@@ -368,7 +368,9 @@ def drain_facts(db, workspace: Path, facts: Sequence[CarryInFact], adapter: Trac
 from core.lesson_carry_in_drain import (
     _drain_committed_facts,
     _pending_facts,
+    join_drain_threads,
     record_committed_save,
     schedule_committed_save,
     schedule_pending_drain,
+    shutdown_drain_threads,
 )

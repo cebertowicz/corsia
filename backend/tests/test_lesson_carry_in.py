@@ -4,6 +4,7 @@ import asyncio
 from dataclasses import dataclass
 import json
 import sqlite3
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -612,6 +613,9 @@ def test_ready_free_save_starts_the_admitted_drain_without_another_trigger(tmp_p
         def start(self):
             self.target(*self.args)
 
+        def join(self):
+            return None
+
     class NoCloseDb:
         def __getattr__(self, name):
             return getattr(db, name)
@@ -628,6 +632,66 @@ def test_ready_free_save_starts_the_admitted_drain_without_another_trigger(tmp_p
 
     assert users == ["user"]
     assert db.execute("SELECT event_name FROM outcome_events WHERE event_name='learning_loop.carry_in_result'").fetchone()
+
+
+def test_pool_reset_waits_for_running_drain_threads(isolated_db, monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    """Pool teardown must wait for running drains before it can close their connections."""
+    from tests.conftest import _reset_db_pool
+    from core.lesson_carry_in_drain import schedule_pending_drain
+    from infra.database import get_db
+
+    entered = threading.Barrier(3)
+    release = threading.Event()
+    pool_closed = threading.Event()
+    connection_ids: set[int] = set()
+
+    def blocked_drain(_workspace: Path) -> None:
+        connection_ids.add(id(getattr(get_db(), "_conn")))
+        entered.wait(timeout=5)
+        assert release.wait(timeout=5)
+
+    class Pool:
+        def shutdown_pool(self, _reconfigure=None) -> None:
+            pool_closed.set()
+
+    monkeypatch.setattr("core.lesson_carry_in_drain._drain_pending", blocked_drain)
+    schedule_pending_drain(tmp_path)
+    schedule_pending_drain(tmp_path)
+    entered.wait(timeout=5)
+
+    reset = threading.Thread(target=lambda: _reset_db_pool(Pool()))
+    reset.start()
+    assert not pool_closed.wait(timeout=0.05)
+    release.set()
+    reset.join(timeout=5)
+
+    assert pool_closed.is_set()
+    assert len(connection_ids) == 2
+
+
+def test_shutdown_keeps_drain_scheduling_closed_until_process_exit(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    """A catalog notification after drain shutdown must not reopen the database race."""
+    from core.lesson_carry_in_drain import schedule_pending_drain, shutdown_drain_threads
+
+    started: list[object] = []
+
+    class Thread:
+        def __init__(self, *, target, args, **_kwargs):
+            self.target = target
+            self.args = args
+
+        def start(self):
+            started.append(self)
+
+        def join(self):
+            return None
+
+    monkeypatch.setattr("core.lesson_carry_in_drain.threading.Thread", Thread)
+    monkeypatch.setattr("core.lesson_carry_in_drain._DRAINS_STOPPING", False)
+    shutdown_drain_threads()
+    schedule_pending_drain(tmp_path)
+
+    assert started == []
 
 
 def test_cleanup_cannot_rollback_a_settled_carry_in_result(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
@@ -737,26 +801,22 @@ def test_rebaseline_cleanup_cannot_rollback_its_settled_result(monkeypatch: pyte
     assert db.execute("SELECT event_name FROM outcome_events WHERE subject_key=?", (previous.subject_key + ":rebaseline",)).fetchone()
 
 
-def test_committed_save_returns_before_its_background_drain_runs(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
-    from core.lesson_carry_in import record_committed_save
+def test_committed_save_returns_before_its_background_drain_finishes(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    from core.lesson_carry_in import join_drain_threads, record_committed_save
 
-    started: list[object] = []
+    started = threading.Event()
+    release = threading.Event()
 
-    class DeferredThread:
-        def __init__(self, *, target, args, daemon, name):
-            self.target = target
-            self.args = args
-            self.daemon = daemon
-            self.name = name
+    def blocked_drain(*_args) -> None:
+        started.set()
+        assert release.wait(timeout=5)
 
-        def start(self):
-            started.append(self)
-
-    monkeypatch.setattr("core.lesson_carry_in_drain.threading.Thread", DeferredThread)
+    monkeypatch.setattr("core.lesson_carry_in_drain._record_save_drain", blocked_drain)
     record_committed_save(tmp_path, [tmp_path / "context" / "rule.md"], "a" * 40)
 
-    assert len(started) == 1
-    assert started[0].name == "corsia-carry-in"
+    assert started.wait(timeout=5)
+    release.set()
+    join_drain_threads()
 
 
 def test_busy_save_stays_pending_until_the_existing_pending_drain_trigger(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -793,6 +853,9 @@ def test_busy_save_stays_pending_until_the_existing_pending_drain_trigger(tmp_pa
 
         def start(self):
             self.target(*self.args)
+
+        def join(self):
+            return None
 
     class NoCloseDb:
         def __getattr__(self, name):

@@ -24,14 +24,69 @@ from core.lesson_carry_in import (
 from core.lesson_carry_in_contract import LocalTraceAdapter, TraceAdapter, rotated_cases
 
 _DRAIN_LOCK = threading.Lock()
+_THREADS_LOCK = threading.RLock()
+_DRAIN_THREADS: set[threading.Thread] = set()
+_DRAINS_STOPPING = False
+
+
+def _run_drain(
+    target: Callable[..., None], args: tuple[object, ...], thread: threading.Thread,
+) -> None:
+    """Own one drain's connection and unregister it before its thread exits."""
+    try:
+        target(*args)
+    finally:
+        # Every drain opens its pooled connection from its own thread. Release it
+        # before teardown may replace or close the database pool.
+        from infra.database import close_thread_db
+
+        close_thread_db()
+        with _THREADS_LOCK:
+            _DRAIN_THREADS.discard(thread)
+
+
+def _schedule_drain(target: Callable[..., None], args: tuple[object, ...]) -> None:
+    """Start a nonblocking drain while retaining it for explicit shutdown."""
+    holder: dict[str, threading.Thread] = {}
+
+    def run() -> None:
+        _run_drain(target, args, holder["thread"])
+
+    thread = threading.Thread(target=run, args=(), daemon=True, name="corsia-carry-in")
+    holder["thread"] = thread
+    with _THREADS_LOCK:
+        if _DRAINS_STOPPING:
+            return
+        _DRAIN_THREADS.add(thread)
+        try:
+            thread.start()
+        except BaseException:
+            _DRAIN_THREADS.discard(thread)
+            raise
+
+
+def join_drain_threads() -> None:
+    """Wait for every drain that was already scheduled before database teardown."""
+    while True:
+        with _THREADS_LOCK:
+            threads = tuple(thread for thread in _DRAIN_THREADS if thread is not threading.current_thread())
+        if not threads:
+            return
+        for thread in threads:
+            thread.join()
+
+
+def shutdown_drain_threads() -> None:
+    """Permanently stop new drains, then join existing drains before storage shutdown."""
+    global _DRAINS_STOPPING
+    with _THREADS_LOCK:
+        _DRAINS_STOPPING = True
+    join_drain_threads()
 
 
 def record_committed_save(workspace: Path, paths: Sequence[Path], commit: str) -> None:
     """Start the non-blocking drain after an already-committed guidance save."""
-    threading.Thread(
-        target=_record_save_drain, args=(workspace, tuple(paths), commit), daemon=True,
-        name="corsia-carry-in",
-    ).start()
+    _schedule_drain(_record_save_drain, (workspace, tuple(paths), commit))
 
 
 def schedule_committed_save(workspace: Path, paths: Sequence[Path], commit: str) -> None:
@@ -144,8 +199,8 @@ def _drain_pending(workspace: Path) -> None:
 
 
 def schedule_pending_drain(workspace: Path) -> None:
-    """Start no new lifecycle: use the existing bounded drain trigger."""
-    threading.Thread(target=_drain_pending, args=(workspace,), daemon=True, name="corsia-carry-in").start()
+    """Use the existing lifecycle trigger to start a nonblocking bounded drain."""
+    _schedule_drain(_drain_pending, (workspace,))
 
 
 def _record_save_drain(workspace: Path, paths: Sequence[Path], commit: str) -> None:
