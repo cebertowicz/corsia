@@ -45,7 +45,7 @@ def test_connected_apps_start_web_search_with_the_question_inline():
 def test_search_already_ready_asks_lookup_consent_as_first_question():
     text = first_run_wake.first_app_step(facts(connected_app_count=2, web_search_ready=True))
     assert "5. **About you" in text
-    assert "Your name and anything I search for go to Brave. Want me to?" in text
+    assert "Your name and anything I search for are sent to web search engines. Want me to?" in text
     assert "## B. Search" not in text
 
 

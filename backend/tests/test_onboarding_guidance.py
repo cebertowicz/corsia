@@ -469,7 +469,7 @@ def test_the_look_up_reference_carries_the_rules_outcomes_questions_and_examples
     examples = ref.split("## Worked examples", 1)[1]
     assert re.findall(r"^\*\*(\d)\. ([^.]+)\.\*\*", examples, flags=re.MULTILINE) == [
         ("1", "One clear match"), ("2", "Two people with the same name"), ("3", "A famous namesake"), ("4", "Nothing found")]
-    assert len(ref.split()) < 2140
+    assert len(ref.split()) < 2144  # The provider-neutral consent disclosure adds four words.
     assert not re.search(r"\bAI\b", ref)
 
 
@@ -574,7 +574,7 @@ def test_approve_with_suggestions_still_open_saves_nothing_and_asks_to_be_told()
 
 
 ASK_FIRST = ("`I can look you up on the web, so you don't have to tell me everything yourself. "
-             "Your name and anything I search for go to Brave. Want me to?`")
+             "Your name and anything I search for are sent to web search engines. Want me to?`")
 
 
 def test_a_search_set_up_before_this_chat_asks_first_and_searches_only_on_a_yes():
@@ -593,7 +593,7 @@ def test_a_key_saved_in_this_chat_is_not_asked_about_again_and_without_search_th
     step = _step(5)
 
     assert "When the key was saved in step 4, ask nothing: step 4 already offered the opt-out." in ref
-    assert ref.count("Your name and anything I search for go to Brave") == 1
+    assert ref.count("Your name and anything I search for are sent to web search engines") == 1
     assert "(`web_search_ready` is false and no key was just saved)" in ref
     assert "When search does not work, step 5 says nothing about search or about skipping it, anywhere." in step
     assert "When search was already set up before this chat, the lookup opens with the one question that reference carries." in step
