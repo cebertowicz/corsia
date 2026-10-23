@@ -300,7 +300,8 @@ def test_recorded_lessons_count_each_lesson_once_with_a_reference_per_version(db
     from datetime import datetime, timezone
 
     from jobs import learning_report
-    from plans import lesson_reviews
+    from plans import lesson_reviews, node_states
+    from tests.plan_writer_authorizer import raw_plan_seed
 
     db.execute("INSERT INTO projects (id,name,created_at,updated_at) VALUES ('proj','Project','t','t')")
     db.execute("INSERT INTO threads (id,user_id,project_id,model,created_at,updated_at) "
@@ -335,6 +336,21 @@ def test_recorded_lessons_count_each_lesson_once_with_a_reference_per_version(db
     lesson_reviews.ensure_lesson_review(db, "owner", lesson_id="y", behavioral_sha256="1", capture_id="x", **review)
     assert (recorded()["count"], lessons()["in_use"]["count"], lessons()["held"]["count"]) == (5, 3, 2)
     assert "capture:x:1" not in lessons()["held"]["refs"]
+
+    # an archived review is settled even while its state is open, as the trial-offering path refuses it
+    with raw_plan_seed(db):
+        db.execute(
+            "UPDATE plan_nodes SET archived_at='t' WHERE id IN (SELECT node_id FROM plan_node_artifact_links "
+            "WHERE source_event_id IN (?,?))",
+            (lesson_reviews.lesson_key("b", "1"), lesson_reviews.capture_key("c", "1")),
+        )
+    assert (recorded()["count"], lessons()["in_use"]["count"], lessons()["held"]["count"]) == (3, 2, 1)
+    open_keys = {str(row[0]) for row in db.execute(
+        "SELECT l.source_event_id FROM plan_node_artifact_links l JOIN plan_nodes n ON n.id=l.node_id "
+        f"WHERE l.provenance='lesson.trial_review' AND {node_states.open_sql('n')}"
+    )}
+    reported = lessons()["in_use"]["refs"] + lessons()["held"]["refs"]
+    assert {ref.split(":")[1] for ref in reported} == {key.split(":")[1] for key in open_keys}
 
 
 def test_daily_report_is_passive_without_qualifying_facts(db):

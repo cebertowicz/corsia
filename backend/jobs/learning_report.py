@@ -91,7 +91,7 @@ def _lessons(
     where, scope_args = _scope_where(scope)
     start, end = _day_bounds(report_date)
     rows = db.execute(
-        f"""SELECT l.source_event_id,p.owner_id,n.state
+        f"""SELECT l.source_event_id,p.owner_id,n.state,n.archived_at
               FROM plan_node_artifact_links l
               JOIN plan_nodes n ON n.id=l.node_id
               JOIN plans p ON p.id=n.plan_id
@@ -105,7 +105,11 @@ def _lessons(
     refs = [str(row["source_event_id"]) for row in rows]
     # a review key is lesson:<id>:<sha> for a trial, lesson:<id>:watch:<sha> for a watch,
     # capture:<id>:<hash>; a capture that became a trial is closed, or shares the trial's id
-    open_keys = [str(row["source_event_id"]).split(":") for row in rows if row["state"] not in TERMINAL_STATES]
+    # open as plans' open_sql decides it: unarchived and unsettled (open_sql is not on the facade)
+    open_keys = [
+        str(row["source_event_id"]).split(":") for row in rows
+        if row["archived_at"] is None and row["state"] not in TERMINAL_STATES
+    ]
     in_use = {key[1] for key in open_keys if key[0] == "lesson" and len(key) == 3}
     held = {key[1] for key in open_keys} - in_use
     in_use_refs = [ref for ref in refs if ref.split(":")[1] in in_use]
