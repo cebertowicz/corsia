@@ -184,9 +184,10 @@ def author_thread(author: str | None) -> str | None:
 def record(
     db: sqlite3.Connection, thread_id: str | None, *, result: str, reason: str, verdict: str,
     fields: tuple[str, ...] = (), decision: str | None = None, widens: int | None = None,
+    items_before: int | None = None, items_after: int | None = None,
 ) -> None:
     """One outcome fact on the caller's open transaction; nothing here commits."""
-    from infra.outcome_event_attributes import enum_attr, text_attr
+    from infra.outcome_event_attributes import count_attr, enum_attr, text_attr
     from infra.outcome_events import record_outcome_event
 
     attributes: dict[str, Any] = {"result": result, "reason": reason, "verdict": verdict}
@@ -195,6 +196,7 @@ def record(
         "reason": enum_attr("fields", "verbatim", "lesson-outside-placement", "rewording", "stewardship", "widens"),
         "verdict": enum_attr("written", "proposed", "trial", "save"),
         "fields": text_attr(200), "decision": text_attr(_DECISION_CHARS), "widens": text_attr(32),
+        "items_before": count_attr(), "items_after": count_attr(),
     }
     if fields:
         attributes["fields"] = ",".join(fields)
@@ -202,6 +204,10 @@ def record(
         attributes["decision"] = decision
     if widens is not None:
         attributes["widens"] = str(widens)
+    if items_before is not None:
+        attributes["items_before"] = items_before
+    if items_after is not None:
+        attributes["items_after"] = items_after
     record_outcome_event(
         db, dedupe_key=f"lesson-gate:{uuid.uuid4()}", event_name=EVENT, source="corsia",
         provenance="instrumented", ts=datetime.now(timezone.utc).isoformat(),
@@ -226,26 +232,32 @@ def record_accepted(db: sqlite3.Connection, thread_id: str, verdict: str, gate: 
         )
 
 
-def record_save_reword(author: str | None) -> None:
-    """Record an accepted count-neutral or shrinking lesson rewrite in a short transaction."""
+def record_save_reword(author: str | None, *, items_before: int, items_after: int) -> None:
+    """Record one rewritten guidance file's canonical lesson-item counts."""
     from infra.database import get_db, write_transaction
 
     db = get_db()
     try:
         with write_transaction(db, scope="lesson_gate") as connection:
-            record(connection, author_thread(author), result="accepted", reason="rewording", verdict="save")
+            record(
+                connection, author_thread(author), result="accepted", reason="rewording", verdict="save",
+                items_before=items_before, items_after=items_after,
+            )
     finally:
         db.close()
 
 
-def record_save_stewardship(thread_id: str) -> None:
-    """Record a conductor's managed instruction-file update against its target thread."""
+def record_save_stewardship(thread_id: str, *, items_before: int, items_after: int) -> None:
+    """Record a managed-file update against its target with canonical item counts."""
     from infra.database import get_db, write_transaction
 
     db = get_db()
     try:
         with write_transaction(db, scope="lesson_gate") as connection:
-            record(connection, thread_id, result="accepted", reason="stewardship", verdict="save")
+            record(
+                connection, thread_id, result="accepted", reason="stewardship", verdict="save",
+                items_before=items_before, items_after=items_after,
+            )
     finally:
         db.close()
 

@@ -313,22 +313,27 @@ def test_an_accepted_lesson_is_recorded_with_its_decision(env: Env) -> None:
     }]
 
 
-def test_a_count_neutral_save_reword_is_recorded(env: Env) -> None:
+def test_a_folded_save_records_before_and_after_lesson_items(env: Env) -> None:
     from infra.guidance_git import save_guidance
     from infra.guidance_targets import GuidanceTarget
 
     path = env.tray / "context" / "RESPONSIBILITY.md"
     path.parent.mkdir(parents=True)
-    path.write_text("# Role\n\n## Lessons\n\n- Keep commits focused.\n")
+    path.write_text(
+        "# Role\n\n## Lessons\n\n- Keep commits focused.\n- Run the smaller checks first.\n"
+    )
 
     saved = save_guidance(
-        {path: b"# Role\n\n## Lessons\n\n- Keep commits small and focused.\n"},
+        {path: b"# Role\n\n## Lessons\n\n- Keep commits small and run the smaller checks first.\n"},
         workspace=env.workspace, target=GuidanceTarget("agent"),
         author=f"Lane <{THREAD}@agents.corsia.local>",
     )
 
     assert saved.outcome == "written"
-    assert _facts(env) == [{"result": "accepted", "reason": "rewording", "verdict": "save", "thread": THREAD}]
+    assert _facts(env) == [{
+        "result": "accepted", "reason": "rewording", "verdict": "save",
+        "items_before": 2, "items_after": 1, "thread": THREAD,
+    }]
 
 
 def test_a_file_edit_refusal_is_recorded_and_the_learning_report_counts_it(env: Env) -> None:
