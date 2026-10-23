@@ -21,10 +21,10 @@ _PERSON_CORRECTION_SOURCE_SQL = "COALESCE(json_extract(attributes, '$.source_kin
 
 
 def deliver_learning_report(report: dict[str, Any]) -> Any:
-    """The sole delivery seam; tests replace this function with a double."""
-    from events.learning_report import deliver_learning_report as deliver
+    """Synchronously validate and deliver from the producer's synchronous jobs."""
+    from events.learning_report import deliver_learning_report_sync
 
-    return deliver(report)
+    return deliver_learning_report_sync(report)
 
 
 def _scope_where(scope: str) -> tuple[str, tuple[str, ...]]:

@@ -56,6 +56,51 @@ def test_disabled_verdict_source_is_not_reported_as_an_empty_experiment_list(db)
     }
 
 
+def test_daily_early_and_workspace_reports_validate_unchanged_with_sent_back(db):
+    from events.learning_report import validated
+    from jobs.learning_report import build_report
+
+    _event(
+        db, event_name="measurement.correction", ts="2026-10-22T18:00:00+00:00", project_id="proj",
+        subject_key="sent-back:task", attributes={"source_kind": "sent_back", "label": "correction"},
+    )
+    db.commit()
+
+    reports = [
+        build_report(db, scope="proj", report_date="2026-10-22"),
+        build_report(db, scope="proj", report_date="2026-10-22", report_kind="early-1"),
+        build_report(db, scope="workspace", report_date="2026-10-22"),
+    ]
+
+    assert [validated(report).as_contract() for report in reports] == reports
+
+
+def test_learning_report_delivery_uses_the_real_sync_seam(db, monkeypatch):
+    import inspect
+
+    from events import learning_report as report_events
+    from jobs import learning_report
+
+    delivered = []
+
+    def deliver(**kwargs):
+        delivered.append(kwargs)
+        return ["delivered"]
+
+    monkeypatch.setattr(report_events, "deliver_measurement_report_sync", deliver)
+    report = learning_report.build_report(db, scope="proj", report_date="2026-10-22")
+    result = learning_report.deliver_learning_report(report)
+    try:
+        assert result == ["delivered"]
+    finally:
+        if inspect.iscoroutine(result):
+            result.close()
+    assert delivered == [{
+        "scope": "proj", "event_type": "measurement.learning_report", "payload": report,
+        "transaction_scope": "deliver_learning_report", "db": None,
+    }]
+
+
 def test_enabled_verdict_source_reports_started_trials_and_wakes(db, monkeypatch):
     from core import workflow_verdict_evaluator
     from jobs.learning_report import build_report
