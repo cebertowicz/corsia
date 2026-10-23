@@ -11,6 +11,12 @@
 
 <!-- What changed, why this is the smallest correct root-cause fix, and the named state owner for stateful work. -->
 
+## Release note
+
+<!-- A PR that changes what a person sees or does adds one plain line under ## Unreleased in CHANGELOG.md in this PR. Internal-only PRs write none. -->
+
+- Line added under Unreleased (or none):
+
 ## First-pass evidence
 
 <!-- Link author-time evidence where it already lives; do not transcribe it into the PR. -->

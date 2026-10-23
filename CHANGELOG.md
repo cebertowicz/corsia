@@ -3,6 +3,32 @@
 Shipped behavior, newest first. When a later entry changes an earlier design,
 the later entry describes the current behavior.
 
+## Unreleased
+
+_Changes merged since the last release. Each PR that changes what you see or do adds a line here._
+
+- Quitting the Mac app now also stops the local model server CORSIA started, so it no longer holds memory after you quit.
+- If you quit partway through first-run setup, the next launch starts setup fresh; downloaded models are kept.
+- When the app finds an earlier CORSIA install, Start fresh moves it into a dated folder under CORSIA backups in your home folder, then begins a clean setup.
+- Setup opens with a Getting started page and four steps in the side rail, with Back on every step after the first, and you can edit your account from Back.
+- Pressing Download in setup always starts the download with progress, or says why it didn't and offers Retry.
+- A Claude Code or Codex sign-in that never returns from the browser now stops after five minutes and says what to do, instead of waiting forever.
+- If a signed-in Claude or ChatGPT account has no models for Claude Code or Codex, setup and Settings say so and offer another account or turning that tool off.
+- After you sign in to Claude Code, its models reach the model picker, and the row no longer stays stuck on Sign in.
+- Sign-in pages during setup stay in CORSIA's browser pane, and Google setup no longer creates a second project.
+- The local model chosen in setup stays loaded afterwards.
+- CORSIA's own local model defaults to medium reasoning effort unless you chose another.
+- CORSIA's own local model server handles two requests at once, and its group in the model picker is named CORSIA instead of Local.
+- Sending to a local model that isn't loaded yet waits until it loads, and Stop cancels a message still waiting on its model.
+- Agents can search the web with no search key while CORSIA's own local model is running.
+- Links in a chat open in your browser from the desktop app.
+- When an agent opens a page in the shared browser, the chat shows a chip with that site; clicking it reopens the browser there.
+- The host-access request card now says what host access is before asking you to approve it.
+- Google and Microsoft setup say what access sign-in grants before asking "Go ahead?", and the approval toggle is called Auto-approve in Settings, as in the chat.
+- Connections from paired devices work again.
+- An agent still waits for your yes before a newly connected command-line tool's first change, even when you asked for that change.
+- When a plan isn't moving, its note names each wait that is overdue.
+
 ## v0.4.0 — A self-starting Mac app, updates you control, a shared browser, connected apps, and steadier plans
 
 Released 2026-10-16.
