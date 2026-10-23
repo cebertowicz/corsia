@@ -197,6 +197,33 @@ describe('ProvidersV7View card request', () => {
 		expect(serverReads()).toBeGreaterThan(beforeOnline);
 	});
 
+	it('offers the setup flow\'s own row for a CLI without a card, and starts its install from Sign in', async () => {
+		token.set('test-token');
+		const sources = [
+			{ source: 'claude-code', name: 'Claude Code', state: 'needs_auth' },
+			{ source: 'codex', name: 'Codex', state: 'not_installed' },
+		];
+		const fetchMock = vi.fn((url: string) => String(url).includes('/providers/sources')
+			? Promise.resolve({ ok: true, json: async () => ({ sources }) })
+			: new Promise<never>(() => {}));
+		vi.stubGlobal('fetch', fetchMock);
+		// Claude Code already has a card; only Codex needs the row.
+		hostGroupSnapshot.set([{
+			key: 'agent-clis', name: 'Agent CLIs', subname: '', netKind: 'localhost', providers: [harness('claude-code', 'Claude Code')],
+		} as HostGroup]);
+
+		component = mount(ProvidersV7View, { target: document.body });
+		flushSync();
+		await tick(); await tick();
+
+		expect(document.querySelector('section[aria-label="Claude Code"]')).toBeNull();
+		const row = document.querySelector('section[aria-label="Codex"]');
+		expect(row?.textContent).toContain('Uses your ChatGPT subscription.');
+		const signIn = [...(row?.querySelectorAll('button') ?? [])].find((button) => button.textContent?.includes('Sign in')) as HTMLButtonElement;
+		signIn.click();
+		await vi.waitFor(() => expect(fetchMock.mock.calls.some((call) => String(call[0]).endsWith('/providers/cli/codex/install'))).toBe(true));
+	});
+
 	it('renders a keyed cloud provider that is switched off with the off dot, off subline and off switch', async () => {
 		vi.stubGlobal('fetch', vi.fn(() => new Promise<never>(() => {})));
 		const cloud = (name: string, label: string, enabled: boolean) => ({

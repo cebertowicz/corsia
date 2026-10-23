@@ -1,11 +1,17 @@
 import { get } from 'svelte/store';
 import { token } from '$lib/stores/auth';
+import type { AiRow } from './components/SetupAiRows.svelte';
 
 /** The desktop shell's way to save a setup report; absent in a browser. */
 export const setupReportInvoke = () => typeof window === 'undefined' ? undefined : (window as Window & { __TAURI_INTERNALS__?: { invoke?: (command: string, args?: Record<string, unknown>) => Promise<unknown> } }).__TAURI_INTERNALS__?.invoke;
 
 /** One failed setup row, as the screen shows it. */
 export type SetupReportRow = { key: 'claude-code' | 'codex' | 'omlx' | 'api'; name: string; cause?: string; reference?: string };
+
+/** Save a report only where a reference gives the report log lines to find; the row's own action covers the rest. */
+export function withReportAction(row: AiRow, rows: () => SetupReportRow[]): AiRow {
+	return row.reportable && row.reference ? { ...row, more: [...(row.more ?? []), { label: 'Save a report', run: () => void saveSetupReport(rows()) }] } : row;
+}
 
 /** Saved in place of the details when the service can't give them, so the report says what's missing. */
 export const DETAILS_UNREAD = 'CORSIA couldn’t read the setup details from its service';
