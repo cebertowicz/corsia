@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { flushSync, mount, tick, unmount } from 'svelte';
 import { activeThreadId, activeToolsByThread, messages } from '$lib/stores/threads';
-import { _resetTurnStateForTests } from '$lib/ws/turnState';
+import { _resetTurnStateForTests, INITIAL_TURN_STATE, restoreTurnState } from '$lib/ws/turnState';
 import MessageList from './MessageList.svelte';
 
 /**
@@ -163,6 +163,32 @@ describe('a deliberate user scroll always wins', () => {
 		userScrollsTo(el, CONTENT - VIEWPORT);
 
 		expect(followingLiveEdge()).toBe(true);
+	});
+});
+
+describe('the first-run opening live edge', () => {
+	it.each([
+		{ label: 'queued delivery', pending: { id: 'queued', delivery_state: 'queued' } },
+		{ label: 'optimistic delivery during an active turn', pending: { id: 'optimistic', _optimistic: true }, activeTurn: true },
+	])('follows a $label below a revealed opening instead of re-anchoring the greeting', async ({ pending, activeTurn }) => {
+		if (activeTurn) restoreTurnState(THREAD_ID, {
+			...INITIAL_TURN_STATE, phase: 'active', turnId: 'turn', turnOrder: 1,
+		});
+		messages.set([
+			{ id: 'opening', thread_id: THREAD_ID, role: 'assistant', content: 'Hi.', seq: 1,
+				created_at: '2026-08-01T00:00:00Z', metadata: { first_run_opening: true } },
+			{ ...pending, thread_id: THREAD_ID, role: 'user', content: 'Pending input',
+				created_at: '2026-08-01T00:01:00Z' },
+		] as never);
+		const list = renderList();
+		const el = scroller();
+		el.querySelector<HTMLElement>('[data-message-id="opening"]')!.scrollIntoView = () => {};
+
+		list.followBottom();
+		await tick();
+		flushSync();
+
+		expect(el.scrollTop).toBe(CONTENT);
 	});
 });
 

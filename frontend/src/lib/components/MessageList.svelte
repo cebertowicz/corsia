@@ -250,7 +250,7 @@
 	export function followBottom() {
 		if (dividerLanding.blocksLiveEdge(renderedThreadId)) return;
 		const last = transcriptMessages[transcriptMessages.length - 1];
-		beginProgrammaticScroll(() => pinLiveEdge(messagesEl, last?.metadata?.first_run_opening === true ? last.id : null));
+		beginProgrammaticScroll(() => pinLiveEdge(messagesEl, pendingEntries.length === 0 && last?.metadata?.first_run_opening === true ? last.id : null));
 	}
 	// Re-pin a live-edge transcript when the composer or attention rail grows; preserve a reader's history position.
 	let wasPinnedBeforeLayoutChange = $state(true);
