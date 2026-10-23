@@ -20,7 +20,6 @@ from core.corrections_recording import (
 from core import workflow_verdict_evaluator
 from core.workflow_verdict_read import PLANNED_EVENT, REACHED_EVENT
 from events.learning_report import deliver_learning_report_sync
-from plans.lesson_reviews import LESSON_PREFIX
 
 EARLY_FLOOR = 5
 HISTORY_DAYS = 28
@@ -105,7 +104,7 @@ def _lessons(
     refs = [str(row["source_event_id"]) for row in rows]
     # a review key is <prefix>:<id>:...; a capture and the trial it became share the id
     ids = {ref.split(":")[1] for ref in refs}
-    in_use = {ref.split(":")[1] for ref in refs if ref.split(":")[0] == LESSON_PREFIX}
+    in_use = {ref.split(":")[1] for ref in refs if ref.split(":")[0] == "lesson"}
     in_use_refs = [ref for ref in refs if ref.split(":")[1] in in_use]
     held_refs = [ref for ref in refs if ref.split(":")[1] not in in_use]
     return ({
