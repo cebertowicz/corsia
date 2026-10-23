@@ -93,9 +93,7 @@
 	const accountName = $derived(username.trim() || $user?.name || '');
 	const editing = $derived(Boolean($token) && accountKnown);
 	// A new account needs every field; an existing one needs a name, and a password only when one is being changed.
-	const accountValid = $derived(editing
-		? Boolean(name.trim() && (!password || (password.length >= 8 && confirmation === password)))
-		: Boolean(name.trim() && username.trim() && !usernameError && password.length >= 8 && confirmation === password));
+	const accountValid = $derived(editing ? Boolean(name.trim() && (!password || (password.length >= 8 && confirmation === password))) : Boolean(name.trim() && username.trim() && !usernameError && password.length >= 8 && confirmation === password));
 	const steps = $derived<SetupStep[]>(page === 'connect' ? remote.steps : [
 		{ label: 'Getting started', icon: 'computer', state: ['checking', 'welcome', 'hard-stop'].includes(page) || (page === 'error' && !$token) ? 'current' : 'done' },
 		{ label: 'Account & workspace', icon: 'person', state: page === 'account' ? 'current' : ['subscriptions', 'models'].includes(page) || (page === 'error' && $token) ? 'done' : 'todo' },
