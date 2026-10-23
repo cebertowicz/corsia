@@ -189,8 +189,7 @@
 			const response = await fetch('/api/setup/status');
 			if (response.status === 409) { onExistingAccount(); return; }
 			if (!response.ok) throw new Error('status');
-			status = await response.json();
-			if (status.work_folder) { folder = status.work_folder; defaultFolder = status.work_folder; }
+			status = await response.json(); if (status.work_folder) { folder = status.work_folder; defaultFolder = status.work_folder; }
 			if (status.required_username) username = status.required_username;
 			if (status.classifier) classifier.accept(status.classifier);
 			if (status.macos_supported === false) { page = 'hard-stop'; return; }
@@ -330,8 +329,7 @@
 		const progress = await fetchSetupProgress(get(token));
 		if (!progress) { page = 'error'; return; }
 		if (progress.setup_completed) { onFinished(); return; }
-		status = (progress.status ?? {}) as Status;
-		if (status.work_folder) { folder = status.work_folder; defaultFolder = status.work_folder; }
+		status = (progress.status ?? {}) as Status; if (status.work_folder) { folder = status.work_folder; defaultFolder = status.work_folder; }
 		page = 'models';
 		if (status.classifier) classifier.accept(status.classifier);
 		// A relaunch after the account step has no screen-1 start to rerun, so a local download that was never claimed starts here.
@@ -363,6 +361,7 @@
 		return () => { offModels(); offClassifier(); window.removeEventListener('focus', focus); };
 	});
 </script>
+
 <SetupShell bind:this={shell} {steps} section={page === 'connect' ? 'Connect' : 'Setup'} {jobs} page={page === 'connect' ? `connect-${remote.stage}` : page} title={view.title} lede={view.lede} primary={view.primary} onPrimary={view.onPrimary}>
 	{#snippet secondary()}
 		{#if page === 'connect'}<SetupConnectBack onclick={() => remote.stage === 'code' ? remote.toChoose() : leaveConnect()} />
@@ -393,6 +392,7 @@
 <ConfirmDialog open={confirmConnect} title="Connect to another computer instead?" description="This stops the download on this computer." confirmLabel="Stop and connect" cancelLabel="Keep downloading" onConfirm={() => { confirmConnect = false; void connectToAnotherComputer(); }} onCancel={() => { confirmConnect = false; }} />
 {#if showAdd}<AddProviderModal onClose={() => { showAdd = false; void refreshSources(); }} onSelectCloud={selectProvider} />{/if}
 {#if openProvider}<ProviderSettingsModal provider={openProvider} initialTab="advanced" onClose={() => { openProvider = null; void refreshSources(); }} />{/if}
+
 <style>
 	p { font-size: var(--text-subhead); line-height: var(--lh-normal); }
 	.error-text { margin: var(--space-2) var(--space-4); font-size: var(--text-subhead); }
