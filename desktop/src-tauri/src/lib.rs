@@ -387,6 +387,13 @@ const LOCAL_SERVICE_PERMISSIONS: &[&str] = &[
 ];
 const LOCAL_SERVICE_EXTERNAL_URL_SCOPES: &[&str] = &["http://*", "https://*"];
 
+fn local_service_external_url_scopes() -> Vec<serde_json::Value> {
+    LOCAL_SERVICE_EXTERNAL_URL_SCOPES
+        .iter()
+        .map(|url| serde_json::json!({ "url": url }))
+        .collect()
+}
+
 /// Builds the capability for one local-service origin: its own app commands and only browser-safe external URLs.
 fn local_service_capability(port: u16) -> CapabilityBuilder {
     LOCAL_SERVICE_PERMISSIONS
@@ -397,7 +404,7 @@ fn local_service_capability(port: u16) -> CapabilityBuilder {
         )
         .permission_scoped(
             "opener:allow-open-url",
-            LOCAL_SERVICE_EXTERNAL_URL_SCOPES.iter().map(|url| serde_json::json!({ "url": url })).collect::<Vec<_>>(),
+            local_service_external_url_scopes(),
             Vec::<serde_json::Value>::new(),
         )
 }
@@ -2269,6 +2276,14 @@ mod tests {
     fn the_local_service_opener_scope_allows_only_http_and_https_urls() {
         assert_eq!(LOCAL_SERVICE_EXTERNAL_URL_SCOPES, ["http://*", "https://*"]);
         assert!(!LOCAL_SERVICE_EXTERNAL_URL_SCOPES.iter().any(|scope| scope.starts_with("file:") || scope.starts_with("javascript:")));
+        assert_eq!(
+            local_service_external_url_scopes(),
+            LOCAL_SERVICE_EXTERNAL_URL_SCOPES
+                .iter()
+                .map(|url| serde_json::json!({ "url": url }))
+                .collect::<Vec<_>>(),
+            "the capability must receive the same URL scope that the allowlist declares"
+        );
     }
 
     #[test]

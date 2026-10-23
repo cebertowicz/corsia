@@ -4,7 +4,7 @@ import AssistantMessage from '$lib/components/AssistantMessage.svelte';
 import { renderMarkdown } from '$lib/markdown';
 import vectors from '../../../testdata/link-target-vectors.json';
 import * as productEvents from '$lib/product_events';
-import { installLinkTargetResolver, isTauriShell, resolveLinkTarget, type LinkResolverDeps } from './linkTargetResolver';
+import { installLinkTargetResolver, resolveLinkTarget, type LinkResolverDeps } from './linkTargetResolver';
 
 const ROOTS = [{
 	id: 'workspace', label: 'Workspace', kind: 'workspace' as const, path: '/workspace', nodes: [], capped: false,
@@ -40,7 +40,6 @@ afterEach(() => {
 	component = undefined;
 	host?.remove();
 	host = undefined;
-	vi.unstubAllGlobals();
 });
 
 describe('resolveLinkTarget', () => {
@@ -244,11 +243,10 @@ describe('delegated rendered-markdown listener', () => {
 		spy.mockRestore();
 	});
 
-	it('routes a chat OAuth link through Tauri when its styling marker was initialized before the runtime bridge', async () => {
-		const d = deps({ isTauri: isTauriShell });
+	it('routes a chat OAuth link through Tauri', async () => {
+		const d = deps({ isTauri: () => true });
 		const url = 'https://accounts.google.com/o/oauth2/v2/auth?client_id=client&redirect_uri=http%3A%2F%2Flocalhost%3A3000&response_type=code';
-		vi.stubGlobal('__TAURI_INTERNALS__', { invoke: vi.fn() });
-		document.documentElement.dataset.shell = '';
+		document.documentElement.dataset.shell = 'tauri';
 		const anchor = installSurface(`[Continue](${url})`, 'chat', d);
 		const click = new MouseEvent('click', { bubbles: true, cancelable: true });
 
