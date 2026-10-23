@@ -145,7 +145,7 @@ def receipt_reference(db, *, user_id, thread_ids, from_ts, to_ts):
     rows.sort(key=lambda row: (owner_chunks[row["thread_id"]], row["created_at"], row["receipt_id"]))
     offers = [_offer(dict(row)) for row in rows if from_ts <= row["created_at"] < to_ts]
     retained: dict[tuple[str, str, str, str], dict] = {}
-    for row in rows:
+    for row in sorted(rows, key=lambda row: (row["created_at"], row["receipt_id"])):
         offer = _offer(dict(row))
         retained.setdefault((offer["id"], offer["version"], offer["path"], offer["raw_sha256"]), offer)
     calls = db.execute(
@@ -225,7 +225,7 @@ def test_receipts_match_across_thread_chunks_and_keep_first_retained_receipt(db)
         thread = f"t{index:04d}"
         threads.append(thread)
         db.execute("INSERT INTO threads(id,user_id,model,created_at,updated_at) VALUES(?,'user','m','t','t')", (thread,))
-        # The later chunk holds the earliest timestamp; retention is still receipt order.
+        # The later chunk holds the earliest timestamp; retention still keeps the earliest receipt.
         stamp = f"2026-09-{30 - index // 50:02d}T00:00:00"
         write_trial_receipt(db, lesson_id="one", node_id=f"task-{index}", created_at=stamp, thread_id=thread)
         if index % 3:
@@ -234,6 +234,7 @@ def test_receipts_match_across_thread_chunks_and_keep_first_retained_receipt(db)
     new = read_offer_evidence(db, **kwargs)
     reference = receipt_reference(db, **kwargs)
     assert len(reference["retained"]) == 2 and reference["retained"][0]["id"] == "one"
+    assert reference["retained"][0]["created_at"] == "2026-09-09T00:00:00"
     assert len(reference["period"]["offers"]) > 1000
     assert_materialized_equals_the_scan(new, reference)
 

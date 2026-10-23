@@ -1,4 +1,16 @@
-"""Receipt-native lesson offers, kept in SQLite for report paging and fingerprints."""
+"""Period offers, read from task-start guidance receipts and kept in SQLite.
+
+An offer is one same-user ``guidance_loads`` row with ``variant='with'`` and a lesson identity:
+the receipt the task-start writer records when it delivers a trial lesson. This module is the one
+definition of an offer row: its fields, the SQL that selects it, the order it is listed in and
+the chunk sizes.
+
+A report needs three things from the period offers: per-(id, version) counts, the snapshot
+fingerprint, and (for one selected lesson) a 20-reference page. Counts are grouped in SQL, the
+fingerprint is the digest of the offers' canonical JSON text built by SQLite (kept compressed,
+since the digest cannot start until the render-time coverage that precedes it is known), and
+the selected lesson's offers are read by LIMIT/OFFSET inside the collecting snapshot.
+"""
 from __future__ import annotations
 
 import hashlib
@@ -10,6 +22,7 @@ from typing import Any
 
 from core.lesson_report_sql import json_row_chunk_lists, json_row_chunks, json_text_chunks
 
+#: Owners are read in groups of this many, which is also SQLite's bound-parameter limit per statement.
 OWNER_CHUNK = 499
 CHUNK_ROWS = 100_000
 PAGE_SIZE = 20
@@ -18,6 +31,7 @@ FIELDS: tuple[str | tuple[str, str], ...] = (
     "turn_id", "task_id", "checkpoint_generation_id", "created_at", "path", "raw_sha256", ("raw_version", "NULL"),
     ("descriptor_tokens", "NULL"), ("version_reason", "'task-start receipt records behavioral identity'"),
 )
+# Python's canonical form sorts keys, so the text SQLite builds must as well.
 CANONICAL_FIELDS = tuple(sorted(FIELDS, key=lambda field: field if isinstance(field, str) else field[0]))
 _OWNERS = "(SELECT value AS tid,key/" + str(OWNER_CHUNK) + " AS chunk FROM json_each(?) LIMIT -1) o"
 _COLUMNS = (
@@ -73,6 +87,13 @@ class DeferredOffers:
                 raise LessonReportCollectionCancelled
 
     def prefetch(self, db, request: DetailRequest, reviews_at_most: int) -> None:
+        """Read the offers a detail page of the requested lesson can show.
+
+        A page lists the lesson's reviews first, then its offers, 20 references from the request's
+        offset. With ``r`` reviews the offers on that page start at ``offset - r``, so the window
+        from ``offset - reviews_at_most`` to the end of the page holds them for every ``r`` up to
+        the bound, and no count of the rows' reviews has to be predicted here.
+        """
         for (lesson_id, version), counts in self.counts.items():
             if lesson_id != request.lesson_id or request.version not in (None, version):
                 continue
@@ -87,6 +108,7 @@ class DeferredOffers:
         return self.counts.get(identity, {}).get("n", 0)
 
     def page(self, identity: tuple[str, str], start: int, end: int) -> list[dict[str, Any]]:
+        """The identity's offers from ``start`` to ``end``, which must lie inside its prefetched window."""
         if end <= start:
             return []
         first, rows = self._windows.get(identity, (0, []))
@@ -95,22 +117,33 @@ class DeferredOffers:
         return rows[start - first:end - first]
 
     def feed(self, digest) -> None:
+        """Hash the offers exactly as ``json.dumps`` joins a list's canonical elements."""
         for index, chunk in enumerate(self._chunks):
             if index:
                 digest.update(b",")
             digest.update(zlib.decompress(chunk))
 
 
+#: The one snapshot field a DeferredOffers object stands for, by its own key path.
 OFFERS_PATH = ("period", "offers")
 
 
 def snapshot_fingerprint(payload: dict[str, Any], canonical) -> str:
+    """The snapshot digest, with the period offers fed from SQLite text at their own key.
+
+    Only the containers on ``OFFERS_PATH`` are written here, key by key in the order
+    ``canonical`` sorts them; every other value goes to ``canonical`` whole, and the offers
+    field is the deferred object's own array. The bytes are therefore those of the canonical
+    encoding of the payload with the offers as a list, and no part of the serialized document
+    is searched for a marker -- a preserved free-text field can hold any string.
+    """
     digest = hashlib.sha256()
     _stream_fields(digest, payload, OFFERS_PATH, canonical, payload["period"]["offers"].feed)
     return digest.hexdigest()
 
 
 def _stream_fields(digest, value: dict[str, Any], path: tuple[str, ...], canonical, feed) -> None:
+    """Write ``value`` the way ``canonical`` writes a dict, feeding the field at ``path`` in."""
     if not path:
         digest.update(b"[")
         feed(digest)

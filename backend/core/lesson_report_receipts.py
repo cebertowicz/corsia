@@ -42,12 +42,17 @@ def read_offer_evidence(db, *, user_id: str, thread_ids: tuple[str, ...], from_t
         empty = offers.DeferredOffers([], user_id, from_ts, to_ts)
         empty.collect(db, cancellation_event=cancellation_event)
         return {"retained": [], "period": {"offers": empty, "calls": 0, "unavailable_calls": {}}}
+    # An identity's retained receipt is its earliest one over every owner, whatever chunk holds it.
     retained: dict[tuple[str, str, str, str], dict[str, Any]] = {}
     for row in _rows(db, user_id=user_id, owners=owners):
-        retained.setdefault((row["id"], row["version"], row["path"], row["raw_sha256"]), row)
+        key = (row["id"], row["version"], row["path"], row["raw_sha256"])
+        kept = retained.get(key)
+        if kept is None or (row["created_at"], row["receipt_id"]) < (kept["created_at"], kept["receipt_id"]):
+            retained[key] = row
     period = offers.DeferredOffers(list(owners), user_id, from_ts, to_ts)
     period.collect(db, cancellation_event=cancellation_event)
-    return {"retained": list(retained.values()), "period": {"offers": period,
+    earliest = sorted(retained.values(), key=lambda row: (row["created_at"], row["receipt_id"]))
+    return {"retained": earliest, "period": {"offers": period,
             "calls": _calls(db, user_id, owners, from_ts, to_ts), "unavailable_calls": {}}}
 
 
