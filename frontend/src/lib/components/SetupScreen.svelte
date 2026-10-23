@@ -23,7 +23,7 @@
 	import { connect } from '$lib/ws';
 	import { hasReadySetupModel, setupModelWorks, setupCatalog, type SetupModel } from '$lib/setupModels';
 	import { fetchSetupProgress, recordSetupProgress } from '$lib/setupProgress';
-	import { saveSetupReport, type SetupReportRow } from '$lib/setupReport';
+	import { saveSetupReport, withReportAction, type SetupReportRow } from '$lib/setupReport';
 	import { createSetupClassifier, type ClassifierState } from '$lib/setupClassifier.svelte';
 	import { createSetupLocalPick } from '$lib/setupLocalPick.svelte';
 	import { createSetupRemote } from '$lib/setupRemote.svelte';
@@ -90,10 +90,6 @@
 			cause: row.key === 'omlx' ? (localOffFailed ? 'turn_off_failed' : local?.setup_error_code ?? (localStartError || undefined)) : connectFlow.attempts[row.key]?.cause,
 		}));
 	}
-	/** Save a report only where a reference gives the report log lines to find; the row's own action covers the rest. */
-	function withReportAction(row: AiRow): AiRow {
-		return row.reportable && row.reference ? { ...row, more: [...(row.more ?? []), { label: 'Save a report', run: () => void saveSetupReport(reportRows()) }] } : row;
-	}
 	const jobs = $derived<SetupJob[]>([
 		...(page !== 'models' && (downloading || localFailed) ? [{ label: 'Local model', state: localFailed ? 'error' as const : 'busy' as const,
 			meta: localFailed ? (localStartError ? startFix : local?.fix) ?? '' : local?.local_state === 'starting' ? 'Starting the local model…' : ['Downloading', `${local?.download_percent ?? 0}%`, measuredDownloadTime(local?.download_eta_seconds)].filter(Boolean).join(' · '), progress: (local?.download_percent ?? 0) / 100 }] : []),
@@ -109,12 +105,12 @@
 			const view = connectFlow.row(source);
 			const works = catalog.some((row) => row.connection === vendor && setupModelWorks(row));
 			const toggle = view.canTurnOff ? { on: true, run: (next: boolean) => { if (!next) turnOffTool(vendor); } } : undefined;
-			return withReportAction({ key: vendor, name: vendor === 'codex' ? 'Codex' : 'Claude Code', ...view, toggle, pill: works ? { state: 'success', label: 'Ready' } : undefined });
+			return withReportAction({ key: vendor, name: vendor === 'codex' ? 'Codex' : 'Claude Code', ...view, toggle, pill: works ? { state: 'success', label: 'Ready' } : undefined }, reportRows);
 		});
 		rows.push(withReportAction({ ...setupLocalRow({ source: local, pick: localPick.pick, eligible, downloading, preparing: localPreparing || localBusy || localPick.pick?.state === 'checking', ready: localReady, startError: localStartError, startFix, startReference: localStartReference, freeDisk: status.free_disk_gb,
 			cloudReady, confirmingStop: confirmLocalStop, turnOffFailed: localOffFailed,
 			start: () => void startLocal(), stop: () => void stopLocal(), check: () => void checkLocal(),
-			confirmStop: (next) => { confirmLocalStop = next; }, turnOff: () => void turnOffLocal() }), localOnly }));
+			confirmStop: (next) => { confirmLocalStop = next; }, turnOff: () => void turnOffLocal() }), localOnly }, reportRows));
 		const provider = tested.find((test) => hasReadySetupModel(catalog.filter((row) => row.connection !== 'omlx' && row.connection !== 'claude-code' && row.connection !== 'codex'), [test]));
 		rows.push({ key: 'api', name: 'API provider', meta: provider ? `${provider.source} · passed a test call` : 'Pay as you go, with a key from Anthropic, OpenAI or another provider.',
 			pill: provider ? { state: 'success', label: 'Ready' } : undefined, action: provider ? undefined : { label: 'Add provider', run: () => { showAdd = true; } } });
