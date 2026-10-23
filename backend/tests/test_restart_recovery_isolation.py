@@ -79,6 +79,7 @@ async def test_startup_broadcasts_committed_admission_failures(monkeypatch):
     monkeypatch.setattr(restart_startup, "_replay_held_webhooks", replay)
     recovery = SimpleNamespace(
         settlements=(),
+        ended_turns=(),
         batches=(FailedInputBatch("failed", ("input",), "plan admission failed"),),
     )
 
@@ -116,6 +117,7 @@ async def test_stalled_or_failed_recovery_does_not_block_sibling(monkeypatch, fa
     monkeypatch.setattr(restart_startup, "_complete_restart_operation", lambda: None)
     recovery = SimpleNamespace(
         settlements=(),
+        ended_turns=(),
         batches=tuple(SimpleNamespace(thread_id=t, turn_id=t)
                       for t in ("first", "second", "legacy")),
     )
@@ -244,6 +246,7 @@ async def test_shutdown_cancels_all_recovery_children_without_duplicate_wakes(mo
     monkeypatch.setattr(restart_startup, "_replay_held_webhooks", no_work)
     recovery = SimpleNamespace(
         settlements=(),
+        ended_turns=(),
         batches=tuple(SimpleNamespace(thread_id=t, turn_id=t) for t in ("cc", "native")),
     )
     task = asyncio.create_task(restart_startup.drive_startup_continuity(
@@ -278,6 +281,7 @@ async def test_independent_recovery_cancellation_is_not_success(monkeypatch):
     monkeypatch.setattr(restart_startup, "_replay_held_webhooks", no_work)
     recovery = SimpleNamespace(
         settlements=(),
+        ended_turns=(),
         batches=tuple(SimpleNamespace(thread_id=t, turn_id=t) for t in ("cancelled", "sibling")),
     )
     log = SimpleNamespace(info=lambda *_a: None, error=lambda *a: errors.append(a))
