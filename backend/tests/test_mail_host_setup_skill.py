@@ -28,6 +28,23 @@ def test_the_skill_hands_gmail_and_microsoft_to_their_own_skills_and_posts_the_o
     assert "press Set key on the <host> row in Settings › Connected apps, paste it and press Set" in SKILL
 
 
+def test_the_offer_comes_before_the_first_call_that_adds_the_account() -> None:
+    steps = SKILL.split("## After an update", 1)[0]
+    assert steps.index("Go ahead?") < steps.index("call `mail_host_connect`")
+    step3 = steps.split("\n3. ", 1)[1].split("\n4. ", 1)[0]
+    assert "Go ahead?" in step3 and "mail_host_connect" not in step3
+    step2 = steps.split("\n2. ", 1)[1].split("\n3. ", 1)[0]
+    assert "mail_host_connect" not in step2
+
+
+def test_a_system_change_notice_that_adds_the_skill_is_handled_once() -> None:
+    assert "a System-change notice adds this skill" in SKILL.split("---")[1]
+    after = SKILL.split("## After an update", 1)[1]
+    assert "When a System-change notice adds this skill: if the profile says `Email app: Other`, offer once" in after
+    assert "record the notice as handled and never offer again" in after
+    assert "Otherwise just record it as handled." in after
+
+
 def test_every_tool_the_skill_names_exists_and_is_loaded_through_the_pack_it_lives_in() -> None:
     named = set(re.findall(r"`(mail_host_[a-z_]+)`", SKILL))
     assert named == {"mail_host_connect"}

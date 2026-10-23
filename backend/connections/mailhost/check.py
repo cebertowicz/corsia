@@ -21,7 +21,6 @@ from connections.mailhost.errors import IMAP_OFF, PASSWORD_REFUSED, MailHostErro
 from connections.mailhost.provider import PASSWORD
 from infra.db_async import run_in_db
 from infra.state.ws import notify_connected_apps_updated
-from infra.state.ws import notify_connected_apps_updated
 
 log = logging.getLogger(__name__)
 
