@@ -5,6 +5,8 @@
 		busy?: boolean; error?: boolean; detail?: string; reference?: string;
 		/** The spinner stays beside the action (an install under way, with Cancel) instead of giving way to it. */
 		spinning?: boolean;
+		/** This ready local model is the only configured way to continue. */
+		localOnly?: boolean;
 		action?: { label: string; run: () => void; loading?: boolean };
 		confirm?: { label: string; run: () => void }[];
 		more?: { label: string; run: () => void }[];
@@ -18,6 +20,7 @@
 <script lang="ts">
 	import { fade } from 'svelte/transition';
 	import { Button, ListRow, Spinner, StatePill, Toggle } from '$lib/components/ui';
+	import { LOCAL_ONLY_MODEL_GUIDANCE } from '$lib/setupLocalPresentation';
 
 	const { rows }: { rows: AiRow[] } = $props();
 
@@ -44,7 +47,7 @@
 					{#if row.toggle}<Toggle size="sm" checked={row.toggle.on} held={row.toggle.held} ariaLabel={row.name} describedBy={row.detail ? `setup-row-detail-${row.key}` : undefined} onchange={row.toggle.run} />{/if}
 				{/snippet}
 			</ListRow>
-			{#if row.detail || row.reference}<div class="disclosure" in:disclosureMotion out:disclosureMotion>{#if row.detail}<p class="detail" class:err={row.error} id="setup-row-detail-{row.key}">{row.detail}</p>{/if}{#if row.reference}<p class="reference">Reference: {row.reference}</p>{/if}</div>{/if}
+			{#if row.detail || row.reference || row.localOnly}<div class="disclosure" in:disclosureMotion out:disclosureMotion>{#if row.localOnly}<p class="detail">{LOCAL_ONLY_MODEL_GUIDANCE}</p>{/if}{#if row.detail}<p class="detail" class:err={row.error} id="setup-row-detail-{row.key}">{row.detail}</p>{/if}{#if row.reference}<p class="reference">Reference: {row.reference}</p>{/if}</div>{/if}
 			{#if row.confirm ?? row.more}
 				<div class="disclosure" in:disclosureMotion out:disclosureMotion><div class="inrow">{#each row.confirm ?? row.more ?? [] as item (item.label)}<Button variant="chip" size="sm" onclick={item.run}>{item.label}</Button>{/each}</div></div>
 			{/if}

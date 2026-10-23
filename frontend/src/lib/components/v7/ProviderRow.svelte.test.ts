@@ -85,11 +85,12 @@ describe('ProviderRow External switch', () => {
 		const off = { ...on, server: { ...on.server, status: 'disabled' as const } };
 		let c = mount(ProviderRow, { target: document.body, props: { provider: on } });
 		flushSync();
-		expect(document.querySelector('button.tg')?.getAttribute('aria-label')).toBe('Disable');
+		expect(document.querySelector('button.tg')?.getAttribute('aria-label')).toBe('Use OpenAI-compatible API');
+		expect(document.querySelector('button.tg')?.getAttribute('aria-pressed')).toBe('true');
 		unmount(c);
 		c = mount(ProviderRow, { target: document.body, props: { provider: off } });
 		flushSync();
-		expect(document.querySelector('button.tg')?.getAttribute('aria-label')).toBe('Enable');
+		expect(document.querySelector('button.tg')?.getAttribute('aria-pressed')).toBe('false');
 		unmount(c);
 	});
 });

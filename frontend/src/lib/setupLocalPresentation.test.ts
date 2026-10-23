@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { measuredDownloadTime } from './setupLocalPresentation';
+import { measuredDownloadTime, showLocalOnlyGuidance } from './setupLocalPresentation';
+
+describe('local-only guidance', () => {
+	it('shows while a local model is active and no cloud model works', () => {
+		expect(showLocalOnlyGuidance({ eligible: true, localModelActive: true, cloudReady: false })).toBe(true);
+		expect(showLocalOnlyGuidance({ eligible: true, localModelActive: false, cloudReady: false })).toBe(false);
+		expect(showLocalOnlyGuidance({ eligible: false, localModelActive: true, cloudReady: false })).toBe(false);
+		expect(showLocalOnlyGuidance({ eligible: true, localModelActive: true, cloudReady: true })).toBe(false);
+	});
+});
 
 describe('measured download time', () => {
 	it('says nothing until a time is measured', () => {

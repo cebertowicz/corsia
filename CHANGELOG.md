@@ -8,6 +8,7 @@ the later entry describes the current behavior.
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here._
 
 - Posting a document comment now saves promptly and clears the composer while delivery continues in the background.
+- Setup keeps CORSIA’s own work folder as the default offer after you choose another folder.
 - Quitting the Mac app now also stops the local model server CORSIA started, so it no longer holds memory after you quit.
 - If you quit partway through first-run setup, the next launch starts setup fresh; downloaded models are kept.
 - When the app finds an earlier CORSIA install, Start fresh moves it into a dated folder under CORSIA backups in your home folder, then begins a clean setup.

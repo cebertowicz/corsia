@@ -49,6 +49,8 @@ const RUNTIME_PROVIDED = new Set([
 	'--toast-anchor-width',
 	// HomeShell's `style:--artifact-header-inset` on main: the expanded artifact column plus divider, from ChatArtifactSplit.
 	'--artifact-header-inset',
+	// HomeShell's `style:--header-right-controls-inset` on main: the measured width of the header's right controls.
+	'--header-right-controls-inset',
 ]);
 
 /**
