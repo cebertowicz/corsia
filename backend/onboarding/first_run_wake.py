@@ -367,11 +367,15 @@ async def render_for(model: str, path: str = "script", *, thread_id: str | None 
             harness_ready = facts.get("harness_ready", [])
             ready = {"claude-code" if source == "claude_code" else source
                      for source in harness_ready} if isinstance(harness_ready, list) else set()
-            card = await run_in_db(setup_decisions.import_card, model, ready)
-            decisions = [item for item in facts.get("setup", {}).get("setup_decisions", [])
-                         if item.get("title") != IMPORT_DECISION_TITLE]
-            imported = setup_decisions.agent_import(card)
-            facts["setup"] = {"setup_decisions": ([imported] if imported else []) + decisions}
+            setup = facts.get("setup")
+            cached_decisions = setup.get("setup_decisions") if isinstance(setup, dict) else None
+            # An unavailable marker stays as it is: it sends the agent to the live read, and a
+            # partial list beside it would pass for the complete one.
+            if isinstance(cached_decisions, list):
+                card = await run_in_db(setup_decisions.import_card, model, ready)
+                decisions = [item for item in cached_decisions if item.get("title") != IMPORT_DECISION_TITLE]
+                imported = setup_decisions.agent_import(card)
+                facts["setup"] = {"setup_decisions": ([imported] if imported else []) + decisions}
         if thread_id:
             await run_in_db(reconcile_rendered_app_facts, thread_id, facts)
         return render(facts, instructions("app") + "\n\n" + first_app_step(facts), APP_INLINE_SUMMARY)

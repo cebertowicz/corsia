@@ -208,23 +208,25 @@ async def test_complete_app_setup_only_reads_facts_for_a_held_app_wake(
     assert setup_progress.view()["setup_completed"] is True
 
 
-@pytest.mark.parametrize("states, count, step_three", [
-    (("working", "awaiting_approval", "needs_token", "disconnected"), 2, False),
-    (("working", "needs_token", "disconnected"), 1, True),
+@pytest.mark.parametrize("kinds, count, step_three", [
+    (("approved", "awaiting", "expired"), 2, False),
+    (("approved", "expired"), 1, True),
 ])
-def test_connected_app_facts_counts_working_and_awaiting_rows(isolated_db, states, count, step_three):
-    from infra.database import write_transaction
-    from infra.time import utc_now
+def test_connected_app_facts_count_every_app_but_an_expired_proposal(isolated_db, kinds, count, step_three):
+    from connections.app_lifecycle import approve_proposal, create_pending_app
+    from infra.database import get_db, write_transaction
     from onboarding.app_first_run import _connected_app_facts, applicable_steps
 
-    now = utc_now().isoformat()
-    with write_transaction(None, scope="seed_connected_apps") as db:
-        for index, state in enumerate(states):
-            db.execute(
-                "INSERT INTO connected_apps (id, name, config_json, state, state_since, reach_mode, "
-                "created_at, updated_at) VALUES (?, ?, '{}', ?, ?, 'all', ?, ?)",
-                (f"app-{index}", f"App {index}", state, now, now, now),
-            )
+    reach = {"mode": "all", "project_ids": [], "outside_projects": False}
+    for index, kind in enumerate(kinds):
+        app = create_pending_app(f"App {index}", {}, reach, actor_thread_id="importer", db=get_db())
+        if kind == "approved":
+            assert approve_proposal(app["id"], db=get_db())["state"] == "disconnected"
+        elif kind == "expired":
+            with write_transaction(None, scope="age_connected_app_proposal") as db:
+                db.execute(
+                    "UPDATE connected_apps SET state_since='2000-01-01T00:00:00' WHERE id=?", (app["id"],),
+                )
 
     facts = _connected_app_facts()
 
@@ -498,6 +500,39 @@ async def test_cached_pick_with_an_import_card_keeps_import_open_and_first(
         "SELECT title FROM plan_nodes WHERE workflow_ref='first-run-app' AND archived_at IS NULL "
         "ORDER BY order_key LIMIT 1"
     ) == [{"title": "Bring over what your other tools know"}]
+
+
+@pytest.mark.asyncio
+async def test_cached_pick_keeps_an_unavailable_setup_marker_and_the_import_step(
+    fresh_install, app_seed_facts, monkeypatch,
+):
+    from infra import accounts
+    from onboarding import app_first_run, first_run_wake, setup_decisions
+
+    accounts.create_first_account("newcomer", PASSWORD, first_run_path="app")
+    conductor_id = _conductor_id()
+    marker = {"unavailable": first_run_wake.UNAVAILABLE_READS["setup"]}
+    cached = {**_completed_app_facts(), "setup": marker}
+    monkeypatch.setattr(app_first_run, "read_app_facts", AsyncMock(return_value=cached))
+    assert await app_first_run.complete_app_setup(
+        "newcomer", step=None, local_ai=None, picks=None, handoff=None,
+    ) is True
+    monkeypatch.setattr(first_run_wake, "_bound_model", lambda model: {"model": model, "source": "omlx"})
+
+    def no_card(model, ready):
+        raise AssertionError("an unavailable setup read must not gain an import card")
+
+    monkeypatch.setattr(setup_decisions, "import_card", no_card)
+
+    wake = await first_run_wake.render_for("test/model", "app", thread_id=conductor_id)
+
+    rendered, _ = json.JSONDecoder().raw_decode(wake.split("## Setup facts\n\n", 1)[1])
+    assert rendered["setup"] == marker
+    assert "Bring over what your other tools know" in [
+        row["title"] for row in _rows(
+            "SELECT title FROM plan_nodes WHERE workflow_ref='first-run-app' AND archived_at IS NULL"
+        )
+    ]
 
 
 def test_completion_retry_uses_the_latest_facts_at_the_first_model_pick(fresh_install, app_seed_facts):

@@ -7,7 +7,10 @@ import sqlite3
 from collections.abc import Mapping
 from typing import Any
 
-IMPORT_DECISION_TITLE = "Bring over what your other tools know"
+from onboarding.setup_strings import AGENT_IMPORT
+
+# The import decision is identified by its rendered title, so it is read from the one string source.
+IMPORT_DECISION_TITLE = AGENT_IMPORT["title"]
 
 
 class SetupOwnerError(Exception):
@@ -34,9 +37,10 @@ def _has_import_step(facts: Mapping[str, Any]) -> bool:
 
     Before a model is bound, stat-only discovery makes the provisional plan visible.
     Once a model is bound, only its provider-specific import decision card can keep
-    the step applicable.
+    the step applicable; an unavailable setup read keeps the provisional answer, so
+    a failed read never removes the step before the agent's live read settles it.
     """
-    if "bound_model" not in facts:
+    if "bound_model" not in facts or _is_unavailable(facts.get("setup")):
         agents_found = facts.get("agents_found")
         return isinstance(agents_found, (list, tuple, set, frozenset)) and any(
             isinstance(tool, str) and tool for tool in agents_found
@@ -126,9 +130,6 @@ def applicable_steps(
     return tuple(steps)
 
 
-CONNECTED_APP_STATES = frozenset({"working", "awaiting_approval"})
-
-
 def _connected_app_facts(db: sqlite3.Connection | None = None) -> dict[str, Any]:
     """Read local, already-authorized app/account state without a provider call."""
     from connections.app_reach import list_apps
@@ -136,10 +137,10 @@ def _connected_app_facts(db: sqlite3.Connection | None = None) -> dict[str, Any]
 
     connection = db or get_db()
     try:
-        # ``list_apps`` is the canonical state projection. A working app and one
-        # brought over that awaits the person's approval both count; expired,
-        # broken and disconnected entries do not.
-        count = sum(app.get("state") in CONNECTED_APP_STATES for app in list_apps(db=connection))
+        # ``list_apps`` is the canonical state projection. An app is already set up
+        # once its row exists, approved or still awaiting the person's approval;
+        # only a proposal whose review window lapsed (``expired``) does not count.
+        count = sum(app.get("state") != "expired" for app in list_apps(db=connection))
         ready = False
         for row in connection.execute(
             "SELECT capabilities_json FROM connected_accounts WHERE state='connected'"
