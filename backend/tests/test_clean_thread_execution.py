@@ -474,6 +474,41 @@ async def test_provider_action_settles_only_reported_write_evidence() -> None:
 
 
 @pytest.mark.asyncio
+async def test_cancellation_after_durable_begin_settles_input_write(monkeypatch) -> None:
+    """Cancellation must not leave a committed provider-write fence unresolved."""
+    import infra.input_writes as writes
+
+    db = sqlite3.connect(":memory:")
+    began = asyncio.Event()
+    release_begin = asyncio.Event()
+    original_write = writes._write
+
+    async def delayed_begin(action, *args, **kwargs):
+        result = await original_write(action, *args, **kwargs)
+        if action is writes.begin_batch_write:
+            began.set()
+            await release_begin.wait()
+        return result
+
+    try:
+        task = asyncio.create_task(writes.dispatch_fenced_batch(
+            _claimed(db), lambda _evidence: asyncio.sleep(0),
+            attempt_id="cancelled-begin", started_at="t2", db=db,
+        ))
+        monkeypatch.setattr(writes, "_write", delayed_begin)
+        await began.wait()
+        task.cancel()
+        release_begin.set()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert tuple(db.execute(
+            "SELECT delivery_state,write_outcome FROM messages"
+        ).fetchone()) == ("cancelled", "proved_no_write")
+    finally:
+        db.close()
+
+
+@pytest.mark.asyncio
 async def test_provider_success_without_write_evidence_is_not_inferred() -> None:
     """A returned adapter call is not proof that the provider got the bytes."""
     from infra.thread_execution import dispatch_fenced_batch

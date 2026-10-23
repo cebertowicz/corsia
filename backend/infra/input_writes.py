@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import sqlite3
 from typing import Awaitable, Callable, TypeVar
 from infra.provider_write_evidence import ProviderWriteEvidence
@@ -313,6 +314,11 @@ async def _settle_evidence(
         attempt_id,
         outcome=outcome,
         error=error,
+        no_write_state=(
+            "cancelled"
+            if outcome == "proved_no_write" and isinstance(error, asyncio.CancelledError)
+            else "failed"
+        ),
         db=db,
     )
     if outcome == "proved_no_write" and not evidence.proved_no_write:
@@ -333,14 +339,23 @@ async def dispatch_fenced_batch(
     db: sqlite3.Connection | None = None,
 ) -> T:
     """Fence, dispatch outside storage, and settle only adapter evidence."""
-    await _write(
+    evidence = evidence or ProviderWriteEvidence()
+    begin_task = asyncio.create_task(_write(
         begin_batch_write,
         batch,
         attempt_id=attempt_id,
         started_at=started_at,
         db=db,
-    )
-    evidence = evidence or ProviderWriteEvidence()
+    ))
+    try:
+        await asyncio.shield(begin_task)
+    except asyncio.CancelledError as cancelled:
+        # The durable begin can finish after the caller is cancelled. Join it
+        # before propagating cancellation so a committed fence is never left
+        # without its matching proved-no-write settlement.
+        await asyncio.shield(begin_task)
+        await _settle_evidence(attempt_id, evidence, cancelled, db=db)
+        raise
     try:
         result = await dispatcher(evidence)
     except BaseException as error:
