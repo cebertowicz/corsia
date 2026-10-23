@@ -89,7 +89,7 @@ def _correction_rows(
 def _in_use(
     db: sqlite3.Connection, scope: str, start: str, end: str,
 ) -> dict[str, Any] | None:
-    """Count that day's recorded trial lessons with a receipt-backed offer.
+    """Count that day's recorded trial lessons with complete receipt-backed evidence.
 
     The receipt reader owns manifest parsing and offer membership; the public Plans
     read owns review-key projection. No job-local offer or key rule is duplicated.
@@ -110,6 +110,8 @@ def _in_use(
         )
         period = receipt["period"]
         calls += period["calls"]
+        if period["unavailable_calls"]:
+            return None
         offered.update(period["offers"].counts)
     if calls == 0:
         return None

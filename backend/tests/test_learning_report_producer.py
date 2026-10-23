@@ -337,6 +337,35 @@ def test_in_use_matches_recorded_lessons_to_offer_receipts(db):
     }
 
 
+def test_in_use_is_unknown_when_any_dated_offer_receipt_is_unavailable(db):
+    from datetime import datetime, timezone
+
+    from jobs import learning_report
+    from plans import lesson_reviews
+
+    db.execute("INSERT INTO projects (id,name,created_at,updated_at) VALUES ('proj','Project','t','t')")
+    db.execute("INSERT INTO threads (id,user_id,project_id,model,created_at,updated_at) "
+               "VALUES ('owner','user','proj','test/model','t','t')")
+    db.execute("INSERT INTO artifact_identities (id,integration,type,external_id,title,state,created_at,updated_at) "
+               "VALUES ('art','workspace','skill','workspace://art','art','active','t','t')")
+    review = {"artifact_id": "art", "title": "Review", "acceptance": "Decide.", "review_after": "2099-01-01T00:00:00+00:00"}
+    today = learning_report.report_date_for(datetime.now(timezone.utc))
+    lesson_reviews.ensure_lesson_review(db, "owner", lesson_id="a", behavioral_sha256="a" * 64, **review)
+    _offer_receipt(db, usage_id="usage:complete", manifest_id="manifest:complete", lessons=[
+        {"id": "a", "behavioral_sha256": "a" * 64},
+    ], created_at=f"{today}T18:00:00+00:00")
+    db.execute(
+        "INSERT INTO llm_usage(id,thread_id,turn_id,model,context_manifest_id,created_at) "
+        "VALUES ('usage:unavailable','owner','turn','test/model',NULL,?)",
+        (f"{today}T18:01:00+00:00",),
+    )
+    db.commit()
+
+    report = learning_report.build_report(db, scope="proj", report_date=today)
+
+    assert report["items"]["lessons"]["in_use"] is None
+
+
 def test_in_use_is_unknown_without_dated_offer_receipts(db):
     from jobs.learning_report import build_report
 
