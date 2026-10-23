@@ -23,6 +23,15 @@ export function waitsOutside(states: Record<string, ThreadPlanStateEntry>, threa
 	return entry?.state === 'waiting' && !!entry.wait;
 }
 
+/**
+ * When an idle plan's set-aside work comes back (EW7), or null. The server sends
+ * `set_aside_until` for any set-aside task; only an idle plan reads set aside, so
+ * one still working or owing you keeps its own state.
+ */
+export function planSetAsideUntil(entry: ThreadPlanStateEntry | undefined): string | null {
+	return entry?.state === 'idle' && entry.set_aside_until ? entry.set_aside_until : null;
+}
+
 let listed = new Set<string>();
 let seq = 0;
 /** The newest read that has written each thread, so a slow older read never overwrites it. */

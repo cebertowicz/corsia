@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { enterProjectScope } from '$lib/stores/projects';
 	import type { ActivityGroupSummary, ActivityPlanGroup, ActivityPlanRow as ActivityRowModel } from '$lib/activityHome';
-	import { threadPlanStates } from '$lib/stores/threadPlanStates';
+	import { planSetAsideUntil, threadPlanStates } from '$lib/stores/threadPlanStates';
 	import { parseWsTimestamp } from '$lib/time';
 	import ActivityPlanRow from './ActivityPlanRow.svelte';
 
@@ -46,7 +46,8 @@
 		const key = (row: ActivityRowModel): [number, number] => {
 			const entry = $threadPlanStates[row.entry.owner.thread_id ?? ''];
 			if (entry?.state === 'waiting' && entry.wait) return [0, parseWsTimestamp(entry.wait.until)];
-			return entry?.set_aside_until ? [1, parseWsTimestamp(entry.set_aside_until)] : [2, 0];
+			const until = planSetAsideUntil(entry);
+			return until ? [1, parseWsTimestamp(until)] : [2, 0];
 		};
 		return group.waiting.map((row, index) => ({ row, index, at: key(row) }))
 			.sort((a, b) => (a.at[0] - b.at[0]) || (a.at[1] - b.at[1]) || (a.index - b.index)).map(({ row }) => row);
