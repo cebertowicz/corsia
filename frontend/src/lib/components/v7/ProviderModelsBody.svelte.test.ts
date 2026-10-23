@@ -69,7 +69,7 @@ describe('Settings model rows and account usage', () => {
 		const localProvider = {
 			name: 'omlx', label: 'oMLX', type: 'network', statusDot: 'online', subline: 'Local',
 			raw: { name: 'omlx', label: 'oMLX', type: 'network' },
-			server: { id: 'local-test', provider: 'omlx', kind: 'managed', source: 'manual', corsia_omlx: true, on_this_mac: true, instance_name: 'Local', endpoints: [] },
+			server: { id: 'local-test', provider: 'omlx', kind: 'managed', source: 'manual', corsia_omlx: true, on_this_mac: true, instance_name: 'CORSIA', endpoints: [] },
 		} as unknown as HostProvider;
 		token.set('test-token');
 		vi.stubGlobal('fetch', vi.fn(async (url: string) => {
@@ -105,7 +105,7 @@ describe('Settings model rows and account usage', () => {
 		const localProvider = {
 			name: 'omlx', label: 'oMLX', type: 'network', statusDot: 'online', subline: 'Local',
 			raw: { name: 'omlx', label: 'oMLX', type: 'network' },
-			server: { id: 'local-test', provider: 'omlx', kind: 'managed', source: 'manual', corsia_omlx: true, on_this_mac: true, instance_name: 'Local', endpoints: [] },
+			server: { id: 'local-test', provider: 'omlx', kind: 'managed', source: 'manual', corsia_omlx: true, on_this_mac: true, instance_name: 'CORSIA', endpoints: [] },
 		} as unknown as HostProvider;
 		token.set('test-token');
 		let finishing = true;
@@ -151,7 +151,7 @@ describe('Settings model rows and account usage', () => {
 		const localProvider = {
 			name: 'omlx', label: 'oMLX', type: 'network', statusDot: 'online', subline: 'Local',
 			raw: { name: 'omlx', label: 'oMLX', type: 'network' },
-			server: { id: 'local-test', provider: 'omlx', kind: 'managed', source: 'manual', corsia_omlx: true, on_this_mac: true, instance_name: 'Local', endpoints: [] },
+			server: { id: 'local-test', provider: 'omlx', kind: 'managed', source: 'manual', corsia_omlx: true, on_this_mac: true, instance_name: 'CORSIA', endpoints: [] },
 		} as unknown as HostProvider;
 		token.set('test-token');
 		vi.stubGlobal('fetch', vi.fn(async (url: string) => {
