@@ -1,6 +1,6 @@
 ---
 name: google-setup
-description: Use when the person wants their email or calendar connected, or when `google_status` says not_connected or `google_connect` says no Google client is saved.
+description: Use when the person wants Gmail or Google Calendar connected, or when `google_status` says not_connected or `google_connect` says no Google client is saved.
 ---
 
 # Connect Google

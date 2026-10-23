@@ -1,6 +1,6 @@
 ---
 name: mail-host-setup
-description: Use when email or calendar on a host other than Gmail or Microsoft (iCloud, Yahoo, Fastmail, a work server) needs connecting or an app password, or a System-change notice adds this skill.
+description: Use when email or calendar needs connecting and the host is unknown or not Gmail or Microsoft (iCloud, Yahoo), a row needs an app password, or a System-change notice adds this skill.
 ---
 
 # Connect another email host
