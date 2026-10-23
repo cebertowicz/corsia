@@ -142,7 +142,7 @@ def test_reject_is_not_a_self_caught_source(db):
         {"node_id": task.id, "feedback": "revise", "expected_revision": reviewed["node"]["revision"]},
         "reject",
     )
-    assert _facts(db) == []
+    assert [attributes["source_kind"] for _subject, _thread_id, attributes in _facts(db)] == ["sent_back"]
 
 
 def test_github_reopen_and_explicit_merged_revert_target_owned_prs(db):
