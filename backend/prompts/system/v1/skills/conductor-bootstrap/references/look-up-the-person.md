@@ -4,7 +4,7 @@ For the CORSIA agent: step 5 of `references/first-run-app.md`. Follow in order. 
 
 ## Before anything: ask when search was already set up
 
-When `web_search_ready` was already true before step 4, so no key was saved in this chat, open with this line and wait for the answer: `I can look you up on the web, so you don't have to tell me everything yourself. Your name and anything I search for go to Brave. Want me to?` On a yes, go on from section A. On a no, or anything but a yes, go straight to section E. When the key was saved in step 4, ask nothing: step 4 already offered the opt-out.
+When `web_search_ready` was already true before step 4, so no key was saved in this chat, open with this line and wait for the answer: `I can look you up on the web, so you don't have to tell me everything yourself. Your name and anything I search for are sent to web search engines. Want me to?` On a yes, go on from section A. On a no, or anything but a yes, go straight to section E. When the key was saved in step 4, ask nothing: step 4 already offered the opt-out.
 
 ## A. What you start from
 
