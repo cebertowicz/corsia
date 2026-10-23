@@ -56,7 +56,7 @@ def test_disabled_verdict_source_is_not_reported_as_an_empty_experiment_list(db)
     }
 
 
-def test_daily_early_and_workspace_reports_validate_unchanged_with_sent_back(db):
+def test_daily_and_early_reports_validate_unchanged_with_sent_back(db):
     from events.learning_report import validated
     from jobs.learning_report import build_report
 
@@ -69,15 +69,12 @@ def test_daily_early_and_workspace_reports_validate_unchanged_with_sent_back(db)
     reports = [
         build_report(db, scope="proj", report_date="2026-10-22"),
         build_report(db, scope="proj", report_date="2026-10-22", report_kind="early-1"),
-        build_report(db, scope="workspace", report_date="2026-10-22"),
     ]
 
     assert [validated(report).as_contract() for report in reports] == reports
 
 
 def test_learning_report_delivery_uses_the_real_sync_seam(db, monkeypatch):
-    import inspect
-
     from events import learning_report as report_events
     from jobs import learning_report
 
@@ -89,12 +86,8 @@ def test_learning_report_delivery_uses_the_real_sync_seam(db, monkeypatch):
 
     monkeypatch.setattr(report_events, "deliver_measurement_report_sync", deliver)
     report = learning_report.build_report(db, scope="proj", report_date="2026-10-22")
-    result = learning_report.deliver_learning_report(report)
-    try:
-        assert result == ["delivered"]
-    finally:
-        if inspect.iscoroutine(result):
-            result.close()
+    result = learning_report.deliver_learning_report_sync(report)
+    assert result == ["delivered"]
     assert delivered == [{
         "scope": "proj", "event_type": "measurement.learning_report", "payload": report,
         "transaction_scope": "deliver_learning_report", "db": None,
@@ -172,7 +165,7 @@ def test_early_threshold_includes_zero_days_and_uses_history_age_for_its_floor(d
             )
     db.commit()
     delivered = []
-    monkeypatch.setattr(learning_report, "deliver_learning_report", delivered.append)
+    monkeypatch.setattr(learning_report, "deliver_learning_report_sync", delivered.append)
 
     assert learning_report.early_threshold(db, scope="established", report_date=report_day.isoformat()) == learning_report.EARLY_FLOOR
     assert learning_report.early_threshold(db, scope="new", report_date=report_day.isoformat()) == learning_report.EARLY_FLOOR
@@ -211,7 +204,7 @@ def test_sent_back_corrections_are_shown_separately_but_never_trigger_early_repo
         )
     db.commit()
     delivered = []
-    monkeypatch.setattr(learning_report, "deliver_learning_report", delivered.append)
+    monkeypatch.setattr(learning_report, "deliver_learning_report_sync", delivered.append)
 
     report = learning_report.build_report(db, scope="daily", report_date=report_day.isoformat())
 
@@ -227,7 +220,7 @@ def test_early_report_uses_floor_then_cap_and_calls_only_the_adapter(db, monkeyp
     from jobs import learning_report
 
     delivered = []
-    monkeypatch.setattr(learning_report, "deliver_learning_report", delivered.append)
+    monkeypatch.setattr(learning_report, "deliver_learning_report_sync", delivered.append)
     today = "2026-10-22"
     for number in range(50):  # ten times the temporary floor threshold
         _event(db, event_name="measurement.correction", ts=f"{today}T18:00:00+00:00", project_id="proj",
@@ -242,7 +235,7 @@ def test_early_report_uses_floor_then_cap_and_calls_only_the_adapter(db, monkeyp
 
 
 @pytest.mark.parametrize("zone_name", ["Europe/Berlin"])
-def test_daily_report_after_midnight_reads_the_last_completed_local_day(db, monkeypatch, zone_name):
+def test_daily_reports_cover_two_completed_local_days_oldest_first(db, monkeypatch, zone_name):
     from datetime import datetime
     from zoneinfo import ZoneInfo
 
@@ -251,23 +244,52 @@ def test_daily_report_after_midnight_reads_the_last_completed_local_day(db, monk
 
     zone = ZoneInfo(zone_name)
     db.execute("INSERT INTO projects (id,name,created_at,updated_at) VALUES ('proj','Project','now','now')")
+    _event(db, event_name="measurement.correction", ts="2026-10-21T21:30:00+00:00", project_id="proj",
+           subject_key="message:older", attributes={"source_kind": "message", "label": "correction"})
     _event(db, event_name="measurement.correction", ts="2026-10-22T21:30:00+00:00", project_id="proj",
-           subject_key="message:yesterday", attributes={"source_kind": "message", "label": "correction"})
-    _event(db, event_name="measurement.correction", ts="2026-10-22T22:30:00+00:00", project_id="proj",
-           subject_key="message:today", attributes={"source_kind": "message", "label": "correction"})
+           subject_key="message:newer", attributes={"source_kind": "message", "label": "correction"})
     db.commit()
     delivered = []
     monkeypatch.setattr(database, "get_db", lambda: db)
-    monkeypatch.setattr(learning_report, "deliver_learning_report", delivered.append)
+    monkeypatch.setattr(learning_report, "deliver_learning_report_sync", delivered.append)
     monkeypatch.setattr(learning_report, "install_timezone", lambda: zone)
 
     delivered_keys = learning_report.emit_daily_reports(now=datetime(2026, 10, 23, 0, 5, tzinfo=zone))
 
-    assert delivered_keys == ["proj:2026-10-22:daily"]
-    [project_report] = delivered
-    assert project_report["scope"] == "proj"
-    assert project_report["report_date"] == "2026-10-22"
-    assert project_report["items"]["corrections"] == {"message": {"count": 1, "refs": ["message:yesterday"]}}
+    assert delivered_keys == ["proj:2026-10-21:daily", "proj:2026-10-22:daily"]
+    assert [(report["scope"], report["report_date"]) for report in delivered] == [
+        ("proj", "2026-10-21"), ("proj", "2026-10-22"),
+    ]
+
+
+def test_daily_reports_continue_after_one_scope_delivery_fails(db, monkeypatch):
+    from datetime import datetime, timezone
+
+    from infra import database
+    from jobs import learning_report
+
+    for scope in ("broken", "later"):
+        db.execute("INSERT INTO projects (id,name,created_at,updated_at) VALUES (?,?,?,?)", (scope, scope, "now", "now"))
+        _event(
+            db, event_name="measurement.correction", ts="2026-10-22T12:00:00+00:00", project_id=scope,
+            subject_key=f"message:{scope}", attributes={"source_kind": "message", "label": "correction"},
+        )
+    db.commit()
+    attempted = []
+
+    def deliver(report):
+        attempted.append(report["report_key"])
+        if report["scope"] == "broken":
+            raise RuntimeError("designation failed")
+
+    monkeypatch.setattr(database, "get_db", lambda: db)
+    monkeypatch.setattr(learning_report, "deliver_learning_report_sync", deliver)
+    monkeypatch.setattr(learning_report, "install_timezone", lambda: timezone.utc)
+
+    delivered = learning_report.emit_daily_reports(now=datetime(2026, 10, 23, tzinfo=timezone.utc))
+
+    assert attempted == ["broken:2026-10-22:daily", "later:2026-10-22:daily"]
+    assert delivered == ["later:2026-10-22:daily"]
 
 
 def test_daily_report_is_passive_without_qualifying_facts(db):

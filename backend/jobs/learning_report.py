@@ -8,6 +8,8 @@ from collections import defaultdict
 from datetime import date, datetime, time, timedelta, timezone, tzinfo
 from typing import Any
 
+from loguru import logger
+
 from core.corrections_recording import (
     CORRECTION_EVENT,
     LABEL_CORRECTION,
@@ -17,6 +19,7 @@ from core.corrections_recording import (
 )
 from core import workflow_verdict_evaluator
 from core.workflow_verdict_read import PLANNED_EVENT, REACHED_EVENT
+from events.learning_report import deliver_learning_report_sync
 
 EARLY_FLOOR = 5
 HISTORY_DAYS = 28
@@ -35,17 +38,7 @@ _PERSON_CORRECTION_SOURCE_SQL = (
 _PERSON_CORRECTION_SOURCE_ARGS = (SOURCE_KIND_MESSAGE, *PERSON_CORRECTION_SOURCES)
 
 
-def deliver_learning_report(report: dict[str, Any]) -> Any:
-    """Synchronously validate and deliver from the producer's synchronous jobs."""
-    from events.learning_report import deliver_learning_report_sync
-
-    return deliver_learning_report_sync(report)
-
-
 def _scope_where(scope: str) -> tuple[str, tuple[str, ...]]:
-    if scope == "workspace":
-        # Cross-project adoption/theme records have no durable producer source yet.
-        return "0", ()
     return "project_id=?", (scope,)
 
 
@@ -164,8 +157,6 @@ def build_report(db: sqlite3.Connection, *, scope: str, report_date: str, report
 def early_threshold(db: sqlite3.Connection, *, scope: str, report_date: str) -> int:
     """The prior 28 local-install days' p90 of corrections, or the history floor."""
     day = date.fromisoformat(report_date)
-    if scope == "workspace":
-        return EARLY_FLOOR
     start, end = _day_bounds((day - timedelta(days=HISTORY_DAYS)).isoformat())[0], _day_bounds(report_date)[0]
     first = db.execute(
         f"""SELECT MIN(ts) FROM outcome_events
@@ -198,38 +189,52 @@ def early_threshold(db: sqlite3.Connection, *, scope: str, report_date: str) -> 
 
 def maybe_emit_early(db: sqlite3.Connection, *, scope: str, report_date: str) -> bool:
     """Deliver the count-derived early key; repeat calls stay idempotent by key."""
-    if scope == "workspace":
-        return False
     corrections = _correction_rows(db, scope, report_date, person_only=True)
     threshold = early_threshold(db, scope=scope, report_date=report_date)
     kind = "early-2" if len(corrections) >= 2 * threshold else "early-1" if len(corrections) >= threshold else None
     if kind is None:
         return False
-    deliver_learning_report(build_report(db, scope=scope, report_date=report_date, report_kind=kind))
+    deliver_learning_report_sync(build_report(db, scope=scope, report_date=report_date, report_kind=kind))
     return True
 
 
+def _has_reportable_items(report: dict[str, Any]) -> bool:
+    items = report["items"]
+    counts = [
+        *items["corrections"].values(), *items["lessons"].values(),
+        *items["experiments"].values(), items["wins"],
+    ]
+    return any(count is not None and count["count"] > 0 for count in counts)
+
+
 def emit_daily_reports(*, now: datetime | None = None) -> list[str]:
-    """Run on the existing nightly job for the last completed local-install day."""
+    """Cover the last two completed local days; duplicate report keys are harmless."""
     from infra.database import get_db
 
     instant = now or datetime.now(timezone.utc)
-    completed_day = (instant.astimezone(install_timezone()).date() - timedelta(days=1)).isoformat()
+    current_day = instant.astimezone(install_timezone()).date()
+    report_dates = tuple((current_day - timedelta(days=offset)).isoformat() for offset in (2, 1))
     db = get_db()
     try:
-        scopes = ["workspace", *(str(row["id"]) for row in db.execute("SELECT id FROM projects ORDER BY id"))]
-        reports = [build_report(db, scope=scope, report_date=completed_day) for scope in scopes]
+        scopes = [str(row["id"]) for row in db.execute("SELECT id FROM projects ORDER BY id")]
+        reports = []
+        for report_date in report_dates:
+            for scope in scopes:
+                try:
+                    report = build_report(db, scope=scope, report_date=report_date)
+                except Exception:
+                    logger.exception("learning report build failed for {} on {}", scope, report_date)
+                else:
+                    if _has_reportable_items(report):
+                        reports.append(report)
     finally:
         db.close()
     delivered = []
     for report in reports:
-        items = report["items"]
-        counts = [
-            *items["corrections"].values(), *items["lessons"].values(),
-            *items["experiments"].values(), items["wins"],
-        ]
-        if any(count is not None and count["count"] > 0 for count in counts):
-            delivered.append(report)
-    for report in delivered:
-        deliver_learning_report(report)
-    return [str(report["report_key"]) for report in delivered]
+        try:
+            deliver_learning_report_sync(report)
+        except Exception:
+            logger.exception("learning report delivery failed for {}", report["report_key"])
+        else:
+            delivered.append(str(report["report_key"]))
+    return delivered
