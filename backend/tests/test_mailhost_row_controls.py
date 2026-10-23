@@ -24,7 +24,7 @@ from mailhost_helpers import (  # noqa: F401  (fixtures)
 from api import key_write_guard
 from api import keys as keys_api
 from api import mcp as mcp_api
-from connections.mailhost import check, store
+from connections.mailhost import check, endpoints, store
 from infra import accounts, key_store
 from infra.database import get_db
 
@@ -75,11 +75,9 @@ async def _listed(client, account_id: str) -> dict:
     return next(found for found in listed.json()["accounts"] if found["id"] == account_id)
 
 
-async def _check(client, account_id, *, password=TEST_PASSWORD, token=OWNER_SESSION_TOKEN, body=None):
-    return await client.post(
-        f"/api/mcp/accounts/{account_id}/mailhost/check", headers=_auth(token),
-        json=body if body is not None else {"password": password},
-    )
+async def _check(client, account_id, *, token=OWNER_SESSION_TOKEN, body=None):
+    """Try again: one press, so no body unless a test sends one."""
+    return await client.post(f"/api/mcp/accounts/{account_id}/mailhost/check", headers=_auth(token), json=body)
 
 
 async def _servers(client, account_id, servers, *, password=TEST_PASSWORD, token=OWNER_SESSION_TOKEN):
@@ -176,27 +174,16 @@ async def test_a_mail_host_entry_can_be_cleared_but_the_card_is_told_it_cannot_b
 
 
 # -- Try again ------------------------------------------------------------------------------------
+# One press: no CORSIA password, no body. It is the person's alone by session provenance (an agent or
+# API token is refused), takes only the row id and reads the stored servers when it runs.
 
 
-async def test_try_again_needs_the_password_and_changes_nothing_without_it(unreachable) -> None:
-    before = row(unreachable.account_id)["raw"]
-    missing = await _check(unreachable.client, unreachable.account_id, body={})
-    assert missing.status_code == 400 and missing.json()["detail"]["message"] == key_write_guard.NO_PASSWORD
-    empty = await _check(unreachable.client, unreachable.account_id, password="")
-    assert empty.status_code == 400
-    wrong = await _check(unreachable.client, unreachable.account_id, password=WRONG)
-    assert wrong.status_code == 403 and wrong.json()["detail"]["message"] == key_write_guard.MISMATCH
-    await check.wait_for_checks()
-    assert row(unreachable.account_id)["raw"] == before and unreachable.built.imap.commands == []
-    _no_leak(missing.text, empty.text, wrong.text)
-
-
-async def test_try_again_with_the_password_checks_again_and_returns_the_checking_row(unreachable) -> None:
+async def test_try_again_is_one_press_with_no_password_and_returns_the_checking_row(unreachable) -> None:
     edited = await _servers(unreachable.client, unreachable.account_id, _good(unreachable.built))
     assert edited.status_code == 200
     await check.wait_for_checks()
     assert row(unreachable.account_id)["check"]["status"] == store.OK
-    unreachable.built.imap.password = "[REDACTED]"
+    unreachable.built.imap.password = "changed-at-the-host-0000"
     again = await _check(unreachable.client, unreachable.account_id)
     assert again.status_code == 200
     assert again.json()["row"]["mailhost"]["problem"] == "checking"
@@ -205,19 +192,18 @@ async def test_try_again_with_the_password_checks_again_and_returns_the_checking
     _no_leak(again.text)
 
 
-async def test_try_again_is_the_persons_alone(unreachable) -> None:
+async def test_try_again_is_the_persons_alone_an_agent_or_api_token_is_refused_403(unreachable) -> None:
     before = row(unreachable.account_id)["raw"]
-    for token in (OWNER_TOKEN, "nobody"):
-        refused = await _check(unreachable.client, unreachable.account_id, token=token)
-        assert refused.status_code in (401, 403)
-        _no_leak(refused.text)
+    refused = await _check(unreachable.client, unreachable.account_id, token=OWNER_TOKEN)
+    assert refused.status_code == 403
+    assert (await _check(unreachable.client, unreachable.account_id, token="nobody")).status_code == 401
     query = await unreachable.client.post(
         f"/api/mcp/accounts/{unreachable.account_id}/mailhost/check?token={OWNER_SESSION_TOKEN}",
-        json={"password": TEST_PASSWORD},
     )
     assert query.status_code == 401
     await check.wait_for_checks()
-    assert row(unreachable.account_id)["raw"] == before
+    assert row(unreachable.account_id)["raw"] == before and unreachable.built.imap.commands == []
+    _no_leak(refused.text)
 
 
 async def test_try_again_on_another_providers_or_unknown_account_is_not_found(client, env) -> None:
@@ -226,28 +212,72 @@ async def test_try_again_on_another_providers_or_unknown_account_is_not_found(cl
         assert missing.status_code == 404 and missing.json()["detail"] == "That account isn't connected."
 
 
-async def test_three_wrong_passwords_on_try_again_end_that_session_only(unreachable) -> None:
-    for _ in range(2):
-        assert (await _check(unreachable.client, unreachable.account_id, password=WRONG)).status_code == 403
-    third = await _check(unreachable.client, unreachable.account_id, password=WRONG)
-    assert third.status_code == 401 and third.json()["detail"]["message"] == key_write_guard.SIGNED_OUT
-    assert accounts.resolve_token(OWNER_SESSION_TOKEN) is None
-    assert accounts.resolve_token("second-session-credential-for-row-controls") is not None
-    assert (await _check(unreachable.client, unreachable.account_id)).status_code == 401
-    assert unreachable.built.imap.commands == []
+async def test_try_again_takes_only_the_row_id_and_never_goes_anywhere_but_the_stored_servers(unreachable) -> None:
+    good = _good(unreachable.built)
+    await _servers(unreachable.client, unreachable.account_id, good)
+    await check.wait_for_checks()
+    stored = row(unreachable.account_id)["endpoints"]
+    elsewhere = {"imap": "attacker.example:993", "smtp": "attacker.example:465", "caldav": "https://attacker.example/",
+                 "host": "attacker.example", "port": 993, "tls": False, "username": "evil", "password": "whatever"}
+    again = await _check(unreachable.client, unreachable.account_id, body=elsewhere)
+    assert again.status_code == 200
+    await check.wait_for_checks()
+    after = row(unreachable.account_id)
+    assert after["endpoints"]["imap"] == stored["imap"] and after["endpoints"]["smtp"] == stored["smtp"]
+    assert after["endpoints"]["caldav"] == stored["caldav"] and after["check"]["status"] == store.OK
+    logins = [verb for _, verb in unreachable.built.imap.commands].count("LOGIN")
+    assert logins == 2, "both checks logged in at the stored server, and nowhere else"
+    assert "attacker" not in after["raw"] and "evil" not in after["raw"]
 
 
-async def test_repeated_wrong_passwords_make_try_again_busy_until_they_settle(unreachable, monkeypatch) -> None:
-    for _ in range(2):
-        assert (await _check(unreachable.client, unreachable.account_id, password=WRONG)).status_code == 403
-    answers = await asyncio.gather(*(
-        _check(unreachable.client, unreachable.account_id, password=WRONG) for _ in range(4)
-    ))
-    codes = sorted(answer.status_code for answer in answers)
-    assert codes.count(429) >= 3 and 401 in codes
-    busy = next(answer for answer in answers if answer.status_code == 429)
-    assert busy.json()["detail"] == {"code": "key_write_busy", "message": key_write_guard.BUSY}
-    assert unreachable.built.imap.commands == [] and key_write_guard._pending == {}
+async def test_try_again_goes_through_the_connect_check_so_the_password_never_leaves_before_tls(conductor, servers, client, monkeypatch) -> None:
+    built = servers(imap={"implicit_tls": False, "offer_starttls": False})
+    monkeypatch.setattr(endpoints, "IMAP_STARTTLS_PORTS", frozenset((built.imap.port,)))
+    account_id = add_account(built, conductor)["account_id"]
+    key_store.set_value(key_store.MAILHOST_PREFIX + account_id, PASSWORD)
+    seen: list[str] = []
+    real = check.run_check
+
+    async def watched(account, *args):
+        seen.append(account)
+        return await real(account, *args)
+
+    monkeypatch.setattr(check, "run_check", watched)
+    assert (await _check(client, account_id)).status_code == 200
+    await check.wait_for_checks()
+    assert seen == [account_id]
+    assert row(account_id)["check"]["status"] == store.UNREACHABLE
+    assert all(verb != "LOGIN" for _, verb in built.imap.commands)
+    assert PASSWORD.encode() not in built.imap.plain
+
+
+async def test_a_second_try_again_while_one_runs_joins_it_and_starts_no_second_check(unreachable, monkeypatch) -> None:
+    started, release = asyncio.Event(), asyncio.Event()
+    runs: list[str] = []
+
+    async def slow(account_id, ep, password):
+        runs.append(account_id)
+        started.set()
+        await release.wait()
+        return ep, store.UNREACHABLE, ep.imap.host, ()
+
+    monkeypatch.setattr(check, "_outcome", slow)
+    first = await _check(unreachable.client, unreachable.account_id)
+    assert first.status_code == 200 and first.json()["row"]["mailhost"]["problem"] == "checking"
+    await asyncio.wait_for(started.wait(), 5)
+    second, third = await asyncio.gather(
+        _check(unreachable.client, unreachable.account_id), _check(unreachable.client, unreachable.account_id),
+    )
+    for joined in (second, third):
+        assert joined.status_code == 200 and joined.json()["row"]["mailhost"]["problem"] == "checking"
+    release.set()
+    await check.wait_for_checks()
+    assert runs == [unreachable.account_id], "one check ran for three presses"
+    assert row(unreachable.account_id)["check"]["status"] == store.UNREACHABLE
+    again = await _check(unreachable.client, unreachable.account_id)
+    assert again.status_code == 200
+    await check.wait_for_checks()
+    assert len(runs) == 2, "once the first ended, Try again starts a new check"
 
 
 # -- Edit server ----------------------------------------------------------------------------------
@@ -312,7 +342,7 @@ async def test_edit_server_refuses_a_bad_name_with_its_fixed_line_before_the_pas
     assert (await _servers(unreachable.client, unreachable.account_id, insecure)).status_code == 400
     # Neither refusal counted a wrong password: three more wrong ones are still needed to end the session.
     assert accounts.resolve_token(OWNER_SESSION_TOKEN) is not None
-    assert (await _check(unreachable.client, unreachable.account_id, password=WRONG)).status_code == 403
+    assert (await _servers(unreachable.client, unreachable.account_id, good, password=WRONG)).status_code == 403
 
 
 async def test_an_empty_calendar_address_clears_it_and_the_row_ends_mail_only(unreachable) -> None:
@@ -331,7 +361,6 @@ async def test_no_password_reaches_a_response_a_log_or_the_stored_row_on_either_
     good = _good(unreachable.built)
     with caplog.at_level(logging.DEBUG):
         texts = [
-            (await _check(unreachable.client, unreachable.account_id, password=WRONG)).text,
             (await _servers(unreachable.client, unreachable.account_id, good, password=WRONG)).text,
             (await _servers(unreachable.client, unreachable.account_id, good)).text,
         ]

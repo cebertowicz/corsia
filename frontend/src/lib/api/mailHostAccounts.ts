@@ -13,11 +13,12 @@ export function mailHostStateLine(account: Pick<ConnectedAccount, 'provider_disp
 	}
 }
 
-/** The person-only mail-host row writes: each carries the CORSIA password and starts a check (H17). Throws `KeyWriteError`. */
-export async function retryMailHost(id: string, password: string): Promise<void> {
-	await keyWrite(`/api/mcp/accounts/${encodeURIComponent(id)}/mailhost/check`, 'POST', { password });
+/** Try again: one press, nothing but the row's id (the server reads the saved servers and needs a signed-in person, not a password). Throws `KeyWriteError`. */
+export async function retryMailHost(id: string): Promise<void> {
+	await keyWrite(`/api/mcp/accounts/${encodeURIComponent(id)}/mailhost/check`, 'POST', {});
 }
 
+/** Edit server: the person-only write that decides where the app password goes, so it carries the CORSIA password (H17). */
 export async function saveMailHostServers(id: string, servers: { imap: string; smtp: string; caldav: string }, password: string): Promise<void> {
 	await keyWrite(`/api/mcp/accounts/${encodeURIComponent(id)}/mailhost/servers`, 'PUT', { ...servers, password });
 }

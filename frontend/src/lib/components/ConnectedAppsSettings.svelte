@@ -306,7 +306,7 @@
 								<div class="details">
 									{#if row.provider === 'mailhost'}
 									{#if errorId === row.id && actionError && actionId === null}<p class="error" role="alert">{actionError}</p>{/if}
-									<MailHostDetail account={row} {offline} onSetKey={() => requestAppKey({ name: row.provider_display_name, key_refs: row.mailhost?.key_refs }, { hosts: row.mailhost?.destination_hosts })} onWhere={() => { whereApprove = false; whereRow = row; }} onRemove={() => confirmingRemove = row} onChanged={() => void refresh()} />
+									<MailHostDetail account={row} {offline} onSetKey={() => requestAppKey({ name: row.provider_display_name, key_refs: row.mailhost?.key_refs }, { hosts: row.mailhost?.destination_hosts })} onWhere={() => { whereApprove = false; whereRow = row; }} onRemove={() => confirmingRemove = row} onChanged={() => { openId = null; void refresh(); }} />
 									{:else}
 									{#if errorId === row.id && actionError && actionId === null}<p class="error" role="alert">{actionError}</p>{/if}
 									<p class="capabilities"><span class="capability-label">Reaches</span><span>{capabilityLabels(row)}</span></p>

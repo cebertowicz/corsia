@@ -5,21 +5,21 @@
 	import { KEYS_NOT_SAVED, KeyWriteError } from '$lib/stores/keys';
 
 	// The open row of a mail-host account (iCloud, Yahoo, a work server): what its last check found, and the one next step.
-	// Try again and Edit server start a check that logs in with the app password, so each asks for the CORSIA password (H17).
+	// Try again is one press and re-checks the saved servers. Edit server decides where the app password goes, so Save asks for the CORSIA password (H17).
+	// The row closes once a check starts: the result lands on its status line.
 	let { account, offline = false, onSetKey, onWhere, onRemove, onChanged = () => {} }: {
 		account: ConnectedAccount;
 		offline?: boolean;
 		onSetKey: () => void;
 		onWhere: () => void;
 		onRemove: () => void;
-		/** A check started: the list reloads and the row reads Checking…. */
+		/** A check started: the row closes and the list reloads, so it reads Checking…. */
 		onChanged?: () => void;
 	} = $props();
 	const host = $derived(account.provider_display_name);
 	const problem = $derived(account.mailhost?.problem ?? null);
 	const server = $derived(account.mailhost?.server ?? '');
 	let editing = $state(false);
-	let retrying = $state(false);
 	let imap = $state('');
 	let smtp = $state('');
 	let caldav = $state('');
@@ -44,18 +44,28 @@
 	const SMTP_HINT = 'smtp.example.com or smtp.example.com:465';
 	const UNREACHABLE = 'CORSIA couldn’t reach this server.';
 	function reset(): void {
-		editing = false; retrying = false; password = ''; passwordError = ''; formError = '';
+		editing = false; password = ''; passwordError = ''; formError = '';
 	}
 	function edit(): void {
 		reset();
 		imap = account.mailhost?.imap ?? ''; smtp = account.mailhost?.smtp ?? ''; caldav = account.mailhost?.caldav ?? '';
 		editing = true;
 	}
-	function retry(): void {
-		reset();
-		retrying = true;
+	/** Try again: one press, no password. A refusal reads as a line under the status. */
+	async function tryAgain(): Promise<void> {
+		if (busy) return;
+		busy = true; formError = '';
+		try {
+			await retryMailHost(account.id);
+		} catch (error) {
+			formError = error instanceof KeyWriteError ? error.message : KEYS_NOT_SAVED;
+			busy = false;
+			return;
+		}
+		busy = false;
+		onChanged();
 	}
-	/** One person-only write: the password is cleared whatever the answer, a refusal reads on the field it belongs to. */
+	/** Edit server's write: the password is cleared whatever the answer, a refusal reads on the field it belongs to. */
 	async function submit(run: (typed: string) => Promise<void>): Promise<void> {
 		if (busy) return;
 		if (!password) { passwordError = 'Enter your CORSIA password.'; return; }
@@ -78,9 +88,8 @@
 		if (!dirty) return;
 		void submit((typed) => saveMailHostServers(account.id, { imap, smtp, caldav }, typed));
 	}
-	function tryAgain(): void {
-		void submit((typed) => retryMailHost(account.id, typed));
-	}
+	// A filled primary button sits on the column edge; only a ghost button's padding is pulled out to it.
+	const outdent = $derived(editing ? !dirty : problem === null || problem === 'checking');
 </script>
 
 {#if problem === null}<p class="capabilities"><span class="capability-label">Reaches</span><span>{reaches}</span></p>{/if}
@@ -95,26 +104,21 @@
 			<Field variant="nested" layout="stacked" label="CORSIA password" labelFor="mailhost-password" error={passwordError}><input id="mailhost-password" type="password" autocomplete="current-password" aria-invalid={!!passwordError} bind:value={password} /></Field>
 		{/if}
 	</form>
-{:else if retrying}
-	<form class="server" onsubmit={(event) => { event.preventDefault(); tryAgain(); }}>
-		<Field variant="nested" layout="stacked" label="CORSIA password" labelFor="mailhost-password" error={passwordError}><input id="mailhost-password" type="password" autocomplete="current-password" aria-invalid={!!passwordError} bind:value={password} /></Field>
-		<div class="form-actions">
-			<Button type="submit" variant="primary" size="sm" loading={busy} disabled={offline}>Try again</Button>
-			<Button variant="ghost" size="sm" disabled={busy} onclick={reset}>Cancel</Button>
-		</div>
-	</form>
 {/if}
 {#if formError}<p class="failed" role="alert">{formError}</p>{/if}
 {#if offline}<p class="offline-action-note" role="status">Actions are unavailable while offline.</p>{/if}
-{#if problem !== 'checking' && !retrying}
-	<div class="actions account-actions">
-		{#if editing}{#if dirty}<span class="account-action"><Button variant="primary" size="sm" loading={busy} disabled={offline} onclick={save}>Save</Button></span>{/if}<span class="account-action"><Button variant="ghost" size="sm" disabled={offline || busy} onclick={reset}>Cancel</Button></span>
-		{:else if problem === 'waiting'}<span class="account-action"><Button variant="primary" size="sm" disabled={offline} onclick={onSetKey}>Set key</Button></span>
-		{:else if problem === 'refused' || problem === 'revoked'}<span class="account-action"><Button variant="primary" size="sm" disabled={offline} onclick={onSetKey}>Replace key</Button></span>
-		{:else if problem === 'imap_off'}<span class="account-action"><Button variant="primary" size="sm" disabled={offline} onclick={retry}>Try again</Button></span>
-		{:else if problem === 'unreachable'}<span class="account-action"><Button variant="primary" size="sm" disabled={offline} onclick={edit}>Edit server</Button></span><span class="account-action"><Button variant="ghost" size="sm" disabled={offline} onclick={retry}>Try again</Button></span>{/if}
-		<span class="account-action"><Button variant="ghost" size="sm" disabled={offline} onclick={onWhere}>Where it works…</Button></span>
-		<span class="danger-text account-action"><Button variant="ghost" size="sm" disabled={offline} onclick={onRemove}>Remove</Button></span>
+{#if problem !== 'checking'}
+	<div class="actions account-actions" class:outdent>
+		{#if editing}
+			{#if dirty}<span class="account-action"><Button variant="primary" size="sm" loading={busy} disabled={offline} onclick={save}>Save</Button></span>{/if}<span class="account-action"><Button variant="ghost" size="sm" disabled={offline || busy} onclick={reset}>Cancel</Button></span>
+		{:else}
+			{#if problem === 'waiting'}<span class="account-action"><Button variant="primary" size="sm" disabled={offline} onclick={onSetKey}>Set key</Button></span>
+			{:else if problem === 'refused' || problem === 'revoked'}<span class="account-action"><Button variant="primary" size="sm" disabled={offline} onclick={onSetKey}>Replace key</Button></span>
+			{:else if problem === 'imap_off'}<span class="account-action"><Button variant="primary" size="sm" loading={busy} disabled={offline} onclick={() => void tryAgain()}>Try again</Button></span>
+			{:else if problem === 'unreachable'}<span class="account-action"><Button variant="primary" size="sm" disabled={offline || busy} onclick={edit}>Edit server</Button></span><span class="account-action"><Button variant="ghost" size="sm" loading={busy} disabled={offline} onclick={() => void tryAgain()}>Try again</Button></span>{/if}
+			<span class="account-action"><Button variant="ghost" size="sm" disabled={offline || busy} onclick={onWhere}>Where it works…</Button></span>
+			<span class="danger-text account-action"><Button variant="ghost" size="sm" disabled={offline || busy} onclick={onRemove}>Remove</Button></span>
+		{/if}
 	</div>
 {/if}
 
@@ -125,8 +129,8 @@
 	.failed { margin: 0 0 var(--space-2); color: var(--red-text); font-size: var(--text-subhead); line-height: var(--lh-normal); }
 	.offline-action-note { margin: 0 0 var(--space-2); color: var(--text-tertiary); font-size: var(--text-caption); line-height: var(--lh-normal); }
 	.server { display: flex; flex-direction: column; gap: var(--space-2); max-width: calc(var(--space-8) * 9); margin: 0 0 var(--space-2); }
-	.form-actions { display: flex; gap: var(--space-1); margin-left: calc(-1 * var(--button-pad-x-sm)); }
-	.actions { display: flex; flex-wrap: wrap; gap: var(--space-1); margin-left: calc(-1 * var(--button-pad-x-sm)); }
+	.actions { display: flex; flex-wrap: wrap; gap: var(--space-1); }
+	.actions.outdent { margin-left: calc(-1 * var(--button-pad-x-sm)); }
 	.account-action { position: relative; display: inline-flex; }
 	.account-action :global(.btn:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
 	.account-action::after { content: ''; position: absolute; inset: calc(-1 * var(--space-2)); }

@@ -94,16 +94,21 @@ def write(
 
 
 def begin_check(
-    account_id: str, *, replacement: Endpoints | None = None, db: sqlite3.Connection | None = None,
+    account_id: str, *, replacement: Endpoints | None = None, only_if_idle: bool = False,
+    db: sqlite3.Connection | None = None,
 ) -> tuple[Endpoints, str] | None:
     """Mark the row Checking; returns its settings and the new check's token, or None for no such row.
 
     With ``replacement`` the check runs against those settings, which are saved in the same write.
+    With ``only_if_idle`` a row already Checking is left alone and the token is empty: the check
+    running on it is the one, so no second starts.
     """
     with write_transaction(db, scope="mail_host_check_begin") as conn:
-        endpoints = read(account_id, db=conn)[0]
+        endpoints, state = read(account_id, db=conn)
         if endpoints is None:
             return None
+        if only_if_idle and state.get("status") == CHECKING:
+            return endpoints, ""
         endpoints = replacement or endpoints
         token = uuid.uuid4().hex
         write(account_id, endpoints, status=CHECKING, token=token, db=conn)

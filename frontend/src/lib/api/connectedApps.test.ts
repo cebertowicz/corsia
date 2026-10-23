@@ -142,10 +142,10 @@ describe('which revocation causes show the manual Google Account step', () => {
 
 describe('mail-host row calls', () => {
 	const headerOf = (fetchMock: ReturnType<typeof vi.fn>) => fetchMock.mock.calls[0][1].headers as Record<string, string>;
-	it('sends Try again with the CORSIA password to the account route', async () => {
+	it('sends Try again with nothing but the row id: no password, no server', async () => {
 		const fetchMock = answer({ row: {} });
-		await retryMailHost('acc 1', 'pw');
-		expect(fetchMock).toHaveBeenCalledWith('/api/mcp/accounts/acc%201/mailhost/check', expect.objectContaining({ method: 'POST', body: JSON.stringify({ password: 'pw' }) }));
+		await retryMailHost('acc 1');
+		expect(fetchMock).toHaveBeenCalledWith('/api/mcp/accounts/acc%201/mailhost/check', expect.objectContaining({ method: 'POST', body: '{}' }));
 		expect(headerOf(fetchMock)['Content-Type']).toBe('application/json');
 	});
 	it('sends Edit server as one PUT with the three addresses and the password', async () => {

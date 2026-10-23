@@ -489,6 +489,24 @@ describe('ConnectedAppsSettings', () => {
 			expect(line('e')).toContain('Connected');
 		});
 
+		it('closes the row once Try again starts a check: chevron right, status line Checking…', async () => {
+			let problem: string = 'imap_off';
+			const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+				if (init?.method === 'POST' && String(input).endsWith('/mailhost/check')) { problem = 'checking'; return { ok: true, json: async () => ({ row: {} }) }; }
+				return { ok: true, json: async () => ({ servers: [], accounts: [mailhost('a', 'AOL', { problem })] }) };
+			});
+			vi.stubGlobal('fetch', fetchMock);
+			component = mount(ConnectedAppsSettings, { target: host });
+			await vi.waitFor(() => expect(host.querySelector('[data-connected-account-id="a"]')).not.toBeNull());
+			openRow('a');
+			expect(host.querySelector('[data-connected-account-id="a"] .details')).not.toBeNull();
+			labelled('Try again')!.click();
+			await vi.waitFor(() => expect(host.querySelector('[data-connected-account-id="a"] .sub')?.textContent).toContain('Checking…'));
+			expect(host.querySelector('[data-connected-account-id="a"] .details')).toBeNull();
+			expect(host.querySelector('[data-connected-account-id="a"] button')?.getAttribute('aria-expanded')).toBe('false');
+			expect(fetchMock.mock.calls.some(([url, init]) => String(url).endsWith('/accounts/a/mailhost/check') && (init as RequestInit).body === '{}')).toBe(true);
+		});
+
 		it('reads the list again when the host says a check ended, and not on a timer', async () => {
 			vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
 			let problem: 'checking' | null = 'checking';

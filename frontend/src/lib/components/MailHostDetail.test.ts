@@ -121,33 +121,82 @@ describe('MailHostDetail', () => {
 		await vi.waitFor(() => expect(root.querySelector('[role="alert"]')?.textContent).toBe('That server name isn’t valid.'));
 		expect([...root.querySelectorAll('.err')].map((error) => error.textContent)).not.toContain('That server name isn’t valid.');
 	});
-	it('asks for the CORSIA password in one inline form before Try again', async () => {
+	it('re-checks with one press of Try again: no form, no password, then the row is told a check started', async () => {
 		const onChanged = vi.fn();
 		const root = render(account('iCloud', { problem: 'imap_off' }), { onChanged });
-		button(root, 'Try again')!.click();
-		flushSync();
-		expect(root.querySelectorAll('input')).toHaveLength(1);
+		expect(root.querySelectorAll('input')).toHaveLength(0);
 		expect(button(root, 'Try again')?.className).toContain('primary');
-		expect(button(root, 'Cancel')).toBeDefined();
-		expect(button(root, 'Remove')).toBeUndefined();
-		submit(root);
-		expect(retryMailHost).not.toHaveBeenCalled();
-		expect(root.querySelector('.err')?.textContent).toBe('Enter your CORSIA password.');
-		type('#mailhost-password', 'pw');
-		submit(root);
+		button(root, 'Try again')!.click();
 		await vi.waitFor(() => expect(onChanged).toHaveBeenCalledOnce());
-		expect(retryMailHost).toHaveBeenCalledWith('iCloud', 'pw');
+		expect(retryMailHost).toHaveBeenCalledOnce();
+		expect(vi.mocked(retryMailHost).mock.calls[0]).toEqual(['iCloud']);
 		expect(root.querySelectorAll('input')).toHaveLength(0);
 	});
-	it('closes Try again without a call on Cancel', () => {
-		const root = render(unreachable());
+	it('presses Try again once even when pressed twice while it is running', async () => {
+		let finish: () => void = () => {};
+		vi.mocked(retryMailHost).mockImplementationOnce(() => new Promise<void>((resolve) => { finish = resolve; }));
+		const onChanged = vi.fn();
+		const root = render(unreachable(), { onChanged });
+		button(root, 'Try again')!.click();
 		button(root, 'Try again')!.click();
 		flushSync();
+		finish();
+		await vi.waitFor(() => expect(onChanged).toHaveBeenCalledOnce());
+		expect(retryMailHost).toHaveBeenCalledOnce();
+	});
+	it('shows a refused Try again as a line and does not close the row', async () => {
+		vi.mocked(retryMailHost).mockRejectedValueOnce(new KeyWriteError('unknown', 'Couldn’t save that. Nothing was changed.'));
+		const onChanged = vi.fn();
+		const root = render(unreachable(), { onChanged });
+		button(root, 'Try again')!.click();
+		await vi.waitFor(() => expect(root.querySelector('[role="alert"]')?.textContent).toBe('Couldn’t save that. Nothing was changed.'));
+		expect(onChanged).not.toHaveBeenCalled();
+		expect(button(root, 'Try again')).toBeDefined();
+	});
+	it('shows only Save and Cancel while editing: no Where it works…, no Remove', () => {
+		const root = render(unreachable());
+		expect(button(root, 'Where it works…')).toBeDefined();
+		expect(button(root, 'Remove')).toBeDefined();
+		button(root, 'Edit server')!.click();
+		flushSync();
+		expect(button(root, 'Where it works…')).toBeUndefined();
+		expect(button(root, 'Remove')).toBeUndefined();
+		expect([...root.querySelectorAll('button')].map((candidate) => candidate.textContent?.trim())).toEqual(['Cancel']);
+		type('#mailhost-imap', 'mail.example.com');
+		expect([...root.querySelectorAll('button')].map((candidate) => candidate.textContent?.trim())).toEqual(['Save', 'Cancel']);
 		button(root, 'Cancel')!.click();
 		flushSync();
-		expect(root.querySelectorAll('input')).toHaveLength(0);
-		expect(retryMailHost).not.toHaveBeenCalled();
-		expect(button(root, 'Edit server')).toBeDefined();
+		expect(button(root, 'Where it works…')).toBeDefined();
+		expect(button(root, 'Remove')).toBeDefined();
+	});
+	it('keeps the typed server values when the CORSIA password is wrong, and clears only the password', async () => {
+		vi.mocked(saveMailHostServers).mockRejectedValueOnce(new KeyWriteError('wrong_password', 'That password is wrong. Nothing was changed.'));
+		const root = render(unreachable());
+		button(root, 'Edit server')!.click();
+		flushSync();
+		type('#mailhost-imap', 'mail.typed.example');
+		type('#mailhost-smtp', 'smtp.typed.example');
+		type('#mailhost-caldav', 'https://dav.typed.example/');
+		type('#mailhost-password', 'nope');
+		button(root, 'Save')!.click();
+		await vi.waitFor(() => expect([...root.querySelectorAll('.err')].map((error) => error.textContent)).toContain('That password is wrong. Nothing was changed.'));
+		expect(['#mailhost-imap', '#mailhost-smtp', '#mailhost-caldav', '#mailhost-password'].map((id) => root.querySelector<HTMLInputElement>(id)!.value))
+			.toEqual(['mail.typed.example', 'smtp.typed.example', 'https://dav.typed.example/', '']);
+		expect(button(root, 'Save')).toBeDefined();
+	});
+	it('pulls a button out to the column edge only when the first action is a ghost button', () => {
+		const outdented = (row: ConnectedAccount) => { const root = render(row); const out = root.querySelector('.actions')!.classList.contains('outdent'); unmount(component!); component = null; host!.remove(); host = null; return out; };
+		expect(outdented(account('iCloud', { problem: 'waiting' }))).toBe(false);
+		expect(outdented(account('iCloud', { problem: 'refused' }))).toBe(false);
+		expect(outdented(account('iCloud', { problem: 'imap_off' }))).toBe(false);
+		expect(outdented(unreachable())).toBe(false);
+		expect(outdented(account('Zoho', { problem: null }))).toBe(true);
+		const root = render(unreachable());
+		button(root, 'Edit server')!.click();
+		flushSync();
+		expect(root.querySelector('.actions')!.classList.contains('outdent')).toBe(true);
+		type('#mailhost-imap', 'mail.example.com');
+		expect(root.querySelector('.actions')!.classList.contains('outdent')).toBe(false);
 	});
 	it('shows no actions while checking', () => {
 		const root = render(account('iCloud', { problem: 'checking' }));

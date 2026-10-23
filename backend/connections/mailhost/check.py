@@ -1,8 +1,8 @@
 """The check that runs when the person sets or replaces a mail-host app password.
 
 It starts only from the Keys write path (``api.keys``) and the row's own Try again and Edit
-server (``api.mail_host_accounts``), all behind the person's session and password; no
-agent-callable route reaches it (H7, H17). IMAP login first (a refused password
+server (``api.mail_host_accounts``), all behind the person's session (the key write and Edit
+server also behind their CORSIA password); no agent-callable route reaches it (H7, H17). IMAP login first (a refused password
 stops there, so one wrong password is one login attempt at the host), then SMTP, then CalDAV
 discovery. A calendar the host doesn't offer leaves the row mail only. Every failure becomes
 one named status; the host's own text never reaches the row, a log or an agent (H15).
@@ -92,14 +92,17 @@ def _credentials(account_id: str) -> str | None:
     return str(bundle[PASSWORD]) if bundle else None
 
 
-async def start_check(account_id: str, replacement: Endpoints | None = None) -> bool:
+async def start_check(account_id: str, replacement: Endpoints | None = None, *, merge: bool = False) -> bool:
     """Mark the row Checking and check it in the background; False when it is no mail-host row.
 
     ``replacement`` runs the check against new settings (Edit server), saved with the Checking mark.
+    ``merge`` joins a check already running on the row instead of starting a second (Try again).
     """
-    begun = await run_in_db(lambda: store.begin_check(account_id, replacement=replacement))
+    begun = await run_in_db(lambda: store.begin_check(account_id, replacement=replacement, only_if_idle=merge))
     if begun is None:
         return False
+    if not begun[1]:
+        return True
     task = asyncio.create_task(run_check(account_id, *begun))
     _pending.add(task)
     task.add_done_callback(_pending.discard)
