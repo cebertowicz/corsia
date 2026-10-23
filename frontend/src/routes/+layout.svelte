@@ -7,6 +7,7 @@
 	import { paneOpen } from '$lib/stores/paneOpen';
 	import { paneCollapsed } from '$lib/stores/paneCollapsed';
 	import { installLinkTargetResolver } from '$lib/linkTargetResolver';
+	import { installTauriShell } from '$lib/tauriShell';
 	import { theme } from '$lib/stores/theme';
 	import { ACCENT_ROLE_TOKENS, accentRoles, type AccentRoles } from '$lib/utils/projectColors';
 
@@ -23,9 +24,11 @@
 	}
 
 	onMount(() => {
+		const removeTauriShell = installTauriShell();
 		const removeLinkTargetResolver = installLinkTargetResolver();
 		return () => {
 			removeLinkTargetResolver();
+			removeTauriShell();
 			disconnect();
 		};
 	});
