@@ -7,14 +7,20 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 
 from core.stop_causes import PlanLimitStop, frame_cause
-from core.turn_core import TerminalSettlement, TurnTerminalResult, drive_turn_settlement
+from core.turn_core import (
+    TerminalSettlement,
+    TurnIdentity,
+    TurnTerminalResult,
+    drive_turn_settlement,
+    persist_turn_terminal,
+    settle_turn_terminal,
+)
 import infra.provider_usage as provider_usage
 from infra.context_receipts import (
     attach_context_receipt,
     live_context_usage_payload,
     unavailable_context_usage,
 )
-from infra.database import get_db
 from infra.db_async import run_in_db
 from infra.llm_usage import (
     PlanUsagePersistenceError,
@@ -35,6 +41,28 @@ from subagents.codex_terminal_context import (  # noqa: F401 - public re-export
 
 log = logging.getLogger(__name__)
 _TERMINAL_USAGE_UNSET = object()
+UNSETTLED_AT_TERMINAL = "Codex Turn ended before its provider write settled"
+
+
+async def claim_live_terminal(
+    live: _LiveCodex,
+    outcome: str,
+    error: str | BaseException | None = None,
+    db=None,
+    *,
+    identity: TurnIdentity | None = None,
+) -> TurnTerminalResult:
+    """Quarantine an unsettled write, then terminalize its owning Turn."""
+    identity = identity or live.corsia_turn
+    if identity is None:
+        return TurnTerminalResult.CONFLICTING_TERMINAL
+    if db is None:
+        return await settle_turn_terminal(
+            identity.turn_id, outcome, error, quarantine=UNSETTLED_AT_TERMINAL,
+        )
+    from infra.thread_recovery import ambiguous_stale_writes
+    ambiguous_stale_writes(db, identity.turn_id, error=UNSETTLED_AT_TERMINAL)
+    return persist_turn_terminal(identity.turn_id, outcome, error, db=db)
 
 
 class CommittedTerminalFailure(Exception):
@@ -70,21 +98,6 @@ async def release_and_drive_terminal(ctx, settlement) -> None:
     if release is not None:
         await release
 
-
-def turn_has_durable_terminal(turn_id: str) -> bool:
-    """Return whether the exact Codex Turn has durably left active state."""
-    connection = get_db()
-    try:
-        row = connection.execute(
-            "SELECT status FROM active_turns WHERE id=?", (turn_id,)
-        ).fetchone()
-        return row is not None and row["status"] in {
-            "completed",
-            "cancelled",
-            "error",
-        }
-    finally:
-        connection.close()
 
 
 async def finish_interrupted_if_still_owned(
