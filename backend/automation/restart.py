@@ -14,13 +14,10 @@ RESTART_PENDING_MESSAGE = (
     "A system restart is pending. Finish at the next safe boundary. If unfinished "
     "work must continue after startup, call restart_resume now."
 )
-RESTART_CANCELLED_MESSAGE = (
-    "The pending restart was cancelled. Continue on this instance."
-)
+RESTART_CANCELLED_MESSAGE = "The pending restart was cancelled. Continue on this instance."
 STEER_TIMEOUT_SECONDS = 4.0
 
-# Detached resume tasks are held here only so the event loop cannot garbage
-# collect a task that is still running; each entry removes itself when done.
+# Detached resume tasks prevent garbage collection; each entry removes itself when done.
 _RESUME_TASKS: set[asyncio.Task] = set()
 
 
@@ -284,6 +281,8 @@ def _release_restart_control(
     cancelled: bool,
     failure_code: str | None,
     failure_detail: str | None,
+    *,
+    phases: frozenset[str] | None = None,
 ) -> tuple[str, ...] | None:
     """Release the operation's hold and its wake registrations; None when it was not ours to release."""
     from automation import self_restart
@@ -296,6 +295,7 @@ def _release_restart_control(
             cancelled=cancelled,
             failure_code=failure_code,
             failure_detail=failure_detail,
+            phases=phases or self_restart.ABORTABLE_PHASES,
             db=connection,
         )
         if not released:

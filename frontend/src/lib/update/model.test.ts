@@ -67,7 +67,7 @@ describe('update model', () => {
 		['checkout_detached', "This copy of CORSIA can't update itself because it isn't set up to follow updates.", null],
 		['checkout_dirty', 'This copy of CORSIA has local changes.', 'Try again'],
 		['restart_pending', 'An update is ready and waiting for a restart.', 'Restart now'],
-		['rolled_back', "The new version didn't start.", 'Try again'],
+		['rolled_back', "Couldn't start the new version.", 'Try again'],
 	] as const)('words %s truthfully and names its action', (code, headline, retryLabel) => {
 		const copy = failureCopy(failure(code));
 		expect(copy.headline).toBe(headline);
@@ -112,7 +112,7 @@ describe('update model', () => {
 		expect(mismatch.body).toBe('Versions differ.');
 		const rolledBack = failureCopy(failure('rolled_back'));
 		expect(rolledBack.title).toBe("Update didn't finish");
-		expect(rolledBack.headline).toBe("The new version didn't start.");
+		expect(rolledBack.headline).toBe("Couldn't start the new version.");
 		expect(rolledBack.body).toBe('CORSIA is still running the version it had.');
 		expect(rolledBack.retryLabel).toBe('Try again');
 		const refused = failureCopy(failureFromVerdict({ kind: 'refused', message: 'A restart is already in flight.' }));

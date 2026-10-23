@@ -905,13 +905,16 @@ def test_close_out_advances_and_releases_a_surviving_holding_reservation(
     assert sr.restart_holds_new_work() is False
 
 
-def test_update_startup_fails_when_its_target_version_is_not_running(
+async def test_update_startup_fails_when_its_target_version_is_not_running(
     isolated_db, monkeypatch
 ):
-    """A rollback startup must not report the retained update as complete."""
-    from automation import restart_startup
+    """A proven rollback releases its wakes and schedules the conductor notice."""
+    from automation import restart, restart_startup, update_failure_notice
     from automation import self_restart as sr
+    from loguru import logger
 
+    notice = MagicMock()
+    monkeypatch.setattr(update_failure_notice, "tell_conductor_detached", notice)
     monkeypatch.setattr(
         "infra.restart_authorization.serving_head_sha", lambda: "deployedsha"
     )
@@ -931,19 +934,46 @@ def test_update_startup_fails_when_its_target_version_is_not_running(
     assert rid is not None
     _advance(rid, "steering", "ready", "restarting")
 
-    restart_startup.close_out_prior_self_restart()
-    restart_startup._complete_restart_operation()
+    await restart_startup.reconcile_startup_continuity(logger)
 
     operation = sr.operation_by_id(rid)
     assert operation["status"] == "failed"
     assert operation["failure_code"] == "rolled_back"
     assert "target version 0.4.2 is not running" in operation["failure_detail"]
     assert sr.restart_holds_new_work() is False
+    notice.assert_called_once_with(rid, restart._RESUME_TASKS)
 
 
-def test_packaged_update_startup_completes_when_the_target_version_is_running(
+async def test_packaged_update_startup_completes_when_the_target_version_is_running(
     isolated_db, monkeypatch
 ):
+    from automation import restart_startup, update_failure_notice
+    from automation import self_restart as sr
+    from loguru import logger
+
+    notice = MagicMock()
+    monkeypatch.setattr(update_failure_notice, "tell_conductor_detached", notice)
+    monkeypatch.setattr("infra.build_info.app_version", lambda: "0.4.2")
+    monkeypatch.setattr(
+        "infra.platform_paths.app_bundle_root", lambda: Path("/Applications/CORSIA.app")
+    )
+    rid = sr.try_acquire(
+        "t-1", "steve", "oldsha", "dev", "update",
+        kind="update", target_version="0.4.2",
+    )
+    assert rid is not None
+    _advance(rid, "steering", "ready", "restarting")
+
+    await restart_startup.reconcile_startup_continuity(logger)
+
+    assert sr.operation_by_id(rid)["status"] == "complete"
+    notice.assert_not_called()
+
+
+def test_packaged_update_with_an_unparseable_version_completes_without_rollback(
+    isolated_db, monkeypatch
+):
+    """An unknown version cannot prove a rollback, so preserve the prior completion path."""
     from automation import restart_startup
     from automation import self_restart as sr
 
@@ -953,7 +983,7 @@ def test_packaged_update_startup_completes_when_the_target_version_is_running(
     )
     rid = sr.try_acquire(
         "t-1", "steve", "oldsha", "dev", "update",
-        kind="update", target_version="0.4.2",
+        kind="update", target_version="not-a-version",
     )
     assert rid is not None
     _advance(rid, "steering", "ready", "restarting")

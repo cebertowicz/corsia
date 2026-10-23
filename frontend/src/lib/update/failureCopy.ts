@@ -123,7 +123,7 @@ export function failureCopy(failure: UpdateFailure): FailureCopy {
 		case 'rolled_back':
 			return {
 				title: "Update didn't finish",
-				headline: "The new version didn't start.",
+				headline: "Couldn't start the new version.",
 				body: KEPT_VERSION,
 				toastLine: null,
 				retryLabel: 'Try again',

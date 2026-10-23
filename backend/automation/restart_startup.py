@@ -35,14 +35,17 @@ async def _replay_held_webhooks() -> None:
         )
 
 
-def _complete_restart_operation() -> None:
-    from automation import self_restart
+def _complete_restart_operation() -> str | None:
+    """Settle the adopted restart and return a rolled-back Update's id for notice delivery."""
+    from automation import restart, self_restart
     from infra import build_info, platform_paths, update_status
     from infra.restart_authorization import serving_head_sha
+    from loguru import logger
 
     operation = self_restart.in_flight_request()
     if operation is None:
-        return
+        return None
+    operation_id = str(operation["id"])
     target_version = operation.get("target_version")
     if (
         operation.get("kind") == "update"
@@ -52,31 +55,36 @@ def _complete_restart_operation() -> None:
     ):
         running_version = build_info.app_version()
         try:
+            if not isinstance(running_version, str):
+                raise ValueError("running bundle version is unavailable")
             target_version = update_status.normalize_packaged_version(target_version)
-            running_version = (
-                update_status.normalize_packaged_version(running_version)
-                if isinstance(running_version, str) else None
+            running_version = update_status.normalize_packaged_version(running_version)
+        except (TypeError, ValueError) as exc:
+            logger.warning(
+                "startup: could not verify packaged Update versions; completing without comparison: {}",
+                exc,
             )
-        except ValueError:
-            running_version = None
-        if running_version != target_version:
-            detail = (
-                f"Update target version {target_version} is not running "
-                f"(running: {running_version or 'unknown'})."
-            )
-            if not self_restart.abort_operation(
-                str(operation["id"]),
-                error=detail,
-                failure_code="rolled_back",
-                failure_detail=detail,
-                phases=frozenset({"resuming"}),
-            ):
-                raise RuntimeError("update operation could not release ingress")
-            return
+        else:
+            if running_version != target_version:
+                detail = (
+                    f"Update target version {target_version} is not running "
+                    f"(running: {running_version})."
+                )
+                if restart._release_restart_control(
+                    operation_id,
+                    detail,
+                    False,
+                    "rolled_back",
+                    detail,
+                    phases=frozenset({"resuming"}),
+                ) is None:
+                    raise RuntimeError("update operation could not release ingress")
+                return operation_id
     if not self_restart.complete_operation(
-        str(operation["id"]), deployed_sha=serving_head_sha() or None,
+        operation_id, deployed_sha=serving_head_sha() or None,
     ):
         raise RuntimeError("restart operation could not release ingress")
+    return None
 
 
 async def run_startup_reconcile(logger) -> tuple[object, tuple[str, ...]]:
@@ -145,7 +153,12 @@ async def reconcile_startup_continuity(logger) -> tuple[object, tuple[str, ...]]
         successor_id=lambda _thread_id: str(uuid.uuid4()),
     )
     pending_switches = await run_in_db(_pending_switch_threads)
-    await run_in_db(_complete_restart_operation)
+    rolled_back_operation = await run_in_db(_complete_restart_operation)
+    if rolled_back_operation is not None:
+        from automation.restart import _RESUME_TASKS
+        from automation.update_failure_notice import tell_conductor_detached
+
+        tell_conductor_detached(rolled_back_operation, _RESUME_TASKS)
     return recovered, tuple(
         dict.fromkeys((*wake_threads, *process_threads, *pending_switches))
     )
