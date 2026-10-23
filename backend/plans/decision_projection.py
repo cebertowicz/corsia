@@ -167,6 +167,37 @@ def canonical_order(decisions: list[dict]) -> list[dict]:
     )
 
 
+def review_steps(source_ids, *, db) -> dict[str, list[str]]:
+    """Return each source task's decision-review node ids: identity only.
+
+    Maps a source task to the review node of every well-formed decision drafted
+    from it, answered, withdrawn or still open. It decides no eligibility: the
+    review node's own state history says when the user owed an answer, so a
+    past decision stays in the task's history. The read pins the source-task
+    partial index, which SQLite otherwise skips for its broader
+    ``(integration,type)`` key.
+    """
+    unique = list(dict.fromkeys(str(source_id) for source_id in source_ids))
+    found: dict[str, list[str]] = {}
+    for start in range(0, len(unique), hierarchy._ID_CHUNK):
+        chunk = unique[start:start + hierarchy._ID_CHUNK]
+        marks = ",".join("?" for _ in chunk)
+        rows = fetch_all(
+            db,
+            f"""SELECT i.metadata FROM artifact_identities i
+                  INDEXED BY idx_artifact_identities_decision_source
+                 WHERE i.integration='local' AND i.type='plan-decision'
+                   AND json_valid(i.metadata)
+                   AND json_extract(i.metadata,'$.plan_decision.source_node_id') IN ({marks})""",
+            tuple(chunk),
+        )
+        for row in rows:
+            body = _body(row)
+            if body is not None and str(body["source_node_id"]) in chunk:
+                found.setdefault(str(body["source_node_id"]), []).append(str(body["node_id"]))
+    return {source_id: list(dict.fromkeys(node_ids)) for source_id, node_ids in found.items()}
+
+
 def answerable(db, source_nodes: dict[str, str]) -> dict[str, bool]:
     """Which of these decision identities the answer route could actually settle.
 

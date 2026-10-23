@@ -8,7 +8,7 @@ import sqlite3
 import pytest
 
 from infra.database_migrations import MIGRATIONS
-from infra.migration_142_to_143_sent_back_corrections import migrate_142_to_143
+from infra.migration_143_to_144_sent_back_corrections import migrate_143_to_144
 from infra.schema import SCHEMA_VERSION
 from plans import service
 from tests.test_plan_rejection_revision import _db as rejection_db, _reject, _returned
@@ -135,11 +135,11 @@ def test_the_migration_records_each_earlier_verdict_once_and_is_idempotent():
         second = _seed_rejection(db, "worker")
         _seed_rejection(db, "worker", revision=False)  # a returned leaf is not a verdict
 
-        migrate_142_to_143(db)
+        migrate_143_to_144(db)
         assert [row["subject_key"] for row in _facts(db)] == sorted(
             f"plan-review-rejected:{event}" for event in (first, second)
         )
-        migrate_142_to_143(db)
+        migrate_143_to_144(db)
         assert len(_facts(db)) == 2
         assert {row["agent_thread_id"] for row in _facts(db)} == {"parent"}
         assert db.row_factory is sqlite3.Row
@@ -153,9 +153,9 @@ def test_the_migration_leaves_a_live_fact_alone_and_the_step_is_registered():
     db = rejection_db(None)
     try:
         assert record_rejection_correction(db, _seed_rejection(db, "worker"))
-        migrate_142_to_143(db)
+        migrate_143_to_144(db)
         assert len(_facts(db)) == 1
-        assert SCHEMA_VERSION == 143 and MIGRATIONS[142] is migrate_142_to_143
+        assert SCHEMA_VERSION == 144 and MIGRATIONS[143] is migrate_143_to_144
     finally:
         db.close()
 
@@ -178,13 +178,13 @@ def test_sent_back_facts_are_split_by_source_and_do_not_enter_trial_verdicts():
         db.close()
 
 
-def test_a_v142_install_records_its_earlier_verdicts_when_it_starts():
+def test_a_v143_install_records_its_earlier_verdicts_when_it_starts():
     from infra.database_migrations import migrate_to_current
 
     db = rejection_db(None)
     try:
         event_id = _seed_rejection(db, "worker")
-        db.execute("PRAGMA user_version=142")
+        db.execute("PRAGMA user_version=143")
         db.commit()
 
         assert migrate_to_current(db, SCHEMA_VERSION).migrated

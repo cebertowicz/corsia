@@ -1,10 +1,10 @@
-"""Schema 142 -> 143: record the sent-back correction facts that earlier rejections never wrote."""
+"""Schema 143 -> 144: record the sent-back correction facts that earlier rejections never wrote."""
 from __future__ import annotations
 
 import sqlite3
 
 
-def migrate_142_to_143(conn: sqlite3.Connection) -> None:
+def migrate_143_to_144(conn: sqlite3.Connection) -> None:
     """Write one fact per reviewed-node rejection, through the writer the rejection itself uses.
 
     A rejection creates its revision task (``follow_up_of`` the reviewed node, with a

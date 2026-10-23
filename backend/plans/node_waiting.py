@@ -11,9 +11,10 @@ is open and at least one of these holds:
 - an unmet dependency: an edge present while its prerequisite is not accepted;
 - ``review_requested`` while the node links a registered GitHub pull request.
 
-User-owned holds (the user's pause, a blocker on the user) and whole-plan
-pauses are the user's time, so they are cut out; so is anything after the
-node settles. Causes that
+The user's time is cut out, whoever armed the wait: user-owned holds (the
+user's pause, a blocker on the user), whole-plan pauses, and a decision on the
+node while its review step is ``review_requested`` (until the step leaves
+review or is archived); so is anything after the node settles. Causes that
 overlap count once. An interval still open runs to ``now``.
 
 Nothing is stored. Intervals are rebuilt from the append-only
@@ -33,6 +34,7 @@ from datetime import datetime
 from typing import Callable
 
 from infra.github_pr_identity import GITHUB_INTEGRATION, PR_TYPE
+from plans import decision_projection
 from plans.node_states import _ACCEPTED_STATES, _TERMINAL_STATES
 from plans.status_time import parse
 
@@ -170,27 +172,48 @@ def _read(connection, ids: list[str], rows_in: Callable) -> dict[str, dict]:
     return facts
 
 
-def _prerequisite_unmet(connection, prerequisites: list[str], rows_in, now: float):
-    """Each prerequisite's not-yet-accepted intervals, in one chunked query."""
+def _unmet_and_decision_time(
+    connection, prerequisites: list[str], review_steps: dict[str, list[str]],
+    rows_in, now: float,
+):
+    """Each prerequisite's unmet spans and each source's decision time, one state-history query.
+
+    Decision time is the union of its review nodes' ``review_requested``
+    stretches, clipped where a review node was archived.
+    """
+    node_ids = sorted(set(prerequisites) | {step for steps in review_steps.values() for step in steps})
     by_id: dict[str, dict] = {}
     for row in rows_in(
         connection,
-        """SELECT n.id,n.created_at,n.state,e.prior_state,e.new_state,e.created_at AS at
+        """SELECT n.id,n.created_at,n.state,n.archived_at,
+                  e.prior_state,e.new_state,e.created_at AS at
            FROM plan_nodes n
            LEFT JOIN plan_node_events e ON e.node_id=n.id AND e.event='state_transition'
            WHERE n.id IN ({marks}) ORDER BY e.created_at,e.rowid""",
-        prerequisites,
+        node_ids,
     ):
         entry = by_id.setdefault(str(row["id"]), {"node": dict(row), "transitions": []})
         if row["at"] is not None:
             entry["transitions"].append({**dict(row), "created_at": row["at"]})
-    return {
-        node_id: _spans_where(
-            _state_spans(entry["node"], entry["transitions"], now),
-            lambda state: state not in _ACCEPTED_STATES,
-        )
+    spans = {
+        node_id: _state_spans(entry["node"], entry["transitions"], now)
         for node_id, entry in by_id.items()
     }
+    unmet = {
+        node_id: _spans_where(spans[node_id], lambda state: state not in _ACCEPTED_STATES)
+        for node_id in prerequisites if node_id in spans
+    }
+
+    def in_review(step: str) -> list[Interval]:
+        asked = _spans_where(spans.get(step, []), lambda state: state == "review_requested")
+        archived = _at(by_id[step]["node"]["archived_at"]) if step in by_id else None
+        return asked if archived is None else intersect(asked, [(0.0, archived)])
+
+    decision_time = {
+        source_id: union([span for step in steps for span in in_review(step)])
+        for source_id, steps in review_steps.items()
+    }
+    return unmet, decision_time
 
 
 def _plan_paused(connection, plan_ids: list[str], rows_in: Callable, now: float):
@@ -244,11 +267,14 @@ def own_waiting_intervals(
         sorted({str(fact["node"]["plan_id"]) for fact in facts.values() if "node" in fact}),
         rows_in, clock,
     )
+    review_steps = decision_projection.review_steps(node_ids, db=connection)
     prerequisites = sorted({
         str(row["depends_on"]) for fact in facts.values() for row in fact["edges"]
         if row["depends_on"] is not None
     } | {str(row["depends_on_node_id"]) for fact in facts.values() for row in fact["live"]})
-    unmet = _prerequisite_unmet(connection, prerequisites, rows_in, clock)
+    unmet, decision_time = _unmet_and_decision_time(
+        connection, prerequisites, review_steps, rows_in, clock,
+    )
     result: dict[str, list[Interval]] = {}
     for node_id, fact in facts.items():
         if "node" not in fact:
@@ -264,7 +290,7 @@ def own_waiting_intervals(
         if linked is not None:
             review = _spans_where(spans, lambda state: state == "review_requested")
             causes += intersect(review, [(linked, clock)])
-        user_time = [
+        user_time = decision_time.get(node_id, []) + [
             (start, _at(row["cleared_at"]) or clock)
             for row in fact["holds"] if (start := _at(row["created_at"])) is not None
         ] + paused.get(str(fact["node"]["plan_id"]), [])
