@@ -26,6 +26,21 @@ def test_first_step_explains_unfinished_signin_and_points_to_actual_card_action(
     assert "2. **Bring over" not in text
 
 
+def test_first_step_distinguishes_a_failed_signin_from_an_unsigned_source():
+    text = first_run_wake.first_app_step(facts(
+        sources_missing={"codex": "needs_auth"}, pays_for=["codex"],
+        tool_attempts={"codex": {"attempt": "none"}},
+    ))
+
+    assert "[Claude Code | Codex] is not signed in." in text
+    assert "Only when `tool_attempts` says `signin_failed`" in text
+    assert "Setup's sign-in to [Claude Code | Codex] didn't finish." in text
+    assert "[Settings › Providers](/settings/providers), press Sign in on its card" in text
+    assert "For either sign-in line, when they say it is done" in text
+    assert "`GET /api/vendor-accounts`" in text
+    assert "Never initiate or cancel the vendor sign-in yourself" in text
+
+
 def test_import_with_consent_is_first_but_missing_consent_skips_it():
     base = facts(agents_found=["hermes"])
     assert "3. **Where your work lives" in first_run_wake.first_app_step(base)

@@ -146,16 +146,16 @@ def enqueue_first_run_wake(
 ) -> bool:
     """Queue the first-run wake inside the caller's transaction.
 
-    Only a conductor with no prior conversation gets it; its scripted opening
-    is allowed. A restored conductor's real history is left alone. The id makes a retry
-    a duplicate. With no model bound the input waits under
-    ``no_model_selected`` until the user's first model choice drives it.
+    Only a conductor with no prior conversation gets it. A restored conductor's
+    real history is left alone. The id makes a retry a duplicate. With no model
+    bound the input waits under ``no_model_selected`` until the user's first
+    model choice drives it.
     """
     from events.delivery import enqueue_event_wake
 
     if db.execute(
-        "SELECT 1 FROM messages WHERE thread_id = ? AND id != ? LIMIT 1",
-        (conductor_id, f"first-run-opening:{conductor_id}"),
+        "SELECT 1 FROM messages WHERE thread_id = ? LIMIT 1",
+        (conductor_id,),
     ).fetchone():
         return False
     enqueue_event_wake(

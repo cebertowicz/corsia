@@ -353,6 +353,18 @@ def test_the_subscription_step_installs_in_the_background_then_signs_in():
     assert "post the sign-in line below right after they answer the question in front of you" in step
 
 
+def test_web_search_guidance_distinguishes_keyless_readiness_from_key_setup():
+    web = (FIRST_RUN_APP.parent / "web-search.md").read_text(encoding="utf-8")
+
+    assert "When `web_search_ready` is true, search already works; skip this key setup." in web
+    assert "Without a saved key, the managed local server can provide search." in web
+    assert "When `web_search_ready` is false, search doesn't work right now; this setup turns it on, and so can the managed local server once it's running." in web
+    assert "There is no fallback search: without a key, web search stays off." not in web
+    assert "search stays off until this setup succeeds" not in web
+    assert "I can't search the web right now." in _step(4)
+    assert "Until then I can't search the web." not in _step(4)
+
+
 def test_the_community_step_explains_asks_one_decision_and_writes_the_profile_lines():
     step = _step(7)
 

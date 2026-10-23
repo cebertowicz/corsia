@@ -8,6 +8,11 @@ OPENING_REFERENCE = "skills/conductor-bootstrap/references/first-run-opening.md"
 OPENING_PREFIX = "Hi {name}."
 
 
+def opening_message_id(thread_id: str) -> str:
+    """Return the stable id for the first app greeting in ``thread_id``."""
+    return f"first-run-opening:{thread_id}"
+
+
 def opening_message(name: str | None = None) -> str:
     """Return the packaged opening, with its optional person-facing prefix."""
     from infra.system_package import system_resource_source
@@ -23,7 +28,7 @@ def pending_warm_opening(conductor_id: str, *, db: sqlite3.Connection) -> str | 
 
     if held_first_run_path(conductor_id, db=db) != "app":
         return None
-    opening_id = f"first-run-opening:{conductor_id}"
+    opening_id = opening_message_id(conductor_id)
     if db.execute(
         "SELECT 1 FROM messages WHERE id=? AND thread_id=?", (opening_id, conductor_id),
     ).fetchone() is not None:
@@ -46,11 +51,12 @@ def pending_warm_opening(conductor_id: str, *, db: sqlite3.Connection) -> str | 
 def seed_first_model_opening(conductor_id: str, *, db: sqlite3.Connection) -> None:
     """Add the greeting on the model transaction's connection before wake release."""
     from infra.queries import insert_message
+    from infra.turn_provenance import SERVER_SCRIPTED_REASON
 
     opening = pending_warm_opening(conductor_id, db=db)
     if opening is not None:
         insert_message(
             conductor_id, "assistant", opening,
-            {"for_user": True, "first_run_opening": True, "turn_unbound_reason": "server_scripted"},
-            msg_id=f"first-run-opening:{conductor_id}", db=db,
+            {"for_user": True, "first_run_opening": True, "turn_unbound_reason": SERVER_SCRIPTED_REASON},
+            msg_id=opening_message_id(conductor_id), db=db,
         )

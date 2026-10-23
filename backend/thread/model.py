@@ -225,16 +225,19 @@ async def _apply_first_selection(
     if not selected:
         return None
     from infra.onboarding_events import note_first_model_selected
+    from onboarding.first_run_opening import opening_message_id
     from onboarding.local_download_wake import flush_pending_local_download
     from infra.send_broadcast import broadcast_message_rows
 
+    post_error: str | None = None
     if first_run_wake is not None:
         # Publish the whole committed opening before this path drives the wake.
         # Script/restored paths with no app opening simply project no row.
         try:
-            await broadcast_message_rows(thread_id, (f"first-run-opening:{thread_id}",))
+            await broadcast_message_rows(thread_id, (opening_message_id(thread_id),))
         except Exception:
             log.exception("first-run opening broadcast failed: %s", thread_id)
+            post_error = "Your model is selected, but the chat update failed. Reopen this chat to refresh it."
 
     # ``select_first_model`` committed the rendered first-run wake above. A setup
     # download that ended while the person was still in setup can now be delivered.
@@ -251,6 +254,7 @@ async def _apply_first_selection(
         preparation=None,
         breadcrumb=None,
         committed_at=now,
+        post_effects_error=post_error,
     )
 
 

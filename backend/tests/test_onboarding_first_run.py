@@ -417,6 +417,18 @@ class TestWakeAndSetupPlan:
             assert enqueue_first_run_wake(conductor_id, db=db) is False
         assert _first_run_rows() == []
 
+    def test_an_existing_scripted_opening_also_prevents_a_new_wake(self, fresh_install):
+        from infra import accounts
+        from infra.database import write_transaction
+        from infra.onboarding_events import enqueue_first_run_wake
+
+        accounts.create_user("newcomer", SECRET_ENOUGH, first_run_wake=False)
+        conductor_id = _conductor()
+        _insert(conductor_id, "assistant", f"first-run-opening:{conductor_id}")
+        with write_transaction(None, scope="test_scripted_opening_history") as db:
+            assert enqueue_first_run_wake(conductor_id, db=db) is False
+        assert _first_run_rows() == []
+
     def test_disabled_first_run_wake_seeds_no_setup_plan(self, fresh_install):
         from infra import accounts
 

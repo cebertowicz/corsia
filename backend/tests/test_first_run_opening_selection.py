@@ -141,11 +141,43 @@ async def test_opening_broadcast_failure_still_drives_committed_first_pick(fresh
 
     assert result.changed
     assert result.new_model == "test/model"
+    assert result.post_effects_error == (
+        "Your model is selected, but the chat update failed. Reopen this chat to refresh it."
+    )
     assert _rows("SELECT model FROM threads WHERE id=?", thread) == [{"model": "test/model"}]
-    assert len(_rows("SELECT id FROM messages WHERE id=?", f"first-run-opening:{thread}")) == 1
+    # A history reload reads the committed row even though this browser never got it live.
+    assert len(_rows("SELECT id,content FROM messages WHERE id=?", f"first-run-opening:{thread}")) == 1
     broadcast.assert_awaited_once_with(thread, (f"first-run-opening:{thread}",))
     drive.assert_awaited_once_with(thread)
     assert "first-run opening broadcast failed" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_committed_first_pick_warning_reaches_the_existing_model_api_response(monkeypatch):
+    from api import thread_mutations
+    from thread.model_state import ModelSwitchOutcome
+
+    outcome = ModelSwitchOutcome(
+        changed=True, old_model=None, new_model="test/model", preparation=None,
+        breadcrumb=None, committed_at="2026-10-22T00:00:00",
+        post_effects_error="Your model is selected, but the chat update failed. Reopen this chat to refresh it.",
+    )
+    monkeypatch.setattr("connections.harness_refresh.prepare_selection", AsyncMock())
+    monkeypatch.setattr(thread_mutations, "is_dispatchable_model", lambda _model: True)
+    monkeypatch.setattr(thread_mutations, "run_in_db", AsyncMock(return_value=True))
+    monkeypatch.setattr(thread_mutations, "switch_model", AsyncMock(return_value=outcome))
+
+    response = await thread_mutations._patch_model("thread", "pat", {"model": "test/model"})
+
+    assert response == {
+        "ok": True,
+        "model": "test/model",
+        "model_updated_at": "2026-10-22T00:00:00",
+        "warning": (
+            "model switch committed, but post-switch cleanup or notification failed: "
+            "Your model is selected, but the chat update failed. Reopen this chat to refresh it."
+        ),
+    }
 
 
 @pytest.mark.asyncio
