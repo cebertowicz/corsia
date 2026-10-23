@@ -87,7 +87,8 @@ def release_restart_control(
             )
         elif target == "complete":
             released = self_restart.complete_operation(
-                operation_id, deployed_sha=serving_head_sha() or None, db=connection,
+                operation_id, deployed_sha=serving_head_sha() or None,
+                failure_detail=failure_detail, db=connection,
             )
         else:
             released = self_restart.abort_operation(

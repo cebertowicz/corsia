@@ -162,6 +162,91 @@ async def test_failure_report_releases_before_bundle_rollback(isolated_db, monke
         await asyncio.gather(*tuple(restart._RESUME_TASKS))
 
 
+@pytest.mark.parametrize("running,status,code", [
+    ("0.4.2", "complete", None),
+    ("0.4.0", "failed", "wrong_version_running"),
+])
+async def test_unconfirmed_update_settles_after_timeout(
+    isolated_db, monkeypatch, tmp_path, running, status, code,
+):
+    from loguru import logger
+
+    from automation.update_verification import settle_unconfirmed_update
+    from infra import drain, state
+
+    operation_id = await run_in_db(operation_in)
+    drain.SIGNAL_FILE.write_text("{}")
+    state._drain = {"operation_id": operation_id}
+    monkeypatch.setattr("infra.build_info.app_version", lambda: running)
+    monkeypatch.setattr("infra.thread_execution.drive_thread", AsyncMock())
+    await settle_unconfirmed_update(logger, timeout=0)
+    row = self_restart.operation_by_id(operation_id)
+    assert row["status"] == status and row["failure_code"] == code
+    reason = json.loads(row["failure_detail"])["reason"]
+    assert reason == ("confirmation_timeout" if code is None else "mismatch")
+    assert not self_restart.restart_holds_new_work()
+    assert not drain.SIGNAL_FILE.exists() and state._drain is None
+    if restart._RESUME_TASKS:
+        await asyncio.gather(*tuple(restart._RESUME_TASKS))
+
+
+async def test_shell_confirmation_before_timeout_wins(isolated_db, monkeypatch):
+    from loguru import logger
+
+    from automation.update_verification import confirm_packaged_update, settle_unconfirmed_update
+
+    operation_id = await run_in_db(operation_in)
+    monkeypatch.setattr("infra.build_info.app_version", lambda: "0.4.2")
+    monkeypatch.setattr("infra.thread_execution.drive_thread", AsyncMock())
+    settling = asyncio.create_task(settle_unconfirmed_update(logger, timeout=0.2))
+    await asyncio.sleep(0)
+    confirmed = await confirm_packaged_update(operation_id, healthy=True)
+    await settling
+    assert confirmed["status"] == "complete"
+    row = self_restart.operation_by_id(operation_id)
+    assert row["status"] == "complete"
+    assert "reason" not in json.loads(row["failure_detail"])
+    if restart._RESUME_TASKS:
+        await asyncio.gather(*tuple(restart._RESUME_TASKS))
+
+
+@pytest.mark.parametrize("phase", ["resuming", None])
+async def test_unconfirmed_settlement_ignores_other_operations(isolated_db, phase):
+    from loguru import logger
+
+    from automation.update_verification import settle_unconfirmed_update
+
+    operation_id = await run_in_db(operation_in, phase) if phase else None
+    # Returns before its timer: nothing here is an Update awaiting confirmation.
+    await asyncio.wait_for(settle_unconfirmed_update(logger, timeout=3600), 5)
+    if operation_id:
+        assert self_restart.operation_by_id(operation_id)["status"] == "in_flight"
+
+
+async def test_startup_drive_settles_unconfirmed_update_even_when_drive_fails(isolated_db, monkeypatch):
+    from loguru import logger
+
+    from automation import update_verification
+
+    operation_id = await run_in_db(operation_in)
+    monkeypatch.setattr(update_verification, "UNCONFIRMED_UPDATE_SECONDS", 0)
+    monkeypatch.setattr("infra.build_info.app_version", lambda: "0.4.2")
+    monkeypatch.setattr("infra.thread_execution.drive_thread", AsyncMock())
+
+    async def broken_drive(*_args):
+        raise RuntimeError("drive failed")
+
+    async def no_harness():
+        return None
+
+    monkeypatch.setattr(restart_startup, "drive_startup_continuity", broken_drive)
+    with pytest.raises(RuntimeError, match="drive failed"):
+        await restart_startup.run_startup_drive(no_harness(), None, (), None, logger)
+    assert self_restart.operation_by_id(operation_id)["status"] == "complete"
+    if restart._RESUME_TASKS:
+        await asyncio.gather(*tuple(restart._RESUME_TASKS))
+
+
 async def test_pre_protocol_update_mismatch_never_claims_rollback(isolated_db, monkeypatch):
     from automation.update_verification import confirm_packaged_update
 
