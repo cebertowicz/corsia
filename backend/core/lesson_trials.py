@@ -21,7 +21,6 @@ from datetime import datetime, timezone
 from typing import Any
 
 from core.correction_learning import CAUSES
-from core.lesson_carry_in_contract import validate_actions
 
 LESSON_KEY = "lesson"
 STATES = ("watch", "trial", "retired", "promoted")
@@ -95,7 +94,7 @@ class Lesson:
     new_target_path: str | None = None
     target_section: str | None = None
     cause: str | None = None
-    case: dict[str, Any] | None = None
+    case: dict[str, str] | None = None
 
     @property
     def review_node_id(self) -> str | None:
@@ -232,23 +231,12 @@ def _subjects(value: object) -> tuple[str, ...] | None:
     return tuple(subjects)
 
 
-def _case(value: object) -> dict[str, Any] | None:
+def _case(value: object) -> dict[str, str] | None:
     keys = ("what_happened", "right_call", "does_not_apply", "correction_subject")
-    allowed = {*keys, "actions"}
-    if not isinstance(value, dict) or set(value) - allowed or not set(keys) <= set(value):
+    if not isinstance(value, dict) or set(value) != set(keys):
         return None
     cleaned = {key: _clean(value.get(key)) for key in keys}
-    if not all(cleaned.values()):
-        return None
-    case: dict[str, Any] = {key: text for key, text in cleaned.items() if text is not None}
-    if "actions" in value:
-        try:
-            actions = validate_actions(value["actions"])
-        except ValueError:
-            return None
-        if actions is not None:
-            case["actions"] = actions
-    return case
+    return {key: text for key, text in cleaned.items() if text is not None} if all(cleaned.values()) else None
 
 
 def _pair(value: object, first: str, second: str) -> dict[str, str] | None:
@@ -293,7 +281,7 @@ def lesson_errors(block: object, description: str | None, body: str) -> list[str
     if "cause" in block and block.get("cause") not in CAUSES:
         errors.append("corsia.lesson.cause must be a System correction cause")
     if "case" in block and _case(block.get("case")) is None:
-        errors.append("corsia.lesson.case must name what_happened, right_call, does_not_apply and correction_subject; optional actions must be a valid carry-in action contract")
+        errors.append("corsia.lesson.case must name what_happened, right_call, does_not_apply and correction_subject")
     if state == "promoted" and _pair(block.get("destination"), "path", "version") is None:
         errors.append("corsia.lesson.destination {path, version} is required when promoted")
     elif "destination" in block and _pair(block["destination"], "path", "version") is None:

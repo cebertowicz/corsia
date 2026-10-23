@@ -28,7 +28,6 @@ from infra.guidance_messages import (
     SAVE_COMMITTED, SAVE_FAILED, SAVE_HISTORY_OFF, SAVE_STALE, SAVE_UNRECORDED, SAVE_UNSYNCED,
     commit_message, recorded_reason,
 )
-from infra.guidance_startup import startup_sweep
 from infra.guidance_targets import GuidanceTarget
 from infra.skill_save_validation import refused_save
 
@@ -304,14 +303,6 @@ def save_guidance(
     }
     logger.info("guidance save {}", properties)
     emit_product_event("guidance_history", "save", properties=properties)
-    if result.outcome == "written" and result.sha:
-        try:
-            from core.lesson_carry_in_drain import record_committed_save
-
-            record_committed_save(workspace, tuple(changes), result.sha)
-        except Exception:
-            # Carry-in checks are after-save work: guidance history remains authoritative.
-            logger.opt(exception=True).warning("carry-in scheduling failed")
     return result
 
 
@@ -391,3 +382,17 @@ def _save(
             "written", "index-unsynced" if landed.unsynced else "", sha=landed.sha,
             line="\n".join(lines), unsynced=landed.unsynced,
         )
+
+
+def startup_sweep(workspace: Path) -> None:
+    """Commit outside guidance edits once at server start; without a repository, do nothing."""
+    repo, _why = workspace_repository(workspace)
+    if repo is None:
+        return
+    try:
+        with _locked(_acquire(repo)[0]) as db:
+            lines = _sweep_others(repo, workspace, db, set())
+        if lines:
+            logger.info("startup guidance sweep: {}", "; ".join(lines))
+    except Exception:  # startup must not fail on history
+        logger.opt(exception=True).warning("startup guidance sweep failed")

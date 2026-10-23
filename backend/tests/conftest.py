@@ -136,21 +136,8 @@ async def _join_terminal_driver(session, timeout: float = 2.0) -> None:
             )
 
 
-@pytest.fixture(autouse=True)
-def _reset_carry_in_drain_shutdown_gate():
-    """Keep one test's in-process application shutdown from closing later tests' drains."""
-    import core.lesson_carry_in  # Import the public façade before its implementation.
-    from core import lesson_carry_in_drain
-    lesson_carry_in_drain._DRAINS_STOPPING = False
-    yield
-    lesson_carry_in_drain._DRAINS_STOPPING = False
-
-
 def _reset_db_pool(database, *, reconfigure=None) -> None:
-    """Join carry-in workers before replacing their database pool."""
-    from core.lesson_carry_in_drain import join_drain_threads
-
-    join_drain_threads()
+    """Close the old pool and install test configuration before admitting work."""
     database.shutdown_pool(reconfigure)
 
 

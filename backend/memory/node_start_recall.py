@@ -6,14 +6,12 @@ operation's outcome: failures are logged and simply omit the optional block.
 
 from __future__ import annotations
 
-
 from datetime import UTC, datetime
 from functools import lru_cache
 import json
 import re
 import sqlite3
 from time import perf_counter
-
 
 from core.correction_notes import local_clock
 from core.corrections_recording import (
@@ -22,7 +20,6 @@ from core.corrections_recording import (
     owner_message_sql_predicate,
 )
 from infra.checkpoint_queries import current_installed_through_seq
-
 from llm.locality import cloud_off_project_ids
 from memory.checkpoint_search import caller_user_id
 from memory.node_start_recall_telemetry import Hit, log_lookup, log_lookup_error
@@ -77,7 +74,7 @@ def attach_to_result(
     if lines:
         result[RESULT_KEY] = lines
     node = result.get("node") if isinstance(result.get("node"), dict) else None
-    node_started = (node is not None and node.get("kind") == "task") or _started_node_id(result.get("next")) == text.node_id
+    node_started = (node is not None and node.get("kind") == "task") or started_node_id(result.get("next")) == text.node_id
     if not node_started or text.node_id is None:
         return
     from core.lesson_delivery import attach_at_start
@@ -90,7 +87,7 @@ def attach_to_result(
 
 def related_for_next(db: sqlite3.Connection, block: dict, *, caller_thread_id: str) -> list[str]:
     """Return prior words for the task a wake's ``next`` block reports started."""
-    node_id = _started_node_id(block)
+    node_id = started_node_id(block)
     if node_id is None:
         return []
     try:
@@ -109,12 +106,12 @@ def _subject(db, operation: str, result: dict) -> tuple[NodeText, str] | None:
     if operation == "raise" and isinstance(result.get("decision"), dict):
         decision = result["decision"]
         return NodeText(str(decision.get("title") or ""), intent=str(decision.get("context") or "")), "decision_raise"
-    node_id = _started_node_id(result.get("next"))
+    node_id = started_node_id(result.get("next"))
     text = _node_text(db, node_id) if node_id else None
     return None if text is None else (text, "close_next")
 
 
-def _started_node_id(block: object) -> str | None:
+def started_node_id(block: object) -> str | None:
     selected = block.get("selected") if isinstance(block, dict) else None
     if not isinstance(selected, dict) or selected.get("how") not in _STARTED_HOWS:
         return None

@@ -82,6 +82,7 @@ def _in_context(monkeypatch, tmp_path: Path, text: str = "# Rules\n", *, deliver
     workspace.mkdir(exist_ok=True)
     (workspace / "AGENTS.md").write_text(text, encoding="utf-8")
     monkeypatch.setattr("infra.config.WORKSPACE", workspace)
+    monkeypatch.setattr("tools.sandbox_config._STATIC_ALLOWED_RW", [workspace.resolve()])
     monkeypatch.setattr(
         "core.lesson_delivery._context_paths", lambda *_args: {"AGENTS.md"} if delivered else set(),
     )

@@ -153,7 +153,7 @@ def render_trial(
     trial: Trial, source_refs: list[dict[str, Any]], originating_subjects: tuple[str, ...] | None = None,
     origin: dict[str, str] | None = None, target_file: str | None = None,
     new_target_path: str | None = None, target_section: str | None = None, cause: str | None = None,
-    case: dict[str, Any] | None = None,
+    case: dict[str, str] | None = None,
 ) -> str:
     """A trial skill with no ``review_ref``: written, and not yet offered.
 
@@ -179,10 +179,7 @@ def render_trial(
     if cause is not None:
         lesson["cause"] = _one_line(cause)
     if case is not None:
-        lesson["case"] = {
-            **{key: _one_line(case[key]) for key in ("what_happened", "right_call", "does_not_apply", "correction_subject")},
-            **({"actions": case["actions"]} if "actions" in case else {}),
-        }
+        lesson["case"] = {key: _one_line(value) for key, value in case.items()}
     return _dump(
         {"name": name, "description": _one_line(description), "corsia": {LESSON_KEY: lesson}},
         body,

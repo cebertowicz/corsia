@@ -32,12 +32,6 @@ Body text.
 _IDENTITY = ["-c", "user.email=t@t", "-c", "user.name=T"]
 
 
-@pytest.fixture(autouse=True)
-def suppress_background_carry_in(monkeypatch):
-    """Keep guidance-history tests synchronous; the dedicated test asserts scheduling."""
-    monkeypatch.setattr("core.lesson_carry_in_drain.record_committed_save", lambda *_args: None)
-
-
 @pytest.fixture
 def history_scope(isolated_db, tmp_path, monkeypatch):
     """A git workspace, an isolated database, and an owning thread."""
@@ -703,27 +697,9 @@ def test_an_ignored_guidance_path_reports_history_off(history_scope):
     assert result.outcome == "history-off" and "ignored" in result.line
 
 
-def test_a_committed_save_schedules_carry_in_after_history_lands(history_scope, monkeypatch):
-    workspace, _ = history_scope
-    scheduled: list[tuple[Path, tuple[Path, ...], str]] = []
-    monkeypatch.setattr(
-        "core.lesson_carry_in_drain.record_committed_save",
-        lambda saved_workspace, paths, commit: scheduled.append((saved_workspace, paths, commit)),
-    )
-
-    path = _history(workspace)
-    result = _save(workspace, path, "carry-in target\n")
-
-    assert result.outcome == "written"
-    assert scheduled == [(workspace, (path,), result.sha)]
-
-
 def test_forty_save_burst_reports_lock_wait_p95(history_scope, monkeypatch):
     workspace, _ = history_scope
     events: list[dict] = []
-    # This stress test owns concurrent Git-save behavior, not post-save C1 execution.
-    # Suppress its daemon drains so their independent DB work cannot race the test DB authorizer.
-    monkeypatch.setattr("core.lesson_carry_in_drain.record_committed_save", lambda *_args: None)
     monkeypatch.setattr(
         "infra.product_events.emit_product_event",
         lambda category, action, **kwargs: events.append({"event": f"{category}.{action}", **kwargs["properties"]}),

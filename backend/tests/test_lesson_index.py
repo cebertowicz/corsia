@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 import sqlite3
+import uuid
 
 import pytest
 
@@ -504,25 +505,42 @@ def test_trial_delivery_does_not_change_the_cached_index(db, workspace):
         "trial lesson not offered: trial lesson is delivered per task"
 
 
-def test_trials_share_the_ordinary_40_skill_cap(db, workspace):
+def test_a_trial_takes_no_listed_skill_slot(db, workspace):
     from core.skills_registry import trial_delivery_rows
 
-    for number in range(41):
-        if number != 20:
-            _write(workspace, "owner", f"skill-{number:02}", _plain(f"skill-{number:02}"))
-    under_cap, _ = _activate(db, workspace, name="skill-20", lesson_id=LESSON)
-    past_cap, _ = _activate(db, workspace, name="skill-99", lesson_id=OTHER)
+    for number in range(40):
+        _write(workspace, "owner", f"skill-{number:02}", _plain(f"skill-{number:02}"))
+    trial, _ = _activate(db, workspace, name="skill-00a", lesson_id=LESSON)
+
+    delivered, not_delivered = trial_delivery_rows(
+        thread_id="owner", project_id=None, workspace=workspace, db=db,
+    )
+    content = _index(_sources(db, workspace)).prompt_content or ""
+
+    assert [row.path for row in delivered] == [trial]
+    assert not_delivered == []
+    assert all(f"- skill-{number:02}: " in content for number in range(40))
+    assert "listed by name only" not in content
+
+
+def test_trials_past_their_own_40_cap_are_held(db, workspace):
+    from core.skills_registry import trial_delivery_rows
+
+    _write(workspace, "owner", "deploy", _plain("deploy"))
+    paths = [
+        _activate(db, workspace, name=f"trial-{number:02}", lesson_id=str(uuid.uuid5(uuid.NAMESPACE_URL, str(number))))[0]
+        for number in range(41)
+    ]
 
     delivered, not_delivered = trial_delivery_rows(
         thread_id="owner", project_id=None, workspace=workspace, db=db,
     )
     sources = _sources(db, workspace)
 
-    assert [row.path for row in delivered] == [under_cap]
-    assert [row.path for row in not_delivered] == [past_cap]
-    assert "- skill-20 (trial, unproven):" not in (_index(sources).prompt_content or "")
-    assert "- skill-99 (trial, unproven):" not in (_index(sources).prompt_content or "")
-    assert _held(sources, "skill-99").reason == "trial lesson not offered: ordinary skill cap omitted it"
+    assert [row.path for row in delivered] == paths[:40]
+    assert [row.path for row in not_delivered] == [paths[40]]
+    assert "- deploy: " in (_index(sources).prompt_content or "")
+    assert _held(sources, "trial-40").reason == "trial lesson not offered: trial cap omitted it"
 
 
 MISPLACED = "trial lesson not offered: its file is not in its owner's skills"

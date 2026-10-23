@@ -482,8 +482,8 @@ table and no second registry.
   Current files and packaged System availability do not establish delivery;
   unresolved project roots, System projection and role-skill coverage are named.
 - **Trial delivery and accounting.** `backend/core/lesson_delivery.py` delivers
-  an eligible trial only at a task-start new-file seam or an eligible
-  read-on-demand file seam; cached context never contains a trial. It records
+  every eligible trial only when a task starts, within a per-start token cap;
+  cached context never contains a trial. It records
   the task, variant, installed generation and lesson identity in
   `guidance_loads` without changing installed bytes or hashes. Body reads remain
   history. The Context sheet and Measurement Learning detail use existing

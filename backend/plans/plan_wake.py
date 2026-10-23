@@ -218,7 +218,7 @@ def with_next(db, plan_id: str, executor: str, line: str, **facts) -> str:
     related = node_start_recall.related_for_next(db, block, caller_thread_id=executor)
     if related:
         facts[node_start_recall.RESULT_KEY] = related
-    node_id = node_start_recall._started_node_id(block)
+    node_id = node_start_recall.started_node_id(block)
     if node_id is not None:
         from core.lesson_delivery import attach_at_start
 

@@ -106,13 +106,15 @@ def _context_paths(db: sqlite3.Connection, thread_id: str) -> set[str]:
 def _body_omission(trial: TrialDelivery, context: set[str]) -> str | None:
     """Why an in-context body cannot go to this thread now, or None when it can."""
     from infra.config import WORKSPACE
-    from tools.filesystem_gate import canonical_target_path
+    from tools.filesystem_gate import _resolve_path, canonical_target_path
 
     target = canonical_target_path(trial.target, workspace=WORKSPACE)
     if target not in context:
         return "target not in thread context"
+    if Path(target).is_absolute():
+        return "target outside the workspace"
     try:
-        text = (Path(WORKSPACE) / target).read_text(encoding="utf-8")
+        text = _resolve_path(target, workspace=Path(WORKSPACE)).read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
         return "target unreadable"
     if has_section(text, str(trial.section)):

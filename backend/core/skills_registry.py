@@ -156,7 +156,10 @@ def _listed_skills(
 def _capped_index_rows(
     rows: list[SkillRow], *, precedence: tuple[tuple[str, str], ...],
 ) -> tuple[list[SkillRow], list[SkillRow], list[SkillRow], list[SkillRow]]:
-    """Apply the ordinary cap once, including task-delivered trials in its order."""
+    """Apply the ordinary cap to listed skills and a separate cap of the same size to trials.
+
+    A trial is delivered per task, never listed, so it takes no listing slot.
+    """
     specificity = {root: index for index, root in enumerate(reversed(precedence))}
 
     def index_order(row: SkillRow) -> tuple[int, str]:
@@ -168,17 +171,12 @@ def _capped_index_rows(
     name_only_rows: list[SkillRow] = []
     per_task_rows: list[SkillRow] = []
     capped_trials: list[SkillRow] = []
-    ordinary_count = 0
     for row in other_rows:
-        trial = lesson_block(row.metadata) is not None
-        if ordinary_count < _NON_SYSTEM_FULL_SKILL_LIMIT:
-            ordinary_count += 1
-            if trial:
-                per_task_rows.append(row)
-            else:
-                full_rows.append(row)
-        elif trial:
-            capped_trials.append(row)
+        if lesson_block(row.metadata) is not None:
+            under_cap = len(per_task_rows) < _NON_SYSTEM_FULL_SKILL_LIMIT
+            (per_task_rows if under_cap else capped_trials).append(row)
+        elif len(full_rows) - len(system_rows) < _NON_SYSTEM_FULL_SKILL_LIMIT:
+            full_rows.append(row)
         else:
             name_only_rows.append(row)
     return full_rows, name_only_rows, per_task_rows, capped_trials

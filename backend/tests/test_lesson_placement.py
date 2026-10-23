@@ -64,6 +64,7 @@ def env(tmp_path, monkeypatch) -> Env:
     db.commit()
     monkeypatch.setattr("infra.database.get_db", lambda: _connect(str(path)))
     monkeypatch.setattr("infra.config.WORKSPACE", workspace)
+    monkeypatch.setattr("tools.sandbox_config._STATIC_ALLOWED_RW", [workspace.resolve()])
     return Env(
         workspace, workspace / ".threads" / THREAD, db, _tool_db(path, monkeypatch),
         placement_worker, monkeypatch,
@@ -549,6 +550,18 @@ def test_an_in_context_trial_may_only_add_a_section(env: Env) -> None:
     assert changed.startswith("Error: AGENTS.md is already in context and has a 'Reporting' section;")
     assert missing.startswith("Error: MISSING.md could not be read")
     assert added.startswith("Entry 3 queued")
+
+
+def test_an_outside_workspace_target_is_refused_without_reading_it(env: Env) -> None:
+    outside = env.workspace.parent / "OUTSIDE.md"
+    outside.write_text("# Outside\n\n## Reporting\n\nPrivate.\n", encoding="utf-8")
+
+    with_section = _place(env, _entry(env), _answer(target_file=str(outside)))
+    without_section = _place(env, _entry(env), _answer(target_file=str(outside), target_section="Absent"))
+
+    assert with_section == without_section
+    assert "is outside the workspace" in with_section
+    assert "Reporting" not in with_section
 
 
 async def test_a_checkpoint_stages_a_trial_and_its_install_hands_it_to_the_worker(

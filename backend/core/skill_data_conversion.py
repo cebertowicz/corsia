@@ -227,20 +227,6 @@ def _skill_roots(scope_root: Path, unresolved: list[str]) -> list[Path]:
     return roots
 
 
-def installed_skill_files(workspace: Path, db) -> list[Path]:
-    """Return only direct skill files beneath roots the context resolver can deliver.
-
-    This intentionally does not recurse through a workspace: source trees, package
-    directories, worktrees, and arbitrary attachments are not skill scope roots.
-    """
-    unresolved: list[str] = []
-    paths: list[Path] = []
-    for scope_root in _scope_roots(workspace, db, unresolved):
-        for root in _skill_roots(scope_root, unresolved):
-            paths.extend(skill_files(root))
-    return list(dict.fromkeys(paths))
-
-
 def _replace(path: Path, expected: bytes | None, raw: bytes, mode: int) -> bool:
     """Atomically swap in ``raw``; False when the file is not as ``expected`` (None: absent)."""
     with NamedTemporaryFile(dir=path.parent, prefix=f".{path.name}.", delete=False) as handle:

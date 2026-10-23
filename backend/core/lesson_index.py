@@ -24,7 +24,7 @@ from core.skill_scanning import omitted_row
 
 OVERRIDDEN = "overridden by a more specific skill"
 PER_TASK = "trial lesson is delivered per task"
-CAP_OMITTED = "ordinary skill cap omitted it"
+CAP_OMITTED = "trial cap omitted it"
 UNCHECKED = "its review could not be checked"
 UNREADABLE = "its file could not be read"
 SAME_NAME = "an ordinary skill has its name"

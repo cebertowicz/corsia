@@ -109,7 +109,7 @@ def _target(decision: Decision) -> str:
     raw = decision.new_target_path if decision.target_file == "new" else decision.target_file
     target = canonical_target_path(str(raw), workspace=WORKSPACE)
     if target == ".corsia" or target.startswith(".corsia/"):
-        raise TrialRefused("invalid-learning-metadata", "System projections cannot be lesson carry-in targets.")
+        raise TrialRefused("invalid-learning-metadata", "System projections cannot be lesson targets.")
     return target
 
 
@@ -122,12 +122,18 @@ def _additive_only(decision: Decision) -> None:
     """
     from core.skill_validation import is_skill_file
     from infra.config import WORKSPACE
+    from tools.filesystem_gate import _resolve_path
 
     if decision.target_file == "new" or is_skill_file(Path(str(decision.target_file))):
         return
-    path = Path(WORKSPACE) / _target(decision)
+    target = _target(decision)
+    if Path(target).is_absolute():
+        raise TrialRefused("non-additive", (
+            f"{decision.target_file} is outside the workspace; a trial for a file already in "
+            "context must target a workspace file"
+        ))
     try:
-        text = path.read_text(encoding="utf-8")
+        text = _resolve_path(target, workspace=Path(WORKSPACE)).read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
         raise TrialRefused("non-additive", (
             f"{decision.target_file} could not be read, so a trial cannot show it only adds a section"
@@ -147,12 +153,13 @@ def _target_trials(
     if place.tray is None:
         return [], []
     open_trials, retired = [], []
+    target = _target(decision)
     for path in sorted((place.tray / "skills").glob("*/SKILL.md")):
         current = lesson_files.read_trial(path.read_text(encoding="utf-8", errors="replace"))
         if (
             current is None
             or current.lesson.owner != place.thread_id
-            or _target_from_lesson(current) != _target(decision)
+            or _target_from_lesson(current) != target
         ):
             continue
         if current.lesson.state in ("watch", "trial"):
@@ -160,6 +167,10 @@ def _target_trials(
         elif current.lesson.state in ("retired", "promoted"):
             retired.append((path, current))
     return open_trials, retired
+
+
+def _same_case(current: Any, decision: Decision) -> bool:
+    return current.lesson.target_section == decision.target_section and current.lesson.cause == decision.cause
 
 
 def _target_from_lesson(current: Any) -> str | None:
@@ -218,14 +229,13 @@ def admit(
     open_trials, retired_trials = _target_trials(place, decision)
     open_rows = tuple(_trial_row(path, current) for path, current in open_trials)
     retired_rows = tuple(_trial_row(path, current) for path, current in retired_trials)
-    same = lambda current: current.lesson.target_section == decision.target_section and current.lesson.cause == decision.cause
-    retired_match = next(((path, current) for path, current in retired_trials if same(current)), None)
+    retired_match = next(((path, current) for path, current in retired_trials if _same_case(current, decision)), None)
     if retired_match and decision.new_evidence is None:
         raise TrialRefused("retired-match", (
             f"retired trial '{retired_match[1].name}' has the same target, section, and cause; "
             "set new_evidence to target_changed or case_differs to admit a new trial"
         ))
-    merge = next(((path, current) for path, current in open_trials if same(current)), None)
+    merge = next(((path, current) for path, current in open_trials if _same_case(current, decision)), None)
     write_path = merge[0] if merge else destination.path
     capture = None
     if place.tray is not None:
