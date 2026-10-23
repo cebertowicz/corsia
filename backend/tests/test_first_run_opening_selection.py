@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from unittest.mock import AsyncMock
 
 import httpx
@@ -16,7 +17,6 @@ def fresh_app(isolated_db, monkeypatch):
     with write_transaction(None, scope="fresh_app_opening") as db:
         db.execute("DELETE FROM auth_tokens")
         db.execute("DELETE FROM users")
-    monkeypatch.setattr("onboarding.first_run_wake.app_reference_served", lambda: True)
     monkeypatch.setattr("onboarding.app_first_run._pre_pick_facts", lambda **_: {
         "agents_found": [], "connected_app_count": 0, "email_calendar_ready": False,
     })
@@ -65,7 +65,10 @@ def _ready(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_app_api_account_lands_with_plan_and_first_pick_publishes_before_drive(fresh_app, monkeypatch):
+    from connections import account_selection
     from infra import state
+    from infra.database import write_transaction
+    from onboarding.first_run_opening import pending_warm_opening
     from thread.model import _apply_first_selection
 
     thread = await _account()
@@ -76,7 +79,25 @@ async def test_app_api_account_lands_with_plan_and_first_pick_publishes_before_d
     # New requests/relaunch reads observe the same pending plan and no greeting.
     assert _rows("SELECT model FROM threads WHERE id=?", thread) == [{"model": None}]
     assert _rows("SELECT id FROM messages WHERE id=?", opening_id) == []
+    [digest] = _rows(
+        "SELECT role,delivery_state,metadata FROM messages WHERE thread_id=? "
+        "AND json_extract(metadata,'$.event_type')='context.digest'", thread,
+    )
+    assert (digest["role"], digest["delivery_state"]) == ("system", "queued")
+    assert json.loads(digest["metadata"])["type"] == "context_event"
+    assert json.loads(digest["metadata"])["event_disposition"] == "passive"
+    with write_transaction(None, scope="preview_app_opening") as db:
+        preview = pending_warm_opening(thread, db=db)
+        assert preview is not None
+        assert db.execute("SELECT 1 FROM messages WHERE id=?", (opening_id,)).fetchone() is None
     _ready(monkeypatch)
+
+    def bind(*_, db, **__):
+        assert db.execute("SELECT content FROM messages WHERE id=?", (opening_id,)).fetchone()["content"] == preview
+        wake = db.execute("SELECT delivery_error FROM messages WHERE id=?", (f"first-run:{thread}",)).fetchone()
+        assert wake["delivery_error"] == "no_model_selected"
+
+    monkeypatch.setattr(account_selection, "bind_model_account", bind)
     monkeypatch.setattr("thread.model._inline_first_run_wake", AsyncMock(return_value="First applicable setup step"))
     events = []
     monkeypatch.setattr(state, "broadcast_to_thread", lambda _thread, event, **_: events.append(event))
@@ -87,6 +108,7 @@ async def test_app_api_account_lands_with_plan_and_first_pick_publishes_before_d
         assert len(opening_events) == 1
         message = opening_events[0]["message"]
         assert message["content"].startswith("Hi Pat.\n\nI'm CORSIA.")
+        assert message["content"] == preview
         assert message["metadata"]["first_run_opening"] is True
         assert message["seq"] > 0
         [stored] = _rows("SELECT content,seq FROM messages WHERE id=?", opening_id)
@@ -145,7 +167,7 @@ async def test_binding_failure_after_opening_insert_rolls_back_entire_pick(fresh
         select_first_model(thread, "test/model", user_id="pat", now="t", first_run_wake="First step")
     assert _rows("SELECT model FROM threads WHERE id=?", thread) == [{"model": None}]
     assert _rows("SELECT id FROM messages WHERE id=?", f"first-run-opening:{thread}") == []
-    [wake] = _rows("SELECT delivery_state,delivery_error FROM messages WHERE thread_id=? AND delivery_error='no_model_selected'", thread)
+    [wake] = _rows("SELECT delivery_state,delivery_error FROM messages WHERE id=?", f"first-run:{thread}")
     assert wake == {"delivery_state": "queued", "delivery_error": "no_model_selected"}
     assert _rows("SELECT id,state,revision FROM plan_nodes WHERE workflow_ref='first-run-app' ORDER BY id") == plan_before
 
@@ -160,6 +182,38 @@ async def test_restored_history_excludes_both_warm_opening_and_selection_seed(fr
     with write_transaction(None, scope="restore_while_held") as db:
         # A held app wake exists, but genuine restored history makes it ineligible.
         insert_message(thread, "user", "Earlier conversation", db=db)
+        assert pending_warm_opening(thread, db=db) is None
+        seed_first_model_opening(thread, db=db)
+        assert db.execute("SELECT 1 FROM messages WHERE id=?", (f"first-run-opening:{thread}",)).fetchone() is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("role,delivery,metadata_patch", [
+    ("system", "delivered", {}),
+    ("user", "queued", {}),
+    ("assistant", "delivered", {"turn_unbound_reason": "server_scripted"}),
+    ("system", "queued", {"type": "other"}),
+    ("system", "queued", {"event_type": "other.notification"}),
+    ("system", "queued", {"event_disposition": "wake"}),
+    ("system", "queued", {"event_disposition": None}),
+    ("system", "queued", None),
+])
+async def test_only_queued_passive_system_digest_allows_opening(fresh_app, role, delivery, metadata_patch):
+    from infra.database import write_transaction
+    from onboarding.first_run_opening import pending_warm_opening, seed_first_model_opening
+
+    thread = await _account()
+    with write_transaction(None, scope="opening_history_boundary") as db:
+        digest = db.execute(
+            "SELECT id,metadata FROM messages WHERE thread_id=? "
+            "AND json_extract(metadata,'$.event_type')='context.digest'", (thread,),
+        ).fetchone()
+        assert digest is not None
+        metadata = {**json.loads(digest["metadata"]), **metadata_patch} if metadata_patch is not None else None
+        db.execute(
+            "UPDATE messages SET role=?,delivery_state=?,metadata=? WHERE id=?",
+            (role, delivery, json.dumps(metadata) if metadata is not None else None, digest["id"]),
+        )
         assert pending_warm_opening(thread, db=db) is None
         seed_first_model_opening(thread, db=db)
         assert db.execute("SELECT 1 FROM messages WHERE id=?", (f"first-run-opening:{thread}",)).fetchone() is None

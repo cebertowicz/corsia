@@ -28,9 +28,15 @@ def pending_warm_opening(conductor_id: str, *, db: sqlite3.Connection) -> str | 
         "SELECT 1 FROM messages WHERE id=? AND thread_id=?", (opening_id, conductor_id),
     ).fetchone() is not None:
         return None
+    # Setup plan changes queue a passive digest before the first-run wake.
+    # Only that pending notification is compatible with an untouched conversation.
     if db.execute(
         "SELECT 1 FROM messages WHERE thread_id=? "
-        "AND NOT (id=? OR (id=? AND delivery_state='queued')) LIMIT 1",
+        "AND NOT COALESCE(id=? OR (id=? AND delivery_state='queued') OR ("
+        "role='system' AND delivery_state='queued' "
+        "AND json_extract(metadata,'$.type')='context_event' "
+        "AND json_extract(metadata,'$.event_type')='context.digest' "
+        "AND json_extract(metadata,'$.event_disposition')='passive'), 0) LIMIT 1",
         (conductor_id, opening_id, first_run_message_id(conductor_id)),
     ).fetchone() is not None:
         return None

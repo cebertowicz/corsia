@@ -64,7 +64,7 @@ APP_INLINE_SUMMARY = (
 def app_reference_served() -> bool:
     """Whether the app-path instruction reference is present in this System package."""
     from infra.system_package import system_resource_source
-    from onboarding.app_first_run import OPENING_REFERENCE
+    from onboarding.first_run_opening import OPENING_REFERENCE
 
     return all(system_resource_source(path).is_file() for path in (APP_REFERENCE, APP_START_REFERENCE, OPENING_REFERENCE))
 
