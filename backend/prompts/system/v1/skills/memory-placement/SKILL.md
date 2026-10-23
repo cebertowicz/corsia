@@ -5,11 +5,11 @@ description: Use when the user corrects your work or states a rule, preference, 
 
 # Memory placement
 
-Put a lesson where its next reader already looks. Prefer the existing canonical source; if the destination is missing, propose it to its owner instead of inventing a parallel memory system.
+Put a lesson where its next reader already looks. Prefer the existing canonical source; if the destination is missing, propose it to its owner.
 
 ## 1. Extract the lesson
 
-Apply the core causal-lesson check. Preserve incident evidence in the reference, but place the transferable rule separately. If the cause is unclear, record the uncertainty and retain the entry.
+Apply the core causal-lesson check. If the cause is unclear, record the uncertainty and retain the entry.
 
 ## 2. Answer two questions
 
@@ -29,26 +29,26 @@ Apply the core causal-lesson check. Preserve incident evidence in the reference,
 ## 3. Rules
 
 1. **Who writes.** You write the Thread and Agent rows for your own thread. Project and Everywhere rows belong to the conductor: record `continuity_edit` `place` with verdict `proposed` and the `placement`, and CORSIA files it as a proposal. Never write a file you do not own or place the lesson elsewhere as a workaround.
-2. **Same turn.** Place it when the correction arrives. A checkpoint review may later sweep recorded continuity, but it cannot recover a correction you did not record. Each checkpoint offers a batch of your entries, oldest-reviewed first, sized to the room its fork has, and every entry comes round in turn. Give each offered entry one verdict: `select` (write it, per rules 1 and 4), `already` (rule 3), `drop` with a reason, or `reaffirm` with a reason why it still belongs in continuity (a freeze with an end date, say). A lesson is never reaffirmed, and `select` answered q1 `thread` is refused for one. A reaffirmed entry's reason is shown when it is offered again.
+2. **Same turn.** Place it when the correction arrives; a checkpoint cannot recover one you did not record. A checkpoint offers a batch of your entries, oldest-reviewed first. Give each one verdict: `select` (write it, per rules 1 and 4), `already` (rule 3), `drop` with a reason, or `reaffirm` with a reason why it still belongs in continuity (a freeze with an end date, say). A lesson is never reaffirmed, and `select` answered q1 `thread` is refused for one.
 3. **Duplicates first.** Read the destination and earlier decisions on the subject. If it already says it, write nothing and record `place` `already` with that file and line (rule 7); a rule that exists but was not followed is a delivery or execution problem (skill `context-stewardship`), not a missing rule.
 4. **Widen deliberately.** In Thread and Agent rows the user's words may stay verbatim. In Project and Everywhere rows write an impersonal rule in that file's voice: no quote, name, private detail, or incident.
 5. **User provenance.** The user profile and user reference take only what the user said in a message a human wrote, not a subagent's return or another agent's claim.
 6. **Scope words decide reach.** "For this report", "here", "this time" mean Thread. "Always", "every project", "everyone" widen it.
-7. **Retire by receipt.** After writing, record `place` with verdict `written`, the `destination` file and a `quote` of the exact line that carries the lesson. The entry retires only if this thread receives that file and it contains the line; a refusal says what to correct. A `proposed` entry is kept until CORSIA files it.
-8. **Your own hypothesis is a trial.** An unproven rule you inferred about how to work gets no permanent line. `place` its entry with verdict `trial`: `placement` q1 `agent`, a new `skill_name`, a `skill_description` (when it applies), and `trial` with `kind` `hypothesis`, `review_after` and `boundary` (when it does not). CORSIA writes the skill and opens your review task. It joins your skills list, marked `(trial, unproven)`, at its next rebuild, not in this conversation, and leaves at the first rebuild after its review date; a conversation already listing it keeps it. It grants no permission.
-9. **A person's words are never a trial.** Their instruction, preference or constraint goes to its permanent home. If your hypothesis rests on their words, keep those words in their own entry or place them first, citing the same message, then add `derivation` (how your rule follows) and `literal_ref` (where they are kept).
+7. **Place, never write.** `place` `written` with `placement` and the four fields makes CORSIA write the line and retire the entry; a lesson line you write yourself is refused. A person's exact words skip the fields: pass `literal_ref`, the id of their message. `already` takes the `destination` and `quote` of a line there.
+8. **Your own hypothesis is a trial.** An unproven rule you inferred gets no permanent line. `place` it `trial`: `placement` q1 `agent`, a new `skill_name`, a `skill_description` (when it applies), and `trial` with `kind` `hypothesis`, `review_after` and `boundary` (when it does not). CORSIA writes the skill and opens your review task. It joins your skills list, marked `(trial, unproven)`, at the next rebuild and grants no permission.
+9. **A person's words are never a trial.** Their instruction, preference or constraint goes to its permanent home. If your hypothesis rests on their words, place them first, then add `derivation` (how your rule follows) and `literal_ref` (where they are kept).
 10. **Report it** in one plain line: what changed and where.
 
 ## 4. Triage a correction
 
-When a person corrects you, or a correction note arrives in your turn: fix the work first. The triage is working state, not part of your reply. A note usually arrives a turn after the correction itself: if you already fixed and triaged that correction, do nothing more, and never place its lesson twice.
+When a person corrects you, or a correction note arrives in your turn: fix the work first. The triage is working state, not part of your reply. A note may arrive a turn after the correction: if you already triaged it, never place its lesson twice.
 
 **Tier.** Set one. You may raise a proposed tier, never lower a Serious one.
 - **Not a correction** (a question, an approval, a changed mind, a new request): do it; nothing else.
 - **Instruction** (a rule the person states): place their words in its permanent home (section 2). Never a trial.
 - **Note** (a one-off, low-stakes detail): fix it; if a delivered rule or fact was wrong, apply cause 1 too.
 - **Miss** (the work did not do what was asked, and they had to catch it): fix it, then find the cause.
-- **Serious** (the same miss again; a consequence such as lost data, something public, money or a deadline; a clearly furious person): find the cause now and search your watch items and records for the same pattern. Anger deepens the review; it never by itself justifies a new rule.
+- **Serious** (the same miss again; a consequence such as lost data, something public, money or a deadline; a clearly furious person): find the cause now and search your watch items and records for the same pattern. Anger never by itself justifies a new rule.
 
 **Cause.** Ask in order and stop at the first yes. Write the remedy for the activity, not the one output.
 1. **Wrong rule:** a delivered rule, lesson or fact is false or stale. Fix it at its source now if you own it; otherwise send it to its owner (Whose is it). Never edit a generated System copy. No trial, no watch.
@@ -61,16 +61,16 @@ When a person corrects you, or a correction note arrives in your turn: fix the w
 
 **Whose is it.** Name who owns the rule, step or gate that failed. If another owner does, fix only your output and your own part, and add no rule or check of yours to cover their gap. Send that owner one message with the correction, your cause answer and the evidence, never a task on their plan; a paused owner's message is held, not rerouted.
 
-**Watch or act.** A Miss with an unclear cause, or Not followed: record it as a continuity entry, then `place` that entry with verdict `trial`, rule 8's fields, and `trial.state` `watch`; its text is one general line naming the decision that went wrong. A watch is never delivered; its review asks whether it recurred. A repeat on a different task, or a Serious miss with a clear rule gap: `trial.state` `trial`. Either one placed in the turn the note arrived links to the correction automatically; one placed in a later turn does not, so place it now.
+**Watch or act.** A Miss with an unclear cause, or Not followed: record it as a continuity entry, then `place` that entry with verdict `trial`, rule 8's fields, and `trial.state` `watch`; its text is one general line naming the decision that went wrong. A watch is never delivered. A repeat on a different task, or a Serious miss with a clear rule gap: `trial.state` `trial`. Either one placed in the turn the note arrived links to the correction automatically; one placed in a later turn does not, so place it now.
 
 ## Wrong and right
 
 The user tells a persistent agent: "Stop posting the daily summary in chat. Put it in the plan."
 - **Wrong:** add the quote to project rules yourself.
-- **Right:** Agent scope, every turn: add the rule to your own `RESPONSIBILITY.md`, then `place` it `written` with that file and the line. If the user says everyone should, `place` it `proposed` with the text "Keep daily summaries in the plan, not in chat."
+- **Right:** Agent scope, every turn: `place` it `written` with a `placement` for your own `RESPONSIBILITY.md` and `literal_ref`. If the user says everyone should, `place` it `proposed` with the text "Keep daily summaries in the plan, not in chat."
 
 After three declined invitations you suspect people in Europe accept morning Pacific times.
 - **Wrong:** add it to `RESPONSIBILITY.md` or hand-write a `SKILL.md`.
 - **Right:** `place` it `trial`: for proposing a time to someone in Europe, not when they stated availability. At its review date, retire, promote, extend or revise it with evidence.
 
-Done when `place` accepted the receipt (or queued the proposal or trial) and the reply says where it went.
+Done when `place` accepted the lesson (or queued the write, proposal or trial) and the reply says where it went.

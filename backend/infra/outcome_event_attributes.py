@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from core.corrections_recording import CORRECTION_EVENT, FACT_KEYS as CORRECTION_FACT_KEYS, LABELS as CORRECTION_LABELS
+from core.lesson_gate import EVENT as LESSON_GATE_EVENT
 from core.size_rating import BASES, FACT_KEYS, SIZE_CLASSES, SIZE_EVENT
 from host_access.credential_sanitizer import contains_credential, sanitize_credential_data
 from infra.outcome_event_input import OutcomeInputRefusal
@@ -195,6 +196,14 @@ ATTRIBUTE_ALLOWLISTS: dict[str, dict[str, AttributeSpec]] = {
         "threshold": id_attr(),
         "truncated": enum_attr("true", "false"),
         "original_tokens": count_attr(),
+    },
+    # The lesson gate's refusals and accepted lessons (core/lesson_gate.py). The decision is the
+    # agent's own one-line statement of the choice, kept so lessons per decision can be counted.
+    LESSON_GATE_EVENT: {
+        "result": enum_attr("refused", "accepted"),
+        "reason": enum_attr("fields", "widens", "verbatim", "lesson-outside-placement"),
+        "verdict": enum_attr("written", "proposed", "trial", "save"),
+        "fields": text_attr(80), "decision": text_attr(300), "widens": id_attr(),
     },
     "github.issue.opened": {**_ISSUE_ATTRS},
     "github.issue.closed": {

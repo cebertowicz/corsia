@@ -19,6 +19,7 @@ from tests.test_checkpoint_placement import (  # noqa: F401 -- worker_env is a f
     _raw,
     worker_env,
 )
+from tests.test_lesson_placement import GATE_FIELDS
 from tests.test_continuity_staging import _connect, _db, _seed_thread, _tool_db
 
 
@@ -72,7 +73,7 @@ def test_place_checks_its_parameters_per_verdict(placing) -> None:
         "place",
         {"entry_id": entry, "verdict": "written", "destination": "x",
          "quote": "a long enough quote", "placement": _raw()},
-    ) == "Error: placement goes only with verdict proposed or trial"
+    ) == "Error: place written takes a placement, or a destination and quote, not both"
 
 
 def test_place_written_retires_only_when_the_file_carries_the_quote(placing) -> None:
@@ -80,7 +81,7 @@ def test_place_written_retires_only_when_the_file_carries_the_quote(placing) -> 
 
     written = continuity._run(
         "thread-1", "place",
-        {"entry_id": entry, "verdict": "written", "destination": "skills/a/SKILL.md",
+        {"entry_id": entry, **GATE_FIELDS, "verdict": "written", "destination": "skills/a/SKILL.md",
          "quote": "Keep each commit small and focused."},
     )
     unsaid = continuity._run(
@@ -90,13 +91,13 @@ def test_place_written_retires_only_when_the_file_carries_the_quote(placing) -> 
     )
     nowhere = continuity._run(
         "thread-1", "place",
-        {"entry_id": elsewhere, "verdict": "written", "destination": "issue 12",
+        {"entry_id": elsewhere, **GATE_FIELDS, "verdict": "written", "destination": "issue 12",
          "quote": "Keep each commit small and focused."},
     )
     (root.parent / "outside.md").write_text("Keep each commit small and focused.\n")
     outside = continuity._run(
         "thread-1", "place",
-        {"entry_id": elsewhere, "verdict": "written",
+        {"entry_id": elsewhere, **GATE_FIELDS, "verdict": "written",
          "destination": str(root.parent / "outside.md"),
          "quote": "Keep each commit small and focused."},
     )
@@ -129,14 +130,14 @@ def test_a_file_no_later_turn_receives_is_not_a_receipt(placing) -> None:
     scratch, upload = (
         continuity._run(
             "thread-1", "place",
-            {"entry_id": entry, "verdict": "written",
+            {"entry_id": entry, **GATE_FIELDS, "verdict": "written",
              "destination": f".threads/thread-1/{name}", "quote": quote},
         )
         for name in ("working/note.md", "uploads/notes.md")
     )
     bootloader = continuity._run(
         "thread-1", "place",
-        {"entry_id": lessons, "verdict": "written",
+        {"entry_id": lessons, **GATE_FIELDS, "verdict": "written",
          "destination": ".threads/thread-1/context/LESSONS.md", "quote": quote},
     )
 
@@ -210,11 +211,11 @@ def test_place_proposed_queues_the_answer_for_the_worker(placing) -> None:
 
     queued = continuity._run(
         "thread-1", "place",
-        {"entry_id": entry, "verdict": "proposed", "placement": _raw(q1="project")},
+        {"entry_id": entry, **GATE_FIELDS, "verdict": "proposed", "placement": _raw(q1="project")},
     )
     ours = continuity._run(
         "thread-1", "place",
-        {"entry_id": own, "verdict": "proposed", "placement": _raw(q1="agent")},
+        {"entry_id": own, **GATE_FIELDS, "verdict": "proposed", "placement": _raw(q1="agent")},
     )
 
     assert queued == (
@@ -250,7 +251,7 @@ def test_a_proposal_naming_someone_is_refused_while_it_can_be_rephrased(
     named, rephrased = (
         continuity._run(
             "thread-1", "place",
-            {"entry_id": entry, "verdict": "proposed",
+            {"entry_id": entry, **GATE_FIELDS, "verdict": "proposed",
              "placement": _raw(q1="project", text=text)},
         )
         for text in (
@@ -281,7 +282,7 @@ async def test_an_in_turn_proposal_is_filed_by_the_worker(worker_env) -> None:
     })
     rule = "Keep every commit small and reviewable."
     _live_operation(db, "thread-1", "place", {
-        "entry_id": entry, "verdict": "proposed",
+        "entry_id": entry, **GATE_FIELDS, "verdict": "proposed",
         "placement": _raw(q1="project", text=rule),
     })
     db.commit()

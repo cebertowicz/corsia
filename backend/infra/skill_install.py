@@ -203,6 +203,7 @@ def install_skill_bundle(
             evidence=consent_decision_id,
             expected={path: None for path in writes},
             binary_safe_history=binary_safe_history,
+            lesson_gate=False,  # reviewed library content
         )
     except OSError:
         # A write failed before any commit, so this new folder holds only part of the bundle.
@@ -269,6 +270,7 @@ def update_skill_bundle(
             deletes=deletes,
             atomic=True,
             binary_safe_history=True,
+            lesson_gate=False,
         )
     except OSError:
         logger.warning("skill update failed at guidance save for {}", name)
@@ -312,6 +314,7 @@ def remove_skill_bundle(
             deletes=deletes,
             atomic=True,
             binary_safe_history=True,
+            lesson_gate=False,
         )
     except OSError:
         logger.warning("skill removal failed at guidance save for {}", name)
