@@ -26,11 +26,13 @@ class SkillSaveRefusal:
 
 def refused_save(
     writes: dict[Path, bytes], *, author: str | None = None, lesson_gate: bool = True,
+    workspace: Path | None = None, scope: str | None = None,
 ) -> SaveResult | None:
     """The guidance-save result refusing an invalid skill write, or a lesson an agent wrote
     outside placement, or None when every write may proceed.
 
     The lesson rule is on unless a named call site turns it off; a person's own save passes.
+    Call outside an open transaction: a caller that rolls back after refusal also loses its outcome fact.
     """
     from infra.guidance_git import SaveResult
     from infra.guidance_messages import is_person_author
@@ -40,7 +42,7 @@ def refused_save(
     if lesson_gate and not is_person_author(author):
         from infra.lesson_save_gate import lesson_refusal
 
-        return lesson_refusal(writes, author)
+        return lesson_refusal(writes, author, workspace=workspace, scope=scope)
     return None
 
 

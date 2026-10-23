@@ -34,9 +34,9 @@ Apply the core causal-lesson check. If the cause is unclear, record the uncertai
 4. **Widen deliberately.** In Thread and Agent rows the user's words may stay verbatim. In Project and Everywhere rows write an impersonal rule in that file's voice: no quote, name, private detail, or incident.
 5. **User provenance.** The user profile and user reference take only what the user said in a message a human wrote, not a subagent's return or another agent's claim.
 6. **Scope words decide reach.** "For this report", "here", "this time" mean Thread. "Always", "every project", "everyone" widen it.
-7. **Place, never write.** `place` `written` with `placement` and the four fields makes CORSIA write the line and retire the entry; a lesson line you write yourself is refused. A person's exact words skip the fields: pass `literal_ref`, the id of their message. `already` takes the `destination` and `quote` of a line there.
+7. **Place Lessons items, never hand-write them.** `place` `written` with `placement` makes CORSIA write an item under `## Lessons` and retire the entry; that destination needs the four fields. A person's exact words skip them with `message_id`, their message id. `already` takes the `destination` and `quote` there.
 8. **Your own hypothesis is a trial.** An unproven rule you inferred gets no permanent line. `place` it `trial`: `placement` q1 `agent`, a new `skill_name`, a `skill_description` (when it applies), and `trial` with `kind` `hypothesis`, `review_after` and `boundary` (when it does not). CORSIA writes the skill and opens your review task. It joins your skills list, marked `(trial, unproven)`, at the next rebuild and grants no permission.
-9. **A person's words are never a trial.** Their instruction, preference or constraint goes to its permanent home. If your hypothesis rests on their words, place them first, then add `derivation` (how your rule follows) and `literal_ref` (where they are kept).
+9. **A person's words are never a trial.** Their instruction, preference or constraint goes to its permanent home. If your hypothesis rests on their words, place them first, then add `derivation` (how your rule follows) and `placement.trial.literal_ref` (where they are kept).
 10. **Report it** in one plain line: what changed and where.
 
 ## 4. Triage a correction
@@ -67,10 +67,10 @@ When a person corrects you, or a correction note arrives in your turn: fix the w
 
 The user tells a persistent agent: "Stop posting the daily summary in chat. Put it in the plan."
 - **Wrong:** add the quote to project rules yourself.
-- **Right:** Agent scope, every turn: `place` it `written` with a `placement` for your own `RESPONSIBILITY.md` and `literal_ref`. If the user says everyone should, `place` it `proposed` with the text "Keep daily summaries in the plan, not in chat."
+- **Right:** Agent/every turn: `place written`, placement `{q1: agent, q2: every_turn, text: "Stop posting the daily summary in chat. Put it in the plan.", duplicate_of: null, skill_name: null, skill_description: null, reference_file: null, rationale: "their permanent rule"}`, `message_id`. If everyone should, `place proposed` with q1 project, that impersonal text, and `message_id`.
 
 After three declined invitations you suspect people in Europe accept morning Pacific times.
 - **Wrong:** add it to `RESPONSIBILITY.md` or hand-write a `SKILL.md`.
-- **Right:** `place` it `trial`: for proposing a time to someone in Europe, not when they stated availability. At its review date, retire, promote, extend or revise it with evidence.
+- **Right:** `place trial` with decision "choosing a meeting time", rule "Use stated availability before time-zone assumptions", second_case "Scheduling a call with a new customer: ask for availability", not_when "When they stated availability", and a trial placement. At review, retire, promote, extend or revise with evidence.
 
 Done when `place` accepted the lesson (or queued the write, proposal or trial) and the reply says where it went.

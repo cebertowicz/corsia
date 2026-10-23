@@ -1,8 +1,8 @@
 """The lesson gate's one shape: four stated fields at ``place`` time, and the facts it counts.
 
 Deterministic and unjudged: each field is checked only for being plain text, an
-optional ``widens`` id only for existing, and a person's verbatim instruction
-only by finding its line in a message a person wrote. A refusal is built from
+optional ``widens`` id only for existing, and a person's message only by
+finding it in the caller's project scope. A refusal is built from
 that result, naming the fields it found missing and one wrong/right pair; the
 same definitions are the tool's own parameter text. Every refusal and every
 accepted lesson is one ``measurement.lesson_gate`` outcome event (no new store),
@@ -33,13 +33,13 @@ DEFINITIONS = {
     "second_case": "a different kind of work where this rule would also have prevented a miss.",
     "not_when": "when the rule does not apply.",
     "widens": "optional: the entry_id of an earlier lesson of yours that this one widens; it must exist.",
-    "literal_ref": "optional: the id of a message a person wrote in this thread that contains the line exactly; skips the four fields.",
+    "message_id": "optional: the id of a person-written message in this project; exact words skip the four fields for a lesson, and a proposed person instruction needs no exact match.",
 }
 WRONG_RIGHT = (
     'Wrong decision (one check): "read the stamp on this frame". '
     'Right (the choice it belongs to): "accepting evidence that work is done".'
 )
-_LINE_VERDICTS = ("written", "proposed")
+_LINE_VERDICTS = ("written",)
 _AUTHOR_THREAD = re.compile(r"<([^<>@\s]+)@agents\.corsia\.local>\s*$")
 
 
@@ -64,19 +64,41 @@ def _line(params: dict[str, Any]) -> str:
     return str(text or params.get("quote") or "")
 
 
-def _person_said(db: sqlite3.Connection, thread_id: str, message_id: Any, line: str) -> bool:
-    """Whether ``message_id`` is a message a person wrote in this thread that carries ``line``."""
+def _person_said(db: sqlite3.Connection, thread_id: str, message_id: Any, line: str | None) -> bool:
+    """Whether a project-scope person message is the requested source, and optionally says ``line``."""
     from core.corrections_recording import is_owner_authored_message
     from core.placement_decide import says
 
     if not isinstance(message_id, str) or not message_id:
         return False
     row = db.execute(
-        "SELECT role,content,metadata FROM messages WHERE thread_id=? AND id=?", (thread_id, message_id),
+        "SELECT m.role AS role,m.content AS content,m.metadata AS metadata FROM messages AS m "
+        "JOIN threads AS source ON source.id=m.thread_id "
+        "JOIN threads AS caller ON caller.id=? WHERE m.id=? AND "
+        "((caller.project_id IS NULL AND source.id=caller.id) OR "
+        "(caller.project_id IS NOT NULL AND source.project_id=caller.project_id))",
+        (thread_id, message_id),
     ).fetchone()
     return row is not None and is_owner_authored_message(
         role=row["role"], content=row["content"], metadata=row["metadata"],
-    ) and says(row["content"], line)
+    ) and (line is None or says(row["content"], line))
+
+
+def _requires_fields(db: sqlite3.Connection, thread_id: str, params: dict[str, Any]) -> bool:
+    """Whether a mapped placement writes a lesson rather than a proposal, fact, or reference."""
+    verdict = str(params["verdict"])
+    placement = params.get("placement")
+    if not isinstance(placement, dict):
+        return verdict == "written"
+    from core.placement_answer import thread_place
+    from core.placement_decide import InvalidDecision, map_destination, validate_decision
+
+    try:
+        return map_destination(thread_place(db, thread_id), validate_decision(placement)).kind in {
+            "context", "skill", "trial",
+        }
+    except InvalidDecision:
+        return verdict != "proposed"
 
 
 def _widens_exists(db: sqlite3.Connection, thread_id: str, epoch: int, entry_id: int, widens: Any) -> bool:
@@ -89,19 +111,24 @@ def _widens_exists(db: sqlite3.Connection, thread_id: str, epoch: int, entry_id:
 
 
 def check_place(db: sqlite3.Connection, thread_id: str, epoch: int, params: dict[str, Any]) -> Gate:
-    """Check one in-turn ``place``: the four fields, unless a person's words are resolved verbatim."""
+    """Check one in-turn ``place``: fields only for a lesson destination, with person sources checked."""
     verdict = str(params["verdict"])
     if verdict == "already":
         return Gate()
     problems: list[str] = []
+    message_id = params.get("message_id")
+    requires_fields = _requires_fields(db, thread_id, params)
     verbatim = (
-        verdict in _LINE_VERDICTS and params.get("literal_ref") is not None
-        and _person_said(db, thread_id, params["literal_ref"], _line(params))
+        requires_fields and verdict in _LINE_VERDICTS and message_id is not None
+        and _person_said(db, thread_id, message_id, _line(params))
     )
-    if not verbatim:
+    person_proposal = verdict == "proposed" and message_id is not None and _person_said(
+        db, thread_id, message_id, None,
+    )
+    if requires_fields and not verbatim:
         problems += [name for name in FIELDS if not _plain(params.get(name))]
-        if params.get("literal_ref") is not None and problems:
-            problems.append("literal_ref")
+    if message_id is not None and not (verbatim or person_proposal):
+        problems.append("message_id")
     widens = params.get("widens")
     if widens is not None and not _widens_exists(db, thread_id, epoch, int(params["entry_id"]), widens):
         problems.append("widens")
@@ -117,21 +144,33 @@ def check_place(db: sqlite3.Connection, thread_id: str, epoch: int, params: dict
 
 
 def refusal_text(problems: list[str]) -> str:
-    """The reply to a refused ``place``: what is missing, how each is defined, one pair."""
-    names = ", ".join(problems)
-    lines = [f"Error: place not accepted: {names} {'is' if len(problems) == 1 else 'are'} missing or not plain text."]
-    lines += [f"- {name}: {DEFINITIONS[name]}" for name in problems]
+    """The reply to a refused ``place``: a distinct cause and definition for each problem."""
+    fields = [name for name in problems if name in FIELDS]
+    lines = []
+    if fields:
+        names = ", ".join(fields)
+        lines.append(f"Error: place not accepted: {names} {'is' if len(fields) == 1 else 'are'} missing or not plain text.")
+    else:
+        lines.append("Error: place not accepted.")
+    for name in problems:
+        cause = (
+            "missing or not plain text" if name in FIELDS else
+            "no lesson with that id" if name == "widens" else
+            "no person-written message in this project contains the line"
+        )
+        lines.append(f"- {name}: {cause}. {DEFINITIONS[name]}")
     return "\n".join([*lines, WRONG_RIGHT])
 
 
-def save_refusal_line(path: Path) -> str:
-    """The reply to a file save that adds or changes a lesson outside ``place``."""
+def save_refusal_line(path: Path, *, removed: bool = False) -> str:
+    """The reply to a file save that grows lesson items outside ``place``."""
     lead = "The file is unchanged." if path.exists() else "Nothing was written."
     return "\n".join([
         f"Error: {path.name} not saved: a lesson is placed with continuity_edit place, which writes the line itself. {lead}",
         str(path),
         "Fix: record it as a continuity entry, then call continuity_edit with operation place, verdict written, "
-        "entry_id, placement, decision, rule, second_case and not_when.",
+        "entry_id, placement, decision, rule, second_case and not_when (or message_id for a person's exact words).",
+        *( ["To merge lessons, save the file without the old lines, then place the merged one."] if removed else [] ),
         WRONG_RIGHT,
     ])
 
@@ -147,9 +186,16 @@ def record(
     fields: tuple[str, ...] = (), decision: str | None = None, widens: int | None = None,
 ) -> None:
     """One outcome fact on the caller's open transaction; nothing here commits."""
+    from infra.outcome_event_attributes import enum_attr, text_attr
     from infra.outcome_events import record_outcome_event
 
     attributes: dict[str, Any] = {"result": result, "reason": reason, "verdict": verdict}
+    specs = {
+        "result": enum_attr("accepted", "refused"),
+        "reason": enum_attr("fields", "verbatim", "lesson-outside-placement", "rewording", "stewardship", "widens"),
+        "verdict": enum_attr("written", "proposed", "trial", "save"),
+        "fields": text_attr(200), "decision": text_attr(_DECISION_CHARS), "widens": text_attr(32),
+    }
     if fields:
         attributes["fields"] = ",".join(fields)
     if decision:
@@ -159,7 +205,7 @@ def record(
     record_outcome_event(
         db, dedupe_key=f"lesson-gate:{uuid.uuid4()}", event_name=EVENT, source="corsia",
         provenance="instrumented", ts=datetime.now(timezone.utc).isoformat(),
-        agent_thread_id=thread_id, attributes=attributes,
+        agent_thread_id=thread_id, attributes=attributes, declared_specs=specs,
     )
 
 
@@ -178,6 +224,30 @@ def record_accepted(db: sqlite3.Connection, thread_id: str, verdict: str, gate: 
             db, thread_id, result="accepted", reason=gate.reason, verdict=verdict,
             decision=gate.decision, widens=gate.widens,
         )
+
+
+def record_save_reword(author: str | None) -> None:
+    """Record an accepted count-neutral or shrinking lesson rewrite in a short transaction."""
+    from infra.database import get_db, write_transaction
+
+    db = get_db()
+    try:
+        with write_transaction(db, scope="lesson_gate") as connection:
+            record(connection, author_thread(author), result="accepted", reason="rewording", verdict="save")
+    finally:
+        db.close()
+
+
+def record_save_stewardship(thread_id: str) -> None:
+    """Record a conductor's managed instruction-file update against its target thread."""
+    from infra.database import get_db, write_transaction
+
+    db = get_db()
+    try:
+        with write_transaction(db, scope="lesson_gate") as connection:
+            record(connection, thread_id, result="accepted", reason="stewardship", verdict="save")
+    finally:
+        db.close()
 
 
 def record_save_refusal(author: str | None) -> None:

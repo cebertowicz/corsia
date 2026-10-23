@@ -276,14 +276,10 @@ def skill_body(text: str) -> str:
 
 
 def lesson_count(text: str) -> int:
-    """List items under every ``## Lessons`` heading."""
-    inside, count = False, 0
-    for line in text.split("\n"):
-        if line.startswith("## "):
-            inside = bool(re.match(r"^## Lessons\s*$", line))
-        elif inside and line.lstrip().startswith("- "):
-            count += 1
-    return count
+    """Count items through the shared Lessons parser."""
+    from core.lesson_items import lesson_count as count_items
+
+    return count_items(text)
 
 
 def over_cap(kind: str, text: str) -> bool:
@@ -321,22 +317,10 @@ def skill_description(text: str) -> str | None:
 
 
 def append_lesson(text: str | None, line: str, day: str) -> tuple[str, int]:
-    """Add one dated lesson under ``## Lessons``; return the text and lesson count."""
-    body = text if text is not None else "# Lessons\n"
-    lesson = f"- {day}: {line}"
-    if not re.search(r"^## Lessons\s*$", body, re.MULTILINE):
-        body = body.rstrip("\n") + "\n\n## Lessons\n"
-    lines = body.rstrip("\n").split("\n")
-    start = next(i for i, row in enumerate(lines) if re.match(r"^## Lessons\s*$", row))
-    end = next(
-        (i for i in range(start + 1, len(lines)) if lines[i].startswith("## ")),
-        len(lines),
-    )
-    insert_at = end
-    while insert_at > start + 1 and not lines[insert_at - 1].strip():
-        insert_at -= 1
-    lines.insert(insert_at, lesson)
-    result = "\n".join(lines) + "\n"
+    """Add one dated lesson through the shared Lessons parser and return its count."""
+    from core.lesson_items import append_lesson as append_item
+
+    result = append_item(text, line, day)
     return result, lesson_count(result)
 
 

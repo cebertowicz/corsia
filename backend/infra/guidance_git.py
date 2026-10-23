@@ -280,7 +280,7 @@ def save_guidance(
     Binary-safe reviewed bundles use raw SHA-256 and a 1 MB file ceiling; ordinary guidance is text-only.
     An agent's new or changed lesson is refused unless the caller passes ``lesson_gate=False``.
     """
-    if (refused := refused_save(writes, author=author, lesson_gate=lesson_gate)) is not None:
+    if (refused := refused_save(writes, author=author, lesson_gate=lesson_gate, workspace=workspace, scope=target.scope)) is not None:
         return refused
     deletes = deletes or {}
     if set(writes) & set(deletes):

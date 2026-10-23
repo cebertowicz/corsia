@@ -60,12 +60,12 @@ def test_an_agent_cannot_add_a_lesson_line_by_editing(tmp_path) -> None:
     assert "RESPONSIBILITY.md" in result.line
 
 
-def test_an_agent_cannot_rewrite_a_lesson_line(tmp_path) -> None:
+def test_an_agent_can_reword_a_lesson_without_growing_the_item_count(tmp_path) -> None:
     path = _on_disk(tmp_path, "RESPONSIBILITY.md", BOOTLOADER)
 
     result = _refuse({path: BOOTLOADER.replace("Keep each commit small.", "Keep each commit tiny.")})
 
-    assert _reason(result) == REASON
+    assert result is None
 
 
 def test_a_new_file_with_a_lessons_section_is_refused(tmp_path) -> None:
@@ -106,6 +106,60 @@ def test_an_invalid_skill_is_reported_before_the_lesson_rule(tmp_path) -> None:
     result = _refuse({path: LESSON_SKILL.replace("description: Use when merging.\n", "")})
 
     assert _reason(result) == INVALID_SKILL_REASON
+
+
+def test_a_recurrence_date_and_two_items_folded_to_one_pass(tmp_path) -> None:
+    path = _on_disk(tmp_path, "RESPONSIBILITY.md", BOOTLOADER)
+    recurrence = BOOTLOADER.replace("2026-10-01", "2026-10-23")
+    folded = BOOTLOADER.replace(
+        "- 2026-10-01: Keep each commit small.\n- 2026-10-02: Run the smaller tests first.\n",
+        "- Keep each commit small and run the smaller tests first.\n",
+    )
+
+    assert _refuse({path: recurrence}) is None
+    assert _refuse({path: folded}) is None
+
+
+def test_wrapped_item_reword_and_reflow_pass_without_item_growth(tmp_path) -> None:
+    path = _on_disk(
+        tmp_path,
+        "RESPONSIBILITY.md",
+        "# Role\n\n## Lessons learned\n\n- Keep each commit small and\n  focused.\n",
+    )
+    reworded = "# Role\n\n## Lessons learned\n\n- Keep each commit small and\n  focused before release.\n"
+    reflowed = "# Role\n\n## Lessons learned\n\n- Keep each commit small and focused.\n"
+
+    assert _refuse({path: reworded}) is None
+    assert _refuse({path: reflowed}) is None
+
+
+def test_shared_parser_ignores_fenced_headings_and_joins_wrapped_items() -> None:
+    from core.lesson_items import lesson_items
+
+    assert lesson_items("## Lessons\n- Real item\n```md\n## Lessons\n- Not an item\n```\n") == {"Real item": 1}
+
+
+def test_a_new_wrapped_item_passes_when_it_exists_in_another_same_scope_file(tmp_path) -> None:
+    source = _on_disk(tmp_path, "context/source.md", "## Lessons\n- Keep commits\n  focused.\n")
+    target = tmp_path / "context" / "target.md"
+
+    assert source.exists()
+    assert _refuse(
+        {target: "## Lessons\n- Keep commits focused.\n"},
+        workspace=tmp_path, scope="context, workspace scope",
+    ) is None
+
+
+def test_one_genuinely_new_item_is_refused_even_when_another_item_exists(tmp_path) -> None:
+    _on_disk(tmp_path, "context/source.md", "## Lessons\n- Keep commits focused.\n")
+    target = tmp_path / "context" / "target.md"
+
+    result = _refuse(
+        {target: "## Lessons\n- Keep commits focused.\n- Read the release notes.\n"},
+        workspace=tmp_path, scope="context, workspace scope",
+    )
+
+    assert _reason(result) == REASON
 
 
 # -- Not gated (HG-1) -------------------------------------------------------------
@@ -154,13 +208,12 @@ def test_not_gated_a_path_fix_outside_the_lessons_section(tmp_path) -> None:
     assert fixed is None
 
 
-def test_a_path_fix_inside_a_lesson_line_goes_through_place(tmp_path) -> None:
-    """The gate has no token-diff rule: a changed lesson line is a changed line."""
+def test_a_path_fix_inside_a_lesson_item_passes_without_growing_the_count(tmp_path) -> None:
     path = _on_disk(tmp_path, "RESPONSIBILITY.md", BOOTLOADER.replace("small.", "small (see old/path.md)."))
 
     result = _refuse({path: BOOTLOADER.replace("small.", "small (see new/path.md).")})
 
-    assert _reason(result) == REASON
+    assert result is None
 
 
 def test_not_gated_the_named_call_sites_that_switch_it_off(tmp_path) -> None:
@@ -170,8 +223,11 @@ def test_not_gated_the_named_call_sites_that_switch_it_off(tmp_path) -> None:
 
 
 _SRC = Path(__file__).resolve().parents[1]
-#: skill_install is reviewed library content; placement and lesson_outcomes are the writers behind ``place``.
-_GATE_OFF = {"core/placement_save.py": 1, "core/lesson_outcomes.py": 1, "infra/skill_install.py": 3}
+#: Reviewed library content, placement, outcome retirement, and conductor stewardship are the named bypasses.
+_GATE_OFF = {
+    "core/placement_save.py": 1, "core/lesson_outcomes.py": 1, "infra/skill_install.py": 3,
+    "tools/conductor_instruction_files.py": 1,
+}
 
 
 def _save_guidance_calls() -> dict[str, list[ast.Call]]:

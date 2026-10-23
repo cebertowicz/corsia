@@ -1,14 +1,14 @@
-"""The save-time lesson rule: an agent's lesson reaches a guidance file only through ``place``.
+"""The save-time lesson rule: an agent's new lesson reaches a guidance file through ``place``.
 
-A write is judged against the file on disk. A new or changed line under
-``## Lessons`` is refused; the section compares as a multiset of lines, so
-deletions and reorders pass. A SKILL.md is refused only when it is new with a
-``lesson:`` block or its block changes; edits to its body pass.
+A write is judged against the file on disk. It refuses a growing multiset of
+``## Lessons`` items only when an added item is not already in another guidance
+file of the same scope. Equal-or-smaller rewrites pass and are counted. A
+SKILL.md is refused only when it is new with a ``lesson:`` block or its block
+changes; edits to its body pass.
 """
 
 from __future__ import annotations
 
-import re
 from collections import Counter
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -16,19 +16,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from infra.guidance_git import SaveResult
 
-_HEADING = re.compile(r"^#{1,2} ")
-_LESSONS = re.compile(r"^## Lessons\s*$")
-
-
-def _lesson_lines(text: str) -> Counter[str]:
-    inside = False
-    lines: Counter[str] = Counter()
-    for line in text.split("\n"):
-        if _HEADING.match(line):
-            inside = bool(_LESSONS.match(line))
-        elif inside and line.strip():
-            lines[line.strip()] += 1
-    return lines
+from core.lesson_items import lesson_items
 
 
 def _lesson_block(text: str) -> object | None:
@@ -38,18 +26,48 @@ def _lesson_block(text: str) -> object | None:
     return lesson_block(validate_skill_text(text).metadata or {})
 
 
-def _adds_lesson(path: Path, data: bytes) -> bool:
+def _same_scope_items(path: Path, workspace: Path | None, scope: str | None) -> Counter[str]:
+    """Current lesson items in other on-disk guidance files of this save's scope."""
+    if workspace is None or not scope:
+        return Counter()
+    from core.guidance_paths import classify_guidance_path
+    from infra.database import get_db
+
+    items: Counter[str] = Counter()
+    db = get_db()
+    try:
+        for candidate in workspace.rglob("*"):
+            if candidate == path or not candidate.is_file():
+                continue
+            if classify_guidance_path(candidate, workspace=workspace, db=db) == scope:
+                items.update(lesson_items(candidate.read_text(encoding="utf-8", errors="replace")))
+    finally:
+        db.close()
+    return items
+
+
+def _lesson_change(
+    path: Path, data: bytes, *, workspace: Path | None, scope: str | None,
+) -> tuple[bool, bool, bool]:
+    """Return ``(refuse, reworded, removed)`` for one proposed file write."""
     new = data.decode("utf-8", errors="replace")
     old = path.read_text(encoding="utf-8", errors="replace") if path.is_file() else ""
-    if _lesson_lines(new) - _lesson_lines(old):
-        return True
+    new_items, old_items = lesson_items(new), lesson_items(old)
+    added, removed = new_items - old_items, old_items - new_items
+    if sum(new_items.values()) > sum(old_items.values()) and any(
+        item not in _same_scope_items(path, workspace, scope) for item in added
+    ):
+        return True, False, bool(removed)
     if path.name != "SKILL.md":
-        return False
+        return False, new_items != old_items, bool(removed)
     block = _lesson_block(new)
-    return block is not None and block != _lesson_block(old)
+    return block is not None and block != _lesson_block(old), new_items != old_items, bool(removed)
 
 
-def lesson_refusal(writes: dict[Path, bytes], author: str | None = None) -> SaveResult | None:
+def lesson_refusal(
+    writes: dict[Path, bytes], author: str | None = None, *, workspace: Path | None = None,
+    scope: str | None = None,
+) -> SaveResult | None:
     """The guidance-save result refusing a lesson written outside placement, or None.
 
     A refusal is recorded as an outcome fact for the author's thread.
@@ -58,11 +76,20 @@ def lesson_refusal(writes: dict[Path, bytes], author: str | None = None) -> Save
     from infra.guidance_git import SaveResult
     from infra.skill_save_validation import REFUSED
 
-    path = next((path for path, data in writes.items() if _adds_lesson(path, data)), None)
-    if path is None:
+    changes = [
+        (path, *_lesson_change(path, data, workspace=workspace, scope=scope))
+        for path, data in writes.items()
+    ]
+    refused = next(((path, removed) for path, blocks, _reworded, removed in changes if blocks), None)
+    if refused is None:
+        if any(reworded for _path, _blocks, reworded, _removed in changes):
+            from core.lesson_gate import record_save_reword
+
+            record_save_reword(author)
         return None
+    path, removed = refused
     record_save_refusal(author)
     return SaveResult(
-        REFUSED, SAVE_REASON, line=save_refusal_line(path),
-        errors=("a lesson line or lesson block was added or changed outside placement",),
+        REFUSED, SAVE_REASON, line=save_refusal_line(path, removed=removed),
+        errors=("a new lesson item or lesson block was added outside placement",),
     )

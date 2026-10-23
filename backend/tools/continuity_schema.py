@@ -194,7 +194,7 @@ _OPERATION_FIELDS = {
         "entry_id", "verdict", "destination", "quote", "placement", "room", "reason",
     },
     "place": {
-        "entry_id", "verdict", "destination", "quote", "placement", *LESSON_FIELDS, "widens", "literal_ref",
+        "entry_id", "verdict", "destination", "quote", "placement", *LESSON_FIELDS, "widens", "message_id",
     },
 }
 _REQUIRED_FIELDS = {

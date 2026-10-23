@@ -82,12 +82,14 @@ def _state(env: Env, entry: int) -> tuple[str, str | None]:
     return mark["state"], mark["placement_state"]
 
 
-def _person_message(env: Env, text: str, role: str = "user", metadata: str | None = None) -> str:
+def _person_message(
+    env: Env, text: str, role: str = "user", metadata: str | None = None, thread_id: str = THREAD,
+) -> str:
     count = env.db.execute("SELECT count(*) FROM messages").fetchone()[0]
     message_id = f"msg-{count}"
     env.db.execute(
         "INSERT INTO messages (id,thread_id,role,content,created_at,seq,metadata) VALUES (?,?,?,?,?,?,?)",
-        (message_id, THREAD, role, text, "t1", 100 + count, metadata),
+        (message_id, thread_id, role, text, "t1", 100 + count, metadata),
     )
     env.db.commit()
     return message_id
@@ -136,7 +138,7 @@ def test_every_field_has_a_one_line_definition_in_the_tool_text(env: Env) -> Non
     tool = ContinuityEditTool()
     properties = tool.parameters["properties"]
 
-    for field in ("decision", "rule", "second_case", "not_when", "widens", "literal_ref"):
+    for field in ("decision", "rule", "second_case", "not_when", "widens", "message_id"):
         description = properties[field]["description"]
         assert description and "\n" not in description, field
     assert tool.validate_params({"operation": "place", "entry_id": 1, "verdict": "proposed", "placement": _raw(), **FIELDS}) == []
@@ -158,11 +160,17 @@ def test_place_already_writes_nothing_and_needs_no_fields(env: Env) -> None:
     assert _facts(env) == []
 
 
-@pytest.mark.parametrize("verdict", ["written", "proposed", "trial"])
-def test_every_lesson_verdict_needs_the_fields(env: Env, verdict: str) -> None:
-    reply = _place(env, _entry(env), verdict, placement=_raw(q1="project" if verdict == "proposed" else "agent"))
+@pytest.mark.parametrize("verdict", ["written", "trial"])
+def test_every_lesson_destination_needs_the_fields(env: Env, verdict: str) -> None:
+    reply = _place(env, _entry(env), verdict, placement=_raw(q1="agent"))
 
     assert reply.startswith("Error:") and "decision" in reply and "not_when" in reply
+
+
+def test_a_proposed_placement_is_not_forced_into_lesson_fields(env: Env) -> None:
+    reply = _place(env, _entry(env), "proposed", placement=_raw(q1="project"))
+
+    assert reply.startswith("Entry 1 queued")
 
 
 # -- HG-1a: place written performs the write ---------------------------------------
@@ -220,21 +228,33 @@ def test_a_receipt_with_the_fields_still_retires_on_the_quote(env: Env) -> None:
     assert _state(env, entry) == ("retired", "written")
 
 
-# -- HG-1a: a person's verbatim instruction skips HG-2 --------------------------------
+# -- HG-1a: a person's message skips HG-2 where its destination is a lesson ----------------
 
 
-def test_a_verbatim_person_instruction_with_a_resolving_literal_ref_skips_the_fields(env: Env) -> None:
+def test_a_person_instruction_with_a_resolving_message_id_skips_the_fields(env: Env) -> None:
     message = _person_message(env, f"Please do this. {PERSON_WORDS} Thanks.")
     entry = _entry(env)
 
-    reply = _place(env, entry, placement=_raw(text=PERSON_WORDS), literal_ref=message)
+    reply = _place(env, entry, placement=_raw(text=PERSON_WORDS), message_id=message)
 
     assert reply.startswith(f"Entry {entry} queued")
     assert _facts(env)[-1]["reason"] == "verbatim"
 
 
+def test_a_message_id_from_another_thread_in_the_project_resolves(env: Env) -> None:
+    other = "other"
+    _seed_thread(env.db, other)
+    env.db.execute("INSERT INTO projects (id,name,created_at,updated_at) VALUES ('project','Project','t','t')")
+    env.db.execute("UPDATE threads SET project_id='project' WHERE id IN (?, ?)", (THREAD, other))
+    env.db.commit()
+    message = _person_message(env, PERSON_WORDS, thread_id=other)
+    from core.lesson_gate import _person_said
+
+    assert _person_said(env.db, THREAD, message, PERSON_WORDS)
+
+
 @pytest.mark.parametrize("case", ["agent-role", "other-words", "wrapper", "missing"])
-def test_a_literal_ref_that_does_not_resolve_leaves_the_lesson_gated(env: Env, case: str) -> None:
+def test_a_message_id_that_does_not_resolve_names_its_own_cause(env: Env, case: str) -> None:
     refs = {
         "agent-role": _person_message(env, PERSON_WORDS, role="assistant"),
         "other-words": _person_message(env, "Something else entirely, said at length."),
@@ -242,9 +262,10 @@ def test_a_literal_ref_that_does_not_resolve_leaves_the_lesson_gated(env: Env, c
         "missing": "no-such-message",
     }
 
-    reply = _place(env, _entry(env), placement=_raw(text=PERSON_WORDS), literal_ref=refs[case])
+    reply = _place(env, _entry(env), placement=_raw(text=PERSON_WORDS), message_id=refs[case])
 
-    assert reply.startswith("Error:") and "decision" in reply and "literal_ref" in reply
+    assert reply.startswith("Error:") and "decision" in reply and "message_id" in reply
+    assert "no person-written message in this project contains the line" in reply
 
 
 # -- widens: optional, existence only -------------------------------------------------
@@ -290,6 +311,24 @@ def test_an_accepted_lesson_is_recorded_with_its_decision(env: Env) -> None:
         "result": "accepted", "reason": "fields", "verdict": "written",
         "decision": FIELDS["decision"], "thread": THREAD,
     }]
+
+
+def test_a_count_neutral_save_reword_is_recorded(env: Env) -> None:
+    from infra.guidance_git import save_guidance
+    from infra.guidance_targets import GuidanceTarget
+
+    path = env.tray / "context" / "RESPONSIBILITY.md"
+    path.parent.mkdir(parents=True)
+    path.write_text("# Role\n\n## Lessons\n\n- Keep commits focused.\n")
+
+    saved = save_guidance(
+        {path: b"# Role\n\n## Lessons\n\n- Keep commits small and focused.\n"},
+        workspace=env.workspace, target=GuidanceTarget("agent"),
+        author=f"Lane <{THREAD}@agents.corsia.local>",
+    )
+
+    assert saved.outcome == "written"
+    assert _facts(env) == [{"result": "accepted", "reason": "rewording", "verdict": "save", "thread": THREAD}]
 
 
 def test_a_file_edit_refusal_is_recorded_and_the_learning_report_counts_it(env: Env) -> None:
