@@ -387,15 +387,9 @@ const LOCAL_SERVICE_PERMISSIONS: &[&str] = &[
 ];
 const LOCAL_SERVICE_EXTERNAL_URL_SCOPES: &[&str] = &["http://*", "https://*"];
 
-/// Lets the page the local service serves at this exact origin call its commands and open safe external links. The app's
-/// command ACL refuses every origin it does not name, and the service page is not the startup shell, so without this the
-/// first-run folder choice, Connect to another computer screens, and chat sign-in links are refused.
-fn grant_local_service_origin<R: tauri::Runtime>(app: &tauri::AppHandle<R>, service: &AppServiceState, port: u16) -> Result<(), String> {
-    let mut granted = service.granted_local_ports.lock().unwrap_or_else(PoisonError::into_inner);
-    if granted.contains(&port) {
-        return Ok(());
-    }
-    let capability = LOCAL_SERVICE_PERMISSIONS
+/// Builds the capability for one local-service origin: its own app commands and only browser-safe external URLs.
+fn local_service_capability(port: u16) -> CapabilityBuilder {
+    LOCAL_SERVICE_PERMISSIONS
         .iter()
         .fold(
             CapabilityBuilder::new(format!("local-service-origin-{port}")).remote(service_url(port)).window("main"),
@@ -405,8 +399,18 @@ fn grant_local_service_origin<R: tauri::Runtime>(app: &tauri::AppHandle<R>, serv
             "opener:allow-open-url",
             LOCAL_SERVICE_EXTERNAL_URL_SCOPES.iter().map(|url| serde_json::json!({ "url": url })).collect::<Vec<_>>(),
             Vec::<serde_json::Value>::new(),
-        );
-    app.add_capability(capability).map_err(|error| format!("could not grant local service permissions: {error}"))?;
+        )
+}
+
+/// Lets the page the local service serves at this exact origin call its commands and open safe external links. The app's
+/// command ACL refuses every origin it does not name, and the service page is not the startup shell, so without this the
+/// first-run folder choice, Connect to another computer screens, and chat sign-in links are refused.
+fn grant_local_service_origin<R: tauri::Runtime>(app: &tauri::AppHandle<R>, service: &AppServiceState, port: u16) -> Result<(), String> {
+    let mut granted = service.granted_local_ports.lock().unwrap_or_else(PoisonError::into_inner);
+    if granted.contains(&port) {
+        return Ok(());
+    }
+    app.add_capability(local_service_capability(port)).map_err(|error| format!("could not grant local service permissions: {error}"))?;
     granted.insert(port);
     Ok(())
 }
@@ -2259,6 +2263,12 @@ mod tests {
             let refusal = invoke_from(&webview, command, other).unwrap_err();
             assert!(refusal.to_string().contains("not allowed"), "{command} was not ACL-refused from {other}: {refusal}");
         }
+    }
+
+    #[test]
+    fn the_local_service_opener_scope_allows_only_http_and_https_urls() {
+        assert_eq!(LOCAL_SERVICE_EXTERNAL_URL_SCOPES, ["http://*", "https://*"]);
+        assert!(!LOCAL_SERVICE_EXTERNAL_URL_SCOPES.iter().any(|scope| scope.starts_with("file:") || scope.starts_with("javascript:")));
     }
 
     #[test]

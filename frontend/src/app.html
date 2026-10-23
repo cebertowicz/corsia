@@ -2,7 +2,19 @@
 <html lang="en" data-theme="dark" data-shell="">
 <head>
 	<meta charset="utf-8" />
-
+	<script>
+		if (window.__TAURI_INTERNALS__ || window.__TAURI__) {
+			document.documentElement.dataset.shell = 'tauri';
+			window.addEventListener('keydown', (e) => {
+				if ((e.metaKey || e.ctrlKey) && (e.key === 'r' || e.key === 'R')) {
+					e.preventDefault();
+					const u = new URL(window.location.href);
+					u.searchParams.set('_r', String(Date.now()));
+					window.location.replace(u.toString());
+				}
+			}, true);
+		}
+	</script>
 	<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
 	<meta name="mobile-web-app-capable" content="yes" />
 	<meta name="apple-mobile-web-app-capable" content="yes" />
