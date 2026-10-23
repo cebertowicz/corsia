@@ -292,6 +292,31 @@ def test_daily_reports_continue_after_one_scope_delivery_fails(db, monkeypatch):
     assert delivered == ["later:2026-10-22:daily"]
 
 
+def test_recorded_lessons_count_each_lesson_once_with_a_reference_per_version(db):
+    from datetime import datetime, timezone
+
+    from jobs import learning_report
+    from plans import lesson_reviews
+
+    db.execute("INSERT INTO projects (id,name,created_at,updated_at) VALUES ('proj','Project','t','t')")
+    db.execute("INSERT INTO threads (id,user_id,project_id,model,created_at,updated_at) "
+               "VALUES ('owner','user','proj','test/model','t','t')")
+    db.execute("INSERT INTO artifact_identities (id,integration,type,external_id,title,state,created_at,updated_at) "
+               "VALUES ('art','workspace','skill','workspace://art','art','active','t','t')")
+    review = {"artifact_id": "art", "title": "Review", "acceptance": "Decide.", "review_after": "2099-01-01T00:00:00+00:00"}
+    today = learning_report.report_date_for(datetime.now(timezone.utc))
+
+    def recorded():
+        return learning_report.build_report(db, scope="proj", report_date=today)["items"]["lessons"]["recorded"]
+
+    for lesson_id, sha in (("a", "1"), ("a", "2"), ("b", "1")):
+        lesson_reviews.ensure_lesson_review(db, "owner", lesson_id=lesson_id, behavioral_sha256=sha, **review)
+    assert (recorded()["count"], len(recorded()["refs"])) == (2, 3)
+
+    lesson_reviews.ensure_capture_review(db, "owner", capture_id="a", capture_hash="1", **review)
+    assert (recorded()["count"], len(recorded()["refs"])) == (2, 4)
+
+
 def test_daily_report_is_passive_without_qualifying_facts(db):
     from jobs.learning_report import build_report
 
