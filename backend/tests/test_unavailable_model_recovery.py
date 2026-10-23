@@ -104,6 +104,8 @@ async def test_discover_cloud_models_notifies_when_catalog_changes(monkeypatch):
 
     monkeypatch.setattr(catalog_cloud, "_anthropic_discovered", lambda: [])
     monkeypatch.setattr(catalog_cloud, "_persist_cloud_models", lambda *_a, **_k: [])
+    reads = iter([[], [("new-model",)]])
+    monkeypatch.setattr(catalog_cloud, "_provider_rows", lambda _p: next(reads))
     notify = Mock()
     monkeypatch.setattr(ws, "notify_models_changed", notify)
 

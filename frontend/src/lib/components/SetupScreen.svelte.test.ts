@@ -67,7 +67,7 @@ const rowNames = () => Array.from(host.querySelectorAll('section.item')).map((ro
 
 afterEach(async () => {
 	if (component) await unmount(component);
-	host.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals();
+	host.remove(); delete (window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__; vi.restoreAllMocks(); vi.unstubAllGlobals();
 });
 
 // The approved Welcome copy (onboarding story section 2), spelled out here so a change to the shipped strings fails this test.
@@ -176,6 +176,33 @@ describe('SetupScreen', () => {
 		expect(host.textContent).toContain('CORSIA needs one working model to continue setup.');
 		expect(button('Start using CORSIA')?.disabled).toBe(true);
 	});
+
+	it('keeps the shell-owned default when a warned folder is replaced', async () => {
+		const invoke = vi.fn(async (command: string) => command === 'choose_work_folder'
+			? { state: 'ready', path: '/fixture/Documents', folder_warning: { kind: 'personal_folder', folder: 'Documents' } }
+			: undefined);
+		Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: { invoke } });
+		await openAccount(); button('Change')?.click(); await settle();
+		button('Use ~/CORSIA')?.click(); fillAccount(); await settle();
+		button('Continue')?.click(); await settle();
+		expect(invoke.mock.calls.filter(([command]) => command === 'configure_work_folder')).toHaveLength(0);
+		expect(calls.filter((call) => call.url === '/api/setup/first-account')).toHaveLength(1);
+	});
+
+	for (const [state, reason] of [['unreadable', 'permission denied'], ['unwritable', 'the disk is read-only']] as const) {
+		it(`does not apply a ${state} folder or create an account`, async () => {
+			const invoke = vi.fn(async (command: string) => command === 'choose_work_folder'
+				? { state, path: '/fixture/unavailable', reason }
+				: undefined);
+			Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: { invoke } });
+			await openAccount(); button('Change')?.click(); await settle(); fillAccount(); await settle();
+
+			expect(button('Continue')).toHaveProperty('disabled', true);
+			button('Continue')?.click(); await settle();
+			expect(invoke.mock.calls.filter(([command]) => command === 'configure_work_folder')).toHaveLength(0);
+			expect(calls.filter((call) => call.url === '/api/setup/first-account')).toHaveLength(0);
+		});
+	}
 
 	it('asks which subscriptions they pay for, installs the picked tool at once and shows a row only for it', async () => {
 		sources = [{ source: 'claude-code', name: 'Claude Code', state: 'not_installed' }, { source: 'codex', name: 'Codex', state: 'not_installed' }];

@@ -16,7 +16,9 @@ spawn it makes runs inside, so no start is claimed twice:
    turn can run. If another spawn took the slot first, the start goes back to the queue
    at its place, never refused for it. Any other refusal ends it ``refused`` and tells
    the owner through ``worker.no_result``;
-3. each started worker whose last turn ended settles once (``automation.worker_settle``).
+3. each worker that was already started when the pass began and whose last turn ended settles
+   once (``automation.worker_settle``); a worker made in this pass is observed on the next
+   pass, so its start is visible before its completion.
 
 Every way a start ends (refused, cut short, settled) goes through :func:`_settle`, which
 reports it with what its row kept (its trace and workflow) and removes its inputs.
@@ -108,11 +110,14 @@ async def drive() -> int:
         for row in await run_in_db(_read, worker_starts.orphans):
             if row["worker_thread_id"] is None or _LIVE.get(row["worker_thread_id"]) is None:
                 await _end(row, json.loads(row["run_input"] or "{}"), NO_RESULT, _RESTARTED)
+        claimed = await run_in_db(_claim)
+        claimed_ids = {row["id"] for row, _run_input in claimed}
         made = 0
-        for row, run_input in await run_in_db(_claim):
+        for row, run_input in claimed:
             made += await _start(row, run_input)
         for item in await run_in_db(_read, worker_settle.ready):
-            await _settle(item)
+            if item.decision_id not in claimed_ids:
+                await _settle(item)
         _state["open"] = await run_in_db(worker_starts.any_open)
         return made
 
