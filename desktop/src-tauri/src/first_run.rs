@@ -64,7 +64,7 @@ fn folder_warning(path: &Path, home: &Path) -> Result<Option<FolderWarning>, Str
         return Ok(Some(FolderWarning::PersonalFolder { folder: "Home" }));
     }
 
-    [
+    for (personal, name) in [
         (home.join("Documents"), "Documents"),
         (home.join("Desktop"), "Desktop"),
         (home.join("Downloads"), "Downloads"),
@@ -74,21 +74,16 @@ fn folder_warning(path: &Path, home: &Path) -> Result<Option<FolderWarning>, Str
                 .join("com~apple~CloudDocs"),
             "iCloud Drive",
         ),
-    ]
-    .into_iter()
-    .find_map(|(protected, name)| {
-        if path == protected {
-            Some(FolderWarning::PersonalFolder { folder: name })
-        } else if path.starts_with(home) && protected.starts_with(path) {
-            Some(FolderWarning::ContainsPersonalFolder { folder: name })
-        } else {
-            None
+    ] {
+        if path == personal {
+            return Ok(Some(FolderWarning::PersonalFolder { folder: name }));
         }
-    })
-    .map(Ok)
-    .unwrap_or_else(|| {
-        workspace_is_fresh(path).map(|fresh| (!fresh).then_some(FolderWarning::ContainsFiles))
-    })
+        if path.starts_with(home) && personal.starts_with(path) {
+            return Ok(Some(FolderWarning::ContainsPersonalFolder { folder: name }));
+        }
+    }
+
+    workspace_is_fresh(path).map(|fresh| (!fresh).then_some(FolderWarning::ContainsFiles))
 }
 
 pub fn classify_folder(
