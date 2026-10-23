@@ -49,6 +49,7 @@ def test_published_details_parse_changelog_and_cap_items(tmp_path):
     items = "\n".join(f"- Item {index}" for index in range(51))
     (seed / "CHANGELOG.md").write_text(
         f"## Unreleased\n\n_Changes merged since the last release._\n\n"
+        f"- Upcoming change\n\n"
         f"## v1.1.0 — Useful release\n\n### Added\n{items}\n"
     )
     _git(seed, "add", "CHANGELOG.md")
