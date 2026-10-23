@@ -1,9 +1,9 @@
 """Measurement connector manifest for movement and learning reports.
 
 Both platform-produced report types are informational unless their declared
-wake fact promotes them. Their delivery functions name the event type
-explicitly, so this connector never infers one report type from the other's
-payload. Payload contracts and their strict validators live beside their
+wake fact promotes them. The payloads carry no type of their own: each delivery
+function names its event type explicitly, and ``_classify`` answers only for a
+payload normalized without one, which is a movement digest. Payload contracts and their strict validators live beside their
 delivery functions (``events/movement_report.py``, ``events/learning_report.py``).
 """
 
@@ -64,7 +64,7 @@ MANIFEST = register(ConnectorManifest(
             event_class="informational",
             actionable_when={"wake": True},
             collapse_fact="report_key",
-            digest_line_facts=("scope", "report_date", "report_key", "wake")),
+            digest_line_facts=("scope", "report_date", "report_key", "items")),
     },
     classify=_classify,
     extract_facts=_extract_facts,

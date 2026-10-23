@@ -18,9 +18,9 @@ from __future__ import annotations
 import sqlite3
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import date
 from typing import Any
 
+from events import report_payload
 from events.connectors.measurement import LEARNING_REPORT_EVENT
 from events.platform import PlatformDelivery
 from events.report_delivery import deliver_measurement_report_sync
@@ -37,19 +37,11 @@ class MalformedLearningReport(ValueError):
 
 
 def _keys(raw: Any, required: set[str], what: str) -> Mapping[str, Any]:
-    if not isinstance(raw, Mapping):
-        raise MalformedLearningReport(f"{what} must be an object")
-    missing, extra = required - set(raw), set(raw) - required
-    if missing or extra:
-        raise MalformedLearningReport(
-            f"{what}: missing {sorted(missing)}, unexpected {sorted(extra)}")
-    return raw
+    return report_payload.exact_keys(raw, required, what, MalformedLearningReport)
 
 
 def _text(value: Any, what: str) -> str:
-    if not isinstance(value, str) or not value.strip():
-        raise MalformedLearningReport(f"{what} must be a non-empty string")
-    return value
+    return report_payload.text(value, what, MalformedLearningReport)
 
 
 @dataclass(frozen=True)
@@ -134,14 +126,7 @@ class LearningReport:
     def parse(cls, raw: Any) -> LearningReport:
         raw = _keys(raw, {"scope", "report_date", "report_key", "wake", "items"}, "report")
         scope = _text(raw["scope"], "scope")
-        report_date = _text(raw["report_date"], "report_date")
-        try:
-            parsed_date = date.fromisoformat(report_date)
-        except ValueError as exc:
-            raise MalformedLearningReport(
-                f"report_date {report_date!r} is not YYYY-MM-DD") from exc
-        if parsed_date.isoformat() != report_date:
-            raise MalformedLearningReport(f"report_date {report_date!r} is not YYYY-MM-DD")
+        report_date = report_payload.report_date(raw["report_date"], MalformedLearningReport)
         report_key = _text(raw["report_key"], "report_key")
         allowed_keys = {f"{scope}:{report_date}:{suffix}" for suffix in _REPORT_SUFFIXES}
         if report_key not in allowed_keys:
@@ -167,8 +152,7 @@ class LearningReport:
 
 def validated(report: LearningReport | Mapping[str, Any]) -> LearningReport:
     """Parse a raw report, or re-validate a typed one built by hand."""
-    raw = report.as_contract() if isinstance(report, LearningReport) else report
-    return LearningReport.parse(raw)
+    return report_payload.revalidate(report, LearningReport)
 
 
 def deliver_learning_report_sync(

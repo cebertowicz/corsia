@@ -109,6 +109,18 @@ class TestDelivery:
             _report(day="2026-10-24", wake=False))] == [DIGESTED]
         assert (_wakes(workspace), _notes(workspace)) == (1, 1)
 
+    def test_passive_note_line_carries_the_items(self, workspace):
+        deliver_learning_report_sync(_report(wake=False))
+        db = get_db()
+        try:
+            (line,) = db.execute(
+                "SELECT summary FROM context_change_journal "
+                "WHERE object_kind='thread_context' AND object_id=?", (workspace,)).fetchone()
+        finally:
+            db.close()
+        assert 'items={"corrections":{"person":{"count":2,' in line
+        assert '"wins":null' in line and "wake=" not in line
+
     def test_project_scope_reaches_its_conductor(self, workspace, project):
         assert [(delivery.outcome, delivery.thread_id) for delivery in deliver_learning_report_sync(
             _report(scope="proj-1"))] == [(WOKE, project)]

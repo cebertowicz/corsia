@@ -42,9 +42,10 @@ from __future__ import annotations
 import sqlite3
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import datetime
 from typing import Any
 
+from events import report_payload
 from events.connectors.measurement import MOVEMENT_DIGEST_EVENT
 from events.platform import PlatformDelivery
 from events.report_delivery import deliver_measurement_report_sync
@@ -58,9 +59,7 @@ class MalformedMovementReport(ValueError):
 
 
 def _text(value: Any, what: str) -> str:
-    if not isinstance(value, str) or not value.strip():
-        raise MalformedMovementReport(f"{what} must be a non-empty string")
-    return value
+    return report_payload.text(value, what, MalformedMovementReport)
 
 
 def _number(value: Any, what: str) -> float:
@@ -70,13 +69,7 @@ def _number(value: Any, what: str) -> float:
 
 
 def _keys(raw: Any, required: set[str], what: str) -> Mapping[str, Any]:
-    if not isinstance(raw, Mapping):
-        raise MalformedMovementReport(f"{what} must be an object")
-    missing, extra = required - set(raw), set(raw) - required
-    if missing or extra:
-        raise MalformedMovementReport(
-            f"{what}: missing {sorted(missing)}, unexpected {sorted(extra)}")
-    return raw
+    return report_payload.exact_keys(raw, required, what, MalformedMovementReport)
 
 
 @dataclass(frozen=True)
@@ -156,12 +149,7 @@ class MovementReport:
     @classmethod
     def parse(cls, raw: Any) -> MovementReport:
         raw = _keys(raw, {"scope", "report_date", "breach", "moves"}, "report")
-        day = _text(raw["report_date"], "report_date")
-        try:
-            date.fromisoformat(day)
-        except ValueError as exc:
-            raise MalformedMovementReport(
-                f"report_date {day!r} is not YYYY-MM-DD") from exc
+        day = report_payload.report_date(raw["report_date"], MalformedMovementReport)
         if not isinstance(raw["breach"], bool):
             raise MalformedMovementReport("breach must be true or false")
         if not isinstance(raw["moves"], (list, tuple)):
@@ -188,8 +176,7 @@ class MovementReport:
 
 def validated(report: MovementReport | Mapping[str, Any]) -> MovementReport:
     """Parse a raw report, or re-validate a typed one built by hand."""
-    raw = report.as_contract() if isinstance(report, MovementReport) else report
-    return MovementReport.parse(raw)
+    return report_payload.revalidate(report, MovementReport)
 
 
 def deliver_movement_report_sync(
