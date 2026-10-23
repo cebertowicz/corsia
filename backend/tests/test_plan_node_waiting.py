@@ -15,7 +15,7 @@ import uuid
 import pytest
 
 from infra.schema import SCHEMA_SQL
-from plans import decisions, mutations, node_cost, public, scheduled_wait, service
+from plans import decisions, followups, mutations, node_cost, public, scheduled_wait, service
 from plans.boundary import PlanActor
 from tests.plan_writer_authorizer import raw_plan_seed
 
@@ -400,28 +400,36 @@ def test_an_unanswered_decision_cuts_to_now_and_an_edit_back_to_draft_ends_it(db
     assert _waited(db, edited, 90) == 30 * 60 + 30 * 60
 
 
-def test_a_withdrawn_decision_or_one_dismissed_out_of_band_stops_being_the_users_time(db, clock):
+def test_withdrawal_ends_a_decision_but_an_attention_clear_does_not_rewrite_its_history(db, clock):
     from registry import attention
 
     plan = service.ensure_plan("thread", "child", db=db)
     withdrawn = _task(db, plan.id, "Withdrawn")
-    dismissed = _task(db, plan.id, "Dismissed")
-    for node in (withdrawn, dismissed):
+    cleared = _task(db, plan.id, "Cleared")
+    for node in (withdrawn, cleared):
         _move(db, node.id, "pending", "active", 0)
         _watch(db, node, 0)
     raised = _decision(db, plan, withdrawn, clock, 20)
-    shown = _decision(db, plan, dismissed, clock, 20)
+    shown = _decision(db, plan, cleared, clock, 20)
     clock(50)
     decisions.invalidate(
         raised["id"], expected_revision=raised["revision"], mutation_id=uuid.uuid4().hex,
         actor=CHILD, provenance="test.waiting", db=db,
     )
     clock(60)
-    # The person dismissed it from their queue; the review step stays in review.
+    # An out-of-band clear leaves the review step in review_requested.
     attention.clear_attention(shown["artifact_id"], outcome="dismiss", reason="not now", db=db)
+    assert _waited(db, cleared, 80) == 20 * 60
+
+    clock(80)
+    decisions.invalidate(
+        shown["id"], expected_revision=shown["revision"], mutation_id=uuid.uuid4().hex,
+        actor=CHILD, provenance="test.waiting", db=db,
+    )
 
     assert _waited(db, withdrawn, 90) == 20 * 60 + 40 * 60
-    assert _waited(db, dismissed, 90) == 20 * 60 + 30 * 60
+    # The user time was 20..80 both before and after withdrawal.
+    assert _waited(db, cleared, 90) == 20 * 60 + 10 * 60
 
 
 def test_a_dependency_on_the_users_step_is_their_time_but_an_agents_step_waits(db):
@@ -453,6 +461,33 @@ def test_a_user_step_closed_unaccepted_leaves_an_unmet_dependency_that_waits_aga
 
     # The user's 0..30 is cut; from their Won't do on, the agent must re-plan.
     assert _waited(db, on_person, 90) == 60 * 60
+
+
+def test_a_failed_user_step_without_a_follow_up_stays_the_users_time(db):
+    plan = service.ensure_plan("thread", "owner", db=db)
+    person_step = _task(db, plan.id, "Sign in", assignee="user")
+    dependent = _task(db, plan.id, "After sign-in")
+    _move(db, dependent.id, "pending", "active", 0)
+    _depend(db, dependent, person_step, 0)
+    _move(db, person_step.id, "pending", "failed", 30)
+
+    assert _waited(db, dependent, 90) == 0
+
+
+def test_a_failed_user_step_stops_being_the_users_time_when_its_follow_up_exists(db, clock):
+    plan = service.ensure_plan("thread", "owner", db=db)
+    person_step = _task(db, plan.id, "Sign in", assignee="user")
+    dependent = _task(db, plan.id, "After sign-in")
+    _move(db, dependent.id, "pending", "active", 0)
+    _depend(db, dependent, person_step, 0)
+    _move(db, person_step.id, "pending", "failed", 30)
+    clock(60)
+    followups.add_follow_up(
+        person_step.id, title="Try another provider", acceptance_criteria="A provider is connected",
+        db=db,
+    )
+
+    assert _waited(db, dependent, 90) == 30 * 60
 
 
 def test_open_waits_leave_out_a_decision_the_user_owes(db, clock):

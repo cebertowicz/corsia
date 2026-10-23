@@ -51,18 +51,20 @@ def test_a_full_v142_install_takes_the_step_and_ends_where_a_fresh_install_start
 
 def test_a_task_finds_its_decisions_through_the_index():
     from infra.database import initialize_schema
-    from plans import node_cost, node_waiting
+    from plans import decision_projection
 
     db = sqlite3.connect(":memory:")
     db.row_factory = sqlite3.Row
     initialize_schema(db)
-    plans: list[str] = []
-    db.set_trace_callback(lambda sql: plans.append(sql) if "INDEXED BY" in sql else None)
-    node_waiting._decisions_raised(db, ["a", "b"], node_cost._rows_in, 0.0)
-    db.set_trace_callback(None)
-    query = plans[0][plans[0].index("SELECT"):]
-    used = " ".join(
-        str(row[-1]) for row in db.execute("EXPLAIN QUERY PLAN " + query.replace("'a','b'", "?,?"), ("a", "b"))
+    queries: list[str] = []
+    db.set_trace_callback(
+        lambda sql: queries.append(sql)
+        if "$.plan_decision.source_node_id" in sql and "FROM artifact_identities i" in sql else None
     )
+    assert decision_projection.review_steps(["a", "b"], db=db) == {}
+    db.set_trace_callback(None)
+    query = queries[0][queries[0].index("SELECT"):]
+    used = " ".join(str(row[-1]) for row in db.execute("EXPLAIN QUERY PLAN " + query))
 
+    assert f"INDEXED BY {_INDEX}" in query
     assert f"USING INDEX {_INDEX}" in used

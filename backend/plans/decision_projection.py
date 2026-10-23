@@ -167,6 +167,43 @@ def canonical_order(decisions: list[dict]) -> list[dict]:
     )
 
 
+def review_steps(source_ids, *, db) -> dict[str, list[str]]:
+    """Return each source task's eligible decision-review node ids.
+
+    This narrow owner read pins the source-task partial index: SQLite otherwise
+    chooses its broader ``(integration,type)`` key even with the expression's
+    partial terms present. It then accepts only active, well-formed decision
+    identities with a live attention link on the review node named in their
+    body. Consumers own the review node's lifecycle; this projection owns
+    identity and linkage eligibility.
+    """
+    unique = list(dict.fromkeys(str(source_id) for source_id in source_ids))
+    found: dict[str, list[str]] = {}
+    for start in range(0, len(unique), hierarchy._ID_CHUNK):
+        chunk = unique[start:start + hierarchy._ID_CHUNK]
+        marks = ",".join("?" for _ in chunk)
+        rows = fetch_all(
+            db,
+            f"""SELECT i.metadata,l.node_id AS review_node_id
+                  FROM artifact_identities i INDEXED BY idx_artifact_identities_decision_source
+                  CROSS JOIN plan_node_artifact_links l
+                 WHERE i.integration='local' AND i.type='plan-decision'
+                   AND i.state='active' AND json_valid(i.metadata)
+                   AND json_extract(i.metadata,'$.plan_decision.source_node_id') IN ({marks})
+                   AND l.artifact_id=i.id AND l.role='attention'""",
+            tuple(chunk),
+        )
+        for row in rows:
+            body = _body(row)
+            if body is None:
+                continue
+            source_id, review_node_id = str(body["source_node_id"]), str(body["node_id"])
+            if source_id not in chunk or review_node_id != str(row["review_node_id"]):
+                continue
+            found.setdefault(source_id, []).append(review_node_id)
+    return {source_id: list(dict.fromkeys(node_ids)) for source_id, node_ids in found.items()}
+
+
 def answerable(db, source_nodes: dict[str, str]) -> dict[str, bool]:
     """Which of these decision identities the answer route could actually settle.
 
