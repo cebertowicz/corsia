@@ -30,7 +30,7 @@ def test_v147_fresh_schema_has_no_install_history_rows() -> None:
 def _combined_starts_plan(db: sqlite3.Connection) -> str:
     groups = tuple(dict.fromkeys(_source_group(metric) for metric in REGISTRY))
     known = tuple(group for group in groups if group in _SOURCE_START_SQL)
-    query = _breaks_query((*known, "asks_hold"), include_models=False)
+    query = _breaks_query((*known, "asks_hold"))
     return "\n".join(str(row[3]) for row in db.execute("EXPLAIN QUERY PLAN " + query))
 
 

@@ -119,6 +119,19 @@ def test_a_measure_across_a_definition_break_is_never_compared():
     assert result["worse"] == []
 
 
+def test_derived_cost_measures_share_the_size_comparability_boundary():
+    """No derived Measure asks /series for a key it never serves in ``breaks``."""
+    boundaries = {"estimated_human_hours_per_active_hour": []}
+    result = _build(
+        _agent("a", "Alpha", dollars_per_work_hour=(1.0, 30, 1.5, 30)),
+        comparable=lambda series, _period: not boundaries[series],
+        cost=_cost(1.0, 1.5),
+        models={"size_overall": [{"size": "S", "cost_per_task": 2.0}],
+                "rows": [_model("Opus", _cell("S", 20, 2.0, 3.0))]},
+    )
+    assert sorted(row["measure"] for row in result["worse"]) == ["cost_per_hour", "cost_per_task", "dollars_per_hour"]
+
+
 def test_an_agent_dollars_per_hour_row_reads_against_the_scope_pooled_figure():
     result = _build(
         _agent("a", "Alpha", dollars_per_work_hour=(1.0, 30, 1.5, 30)),

@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 
 from core.measurement_scope import Grain
 from infra.database import get_db, write_transaction
+from infra.db_async import run_in_db
 from infra.measurement_starts import (
     SOURCE_START_SQL as _SOURCE_START_SQL,
     source_group as _source_group,
@@ -26,31 +27,16 @@ def _period(grain: Grain, value: str | None) -> str | None:
     return grain.period_of(instant.astimezone(ZoneInfo(grain.zone)).date().isoformat())
 
 
-_MODEL_ROWS_SQL = """
-    SELECT json_extract(f.attributes,'$.rater') AS identity, MIN(e.created_at) AS started_at
-    FROM outcome_events f INDEXED BY idx_measurement_size_rater
-    CROSS JOIN plan_nodes n ON n.id=substr(f.subject_key,11)
-    JOIN plan_node_events e ON e.node_id=n.id
-      AND e.new_state IN ('accepted','accepted_with_followup')
-    WHERE f.event_name='measurement.size_rating' AND f.retracted_at IS NULL
-      AND f.subject_key GLOB 'plan_node:*'
-      AND json_extract(f.attributes,'$.rater') > ''
-    GROUP BY identity
-"""
-
-
-def _breaks_query(groups: Iterable[str], include_models: bool) -> str:
+def _breaks_query(groups: Iterable[str]) -> str:
     """Read any as-yet-unretained starts plus persisted break metadata."""
     columns = [f"({_SOURCE_START_SQL[group]}) AS {group}" for group in groups]
     columns.append("""(
         SELECT COALESCE(json_group_array(json_object('period',period,'kind',kind,'reason',reason,'metric_group',metric_group)), '[]')
         FROM (SELECT period,kind,reason,metric_group FROM measure_breaks
-              WHERE kind != 'start' ORDER BY period,kind,metric_group)
+              WHERE kind NOT IN ('start','model') ORDER BY period,kind,metric_group)
     ) AS worlds""")
-    columns.append(f"""(
-        SELECT COALESCE(json_group_array(json_object('identity',identity,'started_at',started_at)), '[]')
-        FROM ({_MODEL_ROWS_SQL})
-    ) AS models""" if include_models else "'[]' AS models")
+    # Model boundaries are retained at rating-write time, so this request reads
+    # only the small break table rather than grouping the rating history.
     return "SELECT " + ", ".join(columns)
 
 
@@ -94,6 +80,24 @@ def persist_source_starts(starts: dict[str, str | None]) -> None:
         db.close()
 
 
+async def persist_pending_starts(starts: dict[str, str | None]) -> None:
+    """Flush one read lane's retained-boundary discoveries through the write lane."""
+    if any(starts.values()):
+        await run_in_db(persist_source_starts, starts)
+
+
+def _model_breaks(db, grain: Grain) -> list[dict[str, str]]:
+    """Build rater-change marks from retained UTC settlement instants."""
+    versions = list(db.execute(
+        "SELECT identity,started_at FROM measurement_model_versions ORDER BY started_at,identity"
+    ))
+    breaks: list[dict[str, str]] = []
+    for _, started_at in versions[1:]:
+        if period := _period(grain, str(started_at)):
+            breaks.append({"period": period, "kind": "model", "reason": "rater changed"})
+    return breaks
+
+
 def _derive_missing_starts(db, groups: Iterable[str]) -> dict[str, str | None]:
     """Read only source groups not yet retained; call before the short write above."""
     requested = tuple(group for group in dict.fromkeys(groups) if group in _SOURCE_START_SQL)
@@ -126,8 +130,8 @@ def source_started_ats(db, metrics: Iterable[str], *, pending_starts: dict[str, 
     return {group: starts.get(group) or derived.get(group) for group in groups}
 
 
-def _break_metadata(db, metrics: Iterable[str], grain: Grain, *, include_models: bool,
-                    pending_starts: dict[str, str | None] | None = None) -> tuple[dict[str, str | None], list[dict[str, str]], list[dict[str, str]], str | None]:
+def _break_metadata(db, metrics: Iterable[str], grain: Grain, *,
+                    pending_starts: dict[str, str | None] | None = None) -> tuple[dict[str, str | None], list[dict[str, str]], str | None]:
     groups = tuple(dict.fromkeys(_source_group(metric) for metric in metrics))
     stored = _stored_starts(db, groups)
     missing = tuple(group for group in groups if group in _SOURCE_START_SQL and not stored[group])
@@ -135,7 +139,7 @@ def _break_metadata(db, metrics: Iterable[str], grain: Grain, *, include_models:
     query_groups = [*missing]
     if "asks_per_outcome" in metrics and not asks_hold_stored:
         query_groups.append("asks_hold")
-    row = db.execute(_breaks_query(query_groups, include_models)).fetchone()
+    row = db.execute(_breaks_query(query_groups)).fetchone()
     derived = {group: str(row[group]) if row and row[group] else None for group in missing}
     if "asks_hold" in query_groups:
         derived["asks_hold"] = str(row["asks_hold"]) if row and row["asks_hold"] else None
@@ -148,25 +152,14 @@ def _break_metadata(db, metrics: Iterable[str], grain: Grain, *, include_models:
     worlds = [{**item, "period": grain.period_of(str(item["period"]))}
               for item in json.loads(row["worlds"] or "[]")]
 
-    model_rows = sorted(
-        json.loads(row["models"] or "[]"),
-        key=lambda item: (item.get("started_at") or "", item.get("identity") or ""),
-    )
-    models = [{"period": period, "kind": "model", "reason": "rater changed"}
-              for item in model_rows[1:]
-              if (period := _period(grain, item.get("started_at")))]
-    return starts, worlds, models, asks_hold
+    return starts, [*worlds, *_model_breaks(db, grain)], asks_hold
 
 
-def derive_breaks(db, metrics: Iterable[str], grain: Grain, *, include_models: bool = True,
+def derive_breaks(db, metrics: Iterable[str], grain: Grain, *,
                   pending_starts: dict[str, str | None] | None = None) -> dict[str, list[dict[str, str]]]:
     """Return requested series' retained starts and comparable boundaries."""
     requested = tuple(metrics)
-    group_starts, worlds, size_models, asks_hold_value = _break_metadata(
-        db, requested, grain,
-        include_models=include_models and "estimated_human_hours_per_active_hour" in requested,
-        pending_starts=pending_starts,
-    )
+    group_starts, worlds, asks_hold_value = _break_metadata(db, requested, grain, pending_starts=pending_starts)
     starts = {metric: _period(grain, group_starts[_source_group(metric)]) for metric in requested}
     asks_hold = _period(grain, asks_hold_value)
     result: dict[str, list[dict[str, str]]] = {}
@@ -184,17 +177,30 @@ def derive_breaks(db, metrics: Iterable[str], grain: Grain, *, include_models: b
                  or item.get("metric_group") == group)
                 and (not start or item["period"] > start))
         )
-        if metric == "estimated_human_hours_per_active_hour":
-            rows.extend(size_models)
         result[metric] = rows
     return result
 
 
-def first_source_period(breaks: Iterable[dict[str, str]]) -> str | None:
-    """Return the data-availability start, not a later completeness/source mark."""
-    return next((item["period"] for item in breaks if item["kind"] == "start"), None)
+def first_availability_period(breaks: Iterable[dict[str, str]]) -> str | None:
+    """Return the first source that can observe a metric, not later completeness marks."""
+    return next((item["period"] for item in breaks if item["kind"] in {"start", "source"}), None)
+
+
+def latest_source_mark_period(db, group: str) -> str | None:
+    """Return a group's latest completeness/source mark for callers that need it."""
+    row = db.execute(
+        "SELECT MAX(period) FROM measure_breaks WHERE kind='source' AND metric_group=?", (group,)
+    ).fetchone()
+    return str(row[0]) if row and row[0] else None
+
+
+def comparability_start(breaks: Iterable[dict[str, str]]) -> str | None:
+    """Return the final definition boundary a period must reach to be comparable."""
+    marks = [item["period"] for item in breaks if item["kind"] in {"world", "model"}]
+    return max(marks, default=None)
 
 
 def period_comparable(metric: str, period: str, breaks: Iterable[dict[str, str]]) -> bool:
     """Use the one derived list for chart rows and Agents findings alike."""
-    return not any(item["kind"] in {"world", "model"} and period < item["period"] for item in breaks)
+    start = comparability_start(breaks)
+    return start is None or period >= start

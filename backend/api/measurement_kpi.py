@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any, NamedTuple
 
-from api.measurement_breaks import source_started_at
+from api.measurement_breaks import latest_source_mark_period, source_started_at
 from api.measurement_token_sql import TOKEN_FIGURE_SQL
 
 
@@ -43,9 +43,7 @@ def build_kpi(db, current: Period, previous: Period, *, pending_starts: dict[str
     """Build both periods' token figures on a connection whose scope table is already prepared. One read."""
     bounds = {"previous_from": previous.start, "current_from": current.start, "current_to": current.end}
     tokens = {row["period"]: dict(row) for row in db.execute(_TOKEN_SQL, bounds).fetchall()}
-    source_mark = db.execute(
-        "SELECT MAX(period) FROM measure_breaks WHERE kind='source' AND metric_group='tokens'"
-    ).fetchone()[0]
+    source_mark = latest_source_mark_period(db, "tokens")
     recorded_from = source_mark or source_started_at(db, "fresh_tokens", pending_starts=pending_starts)
     return {
         name: {

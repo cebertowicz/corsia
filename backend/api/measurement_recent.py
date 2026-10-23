@@ -6,14 +6,14 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Query
 
-from api.measurement_breaks import persist_source_starts
+from api.measurement_breaks import persist_pending_starts
 from api.measurement_kpi import Period, build_kpi
 from api.measurement_partial import grain_instant, stored_bound
 from api.measurement_prepared import DDL, PREPARED_SCOPE
 from api.measurement_scope import resolve_grain, scope_cte, validate_scope
 from infra.auth import require_user
 from infra.database import get_db
-from infra.db_async import run_bulk, run_in_db
+from infra.db_async import run_bulk
 
 router = APIRouter()
 
@@ -51,7 +51,6 @@ async def measurement_key_figures(
             db.close()
 
     selected_scope, kpi, pending_starts = await run_bulk(query)
-    if any(pending_starts.values()):
-        await run_in_db(persist_source_starts, pending_starts)
+    await persist_pending_starts(pending_starts)
     return {"definition_version": 1, "scope": selected_scope, "timezone": timezone_name,
             "generated_at": request_now.isoformat(), "today": today, "period": page_grain.describe(), "kpi": kpi}

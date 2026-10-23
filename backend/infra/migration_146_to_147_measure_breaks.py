@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from infra.measurement_schema import MEASUREMENT_BREAKS_SCHEMA_SQL, MEASUREMENT_INDEXES
-from infra.measurement_starts import SOURCE_START_SQL, source_starts_query
+from infra.measurement_starts import SOURCE_START_SQL, record_existing_model_versions, source_starts_query
 
 
 def _has_columns(schema: dict[str, set[str]], required: dict[str, set[str]]) -> bool:
@@ -89,3 +89,8 @@ def migrate_146_to_147(conn) -> None:
     conn.execute("DROP INDEX IF EXISTS idx_measurement_presence_start")
     conn.execute("DROP INDEX IF EXISTS idx_measurement_active_turns_start")
     _record_legacy_marks(conn, _record_existing_starts(conn, schema))
+    if _has_columns(schema, {
+        "outcome_events": {"event_name", "retracted_at", "subject_key", "attributes"},
+        "plan_nodes": {"id"}, "plan_node_events": {"node_id", "created_at", "new_state"},
+    }):
+        record_existing_model_versions(conn)

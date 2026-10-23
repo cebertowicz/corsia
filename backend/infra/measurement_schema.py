@@ -17,6 +17,10 @@ CREATE TABLE IF NOT EXISTS measure_breaks (
     reason TEXT NOT NULL,
     PRIMARY KEY(period, kind, metric_group)
 );
+CREATE TABLE IF NOT EXISTS measurement_model_versions (
+    identity TEXT PRIMARY KEY,
+    started_at TEXT NOT NULL
+);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_measure_breaks_identity
     ON measure_breaks(period, kind, COALESCE(metric_group, ''));
 CREATE UNIQUE INDEX IF NOT EXISTS idx_measure_break_starts_group

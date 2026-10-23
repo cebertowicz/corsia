@@ -14,7 +14,9 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
+from core.size_rating import SIZE_EVENT
 from host_access.credential_sanitizer import contains_credential
+from infra.measurement_starts import record_model_version
 from infra.outcome_event_attributes import AttributeSpec, filter_attributes
 from infra.outcome_event_input import OutcomeInputRefusal
 
@@ -101,10 +103,11 @@ def record_outcome_event(
             raise OutcomeInputRefusal("outcome event identity fields must not carry credentials")
     kept, dropped = filter_attributes(event_name, attributes, declared_specs)
     event_id = str(uuid.uuid4())
+    occurred_at = _utc(ts)
     cursor = db.execute(
         f"INSERT INTO outcome_events ({_COLUMNS}) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,NULL) "
         "ON CONFLICT(dedupe_key) DO NOTHING",
-        (event_id, dedupe_key, event_name, source, provenance, _utc(ts), _now(),
+        (event_id, dedupe_key, event_name, source, provenance, occurred_at, _now(),
          subject_key, project_id, agent_thread_id, attribution, corroborated_by,
          json.dumps(kept, separators=(",", ":"))),
     )
@@ -113,6 +116,8 @@ def record_outcome_event(
         return RecordResult(False, None, ())
     if dropped:
         count_outcome_event(db, "attribute_dropped", event_name, len(dropped), agent_thread_id=agent_thread_id or "")
+    if event_name == SIZE_EVENT:
+        record_model_version(db, str(kept.get("rater") or ""), subject_key)
     return RecordResult(True, event_id, tuple(dropped))
 
 

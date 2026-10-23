@@ -9,9 +9,15 @@ import pytest
 from api import measurement
 from api import measurement_breaks
 from api.measurement import _row
-from api.measurement_breaks import derive_breaks, period_comparable, record_source_starts, source_started_ats
+from api.measurement_breaks import (
+    comparability_start, derive_breaks, first_availability_period, period_comparable, record_source_starts,
+    source_started_ats,
+)
 from core.measurement_scope import resolve_grain
 from infra.database import get_db
+from infra.measurement_starts import record_existing_model_versions
+from infra.outcome_events import record_outcome_event
+from plans import service as plan_service
 from tests.plan_writer_authorizer import raw_plan_seed
 from tests.test_measurement_api import _seed_decision, _seed_outcomes, _seed_thread
 
@@ -170,6 +176,82 @@ def test_world_break_maps_to_requested_month_grain(isolated_db) -> None:
         db.close()
 
 
+def test_new_size_rater_persists_its_accepted_task_boundary(isolated_db) -> None:
+    db = get_db()
+    try:
+        _thread(db)
+        with raw_plan_seed(db):
+            for key, rater, settled_at in (("first", "rater-a", "2026-09-01T12:00:00Z"),
+                                            ("second", "rater-b", "2026-09-15T12:00:00Z")):
+                db.execute("INSERT INTO plan_nodes (id,plan_id,order_key,kind,title,acceptance_criteria,state,commitment_id,requirements_revision,revision,created_at,updated_at) VALUES (?,?,0,'task','t','t','accepted',?,1,1,'t','t')", (key, "plan", key))
+                db.execute("INSERT INTO plan_node_events (id,node_id,provenance,event,prior_state,new_state,created_at) VALUES (?,?, 'test','accepted','active','accepted',?)", (f"{key}-accepted", key, settled_at))
+                record_outcome_event(
+                    db, dedupe_key=key, event_name="measurement.size_rating", source="corsia",
+                    provenance="agent_recorded", ts="2026-10-01T12:00:00Z", subject_key=f"plan_node:{key}",
+                    attributes={"rater": rater},
+                )
+        versions = list(db.execute("SELECT identity,started_at FROM measurement_model_versions ORDER BY identity"))
+        model_marks = list(db.execute("SELECT * FROM measure_breaks WHERE kind='model'"))
+    finally:
+        db.close()
+    assert not model_marks
+    assert [tuple(row) for row in versions] == [
+        ("rater-a", "2026-09-01T12:00:00Z"), ("rater-b", "2026-09-15T12:00:00Z"),
+    ]
+
+
+def test_model_boundaries_use_accepted_pacific_periods_for_migration_and_writes(isolated_db, monkeypatch) -> None:
+    """Migration and new writes both use settlement, not a rating's UTC timestamp."""
+    grain = resolve_grain("weeks", "America/Los_Angeles", now=datetime(2026, 10, 22, tzinfo=timezone.utc))
+    db = get_db()
+    try:
+        _thread(db)
+        with raw_plan_seed(db):
+            for node_id, rater, settled_at in (("seed-old", "seed-a", "2026-09-08T12:00:00Z"),
+                                                ("seed-new", "seed-b", "2026-09-15T05:30:00Z")):
+                db.execute("INSERT INTO plan_nodes (id,plan_id,order_key,kind,title,acceptance_criteria,state,commitment_id,requirements_revision,revision,created_at,updated_at) VALUES (?,?,0,'task','t','t','accepted',?,1,1,'t','t')", (node_id, "plan", node_id))
+                db.execute("INSERT INTO plan_node_events (id,node_id,provenance,event,prior_state,new_state,created_at) VALUES (?,?, 'test','accepted','active','accepted',?)", (f"{node_id}-accepted", node_id, settled_at))
+                db.execute("INSERT INTO outcome_events (id,dedupe_key,event_name,source,provenance,ts,observed_ts,subject_key,attributes) VALUES (?,?,?,?,?,?,?,?,?)", (f"{node_id}-rating", f"{node_id}-rating", "measurement.size_rating", "corsia", "agent_recorded", "2026-10-01T12:00:00Z", "2026-10-01T12:00:00Z", f"plan_node:{node_id}", json.dumps({"rater": rater})))
+        record_existing_model_versions(db)
+        seeded = derive_breaks(db, ("estimated_human_hours_per_active_hour",), grain)
+        db.execute("DELETE FROM measurement_model_versions")
+        with raw_plan_seed(db):
+            db.execute("INSERT INTO plan_nodes (id,plan_id,order_key,kind,title,acceptance_criteria,state,commitment_id,requirements_revision,revision,created_at,updated_at) VALUES ('write-old','plan',0,'task','t','t','accepted','write-old',1,1,'t','t')")
+            db.execute("INSERT INTO plan_node_events (id,node_id,provenance,event,prior_state,new_state,created_at) VALUES ('write-old-accepted','write-old','test','accepted','active','accepted','2026-09-08T12:00:00Z')")
+            record_outcome_event(db, dedupe_key="write-old-rating", event_name="measurement.size_rating", source="corsia", provenance="agent_recorded", ts="2026-10-01T12:00:00Z", subject_key="plan_node:write-old", attributes={"rater": "write-a"})
+            db.execute("INSERT INTO plan_nodes (id,plan_id,order_key,kind,title,acceptance_criteria,state,commitment_id,requirements_revision,revision,created_at,updated_at) VALUES ('write-new','plan',1,'task','t','t','accepted','write-new',1,1,'t','t')")
+            record_outcome_event(db, dedupe_key="write-new-rating", event_name="measurement.size_rating", source="corsia", provenance="agent_recorded", ts="2026-09-15T05:00:00Z", subject_key="plan_node:write-new", attributes={"rater": "write-b"})
+            monkeypatch.setattr(plan_service, "_now", lambda: "2026-09-15T05:30:00Z")
+            plan_service._event(db, "write-new", "accepted", actor_id=None, provenance="test", prior_state="active", new_state="accepted")
+        written = derive_breaks(db, ("estimated_human_hours_per_active_hour",), grain)
+    finally:
+        db.close()
+    expected = {"period": "2026-09-14", "kind": "model", "reason": "rater changed"}
+    assert expected in seeded["estimated_human_hours_per_active_hour"]
+    assert expected in written["estimated_human_hours_per_active_hour"]
+    for breaks in (seeded, written):
+        marks = breaks["estimated_human_hours_per_active_hour"]
+        assert not period_comparable("estimated_human_hours_per_active_hour", "2026-09-07", marks)
+        assert period_comparable("estimated_human_hours_per_active_hour", "2026-09-14", marks)
+
+
+def test_availability_and_comparability_helpers_distinguish_source_and_definition_marks() -> None:
+    source_only = [{"period": "2026-09-07", "kind": "source", "reason": "user-owned holds first recorded"}]
+    start_then_completeness = [
+        {"period": "2026-03-02", "kind": "start", "reason": "instrument source first recorded"},
+        {"period": "2026-09-07", "kind": "source", "reason": "token totals cover every harness from this week"},
+    ]
+    marks = [
+        {"period": "2026-08-31", "kind": "world", "reason": "counting changed"},
+        {"period": "2026-09-14", "kind": "model", "reason": "rater changed"},
+    ]
+    assert first_availability_period(source_only) == "2026-09-07"
+    assert first_availability_period(start_then_completeness) == "2026-03-02"
+    assert comparability_start(marks) == "2026-09-14"
+    assert not period_comparable("estimated_human_hours_per_active_hour", "2026-09-07", marks)
+    assert period_comparable("estimated_human_hours_per_active_hour", "2026-09-14", marks)
+
+
 def test_token_completeness_break_keeps_earlier_available_token_periods(isolated_db) -> None:
     db = get_db()
     try:
@@ -187,7 +269,8 @@ def test_token_completeness_break_keeps_earlier_available_token_periods(isolated
     assert {"period": "2026-09-07", "kind": "source", "reason": "token totals cover every harness from this week"} not in breaks["limit_hits"]
 
 
-def test_size_model_break_is_requested_lazily_and_uses_rater(isolated_db) -> None:
+@pytest.mark.parametrize("rating_rows", (7_593, 75_930), ids=("current", "10x"))
+def test_size_model_break_is_retained_once_and_never_reads_rating_history(isolated_db, rating_rows) -> None:
     db = get_db()
     try:
         _thread(db)
@@ -198,19 +281,26 @@ def test_size_model_break_is_requested_lazily_and_uses_rater(isolated_db) -> Non
         for event_id, node_id, rater, observed in (("size-one", "size-node-one", "rater-a", "2026-09-01T12:00:00Z"), ("size-two", "size-node-two", "rater-b", "2026-09-15T12:00:00Z")):
             db.execute("INSERT INTO outcome_events (id,dedupe_key,event_name,source,provenance,ts,observed_ts,subject_key,attributes) VALUES (?,?,?,?,?,?,?,?,?)", (event_id, event_id, "measurement.size_rating", "corsia", "agent_recorded", observed, observed, f"plan_node:{node_id}", json.dumps({"rater": rater})))
         db.commit()
+        record_existing_model_versions(db)
+        source_started_ats(db, ("outcomes", "estimated_human_hours_per_active_hour"))
+        # Production has 7,593 outcome rows; at both that count and 10x, the
+        # request budget is one break-table read and zero rating-history reads.
+        db.executemany(
+            "INSERT INTO outcome_events (id,dedupe_key,event_name,source,provenance,ts,observed_ts,subject_key,attributes) VALUES (?,?,?,?,?,?,?,?,?)",
+            ((f"history-{index}", f"history-{index}", "measurement.size_rating", "corsia", "agent_recorded",
+              "2026-09-16T12:00:00Z", "2026-09-16T12:00:00Z", "plan_node:missing", json.dumps({"rater": "rater-c"}))
+             for index in range(rating_rows)),
+        )
+        db.commit()
         executed: list[str] = []
         db.set_trace_callback(executed.append)
         nonsize = derive_breaks(db, ("outcomes",), _grain())
         sized = derive_breaks(db, ("estimated_human_hours_per_active_hour",), _grain())
-        model_query = next(sql for sql in executed if "SELECT json_extract(f.attributes,'$.rater')" in sql)
-        model_plan = "\n".join(str(row[3]) for row in db.execute("EXPLAIN QUERY PLAN " + model_query))
     finally:
         db.close()
     assert nonsize["outcomes"] == [{"period": "2026-08-31", "kind": "start", "reason": "instrument source first recorded"}]
     assert {"period": "2026-09-14", "kind": "model", "reason": "rater changed"} in sized["estimated_human_hours_per_active_hour"]
-    assert "SCAN outcome_events" not in model_plan
-    assert "USE TEMP B-TREE" not in model_plan
-    assert "idx_measurement_size_rater" in model_plan
+    assert not any("outcome_events" in sql for sql in executed)
 
 
 @pytest.mark.asyncio
@@ -256,8 +346,8 @@ async def test_series_index_start_reads_keep_only_the_indexes_needed_after_start
     queries: list[str] = []
     original = measurement_breaks._breaks_query
 
-    def traced_query(groups, include_models: bool) -> str:
-        query = original(groups, include_models)
+    def traced_query(groups) -> str:
+        query = original(groups)
         queries.append(query)
         return query
 

@@ -17,7 +17,9 @@ from api.measurement_join import joined_read
 from api.measurement_limits import first_recorded_period, limits_by_period, router as limits_router
 from api.measurement_recent import router as recent_router
 from api.measurement_presence import PresenceCoverage, presence_coverage
-from api.measurement_breaks import derive_breaks, first_source_period, period_comparable, persist_source_starts
+from api.measurement_breaks import (
+    comparability_start, derive_breaks, first_availability_period, period_comparable, persist_pending_starts,
+)
 from api.measurement_registry import REGISTRY, period_measured
 from api.measurement_series_selection import metric_spine, requested_series
 from api.measurement_models import models_read, task_chain_costs
@@ -28,7 +30,7 @@ from api.measurement_windows import series_windows
 from api.measurement_scope import resolve_grain, scope_cte, validate_scope
 from infra.auth import require_user
 from infra.database import get_db
-from infra.db_async import run_bulk, run_in_db
+from infra.db_async import run_bulk
 from infra.config import WORKSPACE
 from core.lesson_report_access import report_for_identity
 from core.lesson_report_offers import LessonReportCollectionCancelled
@@ -38,11 +40,6 @@ router = APIRouter(prefix="/api/measurement", tags=["measurement"])
 router.include_router(limits_router)
 router.include_router(recent_router)
 
-
-async def _persist_pending_starts(starts: dict[str, str | None]) -> None:
-    """Write source starts computed on the read-only bulk lane after that read ends."""
-    if any(starts.values()):
-        await run_in_db(persist_source_starts, starts)
 
 
 async def _monitor_client_disconnect(request: Request, cancellation_event: Event) -> None:
@@ -195,19 +192,19 @@ async def series_payload(requested: list[str], project: str, agent: str, page_gr
     selected_scope, family_rows, first_limit_period, outcomes_so_far, coverage, breaks, pending_starts = await run_bulk(
         _series_read, requested, project, agent, page_grain, user["id"],
     )
-    await _persist_pending_starts(pending_starts)
+    await persist_pending_starts(pending_starts)
     first_presence = coverage.start_period(page_grain)
     rows: list[dict[str, Any]] = []
     windows: dict[str, dict[str, Any]] = {}
     spine = list(page_grain.periods)
     def measured(metric: str, period: str) -> bool:
-        return period_measured(metric, period, page_grain, first_presence, first_source_period(breaks[metric]))
+        return period_measured(metric, period, page_grain, first_presence, first_availability_period(breaks[metric]))
 
     for metric in requested:
         family = REGISTRY[metric].family
         by_period = {row["period"]: row for row in family_rows[family]}
         sources = by_period if family != "tokens" else {}
-        source_start = first_source_period(breaks[metric])
+        source_start = first_availability_period(breaks[metric])
         eligible_periods = metric_spine(metric, spine, first_limit_period, first_presence, source_start, page_grain)
         eligible, first_row = set(eligible_periods), len(rows)
         drawn = [period for period in eligible_periods if period in page_grain.served]
@@ -222,7 +219,7 @@ async def series_payload(requested: list[str], project: str, agent: str, page_gr
         if family == "size":
             rows.extend(size_rows(metric, REGISTRY[metric].minimum_n, REGISTRY[metric].method_version, drawn, family_rows[family],
                                   lambda name, period: period_comparable(name, period, breaks[name]), rate_measured,
-                                  dates={"data_start": rate_period, "comparability_before": next((item["period"] for item in breaks[metric] if item["kind"] in {"world", "model"}), None)}))
+                                  dates={"data_start": rate_period, "comparability_before": comparability_start(breaks[metric])}))
         elif family == "tokens":
             by_period = {row["period"]: row for row in family_rows[family]}
             periods = [*drawn, current_period] if metric == "fresh_tokens" else drawn
@@ -238,7 +235,7 @@ async def series_payload(requested: list[str], project: str, agent: str, page_gr
             if metric == "outcomes" and outcomes_so_far is not None:
                 rows.append(_row(metric, current_period, {"outcomes": outcomes_so_far}, False, True, page_grain, first_presence, source_start, breaks[metric]))
         pooling = {"measured": rate_measured, "size_minimum_n": REGISTRY[metric].minimum_n if family == "size" else None,
-                   "row": lambda name, period, source: _row(name, period, source, selected_scope["agent"] is not None, grain=page_grain, first_presence_period=first_presence, source_start=first_source_period(breaks[name]), breaks=breaks[name])}
+                   "row": lambda name, period, source: _row(name, period, source, selected_scope["agent"] is not None, grain=page_grain, first_presence_period=first_presence, source_start=first_availability_period(breaks[name]), breaks=breaks[name])}
         # Every series pools the window its card names; a size series' comparability marks its rows, never its window.
         windows[metric] = series_windows(metric, page_grain, by_period, periods=set(eligible_periods), **pooling)
         add_averages(rows[first_row:], metric, page_grain, eligible, by_period, **pooling)
@@ -268,18 +265,17 @@ async def measurement_index(project: str = Query(...), agent: str = Query(...),
             """, params).fetchone()
             total = int(cost["n"] or 0)
             pending_starts: dict[str, str | None] = {}
-            breaks = derive_breaks(db, REGISTRY, resolve_grain("days", zone), include_models=False,
-                                  pending_starts=pending_starts)
+            breaks = derive_breaks(db, REGISTRY, resolve_grain("days", zone), pending_starts=pending_starts)
             return selected_scope.response(), {"known_cost_usd": float(cost["known_cost_usd"] or 0),
                                                "unknown_cost_share": (int(cost["unknown_cost_rows"] or 0) / total if total else 0)}, presence_coverage(db, user["id"], zone), breaks, pending_starts
         finally:
             db.close()
 
     selected_scope, cost_metadata, coverage, breaks, pending_starts = await run_bulk(query)
-    await _persist_pending_starts(pending_starts)
+    await persist_pending_starts(pending_starts)
 
     def data_start(name: str, item: Any) -> str | None:
-        source_start = next((item["period"] for item in breaks[name] if item["kind"] in {"start", "source"}), None)
+        source_start = first_availability_period(breaks[name])
         if item.family == "size":
             return max((start for start in (source_start, coverage.start_day) if start), default=None)
         if item.presence_backed:
@@ -290,7 +286,7 @@ async def measurement_index(project: str = Query(...), agent: str = Query(...),
                     "minimum_n": item.minimum_n, "owner": "Self-Improvement Infrastructure",
                     "method_version": item.method_version, "data_start": data_start(name, item), "proxy": item.proxy,
                     "proxy_explanation": "Proxy measurement" if item.proxy else None,
-                    "comparability": {"before": next((mark["period"] for mark in breaks[name] if mark["kind"] in {"world", "model"}), None), "restricted": name not in {"outcomes", "fresh_tokens"}},
+                    "comparability": {"before": comparability_start(breaks[name]), "restricted": name not in {"outcomes", "fresh_tokens"}},
                     "breaks": breaks[name],
                     "availability": "ready" if item.available else "unavailable",
                     "scope_capability": ["project", "agent"], "companion": item.companion}
@@ -349,7 +345,7 @@ async def agents_payload(project: str, agent: str, page_grain: Grain, sort: str,
             rows, findings, summaries, agent_count, overall = build_agents(
                 db, params, REGISTRY, metric, sort, page_grain,
                 lambda name, period: period_comparable(name, period, breaks[name]),
-                lambda name, period: period_measured(name, period, page_grain, first_presence, next((item["period"] for item in breaks[name] if item["kind"] in {"start", "source"}), None)), cost_rows, with_dollars=dollars)
+                lambda name, period: period_measured(name, period, page_grain, first_presence, first_availability_period(breaks[name])), cost_rows, with_dollars=dollars)
             return {
                 "definition_version": 1,
                 "scope": selected_scope.response(),
@@ -369,7 +365,7 @@ async def agents_payload(project: str, agent: str, page_grain: Grain, sort: str,
             db.close()
 
     payload, pending_starts = await run_bulk(query)
-    await _persist_pending_starts(pending_starts)
+    await persist_pending_starts(pending_starts)
     return payload
 
 @router.get("/models")

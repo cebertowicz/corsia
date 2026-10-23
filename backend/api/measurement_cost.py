@@ -17,7 +17,7 @@ from fastapi import Depends, Query
 from api.cost_identity import IDENTITY_GROUP, IdentityResolver, identity_columns, identity_join
 from api.measurement_actual import build_actual
 from api.measurement_average import cost_average
-from api.measurement_breaks import persist_source_starts, source_started_period
+from api.measurement_breaks import persist_pending_starts, source_started_period
 from api.measurement_join import joined_read
 from api.measurement_queries import (
     PREPARED_OUTCOMES, PREPARED_SCOPE, prepare_outcome_periods, prepare_scope_threads,
@@ -31,7 +31,7 @@ from core.measurement_token_contract import (
     CLAUDE_CODE_SOURCE, CODEX_SOURCE, TOKEN_BUCKETS, buckets_reported_sql, contract_proven_sql, total_agrees_sql,
 )
 from infra.database import get_db
-from infra.db_async import run_bulk, run_in_db
+from infra.db_async import run_bulk
 from llm.api_equivalent import (
     api_equivalent, has_public_long_context_price, has_unpublished_cache_rate, is_not_api_priced, price_identity,
 )
@@ -158,8 +158,7 @@ async def cost_read(project: str, agent: str, page_grain: Grain, user: dict) -> 
             db.close()
 
     result, pending_starts = await run_bulk(query)
-    if any(pending_starts.values()):
-        await run_in_db(persist_source_starts, pending_starts)
+    await persist_pending_starts(pending_starts)
     return result
 
 
