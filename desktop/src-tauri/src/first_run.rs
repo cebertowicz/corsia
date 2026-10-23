@@ -811,6 +811,7 @@ mod tests {
             fs::create_dir_all(path).unwrap();
         }
         let documents_with_trailing_separator = PathBuf::from(format!("{}/", documents.display()));
+        let home_parent = home.0.parent().unwrap().to_path_buf();
 
         for (path, folder_warning) in [
             (&home.0, FolderWarning::PersonalFolder { folder: "Home" }),
@@ -821,7 +822,7 @@ mod tests {
             (&cloud_docs, FolderWarning::PersonalFolder { folder: "iCloud Drive" }),
             (&library, FolderWarning::ContainsPersonalFolder { folder: "iCloud Drive" }),
             (
-                home.0.parent().unwrap(),
+                &home_parent,
                 FolderWarning::ContainsPersonalFolder { folder: "Documents" },
             ),
         ] {
