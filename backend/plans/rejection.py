@@ -66,7 +66,6 @@ def reject_submission(
     whether this was a replay.
     """
     feedback = service._required_text(feedback, "review feedback")
-    rejection_event_ids: list[str] = []
     with service._connection(db) as connection, service._write(connection):
         # A sent-back submission is closed, which no writer may touch; its
         # replay only reads, so it is resolved before the live-node guard.
@@ -104,11 +103,12 @@ def reject_submission(
         rejected, rejection_event_id = _send_back(
             connection, node_id, feedback, actor_id, provenance, settles_worker=False,
         )
-        rejection_event_ids.append(rejection_event_id)
-        # Returned worker leaves carry the verdict for their own closure, but
-        # only the reviewed node above is the verdict's correction fact.
+        # The worker's returned steps settle like any closed step: a nested
+        # delegation among them retires its own worker, which gets no revision.
+        # They carry the verdict for their own closure, but only the reviewed
+        # node above is its correction fact.
         for leaf in returned:
-            _sent_back, _leaf_rejection_event_id = _send_back(
+            _send_back(
                 connection, leaf["id"], feedback, actor_id, provenance, settles_worker=True,
             )
         worker_step_id = _attach_revision_and_seed_worker(
@@ -122,11 +122,11 @@ def reject_submission(
             connection, revision.id, "revision_created", actor_id=actor_id,
             provenance=provenance, payload=payload,
         )
-        result = rejected, service._node_from_row(connection, service._node_row(connection, revision.id)), False
-    from core.sent_back_corrections import record_rejection_corrections
+        from core.sent_back_corrections import schedule_rejection_corrections
 
-    record_rejection_corrections(rejection_event_ids, db=db)
-    return result
+        # Recorded once this write commits; the nightly recovery covers a failure.
+        schedule_rejection_corrections(connection, [rejection_event_id])
+        return rejected, service._node_from_row(connection, service._node_row(connection, revision.id)), False
 
 
 def _attach_revision_and_seed_worker(

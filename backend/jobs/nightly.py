@@ -190,6 +190,7 @@ async def _run_job_safely() -> None:
             )
     # Follow-up jobs run after the terminal record: their failures cannot change
     # the maintenance disposition already written.
+    await _record_sent_back_corrections_safely()
     await _emit_learning_reports_safely()
     await _reap_worktrees_safely()
 
@@ -203,6 +204,25 @@ async def _run_scheduled_update_if_due(now: datetime | None = None) -> str | Non
     except Exception:
         logger.exception("nightly_job: scheduled update tick failed")
         return None
+
+
+async def _record_sent_back_corrections_safely() -> None:
+    """Record sent-back correction facts the live path missed; log and swallow any failure."""
+    from core.sent_back_corrections import reconcile_sent_back_corrections
+
+    def reconcile() -> int:
+        db = get_db()
+        try:
+            return reconcile_sent_back_corrections(db)
+        finally:
+            db.close()
+
+    try:
+        recovered = await asyncio.to_thread(reconcile)
+        if recovered:
+            logger.info("nightly_job: recovered {} sent-back correction facts", recovered)
+    except Exception:
+        logger.exception("nightly_job: sent-back correction recovery failed")
 
 
 async def _emit_learning_reports_safely() -> None:
