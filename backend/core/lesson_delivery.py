@@ -197,6 +197,28 @@ def read_delivery(
     return ReadDelivery(f"{rendered_text}\n\n" + "\n\n".join(additions), node_id, receipts)
 
 
+def _record_trial_draw(
+    db: sqlite3.Connection, *, thread_id: str, node_id: str, trial: TrialDelivery,
+    variant: Variant, checkpoint_generation_id: str | None,
+) -> None:
+    """Record one draw or fail the enclosing transaction without a receipt."""
+    from core.guidance_manifest import record_guidance_load
+
+    record_guidance_load(
+        thread_id=thread_id, turn_id=None, path=trial.source_path,
+        data=trial.source_data, returned_text=trial.body, partial=False,
+        node_id=node_id, variant=variant, checkpoint_generation_id=checkpoint_generation_id,
+        lesson_id=trial.lesson_id, lesson_behavioral_sha256=trial.behavioral_sha256, db=db,
+    )
+    receipt = db.execute(
+        """SELECT 1 FROM guidance_loads WHERE node_id=? AND lesson_id=?
+           AND lesson_behavioral_sha256=? LIMIT 1""",
+        (node_id, trial.lesson_id, trial.behavioral_sha256),
+    ).fetchone()
+    if receipt is None:
+        raise RuntimeError("trial draw receipt unavailable")
+
+
 def start_trials(
     db: sqlite3.Connection, *, thread_id: str, node_id: str,
     checkpoint_generation_id: str | None = None,
@@ -207,7 +229,6 @@ def start_trials(
     the short receipt-write transaction. This avoids opening the trial-draw
     savepoint while scanning skills or aggregating prior delivery state.
     """
-    from core.guidance_manifest import record_guidance_load
     from infra.database import write_transaction
 
     pending: list[tuple[TrialDelivery, Variant]] = []
@@ -243,13 +264,8 @@ def start_trials(
         return with_deliveries
     with write_transaction(db, scope="trial_draw") as tx:
         for trial, variant in pending:
-            record_guidance_load(
-                thread_id=thread_id, turn_id=None, path=trial.source_path,
-                data=trial.source_data, returned_text=trial.body, partial=False,
-                node_id=node_id, variant=variant,
-                checkpoint_generation_id=checkpoint_generation_id,
-                lesson_id=trial.lesson_id,
-                lesson_behavioral_sha256=trial.behavioral_sha256, db=tx,
-                raise_on_failure=True,
+            _record_trial_draw(
+                tx, thread_id=thread_id, node_id=node_id, trial=trial,
+                variant=variant, checkpoint_generation_id=checkpoint_generation_id,
             )
     return with_deliveries

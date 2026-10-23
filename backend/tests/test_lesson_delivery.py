@@ -187,7 +187,7 @@ def test_start_trials_rolls_back_the_draw_when_its_receipt_fails(db, tmp_path, m
 
     monkeypatch.setattr("core.guidance_manifest._sha256_bytes", receipt_failure)
 
-    with pytest.raises(RuntimeError, match="receipt unavailable"):
+    with pytest.raises(RuntimeError, match="trial draw receipt unavailable"):
         start_trials(db, thread_id="thread", node_id=node_id, checkpoint_generation_id="install-1")
 
     assert db.execute("SELECT * FROM guidance_loads").fetchall() == []
