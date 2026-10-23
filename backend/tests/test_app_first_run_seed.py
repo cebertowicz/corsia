@@ -51,35 +51,22 @@ def _rows(sql: str, *args):
         db.close()
 
 
-def test_app_account_persists_one_opening_and_keeps_held_wake(
+def test_app_account_holds_only_the_neutral_wake_until_the_first_model_pick(
     fresh_install, app_seed_facts,
 ):
     from infra import accounts, config, user_profile
+    from infra.database import write_transaction
     from infra.onboarding_events import first_run_message_id
+    from onboarding.app_first_run import seed_first_model_opening
 
     accounts.create_first_account(
         "newcomer", PASSWORD, full_name="  New\x01   Comer ", first_run_path="app",
     )
 
     conductor_id = _conductor_id()
-    [opening] = _rows("SELECT * FROM messages WHERE id=?", f"first-run-opening:{conductor_id}")
-    assert (opening["thread_id"], opening["role"], opening["delivery_state"]) == (
-        conductor_id, "assistant", "delivered",
-    )
     assert user_profile.profile_name(config.WORKSPACE) == "New"
-    assert opening["content"].startswith("Hi New.\n\nI'm CORSIA.")
-    metadata = json.loads(opening["metadata"])
-    assert metadata["for_user"] is True
-    assert metadata["turn_unbound_reason"] == "server_scripted"
-    assert "turn_id" not in metadata
-    from history.projection import render_portable_history
-    from infra.database import get_db
-
-    db = get_db()
-    try:
-        render_portable_history(conductor_id, db=db)
-    finally:
-        db.close()
+    assert _rows("SELECT * FROM messages WHERE id=?", f"first-run-opening:{conductor_id}") == []
+    assert _rows("SELECT id FROM plan_nodes WHERE workflow_ref='first-run-app'")
     [wake] = _rows("SELECT * FROM messages WHERE id=?", first_run_message_id(conductor_id))
     assert (wake["role"], wake["delivery_state"], wake["delivery_error"]) == (
         "system", "queued", "no_model_selected",
@@ -87,13 +74,76 @@ def test_app_account_persists_one_opening_and_keeps_held_wake(
     [thread] = _rows("SELECT model FROM threads WHERE id=?", conductor_id)
     assert thread["model"] is None
 
-    # A retry writes neither a second greeting nor a second plan task.
-    from infra.database import write_transaction
-    from onboarding.app_first_run import seed_initial
+    with write_transaction(None, scope="seed_app_first_model") as db:
+        seed_first_model_opening(conductor_id, db=db)
+        seed_first_model_opening(conductor_id, db=db)
 
-    with write_transaction(None, scope="repeat_app_seed") as db:
-        seed_initial(conductor_id, "newcomer", db=db, opening_name="New")
+    [opening] = _rows("SELECT * FROM messages WHERE id=?", f"first-run-opening:{conductor_id}")
+    assert (opening["thread_id"], opening["role"], opening["delivery_state"]) == (
+        conductor_id, "assistant", "delivered",
+    )
+    assert opening["content"].startswith("Hi New.\n\nI'm CORSIA.")
+    metadata = json.loads(opening["metadata"])
+    assert metadata["for_user"] is True
+    assert metadata["turn_unbound_reason"] == "server_scripted"
+    assert "turn_id" not in metadata
     assert len(_rows("SELECT * FROM messages WHERE id=?", opening["id"])) == 1
+    assert _rows("SELECT id FROM plan_nodes WHERE workflow_ref='first-run-app'")
+
+
+def test_first_model_transaction_writes_the_opening_and_model_once(
+    fresh_install, app_seed_facts, monkeypatch,
+):
+    from connections import account_selection
+    from infra import accounts
+    from thread.model_row import select_first_model
+    import llm.resolution as resolution
+
+    accounts.create_first_account("newcomer", PASSWORD, first_run_path="app")
+    conductor_id = _conductor_id()
+    monkeypatch.setattr(resolution, "resolve_execution_target", lambda *_args, **_kwargs: type(
+        "Target", (), {"available": True, "availability_reason": None},
+    )())
+    monkeypatch.setattr(account_selection, "bind_model_account", lambda *_args, **_kwargs: None)
+
+    assert select_first_model(
+        conductor_id, "test/model", user_id="newcomer", now="t", first_run_wake="first turn",
+    )
+    assert _rows("SELECT model FROM threads WHERE id=?", conductor_id) == [{"model": "test/model"}]
+    assert len(_rows("SELECT * FROM messages WHERE id=?", f"first-run-opening:{conductor_id}")) == 1
+    assert _rows("SELECT id FROM plan_nodes WHERE workflow_ref='first-run-app'")
+    assert select_first_model(
+        conductor_id, "other/model", user_id="newcomer", now="later", first_run_wake="later turn",
+    ) is False
+    assert len(_rows("SELECT * FROM messages WHERE id=?", f"first-run-opening:{conductor_id}")) == 1
+
+
+def test_first_model_transaction_rolls_back_the_opening_and_binding_on_seed_failure(
+    fresh_install, app_seed_facts, monkeypatch,
+):
+    from connections import account_selection
+    from infra import accounts
+    from onboarding import app_first_run
+    from thread.model_row import select_first_model
+    import llm.resolution as resolution
+
+    accounts.create_first_account("newcomer", PASSWORD, first_run_path="app")
+    conductor_id = _conductor_id()
+    monkeypatch.setattr(resolution, "resolve_execution_target", lambda *_args, **_kwargs: type(
+        "Target", (), {"available": True, "availability_reason": None},
+    )())
+    monkeypatch.setattr(account_selection, "bind_model_account", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(app_first_run, "opening_message", lambda *_args, **_kwargs: (_ for _ in ()).throw(
+        RuntimeError("seed failed"),
+    ))
+
+    with pytest.raises(RuntimeError, match="seed failed"):
+        select_first_model(
+            conductor_id, "test/model", user_id="newcomer", now="t", first_run_wake="first turn",
+        )
+    assert _rows("SELECT model FROM threads WHERE id=?", conductor_id) == [{"model": None}]
+    assert _rows("SELECT id FROM messages WHERE id=?", f"first-run-opening:{conductor_id}") == []
+    assert _rows("SELECT id FROM plan_nodes WHERE workflow_ref='first-run-app'")
 
 
 @pytest.mark.asyncio
@@ -167,7 +217,10 @@ def test_portable_history_refuses_a_fabricated_turn_for_the_opening(fresh_instal
 
     accounts.create_first_account("newcomer", PASSWORD, full_name="New Comer", first_run_path="app")
     conductor_id = _conductor_id()
+    from onboarding.app_first_run import seed_first_model_opening
+
     with write_transaction(None, scope="fabricated_opening_turn") as db:
+        seed_first_model_opening(conductor_id, db=db)
         db.execute(
             "UPDATE messages SET metadata=? WHERE id=?",
             (json.dumps({"turn_id": "invented-turn"}), f"first-run-opening:{conductor_id}"),
@@ -181,10 +234,10 @@ def test_portable_history_refuses_a_fabricated_turn_for_the_opening(fresh_instal
         db.close()
 
 
-def test_seed_initial_preserves_restored_conductor_history(fresh_install, app_seed_facts):
-    from infra import accounts
+def test_first_model_seed_preserves_restored_conductor_history(fresh_install, app_seed_facts):
+    from infra import accounts, onboarding_events
     from infra.database import write_transaction
-    from onboarding.app_first_run import seed_initial
+    from onboarding.app_first_run import seed_first_model_opening
     from infra.queries import insert_message
 
     accounts.create_first_account("newcomer", PASSWORD, full_name="New Comer", first_run_path="app")
@@ -193,7 +246,8 @@ def test_seed_initial_preserves_restored_conductor_history(fresh_install, app_se
             "INSERT INTO threads (id, user_id, created_at, updated_at) VALUES ('restored', 'newcomer', 't', 't')"
         )
         insert_message("restored", "user", "Restored conversation", db=db)
-        seed_initial("restored", "newcomer", db=db, opening_name="New")
+        onboarding_events.enqueue_first_run_wake("restored", first_run_path="app", db=db)
+        seed_first_model_opening("restored", db=db)
 
     assert [row["role"] for row in _rows("SELECT role FROM messages WHERE thread_id='restored'")] == ["user"]
     assert _rows("SELECT id FROM plans WHERE owner_id='restored'") == []
@@ -257,6 +311,7 @@ def test_applicable_steps_and_completion_cache_reconcile_conditionals(
     with write_transaction(None, scope="complete_app_seed") as db:
         cache_completed_facts(conductor_id, "newcomer", facts, db=db)
         assert read_cached_app_facts(conductor_id, db=db) == facts
+        assert db.execute("SELECT 1 FROM plan_nodes WHERE workflow_ref='first-run-app'").fetchone() is not None
 
     live = _rows(
         "SELECT n.title, n.workflow_ref, n.workflow_step, n.difficulty "
@@ -271,7 +326,7 @@ def test_applicable_steps_and_completion_cache_reconcile_conditionals(
     ]
 
 
-def test_completion_retry_reconciles_facts_that_changed_during_setup(fresh_install, app_seed_facts):
+def test_completion_retry_uses_the_latest_facts_at_the_first_model_pick(fresh_install, app_seed_facts):
     from infra import accounts
     from infra.database import write_transaction
     from onboarding.app_first_run import applicable_steps, cache_completed_facts
@@ -291,83 +346,26 @@ def test_completion_retry_reconciles_facts_that_changed_during_setup(fresh_insta
     assert remaining == [step["title"] for step in applicable_steps(updated)]
 
 
-def test_completion_retry_keeps_edited_workflow_nodes_by_stable_identity(fresh_install, app_seed_facts):
+def test_first_model_seed_is_idempotent_after_completion(fresh_install, app_seed_facts):
     from infra import accounts
     from infra.database import write_transaction
     from onboarding.app_first_run import cache_completed_facts
-    from plans import public
 
     accounts.create_first_account("newcomer", PASSWORD, first_run_path="app")
     conductor_id = _conductor_id()
-    actor = public.PlanActor(conductor_id, "newcomer", None)
-    initial = {"agents_found": [], "connected_app_count": 0, "web_search_ready": False}
-    updated = {**initial, "connected_app_count": 2, "web_search_ready": True}
-    with write_transaction(None, scope="stable_workflow_identity") as db:
-        cache_completed_facts(conductor_id, "newcomer", initial, db=db)
-        listing = public.read_current_plan(actor=actor, include_folded=True, db=db)
-        plan_id = listing["plan"]["id"]
-        nodes = {
-            row["workflow_step"]: dict(row)
-            for row in db.execute(
-                "SELECT id, workflow_step, order_key, revision FROM plan_nodes "
-                "WHERE plan_id=? AND workflow_ref='first-run-app'",
-                (plan_id,),
-            )
-        }
-        public.mutate(
-            plan_id, "edit", {
-                "node_id": nodes["5:common"]["id"],
-                "title": "A title the user edited",
-                "description": "A description the user edited",
-                "expected_revision": nodes["5:common"]["revision"],
-            }, actor=actor, provenance="test.app_first_run",
-            mutation_id="test-first-run-app-edit-labels", db=db,
-        )
-        public.mutate(
-            plan_id, "mark_done", {
-                "node_id": nodes["7:common"]["id"],
-                "evidence": "Completed before reconciliation",
-                "verification_result": "passed",
-                "expected_revision": nodes["7:common"]["revision"],
-            }, actor=actor, provenance="test.app_first_run",
-            mutation_id="test-first-run-app-complete", db=db,
-        )
-        public.mutate(
-            plan_id, "archive_node", {
-                "node_id": nodes["8:common"]["id"],
-                "expected_revision": nodes["8:common"]["revision"],
-            }, actor=actor, provenance="test.app_first_run",
-            mutation_id="test-first-run-app-archive", db=db,
-        )
-        protected = {
-            row["workflow_step"]: dict(row)
-            for row in db.execute(
-                "SELECT workflow_step, order_key, revision FROM plan_nodes WHERE id IN (?, ?)",
-                (nodes["7:common"]["id"], nodes["8:common"]["id"]),
-            )
-        }
-        assert set(protected) == {"7:common", "8:common"}
-        cache_completed_facts(conductor_id, "newcomer", updated, db=db)
-        cache_completed_facts(conductor_id, "newcomer", updated, db=db)
+    facts = {"agents_found": [], "connected_app_count": 0, "web_search_ready": False}
+    with write_transaction(None, scope="stable_first_pick_seed") as db:
+        cache_completed_facts(conductor_id, "newcomer", facts, db=db)
+        initial_ids = [row["id"] for row in db.execute(
+            "SELECT id FROM plan_nodes WHERE workflow_ref='first-run-app' ORDER BY id"
+        )]
+        from onboarding.app_first_run import seed_first_model_opening
 
-    rows = _rows(
-        "SELECT id, title, description, workflow_step, state, archived_at, order_key, revision "
-        "FROM plan_nodes WHERE plan_id=? AND workflow_ref='first-run-app'", plan_id,
-    )
-    by_step = {row["workflow_step"]: row for row in rows}
-    assert {step: row["id"] for step, row in by_step.items()} == {
-        step: node["id"] for step, node in nodes.items()
-    }
-    assert len(by_step) == len(rows)
-    assert (by_step["5:common"]["title"], by_step["5:common"]["description"]) == (
-        "A title the user edited", "A description the user edited",
-    )
-    assert by_step["3:common"]["archived_at"] is not None
-    assert by_step["7:common"]["state"] == "accepted"
-    assert by_step["8:common"]["archived_at"] is not None
-    assert {step: (by_step[step]["order_key"], by_step[step]["revision"]) for step in protected} == {
-        step: (node["order_key"], node["revision"]) for step, node in protected.items()
-    }
+        seed_first_model_opening(conductor_id, db=db)
+        seed_first_model_opening(conductor_id, db=db)
+        assert [row["id"] for row in db.execute(
+            "SELECT id FROM plan_nodes WHERE workflow_ref='first-run-app' ORDER BY id"
+        )] == initial_ids
 
 
 def test_named_apps_are_children_and_preserve_visible_onboarding_steps(fresh_install, app_seed_facts):

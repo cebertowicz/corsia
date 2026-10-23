@@ -11,6 +11,8 @@ import { emit } from './events';
 import { registerSubagent, setSubagentStatus, setSubagentInit } from '../stores/subagents';
 import { handleAuthOk, handleSystemDraining, handleWsError } from './handlersConnection';
 import { compareMessageOrder } from '../messageHistory';
+import { startTypewriter } from './typewriter';
+import { consumeFirstRunOpening } from './firstRunOpeningReveal';
 import {
 	handleInputAccepted,
 	handleContextUsageUpdated,
@@ -283,10 +285,16 @@ export function handleMessage(data: any, resetHeartbeat: () => void, isCurrentOw
 			if (!injected) break;
 			const inputId = typeof injected.metadata?.input_id === 'string'
 				? injected.metadata.input_id : null;
+			// Consume even when hidden: switching back is history, never a delayed reveal.
+			const localOpening = consumeFirstRunOpening(threadId, injected);
 			if (isDisplayedThread(threadId)) {
+				const alreadyPresent = get(messages).some(message => message.id === injected.id);
 				messages.update(current =>
 					reconcileCorrelatedMessage(current, injected, inputId).sort(compareMessageOrder)
 				);
+				if (localOpening && !alreadyPresent && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+					startTypewriter(threadId, injected.id, 0, injected.content.length, undefined, 'words');
+				}
 			}
 			emit('message_added', data);
 			break;

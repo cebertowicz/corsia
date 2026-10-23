@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { tick } from 'svelte';
+	import { compareMessageOrder } from '$lib/messageHistory';
 	import { get } from 'svelte/store';
 	import { token } from '$lib/stores/auth';
 	import { loadDeferredToolResult } from '$lib/toolResultLoader';
@@ -54,8 +55,15 @@
 	let expandedReasoning = $state(new Set<string>());
 	// The shared store can retain a prior selection; filter at this transcript boundary (#1084).
 	const renderedThreadId = $derived(threadId ?? $activeThreadId);
-	const messageRows = $derived($messages.filter((m) => m.thread_id === renderedThreadId));
-	const renderedStreaming = $derived(isThreadTurnActive($turnStates, renderedThreadId));
+	const threadMessages = $derived($messages.filter((m) => m.thread_id === renderedThreadId));
+	// Store and run the first turn normally. Only presentation waits for the local
+	// opening's existing reveal timer; completion or navigation releases it whole.
+	const revealingOpening = $derived(threadMessages.find((m) =>
+		m.metadata?.first_run_opening === true && m.typewriterPos != null));
+	const messageRows = $derived(revealingOpening
+		? threadMessages.filter((m) => compareMessageOrder(m, revealingOpening) <= 0)
+		: threadMessages);
+	const renderedStreaming = $derived(!revealingOpening && isThreadTurnActive($turnStates, renderedThreadId));
 	const focusLive = createFocusWorkBlock(() => renderedThreadId, () => focusMode);
 	const checkpointState = $derived(
 		renderedThreadId ? $checkpointsByThread.get(renderedThreadId) : undefined,
@@ -120,14 +128,14 @@
 		};
 	});
 	const liveTurn = $derived(
-		focusLive.current.active
+		!revealingOpening && focusLive.current.active
 			? { turnId: renderedThreadId ? $turnStates.get(renderedThreadId)?.turnId ?? null : null }
 			: null,
 	);
 	const transcriptEntries = $derived(mergeTranscriptUpdates(
 		buildTranscriptPresentation(transcriptMessages, focusMode, liveTurn, undefined,
 			focusMode ? focusRuns.filter((run) => runHasMore(run, runLoads[run.lastId])) : []),
-		(renderedThreadId ? $threadUpdateCards[renderedThreadId]?.cards ?? [] : []).filter((card) => card.after_seq >= windowFloor),
+		(revealingOpening ? [] : renderedThreadId ? $threadUpdateCards[renderedThreadId]?.cards ?? [] : []).filter((card) => card.after_seq >= windowFloor),
 		{
 			focusMode, divider: renderedThreadId ? $visitDividers[renderedThreadId]?.divider ?? null : null,
 			pauses: pauseDescriptors, turnSummaries,
@@ -321,8 +329,8 @@
 			{onOpenLightbox}
 			threadId={renderedThreadId}
 			{renderedStreaming}
-			liveRollup={focusLive.current}
-			checkpoint={transcriptCheckpoint}
+			liveRollup={revealingOpening ? undefined : focusLive.current}
+			checkpoint={revealingOpening ? null : transcriptCheckpoint}
 			{turnSummaries}
 			pauses={focusMode ? [] : pauseDescriptors}
 			historyComplete={historyComplete ?? !(hasMoreMessages || firstLoadPending || firstLoadFailed)}

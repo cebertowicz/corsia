@@ -110,7 +110,7 @@ async def _build_warm_prefix(
     await agent._connect_mcp()
     tool_defs = _freeze_tool_definitions(advertised_tool_definitions(agent.tools))
     wire_tool_defs = list(tool_defs)
-    candidates, eager_checkpoint_id = await run_in_db(
+    candidates, eager_checkpoint_id, pending_opening = await run_in_db(
         _warm_replay_candidates, thread_id, target.catalog_id,
     )
     messages, _prefix_info = await _render_warm_replay(
@@ -122,6 +122,11 @@ async def _build_warm_prefix(
         eager_checkpoint_id=eager_checkpoint_id,
         tool_defs=tool_defs,
     )
+    if pending_opening is not None:
+        # The selected-turn transaction persists this server-authored row before
+        # adopting the model. Rehearse that exact history segment without making
+        # model choice or warm itself visible to the person.
+        messages.append({"role": "assistant", "content": pending_opening})
     messages = sanitize_messages(sanitize_empty_content(messages))
     prompt_shape = make_prompt_extra_body(
         messages,
@@ -196,7 +201,13 @@ def _warm_replay_candidates(thread_id: str, target_catalog_id: str):
         _, _, eager = provider_boundary_snapshot(
             thread_id, "native", target_catalog_id, db=db,
         )
-        return candidates, eager.id if eager is not None else None
+        from onboarding.app_first_run import pending_warm_opening
+
+        return (
+            candidates,
+            eager.id if eager is not None else None,
+            pending_warm_opening(thread_id, db=db),
+        )
     finally:
         if db.in_transaction:
             db.execute("ROLLBACK")

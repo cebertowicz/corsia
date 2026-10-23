@@ -226,6 +226,12 @@ async def _apply_first_selection(
         return None
     from infra.onboarding_events import note_first_model_selected
     from onboarding.local_download_wake import flush_pending_local_download
+    from infra.send_broadcast import broadcast_message_rows
+
+    if first_run_wake is not None:
+        # Publish the whole committed opening before any path can drive the wake.
+        # Script/restored paths with no app opening simply project no row.
+        await broadcast_message_rows(thread_id, (f"first-run-opening:{thread_id}",))
 
     # ``select_first_model`` committed the rendered first-run wake above. A setup
     # download that ended while the person was still in setup can now be delivered.

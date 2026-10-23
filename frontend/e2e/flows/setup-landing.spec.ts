@@ -16,29 +16,45 @@ import { promisify } from 'node:util';
 // session credential so the real shell can authenticate behind the mocked setup.
 
 const SCREENSHOT_DIR = process.env.SETUP_LANDING_SHOTS_DIR;
-const seedAppOpeningProcess = promisify(execFile);
-const APP_OPENING_SEED_TIMEOUT_MS = 15_000;
+const seedAppLandingProcess = promisify(execFile);
+const APP_LANDING_SEED_TIMEOUT_MS = 15_000;
 
-async function seedAppOpening() {
+async function seedAppLanding() {
 	const python = process.env.CORSIA_E2E_BACKEND_PYTHON;
 	const workspace = process.env.CORSIA_E2E_WORKSPACE;
 	const state = process.env.CORSIA_E2E_STATE_DIR;
 	if (!python || !workspace || !state) throw new Error('setup landing requires the disposable e2e-local environment');
-	// The harness already owns queued context and the held first-run wake. The app
-	// guard correctly preserves that history, so seed only its scripted greeting
-	// through the same writer and metadata the app path uses.
-	await seedAppOpeningProcess(python, ['-c', [
+	// Convert only the harness's unused CLI seed into an app landing. No greeting
+	// is seeded: the real first-model transaction must create and broadcast it.
+	await seedAppLandingProcess(python, ['-c', [
+		'from infra import config, user_profile',
 		'from infra.corsia_agent import get_corsia_agent',
 		'from infra.database import write_transaction',
-		'from infra.queries import insert_message',
-		'from onboarding.app_first_run import opening_message',
-		'with write_transaction(None, scope="e2e_app_opening") as db:',
+		'from infra.onboarding_events import enqueue_first_run_wake',
+		'from onboarding.app_first_run import seed_initial',
+		'from plans import public',
+		'profile = user_profile.stage_profile_update(config.WORKSPACE, full_name="First Person")',
+		'if profile is not None: profile.publish()',
+		'with write_transaction(None, scope="e2e_app_landing") as db:',
 		'    thread_id = get_corsia_agent(db=db)',
-		'    insert_message(thread_id, "assistant", opening_message("First Person"), {"for_user": True, "first_run_opening": True, "turn_unbound_reason": "server_scripted"}, msg_id=f"first-run-opening:{thread_id}", db=db)',
+		'    owner = db.execute("SELECT user_id,model FROM threads WHERE id=?", (thread_id,)).fetchone()',
+		'    assert owner["model"] is None',
+		'    assert db.execute("SELECT 1 FROM messages WHERE thread_id=? AND seq IS NOT NULL", (thread_id,)).fetchone() is None',
+		'    actor = public.PlanActor(thread_id, owner["user_id"], None)',
+		'    listing = public.ensure_current_plan(actor=actor, include_folded=True, db=db)',
+		'    for node in listing["nodes"]:',
+		'        if node.get("archived_at") is not None: continue',
+		'        current = public.get_node(node["id"], db=db)',
+		'        public.mutate(listing["plan"]["id"], "close_node", {"node_id": node["id"], "expected_revision": current.revision, "reason": "Disposable app setup fixture"}, actor=actor, provenance="test.app_landing", mutation_id="app-close:" + node["id"], db=db)',
+		'        current = public.get_node(node["id"], db=db)',
+		'        public.mutate(listing["plan"]["id"], "archive_node", {"node_id": node["id"], "expected_revision": current.revision}, actor=actor, provenance="test.app_landing", mutation_id="app-archive:" + node["id"], db=db)',
+		'    db.execute("DELETE FROM messages WHERE thread_id=? AND seq IS NULL", (thread_id,))',
+		'    seed_initial(thread_id, owner["user_id"], db=db)',
+		'    assert enqueue_first_run_wake(thread_id, first_run_path="app", db=db)',
 	].join('\n')], {
 		cwd: resolve('..', 'backend'),
 		env: { ...process.env, CORSIA_WORKSPACE: workspace, CORSIA_STATE_DIR: state, CORSIA_TEST_MODE: '1', CORSIA_ANALYTICS_DISABLE: '1' },
-		timeout: APP_OPENING_SEED_TIMEOUT_MS,
+		timeout: APP_LANDING_SEED_TIMEOUT_MS,
 		killSignal: 'SIGTERM',
 		maxBuffer: 64 * 1024,
 	});
@@ -76,7 +92,7 @@ test.describe('@surface:first-run setup landing', () => {
 	test.slow();
 	for (const [label, sources] of readySources) {
 		test(`${label} ready: Start using CORSIA lands in a usable chat and a turn renders with attribution`, async ({ page, request }) => {
-			await seedAppOpening();
+			await seedAppLanding();
 			await serveReadySetup(page, sources);
 			const slug = label.toLowerCase().replace(/\s+/g, '-');
 			const project = test.info().project.name;
@@ -114,7 +130,7 @@ test.describe('@surface:first-run setup landing', () => {
 			// Setup chose no model: the CORSIA agent waits on the person's pick, and the first-run message is held until then.
 			const chip = page.locator('button.model-chip');
 			await expect(chip).toContainText('Select Model');
-			await expect(lastAssistantMessage(page)).toContainText('Hi First Person.');
+			await expect(page.getByText('Hi First.', { exact: false })).toHaveCount(0);
 			const planChip = page.getByRole('button', { name: /^Open plan —/ });
 			if (project === 'chromium-mobile') {
 				await expect(planChip).toBeVisible();
@@ -131,7 +147,14 @@ test.describe('@surface:first-run setup landing', () => {
 				{ content: 'SETUP_LANDING_REPLY', finish_reason: 'stop' },
 			]);
 			await chip.click();
+			const pickedAt = Date.now();
 			await page.locator('button.model-list-item', { hasText: 'Vendor default' }).click();
+			const opening = page.locator('.assistant-msg').filter({ has: page.locator('.typewriter-text') });
+			await expect(opening.locator('.typewriter-text')).toContainText('Hi', { timeout: 2_000 });
+			expect(Date.now() - pickedAt).toBeLessThan(2_500);
+			await expect(page.getByText('SETUP_LANDING_FIRST_RUN_REPLY', { exact: true })).toHaveCount(0);
+			await expect(page.locator('[aria-live="polite"][aria-atomic="true"]')).toContainText("I'm CORSIA.");
+			await expect(page.locator('.typewriter-text')).toHaveCount(0, { timeout: 45_000 });
 			await expect(chip).toContainText('Vendor default');
 			await waitForWsConnected(page);
 			// Focus is on by default and tucks finished work behind a summary; open it to read a reply itself.
@@ -143,6 +166,12 @@ test.describe('@surface:first-run setup landing', () => {
 			}).toPass({ timeout: 25_000 });
 			// Picking the model starts the held first-run message.
 			await readReply('SETUP_LANDING_FIRST_RUN_REPLY');
+			await page.unroute('**/api/auth/status');
+			await page.unroute('**/api/setup/progress');
+			await page.reload();
+			await expect(page.locator('.typewriter-text')).toHaveCount(0);
+			await expect(page.getByText('Hi First.', { exact: false })).toBeVisible();
+			await waitForWsConnected(page);
 			await sendChatMessage(page, 'Say hello.');
 			await readReply('SETUP_LANDING_REPLY');
 			const badge = reply.locator('.msg-model-badge');

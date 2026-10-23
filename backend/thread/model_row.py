@@ -300,6 +300,12 @@ def select_first_model(
             )
         from connections.account_selection import bind_model_account
 
+        if first_run_wake is not None:
+            from onboarding.app_first_run import seed_first_model_opening
+
+            # This is the only write that can release the held wake. Persist the
+            # greeting before model adoption makes the wake runnable.
+            seed_first_model_opening(thread_id, db=db)
         bind_model_account(thread_id, destination_model, account_id=account_id,
                            actor_thread_id=actor_thread_id, db=db)
         if first_run_wake is not None:

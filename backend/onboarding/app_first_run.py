@@ -1,4 +1,4 @@
-"""Persist and reconcile the app-path first-run opening before model selection."""
+"""Own the app-path landing plan, cached setup facts, and post-pick opening."""
 
 from __future__ import annotations
 
@@ -208,7 +208,7 @@ async def complete_app_setup(
             setup_progress.update(completed=True, db=db)
             # Model selection can consume the wake while facts are being read.
             # Completion stays successful; only a still-held app wake receives
-            # the plan reconciliation and cached snapshot.
+            # plan reconciliation and cached snapshot for the selected first turn.
             if _held_app_conductor(db=db) == conductor_id:
                 cache_completed_facts(conductor_id, user_id, facts, db=db)
 
@@ -299,41 +299,59 @@ def _pre_pick_facts(*, db: sqlite3.Connection) -> dict[str, Any]:
     }
 
 
-def seed_initial(
-    conductor_id: str, user_id: str, *, db: sqlite3.Connection, opening_name: str | None = None,
-) -> None:
-    """Persist the visible greeting and only the facts-safe pre-pick setup tasks."""
-    from infra.queries import insert_message
-
-    opening_id = f"first-run-opening:{conductor_id}"
-    wake_id = _first_run_message_id(conductor_id)
-    prior = db.execute(
-        "SELECT 1 FROM messages WHERE thread_id=? AND NOT (id=? OR (id=? AND delivery_state='queued')) LIMIT 1",
-        (conductor_id, opening_id, wake_id),
-    ).fetchone()
-    if prior is not None:
-        # A restored/reused conductor already has genuine history. It keeps that
-        # history rather than receiving a new scripted greeting or setup plan.
+def seed_initial(conductor_id: str, user_id: str, *, db: sqlite3.Connection) -> None:
+    """Create the stat-safe landing plan without showing the scripted opening."""
+    if db.execute("SELECT 1 FROM messages WHERE thread_id=? LIMIT 1", (conductor_id,)).fetchone() is not None:
         return
-    metadata = {
-        "for_user": True,
-        "first_run_opening": True,
-        # This server-authored opening predates the first model Turn. The
-        # portable-history writer's existing unbound semantic-row contract
-        # preserves it as a stateless scripted segment instead of inventing a Turn.
-        "turn_unbound_reason": "server_scripted",
-    }
-    if db.execute("SELECT 1 FROM messages WHERE id=?", (opening_id,)).fetchone() is None:
-        insert_message(
-            conductor_id, "assistant", opening_message(opening_name), metadata,
-            msg_id=opening_id, db=db,
-        )
     initial = applicable_steps(_pre_pick_facts(db=db))
     _seed_descriptors(
         conductor_id, user_id,
         tuple(step for step in initial if step["step_number"] != 4),
         db=db,
     )
+
+
+def _opening_for_held_app(conductor_id: str, *, db: sqlite3.Connection) -> str | None:
+    """The app greeting that is still absent from a held first-run thread."""
+    from infra import config, user_profile
+    from infra.onboarding_events import held_first_run_path
+
+    if held_first_run_path(conductor_id, db=db) != "app":
+        return None
+    opening_id = f"first-run-opening:{conductor_id}"
+    if db.execute(
+        "SELECT 1 FROM messages WHERE id=? AND thread_id=?", (opening_id, conductor_id),
+    ).fetchone() is not None:
+        return None
+    wake_id = _first_run_message_id(conductor_id)
+    if db.execute(
+        "SELECT 1 FROM messages WHERE thread_id=? "
+        "AND NOT (id=? OR (id=? AND delivery_state='queued')) LIMIT 1",
+        (conductor_id, opening_id, wake_id),
+    ).fetchone() is not None:
+        return None
+    return opening_message(user_profile.profile_name(config.WORKSPACE) or None)
+
+
+def seed_first_model_opening(conductor_id: str, *, db: sqlite3.Connection) -> None:
+    """Atomically add the app greeting immediately before its first model pick."""
+    from infra.queries import insert_message
+
+    opening = _opening_for_held_app(conductor_id, db=db)
+    if opening is None:
+        return
+    opening_id = f"first-run-opening:{conductor_id}"
+    insert_message(
+        conductor_id, "assistant", opening,
+        {"for_user": True, "first_run_opening": True, "turn_unbound_reason": "server_scripted"},
+        msg_id=opening_id, db=db,
+    )
+    # Plan rows are setup lifecycle state and must not be changed here.
+
+
+def pending_warm_opening(conductor_id: str, *, db: sqlite3.Connection) -> str | None:
+    """Return the unpersisted app greeting needed to warm the selected turn's prefix."""
+    return _opening_for_held_app(conductor_id, db=db)
 
 
 def _first_run_message_id(conductor_id: str) -> str:
@@ -345,7 +363,7 @@ def _first_run_message_id(conductor_id: str) -> str:
 def cache_completed_facts(
     conductor_id: str, user_id: str, facts: Mapping[str, Any], *, db: sqlite3.Connection,
 ) -> None:
-    """Reconcile final tasks and cache their shared snapshot on the held wake."""
+    """Reconcile final setup rows and cache their shared snapshot on the held wake."""
     _seed_descriptors(conductor_id, user_id, applicable_steps(facts), db=db, reconcile=True)
     row = db.execute(
         "SELECT metadata FROM messages WHERE id=? AND thread_id=? AND delivery_state='queued'",

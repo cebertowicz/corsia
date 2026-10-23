@@ -49,7 +49,7 @@ async def _until(condition, seconds: float = 10.0) -> None:
 
 @pytest.fixture
 def app_first_run(monkeypatch, isolated_db):
-    """Seed the production app-path opening and its held first-run wake."""
+    """Seed the production app landing plan and its held first-run wake."""
     from infra import accounts
     from infra.corsia_agent import get_corsia_agent
     from infra.database import write_transaction
@@ -215,10 +215,11 @@ async def test_app_first_run_warm_is_the_first_selected_turn_prefix(app_first_ru
 
     db = get_db()
     try:
-        greeting = db.execute(
-            "SELECT content FROM messages WHERE thread_id=? AND id=?",
+        assert db.execute(
+            "SELECT 1 FROM messages WHERE thread_id=? AND id=?",
             (app_first_run, f"first-run-opening:{app_first_run}"),
-        ).fetchone()["content"]
+        ).fetchone() is None
+        assert db.execute("SELECT 1 FROM plan_nodes WHERE workflow_ref='first-run-app'").fetchone() is not None
         held_wake_before_selection = db.execute(
             "SELECT content FROM messages WHERE thread_id=? AND delivery_state='queued'",
             (app_first_run,),
@@ -226,10 +227,20 @@ async def test_app_first_run_warm_is_the_first_selected_turn_prefix(app_first_ru
     finally:
         db.close()
 
-    # Warming an unbound thread must not choose either a model or an account.
+    # Warming an unbound thread must not choose a model or account or publish
+    # the greeting. The setup plan is already visible before the model pick.
     assert _model_and_account_binding(app_first_run) == (None, None)
     warm = await _warm(app_first_run, wire, monkeypatch)
     assert _model_and_account_binding(app_first_run) == (None, None)
+    db = get_db()
+    try:
+        assert db.execute(
+            "SELECT 1 FROM messages WHERE thread_id=? AND id=?",
+            (app_first_run, f"first-run-opening:{app_first_run}"),
+        ).fetchone() is None
+        assert db.execute("SELECT 1 FROM plan_nodes WHERE workflow_ref='first-run-app'").fetchone() is not None
+    finally:
+        db.close()
     turn = await _first_turn(app_first_run, wire)
 
     from infra.database import get_db
@@ -237,6 +248,10 @@ async def test_app_first_run_warm_is_the_first_selected_turn_prefix(app_first_ru
 
     db = get_db()
     try:
+        greeting = db.execute(
+            "SELECT content FROM messages WHERE thread_id=? AND id=?",
+            (app_first_run, f"first-run-opening:{app_first_run}"),
+        ).fetchone()["content"]
         first_run_wake = db.execute(
             "SELECT content FROM messages WHERE thread_id=? AND id=?",
             (app_first_run, first_run_message_id(app_first_run)),
