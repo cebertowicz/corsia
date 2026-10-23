@@ -13,7 +13,7 @@ from tools.web_omlx_search import NO_SERVER, SERVER_STOPPED, keyless_search
 from tools.web_search_outcome import WORKS, outcome_line, run_search
 
 #: What an agent reads when no key and no managed local search are available.
-NO_KEY_TEXT = "Web search needs a Brave key in Settings › Keys or a local model set up."
+NO_KEY_TEXT = "Web search needs a Brave key in Settings › Keys, or CORSIA's own local model server set up."
 EMPTY_OMLX_TEXT = (
     "Keyless web search came back empty. Try rewording the query; "
     "a Brave key in Settings › Keys makes search dependable."

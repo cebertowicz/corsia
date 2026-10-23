@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from typing import Any
 
 import httpx
@@ -11,16 +10,15 @@ from tools.web_search_outcome import (
     FAILED,
     REASON_NETWORK,
     REASON_PROVIDER,
+    REASON_RATE_LIMIT,
     REASON_TIMEOUT,
     WORKS,
     SearchOutcome,
-    classify_status,
 )
 
 NO_SERVER = "no_server"
 SERVER_STOPPED = "server_stopped"
-# Three empty-result tries plus two one-second waits finish within about 45 seconds.
-ATTEMPT_TIMEOUT_SECONDS = 14.0
+TIMEOUT_SECONDS = 14.0
 
 
 def _result_items(body: dict[str, Any]) -> list[dict[str, str]] | None:
@@ -68,14 +66,9 @@ async def _search_target() -> tuple[str, dict[str, str]] | SearchOutcome | str:
     return f"{api_base.rstrip('/')}/web/search", headers
 
 
-async def keyless_available() -> bool:
-    """Whether the managed server is ready for keyless search, without searching."""
-    return isinstance(await _search_target(), tuple)
-
-
 async def _search_once(url: str, headers: dict[str, str], query: str) -> SearchOutcome:
     try:
-        async with httpx.AsyncClient(timeout=ATTEMPT_TIMEOUT_SECONDS) as client:
+        async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as client:
             response = await client.post(url, json={"query": query}, headers=headers)
     except httpx.TimeoutException:
         return SearchOutcome(FAILED, REASON_TIMEOUT)
@@ -85,12 +78,10 @@ async def _search_once(url: str, headers: dict[str, str], query: str) -> SearchO
         body = response.json()
     except ValueError:
         body = None
-    if response.status_code in (401, 403):
-        return SearchOutcome(FAILED, REASON_PROVIDER)
-    failure = classify_status(response.status_code, body)
-    if failure is not None:
-        return failure
-    if not isinstance(body, dict):
+    # No key is in play here, so no answer from oMLX is ever a refused key.
+    if response.status_code == 429:
+        return SearchOutcome(FAILED, REASON_RATE_LIMIT)
+    if response.status_code >= 400 or not isinstance(body, dict):
         return SearchOutcome(FAILED, REASON_PROVIDER)
     items = _result_items(body)
     if items is None:
@@ -99,14 +90,9 @@ async def _search_once(url: str, headers: dict[str, str], query: str) -> SearchO
 
 
 async def keyless_search(query: str) -> SearchOutcome | str:
-    """Search once-resolved managed oMLX, retrying only an empty successful answer."""
+    """Search once through the managed oMLX server, or name why it is unavailable."""
     target = await _search_target()
     if not isinstance(target, tuple):
         return target
     url, headers = target
-    for attempt in range(3):
-        outcome = await _search_once(url, headers, query)
-        if outcome.kind != WORKS or outcome.results or attempt == 2:
-            return outcome
-        await asyncio.sleep(1)
-    raise AssertionError("three-attempt search loop must return")
+    return await _search_once(url, headers, query)

@@ -189,28 +189,22 @@ async def test_web_search_uses_managed_omlx_without_brave_key(store, monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_keyless_search_retries_empty_results_after_one_discovery(monkeypatch):
+async def test_keyless_search_answers_an_empty_result_without_retrying(monkeypatch):
     target = ("http://omlx.test/v1/web/search", {"Authorization": "Bearer safe"})
-    search_once = AsyncMock(side_effect=[
-        outcome_mod.SearchOutcome(WORKS),
-        outcome_mod.SearchOutcome(WORKS, results=[{"title": "Recovered", "url": "https://recovered.test"}]),
-    ])
-    sleep = AsyncMock()
+    search_once = AsyncMock(return_value=outcome_mod.SearchOutcome(WORKS))
     discovery = AsyncMock(return_value=target)
     monkeypatch.setattr(omlx_mod, "_search_target", discovery)
     monkeypatch.setattr(omlx_mod, "_search_once", search_once)
-    monkeypatch.setattr(omlx_mod.asyncio, "sleep", sleep)
 
     outcome = await omlx_mod.keyless_search("q")
 
-    assert outcome.results[0]["title"] == "Recovered"
+    assert (outcome.kind, outcome.results) == (WORKS, [])
     discovery.assert_awaited_once_with()
-    assert search_once.await_count == 2
-    sleep.assert_awaited_once_with(1)
+    search_once.assert_awaited_once_with(*target, "q")
 
 
 @pytest.mark.asyncio
-async def test_web_search_explains_three_empty_managed_omlx_results(store, monkeypatch):
+async def test_web_search_explains_an_empty_managed_omlx_result(store, monkeypatch):
     keyless = AsyncMock(return_value=outcome_mod.SearchOutcome(WORKS))
     monkeypatch.setattr(web_mod, "keyless_search", keyless)
 
@@ -239,6 +233,8 @@ async def test_web_search_names_the_keyless_unavailable_state(store, monkeypatch
     ({"ok": False}, (FAILED, REASON_PROVIDER)),
     (httpx.ConnectError("refused"), (FAILED, REASON_NETWORK)),
     (httpx.Response(401), (FAILED, REASON_PROVIDER)),
+    (httpx.Response(422, json={"error": {"code": "SUBSCRIPTION_TOKEN_INVALID"}}), (FAILED, REASON_PROVIDER)),
+    (httpx.Response(429), (FAILED, REASON_RATE_LIMIT)),
 ])
 async def test_managed_omlx_failures_use_search_outcome_classes(monkeypatch, response, expected):
     if isinstance(response, Exception):
@@ -246,7 +242,8 @@ async def test_managed_omlx_failures_use_search_outcome_classes(monkeypatch, res
             raise response
     elif isinstance(response, httpx.Response):
         def handler(request):
-            return httpx.Response(response.status_code, request=request)
+            return httpx.Response(response.status_code, content=response.content,
+                                  headers=response.headers, request=request)
     else:
         def handler(request):
             return httpx.Response(200, json=response, request=request)
