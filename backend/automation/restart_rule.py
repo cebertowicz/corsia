@@ -19,6 +19,7 @@ HOLD_PHASES = frozenset({
     "restarting",
     "resuming",
 })
+ACTIVE_PHASES = HOLD_PHASES | {"verifying"}
 
 
 def parse(ts: str) -> datetime | None:
@@ -36,7 +37,7 @@ def row_is_active(row, *, now: datetime) -> bool:
     if str(row["status"]) != "in_flight":
         return False
     phase = row["phase"] if "phase" in row.keys() else None
-    if phase in HOLD_PHASES:
+    if phase in ACTIVE_PHASES:
         return True
     if phase:
         return False
