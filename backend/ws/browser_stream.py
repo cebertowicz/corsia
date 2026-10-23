@@ -7,7 +7,7 @@ import json
 import logging
 import secrets
 from functools import partial
-from typing import Callable
+from typing import Awaitable, Callable
 
 from fastapi import WebSocket, WebSocketDisconnect
 from websockets.exceptions import WebSocketException
@@ -81,58 +81,54 @@ def _user_owns_thread(thread_id: str, user_id: str) -> bool:
         db.close()
 
 
-async def _screencast_events(thread_id: str, connection_token: str, frames: PaneFrames) -> None:
-    """Reconnect the pane frame stream after a transient CDP failure."""
+async def _retry_pane_connection(thread_id: str, connection_token: str, kind: str,
+                                 terminal_reason: str, connect: Callable[[], Awaitable[None]]) -> None:
+    """Reconnect one CDP stream after transient loss, with one bounded policy for every stream."""
     failures = 0
     while True:
-        delivered, started = False, asyncio.get_running_loop().time()
-
-        def deliver(frame: str) -> object:
-            nonlocal delivered
-            delivered = True
-            return frames.offer(frame)
-
+        started = asyncio.get_running_loop().time()
+        clean_return = False
         try:
-            await browser_pane.screencast(thread_id, connection_token, deliver)
-        except (OSError, WebSocketException) as exc:
-            if delivered or asyncio.get_running_loop().time() - started >= PANE_RETRY_RESET_SECONDS:
-                failures = 0
-            failures += 1
-            log.warning("browser pane %s lost its screencast (attempt %d of %d): %s",
-                        thread_id, failures, len(PANE_RETRY_DELAYS), exc)
-            if failures == len(PANE_RETRY_DELAYS):
-                raise BrowserSessionError("The pane stopped showing the page") from exc
+            await connect()
+        except (BrowserSessionError, ProcessOwnerError, OSError, WebSocketException) as exc:
+            error = exc
         else:
-            failures = 0  # A closed page target can be replaced by the session's current target.
+            # A clean return still means this stream ended; only a long run proves it was stable.
+            clean_return = True
+            error = BrowserSessionError(f"{kind} ended")
+        if asyncio.get_running_loop().time() - started >= PANE_RETRY_RESET_SECONDS:
+            failures = 0
+        failures += 1
+        log.warning("browser pane %s lost its %s (attempt %d of %d): %s",
+                    thread_id, kind, failures, len(PANE_RETRY_DELAYS) + 1, error)
+        if failures > len(PANE_RETRY_DELAYS):
+            if not clean_return and isinstance(error, BrowserSessionError):
+                raise error
+            raise BrowserSessionError(terminal_reason) from error
         browser_pane.clear_page_endpoint(thread_id, connection_token)
-        await asyncio.sleep(PANE_RETRY_DELAYS[max(failures - 1, 0)])
+        await asyncio.sleep(PANE_RETRY_DELAYS[failures - 1])
+
+
+async def _screencast_events(thread_id: str, connection_token: str, frames: PaneFrames) -> None:
+    """Reconnect the pane frame stream after a transient CDP failure."""
+    def deliver(frame: str) -> object:
+        return frames.offer(frame)
+
+    await _retry_pane_connection(
+        thread_id, connection_token, "screencast", "The pane stopped showing the page",
+        lambda: browser_pane.screencast(thread_id, connection_token, deliver),
+    )
 
 
 async def _metadata_events(thread_id: str, connection_token: str, report: Callable[[dict], None]) -> None:
     """Reconnect page-address metadata while the pane stays connected."""
-    failures = 0
-    while True:
-        reported, started = False, asyncio.get_running_loop().time()
+    async def emit(message: dict) -> None:
+        report(message)
 
-        async def emit(message: dict) -> None:
-            nonlocal reported
-            reported = True
-            report(message)
-
-        try:
-            await browser_pane.watch_page_metadata(thread_id, connection_token, emit)
-        except (BrowserSessionError, ProcessOwnerError, OSError, WebSocketException) as exc:
-            if reported or asyncio.get_running_loop().time() - started >= PANE_RETRY_RESET_SECONDS:
-                failures = 0
-            failures += 1
-            log.warning("browser pane %s lost its page address watch (attempt %d of %d): %s",
-                        thread_id, failures, len(PANE_RETRY_DELAYS), exc)
-            if failures == len(PANE_RETRY_DELAYS):
-                raise BrowserSessionError("The pane stopped following the page's address") from exc
-        else:
-            failures = 0
-        browser_pane.clear_page_endpoint(thread_id, connection_token)
-        await asyncio.sleep(PANE_RETRY_DELAYS[max(failures - 1, 0)])
+    await _retry_pane_connection(
+        thread_id, connection_token, "page address watch", "The pane stopped following the page's address",
+        lambda: browser_pane.watch_page_metadata(thread_id, connection_token, emit),
+    )
 
 
 async def _relay(pane: WebSocket, thread_id: str, user_id: str) -> None:

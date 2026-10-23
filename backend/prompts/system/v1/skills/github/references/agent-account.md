@@ -20,9 +20,9 @@ Once an agents' account exists, `gh` and `git push` in agent shells fail on purp
 
 Only when no agents' account exists and the person chose to create one, never on a reconnect. Browser steps follow skill `conductor-bootstrap` `references/browser-person-steps.md`.
 
-1. Open `https://github.com/signup` with `browser_open`; the person watches in the CORSIA browser pane, so do not set `show_window`. GitHub may show a human check before the form: `post_update` `GitHub's sign-up will likely ask you to prove you're human; solve it in the CORSIA browser pane and I'll continue when it clears.` and watch per that file's A.
+1. Open `https://github.com/signup` with `browser_open`; the person watches in the shared browser, so do not set `show_window`. GitHub may show a human check before the form: `post_update` `GitHub's sign-up will likely ask you to prove you're human; solve it in the shared browser and I'll continue when it clears.` and watch per that file's A.
 2. Fill the agents' address exactly as the setup decision's option A named it, or the address the person gave you in chat; outside setup, ask in chat which address to use. If asked, fill a username you suggest. Fill nothing else.
-3. The password and any verification code are the person's: per B, tell them to type them in the CORSIA browser pane and watch only the URL and title until the page moves on.
+3. The password and any verification code are the person's: per B, tell them to type them in the shared browser and watch only the URL and title until the page moves on.
 4. Then `connect`.
 
 ## Posting as the person

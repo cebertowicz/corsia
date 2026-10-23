@@ -490,6 +490,7 @@ async def test_a_screencast_chrome_refuses_closes_the_pane_with_its_reason(monke
     async def refused(_thread_id, _token, _deliver):
         raise BrowserSessionError("This page couldn't be shown")
 
+    monkeypatch.setattr(browser_stream, "PANE_RETRY_DELAYS", (0, 0, 0))
     monkeypatch.setattr(browser_pane, "screencast", refused)
     await asyncio.wait_for(browser_stream.browser_stream_endpoint(pane, "thread-1"), 1)
     assert pane.json == [{"type": "browser_state", "state": "error", "reason": "This page couldn't be shown"}]

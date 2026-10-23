@@ -73,20 +73,30 @@ def test_person_browser_steps_have_one_rule_and_no_url_wait():
         assert "`wait` on a URL" not in text
 
 
-def test_person_browser_guidance_uses_the_corsia_pane_without_a_headed_window():
+def test_person_browser_guidance_keeps_every_first_run_step_in_the_shared_browser():
     system = ROOT / "backend/prompts/system/v1"
-    for path in (
-        system / "skills/conductor-bootstrap/references/browser-person-steps.md",
-        system / "skills/conductor-bootstrap/references/web-search.md",
-        system / "skills/conductor-bootstrap/references/first-run.md",
-        system / "skills/github/references/agent-account.md",
-        system / "skills/google-setup/SKILL.md",
-        system / "skills/microsoft-setup/SKILL.md",
-    ):
-        text = path.read_text(encoding="utf-8")
-        assert "show_window: true" not in text
-        assert "open window" not in text
-        assert "CORSIA" in text and "pane" in text
+    expected_guidance = {
+        "skills/conductor-bootstrap/references/browser-person-steps.md": (
+            "Use this whenever you open a page in the shared browser (`browser_open` without `show_window`)"
+        ),
+        "skills/conductor-bootstrap/references/web-search.md": (
+            "the person watches in the shared browser, so do not set `show_window`"
+        ),
+        "skills/conductor-bootstrap/references/first-run.md": (
+            "follow skill `github` › `references/agent-account.md` in the shared browser"
+        ),
+        "skills/github/references/agent-account.md": (
+            "the person watches in the shared browser, so do not set `show_window`"
+        ),
+        "skills/google-setup/SKILL.md": (
+            "Do not set `show_window`: the shared browser is already available."
+        ),
+        "skills/microsoft-setup/SKILL.md": (
+            "the person watches in the shared browser, so do not set `show_window`"
+        ),
+    }
+    for relative_path, instruction in expected_guidance.items():
+        assert instruction in (system / relative_path).read_text(encoding="utf-8")
 
 
 def test_email_and_calendar_route_to_google_setup_and_setup_hands_off_no_agent():
@@ -119,11 +129,11 @@ def test_google_setup_carries_the_approved_offer_and_leaves_secrets_to_the_backe
     assert "Read the client ID from the Clients list" in steps and "never open it" in steps
     assert steps.index("`google_connect` with no `client_file`") < steps.index("If the error says to reinstall or update CORSIA")
     assert steps.count("console.cloud.google.com/projectcreate") == 1
-    assert "Do not set `show_window`: the browser is already shared in the CORSIA pane." in steps
+    assert "Do not set `show_window`: the shared browser is already available." in steps
     assert "Do not revisit `projectcreate` or submit Create again" in steps
     assert "wait for the project selector to show `CORSIA` as the current project" in steps
     assert "first check whether the selector lists `CORSIA`: select it if it does" in steps
-    assert "5. In the window step 4 opened" in steps
+    assert "5. In the shared browser from step 4:" in steps
     assert "report it the way you report any problem with CORSIA, and stop" in steps
     assert "If it names install commands instead (CORSIA run from source)" in steps
     assert "then call `browser_open` again" in steps
