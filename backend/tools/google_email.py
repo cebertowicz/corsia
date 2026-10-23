@@ -15,9 +15,10 @@ import logging
 from base64 import urlsafe_b64encode
 from typing import Any
 
+from connections.account_errors import AccountError
 from connections.google import client as google_client
-from connections.google.accounts import ACCOUNT_PARAM, thread_key
-from connections.mail_accounts import resolve_for_thread
+from connections.google.accounts import thread_key
+from connections.mail_accounts import MAIL_ACCOUNT_PARAM, resolve_for_thread
 from connections.mailhost import outbound as mailhost_outbound, reply as mailhost_reply
 from connections.mailhost.errors import PASSWORD_REFUSED, MailHostError
 from connections.google.client import GoogleError, GoogleRequestFailed
@@ -172,7 +173,7 @@ class EmailDraftTool(Tool):
                 "subject": {"type": "string", "description": "One line."},
                 "body": {"type": "string", "description": "The message text, without a signature."},
                 "reply_to_message_id": {"type": "string", "description": "The message id (not the thread id), from email_search or email_read on this account, to reply under. On a mail host the recipient defaults to the message's Reply-To, else its sender, and the subject gets Re: when it lacks it."},
-                "account_id": ACCOUNT_PARAM,
+                "account_id": MAIL_ACCOUNT_PARAM,
             },
             "required": ["subject", "body"],
         }
@@ -181,7 +182,7 @@ class EmailDraftTool(Tool):
         thread_id = kwargs.get("_thread_id")
         try:
             account = await run_in_db(resolve_for_thread, kwargs.get("account_id"), thread_id)
-        except GoogleError as exc:
+        except (AccountError, GoogleError) as exc:
             return f"Error: {exc}"
         try:
             return await self._save(str(thread_id), account, kwargs)
@@ -295,7 +296,7 @@ class EmailSendTool(Tool):
             return f"Error: {NO_ACCOUNT}"
         try:
             account = await run_in_db(resolve_for_thread, target["account_id"], thread_id)
-        except GoogleError as exc:
+        except (AccountError, GoogleError) as exc:
             return f"Error: Not sent: {exc}"
         try:
             parsed = parse_document(verdict.data.decode("utf-8"))

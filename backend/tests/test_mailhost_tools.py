@@ -27,7 +27,7 @@ from api.connected_account_rows import list_account_rows
 from connections import account_actions, mail_accounts
 from connections.account_errors import AccountError
 from connections.google import accounts as google_accounts
-from connections.google.client import GoogleError
+from connections.google.client import NOT_CONNECTED, GoogleError
 from connections.mail import email_screen
 from events.connectors import mail_poller as poller
 from connections.mailhost import check, imap, read as mailhost_read, store
@@ -490,7 +490,7 @@ async def test_with_no_email_account_the_resolver_names_every_connection_path(en
 async def test_with_no_mail_host_account_the_resolver_is_the_google_one_unchanged(env, conductor) -> None:
     with pytest.raises(GoogleError) as ours:
         google_accounts.resolve_for_thread(None, conductor)
-    assert str(ours.value) == google_accounts.NO_GOOGLE_ACCOUNT
+    assert str(ours.value) == NOT_CONNECTED
 
 
 async def test_mail_account_parameters_describe_every_supported_mail_account() -> None:

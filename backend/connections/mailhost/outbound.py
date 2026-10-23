@@ -34,13 +34,13 @@ def _from_account(message: EmailMessage, address: str) -> None:
 
 async def _keep_copy(account_id: str, kind: str, message: EmailMessage) -> bool:
     """Append a copy to the host's Drafts or Sent folder; False (logged) when the host shows no such folder."""
-    endpoints, username, password = await run_in_db(read.credentials, account_id)
+    endpoints, username, password, check = await run_in_db(read.credentials, account_id)
 
     def call() -> bool:
         with imap.account_lock(account_id):
             return imap.append(endpoints, username, password, kind, message.as_bytes())
 
-    saved = await read._guarded(account_id, endpoints, call)
+    saved = await read._guarded(account_id, check, call)
     if not saved:
         log.warning("mail host shows no %s folder; the copy was not saved", kind)
     return bool(saved)
@@ -55,7 +55,7 @@ async def save_draft(account_id: str, message: EmailMessage) -> None:
 
 async def send(account_id: str, message: EmailMessage) -> str:
     """Send one approved message and append a Sent copy when SMTP does not do so itself."""
-    endpoints, _username, password = await run_in_db(read.credentials, account_id)
+    endpoints, _username, password, check = await run_in_db(read.credentials, account_id)
     _from_account(message, endpoints.username)
     if not message.get("Message-ID"):
         message["Message-ID"] = make_msgid()
@@ -63,7 +63,7 @@ async def send(account_id: str, message: EmailMessage) -> str:
     def deliver() -> None:
         smtp.send_message(endpoints, endpoints.username, password, message)
 
-    await read._guarded(account_id, endpoints, deliver)
+    await read._guarded(account_id, check, deliver)
     if not endpoints.smtp_saves_sent:
         try:
             await _keep_copy(account_id, folders.SENT, message)
@@ -80,7 +80,7 @@ async def send_invite(account_id: str, sender: str, invite: Invite) -> InviteSen
     the host accepted the mail, so a failed send leaves nothing behind to duplicate on a retry; a calendar that
     will not take the event never undoes the send, and the result says so.
     """
-    endpoints, _username, password = await run_in_db(read.credentials, account_id)
+    endpoints, _username, password, _check = await run_in_db(read.credentials, account_id)
     uid = str(uuid4())
     await send(account_id, invites.invite_message(sender, invite, uid))
     stored = await caldav.put_event(endpoints, password, uid, invites.stored_event(sender, invite, uid))

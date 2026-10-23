@@ -28,13 +28,13 @@ async def reply_target(account_id: str, message_id: str) -> tuple[dict, str]:
         validity, uid = read.parse_message_id(account_id, message_id)
     except read.MessageNotFound as exc:
         raise DraftRefused(str(exc)) from None
-    endpoints, username, password = await run_in_db(read.credentials, account_id)
+    endpoints, username, password, check = await run_in_db(read.credentials, account_id)
 
     def call() -> bytes | None:
         with imap.account_lock(account_id):
             return imap.reply_headers(endpoints, username, password, validity, uid)
 
-    raw = await read._guarded(account_id, endpoints, call)
+    raw = await read._guarded(account_id, check, call)
     if raw is None:
         raise DraftRefused(read.NOT_FOUND)
     headers = email.message_from_bytes(raw, policy=email.policy.default)

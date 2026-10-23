@@ -19,7 +19,7 @@ import pytest
 
 from connections.google import client as google_client
 from connections.mail import email_document
-from connections.google.accounts import NONE_AVAILABLE
+from connections.mail_accounts import NONE_AVAILABLE
 from doceditor.document_scope import revision as document_revision
 from google_account_helpers import make_only_corsia
 import infra.config as config
@@ -296,13 +296,12 @@ async def test_a_caller_outside_the_accounts_reach_is_refused_with_the_exact_tex
 
 async def test_send_re_checks_reach_and_uses_the_drafts_own_account(mail, approve, monkeypatch):
     from connections import connected_accounts
-    from connections.google import accounts
 
     saved = await _draft(mail)
     assert json.loads(_row(saved["draft_id"])["target_json"])["account_id"] == mail.account
     monkeypatch.setattr(connected_accounts, "account_reaches_thread", lambda *args, **kwargs: False)
     out = await _send(mail, saved)
-    assert out == f"Error: Not sent: {accounts.NONE_AVAILABLE}"
+    assert out == f"Error: Not sent: {NONE_AVAILABLE}"
     assert mail.sent_requests() == [] and _row(saved["draft_id"])["state"] == "open"
 
 

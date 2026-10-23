@@ -27,26 +27,26 @@ def _cursor(validity: int, uid: int) -> str:
 
 async def floor(account_id: str) -> str:
     """Record the current mailbox position without delivering existing mail."""
-    endpoints, username, password = await run_in_db(read.credentials, account_id)
+    endpoints, username, password, check = await run_in_db(read.credentials, account_id)
 
     def call() -> tuple[int, int]:
         with imap.account_lock(account_id):
             return imap.inbox_cursor(endpoints, username, password)
 
-    validity, uid = await read._guarded(account_id, endpoints, call)
+    validity, uid = await read._guarded(account_id, check, call)
     return _cursor(validity, uid)
 
 
 async def added(account_id: str, position: str) -> tuple[str, list[read.Message]]:
     """Return a new cursor and messages newer than ``position``; never replay a rebuilt inbox."""
     validity, last_uid = _parse_cursor(position)
-    endpoints, username, password = await run_in_db(read.credentials, account_id)
+    endpoints, username, password, check = await run_in_db(read.credentials, account_id)
 
     def call() -> tuple[int, int, list[tuple[int, bytes]]]:
         with imap.account_lock(account_id):
             return imap.added_after(endpoints, username, password, validity, last_uid, MAX_POLL_BYTES)
 
-    current_validity, current_last, found = await read._guarded(account_id, endpoints, call)
+    current_validity, current_last, found = await read._guarded(account_id, check, call)
     return (
         _cursor(current_validity, current_last),
         [read.Message(read.mint_message_id(account_id, current_validity, uid), "", *read.parse(raw, with_body=True)) for uid, raw in found],

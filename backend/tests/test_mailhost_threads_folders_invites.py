@@ -15,7 +15,7 @@ from test_mailhost_send import _draft, _send, host, make_host  # noqa: F401  (fi
 
 from connections.mail.email_document import reply_subject
 from connections.mailhost import read
-from tools.google_calendar import CalendarDraftInviteTool, CalendarSendInviteTool
+from tools.calendar_list import CalendarDraftInviteTool, CalendarSendInviteTool
 from tools.google_email import EmailDraftTool
 
 

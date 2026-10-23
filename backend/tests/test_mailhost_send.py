@@ -17,13 +17,14 @@ from mailhost_helpers import (  # noqa: F401  (fixtures)
 )
 
 import infra.config as config
-from connections.mailhost import check, store
+from connections.mailhost import check, read as mailhost_read, store
 from events.connectors import mail_poller as poller
 from infra.database import get_db
 from infra.platform_paths import WorkspaceSelection
-from tools import google_calendar, google_email
+from tools import calendar_list as google_calendar
+from tools import google_email
 from tools.action_gate import Approved
-from tools.google_calendar import CalendarDraftInviteTool, CalendarSendInviteTool
+from tools.calendar_list import CalendarDraftInviteTool, CalendarSendInviteTool
 from tools.google_email import EmailDraftTool, EmailSendTool
 
 pytestmark = pytest.mark.asyncio
@@ -128,14 +129,14 @@ async def test_a_missing_sent_copy_does_not_turn_a_delivered_send_into_a_failure
 
 async def test_a_refused_password_sends_nothing_reopens_the_draft_and_turns_the_row_to_refused(host, monkeypatch) -> None:
     notified = []
-    monkeypatch.setattr(check, "notify_connected_apps_updated", lambda: notified.append(1))
+    monkeypatch.setattr(mailhost_read, "notify_connected_apps_updated", lambda: notified.append(1))
     saved = await _draft(host)
     host.built.smtp.password = "changed-after-the-draft"
     out = await _send(host, saved)
     assert out.startswith("Error: Not sent: ") and "didn’t accept this app password" in out
     assert host.built.smtp.sent == [] and _row(saved["draft_id"])["state"] == "open"
     found = row(host.account_id)
-    assert found["check"]["status"] == store.REFUSED and found["state"] == "needs_sign_in" and notified
+    assert found["check"]["status"] == store.REVOKED and found["state"] == "needs_sign_in" and notified
     _no_leak(out, found["raw"])
 
 
@@ -183,14 +184,14 @@ async def test_a_password_the_poller_finds_refused_flips_the_row_and_polling_for
     monkeypatch.setattr(poller, "_status", poller._fresh_status())
     monkeypatch.setenv(poller.TEST_ENABLE_ENV, "1")
     notified = []
-    monkeypatch.setattr(check, "notify_connected_apps_updated", lambda: notified.append(1))
+    monkeypatch.setattr(mailhost_read, "notify_connected_apps_updated", lambda: notified.append(1))
     await poller.run_cycle()
     assert row(host.account_id)["state"] == "connected"
     host.built.imap.password = "revoked-by-the-host"
     poller._due[host.account_id] = 0
     await poller.run_cycle()
     found = row(host.account_id)
-    assert found["check"]["status"] == store.REFUSED and found["state"] == "needs_sign_in" and notified
+    assert found["check"]["status"] == store.REVOKED and found["state"] == "needs_sign_in" and notified
     logins = [verb for _, verb in host.built.imap.commands].count("LOGIN")
     await poller.run_cycle()
     assert [verb for _, verb in host.built.imap.commands].count("LOGIN") == logins
