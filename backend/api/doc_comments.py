@@ -135,7 +135,7 @@ async def create_comment(
         region=region,
     )
     try:
-        row, _registered, feedback = await create_validated_comment(request, body.client_id)
+        row, _registered, feedback, created = await create_validated_comment(request, body.client_id)
     except CommentAccessDenied as exc:
         raise HTTPException(404, str(exc)) from exc
     except CommentActionError as exc:
@@ -147,8 +147,8 @@ async def create_comment(
             409,
             "client_id collides with another artifact's comment — re-mint and retry",
         ) from exc
-    if feedback["batch_ids"]:
-        background.add_task(deliver_person_comment_after_response, feedback["batch_ids"])
+    if created:
+        background.add_task(deliver_person_comment_after_response, feedback["batch_ids"], artifact_id)
     if feedback["woken"]:
         from plans import public
 

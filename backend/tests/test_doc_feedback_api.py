@@ -87,7 +87,7 @@ async def test_comment_handler_returns_before_a_blocked_background_delivery(isol
     started = asyncio.Event()
     release = asyncio.Event()
 
-    async def blocked_delivery(_batch_ids):
+    async def blocked_delivery(_batch_ids, _artifact_id):
         started.set()
         await release.wait()
 
@@ -115,6 +115,35 @@ async def test_comment_handler_returns_before_a_blocked_background_delivery(isol
     await asyncio.wait_for(started.wait(), timeout=1)
     running.cancel()
     await asyncio.gather(running, return_exceptions=True)
+
+
+def test_no_recipient_person_comment_still_sends_one_frame(client, isolated_db, monkeypatch):
+    """A user comment on their own document is announced after its empty delivery."""
+    from doceditor import comment_notifications, live_runtime
+
+    monkeypatch.setattr(live_runtime, "_manager", None)
+    db = get_db()
+    try:
+        seed_thread(db, "ui")
+        db.execute("UPDATE threads SET user_id=? WHERE id='ui'", (OWNER_USER,))
+        created_artifact_id = seed_document(db, "ui")
+    finally:
+        db.close()
+    frames: list[str] = []
+    monkeypatch.setattr(
+        comment_notifications,
+        "broadcast_doc_comment_changed",
+        lambda artifact_id, **_kwargs: frames.append(artifact_id),
+    )
+
+    response = client.post(
+        f"/api/artifacts/{created_artifact_id}/comments?token={OWNER_TOKEN}",
+        json={"body": "Keep canvases current.", "client_id": "no-recipient-comment"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["batch_ids"] == []
+    assert frames == [created_artifact_id]
 
 
 @pytest.mark.parametrize("path", ["send", "retry"])

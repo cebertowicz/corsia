@@ -59,7 +59,7 @@ def test_person_delivery_announces_once_after_all_recipient_batches_close(isolat
         )
 
         assert len(feedback["batch_ids"]) == 2
-        feedback_batches.deliver_person_comment(db, feedback["batch_ids"])
+        feedback_batches.deliver_person_comment(db, feedback["batch_ids"], artifact_id)
 
         assert frames == [artifact_id]
         assert all(row["state"] == "delivered" for row in batches(db) if row["id"] in feedback["batch_ids"])

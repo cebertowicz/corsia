@@ -155,7 +155,7 @@ async def create_agent_comment(token: str, body: AgentCommentCreate):
         quote=body.quote, near=body.near, replacement=body.replacement, registration=register_spec, submit=body.submit,
     )
     try:
-        row, registered, feedback = await create_validated_comment(request, body.client_id)
+        row, registered, feedback, _created = await create_validated_comment(request, body.client_id)
     except CommentAccessDenied as exc:
         raise HTTPException(404, str(exc)) from exc
     except AppLoopUnavailable as exc:
