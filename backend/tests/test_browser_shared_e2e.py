@@ -21,7 +21,9 @@ from uuid import uuid4
 
 import pytest
 
-from host_access import browser_cdp, browser_control, browser_dom_write, browser_screencast, browser_session_commands
+from host_access import (
+    browser_cdp, browser_control, browser_dom_write, browser_screencast, browser_session_commands, browser_steps,
+)
 from host_access.browser_session_state import BrowserSessionError
 from host_access.browser_sessions import BrowserSessionOwner
 
@@ -257,16 +259,16 @@ async def test_shared_pane_cdp_shortcut_sequence_submits_a_form():
 
 def _quiet_password_steps(monkeypatch, steps: list[str]) -> None:
     """Record the person's password step instead of writing a plan, and report nothing to a pane."""
-    async def open_episode(_thread_id, episode):
-        episode.node_id = "password-step"
+    async def open_step(_thread_id, step):
+        step.node_id = "password-step"
         steps.append("opened")
 
-    async def settle_episode(_thread_id, _episode):
+    async def settle_step(_thread_id, _step):
         steps.append("settled")
 
-    monkeypatch.setattr(browser_control, "_open_episode", open_episode)
-    monkeypatch.setattr(browser_control, "_settle_episode", settle_episode)
-    monkeypatch.setattr(browser_control, "_publish_password_page", lambda *_args: None)
+    monkeypatch.setattr(browser_control, "_open_step", open_step)
+    monkeypatch.setattr(browser_control, "_settle_step", settle_step)
+    monkeypatch.setattr(browser_steps, "publish_password_page", lambda *_args: None)
 
 
 @pytest.mark.integration

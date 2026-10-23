@@ -67,6 +67,17 @@ async def page_endpoint(owner: Any, thread_id: str) -> str:
     return await browser_cdp.page_endpoint(partial(_command, owner, runtime, None))
 
 
+async def declare_person_step(owner: Any, thread_id: str, instruction: str) -> None:
+    """Give the current shared-browser page to the person and arrange its observed completion."""
+    await owner._pin_native()
+    runtime = await owner._admit(thread_id, lease_id=None, show_window=None, session="existing")
+    command = partial(_command, owner, runtime, None)
+    endpoint = await browser_cdp.page_endpoint(command)
+    await browser_control.declare_person_step(
+        thread_id, partial(browser_cdp.page_password_probe, endpoint), instruction,
+    )
+
+
 async def _command(owner: Any, runtime: Any, lease_id: str | None, args: Sequence[str], timeout: float) -> browser_cli.CommandResult:
     result, _unfinished = await owner._run_admitted(runtime, args, lease_id=lease_id, timeout=timeout)
     return result

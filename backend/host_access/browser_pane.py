@@ -64,7 +64,7 @@ async def screencast(thread_id: str, connection_token: str, deliver: Callable[[s
 async def password_probe(thread_id: str, connection_token: str, known_visit: str | None,
                          known_nodes: frozenset[int]) -> browser_cdp.PasswordProbe:
     """Probe the shared page for a password field over this pane's page endpoint."""
-    endpoint = await _page_endpoint(thread_id, connection_token, browser_control.PASSWORD_CHECK_FAILED)
+    endpoint = await _page_endpoint(thread_id, connection_token, browser_control.PAGE_CHECK_FAILED)
     return await browser_cdp.page_password_probe(endpoint, known_visit, known_nodes)
 
 
