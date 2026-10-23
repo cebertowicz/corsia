@@ -71,7 +71,8 @@
 	let localPreparing = $state(false);
 	let finishing = $state(false), showAdd = $state(false), openProvider = $state<HostProvider | null>(null);
 	// The subscriptions answer; null until answered (or skipped, or a resumed setup), when every CLI row shows.
-	let picks = $state<SetupPicks | null>(null), confirmLocalStop = $state(false), confirmConnect = $state(false), localOffFailed = $state<{ reference?: string } | undefined>();
+	// toolsOff: tools turned off from a row before the question was answered; nothing is recorded for them.
+	let picks = $state<SetupPicks | null>(null), toolsOff = $state<string[]>([]), confirmLocalStop = $state(false), confirmConnect = $state(false), localOffFailed = $state<{ reference?: string } | undefined>();
 	const connectFlow = createSetupConnect({ token: () => get(token), sources: () => sources, refreshSources });
 	const canConnect = shellInfo() !== null;
 	let preauthLocal = $state<LocalRowState | undefined>();
@@ -82,7 +83,7 @@
 	const tested = $derived($testedProviders.map((source) => ({ source })));
 	const canFinish = $derived(hasReadySetupModel(catalog, tested));
 	const cliSignedIn = (vendor: string) => { const source = sources.find((row) => row.source === vendor); return Boolean(source && (sourceIsReady(source) || source.limited)); };
-	const cliPicked = (vendor: string) => picks === null || (vendor === 'codex' ? picks.chatgpt : picks.claude);
+	const cliPicked = (vendor: string) => !toolsOff.includes(vendor) && (picks === null || (vendor === 'codex' ? picks.chatgpt : picks.claude));
 	const subscriptionsSkipped = $derived(subscriptionQuestion(cliSignedIn('claude-code'), cliSignedIn('codex')) === null);
 	// A working cloud model frees the local download to be turned off.
 	const cloudReady = $derived(catalog.some((row) => row.connection !== 'omlx' && setupModelWorks(row)));
@@ -163,13 +164,15 @@
 	function afterAccount() { page = subscriptionsSkipped ? 'models' : 'subscriptions'; }
 	/** One answer: picked tools start installing now, an unpicked one stops what it started. */
 	function recordPicks(next: SetupPicks) {
-		picks = next;
+		picks = next; toolsOff = [];
 		// Kept so the first chat knows which subscriptions the person said they pay for.
 		void recordSetupProgress({ picks: next }, get(token));
 	}
 	/** The row's switch: the tool is unpicked as on the subscriptions screen, and what it started stops. */
 	function turnOffTool(vendor: string) {
-		recordPicks({ claude: vendor === 'claude-code' ? false : picks?.claude ?? true, chatgpt: vendor === 'codex' ? false : picks?.chatgpt ?? true });
+		// With no answer recorded, the other tool's pick is unknown: it is never written as a yes the person didn't give.
+		if (picks) recordPicks({ claude: vendor === 'claude-code' ? false : picks.claude, chatgpt: vendor === 'codex' ? false : picks.chatgpt });
+		else toolsOff = [...toolsOff, vendor];
 		void connectFlow.stop(vendor);
 	}
 	function answerSubscriptions(next: SetupPicks) {

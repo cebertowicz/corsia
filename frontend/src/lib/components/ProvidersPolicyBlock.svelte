@@ -31,7 +31,7 @@
 	async function load() {
 		accountsError = '';
 		const [, accounts] = await Promise.all([policyState.load(), loadVendorAccounts()]);
-		if (!accounts.ok) accountsError = accounts.error ?? 'Could not load accounts.';
+		if (!accounts.ok) accountsError = accounts.error ?? 'Couldn’t load your accounts.';
 	}
 	async function toggleScope(useWorkspace: boolean) { await policyState.toggleScope(useWorkspace); }
 	async function save(entry: ProviderEntry, patch: Partial<ProviderEntry>, target: string) { await policyState.save(entry, patch, target); }

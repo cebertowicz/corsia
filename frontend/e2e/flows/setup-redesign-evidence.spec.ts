@@ -398,11 +398,13 @@ test('setup redesign complete state frames @setup-redesign', async ({ browser, r
 	await setFocusMode(request, false);
 	const emailQuestion = 'Which email do you use: Gmail (a work Gmail counts), Outlook, or something else?';
 	const emailScenarios = [
-		{ name: 'first-run-email-gmail', answer: 'Gmail', next: 'I can look after your email and calendar. To connect them, I\'ll set up your own private Google project in a browser you can watch, and you sign in and click Allow. Google will also ask for your Drive, Docs and Sheets, so you won\'t have to sign in again later. Two things to expect: Google will warn that the app isn\'t verified. That\'s normal for a private project like yours; choose "Advanced", then "Go to CORSIA (unsafe)". It\'s your own project, so you\'re the only one it can reach. And the project gets published as "In production", because a project left in Testing stops letting me in after 7 days. Go ahead?', element: 'Fresh conversation: the answer “Gmail”, then CORSIA’s offer to set up your own Google project, ending “Go ahead?”' },
+		{ name: 'first-run-email-gmail', answer: 'Gmail', next: 'To connect Gmail and Calendar, CORSIA creates a private Google project you own, in a browser you can watch. Google will ask to:\n- Read, send and change your Gmail, and manage your calendar.\n- See, edit and delete your Drive, Docs and Sheets files, so you won\'t have to sign in again later.\nTwo things to expect:\n- If Google warns the app isn\'t verified, choose "Advanced", then "Go to CORSIA (unsafe)". It\'s your own project, so only you can reach it.\n- CORSIA may set the project to "In production", because a project left in Testing stops letting CORSIA in after 7 days.\nGo ahead?', element: 'Fresh conversation: the answer “Gmail”, then CORSIA’s offer to set up your own Google project, ending “Go ahead?”' },
 		{ name: 'first-run-email-outlook', answer: 'Outlook', next: 'I can\'t connect Outlook, but I\'ve noted which one you use.', element: 'Fresh conversation: the answer “Outlook”, then “I can’t connect Outlook, but I’ve noted which one you use.”' },
-		{ name: 'first-run-email-both', answer: 'Gmail and Outlook', next: 'I can look after your email and calendar. To connect them, I\'ll set up your own private Google project in a browser you can watch, and you sign in and click Allow. Google will also ask for your Drive, Docs and Sheets, so you won\'t have to sign in again later. Two things to expect: Google will warn that the app isn\'t verified. That\'s normal for a private project like yours; choose "Advanced", then "Go to CORSIA (unsafe)". It\'s your own project, so you\'re the only one it can reach. And the project gets published as "In production", because a project left in Testing stops letting me in after 7 days. Go ahead?', element: 'Fresh conversation: the answer “Gmail and Outlook”, then CORSIA’s offer to set up your own Google project, ending “Go ahead?”' },
+		{ name: 'first-run-email-both', answer: 'Gmail and Outlook', next: 'To connect Gmail and Calendar, CORSIA creates a private Google project you own, in a browser you can watch. Google will ask to:\n- Read, send and change your Gmail, and manage your calendar.\n- See, edit and delete your Drive, Docs and Sheets files, so you won\'t have to sign in again later.\nTwo things to expect:\n- If Google warns the app isn\'t verified, choose "Advanced", then "Go to CORSIA (unsafe)". It\'s your own project, so only you can reach it.\n- CORSIA may set the project to "In production", because a project left in Testing stops letting CORSIA in after 7 days.\nGo ahead?', element: 'Fresh conversation: the answer “Gmail and Outlook”, then CORSIA’s offer to set up your own Google project, ending “Go ahead?”' },
 		{ name: 'first-run-email-other', answer: 'Proton Mail', next: 'I can\'t connect that email, but I\'ve noted which one you use.', element: 'Fresh conversation: the answer “Proton Mail”, then “I can’t connect that email, but I’ve noted which one you use.”' },
 	] as const;
+	// A reply with bullets renders as a paragraph and a list, so match its first line, which is one element.
+	const firstLine = (reply: string) => reply.split('\n')[0];
 	const cases = emailScenarios.filter((row) => row.name === `first-run-email-${emailCase}`);
 	expect(cases, 'CORSIA_SETUP_EMAIL_CASE is gmail, outlook, both or other').toHaveLength(1);
 	const threadId = await corsiaAgentThread(request);
@@ -451,12 +453,12 @@ First, a few things to set up here, one at a time. Any of them can wait: say "no
 			await expect(emailPage.getByText(openingLead, { exact: true })).toHaveCount(1);
 			await expect(emailPage.getByText(emailQuestion, { exact: true }), 'the email question appears once').toHaveCount(1);
 			await expect(emailPage.getByText(scenario.answer, { exact: true })).toHaveCount(1);
-			await expect(emailPage.getByText(scenario.next, { exact: true })).toHaveCount(1);
+			await expect(emailPage.getByText(firstLine(scenario.next))).toHaveCount(1);
 			for (const other of emailScenarios.filter((row) => row.name !== scenario.name)) {
 				await expect(emailPage.getByText(other.answer, { exact: true }), `${other.name}'s answer is not in ${scenario.name}`).toHaveCount(0);
-				if (other.next !== scenario.next) await expect(emailPage.getByText(other.next, { exact: true }), `${other.name}'s reply is not in ${scenario.name}`).toHaveCount(0);
+				if (other.next !== scenario.next) await expect(emailPage.getByText(firstLine(other.next)), `${other.name}'s reply is not in ${scenario.name}`).toHaveCount(0);
 			}
-			await emailPage.getByText(scenario.next, { exact: true }).scrollIntoViewIfNeeded();
+			await emailPage.getByText(firstLine(scenario.next)).scrollIntoViewIfNeeded();
 			await expectCleanFirstRun(emailPage);
 			const emailFile = `${scenario.name}-${theme}-1280x900.png`;
 			const emailPath = resolve(assets!, emailFile);

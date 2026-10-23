@@ -1118,7 +1118,6 @@ async def test_claimed_batch_uses_one_preflight_and_exact_provider_fence(
         from core.destination_preflight import attach_native_provider_fit_ledger
         from core.turn_context import NativePreparedContext
 
-        assert warm_join_started.is_set()
         preflights.append(kwargs)
         messages = [{"role": "user", "content": kwargs["current_user_content"]}]
         prepared = attach_native_provider_fit_ledger(
@@ -1140,6 +1139,8 @@ async def test_claimed_batch_uses_one_preflight_and_exact_provider_fence(
     async def _dispatch(provider, ctx):
         dispatch_started.set()
         dispatches.append((provider, ctx))
+        # The harness now owns the wait; preparation may finish beforehand.
+        await thread_warm.join_requested_warm_for_delivery(ctx.thread_id, ctx.target.catalog_id)
         ctx.mark_accepted()
         await ctx.settle_delivery()
         return "native.fake", None, admission.batch.identity
@@ -1156,10 +1157,10 @@ async def test_claimed_batch_uses_one_preflight_and_exact_provider_fence(
     send_task = asyncio.create_task(execute_claimed_batch(
         admission.batch, thread_row=thread_row, target=target, user={"id": "user-1"},
     ))
-    await asyncio.sleep(0)
-    await asyncio.sleep(0)
-    assert dispatch_started.is_set() is False
-    assert preflights == []
+    await asyncio.wait_for(warm_join_started.wait(), HANG_GUARD_SECONDS)
+    assert dispatch_started.is_set()
+    assert len(preflights) == 1
+    assert not send_task.done()
     warm_release.set()
     result = await send_task
     assert warm_task is not None

@@ -246,3 +246,24 @@ async def test_cloud_discovery_http_reports_only_committed_rows(
         result = response.json()
         assert result["ok"] is True
         assert [m["id"] for m in result["models"]] == [m["provider_model_id"] for m in models]
+
+
+@pytest.mark.asyncio
+async def test_cloud_discovery_broadcasts_only_when_the_stored_models_changed(isolated_db, monkeypatch):
+    from unittest.mock import Mock
+    from infra.state import ws
+
+    models = _models("anthropic")
+    monkeypatch.setattr(catalog_cloud, "_anthropic_discovered", lambda: models)
+    notify = Mock()
+    monkeypatch.setattr(ws, "notify_models_changed", notify)
+
+    await catalog_cloud.discover_cloud_models("anthropic", "k")
+    assert notify.call_count == 1  # first insert is a change
+
+    await catalog_cloud.discover_cloud_models("anthropic", "k")
+    assert notify.call_count == 1  # same models, newer timestamps: no broadcast
+
+    models[0] = {**models[0], "display_name": "Renamed"}
+    await catalog_cloud.discover_cloud_models("anthropic", "k")
+    assert notify.call_count == 2

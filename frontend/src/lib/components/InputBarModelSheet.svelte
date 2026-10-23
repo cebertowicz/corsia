@@ -294,8 +294,8 @@
 				{/each}
 				{#if cloudModelsOff && hasReadyGroup}<PickerLocalOnlyNote kind="quiet" {projectCloudOff} inherited={inheritedLocalOnly} onprojectsettings={openProjectPolicy} />{/if}
 				{#if showsLocalSection}
-					<section class="model-group" aria-label="Local">
-						<PickerModelGroupHeader name="Local" groupKey="local" count={0} fallback />
+					<section class="model-group" aria-label="CORSIA">
+						<PickerModelGroupHeader name="CORSIA" groupKey="local" count={0} fallback />
 						{#if $localStatus}
 								{#if $localStatus.retry === 'settings'}
 									<div class="local-settings-status"><span class="text" aria-live="polite">{$localStatus.line}</span><button type="button" disabled={settingsRetrying} onclick={retrySettingsDownload}>{settingsRetrying ? 'Trying again…' : 'Try again'}</button></div>

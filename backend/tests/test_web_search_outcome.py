@@ -9,11 +9,15 @@ from __future__ import annotations
 
 import json
 import logging
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
 
 from infra import key_store
+from llm.providers.omlx_public_auth import OmlxPublicAuthError
+from tools import web as web_mod
+from tools import web_omlx_search as omlx_mod
 from tools import web_search_outcome as outcome_mod
 from tools.web import NO_KEY_TEXT, WebSearchTool
 from tools.web_search_outcome import (
@@ -151,3 +155,198 @@ async def test_a_newly_saved_key_is_used_on_the_next_call(store, monkeypatch):
     assert "1. Hit" in text and VALUE not in text
     assert seen[-1].headers["X-Subscription-Token"] == VALUE
     assert json.dumps(dict(seen[-1].url.params)).find(VALUE) == -1
+
+
+@pytest.mark.asyncio
+async def test_brave_key_precedes_managed_omlx(store, monkeypatch):
+    key = "brave-key"
+    brave = AsyncMock(return_value=outcome_mod.SearchOutcome(
+        WORKS, results=[{"title": "Brave", "url": "https://brave.test"}],
+    ))
+    keyless = AsyncMock()
+    key_store.set_value("web-search", key)
+    monkeypatch.setattr(web_mod, "run_search", brave)
+    monkeypatch.setattr(web_mod, "keyless_search", keyless)
+
+    text = await WebSearchTool().execute("q")
+
+    assert "Brave" in text
+    brave.assert_awaited_once_with(key, "q", 5)
+    keyless.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_web_search_uses_managed_omlx_without_brave_key(store, monkeypatch):
+    keyless = AsyncMock(return_value=outcome_mod.SearchOutcome(WORKS, results=[
+        {"title": "oMLX", "url": "https://omlx.test/result", "description": "Snippet"},
+        {"title": "Second", "url": "https://omlx.test/second"},
+    ]))
+    monkeypatch.setattr(web_mod, "keyless_search", keyless)
+
+    text = await WebSearchTool().execute("q", count=1)
+
+    assert "1. oMLX" in text
+    assert "https://omlx.test/result" in text
+    assert "Second" not in text
+    keyless.assert_awaited_once_with("q")
+
+
+@pytest.mark.asyncio
+async def test_search_target_recovers_a_stale_endpoint_through_the_guard(monkeypatch):
+    calls: list[str] = []
+
+    def server(*, include_disabled):
+        assert include_disabled is True
+        return {"id": "omlx-1", "status": "online"}
+
+    async def guard(server_id):
+        calls.append(f"guard:{server_id}")
+        return True
+
+    def api_base(server_id):
+        calls.append(f"base:{server_id}")
+        return "http://127.0.0.1:8210/v1"
+
+    async def headers(cfg, *, url):
+        assert cfg == {"server_id": "omlx-1"}
+        assert url == "http://127.0.0.1:8210/v1"
+        return {"Authorization": "Bearer safe"}
+
+    monkeypatch.setattr("llm.local_sources.corsia_omlx_server", server)
+    monkeypatch.setattr("llm.network_endpoints.freshness_guard", guard)
+    monkeypatch.setattr("llm.network_endpoints.build_api_base", api_base)
+    monkeypatch.setattr("llm.providers.omlx_public_auth.public_headers", headers)
+
+    assert await omlx_mod._search_target() == (
+        "http://127.0.0.1:8210/v1/web/search", {"Authorization": "Bearer safe"},
+    )
+    assert calls == ["guard:omlx-1", "base:omlx-1"]
+
+
+@pytest.mark.asyncio
+async def test_search_target_reports_a_stale_endpoint_that_the_guard_cannot_recover(monkeypatch):
+    monkeypatch.setattr(
+        "llm.local_sources.corsia_omlx_server",
+        lambda *, include_disabled: {"id": "omlx-1", "status": "online"},
+    )
+    monkeypatch.setattr("llm.network_endpoints.freshness_guard", AsyncMock(return_value=False))
+    monkeypatch.setattr(
+        "llm.network_endpoints.build_api_base",
+        lambda _server_id: pytest.fail("a still-stale endpoint must not be used"),
+    )
+
+    assert await omlx_mod._search_target() == omlx_mod.SERVER_STOPPED
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("server", "expected"),
+    [
+        (None, omlx_mod.NO_SERVER),
+        ({"id": "omlx-1", "status": "offline"}, omlx_mod.SERVER_STOPPED),
+        ({"id": "omlx-1", "status": "disabled"}, omlx_mod.SERVER_DISABLED),
+    ],
+)
+async def test_search_target_reports_registered_server_state(monkeypatch, server, expected):
+    monkeypatch.setattr(
+        "llm.local_sources.corsia_omlx_server", lambda *, include_disabled: server,
+    )
+    monkeypatch.setattr(
+        "llm.network_endpoints.freshness_guard",
+        AsyncMock(side_effect=AssertionError("a stopped server must not be probed")),
+    )
+
+    assert await omlx_mod._search_target() == expected
+
+
+@pytest.mark.asyncio
+async def test_search_target_maps_public_auth_failure_to_provider_error(monkeypatch):
+    monkeypatch.setattr(
+        "llm.local_sources.corsia_omlx_server",
+        lambda *, include_disabled: {"id": "omlx-1", "status": "online"},
+    )
+    monkeypatch.setattr("llm.network_endpoints.freshness_guard", AsyncMock(return_value=True))
+    monkeypatch.setattr("llm.network_endpoints.build_api_base", lambda _server_id: "http://omlx.test/v1")
+
+    async def reject_headers(_cfg, *, url):
+        raise OmlxPublicAuthError("endpoint changed")
+
+    monkeypatch.setattr("llm.providers.omlx_public_auth.public_headers", reject_headers)
+
+    outcome = await omlx_mod._search_target()
+
+    assert (outcome.kind, outcome.reason) == (FAILED, REASON_PROVIDER)
+
+
+@pytest.mark.asyncio
+async def test_keyless_search_answers_an_empty_result_without_retrying(monkeypatch):
+    target = ("http://omlx.test/v1/web/search", {"Authorization": "Bearer safe"})
+    search_once = AsyncMock(return_value=outcome_mod.SearchOutcome(WORKS))
+    discovery = AsyncMock(return_value=target)
+    monkeypatch.setattr(omlx_mod, "_search_target", discovery)
+    monkeypatch.setattr(omlx_mod, "_search_once", search_once)
+
+    outcome = await omlx_mod.keyless_search("q")
+
+    assert (outcome.kind, outcome.results) == (WORKS, [])
+    discovery.assert_awaited_once_with()
+    search_once.assert_awaited_once_with(*target, "q")
+
+
+@pytest.mark.asyncio
+async def test_web_search_explains_an_empty_managed_omlx_result(store, monkeypatch):
+    keyless = AsyncMock(return_value=outcome_mod.SearchOutcome(WORKS))
+    monkeypatch.setattr(web_mod, "keyless_search", keyless)
+
+    text = await WebSearchTool().execute("q")
+
+    assert text == web_mod.EMPTY_OMLX_TEXT
+    keyless.assert_awaited_once_with("q")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("keyless_result", "expected"),
+    [
+        (omlx_mod.NO_SERVER, web_mod.NO_KEY_TEXT),
+        (omlx_mod.SERVER_DISABLED, web_mod.SERVER_DISABLED_TEXT),
+        (omlx_mod.SERVER_STOPPED, web_mod.SERVER_STOPPED_TEXT),
+    ],
+)
+async def test_web_search_names_the_keyless_unavailable_state(store, monkeypatch, keyless_result, expected):
+    monkeypatch.setattr(web_mod, "keyless_search", AsyncMock(return_value=keyless_result))
+
+    assert await WebSearchTool().execute("q") == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("response,expected", [
+    ({"ok": False}, (FAILED, REASON_PROVIDER)),
+    (httpx.ConnectError("refused"), (FAILED, REASON_NETWORK)),
+    (httpx.Response(401), (FAILED, REASON_PROVIDER)),
+    (httpx.Response(422, json={"error": {"code": "SUBSCRIPTION_TOKEN_INVALID"}}), (FAILED, REASON_PROVIDER)),
+    (httpx.Response(429), (FAILED, REASON_RATE_LIMIT)),
+])
+async def test_managed_omlx_failures_use_search_outcome_classes(monkeypatch, response, expected):
+    if isinstance(response, Exception):
+        def handler(_request):
+            raise response
+    elif isinstance(response, httpx.Response):
+        def handler(request):
+            return httpx.Response(response.status_code, content=response.content,
+                                  headers=response.headers, request=request)
+    else:
+        def handler(request):
+            return httpx.Response(200, json=response, request=request)
+    original_client = httpx.AsyncClient
+
+    class Client(original_client):
+        def __init__(self, *args, **kwargs):
+            kwargs["transport"] = httpx.MockTransport(handler)
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr(omlx_mod.httpx, "AsyncClient", Client)
+    result = await omlx_mod._search_once("http://omlx.test/v1/web/search", {}, "q")
+
+    assert (result.kind, result.reason) == expected
+    assert result.kind != KEY_REFUSED

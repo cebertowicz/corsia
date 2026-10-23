@@ -72,6 +72,18 @@ function _setState(key: string, patch: Partial<ProviderModelsState>) {
 	});
 }
 
+/**
+ * Puts a list the caller already holds into the store before its card opens: the open
+ * paints it at once while its own read refreshes behind it. Only fills a card the store holds
+ * nothing for, so an older snapshot can never overwrite a newer read.
+ */
+export function seedProviderModels(providerName: string, serverId: string | undefined, models: ProviderModel[]): void {
+	const k = _key(providerName, serverId);
+	const current = get(_models)[k];
+	if (current?.loading || current?.models.length) return;
+	_setState(k, { models, lastError: undefined });
+}
+
 export async function loadProviderModelsFor(p: ProviderEntry, server?: NetworkServer): Promise<void> {
 	const k = _key(p.name, server?.id);
 	_setState(k, { loading: true, lastError: undefined });
