@@ -14,7 +14,7 @@ End your turn. Not now: `OK. Settings › Keys has it whenever you want it.` Clo
 
 ## 2. Open the right page
 
-Open it with `browser_open` and `show_window: true`, tell the person in one `post_update` that a window opened, and fill only the email they chose at install (the saved email; if none is saved, ask for one in chat first).
+Open it with `browser_open`; the person watches in the shared browser, so do not set `show_window`. Tell the person in one `post_update` that the pane opened, and fill only the email they chose at install (the saved email; if none is saved, ask for one in chat first).
 
 | They have an account | Open | Fill |
 |---|---|---|

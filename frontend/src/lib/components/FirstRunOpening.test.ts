@@ -1,4 +1,5 @@
 import { flushSync, mount, tick, unmount } from 'svelte';
+import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { get } from 'svelte/store';
 import MessageList from './MessageList.svelte';
@@ -16,7 +17,10 @@ import { _resetTypewritersForTests } from '$lib/ws/typewriter';
 vi.mock('$lib/product_events', () => ({ emitProductEvent: vi.fn(), identifyUser: vi.fn() }));
 vi.mock('$lib/ws', () => ({ on: () => () => {}, connect: vi.fn(), disconnect: vi.fn(), isConnected: () => false, reconnectNow: vi.fn(), sendMessage: vi.fn(), stopTurn: vi.fn(), hasActiveTurn: () => false, subscribeThread: vi.fn(), unsubscribeThread: vi.fn(), watchThread: vi.fn(), cancelThreadTypewriters: vi.fn() }));
 const thread = 'first-run-ui';
-const content = 'Hi Pat.\n\nHere is the plan for finishing your setup.';
+const content = 'Hi Pat.\n\n' + readFileSync(new URL(
+	'../../../../backend/prompts/system/v1/skills/conductor-bootstrap/references/first-run-opening.md',
+	import.meta.url,
+), 'utf8').trim();
 const opening: Omit<Message, 'thread_id'> = { id: `first-run-opening:${thread}`, role: 'assistant', content, seq: 1,
 	created_at: '2026-10-22T00:00:00Z', metadata: { for_user: true, first_run_opening: true } };
 let host: HTMLElement;
@@ -54,7 +58,8 @@ describe('first-run transcript composition', () => {
 		const observer = new MutationObserver(records => changes.push(...records));
 		observer.observe(region, { childList: true, characterData: true, subtree: true });
 		vi.advanceTimersByTime(90); await settle();
-		expect(host.querySelector('.typewriter-text')?.textContent).toBe('Hi ');
+		expect(host.querySelector('.typewriter-text')?.textContent).toMatch(/^Hi Pat\./);
+		expect(host.querySelector('.typewriter-text')?.textContent!.length).toBeLessThan(content.length);
 		expect(host.querySelector('.typewriter-text')?.closest('[aria-hidden="true"]')).not.toBeNull();
 		restoreTurnState(thread, { ...INITIAL_TURN_STATE, phase: 'active', turnId: 'first', turnOrder: 1 });
 		streamContentByThread.set(new Map([[thread, 'FIRST_LIVE_DELTA']]));
@@ -66,7 +71,7 @@ describe('first-run transcript composition', () => {
 		expect(host.textContent).not.toContain('FIRST_MODEL_STEP');
 		expect(host.textContent).not.toContain('FIRST_LIVE_DELTA');
 		expect(host.textContent).not.toContain('FIRST_REASONING');
-		vi.advanceTimersByTime(5_000); await settle();
+		vi.advanceTimersByTime(1_910); await settle();
 		expect(host.querySelector('.typewriter-text')).toBeNull();
 		expect(host.textContent).toContain('FIRST_MODEL_STEP');
 		expect(host.querySelector('[aria-live="polite"][aria-atomic="true"]')).toBe(region);
@@ -79,7 +84,7 @@ describe('first-run transcript composition', () => {
 		if (kind === 'reduced motion') { awaitFirstRunOpening(thread); vi.stubGlobal('matchMedia', () => ({ matches: true })); }
 		if (kind !== 'history') receive();
 		await settle();
-		expect(host.textContent).toContain('Here is the plan for finishing your setup.');
+		expect(host.textContent).toContain("Here's mine for finishing your setup.");
 		expect(host.querySelector('.typewriter-text')).toBeNull();
 		expect(host.querySelector('[aria-atomic="true"]')).toBeNull();
 	});

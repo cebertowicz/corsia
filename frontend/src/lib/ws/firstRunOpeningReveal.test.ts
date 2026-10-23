@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { get } from 'svelte/store';
+import { readFileSync } from 'node:fs';
 import { activeThreadId, messages } from '$lib/stores/threads';
 import { handleMessage } from './handlers';
 import { awaitFirstRunOpening, cancelFirstRunOpening, _resetFirstRunOpeningRevealForTests } from './firstRunOpeningReveal';
@@ -11,7 +12,7 @@ const content = 'Hi Pat.\n\nI am CORSIA. Here is the plan for finishing setup.';
 const opening = { id: `first-run-opening:${thread}`, role: 'assistant', content,
 	created_at: '2026-10-22T00:00:00Z', seq: 1,
 	metadata: { for_user: true, first_run_opening: true, turn_unbound_reason: 'server_scripted' } };
-const receive = () => handleMessage({ type: 'message_added', thread_id: thread, message: opening }, () => {});
+const receive = (message = opening) => handleMessage({ type: 'message_added', thread_id: thread, message }, () => {});
 const row = () => get(messages).find(message => message.id === opening.id)!;
 
 beforeEach(() => {
@@ -26,6 +27,22 @@ afterEach(() => {
 });
 
 describe('local first-pick opening', () => {
+	it('reveals the actual packaged opening at word boundaries and finishes within two seconds', () => {
+		const fullContent = 'Hi Pat.\n\n' + readFileSync(new URL(
+			'../../../../backend/prompts/system/v1/skills/conductor-bootstrap/references/first-run-opening.md',
+			import.meta.url,
+		), 'utf8').trim();
+		expect(fullContent.split(/\s+/).length).toBeGreaterThan(200);
+		awaitFirstRunOpening(thread); receive({ ...opening, content: fullContent });
+		vi.advanceTimersByTime(100);
+		expect(row().typewriterPos).toBeGreaterThan(0);
+		expect(row().typewriterPos).toBeLessThan(fullContent.length);
+		expect(fullContent.slice(0, row().typewriterPos)).toMatch(/\s$/);
+		vi.advanceTimersByTime(1_900);
+		expect(row().typewriterPos).toBeUndefined();
+		expect(row().content).toBe(fullContent);
+		expect(_getActiveTypewriterCount(thread)).toBe(0);
+	});
 	it('starts on live arrival, advances by words, retains full content, and never replays', () => {
 		awaitFirstRunOpening(thread); receive();
 		expect(row().content).toBe(content);
@@ -39,7 +56,7 @@ describe('local first-pick opening', () => {
 		cancelThreadTypewriters(thread, { turnId: 'first', turnOrder: 1 });
 		expect(_getActiveTypewriterCount(thread)).toBe(1);
 		receive(); expect(_getActiveTypewriterCount(thread)).toBe(1);
-		vi.advanceTimersByTime(5_000);
+		vi.advanceTimersByTime(1_820);
 		expect(row().typewriterPos).toBeUndefined();
 		receive(); expect(row().typewriterPos).toBeUndefined();
 		expect(_getActiveTypewriterCount(thread)).toBe(0);

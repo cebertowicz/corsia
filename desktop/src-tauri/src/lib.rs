@@ -47,6 +47,7 @@ mod startup_failure;
 mod test_tls;
 use startup_failure::StartupFailure;
 mod trust;
+mod unfinished_setup;
 mod version_check;
 mod window_placement;
 mod update_stage;
@@ -69,6 +70,10 @@ struct AppServiceState {
     app_dir: Mutex<Option<PathBuf>>,
     /// The local service ports already granted their commands; a capability can't be removed, so each is added once.
     granted_local_ports: Mutex<std::collections::BTreeSet<u16>>,
+    /// Set once this process has had its one chance to wipe an unfinished setup. A retry in the same process (after
+    /// an approval prompt or a slow start) never wipes, so it can't delete what this process just started; what a
+    /// retry may still do, planning a first run in the folder a finished wipe left, is read from disk.
+    setup_checked: AtomicBool,
     quitting: AtomicBool,
     exit_cleanup_attempted: AtomicBool,
     adoption_in_progress: AtomicBool,
@@ -365,6 +370,55 @@ fn unregister_service() -> Result<(), String> {
     run_service_command("unregister")
 }
 
+/// An unfinished first-run setup leaves nothing: before anything is planned or started, a marker the first run
+/// left (and the backend deletes when setup finishes) makes this launch wipe the state folder and what setup
+/// created, so first run begins again at step 1. Without a marker, or with one that cannot be trusted, nothing
+/// is touched. Starting over never stops a launch, and it is all or nothing for the old install: a wipe that
+/// fails deletes nothing, so the marker is dropped and the install resumes where it stopped (the old behavior);
+/// one that gets past its first step has removed the old install, so the launch plans a clean first run.
+///
+/// Returns the work folder that setup made, so planning the new first run reuses it.
+fn start_over_if_unfinished(app_dir: &Path, may_wipe: bool) -> Option<PathBuf> {
+    match unfinished_setup::at_launch(app_dir) {
+        unfinished_setup::Launch::Nothing => None,
+        unfinished_setup::Launch::Replan(workspace) => {
+            unfinished_setup::finish_leftovers(app_dir);
+            Some(workspace)
+        }
+        unfinished_setup::Launch::Damaged(reason) => {
+            // Nothing can trust it, so it only gets in the way: this install is simply not marked.
+            log::error!("a damaged unfinished-setup marker was removed: {reason}");
+            drop_marker(app_dir);
+            None
+        }
+        unfinished_setup::Launch::Untrusted(reason) => {
+            log::error!("an unfinished-setup marker was left alone: {reason}");
+            None
+        }
+        // This process has already started a service, so what is on disk is not an abandoned setup.
+        unfinished_setup::Launch::Wipe(_) if !may_wipe => None,
+        unfinished_setup::Launch::Wipe(marker) => {
+            log::info!("setup was never finished: starting it over");
+            // The service holds the state folder open, so it stops first.
+            let wiped = unregister_service().and_then(|()| unfinished_setup::wipe(app_dir, &marker));
+            match wiped {
+                Ok(()) => Some(PathBuf::from(marker.workspace)),
+                Err(error) => {
+                    log::error!("could not start setup over, so it resumes where it stopped: {error}");
+                    drop_marker(app_dir);
+                    None
+                }
+            }
+        }
+    }
+}
+
+fn drop_marker(app_dir: &Path) {
+    if let Err(error) = unfinished_setup::discard_marker(app_dir) {
+        log::error!("could not remove the unfinished-setup marker: {error}");
+    }
+}
+
 fn restart_service() -> Result<(), String> {
     unregister_service()?;
     run_service_command("register")
@@ -576,12 +630,18 @@ fn start_service<R: tauri::Runtime>(
         log::error!("an unfinished Start fresh could not be put back: {}", failure.details);
         return Ok(ServiceStartup::StartFreshFailed { failure });
     }
+    let started_over = if first_run::environment_names_the_roots() {
+        None
+    } else {
+        let may_wipe = !service.setup_checked.swap(true, Ordering::SeqCst);
+        start_over_if_unfinished(&app_dir, may_wipe)
+    };
     // Decide about the workspace before anything is written: a refusal leaves
     // the computer exactly as it was.
     let first_run = if first_run::environment_names_the_roots() {
         first_run::FirstRun::Configured
     } else {
-        first_run::plan(&home, &app_dir)?
+        first_run::plan_trusting(&home, &app_dir, started_over.as_deref())?
     };
     if let first_run::FirstRun::ExistingInstall { reason, details } = first_run {
         return Ok(ServiceStartup::ExistingInstall { reason, details });
@@ -593,6 +653,16 @@ fn start_service<R: tauri::Runtime>(
     }
     let port = port_for_startup(&first_run, first_run::recorded_port(&app_dir))?;
     if let first_run::FirstRun::Fresh { workspace } = first_run {
+        // Marked before anything is written, so a marker that can't be written refuses the launch and leaves the
+        // computer as it was. Only a first run that makes the state folder marks it; `false` means it was not new.
+        match unfinished_setup::mark(&app_dir, &workspace) {
+            Ok(true) => {}
+            Ok(false) => log::info!("the state folder was not new, so setup is not marked unfinished"),
+            Err(error) => {
+                log::error!("could not mark setup as unfinished: {error}");
+                return Err("Couldn’t start setup. Quit and reopen CORSIA to try again.".into());
+            }
+        }
         let resources = bundled_resource_dir(app).ok();
         first_run::apply(&workspace, &app_dir, port, |path| {
             first_run::git_init(

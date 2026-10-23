@@ -243,6 +243,7 @@ async def _run_prepared_turn(
             on_provider_response=_provider_accepted,
             on_provider_terminal=request.settle_delivery_terminal,
             on_safe_boundary=_safe_boundary,
+            catalog_id=request.target.catalog_id,
         )
     )
 

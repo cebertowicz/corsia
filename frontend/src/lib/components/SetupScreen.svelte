@@ -127,7 +127,8 @@
 			}
 			const view = connectFlow.row(source);
 			const works = catalog.some((row) => row.connection === vendor && setupModelWorks(row));
-			return withReportAction({ key: vendor, name: vendor === 'codex' ? 'Codex' : 'Claude Code', ...view, pill: works ? { state: 'success', label: 'Ready' } : undefined });
+			const toggle = view.canTurnOff ? { on: true, run: (next: boolean) => { if (!next) turnOffTool(vendor); } } : undefined;
+			return withReportAction({ key: vendor, name: vendor === 'codex' ? 'Codex' : 'Claude Code', ...view, toggle, pill: works ? { state: 'success', label: 'Ready' } : undefined });
 		});
 		rows.push(withReportAction(setupLocalRow({ source: local, pick: localPick.pick, eligible, downloading, preparing: localPreparing || localBusy || localPick.pick?.state === 'checking', ready: catalog.some((row) => row.connection === 'omlx' && setupModelWorks(row)), startError: localStartError, startFix, startReference: localStartReference, freeDisk: status.free_disk_gb,
 			cloudReady, confirmingStop: confirmLocalStop, turnOffFailed: localOffFailed,
@@ -163,10 +164,18 @@
 	/** The subscriptions screen is asked only while a CLI is still not signed in. */
 	function afterAccount() { page = subscriptionsSkipped ? 'models' : 'subscriptions'; }
 	/** One answer: picked tools start installing now, an unpicked one stops what it started. */
-	function answerSubscriptions(next: SetupPicks) {
+	function recordPicks(next: SetupPicks) {
 		picks = next;
 		// Kept so the first chat knows which subscriptions the person said they pay for.
 		void recordSetupProgress({ picks: next }, get(token));
+	}
+	/** The row's switch: the tool is unpicked as on the subscriptions screen, and what it started stops. */
+	function turnOffTool(vendor: string) {
+		recordPicks({ claude: vendor === 'claude-code' ? false : picks?.claude ?? true, chatgpt: vendor === 'codex' ? false : picks?.chatgpt ?? true });
+		void connectFlow.stop(vendor);
+	}
+	function answerSubscriptions(next: SetupPicks) {
+		recordPicks(next);
 		for (const vendor of CLI_VENDORS) {
 			if (cliSignedIn(vendor)) continue;
 			const source = sources.find((row) => row.source === vendor);
@@ -314,9 +323,9 @@
 				return;
 			}
 			warm.start(catalog, current);
-			// The mark leaves before the first chat takes over, so the hand-over is one motion.
-			await shell?.exitMark();
 			await warm.finish();
+			// The mark leaves immediately before the first chat takes over.
+			await shell?.exitMark();
 			onFinished();
 		} finally { finishing = false; }
 	}

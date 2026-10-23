@@ -11,6 +11,7 @@ from tests.unavailable_model_support import (
     HELD,
     hold_head,
     message_row,
+    mark_model_loaded,
     seed_model,
     set_model_available,
 )
@@ -130,6 +131,7 @@ async def test_lifted_hold_stays_visible_while_nothing_can_claim_it(
 
     await hold_head(monkeypatch, "t", "omlx@srv/m", "m1")
     set_model_available("omlx@srv/m", 1)
+    mark_model_loaded(monkeypatch, "omlx@srv/m")
     monkeypatch.setattr("plans.public.set_aside_while_paused", lambda *_a, **_k: True)
     drive = AsyncMock()
     monkeypatch.setattr(execution, "drive_claimed_batch", drive)
@@ -163,6 +165,7 @@ async def test_hold_lifted_while_an_unrelated_turn_runs_drives_when_it_settles(
     finally:
         db.close()
     set_model_available("omlx@srv/m", 1)
+    mark_model_loaded(monkeypatch, "omlx@srv/m")
 
     await recovery._resume_held_heads()
     assert message_row("m1") == HELD
@@ -186,6 +189,7 @@ async def test_release_publishes_the_cleared_row_live(
 
     await hold_head(monkeypatch, "t", "omlx@srv/m", "m1")
     set_model_available("omlx@srv/m", 1)
+    mark_model_loaded(monkeypatch, "omlx@srv/m")
     monkeypatch.setattr(execution, "_execute_claimed_batch", AsyncMock())
     published = Mock()
     monkeypatch.setattr("infra.state.broadcast_to_thread", published)

@@ -7,6 +7,7 @@ import { isCurrentTurn, type TurnIdentity } from './turnState';
 const TYPEWRITER_BASE_SPEED = 12;
 const TYPEWRITER_INTERVAL_MS = 33;
 const TYPEWRITER_SPEEDUP_AFTER = 200;
+const OPENING_REVEAL_DURATION_MS = 1_800;
 
 interface TypewriterTimer {
 	identity?: TurnIdentity;
@@ -67,13 +68,13 @@ export function startTypewriter(
 
 	let pos = startPos;
 	// The scripted opening uses the same timer/store path as settled step text,
-	// but advances at word boundaries at one provider-independent reading pace.
+	// but advances at word boundaries within the same total duration for every provider.
 	const content = get(messages).find(m => m.id === messageId)?.content ?? '';
 	const wordEnds = pacing === 'words'
 		? Array.from(content.matchAll(/\S+\s*/g), match => match.index! + match[0].length)
 			.filter(end => end > startPos && end <= endPos)
 		: [];
-	let wordIndex = 0;
+	const startedAt = Date.now();
 
 	// Hiding content and animating it are ONE act, so they happen in one place.
 	// `handleStepText` used to set `typewriterPos: 0` on the row and then start
@@ -129,8 +130,10 @@ export function startTypewriter(
 			? TYPEWRITER_BASE_SPEED + Math.floor((revealed - TYPEWRITER_SPEEDUP_AFTER) / 100) * 4
 			: TYPEWRITER_BASE_SPEED;
 
+		const wordsShown = Math.max(1, Math.ceil(wordEnds.length
+			* Math.min(1, (Date.now() - startedAt) / OPENING_REVEAL_DURATION_MS)));
 		pos = pacing === 'words'
-			? wordEnds[wordIndex++] ?? endPos
+			? wordEnds[wordsShown - 1] ?? endPos
 			: Math.min(pos + speed, endPos);
 
 		const current = get(messages);
@@ -154,7 +157,7 @@ export function startTypewriter(
 			_unregisterTimer(threadId, messageId);
 			emit('typewriter_done', { messageId, threadId });
 		}
-	}, pacing === 'words' ? 90 : TYPEWRITER_INTERVAL_MS);
+	}, TYPEWRITER_INTERVAL_MS);
 
 	_registerTimer(threadId, messageId, { identity, timer });
 }

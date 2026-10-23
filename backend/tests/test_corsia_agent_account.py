@@ -716,3 +716,25 @@ async def test_j7_the_personal_account_signed_in_on_the_card_runs_the_first_turn
 
     assert turn_account("codex", thread_id=CONDUCTOR, model=MODEL, db=db) == (personal["id"], None)
     assert require_claim("codex", thread_id=CONDUCTOR, model=MODEL, db=db) == personal["id"]
+
+
+def test_the_account_list_marks_a_signed_in_account_that_has_no_usable_model(conductor):
+    """Settings reads the same per-account state as the first-run card: only Personal has no model to run."""
+    from api.vendor_accounts import router
+    from infra.auth import require_user
+
+    db, work, personal = conductor
+    _make("ready", db, work)
+    _make("no_usable_model", db, personal)
+    app = FastAPI()
+    app.include_router(router)
+    app.dependency_overrides[require_user] = lambda: {"id": "user"}
+
+    with TestClient(app) as api:
+        listed = api.get("/api/vendor-accounts", params={"provider": "codex"}).json()["accounts"]
+        renamed = api.patch(f"/api/vendor-accounts/{personal['id']}",
+                            json={"name": "Renamed", "expected_revision": personal["revision"]}).json()
+
+    assert {row["id"]: row["no_usable_model"] for row in listed if not row["is_default"]} == {
+        work["id"]: False, personal["id"]: True}
+    assert renamed["no_usable_model"] is True  # a single-account response carries it too

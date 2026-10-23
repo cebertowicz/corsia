@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 
-from infra import user_profile
+from infra import setup_marker, user_profile
 from infra.accounts import (
     AccountError,
     issue_token,
@@ -47,6 +47,9 @@ def update_account(
                 session = issue_token(name, kind="session", label="browser", db=conn)
             if staged:
                 staged.publish()
+                # A profile the unfinished-setup marker lists must keep matching its digest, or a relaunch
+                # would leave the abandoned setup's name behind; a marker that cannot be updated undoes it.
+                setup_marker.update_created_file(user_profile.PROFILE_RELATIVE_PATH.as_posix(), staged.sha256)
     except BaseException:
         if staged:
             staged.undo()

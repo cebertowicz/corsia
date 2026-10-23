@@ -13,6 +13,7 @@ from connections.account_selection import rebind_idle_account
 from connections.corsia_agent_account import (
     FirstRunBind,
     NotCorsiaAgent,
+    accounts_without_usable_model,
     bind_corsia_agent_account,
     require_corsia_agent,
 )
@@ -117,16 +118,25 @@ def _billing_views() -> dict[str, dict]:
         db.close()
 
 
-async def _shown(account, rows=None, numbered_rows=None, billing_views=None):
+async def _no_usable_model(providers) -> set[str]:
+    """The accounts, across these vendors, that signed in but have no model CORSIA can run."""
+    wanted = {provider for provider in providers if provider in accounts.VENDORS}
+    return await run_read(accounts_without_usable_model, wanted) if wanted else set()
+
+
+async def _shown(account, rows=None, numbered_rows=None, billing_views=None, no_model=None):
     """The account as the API returns it, with its person-facing label."""
     if billing_views is None:
         billing_views = await run_in_db(_billing_views)
+    if no_model is None:
+        no_model = await _no_usable_model([account["provider"]])
     if rows is None:
         rows = await _read(accounts.list_accounts, provider=account["provider"])
     if numbered_rows is None:
         numbered_rows = await _read(accounts.list_accounts, provider=account["provider"], include_removed=True)
     return _safe(account) | {"duplicate_of": await _read(accounts.duplicate_of, account, rows=rows),
                              "allow_overage": await run_read(_allow_overage, account),
+                             "no_usable_model": account["id"] in no_model,
                              "label": account_label(account, rows=numbered_rows),
                              **billing_views.get(account["id"], {"billing": None, "billing_revision": 0}),
                              "usage": await run_read(_usage, account)}
@@ -138,7 +148,8 @@ async def list_vendor_accounts(provider: str | None = None, include_removed: boo
     numbered_rows = rows if include_removed else await _read(
         accounts.list_accounts, provider=provider, include_removed=True)
     billing_views = await run_read(_billing_views)
-    return {"accounts": [await _shown(row, rows, numbered_rows, billing_views) for row in rows]}
+    no_model = await _no_usable_model(row["provider"] for row in rows)
+    return {"accounts": [await _shown(row, rows, numbered_rows, billing_views, no_model) for row in rows]}
 
 
 @router.post("/vendor-accounts")
