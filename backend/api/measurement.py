@@ -158,15 +158,15 @@ async def measurement_series(
 
 
 
-def _series_read(requested: list[str], project: str, agent: str, page_grain: Grain, user: dict) -> tuple[dict[str, str | None], dict[str, list[dict[str, Any]]], str | None, int | None, PresenceCoverage, dict[str, list[dict[str, str]]], dict[str, str | None]]:
+def _series_read(requested: list[str], project: str, agent: str, page_grain: Grain, user_id: str) -> tuple[dict[str, str | None], dict[str, list[dict[str, Any]]], str | None, int | None, PresenceCoverage, dict[str, list[dict[str, str]]], dict[str, str | None]]:
     db = get_db()
     try:
-        selected_scope = validate_scope(db, user["id"], project, agent)
-        scope_params = selected_scope.params(user["id"])
+        selected_scope = validate_scope(db, user_id, project, agent)
+        scope_params = selected_scope.params(user_id)
         params = {**scope_params, "grain": page_grain}
         so_far = current_period_outcomes(db, scope_params, page_grain) if "outcomes" in requested and page_grain.kind == "days" else None
         families = {REGISTRY[metric].family for metric in requested}
-        coverage = presence_coverage(db, user["id"], page_grain.zone)
+        coverage = presence_coverage(db, user_id, page_grain.zone)
         first_limit_period = first_recorded_period(db, params) if "limits" in families else None
         pending_starts: dict[str, str | None] = {}
         breaks = derive_breaks(db, requested, page_grain, pending_starts=pending_starts)
@@ -193,7 +193,7 @@ async def series_payload(requested: list[str], project: str, agent: str, page_gr
     current_period = page_grain.current
 
     selected_scope, family_rows, first_limit_period, outcomes_so_far, coverage, breaks, pending_starts = await run_bulk(
-        _series_read, requested, project, agent, page_grain, user,
+        _series_read, requested, project, agent, page_grain, user["id"],
     )
     await _persist_pending_starts(pending_starts)
     first_presence = coverage.start_period(page_grain)
