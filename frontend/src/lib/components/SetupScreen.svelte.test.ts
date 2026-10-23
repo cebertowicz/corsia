@@ -257,6 +257,26 @@ describe('SetupScreen', () => {
 		expect(rowNames()).not.toContain('Claude Code');
 	});
 
+	it('records nothing about the other tool when a row is turned off in a resumed setup, where the subscriptions question was not answered', async () => {
+		const account = { account_id: 'a1', label: 'me@example.com', label_verified: true, identified: true, state: 'no_usable_model', resets_at: null, corsia_agent_binding: false };
+		sources = [{ source: 'claude-code', name: 'Claude Code', state: 'ready', accounts: [account] } as never, { source: 'codex', name: 'Codex', state: 'ready' }];
+		const base = vi.mocked(fetch).getMockImplementation()!;
+		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+			if (String(input) === '/api/setup/progress' && (init?.method ?? 'GET') === 'GET') return json({ setup_completed: false, status: { local_eligible: false, work_folder: '~/CORSIA' } });
+			return base(input, init);
+		}));
+		await unmount(component);
+		token.set('setup-token');
+		component = mount(SetupScreen, { target: host, props: { onExistingAccount: vi.fn(), onAccountCreated: vi.fn(), onFinished: vi.fn(), resume: true } });
+		flushSync(); await settle(); await settle();
+		expect(rowNames()).toContain('Claude Code');
+		progressBodies.length = 0;
+		host.querySelector<HTMLButtonElement>('button[aria-label="Claude Code"]')!.click(); await settle();
+		expect(progressBodies.map((body) => JSON.parse(body)).filter((body) => 'picks' in body)).toEqual([]);
+		expect(rowNames()).not.toContain('Claude Code');
+		expect(rowNames()).toContain('Codex');
+	});
+
 	it('skips the subscriptions screen when both tools are signed in, and Back returns to the account', async () => {
 		sources = [{ source: 'claude-code', name: 'Claude Code', state: 'ready' }, { source: 'codex', name: 'Codex', state: 'ready' }];
 		await passFolder();
