@@ -20,6 +20,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - CORSIA's own local model defaults to medium reasoning effort unless you chose another.
 - CORSIA's own local model server handles two requests at once, and its group in the model picker is named CORSIA instead of Local.
 - Sending to a local model that isn't loaded yet waits until it loads, and Stop cancels a message still waiting on its model.
+- A Codex chat no longer stays stuck on running when Codex stops partway through receiving a message; your next message runs.
 - Agents can search the web with no search key while CORSIA's own local model is running.
 - Links in a chat open in your browser from the desktop app.
 - When an agent opens a page in the shared browser, the chat shows a chip with that site; clicking it reopens the browser there.
