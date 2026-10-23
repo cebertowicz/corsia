@@ -57,7 +57,7 @@
 		previews?: PreviewFrameSource | null;
 		readOnly?: boolean;
 		/** Where this document lives, so its markdown images resolve against it; none means they stay links. */
-		imageBase?: { path: string; projectId: string | null } | null;
+		imageBase?: { path: string; projectId: string | null; imageCacheKey?: string } | null;
 		/** Opens a drawn image larger in the canvas; without it an image is only selected. */
 		onOpenImage?: (request: OpenImageRequest) => void;
 		/** Follows a link written in this document, given its target as written; without it a link is only styled. */
@@ -223,7 +223,7 @@
 				docTheme,
 				docHighlight,
 				markdownLivePreview,
-				imageContext.of(() => imageBase && { docPath: imageBase.path, projectId: imageBase.projectId, token: get(token) ?? '' }),
+				imageContext.of(() => imageBase && { docPath: imageBase.path, projectId: imageBase.projectId, token: get(token) ?? '', imageCacheKey: imageBase.imageCacheKey }),
 				...(onOpenImage ? [imageOpener.of((request) => onOpenImage?.(request))] : []),
 				...(onOpenLink ? [linkOpener.of((href) => onOpenLink?.(href))] : []),
 				markdownTasks,

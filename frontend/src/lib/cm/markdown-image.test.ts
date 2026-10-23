@@ -38,6 +38,7 @@ afterEach(() => {
 });
 
 const imagePath = (img: HTMLImageElement) => new URL(img.src, 'http://x').searchParams.get('path');
+const imageCacheKey = (img: HTMLImageElement) => new URL(img.src, 'http://x').searchParams.get('v');
 const IMAGE = '![Mock screen](shots/a.png)';
 const DOC = `# Plan\n\n${IMAGE}\n\nafter the image\n`;
 
@@ -69,6 +70,21 @@ describe('resolveImagePath', () => {
 });
 
 describe('markdown images in the live preview', () => {
+	it('uses one cache key throughout an open document and a new key after reopening it', () => {
+		const firstOpen: ImageContext = { ...CONTEXT, imageCacheKey: 'open-1' };
+		const sameOpen: ImageContext = { ...CONTEXT, imageCacheKey: 'open-1' };
+		const secondOpen: ImageContext = { ...CONTEXT, imageCacheKey: 'open-2' };
+		const first = mount(`${IMAGE}\n\n| Image |\n| - |\n| ${IMAGE} |\n`, 0, firstOpen);
+		const reopened = mount(`${IMAGE}\n\n| Image |\n| - |\n| ${IMAGE} |\n`, 0, secondOpen);
+		const rebuilt = mount(`${IMAGE}\n\n| Image |\n| - |\n| ${IMAGE} |\n`, 0, sameOpen);
+
+		for (const selector of ['.cm-md-image img', '.cm-md-table td img']) {
+			expect(imageCacheKey(first.dom.querySelector<HTMLImageElement>(selector)!)).toBe('open-1');
+			expect(imageCacheKey(rebuilt.dom.querySelector<HTMLImageElement>(selector)!)).toBe('open-1');
+			expect(imageCacheKey(reopened.dom.querySelector<HTMLImageElement>(selector)!)).toBe('open-2');
+		}
+	});
+
 	it('draws a relative image below its line, named by its alt text, from the content route', () => {
 		const view = mount(DOC);
 		const img = view.dom.querySelector<HTMLImageElement>('.cm-md-image img')!;

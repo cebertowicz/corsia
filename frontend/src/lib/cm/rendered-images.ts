@@ -21,7 +21,7 @@ export function renderedFragment(html: string, context: ImageContext | null): Do
 			continue;
 		}
 		// Not a `.cm-md-image`: that is the standalone image a click opens and the document holds its place by.
-		img.replaceWith(drawImage(document.createElement('span'), alt, imageContentUrl({ path, projectId: context.projectId, token: context.token })));
+		img.replaceWith(drawImage(document.createElement('span'), alt, imageContentUrl({ path, projectId: context.projectId, token: context.token, imageCacheKey: context.imageCacheKey })));
 	}
 	return template.content;
 }
