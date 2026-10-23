@@ -133,7 +133,7 @@ sys.exit(1)
 # The app binary's update modes. A control file `<mode>_exit` makes a mode fail
 # with that status and change nothing.
 _FAKE_APP = """
-import os, sys
+import os, plistlib, sys
 from pathlib import Path
 
 state = Path(os.environ["FAKE_LAUNCHD"])
@@ -144,7 +144,18 @@ with open(state / "app", "a") as log:
 control = state / (mode.strip("-") + "_exit")
 if control.exists():
     sys.exit(int(control.read_text()))
-if mode == "--update-swap":
+if mode == "--service" and operation == "register":
+    plist = bundle / "Contents" / "Library" / "LaunchAgents" / "ai.corsia.service.plist"
+    state.joinpath("loaded").write_text(str(plist))
+    info = plistlib.loads((bundle / "Contents" / "Info.plist").read_bytes())
+    generation = info["CFBundleShortVersionString"] + "+" + info["CFBundleVersion"]
+    forced = state / "service-register_generation"
+    state.joinpath("generation").write_text(forced.read_text() if forced.exists() else generation)
+    starts = int(state.joinpath("starts").read_text()) + 1
+    state.joinpath("starts").write_text(str(starts))
+    pids = state.joinpath("pids").read_text().split()
+    state.joinpath("pid").write_text(pids[starts % len(pids)])
+elif mode == "--update-swap":
     previous = bundle.with_name("CORSIA.app.previous")
     os.rename(bundle, previous)
     os.rename(bundle.with_name("CORSIA.app.staged"), bundle)
@@ -272,6 +283,7 @@ class App:
         result = self.run("start")
         assert result.returncode == 0, result.stdout + result.stderr
         (self.launchd / "calls").write_text("")
+        (self.launchd / "app").write_text("")
 
     def stage(self, short: str, build: str) -> Path:
         staged = self.bundle.with_name("CORSIA.app.staged")
@@ -321,7 +333,8 @@ def test_app_mode_uses_its_bundle_service_and_service_json_never_a_checkout(app)
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert "ENV FILE SOURCED" not in result.stdout + result.stderr
-    assert app.launchd_calls() == [f"bootstrap gui/{os.getuid()} {app.plist}"]
+    assert app.launchd_calls() == []
+    assert app.calls("app") == ["--service register"]
     assert f"http://127.0.0.1:{PORT}/api/health" in app.calls("curl")
     assert not (app.home / "Library" / "LaunchAgents").exists()
 
@@ -367,11 +380,10 @@ def test_start_stop_and_restart_never_write_inside_a_read_only_bundle(app):
         assert result.returncode == 0, result.stdout + result.stderr
     domain = f"gui/{os.getuid()}"
     assert app.launchd_calls() == [
-        f"bootstrap {domain} {app.plist}",
         f"bootout --wait {domain}/{LABEL}",
-        f"bootstrap {domain} {app.plist}",
         f"kickstart -k {domain}/{LABEL}",
     ]
+    assert app.calls("app") == ["--service register", "--service register"]
     # The restart proved a new process and printed its version identity.
     assert (app.launchd / "starts").read_text() == "3"
     assert f"launchd {LABEL}" in results[-1].stdout
@@ -462,11 +474,11 @@ def test_update_swaps_the_staged_app_and_hands_off_to_its_own_script(app):
     assert result.returncode == 0, result.stdout + result.stderr
     assert "lifecycle from 2.0.0+2" in result.stdout
     domain = f"gui/{os.getuid()}"
-    assert app.launchd_calls() == [
-        f"bootout --wait {domain}/{LABEL}",
-        f"bootstrap {domain} {app.plist}",
+    assert app.launchd_calls() == [f"bootout --wait {domain}/{LABEL}"]
+    assert app.calls("app") == [
+        f"--update-swap {OPERATION_ID}",
+        "--service register",
     ]
-    assert app.calls("app") == [f"--update-swap {OPERATION_ID}"]
     assert app.generation() == "2.0.0+2"
     assert (app.launchd / "generation").read_text() == "2.0.0+2"
     assert not app.bundle.with_name("CORSIA.app.staged").exists()
@@ -484,9 +496,10 @@ def test_a_failed_swap_starts_the_installed_app_again(app):
     assert "could not be installed (swap exit 42)" in result.stdout
     assert "lifecycle from" not in result.stdout
     domain = f"gui/{os.getuid()}"
-    assert app.launchd_calls() == [
-        f"bootout --wait {domain}/{LABEL}",
-        f"bootstrap {domain} {app.plist}",
+    assert app.launchd_calls() == [f"bootout --wait {domain}/{LABEL}"]
+    assert app.calls("app") == [
+        f"--update-swap {OPERATION_ID}",
+        "--service register",
     ]
     assert app.generation() == "1.0.0+1"
     assert (app.launchd / "generation").read_text() == "1.0.0+1"
@@ -507,13 +520,13 @@ def test_after_the_swap_a_health_failure_rolls_back_and_starts_the_old_app(app):
     domain = f"gui/{os.getuid()}"
     assert app.launchd_calls() == [
         f"bootout --wait {domain}/{LABEL}",
-        f"bootstrap {domain} {app.plist}",
         f"bootout --wait {domain}/{LABEL}",
-        f"bootstrap {domain} {app.plist}",
     ]
     assert app.calls("app") == [
         f"--update-swap {OPERATION_ID}",
+        "--service register",
         f"--update-rollback {OPERATION_ID}",
+        "--service register",
     ]
     assert app.generation() == "1.0.0+1"
     assert (app.launchd / "generation").read_text() == "1.0.0+1"
@@ -525,11 +538,7 @@ def test_after_the_swap_a_wrong_version_rolls_back_and_starts_the_old_app(app):
     shutil.copytree(app.bundle, previous, symlinks=True)
     _set_version(app.bundle, "2.0.0", "2")
     # The backend that answers is not the one this app ships.
-    app.fakebin.joinpath("launchctl").write_text(
-        app.fakebin.joinpath("launchctl").read_text()
-        + '\nif command in ("bootstrap", "kickstart"):\n'
-        + '    (state / "generation").write_text("1.0.0+1")\n'
-    )
+    (app.launchd / "service-register_generation").write_text("1.0.0+1")
 
     result = app.run("restart-prepared", CORSIA_RESTART_OPERATION_ID=OPERATION_ID)
 
@@ -537,7 +546,11 @@ def test_after_the_swap_a_wrong_version_rolls_back_and_starts_the_old_app(app):
     output = result.stdout + result.stderr
     assert "is version 1.0.0+1, not 2.0.0+2" in output
     assert "went back to version 1.0.0+1" in output
-    assert app.calls("app") == [f"--update-rollback {OPERATION_ID}"]
+    assert app.calls("app") == [
+        "--service register",
+        f"--update-rollback {OPERATION_ID}",
+        "--service register",
+    ]
     assert app.generation() == "1.0.0+1"
     assert (app.launchd / "generation").read_text() == "1.0.0+1"
     assert not previous.exists()

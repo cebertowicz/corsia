@@ -905,6 +905,39 @@ def test_close_out_advances_and_releases_a_surviving_holding_reservation(
     assert sr.restart_holds_new_work() is False
 
 
+def test_update_startup_fails_when_its_target_version_is_not_running(
+    isolated_db, monkeypatch
+):
+    """A rollback startup must not report the retained update as complete."""
+    from automation import restart_startup
+    from automation import self_restart as sr
+
+    monkeypatch.setattr(
+        "infra.restart_authorization.serving_head_sha", lambda: "deployedsha"
+    )
+    monkeypatch.setattr("infra.build_info.app_version", lambda: "0.4.1")
+    rid = sr.try_acquire(
+        "t-1",
+        "steve",
+        "oldsha",
+        "dev",
+        "update",
+        kind="update",
+        target_version="0.4.2",
+    )
+    assert rid is not None
+    _advance(rid, "steering", "ready", "restarting")
+
+    restart_startup.close_out_prior_self_restart()
+    restart_startup._complete_restart_operation()
+
+    operation = sr.operation_by_id(rid)
+    assert operation["status"] == "failed"
+    assert operation["failure_code"] == "launch_failed"
+    assert "target version 0.4.2 is not running" in operation["failure_detail"]
+    assert sr.restart_holds_new_work() is False
+
+
 def test_close_out_supersedes_only_legacy_phaseless_rows(isolated_db, monkeypatch):
     """Pre-lifecycle rows still use the TTL; operational holds never do."""
     from datetime import datetime, timedelta, timezone

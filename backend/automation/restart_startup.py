@@ -37,11 +37,28 @@ async def _replay_held_webhooks() -> None:
 
 def _complete_restart_operation() -> None:
     from automation import self_restart
+    from infra import build_info
     from infra.restart_authorization import serving_head_sha
 
     operation = self_restart.in_flight_request()
     if operation is None:
         return
+    target_version = operation.get("target_version")
+    if operation.get("kind") == "update" and isinstance(target_version, str) and target_version:
+        running_version = build_info.app_version()
+        if running_version != target_version:
+            detail = (
+                f"Update target version {target_version} is not running "
+                f"(running: {running_version or 'unknown'})."
+            )
+            if not self_restart.fail_resuming_operation(
+                str(operation["id"]),
+                error=detail,
+                failure_code="launch_failed",
+                failure_detail=detail,
+            ):
+                raise RuntimeError("update operation could not release ingress")
+            return
     if not self_restart.complete_operation(
         str(operation["id"]), deployed_sha=serving_head_sha() or None,
     ):

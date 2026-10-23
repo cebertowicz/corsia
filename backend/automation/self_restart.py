@@ -348,6 +348,35 @@ def abort_operation(
         return settled
 
 
+def fail_resuming_operation(
+    operation_id: str,
+    *,
+    error: str,
+    failure_code: str | None = None,
+    failure_detail: str | None = None,
+    db=None,
+) -> bool:
+    """Terminalize a startup-verification failure without restart compensation."""
+    with write_transaction(db, scope="restart_operation") as connection:
+        cur = connection.execute(
+            "UPDATE self_restart_requests SET status='failed',phase=NULL,settled_at=?,"
+            "updated_at=?,error=?,failure_code=?,failure_detail=? "
+            "WHERE id=? AND status='in_flight' AND phase='resuming'",
+            (
+                _now_iso(),
+                _now_iso(),
+                error[:500],
+                failure_code,
+                failure_detail,
+                operation_id,
+            ),
+        )
+        settled = cur.rowcount == 1
+        if settled:
+            revoke_lifecycle_token_for_terminal_operation(connection, operation_id)
+        return settled
+
+
 def clear_stale_in_flight(
     deployed_sha: str | None = None,
     *,
