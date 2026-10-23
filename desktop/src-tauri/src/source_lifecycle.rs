@@ -253,6 +253,7 @@ impl SourceLifecycle {
             },
             NOT_RUNNING_WINDOW,
             STARTUP_CAP,
+            None,
         )
         .map_err(|failure| match failure {
             StartupFailure::TimedOut { .. } => {
@@ -793,6 +794,7 @@ mod tests {
             },
             cap,
             cap,
+            None,
         )
         .unwrap_err();
         assert_eq!(error, StartupFailure::Restarted);
@@ -817,6 +819,7 @@ mod tests {
             || Ok((calls.fetch_add(1, std::sync::atomic::Ordering::Relaxed) == 0).then_some(pid)),
             cap,
             cap,
+            None,
         )
         .unwrap_err();
         assert_eq!(
@@ -838,6 +841,7 @@ mod tests {
                 || Ok(None),
                 Duration::from_millis(30),
                 cap,
+                None,
             )
             .unwrap_err(),
             StartupFailure::Exited { refusal: None }
@@ -855,6 +859,7 @@ mod tests {
                 || Err("could not ask launchd about the existing install".into()),
                 Duration::from_secs(3),
                 Duration::from_secs(3),
+                None,
             )
             .unwrap_err(),
             StartupFailure::PidUnreadable("could not ask launchd about the existing install".into())
@@ -871,6 +876,7 @@ mod tests {
                 || Ok(Some(std::process::id())),
                 Duration::from_millis(30),
                 Duration::from_millis(30),
+                None,
             )
             .unwrap_err(),
             StartupFailure::TimedOut { refusal: None }

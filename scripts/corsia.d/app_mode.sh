@@ -331,6 +331,115 @@ app_mode_swap_staged_update() {
     handoff_redeploy_restart "$_corsia_app_bundle/Contents/Resources"
 }
 
+# Succeeds when the database's committed schema is newer than the newest the app
+# at $1 can open, read from that app's own infra/schema.py. A new build migrates
+# at startup and an older one refuses a newer schema on every start, so swapping
+# one back then crash-loops. An answer that cannot be read counts as newer, since
+# preventing that swap is this check's whole purpose. Read through SQLite, never
+# the file header: a migration committed just before its process was stopped can
+# still sit in the WAL.
+app_mode_data_outgrew() {
+    local previous="$1" versions
+    if ! versions="$("$PYTHON" -I -B -c '
+import ast, sqlite3, sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+from infra.platform_paths import runtime_db_paths
+
+def supported(source):
+    for node in ast.parse(Path(source).read_text()).body:
+        targets = node.targets if isinstance(node, ast.Assign) else [getattr(node, "target", None)]
+        if any(isinstance(t, ast.Name) and t.id == "SCHEMA_VERSION" for t in targets):
+            value = getattr(node.value, "value", None)
+            if type(value) is int:
+                return value
+    raise ValueError("no SCHEMA_VERSION")
+
+newest = supported(sys.argv[3])
+db = runtime_db_paths(Path(sys.argv[2]))[0]
+current = 0
+if db.exists():
+    conn = sqlite3.connect(f"{db.as_uri()}?mode=ro", uri=True, timeout=10)
+    try:
+        current = conn.execute("PRAGMA user_version").fetchone()[0]
+    finally:
+        conn.close()
+print(current, newest)
+' "$BACKEND_DIR" "$CORSIA_STATE_DIR" "$previous/Contents/Resources/backend/infra/schema.py" 2>/dev/null)" \
+        || ! [[ "$versions" =~ ^([0-9]+)\ ([0-9]+)$ ]]; then
+        warn "Could not tell whether $previous can open CORSIA's data"
+        return 0
+    fi
+    [ "${BASH_REMATCH[1]}" -gt "${BASH_REMATCH[2]}" ]
+}
+
+# Proves a started update: healthy, running this app's generation, and its
+# Update operation confirmed complete. On failure, says why in
+# _corsia_app_update_failure.
+app_mode_verify_swapped_update() {
+    local expected actual
+    if ! wait_for_backend_health; then
+        _corsia_app_update_failure="The updated service did not become healthy."
+        return 1
+    fi
+    if ! expected="$(app_mode_generation "$_corsia_app_bundle")"; then
+        _corsia_app_update_failure="The updated app's version could not be read."
+        return 1
+    fi
+    if ! actual="$(app_mode_backend_generation)"; then
+        _corsia_app_update_failure="The updated service did not report its version."
+        return 1
+    fi
+    if [ "$actual" != "$expected" ]; then
+        _corsia_app_update_failure="The updated service is version $actual, not $expected."
+        return 1
+    fi
+    if ! app_mode_report_update true "" || [ "$_corsia_app_update_status" != complete ]; then
+        _corsia_app_update_failure="The updated service could not complete its Update operation."
+        return 1
+    fi
+}
+
+# Gives up on a swapped update that failed a check: rolls back to the previous
+# app, unless the new one has already upgraded the data past what the previous
+# app can open. Then it keeps the new app (roll forward) and checks it once
+# more. Succeeds only when a kept update passes those checks.
+app_mode_abandon_swapped_update() {
+    local previous="$1" reason="$2"
+    _corsia_app_update_kept=false
+    if app_mode_data_outgrew "$previous"; then
+        app_mode_keep_swapped_update "$previous" "$reason" running && return 0
+        return 1
+    fi
+    app_mode_rollback_swapped_update "$previous" "$reason" || :
+    [ "$_corsia_app_update_kept" = true ]
+}
+
+# Keeps the swapped update that already upgraded the data, starting it again if
+# the rollback had stopped it. Never restores the pre-upgrade backup: that would
+# silently drop everything written since.
+app_mode_keep_swapped_update() {
+    local previous="$1" reason="$2" state="$3" previous_generation generation
+    previous_generation="$(app_mode_generation "$previous" 2>/dev/null || echo unknown)"
+    generation="$(app_mode_generation "$_corsia_app_bundle" 2>/dev/null || echo unknown)"
+    warn "$reason The update already upgraded CORSIA's data, which version $previous_generation can't open, so CORSIA is keeping version $generation."
+    if [ "$state" = stopped ] && ! app_mode_service_reload; then
+        fail "CORSIA kept version $generation but could not start it. Open CORSIA to start it again. Version $previous_generation remains at $previous."
+        return 1
+    fi
+    if [ "${_corsia_app_update_reported:-false}" != true ] && app_mode_verify_swapped_update; then
+        _corsia_app_update_kept=true
+        rm -rf "$previous" || warn "Could not remove the previous app at $previous"
+        ok "CORSIA is running version $generation"
+        print_backend_status
+        return 0
+    fi
+    reason="${_corsia_app_update_failure:-$reason}"
+    [ "${_corsia_app_update_reported:-false}" = true ] || app_mode_report_update false "$reason" || :
+    fail "$reason CORSIA kept version $generation because it already upgraded your data, which version $previous_generation can't open. Open CORSIA to try starting it again. Version $previous_generation remains at $previous, and the copy of your data from before the upgrade is beside the database in CORSIA's data folder."
+    return 1
+}
+
 app_mode_rollback_swapped_update() {
     local previous="$1" reason="$2" operation_id="${CORSIA_RESTART_OPERATION_ID:-update}" previous_generation rollback_status
     previous_generation="$(app_mode_generation "$previous" 2>/dev/null || echo unknown)"
@@ -349,6 +458,11 @@ app_mode_rollback_swapped_update() {
     # rollback, and start failures below are reported only by this shell.
     if service_is_loaded && ! bootout_service_and_wait "$(service_domain)" "$(service_label)"; then
         fail "$reason CORSIA could not stop the new service, so it was not rolled back. The new app remains installed at $_corsia_app_bundle and the previous app remains at $previous."
+        return 1
+    fi
+    # Checked again once stopped: a migration can commit after the first check.
+    if app_mode_data_outgrew "$previous"; then
+        app_mode_keep_swapped_update "$previous" "$reason" stopped && return 0
         return 1
     fi
     if "$_corsia_app_bundle/Contents/MacOS/CORSIA" --update-rollback "$operation_id"; then
@@ -397,7 +511,7 @@ print(row["status"])' "$operation_id")" || return 1
 }
 
 app_mode_start_swapped_update() {
-    local previous="$1" job expected actual
+    local previous="$1" job
     if service_is_loaded; then
         if ! job="$(launchctl print "$(service_domain)/$(service_label)" 2>/dev/null)" \
             || ! printf '%s\n' "$job" | app_mode_job_is_this_bundle; then
@@ -405,34 +519,18 @@ app_mode_start_swapped_update() {
             return 1
         fi
         if ! launchctl kickstart -k "$(service_domain)/$(service_label)"; then
-            app_mode_rollback_swapped_update "$previous" "The updated service could not be restarted." || return 1
+            app_mode_abandon_swapped_update "$previous" "The updated service could not be restarted." && return 0
             return 1
         fi
     else
         require_no_unmanaged_backend "$BACKEND_PORT" || return 1
         if ! app_mode_service_reload; then
-            app_mode_rollback_swapped_update "$previous" "The updated service could not be started." || return 1
+            app_mode_abandon_swapped_update "$previous" "The updated service could not be started." && return 0
             return 1
         fi
     fi
-    if ! wait_for_backend_health; then
-        app_mode_rollback_swapped_update "$previous" "The updated service did not become healthy." || return 1
-        return 1
-    fi
-    if ! expected="$(app_mode_generation "$_corsia_app_bundle")"; then
-        app_mode_rollback_swapped_update "$previous" "The updated app's version could not be read." || return 1
-        return 1
-    fi
-    if ! actual="$(app_mode_backend_generation)"; then
-        app_mode_rollback_swapped_update "$previous" "The updated service did not report its version." || return 1
-        return 1
-    fi
-    if [ "$actual" != "$expected" ]; then
-        app_mode_rollback_swapped_update "$previous" "The updated service is version $actual, not $expected." || return 1
-        return 1
-    fi
-    if ! app_mode_report_update true "" || [ "$_corsia_app_update_status" != complete ]; then
-        app_mode_rollback_swapped_update "$previous" "The updated service could not complete its Update operation." || return 1
+    if ! app_mode_verify_swapped_update; then
+        app_mode_abandon_swapped_update "$previous" "$_corsia_app_update_failure" && return 0
         return 1
     fi
     rm -rf "$previous" || warn "Could not remove the previous app at $previous"

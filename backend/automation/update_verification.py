@@ -2,11 +2,19 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 
 from automation import self_restart
 from automation.restart_settlement import settle_restart_control
 from infra import build_info, update_status
+
+#: How long a packaged Update may sit in ``verifying`` once its new backend is
+#: serving. The updater shell confirms within seconds of health (three calls of
+#: at most five seconds each); one still unconfirmed past this has no live shell,
+#: for example after the app was restored by hand, and without this the
+#: operation would hold its banners and the restart lock indefinitely.
+UNCONFIRMED_UPDATE_SECONDS = 60.0
 
 
 def version_failure(operation: dict) -> tuple[str | None, dict]:
@@ -48,6 +56,8 @@ async def confirm_packaged_update(
     if not healthy:
         code = code or failure_code
         detail["reason"] = reason[:500] or "health_check_failed"
+    elif reason:
+        detail.setdefault("reason", reason[:500])
     target = "failed" if code else "complete"
     if not await settle_restart_control(
         operation_id, target=target, error="The packaged Update did not finish its checks." if code else "",
@@ -55,3 +65,28 @@ async def confirm_packaged_update(
     ):
         return None
     return await run_in_db(self_restart.operation_by_id, operation_id)
+
+
+async def settle_unconfirmed_update(logger, *, timeout: float | None = None) -> None:
+    """Settle this startup's ``verifying`` Update when no shell confirms it in time.
+
+    The serving backend is the health evidence, so the version check alone
+    decides: a match completes it, a mismatch fails it with the usual codes.
+    Whichever of this and the shell's confirmation arrives first settles it.
+    """
+    from infra.db_async import run_in_db
+
+    operation = await run_in_db(self_restart.in_flight_request)
+    if operation is None or operation.get("kind") != "update" or operation.get("phase") != "verifying":
+        return
+    operation_id = str(operation["id"])
+    timeout = UNCONFIRMED_UPDATE_SECONDS if timeout is None else timeout
+    await asyncio.sleep(timeout)
+    current = await run_in_db(self_restart.operation_by_id, operation_id)
+    if current is None or current.get("status") != "in_flight" or current.get("phase") != "verifying":
+        return
+    row = await confirm_packaged_update(operation_id, healthy=True, reason="confirmation_timeout")
+    logger.warning(
+        "self-restart: Update {} had no confirmation after {:.0f}s; settled {}",
+        operation_id, timeout, (row or {}).get("status", "by another owner"),
+    )

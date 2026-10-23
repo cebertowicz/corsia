@@ -27,6 +27,7 @@ BACKEND = REPO / "backend"
 LABEL = "ai.corsia.service"
 OPERATION_ID = "0123456789abcdef0123456789abcdef"
 PORT = 47211
+APP_SCHEMA_VERSION = 5
 
 _FAKE_LAUNCHCTL = """
 import os, plistlib, sys
@@ -73,6 +74,15 @@ elif command == "bootout":
     if not loaded.exists():
         sys.exit(3)
     loaded.unlink()
+    # A migration that commits as that generation's process is stopped.
+    migrated = state / "bootout_migrates"
+    if migrated.exists() and migrated.read_text().split()[2] == (state / "generation").read_text():
+        import sqlite3
+        db, version, _generation = migrated.read_text().split()
+        conn = sqlite3.connect(db)
+        conn.execute(f"PRAGMA user_version={int(version)}")
+        conn.commit()
+        conn.close()
 elif command == "kickstart":
     if not loaded.exists():
         sys.exit(113)
@@ -221,6 +231,8 @@ def _build_app(bundle: Path) -> None:
     (infra / "__init__.py").write_text("")
     for module in ("platform_paths.py", "service_file.py", "fs_durability.py"):
         shutil.copy(BACKEND / "infra" / module, infra / module)
+    # Read by the rollback's schema check, which never imports it.
+    (infra / "schema.py").write_text(f"SCHEMA_VERSION = {APP_SCHEMA_VERSION}\n")
     _python_tool(
         resources / "python" / "bin" / "python3",
         """
@@ -649,3 +661,62 @@ def test_after_the_swap_a_wrong_version_rolls_back_and_starts_the_old_app(app):
     assert app.generation() == "1.0.0+1"
     assert (app.launchd / "generation").read_text() == "1.0.0+1"
     assert not previous.exists()
+
+
+def _database_at(state: Path, version: int) -> Path:
+    import sqlite3
+
+    state.mkdir(parents=True, exist_ok=True)
+    db = state / "corsia.db"
+    conn = sqlite3.connect(db)
+    conn.execute(f"PRAGMA user_version={version}")
+    conn.commit()
+    conn.close()
+    return db
+
+
+def test_after_the_swap_data_the_old_app_cannot_open_keeps_the_new_app(app):
+    app.load()
+    app.stage("2.0.0", "2")
+    (app.launchd / "health_fail_generation").write_text("2.0.0+2")
+    state = app.root / "state"
+    _database_at(state, APP_SCHEMA_VERSION + 1)
+
+    result = app.run("restart-prepared", CORSIA_RESTART_OPERATION_ID=OPERATION_ID, CORSIA_STATE_DIR=str(state))
+
+    assert result.returncode != 0
+    output = result.stdout + result.stderr
+    assert "already upgraded CORSIA's data, which version 1.0.0+1 can't open" in output
+    assert "went back to version" not in output
+    assert not any("--update-rollback" in call for call in app.calls("app"))
+    domain = f"gui/{os.getuid()}"
+    assert app.launchd_calls() == [f"bootout --wait {domain}/{LABEL}"]
+    assert app.generation() == "2.0.0+2"
+    assert (app.launchd / "generation").read_text() == "2.0.0+2"
+    assert (app.launchd / "failed_operation").read_text() == OPERATION_ID
+    assert app.bundle.with_name("CORSIA.app.previous").is_dir()
+
+
+def test_a_migration_committed_as_the_rollback_stops_the_service_keeps_the_new_app(app):
+    app.load()
+    app.stage("2.0.0", "2")
+    (app.launchd / "health_fail_generation").write_text("2.0.0+2")
+    state = app.root / "state"
+    db = _database_at(state, APP_SCHEMA_VERSION)
+    (app.launchd / "bootout_migrates").write_text(f"{db} {APP_SCHEMA_VERSION + 1} 2.0.0+2")
+
+    result = app.run("restart-prepared", CORSIA_RESTART_OPERATION_ID=OPERATION_ID, CORSIA_STATE_DIR=str(state))
+
+    assert result.returncode != 0
+    output = result.stdout + result.stderr
+    assert "already upgraded CORSIA's data" in output
+    assert not any("--update-rollback" in call for call in app.calls("app"))
+    domain = f"gui/{os.getuid()}"
+    # Stopped once for the swap and once for the rollback, then started again.
+    assert app.launchd_calls() == [
+        f"bootout --wait {domain}/{LABEL}",
+        f"bootout --wait {domain}/{LABEL}",
+    ]
+    assert app.calls("app")[-2:] == ["--service unregister", "--service register"]
+    assert app.generation() == "2.0.0+2"
+    assert (app.launchd / "generation").read_text() == "2.0.0+2"
