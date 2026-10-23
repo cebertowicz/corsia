@@ -27,6 +27,8 @@ class KnownHost:
     product: str = ""
     #: iCloud's IMAP username is the bare name; the full address also works, so both are tried.
     bare_name_alternate: bool = False
+    #: False when ``app_password_url`` is only the host's homepage: the row then names the page in plain text, not as a link.
+    shows_account_link: bool = True
 
     def endpoints(self, address: str) -> Endpoints:
         alternates = (address.split("@", 1)[0],) if self.bare_name_alternate else ()
@@ -54,6 +56,7 @@ def _gmx(domains: tuple[str, ...], tld: str) -> KnownHost:
         click_path="GMX Settings › Security › Application-specific passwords",
         enable_imap_step="Turn on POP3 and IMAP in GMX: Settings › POP3 & IMAP › Allow access.",
         product="GMX Mail",
+        shows_account_link=False,  # www.gmx.com is the homepage; the account-security page is behind sign-in and was not verified
     )
 
 

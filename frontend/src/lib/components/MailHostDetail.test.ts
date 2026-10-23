@@ -39,7 +39,8 @@ describe('MailHostDetail', () => {
 	it('asks for the app password with Set key as the one primary action', () => {
 		const onSetKey = vi.fn();
 		const root = render(account('iCloud', { problem: 'waiting' }), { onSetKey });
-		expect(root.textContent).toContain('iCloud needs an app password before agents can use this account: make one in your iCloud account settings. Press Set key, paste it and press Set.');
+		expect(root.textContent).toContain('iCloud needs an app password before agents can use this account: make one in your iCloud account settings, then press Set key.');
+		expect(root.textContent).not.toContain('press Set.');
 		expect(button(root, 'Set key')?.className).toContain('primary');
 		expect(root.textContent).not.toContain('Reaches');
 		button(root, 'Set key')!.click();
@@ -55,9 +56,10 @@ describe('MailHostDetail', () => {
 		const url = 'https://account.apple.com/';
 		expect(body(account('iCloud', { problem: 'waiting', manage_url: url })).links).toEqual([['iCloud account settings', url, '_blank', 'noopener']]);
 		expect(body(account('iCloud', { problem: 'refused', manage_url: url })).links).toEqual([['iCloud account settings', url, '_blank', 'noopener']]);
-		expect(body(account('Zoho', { problem: 'imap_off', manage_url: 'https://accounts.zoho.com/', product_name: 'Zoho Mail' })).links).toEqual([['Zoho Mail settings', 'https://accounts.zoho.com/', '_blank', 'noopener']]);
+		// manage_url is the account-security page, not the IMAP setting, so the IMAP-off words never link to it.
+		expect(body(account('Zoho', { problem: 'imap_off', manage_url: 'https://accounts.zoho.com/', product_name: 'Zoho Mail' })).links).toEqual([]);
 		for (const problem of ['waiting', 'refused'] as const) expect(body(account('off.test', { problem })).links).toEqual([]);
-		expect(body(account('off.test', { problem: 'waiting' })).text).toBe('off.test needs an app password before agents can use this account: make one in your off.test account settings. Press Set key, paste it and press Set.');
+		expect(body(account('off.test', { problem: 'waiting' })).text).toBe('off.test needs an app password before agents can use this account: make one in your off.test account settings, then press Set key.');
 	});
 	it('names the product only for a known host: a typed-in host is sent to its host or IT', () => {
 		const known = render(account('Zoho', { problem: 'imap_off', manage_url: 'https://accounts.zoho.com/', product_name: 'Zoho Mail' }));

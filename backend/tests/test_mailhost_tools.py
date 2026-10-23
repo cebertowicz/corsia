@@ -105,7 +105,7 @@ async def test_connect_adds_one_waiting_row_and_its_key_and_never_asks_for_a_pas
     assert sorted(result["password_goes_to"]) == ["127.0.0.1"]
     assert "never ask for, read or repeat the password" in result["next"]
     entry = key_store.entry_metadata(result["key_name"])
-    assert entry["is_set"] is False and entry["label"] == f"mail.test key: {ADDRESS}"
+    assert entry["is_set"] is False and entry["label"] == ADDRESS
     assert row(result["account_id"])["state"] == "needs_sign_in" and count_rows() == 1
     _no_leak(json.dumps(result))
 

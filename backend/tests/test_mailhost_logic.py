@@ -8,7 +8,7 @@ from datetime import date, datetime, timezone
 import pytest
 from mailhost_fakes import SAMPLE_EVENTS, message
 
-from connections.mailhost import events, query, read
+from connections.mailhost import account, events, query, read
 from connections.mailhost.endpoints import (
     BAD_ADDRESS, Endpoints, EndpointsRefused, Server, parse_address, parse_caldav, parse_server,
 )
@@ -136,3 +136,14 @@ def test_events_expand_repeats_inside_the_window_and_mark_all_day_and_free_time(
     assert standup["attendees"] == ["sam@example.com"] and standup["free/busy"] == "busy"
     assert holiday["start"] == "2026-10-23" and holiday["free/busy"] == "free"
     assert weekly["id"].startswith("weekly-1@2026-10-26T18:00:00")
+
+
+def test_a_key_label_is_the_address_for_a_typed_in_host_and_never_drops_the_address() -> None:
+    typed = Endpoints(name="work.test", known=False, username="you@work.test", imap=Server("imap.work.test", 993), smtp=Server("smtp.work.test", 465))
+    assert account.key_label(typed, "you@work.test") == "you@work.test"
+    known = known_host("you@icloud.com")
+    assert known is not None and account.key_label(known.endpoints("you@icloud.com"), "you@icloud.com") == "iCloud key: you@icloud.com"
+    long_host = "very-long-mail-host-name-for-testing-and-then-some-more-words-still.example.test"
+    address = f"you@{long_host}"
+    label = account.key_label(Endpoints(name=long_host, known=False, username=address, imap=Server("i", 993), smtp=Server("s", 465)), address)
+    assert len(label) <= account.KEY_LABEL_MAX and label.startswith("you@very-long-mail-host") and label.endswith("…")

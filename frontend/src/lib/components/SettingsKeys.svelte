@@ -29,6 +29,9 @@
 	let serverRows = $state<ServerKeyRow[]>([]);
 	let loadError = $state('');
 	let open = $state<{ name: string; action: Action } | null>(null);
+	/** A mail-host key is the app password the person made on their host; every other key stays "Key". */
+	const MAIL_HOST_KEY_PREFIX = 'connected-account--mailhost--';
+	const fieldLabel = $derived(open?.name.startsWith(MAIL_HOST_KEY_PREFIX) ? 'App password' : 'Key');
 	// Both fields are write-only: emptied after every submit and never restored.
 	let keyValue = $state('');
 	let password = $state('');
@@ -72,7 +75,7 @@
 		void tick().then(async () => {
 			openForm(target.entry, 'set');
 			await tick();
-			[...document.querySelectorAll<HTMLElement>('[data-key-entry]')].find((card) => card.dataset.keyEntry === target.entry)?.querySelector<HTMLInputElement>('input[aria-label="Key"]')?.focus();
+			[...document.querySelectorAll<HTMLElement>('[data-key-entry]')].find((card) => card.dataset.keyEntry === target.entry)?.querySelector<HTMLInputElement>('.key-form input[type="password"]')?.focus();
 		});
 	});
 
@@ -252,10 +255,10 @@
 	{#if open}
 	<form class="key-form" onsubmit={submit}>
 		{#if open.action === 'set'}
-			<Field label="Key">
+			<Field label={fieldLabel}>
 				<input
 					type="password"
-					aria-label="Key"
+					aria-label={fieldLabel}
 					autocomplete="off"
 					data-1p-ignore
 					data-lpignore="true"

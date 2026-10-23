@@ -63,10 +63,11 @@ def row_detail(account_id: str, db: sqlite3.Connection) -> dict[str, Any]:
         failing = _failing(endpoints, host)
         if failing:
             detail["failing"] = failing
-    if endpoints.app_password_url:
+    known = known_host(endpoints.username) if endpoints.known else None
+    if endpoints.app_password_url and (known is None or known.shows_account_link):
         detail["manage_url"] = endpoints.app_password_url
     if not endpoints.known:
         detail["destination_hosts"] = endpoints.password_destinations()
-    elif (known := known_host(endpoints.username)) and known.product:
+    elif known and known.product:
         detail["product_name"] = known.product
     return {"provider_display_name": endpoints.name, "mailhost": detail}

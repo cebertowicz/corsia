@@ -25,7 +25,7 @@ log = logging.getLogger(__name__)
 NEXT_WAITING = (
     "Post the app-password page with post_update as a chat link the person opens in their own browser (its click "
     "path is in click_path); never open it yourself and never ask for, read or repeat the password. Then tell them: "
-    "in Settings › Keys, press Set key on that account's key, paste the app password and press Set. CORSIA checks it "
+    "in Settings › Keys, press Set key on that account's key and paste the app password. CORSIA checks it "
     "and the account shows Connected in Connected apps. {extra}"
 )
 NEXT_EXISTING = (

@@ -564,6 +564,8 @@ describe('ConnectedAppsSettings', () => {
 				labelled('Remove')!.click();
 				flushSync();
 				expect(document.body.textContent).toContain('Agents lose access now.');
+				// The notice from the first removal is reused for the second: focus has to move again, not only on mount.
+				(document.activeElement as HTMLElement | null)?.blur();
 				([...document.body.querySelectorAll<HTMLButtonElement>('button')].filter((candidate) => candidate.textContent?.trim() === 'Remove').at(-1) as HTMLButtonElement).click();
 				await vi.waitFor(() => expect(host.querySelector('.manual-removal')?.textContent).toBe(expected[id][0]));
 				expect(host.querySelector('.manual-removal a')?.getAttribute('href') ?? null).toBe(expected[id][1]);
@@ -572,6 +574,23 @@ describe('ConnectedAppsSettings', () => {
 				expect(host.querySelector('.manual-removal')?.getAttribute('tabindex')).toBe('-1');
 				expect(host.querySelector('.manual-removal')?.getAttribute('role')).toBe('status');
 			}
+		});
+
+		it('names a typed-in host account by its address alone, and a known host by provider and address', async () => {
+			const rows = [{ ...mailhost('icloud', 'iCloud', { problem: null }), address: 'you@icloud.com' }, mailhost('typed', 'example.com', { problem: null })];
+			vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ servers: [], accounts: rows }) })));
+			component = mount(ConnectedAppsSettings, { target: host });
+			await vi.waitFor(() => expect(host.querySelector('[data-connected-account-id="typed"]')).not.toBeNull());
+			const title = (id: string) => host.querySelector(`[data-connected-account-id="${id}"] .account-closed-name`);
+			expect(title('typed')?.textContent).toBe('you@example.com');
+			expect(title('typed')?.querySelector('.account-provider')).toBeNull();
+			expect(title('icloud')?.textContent).toBe('iCloud —you@icloud.com');
+			expect(host.querySelector('[data-connected-account-id="typed"] button')?.getAttribute('aria-label')).toBe('you@example.com');
+			expect(host.querySelector('[data-connected-account-id="icloud"] button')?.getAttribute('aria-label')).toBe('iCloud — you@icloud.com');
+			openRow('typed');
+			labelled('Remove')!.click();
+			flushSync();
+			expect(document.body.textContent).toContain('Remove you@example.com?');
 		});
 	});
 

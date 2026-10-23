@@ -49,9 +49,23 @@ def _endpoints(address: str, imap: object, smtp: object, caldav: object, usernam
 
 
 def key_label(endpoints: Endpoints, address: str) -> str:
-    """``<host> key: <address>``; an address too long to show whole falls back to ``<host> key``."""
-    label = f"{endpoints.name} key: {address}"
-    return label if len(label) <= KEY_LABEL_MAX else f"{endpoints.name} key"
+    """``<host> key: <address>``, or the address alone for a typed-in host (its name is the address's own domain).
+
+    The address is what tells two keys apart, so it is never dropped: one too long for the label is cut at the end
+    of its domain, keeping the local part and the ``@``.
+    """
+    if endpoints.name.lower() == domain_of(address).lower():
+        return _fit_address(address, KEY_LABEL_MAX)
+    prefix = f"{endpoints.name} key: "
+    return prefix + _fit_address(address, KEY_LABEL_MAX - len(prefix))
+
+
+def _fit_address(address: str, limit: int) -> str:
+    if len(address) <= limit:
+        return address
+    local, _, domain = address.rpartition("@")
+    room = limit - len(local) - 2  # the "@" and the ellipsis
+    return f"{local}@{domain[:room]}…" if room >= 1 else address[: limit - 1] + "…"
 
 
 def describe(account_id: str, *, db: sqlite3.Connection, existing: bool) -> dict[str, Any]:

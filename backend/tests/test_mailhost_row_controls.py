@@ -99,7 +99,7 @@ async def test_a_waiting_row_names_its_host_and_where_the_key_is(conductor, serv
     assert found["provider"] == "mailhost" and found["provider_display_name"] == "mail.test"
     assert detail["problem"] == "waiting" and detail["calendar_missing"] is False
     assert detail["key_refs"] == [{
-        "entry": key_store.MAILHOST_PREFIX + account_id, "name": f"mail.test key: {ADDRESS}", "set": False,
+        "entry": key_store.MAILHOST_PREFIX + account_id, "name": ADDRESS, "set": False,
     }]
     assert detail["destination_hosts"] == ["127.0.0.1"]
     assert detail["imap"].startswith("127.0.0.1:") and detail["smtp"].startswith("127.0.0.1:")

@@ -33,11 +33,12 @@
 	/** The body is text, and `link` is the words that go to the host's page when it has one: where the person must go next. */
 	const detail = $derived.by((): { before: string; link?: string; after?: string } => {
 		switch (problem) {
-			case 'waiting': return { before: `${host} needs an app password before agents can use this account: make one in your `, link: `${host} account settings`, after: '. Press Set key, paste it and press Set.' };
+			case 'waiting': return { before: `${host} needs an app password before agents can use this account: make one in your `, link: `${host} account settings`, after: ', then press Set key.' };
 			case 'refused': return { before: `${host} didn’t accept this app password. Make a new one in your `, link: `${host} account settings`, after: ', then press Replace key.' };
 			case 'revoked': return { before: `${host} stopped accepting the app password, so agents can’t use this account. ${host === 'iCloud' ? 'iCloud does this when your Apple password changes. ' : ''}Make a new one, then press Replace key.` };
+			// No catalog entry carries a verified IMAP-settings page, so the product's name is text, never a link.
 			case 'imap_off': return product
-				? { before: `${host} has email access for other apps turned off. Turn on IMAP in `, link: `${product} settings`, after: ', then press Try again.' }
+				? { before: `${host} has email access for other apps turned off. Turn on IMAP in ${product} settings, then press Try again.` }
 				: { before: `${host} has email access for other apps turned off. Turn on IMAP with your host or IT, then press Try again.` };
 			case 'unreachable': return { before: `CORSIA couldn’t reach ${server}. Check the server names with your host or IT.` };
 			default: return { before: '' };

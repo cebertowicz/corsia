@@ -28,3 +28,12 @@ export function clippedPrefix(prefix: string, available: number, style: CSSStyle
 	}
 	return `${chars.slice(0, low).join('').replace(/[._+\-]+$/, '')}…`;
 }
+/** A typed-in host's provider is the address's own domain, so the address alone already names the account. */
+export function providerIsDomain(provider: string, address: string): boolean {
+	const parts = accountAddress(address);
+	return parts !== null && parts.domain.toLowerCase() === provider.toLowerCase();
+}
+/** An account's name: its address, led by the provider unless the provider is only that address's domain. */
+export function accountName(account: { provider_display_name: string; address: string }): string {
+	return providerIsDomain(account.provider_display_name, account.address) ? account.address : `${account.provider_display_name} — ${account.address}`;
+}

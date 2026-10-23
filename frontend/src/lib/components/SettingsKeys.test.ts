@@ -184,6 +184,21 @@ describe('Settings › Keys', () => {
 		expect(password.getAttribute('autocomplete')).toBe('current-password');
 	});
 
+	it('calls the field App password for a mail-host key and Key for every other key', async () => {
+		const mailKey = { ...maps, name: 'connected-account--mailhost--abc', label: 'you@work.test', description: 'App password for this email account.' };
+		entries = [{ ...webSearch }, mailKey];
+		await mountKeys();
+		button('connected-account--mailhost--abc', 'Set').click();
+		flushSync();
+		const mailForm = host.querySelector('[data-key-entry="connected-account--mailhost--abc"] form')!;
+		expect(mailForm.querySelector('input[aria-label="App password"]')).not.toBeNull();
+		expect(mailForm.querySelector('input[aria-label="Key"]')).toBeNull();
+		expect(mailForm.textContent).toContain('App password');
+		button('web-search', 'Set').click();
+		flushSync();
+		expect(inputs('web-search').value).not.toBeNull();
+	});
+
 	it('asks for both fields before sending anything', async () => {
 		await mountKeys();
 		button('web-search', 'Set').click();
