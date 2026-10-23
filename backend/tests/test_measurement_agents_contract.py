@@ -128,16 +128,15 @@ def test_the_surfaces_key_list_is_the_handlers_return_not_a_remembered_one():
 
     from api import measurement
 
-    # The nested read returns the body plus pending boundary writes; the outer handler
-    # persists those writes and returns the body unchanged. Where to look reads this body.
+    # The read lane returns its payload directly.  Boundary derivation is read-only,
+    # so there is no second write payload for an outer handler to persist.
     handler = ast.parse(inspect.getsource(measurement.agents_payload))
     returned = [
-        node.value.elts[0]
+        node.value
         for node in ast.walk(handler)
-        if isinstance(node, ast.Return) and isinstance(node.value, ast.Tuple)
-        and len(node.value.elts) == 2 and isinstance(node.value.elts[0], ast.Dict)
+        if isinstance(node, ast.Return) and isinstance(node.value, ast.Dict)
     ]
-    assert len(returned) == 1, f"expected one payload dict in the read-lane return, found {len(returned)}"
+    assert len(returned) == 1, f"expected one payload dict in the read lane, found {len(returned)}"
     served = {key.value for key in returned[0].keys if isinstance(key, ast.Constant)}
     assert served == SERVED_KEYS, (
         f"handler returns {sorted(served)}, surface consumes {sorted(SERVED_KEYS)}"
