@@ -301,8 +301,8 @@ async def _end_owned_turn(
     await _settle_live_tool_debt(thread_id, live, bcast)
     if not defer_drive:
         terminal = await _claim_live_terminal(
-            live, outcome, error, db, identity=identity,
-            persist_terminal=persist_turn_terminal,
+            live, outcome, error, db,
+            identity=identity,
         )
     else:
         assert db is None, "deferred Codex terminal requires its own transaction"

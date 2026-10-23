@@ -12,7 +12,6 @@ from core.turn_core import (
     TurnIdentity,
     TurnTerminalResult,
     drive_turn_settlement,
-    persist_turn_terminal,
     settle_turn_terminal,
 )
 import infra.provider_usage as provider_usage
@@ -51,7 +50,6 @@ async def claim_live_terminal(
     db=None,
     *,
     identity: TurnIdentity | None = None,
-    persist_terminal=persist_turn_terminal,
 ) -> TurnTerminalResult:
     """Quarantine an unsettled write, then terminalize its owning Turn."""
     identity = identity or live.corsia_turn
@@ -62,8 +60,10 @@ async def claim_live_terminal(
             identity.turn_id, outcome, error, quarantine=UNSETTLED_AT_TERMINAL,
         )
     from infra.thread_recovery import ambiguous_stale_writes
+    from subagents import codex_runtime
+
     ambiguous_stale_writes(db, identity.turn_id, error=UNSETTLED_AT_TERMINAL)
-    return persist_terminal(identity.turn_id, outcome, error, db=db)
+    return codex_runtime.persist_turn_terminal(identity.turn_id, outcome, error, db=db)
 
 
 class CommittedTerminalFailure(Exception):
