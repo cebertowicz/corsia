@@ -7,6 +7,7 @@ the later entry describes the current behavior.
 
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here._
 
+- Reopening an unchanged document while disconnected now says your changes stay on this device, instead of warning that they aren't saved.
 - Posting a document comment makes it appear right away and clears the box; the agent still gets it.
 - Setup keeps CORSIA’s own work folder as the default offer after you choose another folder.
 - Quitting the Mac app now also stops the local model server CORSIA started, so it no longer holds memory after you quit.

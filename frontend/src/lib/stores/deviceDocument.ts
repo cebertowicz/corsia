@@ -20,6 +20,7 @@ export class DeviceDocument {
 		const loaded = this.persistence._db.then(async db => {
 			this.observe(db);
 			await this.persistence.whenSynced;
+			this.synced();
 		}).catch(error => { this.failed(error); });
 		this.ready = Promise.race([loaded, failure]);
 	}
@@ -30,6 +31,15 @@ export class DeviceDocument {
 		this.error = error instanceof Error || error instanceof DOMException ? error.message : 'Device storage failed';
 		this.saved = false;
 		this.releaseFailure();
+		this.changed();
+	}
+
+	private synced(): void {
+		// The library's initial fetch ran before observe(), so a reopen whose stored
+		// copy already matches makes no observed write. Once synced, the copy is
+		// saved unless a write is in flight (its completion decides) or storage failed.
+		if (this.closed || this.error || this.pending > 0) return;
+		this.saved = true;
 		this.changed();
 	}
 
