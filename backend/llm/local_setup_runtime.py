@@ -21,7 +21,7 @@ log = logging.getLogger(__name__)
 
 LOCAL_HOST = "127.0.0.1"
 HEALTH_WAIT_SECONDS = 120.0
-LOCAL_SERVER_NAME = "Local"
+LOCAL_SERVER_NAME = "CORSIA"
 
 
 async def omlx_answers(port: int) -> bool:

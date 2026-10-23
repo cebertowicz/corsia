@@ -91,7 +91,7 @@ async def test_register_managed_server_renames_only_its_existing_row(isolated_db
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("old_name", ["CORSIA's own oMLX", "This Mac"])
+@pytest.mark.parametrize("old_name", ["Local", "CORSIA's own oMLX", "This Mac"])
 async def test_startup_renames_an_existing_managed_row_and_its_models_only(isolated_db, monkeypatch, tmp_path, old_name) -> None:
     import json
 
@@ -109,14 +109,14 @@ async def test_startup_renames_an_existing_managed_row_and_its_models_only(isola
     )
     mine = await run_in_db(
         discovery.upsert_server,
-        provider="omlx", instance_id="127.0.0.1:9000", instance_name="My oMLX",
+        provider="omlx", instance_id="127.0.0.1:9000", instance_name=old_name,
         host="127.0.0.1", port=9000, status="online", kind="external", source="manual",
     )
     for model_id, server_id in (("managed-model", managed), ("my-model", mine)):
         _model_row(model_id, f"omlx@{server_id}/{model_id}", model_id)
         db = get_db()
         db.execute("UPDATE models SET metadata_json = ? WHERE id = ?",
-                   (json.dumps({"server_id": server_id, "server_name": old_name if server_id == managed else "My oMLX"}), model_id))
+                   (json.dumps({"server_id": server_id, "server_name": old_name}), model_id))
         db.commit()
         db.close()
 
@@ -132,14 +132,14 @@ async def test_startup_renames_an_existing_managed_row_and_its_models_only(isola
 
     await app_startup_runtime.resume_local_setup()
 
-    assert LOCAL_SERVER_NAME == "Local"
-    assert (await run_in_db(discovery.get_server, managed))["instance_name"] == "Local"
-    assert (await run_in_db(discovery.get_server, mine))["instance_name"] == "My oMLX"
+    assert LOCAL_SERVER_NAME == "CORSIA"
+    assert (await run_in_db(discovery.get_server, managed))["instance_name"] == "CORSIA"
+    assert (await run_in_db(discovery.get_server, mine))["instance_name"] == old_name
     db = get_db()
     names = {row["id"]: json.loads(row["metadata_json"])["server_name"]
              for row in db.execute("SELECT id, metadata_json FROM models WHERE id IN ('managed-model', 'my-model')")}
     db.close()
-    assert names == {"managed-model": "Local", "my-model": "My oMLX"}
+    assert names == {"managed-model": "CORSIA", "my-model": old_name}
 
 
 def test_managed_paths_are_a_pure_lookup(monkeypatch, tmp_path) -> None:

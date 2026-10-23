@@ -9,7 +9,7 @@ const GIB = 1024 ** 3;
 const localProvider = {
 	name: 'omlx', label: 'oMLX', type: 'network', statusDot: 'online', subline: 'Local',
 	raw: { name: 'omlx', label: 'oMLX', type: 'network' },
-	server: { id: 'local-test', provider: 'omlx', kind: 'managed', source: 'manual', corsia_omlx: true, on_this_mac: true, status: 'online', instance_name: 'Local', endpoints: [] },
+	server: { id: 'local-test', provider: 'omlx', kind: 'managed', source: 'manual', corsia_omlx: true, on_this_mac: true, status: 'online', instance_name: 'CORSIA', endpoints: [] },
 } as unknown as HostProvider;
 
 // The backend decides whether pinning fits (``pin_fits``) and writes the line under the row (``keep_line``); the rows carry its verdicts.
