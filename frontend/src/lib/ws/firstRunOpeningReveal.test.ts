@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { get } from 'svelte/store';
 import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { activeThreadId, messages } from '$lib/stores/threads';
 import { handleMessage } from './handlers';
 import { awaitFirstRunOpening, cancelFirstRunOpening, _resetFirstRunOpeningRevealForTests } from './firstRunOpeningReveal';
@@ -28,9 +29,8 @@ afterEach(() => {
 
 describe('local first-pick opening', () => {
 	it('reveals the actual packaged opening at word boundaries and finishes within two seconds', () => {
-		const fullContent = 'Hi Pat.\n\n' + readFileSync(new URL(
+		const fullContent = 'Hi Pat.\n\n' + readFileSync(resolve(__dirname,
 			'../../../../backend/prompts/system/v1/skills/conductor-bootstrap/references/first-run-opening.md',
-			import.meta.url,
 		), 'utf8').trim();
 		expect(fullContent.split(/\s+/).length).toBeGreaterThan(200);
 		awaitFirstRunOpening(thread); receive({ ...opening, content: fullContent });

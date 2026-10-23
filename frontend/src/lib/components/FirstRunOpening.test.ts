@@ -1,5 +1,6 @@
 import { flushSync, mount, tick, unmount } from 'svelte';
 import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { get } from 'svelte/store';
 import MessageList from './MessageList.svelte';
@@ -17,9 +18,8 @@ import { _resetTypewritersForTests } from '$lib/ws/typewriter';
 vi.mock('$lib/product_events', () => ({ emitProductEvent: vi.fn(), identifyUser: vi.fn() }));
 vi.mock('$lib/ws', () => ({ on: () => () => {}, connect: vi.fn(), disconnect: vi.fn(), isConnected: () => false, reconnectNow: vi.fn(), sendMessage: vi.fn(), stopTurn: vi.fn(), hasActiveTurn: () => false, subscribeThread: vi.fn(), unsubscribeThread: vi.fn(), watchThread: vi.fn(), cancelThreadTypewriters: vi.fn() }));
 const thread = 'first-run-ui';
-const content = 'Hi Pat.\n\n' + readFileSync(new URL(
+const content = 'Hi Pat.\n\n' + readFileSync(resolve(__dirname,
 	'../../../../backend/prompts/system/v1/skills/conductor-bootstrap/references/first-run-opening.md',
-	import.meta.url,
 ), 'utf8').trim();
 const opening: Omit<Message, 'thread_id'> = { id: `first-run-opening:${thread}`, role: 'assistant', content, seq: 1,
 	created_at: '2026-10-22T00:00:00Z', metadata: { for_user: true, first_run_opening: true } };
