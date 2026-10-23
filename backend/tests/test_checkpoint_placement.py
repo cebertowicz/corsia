@@ -110,6 +110,7 @@ def _review_setup(tmp_path, monkeypatch):
     _running(db)
     db.commit()
     monkeypatch.setattr("infra.config.WORKSPACE", tmp_path)
+    monkeypatch.setattr("tools.sandbox_config._STATIC_ALLOWED_RW", [tmp_path.resolve()])
     return path, db, lesson, fact
 
 
