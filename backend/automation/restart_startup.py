@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 import uuid
 
@@ -40,46 +41,44 @@ def _complete_restart_operation() -> str | None:
     from automation import restart, self_restart
     from infra import build_info, platform_paths, update_status
     from infra.restart_authorization import serving_head_sha
-    from loguru import logger
 
     operation = self_restart.in_flight_request()
     if operation is None:
         return None
     operation_id = str(operation["id"])
-    target_version = operation.get("target_version")
-    if (
-        operation.get("kind") == "update"
-        and isinstance(target_version, str)
-        and target_version
-        and platform_paths.app_bundle_root() is not None
-    ):
+    if operation.get("kind") == "update" and platform_paths.app_bundle_root() is not None:
+        target_version = operation.get("target_version")
         running_version = build_info.app_version()
+        reason = None
         try:
-            if not isinstance(running_version, str):
-                raise ValueError("running bundle version is unavailable")
-            target_version = update_status.normalize_packaged_version(target_version)
-            running_version = update_status.normalize_packaged_version(running_version)
-        except (TypeError, ValueError) as exc:
-            logger.warning(
-                "startup: could not verify packaged Update versions; completing without comparison: {}",
-                exc,
+            if not isinstance(running_version, str) or not running_version:
+                reason = "running_version_unavailable"
+            elif not isinstance(target_version, str) or not target_version:
+                reason = "unparseable_version"
+            else:
+                target_version = update_status.normalize_packaged_version(target_version)
+                running_version = update_status.normalize_packaged_version(running_version)
+                if running_version != target_version:
+                    reason = "mismatch"
+        except (TypeError, ValueError):
+            reason = "unparseable_version"
+        if reason is not None:
+            detail = json.dumps({
+                "reason": reason,
+                "target_version": target_version,
+                "running_version": running_version,
+            })
+            error = (
+                f"Update target version {target_version} is not running "
+                f"(running: {running_version or 'unknown'})."
+                if reason == "mismatch"
+                else "CORSIA could not verify the packaged Update version."
             )
-        else:
-            if running_version != target_version:
-                detail = (
-                    f"Update target version {target_version} is not running "
-                    f"(running: {running_version})."
-                )
-                if restart._release_restart_control(
-                    operation_id,
-                    detail,
-                    False,
-                    "rolled_back",
-                    detail,
-                    phases=frozenset({"resuming"}),
-                ) is None:
-                    raise RuntimeError("update operation could not release ingress")
-                return operation_id
+            if restart._release_restart_control(
+                operation_id, error, False, "rolled_back", detail,
+            ) is None:
+                raise RuntimeError("update operation could not release ingress")
+            return operation_id
     if not self_restart.complete_operation(
         operation_id, deployed_sha=serving_head_sha() or None,
     ):
@@ -87,7 +86,7 @@ def _complete_restart_operation() -> str | None:
     return None
 
 
-async def run_startup_reconcile(logger) -> tuple[object, tuple[str, ...]]:
+async def run_startup_reconcile(logger) -> tuple[object, tuple[str, ...], str | None]:
     """Time and report the pre-bind reconcile phase."""
     phase_started = time.monotonic()
     logger.info("startup phase: restart continuity reconcile started")
@@ -99,12 +98,17 @@ async def run_startup_reconcile(logger) -> tuple[object, tuple[str, ...]]:
     return reconciled
 
 
-async def run_startup_drive(harness_task, recovered, wakes, logger) -> None:
+async def run_startup_drive(harness_task, recovered, wakes, rolled_back_operation, logger) -> None:
     """Time and report the lifecycle-owned post-bind drive phase."""
     phase_started = time.monotonic()
     logger.info("startup phase: restart continuity drive started")
     try:
         await harness_task
+        if rolled_back_operation is not None:
+            from automation.restart import _RESUME_TASKS
+            from automation.update_failure_notice import tell_conductor_detached
+
+            tell_conductor_detached(rolled_back_operation, _RESUME_TASKS)
         await drive_startup_continuity(recovered, wakes, logger)
     except asyncio.CancelledError:
         logger.warning("startup phase: restart continuity drive cancelled")
@@ -122,7 +126,7 @@ async def run_startup_drive(harness_task, recovered, wakes, logger) -> None:
     )
 
 
-async def reconcile_startup_continuity(logger) -> tuple[object, tuple[str, ...]]:
+async def reconcile_startup_continuity(logger) -> tuple[object, tuple[str, ...], str | None]:
     """Terminalize stale owners durably, before any serving work begins.
 
     Only database-bound work belongs here. It runs in front of the port bind
@@ -154,14 +158,9 @@ async def reconcile_startup_continuity(logger) -> tuple[object, tuple[str, ...]]
     )
     pending_switches = await run_in_db(_pending_switch_threads)
     rolled_back_operation = await run_in_db(_complete_restart_operation)
-    if rolled_back_operation is not None:
-        from automation.restart import _RESUME_TASKS
-        from automation.update_failure_notice import tell_conductor_detached
-
-        tell_conductor_detached(rolled_back_operation, _RESUME_TASKS)
     return recovered, tuple(
         dict.fromkeys((*wake_threads, *process_threads, *pending_switches))
-    )
+    ), rolled_back_operation
 
 
 def _pending_switch_threads() -> tuple[str, ...]:

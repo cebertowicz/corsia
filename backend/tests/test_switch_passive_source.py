@@ -135,7 +135,7 @@ async def test_startup_wake_activates_a_switch_stuck_behind_a_digest(
 
     monkeypatch.setattr(model_pending, "_commit_fitting_switch", commit)
     monkeypatch.setattr(restart_startup, "_replay_held_webhooks", AsyncMock())
-    recovered, wakes = await restart_startup.reconcile_startup_continuity(logger)
+    recovered, wakes, _rolled_back = await restart_startup.reconcile_startup_continuity(logger)
     assert THREAD in wakes
 
     await restart_startup.drive_startup_continuity(recovered, wakes, logger)

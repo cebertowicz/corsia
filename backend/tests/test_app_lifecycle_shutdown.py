@@ -290,7 +290,7 @@ async def test_checkpoint_reconciliation_runs_after_orphan_terminalization(monke
 
     async def recover_turns(_logger):
         events.append("turn_recovery")
-        return SimpleNamespace(settlements=(), batches=()), ()
+        return SimpleNamespace(settlements=(), batches=()), (), None
 
     async def reconcile_checkpoints() -> None:
         events.append("checkpoint_reconciliation")
@@ -323,7 +323,7 @@ async def test_readiness_does_not_wait_on_a_stuck_continuity_drive(monkeypatch):
     driving = asyncio.Event()
 
     async def reconcile(_logger):
-        return SimpleNamespace(settlements=(), batches=()), ()
+        return SimpleNamespace(settlements=(), batches=()), (), None
 
     async def never_finishes(_recovered, _wakes, _logger) -> None:
         driving.set()
@@ -1696,7 +1696,7 @@ def _isolate_rollup_lifespan(monkeypatch) -> None:
     _isolate_lifespan(monkeypatch)
 
     async def startup_reconcile(_logger):
-        return SimpleNamespace(batches=[], settlements=[]), ()
+        return SimpleNamespace(batches=[], settlements=[]), (), None
 
     monkeypatch.setattr(restart_startup, "run_startup_reconcile", startup_reconcile)
     monkeypatch.setattr(restart_startup, "run_startup_drive", _noop)

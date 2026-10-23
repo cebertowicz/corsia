@@ -156,7 +156,7 @@ async def lifespan(app: FastAPI):
         startup_tasks[1] = asyncio.create_task(_startup_cloud_discovery())
         startup_tasks[2] = asyncio.create_task(_startup_network_discovery())
         startup_tasks[3] = asyncio.create_task(_startup_harness_discovery())
-        recovered, wakes = await restart_startup.run_startup_reconcile(logger)
+        recovered, wakes, rolled_back_operation = await restart_startup.run_startup_reconcile(logger)
         await _start_runtime_services()
         from core.devices_runtime import runtime as devices_runtime
         from infra.settings import get_devices_enabled, get_devices_outside_address
@@ -167,7 +167,7 @@ async def lifespan(app: FastAPI):
         schedule_usage_rollup_refresh()
         startup_tasks[4] = asyncio.create_task(
             restart_startup.run_startup_drive(
-                startup_tasks[3], recovered, wakes, logger,
+                startup_tasks[3], recovered, wakes, rolled_back_operation, logger,
             ),
         )
         yield

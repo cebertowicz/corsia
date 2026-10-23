@@ -908,40 +908,48 @@ def test_close_out_advances_and_releases_a_surviving_holding_reservation(
 async def test_update_startup_fails_when_its_target_version_is_not_running(
     isolated_db, monkeypatch
 ):
-    """A proven rollback releases its wakes and schedules the conductor notice."""
+    """A proven rollback waits for the harness before it schedules its notice."""
     from automation import restart, restart_startup, update_failure_notice
     from automation import self_restart as sr
     from loguru import logger
 
-    notice = MagicMock()
-    monkeypatch.setattr(update_failure_notice, "tell_conductor_detached", notice)
+    events: list[str] = []
     monkeypatch.setattr(
-        "infra.restart_authorization.serving_head_sha", lambda: "deployedsha"
+        update_failure_notice, "tell_conductor_detached",
+        lambda operation_id, tasks: events.append(f"notice:{operation_id}"),
     )
+    monkeypatch.setattr(restart_startup, "drive_startup_continuity", AsyncMock())
     monkeypatch.setattr("infra.build_info.app_version", lambda: "0.4.1")
     monkeypatch.setattr(
         "infra.platform_paths.app_bundle_root", lambda: Path("/Applications/CORSIA.app")
     )
     rid = sr.try_acquire(
-        "t-1",
-        "steve",
-        "oldsha",
-        "dev",
-        "update",
-        kind="update",
-        target_version="0.4.2",
+        "t-1", "steve", "oldsha", "dev", "update",
+        kind="update", target_version="0.4.2",
     )
     assert rid is not None
     _advance(rid, "steering", "ready", "restarting")
 
-    await restart_startup.reconcile_startup_continuity(logger)
+    recovered, wakes, rolled_back = await restart_startup.reconcile_startup_continuity(logger)
 
     operation = sr.operation_by_id(rid)
     assert operation["status"] == "failed"
     assert operation["failure_code"] == "rolled_back"
-    assert "target version 0.4.2 is not running" in operation["failure_detail"]
+    assert json.loads(operation["failure_detail"]) == {
+        "reason": "mismatch", "target_version": "0.4.2", "running_version": "0.4.1",
+    }
     assert sr.restart_holds_new_work() is False
-    notice.assert_called_once_with(rid, restart._RESUME_TASKS)
+    assert events == []
+
+    async def harness_ready() -> None:
+        events.append("harness")
+
+    await restart_startup.run_startup_drive(
+        harness_ready(), recovered, wakes, rolled_back, logger,
+    )
+
+    assert events == ["harness", f"notice:{rid}"]
+    assert restart._RESUME_TASKS == set()
 
 
 async def test_packaged_update_startup_completes_when_the_target_version_is_running(
@@ -964,34 +972,46 @@ async def test_packaged_update_startup_completes_when_the_target_version_is_runn
     assert rid is not None
     _advance(rid, "steering", "ready", "restarting")
 
-    await restart_startup.reconcile_startup_continuity(logger)
+    _recovered, _wakes, rolled_back = await restart_startup.reconcile_startup_continuity(logger)
 
     assert sr.operation_by_id(rid)["status"] == "complete"
+    assert rolled_back is None
     notice.assert_not_called()
 
 
-def test_packaged_update_with_an_unparseable_version_completes_without_rollback(
-    isolated_db, monkeypatch
+@pytest.mark.parametrize(
+    ("target_version", "running_version", "reason"),
+    [
+        ("0.4.2", None, "running_version_unavailable"),
+        ("not-a-version", "0.4.2", "unparseable_version"),
+        ("0.4.2", "not-a-version", "unparseable_version"),
+    ],
+)
+def test_packaged_update_with_an_unverifiable_version_fails_closed(
+    isolated_db, monkeypatch, target_version, running_version, reason,
 ):
-    """An unknown version cannot prove a rollback, so preserve the prior completion path."""
+    """A packaged bundle must prove its stamped target before it can complete."""
     from automation import restart_startup
     from automation import self_restart as sr
 
-    monkeypatch.setattr("infra.build_info.app_version", lambda: "0.4.2")
+    monkeypatch.setattr("infra.build_info.app_version", lambda: running_version)
     monkeypatch.setattr(
         "infra.platform_paths.app_bundle_root", lambda: Path("/Applications/CORSIA.app")
     )
     rid = sr.try_acquire(
         "t-1", "steve", "oldsha", "dev", "update",
-        kind="update", target_version="not-a-version",
+        kind="update", target_version=target_version,
     )
     assert rid is not None
     _advance(rid, "steering", "ready", "restarting")
 
     restart_startup.close_out_prior_self_restart()
-    restart_startup._complete_restart_operation()
+    assert restart_startup._complete_restart_operation() == rid
 
-    assert sr.operation_by_id(rid)["status"] == "complete"
+    operation = sr.operation_by_id(rid)
+    assert operation["status"] == "failed"
+    assert operation["failure_code"] == "rolled_back"
+    assert json.loads(operation["failure_detail"])["reason"] == reason
 
 
 def test_source_checkout_update_startup_does_not_compare_release_formats(
@@ -1176,7 +1196,7 @@ async def test_startup_materializes_restart_wake_then_releases_ingress(
 
     from loguru import logger
 
-    recovered, wakes = await restart_startup.reconcile_startup_continuity(logger)
+    recovered, wakes, _rolled_back = await restart_startup.reconcile_startup_continuity(logger)
     await restart_startup.drive_startup_continuity(recovered, wakes, logger)
 
     assert _rows(

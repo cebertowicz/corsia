@@ -20,6 +20,9 @@ ABORTABLE_PHASES = frozenset({
     "ready",
     "restarting",
 })
+# Startup may prove an Update was not installed only after the bounce, when the
+# operation is resuming. This is the sole additional failed terminal transition.
+UNVERIFIED_UPDATE_FAILURE_PHASES = frozenset({"resuming"})
 TERMINAL_STATUSES = frozenset({"complete", "failed", "cancelled", "superseded"})
 
 
@@ -320,11 +323,15 @@ def abort_operation(
     cancelled: bool = False,
     failure_code: str | None = None,
     failure_detail: str | None = None,
-    phases: frozenset[str] = ABORTABLE_PHASES,
     db=None,
 ) -> bool:
-    """Release one exact operation through its allowed terminal transition."""
+    """Release one exact operation through its state-owned terminal transition."""
     status = "cancelled" if cancelled else "failed"
+    phases = (
+        UNVERIFIED_UPDATE_FAILURE_PHASES
+        if failure_code == "rolled_back"
+        else ABORTABLE_PHASES
+    )
     with write_transaction(db, scope="restart_operation") as connection:
         placeholders = ",".join("?" for _phase in phases)
         cur = connection.execute(

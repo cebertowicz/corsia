@@ -44,11 +44,16 @@ async def tell_conductor_about_failed_update(operation_id: str) -> None:
     numbers = ", ".join(
         f"{name}={detail[name]}" for name in ("needed_bytes", "free_bytes") if name in detail
     ) or "no disk measurements"
+    versions = (
+        f"; target version {detail['target_version']}; "
+        f"running version {detail['running_version']}"
+        if "target_version" in detail and "running_version" in detail else ""
+    )
     from events.delivery import deliver_to_thread
 
     sent = await deliver_to_thread(
         str(contact["id"]), "system.update_failed",
-        f"Update failed: {operation.get('failure_code') or 'unknown'}; {numbers}; "
+        f"Update failed: {operation.get('failure_code') or 'unknown'}; {numbers}{versions}; "
         f"log: {detail.get('log_path', 'no log path')}",
         {"operation_id": operation_id, "failure_code": operation.get("failure_code")},
         delivery_id=f"update-failed:{operation_id}",

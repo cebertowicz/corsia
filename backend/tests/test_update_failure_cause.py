@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import sqlite3
 from pathlib import Path
 from unittest.mock import AsyncMock
@@ -204,6 +205,50 @@ async def test_failed_update_marks_conductor_only_after_successful_send(isolated
         connection.close()
     assert told_at is not None
     sent.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_rolled_back_update_notice_names_the_target_and_running_versions(
+    isolated_db, monkeypatch
+):
+    from automation import self_restart
+    from automation.update_failure_notice import tell_conductor_about_failed_update
+    from core import agent_roster_queries
+    from events import delivery
+
+    operation_id = self_restart.try_acquire(
+        None, "steve", None, None, "update", kind="update", trigger="manual"
+    )
+    assert operation_id is not None
+    for expected, target in (
+        ("holding", "steering"),
+        ("steering", "ready"),
+        ("ready", "restarting"),
+        ("restarting", "resuming"),
+    ):
+        assert self_restart.transition_operation(
+            operation_id, expected=expected, target=target,
+        )
+    assert self_restart.abort_operation(
+        operation_id,
+        error="Update target version 0.4.2 is not running (running: 0.4.1).",
+        failure_code="rolled_back",
+        failure_detail=json.dumps({
+            "reason": "mismatch",
+            "target_version": "0.4.2",
+            "running_version": "0.4.1",
+        }),
+    )
+    sent = AsyncMock(return_value=True)
+    monkeypatch.setattr(
+        agent_roster_queries, "corsia_agent_contact", lambda _user, _db: ({"id": "conductor"}, None)
+    )
+    monkeypatch.setattr(delivery, "deliver_to_thread", sent)
+
+    await tell_conductor_about_failed_update(operation_id)
+
+    assert "target version 0.4.2" in sent.await_args.args[2]
+    assert "running version 0.4.1" in sent.await_args.args[2]
 
 
 @pytest.mark.asyncio
