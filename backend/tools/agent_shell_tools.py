@@ -24,19 +24,35 @@ from tools.managed_runtime import (
 logger = logging.getLogger(__name__)
 # Environment names a shell child needs from CORSIA, passed through the sandbox by name.
 ENV_NAMES = ("npm_config_cache", "PIP_CACHE_DIR", "UV_CACHE_DIR")
+# The bundled Git's helper commands and templates, which Git finds relative to its own binary.
+_GIT_RUNTIME_DIRS = ("libexec/git-core", "share/git-core")
 _prefetch: asyncio.Task | None = None
 
 
-def _bundled_python_dir() -> Path | None:
+def _bundle_resources() -> Path | None:
     bundle = app_bundle_root()
-    directory = None if bundle is None else bundle / "Contents" / "Resources" / "python" / "bin"
+    return None if bundle is None else bundle / "Contents" / "Resources"
+
+
+def _bundled_python_dir() -> Path | None:
+    resources = _bundle_resources()
+    directory = None if resources is None else resources / "python" / "bin"
     return directory if directory is not None and (directory / "python3").is_file() else None
 
 
 def readable_dirs() -> list[Path]:
-    """The folders the PATH entries live in, read-only inside the sandbox: the app's Python and the runtime cache."""
+    """The folders the PATH entries live in, read-only inside the sandbox.
+
+    The app's Python, its Git runtime (the exec path with git-remote-https, and the templates
+    init and clone copy) and the runtime cache; each only where it exists.
+    """
     python_dir = _bundled_python_dir()
-    candidates = [None if python_dir is None else python_dir.parent, runtime_cache_root()]
+    resources = _bundle_resources()
+    candidates = [
+        None if python_dir is None else python_dir.parent,
+        *(None if resources is None else resources / name for name in _GIT_RUNTIME_DIRS),
+        runtime_cache_root(),
+    ]
     return [directory for directory in candidates if directory is not None and directory.is_dir()]
 
 
