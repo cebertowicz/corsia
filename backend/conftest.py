@@ -243,6 +243,7 @@ def integration_client(integration_workspace):
     import asyncio
     import app_lifecycle
     import app_startup_runtime
+    import api.usage_rollup as usage_rollup
     import automation.plan_liveness as plan_liveness
     import connections
     import llm.network_discovery as network_discovery
@@ -290,6 +291,9 @@ def integration_client(integration_workspace):
         suspended.enter_context(patch.object(
             connections, "seed_builtin_connections", lambda **_kwargs: 0,
         ))
+        # The session app cannot refresh mutable rollup caches while per-test
+        # fixtures repeatedly replace the active isolated database.
+        suspended.enter_context(patch.object(usage_rollup, "schedule_refresh", lambda: None))
         for module, loop_name in _BACKGROUND_LOOPS:
             suspended.enter_context(
                 patch.object(module, loop_name, _suspend_forever)
