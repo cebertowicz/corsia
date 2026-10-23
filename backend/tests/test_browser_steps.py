@@ -78,7 +78,7 @@ async def test_start_at_resumes_from_named_step(tool, monkeypatch):
     result = json.loads(await tool.execute("google-setup/console-client", start_at="client-name", _thread_id="thread"))
 
     assert result["ok"] is True
-    assert calls[0] == ["fill", "label=Name", "CORSIA"]
+    assert calls[0] == ["fill", 'role=textbox[name="Name"]', "CORSIA"]
     assert "clients-page" not in result["steps"]
 
 
