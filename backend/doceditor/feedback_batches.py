@@ -19,7 +19,7 @@ from doceditor.feedback_state import (
     user_feedback_for_document,
 )
 import infra.sweep_wake as sweep_wake
-from infra.database import write_transaction
+from infra.database import get_db, write_transaction
 from infra.write_effects import after_commit
 
 log = logging.getLogger(__name__)
@@ -351,13 +351,14 @@ def close_for_turn_end(db, thread_id: str) -> list[str]:
 
 def close_due(now: str, *, db=None) -> list[str]:
     """Deliver every due batch; one that raises rolls back alone, is logged, and retries next pass."""
-    deliveries: list[tuple[str, str]] = []
-    with write_transaction(db, scope="close_due_doc_feedback") as connection:
+    connection = db if db is not None else get_db()
+    try:
         rows = connection.execute(
             """SELECT id,artifact_id,author_kind,closed_reason FROM doc_feedback_batches
                WHERE state='open' AND closes_at<=? ORDER BY closes_at,id""",
             (now,),
         ).fetchall()
+        deliveries: list[tuple[str, str]] = []
         woken: list[str] = []
         for row in rows:
             reason = row["closed_reason"] or ("quiet" if row["author_kind"] == "agent" else "idle")
@@ -368,8 +369,11 @@ def close_due(now: str, *, db=None) -> list[str]:
                 continue
             woken.extend(selected)
             comment_notifications.collect_due_user_delivery(deliveries, connection, row, closed)
-    comment_notifications.publish_due_user_feedback(deliveries)
-    return woken
+        comment_notifications.publish_due_user_feedback(deliveries)
+        return woken
+    finally:
+        if db is None:
+            connection.close()
 
 
 def retry_for_document(db, *, author_kind: str, author_id: str, artifact_id: str) -> list[str]:

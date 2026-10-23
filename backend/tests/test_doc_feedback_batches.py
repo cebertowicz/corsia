@@ -327,3 +327,37 @@ def test_user_feedback_projection_has_no_open_comment_after_immediate_delivery(i
         assert [row["state"] for row in batches(db)] == ["delivered", "delivered"]
     finally:
         db.close()
+
+
+def test_due_sweep_without_a_supplied_db_keeps_its_connection_through_publication(monkeypatch):
+    events: list[str] = []
+
+    class Result:
+        def fetchall(self):
+            return [{"id": "batch", "artifact_id": "artifact", "author_kind": "user", "closed_reason": None}]
+
+    class Connection:
+        def execute(self, _sql, _params):
+            events.append("select")
+            return Result()
+
+        def close(self):
+            events.append("close")
+
+    def close_batch(received, _batch_id, _reason):
+        assert received is connection
+        events.append("close_batch")
+        return True, ("owner",)
+
+    def collect(_deliveries, received, _row, _closed):
+        assert received is connection
+        events.append("collect")
+
+    connection = Connection()
+    monkeypatch.setattr(feedback_batches, "get_db", lambda: connection)
+    monkeypatch.setattr(feedback_batches, "close_batch", close_batch)
+    monkeypatch.setattr(comment_notifications, "collect_due_user_delivery", collect)
+    monkeypatch.setattr(comment_notifications, "publish_due_user_feedback", lambda _deliveries: events.append("publish"))
+
+    assert feedback_batches.close_due("2000-01-01T00:00:00+00:00") == ["owner"]
+    assert events == ["select", "close_batch", "collect", "publish", "close"]
