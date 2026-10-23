@@ -13,7 +13,7 @@ from typing import Any
 
 from connections.account_state import emit_lifecycle_event, record_audit
 from connections.connected_accounts import MAILHOST_PROVIDER, create_account_for_thread, credential_key, get_account
-from connections.mailhost import store
+from connections.mailhost import dns, store
 from connections.mailhost.endpoints import (
     Endpoints, EndpointsRefused, domain_of, parse_address, parse_caldav, parse_server,
 )
@@ -38,9 +38,14 @@ def _endpoints(address: str, imap: object, smtp: object, caldav: object, usernam
     known = known_host(address)
     if known is not None:
         return known.endpoints(address)
+    typed_name = parse_address(username) if username else address
+    if imap is None and smtp is None:
+        discovered = dns.discover(domain_of(address), typed_name)
+        if discovered is not None:
+            return discovered
+        raise EndpointsRefused(UNKNOWN_HOST)
     if imap is None or smtp is None:
         raise EndpointsRefused(UNKNOWN_HOST)
-    typed_name = parse_address(username) if username else address
     return Endpoints(
         name=domain_of(address), known=False, username=typed_name,
         imap=parse_server(imap, field_name="imap"), smtp=parse_server(smtp, field_name="smtp"),

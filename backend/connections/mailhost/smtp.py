@@ -11,6 +11,8 @@ from __future__ import annotations
 import smtplib
 import socket
 import ssl
+from email.message import EmailMessage
+from email.utils import getaddresses
 
 from connections.mailhost import tls
 from connections.mailhost.endpoints import Endpoints, Server
@@ -62,4 +64,45 @@ def check_login(ep: Endpoints, password: str) -> None:
             if exc.cause == PASSWORD_REFUSED:
                 raise
             unreachable = exc
+    raise unreachable or MailHostError(SERVER_UNREACHABLE, host=ep.smtp.host)
+
+
+def _recipients(message: EmailMessage) -> list[str]:
+    return [address for _, address in getaddresses(message.get_all("To", []) + message.get_all("Cc", [])) if address]
+
+
+def send_message(ep: Endpoints, username: str, password: str, message: EmailMessage) -> None:
+    """Submit an approved message over TLS; no SMTP reply text leaves this module."""
+    unreachable: MailHostError | None = None
+    for port in ep.smtp_ports():
+        starttls = Server(ep.smtp.host, port).tls_starts_with_starttls(imap=False)
+        try:
+            client: smtplib.SMTP
+            if starttls:
+                client = smtplib.SMTP(ep.smtp.host, port, timeout=TIMEOUT_SECONDS)
+            else:
+                client = smtplib.SMTP_SSL(ep.smtp.host, port, context=tls.context(), timeout=TIMEOUT_SECONDS)
+            try:
+                if starttls:
+                    client.ehlo()
+                    if not client.has_extn("starttls"):
+                        raise MailHostError(SERVER_UNREACHABLE, host=ep.smtp.host)
+                    client.starttls(context=tls.context())
+                    client.ehlo()
+                client.login(username, password)
+                client.send_message(message, from_addr=username, to_addrs=_recipients(message))
+                return
+            finally:
+                try:
+                    client.close()
+                except Exception:  # noqa: BLE001 - an already-dead connection has nothing left to report
+                    pass
+        except smtplib.SMTPAuthenticationError:
+            raise MailHostError(PASSWORD_REFUSED, name=ep.name) from None
+        except MailHostError as exc:
+            if exc.cause == PASSWORD_REFUSED:
+                raise
+            unreachable = exc
+        except _TRANSPORT:
+            unreachable = MailHostError(SERVER_UNREACHABLE, host=ep.smtp.host)
     raise unreachable or MailHostError(SERVER_UNREACHABLE, host=ep.smtp.host)

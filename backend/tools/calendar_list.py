@@ -18,11 +18,12 @@ from connections.mail_accounts import MAIL_ACCOUNT_PARAM
 from connections.account_errors import AccountError
 from connections.connected_accounts import MAILHOST_PROVIDER
 from connections.google import client as google_client
-from connections.google.accounts import ACCOUNT_PARAM, resolve_for_thread
+from connections.google.accounts import ACCOUNT_PARAM
 from connections.calendar_document import OFFSET_REQUIRED, compose_document, parse_time, read_draft, read_invite
 from connections.google.calendar_document import event_summaries
 from connections.google.client import GoogleError, GoogleRequestFailed
-from connections.mailhost import agenda
+from connections.mailhost import agenda, outbound as mailhost_outbound
+from connections.mailhost.errors import PASSWORD_REFUSED, MailHostError
 from infra import config
 from infra.db_async import run_in_db
 from tools.action_delivery import deliver_claimed
@@ -62,11 +63,6 @@ OTHER_ACCOUNT = "This invite was drafted from {address}; save a new one (omit dr
 async def _account(kwargs: dict[str, Any]) -> dict:
     """The Gmail or mail-host account the call names and this thread may use, or :class:`AccountError`."""
     return await run_in_db(mail_accounts.resolve_for_thread, kwargs.get("account_id"), kwargs.get("_thread_id"))
-
-
-async def _google_account(kwargs: dict[str, Any]) -> dict:
-    """The Google account an invite is drafted from; invites are Google-only."""
-    return await run_in_db(resolve_for_thread, kwargs.get("account_id"), kwargs.get("_thread_id"))
 
 
 # Reviewed-draft storage is shared by provider families in tools.reviewed_drafts.
@@ -170,7 +166,7 @@ class CalendarDraftInviteTool(Tool):
 
     async def execute(self, **kwargs: Any) -> str:
         try:
-            account = await _google_account(kwargs)
+            account = await _account(kwargs)
         except AccountError as exc:
             return f"Error: {exc}"
         try:
@@ -203,6 +199,22 @@ class CalendarDraftInviteTool(Tool):
         path = (await run_in_db(open_draft, thread_id, saved["draft_id"], "invite"))["path"]
         return json.dumps({"draft_id": saved["draft_id"], "revision": saved["revision"], "path": path,
                            "from": email, "account_id": account["id"], "next": AFTER_DRAFT})
+
+def _google_invite_body(invite) -> dict[str, Any]:
+    return {"summary": invite.title, "start": {"dateTime": invite.start}, "end": {"dateTime": invite.end},
+            "attendees": [{"email": email} for email in invite.attendees], "description": invite.description}
+
+
+def _refused_before_send(exc: Exception) -> bool:
+    return isinstance(exc, MailHostError) and exc.cause == PASSWORD_REFUSED
+
+
+def _mailhost_invite_body(invite):
+    return invite
+
+
+_INVITE_BODIES = {"google": _google_invite_body, "mailhost": _mailhost_invite_body}
+
 
 class CalendarSendInviteTool(Tool):
     self_describing_errors = True
@@ -240,7 +252,7 @@ class CalendarSendInviteTool(Tool):
             return prepared
         return await self._deliver(draft_id, *prepared)
 
-    async def _prepare(self, thread_id: Any, draft_id: str, revision: str) -> tuple[str, dict] | str:
+    async def _prepare(self, thread_id: Any, draft_id: str, revision: str) -> tuple[dict, Any] | str:
         row = await run_in_db(open_draft, str(thread_id), draft_id, "invite")
         if row is None:
             return f"Error: {NO_OPEN_DRAFT}"
@@ -256,36 +268,48 @@ class CalendarSendInviteTool(Tool):
         except (UnicodeDecodeError, ValueError):
             return f"Error: {BAD_DOCUMENT}"
         try:
-            account = await run_in_db(resolve_for_thread, draft.account_id, thread_id)
+            account = await run_in_db(mail_accounts.resolve_for_thread, draft.account_id, thread_id)
         except AccountError as exc:
             return f"Error: Not sent: {exc}"
         if str(account["address"]).lower() != draft.address.lower():
             return f"Error: {BAD_DOCUMENT}"
-        invite = draft.invite
-        return str(account["id"]), {"summary": invite.title, "start": {"dateTime": invite.start},
-                "end": {"dateTime": invite.end},
-                "attendees": [{"email": email} for email in invite.attendees], "description": invite.description}
+        body_builder = _INVITE_BODIES.get(str(account["provider"]))
+        if body_builder is None:
+            return "Error: Not sent: this account can't send invitations."
+        return account, body_builder(draft.invite)
 
-    async def _deliver(self, draft_id: str, account_id: str, body: dict) -> str:
+    async def _deliver(self, draft_id: str, account: dict, body: Any) -> str:
+        deliver = {"google": self._deliver_google, "mailhost": self._deliver_mailhost}.get(str(account["provider"]))
+        if deliver is None:
+            return "Error: Not sent: this account can't send invitations."
+        return await deliver(draft_id, account, body)
+
+    async def _deliver_google(self, draft_id: str, account: dict, body: dict) -> str:
+        account_id = str(account["id"])
         return await deliver_claimed(
-            draft_id,
-            acquire=lambda: google_client.access_token(account_id),
-            provider_errors=(GoogleError,),
-            send=lambda bearer: google_client.request_json(
-                "POST", _event_url("primary"), account_id=account_id, body=body,
-                params={"sendUpdates": "all"}, token=bearer,
-            ),
+            draft_id, acquire=lambda: google_client.access_token(account_id), provider_errors=(GoogleError,),
+            send=lambda bearer: google_client.request_json("POST", _event_url("primary"), account_id=account_id,
+                body=body, params={"sendUpdates": "all"}, token=bearer),
             result_id=lambda sent: sent.get("id") if isinstance(sent, dict) else None,
-            success=lambda sent, event_id: json.dumps({
-                "event_id": event_id,
-                "html_link": sent.get("htmlLink") if isinstance(sent, dict) else None,
-            }),
+            success=lambda sent, event_id: json.dumps({"event_id": event_id,
+                "html_link": sent.get("htmlLink") if isinstance(sent, dict) else None}),
             sign_in_error=lambda exc: str(exc) if isinstance(exc, GoogleError) else "couldn't reach Google. Try again later.",
-            request_error=str,
-            never_sent=lambda exc: isinstance(exc, google_client.GoogleSignInRejected)
-            or isinstance(exc, GoogleRequestFailed) and exc.never_sent,
-            still_sending=STILL_SENDING,
+            request_error=str, never_sent=lambda exc: isinstance(exc, google_client.GoogleSignInRejected)
+            or isinstance(exc, GoogleRequestFailed) and exc.never_sent, still_sending=STILL_SENDING,
+            claim_error="Not sent: couldn't check the invite draft. Try again.", unconfirmed=UNCONFIRMED,
+            label="calendar_send_invite",
+        )
+
+    async def _deliver_mailhost(self, draft_id: str, account: dict, body: Any) -> str:
+        account_id, address = str(account["id"]), str(account["address"])
+        async def no_token() -> None:
+            return None
+        return await deliver_claimed(
+            draft_id, acquire=no_token, provider_errors=(GoogleError,),
+            send=lambda _token: mailhost_outbound.send_invite(account_id, address, body), result_id=lambda result: result,
+            success=lambda _result, event_id: json.dumps({"event_id": event_id}), sign_in_error=str,
+            request_error=str, never_sent=_refused_before_send, still_sending=STILL_SENDING,
             claim_error="Not sent: couldn't check the invite draft. Try again.",
-            unconfirmed=UNCONFIRMED,
+            unconfirmed="The mail host didn't confirm the invite send, so it may have gone out. Check the person's calendar first.",
             label="calendar_send_invite",
         )

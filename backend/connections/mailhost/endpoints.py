@@ -90,6 +90,8 @@ class Endpoints:
     #: The username forms the host accepted at the last check (None until one has).
     imap_username: str | None = None
     caldav_username: str | None = None
+    #: True only when the host has been verified to save SMTP deliveries to Sent itself.
+    smtp_saves_sent: bool | None = None
 
     def imap_port(self) -> int:
         return self.imap.port or IMAP_DEFAULT_PORT
@@ -112,6 +114,7 @@ class Endpoints:
             "click_path": self.click_path, "enable_imap_step": self.enable_imap_step,
             "username_alternates": list(self.username_alternates),
             "imap_username": self.imap_username, "caldav_username": self.caldav_username,
+            "smtp_saves_sent": self.smtp_saves_sent,
         }
 
     @classmethod
@@ -129,6 +132,7 @@ class Endpoints:
                 enable_imap_step=raw.get("enable_imap_step"),
                 username_alternates=tuple(str(name) for name in raw.get("username_alternates") or ()),
                 imap_username=raw.get("imap_username"), caldav_username=raw.get("caldav_username"),
+                smtp_saves_sent=raw.get("smtp_saves_sent"),
             )
         except (KeyError, TypeError, AttributeError):
             return None

@@ -16,7 +16,10 @@ from base64 import urlsafe_b64encode
 from typing import Any
 
 from connections.google import client as google_client
-from connections.google.accounts import ACCOUNT_PARAM, resolve_for_thread, thread_key
+from connections.google.accounts import ACCOUNT_PARAM, thread_key
+from connections.mail_accounts import resolve_for_thread
+from connections.mailhost import outbound as mailhost_outbound
+from connections.mailhost.errors import PASSWORD_REFUSED, MailHostError
 from connections.google.client import GoogleError, GoogleRequestFailed
 from connections.mail.email_document import (
     NEEDS_BODY,
@@ -74,6 +77,64 @@ UNCONFIRMED = (
     "Google didn't confirm the send, so the email may have gone out. Don't send this draft "
     "again: check the person's Sent mail first."
 )
+MAILHOST_UNCONFIRMED = (
+    "The mail host didn't confirm the send, so the email may have gone out. Don't send this draft "
+    "again: check the person's Sent mail first."
+)
+
+
+async def _google_draft_metadata(account_id: str, existing: dict | None, reply_id: object) -> tuple[dict, str | None, str]:
+    if reply_id:
+        target, label = await reply_target(account_id, str(reply_id))
+    else:
+        target, label = draft_target(existing), await kept_reply_label(account_id, existing)
+    return target, label, await fetch_signature(account_id)
+
+
+async def _mailhost_draft_metadata(account_id: str, existing: dict | None, reply_id: object) -> tuple[dict, str | None, str]:
+    if reply_id:
+        raise DraftRefused("Replies on this mail host aren't available yet; save a new email instead.")
+    return draft_target(existing), None, ""
+
+
+_DRAFT_METADATA = {"google": _google_draft_metadata, "mailhost": _mailhost_draft_metadata}
+
+
+async def _no_draft_copy(_account_id: str, _text: str, _target: dict) -> None:
+    return None
+
+
+async def _mailhost_draft_copy(account_id: str, text: str, target: dict) -> None:
+    parsed = parse_document(text)
+    if parsed is None:
+        raise DraftRefused(BAD_DOCUMENT)
+    await mailhost_outbound.save_draft(account_id, build_message(parsed, target))
+
+
+_DRAFT_COPIES = {"google": _no_draft_copy, "mailhost": _mailhost_draft_copy}
+
+
+def _google_send_body(message, target: dict) -> dict[str, Any]:
+    body: dict[str, Any] = {"raw": urlsafe_b64encode(message.as_bytes()).decode("ascii")}
+    if target.get("thread_id"):
+        body["threadId"] = target["thread_id"]
+    return body
+
+
+def _mailhost_send_body(message, _target: dict):
+    return message
+
+
+_SEND_BODIES = {"google": _google_send_body, "mailhost": _mailhost_send_body}
+
+
+async def _none() -> None:
+    return None
+
+
+def _refused_before_send(exc: Exception) -> bool:
+    """A refused app password stops the submission before any message leaves."""
+    return isinstance(exc, MailHostError) and exc.cause == PASSWORD_REFUSED
 
 
 # Reviewed-draft storage is shared by provider families in tools.reviewed_drafts.
@@ -145,13 +206,11 @@ class EmailDraftTool(Tool):
         existing = await run_in_db(open_draft, thread_id, str(draft_id), "email") if draft_id is not None else None
         if existing is not None and existing["state"] != "open":
             raise DraftRefused(NO_OPEN_DRAFT)
-        reply_id = kwargs.get("reply_to_message_id")
-        if reply_id:
-            target, reply_label = await reply_target(account_id, str(reply_id))
-        else:
-            target, reply_label = draft_target(existing), await kept_reply_label(account_id, existing)
+        draft_metadata = _DRAFT_METADATA.get(str(account["provider"]))
+        if draft_metadata is None:
+            raise DraftRefused("This account can't save email drafts.")
+        target, reply_label, signature = await draft_metadata(account_id, existing, kwargs.get("reply_to_message_id"))
         target = {**target, "account_id": account_id, "account": address}
-        signature = await fetch_signature(account_id)
         text = compose_document(address, to, cc, subject, body, signature, reply_label)
         try:
             saved = await save_draft(
@@ -161,6 +220,10 @@ class EmailDraftTool(Tool):
             )
         except DraftStorageRefused as exc:
             raise DraftRefused(str(exc)) from None
+        copy = _DRAFT_COPIES.get(str(account["provider"]))
+        if copy is None:
+            raise DraftRefused("This account can't save email drafts.")
+        await copy(account_id, text, target)
         relative = str((await run_in_db(open_draft, thread_id, saved["draft_id"], "email"))["path"])
         return json.dumps({
             "draft_id": saved["draft_id"], "revision": saved["revision"], "path": relative,
@@ -211,8 +274,8 @@ class EmailSendTool(Tool):
             return prepared
         return await self._deliver(draft_id, *prepared)
 
-    async def _prepare(self, thread_id: Any, draft_id: str, revision: str) -> tuple[str, dict] | str:
-        """The sending account and Gmail request body for an approved draft, or the error text."""
+    async def _prepare(self, thread_id: Any, draft_id: str, revision: str) -> tuple[dict, Any] | str:
+        """The sending account and its provider request body for an approved draft, or the error text."""
         row = await run_in_db(open_draft, str(thread_id), draft_id, "email")
         if row is not None and row["state"] == "sending":
             return f"Error: {STILL_SENDING}"
@@ -233,35 +296,47 @@ class EmailSendTool(Tool):
             # Display only: the sender is always the bound account, never this line.
             if parsed["from"] is not None and parsed["from"].lower() != str(account["address"]).lower():
                 return f"Error: {FROM_MISMATCH.format(account=account['address'])}"
-            raw = urlsafe_b64encode(build_message(parsed, target).as_bytes()).decode("ascii")
+            body_builder = _SEND_BODIES.get(str(account["provider"]))
+            if body_builder is None:
+                return "Error: Not sent: this account can't send email."
+            body = body_builder(build_message(parsed, target), target)
         except (UnicodeDecodeError, ValueError):
             return f"Error: {BAD_DOCUMENT}"
-        body: dict[str, Any] = {"raw": raw}
-        if target.get("thread_id"):
-            body["threadId"] = target["thread_id"]
-        return str(account["id"]), body
+        return account, body
 
-    async def _deliver(self, draft_id: str, account_id: str, body: dict) -> str:
-        """Send through the shared claimed-delivery lifecycle."""
+    async def _deliver(self, draft_id: str, account: dict, body: Any) -> str:
+        """Send through the shared claimed-delivery lifecycle and the account's registered backend."""
+        deliver = {"google": self._deliver_google, "mailhost": self._deliver_mailhost}.get(str(account["provider"]))
+        if deliver is None:
+            return "Error: Not sent: this account can't send email."
+        return await deliver(draft_id, account, body)
+
+    async def _deliver_google(self, draft_id: str, account: dict, body: dict) -> str:
+        account_id = str(account["id"])
         return await deliver_claimed(
             draft_id,
             acquire=lambda: google_client.access_token(account_id),
             provider_errors=(GoogleError,),
-            send=lambda bearer: google_client.request_json(
-                "POST", SEND_URL, account_id=account_id, body=body, token=bearer,
-            ),
+            send=lambda bearer: google_client.request_json("POST", SEND_URL, account_id=account_id, body=body, token=bearer),
             result_id=lambda sent: sent.get("id") if isinstance(sent, dict) else None,
-            success=lambda sent, message_id: json.dumps({
-                "sent_message_id": message_id,
-                "thread_id": thread_key(account_id, sent.get("threadId")),
-                "account_id": account_id,
-            }),
+            success=lambda sent, message_id: json.dumps({"sent_message_id": message_id,
+                "thread_id": thread_key(account_id, sent.get("threadId")), "account_id": account_id}),
             sign_in_error=lambda exc: str(exc) if isinstance(exc, GoogleError) else "couldn't reach Google. Try again later.",
             request_error=str,
             never_sent=lambda exc: isinstance(exc, google_client.GoogleSignInRejected)
             or isinstance(exc, GoogleRequestFailed) and exc.never_sent,
-            still_sending=STILL_SENDING,
-            claim_error="Not sent: couldn't check the draft. Try again.",
-            unconfirmed=UNCONFIRMED,
-            label="email_send",
+            still_sending=STILL_SENDING, claim_error="Not sent: couldn't check the draft. Try again.",
+            unconfirmed=UNCONFIRMED, label="email_send",
+        )
+
+    async def _deliver_mailhost(self, draft_id: str, account: dict, body: Any) -> str:
+        account_id = str(account["id"])
+        return await deliver_claimed(
+            draft_id,
+            acquire=lambda: _none(), provider_errors=(GoogleError,),
+            send=lambda _token: mailhost_outbound.send(account_id, body), result_id=lambda result: result,
+            success=lambda _result, message_id: json.dumps({"sent_message_id": message_id, "account_id": account_id}),
+            sign_in_error=lambda exc: str(exc), request_error=str, never_sent=_refused_before_send,
+            still_sending=STILL_SENDING, claim_error="Not sent: couldn't check the draft. Try again.",
+            unconfirmed=MAILHOST_UNCONFIRMED, label="email_send",
         )

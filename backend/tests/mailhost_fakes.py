@@ -88,6 +88,15 @@ class _Connection:
         line, _, self.buffer = self.buffer.partition(b"\r\n")
         return line
 
+    def read_exact(self, size: int) -> bytes:
+        while len(self.buffer) < size:
+            chunk = self.sock.recv(65536)
+            if not chunk:
+                break
+            self.buffer += chunk
+        data, self.buffer = self.buffer[:size], self.buffer[size:]
+        return data
+
     def send(self, *lines: str | bytes) -> None:
         for line in lines:
             self.sock.sendall((line.encode() if isinstance(line, str) else line) + b"\r\n")
@@ -153,6 +162,7 @@ class FakeImap(_LineServer):
         self.user, self.password, self.messages = user, password, messages or {}
         self.offer_starttls, self.imap_off, self.validity = offer_starttls, imap_off, validity
         self.searches: list[str] = []
+        self.appended: list[tuple[str, bytes]] = []
         super().__init__(authority, implicit_tls=implicit_tls)
 
     def session(self, conn: _Connection) -> None:
@@ -179,6 +189,13 @@ class FakeImap(_LineServer):
                 conn.send(f"* {len(self.messages)} EXISTS", f"* OK [UIDVALIDITY {self.validity}] ok", f"{tag} OK [READ-ONLY] done")
             elif verb == "UID":
                 self._uid(conn, tag, args)
+            elif verb == "APPEND":
+                folder, _, size = args.rpartition(" ")
+                conn.send("+ ready")
+                raw = conn.read_exact(int(size.strip("{}+")))
+                conn.readline()
+                self.appended.append((shlex.split(folder)[0], raw))
+                conn.send(f"{tag} OK appended")
             elif verb == "LOGOUT":
                 conn.send("* BYE", f"{tag} OK bye")
                 return
@@ -208,10 +225,12 @@ class FakeSmtp(_LineServer):
                  offer_starttls: bool = False, plain_auth_without_tls: bool = False) -> None:
         self.user, self.password = user, password
         self.offer_starttls, self.plain_auth_without_tls = offer_starttls, plain_auth_without_tls
+        self.sent: list[tuple[list[str], bytes]] = []
         super().__init__(authority, implicit_tls=implicit_tls)
 
     def session(self, conn: _Connection) -> None:
         conn.send("220 localhost ESMTP")
+        recipients: list[str] = []
         while (line := self.read(conn)) is not None:
             verb, _, args = line.partition(" ")
             verb = verb.upper()
@@ -230,6 +249,17 @@ class FakeSmtp(_LineServer):
                 decoded = base64.b64decode(args.split(" ", 1)[1]).split(b"\0") if " " in args else []
                 ok = decoded == [b"", self.user.encode(), self.password.encode()]
                 conn.send("235 accepted" if ok else f"535 rejected {HOST_REPLY_MARKER}")
+            elif verb == "RCPT":
+                recipients.append(args.split(":", 1)[1].strip(" <>"))
+                conn.send("250 OK")
+            elif verb == "DATA":
+                conn.send("354 go ahead")
+                lines: list[bytes] = []
+                while (data_line := conn.readline()) not in (None, b"."):
+                    lines.append(data_line)
+                self.sent.append((recipients[:], b"\r\n".join(lines)))
+                recipients.clear()
+                conn.send("250 queued")
             elif verb == "QUIT":
                 conn.send("221 bye")
                 return

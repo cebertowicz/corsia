@@ -145,6 +145,48 @@ def search(ep: Endpoints, username: str, password: str, criteria: list[str], lim
         return validity, [(int(uid), by_uid[int(uid)]) for uid in uids if int(uid) in by_uid]
 
 
+def append(ep: Endpoints, username: str, password: str, mailbox: str, raw: bytes) -> None:
+    """Save a reviewed RFC 822 message in a host folder without exposing server text."""
+    with session(ep, username, password) as conn:
+        status, _ = conn.append(mailbox, None, None, raw)
+        if status != "OK":
+            raise _unreachable(ep)
+
+
+def inbox_cursor(ep: Endpoints, username: str, password: str) -> tuple[int, int]:
+    """The inbox UIDVALIDITY and current last UID, used as a no-replay poll floor."""
+    with session(ep, username, password) as conn:
+        validity = _select(conn, ep)
+        status, found = conn.uid("SEARCH", "ALL")
+        if status != "OK":
+            raise _unreachable(ep)
+        uids = (found[0] or b"").split()
+        return validity, max((int(uid) for uid in uids), default=0)
+
+
+def added_after(
+    ep: Endpoints, username: str, password: str, validity: int, last_uid: int, max_bytes: int,
+) -> tuple[int, int, list[tuple[int, bytes]]]:
+    """Messages newer than the stored UID, or a new no-replay floor after a mailbox rebuild."""
+    with session(ep, username, password) as conn:
+        current_validity = _select(conn, ep)
+        status, found = conn.uid("SEARCH", "ALL")
+        if status != "OK":
+            raise _unreachable(ep)
+        uids = [int(uid) for uid in (found[0] or b"").split()]
+        current_last = max(uids, default=0)
+        if current_validity != validity:
+            return current_validity, current_last, []
+        wanted = [uid for uid in uids if uid > last_uid]
+        if not wanted:
+            return current_validity, current_last, []
+        status, data = conn.uid("FETCH", ",".join(str(uid) for uid in wanted), f"(UID BODY.PEEK[]<0.{max_bytes}>)")
+        if status != "OK":
+            raise _unreachable(ep)
+        by_uid = dict(_items(data))
+        return current_validity, current_last, [(uid, by_uid[uid]) for uid in wanted if uid in by_uid]
+
+
 def fetch(ep: Endpoints, username: str, password: str, validity: int, uid: int, max_bytes: int) -> bytes | None:
     """One inbox message's raw bytes (up to ``max_bytes``), or None when it is gone or its mailbox was rebuilt."""
     with session(ep, username, password) as conn:

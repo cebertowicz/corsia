@@ -15,7 +15,7 @@ import httpx
 import pytest
 from auth_fixtures import OWNER_SESSION_TOKEN, OWNER_USER, TEST_PASSWORD, seed_account
 from fastapi import FastAPI
-from mailhost_fakes import HOST_REPLY_MARKER
+from mailhost_fakes import HOST_REPLY_MARKER, message
 from mailhost_helpers import (  # noqa: F401  (fixtures)
     ADDRESS, BODY_CANARY, PASSWORD, add_account, authority, conductor, count_rows, env, row, run_check, servers,
 )
@@ -29,6 +29,7 @@ from connections.account_errors import AccountError
 from connections.google import accounts as google_accounts
 from connections.google.client import GoogleError
 from connections.mail import email_screen
+from events.connectors import mail_poller as poller
 from connections.mailhost import check, imap, read as mailhost_read, store
 from connections.mailhost.errors import IMAP_OFF, PASSWORD_REFUSED, SERVER_UNREACHABLE, MailHostError
 from infra import key_store
@@ -435,12 +436,55 @@ async def test_two_accounts_need_an_account_id_and_it_names_the_choices(conducto
     assert named["messages"]
 
 
+async def test_scheduled_poller_floors_then_delivers_new_mail_and_resets_a_rebuilt_mailbox(
+    connected, clean_screen, monkeypatch,
+) -> None:
+    await _set_through_keys(connected)
+    for name, value in (("_accounts", {}), ("_inflight", {}), ("_due", {})):
+        monkeypatch.setattr(poller, name, value)
+    monkeypatch.setattr(poller, "_status", poller._fresh_status())
+    monkeypatch.setenv(poller.TEST_ENABLE_ENV, "1")
+    delivered = []
+    monkeypatch.setattr(poller, "deliver_platform_event_sync", lambda _source, payload, **_kw: delivered.append(payload) or [])
+
+    await poller.run_cycle()
+    assert delivered == []
+    db = get_db()
+    try:
+        first = db.execute("SELECT cursor_json FROM connected_accounts WHERE id=?", (connected.account_id,)).fetchone()[0]
+    finally:
+        db.close()
+    assert json.loads(first)["imap_uid"] == "7:2"
+
+    connected.built.imap.messages[3] = message("New invoice", "new body", sender="new@example.com")
+    poller._due[connected.account_id] = 0
+    await poller.run_cycle()
+    assert [item["message_id"] for item in delivered] == ["7-3"]
+
+    connected.built.imap.validity = 8
+    poller._due[connected.account_id] = 0
+    await poller.run_cycle()
+    assert [item["message_id"] for item in delivered] == ["7-3"]
+    db = get_db()
+    try:
+        rebuilt = db.execute("SELECT cursor_json FROM connected_accounts WHERE id=?", (connected.account_id,)).fetchone()[0]
+    finally:
+        db.close()
+    assert json.loads(rebuilt)["imap_uid"] == "8:3"
+
+
 async def test_with_no_email_account_the_resolver_names_every_connection_path(env, conductor) -> None:
     with pytest.raises(AccountError) as refusal:
         mail_accounts.resolve_for_thread(None, conductor)
     assert str(refusal.value) == mail_accounts.NO_EMAIL_ACCOUNT
     output = await EmailSearchTool().execute(_thread_id=conductor, query="x")
     assert "google-setup" in output and "microsoft_status" in output and "microsoft_mail_search" in output and "microsoft_mail_read" in output and "mail-host-setup" in output
+
+
+async def test_with_no_mail_host_account_the_resolver_is_the_google_one_unchanged(env, conductor) -> None:
+    with pytest.raises(GoogleError) as ours:
+        google_accounts.resolve_for_thread(None, conductor)
+    assert str(ours.value) == google_accounts.NO_GOOGLE_ACCOUNT
 
 
 async def test_mail_account_parameters_describe_every_supported_mail_account() -> None:

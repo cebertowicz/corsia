@@ -92,6 +92,14 @@ def _credentials(account_id: str) -> str | None:
     return str(bundle[PASSWORD]) if bundle else None
 
 
+async def mark_password_refused(account_id: str, endpoints: Endpoints) -> None:
+    """Persist a later host refusal, notify the row, and leave nothing silently usable."""
+    written = await run_in_db(lambda: store.write(account_id, endpoints, status=store.REFUSED))
+    if written:
+        emit_lifecycle_event("connect_failed", account_id, "mailhost", cause=store.REFUSED)
+        notify_connected_apps_updated()
+
+
 async def start_check(account_id: str, replacement: Endpoints | None = None, *, merge: bool = False) -> bool:
     """Mark the row Checking and check it in the background; False when it is no mail-host row.
 
