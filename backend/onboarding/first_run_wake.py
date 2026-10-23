@@ -348,11 +348,18 @@ async def render_for(model: str, path: str = "script", *, thread_id: str | None 
     """Render the first run; a completed app setup reuses its committed facts."""
     if path == "app" and app_reference_served():
         from infra.db_async import run_in_db
-        from onboarding.app_first_run import IMPORT_DECISION_TITLE, read_app_facts, read_cached_app_facts
+        from onboarding.app_first_run import (
+            IMPORT_DECISION_TITLE,
+            read_app_facts,
+            read_cached_app_facts,
+            reconcile_rendered_app_facts,
+        )
 
         facts = await run_in_db(read_cached_app_facts, thread_id) if thread_id else None
         if facts is None:
             facts = await read_app_facts(model)
+            if thread_id:
+                await run_in_db(reconcile_rendered_app_facts, thread_id, facts)
         else:
             facts = {**facts, "bound_model": await run_in_db(_bound_model, model)}
             # Consent names the person-selected provider, which was unknown in setup.

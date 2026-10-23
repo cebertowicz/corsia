@@ -142,7 +142,7 @@ async def test_opening_broadcast_failure_still_drives_committed_first_pick(fresh
     assert result.changed
     assert result.new_model == "test/model"
     assert result.post_effects_error == (
-        "Your model is selected, but the chat update failed. Reopen this chat to refresh it."
+        "Your model is selected, but this chat didn't refresh. Reopen it to see the latest."
     )
     assert _rows("SELECT model FROM threads WHERE id=?", thread) == [{"model": "test/model"}]
     # A history reload reads the committed row even though this browser never got it live.
@@ -160,7 +160,7 @@ async def test_committed_first_pick_warning_reaches_the_existing_model_api_respo
     outcome = ModelSwitchOutcome(
         changed=True, old_model=None, new_model="test/model", preparation=None,
         breadcrumb=None, committed_at="2026-10-22T00:00:00",
-        post_effects_error="Your model is selected, but the chat update failed. Reopen this chat to refresh it.",
+        post_effects_error="Your model is selected, but this chat didn't refresh. Reopen it to see the latest.",
     )
     monkeypatch.setattr("connections.harness_refresh.prepare_selection", AsyncMock())
     monkeypatch.setattr(thread_mutations, "is_dispatchable_model", lambda _model: True)
@@ -175,7 +175,7 @@ async def test_committed_first_pick_warning_reaches_the_existing_model_api_respo
         "model_updated_at": "2026-10-22T00:00:00",
         "warning": (
             "model switch committed, but post-switch cleanup or notification failed: "
-            "Your model is selected, but the chat update failed. Reopen this chat to refresh it."
+            "Your model is selected, but this chat didn't refresh. Reopen it to see the latest."
         ),
     }
 

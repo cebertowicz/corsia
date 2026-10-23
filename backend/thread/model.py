@@ -237,7 +237,7 @@ async def _apply_first_selection(
             await broadcast_message_rows(thread_id, (opening_message_id(thread_id),))
         except Exception:
             log.exception("first-run opening broadcast failed: %s", thread_id)
-            post_error = "Your model is selected, but the chat update failed. Reopen this chat to refresh it."
+            post_error = "Your model is selected, but this chat didn't refresh. Reopen it to see the latest."
 
     # ``select_first_model`` committed the rendered first-run wake above. A setup
     # download that ended while the person was still in setup can now be delivered.

@@ -331,6 +331,25 @@ def cache_completed_facts(
     )
 
 
+def reconcile_rendered_app_facts(conductor_id: str, facts: Mapping[str, Any]) -> None:
+    """Reconcile a held app wake whose final setup snapshot was never cached."""
+    from infra.database import write_transaction
+    from infra.queries import get_thread
+
+    with write_transaction(None, scope="reconcile_rendered_app_facts") as db:
+        # Rendering can race with selection consuming the wake. Only repair the
+        # still-held app first run, matching completion's existing guard.
+        if _held_app_conductor(db=db) != conductor_id:
+            return
+        thread = get_thread(conductor_id, db=db)
+        user_id = thread["user_id"] if thread is not None else None
+        if not isinstance(user_id, str) or not user_id:
+            return
+        _seed_descriptors(
+            conductor_id, user_id, applicable_steps(facts), db=db, reconcile=True,
+        )
+
+
 def read_cached_app_facts(
     thread_id: str, db: sqlite3.Connection | None = None,
 ) -> dict[str, Any] | None:

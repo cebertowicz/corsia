@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -324,6 +325,37 @@ def test_applicable_steps_and_completion_cache_reconcile_conditionals(
         ("first-run-app", f"{step['step_number']}:{step.get('vendor', 'common')}", "routine")
         for step in steps
     ]
+
+
+@pytest.mark.asyncio
+async def test_uncached_first_pick_reconciles_current_facts_before_rendering(fresh_install, app_seed_facts, monkeypatch):
+    from infra import accounts
+    from onboarding import app_first_run, first_run_wake
+
+    accounts.create_first_account("newcomer", PASSWORD, first_run_path="app")
+    conductor_id = _conductor_id()
+    facts = {
+        "agents_found": [],
+        "connected_app_count": 2,
+        "email_calendar_ready": True,
+        "web_search_ready": False,
+        "sources_missing": {},
+        "pays_for": [],
+        "setup": {"setup_decisions": []},
+    }
+    monkeypatch.setattr(app_first_run, "read_app_facts", AsyncMock(return_value=facts))
+
+    wake = await first_run_wake.render_for("test/model", "app", thread_id=conductor_id)
+
+    assert "4. **Web search" in wake
+    live = _rows(
+        "SELECT workflow_step FROM plan_nodes WHERE workflow_ref='first-run-app' "
+        "AND archived_at IS NULL ORDER BY workflow_step"
+    )
+    assert {node["workflow_step"] for node in live} == {
+        f"{step['step_number']}:{step.get('vendor', 'common')}"
+        for step in app_first_run.applicable_steps(facts)
+    }
 
 
 def test_completion_retry_uses_the_latest_facts_at_the_first_model_pick(fresh_install, app_seed_facts):

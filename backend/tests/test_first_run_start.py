@@ -1,5 +1,5 @@
 """The app's first generated turn works one server-seeded setup step."""
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -89,12 +89,15 @@ async def test_completed_setup_reuses_snapshot_but_builds_provider_specific_impo
     monkeypatch.setattr(app_first_run, "read_cached_app_facts", lambda _thread: snapshot)
     read = AsyncMock(side_effect=AssertionError("setup must not run again after the pick"))
     monkeypatch.setattr(app_first_run, "read_app_facts", read)
+    reconcile = Mock(side_effect=AssertionError("cached facts must not write the setup plan"))
+    monkeypatch.setattr(app_first_run, "reconcile_rendered_app_facts", reconcile)
     monkeypatch.setattr(first_run_wake, "_bound_model", lambda model: {"model": model, "source": "omlx"})
     monkeypatch.setattr(setup_decisions, "import_card", lambda model, ready: setup_decisions.ImportCard(("Hermes Agent",), (), ""))
 
     wake = await first_run_wake.render_for("test-local", "app", thread_id="test-conductor")
 
     read.assert_not_awaited()
+    reconcile.assert_not_called()
     assert "2. **Bring over what your other tools know" in wake
     assert "Bring over what your other tools know" in wake
     assert snapshot["setup"]["setup_decisions"] == []  # keep committed snapshot immutable
