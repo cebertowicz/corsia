@@ -327,6 +327,15 @@ def test_recorded_lessons_count_each_lesson_once_with_a_reference_per_version(db
     assert (lessons()["in_use"]["count"], lessons()["held"]["count"]) == (2, 1)
     assert lessons()["held"]["refs"] == ["capture:c:1"]
 
+    # a watch is not delivered as guidance, so it is held
+    lesson_reviews.ensure_lesson_review(db, "owner", lesson_id="w", behavioral_sha256="1", state="watch", **review)
+    assert (lessons()["in_use"]["count"], lessons()["held"]["count"]) == (2, 2)
+    # a capture completed as a revision of another lesson is closed, so it is neither held nor counted twice
+    lesson_reviews.ensure_capture_review(db, "owner", capture_id="x", capture_hash="1", **review)
+    lesson_reviews.ensure_lesson_review(db, "owner", lesson_id="y", behavioral_sha256="1", capture_id="x", **review)
+    assert (recorded()["count"], lessons()["in_use"]["count"], lessons()["held"]["count"]) == (5, 3, 2)
+    assert "capture:x:1" not in lessons()["held"]["refs"]
+
 
 def test_daily_report_is_passive_without_qualifying_facts(db):
     from jobs.learning_report import build_report

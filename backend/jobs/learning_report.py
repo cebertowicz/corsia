@@ -20,6 +20,7 @@ from core.corrections_recording import (
 from core import workflow_verdict_evaluator
 from core.workflow_verdict_read import PLANNED_EVENT, REACHED_EVENT
 from events.learning_report import deliver_learning_report_sync
+from plans.public import TERMINAL_STATES
 
 EARLY_FLOOR = 5
 HISTORY_DAYS = 28
@@ -90,7 +91,7 @@ def _lessons(
     where, scope_args = _scope_where(scope)
     start, end = _day_bounds(report_date)
     rows = db.execute(
-        f"""SELECT l.source_event_id,p.owner_id
+        f"""SELECT l.source_event_id,p.owner_id,n.state
               FROM plan_node_artifact_links l
               JOIN plan_nodes n ON n.id=l.node_id
               JOIN plans p ON p.id=n.plan_id
@@ -102,15 +103,17 @@ def _lessons(
     ).fetchall()
     # trials only until the lesson gate routes every lesson through place
     refs = [str(row["source_event_id"]) for row in rows]
-    # a review key is <prefix>:<id>:...; a capture and the trial it became share the id
-    ids = {ref.split(":")[1] for ref in refs}
-    in_use = {ref.split(":")[1] for ref in refs if ref.split(":")[0] == "lesson"}
+    # a review key is lesson:<id>:<sha> for a trial, lesson:<id>:watch:<sha> for a watch,
+    # capture:<id>:<hash>; a capture that became a trial is closed, or shares the trial's id
+    open_keys = [str(row["source_event_id"]).split(":") for row in rows if row["state"] not in TERMINAL_STATES]
+    in_use = {key[1] for key in open_keys if key[0] == "lesson" and len(key) == 3}
+    held = {key[1] for key in open_keys} - in_use
     in_use_refs = [ref for ref in refs if ref.split(":")[1] in in_use]
-    held_refs = [ref for ref in refs if ref.split(":")[1] not in in_use]
+    held_refs = [ref for ref in refs if ref.split(":")[1] in held]
     return ({
-        "recorded": {**_count(refs), "count": len(ids)},
+        "recorded": {**_count(refs), "count": len(in_use | held)},
         "in_use": {**_count(in_use_refs), "count": len(in_use)},
-        "held": {**_count(held_refs), "count": len(ids - in_use)},
+        "held": {**_count(held_refs), "count": len(held)},
         "confirmed": None,
         "consolidated": None,
         "repeated": None,
