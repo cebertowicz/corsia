@@ -11,7 +11,8 @@ from typing import Any
 from loguru import logger
 
 from core.lesson_carry_in_contract import (
-    ACTIONS_FIELDS, ACTION_FIELDS, SAMPLE_COUNT, Action, CarryInRun, LocalTraceAdapter, TraceAdapter, TraceScore, action_matches,
+    ACTIONS_FIELDS, ACTION_FIELDS, PENDING_EVENT, RESULT_EVENT, RETIREMENT_EVENT, SAMPLE_COUNT,
+    SOURCE_SKIPPED_EVENT, Action, CarryInRun, LocalTraceAdapter, TraceAdapter, TraceScore, action_matches,
     canonical_calls, rotated_cases, run_three, scenario_for_case, score_trace, validate_actions,
 )
 from core.lesson_carry_in_history import (
@@ -20,11 +21,6 @@ from core.lesson_carry_in_history import (
     target_snapshot as _target_snapshot,
 )
 from core.lesson_carry_in_result_queries import baseline_result, prior_case_status, result_event
-
-PENDING_EVENT = "learning_loop.carry_in_pending"
-RESULT_EVENT = "learning_loop.carry_in_result"
-RETIREMENT_EVENT = "learning_loop.carry_in_retirement"
-SOURCE_SKIPPED_EVENT = "learning_loop.carry_in_source_skipped"
 
 
 @dataclass(frozen=True)
@@ -108,12 +104,8 @@ def record_pending(db, fact: CarryInFact, *, reason: str | None = None) -> bool:
     )
 
 
-def record_source_skipped(
-    db, *, lesson_id: str, owner_thread_id: str, target_commit: str, target_path: str,
-    reason: str = "outside_workspace",
-) -> bool:
+def record_source_skipped(db, fact: CarryInFact, reason: str = "outside_workspace") -> bool:
     """Count an excluded case without retaining its source path or target text."""
-    fact = CarryInFact(lesson_id, owner_thread_id, target_commit, target_path, "skipped-source")
     return _record(
         db, event_name=SOURCE_SKIPPED_EVENT, fact=fact, dedupe_suffix=f"source-{reason}",
         attributes={"reason": reason},
@@ -154,12 +146,6 @@ def _model_identity(run: CarryInRun) -> str | None:
     return json.dumps({"resolved_identity": run.identity, "selector": run.selector}, sort_keys=True)
 
 
-def coverage_counts(db):
-    from core.lesson_carry_in_coverage import coverage_counts as count_coverage
-
-    return count_coverage(db)
-
-
 def record_retirement(db, fact: CarryInFact, reason: str) -> bool:
     """Record the owner-supplied, queryable retirement reason without case source text."""
     if not reason.strip():
@@ -185,8 +171,10 @@ def is_pending(db, fact: CarryInFact) -> bool:
     return row is not None
 
 
-def _matching_facts(db, workspace: Path, paths: Sequence[Path], commit: str) -> list[CarryInFact]:
-    """Find cases for just-saved targets from direct installed-skill roots only."""
+def _matching_facts(
+    db, workspace: Path, paths: Sequence[Path], commit: str,
+) -> tuple[list[CarryInFact], list[tuple[CarryInFact, str]]]:
+    """Find cases for just-saved targets, and the skipped ones with why; reads only."""
     from core.lesson_files import read_trial
     from core.skill_data_conversion import installed_skill_files
     from tools.filesystem_gate import canonical_target_path
@@ -194,6 +182,7 @@ def _matching_facts(db, workspace: Path, paths: Sequence[Path], commit: str) -> 
     workspace_root = workspace.resolve(strict=False)
     saved = {canonical_target_path(str(path.resolve()), workspace_root) for path in paths}
     facts: list[CarryInFact] = []
+    skipped: list[tuple[CarryInFact, str]] = []
     for source_path in installed_skill_files(workspace_root, db):
         try:
             trial = read_trial(source_path.read_text(encoding="utf-8"))
@@ -206,27 +195,21 @@ def _matching_facts(db, workspace: Path, paths: Sequence[Path], commit: str) -> 
         if actions is None or not target or canonical_target_path(target, workspace_root) not in saved:
             continue
         canonical_target = canonical_target_path(target, workspace_root)
+        source = CarryInFact(trial.lesson.id, trial.lesson.owner, commit, canonical_target, "skipped-source")
         if _is_thread_skill_target(canonical_target):
-            record_source_skipped(
-                db, lesson_id=trial.lesson.id, owner_thread_id=trial.lesson.owner,
-                target_commit=commit, target_path=canonical_target,
-                reason="thread_skill_no_unlineaged_route",
-            )
+            skipped.append((source, "thread_skill_no_unlineaged_route"))
             continue
         try:
             relative = source_path.resolve().relative_to(workspace_root).as_posix()
         except ValueError:
-            record_source_skipped(
-                db, lesson_id=trial.lesson.id, owner_thread_id=trial.lesson.owner,
-                target_commit=commit, target_path=canonical_target,
-            )
+            skipped.append((source, "outside_workspace"))
             logger.warning("carry-in case source is outside workspace: source={} workspace={}", source_path, workspace_root)
             continue
         facts.append(CarryInFact(
             trial.lesson.id, trial.lesson.owner, commit, canonical_target,
             f"{relative}#corsia.lesson.case",
         ))
-    return facts
+    return facts, skipped
 
 
 def _case_for_fact(workspace: Path, fact: CarryInFact) -> dict[str, Any] | None:
@@ -287,6 +270,7 @@ def _rebaseline_first(
     setter(FencedTarget(prior.target_path, prior.target_commit, blob, rebaseline.role))
     import hashlib
     prior_case = _case_for_fact(workspace, prior)
+    _no_open_transaction(db)
     try:
         run = run_three(
             actions, adapter, scenario=scenario_for_case(prior_case or {}),
@@ -305,15 +289,18 @@ def _rebaseline_first(
             cleanup()
 
 
+def _no_open_transaction(db) -> None:
+    """A model turn never runs while this connection holds a write open."""
+    if db.in_transaction:
+        raise RuntimeError("carry-in model run started inside an open transaction")
+
+
 def drain_facts(db, workspace: Path, facts: Sequence[CarryInFact], adapter: TraceAdapter) -> list[CarryInRun]:
-    """Use one caller-admitted local adapter to settle pending facts serially."""
+    """Use one caller-admitted local adapter to settle already-pending facts serially."""
     from infra.database import write_transaction
 
     runs: list[CarryInRun] = []
     for fact in facts:
-        # Pending must survive a stalled or unavailable local-admission check.
-        with write_transaction(db, scope="carry_in_pending") as transaction:
-            record_pending(transaction, fact)
         if not is_pending(db, fact):
             continue
         case = _case_for_fact(workspace, fact)
@@ -333,17 +320,18 @@ def drain_facts(db, workspace: Path, facts: Sequence[CarryInFact], adapter: Trac
                 from eval.fresh_turn_context import FencedTarget
 
                 setter(FencedTarget(fact.target_path, fact.target_commit, blob, fact.role))
+            _no_open_transaction(db)
             run = run_three(
                 actions, adapter, scenario=scenario_for_case(case),
                 before_sample=lambda: _target_snapshot(workspace, fact),
             )
+            case_sha = _case_sha(case)
+            owner = target_scope_owner(db, workspace, fact.target_path)
+            case_status = "proven" if run.verdict == "pass" else prior_case_status(db, fact, case_sha)
             with write_transaction(db, scope="carry_in_result") as transaction:
                 if run.state == "pending" and run.reason is not None:
                     record_pending(transaction, fact, reason=run.reason)
                 elif run.state == "settled":
-                    owner = target_scope_owner(transaction, workspace, fact.target_path)
-                    case_sha = _case_sha(case)
-                    case_status = "proven" if run.verdict == "pass" else prior_case_status(transaction, fact, case_sha)
                     record_result(
                         transaction, fact, run, owner_unresolved=owner is None,
                         case_sha=case_sha, case_status=case_status,
@@ -354,8 +342,10 @@ def drain_facts(db, workspace: Path, facts: Sequence[CarryInFact], adapter: Trac
                     ):
                         from core.self_caught_corrections import record_carry_in_regression
 
+                        # An ambiguous target owner leaves the regression with the lesson's owner.
                         record_carry_in_regression(
-                            transaction, result_event_id=str(event[0]), thread_id=owner, created_at=str(event[1]),
+                            transaction, result_event_id=str(event[0]), thread_id=owner or fact.owner_thread_id,
+                            created_at=str(event[1]),
                         )
             runs.append(run)
         finally:
@@ -363,38 +353,3 @@ def drain_facts(db, workspace: Path, facts: Sequence[CarryInFact], adapter: Trac
             if cleanup is not None:
                 cleanup()
     return runs
-
-
-def _drain_committed_facts(*args, **kwargs):
-    from core.lesson_carry_in_drain import _drain_committed_facts as drain
-
-    return drain(*args, **kwargs)
-
-def _pending_facts(*args, **kwargs):
-    from core.lesson_carry_in_drain import _pending_facts as pending
-
-    return pending(*args, **kwargs)
-
-
-def join_drain_threads(*args, **kwargs):
-    from core.lesson_carry_in_drain import join_drain_threads as join
-
-    return join(*args, **kwargs)
-
-
-def record_committed_save(*args, **kwargs):
-    from core.lesson_carry_in_drain import record_committed_save as record
-
-    return record(*args, **kwargs)
-
-
-def schedule_pending_drain(*args, **kwargs):
-    from core.lesson_carry_in_drain import schedule_pending_drain as schedule
-
-    return schedule(*args, **kwargs)
-
-
-def shutdown_drain_threads(*args, **kwargs):
-    from core.lesson_carry_in_drain import shutdown_drain_threads as shutdown
-
-    return shutdown(*args, **kwargs)

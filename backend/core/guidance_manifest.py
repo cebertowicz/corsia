@@ -341,43 +341,51 @@ def record_continuation_manifest(
     )
 
 
-def record_guidance_load(
-    *, thread_id: str | None, turn_id: str | None, path: Path, data: bytes,
+def insert_guidance_load(
+    tx, *, thread_id: str | None, turn_id: str | None, path: Path, data: bytes,
     returned_text: str, partial: bool, node_id: str | None = None,
     variant: str | None = None, checkpoint_generation_id: str | None = None,
     lesson_id: str | None = None, lesson_behavioral_sha256: str | None = None,
-    db=None,
+) -> None:
+    """Insert one guidance receipt inside the caller's transaction; raises on failure.
+
+    ``data`` is the bytes the delivered text came from, never a second read.
+    """
+    from infra.time import utc_now_iso
+    import uuid
+
+    tx.execute(
+        """INSERT INTO guidance_loads
+               (id, thread_id, turn_id, path, raw_sha256, git_blob_oid,
+                delivered_sha256, byte_count, partial, node_id, variant,
+                checkpoint_generation_id, lesson_id, lesson_behavioral_sha256, created_at)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            uuid.uuid4().hex, thread_id, turn_id, str(path),
+            _sha256_bytes(data), git_blob_oid(data),
+            _sha256_bytes(returned_text.encode("utf-8")), len(data),
+            int(partial), node_id, variant, checkpoint_generation_id, lesson_id,
+            lesson_behavioral_sha256, utc_now_iso(),
+        ),
+    )
+
+
+def record_guidance_load(
+    *, thread_id: str | None, turn_id: str | None, path: Path, data: bytes,
+    returned_text: str, partial: bool,
 ) -> None:
     """Record one mid-Turn read of a ``SKILL.md``; never raises.
 
     ``data`` is the bytes the read returned text from, never a second read.
     """
     from infra.database import write_transaction
-    from infra.time import utc_now_iso
-    import uuid
-
-    def insert(tx) -> None:
-        tx.execute(
-            """INSERT INTO guidance_loads
-                   (id, thread_id, turn_id, path, raw_sha256, git_blob_oid,
-                    delivered_sha256, byte_count, partial, node_id, variant,
-                    checkpoint_generation_id, lesson_id, lesson_behavioral_sha256, created_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (
-                uuid.uuid4().hex, thread_id, turn_id, str(path),
-                _sha256_bytes(data), git_blob_oid(data),
-                _sha256_bytes(returned_text.encode("utf-8")), len(data),
-                int(partial), node_id, variant, checkpoint_generation_id, lesson_id,
-                lesson_behavioral_sha256, utc_now_iso(),
-            ),
-        )
 
     try:
-        if db is not None:
-            insert(db)
-        else:
-            with write_transaction(None, scope="record_guidance_load") as tx:
-                insert(tx)
+        with write_transaction(None, scope="record_guidance_load") as tx:
+            insert_guidance_load(
+                tx, thread_id=thread_id, turn_id=turn_id, path=path, data=data,
+                returned_text=returned_text, partial=partial,
+            )
     except Exception:
         log.exception("guidance_manifest: skill read of %s unrecorded", path)
         if thread_id and turn_id:

@@ -16,7 +16,7 @@ async def shutdown_owned_tasks(
     """Cancel and join exact background and finite startup tasks, and stop held vendor and app sign-ins."""
     from connections.account_controls import stop_all_signins
     from connections.microsoft.oauth import stop_all_signins as stop_microsoft_signins
-    from core.lesson_carry_in import shutdown_drain_threads
+    from core.lesson_carry_in_drain import shutdown_drain_threads
     from jobs.corrections_realtime import shutdown as stop_corrections_classifier
     from llm.local_setup import flight_task
     from llm.local_setup_prepare import prepare_task

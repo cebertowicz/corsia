@@ -25,6 +25,10 @@ SAMPLE_COUNT = 3
 PASS_THRESHOLD = 2
 # One pending case per existing catalog-ready trigger bounds recovery work.
 CASES_PER_EDIT_CAP = 1
+PENDING_EVENT = "learning_loop.carry_in_pending"
+RESULT_EVENT = "learning_loop.carry_in_result"
+RETIREMENT_EVENT = "learning_loop.carry_in_retirement"
+SOURCE_SKIPPED_EVENT = "learning_loop.carry_in_source_skipped"
 
 
 class TraceAdapter(Protocol):

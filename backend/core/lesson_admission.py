@@ -113,19 +113,45 @@ def _target(decision: Decision) -> str:
     return target
 
 
-def _target_trials(
-    db: sqlite3.Connection, place: ThreadPlace, decision: Decision,
-) -> tuple[list[tuple[Path, Any]], list[tuple[Path, Any]]]:
-    from core.skill_resolution import resolve_effective_skills
+def _additive_only(decision: Decision) -> None:
+    """Refuse an in-context trial that would change a section the target already has.
+
+    A file read on demand (a skill or a new file) can carry any trial. A file
+    already in context gets the trial body beside its own text, so the trial
+    may only add a section: one whose heading the target does not have yet.
+    """
+    from core.skill_validation import is_skill_file
     from infra.config import WORKSPACE
 
-    root = Path(WORKSPACE)
-    resolved = resolve_effective_skills(
-        thread_id=place.thread_id, project_id=place.project_id, workspace=root, db=db,
-    )
-    paths = [row.path for row in (*resolved.included, *resolved.omitted)]
+    if decision.target_file == "new" or is_skill_file(Path(str(decision.target_file))):
+        return
+    path = Path(WORKSPACE) / _target(decision)
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        raise TrialRefused("non-additive", (
+            f"{decision.target_file} could not be read, so a trial cannot show it only adds a section"
+        )) from None
+    section = str(decision.target_section).lstrip("#").strip().casefold()
+    headings = {
+        line.lstrip("#").strip().casefold() for line in text.splitlines() if line.startswith("#")
+    }
+    if section in headings:
+        raise TrialRefused("non-additive", (
+            f"{decision.target_file} is already in context and has a '{decision.target_section}' "
+            "section; a trial there may only add a new section, so name a new target_section "
+            "or place the change without trial"
+        ))
+
+
+def _target_trials(
+    place: ThreadPlace, decision: Decision,
+) -> tuple[list[tuple[Path, Any]], list[tuple[Path, Any]]]:
+    """The owner's own lessons on this target; a trial is only ever in its owner's tray."""
+    if place.tray is None:
+        return [], []
     open_trials, retired = [], []
-    for path in paths:
+    for path in sorted((place.tray / "skills").glob("*/SKILL.md")):
         current = lesson_files.read_trial(path.read_text(encoding="utf-8", errors="replace"))
         if (
             current is None
@@ -183,6 +209,7 @@ def admit(
             "a temporary worker keeps no trial lessons: return the finding to "
             "your parent in your plan, and leave this entry as it is"
         ))
+    _additive_only(decision)
     epoch = int(entry.get("history_epoch", row["history_epoch"]))
     capture_id = lesson_id(thread_id, epoch, int(entry["entry_id"]))
     hold = _incomplete(db, thread_id, epoch, entry, decision)
@@ -192,7 +219,7 @@ def admit(
         raise TrialRefused("invalid-output", (
             "skill_name must be a new lowercase-hyphenated name for the trial skill"
         ))
-    open_trials, retired_trials = _target_trials(db, place, decision)
+    open_trials, retired_trials = _target_trials(place, decision)
     open_rows = tuple(_trial_row(path, current) for path, current in open_trials)
     retired_rows = tuple(_trial_row(path, current) for path, current in retired_trials)
     same = lambda current: current.lesson.target_section == decision.target_section and current.lesson.cause == decision.cause

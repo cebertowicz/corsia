@@ -141,15 +141,15 @@ def _skill(env: Env, name: str = "cite-the-head") -> Path:
     return env.tray / "skills" / name / "SKILL.md"
 
 
-def _external_trial(
+def _owned_trial(
     env: Env, name: str, *, cause: str = "process_gap", state: str = "trial",
     target_file: str = "skills/checks/SKILL.md",
 ) -> Path:
-    """Seed a same-owner trial outside this thread's tray for tool-path discovery."""
+    """Seed another of this thread's own trials, in its tray."""
     from core.lesson_files import render_trial
     from core.lesson_trials import Trial
 
-    path = env.workspace / "skills" / name / "SKILL.md"
+    path = _skill(env, name).parent.parent / name / "SKILL.md"
     path.parent.mkdir(parents=True)
     path.write_text(render_trial(
         lesson_id=str(uuid.uuid4()), owner=THREAD, name=name,
@@ -191,11 +191,11 @@ def _other_thread_trial(env: Env, name: str, *, state: str = "trial") -> Path:
 
 
 def _offered(env: Env) -> list[dict]:
-    """The lessons the per-task delivery seam would offer the next task.
+    """The lessons the next task start would deliver.
 
     The cached skills index must never carry one, so that is checked on every call.
     """
-    from core.lesson_delivery import _eligible_trials
+    from core.lesson_delivery import _resolve
     from core.lesson_files import read_trial
     from core.lesson_index import TRIAL_MARK
 
@@ -207,7 +207,7 @@ def _offered(env: Env) -> list[dict]:
     cached = "".join(source.prompt_content or "" for source in index)
     assert TRIAL_MARK not in cached
     offered = []
-    for trial in _eligible_trials(env.db, THREAD):
+    for trial in _resolve(env.db, THREAD)[0]:
         current = read_trial(trial.source_data.decode("utf-8"))
         offered.append({
             "id": trial.lesson_id, "behavioral_sha256": trial.behavioral_sha256,
@@ -230,8 +230,8 @@ def _open(rows: list[sqlite3.Row]) -> list[sqlite3.Row]:
 
 
 def _offered_at(env: Env, now: datetime) -> list[dict]:
-    """The lessons the per-task delivery seam would offer a task started at ``now``."""
-    from core import lesson_delivery
+    """The lessons a task started at ``now`` would receive."""
+    from core import lesson_index
 
     class _At(datetime):
         @classmethod
@@ -239,7 +239,7 @@ def _offered_at(env: Env, now: datetime) -> list[dict]:
             return now.astimezone(tz)
 
     with pytest.MonkeyPatch.context() as patch:
-        patch.setattr(lesson_delivery, "datetime", _At)
+        patch.setattr(lesson_index, "datetime", _At)
         return _offered(env)
 
 
@@ -435,10 +435,10 @@ async def test_a_retired_lesson_tried_again_is_a_new_lesson_naming_its_origin(en
     assert [lesson["id"] for lesson in _offered(env)] == [new.lesson.id]
 
 
-async def test_tool_placement_merges_the_same_target_section_and_cause_across_locations(
+async def test_tool_placement_merges_the_same_target_section_and_cause_into_the_owners_trial(
     env: Env,
 ) -> None:
-    existing = _external_trial(env, "existing-check")
+    existing = _owned_trial(env, "existing-check")
     entry = _entry(env, [{"kind": "turn", "reference": "turn-merge"}])
 
     reply = _place(env, entry, _answer(skill_name="incoming-check"))
@@ -480,7 +480,7 @@ async def test_tool_placement_ignores_another_threads_retired_same_target_trial(
 async def test_tool_placement_merges_relative_destination_with_resolved_trial_target(
     env: Env,
 ) -> None:
-    existing = _external_trial(
+    existing = _owned_trial(
         env, "existing-check", target_file=str((env.workspace / "skills/checks/SKILL.md").resolve()),
     )
     entry = _entry(env, [{"kind": "turn", "reference": "turn-relative"}])
@@ -498,7 +498,7 @@ async def test_tool_placement_merges_relative_destination_with_resolved_trial_ta
 async def test_tool_placement_creates_a_different_cause_and_lists_the_open_trial(
     env: Env,
 ) -> None:
-    _external_trial(env, "existing-check")
+    _owned_trial(env, "existing-check")
     entry = _entry(env)
 
     reply = _place(env, entry, _answer(skill_name="wrong-rule-check", cause="wrong_rule"))
@@ -512,7 +512,7 @@ async def test_tool_placement_creates_a_different_cause_and_lists_the_open_trial
 async def test_tool_placement_admits_a_retired_target_match_with_target_changed(
     env: Env,
 ) -> None:
-    _external_trial(env, "retired-check", state="retired")
+    _owned_trial(env, "retired-check", state="retired")
     entry = _entry(env)
 
     reply = _place(
@@ -527,7 +527,7 @@ async def test_tool_placement_admits_a_retired_target_match_with_target_changed(
 async def test_tool_placement_refusal_names_the_retired_trial_without_new_evidence(
     env: Env,
 ) -> None:
-    _external_trial(env, "retired-check", state="retired")
+    _owned_trial(env, "retired-check", state="retired")
     entry = _entry(env)
 
     reply = _place(env, entry, _answer(skill_name="replacement-check"))
@@ -537,6 +537,18 @@ async def test_tool_placement_refusal_names_the_retired_trial_without_new_eviden
         "set new_evidence to target_changed or case_differs to admit a new trial"
     )
     assert not _skill(env, "replacement-check").exists()
+
+
+def test_an_in_context_trial_may_only_add_a_section(env: Env) -> None:
+    (env.workspace / "AGENTS.md").write_text("# Agents\n\n## Reporting\n\nName the run.\n", encoding="utf-8")
+
+    changed = _place(env, _entry(env), _answer(target_file="AGENTS.md"))
+    missing = _place(env, _entry(env), _answer(target_file="MISSING.md"))
+    added = _place(env, _entry(env), _answer(target_file="AGENTS.md", target_section="Check heads"))
+
+    assert changed.startswith("Error: AGENTS.md is already in context and has a 'Reporting' section;")
+    assert missing.startswith("Error: MISSING.md could not be read")
+    assert added.startswith("Entry 3 queued")
 
 
 async def test_a_checkpoint_stages_a_trial_and_its_install_hands_it_to_the_worker(

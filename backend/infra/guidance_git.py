@@ -306,7 +306,7 @@ def save_guidance(
     emit_product_event("guidance_history", "save", properties=properties)
     if result.outcome == "written" and result.sha:
         try:
-            from core.lesson_carry_in import record_committed_save
+            from core.lesson_carry_in_drain import record_committed_save
 
             record_committed_save(workspace, tuple(changes), result.sha)
         except Exception:

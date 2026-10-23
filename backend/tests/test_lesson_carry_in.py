@@ -26,11 +26,11 @@ def _call(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
     return {"name": name, "arguments": arguments}
 
 
-def _event_db() -> sqlite3.Connection:
+def _event_db(path: str = ":memory:") -> sqlite3.Connection:
     from infra.outcome_events_schema import OUTCOME_EVENTS_SCHEMA_SQL
     from infra.schema import SCHEMA_SQL
 
-    db = sqlite3.connect(":memory:")
+    db = sqlite3.connect(path)
     db.row_factory = sqlite3.Row
     db.executescript(SCHEMA_SQL)
     db.executescript(OUTCOME_EVENTS_SCHEMA_SQL)
@@ -38,6 +38,7 @@ def _event_db() -> sqlite3.Connection:
         "INSERT INTO threads (id,user_id,model,history_epoch,next_message_seq,created_at,updated_at) "
         "VALUES ('owner', 'user', 'native/test', 0, 1, '2026-10-21T00:00:00+00:00', '2026-10-21T00:00:00+00:00')"
     )
+    db.commit()
     return db
 
 
@@ -454,8 +455,9 @@ def test_committed_target_edit_finds_its_file_local_executable_case_without_a_wo
     unrelated.write_text(source.read_text())
     monkeypatch.setattr(Path, "rglob", lambda *_args, **_kwargs: pytest.fail("recursive workspace walk"))
 
-    facts = _matching_facts(_event_db(), workspace, [target], "a" * 40)
+    facts, skipped = _matching_facts(_event_db(), workspace, [target], "a" * 40)
 
+    assert skipped == []
     assert facts == [
         CarryInFact(
             "12345678-1234-5678-1234-567812345678", "owner", "a" * 40,
@@ -489,7 +491,7 @@ def test_matching_case_survives_a_symlinked_workspace_root(tmp_path: Path):
     ))
 
     db = _event_db()
-    facts = _matching_facts(db, workspace, [target], "a" * 40)
+    facts, _skipped = _matching_facts(db, workspace, [target], "a" * 40)
 
     assert facts == [
         CarryInFact(
@@ -497,7 +499,9 @@ def test_matching_case_survives_a_symlinked_workspace_root(tmp_path: Path):
             "context/rule.md", ".threads/owner/skills/lesson/SKILL.md#corsia.lesson.case",
         )
     ]
-    from core.lesson_carry_in import drain_facts, is_pending
+    from core.lesson_carry_in import drain_facts, is_pending, record_pending
+    record_pending(db, facts[0])
+    db.commit()
     runs = drain_facts(db, workspace, facts, Adapter([], is_ready=False))
     assert [run.state for run in runs] == ["pending"]
     assert is_pending(db, facts[0])
@@ -524,28 +528,31 @@ def test_thread_skill_target_is_skipped_without_an_unlineaged_route(tmp_path: Pa
     ))
     db = _event_db()
 
-    assert _matching_facts(db, workspace, [target], "a" * 40) == []
-    row = db.execute("SELECT attributes FROM outcome_events WHERE event_name='learning_loop.carry_in_source_skipped'").fetchone()
-    assert json.loads(row["attributes"])["reason"] == "thread_skill_no_unlineaged_route"
+    facts, skipped = _matching_facts(db, workspace, [target], "a" * 40)
+
+    assert facts == []
+    assert [reason for _source, reason in skipped] == ["thread_skill_no_unlineaged_route"]
+    assert db.execute("SELECT COUNT(*) FROM outcome_events").fetchone()[0] == 0
 
 
 def test_coverage_counts_skipped_thread_skill_targets_in_the_denominator():
-    from core.lesson_carry_in import CarryInFact, CarryInRun, TraceScore, coverage_counts, record_result, record_source_skipped
+    from core.lesson_carry_in import CarryInFact, CarryInRun, TraceScore, record_result, record_source_skipped
+    from core.lesson_carry_in_coverage import coverage_counts
 
     db = _event_db()
     fact = CarryInFact("lesson", "owner", "a" * 40, "context/rule.md", "case")
     run = CarryInRun("settled", (TraceScore("pass", "ok", 0),) * 3)
     assert record_result(db, fact, run)
     assert record_source_skipped(
-        db, lesson_id="skill", owner_thread_id="owner", target_commit="b" * 40,
-        target_path=".threads/owner/skills/lesson/SKILL.md", reason="thread_skill_no_unlineaged_route",
+        db, CarryInFact("skill", "owner", "b" * 40, ".threads/owner/skills/lesson/SKILL.md", "skipped-source"),
+        "thread_skill_no_unlineaged_route",
     )
 
     assert coverage_counts(db) == {"covered": 1, "skipped": 1, "total": 2}
 
 
 def test_external_carry_in_source_is_counted_without_retaining_its_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    from core.lesson_carry_in import _matching_facts
+    from core.lesson_carry_in import _matching_facts, record_source_skipped
     from core.lesson_files import render_trial
     from core.lesson_trials import Trial
 
@@ -567,7 +574,10 @@ def test_external_carry_in_source_is_counted_without_retaining_its_path(tmp_path
     monkeypatch.setattr("core.skill_data_conversion.installed_skill_files", lambda *_args: [source])
     db = _event_db()
 
-    assert _matching_facts(db, workspace, [target], "a" * 40) == []
+    facts, skipped = _matching_facts(db, workspace, [target], "a" * 40)
+    assert facts == []
+    for skipped_source, reason in skipped:
+        record_source_skipped(db, skipped_source, reason)
     row = db.execute(
         "SELECT subject_key,attributes FROM outcome_events WHERE event_name='learning_loop.carry_in_source_skipped'"
     ).fetchone()
@@ -596,12 +606,13 @@ def test_drain_settles_a_pending_case_with_a_mocked_local_adapter(tmp_path: Path
             "does_not_apply": "For a draft.", "correction_subject": "message:1", "actions": ACTIONS,
         },
     ))
-    fact = _matching_facts(_event_db(), workspace, [target], "a" * 40)[0]
+    fact = _matching_facts(_event_db(), workspace, [target], "a" * 40)[0][0]
     db = _event_db()
     passed = [_call("read_file", {"path": "context/rule.md"}), _call("plan_update", {"operation": "mark_done"})]
 
     monkeypatch.setattr("core.lesson_carry_in._target_snapshot", lambda *_args: ("target-hash", None))
     assert record_pending(db, fact)
+    db.commit()
     runs = drain_facts(db, workspace, [fact], Adapter([passed, passed, passed]))
 
     assert [run.verdict for run in runs] == ["pass"]
@@ -609,7 +620,7 @@ def test_drain_settles_a_pending_case_with_a_mocked_local_adapter(tmp_path: Path
 
 
 def test_ready_free_save_starts_the_admitted_drain_without_another_trigger(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    from core.lesson_carry_in import record_committed_save
+    from core.lesson_carry_in_drain import record_committed_save
     from core.lesson_files import render_trial
     from core.lesson_trials import Trial
 
@@ -761,7 +772,7 @@ def test_cleanup_cannot_rollback_a_settled_carry_in_result(monkeypatch: pytest.M
             pass
 
     monkeypatch.setattr("infra.database.get_db", lambda: NoCloseDb())
-    monkeypatch.setattr("core.lesson_carry_in_drain._matching_facts", lambda *_args: [fact])
+    monkeypatch.setattr("core.lesson_carry_in_drain._matching_facts", lambda *_args: ([fact], []))
     monkeypatch.setattr("core.lesson_carry_in_drain._fresh_scope", lambda *_args: None)
     monkeypatch.setattr("core.lesson_carry_in_drain.LocalTraceAdapter", CleanupAdapter)
     monkeypatch.setattr("core.lesson_carry_in_drain.logger", Logger())
@@ -779,10 +790,12 @@ def test_cleanup_cannot_rollback_a_settled_carry_in_result(monkeypatch: pytest.M
 
 
 def test_drain_facts_cleans_up_when_the_adapter_raises(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
-    from core.lesson_carry_in import CarryInFact, drain_facts
+    from core.lesson_carry_in import CarryInFact, drain_facts, record_pending
 
     db = _event_db()
     fact = CarryInFact("lesson", "owner", "a" * 40, "context/rule.md", "case")
+    assert record_pending(db, fact)
+    db.commit()
     cleaned: list[bool] = []
 
     class RaisingAdapter:
@@ -805,6 +818,49 @@ def test_drain_facts_cleans_up_when_the_adapter_raises(monkeypatch: pytest.Monke
         drain_facts(db, tmp_path, [fact], RaisingAdapter())
 
     assert cleaned == [True]
+
+
+def test_save_commits_pending_before_any_model_turn(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    from core.lesson_carry_in import CarryInFact
+    from core.lesson_carry_in_drain import _drain_committed_facts
+
+    path = str(tmp_path / "events.db")
+    db = _event_db(path)
+    fact = CarryInFact("lesson", "owner", "a" * 40, "context/rule.md", "case")
+    gone = CarryInFact("other", "vanished-owner", "a" * 40, "context/rule.md", "case")
+    seen: list[list[str]] = []
+
+    class WitnessAdapter(Adapter):
+        def run(self, **kwargs):
+            reader = sqlite3.connect(path)
+            try:
+                seen.append([row[0] for row in reader.execute(
+                    "SELECT event_name FROM outcome_events ORDER BY event_name"
+                )])
+            finally:
+                reader.close()
+            return super().run(**kwargs)
+
+    failed = [_call("read_file", {"path": "context/rule.md"})]
+    monkeypatch.setattr("core.lesson_carry_in_drain._matching_facts", lambda *_args: ([fact, gone], []))
+    monkeypatch.setattr("core.lesson_carry_in_drain._fresh_scope", lambda *_args: None)
+    monkeypatch.setattr(
+        "core.lesson_carry_in._case_for_fact",
+        lambda *_args: {"what_happened": "The rule was missed.", "actions": ACTIONS},
+    )
+    monkeypatch.setattr("core.lesson_carry_in._target_snapshot", lambda *_args: ("target-hash", None))
+    monkeypatch.setattr("core.lesson_carry_in.target_scope_owner", lambda *_args: "owner")
+
+    _drain_committed_facts(
+        db, tmp_path, [tmp_path / "context" / "rule.md"], "a" * 40,
+        adapter_factory=lambda _user: WitnessAdapter([failed, failed, failed]),
+    )
+
+    # A second connection sees both pendings and the no-user retirement before the first sample.
+    assert seen[0] == [
+        "learning_loop.carry_in_pending", "learning_loop.carry_in_pending", "learning_loop.carry_in_retirement",
+    ]
+    assert len(seen) == 3
 
 
 def test_rebaseline_cleanup_cannot_rollback_its_settled_result(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
@@ -861,7 +917,7 @@ def test_rebaseline_cleanup_cannot_rollback_its_settled_result(monkeypatch: pyte
 
 
 def test_committed_save_returns_before_its_background_drain_finishes(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
-    from core.lesson_carry_in import join_drain_threads, record_committed_save
+    from core.lesson_carry_in_drain import join_drain_threads, record_committed_save
 
     started = threading.Event()
     release = threading.Event()
@@ -879,8 +935,8 @@ def test_committed_save_returns_before_its_background_drain_finishes(monkeypatch
 
 
 def test_busy_save_stays_pending_until_the_existing_pending_drain_trigger(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    from core.lesson_carry_in import CarryInFact, is_pending, record_committed_save
-    from core.lesson_carry_in_drain import _drain_pending
+    from core.lesson_carry_in import CarryInFact, is_pending
+    from core.lesson_carry_in_drain import _drain_pending, record_committed_save
     from core.lesson_files import render_trial
     from core.lesson_trials import Trial
 
@@ -968,6 +1024,7 @@ def test_failed_thread_target_does_not_create_an_owner_failure_surface(tmp_path:
 
     monkeypatch.setattr("core.lesson_carry_in._target_snapshot", lambda *_args: ("target-hash", None))
     assert record_pending(db, fact)
+    db.commit()
     assert [run.verdict for run in drain_facts(db, workspace, [fact], Adapter([failed, failed, failed]))] == ["fail"]
     assert drain_facts(db, workspace, [fact], Adapter([failed, failed, failed])) == []
     rows = db.execute("SELECT attributes FROM outcome_events WHERE event_name='measurement.correction'").fetchall()
@@ -1110,7 +1167,7 @@ def test_pending_drain_retires_missing_owner_before_running_later_fact(
 
     assert drained == [second]
     assert not is_pending(db, first)
-    assert "owner is unavailable" in db.execute(
+    assert "owner has no user" in db.execute(
         "SELECT attributes FROM outcome_events WHERE event_name='learning_loop.carry_in_retirement'"
     ).fetchone()["attributes"]
 
@@ -1222,7 +1279,7 @@ def _carry_in_run(verdict: str):
 def _drain_edit_after_prior(
     db, monkeypatch: pytest.MonkeyPatch, prior_verdict: str, *, prior_role: str = "edit", changed_case: bool = False,
 ):
-    from core.lesson_carry_in import CarryInFact, _case_sha, drain_facts, record_result
+    from core.lesson_carry_in import CarryInFact, _case_sha, drain_facts, record_pending, record_result
 
     prior_case = {"what_happened": "Missed.", "right_call": "Read it.", "does_not_apply": "Draft.", "actions": ACTIONS}
     edit_case = {**prior_case, "right_call": "Read the changed rule."} if changed_case else prior_case
@@ -1232,6 +1289,8 @@ def _drain_edit_after_prior(
         db, prior, _carry_in_run(prior_verdict), case_sha=_case_sha(prior_case),
         case_status="proven" if prior_verdict == "pass" else "unproven",
     )
+    assert record_pending(db, edit)
+    db.commit()
     monkeypatch.setattr("core.lesson_carry_in._case_for_fact", lambda *_args: edit_case)
     monkeypatch.setattr("core.lesson_carry_in._target_snapshot", lambda *_args: ("target", None))
     monkeypatch.setattr("core.lesson_carry_in.target_scope_owner", lambda *_args: "owner")

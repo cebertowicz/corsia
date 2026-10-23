@@ -75,14 +75,14 @@ def attach_to_result(
     text, trigger = subject
     lines = related(db, text, caller_thread_id=caller_thread_id, trigger=trigger)
     if lines:
-        result.update({RESULT_KEY: lines})
+        result[RESULT_KEY] = lines
     node = result.get("node") if isinstance(result.get("node"), dict) else None
     node_started = (node is not None and node.get("kind") == "task") or _started_node_id(result.get("next")) == text.node_id
     if not node_started or text.node_id is None:
         return
-    from plans.public import attach_trial_lessons_advisory
+    from core.lesson_delivery import attach_at_start
 
-    attach_trial_lessons_advisory(
+    attach_at_start(
         db, result, thread_id=caller_thread_id, node_id=text.node_id,
         checkpoint_generation_id=checkpoint_generation_id,
     )

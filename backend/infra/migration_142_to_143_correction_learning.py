@@ -24,7 +24,6 @@ def migrate_142_to_143(conn: sqlite3.Connection) -> None:
         if name not in columns:
             conn.execute(f"ALTER TABLE guidance_loads ADD COLUMN {name} {ddl}")
     conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_guidance_loads_install_path "
-        "ON guidance_loads(checkpoint_generation_id, path, lesson_id, lesson_behavioral_sha256, variant) "
-        "WHERE checkpoint_generation_id IS NOT NULL"
+        "CREATE INDEX IF NOT EXISTS idx_guidance_loads_lesson_node "
+        "ON guidance_loads(lesson_id, lesson_behavioral_sha256, node_id) WHERE lesson_id IS NOT NULL"
     )

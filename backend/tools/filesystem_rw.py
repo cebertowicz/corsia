@@ -1,7 +1,7 @@
 """Read and write file tools."""
 
 import asyncio
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 import re
 from pathlib import Path
 from typing import Any
@@ -206,26 +206,7 @@ class ReadFileTool(Tool):
             return f"Error reading file: {str(e)}"
         # The observer touches only loop-owned document and read-base state.
         record_read_base(kwargs.get("_thread_id"), authorized.resolved, outcome.data)
-        from core.lesson_read_receipts import (
-            apply_lesson_read_delivery,
-            record_lesson_read_receipts,
-        )
-
-        delivered_text, receipt = await apply_lesson_read_delivery(
-            authorized.resolved,
-            rendered_text=outcome.text,
-            data=outcome.data,
-            thread_id=kwargs.get("_thread_id"),
-        )
-        outcome = replace(outcome, text=delivered_text)
-        await record_lesson_read_receipts(
-            authorized.resolved,
-            rendered_text=outcome.text,
-            data=outcome.data,
-            whole=outcome.whole,
-            thread_id=kwargs.get("_thread_id"),
-            receipt=receipt,
-        )
+        await self._record_skill_read(authorized.resolved, outcome, kwargs)
         annotation = await self._shared_document_annotation(
             authorized.resolved, outcome, offset,
         )
@@ -274,6 +255,29 @@ class ReadFileTool(Tool):
                 db.close()
 
         return await run_in_db(_annotation)
+
+    @staticmethod
+    async def _record_skill_read(
+        resolved: Path, outcome: _ReadOutcome, kwargs: dict[str, Any],
+    ) -> None:
+        """Leave a version receipt when a Turn reads a skill it was not given."""
+        from core.skill_validation import is_skill_file
+
+        if outcome.data is None or not is_skill_file(resolved):
+            return
+        from core.guidance_manifest import record_guidance_load
+        from infra import state as runtime_state
+
+        identity = runtime_state._current_turn_identity.get(None)
+        await asyncio.to_thread(
+            record_guidance_load,
+            thread_id=kwargs.get("_thread_id"),
+            turn_id=getattr(identity, "turn_id", None),
+            path=resolved,
+            data=outcome.data,
+            returned_text=outcome.text,
+            partial=not outcome.whole,
+        )
 
 
 class WriteFileTool(Tool):

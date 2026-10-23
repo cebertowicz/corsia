@@ -4,6 +4,8 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
+from core.lesson_carry_in_contract import PENDING_EVENT, RESULT_EVENT
+
 if TYPE_CHECKING:
     from core.lesson_carry_in import CarryInFact
 
@@ -12,13 +14,11 @@ def prior_case_status(db, fact: CarryInFact, case_sha: str | None) -> str:
     """Return proven only after an earlier matching settled pass, in any run role."""
     if case_sha is None:
         return "unproven"
-    from core.lesson_carry_in import PENDING_EVENT, RESULT_EVENT
-
     row = db.execute(
         """SELECT 1 FROM outcome_events
            WHERE event_name=? AND retracted_at IS NULL
-             AND rowid < (
-               SELECT MIN(rowid) FROM outcome_events
+             AND ts < (
+               SELECT MIN(ts) FROM outcome_events
                WHERE event_name=? AND subject_key=? AND retracted_at IS NULL
              )
              AND json_extract(attributes, '$.lesson_id')=?
@@ -41,8 +41,6 @@ def result_event(db, fact: CarryInFact):
 
 def baseline_result(db, fact: CarryInFact) -> tuple[CarryInFact, str] | None:
     """Return the newest settled fact used to compare the current model."""
-    from core.lesson_carry_in import RESULT_EVENT
-
     rows = db.execute(
         """SELECT attributes FROM outcome_events
            WHERE event_name=? AND retracted_at IS NULL

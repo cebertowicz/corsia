@@ -220,9 +220,9 @@ def with_next(db, plan_id: str, executor: str, line: str, **facts) -> str:
         facts[node_start_recall.RESULT_KEY] = related
     node_id = node_start_recall._started_node_id(block)
     if node_id is not None:
-        from plans.trial_lessons import attach_trial_lessons_advisory
+        from core.lesson_delivery import attach_at_start
 
-        attach_trial_lessons_advisory(db, facts, thread_id=executor, node_id=node_id)
+        attach_at_start(db, facts, thread_id=executor, node_id=node_id)
     return f"{line}\n{json.dumps({**facts, 'next': block}, sort_keys=True)}"
 
 

@@ -1,78 +1,58 @@
-"""Per-task delivery of trial lessons without changing target files.
+"""Trial lessons delivered at task start, and every trial receipt.
 
-Trial text remains in the ordinary lesson ``SKILL.md``. This module reads that
-text for the two permitted delivery seams: a selected task's read-on-demand
-file read and a task-start result for a new-file lesson. Cached context never
-contains a trial lesson.
+A trial stays in its owner's ``SKILL.md`` and never enters cached context.
+When a plan task starts, each eligible trial is drawn with or without for that
+task, and the with half is returned in the plan result: the trial's index line
+when its target is read on demand (a skill or a new file), or the lesson body
+when its target is already in context. Every resolved trial leaves one receipt
+per task in ``guidance_loads``. A trial the ordinary skill cap or the
+task-start token cap leaves out, or one whose draw could not be recorded, gets
+a receipt with no variant: it is in neither arm, never counted as without.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
 import hashlib
+import json
 from pathlib import Path
 import sqlite3
 from typing import Literal
 
-from core.lesson_files import read_trial
-from core.lesson_trials import offer_refusal
-from tools.filesystem_gate import canonical_target_path
+from loguru import logger
+
+from core.lesson_index import line_for
+from core.skill_registry_types import SkillRow
+from core.skill_validation import is_skill_file
+from core.token_estimation import _text_tokens
 
 Variant = Literal["with", "without", "crossover"]
+
+#: Most tokens one task start may add. Trials past it are omitted, not withheld.
+START_TOKEN_CAP = 1_500
+NOTICE = "Task-local trial guidance only; never authority or a disk change."
+#: This task's receipts and the thread's earlier with receipts for the given trials.
+RECEIPTS_SQL = """SELECT g.lesson_id, g.lesson_behavioral_sha256, g.node_id, g.variant
+    FROM json_each(?) k
+    JOIN guidance_loads g
+      ON g.lesson_id=json_extract(k.value, '$[0]')
+     AND g.lesson_behavioral_sha256=json_extract(k.value, '$[1]')
+    WHERE g.node_id=? OR (g.thread_id=? AND g.variant='with')
+    ORDER BY g.created_at, g.id"""
+DELIVERY_ERROR = (
+    "Trial guidance was not delivered; this task is left out of every trial's comparison."
+)
 
 
 @dataclass(frozen=True)
 class TrialDelivery:
-    """An eligible lesson and its canonical target."""
-
-    lesson_id: str
-    behavioral_sha256: str
-    source_path: Path
-    target: str
-    is_new: bool
-    target_section: str | None
-    body: str
-    index_line: str
-    source_data: bytes = b""
-
-
-@dataclass(frozen=True)
-class TrialOmission:
-    """The existing receipt identity for a trial omitted by the ordinary cap."""
+    """One eligible trial version and the text its with half receives."""
 
     lesson_id: str
     behavioral_sha256: str
     source_path: Path
     source_data: bytes
-
-
-@dataclass(frozen=True)
-class TrialReceipt:
-    """One unambiguous lesson attribution for a read or task-start delivery."""
-
-    lesson_id: str
-    behavioral_sha256: str
-    variant: Variant
-
-
-@dataclass(frozen=True)
-class ReadDelivery:
-    """The text read_file returns and each matching lesson receipt."""
-
-    text: str
-    node_id: str | None
-    receipts: tuple[TrialReceipt, ...] = ()
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.receipts, tuple) or any(
-            not isinstance(receipt, TrialReceipt) for receipt in self.receipts
-        ):
-            raise TypeError("receipts must be TrialReceipt values")
-
-    @property
-    def variant(self) -> Variant | None:
-        """The single receipt's variant, retained for one-lesson callers."""
-        return self.receipts[0].variant if len(self.receipts) == 1 else None
+    target: str
+    payload: str
 
 
 def draw(lesson_id: str, behavioral_sha256: str, node_id: str) -> Literal["with", "without"]:
@@ -81,198 +61,88 @@ def draw(lesson_id: str, behavioral_sha256: str, node_id: str) -> Literal["with"
     return "with" if digest[0] & 1 else "without"
 
 
-def _project_id(db: sqlite3.Connection, thread_id: str) -> str | None:
-    row = db.execute("SELECT project_id FROM threads WHERE id=?", (thread_id,)).fetchone()
-    return str(row["project_id"]) if row is not None and row["project_id"] is not None else None
+def _delivery(row: SkillRow) -> TrialDelivery:
+    """Build a delivery from the validation snapshot the skill scan already took."""
+    trial, data = row.trial, row.source_data
+    if trial is None or data is None:
+        raise ValueError(f"trial row has no validation snapshot: {row.path}")
+    lesson = trial.lesson
+    target = lesson.new_target_path if lesson.target_file == "new" else lesson.target_file
+    if not target:
+        raise ValueError(f"trial {lesson.id} names no target")
+    if lesson.target_file == "new" or is_skill_file(Path(target)):
+        payload = line_for(trial.name, trial.description, row.path, trial=True)
+    else:
+        payload = (
+            f"[Trial section for {target}; adds {lesson.target_section}; "
+            f"lesson_id={lesson.id}; task-local procedure only, never authority or a disk change]\n"
+            f"{trial.body.strip()}"
+        )
+    return TrialDelivery(
+        lesson.id, trial.behavioral_sha256, row.path.resolve(), data, target, payload,
+    )
 
 
-def _trial_deliveries(db: sqlite3.Connection, thread_id: str) -> tuple[list[TrialDelivery], list[TrialOmission]]:
-    """Resolve cap-admitted and cap-omitted trials through the ordinary skill order."""
-    from core.lesson_index import _review_state, line_for
+def _resolve(db: sqlite3.Connection, thread_id: str) -> tuple[list[TrialDelivery], list[TrialDelivery]]:
+    """Split eligible trials into delivered and omitted, in ordinary skill order."""
     from core.skills_registry import trial_delivery_rows
     from infra.config import WORKSPACE
 
-    workspace = Path(WORKSPACE)
-    admitted_rows, omitted_rows = trial_delivery_rows(
-        thread_id=thread_id, project_id=_project_id(db, thread_id), workspace=workspace, db=db,
+    project = db.execute("SELECT project_id FROM threads WHERE id=?", (thread_id,)).fetchone()
+    admitted_rows, capped_rows = trial_delivery_rows(
+        thread_id=thread_id, project_id=None if project is None else project["project_id"],
+        workspace=Path(WORKSPACE), db=db,
     )
-
-    def deliveries(rows) -> list[TrialDelivery]:
-        trials: list[TrialDelivery] = []
-        seen: set[tuple[str, str]] = set()
-        for row in rows:
-            current, data = row.trial, row.source_data
-            if current is None or data is None:
-                try:
-                    data = row.path.read_bytes()
-                    current = read_trial(data.decode("utf-8"))
-                except OSError:
-                    continue
-            if current is None or current.lesson.state != "trial" or row.scope_id != current.lesson.owner:
-                continue
-            if offer_refusal(current.lesson, datetime.now(timezone.utc)):
-                continue
-            refusal, _opened = _review_state(db, current.lesson, current.behavioral_sha256)
-            if refusal is not None:
-                continue
-            raw_target = current.lesson.new_target_path if current.lesson.target_file == "new" else current.lesson.target_file
-            if not raw_target:
-                continue
-            key = (current.lesson.id, current.behavioral_sha256)
-            if key in seen:
-                continue
-            seen.add(key)
-            trials.append(TrialDelivery(
-                lesson_id=current.lesson.id,
-                behavioral_sha256=current.behavioral_sha256,
-                source_path=row.path.resolve(),
-                target=canonical_target_path(raw_target, workspace),
-                is_new=current.lesson.target_file == "new",
-                target_section=current.lesson.target_section,
-                body=current.body,
-                index_line=line_for(current.name, current.description, raw_target, trial=True),
-                source_data=data,
-            ))
-        return trials
-
-    omissions = [
-        TrialOmission(
-            row.trial.lesson.id, row.trial.behavioral_sha256, row.path.resolve(), row.source_data,
-        )
-        for row in omitted_rows if row.trial is not None and row.source_data is not None
-    ]
-    return deliveries(admitted_rows), omissions
+    admitted: dict[tuple[str, str], TrialDelivery] = {}
+    omitted: dict[tuple[str, str], TrialDelivery] = {}
+    spent = 0
+    for row in admitted_rows:
+        trial = _delivery(row)
+        key = (trial.lesson_id, trial.behavioral_sha256)
+        if key in admitted or key in omitted:
+            continue
+        cost = _text_tokens(trial.payload, None)
+        # The cap is decided before the draw, so it never favors either arm.
+        if spent + cost > START_TOKEN_CAP:
+            omitted[key] = trial
+            continue
+        spent += cost
+        admitted[key] = trial
+    for row in capped_rows:
+        trial = _delivery(row)
+        key = (trial.lesson_id, trial.behavioral_sha256)
+        if key not in admitted:
+            omitted.setdefault(key, trial)
+    return list(admitted.values()), list(omitted.values())
 
 
-def _eligible_trials(db: sqlite3.Connection, thread_id: str) -> list[TrialDelivery]:
-    """Return only trials admitted by the ordinary 40-item skill cap."""
-    return _trial_deliveries(db, thread_id)[0]
+def _receipts(
+    db: sqlite3.Connection, *, thread_id: str, node_id: str, trials: list[TrialDelivery],
+) -> tuple[dict[tuple[str, str], str | None], set[tuple[str, str]]]:
+    """This task's recorded variant per trial, and the trials this thread already had with."""
+    keys = json.dumps([[trial.lesson_id, trial.behavioral_sha256] for trial in trials])
+    recorded: dict[tuple[str, str], str | None] = {}
+    prior_with: set[tuple[str, str]] = set()
+    for row in db.execute(RECEIPTS_SQL, (keys, node_id, thread_id)):
+        key = (str(row["lesson_id"]), str(row["lesson_behavioral_sha256"]))
+        if row["node_id"] == node_id:
+            recorded.setdefault(key, row["variant"])
+        else:
+            prior_with.add(key)
+    return recorded, prior_with
 
 
-def _cap_omitted_trials(db: sqlite3.Connection, thread_id: str) -> list[TrialOmission]:
-    """Return eligible trials omitted only by the ordinary skill cap."""
-    return _trial_deliveries(db, thread_id)[1]
-
-
-def _current_task(db: sqlite3.Connection, thread_id: str) -> str | None:
-    from plans.public import attributed_selection
-
-    selected = attributed_selection(db, thread_id)
-    return str(selected["node_id"]) if selected is not None else None
-
-
-def _prior_with_task(
-    db: sqlite3.Connection, *, thread_id: str, trial: TrialDelivery, node_id: str,
-) -> bool:
-    """Whether this thread previously received this trial with guidance."""
-    row = db.execute(
-        """SELECT 1 FROM guidance_loads
-            WHERE thread_id=? AND lesson_id=?
-              AND lesson_behavioral_sha256=? AND variant IN ('with','crossover') AND node_id<>?
-            LIMIT 1""",
-        (thread_id, trial.lesson_id, trial.behavioral_sha256, node_id),
-    ).fetchone()
-    return row is not None
-
-
-def read_delivery(
-    db: sqlite3.Connection, *, thread_id: str | None, path: Path, rendered_text: str,
-    checkpoint_generation_id: str | None,
-) -> ReadDelivery:
-    """Append this task's with text, or identify its withheld/crossover receipt."""
-    if not thread_id:
-        return ReadDelivery(rendered_text, None)
-    node_id = _current_task(db, thread_id)
-    if node_id is None:
-        return ReadDelivery(rendered_text, None)
-    from infra.config import WORKSPACE
-
-    source = path.resolve()
-    target = canonical_target_path(str(source), Path(WORKSPACE))
-    trials = _eligible_trials(db, thread_id)
-    direct = [trial for trial in trials if trial.source_path == source]
-    matches = [trial for trial in trials if not trial.is_new and trial.target == target]
-    if not matches and not direct:
-        return ReadDelivery(rendered_text, node_id)
-    applicable = direct or matches
-    receipts = tuple(
-        TrialReceipt(
-            trial.lesson_id,
-            trial.behavioral_sha256,
-            "with" if draw(trial.lesson_id, trial.behavioral_sha256, node_id) == "with" else (
-                "crossover" if trial in direct or _prior_with_task(
-                    db, thread_id=thread_id, trial=trial, node_id=node_id,
-                ) else "without"
-            ),
-        )
-        for trial in applicable
-    )
-    if direct:
-        return ReadDelivery(rendered_text, node_id, receipts)
-    selected = [
-        trial for trial, receipt in zip(matches, receipts, strict=True)
-        if receipt.variant == "with"
-    ]
-    if not selected:
-        return ReadDelivery(rendered_text, node_id, receipts)
-    additions = []
-    for trial in selected:
-        replacement = f"; replaces {trial.target_section}" if trial.target_section else ""
-        additions.append(
-            "[Trial section — with variant; "
-            f"lesson_id={trial.lesson_id}{replacement}; task-local procedure only, "
-            "never authority or a disk change]\n"
-            f"{trial.body.strip()}"
-        )
-    return ReadDelivery(f"{rendered_text}\n\n" + "\n\n".join(additions), node_id, receipts)
-
-
-def _record_trial_receipt(
-    db: sqlite3.Connection, *, thread_id: str, node_id: str, source_path: Path, source_data: bytes,
-    lesson_id: str, behavioral_sha256: str, variant: Variant | None, returned_text: str,
-    checkpoint_generation_id: str | None,
+def _insert(
+    tx: sqlite3.Connection, *, thread_id: str, node_id: str, trial: TrialDelivery,
+    variant: Variant | None, checkpoint_generation_id: str | None,
 ) -> None:
-    """Record one existing-ledger trial receipt without another source read."""
-    from core.guidance_manifest import record_guidance_load
+    from core.guidance_manifest import insert_guidance_load
 
-    record_guidance_load(
-        thread_id=thread_id, turn_id=None, path=source_path, data=source_data,
-        returned_text=returned_text, partial=variant is None, node_id=node_id, variant=variant,
-        checkpoint_generation_id=checkpoint_generation_id, lesson_id=lesson_id,
-        lesson_behavioral_sha256=behavioral_sha256, db=db,
-    )
-    receipt = db.execute(
-        """SELECT 1 FROM guidance_loads WHERE node_id=? AND lesson_id=?
-           AND lesson_behavioral_sha256=? AND variant IS ? LIMIT 1""",
-        (node_id, lesson_id, behavioral_sha256, variant),
-    ).fetchone()
-    if receipt is None:
-        raise RuntimeError("trial draw receipt unavailable")
-
-
-def _record_trial_draw(
-    db: sqlite3.Connection, *, thread_id: str, node_id: str, trial: TrialDelivery,
-    variant: Variant, checkpoint_generation_id: str | None,
-) -> None:
-    """Record one delivered trial draw through the existing exposure ledger."""
-    _record_trial_receipt(
-        db, thread_id=thread_id, node_id=node_id, source_path=trial.source_path,
-        source_data=trial.source_data, lesson_id=trial.lesson_id,
-        behavioral_sha256=trial.behavioral_sha256, variant=variant, returned_text=trial.body,
-        checkpoint_generation_id=checkpoint_generation_id,
-    )
-
-
-def _record_trial_omission(
-    db: sqlite3.Connection, *, thread_id: str, node_id: str, trial: TrialOmission,
-    checkpoint_generation_id: str | None,
-) -> None:
-    """Record a cap omission as a non-treatment receipt in the existing ledger."""
-    _record_trial_receipt(
-        db, thread_id=thread_id, node_id=node_id, source_path=trial.source_path,
-        source_data=trial.source_data, lesson_id=trial.lesson_id,
-        behavioral_sha256=trial.behavioral_sha256, variant=None, returned_text="",
-        checkpoint_generation_id=checkpoint_generation_id,
+    insert_guidance_load(
+        tx, thread_id=thread_id, turn_id=None, path=trial.source_path, data=trial.source_data,
+        returned_text="" if variant is None else trial.payload, partial=variant is None,
+        node_id=node_id, variant=variant, checkpoint_generation_id=checkpoint_generation_id,
+        lesson_id=trial.lesson_id, lesson_behavioral_sha256=trial.behavioral_sha256,
     )
 
 
@@ -280,64 +150,79 @@ def start_trials(
     db: sqlite3.Connection, *, thread_id: str, node_id: str,
     checkpoint_generation_id: str | None = None,
 ) -> list[dict[str, str]]:
-    """Record new-file draws and return the task's with half.
+    """Record this task's receipts in one transaction, then return its with half.
 
-    Eligibility resolution and receipt lookup are reads, so they happen before
-    the short receipt-write transaction. This avoids opening the trial-draw
-    savepoint while scanning skills or aggregating prior delivery state.
+    A receipt already recorded for this task keeps its variant, so a restart
+    returns the same text. If the draw cannot be recorded, every trial is
+    recorded as omitted instead and the failure is raised: no text is returned.
     """
     from infra.database import write_transaction
 
-    pending_omissions: list[TrialOmission] = []
-    pending_draws: list[tuple[TrialDelivery, Variant]] = []
-    with_deliveries = []
-    admitted, cap_omitted = _trial_deliveries(db, thread_id)
-    for omission in cap_omitted:
-        existing = db.execute(
-            """SELECT 1 FROM guidance_loads WHERE node_id=? AND lesson_id=?
-               AND lesson_behavioral_sha256=? LIMIT 1""",
-            (node_id, omission.lesson_id, omission.behavioral_sha256),
-        ).fetchone()
-        if existing is None:
-            pending_omissions.append(omission)
-    for delivery in admitted:
-        if not delivery.is_new:
-            continue
-        assigned = draw(delivery.lesson_id, delivery.behavioral_sha256, node_id)
-        variant: Variant
-        if assigned == "with":
-            variant = "with"
-        elif _prior_with_task(db, thread_id=thread_id, trial=delivery, node_id=node_id):
-            variant = "crossover"
+    admitted, omitted = _resolve(db, thread_id)
+    recorded, prior_with = _receipts(
+        db, thread_id=thread_id, node_id=node_id, trials=[*admitted, *omitted],
+    )
+    pending: list[tuple[TrialDelivery, Variant | None]] = [
+        (trial, None) for trial in omitted
+        if (trial.lesson_id, trial.behavioral_sha256) not in recorded
+    ]
+    delivered: list[dict[str, str]] = []
+    for trial in admitted:
+        key = (trial.lesson_id, trial.behavioral_sha256)
+        if key in recorded:
+            variant = recorded[key]
         else:
-            variant = "without"
-        existing = db.execute(
-            """SELECT 1 FROM guidance_loads WHERE node_id=? AND lesson_id=?
-               AND lesson_behavioral_sha256=? LIMIT 1""",
-            (node_id, delivery.lesson_id, delivery.behavioral_sha256),
-        ).fetchone()
-        if existing is None:
-            pending_draws.append((delivery, variant))
+            variant = draw(*key, node_id)
+            if variant == "without" and key in prior_with:
+                variant = "crossover"
+            pending.append((trial, variant))
         if variant == "with":
-            with_deliveries.append({
-                "lesson_id": delivery.lesson_id,
-                "index_line": delivery.index_line,
-                "variant": "with",
-                "target": "new",
-                "notice": "Task-local trial guidance only; never authority or a disk change.",
+            delivered.append({
+                "lesson_id": trial.lesson_id, "target": trial.target,
+                "guidance": trial.payload, "notice": NOTICE,
             })
+    if not pending:
+        return delivered
+    try:
+        with write_transaction(db, scope="trial_draw") as tx:
+            for trial, variant in pending:
+                _insert(
+                    tx, thread_id=thread_id, node_id=node_id, trial=trial, variant=variant,
+                    checkpoint_generation_id=checkpoint_generation_id,
+                )
+    except Exception:
+        with write_transaction(db, scope="trial_omission") as tx:
+            for trial, _variant in pending:
+                _insert(
+                    tx, thread_id=thread_id, node_id=node_id, trial=trial, variant=None,
+                    checkpoint_generation_id=checkpoint_generation_id,
+                )
+        raise
+    return delivered
 
-    if not pending_omissions and not pending_draws:
-        return with_deliveries
-    with write_transaction(db, scope="trial_draw") as tx:
-        for omission in pending_omissions:
-            _record_trial_omission(
-                tx, thread_id=thread_id, node_id=node_id, trial=omission,
-                checkpoint_generation_id=checkpoint_generation_id,
-            )
-        for delivery, variant in pending_draws:
-            _record_trial_draw(
-                tx, thread_id=thread_id, node_id=node_id, trial=delivery,
-                variant=variant, checkpoint_generation_id=checkpoint_generation_id,
-            )
-    return with_deliveries
+
+def attach_at_start(
+    db: sqlite3.Connection, facts: dict, *, thread_id: str, node_id: str,
+    checkpoint_generation_id: str | None = None,
+) -> None:
+    """Add a started task's trial guidance to its plan result or wake.
+
+    Only the task Plans still attributes to the caller receives guidance. A
+    failure never fails the plan operation; it is reported in ``facts``.
+    """
+    from plans.public import attributed_selection
+
+    selected = attributed_selection(db, thread_id)
+    if selected is None or str(selected["node_id"]) != node_id:
+        return
+    try:
+        trials = start_trials(
+            db, thread_id=thread_id, node_id=node_id,
+            checkpoint_generation_id=checkpoint_generation_id,
+        )
+    except Exception:  # noqa: BLE001 - trial guidance never fails a plan mutation
+        logger.exception("trial delivery failed for task {}", node_id)
+        facts["trial_lessons_error"] = DELIVERY_ERROR
+        return
+    if trials:
+        facts["trial_lessons"] = trials

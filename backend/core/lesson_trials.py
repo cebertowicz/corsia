@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from core.correction_learning import CAUSES
+from core.lesson_carry_in_contract import validate_actions
 
 LESSON_KEY = "lesson"
 STATES = ("watch", "trial", "retired", "promoted")
@@ -31,7 +32,6 @@ PERMANENT_KINDS = frozenset(KINDS) - {"hypothesis"}
 #: fixture set, not empirical optima.
 BODY_WORDS = 150
 DESCRIPTION_WORDS = 40
-# Trial bodies never enter the cached skills index.
 REVIEW_REF_PREFIX = "plan-node:"
 _FIELDS = frozenset({
     "id", "state", "owner", "review_after", "source_refs", "review_ref",
@@ -243,8 +243,6 @@ def _case(value: object) -> dict[str, Any] | None:
     case: dict[str, Any] = {key: text for key, text in cleaned.items() if text is not None}
     if "actions" in value:
         try:
-            from core.lesson_carry_in import validate_actions
-
             actions = validate_actions(value["actions"])
         except ValueError:
             return None

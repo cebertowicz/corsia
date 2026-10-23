@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 
-from core.lesson_carry_in import RESULT_EVENT, SOURCE_SKIPPED_EVENT
+from core.lesson_carry_in_contract import RESULT_EVENT, SOURCE_SKIPPED_EVENT
 
 
 def coverage_counts(db) -> dict[str, int]:

@@ -204,7 +204,7 @@ def notify_models_changed() -> None:
 
     schedule_unavailable_model_recovery()
     try:
-        from core.lesson_carry_in import schedule_pending_drain
+        from core.lesson_carry_in_drain import schedule_pending_drain
 
         schedule_pending_drain(WORKSPACE)
     except Exception:

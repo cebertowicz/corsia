@@ -148,7 +148,7 @@ def _reset_carry_in_drain_shutdown_gate():
 
 def _reset_db_pool(database, *, reconfigure=None) -> None:
     """Join carry-in workers before replacing their database pool."""
-    from core.lesson_carry_in import join_drain_threads
+    from core.lesson_carry_in_drain import join_drain_threads
 
     join_drain_threads()
     database.shutdown_pool(reconfigure)

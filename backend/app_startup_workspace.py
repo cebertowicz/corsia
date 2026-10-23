@@ -29,7 +29,7 @@ def initialize_workspace(workspace: Path, logger) -> None:
         logger.exception("skill CORSIA data conversion failed; retrying next start")
     startup_sweep(workspace)
     try:
-        from core.lesson_carry_in import schedule_pending_drain
+        from core.lesson_carry_in_drain import schedule_pending_drain
 
         schedule_pending_drain(workspace)
     except Exception:

@@ -9,7 +9,6 @@ from pathlib import Path
 from loguru import logger
 
 from core.lesson_carry_in import (
-    PENDING_EVENT,
     CarryInFact,
     _case_for_fact,
     _fresh_scope,
@@ -19,8 +18,11 @@ from core.lesson_carry_in import (
     is_pending,
     record_pending,
     record_retirement,
+    record_source_skipped,
 )
-from core.lesson_carry_in_contract import LocalTraceAdapter, TraceAdapter, rotated_cases
+from core.lesson_carry_in_contract import PENDING_EVENT, LocalTraceAdapter, TraceAdapter, rotated_cases
+
+NO_USER = "carry-in owner has no user"
 
 _DRAIN_LOCK = threading.Lock()
 _THREADS_LOCK = threading.RLock()
@@ -97,12 +99,21 @@ def _drain_committed_facts(
     db, workspace: Path, paths: Sequence[Path], commit: str,
     *, adapter_factory: Callable[..., TraceAdapter] | None = None,
 ) -> None:
-    """Advance committed target edits through the owned local adapter."""
-    facts = _matching_facts(db, workspace, paths, commit)
+    """Commit every matching case as pending, then advance each through the local adapter."""
+    from infra.database import write_transaction
+
+    facts, skipped = _matching_facts(db, workspace, paths, commit)
+    users = {fact.subject_key: _owner_user_id(db, fact.owner_thread_id) for fact in facts}
+    with write_transaction(db, scope="carry_in_pending") as transaction:
+        for source, reason in skipped:
+            record_source_skipped(transaction, source, reason)
+        for fact in facts:
+            record_pending(transaction, fact)
+            if users[fact.subject_key] is None:
+                record_retirement(transaction, fact, NO_USER)
     for fact in facts:
-        user_id = _owner_user_id(db, fact.owner_thread_id)
+        user_id = users[fact.subject_key]
         if user_id is None:
-            record_pending(db, fact)
             continue
         scope = _fresh_scope(db, workspace, fact.target_path)
         adapter = LocalTraceAdapter(user_id, scope) if adapter_factory is None else adapter_factory(user_id)
@@ -136,21 +147,20 @@ def _drainable_pending_facts(db, workspace: Path, facts: Sequence[CarryInFact]) 
     from infra.database import write_transaction
 
     drainable: list[CarryInFact] = []
+    retired: list[tuple[CarryInFact, str]] = []
     for fact in facts:
         if _case_for_fact(workspace, fact) is None:
-            with write_transaction(db, scope="carry_in_retirement") as transaction:
-                record_retirement(transaction, fact, "carry-in case is unavailable")
-            continue
-        _target_hash, reason = _target_snapshot(workspace, fact)
-        if reason == "target_changed_after_commit":
-            with write_transaction(db, scope="carry_in_retirement") as transaction:
-                record_retirement(transaction, fact, "target changed after recorded commit")
-            continue
-        if _owner_user_id(db, fact.owner_thread_id) is None:
-            with write_transaction(db, scope="carry_in_retirement") as transaction:
-                record_retirement(transaction, fact, "carry-in owner is unavailable")
-            continue
-        drainable.append(fact)
+            retired.append((fact, "carry-in case is unavailable"))
+        elif _target_snapshot(workspace, fact)[1] == "target_changed_after_commit":
+            retired.append((fact, "target changed after recorded commit"))
+        elif _owner_user_id(db, fact.owner_thread_id) is None:
+            retired.append((fact, NO_USER))
+        else:
+            drainable.append(fact)
+    if retired:
+        with write_transaction(db, scope="carry_in_retirement") as transaction:
+            for fact, reason in retired:
+                record_retirement(transaction, fact, reason)
     return drainable
 
 

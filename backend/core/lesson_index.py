@@ -1,8 +1,8 @@
 """Keep trial lessons out of every cached skills index.
 
 A trial lesson remains an ordinary resolved skill file, but it is never placed
-in the cached index or its metadata. Its text is delivered only by the
-per-task read and plan-start seams in :mod:`core.lesson_delivery`. This module
+in the cached index or its metadata. Its text is delivered only at task start
+by :mod:`core.lesson_delivery`. This module
 still validates trial review state and preserves ordinary-skill precedence, so
 a broken, expired, or shadowed trial has an actionable omitted reason instead
 of silently disappearing.
@@ -18,13 +18,11 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from typing import Any
 
-from core.lesson_files import raw_sha256, read_trial
 from core.lesson_trials import lesson_block, offer_refusal
 from core.skill_registry_types import SkillRow
 from core.skill_scanning import omitted_row
 
 OVERRIDDEN = "overridden by a more specific skill"
-# Trial lessons are never budgeted in the cached index.
 PER_TASK = "trial lesson is delivered per task"
 CAP_OMITTED = "ordinary skill cap omitted it"
 UNCHECKED = "its review could not be checked"
@@ -66,8 +64,6 @@ def line_for(name: str, description: str, path: object, *, trial: bool = False) 
     return f"- {name}{TRIAL_MARK if trial else ''}: {description} ({path})"
 
 
-# Trial lessons have no cached-index estimates.
-
 def _review_state(db, lesson, behavioral_sha256: str) -> tuple[str | None, str]:
     """Why the trial's review does not cover it, and when that review opened."""
     from plans import public as plans
@@ -93,14 +89,7 @@ def _review_state(db, lesson, behavioral_sha256: str) -> tuple[str | None, str]:
 def _candidate(row: SkillRow, *, thread_id: str, db, now: datetime):
     """One trial row as (refusal, opened_at, record)."""
     trial, digest = row.trial, row.raw_sha256
-    if trial is None or digest is None:
-        try:
-            data = row.path.read_bytes()
-            trial = read_trial(data.decode("utf-8"))
-            digest = raw_sha256(data)
-        except (OSError, UnicodeDecodeError):
-            trial = None
-    if trial is None or digest is None:
+    if trial is None or digest is None or row.source_data is None:
         return UNREADABLE, "", None
     # The review covers the owner's own file: a copy anywhere else is not the trial.
     if row.scope != "thread" or row.scope_id != trial.lesson.owner:

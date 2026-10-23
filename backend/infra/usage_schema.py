@@ -103,9 +103,8 @@ USAGE_SCHEMA_SQL = """
     );
     CREATE INDEX IF NOT EXISTS idx_guidance_loads_turn
         ON guidance_loads(turn_id) WHERE turn_id IS NOT NULL;
-    CREATE INDEX IF NOT EXISTS idx_guidance_loads_install_path
-        ON guidance_loads(checkpoint_generation_id, path, lesson_id, lesson_behavioral_sha256, variant)
-        WHERE checkpoint_generation_id IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS idx_guidance_loads_lesson_node
+        ON guidance_loads(lesson_id, lesson_behavioral_sha256, node_id) WHERE lesson_id IS NOT NULL;
 """ + LIMIT_HISTORY_SCHEMA_SQL
 # The hourly rollup Measurement reads in place of the ledger (``api.usage_rollup``).
 USAGE_SCHEMA_SQL += USAGE_ROLLUP_SQL

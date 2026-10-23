@@ -153,20 +153,20 @@ async def test_plan_activation_records_new_trial_before_returning_lessons(recall
     monkeypatch.setattr("core.lesson_delivery.draw", lambda *_args: "with")
     from core import lesson_delivery
 
-    real_trial_deliveries = lesson_delivery._trial_deliveries
+    real_resolve = lesson_delivery._resolve
     eligibility_transaction_states: list[bool] = []
 
     def observe_eligibility_state(db, thread_id):
         eligibility_transaction_states.append(db.in_transaction)
-        return real_trial_deliveries(db, thread_id)
+        return real_resolve(db, thread_id)
 
-    monkeypatch.setattr(lesson_delivery, "_trial_deliveries", observe_eligibility_state)
+    monkeypatch.setattr(lesson_delivery, "_resolve", observe_eligibility_state)
     result = await _activate(recall_db, thread_id, "Start new target work")
 
     assert eligibility_transaction_states == [False]
     assert result["trial_lessons"] == [{
-        "lesson_id": "e6a148b9-30dd-4b5a-b498-486282096733", "index_line": "- carry-in (trial, unproven): Use when starting the carry-in proof. (context/new.md)",
-        "variant": "with", "target": "new",
+        "lesson_id": "e6a148b9-30dd-4b5a-b498-486282096733", "target": "context/new.md",
+        "guidance": f"- carry-in (trial, unproven): Use when starting the carry-in proof. ({source.resolve()})",
         "notice": "Task-local trial guidance only; never authority or a disk change.",
     }]
     row = recall_db.execute(
@@ -204,8 +204,8 @@ async def test_plan_tool_threads_bound_install_to_trial_delivery(recall_db, monk
 
 
 def test_trial_delivery_requires_exact_attributed_selection(recall_db, monkeypatch):
+    from core.lesson_delivery import attach_at_start
     from plans.dependencies import add_dependency
-    from plans.trial_lessons import attach_trial_lessons
 
     worker = mk_session("trial-held")
     plan = service.ensure_plan("thread", worker, db=recall_db)
@@ -218,7 +218,7 @@ def test_trial_delivery_requires_exact_attributed_selection(recall_db, monkeypat
     monkeypatch.setattr("core.lesson_delivery.start_trials", lambda *_args, **_kwargs: called.append(object()))
 
     facts: dict = {}
-    attach_trial_lessons(recall_db, facts, thread_id=worker, node_id=dependent.id)
+    attach_at_start(recall_db, facts, thread_id=worker, node_id=dependent.id)
 
     assert called == []
     assert facts == {}
@@ -230,13 +230,13 @@ async def test_trial_delivery_failure_is_advisory_to_plan_operation(recall_db, m
     def fail(*_args, **_kwargs):
         raise RuntimeError("trial delivery failed")
 
-    monkeypatch.setattr("plans.trial_lessons.attach_trial_lessons", fail)
+    monkeypatch.setattr("core.lesson_delivery.start_trials", fail)
     result = await _activate(recall_db, mk_session("trial-advisory"), "Start new target work")
 
     assert result["admission"]["condition"] == "running"
     assert "trial_lessons" not in result
     assert result["trial_lessons_error"] == (
-        "Trial guidance was not delivered; no trial receipt was recorded."
+        "Trial guidance was not delivered; this task is left out of every trial's comparison."
     )
 
 
@@ -249,12 +249,9 @@ def test_wake_with_unknown_install_records_without_receipt(recall_db, monkeypatc
     task = add_task(recall_db, plan.id, "Start new target work")
     admission.activate(task.id, expected_revision=task.revision, actor_id=worker, provenance="test", db=recall_db)
     trial = TrialDelivery(
-        lesson_id="new", behavioral_sha256="a" * 64,
-        source_path=Path("/trial/SKILL.md"), target="new", is_new=True,
-        target_section=None, body="Use the trial procedure.", index_line="- trial",
-        source_data=b"trial source",
+        "new", "a" * 64, Path("/trial/SKILL.md"), b"trial source", "context/new.md", "- trial",
     )
-    monkeypatch.setattr("core.lesson_delivery._trial_deliveries", lambda *_args: ([trial], []))
+    monkeypatch.setattr("core.lesson_delivery._resolve", lambda *_args: ([trial], []))
     monkeypatch.setattr("core.lesson_delivery.draw", lambda *_args: "without")
     recall_db.commit()
 
