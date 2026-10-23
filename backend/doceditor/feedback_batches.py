@@ -19,7 +19,7 @@ from doceditor.feedback_state import (
     user_feedback_for_document,
 )
 import infra.sweep_wake as sweep_wake
-from infra.database import get_db, write_transaction
+from infra.database import TransactionOwnershipError, get_db, write_transaction
 from infra.write_effects import after_commit
 
 log = logging.getLogger(__name__)
@@ -263,17 +263,25 @@ def deliver_person_comment(db, batch_ids: list[str], artifact_id: str) -> list[s
     return woken
 
 
-def _claim_and_deliver(db, batch_id: str, *, from_state: str, reason: str | None) -> tuple[bool, tuple[str, ...]]:
+def _claim_and_deliver(
+    db, batch_id: str, *, from_state: str, reason: str | None, due_by: str | None = None,
+) -> tuple[bool, tuple[str, ...]]:
     now = _now()
     closed_sql = "closed_reason=?" if reason is not None else "closed_reason=closed_reason"
+    due_sql = ""
     params: list[Any] = [now]
     if reason is not None:
         params.append(reason)
     params.extend([batch_id, from_state])
+    if due_by is not None:
+        # Due path: re-check closes_at here and derive the reason from the row this claim reads.
+        closed_sql = "closed_reason=COALESCE(NULLIF(closed_reason,''),CASE author_kind WHEN 'agent' THEN 'quiet' ELSE 'idle' END)"
+        due_sql = " AND closes_at<=?"
+        params.append(due_by)
     changed = db.execute(
         f"""UPDATE doc_feedback_batches SET state='delivered',updated_at=?,
             {closed_sql},undelivered_reason=NULL,attempts=attempts+1
-            WHERE id=? AND state=?""",
+            WHERE id=? AND state=?{due_sql}""",
         params,
     )
     if changed.rowcount == 0:
@@ -301,10 +309,12 @@ def _claim_and_deliver(db, batch_id: str, *, from_state: str, reason: str | None
     return True, delivered.woken_threads + review_woken
 
 
-def close_batch(db, batch_id: str, reason: str) -> tuple[bool, tuple[str, ...]]:
-    """Conditionally close and deliver one open batch exactly once."""
+def close_batch(
+    db, batch_id: str, reason: str | None, *, due_by: str | None = None,
+) -> tuple[bool, tuple[str, ...]]:
+    """Conditionally close and deliver one open batch once; ``due_by`` (reason None) is the due sweep's re-checked claim."""
     with write_transaction(db, scope="close_doc_feedback_batch") as connection:
-        return _claim_and_deliver(connection, batch_id, from_state="open", reason=reason)
+        return _claim_and_deliver(connection, batch_id, from_state="open", reason=reason, due_by=due_by)
 
 
 def retry_batch(db, batch_id: str) -> tuple[bool, tuple[str, ...]]:
@@ -352,18 +362,18 @@ def close_for_turn_end(db, thread_id: str) -> list[str]:
 def close_due(now: str, *, db=None) -> list[str]:
     """Deliver every due batch; one that raises rolls back alone, is logged, and retries next pass."""
     connection = db if db is not None else get_db()
+    if db is None and connection.in_transaction:
+        raise TransactionOwnershipError("close_due needs a clean pooled connection (it closes it), or the owner's as db=")
     try:
         rows = connection.execute(
-            """SELECT id,artifact_id,author_kind,closed_reason FROM doc_feedback_batches
-               WHERE state='open' AND closes_at<=? ORDER BY closes_at,id""",
-            (now,),
+            "SELECT id,artifact_id,author_kind FROM doc_feedback_batches "
+            "WHERE state='open' AND closes_at<=? ORDER BY closes_at,id", (now,),
         ).fetchall()
         deliveries: list[tuple[str, str]] = []
         woken: list[str] = []
         for row in rows:
-            reason = row["closed_reason"] or ("quiet" if row["author_kind"] == "agent" else "idle")
             try:
-                closed, selected = close_batch(connection, row["id"], reason)
+                closed, selected = close_batch(connection, row["id"], None, due_by=now)
             except Exception:
                 log.exception("document feedback batch %s failed to close", row["id"])
                 continue

@@ -337,6 +337,8 @@ def test_due_sweep_without_a_supplied_db_keeps_its_connection_through_publicatio
             return [{"id": "batch", "artifact_id": "artifact", "author_kind": "user", "closed_reason": None}]
 
     class Connection:
+        in_transaction = False
+
         def execute(self, _sql, _params):
             events.append("select")
             return Result()
@@ -344,8 +346,9 @@ def test_due_sweep_without_a_supplied_db_keeps_its_connection_through_publicatio
         def close(self):
             events.append("close")
 
-    def close_batch(received, _batch_id, _reason):
+    def close_batch(received, _batch_id, reason, *, due_by):
         assert received is connection
+        assert (reason, due_by) == (None, "2000-01-01T00:00:00+00:00")
         events.append("close_batch")
         return True, ("owner",)
 

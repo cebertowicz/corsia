@@ -354,10 +354,10 @@ def test_raising_due_batch_rolls_back_alone_and_siblings_continue(isolated_db, m
         bad_batch_id = by_document[bad_document]["id"]
         original = feedback_batches._claim_and_deliver
 
-        def raise_for_bad_batch(connection, batch_id, *, from_state, reason):
+        def raise_for_bad_batch(connection, batch_id, **kwargs):
             if batch_id == bad_batch_id:
                 raise RuntimeError("injected delivery failure")
-            return original(connection, batch_id, from_state=from_state, reason=reason)
+            return original(connection, batch_id, **kwargs)
 
         monkeypatch.setattr(feedback_batches, "_claim_and_deliver", raise_for_bad_batch)
         db.execute("UPDATE doc_feedback_batches SET closes_at='2000-01-01T00:00:00+00:00'")
