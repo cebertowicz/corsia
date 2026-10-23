@@ -43,6 +43,25 @@ def test_weekly_figure_counts_chat_messages_and_unreadable_counts_comments_not_a
     assert any(subject == "plan-decision-answer:dec:7" for subject, _ in _facts(db))  # triage still sees it
 
 
+def test_labelled_sent_back_facts_do_not_change_classifier_version_metrics(db):
+    from core.sent_back_corrections import SentBackCorrection, record_sent_back_correction
+    from jobs.corrections_activation import weekly_correction_figure
+    from jobs.corrections_recording import unreadable_facts
+
+    now = datetime.now(timezone.utc).isoformat()
+    weekly_before = weekly_correction_figure(_version(), since="2000-01-01T00:00:00Z", weeks=1)
+    unreadable_before = unreadable_facts(db, _version())
+
+    assert record_sent_back_correction(
+        SentBackCorrection("sent-back-event", now, None, "owner"), db=db,
+    )
+    attributes = json.loads(db.execute("SELECT attributes FROM outcome_events").fetchone()["attributes"])
+    assert attributes["label"] == "correction"
+
+    assert weekly_correction_figure(_version(), since="2000-01-01T00:00:00Z", weeks=1) == weekly_before
+    assert unreadable_facts(db, _version()) == unreadable_before
+
+
 def test_a_legacy_fact_with_message_id_and_no_source_kind_still_counts(db):
     from core.corrections_recording import version_attributes
     from jobs.corrections_activation import weekly_correction_figure
