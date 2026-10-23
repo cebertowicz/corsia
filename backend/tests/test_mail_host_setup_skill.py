@@ -35,6 +35,7 @@ def test_the_offer_comes_before_the_first_call_that_adds_the_account() -> None:
     assert "Go ahead?" in step3 and "mail_host_connect" not in step3
     step2 = steps.split("\n2. ", 1)[1].split("\n3. ", 1)[0]
     assert "mail_host_connect" not in step2
+    assert "Then apply step 1 to it." in step2
 
 
 def test_a_system_change_notice_that_adds_the_skill_is_handled_once() -> None:
