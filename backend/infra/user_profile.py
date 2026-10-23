@@ -16,6 +16,7 @@ a return value that also means "already exists".
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import pwd
@@ -130,11 +131,14 @@ class StagedProfile:
     the text being extended, or ``None`` when the profile is being created.
     """
 
-    def __init__(self, path: Path, temp: Path, previous: str | None) -> None:
+    def __init__(self, path: Path, temp: Path, previous: str | None, text: str) -> None:
         self._path = path
         self._temp = temp
         self._previous = previous
         self._published = False
+        #: The digest of the file this write leaves, and of the one it creates (None when it extends the person's own).
+        self.sha256 = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        self.created_sha256 = self.sha256 if previous is None else None
 
     def publish(self) -> None:
         """Move the staged file into place with one rename; on failure nothing has changed."""
@@ -168,7 +172,7 @@ def _stage_text(path: Path, text: str, previous: str | None, mode: int | None) -
     except BaseException:
         temp.unlink(missing_ok=True)
         raise
-    return StagedProfile(path, temp, previous)
+    return StagedProfile(path, temp, previous, text)
 
 
 def stage_user_profile(workspace: Path, full_name: str, timezone: str, email: str = "") -> StagedProfile | None:

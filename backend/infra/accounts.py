@@ -31,6 +31,7 @@ import secrets
 import sqlite3
 from datetime import timedelta
 
+import infra.setup_marker as setup_marker  # mypy resolves a new submodule only this way
 from infra import user_profile
 from infra.account_validation import AccountError, FirstAccountExists, normalize_username, require_password
 from infra.database import get_db, write_transaction
@@ -156,9 +157,12 @@ def _create_account(
             from infra.corsia_agent import ensure_corsia_agent
 
             conductor_id = ensure_corsia_agent(name, model=None, db=conn)
-            from infra.setup_progress import start_after_account
+            from infra.setup_progress import release_marker_if_finished, start_after_account
 
             start_after_account(first_run_path, db=conn)
+            # An account made outside the app (`corsia user add`) leaves no setup to finish, so the shell's wipe
+            # marker goes now; a marker that will not go refuses the account, since the next launch would wipe it.
+            release_marker_if_finished(db=conn)
             if not data_owners_without_accounts(conn):
                 from infra import config
                 from registry.shared_ownership_assignment import enforce_scaffold_ownership
@@ -212,6 +216,20 @@ def create_user(
     return name
 
 
+def _publish_profile(staged: user_profile.StagedProfile, first_run_path: str):
+    """The account transaction's last step: publish the staged profile.
+
+    The app's setup first tells the shell's unfinished-setup marker about a profile it creates, so a relaunch
+    removes it. A marker that cannot be written refuses the account before the file exists.
+    """
+    def publish() -> None:
+        if first_run_path == "app" and staged.created_sha256:
+            setup_marker.record_created_file(user_profile.PROFILE_RELATIVE_PATH.as_posix(), staged.created_sha256)
+        staged.publish()
+
+    return publish
+
+
 def create_first_account(
     username: str, password: str, *, full_name: str | None = None, email: str = "",
     first_run_wake: bool = True, first_run_path: str = "script",
@@ -237,7 +255,7 @@ def create_first_account(
         announce = _create_account(
             name, encoded, db=None, first_run_wake=first_run_wake, require_first=True,
             first_run_path=first_run_path, claim_data_owner=True,
-            before_commit=staged.publish if staged else None,
+            before_commit=_publish_profile(staged, first_run_path) if staged else None,
         )
     except BaseException:
         if staged:
