@@ -148,6 +148,25 @@ def db_job_boundary(scope: str) -> Iterator[None]:
         )
 
 
+def claim_connection(db: sqlite3.Connection | None, scope: str) -> tuple[sqlite3.Connection, bool]:
+    """Resolve the connection a write frame works on and whether that frame owns it.
+
+    ``db=None`` claims this thread's pooled connection as its owner, which needs a clean connection
+    on a lane that may write; ``db=<connection>`` names the owner explicitly. One rule, shared by
+    ``write_transaction`` and any caller that must fail once, before it starts a multi-step pass.
+    """
+    connection = db if db is not None else get_db()
+    refuse_lane_write(connection, scope)
+    owns_connection = db is None
+    if owns_connection and connection.in_transaction:
+        raise TransactionOwnershipError(
+            f"{scope} claimed the outermost write transaction, but this thread's "
+            "pooled connection is already inside one owned by another frame; "
+            "pass that owner's connection as db= instead"
+        )
+    return connection, owns_connection
+
+
 @contextmanager
 def write_transaction(
     db: sqlite3.Connection | None, *, scope: str,
@@ -179,15 +198,7 @@ def write_transaction(
     """
     if not scope.isidentifier():
         raise ValueError(f"transaction scope must be a bare identifier: {scope!r}")
-    connection = db if db is not None else get_db()
-    refuse_lane_write(connection, scope)
-    owns_connection = db is None
-    if owns_connection and connection.in_transaction:
-        raise TransactionOwnershipError(
-            f"{scope} claimed the outermost write transaction, but this thread's "
-            "pooled connection is already inside one owned by another frame; "
-            "pass that owner's connection as db= instead"
-        )
+    connection, owns_connection = claim_connection(db, scope)
     try:
         if connection.in_transaction:
             savepoint = f"{scope}_{uuid.uuid4().hex}"

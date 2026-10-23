@@ -219,16 +219,16 @@ def test_raising_due_batch_rolls_back_alone(review_env, monkeypatch):
     from doc_feedback_helpers import seed_document
     other = seed_document(db, "owner", name="other.md")
     later = ordinary_comment(db, other)
-    original = feedback_batches.close_batch
+    original = feedback_batches._close_due_batch
 
-    def close(connection, batch_id, reason, **kwargs):
+    def close(connection, batch_id, now):
         if batch_id == ordinary:
             with write_transaction(connection, scope="test_failed_batch"):
                 connection.execute("UPDATE doc_feedback_batches SET item_count=123 WHERE id=?", (batch_id,))
                 raise RuntimeError("one broken batch")
-        return original(connection, batch_id, reason, **kwargs)
+        return original(connection, batch_id, now)
 
-    monkeypatch.setattr(feedback_batches, "close_batch", close)
+    monkeypatch.setattr(feedback_batches, "_close_due_batch", close)
     feedback_batches.close_due("9999-01-01T00:00:00+00:00", db=db)
     assert db.execute("SELECT state,item_count FROM doc_feedback_batches WHERE id=?", (ordinary,)).fetchone()[:] == ("open", 1)
     assert db.execute("SELECT state FROM doc_feedback_batches WHERE id=?", (later,)).fetchone()[0] == "delivered"
