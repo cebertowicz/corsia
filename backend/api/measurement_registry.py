@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, timedelta
 
 from core.measurement_scope import Grain
 
@@ -46,17 +45,6 @@ REGISTRY: dict[str, MetricDefinition] = {
     "dollar_trend": MetricDefinition("unavailable", "usd", 0, available=False),
 }
 
-
-
-def instrument_period(start: str, grain: Grain | None = None) -> str:
-    """Return the period an instrument started in: its Monday, or its own day on the Days grain.
-
-    A start dated mid-week still measured that week, and the served spine is made of
-    completed periods: clipping at the raw date would retire the very first period the
-    instrument observed, forever. Without a grain the period is the week.
-    """
-    day = date.fromisoformat(start[:10])
-    return day.isoformat() if grain is not None and grain.kind == "days" else (day - timedelta(days=day.weekday())).isoformat()
 
 
 def period_measured(metric: str, period: str, grain: Grain | None = None,

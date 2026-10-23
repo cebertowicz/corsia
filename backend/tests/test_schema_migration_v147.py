@@ -53,11 +53,8 @@ def test_v147_fresh_schema_has_no_install_history_rows() -> None:
 def test_v147_upgrade_leaves_a_history_free_install_empty() -> None:
     db = _legacy_db()
     try:
-        db.execute("CREATE TABLE measurement_model_versions (identity TEXT PRIMARY KEY, started_at TEXT NOT NULL)")
-        db.commit()
         assert migrate_to_current(db, SCHEMA_VERSION).to_version == 147
         assert _breaks(db) == []
-        assert db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='measurement_model_versions'").fetchone() is None
         assert migrate_to_current(db, SCHEMA_VERSION).migrated is False
     finally:
         db.close()

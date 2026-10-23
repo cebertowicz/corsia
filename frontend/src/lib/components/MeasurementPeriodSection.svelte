@@ -59,7 +59,8 @@
 	<div class="sh"><h3 id={`${id}-title`}>{title}</h3></div>
 	{#if state.loading && !state.rows.length}<div class="skeleton" aria-label={`Loading ${title}`}></div>
 	{:else if state.error && !state.rows.length}<div class="panel-error" role="alert">{state.error}<button onclick={onRetry}>Retry</button></div>
-	{:else if !state.rows.length || !view.periods.length}<p class="empty">No measurements in this project or workspace.</p>
+	{:else if !state.rows.length}<p class="empty">No measurement rows in this range.</p>
+	{:else if !view.periods.length}<p class="empty">Not yet measured for this scope.</p>
 	{:else}
 		<p class="stat"><b>{value === null ? '–' : headline(value)}</b> {unitText}, {view.nowText}, n {group(view.current.n)}, {periodChange(view, true, undefined, minN === undefined ? served : undefined)}</p>
 		{@render extra?.()}

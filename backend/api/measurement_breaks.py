@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 from core.measurement_scope import Grain
-from infra.measurement_starts import LIVE_START_SQL, MODEL_VERSION_ROWS_SQL, live_starts_query, source_group
+from infra.measurement_starts import MODEL_VERSION_ROWS_SQL, has_live_start, live_starts_query, source_group
 
 
 def _period(grain: Grain, value: str | None) -> str | None:
@@ -21,10 +21,14 @@ def _period(grain: Grain, value: str | None) -> str | None:
     return grain.period_of(instant.astimezone(ZoneInfo(grain.zone)).date().isoformat())
 
 
+COMPARABILITY_UNRESTRICTED = frozenset({"outcomes", "fresh_tokens"})
+
+
 def _breaks_query(groups: Iterable[str]) -> str:
-    """Reuse the canonical live-start mapping with immutable migration marks."""
-    known = tuple(group for group in groups if group in LIVE_START_SQL)
-    live = live_starts_query(known).removeprefix("SELECT ") if known else ""
+    """Reuse canonical live starts with immutable migration marks."""
+    requested = tuple(dict.fromkeys(groups))
+    live_groups = tuple(group for group in requested if has_live_start(group))
+    live = live_starts_query(live_groups).removeprefix("SELECT ") if live_groups else ""
     marks = """(
         SELECT COALESCE(json_group_array(json_object(
             'period',period,'kind',kind,'reason',reason,'metric_group',metric_group
@@ -37,8 +41,8 @@ def _breaks_query(groups: Iterable[str]) -> str:
     return f"SELECT {', '.join(item for item in (live, marks) if item)}"
 
 
-def _seeded_starts(db, groups: Iterable[str], grain: Grain) -> dict[str, str | None]:
-    """Read migration facts once; they are the only historical state a read consults."""
+def _seeded_starts(db, groups: Iterable[str]) -> dict[str, str | None]:
+    """Read immutable legacy floor instants once; reads never change them."""
     requested = tuple(dict.fromkeys(groups))
     if not requested:
         return {}
@@ -47,7 +51,7 @@ def _seeded_starts(db, groups: Iterable[str], grain: Grain) -> dict[str, str | N
         f"SELECT metric_group,period FROM measure_breaks WHERE kind='start' "
         f"AND metric_group IN ({placeholders})", requested,
     )
-    found = {str(row["metric_group"]): grain.period_of(str(row["period"])) for row in rows}
+    found = {str(row["metric_group"]): str(row["period"]) for row in rows}
     return {group: found.get(group) for group in requested}
 
 
@@ -70,14 +74,12 @@ def _metadata(db, metrics: Iterable[str], grain: Grain) -> tuple[dict[str, str |
     requested = tuple(metrics)
     groups = tuple(dict.fromkeys(source_group(metric) for metric in requested))
     row = db.execute(_breaks_query(groups)).fetchone()
-    seeded = _seeded_starts(db, groups, grain)
-    starts = {
-        group: max(
-            (value for value in (seeded[group], _period(grain, str(row[group])) if group in LIVE_START_SQL and row and row[group] else None) if value),
-            default=None,
-        )
+    seeded = _seeded_starts(db, groups)
+    live = {
+        group: str(row[group]) if has_live_start(group) and row and row[group] else None
         for group in groups
     }
+    starts = {group: _period(grain, seeded[group] or live[group]) for group in groups}
     marks = [
         {"period": grain.period_of(str(item["period"])), "kind": str(item["kind"]),
          "reason": str(item["reason"]), "metric_group": item["metric_group"]}
@@ -101,7 +103,7 @@ def derive_breaks(db, metrics: Iterable[str], grain: Grain) -> dict[str, list[di
         rows.extend(
             {key: value for key, value in mark.items() if key != "metric_group"}
             for mark in marks
-            if ((mark["metric_group"] is None and metric not in {"outcomes", "fresh_tokens"})
+            if ((mark["metric_group"] is None and metric not in COMPARABILITY_UNRESTRICTED)
                 or mark["metric_group"] == source_group(metric))
             and (not start or mark["period"] > start)
         )

@@ -80,7 +80,7 @@ def test_fresh_install_live_start_is_primary_and_reads_do_not_write(isolated_db)
     assert after == before
 
 
-def test_legacy_seed_never_allows_live_start_to_move_earlier_or_later(isolated_db) -> None:
+def test_legacy_floor_is_used_instead_of_the_live_start(isolated_db) -> None:
     db = get_db()
     try:
         _thread(db)
@@ -95,6 +95,38 @@ def test_legacy_seed_never_allows_live_start_to_move_earlier_or_later(isolated_d
     finally:
         db.close()
     assert breaks["first_try_acceptance"][0]["period"] == "2026-09-14"
+
+
+def test_seeded_and_live_starts_share_the_days_viewer_zone_bucket(isolated_db) -> None:
+    grain = resolve_grain("days", "America/Los_Angeles", now=datetime(2026, 10, 22, tzinfo=timezone.utc))
+    db = get_db()
+    try:
+        _thread(db)
+        _accepted(db, "node", "2026-09-15T00:30:00Z")
+        db.commit()
+        live = derive_breaks(db, ("outcomes",), grain)
+        _mark(db, "2026-09-15T00:30:00Z", "start", "outcomes", "instrument source first recorded")
+        db.commit()
+        seeded = derive_breaks(db, ("outcomes",), grain)
+    finally:
+        db.close()
+    assert live["outcomes"][0]["period"] == seeded["outcomes"][0]["period"] == "2026-09-14"
+
+
+def test_size_live_start_requires_a_size_rating_on_an_accepted_outcome(isolated_db) -> None:
+    db = get_db()
+    try:
+        _thread(db)
+        _accepted(db, "node", "2026-09-01T12:00:00Z")
+        db.commit()
+        before_rating = derive_breaks(db, ("estimated_human_hours_per_active_hour",), _grain())
+        _rating(db, "node", "rater-a")
+        db.commit()
+        after_rating = derive_breaks(db, ("estimated_human_hours_per_active_hour",), _grain())
+    finally:
+        db.close()
+    assert before_rating["estimated_human_hours_per_active_hour"] == []
+    assert after_rating["estimated_human_hours_per_active_hour"][0]["period"] == "2026-08-31"
 
 
 def test_legacy_asks_seed_gates_pre_hold_periods_but_fresh_live_start_is_decision(isolated_db) -> None:

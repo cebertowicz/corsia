@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from infra.measurement_schema import MEASUREMENT_BREAKS_SCHEMA_SQL, MEASUREMENT_INDEXES
-from infra.measurement_starts import SOURCE_START_SQL, source_starts_query
+from infra.measurement_starts import legacy_sources, source_first_rows_query
 
 
 def _has_columns(schema: dict[str, set[str]], required: dict[str, set[str]]) -> bool:
@@ -37,8 +37,15 @@ def _record_existing_starts(conn, schema: dict[str, set[str]]) -> dict[str, str]
     groups = tuple(group for group, required in required_columns.items() if _has_columns(schema, required))
     if not groups:
         return {}
-    row = conn.execute(source_starts_query(groups)).fetchone()
-    values = {group: str(value) for group, value in zip(groups, row) if value} if row else {}
+    sources = tuple(dict.fromkeys(source for group in groups for source in legacy_sources(group)))
+    row = conn.execute(source_first_rows_query(sources)).fetchone()
+    values: dict[str, str] = {}
+    for group in groups:
+        if value := max(
+            (str(row[source]) for source in legacy_sources(group) if row and row[source]),
+            default=None,
+        ):
+            values[group] = value
     conn.executemany(
         "INSERT OR IGNORE INTO measure_breaks(period,kind,metric_group,reason) VALUES (?,?,?,?)",
         [
@@ -65,8 +72,7 @@ def _record_legacy_marks(conn, starts: dict[str, str]) -> None:
 def migrate_146_to_147(conn) -> None:
     """Create immutable Measurement boundaries and seed legacy-install history."""
     conn.executescript(MEASUREMENT_BREAKS_SCHEMA_SQL)
-    # Earlier candidate heads recorded rater boundaries; final reads derive them from facts.
-    conn.execute("DROP TABLE IF EXISTS measurement_model_versions")
+
     tables = [str(row[0]) for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")]
     schema = {
         table: {str(row[1]) for row in conn.execute(f"PRAGMA table_info({table})")}

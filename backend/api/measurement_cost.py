@@ -264,9 +264,9 @@ def _series(db, classified: list[dict[str, Any]], sized: Mapping[str, Mapping[st
     ``sized`` is the week's size-rated accepted outcomes and their hours of work. All priced
     spend in a period divided by those hours is the all-in cost per hour of delivered work; it
     is withheld, never zero, when fewer than ``MINIMUM_SIZED`` outcomes stand behind it.
-    The series starts at its first priced period. Once size ratings exist, it also waits for
-    their install-wide instrument start before serving Work per hour, so no leading period
-    reads as no data while a spend-only subtotal remains observable.
+    The series starts at its first priced period. Work per hour also waits for the first
+    accepted outcome with a size rating, so no leading period reads as no data while a
+    spend-only subtotal remains observable.
     """
     size_start = source_started_period(db, "estimated_human_hours_per_active_hour", grain)
     outcomes = {row["period"]: int(row["outcomes"]) for row in db.execute(

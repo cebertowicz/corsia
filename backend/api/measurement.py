@@ -18,7 +18,8 @@ from api.measurement_limits import first_recorded_period, limits_by_period, rout
 from api.measurement_recent import router as recent_router
 from api.measurement_presence import PresenceCoverage, presence_coverage
 from api.measurement_breaks import (
-    comparability_start, derive_breaks, first_availability_period, period_comparable,
+    COMPARABILITY_UNRESTRICTED, comparability_start, derive_breaks, first_availability_period,
+    period_comparable,
 )
 from api.measurement_registry import REGISTRY, period_measured
 from api.measurement_series_selection import metric_spine, requested_series
@@ -39,7 +40,6 @@ from core.measurement_scope import Grain, ScopeError
 router = APIRouter(prefix="/api/measurement", tags=["measurement"])
 router.include_router(limits_router)
 router.include_router(recent_router)
-
 
 
 async def _monitor_client_disconnect(request: Request, cancellation_event: Event) -> None:
@@ -282,7 +282,7 @@ async def measurement_index(project: str = Query(...), agent: str = Query(...),
                     "minimum_n": item.minimum_n, "owner": "Self-Improvement Infrastructure",
                     "method_version": item.method_version, "data_start": data_start(name, item), "proxy": item.proxy,
                     "proxy_explanation": "Proxy measurement" if item.proxy else None,
-                    "comparability": {"before": comparability_start(breaks[name]), "restricted": name not in {"outcomes", "fresh_tokens"}},
+                    "comparability": {"before": comparability_start(breaks[name]), "restricted": name not in COMPARABILITY_UNRESTRICTED},
                     "breaks": breaks[name],
                     "availability": "ready" if item.available else "unavailable",
                     "scope_capability": ["project", "agent"], "companion": item.companion}
