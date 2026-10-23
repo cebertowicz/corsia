@@ -14,6 +14,7 @@ from events.connectors.library import (
     LIBRARY_CONNECTOR,
     LIBRARY_INTEGRATION,
 )
+from infra.db_async import run_off_db
 from library.installed import local_edits, read_origin
 from library.items import item_manifest, source_ref
 
@@ -102,7 +103,7 @@ async def library_refresh_loop() -> None:
     """Run an initial check then one read-only producer pass per day."""
     while True:
         try:
-            await asyncio.to_thread(produce_once)
+            await run_off_db(produce_once)
         except Exception:
             log.exception("library notice refresh failed")
         await asyncio.sleep(REFRESH_SECONDS)
@@ -114,7 +115,7 @@ def request_refresh() -> None:
 
     async def refresh() -> None:
         try:
-            await asyncio.to_thread(produce_once)
+            await run_off_db(produce_once)
         except Exception:
             log.exception("library notice refresh failed")
 
