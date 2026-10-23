@@ -10,8 +10,10 @@ turn; the digest's own delivery state records whether a turn received it.
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from collections.abc import Iterable
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from core.corrections_recording import (
@@ -27,6 +29,19 @@ from core.corrections_recording import (
 
 NOTE_KIND = "correction_note"
 QUOTE_CHARS = 160
+EARLIER_CORRECTIONS_LIMIT = 3
+_REPEAT_SEARCH_LIMIT = 12
+_REPEAT_CANDIDATE_LIMIT = 16
+_REPEAT_TERM_LIMIT = 1
+_STOPWORDS = frozenset({
+    "a", "about", "after", "again", "all", "also", "an", "and", "any", "are", "as", "at",
+    "be", "because", "been", "being", "but", "by", "can", "could", "did", "do", "does", "for",
+    "from", "get", "got", "had", "has", "have", "here", "how", "i", "if", "in", "into", "is",
+    "it", "its", "just", "like", "me", "more", "my", "no", "not", "of", "on", "or", "our", "out",
+    "so", "still", "that", "the", "their", "them", "then", "there", "these", "they", "this", "to",
+    "too", "up", "was", "we", "were", "what", "when", "which", "who", "why", "will", "with", "would",
+    "you", "your",
+})
 # Several comment or answer notes can arrive in one digest (a round of review); each of those asks for one triage.
 TRIAGE_TOGETHER = (
     "If several correction notes reach you together, triage them as one: look for one general cause "
@@ -40,6 +55,74 @@ def _quote(content: str) -> str:
     return line if len(line) <= QUOTE_CHARS else line[: QUOTE_CHARS - 1].rstrip() + "…"
 
 
+@dataclass(frozen=True)
+class EarlierCorrection:
+    """One matching prior chat correction, formatted only for the target agent."""
+
+    thread_title: str
+    created_at: str
+    content: str
+
+
+def _distinctive_words(content: str) -> tuple[str, ...]:
+    """Return stable FTS terms without generic correction language."""
+    return tuple(
+        word for word in dict.fromkeys(re.findall(r"[\w]+", content.casefold()))
+        if len(word) > 2 and word not in _STOPWORDS
+    )
+
+
+def earlier_chat_corrections(db: sqlite3.Connection, candidate: CorrectionCandidate) -> tuple[EarlierCorrection, ...]:
+    """Find a few similarly-worded earlier chat corrections for this install.
+
+    Comments and decision answers do not retain their original words in an FTS
+    source, so this slice deliberately searches chat corrections only.
+    """
+    if candidate.source_kind != "message":
+        return ()
+    words = sorted(_distinctive_words(candidate.content), key=lambda word: (-len(word), word))[:_REPEAT_TERM_LIMIT]
+    if not words:
+        return ()
+    from infra.db_fts import fts5_escape
+
+    query = " OR ".join(fts5_escape(word) for word in words)
+    owner_filter, owner_params = owner_message_sql_predicate("m")
+    rows = db.execute(
+        f"""WITH ranked AS (
+                   SELECT rowid,bm25(messages_fts) AS rank FROM messages_fts
+                   WHERE messages_fts MATCH :query ORDER BY rank LIMIT :candidate_limit
+               )
+               SELECT t.title,m.created_at,m.content
+               FROM ranked
+               JOIN messages m ON m.rowid=ranked.rowid
+               JOIN threads t ON t.id=m.thread_id
+               WHERE EXISTS (
+                     SELECT 1 FROM outcome_events e
+                     WHERE e.subject_key='message:' || m.id
+                       AND e.event_name=:event AND e.retracted_at IS NULL
+                 )
+                 AND t.user_id=(SELECT user_id FROM threads WHERE id=:thread)
+                 AND (m.created_at < :created OR (m.created_at=:created AND m.id < :message))
+                 AND {owner_filter}
+               ORDER BY ranked.rank,m.created_at DESC,m.id DESC
+               LIMIT :limit""",
+        {
+            **owner_params,
+            "query": query,
+            "candidate_limit": _REPEAT_CANDIDATE_LIMIT,
+            "event": CORRECTION_EVENT,
+            "thread": candidate.thread_id,
+            "created": candidate.created_at,
+            "message": candidate.source_id,
+            "limit": _REPEAT_SEARCH_LIMIT,
+        },
+    ).fetchall()
+    return tuple(
+        EarlierCorrection(str(row[0] or "Untitled thread"), str(row[1]), str(row[2]))
+        for row in rows[:EARLIER_CORRECTIONS_LIMIT]
+    )
+
+
 def local_clock(created_at: str) -> str:
     """An ISO timestamp in local time like the digest clock; unparseable input unchanged."""
     try:
@@ -51,8 +134,8 @@ def local_clock(created_at: str) -> str:
     return f"{sent.astimezone():%Y-%m-%d %H:%M %Z}"
 
 
-def _note(where: str, words: str, arrived_as: str) -> str:
-    return (
+def _note(where: str, words: str, arrived_as: str, earlier: Iterable[EarlierCorrection] = ()) -> str:
+    note = (
         f'Correction recorded on your {where}: "{_quote(words)}"\n'
         "Proposed tier: none yet; you set it.\n"
         "Fix the work first. Then triage it with skill `memory-placement` section 4: "
@@ -60,11 +143,25 @@ def _note(where: str, words: str, arrived_as: str) -> str:
         "The triage is working state, not part of your reply. "
         f"If you already fixed and triaged it when the {arrived_as} arrived, do nothing more."
     )
+    earlier = tuple(earlier)
+    if not earlier:
+        return note
+    entries = "\n".join(
+        f'- {match.thread_title} ({local_clock(match.created_at)}): "{_quote(match.content)}"'
+        for match in earlier
+    )
+    return (
+        f"{note}\nEarlier corrections that may be the same miss:\n{entries}\n"
+        "If one is the same kind of miss, this is a repeat: propose a project-wide rule to your "
+        "project's conductor rather than only your own file."
+    )
 
 
-def note_text(message_id: str, content: str, created_at: str) -> str:
+def note_text(
+    message_id: str, content: str, created_at: str, earlier: Iterable[EarlierCorrection] = (),
+) -> str:
     """The note one chat correction puts in its target's next turn."""
-    return _note(f"work (message {message_id}, sent {local_clock(created_at)})", content, "message")
+    return _note(f"work (message {message_id}, sent {local_clock(created_at)})", content, "message", earlier)
 
 
 def _source_note_text(candidate: CorrectionCandidate) -> str:
@@ -124,6 +221,7 @@ def queue_correction_note(
     candidate: CorrectionCandidate,
     version: ClassifierVersion,
     event_id: str,
+    earlier: Iterable[EarlierCorrection] = (),
 ) -> int | None:
     """Journal the note for a newly recorded correction, inside the fact's transaction.
 
@@ -144,7 +242,9 @@ def queue_correction_note(
         return None
     if candidate.source_kind == "message":
         row = db.execute("SELECT content FROM messages WHERE id=?", (candidate.source_id,)).fetchone()
-        summary = note_text(candidate.source_id, str(row[0] if row else candidate.content), candidate.created_at)
+        summary = note_text(
+            candidate.source_id, str(row[0] if row else candidate.content), candidate.created_at, earlier,
+        )
     else:
         summary = _source_note_text(candidate)
     from infra.passive_changes import REOFFER_UNWRITTEN, append_thread_context_note
