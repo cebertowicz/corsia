@@ -9,7 +9,7 @@ from urllib.parse import urlparse
 import httpx
 
 from tools.base import Tool
-from tools.web_omlx_search import NO_SERVER, SERVER_STOPPED, keyless_search
+from tools.web_omlx_search import NO_SERVER, SERVER_DISABLED, SERVER_STOPPED, keyless_search
 from tools.web_search_outcome import WORKS, outcome_line, run_search
 
 #: What an agent reads when no key and no managed local search are available.
@@ -21,6 +21,11 @@ EMPTY_OMLX_TEXT = (
 SERVER_STOPPED_TEXT = (
     "Keyless web search needs CORSIA's local model server, which isn't running. "
     "A Brave key in Settings › Keys works without it."
+)
+SERVER_DISABLED_TEXT = (
+    "Keyless web search needs CORSIA's local model server, which is switched off. "
+    "The person can turn it back on where they manage the local model, "
+    "or save a Brave key in Settings › Keys."
 )
 
 # Shared constants
@@ -94,6 +99,8 @@ class WebSearchTool(Tool):
             outcome = await keyless_search(query)
             if outcome == NO_SERVER:
                 return NO_KEY_TEXT
+            if outcome == SERVER_DISABLED:
+                return SERVER_DISABLED_TEXT
             if outcome == SERVER_STOPPED:
                 return SERVER_STOPPED_TEXT
             if outcome.kind != WORKS:
