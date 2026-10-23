@@ -104,7 +104,10 @@ describe('the overlay primitives leave the pane they were opened in', () => {
 		expect(frame?.classList.contains('modal-frame')).toBe(true);
 		expect(frame?.parentElement).toBe(layer);
 		// The blurred layer must not sit inside the faded card, or the browser makes the card a backdrop root.
-		expect(glass?.parentElement).toBe(frame);
+		// It sits in a clip wrapper beside the card, which trims it with overflow rather than a clip-path.
+		const clip = glass?.parentElement;
+		expect(clip?.classList.contains('modal-glass-clip')).toBe(true);
+		expect(clip?.parentElement).toBe(frame);
 		expect(card?.contains(glass)).toBe(false);
 		expect(host.contains(layer)).toBe(false);
 	});
