@@ -16,8 +16,10 @@ from connections.connected_accounts import GOOGLE_PROVIDER, MAILHOST_PROVIDER
 from connections.google import accounts as google_accounts
 from connections.mailhost import store
 
-# Preserve the established Google-only refusal while resolving both provider families.
-NONE_AVAILABLE = google_accounts.NONE_AVAILABLE
+NONE_AVAILABLE = (
+    "No email account is available here. If one should be, ask the person to change Where it works "
+    "on its row in Connected apps."
+)
 CHOOSE = (
     "Pass account_id to say which account to use: {choices}. If the person hasn't said "
     "which account, ask them; never pick one for them."

@@ -179,6 +179,37 @@ async def test_the_password_is_in_no_draft_send_or_log_text(host, caplog) -> Non
         assert PASSWORD.encode() not in data
 
 
+async def test_new_mail_after_the_floor_is_delivered_as_a_mailhost_event_and_the_cursor_moves(host, monkeypatch) -> None:
+    from connections.connected_accounts import get_account
+    from connections.mail import email_screen
+
+    for name in ("_accounts", "_inflight", "_due"):
+        monkeypatch.setattr(poller, name, {})
+    monkeypatch.setattr(poller, "_status", poller._fresh_status())
+
+    def unavailable():
+        raise email_screen.ScreenUnavailable("no local model")
+
+    monkeypatch.setattr(email_screen, "_resolve_local_target", unavailable)
+    delivered = []
+    real_deliver = poller.deliver_platform_event_sync
+
+    def deliver(connector, payload, **kwargs):
+        delivered.append((connector, payload))
+        return real_deliver(connector, payload, **kwargs)
+
+    monkeypatch.setattr(poller, "deliver_platform_event_sync", deliver)
+    await poller.poll_once(host.account_id)
+    assert delivered == []
+    new_uid = max(host.built.imap.messages) + 1
+    host.built.imap.messages[new_uid] = next(iter(host.built.imap.messages.values()))
+    await poller.poll_once(host.account_id)
+    [(connector, payload)] = delivered
+    assert connector == "mailhost" and payload["account_id"] == host.account_id
+    assert payload["message_id"].endswith(f"-{new_uid}")
+    assert get_account(host.account_id, db=get_db())["cursor"]["imap_uid"].endswith(f":{new_uid}")
+
+
 async def test_a_password_the_poller_finds_refused_flips_the_row_and_polling_for_it_stops(host, monkeypatch) -> None:
     for name in ("_accounts", "_inflight", "_due"):
         monkeypatch.setattr(poller, name, {})

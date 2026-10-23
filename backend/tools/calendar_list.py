@@ -18,7 +18,6 @@ from connections.mail_accounts import MAIL_ACCOUNT_PARAM
 from connections.account_errors import AccountError
 from connections.connected_accounts import MAILHOST_PROVIDER
 from connections.google import client as google_client
-from connections.google.accounts import ACCOUNT_PARAM
 from connections.calendar_document import OFFSET_REQUIRED, compose_document, parse_time, read_draft, read_invite
 from connections.google.calendar_document import event_summaries
 from connections.google.client import GoogleError, GoogleRequestFailed
@@ -159,7 +158,7 @@ class CalendarDraftInviteTool(Tool):
                 "end": {"type": "string", "description": "RFC3339 end with a UTC offset."},
                 "attendees": {"type": "array", "items": {"type": "string"}, "description": "Attendee email addresses."},
                 "description": {"type": "string", "description": "Optional event description."},
-                "account_id": ACCOUNT_PARAM,
+                "account_id": MAIL_ACCOUNT_PARAM,
             },
             "required": ["title", "start", "end", "attendees"],
         }
