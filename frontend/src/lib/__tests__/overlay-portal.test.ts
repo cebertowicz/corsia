@@ -89,15 +89,24 @@ afterEach(() => {
 });
 
 describe('the overlay primitives leave the pane they were opened in', () => {
-	it('Modal renders its scrim and card directly under document.body', async () => {
+	it('Modal renders a portaled layer with a scrim beside the card, and the glass beside the card inside its frame', async () => {
 		component = mount(Modal, { target: pane(), props: { title: 'Add model', onClose: vi.fn(), children: (() => {}) as never } });
 		flushSync();
 		await tick();
+		const layer = document.querySelector<HTMLElement>('.modal-layer');
 		const scrim = document.querySelector<HTMLElement>('.bg');
-		expect(scrim).not.toBeNull();
-		expect(scrim!.parentElement).toBe(document.body);
-		expect(host.contains(scrim)).toBe(false);
-		expect(scrim!.querySelector('[role="dialog"]')).not.toBeNull();
+		const card = document.querySelector<HTMLElement>('[role="dialog"]');
+		expect(layer).not.toBeNull();
+		expect(layer!.parentElement).toBe(document.body);
+		expect(scrim?.parentElement).toBe(layer);
+		const frame = card?.parentElement;
+		const glass = document.querySelector<HTMLElement>('.modal-glass');
+		expect(frame?.classList.contains('modal-frame')).toBe(true);
+		expect(frame?.parentElement).toBe(layer);
+		// The blurred layer must not sit inside the faded card, or the browser makes the card a backdrop root.
+		expect(glass?.parentElement).toBe(frame);
+		expect(card?.contains(glass)).toBe(false);
+		expect(host.contains(layer)).toBe(false);
 	});
 
 	it('Popover renders its card directly under document.body', async () => {
