@@ -35,9 +35,13 @@ def _now() -> str:
 
 
 def _rows_to_threads(rows: list[dict]) -> list[dict]:
-    """Group flat rows into top-level threads with nested replies."""
+    """Group flat rows into top-level threads with nested replies.
+
+    A reply stored against another reply joins its thread's root, so it still shows.
+    """
     tops: dict[str, dict] = {}
     replies: list[dict] = []
+    parents = {r["id"]: r["parent_id"] for r in rows}
     for r in rows:
         if r["parent_id"]:
             replies.append(r)
@@ -45,10 +49,28 @@ def _rows_to_threads(rows: list[dict]) -> list[dict]:
             r["replies"] = []
             tops[r["id"]] = r
     for r in replies:
-        parent = tops.get(r["parent_id"])
+        root_id, seen = r["parent_id"], {r["id"]}
+        while parents.get(root_id) and root_id not in seen:
+            seen.add(root_id)
+            root_id = parents[root_id]
+        parent = tops.get(root_id)
         if parent is not None:
             parent["replies"].append(r)
     return list(tops.values())
+
+
+def _thread_root_id(connection, comment_id: str | None) -> str | None:
+    """The top-level comment a reply's thread hangs from: replies are stored one level deep."""
+    if not comment_id:
+        return comment_id
+    root_id, seen = comment_id, set()
+    while root_id not in seen:
+        seen.add(root_id)
+        row = connection.execute("SELECT parent_id FROM doc_comments WHERE id=?", (root_id,)).fetchone()
+        if row is None or not row["parent_id"]:
+            break
+        root_id = row["parent_id"]
+    return root_id
 
 
 def get_comment(comment_id: str, *, db=None) -> dict | None:
@@ -142,7 +164,7 @@ def create_with_status(
                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,0,0,?,?,?,?,?,?,?,?,?,?)
                ON CONFLICT(id) DO NOTHING""",
             (
-                cid, artifact_id, parent_id, author, author_kind, author_thread_id,
+                cid, artifact_id, _thread_root_id(connection, parent_id), author, author_kind, author_thread_id,
                 body, anchor_text, from_off, to_off, anchor_prefix, anchor_suffix,
                 1 if review else 0, replacement, now, now,
                 x, y, w, h, number, image_rev, image_src,
