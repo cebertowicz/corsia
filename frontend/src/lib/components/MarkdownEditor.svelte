@@ -9,7 +9,7 @@
 	import { GFM } from '@lezer/markdown';
 	import { docTheme, docHighlight } from '$lib/cm/theme';
 	import { markdownLivePreview } from '$lib/cm/markdown-live';
-	import { imageContext, imageOpener, type OpenImageRequest } from '$lib/cm/markdown-image';
+	import { imageContext, imageOpener, refreshMarkdownImages, type OpenImageRequest } from '$lib/cm/markdown-image';
 	import { linkOpener } from '$lib/cm/markdown-link';
 	import { token } from '$lib/stores/auth';
 	import { get } from 'svelte/store';
@@ -321,6 +321,11 @@
 	$effect(() => {
 		const ro = readOnly;
 		view?.dispatch({ effects: roComp.reconfigure(EditorState.readOnly.of(ro)) });
+	});
+
+	$effect(() => {
+		imageBase?.imageCacheKey;
+		view?.dispatch({ effects: refreshMarkdownImages.of() });
 	});
 
 	$effect(() => {

@@ -1,6 +1,6 @@
 import { Decoration, type DecorationSet, EditorView, keymap, WidgetType } from '@codemirror/view';
 import { syntaxTree } from '@codemirror/language';
-import { Facet, Prec, RangeSet, StateField, type EditorState, type Range, type Text } from '@codemirror/state';
+import { Facet, Prec, RangeSet, StateEffect, StateField, type EditorState, type Range, type Text } from '@codemirror/state';
 import type { SyntaxNode } from '@lezer/common';
 import { imageContentUrl } from '$lib/artifactImage';
 import { FAILED_IMAGE, imageFailureReason, MISSING_IMAGE, NOT_AN_IMAGE, UNAVAILABLE_IMAGE } from '$lib/imageFailure';
@@ -123,6 +123,8 @@ interface Images {
 
 const NONE: Images = { decorations: Decoration.none, atomic: Decoration.none };
 const UNIT = Decoration.mark({});
+/** Rebuild document-image widgets after their open view receives a file-change hint. */
+export const refreshMarkdownImages = StateEffect.define<void>();
 
 /**
  * An image's markdown never shows. A line holding only the image is replaced by it, so no empty line is left
@@ -164,7 +166,8 @@ export const markdownImages = StateField.define<Images>({
 	create: buildImages,
 	update(images, tr) {
 		const selectionMoved = tr.selection !== undefined && images.atomic.size > 0;
-		if (tr.docChanged || selectionMoved || syntaxTree(tr.state) !== syntaxTree(tr.startState)) return buildImages(tr.state);
+		const imageRefresh = tr.effects.some((effect) => effect.is(refreshMarkdownImages));
+		if (tr.docChanged || selectionMoved || imageRefresh || syntaxTree(tr.state) !== syntaxTree(tr.startState)) return buildImages(tr.state);
 		return images;
 	},
 	provide: (f) => [

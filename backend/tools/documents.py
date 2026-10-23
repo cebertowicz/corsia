@@ -242,7 +242,7 @@ class DocCommentCreateTool(Tool):
                 registration=target[2], submit=bool(kwargs.get("submit")), region=region,
                 review_request_id=kwargs.get("_review_request_id"),
             )
-            row, registered, feedback = await create_validated_comment(request, client_id)
+            row, registered, feedback, _created = await create_validated_comment(request, client_id)
         except QuoteResolveError as exc:
             return f"Error creating document comment: {dict(error=exc.kind, message=exc.message, candidate_lines=exc.candidate_lines)}"
         except CrossArtifactIdError:

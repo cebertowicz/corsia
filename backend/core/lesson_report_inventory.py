@@ -14,8 +14,12 @@ from core.skill_validation import validate_skill_text
 Identity = tuple[str, str, str]
 
 
-def source_record(text: str, path: str) -> dict[str, Any] | None:
-    """Project one authorized current source using the canonical file validators."""
+def source_record(text: str, path: str, *, with_statement: bool = False) -> dict[str, Any] | None:
+    """Project one authorized current source using the canonical file validators.
+
+    ``with_statement`` adds the trial's one-line statement for list rows; recorded
+    reads keep their original shape.
+    """
     trial = read_trial(text)
     if trial:
         lesson = trial.lesson
@@ -29,6 +33,8 @@ def source_record(text: str, path: str) -> dict[str, Any] | None:
             "path": path, "raw_sha256": raw_sha256(text.encode()),
             "source_refs": list(lesson.source_refs),
         }
+        if with_statement:
+            record["statement"] = trial.statement
         if "originating_subjects" in block:
             record["originating_subjects"] = list(lesson.originating_subjects)
         return record

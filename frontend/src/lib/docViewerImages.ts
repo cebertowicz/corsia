@@ -43,8 +43,8 @@ interface DocViewerImagesOptions {
 	session: () => LiveDocumentSession | undefined;
 	accent: () => string | null;
 	feedback: () => DocFeedback | undefined;
-	/** Stable while this document view is open, new when it is opened again. */
-	imageCacheKey: string;
+	/** Current document-view cache key; changes when a linked image changes. */
+	imageCacheKey: () => string;
 	/** Shows a comment at its place in the document, for a drawer group whose image does not open. */
 	showInText: (id: string) => void;
 }
@@ -92,7 +92,7 @@ export function createDocViewerImages(options: DocViewerImagesOptions) {
 		if (target?.threadId) remapTabDocumentImage(target.threadId, target.instanceId, mapPos);
 	}
 	const groups = {
-		srcOf: (comment: DocComment) => (comment.imageSrc ? imageContentUrl({ path: comment.imageSrc, projectId: projectId(), token: get(token) ?? '', imageCacheKey: options.imageCacheKey }) : null),
+		srcOf: (comment: DocComment) => (comment.imageSrc ? imageContentUrl({ path: comment.imageSrc, projectId: projectId(), token: get(token) ?? '', imageCacheKey: options.imageCacheKey() }) : null),
 		colorOf: (comment: DocComment) => regionColor(comment, projectId(), options.accent()),
 		onOpen: (comment: DocComment, focus?: Focus) => openOr([comment.id], focus, () => options.showInText(comment.id)),
 	};

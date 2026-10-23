@@ -144,6 +144,7 @@ class TestValidation:
         lambda r: r.pop("scope"),
         lambda r: r.update(scope=""),
         lambda r: r.update(report_date="15/10/2026"),
+        lambda r: r.update(report_date="20261015"),
         lambda r: r.update(breach="yes"),
         lambda r: r.update(breach=True, moves=[]),
         lambda r: r.update(extra=1),

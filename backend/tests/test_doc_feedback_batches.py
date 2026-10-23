@@ -44,6 +44,29 @@ def test_each_person_comment_is_delivered_as_its_own_task(isolated_db):
         db.close()
 
 
+def test_person_delivery_announces_once_after_all_recipient_batches_close(isolated_db, monkeypatch):
+    frames: list[str] = []
+    monkeypatch.setattr(comment_notifications, "broadcast_doc_comment_changed", lambda artifact_id, **_kwargs: frames.append(artifact_id))
+    db = get_db()
+    try:
+        seed_thread(db, "owner")
+        seed_thread(db, "author")
+        artifact_id = seed_document(db, "owner")
+        root, _ = add_comment(db, artifact_id)
+        frames.clear()
+        _reply, feedback = add_comment(
+            db, artifact_id, author_kind="user", author_id=None, author="Steve", parent_id=root["id"],
+        )
+
+        assert len(feedback["batch_ids"]) == 2
+        feedback_batches.deliver_person_comment(db, feedback["batch_ids"], artifact_id)
+
+        assert frames == [artifact_id]
+        assert all(row["state"] == "delivered" for row in batches(db) if row["id"] in feedback["batch_ids"])
+    finally:
+        db.close()
+
+
 def test_agent_comments_keep_their_quiet_batch_after_an_earlier_delivery(isolated_db):
     db = get_db()
     try:
