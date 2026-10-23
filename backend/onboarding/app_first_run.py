@@ -126,6 +126,9 @@ def applicable_steps(
     return tuple(steps)
 
 
+CONNECTED_APP_STATES = frozenset({"working", "awaiting_approval"})
+
+
 def _connected_app_facts(db: sqlite3.Connection | None = None) -> dict[str, Any]:
     """Read local, already-authorized app/account state without a provider call."""
     from connections.app_reach import list_apps
@@ -133,9 +136,10 @@ def _connected_app_facts(db: sqlite3.Connection | None = None) -> dict[str, Any]
 
     connection = db or get_db()
     try:
-        # ``list_apps`` is the canonical state projection: pending, expired, and
-        # disconnected entries remain visible there but are not usable connections.
-        count = sum(app.get("state") == "connected" for app in list_apps(db=connection))
+        # ``list_apps`` is the canonical state projection. A working app and one
+        # brought over that awaits the person's approval both count; expired,
+        # broken and disconnected entries do not.
+        count = sum(app.get("state") in CONNECTED_APP_STATES for app in list_apps(db=connection))
         ready = False
         for row in connection.execute(
             "SELECT capabilities_json FROM connected_accounts WHERE state='connected'"

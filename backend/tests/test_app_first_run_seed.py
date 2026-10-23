@@ -208,17 +208,28 @@ async def test_complete_app_setup_only_reads_facts_for_a_held_app_wake(
     assert setup_progress.view()["setup_completed"] is True
 
 
-def test_connected_app_facts_counts_only_connected_projections(isolated_db, monkeypatch):
-    from connections import app_reach
-    from onboarding.app_first_run import _connected_app_facts
+@pytest.mark.parametrize("states, count, step_three", [
+    (("working", "awaiting_approval", "needs_token", "disconnected"), 2, False),
+    (("working", "needs_token", "disconnected"), 1, True),
+])
+def test_connected_app_facts_counts_working_and_awaiting_rows(isolated_db, states, count, step_three):
+    from infra.database import write_transaction
+    from infra.time import utc_now
+    from onboarding.app_first_run import _connected_app_facts, applicable_steps
 
-    monkeypatch.setattr(app_reach, "list_apps", lambda *, db: [
-        {"state": app_reach.PENDING_STATE},
-        {"state": "disconnected"},
-        {"state": "connected"},
-    ])
+    now = utc_now().isoformat()
+    with write_transaction(None, scope="seed_connected_apps") as db:
+        for index, state in enumerate(states):
+            db.execute(
+                "INSERT INTO connected_apps (id, name, config_json, state, state_since, reach_mode, "
+                "created_at, updated_at) VALUES (?, ?, '{}', ?, ?, 'all', ?, ?)",
+                (f"app-{index}", f"App {index}", state, now, now, now),
+            )
 
-    assert _connected_app_facts()["connected_app_count"] == 1
+    facts = _connected_app_facts()
+
+    assert facts["connected_app_count"] == count
+    assert (3 in {step["step_number"] for step in applicable_steps(facts)}) is step_three
 
 
 def test_portable_history_refuses_a_fabricated_turn_for_the_opening(fresh_install, app_seed_facts):
