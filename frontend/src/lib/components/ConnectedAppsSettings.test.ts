@@ -2,6 +2,7 @@ import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ConnectedAppsSettings from './ConnectedAppsSettings.svelte';
 import WhereItWorks from './WhereItWorks.svelte';
+import { emit } from '$lib/ws/events';
 import { token } from '$lib/stores/auth';
 import { projects } from '$lib/stores/projects';
 import { get } from 'svelte/store';
@@ -488,19 +489,19 @@ describe('ConnectedAppsSettings', () => {
 			expect(line('e')).toContain('Connected');
 		});
 
-		it('reads the list again while a row is Checking and stops once the check ends', async () => {
+		it('reads the list again when the host says a check ended, and not on a timer', async () => {
 			vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
-			const answers = [[mailhost('a', 'iCloud', { problem: 'checking' })], [mailhost('a', 'iCloud', { problem: 'checking' })], [mailhost('a', 'iCloud', { problem: null })]];
-			const fetchMock = vi.fn(async () => ({ ok: true, json: async () => ({ servers: [], accounts: answers.length > 1 ? answers.shift() : answers[0] }) }));
+			let problem: 'checking' | null = 'checking';
+			const fetchMock = vi.fn(async () => ({ ok: true, json: async () => ({ servers: [], accounts: [mailhost('a', 'iCloud', { problem })] }) }));
 			vi.stubGlobal('fetch', fetchMock);
 			component = mount(ConnectedAppsSettings, { target: host });
 			await vi.waitFor(() => expect(host.querySelector('[data-connected-account-id="a"] .sub')?.textContent).toContain('Checking…'));
-			await vi.advanceTimersByTimeAsync(2000);
-			await vi.advanceTimersByTimeAsync(2000);
-			await vi.waitFor(() => expect(host.querySelector('[data-connected-account-id="a"] .sub')?.textContent).toContain('Connected'));
 			const calls = fetchMock.mock.calls.length;
 			await vi.advanceTimersByTimeAsync(10000);
 			expect(fetchMock.mock.calls.length).toBe(calls);
+			problem = null;
+			emit('connected_apps_updated', { type: 'connected_apps_updated' });
+			await vi.waitFor(() => expect(host.querySelector('[data-connected-account-id="a"] .sub')?.textContent).toContain('Connected'));
 			vi.useRealTimers();
 		});
 

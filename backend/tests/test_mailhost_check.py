@@ -46,6 +46,14 @@ async def test_a_good_password_connects_with_mail_and_calendar(conductor, server
     assert all(tls_on for tls_on, _ in built.smtp.commands), "every SMTP command ran inside TLS"
 
 
+async def test_a_finished_check_tells_the_open_screens(conductor, servers, monkeypatch) -> None:
+    told: list[str] = []
+    monkeypatch.setattr(check, "notify_connected_apps_updated", lambda: told.append("updated"))
+    account_id = add_account(servers(), conductor)["account_id"]
+    assert await run_check(account_id) == store.OK
+    assert told == ["updated"]
+
+
 async def test_no_calendar_leaves_the_account_mail_only(conductor, servers) -> None:
     account_id = add_account(servers(with_caldav=False), conductor)["account_id"]
     assert await run_check(account_id) == store.MAIL_ONLY
@@ -185,7 +193,9 @@ async def test_a_refused_smtp_password_does_not_try_another_port(servers, monkey
     assert [verb for _, verb in built.smtp.commands].count("AUTH") == 1
 
 
-async def test_an_older_check_never_overwrites_a_newer_one(conductor, servers) -> None:
+async def test_an_older_check_never_overwrites_a_newer_one(conductor, servers, monkeypatch) -> None:
+    told: list[str] = []
+    monkeypatch.setattr(check, "notify_connected_apps_updated", lambda: told.append("updated"))
     built = servers()
     account_id = add_account(built, conductor)["account_id"]
     first = store.begin_check(account_id)
@@ -195,7 +205,9 @@ async def test_an_older_check_never_overwrites_a_newer_one(conductor, servers) -
     key_store.set_value(name, PASSWORD)
     assert await check.run_check(account_id, first[0], first[1]) == store.OK  # finishes, but its token is stale
     assert row(account_id)["check"]["status"] == store.CHECKING and row(account_id)["state"] == "needs_sign_in"
+    assert told == [], "a stale check changed nothing, so it tells no screen"
     assert await check.run_check(account_id, second[0], second[1]) == store.OK
+    assert told == ["updated"]
     assert row(account_id)["check"]["status"] == store.OK and row(account_id)["state"] == "connected"
 
 

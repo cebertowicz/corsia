@@ -20,6 +20,8 @@ from connections.mailhost.endpoints import Endpoints
 from connections.mailhost.errors import IMAP_OFF, PASSWORD_REFUSED, MailHostError
 from connections.mailhost.provider import PASSWORD
 from infra.db_async import run_in_db
+from infra.state.ws import notify_connected_apps_updated
+from infra.state.ws import notify_connected_apps_updated
 
 log = logging.getLogger(__name__)
 
@@ -60,7 +62,8 @@ async def run_check(account_id: str, endpoints: Endpoints, token: str) -> str:
     """Run one check for the token ``store.begin_check`` issued; returns the status it recorded."""
     credentials = await run_in_db(_credentials, account_id)
     if credentials is None:
-        await run_in_db(lambda: store.write(account_id, endpoints, status=store.WAITING, expect_token=token))
+        if await run_in_db(lambda: store.write(account_id, endpoints, status=store.WAITING, expect_token=token)):
+            notify_connected_apps_updated()
         return store.WAITING
     try:
         endpoints, status, host, capabilities = await _outcome(account_id, endpoints, credentials)
@@ -75,6 +78,7 @@ async def run_check(account_id: str, endpoints: Endpoints, token: str) -> str:
             "connect_succeeded" if status in store.CONNECTED_STATUSES else "connect_failed", account_id, "mailhost",
             **({} if status in store.CONNECTED_STATUSES else {"cause": status}),
         )
+        notify_connected_apps_updated()
     return status
 
 

@@ -16,6 +16,7 @@
 	import MailHostDetail from './MailHostDetail.svelte';
 	import ConnectAppFlow from './ConnectAppFlow.svelte';
 	import AccountManualNotice from './AccountManualNotice.svelte';
+	import { on } from '$lib/ws/events';
 	import { mailHostStateLine } from '$lib/api/mailHostAccounts';
 	import { accountAddress, clippedPrefix, localSegments, width } from '$lib/accountAddress';
 	const accountName = (account: ConnectedAccount) => `${account.provider_display_name} — ${account.address}`;
@@ -265,17 +266,13 @@
 		});
 	});
 	$effect(() => { if (offline) clearLinkedFocus(); });
-	// A mail-host check runs in the background; read the list again until no row is still Checking.
-	$effect(() => {
-		if (!rows.some((row) => isAccount(row) && row.provider === 'mailhost' && row.mailhost?.problem === 'checking')) return;
-		const timer = setInterval(() => { void refresh(); }, 2000);
-		return () => clearInterval(timer);
-	});
 	onMount(() => {
 		void loadProjects(); void load();
 		const afterSignIn = () => { void refresh(); };
 		window.addEventListener('focus', afterSignIn);
-		return () => window.removeEventListener('focus', afterSignIn);
+		// A mail-host check runs in the background and the host says when it ends.
+		const offChecked = on('connected_apps_updated', afterSignIn);
+		return () => { window.removeEventListener('focus', afterSignIn); offChecked(); };
 	});
 </script>
 
