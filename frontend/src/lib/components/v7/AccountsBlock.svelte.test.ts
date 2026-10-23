@@ -245,7 +245,8 @@ describe('rendering and actions', () => {
 				reads += 1;
 				if (reads === 1) return response({ accounts: [defaultAccount, signedIn] });
 				if (reads === 2) return response({ accounts: [defaultAccount, { ...signedIn, no_usable_model: true }] });
-				return response({}, 500);
+				if (reads === 3) return response({}, 500);
+				return response({ accounts: [defaultAccount, { ...signedIn, no_usable_model: true }] });
 			}));
 			const component = mount(AccountsBlock, { target: document.body, props: { provider } });
 			await settle();
@@ -255,7 +256,11 @@ describe('rendering and actions', () => {
 			expect(document.body.textContent).toContain(noModel);
 			emit('models_updated', {});
 			await settle();
-			expect(document.body.textContent).toContain('Could not load accounts.');
+			expect(document.body.textContent).toContain('Couldn’t refresh your accounts.');
+			[...document.querySelectorAll('button')].filter((element) => element.textContent?.trim() === 'Reload').at(-1)!.click();
+			await settle();
+			expect(document.body.textContent).not.toContain('Couldn’t refresh your accounts.');
+			expect(document.body.textContent).toContain(noModel);
 			unmount(component);
 		});
 

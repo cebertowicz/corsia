@@ -36,6 +36,7 @@
 	const { provider }: Props = $props();
 
 	let actionError = $state('');
+	let refreshError = $state('');
 	let adding = $state(false);
 	let addName = $state('');
 	let pending = $state<Record<string, boolean>>({});
@@ -91,7 +92,8 @@
 	});
 
 	// The first read of a new login's models ends with models_updated: the list then shows whether the account has any.
-	onMount(() => on('models_updated', async () => { const result = await loadVendorAccounts(); if (!result.ok && !result.superseded) actionError = result.error ?? 'Could not load accounts.'; }));
+	const refreshAccounts = async () => { const result = await loadVendorAccounts(); if (!result.superseded) refreshError = result.ok ? '' : 'Couldn’t refresh your accounts.'; };
+	onMount(() => on('models_updated', refreshAccounts));
 
 	onMount(async () => {
 		void policyState.load();
@@ -273,7 +275,7 @@
 {#if !showRows && accounts.length === 1}<OverageSwitch account={accounts[0]} />{/if}
 {#if actionError || policyError}<Message variant="err">{actionError || policyError}</Message>{/if}
 {#if policyError && !actionError}<Button size="sm" onclick={() => policyState.load()}>Reload</Button>{/if}
-
+{#if refreshError}<Message variant="err">{refreshError}</Message><Button size="sm" onclick={refreshAccounts}>Reload</Button>{/if}
 <div class="accounts" aria-label={`${provider.label} accounts`}>
 	{#if !showRows}
 		<div class="empty-row">
