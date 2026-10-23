@@ -681,6 +681,7 @@ def _startup_recovery_probe(
         events.append("recover_turns")
         return SimpleNamespace(
             settlements=(SimpleNamespace(thread_id="settled-thread"),),
+            ended_turns=(),
             batches=batches,
         )
 
