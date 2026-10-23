@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { get } from 'svelte/store';
 import { activeModelId, loadModels, models, workspaceModels } from './models';
+import { readWorkspaceModels } from './modelsLoad';
 import { activeThreadId } from './threads';
 import { token } from './auth';
 
@@ -70,9 +71,9 @@ describe('loadModels account scope', () => {
 		expect(query(fetchMock.mock.calls[0][0]).thread_id).toBe('another-thread');
 	});
 
-	it('keeps the unscoped read with no open thread', async () => {
+	it('keeps the unscoped read with no open thread, signed in so the network listener accepts it', async () => {
 		token.set('session');
-		const fetchMock = vi.fn(async (_path: string) => ({
+		const fetchMock = vi.fn(async (_path: string, _init?: RequestInit) => ({
 			ok: true, json: async () => ({ models: [] }),
 		} as Response));
 		globalThis.fetch = fetchMock as unknown as typeof fetch;
@@ -80,6 +81,19 @@ describe('loadModels account scope', () => {
 		await loadModels();
 
 		expect(fetchMock.mock.calls[0][0]).toBe('/api/models');
+		expect(fetchMock.mock.calls[0][1]).toEqual({ headers: { Authorization: 'Bearer session' } });
+	});
+
+	it('signs the Settings workspace read too', async () => {
+		token.set('session');
+		const fetchMock = vi.fn(async (_path: string, _init?: RequestInit) => ({
+			ok: true, json: async () => ({ models: [] }),
+		} as Response));
+		globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+		await readWorkspaceModels();
+
+		expect(fetchMock.mock.calls[0]).toEqual(['/api/models', { headers: { Authorization: 'Bearer session' } }]);
 	});
 
 	it('never shows one account status for another: a failed thread read leaves no row ready', async () => {
