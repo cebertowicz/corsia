@@ -104,8 +104,11 @@ def test_google_setup_carries_the_approved_offer_and_leaves_secrets_to_the_backe
 
     assert "I'll set up your own private Google project in a browser you can watch" in steps
     assert "Google will also ask for your Drive, Docs and Sheets, so you won't have to sign in again later." in steps
-    for api in ("Gmail API", "Google Calendar API", "Google Drive API", "Google Docs API", "Google Sheets API"):
-        assert api in steps
+    enable_link = "https://console.cloud.google.com/flows/enableapi?apiid="
+    assert enable_link in steps
+    enabled = steps.split(enable_link, 1)[1].split("`", 1)[0].split(",")
+    assert enabled == ["gmail.googleapis.com", "calendar-json.googleapis.com", "drive.googleapis.com",
+                       "docs.googleapis.com", "sheets.googleapis.com"]
     assert '"Go to CORSIA (unsafe)"' in steps
     assert "a project left in Testing stops letting me in after 7 days. Go ahead?" in steps
     assert "`Ask me any time to connect your email.`" in steps
@@ -155,3 +158,23 @@ def test_a_missing_gh_on_post_as_me_is_installed_by_the_agent_account_tool():
     assert "- **`gh` missing:** call `github_agent_account` with `action: \"install\"`" in text
     assert "install" in ACTIONS and COMMAND_RUNTIME["gh"] == "gh"
     assert "with `gh` written as the full path `command -v gh` prints in your shell" in text
+
+
+def test_google_connect_reads_the_downloads_client_file_without_host_access(tmp_path, monkeypatch):
+    """The skill passes ~/Downloads/client_secret_<id>.json as is; google_connect reads it itself."""
+    import json
+
+    from connections.google.client import read_client_file
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    downloads = tmp_path / "Downloads"
+    downloads.mkdir()
+    client_id = "123-abc.apps.googleusercontent.com"
+    (downloads / f"client_secret_{client_id}.json").write_text(
+        json.dumps({"installed": {"client_id": client_id, "client_secret": "fixture-value"}}), encoding="utf-8"
+    )
+
+    assert read_client_file(f"~/Downloads/client_secret_{client_id}.json") == (client_id, "fixture-value")
+    steps = SKILL.read_text(encoding="utf-8")
+    assert "`client_file` set to that path as is" in steps
+    assert "never list or check Downloads first and never request host access for it" in steps
