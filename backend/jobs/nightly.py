@@ -232,8 +232,7 @@ async def _emit_learning_reports_safely() -> None:
     try:
         await asyncio.to_thread(emit_daily_reports)
     except Exception:
-        # Agent Substrate owns the future delivery contract; its absence must not
-        # change the already-recorded maintenance disposition.
+        # This follow-up must not change the already-recorded maintenance disposition.
         logger.exception("nightly_job: learning report delivery failed")
 
 

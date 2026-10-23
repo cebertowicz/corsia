@@ -1,6 +1,13 @@
 from __future__ import annotations
 
+import asyncio
+import os
+import sqlite3
+import subprocess
+import sys
+import threading
 import time
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -236,3 +243,126 @@ def test_producer_withdrawal_wakes_the_registered_owner_once(isolated_db, tmp_pa
     producer.produce_once()
 
     assert _count("SELECT COUNT(*) FROM messages WHERE thread_id=? AND id LIKE 'platform-event:%'", owner) == 1
+
+
+_CHILD_ENTRYPOINT = "CORSIA_LIBRARY_PRODUCER_CHILD_ENTRYPOINT"
+_CHILD_TIMEOUT_SECONDS = 12
+
+
+def _run_pool_lifetime_child(entrypoint: str, tmp_path: Path) -> subprocess.CompletedProcess[str]:
+    workspace = tmp_path / "workspace"
+    state = tmp_path / "state"
+    workspace.mkdir()
+    state.mkdir()
+    environment = {
+        **os.environ,
+        _CHILD_ENTRYPOINT: entrypoint,
+        "CORSIA_WORKSPACE": str(workspace),
+        "CORSIA_STATE_DIR": str(state),
+        "CORSIA_TEST_MODE": "1",
+        "CORSIA_ANALYTICS_DISABLE": "1",
+    }
+    try:
+        return subprocess.run(
+            [sys.executable, "-m", "pytest", str(Path(__file__)), "-q", "-k", "pool_lifetime_child"],
+            env=environment, capture_output=True, text=True, timeout=_CHILD_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as error:
+        pytest.fail(f"{entrypoint} producer child exceeded its {_CHILD_TIMEOUT_SECONDS}s hard timeout: {error}")
+
+
+@pytest.mark.parametrize("entrypoint", ("daily", "requested"))
+def test_producer_cancellation_joins_real_pool_query_before_shutdown(tmp_path, entrypoint):
+    """The child kill bound leaves no stuck SQLite worker in the main test runner."""
+    result = _run_pool_lifetime_child(entrypoint, tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+async def _wait_for(event: threading.Event, *, timeout: float = 5) -> None:
+    deadline = time.monotonic() + timeout
+    while not event.is_set():
+        if time.monotonic() >= deadline:
+            pytest.fail(f"event did not arrive within {timeout}s")
+        await asyncio.sleep(0.01)
+
+
+async def _producer_task(entrypoint: str):
+    from infra import app_loop
+    from library import producer
+    from ws import ingress
+
+    if entrypoint == "daily":
+        return asyncio.create_task(producer.library_refresh_loop()), False
+    app_loop.capture(asyncio.get_running_loop())
+    producer.request_refresh()
+    while not ingress.background_tasks:
+        await asyncio.sleep(0)
+    return next(iter(ingress.background_tasks)), True
+
+
+@pytest.mark.asyncio
+async def test_producer_pool_lifetime_child(isolated_db, monkeypatch):
+    """The child process runs one real pooled query, cancellation, and pool shutdown."""
+    entrypoint = os.environ.get(_CHILD_ENTRYPOINT)
+    if entrypoint not in {"daily", "requested"}:
+        pytest.skip("only run through the bounded parent regression")
+    from infra import app_loop, database
+    from library import producer
+
+    query_started = threading.Event()
+    release_query = threading.Event()
+    producer_finished = threading.Event()
+    reconfigured = threading.Event()
+    real_connect = database.sqlite3.connect
+
+    def connect(*args, **kwargs):
+        connection = real_connect(*args, **kwargs)
+
+        def authorize(action, table, *_args):
+            if action == sqlite3.SQLITE_READ and table == "artifact_identities":
+                query_started.set()
+                if not release_query.wait(timeout=5):
+                    return sqlite3.SQLITE_DENY
+            return sqlite3.SQLITE_OK
+
+        connection.set_authorizer(authorize)
+        return connection
+
+    real_produce_once = producer.produce_once
+
+    def produce_once():
+        try:
+            return real_produce_once()
+        finally:
+            producer_finished.set()
+
+    def reconfigure():
+        assert producer_finished.is_set()
+        reconfigured.set()
+
+    monkeypatch.setattr(database.sqlite3, "connect", connect)
+    monkeypatch.setattr(producer, "produce_once", produce_once)
+    monkeypatch.setattr("library.load_index", lambda: SimpleNamespace(skills=(), index_age="just now", generations={}))
+    task, clear_loop = await _producer_task(entrypoint)
+    shutdown = threading.Thread(target=database.shutdown_pool, args=(reconfigure,), name="producer-pool-shutdown")
+    try:
+        await _wait_for(query_started)
+        shutdown.start()
+        task.cancel()
+        await asyncio.sleep(0)
+        assert not task.done()
+        release_query.set()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, timeout=5)
+        await _wait_for(reconfigured)
+        shutdown.join(timeout=1)
+        assert not shutdown.is_alive()
+    finally:
+        release_query.set()
+        if not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        if shutdown.is_alive():
+            shutdown.join(timeout=1)
+        if clear_loop:
+            app_loop.clear()
