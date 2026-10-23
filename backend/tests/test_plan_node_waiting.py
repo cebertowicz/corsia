@@ -15,7 +15,8 @@ import uuid
 import pytest
 
 from infra.schema import SCHEMA_SQL
-from plans import mutations, node_cost, public, scheduled_wait, service
+from plans import decisions, mutations, node_cost, public, scheduled_wait, service
+from plans.boundary import PlanActor
 from tests.plan_writer_authorizer import raw_plan_seed
 
 T0 = datetime(2026, 9, 28, 12, 0, tzinfo=timezone.utc)
@@ -322,6 +323,103 @@ def test_a_task_its_agent_set_aside_is_not_waiting_but_a_blocker_watch_is(db):
     )
 
     assert _waited(db, node, 90) == 20 * 60
+
+
+# Waiting on the user is their time, whoever armed the wait (decision 114e0dca follow-up).
+
+
+CHILD = PlanActor("child", "user-1", "project-1")
+
+
+def _decision(db, plan, source, clock, raised):
+    """A real decision on ``source`` in the child's plan, raised by its parent at ``raised``."""
+    parent = PlanActor("owner", "user-1", "project-1")
+    clock(raised)
+    drafted = decisions.draft(
+        plan.id, source_node_id=source.id, mutation_id=uuid.uuid4().hex, actor=CHILD,
+        provenance="test.waiting", db=db, title="Which way?", context="Two ways.",
+        tradeoff="Speed or reach.", recommendation="A", rationale="A is cheaper.",
+        options=[{"id": "A", "label": "A", "detail": "a"}, {"id": "B", "label": "B", "detail": "b"}],
+        other_enabled=True,
+    ).result["decision"]
+    reviewed = decisions.parent_review(
+        drafted["id"], expected_revision=drafted["revision"], mutation_id=uuid.uuid4().hex,
+        actor=parent, provenance="test.waiting", db=db,
+    ).result["decision"]
+    return decisions.raise_to_user(
+        reviewed["id"], expected_revision=reviewed["revision"], mutation_id=uuid.uuid4().hex,
+        actor=parent, provenance="test.waiting", db=db,
+    ).result["decision"]
+
+
+@pytest.fixture
+def clock(monkeypatch):
+    """Set the plan writers' clock to ``minutes`` after T0: events are append-only."""
+    return lambda minutes: monkeypatch.setattr(service, "_now", lambda: _at(minutes))
+
+
+def test_a_raised_decision_is_the_users_time_until_it_is_answered(db, clock):
+    plan = service.ensure_plan("thread", "child", db=db)
+    node = _task(db, plan.id)
+    _move(db, node.id, "pending", "active", 0)
+    _watch(db, node, 0, resolved=80)
+    raised = _decision(db, plan, node, clock, 20)
+    clock(50)
+    decisions.answer(
+        raised["id"], option_id="A", expected_revision=raised["revision"],
+        mutation_id=uuid.uuid4().hex, actor=PlanActor(None, "user-1", None, kind="user"),
+        provenance="test.waiting", db=db,
+    )
+
+    # The agent's own watch ran 0..80; the user owed the answer 20..50.
+    assert _waited(db, node, 90) == 20 * 60 + 30 * 60
+
+
+def test_an_unanswered_decision_cuts_to_now_and_an_edit_back_to_draft_ends_it(db, clock):
+    plan = service.ensure_plan("thread", "child", db=db)
+    open_question = _task(db, plan.id, "Open")
+    edited = _task(db, plan.id, "Edited")
+    for node in (open_question, edited):
+        _move(db, node.id, "pending", "active", 0)
+        _watch(db, node, 0)
+    _decision(db, plan, open_question, clock, 30)
+    raised = _decision(db, plan, edited, clock, 30)
+    clock(60)
+    decisions.update(
+        raised["id"], expected_revision=raised["revision"], mutation_id=uuid.uuid4().hex,
+        actor=CHILD, provenance="test.waiting", db=db, title="Which way, again?",
+    )
+
+    assert _waited(db, open_question, 90) == 30 * 60
+    assert _waited(db, edited, 90) == 30 * 60 + 30 * 60
+
+
+def test_a_dependency_on_the_users_step_is_their_time_but_an_agents_step_waits(db):
+    plan = service.ensure_plan("thread", "owner", db=db)
+    person_step = _task(db, plan.id, "Sign in", assignee="user")
+    agent_step = _task(db, plan.id, "Build")
+    on_person = _task(db, plan.id, "After sign-in")
+    on_agent = _task(db, plan.id, "After build")
+    for node in (on_person, on_agent):
+        _move(db, node.id, "pending", "active", 0)
+        _watch(db, node, 0, resolved=10)
+    _depend(db, on_person, person_step, 5)
+    _depend(db, on_agent, agent_step, 5)
+    _move(db, person_step.id, "pending", "accepted", 40)
+    _move(db, agent_step.id, "pending", "accepted", 40)
+
+    # A watch 0..10 overlaps the dependency 5..40: the user's 5..40 is cut whole.
+    assert _waited(db, on_person, 90) == 5 * 60
+    assert _waited(db, on_agent, 90) == 40 * 60
+
+
+def test_open_waits_leave_out_a_decision_the_user_owes(db, clock):
+    plan = service.ensure_plan("thread", "child", db=db)
+    node = _task(db, plan.id)
+    _watch(db, node, 0, resolved=60)
+    _decision(db, plan, node, clock, 20)
+
+    assert _minutes(_open(db, ["child"], 0, 90)["child"]) == [(0, 20)]
 
 
 # Open time (decision 114e0dca): each thread's outside-wait intervals for a run.

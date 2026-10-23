@@ -11,10 +11,12 @@ is open and at least one of these holds:
 - an unmet dependency: an edge present while its prerequisite is not accepted;
 - ``review_requested`` while the node links a registered GitHub pull request.
 
-User-owned holds (the user's pause, a blocker on the user) and whole-plan
-pauses are the user's time, so they are cut out; so is anything after the
-node settles. Causes that
-overlap count once. An interval still open runs to ``now``.
+The user's time is cut out, whoever armed the wait: user-owned holds (the
+user's pause, a blocker on the user), whole-plan pauses, a decision on the
+node from its raise until it is answered, withdrawn or reopened for editing,
+and a dependency on a step assigned to the user while that step is open. So is
+anything after the node settles. Causes that overlap count once. An interval
+still open runs to ``now``.
 
 Nothing is stored. Intervals are rebuilt from the append-only
 ``plan_node_events`` (state transitions, dependency added/removed), the plan's
@@ -171,11 +173,11 @@ def _read(connection, ids: list[str], rows_in: Callable) -> dict[str, dict]:
 
 
 def _prerequisite_unmet(connection, prerequisites: list[str], rows_in, now: float):
-    """Each prerequisite's not-yet-accepted intervals, in one chunked query."""
+    """Each prerequisite's not-yet-accepted intervals, and which are the user's steps."""
     by_id: dict[str, dict] = {}
     for row in rows_in(
         connection,
-        """SELECT n.id,n.created_at,n.state,e.prior_state,e.new_state,e.created_at AS at
+        """SELECT n.id,n.created_at,n.state,n.assignee,e.prior_state,e.new_state,e.created_at AS at
            FROM plan_nodes n
            LEFT JOIN plan_node_events e ON e.node_id=n.id AND e.event='state_transition'
            WHERE n.id IN ({marks}) ORDER BY e.created_at,e.rowid""",
@@ -184,13 +186,53 @@ def _prerequisite_unmet(connection, prerequisites: list[str], rows_in, now: floa
         entry = by_id.setdefault(str(row["id"]), {"node": dict(row), "transitions": []})
         if row["at"] is not None:
             entry["transitions"].append({**dict(row), "created_at": row["at"]})
-    return {
+    unmet = {
         node_id: _spans_where(
             _state_spans(entry["node"], entry["transitions"], now),
             lambda state: state not in _ACCEPTED_STATES,
         )
         for node_id, entry in by_id.items()
     }
+    return unmet, {node_id for node_id, entry in by_id.items() if entry["node"]["assignee"] == "user"}
+
+
+def _decisions_raised(connection, node_ids: list[str], rows_in: Callable, now: float):
+    """Each task's raised-decision stretches, from its decisions' review-step events.
+
+    A decision's body names its source task and its review step, the user's,
+    and neither ever changes; ``idx_artifact_identities_decision_source`` keys
+    the lookup on the task, so it costs that task's decisions alone. It is
+    named, because without statistics SQLite prefers the (integration, type)
+    key, a scan of every decision; the literal type and ``json_valid`` term
+    are what make the partial index usable. An answer, a withdrawal or an edit back to draft ends a raise; one
+    still unanswered runs to ``now``.
+    """
+    opened: dict[str, tuple[str, float]] = {}
+    found: dict[str, list[Interval]] = defaultdict(list)
+    for row in rows_in(
+        connection,
+        """SELECT e.node_id,json_extract(i.metadata,'$.plan_decision.source_node_id') AS source_id,
+                  e.event,e.created_at
+           FROM artifact_identities i INDEXED BY idx_artifact_identities_decision_source
+           CROSS JOIN plan_node_events e
+             ON e.node_id=json_extract(i.metadata,'$.plan_decision.node_id')
+           WHERE i.integration='local' AND i.type='plan-decision' AND json_valid(i.metadata)
+             AND json_extract(i.metadata,'$.plan_decision.source_node_id') IN ({marks})
+             AND e.event IN ('decision_raised','decision_answered','decision_invalidated','decision_updated')
+           ORDER BY e.created_at,e.rowid""",
+        node_ids,
+    ):
+        review, source, at = str(row["node_id"]), row["source_id"], _at(row["created_at"])
+        if at is None:
+            continue
+        if row["event"] == "decision_raised":
+            opened.setdefault(review, (str(source), at))
+        elif review in opened:
+            source_id, start = opened.pop(review)
+            found[source_id].append((start, at))
+    for source_id, start in opened.values():
+        found[source_id].append((start, now))
+    return found
 
 
 def _plan_paused(connection, plan_ids: list[str], rows_in: Callable, now: float):
@@ -244,11 +286,12 @@ def own_waiting_intervals(
         sorted({str(fact["node"]["plan_id"]) for fact in facts.values() if "node" in fact}),
         rows_in, clock,
     )
+    raised = _decisions_raised(connection, node_ids, rows_in, clock)
     prerequisites = sorted({
         str(row["depends_on"]) for fact in facts.values() for row in fact["edges"]
         if row["depends_on"] is not None
     } | {str(row["depends_on_node_id"]) for fact in facts.values() for row in fact["live"]})
-    unmet = _prerequisite_unmet(connection, prerequisites, rows_in, clock)
+    unmet, user_steps = _prerequisite_unmet(connection, prerequisites, rows_in, clock)
     result: dict[str, list[Interval]] = {}
     for node_id, fact in facts.items():
         if "node" not in fact:
@@ -258,13 +301,18 @@ def own_waiting_intervals(
             (start, clock if row["status"] == "armed" else (_at(row["ended_at"]) or start))
             for row in fact["watches"] if (start := _at(row["armed_at"])) is not None
         ]
+        user_time = list(raised.get(node_id, []))
         for prerequisite, present in _edge_intervals(fact["edges"], fact["live"], clock).items():
-            causes += intersect(present, unmet.get(prerequisite, []))
+            pending = intersect(present, unmet.get(prerequisite, []))
+            if prerequisite in user_steps:
+                user_time += pending
+            else:
+                causes += pending
         linked = _at(fact.get("pr_linked_at"))
         if linked is not None:
             review = _spans_where(spans, lambda state: state == "review_requested")
             causes += intersect(review, [(linked, clock)])
-        user_time = [
+        user_time += [
             (start, _at(row["cleared_at"]) or clock)
             for row in fact["holds"] if (start := _at(row["created_at"])) is not None
         ] + paused.get(str(fact["node"]["plan_id"]), [])
