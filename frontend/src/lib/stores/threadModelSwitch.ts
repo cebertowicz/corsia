@@ -1,4 +1,22 @@
 import { updateThreadRow } from './threadRow';
+import type { Model } from './models';
+import { emitProductEvent } from '$lib/product_events';
+
+export function emitSwitchEvent(
+	model: Model,
+	dispatchId: string,
+	threadId: string | null,
+	previousId: string | null,
+) {
+	emitProductEvent('model', 'switched', {
+		thread_id: threadId,
+		model_id: dispatchId,
+		catalog_model_id: model.id,
+		provider: model.provider ?? model.backend,
+		previous_model_id: previousId,
+		reasoning_shape: model.capabilities?.reasoning_config?.type ?? null,
+	});
+}
 
 export interface ThreadModelSwitchState {
 	pending_model?: string | null;

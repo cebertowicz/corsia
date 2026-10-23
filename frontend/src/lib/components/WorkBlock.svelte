@@ -189,7 +189,7 @@
 <style>
 	.transcript-fold { display: flex; flex-wrap: wrap; max-width: 760px; margin: 0 auto 14px; min-width: 0; align-items: center; scroll-margin-top: var(--sticky-top, 0px); }
 	/* Notes (plan-limit pauses) are rows under the block, never items beside the chip. */
-	.transcript-fold > :global(.plan-limit-paused) { flex: 0 0 100%; }
+	.transcript-fold > :global(.plan-limit-paused) { flex: 0 0 100%; min-width: 0; }
 	/* Collapsed: a glass capsule sized to its label. Expanded: the same capsule pins as the header. */
 	.fold-toggle {
 		position: sticky; top: var(--sticky-top, 0px); z-index: 4;
@@ -206,7 +206,8 @@
 	.fold-new { display: inline-flex; flex: 0 0 auto; align-items: center; gap: var(--space-1); margin-left: calc(-1 * var(--space-1)); white-space: nowrap; }
 	.fold-new i { width: calc(var(--space-1) * 1.5); height: calc(var(--space-1) * 1.5); border-radius: var(--radius-circle); background: var(--accent); }
 	.fold-new-word { color: var(--accent-text); }
-	.fold-details, .fold-history { flex: 0 0 100%; box-sizing: border-box; }
+	/* min-width 0: a flex item's automatic minimum is its content's min-content, so one nowrap tool phrase would widen the pane past the phone. */
+	.fold-details, .fold-history { flex: 0 0 100%; min-width: 0; box-sizing: border-box; }
 	.fold-browser { display: inline-flex; min-width: 0; margin-left: var(--space-2); }
 	.fold-chevron { flex: 0 0 auto; color: var(--text-tertiary); transition: transform var(--dur-tight); }
 	.fold-chevron.expanded { transform: rotate(90deg); }

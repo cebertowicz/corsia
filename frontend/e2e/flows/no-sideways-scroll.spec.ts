@@ -227,6 +227,14 @@ const FINDING_AGENT = `lane_${'n'.repeat(60)}`;
 const FINDING_ACTION = `Review ${'a'.repeat(60)}`;
 /** A local model selector as the catalog serves it, about 50 characters with no space to wrap at. */
 const LOCAL_MODEL = 'omlx@ns-f378151a51/Qwen3.8-Flash-Next-MLX-oQ6-MTP';
+/**
+ * The tool calls a real turn stores: a long phrase and the backend's long error line, which the
+ * activity rows must truncate inside the pane instead of widening it.
+ */
+const TOOL_CALLS = [
+	{ id: 'phone-guard-call-1', name: 'Bash', args: { command: 'corsia records recent' }, phrase: `Listed recent records of ${LONG_TOKEN}`, outcome: 'failed', error_line: 'Error: Command timed out after 120 seconds waiting for the host-access supervisor to answer', result_state: 'absent' },
+	{ id: 'phone-guard-call-2', name: 'Bash', args: { command: 'corsia plan update status' }, phrase: 'Updated the plan status', outcome: 'done', result_state: 'absent' },
+];
 const DEBUG_VERSION_HASH = '3e8bac2779e44891e427005349d4f498978e2afb';
 /**
  * The metadata a CI merge build actually shows: `3e8bac2` is the synthetic merge commit,
@@ -343,6 +351,14 @@ async function seed(
 			actual: { subscription_records: 1_600, unknown_charge_records: 0, external_unset_records: 0, direct_api_dollars: 4.2, complete: true, workspace_subscription: { subscription_dollars: null, overage_dollars: null, subscription_facts: 0, overage_facts: 0, subscription_coverage: 'none', overage_coverage: 'none', overlapping_overage: [], allocation: 'unavailable' } },
 		} });
 	});
+	// The catalog a person with a local model sees: one more ready row whose option text is the
+	// unbroken selector plus its description, the longest label a model picker has to hold.
+	await page.route(/\/api\/models(\?.*)?$/, async (route) => {
+		const response = await route.fetch();
+		const body = await response.json();
+		const local = { id: LOCAL_MODEL, name: LOCAL_MODEL, desc: 'Local · vision, tools, reasoning · 262k context', size: '', backend: 'local', speed: '', status: 'ready', is_local: true };
+		return route.fulfill({ response, json: { ...body, models: [...body.models, local] } });
+	});
 	await page.route('**/api/version', async (route) => {
 		await versionHold;
 		return route.fulfill({ json: DEBUG_VERSION });
@@ -363,13 +379,13 @@ async function seed(
 		} });
 	});
 	await page.route(`**/api/threads/${agentId}/messages**`, async (route) => {
-		const message = (id: string, role: 'user' | 'assistant', content: string, n: number) => ({
-			id, thread_id: agentId, role, content, created_at: `2026-10-01T12:00:00.00000${n}`, metadata: null,
+		const message = (id: string, role: 'user' | 'assistant', content: string, n: number, metadata: object | null = null) => ({
+			id, thread_id: agentId, role, content, created_at: `2026-10-01T12:00:00.00000${n}`, metadata,
 		});
 		return route.fulfill({ json: {
 			messages: [
 				message('phone-guard-1', 'user', `Please check ${LONG_TOKEN} for me`, 1),
-				message('phone-guard-2', 'assistant', `Checked ${LONG_TOKEN}: it resolves.`, 2),
+				message('phone-guard-2', 'assistant', `Checked ${LONG_TOKEN}: it resolves.`, 2, { tool_calls: TOOL_CALLS }),
 			],
 			has_more: false, oldest_id: null,
 		} });
@@ -554,10 +570,14 @@ const VIEW_TARGETS: Record<string, Target> = {
 			await resume.click();
 			// The assistant's reply sits under the "Worked" disclosure; a reader opens it to read the answer.
 			await page.getByRole('button', { name: 'Expand Worked' }).click();
+			// The tool chip opens into its rows, each with its phrase and outcome.
+			await page.locator('.ta-summary').first().click();
 		},
 		ready: async (page, _data, timeout = 20_000) => {
 			await expect(page.getByRole('textbox', { name: 'Message CORSIA' }), 'the thread is open').toBeVisible({ timeout });
 			await expect(page.locator('.message').filter({ hasText: LONG_TOKEN }), 'the transcript shows both seeded messages').toHaveCount(2, { timeout });
+			await expect(page.locator('.ta-row'), 'the tool chip shows both seeded calls, the failed one with its error line').toHaveCount(TOOL_CALLS.length, { timeout });
+			await expect(page.locator('.ta-outcome.bad'), 'the failed call shows its error line').toContainText('Command timed out', { timeout });
 		},
 	},
 	settings: {
@@ -616,11 +636,47 @@ const ROUTE_TARGETS: Record<string, { url: (data: Seed) => string; ready: Target
 
 // ---- Measuring: signed in, on the expected surface, populated, then scrolled ----
 
+/**
+ * The same measurement with the longest data a reader's content can hold put into the elements built to
+ * hold it: every element that truncates with an ellipsis gets a long unbroken token, and every select gets a
+ * long option. Hand-seeded fixtures only cover the content someone thought of; this covers every such element
+ * on a surface, so a new chip, row or select that sizes itself to its content fails here without a new fixture.
+ * The page is restored afterwards, so the next step reads what it expects.
+ */
+async function sidewaysScrollersWithLongData(page: Page): Promise<Offender[]> {
+	await page.evaluate(() => {
+		const undo: Array<() => void> = [];
+		(window as unknown as { __longData: Array<() => void> }).__longData = undo;
+		const long = 'W'.repeat(90);
+		for (const el of Array.from(document.querySelectorAll<HTMLElement>('body *'))) {
+			if (getComputedStyle(el).textOverflow !== 'ellipsis') continue;
+			for (const text of Array.from(el.childNodes).filter((node): node is Text => node instanceof Text && !!node.nodeValue?.trim())) {
+				const original = text.nodeValue;
+				text.nodeValue = `${original}${long}`;
+				undo.push(() => { text.nodeValue = original; });
+			}
+		}
+		for (const select of Array.from(document.querySelectorAll('select'))) {
+			const option = document.createElement('option');
+			option.textContent = long;
+			select.appendChild(option);
+			undo.push(() => option.remove());
+		}
+	});
+	try {
+		return await sidewaysScrollers(page);
+	} finally {
+		await page.evaluate(() => (window as unknown as { __longData: Array<() => void> }).__longData.forEach((undo) => undo()));
+	}
+}
+
 async function measure(page: Page, ready: () => Promise<void>): Promise<Offender[]> {
 	await ready();
 	// Web fonts change line breaks; wait for them to load rather than for a delay.
 	await page.evaluate(() => document.fonts.ready.then(() => true));
-	return sidewaysScrollers(page);
+	const offenders = await sidewaysScrollers(page);
+	if (offenders.length) return offenders;
+	return (await sidewaysScrollersWithLongData(page)).map((offender) => ({ ...offender, element: `${offender.element} (with long data)` }));
 }
 
 /** The readiness proof for a shell view: signed in, then the view's own content. */

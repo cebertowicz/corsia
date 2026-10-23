@@ -88,6 +88,7 @@ def install_resolved_omlx_session(
     *,
     context_window: int = 128000,
     reasoning_effort: str | None = None,
+    supports_reasoning: bool = False,
 ):
     """Install one authenticated session with an already-resolved oMLX target."""
     from llm.resolution import ExecutionTarget
@@ -104,7 +105,7 @@ def install_resolved_omlx_session(
         available=True,
         availability_reason=None,
         display_name=provider_model_id,
-        supports_reasoning=False,
+        supports_reasoning=supports_reasoning,
     )
     session_db = MagicMock()
     session_db.execute.return_value.fetchone.return_value = None

@@ -63,6 +63,7 @@ def test_cache_warm_eager_checkpoint_matches_native_send_without_exact_render(
         monkeypatch, exact=exact, checkpoint_tail=checkpoint_tail,
     )
     connection = MagicMock()
+    connection.execute.return_value.fetchone.return_value = None  # No held app wake.
     monkeypatch.setattr(api_runtime, "get_db", lambda: connection)
     eager = SimpleNamespace(id=checkpoint_tail.checkpoint_generation_id)
     snapshot = MagicMock(return_value=(None, eager, eager))
@@ -109,6 +110,9 @@ def test_cache_warm_eager_checkpoint_matches_native_send_without_exact_render(
     assert tuple(warm_tools) == tools
     assert connection.execute.call_args_list == [
         (("BEGIN",), {}),
+        (("SELECT metadata FROM messages WHERE id=? AND thread_id=? "
+          "AND delivery_state='queued' AND delivery_error=?",
+          ("first-run:sess-warm-eager", "sess-warm-eager", "no_model_selected")), {}),
         (("ROLLBACK",), {}),
     ]
     snapshot.assert_called_once_with(

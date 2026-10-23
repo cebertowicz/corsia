@@ -56,6 +56,8 @@ export interface Message {
 	created_at: string;
 	seq?: number | null;
 	typewriterPos?: number;
+	/** Local presentation only; never persisted or inferred from history. */
+	firstRunOpeningReveal?: boolean;
 	reasoning?: string;
 	_optimistic?: boolean;
 	delivery_state?: import('../messageDelivery').MessageDeliveryState;

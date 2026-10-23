@@ -179,6 +179,10 @@ def _create_account(
                 if start_setup_task:
                     first_run_path = "script"  # seeded tasks mean the wake follows the script path
                     seed_first_run_setup_plan(conductor_id, name, db=conn)
+                else:
+                    from onboarding.app_first_run import seed_initial
+
+                    seed_initial(conductor_id, name, db=conn)
                 woke = enqueue_first_run_wake(conductor_id, first_run_path=first_run_path, db=conn)
         if before_commit is not None:
             before_commit()

@@ -23,6 +23,7 @@ class CCForkOutput:
     stderr: bytes
     truncated: bool
     failure: str | None = None
+    input_note: str = "input not sent"
 
 
 async def _stop_process(process) -> None:
@@ -52,6 +53,7 @@ class _ToolBoundary:
         self.lock = asyncio.Lock()
         self.closed = self.truncated = False
         self.failure: str | None = None
+        self.input_note = "input not sent"
         self.on_usage = on_usage
         self.calls: dict[str, tuple[str | None, dict]] = {}
         self.claimed_tool_calls: set[str] = set()
@@ -185,8 +187,14 @@ async def _exchange(
     from core.fork_account import require_fork_write
 
     require_fork_write(request)
-    process.stdin.write(payload)
-    await process.stdin.drain()
+    try:
+        process.stdin.write(payload)
+        await process.stdin.drain()
+    except (BrokenPipeError, ConnectionResetError) as error:
+        # The process ended first; its exit and stdout still name the outcome.
+        boundary.input_note = f"input write failed: {type(error).__name__}"
+    else:
+        boundary.input_note = f"input sent ({len(payload)} bytes)"
     process.stdin.close()
 
     async def stderr():
@@ -245,4 +253,6 @@ async def communicate_fork(
                     task.cancel()
             await asyncio.gather(operation, stopped, exited, return_exceptions=True)
             await boundary.close()
-    return CCForkOutput(bytes(captured), bytes(errors), boundary.truncated, boundary.failure)
+    return CCForkOutput(
+        bytes(captured), bytes(errors), boundary.truncated, boundary.failure, boundary.input_note,
+    )

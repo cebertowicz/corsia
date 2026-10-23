@@ -34,6 +34,15 @@
 		renderedAsks?: ReadonlySet<string>;
 	} = $props();
 
+	let openingAnnouncement = $state('');
+	$effect(() => {
+		// Populate a stable live region once. Reveal ticks and the final markdown
+		// swap are visual only, and a later mount of history does not announce.
+		if (msg.firstRunOpeningReveal && msg.typewriterPos != null && !openingAnnouncement) {
+			openingAnnouncement = msg.content;
+		}
+	});
+
 	const activityTools = $derived.by(() => {
 		const hints: string[] = msg.toolHints ?? [];
 		const calls: any[] = msg.metadata?.tool_calls ?? [];
@@ -145,12 +154,17 @@
 
 	{#if showContent && msg.content}
 	<div class="md-content long-message-body">
-		{#if msg.typewriterPos != null}
-			<pre class="typewriter-text">{msg.content.slice(0, msg.typewriterPos)}</pre>
-			<span class="typewriter-cursor">&#9613;</span>
-		{:else}
-			{@html renderMarkdown(msg.content)}
+		{#if msg.firstRunOpeningReveal}
+			<span class="sr-only" aria-live="polite" aria-atomic="true">{openingAnnouncement}</span>
 		{/if}
+		<div aria-hidden={openingAnnouncement || (msg.firstRunOpeningReveal && msg.typewriterPos != null) ? 'true' : undefined}>
+			{#if msg.typewriterPos != null}
+				<pre class="typewriter-text">{msg.content.slice(0, msg.typewriterPos)}</pre>
+				<span class="typewriter-cursor" aria-hidden="true">&#9613;</span>
+			{:else}
+				{@html renderMarkdown(msg.content)}
+			{/if}
+		</div>
 	</div>
 	{/if}
 
@@ -170,6 +184,10 @@
 </div>
 
 <style>
+	.sr-only {
+		position: absolute; inline-size: 0; block-size: 0; margin: 0; padding: 0;
+		overflow: hidden; clip-path: inset(50%); white-space: nowrap;
+	}
 	.tool-calls {
 		display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px;
 		padding-left: 8px; border-left: 2px solid color-mix(in srgb, var(--teal) 35%, transparent);

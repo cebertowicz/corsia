@@ -26,6 +26,11 @@ def _media_projection_kwargs(media_projection) -> dict:
     return {} if media_projection is None else {"media_projection": media_projection}
 
 
+def _resolve_thread_effort(requested, thread_row: Any, target: ExecutionTarget) -> str | None:
+    if requested is None and "reasoning_effort" in thread_row.keys():
+        requested = thread_row["reasoning_effort"]
+    return resolve_reasoning_effort(requested, target.catalog_id)
+
 
 async def dispatch_cc_sub(
     thread_id: str,
@@ -226,7 +231,7 @@ async def dispatch_native_event(
             target=target,
             ingress="event",
             turn_id=turn_id,
-            reasoning_effort=None,
+            reasoning_effort=_resolve_thread_effort(None, thread_row, target),
             broadcast=_broadcast,
             step_metadata=metadata,
             persist_input_once=persist_input_once,
@@ -286,11 +291,7 @@ async def dispatch_native_delegation(
             target=target,
             turn_id=turn_id,
             ingress="delegation",
-            reasoning_effort=resolve_reasoning_effort(
-                reasoning_effort if reasoning_effort is not None
-                else thread_row["reasoning_effort"] if "reasoning_effort" in thread_row.keys() else None,
-                target.catalog_id,
-            ),
+            reasoning_effort=_resolve_thread_effort(reasoning_effort, thread_row, target),
             persist_input_once=persist_input_once,
             settle_delivery=settle_delivery,
             prepared_context=prepared_context,
@@ -338,10 +339,9 @@ async def dispatch_native_ws(
     from infra import state
     from ws.turn import execute_turn
 
-    effective_reasoning_effort = reasoning_effort
-    if effective_reasoning_effort is None and "reasoning_effort" in thread_row.keys():
-        effective_reasoning_effort = thread_row["reasoning_effort"]
-    effective_reasoning_effort = resolve_reasoning_effort(effective_reasoning_effort, target.catalog_id)
+    effective_reasoning_effort = _resolve_thread_effort(
+        reasoning_effort, thread_row, target,
+    )
     start_ack = asyncio.get_running_loop().create_future()
     turn_task = asyncio.create_task(
         execute_turn(

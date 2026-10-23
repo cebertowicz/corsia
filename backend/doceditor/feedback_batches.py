@@ -19,7 +19,7 @@ from doceditor.feedback_state import (
     user_feedback_for_document,
 )
 import infra.sweep_wake as sweep_wake
-from infra.database import write_transaction
+from infra.database import claim_connection, write_transaction
 from infra.write_effects import after_commit
 
 log = logging.getLogger(__name__)
@@ -263,17 +263,23 @@ def deliver_person_comment(db, batch_ids: list[str], artifact_id: str) -> list[s
     return woken
 
 
-def _claim_and_deliver(db, batch_id: str, *, from_state: str, reason: str | None) -> tuple[bool, tuple[str, ...]]:
+def _claim_and_deliver(db, batch_id: str, *, from_state: str, reason: str | None, due_by: str | None = None) -> tuple[bool, tuple[str, ...]]:
+    if (reason is not None) + (due_by is not None) != (from_state == "open"):
+        raise ValueError("an open-batch claim names exactly one of a reason or a due cutoff; a retry names neither")
     now = _now()
     closed_sql = "closed_reason=?" if reason is not None else "closed_reason=closed_reason"
+    due_sql = " AND closes_at<=?" if due_by is not None else ""
     params: list[Any] = [now]
     if reason is not None:
         params.append(reason)
     params.extend([batch_id, from_state])
+    if due_by is not None:
+        closed_sql = "closed_reason=COALESCE(NULLIF(closed_reason,''),CASE author_kind WHEN 'agent' THEN 'quiet' ELSE 'idle' END)"
+        params.append(due_by)
     changed = db.execute(
         f"""UPDATE doc_feedback_batches SET state='delivered',updated_at=?,
             {closed_sql},undelivered_reason=NULL,attempts=attempts+1
-            WHERE id=? AND state=?""",
+            WHERE id=? AND state=?{due_sql}""",
         params,
     )
     if changed.rowcount == 0:
@@ -305,6 +311,12 @@ def close_batch(db, batch_id: str, reason: str) -> tuple[bool, tuple[str, ...]]:
     """Conditionally close and deliver one open batch exactly once."""
     with write_transaction(db, scope="close_doc_feedback_batch") as connection:
         return _claim_and_deliver(connection, batch_id, from_state="open", reason=reason)
+
+
+def _close_due_batch(db, batch_id: str, now: str) -> tuple[bool, tuple[str, ...]]:
+    """The due sweep's claim: closes_at is re-checked in the claim and the reason derives from the row."""
+    with write_transaction(db, scope="close_doc_feedback_batch") as connection:
+        return _claim_and_deliver(connection, batch_id, from_state="open", reason=None, due_by=now)
 
 
 def retry_batch(db, batch_id: str) -> tuple[bool, tuple[str, ...]]:
@@ -351,25 +363,27 @@ def close_for_turn_end(db, thread_id: str) -> list[str]:
 
 def close_due(now: str, *, db=None) -> list[str]:
     """Deliver every due batch; one that raises rolls back alone, is logged, and retries next pass."""
-    deliveries: list[tuple[str, str]] = []
-    with write_transaction(db, scope="close_due_doc_feedback") as connection:
+    connection, owns_connection = claim_connection(db, "close_due_doc_feedback")
+    try:
         rows = connection.execute(
-            """SELECT id,artifact_id,author_kind,closed_reason FROM doc_feedback_batches
-               WHERE state='open' AND closes_at<=? ORDER BY closes_at,id""",
-            (now,),
+            "SELECT id,artifact_id,author_kind FROM doc_feedback_batches "
+            "WHERE state='open' AND closes_at<=? ORDER BY closes_at,id", (now,),
         ).fetchall()
+        deliveries: list[tuple[str, str]] = []
         woken: list[str] = []
         for row in rows:
-            reason = row["closed_reason"] or ("quiet" if row["author_kind"] == "agent" else "idle")
             try:
-                closed, selected = close_batch(connection, row["id"], reason)
+                closed, selected = _close_due_batch(connection, row["id"], now)
             except Exception:
                 log.exception("document feedback batch %s failed to close", row["id"])
                 continue
             woken.extend(selected)
             comment_notifications.collect_due_user_delivery(deliveries, connection, row, closed)
-    comment_notifications.publish_due_user_feedback(deliveries)
-    return woken
+        comment_notifications.publish_due_user_feedback(deliveries)
+        return woken
+    finally:
+        if owns_connection:
+            connection.close()
 
 
 def retry_for_document(db, *, author_kind: str, author_id: str, artifact_id: str) -> list[str]:

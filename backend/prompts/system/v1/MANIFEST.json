@@ -190,10 +190,22 @@
       "sha256": "0160994d05af30bc3e13055ea18034b975c9c1fda29476ca6610fc5dbdf931e3"
     },
     {
-      "bytes": 22455,
+      "bytes": 23472,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/references/first-run-app.md",
-      "sha256": "2fe3ebfeb64140b056428fede3274e578e3605432ea81c9d42b15630bb405b00"
+      "sha256": "7298ebd178708511939cc52f3558d312d932f4b9f48e6a0feed4a4f84fcba45f"
+    },
+    {
+      "bytes": 1225,
+      "kind": "skill",
+      "path": "skills/conductor-bootstrap/references/first-run-opening.md",
+      "sha256": "0e0a32220ede6443efafefe958d0db9e531582050586ce86827a97491d12b30f"
+    },
+    {
+      "bytes": 1366,
+      "kind": "skill",
+      "path": "skills/conductor-bootstrap/references/first-run-start.md",
+      "sha256": "5390c727704a7c73f755e813fd583eb7473da73918e242cfc10d9cd9ab08bf24"
     },
     {
       "bytes": 17500,
@@ -214,10 +226,10 @@
       "sha256": "582fe0631a98012f88d545e7b4d4e82a78d9d13d812d6e32a42ca8d40ec2b3b6"
     },
     {
-      "bytes": 11981,
+      "bytes": 12031,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/references/look-up-the-person.md",
-      "sha256": "c91cedf1a7bb4c05967bd0c1107d5ee729d127a36e5e45323f256ddbaf0e4552"
+      "sha256": "b3178c67acaa523f8f82810878087fecdf02cfb61f9013275a85dcb96a7b449a"
     },
     {
       "bytes": 5753,
@@ -238,10 +250,10 @@
       "sha256": "586b814c75cde6491212911ba8c4af4c9131e726585fb2e587a639e000c3a566"
     },
     {
-      "bytes": 5587,
+      "bytes": 5866,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/references/web-search.md",
-      "sha256": "91b5fbf9dfba4e31508e7abb170e9612e673d44d3033a6f5fcfb2b3a032fe147"
+      "sha256": "7c019481404e9c70bd1ce4b28b66d403bd6551c2c744d35af23811565386dd38"
     },
     {
       "bytes": 6788,
@@ -250,10 +262,10 @@
       "sha256": "40cc04d5b875d4eb5055f8927bc4f555a37e5f91285bdabdcc2526cc5abc2b45"
     },
     {
-      "bytes": 5795,
+      "bytes": 6036,
       "kind": "skill",
       "path": "skills/context-stewardship/SKILL.md",
-      "sha256": "b24e1a26e40302da3205d6ec49965b43829ac7b5b3b00ffa9954ab54a3d95ced"
+      "sha256": "b9f947eb8a900aace3aa68da95035a8e2cbc6e05764f102ce072f968e9cb16a6"
     },
     {
       "bytes": 3355,
