@@ -39,6 +39,8 @@
 	let showAdd = $state(false);
 	let toggleError = $state('');
 	let sources = $state<ModelSource[]>([]);
+	// Cards are known once the first host-group read has finished; until then a tool may already have one.
+	let groupsRead = $state(false);
 	const localSource = $derived(sources.find((source) => source.source === 'omlx'));
 	let localSetupBusy = $state(false);
 	let stopLocalSourceUpdates: (() => void) | null = null;
@@ -139,6 +141,7 @@
 	onMount(async () => {
 		await Promise.all([loadProviders(), loadNetworkServers(), loadVendorAccounts(), refreshSources()]);
 		await loadHostGroups();
+		groupsRead = true;
 		loadModels();
 		stopLocalSourceUpdates = on('models_updated', () => { void refreshSources(); if (cliRows.length) void loadHostGroups(); });
 	});
@@ -149,7 +152,7 @@
 	const connectFlow = createSetupConnect({ token: () => get(token), sources: () => sources, refreshSources: async (strict) => { await refreshSources(strict); void loadHostGroups(); } });
 	const cliRows = $derived(HARNESSES.flatMap(({ name }) => {
 		const source = sources.find((candidate) => candidate.source === name);
-		if (!source || baseGroups.some((group) => group.providers.some((provider) => provider.name === name))) return [];
+		if (!groupsRead || $harnessInventoryError || !source || baseGroups.some((group) => group.providers.some((provider) => provider.name === name))) return [];
 		const { cli } = VENDOR_COPY[name], view = connectFlow.row(source);
 		return [withReportAction({ key: name, name: cli, ...view }, () => [{ key: name as 'claude-code' | 'codex', name: cli, reference: view.reference, cause: connectFlow.attempts[name]?.cause }])];
 	}));

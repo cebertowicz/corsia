@@ -203,9 +203,10 @@ describe('ProvidersV7View card request', () => {
 			{ source: 'claude-code', name: 'Claude Code', state: 'needs_auth' },
 			{ source: 'codex', name: 'Codex', state: 'not_installed' },
 		];
-		const fetchMock = vi.fn((url: string) => String(url).includes('/providers/sources')
-			? Promise.resolve({ ok: true, json: async () => ({ sources }) })
-			: new Promise<never>(() => {}));
+		const claudeModel = { id: 'claude-1', harness: 'claude-code', provider: 'claude-code', enabled: 0, available: true };
+		const fetchMock = vi.fn(async (url: string) => String(url).includes('/providers/sources')
+			? { ok: true, json: async () => ({ sources }) }
+			: { ok: true, json: async () => ({ providers: [], servers: [], accounts: [], models: [claudeModel] }) });
 		vi.stubGlobal('fetch', fetchMock);
 		// Claude Code already has a card; only Codex needs the row.
 		hostGroupSnapshot.set([{
@@ -214,8 +215,11 @@ describe('ProvidersV7View card request', () => {
 
 		component = mount(ProvidersV7View, { target: document.body });
 		flushSync();
-		await tick(); await tick();
+		// No row until the first host-group read says which tools already have a card.
+		expect(document.querySelector('section[aria-label="Codex"]')).toBeNull();
+		await vi.waitFor(() => expect(document.querySelector('section[aria-label="Codex"]')).not.toBeNull());
 
+		expect(document.querySelector('[data-provider-card="claude-code"]')).not.toBeNull();
 		expect(document.querySelector('section[aria-label="Claude Code"]')).toBeNull();
 		const row = document.querySelector('section[aria-label="Codex"]');
 		expect(row?.textContent).toContain('Uses your ChatGPT subscription.');
