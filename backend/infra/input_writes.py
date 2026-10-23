@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import sqlite3
 from typing import Awaitable, Callable, TypeVar
 from infra.provider_write_evidence import ProviderWriteEvidence
@@ -75,6 +76,42 @@ def begin_batch_write(
                 raise RuntimeError(
                     f"input write claim changed before dispatch: {item.message_id}"
                 )
+
+
+def lift_batch_fence(
+    batch: ClaimedBatch,
+    *,
+    attempt_id: str,
+    db: sqlite3.Connection | None = None,
+) -> None:
+    """Undo a committed begin that never reached dispatch, keeping the Turn's claim."""
+    with write_transaction(db, scope="lift_batch_fence") as connection:
+        lifted = connection.execute(
+            "UPDATE messages SET delivery_attempt_id=NULL,write_started_at=NULL "
+            "WHERE thread_id=? AND active_turn_id=? AND delivery_attempt_id=? "
+            "AND delivery_state='queued' AND write_outcome IS NULL",
+            (batch.thread_id, batch.turn_id, attempt_id),
+        ).rowcount
+        if lifted not in (0, len(batch.items)):
+            raise RuntimeError(f"input write fence changed before lift: {attempt_id}")
+
+
+async def fence_batch_write(
+    batch: ClaimedBatch,
+    *,
+    attempt_id: str,
+    started_at: str,
+    db: sqlite3.Connection | None = None,
+) -> None:
+    """Begin a provider write; a cancelled begin leaves the pre-begin state."""
+    try:
+        await _write(begin_batch_write, batch, attempt_id=attempt_id, started_at=started_at, db=db)
+    except asyncio.CancelledError:
+        # run_in_db joins the begin before reporting cancellation, so it may
+        # have committed. No provider bytes left: lift the fence so the Turn's
+        # terminal settles these inputs exactly as if the cancel came first.
+        await _write(lift_batch_fence, batch, attempt_id=attempt_id, db=db)
+        raise
 
 
 def release_batch_before_write(
@@ -333,13 +370,7 @@ async def dispatch_fenced_batch(
     db: sqlite3.Connection | None = None,
 ) -> T:
     """Fence, dispatch outside storage, and settle only adapter evidence."""
-    await _write(
-        begin_batch_write,
-        batch,
-        attempt_id=attempt_id,
-        started_at=started_at,
-        db=db,
-    )
+    await fence_batch_write(batch, attempt_id=attempt_id, started_at=started_at, db=db)
     evidence = evidence or ProviderWriteEvidence()
     try:
         result = await dispatcher(evidence)

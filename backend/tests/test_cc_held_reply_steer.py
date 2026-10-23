@@ -314,7 +314,6 @@ async def test_cc_begin_write_failure_after_prefix_trim_releases_each_row_once(
     cc_turn, monkeypatch, caplog,
 ):
     from infra import input_writes
-    from subagents import cc_runtime_steering
     from subagents.cc_runtime_events import _make_on_event
 
     released = []
@@ -332,7 +331,7 @@ async def test_cc_begin_write_failure_after_prefix_trim_releases_each_row_once(
 
     monkeypatch.setattr(input_writes, "release_batch_before_write", recording_release)
     monkeypatch.setattr("infra.preflight_attempt.live_input_fits", fits_one)
-    monkeypatch.setattr(cc_runtime_steering, "begin_batch_write", locked)
+    monkeypatch.setattr(input_writes, "begin_batch_write", locked)
     on_event = _make_on_event(cc_turn.live, "thread-1", lambda *_a: None, cc_turn.db)
     await on_event(_tool_use("provider-1", "a.md"))
     _accept_steer("steer")
@@ -352,7 +351,6 @@ async def test_cc_release_failure_never_replaces_the_original_cause(
     cc_turn, monkeypatch, caplog,
 ):
     from infra import input_writes
-    from subagents import cc_runtime_steering
     from subagents.cc_runtime_events import _make_on_event
 
     def locked(*_args, **_kwargs):
@@ -361,7 +359,7 @@ async def test_cc_release_failure_never_replaces_the_original_cause(
     def release_fails(*_args, **_kwargs):
         raise RuntimeError("release also failed")
 
-    monkeypatch.setattr(cc_runtime_steering, "begin_batch_write", locked)
+    monkeypatch.setattr(input_writes, "begin_batch_write", locked)
     monkeypatch.setattr(input_writes, "release_batch_before_write", release_fails)
     on_event = _make_on_event(cc_turn.live, "thread-1", lambda *_a: None, cc_turn.db)
     await on_event(_tool_use("provider-1", "a.md"))
