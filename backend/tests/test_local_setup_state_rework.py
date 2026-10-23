@@ -3,6 +3,7 @@
 import asyncio
 import os
 from dataclasses import replace
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -136,6 +137,29 @@ async def test_startup_delivery_failure_preserves_a_live_flight(flight, monkeypa
 
 
 @pytest.mark.asyncio
+async def test_setup_download_registers_then_forces_a_pin_and_read_back(flight, monkeypatch):
+    from llm import local_setup_flow as flow
+    from llm.local_model import LocalModel
+
+    model = LocalModel("Jundot/new-model", 1_000_000, 32_768)
+    keep_loaded = AsyncMock()
+    monkeypatch.setattr(flow.prepare, "join", AsyncMock())
+    monkeypatch.setattr("llm.local_sources.local_server_for_install", AsyncMock(return_value=("server", 8210, False)))
+    monkeypatch.setattr(flow.ls, "_record_model", lambda _model: None)
+    monkeypatch.setattr(flow.ls, "_download", AsyncMock())
+    monkeypatch.setattr(flow.ls, "record_downloaded", lambda: None)
+    monkeypatch.setattr(flow, "apply_optimal_settings", AsyncMock(return_value=SimpleNamespace(status="applied", writer_attempted=True)))
+    monkeypatch.setattr("llm.catalog_network_models.discover_network_models", AsyncMock(return_value={"ok": True}))
+    monkeypatch.setattr(flow, "record_set_up", lambda _model: None)
+    monkeypatch.setattr(flow, "keep_loaded", keep_loaded)
+
+    result = await flow._setup_new_omlx(lambda _stage, **_kwargs: None, [], model)
+
+    assert result["ok"] is True
+    keep_loaded.assert_awaited_once_with("server", model, force_pin=True)
+
+
+@pytest.mark.asyncio
 async def test_corsias_own_registered_local_model_is_visible_and_setup_and_prepare_do_not_modify_it(isolated_db, flight, monkeypatch):
     from llm import local_setup_flow as flow, local_setup_prepare as prepare, local_sources
     from llm import network_discovery as discovery
@@ -195,3 +219,63 @@ async def test_failed_boot_retains_identity_until_the_supervised_process_exits(f
     assert supervisor.is_corsia_process(pid)
     assert (await supervisor.start_server({"server_id": "boot-failed", "host": "127.0.0.1", "port": 8210}))["ok"] is False
     assert supervisor.is_corsia_process(pid)
+
+
+@pytest.mark.asyncio
+async def test_a_running_server_with_no_model_starts_the_download_instead_of_reading_as_connected(isolated_db, flight, monkeypatch):
+    from llm import local_setup_flow as flow
+    from llm import network_discovery as discovery
+    from llm.managed_omlx_binary import MANAGED_INSTANCE_ID
+
+    discovery.upsert_server(provider="omlx", instance_id=MANAGED_INSTANCE_ID, instance_name="Local model",
+                            host="127.0.0.1", port=8210, status="online", kind="managed", source="corsia")
+    started = asyncio.Event()
+
+    async def download_flight(**_kwargs):
+        started.set()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(flow, "local_memory_ok", lambda: True)
+    monkeypatch.setattr(flow, "_run_flight", download_flight)
+    try:
+        result = await flow.begin_local_setup(onboarding=True)
+        await asyncio.wait_for(started.wait(), 2)
+        assert result["ok"] and result["in_progress"] and not result.get("existing")
+        assert flight.setup_status()["state"] == "starting"
+    finally:
+        flight._flight.task.cancel()
+        await asyncio.gather(flight._flight.task, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_a_press_that_cannot_claim_the_operation_says_why_instead_of_reporting_progress(isolated_db, flight, monkeypatch):
+    from llm import local_setup_flow as flow, local_setup_operation
+
+    monkeypatch.setattr(flow, "local_memory_ok", lambda: True)
+    held = local_setup_operation.try_lock()
+    assert held is not None
+    try:
+        result = await flow.begin_local_setup(onboarding=True)
+    finally:
+        local_setup_operation.unlock(held)
+    assert result["ok"] is False and result["reason"] == "operation_held"
+    assert "Quit CORSIA completely" in result["fix"] and not flight._running()
+    assert result["ref"].startswith("local-")
+
+
+@pytest.mark.asyncio
+async def test_a_settings_press_that_cannot_claim_the_operation_says_why_and_logs_a_reference(isolated_db, flight, monkeypatch):
+    from llm import local_setup_flow as flow, local_setup_operation
+    from llm.local_model import LocalModel
+
+    monkeypatch.setattr(flow, "local_memory_ok", lambda: True)
+    warned = []
+    monkeypatch.setattr(flight.log, "warning", lambda message, *args: warned.append(message % args))
+    held = local_setup_operation.try_lock()
+    assert held is not None
+    try:
+        result = await flow.begin_settings_download(LocalModel.__new__(LocalModel))
+    finally:
+        local_setup_operation.unlock(held)
+    assert result["ok"] is False and result["reason"] == "operation_held" and not flight._running()
+    assert warned == [f"Local setup could not claim its operation reference={result['ref']}"]

@@ -96,11 +96,10 @@ def tool_activity(name: str | None, arguments: object) -> ToolActivity:
     return ToolActivity(f"{verb} {shown}".strip(), value)
 
 
-def tool_display_activity(name: str | None, arguments: object) -> ToolActivity:
-    """Render a call's activity, naming the tool a ``tool_call`` bridge runs.
+def resolve_display_call(name: str | None, arguments: object) -> tuple[str, object]:
+    """The tool a call really runs and its arguments, looking through a ``tool_call`` bridge.
 
-    Every harness path uses this, live and on reload, so one call keeps one
-    label. Arguments may arrive as a JSON string or a partial stream chunk.
+    Arguments may arrive as a JSON string or a partial stream chunk; this is the one place they are read.
     """
     from tools.tool_surface import resolve_dispatch
 
@@ -110,4 +109,4 @@ def tool_display_activity(name: str | None, arguments: object) -> ToolActivity:
         except ValueError:
             arguments = {}
     resolved_name, resolved_arguments, _ = resolve_dispatch(name or "", arguments)
-    return tool_activity(resolved_name, resolved_arguments)
+    return resolved_name, resolved_arguments

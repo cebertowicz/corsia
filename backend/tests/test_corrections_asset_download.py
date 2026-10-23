@@ -749,6 +749,15 @@ def test_routes_start_and_report_state_and_take_no_path(api_client):
     assert again.json() == {"state": "ready"}
 
 
+def test_the_setup_start_route_reports_a_failure_like_the_startup_start(api_client, monkeypatch):
+    import app_startup_runtime
+
+    calls = []
+    monkeypatch.setattr(api_client.flight, "start", lambda **kwargs: calls.append(kwargs) or {"state": "idle"})
+    api_client.post("/api/setup/classifier", json={}, headers=JSON_HEADERS)
+    assert calls == [{"on_failure": app_startup_runtime.report_classifier_download_failure}]
+
+
 def test_an_installed_asset_wakes_the_correction_worker_on_the_app_loop(monkeypatch):
     import asyncio
 

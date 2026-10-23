@@ -90,13 +90,14 @@ async def annotate_download_will_pin(sources: list[dict]) -> None:
         download["will_pin"] = pin_fits(int(size), _pinned_bytes(rows), pin_room_bytes())
 
 
-async def keep_loaded(server_id: str, model: LocalModel) -> None:
-    """Pin a completed download when it fits the room for pins, then load it when it fits now.
+async def keep_loaded(server_id: str, model: LocalModel, *, force_pin: bool = False) -> None:
+    """Pin a completed download, then load it when it fits now.
 
-    Every outcome is a row state, never a failure: a pin that doesn't fit leaves the
-    model downloaded and unpinned, and the row's live verdict says why; a step that
-    failed is recorded for the row (see the module table). A completed download is
-    never undone here.
+    Setup uses ``force_pin`` for its one managed model. Settings downloads retain
+    the capacity guard so adding another model does not displace that setup model.
+    Every outcome is a row state: a guarded pin that does not fit leaves the model
+    downloaded and unpinned, while a failed forced pin is visible on the row. A
+    completed download is never undone here.
     """
     from llm.network_discovery import discover_and_notify, notify_cached_model_loaded
     from llm.providers.omlx_lifecycle import load_model
@@ -116,22 +117,31 @@ async def keep_loaded(server_id: str, model: LocalModel) -> None:
         _FAILED[key] = NOT_KEPT
         return
     size = row.get("estimated_size")
-    if not isinstance(size, (int, float)) or size <= 0:
+    size_bytes: float | None = (
+        float(size) if isinstance(size, (int, float)) and size > 0 else None
+    )
+    if size_bytes is None and not force_pin:
         log.warning("Not keeping the downloaded local model loaded: oMLX gave no usable size")
         return
-    pinned = pin_fits(int(size), _pinned_bytes(rows, skip=model.model), pin_room_bytes())
+    pinned = force_pin or (
+        size_bytes is not None
+        and pin_fits(int(size_bytes), _pinned_bytes(rows, skip=model.model), pin_room_bytes())
+    )
     if pinned:
         pin = await update_model_settings({"server_id": server_id}, model.model, {"pinned": True})
-        if not pin.get("ok"):
-            log.warning("Couldn't pin the downloaded local model")
-            emit("pin", pin.get("message") or "Pin refused")
+        if not pin.get("ok") or pin.get("settings", {}).get("pinned") is not True:
+            log.warning("oMLX did not confirm the downloaded local model as pinned")
+            emit("pin", pin.get("message") or "Pin did not persist")
             _FAILED[key] = NOT_KEPT
             return
         emit("pin")
     not_loaded = NOT_LOADED if pinned else NOT_LOADED_UNPINNED
+    if size_bytes is None:
+        log.warning("Not loading the downloaded local model now: oMLX gave no usable size")
+        return
     step = "memory check"
     try:
-        decision = await check_can_load(float(size) / GIB, "omlx")
+        decision = await check_can_load(size_bytes / GIB, "omlx")
         if not decision.get("ok"):
             log.warning("Not loading the downloaded local model now: not enough free memory")
             return

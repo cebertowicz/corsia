@@ -17,6 +17,8 @@ export type DevicesApi = {
 	computer_name: string;
 	lan_addresses: string[];
 	code: { state: 'none' | 'active' | 'paused'; expires_in_seconds?: number | null; value?: string };
+	/** Whether the server says this caller is not the host's direct loopback page. */
+	read_only: boolean;
 	/** The saved outside address, `host` or `host:port` (always reached over https). */
 	outside_address?: string | null;
 };
@@ -57,9 +59,9 @@ function listenerOf(api: DevicesApi): DevicesView['listener'] {
 	return api.listening.reason === 'ports_taken' ? 'all-ports-taken' : 'unavailable';
 }
 
-export function viewFromApi(api: DevicesApi, forcedReadOnly: boolean, hostNameOverride?: string): DevicesView {
-	// The code's characters come only over direct loopback (G11): an active code without them is a connected computer's view.
-	const readOnly = forcedReadOnly || (api.code.state === 'active' && !api.code.value);
+export function viewFromApi(api: DevicesApi, hostNameOverride?: string): DevicesView {
+	// `read_only` is the host's authority for management access; a redacted active code follows from it.
+	const readOnly = api.read_only;
 	const code = api.code.state === 'active' ? api.code.value ?? null : null;
 	return {
 		load: 'ready',
@@ -99,7 +101,6 @@ export function createDevices(options: Options = {}) {
 	let view = $state<DevicesView>({ ...EMPTY_VIEW });
 	let endsAt: number | null = null;
 	let remaining = $state<number | null>(null);
-	let forcedReadOnly = false;
 
 	const headers = (json = false): Record<string, string> => {
 		const current = get(token);
@@ -107,7 +108,7 @@ export function createDevices(options: Options = {}) {
 	};
 
 	function accept(api: DevicesApi) {
-		const next = viewFromApi(api, forcedReadOnly || Boolean(options.remoteName?.()), options.remoteName?.());
+		const next = viewFromApi(api, options.remoteName?.());
 		endsAt = next.endsInSeconds === null ? null : now() + next.endsInSeconds * 1000;
 		remaining = next.endsInSeconds;
 		view = { ...next, endsInSeconds: remaining };
@@ -134,7 +135,7 @@ export function createDevices(options: Options = {}) {
 
 	async function write(path: string, init: RequestInit, fallback: string): Promise<DevicesApi | null> {
 		const response = await fetch(path, { ...init, headers: headers(init.body !== undefined) });
-		if (response.status === 403) { forcedReadOnly = true; await read(); return null; }
+		if (response.status === 403) { await read(); return null; }
 		if (!response.ok) {
 			const body: unknown = await response.json().catch(() => null);
 			const detail = body && typeof body === 'object' && 'detail' in body ? (body as { detail?: unknown }).detail : null;

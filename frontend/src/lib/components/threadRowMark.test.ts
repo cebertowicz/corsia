@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import type { ThreadPlanStateEntry } from '$lib/api/plans';
 import { canMarkSeen, showsWaitingGlyph, slotThreeWord, waitMarkTitle } from './threadRowMark';
@@ -40,11 +40,10 @@ describe('slotThreeWord', () => {
 });
 
 describe('waiting', () => {
-	// Local noon: 40 minutes later is still "today", whatever time the suite runs.
-	const noon = new Date(2026, 0, 15, 12, 0).getTime();
-	const wait = { label: 'CI on PR #1193', until: new Date(noon + 40 * 60_000).toISOString(), more: 0 };
-	beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(noon); });
-	afterEach(() => { vi.useRealTimers(); });
+	// Local noon, so the check-back time never crosses midnight into "tomorrow".
+	const noon = new Date();
+	noon.setHours(12, 0, 0, 0);
+	const wait = { label: 'CI on PR #1193', until: new Date(noon.getTime() + 40 * 60_000).toISOString(), more: 0 };
 
 	it('is a glyph, never a word in slot 3', () => {
 		expect(slotThreeWord({ ...idle, state: 'waiting', wait })).toBe('');
@@ -58,7 +57,7 @@ describe('waiting', () => {
 	});
 
 	it('titles the glyph with what it waits for and when it checks back', () => {
-		expect(waitMarkTitle({ ...idle, state: 'waiting', wait })).toMatch(/^Waiting for CI on PR #1193 · checks back today at /);
+		expect(waitMarkTitle({ ...idle, state: 'waiting', wait }, noon)).toMatch(/^Waiting for CI on PR #1193 · checks back today at /);
 		expect(waitMarkTitle({ ...idle, state: 'waiting', wait: null })).toBe('');
 		expect(waitMarkTitle({ ...idle, state: 'idle', wait })).toBe('');
 	});

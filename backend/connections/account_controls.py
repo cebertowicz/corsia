@@ -2,9 +2,10 @@
 
 CORSIA retains only a hash when comparing Codex logins; each vendor CLI writes and
 removes its own for the home it is given. Sign-in is the vendor's browser
-route, held in memory until the vendor process exits, the person cancels or the
-five-minute wait runs out; a restart drops it and the account stays signed out. Only the vendor's status
-command decides whether an account is signed in. Default identity is read only
+route, held in memory until the vendor process exits (or, for Claude Code, its status
+reads signed in), the person cancels or the five-minute wait runs out; a restart drops
+it and the account stays signed out. Only the vendor's status command decides whether
+an account is signed in. Default identity is read only
 at completion and verify; its login is never changed here.
 """
 from __future__ import annotations
@@ -15,7 +16,7 @@ import json
 import logging
 from typing import Any
 
-from connections import account_signin_prompt, harness_models
+from connections import account_login_wait, account_signin_prompt, harness_models
 from connections.account_identity import codex_identity, refresh_default_identity
 from connections.account_lifecycle import change_state
 from connections.account_profiles import profile_for, sign_out_account
@@ -124,6 +125,17 @@ async def _vendor_status(provider: str, home: str, binary: str) -> tuple[bool | 
     return True, profile.facts_from_status(report), None
 
 
+def _status_poll(operation: SignIn, home: str, binary: str):
+    """The vendor-status read that can end a held login early, for a vendor whose profile allows it."""
+    if not profile_for(operation.provider).status_ends_login:
+        return None
+
+    async def read() -> bool | None:
+        return (await _vendor_status(operation.provider, home, binary))[0]
+
+    return read
+
+
 async def _hold(operation: SignIn, home: str, binary: str) -> None:
     """Wait for the vendor login to exit by itself, then let the vendor's status decide.
 
@@ -138,14 +150,17 @@ async def _hold(operation: SignIn, home: str, binary: str) -> None:
         async with killed_on_exit(process):
             try:
                 async with asyncio.timeout(_SIGNIN_WAIT_SECONDS):
-                    await process.wait()
+                    await account_login_wait.login_done(process, _status_poll(operation, home, binary))
             except TimeoutError:
                 raise _SigninWaitExpired from None
             finally:
                 # Settle the reader before anything else reads the pipe to reap the process.
                 drain.cancel()
                 await asyncio.gather(drain, return_exceptions=True)
-        if process.returncode != 0:
+        # A login stopped here had stored its credentials: the status read below decides, not its exit code.
+        if process.returncode is None:
+            await account_login_wait.stop_login(process)
+        elif process.returncode != 0:
             operation.status, operation.cause = "failed", "vendor_login_failed"
             return
         signed_in, identity, cause = await _vendor_status(operation.provider, home, binary)

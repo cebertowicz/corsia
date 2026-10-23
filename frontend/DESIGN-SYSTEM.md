@@ -359,7 +359,7 @@ in-line.
 | `--ease-snap` | `cubic-bezier(0.2, 0, 0, 1)` | Button + IconButton state changes (100ms); tight UI feedback. Source: `ui/Button.svelte:59`, `ui/IconButton.svelte:46`. |
 | `--ease-material` | `cubic-bezier(0.4, 0, 0.2, 1)` | Sidebar collapse width transition (250ms). Source: `Sidebar.svelte:189`. |
 | `--ease-ios-sheet` | `cubic-bezier(0.32, 0.72, 0, 1)` | Mobile drawer transform (320ms); swipe-row snap. The iOS sheet curve. Source: `Sidebar.svelte:259`. |
-| `--ease-entrance` | `cubic-bezier(0.22, 1, 0.36, 1)` | Login hero-grow (600ms), fade-rise (380ms); phone `main` slide when the rail or pane opens and closes (`--dur-spring`). Pronounced ease-out with no overshoot. Source: `LoginScreen.svelte:94, 106`, `HomeShell.svelte:339, 374`. |
+| `--ease-entrance` | `cubic-bezier(0.22, 1, 0.36, 1)` | Login fade-rise (380ms); phone `main` slide when the rail or pane opens and closes (`--dur-spring`). Pronounced ease-out with no overshoot. Source: `LoginScreen.svelte`, `HomeShell.svelte:339, 374`. |
 | `--ease-cubic-out` (Svelte built-in) | `cubicOut` ≈ `cubic-bezier(0.33, 1, 0.68, 1)` | Auth gate ↔ app cross-fade (320 / 460ms). Source: `+page.svelte:39, 347–354`. |
 
 **Note on auth-fade curve drift.** `Sidebar.svelte:255` comment claims
@@ -376,7 +376,6 @@ fix the comment — flagged in §8.7.
 | Standard | 200–250ms | Modal fly-in (200ms); sidebar collapse width (250ms) |
 | Drawer | 320ms | Mobile drawer present / dismiss; swipe snap; auth-gate exit |
 | Hero | 380–460ms | Auth gate enter (460ms / 200ms delay); login fade-rise (380ms / 220ms delay) |
-| Hero+ | 600ms | Login hero-grow logo |
 
 Avoid mid-band oddballs (270, 420ms etc.) — pick the class that matches
 the surface's role in the user's attention.
@@ -409,19 +408,17 @@ duration: 320, easing: cubicOut`; app `in:fade duration: 460, delay:
 transition feels like a hand-off rather than a flicker. Source:
 `+page.svelte:347–354`.
 
-**Picker → login hero-grow (Tauri).** Logo `hero-grow` keyframe 600ms
-`--ease-entrance`, `transform-origin: center`: scale 0.4 → 1, opacity 0
-→ 1. The 0.4 floor matches the 96px picker mark to the 240px hero size
-so first paint reads as continuation rather than a swap. The login
-screen background also matches the picker's translucency
-(`color-mix(--bg-primary 55%, transparent)` + `--glass-blur`) when in
-the Tauri shell. Source: `LoginScreen.svelte:68–100`.
+**Picker → login mark.** The login logo is the living mark (`LivingMark.svelte`,
+`entry="none"`): it is drawn at rest, with no grow-in, and moves only through its
+ambient flow and pulse. The login screen background still matches the picker's
+translucency (`color-mix(--bg-primary 55%, transparent)` + `--glass-blur`) when in
+the Tauri shell. Source: `LoginScreen.svelte`.
 
 **Picker → login fade-rise (form).** Card content (h1 / p / input /
 button / error) all share a single `fade-rise` keyframe: 380ms
 `--ease-entrance` with 220ms delay; opacity 0 + translateY(6px) →
-final. The 220ms delay overlaps the hero-grow's tail so the hero
-settles before the form appears. Source: `LoginScreen.svelte:101–111`.
+final. The 220ms delay lets the logo settle before the form appears.
+Source: `LoginScreen.svelte`.
 
 **Login → home (the new-chat reveal).** Same auth-gate cross-fade
 above, terminating in the chat view's `bg-primary` solid surface. No
@@ -491,8 +488,8 @@ reach for it from any component.
 #### 2.7.5 Reduced motion
 
 `@media (prefers-reduced-motion: reduce)` should:
-- Disable `hero-grow` and `fade-rise` (replace with instant
-  opacity-only).
+- Disable `fade-rise` (replace with instant opacity-only). The living mark
+  draws as a still frame.
 - Drop `fly` from modal entrance (keep fade).
 - Replace drawer transform-slide with instant.
 - Hold ambient `pulse` and `blink` at a static frame (not jarring).

@@ -253,6 +253,20 @@ def test_a_declared_events_owner_is_the_registered_owner_rules_read(intake_world
     assert _decisions(intake_world, "owned") == {("to-owner", OWNER, "digested", None)}
 
 
+def test_an_agents_own_emit_tool_event_does_not_come_back_to_it(intake_world, monkeypatch):
+    monkeypatch.setattr("events.platform.enqueue_event_wake", lambda *args, **kwargs: None)
+    _rule(intake_world, "to-owner", OTHER, to="registered_owner", mode="digest")
+
+    own = _admit(event_id="own-turn", origin="agent")
+    explained = rule_authoring.explain(intake_world, project_id="project-a", event_id="own-turn")
+
+    # Only the emit tool knows its sender; a CLI emit as the session still reaches it (test above).
+    assert own.accepted and own.rules_matched == 1
+    assert _decisions(intake_world, "own-turn") == {("to-owner", OWNER, "held", "sent by this chat")}
+    assert explained["decisions"][0]["reason"] == "sent by this chat"
+    assert _digested(intake_world, OWNER, "own-turn") == 0
+
+
 def test_a_rule_fires_when_intake_dead_letters_for_an_inactive_owner(intake_world, monkeypatch):
     wakes = []
     monkeypatch.setattr("events.platform.enqueue_event_wake", lambda *args, **kwargs: wakes.append(args[0]))
@@ -464,6 +478,7 @@ def test_script_event_lines_route_and_a_refusal_becomes_an_owner_error(intake_wo
     assert refused.signals[-1].kind == "error" and undeclared_fact in refused.signals[-1].summary
     # The run's stamp, the same one a measure line from this run gets, so the two dedupe together.
     assert _stored(intake_world, "qa.both") == [(OWNER, "project", "ok", f"script:{schedule.id}:run-3")]
+    assert _digested(intake_world, OWNER, f"script:{schedule.id}:run-1:0") == 1
 
 
 def test_a_script_run_with_many_refusal_kinds_names_two_with_their_fixes_and_counts_the_rest(

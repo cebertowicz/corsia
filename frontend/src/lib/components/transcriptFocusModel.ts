@@ -1,4 +1,5 @@
 import type { UpdateCard } from '$lib/api/threadUpdates';
+import { parseBrowserChip, type BrowserChip } from '$lib/browserChip';
 import type { TranscriptMessage } from './messageListModel';
 import { SOURCE_MEMBERS, sourceMembers, sourceRange } from './contextEventModel';
 import type { PlanLimitPauseDescriptor } from './planLimitPause';
@@ -50,6 +51,8 @@ export type TranscriptFoldEntry = {
 	new?: boolean;
 	/** F2b: where the divider goes once the block's rows load; only on the block that is `new` because of it. */
 	divider?: BlockDivider;
+	/** The window the block's newest open put in front of the person; the collapsed block shows it beside its capsule. */
+	browserChip?: BrowserChip;
 };
 
 /** List key of the one run nothing has closed yet. */
@@ -174,12 +177,15 @@ function messageEntry(
 }
 
 function contentOnly(message: TranscriptMessage): TranscriptMessage {
+	// The open is work, so its chip goes with the activity half into the block.
+	const metadata = { ...message.metadata, tool_calls: [] };
+	delete metadata.browser_chip;
 	return {
 		...message,
 		[SOURCE_MEMBERS]: sourceMembers(message),
 		toolHints: [],
 		reasoning: undefined,
-		metadata: { ...message.metadata, tool_calls: [] },
+		metadata,
 	};
 }
 
@@ -187,6 +193,21 @@ function activityOnly(message: TranscriptMessage): TranscriptMessage {
 	const metadata = { ...message.metadata };
 	delete metadata.for_user;
 	return { ...message, [SOURCE_MEMBERS]: sourceMembers(message), content: '', metadata };
+}
+
+/** The newest chip among a block's held stubs and loaded Steps, by position: every open reopens the one browser view. */
+function newestChip(stubs: readonly RunStub[], items: readonly TranscriptMessageEntry[]): BrowserChip | undefined {
+	let newest: { seq: number; chip: BrowserChip } | undefined;
+	const offer = (seq: number, chip: BrowserChip | null | undefined) => {
+		if (chip && (!newest || seq >= newest.seq)) newest = { seq, chip };
+	};
+	for (const stub of stubs) offer(stub.lastSeq, stub.browserChip);
+	for (const { message } of items) {
+		// Items come oldest first; a row not sequenced yet (a live Step) is newer than any that is.
+		const seq = typeof message.seq === 'number' && message.seq > 0 ? message.seq : Infinity;
+		offer(seq, parseBrowserChip(message.metadata?.browser_chip));
+	}
+	return newest?.chip;
 }
 
 /**
@@ -219,11 +240,15 @@ export function buildTranscriptPresentation(
 	const waiting = [...stubs].sort((a, b) => a.firstSeq - b.firstSeq);
 	const held: RunStub[] = [];
 	const holdThrough = (seq: number) => {
-		while (waiting.length && waiting[0].firstSeq <= seq) held.push(waiting.shift()!);
+		while (waiting.length && waiting[0].firstSeq <= seq) {
+			held.push(waiting.shift()!);
+		}
 	};
 	const closeRun = (closingId: string | null) => {
 		if (work.length === 0 && held.length === 0) return;
 		const run = runEntry(work.splice(0), closingId === null ? openKey : `run:${closingId}`);
+		const browserChip = newestChip(held, run.items);
+		if (browserChip) run.browserChip = browserChip;
 		if (held.length) {
 			const stub = combineStubs(held.splice(0));
 			run.stub = stub;

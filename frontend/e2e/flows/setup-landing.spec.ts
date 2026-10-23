@@ -29,7 +29,7 @@ async function serveReadySetup(page: Page, sources: readonly Record<string, unkn
 		? { id: selectedModel, litellm_model: selectedModel, name: 'Vendor default', connection: 'claude-code', provider: 'claude-code', backend: 'api', status: 'ready', is_default: true, runs_on: [{ account_id: 'disposable-account', selected: true, status: 'ready' }] }
 		: { id: selectedModel, litellm_model: selectedModel, name: 'Vendor default', connection: 'omlx', provider: 'omlx', backend: 'network', status: 'ready', is_default: true }], active_local_threads: 0 } }) : route.continue());
 	await page.route('**/api/setup/local-model', (route) => route.fulfill({ json: { state: 'picked', model: { name: 'Qwen 3.8', repository: 'example/qwen', download_size_bytes: 30_000_000_000, download_size_gb: 30, context_window: 65536 }, message: null } }));
-	await page.route('**/api/setup/local-download', (route) => route.fulfill({ json: { ok: true, in_progress: false } }));
+	await page.route('**/api/setup/local-download', (route) => route.fulfill({ json: { ok: true, in_progress: true } }));
 	await page.route('**/api/setup/first-account', (route) => route.fulfill({ json: { token: TEST_SESSION_TOKEN, user: { id: 'e2e', name: 'First Person' } } }));
 	await page.route('**/api/providers/sources/recheck**', (route) => route.fulfill({ json: { sources } }));
 	await page.route('**/api/providers/sources**', (route) => route.fulfill({ json: { sources } }));
@@ -50,7 +50,7 @@ test.describe('@surface:first-run setup landing', () => {
 
 			await page.goto('/');
 			await expect(page.getByRole('heading', { name: 'Welcome to CORSIA' })).toBeVisible();
-			if (project === 'chromium-mobile') await page.getByRole('button', { name: 'Continue' }).click();
+			await page.getByRole('button', { name: 'Continue' }).click();
 			await page.locator('input[autocomplete="name"]').fill('First Person');
 			await page.locator('input[autocomplete="username"]').fill('first');
 			await page.locator('input[autocomplete="new-password"]').nth(0).fill('correct-password');

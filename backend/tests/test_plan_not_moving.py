@@ -39,7 +39,7 @@ _LABELS = {
 
 def _leaf(node_id: str, condition: str, *causes: dict, review: str | None = None) -> dict:
     return {
-        "id": node_id, "parent_id": None,
+        "id": node_id, "title": f"Task {node_id}", "parent_id": None,
         "state": "review_requested" if condition == "review" else "active",
         "execution": {"condition": condition, "causes": list(causes)},
         "review": {"kind": review} if review else None,
@@ -80,16 +80,22 @@ def _header(
     return ("not_moving" if still else operator_node_state.leading(counts)), display
 
 
-def _parts(need_you=0, paused_by_you=0, ends=None, overdue=0, next_overdue=None, set_aside=0):
+def _parts(
+    need_you=0, paused_by_you=0, ends=None, overdue=0, next_overdue=None,
+    set_aside=0, overdue_wait_entries=None,
+):
     """The facts ``not_moving.read`` returns; a dated wait turns overdue after the grace."""
     if ends and next_overdue is None:
         next_overdue = (
             datetime.fromisoformat(ends.replace("Z", "+00:00")) + not_moving.OVERDUE_GRACE
         ).isoformat()
-    return {
+    facts = {
         "need_you": need_you, "next_wait_ends_at": ends, "next_overdue_at": next_overdue,
         "overdue_waits": overdue, "paused_by_you": paused_by_you, "set_aside": set_aside,
     }
+    if overdue_wait_entries:
+        facts["overdue_wait_entries"] = overdue_wait_entries
+    return facts
 
 
 _CASES = {
@@ -449,3 +455,74 @@ def test_the_digest_names_overdue_waits_and_what_to_do():
     for exit_ in ("resolve it", "wait again", "raise a decision", "close the task"):
         assert exit_ in text
     assert "1 wait is past the deadline" in not_moving.note(_parts(overdue=1))
+
+
+def test_two_overdue_waits_keep_plan_order_and_name_each_task():
+    first = _leaf("12345678-first", "waiting", _wait(_ago(timedelta(days=2))))
+    first["title"] = "First overdue task"
+    second = _leaf("87654321-second", "waiting", _wait(_ago(timedelta(days=1))))
+    second["title"] = "Second overdue task"
+
+    _lead, display = _header([first, second])
+
+    facts = display["not_moving"]
+    assert facts["overdue_waits"] == 2
+    assert facts["overdue_wait_entries"] == [
+        {"title": "First overdue task", "node_id": "12345678-first"},
+        {"title": "Second overdue task", "node_id": "87654321-second"},
+    ]
+    assert not_moving.note(facts).endswith(
+        "First overdue task (12345678-first), Second overdue task (87654321-second). Check each: "
+        "resolve it if it cleared, wait again with a new deadline and a reason, raise a "
+        "decision, or close the task."
+    )
+
+
+def test_many_overdue_waits_name_the_first_few_by_full_id_and_count_the_rest():
+    """Full ids the agent can pass back; the line stays inside the checkpoint budget."""
+    late = _ago(timedelta(days=1))
+    nodes = []
+    for index in range(operator_nodes.OPEN_NODE_BUDGET):
+        leaf = _leaf(f"{index:032x}", "waiting", _wait(late))
+        leaf["title"] = "T" * 60
+        nodes.append(leaf)
+
+    facts = _header(nodes)[1]["not_moving"]
+    text = not_moving.note(facts)
+
+    assert facts["overdue_waits"] == operator_nodes.OPEN_NODE_BUDGET
+    named = [f"({index:032x})" for index in range(not_moving.NAMED_OVERDUE)]
+    assert all(full_id in text for full_id in named)
+    assert f"({not_moving.NAMED_OVERDUE:032x})" not in text
+    hidden = operator_nodes.OPEN_NODE_BUDGET - not_moving.NAMED_OVERDUE
+    assert f" and {hidden} more. Check each:" in text
+    assert len(status_context.render({"note": text}).encode()) < status_context.CHECKPOINT_BYTES // 3
+
+
+def test_named_overdue_titles_are_cut_by_emitted_bytes_in_any_script():
+    """Non-ASCII titles escape to 6 or 12 bytes a character; the note still fits."""
+    late = _ago(timedelta(days=1))
+    nodes = []
+    for index, title in enumerate(("\U0001F600" * 60, "漢" * 60, "\U0001F680" * 60, "x")):
+        leaf = _leaf(f"{index:032x}", "waiting", _wait(late))
+        leaf["title"] = title
+        nodes.append(leaf)
+
+    text = not_moving.note(_header(nodes)[1]["not_moving"])
+
+    assert "漢" in text and "(00000000000000000000000000000002)" in text
+    assert len(status_context.render({"note": text}).encode()) < status_context.CHECKPOINT_BYTES // 3
+
+
+def test_unnamed_facts_count_overdue_waits_without_an_empty_list():
+    """Aggregate facts (Activity) carry the count only; the note names no one."""
+    counts = dict.fromkeys(operator_node_state.DISTRIBUTION_KEYS, 0)
+    counts["waiting"] = 1
+    late = _ago(timedelta(days=1))
+    facts = not_moving.read_from_facts(
+        counts, user_ready=0, user_blocked=0, paused_by_user=0, wait_deadlines=[(late, late, None)],
+    )
+
+    assert facts is not None and facts["overdue_waits"] == 1
+    assert "overdue_wait_entries" not in facts
+    assert "1 wait is past the deadline. Check each:" in not_moving.note(facts)

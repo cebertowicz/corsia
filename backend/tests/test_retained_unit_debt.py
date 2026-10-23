@@ -17,7 +17,7 @@ import pytest
 from loguru import logger
 
 from core._tool_result_delivery_support import ToolResultBindingError
-from core.tool_result_delivery import PROVIDER_MISSING_RESULT_REASON
+from infra.delivery_states import PROVIDER_MISSING_RESULT_REASON
 from core.turn_core import BOOT_EPOCH, persist_turn_settlement, persist_turn_terminal
 from history.projection import render_portable_history
 from infra.completed_tool_results import persist_completed_tool_results

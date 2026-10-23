@@ -27,7 +27,7 @@ afterEach(async () => {
 	component = null; host?.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals(); token.set(null); user.set(null);
 });
 
-async function openModels({ localEligible = false, localReplies = [], progressFails = false }: { localEligible?: boolean; localReplies?: Array<Response | Error>; progressFails?: boolean } = {}) {
+async function openModels({ localEligible = false, localReplies = [], progressFails = false, sources = () => [], classifier }: { localEligible?: boolean; localReplies?: Array<Response | Error>; progressFails?: boolean; sources?: () => unknown[]; classifier?: unknown } = {}) {
 	vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
 		const url = String(input);
 		if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: localEligible, work_folder: '~/CORSIA' });
@@ -38,7 +38,8 @@ async function openModels({ localEligible = false, localReplies = [], progressFa
 		}
 		if (url === '/api/setup/first-account' && init?.method === 'POST') return json({ token: 'test-token', user: { id: 'user', name: 'Ada' } });
 		if (url === '/api/setup/progress' && init?.method === 'PUT') return json({}, progressFails ? 500 : 200);
-		if (url.includes('/sources')) return json({ sources: [] });
+		if (url.startsWith('/api/setup/classifier')) return classifier ? json(classifier) : json({ state: 'ready' });
+		if (url.includes('/sources')) return json({ sources: sources() });
 		if (url.includes('/corsia-agent')) return json({ target: { thread_id: 'corsia-thread' } });
 		if (url.includes('/models')) return json({ models: [{ id: 'claude', name: 'Claude', backend: 'harness', litellm_model: 'claude-code/sonnet', status: 'ready', connection: 'claude-code', runs_on: [{ selected: true, status: 'ready' }] }] });
 		return json({});
@@ -86,6 +87,59 @@ describe('SetupScreen local-start recovery', () => {
 		await openModels({ localEligible: true, localReplies: [...localReplies] });
 		await vi.waitFor(() => expect(host.textContent).toContain(expected));
 		expect(host.textContent).not.toContain('private route detail');
+	});
+});
+
+const omlx = (fields: Record<string, unknown>) => ({ source: 'omlx', name: 'Local model', state: 'needs_setup', ...fields });
+const localPosts = () => vi.mocked(fetch).mock.calls.filter(([url, init]) => ['/api/providers/local/setup', '/api/setup/local-download'].includes(String(url)) && init?.method === 'POST').length;
+
+describe('SetupScreen Download press is never silent', () => {
+	it('shows the service reason and reference, and a Retry, when it holds the press', async () => {
+		const fix = 'Quit CORSIA completely, reopen it, then press Retry.';
+		await openModels({ localEligible: true, localReplies: [json({ ok: false, reason: 'operation_held', fix, ref: 'local-0123456789abcdef' })] });
+		await vi.waitFor(() => expect(host.textContent).toContain(fix));
+		expect(host.textContent).toContain('local-0123456789abcdef');
+		expect(Array.from(host.querySelectorAll('button')).some((candidate) => candidate.textContent?.trim() === 'Retry')).toBe(true);
+	});
+
+	it('moves the row to downloading when Retry is pressed and the service starts the flight', async () => {
+		let flying = false;
+		const fix = 'Quit CORSIA completely, reopen it, then press Retry.';
+		await openModels({ localEligible: true, sources: () => [omlx(flying ? { local_state: 'downloading', download_percent: 3 } : {})],
+			localReplies: [json({ ok: false, reason: 'operation_held', fix, ref: 'local-0123456789abcdef' }), json({ ok: true, in_progress: true, stage: 'Installing' })] });
+		await vi.waitFor(() => expect(host.textContent).toContain(fix));
+		flying = true;
+		click('Retry'); await settle();
+		await vi.waitFor(() => expect(host.textContent).toContain('Downloading 3%'));
+		expect(host.textContent).not.toContain(fix);
+		expect(localPosts()).toBe(2);
+	});
+
+	it('treats an already-connected local model as started, not as a failure', async () => {
+		await openModels({ localEligible: true, sources: () => [omlx({ state: 'ready', local_state: 'ready' })], localReplies: [json({ ok: true, existing: true })] });
+		await settle();
+		expect(host.textContent).not.toContain('CORSIA couldn’t start');
+	});
+});
+
+describe('SetupScreen classifier download stays unseen', () => {
+	it.each([
+		['downloading', { state: 'downloading', bytes_done: 60, bytes_total: 100 }],
+		['failed', { state: 'failed', reason: 'Couldn’t download', retryable: true }],
+	] as const)('shows no line for it and Start using CORSIA stays enabled while it is %s', async (_name, classifier) => {
+		await openModels({ classifier });
+		expect(host.textContent).not.toContain('Finishing setup');
+		expect(host.textContent).not.toContain('Downloading');
+		const start = Array.from(host.querySelectorAll('button')).find((candidate) => candidate.textContent?.trim() === 'Start using CORSIA');
+		expect(start?.disabled).toBe(false);
+	});
+
+	it('retries a failed classifier download quietly when the window comes back to the front', async () => {
+		await openModels({ classifier: { state: 'failed', reason: 'Couldn’t download', retryable: true } });
+		const posts = () => vi.mocked(fetch).mock.calls.filter(([url, init]) => String(url) === '/api/setup/classifier' && init?.method === 'POST').length;
+		const before = posts();
+		window.dispatchEvent(new Event('focus')); await settle();
+		await vi.waitFor(() => expect(posts()).toBe(before + 1));
 	});
 });
 

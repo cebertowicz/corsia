@@ -8,6 +8,8 @@
  * the stub and the rows it holds, exactly as it does for a loaded run.
  */
 
+import { parseBrowserChip, type BrowserChip } from './browserChip';
+
 export interface RunStub {
 	firstId: string;
 	lastId: string;
@@ -23,6 +25,8 @@ export interface RunStub {
 	kinds: string[];
 	/** Older rows of this run may sit on a page not read yet: the server cut the run at its scan edge. */
 	continuesOlder: boolean;
+	/** The window the run's newest open put in front of the person, as its Steps stored it; the block shows it. */
+	browserChip?: BrowserChip;
 }
 
 /** Where a run's range read stands; keyed by the run's newest row id. */
@@ -63,6 +67,7 @@ export function parseRunStubs(page: FocusRunsPage | null | undefined): RunStub[]
 		kinds: Array.isArray(stub.kinds)
 			? [...new Set(stub.kinds.filter((kind: unknown): kind is string => typeof kind === 'string'))].sort() as string[] : [],
 		continuesOlder: stub.continues_older === true,
+		browserChip: parseBrowserChip(stub.browser_chip) ?? undefined,
 	})).sort((a, b) => a.firstSeq - b.firstSeq);
 }
 

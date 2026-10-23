@@ -39,11 +39,10 @@ export function failureAction(action: string, ref?: string | null): string {
 }
 
 /** Keep refusal recovery distinct from retryable installer failures without exposing installer output. */
-export function installFailureCopy(cli: string, cause?: InstallFailureCause | null, ref?: string | null) {
+export function installFailureCopy(cli: string, cause?: InstallFailureCause | null, ref?: string | null, maker?: string) {
 	if (installCause(cause) === 'site_refused') {
-		// Without a reference there is nothing to report, so Retry is the only action left.
-		return ref ? { meta: `Couldn’t download ${cli}. The download site refused the request. Save a report.`, reference: ref, retry: false }
-			: { meta: `Couldn’t download ${cli}. The download site refused the request. Retry.`, reference: undefined, retry: true };
+		// Retry stays beside the report: the line tells the person to try again.
+		return { meta: `${maker ?? 'The maker'}’s site refused the download. Try again, or install it yourself.`, reference: ref ?? undefined, retry: true };
 	}
 	if (installCause(cause) === 'connection') {
 		return { meta: `Couldn’t download ${cli}. Check your internet connection, then Retry.`, reference: ref ?? undefined, retry: true };
@@ -54,20 +53,15 @@ export function installFailureCopy(cli: string, cause?: InstallFailureCause | nu
 /** The sign-in's real cause in words, and whether a report would help diagnose it. */
 export function signinFailureCopy(vendor: string, cause?: string | null, ref?: string | null): { meta: string; reportable: boolean } {
 	const { cli, account } = VENDOR_COPY[vendor] ?? { cli: vendor, account: vendor };
-	const again = failureAction('Sign in again', ref);
-	if (cause === 'unreachable') return { meta: `CORSIA didn’t answer while starting the ${cli} sign-in. Sign in again.`, reportable: true };
-	if (cause === 'agent_unavailable') return { meta: `CORSIA couldn’t reach its agent to start signing in. ${again}`, reportable: true };
+	const retry = ref ? 'Press Sign in to try again, or save a report.' : 'Press Sign in to try again.';
 	if (cause?.endsWith('_executable_missing')) return { meta: `CORSIA couldn’t find ${cli} on this computer. Sign in again to install it.`, reportable: true };
 	if (cause?.endsWith('_signin_in_progress')) return { meta: `Another ${cli} sign-in is already open. Finish it in your browser, or sign in again.`, reportable: false };
 	if (cause === 'signin_timed_out') return { meta: `Couldn’t finish signing in to ${cli}: your browser didn’t come back to CORSIA in time. Sign in again, or turn ${cli} off.`, reportable: false };
-	if (cause === 'vendor_login_failed') return { meta: `Signing in to ${cli} didn’t finish in the browser. Sign in again.`, reportable: false };
+	if (cause === 'vendor_login_failed') return { meta: 'Sign-in didn’t finish in your browser. Press Sign in to try again.', reportable: false };
 	if (cause === 'vendor_not_signed_in') return { meta: `${cli} didn’t report a signed-in ${account} account. Sign in again.`, reportable: false };
 	if (cause === 'same_account') return { meta: `That ${account} account is already signed in here. To add another, sign in again with a different ${account} account.`, reportable: false };
-	if (cause === 'signin_check_failed' || cause === 'vendor_status_failed') return { meta: `CORSIA couldn’t check the ${cli} sign-in. ${again}`, reportable: true };
-	if (cause === 'vendor_login_unavailable' || cause === 'vendor_logout_unavailable') return { meta: `CORSIA couldn’t start the ${cli} sign-in. ${again}`, reportable: true };
-	if (cause === 'prompt_unrecognized') return { meta: `${cli} asked something CORSIA didn’t expect. ${again}`, reportable: true };
-	// The cause code itself goes to the report, never into the sentence.
-	return { meta: `Couldn’t finish signing in to ${cli}. ${again}`, reportable: true };
+	// Every other cause is CORSIA’s own plumbing: the person gets one line and the report, never the cause code.
+	return { meta: `Sign-in didn’t finish. ${retry}`, reportable: true };
 }
 
 /** The ready account's name for its row: an email, plan, or the vendor's own label. */
@@ -217,7 +211,7 @@ export function createSetupConnect(deps: ConnectDeps) {
 			return { meta: failure.meta, reference: entry.ref ?? undefined, error: true, reportable: failure.reportable, action: signInAction, canTurnOff: entry.signinCause === 'signin_timed_out' };
 		}
 		if (entry?.phase === 'failed') {
-			const failure = installFailureCopy(copy.cli, entry.cause, entry.ref);
+			const failure = installFailureCopy(copy.cli, entry.cause, entry.ref, copy.maker);
 			return { meta: failure.meta, reference: failure.reference, error: true, reportable: true, action: failure.retry ? { label: 'Retry', run: () => void startInstall(source, true) } : undefined };
 		}
 		if (entry?.phase === 'path-shadow') return { meta: `An older ${copy.cli} at ${entry.shadowedBinary} runs instead of the one CORSIA installed. Remove it, then come back here.`, error: true, action: { label: 'Check again', run: () => void deps.refreshSources(true) } };
