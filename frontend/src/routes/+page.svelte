@@ -454,7 +454,7 @@
 <CorsiaMessageRequestHandler {goConductor} chatPanel={chatPanelRef} />
 <FirstRunHandoff
 	authenticated={$isAuthenticated} token={$token} scope={$uiScope} {selectionIntent} {setupFinishedHandoff} {setupFinishedIntent}
-	chatPanelReady={!!chatPanelRef} activeThread={get(activeThreadId)} {activeView} {selectThread} bind:conductorLookup
+	chatPanelReady={!!chatPanelRef} activeThread={$activeThreadId} {activeView} {selectThread} bind:conductorLookup
 />
 
 <HomePageView

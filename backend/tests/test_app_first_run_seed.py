@@ -54,11 +54,11 @@ def _rows(sql: str, *args):
 def test_app_account_persists_one_opening_and_keeps_held_wake(
     fresh_install, app_seed_facts,
 ):
-    from infra import accounts
+    from infra import accounts, config, user_profile
     from infra.onboarding_events import first_run_message_id
 
     accounts.create_first_account(
-        "newcomer", PASSWORD, full_name="New Comer", first_run_path="app",
+        "newcomer", PASSWORD, full_name="  New\x01   Comer ", first_run_path="app",
     )
 
     conductor_id = _conductor_id()
@@ -66,6 +66,7 @@ def test_app_account_persists_one_opening_and_keeps_held_wake(
     assert (opening["thread_id"], opening["role"], opening["delivery_state"]) == (
         conductor_id, "assistant", "delivered",
     )
+    assert user_profile.profile_name(config.WORKSPACE) == "New"
     assert opening["content"].startswith("Hi New.\n\nI'm CORSIA.")
     metadata = json.loads(opening["metadata"])
     assert metadata["for_user"] is True
@@ -239,6 +240,15 @@ def test_applicable_steps_and_completion_cache_reconcile_conditionals(
         (8, "Your files, and when agents ask first", None),
         (9, "Hand over to your agents", None),
     ]
+    assert [step["acceptance_criteria"] for step in steps] == [
+        "you connected your Claude subscription or chose not now",
+        "you chose whether to bring over what your other tools know",
+        "web search works or you chose not now",
+        "CORSIA knows enough about you to help, or you chose not now",
+        "you chose whether to use or share community improvements, or chose not now",
+        "CORSIA explained how file access and approval work",
+        "CORSIA asked what you would like help with next",
+    ]
 
     accounts.create_first_account("newcomer", PASSWORD, full_name="New Comer", first_run_path="app")
     conductor_id = _conductor_id()
@@ -247,11 +257,16 @@ def test_applicable_steps_and_completion_cache_reconcile_conditionals(
         assert read_cached_app_facts(conductor_id, db=db) == facts
 
     live = _rows(
-        "SELECT n.title FROM plan_nodes n JOIN plans p ON p.id=n.plan_id "
-        "WHERE p.owner_id=? AND n.description LIKE 'first-run-app:%' "
+        "SELECT n.title, n.workflow_ref, n.workflow_step, n.difficulty "
+        "FROM plan_nodes n JOIN plans p ON p.id=n.plan_id "
+        "WHERE p.owner_id=? AND n.workflow_ref='first-run-app' "
         "AND n.archived_at IS NULL ORDER BY n.order_key", conductor_id,
     )
     assert [node["title"] for node in live] == [step["title"] for step in steps]
+    assert [(node["workflow_ref"], node["workflow_step"], node["difficulty"]) for node in live] == [
+        ("first-run-app", f"{step['step_number']}:{step.get('vendor', 'common')}", "routine")
+        for step in steps
+    ]
 
 
 def test_completion_retry_reconciles_facts_that_changed_during_setup(fresh_install, app_seed_facts):
@@ -274,6 +289,85 @@ def test_completion_retry_reconciles_facts_that_changed_during_setup(fresh_insta
     assert remaining == [step["title"] for step in applicable_steps(updated)]
 
 
+def test_completion_retry_keeps_edited_workflow_nodes_by_stable_identity(fresh_install, app_seed_facts):
+    from infra import accounts
+    from infra.database import write_transaction
+    from onboarding.app_first_run import cache_completed_facts
+    from plans import public
+
+    accounts.create_first_account("newcomer", PASSWORD, first_run_path="app")
+    conductor_id = _conductor_id()
+    actor = public.PlanActor(conductor_id, "newcomer", None)
+    initial = {"agents_found": [], "connected_app_count": 0, "web_search_ready": False}
+    updated = {**initial, "connected_app_count": 2, "web_search_ready": True}
+    with write_transaction(None, scope="stable_workflow_identity") as db:
+        cache_completed_facts(conductor_id, "newcomer", initial, db=db)
+        listing = public.read_current_plan(actor=actor, include_folded=True, db=db)
+        plan_id = listing["plan"]["id"]
+        nodes = {
+            row["workflow_step"]: dict(row)
+            for row in db.execute(
+                "SELECT id, workflow_step, order_key, revision FROM plan_nodes "
+                "WHERE plan_id=? AND workflow_ref='first-run-app'",
+                (plan_id,),
+            )
+        }
+        public.mutate(
+            plan_id, "edit", {
+                "node_id": nodes["5:common"]["id"],
+                "title": "A title the user edited",
+                "description": "A description the user edited",
+                "expected_revision": nodes["5:common"]["revision"],
+            }, actor=actor, provenance="test.app_first_run",
+            mutation_id="test-first-run-app-edit-labels", db=db,
+        )
+        public.mutate(
+            plan_id, "mark_done", {
+                "node_id": nodes["7:common"]["id"],
+                "evidence": "Completed before reconciliation",
+                "verification_result": "passed",
+                "expected_revision": nodes["7:common"]["revision"],
+            }, actor=actor, provenance="test.app_first_run",
+            mutation_id="test-first-run-app-complete", db=db,
+        )
+        public.mutate(
+            plan_id, "archive_node", {
+                "node_id": nodes["8:common"]["id"],
+                "expected_revision": nodes["8:common"]["revision"],
+            }, actor=actor, provenance="test.app_first_run",
+            mutation_id="test-first-run-app-archive", db=db,
+        )
+        protected = {
+            row["workflow_step"]: dict(row)
+            for row in db.execute(
+                "SELECT workflow_step, order_key, revision FROM plan_nodes WHERE id IN (?, ?)",
+                (nodes["7:common"]["id"], nodes["8:common"]["id"]),
+            )
+        }
+        assert set(protected) == {"7:common", "8:common"}
+        cache_completed_facts(conductor_id, "newcomer", updated, db=db)
+        cache_completed_facts(conductor_id, "newcomer", updated, db=db)
+
+    rows = _rows(
+        "SELECT id, title, description, workflow_step, state, archived_at, order_key, revision "
+        "FROM plan_nodes WHERE plan_id=? AND workflow_ref='first-run-app'", plan_id,
+    )
+    by_step = {row["workflow_step"]: row for row in rows}
+    assert {step: row["id"] for step, row in by_step.items()} == {
+        step: node["id"] for step, node in nodes.items()
+    }
+    assert len(by_step) == len(rows)
+    assert (by_step["5:common"]["title"], by_step["5:common"]["description"]) == (
+        "A title the user edited", "A description the user edited",
+    )
+    assert by_step["3:common"]["archived_at"] is not None
+    assert by_step["7:common"]["state"] == "accepted"
+    assert by_step["8:common"]["archived_at"] is not None
+    assert {step: (by_step[step]["order_key"], by_step[step]["revision"]) for step in protected} == {
+        step: (node["order_key"], node["revision"]) for step, node in protected.items()
+    }
+
+
 def test_named_apps_are_children_and_preserve_visible_onboarding_steps(fresh_install, app_seed_facts):
     from infra import accounts
     from infra.database import write_transaction
@@ -288,7 +382,7 @@ def test_named_apps_are_children_and_preserve_visible_onboarding_steps(fresh_ins
         cache_completed_facts(conductor_id, "newcomer", facts, db=db)
         listing = public.read_current_plan(actor=actor, include_folded=True, db=db)
         connect = next(node for node in listing["nodes"] if node["title"] == "Where your work lives")
-        assert "every app child is settled" in public.get_node(connect["id"], db=db).acceptance_criteria
+        assert "each connection is finished or skipped" in public.get_node(connect["id"], db=db).acceptance_criteria
         for app in ("Slack", "Notes"):
             public.add_node(
                 listing["plan"]["id"], kind="task", title=f"Connect {app}",

@@ -63,7 +63,7 @@ export function landOnFirstRun(
 	firstRunOpening = Promise.resolve()
 		.then(() => open(landing))
 		.then((opened) => { if (opened !== false) firstRunLanded = true; })
-		.catch(() => {})
+		.catch(() => { console.warn('[first run] landing failed; remains retryable'); })
 		.finally(() => { firstRunOpening = null; });
 	return firstRunOpening;
 }

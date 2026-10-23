@@ -316,10 +316,10 @@ def first_app_step(facts: dict[str, Any]) -> str:
     import re
 
     from infra.system_package import system_resource_source
-    from onboarding.app_first_run import applicable_steps
+    from onboarding.app_first_run import IMPORT_DECISION_TITLE, applicable_steps
 
     steps = applicable_steps(facts)
-    has_import = any(item.get("title") == "Bring over what your other tools know"
+    has_import = any(item.get("title") == IMPORT_DECISION_TITLE
                      for item in facts.get("setup", {}).get("setup_decisions", []))
     # Setup can detect a tool before a provider-specific consent card exists.
     # If it disappeared by the pick, its seeded step is silently skipped.
@@ -348,7 +348,7 @@ async def render_for(model: str, path: str = "script", *, thread_id: str | None 
     """Render the first run; a completed app setup reuses its committed facts."""
     if path == "app" and app_reference_served():
         from infra.db_async import run_in_db
-        from onboarding.app_first_run import read_app_facts, read_cached_app_facts
+        from onboarding.app_first_run import IMPORT_DECISION_TITLE, read_app_facts, read_cached_app_facts
 
         facts = await run_in_db(read_cached_app_facts, thread_id) if thread_id else None
         if facts is None:
@@ -362,7 +362,7 @@ async def render_for(model: str, path: str = "script", *, thread_id: str | None 
                      for source in harness_ready} if isinstance(harness_ready, list) else set()
             card = await run_in_db(setup_decisions.import_card, model, ready)
             decisions = [item for item in facts.get("setup", {}).get("setup_decisions", [])
-                         if item.get("title") != "Bring over what your other tools know"]
+                         if item.get("title") != IMPORT_DECISION_TITLE]
             imported = setup_decisions.agent_import(card)
             facts["setup"] = {"setup_decisions": ([imported] if imported else []) + decisions}
         return render(facts, instructions("app") + "\n\n" + first_app_step(facts), APP_INLINE_SUMMARY)

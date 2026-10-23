@@ -6,6 +6,7 @@ type CurrentFirstRunState = {
 	token: string | null;
 	scope: UiScope | null;
 	selectionIntent: number;
+	activeThread: string | null;
 };
 
 type FirstRunOpen = (id: string, ownsSelection: () => boolean) => Promise<boolean>;
@@ -64,10 +65,15 @@ export function createFirstRunHandoff() {
 			if (!panelReady || activeThread || setupFinishedIntent !== state.selectionIntent || !state.authenticated
 				|| !cached || cached.scope !== state.scope || cached.lookup.kind !== 'target' || !cached.lookup.firstRunPending) return;
 			let active = true;
-			void landOnFirstRun(cached.lookup, cached.scope, (id) =>
-				open(id, ownsSelection(() => active, state.selectionIntent, state.token, state.scope, current)),
-			);
-			return () => { active = false; };
+			let openingId: string | undefined;
+			void landOnFirstRun(cached.lookup, cached.scope, (id) => {
+				openingId = id;
+				return open(id, ownsSelection(() => active, state.selectionIntent, state.token, state.scope, current));
+			});
+			return () => {
+				// A reactive active-thread update can be this landing's own selection.
+				if (openingId === undefined || current().activeThread !== openingId) active = false;
+			};
 		},
 	};
 }

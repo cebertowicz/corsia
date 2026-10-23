@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
+	import { onDestroy, untrack } from 'svelte';
 	import type { View } from '$lib/homePaneConfig';
 	import { type FirstRunSelectionOwner } from '$lib/homeThreadSelection';
 	import type { ThreadOpenSource } from '$lib/openTimingRuntime';
@@ -25,12 +25,14 @@
 	} = $props();
 
 	const handoff = createFirstRunHandoff();
+	let mounted = true;
+	onDestroy(() => { mounted = false; });
 	let lastLookupKey: string | null = null;
-	const current = () => ({ authenticated, token, scope, selectionIntent });
+	const current = () => ({ authenticated, token, scope, selectionIntent, activeThread });
 	async function open(id: string, owner: () => boolean) {
-		if (activeView === 'measurement') return false;
-		await selectThread(id, 'other', owner);
-		return chatPanelReady;
+		if (!mounted || activeView === 'measurement') return false;
+		await selectThread(id, 'other', () => mounted && owner());
+		return mounted && chatPanelReady;
 	}
 
 	$effect(() => {

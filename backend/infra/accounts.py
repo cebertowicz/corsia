@@ -241,7 +241,7 @@ def create_first_account(
         announce = _create_account(
             name, encoded, db=None, first_run_wake=first_run_wake, require_first=True,
             first_run_path=first_run_path, claim_data_owner=True,
-            opening_name=(full_name.split(" ", 1)[0] if full_name else None),
+            opening_name=(user_profile.preferred_name(full_name) if full_name else None),
             before_commit=staged.publish if staged else None,
         )
     except BaseException:

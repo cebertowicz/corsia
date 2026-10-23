@@ -242,13 +242,15 @@ describe('landOnFirstRun', () => {
 		expect(open).toHaveBeenCalledTimes(1);
 	});
 
-	it('retries first-run entry after the opener fails', async () => {
+	it('logs and retries first-run entry after the opener fails', async () => {
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 		const open = vi.fn()
 			.mockRejectedValueOnce(new Error('first open canceled'))
 			.mockResolvedValueOnce(undefined);
 
 		await landOnFirstRun(pending, null, open);
 		await landOnFirstRun(pending, null, open);
+		expect(warn).toHaveBeenCalledWith('[first run] landing failed; remains retryable');
 		expect(open).toHaveBeenCalledTimes(2);
 	});
 

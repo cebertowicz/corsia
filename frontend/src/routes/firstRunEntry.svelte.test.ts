@@ -210,6 +210,25 @@ describe('first-run entry across auth readiness', () => {
 		expect(writes).not.toContain('POST /api/threads');
 	});
 
+	it('keeps a thread selected when setup finishes after the selection changes', async () => {
+		startsSetup = true;
+		listedThreads = [row('fixture-choice')];
+		render();
+		await vi.waitFor(() => expect(setupHarness.finish).not.toBeNull());
+		authenticate();
+		await settle();
+		resolveLookup();
+		await settle();
+
+		activeThreadId.set('fixture-choice');
+		flushSync();
+		setupHarness.finish?.();
+		await settle();
+
+		expect(get(activeThreadId)).toBe('fixture-choice');
+		expect(historyReads('fixture-conductor')).toHaveLength(0);
+	});
+
 	it('keeps New Chat empty when it invalidates the post-setup retry', async () => {
 		startsSetup = true;
 		render();
@@ -234,6 +253,34 @@ describe('first-run entry across auth readiness', () => {
 		expect(get(activeThreadId)).toBeNull();
 		expect(historyReads('fixture-conductor')).toHaveLength(0);
 		expect(landSpy).toHaveBeenCalledTimes(landingAttempts);
+	});
+
+	it('cancels the post-setup landing when the route unmounts after its own selection update', async () => {
+		startsSetup = true;
+		listedThreads = [row('fixture-conductor')];
+		render();
+		await vi.waitFor(() => expect(setupHarness.finish).not.toBeNull());
+		authenticate();
+		await settle();
+		resolveLookup();
+		await settle();
+		const threadListReads = paths.filter(path => path === '/api/threads').length;
+		deferredThreadList = deferred<Response>();
+
+		setupHarness.finish?.();
+		await vi.waitFor(() => expect(paths.filter(path => path === '/api/threads').length).toBeGreaterThan(threadListReads));
+		activeThreadId.set('fixture-conductor');
+		flushSync();
+		expect(historyReads('fixture-conductor')).toHaveLength(0);
+
+		await unmount(page!);
+		page = null;
+		activeThreadId.set(null);
+		deferredThreadList.resolve(json({ threads: listedThreads }));
+		await settle();
+
+		expect(get(activeThreadId)).toBeNull();
+		expect(historyReads('fixture-conductor')).toHaveLength(0);
 	});
 
 	it('opens CORSIA and sends one pending request through the composer', async () => {

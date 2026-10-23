@@ -89,44 +89,44 @@ def applicable_steps(
         product = "Claude" if vendor == "claude_code" else "ChatGPT"
         steps.append(_step(
             1, "Add your second subscription",
-            f"the {product} subscription is connected, or the user chose not now",
+            f"you connected your {product} subscription or chose not now",
             vendor=vendor,
         ))
     if _has_import_step(facts):
         steps.append(_step(
             2, "Bring over what your other tools know",
-            "the user chose whether to bring over context from their other tools",
+            "you chose whether to bring over what your other tools know",
         ))
     if connected_app_count < 2:
         steps.append(_step(
             3, "Where your work lives",
-            "the user named the apps where their work lives and every app child is settled, or chose not now",
+            "you named the apps where you work, and each connection is finished or skipped",
         ))
     if facts.get("web_search_ready") is not True:
         steps.append(_step(
             4, "Web search",
-            "web search works, or the user chose not now",
+            "web search works or you chose not now",
         ))
     steps.extend((
         _step(
             5, "About you",
-            "CORSIA knows enough about the user to help, or the user chose not now",
+            "CORSIA knows enough about you to help, or you chose not now",
         ),
         *(() if email_calendar_ready else (_step(
             6, "Email and calendar",
-            "the user chose how to connect email and calendar, or chose not now",
+            "you chose how to connect email and calendar, or chose not now",
         ),)),
         _step(
             7, "How CORSIA gets better",
-            "the user chose whether to use or share community improvements, or chose not now",
+            "you chose whether to use or share community improvements, or chose not now",
         ),
         _step(
             8, "Your files, and when agents ask first",
-            "the user has been told how file access and approval work",
+            "CORSIA explained how file access and approval work",
         ),
         _step(
             9, "Hand over to your agents",
-            "the user has the final setup question and knows what CORSIA can take off their plate",
+            "CORSIA asked what you would like help with next",
         ),
     ))
     return tuple(steps)
@@ -225,45 +225,40 @@ def _seed_descriptors(
 
     actor = public.PlanActor(conductor_id, user_id, None)
     listing = public.ensure_current_plan(actor=actor, include_folded=True, db=db)
+    # The public listing omits workflow fields; scope these reads to the seeded workflow.
     existing = {
-        (row["title"], row["description"])
-        for row in db.execute(
-            "SELECT title, description FROM plan_nodes WHERE plan_id=?", (listing["plan"]["id"],)
+        row["workflow_step"] for row in db.execute(
+            "SELECT workflow_step FROM plan_nodes WHERE plan_id=? AND workflow_ref='first-run-app'",
+            (listing["plan"]["id"],),
         )
     }
-    desired = {
-        (step["title"], f"first-run-app:{step['step_number']}:{step.get('vendor', 'common')}")
-        for step in descriptors
-    }
+    desired = {f"{step['step_number']}:{step.get('vendor', 'common')}" for step in descriptors}
     for index, step in enumerate(descriptors):
-        key = f"first-run-app:{step['step_number']}:{step.get('vendor', 'common')}"
-        identity = (step["title"], key)
-        if identity in existing:
+        workflow_step = f"{step['step_number']}:{step.get('vendor', 'common')}"
+        if workflow_step in existing:
             continue
         public.add_node(
             listing["plan"]["id"],
             kind="phase" if step["step_number"] == 3 else "task",
             title=step["title"],
             acceptance_criteria=step["acceptance_criteria"],
-            description=key,
+            workflow_ref="first-run-app",
+            workflow_step=workflow_step,
+            difficulty="routine",
             order_key=step["step_number"] * 10 + index,
             provenance="onboarding.app_first_run",
             db=db,
         )
     if reconcile:
         nodes = db.execute(
-            "SELECT id, title, description, state, archived_at, revision FROM plan_nodes WHERE plan_id=?",
+            "SELECT id, workflow_step, state, archived_at, revision "
+            "FROM plan_nodes WHERE plan_id=? AND workflow_ref='first-run-app'",
             (listing["plan"]["id"],),
         )
         for node in nodes:
-            description = node["description"]
-            identity = (node["title"], description)
             if (
-                isinstance(description, str)
-                and description.startswith("first-run-app:")
-                and identity not in desired
-                and node["state"] == "pending"
-                and node["archived_at"] is None
+                node["workflow_step"] not in desired
+                and node["state"] == "pending" and node["archived_at"] is None
             ):
                 public.mutate(
                     listing["plan"]["id"], "archive_node",
@@ -271,20 +266,26 @@ def _seed_descriptors(
                     actor=actor, provenance="onboarding.app_first_run",
                     mutation_id=f"first-run-app-reconcile:{conductor_id}:{node['id']}", db=db,
                 )
-        for order_key, step in enumerate(descriptors):
-            description = f"first-run-app:{step['step_number']}:{step.get('vendor', 'common')}"
+        next_open_position = 0
+        for step in descriptors:
+            workflow_step = f"{step['step_number']}:{step.get('vendor', 'common')}"
             node = db.execute(
                 "SELECT id, revision, order_key FROM plan_nodes "
-                "WHERE plan_id=? AND title=? AND description=? AND archived_at IS NULL",
-                (listing["plan"]["id"], step["title"], description),
+                "WHERE plan_id=? AND workflow_ref=? AND workflow_step=? "
+                "AND archived_at IS NULL AND folded=0 "
+                "AND state NOT IN ('accepted', 'accepted_with_followup', 'failed', 'closed')",
+                (listing["plan"]["id"], "first-run-app", workflow_step),
             ).fetchone()
-            if node is not None and node["order_key"] != order_key:
+            if node is None:
+                continue
+            if node["order_key"] != next_open_position:
                 public.mutate(
                     listing["plan"]["id"], "reorder",
-                    {"node_id": node["id"], "order_key": order_key, "expected_revision": node["revision"]},
+                    {"node_id": node["id"], "order_key": next_open_position, "expected_revision": node["revision"]},
                     actor=actor, provenance="onboarding.app_first_run",
                     mutation_id=f"first-run-app-order:{conductor_id}:{node['id']}:{node['revision']}", db=db,
                 )
+            next_open_position += 1
 
 
 def _pre_pick_facts(*, db: sqlite3.Connection) -> dict[str, Any]:
