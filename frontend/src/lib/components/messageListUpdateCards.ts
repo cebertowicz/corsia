@@ -1,6 +1,6 @@
 import type { UpdateCard } from '$lib/api/threadUpdates';
 
-export type DividerLanding = { threadId: string; generation: number };
+export type InitialLanding = { threadId: string; generation: number; target: 'divider' | 'opening' };
 
 type Frame = (callback: FrameRequestCallback) => number;
 type BeginProgrammaticScroll = (write: () => void) => void;
@@ -22,19 +22,19 @@ export class RenderedUpdateCards {
  * Transient update-dot landing intent. Its owner supplies settlement so this
  * helper never reads shared stores, touches the DOM, or writes scroll position.
  */
-export class DividerLandingIntent {
-	#landing: DividerLanding | null = null;
+export class InitialLandingIntent {
+	#landing: InitialLanding | null = null;
 	#generation = 0;
 
-	constructor(private readonly onSettled: (threadId: string) => void) {}
+	constructor(private readonly onSettled: (landing: InitialLanding) => void) {}
 
-	begin(threadId: string): DividerLanding {
-		const landing = { threadId, generation: ++this.#generation };
+	begin(threadId: string, target: InitialLanding['target']): InitialLanding {
+		const landing = { threadId, target, generation: ++this.#generation };
 		this.#landing = landing;
 		return landing;
 	}
 
-	isCurrent(landing: DividerLanding): boolean {
+	isCurrent(landing: InitialLanding): boolean {
 		return this.#landing?.threadId === landing.threadId
 			&& this.#landing.generation === landing.generation;
 	}
@@ -43,35 +43,51 @@ export class DividerLandingIntent {
 		return this.#landing?.threadId === threadId;
 	}
 
-	cancel(threadId?: string): void {
-		if (!this.#landing || (threadId && this.#landing.threadId !== threadId)) return;
-		const { threadId: settledThreadId } = this.#landing;
-		this.#generation++;
-		this.#landing = null;
-		this.onSettled(settledThreadId);
+	targetFor(threadId: string | null | undefined): InitialLanding['target'] | null {
+		const landing = this.#landing;
+		if (!landing || landing.threadId !== threadId) return null;
+		return landing.target;
 	}
 
-	finish(landing: DividerLanding): void {
+	finishCurrent(threadId: string, target: InitialLanding['target']): void {
+		if (this.#landing?.threadId === threadId && this.#landing.target === target) this.finish(this.#landing);
+	}
+
+	cancel(threadId?: string): void {
+		if (!this.#landing || (threadId && this.#landing.threadId !== threadId)) return;
+		const landing = this.#landing;
+		this.#generation++;
+		this.#landing = null;
+		this.onSettled(landing);
+	}
+
+	finish(landing: InitialLanding): void {
 		if (!this.isCurrent(landing)) return;
 		this.#landing = null;
-		this.onSettled(landing.threadId);
+		this.onSettled(landing);
 	}
 }
 
-/** Keep divider intent through the programmatic-scroll release frame. */
-export function scheduleDividerLanding(
-	landing: DividerLanding,
-	intent: DividerLandingIntent,
+/** Keep an initial landing intent through the programmatic-scroll release frame. */
+export function scheduleInitialLanding(
+	landing: InitialLanding,
+	intent: InitialLandingIntent,
+	shouldLand: () => boolean,
+	holdLanding: () => boolean,
 	afterTick: () => Promise<void>,
 	frame: Frame,
 	beginProgrammaticScroll: BeginProgrammaticScroll,
-	writeDivider: () => void,
+	writeLanding: () => void,
 ): void {
 	afterTick().then(() => frame(() => {
 		if (!intent.isCurrent(landing)) return;
+		if (!shouldLand()) {
+			intent.cancel(landing.threadId);
+			return;
+		}
 		beginProgrammaticScroll(() => {
-			if (intent.isCurrent(landing)) writeDivider();
+			if (intent.isCurrent(landing) && shouldLand()) writeLanding();
 		});
-		frame(() => intent.finish(landing));
+		if (!holdLanding()) frame(() => intent.finish(landing));
 	}));
 }

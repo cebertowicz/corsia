@@ -49,6 +49,11 @@ export function landOnNewContent(messagesEl: HTMLElement | undefined): void {
 		?.scrollIntoView({ block: 'start' });
 }
 
+/** The first-run opening lands once at its first readable line, below the glass header. */
+export function landOnFirstRunOpening(messagesEl: HTMLElement | undefined): void {
+	messagesEl?.querySelector<HTMLElement>('[data-first-run-opening]')?.scrollIntoView({ block: 'start' });
+}
+
 export function hasLandingTarget(entries: readonly { kind: string; new?: boolean }[]): boolean {
 	return entries.some((entry) => entry.kind === 'divider' || (entry.kind === 'fold' && entry.new === true));
 }

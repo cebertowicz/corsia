@@ -18,6 +18,9 @@ import { promisify } from 'node:util';
 const SCREENSHOT_DIR = process.env.SETUP_LANDING_SHOTS_DIR;
 const seedAppLandingProcess = promisify(execFile);
 const APP_LANDING_SEED_TIMEOUT_MS = 15_000;
+// The packaged seeded opening reveals over 1.8s; this is its full E2E budget,
+// including the post-picker render and the slower mobile renderer.
+const SEEDED_OPENING_REVEAL_BUDGET_MS = 8_000;
 
 async function seedAppLanding() {
 	const python = process.env.CORSIA_E2E_BACKEND_PYTHON;
@@ -81,6 +84,33 @@ async function serveReadySetup(page: Page, sources: readonly Record<string, unkn
 	await page.route('**/api/providers/sources**', (route) => route.fulfill({ json: { sources } }));
 }
 
+// The greeting begins inside the visible transcript viewport: below the rendered
+// glass header and above the floating composer when it overlaps the scroller.
+async function expectGreetingFirstLineVisible(page: Page) {
+	const firstLine = page.locator('.assistant-msg').getByText('Hi First.', { exact: false }).and(page.locator(':not(.sr-only)')).first();
+	await expect(firstLine).toBeVisible();
+	await expect(async () => {
+		const [line, header, transcript, composer] = await Promise.all([
+			firstLine.boundingBox(),
+			page.locator('.shell-header').boundingBox(),
+			page.locator('.messages').boundingBox(),
+			page.locator('.input-floater').boundingBox(),
+		]);
+		const viewportHeight = await page.evaluate(() => window.innerHeight);
+		expect(line && header && transcript).toBeTruthy();
+		const composerOverlapsTranscript = composer
+			&& composer.y < transcript!.y + transcript!.height
+			&& composer.y + composer.height > transcript!.y;
+		const visibleBottom = Math.min(
+			viewportHeight,
+			transcript!.y + transcript!.height,
+			composerOverlapsTranscript ? composer!.y : Infinity,
+		);
+		expect(line!.y).toBeGreaterThanOrEqual(header!.y + header!.height);
+		expect(line!.y + line!.height).toBeLessThanOrEqual(visibleBottom);
+	}).toPass({ timeout: 2_000 });
+}
+
 async function shot(page: Page, name: string) {
 	if (SCREENSHOT_DIR) await page.screenshot({ path: `${SCREENSHOT_DIR}/${name}.png`, animations: 'disabled', scale: 'css' });
 }
@@ -96,6 +126,7 @@ test.describe('@surface:first-run setup landing', () => {
 			await serveReadySetup(page, sources);
 			const slug = label.toLowerCase().replace(/\s+/g, '-');
 			const project = test.info().project.name;
+			if (project === 'chromium-mobile') await page.setViewportSize({ width: 393, height: 852 });
 
 			const appSocket = page.waitForEvent('websocket', {
 				predicate: (socket) => new URL(socket.url()).pathname === '/ws',
@@ -155,7 +186,10 @@ test.describe('@surface:first-run setup landing', () => {
 			await expect(page.getByText('SETUP_LANDING_FIRST_RUN_REPLY', { exact: true })).toHaveCount(0);
 			await expect(page.locator('[aria-live="polite"][aria-atomic="true"]')).toContainText("I'm CORSIA.");
 			await shot(page, `opening-live-${slug}-${project}`);
-			await expect(page.locator('.typewriter-text')).toHaveCount(0, { timeout: 2_000 });
+			// This seeded opening is 1.2k characters; its acceleration crosses the
+			// original two-second observation window under a mobile renderer.
+			await expect(page.locator('.typewriter-text')).toHaveCount(0, { timeout: SEEDED_OPENING_REVEAL_BUDGET_MS });
+			await expectGreetingFirstLineVisible(page);
 			await shot(page, `opening-complete-${slug}-${project}`);
 			await expect(chip).toContainText('Vendor default');
 			await waitForWsConnected(page);
