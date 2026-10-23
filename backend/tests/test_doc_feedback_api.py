@@ -91,7 +91,7 @@ async def test_comment_handler_returns_before_a_blocked_background_delivery(isol
         started.set()
         await release.wait()
 
-    monkeypatch.setattr(doc_comments, "_deliver_person_comment_after_response", blocked_delivery)
+    monkeypatch.setattr(doc_comments, "deliver_person_comment_after_response", blocked_delivery)
     background = BackgroundTasks()
     result = await doc_comments.create_comment(
         created_artifact_id,

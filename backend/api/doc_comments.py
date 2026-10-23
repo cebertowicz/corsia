@@ -20,6 +20,7 @@ from pathlib import Path
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel, Field
 
+from api.doc_comment_delivery import deliver_person_comment_after_response
 from api.doc_comment_models import CommentCreate
 
 from doceditor import comments as store, doc_images, feedback_batches, feedback_state, image_regions
@@ -46,27 +47,6 @@ from infra.db_async import run_in_db
 from registry import models as registry_models
 
 router = APIRouter(prefix="/api", tags=["doc-comments"])
-
-
-async def _deliver_person_comment_after_response(batch_ids: list[str]) -> None:
-    """Run the existing close/deliver writer after a comment POST response.
-
-    A failed delivery leaves its batch open, so the continuation sweep remains
-    the durable retry path. Successful delivery emits the comment's single
-    change frame after its batch has closed.
-    """
-    def deliver() -> list[str]:
-        db = get_db()
-        try:
-            return feedback_batches.deliver_person_comment(db, batch_ids)
-        finally:
-            db.close()
-
-    woken = await run_in_db(deliver)
-    if woken:
-        from plans import public
-
-        await public.drive_threads(woken)
 
 
 def _assert_owns_artifact(artifact_id: str, user_id: str, db) -> None:
@@ -168,7 +148,7 @@ async def create_comment(
             "client_id collides with another artifact's comment — re-mint and retry",
         ) from exc
     if feedback["batch_ids"]:
-        background.add_task(_deliver_person_comment_after_response, feedback["batch_ids"])
+        background.add_task(deliver_person_comment_after_response, feedback["batch_ids"])
     if feedback["woken"]:
         from plans import public
 
