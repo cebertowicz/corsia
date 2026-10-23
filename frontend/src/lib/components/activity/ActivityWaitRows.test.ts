@@ -65,6 +65,31 @@ describe('Activity waiting rows', () => {
 		expect(host.querySelector('.state-word')).toBeNull();
 	});
 
+	it('a plan still working or owing you keeps its own state beside set-aside work, and names its count', () => {
+		for (const state of ['moving', 'needs_input'] as const) {
+			threadPlanStates.set({ t6: entry({ state, set_aside_until: at(24 * 60) }) });
+			const working = row('t6', 'Release agent');
+			working.entry.progress = { ...working.entry.progress, open: 15, liveness: 'advancing' };
+			working.entry.display = { label_key: 'working', tone_key: 'active' } as typeof working.entry.display;
+			component = mount(ActivityPlanRowView, { target: host, props: { row: working, onSelectThread: () => {} } });
+			flushSync();
+
+			expect(host.textContent).not.toMatch(/Set aside/);
+			expect(host.querySelector('.plan-state .snooze-clock')).toBeNull();
+			expect(host.querySelector('.state-word')).not.toBeNull();
+			expect(host.querySelector('.progress')?.textContent).toBe('15 tasks left');
+			unmount(component);
+			component = null;
+		}
+	});
+
+	it('one open task reads in the singular', () => {
+		threadPlanStates.set({ t7: entry({ state: 'idle', set_aside_until: at(24 * 60) }) });
+		render('t7');
+
+		expect(host.querySelector('.progress')?.textContent).toBe('1 task left');
+	});
+
 	it('a set-aside row whose time has passed reads due now', () => {
 		threadPlanStates.set({ t3: entry({ state: 'idle', set_aside_until: at(-5) }) });
 		render('t3');

@@ -78,7 +78,8 @@
 	// Every wait is set aside by its agent: the plan comes back at a time it chose (EW7); no state word.
 	const setAside = $derived.by(() => {
 		const entry = $threadPlanStates[threadId];
-		return !wait && entry?.set_aside_until ? setAsideLine(entry.set_aside_until, $minuteClock) : null;
+		// Only an idle plan reads set aside: one still working or owing you keeps its own state.
+		return !wait && entry?.state === 'idle' && entry.set_aside_until ? setAsideLine(entry.set_aside_until, $minuteClock) : null;
 	});
 	// A host-like label ("github.com/…/checks") stays as written; any other starts a sentence.
 	const waitLabel = $derived(!wait ? '' : /^[\w-]+(\.[\w-]+)+(\/|$)/.test(wait.label) ? wait.label
@@ -187,7 +188,7 @@
 					{#if !setAside}<span class="state-word {tone}">{stateLabel}</span>{/if}
 					<!-- Failure state is carried by the canonical plan display above. -->
 					{#if row.entry.progress.open > 0}
-						<span class="progress">{row.entry.progress.open} left</span>
+						<span class="progress">{row.entry.progress.open} {row.entry.progress.open === 1 ? 'task' : 'tasks'} left</span>
 					{/if}
 				</span>
 				<!-- A wide row expands with this chevron and opens with the Open button.
