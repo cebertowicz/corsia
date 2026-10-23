@@ -177,9 +177,9 @@ describe('SetupScreen', () => {
 		expect(button('Start using CORSIA')?.disabled).toBe(true);
 	});
 
-	it('keeps the shell-owned default when a protected folder is replaced', async () => {
+	it('keeps the shell-owned default when a warned folder is replaced', async () => {
 		const invoke = vi.fn(async (command: string) => command === 'choose_work_folder'
-			? { state: 'ready', path: '/fixture/Documents', protected_folder: { kind: 'personal_folder', folder: 'Documents' } }
+			? { state: 'ready', path: '/fixture/Documents', folder_warning: { kind: 'personal_folder', folder: 'Documents' } }
 			: undefined);
 		Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: { invoke } });
 		await openAccount(); button('Change')?.click(); await settle();

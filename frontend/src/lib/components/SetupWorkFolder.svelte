@@ -1,9 +1,9 @@
 <script lang="ts">
 	import FolderRow from './FolderRow.svelte';
 
-	type ProtectedFolder = { kind: 'personal_folder'; folder: string } | { kind: 'contains_personal_folder'; folder: string } | { kind: 'contains_files' };
-	export type FolderNotice = { kind: 'protected'; folder: ProtectedFolder } | { kind: 'unwritable'; reason: string } | { kind: 'picker_failed' } | null;
-	type Choice = { state: 'ready'; path: string; protected_folder: ProtectedFolder | null } | { state: 'unwritable'; path: string; reason: string };
+	type FolderWarning = { kind: 'personal_folder'; folder: string } | { kind: 'contains_personal_folder'; folder: string } | { kind: 'contains_files' };
+	export type FolderNotice = { kind: 'warning'; warning: FolderWarning } | { kind: 'unwritable'; reason: string } | { kind: 'unreadable'; reason: string } | { kind: 'picker_failed' } | null;
+	type Choice = { state: 'ready'; path: string; folder_warning: FolderWarning | null } | { state: 'unwritable'; path: string; reason: string } | { state: 'unreadable'; path: string; reason: string };
 	interface Props { folder: string; changed: boolean; changing: boolean; notice: FolderNotice; error?: string }
 	let { folder = $bindable(), changed = $bindable(), changing = $bindable(), notice = $bindable(), error = '' }: Props = $props();
 	async function changeFolder() {
@@ -14,7 +14,7 @@
 			const choice = await invoke('choose_work_folder') as Choice | null;
 			if (!choice) return;
 			folder = choice.path; changed = true;
-			notice = choice.state === 'ready' ? (choice.protected_folder ? { kind: 'protected', folder: choice.protected_folder } : null) : { kind: 'unwritable', reason: choice.reason };
+			notice = choice.state === 'ready' ? (choice.folder_warning ? { kind: 'warning', warning: choice.folder_warning } : null) : { kind: choice.state, reason: choice.reason };
 		} catch { notice = { kind: 'picker_failed' }; }
 		finally { changing = false; }
 	}
@@ -26,9 +26,9 @@
 		notice = null;
 	}
 
-	function keepProtectedFolder() { notice = null; }
+	function keepFolder() { notice = null; }
 </script>
-<FolderRow {folder} {notice} {changing} onChange={changeFolder} onUseDefault={useDefaultFolder} onKeepProtected={keepProtectedFolder} />
+<FolderRow {folder} {notice} {changing} onChange={changeFolder} onUseDefault={useDefaultFolder} onKeepFolder={keepFolder} />
 {#if error}<p class="error-text" role="alert">{error}</p>{/if}
 
 <style>

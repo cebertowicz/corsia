@@ -25,8 +25,8 @@ afterEach(async () => {
 });
 
 describe('SetupWorkFolder', () => {
-	it('holds every protected choice until the person keeps it or uses the default', async () => {
-		for (const [path, protected_folder] of [
+	it('holds every folder warning until the person keeps it or uses the default', async () => {
+		for (const [path, folder_warning] of [
 			['~/Documents', { kind: 'personal_folder', folder: 'Documents' }],
 			['~/Desktop', { kind: 'personal_folder', folder: 'Desktop' }],
 			['~/Downloads', { kind: 'personal_folder', folder: 'Downloads' }],
@@ -34,7 +34,7 @@ describe('SetupWorkFolder', () => {
 			['~/Library/Mobile Documents/com~apple~CloudDocs', { kind: 'personal_folder', folder: 'iCloud Drive' }],
 			['~/Library', { kind: 'contains_personal_folder', folder: 'iCloud Drive' }],
 		] as const) {
-			render({ state: 'ready', path, protected_folder });
+			render({ state: 'ready', path, folder_warning });
 			button('Change').click(); await settle();
 			expect(host.textContent).toContain('Agents open anything in the work folder without asking;');
 			expect(button('Use ~/CORSIA')).toBeTruthy();
@@ -43,24 +43,30 @@ describe('SetupWorkFolder', () => {
 		}
 	});
 
-	it('uses ~/CORSIA or keeps the chosen folder only after its explicit button', async () => {
-		render({ state: 'ready', path: '~/Documents', protected_folder: { kind: 'personal_folder', folder: 'Documents' } });
+	it('uses ~/CORSIA or keeps the warned folder only after its explicit button', async () => {
+		render({ state: 'ready', path: '~/Documents', folder_warning: { kind: 'personal_folder', folder: 'Documents' } });
 		button('Change').click(); await settle();
 		button('Use ~/CORSIA').click(); await settle();
 		expect(host.textContent).toContain('~/CORSIA');
 		expect(button('Keep this folder')).toBeUndefined();
 
 		await unmount(component!); component = null; host.remove();
-		render({ state: 'ready', path: '~/Documents', protected_folder: { kind: 'personal_folder', folder: 'Documents' } });
+		render({ state: 'ready', path: '~/Documents', folder_warning: { kind: 'personal_folder', folder: 'Documents' } });
 		button('Change').click(); await settle();
 		button('Keep this folder').click(); await settle();
 		expect(host.textContent).toContain('~/Documents');
 		expect(button('Use ~/CORSIA')).toBeUndefined();
 	});
 
+	it('holds an unreadable choice until another folder is selected', async () => {
+		render({ state: 'unreadable', path: '/Volumes/Archive/corsia', reason: 'permission denied' });
+		button('Change').click(); await settle();
+		expect(host.textContent).toContain('CORSIA can’t inspect this folder. Choose another one.');
+	});
+
 	it('does not steer an empty new folder inside Documents or a normal folder', async () => {
 		for (const path of ['~/Documents/CORSIA', '~/Projects/CORSIA']) {
-			render({ state: 'ready', path, protected_folder: null });
+			render({ state: 'ready', path, folder_warning: null });
 			button('Change').click(); await settle();
 			expect(host.textContent).toContain(path);
 			expect(button('Use ~/CORSIA')).toBeUndefined();

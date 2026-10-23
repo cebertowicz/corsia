@@ -46,21 +46,22 @@ pub enum FirstRun {
 #[derive(Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum FolderClassification {
-    Ready { path: String, protected_folder: Option<ProtectedFolder> },
+    Ready { path: String, folder_warning: Option<FolderWarning> },
     Unwritable { path: String, reason: String },
+    Unreadable { path: String, reason: String },
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-pub enum ProtectedFolder {
+pub enum FolderWarning {
     PersonalFolder { folder: &'static str },
     ContainsPersonalFolder { folder: &'static str },
     ContainsFiles,
 }
 
-fn protected_folder(path: &Path, home: &Path) -> Option<ProtectedFolder> {
+fn folder_warning(path: &Path, home: &Path) -> Result<Option<FolderWarning>, String> {
     if path == home {
-        return Some(ProtectedFolder::PersonalFolder { folder: "Home" });
+        return Ok(Some(FolderWarning::PersonalFolder { folder: "Home" }));
     }
 
     [
@@ -77,18 +78,16 @@ fn protected_folder(path: &Path, home: &Path) -> Option<ProtectedFolder> {
     .into_iter()
     .find_map(|(protected, name)| {
         if path == protected {
-            Some(ProtectedFolder::PersonalFolder { folder: name })
+            Some(FolderWarning::PersonalFolder { folder: name })
         } else if path.starts_with(home) && protected.starts_with(path) {
-            Some(ProtectedFolder::ContainsPersonalFolder { folder: name })
+            Some(FolderWarning::ContainsPersonalFolder { folder: name })
         } else {
             None
         }
     })
-    .or_else(|| {
-        directory_has_files(path)
-            .ok()
-            .filter(|has_files| *has_files)
-            .map(|_| ProtectedFolder::ContainsFiles)
+    .map(Ok)
+    .unwrap_or_else(|| {
+        workspace_is_fresh(path).map(|fresh| (!fresh).then_some(FolderWarning::ContainsFiles))
     })
 }
 
@@ -101,9 +100,9 @@ pub fn classify_folder(
     let resolved_path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
     let resolved_home = home.canonicalize().unwrap_or_else(|_| home.to_path_buf());
     match check_writable(path) {
-        Ok(()) => FolderClassification::Ready {
-            path: shown,
-            protected_folder: protected_folder(&resolved_path, &resolved_home),
+        Ok(()) => match folder_warning(&resolved_path, &resolved_home) {
+            Ok(folder_warning) => FolderClassification::Ready { path: shown, folder_warning },
+            Err(reason) => FolderClassification::Unreadable { path: shown, reason },
         },
         Err(reason) => FolderClassification::Unwritable { path: shown, reason },
     }
@@ -803,7 +802,7 @@ mod tests {
     }
 
     #[test]
-    fn protected_and_unwritable_folder_choices_are_classified() {
+    fn folder_warnings_and_unavailable_folder_choices_are_classified() {
         let home = Home::new("folder-classification");
         let documents = home.0.join("Documents");
         let empty_in_documents = documents.join("corsia");
@@ -818,20 +817,20 @@ mod tests {
         }
         let documents_with_trailing_separator = PathBuf::from(format!("{}/", documents.display()));
 
-        for (path, protected_folder) in [
-            (&home.0, ProtectedFolder::PersonalFolder { folder: "Home" }),
-            (&documents, ProtectedFolder::PersonalFolder { folder: "Documents" }),
-            (&documents_with_trailing_separator, ProtectedFolder::PersonalFolder { folder: "Documents" }),
-            (&desktop, ProtectedFolder::PersonalFolder { folder: "Desktop" }),
-            (&downloads, ProtectedFolder::PersonalFolder { folder: "Downloads" }),
-            (&cloud_docs, ProtectedFolder::PersonalFolder { folder: "iCloud Drive" }),
-            (&library, ProtectedFolder::ContainsPersonalFolder { folder: "iCloud Drive" }),
+        for (path, folder_warning) in [
+            (&home.0, FolderWarning::PersonalFolder { folder: "Home" }),
+            (&documents, FolderWarning::PersonalFolder { folder: "Documents" }),
+            (&documents_with_trailing_separator, FolderWarning::PersonalFolder { folder: "Documents" }),
+            (&desktop, FolderWarning::PersonalFolder { folder: "Desktop" }),
+            (&downloads, FolderWarning::PersonalFolder { folder: "Downloads" }),
+            (&cloud_docs, FolderWarning::PersonalFolder { folder: "iCloud Drive" }),
+            (&library, FolderWarning::ContainsPersonalFolder { folder: "iCloud Drive" }),
         ] {
             assert_eq!(
                 classify_folder(path, &home.0, |_| Ok(())),
                 FolderClassification::Ready {
                     path: path.display().to_string(),
-                    protected_folder: Some(protected_folder),
+                    folder_warning: Some(folder_warning),
                 }
             );
         }
@@ -840,15 +839,25 @@ mod tests {
             classify_folder(&empty_in_documents, &home.0, |_| Ok(())),
             FolderClassification::Ready {
                 path: empty_in_documents.display().to_string(),
-                protected_folder: None,
+                folder_warning: None,
             }
         );
+        fs::write(empty_in_documents.join(".DS_Store"), "").unwrap();
+        fs::create_dir_all(empty_in_documents.join(".git")).unwrap();
+        assert_eq!(
+            classify_folder(&empty_in_documents, &home.0, |_| Ok(())),
+            FolderClassification::Ready {
+                path: empty_in_documents.display().to_string(),
+                folder_warning: None,
+            }
+        );
+
         fs::write(empty_in_documents.join("personal-note.txt"), "private").unwrap();
         assert_eq!(
             classify_folder(&empty_in_documents, &home.0, |_| Ok(())),
             FolderClassification::Ready {
                 path: empty_in_documents.display().to_string(),
-                protected_folder: Some(ProtectedFolder::ContainsFiles),
+                folder_warning: Some(FolderWarning::ContainsFiles),
             }
         );
 
@@ -860,11 +869,19 @@ mod tests {
                 reason: "the disk is read-only".into(),
             }
         );
+
+        let unreadable = home.0.join("not-a-folder");
+        fs::write(&unreadable, "not a folder").unwrap();
+        let FolderClassification::Unreadable { path, reason } = classify_folder(&unreadable, &home.0, |_| Ok(())) else {
+            panic!("a folder that cannot be inspected must not look ready");
+        };
+        assert_eq!(path, unreadable.display().to_string());
+        assert!(reason.contains("could not read"), "{reason}");
     }
 
     #[cfg(unix)]
     #[test]
-    fn protected_folder_classification_resolves_symlinks() {
+    fn folder_warning_classification_resolves_symlinks() {
         let home = Home::new("folder-classification-symlink");
         let documents = home.0.join("Documents");
         fs::create_dir_all(&documents).unwrap();
@@ -875,7 +892,7 @@ mod tests {
             classify_folder(&alias, &home.0, |_| Ok(())),
             FolderClassification::Ready {
                 path: alias.display().to_string(),
-                protected_folder: Some(ProtectedFolder::PersonalFolder { folder: "Documents" }),
+                folder_warning: Some(FolderWarning::PersonalFolder { folder: "Documents" }),
             }
         );
     }

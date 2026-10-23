@@ -1,10 +1,11 @@
 <script lang="ts">
 	import { Button } from '$lib/components/ui';
 
-	type ProtectedFolder = { kind: 'personal_folder'; folder: string } | { kind: 'contains_personal_folder'; folder: string } | { kind: 'contains_files' };
+	type FolderWarning = { kind: 'personal_folder'; folder: string } | { kind: 'contains_personal_folder'; folder: string } | { kind: 'contains_files' };
 	type FolderNotice =
-		| { kind: 'protected'; folder: ProtectedFolder }
+		| { kind: 'warning'; warning: FolderWarning }
 		| { kind: 'unwritable'; reason: string }
+		| { kind: 'unreadable'; reason: string }
 		| { kind: 'picker_failed' }
 		| null;
 
@@ -14,33 +15,35 @@
 		changing?: boolean;
 		onChange: () => void;
 		onUseDefault?: () => void;
-		onKeepProtected?: () => void;
+		onKeepFolder?: () => void;
 	}
 
-	const { folder, notice = null, changing = false, onChange, onUseDefault, onKeepProtected }: Props = $props();
-	function protectedNotice(folder: ProtectedFolder): string {
+	const { folder, notice = null, changing = false, onChange, onUseDefault, onKeepFolder }: Props = $props();
+	function folderWarningNotice(folder: FolderWarning): string {
 		const safety = 'Agents open anything in the work folder without asking; outside it, CORSIA asks you first.';
-		if (folder.kind === 'personal_folder') return `Your ${folder.folder} folder holds personal files. ${safety}`;
-		if (folder.kind === 'contains_personal_folder') return `This folder contains your ${folder.folder} folder. ${safety}`;
+		if (folder.kind === 'personal_folder') return `Your ${folder.folder} folder holds personal files. macOS may ask to let CORSIA use it. ${safety}`;
+		if (folder.kind === 'contains_personal_folder') return `This folder contains your ${folder.folder} folder. macOS may ask to let CORSIA use that folder. ${safety}`;
 		return `This folder already holds files. ${safety}`;
 	}
 </script>
 
-<div class="folder" data-folder-blocked={notice?.kind === 'unwritable' ? 'true' : undefined}>
+<div class="folder" data-folder-blocked={notice?.kind === 'unwritable' || notice?.kind === 'unreadable' ? 'true' : undefined}>
 	<p class="line">
 		<span class="label">Work folder</span>
 		<span class="path">{folder}</span>
 		<Button variant="chip" size="sm" loading={changing} disabled={changing} onclick={onChange}>Change</Button>
 	</p>
-	<p class="why">Your projects and files live here. macOS asks once to let CORSIA use this folder; choose Allow.</p>
-	{#if notice?.kind === 'protected'}
-		<p class="note">{protectedNotice(notice.folder)}</p>
+	<p class="why">Your projects and files live here.</p>
+	{#if notice?.kind === 'warning'}
+		<p class="note">{folderWarningNotice(notice.warning)}</p>
 		<div class="choices">
 			<Button variant="chip" size="sm" onclick={onUseDefault}>Use ~/CORSIA</Button>
-			<Button variant="chip" size="sm" onclick={onKeepProtected}>Keep this folder</Button>
+			<Button variant="chip" size="sm" onclick={onKeepFolder}>Keep this folder</Button>
 		</div>
 	{:else if notice?.kind === 'unwritable'}
 		<p class="note error">CORSIA can’t write to this folder. Choose another one.</p>
+	{:else if notice?.kind === 'unreadable'}
+		<p class="note error">CORSIA can’t inspect this folder. Choose another one.</p>
 	{:else if notice?.kind === 'picker_failed'}
 		<p class="note error">Couldn’t check that folder. Choose it again.</p>
 	{/if}

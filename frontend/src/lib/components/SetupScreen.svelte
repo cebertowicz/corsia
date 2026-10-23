@@ -87,8 +87,8 @@
 	// A working cloud model frees the local download to be turned off.
 	const cloudReady = $derived(catalog.some((row) => row.connection !== 'omlx' && setupModelWorks(row)));
 	const localReady = $derived(catalog.some((row) => row.connection === 'omlx' && setupModelWorks(row)));
-	const localInProgress = $derived(downloading || localPreparing || localBusy || localPick.pick?.state === 'checking' || localReady);
-	const localOnly = $derived(showLocalOnlyGuidance({ eligible, localInProgress, cloudReady }));
+	const localModelActive = $derived(downloading || localPreparing || localBusy || localPick.pick?.state === 'checking' || localReady);
+	const localOnly = $derived(showLocalOnlyGuidance({ eligible, localModelActive, cloudReady }));
 	const usernameError = $derived(username && !/^[a-z0-9_-]{1,32}$/.test(username) ? 'Use up to 32 lowercase letters, numbers, dashes or underscores.' : '');
 	const accountName = $derived(username.trim() || $user?.name || '');
 	const editing = $derived(Boolean($token) && accountKnown);
@@ -147,7 +147,7 @@
 		if (page === 'welcome') return { title: WELCOME_TITLE, primary: { label: 'Continue' }, onPrimary: () => { page = 'account'; } };
 		// A resumed setup has no account details to show, so it reads back what is set.
 		if (page === 'account' && $token && !accountKnown) return { title: 'Your account', primary: { label: 'Continue' }, onPrimary: afterAccount };
-		if (page === 'account') return { title: editing ? 'Your account' : 'Create your account', lede: ACCOUNT_LEDE, primary: { label: 'Continue', loading: accountBusy, disabled: !accountValid || accountBusy || folderChanging || folderNotice?.kind === 'protected' || folderNotice?.kind === 'unwritable' || folderNotice?.kind === 'picker_failed' }, onPrimary: submitAccount };
+		if (page === 'account') return { title: editing ? 'Your account' : 'Create your account', lede: ACCOUNT_LEDE, primary: { label: 'Continue', loading: accountBusy, disabled: !accountValid || accountBusy || folderChanging || folderNotice?.kind === 'warning' || folderNotice?.kind === 'unwritable' || folderNotice?.kind === 'unreadable' || folderNotice?.kind === 'picker_failed' }, onPrimary: submitAccount };
 		if (page === 'subscriptions') return { title: 'Your subscriptions', lede: 'CORSIA’s agents can work through a Claude or ChatGPT subscription you already pay for.' };
 		return { title: 'Providers & models', lede: 'CORSIA needs one working model to continue setup.', primary: { label: 'Start using CORSIA', disabled: !canFinish || finishing, loading: finishing, note: finishNote, noteAlways: true }, onPrimary: finishSetup };
 	});
