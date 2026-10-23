@@ -47,7 +47,7 @@ def record_rejection_correction(db, rejection_event_id: str) -> bool:
     attribute alike. Raises on any failure: inside the rejection, that fails the rejection.
     """
     from infra.outcome_events import record_outcome_event
-    from plans.admission_projection import executor_of
+    from plans.public import executor_of
 
     row = db.execute(
         """SELECT e.created_at,n.executor_thread_id,n.owner_thread_id,
