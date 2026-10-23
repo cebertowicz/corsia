@@ -162,7 +162,7 @@ test.describe('@surface:first-run setup landing', () => {
 			// Focus is on by default and tucks finished work behind a summary; open it to read a reply itself.
 			const reply = lastAssistantMessage(page);
 			const readReply = async (text: string) => expect(async () => {
-				const worked = page.getByRole('button', { name: /^Expand Worked/ });
+				const worked = page.getByRole('button', { name: /^Expand Worked/ }).last();
 				if (await worked.isVisible()) await worked.click();
 				await expect(reply).toContainText(text, { timeout: 2_000 });
 			}).toPass({ timeout: 25_000 });
