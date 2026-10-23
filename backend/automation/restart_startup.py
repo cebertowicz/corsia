@@ -46,7 +46,8 @@ def _complete_restart_operation() -> str | None:
     if operation is None:
         return None
     operation_id = str(operation["id"])
-    if operation.get("kind") == "update" and platform_paths.app_bundle_root() is not None:
+    app_bundle = platform_paths.app_bundle_root()
+    if operation.get("kind") == "update" and app_bundle is not None:
         target_version = operation.get("target_version")
         running_version = build_info.app_version()
         reason = None
@@ -79,6 +80,11 @@ def _complete_restart_operation() -> str | None:
             ) is None:
                 raise RuntimeError("update operation could not release ingress")
             return operation_id
+        # The old lifecycle shell retains the previous app until it has checked
+        # this backend's health and generation. It, rather than this early
+        # startup pass, owns success completion for that post-swap interval.
+        if app_bundle.with_name(f"{app_bundle.name}.previous").is_dir():
+            return None
     if not self_restart.complete_operation(
         operation_id, deployed_sha=serving_head_sha() or None,
     ):

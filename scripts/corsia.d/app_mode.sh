@@ -360,6 +360,23 @@ app_mode_rollback_swapped_update() {
     return 0
 }
 
+app_mode_complete_swapped_update() {
+    local operation_id="${CORSIA_RESTART_OPERATION_ID:-}"
+    if [ -z "$operation_id" ]; then
+        fail "The updated service is healthy, but its Update operation id is missing"
+        return 1
+    fi
+    "$PYTHON" -I -B -c 'import sys
+sys.path.insert(0, sys.argv[1])
+from automation import self_restart
+from infra.restart_authorization import serving_head_sha
+if not self_restart.complete_operation(
+    sys.argv[2], deployed_sha=serving_head_sha() or None,
+):
+    raise SystemExit("update operation could not release ingress")
+' "$BACKEND_DIR" "$operation_id"
+}
+
 app_mode_start_swapped_update() {
     local previous="$1" job expected actual
     if service_is_loaded; then
@@ -393,6 +410,10 @@ app_mode_start_swapped_update() {
     fi
     if [ "$actual" != "$expected" ]; then
         app_mode_rollback_swapped_update "$previous" "The updated service is version $actual, not $expected." || return 1
+        return 1
+    fi
+    if ! app_mode_complete_swapped_update; then
+        app_mode_rollback_swapped_update "$previous" "The updated service could not complete its Update operation." || return 1
         return 1
     fi
     rm -rf "$previous" || warn "Could not remove the previous app at $previous"

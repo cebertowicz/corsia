@@ -210,9 +210,20 @@ def _build_app(bundle: Path) -> None:
     (infra / "__init__.py").write_text("")
     for module in ("platform_paths.py", "service_file.py", "fs_durability.py"):
         shutil.copy(BACKEND / "infra" / module, infra / module)
-    _executable(
+    _python_tool(
         resources / "python" / "bin" / "python3",
-        f'#!/bin/sh\nexec "{sys.executable}" "$@"\n',
+        """
+import os, sys
+from pathlib import Path
+
+if "-c" in sys.argv and "complete_operation" in sys.argv[sys.argv.index("-c") + 1]:
+    state = Path(os.environ["FAKE_LAUNCHD"])
+    if (state / "settle_operation_exit").exists():
+        raise SystemExit(int((state / "settle_operation_exit").read_text()))
+    (state / "settled_operation").write_text(sys.argv[-1])
+    raise SystemExit(0)
+os.execv(sys.executable, [sys.executable, *sys.argv[1:]])
+""",
     )
     # Anything a source checkout would read here must be ignored.
     (resources / ".env").write_text('echo "ENV FILE SOURCED"\nBACKEND_PORT=1\n')
@@ -493,8 +504,30 @@ def test_update_swaps_the_staged_app_and_hands_off_to_its_own_script(app):
     ]
     assert app.generation() == "2.0.0+2"
     assert (app.launchd / "generation").read_text() == "2.0.0+2"
+    assert (app.launchd / "settled_operation").read_text() == OPERATION_ID
     assert not app.bundle.with_name("CORSIA.app.staged").exists()
     assert not app.bundle.with_name("CORSIA.app.previous").exists()
+
+
+def test_a_completion_failure_rolls_back_the_healthy_swapped_app(app):
+    app.load()
+    app.stage("2.0.0", "2")
+    (app.launchd / "settle_operation_exit").write_text("1")
+
+    result = app.run("restart-prepared", CORSIA_RESTART_OPERATION_ID=OPERATION_ID)
+
+    assert result.returncode != 0
+    assert "could not complete its Update operation" in result.stdout + result.stderr
+    assert app.generation() == "1.0.0+1"
+    assert not (app.launchd / "settled_operation").exists()
+    assert app.calls("app") == [
+        f"--update-swap {OPERATION_ID}",
+        "--service unregister",
+        "--service register",
+        f"--update-rollback {OPERATION_ID}",
+        "--service unregister",
+        "--service register",
+    ]
 
 
 def test_a_failed_swap_starts_the_installed_app_again(app):

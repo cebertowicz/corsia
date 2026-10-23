@@ -953,7 +953,7 @@ async def test_update_startup_fails_when_its_target_version_is_not_running(
 
 
 async def test_packaged_update_startup_completes_when_the_target_version_is_running(
-    isolated_db, monkeypatch
+    isolated_db, monkeypatch, tmp_path
 ):
     from automation import restart_startup, update_failure_notice
     from automation import self_restart as sr
@@ -961,10 +961,10 @@ async def test_packaged_update_startup_completes_when_the_target_version_is_runn
 
     notice = MagicMock()
     monkeypatch.setattr(update_failure_notice, "tell_conductor_detached", notice)
+    bundle = tmp_path / "CORSIA.app"
+    bundle.mkdir()
     monkeypatch.setattr("infra.build_info.app_version", lambda: "0.4.2")
-    monkeypatch.setattr(
-        "infra.platform_paths.app_bundle_root", lambda: Path("/Applications/CORSIA.app")
-    )
+    monkeypatch.setattr("infra.platform_paths.app_bundle_root", lambda: bundle)
     rid = sr.try_acquire(
         "t-1", "steve", "oldsha", "dev", "update",
         kind="update", target_version="0.4.2",
@@ -977,6 +977,33 @@ async def test_packaged_update_startup_completes_when_the_target_version_is_runn
     assert sr.operation_by_id(rid)["status"] == "complete"
     assert rolled_back is None
     notice.assert_not_called()
+
+
+def test_packaged_update_waits_for_the_post_swap_shell_to_confirm_health(
+    isolated_db, monkeypatch, tmp_path,
+):
+    """The new backend cannot complete while the old shell can still roll it back."""
+    from automation import restart_startup
+    from automation import self_restart as sr
+
+    bundle = tmp_path / "CORSIA.app"
+    bundle.mkdir()
+    bundle.with_name("CORSIA.app.previous").mkdir()
+    monkeypatch.setattr("infra.build_info.app_version", lambda: "0.4.2")
+    monkeypatch.setattr("infra.platform_paths.app_bundle_root", lambda: bundle)
+    rid = sr.try_acquire(
+        "t-1", "steve", "oldsha", "dev", "update",
+        kind="update", target_version="0.4.2",
+    )
+    assert rid is not None
+    _advance(rid, "steering", "ready", "restarting")
+
+    restart_startup.close_out_prior_self_restart()
+
+    assert restart_startup._complete_restart_operation() is None
+    assert sr.operation_by_id(rid)["status"] == "in_flight"
+    assert sr.restart_holds_new_work() is True
+    assert sr.complete_operation(rid)
 
 
 @pytest.mark.parametrize(
