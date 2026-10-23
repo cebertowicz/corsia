@@ -42,11 +42,18 @@ afterEach(() => {
 	measurementOrigin.set(null);
 });
 
-function render(activeView: 'activity' | 'chat' | 'measurement' = 'chat', conductorThreadId: string | null = null, onMeasurement = () => {}, hasPane = true): void {
+function render(
+	activeView: 'activity' | 'chat' | 'measurement' = 'chat',
+	conductorThreadId: string | null = null,
+	onMeasurement = () => {},
+	hasPane = true,
+	artifactHeaderInset: number | null = null,
+	onTogglePane = () => {},
+): void {
 	if (component) unmount(component);
 	component = mount(Header, {
 		target: host,
-		props: { onToggleSidebar: () => {}, onTogglePane: () => {}, onMeasurement, activeView, conductorThreadId, hasPane },
+		props: { onToggleSidebar: () => {}, onTogglePane, onMeasurement, activeView, conductorThreadId, hasPane, artifactHeaderInset },
 	});
 	flushSync();
 }
@@ -63,6 +70,29 @@ describe('Header', () => {
 		render();
 		expect(host.querySelectorAll('[aria-label$="settings"]')).toHaveLength(1);
 		expect(host.querySelector('[aria-label="Thread settings"]')).not.toBeNull();
+	});
+
+	it('keeps the canvas-open desktop controls reachable outside the narrowed chat segment', () => {
+		let measuresOpened = 0;
+		let panelToggles = 0;
+		threads.set([{ ...agentThread }]);
+		render('chat', null, () => { measuresOpened += 1; }, true, 600, () => { panelToggles += 1; });
+
+		const right = host.querySelector('.shell-header > .h-right');
+		expect(right).not.toBeNull();
+		const measurement = right?.querySelector('[aria-label^="Measurement for"]') as HTMLButtonElement;
+		const settings = right?.querySelector('[aria-label="Thread settings"]') as HTMLButtonElement;
+		const panel = right?.querySelector('[aria-label="Toggle panel"]') as HTMLButtonElement;
+		expect(measurement).toBeTruthy();
+		expect(settings).toBeTruthy();
+		expect(panel).toBeTruthy();
+
+		measurement.click();
+		settings.click();
+		panel.click();
+		expect(measuresOpened).toBe(1);
+		expect(get(threadSettingsOpen)).toBe(true);
+		expect(panelToggles).toBe(1);
 	});
 
 	it('keeps an active thread chat-first without a Plan takeover action', () => {

@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { test } from '../support/test';
 import { expect } from '@playwright/test';
@@ -5,11 +6,26 @@ import {
 	createSession,
 	loginByUrl,
 	saveEvidenceScreenshot,
+	sidebarThread,
 	TEST_TOKEN,
 } from '../support/corsia';
 
+function enableMeasurementForSession(sessionId: string): void {
+	const stateRoot = process.env.CORSIA_E2E_STATE_DIR;
+	const python = process.env.CORSIA_E2E_BACKEND_PYTHON;
+	if (!stateRoot || !python) throw new Error('Artifact desktop proof requires the disposable E2E state and Python');
+	execFileSync(python, ['-c', [
+		'import sqlite3, sys',
+		'connection = sqlite3.connect(sys.argv[1])',
+		'connection.execute("UPDATE threads SET agent_enabled = 1, agent_status = \'active\', agent_responsibility = \'Owns artifacts\' WHERE id = ?", (sys.argv[2],))',
+		'connection.commit()',
+	].join('\n'), `${stateRoot}/corsia.db`, sessionId]);
+}
+
 test.describe('@flow:artifact-leaf @surface:chat @surface:documents artifact leaf desktop shell', () => {
-	test('renders a thread-pinned split with comments, resize, collapse, and expand', async ({ page, request }, testInfo) => {
+	test('renders a thread-pinned split with header controls, resize, collapse, and expand', async ({ page, request }, testInfo) => {
+		// This journey captures ten evidence frames and now includes the 900px pane transition.
+		test.setTimeout(45_000);
 		test.skip((page.viewportSize()?.width ?? 0) <= 1024, 'Slice 1 is desktop-only');
 
 		const stamp = Date.now();
@@ -22,35 +38,40 @@ test.describe('@flow:artifact-leaf @surface:chat @surface:documents artifact lea
 		const roots: Array<{ kind: string; path: string }> = tree.roots ?? [];
 		const workspaceRoot = (roots.find((root) => root.kind === 'workspace') ?? roots[0])?.path;
 		expect(workspaceRoot).toEqual(expect.any(String));
-		const docPath = path.join(workspaceRoot, fileName);
-		const docText = '# Artifact leaf E2E\n\nThread-scoped document body.';
-
-		const seed = await request.put(`/api/files/content?token=${tok}`, {
-			data: {
-				path: docPath,
-				text: docText,
-				project_id: null,
-				thread_id: sessionId,
-				create: true,
-			},
-		});
-		expect(seed.ok(), `seed failed: ${seed.status()} ${await seed.text()}`).toBeTruthy();
+		const tabs = Array.from({ length: 8 }, (_, index) => ({
+			path: path.join(workspaceRoot, index === 0 ? fileName : `artifact-leaf-${stamp}-${index}.md`),
+			title: index === 0 ? fileName : `artifact-leaf-${stamp}-${index}.md`,
+		}));
+		for (const artifact of tabs) {
+			const seed = await request.put(`/api/files/content?token=${tok}`, {
+				data: {
+					path: artifact.path,
+					text: '# Artifact leaf E2E\n\nThread-scoped document body.',
+					project_id: null,
+					thread_id: sessionId,
+					create: true,
+				},
+			});
+			expect(seed.ok(), `seed failed: ${seed.status()} ${await seed.text()}`).toBeTruthy();
+		}
+		enableMeasurementForSession(sessionId);
+		const docPath = tabs[0].path;
 
 		await page.addInitScript(
-			({ threadId, artifactPath, artifactTitle }) => {
+			({ threadId, artifactTabs }) => {
 				localStorage.setItem(
 					'corsia:artifactWorkspace:v1',
 					JSON.stringify({
 						threads: {
 							[threadId]: {
-								tabs: [{
+								tabs: artifactTabs.map(({ path, title }) => ({
 									artifactId: null,
-									path: artifactPath,
-									title: artifactTitle,
+									path,
+									title,
 									loadedRevision: null,
 									status: 'loading',
-								}],
-								activeTabId: `path:${artifactPath}`,
+								})),
+								activeTabId: `path:${artifactTabs[0].path}`,
 								visible: true,
 								activeSurface: 'artifact',
 							},
@@ -59,7 +80,7 @@ test.describe('@flow:artifact-leaf @surface:chat @surface:documents artifact lea
 					}),
 				);
 			},
-			{ threadId: sessionId, artifactPath: docPath, artifactTitle: fileName },
+			{ threadId: sessionId, artifactTabs: tabs },
 		);
 
 		await loginByUrl(page);
@@ -72,6 +93,14 @@ test.describe('@flow:artifact-leaf @surface:chat @surface:documents artifact lea
 		const tab = page.getByRole('tab', { name: fileName });
 		const divider = page.getByRole('separator', { name: 'Resize artifact panel' });
 		const assertHeaderTracksArtifactWidth = async () => {
+			// The split's ResizeObserver follows the pane transition; wait for the
+			// actual minimum-width contract instead of sampling its first layout frame.
+			await expect.poll(async () => await page.evaluate(() => {
+				const leaf = document.querySelector<HTMLElement>('.leaf-col')?.getBoundingClientRect();
+				const split = document.querySelector<HTMLElement>('.split')?.getBoundingClientRect();
+				if (!leaf || !split) throw new Error('split width is unavailable');
+				return split.width - leaf.width - 8;
+			})).toBeGreaterThanOrEqual(420);
 			const geometry = await page.evaluate(() => {
 				const title = document.querySelector<HTMLElement>('.h-title')?.getBoundingClientRect();
 				const divider = document.querySelector<HTMLElement>('[aria-label="Resize artifact panel"]')?.getBoundingClientRect();
@@ -99,6 +128,54 @@ test.describe('@flow:artifact-leaf @surface:chat @surface:documents artifact lea
 		await expect(divider).toBeVisible();
 		await assertHeaderTracksArtifactWidth();
 
+		await page.setViewportSize({ width: 1440, height: 900 });
+		const measurement = page.getByRole('button', { name: `Measurement for ${sessionTitle}`, exact: true });
+		const settings = page.getByRole('button', { name: 'Thread settings', exact: true });
+		const panelToggle = page.getByRole('button', { name: 'Toggle panel', exact: true });
+		await expect(measurement).toBeVisible();
+		await expect(settings).toBeVisible();
+		await expect(panelToggle).toBeVisible();
+		expect(await page.locator('.main').evaluate((main) => getComputedStyle(main).zIndex)).toBe('auto');
+		for (const theme of ['dark', 'light'] as const) {
+			await page.locator('html').evaluate((element, value) => element.setAttribute('data-theme', value), theme);
+			await saveEvidenceScreenshot(page, testInfo, `header-icons-after-${theme}-1440-drawer-open`, { fullPage: false });
+		}
+
+		await measurement.click();
+		await expect(page.getByRole('button', { name: 'Close Measurement' })).toBeVisible();
+		await page.getByRole('button', { name: 'Close Measurement' }).click();
+		await expect(tab).toBeVisible();
+		await settings.click();
+		await expect(page.getByText('Context files', { exact: true })).toBeVisible();
+		await page.getByRole('button', { name: `Agent: ${sessionTitle}` }).click();
+		await expect(tab).toBeVisible();
+
+		const strip = page.locator('.canvas-header-strip');
+		const [stripBox, measurementBox, settingsBox, panelBox] = await Promise.all([
+			strip.boundingBox(), measurement.boundingBox(), settings.boundingBox(), panelToggle.boundingBox(),
+		]);
+		expect(stripBox).not.toBeNull();
+		expect(measurementBox).not.toBeNull();
+		expect(settingsBox).not.toBeNull();
+		expect(panelBox).not.toBeNull();
+		expect(stripBox!.x + stripBox!.width).toBeLessThanOrEqual(measurementBox!.x);
+		expect(measurementBox!.x + measurementBox!.width).toBeLessThanOrEqual(settingsBox!.x);
+		expect(settingsBox!.x + settingsBox!.width).toBeLessThanOrEqual(panelBox!.x);
+
+		await page.getByRole('tablist', { name: 'Open side panel items' }).evaluate((element) => {
+			element.scrollLeft = element.scrollWidth;
+		});
+		const lastTab = page.locator('.canvas-header-strip .tab').last();
+		const lastTabBox = await lastTab.boundingBox();
+		expect(lastTabBox).not.toBeNull();
+		expect(lastTabBox!.x + lastTabBox!.width).toBeLessThanOrEqual(measurementBox!.x);
+		await lastTab.click();
+		await expect(lastTab).toHaveAttribute('aria-selected', 'true');
+		for (const theme of ['dark', 'light'] as const) {
+			await page.locator('html').evaluate((element, value) => element.setAttribute('data-theme', value), theme);
+			await saveEvidenceScreenshot(page, testInfo, `header-icons-after-${theme}-1440-many-tabs`, { fullPage: false });
+		}
+
 		const collapseButton = page.getByRole('button', { name: 'Collapse artifact panel' });
 		const [headerBox, tabBox, collapseBox] = await Promise.all([
 			page.locator('.shell-header').boundingBox(),
@@ -113,6 +190,51 @@ test.describe('@flow:artifact-leaf @surface:chat @surface:documents artifact lea
 		expect(collapseBox!.y).toBeGreaterThanOrEqual(headerBox!.y);
 		expect(collapseBox!.y + collapseBox!.height).toBeLessThanOrEqual(headerBox!.y + headerBox!.height);
 
+		const drawer = page.locator('aside.pane');
+		await expect(drawer).not.toHaveClass(/(^|\s)overlay(\s|$)/);
+		await panelToggle.click();
+		await expect(drawer).toHaveClass(/(^|\s)collapsed(\s|$)/);
+		for (const theme of ['dark', 'light'] as const) {
+			await page.locator('html').evaluate((element, value) => element.setAttribute('data-theme', value), theme);
+			await saveEvidenceScreenshot(page, testInfo, `header-icons-after-${theme}-1440-drawer-closed`, { fullPage: false });
+		}
+		await panelToggle.click();
+		await expect(drawer).not.toHaveClass(/(^|\s)collapsed(\s|$)/);
+		await page.setViewportSize({ width: 1100, height: 900 });
+		await expect.poll(async () => await drawer.getAttribute('class')).toContain('overlay');
+		await panelToggle.click();
+		await expect(drawer).toHaveClass(/(^|\s)collapsed(\s|$)/);
+
+		// At 900px an open desktop sidebar leaves the canvas compact. Collapse it
+		// through the visible header control to prove the expanded-canvas state.
+		await page.setViewportSize({ width: 900, height: 900 });
+		await page.getByRole('button', { name: 'Toggle sidebar', exact: true }).click();
+		await expect.poll(async () => await page.locator('.main').evaluate((main) => main.classList.contains('canvas-header-active'))).toBe(true);
+		expect(await page.locator('.main').evaluate((main) => getComputedStyle(main).zIndex)).toBe('10');
+		const mainTransitionStarted = page.locator('.main').evaluate((main) => new Promise<void>((resolve) => {
+			main.addEventListener('transitionstart', (event) => {
+				if (event.propertyName === 'transform') resolve();
+			}, { once: true });
+		}));
+		await panelToggle.click();
+		await mainTransitionStarted;
+		const midOpenGeometry = await page.evaluate(() => {
+			const main = document.querySelector<HTMLElement>('.main');
+			if (!main) throw new Error('tablet main is unavailable');
+			const box = main.getBoundingClientRect();
+			const x = Math.max(8, Math.min(window.innerWidth - 8, box.left + 24));
+			const y = Math.max(8, Math.min(window.innerHeight - 8, box.top + 160));
+			const target = document.elementFromPoint(x, y);
+			return { mainOwnsVisiblePoint: target != null && main.contains(target) };
+		});
+		expect(midOpenGeometry.mainOwnsVisiblePoint).toBe(true);
+		await page.locator('html').evaluate((element) => element.setAttribute('data-theme', 'light'));
+		await saveEvidenceScreenshot(page, testInfo, 'header-icons-after-light-900-pane-mid-open', { fullPage: false });
+		await expect(drawer).toHaveClass(/(^|\s)open(\s|$)/);
+
+		await page.setViewportSize({ width: 1440, height: 1000 });
+		await expect(drawer).not.toHaveClass(/(^|\s)overlay(\s|$)/);
+
 		await divider.focus();
 		await page.keyboard.press('Home');
 		await expect.poll(async () => Number(await divider.getAttribute('aria-valuenow'))).toBe(360);
@@ -123,7 +245,7 @@ test.describe('@flow:artifact-leaf @surface:chat @surface:documents artifact lea
 		await saveEvidenceScreenshot(page, testInfo, 'artifact-leaf-desktop-split', { fullPage: false });
 
 		await collapseButton.click();
-		const rail = page.getByRole('button', { name: 'Expand artifact panel (1 open)' });
+		const rail = page.getByRole('button', { name: `Expand artifact panel (${tabs.length} open)` });
 		await expect(rail).toBeVisible();
 		await expect(page.getByRole('textbox', { name: 'Message CORSIA' })).toBeVisible();
 		await saveEvidenceScreenshot(page, testInfo, 'artifact-leaf-desktop-rail', { fullPage: false });
@@ -131,5 +253,180 @@ test.describe('@flow:artifact-leaf @surface:chat @surface:documents artifact lea
 		await rail.click();
 		await expect(tab).toBeVisible();
 		await expect(divider).toBeVisible();
+	});
+
+	test('ends an ordinary chat canvas strip at its two visible controls', async ({ page, request }, testInfo) => {
+		test.skip((page.viewportSize()?.width ?? 0) <= 1024, 'Desktop-only control geometry');
+
+		const stamp = Date.now();
+		const sessionTitle = `ordinary-artifact-${stamp}`;
+		const fileName = `ordinary-artifact-${stamp}.md`;
+		const sessionId = await createSession(request, sessionTitle);
+		const tok = encodeURIComponent(TEST_TOKEN);
+		const tree = await (await request.get(`/api/files/tree?token=${tok}`)).json();
+		const roots: Array<{ kind: string; path: string }> = tree.roots ?? [];
+		const workspaceRoot = (roots.find((root) => root.kind === 'workspace') ?? roots[0])?.path;
+		expect(workspaceRoot).toEqual(expect.any(String));
+		const artifactPath = path.join(workspaceRoot, fileName);
+		const seed = await request.put(`/api/files/content?token=${tok}`, {
+			data: { path: artifactPath, text: '# Ordinary artifact\n\nCanvas evidence.', project_id: null, thread_id: sessionId, create: true },
+		});
+		expect(seed.ok(), `seed failed: ${seed.status()} ${await seed.text()}`).toBeTruthy();
+		await page.addInitScript(
+			({ threadId, openPath, title }) => localStorage.setItem('corsia:artifactWorkspace:v1', JSON.stringify({
+				threads: { [threadId]: { tabs: [{ artifactId: null, path: openPath, title, loadedRevision: null, status: 'loading' }], activeTabId: `path:${openPath}`, visible: true, activeSurface: 'artifact' } },
+				splitWidth: null,
+			})),
+			{ threadId: sessionId, openPath: artifactPath, title: fileName },
+		);
+		await loginByUrl(page);
+		await sidebarThread(page, sessionTitle).click();
+		await page.setViewportSize({ width: 1440, height: 900 });
+		await expect(page.getByRole('tab', { name: fileName })).toBeVisible();
+		await expect(page.getByRole('button', { name: 'Thread settings', exact: true })).toBeVisible();
+		await expect(page.getByRole('button', { name: 'Toggle panel', exact: true })).toBeVisible();
+		expect(await page.getByRole('button', { name: `Measurement for ${sessionTitle}`, exact: true }).count()).toBe(0);
+		await expect.poll(async () => await page.evaluate(() => {
+			const strip = document.querySelector<HTMLElement>('.canvas-header-strip')?.getBoundingClientRect();
+			const controls = document.querySelector<HTMLElement>('.h-right')?.getBoundingClientRect();
+			if (!strip || !controls) throw new Error('ordinary canvas control geometry is unavailable');
+			return strip.right <= controls.left;
+		})).toBe(true);
+		for (const theme of ['dark', 'light'] as const) {
+			await page.locator('html').evaluate((element, value) => element.setAttribute('data-theme', value), theme);
+			await saveEvidenceScreenshot(page, testInfo, `header-icons-after-${theme}-1440-ordinary-chat-canvas`, { fullPage: false });
+		}
+	});
+
+	test('keeps a long non-canvas chat title clear of its controls', async ({ page, request }, testInfo) => {
+		test.skip((page.viewportSize()?.width ?? 0) <= 1024, 'Desktop-only title geometry');
+
+		const sessionTitle = `a deliberately long ordinary chat title that must truncate before the right header controls ${Date.now()}`;
+		await createSession(request, sessionTitle);
+		await loginByUrl(page);
+		await sidebarThread(page, sessionTitle).click();
+		await page.setViewportSize({ width: 1440, height: 900 });
+		const geometry = await page.evaluate(() => {
+			const title = document.querySelector<HTMLElement>('.h-title')?.getBoundingClientRect();
+			const controls = document.querySelector<HTMLElement>('.h-right')?.getBoundingClientRect();
+			if (!title || !controls) throw new Error('ordinary header title geometry is unavailable');
+			return { titleRight: title.right, controlsLeft: controls.left };
+		});
+		expect(geometry.titleRight).toBeLessThanOrEqual(geometry.controlsLeft);
+		await page.locator('html').evaluate((element) => element.setAttribute('data-theme', 'light'));
+		await saveEvidenceScreenshot(page, testInfo, 'header-icons-after-light-1440-no-canvas-long-title', { fullPage: false });
+	});
+
+	test('keeps the phone header unchanged with an artifact open', async ({ page, request }, testInfo) => {
+		test.skip((page.viewportSize()?.width ?? 0) > 768, 'Phone evidence only');
+
+		const stamp = Date.now();
+		const sessionTitle = `artifact-leaf-phone-${stamp}`;
+		const fileName = `artifact-leaf-phone-${stamp}.md`;
+		const sessionId = await createSession(request, sessionTitle);
+		const tok = encodeURIComponent(TEST_TOKEN);
+		const tree = await (await request.get(`/api/files/tree?token=${tok}`)).json();
+		const roots: Array<{ kind: string; path: string }> = tree.roots ?? [];
+		const workspaceRoot = (roots.find((root) => root.kind === 'workspace') ?? roots[0])?.path;
+		expect(workspaceRoot).toEqual(expect.any(String));
+		const artifactPath = path.join(workspaceRoot, fileName);
+		const seed = await request.put(`/api/files/content?token=${tok}`, {
+			data: {
+				path: artifactPath,
+				text: '# Artifact leaf phone evidence\n\nThread-scoped document body.',
+				project_id: null,
+				thread_id: sessionId,
+				create: true,
+			},
+		});
+		expect(seed.ok(), `seed failed: ${seed.status()} ${await seed.text()}`).toBeTruthy();
+		await page.addInitScript(
+			({ threadId, openPath, title }) => {
+				localStorage.setItem('corsia:artifactWorkspace:v1', JSON.stringify({
+					threads: {
+						[threadId]: {
+							tabs: [{ artifactId: null, path: openPath, title, loadedRevision: null, status: 'loading' }],
+							activeTabId: `path:${openPath}`,
+							visible: true,
+							activeSurface: 'artifact',
+						},
+					},
+					splitWidth: null,
+				}));
+			},
+			{ threadId: sessionId, openPath: artifactPath, title: fileName },
+		);
+
+		await loginByUrl(page);
+		await page.getByRole('button', { name: 'Toggle sidebar' }).click();
+		await sidebarThread(page, sessionTitle).click();
+		await page.setViewportSize({ width: 393, height: 852 });
+		await expect(page.getByRole('button', { name: 'Tabs (1)' })).toBeVisible();
+		await expect(page.getByRole('region', { name: 'Document text' })).toBeVisible();
+		const geometry = await page.evaluate(() => {
+			const header = document.querySelector<HTMLElement>('.shell-header')?.getBoundingClientRect();
+			const title = document.querySelector<HTMLElement>('.h-title')?.getBoundingClientRect();
+			const controls = document.querySelector<HTMLElement>('.h-right')?.getBoundingClientRect();
+			const headerElement = document.querySelector<HTMLElement>('.shell-header');
+			if (!header || !title || !controls || !headerElement) throw new Error('phone artifact header geometry is unavailable');
+			const headerHeightProbe = document.createElement('div');
+			headerHeightProbe.style.height = 'var(--header-bottom)';
+			headerElement.append(headerHeightProbe);
+			const expectedHeaderHeight = Number.parseFloat(getComputedStyle(headerHeightProbe).height);
+			headerHeightProbe.remove();
+			return {
+				headerHeight: header.height,
+				expectedHeaderHeight,
+				titleCenterY: title.y + title.height / 2,
+				controlsCenterY: controls.y + controls.height / 2,
+				titleRight: title.right,
+				controlsLeft: controls.left,
+			};
+		});
+		expect(Math.abs(geometry.titleCenterY - geometry.controlsCenterY)).toBeLessThan(4);
+		expect(geometry.titleRight).toBeLessThanOrEqual(geometry.controlsLeft);
+		expect(geometry.headerHeight).toBeCloseTo(geometry.expectedHeaderHeight, 0);
+		for (const theme of ['dark', 'light'] as const) {
+			await page.locator('html').evaluate((element, value) => element.setAttribute('data-theme', value), theme);
+			await saveEvidenceScreenshot(page, testInfo, `header-icons-after-${theme}-393`, { fullPage: false });
+		}
+	});
+
+	test('keeps an ordinary phone chat title and controls on one header row', async ({ page, request }, testInfo) => {
+		test.skip((page.viewportSize()?.width ?? 0) > 768, 'Phone evidence only');
+
+		const sessionTitle = `a deliberately long ordinary phone chat title that must truncate before its header controls ${Date.now()}`;
+		await createSession(request, sessionTitle);
+		await loginByUrl(page);
+		await page.getByRole('button', { name: 'Toggle sidebar' }).click();
+		await sidebarThread(page, sessionTitle).click();
+		await page.setViewportSize({ width: 393, height: 852 });
+		await expect(page.getByRole('button', { name: 'Thread settings', exact: true })).toBeVisible();
+		await expect(page.getByRole('button', { name: 'Toggle panel', exact: true })).toBeVisible();
+		const geometry = await page.evaluate(() => {
+			const header = document.querySelector<HTMLElement>('.shell-header')?.getBoundingClientRect();
+			const title = document.querySelector<HTMLElement>('.h-title')?.getBoundingClientRect();
+			const controls = document.querySelector<HTMLElement>('.h-right')?.getBoundingClientRect();
+			const headerElement = document.querySelector<HTMLElement>('.shell-header');
+			if (!header || !title || !controls || !headerElement) throw new Error('ordinary phone header geometry is unavailable');
+			const headerHeightProbe = document.createElement('div');
+			headerHeightProbe.style.height = 'var(--header-bottom)';
+			headerElement.append(headerHeightProbe);
+			const expectedHeaderHeight = Number.parseFloat(getComputedStyle(headerHeightProbe).height);
+			headerHeightProbe.remove();
+			return {
+				headerHeight: header.height,
+				expectedHeaderHeight,
+				titleCenterY: title.y + title.height / 2,
+				controlsCenterY: controls.y + controls.height / 2,
+				titleRight: title.right,
+				controlsLeft: controls.left,
+			};
+		});
+		expect(Math.abs(geometry.titleCenterY - geometry.controlsCenterY)).toBeLessThan(4);
+		expect(geometry.titleRight).toBeLessThanOrEqual(geometry.controlsLeft);
+		expect(geometry.headerHeight).toBeCloseTo(geometry.expectedHeaderHeight, 0);
+		await page.locator('html').evaluate((element) => element.setAttribute('data-theme', 'light'));
+		await saveEvidenceScreenshot(page, testInfo, 'header-icons-after-light-393-no-canvas', { fullPage: false });
 	});
 });

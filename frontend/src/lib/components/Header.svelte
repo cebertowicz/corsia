@@ -13,9 +13,11 @@
 	import { openMeasurementFromThread } from '$lib/stores/measurementNavigation';
 	import type { View } from '$lib/homePaneConfig';
 
-	let { onToggleSidebar, onTogglePane, onMeasurement, activeView, conductorThreadId, hasPane = true, artifactHeaderInset = null }: {
+	let { onToggleSidebar, onTogglePane, onMeasurement, onRightControlsWidth, activeView, conductorThreadId, hasPane = true, artifactHeaderInset = null }: {
 		onToggleSidebar: () => void;
 		onTogglePane: () => void;
+		/** Reports the measured desktop canvas control group width to the shell. */
+		onRightControlsWidth?: (width: number) => void;
 		/** Opens the Measurement surface; the doorway writes its own scope first (PL-2). */
 		onMeasurement?: () => void;
 		activeView: View;
@@ -39,6 +41,24 @@
 	const isConductor = $derived(!isTakeover && $activeThread == null && $activeThreadId == null);
 
 	let overflowOpen = $state(false);
+	let headerEl = $state<HTMLElement>();
+	let rightControlsEl = $state<HTMLElement>();
+
+	$effect(() => {
+		const shell = headerEl;
+		const controls = rightControlsEl;
+		if (!shell || !controls || typeof ResizeObserver === 'undefined') return;
+		const updateWidth = () => {
+			const shellBox = shell.getBoundingClientRect();
+			const controlsBox = controls.getBoundingClientRect();
+			onRightControlsWidth?.(Math.ceil(shellBox.right - controlsBox.left));
+		};
+		updateWidth();
+		const observer = new ResizeObserver(updateWidth);
+		observer.observe(shell);
+		observer.observe(controls);
+		return () => observer.disconnect();
+	});
 	const overflowActions = $derived((h?.actions ?? []).filter((a) => !a.primary && !a.wideOnly));
 	// PL-2: an agent thread opens its own scope, a conductor thread its project.
 	const isLaneThread = $derived($activeThread != null && isNavAgent($activeThread));
@@ -122,7 +142,7 @@
 	{/if}
 {/snippet}
 
-<header class="shell-header" class:shell-inset={$sidebarCollapsed} data-tauri-drag-region use:toastTopSurface>
+<header bind:this={headerEl} class="shell-header" class:shell-inset={$sidebarCollapsed} class:with-canvas={artifactHeaderInset !== null} data-tauri-drag-region use:toastTopSurface>
 	<div
 		class="chat-header"
 		class:with-canvas={artifactHeaderInset !== null}
@@ -144,7 +164,9 @@
 		<span class="h-title">{@render titleInner()}</span>
 	</div>
 
-	<div class="h-zone h-right">
+	</div>
+
+	<div bind:this={rightControlsEl} class="h-zone h-right">
 		{#if isTakeover && h?.actions?.length}
 			{#each h.actions as a (a.id)}
 				<button class="h-act" class:active={a.active} class:overflowable={!a.primary} class:wide-only={a.wideOnly} onclick={() => run(a.onClick)} title={a.title ?? a.label}>{a.label}</button>
@@ -179,7 +201,6 @@
 			</button>
 		{/if}
 		</div>
-	</div>
 </header>
 
 {#if overflowOpen && hasOverflow}
@@ -197,8 +218,8 @@
 		position: absolute; top: 0; left: 0; right: 0;
 		z-index: 10;
 		height: var(--header-height);
-		--header-inline-end: 12px;
-		padding: 0 var(--header-inline-end) 0 max(12px, env(titlebar-area-x, 12px));
+		--header-inline-end: var(--space-3);
+		padding: 0 var(--header-inline-end) 0 max(var(--space-3), env(titlebar-area-x, var(--space-3)));
 		display: flex; align-items: center; gap: 8px;
 		flex-shrink: 0;
 		box-shadow: var(--glass-rim);
@@ -219,9 +240,13 @@
 		mask-image: linear-gradient(180deg, rgba(0,0,0,1) 0%, rgba(0,0,0,0.95) 50%, rgba(0,0,0,0.5) 80%, transparent 100%);
 	}
 	:global(html[data-shell="tauri"]) .shell-header.shell-inset { padding-left: 99px; }
+	/* Only the desktop drawer overlays the canvas. At narrower breakpoints main stays
+	   above the fixed pane, so the header keeps its normal stacking context there. */
+	@media (min-width: 64.0625rem) { .shell-header.with-canvas { z-index: auto; } .shell-header.with-canvas::before { z-index: 0; } }
 	.shell-header :global(button) { -webkit-app-region: no-drag; app-region: no-drag; }
 
 	.chat-header { display: flex; align-items: center; flex: 1; min-width: 0; }
+	.shell-header.with-canvas .chat-header { position: relative; z-index: 1; }
 	/* The canvas keeps its own segment in the shared header. All chat controls, including
 	   the title, stay in the remaining segment instead of layering over its tabs. */
 	.chat-header.with-canvas {
@@ -231,6 +256,10 @@
 	.h-zone { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
 	.h-leading { display: flex; align-items: center; min-width: 0; flex: 1; gap: 8px; }
 	.h-right { margin-left: auto; }
+	/* Only an expanded desktop canvas needs controls above its overlaid drawer. */
+	.shell-header.with-canvas .h-right {
+		position: absolute; right: var(--header-inline-end); z-index: 12;
+	}
 
 	.h-icon {
 		display: flex; align-items: center; justify-content: center;
@@ -319,11 +348,12 @@
 			box-shadow: none;
 			display: grid; grid-template-columns: auto 1fr auto; gap: 4px;
 		}
-		/* The desktop split wrapper collapses back to the existing three mobile header cells. */
+		/* h-right is a shell sibling (for the desktop canvas), so pin it to the third cell;
+		   auto-placement would give it a second phone row. */
 		.chat-header, .chat-header.with-canvas {
-			grid-column: 1 / -1;
+			grid-column: 1 / 3; grid-row: 1;
 			width: 100%; max-width: none; flex: 1;
-			display: grid; grid-template-columns: auto 1fr auto; gap: var(--space-1);
+			display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--space-1);
 		}
 		.h-leading { display: contents; }
 		/* The blur stays on this masked layer so it fades out with no hard edge.
@@ -348,7 +378,11 @@
 			mask-image: linear-gradient(180deg, rgba(0,0,0,1) calc(50% + var(--header-pad-top) / 2 + 9px), transparent 100%);
 		}
 		.h-left { justify-self: start; }
-		.h-right { justify-self: end; margin-left: 0; }
+		/* Undo the desktop canvas layer: phone controls sit in the third cell beside the title. */
+		.shell-header.with-canvas .h-right, .h-right {
+			position: static; right: auto; z-index: auto;
+			grid-column: 3; grid-row: 1; align-self: center; justify-self: end; margin-left: 0;
+		}
 		/* inline-flex is content-sized; override so the 1fr cell bounds the title and
 		   the existing overflow:hidden + text-overflow:ellipsis on .h-scope fires. */
 		.h-title { justify-self: center; text-align: center; width: 100%; min-width: 0; }

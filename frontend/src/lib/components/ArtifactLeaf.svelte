@@ -362,7 +362,7 @@
 	/* Expanded tabs occupy the canvas segment of the shared header. They are out of
 	   leaf flow, so the document begins directly below the header with no second band. */
 	.canvas-header-strip {
-		position: absolute; inset: 0 0 auto;
+		position: absolute; inset: 0 var(--header-right-controls-inset) auto 0;
 		height: var(--header-height); z-index: 11;
 	}
 	.canvas-header-strip :global(.strip) { height: 100%; padding-left: var(--space-3); padding-right: var(--space-2); border-bottom: 0; background: transparent; }
