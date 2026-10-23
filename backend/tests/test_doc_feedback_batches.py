@@ -29,7 +29,7 @@ def add_user_edit(db, artifact_id: str, recipient_id: str = "owner") -> None:
         )
 
 
-def test_each_person_comment_is_delivered_as_its_own_task(isolated_db):
+def test_person_comments_share_an_idle_batch_until_the_sweep_delivers_them(isolated_db):
     db = get_db()
     try:
         seed_thread(db, "owner", title="Documents")
@@ -37,9 +37,8 @@ def test_each_person_comment_is_delivered_as_its_own_task(isolated_db):
         added = [add_person_comment(db, artifact_id) for _ in range(3)]
 
         rows = batches(db)
-        assert [(row["state"], row["closed_reason"], row["item_count"]) for row in rows] == [("delivered", "send", 1)] * 3
-        assert [linked_comment_ids(db, row["id"]) for row in rows] == [[row["id"]] for row, _feedback in added]
-        assert len({row["delivered_node_id"] for row in rows}) == 3
+        assert [(row["state"], row["closed_reason"], row["item_count"]) for row in rows] == [("open", None, 3)]
+        assert linked_comment_ids(db, rows[0]["id"]) == sorted(row["id"] for row, _feedback in added)
     finally:
         db.close()
 
@@ -69,7 +68,7 @@ def test_agent_comments_keep_their_quiet_batch_after_an_earlier_delivery(isolate
         db.close()
 
 
-def test_user_comment_delivers_immediately_and_client_replay_is_a_noop(isolated_db):
+def test_user_comment_remains_open_and_client_replay_is_a_noop(isolated_db):
     db = get_db()
     try:
         seed_thread(db, "owner")
@@ -80,36 +79,33 @@ def test_user_comment_delivers_immediately_and_client_replay_is_a_noop(isolated_
 
         [batch] = batches(db)
         assert replay["id"] == comment["id"]
-        assert (batch["state"], batch["closed_reason"], batch["attempts"]) == ("delivered", "send", 1)
+        assert (batch["state"], batch["closed_reason"], batch["attempts"]) == ("open", None, 0)
         assert linked_comment_ids(db, batch["id"]) == [comment["id"]]
-        assert feedback["woken"] == ["owner"]
+        assert feedback["woken"] == []
         assert replay_feedback["woken"] == []
     finally:
         db.close()
 
 
-def test_comment_while_an_earlier_task_is_selected_queues_behind_it_without_a_second_wake(isolated_db):
+def test_second_person_comment_joins_the_open_idle_batch_without_a_wake(isolated_db):
     db = get_db()
     try:
         seed_thread(db, "owner")
         artifact_id = seed_document(db, "owner")
         first, opened = add_person_comment(db, artifact_id)
-        assert opened["woken"] == ["owner"]
+        assert opened["woken"] == []
 
         second, queued = add_person_comment(db, artifact_id)
 
         rows = batches(db)
-        assert len(rows) == 2
-        assert linked_comment_ids(db, rows[0]["id"]) == [first["id"]]
-        assert linked_comment_ids(db, rows[1]["id"]) == [second["id"]]
-        assert rows[0]["delivered_node_id"] != rows[1]["delivered_node_id"]
-        # Admission never preempts the selected task, so the owner is not woken twice.
+        assert len(rows) == 1
+        assert linked_comment_ids(db, rows[0]["id"]) == sorted([first["id"], second["id"]])
         assert queued["woken"] == []
     finally:
         db.close()
 
 
-def test_comment_after_the_earlier_task_settled_selects_a_new_task_and_wakes_the_owner(isolated_db):
+def test_comment_after_the_earlier_task_settled_is_delivered_by_its_next_sweep(isolated_db):
     from plans import admission, service
 
     db = get_db()
@@ -117,6 +113,8 @@ def test_comment_after_the_earlier_task_settled_selects_a_new_task_and_wakes_the
         seed_thread(db, "owner")
         artifact_id = seed_document(db, "owner")
         add_person_comment(db, artifact_id)
+        deadline = batches(db, state="open")[0]["closes_at"]
+        feedback_batches.close_due(deadline, db=db)
         [delivered] = batches(db)
         node_id = delivered["delivered_node_id"]
         admission.release(node_id, "test", db=db)
@@ -127,7 +125,8 @@ def test_comment_after_the_earlier_task_settled_selects_a_new_task_and_wakes_the
 
         rows = batches(db)
         assert len(rows) == 2 and rows[0]["delivered_node_id"] != rows[1]["delivered_node_id"]
-        assert feedback["woken"] == ["owner"]
+        assert rows[1]["state"] == "open"
+        assert feedback["woken"] == []
     finally:
         db.close()
 
@@ -288,7 +287,7 @@ def test_due_user_feedback_for_thread_document_broadcasts_to_owner(isolated_db, 
         db.close()
 
 
-def test_user_feedback_projection_has_no_open_comment_after_immediate_delivery(isolated_db):
+def test_user_feedback_projection_reports_comments_waiting_for_idle_delivery(isolated_db):
     db = get_db()
     try:
         seed_thread(db, "owner", title="Documents & Artifacts")
@@ -297,10 +296,10 @@ def test_user_feedback_projection_has_no_open_comment_after_immediate_delivery(i
         add_person_comment(db, artifact_id)
 
         assert feedback_batches.user_feedback_for_document(db, artifact_id) == {
-            "open_count": 0,
+            "open_count": 2,
             "owner_label": "Documents & Artifacts",
             "undelivered_batches": [],
         }
-        assert [row["state"] for row in batches(db)] == ["delivered", "delivered"]
+        assert [row["state"] for row in batches(db)] == ["open"]
     finally:
         db.close()

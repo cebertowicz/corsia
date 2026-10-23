@@ -29,7 +29,7 @@ def artifact_id(isolated_db):
         db.close()
 
 
-def test_user_comment_delivers_once_and_drives_only_after_create_commits(client, isolated_db, monkeypatch):
+def test_user_comment_post_acknowledges_a_saved_open_batch_without_driving(client, isolated_db, monkeypatch):
     from doceditor import live_runtime
     from plans import public
 
@@ -54,9 +54,15 @@ def test_user_comment_delivers_once_and_drives_only_after_create_commits(client,
 
     assert first.status_code == 200, first.text
     assert replay.status_code == 200, replay.text
-    assert first.json()["woken"] == ["owner"]
+    assert first.json()["woken"] == []
     assert replay.json()["woken"] == []
-    assert drives == [["owner"]]
+    db = get_db()
+    try:
+        [batch] = batches(db)
+        assert (batch["state"], batch["item_count"], batch["attempts"]) == ("open", 1, 0)
+    finally:
+        db.close()
+    assert drives == []
 
 
 @pytest.mark.parametrize("path", ["send", "retry"])

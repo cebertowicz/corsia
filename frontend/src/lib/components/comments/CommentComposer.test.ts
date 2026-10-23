@@ -58,4 +58,20 @@ describe('CommentComposer', () => {
 			log.mockRestore();
 		}
 	});
+
+	it('clears only after the save acknowledgement resolves', async () => {
+		let acknowledge!: () => void;
+		const onSubmit = vi.fn(() => new Promise<void>((resolve) => { acknowledge = resolve; }));
+		const textarea = render(onSubmit);
+		textarea.value = 'Wait for saved acknowledgement';
+		textarea.dispatchEvent(new Event('input', { bubbles: true }));
+		flushSync();
+
+		host.querySelector<HTMLButtonElement>('.submit')!.click();
+		await vi.waitFor(() => expect(onSubmit).toHaveBeenCalledWith('Wait for saved acknowledgement'));
+		expect(textarea.value).toBe('Wait for saved acknowledgement');
+
+		acknowledge();
+		await vi.waitFor(() => expect(textarea.value).toBe(''));
+	});
 });

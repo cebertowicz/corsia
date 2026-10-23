@@ -70,20 +70,26 @@ async def test_user_create_patch_and_decision_each_send_one_frame(
 
 
 @pytest.mark.asyncio
-async def test_a_person_comment_frame_goes_out_after_its_delivery(
+async def test_a_person_comment_post_commits_and_announces_without_inline_delivery(
     integration_client, doc, _registrable_roots, monkeypatch,
 ):
-    """A canvas reloading on the frame must already read the comment as delivered."""
-    from doceditor import comment_notifications
+    """The save acknowledgement must not wait for feedback delivery or a thread drive."""
+    from doceditor import comment_notifications, feedback_batches
     from infra.database import get_db
 
     _owner, artifact_id = await _own(integration_client, doc)
-    unsent_at_frame: list[int] = []
+    open_at_frame: list[int] = []
+
+    class InlineDelivery(BaseException):
+        pass
+
+    def reject_inline_delivery(*_args, **_kwargs):
+        raise InlineDelivery("comment POST must not close a feedback batch")
 
     def frame(frame_artifact_id, **_kwargs):
         db = get_db()
         try:
-            unsent_at_frame.append(
+            open_at_frame.append(
                 db.execute(
                     "SELECT COUNT(*) FROM doc_feedback_batches WHERE artifact_id=? AND state='open'", (frame_artifact_id,),
                 ).fetchone()[0]
@@ -92,9 +98,11 @@ async def test_a_person_comment_frame_goes_out_after_its_delivery(
             db.close()
 
     monkeypatch.setattr(comment_notifications, "broadcast_doc_comment_changed", frame)
+    monkeypatch.setattr(feedback_batches, "close_batch", reject_inline_delivery)
     created = _user_comment(integration_client, artifact_id)
     assert created.status_code == 200, created.text
-    assert unsent_at_frame == [0]
+    assert created.json()["woken"] == []
+    assert open_at_frame == [1]
 
 
 @pytest.mark.asyncio
