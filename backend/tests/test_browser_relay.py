@@ -201,14 +201,14 @@ async def test_navigation_result_overflow_closes_stalled_pane(monkeypatch, caplo
 
 
 @pytest.mark.asyncio
-async def test_a_lost_address_watch_is_re_established_then_ends_the_stream_visibly(monkeypatch, caplog):
-    monkeypatch.setattr(browser_stream, "METADATA_RETRY_DELAYS", (0, 0, 0))
+async def test_a_lost_address_watch_reconnects_then_ends_the_stream_visibly(monkeypatch, caplog):
+    monkeypatch.setattr(browser_stream, "PANE_RETRY_DELAYS", (0,))
     attempts = []
 
     async def watch_page_metadata(_thread_id, _connection_token, report):
         attempts.append(len(attempts))
         if len(attempts) == 1:
-            # The first watch reports the page, then its CDP connection drops.
+            # An initial metadata report is not a stable run, so its quick drop spends retry budget.
             await report({"type": "browser_metadata", "url": "https://example.test", "domain": "example.test", "title": "Example"})
             raise OSError("connection reset")
         raise browser_stream.BrowserSessionError("This page couldn't be checked")
@@ -220,9 +220,112 @@ async def test_a_lost_address_watch_is_re_established_then_ends_the_stream_visib
             await asyncio.Future()
 
     pane = Pane()
-    with pytest.raises(browser_stream.BrowserSessionError, match="stopped following the page's address"):
+    with pytest.raises(browser_stream.BrowserSessionError, match="This page couldn't be checked"):
         await asyncio.wait_for(browser_stream._relay(pane, "thread", "user"), 1)
-    assert attempts == [0, 1, 2]
-    assert caplog.text.count("lost its page address watch") == 3
+    assert attempts == [0, 1]
+    assert caplog.text.count("lost its page address watch") == 2
     assert {"type": "browser_metadata", "url": "https://example.test", "domain": "example.test",
             "title": "Example"} in [json.loads(message) for message in pane.text]
+
+
+@pytest.mark.asyncio
+async def test_a_lost_screencast_reconnects_without_ending_the_pane(monkeypatch):
+    monkeypatch.setattr(browser_stream, "PANE_RETRY_DELAYS", (0, 0, 0))
+    attempts, reconnected = [], asyncio.Event()
+
+    async def screencast(*_args):
+        attempts.append(len(attempts))
+        if len(attempts) == 1:
+            raise browser_stream.BrowserSessionError("page target moved")
+        reconnected.set()
+        await asyncio.Future()
+
+    async def watch_page_metadata(*_args):
+        await asyncio.Future()
+
+    class Pane(FakePane):
+        async def receive_text(self):
+            await asyncio.Future()
+
+    monkeypatch.setattr(browser_stream.browser_pane, "screencast", screencast)
+    monkeypatch.setattr(browser_stream.browser_pane, "watch_page_metadata", watch_page_metadata)
+    relay = asyncio.create_task(browser_stream._relay(Pane(), "thread", "user"))
+    try:
+        await asyncio.wait_for(reconnected.wait(), 1)
+        assert attempts == [0, 1]
+        assert not relay.done()
+    finally:
+        relay.cancel()
+        await asyncio.gather(relay, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_screencast_clean_returns_spend_the_retry_budget(monkeypatch):
+    monkeypatch.setattr(browser_stream, "PANE_RETRY_DELAYS", (0,))
+    attempts = []
+
+    async def screencast(*_args):
+        attempts.append(len(attempts))
+
+    async def watch_page_metadata(*_args):
+        await asyncio.Future()
+
+    class Pane(FakePane):
+        async def receive_text(self):
+            await asyncio.Future()
+
+    monkeypatch.setattr(browser_stream.browser_pane, "screencast", screencast)
+    monkeypatch.setattr(browser_stream.browser_pane, "watch_page_metadata", watch_page_metadata)
+    with pytest.raises(browser_stream.BrowserSessionError, match="stopped showing the page"):
+        await asyncio.wait_for(browser_stream._relay(Pane(), "thread", "user"), 1)
+    assert attempts == [0, 1]
+
+
+@pytest.mark.asyncio
+async def test_screencast_frame_between_quick_drops_does_not_reset_retry_budget(monkeypatch):
+    monkeypatch.setattr(browser_stream, "PANE_RETRY_DELAYS", (0,))
+    attempts = []
+
+    async def screencast(_thread_id, _connection_token, deliver):
+        attempts.append(len(attempts))
+        if len(attempts) == 2:
+            deliver("frame")
+        raise OSError("connection reset")
+
+    async def watch_page_metadata(*_args):
+        await asyncio.Future()
+
+    class Pane(FakePane):
+        async def receive_text(self):
+            await asyncio.Future()
+
+    monkeypatch.setattr(browser_stream.browser_pane, "screencast", screencast)
+    monkeypatch.setattr(browser_stream.browser_pane, "watch_page_metadata", watch_page_metadata)
+    with pytest.raises(browser_stream.BrowserSessionError, match="stopped showing the page"):
+        await asyncio.wait_for(browser_stream._relay(Pane(), "thread", "user"), 1)
+    assert attempts == [0, 1]
+
+
+@pytest.mark.asyncio
+async def test_metadata_report_between_quick_drops_does_not_reset_retry_budget(monkeypatch):
+    monkeypatch.setattr(browser_stream, "PANE_RETRY_DELAYS", (0,))
+    attempts = []
+
+    async def screencast(*_args):
+        await asyncio.Future()
+
+    async def watch_page_metadata(_thread_id, _connection_token, report):
+        attempts.append(len(attempts))
+        if len(attempts) == 2:
+            await report({"type": "browser_metadata", "url": "https://example.test", "title": "Example"})
+        raise OSError("connection reset")
+
+    class Pane(FakePane):
+        async def receive_text(self):
+            await asyncio.Future()
+
+    monkeypatch.setattr(browser_stream.browser_pane, "screencast", screencast)
+    monkeypatch.setattr(browser_stream.browser_pane, "watch_page_metadata", watch_page_metadata)
+    with pytest.raises(browser_stream.BrowserSessionError, match="stopped following the page's address"):
+        await asyncio.wait_for(browser_stream._relay(Pane(), "thread", "user"), 1)
+    assert attempts == [0, 1]
