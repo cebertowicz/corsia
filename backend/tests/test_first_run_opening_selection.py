@@ -131,7 +131,7 @@ async def test_binding_failure_after_opening_insert_rolls_back_entire_pick(fresh
 async def test_restored_history_excludes_both_warm_opening_and_selection_seed(fresh_app):
     from infra.database import write_transaction
     from infra.queries import insert_message
-    from onboarding.app_first_run import pending_warm_opening, seed_first_model_opening
+    from onboarding.first_run_opening import pending_warm_opening, seed_first_model_opening
 
     thread = await _account()
     with write_transaction(None, scope="restore_while_held") as db:

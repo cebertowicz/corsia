@@ -1,4 +1,4 @@
-"""Own the app-path landing plan, cached setup facts, and post-pick opening."""
+"""Own the app-path landing plan and cached setup facts."""
 
 from __future__ import annotations
 
@@ -7,17 +7,7 @@ import sqlite3
 from collections.abc import Mapping
 from typing import Any
 
-OPENING_REFERENCE = "skills/conductor-bootstrap/references/first-run-opening.md"
-OPENING_PREFIX = "Hi {name}."
 IMPORT_DECISION_TITLE = "Bring over what your other tools know"
-
-
-def opening_message(name: str | None = None) -> str:
-    """Return the packaged opening, with its optional person-facing prefix."""
-    from infra.system_package import system_resource_source
-
-    text = system_resource_source(OPENING_REFERENCE).read_text(encoding="utf-8").strip()
-    return f"{OPENING_PREFIX.format(name=name)}\n\n{text}" if name else text
 
 
 def _is_unavailable(value: object) -> bool:
@@ -309,49 +299,6 @@ def seed_initial(conductor_id: str, user_id: str, *, db: sqlite3.Connection) -> 
         tuple(step for step in initial if step["step_number"] != 4),
         db=db,
     )
-
-
-def _opening_for_held_app(conductor_id: str, *, db: sqlite3.Connection) -> str | None:
-    """The app greeting that is still absent from a held first-run thread."""
-    from infra import config, user_profile
-    from infra.onboarding_events import held_first_run_path
-
-    if held_first_run_path(conductor_id, db=db) != "app":
-        return None
-    opening_id = f"first-run-opening:{conductor_id}"
-    if db.execute(
-        "SELECT 1 FROM messages WHERE id=? AND thread_id=?", (opening_id, conductor_id),
-    ).fetchone() is not None:
-        return None
-    wake_id = _first_run_message_id(conductor_id)
-    if db.execute(
-        "SELECT 1 FROM messages WHERE thread_id=? "
-        "AND NOT (id=? OR (id=? AND delivery_state='queued')) LIMIT 1",
-        (conductor_id, opening_id, wake_id),
-    ).fetchone() is not None:
-        return None
-    return opening_message(user_profile.profile_name(config.WORKSPACE) or None)
-
-
-def seed_first_model_opening(conductor_id: str, *, db: sqlite3.Connection) -> None:
-    """Atomically add the app greeting immediately before its first model pick."""
-    from infra.queries import insert_message
-
-    opening = _opening_for_held_app(conductor_id, db=db)
-    if opening is None:
-        return
-    opening_id = f"first-run-opening:{conductor_id}"
-    insert_message(
-        conductor_id, "assistant", opening,
-        {"for_user": True, "first_run_opening": True, "turn_unbound_reason": "server_scripted"},
-        msg_id=opening_id, db=db,
-    )
-    # Plan rows are setup lifecycle state and must not be changed here.
-
-
-def pending_warm_opening(conductor_id: str, *, db: sqlite3.Connection) -> str | None:
-    """Return the unpersisted app greeting needed to warm the selected turn's prefix."""
-    return _opening_for_held_app(conductor_id, db=db)
 
 
 def _first_run_message_id(conductor_id: str) -> str:

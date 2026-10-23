@@ -123,9 +123,8 @@ async def _build_warm_prefix(
         tool_defs=tool_defs,
     )
     if pending_opening is not None:
-        # The selected-turn transaction persists this server-authored row before
-        # adopting the model. Rehearse that exact history segment without making
-        # model choice or warm itself visible to the person.
+        # Rehearse the greeting the selection transaction will persist, without
+        # publishing it or choosing a model/account during the warm.
         messages.append({"role": "assistant", "content": pending_opening})
     messages = sanitize_messages(sanitize_empty_content(messages))
     prompt_shape = make_prompt_extra_body(
@@ -201,13 +200,9 @@ def _warm_replay_candidates(thread_id: str, target_catalog_id: str):
         _, _, eager = provider_boundary_snapshot(
             thread_id, "native", target_catalog_id, db=db,
         )
-        from onboarding.app_first_run import pending_warm_opening
+        from onboarding.first_run_opening import pending_warm_opening
 
-        return (
-            candidates,
-            eager.id if eager is not None else None,
-            pending_warm_opening(thread_id, db=db),
-        )
+        return candidates, eager.id if eager is not None else None, pending_warm_opening(thread_id, db=db)
     finally:
         if db.in_transaction:
             db.execute("ROLLBACK")
@@ -392,12 +387,7 @@ async def warm_session_cache(
     proved = await _prove_warm_target(target, thread_id)
     if isinstance(proved, dict):
         return proved
-    messages, tools, prompt_shape = await _build_warm_prefix(
-        thread_id,
-        project_id,
-        proved,
-        reasoning_effort,
-    )
+    messages, tools, prompt_shape = await _build_warm_prefix(thread_id, project_id, proved, reasoning_effort)
     return await _submit_warm(
         thread_id,
         proved,

@@ -57,7 +57,7 @@ def test_app_account_holds_only_the_neutral_wake_until_the_first_model_pick(
     from infra import accounts, config, user_profile
     from infra.database import write_transaction
     from infra.onboarding_events import first_run_message_id
-    from onboarding.app_first_run import seed_first_model_opening
+    from onboarding.first_run_opening import seed_first_model_opening
 
     accounts.create_first_account(
         "newcomer", PASSWORD, full_name="  New\x01   Comer ", first_run_path="app",
@@ -123,7 +123,7 @@ def test_first_model_transaction_rolls_back_the_opening_and_binding_on_seed_fail
 ):
     from connections import account_selection
     from infra import accounts
-    from onboarding import app_first_run
+    from onboarding import first_run_opening
     from thread.model_row import select_first_model
     import llm.resolution as resolution
 
@@ -133,7 +133,7 @@ def test_first_model_transaction_rolls_back_the_opening_and_binding_on_seed_fail
         "Target", (), {"available": True, "availability_reason": None},
     )())
     monkeypatch.setattr(account_selection, "bind_model_account", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(app_first_run, "opening_message", lambda *_args, **_kwargs: (_ for _ in ()).throw(
+    monkeypatch.setattr(first_run_opening, "opening_message", lambda *_args, **_kwargs: (_ for _ in ()).throw(
         RuntimeError("seed failed"),
     ))
 
@@ -217,7 +217,7 @@ def test_portable_history_refuses_a_fabricated_turn_for_the_opening(fresh_instal
 
     accounts.create_first_account("newcomer", PASSWORD, full_name="New Comer", first_run_path="app")
     conductor_id = _conductor_id()
-    from onboarding.app_first_run import seed_first_model_opening
+    from onboarding.first_run_opening import seed_first_model_opening
 
     with write_transaction(None, scope="fabricated_opening_turn") as db:
         seed_first_model_opening(conductor_id, db=db)
@@ -237,7 +237,7 @@ def test_portable_history_refuses_a_fabricated_turn_for_the_opening(fresh_instal
 def test_first_model_seed_preserves_restored_conductor_history(fresh_install, app_seed_facts):
     from infra import accounts, onboarding_events
     from infra.database import write_transaction
-    from onboarding.app_first_run import seed_first_model_opening
+    from onboarding.first_run_opening import seed_first_model_opening
     from infra.queries import insert_message
 
     accounts.create_first_account("newcomer", PASSWORD, full_name="New Comer", first_run_path="app")
@@ -359,7 +359,7 @@ def test_first_model_seed_is_idempotent_after_completion(fresh_install, app_seed
         initial_ids = [row["id"] for row in db.execute(
             "SELECT id FROM plan_nodes WHERE workflow_ref='first-run-app' ORDER BY id"
         )]
-        from onboarding.app_first_run import seed_first_model_opening
+        from onboarding.first_run_opening import seed_first_model_opening
 
         seed_first_model_opening(conductor_id, db=db)
         seed_first_model_opening(conductor_id, db=db)

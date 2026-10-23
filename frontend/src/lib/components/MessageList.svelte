@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { tick } from 'svelte';
-	import { compareMessageOrder } from '$lib/messageHistory';
+	import { firstRunOpeningPresentation } from '$lib/ws/firstRunOpeningReveal';
 	import { get } from 'svelte/store';
 	import { token } from '$lib/stores/auth';
 	import { loadDeferredToolResult } from '$lib/toolResultLoader';
@@ -53,16 +53,8 @@
 	} = $props();
 	let expandedTools = $state(new Set<string>());
 	let expandedReasoning = $state(new Set<string>());
-	// The shared store can retain a prior selection; filter at this transcript boundary (#1084).
 	const renderedThreadId = $derived(threadId ?? $activeThreadId);
-	const threadMessages = $derived($messages.filter((m) => m.thread_id === renderedThreadId));
-	// Store and run the first turn normally. Only presentation waits for the local
-	// opening's existing reveal timer; completion or navigation releases it whole.
-	const revealingOpening = $derived(threadMessages.find((m) =>
-		m.metadata?.first_run_opening === true && m.typewriterPos != null));
-	const messageRows = $derived(revealingOpening
-		? threadMessages.filter((m) => compareMessageOrder(m, revealingOpening) <= 0)
-		: threadMessages);
+	const { rows: messageRows, opening: revealingOpening } = $derived(firstRunOpeningPresentation($messages, renderedThreadId));
 	const renderedStreaming = $derived(!revealingOpening && isThreadTurnActive($turnStates, renderedThreadId));
 	const focusLive = createFocusWorkBlock(() => renderedThreadId, () => focusMode);
 	const checkpointState = $derived(
