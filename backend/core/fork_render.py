@@ -55,7 +55,9 @@ async def capture_warm_fork_source(
     if harness == "claude-code":
         from core.fork_cc_boundary import capture_registered_boundary_warm_source
 
-        warm_boundary = _durable_warm_boundary(thread_id, boundary, harness)
+        warm_boundary = await asyncio.to_thread(
+            _durable_warm_boundary, thread_id, boundary, harness,
+        )
         if warm_boundary is None:
             return warm_capture_refused(thread_id, harness, "no_warm_boundary")
         return await capture_registered_boundary_warm_source(
@@ -64,7 +66,9 @@ async def capture_warm_fork_source(
     from core.fork_codex import capture_warm_source, warm_tool_boundary_prefix_bytes
 
     if prefix_bytes is None:
-        warm_boundary = _durable_warm_boundary(thread_id, boundary, harness)
+        warm_boundary = await asyncio.to_thread(
+            _durable_warm_boundary, thread_id, boundary, harness,
+        )
         if warm_boundary is None:
             return warm_capture_refused(thread_id, harness, "no_warm_boundary")
         prefix_bytes = await asyncio.to_thread(
