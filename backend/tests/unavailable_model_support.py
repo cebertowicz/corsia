@@ -43,6 +43,23 @@ def set_model_available(model_id: str, available: int) -> None:
         db.close()
 
 
+def mark_model_loaded(monkeypatch, model_id: str) -> None:
+    """Publish the cached loaded fact and online server separately from disk availability."""
+    from infra.database import get_db
+    from llm import network_discovery
+
+    server_id, _, provider_model = model_id.partition("@")[2].partition("/")
+    db = get_db()
+    db.execute(
+        "INSERT INTO network_servers (id,instance_id,instance_name,port,status,last_seen_at,created_at,updated_at) "
+        "VALUES (?,?,?,8210,'online','t0','t0','t0') ON CONFLICT(id) DO UPDATE SET status='online'",
+        (server_id, server_id, server_id),
+    )
+    db.commit()
+    db.close()
+    monkeypatch.setitem(network_discovery._LOADED_BY_SERVER, server_id, {provider_model})
+
+
 def admit_held_candidate(thread_id: str, model: str, message_id: str):
     """Create a thread on ``model`` and claim its first input for a Turn."""
     from infra.database import get_db

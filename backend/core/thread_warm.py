@@ -102,26 +102,61 @@ async def cancel_thread_warm(
     return was_running
 
 
-async def await_thread_warm(thread_id: str) -> bool:
-    """Await only the warm already registered for this thread.
+async def await_thread_warm(
+    thread_id: str,
+    *,
+    cancel_event: asyncio.Event | None = None,
+) -> bool:
+    """Await only a registered warm, or this Turn's exact cancellation.
 
-    Native delivery never creates provider work here. Shielding keeps Stop
-    immediate: cancelling the delivery stops this waiter without cancelling
-    the independently requested warm.
+    Native delivery never creates provider work here. The shield keeps the
+    warm independently owned: a Turn cancellation ends only its waiter, never
+    the requested warm task.
     """
     task = state._active_warm_tasks.get(thread_id)
     if task is None or task.done():
         return False
-    try:
-        await asyncio.shield(task)
-    except asyncio.CancelledError:
-        waiter = asyncio.current_task()
-        if waiter is not None and waiter.cancelling():
+    if cancel_event is None:
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            waiter = asyncio.current_task()
+            if waiter is not None and waiter.cancelling():
+                raise
+            if task.cancelled():
+                return False
             raise
-        if task.cancelled():
+        return True
+    if cancel_event.is_set():
+        return False
+
+    warm_wait = asyncio.shield(task)
+    cancellation_wait = asyncio.create_task(cancel_event.wait())
+    try:
+        done, _ = await asyncio.wait(
+            (warm_wait, cancellation_wait),
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        # A concurrently completed cancellation wins: the caller must take the
+        # Native loop's normal pre-set-cancellation terminal path.
+        if cancellation_wait in done:
             return False
-        raise
-    return True
+        try:
+            warm_wait.result()
+        except asyncio.CancelledError:
+            waiter = asyncio.current_task()
+            if waiter is not None and waiter.cancelling():
+                raise
+            if task.cancelled():
+                return False
+            raise
+        return True
+    finally:
+        if not warm_wait.done():
+            warm_wait.cancel()
+        if not cancellation_wait.done():
+            cancellation_wait.cancel()
+        await asyncio.gather(warm_wait, cancellation_wait, return_exceptions=True)
 
 
 async def await_warm_outcome(task: asyncio.Task) -> dict[str, Any]:
@@ -144,8 +179,13 @@ async def await_warm_outcome(task: asyncio.Task) -> dict[str, Any]:
     return {"ok": True, "message": "Warm finished"}
 
 
-async def join_requested_warm_for_delivery(thread_id: str, catalog_id: str) -> bool:
-    """Join an explicit Native warm of this model without blocking on its failure.
+async def join_requested_warm_for_delivery(
+    thread_id: str,
+    catalog_id: str,
+    *,
+    cancel_event: asyncio.Event | None = None,
+) -> bool:
+    """Join an explicit matching warm unless this exact Turn is cancelled.
 
     A warm of another model is left running on its own hardware: delivery
     neither waits for it nor cancels it.
@@ -154,7 +194,7 @@ async def join_requested_warm_for_delivery(thread_id: str, catalog_id: str) -> b
     if task is None or getattr(task, "_corsia_warm_model", None) != catalog_id:
         return False
     try:
-        return await await_thread_warm(thread_id)
+        return await await_thread_warm(thread_id, cancel_event=cancel_event)
     except asyncio.CancelledError:
         raise
     except Exception as error:
