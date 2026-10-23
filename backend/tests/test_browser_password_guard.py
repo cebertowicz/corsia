@@ -355,7 +355,7 @@ async def test_the_reprobe_stops_without_probing_once_the_person_declines_the_st
 async def test_a_reprobe_on_another_target_settles_the_agents_episode(steps, monkeypatch):
     monkeypatch.setattr(browser_control, "REPROBE_EVERY", 0.01)
     page = SignInPage()
-    _episode, loop = await _agent_meets_password_page(page)
+    episode, loop = await _agent_meets_password_page(page)
     other_tab = PasswordProbe("visit-other", "example.test", frozenset(), "ws://page.test/devtools/page/other")
 
     async def pane_probe(_visit, _known):
@@ -366,7 +366,29 @@ async def test_a_reprobe_on_another_target_settles_the_agents_episode(steps, mon
     browser_control.pane_connected("thread", "pane", None, pane_probe)
     await asyncio.wait_for(loop, 1)
     assert steps["settled"] == ["password-step"]
+    assert episode.settlement_evidence == "The person moved to another browser tab"
     assert not browser_control.password_page("thread")
+
+
+@pytest.mark.asyncio
+async def test_an_agent_command_during_a_person_step_is_refused_and_leaves_the_step_open(steps):
+    """On the step's own visit, the agent's next page command neither runs nor settles the person's step."""
+    chooser = PasswordProbe("visit-one", "accounts.example.test", frozenset(), "page-one")
+
+    async def probe(_visit, _known):
+        return chooser
+
+    with pytest.raises(BrowserSessionError, match="person's to complete"):
+        await browser_control.declare_person_step("thread", probe, "Choose your account")
+    with pytest.raises(BrowserSessionError, match="person's to complete"):
+        await browser_control.require_page_access("thread", probe, ("click", "@e1"))
+    assert steps["settled"] == []
+    assert browser_control._episodes["thread"].node_id == "password-step"
+    # The person's navigation to a new visit settles the step on the agent's next command, which then runs.
+    chooser = PasswordProbe("visit-two", "accounts.example.test", frozenset(), "page-one")
+    await browser_control.require_page_access("thread", probe, ("snapshot",))
+    assert steps["settled"] == ["password-step"]
+    assert "thread" not in browser_control._episodes
 
 
 @pytest.mark.asyncio

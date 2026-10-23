@@ -127,6 +127,9 @@ async def require_page_access(thread_id: str, probe: Probe, args: tuple[str, ...
             _publish_password_page(thread_id, True)
             ending = " Post nothing in chat." if has_pane(thread_id) else " If you reply, use one short line; don't restate the task or say you made it."
             raise BrowserSessionError(PASSWORD_PAGE + ending)
+        if prior is not None and not prior.password:
+            # The person's step is still on this visit: the agent's command never touches the page or settles it.
+            raise BrowserSessionError(PERSON_STEP)
         if prior is not None:
             await _end_episode(thread_id, prior)
         if guarded is not None:
@@ -237,6 +240,7 @@ async def _reprobe(thread_id: str, episode: PasswordEpisode) -> bool:
             return True
         if result.target != episode.target:
             log.info("browser re-probe for %s reached another page target", thread_id)
+            episode.settlement_evidence = "The person moved to another browser tab"
             await _end_episode(thread_id, episode)
             return False
         if result.visit == episode.visit and result.visible_nodes:
