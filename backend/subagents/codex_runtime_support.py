@@ -40,6 +40,20 @@ def quarantined_unknown_write(thread_id: str, message_id: str) -> bool:
         connection.close()
 
 
+def turn_has_durable_terminal(turn_id: str) -> bool:
+    """Return whether this Codex Turn has durably left active state."""
+    connection = get_db()
+    try:
+        row = connection.execute(
+            "SELECT status FROM active_turns WHERE id=?", (turn_id,)
+        ).fetchone()
+        return row is not None and row["status"] in {
+            "completed", "cancelled", "error",
+        }
+    finally:
+        connection.close()
+
+
 def resolve_working_dir(project_id: str | None, db) -> str:
     if project_id:
         if db is None:
