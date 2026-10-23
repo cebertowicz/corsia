@@ -11,9 +11,10 @@ from fastapi import FastAPI
 
 
 @pytest.fixture
-def fresh_app(isolated_db, monkeypatch):
+def fresh_app(isolated_db, monkeypatch, tmp_path):
     from infra.database import write_transaction
 
+    monkeypatch.setattr("infra.config.WORKSPACE", tmp_path / "workspace")
     with write_transaction(None, scope="fresh_app_opening") as db:
         db.execute("DELETE FROM auth_tokens")
         db.execute("DELETE FROM users")
