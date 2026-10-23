@@ -80,7 +80,7 @@ def attach_to_result(
     node_started = (node is not None and node.get("kind") == "task") or _started_node_id(result.get("next")) == text.node_id
     if not node_started or text.node_id is None:
         return
-    from plans.trial_lessons import attach_trial_lessons_advisory
+    from plans.public import attach_trial_lessons_advisory
 
     attach_trial_lessons_advisory(
         db, result, thread_id=caller_thread_id, node_id=text.node_id,

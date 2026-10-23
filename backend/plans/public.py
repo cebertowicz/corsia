@@ -205,7 +205,7 @@ from plans.pause_authority import set_aside_while_paused, thread_paused_since
 from plans.projections import liveness_signal, open_delegated_node_ids
 from plans.plan_write import transaction as plan_transaction
 from plans.selection_validity import attributed_selection, selection_valid
-from plans.trial_lessons import attach_trial_lessons
+from plans.trial_lessons import attach_trial_lessons, attach_trial_lessons_advisory
 from plans.turn_admission import snapshot_after_admission
 from plans.wake_currency import KINDS as WAKE_KINDS, is_current as wake_is_current
 from plans.watch_resolution import resolve_delivered_event
