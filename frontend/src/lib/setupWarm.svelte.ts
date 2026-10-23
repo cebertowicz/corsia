@@ -10,6 +10,39 @@ type WarmProgressEvent = {
 	progress?: { total_blocks?: number | null; ready_blocks?: number | null };
 };
 
+type FinishSetupWarmHandoff = {
+	session: string | null;
+	isFinishing: boolean;
+	setFinishing: (finishing: boolean) => void;
+	setSourceError: (error: string) => void;
+	recordProgress: (session: string) => Promise<boolean>;
+	getCatalog: () => SetupModel[];
+	warm: Pick<ReturnType<typeof createSetupWarm>, 'start' | 'finish'>;
+	exitMark: () => Promise<void> | undefined;
+	onFinished: () => void;
+};
+
+/** Complete setup, join its local warm-up, then hand off to the first chat. */
+export async function finishSetupWarmHandoff({
+	session, isFinishing, setFinishing, setSourceError, recordProgress, getCatalog, warm, exitMark, onFinished,
+}: FinishSetupWarmHandoff): Promise<void> {
+	if (!session || isFinishing) return;
+	setFinishing(true);
+	setSourceError('');
+	try {
+		if (!await recordProgress(session)) {
+			setSourceError('CORSIA couldn’t save setup progress. Try again.');
+			return;
+		}
+		warm.start(getCatalog(), session);
+		await warm.finish();
+		await exitMark();
+		onFinished();
+	} finally {
+		setFinishing(false);
+	}
+}
+
 /** Warm a ready local candidate, without choosing the agent's model. */
 export function createSetupWarm() {
 	let running = $state(false);

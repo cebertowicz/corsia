@@ -4,7 +4,8 @@
  * neither, so every remote-connect surface checks `shellInfo()` first.
  */
 
-export type ShellInfo = { mode: 'local' } | { mode: 'remote'; name: string };
+export type DefaultWorkspace = { path: string; display: string };
+export type ShellInfo = { mode: 'local'; default_workspace?: DefaultWorkspace } | { mode: 'remote'; name: string };
 
 export type PairTarget =
 	| { kind: 'dns_sd'; instance: string }
@@ -21,13 +22,21 @@ export type PairResult =
 export type DiscoveredResult = { names: string[]; denied?: boolean };
 
 type Invoke = (command: string, args?: Record<string, unknown>) => Promise<unknown>;
-type ShellWindow = Window & { __CORSIA_SHELL__?: ShellInfo; __TAURI_INTERNALS__?: { invoke?: Invoke } };
+type ShellWindow = Window & { __CORSIA_SHELL__?: unknown; __TAURI_INTERNALS__?: { invoke?: Invoke } };
 
 export function shellInfo(): ShellInfo | null {
 	if (typeof window === 'undefined') return null;
 	const info = (window as ShellWindow).__CORSIA_SHELL__;
-	if (!info) return null;
-	return info.mode === 'remote' && typeof info.name === 'string' ? info : { mode: 'local' };
+	if (!info || typeof info !== 'object') return null;
+	const shell = info as Record<string, unknown>;
+	if (shell.mode === 'remote' && typeof shell.name === 'string') return { mode: 'remote', name: shell.name };
+	if (shell.mode !== 'local') return { mode: 'local' };
+	const workspace = shell.default_workspace;
+	if (!workspace || typeof workspace !== 'object') return { mode: 'local' };
+	const { path, display } = workspace as Record<string, unknown>;
+	return typeof path === 'string' && path && typeof display === 'string' && display
+		? { mode: 'local', default_workspace: { path, display } }
+		: { mode: 'local' };
 }
 
 function invoke(command: string, args?: Record<string, unknown>): Promise<unknown> {
