@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any, NamedTuple
 
-from api.measurement_registry import TOKENS_RECORDED_FROM
+from api.measurement_breaks import source_started_at
 from api.measurement_token_sql import TOKEN_FIGURE_SQL
 
 
@@ -39,14 +39,18 @@ def _token_figure(row: dict[str, Any] | None, name: str) -> dict[str, int]:
     return {"value": int(row[name] or 0), "unknown_records": int(row[f"{name}_unknown"] or 0)}
 
 
-def build_kpi(db, current: Period, previous: Period) -> dict[str, Any]:
+def build_kpi(db, current: Period, previous: Period, *, pending_starts: dict[str, str | None] | None = None) -> dict[str, Any]:
     """Build both periods' token figures on a connection whose scope table is already prepared. One read."""
     bounds = {"previous_from": previous.start, "current_from": current.start, "current_to": current.end}
     tokens = {row["period"]: dict(row) for row in db.execute(_TOKEN_SQL, bounds).fetchall()}
+    source_mark = db.execute(
+        "SELECT MAX(period) FROM measure_breaks WHERE kind='source' AND metric_group='tokens'"
+    ).fetchone()[0]
+    recorded_from = source_mark or source_started_at(db, "fresh_tokens", pending_starts=pending_starts)
     return {
         name: {
             "start": period.start, "end": period.end,
-            "tokens_recorded": period.start >= TOKENS_RECORDED_FROM,
+            "tokens_recorded": bool(recorded_from and period.start >= str(recorded_from)[:10]),
             "tokens": {key: _token_figure(tokens.get(name), key) for key, _, _ in TOKEN_FIGURE_SQL},
         }
         for name, period in (("current", current), ("previous", previous))

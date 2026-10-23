@@ -273,4 +273,5 @@ async def measurement_where_to_look(
         # The page's default Agents table: its dollars column is not a measure ranked here.
         agents = await page.agents_payload(project, agent, page_grain.unaveraged(), "ranked", "fresh_tokens_per_outcome",
                                            True, user, reuse_finished=True)
-    return build_where_to_look(scope, series["windows"], agents, page.period_comparable, page_grain, models, cost)
+    comparable = lambda metric, period: page.period_comparable(metric, period, series["breaks"][metric])
+    return build_where_to_look(scope, series["windows"], agents, comparable, page_grain, models, cost)

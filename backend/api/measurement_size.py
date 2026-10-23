@@ -190,7 +190,7 @@ def pooled_size_window(pooled: dict[str, Any], measured: bool, minimum_n: int) -
                      "estimated_hours": pooled.get("estimated_hours") or 0.0, "active_hours": active_hours}}
 
 
-def size_rows(metric: str, minimum_n: int, spine: list[str], sources: list[dict[str, Any]],
+def size_rows(metric: str, minimum_n: int, method_version: int, spine: list[str], sources: list[dict[str, Any]],
               comparable: Any, measured: Any, *, dates: dict[str, str]) -> list[dict[str, Any]]:
     """Serve one row per completed period, including periods with no outcomes or time.
 
@@ -215,7 +215,7 @@ def size_rows(metric: str, minimum_n: int, spine: list[str], sources: list[dict[
         # Who rated an outcome, and whether its author declared the size, is served as coverage, never as a break.
         reason = None if comparable(metric, period) else "outcome_definition_changed"
         rows.append({
-            "period": period, "series": metric, "value": value, "raw_value": raw_value, "n": n, "proxy": True,
+            "period": period, "series": metric, "method_version": method_version, "value": value, "raw_value": raw_value, "n": n, "proxy": True,
             "partial": sized < source["outcomes"],
             "comparable": reason is None, "break": None, "dimension": None, "thin": False,
             "size": {

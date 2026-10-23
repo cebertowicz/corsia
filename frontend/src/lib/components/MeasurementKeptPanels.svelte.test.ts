@@ -54,6 +54,15 @@ function render(rows: Record<Series, MeasurementRow[]>, period = daysPeriod(day(
 const card = (id: string) => host.querySelector(`#${id}-title`)!.closest('section')!;
 
 describe('kept charts on Days', () => {
+	it('calls a no-start response not yet measured, not an empty range', () => {
+		const empty = { outcomes: [], took_recommendation_pct: [], asks_per_outcome: [], rejections_per_outcome: [], fresh_tokens_per_outcome: [] };
+		render(empty);
+		for (const id of ['outcomes', 'alignment', 'asks', 'rejections', 'tokens']) {
+			expect(card(id).textContent).toContain('Not yet measured for this scope.');
+			expect(card(id).textContent).not.toContain('No measurement rows in this range.');
+		}
+	});
+
 	for (const [id, label] of [['outcomes', 'Outcomes'], ['asks', 'Asks'], ['rejections', 'Rejections'], ['tokens', 'Fresh tokens']] as const) {
 		it(`${label} reads BY DAY with a bar per day and the 7-day moving average`, () => {
 			render(allDays());

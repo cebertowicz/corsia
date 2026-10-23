@@ -145,11 +145,9 @@ async def test_midpoints_coverage_and_identical_retry(isolated_db):
     assert row["value"] == pytest.approx(200.0)
     assert row["n"] == 20 and row["proxy"] is True
     assert size["basis"] == {"delivered_evidence_proxy": 0, "accepted_scope_proxy": 20, "author_declared": 0}
-    # The dates are served with the row, so the headline never restates them. The rate starts
-    # at the later of the instrument's start and the first presence period.
-    from api.measurement import _COMPARABILITY_BREAK
-
-    assert (size["data_start"], size["comparability_before"]) == (WEEK, _COMPARABILITY_BREAK)
+    # This fresh fixture has no retained model/change mark before its first rating, so its
+    # coverage starts at the instrument rather than inheriting a workspace-history boundary.
+    assert (size["data_start"], size["comparability_before"]) == (WEEK, None)
 
 
 @pytest.mark.asyncio
@@ -492,7 +490,8 @@ async def test_the_headline_window_pools_every_period_across_raters(isolated_db,
         db.close()
     served = await measurement_series("estimated_human_hours_per_active_hour", project="all", agent="none", grain="weeks",
                                       timezone_name="UTC", user=USER)
-    assert [row["comparable"] for row in served["rows"] if row["period"] in (WEEK, second)] == [True, True]
+    # A changed rater is a model break at the oldest week its ratings count.
+    assert [row["comparable"] for row in served["rows"] if row["period"] in (WEEK, second)] == [False, True]
     latest = served["windows"]["estimated_human_hours_per_active_hour"]["latest"]
     # The rate divides by presence time, so the window starts at the first presence week.
     assert (latest["n"], latest["from"], latest["to"]) == (40, WEEK, "2026-10-04")
@@ -599,8 +598,8 @@ async def test_the_rated_series_starts_at_its_first_observed_period_and_keeps_th
     result = await measurement_series(ids, project="all", agent="none", grain=grain, timezone_name="UTC", user=USER)
     rows = {(row["series"], row["period"]): row for row in result["rows"]}
     served = [week for series, week in rows if series == "estimated_human_hours_per_active_hour"]
-    assert early not in served and first == min(served), "no row stands for a period before the instrument existed"
-    assert ("took_recommendation_pct", early) in rows, "a series that existed then still serves it"
+    assert early in served and early == min(served), "the install-wide instrument start serves an early scope zero"
+    assert ("took_recommendation_pct", early) not in rows, "a decision metric without retained source remains unmeasured"
     size = rows[("estimated_human_hours_per_active_hour", first)]["size"]
     assert (size["outcomes"], size["sized"], size["unsized"]) == (22, 21, 1)
     assert size["estimated_hours"] == pytest.approx(42)

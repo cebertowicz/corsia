@@ -17,6 +17,7 @@ from test_measurement_agents import _agents, _frame, _seed_agent, _seed_project,
 
 # Every top-level key the Agents surface consumes, copied from the store's decode contract.
 SERVED_KEYS = {
+    "breaks",
     "caption",
     "definition_version",
     "findings",
@@ -127,15 +128,17 @@ def test_the_surfaces_key_list_is_the_handlers_return_not_a_remembered_one():
 
     from api import measurement
 
-    # The route validates and resolves its grain, then returns this body; Where to look reads the same one.
+    # The nested read returns the body plus pending boundary writes; the outer handler
+    # persists those writes and returns the body unchanged. Where to look reads this body.
     handler = ast.parse(inspect.getsource(measurement.agents_payload))
     returned = [
-        node
+        node.value.elts[0]
         for node in ast.walk(handler)
-        if isinstance(node, ast.Return) and isinstance(node.value, ast.Dict)
+        if isinstance(node, ast.Return) and isinstance(node.value, ast.Tuple)
+        and len(node.value.elts) == 2 and isinstance(node.value.elts[0], ast.Dict)
     ]
-    assert len(returned) == 1, f"expected one dict return in the handler, found {len(returned)}"
-    served = {key.value for key in returned[0].value.keys if isinstance(key, ast.Constant)}
+    assert len(returned) == 1, f"expected one payload dict in the read-lane return, found {len(returned)}"
+    served = {key.value for key in returned[0].keys if isinstance(key, ast.Constant)}
     assert served == SERVED_KEYS, (
         f"handler returns {sorted(served)}, surface consumes {sorted(SERVED_KEYS)}"
     )

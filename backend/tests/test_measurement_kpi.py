@@ -28,7 +28,7 @@ def _usage(db, usage_id, thread, created_at, *, parts=(None, None, None, None), 
     prompt, completion, creation, read = parts
     db.execute(
         "INSERT INTO llm_usage (id,thread_id,model,prompt_tokens,completion_tokens,cache_creation_tokens,cache_read_tokens,"
-        "total_tokens,cost_usd,source,created_at) VALUES (?,?,'test',?,?,?,?,?,0,'test',?)",
+        "total_tokens,cost_usd,source,created_at) VALUES (?,?,'claude-code/test',?,?,?,?,?,0,'external_harness:claude-code',?)",
         (usage_id, thread, prompt, completion, creation, read, total, created_at),
     )
 

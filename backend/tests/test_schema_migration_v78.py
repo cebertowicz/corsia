@@ -51,7 +51,7 @@ _EXPECTED_INDEXES = {
 
 
 def _measurement_indexes(db: sqlite3.Connection) -> dict[str, str]:
-    """Every measurement index this database carries, name -> flattened SQL.
+    """The v78 Measurement indexes this database carries, name -> flattened SQL.
 
     Filtered in Python: SQL ``LIKE 'idx_measurement_%'`` would treat ``_`` as a
     single-character wildcard and could admit an unrelated index.
@@ -61,7 +61,7 @@ def _measurement_indexes(db: sqlite3.Connection) -> dict[str, str]:
         for name, sql in db.execute(
             "SELECT name, sql FROM sqlite_master WHERE type='index'"
         )
-        if str(name).startswith("idx_measurement_")
+        if str(name) in _EXPECTED_INDEXES
     }
 
 
@@ -99,7 +99,7 @@ def _build_existing_v77_database(path) -> None:
 
 
 def test_the_step_is_registered_at_77_and_81_is_current() -> None:
-    assert SCHEMA_VERSION == 146
+    assert SCHEMA_VERSION == 147
     assert MIGRATIONS[77] is migrate_77_to_78
 
 

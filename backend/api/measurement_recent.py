@@ -6,13 +6,14 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Query
 
+from api.measurement_breaks import persist_source_starts
 from api.measurement_kpi import Period, build_kpi
 from api.measurement_partial import grain_instant, stored_bound
 from api.measurement_prepared import DDL, PREPARED_SCOPE
 from api.measurement_scope import resolve_grain, scope_cte, validate_scope
 from infra.auth import require_user
 from infra.database import get_db
-from infra.db_async import run_bulk
+from infra.db_async import run_bulk, run_in_db
 
 router = APIRouter()
 
@@ -30,7 +31,7 @@ async def measurement_key_figures(
                for name, window in windows.items()}
     current, previous, today = periods["current"], periods["previous"], page_grain.current
 
-    def query() -> tuple[dict[str, str | None], dict[str, Any]]:
+    def query() -> tuple[dict[str, str | None], dict[str, Any], dict[str, str | None]]:
         """Read the scope and the two windows' token figures on one connection."""
         db = get_db()
         try:
@@ -41,13 +42,16 @@ async def measurement_key_figures(
             db.execute(DDL[PREPARED_SCOPE])
             db.execute(f"DELETE FROM {PREPARED_SCOPE}")
             db.execute(scope_cte() + f"INSERT INTO {PREPARED_SCOPE}(id,root_id) SELECT id,root_id FROM scope_threads", params)
-            kpi = build_kpi(db, current, previous)
+            pending_starts: dict[str, str | None] = {}
+            kpi = build_kpi(db, current, previous, pending_starts=pending_starts)
             for name, window in windows.items():
                 kpi[name].update({"from": window.first, "to": page_grain.period_end(window.last)})
-            return selected_scope.response(), kpi
+            return selected_scope.response(), kpi, pending_starts
         finally:
             db.close()
 
-    selected_scope, kpi = await run_bulk(query)
+    selected_scope, kpi, pending_starts = await run_bulk(query)
+    if any(pending_starts.values()):
+        await run_in_db(persist_source_starts, pending_starts)
     return {"definition_version": 1, "scope": selected_scope, "timezone": timezone_name,
             "generated_at": request_now.isoformat(), "today": today, "period": page_grain.describe(), "kpi": kpi}
