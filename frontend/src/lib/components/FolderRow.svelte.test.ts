@@ -20,11 +20,11 @@ function render(props: ConstructorParameters<typeof FolderRow>[0]['props']) {
 describe('FolderRow', () => {
 	it('explains a protected folder and requires a deliberate default or keep choice', () => {
 		const change = vi.fn(), useDefault = vi.fn(), keepProtected = vi.fn();
-		render({ folder: '~/Documents/corsia', notice: { kind: 'protected', folder: 'Documents' }, onChange: change, onUseDefault: useDefault, onKeepProtected: keepProtected });
+		render({ folder: '~/Documents/corsia', notice: { kind: 'protected', folder: { kind: 'contains_files' } }, onChange: change, onUseDefault: useDefault, onKeepProtected: keepProtected });
 
 		expect(host.textContent).toContain('Work folder');
 		expect(host.textContent).toContain('~/Documents/corsia');
-		expect(host.textContent).toContain('Agents work freely inside your work folder. Your personal files are safer outside it, where CORSIA asks before opening them.');
+		expect(host.textContent).toContain('This folder already holds files. Agents open anything in the work folder without asking; outside it, CORSIA asks you first.');
 		(Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Use ~/CORSIA') as HTMLButtonElement).click();
 		(Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Keep this folder') as HTMLButtonElement).click();
 		expect(useDefault).toHaveBeenCalledOnce();

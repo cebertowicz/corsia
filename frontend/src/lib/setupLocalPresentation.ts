@@ -1,12 +1,12 @@
 // Local presentation uses CORSIA’s managed download only.
 
-export const LOCAL_ONLY_MODEL_GUIDANCE = 'Local models are good for private work. For running many agents at once, cloud models are recommended.';
+export const LOCAL_ONLY_MODEL_GUIDANCE = 'Good for private work. For now, to run many agents at once, add a cloud model.';
 
-type LocalOnlyGuidanceInput = { eligible: boolean; localReady: boolean; signedInSubscription: boolean; hasApiKey: boolean };
+type LocalOnlyGuidanceInput = { eligible: boolean; localInProgress: boolean; cloudReady: boolean };
 
-/** The recommendation appears only when local is the available path forward. */
-export function showLocalOnlyGuidance({ eligible, localReady, signedInSubscription, hasApiKey }: LocalOnlyGuidanceInput): boolean {
-	return eligible && localReady && !signedInSubscription && !hasApiKey;
+/** The recommendation appears while local is the only working path forward. */
+export function showLocalOnlyGuidance({ eligible, localInProgress, cloudReady }: LocalOnlyGuidanceInput): boolean {
+	return eligible && localInProgress && !cloudReady;
 }
 
 export function measuredDownloadTime(seconds: number | null | undefined): string | undefined {

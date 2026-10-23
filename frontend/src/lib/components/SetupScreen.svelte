@@ -18,7 +18,7 @@
 	import { fetchSources, recheckSources, cancelLocalDownload, sourceIsReady, type ModelSource } from '$lib/conductorSources';
 	import { stopLocalServer } from '$lib/conductorSourcesApi';
 	import { createSetupConnect, POLL_MS } from '$lib/setupConnect.svelte';
-	import { loadProviders, providers, testedProviders, type ProviderEntry } from '$lib/stores/providers';
+	import { loadProviders, testedProviders, type ProviderEntry } from '$lib/stores/providers';
 	import { on } from '$lib/ws/events';
 	import { connect } from '$lib/ws';
 	import { hasReadySetupModel, setupModelWorks, setupCatalog, type SetupModel } from '$lib/setupModels';
@@ -87,8 +87,8 @@
 	// A working cloud model frees the local download to be turned off.
 	const cloudReady = $derived(catalog.some((row) => row.connection !== 'omlx' && setupModelWorks(row)));
 	const localReady = $derived(catalog.some((row) => row.connection === 'omlx' && setupModelWorks(row)));
-	const hasApiKey = $derived($providers.some((provider) => provider.has_key));
-	const localOnly = $derived(showLocalOnlyGuidance({ eligible, localReady, signedInSubscription: cliSignedIn('claude-code') || cliSignedIn('codex'), hasApiKey }));
+	const localInProgress = $derived(downloading || localPreparing || localBusy || localPick.pick?.state === 'checking' || localReady);
+	const localOnly = $derived(showLocalOnlyGuidance({ eligible, localInProgress, cloudReady }));
 	const usernameError = $derived(username && !/^[a-z0-9_-]{1,32}$/.test(username) ? 'Use up to 32 lowercase letters, numbers, dashes or underscores.' : '');
 	const accountName = $derived(username.trim() || $user?.name || '');
 	const editing = $derived(Boolean($token) && accountKnown);

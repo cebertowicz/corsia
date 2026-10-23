@@ -46,13 +46,21 @@ pub enum FirstRun {
 #[derive(Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum FolderClassification {
-    Ready { path: String, protected_folder: Option<&'static str> },
+    Ready { path: String, protected_folder: Option<ProtectedFolder> },
     Unwritable { path: String, reason: String },
 }
 
-fn protected_folder(path: &Path, home: &Path) -> Option<&'static str> {
+#[derive(Debug, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ProtectedFolder {
+    PersonalFolder { folder: &'static str },
+    ContainsPersonalFolder { folder: &'static str },
+    ContainsFiles,
+}
+
+fn protected_folder(path: &Path, home: &Path) -> Option<ProtectedFolder> {
     if path == home {
-        return Some("Home");
+        return Some(ProtectedFolder::PersonalFolder { folder: "Home" });
     }
 
     [
@@ -68,7 +76,19 @@ fn protected_folder(path: &Path, home: &Path) -> Option<&'static str> {
     ]
     .into_iter()
     .find_map(|(protected, name)| {
-        (path.starts_with(&protected) || protected.starts_with(path)).then_some(name)
+        if path == protected {
+            Some(ProtectedFolder::PersonalFolder { folder: name })
+        } else if path.starts_with(home) && protected.starts_with(path) {
+            Some(ProtectedFolder::ContainsPersonalFolder { folder: name })
+        } else {
+            None
+        }
+    })
+    .or_else(|| {
+        directory_has_files(path)
+            .ok()
+            .filter(|has_files| *has_files)
+            .map(|_| ProtectedFolder::ContainsFiles)
     })
 }
 
@@ -785,26 +805,27 @@ mod tests {
     #[test]
     fn protected_and_unwritable_folder_choices_are_classified() {
         let home = Home::new("folder-classification");
-        let documents = home.0.join("Documents").join("corsia");
+        let documents = home.0.join("Documents");
+        let empty_in_documents = documents.join("corsia");
         let desktop = home.0.join("Desktop");
         let downloads = home.0.join("Downloads");
         let library = home.0.join("Library");
         let cloud_docs = library
             .join("Mobile Documents")
             .join("com~apple~CloudDocs");
-        for path in [&documents, &desktop, &downloads, &cloud_docs] {
+        for path in [&empty_in_documents, &desktop, &downloads, &cloud_docs] {
             fs::create_dir_all(path).unwrap();
         }
         let documents_with_trailing_separator = PathBuf::from(format!("{}/", documents.display()));
 
         for (path, protected_folder) in [
-            (&home.0, "Home"),
-            (&documents, "Documents"),
-            (&documents_with_trailing_separator, "Documents"),
-            (&desktop, "Desktop"),
-            (&downloads, "Downloads"),
-            (&cloud_docs, "iCloud Drive"),
-            (&library, "iCloud Drive"),
+            (&home.0, ProtectedFolder::PersonalFolder { folder: "Home" }),
+            (&documents, ProtectedFolder::PersonalFolder { folder: "Documents" }),
+            (&documents_with_trailing_separator, ProtectedFolder::PersonalFolder { folder: "Documents" }),
+            (&desktop, ProtectedFolder::PersonalFolder { folder: "Desktop" }),
+            (&downloads, ProtectedFolder::PersonalFolder { folder: "Downloads" }),
+            (&cloud_docs, ProtectedFolder::PersonalFolder { folder: "iCloud Drive" }),
+            (&library, ProtectedFolder::ContainsPersonalFolder { folder: "iCloud Drive" }),
         ] {
             assert_eq!(
                 classify_folder(path, &home.0, |_| Ok(())),
@@ -814,6 +835,22 @@ mod tests {
                 }
             );
         }
+
+        assert_eq!(
+            classify_folder(&empty_in_documents, &home.0, |_| Ok(())),
+            FolderClassification::Ready {
+                path: empty_in_documents.display().to_string(),
+                protected_folder: None,
+            }
+        );
+        fs::write(empty_in_documents.join("personal-note.txt"), "private").unwrap();
+        assert_eq!(
+            classify_folder(&empty_in_documents, &home.0, |_| Ok(())),
+            FolderClassification::Ready {
+                path: empty_in_documents.display().to_string(),
+                protected_folder: Some(ProtectedFolder::ContainsFiles),
+            }
+        );
 
         let unwritable = home.0.join("read-only");
         assert_eq!(
@@ -838,7 +875,7 @@ mod tests {
             classify_folder(&alias, &home.0, |_| Ok(())),
             FolderClassification::Ready {
                 path: alias.display().to_string(),
-                protected_folder: Some("Documents"),
+                protected_folder: Some(ProtectedFolder::PersonalFolder { folder: "Documents" }),
             }
         );
     }

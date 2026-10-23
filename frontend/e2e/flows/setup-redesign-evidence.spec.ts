@@ -28,7 +28,7 @@ const fixtures: Fixture[] = [
 	{ name: 'account-classifier-downloading', screen: 'account', classifier: 'downloading', element: 'No classifier download line while it downloads' },
 	{ name: 'account-classifier-failed', screen: 'account', classifier: 'failed', element: 'No classifier download line when it fails' },
 	{ name: 'account-exists', screen: 'account-exists', element: 'This computer already has a CORSIA account. Sign in instead.' },
-	{ name: 'folder-protected', screen: 'protected', element: 'Choose Allow when it does.' },
+	{ name: 'folder-protected', screen: 'protected', element: 'Your Documents folder holds personal files.' },
 	{ name: 'folder-unwritable', screen: 'unwritable', element: 'CORSIA can’t write to this folder. Choose another one.' },
 	{ name: 'creating', screen: 'creating', element: 'Starting CORSIA; Continue spinner' },
 	{ name: 'create-failed', screen: 'create-failed', element: 'Couldn’t create your account. Try again.' },
@@ -106,7 +106,7 @@ async function serve(page: Page, fixture: Fixture) {
 	});
 	await page.addInitScript(({ screen }) => {
 		if (screen === 'protected' || screen === 'unwritable') {
-			(window as unknown as { __TAURI_INTERNALS__: unknown }).__TAURI_INTERNALS__ = { invoke: async () => screen === 'protected' ? { state: 'ready', path: '~/Documents/CORSIA', protected_folder: 'Documents' } : { state: 'unwritable', path: '/Volumes/Archive/CORSIA', reason: 'read-only' } };
+			(window as unknown as { __TAURI_INTERNALS__: unknown }).__TAURI_INTERNALS__ = { invoke: async () => screen === 'protected' ? { state: 'ready', path: '~/Documents', protected_folder: { kind: 'personal_folder', folder: 'Documents' } } : { state: 'unwritable', path: '/Volumes/Archive/CORSIA', reason: 'read-only' } };
 		}
 	}, { screen: fixture.screen });
 	await page.route((url) => url.pathname.startsWith('/api/'), async (route: Route) => {
@@ -260,7 +260,7 @@ async function assertState(page: Page, fixture: Fixture) {
 	if (fixture.screen === 'mismatch') { await expect(text('Passwords don’t match.')).toBeVisible(); return; }
 	if (fixture.screen === 'account-exists') { await expect(text('This computer already has a CORSIA account. Sign in instead.')).toBeVisible(); return; }
 	if (fixture.screen === 'protected') {
-		await expect(text('Agents work freely inside your work folder. Your personal files are safer outside it, where CORSIA asks before opening them.')).toBeVisible();
+		await expect(text('Your Documents folder holds personal files. Agents open anything in the work folder without asking; outside it, CORSIA asks you first.')).toBeVisible();
 		await expect(page.getByRole('button', { name: 'Use ~/CORSIA', exact: true })).toBeVisible();
 		await expect(page.getByRole('button', { name: 'Keep this folder', exact: true })).toBeVisible();
 		await expect(page.getByRole('button', { name: 'Continue', exact: true })).toBeDisabled();
@@ -301,7 +301,7 @@ async function assertState(page: Page, fixture: Fixture) {
 			: fixture.local === 'start-failed' ? localSetupFix('connection')
 			: 'Free and private. Runs on this computer, even offline. 30 GB download.';
 		await expect(row).toContainText(expected);
-		if (fixture.local === 'ready' && !fixture.cli && !fixture.api) await expect(row).toContainText('Local models are good for private work. For running many agents at once, cloud models are recommended.');
+		if (['downloading', 'paused', 'starting', 'ready'].includes(fixture.local ?? '') && !fixture.cli && !fixture.api) await expect(row).toContainText('Good for private work. For now, to run many agents at once, add a cloud model.');
 		if (fixture.local === 'other-no-ref' || fixture.local === 'start-failed') await expect(row.getByText(/Reference:/)).toHaveCount(0);
 		if (fixture.local === 'setup-failed' || fixture.local === 'start-failed') await expect(row.getByRole('button', { name: 'Save a report', exact: true })).toBeVisible();
 	}

@@ -2,12 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { measuredDownloadTime, showLocalOnlyGuidance } from './setupLocalPresentation';
 
 describe('local-only guidance', () => {
-	it('shows only when a ready local model is the sole configured path', () => {
-		expect(showLocalOnlyGuidance({ eligible: true, localReady: true, signedInSubscription: false, hasApiKey: false })).toBe(true);
-		expect(showLocalOnlyGuidance({ eligible: false, localReady: true, signedInSubscription: false, hasApiKey: false })).toBe(false);
-		expect(showLocalOnlyGuidance({ eligible: true, localReady: true, signedInSubscription: true, hasApiKey: false })).toBe(false);
-		expect(showLocalOnlyGuidance({ eligible: true, localReady: true, signedInSubscription: false, hasApiKey: true })).toBe(false);
-		expect(showLocalOnlyGuidance({ eligible: true, localReady: true, signedInSubscription: true, hasApiKey: true })).toBe(false);
+	it('shows while local setup is in progress and no cloud model works', () => {
+		expect(showLocalOnlyGuidance({ eligible: true, localInProgress: true, cloudReady: false })).toBe(true);
+		expect(showLocalOnlyGuidance({ eligible: true, localInProgress: false, cloudReady: false })).toBe(false);
+		expect(showLocalOnlyGuidance({ eligible: false, localInProgress: true, cloudReady: false })).toBe(false);
+		expect(showLocalOnlyGuidance({ eligible: true, localInProgress: true, cloudReady: true })).toBe(false);
 	});
 });
 

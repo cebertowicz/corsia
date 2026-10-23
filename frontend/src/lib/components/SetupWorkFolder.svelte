@@ -1,8 +1,9 @@
 <script lang="ts">
 	import FolderRow from './FolderRow.svelte';
 
-	export type FolderNotice = { kind: 'protected'; folder: string } | { kind: 'unwritable'; reason: string } | { kind: 'picker_failed' } | null;
-	type Choice = { state: 'ready'; path: string; protected_folder: string | null } | { state: 'unwritable'; path: string; reason: string };
+	type ProtectedFolder = { kind: 'personal_folder'; folder: string } | { kind: 'contains_personal_folder'; folder: string } | { kind: 'contains_files' };
+	export type FolderNotice = { kind: 'protected'; folder: ProtectedFolder } | { kind: 'unwritable'; reason: string } | { kind: 'picker_failed' } | null;
+	type Choice = { state: 'ready'; path: string; protected_folder: ProtectedFolder | null } | { state: 'unwritable'; path: string; reason: string };
 	interface Props { folder: string; changed: boolean; changing: boolean; notice: FolderNotice; error?: string }
 	let { folder = $bindable(), changed = $bindable(), changing = $bindable(), notice = $bindable(), error = '' }: Props = $props();
 	async function changeFolder() {
@@ -20,17 +21,16 @@
 
 	function useDefaultFolder() {
 		folder = '~/CORSIA';
-		changed = true;
+		// The desktop shell owns and creates its default workspace; do not send a display path back as a filesystem path.
+		changed = false;
 		notice = null;
 	}
 
 	function keepProtectedFolder() { notice = null; }
 </script>
 <FolderRow {folder} {notice} {changing} onChange={changeFolder} onUseDefault={useDefaultFolder} onKeepProtected={keepProtectedFolder} />
-<p class="why">Your projects and files live here.</p>
 {#if error}<p class="error-text" role="alert">{error}</p>{/if}
 
 <style>
 	.error-text { margin: var(--space-2) 0 0; font-size: var(--text-subhead); }
-	.why { margin: var(--space-1) 0 0; color: var(--text-secondary); font-size: var(--text-subhead); }
 </style>
