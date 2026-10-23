@@ -35,13 +35,9 @@ def _now() -> str:
 
 
 def _rows_to_threads(rows: list[dict]) -> list[dict]:
-    """Group flat rows into top-level threads with nested replies.
-
-    A reply stored against another reply joins its thread's root, so it still shows.
-    """
+    """Group flat rows into top-level threads with nested replies."""
     tops: dict[str, dict] = {}
     replies: list[dict] = []
-    parents = {r["id"]: r["parent_id"] for r in rows}
     for r in rows:
         if r["parent_id"]:
             replies.append(r)
@@ -49,28 +45,18 @@ def _rows_to_threads(rows: list[dict]) -> list[dict]:
             r["replies"] = []
             tops[r["id"]] = r
     for r in replies:
-        root_id, seen = r["parent_id"], {r["id"]}
-        while parents.get(root_id) and root_id not in seen:
-            seen.add(root_id)
-            root_id = parents[root_id]
-        parent = tops.get(root_id)
+        parent = tops.get(r["parent_id"])
         if parent is not None:
             parent["replies"].append(r)
     return list(tops.values())
 
 
 def _thread_root_id(connection, comment_id: str | None) -> str | None:
-    """The top-level comment a reply's thread hangs from: replies are stored one level deep."""
+    """Normalize a reply parent to its top-level comment in one database hop."""
     if not comment_id:
         return comment_id
-    root_id, seen = comment_id, set()
-    while root_id not in seen:
-        seen.add(root_id)
-        row = connection.execute("SELECT parent_id FROM doc_comments WHERE id=?", (root_id,)).fetchone()
-        if row is None or not row["parent_id"]:
-            break
-        root_id = row["parent_id"]
-    return root_id
+    row = connection.execute("SELECT parent_id FROM doc_comments WHERE id=?", (comment_id,)).fetchone()
+    return row["parent_id"] if row is not None and row["parent_id"] else comment_id
 
 
 def get_comment(comment_id: str, *, db=None) -> dict | None:

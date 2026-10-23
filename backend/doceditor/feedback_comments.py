@@ -21,19 +21,12 @@ def author_id(comment: dict[str, Any]) -> str:
 
 
 def _root_comment(db, comment: dict[str, Any]) -> dict[str, Any] | None:
+    """Return a reply's stored top-level parent."""
     parent_id = comment.get("parent_id")
     if not parent_id:
         return None
     row = db.execute("SELECT * FROM doc_comments WHERE id=?", (parent_id,)).fetchone()
-    if row is None:
-        return None
-    root = dict(row)
-    if root.get("parent_id"):
-        row = db.execute(
-            "SELECT * FROM doc_comments WHERE id=?", (root["parent_id"],)
-        ).fetchone()
-        return dict(row) if row else root
-    return root
+    return dict(row) if row else None
 
 
 def _recipient_for_author(comment: dict[str, Any]) -> str:
