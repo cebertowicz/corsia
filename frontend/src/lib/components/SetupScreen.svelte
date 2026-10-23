@@ -32,8 +32,7 @@
 	import { measuredDownloadTime, showLocalOnlyGuidance } from '$lib/setupLocalPresentation';
 	import { ACCOUNT_LEDE, WELCOME_TITLE } from '$lib/setupWelcome';
 	interface Props { onExistingAccount: () => void; onAccountCreated: () => void; onFinished: () => void; startConnect?: boolean; onLeaveConnect?: () => void; resume?: boolean }
-	type LocalStartResult = 'started' | 'failed';
-	type LocalStartResponse = { result: LocalStartResult; reference?: string; fix?: string };
+	type LocalStartResponse = { result: 'started' | 'failed'; reference?: string; fix?: string };
 	const LOCAL_START_NETWORK_FAILURE = 'CORSIA couldn’t start local setup.';
 	async function requestLocalStart(session: string | null): Promise<LocalStartResponse> {
 		const response = await fetch(session ? '/api/providers/local/setup' : '/api/setup/local-download', {
@@ -49,9 +48,7 @@
 		return { result: 'failed', reference, fix };
 	}
 	/** The backend's own account refusal names the cause; a validation 422 has no string detail. */
-	function accountRefusal(detail: unknown): string | null {
-		return typeof detail === 'string' && detail.trim() ? detail.trim() : null;
-	}
+	function accountRefusal(detail: unknown): string | null { return typeof detail === 'string' && detail.trim() ? detail.trim() : null; }
 	const { onExistingAccount, onAccountCreated, onFinished, startConnect = false, onLeaveConnect, resume = false }: Props = $props();
 	type Page = 'checking' | 'welcome' | 'account' | 'subscriptions' | 'models' | 'hard-stop' | 'error' | 'connect';
 	const CLI_VENDORS = ['claude-code', 'codex'] as const;
