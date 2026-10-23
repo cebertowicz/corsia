@@ -100,11 +100,13 @@ def reject_submission(
             connection, node_id, revision.id, actor_id=actor_id, provenance=provenance,
         )
         # The step's worker is not settled: the revision is attached to it below.
-        rejected = _send_back(
+        rejected, rejection_event_id = _send_back(
             connection, node_id, feedback, actor_id, provenance, settles_worker=False,
         )
         # The worker's returned steps settle like any closed step: a nested
         # delegation among them retires its own worker, which gets no revision.
+        # They carry the verdict for their own closure, but only the reviewed
+        # node above is its correction fact.
         for leaf in returned:
             _send_back(
                 connection, leaf["id"], feedback, actor_id, provenance, settles_worker=True,
@@ -120,6 +122,10 @@ def reject_submission(
             connection, revision.id, "revision_created", actor_id=actor_id,
             provenance=provenance, payload=payload,
         )
+        from core.sent_back_corrections import record_rejection_correction
+
+        # In this write: a fact that cannot be recorded fails the rejection.
+        record_rejection_correction(connection, rejection_event_id)
         return rejected, service._node_from_row(connection, service._node_row(connection, revision.id)), False
 
 
@@ -153,7 +159,7 @@ SENT_BACK = "Sent back"
 
 def _send_back(
     connection, node_id: str, feedback: str, actor_id, provenance, *, settles_worker: bool,
-) -> PlanNode:
+) -> tuple[PlanNode, str]:
     """The verdict on one submission: rejected with this feedback, then closed.
 
     It closes as ``plans.closure.close_node`` records a close -- the reason on
@@ -165,7 +171,7 @@ def _send_back(
     """
     from plans import archival
 
-    service._event(
+    rejection_event_id = service._event(
         connection, node_id, "review_rejected", actor_id=actor_id,
         provenance=provenance, payload={"feedback": feedback},
     )
@@ -178,7 +184,7 @@ def _send_back(
         connection, service._node_row(connection, node_id),
         actor_id=actor_id, provenance=provenance,
     )
-    return sent_back
+    return sent_back, rejection_event_id
 
 
 def _revision_of(connection, node_id: str) -> tuple[PlanNode, str | None] | None:

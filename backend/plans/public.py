@@ -192,6 +192,7 @@ from plans.nudge_scheduling import (
 )
 
 # Admission, selection, liveness and wakes (automation/, infra/).
+from plans.admission_projection import executor_of
 from plans.wait_causes import stalled_why
 from plans.admission import (
     project as project_admission,

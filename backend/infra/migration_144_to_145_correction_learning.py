@@ -1,10 +1,10 @@
-"""Schema 143 -> 144: correction learning and trial-delivery receipt provenance."""
+"""Schema 144 -> 145: correction learning and trial-delivery receipt provenance."""
 from __future__ import annotations
 
 import sqlite3
 
 
-def migrate_143_to_144(conn: sqlite3.Connection) -> None:
+def migrate_144_to_145(conn: sqlite3.Connection) -> None:
     conn.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_learning_loop_triage_subject ON outcome_events(subject_key) "
         "WHERE event_name='learning_loop.correction_triage'"

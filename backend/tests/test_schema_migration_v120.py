@@ -7,7 +7,7 @@ import uuid
 
 from infra.database_migrations import MIGRATIONS
 from infra.migration_119_to_120_withdraw_retired_user_asks import migrate_119_to_120
-from infra.migration_143_to_144_correction_learning import migrate_143_to_144
+from infra.migration_144_to_145_correction_learning import migrate_144_to_145
 from infra.schema import SCHEMA_SQL, SCHEMA_VERSION
 from plans import service
 from plans.boundary import PlanActor, mutate
@@ -65,10 +65,10 @@ def _raise_ask(db: sqlite3.Connection, artifact_id: str, owner: str = "owner"):
 
 
 def test_registers_the_hold_only_migration():
-    assert SCHEMA_VERSION == 144
+    assert SCHEMA_VERSION == 145
     assert MIGRATIONS[119] is migrate_119_to_120
-    assert MIGRATIONS[143] is migrate_143_to_144
-    assert 144 not in MIGRATIONS
+    assert MIGRATIONS[144] is migrate_144_to_145
+    assert 145 not in MIGRATIONS
 
 
 def test_withdraws_terminal_and_archived_asks_but_leaves_live_asks_open():
