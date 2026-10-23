@@ -315,11 +315,15 @@ def test_alias_change_updates_display_name_not_pmid(monkeypatch, fresh_db):
 def test_discovery_applies_medium_only_to_corsia_managed_omlx(
     monkeypatch, fresh_db, managed,
 ):
+    from llm import network_discovery as nd
+    from llm.managed_omlx_binary import MANAGED_INSTANCE_ID
+
     _stub_network_helpers(monkeypatch)
-    monkeypatch.setattr(
-        "llm.local_sources.corsia_omlx_server",
-        lambda servers=None: servers[0] if managed and servers else None,
-    )
+    if managed:
+        stub = nd.get_server
+        monkeypatch.setattr(nd, "get_server", lambda sid: {
+            **stub(sid), "kind": "managed", "source": "corsia", "instance_id": MANAGED_INSTANCE_ID,
+        })
     router = _Router({
         ("GET", "/v1/models/status"): _resp(200, {"models": [{
             "id": "Qwen-Managed-Test",
@@ -343,4 +347,4 @@ def test_discovery_applies_medium_only_to_corsia_managed_omlx(
     conn.close()
     shape = json.loads(row[0])["reasoning_shape"]
     assert shape["default"] == ("medium" if managed else "low")
-    assert ("applies_default_when_unset" in shape) is managed
+    assert shape.get("send_when_unset") == ("medium" if managed else None)

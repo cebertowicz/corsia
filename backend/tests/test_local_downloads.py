@@ -215,7 +215,7 @@ def _discovery_lists(server_id: str, listed: list[str]) -> None:
     from llm import catalog_network_models
 
     catalog_network_models._reconcile_network_models(
-        server_id, {"id": server_id, "provider": "omlx"}, [{"id": name} for name in listed], {}, "now",
+        server_id, {"provider": "omlx"}, [{"id": name} for name in listed], {}, "now",
         {"discovered": 0, "updated": 0, "missing": 0})
 
 

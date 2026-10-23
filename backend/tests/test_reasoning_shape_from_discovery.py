@@ -210,35 +210,35 @@ def test_levels_win_over_the_toggle():
     assert shape["type"] == "effort_levels"
 
 
-def test_managed_omlx_defaults_an_unset_effort_to_medium(monkeypatch):
-    from llm import reasoning_config as rc
+def test_managed_omlx_sends_medium_for_an_unset_effort():
+    from llm.providers.omlx_thinking import wire_reasoning_effort
 
     shape = reasoning_shape_from_discovery(
         {
             "reasoning_efforts": ["low", "medium", "xhigh"],
             "reasoning_effort_default": "low",
         },
-        default_effort_when_unset="medium",
+        managed_effort="medium",
     )
 
     assert shape == {
         "type": "effort_levels",
         "values": ["low", "medium", "xhigh"],
         "default": "medium",
-        "applies_default_when_unset": True,
+        "send_when_unset": "medium",
     }
-    monkeypatch.setattr(rc, "reasoning_config_for_model", lambda _: shape)
-    assert rc.effective_reasoning_effort(None, "managed-qwen") == "medium"
-    assert rc.effective_reasoning_effort("low", "managed-qwen") == "low"
+    assert wire_reasoning_effort(None, shape) == "medium"
+    assert wire_reasoning_effort("low", shape) == "low"
+    assert wire_reasoning_effort("auto", shape) is None
 
 
-def test_managed_omlx_never_applies_medium_when_the_model_does_not_support_it():
+def test_managed_omlx_never_sends_medium_when_the_model_does_not_list_it():
     shape = reasoning_shape_from_discovery(
         {
             "reasoning_efforts": ["low", "xhigh"],
             "reasoning_effort_default": "low",
         },
-        default_effort_when_unset="medium",
+        managed_effort="medium",
     )
 
     assert shape == {
@@ -248,8 +248,8 @@ def test_managed_omlx_never_applies_medium_when_the_model_does_not_support_it():
     }
 
 
-def test_personal_omlx_keeps_an_unset_effort_unset(monkeypatch):
-    from llm import reasoning_config as rc
+def test_personal_omlx_keeps_an_unset_effort_unset():
+    from llm.providers.omlx_thinking import wire_reasoning_effort
 
     shape = reasoning_shape_from_discovery(
         {
@@ -263,19 +263,25 @@ def test_personal_omlx_keeps_an_unset_effort_unset(monkeypatch):
         "values": ["low", "medium", "xhigh"],
         "default": "low",
     }
-    monkeypatch.setattr(rc, "reasoning_config_for_model", lambda _: shape)
-    assert rc.effective_reasoning_effort(None, "personal-qwen") is None
+    assert wire_reasoning_effort(None, shape) is None
 
 
-def test_managed_omlx_configured_effort_wins_over_medium_default():
+def test_managed_omlx_configured_effort_wins_over_medium():
+    """The server applies its own configured level, so none is sent for it."""
+    from llm.providers.omlx_thinking import wire_reasoning_effort
+
     shape = reasoning_shape_from_discovery(
         {
             "reasoning_efforts": ["low", "medium", "xhigh"],
             "reasoning_effort_default": "low",
             "configured_reasoning_effort": "xhigh",
         },
-        default_effort_when_unset="medium",
+        managed_effort="medium",
     )
 
-    assert shape["default"] == "xhigh"
-    assert shape["applies_default_when_unset"] is True
+    assert shape == {
+        "type": "effort_levels",
+        "values": ["low", "medium", "xhigh"],
+        "default": "xhigh",
+    }
+    assert wire_reasoning_effort(None, shape) is None

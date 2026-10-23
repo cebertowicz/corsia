@@ -230,7 +230,6 @@ def test_effective_effort_resolves_a_stale_level_to_what_the_picker_shows(monkey
 
 def test_effective_effort_leaves_off_auto_and_unset_alone(monkeypatch):
     from llm import reasoning_config as rc
-
     lookups: list[str] = []
 
     def reasoning_config(model: str):
@@ -239,11 +238,11 @@ def test_effective_effort_leaves_off_auto_and_unset_alone(monkeypatch):
 
     monkeypatch.setattr(rc, "reasoning_config_for_model", reasoning_config)
     assert rc.effective_reasoning_effort(None, "qwen38") is None
-    assert lookups == ["qwen38"]
     assert rc.effective_reasoning_effort("", "qwen38") is None
     assert rc.effective_reasoning_effort("none", "qwen38") == "none"
     assert rc.effective_reasoning_effort("auto", "qwen38") == "auto"
-    assert lookups == ["qwen38"]
+    # Dispatch calls this on the event loop; these values must not read the catalog.
+    assert lookups == []
 
 
 def test_effective_effort_passes_through_when_the_vocabulary_is_unknown(monkeypatch):
