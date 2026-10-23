@@ -6,6 +6,7 @@ import {
 	pollJobsFor,
 	markModelOptimistic,
 	modelsForProvider,
+	seedProviderModels,
 } from '../providerModels';
 import { loadModel, unloadModel } from '../providerModelCommands';
 import { token } from '../auth';
@@ -327,5 +328,31 @@ describe('loadModel / unloadModel — External rows use the catalog update', () 
 	it('still loads a managed model through the server', async () => {
 		await loadModel(provider(), server(), 'qwen', 'row-1');
 		expect(String(fetchMock.mock.calls[0][0])).toContain('/api/settings/network-servers/srv-1/models/load');
+	});
+});
+
+describe('models ahead of the first open', () => {
+	beforeEach(() => {
+		token.set('test-token');
+		vi.restoreAllMocks();
+
+	});
+	it('seeds an empty card, but never over rows already held or a read in flight', async () => {
+		const p = { ...provider(), name: 'codex', type: 'harness' as const };
+		const row = { id: 'codex/x', name: 'X', state: 'loaded' as const, meta: '', caps: [] };
+
+		seedProviderModels('codex', undefined, [row]);
+		expect(modelsView(p).models).toEqual([row]);
+
+		seedProviderModels('codex', undefined, [{ ...row, name: 'older snapshot' }]);
+		expect(modelsView(p).models).toEqual([row]);
+
+		let release: (r: Response) => void = () => {};
+		(globalThis as { fetch: typeof fetch }).fetch = vi.fn(() => new Promise<Response>((resolve) => { release = resolve; })) as unknown as typeof fetch;
+		const reading = loadProviderModelsFor({ ...provider(), name: 'omlx-other' }, server());
+		seedProviderModels('omlx-other', 'srv-1', [row]);
+		expect(modelsView({ ...provider(), name: 'omlx-other' }, server()).models).toEqual([]);
+		release(new Response('{}', { status: 500 }));
+		await reading;
 	});
 });

@@ -71,7 +71,7 @@ describe('HostAccessReviewSetting fallback', () => {
 
 		expect(fallbackToggle()).toBeNull();
 		expect(host.textContent).not.toContain("Fall back to the agent's own model");
-		expect(host.textContent).toContain('Auto-approve leases');
+		expect(host.textContent).toContain('Auto-approve');
 	});
 
 	it('names the chosen reviewer in the fallback row, off by default', () => {

@@ -86,16 +86,21 @@ async def local_server_for_install(
     return server_id, port, False
 
 
-def corsia_omlx_server(servers: list[dict] | None = None) -> dict | None:
-    """CORSIA's own oMLX server row, online or not; None when it isn't registered or is turned off.
+def corsia_omlx_server(
+    servers: list[dict] | None = None, *, include_disabled: bool = False,
+) -> dict | None:
+    """CORSIA's own oMLX server row, online or not; None when it isn't registered.
 
     Identity only: a caller that needs it running also reads ``status``. ``UNIQUE(provider,
-    instance_id)`` allows at most one such row, so there is no choice between several.
-    Pass the oMLX rows a caller already read to avoid reading them again.
+    instance_id)`` allows at most one such row, so there is no choice between several. By
+    default a disabled server remains unavailable to existing callers; callers that need to
+    explain that state can opt in. Pass the oMLX rows a caller already read to avoid reading
+    them again.
     """
     rows = get_servers(provider="omlx") if servers is None else servers
     return next((server for server in rows
-                 if is_corsia_managed_server(server) and server.get("status") != "disabled"), None)
+                 if is_corsia_managed_server(server)
+                 and (include_disabled or server.get("status") != "disabled")), None)
 
 
 def local_omlx_servers(servers: list[dict] | None = None) -> list[dict]:
