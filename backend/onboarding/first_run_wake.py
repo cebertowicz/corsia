@@ -19,7 +19,7 @@ log = logging.getLogger(__name__)
 FIRST_RUN_REFERENCE = "skills/conductor-bootstrap/references/first-run.md"
 APP_REFERENCE = "skills/conductor-bootstrap/references/first-run-app.md"
 APP_START_REFERENCE = "skills/conductor-bootstrap/references/first-run-start.md"
-#: The whole set of fact reads shares this budget; the first model pick waits no longer.
+#: Fact reads share this budget; cancelled reads finish cleanup before the pick returns.
 FACTS_TIMEOUT_SECONDS = 5.0
 APP_FACT_KEYS = frozenset({
     "first_run_path", "harness_ready", "sources_missing", "agents_found", "local_download",
@@ -201,19 +201,24 @@ def _unavailable(name: str) -> dict[str, str]:
 
 async def _read_facts(reads: dict[str, Any]) -> dict[str, Any]:
     tasks = {name: asyncio.ensure_future(read()) for name, read in reads.items()}
-    await asyncio.wait(tasks.values(), timeout=FACTS_TIMEOUT_SECONDS)
-    results: dict[str, Any] = {}
-    for name, task in tasks.items():
-        if not task.done():
-            task.cancel()
-            log.error("first-run setup fact %s unavailable: unfinished after %ss", name, FACTS_TIMEOUT_SECONDS)
-            results[name] = _unavailable(name)
-        elif task.exception() is not None:
-            log.error("first-run setup fact %s unavailable: read failed", name, exc_info=task.exception())
-            results[name] = _unavailable(name)
-        else:
-            results[name] = task.result()
-    return results
+    try:
+        await asyncio.wait(tasks.values(), timeout=FACTS_TIMEOUT_SECONDS)
+        results: dict[str, Any] = {}
+        for name, task in tasks.items():
+            if not task.done() or task.cancelled():
+                log.error("first-run setup fact %s unavailable: unfinished after %ss", name, FACTS_TIMEOUT_SECONDS)
+                results[name] = _unavailable(name)
+            elif task.exception() is not None:
+                log.error("first-run setup fact %s unavailable: read failed", name, exc_info=task.exception())
+                results[name] = _unavailable(name)
+            else:
+                results[name] = task.result()
+        return results
+    finally:
+        for task in tasks.values():
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks.values(), return_exceptions=True)
 
 
 async def _script_setup_facts(model: str, path: str) -> dict[str, Any]:
