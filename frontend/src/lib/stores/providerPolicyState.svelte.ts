@@ -18,7 +18,7 @@ export function createProviderPolicyState(projectId?: string | (() => string | u
 	const providerQueues = new Map<string, Promise<void>>();
 	// A patch function returns null when the change would not alter anything, so nothing is sent.
 	type PolicyPatch = Partial<ProviderEntry> | ((entry: ProviderEntry) => Partial<ProviderEntry> | null);
-	// A failed read names the read, never a route's wording; the host's Reload button is the next step.
+	// A failed read names the read, never a route's wording; the host's Retry button is the next step.
 	const loadFailureText = (result: { ok: boolean; reached?: boolean }) =>
 		!result.ok && result.reached === false ? 'Couldn’t load providers. Check your connection.' : 'Couldn’t load providers.';
 
@@ -47,7 +47,7 @@ export function createProviderPolicyState(projectId?: string | (() => string | u
 		failures = text === null ? rest : { ...rest, [target]: text };
 	}
 
-	/** Re-read the policy without touching loading or failures, so the next save uses the current revision. When it cannot, `error` says so and the host offers a reload. */
+	/** Re-read the policy without touching loading or failures, so the next save uses the current revision. When it cannot, `error` says so and the host offers Retry. */
 	async function refresh(): Promise<ProviderPolicy | null> {
 		const result = await loadProviderPolicy(currentProjectId());
 		if (result.ok && Array.isArray(result.value?.providers)) {
