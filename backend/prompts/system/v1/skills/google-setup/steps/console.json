@@ -1,0 +1,19 @@
+{
+  "domains": ["google.com"],
+  "steps": [
+    {"id":"project-page","says":"Open Google Cloud's project page.","action":"goto","url":"https://console.cloud.google.com/projectcreate"},
+    {"id":"project-name","says":"Name the project CORSIA.","action":"type","selector":"input[aria-label='Project name']","value":"CORSIA"},
+    {"id":"project-create","says":"Create the CORSIA project.","action":"click","selector":"button[type='submit']"},
+    {"id":"project-ready","says":"Wait until the new project is available.","action":"wait_for","selector":"[aria-label='Select a project']","timeout":90},
+    {"id":"apis-page","says":"Open the five API enablement page.","action":"goto","url":"https://console.cloud.google.com/flows/enableapi?apiid=gmail.googleapis.com,calendar-json.googleapis.com,drive.googleapis.com,docs.googleapis.com,sheets.googleapis.com"},
+    {"id":"apis-enable","says":"Enable the Google APIs.","action":"click","selector":"button[aria-label='Enable']"},
+    {"id":"branding-page","says":"Open Google Auth Platform branding.","action":"goto","url":"https://console.cloud.google.com/auth/branding"},
+    {"id":"app-name","says":"Set the app name to CORSIA.","action":"type","selector":"input[aria-label='App name']","value":"CORSIA"},
+    {"id":"support-email","says":"Set the support email.","action":"type","selector":"input[aria-label='User support email']","value":"${address}"},
+    {"id":"clients-page","says":"Open the OAuth clients page.","action":"goto","url":"https://console.cloud.google.com/auth/clients"},
+    {"id":"create-client","says":"Create the Desktop app OAuth client.","action":"click","selector":"button[aria-label='Create client']"},
+    {"id":"download-json","says":"Download the client JSON without reading the secret dialog.","action":"click","script":"[...document.querySelectorAll('button')].find(b => b.textContent.includes('Download JSON')).click()"},
+    {"id":"download-wait","says":"Wait for the client JSON download to finish.","action":"wait_for","selector":"3000","timeout":3},
+    {"id":"close-secret-dialog","says":"Close the secret dialog without reading it.","action":"goto","reload":true}
+  ]
+}
