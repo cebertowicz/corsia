@@ -12,6 +12,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+from core.skill_validation import validate_skill_bundle
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SPEC_KEYS = {"name", "description", "license", "compatibility", "metadata", "allowed-tools"}
 POINTER = "corsia-data"
@@ -43,6 +45,19 @@ def _flow_nodes(node: yaml.Node) -> list[yaml.Node]:
 
 def test_the_check_sees_the_system_skills() -> None:
     assert len(_tracked_system_skills()) >= 20
+
+
+def test_every_system_skill_bundle_validates() -> None:
+    invalid = []
+    for rel in _tracked_system_skills():
+        path = REPO_ROOT / rel
+        sidecar = path.parent / "corsia.yaml"
+        files = {"corsia.yaml": sidecar.read_text(encoding="utf-8")} if sidecar.is_file() else None
+        result = validate_skill_bundle(path.read_text(encoding="utf-8"), files)
+        if not result.ok:
+            invalid.append(f"{rel}: {result.errors}")
+
+    assert not invalid, "System skill bundles that fail validation:\n  " + "\n  ".join(invalid)
 
 
 @pytest.mark.parametrize("rel", _tracked_system_skills())
