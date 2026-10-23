@@ -16,7 +16,7 @@
 	let { onToggleSidebar, onTogglePane, onMeasurement, onRightControlsWidth, activeView, conductorThreadId, hasPane = true, artifactHeaderInset = null }: {
 		onToggleSidebar: () => void;
 		onTogglePane: () => void;
-		/** Reports the measured desktop canvas control group width to the shell. */
+		/** Reports how far the right controls reach in from the header's inline end, so the canvas tabs can stop before them. */
 		onRightControlsWidth?: (width: number) => void;
 		/** Opens the Measurement surface; the doorway writes its own scope first (PL-2). */
 		onMeasurement?: () => void;
@@ -49,14 +49,13 @@
 		const controls = rightControlsEl;
 		if (!shell || !controls || typeof ResizeObserver === 'undefined') return;
 		const updateWidth = () => {
-			const shellBox = shell.getBoundingClientRect();
-			const controlsBox = controls.getBoundingClientRect();
-			onRightControlsWidth?.(Math.ceil(shellBox.right - controlsBox.left));
+			onRightControlsWidth?.(Math.ceil(shell.getBoundingClientRect().right - controls.getBoundingClientRect().left));
 		};
 		updateWidth();
 		const observer = new ResizeObserver(updateWidth);
 		observer.observe(shell);
-		observer.observe(controls);
+		// Border box: the overlaid-drawer padding changes the controls' reach without changing their content.
+		observer.observe(controls, { box: 'border-box' });
 		return () => observer.disconnect();
 	});
 	const overflowActions = $derived((h?.actions ?? []).filter((a) => !a.primary && !a.wideOnly));
@@ -142,65 +141,64 @@
 	{/if}
 {/snippet}
 
-<header bind:this={headerEl} class="shell-header" class:shell-inset={$sidebarCollapsed} class:with-canvas={artifactHeaderInset !== null} data-tauri-drag-region use:toastTopSurface>
+<header bind:this={headerEl} class="shell-header" class:shell-inset={$sidebarCollapsed} data-tauri-drag-region use:toastTopSurface>
 	<div
 		class="chat-header"
 		class:with-canvas={artifactHeaderInset !== null}
 		style:--artifact-header-inset={artifactHeaderInset === null ? undefined : `${artifactHeaderInset}px`}
 	>
 		<div class="h-leading">
-		<div class="h-zone h-left">
-			<button class="h-icon" onclick={toggleSidebar} title="Toggle sidebar" aria-label="Toggle sidebar">
-				<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="9" y1="4" x2="9" y2="20"/></svg>
-			</button>
-			{#if isTakeover && h?.onBack}
-				<button class="h-back" onclick={back} title={h?.backLabel ?? 'Back'} aria-label={h?.backLabel ?? 'Back'}>
-					<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
-					<span class="h-back-label">{h?.backLabel ?? 'Back'}</span>
+			<div class="h-zone h-left">
+				<button class="h-icon" onclick={toggleSidebar} title="Toggle sidebar" aria-label="Toggle sidebar">
+					<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="9" y1="4" x2="9" y2="20"/></svg>
+				</button>
+				{#if isTakeover && h?.onBack}
+					<button class="h-back" onclick={back} title={h?.backLabel ?? 'Back'} aria-label={h?.backLabel ?? 'Back'}>
+						<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+						<span class="h-back-label">{h?.backLabel ?? 'Back'}</span>
+					</button>
+				{/if}
+			</div>
+
+			<span class="h-title">{@render titleInner()}</span>
+		</div>
+
+		<div bind:this={rightControlsEl} class="h-zone h-right">
+			{#if isTakeover && h?.actions?.length}
+				{#each h.actions as a (a.id)}
+					<button class="h-act" class:active={a.active} class:overflowable={!a.primary} class:wide-only={a.wideOnly} onclick={() => run(a.onClick)} title={a.title ?? a.label}>{a.label}</button>
+				{/each}
+			{/if}
+			{#if showMeasures}
+				<button class="h-icon" onclick={openMeasures} title={measuresLabel} aria-label={measuresLabel}>
+					<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18M7 16l4-5 3 3 4-7"/></svg>
+				</button>
+			{/if}
+			{#if hasOverflow}
+				<button class="h-overflow" class:open={overflowOpen} onclick={() => (overflowOpen = !overflowOpen)} aria-label="More actions" title="More">
+					<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/></svg>
+				</button>
+			{/if}
+			{#if activeView === 'chat' && !isTakeover && ($activeThread || isConductorThread)}
+				<button class="h-icon" class:active={$threadSettingsOpen} onclick={openThreadSettings} title={isConductorThread ? `${designatedName} settings` : 'Thread settings'} aria-label={isConductorThread ? `${designatedName} settings` : 'Thread settings'}>
+					{@render gearIcon()}
+				</button>
+			{:else if activeView === 'activity' && $uiScope}
+				<button class="h-icon" onclick={openProjectSettings} title="Project settings" aria-label="Project settings">
+					{@render gearIcon()}
+				</button>
+			{:else if activeView === 'activity' && !$uiScope}
+				<button class="h-icon" onclick={openWorkspaceSettings} title="Workspace settings" aria-label="Workspace settings">
+					{@render gearIcon()}
+				</button>
+			{/if}
+			{#if hasPane}
+				<button class="h-icon" onclick={onTogglePane} title="Toggle panel" aria-label="Toggle panel">
+					<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="15" y1="4" x2="15" y2="20"/></svg>
 				</button>
 			{/if}
 		</div>
-
-		<span class="h-title">{@render titleInner()}</span>
 	</div>
-
-	</div>
-
-	<div bind:this={rightControlsEl} class="h-zone h-right">
-		{#if isTakeover && h?.actions?.length}
-			{#each h.actions as a (a.id)}
-				<button class="h-act" class:active={a.active} class:overflowable={!a.primary} class:wide-only={a.wideOnly} onclick={() => run(a.onClick)} title={a.title ?? a.label}>{a.label}</button>
-			{/each}
-		{/if}
-		{#if showMeasures}
-			<button class="h-icon" onclick={openMeasures} title={measuresLabel} aria-label={measuresLabel}>
-				<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18M7 16l4-5 3 3 4-7"/></svg>
-			</button>
-		{/if}
-		{#if hasOverflow}
-			<button class="h-overflow" class:open={overflowOpen} onclick={() => (overflowOpen = !overflowOpen)} aria-label="More actions" title="More">
-				<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/></svg>
-			</button>
-		{/if}
-		{#if activeView === 'chat' && !isTakeover && ($activeThread || isConductorThread)}
-			<button class="h-icon" class:active={$threadSettingsOpen} onclick={openThreadSettings} title={isConductorThread ? `${designatedName} settings` : 'Thread settings'} aria-label={isConductorThread ? `${designatedName} settings` : 'Thread settings'}>
-				{@render gearIcon()}
-			</button>
-		{:else if activeView === 'activity' && $uiScope}
-			<button class="h-icon" onclick={openProjectSettings} title="Project settings" aria-label="Project settings">
-				{@render gearIcon()}
-			</button>
-		{:else if activeView === 'activity' && !$uiScope}
-			<button class="h-icon" onclick={openWorkspaceSettings} title="Workspace settings" aria-label="Workspace settings">
-				{@render gearIcon()}
-			</button>
-		{/if}
-		{#if hasPane}
-			<button class="h-icon" onclick={onTogglePane} title="Toggle panel" aria-label="Toggle panel">
-				<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="15" y1="4" x2="15" y2="20"/></svg>
-			</button>
-		{/if}
-		</div>
 </header>
 
 {#if overflowOpen && hasOverflow}
@@ -218,8 +216,8 @@
 		position: absolute; top: 0; left: 0; right: 0;
 		z-index: 10;
 		height: var(--header-height);
-		--header-inline-end: var(--space-3);
-		padding: 0 var(--header-inline-end) 0 max(var(--space-3), env(titlebar-area-x, var(--space-3)));
+		--header-inline-end: 12px;
+		padding: 0 var(--header-inline-end) 0 max(12px, env(titlebar-area-x, 12px));
 		display: flex; align-items: center; gap: 8px;
 		flex-shrink: 0;
 		box-shadow: var(--glass-rim);
@@ -240,26 +238,19 @@
 		mask-image: linear-gradient(180deg, rgba(0,0,0,1) 0%, rgba(0,0,0,0.95) 50%, rgba(0,0,0,0.5) 80%, transparent 100%);
 	}
 	:global(html[data-shell="tauri"]) .shell-header.shell-inset { padding-left: 99px; }
-	/* Only the desktop drawer overlays the canvas. At narrower breakpoints main stays
-	   above the fixed pane, so the header keeps its normal stacking context there. */
-	@media (min-width: 64.0625rem) { .shell-header.with-canvas { z-index: auto; } .shell-header.with-canvas::before { z-index: 0; } }
 	.shell-header :global(button) { -webkit-app-region: no-drag; app-region: no-drag; }
 
 	.chat-header { display: flex; align-items: center; flex: 1; min-width: 0; }
-	.shell-header.with-canvas .chat-header { position: relative; z-index: 1; }
-	/* The canvas keeps its own segment in the shared header. All chat controls, including
-	   the title, stay in the remaining segment instead of layering over its tabs. */
-	.chat-header.with-canvas {
+	/* The canvas keeps its own segment in the shared header. The title stays in the remaining
+	   segment; the right controls stay at the header's end and the canvas tabs stop before them. */
+	.chat-header.with-canvas .h-leading {
 		flex: 0 1 calc(100% - var(--artifact-header-inset));
 		max-width: calc(100% - var(--artifact-header-inset));
 	}
 	.h-zone { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
 	.h-leading { display: flex; align-items: center; min-width: 0; flex: 1; gap: 8px; }
-	.h-right { margin-left: auto; }
-	/* Only an expanded desktop canvas needs controls above its overlaid drawer. */
-	.shell-header.with-canvas .h-right {
-		position: absolute; right: var(--header-inline-end); z-index: 12;
-	}
+	/* An overlaid drawer covers the inline end; PaneShell publishes how much, so the controls keep clear of it. */
+	.h-right { margin-left: auto; padding-inline-end: var(--pane-overlay-inset, 0px); }
 
 	.h-icon {
 		display: flex; align-items: center; justify-content: center;
@@ -348,12 +339,11 @@
 			box-shadow: none;
 			display: grid; grid-template-columns: auto 1fr auto; gap: 4px;
 		}
-		/* h-right is a shell sibling (for the desktop canvas), so pin it to the third cell;
-		   auto-placement would give it a second phone row. */
+		/* The desktop split wrapper collapses back to the existing three mobile header cells. */
 		.chat-header, .chat-header.with-canvas {
-			grid-column: 1 / 3; grid-row: 1;
+			grid-column: 1 / -1;
 			width: 100%; max-width: none; flex: 1;
-			display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--space-1);
+			display: grid; grid-template-columns: auto 1fr auto; gap: var(--space-1);
 		}
 		.h-leading { display: contents; }
 		/* The blur stays on this masked layer so it fades out with no hard edge.
@@ -378,11 +368,7 @@
 			mask-image: linear-gradient(180deg, rgba(0,0,0,1) calc(50% + var(--header-pad-top) / 2 + 9px), transparent 100%);
 		}
 		.h-left { justify-self: start; }
-		/* Undo the desktop canvas layer: phone controls sit in the third cell beside the title. */
-		.shell-header.with-canvas .h-right, .h-right {
-			position: static; right: auto; z-index: auto;
-			grid-column: 3; grid-row: 1; align-self: center; justify-self: end; margin-left: 0;
-		}
+		.h-right { justify-self: end; margin-left: 0; }
 		/* inline-flex is content-sized; override so the 1fr cell bounds the title and
 		   the existing overflow:hidden + text-overflow:ellipsis on .h-scope fires. */
 		.h-title { justify-self: center; text-align: center; width: 100%; min-width: 0; }

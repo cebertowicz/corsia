@@ -72,13 +72,13 @@ describe('Header', () => {
 		expect(host.querySelector('[aria-label="Thread settings"]')).not.toBeNull();
 	});
 
-	it('keeps the canvas-open desktop controls reachable outside the narrowed chat segment', () => {
+	it('keeps the canvas-open desktop controls in the header', () => {
 		let measuresOpened = 0;
 		let panelToggles = 0;
 		threads.set([{ ...agentThread }]);
 		render('chat', null, () => { measuresOpened += 1; }, true, 600, () => { panelToggles += 1; });
 
-		const right = host.querySelector('.shell-header > .h-right');
+		const right = host.querySelector('.h-right');
 		expect(right).not.toBeNull();
 		const measurement = right?.querySelector('[aria-label^="Measurement for"]') as HTMLButtonElement;
 		const settings = right?.querySelector('[aria-label="Thread settings"]') as HTMLButtonElement;

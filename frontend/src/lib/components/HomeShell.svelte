@@ -235,7 +235,6 @@
 		class="main"
 		class:open={sidebarOpen}
 		class:pane-open={paneVisible}
-		class:canvas-header-active={artifactHeaderInset !== null}
 		style:--artifact-header-inset={artifactHeaderInset === null ? undefined : `${artifactHeaderInset}px`}
 		style:--header-right-controls-inset={artifactHeaderInset === null ? undefined : `${headerRightControlsInset}px`}
 		bind:this={mainEl}
@@ -321,11 +320,6 @@
 		position: relative;
 		background: var(--bg-primary);
 		z-index: 10;
-	}
-	/* Only the desktop pane overlays the canvas. At narrower breakpoints the fixed
-	   pane is revealed beneath main as it slides, so main keeps its base z-index. */
-	@media (min-width: 64.0625rem) {
-		.main.canvas-header-active { z-index: auto; }
 	}
 	.main-close-tap {
 		display: none; position: absolute; inset: var(--header-bottom) 0 0; z-index: 9;
