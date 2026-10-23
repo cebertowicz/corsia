@@ -189,6 +189,21 @@ describe('SetupScreen', () => {
 		expect(calls.filter((call) => call.url === '/api/setup/first-account')).toHaveLength(1);
 	});
 
+	for (const [state, reason] of [['unreadable', 'permission denied'], ['unwritable', 'the disk is read-only']] as const) {
+		it(`does not apply a ${state} folder or create an account`, async () => {
+			const invoke = vi.fn(async (command: string) => command === 'choose_work_folder'
+				? { state, path: '/fixture/unavailable', reason }
+				: undefined);
+			Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: { invoke } });
+			await openAccount(); button('Change')?.click(); await settle(); fillAccount(); await settle();
+
+			expect(button('Continue')).toHaveProperty('disabled', true);
+			button('Continue')?.click(); await settle();
+			expect(invoke.mock.calls.filter(([command]) => command === 'configure_work_folder')).toHaveLength(0);
+			expect(calls.filter((call) => call.url === '/api/setup/first-account')).toHaveLength(0);
+		});
+	}
+
 	it('asks which subscriptions they pay for, installs the picked tool at once and shows a row only for it', async () => {
 		sources = [{ source: 'claude-code', name: 'Claude Code', state: 'not_installed' }, { source: 'codex', name: 'Codex', state: 'not_installed' }];
 		await passFolder();
