@@ -17,4 +17,4 @@ For each move, in order:
 4. **Send the finding once** to the owner agent, or to its project's conductor where it has one, with `delegate_send`: series, value against range, the preceding change if any, the missing context if any, and one proposed fix. One message per owner per digest, covering all of that owner's moves. Do not resend an unanswered finding.
 5. **Close the loop.** Record the series and date on your plan. On the next digest, check whether it moved back into range. Still out: ask the owner what it found, and raise it to the person only if the fix needs their word.
 
-The person's word is still needed for a change to product behaviour, spending, or a new source's access. A digest is not a reason to message the person: no `post_update` for a move you can route to its owner.
+The person's word is still needed for a change to product behaviour, spending, or a new source's access. A digest is not a reason to message the person: no `post_update` for a move you can route to its owner. This covers movement digests only; a learning report follows `context-stewardship`.
