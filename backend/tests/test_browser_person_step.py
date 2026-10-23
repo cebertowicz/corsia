@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 
 import pytest
+import pytest_asyncio
 
 from host_access import browser_control, browser_steps
 from host_access.browser_cdp import PasswordProbe
@@ -50,8 +51,8 @@ class Page:
             await asyncio.wait_for(self.probed.wait(), 1)
 
 
-@pytest.fixture
-def plan(isolated_db, monkeypatch):
+@pytest_asyncio.fixture
+async def plan(isolated_db, monkeypatch):
     """The agent's plan with its selected task, plus the product events and pane notices the page caused."""
     db = get_db()
     seed_threads(db)
@@ -67,7 +68,11 @@ def plan(isolated_db, monkeypatch):
                         lambda _thread, message: recorded["notices"].append(message["visible"]))
     monkeypatch.setattr(browser_control, "REPROBE_EVERY", 0.01)
     yield recorded
+    step = browser_control._steps.get(THREAD)
+    reprobe = step.reprobe if step is not None else None
     browser_control.pane_disconnected(THREAD, "pane")
+    if reprobe is not None:
+        await asyncio.gather(reprobe, return_exceptions=True)
     for registry in (browser_control._steps, browser_control._guarded_visits, browser_control._probe_locks):
         registry.clear()
 
@@ -225,6 +230,53 @@ async def test_a_password_field_seen_during_a_person_step_keeps_the_visit_read_g
         with pytest.raises(BrowserSessionError, match="asks for a password"):
             await browser_control.require_page_access(THREAD, page.agent_probe, command)
     await browser_control.require_page_access(THREAD, page.agent_probe, ("snapshot",))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["close_node", "mark_done"], ids=["declined", "marked-done"])
+@pytest.mark.parametrize("pane", [True, False], ids=["pane", "no-pane"])
+@pytest.mark.parametrize("observed", [True, False], ids=["already-observed", "not-yet-observed"])
+async def test_redeclaring_an_ended_person_step_refuses_without_reopening_or_counting_it_again(
+    plan, monkeypatch, operation, pane, observed,
+):
+    """A reused ended receipt cannot promise a new handoff or wait for a wake that will never arrive."""
+    page, db = Page(), plan["db"]
+    if pane:
+        browser_control.pane_connected(THREAD, "pane", None, page.pane_probe)
+    await browser_control.declare_person_step(THREAD, page.agent_probe, "Choose your account")
+    original = browser_control._steps[THREAD]
+    loop = original.reprobe
+    [step] = _steps(db)
+    params = close_params(db, operation, step["id"])
+    plan_update(db, plan["plan"].id, operation,
+                {**params, "reason": "Not now"} if operation == "close_node" else params, actor=HUMAN)
+    if observed:
+        await browser_control.require_page_access(THREAD, page.agent_probe, ("snapshot",))
+
+    starts = []
+    start_reprobe = browser_control._start_reprobe
+
+    def record_start(*args):
+        starts.append(args)
+        start_reprobe(*args)
+
+    monkeypatch.setattr(browser_control, "_start_reprobe", record_start)
+    for _ in range(2):
+        with pytest.raises(BrowserSessionError) as refused:
+            await browser_control.declare_person_step(THREAD, page.agent_probe, "Choose your account")
+        assert str(refused.value) == (
+            "The person already ended the step for this page, so it can't be given to them again. "
+            "Tell them in chat what you needed the page for and stop."
+        )
+        assert THREAD not in browser_control._steps
+        await browser_control.require_page_access(THREAD, page.agent_probe, ("snapshot",))
+    if loop is not None:
+        await asyncio.gather(loop, return_exceptions=True)
+    assert starts == [] and original.reprobe is None
+    assert len(_steps(db)) == 1
+    assert plan["events"] == ["person_step_opened"] + (
+        ["person_step_declined"] if operation == "close_node" else []
+    )
 
 
 def test_the_done_states_a_decline_is_told_from_are_the_plans_accepted_states():

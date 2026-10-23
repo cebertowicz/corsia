@@ -32,6 +32,10 @@ PERSON_STEP = (
     "current task waits on it; end your turn. If they decline, tell them in chat what you needed the page for "
     "and stop."
 )
+PERSON_STEP_ENDED = (
+    "The person already ended the step for this page, so it can't be given to them again. "
+    "Tell them in chat what you needed the page for and stop."
+)
 # Locates an agent's ref or CSS selector on the page as a backendNodeId, or None when it can't.
 Resolve = Callable[[str], Awaitable[int | None]]
 # AR6: while a step is open and a pane is connected, the probe re-runs this many seconds after the
@@ -83,7 +87,8 @@ async def require_page_access(thread_id: str, probe: Probe, args: tuple[str, ...
 async def declare_person_step(thread_id: str, probe: Probe, instruction: str) -> None:
     """Give the current page to the person as a step that settles on their next page visit.
 
-    A password page is refused exactly as any other command is; a second declaration on the visit is a no-op.
+    A password page is refused exactly as any other command is. A second declaration is a no-op while
+    the visit's person step is open, and is refused after the person has ended it.
     """
     instruction = str(instruction).strip()
     if not instruction:
@@ -232,12 +237,16 @@ async def _reprobe(thread_id: str, step: BrowserStep) -> bool:
 
 
 async def _open_step(thread_id: str, step: BrowserStep) -> None:
+    """Attach the row and report an opening only if a reused person-step receipt is still open."""
     if step.node_id is not None:
         return
     step.node_id = await asyncio.to_thread(
         _plan_write, "open_user_step", thread_id, key=step.visit,
         title=step.title(), description=step.description(), provenance=step.provenance,
     )
+    if isinstance(step, PersonStep) and await asyncio.to_thread(_step_row_state, step.node_id) is not None:
+        _steps.pop(thread_id, None)
+        raise BrowserSessionError(PERSON_STEP_ENDED)
     await _emit(f"{step.event_prefix}_opened", thread_id)
 
 

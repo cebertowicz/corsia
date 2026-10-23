@@ -1263,6 +1263,7 @@ async def test_browser_person_step_runs_the_real_declaration_for_the_authoritati
         return "step"
 
     monkeypatch.setattr(browser_control, "_plan_write", plan_write)
+    monkeypatch.setattr(browser_control, "_step_row_state", lambda _node_id: None)
     monkeypatch.setattr(browser_control, "emit_product_event", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(browser_runtime, "_check_installed", lambda: None)
     monkeypatch.setattr(browser_runtime, "PROCESS_OWNER", SimpleNamespace(browser_sessions=lambda: owner))
