@@ -8,7 +8,13 @@ from collections import defaultdict
 from datetime import date, datetime, time, timedelta, timezone, tzinfo
 from typing import Any
 
-from core.corrections_recording import CORRECTION_EVENT, LABEL_CORRECTION
+from core.corrections_recording import (
+    CORRECTION_EVENT,
+    LABEL_CORRECTION,
+    SOURCE_KIND_DECISION_ANSWER,
+    SOURCE_KIND_DOC_COMMENT,
+    SOURCE_KIND_MESSAGE,
+)
 from core import workflow_verdict_evaluator
 from core.workflow_verdict_read import PLANNED_EVENT, REACHED_EVENT
 
@@ -16,8 +22,17 @@ EARLY_FLOOR = 5
 HISTORY_DAYS = 28
 MIN_HISTORY_DAYS = 14
 MAX_REFS = 50
-PERSON_CORRECTION_SOURCES = ("message", "doc_comment", "plan_decision_answer")
-_PERSON_CORRECTION_SOURCE_SQL = "COALESCE(json_extract(attributes, '$.source_kind'), 'message') IN (?,?,?)"
+PERSON_CORRECTION_SOURCES = (
+    SOURCE_KIND_MESSAGE,
+    SOURCE_KIND_DOC_COMMENT,
+    SOURCE_KIND_DECISION_ANSWER,
+)
+_PERSON_CORRECTION_SOURCE_PLACEHOLDERS = ", ".join("?" for _ in PERSON_CORRECTION_SOURCES)
+_PERSON_CORRECTION_SOURCE_SQL = (
+    "COALESCE(json_extract(attributes, '$.source_kind'), ?) "
+    f"IN ({_PERSON_CORRECTION_SOURCE_PLACEHOLDERS})"
+)
+_PERSON_CORRECTION_SOURCE_ARGS = (SOURCE_KIND_MESSAGE, *PERSON_CORRECTION_SOURCES)
 
 
 def deliver_learning_report(report: dict[str, Any]) -> Any:
@@ -63,16 +78,16 @@ def _correction_rows(
     where, scope_args = _scope_where(scope)
     start, end = _day_bounds(report_date)
     source_where = f" AND {_PERSON_CORRECTION_SOURCE_SQL}" if person_only else ""
-    source_args = PERSON_CORRECTION_SOURCES if person_only else ()
+    source_args = _PERSON_CORRECTION_SOURCE_ARGS if person_only else ()
     return db.execute(
         f"""SELECT subject_key,agent_thread_id,ts,
-                   COALESCE(json_extract(attributes, '$.source_kind'), 'message') AS source_kind
+                   COALESCE(json_extract(attributes, '$.source_kind'), ?) AS source_kind
               FROM outcome_events
              WHERE event_name=? AND retracted_at IS NULL
                AND json_extract(attributes, '$.label')=?
                AND ts>=? AND ts<?{source_where} AND {where}
              ORDER BY source_kind,subject_key""",
-        (CORRECTION_EVENT, LABEL_CORRECTION, start, end, *source_args, *scope_args),
+        (SOURCE_KIND_MESSAGE, CORRECTION_EVENT, LABEL_CORRECTION, start, end, *source_args, *scope_args),
     ).fetchall()
 
 
@@ -157,7 +172,7 @@ def early_threshold(db: sqlite3.Connection, *, scope: str, report_date: str) -> 
              WHERE event_name=? AND retracted_at IS NULL AND project_id=?
                AND json_extract(attributes, '$.label')=?
                AND {_PERSON_CORRECTION_SOURCE_SQL}""",
-        (CORRECTION_EVENT, scope, LABEL_CORRECTION, *PERSON_CORRECTION_SOURCES),
+        (CORRECTION_EVENT, scope, LABEL_CORRECTION, *_PERSON_CORRECTION_SOURCE_ARGS),
     ).fetchone()[0]
     if first is None:
         return EARLY_FLOOR
@@ -169,7 +184,7 @@ def early_threshold(db: sqlite3.Connection, *, scope: str, report_date: str) -> 
              WHERE event_name=? AND retracted_at IS NULL AND project_id=?
                AND json_extract(attributes, '$.label')=? AND ts>=? AND ts<?
                AND {_PERSON_CORRECTION_SOURCE_SQL}""",
-        (CORRECTION_EVENT, scope, LABEL_CORRECTION, start, end, *PERSON_CORRECTION_SOURCES),
+        (CORRECTION_EVENT, scope, LABEL_CORRECTION, start, end, *_PERSON_CORRECTION_SOURCE_ARGS),
     ).fetchall()
     counts: dict[str, int] = defaultdict(int)
     for row in rows:
