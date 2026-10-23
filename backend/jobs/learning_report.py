@@ -149,9 +149,10 @@ def build_report(db: sqlite3.Connection, *, scope: str, report_date: str, report
         "experiments": experiments,
         "wins": None,
     }
+    # a person's correction day wakes the daily read: its floor line is the report's only post
     wake = report_kind != "daily" or len(lesson_agents) >= 2 or any(
-        count is not None and count["count"] > 0 for count in experiments.values()
-    )
+        source in PERSON_CORRECTION_SOURCES for source in correction_refs
+    ) or any(count is not None and count["count"] > 0 for count in experiments.values())
     return {"scope": scope, "report_date": report_date, "report_key": f"{scope}:{report_date}:{report_kind}",
             "wake": wake, "items": items}
 

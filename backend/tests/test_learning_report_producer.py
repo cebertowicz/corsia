@@ -43,7 +43,7 @@ def test_disabled_verdict_source_is_not_reported_as_an_empty_experiment_list(db)
     report = build_report(db, scope="proj", report_date="2026-10-22")
 
     assert report == {
-        "scope": "proj", "report_date": "2026-10-22", "report_key": "proj:2026-10-22:daily", "wake": False,
+        "scope": "proj", "report_date": "2026-10-22", "report_key": "proj:2026-10-22:daily", "wake": True,
         "items": {
             "corrections": {
                 "doc_comment": {"count": 1, "refs": ["comment:b"]},
@@ -211,6 +211,7 @@ def test_sent_back_corrections_are_shown_separately_but_never_trigger_early_repo
     assert learning_report.early_threshold(db, scope="history", report_date=report_day.isoformat()) == 8
     assert not learning_report.maybe_emit_early(db, scope="daily", report_date=report_day.isoformat())
     assert delivered == []
+    assert report["wake"] is False
     assert report["items"]["corrections"] == {
         "sent_back": {"count": 200, "refs": [f"sent-back:today:{number:03}" for number in range(50)]},
     }
