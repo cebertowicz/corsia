@@ -66,6 +66,7 @@ def reject_submission(
     whether this was a replay.
     """
     feedback = service._required_text(feedback, "review feedback")
+    rejection_event_ids: list[str] = []
     with service._connection(db) as connection, service._write(connection):
         # A sent-back submission is closed, which no writer may touch; its
         # replay only reads, so it is resolved before the live-node guard.
@@ -100,13 +101,14 @@ def reject_submission(
             connection, node_id, revision.id, actor_id=actor_id, provenance=provenance,
         )
         # The step's worker is not settled: the revision is attached to it below.
-        rejected = _send_back(
+        rejected, rejection_event_id = _send_back(
             connection, node_id, feedback, actor_id, provenance, settles_worker=False,
         )
-        # The worker's returned steps settle like any closed step: a nested
-        # delegation among them retires its own worker, which gets no revision.
+        rejection_event_ids.append(rejection_event_id)
+        # Returned worker leaves carry the verdict for their own closure, but
+        # only the reviewed node above is the verdict's correction fact.
         for leaf in returned:
-            _send_back(
+            _sent_back, _leaf_rejection_event_id = _send_back(
                 connection, leaf["id"], feedback, actor_id, provenance, settles_worker=True,
             )
         worker_step_id = _attach_revision_and_seed_worker(
@@ -120,7 +122,11 @@ def reject_submission(
             connection, revision.id, "revision_created", actor_id=actor_id,
             provenance=provenance, payload=payload,
         )
-        return rejected, service._node_from_row(connection, service._node_row(connection, revision.id)), False
+        result = rejected, service._node_from_row(connection, service._node_row(connection, revision.id)), False
+    from core.sent_back_corrections import record_rejection_corrections
+
+    record_rejection_corrections(rejection_event_ids, db=db)
+    return result
 
 
 def _attach_revision_and_seed_worker(
@@ -153,7 +159,7 @@ SENT_BACK = "Sent back"
 
 def _send_back(
     connection, node_id: str, feedback: str, actor_id, provenance, *, settles_worker: bool,
-) -> PlanNode:
+) -> tuple[PlanNode, str]:
     """The verdict on one submission: rejected with this feedback, then closed.
 
     It closes as ``plans.closure.close_node`` records a close -- the reason on
@@ -165,7 +171,7 @@ def _send_back(
     """
     from plans import archival
 
-    service._event(
+    rejection_event_id = service._event(
         connection, node_id, "review_rejected", actor_id=actor_id,
         provenance=provenance, payload={"feedback": feedback},
     )
@@ -178,7 +184,7 @@ def _send_back(
         connection, service._node_row(connection, node_id),
         actor_id=actor_id, provenance=provenance,
     )
-    return sent_back
+    return sent_back, rejection_event_id
 
 
 def _revision_of(connection, node_id: str) -> tuple[PlanNode, str | None] | None:
