@@ -236,7 +236,7 @@ describe('rendering and actions', () => {
 			}
 		});
 
-		it('reads the list again when a login finishes reading its models, and says so when that read fails', async () => {
+		it('reads the list again when a login finishes reading its models, and says so with its reference and a Retry when that read fails', async () => {
 			const signedIn = { ...workAccount, state: 'signed_in' as const };
 			const noModel = 'This ChatGPT account has no models for Codex.';
 			let reads = 0;
@@ -245,7 +245,7 @@ describe('rendering and actions', () => {
 				reads += 1;
 				if (reads === 1) return response({ accounts: [defaultAccount, signedIn] });
 				if (reads === 2) return response({ accounts: [defaultAccount, { ...signedIn, no_usable_model: true }] });
-				if (reads === 3) return response({}, 500);
+				if (reads === 3) return response({ ref: 'K7M2QX' }, 500);
 				return response({ accounts: [defaultAccount, { ...signedIn, no_usable_model: true }] });
 			}));
 			const component = mount(AccountsBlock, { target: document.body, props: { provider } });
@@ -256,15 +256,15 @@ describe('rendering and actions', () => {
 			expect(document.body.textContent).toContain(noModel);
 			emit('models_updated', {});
 			await settle();
-			expect(document.body.textContent).toContain('Couldn’t refresh your accounts.');
-			[...document.querySelectorAll('button')].filter((element) => element.textContent?.trim() === 'Reload').at(-1)!.click();
+			expect(document.body.textContent).toContain('Couldn’t load your accounts. Reference: K7M2QX');
+			button('Retry').click();
 			await settle();
-			expect(document.body.textContent).not.toContain('Couldn’t refresh your accounts.');
+			expect(document.body.textContent).not.toContain('Couldn’t load your accounts.');
 			expect(document.body.textContent).toContain(noModel);
 			unmount(component);
 		});
 
-		it('says what happened to a sign-in that timed out and what to do next', async () => {
+		it('says what the browser may have shown after a timed-out sign-in and what to do next', async () => {
 			vi.stubGlobal('fetch', vi.fn()
 				.mockResolvedValueOnce(response({ accounts: [defaultAccount, workAccount] }))
 				.mockResolvedValueOnce(response({ detail: 'no sign-in is in progress for this account' }, 409))
@@ -273,7 +273,7 @@ describe('rendering and actions', () => {
 			await settle();
 			button('Sign in').click();
 			await settle();
-			expect(document.body.textContent).toContain('Couldn’t finish signing in: your browser didn’t come back to CORSIA in time. Sign in again, or turn this account off.');
+			expect(document.body.textContent).toContain('Couldn’t finish signing in. If your browser said this account doesn’t include Codex, sign in with another account or turn this account off. Otherwise, sign in again.');
 			unmount(component);
 		});
 

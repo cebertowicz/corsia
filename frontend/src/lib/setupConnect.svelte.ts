@@ -56,7 +56,7 @@ export function signinFailureCopy(vendor: string, cause?: string | null, ref?: s
 	const retry = ref ? 'Press Sign in to try again, or save a report.' : 'Press Sign in to try again.';
 	if (cause?.endsWith('_executable_missing')) return { meta: `CORSIA couldn’t find ${cli} on this computer. Sign in again to install it.`, reportable: true };
 	if (cause?.endsWith('_signin_in_progress')) return { meta: `Another ${cli} sign-in is already open. Finish it in your browser, or sign in again.`, reportable: false };
-	if (cause === 'signin_timed_out') return { meta: `Couldn’t finish signing in to ${cli}: your browser didn’t come back to CORSIA in time. Sign in again, or turn ${cli} off.`, reportable: false };
+	if (cause === 'signin_timed_out') return { meta: `Couldn’t finish signing in to ${cli}. If your browser said this account doesn’t include ${cli}, sign in with another account or turn ${cli} off. Otherwise, sign in again.`, reportable: false };
 	if (cause === 'vendor_login_failed') return { meta: 'Sign-in didn’t finish in your browser. Press Sign in to try again.', reportable: false };
 	if (cause === 'vendor_not_signed_in') return { meta: `${cli} didn’t report a signed-in ${account} account. Sign in again.`, reportable: false };
 	if (cause === 'same_account') return { meta: `That ${account} account is already signed in here. To add another, sign in again with a different ${account} account.`, reportable: false };
