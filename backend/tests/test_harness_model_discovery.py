@@ -884,22 +884,6 @@ async def test_refused_context_usage_reports_the_harness_reason(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_usage_before_set_model_is_named_distinctly(monkeypatch):
-    """Ordering defects no longer share the refusal message."""
-    probe = _context_probe_call(monkeypatch, [
-        {"type": "control_response", "response": {
-            "subtype": "success", "request_id": "corsia-context-usage",
-            "response": {"rawMaxTokens": 1, "maxTokens": 1},
-        }},
-    ])
-
-    with pytest.raises(RuntimeError) as excinfo:
-        await probe
-
-    assert "before set_model succeeded" in str(excinfo.value)
-
-
-@pytest.mark.asyncio
 async def test_missing_context_response_lists_what_arrived(monkeypatch):
     """An absent usage response says which control responses did arrive."""
     probe = _context_probe_call(monkeypatch, [

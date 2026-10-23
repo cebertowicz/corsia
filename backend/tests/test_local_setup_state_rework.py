@@ -3,6 +3,7 @@
 import asyncio
 import os
 from dataclasses import replace
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -133,6 +134,29 @@ async def test_startup_delivery_failure_preserves_a_live_flight(flight, monkeypa
     finally:
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_setup_download_registers_then_forces_a_pin_and_read_back(flight, monkeypatch):
+    from llm import local_setup_flow as flow
+    from llm.local_model import LocalModel
+
+    model = LocalModel("Jundot/new-model", 1_000_000, 32_768)
+    keep_loaded = AsyncMock()
+    monkeypatch.setattr(flow.prepare, "join", AsyncMock())
+    monkeypatch.setattr("llm.local_sources.local_server_for_install", AsyncMock(return_value=("server", 8210, False)))
+    monkeypatch.setattr(flow.ls, "_record_model", lambda _model: None)
+    monkeypatch.setattr(flow.ls, "_download", AsyncMock())
+    monkeypatch.setattr(flow.ls, "record_downloaded", lambda: None)
+    monkeypatch.setattr(flow, "apply_optimal_settings", AsyncMock(return_value=SimpleNamespace(status="applied", writer_attempted=True)))
+    monkeypatch.setattr("llm.catalog_network_models.discover_network_models", AsyncMock(return_value={"ok": True}))
+    monkeypatch.setattr(flow, "record_set_up", lambda _model: None)
+    monkeypatch.setattr(flow, "keep_loaded", keep_loaded)
+
+    result = await flow._setup_new_omlx(lambda _stage, **_kwargs: None, [], model)
+
+    assert result["ok"] is True
+    keep_loaded.assert_awaited_once_with("server", model, force_pin=True)
 
 
 @pytest.mark.asyncio

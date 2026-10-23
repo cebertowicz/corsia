@@ -13,7 +13,11 @@ MODEL = LocalModel("Jundot/new-model", 1_000_000, 32_768)
 
 @pytest.fixture
 def calls(monkeypatch):
-    seen = {"pins": [], "loads": [], "events": [], "can_load": {"ok": True}, "pin": {"ok": True}, "load": {"ok": True}}
+    seen = {
+        "pins": [], "loads": [], "events": [],
+        "can_load": {"ok": True}, "pin": {"ok": True, "settings": {"pinned": True}},
+        "load": {"ok": True},
+    }
 
     def set_rows(rows, room_gib):
         async def model_rows(_server_id):
@@ -70,6 +74,27 @@ async def test_a_model_that_fits_the_pin_room_is_pinned_then_loaded(calls) -> No
 
 
 @pytest.mark.asyncio
+async def test_setup_forces_its_managed_model_to_pin_even_when_the_room_is_full(calls) -> None:
+    calls["set_rows"]([_row("new-model", 10), _row("other", 15, pinned=True)], room_gib=20)
+
+    await local_keep_loaded.keep_loaded("server", MODEL, force_pin=True)
+
+    assert calls["pins"] == [("new-model", {"pinned": True})]
+    assert calls["loads"] == ["new-model"]
+
+
+@pytest.mark.asyncio
+async def test_a_pin_that_is_not_confirmed_by_the_put_stops_with_its_line(calls) -> None:
+    calls["set_rows"]([_row("new-model", 10)], room_gib=20)
+    calls["pin"] = {"ok": True, "settings": {"pinned": False}}
+
+    await local_keep_loaded.keep_loaded("server", MODEL)
+
+    assert calls["loads"] == []
+    assert local_keep_loaded.failures("server") == {"new-model": local_keep_loaded.NOT_KEPT}
+
+
+@pytest.mark.asyncio
 async def test_pins_already_using_the_room_leave_it_unpinned_and_the_row_says_why_live(calls) -> None:
     calls["set_rows"]([_row("new-model", 10), _row("other", 15, pinned=True)], room_gib=20)
 
@@ -84,7 +109,7 @@ async def test_pins_already_using_the_room_leave_it_unpinned_and_the_row_says_wh
 @pytest.mark.asyncio
 async def test_a_pin_that_cannot_be_written_stops_with_its_line(calls) -> None:
     calls["set_rows"]([_row("new-model", 10)], room_gib=20)
-    calls["pin"] = {"ok": False}
+    calls["pin"] = {"ok": False, "message": "Pin refused"}
 
     await local_keep_loaded.keep_loaded("server", MODEL)
 
@@ -135,6 +160,16 @@ async def test_a_refused_load_on_an_unpinned_row_says_turn_it_on(calls) -> None:
     assert local_keep_loaded.failures("server") == {
         "new-model": "Not loaded: oMLX couldn’t load it. Turn it on to try again.",
     }
+
+
+@pytest.mark.asyncio
+async def test_setup_pins_without_a_size_but_skips_the_load_memory_check(calls) -> None:
+    calls["set_rows"]([{"id": "new-model"}], room_gib=20)
+
+    await local_keep_loaded.keep_loaded("server", MODEL, force_pin=True)
+
+    assert calls["pins"] == [("new-model", {"pinned": True})]
+    assert calls["loads"] == [] and local_keep_loaded.failures("server") == {}
 
 
 @pytest.mark.asyncio

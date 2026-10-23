@@ -47,7 +47,7 @@ done
 fail() { echo "error: $*" >&2; exit 1; }
 fetch_verified() {
   local url="$1" file="$2" digest="$3"
-  curl --fail --location --retry 3 --silent --show-error "$url" --output "$file"
+  curl --fail --location --retry 3 --retry-all-errors --silent --show-error "$url" --output "$file"
   echo "${digest}  ${file}" | shasum --algorithm 256 --check --status || fail "SHA-256 mismatch for $(basename "$file")"
 }
 fetch_agent_browser() {

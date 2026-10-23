@@ -48,7 +48,7 @@ async def _setup_new_omlx(report: Callable[..., None], events: list[str],
         raise RuntimeError(result.get("error") or "The local model catalog could not refresh.")
     await asyncio.to_thread(record_set_up, model)
     report("Loading model", finishing=True)
-    await keep_loaded(server_id, model)
+    await keep_loaded(server_id, model, force_pin=True)
     ls._emit("completed", model=model.repository)
     return {"ok": True, "server_id": server_id, "model": model.model,
             "download_size": format_size(model.download_size_bytes), "progress": events}
