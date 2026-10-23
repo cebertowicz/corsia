@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { fade, fly } from 'svelte/transition';
+	import { fade } from 'svelte/transition';
 	import { backOut } from 'svelte/easing';
 	import { onMount, tick } from 'svelte';
 	import type { Snippet } from 'svelte';
@@ -65,6 +65,20 @@
 		if (e.target === e.currentTarget) onClose();
 	}
 
+	// `fly` is a rise plus a fade. The blur has to sit on an element with no faded or
+	// filtered ancestor, or the browser makes that ancestor a backdrop root and the blur
+	// samples nothing. `fly` writes opacity into its animation even with `opacity: 1`, so it
+	// can't sit above the blur. So the rise is on `.modal-frame` (transform only), and `fade` is on `.modal`
+	// and, separately, on the glass layer beside it. One timing keeps the three in step.
+	const motion = { duration: 380, easing: backOut };
+	function modalRise(_node: Element, { y = 12, duration, easing }: { y?: number; duration: number; easing: (t: number) => number }) {
+		return {
+			duration,
+			easing,
+			css: (_t: number, u: number) => `transform: translateY(${u * y}px)`,
+		};
+	}
+
 	onMount(() => {
 		const previousFocus = document.activeElement instanceof HTMLElement
 			? document.activeElement
@@ -97,68 +111,99 @@
 	column or the open document, the scrim and card were clipped to that column in a
 	WebKit webview and sat behind the other panes.
 -->
-<!-- svelte-ignore a11y_click_events_have_key_events -->
-<!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="bg" onclick={onBackdropClick} transition:fade={{ duration: 120 }} use:portal>
-	<div
-		bind:this={modalElement}
-		class="modal {size}"
-		transition:fly={{ y: 12, duration: 380, easing: backOut }}
-		{role}
-		aria-modal="true"
-		aria-label={ariaLabel}
-		aria-labelledby={ariaLabelledBy}
-		tabindex="-1"
-		onkeydown={onKeydown}
-	>
-		{#if head}
-			{@render head()}
-		{:else if title}
-			<header class="head">
-				<div class="title">{title}</div>
-				<IconButton ariaLabel="Close" onclick={onClose}>
-					<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6 18 18M18 6 6 18"/></svg>
-				</IconButton>
-			</header>
-		{/if}
+<div class="modal-layer" use:portal>
+	<!-- svelte-ignore a11y_click_events_have_key_events -->
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
+	<div class="bg" onclick={onBackdropClick} transition:fade={{ duration: 120 }}></div>
+	<div class="modal-frame {size}" transition:modalRise={motion}>
+		<div class="modal-glass" transition:fade={motion}></div>
+		<div
+			bind:this={modalElement}
+			class="modal"
+			transition:fade={motion}
+			{role}
+			aria-modal="true"
+			aria-label={ariaLabel}
+			aria-labelledby={ariaLabelledBy}
+			tabindex="-1"
+			onkeydown={onKeydown}
+		>
+			{#if head}
+				{@render head()}
+			{:else if title}
+				<header class="head">
+					<div class="title">{title}</div>
+					<IconButton ariaLabel="Close" onclick={onClose}>
+						<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6 18 18M18 6 6 18"/></svg>
+					</IconButton>
+				</header>
+			{/if}
 
-		<div class="body">
-			{@render children()}
+			<div class="body">
+				{@render children()}
+			</div>
+
+			{#if foot}
+				<footer class="foot">
+					{@render foot()}
+				</footer>
+			{/if}
 		</div>
-
-		{#if foot}
-			<footer class="foot">
-				{@render foot()}
-			</footer>
-		{/if}
 	</div>
 </div>
 
 <style>
-	.bg {
+	.modal-layer {
 		position: fixed; inset: 0;
-		background: var(--glass-scrim);
 		z-index: 100;
 		display: flex; align-items: center; justify-content: center;
 		padding-top:    max(32px, var(--safe-top) + 8px);
 		padding-bottom: max(32px, env(safe-area-inset-bottom, 0px) + 8px);
 		padding-left: 32px; padding-right: 32px;
+		pointer-events: none;
 	}
-	.modal {
-		background: var(--glass-regular-thick);
-		backdrop-filter: var(--glass-blur);
-		-webkit-backdrop-filter: var(--glass-blur);
-		border: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
-		border-radius: var(--radius);
-		box-shadow: var(--glass-elevation-3);
-		display: flex; flex-direction: column; overflow: hidden;
+	.bg {
+		position: absolute; inset: 0;
+		background: var(--glass-scrim);
+		pointer-events: auto;
+	}
+	/* Sizes and rises the card. Carries only a transform animation, never opacity. */
+	.modal-frame {
+		position: relative;
+		z-index: 1;
+		pointer-events: auto;
+		display: flex; flex-direction: column;
 		width: 100%;
 		max-height: 86vh;
 		max-height: 86dvh;
 	}
-	.modal.sm { max-width: 480px; }
-	.modal.md { max-width: 640px; }
-	.modal.lg { max-width: 800px; }
+	.modal-frame.sm { max-width: 480px; }
+	.modal-frame.md { max-width: 640px; }
+	.modal-frame.lg { max-width: 800px; }
+	/*
+		The glass: tint plus blur, on its own element beside the card, so no ancestor of it
+		carries opacity, filter or mask (the frame animates transform only). It reaches three
+		sigma past the card so the blur's sampling edge is hidden, and its own clip-path trims
+		it back to the card's rounded box. Its own opacity fades it with the card.
+	*/
+	.modal-glass {
+		position: absolute;
+		inset: calc(-1 * var(--glass-blur-reach));
+		clip-path: inset(var(--glass-blur-reach) round var(--radius));
+		pointer-events: none;
+		background: var(--glass-regular-thick);
+		backdrop-filter: var(--glass-blur);
+		-webkit-backdrop-filter: var(--glass-blur);
+	}
+	.modal {
+		position: relative;
+		border: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+		border-radius: var(--radius);
+		box-shadow: var(--glass-elevation-3);
+		display: flex; flex-direction: column; overflow: hidden;
+		min-height: 0;
+		width: 100%;
+	}
 
 	.head {
 		display: flex; align-items: center; gap: 12px;
@@ -179,16 +224,16 @@
 	}
 
 	@media (max-width: 720px) {
-		.bg {
+		.modal-layer {
 			padding-top:    max(12px, var(--safe-top) + 4px);
 			padding-bottom: max(12px, env(safe-area-inset-bottom, 0px) + 4px);
 			padding-left: 12px; padding-right: 12px;
 		}
 		/* Fill only the room inside the safe-area padding, so the footer clears the home indicator. */
-		.modal { max-height: 100%; }
+		.modal-frame { max-height: 100%; }
 	}
 	@media (max-width: 480px) {
-		.bg {
+		.modal-layer {
 			padding-top:    max(8px, var(--safe-top));
 			padding-bottom: max(8px, env(safe-area-inset-bottom, 0px));
 			padding-left: 8px; padding-right: 8px;

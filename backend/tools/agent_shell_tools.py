@@ -22,8 +22,8 @@ from tools.managed_runtime import (
 )
 
 logger = logging.getLogger(__name__)
-# Environment names a shell child needs from CORSIA, passed through the sandbox by name.
-ENV_NAMES = ("npm_config_cache", "PIP_CACHE_DIR", "UV_CACHE_DIR")
+# Writable package-cache environment names passed through the sandbox by name.
+CACHE_ENV_NAMES = ("npm_config_cache", "PIP_CACHE_DIR", "UV_CACHE_DIR")
 # The bundled Git's helper commands and templates, which Git finds relative to its own binary.
 _GIT_RUNTIME_DIRS = ("libexec/git-core", "share/git-core")
 _prefetch: asyncio.Task | None = None

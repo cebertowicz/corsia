@@ -172,11 +172,6 @@ fetch_verified "$OMLX_URL" "$BUILD_ROOT/downloads/$OMLX_WHEEL" "$OMLX_SHA256"
 PYTHONPATH="$BUNDLE_ROOT/python/backend-packages" "$PYTHON" -m pip check
 PYTHONPATH="$BUNDLE_ROOT/python/omlx-packages" "$PYTHON" -m pip check
 
-# Nothing may write bytecode into the signed bundle: an added __pycache__ breaks
-# its seal, and Update refuses to stage from an app whose seal is broken.
-printf 'import sys\nsys.dont_write_bytecode = True\n' \
-  >"$("$PYTHON" -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')/sitecustomize.py"
-
 build_git_runtime
 fetch_agent_browser
 fetch_safehouse
@@ -194,6 +189,11 @@ install -m 0755 "$ROOT/desktop/scripts/omlx" "$BUNDLE_ROOT/bin/omlx"
 mkdir -p "$BUNDLE_ROOT/scripts"
 install -m 0755 "$ROOT/scripts/corsia" "$BUNDLE_ROOT/scripts/corsia"
 rsync -a --delete "$ROOT/scripts/corsia.d/" "$BUNDLE_ROOT/scripts/corsia.d/"
+# Nothing may write bytecode into the signed bundle: an added __pycache__ breaks
+# its seal. Compile every packaged source only after every resource is staged,
+# using unchecked hashes so a later mtime change cannot make a cache stale.
+# The staged-app proof below checks every source on the finished app.
+"$PYTHON" -m compileall -q -f --invalidation-mode unchecked-hash "$BUNDLE_ROOT"
 
 node "$ROOT/desktop/scripts/gen-shell-tokens.mjs"
 node "$ROOT/desktop/scripts/gen-shell-logo.mjs"
@@ -215,6 +215,7 @@ install -d "$APP/Contents/Library/LaunchAgents"
 install -m 0644 "$ROOT/desktop/launchd/ai.corsia.service.plist" \
   "$APP/Contents/Library/LaunchAgents/ai.corsia.service.plist"
 "$ROOT/desktop/scripts/check-bundle-launch-agent.sh" "$APP"
+"$ROOT/desktop/scripts/test-bundled-python-immutability.sh" "$APP"
 if ! "$skip_dmg"; then
   mkdir -p "$DMG_DIR"
   rm -f "$DMG"
