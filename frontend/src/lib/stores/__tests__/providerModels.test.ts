@@ -6,6 +6,10 @@ import {
 	pollJobsFor,
 	markModelOptimistic,
 	modelsForProvider,
+	noteModelsEvent,
+	prefetchProviderModels,
+	providerModelsFresh,
+	seedProviderModels,
 } from '../providerModels';
 import { loadModel, unloadModel } from '../providerModelCommands';
 import { token } from '../auth';
@@ -327,5 +331,75 @@ describe('loadModel / unloadModel — External rows use the catalog update', () 
 	it('still loads a managed model through the server', async () => {
 		await loadModel(provider(), server(), 'qwen', 'row-1');
 		expect(String(fetchMock.mock.calls[0][0])).toContain('/api/settings/network-servers/srv-1/models/load');
+	});
+});
+
+describe('models ahead of the first open', () => {
+	beforeEach(() => {
+		token.set('test-token');
+		vi.restoreAllMocks();
+	});
+
+	const modelsRoute = (u: string) => u.includes('/api/settings/network-servers/srv-1/models');
+
+	it('reads a server card once on the page and not again while the store holds it', async () => {
+		const p = provider(); const srv = { ...server(), id: 'srv-fresh' };
+		const fetchMock = installFetchScript([{ when: (u) => u.includes('/network-servers/srv-fresh/models'), respond: () => ({ loaded: [], available: [{ model_id: 'a', display_name: 'A' }] }) }]);
+
+		await prefetchProviderModels(p, srv);
+		await prefetchProviderModels(p, srv);
+
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+		expect(modelsView(p, srv).models.map((m) => m.id)).toEqual(['a']);
+	});
+
+	it('skips a card with nothing to read: a cloud provider without a key, a row with no server', async () => {
+		const fetchMock = installFetchScript([]);
+
+		await prefetchProviderModels({ ...provider(), name: 'openai', type: 'cloud', has_key: false });
+		await prefetchProviderModels(provider());
+
+		expect(fetchMock).not.toHaveBeenCalled();
+	});
+
+	it('seeds a list the page already holds, but never over a read in flight', async () => {
+		const p = { ...provider(), name: 'codex', type: 'harness' as const };
+		const row = { id: 'codex/x', name: 'X', state: 'loaded' as const, meta: '', caps: [] };
+
+		seedProviderModels('codex', undefined, [row]);
+		expect(modelsView(p).models).toEqual([row]);
+
+		let release: (r: Response) => void = () => {};
+		(globalThis as { fetch: typeof fetch }).fetch = vi.fn(() => new Promise<Response>((resolve) => { release = resolve; })) as unknown as typeof fetch;
+		const reading = loadProviderModelsFor({ ...provider(), name: 'omlx-other' }, server());
+		seedProviderModels('omlx-other', 'srv-1', [row]);
+		expect(modelsView({ ...provider(), name: 'omlx-other' }, server()).models).toEqual([]);
+		release(new Response('{}', { status: 500 }));
+		await reading;
+	});
+
+	it('calls a stored read fresh only while no model event has followed it', async () => {
+		const p = provider(); const srv = server();
+		installFetchScript([{ when: modelsRoute, respond: () => ({ loaded: [], available: [] }) }]);
+		await loadProviderModelsFor(p, srv);
+		expect(providerModelsFresh(p, srv)).toBe(true);
+
+		noteModelsEvent();
+
+		expect(providerModelsFresh(p, srv)).toBe(false);
+		await loadProviderModelsFor(p, srv);
+		expect(providerModelsFresh(p, srv)).toBe(true);
+	});
+
+	it('does not call a read fresh when an event landed while it was running', async () => {
+		const p = provider(); const srv = server();
+		(globalThis as { fetch: typeof fetch }).fetch = vi.fn(async () => {
+			noteModelsEvent();
+			return new Response(JSON.stringify({ loaded: [], available: [] }), { status: 200 });
+		}) as unknown as typeof fetch;
+
+		await loadProviderModelsFor(p, srv);
+
+		expect(providerModelsFresh(p, srv)).toBe(false);
 	});
 });

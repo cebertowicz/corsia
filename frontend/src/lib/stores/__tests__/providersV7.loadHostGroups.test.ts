@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { get } from 'svelte/store';
+import { providerModels, modelsForProvider } from '../providerModels';
 import { groupByHost, harnessInventoryError, hostGroupSnapshot, hostGroups, loadHostGroups } from '../providersV7';
 import { vendorAccounts } from '../vendorAccounts';
 import { networkServers, type NetworkServer } from '../networkServers';
@@ -76,6 +77,14 @@ describe('loadHostGroups harness cards', () => {
 		expect(codexSubline()).toBe('2 accounts · 1 model');
 		vendorAccounts.update((accounts) => accounts.map((account) => account.id === 'added' ? { ...account, state: 'removed' as const } : account));
 		expect(codexSubline()).toBe('1 account · 1 model');
+	});
+
+	it('holds the harness models from the same two reads, so opening a card needs no read of its own', async () => {
+		stubFetch(true, 'ready');
+		await loadHostGroups();
+
+		const held = modelsForProvider(get(providerModels), { name: 'codex' } as never).models;
+		expect(held.map((m) => [m.id, m.state])).toEqual([[codexRow.id, 'loaded']]);
 	});
 
 	it('does not show an empty card when the picker cannot offer any of its models', async () => {

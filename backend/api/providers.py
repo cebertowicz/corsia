@@ -239,8 +239,8 @@ async def list_provider_models(name: str):
     if not api_key:
         return {"models": [], "error": "No API key configured"}
 
-    from llm.catalog import discover_cloud_models
-    return await discover_cloud_models(name, api_key)
+    from llm.cloud_models_view import cloud_models_for_settings
+    return await cloud_models_for_settings(name, api_key)
 
 
 @router.post("/{name}/test")

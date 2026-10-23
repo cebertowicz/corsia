@@ -53,6 +53,18 @@ interface ProviderModelsState {
 	loading: boolean;
 	models: ProviderModel[];
 	lastError?: string;
+	/** `modelsEventSeq` when the last successful read began; a later event may have changed what it saw. */
+	readSeq?: number;
+}
+
+let modelsEventSeq = 0;
+/** Counts `models_updated` events while Settings › Providers is open, so a read can tell whether one landed after it began. */
+export function noteModelsEvent(): void { modelsEventSeq += 1; }
+
+/** Whether the store holds a read of this card that no model event has followed. */
+export function providerModelsFresh(p: ProviderEntry, server?: NetworkServer): boolean {
+	const current = get(_models)[_key(p.name, server?.id)];
+	return !!current && !current.loading && current.readSeq === modelsEventSeq;
 }
 
 const _models = writable<Record<string, ProviderModelsState>>({});
@@ -72,17 +84,36 @@ function _setState(key: string, patch: Partial<ProviderModelsState>) {
 	});
 }
 
+/**
+ * Puts a list the caller already holds into the store before its card opens: the open
+ * renders it at once and its own read refreshes behind it. Never replaces a read in flight.
+ */
+export function seedProviderModels(providerName: string, serverId: string | undefined, models: ProviderModel[]): void {
+	const k = _key(providerName, serverId);
+	if (get(_models)[k]?.loading) return;
+	_setState(k, { models, lastError: undefined });
+}
+
+/** Reads a card's models ahead of its first open, unless the store already holds them or a read is running. */
+export function prefetchProviderModels(p: ProviderEntry, server?: NetworkServer): Promise<void> {
+	const current = get(_models)[_key(p.name, server?.id)];
+	if (current?.loading || current?.models.length) return Promise.resolve();
+	if (p.type === 'cloud' ? !p.has_key : !server) return Promise.resolve();
+	return loadProviderModelsFor(p, server);
+}
+
 export async function loadProviderModelsFor(p: ProviderEntry, server?: NetworkServer): Promise<void> {
 	const k = _key(p.name, server?.id);
+	const seq = modelsEventSeq;
 	_setState(k, { loading: true, lastError: undefined });
 
 	try {
-		if (p.type === 'harness') return _setState(k, { loading: false, models: await harnessModels(p.name) });
+		if (p.type === 'harness') return _setState(k, { loading: false, models: await harnessModels(p.name), readSeq: seq });
 		if (p.type === 'cloud') {
 			const res = await fetch(`${BASE}/api/settings/providers/${p.name}/models?token=${t()}`);
 			if (!res.ok) {
 				const list = fallbackCloudModels(p.models);
-				_setState(k, { loading: false, models: list });
+				_setState(k, { loading: false, models: list, readSeq: seq });
 				return;
 			}
 			const data = await res.json();
@@ -90,6 +121,7 @@ export async function loadProviderModelsFor(p: ProviderEntry, server?: NetworkSe
 			_setState(k, {
 				loading: false,
 				models: preserveTransitional(get(_models)[k]?.models, list),
+				readSeq: seq,
 			});
 			return;
 		}
@@ -100,7 +132,7 @@ export async function loadProviderModelsFor(p: ProviderEntry, server?: NetworkSe
 			const data = await res.json();
 			const deduped = networkProviderModels(data);
 			const next = preserveTransitional(get(_models)[k]?.models, deduped);
-			_setState(k, { loading: false, models: next });
+			_setState(k, { loading: false, models: next, readSeq: seq });
 		}
 	} catch (e) {
 		_setState(k, { loading: false, lastError: String(e) });
