@@ -2,7 +2,9 @@ import { writable, derived, get } from 'svelte/store';
 import { token } from './auth';
 import { providers as providersStore, type ProviderEntry } from './providers';
 import { networkServers, loadNetworkServers, type NetworkServer } from './networkServers';
-import { fetchCatalogInventory, harnessSummaries, type HarnessSummary } from './harnessProviders';
+import { fetchCatalogInventory, harnessProviderModels, harnessSummaries, type HarnessSummary } from './harnessProviders';
+import { HARNESSES } from './harnessMembership';
+import { seedProviderModels } from './providerModels';
 import { readWorkspaceModels } from './modelsLoad';
 import { vendorAccounts } from './vendorAccounts';
 
@@ -278,6 +280,7 @@ export async function loadHostGroups(): Promise<void> {
 				},
 			),
 		]);
+		if (harnessData) HARNESSES.forEach(({ name }) => seedProviderModels(name, undefined, harnessProviderModels(harnessData.inventory, name, harnessData.catalog)));
 		const provs = get(providersStore);
 		const servers = get(networkServers);
 		hostGroupSnapshot.set(groupByHost(provs, servers, resources, harnessData ? harnessSummaries(harnessData.inventory, harnessData.catalog) : []));
