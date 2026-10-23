@@ -320,12 +320,13 @@ def abort_operation(
     cancelled: bool = False,
     failure_code: str | None = None,
     failure_detail: str | None = None,
+    phases: frozenset[str] = ABORTABLE_PHASES,
     db=None,
 ) -> bool:
-    """Release one exact healthy-instance operation through explicit compensation."""
+    """Release one exact operation through its allowed terminal transition."""
     status = "cancelled" if cancelled else "failed"
     with write_transaction(db, scope="restart_operation") as connection:
-        placeholders = ",".join("?" for _phase in ABORTABLE_PHASES)
+        placeholders = ",".join("?" for _phase in phases)
         cur = connection.execute(
             "UPDATE self_restart_requests SET status=?,phase=NULL,settled_at=?,"
             "updated_at=?,error=?,failure_code=?,failure_detail=? "
@@ -339,36 +340,7 @@ def abort_operation(
                 failure_code,
                 failure_detail,
                 operation_id,
-                *sorted(ABORTABLE_PHASES),
-            ),
-        )
-        settled = cur.rowcount == 1
-        if settled:
-            revoke_lifecycle_token_for_terminal_operation(connection, operation_id)
-        return settled
-
-
-def fail_resuming_operation(
-    operation_id: str,
-    *,
-    error: str,
-    failure_code: str | None = None,
-    failure_detail: str | None = None,
-    db=None,
-) -> bool:
-    """Terminalize a startup-verification failure without restart compensation."""
-    with write_transaction(db, scope="restart_operation") as connection:
-        cur = connection.execute(
-            "UPDATE self_restart_requests SET status='failed',phase=NULL,settled_at=?,"
-            "updated_at=?,error=?,failure_code=?,failure_detail=? "
-            "WHERE id=? AND status='in_flight' AND phase='resuming'",
-            (
-                _now_iso(),
-                _now_iso(),
-                error[:500],
-                failure_code,
-                failure_detail,
-                operation_id,
+                *sorted(phases),
             ),
         )
         settled = cur.rowcount == 1

@@ -188,7 +188,7 @@ app_mode_service_start() {
         return 0
     fi
     require_no_unmanaged_backend "$BACKEND_PORT" || return 1
-    if ! "$_corsia_app_bundle/Contents/MacOS/CORSIA" --service register; then
+    if ! "$_corsia_app_bundle/Contents/MacOS/CORSIA" --service reload; then
         fail "Could not start $(service_label)"
         return 1
     fi
@@ -232,7 +232,7 @@ app_mode_service_restart() {
 }
 
 app_mode_refuse_registration() {
-    fail "corsia service $1 does not apply to the CORSIA app, which registers its own service: use $_corsia_app_bundle/Contents/MacOS/CORSIA --service register|unregister"
+    fail "corsia service $1 does not apply to the CORSIA app, which registers its own service: use $_corsia_app_bundle/Contents/MacOS/CORSIA --service register|reload|unregister"
     return 1
 }
 
@@ -302,7 +302,7 @@ app_mode_swap_staged_update() {
                 || cancel_failed_drain "$(current_drain_url)" "${CORSIA_RESTART_OPERATION_ID:-}" \
                 || :
         else
-            "$_corsia_app_bundle/Contents/MacOS/CORSIA" --service register || :
+            "$_corsia_app_bundle/Contents/MacOS/CORSIA" --service reload || :
         fi
         fail "Update stopped: CORSIA did not stop, so the staged update was not installed"
         return 1
@@ -314,7 +314,7 @@ app_mode_swap_staged_update() {
     else
         swap_status=$?
         fail "The update could not be installed (swap exit $swap_status); starting this version again"
-        "$_corsia_app_bundle/Contents/MacOS/CORSIA" --service register \
+        "$_corsia_app_bundle/Contents/MacOS/CORSIA" --service reload \
             || fail "CORSIA could not be started again; open CORSIA to start it"
         return 1
     fi
@@ -338,7 +338,7 @@ app_mode_rollback_swapped_update() {
         fail "$reason CORSIA could not roll back (rollback exit $rollback_status). The new app remains installed at $_corsia_app_bundle and the previous app remains at $previous."
         return 1
     fi
-    if ! "$_corsia_app_bundle/Contents/MacOS/CORSIA" --service register; then
+    if ! "$_corsia_app_bundle/Contents/MacOS/CORSIA" --service reload; then
         fail "$reason CORSIA went back to version $previous_generation, but could not start it. The failed update remains at $previous."
         return 1
     fi
@@ -366,7 +366,7 @@ app_mode_start_swapped_update() {
         fi
     else
         require_no_unmanaged_backend "$BACKEND_PORT" || return 1
-        if ! "$_corsia_app_bundle/Contents/MacOS/CORSIA" --service register; then
+        if ! "$_corsia_app_bundle/Contents/MacOS/CORSIA" --service reload; then
             app_mode_rollback_swapped_update "$previous" "The updated service could not be started." || return 1
             return 1
         fi

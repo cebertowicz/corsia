@@ -120,6 +120,14 @@ export function failureCopy(failure: UpdateFailure): FailureCopy {
 				toastLine: null,
 				retryLabel: 'Try again',
 			};
+		case 'rolled_back':
+			return {
+				title: "Update didn't finish",
+				headline: "The new version didn't start.",
+				body: KEPT_VERSION,
+				toastLine: null,
+				retryLabel: 'Try again',
+			};
 		case 'drain_cancelled':
 			return {
 				title: 'Update cancelled',

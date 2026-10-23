@@ -916,6 +916,9 @@ def test_update_startup_fails_when_its_target_version_is_not_running(
         "infra.restart_authorization.serving_head_sha", lambda: "deployedsha"
     )
     monkeypatch.setattr("infra.build_info.app_version", lambda: "0.4.1")
+    monkeypatch.setattr(
+        "infra.platform_paths.app_bundle_root", lambda: Path("/Applications/CORSIA.app")
+    )
     rid = sr.try_acquire(
         "t-1",
         "steve",
@@ -933,9 +936,53 @@ def test_update_startup_fails_when_its_target_version_is_not_running(
 
     operation = sr.operation_by_id(rid)
     assert operation["status"] == "failed"
-    assert operation["failure_code"] == "launch_failed"
+    assert operation["failure_code"] == "rolled_back"
     assert "target version 0.4.2 is not running" in operation["failure_detail"]
     assert sr.restart_holds_new_work() is False
+
+
+def test_packaged_update_startup_completes_when_the_target_version_is_running(
+    isolated_db, monkeypatch
+):
+    from automation import restart_startup
+    from automation import self_restart as sr
+
+    monkeypatch.setattr("infra.build_info.app_version", lambda: "0.4.2")
+    monkeypatch.setattr(
+        "infra.platform_paths.app_bundle_root", lambda: Path("/Applications/CORSIA.app")
+    )
+    rid = sr.try_acquire(
+        "t-1", "steve", "oldsha", "dev", "update",
+        kind="update", target_version="0.4.2",
+    )
+    assert rid is not None
+    _advance(rid, "steering", "ready", "restarting")
+
+    restart_startup.close_out_prior_self_restart()
+    restart_startup._complete_restart_operation()
+
+    assert sr.operation_by_id(rid)["status"] == "complete"
+
+
+def test_source_checkout_update_startup_does_not_compare_release_formats(
+    isolated_db, monkeypatch
+):
+    from automation import restart_startup
+    from automation import self_restart as sr
+
+    monkeypatch.setattr("infra.build_info.app_version", lambda: "v0.4.1-12-gabcdef")
+    monkeypatch.setattr("infra.platform_paths.app_bundle_root", lambda: None)
+    rid = sr.try_acquire(
+        "t-1", "steve", "oldsha", "dev", "update",
+        kind="update", target_version="2026.10.22.1936",
+    )
+    assert rid is not None
+    _advance(rid, "steering", "ready", "restarting")
+
+    restart_startup.close_out_prior_self_restart()
+    restart_startup._complete_restart_operation()
+
+    assert sr.operation_by_id(rid)["status"] == "complete"
 
 
 def test_close_out_supersedes_only_legacy_phaseless_rows(isolated_db, monkeypatch):
