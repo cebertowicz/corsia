@@ -19,7 +19,7 @@
 		codexReady: boolean;
 		/** The answer kept from an earlier visit, shown as the selected button. */
 		answer?: SetupPicks | null;
-		/** Whether this Mac can run the free local model, which decides the no-plan line. */
+		/** Whether this computer can run the free local model, which decides the no-subscription line. */
 		eligible?: boolean;
 		onAnswer: (picks: SetupPicks) => void;
 	}
@@ -38,10 +38,10 @@
 		{ label: 'No', picks: { claude: false, chatgpt: true } },
 	]);
 	const explainer = $derived(question === 'both'
-		? 'Claude plans use Claude Code; ChatGPT plans use Codex. Pick one you pay for and CORSIA installs it now. You sign in on the next screen.'
+		? 'Claude Code and Codex are the apps you’ll sign in to next.'
 		: question === 'chatgpt'
-			? 'ChatGPT plans use Codex (Claude plans use Claude Code). If you pay, CORSIA installs it now and you sign in on the next screen. If not, Claude Code is enough to continue.'
-			: 'Claude plans use Claude Code (ChatGPT plans use Codex). If you pay, CORSIA installs it now and you sign in on the next screen. If not, Codex is enough to continue.');
+			? 'A ChatGPT subscription uses Codex (a Claude subscription uses Claude Code). If you pay, CORSIA installs it now and you sign in on the next screen. If not, Claude Code is enough to continue.'
+			: 'A Claude subscription uses Claude Code (a ChatGPT subscription uses Codex). If you pay, CORSIA installs it now and you sign in on the next screen. If not, Codex is enough to continue.');
 	const chosen = (picks: SetupPicks) => answer !== null && answer.claude === picks.claude && answer.chatgpt === picks.chatgpt;
 </script>
 
@@ -53,14 +53,14 @@
 		</p>
 	{/if}
 	<div class="question" role="group" aria-labelledby="setup-subscriptions">
-		<span class="ask" id="setup-subscriptions">{question === 'both' ? 'Do you pay for Claude or ChatGPT?' : `Do you also pay for ${question === 'chatgpt' ? 'ChatGPT' : 'Claude'}?`}</span>
+		<span class="ask" id="setup-subscriptions">{question === 'both' ? 'Which do you pay for?' : `Do you also pay for ${question === 'chatgpt' ? 'ChatGPT' : 'Claude'}?`}</span>
 		<div class="choices">
 			{#each choices as choice (choice.label)}
 				<Button variant={chosen(choice.picks) ? 'primary' : 'secondary'} description={chosen(choice.picks) ? 'Your earlier answer' : undefined} onclick={() => onAnswer(choice.picks)}>{choice.label}</Button>
 			{/each}
 		</div>
 		<p class="explain">{explainer}</p>
-		{#if question === 'both'}<p class="explain">{eligible ? 'No plan? The free model downloading to this Mac works too, or add an API key.' : 'No plan? Add an API key on the next screen.'}</p>{/if}
+		{#if question === 'both'}<p class="explain">{eligible ? 'No subscription? The free model downloading to this computer works too, or add an API key.' : 'No subscription? Add an API key on the next screen.'}</p>{/if}
 	</div>
 {/if}
 

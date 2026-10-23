@@ -31,7 +31,7 @@ def setup_fix(cause: object, bytes_to_free: object = None, retry: str = RETRY_IN
     if cause == "own_omlx_upgrade_required":
         # Only a source run without the bundled oMLX reaches this (ensure_omlx).
         if retry == RETRY_IN_APP:
-            return "The oMLX on this computer is out of date or broken. Update it, then try again."
+            return "The oMLX app already on this computer is out of date or broken. Update it, then press Retry."
         return f"Run `brew upgrade jundot/omlx/omlx`, or install the CORSIA app to use its bundled oMLX, then {retry}"
     if retry == RETRY_IN_APP:
         return "CORSIA couldn’t set up the local model."
