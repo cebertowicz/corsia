@@ -6,7 +6,6 @@
 	import {
 		providerModels,
 		loadProviderModelsFor,
-		providerModelsFresh,
 		pollJobsFor,
 		modelsForProvider,
 		markModelOptimistic,
@@ -77,8 +76,6 @@
 	const isCorsiaOmlx = $derived(provider.name === 'omlx' && provider.server?.corsia_omlx === true); // CORSIA's managed oMLX only
 	const adminUrl = $derived(provider.name === 'omlx' ? omlxAdminUrl(provider.server?.mgmt_base ?? undefined) : undefined);
 	const catalogOnly = $derived(provider.type === 'cloud' || isExternal || isHarness);
-	// A local engine's rows are live state: a stored read that a model event has followed waits for this open's own read.
-	let liveRead = $state(catalogOnly || providerModelsFresh(provider.raw, provider.server));
 	// A harness section names the switch, not picker delivery; the row warning says when the picker can't offer it.
 	const loadedLabel = $derived(isHarness ? 'Shown' : catalogOnly ? 'Active' : 'Loaded');
 	const availableLabel = $derived(isHarness ? 'Hidden' : 'Available');
@@ -112,8 +109,7 @@
 	}
 
 	onMount(() => {
-		const modelsRead = loadProviderModelsFor(provider.raw, provider.server).finally(() => { liveRead = true; });
-		void Promise.all([modelsRead, refreshLocalDownloads()]).then(() => {
+		void Promise.all([loadProviderModelsFor(provider.raw, provider.server), refreshLocalDownloads()]).then(() => {
 			if (!catalogOnly) {
 				void pollJobsFor(provider.raw, provider.server);
 				_ensurePolling();
@@ -273,7 +269,7 @@
 	/>
 {/if}
 
-{#if !liveRead || (pmState.loading && models.length === 0)}
+{#if pmState.loading && models.length === 0}
 	<ProviderModelsPhase message="Loading models…" />
 {:else if pmState.lastError}
 	<ProviderModelsPhase message={`Failed to load models: ${pmState.lastError}`} error />

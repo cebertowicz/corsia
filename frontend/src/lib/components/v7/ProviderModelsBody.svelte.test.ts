@@ -6,7 +6,6 @@ import { workspaceModels, type Model } from '$lib/stores/models';
 import { groupModels } from '$lib/stores/modelGroups';
 import { withAccountTurn } from '$lib/stores/modelFixtures';
 import { token } from '$lib/stores/auth';
-import { loadProviderModelsFor, noteModelsEvent } from '$lib/stores/providerModels';
 import type { HostProvider } from '$lib/stores/providersV7';
 
 vi.mock('$lib/stores/harnessProviders', async (importOriginal) => ({
@@ -173,48 +172,5 @@ describe('Settings model rows and account usage', () => {
 
 		expect(document.querySelector('[role="group"][aria-label="Actions for Loaded model"]')).toBeNull();
 		expect(document.querySelector('[role="group"][aria-label="Actions for Available model"]')).not.toBeNull();
-	});
-
-	it('shows a local engine\u2019s stored rows at once only while no model event has followed them', async () => {
-		const localProvider = {
-			name: 'omlx', label: 'oMLX', type: 'network', statusDot: 'online', subline: 'Local',
-			raw: { name: 'omlx', label: 'oMLX', type: 'network' },
-			server: { id: 'local-test', provider: 'omlx', kind: 'managed', source: 'manual', instance_name: 'Local', endpoints: [] },
-		} as unknown as HostProvider;
-		token.set('test-token');
-		let answer = { loaded: [{ id: 'm1', model_id: 'm1', display_name: 'Held model' }], available: [] as unknown[] };
-		const release: Array<() => void> = [];
-		vi.stubGlobal('fetch', vi.fn(async (url: string) => {
-			if (url.includes('/network-servers/local-test/models')) {
-				const body = answer;
-				if (release.length === 0 && (globalThis as { hold?: boolean }).hold) await new Promise<void>((resolve) => release.push(resolve));
-				return { ok: true, json: async () => body };
-			}
-			if (url.includes('/providers/sources')) return { ok: true, json: async () => ({ sources: [] }) };
-			return { ok: true, json: async () => [] };
-		}));
-		await loadProviderModelsFor(localProvider.raw as never, localProvider.server);
-		expect(document.body.textContent).not.toContain('Held model');
-
-		(globalThis as { hold?: boolean }).hold = true;
-		component = mount(ProviderModelsBody, { target: document.body, props: { provider: localProvider, isLocal: true } });
-		flushSync();
-		await tick();
-		// Fresh: the stored rows render before this open's own read answers.
-		expect(document.body.textContent).toContain('Held model');
-		unmount(component); component = null; document.body.innerHTML = '';
-
-		noteModelsEvent();
-		release.length = 0;
-		component = mount(ProviderModelsBody, { target: document.body, props: { provider: localProvider, isLocal: true } });
-		flushSync();
-		await tick();
-		// Stale: a model event followed the stored read, so the rows wait for the open's own read.
-		expect(document.body.textContent).not.toContain('Held model');
-		answer = { loaded: [{ id: 'm1', model_id: 'm1', display_name: 'Held model' }], available: [] };
-		release.forEach((resolve) => resolve());
-		(globalThis as { hold?: boolean }).hold = false;
-		await tick(); await tick(); await tick();
-		expect(document.body.textContent).toContain('Held model');
 	});
 });

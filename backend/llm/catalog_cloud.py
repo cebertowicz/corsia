@@ -5,7 +5,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
-from infra.database import write_transaction
+from infra.database import get_db, write_transaction
 from llm.hosted_catalog.loader import CatalogSnapshotError
 from llm.reasoning_config import reasoning_shape_from_metadata
 
@@ -213,8 +213,16 @@ def _persist_cloud_models(provider: str, discovered: list[dict], now: str) -> li
     return models
 
 
-async def discover_cloud_models(provider: str, api_key: str, *, notify: bool = True) -> dict:
-    """Discover and store a provider's models; ``notify=False`` leaves the changed-or-not broadcast to the caller."""
+def _provider_rows(provider: str) -> list[tuple]:
+    """A provider's stored model rows minus refresh timestamps, to tell a real change from a re-read."""
+    rows = get_db().execute(
+        "SELECT * FROM models WHERE provider = ? ORDER BY id", (provider,)
+    ).fetchall()
+    skip = {"updated_at", "last_seen_at"}
+    return [tuple(row[key] for key in row.keys() if key not in skip) for row in rows]
+
+
+async def discover_cloud_models(provider: str, api_key: str) -> dict:
     import httpx
 
     now = _now()
@@ -247,13 +255,12 @@ async def discover_cloud_models(provider: str, api_key: str, *, notify: bool = T
         result["error"] = f"Cloud discovery not implemented for {provider}"
         return result
 
+    before = _provider_rows(provider)
     result["models"] = _persist_cloud_models(provider, discovered, now)
     result["ok"] = True
     from infra.state.ws import notify_models_changed
-    from llm.cloud_models_view import remember
 
-    if notify:
+    if _provider_rows(provider) != before:
         notify_models_changed()
     result["models"].sort(key=lambda model: (-model.get("enabled", 0), model["display_name"]))
-    remember(provider, api_key, result["models"])
     return result

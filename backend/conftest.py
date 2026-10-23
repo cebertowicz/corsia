@@ -168,16 +168,6 @@ def _no_host_harness_sign_in_check(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def _forget_cloud_discoveries():
-    """A cloud model list remembered by one test never answers a later test's database."""
-    from llm import cloud_models_view
-
-    cloud_models_view._last.clear()
-    yield
-    cloud_models_view._last.clear()
-
-
-@pytest.fixture(autouse=True)
 def _hide_session_app_loop(request, monkeypatch):
     """Only a test that serves the integration app may reach its application loop.
 

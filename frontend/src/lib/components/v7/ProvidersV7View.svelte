@@ -15,7 +15,6 @@
 	import { loadNetworkServers, setNetworkServerEnabled } from '$lib/stores/networkServers';
 	import { Button } from '$lib/components/ui';
 	import { loadModels } from '$lib/stores/models';
-	import { noteModelsEvent, prefetchProviderModels } from '$lib/stores/providerModels';
 	import { loadVendorAccounts, vendorAccounts } from '$lib/stores/vendorAccounts';
 	import { providerCardRequest, settingsNavigation } from '$lib/stores/settingsNavigation';
 	import HostSection from './HostSection.svelte';
@@ -38,7 +37,6 @@
 	let localSource = $state<ModelSource | undefined>(undefined);
 	let localSetupBusy = $state(false);
 	let stopLocalSourceUpdates: (() => void) | null = null;
-	let stopModelEvents: (() => void) | null = null;
 
 	async function refreshLocalSource() {
 		const current = get(token);
@@ -134,15 +132,12 @@
 	}
 
 	onMount(async () => {
-		stopModelEvents = on('models_updated', noteModelsEvent);
 		await Promise.all([loadProviders(), loadNetworkServers(), loadVendorAccounts(), refreshLocalSource()]);
 		await loadHostGroups();
 		loadModels();
-		// Each card's models load with the page, so opening a card shows them at once and refreshes behind.
-		for (const group of baseGroups) for (const p of group.providers) void prefetchProviderModels(p.raw, p.server);
 		stopLocalSourceUpdates = on('models_updated', () => { void refreshLocalSource(); });
 	});
-	onDestroy(() => { stopLocalSourceUpdates?.(); stopModelEvents?.(); });
+	onDestroy(() => stopLocalSourceUpdates?.());
 
 	const groups = $derived.by<HostGroup[]>(() => {
 		const base = baseGroups;
