@@ -47,6 +47,11 @@ def saver_author(*, thread_id: str | None = None, user_id: str | None = None) ->
     return f"{_clean(name) or thread_id} <{thread_id}@agents.corsia.local>"
 
 
+def is_person_author(author: str | None) -> bool:
+    """Whether a guidance author is the person: only a user-route save names a user address."""
+    return author is not None and author.endswith("@users.corsia.local>")
+
+
 def recorded_reason(reason: str | None) -> str:
     """One line of at most 200 characters, or empty when absent or credential-shaped."""
     line = (reason or "").strip().split("\n")[0].strip()[:200]

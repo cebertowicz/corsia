@@ -102,6 +102,7 @@ def _save(
         workspace=Path(WORKSPACE), target=GuidanceTarget("placement"),
         expected=expected, atomic=True, author=outcomes._author(place),
         message=outcomes._message(entry, decision, relative, trailer, verb=verb),
+        lesson_gate=False,  # the step's own retire and promote path
     )
     if result.outcome in ("written", "unchanged"):
         return True

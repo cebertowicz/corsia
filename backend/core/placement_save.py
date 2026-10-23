@@ -36,6 +36,7 @@ def save_placement(
     result = save_guidance(
         encoded, workspace=Path(WORKSPACE), target=GuidanceTarget("placement"), expected=expected,
         atomic=True, author=author(place), message=message(entry, decision, relative, trailer, operations),
+        lesson_gate=False,  # the writer behind ``place``
     )
     if result.outcome in ("deferred", "stale"):
         defer(entry, result.reason, destination=relative)

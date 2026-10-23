@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import Any
 
 from core.continuity_types import ENTRY_FIELD_MODELS, ENTRY_FIELDS
+from core.lesson_gate import DEFINITIONS as LESSON_DEFINITIONS, FIELDS as LESSON_FIELDS
 from core.placement_decide import ANSWER_SCHEMA
 from core.placement_room import OPERATION_SCHEMA
 from infra.continuity_store import ContinuityError, validate_entry_body
@@ -192,7 +193,9 @@ _OPERATION_FIELDS = {
     "review": {
         "entry_id", "verdict", "destination", "quote", "placement", "room", "reason",
     },
-    "place": {"entry_id", "verdict", "destination", "quote", "placement"},
+    "place": {
+        "entry_id", "verdict", "destination", "quote", "placement", *LESSON_FIELDS, "widens", "literal_ref",
+    },
 }
 _REQUIRED_FIELDS = {
     "inspect": (),
@@ -248,12 +251,8 @@ def _field_description() -> str:
         if operation != "add" and "field" in _OPERATION_FIELDS[operation]
     )
     return (
-        "The continuity field for the entry. Required on add, selecting "
-        "the new entry's field. Optional on " + ", ".join(optional) + ": "
-        "on inspect without entry_id it filters the listing to that field; "
-        "on inspect with entry_id, and on replace and drop, it is a "
-        "redundant but correct confirmation that must match the entry's "
-        "stored field, or the call is refused naming the mismatch."
+        "The entry's field. Required on add. Optional on " + ", ".join(optional) + ": "
+        "without entry_id, inspect filters by it; otherwise it must match the stored field."
     )
 
 
@@ -262,13 +261,11 @@ _FIELD_SCHEMAS: dict[str, dict[str, Any]] = {
         "type": "string",
         "enum": list(_OPERATIONS),
         "description": (
-            "inspect lists current entries and ids; add records a new entry; "
-            "replace rewrites one by id; drop retires one by id. review is "
-            "only for a checkpoint's placement review; place records that you "
-            "placed a lesson yourself: written or already retires the entry "
-            "once destination is read and contains quote; proposed queues "
-            "placement for CORSIA to file as a proposal; trial queues it as a "
-            "trial skill with a review date."
+            "inspect lists entries; add records one; replace rewrites one; drop "
+            "retires one. review is only for a checkpoint. place files a lesson: "
+            "already retires the entry once destination holds quote; written "
+            "queues CORSIA to write the line; proposed queues a proposal; trial "
+            "queues a trial skill with a review date."
         ),
     },
     "field": {
@@ -281,8 +278,7 @@ _FIELD_SCHEMAS: dict[str, dict[str, Any]] = {
         "type": "integer",
         "minimum": 1,
         "description": (
-            "The entry to inspect, replace, or drop, as listed in the frozen "
-            "continuity index or returned by inspect."
+            "The entry, as listed in the continuity index or by inspect."
         ),
     },
     "reason": {
@@ -325,15 +321,20 @@ _FIELD_SCHEMAS: dict[str, dict[str, Any]] = {
     "placement": {
         **ANSWER_SCHEMA,
         "description": (
-            "review select, place proposed or place trial: where the lesson "
-            "goes, as the placement review asks. trial is only for your own "
-            "unproven hypothesis, never for what a person told you."
+            "review select, place written, proposed or trial: where the lesson "
+            "goes. trial is only for your own unproven hypothesis."
         ),
     },
     "room": {
         "type": "array",
         "items": OPERATION_SCHEMA,
-        "description": "review select only, when the review refuses for the cap: make-room operations.",
+        "description": "review select only: make-room operations when the file is at its cap.",
+    },
+    **{
+        name: (
+            {"type": "integer", "minimum": 1} if name == "widens" else {"type": "string"}
+        ) | {"description": "place: " + text}
+        for name, text in LESSON_DEFINITIONS.items()
     },
 }
 

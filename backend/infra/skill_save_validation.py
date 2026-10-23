@@ -24,13 +24,24 @@ class SkillSaveRefusal:
     line: str
 
 
-def refused_save(writes: dict[Path, bytes]) -> SaveResult | None:
-    """The guidance-save result refusing an invalid skill write, or None when every write may proceed."""
-    from infra.guidance_git import SaveResult
+def refused_save(
+    writes: dict[Path, bytes], *, author: str | None = None, lesson_gate: bool = True,
+) -> SaveResult | None:
+    """The guidance-save result refusing an invalid skill write, or a lesson an agent wrote
+    outside placement, or None when every write may proceed.
 
-    if (refusal := invalid_skill_write(writes)) is None:
-        return None
-    return SaveResult(REFUSED, INVALID_SKILL_REASON, line=refusal.line, errors=refusal.errors)
+    The lesson rule is on unless a named call site turns it off; a person's own save passes.
+    """
+    from infra.guidance_git import SaveResult
+    from infra.guidance_messages import is_person_author
+
+    if (refusal := invalid_skill_write(writes)) is not None:
+        return SaveResult(REFUSED, INVALID_SKILL_REASON, line=refusal.line, errors=refusal.errors)
+    if lesson_gate and not is_person_author(author):
+        from infra.lesson_save_gate import lesson_refusal
+
+        return lesson_refusal(writes, author)
+    return None
 
 
 def invalid_skill_write(writes: dict[Path, bytes]) -> SkillSaveRefusal | None:
