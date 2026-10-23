@@ -1,7 +1,7 @@
 """Learning-status reports: strict payload validation and scope delivery.
 
 A model-free producer supplies one report per scope and date through
-:func:`deliver_learning_report`. Each report has a ``report_key`` ending in
+:func:`deliver_learning_report_sync`. Each report has a ``report_key`` ending in
 ``daily``, ``early-1``, or ``early-2``; delivery is idempotent on that key.
 The workspace scope resolves to the CORSIA agent and a project scope to that
 project's designated conductor at delivery time. ``wake`` selects an actionable
@@ -24,7 +24,6 @@ from events import report_payload
 from events.connectors.measurement import LEARNING_REPORT_EVENT
 from events.platform import PlatformDelivery
 from events.report_delivery import deliver_measurement_report_sync
-from infra.db_async import run_in_db_unless_owned
 
 _REPORT_SUFFIXES = ("daily", "early-1", "early-2")
 _LESSON_KEYS = ("recorded", "confirmed", "consolidated", "repeated")
@@ -164,12 +163,3 @@ def deliver_learning_report_sync(
         scope=parsed.scope, event_type=LEARNING_REPORT_EVENT,
         payload=parsed.as_event_payload(),
         transaction_scope="deliver_learning_report", db=db)
-
-
-async def deliver_learning_report(
-    report: LearningReport | Mapping[str, Any], *, db: sqlite3.Connection | None = None,
-) -> list[PlatformDelivery]:
-    """The producer's one call. Raises :class:`MalformedLearningReport` first."""
-    parsed = validated(report)
-    return await run_in_db_unless_owned(
-        db, deliver_learning_report_sync, parsed, db=db)

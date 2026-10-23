@@ -31,7 +31,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - Connections from paired devices work again.
 - An agent still waits for your yes before a newly connected command-line tool's first change, even when you asked for that change.
 - When a plan isn't moving, its note names each wait that is overdue.
-- A replaced image now shows when its document is reopened, even if it has comments.
+- A replaced image now shows right away in a document that is open, and when it is reopened, even if it has comments.
 
 ## v0.4.0 — A self-starting Mac app, updates you control, a shared browser, connected apps, and steadier plans
 

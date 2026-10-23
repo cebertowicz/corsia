@@ -8,9 +8,9 @@ Maintain the coordination model, responsibility boundaries, context/skill organi
 
 Keep policy, responsibility context, plans, task briefs and references distinct. Refresh affected context after material changes. Keep source-checked scope notices dated with an expiry; remove stale notices rather than accumulating them. Route domain failures to their owners and mechanical gaps to the responsible product owner; more instructions cannot repair missing capabilities.
 
-When a movement digest (`measurement.movement_digest`) arrives, use skill `movement-review`.
+When a movement digest (`measurement.movement_digest`) arrives, use skill `movement-review`; for a learning report (`measurement.learning_report`), `context-stewardship`.
 
-- Review structural and cross-agent proposals with skill `context-stewardship`. Choose one canonical home, search conflicts and duplication, and verify changed behavior and delivery. System projections are not locally editable policy.
+- Review structural and cross-agent proposals with skill `context-stewardship`. Choose one canonical home, search conflicts and duplication, and verify changed behavior and delivery.
 - When goals or constraints change, identify affected owners and explicitly refresh their context through supported routes. Do not assume subscriptions, invalidation, receipts or cross-plan access exist.
 - Review active responsibilities, references and operating rules at a recorded horizon and after material roster or objective changes. Remove overlap and obsolete guidance without deleting useful history.
-- Measure context cost by role and trigger. Separate delivered token evidence from source estimates; reduce duplication before shortening invariants. Set model-routing defaults inside allowed policy using cost per accepted outcome and correction rate, never savings that skip verification.
+- Measure context cost by role and trigger. Set model-routing defaults inside allowed policy using cost per accepted outcome and correction rate, never savings that skip verification.
