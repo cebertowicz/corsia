@@ -474,6 +474,55 @@ async def test_provider_action_settles_only_reported_write_evidence() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(("stop", "settled"), (
+    ("plan_limit", ("queued", None, None)),
+    ("user", ("cancelled", "proved_no_write", "turn-1")),
+))
+async def test_cancel_during_begin_settles_as_if_it_came_first(monkeypatch, stop, settled) -> None:
+    """A cancel landing while the begin commits leaves no fence; the Turn's terminal maps it as today."""
+    import infra.input_writes as writes
+    from core.stop_causes import PlanLimitStop
+
+    db = sqlite3.connect(":memory:")
+    began = asyncio.Event()
+    release_begin = asyncio.Event()
+    original_write = writes._write
+
+    async def begin_then_wait(action, *args, **kwargs):
+        result = await original_write(action, *args, **kwargs)
+        if action is writes.begin_batch_write:
+            began.set()
+            await release_begin.wait()
+        return result
+
+    try:
+        batch = _claimed(db)
+        monkeypatch.setattr(writes, "_write", begin_then_wait)
+        dispatcher = AsyncMock()
+        task = asyncio.create_task(writes.dispatch_fenced_batch(
+            batch, dispatcher, attempt_id="cancelled-begin", started_at="t2", db=db,
+        ))
+        await asyncio.wait_for(began.wait(), HANG_GUARD_SECONDS)
+        task.cancel()
+        release_begin.set()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        dispatcher.assert_not_awaited()
+        assert tuple(db.execute(
+            "SELECT delivery_state,active_turn_id,delivery_attempt_id,write_started_at FROM messages"
+        ).fetchone()) == ("queued", "turn-1", None, None)
+        writes.settle_unwritten_turn_inputs(
+            db, "turn-1", outcome="cancelled",
+            error=PlanLimitStop() if stop == "plan_limit" else None,
+        )
+        assert tuple(db.execute(
+            "SELECT delivery_state,write_outcome,active_turn_id FROM messages"
+        ).fetchone()) == settled
+    finally:
+        db.close()
+
+
+@pytest.mark.asyncio
 async def test_provider_success_without_write_evidence_is_not_inferred() -> None:
     """A returned adapter call is not proof that the provider got the bytes."""
     from infra.thread_execution import dispatch_fenced_batch
