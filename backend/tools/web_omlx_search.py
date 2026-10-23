@@ -17,6 +17,7 @@ from tools.web_search_outcome import (
 )
 
 NO_SERVER = "no_server"
+SERVER_DISABLED = "server_disabled"
 SERVER_STOPPED = "server_stopped"
 TIMEOUT_SECONDS = 14.0
 
@@ -45,16 +46,20 @@ def _result_items(body: dict[str, Any]) -> list[dict[str, str]] | None:
 
 
 async def _search_target() -> tuple[str, dict[str, str]] | SearchOutcome | str:
-    """Resolve the already-live managed server without starting or probing it."""
+    """Resolve the managed server without starting it, refreshing a stale endpoint if needed."""
     from infra.db_async import run_in_db
     from llm.local_sources import corsia_omlx_server
-    from llm.network_endpoints import build_api_base
+    from llm.network_endpoints import build_api_base, freshness_guard
     from llm.providers.omlx_public_auth import OmlxPublicAuthError, public_headers
 
-    server = await run_in_db(corsia_omlx_server)
+    server = await run_in_db(corsia_omlx_server, include_disabled=True)
     if server is None:
         return NO_SERVER
+    if server.get("status") == "disabled":
+        return SERVER_DISABLED
     if server.get("status") != "online":
+        return SERVER_STOPPED
+    if not await freshness_guard(server["id"]):
         return SERVER_STOPPED
     api_base = await run_in_db(build_api_base, server["id"])
     if api_base is None:

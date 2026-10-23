@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import uuid
@@ -138,24 +139,19 @@ async def _enrich_generation_configs(cfg: dict, canonical: dict[str, dict]) -> N
 
     from llm.providers.omlx_endpoints import admin_request
 
-    for provider_model_id, model in canonical.items():
-        if model.get("context_length") is not None:
-            continue
+    async def read(provider_model_id: str, model: dict) -> None:
         try:
-            response = await admin_request(
-                cfg, "GET", f"/models/{provider_model_id}/generation_config", timeout=5,
-            )
+            response = await admin_request(cfg, "GET", f"/models/{provider_model_id}/generation_config", timeout=5)
             if response.status_code != 200:
-                continue
+                return
             context_length = extract_context_length(response.json() or {})
             if context_length is not None:
                 model["context_length"] = context_length
         except (httpx.HTTPError, ValueError) as exc:
-            log.debug(
-                "oMLX generation_config context enrichment failed for %s: %s",
-                provider_model_id,
-                exc,
-            )
+            log.debug("oMLX generation_config context enrichment failed for %s: %s", provider_model_id, exc)
+
+    # Reads run together: a long list costs the slowest read, not the sum.
+    await asyncio.gather(*(read(i, m) for i, m in canonical.items() if m.get("context_length") is None))
 
 
 async def _enrich_admin_models(cfg: dict, canonical: dict[str, dict]) -> None:

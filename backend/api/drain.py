@@ -91,6 +91,35 @@ async def cancel_drain(token: str, operation_id: str):
     return {"ok": True, "active": False, "operation_id": operation_id}
 
 
+@router.post("/drain/update")
+async def confirm_update(token: str, body: dict):
+    """Receive the lifecycle shell's health observation in the running backend."""
+    user = _require_user(token)
+    from automation import self_restart
+    from automation.update_verification import confirm_packaged_update
+    from infra.db_async import run_in_db
+
+    operation_id = body.get("operation_id")
+    if not isinstance(operation_id, str) or not isinstance(body.get("healthy"), bool):
+        raise HTTPException(400, "operation_id and healthy are required")
+    operation = await run_in_db(self_restart.operation_by_id, operation_id)
+    if operation is None:
+        raise HTTPException(404, "Update operation not found")
+    if operation.get("requester_user") not in {None, user["id"]}:
+        raise HTTPException(403, "Update belongs to another user")
+    code = body.get("failure_code", "version_unverified")
+    if code not in {"version_unverified", "wrong_version_running"}:
+        raise HTTPException(400, "invalid Update failure code")
+    settled = await confirm_packaged_update(
+        operation_id, healthy=body["healthy"], reason=str(body.get("reason") or ""),
+        failure_code=code,
+    )
+    if settled is None:
+        raise HTTPException(409, "Update operation changed before confirmation")
+    return {"ok": True, "operation_id": operation_id, "status": settled["status"],
+            "failure_code": settled.get("failure_code")}
+
+
 @router.post("/drain/ready")
 async def drain_ready(token: str, body: dict):
     """Advance one quiescent exact operation to process-restart ownership."""

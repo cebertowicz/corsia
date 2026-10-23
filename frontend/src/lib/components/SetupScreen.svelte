@@ -28,30 +28,11 @@
 	import { createSetupLocalPick } from '$lib/setupLocalPick.svelte';
 	import { createSetupRemote } from '$lib/setupRemote.svelte';
 	import { applyWorkFolder, shellInfo } from '$lib/remoteShell';
+	import { accountRefusal, LOCAL_START_NETWORK_FAILURE, passwordConfirmationError, requestLocalStart } from '$lib/setupFormSupport';
 	import { setupLocalRow, setupStartNote, type LocalRowState } from '$lib/setupProviderRows';
-	import { measuredDownloadTime } from '$lib/setupLocalPresentation';
+	import { measuredDownloadTime, showLocalOnlyGuidance } from '$lib/setupLocalPresentation';
 	import { ACCOUNT_LEDE, WELCOME_TITLE } from '$lib/setupWelcome';
 	interface Props { onExistingAccount: () => void; onAccountCreated: () => void; onFinished: () => void; startConnect?: boolean; onLeaveConnect?: () => void; resume?: boolean }
-	type LocalStartResult = 'started' | 'failed';
-	type LocalStartResponse = { result: LocalStartResult; reference?: string; fix?: string };
-	const LOCAL_START_NETWORK_FAILURE = 'CORSIA couldn’t start local setup.';
-	async function requestLocalStart(session: string | null): Promise<LocalStartResponse> {
-		const response = await fetch(session ? '/api/providers/local/setup' : '/api/setup/local-download', {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json', ...(session ? { Authorization: `Bearer ${session}` } : {}) },
-			body: JSON.stringify(session ? { onboarding: true } : {}),
-		});
-		const body = await response.json().catch(() => null);
-		const reference = typeof body?.detail?.ref === 'string' ? body.detail.ref : typeof body?.ref === 'string' ? body.ref : undefined;
-		const fix = typeof body?.detail?.fix === 'string' ? body.detail.fix : typeof body?.fix === 'string' ? body.fix : undefined;
-		if (response.ok && body?.ok !== false) return { result: 'started', reference };
-		if (!fix) throw new Error('local start response omitted recovery');
-		return { result: 'failed', reference, fix };
-	}
-	/** The backend's own account refusal names the cause; a validation 422 has no string detail. */
-	function accountRefusal(detail: unknown): string | null {
-		return typeof detail === 'string' && detail.trim() ? detail.trim() : null;
-	}
 	const { onExistingAccount, onAccountCreated, onFinished, startConnect = false, onLeaveConnect, resume = false }: Props = $props();
 	type Page = 'checking' | 'welcome' | 'account' | 'subscriptions' | 'models' | 'hard-stop' | 'error' | 'connect';
 	const CLI_VENDORS = ['claude-code', 'codex'] as const;
@@ -61,7 +42,7 @@
 	let shell: SetupShell | undefined = $state();
 	let status = $state<Status>({}), statusError = $state(''), reportError = $state('');
 	let name = $state(''), username = $state(''), password = $state(''), confirmation = $state(''), email = $state('');
-	let folder = $state('~/CORSIA'), folderChanged = $state(false), folderChanging = $state(false), folderNotice = $state<FolderNotice>(null);
+	let folder = $state(''), defaultFolder = $state(''), defaultFolderPath = $state(''), folderApplyPath = $state(''), savedFolder = $state(false), folderChanged = $state(false), folderChanging = $state(false), folderNotice = $state<FolderNotice>(null);
 	let accountBusy = $state(false), accountError = $state(''), accountExists = $state(false), confirmationError = $state('');
 	// Set once setup itself made the account: Back to the account screen then edits it, and only what differs from these is saved.
 	let accountKnown = $state(false), savedName = '', savedEmail = '';
@@ -87,13 +68,15 @@
 	const subscriptionsSkipped = $derived(subscriptionQuestion(cliSignedIn('claude-code'), cliSignedIn('codex')) === null);
 	// A working cloud model frees the local download to be turned off.
 	const cloudReady = $derived(catalog.some((row) => row.connection !== 'omlx' && setupModelWorks(row)));
+	const localReady = $derived(catalog.some((row) => row.connection === 'omlx' && setupModelWorks(row)));
+	const localModelActive = $derived(downloading || localPreparing || localBusy || localPick.pick?.state === 'checking' || localReady);
+	const localOnly = $derived(showLocalOnlyGuidance({ eligible, localModelActive, cloudReady }));
 	const usernameError = $derived(username && !/^[a-z0-9_-]{1,32}$/.test(username) ? 'Use up to 32 lowercase letters, numbers, dashes or underscores.' : '');
 	const accountName = $derived(username.trim() || $user?.name || '');
 	const editing = $derived(Boolean($token) && accountKnown);
+	const folderDecisionPending = $derived(folderNotice !== null);
 	// A new account needs every field; an existing one needs a name, and a password only when one is being changed.
-	const accountValid = $derived(editing
-		? Boolean(name.trim() && (!password || (password.length >= 8 && confirmation === password)))
-		: Boolean(name.trim() && username.trim() && !usernameError && password.length >= 8 && confirmation === password));
+	const canSubmitAccount = $derived(!folderDecisionPending && (editing ? Boolean(name.trim() && (!password || (password.length >= 8 && confirmation === password))) : Boolean(name.trim() && username.trim() && !usernameError && password.length >= 8 && confirmation === password)));
 	const steps = $derived<SetupStep[]>(page === 'connect' ? remote.steps : [
 		{ label: 'Getting started', icon: 'computer', state: ['checking', 'welcome', 'hard-stop'].includes(page) || (page === 'error' && !$token) ? 'current' : 'done' },
 		{ label: 'Account & workspace', icon: 'person', state: page === 'account' ? 'current' : ['subscriptions', 'models'].includes(page) || (page === 'error' && $token) ? 'done' : 'todo' },
@@ -128,10 +111,10 @@
 			const toggle = view.canTurnOff ? { on: true, run: (next: boolean) => { if (!next) turnOffTool(vendor); } } : undefined;
 			return withReportAction({ key: vendor, name: vendor === 'codex' ? 'Codex' : 'Claude Code', ...view, toggle, pill: works ? { state: 'success', label: 'Ready' } : undefined });
 		});
-		rows.push(withReportAction(setupLocalRow({ source: local, pick: localPick.pick, eligible, downloading, preparing: localPreparing || localBusy || localPick.pick?.state === 'checking', ready: catalog.some((row) => row.connection === 'omlx' && setupModelWorks(row)), startError: localStartError, startFix, startReference: localStartReference, freeDisk: status.free_disk_gb,
+		rows.push(withReportAction({ ...setupLocalRow({ source: local, pick: localPick.pick, eligible, downloading, preparing: localPreparing || localBusy || localPick.pick?.state === 'checking', ready: localReady, startError: localStartError, startFix, startReference: localStartReference, freeDisk: status.free_disk_gb,
 			cloudReady, confirmingStop: confirmLocalStop, turnOffFailed: localOffFailed,
 			start: () => void startLocal(), stop: () => void stopLocal(), check: () => void checkLocal(),
-			confirmStop: (next) => { confirmLocalStop = next; }, turnOff: () => void turnOffLocal() })));
+			confirmStop: (next) => { confirmLocalStop = next; }, turnOff: () => void turnOffLocal() }), localOnly }));
 		const provider = tested.find((test) => hasReadySetupModel(catalog.filter((row) => row.connection !== 'omlx' && row.connection !== 'claude-code' && row.connection !== 'codex'), [test]));
 		rows.push({ key: 'api', name: 'API provider', meta: provider ? `${provider.source} · passed a test call` : 'Pay as you go, with a key from Anthropic, OpenAI or another provider.',
 			pill: provider ? { state: 'success', label: 'Ready' } : undefined, action: provider ? undefined : { label: 'Add provider', run: () => { showAdd = true; } } });
@@ -147,15 +130,14 @@
 		if (page === 'welcome') return { title: WELCOME_TITLE, primary: { label: 'Continue' }, onPrimary: () => { page = 'account'; } };
 		// A resumed setup has no account details to show, so it reads back what is set.
 		if (page === 'account' && $token && !accountKnown) return { title: 'Your account', primary: { label: 'Continue' }, onPrimary: afterAccount };
-		if (page === 'account') return { title: editing ? 'Your account' : 'Create your account', lede: ACCOUNT_LEDE, primary: { label: 'Continue', loading: accountBusy, disabled: !accountValid || accountBusy || folderChanging || folderNotice?.kind === 'unwritable' || folderNotice?.kind === 'picker_failed' }, onPrimary: submitAccount };
+		if (page === 'account') return { title: editing ? 'Your account' : 'Create your account', lede: ACCOUNT_LEDE, primary: { label: 'Continue', loading: accountBusy, disabled: !canSubmitAccount || accountBusy || folderChanging }, onPrimary: submitAccount };
 		if (page === 'subscriptions') return { title: 'Your subscriptions', lede: 'CORSIA’s agents can work through a Claude or ChatGPT subscription you already pay for.' };
 		return { title: 'Providers & models', lede: 'CORSIA needs one working model to continue setup.', primary: { label: 'Start using CORSIA', disabled: !canFinish || finishing, loading: finishing, note: finishNote, noteAlways: true }, onPrimary: finishSetup };
 	});
-	function validateConfirmation() { confirmationError = confirmation && password !== confirmation ? 'Passwords don’t match.' : ''; }
 	/** Continue on the account screen creates the account, applying the chosen folder first, or saves what changed on one setup already made. */
 	async function submitAccount() {
-		validateConfirmation();
-		if (!accountValid) return;
+		confirmationError = passwordConfirmationError(password, confirmation);
+		if (!canSubmitAccount) return;
 		if (editing) await updateAccount(); else if (!get(token)) await createAccount();
 	}
 	/** The subscriptions screen is asked only while a CLI is still not signed in. */
@@ -184,13 +166,27 @@
 		page = 'models';
 	}
 	function leaveConnect() { if (startConnect) onLeaveConnect?.(); else page = 'welcome'; }
+	function setFolderState(next: Status) {
+		const info = shellInfo();
+		const workspace = info?.mode === 'local' ? info.default_workspace : undefined;
+		if (workspace) { defaultFolder = workspace.display; defaultFolderPath = workspace.path; }
+		if (next.work_folder) {
+			folder = next.work_folder;
+			// Status names the current display folder even for the initial shell-owned default.
+			savedFolder = workspace ? next.work_folder !== workspace.display : true;
+		} else {
+			savedFolder = false;
+			if (workspace) folder = workspace.display;
+		}
+		folderApplyPath = '';
+	}
 	async function readStatus() {
 		page = 'checking'; statusError = '';
 		try {
 			const response = await fetch('/api/setup/status');
 			if (response.status === 409) { onExistingAccount(); return; }
 			if (!response.ok) throw new Error('status');
-			status = await response.json(); folder = status.work_folder || folder;
+			status = await response.json(); setFolderState(status);
 			if (status.required_username) username = status.required_username;
 			if (status.classifier) classifier.accept(status.classifier);
 			if (status.macos_supported === false) { page = 'hard-stop'; return; }
@@ -251,10 +247,13 @@
 		remote.reset(); page = 'connect';
 	}
 	async function createAccount() {
-		if (!accountValid || accountBusy) return;
+		if (!canSubmitAccount || accountBusy) return;
 		accountBusy = true; accountError = '';
 		try {
-			if (folderChanged) { await applyWorkFolder(folder); folderChanged = false; }
+			if (folderChanged) {
+				if (!folderApplyPath) throw new Error('work folder path is unavailable');
+				await applyWorkFolder(folderApplyPath); folderChanged = false;
+			}
 			const response = await fetch('/api/setup/first-account', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.trim(), username: username.trim(), password, email: email.trim() || null }) });
 			if (response.status === 409) { accountExists = true; accountError = 'This computer already has a CORSIA account. Sign in instead.'; page = 'account'; return; }
 			const result = await response.json().catch(() => null);
@@ -330,7 +329,8 @@
 		const progress = await fetchSetupProgress(get(token));
 		if (!progress) { page = 'error'; return; }
 		if (progress.setup_completed) { onFinished(); return; }
-		status = (progress.status ?? {}) as Status; folder = status.work_folder || folder; page = 'models';
+		status = (progress.status ?? {}) as Status; setFolderState(status);
+		page = 'models';
 		if (status.classifier) classifier.accept(status.classifier);
 		// A relaunch after the account step has no screen-1 start to rerun, so a local download that was never claimed starts here.
 		const unstarted = eligible && status.local_started === false;
@@ -378,10 +378,10 @@
 		<p class="settled" data-testid="setup-account-made">{accountName ? `Your account is set up as ${accountName}.` : 'Your account is set up.'}</p>
 		<p class="settled" data-testid="setup-folder-made">CORSIA keeps your work in {folder}.</p>
 	{:else if page === 'account'}
-		<SetupAccountForm bind:name bind:username bind:password bind:confirmation bind:email {usernameError} {confirmationError} requiredUsername={status.required_username} {editing} {accountError} onSubmit={submitAccount} onValidateConfirmation={validateConfirmation} />
+		<SetupAccountForm bind:name bind:username bind:password bind:confirmation bind:email {usernameError} {confirmationError} requiredUsername={status.required_username} {editing} {accountError} onSubmit={submitAccount} onValidateConfirmation={() => confirmationError = passwordConfirmationError(password, confirmation)} />
 		<!-- Creating the account scaffolds the work folder, so after it the folder is read back, not offered. -->
 		{#if editing}<p class="settled" data-testid="setup-folder-made">CORSIA keeps your work in {folder}.</p>
-		{:else}<SetupWorkFolder bind:folder bind:changed={folderChanged} bind:changing={folderChanging} bind:notice={folderNotice} />{/if}
+		{:else}<SetupWorkFolder bind:folder {defaultFolder} {defaultFolderPath} bind:applyPath={folderApplyPath} {savedFolder} bind:changed={folderChanged} bind:changing={folderChanging} bind:notice={folderNotice} />{/if}
 		{#if accountExists}<Button variant="chip" onclick={onExistingAccount}>Sign in</Button>{/if}
 	{:else if page === 'subscriptions'}<SetupSubscriptions claudeReady={cliSignedIn('claude-code')} codexReady={cliSignedIn('codex')} {eligible} answer={picks} onAnswer={answerSubscriptions} />
 	{:else if page === 'models'}

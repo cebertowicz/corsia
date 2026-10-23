@@ -12,6 +12,8 @@ export interface ImageContext {
 	docPath: string | null;
 	projectId: string | null;
 	token: string;
+	/** Stable while this document view is open, new on its next mount. */
+	imageCacheKey?: string;
 }
 
 /** Resolves lazily so a widget built later sees the editor's current document and sign-in. */
@@ -139,7 +141,7 @@ function buildImages(state: EditorState): Images {
 			const { alt, path } = imageSource(node.node, doc, context.docPath);
 			if (path === null) return false;
 			const line = doc.lineAt(node.from);
-			const src = imageContentUrl({ path, projectId: context.projectId, token: context.token });
+			const src = imageContentUrl({ path, projectId: context.projectId, token: context.token, imageCacheKey: context.imageCacheKey });
 			const selected = selection.ranges.some((r) => !r.empty && r.from <= node.from && r.to >= node.to);
 			const widget = new ImageWidget(alt, src, node.from, node.to, selected);
 			if (line.text.trim() === doc.sliceString(node.from, node.to)) {

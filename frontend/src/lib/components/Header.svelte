@@ -13,9 +13,11 @@
 	import { openMeasurementFromThread } from '$lib/stores/measurementNavigation';
 	import type { View } from '$lib/homePaneConfig';
 
-	let { onToggleSidebar, onTogglePane, onMeasurement, activeView, conductorThreadId, hasPane = true, artifactHeaderInset = null }: {
+	let { onToggleSidebar, onTogglePane, onMeasurement, onRightControlsWidth, activeView, conductorThreadId, hasPane = true, artifactHeaderInset = null }: {
 		onToggleSidebar: () => void;
 		onTogglePane: () => void;
+		/** Reports how far the right controls reach in from the header's inline end, so the canvas tabs can stop before them. */
+		onRightControlsWidth?: (width: number) => void;
 		/** Opens the Measurement surface; the doorway writes its own scope first (PL-2). */
 		onMeasurement?: () => void;
 		activeView: View;
@@ -39,6 +41,23 @@
 	const isConductor = $derived(!isTakeover && $activeThread == null && $activeThreadId == null);
 
 	let overflowOpen = $state(false);
+	let headerEl = $state<HTMLElement>();
+	let rightControlsEl = $state<HTMLElement>();
+
+	$effect(() => {
+		const shell = headerEl;
+		const controls = rightControlsEl;
+		if (!shell || !controls || typeof ResizeObserver === 'undefined') return;
+		const updateWidth = () => {
+			onRightControlsWidth?.(Math.ceil(shell.getBoundingClientRect().right - controls.getBoundingClientRect().left));
+		};
+		updateWidth();
+		const observer = new ResizeObserver(updateWidth);
+		observer.observe(shell);
+		// Border box: the overlaid-drawer padding changes the controls' reach without changing their content.
+		observer.observe(controls, { box: 'border-box' });
+		return () => observer.disconnect();
+	});
 	const overflowActions = $derived((h?.actions ?? []).filter((a) => !a.primary && !a.wideOnly));
 	// PL-2: an agent thread opens its own scope, a conductor thread its project.
 	const isLaneThread = $derived($activeThread != null && isNavAgent($activeThread));
@@ -122,62 +141,62 @@
 	{/if}
 {/snippet}
 
-<header class="shell-header" class:shell-inset={$sidebarCollapsed} data-tauri-drag-region use:toastTopSurface>
+<header bind:this={headerEl} class="shell-header" class:shell-inset={$sidebarCollapsed} data-tauri-drag-region use:toastTopSurface>
 	<div
 		class="chat-header"
 		class:with-canvas={artifactHeaderInset !== null}
 		style:--artifact-header-inset={artifactHeaderInset === null ? undefined : `${artifactHeaderInset}px`}
 	>
 		<div class="h-leading">
-		<div class="h-zone h-left">
-			<button class="h-icon" onclick={toggleSidebar} title="Toggle sidebar" aria-label="Toggle sidebar">
-				<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="9" y1="4" x2="9" y2="20"/></svg>
-			</button>
-			{#if isTakeover && h?.onBack}
-				<button class="h-back" onclick={back} title={h?.backLabel ?? 'Back'} aria-label={h?.backLabel ?? 'Back'}>
-					<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
-					<span class="h-back-label">{h?.backLabel ?? 'Back'}</span>
+			<div class="h-zone h-left">
+				<button class="h-icon" onclick={toggleSidebar} title="Toggle sidebar" aria-label="Toggle sidebar">
+					<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="9" y1="4" x2="9" y2="20"/></svg>
 				</button>
-			{/if}
+				{#if isTakeover && h?.onBack}
+					<button class="h-back" onclick={back} title={h?.backLabel ?? 'Back'} aria-label={h?.backLabel ?? 'Back'}>
+						<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+						<span class="h-back-label">{h?.backLabel ?? 'Back'}</span>
+					</button>
+				{/if}
+			</div>
+
+			<span class="h-title">{@render titleInner()}</span>
 		</div>
 
-		<span class="h-title">{@render titleInner()}</span>
-	</div>
-
-	<div class="h-zone h-right">
-		{#if isTakeover && h?.actions?.length}
-			{#each h.actions as a (a.id)}
-				<button class="h-act" class:active={a.active} class:overflowable={!a.primary} class:wide-only={a.wideOnly} onclick={() => run(a.onClick)} title={a.title ?? a.label}>{a.label}</button>
-			{/each}
-		{/if}
-		{#if showMeasures}
-			<button class="h-icon" onclick={openMeasures} title={measuresLabel} aria-label={measuresLabel}>
-				<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18M7 16l4-5 3 3 4-7"/></svg>
-			</button>
-		{/if}
-		{#if hasOverflow}
-			<button class="h-overflow" class:open={overflowOpen} onclick={() => (overflowOpen = !overflowOpen)} aria-label="More actions" title="More">
-				<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/></svg>
-			</button>
-		{/if}
-		{#if activeView === 'chat' && !isTakeover && ($activeThread || isConductorThread)}
-			<button class="h-icon" class:active={$threadSettingsOpen} onclick={openThreadSettings} title={isConductorThread ? `${designatedName} settings` : 'Thread settings'} aria-label={isConductorThread ? `${designatedName} settings` : 'Thread settings'}>
-				{@render gearIcon()}
-			</button>
-		{:else if activeView === 'activity' && $uiScope}
-			<button class="h-icon" onclick={openProjectSettings} title="Project settings" aria-label="Project settings">
-				{@render gearIcon()}
-			</button>
-		{:else if activeView === 'activity' && !$uiScope}
-			<button class="h-icon" onclick={openWorkspaceSettings} title="Workspace settings" aria-label="Workspace settings">
-				{@render gearIcon()}
-			</button>
-		{/if}
-		{#if hasPane}
-			<button class="h-icon" onclick={onTogglePane} title="Toggle panel" aria-label="Toggle panel">
-				<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="15" y1="4" x2="15" y2="20"/></svg>
-			</button>
-		{/if}
+		<div bind:this={rightControlsEl} class="h-zone h-right">
+			{#if isTakeover && h?.actions?.length}
+				{#each h.actions as a (a.id)}
+					<button class="h-act" class:active={a.active} class:overflowable={!a.primary} class:wide-only={a.wideOnly} onclick={() => run(a.onClick)} title={a.title ?? a.label}>{a.label}</button>
+				{/each}
+			{/if}
+			{#if showMeasures}
+				<button class="h-icon" onclick={openMeasures} title={measuresLabel} aria-label={measuresLabel}>
+					<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18M7 16l4-5 3 3 4-7"/></svg>
+				</button>
+			{/if}
+			{#if hasOverflow}
+				<button class="h-overflow" class:open={overflowOpen} onclick={() => (overflowOpen = !overflowOpen)} aria-label="More actions" title="More">
+					<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/></svg>
+				</button>
+			{/if}
+			{#if activeView === 'chat' && !isTakeover && ($activeThread || isConductorThread)}
+				<button class="h-icon" class:active={$threadSettingsOpen} onclick={openThreadSettings} title={isConductorThread ? `${designatedName} settings` : 'Thread settings'} aria-label={isConductorThread ? `${designatedName} settings` : 'Thread settings'}>
+					{@render gearIcon()}
+				</button>
+			{:else if activeView === 'activity' && $uiScope}
+				<button class="h-icon" onclick={openProjectSettings} title="Project settings" aria-label="Project settings">
+					{@render gearIcon()}
+				</button>
+			{:else if activeView === 'activity' && !$uiScope}
+				<button class="h-icon" onclick={openWorkspaceSettings} title="Workspace settings" aria-label="Workspace settings">
+					{@render gearIcon()}
+				</button>
+			{/if}
+			{#if hasPane}
+				<button class="h-icon" onclick={onTogglePane} title="Toggle panel" aria-label="Toggle panel">
+					<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="15" y1="4" x2="15" y2="20"/></svg>
+				</button>
+			{/if}
 		</div>
 	</div>
 </header>
@@ -222,15 +241,16 @@
 	.shell-header :global(button) { -webkit-app-region: no-drag; app-region: no-drag; }
 
 	.chat-header { display: flex; align-items: center; flex: 1; min-width: 0; }
-	/* The canvas keeps its own segment in the shared header. All chat controls, including
-	   the title, stay in the remaining segment instead of layering over its tabs. */
-	.chat-header.with-canvas {
+	/* The canvas keeps its own segment in the shared header. The title stays in the remaining
+	   segment; the right controls stay at the header's end and the canvas tabs stop before them. */
+	.chat-header.with-canvas .h-leading {
 		flex: 0 1 calc(100% - var(--artifact-header-inset));
 		max-width: calc(100% - var(--artifact-header-inset));
 	}
 	.h-zone { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
 	.h-leading { display: flex; align-items: center; min-width: 0; flex: 1; gap: 8px; }
-	.h-right { margin-left: auto; }
+	/* An overlaid drawer covers the inline end; PaneShell publishes how much, so the controls keep clear of it. */
+	.h-right { margin-left: auto; padding-inline-end: var(--pane-overlay-inset, 0px); }
 
 	.h-icon {
 		display: flex; align-items: center; justify-content: center;

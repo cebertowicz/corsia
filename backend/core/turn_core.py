@@ -255,14 +255,13 @@ async def drive_turn_settlement(
 
 
 async def settle_turn_terminal(
-    turn_id: str,
-    outcome: str,
-    error: str | BaseException | None = None,
-    *,
-    ended_at: str | None = None,
+    turn_id: str, outcome: str, error: str | BaseException | None = None,
+    *, ended_at: str | None = None, quarantine: str | None = None,
 ) -> TerminalResult:
     """Commit one terminal and synchronously drive all work it exposes."""
-    settlement = await commit_turn_terminal(turn_id, outcome, error, ended_at=ended_at)
+    settlement = await commit_turn_terminal(
+        turn_id, outcome, error, ended_at=ended_at, quarantine=quarantine,
+    )
     return await drive_turn_settlement(settlement)
 
 

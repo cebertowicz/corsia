@@ -1,4 +1,5 @@
 import { get } from 'svelte/store';
+import type { UpdatePhase } from '../update/model';
 import { token } from './auth';
 import { plainErrorText, SERVER_UNREACHABLE } from '../plainError';
 
@@ -49,7 +50,7 @@ export async function readSystemVersion(signal?: AbortSignal): Promise<SystemVer
 
 export interface SystemRestartStatus {
 	status: 'in_flight' | 'complete' | 'failed' | 'cancelled' | 'superseded';
-	phase?: 'holding' | 'steering' | 'draining' | 'ready' | 'restarting' | 'resuming' | null;
+	phase?: UpdatePhase | null;
 	error?: string | null;
 }
 
@@ -89,6 +90,7 @@ function restartPhase(restartStatus: SystemRestartStatus | null, hasVersion: boo
 	if (restartStatus?.status === 'in_flight') {
 		if (restartStatus.phase === 'restarting') return 'Restarting backend…';
 		if (restartStatus.phase === 'resuming') return 'Restoring restart continuity…';
+		if (restartStatus.phase === 'verifying') return 'Checking the new version…';
 		if (restartStatus.phase === 'ready') return 'Drain complete. Starting replacement…';
 		return 'Draining active work…';
 	}

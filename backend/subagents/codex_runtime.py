@@ -18,13 +18,11 @@ from llm.resolution import ExecutionTarget, Harness
 from subagents import completed_tool_terminal as _tool_terminal
 from core.turn_core import (
     TerminalSettlement,
-    TurnIdentity,
-    TurnTerminalResult,
+    TurnIdentity, TurnTerminalResult,
     bind_preadmitted_turn,
     commit_turn_terminal,
     persist_turn_start_bound,
     persist_turn_terminal,
-    settle_turn_terminal,
 )
 from core.turn_activity import turn_activity_frame
 from subagents.codex_runtime_errors import (
@@ -44,11 +42,12 @@ from subagents.codex_runtime_event_delivery import (
     runtime_event_handler as _make_on_event,
 )
 from subagents.codex_runtime_terminal import (
+    UNSETTLED_AT_TERMINAL as _UNSETTLED_AT_TERMINAL,
     CommittedTerminalFailure,
+    claim_live_terminal as _claim_live_terminal,
     finish_interrupted_if_still_owned as _finish_interrupted_if_still_owned,
     preserve_committed_terminal,
     publish_claimed_terminal as _publish_claimed_terminal,
-    turn_has_durable_terminal as _turn_has_durable_terminal,
 )
 from subagents.codex_destination import (
     refresh_prepared_codex_context_after_boundary as _refresh_prepared_codex_context_after_boundary,
@@ -105,6 +104,7 @@ from subagents.codex_runtime_support import (
     request_exact_stop as _request_exact_stop,
     restore_thread_id as _restore_thread_id,
     terminate_app_session as _terminate_app_session,
+    turn_has_durable_terminal as _turn_has_durable_terminal,
     working_dir_for_reconstruction as _working_dir_for_reconstruction,
 )
 
@@ -275,27 +275,6 @@ async def _start_live_turn(
     return identity
 
 
-async def _claim_live_terminal(
-    live: _LiveCodex,
-    outcome: str,
-    error: str | BaseException | None = None,
-    db=None,
-    *,
-    identity: TurnIdentity | None = None,
-) -> TurnTerminalResult:
-    identity = identity or live.corsia_turn
-    if identity is None:
-        return TurnTerminalResult.CONFLICTING_TERMINAL
-    if db is not None:
-        return persist_turn_terminal(
-            identity.turn_id,
-            outcome,
-            error,
-            db=db,
-        )
-    return await settle_turn_terminal(identity.turn_id, outcome, error)
-
-
 async def _end_owned_turn(
     thread_id: str,
     live: _LiveCodex,
@@ -322,11 +301,18 @@ async def _end_owned_turn(
     await _settle_live_tool_debt(thread_id, live, bcast)
     if not defer_drive:
         terminal = await _claim_live_terminal(
-            live, outcome, error, db, identity=identity,
+            live, outcome, error, db,
+            identity=identity,
         )
     else:
         assert db is None, "deferred Codex terminal requires its own transaction"
-        terminal = await commit_turn_terminal(identity.turn_id, outcome, error)
+
+        terminal = await commit_turn_terminal(
+            identity.turn_id, outcome, error,
+            quarantine=_UNSETTLED_AT_TERMINAL if (
+                outcome != "cancelled" or live.input_delivery_unproven
+            ) else None,
+        )
     result = terminal.result if isinstance(terminal, TerminalSettlement) else terminal
     if result is not TurnTerminalResult.APPLIED:
         return terminal
@@ -2214,7 +2200,6 @@ async def _force_shutdown_unsettled_app_server(
         "its dynamic tool did not settle.",
         bcast,
     )
-
 
 
 async def _shutdown_live_owner(

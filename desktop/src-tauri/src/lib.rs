@@ -809,20 +809,32 @@ async fn configure_work_folder(app: tauri::AppHandle, path: PathBuf) -> Result<(
     Ok(())
 }
 
-fn remote_shell_context(connection: &shell_state::ShellState) -> serde_json::Value {
+fn local_shell_context(home: Option<&Path>) -> serde_json::Value {
+    let Some(home) = home else { return serde_json::json!({ "mode": "local" }); };
+    let workspace = first_run::default_workspace(home);
+    serde_json::json!({
+        "mode": "local",
+        "default_workspace": {
+            "path": workspace.display().to_string(),
+            "display": format!("~/{}", first_run::WORKSPACE_FOLDER),
+        },
+    })
+}
+
+fn remote_shell_context(connection: &shell_state::ShellState, home: Option<&Path>) -> serde_json::Value {
     match connection.state() {
         shell_state::LaunchState::Remote { name } => serde_json::json!({ "mode": "remote", "name": name }),
-        _ => serde_json::json!({ "mode": "local" }),
+        _ => local_shell_context(home),
     }
 }
 
 /// What a page load hands the window: the shell context, and the script drawing the shell state. A finished load of
 /// any page but the startup shell means a Ready launch answer was followed, so it is not followed again.
-fn page_load_state(connection: &mut shell_state::ShellState, url: &str, finished: bool) -> (serde_json::Value, Option<String>) {
+fn page_load_state(connection: &mut shell_state::ShellState, url: &str, finished: bool, home: Option<&Path>) -> (serde_json::Value, Option<String>) {
     if finished && !is_shell_origin(url) {
         connection.left_shell();
     }
-    (remote_shell_context(connection), shell_state_script(connection.state()))
+    (remote_shell_context(connection, home), shell_state_script(connection.state()))
 }
 
 fn remote_startup_state(state: &shell_state::LaunchState) -> Option<serde_json::Value> {
@@ -1943,13 +1955,14 @@ pub fn run() {
             // the script self-guards via __corsia_drag_handler_installed
             // so multiple injections don't double-bind.
             let finished = matches!(payload.event(), tauri::webview::PageLoadEvent::Finished);
+            let home = webview.app_handle().path().home_dir().ok();
             let (shell_context, startup_state) = webview
                 .app_handle()
                 .state::<RemoteRuntime>()
                 .shell
                 .lock()
-                .map(|mut connection| page_load_state(&mut connection, payload.url().as_str(), finished))
-                .unwrap_or_else(|_| (serde_json::json!({ "mode": "local" }), None));
+                .map(|mut connection| page_load_state(&mut connection, payload.url().as_str(), finished, home.as_deref()))
+                .unwrap_or_else(|_| (local_shell_context(home.as_deref()), None));
             let show_state = startup_state.unwrap_or_default();
             let _ = webview.eval(format!("window.__CORSIA_SHELL__ = {shell_context};{DRAG_INIT_SCRIPT}{show_state}"));
             // Re-apply traffic-light position after each navigation —
@@ -2206,11 +2219,12 @@ mod tests {
             outside: None,
         };
         let mut connection = shell_state::ShellState::launch(Some(&saved));
-        assert_eq!(remote_shell_context(&connection), serde_json::json!({ "mode": "local" }));
+        let home = Path::new("/fixture");
+        assert_eq!(remote_shell_context(&connection, Some(home)), serde_json::json!({ "mode": "local", "default_workspace": { "path": "/fixture/CORSIA", "display": "~/CORSIA" } }));
         connection.connected("Studio");
-        assert_eq!(remote_shell_context(&connection), serde_json::json!({ "mode": "remote", "name": "Studio" }));
+        assert_eq!(remote_shell_context(&connection, Some(home)), serde_json::json!({ "mode": "remote", "name": "Studio" }));
         connection.failed("Studio", classify::ConnectFailure::Network);
-        assert_eq!(remote_shell_context(&connection), serde_json::json!({ "mode": "local" }));
+        assert_eq!(remote_shell_context(&connection, Some(home)), serde_json::json!({ "mode": "local", "default_workspace": { "path": "/fixture/CORSIA", "display": "~/CORSIA" } }));
     }
 
     #[test]
@@ -2482,13 +2496,13 @@ mod tests {
         let runtime = app.state::<RemoteRuntime>();
         let mut connection = runtime.shell.lock().unwrap();
         // The shell loads after the answer: it is drawn, and the window follows it to the service.
-        let (_, script) = page_load_state(&mut connection, "tauri://localhost/index.html", true);
+        let (_, script) = page_load_state(&mut connection, "tauri://localhost/index.html", true, Some(Path::new("/fixture")));
         assert!(script.is_some_and(|script| script.contains(r#""state":"ready""#)));
-        page_load_state(&mut connection, "http://127.0.0.1:47895/", false);
+        page_load_state(&mut connection, "http://127.0.0.1:47895/", false, Some(Path::new("/fixture")));
         assert!(shell_state_script(connection.state()).is_some(), "a load still starting has not reached the service");
-        page_load_state(&mut connection, "http://127.0.0.1:47895/", true);
+        page_load_state(&mut connection, "http://127.0.0.1:47895/", true, Some(Path::new("/fixture")));
         // A quit failure later sends the window back to the shell, which must stay on its own screen.
-        let (_, script) = page_load_state(&mut connection, "tauri://localhost/index.html#quit-failure", true);
+        let (_, script) = page_load_state(&mut connection, "tauri://localhost/index.html#quit-failure", true, Some(Path::new("/fixture")));
         assert_eq!(script, None);
     }
 

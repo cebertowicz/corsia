@@ -109,7 +109,7 @@ describe('ProvidersPolicyBlock', () => {
 		await vi.waitFor(() => expect(host.querySelector('.policy-status.error')?.textContent).toBe('Couldn’t save this change. Check your connection and try again.'));
 	});
 
-	it('shows both load errors above a single Reload providers button', async () => {
+	it('shows both load errors above a single Retry button', async () => {
 		const provider = { provider_key: 'claude-code', capabilities: { units: 'accounts' as const, rollover: true }, rollover: true, order: null, disabled: [], revision: 1,
 			units: [{ id: 'account-a', label: 'Account A', enabled: true }, { id: 'account-b', label: 'Account B', enabled: true }] };
 		let policyReads = 0;
@@ -127,10 +127,10 @@ describe('ProvidersPolicyBlock', () => {
 		await vi.waitFor(() => expect(host.querySelector<HTMLButtonElement>('[aria-label="Use Account A"]')).not.toBeNull());
 		host.querySelector<HTMLButtonElement>('[aria-label="Use Account A"]')!.click();
 		await vi.waitFor(() => expect(host.querySelectorAll('p.error[role="alert"]')).toHaveLength(2));
-		expect([...host.querySelectorAll('button')].filter((button) => button.textContent?.trim() === 'Reload providers')).toHaveLength(1);
+		expect([...host.querySelectorAll('button')].filter((button) => button.textContent?.trim() === 'Retry')).toHaveLength(1);
 	});
 
-	it('keeps the error and a Reload providers button when the policy cannot be re-read after a failed save', async () => {
+	it('keeps the error and a Retry button when the policy cannot be re-read after a failed save', async () => {
 		const provider = { provider_key: 'claude-code', capabilities: { units: 'accounts' as const, rollover: true }, rollover: true, order: null, disabled: [], revision: 1,
 			units: [{ id: 'account-a', label: 'Account A', enabled: true }, { id: 'account-b', label: 'Account B', enabled: true }] };
 		let policyReads = 0;
@@ -148,7 +148,7 @@ describe('ProvidersPolicyBlock', () => {
 		await vi.waitFor(() => expect(host.querySelector<HTMLButtonElement>('[aria-label="Use Account A"]')).not.toBeNull());
 		host.querySelector<HTMLButtonElement>('[aria-label="Use Account A"]')!.click();
 		await vi.waitFor(() => expect(host.querySelector('.policy-status.error')?.textContent).toBe('Couldn’t save this change. Check your connection and try again.'));
-		const reload = [...host.querySelectorAll('button')].find((button) => button.textContent?.trim() === 'Reload providers');
+		const reload = [...host.querySelectorAll('button')].find((button) => button.textContent?.trim() === 'Retry');
 		expect(reload).toBeDefined();
 		expect(host.querySelector('p.error[role="alert"]')).not.toBeNull();
 		reload!.click();
@@ -207,7 +207,7 @@ describe('ProvidersPolicyBlock', () => {
 
 		await vi.waitFor(() => expect(host.textContent).toContain('Couldn’t load providers.'));
 		expect(host.textContent).not.toContain('Policy unavailable');
-		expect(host.textContent).toContain('Reload providers');
+		expect(host.textContent).toContain('Retry');
 	});
 
 	it('shows a visible error rather than throwing for a malformed successful response', async () => {
@@ -216,7 +216,7 @@ describe('ProvidersPolicyBlock', () => {
 		flushSync();
 
 		await vi.waitFor(() => expect(host.textContent).toContain('Couldn’t load providers.'));
-		expect(host.textContent).toContain('Reload providers');
+		expect(host.textContent).toContain('Retry');
 	});
 
 	const projectPolicy = {
@@ -373,7 +373,7 @@ describe('ProvidersPolicyBlock', () => {
 		flushSync();
 
 		await vi.waitFor(() => expect(host.querySelector('[role="alert"]')?.textContent).toBe('Accounts unavailable'));
-		expect(host.textContent).toContain('Reload providers');
+		expect(host.textContent).toContain('Retry');
 		expect(host.textContent).toContain('Work');
 	});
 });

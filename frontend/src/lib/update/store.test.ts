@@ -17,7 +17,7 @@ import {
 	updateUnreachable,
 } from './store';
 
-const running = (phase: 'holding' | 'steering' | 'draining' | 'ready' | 'restarting' | 'resuming') => ({
+const running = (phase: 'holding' | 'steering' | 'draining' | 'ready' | 'restarting' | 'resuming' | 'verifying') => ({
 	branch: 'dev', current_sha: 'a', remote_sha: 'b', commits_behind: 1, available: true,
 	checked_at: 1, error: null, current_version: '2026.10.12', target_version: '2026.10.13',
 	drain_cap_seconds: 300, usual_seconds: null, server_time: '2026-10-13T22:00:00Z',
@@ -110,7 +110,7 @@ describe('update store', () => {
 		expect(get(settingsNavigation).openRequest).toBe(opened);
 	});
 
-	it.each(['holding', 'steering', 'draining', 'ready', 'restarting', 'resuming'] as const)(
+	it.each(['holding', 'steering', 'draining', 'ready', 'restarting', 'resuming', 'verifying'] as const)(
 		'adopts the durable %s phase on load', async (phase) => {
 			vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => running(phase) })));
 			await loadUpdateStatus();

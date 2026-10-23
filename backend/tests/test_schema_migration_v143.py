@@ -1,10 +1,10 @@
-"""Schema 141 -> 142: the decision source-task index, added in place with every row kept."""
+"""Schema 142 -> 143: the decision source-task index, added in place with every row kept."""
 from __future__ import annotations
 
 import json
 import sqlite3
 
-from infra.migration_141_to_142_decision_source_index import migrate_141_to_142
+from infra.migration_142_to_143_decision_source_index import migrate_142_to_143
 
 _INDEX = "idx_artifact_identities_decision_source"
 
@@ -14,12 +14,12 @@ def _index_sql(db):
     return None if row is None else row[0]
 
 
-def test_a_full_v141_install_takes_the_step_and_ends_where_a_fresh_install_starts():
+def test_a_full_v142_install_takes_the_step_and_ends_where_a_fresh_install_starts():
     from infra.database import initialize_schema
     from infra.database_migrations import MIGRATIONS, migrate_to_current
     from infra.schema import SCHEMA_VERSION
 
-    assert SCHEMA_VERSION == 142 and MIGRATIONS[141] is migrate_141_to_142
+    assert SCHEMA_VERSION == 143 and MIGRATIONS[142] is migrate_142_to_143
     fresh = sqlite3.connect(":memory:")
     initialize_schema(fresh)
     db = sqlite3.connect(":memory:")
@@ -35,17 +35,17 @@ def test_a_full_v141_install_takes_the_step_and_ends_where_a_fresh_install_start
         " VALUES (?,'local',?,?,?,'t','t')",
         [(row_id, kind, row_id, metadata) for row_id, kind, metadata in rows],
     )
-    db.execute("PRAGMA user_version=141")
+    db.execute("PRAGMA user_version=142")
     db.commit()
 
     result = migrate_to_current(db, SCHEMA_VERSION)
 
-    assert (result.migrated, result.from_version, result.to_version) == (True, 141, 142)
+    assert (result.migrated, result.from_version, result.to_version) == (True, 142, 143)
     schema = "SELECT type,name,tbl_name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name"
     assert db.execute(schema).fetchall() == fresh.execute(schema).fetchall()
     assert _index_sql(db) is not None
     assert db.execute("SELECT COUNT(*) FROM artifact_identities").fetchone()[0] == 3
-    migrate_141_to_142(db)  # a second run changes nothing
+    migrate_142_to_143(db)  # a second run changes nothing
     assert not migrate_to_current(db, SCHEMA_VERSION).migrated
 
 

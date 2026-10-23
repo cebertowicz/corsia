@@ -274,7 +274,7 @@
 <div class="account-manager">
 {#if !showRows && accounts.length === 1}<OverageSwitch account={accounts[0]} />{/if}
 {#if actionError || policyError}<Message variant="err">{actionError || policyError}</Message>{/if}
-{#if policyError && !actionError}<Button size="sm" onclick={() => policyState.load()}>Reload</Button>{/if}
+{#if policyError && !actionError}<Button size="sm" onclick={() => policyState.load()}>Retry</Button>{/if}
 {#if refreshError}<Message variant="err">{refreshError}</Message><Button size="sm" onclick={refreshAccounts}>Retry</Button>{/if}
 <div class="accounts" aria-label={`${provider.label} accounts`}>
 	{#if !showRows}

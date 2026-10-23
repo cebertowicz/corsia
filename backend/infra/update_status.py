@@ -111,12 +111,17 @@ def _bundle_endpoint(bundle: Path) -> str:
     return endpoint
 
 
+def normalize_packaged_version(version: str) -> str:
+    """Return the Tauri manifest's canonical semantic version form."""
+    return str(semver.Version.parse(version))
+
+
 def _bundle_current_version() -> str:
     """Return the running bundle version from the canonical build-info owner."""
     version = build_info.app_version()
     if not isinstance(version, str):
         raise RuntimeError("Running bundle version is unavailable.")
-    return version
+    return normalize_packaged_version(version)
 
 
 def _manifest(endpoint: str) -> dict:
@@ -171,6 +176,7 @@ def _packaged_probe(bundle: Path) -> UpdateStatus:
         target_version = manifest.get("version")
         if not isinstance(target_version, str):
             raise RuntimeError("Packaged update manifest has no version.")
+        target_version = normalize_packaged_version(target_version)
         current = semver.Version.parse(current_version)
         target = semver.Version.parse(target_version)
         platforms = manifest.get("platforms")

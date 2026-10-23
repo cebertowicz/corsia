@@ -51,6 +51,14 @@ def _rows_to_threads(rows: list[dict]) -> list[dict]:
     return list(tops.values())
 
 
+def _thread_root_id(connection, comment_id: str | None) -> str | None:
+    """Normalize a reply parent to its top-level comment in one database hop."""
+    if not comment_id:
+        return comment_id
+    row = connection.execute("SELECT parent_id FROM doc_comments WHERE id=?", (comment_id,)).fetchone()
+    return row["parent_id"] if row is not None and row["parent_id"] else comment_id
+
+
 def get_comment(comment_id: str, *, db=None) -> dict | None:
     """Return one comment row by id."""
     _db = db or get_db()
@@ -142,7 +150,7 @@ def create_with_status(
                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,0,0,?,?,?,?,?,?,?,?,?,?)
                ON CONFLICT(id) DO NOTHING""",
             (
-                cid, artifact_id, parent_id, author, author_kind, author_thread_id,
+                cid, artifact_id, _thread_root_id(connection, parent_id), author, author_kind, author_thread_id,
                 body, anchor_text, from_off, to_off, anchor_prefix, anchor_suffix,
                 1 if review else 0, replacement, now, now,
                 x, y, w, h, number, image_rev, image_src,

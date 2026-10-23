@@ -120,6 +120,30 @@ export function failureCopy(failure: UpdateFailure): FailureCopy {
 				toastLine: null,
 				retryLabel: 'Try again',
 			};
+		case 'version_unverified':
+			return {
+				title: "Update didn't finish",
+				headline: "Couldn't confirm the new version.",
+				body: "The update didn't finish its checks. The running version isn't confirmed.",
+				toastLine: null,
+				retryLabel: 'Try again',
+			};
+		case 'wrong_version_running':
+			return {
+				title: "Update didn't finish",
+				headline: 'CORSIA started a different version.',
+				body: 'The running version differs from the update requested.',
+				toastLine: null,
+				retryLabel: 'Try again',
+			};
+		case 'rolled_back':
+			return {
+				title: "Update didn't finish",
+				headline: "Couldn't start the new version.",
+				body: KEPT_VERSION,
+				toastLine: null,
+				retryLabel: 'Try again',
+			};
 		case 'drain_cancelled':
 			return {
 				title: 'Update cancelled',
