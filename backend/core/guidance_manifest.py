@@ -142,9 +142,7 @@ def _entry(source: ContextSourceEntry, *, model: str | None) -> dict[str, Any]:
     }
     path = (source.metadata or {}).get("path")
     if isinstance(path, str) and path and kind != "generated":
-        # References identify every source, including generated rows. The path
-        # is deliberately narrower: it is the file identity shared by read
-        # receipts and correction targets.
+        # Unlike the reference, the path is the file identity correction targets share.
         from infra.config import WORKSPACE
         from tools.filesystem_gate import canonical_target_path
 
@@ -347,10 +345,7 @@ def insert_guidance_load(
     variant: str | None = None, checkpoint_generation_id: str | None = None,
     lesson_id: str | None = None, lesson_behavioral_sha256: str | None = None,
 ) -> None:
-    """Insert one guidance receipt inside the caller's transaction; raises on failure.
-
-    ``data`` is the bytes the delivered text came from, never a second read.
-    """
+    """Insert one receipt in the caller's transaction (raises); ``data`` is the delivered bytes."""
     from infra.time import utc_now_iso
     import uuid
 
@@ -360,13 +355,9 @@ def insert_guidance_load(
                 delivered_sha256, byte_count, partial, node_id, variant,
                 checkpoint_generation_id, lesson_id, lesson_behavioral_sha256, created_at)
            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-        (
-            uuid.uuid4().hex, thread_id, turn_id, str(path),
-            _sha256_bytes(data), git_blob_oid(data),
-            _sha256_bytes(returned_text.encode("utf-8")), len(data),
-            int(partial), node_id, variant, checkpoint_generation_id, lesson_id,
-            lesson_behavioral_sha256, utc_now_iso(),
-        ),
+        (uuid.uuid4().hex, thread_id, turn_id, str(path), _sha256_bytes(data), git_blob_oid(data),
+         _sha256_bytes(returned_text.encode("utf-8")), len(data), int(partial), node_id, variant,
+         checkpoint_generation_id, lesson_id, lesson_behavioral_sha256, utc_now_iso()),
     )
 
 
