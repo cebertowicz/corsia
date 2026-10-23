@@ -103,6 +103,29 @@ async def test_app_api_account_lands_with_plan_and_first_pick_publishes_before_d
 
 
 @pytest.mark.asyncio
+async def test_opening_broadcast_failure_still_drives_committed_first_pick(fresh_app, monkeypatch, caplog):
+    from thread.model import _apply_first_selection
+
+    thread = await _account()
+    _ready(monkeypatch)
+    monkeypatch.setattr("thread.model._inline_first_run_wake", AsyncMock(return_value="First applicable setup step"))
+    broadcast = AsyncMock(side_effect=RuntimeError("opening projection failed"))
+    drive = AsyncMock()
+    monkeypatch.setattr("infra.send_broadcast.broadcast_message_rows", broadcast)
+    monkeypatch.setattr("infra.thread_execution.drive_thread", drive)
+
+    result = await _apply_first_selection(thread, "test/model", user_id="pat", now="2026-10-22T00:00:00")
+
+    assert result.changed
+    assert result.new_model == "test/model"
+    assert _rows("SELECT model FROM threads WHERE id=?", thread) == [{"model": "test/model"}]
+    assert len(_rows("SELECT id FROM messages WHERE id=?", f"first-run-opening:{thread}")) == 1
+    broadcast.assert_awaited_once_with(thread, (f"first-run-opening:{thread}",))
+    drive.assert_awaited_once_with(thread)
+    assert "first-run opening broadcast failed" in caplog.text
+
+
+@pytest.mark.asyncio
 async def test_binding_failure_after_opening_insert_rolls_back_entire_pick(fresh_app, monkeypatch):
     from connections import account_selection
     from thread.model_row import select_first_model

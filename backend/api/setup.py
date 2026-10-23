@@ -10,7 +10,6 @@ the first account); it exists only while no account does.
 from __future__ import annotations
 
 import asyncio
-import logging
 import os
 import platform
 import shutil
@@ -21,17 +20,15 @@ from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
 from api import setup_account
-from api.setup_requests import FirstAccountRequest, LocalDownloadRequest, SetupProgressUpdate, SetupReportRequest
+from api.setup_requests import LocalDownloadRequest, SetupProgressUpdate, SetupReportRequest
 from core.corrections_asset_download import FLIGHT as CLASSIFIER_DOWNLOAD
 from core.corrections_asset_download import public_state as classifier_state
-from infra import account_validation, accounts, config, setup_progress
+from infra import accounts, config, setup_progress
 from infra.auth import authenticate, is_person_session, require_user, token_from_request
 from infra.db_async import run_in_db
 from infra.local_connection import is_direct_loopback
-from infra.time import utc_storage_iso_to_api
 
 router = APIRouter(prefix="/api/setup", tags=["setup"])
-logger = logging.getLogger(__name__)
 
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "[::1]"})
 _TAURI_ORIGINS = frozenset({"tauri:" + "//localhost", "http:" + "//tauri.localhost"})
@@ -370,33 +367,7 @@ async def first_account(request: Request) -> dict | Response:
     """Create exactly one first account and issue the normal browser session."""
     if not _trusted_json_post(request):
         return Response(status_code=403)
-    try:
-        body = FirstAccountRequest.model_validate(await request.json())
-    except (ValidationError, ValueError):
-        return Response(status_code=422)
-    try:
-        user_id = await run_in_db(
-            accounts.create_first_account, body.username, body.password,
-            full_name=body.name, email=body.email or "", first_run_path="app",
-        )
-    except account_validation.FirstAccountExists:
-        return Response(content='{"code":"setup_complete"}', status_code=409, media_type="application/json")
-    except account_validation.AccountError as error:
-        return JSONResponse(status_code=422, content={"detail": str(error)})
-    except Exception:
-        # No user field is in this message; the traceback names only the failing step.
-        logger.exception("First-account creation failed")
-        return JSONResponse(
-            status_code=500,
-            content={"code": "setup_failed", "detail": "Your account was not created. Try again."},
-        )
-    token, expires_at = await run_in_db(accounts.issue_token, user_id, kind="session", label="browser")
-    user = await run_in_db(accounts.get_user, user_id)
-    return {
-        "token": token,
-        "user": user,
-        "expires_at": utc_storage_iso_to_api(expires_at),
-    }
+    return await setup_account.apply_create(request)
 
 
 @router.put("/account", response_model=None)

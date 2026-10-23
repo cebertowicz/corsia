@@ -229,9 +229,12 @@ async def _apply_first_selection(
     from infra.send_broadcast import broadcast_message_rows
 
     if first_run_wake is not None:
-        # Publish the whole committed opening before any path can drive the wake.
+        # Publish the whole committed opening before this path drives the wake.
         # Script/restored paths with no app opening simply project no row.
-        await broadcast_message_rows(thread_id, (f"first-run-opening:{thread_id}",))
+        try:
+            await broadcast_message_rows(thread_id, (f"first-run-opening:{thread_id}",))
+        except Exception:
+            log.exception("first-run opening broadcast failed: %s", thread_id)
 
     # ``select_first_model`` committed the rendered first-run wake above. A setup
     # download that ended while the person was still in setup can now be delivered.

@@ -25,7 +25,7 @@
 	import { fetchSetupProgress, recordSetupProgress } from '$lib/setupProgress';
 	import { saveSetupReport, type SetupReportRow } from '$lib/setupReport';
 	import { createSetupClassifier, type ClassifierState } from '$lib/setupClassifier.svelte';
-	import { createSetupLocalPick } from '$lib/setupLocalPick.svelte';
+	import { createSetupLocalPick, requestLocalStart, LOCAL_START_NETWORK_FAILURE } from '$lib/setupLocalPick.svelte';
 	import { createSetupRemote } from '$lib/setupRemote.svelte';
 	import { applyWorkFolder, shellInfo } from '$lib/remoteShell';
 	import { setupLocalRow, setupStartNote, type LocalRowState } from '$lib/setupProviderRows';
@@ -33,22 +33,6 @@
 	import { ACCOUNT_LEDE, WELCOME_TITLE } from '$lib/setupWelcome';
 	import { createSetupWarm } from '$lib/setupWarm.svelte';
 	interface Props { onExistingAccount: () => void; onAccountCreated: () => void; onFinished: () => void; startConnect?: boolean; onLeaveConnect?: () => void; resume?: boolean }
-	type LocalStartResult = 'started' | 'failed';
-	type LocalStartResponse = { result: LocalStartResult; reference?: string; fix?: string };
-	const LOCAL_START_NETWORK_FAILURE = 'CORSIA couldn’t start local setup.';
-	async function requestLocalStart(session: string | null): Promise<LocalStartResponse> {
-		const response = await fetch(session ? '/api/providers/local/setup' : '/api/setup/local-download', {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json', ...(session ? { Authorization: `Bearer ${session}` } : {}) },
-			body: JSON.stringify(session ? { onboarding: true } : {}),
-		});
-		const body = await response.json().catch(() => null);
-		const reference = typeof body?.detail?.ref === 'string' ? body.detail.ref : typeof body?.ref === 'string' ? body.ref : undefined;
-		const fix = typeof body?.detail?.fix === 'string' ? body.detail.fix : typeof body?.fix === 'string' ? body.fix : undefined;
-		if (response.ok && body?.ok !== false) return { result: 'started', reference };
-		if (!fix) throw new Error('local start response omitted recovery');
-		return { result: 'failed', reference, fix };
-	}
 	/** The backend's own account refusal names the cause; a validation 422 has no string detail. */
 	function accountRefusal(detail: unknown): string | null {
 		return typeof detail === 'string' && detail.trim() ? detail.trim() : null;

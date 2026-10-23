@@ -24,7 +24,7 @@
 	import { canAddLocalModel, canSetUpLocalModel, localStatus, retryLocalSetup, watchLocalStatus } from '$lib/stores/localPickerStatus';
 	import type { LocalPickerRetry } from '$lib/conductorSources';
 	import { toasts } from '$lib/stores/toast';
-	import { emitProductEvent } from '$lib/product_events';
+	import { emitSwitchEvent } from '$lib/stores/threadModelSwitch';
 	import { awaitFirstRunOpening, cancelFirstRunOpening } from '$lib/ws/firstRunOpeningReveal';
 
 	let { threadId = undefined, onclose = () => {}, focusLocalOnly = false, onfocusconsumed = () => {} }: { threadId?: string | null; onclose?: () => void; focusLocalOnly?: boolean; onfocusconsumed?: () => void } = $props();
@@ -150,22 +150,6 @@
 		} finally {
 			if (target) finishThreadModelSwitch(target);
 		}
-	}
-
-	function emitSwitchEvent(
-		model: Model,
-		dispatchId: string,
-		threadId: string | null,
-		previousId: string | null,
-	) {
-		emitProductEvent('model', 'switched', {
-			thread_id: threadId,
-			model_id: dispatchId,
-			catalog_model_id: model.id,
-			provider: model.provider ?? model.backend,
-			previous_model_id: previousId,
-			reasoning_shape: model.capabilities?.reasoning_config?.type ?? null,
-		});
 	}
 </script>
 
