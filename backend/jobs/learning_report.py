@@ -20,6 +20,7 @@ from core.corrections_recording import (
 from core import workflow_verdict_evaluator
 from core.workflow_verdict_read import PLANNED_EVENT, REACHED_EVENT
 from events.learning_report import deliver_learning_report_sync
+from plans.lesson_reviews import LESSON_PREFIX
 
 EARLY_FLOOR = 5
 HISTORY_DAYS = 28
@@ -103,9 +104,14 @@ def _lessons(
     # trials only until the lesson gate routes every lesson through place
     refs = [str(row["source_event_id"]) for row in rows]
     # a review key is <prefix>:<id>:...; a capture and the trial it became share the id
-    distinct = len({ref.split(":")[1] for ref in refs})
+    ids = {ref.split(":")[1] for ref in refs}
+    in_use = {ref.split(":")[1] for ref in refs if ref.split(":")[0] == LESSON_PREFIX}
+    in_use_refs = [ref for ref in refs if ref.split(":")[1] in in_use]
+    held_refs = [ref for ref in refs if ref.split(":")[1] not in in_use]
     return ({
-        "recorded": {**_count(refs), "count": distinct},
+        "recorded": {**_count(refs), "count": len(ids)},
+        "in_use": {**_count(in_use_refs), "count": len(in_use)},
+        "held": {**_count(held_refs), "count": len(ids - in_use)},
         "confirmed": None,
         "consolidated": None,
         "repeated": None,
@@ -149,9 +155,10 @@ def build_report(db: sqlite3.Connection, *, scope: str, report_date: str, report
         "experiments": experiments,
         "wins": None,
     }
+    # a person's correction day wakes the daily read: its floor line is the report's only post
     wake = report_kind != "daily" or len(lesson_agents) >= 2 or any(
-        count is not None and count["count"] > 0 for count in experiments.values()
-    )
+        source in PERSON_CORRECTION_SOURCES for source in correction_refs
+    ) or any(count is not None and count["count"] > 0 for count in experiments.values())
     return {"scope": scope, "report_date": report_date, "report_key": f"{scope}:{report_date}:{report_kind}",
             "wake": wake, "items": items}
 

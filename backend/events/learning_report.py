@@ -26,7 +26,7 @@ from events.platform import PlatformDelivery
 from events.report_delivery import deliver_measurement_report_sync
 
 _REPORT_SUFFIXES = ("daily", "early-1", "early-2")
-_LESSON_KEYS = ("recorded", "confirmed", "consolidated", "repeated")
+_LESSON_KEYS = ("recorded", "in_use", "held", "confirmed", "consolidated", "repeated")
 _EXPERIMENT_KEYS = ("started", "decided")
 _MAX_REFS = 50
 

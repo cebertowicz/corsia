@@ -43,13 +43,16 @@ def test_disabled_verdict_source_is_not_reported_as_an_empty_experiment_list(db)
     report = build_report(db, scope="proj", report_date="2026-10-22")
 
     assert report == {
-        "scope": "proj", "report_date": "2026-10-22", "report_key": "proj:2026-10-22:daily", "wake": False,
+        "scope": "proj", "report_date": "2026-10-22", "report_key": "proj:2026-10-22:daily", "wake": True,
         "items": {
             "corrections": {
                 "doc_comment": {"count": 1, "refs": ["comment:b"]},
                 "message": {"count": 1, "refs": ["message:a"]},
             },
-            "lessons": {"recorded": {"count": 0, "refs": []}, "confirmed": None, "consolidated": None, "repeated": None},
+            "lessons": {
+                **{name: {"count": 0, "refs": []} for name in ("recorded", "in_use", "held")},
+                "confirmed": None, "consolidated": None, "repeated": None,
+            },
             "experiments": {"started": None, "decided": None},
             "wins": None,
         },
@@ -211,6 +214,7 @@ def test_sent_back_corrections_are_shown_separately_but_never_trigger_early_repo
     assert learning_report.early_threshold(db, scope="history", report_date=report_day.isoformat()) == 8
     assert not learning_report.maybe_emit_early(db, scope="daily", report_date=report_day.isoformat())
     assert delivered == []
+    assert report["wake"] is False
     assert report["items"]["corrections"] == {
         "sent_back": {"count": 200, "refs": [f"sent-back:today:{number:03}" for number in range(50)]},
     }
@@ -306,8 +310,11 @@ def test_recorded_lessons_count_each_lesson_once_with_a_reference_per_version(db
     review = {"artifact_id": "art", "title": "Review", "acceptance": "Decide.", "review_after": "2099-01-01T00:00:00+00:00"}
     today = learning_report.report_date_for(datetime.now(timezone.utc))
 
+    def lessons():
+        return learning_report.build_report(db, scope="proj", report_date=today)["items"]["lessons"]
+
     def recorded():
-        return learning_report.build_report(db, scope="proj", report_date=today)["items"]["lessons"]["recorded"]
+        return lessons()["recorded"]
 
     for lesson_id, sha in (("a", "1"), ("a", "2"), ("b", "1")):
         lesson_reviews.ensure_lesson_review(db, "owner", lesson_id=lesson_id, behavioral_sha256=sha, **review)
@@ -315,6 +322,10 @@ def test_recorded_lessons_count_each_lesson_once_with_a_reference_per_version(db
 
     lesson_reviews.ensure_capture_review(db, "owner", capture_id="a", capture_hash="1", **review)
     assert (recorded()["count"], len(recorded()["refs"])) == (2, 4)
+    # a capture that became a trial is in use, never held; a capture alone is held
+    lesson_reviews.ensure_capture_review(db, "owner", capture_id="c", capture_hash="1", **review)
+    assert (lessons()["in_use"]["count"], lessons()["held"]["count"]) == (2, 1)
+    assert lessons()["held"]["refs"] == ["capture:c:1"]
 
 
 def test_daily_report_is_passive_without_qualifying_facts(db):
@@ -325,7 +336,10 @@ def test_daily_report_is_passive_without_qualifying_facts(db):
     assert report["wake"] is False
     assert report["items"] == {
         "corrections": {},
-        "lessons": {"recorded": {"count": 0, "refs": []}, "confirmed": None, "consolidated": None, "repeated": None},
+        "lessons": {
+            **{name: {"count": 0, "refs": []} for name in ("recorded", "in_use", "held")},
+            "confirmed": None, "consolidated": None, "repeated": None,
+        },
         "experiments": {"started": None, "decided": None},
         "wins": None,
     }

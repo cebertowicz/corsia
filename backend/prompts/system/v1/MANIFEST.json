@@ -250,10 +250,10 @@
       "sha256": "40cc04d5b875d4eb5055f8927bc4f555a37e5f91285bdabdcc2526cc5abc2b45"
     },
     {
-      "bytes": 6164,
+      "bytes": 6113,
       "kind": "skill",
       "path": "skills/context-stewardship/SKILL.md",
-      "sha256": "986b7c0f377ff3ed786dcc21dc48d61bee3386e5f9736166f55a6d0249f04b1a"
+      "sha256": "fe751ea13328cbd87b9286db2bb7b8d0c7534a4d465ddadb27e35b7630252470"
     },
     {
       "bytes": 3355,
