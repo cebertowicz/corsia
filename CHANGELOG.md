@@ -7,6 +7,7 @@ the later entry describes the current behavior.
 
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here._
 
+- On a phone, a long tool step in a chat and a long model name in Settings' Host access review no longer make the screen scroll sideways.
 - Reopening an unchanged document while disconnected now says your changes stay on this device, instead of warning that they aren't saved.
 - Posting a document comment makes it appear right away and clears the box; the agent still gets it.
 - Setup keeps CORSIA’s own work folder as the default offer after you choose another folder.
