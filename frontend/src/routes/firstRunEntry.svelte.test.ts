@@ -257,7 +257,7 @@ describe('first-run entry across auth readiness', () => {
 
 	it('cancels the post-setup landing when the route unmounts after its own selection update', async () => {
 		startsSetup = true;
-		listedThreads = [row('fixture-conductor')];
+		const conductor = row('fixture-conductor');
 		render();
 		await vi.waitFor(() => expect(setupHarness.finish).not.toBeNull());
 		authenticate();
@@ -276,7 +276,7 @@ describe('first-run entry across auth readiness', () => {
 		await unmount(page!);
 		page = null;
 		activeThreadId.set(null);
-		deferredThreadList.resolve(json({ threads: listedThreads }));
+		deferredThreadList.resolve(json({ threads: [conductor] }));
 		await settle();
 
 		expect(get(activeThreadId)).toBeNull();
