@@ -492,6 +492,7 @@ async def test_the_headline_window_pools_every_period_across_raters(isolated_db,
                                       timezone_name="UTC", user=USER)
     # A changed rater is a model break at the oldest week its ratings count.
     assert [row["comparable"] for row in served["rows"] if row["period"] in (WEEK, second)] == [False, True]
+    assert _week(served["rows"], WEEK)["size"]["comparable_reason"] == "judging_model_changed"
     latest = served["windows"]["estimated_human_hours_per_active_hour"]["latest"]
     # The rate divides by presence time, so the window starts at the first presence week.
     assert (latest["n"], latest["from"], latest["to"]) == (40, WEEK, "2026-10-04")

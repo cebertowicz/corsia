@@ -47,8 +47,8 @@ REGISTRY: dict[str, MetricDefinition] = {
 
 
 
-def period_measured(metric: str, period: str, grain: Grain | None = None,
-                    first_presence_period: str | None = None, source_start: str | None = None) -> bool:
+def period_measured(metric: str, period: str, first_presence_period: str | None = None,
+                    source_start: str | None = None) -> bool:
     """Say whether one registry id's instrument existed in a period (a week, or a day on Days).
 
     Presence-backed metrics derive their observed range from the user's first recorded

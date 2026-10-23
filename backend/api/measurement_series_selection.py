@@ -27,4 +27,4 @@ def metric_spine(metric: str, spine: list[str], first_limit_period: str | None,
     if metric == "limit_hits":
         first = max(first_limit_period, source_start) if first_limit_period and source_start else first_limit_period or source_start
         return [period for period in spine if first and period >= first]
-    return [period for period in spine if period_measured(metric, period, grain, first_presence_period, source_start)]
+    return [period for period in spine if period_measured(metric, period, first_presence_period, source_start)]

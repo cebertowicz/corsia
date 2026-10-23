@@ -191,7 +191,7 @@ def pooled_size_window(pooled: dict[str, Any], measured: bool, minimum_n: int) -
 
 
 def size_rows(metric: str, minimum_n: int, method_version: int, spine: list[str], sources: list[dict[str, Any]],
-              comparable: Any, measured: Any, *, dates: dict[str, str]) -> list[dict[str, Any]]:
+              comparable: Any, comparability_kind: Any, measured: Any, *, dates: dict[str, str]) -> list[dict[str, Any]]:
     """Serve one row per completed period, including periods with no outcomes or time.
 
     The rate is null before the series' data start, when active time is absent
@@ -212,8 +212,8 @@ def size_rows(metric: str, minimum_n: int, method_version: int, spine: list[str]
         # Before the minimum is applied: still a figure when the ratings are few, never when there are none.
         raw_value = source["estimated_hours"] / active_hours if rate_reason in (None, "below_minimum") else None
         n = 0 if rate_reason == "before_data_start" else sized
-        # Who rated an outcome, and whether its author declared the size, is served as coverage, never as a break.
-        reason = None if comparable(metric, period) else "outcome_definition_changed"
+        kind = comparability_kind(metric) if not comparable(metric, period) else None
+        reason = "judging_model_changed" if kind == "model" else "outcome_definition_changed" if kind else None
         rows.append({
             "period": period, "series": metric, "method_version": method_version, "value": value, "raw_value": raw_value, "n": n, "proxy": True,
             "partial": sized < source["outcomes"],

@@ -63,7 +63,7 @@ def _model_marks(db, grain: Grain) -> list[dict[str, str]]:
             marks.append({
                 "period": period,
                 "kind": "model",
-                "reason": "rater changed",
+                "reason": "judging model changed",
                 "metric_group": "estimated_human_hours_per_active_hour",
             })
     return marks
@@ -99,7 +99,7 @@ def derive_breaks(db, metrics: Iterable[str], grain: Grain) -> dict[str, list[di
         start = starts[source_group(metric)]
         rows: list[dict[str, str]] = []
         if start:
-            rows.append({"period": start, "kind": "start", "reason": "instrument source first recorded"})
+            rows.append({"period": start, "kind": "start", "reason": "first recorded on this install"})
         rows.extend(
             {key: value for key, value in mark.items() if key != "metric_group"}
             for mark in marks
@@ -133,6 +133,12 @@ def comparability_start(breaks: Iterable[dict[str, str]]) -> str | None:
     """Return the final definition boundary a period must reach to be comparable."""
     marks = [item["period"] for item in breaks if item["kind"] in {"world", "model"}]
     return max(marks, default=None)
+
+
+def comparability_break_kind(breaks: Iterable[dict[str, str]]) -> str | None:
+    """Return the kind of the latest boundary that makes prior periods incomparable."""
+    marks = [item for item in breaks if item["kind"] in {"world", "model"}]
+    return max(marks, key=lambda item: item["period"])["kind"] if marks else None
 
 
 def period_comparable(period: str, breaks: Iterable[dict[str, str]]) -> bool:

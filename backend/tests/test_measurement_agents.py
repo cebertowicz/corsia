@@ -303,7 +303,7 @@ def _build(db_seed, *, metric="fresh_tokens_per_outcome", sort="ranked", compara
         rows, findings, summaries, count, _overall = build_agents(
             db, params, REGISTRY, metric, sort, grain,
             comparable or (lambda name, period: period_comparable(period, breaks[name])),
-            measured or (lambda name, period: period_measured(name, period, grain, first_presence)), chain_costs(db, params, grain)["cost_rows"])
+            measured or (lambda name, period: period_measured(name, period, first_presence)), chain_costs(db, params, grain)["cost_rows"])
         return {"rows": rows, "findings": findings, "project_summaries": summaries["active"],
                 "agent_count": count, "findings_state": derive_findings_state(rows, findings, count)}
     finally:
@@ -364,7 +364,7 @@ async def test_the_selected_column_and_order_cannot_change_what_the_findings_fou
     def seed(db):
         _seed_project(db, "p1")
         _seed_agent(db, "worker", project_id="p1")
-        db.execute("INSERT INTO measure_breaks(period,kind,metric_group,reason) VALUES ('2026-08-31','world',NULL,'plan nodes got about 5 times smaller')")
+        db.execute("INSERT INTO measure_breaks(period,kind,metric_group,reason) VALUES ('2026-08-31','world',NULL,'tasks got about 5 times smaller')")
         for index, period in enumerate(frame):
             _seed_period(db, "worker", period, 20)
             _seed_tokens(db, "worker", period, 2000 if index < 8 else 8000)
@@ -750,7 +750,7 @@ async def test_a_finding_never_compares_across_the_period_the_outcome_unit_chang
 
     def seed(db):
         _seed_project(db, "p1")
-        db.execute("INSERT INTO measure_breaks(period,kind,metric_group,reason) VALUES ('2026-08-31','world',NULL,'plan nodes got about 5 times smaller')")
+        db.execute("INSERT INTO measure_breaks(period,kind,metric_group,reason) VALUES ('2026-08-31','world',NULL,'tasks got about 5 times smaller')")
         for agent_id, periods in (("straddle", straddle), ("comparable", later)):
             _seed_agent(db, agent_id, project_id="p1")
             for index, period in enumerate(periods):

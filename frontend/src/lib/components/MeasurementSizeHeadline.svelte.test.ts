@@ -146,6 +146,9 @@ describe('MeasurementSizeHeadline', () => {
 		const changed = render(coverage({ comparable_reason: 'outcome_definition_changed', comparability_before: '2026-09-14' }), null, false);
 		expect(changed.querySelector('.comparability')?.textContent).toContain('before 14 September 2026');
 		expect(changed.textContent).not.toContain('31 August');
+		unmount(component!); host.remove();
+		const model = render(coverage({ comparable_reason: 'judging_model_changed', comparability_before: '2026-09-21' }), null, false);
+		expect(model.querySelector('.comparability')?.textContent).toContain('sizes were judged by a different model before 21 September 2026');
 	});
 
 	it('takes the served rate reason as authoritative even when the counts suggest another', () => {

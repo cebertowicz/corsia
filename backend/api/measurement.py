@@ -18,8 +18,8 @@ from api.measurement_limits import first_recorded_period, limits_by_period, rout
 from api.measurement_recent import router as recent_router
 from api.measurement_presence import PresenceCoverage, presence_coverage
 from api.measurement_breaks import (
-    COMPARABILITY_UNRESTRICTED, comparability_start, derive_breaks, first_availability_period,
-    period_comparable,
+    COMPARABILITY_UNRESTRICTED, comparability_break_kind, comparability_start, derive_breaks,
+    first_availability_period, period_comparable,
 )
 from api.measurement_registry import REGISTRY, period_measured
 from api.measurement_series_selection import metric_spine, requested_series
@@ -127,7 +127,7 @@ def _row(metric: str, period: str, source: dict[str, Any] | None, scoped_agent: 
         value = None if not n or (unknown_records and not source.get("tokens")) else int(source.get("tokens") or 0)
     else: value = source.get("tokens", 0) / n if n else None
     thin = scoped_agent and metric in {"took_recommendation_pct", "answered_other_pct", "answered_neither_pct"} and n < 6
-    if not period_measured(metric, period, grain, first_presence_period, source_start):
+    if not period_measured(metric, period, first_presence_period, source_start):
         # An instrument measures nothing before it exists. The period is served as not
         # measured -- never as a zero the chart could draw a baseline through.
         value, n = None, 0
@@ -196,7 +196,7 @@ async def series_payload(requested: list[str], project: str, agent: str, page_gr
     windows: dict[str, dict[str, Any]] = {}
     spine = list(page_grain.periods)
     def measured(metric: str, period: str) -> bool:
-        return period_measured(metric, period, page_grain, first_presence, first_availability_period(breaks[metric]))
+        return period_measured(metric, period, first_presence, first_availability_period(breaks[metric]))
 
     for metric in requested:
         family = REGISTRY[metric].family
@@ -216,7 +216,8 @@ async def series_payload(requested: list[str], project: str, agent: str, page_gr
             return measured(name, period) and period >= start
         if family == "size":
             rows.extend(size_rows(metric, REGISTRY[metric].minimum_n, REGISTRY[metric].method_version, drawn, family_rows[family],
-                                  lambda name, period: period_comparable(period, breaks[name]), rate_measured,
+                                  lambda name, period: period_comparable(period, breaks[name]),
+                                  lambda name: comparability_break_kind(breaks[name]), rate_measured,
                                   dates={"data_start": rate_period, "comparability_before": comparability_start(breaks[metric])}))
         elif family == "tokens":
             by_period = {row["period"]: row for row in family_rows[family]}
@@ -340,7 +341,7 @@ async def agents_payload(project: str, agent: str, page_grain: Grain, sort: str,
             rows, findings, summaries, agent_count, overall = build_agents(
                 db, params, REGISTRY, metric, sort, page_grain,
                 lambda name, period: period_comparable(period, breaks[name]),
-                lambda name, period: period_measured(name, period, page_grain, first_presence, first_availability_period(breaks[name])), cost_rows, with_dollars=dollars)
+                lambda name, period: period_measured(name, period, first_presence, first_availability_period(breaks[name])), cost_rows, with_dollars=dollars)
             return {
                 "definition_version": 1,
                 "scope": selected_scope.response(),
@@ -359,8 +360,7 @@ async def agents_payload(project: str, agent: str, page_grain: Grain, sort: str,
         finally:
             db.close()
 
-    payload = await run_bulk(query)
-    return payload
+    return await run_bulk(query)
 
 @router.get("/models")
 async def measurement_models(

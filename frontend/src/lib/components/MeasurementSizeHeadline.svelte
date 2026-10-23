@@ -12,6 +12,7 @@
 	/** Copy for each served ``size.comparable_reason``; the server alone decides whether a week compares. */
 	const reasons = (size: SizeCoverage): Record<string, string> => ({
 		outcome_definition_changed: `outcomes were counted differently before ${day(size.comparability_before)}`,
+		judging_model_changed: `sizes were judged by a different model before ${day(size.comparability_before)}`,
 	});
 	/** Copy for each served ``size.rate_reason``; the code, not the counts, says why a rate is withheld. */
 	const rateStatus = (size: SizeCoverage): Record<string, string> => ({

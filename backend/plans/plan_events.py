@@ -247,6 +247,7 @@ def project_node_event(
 
     if from_schema_step(provenance):
         return
+
     append_node_transition(
         connection, node_id=node_id, event_id=event_id, actor_id=actor_id,
         new_state=new_state, created_at=created_at,

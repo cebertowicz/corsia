@@ -74,7 +74,7 @@ def test_fresh_install_live_start_is_primary_and_reads_do_not_write(isolated_db)
         rows = db.execute("SELECT COUNT(*) FROM measure_breaks").fetchone()[0]
     finally:
         db.close()
-    expected = [{"period": "2026-08-10", "kind": "start", "reason": "instrument source first recorded"}]
+    expected = [{"period": "2026-08-10", "kind": "start", "reason": "first recorded on this install"}]
     assert first["first_try_acceptance"] == second["first_try_acceptance"] == expected
     assert rows == 0
     assert after == before
@@ -85,7 +85,7 @@ def test_legacy_floor_is_used_instead_of_the_live_start(isolated_db) -> None:
     try:
         _thread(db)
         _accepted(db, "node", "2026-08-10T12:00:00Z")
-        _mark(db, "2026-09-14T12:00:00Z", "start", "first_try", "instrument source first recorded")
+        _mark(db, "2026-09-14T12:00:00Z", "start", "first_try", "first recorded on this install")
         db.execute(
             "INSERT INTO plan_node_events (id,node_id,provenance,event,prior_state,new_state,created_at) "
             "VALUES ('rejected','node','test','review_rejected','active','active','2026-09-14T12:00:00Z')"
@@ -105,7 +105,7 @@ def test_seeded_and_live_starts_share_the_days_viewer_zone_bucket(isolated_db) -
         _accepted(db, "node", "2026-09-15T00:30:00Z")
         db.commit()
         live = derive_breaks(db, ("outcomes",), grain)
-        _mark(db, "2026-09-15T00:30:00Z", "start", "outcomes", "instrument source first recorded")
+        _mark(db, "2026-09-15T00:30:00Z", "start", "outcomes", "first recorded on this install")
         db.commit()
         seeded = derive_breaks(db, ("outcomes",), grain)
     finally:
@@ -138,7 +138,7 @@ def test_legacy_asks_seed_gates_pre_hold_periods_but_fresh_live_start_is_decisio
             "INSERT INTO plan_node_holds (id,node_id,kind,reason_key,reason,owner_kind,provenance,created_at) "
             "VALUES ('hold','node','blocked','test','test','user','test','2026-09-07T12:00:00Z')"
         )
-        _mark(db, "2026-09-07T12:00:00Z", "start", "asks_per_outcome", "instrument source first recorded")
+        _mark(db, "2026-09-07T12:00:00Z", "start", "asks_per_outcome", "first recorded on this install")
         db.commit()
         legacy = derive_breaks(db, ("asks_per_outcome",), _grain())
         db.execute("DELETE FROM measure_breaks")
@@ -162,7 +162,7 @@ def test_model_marks_derive_from_rating_facts_and_are_size_scoped(isolated_db) -
         unrelated = derive_breaks(db, ("outcomes", "first_try_acceptance"), _grain())
     finally:
         db.close()
-    assert {"period": "2026-09-14", "kind": "model", "reason": "rater changed"} in sized[
+    assert {"period": "2026-09-14", "kind": "model", "reason": "judging model changed"} in sized[
         "estimated_human_hours_per_active_hour"
     ]
     assert not any(mark["kind"] == "model" for marks in unrelated.values() for mark in marks)
@@ -183,19 +183,19 @@ def test_model_mark_uses_each_raters_earliest_accepted_settlement(isolated_db) -
         breaks = derive_breaks(db, ("estimated_human_hours_per_active_hour",), grain)
     finally:
         db.close()
-    assert {"period": "2026-09-14", "kind": "model", "reason": "rater changed"} in breaks[
+    assert {"period": "2026-09-14", "kind": "model", "reason": "judging model changed"} in breaks[
         "estimated_human_hours_per_active_hour"
     ]
 
 
 def test_availability_and_comparability_helpers_distinguish_start_and_marks() -> None:
     start_then_completeness = [
-        {"period": "2026-03-02", "kind": "start", "reason": "instrument source first recorded"},
-        {"period": "2026-09-07", "kind": "source", "reason": "token totals cover every harness from this week"},
+        {"period": "2026-03-02", "kind": "start", "reason": "first recorded on this install"},
+        {"period": "2026-09-07", "kind": "source", "reason": "token totals cover every agent from this week"},
     ]
     marks = [
         {"period": "2026-08-31", "kind": "world", "reason": "counting changed"},
-        {"period": "2026-09-14", "kind": "model", "reason": "rater changed"},
+        {"period": "2026-09-14", "kind": "model", "reason": "judging model changed"},
     ]
     assert first_availability_period(start_then_completeness) == "2026-03-02"
     assert comparability_start(marks) == "2026-09-14"
