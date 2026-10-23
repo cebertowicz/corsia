@@ -37,13 +37,23 @@ it('shows the external warning and exact launch before Plan on a projectless req
 	show(lease);
 	const section = host.querySelector('.policy-exceptions')!;
 	expect(host.querySelector('.purpose')!.nextElementSibling).toBe(section);
-	expect(section.nextElementSibling).toBe(host.querySelector('.plan'));
+	expect(section.nextElementSibling).toBe(host.querySelector('.explainer'));
+	expect(section.nextElementSibling!.nextElementSibling).toBe(host.querySelector('.plan'));
 	expect(host.querySelector('.external-warning')!.textContent).toBe('External agents run outside CORSIA’s managed context and controls. Their instructions, skills and tools may differ, and CORSIA may not fully observe their actions, costs or results. Human approval is required for this exception, even when automatic approval is enabled.');
 	const external = lease.requested_policy_exceptions[0];
 	if (external.policy !== 'external_agent') throw new Error('Invalid fixture');
 	expect(Array.from(section.querySelectorAll('code'), (node) => node.textContent))
 		.toEqual([external.command, external.working_directory]);
 	expect(button('Approve')?.disabled).toBe(false);
+});
+
+it('says what host access is before the request details', () => {
+	const lease = externalLease();
+	lease.requested_policy_exceptions = [];
+	show(lease);
+	const explainer = host.querySelector('.decision-body > .explainer')!;
+	expect(explainer.textContent).toBe("This agent is asking for temporary access to parts of this computer it can't normally reach. It cannot use that access unless you approve, and you can revoke it at any time.");
+	expect(explainer.nextElementSibling).toBe(host.querySelector('.purpose'));
 });
 
 it('keeps a long requesting-thread title available through the drawer heading', () => {
