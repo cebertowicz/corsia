@@ -45,7 +45,7 @@
 	import { toasts } from '$lib/stores/toast';
 	import type { PresenceRange } from '$lib/cm/presence-marks';
 	import DocumentViewport from './DocumentViewport.svelte';
-	import { on } from '$lib/ws/events';
+	import { createDocImageCacheKey } from '$lib/docImageCacheKey.svelte';
 
 	type DocState = 'loading' | 'ready' | 'error';
 
@@ -106,19 +106,9 @@
 	});
 
 	const commentRetryToast = createCommentRetryToast(toasts);
-
 	let presenceRanges = $state<PresenceRange[]>([]);
 	let activity = $state<DocCanvasActivity>();
-	let imageCacheKey = $state(crypto.randomUUID());
-	$effect(() => {
-		const threadId = target?.threadId;
-		const artifactId = loadedArtifactId;
-		if (!threadId || !artifactId) return;
-		return on('artifacts_changed', (payload: { artifact_id?: string; affected_thread_ids?: string[] }) => {
-			if (payload.artifact_id === artifactId || !payload.affected_thread_ids?.includes(threadId)) return;
-			imageCacheKey = crypto.randomUUID();
-		});
-	});
+	const imageKey = createDocImageCacheKey(() => target?.threadId, () => loadedArtifactId);
 	// The comments pane derives orphaning from the text currently on screen (and a refused accept)
 	// so a comment never remains highlighted after an in-editor edit changes it.
 	$effect(() => syncActiveDocumentEditor({ target, draft: save.draft, docState, artifactId: loadedArtifactId, text: editText, readonly: readonly || confirming }));
@@ -148,7 +138,7 @@
 	const images = createDocViewerImages({
 		onOpenImage: () => onOpenImage, root: () => docRoot, comments: () => listedComments, artifactId: () => loadedArtifactId,
 		target: () => target, readOnly: () => readonly || confirming, text: () => editText, session: () => liveSession, accent: () => accent,
-		feedback: () => feedbackStatus?.feedback(), imageCacheKey: () => imageCacheKey, showInText: focusInText });
+		feedback: () => feedbackStatus?.feedback(), imageCacheKey: () => imageKey.current, showInText: focusInText });
 	/** The comments of the image shown over this document, bound to it as it is now: an image's host rebuilds them when it shows one. */
 	export function imageComments() { return images.comments(); }
 	function focusInText(id: string, placement?: 'top') { scroll.toComment(id, commentUI.state?.kind === 'list', placement === 'top' ? 'quote-tap' : 'navigation'); focusedDocComment.set(id); }
@@ -362,7 +352,7 @@
 		onEdit={onDocEdit}
 		onLayout={(mapPos) => activity?.editorChanged(mapPos)}
 		readOnly={readonly || confirming || suggestionBusyId !== null}
-		imageBase={target && { ...target, imageCacheKey }}
+		imageBase={target && { ...target, imageCacheKey: imageKey.current }}
 		onOpenImage={onOpenImage ? (request) => images.open(request) : undefined}
 		tabInstanceId={target?.instanceId ?? null}
 		{onDocumentPlace}
