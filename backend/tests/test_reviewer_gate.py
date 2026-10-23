@@ -88,6 +88,39 @@ class TestReviewerVerdictReturn:
         assert verdict["flag_count"] == 0
         assert verdict["finding_count"] == 1
 
+    def test_completed_event_identifies_the_reviewed_head(self):
+        from reviewer import on_pr_review
+
+        findings = [
+            {"severity": "block", "category": "correctness/logic-error", "file": "backend/x.py"},
+            {"severity": "flag", "category": "tests/missing", "file": "backend/y.py"},
+        ]
+        events: list[tuple[str, str, dict]] = []
+
+        def record(category, action, *, properties=None, **_kwargs):
+            events.append((category, action, properties or {}))
+            return True
+
+        with patch.object(on_pr_review, "parse_findings", return_value=findings), \
+             patch.object(on_pr_review, "fetch_existing_review_comments", return_value=[]), \
+             patch.object(on_pr_review, "fetch_existing_issue_comments", return_value=[]), \
+             patch.object(on_pr_review, "classify_review_findings", return_value=(findings, [], [])), \
+             patch.object(on_pr_review, "publish_review"), \
+             patch.object(on_pr_review, "set_failure", return_value=True), \
+             patch.object(on_pr_review, "emit_product_event", side_effect=record):
+            on_pr_review._process_findings(
+                "[]", 42, "owner/repo", "abc123def", "codex",
+                reviewer_version="test-version", reviewer_standards=["product"],
+            )
+
+        completed = [props for cat, action, props in events if (cat, action) == ("reviewer", "completed")]
+        assert len(completed) == 1
+        keys = ("repo", "pr_number", "head_sha", "block_count", "flag_count", "nit_count")
+        assert {k: completed[0][k] for k in keys} == {
+            "repo": "owner/repo", "pr_number": 42, "head_sha": "abc123def",
+            "block_count": 1, "flag_count": 1, "nit_count": 0,
+        }
+
     def test_reraised_resolved_finding_is_published_without_changing_the_verdict(self):
         from reviewer import on_pr_review
         from reviewer.reviewer_threads import format_threaded_comment_body

@@ -355,9 +355,9 @@ def _process_findings(
     emit_product_event(
         "reviewer", "completed",
         properties={
-            "pr_number": pr_number,
+            "repo": repo, "pr_number": pr_number, "head_sha": head_sha,
             "finding_count": len(findings),
-            "block_count": block_count,
+            "block_count": block_count, "flag_count": flag_count, "nit_count": nit_count,
             "new_count": len(new_threads),
             "unchanged_count": len(still_raised),
             "resolved_count": len(resolve_replies),
