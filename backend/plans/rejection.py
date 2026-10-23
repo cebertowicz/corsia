@@ -122,10 +122,10 @@ def reject_submission(
             connection, revision.id, "revision_created", actor_id=actor_id,
             provenance=provenance, payload=payload,
         )
-        from core.sent_back_corrections import schedule_rejection_corrections
+        from core.sent_back_corrections import record_rejection_correction
 
-        # Recorded once this write commits; the nightly recovery covers a failure.
-        schedule_rejection_corrections(connection, [rejection_event_id])
+        # In this write: a fact that cannot be recorded fails the rejection.
+        record_rejection_correction(connection, rejection_event_id)
         return rejected, service._node_from_row(connection, service._node_row(connection, revision.id)), False
 
 

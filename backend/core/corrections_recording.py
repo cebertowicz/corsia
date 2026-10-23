@@ -183,6 +183,11 @@ def subject_key(source_kind: str, source_id: str) -> str:
     return SUBJECT_PREFIXES[source_kind] + source_id
 
 
+def sent_back_dedupe_key(rejection_event_id: str) -> str:
+    """The one idempotency key for a sent-back fact: its rejection event, under no classifier."""
+    return f"correction:{SOURCE_KIND_SENT_BACK}:{rejection_event_id}"
+
+
 def decision_answer_source_id(decision_id: str, revision: object) -> str:
     """The stable source id for one answered revision of a plan decision."""
     return f"{decision_id}:{revision}"

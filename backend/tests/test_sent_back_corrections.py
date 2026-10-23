@@ -1,313 +1,172 @@
-"""Sent-back plan rejections become correction evidence without agent triage."""
+"""Sent-back plan rejections become correction evidence, written with the rejection."""
 
 from __future__ import annotations
 
 import json
-import logging
 import sqlite3
 
-from infra.schema import SCHEMA_SQL
+import pytest
+
+from infra.database_migrations import MIGRATIONS
+from infra.migration_142_to_143_sent_back_corrections import migrate_142_to_143
+from infra.schema import SCHEMA_VERSION
 from plans import service
+from tests.test_plan_rejection_revision import _db as rejection_db, _reject, _returned
 
 FEEDBACK = "The implementation misses the empty input path."
 
 
-def _db() -> sqlite3.Connection:
-    db = sqlite3.connect(":memory:")
-    db.row_factory = sqlite3.Row
-    db.execute("PRAGMA foreign_keys=ON")
-    db.executescript(SCHEMA_SQL)
-    db.execute("INSERT INTO projects (id,name,created_at,updated_at) VALUES ('project','Project','t','t')")
-    db.execute(
-        "INSERT INTO threads (id,user_id,project_id,created_at,updated_at) VALUES "
-        "('parent','user','project','t','t')"
-    )
-    db.execute(
-        "INSERT INTO threads (id,user_id,project_id,spawned_by,created_at,updated_at) VALUES "
-        "('worker','user','project','parent','t','t')"
-    )
-    plan = service.ensure_plan("thread", "parent", db=db)
-    node = service.add_node(
-        plan.id, kind="task", title="Worker task", acceptance_criteria="Works", db=db,
-    )
-    db.execute("UPDATE plan_nodes SET executor_thread_id='worker' WHERE id=?", (node.id,))
-    revision = service.add_node(plan.id, kind="task", title="Revision", acceptance_criteria="Works", db=db)
-    db.execute("UPDATE plan_nodes SET follow_up_of=? WHERE id=?", (node.id, revision.id))
-    db.execute(
-        """INSERT INTO plan_node_events
-           (id,node_id,actor_id,provenance,event,payload_json,created_at)
-           VALUES ('reject-event',?,'parent','test','review_rejected',?,?)""",
-        (node.id, json.dumps({"feedback": FEEDBACK}), "2026-10-01T12:00:00+00:00"),
-    )
-    db.execute(
-        """INSERT INTO plan_node_events
-           (id,node_id,actor_id,provenance,event,payload_json,created_at)
-           VALUES ('revision-event',?,'parent','test','revision_created',?,?)""",
-        (revision.id, json.dumps({"source_node_id": node.id, "feedback": FEEDBACK}), "2026-10-01T12:00:00+00:00"),
-    )
+def _facts(db) -> list[sqlite3.Row]:
+    return db.execute(
+        "SELECT subject_key,agent_thread_id,project_id,attributes FROM outcome_events "
+        "WHERE event_name='measurement.correction' ORDER BY subject_key"
+    ).fetchall()
+
+
+def _rejection_ids(db, node_id: str) -> list[str]:
+    return [
+        row["id"] for row in db.execute(
+            "SELECT id FROM plan_node_events WHERE node_id=? AND event='review_rejected'", (node_id,),
+        )
+    ]
+
+
+def _seed_rejection(db, runner: str, *, revision: bool = True) -> str:
+    """A node in ``runner``'s plan that was rejected, with the revision a rejection creates."""
+    plan = service.ensure_plan("thread", runner, db=db)
+    node = service.add_node(plan.id, kind="task", title="Task", acceptance_criteria="Works", db=db)
+    events = [("review_rejected", node.id, f"reject-{node.id}")]
+    if revision:
+        follow_up = service.add_node(plan.id, kind="task", title="Revision", acceptance_criteria="Works", db=db)
+        db.execute("UPDATE plan_nodes SET follow_up_of=? WHERE id=?", (node.id, follow_up.id))
+        events.append(("revision_created", follow_up.id, f"revision-{node.id}"))
+    for event, node_id, event_id in events:
+        db.execute(
+            "INSERT INTO plan_node_events (id,node_id,actor_id,provenance,event,payload_json,created_at) "
+            "VALUES (?,?,'parent','test',?,?,'2026-10-01T12:00:00+00:00')",
+            (event_id, node_id, event, json.dumps({"feedback": FEEDBACK})),
+        )
     db.commit()
-    return db
+    return events[0][2]
 
 
-def _reviewable(db):
-    plan = service.ensure_plan("thread", "parent", db=db)
-    node = service.add_node(plan.id, kind="task", title="Review me", acceptance_criteria="Done", db=db)
-    service.transition_node(node.id, "active", actor_id="parent", db=db)
-    db.execute("UPDATE plan_nodes SET executor_thread_id='parent' WHERE id=?", (node.id,))
-    from tests.plan_review_helpers import submit_review_evidence
-
-    submit_review_evidence(node.id, db=db, actor_id="parent")
-    db.commit()
-    return node
-
-
-def test_sent_back_fact_uses_the_rejection_event_and_nearest_persistent_owner():
-    from core.sent_back_corrections import (
-        prepare_sent_back_correction,
-        reconcile_sent_back_corrections,
-        record_sent_back_correction,
-        unrecorded_rejection_event_ids,
-    )
-
-    db = _db()
-    try:
-        notes_before = db.execute("SELECT COUNT(*) FROM context_change_journal").fetchone()[0]
-        assert unrecorded_rejection_event_ids(db, since=None, limit=10) == ["reject-event"]
-        fact = prepare_sent_back_correction("reject-event", db=db)
-        assert fact is not None
-        assert fact.thread_id == "parent"
-        assert fact.project_id == "project"
-        assert reconcile_sent_back_corrections(db) == 1
-        assert not record_sent_back_correction(fact, db=db)
-        assert reconcile_sent_back_corrections(db) == 0
-        assert unrecorded_rejection_event_ids(db, since=None, limit=10) == []
-
-        row = db.execute(
-            "SELECT dedupe_key,subject_key,agent_thread_id,attributes FROM outcome_events"
-        ).fetchone()
-        assert row["dedupe_key"] == "correction:sent_back:reject-event"
-        assert row["subject_key"] == "plan-review-rejected:reject-event"
-        assert row["agent_thread_id"] == "parent"
-        assert json.loads(row["attributes"]) == {
-            "source_kind": "sent_back", "source_id": "reject-event", "thread_id": "parent",
-            "label": "correction",
-        }
-        assert FEEDBACK not in " ".join(str(value) for value in row)
-        assert db.execute("SELECT COUNT(*) FROM context_change_journal").fetchone()[0] == notes_before
-    finally:
-        db.close()
-
-
-def test_rejection_records_its_fact_only_after_the_write_commits():
-    from core import sent_back_corrections
-    from plans import rejection
-
-    db = _db()
-    try:
-        node = _reviewable(db)
-        seen: list[bool] = []
-        record = sent_back_corrections.record_rejection_correction
-
-        def spy(rejection_event_id, *, db):
-            seen.append(db.in_transaction)
-            return record(rejection_event_id, db=db)
-
-        sent_back_corrections.record_rejection_correction = spy
-        try:
-            rejected, _revision, replayed = rejection.reject_submission(
-                node.id, feedback=FEEDBACK, actor_id="parent", db=db,
-            )
-        finally:
-            sent_back_corrections.record_rejection_correction = record
-
-        assert not replayed
-        assert rejected.state == "closed"
-        assert seen == [False]
-        rejection_event = db.execute(
-            "SELECT id FROM plan_node_events WHERE node_id=? AND event='review_rejected'", (node.id,),
-        ).fetchone()[0]
-        closed_events = db.execute(
-            "SELECT COUNT(*) FROM plan_node_events WHERE node_id=? AND new_state='closed'", (node.id,),
-        ).fetchone()[0]
-        facts = db.execute(
-            "SELECT subject_key FROM outcome_events WHERE event_name='measurement.correction'"
-        ).fetchall()
-        assert closed_events == 1
-        assert [row["subject_key"] for row in facts] == [f"plan-review-rejected:{rejection_event}"]
-    finally:
-        db.close()
-
-
-def test_delegated_rejection_records_one_fact_for_the_reviewed_node_only():
-    from core.sent_back_corrections import reconcile_sent_back_corrections, unrecorded_rejection_event_ids
-    from tests.test_plan_rejection_revision import _db as rejection_db, _reject, _returned
-
+def test_a_boundary_rejection_writes_its_fact_in_the_same_transaction():
     db = rejection_db(None)
     try:
         plan, delegated, _worker_plan, leaves = _returned(db, "Worker step", "Second worker step")
-        # The production path: plans.boundary.mutate, a nested write on the caller's connection.
         _reject(db, plan.id, delegated.id)
 
-        reviewed_event = db.execute(
-            "SELECT id FROM plan_node_events WHERE node_id=? AND event='review_rejected'", (delegated.id,),
-        ).fetchone()["id"]
-        leaf_events = db.execute(
-            "SELECT id FROM plan_node_events WHERE event='review_rejected' AND node_id IN (?, ?)",
-            tuple(leaf.id for leaf in leaves),
-        ).fetchall()
-        assert len(leaf_events) == 2
-        assert unrecorded_rejection_event_ids(db, since=None, limit=10) == []
-
-        facts = db.execute(
-            "SELECT subject_key,agent_thread_id FROM outcome_events WHERE event_name='measurement.correction'"
-        ).fetchall()
-        assert [(row["subject_key"], row["agent_thread_id"]) for row in facts] == [
-            (f"plan-review-rejected:{reviewed_event}", "parent")
-        ]
-
-        db.execute("DELETE FROM outcome_events")
-        db.commit()
-        assert unrecorded_rejection_event_ids(db, since=None, limit=10) == [reviewed_event]
-        assert reconcile_sent_back_corrections(db) == 1
+        [reviewed_event] = _rejection_ids(db, delegated.id)
+        assert all(len(_rejection_ids(db, leaf.id)) == 1 for leaf in leaves)
+        [fact] = _facts(db)
+        assert fact["subject_key"] == f"plan-review-rejected:{reviewed_event}"
+        assert (fact["agent_thread_id"], fact["project_id"]) == ("parent", "project-1")
+        assert json.loads(fact["attributes"]) == {
+            "source_kind": "sent_back", "source_id": reviewed_event, "thread_id": "parent",
+            "label": "correction",
+        }
+        assert FEEDBACK not in " ".join(str(value) for value in fact)
+        assert db.execute("SELECT dedupe_key FROM outcome_events").fetchone()[0] == (
+            f"correction:sent_back:{reviewed_event}"
+        )
     finally:
         db.close()
 
 
-def test_worker_rejection_of_a_subworker_remains_a_verdict():
-    from core.sent_back_corrections import unrecorded_rejection_event_ids
-    from plans import mutations, rejection
-    from tests.plan_review_helpers import submit_review_evidence
-    from tests.test_plan_rejection_revision import _db as rejection_db
+def test_a_fact_that_cannot_be_written_rolls_the_rejection_back(monkeypatch):
+    db = rejection_db(None)
+    try:
+        plan, delegated, _worker_plan, _leaves = _returned(db, "Worker step")
+
+        def refuse(*_args, **_kwargs):
+            raise sqlite3.OperationalError("measurement unavailable")
+
+        monkeypatch.setattr("infra.outcome_events.record_outcome_event", refuse)
+        with pytest.raises(sqlite3.OperationalError):
+            _reject(db, plan.id, delegated.id)
+
+        assert _rejection_ids(db, delegated.id) == []
+        assert db.execute("SELECT state FROM plan_nodes WHERE id=?", (delegated.id,)).fetchone()[0] == "review_requested"
+        assert db.execute("SELECT COUNT(*) FROM plan_nodes WHERE follow_up_of=?", (delegated.id,)).fetchone()[0] == 0
+        assert _facts(db) == []
+    finally:
+        db.close()
+
+
+def test_a_fact_counts_against_the_nearest_agent_and_never_drops_an_unresolvable_owner():
+    from core.sent_back_corrections import record_rejection_correction
 
     db = rejection_db(None)
     try:
         db.execute(
-            """INSERT INTO threads (id,user_id,project_id,spawned_by,model,created_at,updated_at)
-               VALUES ('subworker','user-1','project-1','worker','test/model','t','t')"""
+            "INSERT INTO threads (id,user_id,project_id,spawned_by,agent_enabled,model,created_at,updated_at) VALUES "
+            "('promoted','user-1','project-1','parent',1,'m','t','t'),"
+            "('promoted-worker','user-1','project-1','promoted',0,'m','t','t'),"
+            "('loop-a','user-1','project-1',NULL,0,'m','t','t'),"
+            "('loop-b','user-1','project-1','loop-a',0,'m','t','t')"
         )
-        worker_plan = service.ensure_plan("thread", "worker", db=db)
-        delegated = service.add_node(
-            worker_plan.id, kind="task", title="Sub-worker task", acceptance_criteria="Done",
-            spawn_kind="test", db=db,
-        )
-        service.transition_node(delegated.id, "active", actor_id="worker", db=db)
-        mutations.attach_spawned_thread(delegated.id, "subworker", db=db)
-        submit_review_evidence(delegated.id, db=db, actor_id="worker")
-
-        rejected, _revision, replayed = rejection.reject_submission(
-            delegated.id, feedback=FEEDBACK, actor_id="worker", db=db,
-        )
-        event_id = db.execute(
-            "SELECT id FROM plan_node_events WHERE node_id=? AND event='review_rejected'", (delegated.id,),
-        ).fetchone()["id"]
-        fact = db.execute(
-            "SELECT subject_key,agent_thread_id FROM outcome_events WHERE event_name='measurement.correction'"
-        ).fetchone()
-
-        assert not replayed
-        assert rejected.state == "closed"
-        assert unrecorded_rejection_event_ids(db, since=None, limit=10) == []
-        assert tuple(fact) == (f"plan-review-rejected:{event_id}", "parent")
+        # Seed every plan first: building one walks the spawn chain, which a cycle would never end.
+        expected = {
+            "parent": ("parent", "project-1"),
+            "worker": ("parent", "project-1"),  # a worker counts against the agent that spawned it
+            "promoted": ("promoted", "project-1"),  # an agent spawned by another stays itself
+            "promoted-worker": ("promoted", "project-1"),
+            "loop-a": ("loop-a", "project-1"),  # no agent above it (a cycle): the executor itself
+            "ghost": ("ghost", None),  # no thread row at all
+        }
+        events = {runner: _seed_rejection(db, runner) for runner in expected}
+        db.execute("UPDATE threads SET spawned_by='loop-b' WHERE id='loop-a'")
+        for runner, want in expected.items():
+            event_id = events[runner]
+            assert record_rejection_correction(db, event_id)
+            row = db.execute(
+                "SELECT agent_thread_id,project_id FROM outcome_events WHERE subject_key=?",
+                (f"plan-review-rejected:{event_id}",),
+            ).fetchone()
+            assert tuple(row) == want, runner
     finally:
         db.close()
 
 
-def test_failed_live_recording_does_not_fail_the_rejection_and_the_nightly_recovery_records_it(monkeypatch, caplog):
-    from core import sent_back_corrections
-    from plans import rejection
-
-    db = _db()
+def test_the_migration_records_each_earlier_verdict_once_and_is_idempotent():
+    db = rejection_db(None)
     try:
-        node = _reviewable(db)
-        real = sent_back_corrections.record_sent_back_correction
+        first = _seed_rejection(db, "worker")
+        second = _seed_rejection(db, "worker")
+        _seed_rejection(db, "worker", revision=False)  # a returned leaf is not a verdict
 
-        def fail_recording(*_args, **_kwargs):
-            raise RuntimeError("measurement unavailable")
-
-        monkeypatch.setattr(sent_back_corrections, "record_sent_back_correction", fail_recording)
-        with caplog.at_level(logging.WARNING, logger="core.sent_back_corrections"):
-            rejected, _revision, replayed = rejection.reject_submission(
-                node.id, feedback=FEEDBACK, actor_id="parent", db=db,
-            )
-        event_id = db.execute(
-            "SELECT id FROM plan_node_events WHERE node_id=? AND event='review_rejected'", (node.id,),
-        ).fetchone()[0]
-
-        assert not replayed
-        assert rejected.state == "closed"
-        assert f"sent-back correction recording failed for rejection event {event_id}" in caplog.text
-        assert db.execute("SELECT COUNT(*) FROM outcome_events").fetchone()[0] == 0
-
-        monkeypatch.setattr(sent_back_corrections, "record_sent_back_correction", real)
-        # The seeded historical rejection is recovered with it.
-        assert sent_back_corrections.reconcile_sent_back_corrections(db) == 2
-        assert db.execute(
-            "SELECT COUNT(*) FROM outcome_events WHERE subject_key=?", (f"plan-review-rejected:{event_id}",),
-        ).fetchone()[0] == 1
+        migrate_142_to_143(db)
+        assert [row["subject_key"] for row in _facts(db)] == sorted(
+            f"plan-review-rejected:{event}" for event in (first, second)
+        )
+        migrate_142_to_143(db)
+        assert len(_facts(db)) == 2
+        assert {row["agent_thread_id"] for row in _facts(db)} == {"parent"}
+        assert db.row_factory is sqlite3.Row
     finally:
         db.close()
 
 
-def test_recovery_is_bounded_by_the_newest_fact_and_the_batch_limit():
-    from datetime import timedelta
+def test_the_migration_leaves_a_live_fact_alone_and_the_step_is_registered():
+    from core.sent_back_corrections import record_rejection_correction
 
-    from core.sent_back_corrections import reconcile_sent_back_corrections, unrecorded_rejection_event_ids
-
-    db = _db()
+    db = rejection_db(None)
     try:
-        node_id = db.execute("SELECT node_id FROM plan_node_events WHERE id='reject-event'").fetchone()[0]
-        for index, day in enumerate(("2026-10-02", "2026-10-20", "2026-10-21"), start=1):
-            db.execute(
-                """INSERT INTO plan_node_events
-                   (id,node_id,actor_id,provenance,event,payload_json,created_at)
-                   VALUES (?,?,'parent','test','review_rejected',?,?)""",
-                (f"reject-{index}", node_id, json.dumps({"feedback": FEEDBACK}), f"{day}T12:00:00+00:00"),
-            )
-        db.commit()
-
-        # No fact yet: the whole history is eligible, a batch at a time, oldest first.
-        assert unrecorded_rejection_event_ids(db, since=None, limit=2) == ["reject-event", "reject-1"]
-        assert reconcile_sent_back_corrections(db, limit=2) == 2
-        assert reconcile_sent_back_corrections(db, limit=2) == 2
-        assert unrecorded_rejection_event_ids(db, since=None, limit=10) == []
-
-        # A later fact bounds the rescan: an event older than the window is no longer read.
-        db.execute("DELETE FROM outcome_events WHERE subject_key='plan-review-rejected:reject-event'")
-        db.commit()
-        assert reconcile_sent_back_corrections(db, window=timedelta(days=7)) == 0
-        assert unrecorded_rejection_event_ids(db, since=None, limit=10) == ["reject-event"]
-    finally:
-        db.close()
-
-
-def test_an_unresolvable_executor_is_logged_with_its_event_and_reason(caplog):
-    from core.sent_back_corrections import prepare_sent_back_correction
-
-    db = _db()
-    try:
-        # A delegation cycle never reaches a persistent owner.
-        db.execute("UPDATE threads SET spawned_by='worker' WHERE id='parent'")
-        db.commit()
-        with caplog.at_level(logging.WARNING, logger="core.sent_back_corrections"):
-            assert prepare_sent_back_correction("reject-event", db=db) is None
-            assert prepare_sent_back_correction("no-such-event", db=db) is None
-
-        assert "rejection event reject-event: executor parent has no persistent owner" in caplog.text
-        assert "rejection event no-such-event: no such rejection" in caplog.text
+        assert record_rejection_correction(db, _seed_rejection(db, "worker"))
+        migrate_142_to_143(db)
+        assert len(_facts(db)) == 1
+        assert SCHEMA_VERSION == 143 and MIGRATIONS[142] is migrate_142_to_143
     finally:
         db.close()
 
 
 def test_sent_back_facts_are_split_by_source_and_do_not_enter_trial_verdicts():
-    from core.sent_back_corrections import prepare_sent_back_correction, record_sent_back_correction
     from core.correction_attribution import attributed_facts
+    from core.sent_back_corrections import record_rejection_correction
 
-    db = _db()
+    db = rejection_db(None)
     try:
-        fact = prepare_sent_back_correction("reject-event", db=db)
-        assert fact is not None
-        assert record_sent_back_correction(fact, db=db)
-
+        assert record_rejection_correction(db, _seed_rejection(db, "worker"))
         rows = db.execute(
             """SELECT json_extract(attributes, '$.source_kind') AS source_kind, COUNT(*) AS n
                FROM outcome_events WHERE event_name='measurement.correction'
@@ -315,5 +174,21 @@ def test_sent_back_facts_are_split_by_source_and_do_not_enter_trial_verdicts():
         ).fetchall()
         assert [(row["source_kind"], row["n"]) for row in rows] == [("sent_back", 1)]
         assert attributed_facts(db) == []
+    finally:
+        db.close()
+
+
+def test_a_v142_install_records_its_earlier_verdicts_when_it_starts():
+    from infra.database_migrations import migrate_to_current
+
+    db = rejection_db(None)
+    try:
+        event_id = _seed_rejection(db, "worker")
+        db.execute("PRAGMA user_version=142")
+        db.commit()
+
+        assert migrate_to_current(db, SCHEMA_VERSION).migrated
+        assert [row["subject_key"] for row in _facts(db)] == [f"plan-review-rejected:{event_id}"]
+        assert not migrate_to_current(db, SCHEMA_VERSION).migrated
     finally:
         db.close()

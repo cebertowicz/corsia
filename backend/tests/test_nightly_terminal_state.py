@@ -206,22 +206,3 @@ async def test_unclaimable_day_does_not_sweep(run_db, monkeypatch):
         await nightly._run_job_safely()
 
     retention.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_sent_back_recovery_runs_after_the_terminal_record_and_its_failure_is_isolated(run_db, monkeypatch):
-    from core import sent_back_corrections
-    from infra import worktree_reaper
-    from jobs import nightly
-
-    _install_retention(monkeypatch)
-    recovery = MagicMock(side_effect=RuntimeError("measurement unavailable"))
-    reaper = MagicMock()
-    monkeypatch.setattr(sent_back_corrections, "reconcile_sent_back_corrections", recovery)
-    monkeypatch.setattr(worktree_reaper, "reap_all_idle", reaper)
-
-    await nightly._run_job_safely()
-
-    recovery.assert_called_once()
-    reaper.assert_called_once_with()
-    assert _read_run(run_db)["status"] == "ok"
