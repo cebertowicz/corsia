@@ -10,7 +10,7 @@
 		action?: { label: string; run: () => void; loading?: boolean };
 		confirm?: { label: string; run: () => void }[];
 		more?: { label: string; run: () => void }[];
-		/** The row's own recovery copy offers a report; the setup screen wires the shared action. */
+		/** The row's own recovery copy offers a report; its screen adds the shared `withReportAction`. */
 		reportable?: boolean;
 		/** On or off for this source; a held switch cannot change and its detail line says why. */
 		toggle?: { on: boolean; held?: boolean; run: (next: boolean) => void };

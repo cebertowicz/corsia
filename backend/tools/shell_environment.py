@@ -28,7 +28,7 @@ _ENV_CONTROL_NAMES = frozenset({"BASH_ENV", "ENV", "CDPATH"})
 # The backend's own identities Safehouse may pass into a child, in argv order.
 # TRACE_ENV is set only by the script runner for a run an event rule started.
 _SHELL_PASS_NAMES = ("CORSIA_THREAD_ID", "CORSIA_PROCESS_OWNER_MARKER", "CORSIA_TOOL_INVOCATION_ID",
-                     "AGENT_BROWSER_ARGS", *agent_shell_tools.ENV_NAMES, TRACE_ENV)
+                     "AGENT_BROWSER_ARGS", *agent_shell_tools.CACHE_ENV_NAMES, TRACE_ENV)
 
 
 def is_credential_env_name(name: str) -> bool:

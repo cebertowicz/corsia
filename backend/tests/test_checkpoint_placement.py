@@ -94,7 +94,7 @@ def test_migration_40_staging_copy_matches_the_live_schema_while_current() -> No
     from infra.migration_39_to_40_placement_marks import STAGING_40_DDL
     from infra.schema import SCHEMA_VERSION
 
-    if SCHEMA_VERSION == 143:
+    if SCHEMA_VERSION == 144:
         assert STAGING_40_DDL == STAGING_SCHEMA_SQL
 
 
@@ -244,6 +244,8 @@ def test_staged_verdicts_publish_marks_only_when_the_checkpoint_installs(
 
 def test_checkpoint_stages_a_flagged_trial_with_its_checkpoint_epoch(tmp_path, monkeypatch) -> None:
     path, db, lesson, _ = _review_setup(tmp_path, monkeypatch)
+    (tmp_path / "context").mkdir()
+    (tmp_path / "context" / "RESPONSIBILITY.md").write_text("# R\n\n## Lessons\n- Keep commits small.\n")
     db.close()
     continuity = _tool_db(path, monkeypatch)
     trial = _raw(

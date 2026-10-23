@@ -102,8 +102,10 @@ def _lessons(
     ).fetchall()
     # trials only until the lesson gate routes every lesson through place
     refs = [str(row["source_event_id"]) for row in rows]
+    # a review key is <prefix>:<id>:...; a capture and the trial it became share the id
+    distinct = len({ref.split(":")[1] for ref in refs})
     return ({
-        "recorded": _count(refs),
+        "recorded": {**_count(refs), "count": distinct},
         "confirmed": None,
         "consolidated": None,
         "repeated": None,
