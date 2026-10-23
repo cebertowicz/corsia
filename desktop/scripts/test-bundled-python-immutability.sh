@@ -27,9 +27,9 @@ snapshot() {
   # The mtime/mode list makes the required before/after file inventory readable;
   # the hashes close the same-second-mtime and content-preserving-path gaps.
   {
-    printf '%s\n' 'mtime\tmode\tpath'
+    printf 'mtime\tmode\tpath\n'
     find "$APP" -type f -print0 | xargs -0 stat -f '%m\t%p\t%N' | LC_ALL=C sort
-    printf '%s\n' 'sha256\tpath'
+    printf 'sha256\tpath\n'
     find "$APP" -type f -print0 | xargs -0 shasum -a 256 | LC_ALL=C sort
   }
 }

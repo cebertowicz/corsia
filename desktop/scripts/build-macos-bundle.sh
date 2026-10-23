@@ -192,22 +192,8 @@ rsync -a --delete "$ROOT/scripts/corsia.d/" "$BUNDLE_ROOT/scripts/corsia.d/"
 # Nothing may write bytecode into the signed bundle: an added __pycache__ breaks
 # its seal. Compile every packaged source only after every resource is staged,
 # using unchecked hashes so a later mtime change cannot make a cache stale.
+# The staged-app proof below checks every source on the finished app.
 "$PYTHON" -m compileall -q -f --invalidation-mode unchecked-hash "$BUNDLE_ROOT"
-"$PYTHON" - "$BUNDLE_ROOT" <<'PY'
-from importlib.util import cache_from_source
-from pathlib import Path
-import sys
-
-root = Path(sys.argv[1])
-sources = sorted(root.rglob("*.py"))
-missing = [source for source in sources if not Path(cache_from_source(str(source))).is_file()]
-if missing:
-    for source in missing:
-        print(f"missing bytecode: {source}", file=sys.stderr)
-    raise SystemExit(1)
-print(f"bundled-python-py={len(sources)}")
-print(f"bundled-python-pyc={sum(1 for _ in root.rglob('*.pyc'))}")
-PY
 
 node "$ROOT/desktop/scripts/gen-shell-tokens.mjs"
 node "$ROOT/desktop/scripts/gen-shell-logo.mjs"
