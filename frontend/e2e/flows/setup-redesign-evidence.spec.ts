@@ -259,7 +259,13 @@ async function assertState(page: Page, fixture: Fixture) {
 	if (fixture.screen === 'short-password') { await expect(text('Use at least 8 characters.')).toBeVisible(); return; }
 	if (fixture.screen === 'mismatch') { await expect(text('Passwords don’t match.')).toBeVisible(); return; }
 	if (fixture.screen === 'account-exists') { await expect(text('This computer already has a CORSIA account. Sign in instead.')).toBeVisible(); return; }
-	if (fixture.screen === 'protected') { await expect(text('macOS asks you once to let CORSIA use your Documents folder. Choose Allow when it does.')).toBeVisible(); return; }
+	if (fixture.screen === 'protected') {
+		await expect(text('Agents work freely inside your work folder. Your personal files are safer outside it, where CORSIA asks before opening them.')).toBeVisible();
+		await expect(page.getByRole('button', { name: 'Use ~/CORSIA', exact: true })).toBeVisible();
+		await expect(page.getByRole('button', { name: 'Keep this folder', exact: true })).toBeVisible();
+		await expect(page.getByRole('button', { name: 'Continue', exact: true })).toBeDisabled();
+		return;
+	}
 	if (fixture.screen === 'unwritable') { await expect(text('CORSIA can’t write to this folder. Choose another one.')).toBeVisible(); await expect(page.getByRole('button', { name: 'Continue', exact: true })).toBeDisabled(); return; }
 	if (fixture.screen === 'creating') { await expect(text('Starting CORSIA')).toBeVisible(); return; }
 	if (fixture.screen === 'create-failed') { await expect(text('Couldn’t create your account. Try again.')).toBeVisible(); await expect(page.getByRole('button', { name: 'Save a report', exact: true })).toBeVisible(); return; }
@@ -295,6 +301,7 @@ async function assertState(page: Page, fixture: Fixture) {
 			: fixture.local === 'start-failed' ? localSetupFix('connection')
 			: 'Free and private. Runs on this computer, even offline. 30 GB download.';
 		await expect(row).toContainText(expected);
+		if (fixture.local === 'ready' && !fixture.cli && !fixture.api) await expect(row).toContainText('Local models are good for private work. For running many agents at once, cloud models are recommended.');
 		if (fixture.local === 'other-no-ref' || fixture.local === 'start-failed') await expect(row.getByText(/Reference:/)).toHaveCount(0);
 		if (fixture.local === 'setup-failed' || fixture.local === 'start-failed') await expect(row.getByRole('button', { name: 'Save a report', exact: true })).toBeVisible();
 	}

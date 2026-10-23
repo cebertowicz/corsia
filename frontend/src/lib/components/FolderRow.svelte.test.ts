@@ -18,15 +18,17 @@ function render(props: ConstructorParameters<typeof FolderRow>[0]['props']) {
 }
 
 describe('FolderRow', () => {
-	it('opens Change and leaves Continue eligible for a protected folder', () => {
-		const change = vi.fn();
-		render({ folder: '~/Documents/corsia', notice: { kind: 'protected', folder: 'Documents' }, onChange: change });
+	it('explains a protected folder and requires a deliberate default or keep choice', () => {
+		const change = vi.fn(), useDefault = vi.fn(), keepProtected = vi.fn();
+		render({ folder: '~/Documents/corsia', notice: { kind: 'protected', folder: 'Documents' }, onChange: change, onUseDefault: useDefault, onKeepProtected: keepProtected });
 
 		expect(host.textContent).toContain('Work folder');
 		expect(host.textContent).toContain('~/Documents/corsia');
-		expect(host.textContent).toContain('macOS asks you once to let CORSIA use your Documents folder. Choose Allow when it does.');
-		(host.querySelector('button') as HTMLButtonElement).click();
-		expect(change).toHaveBeenCalledOnce();
+		expect(host.textContent).toContain('Agents work freely inside your work folder. Your personal files are safer outside it, where CORSIA asks before opening them.');
+		(Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Use ~/CORSIA') as HTMLButtonElement).click();
+		(Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Keep this folder') as HTMLButtonElement).click();
+		expect(useDefault).toHaveBeenCalledOnce();
+		expect(keepProtected).toHaveBeenCalledOnce();
 	});
 
 	it('shows the write reason and exposes its blocking state', () => {

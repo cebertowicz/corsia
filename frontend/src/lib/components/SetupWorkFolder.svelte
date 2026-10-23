@@ -17,8 +17,16 @@
 		} catch { notice = { kind: 'picker_failed' }; }
 		finally { changing = false; }
 	}
+
+	function useDefaultFolder() {
+		folder = '~/CORSIA';
+		changed = true;
+		notice = null;
+	}
+
+	function keepProtectedFolder() { notice = null; }
 </script>
-<FolderRow {folder} {notice} {changing} onChange={changeFolder} />
+<FolderRow {folder} {notice} {changing} onChange={changeFolder} onUseDefault={useDefaultFolder} onKeepProtected={keepProtectedFolder} />
 <p class="why">Your projects and files live here.</p>
 {#if error}<p class="error-text" role="alert">{error}</p>{/if}
 

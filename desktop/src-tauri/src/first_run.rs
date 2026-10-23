@@ -51,6 +51,10 @@ pub enum FolderClassification {
 }
 
 fn protected_folder(path: &Path, home: &Path) -> Option<&'static str> {
+    if path == home {
+        return Some("Home");
+    }
+
     [
         (home.join("Documents"), "Documents"),
         (home.join("Desktop"), "Desktop"),
@@ -63,7 +67,9 @@ fn protected_folder(path: &Path, home: &Path) -> Option<&'static str> {
         ),
     ]
     .into_iter()
-    .find_map(|(protected, name)| path.starts_with(&protected).then_some(name))
+    .find_map(|(protected, name)| {
+        (path.starts_with(&protected) || protected.starts_with(path)).then_some(name)
+    })
 }
 
 pub fn classify_folder(
@@ -72,10 +78,12 @@ pub fn classify_folder(
     check_writable: impl FnOnce(&Path) -> Result<(), String>,
 ) -> FolderClassification {
     let shown = path.display().to_string();
+    let resolved_path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    let resolved_home = home.canonicalize().unwrap_or_else(|_| home.to_path_buf());
     match check_writable(path) {
         Ok(()) => FolderClassification::Ready {
             path: shown,
-            protected_folder: protected_folder(path, home),
+            protected_folder: protected_folder(&resolved_path, &resolved_home),
         },
         Err(reason) => FolderClassification::Unwritable { path: shown, reason },
     }
@@ -778,13 +786,34 @@ mod tests {
     fn protected_and_unwritable_folder_choices_are_classified() {
         let home = Home::new("folder-classification");
         let documents = home.0.join("Documents").join("corsia");
-        assert_eq!(
-            classify_folder(&documents, &home.0, |_| Ok(())),
-            FolderClassification::Ready {
-                path: documents.display().to_string(),
-                protected_folder: Some("Documents"),
-            }
-        );
+        let desktop = home.0.join("Desktop");
+        let downloads = home.0.join("Downloads");
+        let library = home.0.join("Library");
+        let cloud_docs = library
+            .join("Mobile Documents")
+            .join("com~apple~CloudDocs");
+        for path in [&documents, &desktop, &downloads, &cloud_docs] {
+            fs::create_dir_all(path).unwrap();
+        }
+        let documents_with_trailing_separator = PathBuf::from(format!("{}/", documents.display()));
+
+        for (path, protected_folder) in [
+            (&home.0, "Home"),
+            (&documents, "Documents"),
+            (&documents_with_trailing_separator, "Documents"),
+            (&desktop, "Desktop"),
+            (&downloads, "Downloads"),
+            (&cloud_docs, "iCloud Drive"),
+            (&library, "iCloud Drive"),
+        ] {
+            assert_eq!(
+                classify_folder(path, &home.0, |_| Ok(())),
+                FolderClassification::Ready {
+                    path: path.display().to_string(),
+                    protected_folder: Some(protected_folder),
+                }
+            );
+        }
 
         let unwritable = home.0.join("read-only");
         assert_eq!(
@@ -792,6 +821,24 @@ mod tests {
             FolderClassification::Unwritable {
                 path: unwritable.display().to_string(),
                 reason: "the disk is read-only".into(),
+            }
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn protected_folder_classification_resolves_symlinks() {
+        let home = Home::new("folder-classification-symlink");
+        let documents = home.0.join("Documents");
+        fs::create_dir_all(&documents).unwrap();
+        let alias = home.0.join("documents-alias");
+        std::os::unix::fs::symlink(&documents, &alias).unwrap();
+
+        assert_eq!(
+            classify_folder(&alias, &home.0, |_| Ok(())),
+            FolderClassification::Ready {
+                path: alias.display().to_string(),
+                protected_folder: Some("Documents"),
             }
         );
     }

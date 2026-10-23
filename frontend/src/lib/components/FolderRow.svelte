@@ -12,9 +12,11 @@
 		notice?: FolderNotice;
 		changing?: boolean;
 		onChange: () => void;
+		onUseDefault?: () => void;
+		onKeepProtected?: () => void;
 	}
 
-	const { folder, notice = null, changing = false, onChange }: Props = $props();
+	const { folder, notice = null, changing = false, onChange, onUseDefault, onKeepProtected }: Props = $props();
 </script>
 
 <div class="folder" data-folder-blocked={notice?.kind === 'unwritable' ? 'true' : undefined}>
@@ -24,7 +26,11 @@
 		<Button variant="chip" size="sm" loading={changing} disabled={changing} onclick={onChange}>Change</Button>
 	</p>
 	{#if notice?.kind === 'protected'}
-		<p class="note">macOS asks you once to let CORSIA use your {notice.folder} folder. Choose Allow when it does.</p>
+		<p class="note">Agents work freely inside your work folder. Your personal files are safer outside it, where CORSIA asks before opening them.</p>
+		<div class="choices">
+			<Button variant="primary" size="sm" onclick={onUseDefault}>Use ~/CORSIA</Button>
+			<Button variant="secondary" size="sm" onclick={onKeepProtected}>Keep this folder</Button>
+		</div>
 	{:else if notice?.kind === 'unwritable'}
 		<p class="note error">CORSIA can’t write to this folder. Choose another one.</p>
 	{:else if notice?.kind === 'picker_failed'}
@@ -38,5 +44,6 @@
 	.label { flex: none; color: var(--text-secondary); }
 	.path { min-width: 0; color: var(--text-primary); overflow-wrap: anywhere; }
 	.note { margin: var(--space-1) 0 0; color: var(--text-secondary); font-size: var(--text-footnote); }
+	.choices { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-2); }
 	.error { color: var(--red-text); }
 </style>

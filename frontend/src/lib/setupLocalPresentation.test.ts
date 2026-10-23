@@ -1,5 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { measuredDownloadTime } from './setupLocalPresentation';
+import { measuredDownloadTime, showLocalOnlyGuidance } from './setupLocalPresentation';
+
+describe('local-only guidance', () => {
+	it('shows only when a ready local model is the sole configured path', () => {
+		expect(showLocalOnlyGuidance({ eligible: true, localReady: true, signedInSubscription: false, hasApiKey: false })).toBe(true);
+		expect(showLocalOnlyGuidance({ eligible: false, localReady: true, signedInSubscription: false, hasApiKey: false })).toBe(false);
+		expect(showLocalOnlyGuidance({ eligible: true, localReady: true, signedInSubscription: true, hasApiKey: false })).toBe(false);
+		expect(showLocalOnlyGuidance({ eligible: true, localReady: true, signedInSubscription: false, hasApiKey: true })).toBe(false);
+		expect(showLocalOnlyGuidance({ eligible: true, localReady: true, signedInSubscription: true, hasApiKey: true })).toBe(false);
+	});
+});
 
 describe('measured download time', () => {
 	it('says nothing until a time is measured', () => {
