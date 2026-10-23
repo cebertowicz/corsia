@@ -243,6 +243,19 @@ describe('delegated rendered-markdown listener', () => {
 		spy.mockRestore();
 	});
 
+	it('routes a chat OAuth link through Tauri', async () => {
+		const d = deps({ isTauri: () => true });
+		const url = 'https://accounts.google.com/o/oauth2/v2/auth?client_id=client&redirect_uri=http%3A%2F%2Flocalhost%3A3000&response_type=code';
+		document.documentElement.dataset.shell = 'tauri';
+		const anchor = installSurface(`[Continue](${url})`, 'chat', d);
+		const click = new MouseEvent('click', { bubbles: true, cancelable: true });
+
+		anchor.dispatchEvent(click);
+
+		await vi.waitFor(() => expect(d.openExternal).toHaveBeenCalledWith(url));
+		expect(click.defaultPrevented).toBe(true);
+	});
+
 	it.each([
 		['modifier', 'click', { metaKey: true }],
 		['middle', 'auxclick', { button: 1 }],

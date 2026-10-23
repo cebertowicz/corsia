@@ -187,7 +187,7 @@
 </head>
 <body>
 	<div class="app" data-tauri-drag-region>
-		<img class="mark" src="corsia-mark.svg" alt="" data-tauri-drag-region />
+		<div id="mark" class="mark" aria-hidden="true" data-tauri-drag-region></div>
 		<h1 id="status" role="status" aria-live="polite" data-tauri-drag-region>Starting CORSIA…</h1>
 		<p id="line" class="line" hidden></p>
 		<ul id="fresh-list" class="fresh-list" aria-label="What moves" hidden></ul>
@@ -211,6 +211,12 @@
 			<button id="set-up-local" class="secondary" type="button" hidden>Set up this computer instead</button>
 		</div>
 	</div>
+
+	<!-- Generated from the app living-mark module by desktop/scripts/gen-shell-logo.mjs. Reduced motion shows it still. -->
+	<script src="living-logo.js"></script>
+	<script>
+		window.livingLogo?.createLivingLogo(document.getElementById('mark'), { entry: 'play' });
+	</script>
 
 	<script>
 		(async () => {

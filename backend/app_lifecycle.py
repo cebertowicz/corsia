@@ -105,6 +105,7 @@ def _initialize_startup(logger) -> None:
     from app_startup_workspace import initialize_workspace
     from core.project_path_conversion import convert_legacy_project_paths
     from infra.config import LOGS_DIR, RUNTIME_DIR, UPLOADS_DIR, WORKSPACE, WORKSPACE_SELECTION
+    from infra import setup_progress
     from infra.ignored_environment import drop_ignored_environment, note_ignored_environment
     from infra.startup_prerequisites import prepare_startup_prerequisites
     from plans.public import sweep_owed_status
@@ -119,6 +120,7 @@ def _initialize_startup(logger) -> None:
     logger.info("startup phase: database initialization started")
     init_db()
     drop_ignored_environment()
+    setup_progress.release_marker_at_startup(logger)
     key_store_values.sweep_at_startup()
     convert_legacy_project_paths(WORKSPACE_SELECTION)
     elapsed = time.monotonic() - phase_started
@@ -154,7 +156,7 @@ async def lifespan(app: FastAPI):
         startup_tasks[1] = asyncio.create_task(_startup_cloud_discovery())
         startup_tasks[2] = asyncio.create_task(_startup_network_discovery())
         startup_tasks[3] = asyncio.create_task(_startup_harness_discovery())
-        recovered, wakes = await restart_startup.run_startup_reconcile(logger)
+        recovered, wakes, rolled_back_operation = await restart_startup.run_startup_reconcile(logger)
         await _start_runtime_services()
         from core.devices_runtime import runtime as devices_runtime
         from infra.settings import get_devices_enabled, get_devices_outside_address
@@ -165,7 +167,7 @@ async def lifespan(app: FastAPI):
         schedule_usage_rollup_refresh()
         startup_tasks[4] = asyncio.create_task(
             restart_startup.run_startup_drive(
-                startup_tasks[3], recovered, wakes, logger,
+                startup_tasks[3], recovered, wakes, rolled_back_operation, logger,
             ),
         )
         yield

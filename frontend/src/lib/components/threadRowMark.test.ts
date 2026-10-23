@@ -40,7 +40,10 @@ describe('slotThreeWord', () => {
 });
 
 describe('waiting', () => {
-	const wait = { label: 'CI on PR #1193', until: new Date(Date.now() + 40 * 60_000).toISOString(), more: 0 };
+	// Local noon, so the check-back time never crosses midnight into "tomorrow".
+	const noon = new Date();
+	noon.setHours(12, 0, 0, 0);
+	const wait = { label: 'CI on PR #1193', until: new Date(noon.getTime() + 40 * 60_000).toISOString(), more: 0 };
 
 	it('is a glyph, never a word in slot 3', () => {
 		expect(slotThreeWord({ ...idle, state: 'waiting', wait })).toBe('');
@@ -54,7 +57,7 @@ describe('waiting', () => {
 	});
 
 	it('titles the glyph with what it waits for and when it checks back', () => {
-		expect(waitMarkTitle({ ...idle, state: 'waiting', wait })).toMatch(/^Waiting for CI on PR #1193 · checks back today at /);
+		expect(waitMarkTitle({ ...idle, state: 'waiting', wait }, noon)).toMatch(/^Waiting for CI on PR #1193 · checks back today at /);
 		expect(waitMarkTitle({ ...idle, state: 'waiting', wait: null })).toBe('');
 		expect(waitMarkTitle({ ...idle, state: 'idle', wait })).toBe('');
 	});

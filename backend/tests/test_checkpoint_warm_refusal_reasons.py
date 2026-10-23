@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+import threading
 from types import SimpleNamespace
 
 import pytest
@@ -92,6 +93,69 @@ async def test_switch_capture_names_its_reason(harness, binary, reason) -> None:
 
     assert source is None
     assert lines == [_refused("thread-s", harness, reason)]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("harness", ("claude-code", "codex"))
+async def test_switch_capture_renders_durable_boundary_off_loop_and_preserves_result(
+    monkeypatch, harness: str,
+) -> None:
+    """Both harness paths retain their source/result contract off the event loop."""
+    import core.fork_render as fork_render
+
+    loop_thread = threading.get_ident()
+    render_threads: list[int] = []
+    durable_boundary = object()
+    expected_source = object()
+    observed: dict[str, tuple[object, ...]] = {}
+
+    def render_boundary(thread_id, boundary, rendered_harness):
+        observed["durable_args"] = (thread_id, boundary, rendered_harness)
+        render_threads.append(threading.get_ident())
+        return durable_boundary
+
+    monkeypatch.setattr(fork_render, "_durable_warm_boundary", render_boundary)
+    target = SimpleNamespace(harness=harness)
+    boundary = object()
+    if harness == "claude-code":
+        import core.fork_cc_boundary as cc_boundary
+
+        async def capture_claude(thread_id, captured_boundary, warm_boundary, **kwargs):
+            observed["capture_args"] = (thread_id, captured_boundary, warm_boundary, kwargs)
+            return expected_source
+
+        monkeypatch.setattr(cc_boundary, "capture_registered_boundary_warm_source", capture_claude)
+        source = await fork_render.capture_warm_fork_source(
+            "thread-off-loop", boundary, target=target, binary="/bin/claude", reasoning_effort=None,
+        )
+    else:
+        import core.fork_codex as codex
+
+        def prefix(thread_id, warm_boundary):
+            observed["prefix_args"] = (thread_id, warm_boundary)
+            return 123
+
+        async def capture_codex(thread_id, captured_boundary, **kwargs):
+            observed["capture_args"] = (thread_id, captured_boundary, kwargs)
+            return expected_source
+
+        monkeypatch.setattr(codex, "warm_tool_boundary_prefix_bytes", prefix)
+        monkeypatch.setattr(codex, "capture_warm_source", capture_codex)
+        source = await fork_render.capture_warm_fork_source(
+            "thread-off-loop", boundary, target=target, binary="/bin/codex", reasoning_effort=None,
+        )
+
+    assert source is expected_source
+    assert observed["durable_args"] == ("thread-off-loop", boundary, harness)
+    assert render_threads and render_threads != [loop_thread]
+    if harness == "claude-code":
+        assert observed["capture_args"][:3] == ("thread-off-loop", boundary, durable_boundary)
+    else:
+        assert observed["prefix_args"] == ("thread-off-loop", durable_boundary)
+        assert observed["capture_args"] == (
+            "thread-off-loop", boundary,
+            {"target": target, "binary": "/bin/codex", "prefix_bytes": 123},
+        )
 
 
 @pytest.mark.asyncio

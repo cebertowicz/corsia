@@ -120,9 +120,9 @@ describe('the picker\'s Local group', () => {
 	it('uses the shared status-less Local fallback header while the starter model downloads', async () => {
 		omlx = { local_state: 'downloading', download_percent: 40 };
 		await render();
-		const fallback = host.querySelector('section[aria-label="Local"]')!;
+		const fallback = host.querySelector('section[aria-label="CORSIA"]')!;
 		expect(fallback.querySelector('.model-group-bar')?.getAttribute('data-variant')).toBe('fallback');
-		expect(fallback.querySelector('.model-group-bar')?.textContent?.trim()).toBe('Local');
+		expect(fallback.querySelector('.model-group-bar')?.textContent?.trim()).toBe('CORSIA');
 		expect(fallback.textContent).toContain('Downloading 40%');
 		expect(fallback.textContent).not.toContain('ready');
 		expect(button('Try again')).toBeUndefined();
@@ -138,8 +138,8 @@ describe('the picker\'s Local group', () => {
 	it('keeps the fallback Local header plain when setup fails', async () => {
 		omlx = { local_state: 'failed', setup_kind: 'setup' };
 		await render();
-		const fallback = host.querySelector('section[aria-label="Local"]')!;
-		expect(fallback.querySelector('.model-group-bar')?.textContent?.trim()).toBe('Local');
+		const fallback = host.querySelector('section[aria-label="CORSIA"]')!;
+		expect(fallback.querySelector('.model-group-bar')?.textContent?.trim()).toBe('CORSIA');
 		expect(fallback.textContent).toContain('Setup failed');
 		expect(fallback.textContent).not.toContain('ready');
 	});
@@ -198,7 +198,7 @@ describe('the picker\'s Local group', () => {
 		models.set([claude, localModel]);
 		omlx = { local_state: 'downloading', download_percent: 10 };
 		await render();
-		expect(host.querySelector('section[aria-label="Local"]')).toBeNull();
+		expect(host.querySelector('section[aria-label="CORSIA"]')).toBeNull();
 		expect(host.querySelector('section[aria-label="oMLX"]')?.textContent).toContain('Downloading 10%');
 	});
 

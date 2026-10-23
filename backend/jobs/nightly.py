@@ -188,8 +188,9 @@ async def _run_job_safely() -> None:
                 status,
                 rec_err,
             )
-    # Second step, after the terminal record: its failure cannot change the
-    # retention status already written.
+    # Follow-up jobs run after the terminal record: their failures cannot change
+    # the maintenance disposition already written.
+    await _emit_learning_reports_safely()
     await _reap_worktrees_safely()
 
 
@@ -202,6 +203,17 @@ async def _run_scheduled_update_if_due(now: datetime | None = None) -> str | Non
     except Exception:
         logger.exception("nightly_job: scheduled update tick failed")
         return None
+
+
+async def _emit_learning_reports_safely() -> None:
+    """Run the learning producer on the established once-daily job path."""
+    from jobs.learning_report import emit_daily_reports
+
+    try:
+        await asyncio.to_thread(emit_daily_reports)
+    except Exception:
+        # This follow-up must not change the already-recorded maintenance disposition.
+        logger.exception("nightly_job: learning report delivery failed")
 
 
 async def _reap_worktrees_safely() -> None:

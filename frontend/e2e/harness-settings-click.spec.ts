@@ -162,7 +162,7 @@ test('External provider controls are sibling native buttons in keyboard order', 
 	const card = page.locator('[data-provider-card="external"]');
 	const expand = expandControl(card);
 	const settings = card.getByRole('button', { name: 'Settings' });
-	const enable = card.getByRole('button', { name: 'Disable' });
+	const enable = card.getByRole('button', { name: /^Use / });
 
 	await expect(card.locator(':scope > .pr-head > button')).toHaveCount(3);
 	await expect(expand).toHaveAttribute('aria-expanded', 'false');

@@ -642,6 +642,9 @@ def _advance(rid: str, *phases: str) -> None:
 
     current = "holding"
     for phase in phases:
+        if current == "steering" and phase == "ready":
+            assert sr.transition_operation(rid, expected=current, target="draining")
+            current = "draining"
         assert sr.transition_operation(rid, expected=current, target=phase)
         current = phase
 
@@ -738,7 +741,7 @@ async def test_abort_replaced_operation_has_no_effects(isolated_db, monkeypatch)
     drive.assert_not_awaited()
 
 
-async def test_abort_resuming_operation_has_no_effects(isolated_db, monkeypatch):
+async def test_cancel_resuming_operation_has_no_effects(isolated_db, monkeypatch):
     from automation import restart
     from infra import drain, state, thread_execution
 
@@ -760,7 +763,7 @@ async def test_abort_resuming_operation_has_no_effects(isolated_db, monkeypatch)
     drive = AsyncMock()
     monkeypatch.setattr(thread_execution, "drive_thread", drive)
 
-    assert not await restart.abort_restart_control(operation_id, error="late failure")
+    assert not await restart.abort_restart_control(operation_id, error="late failure", cancelled=True)
 
     assert _restart_abort_rows(operation_id) == before
     assert state._drain == {"marker": "successor"}
@@ -903,6 +906,170 @@ def test_close_out_advances_and_releases_a_surviving_holding_reservation(
 
     assert sr.operation_by_id(rid)["status"] == "complete"
     assert sr.restart_holds_new_work() is False
+
+
+async def test_interrupted_update_startup_proves_the_previous_version_is_running(
+    isolated_db, monkeypatch
+):
+    """A proven rollback waits for the harness before it schedules its notice."""
+    from automation import restart, restart_startup, update_failure_notice
+    from automation import self_restart as sr
+    from loguru import logger
+
+    events: list[str] = []
+    monkeypatch.setattr(
+        update_failure_notice, "tell_conductor_detached",
+        lambda operation_id, tasks: events.append(f"notice:{operation_id}"),
+    )
+    monkeypatch.setattr(restart_startup, "drive_startup_continuity", AsyncMock())
+    monkeypatch.setattr("infra.build_info.app_version", lambda: "0.4.1")
+    monkeypatch.setattr(
+        "infra.platform_paths.app_bundle_root", lambda: Path("/Applications/CORSIA.app")
+    )
+    rid = sr.try_acquire(
+        "t-1", "steve", "oldsha", "dev", "update",
+        kind="update", target_version="0.4.2", previous_version="0.4.1",
+    )
+    assert rid is not None
+    _advance(rid, "steering", "ready", "restarting", "resuming", "verifying")
+
+    recovered, wakes, rolled_back = await restart_startup.reconcile_startup_continuity(logger)
+
+    operation = sr.operation_by_id(rid)
+    assert operation["status"] == "failed"
+    assert operation["failure_code"] == "rolled_back"
+    assert json.loads(operation["failure_detail"]) == {
+        "reason": "mismatch", "target_version": "0.4.2", "running_version": "0.4.1",
+        "previous_version": "0.4.1",
+    }
+    assert sr.restart_holds_new_work() is False
+    assert events == []
+
+    async def harness_ready() -> None:
+        events.append("harness")
+
+    await restart_startup.run_startup_drive(
+        harness_ready(), recovered, wakes, rolled_back, logger,
+    )
+
+    assert events == ["harness", f"notice:{rid}"]
+    assert restart._RESUME_TASKS == set()
+
+
+async def test_packaged_update_startup_waits_for_shell_even_when_target_is_running(
+    isolated_db, monkeypatch, tmp_path
+):
+    from automation import restart_startup, update_failure_notice
+    from automation import self_restart as sr
+    from loguru import logger
+
+    notice = MagicMock()
+    monkeypatch.setattr(update_failure_notice, "tell_conductor_detached", notice)
+    bundle = tmp_path / "CORSIA.app"
+    bundle.mkdir()
+    monkeypatch.setattr("infra.build_info.app_version", lambda: "0.4.2")
+    monkeypatch.setattr("infra.platform_paths.app_bundle_root", lambda: bundle)
+    rid = sr.try_acquire(
+        "t-1", "steve", "oldsha", "dev", "update",
+        kind="update", target_version="0.4.2",
+    )
+    assert rid is not None
+    _advance(rid, "steering", "ready", "restarting")
+
+    _recovered, _wakes, rolled_back = await restart_startup.reconcile_startup_continuity(logger)
+
+    assert sr.operation_by_id(rid)["phase"] == "verifying"
+    assert sr.restart_holds_new_work() is False
+    assert rolled_back is None
+    notice.assert_not_called()
+
+
+def test_packaged_update_waits_for_the_post_swap_shell_to_confirm_health(
+    isolated_db, monkeypatch, tmp_path,
+):
+    """The new backend cannot complete while the old shell can still roll it back."""
+    from automation import restart_startup
+    from automation import self_restart as sr
+
+    bundle = tmp_path / "CORSIA.app"
+    bundle.mkdir()
+    bundle.with_name("CORSIA.app.previous").mkdir()
+    monkeypatch.setattr("infra.build_info.app_version", lambda: "0.4.2")
+    monkeypatch.setattr("infra.platform_paths.app_bundle_root", lambda: bundle)
+    rid = sr.try_acquire(
+        "t-1", "steve", "oldsha", "dev", "update",
+        kind="update", target_version="0.4.2",
+    )
+    assert rid is not None
+    _advance(rid, "steering", "ready", "restarting")
+
+    restart_startup.close_out_prior_self_restart()
+
+    assert restart_startup._complete_restart_operation() is None
+    assert sr.operation_by_id(rid)["status"] == "in_flight"
+    assert sr.operation_by_id(rid)["phase"] == "verifying"
+    assert sr.restart_holds_new_work() is False
+    assert sr.complete_operation(rid)
+
+
+@pytest.mark.parametrize(
+    ("target_version", "running_version", "reason"),
+    [
+        ("0.4.2", None, "running_version_unavailable"),
+        ("not-a-version", "0.4.2", "unparseable_version"),
+        ("0.4.2", "not-a-version", "unparseable_version"),
+    ],
+)
+def test_packaged_update_with_an_unverifiable_version_fails_closed(
+    isolated_db, monkeypatch, target_version, running_version, reason,
+):
+    """A packaged bundle must prove its stamped target before it can complete."""
+    from automation import restart_startup
+    from automation import self_restart as sr
+
+    monkeypatch.setattr("infra.build_info.app_version", lambda: running_version)
+    monkeypatch.setattr(
+        "infra.platform_paths.app_bundle_root", lambda: Path("/Applications/CORSIA.app")
+    )
+    rid = sr.try_acquire(
+        "t-1", "steve", "oldsha", "dev", "update",
+        kind="update", target_version=target_version,
+    )
+    assert rid is not None
+    _advance(rid, "steering", "ready", "restarting")
+
+    restart_startup.close_out_prior_self_restart()
+    assert restart_startup._complete_restart_operation() is None
+    assert sr.operation_by_id(rid)["phase"] == "verifying"
+    assert not sr.restart_holds_new_work()
+    restart_startup.close_out_prior_self_restart()
+    assert restart_startup._complete_restart_operation() == rid
+
+    operation = sr.operation_by_id(rid)
+    assert operation["status"] == "failed"
+    assert operation["failure_code"] == "version_unverified"
+    assert json.loads(operation["failure_detail"])["reason"] == reason
+
+
+def test_source_checkout_update_startup_does_not_compare_release_formats(
+    isolated_db, monkeypatch
+):
+    from automation import restart_startup
+    from automation import self_restart as sr
+
+    monkeypatch.setattr("infra.build_info.app_version", lambda: "v0.4.1-12-gabcdef")
+    monkeypatch.setattr("infra.platform_paths.app_bundle_root", lambda: None)
+    rid = sr.try_acquire(
+        "t-1", "steve", "oldsha", "dev", "update",
+        kind="update", target_version="2026.10.22.1936",
+    )
+    assert rid is not None
+    _advance(rid, "steering", "ready", "restarting")
+
+    restart_startup.close_out_prior_self_restart()
+    restart_startup._complete_restart_operation()
+
+    assert sr.operation_by_id(rid)["status"] == "complete"
 
 
 def test_close_out_supersedes_only_legacy_phaseless_rows(isolated_db, monkeypatch):
@@ -1066,7 +1233,7 @@ async def test_startup_materializes_restart_wake_then_releases_ingress(
 
     from loguru import logger
 
-    recovered, wakes = await restart_startup.reconcile_startup_continuity(logger)
+    recovered, wakes, _rolled_back = await restart_startup.reconcile_startup_continuity(logger)
     await restart_startup.drive_startup_continuity(recovered, wakes, logger)
 
     assert _rows(

@@ -72,7 +72,7 @@ describe('model sheet for a Local only thread', () => {
 	it('no local model, Local section shown: its add link is the only way to add one', () => {
 		localPicker.canAdd = true; models.set([cloud('thread_local_only')]); open();
 		expect(text()).toContain('No local model is ready.');
-		expect(addLinks()).toHaveLength(1); expect(host.querySelector('[aria-label="Local"] .add-local-link')).toBeTruthy();
+		expect(addLinks()).toHaveLength(1); expect(host.querySelector('[aria-label="CORSIA"] .add-local-link')).toBeTruthy();
 	});
 	it('a project-held chat with no local model: the row names the project and claims no add link', () => {
 		threads.set([{ id: 't1', project_id: 'p1', local_only: 0, local_only_effective: true, local_only_cause: 'project', updated_at: '2026-10-19T10:00:00.000000' } as never]);
@@ -93,7 +93,7 @@ describe('model sheet for a Local only thread', () => {
 		const setup = { ...local, id: 'omlx/setup', litellm_model: 'omlx@ns-1/setup', status: 'unavailable' } as Model;
 		threadCatalogs.set(new Map([['w1', [cloud('thread_local_only'), setup]]]));
 		open({ threadId: 'w1' });
-		expect(text()).not.toContain('Local only'); expect(host.querySelector('[aria-label="Local"]')).toBeNull();
+		expect(text()).not.toContain('Local only'); expect(host.querySelector('[aria-label="CORSIA"]')).toBeNull();
 		expect(addLinks()).toHaveLength(1);
 	});
 });

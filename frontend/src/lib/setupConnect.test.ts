@@ -12,16 +12,15 @@ describe('setup CLI installer failure copy', () => {
 		expect(installCause(code)).toBe(cause);
 	});
 
-	it('keeps a vendor refusal distinct and does not offer retry', () => {
-		expect(installFailureCopy('Codex', 'site_refused', 'cli-refused')).toEqual({
-			meta: 'Couldn’t download Codex. The download site refused the request. Save a report.',
+	it('names the maker whose site refused the download, with Retry and the report both kept', () => {
+		expect(installFailureCopy('Codex', 'site_refused', 'cli-refused', 'OpenAI')).toEqual({
+			meta: 'OpenAI’s site refused the download. Try again, or install it yourself.',
 			reference: 'cli-refused',
-			retry: false,
+			retry: true,
 		});
 	});
 
 	it.each([
-		['site_refused', 'Couldn’t download Codex. The download site refused the request. Retry.'],
 		['installer_failed', 'Couldn’t install Codex. Retry.'],
 	] as const)('asks for no report on a %s failure with no reference to find', (cause, meta) => {
 		expect(installFailureCopy('Codex', cause, null)).toEqual({ meta, reference: undefined, retry: true });
@@ -58,17 +57,24 @@ describe('setup CLI installer failure copy', () => {
 describe('setup sign-in failure copy', () => {
 	it('never puts an unknown cause code into the sentence', () => {
 		const copy = signinFailureCopy('codex', 'some_new_cause', 'signin-0123456789abcdef');
-		expect(copy).toEqual({ meta: 'Couldn’t finish signing in to Codex. Sign in again, or save a report.', reportable: true });
+		expect(copy).toEqual({ meta: 'Sign-in didn’t finish. Press Sign in to try again, or save a report.', reportable: true });
 	});
 
 	it('asks for a report only when a reference gives it something to find', () => {
-		expect(signinFailureCopy('codex', 'some_new_cause').meta).toBe('Couldn’t finish signing in to Codex. Sign in again.');
-		expect(signinFailureCopy('codex', 'agent_unavailable').meta).toBe('CORSIA couldn’t reach its agent to start signing in. Sign in again.');
+		expect(signinFailureCopy('codex', 'some_new_cause').meta).toBe('Sign-in didn’t finish. Press Sign in to try again.');
+		expect(signinFailureCopy('codex', 'agent_unavailable').meta).toBe('Sign-in didn’t finish. Press Sign in to try again.');
 	});
 
-	it('names a missing CORSIA agent apart from an unreachable service', () => {
-		expect(signinFailureCopy('codex', 'agent_unavailable').meta).not.toBe(signinFailureCopy('codex', 'unreachable').meta);
-		expect(signinFailureCopy('codex', 'agent_unavailable').reportable).toBe(true);
+	it('keeps CORSIA’s own failures to one line and still offers the report', () => {
+		for (const cause of ['agent_unavailable', 'unreachable', 'prompt_unrecognized', 'signin_check_failed']) {
+			expect(signinFailureCopy('codex', cause).meta).toBe('Sign-in didn’t finish. Press Sign in to try again.');
+			expect(signinFailureCopy('codex', cause).reportable).toBe(true);
+		}
+	});
+
+	it('says the browser never finished when it was closed, and what happened when it never came back', () => {
+		expect(signinFailureCopy('codex', 'vendor_login_failed')).toEqual({ meta: 'Sign-in didn’t finish in your browser. Press Sign in to try again.', reportable: false });
+		expect(signinFailureCopy('codex', 'signin_timed_out')).toEqual({ meta: 'Couldn’t finish signing in to Codex. If your browser said this account doesn’t include Codex, sign in with another account or turn Codex off. Otherwise, sign in again.', reportable: false });
 	});
 
 	it('tells a person who signed in to the same account what to do next', () => {

@@ -756,7 +756,7 @@ async def test_actual_boot_claims_ready_account_head_once_after_lost_notificatio
     before = _row(db)
     close_thread_db()
     db = get_db()
-    down, wakes = await reconcile_startup_continuity(logger)
+    down, wakes, _rolled_back = await reconcile_startup_continuity(logger)
     assert down.batches == down.settlements == () and wakes == ()
     assert _row(db) == before
     assert db.execute('SELECT COUNT(*) FROM active_turns').fetchone()[0] == 0
@@ -772,7 +772,7 @@ async def test_actual_boot_claims_ready_account_head_once_after_lost_notificatio
     assert _row(db) == before
     close_thread_db()
     db = get_db()
-    ready, wakes = await reconcile_startup_continuity(logger)
+    ready, wakes, _rolled_back = await reconcile_startup_continuity(logger)
     assert ready.settlements == () and wakes == () and len(ready.batches) == 1
     batch = ready.batches[0]
     assert batch.vendor_receipt == receipt
@@ -792,7 +792,7 @@ async def test_actual_boot_claims_ready_account_head_once_after_lost_notificatio
     assert writes == [batch]
     after = _row(db)
     assert (after['delivery_state'], after['write_outcome']) == ('delivered', 'accepted')
-    repeated, wakes = await reconcile_startup_continuity(logger)
+    repeated, wakes, _rolled_back = await reconcile_startup_continuity(logger)
     assert repeated.batches == repeated.settlements == () and wakes == ()
     await drive_startup_continuity(repeated, wakes, logger)
     assert writes == [batch] and _row(db) == after

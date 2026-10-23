@@ -210,6 +210,39 @@ def test_a_protected_shell_reads_the_python_and_runtime_folders_it_has_on_path(h
     assert not any(part.startswith("--add-dirs=") and str(runtimes.resolve()) in part for part in argv)  # never writable
 
 
+def _read_only_grants(home, monkeypatch) -> list[str]:
+    argv = _protected_argv(home, monkeypatch)
+    assert not any(part.startswith("--add-dirs=") and "CORSIA.app" in part for part in argv)  # never writable
+    return next(part for part in argv if part.startswith("--add-dirs-ro=")).split("=", 1)[1].split(":")
+
+
+def test_a_protected_shell_reads_the_bundled_git_exec_path_and_templates_so_clone_works(home, monkeypatch):
+    python_dir = _bundle(home, monkeypatch)
+    resources = python_dir.parent.parent
+    exec_path = resources / "libexec" / "git-core"
+    templates = resources / "share" / "git-core"
+    (exec_path / "git-remote-https").parent.mkdir(parents=True)
+    (templates / "templates").mkdir(parents=True)
+    (resources / "bin").mkdir()  # the PATH's bin folder is not part of Git's runtime and is not granted
+    assert _read_only_grants(home, monkeypatch) == [
+        str(python_dir.parent.resolve()), str(exec_path.resolve()), str(templates.resolve()),
+    ]
+
+
+def test_each_bundled_git_folder_is_granted_only_when_it_exists(home, monkeypatch):
+    python_dir = _bundle(home, monkeypatch)
+    exec_path = python_dir.parent.parent / "libexec" / "git-core"
+    exec_path.mkdir(parents=True)
+    assert _read_only_grants(home, monkeypatch) == [str(python_dir.parent.resolve()), str(exec_path.resolve())]
+
+
+def test_the_git_folders_are_granted_without_the_bundled_python(home, monkeypatch):
+    resources = home / "CORSIA.app" / "Contents" / "Resources"
+    (resources / "libexec" / "git-core").mkdir(parents=True)
+    monkeypatch.setattr(agent_shell_tools, "app_bundle_root", lambda: home / "CORSIA.app")
+    assert _read_only_grants(home, monkeypatch) == [str((resources / "libexec" / "git-core").resolve())]
+
+
 def test_a_protected_shell_grants_neither_folder_when_it_is_absent(home, monkeypatch):
     monkeypatch.setattr(agent_shell_tools, "app_bundle_root", lambda: None)
     assert not any(part.startswith("--add-dirs-ro=") for part in _protected_argv(home, monkeypatch))

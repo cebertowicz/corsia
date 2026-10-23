@@ -4,6 +4,7 @@ import AccountsBlock from './AccountsBlock.svelte';
 import { checkVendorSignin, loadVendorAccounts, removeVendorAccount, renameVendorAccount, signOutVendorAccount, type VendorAccount, vendorAccounts } from '$lib/stores/vendorAccounts';
 import { get } from 'svelte/store';
 import { token } from '$lib/stores/auth';
+import { emit } from '$lib/ws/events';
 
 describe('rendering and actions', () => {
 	const provider = {
@@ -104,7 +105,7 @@ describe('rendering and actions', () => {
 			unmount(component);
 		});
 
-		it('keeps the error and offers a Reload when the policy cannot be re-read after a failed save', async () => {
+		it('keeps the error and offers Retry when the policy cannot be re-read after a failed save', async () => {
 			token.set('test-token');
 			let policyReads = 0;
 			const policy = { providers: [{ provider_key: 'codex', capabilities: { units: 'accounts', rollover: false }, rollover: false, order: null, disabled: [], revision: 1, units: [{ id: 'default', label: 'Plus account 1', enabled: true }] }] };
@@ -119,8 +120,8 @@ describe('rendering and actions', () => {
 			document.querySelector<HTMLButtonElement>('[aria-label="Use Plus account 1"]')!.click();
 			await vi.waitFor(() => expect(document.querySelector('.account-usage-row .policy-status')?.textContent).toBe('Couldn’t save this change. Check your connection and try again.'));
 			await settle();
-			expect(button('Reload')).toBeDefined();
-			button('Reload').click();
+			expect(button('Retry')).toBeDefined();
+			button('Retry').click();
 			await vi.waitFor(() => expect(document.querySelector('.msg.err')).toBeNull());
 			unmount(component);
 		});
@@ -220,6 +221,62 @@ describe('rendering and actions', () => {
 				unmount(component);
 				document.body.innerHTML = '';
 			}
+		});
+
+		it('says an account the service records as having no usable model has no models for the tool, and only then', async () => {
+			const signedIn = { ...workAccount, state: 'signed_in' as const };
+			const noModel = 'This ChatGPT account has no models for Codex. Sign in with another account, or turn this account off.';
+			for (const [record, shown] of [[{ no_usable_model: true }, true], [{ no_usable_model: false }, false], [{}, false]] as const) {
+				vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response({ accounts: [defaultAccount, { ...signedIn, ...record }] })));
+				const component = mount(AccountsBlock, { target: document.body, props: { provider } });
+				await settle();
+				expect(document.body.textContent?.includes(noModel)).toBe(shown);
+				unmount(component);
+				document.body.innerHTML = '';
+			}
+		});
+
+		it('reads the list again when a login finishes reading its models, and says so with its reference and a Retry when that read fails', async () => {
+			const signedIn = { ...workAccount, state: 'signed_in' as const };
+			const noModel = 'This ChatGPT account has no models for Codex.';
+			let reads = 0;
+			vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+				if (!String(input).startsWith('/api/vendor-accounts')) return response({});
+				reads += 1;
+				if (reads === 1) return response({ accounts: [defaultAccount, signedIn] });
+				if (reads === 2) return response({ accounts: [defaultAccount, { ...signedIn, no_usable_model: true }] });
+				if (reads === 3) return response({ ref: 'K7M2QX' }, 500);
+				return response({ accounts: [defaultAccount, { ...signedIn, no_usable_model: true }] });
+			}));
+			const component = mount(AccountsBlock, { target: document.body, props: { provider } });
+			await settle();
+			expect(document.body.textContent).not.toContain(noModel);
+			emit('models_updated', {});
+			await settle();
+			expect(document.body.textContent).toContain(noModel);
+			emit('models_updated', {});
+			await settle();
+			expect(document.body.textContent).toContain('Couldn’t load your accounts. Reference: K7M2QX');
+			const retries = [...document.querySelectorAll<HTMLButtonElement>('button')].filter((element) => element.textContent?.trim() === 'Retry');
+			expect(retries).toHaveLength(2);
+			retries[1].click();
+			await settle();
+			expect(document.body.textContent).not.toContain('Couldn’t load your accounts.');
+			expect(document.body.textContent).toContain(noModel);
+			unmount(component);
+		});
+
+		it('says what the browser may have shown after a timed-out sign-in and what to do next', async () => {
+			vi.stubGlobal('fetch', vi.fn()
+				.mockResolvedValueOnce(response({ accounts: [defaultAccount, workAccount] }))
+				.mockResolvedValueOnce(response({ detail: 'no sign-in is in progress for this account' }, 409))
+				.mockResolvedValueOnce(response({ account_id: 'work', route: 'browser', status: 'failed', cause: 'signin_timed_out', ref: 'signin-1' })));
+			const component = mount(AccountsBlock, { target: document.body, props: { provider } });
+			await settle();
+			button('Sign in').click();
+			await settle();
+			expect(document.body.textContent).toContain('Couldn’t finish signing in. If your browser said this account doesn’t include Codex, sign in with another account or turn this account off. Otherwise, sign in again.');
+			unmount(component);
 		});
 
 		it('prefills rename with a named account custom value only', async () => {

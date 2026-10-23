@@ -47,7 +47,11 @@ def test_published_details_parse_changelog_and_cap_items(tmp_path):
 
     seed, clone = _repo_with_remote(tmp_path, "main")
     items = "\n".join(f"- Item {index}" for index in range(51))
-    (seed / "CHANGELOG.md").write_text(f"## v1.1.0 — Useful release\n\n### Added\n{items}\n")
+    (seed / "CHANGELOG.md").write_text(
+        f"## Unreleased\n\n_Changes merged since the last release._\n\n"
+        f"- Upcoming change\n\n"
+        f"## v1.1.0 — Useful release\n\n### Added\n{items}\n"
+    )
     _git(seed, "add", "CHANGELOG.md")
     _git(seed, "commit", "-m", "release notes")
     _git(seed, "tag", "v1.1.0")

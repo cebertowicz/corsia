@@ -95,7 +95,7 @@
 		</SettingsRow>
 	{/if}
 	<SettingsRow
-		name="Auto-approve leases"
+		name="Auto-approve"
 		sub="When the reviewer allows an application, activate it immediately without asking you. Per-action review and hard safety limits still apply. Repository-policy exceptions still require your approval."
 		wrap
 	>

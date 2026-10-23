@@ -6,6 +6,7 @@
 	import { KEYS_SIGNED_OUT } from '$lib/stores/keys';
 	import { Button } from '$lib/components/ui';
 	import SetupShell from './SetupShell.svelte';
+	import LivingMark from './LivingMark.svelte';
 	import { saveSetupReport } from '$lib/setupReport';
 
 	interface Props { onNoAccount?: () => void; }
@@ -116,7 +117,7 @@
 {:else}
 <div class="login-screen">
 	<div class="login-card">
-		<img class="login-logo" src="/icons/corsia-mark.svg" alt="CORSIA" />
+		<div class="login-logo"><LivingMark entry="none" label="CORSIA" /></div>
 		<h1>CORSIA</h1>
 		<p>Your personal AI assistant</p>
 		{#if phase === 'no-account'}
@@ -169,15 +170,6 @@
 		width: min(56vw, 240px);
 		height: min(56vw, 240px);
 		margin: 0 auto 28px;
-		display: block;
-		user-select: none;
-		-webkit-user-drag: none;
-		animation: hero-grow var(--dur-hero-plus) var(--ease-entrance) both;
-		transform-origin: center;
-	}
-	@keyframes hero-grow {
-		from { transform: scale(0.4); opacity: 0; }
-		to { transform: scale(1); opacity: 1; }
 	}
 	.login-card h1,
 	.login-card p,

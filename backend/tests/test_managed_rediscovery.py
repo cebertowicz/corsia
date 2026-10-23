@@ -9,15 +9,18 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
 
 
 @pytest.fixture(autouse=True)
-def _no_relist_marks():
+def _no_relist_marks(monkeypatch):
     from llm import server_observation
 
+    # Successful rediscovery also introspects, independently of notifications.
+    monkeypatch.setattr('llm.providers.omlx_introspection.warm_cache', AsyncMock())
     server_observation._UNLISTED.clear()
     yield
     server_observation._UNLISTED.clear()
@@ -67,12 +70,19 @@ def test_a_failed_rediscovery_is_retried_on_the_next_reach_until_one_lists(isola
     pushes = _count_pushes(monkeypatch)
     server_id = _register()
 
+    push_counts = []
+
     async def run() -> None:
         await _sweep(server_id, up=False)  # offline: rows marked unavailable
-        await _sweep(server_id, up=True)  # back: discovery fails
+        push_counts.append(len(pushes))
+        await _sweep(server_id, up=True)  # back: observed empty loaded set, discovery fails
+        push_counts.append(len(pushes))
         await _sweep(server_id, up=True)  # still reachable: discovery runs again, fails the same way
+        push_counts.append(len(pushes))
         await _sweep(server_id, up=True)  # and again, and lists
+        push_counts.append(len(pushes))
         await _sweep(server_id, up=True)  # listed: nothing more to do
+        push_counts.append(len(pushes))
 
     with caplog.at_level(logging.WARNING, logger="llm.server_observation"):
         asyncio.run(run())
@@ -81,6 +91,8 @@ def test_a_failed_rediscovery_is_retried_on_the_next_reach_until_one_lists(isola
     # Logged once for the repeated error, not on every sweep.
     assert caplog.text.count(f"discovery of {server_id} listed no models: Connection failed: timed out") == 1
     # Pushed on going offline, the first failure and the listing; not the repeat.
+    # A missing observed set and an empty set describe the same loaded state.
+    assert push_counts == [1, 2, 2, 3, 3]
     assert len(pushes) == 3
 
 

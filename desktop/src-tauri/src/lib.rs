@@ -47,6 +47,7 @@ mod startup_failure;
 mod test_tls;
 use startup_failure::StartupFailure;
 mod trust;
+mod unfinished_setup;
 mod version_check;
 mod window_placement;
 mod update_stage;
@@ -69,6 +70,10 @@ struct AppServiceState {
     app_dir: Mutex<Option<PathBuf>>,
     /// The local service ports already granted their commands; a capability can't be removed, so each is added once.
     granted_local_ports: Mutex<std::collections::BTreeSet<u16>>,
+    /// Set once this process has had its one chance to wipe an unfinished setup. A retry in the same process (after
+    /// an approval prompt or a slow start) never wipes, so it can't delete what this process just started; what a
+    /// retry may still do, planning a first run in the folder a finished wipe left, is read from disk.
+    setup_checked: AtomicBool,
     quitting: AtomicBool,
     exit_cleanup_attempted: AtomicBool,
     adoption_in_progress: AtomicBool,
@@ -365,6 +370,55 @@ fn unregister_service() -> Result<(), String> {
     run_service_command("unregister")
 }
 
+/// An unfinished first-run setup leaves nothing: before anything is planned or started, a marker the first run
+/// left (and the backend deletes when setup finishes) makes this launch wipe the state folder and what setup
+/// created, so first run begins again at step 1. Without a marker, or with one that cannot be trusted, nothing
+/// is touched. Starting over never stops a launch, and it is all or nothing for the old install: a wipe that
+/// fails deletes nothing, so the marker is dropped and the install resumes where it stopped (the old behavior);
+/// one that gets past its first step has removed the old install, so the launch plans a clean first run.
+///
+/// Returns the work folder that setup made, so planning the new first run reuses it.
+fn start_over_if_unfinished(app_dir: &Path, may_wipe: bool) -> Option<PathBuf> {
+    match unfinished_setup::at_launch(app_dir) {
+        unfinished_setup::Launch::Nothing => None,
+        unfinished_setup::Launch::Replan(workspace) => {
+            unfinished_setup::finish_leftovers(app_dir);
+            Some(workspace)
+        }
+        unfinished_setup::Launch::Damaged(reason) => {
+            // Nothing can trust it, so it only gets in the way: this install is simply not marked.
+            log::error!("a damaged unfinished-setup marker was removed: {reason}");
+            drop_marker(app_dir);
+            None
+        }
+        unfinished_setup::Launch::Untrusted(reason) => {
+            log::error!("an unfinished-setup marker was left alone: {reason}");
+            None
+        }
+        // This process has already started a service, so what is on disk is not an abandoned setup.
+        unfinished_setup::Launch::Wipe(_) if !may_wipe => None,
+        unfinished_setup::Launch::Wipe(marker) => {
+            log::info!("setup was never finished: starting it over");
+            // The service holds the state folder open, so it stops first.
+            let wiped = unregister_service().and_then(|()| unfinished_setup::wipe(app_dir, &marker));
+            match wiped {
+                Ok(()) => Some(PathBuf::from(marker.workspace)),
+                Err(error) => {
+                    log::error!("could not start setup over, so it resumes where it stopped: {error}");
+                    drop_marker(app_dir);
+                    None
+                }
+            }
+        }
+    }
+}
+
+fn drop_marker(app_dir: &Path) {
+    if let Err(error) = unfinished_setup::discard_marker(app_dir) {
+        log::error!("could not remove the unfinished-setup marker: {error}");
+    }
+}
+
 fn restart_service() -> Result<(), String> {
     unregister_service()?;
     run_service_command("register")
@@ -385,20 +439,39 @@ const LOCAL_SERVICE_PERMISSIONS: &[&str] = &[
     "allow-save-setup-report",
     "allow-start-window-drag",
 ];
+const LOCAL_SERVICE_EXTERNAL_URL_SCOPES: &[&str] = &["http://*", "https://*"];
 
-/// Lets the page the local service serves at this exact origin call its commands. The app's command ACL refuses every
-/// origin it does not name, and the service page is not the startup shell, so without this the first-run folder
-/// choice and the Connect to another computer screens are refused.
+fn local_service_external_url_scopes() -> Vec<serde_json::Value> {
+    LOCAL_SERVICE_EXTERNAL_URL_SCOPES
+        .iter()
+        .map(|url| serde_json::json!({ "url": url }))
+        .collect()
+}
+
+/// Builds the capability for one local-service origin: its own app commands and only browser-safe external URLs.
+fn local_service_capability(port: u16) -> CapabilityBuilder {
+    LOCAL_SERVICE_PERMISSIONS
+        .iter()
+        .fold(
+            CapabilityBuilder::new(format!("local-service-origin-{port}")).remote(service_url(port)).window("main"),
+            |capability, permission| capability.permission(*permission),
+        )
+        .permission_scoped(
+            "opener:allow-open-url",
+            local_service_external_url_scopes(),
+            Vec::<serde_json::Value>::new(),
+        )
+}
+
+/// Lets the page the local service serves at this exact origin call its commands and open safe external links. The app's
+/// command ACL refuses every origin it does not name, and the service page is not the startup shell, so without this the
+/// first-run folder choice, Connect to another computer screens, and chat sign-in links are refused.
 fn grant_local_service_origin<R: tauri::Runtime>(app: &tauri::AppHandle<R>, service: &AppServiceState, port: u16) -> Result<(), String> {
     let mut granted = service.granted_local_ports.lock().unwrap_or_else(PoisonError::into_inner);
     if granted.contains(&port) {
         return Ok(());
     }
-    let capability = LOCAL_SERVICE_PERMISSIONS.iter().fold(
-        CapabilityBuilder::new(format!("local-service-origin-{port}")).remote(service_url(port)).window("main"),
-        |capability, permission| capability.permission(*permission),
-    );
-    app.add_capability(capability).map_err(|error| format!("could not grant local service commands: {error}"))?;
+    app.add_capability(local_service_capability(port)).map_err(|error| format!("could not grant local service permissions: {error}"))?;
     granted.insert(port);
     Ok(())
 }
@@ -576,12 +649,18 @@ fn start_service<R: tauri::Runtime>(
         log::error!("an unfinished Start fresh could not be put back: {}", failure.details);
         return Ok(ServiceStartup::StartFreshFailed { failure });
     }
+    let started_over = if first_run::environment_names_the_roots() {
+        None
+    } else {
+        let may_wipe = !service.setup_checked.swap(true, Ordering::SeqCst);
+        start_over_if_unfinished(&app_dir, may_wipe)
+    };
     // Decide about the workspace before anything is written: a refusal leaves
     // the computer exactly as it was.
     let first_run = if first_run::environment_names_the_roots() {
         first_run::FirstRun::Configured
     } else {
-        first_run::plan(&home, &app_dir)?
+        first_run::plan_trusting(&home, &app_dir, started_over.as_deref())?
     };
     if let first_run::FirstRun::ExistingInstall { reason, details } = first_run {
         return Ok(ServiceStartup::ExistingInstall { reason, details });
@@ -593,6 +672,16 @@ fn start_service<R: tauri::Runtime>(
     }
     let port = port_for_startup(&first_run, first_run::recorded_port(&app_dir))?;
     if let first_run::FirstRun::Fresh { workspace } = first_run {
+        // Marked before anything is written, so a marker that can't be written refuses the launch and leaves the
+        // computer as it was. Only a first run that makes the state folder marks it; `false` means it was not new.
+        match unfinished_setup::mark(&app_dir, &workspace) {
+            Ok(true) => {}
+            Ok(false) => log::info!("the state folder was not new, so setup is not marked unfinished"),
+            Err(error) => {
+                log::error!("could not mark setup as unfinished: {error}");
+                return Err("Couldn’t start setup. Quit and reopen CORSIA to try again.".into());
+            }
+        }
         let resources = bundled_resource_dir(app).ok();
         first_run::apply(&workspace, &app_dir, port, |path| {
             first_run::git_init(
@@ -720,20 +809,32 @@ async fn configure_work_folder(app: tauri::AppHandle, path: PathBuf) -> Result<(
     Ok(())
 }
 
-fn remote_shell_context(connection: &shell_state::ShellState) -> serde_json::Value {
+fn local_shell_context(home: Option<&Path>) -> serde_json::Value {
+    let Some(home) = home else { return serde_json::json!({ "mode": "local" }); };
+    let workspace = first_run::default_workspace(home);
+    serde_json::json!({
+        "mode": "local",
+        "default_workspace": {
+            "path": workspace.display().to_string(),
+            "display": format!("~/{}", first_run::WORKSPACE_FOLDER),
+        },
+    })
+}
+
+fn remote_shell_context(connection: &shell_state::ShellState, home: Option<&Path>) -> serde_json::Value {
     match connection.state() {
         shell_state::LaunchState::Remote { name } => serde_json::json!({ "mode": "remote", "name": name }),
-        _ => serde_json::json!({ "mode": "local" }),
+        _ => local_shell_context(home),
     }
 }
 
 /// What a page load hands the window: the shell context, and the script drawing the shell state. A finished load of
 /// any page but the startup shell means a Ready launch answer was followed, so it is not followed again.
-fn page_load_state(connection: &mut shell_state::ShellState, url: &str, finished: bool) -> (serde_json::Value, Option<String>) {
+fn page_load_state(connection: &mut shell_state::ShellState, url: &str, finished: bool, home: Option<&Path>) -> (serde_json::Value, Option<String>) {
     if finished && !is_shell_origin(url) {
         connection.left_shell();
     }
-    (remote_shell_context(connection), shell_state_script(connection.state()))
+    (remote_shell_context(connection, home), shell_state_script(connection.state()))
 }
 
 fn remote_startup_state(state: &shell_state::LaunchState) -> Option<serde_json::Value> {
@@ -1854,13 +1955,14 @@ pub fn run() {
             // the script self-guards via __corsia_drag_handler_installed
             // so multiple injections don't double-bind.
             let finished = matches!(payload.event(), tauri::webview::PageLoadEvent::Finished);
+            let home = webview.app_handle().path().home_dir().ok();
             let (shell_context, startup_state) = webview
                 .app_handle()
                 .state::<RemoteRuntime>()
                 .shell
                 .lock()
-                .map(|mut connection| page_load_state(&mut connection, payload.url().as_str(), finished))
-                .unwrap_or_else(|_| (serde_json::json!({ "mode": "local" }), None));
+                .map(|mut connection| page_load_state(&mut connection, payload.url().as_str(), finished, home.as_deref()))
+                .unwrap_or_else(|_| (local_shell_context(home.as_deref()), None));
             let show_state = startup_state.unwrap_or_default();
             let _ = webview.eval(format!("window.__CORSIA_SHELL__ = {shell_context};{DRAG_INIT_SCRIPT}{show_state}"));
             // Re-apply traffic-light position after each navigation —
@@ -2117,11 +2219,12 @@ mod tests {
             outside: None,
         };
         let mut connection = shell_state::ShellState::launch(Some(&saved));
-        assert_eq!(remote_shell_context(&connection), serde_json::json!({ "mode": "local" }));
+        let home = Path::new("/fixture");
+        assert_eq!(remote_shell_context(&connection, Some(home)), serde_json::json!({ "mode": "local", "default_workspace": { "path": "/fixture/CORSIA", "display": "~/CORSIA" } }));
         connection.connected("Studio");
-        assert_eq!(remote_shell_context(&connection), serde_json::json!({ "mode": "remote", "name": "Studio" }));
+        assert_eq!(remote_shell_context(&connection, Some(home)), serde_json::json!({ "mode": "remote", "name": "Studio" }));
         connection.failed("Studio", classify::ConnectFailure::Network);
-        assert_eq!(remote_shell_context(&connection), serde_json::json!({ "mode": "local" }));
+        assert_eq!(remote_shell_context(&connection, Some(home)), serde_json::json!({ "mode": "local", "default_workspace": { "path": "/fixture/CORSIA", "display": "~/CORSIA" } }));
     }
 
     #[test]
@@ -2236,6 +2339,35 @@ mod tests {
                 assert!(refusal.to_string().contains("not allowed"), "{command} was not ACL-refused from {other}: {refusal}");
             }
         }
+    }
+
+    #[test]
+    fn the_local_service_origin_can_open_http_links_but_no_other_remote_origin_can() {
+        let (_app, webview) = service_origin_app(47895);
+        let command = "plugin:opener|open_url";
+        let local_error = invoke_from(&webview, command, &service_url(47895)).unwrap_err();
+        assert!(
+            !local_error.to_string().contains("not allowed"),
+            "{command} was ACL-refused from the local service origin: {local_error}"
+        );
+        for other in ["http://127.0.0.1:47896", "http://localhost:47895", "https://127.0.0.1:47895", "http://studio.example:47895", "http://127.0.0.1"] {
+            let refusal = invoke_from(&webview, command, other).unwrap_err();
+            assert!(refusal.to_string().contains("not allowed"), "{command} was not ACL-refused from {other}: {refusal}");
+        }
+    }
+
+    #[test]
+    fn the_local_service_opener_scope_allows_only_http_and_https_urls() {
+        assert_eq!(LOCAL_SERVICE_EXTERNAL_URL_SCOPES, ["http://*", "https://*"]);
+        assert!(!LOCAL_SERVICE_EXTERNAL_URL_SCOPES.iter().any(|scope| scope.starts_with("file:") || scope.starts_with("javascript:")));
+        assert_eq!(
+            local_service_external_url_scopes(),
+            LOCAL_SERVICE_EXTERNAL_URL_SCOPES
+                .iter()
+                .map(|url| serde_json::json!({ "url": url }))
+                .collect::<Vec<_>>(),
+            "the capability must receive the same URL scope that the allowlist declares"
+        );
     }
 
     #[test]
@@ -2364,13 +2496,13 @@ mod tests {
         let runtime = app.state::<RemoteRuntime>();
         let mut connection = runtime.shell.lock().unwrap();
         // The shell loads after the answer: it is drawn, and the window follows it to the service.
-        let (_, script) = page_load_state(&mut connection, "tauri://localhost/index.html", true);
+        let (_, script) = page_load_state(&mut connection, "tauri://localhost/index.html", true, Some(Path::new("/fixture")));
         assert!(script.is_some_and(|script| script.contains(r#""state":"ready""#)));
-        page_load_state(&mut connection, "http://127.0.0.1:47895/", false);
+        page_load_state(&mut connection, "http://127.0.0.1:47895/", false, Some(Path::new("/fixture")));
         assert!(shell_state_script(connection.state()).is_some(), "a load still starting has not reached the service");
-        page_load_state(&mut connection, "http://127.0.0.1:47895/", true);
+        page_load_state(&mut connection, "http://127.0.0.1:47895/", true, Some(Path::new("/fixture")));
         // A quit failure later sends the window back to the shell, which must stay on its own screen.
-        let (_, script) = page_load_state(&mut connection, "tauri://localhost/index.html#quit-failure", true);
+        let (_, script) = page_load_state(&mut connection, "tauri://localhost/index.html#quit-failure", true, Some(Path::new("/fixture")));
         assert_eq!(script, None);
     }
 

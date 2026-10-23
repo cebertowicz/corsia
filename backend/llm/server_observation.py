@@ -70,7 +70,10 @@ async def record_reachable(
     sid = server["id"]
     await run_in_db(nd.update_server_status, sid, status="online", **status)
     if loaded is not None:
+        changed = nd._LOADED_BY_SERVER.get(sid, set()) != loaded
         nd._LOADED_BY_SERVER[sid] = set(loaded)
+        if changed:
+            nd._notify_models_changed_safe()
     if rediscover and (server.get("status") == "offline" or sid in _UNLISTED):
         _schedule(nd._discover_and_notify(sid))
 

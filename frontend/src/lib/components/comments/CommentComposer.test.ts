@@ -58,4 +58,40 @@ describe('CommentComposer', () => {
 			log.mockRestore();
 		}
 	});
+
+	it('keeps the draft when the save request is refused', async () => {
+		const report = vi.spyOn(toasts, 'show').mockImplementation(() => 'failure-toast');
+		const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+		try {
+			const post = vi.fn().mockRejectedValue(new Error('refused'));
+			const textarea = render(() => submitDocumentComment(post));
+			textarea.value = 'Keep this refused draft';
+			textarea.dispatchEvent(new Event('input', { bubbles: true }));
+			flushSync();
+			host.querySelector<HTMLButtonElement>('.submit')!.click();
+
+			await vi.waitFor(() => expect(report).toHaveBeenCalledWith("Couldn't post the comment — try again", 'error'));
+			expect(textarea.value).toBe('Keep this refused draft');
+			expect(post).toHaveBeenCalledOnce();
+		} finally {
+			report.mockRestore();
+			log.mockRestore();
+		}
+	});
+
+	it('clears only after the save acknowledgement resolves', async () => {
+		let acknowledge!: () => void;
+		const onSubmit = vi.fn(() => new Promise<void>((resolve) => { acknowledge = resolve; }));
+		const textarea = render(onSubmit);
+		textarea.value = 'Wait for saved acknowledgement';
+		textarea.dispatchEvent(new Event('input', { bubbles: true }));
+		flushSync();
+
+		host.querySelector<HTMLButtonElement>('.submit')!.click();
+		await vi.waitFor(() => expect(onSubmit).toHaveBeenCalledWith('Wait for saved acknowledgement'));
+		expect(textarea.value).toBe('Wait for saved acknowledgement');
+
+		acknowledge();
+		await vi.waitFor(() => expect(textarea.value).toBe(''));
+	});
 });
