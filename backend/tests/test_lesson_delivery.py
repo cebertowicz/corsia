@@ -53,7 +53,7 @@ def test_read_file_description_does_not_duplicate_trial_marker_protocol():
 
 
 def test_trial_delivery_migration_adds_per_lesson_receipt_columns():
-    from infra.migration_141_to_142_correction_learning import migrate_141_to_142
+    from infra.migration_142_to_143_correction_learning import migrate_142_to_143
 
     connection = sqlite3.connect(":memory:")
     connection.execute("CREATE TABLE outcome_events (subject_key TEXT, event_name TEXT)")
@@ -63,7 +63,7 @@ def test_trial_delivery_migration_adds_per_lesson_receipt_columns():
             delivered_sha256 TEXT, byte_count INTEGER, partial INTEGER, created_at TEXT
         )"""
     )
-    migrate_141_to_142(connection)
+    migrate_142_to_143(connection)
 
     columns = {row[1] for row in connection.execute("PRAGMA table_info(guidance_loads)")}
     assert {"node_id", "variant", "checkpoint_generation_id", "lesson_id", "lesson_behavioral_sha256"} <= columns
