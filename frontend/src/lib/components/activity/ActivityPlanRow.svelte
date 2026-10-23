@@ -13,7 +13,7 @@
 	import ActivityIdentityGlyph from './ActivityIdentityGlyph.svelte';
 	import ThreadWaitingMark from '$lib/components/ThreadWaitingMark.svelte';
 	import SnoozeClock from '$lib/components/plans/SnoozeClock.svelte';
-	import { threadPlanStates } from '$lib/stores/threadPlanStates';
+	import { planSetAsideUntil, threadPlanStates } from '$lib/stores/threadPlanStates';
 	import { setAsideLine, waitBack, waitChecksBack } from '$lib/components/plans/planWaits';
 	import { openWaitArtifact, UNOPENABLE_DOCUMENT } from '$lib/openWaitArtifact';
 	import { minuteClock } from '$lib/time';
@@ -77,9 +77,8 @@
 	});
 	// Every wait is set aside by its agent: the plan comes back at a time it chose (EW7); no state word.
 	const setAside = $derived.by(() => {
-		const entry = $threadPlanStates[threadId];
-		// Only an idle plan reads set aside: one still working or owing you keeps its own state.
-		return !wait && entry?.state === 'idle' && entry.set_aside_until ? setAsideLine(entry.set_aside_until, $minuteClock) : null;
+		const until = planSetAsideUntil($threadPlanStates[threadId]);
+		return !wait && until ? setAsideLine(until, $minuteClock) : null;
 	});
 	// A host-like label ("github.com/…/checks") stays as written; any other starts a sentence.
 	const waitLabel = $derived(!wait ? '' : /^[\w-]+(\.[\w-]+)+(\/|$)/.test(wait.label) ? wait.label
