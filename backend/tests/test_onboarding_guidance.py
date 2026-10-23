@@ -286,7 +286,7 @@ def test_app_path_uses_server_opening_and_plan_then_steps_and_handoff():
     assert "Never post or repeat it" in app
     # The doc's order: the other subscription, the one import, Where your work lives, search, About you.
     assert [title.rstrip(".,") for title in titles] == [
-        "Add your second subscription", "Bring over what your other tools know", "Where your work lives",
+        "Add your Claude or ChatGPT subscription", "Bring over what your other tools know", "Where your work lives",
         "Web search", "About you", "Email and calendar", "Learning from the community",
         "Your files, and when agents ask first",
     ]
@@ -370,7 +370,7 @@ def test_web_search_guidance_distinguishes_keyless_readiness_from_key_setup():
     assert "When `web_search_ready` is false, search doesn't work right now; this setup turns it on, and so can the managed local server once it's running." in web
     assert "There is no fallback search: without a key, web search stays off." not in web
     assert "search stays off until this setup succeeds" not in web
-    assert "I can't search the web right now." in _step(4)
+    assert "`Until search is set up, I can't search the web. Settings › Keys has it whenever you want it.`" in _step(4)
     assert "Until then I can't search the web." not in _step(4)
 
 

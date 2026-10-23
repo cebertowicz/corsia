@@ -313,7 +313,7 @@ def test_applicable_steps_and_completion_cache_reconcile_conditionals(
     connections = next(step for step in applicable_steps({}) if step["step_number"] == 3)
     assert "or you chose not now" in connections["acceptance_criteria"]
     assert [(step["step_number"], step["title"], step.get("vendor")) for step in steps] == [
-        (1, "Add your second subscription", "claude_code"),
+        (1, "Add your Claude subscription", "claude_code"),
         (2, "Bring over what your other tools know", None),
         (4, "Web search", None),
         (5, "About you", None),
@@ -604,3 +604,16 @@ def test_named_apps_are_children_and_preserve_visible_onboarding_steps(fresh_ins
     top_level = {node["title"] for node in final["nodes"] if node["parent_id"] is None}
     assert top_level == {step["title"] for step in applicable_steps(facts)}
     assert "Hand over to your agents" in top_level
+
+
+def test_each_missing_paid_subscription_is_its_own_named_step():
+    from onboarding.app_first_run import applicable_steps
+
+    steps = applicable_steps({
+        "sources_missing": {"claude_code": "needs_auth", "codex": "not_installed"},
+        "pays_for": ["claude_code", "codex"],
+    })
+    assert [(step["title"], step["vendor"]) for step in steps if step["step_number"] == 1] == [
+        ("Add your Claude subscription", "claude_code"),
+        ("Add your ChatGPT subscription", "codex"),
+    ]

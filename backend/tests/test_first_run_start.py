@@ -19,7 +19,7 @@ def test_first_step_explains_unfinished_signin_and_points_to_actual_card_action(
     text = first_run_wake.first_app_step(facts(
         sources_missing={"codex": "needs_auth"}, pays_for=["codex"],
     ))
-    assert "1. **Add your second subscription" in text
+    assert "1. **Add your Claude or ChatGPT subscription" in text
     assert "Setup's sign-in to [Claude Code | Codex] didn't finish." in text
     assert "[Settings › Providers](/settings/providers), press Sign in on its card" in text
     assert "POST /api/vendor-accounts/{id}/signin" not in text

@@ -86,7 +86,7 @@ def applicable_steps(
     for vendor in _paid_missing_sources(facts):
         product = "Claude" if vendor == "claude_code" else "ChatGPT"
         steps.append(_step(
-            1, "Add your second subscription",
+            1, f"Add your {product} subscription",
             f"you connected your {product} subscription, or chose not now",
             vendor=vendor,
         ))

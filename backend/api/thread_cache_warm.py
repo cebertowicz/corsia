@@ -99,6 +99,8 @@ async def _build_warm_prefix(
     target: ExecutionTarget,
     reasoning_effort: str | None,
 ):
+    from loguru import logger
+
     from core.agent import get_agent
     from core.native_context_prefix import _freeze_tool_definitions
     from llm.base import sanitize_empty_content, sanitize_messages
@@ -113,7 +115,7 @@ async def _build_warm_prefix(
     candidates, eager_checkpoint_id, pending_opening = await run_in_db(
         _warm_replay_candidates, thread_id, target.catalog_id,
     )
-    messages, _prefix_info = await _render_warm_replay(
+    messages, prefix_info = await _render_warm_replay(
         agent=agent,
         thread_id=thread_id,
         project_id=project_id,
@@ -123,9 +125,11 @@ async def _build_warm_prefix(
         tool_defs=tool_defs,
     )
     if pending_opening is not None:
-        # Rehearse the greeting the selection transaction will persist, without
-        # publishing it or choosing a model/account during the warm.
+        # Rehearse the greeting selection will persist, without publishing it or choosing a model.
         messages.append({"role": "assistant", "content": pending_opening})
+    logger.info(f"warm_session_cache: built {len(messages)} prefix messages (history={prefix_info['history_messages']}, "
+                f"history_tokens={prefix_info['history_tokens']}, trimmed={prefix_info['was_trimmed']}, "
+                f"opening={pending_opening is not None})")
     messages = sanitize_messages(sanitize_empty_content(messages))
     prompt_shape = make_prompt_extra_body(
         messages,
@@ -277,8 +281,6 @@ async def _submit_warm(
     if probe.get("ok") and probe.get("model_loaded") is False:
         return {"ok": False, "message": f"model not loaded: {model_id}"}
     progress = _probe_progress(probe) if probe.get("ok") else None
-    # Progress is emitted only while a submitted warm is running; the setup UI
-    # never polls this endpoint, so there is no separate probe-only contract.
     if _probe_is_memory_hot(probe):
         return {
             "ok": True,
@@ -341,9 +343,7 @@ async def _start_warm_owner(
     warm, progress_probe = make_provider_warm_operations(
         provider, cfg, model_id, messages, tools, prompt_shape, _probe_progress,
     )
-    progress_callback = make_user_warm_progress_callback(
-        user_id, thread_id, event_model,
-    )
+    progress_callback = make_user_warm_progress_callback(user_id, thread_id, event_model)
     task, started, suppression = await start_thread_warm(
         thread_id,
         key,
@@ -374,9 +374,9 @@ async def _start_warm_owner(
 
 @router.post("/threads/{thread_id}/warm")
 async def warm_session_cache(
-    thread_id: str, token: str = "", model: str | None = None, wait: bool = False,
+    thread_id: str, token: str = "", model: str | None = None, wait: bool = False, progress: bool = False,
 ):
-    """Pre-warm the exact Native oMLX prefix; ``wait`` reports how it ended."""
+    """Pre-warm the exact Native oMLX prefix; ``wait`` reports how it ended; only setup asks for ``progress``."""
     user = authenticate(token)
     if not user:
         raise HTTPException(401)
@@ -395,6 +395,6 @@ async def warm_session_cache(
         tools,
         prompt_shape,
         wait,
-        user_id=user["id"],
+        user_id=user["id"] if progress else None,
         requested_model=model,
     )

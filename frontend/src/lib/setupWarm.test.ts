@@ -33,6 +33,7 @@ describe('setup local warm', () => {
 		expect(requests[1]).toContain('/agent/warm?');
 		expect(requests[1]).toContain('model=omlx%40test%2Fmodel');
 		expect(requests[1]).toContain('wait=true');
+		expect(requests[1]).toContain('progress=true');
 		expect(requests.some((request) => request.includes('probe_only'))).toBe(false);
 		expect(requests.some((request) => request.startsWith('PATCH') || request.startsWith('PUT'))).toBe(false);
 		warm.destroy();

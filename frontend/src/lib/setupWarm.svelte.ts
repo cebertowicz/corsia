@@ -84,7 +84,7 @@ export function createSetupWarm() {
 				stopSubscription = on('thread_warm_progress', (event: WarmProgressEvent) => {
 					acceptProgress(event, lookup.target.thread_id, model);
 				});
-				const query = new URLSearchParams({ token: session, model });
+				const query = new URLSearchParams({ token: session, model, progress: 'true' });
 				const url = `/api/threads/${encodeURIComponent(lookup.target.thread_id)}/warm?${query}`;
 				await fetch(`${url}&wait=true`, { method: 'POST', signal });
 			} catch { /* An unreachable local model leaves the normal cold-turn path available. */ }

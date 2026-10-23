@@ -13,24 +13,6 @@ export type LocalPick = {
 export const LOW_MEMORY_LOCAL_MODEL_SENTENCE = 'Local models need at least 24 GB of memory, and this computer has less. Smaller models and future updates may bring them to 16 GB computers.';
 export const LOW_MEMORY_LOCAL_MODEL_MESSAGE = `${LOW_MEMORY_LOCAL_MODEL_SENTENCE} Connect a subscription or an API provider.`;
 
-type LocalStartResponse = { result: 'started' | 'failed'; reference?: string; fix?: string };
-export const LOCAL_START_NETWORK_FAILURE = 'CORSIA couldn’t start local setup.';
-
-/** Start the local download through the setup or signed-in provider route. */
-export async function requestLocalStart(session: string | null): Promise<LocalStartResponse> {
-	const response = await fetch(session ? '/api/providers/local/setup' : '/api/setup/local-download', {
-		method: 'POST',
-		headers: { 'Content-Type': 'application/json', ...(session ? { Authorization: `Bearer ${session}` } : {}) },
-		body: JSON.stringify(session ? { onboarding: true } : {}),
-	});
-	const body = await response.json().catch(() => null);
-	const reference = typeof body?.detail?.ref === 'string' ? body.detail.ref : typeof body?.ref === 'string' ? body.ref : undefined;
-	const fix = typeof body?.detail?.fix === 'string' ? body.detail.fix : typeof body?.fix === 'string' ? body.fix : undefined;
-	if (response.ok && body?.ok !== false) return { result: 'started', reference };
-	if (!fix) throw new Error('local start response omitted recovery');
-	return { result: 'failed', reference, fix };
-}
-
 const PICK = '/api/setup/local-model';
 const FAILED: LocalPick = { state: 'failed', model: null, message: null };
 
