@@ -407,11 +407,11 @@ pub fn service_command(
         return None;
     }
     let Some(operation) = args.get(1) else {
-        eprintln!("usage: CORSIA --service register|reload|unregister|status");
+        eprintln!("usage: CORSIA --service register|unregister|status");
         return Some(USAGE_EXIT);
     };
     if args.len() != 2 {
-        eprintln!("usage: CORSIA --service register|reload|unregister|status");
+        eprintln!("usage: CORSIA --service register|unregister|status");
         return Some(USAGE_EXIT);
     }
     match operation.as_str() {
@@ -435,16 +435,6 @@ pub fn service_command(
                 Some(FOREIGN_SERVICE_EXIT)
             }
         },
-        "reload" => match refuse_foreign_corsia_job(reader, executable)
-            .and_then(|()| unregister_if_registered(manager))
-            .and_then(|()| manager.register())
-        {
-            Ok(()) => Some(0),
-            Err(error) => {
-                eprintln!("could not reload CORSIA service: {error}");
-                Some(1)
-            }
-        },
         "unregister" => match unregister_if_registered(manager) {
             Ok(()) => Some(0),
             Err(error) => {
@@ -453,7 +443,7 @@ pub fn service_command(
             }
         },
         _ => {
-            eprintln!("usage: CORSIA --service register|reload|unregister|status");
+            eprintln!("usage: CORSIA --service register|unregister|status");
             Some(USAGE_EXIT)
         }
     }
@@ -975,26 +965,6 @@ mod tests {
 
         assert_eq!(exit, Some(FOREIGN_SERVICE_EXIT));
         assert_eq!(manager.registrations.get(), 0);
-    }
-
-    #[test]
-    fn reload_unregisters_then_registers_an_enabled_service() {
-        let (executable, _root) = bundle_executable();
-        let manager = FakeManager::default();
-        manager.status.set(Some(ServiceStatus::Enabled));
-        let reader = FakeLaunchctl { jobs: String::new(), details: String::new() };
-
-        assert_eq!(
-            service_command(
-                &["--service".into(), "reload".into()],
-                &manager,
-                &reader,
-                &executable,
-            ),
-            Some(0),
-        );
-        assert_eq!(manager.unregistrations.get(), 1);
-        assert_eq!(manager.registrations.get(), 1);
     }
 
     #[test]

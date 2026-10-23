@@ -144,7 +144,13 @@ with open(state / "app", "a") as log:
 control = state / (mode.strip("-") + "_exit")
 if control.exists():
     sys.exit(int(control.read_text()))
-if mode == "--service" and operation == "reload":
+if mode == "--service" and operation == "unregister":
+    loaded = state / "loaded"
+    if loaded.exists():
+        loaded.unlink()
+elif mode == "--service" and operation in ("register", "reload"):
+    if operation == "reload" and (bundle / "Contents" / "Resources" / "reject_service_reload").exists():
+        sys.exit(64)
     plist = bundle / "Contents" / "Library" / "LaunchAgents" / "ai.corsia.service.plist"
     state.joinpath("loaded").write_text(str(plist))
     info = plistlib.loads((bundle / "Contents" / "Info.plist").read_bytes())
@@ -334,7 +340,7 @@ def test_app_mode_uses_its_bundle_service_and_service_json_never_a_checkout(app)
     assert result.returncode == 0, result.stdout + result.stderr
     assert "ENV FILE SOURCED" not in result.stdout + result.stderr
     assert app.launchd_calls() == []
-    assert app.calls("app") == ["--service reload"]
+    assert app.calls("app") == ["--service unregister", "--service register"]
     assert f"http://127.0.0.1:{PORT}/api/health" in app.calls("curl")
     assert not (app.home / "Library" / "LaunchAgents").exists()
 
@@ -383,7 +389,12 @@ def test_start_stop_and_restart_never_write_inside_a_read_only_bundle(app):
         f"bootout --wait {domain}/{LABEL}",
         f"kickstart -k {domain}/{LABEL}",
     ]
-    assert app.calls("app") == ["--service reload", "--service reload"]
+    assert app.calls("app") == [
+        "--service unregister",
+        "--service register",
+        "--service unregister",
+        "--service register",
+    ]
     # The restart proved a new process and printed its version identity.
     assert (app.launchd / "starts").read_text() == "3"
     assert f"launchd {LABEL}" in results[-1].stdout
@@ -431,7 +442,7 @@ def test_registration_belongs_to_the_app_binary(app):
         result = app.run("service", verb)
 
         assert result.returncode == 1
-        assert "--service register|reload|unregister" in result.stdout
+        assert "--service register|unregister" in result.stdout
     assert app.launchd_calls() == []
     assert not (app.home / "Library" / "LaunchAgents").exists()
 
@@ -477,7 +488,8 @@ def test_update_swaps_the_staged_app_and_hands_off_to_its_own_script(app):
     assert app.launchd_calls() == [f"bootout --wait {domain}/{LABEL}"]
     assert app.calls("app") == [
         f"--update-swap {OPERATION_ID}",
-        "--service reload",
+        "--service unregister",
+        "--service register",
     ]
     assert app.generation() == "2.0.0+2"
     assert (app.launchd / "generation").read_text() == "2.0.0+2"
@@ -499,7 +511,8 @@ def test_a_failed_swap_starts_the_installed_app_again(app):
     assert app.launchd_calls() == [f"bootout --wait {domain}/{LABEL}"]
     assert app.calls("app") == [
         f"--update-swap {OPERATION_ID}",
-        "--service reload",
+        "--service unregister",
+        "--service register",
     ]
     assert app.generation() == "1.0.0+1"
     assert (app.launchd / "generation").read_text() == "1.0.0+1"
@@ -509,6 +522,9 @@ def test_a_failed_swap_starts_the_installed_app_again(app):
 def test_after_the_swap_a_health_failure_rolls_back_and_starts_the_old_app(app):
     app.load()
     app.stage("2.0.0", "2")
+    # The old app emulates build 417: it has register/unregister, but not the
+    # new reload verb. The staged app is a fixed build and does support it.
+    (app.bundle / "Contents" / "Resources" / "reject_service_reload").write_text("")
     (app.launchd / "health_fail_generation").write_text("2.0.0+2")
 
     result = app.run("restart-prepared", CORSIA_RESTART_OPERATION_ID=OPERATION_ID)
@@ -524,9 +540,11 @@ def test_after_the_swap_a_health_failure_rolls_back_and_starts_the_old_app(app):
     ]
     assert app.calls("app") == [
         f"--update-swap {OPERATION_ID}",
-        "--service reload",
+        "--service unregister",
+        "--service register",
         f"--update-rollback {OPERATION_ID}",
-        "--service reload",
+        "--service unregister",
+        "--service register",
     ]
     assert app.generation() == "1.0.0+1"
     assert (app.launchd / "generation").read_text() == "1.0.0+1"
@@ -546,10 +564,16 @@ def test_after_the_swap_a_wrong_version_rolls_back_and_starts_the_old_app(app):
     output = result.stdout + result.stderr
     assert "is version 1.0.0+1, not 2.0.0+2" in output
     assert "went back to version 1.0.0+1" in output
+    domain = f"gui/{os.getuid()}"
+    assert app.launchd_calls() == [
+        f"bootout --wait {domain}/{LABEL}",
+    ]
     assert app.calls("app") == [
-        "--service reload",
+        "--service unregister",
+        "--service register",
         f"--update-rollback {OPERATION_ID}",
-        "--service reload",
+        "--service unregister",
+        "--service register",
     ]
     assert app.generation() == "1.0.0+1"
     assert (app.launchd / "generation").read_text() == "1.0.0+1"
