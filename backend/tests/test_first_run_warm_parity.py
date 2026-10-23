@@ -24,8 +24,16 @@ def _write(sql: str, *args) -> None:
         db.execute(sql, args)
 
 
-def _seed_omlx() -> None:
-    provider_model = MODEL.partition("/")[2]
+def _seed_omlx(monkeypatch) -> None:
+    from llm import network_discovery
+
+    server_id, _, provider_model = MODEL.partition("@")[2].partition("/")
+    _write(
+        "INSERT INTO network_servers (id,instance_id,instance_name,port,status,"
+        "last_seen_at,created_at,updated_at) VALUES (?,?,'Test',9,'online','t','t','t')",
+        server_id, server_id,
+    )
+    monkeypatch.setattr(network_discovery, "_LOADED_BY_SERVER", {server_id: {provider_model}})
     _write(
         "INSERT OR REPLACE INTO models (id,harness,provider,provider_model_id,"
         "litellm_model,display_name,backend,source,enabled,available,"
@@ -48,12 +56,13 @@ async def _until(condition, seconds: float = 10.0) -> None:
 
 
 @pytest.fixture
-def app_first_run(monkeypatch, isolated_db):
+def app_first_run(monkeypatch, isolated_db, tmp_path):
     """Seed the production app landing plan and its held first-run wake."""
     from infra import accounts
     from infra.corsia_agent import get_corsia_agent
     from infra.database import write_transaction
 
+    monkeypatch.setattr("infra.config.WORKSPACE", tmp_path / "workspace")
     # The common isolated DB seeds ordinary test accounts; this journey starts
     # before any account exists, exactly as the app's first-run path does.
     with write_transaction(None, scope="test_first_run_warm_parity") as db:
@@ -63,7 +72,7 @@ def app_first_run(monkeypatch, isolated_db):
     accounts.create_first_account("newcomer", SECRET_ENOUGH, first_run_path="app")
     conductor_id = get_corsia_agent()
     assert conductor_id
-    _seed_omlx()
+    _seed_omlx(monkeypatch)
     with write_transaction(None, scope="test_first_run_warm_parity") as db:
         db.execute(
             "UPDATE threads SET reasoning_effort='medium' WHERE id=?",
@@ -123,8 +132,11 @@ async def _warm(conductor_id: str, wire, monkeypatch) -> dict:
 
 
 async def _first_turn(conductor_id: str, wire) -> dict:
+    from infra.send_target import resolve_target
     from thread.model import switch_model
 
+    target = await resolve_target(MODEL, thread_id=conductor_id)
+    assert target.available, target.availability_reason
     outcome = await switch_model(
         conductor_id, MODEL, user_id="newcomer", actor_kind="user",
         actor_id="newcomer", reason="harness_model_switch",
