@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from core import lesson_files
+from core.correction_learning import CAUSES
 from core.lesson_trials import PERMANENT_KINDS, lesson_id, parse_instant
 from core.thread_identity import thread_agent_identity
 from core.placement_decide import Decision, Destination, InvalidDecision, ThreadPlace
@@ -95,7 +96,7 @@ def _learning_metadata(decision: Decision) -> None:
         raise TrialRefused("invalid-learning-metadata", "new_target_path is only allowed when target_file is new.")
     if not decision.target_section or not decision.case:
         raise TrialRefused("missing-learning-metadata", "Trial admission needs target_section and case (what_happened, right_call, does_not_apply, correction_subject).")
-    if decision.cause not in ("wrong_rule", "no_foundation", "rule_gap", "process_gap", "not_delivered", "not_followed", "cant_be_done"):
+    if decision.cause not in CAUSES:
         raise TrialRefused("invalid-learning-metadata", "cause must be a System correction cause.")
     if decision.new_evidence not in (None, "target_changed", "case_differs"):
         raise TrialRefused("invalid-learning-metadata", "new_evidence must be target_changed or case_differs.")
@@ -112,18 +113,25 @@ def _target(decision: Decision) -> str:
     return target
 
 
-def _target_trials(decision: Decision) -> tuple[list[tuple[Path, Any]], list[tuple[Path, Any]]]:
-    from core.skill_scanning import skill_files
+def _target_trials(
+    db: sqlite3.Connection, place: ThreadPlace, decision: Decision,
+) -> tuple[list[tuple[Path, Any]], list[tuple[Path, Any]]]:
+    from core.skill_resolution import resolve_effective_skills
     from infra.config import WORKSPACE
 
     root = Path(WORKSPACE)
-    paths = [*skill_files(root)]
-    for tray in sorted((root / ".threads").glob("*")) if (root / ".threads").is_dir() else []:
-        paths.extend(skill_files(tray))
+    resolved = resolve_effective_skills(
+        thread_id=place.thread_id, project_id=place.project_id, workspace=root, db=db,
+    )
+    paths = [row.path for row in (*resolved.included, *resolved.omitted)]
     open_trials, retired = [], []
     for path in paths:
         current = lesson_files.read_trial(path.read_text(encoding="utf-8", errors="replace"))
-        if current is None or _target_from_lesson(current) != _target(decision):
+        if (
+            current is None
+            or current.lesson.owner != place.thread_id
+            or _target_from_lesson(current) != _target(decision)
+        ):
             continue
         if current.lesson.state in ("watch", "trial"):
             open_trials.append((path, current))
@@ -184,7 +192,7 @@ def admit(
         raise TrialRefused("invalid-output", (
             "skill_name must be a new lowercase-hyphenated name for the trial skill"
         ))
-    open_trials, retired_trials = _target_trials(decision)
+    open_trials, retired_trials = _target_trials(db, place, decision)
     open_rows = tuple(_trial_row(path, current) for path, current in open_trials)
     retired_rows = tuple(_trial_row(path, current) for path, current in retired_trials)
     same = lambda current: current.lesson.target_section == decision.target_section and current.lesson.cause == decision.cause

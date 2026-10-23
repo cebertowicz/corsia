@@ -51,22 +51,18 @@ class ReadDelivery:
 
     text: str
     node_id: str | None
-    receipts: tuple[TrialReceipt, ...] | Variant = ()
+    receipts: tuple[TrialReceipt, ...] = ()
 
     def __post_init__(self) -> None:
-        """Normalize the former single-variant seam for existing callers."""
-        if isinstance(self.receipts, str):
-            object.__setattr__(
-                self, "receipts", (TrialReceipt("", "", self.receipts),),
-            )
+        if not isinstance(self.receipts, tuple) or any(
+            not isinstance(receipt, TrialReceipt) for receipt in self.receipts
+        ):
+            raise TypeError("receipts must be TrialReceipt values")
 
     @property
     def variant(self) -> Variant | None:
         """The single receipt's variant, retained for one-lesson callers."""
-        receipts = self.receipts
-        if isinstance(receipts, str):
-            return receipts
-        return receipts[0].variant if len(receipts) == 1 else None
+        return self.receipts[0].variant if len(self.receipts) == 1 else None
 
 
 def draw(lesson_id: str, behavioral_sha256: str, node_id: str) -> Literal["with", "without"]:
@@ -254,5 +250,6 @@ def start_trials(
                 checkpoint_generation_id=checkpoint_generation_id,
                 lesson_id=trial.lesson_id,
                 lesson_behavioral_sha256=trial.behavioral_sha256, db=tx,
+                raise_on_failure=True,
             )
     return with_deliveries

@@ -430,13 +430,14 @@ async def test_a_skill_read_leaves_a_version_receipt(skill):
 
 @pytest.mark.asyncio
 async def test_trial_delivery_changes_only_the_returned_text_and_receipt(skill, monkeypatch):
-    from core.lesson_delivery import ReadDelivery
+    from core.lesson_delivery import ReadDelivery, TrialReceipt
     from infra.database import get_db
 
     monkeypatch.setattr(
         "core.lesson_delivery.read_delivery",
         lambda _db, **kwargs: ReadDelivery(
-            f"{kwargs['rendered_text']}\n\n[Trial section — with variant]", "node-1", "with",
+            f"{kwargs['rendered_text']}\n\n[Trial section — with variant]", "node-1",
+            (TrialReceipt("lesson-1", "a" * 64, "with"),),
         ),
     )
 

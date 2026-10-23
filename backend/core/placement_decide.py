@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from core.correction_learning import CAUSES
 from core.lesson_trials import BODY_WORDS, TRIAL_SCHEMA, Trial, lesson_block, validate_trial
 
 Q1 = ("thread", "agent", "project", "everywhere")
@@ -84,7 +85,7 @@ ANSWER_SCHEMA: dict[str, Any] = {
         "target_file": {"type": ["string", "null"]},
         "new_target_path": {"type": ["string", "null"]},
         "target_section": {"type": ["string", "null"]},
-        "cause": {"type": ["string", "null"], "enum": ["wrong_rule", "no_foundation", "rule_gap", "process_gap", "not_delivered", "not_followed", "cant_be_done", None]},
+        "cause": {"type": ["string", "null"], "enum": [*CAUSES, None]},
         "new_evidence": {"type": ["string", "null"], "enum": ["target_changed", "case_differs", None]},
         "case": {
             "type": ["object", "null"], "additionalProperties": False,

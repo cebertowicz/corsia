@@ -346,11 +346,14 @@ def record_guidance_load(
     returned_text: str, partial: bool, node_id: str | None = None,
     variant: str | None = None, checkpoint_generation_id: str | None = None,
     lesson_id: str | None = None, lesson_behavioral_sha256: str | None = None,
-    db=None,
+    db=None, raise_on_failure: bool = False,
 ) -> None:
-    """Record one mid-Turn read of a ``SKILL.md``; never raises.
+    """Record one mid-Turn read of a ``SKILL.md``.
 
     ``data`` is the bytes the read returned text from, never a second read.
+    Ordinary native reads remain usable when receipt recording fails. Callers
+    that persist a trial assignment can request an exception so their enclosing
+    transaction rolls the draw back instead.
     """
     from infra.database import write_transaction
     from infra.time import utc_now_iso
@@ -382,6 +385,8 @@ def record_guidance_load(
         log.exception("guidance_manifest: skill read of %s unrecorded", path)
         if thread_id and turn_id:
             _mark_guidance_load_failed(thread_id, turn_id)
+        if raise_on_failure:
+            raise
 
 
 def _mark_guidance_load_failed(thread_id: str, turn_id: str) -> None:

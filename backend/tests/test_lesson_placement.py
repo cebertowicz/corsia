@@ -167,6 +167,29 @@ def _external_trial(
     return path
 
 
+def _other_thread_trial(env: Env, name: str, *, state: str = "trial") -> Path:
+    """Seed another thread's same-target trial outside this owner's resolution."""
+    from core.lesson_files import render_trial
+    from core.lesson_trials import Trial
+
+    path = env.workspace / ".threads" / "other-owner" / "skills" / name / "SKILL.md"
+    path.parent.mkdir(parents=True)
+    path.write_text(render_trial(
+        lesson_id=str(uuid.uuid4()), owner="other-owner", name=name,
+        description="Use when reporting a check result on a pull request.",
+        text="Name the exact commit a check ran on.",
+        trial=Trial("hypothesis", _due(days=14), state=state, boundary="A one-line typo fix."),
+        source_refs=TURN, target_file="skills/checks/SKILL.md", target_section="Reporting",
+        cause="process_gap",
+        case={
+            "what_happened": "A result lacked its commit.",
+            "right_call": "Name the commit.", "does_not_apply": "For a draft.",
+            "correction_subject": "message:other-owner",
+        },
+    ), encoding="utf-8")
+    return path
+
+
 def _offered(env: Env) -> list[dict]:
     """The lessons the per-task delivery seam would offer the next task.
 
@@ -426,6 +449,32 @@ async def test_tool_placement_merges_the_same_target_section_and_cause_across_lo
     assert [ref["reference"] for ref in merged.lesson.source_refs] == ["turn-7", "turn-merge"]
     assert not _skill(env, "incoming-check").exists()
     assert "Open trials with this target: existing-check (process_gap)." in reply
+
+
+async def test_tool_placement_ignores_another_threads_open_same_target_trial(env: Env) -> None:
+    other = _other_thread_trial(env, "other-open")
+    entry = _entry(env)
+
+    reply = _place(env, entry, _answer(skill_name="owner-open"))
+    await _drain(env.worker)
+
+    created = lesson_files.read_trial(_skill(env, "owner-open").read_text())
+    assert created is not None and created.lesson.owner == THREAD
+    assert lesson_files.read_trial(other.read_text()).lesson.owner == "other-owner"
+    assert "other-open" not in reply
+
+
+async def test_tool_placement_ignores_another_threads_retired_same_target_trial(env: Env) -> None:
+    other = _other_thread_trial(env, "other-retired", state="retired")
+    entry = _entry(env)
+
+    reply = _place(env, entry, _answer(skill_name="owner-retired"))
+    await _drain(env.worker)
+
+    created = lesson_files.read_trial(_skill(env, "owner-retired").read_text())
+    assert created is not None and created.lesson.owner == THREAD
+    assert lesson_files.read_trial(other.read_text()).lesson.state == "retired"
+    assert "other-retired" not in reply
 
 
 async def test_tool_placement_merges_relative_destination_with_resolved_trial_target(

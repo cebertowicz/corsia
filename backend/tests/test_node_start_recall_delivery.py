@@ -235,6 +235,9 @@ async def test_trial_delivery_failure_is_advisory_to_plan_operation(recall_db, m
 
     assert result["admission"]["condition"] == "running"
     assert "trial_lessons" not in result
+    assert result["trial_lessons_error"] == (
+        "Trial guidance was not delivered; no trial receipt was recorded."
+    )
 
 
 def test_wake_with_unknown_install_records_without_receipt(recall_db, monkeypatch):

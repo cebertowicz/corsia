@@ -44,3 +44,6 @@ def attach_trial_lessons_advisory(
         )
     except Exception as exc:  # noqa: BLE001 - advisory sibling never fails a plan mutation
         log.exception("trial delivery unavailable for selected node %s: %s", node_id, exc)
+        facts["trial_lessons_error"] = (
+            "Trial guidance was not delivered; no trial receipt was recorded."
+        )

@@ -6,7 +6,7 @@ import sqlite3
 
 import pytest
 
-from core.lesson_delivery import TrialDelivery, draw, read_delivery, start_trials
+from core.lesson_delivery import ReadDelivery, TrialDelivery, draw, read_delivery, start_trials
 from infra.schema import SCHEMA_SQL
 from tools.filesystem_gate import canonical_target_path
 
@@ -42,6 +42,11 @@ def _node(variant: str) -> str:
         if draw("lesson", "a" * 64, node_id) == variant:
             return node_id
     raise AssertionError("draw did not produce both halves")
+
+
+def test_read_delivery_rejects_an_unattributed_variant():
+    with pytest.raises(TypeError, match="TrialReceipt"):
+        ReadDelivery("text", "node", "with")
 
 
 def test_read_file_description_does_not_duplicate_trial_marker_protocol():
@@ -167,6 +172,26 @@ def test_start_trials_returns_only_new_file_with_assignments(db, tmp_path, monke
         "SELECT lesson_id,lesson_behavioral_sha256,variant FROM guidance_loads"
     ).fetchone()
     assert tuple(row) == ("new", "a" * 64, "with")
+
+
+def test_start_trials_rolls_back_the_draw_when_its_receipt_fails(db, tmp_path, monkeypatch):
+    new_trial = _trial(tmp_path / "skills" / "new" / "SKILL.md", lesson_id="new", is_new=True)
+    node_id = next(
+        f"node-{number}" for number in range(1000)
+        if draw("new", "a" * 64, f"node-{number}") == "with"
+    )
+    monkeypatch.setattr("core.lesson_delivery._eligible_trials", lambda *_args: [new_trial])
+
+    def receipt_failure(_data):
+        raise RuntimeError("receipt unavailable")
+
+    monkeypatch.setattr("core.guidance_manifest._sha256_bytes", receipt_failure)
+
+    with pytest.raises(RuntimeError, match="receipt unavailable"):
+        start_trials(db, thread_id="thread", node_id=node_id, checkpoint_generation_id="install-1")
+
+    assert db.execute("SELECT * FROM guidance_loads").fetchall() == []
+    assert not db.in_transaction
 
 
 def test_start_trials_records_a_without_draw_without_returning_it(db, tmp_path, monkeypatch):

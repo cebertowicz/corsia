@@ -20,6 +20,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
+from core.correction_learning import CAUSES
+
 LESSON_KEY = "lesson"
 STATES = ("watch", "trial", "retired", "promoted")
 KINDS = ("instruction", "preference", "constraint", "hypothesis")
@@ -290,9 +292,7 @@ def lesson_errors(block: object, description: str | None, body: str) -> list[str
         errors.append("corsia.lesson.new_target_path must be a non-empty string")
     if "target_section" in block and not _clean(block.get("target_section")):
         errors.append("corsia.lesson.target_section must be a non-empty string")
-    if "cause" in block and block.get("cause") not in (
-        "wrong_rule", "no_foundation", "rule_gap", "process_gap", "not_delivered", "not_followed", "cant_be_done",
-    ):
+    if "cause" in block and block.get("cause") not in CAUSES:
         errors.append("corsia.lesson.cause must be a System correction cause")
     if "case" in block and _case(block.get("case")) is None:
         errors.append("corsia.lesson.case must name what_happened, right_call, does_not_apply and correction_subject; optional actions must be a valid carry-in action contract")

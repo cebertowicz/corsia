@@ -249,15 +249,6 @@ def _dispatch_settlement(operation: str, params: dict[str, Any], actor, common, 
     return boundary_settlement.accept(operation, node_id, params, actor, common, db, acting)
 
 
-# Settlement evidence helpers live in plans.boundary_settlement.
-
-
-
-
-
-
-
-
 def dispatch(plan_id, operation, params, actor, provenance, db, *, workflow_version=None):
     """Route one validated mutation without creating a second plan service.
 
