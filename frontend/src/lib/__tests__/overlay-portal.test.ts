@@ -89,7 +89,7 @@ afterEach(() => {
 });
 
 describe('the overlay primitives leave the pane they were opened in', () => {
-	it('Modal renders a portaled layer with sibling scrim and card', async () => {
+	it('Modal renders a portaled layer with a scrim beside the card, and the glass beside the card inside its frame', async () => {
 		component = mount(Modal, { target: pane(), props: { title: 'Add model', onClose: vi.fn(), children: (() => {}) as never } });
 		flushSync();
 		await tick();
@@ -99,7 +99,13 @@ describe('the overlay primitives leave the pane they were opened in', () => {
 		expect(layer).not.toBeNull();
 		expect(layer!.parentElement).toBe(document.body);
 		expect(scrim?.parentElement).toBe(layer);
-		expect(card?.parentElement).toBe(layer);
+		const frame = card?.parentElement;
+		const glass = document.querySelector<HTMLElement>('.modal-glass');
+		expect(frame?.classList.contains('modal-frame')).toBe(true);
+		expect(frame?.parentElement).toBe(layer);
+		// The blurred layer must not sit inside the faded card, or the browser makes the card a backdrop root.
+		expect(glass?.parentElement).toBe(frame);
+		expect(card?.contains(glass)).toBe(false);
 		expect(host.contains(layer)).toBe(false);
 	});
 
