@@ -15,11 +15,13 @@ const NATURAL = { width: 1600, height: 1000 };
 const REPLACED_NATURAL = { width: 1200, height: 800 };
 const filler = (from: number, to: number) => Array.from({ length: to - from }, (_, i) => `Paragraph ${from + i}: the walkthrough continues with enough words to wrap across a few lines of the document column.\n`).join('\n');
 const DOC = ['# Design walkthrough', '', filler(1, 4), '![Mock screen](shots/screen.png)', '', filler(4, 12)].join('\n');
+const LIVE_REFRESH_DOC = DOC.replace('screen.png', 'screen.svg');
+const svgImage = ({ width, height }: typeof NATURAL) => `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><rect width="100%" height="100%" fill="teal" /></svg>`;
 /** Two images, for many comments on each and a drawer with more than one image group. */
 const DOC_TWO = ['# Design walkthrough', '', filler(1, 2), '![Mock screen](shots/screen.png)', '', filler(2, 4), '![Settings screen](shots/settings.png)', '', filler(4, 12)].join('\n');
 const query = `?token=${encodeURIComponent(TEST_TOKEN)}`;
 
-interface Seeded { sessionTitle: string; artifactId: string; imagePath: string }
+interface Seeded { sessionTitle: string; sessionId: string; artifactId: string; imagePath: string }
 
 /** A document with one image near its top, open in its thread's canvas. */
 async function seedDocument(page: Page, request: APIRequestContext, label: string, splitWidth: number | null, doc = DOC): Promise<Seeded> {
@@ -50,7 +52,7 @@ async function seedDocument(page: Page, request: APIRequestContext, label: strin
 		},
 		{ threadId: sessionId, id: artifactId, tabPath: docPath, width: splitWidth },
 	);
-	return { sessionTitle, artifactId, imagePath: path.join(dir, 'shots', 'screen.png') };
+	return { sessionTitle, sessionId, artifactId, imagePath: path.join(dir, 'shots', 'screen.png') };
 }
 
 const overlay = (page: Page) => page.locator('.image-overlay');
@@ -272,6 +274,29 @@ const mockOnly = (testInfo: TestInfo) => {
 };
 
 test.describe('@flow:image-region-comments @surface:documents comments on images inside a document', () => {
+	test('refreshes a replaced image in an open document and keeps its region comment', async ({ page, request }, testInfo) => {
+		mockOnly(testInfo);
+		test.setTimeout(180_000);
+		await page.setViewportSize({ width: 1440, height: 900 });
+		const seeded = await seedDocument(page, request, 'doc-image-live-refresh', null, LIVE_REFRESH_DOC);
+		const imagePath = seeded.imagePath.replace(/\.png$/, '.svg');
+		fs.writeFileSync(imagePath, svgImage(NATURAL));
+		await openDocument(page, seeded, 1440);
+		await openImage(page);
+		await commentOnRegion(page, 'Image replaced while this document stays open');
+		await page.keyboard.press('Escape');
+		await bar(page).getByRole('button', { name: 'Back to walkthrough.md' }).click();
+		await expect(overlay(page)).toHaveCount(0);
+		await expect(marker(page)).toBeVisible();
+
+		const replaced = await request.put(`/api/files/content${query}`, {
+			data: { path: imagePath, text: svgImage(REPLACED_NATURAL), thread_id: seeded.sessionId },
+		});
+		expect(replaced.ok(), `image replace failed: ${replaced.status()}`).toBeTruthy();
+		await expect.poll(() => docImage(page).evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(REPLACED_NATURAL.width);
+		await expect(marker(page)).toBeVisible();
+	});
+
 	test('reopens a replaced image and keeps its region comment on the fresh image', async ({ page, request }, testInfo) => {
 		mockOnly(testInfo);
 		test.setTimeout(180_000);
