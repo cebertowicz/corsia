@@ -184,10 +184,10 @@
       "sha256": "068934f86d89f63bd334a9c8170228d78fbab5d8adc41876c09004bf502e8038"
     },
     {
-      "bytes": 3121,
+      "bytes": 3265,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/references/browser-person-steps.md",
-      "sha256": "e7dab36e3d55d8b9eb8c06ac3bb155057e87906567c199c9c800a82e48009939"
+      "sha256": "1f3efef8f83f6d2202b87097a36a83db26204666a89d9bcbe4d021780492248d"
     },
     {
       "bytes": 22455,
@@ -304,10 +304,10 @@
       "sha256": "dfb7e2a0b7160bace5485ed7898463385cda62bd58d094f1b08922703b0caf8a"
     },
     {
-      "bytes": 5347,
+      "bytes": 6018,
       "kind": "skill",
       "path": "skills/google-setup/SKILL.md",
-      "sha256": "8c90f92817d7b4a8ebdbd81c2ba2997720dda133fcf0ebc064a60887cfd7d252"
+      "sha256": "c803aac1ed3185272636a664ace306bb753884af1e3192610bfaad0a09da1012"
     },
     {
       "bytes": 9080,

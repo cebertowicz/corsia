@@ -21,6 +21,8 @@ def test_context_preview_timing_emits_one_content_free_structured_line():
     finally:
         logger.remove(sink)
 
+    # The periodic summary line also fires once its interval has passed since process start; it is not this line.
+    records = [r for r in records if not r["message"].startswith("context_preview_summary ")]
     assert len(records) == 1
     name, encoded = records[0]["message"].split(" ", 1)
     assert name == "context_preview_timing"
