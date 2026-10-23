@@ -432,7 +432,7 @@ async def test_a_from_line_that_is_not_the_connected_account_sends_nothing(mail,
     path.write_text(path.read_text().replace(f"From: {EMAIL}", "From: someone.else@example.com"))
     out = await _send(mail, saved)
     assert out == (
-        "Error: Not sent: the From line doesn't match the Google account this draft was written "
+        "Error: Not sent: the From line doesn't match the email account this draft was written "
         f"from ({EMAIL}). Save the draft again with email_draft and show the person."
     )
     assert mail.sent_requests() == []

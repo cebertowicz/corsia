@@ -215,7 +215,13 @@ class FakeImap(_LineServer):
         sub, _, rest = args.partition(" ")
         if sub.upper() == "SEARCH":
             self.searches.append(rest)
-            conn.send("* SEARCH " + " ".join(str(uid) for uid in sorted(self.messages)), f"{tag} OK done")
+            uids = sorted(self.messages)
+            if rest.upper().startswith("UID "):
+                start, _, end = rest[4:].partition(":")
+                lower = int(start)
+                upper = max(uids, default=0) if end == "*" else int(end)
+                uids = [uid for uid in uids if lower <= uid <= upper]
+            conn.send("* SEARCH " + " ".join(str(uid) for uid in uids), f"{tag} OK done")
             return
         wanted, _, items = rest.partition(" ")
         for uid in (int(part) for part in wanted.split(",")):
@@ -231,9 +237,14 @@ class FakeImap(_LineServer):
 
 class FakeSmtp(_LineServer):
     def __init__(self, authority: Authority, *, user: str, password: str, implicit_tls: bool = True,
-                 offer_starttls: bool = False, plain_auth_without_tls: bool = False) -> None:
+                 offer_starttls: bool = False, plain_auth_without_tls: bool = False,
+                 refused_recipients: set[str] | None = None, refuse_sender: bool = False,
+                 drop_after_data: bool = False) -> None:
         self.user, self.password = user, password
         self.offer_starttls, self.plain_auth_without_tls = offer_starttls, plain_auth_without_tls
+        self.refused_recipients = refused_recipients or set()
+        self.refuse_sender, self.drop_after_data = refuse_sender, drop_after_data
+        self.mail_from: list[str] = []
         self.sent: list[tuple[list[str], bytes]] = []
         super().__init__(authority, implicit_tls=implicit_tls)
 
@@ -258,9 +269,17 @@ class FakeSmtp(_LineServer):
                 decoded = base64.b64decode(args.split(" ", 1)[1]).split(b"\0") if " " in args else []
                 ok = decoded == [b"", self.user.encode(), self.password.encode()]
                 conn.send("235 accepted" if ok else f"535 rejected {HOST_REPLY_MARKER}")
+            elif verb == "MAIL":
+                sender = args.split(":", 1)[1].strip(" <>")
+                self.mail_from.append(sender)
+                conn.send("550 sender refused" if self.refuse_sender else "250 OK")
             elif verb == "RCPT":
-                recipients.append(args.split(":", 1)[1].strip(" <>"))
-                conn.send("250 OK")
+                recipient = args.split(":", 1)[1].strip(" <>")
+                if recipient in self.refused_recipients:
+                    conn.send("550 recipient refused")
+                else:
+                    recipients.append(recipient)
+                    conn.send("250 OK")
             elif verb == "DATA":
                 conn.send("354 go ahead")
                 body: list[bytes] = []
@@ -268,6 +287,9 @@ class FakeSmtp(_LineServer):
                     body.append(data_line)
                 self.sent.append((recipients[:], b"\r\n".join(body)))
                 recipients.clear()
+                if self.drop_after_data:
+                    conn.sock.close()
+                    return
                 conn.send("250 queued")
             elif verb == "QUIT":
                 conn.send("221 bye")

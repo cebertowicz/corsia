@@ -176,38 +176,46 @@ def reply_headers(ep: Endpoints, username: str, password: str, validity: int, ui
         return dict(_items(data)).get(uid)
 
 
+def _last_uid(conn: imaplib.IMAP4, ep: Endpoints) -> int:
+    status, found = conn.uid("SEARCH", "ALL")
+    if status != "OK":
+        raise _unreachable(ep)
+    return max((int(uid) for uid in (found[0] or b"").split()), default=0)
+
+
 def inbox_cursor(ep: Endpoints, username: str, password: str) -> tuple[int, int]:
     """The inbox UIDVALIDITY and current last UID, used as a no-replay poll floor."""
     with session(ep, username, password) as conn:
         validity = _select(conn, ep)
-        status, found = conn.uid("SEARCH", "ALL")
-        if status != "OK":
-            raise _unreachable(ep)
-        uids = (found[0] or b"").split()
-        return validity, max((int(uid) for uid in uids), default=0)
+        return validity, _last_uid(conn, ep)
+
+
+POLL_BATCH_SIZE = 50
 
 
 def added_after(
     ep: Endpoints, username: str, password: str, validity: int, last_uid: int, max_bytes: int,
 ) -> tuple[int, int, list[tuple[int, bytes]]]:
-    """Messages newer than the stored UID, or a new no-replay floor after a mailbox rebuild."""
+    """Fetch one bounded, oldest-first batch newer than the durable UID cursor."""
     with session(ep, username, password) as conn:
         current_validity = _select(conn, ep)
-        status, found = conn.uid("SEARCH", "ALL")
+        if current_validity != validity:
+            # A rebuilt mailbox: the old cursor means nothing here, so take the whole mailbox's
+            # last UID as the new no-replay floor.  Rare, so the full search is acceptable.
+            return current_validity, _last_uid(conn, ep), []
+        status, found = conn.uid("SEARCH", "UID", f"{last_uid + 1}:*")
         if status != "OK":
             raise _unreachable(ep)
-        uids = [int(uid) for uid in (found[0] or b"").split()]
-        current_last = max(uids, default=0)
-        if current_validity != validity:
-            return current_validity, current_last, []
-        wanted = [uid for uid in uids if uid > last_uid]
+        # RFC 3501 permits a range starting beyond the current highest UID to include
+        # that highest UID, so enforce the durable cursor again client-side.
+        wanted = sorted(uid for uid in (int(uid) for uid in (found[0] or b"").split()) if uid > last_uid)[:POLL_BATCH_SIZE]
         if not wanted:
-            return current_validity, current_last, []
+            return current_validity, last_uid, []
         status, data = conn.uid("FETCH", ",".join(str(uid) for uid in wanted), f"(UID BODY.PEEK[]<0.{max_bytes}>)")
         if status != "OK":
             raise _unreachable(ep)
         by_uid = dict(_items(data))
-        return current_validity, current_last, [(uid, by_uid[uid]) for uid in wanted if uid in by_uid]
+        return current_validity, wanted[-1], [(uid, by_uid[uid]) for uid in wanted if uid in by_uid]
 
 
 def fetch(ep: Endpoints, username: str, password: str, validity: int, uid: int, max_bytes: int) -> bytes | None:

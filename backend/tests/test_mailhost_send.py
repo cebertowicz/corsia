@@ -11,13 +11,15 @@ from email import message_from_bytes, policy
 from types import SimpleNamespace
 
 import pytest
-from mailhost_fakes import HOST_REPLY_MARKER
+from mailhost_fakes import HOST_REPLY_MARKER, FakeSmtp
 from mailhost_helpers import (  # noqa: F401  (fixtures)
     ADDRESS, PASSWORD, add_account, authority, conductor, env, row, run_check, servers,
 )
 
 import infra.config as config
 from connections.mailhost import check, read as mailhost_read, store
+from connections.mailhost import endpoints as mailhost_endpoints
+from connections.mailhost.endpoints import Server
 from events.connectors import mail_poller as poller
 from infra.database import get_db
 from infra.platform_paths import WorkspaceSelection
@@ -108,13 +110,34 @@ async def test_send_submits_over_smtp_to_every_recipient_and_keeps_a_sent_copy(h
     assert len(host.built.smtp.sent) == 1
 
 
-async def test_a_host_known_to_save_its_own_sent_copy_gets_no_second_one(host) -> None:
+async def test_a_partly_refused_send_succeeds_and_names_only_the_refused_addresses(make_host) -> None:
+    host = await make_host(smtp={"refused_recipients": {"lee@example.com"}})
+    saved = await _draft(host)
+    out = json.loads(await _send(host, saved))
+    assert out["not_delivered_to"] == ["lee@example.com"]
+    assert out["note"] == "Tell the person that these addresses did not get the email."
+    assert host.built.smtp.sent[0][0] == ["pat@example.com"]
+    assert _row(saved["draft_id"])["state"] == "sent"
+    _no_leak(json.dumps(out))
+
+
+async def test_a_sender_refusal_reopens_the_draft_and_never_retries_submission(make_host) -> None:
+    host = await make_host(smtp={"refuse_sender": True})
+    saved = await _draft(host)
+    out = await _send(host, saved)
+    assert out.startswith("Error: Not sent: The mail server refused this message")
+    assert _row(saved["draft_id"])["state"] == "open"
+    assert host.built.smtp.sent == [] and len(host.built.smtp.mail_from) == 1
+    _no_leak(out)
+
+
+async def test_a_sent_copy_is_always_appended_and_the_retired_host_flag_is_not_written(host) -> None:
     endpoints, _ = store.read(host.account_id, db=get_db())
-    store.write(host.account_id, type(endpoints)(**{**endpoints.__dict__, "smtp_saves_sent": True}), status=store.OK)
+    assert "smtp_saves_sent" not in endpoints.as_dict()
     saved = await _draft(host)
     await _send(host, saved)
     assert len(host.built.smtp.sent) == 1
-    assert [folder for folder, _ in host.built.imap.appended] == ["Drafts"]
+    assert [folder for folder, _ in host.built.imap.appended] == ["Drafts", "Sent"]
 
 
 async def test_a_missing_sent_copy_does_not_turn_a_delivered_send_into_a_failure(host, caplog) -> None:
@@ -140,13 +163,31 @@ async def test_a_refused_password_sends_nothing_reopens_the_draft_and_turns_the_
     _no_leak(out, found["raw"])
 
 
-async def test_a_send_with_an_unknown_outcome_stays_claimed_and_is_not_repeated(host) -> None:
+async def test_an_unreachable_smtp_server_sends_nothing_and_reopens_the_draft(host) -> None:
     saved = await _draft(host)
     host.built.smtp.close()
     out = await _send(host, saved)
-    assert out.startswith("Error: The mail host didn't confirm the send")
-    assert _row(saved["draft_id"])["state"] == "sending"
-    assert (await _send(host, saved)).startswith("Error")
+    assert out.startswith("Error: Not sent: CORSIA couldn’t reach")
+    assert _row(saved["draft_id"])["state"] == "open"
+    assert host.built.smtp.sent == []
+
+
+async def test_a_disconnect_after_data_stays_claimed_and_never_tries_the_next_port(make_host, authority, monkeypatch) -> None:
+    host = await make_host(smtp={"drop_after_data": True})
+    fallback = FakeSmtp(authority, user=ADDRESS, password=PASSWORD)
+    endpoint, _ = store.read(host.account_id, db=get_db())
+    store.write(host.account_id, type(endpoint)(**{**endpoint.__dict__, "smtp": Server("127.0.0.1")}), status=store.OK)
+    monkeypatch.setattr(mailhost_endpoints, "SMTP_AUTO_PORTS", (host.built.smtp.port, fallback.port))
+    try:
+        saved = await _draft(host)
+        out = await _send(host, saved)
+        assert out.startswith("Error: The mail host didn't confirm the send")
+        assert _row(saved["draft_id"])["state"] == "sending"
+        assert len(host.built.smtp.sent) == 1 and fallback.sent == []
+        assert (await _send(host, saved)).startswith("Error")
+        assert fallback.sent == []
+    finally:
+        fallback.close()
 
 
 async def test_an_invite_is_sent_as_an_icalendar_request_by_smtp(host) -> None:

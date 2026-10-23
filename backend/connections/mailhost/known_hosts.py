@@ -29,17 +29,12 @@ class KnownHost:
     bare_name_alternate: bool = False
     #: False when ``app_password_url`` is only the host's homepage: the row then names the page in plain text, not as a link.
     shows_account_link: bool = True
-    #: Whether the host files SMTP-submitted mail in Sent itself. Verified for no host (the design's Not verified
-    #: list), so every host gets a Sent copy appended; set True only for a host proven to save its own.
-    smtp_saves_sent: bool = False
-
     def endpoints(self, address: str) -> Endpoints:
         alternates = (address.split("@", 1)[0],) if self.bare_name_alternate else ()
         return Endpoints(
             name=self.name, known=True, username=address, imap=self.imap, smtp=self.smtp, caldav=self.caldav,
             app_password_url=self.app_password_url, click_path=self.click_path,
             enable_imap_step=self.enable_imap_step, username_alternates=alternates,
-            smtp_saves_sent=self.smtp_saves_sent,
         )
 
 

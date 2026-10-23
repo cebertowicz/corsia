@@ -22,7 +22,7 @@ from connections.calendar_document import OFFSET_REQUIRED, compose_document, par
 from connections.google.calendar_document import event_summaries
 from connections.google.client import GoogleError, GoogleRequestFailed
 from connections.mailhost import agenda, outbound as mailhost_outbound
-from connections.mailhost.errors import PASSWORD_REFUSED, MailHostError
+from connections.mailhost.errors import MESSAGE_REFUSED, PASSWORD_REFUSED, SERVER_UNREACHABLE, MailHostError
 from infra import config
 from infra.db_async import run_in_db
 from tools.action_delivery import deliver_claimed
@@ -205,13 +205,27 @@ def _google_invite_body(invite) -> dict[str, Any]:
 
 
 def _refused_before_send(exc: Exception) -> bool:
-    return isinstance(exc, MailHostError) and exc.cause == PASSWORD_REFUSED
+    return isinstance(exc, AccountError) or isinstance(exc, MailHostError) and exc.cause in {
+        PASSWORD_REFUSED, SERVER_UNREACHABLE, MESSAGE_REFUSED,
+    }
 
 
 # Google takes a request body; a mail host is handed the validated invite itself.
 _INVITE_BODIES = {"google": _google_invite_body}
 _INVITE_PROVIDERS = ("google", "mailhost")
 NOT_ON_CALENDAR = "The invitation was emailed, but the event isn't on the person's calendar."
+
+
+def _mailhost_invite_success(sent: Any, event_id: str) -> str:
+    result: dict[str, Any] = {"event_id": event_id}
+    if not sent.on_calendar:
+        result["note"] = NOT_ON_CALENDAR
+    if sent.not_delivered_to:
+        result["not_delivered_to"] = list(sent.not_delivered_to)
+        result["delivery_note"] = "Tell the person that these addresses did not get the invitation email."
+    if sent.sent_copy_missing:
+        result["sent_copy_note"] = "The invitation was emailed, but a copy was not saved in the account's Sent folder."
+    return json.dumps(result)
 
 
 class CalendarSendInviteTool(Tool):
@@ -305,8 +319,7 @@ class CalendarSendInviteTool(Tool):
         return await deliver_claimed(
             draft_id, acquire=no_token, provider_errors=(GoogleError,),
             send=lambda _token: mailhost_outbound.send_invite(account_id, address, body), result_id=lambda sent: sent.uid,
-            success=lambda sent, event_id: json.dumps(
-                {"event_id": event_id, **({} if sent.on_calendar else {"note": NOT_ON_CALENDAR})}), sign_in_error=str,
+            success=_mailhost_invite_success, sign_in_error=str,
             request_error=str, never_sent=_refused_before_send, still_sending=STILL_SENDING,
             claim_error="Not sent: couldn't check the invite draft. Try again.",
             unconfirmed="The mail host didn't confirm the invite send, so it may have gone out. Check the person's calendar first.",

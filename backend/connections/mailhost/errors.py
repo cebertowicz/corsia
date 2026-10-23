@@ -12,13 +12,15 @@ SERVER_UNREACHABLE = "server_unreachable"
 PASSWORD_REFUSED = "password_refused"
 IMAP_OFF = "imap_off"
 CALENDAR_NOT_OFFERED = "calendar_not_offered"
-CAUSES = frozenset((SERVER_UNREACHABLE, PASSWORD_REFUSED, IMAP_OFF, CALENDAR_NOT_OFFERED))
+MESSAGE_REFUSED = "message_refused"
+CAUSES = frozenset((SERVER_UNREACHABLE, PASSWORD_REFUSED, IMAP_OFF, CALENDAR_NOT_OFFERED, MESSAGE_REFUSED))
 
 _MESSAGES = {
     SERVER_UNREACHABLE: "CORSIA couldn’t reach {host}. Check the server names with your host or IT.",
     PASSWORD_REFUSED: "{name} didn’t accept this app password. Make a new one in your {name} account settings.",
     IMAP_OFF: "{name} has email access for other apps turned off. Turn on IMAP in {name} settings, then try again.",
     CALENDAR_NOT_OFFERED: "{name} didn’t offer a calendar to CORSIA, so only email is connected.",
+    MESSAGE_REFUSED: "The mail server refused this message, so it wasn't sent. Check the addresses.",
 }
 
 

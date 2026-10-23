@@ -483,6 +483,17 @@ async def test_scheduled_poller_floors_then_delivers_new_mail_and_resets_a_rebui
         db.close()
     assert json.loads(rebuilt)["imap_uid"] == "8:3"
 
+    # A rebuild that renumbers below the old cursor floors at its own last UID, so mail
+    # numbered between the two is still delivered.
+    connected.built.imap.validity = 9
+    connected.built.imap.messages = {1: connected.built.imap.messages[3]}
+    poller._due[connected.account_id] = 0
+    await poller.run_cycle()
+    connected.built.imap.messages[2] = message("After the rebuild", "body", sender="later@example.com")
+    poller._due[connected.account_id] = 0
+    await poller.run_cycle()
+    assert [item["message_id"] for item in delivered] == [mint(connected, 3), mint(connected, 2, validity=9)]
+
 
 async def test_with_no_email_account_the_resolver_names_every_connection_path(env, conductor) -> None:
     with pytest.raises(AccountError) as refusal:

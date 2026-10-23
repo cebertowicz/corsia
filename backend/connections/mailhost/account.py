@@ -102,11 +102,19 @@ def connect(
         raise EndpointsRefused(USE_GOOGLE)
     if domain_of(clean) in MICROSOFT_DOMAINS:
         raise EndpointsRefused(USE_MICROSOFT)
+    # DNS discovery can take several network round trips; never hold the write lock for it.
+    # Keep a refused candidate until the in-transaction existing-row check, preserving the
+    # documented idempotent retry behavior for an address already connected.
+    try:
+        endpoints = _endpoints(clean, imap, smtp, caldav, username)
+    except EndpointsRefused as exc:
+        endpoints = exc
     with write_transaction(db, scope="mail_host_connect") as conn:
         found = store.row_exists_for_address(clean, db=conn)
         if found is not None:
             return describe(found, db=conn, existing=True)
-        endpoints = _endpoints(clean, imap, smtp, caldav, username)
+        if isinstance(endpoints, EndpointsRefused):
+            raise endpoints
         account = create_account_for_thread(
             MAILHOST_PROVIDER, clean, actor_thread_id=thread_id, created_by=("agent", thread_id),
             provider_subject=clean.lower(), state="needs_sign_in", db=conn,

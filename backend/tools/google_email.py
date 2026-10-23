@@ -20,7 +20,7 @@ from connections.google import client as google_client
 from connections.google.accounts import thread_key
 from connections.mail_accounts import MAIL_ACCOUNT_PARAM, resolve_for_thread
 from connections.mailhost import outbound as mailhost_outbound, reply as mailhost_reply
-from connections.mailhost.errors import PASSWORD_REFUSED, MailHostError
+from connections.mailhost.errors import MESSAGE_REFUSED, PASSWORD_REFUSED, SERVER_UNREACHABLE, MailHostError
 from connections.google.client import GoogleError, GoogleRequestFailed
 from connections.mail.email_document import (
     NEEDS_BODY,
@@ -64,7 +64,7 @@ AFTER_DRAFT = (
     "show them the new version."
 )
 FROM_MISMATCH = (
-    "Not sent: the From line doesn't match the Google account this draft was written from "
+    "Not sent: the From line doesn't match the email account this draft was written from "
     "({account}). Save the draft again with email_draft and show the person."
 )
 OTHER_ACCOUNT = (
@@ -72,7 +72,7 @@ OTHER_ACCOUNT = (
     "(omit draft_id) with that account_id and show the person."
 )
 NO_ACCOUNT = (
-    "Not sent: this draft isn't tied to a Google account. Save it again with email_draft and "
+    "Not sent: this draft isn't tied to an email account. Save it again with email_draft and "
     "account_id, show the person, and wait for their reply."
 )
 UNCONFIRMED = (
@@ -108,11 +108,11 @@ async def _no_draft_copy(_account_id: str, _text: str, _target: dict) -> None:
     return None
 
 
-async def _mailhost_draft_copy(account_id: str, text: str, target: dict) -> None:
+async def _mailhost_draft_copy(account_id: str, text: str, target: dict) -> bool:
     parsed = parse_document(text)
     if parsed is None:
         raise DraftRefused(BAD_DOCUMENT)
-    await mailhost_outbound.save_draft(account_id, build_message(parsed, target))
+    return await mailhost_outbound.save_draft(account_id, build_message(parsed, target))
 
 
 _DRAFT_COPIES = {"google": _no_draft_copy, "mailhost": _mailhost_draft_copy}
@@ -136,9 +136,21 @@ async def _none() -> None:
     return None
 
 
+def _mailhost_send_success(sent: Any, message_id: str, account_id: str) -> str:
+    result: dict[str, Any] = {"sent_message_id": message_id, "account_id": account_id}
+    if sent.not_delivered_to:
+        result["not_delivered_to"] = list(sent.not_delivered_to)
+        result["note"] = "Tell the person that these addresses did not get the email."
+    if sent.sent_copy_missing:
+        result["sent_copy_note"] = "The email was sent, but a copy was not saved in the account's Sent folder."
+    return json.dumps(result)
+
+
 def _refused_before_send(exc: Exception) -> bool:
-    """A refused app password stops the submission before any message leaves."""
-    return isinstance(exc, MailHostError) and exc.cause == PASSWORD_REFUSED
+    """Known mail-host refusals happen before SMTP accepts any message."""
+    return isinstance(exc, AccountError) or isinstance(exc, MailHostError) and exc.cause in {
+        PASSWORD_REFUSED, SERVER_UNREACHABLE, MESSAGE_REFUSED,
+    }
 
 
 # Reviewed-draft storage is shared by provider families in tools.reviewed_drafts.
@@ -232,13 +244,24 @@ class EmailDraftTool(Tool):
         copy = _DRAFT_COPIES.get(str(account["provider"]))
         if copy is None:
             raise DraftRefused("This account can't save email drafts.")
-        await copy(account_id, text, target)
+        copy_note: str | None = None
+        try:
+            copied = await copy(account_id, text, target)
+            if copied is False:
+                copy_note = "The draft was saved, but it wasn't copied to the account's Drafts folder."
+        except MailHostError as exc:
+            # The reviewed draft is already durable; a host-side convenience copy cannot undo it.
+            copy_note = f"The draft was saved, but it wasn't copied to the account's Drafts folder. {exc}"
+        except AccountError:
+            copy_note = "The draft was saved, but it wasn't copied to the account's Drafts folder."
         relative = str((await run_in_db(open_draft, thread_id, saved["draft_id"], "email"))["path"])
-        return json.dumps({
+        result = {
             "draft_id": saved["draft_id"], "revision": saved["revision"], "path": relative,
-            "from": address, "account_id": account_id,
-            "next": AFTER_DRAFT,
-        })
+            "from": address, "account_id": account_id, "next": AFTER_DRAFT,
+        }
+        if copy_note is not None:
+            result["note"] = copy_note
+        return json.dumps(result)
 
 
 # Reading and account binding are owned by tools.reviewed_drafts.
@@ -253,7 +276,7 @@ class EmailSendTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "Send a saved email draft from the Google account it was written from. Call it only "
+            "Send a saved email draft from the email account it was written from. Call it only "
             "when the person's latest message says to send this draft. It goes out only if they "
             "wrote after the draft's last save and revision matches the one email_draft returned; "
             "otherwise nothing is sent and the error says what to do."
@@ -343,8 +366,8 @@ class EmailSendTool(Tool):
         return await deliver_claimed(
             draft_id,
             acquire=lambda: _none(), provider_errors=(GoogleError,),
-            send=lambda _token: mailhost_outbound.send(account_id, body), result_id=lambda result: result,
-            success=lambda _result, message_id: json.dumps({"sent_message_id": message_id, "account_id": account_id}),
+            send=lambda _token: mailhost_outbound.send(account_id, body), result_id=lambda result: result.message_id,
+            success=lambda result, message_id: _mailhost_send_success(result, message_id, account_id),
             sign_in_error=lambda exc: str(exc), request_error=str, never_sent=_refused_before_send,
             still_sending=STILL_SENDING, claim_error="Not sent: couldn't check the draft. Try again.",
             unconfirmed=MAILHOST_UNCONFIRMED, label="email_send",
