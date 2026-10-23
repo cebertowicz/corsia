@@ -145,9 +145,8 @@
 		padding-left: 32px; padding-right: 32px;
 	}
 	.modal {
-		background: var(--glass-regular-thick);
-		backdrop-filter: var(--glass-blur);
-		-webkit-backdrop-filter: var(--glass-blur);
+		position: relative;
+		z-index: 0;
 		border: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
 		border-radius: var(--radius);
 		box-shadow: var(--glass-elevation-3);
@@ -155,6 +154,26 @@
 		width: 100%;
 		max-height: 86vh;
 		max-height: 86dvh;
+	}
+	.modal::before {
+		content: '';
+		position: absolute;
+		inset: calc(-1 * var(--glass-blur-reach));
+		z-index: -1;
+		pointer-events: none;
+		background: var(--glass-regular-thick);
+		backdrop-filter: var(--glass-blur);
+		-webkit-backdrop-filter: var(--glass-blur);
+	}
+	@media (prefers-reduced-transparency: reduce) {
+		.modal {
+			position: static;
+			z-index: auto;
+			background: var(--glass-regular-thick);
+			backdrop-filter: var(--glass-blur);
+			-webkit-backdrop-filter: var(--glass-blur);
+		}
+		.modal::before { display: none; }
 	}
 	.modal.sm { max-width: 480px; }
 	.modal.md { max-width: 640px; }
