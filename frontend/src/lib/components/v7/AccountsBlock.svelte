@@ -12,6 +12,8 @@
 	import ProviderAccountPolicyControls from './ProviderAccountPolicyControls.svelte';
 	import PolicySaveStatus from './PolicySaveStatus.svelte';
 	import { signinMessage } from './accountSigninMessage';
+	import { VENDORS } from '$lib/conductorSources';
+	import { on } from '$lib/ws/events';
 	import type { HostProvider } from '$lib/stores/providersV7';
 	import { createProviderPolicyState } from '$lib/stores/providerPolicyState.svelte';
 	import { openProjectSettings } from '$lib/stores/settingsNavigation';
@@ -34,6 +36,7 @@
 	const { provider }: Props = $props();
 
 	let actionError = $state('');
+	let refreshError = $state('');
 	let adding = $state(false);
 	let addName = $state('');
 	let pending = $state<Record<string, boolean>>({});
@@ -88,6 +91,10 @@
 		void policyState.load();
 	});
 
+	// The first read of a new login's models ends with models_updated: the list then shows whether the account has any.
+	const refreshAccounts = async () => { const result = await loadVendorAccounts(); if (!result.superseded) refreshError = result.ok ? '' : 'Couldn’t refresh your accounts.'; };
+	onMount(() => on('models_updated', refreshAccounts));
+
 	onMount(async () => {
 		void policyState.load();
 		const result = await loadVendorAccounts();
@@ -123,6 +130,8 @@
 		if (account.state === 'signed_out') return 'Signed out';
 		if (account.state === 'legacy') return 'Managed by provider';
 		if (account.state === 'removed') return 'Removed';
+		const vendor = VENDORS[account.provider];
+		if (account.no_usable_model && vendor) return `This ${vendor.name} account has no models for ${vendor.cli}. Sign in with another account, or turn this account off.`;
 		return null;
 	}
 
@@ -266,7 +275,7 @@
 {#if !showRows && accounts.length === 1}<OverageSwitch account={accounts[0]} />{/if}
 {#if actionError || policyError}<Message variant="err">{actionError || policyError}</Message>{/if}
 {#if policyError && !actionError}<Button size="sm" onclick={() => policyState.load()}>Reload</Button>{/if}
-
+{#if refreshError}<Message variant="err">{refreshError}</Message><Button size="sm" onclick={refreshAccounts}>Reload</Button>{/if}
 <div class="accounts" aria-label={`${provider.label} accounts`}>
 	{#if !showRows}
 		<div class="empty-row">

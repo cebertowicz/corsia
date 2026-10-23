@@ -330,13 +330,13 @@ def _reconcile_network_models(
     result: dict,
 ) -> dict:
     """Apply one authoritative oMLX snapshot in the DB worker pool."""
+    from llm.local_profiles import managed_reasoning_effort
     from llm.reasoning_config import reasoning_shape_from_discovery
 
     provider = server.get("provider", "omlx")
-    reasoning_by_pmid = {
-        model["id"]: reasoning_shape_from_discovery(model)
-        for model in canonical_models
-    }
+    managed_effort = managed_reasoning_effort(server)
+    reasoning_by_pmid = {model["id"]: reasoning_shape_from_discovery(model, managed_effort=managed_effort)
+                         for model in canonical_models}
     seen_pmids = {model["id"] for model in canonical_models}
     with write_transaction(None, scope="reconcile_network_models") as db:
         for model in canonical_models:

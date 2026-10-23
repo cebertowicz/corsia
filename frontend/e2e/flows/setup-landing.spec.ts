@@ -50,7 +50,7 @@ test.describe('@surface:first-run setup landing', () => {
 
 			await page.goto('/');
 			await expect(page.getByRole('heading', { name: 'Welcome to CORSIA' })).toBeVisible();
-			if (project === 'chromium-mobile') await page.getByRole('button', { name: 'Continue' }).click();
+			await page.getByRole('button', { name: 'Continue' }).click();
 			await page.locator('input[autocomplete="name"]').fill('First Person');
 			await page.locator('input[autocomplete="username"]').fill('first');
 			await page.locator('input[autocomplete="new-password"]').nth(0).fill('correct-password');

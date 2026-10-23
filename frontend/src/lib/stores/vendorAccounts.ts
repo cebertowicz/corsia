@@ -41,6 +41,8 @@ export interface VendorAccount {
 	duplicate_of?: string | null;
 	/** This account's 'Spend past plan limit' switch; null where no plan limit applies. */
 	allow_overage?: boolean | null;
+	/** Signed in, but none of the vendor's models can run on this account. */
+	no_usable_model?: boolean;
 	/** Account-owned plan usage, rendered once in its Settings account row. */
 	usage?: VendorAccountUsage;
 	/** The recorded monthly price and charge day; null when no price is recorded. */

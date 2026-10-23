@@ -63,9 +63,9 @@ describe('setup connect stop', () => {
 	});
 
 	it.each([
-		['a refusal the service sent', () => Promise.resolve(new Response('{}', { status: 409 })), 'Couldn’t finish signing in to Codex. Sign in again.'],
-		['no answer at all', () => Promise.reject(new TypeError('Failed to fetch')), 'CORSIA didn’t answer while starting the Codex sign-in. Sign in again.'],
-	])('names the sign-in start failure only as far as it is known: %s', async (_case, answer, line) => {
+		['a refusal the service sent', () => Promise.resolve(new Response('{}', { status: 409 })), 'Sign-in didn’t finish. Press Sign in to try again.'],
+		['no answer at all', () => Promise.reject(new TypeError('Failed to fetch')), 'Sign-in didn’t finish. Press Sign in to try again.'],
+	])('keeps a sign-in start failure to one line that names no internals: %s', async (_case, answer, line) => {
 		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
 			const url = String(input), method = init?.method ?? 'GET';
 			if (url.startsWith('/api/corsia-agent')) return json({ target: { thread_id: 'corsia-thread' } });

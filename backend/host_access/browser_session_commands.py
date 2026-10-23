@@ -55,7 +55,7 @@ async def run(owner: Any, thread_id: str, args: Sequence[str], *, lease_id: str 
     if result.timed_out and args[0] == "wait":
         return browser_cli.WAIT_TIMED_OUT
     rendered = owner._model_result(result, runtime.record)
-    if args[0] == "open" and runtime.record.show_window and not unfinished and not rendered.startswith("Error:"):
+    if args[0] == "open" and not unfinished and not rendered.startswith("Error:"):
         browser_control.announce_browser_opened(thread_id)
     return rendered
 

@@ -21,6 +21,7 @@ const onLeaveConnect = vi.fn();
 // Every timer in these screens (the poll, the none-found window, the refusal hold, focus after a page change) runs on the fake clock.
 async function settle(ms = 0) { await tick(); await vi.advanceTimersByTimeAsync(ms); await tick(); }
 const buttons = () => Array.from(host.querySelectorAll('button'));
+const dialogButton = (label: string) => Array.from(document.body.querySelectorAll('button')).find((candidate) => flat(candidate.textContent) === label);
 const button = (label: string) => buttons().find((candidate) => flat(candidate.textContent) === label);
 const boxes = () => Array.from(host.querySelectorAll<HTMLInputElement>('input[aria-label^="Code, character"]'));
 const paste = (text: string) => boxes()[0].dispatchEvent(Object.assign(new Event('paste', { bubbles: true, cancelable: true }), { clipboardData: { getData: () => text } }));
@@ -90,6 +91,28 @@ describe('account-screen link', () => {
 		expect(button('Continue')).toBeTruthy();
 		expect(button('Connect to CORSIA on another computer')).toBeUndefined();
 	});
+	it('asks before the chip stops a running download, and keeps downloading on Keep downloading', async () => {
+		const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+			const url = String(input);
+			if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: true, work_folder: '~/CORSIA' });
+			if (url === '/api/setup/local-download' && init?.method === 'POST') return json({ ok: true, in_progress: true });
+			if (url === '/api/setup/local-download') return json({ state: 'downloading', model: 'Qwen' });
+			return json({});
+		});
+		vi.stubGlobal('fetch', fetchMock);
+		await mountSetup();
+		button('Connect to CORSIA on another computer')?.click();
+		await settle();
+		expect(document.body.textContent).toContain('This stops the download on this computer.');
+		expect(document.body.textContent).toContain('Connect to another computer instead?');
+		expect(fetchMock).not.toHaveBeenCalledWith('/api/setup/local-download/stop', expect.anything());
+		dialogButton('Keep downloading')?.click();
+		await settle();
+		expect(document.body.textContent).not.toContain('This stops the download on this computer.');
+		expect(host.querySelector('h1')?.textContent).toBe('Welcome to CORSIA');
+		expect(fetchMock).not.toHaveBeenCalledWith('/api/setup/local-download/stop', expect.anything());
+	});
+
 	it('stops the pre-account local download before opening the remote-computer flow', async () => {
 		const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
 			const url = String(input);
@@ -101,6 +124,8 @@ describe('account-screen link', () => {
 		vi.stubGlobal('fetch', fetchMock);
 		await mountSetup();
 		await openConnect();
+		dialogButton('Stop and connect')?.click();
+		await settle();
 		expect(fetchMock).toHaveBeenCalledWith('/api/setup/local-download/stop', expect.objectContaining({ method: 'POST' }));
 	});
 });

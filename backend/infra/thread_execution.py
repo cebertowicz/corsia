@@ -213,12 +213,6 @@ async def _execute_claimed_batch(
     ws,
     after_persist_before_dispatch,
 ) -> SendResult | InboxQueuedInput:
-    if target.harness == "native":
-        from core.thread_warm import join_requested_warm_for_delivery
-
-        await join_requested_warm_for_delivery(
-            batch.thread_id, target.catalog_id,
-        )
     latest = batch.items[-1]
     prepared = await _prepare_batch(batch, thread_row=thread_row, target=target)
     batch = prepared.batch or batch

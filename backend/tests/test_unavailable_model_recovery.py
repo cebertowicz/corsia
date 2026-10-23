@@ -10,6 +10,7 @@ from tests.unavailable_model_support import (
     HELD,
     hold_head,
     message_row,
+    mark_model_loaded,
     set_model_available,
 )
 
@@ -32,6 +33,7 @@ async def test_ready_notification_releases_and_drives_the_held_head_once(
 
     await hold_head(monkeypatch, "t", "omlx@srv/m", "m1")
     set_model_available("omlx@srv/m", 1)
+    mark_model_loaded(monkeypatch, "omlx@srv/m")
 
     await recovery._resume_held_heads()
     await recovery._resume_held_heads()
@@ -65,6 +67,7 @@ async def test_flap_keeps_fifo_held_until_ready_then_drives_once(
     assert message_row("m1") == HELD
 
     set_model_available("omlx@srv/m", 1)
+    mark_model_loaded(monkeypatch, "omlx@srv/m")
     await recovery._resume_held_heads()
 
     driven.assert_awaited_once()
@@ -127,6 +130,7 @@ async def test_boot_recovery_claims_a_previously_held_input(
     assert message_row("boot-input") == HELD
 
     set_model_available("omlx@srv/m", 1)
+    mark_model_loaded(monkeypatch, "omlx@srv/m")
     recovered = recover_threads(
         boot_epoch="boot-2", recovered_at="t9", successor_id=lambda _t: "boot-turn-1",
     )

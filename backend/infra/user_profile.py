@@ -3,8 +3,10 @@
 ``context/50-USER-PROFILE.md`` reaches every agent as workspace context, so what
 the person wants to be called and their timezone are known from the first turn.
 Install writes it only when it is missing; an existing file is the person's and
-is never changed. The one exception is the email: an existing file that names
-none gets that single line appended, and one that names an email is only read.
+is never changed there, except that an existing file naming no email gets that
+single line appended. While setup is unfinished, ``stage_profile_update`` also
+rewrites the full name, preferred name and email lines the account screen
+collected, and touches no other line.
 
 A write is staged beside its target and published by one rename, so the caller
 can put the publish at the end of its own transaction and undo it if that
@@ -14,6 +16,7 @@ a return value that also means "already exists".
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import pwd
@@ -128,11 +131,14 @@ class StagedProfile:
     the text being extended, or ``None`` when the profile is being created.
     """
 
-    def __init__(self, path: Path, temp: Path, previous: str | None) -> None:
+    def __init__(self, path: Path, temp: Path, previous: str | None, text: str) -> None:
         self._path = path
         self._temp = temp
         self._previous = previous
         self._published = False
+        #: The digest of the file this write leaves, and of the one it creates (None when it extends the person's own).
+        self.sha256 = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        self.created_sha256 = self.sha256 if previous is None else None
 
     def publish(self) -> None:
         """Move the staged file into place with one rename; on failure nothing has changed."""
@@ -152,6 +158,21 @@ class StagedProfile:
                 self._path.write_text(self._previous, encoding="utf-8")
         except OSError:
             logger.exception("Could not restore the user profile")
+
+
+def _stage_text(path: Path, text: str, previous: str | None, mode: int | None) -> StagedProfile:
+    """Write ``text`` beside ``path`` (keeping ``mode`` when the file exists) and return the staged publish."""
+    temp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    descriptor = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write(text)
+        if mode is not None:
+            os.chmod(temp, mode)
+    except BaseException:
+        temp.unlink(missing_ok=True)
+        raise
+    return StagedProfile(path, temp, previous, text)
 
 
 def stage_user_profile(workspace: Path, full_name: str, timezone: str, email: str = "") -> StagedProfile | None:
@@ -178,14 +199,46 @@ def stage_user_profile(workspace: Path, full_name: str, timezone: str, email: st
     else:
         path.parent.mkdir(parents=True, exist_ok=True)
         text = profile_text(full_name, timezone, email)
-    temp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
-    descriptor = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666)
-    try:
-        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-            handle.write(text)
-        if mode is not None:
-            os.chmod(temp, mode)
-    except BaseException:
-        temp.unlink(missing_ok=True)
-        raise
-    return StagedProfile(path, temp, previous)
+    return _stage_text(path, text, previous, mode)
+
+
+def _with_line(lines: list[str], label: str, value: str, *, after: str | None = None) -> list[str]:
+    """``lines`` with the one ``label`` line set to ``value`` (removed when empty), kept where it was or put after ``after``."""
+    kept = [line for line in lines if not line.startswith(label)]
+    if not value:
+        return kept
+    new = f"{label} {value}"
+    for index, line in enumerate(lines):
+        if line.startswith(label):
+            return [*lines[:index], new, *[rest for rest in lines[index + 1:] if not rest.startswith(label)]]
+    place = max((i for i, line in enumerate(kept) if after and line.startswith(after)), default=len(kept) - 1)
+    return [*kept[:place + 1], new, *kept[place + 1:]]
+
+
+def stage_profile_update(workspace: Path, *, full_name: str | None = None, email: str | None = None) -> StagedProfile | None:
+    """Prepare a change to the name and email the person gave during setup, leaving every other line as it is.
+
+    ``full_name`` also resets the preferred name to its first word; ``email`` empty removes the line. ``None`` leaves
+    that field alone. A missing profile is created from a name and refused (``FileNotFoundError``) for an email alone.
+    Returns ``None`` when the file would not change. Raises ``ValueError`` for a blank name and ``OSError`` when the
+    folder cannot be written.
+    """
+    if full_name is not None and not one_line(full_name):
+        raise ValueError("a name is required")
+    path = Path(workspace) / PROFILE_RELATIVE_PATH
+    if not path.exists():
+        if full_name is None:
+            raise FileNotFoundError(f"no user profile at {path} to put the email in")
+        return stage_user_profile(workspace, full_name, mac_timezone(), email or "")
+    previous = path.read_text(encoding="utf-8")
+    lines = previous.splitlines()
+    if full_name is not None:
+        name = one_line(full_name)
+        lines = _with_line(lines, _FULL_NAME_LABEL, name, after="# User profile")
+        lines = _with_line(lines, _NAME_LABEL, name.split(" ", 1)[0], after="# User profile")
+    if email is not None:
+        lines = _with_line(lines, _EMAIL_LABEL, one_line(email), after=_FULL_NAME_LABEL)
+    text = "\n".join(lines) + "\n"
+    if text == previous:
+        return None
+    return _stage_text(path, text, previous, stat.S_IMODE(path.stat().st_mode))

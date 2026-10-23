@@ -13,6 +13,7 @@ from tests.unavailable_model_support import (
     admit_held_candidate,
     hold_head,
     message_row,
+    mark_model_loaded,
     seed_model,
     set_model_available,
 )
@@ -41,11 +42,10 @@ def _active_cloud(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_available_but_unloaded_network_model_releases_its_held_head(
+async def test_available_but_unloaded_network_model_keeps_its_held_head(
     isolated_db, monkeypatch, driven,
 ) -> None:
-    """Resolution runs an available oMLX model (it loads on demand); the catalog
-    status only says 'available'. Release must follow resolution."""
+    """Disk availability alone cannot release a model the provider requires loaded."""
     import infra.unavailable_model_recovery as recovery
     from llm.model_status import get_model_status_rows
     from llm.resolution import resolve_execution_target
@@ -60,7 +60,8 @@ async def test_available_but_unloaded_network_model_releases_its_held_head(
 
     await recovery._resume_held_heads()
 
-    driven.assert_awaited_once()
+    driven.assert_not_awaited()
+    assert message_row("m1") == HELD
 
 
 @pytest.mark.asyncio
@@ -240,6 +241,7 @@ async def test_model_ready_between_resolution_and_hold_still_drains(
     from llm import resolution
 
     seed_model("omlx@srv/m", available=0)
+    mark_model_loaded(monkeypatch, "omlx@srv/m")
     batch = admit_held_candidate("t", "omlx@srv/m", "m1")
     run = AsyncMock()
     monkeypatch.setattr(execution, "execute_claimed_batch", run)

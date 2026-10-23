@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Literal
 
 from loguru import logger
@@ -78,7 +79,7 @@ async def resolve_target(model: str, *, thread_id: str | None = None) -> Executi
 
 def _resolve_target_in_scope(model: str, *, thread_id: str | None) -> ExecutionTarget:
     """Resolve one target, marked unavailable when its thread's policy forbids the model."""
-    return model_resolution.resolve_thread_target(model, thread_id=thread_id)
+    return _ready_target(model_resolution.resolve_thread_target(model, thread_id=thread_id))
 
 
 async def scope_supplied_target(target: ExecutionTarget, *, thread_id: str) -> ExecutionTarget:
@@ -88,11 +89,38 @@ async def scope_supplied_target(target: ExecutionTarget, *, thread_id: str) -> E
     def _scope() -> ExecutionTarget:
         db = get_db()
         try:
-            return model_resolution.scope_to_thread(target, thread_id=thread_id, db=db)
+            return _ready_target(model_resolution.scope_to_thread(target, thread_id=thread_id, db=db), db=db)
         finally:
             db.close()
 
     return await db_async.run_in_db(_scope)
+
+
+def _ready_target(target: ExecutionTarget, *, db=None) -> ExecutionTarget:
+    """Use the catalog's cached oMLX readiness, without probing or loading a model."""
+    if not (target.available and target.harness == "native"
+            and target.provider == "omlx" and target.backend == "network"):
+        return target
+    from llm.model_status import _network_status
+    from llm.network_discovery import get_loaded_model_ids
+    from infra.database import get_db
+
+    server_id = target.transport_model.partition("@")[2].partition("/")[0]
+    connection = db if db is not None else get_db()
+    try:
+        server = connection.execute("SELECT status FROM network_servers WHERE id=?", (server_id,)).fetchone()
+    finally:
+        if db is None:
+            connection.close()
+    status = _network_status(
+        {"litellm_model": target.transport_model, "available": target.available},
+        {server_id: server["status"]} if server else {}, get_loaded_model_ids,
+    )
+    if status == "ready":
+        return target
+    return replace(target, available=False, availability_reason=(
+        "model_not_loaded" if status == "available" else "model_unavailable"
+    ))
 
 
 TargetAdmission = Literal["run", "wait", "fail"]
@@ -122,7 +150,7 @@ def model_admission(model: str, *, db=None, thread_id: str | None = None) -> Tar
     """
     try:
         return classify_target_admission(
-            model_resolution.resolve_thread_target(model, thread_id=thread_id, db=db),
+            _ready_target(model_resolution.resolve_thread_target(model, thread_id=thread_id, db=db), db=db),
         )
     except (ModelUnavailableError, ValueError):
         return "fail"

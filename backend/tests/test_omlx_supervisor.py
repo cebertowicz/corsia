@@ -396,21 +396,33 @@ def test_new_omlx_start_uses_the_managed_cap_only_for_the_bundled_row(isolated_r
         pid = 1234
 
     waited = {}
+    argv: list[str] = []
 
     async def healthy(_host, _port, **kwargs):
         waited.update(kwargs)
         return "healthy"
 
+    def spawn(observed_argv, _log_path):
+        argv.extend(observed_argv)
+        return Spawned()
+
     monkeypatch.setattr(sup, "_port_owner_pid", lambda *_args: None)
     monkeypatch.setattr(sup, "_is_managed_omlx_row", lambda _settings: managed)
-    monkeypatch.setattr(sup, "_managed_omlx_argv", lambda *_args: ["omlx"])
-    monkeypatch.setattr(sup, "_spawn_process", lambda *_args: Spawned())
+    monkeypatch.setattr(sup.process, "managed_omlx_install_error", lambda: None)
+    monkeypatch.setattr(sup.process, "managed_omlx_executable", lambda: "/bundled/omlx")
+    monkeypatch.setattr(sup.shutil, "which", lambda _name: "/path/omlx")
+    monkeypatch.setattr(sup, "_spawn_process", spawn)
     monkeypatch.setattr(sup, "_wait_for_healthy", healthy)
 
     result = asyncio.run(sup.start_server({"server_id": "progress", "host": "127.0.0.1", "port": 9999}))
 
     assert result["ok"] is True
     assert waited == {"timeout_s": expected_timeout, "server_id": "progress", "pid": 1234}
+    if managed:
+        # A pre-existing managed server gets the canonical limit on restart.
+        assert argv[argv.index("--max-concurrent-requests") + 1] == "2"
+    else:
+        assert "--max-concurrent-requests" not in argv
 
 
 def test_failed_boot_names_the_reason_that_ended_the_health_wait(isolated_runtime, monkeypatch, caplog):

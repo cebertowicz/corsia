@@ -257,6 +257,13 @@ async def start_server(cfg: dict) -> dict[str, Any]:
 
     settings = await run_in_db(_resolve_settings, cfg)
     managed = _is_managed_omlx_row(settings)
+    if managed:
+        # This is a launch-time setting too: applying it here updates existing
+        # CORSIA-managed installs at their next restart, without writing to a
+        # person's oMLX row or server settings.
+        from llm.local_profiles import OMLX_GLOBAL_SETTINGS
+
+        settings = {**settings, **OMLX_GLOBAL_SETTINGS}
     argv = _managed_omlx_argv(host, int(port), settings)
     if isinstance(argv, dict):
         return argv
