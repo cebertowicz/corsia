@@ -8,6 +8,7 @@ only by the test's own client context; nothing here touches CORSIA's TLS setting
 from __future__ import annotations
 
 import base64
+import contextlib
 import datetime
 import shlex
 import socket
@@ -140,6 +141,9 @@ class _LineServer:
         raise NotImplementedError
 
     def close(self) -> None:
+        # Linux does not wake a thread blocked in accept() when the listener is only closed.
+        with contextlib.suppress(OSError):
+            self._listener.shutdown(socket.SHUT_RDWR)
         self._listener.close()
 
 
