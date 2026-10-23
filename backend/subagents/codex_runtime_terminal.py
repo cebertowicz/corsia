@@ -51,6 +51,7 @@ async def claim_live_terminal(
     db=None,
     *,
     identity: TurnIdentity | None = None,
+    persist_terminal=persist_turn_terminal,
 ) -> TurnTerminalResult:
     """Quarantine an unsettled write, then terminalize its owning Turn."""
     identity = identity or live.corsia_turn
@@ -62,7 +63,7 @@ async def claim_live_terminal(
         )
     from infra.thread_recovery import ambiguous_stale_writes
     ambiguous_stale_writes(db, identity.turn_id, error=UNSETTLED_AT_TERMINAL)
-    return persist_turn_terminal(identity.turn_id, outcome, error, db=db)
+    return persist_terminal(identity.turn_id, outcome, error, db=db)
 
 
 class CommittedTerminalFailure(Exception):
