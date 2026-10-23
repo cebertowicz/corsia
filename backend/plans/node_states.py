@@ -73,30 +73,14 @@ def in_work_sql(alias: str) -> str:
     return f"{unarchived_sql(alias)} AND {alias}.state <> '{CLOSED}'"
 
 
-def asks_user(state: str, assignee: str | None, *, has_follow_up: bool) -> bool:
-    """Whether a prerequisite stretch is time the user owns.
-
-    This is the Python replay of ``failure_asks_user_sql``'s rule: a
-    user-assigned item stays theirs unless it was accepted or closed; a failed
-    item stops being theirs only once a follow-up exists.
-    """
-    return (
-        assignee == "user"
-        and state not in _ACCEPTED_STATES
-        and state != CLOSED
-        and (state != "failed" or not has_follow_up)
-    )
-
-
 def failure_asks_user_sql(alias: str) -> str:
     """The failed ``plan_nodes`` row ``alias`` still asks the user, as SQL.
 
     The one rule for "this failure is the user's": the item is failed right
     now (not retried), assigned to the user, in work and outside a retired
-    branch, and has no follow-up. ``asks_user`` replays the same rule over
-    state history. The chat list's Failed mark and the update dot and
-    standalone failure card all read it; each adds only its own seen-state on
-    top.
+    branch, and has no follow-up. The chat list's Failed mark and the update
+    dot and standalone failure card all read it; each adds only its own
+    seen-state on top.
     """
     return (
         f"{alias}.state='failed' AND {alias}.assignee='user'"

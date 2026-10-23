@@ -12,14 +12,10 @@ is open and at least one of these holds:
 - ``review_requested`` while the node links a registered GitHub pull request.
 
 The user's time is cut out, whoever armed the wait: user-owned holds (the
-user's pause, a blocker on the user), whole-plan pauses, a decision on the
-node while its review step is ``review_requested``, and a dependency on a step
-assigned to the user while that step asks them. A closed step is an unmet
-dependency the agent must re-plan; a failed user step stays the user's until a
-follow-up exists. The review step's state machine is the historical source: an
-out-of-band attention clear leaves it in review until the decision lifecycle
-closes it. So is anything after the node settles. Causes that overlap count
-once. An interval still open runs to ``now``.
+user's pause, a blocker on the user), whole-plan pauses, and a decision on the
+node while its review step is ``review_requested`` (until the step leaves
+review or is archived); so is anything after the node settles. Causes that
+overlap count once. An interval still open runs to ``now``.
 
 Nothing is stored. Intervals are rebuilt from the append-only
 ``plan_node_events`` (state transitions, dependency added/removed), the plan's
@@ -39,7 +35,7 @@ from typing import Callable
 
 from infra.github_pr_identity import GITHUB_INTEGRATION, PR_TYPE
 from plans import decision_projection
-from plans.node_states import _ACCEPTED_STATES, _TERMINAL_STATES, asks_user
+from plans.node_states import _ACCEPTED_STATES, _TERMINAL_STATES
 from plans.status_time import parse
 
 Interval = tuple[float, float]
@@ -176,36 +172,20 @@ def _read(connection, ids: list[str], rows_in: Callable) -> dict[str, dict]:
     return facts
 
 
-def _user_spans(spans, node: dict) -> list[Interval]:
-    """The prerequisite stretches owned by its user, including a failed retry gap."""
-    follow_up_at = _at(node["follow_up_at"])
-    found: list[Interval] = []
-    for state, start, end in spans:
-        segments = [(start, end, False)]
-        if follow_up_at is not None:
-            segments = [
-                (start, min(end, follow_up_at), False),
-                (max(start, follow_up_at), end, True),
-            ]
-        found.extend(
-            (segment_start, segment_end)
-            for segment_start, segment_end, has_follow_up in segments
-            if segment_end > segment_start
-            and asks_user(state, node["assignee"], has_follow_up=has_follow_up)
-        )
-    return union(found)
+def _unmet_and_decision_time(
+    connection, prerequisites: list[str], review_steps: dict[str, list[str]],
+    rows_in, now: float,
+):
+    """Each prerequisite's unmet spans and each source's decision time, one state-history query.
 
-
-def _prerequisite_unmet(connection, prerequisites: list[str], review_steps, rows_in, now: float):
-    """Prerequisite and decision-review spans, read in one bounded state-history query."""
-    review_ids = {review_id for step_ids in review_steps.values() for review_id in step_ids}
-    node_ids = sorted(set(prerequisites) | review_ids)
+    Decision time is the union of its review nodes' ``review_requested``
+    stretches, clipped where a review node was archived.
+    """
+    node_ids = sorted(set(prerequisites) | {step for steps in review_steps.values() for step in steps})
     by_id: dict[str, dict] = {}
     for row in rows_in(
         connection,
-        """SELECT n.id,n.created_at,n.state,n.assignee,
-                  (SELECT MIN(follow_up.created_at) FROM plan_nodes follow_up
-                   WHERE follow_up.follow_up_of=n.id) AS follow_up_at,
+        """SELECT n.id,n.created_at,n.state,n.archived_at,
                   e.prior_state,e.new_state,e.created_at AS at
            FROM plan_nodes n
            LEFT JOIN plan_node_events e ON e.node_id=n.id AND e.event='state_transition'
@@ -223,20 +203,17 @@ def _prerequisite_unmet(connection, prerequisites: list[str], review_steps, rows
         node_id: _spans_where(spans[node_id], lambda state: state not in _ACCEPTED_STATES)
         for node_id in prerequisites if node_id in spans
     }
-    user_open = {
-        node_id: _user_spans(spans[node_id], entry["node"])
-        for node_id, entry in by_id.items()
-        if node_id in prerequisites and entry["node"]["assignee"] == "user"
-    }
+
+    def in_review(step: str) -> list[Interval]:
+        asked = _spans_where(spans.get(step, []), lambda state: state == "review_requested")
+        archived = _at(by_id[step]["node"]["archived_at"]) if step in by_id else None
+        return asked if archived is None else intersect(asked, [(0.0, archived)])
+
     decision_time = {
-        source_id: union([
-            interval for review_id in review_ids for interval in _spans_where(
-                spans.get(review_id, []), lambda state: state == "review_requested",
-            )
-        ])
-        for source_id, review_ids in review_steps.items()
+        source_id: union([span for step in steps for span in in_review(step)])
+        for source_id, steps in review_steps.items()
     }
-    return unmet, user_open, decision_time
+    return unmet, decision_time
 
 
 def _plan_paused(connection, plan_ids: list[str], rows_in: Callable, now: float):
@@ -295,7 +272,7 @@ def own_waiting_intervals(
         str(row["depends_on"]) for fact in facts.values() for row in fact["edges"]
         if row["depends_on"] is not None
     } | {str(row["depends_on_node_id"]) for fact in facts.values() for row in fact["live"]})
-    unmet, user_open, raised = _prerequisite_unmet(
+    unmet, decision_time = _unmet_and_decision_time(
         connection, prerequisites, review_steps, rows_in, clock,
     )
     result: dict[str, list[Interval]] = {}
@@ -307,17 +284,13 @@ def own_waiting_intervals(
             (start, clock if row["status"] == "armed" else (_at(row["ended_at"]) or start))
             for row in fact["watches"] if (start := _at(row["armed_at"])) is not None
         ]
-        user_time = list(raised.get(node_id, []))
         for prerequisite, present in _edge_intervals(fact["edges"], fact["live"], clock).items():
-            pending = intersect(present, unmet.get(prerequisite, []))
-            theirs = intersect(pending, user_open.get(prerequisite, []))
-            user_time += theirs
-            causes += subtract(pending, theirs)
+            causes += intersect(present, unmet.get(prerequisite, []))
         linked = _at(fact.get("pr_linked_at"))
         if linked is not None:
             review = _spans_where(spans, lambda state: state == "review_requested")
             causes += intersect(review, [(linked, clock)])
-        user_time += [
+        user_time = decision_time.get(node_id, []) + [
             (start, _at(row["cleared_at"]) or clock)
             for row in fact["holds"] if (start := _at(row["created_at"])) is not None
         ] + paused.get(str(fact["node"]["plan_id"]), [])

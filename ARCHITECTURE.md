@@ -333,14 +333,12 @@ dependency (edge events intersected with the prerequisite's not-accepted
 state stretches), or is in `review_requested` with a linked GitHub
 pull-request artifact. Overlaps count once. The user's time is cut out,
 whoever armed the wait: user-owned holds, whole-plan pauses (from
-`plan_events`), a decision on the node while its eligible review step is in
-`review_requested` (found by source node through
-`idx_artifact_identities_decision_source`), and a dependency on a user-assigned
-step while it asks them. A closed step is waiting again; a failed user step
-remains the user's until its follow-up exists. Review-step state transitions
-are the decision history, so an out-of-band attention clear changes no past
-interval. So is time after settling. Every read is a chunked `IN (...)` batch,
-a fixed count per call. The status read shows a
+`plan_events`), and a decision on the node while its review step is in
+`review_requested`, up to the step's archiving (the step is found by source
+node through `idx_artifact_identities_decision_source`; its state transitions
+are the history, so a withdrawn or answered decision still counts for the time
+it was open); so is time after settling. Every read is a chunked `IN (...)`
+batch, a fixed count per call. The status read shows a
 node's own `waited_seconds` in the ages of running, review and waiting rows.
 `plans.public.open_wait_intervals` returns the same intervals per thread,
 unioned over that thread's own plan nodes and clipped to a window, for a run's

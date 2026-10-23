@@ -15,7 +15,7 @@ import uuid
 import pytest
 
 from infra.schema import SCHEMA_SQL
-from plans import decisions, followups, mutations, node_cost, public, scheduled_wait, service
+from plans import archival, closure, decisions, mutations, node_cost, public, scheduled_wait, service
 from plans.boundary import PlanActor
 from tests.plan_writer_authorizer import raw_plan_seed
 
@@ -432,62 +432,53 @@ def test_withdrawal_ends_a_decision_but_an_attention_clear_does_not_rewrite_its_
     assert _waited(db, cleared, 90) == 20 * 60 + 10 * 60
 
 
-def test_a_dependency_on_the_users_step_is_their_time_but_an_agents_step_waits(db):
-    plan = service.ensure_plan("thread", "owner", db=db)
-    person_step = _task(db, plan.id, "Sign in", assignee="user")
-    agent_step = _task(db, plan.id, "Build")
-    on_person = _task(db, plan.id, "After sign-in")
-    on_agent = _task(db, plan.id, "After build")
-    for node in (on_person, on_agent):
-        _move(db, node.id, "pending", "active", 0)
-        _watch(db, node, 0, resolved=10)
-    _depend(db, on_person, person_step, 5)
-    _depend(db, on_agent, agent_step, 5)
-    _move(db, person_step.id, "pending", "accepted", 40)
-    _move(db, agent_step.id, "pending", "accepted", 40)
-
-    # A watch 0..10 overlaps the dependency 5..40: the user's 5..40 is cut whole.
-    assert _waited(db, on_person, 90) == 5 * 60
-    assert _waited(db, on_agent, 90) == 40 * 60
-
-
-def test_a_user_step_closed_unaccepted_leaves_an_unmet_dependency_that_waits_again(db):
-    plan = service.ensure_plan("thread", "owner", db=db)
-    person_step = _task(db, plan.id, "Sign in", assignee="user")
-    on_person = _task(db, plan.id, "After sign-in")
-    _move(db, on_person.id, "pending", "active", 0)
-    _depend(db, on_person, person_step, 0)
-    _move(db, person_step.id, "pending", "closed", 30)
-
-    # The user's 0..30 is cut; from their Won't do on, the agent must re-plan.
-    assert _waited(db, on_person, 90) == 60 * 60
-
-
-def test_a_failed_user_step_without_a_follow_up_stays_the_users_time(db):
-    plan = service.ensure_plan("thread", "owner", db=db)
-    person_step = _task(db, plan.id, "Sign in", assignee="user")
-    dependent = _task(db, plan.id, "After sign-in")
-    _move(db, dependent.id, "pending", "active", 0)
-    _depend(db, dependent, person_step, 0)
-    _move(db, person_step.id, "pending", "failed", 30)
-
-    assert _waited(db, dependent, 90) == 0
-
-
-def test_a_failed_user_step_stops_being_the_users_time_when_its_follow_up_exists(db, clock):
-    plan = service.ensure_plan("thread", "owner", db=db)
-    person_step = _task(db, plan.id, "Sign in", assignee="user")
-    dependent = _task(db, plan.id, "After sign-in")
-    _move(db, dependent.id, "pending", "active", 0)
-    _depend(db, dependent, person_step, 0)
-    _move(db, person_step.id, "pending", "failed", 30)
-    clock(60)
-    followups.add_follow_up(
-        person_step.id, title="Try another provider", acceptance_criteria="A provider is connected",
-        db=db,
+def _source_under_phase(db, plan):
+    """An active task with a watch from minute 0, under a phase, for the exit tests."""
+    phase = service.add_node(
+        plan.id, kind="phase", title="Phase", acceptance_criteria="Phase DOD", db=db,
     )
+    node = _task(db, plan.id, parent_id=phase.id)
+    _move(db, node.id, "pending", "active", 0)
+    _watch(db, node, 0)
+    return phase, node
 
-    assert _waited(db, dependent, 90) == 30 * 60
+
+def test_closing_the_source_withdraws_its_decision_and_ends_the_users_time(db, clock):
+    plan = service.ensure_plan("thread", "child", db=db)
+    _, node = _source_under_phase(db, plan)
+    raised = _decision(db, plan, node, clock, 20)
+    clock(50)
+    closure.close_node(node.id, reason="not needed", db=db)
+
+    review = service._node_row(db, raised["node_id"])
+    assert review["state"] == "closed"
+    # The source's own settling also cuts everything after 50; the review step's
+    # closing is the history that ends the user's 20..50.
+    assert _waited(db, node, 90) == 20 * 60
+
+
+def test_archiving_the_review_step_ends_the_users_time_where_it_was_archived(db, clock):
+    plan = service.ensure_plan("thread", "child", db=db)
+    _, node = _source_under_phase(db, plan)
+    raised = _decision(db, plan, node, clock, 20)
+    clock(40)
+    # Archive is not refused on an open review step; it leaves its state alone.
+    archival.archive_node(raised["node_id"], db=db)
+
+    assert service._node_row(db, raised["node_id"])["state"] == "review_requested"
+    assert _waited(db, node, 90) == 20 * 60 + 50 * 60
+
+
+def test_closing_an_ancestor_is_refused_while_the_source_is_open_so_the_cut_stands(db, clock):
+    plan = service.ensure_plan("thread", "child", db=db)
+    phase, node = _source_under_phase(db, plan)
+    _decision(db, plan, node, clock, 20)
+    clock(50)
+    with pytest.raises(service.PlanError, match="strand open children"):
+        closure.close_node(phase.id, reason="not needed", db=db)
+
+    assert service._node_row(db, phase.id)["state"] != "closed"
+    assert _waited(db, node, 90) == 20 * 60
 
 
 def test_open_waits_leave_out_a_decision_the_user_owes(db, clock):
