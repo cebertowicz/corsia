@@ -49,5 +49,5 @@ async def added(account_id: str, position: str) -> tuple[str, list[read.Message]
     current_validity, current_last, found = await read._guarded(account_id, endpoints, call)
     return (
         _cursor(current_validity, current_last),
-        [read.Message(f"{current_validity}-{uid}", "", *read.parse(raw, with_body=True)) for uid, raw in found],
+        [read.Message(read.mint_message_id(account_id, current_validity, uid), "", *read.parse(raw, with_body=True)) for uid, raw in found],
     )

@@ -14,6 +14,7 @@ from mailhost_helpers import authority, conductor, env, servers  # noqa: F401  (
 from test_mailhost_send import _draft, _send, host, make_host  # noqa: F401  (fixtures and helpers)
 
 from connections.mail.email_document import reply_subject
+from connections.mailhost import read
 from tools.google_calendar import CalendarDraftInviteTool, CalendarSendInviteTool
 from tools.google_email import EmailDraftTool
 
@@ -24,6 +25,10 @@ ORIGINAL = (
     b"References: <root@example.com>\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nNoon on Friday?\r\n"
 )
 PLAIN_FROM = ORIGINAL.replace(b"Reply-To: Team <team@example.com>\r\n", b"")
+
+
+def _id(host, uid: int = 5, validity: int = 7) -> str:
+    return read.mint_message_id(host.account_id, validity, uid)
 
 
 def _parsed(raw: bytes):
@@ -44,7 +49,7 @@ def test_a_reply_subject_gets_re_once() -> None:
 @pytest.mark.asyncio
 async def test_a_reply_threads_under_the_message_defaults_to_reply_to_and_prefixes_the_subject(make_host) -> None:
     host = await _reply_host(make_host)
-    saved = await _draft(host, to=[], cc=[], subject="Lunch plans", reply_to_message_id="7-5")
+    saved = await _draft(host, to=[], cc=[], subject="Lunch plans", reply_to_message_id=_id(host))
     document = (host.workspace / saved["path"]).read_text()
     assert "To: team@example.com" in document and "Subject: Re: Lunch plans" in document
     assert not (await _send(host, saved)).startswith("Error")
@@ -63,16 +68,20 @@ async def test_a_reply_threads_under_the_message_defaults_to_reply_to_and_prefix
 @pytest.mark.asyncio
 async def test_a_reply_without_reply_to_goes_to_the_sender_and_an_explicit_recipient_wins(make_host) -> None:
     host = await _reply_host(make_host, PLAIN_FROM)
-    saved = await _draft(host, to=[], cc=[], subject="Re: Lunch plans", reply_to_message_id="7-5")
+    saved = await _draft(host, to=[], cc=[], subject="Re: Lunch plans", reply_to_message_id=_id(host))
     assert "To: sam@example.com" in (host.workspace / saved["path"]).read_text()
-    explicit = await _draft(host, to=["pat@example.com"], cc=[], subject="Lunch plans", reply_to_message_id="7-5")
+    explicit = await _draft(host, to=["pat@example.com"], cc=[], subject="Lunch plans", reply_to_message_id=_id(host))
     assert "To: pat@example.com" in (host.workspace / explicit["path"]).read_text()
 
 
-@pytest.mark.parametrize("message_id", ["99-5", "7-77", "9f3a1c", "7-5; DELETE"])
+@pytest.mark.parametrize("kind", ["rebuilt", "gone", "gmail", "injection", "other_account"])
 @pytest.mark.asyncio
-async def test_a_message_that_is_not_in_this_accounts_inbox_is_refused_and_nothing_is_saved(make_host, message_id) -> None:
+async def test_a_message_that_is_not_in_this_accounts_inbox_is_refused_and_nothing_is_saved(make_host, kind) -> None:
     host = await _reply_host(make_host)
+    message_id = {
+        "rebuilt": _id(host, validity=99), "gone": _id(host, uid=77), "gmail": "9f3a1c",
+        "injection": _id(host) + "; DELETE", "other_account": read.mint_message_id("another-account", 7, 5),
+    }[kind]
     out = await EmailDraftTool().execute(
         _thread_id=host.thread, account_id=host.account_id, subject="Re: x", body="Yes", reply_to_message_id=message_id,
     )
@@ -84,7 +93,7 @@ async def test_a_message_that_is_not_in_this_accounts_inbox_is_refused_and_nothi
 async def test_a_reply_with_no_recipient_anywhere_is_refused(make_host) -> None:
     host = await _reply_host(make_host, PLAIN_FROM.replace(b"From: Sam <sam@example.com>\r\n", b""))
     out = await EmailDraftTool().execute(
-        _thread_id=host.thread, account_id=host.account_id, subject="Re: x", body="Yes", reply_to_message_id="7-5",
+        _thread_id=host.thread, account_id=host.account_id, subject="Re: x", body="Yes", reply_to_message_id=_id(host),
     )
     assert out == "Error: A draft needs at least one recipient."
 
@@ -143,6 +152,18 @@ async def test_an_invite_is_also_stored_on_the_organizers_calendar_with_the_same
     mailed = _unfolded(_parsed(data).get_body(preferencelist=("calendar",)).get_content())
     assert recipients == ["pat@example.com", "lee@example.com"] and f"UID:{uid}" in mailed and "METHOD:REQUEST" in mailed
     assert "note" not in result
+
+
+@pytest.mark.asyncio
+async def test_an_invitation_the_host_will_not_send_puts_nothing_on_the_calendar(make_host) -> None:
+    host = await make_host()
+    host.built.smtp.password = "not-the-saved-password"
+    drafted = json.loads(await CalendarDraftInviteTool().execute(
+        _thread_id=host.thread, account_id=host.account_id, title="Planning", start="2026-10-27T10:00:00-07:00",
+        end="2026-10-27T11:00:00-07:00", attendees=["pat@example.com"],
+    ))
+    sent = await CalendarSendInviteTool().execute(_thread_id=host.thread, draft_id=drafted["draft_id"], revision=drafted["revision"])
+    assert sent.startswith("Error") and host.built.smtp.sent == [] and host.built.caldav.puts == []
 
 
 @pytest.mark.asyncio

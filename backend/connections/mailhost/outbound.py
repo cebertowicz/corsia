@@ -74,13 +74,14 @@ async def send(account_id: str, message: EmailMessage) -> str:
 
 
 async def send_invite(account_id: str, sender: str, invite: Invite) -> InviteSent:
-    """Put the event on the organizer's calendar, then email the request.
+    """Email the request, then put the same event (same UID) on the organizer's calendar.
 
-    Hosts with no verified RFC 6638 scheduling get the invitation by SMTP.  A calendar that will not take the
-    event never stops the invitation; the result says so.
+    Hosts with no verified RFC 6638 scheduling get the invitation by SMTP.  The calendar copy comes only after
+    the host accepted the mail, so a failed send leaves nothing behind to duplicate on a retry; a calendar that
+    will not take the event never undoes the send, and the result says so.
     """
     endpoints, _username, password = await run_in_db(read.credentials, account_id)
     uid = str(uuid4())
-    stored = await caldav.put_event(endpoints, password, uid, invites.stored_event(sender, invite, uid))
     await send(account_id, invites.invite_message(sender, invite, uid))
+    stored = await caldav.put_event(endpoints, password, uid, invites.stored_event(sender, invite, uid))
     return InviteSent(uid, stored)

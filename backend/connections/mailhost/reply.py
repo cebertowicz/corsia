@@ -25,7 +25,7 @@ def _one_line(value: object) -> str:
 async def reply_target(account_id: str, message_id: str) -> tuple[dict, str]:
     """Threading facts and the line the person sees; the message must be in this account's inbox."""
     try:
-        validity, uid = read.parse_message_id(message_id)
+        validity, uid = read.parse_message_id(account_id, message_id)
     except read.MessageNotFound as exc:
         raise DraftRefused(str(exc)) from None
     endpoints, username, password = await run_in_db(read.credentials, account_id)
@@ -43,7 +43,7 @@ async def reply_target(account_id: str, message_id: str) -> tuple[dict, str]:
     sender = _one_line(headers.get("From"))
     reply_to = _one_line(headers.get("Reply-To")) or sender
     target = {
-        "reply_to": f"{validity}-{uid}",
+        "reply_to": read.mint_message_id(account_id, validity, uid),
         "in_reply_to": message_header or None,
         "references": references or None,
         "reply_addresses": [address for _, address in getaddresses([reply_to]) if is_plain_address(address)],

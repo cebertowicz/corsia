@@ -31,6 +31,7 @@ from connections.google.client import GoogleError
 from connections.mail import email_screen
 from events.connectors import mail_poller as poller
 from connections.mailhost import check, imap, read as mailhost_read, store
+from connections.mailhost import read as mail_read
 from connections.mailhost.errors import IMAP_OFF, PASSWORD_REFUSED, SERVER_UNREACHABLE, MailHostError
 from infra import key_store
 from infra.database import get_db
@@ -51,6 +52,10 @@ def _no_leak(*texts: str) -> None:
 async def _connect(conductor_thread: str, **arguments) -> Any:
     out = await MailHostConnectTool().execute(_thread_id=conductor_thread, **arguments)
     return out if out.startswith("Error") else json.loads(out)
+
+
+def mint(found, uid: int, *, validity: int = 7) -> str:
+    return mail_read.mint_message_id(found.account_id, validity, uid)
 
 
 def _typed(built, **extra) -> dict:
@@ -325,16 +330,17 @@ async def test_search_and_read_work_on_a_connected_mail_host_account(connected, 
     found = json.loads(await EmailSearchTool().execute(_thread_id=connected.thread, query="from:sam", max=5))
     assert connected.built.imap.searches[-1] == 'FROM "sam"'
     ids = [item["message_id"] for item in found["messages"]]
-    assert ids == ["7-2", "7-1"] and found["messages"][0]["from"].endswith("<billing@example.com>")
+    assert ids == [mint(connected, 2), mint(connected, 1)] and found["messages"][0]["from"].endswith("<billing@example.com>")
     assert all("body" not in item for item in found["messages"])
-    read = json.loads(await EmailReadTool().execute(_thread_id=connected.thread, message_id="7-2"))
+    read = json.loads(await EmailReadTool().execute(_thread_id=connected.thread, message_id=mint(connected, 2)))
     assert read["subject"] == "Invoice 42" and BODY_CANARY in read["body"] and read["body"].startswith("<untrusted-email>")
     _no_leak(json.dumps(found), json.dumps(read))
 
 
 async def test_a_message_from_before_the_mailbox_was_rebuilt_reads_as_not_found(connected, clean_screen) -> None:
     await _set_through_keys(connected)
-    for stale in ("8-2", "7-99", "7-2; DELETE", "abc"):
+    for stale in (mint(connected, 2, validity=8), mint(connected, 99), mint(connected, 2) + "; DELETE", "7-2", "abc",
+                  mail_read.mint_message_id("another-account", 7, 2)):
         out = await EmailReadTool().execute(_thread_id=connected.thread, message_id=stale)
         assert out.startswith("Error") and "can't be found" in out and "DELETE" not in out.split("found")[-1]
 
@@ -459,12 +465,12 @@ async def test_scheduled_poller_floors_then_delivers_new_mail_and_resets_a_rebui
     connected.built.imap.messages[3] = message("New invoice", "new body", sender="new@example.com")
     poller._due[connected.account_id] = 0
     await poller.run_cycle()
-    assert [item["message_id"] for item in delivered] == ["7-3"]
+    assert [item["message_id"] for item in delivered] == [mint(connected, 3)]
 
     connected.built.imap.validity = 8
     poller._due[connected.account_id] = 0
     await poller.run_cycle()
-    assert [item["message_id"] for item in delivered] == ["7-3"]
+    assert [item["message_id"] for item in delivered] == [mint(connected, 3)]
     db = get_db()
     try:
         rebuilt = db.execute("SELECT cursor_json FROM connected_accounts WHERE id=?", (connected.account_id,)).fetchone()[0]

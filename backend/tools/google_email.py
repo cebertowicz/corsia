@@ -153,7 +153,7 @@ class EmailDraftTool(Tool):
     def description(self) -> str:
         return (
             "Save an email as a draft document the person can read, from the account named "
-            "by account_id, with that account's signature appended (Gmail). Nothing is sent. Returns "
+            "by account_id. Gmail accounts append their signature. Nothing is sent. Returns "
             "draft_id and revision, which email_send needs. It is sent from the same account. "
             "Pass draft_id to replace an open draft; every field is required again, so "
             "send the whole message. Pass reply_to_message_id, a message id from the same account, "

@@ -141,7 +141,7 @@ class EmailReadTool(Tool):
             return f"Error: {exc}"
         account, backend = str(resolved["id"]), _backend(resolved)
         try:
-            message_id = backend.check_message_id(kwargs.get("message_id"))
+            message_id = backend.check_message_id(kwargs.get("message_id"), account)
             screen = (await run_in_db(email_screen.stored_screens, account, [message_id])).get(message_id)
             if screen is not None and screen.flagged:
                 return f"Error: {flagged_text(screen.rule)}"
