@@ -268,6 +268,35 @@ def test_measurement_correction_split_groups_by_source_kind(isolated_db):
     }
 
 
+def test_record_fact_keeps_the_committed_fact_when_early_delivery_fails(isolated_db, monkeypatch):
+    from jobs import learning_report
+    from jobs.corrections_recording import _record_fact
+    from jobs.corrections_scanning import hydrate_candidates, pending_candidate_keys
+
+    db = _db()
+    try:
+        _seed(db)
+    finally:
+        db.close()
+    candidate = hydrate_candidates(pending_candidate_keys(_version(), 20, "owner"))[0]
+
+    def delivery_failed(*_args, **_kwargs):
+        raise RuntimeError("delivery unavailable")
+
+    monkeypatch.setattr(learning_report, "maybe_emit_early", delivery_failed)
+
+    assert _record_fact(
+        candidate,
+        {"label": "correction", "truncated": False, "original_tokens": 9, "failure_reason": "none"},
+        _version(),
+    ) is True
+    db = _db()
+    try:
+        assert db.execute("SELECT COUNT(*) FROM outcome_events").fetchone()[0] == 1
+    finally:
+        db.close()
+
+
 @pytest.mark.asyncio
 async def test_same_message_and_version_is_recorded_once_when_scan_and_notify_race(isolated_db):
     from jobs.corrections_recording import _record_fact

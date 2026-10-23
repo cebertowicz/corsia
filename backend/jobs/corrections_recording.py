@@ -91,7 +91,25 @@ def _record_fact(
             raise RuntimeError("correction fact attributes were dropped")
         if result.inserted and result.event_id and classification["label"] == LABEL_CORRECTION:
             queue_correction_note(db, candidate, version, result.event_id)
-        return result.inserted
+    if result.inserted and classification["label"] == LABEL_CORRECTION and candidate.project_id:
+        try:
+            from datetime import datetime, timezone
+
+            from infra.database import get_db
+            from jobs.learning_report import maybe_emit_early, report_date_for
+
+            report_db = get_db()
+            try:
+                maybe_emit_early(
+                    report_db, scope=candidate.project_id,
+                    report_date=report_date_for(datetime.now(timezone.utc)),
+                )
+            finally:
+                report_db.close()
+        except Exception:
+            # The correction fact is committed before this best-effort report hook.
+            logger.exception("learning report delivery hook failed")
+    return result.inserted
 
 
 def record_self_caught(candidate: CorrectionCandidate, *, db) -> bool:

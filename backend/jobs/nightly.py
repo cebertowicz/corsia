@@ -188,12 +188,12 @@ async def _run_job_safely() -> None:
                 status,
                 rec_err,
             )
-    # The model-free verdict batch shares the same once-per-day claim. Its failure cannot
-    # change the maintenance disposition already written, and it never wakes an owner while
-    # verdict writes remain disabled.
+    # Follow-up jobs run after the terminal record: their failures cannot change
+    # the maintenance disposition already written. The model-free verdict batch
+    # remains before report emission and never wakes an owner while verdict writes
+    # remain disabled.
     await _run_workflow_verdicts_safely()
-    # Second maintenance step, after the terminal record: its failure cannot change the
-    # retention status already written.
+    await _emit_learning_reports_safely()
     await _reap_worktrees_safely()
 
 
@@ -216,6 +216,18 @@ async def _run_workflow_verdicts_safely() -> None:
         await asyncio.to_thread(run_daily)
     except Exception:
         logger.exception("nightly_job: workflow verdict evaluation failed")
+
+
+async def _emit_learning_reports_safely() -> None:
+    """Run the learning producer on the established once-daily job path."""
+    from jobs.learning_report import emit_daily_reports
+
+    try:
+        await asyncio.to_thread(emit_daily_reports)
+    except Exception:
+        # Agent Substrate owns the future delivery contract; its absence must not
+        # change the already-recorded maintenance disposition.
+        logger.exception("nightly_job: learning report delivery failed")
 
 
 async def _reap_worktrees_safely() -> None:
