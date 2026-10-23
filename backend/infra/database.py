@@ -8,6 +8,7 @@ import uuid
 from contextlib import contextmanager
 from typing import Callable, Iterator
 
+import infra.startup_progress as startup_progress
 import infra.write_admission as write_admission  # mypy resolves a new submodule only this way
 from infra import write_effects
 from infra.db_loop_guard import guard_write_off_event_loop
@@ -83,6 +84,7 @@ def _make_connection(path: str) -> sqlite3.Connection:
         conn.execute("PRAGMA synchronous=NORMAL")  # safe with WAL, faster than FULL
         conn.commit()
         apply_thread_lane(conn)
+        startup_progress.watch(conn)
     except BaseException:
         conn.close()
         raise
@@ -223,8 +225,9 @@ def write_transaction(
             connection.execute("BEGIN IMMEDIATE")
             write_effects.begin(connection)
             started_at = time.monotonic()
-            yield connection
-            connection.commit()
+            with startup_progress.transaction_writes(connection):
+                yield connection
+                connection.commit()
             committed = write_effects.take(connection)
         except BaseException:
             write_effects.abort(connection)
@@ -338,6 +341,7 @@ def init_db():
     from infra.config import WORKSPACE
     from infra.corsia_agent_role_files import carry_workspace_conductor_role_files
     carry_workspace_conductor_role_files(WORKSPACE)
+    startup_progress.mark("recovering")
 
 
 def _init_fts(conn: sqlite3.Connection) -> None:

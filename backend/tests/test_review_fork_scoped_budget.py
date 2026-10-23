@@ -8,7 +8,7 @@ import pytest
 
 from core.artifact_review_capture import ReviewForkFailure
 from history.types import HistoryBoundary
-from test_doc_review_requests import request, review_env, stored
+from test_doc_review_requests import request, review_env, stored, text_document
 from test_review_fork_cold_request import TARGET
 
 
@@ -73,12 +73,13 @@ def _prepare_cold_target(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_checkpointed_long_history_starts_disposable_review_pass(review_env, monkeypatch):
+async def test_checkpointed_long_history_starts_disposable_review_pass(review_env, monkeypatch, tmp_path):
     """A short scoped tail still starts even when covered history exceeds the cap."""
     from core import artifact_review_runtime as runtime
     from core.fork_runtime import handles
 
     db, artifact_id = review_env
+    text_document(db, artifact_id, tmp_path)
     _append_legacy_rows(db, 1, 1023)
     anchor_seq = _append_legacy_segment(db, 1024)
     _append_legacy_rows(db, 1026, 1)

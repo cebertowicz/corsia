@@ -79,10 +79,14 @@ async def run_startup_reconcile(logger) -> tuple[object, tuple[str, ...], str | 
 
 
 async def run_startup_drive(harness_task, recovered, wakes, rolled_back_operation, logger) -> None:
-    """Time and report the lifecycle-owned post-bind drive phase."""
-    phase_started = time.monotonic()
-    logger.info("startup phase: restart continuity drive started")
-    try:
+    """Time and report the lifecycle-owned post-bind drive phase.
+
+    An Update this startup left ``verifying`` is settled here too, when its
+    shell never confirms; the drive failing does not stop that settlement.
+    """
+    from automation.update_verification import settle_unconfirmed_update
+
+    async def drive() -> None:
         await harness_task
         if rolled_back_operation is not None:
             from automation.restart import _RESUME_TASKS
@@ -90,6 +94,14 @@ async def run_startup_drive(harness_task, recovered, wakes, rolled_back_operatio
 
             tell_conductor_detached(rolled_back_operation, _RESUME_TASKS)
         await drive_startup_continuity(recovered, wakes, logger)
+
+    phase_started = time.monotonic()
+    logger.info("startup phase: restart continuity drive started")
+    try:
+        outcomes = await asyncio.gather(drive(), settle_unconfirmed_update(logger), return_exceptions=True)
+        for outcome in outcomes:
+            if isinstance(outcome, BaseException):
+                raise outcome
     except asyncio.CancelledError:
         logger.warning("startup phase: restart continuity drive cancelled")
         raise

@@ -57,24 +57,106 @@ else:
 
 is_backend_running() { curl -sf --max-time 3 "http://127.0.0.1:$BACKEND_PORT/api/health" > /dev/null 2>&1; }
 
-# A healthy backend must publish readiness within one minute. Provider catalog
-# refresh and durable inbox recovery continue as owned post-readiness work; this
-# bound covers only the critical database and continuity path.
+# A healthy backend must publish readiness within one minute of its last visible
+# progress. Before the port binds, progress is the service's own startup-progress
+# file (backend/infra/startup_progress.py), which a schema migration keeps
+# rewriting while it works; a service that never writes one gets one minute in
+# total, as before. Provider catalog refresh and durable inbox recovery continue
+# as owned post-readiness work; this bound covers only the critical database and
+# continuity path.
 CORSIA_HEALTH_WAIT_SECONDS="${CORSIA_HEALTH_WAIT_SECONDS:-60}"
+# However long a start keeps progressing, it ends here: the larger of 15 minutes
+# and 60 seconds per GiB of database. The slowest migration measured so far
+# (backup, a whole-table rebuild and its checks) costs about 23 s per GiB.
+CORSIA_STARTUP_CEILING_SECONDS="${CORSIA_STARTUP_CEILING_SECONDS:-900}"
+CORSIA_STARTUP_SECONDS_PER_GIB="${CORSIA_STARTUP_SECONDS_PER_GIB:-60}"
 CORSIA_DRAIN_MAX_WAIT="${CORSIA_DRAIN_MAX_WAIT:-60}"
 
 runtime_epoch_seconds() { date +%s; }
 
+startup_progress_file() { echo "${CORSIA_STATE_DIR:-}/runtime/startup-progress.json"; }
+
+# "<pid> <seq> <phase>" from the starting service's progress file. The service
+# writes pid, seq and phase first, so bash reads them without an interpreter.
+read_startup_progress() {
+    local file line=""
+    file="$(startup_progress_file)"
+    [ -f "$file" ] || return 1
+    IFS= read -r line < "$file" || [ -n "$line" ] || return 1
+    [[ "$line" =~ ^\{\"schema\":\ 1,\ \"pid\":\ ([0-9]+),\ \"seq\":\ ([0-9]+),\ \"phase\":\ \"([a-z_]+)\" ]] \
+        || return 1
+    echo "${BASH_REMATCH[1]} ${BASH_REMATCH[2]} ${BASH_REMATCH[3]}"
+}
+
+# launchd's process for the service being started, or nothing when no job is
+# loaded or this shell does not manage one.
+startup_service_pid() {
+    declare -F service_loaded_pid > /dev/null || return 0
+    service_is_loaded || return 0
+    service_loaded_pid 2>/dev/null || :
+}
+
+startup_ceiling_seconds() {
+    local db="${CORSIA_STATE_DIR:-}/corsia.db" bytes ceiling
+    bytes="$(stat -c %s "$db" 2>/dev/null || stat -f %z "$db" 2>/dev/null)" || bytes=0
+    case "$bytes" in ''|*[!0-9]*) bytes=0 ;; esac
+    ceiling=$(( (bytes + 1073741823) / 1073741824 * CORSIA_STARTUP_SECONDS_PER_GIB ))
+    [ "$ceiling" -ge "$CORSIA_STARTUP_CEILING_SECONDS" ] || ceiling="$CORSIA_STARTUP_CEILING_SECONDS"
+    [ "$ceiling" -ge "$CORSIA_HEALTH_WAIT_SECONDS" ] || ceiling="$CORSIA_HEALTH_WAIT_SECONDS"
+    echo "$ceiling"
+}
+
+# Waits while the service is starting and still visibly working. Fails at once
+# when its process exits or launchd replaces it, or when it reports a failed
+# startup; after a minute with no progress; or at the ceiling.
 wait_for_backend_health() {
-    local started_at elapsed tty=0 line_open=0
+    local started_at now elapsed idle_since ceiling tty=0 line_open=0
+    local pid first_pid="" progress last_progress="" phase="" shown_phase="" why=idle
     [ -t 1 ] && tty=1
     started_at="$(runtime_epoch_seconds)"
+    idle_since="$started_at"
+    ceiling="$(startup_ceiling_seconds)"
     while :; do
         if is_backend_running; then
             [ "$line_open" -eq 0 ] || echo
             return 0
         fi
-        elapsed=$(( $(runtime_epoch_seconds) - started_at ))
+        now="$(runtime_epoch_seconds)"
+        elapsed=$(( now - started_at ))
+        pid="$(startup_service_pid)"
+        if [ -n "$first_pid" ] && [ "$pid" != "$first_pid" ]; then
+            if [ -n "$pid" ]; then
+                why=restarted
+                break
+            fi
+            if ! kill -0 "$first_pid" 2>/dev/null; then
+                why=exited
+                break
+            fi
+        fi
+        [ -n "$first_pid" ] || first_pid="$pid"
+        if [ -n "$pid" ] && progress="$(read_startup_progress)" \
+            && [ "${progress%% *}" = "$pid" ]; then
+            phase="${progress##* }"
+            if [ "$phase" = failed ]; then
+                why=failed
+                break
+            fi
+            if [ "$progress" != "$last_progress" ]; then
+                last_progress="$progress"
+                idle_since="$now"
+            fi
+        fi
+        case "$phase" in
+            backing_up|migrating|validating)
+                if [ "$shown_phase" != upgrading ]; then
+                    [ "$line_open" -eq 0 ] || echo
+                    line_open=0
+                    echo "  CORSIA is upgrading its data; this can take several minutes on a large database…"
+                    shown_phase=upgrading
+                fi
+                ;;
+        esac
         if [ "$tty" -eq 1 ]; then
             if [ "$elapsed" -ge 10 ]; then
                 printf '\r  Starting CORSIA… (%ss)' "$elapsed"
@@ -85,11 +167,27 @@ wait_for_backend_health() {
         elif [ "$elapsed" -eq 0 ] || [ "$elapsed" -eq 30 ]; then
             echo "  Starting CORSIA…"
         fi
-        [ "$elapsed" -lt "$CORSIA_HEALTH_WAIT_SECONDS" ] || break
+        if [ "$elapsed" -ge "$ceiling" ]; then
+            why=ceiling
+            break
+        fi
+        [ $(( now - idle_since )) -lt "$CORSIA_HEALTH_WAIT_SECONDS" ] || break
         sleep 1
     done
     [ "$line_open" -eq 0 ] || echo
-    fail "CORSIA didn't finish starting within ${CORSIA_HEALTH_WAIT_SECONDS} seconds."
+    case "$why" in
+        restarted) fail "CORSIA stopped while starting, and launchd started it again." ;;
+        exited) fail "CORSIA stopped while starting." ;;
+        failed) fail "CORSIA reported that it could not start." ;;
+        ceiling) fail "CORSIA was still starting after ${elapsed} seconds, the most one start may take." ;;
+        *)
+            if [ -n "$last_progress" ]; then
+                fail "CORSIA stopped making progress while starting: nothing changed for ${CORSIA_HEALTH_WAIT_SECONDS} seconds."
+            else
+                fail "CORSIA didn't finish starting within ${CORSIA_HEALTH_WAIT_SECONDS} seconds."
+            fi
+            ;;
+    esac
     echo "     Run 'corsia logs' to see why (log: ${BACKEND_LOG:-the backend log})."
     return 1
 }

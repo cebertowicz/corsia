@@ -13,35 +13,15 @@ from app_shutdown_owned_tasks import shutdown_owned_tasks as _shutdown_owned_tas
 from app_shutdown_refreshes import shutdown_refresh_owners
 from app_startup_runtime import (
     _start_runtime_services, _startup_harness_discovery as _startup_harness_discovery,
+    _startup_cloud_discovery as _startup_cloud_discovery,
     configure_sqlite_fetch_switch_interval, resume_local_setup, stop_runtime_logs,
 )
 from app_shutdown_native import remaining_native_owners, shutdown_native_turns
 import infra.app_loop as app_loop
+import infra.startup_progress as startup_progress
 from infra import key_store_values, state
 from infra.db_async import run_in_db
 from infra.database import init_db, shutdown_pool
-
-
-async def _startup_cloud_discovery() -> None:
-    from infra.key_store_providers import provider_keys
-    from llm.catalog import discover_cloud_models
-    from loguru import logger
-
-    keys = await run_in_db(provider_keys)
-    for provider, key in (
-        ("openai", keys.get("openai")),
-        ("anthropic", keys.get("anthropic")),
-    ):
-        if not key:
-            continue
-        try:
-            result = await discover_cloud_models(provider, key)
-            if result["ok"]:
-                logger.info(
-                    f"{provider} cloud discovery: {len(result['models'])} models"
-                )
-        except Exception as exc:
-            logger.warning(f"{provider} cloud discovery error: {exc}")
 
 
 async def _discover_network_servers(logger) -> int:
@@ -137,7 +117,8 @@ async def lifespan(app: FastAPI):
     from loguru import logger
 
     configure_sqlite_fetch_switch_interval()
-    _initialize_startup(logger)
+    with startup_progress.publishing():
+        _initialize_startup(logger)
     app_loop.capture(asyncio.get_running_loop())
     startup_tasks: list[asyncio.Task | None] = [None, None, None, None, None]
     body_cancel: asyncio.CancelledError | None = None
@@ -170,10 +151,12 @@ async def lifespan(app: FastAPI):
                 startup_tasks[3], recovered, wakes, rolled_back_operation, logger,
             ),
         )
+        startup_progress.finish()
         yield
     except asyncio.CancelledError as exc:
         body_cancel = exc
     finally:
+        startup_progress.fail("startup stopped before it finished")
         app_loop.clear()
         try:
             await _shutdown_runtime_services(startup_tasks)

@@ -56,11 +56,18 @@ mod update_swap;
 const DEFAULT_SERVICE_PORT: u16 = 47_895;
 const ACTIVE_OPERATION_ERROR: &str = "CORSIA is still completing an operation";
 const HEALTH_POLL_INTERVAL: Duration = Duration::from_millis(250);
-/// A 20 GiB rehearsal root reached health in 71–74 s, the October 20 cold
-/// start took about 99 s, and its longest silent phase was 65 s. Six times the
-/// largest observed start leaves room for a slow migration without concealing
-/// a hang indefinitely.
+/// The fixed cap for a service that publishes no startup progress (an existing
+/// source install). A 20 GiB rehearsal root reached health in 71–74 s and the
+/// October 20 cold start took about 99 s; six times the largest observed start
+/// leaves room for a slow migration without concealing a hang indefinitely.
 pub(crate) const STARTUP_CAP: Duration = Duration::from_secs(600);
+/// The app's own service publishes startup progress, so it is held to the
+/// update shell's rule (`scripts/corsia.d/runtime.sh`): a minute without
+/// visible progress fails, and any start ends at the larger of 15 minutes and
+/// a minute per GiB of database.
+const STARTUP_STALL: Duration = Duration::from_secs(60);
+const STARTUP_CEILING_FLOOR: Duration = Duration::from_secs(900);
+const STARTUP_SECONDS_PER_GIB: u64 = 60;
 /// How long launchd may show no process for a just-started service.
 pub(crate) const NOT_RUNNING_WINDOW: Duration = Duration::from_secs(30);
 const RELAUNCH_POLL_INTERVAL: Duration = Duration::from_secs(2);
@@ -499,33 +506,66 @@ fn bundled_resource_dir<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<
 
 fn wait_for_service(port: u16, app_dir: &Path) -> Result<(), String> {
     let log = service_log_path(app_dir)?;
+    let state = app_paths::state_dir_for(app_dir)?;
+    let progress = state.join("runtime").join("startup-progress.json");
+    let database_bytes = std::fs::metadata(state.join("corsia.db")).map_or(0, |metadata| metadata.len());
     let target = format!("gui/{}/{}", unsafe { libc::geteuid() }, service_label());
     wait_for_startup(
         port,
         Some(&log),
         || Ok(release_proof::launchd_pid(&target)),
         NOT_RUNNING_WINDOW,
-        STARTUP_CAP,
+        startup_ceiling(database_bytes),
+        Some(ProgressWatch { file: &progress, stall: STARTUP_STALL }),
     )
     .map_err(|failure| failure.to_string())
+}
+
+fn startup_ceiling(database_bytes: u64) -> Duration {
+    let gib = database_bytes.div_ceil(1 << 30);
+    STARTUP_CEILING_FLOOR.max(Duration::from_secs(gib * STARTUP_SECONDS_PER_GIB))
+}
+
+/// The starting service's own progress file
+/// (`backend/infra/startup_progress.py`), and how long it may go unchanged.
+pub(crate) struct ProgressWatch<'a> {
+    pub(crate) file: &'a Path,
+    pub(crate) stall: Duration,
+}
+
+/// The fields of a progress file the wait needs; the service writes others.
+#[derive(Deserialize)]
+struct StartupProgress {
+    pid: u32,
+    seq: u64,
+    phase: String,
+}
+
+fn read_startup_progress(file: &Path) -> Option<StartupProgress> {
+    serde_json::from_slice(&std::fs::read(file).ok()?).ok()
 }
 
 /// Health is the readiness signal. A changed launchd PID proves the service
 /// restarted while starting, and a PID the kernel no longer knows with none in
 /// its place proves it exited. launchd showing no process for the whole
 /// `not_running` window means it exited before it was seen or never started;
-/// launchd's 10 s respawn throttle sits well inside the window. Otherwise the
-/// fixed cap bounds a hung startup. `log` is searched only for launcher
-/// refusals.
+/// launchd's 10 s respawn throttle sits well inside the window. With a
+/// `progress` watch, a file naming the launchd PID that reports `failed` ends
+/// the wait at once, and a `seq` that stays unchanged (or no such file) for
+/// `stall` fails it; `cap` bounds every start. `log` is searched only for
+/// launcher refusals.
 pub(crate) fn wait_for_startup(
     port: u16,
     log: Option<&Path>,
     mut service_pid: impl FnMut() -> Result<Option<u32>, String>,
     not_running: Duration,
     cap: Duration,
+    progress: Option<ProgressWatch>,
 ) -> Result<(), StartupFailure> {
     let began = Instant::now();
     let mut initial_pid = None;
+    let mut last_seq = None;
+    let mut idle_since = began;
     loop {
         if probe_health(port) {
             return Ok(());
@@ -543,7 +583,20 @@ pub(crate) fn wait_for_startup(
             (None, Some(pid)) => initial_pid = Some(pid),
             _ => {}
         }
-        if began.elapsed() >= cap {
+        if let (Some(watch), Some(pid)) = (&progress, initial_pid) {
+            if let Some(reading) = read_startup_progress(watch.file).filter(|reading| reading.pid == pid) {
+                // A failed startup exits next; the log may name a refusal.
+                if reading.phase == "failed" {
+                    return Err(StartupFailure::exited(log));
+                }
+                if last_seq != Some(reading.seq) {
+                    last_seq = Some(reading.seq);
+                    idle_since = Instant::now();
+                }
+            }
+        }
+        let stalled = progress.as_ref().is_some_and(|watch| idle_since.elapsed() >= watch.stall);
+        if stalled || began.elapsed() >= cap {
             return Err(StartupFailure::timed_out(log));
         }
         thread::sleep(HEALTH_POLL_INTERVAL);
@@ -2079,6 +2132,103 @@ mod tests {
     use super::*;
     use base64::Engine;
     use std::fs;
+
+    fn closed_port() -> u16 {
+        TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port()
+    }
+
+    fn write_progress(file: &Path, pid: u32, seq: u64, phase: &str) {
+        let staged = file.with_extension("tmp");
+        fs::write(
+            &staged,
+            format!(r#"{{"schema": 1, "pid": {pid}, "seq": {seq}, "phase": "{phase}", "done": null, "total": null}}"#),
+        )
+        .unwrap();
+        fs::rename(staged, file).unwrap();
+    }
+
+    /// Waits on this process as the service, with a 300 ms stall and the cap given.
+    fn wait_on_progress(file: &Path, cap: Duration) -> (Result<(), StartupFailure>, Duration) {
+        let began = Instant::now();
+        let outcome = wait_for_startup(
+            closed_port(),
+            None,
+            || Ok(Some(std::process::id())),
+            Duration::from_secs(30),
+            cap,
+            Some(ProgressWatch { file, stall: Duration::from_millis(300) }),
+        );
+        (outcome, began.elapsed())
+    }
+
+    /// Rewrites the progress file with a growing `seq` until the wait returns.
+    fn keep_beating(file: PathBuf, pid: u32) -> (std::sync::Arc<AtomicBool>, thread::JoinHandle<()>) {
+        let done = std::sync::Arc::new(AtomicBool::new(false));
+        let stop = done.clone();
+        let beater = thread::spawn(move || {
+            let mut seq = 1;
+            while !stop.load(Ordering::Relaxed) {
+                write_progress(&file, pid, seq, "migrating");
+                seq += 1;
+                thread::sleep(Duration::from_millis(50));
+            }
+        });
+        (done, beater)
+    }
+
+    #[test]
+    fn a_startup_that_keeps_progressing_waits_past_the_stall_until_the_ceiling() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("startup-progress.json");
+        let (done, beater) = keep_beating(file.clone(), std::process::id());
+        let (outcome, elapsed) = wait_on_progress(&file, Duration::from_millis(1_200));
+        done.store(true, Ordering::Relaxed);
+        beater.join().unwrap();
+        assert_eq!(outcome.unwrap_err(), StartupFailure::TimedOut { refusal: None });
+        assert!(elapsed >= Duration::from_millis(1_200));
+    }
+
+    #[test]
+    fn a_startup_whose_progress_stops_fails_at_the_stall() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("startup-progress.json");
+        write_progress(&file, std::process::id(), 7, "migrating");
+        let (outcome, elapsed) = wait_on_progress(&file, Duration::from_secs(10));
+        assert_eq!(outcome.unwrap_err(), StartupFailure::TimedOut { refusal: None });
+        assert!(elapsed >= Duration::from_millis(300) && elapsed < Duration::from_secs(3));
+    }
+
+    #[test]
+    fn progress_from_another_process_does_not_count() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("startup-progress.json");
+        let (done, beater) = keep_beating(file.clone(), std::process::id() + 1);
+        let (outcome, elapsed) = wait_on_progress(&file, Duration::from_secs(10));
+        done.store(true, Ordering::Relaxed);
+        beater.join().unwrap();
+        assert_eq!(outcome.unwrap_err(), StartupFailure::TimedOut { refusal: None });
+        assert!(elapsed < Duration::from_secs(3));
+    }
+
+    #[test]
+    fn a_startup_that_reports_failed_ends_the_wait_at_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("startup-progress.json");
+        write_progress(&file, std::process::id(), 3, "failed");
+        let (outcome, elapsed) = wait_on_progress(&file, Duration::from_secs(10));
+        assert_eq!(outcome.unwrap_err(), StartupFailure::Exited { refusal: None });
+        assert!(elapsed < Duration::from_millis(300));
+    }
+
+    #[test]
+    fn the_startup_ceiling_grows_a_minute_per_gib_past_fifteen_minutes() {
+        const GIB: u64 = 1 << 30;
+        assert_eq!(startup_ceiling(0), Duration::from_secs(900));
+        assert_eq!(startup_ceiling(15 * GIB), Duration::from_secs(900));
+        assert_eq!(startup_ceiling(15 * GIB + 1), Duration::from_secs(960));
+        assert_eq!(startup_ceiling(24 * GIB), Duration::from_secs(1_440));
+        assert_eq!(startup_ceiling(100 * GIB), Duration::from_secs(6_000));
+    }
 
     const SHELL_COMMANDS: &[&str] = &[
         "start_local_service",
