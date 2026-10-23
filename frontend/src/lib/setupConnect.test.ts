@@ -72,10 +72,9 @@ describe('setup sign-in failure copy', () => {
 		}
 	});
 
-	it('says the browser never finished when it was closed or never came back', () => {
-		for (const cause of ['signin_timed_out', 'vendor_login_failed']) {
-			expect(signinFailureCopy('codex', cause)).toEqual({ meta: 'Sign-in didn’t finish in your browser. Press Sign in to try again.', reportable: false });
-		}
+	it('says the browser never finished when it was closed, and what happened when it never came back', () => {
+		expect(signinFailureCopy('codex', 'vendor_login_failed')).toEqual({ meta: 'Sign-in didn’t finish in your browser. Press Sign in to try again.', reportable: false });
+		expect(signinFailureCopy('codex', 'signin_timed_out')).toEqual({ meta: 'Couldn’t finish signing in to Codex: your browser didn’t come back to CORSIA in time. Sign in again, or turn Codex off.', reportable: false });
 	});
 
 	it('tells a person who signed in to the same account what to do next', () => {
