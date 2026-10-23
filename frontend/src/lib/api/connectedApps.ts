@@ -1,6 +1,5 @@
 import { get } from 'svelte/store';
 import { token } from '$lib/stores/auth';
-import { write as keyWrite } from '$lib/stores/keys';
 import { plainResponseError } from '$lib/plainError';
 import { signInStateLine } from '$lib/appSignIn';
 
@@ -170,31 +169,10 @@ async function response<T>(path: string, init?: RequestInit, fallback = 'Could n
 	return result.json() as Promise<T>;
 }
 
-/** The row status line of a mail-host account, as Connected apps shows it. */
-export function mailHostStateLine(account: Pick<ConnectedAccount, 'provider_display_name' | 'mailhost'>): string {
-	switch (account.mailhost?.problem ?? null) {
-		case 'waiting': return 'Needs an app password';
-		case 'checking': return 'Checking…';
-		case 'refused': case 'revoked': return 'App password not accepted';
-		case 'imap_off': return `Email access is off at ${account.provider_display_name}`;
-		case 'unreachable': return `Can’t reach ${account.mailhost?.server}`;
-		default: return 'Connected';
-	}
-}
-
 /** One mail-host account by the Keys entry that holds its app password, for the Keys card's check after the password is set. */
 export async function loadMailHostAccount(entry: string): Promise<ConnectedAccount | undefined> {
 	const result = await response<{ accounts?: ConnectedAccount[] }>('/api/mcp/servers');
 	return (result.accounts ?? []).find((account) => account.provider === 'mailhost' && account.mailhost?.key_refs?.some((ref) => ref.entry === entry));
-}
-
-/** The person-only mail-host row writes: each carries the CORSIA password and starts a check (H17). Throws `KeyWriteError`. */
-export async function retryMailHost(id: string, password: string): Promise<void> {
-	await keyWrite(`/api/mcp/accounts/${encodeURIComponent(id)}/mailhost/check`, 'POST', { password });
-}
-
-export async function saveMailHostServers(id: string, servers: { imap: string; smtp: string; caldav: string }, password: string): Promise<void> {
-	await keyWrite(`/api/mcp/accounts/${encodeURIComponent(id)}/mailhost/servers`, 'PUT', { ...servers, password });
 }
 
 export async function loadConnectedAppsList(): Promise<{ servers: ConnectedApp[]; signInHere: boolean }> {

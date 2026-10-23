@@ -3,8 +3,6 @@ import {
 	loadConnectedApps,
 	loadConnectedAppsRows,
 	loadMailHostAccount,
-	retryMailHost,
-	saveMailHostServers,
 	needsManualGoogleStep,
 	startAppSignIn,
 	removeAccount,
@@ -15,6 +13,7 @@ import {
 	type ConnectedAppsRow,
 	type RevocationCause,
 } from './connectedApps';
+import { retryMailHost, saveMailHostServers } from './mailHostAccounts';
 
 afterEach(() => {
 	vi.unstubAllGlobals();

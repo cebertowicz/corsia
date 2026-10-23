@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { Button, Field } from '$lib/components/ui';
-	import { retryMailHost, saveMailHostServers, type ConnectedAccount } from '$lib/api/connectedApps';
+	import type { ConnectedAccount } from '$lib/api/connectedApps';
+	import { retryMailHost, saveMailHostServers } from '$lib/api/mailHostAccounts';
 	import { KEYS_NOT_SAVED, KeyWriteError } from '$lib/stores/keys';
 
 	// The open row of a mail-host account (iCloud, Yahoo, a work server): what its last check found, and the one next step.

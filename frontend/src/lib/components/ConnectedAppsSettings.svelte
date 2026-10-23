@@ -6,7 +6,7 @@
 	import {
 		approveConnectedApp, connectedAppStateLine, declineConnectedApp, loadConnectedAppsRows, reconnectConnectedApp, removeAccount, removeConnectedApp,
 		runtimeDownloadFailureBody, signOutOfAccount, startAccountSignIn, type AccountSignOutResult, type ConnectedAccount, type ConnectedApp,
-		type ConnectedAppsRow, isOnlyCorsia, mailHostStateLine, needsManualAccountStep,
+		type ConnectedAppsRow, isOnlyCorsia, needsManualAccountStep,
 	} from '$lib/api/connectedApps';
 	import { anyFirstSignIn, hasSignInToShow, needsSignInAttention, SIGN_IN_LEDE } from '$lib/appSignIn';
 	import AppSignInPanel from './AppSignInPanel.svelte';
@@ -16,7 +16,8 @@
 	import MailHostDetail from './MailHostDetail.svelte';
 	import ConnectAppFlow from './ConnectAppFlow.svelte';
 	import AccountManualNotice from './AccountManualNotice.svelte';
-	type AccountAddress = { localPrefix: string; localSuffix: string; domain: string };
+	import { mailHostStateLine } from '$lib/api/mailHostAccounts';
+	import { accountAddress, clippedPrefix, localSegments, width } from '$lib/accountAddress';
 	const accountName = (account: ConnectedAccount) => `${account.provider_display_name} — ${account.address}`;
 	const accountAnchor = (id: string) => `connected-account-${id}`;
 	const isAccount = (row: ConnectedAppsRow): row is ConnectedAccount => row.kind === 'account';
@@ -47,7 +48,6 @@
 	let closedDroppedSuffix = $state(new Set<string>());
 	let linkedAccountId = $state<string | null>(null);
 	let copiedAdminMessageId = $state<string | null>(null);
-	let textContext: CanvasRenderingContext2D | null = null;
 	const stateLine = (app: ConnectedApp) => connectedAppStateLine(app, signedOut.has(app.id));
 	const isMicrosoft = (account: ConnectedAccount) => account.provider === 'microsoft';
 	const microsoftCause = (account: ConnectedAccount, cause: string) => isMicrosoft(account) && account.cause === cause;
@@ -169,32 +169,6 @@
 		}
 		catch (cause) { actionError = cause instanceof Error ? cause.message : `Couldn't change this ${account.provider_display_name} account. Try again.`; }
 		finally { confirmingRemove = null; actionId = null; }
-	}
-	function accountAddress(address: string): AccountAddress | null {
-		const at = address.lastIndexOf('@');
-		if (at <= 0 || at === address.length - 1) return null;
-		const local = address.slice(0, at);
-		const suffixStart = Math.max(local.lastIndexOf('.'), local.lastIndexOf('_'), local.lastIndexOf('-'), local.lastIndexOf('+'));
-		return { localPrefix: suffixStart > 0 ? local.slice(0, suffixStart) : local, localSuffix: suffixStart > 0 ? local.slice(suffixStart) : '', domain: address.slice(at + 1) };
-	}
-	function localSegments(prefix: string): string[] { return prefix.split(/[._+\-]+/).filter(Boolean); }
-	function width(text: string, style: CSSStyleDeclaration): number {
-		if (!textContext && typeof document !== 'undefined') textContext = document.createElement('canvas').getContext('2d');
-		if (!textContext) return text.length * 8;
-		textContext.font = style.font || `${style.fontSize} ${style.fontFamily}`;
-		const letterSpacing = Number.parseFloat(style.letterSpacing) || 0;
-		return textContext.measureText(text).width + Math.max(0, text.length - 1) * letterSpacing;
-	}
-	function clippedPrefix(prefix: string, available: number, style: CSSStyleDeclaration): string {
-		if (width(prefix, style) <= available) return prefix;
-		const chars = [...prefix];
-		let low = 0; let high = chars.length;
-		while (low < high) {
-			const middle = Math.ceil((low + high) / 2);
-			if (width(`${chars.slice(0, middle).join('')}…`, style) <= available) low = middle;
-			else high = middle - 1;
-		}
-		return `${chars.slice(0, low).join('').replace(/[._+\-]+$/, '')}…`;
 	}
 	function displayKey(prefix: string, suffix: string, domain: string): string {
 		return `${prefix}${prefix.includes('…') && /^[._+\-]/.test(suffix) ? suffix.slice(1) : suffix}@${domain}`;

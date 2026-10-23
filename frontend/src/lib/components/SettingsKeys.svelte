@@ -19,7 +19,8 @@
 		type ServerKeyRow,
 	} from '$lib/stores/keys';
 	import { requestProviderCard, requestServerCard, settingsAnchor, settingsNavigation } from '$lib/stores/settingsNavigation';
-	import { connectedAppStateLine, loadConnectedAppsList, loadMailHostAccount, mailHostStateLine } from '$lib/api/connectedApps';
+	import { connectedAppStateLine, loadConnectedAppsList, loadMailHostAccount } from '$lib/api/connectedApps';
+	import { mailHostStateLine } from '$lib/api/mailHostAccounts';
 	import { ms } from '$lib/popoverMotion';
 
 	type Action = 'set' | 'clear' | 'remove';

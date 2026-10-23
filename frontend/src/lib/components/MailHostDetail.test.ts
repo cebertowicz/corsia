@@ -1,12 +1,12 @@
 import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import MailHostDetail from './MailHostDetail.svelte';
-import { retryMailHost, saveMailHostServers } from '$lib/api/connectedApps';
+import { retryMailHost, saveMailHostServers } from '$lib/api/mailHostAccounts';
 import { KeyWriteError } from '$lib/stores/keys';
 import type { ConnectedAccount, MailHostDetail as Detail } from '$lib/api/connectedApps';
 
-vi.mock('$lib/api/connectedApps', async (importOriginal) => ({
-	...(await importOriginal<typeof import('$lib/api/connectedApps')>()),
+vi.mock('$lib/api/mailHostAccounts', async (importOriginal) => ({
+	...(await importOriginal<typeof import('$lib/api/mailHostAccounts')>()),
 	retryMailHost: vi.fn(async () => {}),
 	saveMailHostServers: vi.fn(async () => {}),
 }));
