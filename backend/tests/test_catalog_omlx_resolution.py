@@ -343,4 +343,4 @@ def test_discovery_applies_medium_only_to_corsia_managed_omlx(
     conn.close()
     shape = json.loads(row[0])["reasoning_shape"]
     assert shape["default"] == ("medium" if managed else "low")
-    assert ("applies_default" in shape) is managed
+    assert ("applies_default_when_unset" in shape) is managed

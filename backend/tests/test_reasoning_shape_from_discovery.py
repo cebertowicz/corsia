@@ -218,18 +218,34 @@ def test_managed_omlx_defaults_an_unset_effort_to_medium(monkeypatch):
             "reasoning_efforts": ["low", "medium", "xhigh"],
             "reasoning_effort_default": "low",
         },
-        applies_default=True,
+        default_effort_when_unset="medium",
     )
 
     assert shape == {
         "type": "effort_levels",
         "values": ["low", "medium", "xhigh"],
         "default": "medium",
-        "applies_default": True,
+        "applies_default_when_unset": True,
     }
     monkeypatch.setattr(rc, "reasoning_config_for_model", lambda _: shape)
     assert rc.effective_reasoning_effort(None, "managed-qwen") == "medium"
     assert rc.effective_reasoning_effort("low", "managed-qwen") == "low"
+
+
+def test_managed_omlx_never_applies_medium_when_the_model_does_not_support_it():
+    shape = reasoning_shape_from_discovery(
+        {
+            "reasoning_efforts": ["low", "xhigh"],
+            "reasoning_effort_default": "low",
+        },
+        default_effort_when_unset="medium",
+    )
+
+    assert shape == {
+        "type": "effort_levels",
+        "values": ["low", "xhigh"],
+        "default": "low",
+    }
 
 
 def test_personal_omlx_keeps_an_unset_effort_unset(monkeypatch):
@@ -258,8 +274,8 @@ def test_managed_omlx_configured_effort_wins_over_medium_default():
             "reasoning_effort_default": "low",
             "configured_reasoning_effort": "xhigh",
         },
-        applies_default=True,
+        default_effort_when_unset="medium",
     )
 
     assert shape["default"] == "xhigh"
-    assert shape["applies_default"] is True
+    assert shape["applies_default_when_unset"] is True

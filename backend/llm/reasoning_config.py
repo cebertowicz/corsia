@@ -23,7 +23,7 @@ from typing import Any
 
 
 def reasoning_shape_from_discovery(
-    model: dict[str, Any], *, applies_default: bool = False,
+    model: dict[str, Any], *, default_effort_when_unset: str | None = None,
 ) -> dict[str, Any] | None:
     """Build a reasoning descriptor from what an oMLX server reported.
 
@@ -52,8 +52,8 @@ def reasoning_shape_from_discovery(
         configured = model.get("configured_reasoning_effort")
         declared = model.get("reasoning_effort_default")
         default = configured if configured in levels else None
-        if default is None and applies_default and "medium" in levels:
-            default = "medium"
+        if default is None and default_effort_when_unset in levels:
+            default = default_effort_when_unset
         if default is None:
             default = declared if declared in levels else levels[0]
         shape: dict[str, Any] = {
@@ -61,8 +61,8 @@ def reasoning_shape_from_discovery(
             "values": levels,
             "default": default,
         }
-        if applies_default and "medium" in levels:
-            shape["applies_default"] = True
+        if default_effort_when_unset in levels:
+            shape["applies_default_when_unset"] = True
         return shape
 
     thinking_default = model.get("thinking_default")
@@ -146,9 +146,9 @@ def effective_reasoning_effort(raw: str | None, model: str) -> str | None:
       (an External model's published levels), None, so the provider's own
       default runs.
     """
-    config = reasoning_config_for_model(model)
     if raw is None:
-        if config and config.get("applies_default"):
+        config = reasoning_config_for_model(model)
+        if config and config.get("applies_default_when_unset"):
             values = [str(v) for v in config.get("values") or []]
             default = config.get("default")
             return str(default) if default in values else None
@@ -156,6 +156,7 @@ def effective_reasoning_effort(raw: str | None, model: str) -> str | None:
     effort = str(raw).strip().lower()
     if effort in ("", "auto", "none"):
         return effort or None
+    config = reasoning_config_for_model(model)
     if config is None or config.get("type") != "effort_levels":
         return effort
     values = [str(v) for v in config.get("values") or []]
