@@ -50,7 +50,7 @@ def _record_existing_starts(conn, schema: dict[str, set[str]]) -> dict[str, str]
 
 def _record_legacy_marks(conn, starts: dict[str, str]) -> None:
     """Keep only historical marks that describe this installation's own data."""
-    rows = []
+    rows: list[tuple[str, str, str | None, str]] = []
     if (outcomes_start := starts.get("outcomes")) and outcomes_start < "2026-08-31":
         rows.append(("2026-08-31", "world", None, "plan nodes got about 5 times smaller"))
     if (tokens_start := starts.get("tokens")) and tokens_start < "2026-09-07":
