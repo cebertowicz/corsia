@@ -12,7 +12,7 @@ sha256="dd96f92d77aebf142e0ee33f38754b6dc6c6f7a1245129b715f7deea488e3d78"
 bin_dir="${RUNNER_TEMP:?RUNNER_TEMP is unset}/safehouse-bin"
 
 mkdir -p "$bin_dir"
-curl --fail --silent --show-error --location --retry 3 \
+curl --fail --silent --show-error --location --retry 3 --retry-all-errors \
   "https://github.com/eugene1g/agent-safehouse/releases/download/v${version}/safehouse.sh" \
   --output "$bin_dir/safehouse"
 echo "${sha256}  $bin_dir/safehouse" | shasum -a 256 --check --status
