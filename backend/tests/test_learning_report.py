@@ -28,7 +28,7 @@ def _report(scope="workspace", day="2026-10-23", suffix="daily", wake=True):
         "items": {
             "corrections": {"person": _count(2)},
             "lessons": {name: _count() for name in (
-                "recorded", "confirmed", "consolidated", "repeated")},
+                "recorded", "in_use", "confirmed", "consolidated", "repeated")},
             "experiments": {name: _count() for name in ("started", "decided")},
             "wins": None,
         },

@@ -19,7 +19,9 @@ from core.corrections_recording import (
 )
 from core import workflow_verdict_evaluator
 from core.workflow_verdict_read import PLANNED_EVENT, REACHED_EVENT
+from core.lesson_report_receipts import read_offer_evidence
 from events.learning_report import deliver_learning_report_sync
+from plans import public as plans
 
 EARLY_FLOOR = 5
 HISTORY_DAYS = 28
@@ -84,6 +86,45 @@ def _correction_rows(
     ).fetchall()
 
 
+def _in_use(
+    db: sqlite3.Connection, scope: str, start: str, end: str,
+) -> dict[str, Any] | None:
+    """Count that day's recorded trial lessons with complete receipt-backed evidence.
+
+    The receipt reader owns manifest parsing and offer membership; the public Plans
+    read owns review-key projection. No job-local offer or key rule is duplicated.
+    """
+    owners = db.execute(
+        "SELECT id,user_id FROM threads WHERE project_id=? ORDER BY user_id,id", (scope,),
+    ).fetchall()
+    by_user: dict[str, list[str]] = defaultdict(list)
+    for owner in owners:
+        by_user[str(owner["user_id"])].append(str(owner["id"]))
+    if not by_user:
+        return None
+    offered: set[tuple[str, str]] = set()
+    calls = 0
+    for user_id, thread_ids in by_user.items():
+        receipt = read_offer_evidence(
+            db, user_id=user_id, thread_ids=tuple(thread_ids), from_ts=start, to_ts=end,
+        )
+        period = receipt["period"]
+        calls += period["calls"]
+        if period["unavailable_calls"]:
+            return None
+        offered.update(period["offers"].counts)
+    if calls == 0:
+        return None
+    history = plans.lesson_review_history(db, owner_thread_ids=tuple(owner["id"] for owner in owners))
+    matching = [
+        row for row in history
+        if start <= str(row["opened_at"]) < end and row["kind"] == "lesson"
+        and (row["subject_id"], row["subject_hash"]) in offered
+    ]
+    refs = [str(row["key"]) for row in matching]
+    return {**_count(refs), "count": len({str(row["subject_id"]) for row in matching})}
+
+
 def _lessons(
     db: sqlite3.Connection, scope: str, report_date: str,
 ) -> tuple[dict[str, dict[str, Any] | None], set[str]]:
@@ -106,6 +147,7 @@ def _lessons(
     distinct = len({ref.split(":")[1] for ref in refs})
     return ({
         "recorded": {**_count(refs), "count": distinct},
+        "in_use": _in_use(db, scope, start, end),
         "confirmed": None,
         "consolidated": None,
         "repeated": None,
