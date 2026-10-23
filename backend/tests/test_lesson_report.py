@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-import json
+from pathlib import Path
 
 import pytest
 
@@ -72,15 +72,12 @@ def test_foreign_owner_is_refused_before_any_history_adapter_call(db, monkeypatc
 def test_missing_owner_history_is_not_disclosed_but_authorized_exact_offer_survives(db):
     review(db, owner="other", subject="orphan")
     db.execute("DELETE FROM threads WHERE id='other'")
-    entries = [{"source_id": "dynamic:skills-index", "lessons": [{"id": "orphan", "behavioral_sha256": "a" * 64}]}]
-    db.execute(
-        "INSERT INTO context_manifests(id,harness,entries_json,entry_count,created_at) VALUES('receipt','native',?,1,'t')",
-        (json.dumps(entries),),
-    )
-    db.execute(
-        "INSERT INTO llm_usage(id,thread_id,model,created_at,context_manifest_id) "
-        "VALUES('call','owner','test/model','2026-09-21','receipt')",
-    )
+    from core.lesson_delivery import TrialDelivery, _insert
+
+    _insert(db, thread_id="owner", node_id="task", trial=TrialDelivery(
+        "orphan", "a" * 64, Path("/trial/SKILL.md"), b"trial", "new", "- trial",
+    ), variant="with", checkpoint_generation_id=None)
+    db.execute("UPDATE guidance_loads SET created_at='2026-09-21'")
     result = report(db, scope=replace(SCOPE, thread_ids=("owner", "other")))
     assert result["coverage"]["missing_owner_scopes"] == ["other"]
     [row] = result["rows"]
@@ -96,7 +93,7 @@ def test_due_work_is_visible_when_selected_period_has_no_calls(db):
     current = source()
     result = report(db, sources=[current])
     assert result["rows"][0]["due"] is True
-    assert result["rows"][0]["indexed"]["calls"] == 0
+    assert result["rows"][0]["indexed"]["receipts"] == 0
     assert result["rows"][0]["indexed"]["efficacy"] is None
 
 

@@ -2,10 +2,13 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
-from core.lesson_report_boundaries import identity_for_raw, read_boundaries
+from core.lesson_delivery import TrialDelivery, _insert
+from core.lesson_report_boundaries import identity_for_raw
+from core.lesson_report_receipts import read_offers
 from core.lesson_report_reads import read_bodies
 from core.tool_result_delivery import persist_tool_execution_result
 from infra.queries import insert_message
@@ -151,21 +154,22 @@ def test_foreign_and_bare_orphan_paths_do_not_disclose_reads(db):
     assert projection["reads"] == [] and projection["unavailable_reads"] == {}
 
 
-def test_installed_boundary_tuple_keeps_exact_orphan_version_without_prompt_disclosure(db):
-    current = source()
-    lesson = {"id": current["id"], "behavioral_sha256": current["version"], "raw_sha256": current["raw_sha256"],
-              "scope": "thread", "scope_id": "deleted-owner", "path": PATH, "name": "deciding"}
-    metadata = {"responsibility_map_snapshot": {"thread_id": "owner"},
-                "_corsia_installed_context_sources": [{"source_id": "dynamic:skills-index",
-                    "inclusion": "included", "metadata": {"lessons": [lesson]},
-                    "prompt_content": "private bytes"}]}
-    insert_message("owner", "user", "start", metadata, msg_id="boundary", db=db)
-    db.execute("INSERT INTO messages(id,thread_id,role,content,metadata,created_at) "
-               "VALUES('corrupt','owner','user','','invalid','t')")
-    [fact] = read_boundaries(db, user_id="user", thread_ids=("owner", "foreign", "orphan"))
-    assert fact["owner_id"] == "deleted-owner" and fact["offered"] is True
+def test_delivery_receipt_keeps_orphan_behavioral_raw_identity_without_prompt_data(db):
+    trial = TrialDelivery(
+        "orphan-lesson", "a" * 64, Path(PATH), b"private bytes",
+        "skills/deciding/SKILL.md", "Trial guidance.",
+    )
+    _insert(db, thread_id="owner", node_id="deleted-owner-task", trial=trial, variant="with",
+            checkpoint_generation_id=None)
+
+    [fact] = read_offers(
+        db, user_id="user", thread_ids=("owner", "foreign", "orphan"),
+        from_ts="2000-01-01", to_ts="2100-01-01",
+    )["offers"]
+
+    assert fact["offered"] is True and fact["path"] == PATH
     assert "private bytes" not in json.dumps(fact)
-    assert identity_for_raw([fact], digest=current["raw_sha256"], path=PATH) == {
-        "kind": "lesson", "id": current["id"], "version": current["version"],
+    assert identity_for_raw([fact], digest=fact["raw_sha256"], path=PATH) == {
+        "kind": "lesson", "id": "orphan-lesson", "version": "a" * 64,
     }
-    assert identity_for_raw([fact, fact | {"version": "other"}], digest=current["raw_sha256"], path=PATH) is None
+    assert identity_for_raw([fact, fact | {"version": "other"}], digest=fact["raw_sha256"], path=PATH) is None

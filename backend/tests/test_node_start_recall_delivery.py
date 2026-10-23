@@ -120,16 +120,20 @@ async def test_activating_a_task_adds_trial_lessons_as_a_sibling(recall_db, monk
 
 
 @pytest.mark.asyncio
-async def test_plan_activation_records_new_trial_before_returning_lessons(recall_db, monkeypatch, tmp_path):
-    """The real nested trial write remains inside the plan mutation transaction."""
+async def test_plan_activation_records_trial_and_daily_in_use(recall_db, monkeypatch, tmp_path):
+    """Real plan activation delivers a trial and the daily report counts its receipt."""
     from core.lesson_files import read_trial, render_trial, with_review_ref
     from core.lesson_trials import Trial
     from plans import lesson_reviews
-    from tests.project_ref_helpers import select_workspace
+    from tests.project_ref_helpers import project_ref, select_workspace, write_project_context
 
     thread_id = mk_session("trial-real-start")
     select_workspace(monkeypatch, tmp_path)
-    source = tmp_path / ".threads" / thread_id / "skills" / "carry-in" / "SKILL.md"
+    project = write_project_context(tmp_path, "trial")
+    recall_db.execute("INSERT INTO projects(id,name,path,created_at,updated_at) VALUES('trial-project','Trial',?,'t','t')",
+                      (project_ref("trial"),))
+    recall_db.execute("UPDATE threads SET project_id='trial-project' WHERE id=?", (thread_id,))
+    source = project / ".threads" / thread_id / "skills" / "carry-in" / "SKILL.md"
     source.parent.mkdir(parents=True)
     text = render_trial(
         lesson_id="e6a148b9-30dd-4b5a-b498-486282096733", owner=thread_id, name="carry-in",
@@ -173,6 +177,16 @@ async def test_plan_activation_records_new_trial_before_returning_lessons(recall
         "SELECT thread_id, node_id, variant FROM guidance_loads WHERE lesson_id='e6a148b9-30dd-4b5a-b498-486282096733'"
     ).fetchone()
     assert tuple(row) == (thread_id, result["node"]["id"], "with")
+
+    from datetime import datetime, timezone
+    from jobs.learning_report import build_report, report_date_for
+
+    # A task-start offer is reportable before any model usage has been written.
+    assert recall_db.execute("SELECT COUNT(*) FROM llm_usage").fetchone()[0] == 0
+    scope = recall_db.execute("SELECT project_id FROM threads WHERE id=?", (thread_id,)).fetchone()[0]
+    now = datetime.now(timezone.utc)
+    report = build_report(recall_db, scope=scope, report_date=report_date_for(now))["items"]["lessons"]["in_use"]
+    assert report == {"count": 1, "refs": [f"lesson:e6a148b9-30dd-4b5a-b498-486282096733:{trial.behavioral_sha256}"]}
 
 
 @pytest.mark.asyncio

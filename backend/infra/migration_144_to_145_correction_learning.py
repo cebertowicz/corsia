@@ -27,3 +27,8 @@ def migrate_144_to_145(conn: sqlite3.Connection) -> None:
         "CREATE INDEX IF NOT EXISTS idx_guidance_loads_lesson_node "
         "ON guidance_loads(lesson_id, lesson_behavioral_sha256, node_id) WHERE lesson_id IS NOT NULL"
     )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_guidance_loads_trial_thread_time "
+        "ON guidance_loads(thread_id, created_at, lesson_id, lesson_behavioral_sha256, id) "
+        "WHERE variant='with' AND lesson_id IS NOT NULL AND lesson_behavioral_sha256 IS NOT NULL"
+    )

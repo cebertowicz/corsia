@@ -91,7 +91,7 @@ def _in_use(
 ) -> dict[str, Any] | None:
     """Count that day's recorded trial lessons with complete receipt-backed evidence.
 
-    The receipt reader owns manifest parsing and offer membership; the public Plans
+    The receipt reader owns delivery evidence and offer membership; the public Plans
     read owns review-key projection. No job-local offer or key rule is duplicated.
     """
     owners = db.execute(
@@ -113,7 +113,7 @@ def _in_use(
         if period["unavailable_calls"]:
             return None
         offered.update(period["offers"].counts)
-    if calls == 0:
+    if calls == 0 and not offered:
         return None
     history = plans.lesson_review_history(db, owner_thread_ids=tuple(owner["id"] for owner in owners))
     matching = [

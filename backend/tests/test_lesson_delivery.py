@@ -103,7 +103,7 @@ def test_trial_delivery_migration_adds_per_lesson_receipt_columns():
     connection.execute("CREATE TABLE outcome_events (subject_key TEXT, event_name TEXT)")
     connection.execute(
         """CREATE TABLE guidance_loads (
-            id TEXT PRIMARY KEY, path TEXT, raw_sha256 TEXT, git_blob_oid TEXT,
+            id TEXT PRIMARY KEY, thread_id TEXT, path TEXT, raw_sha256 TEXT, git_blob_oid TEXT,
             delivered_sha256 TEXT, byte_count INTEGER, partial INTEGER, created_at TEXT
         )"""
     )
@@ -126,6 +126,20 @@ def test_receipt_reads_use_the_lesson_index(db, build):
         row["detail"] for row in db.execute(f"EXPLAIN QUERY PLAN {RECEIPTS_SQL}", ('[["l","s"]]', "n", "t"))
     )
     assert "USING INDEX idx_guidance_loads_lesson_node" in plan
+
+
+@pytest.mark.parametrize("build", ["schema", "migration"])
+def test_offer_reads_seek_the_thread_time_index(db, build):
+    from core.lesson_report_offers import PERIOD_SQL
+    from infra.migration_144_to_145_correction_learning import migrate_144_to_145
+
+    if build == "migration":
+        db.execute("DROP INDEX idx_guidance_loads_trial_thread_time")
+        migrate_144_to_145(db)
+    plan = " ".join(row["detail"] for row in db.execute(
+        "EXPLAIN QUERY PLAN " + PERIOD_SQL, ('["thread"]', "user", "2026-01-01", "2027-01-01"),
+    ))
+    assert "USING INDEX idx_guidance_loads_trial_thread_time" in plan
 
 
 def test_skill_and_new_targets_get_an_index_line_and_in_context_targets_get_the_body(
