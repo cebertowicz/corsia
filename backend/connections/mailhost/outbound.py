@@ -7,57 +7,23 @@ owns only protocol work, so every mail host follows that one gate.
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from email.message import EmailMessage
 from email.utils import make_msgid
-
-from icalendar import Calendar, Event
+from uuid import uuid4
 
 from connections.calendar_document import Invite
-from connections.mailhost import imap, read, smtp
+from connections.mailhost import caldav, folders, imap, invites, read, smtp
 from connections.mailhost.errors import MailHostError
 from infra.db_async import run_in_db
 
 log = logging.getLogger(__name__)
 
-DRAFTS = "Drafts"
-SENT = "Sent"
 
-
-async def save_draft(account_id: str, message: EmailMessage) -> None:
-    """Append the exact reviewed message to the host's Drafts folder."""
-    endpoints, username, password = await run_in_db(read.credentials, account_id)
-
-    _from_account(message, endpoints.username)
-
-    def call() -> None:
-        with imap.account_lock(account_id):
-            imap.append(endpoints, username, password, DRAFTS, message.as_bytes())
-
-    await read._guarded(account_id, endpoints, call)
-
-
-async def send(account_id: str, message: EmailMessage) -> str:
-    """Send one approved message and append a Sent copy when SMTP does not do so itself."""
-    endpoints, username, password = await run_in_db(read.credentials, account_id)
-    _from_account(message, endpoints.username)
-    if not message.get("Message-ID"):
-        message["Message-ID"] = make_msgid()
-
-    def deliver() -> None:
-        smtp.send_message(endpoints, endpoints.username, password, message)
-
-    def keep_copy() -> None:
-        with imap.account_lock(account_id):
-            imap.append(endpoints, username, password, SENT, message.as_bytes())
-
-    await read._guarded(account_id, endpoints, deliver)
-    if not endpoints.smtp_saves_sent:
-        try:
-            await read._guarded(account_id, endpoints, keep_copy)
-        except MailHostError:
-            # The host accepted the message: a missing Sent copy must not read as a failed send.
-            log.warning("mail host delivered a message but its Sent copy was not saved")
-    return str(message["Message-ID"])
+@dataclass(frozen=True)
+class InviteSent:
+    uid: str
+    on_calendar: bool
 
 
 def _from_account(message: EmailMessage, address: str) -> None:
@@ -66,31 +32,55 @@ def _from_account(message: EmailMessage, address: str) -> None:
     message["From"] = address
 
 
-def invite_message(sender: str, invite: Invite) -> EmailMessage:
-    """A standards-shaped iCalendar email for hosts without server-side scheduling."""
-    calendar = Calendar()
-    calendar.add("prodid", "-//CORSIA//mail-host invite//EN")
-    calendar.add("version", "2.0")
-    calendar.add("method", "REQUEST")
-    event = Event()
-    event.add("uid", make_msgid().strip("<>"))
-    event.add("summary", invite.title)
-    event.add("dtstart", invite.start_at)
-    event.add("dtend", invite.end_at)
-    event.add("description", invite.description)
-    event.add("organizer", f"mailto:{sender}")
-    for attendee in invite.attendees:
-        event.add("attendee", f"mailto:{attendee}")
-    calendar.add_component(event)
-    message = EmailMessage()
-    message["From"] = sender
-    message["To"] = ", ".join(invite.attendees)
-    message["Subject"] = f"Invitation: {invite.title}"
-    message.set_content(invite.description or f"Invitation: {invite.title}")
-    message.add_alternative(calendar.to_ical().decode("utf-8"), subtype="calendar", params={"method": "REQUEST"})
-    return message
+async def _keep_copy(account_id: str, kind: str, message: EmailMessage) -> bool:
+    """Append a copy to the host's Drafts or Sent folder; False (logged) when the host shows no such folder."""
+    endpoints, username, password = await run_in_db(read.credentials, account_id)
+
+    def call() -> bool:
+        with imap.account_lock(account_id):
+            return imap.append(endpoints, username, password, kind, message.as_bytes())
+
+    saved = await read._guarded(account_id, endpoints, call)
+    if not saved:
+        log.warning("mail host shows no %s folder; the copy was not saved", kind)
+    return bool(saved)
 
 
-async def send_invite(account_id: str, sender: str, invite: Invite) -> str:
-    """Fallback for hosts with no verified RFC 6638 scheduling support: send the invite by SMTP."""
-    return await send(account_id, invite_message(sender, invite))
+async def save_draft(account_id: str, message: EmailMessage) -> None:
+    """Append the exact reviewed message to the host's Drafts folder."""
+    endpoints = (await run_in_db(read.credentials, account_id))[0]
+    _from_account(message, endpoints.username)
+    await _keep_copy(account_id, folders.DRAFTS, message)
+
+
+async def send(account_id: str, message: EmailMessage) -> str:
+    """Send one approved message and append a Sent copy when SMTP does not do so itself."""
+    endpoints, _username, password = await run_in_db(read.credentials, account_id)
+    _from_account(message, endpoints.username)
+    if not message.get("Message-ID"):
+        message["Message-ID"] = make_msgid()
+
+    def deliver() -> None:
+        smtp.send_message(endpoints, endpoints.username, password, message)
+
+    await read._guarded(account_id, endpoints, deliver)
+    if not endpoints.smtp_saves_sent:
+        try:
+            await _keep_copy(account_id, folders.SENT, message)
+        except MailHostError:
+            # The host accepted the message: a missing Sent copy must not read as a failed send.
+            log.warning("mail host delivered a message but its Sent copy was not saved")
+    return str(message["Message-ID"])
+
+
+async def send_invite(account_id: str, sender: str, invite: Invite) -> InviteSent:
+    """Put the event on the organizer's calendar, then email the request.
+
+    Hosts with no verified RFC 6638 scheduling get the invitation by SMTP.  A calendar that will not take the
+    event never stops the invitation; the result says so.
+    """
+    endpoints, _username, password = await run_in_db(read.credentials, account_id)
+    uid = str(uuid4())
+    stored = await caldav.put_event(endpoints, password, uid, invites.stored_event(sender, invite, uid))
+    await send(account_id, invites.invite_message(sender, invite, uid))
+    return InviteSent(uid, stored)

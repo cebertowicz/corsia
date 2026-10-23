@@ -18,7 +18,7 @@ from typing import Any
 from connections.google import client as google_client
 from connections.google.accounts import ACCOUNT_PARAM, thread_key
 from connections.mail_accounts import resolve_for_thread
-from connections.mailhost import outbound as mailhost_outbound
+from connections.mailhost import outbound as mailhost_outbound, reply as mailhost_reply
 from connections.mailhost.errors import PASSWORD_REFUSED, MailHostError
 from connections.google.client import GoogleError, GoogleRequestFailed
 from connections.mail.email_document import (
@@ -30,6 +30,7 @@ from connections.mail.email_document import (
     build_message,
     compose_document,
     parse_document,
+    reply_subject,
     text_arg,
 )
 from connections.google.email_gmail import GMAIL, fetch_signature, kept_reply_label, reply_target
@@ -93,8 +94,10 @@ async def _google_draft_metadata(account_id: str, existing: dict | None, reply_i
 
 async def _mailhost_draft_metadata(account_id: str, existing: dict | None, reply_id: object) -> tuple[dict, str | None, str]:
     if reply_id:
-        raise DraftRefused("Replies on this mail host aren't available yet; save a new email instead.")
-    return draft_target(existing), None, ""
+        target, label = await mailhost_reply.reply_target(account_id, str(reply_id))
+    else:
+        target, label = draft_target(existing), await mailhost_reply.kept_reply_label(account_id, existing)
+    return target, label, ""
 
 
 _DRAFT_METADATA = {"google": _google_draft_metadata, "mailhost": _mailhost_draft_metadata}
@@ -149,8 +152,8 @@ class EmailDraftTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "Save an email as a draft document the person can read, from the Gmail account named "
-            "by account_id, with that account's signature appended. Nothing is sent. Returns "
+            "Save an email as a draft document the person can read, from the account named "
+            "by account_id, with that account's signature appended (Gmail). Nothing is sent. Returns "
             "draft_id and revision, which email_send needs. It is sent from the same account. "
             "Pass draft_id to replace an open draft; every field is required again, so "
             "send the whole message. Pass reply_to_message_id, a message id from the same account, "
@@ -164,14 +167,14 @@ class EmailDraftTool(Tool):
             "properties": {
                 "draft_id": {"type": "string", "description": "An open draft to replace; omit for a new one."},
                 "to": {"type": "array", "items": {"type": "string"},
-                       "description": "Plain recipient addresses; at least one."},
+                       "description": "Plain recipient addresses; at least one, unless replying on a mail host."},
                 "cc": {"type": "array", "items": {"type": "string"}, "description": "Plain cc addresses."},
                 "subject": {"type": "string", "description": "One line."},
                 "body": {"type": "string", "description": "The message text, without a signature."},
-                "reply_to_message_id": {"type": "string", "description": "The Gmail message id (not the thread id) to reply under."},
+                "reply_to_message_id": {"type": "string", "description": "The message id (not the thread id), from email_search or email_read on this account, to reply under. On a mail host the recipient defaults to the message's Reply-To, else its sender, and the subject gets Re: when it lacks it."},
                 "account_id": ACCOUNT_PARAM,
             },
-            "required": ["to", "subject", "body"],
+            "required": ["subject", "body"],
         }
 
     async def execute(self, **kwargs: Any) -> str:
@@ -197,7 +200,7 @@ class EmailDraftTool(Tool):
 
         account_id, address = str(account["id"]), str(account["address"])
         to = addresses(kwargs.get("to"))
-        if not to:
+        if not to and not kwargs.get("reply_to_message_id"):
             raise DraftRefused(NEEDS_RECIPIENT)
         cc = addresses(kwargs.get("cc"))
         subject = text_arg(kwargs.get("subject"), NEEDS_SUBJECT, one_line=True)
@@ -210,6 +213,11 @@ class EmailDraftTool(Tool):
         if draft_metadata is None:
             raise DraftRefused("This account can't save email drafts.")
         target, reply_label, signature = await draft_metadata(account_id, existing, kwargs.get("reply_to_message_id"))
+        to = to or target.get("reply_addresses") or []
+        if not to:
+            raise DraftRefused(NEEDS_RECIPIENT)
+        if target.get("prefix_reply_subject"):
+            subject = reply_subject(subject)
         target = {**target, "account_id": account_id, "account": address}
         text = compose_document(address, to, cc, subject, body, signature, reply_label)
         try:

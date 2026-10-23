@@ -30,7 +30,8 @@ pytestmark = pytest.mark.asyncio
 
 
 @pytest.fixture
-async def host(conductor, servers, tmp_path, monkeypatch):
+def make_host(conductor, servers, tmp_path, monkeypatch):
+    """Build a connected mail-host account on fake servers; ``imap`` / ``caldav`` tune what they answer."""
     from registry import service
     from tools import sandbox_config
 
@@ -48,10 +49,18 @@ async def host(conductor, servers, tmp_path, monkeypatch):
 
     monkeypatch.setattr(google_email, "check_action", approved)
     monkeypatch.setattr(google_calendar, "check_action", approved)
-    built = servers()
-    account_id = add_account(built, conductor)["account_id"]
-    assert await run_check(account_id) in store.CONNECTED_STATUSES
-    return SimpleNamespace(built=built, account_id=account_id, thread=conductor, workspace=workspace)
+    async def build(**tuning) -> SimpleNamespace:
+        built = servers(**tuning)
+        account_id = add_account(built, conductor)["account_id"]
+        assert await run_check(account_id) in store.CONNECTED_STATUSES
+        return SimpleNamespace(built=built, account_id=account_id, thread=conductor, workspace=workspace)
+
+    return build
+
+
+@pytest.fixture
+async def host(make_host):
+    return await make_host()
 
 
 def _row(draft_id: str) -> dict:
@@ -137,15 +146,6 @@ async def test_a_send_with_an_unknown_outcome_stays_claimed_and_is_not_repeated(
     assert out.startswith("Error: The mail host didn't confirm the send")
     assert _row(saved["draft_id"])["state"] == "sending"
     assert (await _send(host, saved)).startswith("Error")
-
-
-async def test_a_reply_is_refused_on_a_mail_host_rather_than_sent_unthreaded(host) -> None:
-    out = await EmailDraftTool().execute(
-        _thread_id=host.thread, account_id=host.account_id, to=["pat@example.com"], subject="Re: Lunch", body="Yes",
-        reply_to_message_id="1",
-    )
-    assert out.startswith("Error") and "Replies on this mail host" in out
-    assert host.built.imap.appended == []
 
 
 async def test_an_invite_is_sent_as_an_icalendar_request_by_smtp(host) -> None:

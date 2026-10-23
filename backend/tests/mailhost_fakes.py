@@ -158,11 +158,14 @@ class _LineServer:
 
 class FakeImap(_LineServer):
     def __init__(self, authority: Authority, *, user: str, password: str, messages: dict[int, bytes] | None = None,
-                 implicit_tls: bool = True, offer_starttls: bool = False, imap_off: bool = False, validity: int = 7) -> None:
-        self.user, self.password, self.messages = user, password, messages or {}
+                 implicit_tls: bool = True, offer_starttls: bool = False, imap_off: bool = False, validity: int = 7,
+                 folders: dict[str, str] | None = None) -> None:
+        self.user, self.password, self.messages = user, password, dict(messages or {})
         self.offer_starttls, self.imap_off, self.validity = offer_starttls, imap_off, validity
         self.searches: list[str] = []
         self.appended: list[tuple[str, bytes]] = []
+        #: Folder name -> its RFC 6154 flags, as LIST shows them.
+        self.folders = {"INBOX": "", "Drafts": "\\Drafts", "Sent": "\\Sent"} if folders is None else folders
         super().__init__(authority, implicit_tls=implicit_tls)
 
     def session(self, conn: _Connection) -> None:
@@ -189,13 +192,19 @@ class FakeImap(_LineServer):
                 conn.send(f"* {len(self.messages)} EXISTS", f"* OK [UIDVALIDITY {self.validity}] ok", f"{tag} OK [READ-ONLY] done")
             elif verb == "UID":
                 self._uid(conn, tag, args)
+            elif verb == "LIST":
+                conn.send(*(f'* LIST ({flags}) "/" "{name}"' for name, flags in self.folders.items()), f"{tag} OK done")
             elif verb == "APPEND":
                 folder, _, size = args.rpartition(" ")
                 conn.send("+ ready")
                 raw = conn.read_exact(int(size.strip("{}+")))
                 conn.readline()
-                self.appended.append((shlex.split(folder)[0], raw))
-                conn.send(f"{tag} OK appended")
+                name = shlex.split(folder)[0]
+                if name in self.folders:
+                    self.appended.append((name, raw))
+                    conn.send(f"{tag} OK appended")
+                else:
+                    conn.send(f"{tag} NO [TRYCREATE] no such folder")
             elif verb == "LOGOUT":
                 conn.send("* BYE", f"{tag} OK bye")
                 return
@@ -274,6 +283,9 @@ class FakeCalDav:
                  calendars: tuple[str, ...] = ("/calendars/home/work/",), principal_href: str = "/principal/",
                  supports: str = "VEVENT") -> None:
         self.requests: list[tuple[str, str, str]] = []
+        #: Every PUT: ``(path, body)``; ``put_status`` is what the host answers.
+        self.puts: list[tuple[str, str]] = []
+        self.put_status = 201
         outer = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -294,6 +306,15 @@ class FakeCalDav:
                 self._send(207, outer.body(self.command, self.path))
 
             do_PROPFIND = do_REPORT = _answer  # noqa: N815
+
+            def do_PUT(self) -> None:  # noqa: N802
+                body = self.rfile.read(int(self.headers.get("Content-Length") or 0)).decode()
+                given = self.headers.get("Authorization", "")
+                login = base64.b64decode(given.split(" ", 1)[1]).decode() if given.startswith("Basic ") else ""
+                if login != f"{user}:{password}":
+                    return self._send(401, "")
+                outer.puts.append((self.path, body))
+                self._send(outer.put_status, "")
 
             def _send(self, status: int, body: str) -> None:
                 data = body.encode()

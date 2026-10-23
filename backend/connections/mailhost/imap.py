@@ -16,7 +16,7 @@ import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 
-from connections.mailhost import tls
+from connections.mailhost import folders, tls
 from connections.mailhost.endpoints import Endpoints
 from connections.mailhost.errors import IMAP_OFF, PASSWORD_REFUSED, SERVER_UNREACHABLE, MailHostError
 
@@ -145,12 +145,35 @@ def search(ep: Endpoints, username: str, password: str, criteria: list[str], lim
         return validity, [(int(uid), by_uid[int(uid)]) for uid in uids if int(uid) in by_uid]
 
 
-def append(ep: Endpoints, username: str, password: str, mailbox: str, raw: bytes) -> None:
-    """Save a reviewed RFC 822 message in a host folder without exposing server text."""
+def _quoted(folder: str) -> str:
+    """imaplib sends an APPEND mailbox name as given, so a name with a space needs its quotes."""
+    return '"' + folder.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def append(ep: Endpoints, username: str, password: str, kind: str, raw: bytes) -> bool:
+    """Save a reviewed RFC 822 message in the host's Drafts or Sent folder; False when the host shows no such folder."""
     with session(ep, username, password) as conn:
-        status, _ = conn.append(mailbox, None, None, raw)
+        key = (f"{ep.imap.host}:{ep.imap_port()}", username)
+        folder = folders.resolve(conn, key, kind)
+        if folder is None:
+            return False
+        status, _ = conn.append(_quoted(folder), None, None, raw)
+        if status != "OK":
+            folders.forget(key)
+            raise _unreachable(ep)
+        return True
+
+
+def reply_headers(ep: Endpoints, username: str, password: str, validity: int, uid: int) -> bytes | None:
+    """The threading and address headers of one inbox message, or None when it is gone or its mailbox was rebuilt."""
+    fields = "(UID BODY.PEEK[HEADER.FIELDS (MESSAGE-ID REFERENCES REPLY-TO FROM SUBJECT)])"
+    with session(ep, username, password) as conn:
+        if _select(conn, ep) != validity:
+            return None
+        status, data = conn.uid("FETCH", str(uid), fields)
         if status != "OK":
             raise _unreachable(ep)
+        return dict(_items(data)).get(uid)
 
 
 def inbox_cursor(ep: Endpoints, username: str, password: str) -> tuple[int, int]:

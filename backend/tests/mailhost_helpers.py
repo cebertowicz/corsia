@@ -12,7 +12,7 @@ from types import SimpleNamespace
 import pytest
 from mailhost_fakes import SAMPLE_EVENTS, FakeCalDav, FakeImap, FakeSmtp, make_authority, message
 
-from connections.mailhost import account, check, store, tls
+from connections.mailhost import account, check, folders, store, tls
 from infra import key_store
 from infra.corsia_agent import set_corsia_agent
 from infra.database import get_db
@@ -35,6 +35,7 @@ def env(isolated_db, tmp_path, monkeypatch, authority):
     root.mkdir()
     monkeypatch.setattr("infra.config.STATE_ROOT", root)
     monkeypatch.setattr(tls, "context", authority.client_context)
+    folders._cache.clear()
     return authority
 
 

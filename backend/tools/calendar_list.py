@@ -209,11 +209,10 @@ def _refused_before_send(exc: Exception) -> bool:
     return isinstance(exc, MailHostError) and exc.cause == PASSWORD_REFUSED
 
 
-def _mailhost_invite_body(invite):
-    return invite
-
-
-_INVITE_BODIES = {"google": _google_invite_body, "mailhost": _mailhost_invite_body}
+# Google takes a request body; a mail host is handed the validated invite itself.
+_INVITE_BODIES = {"google": _google_invite_body}
+_INVITE_PROVIDERS = ("google", "mailhost")
+NOT_ON_CALENDAR = "The invitation was emailed, but the event isn't on the person's calendar."
 
 
 class CalendarSendInviteTool(Tool):
@@ -273,10 +272,10 @@ class CalendarSendInviteTool(Tool):
             return f"Error: Not sent: {exc}"
         if str(account["address"]).lower() != draft.address.lower():
             return f"Error: {BAD_DOCUMENT}"
-        body_builder = _INVITE_BODIES.get(str(account["provider"]))
-        if body_builder is None:
+        provider = str(account["provider"])
+        if provider not in _INVITE_PROVIDERS:
             return "Error: Not sent: this account can't send invitations."
-        return account, body_builder(draft.invite)
+        return account, _INVITE_BODIES.get(provider, lambda invite: invite)(draft.invite)
 
     async def _deliver(self, draft_id: str, account: dict, body: Any) -> str:
         deliver = {"google": self._deliver_google, "mailhost": self._deliver_mailhost}.get(str(account["provider"]))
@@ -306,8 +305,9 @@ class CalendarSendInviteTool(Tool):
             return None
         return await deliver_claimed(
             draft_id, acquire=no_token, provider_errors=(GoogleError,),
-            send=lambda _token: mailhost_outbound.send_invite(account_id, address, body), result_id=lambda result: result,
-            success=lambda _result, event_id: json.dumps({"event_id": event_id}), sign_in_error=str,
+            send=lambda _token: mailhost_outbound.send_invite(account_id, address, body), result_id=lambda sent: sent.uid,
+            success=lambda sent, event_id: json.dumps(
+                {"event_id": event_id, **({} if sent.on_calendar else {"note": NOT_ON_CALENDAR})}), sign_in_error=str,
             request_error=str, never_sent=_refused_before_send, still_sending=STILL_SENDING,
             claim_error="Not sent: couldn't check the invite draft. Try again.",
             unconfirmed="The mail host didn't confirm the invite send, so it may have gone out. Check the person's calendar first.",
