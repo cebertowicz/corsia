@@ -53,7 +53,10 @@ from tests.plan_writer_authorizer import raw_plan_seed
 KEY = "selected_description"
 #: Serialized-byte ceiling of one carried description, as the tool emits it.
 BRIEF_CAP = 16384
-CRITERIA = "Every item is acknowledged, resolved, or replied to."
+CRITERIA = (
+    "Every item is acknowledged, resolved, or replied to, and every change made for one is also made "
+    "wherever this document says the same thing in other words."
+)
 SMALL = "Comment c-1\nQuote: quoted source\nFeedback: Please check this point."
 #: Over the ceiling on its own, so the cut is the description's, not the block's.
 LARGE = "Feedback: " + "check this point against the source. " * 600

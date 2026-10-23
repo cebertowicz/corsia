@@ -7,6 +7,7 @@ the later entry describes the current behavior.
 
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here._
 
+- Posting a document comment makes it appear right away and clears the box; the agent still gets it.
 - Setup keeps CORSIA’s own work folder as the default offer after you choose another folder.
 - Quitting the Mac app now also stops the local model server CORSIA started, so it no longer holds memory after you quit.
 - If you quit partway through first-run setup, the next launch starts setup fresh; downloaded models are kept.
@@ -30,7 +31,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - Connections from paired devices work again.
 - An agent still waits for your yes before a newly connected command-line tool's first change, even when you asked for that change.
 - When a plan isn't moving, its note names each wait that is overdue.
-- A replaced image now shows when its document is reopened, even if it has comments.
+- A replaced image now shows right away in a document that is open, and when it is reopened, even if it has comments.
 
 ## v0.4.0 — A self-starting Mac app, updates you control, a shared browser, connected apps, and steadier plans
 
