@@ -7,35 +7,50 @@ vi.mock('y-indexeddb', () => ({ IndexeddbPersistence: class {
 	constructor(name: string, doc: unknown) { return factory.create(name, doc); }
 } }));
 
-function persistence() {
-	const transactions: (EventTarget & { mode: string; error: Error | null })[] = [];
-	const db = new EventTarget() as EventTarget & { transaction: (...args: any[]) => any };
+type FakeTransaction = EventTarget & { mode: string; error: Error | null };
+type FakeDb = EventTarget & { transaction: (...args: any[]) => FakeTransaction };
+
+/** Only readwrite transactions are recorded. A readonly one starts after every earlier writer ends, as IndexedDB orders overlapping scopes. */
+function fakeDb(transactions: FakeTransaction[], probe: 'complete' | 'abort' = 'complete'): FakeDb {
+	const db = new EventTarget() as FakeDb;
+	const writers: Promise<void>[] = [];
 	db.transaction = vi.fn((_stores: string[], mode = 'readonly') => {
-		const transaction = Object.assign(new EventTarget(), { mode, error: null });
+		const transaction = Object.assign(new EventTarget(), { mode, error: null as Error | null });
+		if (mode === 'readonly') {
+			void Promise.all(writers).then(() => {
+				if (probe === 'abort') transaction.error = new Error('probe aborted');
+				transaction.dispatchEvent(new Event(probe));
+			});
+			return transaction;
+		}
 		transactions.push(transaction);
+		writers.push(new Promise<void>(resolve => {
+			for (const name of ['complete', 'abort']) transaction.addEventListener(name, () => resolve(), { once: true });
+		}));
 		return transaction;
 	});
+	return db;
+}
+
+function persistence() {
+	const transactions: FakeTransaction[] = [];
+	const db = fakeDb(transactions);
 	const provider = { _db: Promise.resolve(db), whenSynced: Promise.resolve(), destroy: vi.fn(async () => {}), clearData: vi.fn() };
 	factory.create.mockReturnValue(provider);
 	return { db, provider, transactions };
 }
 
-type FakeTransaction = EventTarget & { mode: string; error: Error | null };
-type FakeDb = EventTarget & { transaction: (...args: any[]) => FakeTransaction };
-
-/** Behaves like y-indexeddb: stored updates replay with the provider as origin, and only other updates write. */
-function fakeIndexeddb(stored: Map<string, Uint8Array[]>, transactions: FakeTransaction[]) {
+/** Behaves like y-indexeddb: its fetch is a readwrite transaction that stores the doc state and is opened before the DeviceDocument can observe the connection; `synced` fires before it commits. */
+function fakeIndexeddb(stored: Map<string, Uint8Array[]>, transactions: FakeTransaction[], options: { holdFetch?: boolean; probe?: 'complete' | 'abort' } = {}) {
 	return (name: string, doc: Y.Doc) => {
-		const db = new EventTarget() as FakeDb;
-		db.transaction = (_stores: string[], mode = 'readonly') => {
-			const transaction = Object.assign(new EventTarget(), { mode, error: null });
-			transactions.push(transaction);
-			return transaction;
-		};
+		const db = fakeDb(transactions, options.probe);
 		const provider: Record<string, unknown> = { destroy: vi.fn(async () => {}), clearData: vi.fn() };
 		provider._db = Promise.resolve(db);
 		provider.whenSynced = (provider._db as Promise<FakeDb>).then(() => {
-			// The library's own fetch runs before the DeviceDocument can observe the connection.
+			const state = Y.encodeStateAsUpdate(doc);
+			const fetch = db.transaction(['updates'], 'readwrite');
+			fetch.addEventListener('complete', () => stored.set(name, [...(stored.get(name) ?? []), state]), { once: true });
+			if (!options.holdFetch) queueMicrotask(() => fetch.dispatchEvent(new Event('complete')));
 			for (const update of stored.get(name) ?? []) Y.applyUpdate(doc, update, provider);
 		});
 		doc.on('update', (update: Uint8Array, origin: unknown) => {
@@ -78,7 +93,7 @@ describe('device copy saved after sync', () => {
 		const second = new DeviceDocument('artifact', 'store', secondDoc);
 		await second.ready;
 		expect(secondDoc.getText('text').toString()).toBe('kept text');
-		expect(transactions).toHaveLength(writes);
+		expect(transactions).toHaveLength(writes + 1); // only the library's own fetch
 		expect(second.saved).toBe(true);
 		expect(second.error).toBe('');
 	});
@@ -101,10 +116,36 @@ describe('device copy saved after sync', () => {
 		await settle();
 		db.transaction(['updates'], 'readwrite');
 		release();
-		await copy.ready;
+		await settle();
 		expect(copy.saved).toBe(false);
 		transactions.at(-1)?.dispatchEvent(new Event('complete'));
+		await copy.ready;
 		expect(copy.saved).toBe(true);
+	});
+
+	it('stays unsaved while the library fetch is still writing the in-memory state, then saves', async () => {
+		const stored = new Map<string, Uint8Array[]>();
+		const transactions: FakeTransaction[] = [];
+		factory.create.mockImplementation(fakeIndexeddb(stored, transactions, { holdFetch: true }));
+		const doc = new Y.Doc();
+		doc.getText('text').insert(0, 'only in memory');
+		const copy = new DeviceDocument('artifact', 'store', doc);
+		await settle();
+		expect(transactions).toHaveLength(1);
+		expect(copy.saved).toBe(false);
+		expect(stored.get('corsia-document:artifact:store')).toBeUndefined();
+		transactions[0].dispatchEvent(new Event('complete'));
+		await copy.ready;
+		expect(stored.get('corsia-document:artifact:store')).toHaveLength(1);
+		expect(copy.saved).toBe(true);
+	});
+
+	it('stays unsaved with the error when the storage check aborts', async () => {
+		factory.create.mockImplementation(fakeIndexeddb(new Map(), [], { probe: 'abort' }));
+		const copy = new DeviceDocument('artifact', 'store', new Y.Doc());
+		await copy.ready;
+		expect(copy.error).toBe('probe aborted');
+		expect(copy.saved).toBe(false);
 	});
 
 	it('goes unsaved when a write begins after the sync and saved again when it completes', async () => {
