@@ -161,6 +161,7 @@ async def test_an_invite_is_sent_as_an_icalendar_request_by_smtp(host) -> None:
     [(recipients, data)] = host.built.smtp.sent
     parsed = message_from_bytes(data, policy=policy.default)
     calendar = parsed.get_body(preferencelist=("calendar",))
+    assert calendar is not None
     assert recipients == ["pat@example.com"] and calendar.get_content_type() == "text/calendar"
     text = calendar.get_content()
     assert "METHOD:REQUEST" in text and "SUMMARY:Planning" in text and "ATTENDEE:mailto:pat@example.com" in text
@@ -179,8 +180,8 @@ async def test_the_password_is_in_no_draft_send_or_log_text(host, caplog) -> Non
 
 
 async def test_a_password_the_poller_finds_refused_flips_the_row_and_polling_for_it_stops(host, monkeypatch) -> None:
-    for name, value in (("_accounts", {}), ("_inflight", {}), ("_due", {})):
-        monkeypatch.setattr(poller, name, value)
+    for name in ("_accounts", "_inflight", "_due"):
+        monkeypatch.setattr(poller, name, {})
     monkeypatch.setattr(poller, "_status", poller._fresh_status())
     monkeypatch.setenv(poller.TEST_ENABLE_ENV, "1")
     notified = []

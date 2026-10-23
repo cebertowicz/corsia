@@ -34,7 +34,7 @@ def _calendar(sender: str, invite: Invite, uid: str, *, method: str | None) -> C
         attendee = vCalAddress(f"mailto:{address}")
         if method is None:
             attendee.params["SCHEDULE-AGENT"] = "CLIENT"
-        event.add("attendee", attendee, encode=0)
+        event.add("attendee", attendee, encode=False)
     calendar.add_component(event)
     return calendar
 

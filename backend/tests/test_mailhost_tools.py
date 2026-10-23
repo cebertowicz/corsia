@@ -446,12 +446,17 @@ async def test_scheduled_poller_floors_then_delivers_new_mail_and_resets_a_rebui
     connected, clean_screen, monkeypatch,
 ) -> None:
     await _set_through_keys(connected)
-    for name, value in (("_accounts", {}), ("_inflight", {}), ("_due", {})):
-        monkeypatch.setattr(poller, name, value)
+    for name in ("_accounts", "_inflight", "_due"):
+        monkeypatch.setattr(poller, name, {})
     monkeypatch.setattr(poller, "_status", poller._fresh_status())
     monkeypatch.setenv(poller.TEST_ENABLE_ENV, "1")
     delivered = []
-    monkeypatch.setattr(poller, "deliver_platform_event_sync", lambda _source, payload, **_kw: delivered.append(payload) or [])
+
+    def deliver(_source, payload, **_kw):
+        delivered.append(payload)
+        return []
+
+    monkeypatch.setattr(poller, "deliver_platform_event_sync", deliver)
 
     await poller.run_cycle()
     assert delivered == []
