@@ -89,7 +89,6 @@ def scope_cte() -> str:
         WITH RECURSIVE scope_roots(id) AS (
           SELECT t.id FROM threads t
           WHERE t.user_id=:user_id
-            AND t.id NOT LIKE 'eval-%'
             AND (:scope_project='all' OR t.project_id=:scope_project)
             AND (:scope_agent IS NULL AND t.parent_thread_id IS NULL
                  OR t.id=:scope_agent
