@@ -11,6 +11,7 @@ from automation.plan_liveness_terminal import on_thread_turn_complete
 from automation.turn_end_effects import record_turn_end
 from doc_feedback_helpers import add_comment, add_person_comment, batches, linked_comment_ids, seed_document, seed_thread
 from doceditor import comment_notifications, feedback_batches
+import infra.database as database
 from infra.database import get_db, write_transaction
 
 
@@ -327,3 +328,40 @@ def test_user_feedback_projection_has_no_open_comment_after_immediate_delivery(i
         assert [row["state"] for row in batches(db)] == ["delivered", "delivered"]
     finally:
         db.close()
+
+
+def test_due_sweep_without_a_supplied_db_keeps_its_connection_through_publication(monkeypatch):
+    events: list[str] = []
+
+    class Result:
+        def fetchall(self):
+            return [{"id": "batch", "artifact_id": "artifact", "author_kind": "user"}]
+
+    class Connection:
+        in_transaction = False
+
+        def execute(self, _sql, _params):
+            events.append("select")
+            return Result()
+
+        def close(self):
+            events.append("close")
+
+    def close_due_batch(received, _batch_id, now):
+        assert received is connection
+        assert now == "2000-01-01T00:00:00+00:00"
+        events.append("close_batch")
+        return True, ("owner",)
+
+    def collect(_deliveries, received, _row, _closed):
+        assert received is connection
+        events.append("collect")
+
+    connection = Connection()
+    monkeypatch.setattr(database, "get_db", lambda: connection)
+    monkeypatch.setattr(feedback_batches, "_close_due_batch", close_due_batch)
+    monkeypatch.setattr(comment_notifications, "collect_due_user_delivery", collect)
+    monkeypatch.setattr(comment_notifications, "publish_due_user_feedback", lambda _deliveries: events.append("publish"))
+
+    assert feedback_batches.close_due("2000-01-01T00:00:00+00:00") == ["owner"]
+    assert events == ["select", "close_batch", "collect", "publish", "close"]

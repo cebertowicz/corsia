@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import SetupScreen from './SetupScreen.svelte';
 import { token, user } from '$lib/stores/auth';
+import { emit } from '$lib/ws/events';
 
 vi.mock('$lib/ws', () => ({ connect: vi.fn() }));
 vi.mock('$lib/linkTargetResolver', () => ({ openExternalUrl: vi.fn(async () => undefined) }));
@@ -24,10 +25,10 @@ function fill(id: string, value: string) {
 
 afterEach(async () => {
 	if (component) await unmount(component);
-	component = null; host?.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals(); token.set(null); user.set(null);
+	component = null; host?.remove(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); token.set(null); user.set(null);
 });
 
-async function openModels({ localEligible = false, localReplies = [], progressFails = false, sources = () => [], classifier }: { localEligible?: boolean; localReplies?: Array<Response | Error>; progressFails?: boolean; sources?: () => unknown[]; classifier?: unknown } = {}) {
+async function openModels({ localEligible = false, localReplies = [], progressFails = false, sources = () => [], classifier, warmReply }: { localEligible?: boolean; localReplies?: Array<Response | Error>; progressFails?: boolean; sources?: () => unknown[]; classifier?: unknown; warmReply?: () => Promise<Response> } = {}) {
 	vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
 		const url = String(input);
 		if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: localEligible, work_folder: '~/CORSIA' });
@@ -40,7 +41,9 @@ async function openModels({ localEligible = false, localReplies = [], progressFa
 		if (url === '/api/setup/progress' && init?.method === 'PUT') return json({}, progressFails ? 500 : 200);
 		if (url.startsWith('/api/setup/classifier')) return classifier ? json(classifier) : json({ state: 'ready' });
 		if (url.includes('/sources')) return json({ sources: sources() });
-		if (url.includes('/corsia-agent')) return json({ target: { thread_id: 'corsia-thread' } });
+		if (url.includes('/corsia-agent')) return json({ target: { thread_id: 'corsia-thread' }, first_run_pending: !!warmReply });
+		if (url.includes('/warm?')) return warmReply!();
+		if (url.includes('/models') && warmReply) return json({ models: [{ id: 'local', name: 'Local', backend: 'network', litellm_model: 'omlx@test/model', status: 'ready', connection: 'omlx' }] });
 		if (url.includes('/models')) return json({ models: [{ id: 'claude', name: 'Claude', backend: 'harness', litellm_model: 'claude-code/sonnet', status: 'ready', connection: 'claude-code', runs_on: [{ selected: true, status: 'ready' }] }] });
 		return json({});
 	}));
@@ -144,6 +147,33 @@ describe('SetupScreen classifier download stays unseen', () => {
 });
 
 describe('SetupScreen completion', () => {
+	it.each([true, false])('shows matching provider warm progress only on the final step and finishes on warm success=%s', async (ok) => {
+		let release!: (response: Response) => void;
+		await openModels({ warmReply: () => new Promise<Response>((resolve) => { release = resolve; }) });
+		await vi.waitFor(() => expect(release).toBeTypeOf('function'));
+		expect(host.textContent).not.toContain('Finishing setup');
+		click('Start using CORSIA'); await settle();
+		await vi.waitFor(() => expect(host.querySelector('h1')?.textContent).toBe('Finishing setup'));
+		expect(onFinished).not.toHaveBeenCalled();
+		emit('thread_warm_progress', { type: 'thread_warm_progress', thread_id: 'corsia-thread', model: 'omlx@test/model', progress: { total_blocks: 10, ready_blocks: 4 } });
+		await settle();
+		expect(host.textContent).toContain('40%');
+		expect(host.textContent?.toLowerCase()).not.toContain('prefill');
+		release(json({ ok }));
+		await vi.waitFor(() => expect(onFinished).toHaveBeenCalledOnce());
+	});
+
+	it('shows Finishing setup without a number when the provider has no progress', async () => {
+		let release!: (response: Response) => void;
+		await openModels({ warmReply: () => new Promise<Response>((resolve) => { release = resolve; }) });
+		await vi.waitFor(() => expect(release).toBeTypeOf('function'));
+		click('Start using CORSIA'); await settle();
+		await vi.waitFor(() => expect(host.querySelector('h1')?.textContent).toBe('Finishing setup'));
+		expect(host.textContent).not.toContain('%');
+		release(json({ ok: true }));
+		await vi.waitFor(() => expect(onFinished).toHaveBeenCalledOnce());
+	});
+
 	it('shows the progress-save recovery when the completion write fails', async () => {
 		await openModels({ progressFails: true });
 		click('Start using CORSIA');

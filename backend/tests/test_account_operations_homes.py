@@ -745,7 +745,7 @@ async def test_checkpoint_claude_spawn_uses_writer_home_and_rechecks_before_stdi
 
         require_fork_write(request)
         assert proc is process
-        return SimpleNamespace(stdout=b'synthetic', stderr=b'', truncated=False, failure=None)
+        return fork_cc_io.CCForkOutput(stdout=b'synthetic', stderr=b'', truncated=False)
     monkeypatch.setattr(fork_cc, '_spawn_process', spawn)
     monkeypatch.setattr(fork_cc_io, 'communicate_fork', communicate)
     monkeypatch.setattr('core.fork_cc_result.result_after_process', lambda *a, **kw: ProviderForkResult('body', None))

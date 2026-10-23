@@ -27,7 +27,7 @@ async def _render_matching_prefix(monkeypatch, tmp_path, target):
         [('user', 'earlier request'), ('assistant', 'earlier answer')],
     ])
     monkeypatch.setattr(thread_cache_warm, '_warm_replay_candidates', lambda *_args: (
-        SimpleNamespace(exact=selection, checkpoint_tail=None), None,
+        SimpleNamespace(exact=selection, checkpoint_tail=None), None, None,
     ))
     warm_messages, warm_tools, _ = await thread_cache_warm._build_warm_prefix(
         'warm-thread', None, target, None,

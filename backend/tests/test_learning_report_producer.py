@@ -29,6 +29,19 @@ def _event(db, *, event_name, ts, project_id=None, agent_thread_id="agent", subj
     )
 
 
+def _offer_receipt(db, *, usage_id, manifest_id, lessons, created_at="2026-10-22T18:00:00+00:00"):
+    db.execute(
+        "INSERT INTO context_manifests(id,harness,entries_json,entry_count,created_at) VALUES(?,?,?,?,?)",
+        (manifest_id, "native", json.dumps([{"source_id": "dynamic:skills-index", "lessons": lessons}]), 1, created_at),
+    )
+    db.execute(
+        """INSERT INTO llm_usage
+           (id,thread_id,turn_id,model,context_manifest_id,created_at)
+           VALUES(?,'owner','turn','test/model',?,?)""",
+        (usage_id, manifest_id, created_at),
+    )
+
+
 def test_disabled_verdict_source_is_not_reported_as_an_empty_experiment_list(db):
     from jobs.learning_report import build_report
 
@@ -43,13 +56,13 @@ def test_disabled_verdict_source_is_not_reported_as_an_empty_experiment_list(db)
     report = build_report(db, scope="proj", report_date="2026-10-22")
 
     assert report == {
-        "scope": "proj", "report_date": "2026-10-22", "report_key": "proj:2026-10-22:daily", "wake": False,
+        "scope": "proj", "report_date": "2026-10-22", "report_key": "proj:2026-10-22:daily", "wake": True,
         "items": {
             "corrections": {
                 "doc_comment": {"count": 1, "refs": ["comment:b"]},
                 "message": {"count": 1, "refs": ["message:a"]},
             },
-            "lessons": {"recorded": {"count": 0, "refs": []}, "confirmed": None, "consolidated": None, "repeated": None},
+            "lessons": {"recorded": {"count": 0, "refs": []}, "in_use": None, "confirmed": None, "consolidated": None, "repeated": None},
             "experiments": {"started": None, "decided": None},
             "wins": None,
         },
@@ -211,6 +224,7 @@ def test_sent_back_corrections_are_shown_separately_but_never_trigger_early_repo
     assert learning_report.early_threshold(db, scope="history", report_date=report_day.isoformat()) == 8
     assert not learning_report.maybe_emit_early(db, scope="daily", report_date=report_day.isoformat())
     assert delivered == []
+    assert report["wake"] is False
     assert report["items"]["corrections"] == {
         "sent_back": {"count": 200, "refs": [f"sent-back:today:{number:03}" for number in range(50)]},
     }
@@ -292,6 +306,77 @@ def test_daily_reports_continue_after_one_scope_delivery_fails(db, monkeypatch):
     assert delivered == ["later:2026-10-22:daily"]
 
 
+def test_in_use_matches_recorded_lessons_to_offer_receipts(db):
+    from datetime import datetime, timezone
+
+    from jobs import learning_report
+    from plans import lesson_reviews
+
+    db.execute("INSERT INTO projects (id,name,created_at,updated_at) VALUES ('proj','Project','t','t')")
+    db.execute("INSERT INTO threads (id,user_id,project_id,model,created_at,updated_at) "
+               "VALUES ('owner','user','proj','test/model','t','t')")
+    db.execute("INSERT INTO artifact_identities (id,integration,type,external_id,title,state,created_at,updated_at) "
+               "VALUES ('art','workspace','skill','workspace://art','art','active','t','t')")
+    review = {"artifact_id": "art", "title": "Review", "acceptance": "Decide.", "review_after": "2099-01-01T00:00:00+00:00"}
+    today = learning_report.report_date_for(datetime.now(timezone.utc))
+    for lesson_id, sha in (("a", "a" * 64), ("b", "b" * 64)):
+        lesson_reviews.ensure_lesson_review(db, "owner", lesson_id=lesson_id, behavioral_sha256=sha, **review)
+    _offer_receipt(db, usage_id="usage:one", manifest_id="manifest:one", lessons=[
+        {"id": "a", "behavioral_sha256": "a" * 64},
+    ], created_at=f"{today}T18:00:00+00:00")
+    _offer_receipt(db, usage_id="usage:two", manifest_id="manifest:two", lessons=[
+        {"id": "a", "behavioral_sha256": "a" * 64},
+        {"id": "b", "behavioral_sha256": "b" * 64},
+    ], created_at=f"{today}T18:00:00+00:00")
+    db.commit()
+
+    report = learning_report.build_report(db, scope="proj", report_date=today)
+
+    assert report["items"]["lessons"]["in_use"] == {
+        "count": 2, "refs": [f"lesson:a:{'a' * 64}", f"lesson:b:{'b' * 64}"],
+    }
+
+
+def test_in_use_is_unknown_when_any_dated_offer_receipt_is_unavailable(db):
+    from datetime import datetime, timezone
+
+    from jobs import learning_report
+    from plans import lesson_reviews
+
+    db.execute("INSERT INTO projects (id,name,created_at,updated_at) VALUES ('proj','Project','t','t')")
+    db.execute("INSERT INTO threads (id,user_id,project_id,model,created_at,updated_at) "
+               "VALUES ('owner','user','proj','test/model','t','t')")
+    db.execute("INSERT INTO artifact_identities (id,integration,type,external_id,title,state,created_at,updated_at) "
+               "VALUES ('art','workspace','skill','workspace://art','art','active','t','t')")
+    review = {"artifact_id": "art", "title": "Review", "acceptance": "Decide.", "review_after": "2099-01-01T00:00:00+00:00"}
+    today = learning_report.report_date_for(datetime.now(timezone.utc))
+    lesson_reviews.ensure_lesson_review(db, "owner", lesson_id="a", behavioral_sha256="a" * 64, **review)
+    _offer_receipt(db, usage_id="usage:complete", manifest_id="manifest:complete", lessons=[
+        {"id": "a", "behavioral_sha256": "a" * 64},
+    ], created_at=f"{today}T18:00:00+00:00")
+    db.execute(
+        "INSERT INTO llm_usage(id,thread_id,turn_id,model,context_manifest_id,created_at) "
+        "VALUES ('usage:unavailable','owner','turn','test/model',NULL,?)",
+        (f"{today}T18:01:00+00:00",),
+    )
+    db.commit()
+
+    report = learning_report.build_report(db, scope="proj", report_date=today)
+
+    assert report["items"]["lessons"]["in_use"] is None
+
+
+def test_in_use_is_unknown_without_dated_offer_receipts(db):
+    from jobs.learning_report import build_report
+
+    db.execute("INSERT INTO projects (id,name,created_at,updated_at) VALUES ('proj','Project','t','t')")
+    db.execute("INSERT INTO threads (id,user_id,project_id,model,created_at,updated_at) "
+               "VALUES ('owner','user','proj','test/model','t','t')")
+    db.commit()
+
+    assert build_report(db, scope="proj", report_date="2026-10-22")["items"]["lessons"]["in_use"] is None
+
+
 def test_recorded_lessons_count_each_lesson_once_with_a_reference_per_version(db):
     from datetime import datetime, timezone
 
@@ -311,7 +396,12 @@ def test_recorded_lessons_count_each_lesson_once_with_a_reference_per_version(db
 
     for lesson_id, sha in (("a", "1"), ("a", "2"), ("b", "1")):
         lesson_reviews.ensure_lesson_review(db, "owner", lesson_id=lesson_id, behavioral_sha256=sha, **review)
+    _offer_receipt(db, usage_id="usage:without-lessons", manifest_id="manifest:without-lessons", lessons=[],
+                   created_at=f"{today}T18:00:00+00:00")
     assert (recorded()["count"], len(recorded()["refs"])) == (2, 3)
+    assert learning_report.build_report(db, scope="proj", report_date=today)["items"]["lessons"]["in_use"] == {
+        "count": 0, "refs": [],
+    }
 
     lesson_reviews.ensure_capture_review(db, "owner", capture_id="a", capture_hash="1", **review)
     assert (recorded()["count"], len(recorded()["refs"])) == (2, 4)
@@ -325,7 +415,7 @@ def test_daily_report_is_passive_without_qualifying_facts(db):
     assert report["wake"] is False
     assert report["items"] == {
         "corrections": {},
-        "lessons": {"recorded": {"count": 0, "refs": []}, "confirmed": None, "consolidated": None, "repeated": None},
+        "lessons": {"recorded": {"count": 0, "refs": []}, "in_use": None, "confirmed": None, "consolidated": None, "repeated": None},
         "experiments": {"started": None, "decided": None},
         "wins": None,
     }

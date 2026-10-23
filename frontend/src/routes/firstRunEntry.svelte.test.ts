@@ -12,6 +12,11 @@ import { activeModelId, models, type Model } from '$lib/stores/models';
 import { disconnect } from '$lib/ws';
 import { resetTurnState } from '$lib/ws/turnState';
 
+const setupHarness = vi.hoisted(() => ({ finish: null as (() => void) | null }));
+vi.mock('$lib/components/SetupScreen.svelte', () => ({
+	default: (_anchor: unknown, props: { onFinished?: () => void }) => { setupHarness.finish = props.onFinished ?? null; },
+}));
+
 // Only transport is replaced. The route, auth handlers, auth gate, ChatPanel,
 // first-run helper, and both selection functions are the production modules.
 class FakeSocket {
@@ -48,6 +53,8 @@ let host: HTMLDivElement;
 let page: ReturnType<typeof mount> | null;
 let lookup: ReturnType<typeof deferred<Response>>;
 let paths: string[];
+let writes: string[];
+let startsSetup: boolean;
 let scopeLookups: Map<string, Promise<Response>>;
 let firstRunPending: boolean;
 let listedThreads: Thread[];
@@ -78,6 +85,9 @@ beforeEach(() => {
 	deferredProjectList = null;
 	lookup = deferred<Response>();
 	paths = [];
+	writes = [];
+	startsSetup = false;
+	setupHarness.finish = null;
 	scopeLookups = new Map();
 	const currentPaths = paths;
 	FakeSocket.instances = [];
@@ -85,8 +95,11 @@ beforeEach(() => {
 	vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
 		const url = new URL(String(input), 'http://fixture.invalid');
 		currentPaths.push(url.pathname);
+		if (init?.method && init.method !== 'GET') writes.push(`${init.method} ${url.pathname}`);
 		if (url.pathname === '/api/auth/logout' && init?.method === 'POST') return json({});
 		if (init?.method && init.method !== 'GET') throw new Error(`Unexpected write: ${init.method} ${url.pathname}`);
+		if (startsSetup && url.pathname === '/api/auth/status') return json({ has_users: false });
+		if (startsSetup && url.pathname === '/api/setup/status') return json({});
 		if (url.pathname === '/api/corsia-agent') return scopeLookups.get('workspace') ?? lookup.promise;
 		if (url.pathname === '/api/conductor') return scopeLookups.get(url.searchParams.get('scope') ?? '') ?? lookup.promise;
 		if (url.pathname === '/api/threads') return deferredThreadList?.promise ?? json({ threads: listedThreads });
@@ -177,6 +190,97 @@ describe('first-run entry across auth readiness', () => {
 		resolveLookup();
 		await vi.waitFor(() => expect(get(activeThreadId)).toBe('fixture-conductor'));
 		expect(historyReads('fixture-conductor')).toHaveLength(1);
+	});
+
+	it('opens CORSIA after setup finishes when auth and lookup completed during setup', async () => {
+		startsSetup = true;
+		render();
+		await vi.waitFor(() => expect(setupHarness.finish).not.toBeNull());
+
+		authenticate();
+		await settle();
+		resolveLookup();
+		await settle();
+		expect(get(activeThreadId)).toBeNull();
+		expect(landSpy).toHaveBeenCalledTimes(1);
+
+		setupHarness.finish?.();
+		await vi.waitFor(() => expect(get(activeThreadId)).toBe('fixture-conductor'));
+		expect(historyReads('fixture-conductor')).toHaveLength(1);
+		expect(writes).not.toContain('POST /api/threads');
+	});
+
+	it('keeps a thread selected when setup finishes after the selection changes', async () => {
+		startsSetup = true;
+		listedThreads = [row('fixture-choice')];
+		render();
+		await vi.waitFor(() => expect(setupHarness.finish).not.toBeNull());
+		authenticate();
+		await settle();
+		resolveLookup();
+		await settle();
+
+		activeThreadId.set('fixture-choice');
+		flushSync();
+		setupHarness.finish?.();
+		await settle();
+
+		expect(get(activeThreadId)).toBe('fixture-choice');
+		expect(historyReads('fixture-conductor')).toHaveLength(0);
+	});
+
+	it('keeps New Chat empty when it invalidates the post-setup retry', async () => {
+		startsSetup = true;
+		render();
+		await vi.waitFor(() => expect(setupHarness.finish).not.toBeNull());
+		authenticate();
+		await settle();
+		resolveLookup();
+		await settle();
+		expect(get(activeThreadId)).toBeNull();
+		const threadListReads = paths.filter(path => path === '/api/threads').length;
+		deferredThreadList = deferred<Response>();
+
+		setupHarness.finish?.();
+		await vi.waitFor(() => expect(paths.filter(path => path === '/api/threads').length).toBeGreaterThan(threadListReads));
+		const landingAttempts = landSpy.mock.calls.length;
+		const newChat = host.querySelector<HTMLButtonElement>('button[aria-label="New chat"]');
+		expect(newChat, 'real sidebar New Chat control after setup').not.toBeNull();
+		newChat!.click();
+		deferredThreadList.resolve(json({ threads: [] }));
+		await settle();
+
+		expect(get(activeThreadId)).toBeNull();
+		expect(historyReads('fixture-conductor')).toHaveLength(0);
+		expect(landSpy).toHaveBeenCalledTimes(landingAttempts);
+	});
+
+	it('cancels the post-setup landing when the route unmounts after its own selection update', async () => {
+		startsSetup = true;
+		const conductor = row('fixture-conductor');
+		render();
+		await vi.waitFor(() => expect(setupHarness.finish).not.toBeNull());
+		authenticate();
+		await settle();
+		resolveLookup();
+		await settle();
+		const threadListReads = paths.filter(path => path === '/api/threads').length;
+		deferredThreadList = deferred<Response>();
+
+		setupHarness.finish?.();
+		await vi.waitFor(() => expect(paths.filter(path => path === '/api/threads').length).toBeGreaterThan(threadListReads));
+		activeThreadId.set('fixture-conductor');
+		flushSync();
+		expect(historyReads('fixture-conductor')).toHaveLength(0);
+
+		await unmount(page!);
+		page = null;
+		activeThreadId.set(null);
+		deferredThreadList.resolve(json({ threads: [conductor] }));
+		await settle();
+
+		expect(get(activeThreadId)).toBeNull();
+		expect(historyReads('fixture-conductor')).toHaveLength(0);
 	});
 
 	it('opens CORSIA and sends one pending request through the composer', async () => {

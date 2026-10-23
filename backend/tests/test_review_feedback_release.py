@@ -8,7 +8,7 @@ import pytest
 
 from doceditor import feedback_batches, review_requests
 from infra.database import write_transaction
-from test_doc_review_requests import request, review_env, fork_comment  # noqa: F401
+from test_doc_review_requests import request, review_env, fork_comment, text_document  # noqa: F401
 
 
 def test_prepare_edit_with_active_fork_uses_one_ordinary_open_batch(review_env):
@@ -32,12 +32,13 @@ def test_prepare_edit_with_active_fork_uses_one_ordinary_open_batch(review_env):
 
 
 @pytest.mark.asyncio
-async def test_withdrawal_between_state_read_and_handle_registration_launches_no_model_step(review_env, monkeypatch):
+async def test_withdrawal_between_state_read_and_handle_registration_launches_no_model_step(review_env, monkeypatch, tmp_path):
     from core import artifact_review_runtime as runtime, fork_runtime
     from infra.db_async import run_in_db
     from tools.document_reviews import cancel_request
 
     db, aid = review_env
+    text_document(db, aid, tmp_path)
     row = await run_in_db(request, db, aid)
     cold = SimpleNamespace(fork_id=row["fork_id"], thread_id="reviewer")
     monkeypatch.setattr(runtime, "_cold_request", lambda _request_id: (row, cold))

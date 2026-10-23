@@ -116,7 +116,9 @@
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<div class="bg" onclick={onBackdropClick} transition:fade={{ duration: 120 }}></div>
 	<div class="modal-frame {size}" transition:modalRise={motion}>
-		<div class="modal-glass" transition:fade={motion}></div>
+		<div class="modal-glass-clip">
+			<div class="modal-glass" transition:fade={motion}></div>
+		</div>
 		<div
 			bind:this={modalElement}
 			class="modal"
@@ -153,13 +155,19 @@
 </div>
 
 <style>
+	/*
+		A size container, so the glass can measure its room to the viewport edge in `cq`
+		units. The padding lives in custom properties because that measurement needs it too.
+	*/
 	.modal-layer {
+		--modal-pad-top:    max(32px, var(--safe-top) + 8px);
+		--modal-pad-bottom: max(32px, env(safe-area-inset-bottom, 0px) + 8px);
+		--modal-pad-x: 32px;
 		position: fixed; inset: 0;
 		z-index: 100;
+		container-type: size;
 		display: flex; align-items: center; justify-content: center;
-		padding-top:    max(32px, var(--safe-top) + 8px);
-		padding-bottom: max(32px, env(safe-area-inset-bottom, 0px) + 8px);
-		padding-left: 32px; padding-right: 32px;
+		padding: var(--modal-pad-top) var(--modal-pad-x) var(--modal-pad-bottom);
 		pointer-events: none;
 	}
 	.bg {
@@ -181,15 +189,32 @@
 	.modal-frame.md { max-width: 640px; }
 	.modal-frame.lg { max-width: 800px; }
 	/*
+		Trims the glass back to the card's rounded box. `overflow: clip` rather than a
+		clip-path on the glass: a clip-path there makes the glass hang past the screen edge
+		when the card nearly fills it, and Chromium's software compositor then misplaces
+		the blur, leaving page text sharp under the card. `overflow` is no backdrop root.
+	*/
+	.modal-glass-clip {
+		position: absolute; inset: 0;
+		overflow: clip;
+		border-radius: var(--radius);
+		pointer-events: none;
+	}
+	/*
 		The glass: tint plus blur, on its own element beside the card, so no ancestor of it
-		carries opacity, filter or mask (the frame animates transform only). It reaches three
-		sigma past the card so the blur's sampling edge is hidden, and its own clip-path trims
-		it back to the card's rounded box. Its own opacity fades it with the card.
+		carries opacity, filter or mask (the frame animates transform only). It reaches up to
+		three sigma past the card so the blur's sampling edge is hidden, but never past the
+		layer's edge: each side stops at the room between the card and the screen edge.
+		Its own opacity fades it with the card.
 	*/
 	.modal-glass {
+		--room-x: max(0px, var(--modal-pad-x) + (100cqw - 100%) / 2);
+		--room-top: max(0px, var(--modal-pad-top) + (100cqh - 100%) / 2);
+		--room-bottom: max(0px, var(--modal-pad-bottom) + (100cqh - 100%) / 2);
 		position: absolute;
-		inset: calc(-1 * var(--glass-blur-reach));
-		clip-path: inset(var(--glass-blur-reach) round var(--radius));
+		inset-inline: calc(-1 * min(var(--glass-blur-reach), var(--room-x)));
+		top: calc(-1 * min(var(--glass-blur-reach), var(--room-top)));
+		bottom: calc(-1 * min(var(--glass-blur-reach), var(--room-bottom)));
 		pointer-events: none;
 		background: var(--glass-regular-thick);
 		backdrop-filter: var(--glass-blur);
@@ -225,18 +250,18 @@
 
 	@media (max-width: 720px) {
 		.modal-layer {
-			padding-top:    max(12px, var(--safe-top) + 4px);
-			padding-bottom: max(12px, env(safe-area-inset-bottom, 0px) + 4px);
-			padding-left: 12px; padding-right: 12px;
+			--modal-pad-top:    max(12px, var(--safe-top) + 4px);
+			--modal-pad-bottom: max(12px, env(safe-area-inset-bottom, 0px) + 4px);
+			--modal-pad-x: 12px;
 		}
 		/* Fill only the room inside the safe-area padding, so the footer clears the home indicator. */
 		.modal-frame { max-height: 100%; }
 	}
 	@media (max-width: 480px) {
 		.modal-layer {
-			padding-top:    max(8px, var(--safe-top));
-			padding-bottom: max(8px, env(safe-area-inset-bottom, 0px));
-			padding-left: 8px; padding-right: 8px;
+			--modal-pad-top:    max(8px, var(--safe-top));
+			--modal-pad-bottom: max(8px, env(safe-area-inset-bottom, 0px));
+			--modal-pad-x: 8px;
 		}
 		.head { padding: 14px 16px; }
 		.body { padding: 14px 16px; }

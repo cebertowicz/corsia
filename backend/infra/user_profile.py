@@ -66,11 +66,22 @@ def one_line(value: str) -> str:
     return " ".join(value.split())
 
 
+def preferred_name(full_name: str) -> str:
+    """Return the full name's printable, bounded first word for a profile greeting."""
+    first = one_line(full_name).split(" ", 1)[0]
+    return _printable_text(first)
+
+
+def _printable_text(value: str) -> str:
+    """Return one readable profile value without controls, bounded for context."""
+    return one_line("".join(char for char in value if char.isprintable()))[:120]
+
+
 def profile_text(full_name: str, timezone: str, email: str = "") -> str:
     """The profile body: the preferred name (the full name's first word), the full name, the email when
     known, and the timezone when the Mac reports one."""
     full_name = one_line(full_name)
-    lines = ["# User profile", "", f"{_NAME_LABEL} {full_name.split(' ', 1)[0]}", f"{_FULL_NAME_LABEL} {full_name}"]
+    lines = ["# User profile", "", f"{_NAME_LABEL} {preferred_name(full_name)}", f"{_FULL_NAME_LABEL} {full_name}"]
     if one_line(email):
         lines.append(f"{_EMAIL_LABEL} {one_line(email)}")
     if timezone:
@@ -104,8 +115,7 @@ def profile_email(workspace: Path) -> str:
 
 def _printable_value(workspace: Path, label: str) -> str:
     """The existing profile's value after ``label``, without control characters, or empty."""
-    value = "".join(char for char in _labeled_value(_read_profile(workspace), label) if char.isprintable())
-    return one_line(value)[:120]
+    return _printable_text(_labeled_value(_read_profile(workspace), label))
 
 
 def profile_name(workspace: Path) -> str:

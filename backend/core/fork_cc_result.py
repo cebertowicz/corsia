@@ -39,7 +39,55 @@ def _result_body(record: dict[str, Any], *, has_body: bool) -> str:
     return terminal if not has_body and isinstance(terminal, str) else ""
 
 
-def result(stdout: bytes, *, kind: ForkKind, truncated: bool = False) -> ProviderForkResult:
+def _no_body_detail(stdout: bytes) -> str:
+    """Say what the process printed instead of a body, without any of its text."""
+    counts: dict[str, int] = {}
+    blocks: set[str] = set()
+    terminal = None
+    for line in stdout.splitlines():
+        try:
+            record = json.loads(line)
+        except (TypeError, json.JSONDecodeError):
+            counts["unparsed"] = counts.get("unparsed", 0) + 1
+            continue
+        kind = str(record.get("type")) if isinstance(record, dict) else "unparsed"
+        if kind == "stream_event":
+            continue
+        counts[kind] = counts.get(kind, 0) + 1
+        if kind == "result":
+            terminal = record
+        elif kind == "assistant":
+            content = (record.get("message") or {}).get("content")
+            for block in content if isinstance(content, list) else []:
+                if isinstance(block, dict):
+                    blocks.add(str(block.get("type")))
+    parts = []
+    if terminal is None:
+        parts.append("no result record")
+    else:
+        status = str(terminal.get("subtype") or "record")
+        status += " error" if terminal.get("is_error") is True else ""
+        text = f"result {status} with empty text"
+        if isinstance(terminal.get("num_turns"), int):
+            text += f" after {terminal['num_turns']} turns"
+        if terminal.get("stop_reason"):
+            text += f" (stop {terminal['stop_reason']})"
+        parts.append(text)
+    if counts.get("assistant"):
+        thinking = {"thinking", "redacted_thinking"}
+        parts.append("assistant replies had thinking only" if blocks and blocks <= thinking
+                     else f"assistant replies had no text ({', '.join(sorted(blocks)) or 'empty'})")
+    elif not counts:
+        parts.append("no stdout records")
+    elif terminal is None:
+        parts.append("stdout records: " + ", ".join(f"{name} x{count}" for name, count in counts.items()))
+    return "; ".join(parts)
+
+
+def result(
+    stdout: bytes, *, kind: ForkKind, truncated: bool = False, process: str | None = None,
+) -> ProviderForkResult:
+    """Parse fork stdout into its body; a missing body names what stdout and ``process`` held."""
     bodies: list[str] = []
     usage, diagnostic = None, None
     calls: dict[str, TokenUsage] = {}
@@ -69,8 +117,10 @@ def result(stdout: bytes, *, kind: ForkKind, truncated: bool = False) -> Provide
                 if not truncated:
                     kind.provider_failure("claude-code", diagnostic)
     if not (body := "\n".join(bodies)).strip():
-        detail = f"{FORK_CONTEXT_TRUNCATED}: {diagnostic or 'no narrative'}" if truncated else None
-        raise ProviderForkRejected(detail or f"Claude Code {kind.name} produced no body")
+        if truncated:
+            raise ProviderForkRejected(f"{FORK_CONTEXT_TRUNCATED}: {diagnostic or 'no narrative'}")
+        detail = "; ".join(filter(None, (_no_body_detail(stdout), process)))
+        raise ProviderForkRejected(f"Claude Code {kind.name} produced no body: {detail}")
     measured = from_anthropic(usage)
     if measured is None and calls:
         measured = sum(calls.values(), TokenUsage())
@@ -84,14 +134,16 @@ def process_diagnostic(stderr: bytes | str, returncode: int | None, *, kind: For
     return f"Claude Code {kind.name} process exited with code {returncode}"
 
 
-def result_after_process(stdout: bytes, diagnostic: str | None, returncode: int | None, *, kind: ForkKind) -> ProviderForkResult:
+def result_after_process(
+    stdout: bytes, diagnostic: str | None, returncode: int | None, *, kind: ForkKind,
+    input_note: str | None = None,
+) -> ProviderForkResult:
+    """Parse a finished process's stdout with its diagnostic, exit code and input outcome."""
     truncated = bool(diagnostic and returncode not in {None, 0} and is_provider_context_limit(diagnostic))
-    try:
-        parsed = result(stdout, truncated=truncated, kind=kind)
-    except ProviderForkRejected as error:
-        if diagnostic and str(error) == f"Claude Code {kind.name} produced no body":
-            raise ProviderForkRejected(diagnostic) from error
-        raise
+    exit_note = f"exit code {returncode}" if returncode is not None else "no exit code"
+    generic = diagnostic == process_diagnostic(b"", returncode, kind=kind)
+    process = "; ".join(filter(None, (None if generic else diagnostic, exit_note, input_note)))
+    parsed = result(stdout, truncated=truncated, kind=kind, process=process)
     if parsed.diagnostic == FORK_CONTEXT_TRUNCATED or not diagnostic or diagnostic == parsed.diagnostic:
         return parsed
     combined = f"{parsed.diagnostic}; {diagnostic}" if parsed.diagnostic else diagnostic

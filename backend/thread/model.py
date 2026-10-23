@@ -191,6 +191,8 @@ async def _inline_first_run_wake(thread_id: str, model: str) -> str | None:
     path = await run_in_db(_held_path)
     if path is None:
         return None
+    if path == "app":
+        return await first_run_wake.render_for(model, path, thread_id=thread_id)
     return await first_run_wake.render_for(model, path)
 
 
@@ -223,7 +225,19 @@ async def _apply_first_selection(
     if not selected:
         return None
     from infra.onboarding_events import note_first_model_selected
+    from onboarding.first_run_opening import opening_message_id
     from onboarding.local_download_wake import flush_pending_local_download
+    from infra.send_broadcast import broadcast_message_rows
+
+    post_error: str | None = None
+    if first_run_wake is not None:
+        # Publish the whole committed opening before this path drives the wake.
+        # Script/restored paths with no app opening simply project no row.
+        try:
+            await broadcast_message_rows(thread_id, (opening_message_id(thread_id),))
+        except Exception:
+            log.exception("first-run opening broadcast failed: %s", thread_id)
+            post_error = "Your model is selected, but this chat didn't refresh. Reopen it to see the latest."
 
     # ``select_first_model`` committed the rendered first-run wake above. A setup
     # download that ended while the person was still in setup can now be delivered.
@@ -240,6 +254,7 @@ async def _apply_first_selection(
         preparation=None,
         breadcrumb=None,
         committed_at=now,
+        post_effects_error=post_error,
     )
 
 

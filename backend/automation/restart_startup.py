@@ -79,10 +79,14 @@ async def run_startup_reconcile(logger) -> tuple[object, tuple[str, ...], str | 
 
 
 async def run_startup_drive(harness_task, recovered, wakes, rolled_back_operation, logger) -> None:
-    """Time and report the lifecycle-owned post-bind drive phase."""
-    phase_started = time.monotonic()
-    logger.info("startup phase: restart continuity drive started")
-    try:
+    """Time and report the lifecycle-owned post-bind drive phase.
+
+    An Update this startup left ``verifying`` is settled here too, when its
+    shell never confirms; the drive failing does not stop that settlement.
+    """
+    from automation.update_verification import settle_unconfirmed_update
+
+    async def drive() -> None:
         await harness_task
         if rolled_back_operation is not None:
             from automation.restart import _RESUME_TASKS
@@ -90,6 +94,14 @@ async def run_startup_drive(harness_task, recovered, wakes, rolled_back_operatio
 
             tell_conductor_detached(rolled_back_operation, _RESUME_TASKS)
         await drive_startup_continuity(recovered, wakes, logger)
+
+    phase_started = time.monotonic()
+    logger.info("startup phase: restart continuity drive started")
+    try:
+        outcomes = await asyncio.gather(drive(), settle_unconfirmed_update(logger), return_exceptions=True)
+        for outcome in outcomes:
+            if isinstance(outcome, BaseException):
+                raise outcome
     except asyncio.CancelledError:
         logger.warning("startup phase: restart continuity drive cancelled")
         raise
@@ -170,16 +182,39 @@ async def _drive_recovered_item(label, action, logger):
         raise
 
 
+async def _drive_recovered_settlement(item, ended_turn_id: str | None) -> None:
+    """Record a recovery-ended Turn's end, then drive its settlement.
+
+    Recovery committed the terminal before the bind, so it bypassed the turn-end
+    hook every live terminal runs; this records it exactly once. The hook runs
+    first, as the live error path records before its terminal drives, so the
+    owner's wake never waits on a successor Turn's admission.
+    """
+    from core.plan_turn_end import record_turn_end_logged
+    from infra.thread_execution import drive_terminal_settlement
+    from infra.thread_recovery import RESTART_TURN_ERROR
+
+    if ended_turn_id is not None:
+        await record_turn_end_logged(
+            item.thread_id, "plan-liveness after a restart-ended Turn failed",
+            "parent drive after a restart-ended Turn failed", level="ERROR",
+            outcome="error", error=RESTART_TURN_ERROR, turn_id=ended_turn_id,
+        )
+    await drive_terminal_settlement(item)
+
+
 async def drive_startup_continuity(recovered, wake_threads, logger) -> None:
     """Drive independent conversations; their durable claims preserve FIFO order."""
-    from infra.thread_execution import drive_terminal_settlement, drive_thread
+    from infra.thread_execution import drive_thread
     from infra.thread_input_types import HeldAdmission
     from infra.turn_admission_driver import drive_turn_admission
 
     claimed_threads = {admission.thread_id for admission in recovered.batches}
     claimed_threads.update(item.thread_id for item in recovered.settlements)
+    ended = dict(recovered.ended_turns)  # idx_active_turns_one_active: one per thread
     actions = [
-        *((f"settlement for {item.thread_id}", drive_terminal_settlement(item))
+        *((f"settlement for {item.thread_id}",
+           _drive_recovered_settlement(item, ended.get(item.thread_id)))
           for item in recovered.settlements),
         *((f"Turn admission for {item.thread_id}", drive_turn_admission(item))
           for item in recovered.batches),

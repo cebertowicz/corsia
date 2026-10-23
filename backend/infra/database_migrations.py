@@ -72,6 +72,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+import infra.startup_progress as startup_progress
 from infra.checkpoint_schema import CHECKPOINT_ENTRY_SEARCH_SCHEMA_SQL
 from infra.database import write_transaction
 from infra.checkpoint_entry_index import backfill_checkpoint_entry_search
@@ -210,6 +211,10 @@ log = logging.getLogger(__name__)
 #: reads committed state alongside the migration's own write lock, so this is a
 #: guard against an unrelated writer, not part of the migration's own timing.
 _BACKUP_TIMEOUT_SECONDS = 30.0
+
+#: Pages the pre-migration backup copies per step, 64 MiB at the default page
+#: size: a fraction of a second each, so its progress stays current.
+_BACKUP_STEP_PAGES = 16_384
 
 #: How much free space the pre-migration backup requires, as a multiple of the
 #: database size. The copy is byte-for-byte, so 1.0 is the floor; the margin
@@ -1004,7 +1009,13 @@ def _write_backup(conn: sqlite3.Connection, from_version: int) -> Path | None:
     try:
         backup = sqlite3.connect(target)
         try:
-            reader.backup(backup)
+            # Stepwise so the copy publishes its progress. Each step takes and
+            # drops its own read lock, which would restart the copy if another
+            # connection committed in between; none can, because the caller
+            # holds the write lock, so the result is the same single snapshot.
+            reader.backup(
+                backup, pages=_BACKUP_STEP_PAGES, progress=startup_progress.backup_step,
+            )
         finally:
             backup.close()
     except BaseException:
@@ -1144,6 +1155,9 @@ def migrate_to_current(conn: sqlite3.Connection, target_version: int) -> Migrati
                 # bound copies across boots: a crash-restart loop is a fresh
                 # uncontested winner every time, which is why `require_backup_room`
                 # reserves space the copy may not consume.
+                startup_progress.mark(
+                    "backing_up", from_version=locked_version, to_version=target_version,
+                )
                 backup_path = _write_backup(conn, locked_version)
                 log.info(
                     "Migrating schema %d -> %d (backup: %s)",
@@ -1151,11 +1165,20 @@ def migrate_to_current(conn: sqlite3.Connection, target_version: int) -> Migrati
                 )
                 from plans.public import sanctioned_plan_write  # lazy: plans imports infra
 
+                steps = _plan(locked_version, target_version)
+                startup_progress.mark("migrating", done=0, total=len(steps))
+                # Long statements and loops of short ones both reach the
+                # handler, so a step that is still working keeps publishing.
+                # Pooled connections already carry it; this covers a connection
+                # opened before startup began publishing.
+                startup_progress.watch(conn)
                 before_schema = _schema_snapshot(conn)
-                for version in _plan(locked_version, target_version):
+                for done, version in enumerate(steps, start=1):
                     with sanctioned_plan_write():
                         MIGRATIONS[version](conn)
+                    startup_progress.mark("migrating", done=done, total=len(steps))
                 conn.execute(f"PRAGMA user_version={target_version}")
+                startup_progress.mark("validating")
                 _validate(conn, _changed_tables(before_schema, _schema_snapshot(conn)))
             except BaseException as error:
                 # Only claim a backup that exists. The failure can now come from

@@ -12,6 +12,9 @@ from infra.thread_input_types import TurnAdmission
 from infra.thread_inputs import start_idle_turn
 
 
+RESTART_TURN_ERROR = "backend restarted while Turn was running"
+
+
 def ambiguous_stale_writes(db: sqlite3.Connection, turn_id: str, *, error: str) -> None:
     """Record every fenced, unsettled provider write for a Turn as ambiguous."""
 
@@ -39,9 +42,12 @@ def recover_threads(
 ):
     """Run the only boot pass; it is not a periodic repair mechanism."""
 
-    from infra.thread_driver import StartupRecovery, TerminalSettlement, finish_turn
+    from infra.thread_driver import (
+        StartupRecovery, TerminalResult, TerminalSettlement, finish_turn,
+    )
 
     settlements: list[TerminalSettlement] = []
+    ended_turns: list[tuple[str, str]] = []
     batches: list[TurnAdmission] = []
     with write_transaction(db, scope="recover_threads") as connection:
         # No dead epoch can own a Codex writer, so nothing would release these holds.
@@ -63,11 +69,13 @@ def recover_threads(
                 ended_at=recovered_at,
                 successor_turn_id=successor_id(str(row["thread_id"])),
                 boot_epoch=boot_epoch,
-                error="backend restarted while Turn was running",
+                error=RESTART_TURN_ERROR,
                 db=connection,
                 hold_expired_limit_at_startup=True,
             )
             settlements.append(terminal)
+            if terminal.result is TerminalResult.APPLIED:
+                ended_turns.append((str(row["thread_id"]), turn_id))
         idle_threads = connection.execute(
             "SELECT DISTINCT m.thread_id FROM messages AS m "
             "WHERE m.delivery_state='queued' AND m.input_order IS NOT NULL "
@@ -85,4 +93,4 @@ def recover_threads(
             )
             if batch is not None:
                 batches.append(batch)
-    return StartupRecovery(tuple(settlements), tuple(batches))
+    return StartupRecovery(tuple(settlements), tuple(batches), tuple(ended_turns))

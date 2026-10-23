@@ -316,6 +316,20 @@ describe('Stop receipt frames', () => {
 		unsubscribe();
 	});
 
+	it('emits user-scoped warm progress through the websocket dispatcher', () => {
+		const received: unknown[] = [];
+		const unsubscribe = on('thread_warm_progress', frame => received.push(frame));
+		const progress = {
+			type: 'thread_warm_progress', thread_id: 'agent-1', model: 'omlx@srv/model',
+			progress: { total_blocks: 10, ready_blocks: 4 },
+		};
+
+		handleMessage(progress, () => {});
+
+		expect(received).toEqual([progress]);
+		unsubscribe();
+	});
+
 	it('re-enables Stop after its visible failure without ending the exact turn', () => {
 		applyLifecycle('thread-1', { turnId: 'turn-1', turnOrder: 1 });
 		stopRequestedTurns.set(new Map([['thread-1', 'turn-1']]));

@@ -245,3 +245,26 @@ async def _start_runtime_services() -> None:
 
     install_process_events()
     await recover_host_access_supervisors()
+
+
+async def _startup_cloud_discovery() -> None:
+    from infra.db_async import run_in_db
+    from infra.key_store_providers import provider_keys
+    from llm.catalog import discover_cloud_models
+    from loguru import logger
+
+    keys = await run_in_db(provider_keys)
+    for provider, key in (
+        ("openai", keys.get("openai")),
+        ("anthropic", keys.get("anthropic")),
+    ):
+        if not key:
+            continue
+        try:
+            result = await discover_cloud_models(provider, key)
+            if result["ok"]:
+                logger.info(
+                    f"{provider} cloud discovery: {len(result['models'])} models"
+                )
+        except Exception as exc:
+            logger.warning(f"{provider} cloud discovery error: {exc}")

@@ -4,6 +4,7 @@ import json
 import shutil
 from pathlib import PurePosixPath
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -35,6 +36,50 @@ class _FakeContext:
 class _FakeTools:
     def get_definitions(self):
         return []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("supports_reasoning", "expected_effort"),
+    [(True, "medium"), (False, None)],
+)
+async def test_event_turn_setup_preserves_supported_reasoning_effort(
+    monkeypatch, supports_reasoning, expected_effort,
+):
+    """Event ingress keeps the resolved effort unless its target cannot reason."""
+    from core import agent as agent_module
+    from core.turn_core import TurnIdentity
+    from ws import turn as ws_turn
+
+    async def get_agent():
+        return SimpleNamespace(tools=_FakeTools())
+
+    async def validate(*_args, **_kwargs):
+        return None
+
+    async def bind(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(agent_module, "get_agent", get_agent)
+    monkeypatch.setattr(ws_turn, "validate_native_target", validate)
+    monkeypatch.setattr(ws_turn, "make_provider_params", lambda _model: {})
+    monkeypatch.setattr(ws_turn, "native_provider_params", lambda _target, _params: {})
+    monkeypatch.setattr(ws_turn, "make_runtime_bindings", lambda *_args: (lambda *_a: None, lambda *_a: None))
+    monkeypatch.setattr(ws_turn, "bind_preadmitted_turn", bind)
+    target = SimpleNamespace(
+        transport_model="omlx@test/model",
+        display_name="Test model",
+        backend="network",
+        supports_reasoning=supports_reasoning,
+    )
+
+    prepared = await ws_turn._setup_turn(
+        "event-effort", "input", [], target=target, turn_id="event-turn",
+        ingress="event", reasoning_effort="medium", broadcast=AsyncMock(),
+        preadmitted_turn=TurnIdentity("event-turn", 1),
+    )
+
+    assert prepared.reasoning_effort == expected_effort
 
 
 def _empty_replay(thread_id: str):

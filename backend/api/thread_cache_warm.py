@@ -5,6 +5,11 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 from loguru import logger
 
+from api.thread_cache_warm_probe import (
+    probe_is_memory_hot,
+    probe_progress,
+    warm_transport_identity,
+)
 from infra.auth import authenticate
 from infra.database import get_db
 from infra.db_async import run_in_db
@@ -66,10 +71,11 @@ def _load_warm_target(thread_id: str, user_id: str, model: str | None = None):
         except (ModelUnavailableError, ValueError) as exc:
             return {"ok": False, "message": str(exc)}
         effort = effective_reasoning_effort(
-            sess["reasoning_effort"]
-            if bound and "reasoning_effort" in sess.keys() else None,
+            sess["reasoning_effort"] if "reasoning_effort" in sess.keys() else None,
             target.catalog_id,
         )
+        if effort and not target.supports_reasoning:
+            effort = None
         return target, sess["project_id"], effort
     finally:
         db.close()
@@ -122,7 +128,7 @@ async def _build_warm_prefix(
     await agent._connect_mcp()
     tool_defs = _freeze_tool_definitions(advertised_tool_definitions(agent.tools))
     wire_tool_defs = list(tool_defs)
-    candidates, eager_checkpoint_id = await run_in_db(
+    candidates, eager_checkpoint_id, pending_opening = await run_in_db(
         _warm_replay_candidates, thread_id, target.catalog_id,
     )
     messages, prefix_info = await _render_warm_replay(
@@ -134,11 +140,15 @@ async def _build_warm_prefix(
         eager_checkpoint_id=eager_checkpoint_id,
         tool_defs=tool_defs,
     )
+    if pending_opening is not None:
+        # Rehearse the greeting selection will persist, without publishing it or choosing a model.
+        messages.append({"role": "assistant", "content": pending_opening})
     logger.info(
         f"warm_session_cache: built {len(messages)} prefix messages "
         f"(history={prefix_info['history_messages']}, "
         f"history_tokens={prefix_info['history_tokens']}, "
-        f"trimmed={prefix_info['was_trimmed']})"
+        f"trimmed={prefix_info['was_trimmed']}, "
+        f"opening={pending_opening is not None})"
     )
     messages = sanitize_messages(sanitize_empty_content(messages))
     prompt_shape = make_prompt_extra_body(
@@ -214,47 +224,17 @@ def _warm_replay_candidates(thread_id: str, target_catalog_id: str):
         _, _, eager = provider_boundary_snapshot(
             thread_id, "native", target_catalog_id, db=db,
         )
-        return candidates, eager.id if eager is not None else None
+        from onboarding.first_run_opening import pending_warm_opening
+
+        return (
+            candidates,
+            eager.id if eager is not None else None,
+            pending_warm_opening(thread_id, db=db),
+        )
     finally:
         if db.in_transaction:
             db.execute("ROLLBACK")
         db.close()
-
-
-def _warm_transport_identity(target: ExecutionTarget) -> tuple[str, str] | None:
-    from llm.local_backends import OmlxBackend, find_backend
-
-    backend = find_backend(target.transport_model)
-    if not isinstance(backend, OmlxBackend):
-        return None
-    server_id, model_id = backend._parse(target.transport_model)
-    if not server_id or not model_id:
-        return None
-    return server_id, model_id
-
-
-def _probe_progress(probe: dict) -> dict:
-    return {
-        "total_blocks": probe.get("total_blocks", 0),
-        "cold_blocks_at_start": probe.get("blocks_cold", 0),
-        "block_size": probe.get("block_size", 0),
-        "total_tokens": probe.get("total_tokens", 0),
-    }
-
-
-def _probe_is_memory_hot(probe: dict) -> bool:
-    total = int(probe.get("total_blocks") or 0)
-    block_size = int(probe.get("block_size") or 0)
-    total_tokens = int(probe.get("total_tokens") or 0)
-    complete_blocks = min(total, total_tokens // block_size) if block_size > 0 else 0
-    partial_blocks = total - complete_blocks
-    return bool(
-        probe.get("ok")
-        and complete_blocks > 0
-        and int(probe.get("blocks_ssd_hot") or 0) >= complete_blocks
-        and int(probe.get("blocks_ssd_disk") or 0) == 0
-        and int(probe.get("blocks_cold") or 0) <= partial_blocks
-    )
 
 
 async def _submit_warm(
@@ -264,10 +244,12 @@ async def _submit_warm(
     wire_tool_defs: list[dict],
     prompt_shape: dict,
     wait: bool = False,
+    user_id: str | None = None,
+    requested_model: str | None = None,
 ):
     from llm.providers import for_provider
 
-    identity = _warm_transport_identity(target)
+    identity = warm_transport_identity(target)
     if identity is None:
         return {
             "ok": False,
@@ -285,8 +267,8 @@ async def _submit_warm(
     )
     if probe.get("ok") and probe.get("model_loaded") is False:
         return {"ok": False, "message": f"model not loaded: {model_id}"}
-    progress = _probe_progress(probe) if probe.get("ok") else None
-    if _probe_is_memory_hot(probe):
+    progress = probe_progress(probe) if probe.get("ok") else None
+    if probe_is_memory_hot(probe):
         return {
             "ok": True,
             "message": "Already warm",
@@ -304,6 +286,8 @@ async def _submit_warm(
         prompt_shape,
         progress,
         wait,
+        user_id=user_id,
+        event_model=requested_model or target.catalog_id,
     )
 
 
@@ -318,9 +302,14 @@ async def _start_warm_owner(
     prompt_shape: dict,
     progress: dict | None,
     wait: bool = False,
+    *,
+    user_id: str | None,
+    event_model: str,
 ):
     from core.thread_warm import (
         await_warm_outcome,
+        make_provider_warm_operations,
+        make_user_warm_progress_callback,
         start_thread_warm,
         warm_prefix_key,
         warm_suppression_reason,
@@ -338,17 +327,19 @@ async def _start_warm_owner(
         return _warm_suppressed(suppression)
     key = warm_prefix_key(thread_id, model_id, messages, tools, prompt_shape)
 
-    async def _warm():
-        return await provider.warm_cache(
-            cfg,
-            model_id=model_id,
-            messages=messages,
-            tools=tools,
-            **prompt_shape,
-        )
-
+    warm, progress_probe = make_provider_warm_operations(
+        provider, cfg, model_id, messages, tools, prompt_shape, probe_progress,
+    )
+    progress_callback = make_user_warm_progress_callback(user_id, thread_id, event_model)
     task, started, suppression = await start_thread_warm(
-        thread_id, key, _warm, model=catalog_id, admission_check=_admission_check,
+        thread_id,
+        key,
+        warm,
+        model=catalog_id,
+        admission_check=_admission_check,
+        progress_probe=progress_probe,
+        progress_callback=progress_callback,
+        initial_progress=progress,
     )
     if suppression is not None:
         return _warm_suppressed(suppression)
@@ -370,9 +361,16 @@ async def _start_warm_owner(
 
 @router.post("/threads/{thread_id}/warm")
 async def warm_session_cache(
-    thread_id: str, token: str = "", model: str | None = None, wait: bool = False,
+    thread_id: str,
+    token: str = "",
+    model: str | None = None,
+    wait: bool = False,
+    progress: bool = False,
 ):
-    """Pre-warm the exact Native oMLX prefix; ``wait`` reports how it ended."""
+    """Pre-warm the exact Native oMLX prefix; ``wait`` reports how it ended.
+
+    Only setup asks for ``progress``, which publishes live block counts.
+    """
     user = authenticate(token)
     if not user:
         raise HTTPException(401)
@@ -396,4 +394,6 @@ async def warm_session_cache(
         tools,
         prompt_shape,
         wait,
+        user_id=user["id"] if progress else None,
+        requested_model=model,
     )

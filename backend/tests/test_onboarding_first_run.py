@@ -268,7 +268,7 @@ class TestWakeAndSetupPlan:
         )] == SETUP_TITLES
         started.assert_called_once()
 
-    def test_served_app_path_seeds_no_setup_tasks_or_start(self, fresh_install, monkeypatch):
+    def test_served_app_path_holds_only_the_model_choice_until_the_pick(self, fresh_install, monkeypatch):
         from infra import accounts, onboarding_events
 
         started = Mock()
@@ -278,7 +278,19 @@ class TestWakeAndSetupPlan:
 
         [wake] = _first_run_rows()
         assert json.loads(wake["metadata"])["first_run_path"] == "app"
-        assert _rows("SELECT n.title FROM plan_nodes n JOIN plans p ON p.id = n.plan_id WHERE p.owner_id=?", _conductor()) == []
+        nodes = _rows(
+            "SELECT n.title,n.state FROM plan_nodes n JOIN plans p ON p.id=n.plan_id WHERE p.owner_id=?",
+            _conductor(),
+        )
+        assert {"Where your work lives", "About you", "Hand over to your agents"} <= {
+            node["title"] for node in nodes
+        }
+        assert all(node["state"] == "pending" for node in nodes)
+        assert _rows(
+            "SELECT role,metadata FROM messages WHERE id=?",
+            f"first-run-opening:{_conductor()}",
+        ) == []
+        assert _rows("SELECT model FROM threads WHERE id=?", _conductor()) == [{"model": None}]
         started.assert_not_called()
 
     def test_the_seeded_tasks_do_not_depend_on_what_the_install_finds(
@@ -402,6 +414,18 @@ class TestWakeAndSetupPlan:
         conductor_id = _conductor()
         _insert(conductor_id, "user", "earlier")
         with write_transaction(None, scope="test_history") as db:
+            assert enqueue_first_run_wake(conductor_id, db=db) is False
+        assert _first_run_rows() == []
+
+    def test_an_existing_scripted_opening_also_prevents_a_new_wake(self, fresh_install):
+        from infra import accounts
+        from infra.database import write_transaction
+        from infra.onboarding_events import enqueue_first_run_wake
+
+        accounts.create_user("newcomer", SECRET_ENOUGH, first_run_wake=False)
+        conductor_id = _conductor()
+        _insert(conductor_id, "assistant", f"first-run-opening:{conductor_id}")
+        with write_transaction(None, scope="test_scripted_opening_history") as db:
             assert enqueue_first_run_wake(conductor_id, db=db) is False
         assert _first_run_rows() == []
 

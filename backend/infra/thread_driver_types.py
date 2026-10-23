@@ -40,6 +40,9 @@ class StartupRecovery:
 
     settlements: tuple[TerminalSettlement, ...]
     batches: tuple[TurnAdmission, ...]
+    # (thread_id, turn_id) of each Turn recovery ended; those Turns never saw
+    # the canonical turn-end hook, so the drive phase records it for them.
+    ended_turns: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

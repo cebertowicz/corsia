@@ -320,22 +320,30 @@ def complete_operation(
     operation_id: str,
     *,
     deployed_sha: str | None = None,
+    failure_detail: str | None = None,
     db=None,
 ) -> bool:
     """Release one exact operation only after continuity handoff succeeds."""
     phases = sorted(phase for phase, moves in TRANSITIONS.items() if phase is not None and "complete" in moves)
     with write_transaction(db, scope="restart_operation") as connection:
+        detail = None if failure_detail is None else _merged_detail(connection, operation_id, failure_detail)
         cur = connection.execute(
             "UPDATE self_restart_requests SET status='complete',phase=NULL,"
-            "settled_at=?,updated_at=?,deployed_sha=?,error=NULL "
+            "settled_at=?,updated_at=?,deployed_sha=?,error=NULL,failure_detail=COALESCE(?,failure_detail) "
             "WHERE id=? AND status='in_flight' "
             f"AND phase IN ({','.join('?' for _ in phases)})",
-            (_now_iso(), _now_iso(), deployed_sha, operation_id, *phases),
+            (_now_iso(), _now_iso(), deployed_sha, detail, operation_id, *phases),
         )
         settled = cur.rowcount == 1
         if settled:
             revoke_lifecycle_token_for_terminal_operation(connection, operation_id)
         return settled
+
+
+def _merged_detail(connection, operation_id: str, failure_detail: str | None) -> str:
+    """The operation's stored detail with ``failure_detail``'s keys laid over it."""
+    return json.dumps({**operation_detail(operation_by_id(operation_id, db=connection) or {}),
+                       **operation_detail({"failure_detail": failure_detail})})
 
 
 def abort_operation(
@@ -363,8 +371,7 @@ def abort_operation(
                 _now_iso(),
                 error[:500],
                 failure_code,
-                json.dumps({**operation_detail(operation_by_id(operation_id, db=connection) or {}),
-                            **operation_detail({"failure_detail": failure_detail})}),
+                _merged_detail(connection, operation_id, failure_detail),
                 operation_id,
                 *phases,
             ),

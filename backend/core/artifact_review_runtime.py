@@ -88,8 +88,17 @@ async def start(request_id: str) -> None:
     try:
         if await asyncio.to_thread(_already_started, request_id):
             return
+        from doceditor.review_fork_scope import ReviewNotForkable, require_forkable
+
         try:
             _row, request = await asyncio.to_thread(_cold_request, request_id)
+            await asyncio.to_thread(require_forkable, request_id)
+        except ReviewNotForkable as refusal:
+            # A fork can't open a document's images, so the reviewer's own thread reviews it.
+            await ARTIFACT_REVIEW_KIND.limit_or_failure_handler(
+                request_id, reason=refusal.reason, state="handed_back",
+            )
+            return
         except Exception as error:
             await ARTIFACT_REVIEW_KIND.limit_or_failure_handler(request_id, error, reason=_build_reason(error))
             return
