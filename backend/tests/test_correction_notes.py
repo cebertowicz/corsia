@@ -382,6 +382,16 @@ def test_note_omits_earlier_block_when_no_match():
     assert "Earlier corrections that may be the same miss:" not in note
 
 
+def test_earlier_lookup_returns_no_matches_when_the_search_index_is_unavailable(agent, main_db):
+    from core.correction_notes import earlier_chat_corrections
+    from jobs.corrections_recording import candidate_for_message
+
+    agent.say("c1", "The account screen has duplicate navigation.")
+    main_db.execute("DROP TABLE messages_fts")
+
+    assert earlier_chat_corrections(main_db, candidate_for_message("c1")) == ()
+
+
 def test_earlier_chat_corrections_caps_matches_at_three(agent, main_db):
     from core.correction_notes import earlier_chat_corrections
     from jobs.corrections_recording import candidate_for_message

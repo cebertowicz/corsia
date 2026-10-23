@@ -15,6 +15,7 @@ import sqlite3
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from zoneinfo import ZoneInfo
 
 from core.corrections_recording import (
     ACTIVE_VERSION_SETTING,
@@ -87,36 +88,41 @@ def earlier_chat_corrections(db: sqlite3.Connection, candidate: CorrectionCandid
 
     query = " OR ".join(fts5_escape(word) for word in words)
     owner_filter, owner_params = owner_message_sql_predicate("m")
-    rows = db.execute(
-        f"""WITH ranked AS (
-                   SELECT rowid,bm25(messages_fts) AS rank FROM messages_fts
-                   WHERE messages_fts MATCH :query ORDER BY rank LIMIT :candidate_limit
-               )
-               SELECT t.title,m.created_at,m.content
-               FROM ranked
-               JOIN messages m ON m.rowid=ranked.rowid
-               JOIN threads t ON t.id=m.thread_id
-               WHERE EXISTS (
-                     SELECT 1 FROM outcome_events e
-                     WHERE e.subject_key='message:' || m.id
-                       AND e.event_name=:event AND e.retracted_at IS NULL
-                 )
-                 AND t.user_id=(SELECT user_id FROM threads WHERE id=:thread)
-                 AND (m.created_at < :created OR (m.created_at=:created AND m.id < :message))
-                 AND {owner_filter}
-               ORDER BY ranked.rank,m.created_at DESC,m.id DESC
-               LIMIT :limit""",
-        {
-            **owner_params,
-            "query": query,
-            "candidate_limit": _REPEAT_CANDIDATE_LIMIT,
-            "event": CORRECTION_EVENT,
-            "thread": candidate.thread_id,
-            "created": candidate.created_at,
-            "message": candidate.source_id,
-            "limit": _REPEAT_SEARCH_LIMIT,
-        },
-    ).fetchall()
+    try:
+        rows = db.execute(
+            f"""WITH ranked AS (
+                       SELECT rowid,bm25(messages_fts) AS rank FROM messages_fts
+                       WHERE messages_fts MATCH :query ORDER BY rank LIMIT :candidate_limit
+                   )
+                   SELECT t.title,m.created_at,m.content
+                   FROM ranked
+                   JOIN messages m ON m.rowid=ranked.rowid
+                   JOIN threads t ON t.id=m.thread_id
+                   WHERE EXISTS (
+                         SELECT 1 FROM outcome_events e
+                         WHERE e.subject_key='message:' || m.id
+                           AND e.event_name=:event AND e.retracted_at IS NULL
+                     )
+                     AND t.user_id=(SELECT user_id FROM threads WHERE id=:thread)
+                     AND (m.created_at < :created OR (m.created_at=:created AND m.id < :message))
+                     AND {owner_filter}
+                   ORDER BY ranked.rank,m.created_at DESC,m.id DESC
+                   LIMIT :limit""",
+            {
+                **owner_params,
+                "query": query,
+                "candidate_limit": _REPEAT_CANDIDATE_LIMIT,
+                "event": CORRECTION_EVENT,
+                "thread": candidate.thread_id,
+                "created": candidate.created_at,
+                "message": candidate.source_id,
+                "limit": _REPEAT_SEARCH_LIMIT,
+            },
+        ).fetchall()
+    except sqlite3.OperationalError as exc:
+        if "no such table: messages_fts" not in str(exc):
+            raise
+        return ()
     return tuple(
         EarlierCorrection(str(row[0] or "Untitled thread"), str(row[1]), str(row[2]))
         for row in rows[:EARLIER_CORRECTIONS_LIMIT]
@@ -131,7 +137,7 @@ def local_clock(created_at: str) -> str:
         return created_at
     if sent.tzinfo is None:
         sent = sent.replace(tzinfo=UTC)
-    return f"{sent.astimezone():%Y-%m-%d %H:%M %Z}"
+    return f"{sent.astimezone(ZoneInfo('America/Los_Angeles')):%Y-%m-%d %H:%M %Z}"
 
 
 def _note(where: str, words: str, arrived_as: str, earlier: Iterable[EarlierCorrection] = ()) -> str:
