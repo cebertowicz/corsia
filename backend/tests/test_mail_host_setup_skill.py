@@ -15,7 +15,7 @@ FIRST_RUN_APP = (SKILLS / "conductor-bootstrap/references/first-run-app.md").rea
 
 def test_the_skill_is_named_and_never_handles_a_password() -> None:
     front = SKILL.split("---")[1]
-    assert "name: mail-host-setup" in front and "description: Use when the person wants email or calendar" in front
+    assert "name: mail-host-setup" in front and "description: Use when email or calendar on a host other than Gmail or Microsoft" in front
     assert "Never ask for, type, read, print or paste a password." in SKILL
     assert "Never open the host's app-password page with `browser_open`." in SKILL
     assert "never repeat it; tell them to delete that app password" in SKILL
