@@ -49,10 +49,7 @@ def test_disabled_verdict_source_is_not_reported_as_an_empty_experiment_list(db)
                 "doc_comment": {"count": 1, "refs": ["comment:b"]},
                 "message": {"count": 1, "refs": ["message:a"]},
             },
-            "lessons": {
-                **{name: {"count": 0, "refs": []} for name in ("recorded", "in_use", "held")},
-                "confirmed": None, "consolidated": None, "repeated": None,
-            },
+            "lessons": {"recorded": {"count": 0, "refs": []}, "confirmed": None, "consolidated": None, "repeated": None},
             "experiments": {"started": None, "decided": None},
             "wins": None,
         },
@@ -300,8 +297,7 @@ def test_recorded_lessons_count_each_lesson_once_with_a_reference_per_version(db
     from datetime import datetime, timezone
 
     from jobs import learning_report
-    from plans import lesson_reviews, node_states
-    from tests.plan_writer_authorizer import raw_plan_seed
+    from plans import lesson_reviews
 
     db.execute("INSERT INTO projects (id,name,created_at,updated_at) VALUES ('proj','Project','t','t')")
     db.execute("INSERT INTO threads (id,user_id,project_id,model,created_at,updated_at) "
@@ -311,11 +307,8 @@ def test_recorded_lessons_count_each_lesson_once_with_a_reference_per_version(db
     review = {"artifact_id": "art", "title": "Review", "acceptance": "Decide.", "review_after": "2099-01-01T00:00:00+00:00"}
     today = learning_report.report_date_for(datetime.now(timezone.utc))
 
-    def lessons():
-        return learning_report.build_report(db, scope="proj", report_date=today)["items"]["lessons"]
-
     def recorded():
-        return lessons()["recorded"]
+        return learning_report.build_report(db, scope="proj", report_date=today)["items"]["lessons"]["recorded"]
 
     for lesson_id, sha in (("a", "1"), ("a", "2"), ("b", "1")):
         lesson_reviews.ensure_lesson_review(db, "owner", lesson_id=lesson_id, behavioral_sha256=sha, **review)
@@ -323,34 +316,6 @@ def test_recorded_lessons_count_each_lesson_once_with_a_reference_per_version(db
 
     lesson_reviews.ensure_capture_review(db, "owner", capture_id="a", capture_hash="1", **review)
     assert (recorded()["count"], len(recorded()["refs"])) == (2, 4)
-    # a capture that became a trial is in use, never held; a capture alone is held
-    lesson_reviews.ensure_capture_review(db, "owner", capture_id="c", capture_hash="1", **review)
-    assert (lessons()["in_use"]["count"], lessons()["held"]["count"]) == (2, 1)
-    assert lessons()["held"]["refs"] == ["capture:c:1"]
-
-    # a watch is not delivered as guidance, so it is held
-    lesson_reviews.ensure_lesson_review(db, "owner", lesson_id="w", behavioral_sha256="1", state="watch", **review)
-    assert (lessons()["in_use"]["count"], lessons()["held"]["count"]) == (2, 2)
-    # a capture completed as a revision of another lesson is closed, so it is neither held nor counted twice
-    lesson_reviews.ensure_capture_review(db, "owner", capture_id="x", capture_hash="1", **review)
-    lesson_reviews.ensure_lesson_review(db, "owner", lesson_id="y", behavioral_sha256="1", capture_id="x", **review)
-    assert (recorded()["count"], lessons()["in_use"]["count"], lessons()["held"]["count"]) == (5, 3, 2)
-    assert "capture:x:1" not in lessons()["held"]["refs"]
-
-    # an archived review is settled even while its state is open, as the trial-offering path refuses it
-    with raw_plan_seed(db):
-        db.execute(
-            "UPDATE plan_nodes SET archived_at='t' WHERE id IN (SELECT node_id FROM plan_node_artifact_links "
-            "WHERE source_event_id IN (?,?))",
-            (lesson_reviews.lesson_key("b", "1"), lesson_reviews.capture_key("c", "1")),
-        )
-    assert (recorded()["count"], lessons()["in_use"]["count"], lessons()["held"]["count"]) == (3, 2, 1)
-    open_keys = {str(row[0]) for row in db.execute(
-        "SELECT l.source_event_id FROM plan_node_artifact_links l JOIN plan_nodes n ON n.id=l.node_id "
-        f"WHERE l.provenance='lesson.trial_review' AND {node_states.open_sql('n')}"
-    )}
-    reported = lessons()["in_use"]["refs"] + lessons()["held"]["refs"]
-    assert {ref.split(":")[1] for ref in reported} == {key.split(":")[1] for key in open_keys}
 
 
 def test_daily_report_is_passive_without_qualifying_facts(db):
@@ -361,10 +326,7 @@ def test_daily_report_is_passive_without_qualifying_facts(db):
     assert report["wake"] is False
     assert report["items"] == {
         "corrections": {},
-        "lessons": {
-            **{name: {"count": 0, "refs": []} for name in ("recorded", "in_use", "held")},
-            "confirmed": None, "consolidated": None, "repeated": None,
-        },
+        "lessons": {"recorded": {"count": 0, "refs": []}, "confirmed": None, "consolidated": None, "repeated": None},
         "experiments": {"started": None, "decided": None},
         "wins": None,
     }
