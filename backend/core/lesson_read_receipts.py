@@ -60,7 +60,7 @@ async def apply_lesson_read_delivery(
     try:
         delivered = await run_in_db(deliver)
     except Exception:  # noqa: BLE001 - a read remains usable if delivery is unavailable
-        logger.exception("lesson_delivery: unable to prepare trial delivery for %s", path)
+        logger.exception("lesson_delivery: unable to prepare trial delivery for {}", path)
         return rendered_text, empty
     return delivered.text, LessonReadReceipt(
         node_id=delivered.node_id,

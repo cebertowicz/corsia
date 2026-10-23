@@ -100,14 +100,12 @@ def _record(db, *, event_name: str, fact: CarryInFact, dedupe_suffix: str, attri
     return result.inserted
 
 
-def record_pending(
-    db, fact: CarryInFact, *, reason: str | None = None, attempt: int | None = None,
-) -> bool:
-    """Record a local-model-unavailable carry-in check without adding a queue."""
-    suffix = f"pending:attempt:{attempt}" if attempt is not None else "pending"
-    if reason is not None and attempt is None:
-        suffix = f"pending:{reason}"
-    return _record(db, event_name=PENDING_EVENT, fact=fact, dedupe_suffix=suffix, attributes={} if reason is None else {"reason": reason})
+def record_pending(db, fact: CarryInFact, *, reason: str | None = None) -> bool:
+    """Record one pending state; retries never create a new pending event."""
+    return _record(
+        db, event_name=PENDING_EVENT, fact=fact, dedupe_suffix="pending",
+        attributes={} if reason is None else {"reason": reason},
+    )
 
 
 def record_source_skipped(
@@ -156,8 +154,10 @@ def _model_identity(run: CarryInRun) -> str | None:
     return json.dumps({"resolved_identity": run.identity, "selector": run.selector}, sort_keys=True)
 
 
+def coverage_counts(db):
+    from core.lesson_carry_in_coverage import coverage_counts as count_coverage
 
-from core.lesson_carry_in_coverage import coverage_counts
+    return count_coverage(db)
 
 
 def record_retirement(db, fact: CarryInFact, reason: str) -> bool:
@@ -322,21 +322,21 @@ def drain_facts(db, workspace: Path, facts: Sequence[CarryInFact], adapter: Trac
             continue
         if not _rebaseline_first(db, workspace, fact, actions, adapter, runs):
             continue
-        setter = getattr(adapter, "set_fenced_target", None)
-        if setter is not None:
-            blob, reason = _recorded_target_blob(workspace, fact)
-            if blob is None:
-                with write_transaction(db, scope="carry_in_pending") as transaction:
-                    record_pending(transaction, fact, reason=reason)
-                continue
-            from eval.fresh_turn_context import FencedTarget
-
-            setter(FencedTarget(fact.target_path, fact.target_commit, blob, fact.role))
-        run = run_three(
-            actions, adapter, scenario=scenario_for_case(case),
-            before_sample=lambda: _target_snapshot(workspace, fact),
-        )
         try:
+            setter = getattr(adapter, "set_fenced_target", None)
+            if setter is not None:
+                blob, reason = _recorded_target_blob(workspace, fact)
+                if blob is None:
+                    with write_transaction(db, scope="carry_in_pending") as transaction:
+                        record_pending(transaction, fact, reason=reason)
+                    continue
+                from eval.fresh_turn_context import FencedTarget
+
+                setter(FencedTarget(fact.target_path, fact.target_commit, blob, fact.role))
+            run = run_three(
+                actions, adapter, scenario=scenario_for_case(case),
+                before_sample=lambda: _target_snapshot(workspace, fact),
+            )
             with write_transaction(db, scope="carry_in_result") as transaction:
                 if run.state == "pending" and run.reason is not None:
                     record_pending(transaction, fact, reason=run.reason)
@@ -365,12 +365,36 @@ def drain_facts(db, workspace: Path, facts: Sequence[CarryInFact], adapter: Trac
     return runs
 
 
-from core.lesson_carry_in_drain import (
-    _drain_committed_facts,
-    _pending_facts,
-    join_drain_threads,
-    record_committed_save,
-    schedule_committed_save,
-    schedule_pending_drain,
-    shutdown_drain_threads,
-)
+def _drain_committed_facts(*args, **kwargs):
+    from core.lesson_carry_in_drain import _drain_committed_facts as drain
+
+    return drain(*args, **kwargs)
+
+def _pending_facts(*args, **kwargs):
+    from core.lesson_carry_in_drain import _pending_facts as pending
+
+    return pending(*args, **kwargs)
+
+
+def join_drain_threads(*args, **kwargs):
+    from core.lesson_carry_in_drain import join_drain_threads as join
+
+    return join(*args, **kwargs)
+
+
+def record_committed_save(*args, **kwargs):
+    from core.lesson_carry_in_drain import record_committed_save as record
+
+    return record(*args, **kwargs)
+
+
+def schedule_pending_drain(*args, **kwargs):
+    from core.lesson_carry_in_drain import schedule_pending_drain as schedule
+
+    return schedule(*args, **kwargs)
+
+
+def shutdown_drain_threads(*args, **kwargs):
+    from core.lesson_carry_in_drain import shutdown_drain_threads as shutdown
+
+    return shutdown(*args, **kwargs)

@@ -153,13 +153,17 @@ def read_trial(text: str) -> TrialFile | None:
     """The trial a ``SKILL.md`` text is, or None when it is not a valid lesson."""
     from core.skill_validation import validate_skill_text
 
-    parsed = validate_skill_text(text)
-    lesson = parse_lesson(parsed.metadata) if parsed.ok else None
-    if lesson is None or not parsed.name or not parsed.description:
+    return trial_from_validation(validate_skill_text(text))
+
+
+def trial_from_validation(validation) -> TrialFile | None:
+    """Return a trial from a skill validation that already read its body."""
+    lesson = parse_lesson(validation.metadata) if validation.ok else None
+    if lesson is None or not validation.name or not validation.description:
         return None
     return TrialFile(
-        lesson=lesson, name=parsed.name, description=parsed.description, body=parsed.body,
-        behavioral_sha256=behavioral_sha256(parsed.description, parsed.body),
+        lesson=lesson, name=validation.name, description=validation.description, body=validation.body,
+        behavioral_sha256=behavioral_sha256(validation.description, validation.body),
     )
 
 

@@ -14,7 +14,7 @@ per-task-delivery reason; it never consumes cached-index budget or estimates.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from typing import Any
 
@@ -26,6 +26,7 @@ from core.skill_scanning import omitted_row
 OVERRIDDEN = "overridden by a more specific skill"
 # Trial lessons are never budgeted in the cached index.
 PER_TASK = "trial lesson is delivered per task"
+CAP_OMITTED = "ordinary skill cap omitted it"
 UNCHECKED = "its review could not be checked"
 UNREADABLE = "its file could not be read"
 SAME_NAME = "an ordinary skill has its name"
@@ -43,6 +44,7 @@ class LessonPartition:
 
     offered: list[SkillRow]
     omitted: list[SkillRow]
+    per_task: list[SkillRow] = field(default_factory=list)
 
 
 def index_line(row: SkillRow) -> str:
@@ -90,12 +92,15 @@ def _review_state(db, lesson, behavioral_sha256: str) -> tuple[str | None, str]:
 
 def _candidate(row: SkillRow, *, thread_id: str, db, now: datetime):
     """One trial row as (refusal, opened_at, record)."""
-    try:
-        data = row.path.read_bytes()
-        trial = read_trial(data.decode("utf-8"))
-    except (OSError, UnicodeDecodeError):
-        trial = None
-    if trial is None:
+    trial, digest = row.trial, row.raw_sha256
+    if trial is None or digest is None:
+        try:
+            data = row.path.read_bytes()
+            trial = read_trial(data.decode("utf-8"))
+            digest = raw_sha256(data)
+        except (OSError, UnicodeDecodeError):
+            trial = None
+    if trial is None or digest is None:
         return UNREADABLE, "", None
     # The review covers the owner's own file: a copy anywhere else is not the trial.
     if row.scope != "thread" or row.scope_id != trial.lesson.owner:
@@ -112,7 +117,7 @@ def _candidate(row: SkillRow, *, thread_id: str, db, now: datetime):
         "scope_id": row.scope_id,
         "inherited": not (row.scope == "thread" and row.scope_id == thread_id),
         "path": str(row.path),
-        "raw_sha256": raw_sha256(data),
+        "raw_sha256": digest,
         "review_after": trial.lesson.review_after,
         "index_line": index_line(row),
     }
@@ -171,6 +176,7 @@ def partition(
     moment = now or datetime.now(timezone.utc)
     remaining = list(omitted)
     held: list[SkillRow] = []
+    per_task: list[SkillRow] = []
     stands: list[SkillRow | None] = []
     for index, row in enumerate(included):
         if lesson_block(row.metadata) is None:
@@ -183,6 +189,7 @@ def partition(
             # The resolved row is held from every cached prefix. Its ordinary
             # lesson file stays available to the per-task delivery seam.
             held.append(omitted_row(standing.row, HELD_PREFIX + PER_TASK))
+            per_task.append(standing.row)
             stands[index] = None
     offered = [row for row in stands if row is not None]
-    return LessonPartition(offered=offered, omitted=[*remaining, *held])
+    return LessonPartition(offered=offered, omitted=[*remaining, *held], per_task=per_task)

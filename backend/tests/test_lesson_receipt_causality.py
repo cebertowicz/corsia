@@ -49,7 +49,7 @@ def _prior(db, *, thread_id: str, node_id: str, generation: str | None) -> None:
 def test_wake_with_carries_into_g1_without(db, tmp_path, monkeypatch):
     trial = _trial(tmp_path / "new" / "SKILL.md", is_new=True)
     with_node, without_node = _node("with"), _node("without")
-    monkeypatch.setattr("core.lesson_delivery._eligible_trials", lambda *_args: [trial])
+    monkeypatch.setattr("core.lesson_delivery._trial_deliveries", lambda *_args: ([trial], []))
 
     start_trials(db, thread_id="thread", node_id=with_node)
     assert start_trials(
@@ -79,7 +79,7 @@ def test_precheckpoint_with_carries_into_g1_without(db, tmp_path, monkeypatch):
 def test_wake_without_records_a_receipt(db, tmp_path, monkeypatch):
     trial = _trial(tmp_path / "new" / "SKILL.md", is_new=True)
     node_id = _node("without")
-    monkeypatch.setattr("core.lesson_delivery._eligible_trials", lambda *_args: [trial])
+    monkeypatch.setattr("core.lesson_delivery._trial_deliveries", lambda *_args: ([trial], []))
 
     assert start_trials(db, thread_id="thread", node_id=node_id) == []
     row = db.execute(

@@ -101,12 +101,13 @@ def _require(value: object, choices: tuple[str, ...], field: str) -> str:
     return str(value)
 
 
-def _subject_exists(db: sqlite3.Connection, subject_key: str) -> None:
+def _subject_exists(db: sqlite3.Connection, thread_id: str, subject_key: str) -> None:
     from core.corrections_recording import CORRECTION_EVENT
 
     row = db.execute(
-        "SELECT 1 FROM outcome_events WHERE event_name=? AND subject_key=? LIMIT 1",
-        (CORRECTION_EVENT, subject_key),
+        "SELECT 1 FROM outcome_events WHERE event_name=? AND subject_key=? "
+        "AND agent_thread_id=? LIMIT 1",
+        (CORRECTION_EVENT, subject_key, thread_id),
     ).fetchone()
     if row is None:
         raise ValueError("subject_key is not a recorded correction for this thread")
@@ -146,7 +147,7 @@ def record_triage(
         raise ValueError("serious_lowered_reason is only allowed when tier is not serious")
     if proposed_serious and tier_value != "serious" and not lowered:
         raise ValueError("Serious is proposed because this task took an outside or hard-to-undo tool effect; serious_lowered_reason is required to lower it")
-    _subject_exists(db, subject_key)
+    _subject_exists(db, thread_id, subject_key)
     existing = db.execute(
         "SELECT 1 FROM outcome_events WHERE event_name=? AND subject_key=? LIMIT 1",
         (TRIAGE_EVENT, subject_key),
@@ -181,7 +182,7 @@ def record_terminal_outcome(
     for field, value in (("lesson_id", lesson_id), ("workflow_version", workflow_version)):
         if value is not None and (not isinstance(value, str) or not value.strip()):
             raise ValueError(f"{field} must be a non-empty string when supplied")
-    _subject_exists(db, subject_key)
+    _subject_exists(db, thread_id, subject_key)
     existing = db.execute(
         "SELECT 1 FROM outcome_events WHERE event_name=? AND subject_key=? LIMIT 1",
         (OUTCOME_EVENT, subject_key),

@@ -9,7 +9,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from core.effective_context import ContextSourceEntry
-from core.lesson_index import index_line, name_entry, partition
+from core.lesson_index import CAP_OMITTED, HELD_PREFIX, index_line, name_entry, partition
+from core.skill_scanning import omitted_row
 from core.lesson_trials import lesson_block
 from core.role_context_sources import RoleContextResolution, RoleName
 from core.skill_registry_types import SkillResolution, SkillRow, SkillScope
@@ -152,10 +153,10 @@ def _listed_skills(
     return listed
 
 
-def _ordered_index_rows(
+def _capped_index_rows(
     rows: list[SkillRow], *, precedence: tuple[tuple[str, str], ...],
-) -> tuple[list[SkillRow], list[SkillRow]]:
-    """Order rows for the stable full index and names-only overflow."""
+) -> tuple[list[SkillRow], list[SkillRow], list[SkillRow], list[SkillRow]]:
+    """Apply the ordinary cap once, including task-delivered trials in its order."""
     specificity = {root: index for index, root in enumerate(reversed(precedence))}
 
     def index_order(row: SkillRow) -> tuple[int, str]:
@@ -164,17 +165,52 @@ def _ordered_index_rows(
     system_rows = sorted((row for row in rows if row.scope == "system"), key=lambda row: row.name)
     other_rows = sorted((row for row in rows if row.scope != "system"), key=index_order)
     full_rows = list(system_rows)
-    name_only_rows = []
+    name_only_rows: list[SkillRow] = []
+    per_task_rows: list[SkillRow] = []
+    capped_trials: list[SkillRow] = []
     ordinary_count = 0
     for row in other_rows:
-        if lesson_block(row.metadata) is not None:
-            full_rows.append(row)
-        elif ordinary_count < _NON_SYSTEM_FULL_SKILL_LIMIT:
-            full_rows.append(row)
+        trial = lesson_block(row.metadata) is not None
+        if ordinary_count < _NON_SYSTEM_FULL_SKILL_LIMIT:
             ordinary_count += 1
+            if trial:
+                per_task_rows.append(row)
+            else:
+                full_rows.append(row)
+        elif trial:
+            capped_trials.append(row)
         else:
             name_only_rows.append(row)
+    return full_rows, name_only_rows, per_task_rows, capped_trials
+
+
+def _ordered_index_rows(
+    rows: list[SkillRow], *, precedence: tuple[tuple[str, str], ...],
+) -> tuple[list[SkillRow], list[SkillRow]]:
+    """Order visible rows for the stable full index and names-only overflow."""
+    full_rows, name_only_rows, _per_task_rows, _capped_trials = _capped_index_rows(
+        rows, precedence=precedence,
+    )
     return full_rows, name_only_rows
+
+
+def trial_delivery_rows(*, thread_id: str, project_id: str | None, workspace: Path, db) -> tuple[list[SkillRow], list[SkillRow]]:
+    """Return cap-admitted trials and cap-omitted trials from one skills ordering."""
+    resolved = resolve_effective_skills(
+        thread_id=thread_id, project_id=project_id, workspace=workspace, db=db,
+    )
+    split = partition(resolved.included, resolved.omitted, thread_id=thread_id, db=db)
+    _full_rows, _name_only_rows, per_task_rows, capped_trials = _capped_index_rows(
+        [*split.offered, *split.per_task], precedence=resolved.precedence,
+    )
+    return per_task_rows, capped_trials
+
+
+def _cap_omitted_rows(rows: list[SkillRow], capped_trials: list[SkillRow]) -> list[SkillRow]:
+    capped_paths = {row.path for row in capped_trials}
+    return [row for row in rows if row.path not in capped_paths] + [
+        omitted_row(row, HELD_PREFIX + CAP_OMITTED) for row in capped_trials
+    ]
 
 
 def _displayable_skill_errors(rows: list[SkillRow]) -> list[SkillRow]:
@@ -204,12 +240,13 @@ def skill_context_sources(
     )
     # The one writer of lesson membership: a held trial leaves the index here.
     split = partition(resolved.included, resolved.omitted, thread_id=thread_id, db=db)
-    full_rows, name_only_rows = _ordered_index_rows(
-        split.offered, precedence=resolved.precedence,
+    full_rows, name_only_rows, _per_task_rows, capped_trials = _capped_index_rows(
+        [*split.offered, *split.per_task], precedence=resolved.precedence,
     )
+    omitted_rows = _cap_omitted_rows(split.omitted, capped_trials)
     included = [*full_rows, *name_only_rows]
     shadowed = sorted(
-        {row.name for row in split.omitted if row.errors == ["shadowed by System"]}
+        {row.name for row in omitted_rows if row.errors == ["shadowed by System"]}
     )
     errors = _displayable_skill_errors(resolved.errors)
     has_index = bool(included or shadowed or errors)
@@ -233,7 +270,7 @@ def skill_context_sources(
             metadata={
                 "provider": "skills",
                 "skill_count": len(included),
-                "omitted_count": len(split.omitted),
+                "omitted_count": len(omitted_rows),
                 "error_count": len(resolved.errors),
                 "system_unavailable": resolved.system_unavailable,
                 "repair_owner": "skills",
@@ -245,7 +282,7 @@ def skill_context_sources(
     ]
     if resolved.system_unavailable:
         sources.append(_system_unavailable_source())
-    for row in split.omitted:
+    for row in omitted_rows:
         reason = row.errors[0] if row.errors else "skill overridden by a more specific scope"
         sources.append(_row_source(row, freshness="fresh", reason=reason))
     for row in resolved.errors:
@@ -259,7 +296,7 @@ def skill_context_sources(
         properties={
             "project_id": project_id,
             "skill_count": len(included),
-            "omitted_count": len(split.omitted),
+            "omitted_count": len(omitted_rows),
             "error_count": len(resolved.errors),
         },
     )

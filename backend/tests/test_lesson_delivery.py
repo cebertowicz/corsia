@@ -1,12 +1,19 @@
 """F4 task-scoped trial delivery, independent of the cached skills index."""
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 import sqlite3
 
 import pytest
 
-from core.lesson_delivery import ReadDelivery, TrialDelivery, draw, read_delivery, start_trials
+from core import lesson_files
+from core.lesson_delivery import (
+    ReadDelivery, TrialDelivery, TrialOmission, _trial_deliveries, draw, read_delivery, start_trials,
+)
+from core.lesson_trials import Trial
+from core.skill_registry_types import SkillRow
+from core.skill_validation import validate_skill_text
 from infra.schema import SCHEMA_SQL
 from tools.filesystem_gate import canonical_target_path
 
@@ -160,7 +167,7 @@ def test_start_trials_returns_only_new_file_with_assignments(db, tmp_path, monke
         f"node-{number}" for number in range(1000)
         if draw("new", "a" * 64, f"node-{number}") == "with"
     )
-    monkeypatch.setattr("core.lesson_delivery._eligible_trials", lambda *_args: [existing, new_trial])
+    monkeypatch.setattr("core.lesson_delivery._trial_deliveries", lambda *_args: ([existing, new_trial], []))
 
     assert start_trials(
         db, thread_id="thread", node_id=node_id, checkpoint_generation_id="install-1",
@@ -180,7 +187,7 @@ def test_start_trials_rolls_back_the_draw_when_its_receipt_fails(db, tmp_path, m
         f"node-{number}" for number in range(1000)
         if draw("new", "a" * 64, f"node-{number}") == "with"
     )
-    monkeypatch.setattr("core.lesson_delivery._eligible_trials", lambda *_args: [new_trial])
+    monkeypatch.setattr("core.lesson_delivery._trial_deliveries", lambda *_args: ([new_trial], []))
 
     def receipt_failure(_data):
         raise RuntimeError("receipt unavailable")
@@ -194,13 +201,74 @@ def test_start_trials_rolls_back_the_draw_when_its_receipt_fails(db, tmp_path, m
     assert not db.in_transaction
 
 
+def test_start_trials_records_a_cap_omission_without_counting_a_trial_draw(db, tmp_path, monkeypatch):
+    omitted = _trial(tmp_path / "skills" / "omitted" / "SKILL.md", lesson_id="omitted", is_new=True)
+    omission = TrialOmission(
+        omitted.lesson_id, omitted.behavioral_sha256, omitted.source_path, omitted.source_data,
+    )
+    monkeypatch.setattr("core.lesson_delivery._trial_deliveries", lambda *_args: ([], [omission]))
+
+    assert start_trials(db, thread_id="thread", node_id="node", checkpoint_generation_id="install-1") == []
+    row = db.execute(
+        "SELECT node_id,variant,lesson_id,lesson_behavioral_sha256,raw_sha256,delivered_sha256 FROM guidance_loads"
+    ).fetchone()
+    assert tuple(row) == (
+        "node", None, "omitted", "a" * 64, hashlib.sha256(omitted.source_data).hexdigest(),
+        hashlib.sha256(b"").hexdigest(),
+    )
+    assert start_trials(db, thread_id="thread", node_id="node", checkpoint_generation_id="install-1") == []
+    assert db.execute("SELECT COUNT(*) FROM guidance_loads").fetchone()[0] == 1
+
+
+def test_trial_resolution_does_not_reopen_41_resolved_trial_bodies(db, tmp_path, monkeypatch):
+    rows = []
+    for number in range(41):
+        name = f"trial-{number:02}"
+        path = tmp_path / "skills" / name / "SKILL.md"
+        path.parent.mkdir(parents=True)
+        text = lesson_files.render_trial(
+            lesson_id=f"00000000-0000-0000-0000-{number:012d}", owner="thread", name=name,
+            description="Use when counting trial reads.", text="Use the reviewed procedure.",
+            trial=Trial(kind="hypothesis", review_after="2030-01-01T00:00:00+00:00"),
+            source_refs=[{"kind": "turn", "reference": "turn-1"}],
+            target_file="new", new_target_path=f"context/{name}.md",
+        )
+        text = lesson_files.with_review_ref(text, "review")
+        path.write_text(text, encoding="utf-8")
+        validation = validate_skill_text(text)
+        trial = lesson_files.trial_from_validation(validation)
+        rows.append(SkillRow(
+            name=name, description=validation.description, scope="thread", scope_id="thread",
+            path=path, body_path=path, metadata=validation.metadata, status="included",
+            trial=trial, raw_sha256=hashlib.sha256(text.encode()).hexdigest(), source_data=text.encode(),
+        ))
+    monkeypatch.setattr(
+        "core.skills_registry.trial_delivery_rows", lambda **_kwargs: (rows[:40], rows[40:]),
+    )
+    monkeypatch.setattr("core.lesson_index._review_state", lambda *_args: (None, ""))
+    original_read = Path.read_bytes
+    reads: list[Path] = []
+
+    def counted_read(path: Path) -> bytes:
+        reads.append(path)
+        return original_read(path)
+
+    monkeypatch.setattr(Path, "read_bytes", counted_read)
+
+    admitted, omitted = _trial_deliveries(db, "thread")
+
+    assert len(admitted) == 40
+    assert [trial.lesson_id for trial in omitted] == ["00000000-0000-0000-0000-000000000040"]
+    assert reads == []
+
+
 def test_start_trials_records_a_without_draw_without_returning_it(db, tmp_path, monkeypatch):
     new_trial = _trial(tmp_path / "skills" / "new" / "SKILL.md", lesson_id="new", is_new=True)
     node_id = next(
         f"node-{number}" for number in range(1000)
         if draw("new", "a" * 64, f"node-{number}") == "without"
     )
-    monkeypatch.setattr("core.lesson_delivery._eligible_trials", lambda *_args: [new_trial])
+    monkeypatch.setattr("core.lesson_delivery._trial_deliveries", lambda *_args: ([new_trial], []))
 
     assert start_trials(
         db, thread_id="thread", node_id=node_id, checkpoint_generation_id="install-1",
@@ -221,7 +289,7 @@ def test_start_trials_records_both_halves_once_per_task(db, tmp_path, monkeypatc
         )
         for variant in ("with", "without")
     }
-    monkeypatch.setattr("core.lesson_delivery._eligible_trials", lambda *_args: [existing, new_trial])
+    monkeypatch.setattr("core.lesson_delivery._trial_deliveries", lambda *_args: ([existing, new_trial], []))
 
     returned = {
         variant: [
@@ -362,7 +430,7 @@ def test_known_task_start_records_crossover_and_unknown_start_records_without(db
         f"node-{number}" for number in range(1000)
         if draw("new", "a" * 64, f"node-{number}") == "without" and f"node-{number}" != without_node
     )
-    monkeypatch.setattr("core.lesson_delivery._eligible_trials", lambda *_args: [new_trial])
+    monkeypatch.setattr("core.lesson_delivery._trial_deliveries", lambda *_args: ([new_trial], []))
 
     start_trials(db, thread_id="thread", node_id=with_node, checkpoint_generation_id="install-1")
     assert start_trials(
@@ -391,7 +459,7 @@ def test_task_start_draw_commits_before_another_connection_reads_it(tmp_path, mo
         f"node-{number}" for number in range(1000)
         if draw("new", "a" * 64, f"node-{number}") == "with"
     )
-    monkeypatch.setattr("core.lesson_delivery._eligible_trials", lambda *_args: [new_trial])
+    monkeypatch.setattr("core.lesson_delivery._trial_deliveries", lambda *_args: ([new_trial], []))
 
     start_trials(db, thread_id="thread", node_id=node_id, checkpoint_generation_id="install-1")
     assert not db.in_transaction

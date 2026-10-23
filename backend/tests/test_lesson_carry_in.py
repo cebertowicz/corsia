@@ -385,6 +385,36 @@ def test_newest_result_is_used_as_the_model_baseline():
     )
 
 
+def test_baseline_result_streams_only_matching_rows():
+    from core.lesson_carry_in import CarryInFact
+    from core.lesson_carry_in_result_queries import baseline_result
+
+    fact = CarryInFact("lesson", "owner", "a" * 40, "context/rule.md", "case")
+
+    class Rows:
+        def __iter__(self):
+            return iter([{
+                "attributes": json.dumps({
+                    "lesson_id": "lesson", "target_path": "context/rule.md", "commit": "b" * 40,
+                    "role": "edit", "model_identity": "model",
+                }),
+            }])
+
+        def fetchall(self):
+            pytest.fail("baseline_result must not materialize matching rows")
+
+    class Db:
+        def execute(self, query, params):
+            assert "json_extract(attributes, '$.lesson_id')=?" in query
+            assert "json_extract(attributes, '$.target_path')=?" in query
+            assert params[1:] == ("lesson", "context/rule.md")
+            return Rows()
+
+    assert baseline_result(Db(), fact) == (
+        CarryInFact("lesson", "owner", "b" * 40, "context/rule.md", "case"), "model",
+    )
+
+
 def test_model_not_ready_stays_pending_without_a_model_call():
     from core.lesson_carry_in import run_three
 
@@ -748,6 +778,35 @@ def test_cleanup_cannot_rollback_a_settled_carry_in_result(monkeypatch: pytest.M
     assert db.execute("SELECT event_name FROM outcome_events WHERE event_name='learning_loop.carry_in_result'").fetchone()
 
 
+def test_drain_facts_cleans_up_when_the_adapter_raises(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    from core.lesson_carry_in import CarryInFact, drain_facts
+
+    db = _event_db()
+    fact = CarryInFact("lesson", "owner", "a" * 40, "context/rule.md", "case")
+    cleaned: list[bool] = []
+
+    class RaisingAdapter:
+        def ready(self) -> bool:
+            return True
+
+        def run(self, **_kwargs):
+            raise RuntimeError("fresh turn failed")
+
+        def cleanup(self):
+            cleaned.append(True)
+
+    monkeypatch.setattr(
+        "core.lesson_carry_in._case_for_fact",
+        lambda *_args: {"what_happened": "The rule was missed.", "actions": ACTIONS},
+    )
+    monkeypatch.setattr("core.lesson_carry_in._target_snapshot", lambda *_args: ("target-hash", None))
+
+    with pytest.raises(RuntimeError, match="fresh turn failed"):
+        drain_facts(db, tmp_path, [fact], RaisingAdapter())
+
+    assert cleaned == [True]
+
+
 def test_rebaseline_cleanup_cannot_rollback_its_settled_result(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     from core.lesson_carry_in import CarryInFact, CarryInRun, TraceScore, _rebaseline_first, record_result
 
@@ -923,7 +982,11 @@ def test_pending_result_and_retirement_are_queryable_outcome_events():
     db = _event_db()
     fact = CarryInFact("lesson-1", "owner", "a" * 40, "context/rule.md", ".threads/owner/skills/lesson/SKILL.md#corsia.lesson.case")
     assert record_pending(db, fact)
+    assert not record_pending(db, fact, reason="local model unavailable")
     assert is_pending(db, fact)
+    assert db.execute(
+        "SELECT COUNT(*) FROM outcome_events WHERE event_name='learning_loop.carry_in_pending'"
+    ).fetchone()[0] == 1
 
     run = CarryInRun(
         "settled", (TraceScore("pass", "required decisive action", 0),) * 3,
@@ -979,8 +1042,12 @@ def test_pending_round_trip_recovers_owner_and_drains_without_a_cap_override(
     monkeypatch.setattr("core.lesson_carry_in_drain.drain_facts", drain)
 
     _drain_pending(tmp_path)
+    _drain_pending(tmp_path)
 
-    assert drained == [fact]
+    assert drained == [fact, fact]
+    assert db.execute(
+        "SELECT COUNT(*) FROM outcome_events WHERE event_name='learning_loop.carry_in_pending'"
+    ).fetchone()[0] == 1
 
 
 def test_pending_drain_retires_caseless_first_fact_before_running_later_fact(
@@ -1018,7 +1085,7 @@ def test_pending_drain_retires_caseless_first_fact_before_running_later_fact(
     ).fetchone()["attributes"]
 
 
-def test_pending_drain_advances_past_missing_owner_without_retiring_first_fact(
+def test_pending_drain_retires_missing_owner_before_running_later_fact(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ):
     from core.lesson_carry_in import CarryInFact, is_pending, record_pending
@@ -1040,13 +1107,12 @@ def test_pending_drain_advances_past_missing_owner_without_retiring_first_fact(
     monkeypatch.setattr("core.lesson_carry_in_drain.drain_facts", lambda _db, _workspace, facts, _adapter: drained.extend(facts))
 
     _drain_pending(tmp_path)
-    assert drained == []
-    assert is_pending(db, first)
-
-    _drain_pending(tmp_path)
 
     assert drained == [second]
-    assert is_pending(db, first)
+    assert not is_pending(db, first)
+    assert "owner is unavailable" in db.execute(
+        "SELECT attributes FROM outcome_events WHERE event_name='learning_loop.carry_in_retirement'"
+    ).fetchone()["attributes"]
 
 
 def test_pending_drain_retires_target_changed_first_fact_before_running_later_fact(
@@ -1179,6 +1245,20 @@ def _corrections(db):
     return db.execute(
         "SELECT agent_thread_id,attributes FROM outcome_events WHERE event_name='measurement.correction'"
     ).fetchall()
+
+
+def test_prior_case_status_rejects_a_pass_recorded_after_this_pending_fact():
+    from core.lesson_carry_in import CarryInFact, _case_sha, record_pending, record_result
+    from core.lesson_carry_in_result_queries import prior_case_status
+
+    db = _event_db()
+    case = {"what_happened": "Missed.", "right_call": "Read it.", "does_not_apply": "Draft.", "actions": ACTIONS}
+    older = CarryInFact("lesson", "owner", "a" * 40, "context/rule.md", "case")
+    newer = CarryInFact("lesson", "owner", "b" * 40, "context/rule.md", "case")
+    assert record_pending(db, older)
+    assert record_result(db, newer, _carry_in_run("pass"), case_sha=_case_sha(case), case_status="proven")
+
+    assert prior_case_status(db, older, _case_sha(case)) == "unproven"
 
 
 def test_fail_then_fail_marks_a_case_unproven_without_a_correction(monkeypatch: pytest.MonkeyPatch):

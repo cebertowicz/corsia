@@ -228,6 +228,25 @@ async def test_prefixed_serious_effect_from_native_result_writer_is_detected() -
     assert serious_proposed(db, THREAD) is True
 
 
+def test_correction_subject_must_belong_to_the_calling_thread() -> None:
+    from infra.outcome_events import record_outcome_event
+
+    db = _db()
+    db.execute(
+        "INSERT INTO threads (id,user_id,model,history_epoch,next_message_seq,created_at,updated_at) "
+        "VALUES ('other', 'user', 'native/test', 0, 1, ?, ?)",
+        (NOW, NOW),
+    )
+    record_outcome_event(
+        db, dedupe_key="correction:other", event_name="measurement.correction", source="agent",
+        provenance="agent_recorded", ts=NOW, subject_key="message:other", agent_thread_id="other",
+        attributes={"label": "correction"},
+    )
+
+    with pytest.raises(ValueError, match="recorded correction for this thread"):
+        record_terminal_outcome(db, thread_id=THREAD, subject_key="message:other", outcome="fixed")
+
+
 def test_terminal_outcome_is_immutable_and_dropped_needs_reason(tmp_path: Path) -> None:
     db = _db()
     path = tmp_path / "SKILL.md"

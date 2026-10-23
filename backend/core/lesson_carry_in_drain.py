@@ -10,14 +10,13 @@ from loguru import logger
 
 from core.lesson_carry_in import (
     PENDING_EVENT,
-    RESULT_EVENT,
-    RETIREMENT_EVENT,
     CarryInFact,
     _case_for_fact,
     _fresh_scope,
     _matching_facts,
     _target_snapshot,
     drain_facts,
+    is_pending,
     record_pending,
     record_retirement,
 )
@@ -89,14 +88,6 @@ def record_committed_save(workspace: Path, paths: Sequence[Path], commit: str) -
     _schedule_drain(_record_save_drain, (workspace, tuple(paths), commit))
 
 
-def schedule_committed_save(workspace: Path, paths: Sequence[Path], commit: str) -> None:
-    """Keep a scheduling failure out of the completed guidance save."""
-    try:
-        record_committed_save(workspace, paths, commit)
-    except Exception:
-        logger.opt(exception=True).warning("carry-in scheduling failed")
-
-
 def _owner_user_id(db, thread_id: str) -> str | None:
     row = db.execute("SELECT user_id FROM threads WHERE id=?", (thread_id,)).fetchone()
     return None if row is None or row[0] is None else str(row[0])
@@ -121,12 +112,10 @@ def _drain_committed_facts(
 def _pending_facts(db) -> list[CarryInFact]:
     """Rebuild unfinished facts from their existing outcome-event attributes."""
     rows = db.execute(
-        """SELECT pending.attributes FROM outcome_events pending
-           WHERE pending.event_name=? AND pending.retracted_at IS NULL AND NOT EXISTS (
-             SELECT 1 FROM outcome_events terminal WHERE terminal.subject_key=pending.subject_key
-               AND terminal.retracted_at IS NULL AND terminal.event_name IN (?, ?)
-           ) ORDER BY pending.observed_ts, pending.id""",
-        (PENDING_EVENT, RESULT_EVENT, RETIREMENT_EVENT),
+        """SELECT attributes FROM outcome_events
+           WHERE event_name=? AND retracted_at IS NULL
+           ORDER BY observed_ts, id""",
+        (PENDING_EVENT,),
     ).fetchall()
     facts: dict[str, CarryInFact] = {}
     for row in rows:
@@ -139,7 +128,7 @@ def _pending_facts(db) -> list[CarryInFact]:
         except (KeyError, TypeError, ValueError, json.JSONDecodeError):
             continue
         facts[fact.subject_key] = fact
-    return list(facts.values())
+    return [fact for fact in facts.values() if is_pending(db, fact)]
 
 
 def _drainable_pending_facts(db, workspace: Path, facts: Sequence[CarryInFact]) -> list[CarryInFact]:
@@ -157,17 +146,17 @@ def _drainable_pending_facts(db, workspace: Path, facts: Sequence[CarryInFact]) 
             with write_transaction(db, scope="carry_in_retirement") as transaction:
                 record_retirement(transaction, fact, "target changed after recorded commit")
             continue
+        if _owner_user_id(db, fact.owner_thread_id) is None:
+            with write_transaction(db, scope="carry_in_retirement") as transaction:
+                record_retirement(transaction, fact, "carry-in owner is unavailable")
+            continue
         drainable.append(fact)
     return drainable
 
 
 def _pending_event_count(db) -> int:
-    """Keep bounded rotation in the existing append-only pending-fact lifecycle."""
-    row = db.execute(
-        "SELECT COUNT(*) FROM outcome_events WHERE event_name=? AND retracted_at IS NULL",
-        (PENDING_EVENT,),
-    ).fetchone()
-    return int(row[0])
+    """Count unresolved facts for a bounded drain window, never drain attempts."""
+    return len(_pending_facts(db))
 
 
 def _drain_pending(workspace: Path) -> None:
@@ -185,10 +174,6 @@ def _drain_pending(workspace: Path) -> None:
                 edit_number=0 if cap is None or cap <= 0 else _pending_event_count(db) // cap,
             )
             for fact in facts:
-                with write_transaction(db, scope="carry_in_pending") as transaction:
-                    record_pending(
-                        transaction, fact, reason="pending drain attempted", attempt=_pending_event_count(transaction) + 1,
-                    )
                 user_id = _owner_user_id(db, fact.owner_thread_id)
                 if user_id is not None:
                     drain_facts(db, workspace, [fact], LocalTraceAdapter(user_id, _fresh_scope(db, workspace, fact.target_path)))

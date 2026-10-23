@@ -153,14 +153,14 @@ async def test_plan_activation_records_new_trial_before_returning_lessons(recall
     monkeypatch.setattr("core.lesson_delivery.draw", lambda *_args: "with")
     from core import lesson_delivery
 
-    real_eligible_trials = lesson_delivery._eligible_trials
+    real_trial_deliveries = lesson_delivery._trial_deliveries
     eligibility_transaction_states: list[bool] = []
 
     def observe_eligibility_state(db, thread_id):
         eligibility_transaction_states.append(db.in_transaction)
-        return real_eligible_trials(db, thread_id)
+        return real_trial_deliveries(db, thread_id)
 
-    monkeypatch.setattr(lesson_delivery, "_eligible_trials", observe_eligibility_state)
+    monkeypatch.setattr(lesson_delivery, "_trial_deliveries", observe_eligibility_state)
     result = await _activate(recall_db, thread_id, "Start new target work")
 
     assert eligibility_transaction_states == [False]
@@ -254,7 +254,7 @@ def test_wake_with_unknown_install_records_without_receipt(recall_db, monkeypatc
         target_section=None, body="Use the trial procedure.", index_line="- trial",
         source_data=b"trial source",
     )
-    monkeypatch.setattr("core.lesson_delivery._eligible_trials", lambda *_args: [trial])
+    monkeypatch.setattr("core.lesson_delivery._trial_deliveries", lambda *_args: ([trial], []))
     monkeypatch.setattr("core.lesson_delivery.draw", lambda *_args: "without")
     recall_db.commit()
 

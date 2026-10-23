@@ -504,6 +504,27 @@ def test_trial_delivery_does_not_change_the_cached_index(db, workspace):
         "trial lesson not offered: trial lesson is delivered per task"
 
 
+def test_trials_share_the_ordinary_40_skill_cap(db, workspace):
+    from core.skills_registry import trial_delivery_rows
+
+    for number in range(41):
+        if number != 20:
+            _write(workspace, "owner", f"skill-{number:02}", _plain(f"skill-{number:02}"))
+    under_cap, _ = _activate(db, workspace, name="skill-20", lesson_id=LESSON)
+    past_cap, _ = _activate(db, workspace, name="skill-99", lesson_id=OTHER)
+
+    delivered, not_delivered = trial_delivery_rows(
+        thread_id="owner", project_id=None, workspace=workspace, db=db,
+    )
+    sources = _sources(db, workspace)
+
+    assert [row.path for row in delivered] == [under_cap]
+    assert [row.path for row in not_delivered] == [past_cap]
+    assert "- skill-20 (trial, unproven):" not in (_index(sources).prompt_content or "")
+    assert "- skill-99 (trial, unproven):" not in (_index(sources).prompt_content or "")
+    assert _held(sources, "skill-99").reason == "trial lesson not offered: ordinary skill cap omitted it"
+
+
 MISPLACED = "trial lesson not offered: its file is not in its owner's skills"
 
 

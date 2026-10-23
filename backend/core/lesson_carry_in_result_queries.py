@@ -12,17 +12,21 @@ def prior_case_status(db, fact: CarryInFact, case_sha: str | None) -> str:
     """Return proven only after an earlier matching settled pass, in any run role."""
     if case_sha is None:
         return "unproven"
-    from core.lesson_carry_in import RESULT_EVENT
+    from core.lesson_carry_in import PENDING_EVENT, RESULT_EVENT
 
     row = db.execute(
         """SELECT 1 FROM outcome_events
            WHERE event_name=? AND retracted_at IS NULL
+             AND rowid < (
+               SELECT MIN(rowid) FROM outcome_events
+               WHERE event_name=? AND subject_key=? AND retracted_at IS NULL
+             )
              AND json_extract(attributes, '$.lesson_id')=?
              AND json_extract(attributes, '$.target_path')=?
              AND json_extract(attributes, '$.case_sha')=?
              AND json_extract(attributes, '$.verdict')='pass'
            LIMIT 1""",
-        (RESULT_EVENT, fact.lesson_id, fact.target_path, case_sha),
+        (RESULT_EVENT, PENDING_EVENT, fact.subject_key, fact.lesson_id, fact.target_path, case_sha),
     ).fetchone()
     return "proven" if row is not None else "unproven"
 
@@ -40,9 +44,13 @@ def baseline_result(db, fact: CarryInFact) -> tuple[CarryInFact, str] | None:
     from core.lesson_carry_in import RESULT_EVENT
 
     rows = db.execute(
-        "SELECT attributes FROM outcome_events WHERE event_name=? AND retracted_at IS NULL ORDER BY ts DESC, rowid DESC",
-        (RESULT_EVENT,),
-    ).fetchall()
+        """SELECT attributes FROM outcome_events
+           WHERE event_name=? AND retracted_at IS NULL
+             AND json_extract(attributes, '$.lesson_id')=?
+             AND json_extract(attributes, '$.target_path')=?
+           ORDER BY ts DESC, rowid DESC""",
+        (RESULT_EVENT, fact.lesson_id, fact.target_path),
+    )
     for row in rows:
         try:
             attrs = json.loads(row["attributes"])
