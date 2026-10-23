@@ -17,10 +17,7 @@ CREATE TABLE IF NOT EXISTS measure_breaks (
     reason TEXT NOT NULL,
     PRIMARY KEY(period, kind, metric_group)
 );
-CREATE TABLE IF NOT EXISTS measurement_model_versions (
-    identity TEXT PRIMARY KEY,
-    started_at TEXT NOT NULL
-);
+-- Model boundaries derive from rating facts at read time.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_measure_breaks_identity
     ON measure_breaks(period, kind, COALESCE(metric_group, ''));
 CREATE UNIQUE INDEX IF NOT EXISTS idx_measure_break_starts_group
@@ -43,11 +40,6 @@ MEASUREMENT_INDEXES: dict[str, str] = {
     "plan_node_events": """
     CREATE INDEX IF NOT EXISTS idx_measurement_rejections_time
         ON plan_node_events(created_at, node_id) WHERE event='review_rejected'""",
-    # The user-owned hold boundary can be newly observed during a request, then
-    # is retained with the other immutable measurement boundaries.
-    "plan_node_holds": """
-    CREATE INDEX IF NOT EXISTS idx_measurement_user_holds_start
-        ON plan_node_holds(created_at) WHERE owner_kind='user'""",
     # The install-wide fresh-token boundary uses exactly this contract. Keeping
     # only qualifying rows makes its first retained record an index seek rather
     # than a traversal of the complete usage ledger.
@@ -66,15 +58,6 @@ MEASUREMENT_INDEXES: dict[str, str] = {
     CREATE INDEX IF NOT EXISTS idx_measurement_decisions_answered
         ON artifact_identities(json_extract(metadata, '$.plan_decision.answered_at'))
         WHERE integration='local' AND type='plan-decision' AND json_valid(metadata)""",
-    "first_try_failed": """
-    CREATE INDEX IF NOT EXISTS idx_measurement_first_try_failed
-        ON plan_node_events(created_at) WHERE new_state='failed'""",
-    "first_try_corrections": """
-    CREATE INDEX IF NOT EXISTS idx_measurement_first_try_corrections
-        ON plan_node_events(created_at) WHERE event='correction_created'""",
-    "first_try_released_bad": """
-    CREATE INDEX IF NOT EXISTS idx_measurement_first_try_released_bad
-        ON plan_node_attempts(released_at) WHERE release_reason IN ('failed','requirements_changed')""",
     "size_rater": """
     CREATE INDEX IF NOT EXISTS idx_measurement_size_rater
         ON outcome_events(json_extract(attributes, '$.rater'), subject_key)

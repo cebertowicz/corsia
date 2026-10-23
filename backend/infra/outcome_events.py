@@ -14,9 +14,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-from core.size_rating import SIZE_EVENT
 from host_access.credential_sanitizer import contains_credential
-from infra.measurement_starts import record_model_version
 from infra.outcome_event_attributes import AttributeSpec, filter_attributes
 from infra.outcome_event_input import OutcomeInputRefusal
 
@@ -115,8 +113,6 @@ def record_outcome_event(
         return RecordResult(False, None, ())
     if dropped:
         count_outcome_event(db, "attribute_dropped", event_name, len(dropped), agent_thread_id=agent_thread_id or "")
-    if event_name == SIZE_EVENT:
-        record_model_version(db, str(kept.get("rater") or ""), subject_key)
     return RecordResult(True, event_id, tuple(dropped))
 
 

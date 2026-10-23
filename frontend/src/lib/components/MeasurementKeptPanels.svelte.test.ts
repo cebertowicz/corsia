@@ -58,7 +58,7 @@ describe('kept charts on Days', () => {
 		const empty = { outcomes: [], took_recommendation_pct: [], asks_per_outcome: [], rejections_per_outcome: [], fresh_tokens_per_outcome: [] };
 		render(empty);
 		for (const id of ['outcomes', 'alignment', 'asks', 'rejections', 'tokens']) {
-			expect(card(id).textContent).toContain('Not yet measured for this scope.');
+			expect(card(id).textContent).toContain('No measurements in this project or workspace.');
 			expect(card(id).textContent).not.toContain('No measurement rows in this range.');
 		}
 	});

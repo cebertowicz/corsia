@@ -431,12 +431,13 @@ async def test_descendant_threads_attribute_to_the_agent_that_owns_them(isolated
         for period in trailing:
             _seed_period(db, "worker", period, 20)
             _seed_tokens(db, "worker-child", period, 1000)
+            _seed_decision(db, "worker", period, 0)
             _seed_hold(db, "worker", period)
 
     result = await _agents(seed)
     row = result["rows"][0]
     assert row["metrics"]["fresh_tokens_per_outcome"]["value"] == pytest.approx(1000 / 20)
-    assert row["metrics"]["asks_per_outcome"]["value"] == pytest.approx(1 / 20)
+    assert row["metrics"]["asks_per_outcome"]["value"] == pytest.approx(2 / 20)
     assert result["project_summaries"][0]["project"]["id"] == "p1"
 
 

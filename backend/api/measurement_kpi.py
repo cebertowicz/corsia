@@ -10,7 +10,8 @@ from __future__ import annotations
 
 from typing import Any, NamedTuple
 
-from api.measurement_breaks import latest_source_mark_period, source_started_at
+from api.measurement_breaks import latest_source_mark_period, source_started_period
+from core.measurement_scope import Grain
 from api.measurement_token_sql import TOKEN_FIGURE_SQL
 
 
@@ -39,12 +40,12 @@ def _token_figure(row: dict[str, Any] | None, name: str) -> dict[str, int]:
     return {"value": int(row[name] or 0), "unknown_records": int(row[f"{name}_unknown"] or 0)}
 
 
-def build_kpi(db, current: Period, previous: Period, *, pending_starts: dict[str, str | None] | None = None) -> dict[str, Any]:
+def build_kpi(db, current: Period, previous: Period, grain: Grain) -> dict[str, Any]:
     """Build both periods' token figures on a connection whose scope table is already prepared. One read."""
     bounds = {"previous_from": previous.start, "current_from": current.start, "current_to": current.end}
     tokens = {row["period"]: dict(row) for row in db.execute(_TOKEN_SQL, bounds).fetchall()}
     source_mark = latest_source_mark_period(db, "tokens")
-    recorded_from = source_mark or source_started_at(db, "fresh_tokens", pending_starts=pending_starts)
+    recorded_from = source_mark or source_started_period(db, "fresh_tokens", grain)
     return {
         name: {
             "start": period.start, "end": period.end,

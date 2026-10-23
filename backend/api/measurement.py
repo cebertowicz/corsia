@@ -18,7 +18,7 @@ from api.measurement_limits import first_recorded_period, limits_by_period, rout
 from api.measurement_recent import router as recent_router
 from api.measurement_presence import PresenceCoverage, presence_coverage
 from api.measurement_breaks import (
-    comparability_start, derive_breaks, first_availability_period, period_comparable, persist_pending_starts,
+    comparability_start, derive_breaks, first_availability_period, period_comparable,
 )
 from api.measurement_registry import REGISTRY, period_measured
 from api.measurement_series_selection import metric_spine, requested_series
@@ -155,7 +155,7 @@ async def measurement_series(
 
 
 
-def _series_read(requested: list[str], project: str, agent: str, page_grain: Grain, user_id: str) -> tuple[dict[str, str | None], dict[str, list[dict[str, Any]]], str | None, int | None, PresenceCoverage, dict[str, list[dict[str, str]]], dict[str, str | None]]:
+def _series_read(requested: list[str], project: str, agent: str, page_grain: Grain, user_id: str) -> tuple[dict[str, str | None], dict[str, list[dict[str, Any]]], str | None, int | None, PresenceCoverage, dict[str, list[dict[str, str]]]]:
     db = get_db()
     try:
         selected_scope = validate_scope(db, user_id, project, agent)
@@ -165,14 +165,13 @@ def _series_read(requested: list[str], project: str, agent: str, page_grain: Gra
         families = {REGISTRY[metric].family for metric in requested}
         coverage = presence_coverage(db, user_id, page_grain.zone)
         first_limit_period = first_recorded_period(db, params) if "limits" in families else None
-        pending_starts: dict[str, str | None] = {}
-        breaks = derive_breaks(db, requested, page_grain, pending_starts=pending_starts)
+        breaks = derive_breaks(db, requested, page_grain)
         prepare_outcome_periods(db, params)
         family_rows = {family: (size_family(db, params) if family == "size" else
                                 [{"period": period, "hits": hits} for period, hits in limits_by_period(db, params).items()] if family == "limits" else
                                 query_family(db, family, params))
                        for family in families}
-        return selected_scope.response(), family_rows, first_limit_period, so_far, coverage, breaks, pending_starts
+        return selected_scope.response(), family_rows, first_limit_period, so_far, coverage, breaks
     finally:
         db.close()
 
@@ -189,10 +188,9 @@ async def series_payload(requested: list[str], project: str, agent: str, page_gr
     # total (and, on Days, the outcome count) also shows this one, flagged partial, so a first period is not an empty page.
     current_period = page_grain.current
 
-    selected_scope, family_rows, first_limit_period, outcomes_so_far, coverage, breaks, pending_starts = await run_bulk(
+    selected_scope, family_rows, first_limit_period, outcomes_so_far, coverage, breaks = await run_bulk(
         _series_read, requested, project, agent, page_grain, user["id"],
     )
-    await persist_pending_starts(pending_starts)
     first_presence = coverage.start_period(page_grain)
     rows: list[dict[str, Any]] = []
     windows: dict[str, dict[str, Any]] = {}
@@ -253,7 +251,7 @@ async def measurement_index(project: str = Query(...), agent: str = Query(...),
     """
     zone = resolve_grain("days", timezone_name).zone
 
-    def query() -> tuple[dict[str, str | None], dict[str, float | int], PresenceCoverage, dict[str, list[dict[str, str]]], dict[str, str | None]]:
+    def query() -> tuple[dict[str, str | None], dict[str, float | int], PresenceCoverage, dict[str, list[dict[str, str]]]]:
         db = get_db()
         try:
             selected_scope = validate_scope(db, user["id"], project, agent)
@@ -264,15 +262,13 @@ async def measurement_index(project: str = Query(...), agent: str = Query(...),
                 FROM llm_usage WHERE thread_id IN (SELECT id FROM scope_threads)
             """, params).fetchone()
             total = int(cost["n"] or 0)
-            pending_starts: dict[str, str | None] = {}
-            breaks = derive_breaks(db, REGISTRY, resolve_grain("days", zone), pending_starts=pending_starts)
+            breaks = derive_breaks(db, REGISTRY, resolve_grain("days", zone))
             return selected_scope.response(), {"known_cost_usd": float(cost["known_cost_usd"] or 0),
-                                               "unknown_cost_share": (int(cost["unknown_cost_rows"] or 0) / total if total else 0)}, presence_coverage(db, user["id"], zone), breaks, pending_starts
+                                               "unknown_cost_share": (int(cost["unknown_cost_rows"] or 0) / total if total else 0)}, presence_coverage(db, user["id"], zone), breaks
         finally:
             db.close()
 
-    selected_scope, cost_metadata, coverage, breaks, pending_starts = await run_bulk(query)
-    await persist_pending_starts(pending_starts)
+    selected_scope, cost_metadata, coverage, breaks = await run_bulk(query)
 
     def data_start(name: str, item: Any) -> str | None:
         source_start = first_availability_period(breaks[name])
@@ -332,15 +328,14 @@ async def agents_payload(project: str, agent: str, page_grain: Grain, sort: str,
     # lane, so this read holds no worker while it waits for them.
     cost_rows = (await task_chain_costs(project, agent, page_grain, user))["cost_rows"] if dollars else []
 
-    def query() -> tuple[dict[str, Any], dict[str, str | None]]:
+    def query() -> dict[str, Any]:
         db = get_db()
         try:
             selected_scope = validate_scope(db, user["id"], project, agent)
             params = {**selected_scope.params(user["id"]), "grain": page_grain}
             first_presence = presence_coverage(db, user["id"], page_grain.zone).start_period(page_grain)
             # One prepared window covers every period the grain draws, so nothing reads live plans.
-            pending_starts: dict[str, str | None] = {}
-            breaks = derive_breaks(db, TABLE_METRICS, page_grain, pending_starts=pending_starts)
+            breaks = derive_breaks(db, TABLE_METRICS, page_grain)
             prepare_outcome_periods(db, params, roots=True)
             rows, findings, summaries, agent_count, overall = build_agents(
                 db, params, REGISTRY, metric, sort, page_grain,
@@ -360,12 +355,11 @@ async def agents_payload(project: str, agent: str, page_grain: Grain, sort: str,
                 "project_summaries": summaries["active"],
                 "inactive_projects": summaries["inactive"],
                 "breaks": breaks[metric],
-            }, pending_starts
+            }
         finally:
             db.close()
 
-    payload, pending_starts = await run_bulk(query)
-    await persist_pending_starts(pending_starts)
+    payload = await run_bulk(query)
     return payload
 
 @router.get("/models")

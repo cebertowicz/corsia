@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from infra.measurement_schema import MEASUREMENT_BREAKS_SCHEMA_SQL, MEASUREMENT_INDEXES
-from infra.measurement_starts import SOURCE_START_SQL, record_existing_model_versions, source_starts_query
+from infra.measurement_starts import SOURCE_START_SQL, source_starts_query
 
 
 def _has_columns(schema: dict[str, set[str]], required: dict[str, set[str]]) -> bool:
@@ -20,8 +20,10 @@ def _record_existing_starts(conn, schema: dict[str, set[str]]) -> dict[str, str]
             "plan_node_attempts": {"released_at", "release_reason"},
         },
         "rejections_per_outcome": {"plan_node_events": {"created_at", "event"}},
-        "asks_per_outcome": {"artifact_identities": {"metadata", "integration", "type"}},
-        "asks_hold": {"plan_node_holds": {"created_at", "owner_kind"}},
+        "asks_per_outcome": {
+            "artifact_identities": {"metadata", "integration", "type"},
+            "plan_node_holds": {"created_at", "owner_kind"},
+        },
         "decisions": {"artifact_identities": {"metadata", "integration", "type"}},
         "tokens": {"llm_usage": {"id", "model", "source", "created_at", "prompt_tokens", "completion_tokens", "cache_creation_tokens", "cache_read_tokens", "total_tokens"}},
         "presence": {"presence_visits": {"entered_at"}},
@@ -40,8 +42,7 @@ def _record_existing_starts(conn, schema: dict[str, set[str]]) -> dict[str, str]
     conn.executemany(
         "INSERT OR IGNORE INTO measure_breaks(period,kind,metric_group,reason) VALUES (?,?,?,?)",
         [
-            (value, "source" if group == "asks_hold" else "start", group,
-             "user-owned holds first recorded" if group == "asks_hold" else "instrument source first recorded")
+            (value, "start", group, "instrument source first recorded")
             for group, value in values.items()
         ],
     )
@@ -64,6 +65,8 @@ def _record_legacy_marks(conn, starts: dict[str, str]) -> None:
 def migrate_146_to_147(conn) -> None:
     """Create immutable Measurement boundaries and seed legacy-install history."""
     conn.executescript(MEASUREMENT_BREAKS_SCHEMA_SQL)
+    # Earlier candidate heads recorded rater boundaries; final reads derive them from facts.
+    conn.execute("DROP TABLE IF EXISTS measurement_model_versions")
     tables = [str(row[0]) for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")]
     schema = {
         table: {str(row[1]) for row in conn.execute(f"PRAGMA table_info({table})")}
@@ -73,24 +76,13 @@ def migrate_146_to_147(conn) -> None:
         "threads": {"threads": {"parent_thread_id", "user_id"}},
         "messages": {"messages": {"thread_id", "created_at", "id", "role"}},
         "plan_node_events": {"plan_node_events": {"created_at", "node_id", "event", "new_state"}},
-        "plan_node_holds": {"plan_node_holds": {"created_at", "owner_kind"}},
         "llm_usage": {"llm_usage": {"id", "model", "source", "created_at", "prompt_tokens", "completion_tokens", "cache_creation_tokens", "cache_read_tokens", "total_tokens"}},
         "artifact_identities": {"artifact_identities": {"metadata", "integration", "type"}},
         "decision_raised": {"artifact_identities": {"metadata", "integration", "type"}},
         "decision_answered": {"artifact_identities": {"metadata", "integration", "type"}},
-        "first_try_failed": {"plan_node_events": {"created_at", "new_state"}},
-        "first_try_corrections": {"plan_node_events": {"created_at", "event"}},
-        "first_try_released_bad": {"plan_node_attempts": {"released_at", "release_reason"}},
         "size_rater": {"outcome_events": {"event_name", "retracted_at", "attributes", "subject_key"}},
     }
     for name, sql in MEASUREMENT_INDEXES.items():
         if _has_columns(schema, index_requirements[name]):
             conn.execute(sql)
-    conn.execute("DROP INDEX IF EXISTS idx_measurement_presence_start")
-    conn.execute("DROP INDEX IF EXISTS idx_measurement_active_turns_start")
     _record_legacy_marks(conn, _record_existing_starts(conn, schema))
-    if _has_columns(schema, {
-        "outcome_events": {"event_name", "retracted_at", "subject_key", "attributes"},
-        "plan_nodes": {"id"}, "plan_node_events": {"node_id", "created_at", "new_state"},
-    }):
-        record_existing_model_versions(conn)

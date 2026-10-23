@@ -17,7 +17,7 @@ from fastapi import Depends, Query
 from api.cost_identity import IDENTITY_GROUP, IdentityResolver, identity_columns, identity_join
 from api.measurement_actual import build_actual
 from api.measurement_average import cost_average
-from api.measurement_breaks import persist_pending_starts, source_started_period
+from api.measurement_breaks import source_started_period
 from api.measurement_join import joined_read
 from api.measurement_queries import (
     PREPARED_OUTCOMES, PREPARED_SCOPE, prepare_outcome_periods, prepare_scope_threads,
@@ -143,23 +143,20 @@ async def cost_read(project: str, agent: str, page_grain: Grain, user: dict) -> 
     """
     ledger = await ledger_read(project, agent, page_grain, user)
 
-    def query() -> tuple[dict[str, Any], dict[str, str | None]]:
+    def query() -> dict[str, Any]:
         db = get_db()
         try:
             selected_scope = validate_scope(db, user["id"], project, agent)
             params = {**selected_scope.params(user["id"]), "grain": page_grain}
             prepare_outcome_periods(db, params)
-            pending_starts: dict[str, str | None] = {}
-            cost = build_cost(db, params, ledger, pending_starts=pending_starts)
+            cost = build_cost(db, params, ledger)
             # The series' moving average spans the grain's own window, served so the chart names it without a copy.
-            return ({"scope": selected_scope.response(), "period": page_grain.describe(),
-                     "average_periods": page_grain.average_periods, **cost}, pending_starts)
+            return {"scope": selected_scope.response(), "period": page_grain.describe(),
+                    "average_periods": page_grain.average_periods, **cost}
         finally:
             db.close()
 
-    result, pending_starts = await run_bulk(query)
-    await persist_pending_starts(pending_starts)
-    return result
+    return await run_bulk(query)
 
 
 def register_cost_route(router, *, require_user, resolve_grain) -> None:
@@ -261,8 +258,7 @@ def classify_usage_rows(rows: list[dict[str, Any]], listings: Mapping[str, str])
     return classified
 
 
-def _series(db, classified: list[dict[str, Any]], sized: Mapping[str, Mapping[str, Any]], grain: Grain,
-            *, pending_starts: dict[str, str | None] | None = None) -> list[dict[str, Any]]:
+def _series(db, classified: list[dict[str, Any]], sized: Mapping[str, Mapping[str, Any]], grain: Grain) -> list[dict[str, Any]]:
     """Weekly known subtotal and retained-usage-record coverage; Unknown only when nothing was priceable.
 
     ``sized`` is the week's size-rated accepted outcomes and their hours of work. All priced
@@ -272,7 +268,7 @@ def _series(db, classified: list[dict[str, Any]], sized: Mapping[str, Mapping[st
     their install-wide instrument start before serving Work per hour, so no leading period
     reads as no data while a spend-only subtotal remains observable.
     """
-    size_start = source_started_period(db, "estimated_human_hours_per_active_hour", grain, pending_starts=pending_starts)
+    size_start = source_started_period(db, "estimated_human_hours_per_active_hour", grain)
     outcomes = {row["period"]: int(row["outcomes"]) for row in db.execute(
         f"SELECT period,outcomes FROM {PREPARED_OUTCOMES}"
     ).fetchall()}
@@ -349,8 +345,7 @@ def _excluded_models(classified: list[dict[str, Any]], grain: Grain) -> dict[str
     }
 
 
-def build_cost(db, params: dict[str, Any], ledger: list[dict[str, Any]] | None = None,
-               *, pending_starts: dict[str, str | None] | None = None) -> dict[str, Any]:
+def build_cost(db, params: dict[str, Any], ledger: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     """Build Cost from Measurement's already prepared scope and outcome periods.
 
     ``ledger`` is the grain's classified usage ledger as ``ledger_read`` shares it; without one it is read here.
@@ -360,7 +355,7 @@ def build_cost(db, params: dict[str, Any], ledger: list[dict[str, Any]] | None =
     """
     grain: Grain = params["grain"]
     classified = ledger if ledger is not None else ledger_shapes(db, params)
-    every = _series(db, classified, size_period_totals(db, params), grain, pending_starts=pending_starts)
+    every = _series(db, classified, size_period_totals(db, params), grain)
     # The lead-in periods are read only so each drawn period has a full span for its average.
     series = [{**row, "average": cost_average(every, grain, row["period"], MINIMUM_SIZED)} for row in every if row["period"] in grain.served]
     # Coverage names the headline window, the one the card's figures and caption name, so neither the

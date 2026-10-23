@@ -1,4 +1,4 @@
-"""Data-backed measurement starts and comparability breaks."""
+"""Data-backed Measurement starts and comparability marks."""
 
 from __future__ import annotations
 
@@ -8,13 +8,7 @@ from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 from core.measurement_scope import Grain
-from infra.database import get_db, write_transaction
-from infra.db_async import run_in_db
-from infra.measurement_starts import (
-    SOURCE_START_SQL as _SOURCE_START_SQL,
-    source_group as _source_group,
-    source_starts_query as _source_starts_query,
-)
+from infra.measurement_starts import LIVE_START_SQL, MODEL_VERSION_ROWS_SQL, live_starts_query, source_group
 
 
 def _period(grain: Grain, value: str | None) -> str | None:
@@ -28,171 +22,105 @@ def _period(grain: Grain, value: str | None) -> str | None:
 
 
 def _breaks_query(groups: Iterable[str]) -> str:
-    """Read any as-yet-unretained starts plus persisted break metadata."""
-    columns = [f"({_SOURCE_START_SQL[group]}) AS {group}" for group in groups]
-    columns.append("""(
-        SELECT COALESCE(json_group_array(json_object('period',period,'kind',kind,'reason',reason,'metric_group',metric_group)), '[]')
-        FROM (SELECT period,kind,reason,metric_group FROM measure_breaks
-              WHERE kind NOT IN ('start','model') ORDER BY period,kind,metric_group)
-    ) AS worlds""")
-    # Model boundaries are retained at rating-write time, so this request reads
-    # only the small break table rather than grouping the rating history.
-    return "SELECT " + ", ".join(columns)
+    """Reuse the canonical live-start mapping with immutable migration marks."""
+    known = tuple(group for group in groups if group in LIVE_START_SQL)
+    live = live_starts_query(known).removeprefix("SELECT ") if known else ""
+    marks = """(
+        SELECT COALESCE(json_group_array(json_object(
+            'period',period,'kind',kind,'reason',reason,'metric_group',metric_group
+        )), '[]')
+        FROM (
+            SELECT period,kind,reason,metric_group FROM measure_breaks
+            WHERE kind != 'start' ORDER BY period,kind,metric_group
+        )
+    ) AS marks"""
+    return f"SELECT {', '.join(item for item in (live, marks) if item)}"
 
 
-def _stored_starts(db, groups: Iterable[str], *, kind: str = "start") -> dict[str, str | None]:
-    """Read retained boundaries of one kind for the requested source groups."""
+def _seeded_starts(db, groups: Iterable[str], grain: Grain) -> dict[str, str | None]:
+    """Read migration facts once; they are the only historical state a read consults."""
     requested = tuple(dict.fromkeys(groups))
     if not requested:
         return {}
     placeholders = ",".join("?" for _ in requested)
     rows = db.execute(
-        f"SELECT metric_group,period FROM measure_breaks WHERE kind=? "
-        f"AND metric_group IN ({placeholders})",
-        (kind, *requested),
+        f"SELECT metric_group,period FROM measure_breaks WHERE kind='start' "
+        f"AND metric_group IN ({placeholders})", requested,
     )
-    found = {str(row["metric_group"]): str(row["period"]) for row in rows}
+    found = {str(row["metric_group"]): grain.period_of(str(row["period"])) for row in rows}
     return {group: found.get(group) for group in requested}
 
 
-def record_source_starts(db, starts: dict[str, str | None]) -> None:
-    """Retain newly observed source boundaries without replacing an earlier one."""
-    rows = [
-        (value, "source" if group == "asks_hold" else "start", group,
-         "user-owned holds first recorded" if group == "asks_hold" else "instrument source first recorded")
-        for group, value in starts.items() if value
-    ]
-    if not rows:
-        return
-    with write_transaction(db, scope="record_measurement_starts"):
-        db.executemany(
-            "INSERT OR IGNORE INTO measure_breaks(period,kind,metric_group,reason) VALUES (?,?,?,?)",
-            rows,
-        )
-
-
-def persist_source_starts(starts: dict[str, str | None]) -> None:
-    """Write starts computed by a read lane through the ordinary writable DB lane."""
-    db = get_db()
-    try:
-        record_source_starts(db, starts)
-    finally:
-        db.close()
-
-
-async def persist_pending_starts(starts: dict[str, str | None]) -> None:
-    """Flush one read lane's retained-boundary discoveries through the write lane."""
-    if any(starts.values()):
-        await run_in_db(persist_source_starts, starts)
-
-
-def _model_breaks(db, grain: Grain) -> list[dict[str, str]]:
-    """Build rater-change marks from retained UTC settlement instants."""
-    versions = list(db.execute(
-        "SELECT identity,started_at FROM measurement_model_versions ORDER BY started_at,identity"
-    ))
-    breaks: list[dict[str, str]] = []
-    for _, started_at in versions[1:]:
+def _model_marks(db, grain: Grain) -> list[dict[str, str]]:
+    """Derive rater changes from current facts; the first rater is the baseline."""
+    marks: list[dict[str, str]] = []
+    for _, started_at in list(db.execute(MODEL_VERSION_ROWS_SQL))[1:]:
         if period := _period(grain, str(started_at)):
-            breaks.append({
+            marks.append({
                 "period": period,
                 "kind": "model",
                 "reason": "rater changed",
                 "metric_group": "estimated_human_hours_per_active_hour",
             })
-    return breaks
+    return marks
 
 
-def _derive_missing_starts(db, groups: Iterable[str]) -> dict[str, str | None]:
-    """Read only source groups not yet retained; call before the short write above."""
-    requested = tuple(group for group in dict.fromkeys(groups) if group in _SOURCE_START_SQL)
-    if not requested:
-        return {}
-    row = db.execute(_source_starts_query(requested)).fetchone()
-    return {group: str(row[group]) if row and row[group] else None for group in requested}
-
-
-def source_started_at(db, metric: str, *, pending_starts: dict[str, str | None] | None = None) -> str | None:
-    """Return one install-wide retained source start for the KPI-only caller."""
-    return source_started_ats(db, (metric,), pending_starts=pending_starts).get(_source_group(metric))
-
-
-def source_started_period(db, metric: str, grain: Grain, *, pending_starts: dict[str, str | None] | None = None) -> str | None:
-    """Return an install-wide source start in the viewer's requested period."""
-    return _period(grain, source_started_at(db, metric, pending_starts=pending_starts))
-
-
-def source_started_ats(db, metrics: Iterable[str], *, pending_starts: dict[str, str | None] | None = None) -> dict[str, str | None]:
-    """Use retained starts; hand bulk-read discoveries to the ordinary write lane."""
-    groups = tuple(dict.fromkeys(_source_group(metric) for metric in metrics))
-    starts = _stored_starts(db, groups)
-    missing = tuple(group for group in groups if group in _SOURCE_START_SQL and not starts[group])
-    derived = _derive_missing_starts(db, missing)
-    if pending_starts is None:
-        record_source_starts(db, derived)
-    else:
-        pending_starts.update(derived)
-    return {group: starts.get(group) or derived.get(group) for group in groups}
-
-
-def _break_metadata(db, metrics: Iterable[str], grain: Grain, *,
-                    pending_starts: dict[str, str | None] | None = None) -> tuple[dict[str, str | None], list[dict[str, str]], str | None]:
-    groups = tuple(dict.fromkeys(_source_group(metric) for metric in metrics))
-    stored = _stored_starts(db, groups)
-    missing = tuple(group for group in groups if group in _SOURCE_START_SQL and not stored[group])
-    asks_hold_stored = _stored_starts(db, ("asks_hold",), kind="source")["asks_hold"] if "asks_per_outcome" in metrics else None
-    query_groups = [*missing]
-    if "asks_per_outcome" in metrics and not asks_hold_stored:
-        query_groups.append("asks_hold")
-    row = db.execute(_breaks_query(query_groups)).fetchone()
-    derived = {group: str(row[group]) if row and row[group] else None for group in missing}
-    if "asks_hold" in query_groups:
-        derived["asks_hold"] = str(row["asks_hold"]) if row and row["asks_hold"] else None
-    if pending_starts is None:
-        record_source_starts(db, derived)
-    else:
-        pending_starts.update(derived)
-    starts = {group: stored.get(group) or derived.get(group) for group in groups}
-    asks_hold = asks_hold_stored or derived.get("asks_hold")
-    worlds = [{**item, "period": grain.period_of(str(item["period"]))}
-              for item in json.loads(row["worlds"] or "[]")]
-
-    return starts, [*worlds, *_model_breaks(db, grain)], asks_hold
-
-
-def derive_breaks(db, metrics: Iterable[str], grain: Grain, *,
-                  pending_starts: dict[str, str | None] | None = None) -> dict[str, list[dict[str, str]]]:
-    """Return requested series' retained starts and comparable boundaries."""
+def _metadata(db, metrics: Iterable[str], grain: Grain) -> tuple[dict[str, str | None], list[dict[str, str]]]:
+    """The one read-only resolver for metric starts and comparable marks."""
     requested = tuple(metrics)
-    group_starts, worlds, asks_hold_value = _break_metadata(db, requested, grain, pending_starts=pending_starts)
-    starts = {metric: _period(grain, group_starts[_source_group(metric)]) for metric in requested}
-    asks_hold = _period(grain, asks_hold_value)
+    groups = tuple(dict.fromkeys(source_group(metric) for metric in requested))
+    row = db.execute(_breaks_query(groups)).fetchone()
+    seeded = _seeded_starts(db, groups, grain)
+    starts = {
+        group: max(
+            (value for value in (seeded[group], _period(grain, str(row[group])) if group in LIVE_START_SQL and row and row[group] else None) if value),
+            default=None,
+        )
+        for group in groups
+    }
+    marks = [
+        {"period": grain.period_of(str(item["period"])), "kind": str(item["kind"]),
+         "reason": str(item["reason"]), "metric_group": item["metric_group"]}
+        for item in json.loads(str(row["marks"]) if row and row["marks"] else "[]")
+    ]
+    if "estimated_human_hours_per_active_hour" in requested:
+        marks.extend(_model_marks(db, grain))
+    return starts, marks
+
+
+def derive_breaks(db, metrics: Iterable[str], grain: Grain) -> dict[str, list[dict[str, str]]]:
+    """Return each requested metric's deterministic source start and definition marks."""
+    requested = tuple(metrics)
+    starts, marks = _metadata(db, requested, grain)
     result: dict[str, list[dict[str, str]]] = {}
-    for metric, start in starts.items():
+    for metric in requested:
+        start = starts[source_group(metric)]
         rows: list[dict[str, str]] = []
         if start:
             rows.append({"period": start, "kind": "start", "reason": "instrument source first recorded"})
-        if metric == "asks_per_outcome" and asks_hold and (not start or asks_hold > start):
-            rows.append({"period": asks_hold, "kind": "source", "reason": "user-owned holds first recorded"})
-        group = _source_group(metric)
         rows.extend(
-            {key: value for key, value in item.items() if key != "metric_group"}
-            for item in worlds
-            if (((item.get("metric_group") is None and metric not in {"outcomes", "fresh_tokens"})
-                 or item.get("metric_group") == group)
-                and (not start or item["period"] > start))
+            {key: value for key, value in mark.items() if key != "metric_group"}
+            for mark in marks
+            if ((mark["metric_group"] is None and metric not in {"outcomes", "fresh_tokens"})
+                or mark["metric_group"] == source_group(metric))
+            and (not start or mark["period"] > start)
         )
         result[metric] = rows
     return result
 
 
+def source_started_period(db, metric: str, grain: Grain) -> str | None:
+    """Return a non-series caller's canonical start from the same resolver."""
+    return _metadata(db, (metric,), grain)[0][source_group(metric)]
+
+
 def first_availability_period(breaks: Iterable[dict[str, str]]) -> str | None:
-    """Return the first source that can observe a metric, not later completeness marks."""
-    return next((item["period"] for item in breaks if item["kind"] in {"start", "source"}), None)
+    """Return the first period whose primary instrument can observe this metric."""
+    return next((item["period"] for item in breaks if item["kind"] == "start"), None)
 
 
 def latest_source_mark_period(db, group: str) -> str | None:
-    """Return a group's latest completeness/source mark for callers that need it."""
+    """Return a migration-seeded completeness mark when a caller needs it."""
     row = db.execute(
         "SELECT MAX(period) FROM measure_breaks WHERE kind='source' AND metric_group=?", (group,)
     ).fetchone()

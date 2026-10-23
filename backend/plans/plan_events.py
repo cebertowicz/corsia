@@ -247,11 +247,6 @@ def project_node_event(
 
     if from_schema_step(provenance):
         return
-
-    if new_state in {"accepted", "accepted_with_followup"}:
-        from infra.measurement_starts import record_accepted_node_model_versions
-
-        record_accepted_node_model_versions(connection, node_id, created_at)
     append_node_transition(
         connection, node_id=node_id, event_id=event_id, actor_id=actor_id,
         new_state=new_state, created_at=created_at,

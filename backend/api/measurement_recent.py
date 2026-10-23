@@ -6,7 +6,6 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Query
 
-from api.measurement_breaks import persist_pending_starts
 from api.measurement_kpi import Period, build_kpi
 from api.measurement_partial import grain_instant, stored_bound
 from api.measurement_prepared import DDL, PREPARED_SCOPE
@@ -31,7 +30,7 @@ async def measurement_key_figures(
                for name, window in windows.items()}
     current, previous, today = periods["current"], periods["previous"], page_grain.current
 
-    def query() -> tuple[dict[str, str | None], dict[str, Any], dict[str, str | None]]:
+    def query() -> tuple[dict[str, str | None], dict[str, Any]]:
         """Read the scope and the two windows' token figures on one connection."""
         db = get_db()
         try:
@@ -42,15 +41,13 @@ async def measurement_key_figures(
             db.execute(DDL[PREPARED_SCOPE])
             db.execute(f"DELETE FROM {PREPARED_SCOPE}")
             db.execute(scope_cte() + f"INSERT INTO {PREPARED_SCOPE}(id,root_id) SELECT id,root_id FROM scope_threads", params)
-            pending_starts: dict[str, str | None] = {}
-            kpi = build_kpi(db, current, previous, pending_starts=pending_starts)
+            kpi = build_kpi(db, current, previous, page_grain)
             for name, window in windows.items():
                 kpi[name].update({"from": window.first, "to": page_grain.period_end(window.last)})
-            return selected_scope.response(), kpi, pending_starts
+            return selected_scope.response(), kpi
         finally:
             db.close()
 
-    selected_scope, kpi, pending_starts = await run_bulk(query)
-    await persist_pending_starts(pending_starts)
+    selected_scope, kpi = await run_bulk(query)
     return {"definition_version": 1, "scope": selected_scope, "timezone": timezone_name,
             "generated_at": request_now.isoformat(), "today": today, "period": page_grain.describe(), "kpi": kpi}

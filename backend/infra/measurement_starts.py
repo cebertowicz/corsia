@@ -9,8 +9,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 from core.measurement_token_contract import priceable_usage_predicate
-from core.size_rating import SIZE_EVENT, SUBJECT_PREFIX
-from infra.database import write_transaction
+from core.size_rating import SIZE_EVENT
 
 
 def source_group(metric: str) -> str:
@@ -28,6 +27,18 @@ def source_group(metric: str) -> str:
     return metric
 
 
+ASKS_PRIMARY_SQL = """
+    SELECT MIN(json_extract(ai.metadata,'$.plan_decision.raised_at')) AS started_at
+    FROM artifact_identities AS ai INDEXED BY idx_measurement_decisions_raised
+    WHERE ai.integration='local' AND ai.type='plan-decision' AND json_valid(ai.metadata)
+"""
+
+ASKS_HOLD_SQL = """
+    SELECT MIN(created_at) AS started_at FROM plan_node_holds
+    WHERE owner_kind='user'
+"""
+
+
 SOURCE_START_SQL = {
     "outcomes": """
         SELECT MIN(e.created_at) FROM plan_node_events e JOIN plan_nodes n ON n.id=e.node_id
@@ -38,20 +49,20 @@ SOURCE_START_SQL = {
           SELECT MIN(e.created_at) AS started_at FROM plan_node_events AS e INDEXED BY idx_plan_node_events_created JOIN plan_nodes n ON n.id=e.node_id
           WHERE n.kind='task' AND e.new_state IN ('accepted','accepted_with_followup')
           UNION ALL SELECT MIN(created_at) FROM plan_node_events INDEXED BY idx_measurement_rejections_time WHERE event='review_rejected'
-          UNION ALL SELECT MIN(released_at) FROM plan_node_attempts INDEXED BY idx_measurement_first_try_released_bad WHERE release_reason IN ('failed','requirements_changed')
-          UNION ALL SELECT MIN(created_at) FROM plan_node_events INDEXED BY idx_measurement_first_try_failed WHERE new_state='failed'
-          UNION ALL SELECT MIN(created_at) FROM plan_node_events INDEXED BY idx_measurement_first_try_corrections WHERE event='correction_created'
+          UNION ALL SELECT MIN(released_at) FROM plan_node_attempts WHERE release_reason IN ('failed','requirements_changed')
+          UNION ALL SELECT MIN(created_at) FROM plan_node_events WHERE new_state='failed'
+          UNION ALL SELECT MIN(created_at) FROM plan_node_events WHERE event='correction_created'
         )
     """,
     "rejections_per_outcome": """
         SELECT MIN(e.created_at) FROM plan_node_events e WHERE e.event='review_rejected'
     """,
-    "asks_per_outcome": """
-        SELECT MIN(json_extract(ai.metadata,'$.plan_decision.raised_at'))
-        FROM artifact_identities AS ai INDEXED BY idx_measurement_decisions_raised
-        WHERE ai.integration='local' AND ai.type='plan-decision' AND json_valid(ai.metadata)
+    "asks_per_outcome": f"""
+        SELECT MAX(started_at) FROM (
+          {ASKS_PRIMARY_SQL}
+          UNION ALL {ASKS_HOLD_SQL}
+        )
     """,
-    "asks_hold": "SELECT MIN(created_at) FROM plan_node_holds INDEXED BY idx_measurement_user_holds_start WHERE owner_kind='user'",
     "decisions": """
         SELECT MIN(json_extract(ai.metadata,'$.plan_decision.answered_at')) FROM artifact_identities AS ai INDEXED BY idx_measurement_decisions_answered
         WHERE ai.integration='local' AND ai.type='plan-decision' AND json_valid(ai.metadata)
@@ -88,6 +99,27 @@ SOURCE_START_SQL = {
 }
 
 
+# Live reads follow the stable primary instrument.  Migration-only SOURCE_START_SQL
+# records the latest first prerequisite for legacy history where the old collector
+# did not make every component observable from the primary stream.
+LIVE_START_SQL = {
+    "outcomes": SOURCE_START_SQL["outcomes"],
+    "first_try": SOURCE_START_SQL["outcomes"],
+    "rejections_per_outcome": SOURCE_START_SQL["rejections_per_outcome"],
+    "asks_per_outcome": ASKS_PRIMARY_SQL,
+    "decisions": SOURCE_START_SQL["decisions"],
+    "tokens": SOURCE_START_SQL["tokens"],
+    "presence": SOURCE_START_SQL["presence"],
+    "estimated_human_hours_per_active_hour": SOURCE_START_SQL["outcomes"],
+    "limit_hits": SOURCE_START_SQL["limit_hits"],
+}
+
+
+def live_starts_query(groups: Iterable[str]) -> str:
+    """Read the primary live instrument for each requested metric group once."""
+    return "SELECT " + ", ".join(f"({LIVE_START_SQL[group]}) AS {group}" for group in groups)
+
+
 def source_start_columns(groups: Iterable[str]) -> list[str]:
     return [f"({SOURCE_START_SQL[group]}) AS {group}" for group in groups]
 
@@ -108,47 +140,3 @@ MODEL_VERSION_ROWS_SQL = f"""
     GROUP BY identity
     ORDER BY started_at, identity
 """
-
-
-def _store_model_version(db, identity: str | None, started_at: str) -> None:
-    """Retain an identity's first accepted-task settlement instant."""
-    if not identity:
-        return
-    with write_transaction(db, scope="record_measurement_model_version"):
-        db.execute(
-            "INSERT INTO measurement_model_versions(identity,started_at) VALUES (?,?) "
-            "ON CONFLICT(identity) DO UPDATE SET started_at=MIN(started_at, excluded.started_at)",
-            (identity, started_at),
-        )
-
-
-def record_model_version(db, identity: str | None, subject_key: str | None) -> None:
-    """Retain a rating's rater at its task's first accepted settlement, if any."""
-    if not identity or not subject_key or not subject_key.startswith(SUBJECT_PREFIX):
-        return
-    node_id = subject_key.removeprefix(SUBJECT_PREFIX)
-    row = db.execute(
-        "SELECT MIN(created_at) FROM plan_node_events WHERE node_id=? "
-        "AND new_state IN ('accepted','accepted_with_followup')",
-        (node_id,),
-    ).fetchone()
-    if row and row[0]:
-        _store_model_version(db, identity, str(row[0]))
-
-
-def record_accepted_node_model_versions(db, node_id: str, started_at: str) -> None:
-    """Retain ratings that predate their node's newly accepted settlement."""
-    rows = db.execute(
-        "SELECT DISTINCT json_extract(attributes,'$.rater') FROM outcome_events "
-        "WHERE subject_key=? AND event_name=? AND retracted_at IS NULL "
-        "AND json_extract(attributes,'$.rater') > ''",
-        (f"{SUBJECT_PREFIX}{node_id}", SIZE_EVENT),
-    )
-    for (identity,) in rows:
-        _store_model_version(db, str(identity), started_at)
-
-
-def record_existing_model_versions(db) -> None:
-    """Seed retained model boundaries once during the schema migration."""
-    for identity, started_at in db.execute(MODEL_VERSION_ROWS_SQL):
-        _store_model_version(db, str(identity), str(started_at))
