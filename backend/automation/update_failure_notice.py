@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import json
 
 from loguru import logger
 
@@ -37,10 +36,7 @@ async def tell_conductor_about_failed_update(operation_id: str) -> None:
         return
     if operation is None:
         return
-    try:
-        detail = json.loads(operation.get("failure_detail") or "{}")
-    except (TypeError, json.JSONDecodeError):
-        detail = {}
+    detail = self_restart.operation_detail(operation)
     numbers = ", ".join(
         f"{name}={detail[name]}" for name in ("needed_bytes", "free_bytes") if name in detail
     ) or "no disk measurements"
@@ -49,6 +45,9 @@ async def tell_conductor_about_failed_update(operation_id: str) -> None:
         f"running version {detail['running_version']}"
         if "target_version" in detail and "running_version" in detail else ""
     )
+    previous = self_restart.previous_version(operation)
+    if previous is not None:
+        versions += f"; previous version {previous}"
     from events.delivery import deliver_to_thread
 
     sent = await deliver_to_thread(

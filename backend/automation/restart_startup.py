@@ -37,59 +37,33 @@ async def _replay_held_webhooks() -> None:
 
 
 def _complete_restart_operation() -> str | None:
-    """Settle the adopted restart and return a rolled-back Update's id for notice delivery."""
+    """Release after recovery claims FIFO heads, retaining confirmation without a hold."""
     from automation import restart, self_restart
-    from infra import build_info, platform_paths, update_status
-    from infra.restart_authorization import serving_head_sha
+    from automation.update_verification import version_failure
+    from infra import platform_paths
 
     operation = self_restart.in_flight_request()
     if operation is None:
         return None
     operation_id = str(operation["id"])
-    app_bundle = platform_paths.app_bundle_root()
-    if operation.get("kind") == "update" and app_bundle is not None:
-        target_version = operation.get("target_version")
-        running_version = build_info.app_version()
-        reason = None
-        try:
-            if not isinstance(running_version, str) or not running_version:
-                reason = "running_version_unavailable"
-            elif not isinstance(target_version, str) or not target_version:
-                reason = "unparseable_version"
-            else:
-                target_version = update_status.normalize_packaged_version(target_version)
-                running_version = update_status.normalize_packaged_version(running_version)
-                if running_version != target_version:
-                    reason = "mismatch"
-        except (TypeError, ValueError):
-            reason = "unparseable_version"
-        if reason is not None:
-            detail = json.dumps({
-                "reason": reason,
-                "target_version": target_version,
-                "running_version": running_version,
-            })
-            error = (
-                f"Update target version {target_version} is not running "
-                f"(running: {running_version or 'unknown'})."
-                if reason == "mismatch"
-                else "CORSIA could not verify the packaged Update version."
-            )
-            if restart._release_restart_control(
-                operation_id, error, False, "rolled_back", detail,
-            ) is None:
-                raise RuntimeError("update operation could not release ingress")
-            return operation_id
-        # The old lifecycle shell retains the previous app until it has checked
-        # this backend's health and generation. It, rather than this early
-        # startup pass, owns success completion for that post-swap interval.
-        if app_bundle.with_name(f"{app_bundle.name}.previous").is_dir():
-            return None
-    if not self_restart.complete_operation(
-        operation_id, deployed_sha=serving_head_sha() or None,
-    ):
+    target, code, detail = "complete", None, None
+    if operation.get("kind") == "update" and platform_paths.app_bundle_root() is not None:
+        if operation.get("phase") == "verifying":
+            # A new process inherited confirmation the prior shell never finished.
+            code, evidence = version_failure(operation)
+            code = code or "version_unverified"
+            evidence.setdefault("reason", "confirmation_interrupted")
+            target, detail = "failed", json.dumps(evidence)
+        else:
+            # Even a broken stamp cannot strand ingress or claim success. The
+            # shell receives the terminal verdict before it attempts rollback.
+            target = "verifying"
+    if restart._release_restart_control(
+        operation_id, "The Update's final check did not finish." if code else "",
+        False, code, detail, target=target if target != "failed" else None,
+    ) is None:
         raise RuntimeError("restart operation could not release ingress")
-    return None
+    return operation_id if code else None
 
 
 async def run_startup_reconcile(logger) -> tuple[object, tuple[str, ...], str | None]:

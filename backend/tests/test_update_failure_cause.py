@@ -217,12 +217,14 @@ async def test_rolled_back_update_notice_names_the_target_and_running_versions(
     from events import delivery
 
     operation_id = self_restart.try_acquire(
-        None, "steve", None, None, "update", kind="update", trigger="manual"
+        None, "steve", None, None, "update", kind="update", trigger="manual",
+        previous_version="0.4.1",
     )
     assert operation_id is not None
     for expected, target in (
         ("holding", "steering"),
-        ("steering", "ready"),
+        ("steering", "draining"),
+        ("draining", "ready"),
         ("ready", "restarting"),
         ("restarting", "resuming"),
     ):
@@ -249,6 +251,7 @@ async def test_rolled_back_update_notice_names_the_target_and_running_versions(
 
     assert "target version 0.4.2" in sent.await_args.args[2]
     assert "running version 0.4.1" in sent.await_args.args[2]
+    assert "previous version 0.4.1" in sent.await_args.args[2]
 
 
 @pytest.mark.asyncio
@@ -379,7 +382,7 @@ async def test_release_returns_while_the_conductor_notice_is_pending(isolated_db
     monkeypatch.setattr(update_failure_notice, "tell_conductor_about_failed_update", slow_notice)
     monkeypatch.setattr(drain, "cancel_drain_projection", lambda: order.append("clear"))
     monkeypatch.setattr(
-        restart, "resume_threads_detached", lambda threads, *_args: order.append("resume")
+        "automation.restart_settlement.resume_threads_detached", lambda threads, *_args: order.append("resume")
     )
 
     released = await asyncio.wait_for(
@@ -413,7 +416,7 @@ async def test_conductor_notice_failure_never_skips_resume(isolated_db, monkeypa
     resumed = []
     monkeypatch.setattr(drain, "cancel_drain_projection", lambda: cleared.append(True))
     monkeypatch.setattr(
-        restart, "resume_threads_detached", lambda threads, *_args: resumed.append(tuple(threads))
+        "automation.restart_settlement.resume_threads_detached", lambda threads, *_args: resumed.append(tuple(threads))
     )
 
     released = await restart.abort_restart_control(

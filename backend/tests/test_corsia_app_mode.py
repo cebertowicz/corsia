@@ -68,6 +68,8 @@ elif command == "bootstrap":
     loaded.write_text(args[2])
     start(args[2])
 elif command == "bootout":
+    if (state / "fail_bootout").exists():
+        sys.exit(5)
     if not loaded.exists():
         sys.exit(3)
     loaded.unlink()
@@ -92,6 +94,14 @@ if url.endswith("/api/health") and serving:
     failed_generation = state / "health_fail_generation"
     if failed_generation.exists() and (state / "generation").read_text() == failed_generation.read_text():
         sys.exit(22)
+    sys.exit(0)
+if "/api/system/drain/update?" in url and serving:
+    body = json.loads(sys.argv[sys.argv.index("-d") + 1])
+    if (state / "failure_report_exit").exists() or (body["healthy"] and (state / "settle_operation_exit").exists()):
+        sys.exit(22)
+    outcome = "complete" if body["healthy"] else "failed"
+    (state / ("settled_operation" if body["healthy"] else "failed_operation")).write_text(body["operation_id"])
+    print(json.dumps({"operation_id": body["operation_id"], "status": outcome}))
     sys.exit(0)
 if url.endswith("/api/version") and serving:
     print(json.dumps({
@@ -167,6 +177,7 @@ elif mode == "--update-swap":
     os.rename(bundle.with_name("CORSIA.app.staged"), bundle)
     print(previous)
 elif mode == "--update-rollback":
+    (state / "rollback_reported").write_text(str((state / "failed_operation").exists()))
     previous = bundle.with_name("CORSIA.app.previous")
     temporary = bundle.with_name("CORSIA.app.rollback")
     os.rename(bundle, temporary)
@@ -216,12 +227,6 @@ def _build_app(bundle: Path) -> None:
 import os, sys
 from pathlib import Path
 
-if "-c" in sys.argv and "complete_operation" in sys.argv[sys.argv.index("-c") + 1]:
-    state = Path(os.environ["FAKE_LAUNCHD"])
-    if (state / "settle_operation_exit").exists():
-        raise SystemExit(int((state / "settle_operation_exit").read_text()))
-    (state / "settled_operation").write_text(sys.argv[-1])
-    raise SystemExit(0)
 os.execv(sys.executable, [sys.executable, *sys.argv[1:]])
 """,
     )
@@ -493,7 +498,7 @@ def test_update_swaps_the_staged_app_and_hands_off_to_its_own_script(app):
         timeout=120,
     )
 
-    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.returncode == 0, result.stdout + result.stderr + str(app.calls("curl"))
     assert "lifecycle from 2.0.0+2" in result.stdout
     domain = f"gui/{os.getuid()}"
     assert app.launchd_calls() == [f"bootout --wait {domain}/{LABEL}"]
@@ -530,6 +535,39 @@ def test_a_completion_failure_rolls_back_the_healthy_swapped_app(app):
     ]
 
 
+def test_failed_rollback_stop_leaves_an_acknowledged_failure_and_the_new_service(app):
+    previous = app.bundle.with_name("CORSIA.app.previous")
+    shutil.copytree(app.bundle, previous, symlinks=True)
+    _set_version(app.bundle, "2.0.0", "2")
+    app.load()
+    (app.launchd / "health_fail_generation").write_text("2.0.0+2")
+    (app.launchd / "fail_bootout").touch()
+
+    result = app.run("restart-prepared", CORSIA_RESTART_OPERATION_ID=OPERATION_ID)
+
+    assert result.returncode != 0
+    assert "could not stop the new service" in result.stdout
+    assert (app.launchd / "failed_operation").read_text() == OPERATION_ID
+    assert (app.launchd / "loaded").exists()
+    assert previous.is_dir() and app.generation() == "2.0.0+2"
+
+
+def test_unacknowledged_failure_keeps_the_running_service_in_place(app):
+    previous = app.bundle.with_name("CORSIA.app.previous")
+    shutil.copytree(app.bundle, previous, symlinks=True)
+    _set_version(app.bundle, "2.0.0", "2")
+    app.load()
+    (app.launchd / "failure_report_exit").touch()
+
+    result = app.run("restart-prepared", CORSIA_RESTART_OPERATION_ID=OPERATION_ID)
+
+    assert result.returncode != 0
+    assert "failure could not be recorded" in result.stdout
+    assert not (app.launchd / "failed_operation").exists()
+    assert not any("--update-rollback" in call for call in app.calls("app"))
+    assert previous.is_dir() and app.generation() == "2.0.0+2"
+
+
 def test_a_failed_swap_starts_the_installed_app_again(app):
     app.load()
     staged = app.stage("2.0.0", "2")
@@ -564,6 +602,7 @@ def test_after_the_swap_a_health_failure_rolls_back_and_starts_the_old_app(app):
     output = result.stdout + result.stderr
     assert "did not become healthy" in output
     assert "went back to version 1.0.0+1" in output
+    assert (app.launchd / "rollback_reported").read_text() == "True"
     domain = f"gui/{os.getuid()}"
     assert app.launchd_calls() == [
         f"bootout --wait {domain}/{LABEL}",
@@ -595,6 +634,7 @@ def test_after_the_swap_a_wrong_version_rolls_back_and_starts_the_old_app(app):
     output = result.stdout + result.stderr
     assert "is version 1.0.0+1, not 2.0.0+2" in output
     assert "went back to version 1.0.0+1" in output
+    assert (app.launchd / "rollback_reported").read_text() == "True"
     domain = f"gui/{os.getuid()}"
     assert app.launchd_calls() == [
         f"bootout --wait {domain}/{LABEL}",

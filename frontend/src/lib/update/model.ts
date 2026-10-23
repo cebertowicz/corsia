@@ -4,7 +4,7 @@
  * surface (toast, sheet, Settings, composer) shows from it.
  */
 
-export type UpdatePhase = 'holding' | 'steering' | 'draining' | 'ready' | 'restarting' | 'resuming';
+export type UpdatePhase = 'holding' | 'steering' | 'draining' | 'ready' | 'restarting' | 'resuming' | 'verifying';
 export type UpdateOperationStatus = 'in_flight' | 'complete' | 'failed' | 'cancelled' | 'superseded';
 export type UpdateFailureCode =
 	| 'disk_space'
@@ -12,6 +12,8 @@ export type UpdateFailureCode =
 	| 'build_failed'
 	| 'launch_failed'
 	| 'rolled_back'
+	| 'version_unverified'
+	| 'wrong_version_running'
 	| 'drain_cancelled'
 	| 'drain_failed'
 	| 'update_timed_out'
@@ -64,9 +66,9 @@ export function isInFlight(op: UpdateOperation | null | undefined): op is Update
 	return op?.status === 'in_flight';
 }
 
-/** The backend refuses new work once an update has left `holding`. */
+/** Only the restart cutoff phases pause new work; confirmation keeps ingress open. */
 export function holdsNewWork(op: UpdateOperation | null | undefined): boolean {
-	return isInFlight(op) && op.kind === 'update' && op.phase !== 'holding';
+	return isInFlight(op) && op.kind === 'update' && op.phase !== 'holding' && op.phase !== 'verifying';
 }
 
 /**
@@ -90,6 +92,7 @@ export function stepIndex(op: UpdateOperation | null, unreachable: boolean): num
 		case 'restarting':
 			return 2;
 		case 'resuming':
+		case 'verifying':
 			return 3;
 		default:
 			return null;
@@ -165,6 +168,7 @@ export function stepMessage(op: UpdateOperation | null, unreachable: boolean): s
 		return counts ? `Pausing agents · ${counts.safe} of ${counts.total}` : 'Pausing agents';
 	}
 	if (step === 2) return 'Restarting CORSIA';
+	if (op?.phase === 'verifying') return 'Checking the new version';
 	const total = op?.drain_total ?? 0;
 	return total > 0 ? `Resuming ${agentsLabel(total)}` : 'Resuming agents';
 }
