@@ -81,6 +81,19 @@ async function serveReadySetup(page: Page, sources: readonly Record<string, unkn
 	await page.route('**/api/providers/sources**', (route) => route.fulfill({ json: { sources } }));
 }
 
+// The first line of the greeting must be inside the transcript's visible band (not scrolled above it).
+async function expectGreetingFirstLineVisible(page: Page) {
+	const firstLine = page.locator('.assistant-msg').getByText('Hi First.', { exact: false }).and(page.locator(':not(.sr-only)')).first();
+	await expect(firstLine).toBeVisible();
+	await expect(async () => {
+		const line = await firstLine.boundingBox();
+		const band = await page.locator('.messages').first().boundingBox();
+		expect(line && band).toBeTruthy();
+		expect(line!.y).toBeGreaterThanOrEqual(band!.y);
+		expect(line!.y + line!.height).toBeLessThanOrEqual(band!.y + band!.height);
+	}).toPass({ timeout: 2_000 });
+}
+
 async function shot(page: Page, name: string) {
 	if (SCREENSHOT_DIR) await page.screenshot({ path: `${SCREENSHOT_DIR}/${name}.png`, animations: 'disabled', scale: 'css' });
 }
@@ -96,6 +109,7 @@ test.describe('@surface:first-run setup landing', () => {
 			await serveReadySetup(page, sources);
 			const slug = label.toLowerCase().replace(/\s+/g, '-');
 			const project = test.info().project.name;
+			if (project === 'chromium-mobile') await page.setViewportSize({ width: 393, height: 852 });
 
 			const appSocket = page.waitForEvent('websocket', {
 				predicate: (socket) => new URL(socket.url()).pathname === '/ws',
@@ -156,6 +170,7 @@ test.describe('@surface:first-run setup landing', () => {
 			await expect(page.locator('[aria-live="polite"][aria-atomic="true"]')).toContainText("I'm CORSIA.");
 			await shot(page, `opening-live-${slug}-${project}`);
 			await expect(page.locator('.typewriter-text')).toHaveCount(0, { timeout: 2_000 });
+			await expectGreetingFirstLineVisible(page);
 			await shot(page, `opening-complete-${slug}-${project}`);
 			await expect(chip).toContainText('Vendor default');
 			await waitForWsConnected(page);

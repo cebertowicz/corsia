@@ -22,7 +22,7 @@
 	import { DividerLandingIntent, RenderedUpdateCards, scheduleDividerLanding } from './messageListUpdateCards';
 	import { countVisibleEntries, visibleEntryContinuation } from './transcriptFocusModel';
 	import { planLimitPauseDescriptors } from './planLimitPause';
-	import { hasLandingTarget as hasLandingTargetIn, landOnNewContent, observeLayoutGrowth } from './messageListLayout';
+	import { hasLandingTarget as hasLandingTargetIn, landOnNewContent, observeLayoutGrowth, pinLiveEdge } from './messageListLayout';
 	import { runHasMore, type RunLoad, type RunStub } from '$lib/focusRuns';
 	import { needsWakeRetry } from './pendingWakeRetry';
 	import { isHumanMessage } from './transcriptRowKinds';
@@ -249,9 +249,8 @@
 	/** Pin to the live edge right now — for high-frequency reveal ticks. */
 	export function followBottom() {
 		if (dividerLanding.blocksLiveEdge(renderedThreadId)) return;
-		beginProgrammaticScroll(() => {
-			if (messagesEl) messagesEl.scrollTop = messagesEl.scrollHeight;
-		});
+		const last = transcriptMessages[transcriptMessages.length - 1];
+		beginProgrammaticScroll(() => pinLiveEdge(messagesEl, last?.metadata?.first_run_opening === true ? last.id : null));
 	}
 	// Re-pin a live-edge transcript when the composer or attention rail grows; preserve a reader's history position.
 	let wasPinnedBeforeLayoutChange = $state(true);
