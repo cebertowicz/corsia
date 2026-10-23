@@ -106,6 +106,13 @@ class BrowserRunStepsTool(Tool):
         begin = identifiers.index(start_at) if start_at else 0
         for step in sequence[begin:]:
             identifier, says = step["id"], step["says"]
+            if step["action"] in {"click", "type"}:
+                # A redirect after the last check must not receive a click or a typed value.
+                saw, url, refusal = await _saw(thread_id, _expected(step))
+                if refusal:
+                    return _guard_result(identifier, says, refusal)
+                if not _allowed(url, domains):
+                    return _result(ok=False, step=identifier, says=says, saw=saw)
             result = await _run(_command(step, values), thread_id=thread_id, timeout=_timeout(step))
             if result.startswith("Error:"):
                 message = result.removeprefix("Error: ")

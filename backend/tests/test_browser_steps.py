@@ -25,14 +25,35 @@ async def invoke(tool, monkeypatch, responses, **kwargs):
     return json.loads(result), calls
 
 
+def page_at(url, calls):
+    async def fake_run(args, **_run_kwargs):
+        calls.append(args)
+        return "ok" if args[0] != "get" else ("Console" if args[1] == "title" else url)
+
+    return fake_run
+
+
 @pytest.mark.asyncio
 async def test_runs_a_server_owned_file_successfully(tool, monkeypatch):
-    responses = ["ok", "Console", "https://console.cloud.google.com/one"] * 6
+    calls = []
+    monkeypatch.setattr(browser_steps, "_run", page_at("https://console.cloud.google.com/one", calls))
 
-    result, calls = await invoke(tool, monkeypatch, responses)
+    result = json.loads(await tool.execute("google-setup/console-project", _thread_id="thread"))
 
     assert result == {"ok": True, "steps": ["project-page", "project-name", "project-create", "project-ready", "apis-page", "apis-enable"]}
-    assert calls[0][0] == ["open", "https://console.cloud.google.com/projectcreate"]
+    assert calls[0] == ["open", "https://console.cloud.google.com/projectcreate"]
+
+
+@pytest.mark.asyncio
+async def test_off_domain_page_never_receives_a_type_or_click(tool, monkeypatch):
+    calls = []
+    monkeypatch.setattr(browser_steps, "_run", page_at("https://evil.example.test/login", calls))
+
+    result = json.loads(await tool.execute("google-setup/console-client", start_at="client-name", _thread_id="thread"))
+
+    assert result == {"ok": False, "step": "client-name", "says": "Name the client CORSIA.",
+                      "saw": {"title": "Console", "url_path": "/login", "missing": 'role=textbox[name="Name"]'}}
+    assert all(args[0] == "get" for args in calls)
 
 
 @pytest.mark.asyncio
@@ -78,7 +99,7 @@ async def test_start_at_resumes_from_named_step(tool, monkeypatch):
     result = json.loads(await tool.execute("google-setup/console-client", start_at="client-name", _thread_id="thread"))
 
     assert result["ok"] is True
-    assert calls[0] == ["fill", 'role=textbox[name="Name"]', "CORSIA"]
+    assert calls[2] == ["fill", 'role=textbox[name="Name"]', "CORSIA"]
     assert "clients-page" not in result["steps"]
 
 
@@ -106,3 +127,4 @@ def test_shipped_step_files_load_and_validate():
         data, error = browser_steps._load(name)
         assert error is None and data is not None
         assert all(step["action"] in {"goto", "click", "type", "wait_for"} for step in data["steps"])
+        assert not any("script" in step for step in data["steps"])
