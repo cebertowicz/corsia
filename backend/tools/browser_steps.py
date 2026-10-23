@@ -91,8 +91,8 @@ class BrowserRunStepsTool(Tool):
 
     async def execute(self, steps: str, start_at: str | None = None, values: object | None = None, **kwargs: Any) -> str:
         data, error = _load(steps) if isinstance(steps, str) else (None, "unknown steps file")
-        if error:
-            return _result(ok=False, error=error)
+        if error or data is None:
+            return _result(ok=False, error=error or "unknown steps file")
         if values is None:
             values = {}
         if not isinstance(values, dict) or not all(isinstance(key, str) and isinstance(value, str) for key, value in values.items()):
