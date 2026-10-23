@@ -215,9 +215,14 @@ def with_next(db, plan_id: str, executor: str, line: str, **facts) -> str:
     from plans import close_next
 
     block = close_next.executor_next(db, plan_id, executor)
-    prior_words = node_start_recall.related_for_next(db, block, caller_thread_id=executor)
-    if prior_words:
-        facts[node_start_recall.RESULT_KEY] = prior_words
+    related = node_start_recall.related_for_next(db, block, caller_thread_id=executor)
+    if related:
+        facts[node_start_recall.RESULT_KEY] = related
+    node_id = node_start_recall.started_node_id(block)
+    if node_id is not None:
+        from core.lesson_delivery import attach_at_start
+
+        attach_at_start(db, facts, thread_id=executor, node_id=node_id)
     return f"{line}\n{json.dumps({**facts, 'next': block}, sort_keys=True)}"
 
 

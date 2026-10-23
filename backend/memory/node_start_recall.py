@@ -6,15 +6,12 @@ operation's outcome: failures are logged and simply omit the optional block.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from functools import lru_cache
 import json
 import re
 import sqlite3
 from time import perf_counter
-
-from loguru import logger as log
 
 from core.correction_notes import local_clock
 from core.corrections_recording import (
@@ -23,11 +20,11 @@ from core.corrections_recording import (
     owner_message_sql_predicate,
 )
 from infra.checkpoint_queries import current_installed_through_seq
-from infra.product_events import emit_product_event
 from llm.locality import cloud_off_project_ids
 from memory.checkpoint_search import caller_user_id
+from memory.node_start_recall_telemetry import Hit, log_lookup, log_lookup_error
 from memory.node_text import node_text as _node_text
-from memory.task_match import Match, NodeText, TaskTerms, first_term_at, match, task_terms
+from memory.task_match import NodeText, TaskTerms, first_term_at, match, task_terms
 
 MAX_HITS = 3
 SOURCE_CANDIDATES = 100
@@ -39,13 +36,6 @@ _HEADER = "Earlier words from the person that match this task, newest first; whe
 _MATCH_FUNCTION = "prior_words_match"
 _OWNER_FUNCTION = "prior_words_owner"
 
-
-@dataclass(frozen=True)
-class _Hit:
-    matched: Match
-    created_at: str
-    kind: str
-    line: str
 
 
 def related(
@@ -60,15 +50,14 @@ def related(
     try:
         reason, hits = _related(db, text, caller_thread_id)
     except Exception as exc:  # noqa: BLE001 - advisory context must not fail its caller
-        _log_error(trigger, exc, started, caller_thread_id)
+        log_lookup_error(trigger, exc, started, caller_thread_id)
         return []
-    _log(reason, trigger, hits, started, caller_thread_id)
+    log_lookup(reason, trigger, hits, started, caller_thread_id)
     return [_HEADER, *(hit.line for hit in hits)] if hits else []
 
 
 def attach_to_result(
-    db: sqlite3.Connection, operation: str, result: object, *, caller_thread_id: str,
-) -> None:
+    db: sqlite3.Connection, operation: str, result: object, *, caller_thread_id: str, checkpoint_generation_id: str | None = None) -> None:
     """Attach ``prior_words`` to a plan result that starts a task or raises a decision."""
     result = getattr(result, "result", result)
     if not isinstance(result, dict):
@@ -76,7 +65,7 @@ def attach_to_result(
     try:
         subject = _subject(db, operation, result)
     except Exception as exc:  # noqa: BLE001 - advisory context must not fail its caller
-        _log_error(operation, exc, perf_counter(), caller_thread_id)
+        log_lookup_error(operation, exc, perf_counter(), caller_thread_id)
         return
     if subject is None:
         return
@@ -84,19 +73,27 @@ def attach_to_result(
     lines = related(db, text, caller_thread_id=caller_thread_id, trigger=trigger)
     if lines:
         result[RESULT_KEY] = lines
+    node = result.get("node") if isinstance(result.get("node"), dict) else None
+    node_started = (node is not None and node.get("kind") == "task") or started_node_id(result.get("next")) == text.node_id
+    if not node_started or text.node_id is None:
+        return
+    from core.lesson_delivery import attach_at_start
+
+    attach_at_start(
+        db, result, thread_id=caller_thread_id, node_id=text.node_id,
+        checkpoint_generation_id=checkpoint_generation_id,
+    )
 
 
-def related_for_next(
-    db: sqlite3.Connection, block: dict, *, caller_thread_id: str,
-) -> list[str]:
+def related_for_next(db: sqlite3.Connection, block: dict, *, caller_thread_id: str) -> list[str]:
     """Return prior words for the task a wake's ``next`` block reports started."""
-    node_id = _started_node_id(block)
+    node_id = started_node_id(block)
     if node_id is None:
         return []
     try:
         text = _node_text(db, node_id)
     except Exception as exc:  # noqa: BLE001 - advisory context must not fail its caller
-        _log_error("wake", exc, perf_counter(), caller_thread_id)
+        log_lookup_error("wake", exc, perf_counter(), caller_thread_id)
         return []
     return [] if text is None else related(db, text, caller_thread_id=caller_thread_id, trigger="wake")
 
@@ -109,19 +106,19 @@ def _subject(db, operation: str, result: dict) -> tuple[NodeText, str] | None:
     if operation == "raise" and isinstance(result.get("decision"), dict):
         decision = result["decision"]
         return NodeText(str(decision.get("title") or ""), intent=str(decision.get("context") or "")), "decision_raise"
-    node_id = _started_node_id(result.get("next"))
+    node_id = started_node_id(result.get("next"))
     text = _node_text(db, node_id) if node_id else None
     return None if text is None else (text, "close_next")
 
 
-def _started_node_id(block: object) -> str | None:
+def started_node_id(block: object) -> str | None:
     selected = block.get("selected") if isinstance(block, dict) else None
     if not isinstance(selected, dict) or selected.get("how") not in _STARTED_HOWS:
         return None
     return str(selected["id"])
 
 
-def _related(db, text: NodeText, caller_thread_id: str) -> tuple[str, list[_Hit]]:
+def _related(db, text: NodeText, caller_thread_id: str) -> tuple[str, list[Hit]]:
     terms = task_terms(text)
     if len(terms.terms) < 2 or not terms.title_terms:
         return "no_terms", []
@@ -143,7 +140,7 @@ def _related(db, text: NodeText, caller_thread_id: str) -> tuple[str, list[_Hit]
     candidates.sort(
         key=lambda hit: (-hit.matched.shared, -hit.matched.title_shared, _newest_first(hit.created_at), hit.kind == "rule"),
     )
-    kept: list[_Hit] = []
+    kept: list[Hit] = []
     rules = 0
     for hit in candidates:
         if hit.kind == "rule" and rules >= 1:
@@ -241,7 +238,7 @@ def source_reaches_thread(db: sqlite3.Connection, source_thread_id: str, recipie
     ).fetchone() is not None
 
 
-def _message_candidates(db, terms, user_id, caller_thread_id, caller, cloud_off, cutoff) -> list[_Hit]:
+def _message_candidates(db, terms, user_id, caller_thread_id, caller, cloud_off, cutoff) -> list[Hit]:
     owner_filter, owner_params = _positional(*owner_message_sql_predicate("m"))
     source_scope, source_params = _source_scope("t", "m.created_at", caller, cloud_off, cutoff)
     caller_cut = current_installed_through_seq(caller_thread_id, db=db) or 0
@@ -263,11 +260,11 @@ def _message_candidates(db, terms, user_id, caller_thread_id, caller, cloud_off,
         found = match(terms, str(row["content"]))
         if found:
             line = f'{local_clock(str(row["created_at"]))} · message in “{row["title"]}” · “{_excerpt(found)}” → get_thread_history(thread_id="{row["thread_id"]}")'
-            hits.append(_Hit(found, str(row["created_at"]), "message", line))
+            hits.append(Hit(found, str(row["created_at"]), "message", line))
     return hits
 
 
-def _comment_candidates(db, terms, user_id, caller, cloud_off, cutoff) -> list[_Hit]:
+def _comment_candidates(db, terms, user_id, caller, cloud_off, cutoff) -> list[Hit]:
     from core.correction_targets import comment_target_sql
 
     source_scope, source_params = _source_scope("t", "c.created_at", caller, cloud_off, cutoff)
@@ -286,11 +283,11 @@ def _comment_candidates(db, terms, user_id, caller, cloud_off, cutoff) -> list[_
         if found:
             about = row["title"] or row["path"] or row["artifact_id"]
             line = f'{local_clock(str(row["created_at"]))} · comment on “{about}” · “{_excerpt(found)}”'
-            hits.append(_Hit(found, str(row["created_at"]), "comment", line))
+            hits.append(Hit(found, str(row["created_at"]), "comment", line))
     return hits
 
 
-def _decision_candidates(db, terms, user_id, caller, cloud_off, cutoff) -> list[_Hit]:
+def _decision_candidates(db, terms, user_id, caller, cloud_off, cutoff) -> list[Hit]:
     from plans.public import DECISION_TYPE
 
     answer = "json_extract(ai.metadata,'$.plan_decision.answer.text')"
@@ -315,11 +312,11 @@ def _decision_candidates(db, terms, user_id, caller, cloud_off, cutoff) -> list[
         found = match(terms, text)
         if found:
             line = f'{local_clock(created_at)} · answer to decision “{row["title"] or row["external_id"]}” · “{_excerpt(found)}”'
-            hits.append(_Hit(found, created_at, "decision", line))
+            hits.append(Hit(found, created_at, "decision", line))
     return hits
 
 
-def _rule_candidates(db, terms, user_id, caller_thread_id, caller, cloud_off, cutoff) -> list[_Hit]:
+def _rule_candidates(db, terms, user_id, caller_thread_id, caller, cloud_off, cutoff) -> list[Hit]:
     # Both rule fields are statement entries (core.continuity_types), so the statement is the rule's text.
     statement = "json_extract(ce.body,'$.statement')"
     source_scope, source_params = _source_scope("t", "ce.updated_at", caller, cloud_off, cutoff)
@@ -350,7 +347,7 @@ def _rule_candidates(db, terms, user_id, caller_thread_id, caller, cloud_off, cu
         if found:
             pointer = f' → get_checkpoints(checkpoint_id="{row["checkpoint_id"]}")' if row["checkpoint_id"] else ""
             line = f'{local_clock(str(row["updated_at"]))} · rule an agent recorded from their words (thread {str(row["thread_id"])[:8]}) · “{_excerpt(found)}”{pointer}'
-            hits.append(_Hit(found, str(row["updated_at"]), "rule", line))
+            hits.append(Hit(found, str(row["updated_at"]), "rule", line))
     return hits
 
 
@@ -372,26 +369,3 @@ def _newest_first(created_at: str) -> float:
         return -value.replace(tzinfo=value.tzinfo or UTC).timestamp()
     except ValueError:
         return 0
-
-
-def _kind_counts(hits: list[_Hit]) -> str:
-    return ",".join(f"{kind}:{sum(hit.kind == kind for hit in hits)}" for kind in ("message", "comment", "decision", "rule"))
-
-
-def _log(reason: str, trigger: str, hits: list[_Hit], started: float, thread_id: str) -> None:
-    ms = (perf_counter() - started) * 1000
-    log.info("prior_words reason={} trigger={} hits={} kinds={} ms={:.1f}", reason, trigger, len(hits), _kind_counts(hits), ms)
-    _emit(reason, trigger, hits, ms, thread_id)
-
-
-def _log_error(trigger: str, exc: Exception, started: float, thread_id: str) -> None:
-    ms = (perf_counter() - started) * 1000
-    log.opt(exception=exc).warning("prior_words reason=error trigger={} hits=0 kinds=message:0,comment:0,decision:0,rule:0 ms={:.1f} error={}: {}", trigger, ms, type(exc).__name__, exc)
-    _emit("error", trigger, [], ms, thread_id)
-
-
-def _emit(reason: str, trigger: str, hits: list[_Hit], ms: float, thread_id: str) -> None:
-    """Record each lookup's outcome as counts only; no words leave the lookup."""
-    emit_product_event("prior_words", reason, thread_id=thread_id, properties={
-        "trigger": trigger, "hits": len(hits), "kinds": _kind_counts(hits), "ms": round(ms, 1),
-    })

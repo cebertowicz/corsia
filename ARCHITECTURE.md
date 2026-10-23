@@ -481,11 +481,13 @@ table and no second registry.
   identity may establish a body read; ambiguous or missing lineage stays unknown.
   Current files and packaged System availability do not establish delivery;
   unresolved project roots, System projection and role-skill coverage are named.
-- **Context accounting.** `backend/infra/lesson_usage_attribution.py` annotates
-  the selected frozen Skills inventory through a usage-level estimate sibling.
-  It changes no installed bytes or hashes. Descriptor estimates remain part of
-  Skills; body reads remain history. The Context sheet and Measurement Learning
-  detail use existing document and review navigation.
+- **Trial delivery and accounting.** `backend/core/lesson_delivery.py` delivers
+  every eligible trial only when a task starts, within a per-start token cap;
+  cached context never contains a trial. It records
+  the task, variant, installed generation and lesson identity in
+  `guidance_loads` without changing installed bytes or hashes. Body reads remain
+  history. The Context sheet and Measurement Learning detail use existing
+  document and review navigation.
 - **Limits.** The index is frozen at install, so a new, changed, or expired
   trial takes effect at the next install and never in a running conversation.
   Offers and supported reads do not establish opportunity, application or benefit.

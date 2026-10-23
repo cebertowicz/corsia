@@ -140,13 +140,13 @@ def _entry(source: ContextSourceEntry, *, model: str | None) -> dict[str, Any]:
         "version_kind": kind,
         "version_reason": reason,
     }
-    lessons = (source.metadata or {}).get("lessons")
-    if source.source_id == SKILLS_INDEX_SOURCE_ID and isinstance(lessons, list):
-        # Offered trial lessons by version; no key means the install predates them.
-        entry["lessons"] = [
-            {"id": lesson["id"], "behavioral_sha256": lesson["behavioral_sha256"]}
-            for lesson in lessons
-        ]
+    path = (source.metadata or {}).get("path")
+    if isinstance(path, str) and path and kind != "generated":
+        # Unlike the reference, the path is the file identity correction targets share.
+        from infra.config import WORKSPACE
+        from tools.filesystem_gate import canonical_target_path
+
+        entry["path"] = canonical_target_path(path, workspace=WORKSPACE)
     return entry
 
 
@@ -339,6 +339,28 @@ def record_continuation_manifest(
     )
 
 
+def insert_guidance_load(
+    tx, *, thread_id: str | None, turn_id: str | None, path: Path, data: bytes,
+    returned_text: str, partial: bool, node_id: str | None = None,
+    variant: str | None = None, checkpoint_generation_id: str | None = None,
+    lesson_id: str | None = None, lesson_behavioral_sha256: str | None = None,
+) -> None:
+    """Insert one receipt in the caller's transaction (raises); ``data`` is the delivered bytes."""
+    from infra.time import utc_now_iso
+    import uuid
+
+    tx.execute(
+        """INSERT INTO guidance_loads
+               (id, thread_id, turn_id, path, raw_sha256, git_blob_oid,
+                delivered_sha256, byte_count, partial, node_id, variant,
+                checkpoint_generation_id, lesson_id, lesson_behavioral_sha256, created_at)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (uuid.uuid4().hex, thread_id, turn_id, str(path), _sha256_bytes(data), git_blob_oid(data),
+         _sha256_bytes(returned_text.encode("utf-8")), len(data), int(partial), node_id, variant,
+         checkpoint_generation_id, lesson_id, lesson_behavioral_sha256, utc_now_iso()),
+    )
+
+
 def record_guidance_load(
     *, thread_id: str | None, turn_id: str | None, path: Path, data: bytes,
     returned_text: str, partial: bool,
@@ -348,22 +370,12 @@ def record_guidance_load(
     ``data`` is the bytes the read returned text from, never a second read.
     """
     from infra.database import write_transaction
-    from infra.time import utc_now_iso
-    import uuid
 
     try:
         with write_transaction(None, scope="record_guidance_load") as tx:
-            tx.execute(
-                """INSERT INTO guidance_loads
-                       (id, thread_id, turn_id, path, raw_sha256, git_blob_oid,
-                        delivered_sha256, byte_count, partial, created_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?)""",
-                (
-                    uuid.uuid4().hex, thread_id, turn_id, str(path),
-                    _sha256_bytes(data), git_blob_oid(data),
-                    _sha256_bytes(returned_text.encode("utf-8")), len(data),
-                    int(partial), utc_now_iso(),
-                ),
+            insert_guidance_load(
+                tx, thread_id=thread_id, turn_id=turn_id, path=path, data=data,
+                returned_text=returned_text, partial=partial,
             )
     except Exception:
         log.exception("guidance_manifest: skill read of %s unrecorded", path)

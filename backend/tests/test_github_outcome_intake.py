@@ -22,6 +22,7 @@ from events.connectors.github_outcomes import (
     closes_issue_refs,
     introduced_by_numbers,
     map_github_outcomes,
+    reverts_pr_refs,
     pr_subject,
 )
 
@@ -100,6 +101,29 @@ def test_merged_pr_emits_merged_introduced_by_and_closes():
     assert ref.attributes["confidence"] == "stated"
     assert ref.dedupe_key == f"github:pr:{REPO}#3191:closes:{REPO.lower()}#1627"
 
+    reverted = fixture("pr_reverts_merged")["payload"]
+    names = drafts_by_name(map_github_outcomes("pull_request", reverted))
+    assert set(names) == {"github.pr.merged", "github.pr.reverts"}
+    assert [draft.attributes for draft in names["github.pr.reverts"]] == [
+        {"repo": REPO, "pr": "3200", "reverted_repo": REPO, "reverted_pr": "3191", "confidence": "stated"},
+        {"repo": REPO, "pr": "3200", "reverted_repo": REPO, "reverted_pr": "1627", "confidence": "stated"},
+    ]
+
+
+def test_reverts_parser_accepts_only_explicit_line_start_footers():
+    body = (
+        "GitHub's button says this reverts a commit.\n"
+        "Reverts #12\n"
+        "Reverts: #13\n"
+        "A sentence Reverts #14 is not a footer.\n"
+        "  reverts cebertowicz/OtherRepo#7\n"
+        "Reverts cebertowicz/maestro#8\r\n"
+        "Reverts #12"
+    )
+    assert reverts_pr_refs(body, REPO) == [
+        (REPO.lower(), 12), ("cebertowicz/otherrepo", 7), (REPO.lower(), 8),
+    ]
+
 
 def test_body_parsers_are_order_stable_deduped_and_repo_qualified():
     body = (
@@ -163,6 +187,16 @@ def test_merged_pr_revert_button_attribute_requires_same_repo(title, body, expec
     payload["pull_request"].update(title=title, body=body)
     primary = drafts_by_name(map_github_outcomes("pull_request", payload))["github.pr.merged"][0]
     assert primary.attributes.get("reverts_pr") == expected
+
+
+def test_issue_reopen_has_a_delivery_stable_key():
+    reopened = fixture("issue_reopened")["payload"]
+    (draft,) = map_github_outcomes("issues", reopened)
+    assert (draft.event_name, draft.dedupe_key, draft.ts) == (
+        "github.issue.reopened",
+        f"github:issue:{REPO}#1627:reopened:{reopened['issue']['updated_at']}",
+        reopened["issue"]["updated_at"],
+    )
 
 
 def test_workflow_run_key_is_run_id_plus_attempt():

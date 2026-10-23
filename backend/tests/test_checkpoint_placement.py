@@ -94,7 +94,7 @@ def test_migration_40_staging_copy_matches_the_live_schema_while_current() -> No
     from infra.migration_39_to_40_placement_marks import STAGING_40_DDL
     from infra.schema import SCHEMA_VERSION
 
-    if SCHEMA_VERSION == 144:
+    if SCHEMA_VERSION == 145:
         assert STAGING_40_DDL == STAGING_SCHEMA_SQL
 
 
@@ -110,6 +110,7 @@ def _review_setup(tmp_path, monkeypatch):
     _running(db)
     db.commit()
     monkeypatch.setattr("infra.config.WORKSPACE", tmp_path)
+    monkeypatch.setattr("tools.sandbox_config._STATIC_ALLOWED_RW", [tmp_path.resolve()])
     return path, db, lesson, fact
 
 
@@ -244,11 +245,21 @@ def test_staged_verdicts_publish_marks_only_when_the_checkpoint_installs(
 
 def test_checkpoint_stages_a_flagged_trial_with_its_checkpoint_epoch(tmp_path, monkeypatch) -> None:
     path, db, lesson, _ = _review_setup(tmp_path, monkeypatch)
+    (tmp_path / "context").mkdir()
+    (tmp_path / "context" / "RESPONSIBILITY.md").write_text("# R\n\n## Lessons\n- Keep commits small.\n")
     db.close()
     continuity = _tool_db(path, monkeypatch)
     trial = _raw(
         q2="task_start", text="On 2026-10-14, name the exact commit a check ran on.",
         skill_name="commit-check", skill_description="Record exact commits for check results.",
+        target_file="context/RESPONSIBILITY.md", target_section="Verification",
+        cause="not_followed",
+        case={
+            "what_happened": "A check result lacked its commit.",
+            "right_call": "Record the commit with each check result.",
+            "does_not_apply": "Do not add this metadata when no check ran.",
+            "correction_subject": "check-result provenance",
+        },
         trial={"kind": "hypothesis", "review_after": "2027-01-01", "boundary": None},
     )
 
@@ -462,6 +473,8 @@ def _raw(**overrides) -> dict:
         "text": "Run the smallest affected tests before pushing.",
         "skill_name": None, "skill_description": None, "reference_file": None,
         "rationale": "applies to this lane every turn",
+        "target_file": None, "new_target_path": None, "target_section": None,
+        "cause": None, "case": None, "new_evidence": None,
     }
     raw.update(overrides)
     return raw

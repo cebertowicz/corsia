@@ -1,0 +1,112 @@
+"""The bounded workflow verdict batch in the existing nightly scheduler."""
+from __future__ import annotations
+
+from contextlib import contextmanager
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+
+from core.workflow_verdict_rules import Snapshot
+
+
+def _snapshot() -> Snapshot:
+    return Snapshot("2026-10-20T00:00:00+00:00", (), subjects=frozenset({"workflow:test@v1"}))
+
+
+def test_daily_verdict_batch_is_read_only_while_writes_are_disabled(monkeypatch) -> None:
+    from jobs import workflow_verdicts
+
+    db = MagicMock()
+    evaluation = SimpleNamespace(verdict=SimpleNamespace(word="keep"))
+    read = MagicMock(return_value=_snapshot())
+    priced = MagicMock(return_value=_snapshot())
+    write = MagicMock(return_value=1)
+    monkeypatch.setattr(workflow_verdicts, "get_db", lambda: db)
+    monkeypatch.setattr(workflow_verdicts, "read_open_snapshot", read)
+    monkeypatch.setattr(workflow_verdicts, "price_snapshot", priced)
+    monkeypatch.setattr(workflow_verdicts, "compute", lambda _snapshot: [evaluation])
+    monkeypatch.setattr(workflow_verdicts.evaluator, "VERDICT_WRITES_ENABLED", False)
+    monkeypatch.setattr(workflow_verdicts.evaluator, "write_verdicts", write)
+
+    report = workflow_verdicts.run_daily()
+
+    assert report.open_subjects == report.evaluated == report.reached == 1
+    assert report.recorded == 0
+    read.assert_called_once()
+    priced.assert_called_once_with(db, _snapshot())
+    db.close.assert_called_once_with()
+    write.assert_not_called()
+
+
+def test_daily_verdict_batch_records_and_wakes_only_when_enabled(monkeypatch) -> None:
+    from jobs import workflow_verdicts
+
+    db = MagicMock()
+    evaluation = SimpleNamespace(verdict=SimpleNamespace(word="keep"))
+    write = MagicMock(return_value=1)
+
+    @contextmanager
+    def transaction(*_args, **_kwargs):
+        yield db
+
+    monkeypatch.setattr(workflow_verdicts, "get_db", lambda: db)
+    monkeypatch.setattr(workflow_verdicts, "read_open_snapshot", lambda *_args, **_kwargs: _snapshot())
+    monkeypatch.setattr(workflow_verdicts, "price_snapshot", lambda _db, snapshot: snapshot)
+    monkeypatch.setattr(workflow_verdicts, "compute", lambda _snapshot: [evaluation])
+    monkeypatch.setattr(workflow_verdicts.evaluator, "VERDICT_WRITES_ENABLED", True)
+    monkeypatch.setattr(workflow_verdicts, "write_transaction", transaction)
+    monkeypatch.setattr(workflow_verdicts.evaluator, "write_verdicts", write)
+
+    report = workflow_verdicts.run_daily()
+
+    assert report.recorded == 1
+    write.assert_called_once_with(db, [evaluation], wake_owners=True)
+
+
+@pytest.mark.asyncio
+async def test_nightly_runs_verdict_batch_after_successful_maintenance(monkeypatch) -> None:
+    from automation import managed_process_events
+    from core import thread_lifecycle
+    from infra import request_timing
+    from jobs import nightly
+
+    record = MagicMock()
+    verdicts = AsyncMock()
+    reaper = AsyncMock()
+    monkeypatch.setattr(nightly, "_claim_today", lambda _day: True)
+    monkeypatch.setattr(nightly, "_record_maintenance_terminal", record)
+    monkeypatch.setattr(thread_lifecycle, "run_lifecycle_retention", MagicMock())
+    monkeypatch.setattr(request_timing, "prune_retention", MagicMock())
+    monkeypatch.setattr(managed_process_events, "drain_retirements", MagicMock())
+    monkeypatch.setattr(nightly, "_run_workflow_verdicts_safely", verdicts)
+    monkeypatch.setattr(nightly, "_reap_worktrees_safely", reaper)
+
+    await nightly._run_job_safely()
+
+    assert record.call_args.args[1] == "ok"
+    verdicts.assert_awaited_once_with()
+    reaper.assert_awaited_once_with()
+
+
+@pytest.mark.asyncio
+async def test_nightly_keeps_the_error_disposition_when_maintenance_fails(monkeypatch) -> None:
+    from automation import managed_process_events
+    from core import thread_lifecycle
+    from infra import request_timing
+    from jobs import nightly
+
+    record = MagicMock()
+    verdicts = AsyncMock()
+    monkeypatch.setattr(nightly, "_claim_today", lambda _day: True)
+    monkeypatch.setattr(nightly, "_record_maintenance_terminal", record)
+    monkeypatch.setattr(thread_lifecycle, "run_lifecycle_retention", MagicMock(side_effect=RuntimeError("retention failed")))
+    monkeypatch.setattr(request_timing, "prune_retention", MagicMock())
+    monkeypatch.setattr(managed_process_events, "drain_retirements", MagicMock())
+    monkeypatch.setattr(nightly, "_run_workflow_verdicts_safely", verdicts)
+    monkeypatch.setattr(nightly, "_reap_worktrees_safely", AsyncMock())
+
+    await nightly._run_job_safely()
+
+    assert record.call_args.args[1] == "error"
+    verdicts.assert_awaited_once_with()

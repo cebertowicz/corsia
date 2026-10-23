@@ -3,7 +3,11 @@ import asyncio
 
 import pytest
 
-from infra.state.context import _current_tool_invocation_id, tool_invocation_context
+from infra.state.context import (
+    _current_checkpoint_generation_id,
+    _current_tool_invocation_id,
+    tool_invocation_context,
+)
 
 
 @pytest.mark.parametrize("missing", [None, "", "   "])
@@ -17,10 +21,15 @@ def test_missing_invocation_clears_an_inherited_foreground_identity(missing):
 
 def test_checkpoint_scope_never_inherits_or_exports_a_foreground_call():
     with tool_invocation_context("foreground-call"):
-        with tool_invocation_context("private-call", fork_id="checkpoint-1"):
+        with tool_invocation_context(
+            "private-call", fork_id="checkpoint-1", checkpoint_generation_id="install-1",
+        ):
             assert _current_tool_invocation_id.get() is None
+            assert _current_checkpoint_generation_id.get() == "install-1"
         assert _current_tool_invocation_id.get() == "foreground-call"
+        assert _current_checkpoint_generation_id.get() is None
     assert _current_tool_invocation_id.get() is None
+    assert _current_checkpoint_generation_id.get() is None
 
 
 @pytest.mark.asyncio

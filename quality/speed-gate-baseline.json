@@ -19,7 +19,7 @@
     "/api/threads/{thread_id}/messages?limit=50&view=focus"
   ],
   "progress_every": 1,
-  "reason": "Machine tokens without a thread are now refused on /api/google/status, matching /api/connected-apps; agents are reach-filtered and the person path is unchanged",
+  "reason": "Read lesson offers from indexed with-variant guidance receipts instead of scanning per-call manifests and per-thread installed-boundary metadata; genuine scoped model-call counts remain separate",
   "route_ceilings": {
     "/api/threads/{thread_id}/messages?limit=50&view=focus": {
       "bytes": 131072
@@ -142,9 +142,9 @@
       "steps": 1257473
     },
     "/api/measurement/lessons": {
-      "bytes": 104075,
-      "statements": 848,
-      "steps": 5448302
+      "bytes": 104038,
+      "statements": 18,
+      "steps": 2048501
     },
     "/api/measurement/limits": {
       "bytes": 509,

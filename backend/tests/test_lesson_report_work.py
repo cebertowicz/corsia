@@ -1,6 +1,6 @@
 """The Learning report does each piece of evidence work once per request and keeps its exact result.
 
-Counts operations (blob reads, manifest parses, offer visits, summaries) rather than wall time.
+Counts operations (blob reads, receipt scans, offer visits, summaries) rather than wall time.
 """
 from __future__ import annotations
 
@@ -9,15 +9,16 @@ from typing import Any
 
 import pytest
 
-from core import lesson_report, lesson_report_receipts as _receipts
+from core import lesson_report
 from core.lesson_files import _with_lesson, render_trial, with_review_ref  # noqa: F401
 from core.lesson_report import ReportScope, read_report
 from core.lesson_report_inventory import build_inventory
 from core.lesson_report_reads import identify_recorded_reads
-from core.lesson_report_receipts import read_offer_evidence, read_offers
+from core.lesson_report_receipts import read_offer_evidence
 from core.lesson_trials import Trial
-from tests.test_lesson_report_receipts import call, db, manifest, offer_counts  # noqa: F401 - shared real-schema fixture
-from tests.test_lesson_report_scan_equivalence import assert_offers_equal
+from tests.lesson_receipt_helpers import write_trial_receipt
+from tests.test_lesson_report_receipts import db  # noqa: F401 - shared real-schema fixture
+from tests.test_lesson_report_scan_equivalence import assert_offers_equal, receipt_reference
 
 NOW = "2026-10-02T12:00:00Z"
 SCOPE = ReportScope("user", ("owner",), "self", "2026-09-21", "2026-09-28")
@@ -108,15 +109,17 @@ def test_reader_memo_is_request_local_and_a_read_error_is_not_cached():
 # ---- 2. read_report summarizes only the requested slice ----
 
 def seed_rows(db, first: int, last: int, offers_per_row: int = 5) -> None:
-    """One lesson per row, each offered by ``offers_per_row`` calls over two tasks."""
+    """One lesson per row, each delivered by ``offers_per_row`` receipt-backed tasks."""
     for row in range(first, last):
-        manifest(db, f"m{row}", [{"id": f"lesson-{row:03}", "behavioral_sha256": f"{row:064x}"}])
         for n in range(offers_per_row):
-            call(db, f"u-{row}-{n}", f"m{row}", task=f"t{n % 2}", attempt=f"a{n}")
+            write_trial_receipt(
+                db, lesson_id=f"lesson-{row:03}", behavioral_sha256=f"{row:064x}", node_id=f"t{n % 2}",
+                checkpoint_generation_id=f"checkpoint-{row}-{n}", created_at=f"2026-09-2{n % 5 + 2}T00:00:{n:02d}",
+            )
 
 
-def collected_report(db, rows: int = 45, reads_per_row: int = 2, detail=None) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-    """The collected evidence of seeded rows, with fabricated body reads, and the list-based offers oracle."""
+def collected_report(db, rows: int = 45, reads_per_row: int = 2, detail=None) -> tuple[dict[str, Any], Any]:
+    """The collected evidence of seeded rows, fabricated body reads, and receipt offers."""
     seed_rows(db, 0, rows)
     return collect_seeded(db, rows, reads_per_row, detail)
 
@@ -128,22 +131,29 @@ def collect_seeded(db, rows: int, reads_per_row: int = 2, detail=None):
               "raw_sha256": SHA, "thread_id": "owner"}
              for row in range(rows) for n in range(reads_per_row)]
     collected["bodies"] = {"reads": reads, "unavailable_reads": {}, "coverage": "test"}
-    oracle = read_offers(db, user_id="user", thread_ids=("owner",), from_ts=SCOPE.from_ts, to_ts=SCOPE.to_ts)
-    return collected, oracle["offers"]
+    reference = receipt_reference(db, user_id="user", thread_ids=("owner",), from_ts=SCOPE.from_ts, to_ts=SCOPE.to_ts)
+    return collected, reference["period"]["offers"]
 
 
 def report(collected, **options):
     return read_report(None, scope=SCOPE, sources=[], now=NOW, collected=collected, **options)
 
 
+def _receipt_counts(offers, identity):
+    period = [offer for offer in offers if (offer["id"], offer["version"]) == identity]
+    return {"receipts": len({offer["receipt_id"] for offer in period}),
+            "tasks": len({offer["task_id"] for offer in period if offer["task_id"]}),
+            "opportunity": None, "application": None, "efficacy": None,
+            "reason": "task-start receipts prove delivery, not reading, use, or benefit"}
+
+
 def oracle_summary(row, offers, reads):
-    """The pre-change per-row summary, written independently of the module under test."""
-    period = [offer for offer in offers if (offer["id"], offer["version"]) == (row["id"], row["version"])]
+    """The receipt-row summary, written independently of the module under test."""
     return {key: row[key] for key in (
         "kind", "id", "version", "name", "activated", "state", "source_status", "owner_ids",
         "due", "review_after", "open_reviews", "lifecycle_reason",
         "review_due", "due_work", "review_due_unknown",
-    )} | {"indexed": offer_counts(period),
+    )} | {"indexed": _receipt_counts(offers, (row["id"], row["version"])),
           "source_scope": (row["current_source"] or {}).get("source_scope"),
           "source_scope_reason": "recorded source scope unavailable" if not row["current_source"] else None,
           "body_reads": sum((read["id"], read["version"]) == (row["id"], row["version"]) for read in reads),
@@ -216,58 +226,38 @@ def test_changed_input_gives_a_fresh_report_and_refuses_the_old_cursor(db):
     assert report(changed)["known_versions"] == 46
 
 
-# ---- 3. read_offer_evidence parses each distinct manifest once per call ----
-
-def lessons(*ids):
-    return [{"id": lesson, "behavioral_sha256": SHA} for lesson in ids]
-
-
-def parses(monkeypatch):
-    """One entry per manifest body handed to the manifest parser (calls without a manifest body never parse)."""
-    seen = []
-    real = _receipts._lessons
-    monkeypatch.setattr(_receipts, "_lessons", lambda text: (seen.append(1) if text is not None else None) or real(text))
-    return seen
-
+# ---- 3. receipt evidence performs bounded receipt work, not manifest parsing ----
 
 def evidence(db, **window):
     return read_offer_evidence(db, user_id="user", thread_ids=("owner",),
                                from_ts=window.get("from_ts", "2026-09-21"), to_ts=window.get("to_ts", "2026-09-28"))
 
 
-def test_a_shared_manifest_is_parsed_once_and_every_call_keeps_its_own_offer(db, monkeypatch):
-    manifest(db, "m1", lessons("one", "two", "one"))
-    manifest(db, "m2", lessons("three"))
-    for index in range(12):
-        call(db, f"u{index:02}", "m1" if index % 3 else "m2", task=None if index == 4 else "task", attempt=f"at{index}")
-    seen = parses(monkeypatch)
-    result = evidence(db)
-    assert len(seen) == 2
-    oracle = read_offers(db, user_id="user", thread_ids=("owner",), from_ts="2026-09-21", to_ts="2026-09-28")
-    assert_offers_equal(result["period"]["offers"], oracle["offers"]) and len(oracle["offers"]) == 4 * 1 + 8 * 2
-    assert result["period"]["calls"] == oracle["calls"] == 12
-    assert [(o["id"], o["usage_id"]) for o in oracle["offers"] if o["usage_id"] == "u04"] == [
-        ("one", "u04"), ("two", "u04")]
-    assert {(o["id"], o["version"]) for o in result["retained"]} == {("one", SHA), ("two", SHA), ("three", SHA)}
-    assert [(o["id"], o["usage_id"]) for o in result["retained"]] == [
-        ("three", "u00"), ("one", "u01"), ("two", "u01")]
-
-
-def test_missing_malformed_and_historical_manifests_keep_their_reasons_and_first_occurrence(db, monkeypatch):
-    manifest(db, "ok", lessons("late"))
+def test_receipt_evidence_scans_receipts_not_manifests_and_keeps_usage_count_separate(db):
+    for index, lesson in enumerate(("one", "two", "one", "three")):
+        write_trial_receipt(
+            db, lesson_id=lesson, behavioral_sha256=SHA, node_id=f"task-{index % 2}",
+            checkpoint_generation_id=f"checkpoint-{index}", created_at=f"2026-09-22T00:00:0{index}",
+        )
+    write_trial_receipt(db, lesson_id="excluded", variant="without", created_at="2026-09-22T00:00:05")
     db.execute("INSERT INTO context_manifests(id,harness,entries_json,entry_count,created_at) VALUES('bad','native','{}',0,'t')")
-    db.execute("INSERT INTO context_manifests(id,harness,entries_json,entry_count,created_at) VALUES('plain','native','[1]',1,'t')")
-    manifest(db, "old", lessons("early"))
-    call(db, "history", "old")
-    db.execute("UPDATE llm_usage SET created_at='2026-01-01' WHERE id='history'")
-    for index, manifest_id in enumerate(["ok", "bad", "plain", "ok", None, "bad", "missing-row"]):
-        call(db, f"p{index}", manifest_id)
-    seen = parses(monkeypatch)
-    result = evidence(db)
-    parsed_once = len(seen)
-    oracle = read_offers(db, user_id="user", thread_ids=("owner",), from_ts="2026-09-21", to_ts="2026-09-28")
-    assert_offers_equal(result["period"]["offers"], oracle["offers"])
-    assert result["period"]["unavailable_calls"] == oracle["unavailable_calls"] != {}
-    assert result["period"]["calls"] == oracle["calls"] == 7
-    assert {o["id"]: o["usage_id"] for o in result["retained"]} == {"early": "history", "late": "p0"}
-    assert parsed_once == 4  # old, ok, bad and plain once each; null and dangling manifests never parse
+    for index in range(2):
+        db.execute(
+            "INSERT INTO llm_usage(id,thread_id,turn_id,model,created_at) VALUES(?, 'owner', 'turn', 'm', '2026-09-22')",
+            (f"usage-{index}",),
+        )
+
+    class ReceiptOnlyDB:
+        def execute(self, sql, params=()):
+            assert "context_manifests" not in sql, "receipt evidence must not parse or join manifests"
+            return db.execute(sql, params)
+
+    result = evidence(ReceiptOnlyDB())
+    reference = receipt_reference(db, user_id="user", thread_ids=("owner",), from_ts="2026-09-21", to_ts="2026-09-28")
+    assert_offers_equal(result["period"]["offers"], reference["period"]["offers"])
+    assert result["retained"] == reference["retained"]
+    assert result["period"]["calls"] == 2
+    assert result["period"]["unavailable_calls"] == {}
+
+
+# Disposition: manifest-parser work-budget and malformed-manifest tests are obsolete; receipts are the sole offer source.

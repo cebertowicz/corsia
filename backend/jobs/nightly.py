@@ -189,7 +189,10 @@ async def _run_job_safely() -> None:
                 rec_err,
             )
     # Follow-up jobs run after the terminal record: their failures cannot change
-    # the maintenance disposition already written.
+    # the maintenance disposition already written. The model-free verdict batch
+    # remains before report emission and never wakes an owner while verdict writes
+    # remain disabled.
+    await _run_workflow_verdicts_safely()
     await _emit_learning_reports_safely()
     await _reap_worktrees_safely()
 
@@ -203,6 +206,16 @@ async def _run_scheduled_update_if_due(now: datetime | None = None) -> str | Non
     except Exception:
         logger.exception("nightly_job: scheduled update tick failed")
         return None
+
+
+async def _run_workflow_verdicts_safely() -> None:
+    """Run the bounded model-free daily verdict evaluation without breaking maintenance."""
+    try:
+        from jobs.workflow_verdicts import run_daily
+
+        await asyncio.to_thread(run_daily)
+    except Exception:
+        logger.exception("nightly_job: workflow verdict evaluation failed")
 
 
 async def _emit_learning_reports_safely() -> None:

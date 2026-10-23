@@ -14,7 +14,6 @@ import json
 from threading import Event
 from typing import Any
 
-from core.lesson_report_boundaries import read_boundaries
 from core.lesson_report_inventory import build_inventory
 from core.lesson_report_offers import PAGE_SIZE, DeferredOffers, DetailRequest, snapshot_fingerprint
 from core.lesson_report_reads import read_bodies
@@ -176,7 +175,6 @@ def collect_report(db, *, scope: ReportScope, sources: list[dict[str, Any]],
     the ``detail`` lesson, the offers a page of it can show.
     """
     history, missing_owners = _history(db, scope)
-    boundaries = read_boundaries(db, user_id=scope.user_id, thread_ids=scope.thread_ids)
     offers = read_offer_evidence(db, user_id=scope.user_id, thread_ids=scope.thread_ids,
                                  from_ts=scope.from_ts, to_ts=scope.to_ts,
                                  cancellation_event=cancellation_event)
@@ -184,14 +182,14 @@ def collect_report(db, *, scope: ReportScope, sources: list[dict[str, Any]],
     if detail is not None:
         # A row lists only reviews from this history, each node once, ahead of its offers.
         period["offers"].prefetch(db, detail, reviews_at_most=len(history))
-    retained = offers["retained"] + boundaries
+    retained = offers["retained"]
     bodies = read_bodies(db, user_id=scope.user_id, thread_ids=scope.thread_ids,
                          facts=sources + retained)
     from core.lesson_corrections import correction_facts, placement_check_counts, source_subjects
 
     # The adapter passes no sources here and joins corrections after reading lesson files.
     subjects = source_subjects(sources)
-    return {"history": history, "missing_owners": missing_owners, "boundaries": boundaries,
+    return {"history": history, "missing_owners": missing_owners,
             "retained": retained, "period": period, "bodies": bodies,
             "correction_facts": correction_facts(db, subjects),
             "placement_checks": placement_check_counts(db, scope.thread_ids)}
@@ -206,22 +204,19 @@ def detail_request(lesson_id: str | None, version: str | None, cursor: str | Non
 
 
 def _detail_page(result: dict[str, Any], *, row: dict[str, Any], period: dict[str, Any],
-                 reads: list[dict[str, Any]], boundaries: list[dict[str, Any]], offset: int,
+                 reads: list[dict[str, Any]], offset: int,
                  fingerprint: str, query: dict[str, Any]) -> dict[str, Any]:
     """Page references for one exact behavior without expanding the list surface."""
     offers, identity = period["offers"], (row["id"], row["version"])
     reviews = [{"kind": "review", "value": review} for review in row["reviews"]]
     bodies = [{"kind": "body_read", "value": read} for read in reads
               if (read["id"], read["version"]) == identity]
-    installed = [{"kind": "installed_boundary", "value": fact} for fact in boundaries
-                 if (fact["id"], fact["version"]) == identity]
 
     def indexed(start: int, end: int) -> list[dict[str, Any]]:
         return [{"kind": "indexed", "value": offer} for offer in offers.page(identity, start, end)]
 
     segments = [(len(reviews), lambda start, end: reviews[start:end]), (offers.total(identity), indexed),
-                (len(bodies), lambda start, end: bodies[start:end]),
-                (len(installed), lambda start, end: installed[start:end])]
+                (len(bodies), lambda start, end: bodies[start:end])]
     total = sum(length for length, _page in segments)
     if offset > total:
         raise ValueError("invalid detail position; refresh the report")
@@ -299,7 +294,7 @@ def read_report(
     data = collected if collected is not None else collect_report(
         db, scope=scope, sources=sources, detail=detail_request(lesson_id, version, cursor, evidence))
     history, missing_owners = data["history"], data["missing_owners"]
-    boundaries, retained, period = data["boundaries"], data["retained"], data["period"]
+    retained, period = data["retained"], data["period"]
     correction_facts = data["correction_facts"]
     placement_checks = data["placement_checks"]
     bodies = data["bodies"]
@@ -338,7 +333,7 @@ def read_report(
             result.update({"detail": None, "reason": "exact lesson/version not unique in this view",
                            "next_call": "lesson_report(scope=\"all\")"})
             return result
-        return _detail_page(result, row=selected[0], period=period, reads=reads, boundaries=boundaries,
+        return _detail_page(result, row=selected[0], period=period, reads=reads,
                             offset=offset, fingerprint=fingerprint, query=query)
     visible_inventory = _list_inventory(inventory, now, state)
     limit = 5 if preview else 20

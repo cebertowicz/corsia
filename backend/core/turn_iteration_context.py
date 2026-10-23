@@ -348,7 +348,6 @@ def _context_usage_from_latest_call(
     if not include_context_details:
         measured.pop("context_snapshot", None)
         measured.pop("source_artifacts", None)
-        measured.pop("lesson_index_estimates", None)
     if effective_input is None:
         measured.update(
             total_used=None,

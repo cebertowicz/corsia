@@ -1,14 +1,15 @@
-"""Placing a hypothesis as a trial: the real tool call, worker, review and installed offer.
+"""Placing a hypothesis as a trial: the real tool call, worker, review and per-task offer.
 
-Nothing between the ``place`` call and the installed skills index is replaced
+Nothing between the ``place`` call and the per-task delivery seam is replaced
 here: the thread's tray, the versioned writer, the artifact registry, the Plans
-review and the skills registry are the real ones. A fault is one real step
-raising once.
+review and the skill resolver are the real ones. A fault is one real step
+raising once. A trial is offered when the task-local delivery seam would
+deliver it; no cached skills index ever carries one.
 
-- A complete hypothesis is written, reviewed and offered by the next install,
+- A complete hypothesis is written, reviewed and offered to the next task,
   and its continuity entry retires. Until the review reference is written, no
-  index offers the file.
-- A failure at any step leaves the trial out of the index and its entry
+  task is offered the file.
+- A failure at any step leaves the trial unoffered and its entry
   recoverable; the retry repeats nothing: one file, one artifact, one review.
 - A person's instruction is never a trial. A hypothesis resting on a person's
   words without a derivation, or without their words kept somewhere, is
@@ -23,6 +24,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import sqlite3
+import uuid
 from typing import Any
 
 import pytest
@@ -61,6 +63,8 @@ def env(tmp_path, monkeypatch) -> Env:
     db.execute("UPDATE threads SET title='Lane', agent_enabled=1 WHERE id=?", (THREAD,))
     db.commit()
     monkeypatch.setattr("infra.database.get_db", lambda: _connect(str(path)))
+    monkeypatch.setattr("infra.config.WORKSPACE", workspace)
+    monkeypatch.setattr("tools.sandbox_config._STATIC_ALLOWED_RW", [workspace.resolve()])
     return Env(
         workspace, workspace / ".threads" / THREAD, db, _tool_db(path, monkeypatch),
         placement_worker, monkeypatch,
@@ -80,6 +84,12 @@ def _answer(*, trial: dict | None = None, **overrides) -> dict:
         skill_description="Use when reporting a check result on a pull request.",
         rationale="a hypothesis to try in this lane",
     )
+    answer.update({
+        "target_file": "skills/checks/SKILL.md", "target_section": "Reporting",
+        "cause": "process_gap",
+        "case": {"what_happened": "A result lacked its commit.", "right_call": "Name the commit.",
+                 "does_not_apply": "For a draft.", "correction_subject": "message:41"},
+    })
     answer["trial"] = {
         "kind": "hypothesis", "review_after": _due(days=14), "boundary": "A one-line typo fix.",
         **(trial or {}),
@@ -132,13 +142,79 @@ def _skill(env: Env, name: str = "cite-the-head") -> Path:
     return env.tray / "skills" / name / "SKILL.md"
 
 
+def _owned_trial(
+    env: Env, name: str, *, cause: str = "process_gap", state: str = "trial",
+    target_file: str = "skills/checks/SKILL.md",
+) -> Path:
+    """Seed another of this thread's own trials, in its tray."""
+    from core.lesson_files import render_trial
+    from core.lesson_trials import Trial
+
+    path = _skill(env, name).parent.parent / name / "SKILL.md"
+    path.parent.mkdir(parents=True)
+    path.write_text(render_trial(
+        lesson_id=str(uuid.uuid4()), owner=THREAD, name=name,
+        description="Use when reporting a check result on a pull request.",
+        text="Name the exact commit a check ran on.",
+        trial=Trial("hypothesis", _due(days=14), state=state, boundary="A one-line typo fix."),
+        source_refs=TURN, target_file=target_file, target_section="Reporting",
+        cause=cause,
+        case={
+            "what_happened": "A result lacked its commit.",
+            "right_call": "Name the commit.", "does_not_apply": "For a draft.",
+            "correction_subject": "message:external",
+        },
+    ), encoding="utf-8")
+    return path
+
+
+def _other_thread_trial(env: Env, name: str, *, state: str = "trial") -> Path:
+    """Seed another thread's same-target trial outside this owner's resolution."""
+    from core.lesson_files import render_trial
+    from core.lesson_trials import Trial
+
+    path = env.workspace / ".threads" / "other-owner" / "skills" / name / "SKILL.md"
+    path.parent.mkdir(parents=True)
+    path.write_text(render_trial(
+        lesson_id=str(uuid.uuid4()), owner="other-owner", name=name,
+        description="Use when reporting a check result on a pull request.",
+        text="Name the exact commit a check ran on.",
+        trial=Trial("hypothesis", _due(days=14), state=state, boundary="A one-line typo fix."),
+        source_refs=TURN, target_file="skills/checks/SKILL.md", target_section="Reporting",
+        cause="process_gap",
+        case={
+            "what_happened": "A result lacked its commit.",
+            "right_call": "Name the commit.", "does_not_apply": "For a draft.",
+            "correction_subject": "message:other-owner",
+        },
+    ), encoding="utf-8")
+    return path
+
+
 def _offered(env: Env) -> list[dict]:
-    """The lessons the next installed skills index would carry."""
+    """The lessons the next task start would deliver.
+
+    The cached skills index must never carry one, so that is checked on every call.
+    """
+    from core.lesson_delivery import _resolve
+    from core.lesson_files import read_trial
+    from core.lesson_index import TRIAL_MARK
+
     sources = skill_context_sources(
         thread_id=THREAD, project_id=None, workspace=env.workspace, db=env.db,
     )
     index = [source for source in sources if source.source_id == "dynamic:skills-index"]
-    return index[0].metadata["lessons"] if index else []
+    assert all("lessons" not in (source.metadata or {}) for source in index)
+    cached = "".join(source.prompt_content or "" for source in index)
+    assert TRIAL_MARK not in cached
+    offered = []
+    for trial in _resolve(env.db, THREAD)[0]:
+        current = read_trial(trial.source_data.decode("utf-8"))
+        offered.append({
+            "id": trial.lesson_id, "behavioral_sha256": trial.behavioral_sha256,
+            "name": current.name,
+        })
+    return offered
 
 
 def _reviews(env: Env, prefix: str = "") -> list[sqlite3.Row]:
@@ -155,16 +231,17 @@ def _open(rows: list[sqlite3.Row]) -> list[sqlite3.Row]:
 
 
 def _offered_at(env: Env, now: datetime) -> list[dict]:
-    """The lessons an index installed at ``now`` would carry."""
+    """The lessons a task started at ``now`` would receive."""
     from core import lesson_index
-    from core.skill_resolution import resolve_effective_skills
 
-    resolved = resolve_effective_skills(
-        thread_id=THREAD, project_id=None, workspace=env.workspace, db=env.db,
-    )
-    return lesson_index.partition(
-        resolved.included, resolved.omitted, thread_id=THREAD, db=env.db, now=now,
-    ).lessons
+    class _At(datetime):
+        @classmethod
+        def now(cls, tz=None):  # noqa: ANN001, ANN206 - datetime's own signature
+            return now.astimezone(tz)
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(lesson_index, "datetime", _At)
+        return _offered(env)
 
 
 def _row(env: Env, entry: int) -> dict:
@@ -347,7 +424,7 @@ async def test_a_retired_lesson_tried_again_is_a_new_lesson_naming_its_origin(en
     assert _offered(env) == []
     second = _entry(env, [{"kind": "turn", "reference": "turn-40"}], "citing the head still helps")
 
-    _place(env, second)
+    _place(env, second, _answer(new_evidence="case_differs"))
     await _drain(env.worker)
 
     new = lesson_files.read_trial(_skill(env).read_text())
@@ -357,6 +434,134 @@ async def test_a_retired_lesson_tried_again_is_a_new_lesson_naming_its_origin(en
     [review] = _open(_reviews(env, f"lesson:{new.lesson.id}:"))
     assert new.lesson.review_ref == f"plan-node:{review['id']}"
     assert [lesson["id"] for lesson in _offered(env)] == [new.lesson.id]
+
+
+async def test_tool_placement_merges_the_same_target_section_and_cause_into_the_owners_trial(
+    env: Env,
+) -> None:
+    existing = _owned_trial(env, "existing-check")
+    entry = _entry(env, [{"kind": "turn", "reference": "turn-merge"}])
+
+    reply = _place(env, entry, _answer(skill_name="incoming-check"))
+    await _drain(env.worker)
+
+    merged = lesson_files.read_trial(existing.read_text())
+    assert merged is not None and merged.name == "existing-check"
+    assert [ref["reference"] for ref in merged.lesson.source_refs] == ["turn-7", "turn-merge"]
+    assert not _skill(env, "incoming-check").exists()
+    assert "Open trials with this target: existing-check (process_gap)." in reply
+
+
+async def test_tool_placement_ignores_another_threads_open_same_target_trial(env: Env) -> None:
+    other = _other_thread_trial(env, "other-open")
+    entry = _entry(env)
+
+    reply = _place(env, entry, _answer(skill_name="owner-open"))
+    await _drain(env.worker)
+
+    created = lesson_files.read_trial(_skill(env, "owner-open").read_text())
+    assert created is not None and created.lesson.owner == THREAD
+    assert lesson_files.read_trial(other.read_text()).lesson.owner == "other-owner"
+    assert "other-open" not in reply
+
+
+async def test_tool_placement_ignores_another_threads_retired_same_target_trial(env: Env) -> None:
+    other = _other_thread_trial(env, "other-retired", state="retired")
+    entry = _entry(env)
+
+    reply = _place(env, entry, _answer(skill_name="owner-retired"))
+    await _drain(env.worker)
+
+    created = lesson_files.read_trial(_skill(env, "owner-retired").read_text())
+    assert created is not None and created.lesson.owner == THREAD
+    assert lesson_files.read_trial(other.read_text()).lesson.state == "retired"
+    assert "other-retired" not in reply
+
+
+async def test_tool_placement_merges_relative_destination_with_resolved_trial_target(
+    env: Env,
+) -> None:
+    existing = _owned_trial(
+        env, "existing-check", target_file=str((env.workspace / "skills/checks/SKILL.md").resolve()),
+    )
+    entry = _entry(env, [{"kind": "turn", "reference": "turn-relative"}])
+
+    _place(env, entry, _answer(skill_name="incoming-check"))
+    await _drain(env.worker)
+
+    merged = lesson_files.read_trial(existing.read_text())
+    assert merged is not None and merged.name == "existing-check"
+    assert merged.lesson.target_file == "skills/checks/SKILL.md"
+    assert [ref["reference"] for ref in merged.lesson.source_refs] == ["turn-7", "turn-relative"]
+    assert not _skill(env, "incoming-check").exists()
+
+
+async def test_tool_placement_creates_a_different_cause_and_lists_the_open_trial(
+    env: Env,
+) -> None:
+    _owned_trial(env, "existing-check")
+    entry = _entry(env)
+
+    reply = _place(env, entry, _answer(skill_name="wrong-rule-check", cause="wrong_rule"))
+    await _drain(env.worker)
+
+    created = lesson_files.read_trial(_skill(env, "wrong-rule-check").read_text())
+    assert created is not None and created.lesson.cause == "wrong_rule"
+    assert "Open trials with this target: existing-check (process_gap)." in reply
+
+
+async def test_tool_placement_admits_a_retired_target_match_with_target_changed(
+    env: Env,
+) -> None:
+    _owned_trial(env, "retired-check", state="retired")
+    entry = _entry(env)
+
+    reply = _place(
+        env, entry, _answer(skill_name="replacement-check", new_evidence="target_changed"),
+    )
+    await _drain(env.worker)
+
+    replacement = lesson_files.read_trial(_skill(env, "replacement-check").read_text())
+    assert replacement is not None and replacement.lesson.state == "trial"
+
+
+async def test_tool_placement_refusal_names_the_retired_trial_without_new_evidence(
+    env: Env,
+) -> None:
+    _owned_trial(env, "retired-check", state="retired")
+    entry = _entry(env)
+
+    reply = _place(env, entry, _answer(skill_name="replacement-check"))
+
+    assert reply == (
+        "Error: retired trial 'retired-check' has the same target, section, and cause; "
+        "set new_evidence to target_changed or case_differs to admit a new trial"
+    )
+    assert not _skill(env, "replacement-check").exists()
+
+
+def test_an_in_context_trial_may_only_add_a_section(env: Env) -> None:
+    (env.workspace / "AGENTS.md").write_text("# Agents\n\n## Reporting\n\nName the run.\n", encoding="utf-8")
+
+    changed = _place(env, _entry(env), _answer(target_file="AGENTS.md"))
+    missing = _place(env, _entry(env), _answer(target_file="MISSING.md"))
+    added = _place(env, _entry(env), _answer(target_file="AGENTS.md", target_section="Check heads"))
+
+    assert changed.startswith("Error: AGENTS.md is already in context and has a 'Reporting' section;")
+    assert missing.startswith("Error: MISSING.md could not be read")
+    assert added.startswith("Entry 3 queued")
+
+
+def test_an_outside_workspace_target_is_refused_without_reading_it(env: Env) -> None:
+    outside = env.workspace.parent / "OUTSIDE.md"
+    outside.write_text("# Outside\n\n## Reporting\n\nPrivate.\n", encoding="utf-8")
+
+    with_section = _place(env, _entry(env), _answer(target_file=str(outside)))
+    without_section = _place(env, _entry(env), _answer(target_file=str(outside), target_section="Absent"))
+
+    assert with_section == without_section
+    assert "is outside the workspace" in with_section
+    assert "Reporting" not in with_section
 
 
 async def test_a_checkpoint_stages_a_trial_and_its_install_hands_it_to_the_worker(
@@ -655,8 +860,11 @@ async def test_a_literal_that_is_kept_nowhere_holds_the_hypothesis(env: Env) -> 
     assert "name that in trial.literal_ref" in reply
 
 
-def _derived(**literal_ref) -> dict:
-    return _answer(trial={"derivation": "it follows", "literal_ref": literal_ref})
+def _derived(*, new_evidence: str | None = None, **literal_ref) -> dict:
+    answer = _answer(trial={"derivation": "it follows", "literal_ref": literal_ref})
+    if new_evidence:
+        answer["new_evidence"] = new_evidence
+    return answer
 
 
 HELD = "does not point at where their exact words are kept"
@@ -763,7 +971,7 @@ async def test_a_written_trial_is_not_where_a_persons_words_are_kept(env: Env) -
 
     assert HELD in _place(env, entry, _derived(entry_id=written))
     assert HELD in _place(env, entry, _derived(**its_file))
-    assert QUEUED in _place(env, entry, _derived(entry_id=literal))
+    assert QUEUED in _place(env, entry, _derived(entry_id=literal, new_evidence="case_differs"))
 
 
 # -- a review that was settled, or a version that came back ------------------------
@@ -873,21 +1081,6 @@ async def test_appended_evidence_finds_the_same_captured_review(env: Env) -> Non
         "message 41", "turn-30",
     ]
     assert _artifacts(env, capture) == 1
-
-
-async def test_a_full_lesson_budget_captures_the_next_trial(env: Env) -> None:
-    from plans import public as plans
-
-    env.monkeypatch.setattr("core.lesson_index.INDEX_TOKEN_BUDGET", 1)
-    entry = _entry(env)
-
-    reply = _place(env, entry)
-    await _drain(env.worker)
-
-    assert "the trial lessons already offered fill the lesson index budget" in reply
-    assert "retire or promote a trial lesson you no longer need" in reply
-    assert not _skill(env).exists() and _offered(env) == []
-    assert plans.open_capture_review_counts(env.db) == {THREAD: 1}
 
 
 async def test_duplicate_watch_placement_merges_each_turns_subjects_on_one_record(env: Env) -> None:

@@ -83,7 +83,7 @@ def test_invalid_origin_reaches_the_existing_not_loaded_error_block(tmp_path, mo
     )
     error = scan_scope(tmp_path, "workspace", "workspace")[0]
     monkeypatch.setattr(registry, "resolve_effective_skills", lambda **_kwargs: SkillResolution([], [], [error]))
-    monkeypatch.setattr(registry, "partition", lambda *_args, **_kwargs: LessonPartition([], [], []))
+    monkeypatch.setattr(registry, "partition", lambda *_args, **_kwargs: LessonPartition([], []))
     monkeypatch.setattr(registry, "emit_product_event", lambda *_args, **_kwargs: None)
 
     index = registry.skill_context_sources(

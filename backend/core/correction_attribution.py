@@ -34,6 +34,8 @@ from core.corrections_recording import (
     SOURCE_KIND_DECISION_ANSWER,
     SOURCE_KIND_DOC_COMMENT,
     SOURCE_KIND_MESSAGE,
+    SOURCE_KIND_SELF_CAUGHT,
+    SELF_CAUGHT_SUBJECT_PREFIX,
     decision_answer_arrived_at_sql,
     decision_answer_subject_key_sql,
 )
@@ -72,6 +74,10 @@ _ATTRIBUTED_SQL = f"""
       FROM facts f LEFT JOIN artifact_identities d ON f.subject_key={decision_answer_subject_key_sql('d')}
         AND d.integration='local' AND d.type='plan-decision'
       WHERE f.subject_key LIKE '{DECISION_SUBJECT_PREFIX}%'
+      UNION ALL
+      SELECT '{SOURCE_KIND_SELF_CAUGHT}',substr(f.subject_key,length('{SELF_CAUGHT_SUBJECT_PREFIX}') + 1),
+        json_extract(f.attributes,'$.recorded_at'),f.agent_thread_id,NULL,f.attributes
+      FROM facts f WHERE f.subject_key LIKE '{SELF_CAUGHT_SUBJECT_PREFIX}%'
     )
     SELECT s.source_kind,s.source_id,s.source_at,s.attributes,
       (SELECT t.plan_node_id FROM active_turns t
@@ -94,11 +100,19 @@ class AttributedFact:
     node_id: str | None
 
 
-def attributed_facts(db: sqlite3.Connection) -> list[AttributedFact]:
-    """Every readable correction fact with the plan node it is attributed to, or None (Unattributed)."""
-    rows = db.execute(_ATTRIBUTED_SQL, {
+def attributed_facts(db: sqlite3.Connection, *, node_ids: Iterable[str] | None = None) -> list[AttributedFact]:
+    """Readable correction facts, optionally only where attribution lands in selected nodes."""
+    query = _ATTRIBUTED_SQL
+    params: dict[str, object] = {
         "event": CORRECTION_EVENT, "correction": LABEL_CORRECTION, "not_correction": LABEL_NOT_CORRECTION,
-    }).fetchall()
+    }
+    if node_ids is not None:
+        encoded = json.dumps(sorted(set(node_ids)))
+        if encoded == "[]":
+            return []
+        query = f"SELECT * FROM ({query}) WHERE node_id IN (SELECT value FROM json_each(:node_ids))"
+        params["node_ids"] = encoded
+    rows = db.execute(query, params).fetchall()
     facts = []
     for row in rows:
         attributes = json.loads(row["attributes"])

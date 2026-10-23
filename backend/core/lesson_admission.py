@@ -18,9 +18,19 @@ from pathlib import Path
 from typing import Any
 
 from core import lesson_files
+from core.correction_learning import CAUSES
+from core.lesson_trial_targeting import (
+    TrialRefused,
+    additive_only as _additive_only,
+    same_case as _same_case,
+    target as _target,
+    target_from_lesson as _target_from_lesson,
+    target_trials as _target_trials,
+    trial_row as _trial_row,
+)
 from core.lesson_trials import PERMANENT_KINDS, lesson_id, parse_instant
 from core.thread_identity import thread_agent_identity
-from core.placement_decide import Decision, Destination, InvalidDecision, ThreadPlace
+from core.placement_decide import Decision, Destination, ThreadPlace
 
 #: A source a person wrote: citing one does not make the agent's rule theirs.
 HUMAN_KINDS = frozenset({"user", "message"})
@@ -39,16 +49,8 @@ FIXES = {
     "no-selective-trigger": (
         "give skill_description (when it applies) and trial.boundary (when it does not)"
     ),
-    "over-budget": "retire or promote a trial lesson you no longer need",
 }
 
-
-class TrialRefused(InvalidDecision):
-    """The trial cannot be placed as answered; ``code`` is the worker's reason."""
-
-    def __init__(self, code: str, message: str) -> None:
-        super().__init__(message)
-        self.code = code
 
 
 @dataclass(frozen=True)
@@ -65,6 +67,10 @@ class Admission:
     capture_id: str
     hold: str | None = None
     text: str | None = None
+    destination_path: Path | None = None
+    open_trials: tuple[dict[str, str], ...] = ()
+    retired_matches: tuple[dict[str, str], ...] = ()
+    merged_into: str | None = None
 
 
 def human_refs(body: dict[str, Any]) -> set[tuple[str, str]]:
@@ -81,6 +87,25 @@ def human_cited(entry: dict[str, Any]) -> bool:
     return bool(human_refs(entry["body"]))
 
 
+def _learning_metadata(decision: Decision) -> None:
+    target = decision.target_file
+    if not target or not decision.cause:
+        raise TrialRefused("missing-learning-metadata", "Trial admission needs target_file and cause.")
+    if target == "new":
+        if not decision.new_target_path:
+            raise TrialRefused("missing-learning-metadata", "target_file new requires new_target_path.")
+    elif decision.new_target_path:
+        raise TrialRefused("invalid-learning-metadata", "new_target_path is only allowed when target_file is new.")
+    if not decision.target_section or not decision.case:
+        raise TrialRefused("missing-learning-metadata", "Trial admission needs target_section and case (what_happened, right_call, does_not_apply, correction_subject).")
+    if decision.cause not in CAUSES:
+        raise TrialRefused("invalid-learning-metadata", "cause must be a System correction cause.")
+    if decision.new_evidence not in (None, "target_changed", "case_differs"):
+        raise TrialRefused("invalid-learning-metadata", "new_evidence must be target_changed or case_differs.")
+
+
+
+
 def admit(
     db: sqlite3.Connection, thread_id: str, entry: dict[str, Any], place: ThreadPlace,
     decision: Decision, destination: Destination, *, now: datetime | None = None,
@@ -88,6 +113,7 @@ def admit(
     """Check one trial answer; ``TrialRefused`` says what the caller must correct."""
     trial = decision.trial
     assert trial is not None
+    _learning_metadata(decision)
     if trial.kind in PERMANENT_KINDS:
         raise TrialRefused("permanent-kind", (
             f"a trial is only for a hypothesis. A person's {trial.kind} keeps its "
@@ -111,6 +137,7 @@ def admit(
             "a temporary worker keeps no trial lessons: return the finding to "
             "your parent in your plan, and leave this entry as it is"
         ))
+    _additive_only(decision)
     epoch = int(entry.get("history_epoch", row["history_epoch"]))
     capture_id = lesson_id(thread_id, epoch, int(entry["entry_id"]))
     hold = _incomplete(db, thread_id, epoch, entry, decision)
@@ -120,18 +147,27 @@ def admit(
         raise TrialRefused("invalid-output", (
             "skill_name must be a new lowercase-hyphenated name for the trial skill"
         ))
+    open_trials, retired_trials = _target_trials(place, decision)
+    open_rows = tuple(_trial_row(current) for _path, current in open_trials)
+    retired_rows = tuple(_trial_row(current) for _path, current in retired_trials)
+    retired_match = next(((path, current) for path, current in retired_trials if _same_case(current, decision)), None)
+    if retired_match and decision.new_evidence is None:
+        raise TrialRefused("retired-match", (
+            f"retired trial '{retired_match[1].name}' has the same target, section, and cause; "
+            "set new_evidence to target_changed or case_differs to admit a new trial"
+        ))
+    merge = next(((path, current) for path, current in open_trials if _same_case(current, decision)), None)
+    write_path = merge[0] if merge else destination.path
     capture = None
     if place.tray is not None:
         path = lesson_files.capture_path(place.tray, capture_id)
         capture = lesson_files.read_capture(path.read_text(encoding="utf-8")) if path.exists() else None
-    identity, text = _render(thread_id, capture_id, entry, decision, destination.path, capture)
-    offered = _offered_elsewhere(db, place, str(decision.skill_name), destination.path)
-    line = _index_line(decision, destination.path)
-    from core.lesson_index import fits_budget
-
-    if not fits_budget(offered, line, identity):
-        return Admission(identity, capture_id, "over-budget")
-    return Admission(identity, capture_id, None, text)
+    identity, text = _render(thread_id, capture_id, entry, decision, write_path, capture)
+    _ensure_name_available(db, place, str(decision.skill_name), write_path)
+    return Admission(
+        identity, capture_id, None, text, write_path, open_rows, retired_rows,
+        merge[1].name if merge else None,
+    )
 
 
 def _incomplete(
@@ -237,6 +273,7 @@ def _render(
     from core.lesson_corrections import merge_subjects
 
     identity, origin, earlier = capture_id, None, ()
+    name = str(decision.skill_name)
     subjects = merge_subjects(
         capture.originating_subjects if capture is not None else (), decision.originating_subjects,
     )
@@ -248,15 +285,19 @@ def _render(
                 "your trial lesson; choose a new name"
             ))
         if current.lesson.state in ("watch", "trial"):
-            identity, earlier = current.lesson.id, current.lesson.source_refs
+            identity, earlier, name = current.lesson.id, current.lesson.source_refs, current.name
             subjects = merge_subjects(current.lesson.originating_subjects, subjects)
         elif current.lesson.id != capture_id:
             origin = {"id": current.lesson.id, "behavioral_sha256": current.behavioral_sha256}
     text = lesson_files.render_trial(
-        lesson_id=identity, owner=thread_id, name=str(decision.skill_name),
+        lesson_id=identity, owner=thread_id, name=name,
         description=str(decision.skill_description), text=decision.text, trial=trial,
         source_refs=lesson_files.merged_refs(earlier, entry["body"].get("source_refs") or []),
         originating_subjects=subjects, origin=origin,
+        target_file="new" if decision.target_file == "new" else _target(decision),
+        new_target_path=_target(decision) if decision.target_file == "new" else None,
+        target_section=decision.target_section,
+        cause=decision.cause, case=decision.case,
     )
     errors = validate_skill_text(text).errors
     if errors:
@@ -264,20 +305,10 @@ def _render(
     return identity, text
 
 
-def _index_line(decision: Decision, path: Path) -> str:
-    from core.lesson_index import line_for
-
-    return line_for(
-        str(decision.skill_name), " ".join(str(decision.skill_description).split()), path,
-        trial=True,
-    )
-
-
-def _offered_elsewhere(
+def _ensure_name_available(
     db: sqlite3.Connection, place: ThreadPlace, name: str, path: Path,
-) -> list[dict[str, Any]]:
-    """The trial lessons this thread is offered now; refuses a name another skill holds."""
-    from core.lesson_index import partition
+) -> None:
+    """Refuse a lesson name already held by another resolved skill."""
     from core.skill_resolution import resolve_effective_skills
     from infra.config import WORKSPACE
 
@@ -291,4 +322,4 @@ def _offered_elsewhere(
                 f"skill_name {name} is already a skill at {row.path}; a trial "
                 "never replaces one. Choose a new name"
             ))
-    return partition(skills.included, skills.omitted, thread_id=place.thread_id, db=db).lessons
+    return None

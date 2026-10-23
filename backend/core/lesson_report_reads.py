@@ -47,7 +47,12 @@ def _joined_read(db, row, metadata, load, facts) -> tuple[dict[str, Any] | None,
         "turn_id": metadata["turn_id"], "message_id": row["id"], "guidance_load_id": load["id"],
         "path": load["path"], "raw_sha256": load["raw_sha256"], "git_blob_oid": load["git_blob_oid"],
         "partial": bool(load["partial"]), "byte_count": load["byte_count"], "created_at": load["created_at"],
-        "task_id": None, "attempt_id": None, "task_reason": "read has no per-call task attribution",
+        "task_id": load["node_id"], "attempt_id": None,
+        "task_reason": "receipt task attribution" if load["node_id"] else "read has no task attribution",
+        "trial_variant": load["variant"],
+        "trial_lesson_id": load["lesson_id"],
+        "trial_behavioral_sha256": load["lesson_behavioral_sha256"],
+        "checkpoint_generation_id": load["checkpoint_generation_id"],
         "provider_consumed": None, "application": None, "body_tokens": None,
         "body_tokens_reason": "no exact token allocation recorded; body remains history accounting",
         "result_reference": tool_result_reference(
@@ -133,7 +138,8 @@ def _candidate_groups(db, user_id: str, thread_ids: tuple[str, ...], unavailable
 
 _LOAD_COLUMNS = (
     "id", "thread_id", "turn_id", "path", "raw_sha256", "git_blob_oid", "delivered_sha256",
-    "byte_count", "partial", "created_at",
+    "byte_count", "partial", "node_id", "variant", "checkpoint_generation_id", "lesson_id",
+    "lesson_behavioral_sha256", "created_at",
 )
 
 
@@ -163,11 +169,22 @@ def read_bodies(
     surviving: list[tuple[Any, dict[str, Any], Any]] = []
     for key, calls in candidates.items():
         loads = loads_by_group[key]
-        if len(calls) != 1 or len(loads) != 1:
+        lesson_receipts = [
+            load for load in loads
+            if load["lesson_id"] is not None and load["lesson_behavioral_sha256"] is not None
+        ]
+        unambiguous_lessons = len({
+            (load["lesson_id"], load["lesson_behavioral_sha256"])
+            for load in lesson_receipts
+        }) == len(lesson_receipts)
+        if (
+            len(calls) != 1 or not loads
+            or (len(loads) > 1 and (len(lesson_receipts) != len(loads) or not unambiguous_lessons))
+        ):
             unavailable["repeated or missing call/load linkage"] += len(calls)
             continue
         row, metadata = calls[0]
-        surviving.append((row, metadata, loads[0]))
+        surviving.extend((row, metadata, load) for load in loads)
 
     bodies: dict[str, Any] = {}
     wanted = json.dumps([list(pair) for pair in dict.fromkeys(

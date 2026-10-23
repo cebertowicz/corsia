@@ -6,6 +6,8 @@ import json
 
 import pytest
 
+from tests.lesson_receipt_helpers import write_trial_receipt
+
 
 @pytest.fixture
 def db(isolated_db):
@@ -28,18 +30,6 @@ def _event(db, *, event_name, ts, project_id=None, agent_thread_id="agent", subj
          json.dumps(attributes or {})),
     )
 
-
-def _offer_receipt(db, *, usage_id, manifest_id, lessons, created_at="2026-10-22T18:00:00+00:00"):
-    db.execute(
-        "INSERT INTO context_manifests(id,harness,entries_json,entry_count,created_at) VALUES(?,?,?,?,?)",
-        (manifest_id, "native", json.dumps([{"source_id": "dynamic:skills-index", "lessons": lessons}]), 1, created_at),
-    )
-    db.execute(
-        """INSERT INTO llm_usage
-           (id,thread_id,turn_id,model,context_manifest_id,created_at)
-           VALUES(?,'owner','turn','test/model',?,?)""",
-        (usage_id, manifest_id, created_at),
-    )
 
 
 def test_disabled_verdict_source_is_not_reported_as_an_empty_experiment_list(db):
@@ -321,13 +311,9 @@ def test_in_use_matches_recorded_lessons_to_offer_receipts(db):
     today = learning_report.report_date_for(datetime.now(timezone.utc))
     for lesson_id, sha in (("a", "a" * 64), ("b", "b" * 64)):
         lesson_reviews.ensure_lesson_review(db, "owner", lesson_id=lesson_id, behavioral_sha256=sha, **review)
-    _offer_receipt(db, usage_id="usage:one", manifest_id="manifest:one", lessons=[
-        {"id": "a", "behavioral_sha256": "a" * 64},
-    ], created_at=f"{today}T18:00:00+00:00")
-    _offer_receipt(db, usage_id="usage:two", manifest_id="manifest:two", lessons=[
-        {"id": "a", "behavioral_sha256": "a" * 64},
-        {"id": "b", "behavioral_sha256": "b" * 64},
-    ], created_at=f"{today}T18:00:00+00:00")
+    write_trial_receipt(db, lesson_id="a", behavioral_sha256="a" * 64, node_id="task:one")
+    write_trial_receipt(db, lesson_id="a", behavioral_sha256="a" * 64, node_id="task:two")
+    write_trial_receipt(db, lesson_id="b", behavioral_sha256="b" * 64, node_id="task:two")
     db.commit()
 
     report = learning_report.build_report(db, scope="proj", report_date=today)
@@ -337,7 +323,7 @@ def test_in_use_matches_recorded_lessons_to_offer_receipts(db):
     }
 
 
-def test_in_use_is_unknown_when_any_dated_offer_receipt_is_unavailable(db):
+def test_in_use_uses_actual_with_receipts_despite_unbound_calls(db):
     from datetime import datetime, timezone
 
     from jobs import learning_report
@@ -351,9 +337,7 @@ def test_in_use_is_unknown_when_any_dated_offer_receipt_is_unavailable(db):
     review = {"artifact_id": "art", "title": "Review", "acceptance": "Decide.", "review_after": "2099-01-01T00:00:00+00:00"}
     today = learning_report.report_date_for(datetime.now(timezone.utc))
     lesson_reviews.ensure_lesson_review(db, "owner", lesson_id="a", behavioral_sha256="a" * 64, **review)
-    _offer_receipt(db, usage_id="usage:complete", manifest_id="manifest:complete", lessons=[
-        {"id": "a", "behavioral_sha256": "a" * 64},
-    ], created_at=f"{today}T18:00:00+00:00")
+    write_trial_receipt(db, lesson_id="a", behavioral_sha256="a" * 64, node_id="task:complete")
     db.execute(
         "INSERT INTO llm_usage(id,thread_id,turn_id,model,context_manifest_id,created_at) "
         "VALUES ('usage:unavailable','owner','turn','test/model',NULL,?)",
@@ -363,10 +347,12 @@ def test_in_use_is_unknown_when_any_dated_offer_receipt_is_unavailable(db):
 
     report = learning_report.build_report(db, scope="proj", report_date=today)
 
-    assert report["items"]["lessons"]["in_use"] is None
+    assert report["items"]["lessons"]["in_use"] == {
+        "count": 1, "refs": [f"lesson:a:{'a' * 64}"],
+    }
 
 
-def test_in_use_is_unknown_without_dated_offer_receipts(db):
+def test_in_use_remains_unknown_without_usage_or_receipts(db):
     from jobs.learning_report import build_report
 
     db.execute("INSERT INTO projects (id,name,created_at,updated_at) VALUES ('proj','Project','t','t')")
@@ -396,8 +382,11 @@ def test_recorded_lessons_count_each_lesson_once_with_a_reference_per_version(db
 
     for lesson_id, sha in (("a", "1"), ("a", "2"), ("b", "1")):
         lesson_reviews.ensure_lesson_review(db, "owner", lesson_id=lesson_id, behavioral_sha256=sha, **review)
-    _offer_receipt(db, usage_id="usage:without-lessons", manifest_id="manifest:without-lessons", lessons=[],
-                   created_at=f"{today}T18:00:00+00:00")
+    write_trial_receipt(db, lesson_id="a", behavioral_sha256="1", node_id="without-task", variant="without")
+    db.execute(
+        "INSERT INTO llm_usage(id,thread_id,turn_id,model,created_at) VALUES "
+        "('usage:without','owner','turn','test/model',?)", (f"{today}T18:00:00+00:00",),
+    )
     assert (recorded()["count"], len(recorded()["refs"])) == (2, 3)
     assert learning_report.build_report(db, scope="proj", report_date=today)["items"]["lessons"]["in_use"] == {
         "count": 0, "refs": [],

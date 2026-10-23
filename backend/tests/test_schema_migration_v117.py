@@ -37,8 +37,17 @@ def _indexes(db: sqlite3.Connection) -> set[str]:
     return {row[1] for row in db.execute("PRAGMA index_list(automation_schedules)")}
 
 
+def _historical_c1_prerequisites(db: sqlite3.Connection) -> None:
+    """Add tables a real v116 database acquired at v47 and v77."""
+    from infra.migration_46_to_47_guidance_manifests import _GUIDANCE_47_DDL
+    from infra.migration_76_to_77_outcome_events import _OUTCOME_EVENTS_77_DDL
+
+    for statement in (*_GUIDANCE_47_DDL, *_OUTCOME_EVENTS_77_DDL):
+        db.execute(statement)
+
+
 def test_v117_registers_and_widens_kind_keeping_rows(tmp_path) -> None:
-    assert SCHEMA_VERSION == 144 and MIGRATIONS[116] is migrate_116_to_117
+    assert SCHEMA_VERSION == 145 and MIGRATIONS[116] is migrate_116_to_117
     path = tmp_path / "old.db"
     with sqlite3.connect(path) as db:
         db.executescript(_V116_TABLE + """
@@ -49,6 +58,7 @@ def test_v117_registers_and_widens_kind_keeping_rows(tmp_path) -> None:
                '{}','t','c','u');
             PRAGMA user_version=116;
         """)
+        _historical_c1_prerequisites(db)
     with sqlite3.connect(path) as db:
         result = migrate_to_current(db, SCHEMA_VERSION)
         row = db.execute(
@@ -61,7 +71,7 @@ def test_v117_registers_and_widens_kind_keeping_rows(tmp_path) -> None:
             "VALUES ('s2','t','w','script','300','n',1,'t','c','u')"
         )
         indexes = _indexes(db)
-    assert (result.migrated, result.from_version, result.to_version) == (True, 116, 144)
+    assert (result.migrated, result.from_version, result.to_version) == (True, 116, 145)
     assert row == ("s1", "cadence", 2, 5, None, None, None)
     assert {"idx_automation_schedules_due", "idx_automation_schedules_scope"} <= indexes
 
@@ -70,6 +80,7 @@ def test_migrated_table_matches_a_fresh_database(tmp_path) -> None:
     path = tmp_path / "old.db"
     with sqlite3.connect(path) as db:
         db.executescript(_V116_TABLE + "PRAGMA user_version=116;")
+        _historical_c1_prerequisites(db)
     with sqlite3.connect(path) as migrated, sqlite3.connect(":memory:") as fresh:
         migrate_to_current(migrated, SCHEMA_VERSION)
         fresh.executescript(SCHEMA_SQL)

@@ -226,6 +226,48 @@ async def test_fact_carries_the_verified_asset_result_without_message_text(isola
     }
 
 
+def test_measurement_correction_split_groups_by_source_kind(isolated_db):
+    from core.corrections_recording import CorrectionCandidate, SOURCE_KIND_SELF_CAUGHT
+    from jobs.corrections_recording import _record_fact, record_self_caught
+    from jobs.corrections_scanning import hydrate_candidates, pending_candidate_keys
+
+    db = _db()
+    try:
+        _seed(db)
+    finally:
+        db.close()
+    person = hydrate_candidates(pending_candidate_keys(_version(), 20, "owner"))[0]
+    assert _record_fact(
+        person,
+        {"label": "correction", "truncated": False, "original_tokens": 9, "failure_reason": "none"},
+        _version(),
+    )
+    db = _db()
+    try:
+        assert record_self_caught(
+            CorrectionCandidate(
+                SOURCE_KIND_SELF_CAUGHT, "plan-failed:test", "thread", "project", "",
+                "2026-10-01T00:02:00Z", arrived=True,
+            ),
+            db=db,
+        )
+        rows = db.execute(
+            """SELECT CASE WHEN json_extract(attributes, '$.source_kind')='self_caught'
+                            THEN 'us' ELSE 'person' END AS caught_by,
+                      COUNT(*) AS count
+               FROM outcome_events
+               WHERE event_name='measurement.correction'
+               GROUP BY json_extract(attributes, '$.source_kind')='self_caught'"""
+        ).fetchall()
+    finally:
+        db.close()
+
+    assert {str(row["caught_by"]): row["count"] for row in rows} == {
+        "person": 1,
+        "us": 1,
+    }
+
+
 def test_record_fact_keeps_the_committed_fact_when_early_delivery_fails(isolated_db, monkeypatch):
     from jobs import learning_report
     from jobs.corrections_recording import _record_fact

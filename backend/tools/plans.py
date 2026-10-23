@@ -9,7 +9,7 @@ from typing import Any
 
 from infra.database import get_db
 from infra.db_async import run_in_db
-from infra.state.context import running_call_ids
+from infra.state.context import _current_checkpoint_generation_id, running_call_ids
 from memory import node_start_recall
 from plans import public
 from plans.public import (
@@ -197,7 +197,7 @@ class PlanEnsureTool(Tool):
 
 def _mutation_operation(
     thread_id, actor_row, turn_identity, plan_id, operation, params, mutation_id, workflows,
-    call_ids=None,
+    call_ids=None, checkpoint_generation_id=None,
 ):
     """Execute one actor-bound mutation on a worker database connection."""
 
@@ -225,7 +225,9 @@ def _mutation_operation(
             workflow_task_fields.append_close_notice(
                 result.result, node_id=params["node_id"], db=db, workflows=workflows,
             )
-        node_start_recall.attach_to_result(db, operation, result, caller_thread_id=thread_id)
+        node_start_recall.attach_to_result(
+            db, operation, result, caller_thread_id=thread_id, checkpoint_generation_id=checkpoint_generation_id,
+        )
         return result
     finally:
         db.close()
@@ -376,6 +378,7 @@ class PlanUpdateTool(_OperationTool):
                 _mutation_operation,
                 actor_thread_id, actor_row, turn_identity, plan_id, operation,
                 params, mutation_id, workflows, running_call_ids(),
+                _current_checkpoint_generation_id.get(),
             ))
             projected = public.deliver_deferred(result)
             await public.drive_deferred(result)

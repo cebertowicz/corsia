@@ -191,9 +191,9 @@ async def retarget_if_current(
 
 
 def _default_broadcast(thread_id: str, message: dict) -> None:
-    from infra import state
+    from infra.state import broadcast_to_thread
 
-    state.broadcast_to_thread(thread_id, message)
+    broadcast_to_thread(thread_id, message)
 
 
 def _surface_exit_error(
@@ -794,8 +794,8 @@ async def _run_app_server_turn(spec: _AppServerTurnSpec) -> TurnIdentity | None:
         runtime_context_epoch=spec.runtime_context_epoch,
         windows=spec.windows,
         expected_reported_model=spec.expected_reported_model,
-        context_snapshot=spec.context_snapshot,
-        harness=spec.harness,
+        context_snapshot=spec.context_snapshot, harness=spec.harness,
+        checkpoint_generation_id=_checkpoint_replay_id(spec.prepared_context),
         continuity_accounting=spec.continuity_accounting,
         continuing_wait_scope=spec.continuing_wait_scope,
     )

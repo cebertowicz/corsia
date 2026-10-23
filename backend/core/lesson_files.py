@@ -49,8 +49,15 @@ HOLD_REASONS = {
     "no-selective-trigger": (
         "it has no trigger and boundary that say when it applies and when it does not"
     ),
-    "over-budget": "the trial lessons already offered fill the lesson index budget",
 }
+
+
+def has_section(text: str, section: str) -> bool:
+    """Whether Markdown ``text`` already has a heading named ``section``, casefolded."""
+    wanted = section.lstrip("#").strip().casefold()
+    return any(
+        line.lstrip("#").strip().casefold() == wanted for line in text.splitlines() if line.startswith("#")
+    )
 
 
 @dataclass(frozen=True)
@@ -144,7 +151,9 @@ def trial_statement(body: str) -> str:
 def render_trial(
     *, lesson_id: str, owner: str, name: str, description: str, text: str,
     trial: Trial, source_refs: list[dict[str, Any]], originating_subjects: tuple[str, ...] | None = None,
-    origin: dict[str, str] | None = None,
+    origin: dict[str, str] | None = None, target_file: str | None = None,
+    new_target_path: str | None = None, target_section: str | None = None, cause: str | None = None,
+    case: dict[str, str] | None = None,
 ) -> str:
     """A trial skill with no ``review_ref``: written, and not yet offered.
 
@@ -161,6 +170,16 @@ def render_trial(
         lesson["originating_subjects"] = list(originating_subjects)
     if origin:
         lesson["origin"] = dict(origin)
+    if target_file is not None:
+        lesson["target_file"] = _one_line(target_file)
+    if new_target_path is not None:
+        lesson["new_target_path"] = _one_line(new_target_path)
+    if target_section is not None:
+        lesson["target_section"] = _one_line(target_section)
+    if cause is not None:
+        lesson["cause"] = _one_line(cause)
+    if case is not None:
+        lesson["case"] = {key: _one_line(value) for key, value in case.items()}
     return _dump(
         {"name": name, "description": _one_line(description), "corsia": {LESSON_KEY: lesson}},
         body,
@@ -171,14 +190,18 @@ def read_trial(text: str) -> TrialFile | None:
     """The trial a ``SKILL.md`` text is, or None when it is not a valid lesson."""
     from core.skill_validation import validate_skill_text
 
-    parsed = validate_skill_text(text)
-    lesson = parse_lesson(parsed.metadata) if parsed.ok else None
-    if lesson is None or not parsed.name or not parsed.description:
+    return trial_from_validation(validate_skill_text(text))
+
+
+def trial_from_validation(validation) -> TrialFile | None:
+    """Return a trial from a skill validation that already read its body."""
+    lesson = parse_lesson(validation.metadata) if validation.ok else None
+    if lesson is None or not validation.name or not validation.description:
         return None
     return TrialFile(
-        lesson=lesson, name=parsed.name, description=parsed.description, body=parsed.body,
-        behavioral_sha256=behavioral_sha256(parsed.description, parsed.body),
-        statement=trial_statement(parsed.body),
+        lesson=lesson, name=validation.name, description=validation.description, body=validation.body,
+        behavioral_sha256=behavioral_sha256(validation.description, validation.body),
+        statement=trial_statement(validation.body),
     )
 
 

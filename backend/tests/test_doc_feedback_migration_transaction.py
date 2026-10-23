@@ -53,7 +53,22 @@ def test_edit_step_keeps_writer_and_exact_ddl_for_both_existing_column_branches(
 
 def _partial71(db):
     # Synthetic partial schema exercises the canonical migration runner.
+    # guidance_loads has existed since v47; v142 extends that historical table.
     db.execute('CREATE TABLE sentinel(id TEXT PRIMARY KEY,value TEXT)')
+    db.execute(
+        """CREATE TABLE guidance_loads (
+            id TEXT PRIMARY KEY,
+            thread_id TEXT,
+            turn_id TEXT,
+            path TEXT NOT NULL,
+            raw_sha256 TEXT NOT NULL,
+            git_blob_oid TEXT NOT NULL,
+            delivered_sha256 TEXT NOT NULL,
+            byte_count INTEGER NOT NULL,
+            partial INTEGER NOT NULL CHECK (partial IN (0, 1)),
+            created_at TEXT NOT NULL
+        )"""
+    )
     db.execute("INSERT INTO sentinel VALUES ('old','preserved')")
     db.execute('PRAGMA user_version=71')
     db.commit()

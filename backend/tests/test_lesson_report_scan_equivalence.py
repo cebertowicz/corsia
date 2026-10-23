@@ -1,15 +1,14 @@
-"""Lesson-report scans return fewer SQLite rows but exactly the rows the row-by-row scans did."""
+"""Lesson-report receipt scans stream exactly the direct receipt reference rows."""
 from __future__ import annotations
 
 import hashlib
 import json
 from collections import Counter
 
-import pytest
-
-from core.lesson_report_receipts import _lessons, read_offer_evidence
+from core.lesson_report_receipts import read_offer_evidence
 from core.lesson_report_reads import _candidate_groups, _read_call
 from core.lesson_report_sql import json_row_chunks, read_file_metadata_predicate
+from tests.lesson_receipt_helpers import write_trial_receipt
 from tests.test_lesson_report_receipts import db  # noqa: F401  (fixture)
 
 PATH = "/authorized/skills/deciding/SKILL.md"
@@ -54,7 +53,6 @@ NOT_READS = {
     "array": ["read_file"],
 }
 SPELLED = {
-    # Raw JSON text a writer other than json.dumps may have stored: escapes decode to the same names.
     "escaped underscore": '{"name": "read\\u005ffile", "arguments": {"path": "' + PATH + '"}, "turn_id": "turn"}',
     "escaped alias": '{"name": "\\u0052ead", "arguments": {"path": "' + PATH + '"}, "turn_id": "turn"}',
     "escaped prefix": '{"name": "mcp\\u005f\\u005fcorsia__read_file", "arguments": {"path": "' + PATH + '"}, "turn_id": "turn"}',
@@ -62,8 +60,6 @@ SPELLED = {
                       + PATH + '"}}, "turn_id": "turn"}',
     "duplicate name keys": '{"name": "bash", "name": "read_file", "arguments": {"path": "' + PATH + '"}, "turn_id": "turn"}',
     "whitespace": '{ "name" :\n "read_file" , "arguments" : {"path": "' + PATH + '"}, "turn_id": "turn"}',
-    # json.loads takes NaN and Infinity, but they are not canonical JSON: SQLite 3.44.0 made
-    # one-argument json_valid() report them false again, so only the JSON5-aware guard walks them.
     "non-canonical NaN": '{"name": "read_file", "arguments": {"path": "' + PATH + '"}, "turn_id": "turn", "cost": NaN}',
     "non-canonical Infinity": '{"name": "read_file", "arguments": {"path": "' + PATH + '"}, "turn_id": "turn", "cost": -Infinity}',
 }
@@ -80,7 +76,8 @@ def _all_rows(db, thread="owner"):
 def _matching(db, thread="owner", **kwargs):
     return [row["id"] for row in db.execute(
         "SELECT m.id FROM messages m WHERE m.thread_id=? AND m.role='tool' AND "
-        + read_file_metadata_predicate("m.metadata", **kwargs) + " ORDER BY m.seq", (thread,))]
+        + read_file_metadata_predicate("m.metadata", **kwargs) + " ORDER BY m.seq", (thread,)
+    )]
 
 
 def test_candidate_prefilter_keeps_every_row_python_resolves_to_read_file_and_drops_plain_non_reads(db):
@@ -122,91 +119,49 @@ def test_chunked_rows_keep_order_across_chunk_boundaries(db):
     assert list(json_row_chunks(db, "SELECT id FROM messages WHERE 0", (), ("id",), "id")) == []
 
 
-# --- receipts: the previous row-by-row implementation is the oracle -------------------------
+# --- receipts: direct row-by-row receipt reference -------------------------------------------
 
-OLD_USAGE_SQL = (
-    "SELECT u.id,u.thread_id,u.turn_id,u.plan_node_id,u.plan_attempt_id,u.plan_commitment_id,"
-    "u.context_manifest_id,u.created_at,u.model,m.harness,m.entries_json "
-    "FROM threads t JOIN llm_usage u ON u.thread_id=t.id "
-    "LEFT JOIN context_manifests m ON m.id=u.context_manifest_id "
-    "WHERE t.user_id=? AND t.id IN ({}) ORDER BY u.created_at,u.id"
+_RECEIPT_FIELDS = (
+    "receipt_id", "thread_id", "turn_id", "task_id", "checkpoint_generation_id", "created_at", "path", "raw_sha256",
+    "id", "version",
 )
 
 
-def old_read_offer_evidence(db, *, user_id, thread_ids, from_ts, to_ts):
-    retained: dict = {}
-    period_offers: list = []
-    period_reasons: dict = {}
-    period_calls = 0
+def receipt_reference(db, *, user_id, thread_ids, from_ts, to_ts):
+    """The receipt rows the report is allowed to expose, independent of its chunking."""
     owners = tuple(dict.fromkeys(thread_ids))
-    for offset in range(0, len(owners), 499):
-        chunk = owners[offset:offset + 499]
-        if not chunk:
-            continue
-        rows = db.execute(OLD_USAGE_SQL.format(",".join("?" for _ in chunk)), (user_id, *chunk))
-        for usage in rows:
-            in_period = from_ts <= usage["created_at"] < to_ts
-            if in_period:
-                period_calls += 1
-            lessons, reason = _lessons(usage["entries_json"])
-            if reason:
-                if in_period:
-                    period_reasons[reason] = period_reasons.get(reason, 0) + 1
-                continue
-            seen: set = set()
-            for lesson in lessons or []:
-                identity = lesson["id"], lesson["behavioral_sha256"]
-                if identity in seen:
-                    continue
-                seen.add(identity)
-                offer = {
-                    "kind": "lesson", "id": identity[0], "version": identity[1],
-                    "offered": True, "usage_id": usage["id"], "thread_id": usage["thread_id"],
-                    "turn_id": usage["turn_id"], "manifest_id": usage["context_manifest_id"],
-                    "task_id": usage["plan_node_id"], "attempt_id": usage["plan_attempt_id"],
-                    "commitment_id": usage["plan_commitment_id"], "created_at": usage["created_at"],
-                    "model": usage["model"], "harness": usage["harness"],
-                    "raw_version": None, "descriptor_tokens": None,
-                    "version_reason": "per-call manifest records behavioral identity only",
-                }
-                retained.setdefault(identity, offer)
-                if in_period:
-                    period_offers.append(offer)
-    return {"retained": list(retained.values()), "period": {"offers": period_offers,
-            "calls": period_calls, "unavailable_calls": period_reasons}}
+    if not owners:
+        return {"retained": [], "period": {"offers": [], "calls": 0, "unavailable_calls": {}}}
+    owner_sql = ",".join("?" for _ in owners)
+    owner_chunks = {owner: index // 499 for index, owner in enumerate(owners)}
+    rows = list(db.execute(
+        "SELECT g.id AS receipt_id,g.thread_id,g.turn_id,g.node_id AS task_id,g.checkpoint_generation_id,"
+        "g.created_at,g.path,g.raw_sha256,g.lesson_id AS id,g.lesson_behavioral_sha256 AS version "
+        "FROM guidance_loads g JOIN threads t ON t.id=g.thread_id "
+        f"WHERE t.user_id=? AND t.id IN ({owner_sql}) AND g.variant='with' "
+        "AND g.lesson_id IS NOT NULL AND g.lesson_behavioral_sha256 IS NOT NULL",
+        (user_id, *owners),
+    ))
+    rows.sort(key=lambda row: (owner_chunks[row["thread_id"]], row["created_at"], row["receipt_id"]))
+    offers = [_offer(dict(row)) for row in rows if from_ts <= row["created_at"] < to_ts]
+    retained: dict[tuple[str, str, str, str], dict] = {}
+    for row in sorted(rows, key=lambda row: (row["created_at"], row["receipt_id"])):
+        offer = _offer(dict(row))
+        retained.setdefault((offer["id"], offer["version"], offer["path"], offer["raw_sha256"]), offer)
+    calls = db.execute(
+        "SELECT COUNT(*) FROM llm_usage u JOIN threads t ON t.id=u.thread_id "
+        f"WHERE t.user_id=? AND t.id IN ({owner_sql}) AND u.created_at>=? AND u.created_at<?",
+        (user_id, *owners, from_ts, to_ts),
+    ).fetchone()[0]
+    return {"retained": list(retained.values()), "period": {"offers": offers, "calls": calls, "unavailable_calls": {}}}
 
 
-def _lesson(identity, version="a"):
-    return {"id": identity, "behavioral_sha256": version * 64}
-
-
-MANIFESTS = {
-    "two": [_lesson("one"), _lesson("two", "b")],
-    "duplicate": [_lesson("one"), _lesson("one"), _lesson("two", "b")],
-    "new-version": [_lesson("one", "c")],
-    "zero": [],
-}
-
-
-def _manifest(db, identity, entries):
-    db.execute(
-        "INSERT INTO context_manifests(id,harness,entries_json,entry_count,created_at) VALUES(?,'native',?,1,'t')",
-        (identity, json.dumps(entries)),
-    )
-
-
-def _usage(db, identity, manifest, created_at, thread="owner", node=None):
-    attribution = ("plan", node, "attempt", "commitment", "execution") if node else (None,) * 5
-    db.execute(
-        "INSERT INTO llm_usage(id,thread_id,turn_id,model,context_manifest_id,created_at,"
-        "plan_id,plan_node_id,plan_attempt_id,plan_commitment_id,plan_usage_role) VALUES(?,?,'turn','m',?,?,?,?,?,?,?)",
-        (identity, thread, manifest, created_at, *attribution),
-    )
-
-
-def _ordered(result):
-    """Canonical digest text plus the key order sort_keys hides."""
-    return json.dumps(result, sort_keys=True, default=str), list(result["period"]["unavailable_calls"].items())
+def _offer(row):
+    return {
+        "kind": "lesson", "id": row["id"], "version": row["version"], "offered": True,
+        **{field: row[field] for field in _RECEIPT_FIELDS}, "raw_version": None, "descriptor_tokens": None,
+        "version_reason": "task-start receipt records behavioral identity",
+    }
 
 
 def _text(offers):
@@ -221,90 +176,73 @@ def _fed(deferred):
     return digest.hexdigest()
 
 
-def assert_materialized_equals_the_scan(new, old):
-    """The materialized period offers carry exactly what the row-by-row list did."""
-    deferred, scanned = new["period"].pop("offers"), old["period"].pop("offers")
-    assert new == old and _ordered(new) == _ordered(old)
-    assert_offers_equal(deferred, scanned)
+def assert_materialized_equals_the_scan(new, reference):
+    """The streamed report rows are exactly the direct receipt reference rows."""
+    deferred = new["period"]["offers"]
+    assert new["retained"] == reference["retained"]
+    assert new["period"] | {"offers": reference["period"]["offers"]} == reference["period"]
+    assert_offers_equal(deferred, reference["period"]["offers"])
 
 
 def assert_offers_equal(deferred, scanned):
-    """A DeferredOffers hashes to the document text of ``scanned`` and counts what it lists."""
+    """A DeferredOffers hashes to the receipt document text and counts its receipts and tasks."""
     assert _fed(deferred) == hashlib.sha256(_text(scanned)).hexdigest()
     expected: dict = {}
     for offer in scanned:
-        row = expected.setdefault((offer["id"], offer["version"]), {
-            "n": 0, "calls": set(), "tasks": set(), "attempts": set(), "calls_without_task": set()})
+        row = expected.setdefault((offer["id"], offer["version"]), {"n": 0, "receipts": set(), "tasks": set()})
         row["n"] += 1
-        row["calls"].add(offer["usage_id"])
+        row["receipts"].add(offer["receipt_id"])
         if offer["task_id"]:
             row["tasks"].add(offer["task_id"])
-        if offer["attempt_id"]:
-            row["attempts"].add(offer["attempt_id"])
-        if not offer["task_id"]:
-            row["calls_without_task"].add(offer["usage_id"])
     assert deferred.counts == {
-        identity: {"n": row["n"], **{key: len(row[key]) for key in ("calls", "tasks", "attempts", "calls_without_task")}}
-        for identity, row in expected.items()}
+        identity: {"n": row["n"], **{key: len(row[key]) for key in ("receipts", "tasks")}}
+        for identity, row in expected.items()
+    }
 
 
-def test_receipts_match_the_row_by_row_scan_for_every_manifest_shape(db):
-    for identity, lessons in MANIFESTS.items():
-        _manifest(db, identity, [{"source_id": "dynamic:skills-index", "lessons": lessons}])
-    _manifest(db, "no-source", [{"source_id": "other"}])
-    _manifest(db, "two-sources", [{"source_id": "dynamic:skills-index", "lessons": []}] * 2)
-    _manifest(db, "no-lessons", [{"source_id": "dynamic:skills-index"}])
-    _manifest(db, "bad-lesson", [{"source_id": "dynamic:skills-index", "lessons": [{"id": "x"}]}])
-    db.execute("INSERT INTO context_manifests(id,harness,entries_json,entry_count,created_at) VALUES('object','n','{}',0,'t')")
-    db.execute("INSERT INTO context_manifests(id,harness,entries_json,entry_count,created_at) VALUES('scalar','n','7',0,'t')")
-    order = ["no-lessons", "two", "bad-lesson", None, "dangling", "duplicate", "no-source", "object",
-             "scalar", "zero", "two-sources", "new-version", "two", "bad-lesson", "no-lessons"]
-    stamps = ["2026-09-22T00:00:00", "2026-09-20T00:00:00", "2026-09-23T00:00:00",
-              "2026-09-23T00:00:00", "2026-09-24T00:00:00", "2026-09-28T00:00:00"]
-    for index, manifest in enumerate(order):
-        # created_at ties across calls make (created_at, id) the only order.
-        _usage(db, f"call-{len(order) - index:02d}", manifest, stamps[index % len(stamps)],
-               node="task" if index % 2 else None)
+def test_receipts_match_the_row_by_row_reference_and_exclude_non_with_or_incomplete_rows(db):
+    write_trial_receipt(db, lesson_id="one", node_id="task-a", created_at="2026-09-22T00:00:00")
+    write_trial_receipt(db, lesson_id="two", behavioral_sha256="b" * 64, node_id="task-b", created_at="2026-09-23T00:00:00")
+    write_trial_receipt(db, lesson_id="one", node_id="task-a", created_at="2026-09-24T00:00:00")
+    write_trial_receipt(db, lesson_id="outside", created_at="2026-09-20T00:00:00")
+    write_trial_receipt(db, lesson_id="without", variant="without", created_at="2026-09-22T00:00:01")
+    write_trial_receipt(db, lesson_id="crossover", variant="crossover", created_at="2026-09-22T00:00:02")
+    missing_lesson = write_trial_receipt(db, lesson_id="missing", created_at="2026-09-22T00:00:03")
+    missing_hash = write_trial_receipt(db, lesson_id="missing-hash", created_at="2026-09-22T00:00:04")
+    db.execute("UPDATE guidance_loads SET lesson_id=NULL WHERE id=?", (missing_lesson,))
+    db.execute("UPDATE guidance_loads SET lesson_behavioral_sha256=NULL WHERE id=?", (missing_hash,))
     kwargs = dict(user_id="user", thread_ids=("owner", "foreign", "owner", "missing"),
                   from_ts="2026-09-21", to_ts="2026-09-28")
     new = read_offer_evidence(db, **kwargs)
-    old = old_read_offer_evidence(db, **kwargs)
-    assert old["period"]["calls"] and old["period"]["unavailable_calls"] and old["retained"]
-    assert_materialized_equals_the_scan(new, old)
+    reference = receipt_reference(db, **kwargs)
+    assert [offer["id"] for offer in reference["period"]["offers"]] == ["one", "two", "one"]
+    assert_materialized_equals_the_scan(new, reference)
 
 
-def test_receipts_match_across_thread_chunks_and_first_retained_offer(db):
-    _manifest(db, "early", [{"source_id": "dynamic:skills-index", "lessons": [_lesson("one")]}])
-    _manifest(db, "late", [{"source_id": "dynamic:skills-index", "lessons": [_lesson("one"), _lesson("two")]}])
-    _manifest(db, "empty", [{"source_id": "dynamic:skills-index"}])
+def test_receipts_match_across_thread_chunks_and_keep_first_retained_receipt(db):
     threads = []
     for index in range(1100):
         thread = f"t{index:04d}"
         threads.append(thread)
         db.execute("INSERT INTO threads(id,user_id,model,created_at,updated_at) VALUES(?,'user','m','t','t')", (thread,))
-        # The later chunk holds the earliest timestamp; retention is still per chunk order.
+        # The later chunk holds the earliest timestamp; retention still keeps the earliest receipt.
         stamp = f"2026-09-{30 - index // 50:02d}T00:00:00"
-        _usage(db, f"a-{index:04d}", "late" if index % 3 else "early", stamp, thread=thread)
-        _usage(db, f"b-{index:04d}", "empty", "2026-09-22T00:00:00", thread=thread)
+        write_trial_receipt(db, lesson_id="one", node_id=f"task-{index}", created_at=stamp, thread_id=thread)
+        if index % 3:
+            write_trial_receipt(db, lesson_id="two", node_id=f"task-{index}", created_at="2026-09-22T00:00:00", thread_id=thread)
     kwargs = dict(user_id="user", thread_ids=tuple(threads), from_ts="2026-09-21", to_ts="2026-09-28")
     new = read_offer_evidence(db, **kwargs)
-    old = old_read_offer_evidence(db, **kwargs)
-    assert len(old["retained"]) == 2 and old["period"]["calls"] > 1000
-    assert_materialized_equals_the_scan(new, old)
+    reference = receipt_reference(db, **kwargs)
+    assert len(reference["retained"]) == 2 and reference["retained"][0]["id"] == "one"
+    assert reference["retained"][0]["created_at"] == "2026-09-09T00:00:00"
+    assert len(reference["period"]["offers"]) > 1000
+    assert_materialized_equals_the_scan(new, reference)
 
 
-def test_receipts_with_no_usage_or_no_threads_are_empty(db):
+def test_receipts_with_no_rows_or_no_threads_are_empty(db):
     for threads in ((), ("owner",)):
         kwargs = dict(user_id="user", thread_ids=threads, from_ts="2026-09-21", to_ts="2026-09-28")
-        assert_materialized_equals_the_scan(read_offer_evidence(db, **kwargs), old_read_offer_evidence(db, **kwargs))
+        assert_materialized_equals_the_scan(read_offer_evidence(db, **kwargs), receipt_reference(db, **kwargs))
 
 
-def test_unparseable_manifest_json_still_raises_like_before(db):
-    db.execute("PRAGMA ignore_check_constraints=1")
-    db.execute("INSERT INTO context_manifests(id,harness,entries_json,entry_count,created_at) VALUES('bad','n','{oops',0,'t')")
-    _usage(db, "call", "bad", "2026-09-22")
-    kwargs = dict(user_id="user", thread_ids=("owner",), from_ts="2026-09-21", to_ts="2026-09-28")
-    with pytest.raises(json.JSONDecodeError):
-        old_read_offer_evidence(db, **kwargs)
-    with pytest.raises(json.JSONDecodeError):
-        read_offer_evidence(db, **kwargs)
+# Disposition: the manifest-JSON failure test is deleted because receipt-native offers never parse manifests.

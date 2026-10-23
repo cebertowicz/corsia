@@ -1,18 +1,13 @@
-"""Schema v96 gives existing databases the installed-boundary index the reader needs.
+"""Schema v96 preserves the installed-boundary index for historical SQL.
 
-Three claims matter, and the first two are the whole reason the index exists.
+The index still serves the guarded historical installed-boundary query that
+motivated it, even though lesson reporting no longer parses those snapshots.
+A guard passed as a bound parameter cannot qualify for SQLite's partial index,
+so the tests retain both the indexed statement and the fallback-plan proof.
+The guard is only a narrowing: ``json_type`` still decides, and the selected
+rows stay identical with or without the index.
 
-* The boundary reader's own statement — captured from what ``read_boundaries``
-  executes, not a copied string — searches the partial index, so the read is
-  bounded by the boundaries a thread has instead of by its whole message
-  history. A guard passed as a bound parameter does not qualify: SQLite matches
-  a partial index against the statement's expression tree, and a parameter is a
-  variable there, so the planner falls back to a full per-thread scan. The last
-  two tests pin that fallback so a future "tidy" cannot silently rebind it.
-* The guard is only a narrowing. The ``json_type`` check still decides, and the
-  rows are identical whether or not the index is present.
-
-Like the v84 indexes, the plans are read with no planner statistics, because
+Like the v84 indexes, plans are read with no planner statistics, because
 production databases never run ANALYZE.
 """
 
@@ -21,7 +16,6 @@ from __future__ import annotations
 import sqlite3
 from contextlib import closing
 
-from core.lesson_report_boundaries import read_boundaries
 from infra.database import initialize_schema
 from infra.database_migrations import MIGRATIONS, migrate_to_current
 from infra.migration_95_to_96_learning_boundary_index import migrate_95_to_96
@@ -36,6 +30,13 @@ _EXPECTED_INDEX = (
 )
 _INDEX = "idx_messages_installed_boundaries"
 _KEY = "_corsia_installed_context_sources"
+_HISTORICAL_BOUNDARY_SQL = (
+    "SELECT m.id,m.metadata FROM threads t JOIN messages m ON m.thread_id=t.id "
+    "WHERE t.id=? AND t.user_id=? "
+    f"AND instr(m.metadata,'{_KEY}')>0 "
+    "AND CASE WHEN json_valid(m.metadata) THEN json_type(m.metadata,?) END='array' "
+    "ORDER BY m.seq,m.id"
+)
 
 #: The thread's whole message history, so a plan that ignores the index is a
 #: plan that reads it. The boundary rows keep the same ``seq`` order they had in
@@ -139,8 +140,12 @@ def _selected(db: sqlite3.Connection) -> list[tuple]:
     )]
 
 
+def _historical_selected(db: sqlite3.Connection) -> list[tuple]:
+    return [tuple(row) for row in db.execute(_HISTORICAL_BOUNDARY_SQL, ("t-1", "u", f"$.{_KEY}"))]
+
+
 def test_the_step_is_registered_at_95_and_96_is_current() -> None:
-    assert SCHEMA_VERSION == 144
+    assert SCHEMA_VERSION == 145
     assert MIGRATIONS[95] is migrate_95_to_96
 
 
@@ -148,10 +153,10 @@ def test_fresh_install_carries_exactly_the_installed_boundary_index() -> None:
     assert _fresh_indexes() == {_INDEX: _EXPECTED_INDEX}
 
 
-def test_the_reader_searches_the_partial_index_and_sorts_in_it() -> None:
-    """The statement ``read_boundaries`` actually runs searches the index, with no planner stats."""
+def test_historical_installed_boundary_query_searches_the_partial_index_and_sorts_in_it() -> None:
+    """The historical guarded query remains index-backed, with no planner stats."""
     with closing(_connection(with_index=True)) as db:
-        statements = _executed(db, lambda: read_boundaries(db, user_id="u", thread_ids=("t-1",)))
+        statements = _executed(db, lambda: _historical_selected(db))
         assert len(statements) == 1, statements
         assert _KEY in statements[0], statements
         assert _plan(db, statements[0]) == [
@@ -165,26 +170,15 @@ def test_the_guarded_statement_keeps_every_row_the_unguarded_one_returns() -> No
     with closing(_connection(with_index=True)) as indexed, closing(_connection(with_index=False)) as bare:
         assert _selected(indexed) == _selected(bare)
         assert [row[0] for row in _selected(bare)] == ["boundary-null-seq", "boundary-first"]
-
-        facts = read_boundaries(indexed, user_id="u", thread_ids=("t-1",))
-        assert facts == read_boundaries(bare, user_id="u", thread_ids=("t-1",))
-        assert [(fact["thread_id"], fact["id"]) for fact in facts] == [
-            ("t-1", "lesson-a"), ("t-1", "lesson-a"),
-        ]
+        assert _historical_selected(indexed) == _historical_selected(bare)
 
 
 def test_the_key_reaches_sqlite_as_text_not_as_a_bound_parameter() -> None:
     """The one spelling that can use the index: a bound key silently loses it."""
-    guarded = (
-        "SELECT m.id,m.metadata FROM threads t JOIN messages m ON m.thread_id=t.id "
-        "WHERE t.id=? AND t.user_id=? "
-        f"AND instr(m.metadata,'{_KEY}')>0 "
-        "AND CASE WHEN json_valid(m.metadata) THEN json_type(m.metadata,?) END='array' "
-        "ORDER BY m.seq,m.id"
-    )
+    guarded = _HISTORICAL_BOUNDARY_SQL
     bound = guarded.replace(f"'{_KEY}'", "?")
     with closing(_connection(with_index=True)) as db:
-        statements = _executed(db, lambda: read_boundaries(db, user_id="u", thread_ids=("t-1",)))
+        statements = _executed(db, lambda: _historical_selected(db))
         assert statements and _KEY in statements[0], statements
         guarded_plan = _plan(db, guarded, "t-1", "u", f"$.{_KEY}")
         bound_plan = _plan(db, bound, "t-1", "u", _KEY, f"$.{_KEY}")
@@ -198,14 +192,14 @@ def test_the_key_reaches_sqlite_as_text_not_as_a_bound_parameter() -> None:
         assert not any("TEMP B-TREE" in step for step in guarded_plan), guarded_plan
 
 
-def test_the_reader_still_selects_the_same_rows_with_the_index_dropped() -> None:
-    """Dropping the index changes the plan only: the reader is correct either way."""
+def test_historical_query_still_selects_the_same_rows_with_the_index_dropped() -> None:
+    """Dropping the index changes the plan only: historical rows stay the same."""
     with closing(_connection(with_index=True)) as db:
-        statements = _executed(db, lambda: read_boundaries(db, user_id="u", thread_ids=("t-1", "t-2")))
-        before = read_boundaries(db, user_id="u", thread_ids=("t-1", "t-2"))
+        statements = _executed(db, lambda: _historical_selected(db))
+        before = _historical_selected(db)
         db.execute(f"DROP INDEX {_INDEX}")
         db.commit()
-        after = read_boundaries(db, user_id="u", thread_ids=("t-1", "t-2"))
+        after = _historical_selected(db)
 
         assert before and before == after
         assert statements and _KEY in statements[0]

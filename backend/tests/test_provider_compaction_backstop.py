@@ -70,6 +70,7 @@ async def test_codex_spawn_uses_only_selected_raw_window_controls(monkeypatch):
     live = SimpleNamespace(
         session=None, corsia_turn=None, context_window=272_000,
         discovered_context_window=None, tool_step_ids={},
+        checkpoint_generation_id=None,
     )
 
     def bind_app_server_session(session) -> None:

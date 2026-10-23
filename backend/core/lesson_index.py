@@ -1,44 +1,30 @@
-"""Which trial lessons a newly installed skills index offers.
+"""Keep trial lessons out of every cached skills index.
 
-Trial lessons are ordinary resolved skills until this one decision: a trial is
-offered only while its file is in its owner's own skills and says ``trial``,
-its review date is ahead, and its owner holds an open review of that exact
-version. Everything else is kept out with a reason the skills surface shows.
-The skills registry calls this once per install, so the choice is frozen with
-the installed index: a new or expired trial changes the next install, never a
-running conversation.
+A trial lesson remains an ordinary resolved skill file, but it is never placed
+in the cached index or its metadata. Its text is delivered only at task start
+by :mod:`core.lesson_delivery`. This module
+still validates trial review state and preserves ordinary-skill precedence, so
+a broken, expired, or shadowed trial has an actionable omitted reason instead
+of silently disappearing.
 
-The same rendered index line is the unit of the lesson budget and of every
-later per-lesson estimate, so the parts never add up to more than the index.
-That line marks a trial, so a reader of the index can tell an unproven rule
-its owner wrote from an approved skill before loading it.
-
-A trial never stands in for an ordinary skill. Placement refuses a taken name,
-but an ordinary skill can take a trial's name afterwards; scope precedence
-would then let the more specific trial win. From the next install the trial
-is held and the ordinary skill offered. Both files stay as they are. A System
-skill of the name already wins in the resolver.
-
-One walk decides each name, from its most specific row down. Where an ordinary
-skill holds the name, every trial above it is held and it is offered. Otherwise
-the first trial that passes the checks stands for the name, with its lesson
-record and its place in the budget: a held trial never gives way to a trial
-that was not checked the same way.
+One walk decides each name from most specific to least. An ordinary skill that
+holds the name is offered. A valid trial with no ordinary winner is held with a
+per-task-delivery reason; it never consumes cached-index budget or estimates.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from typing import Any
 
-from core.lesson_files import raw_sha256, read_trial
-from core.lesson_trials import INDEX_TOKEN_BUDGET, lesson_block, offer_refusal
+from core.lesson_trials import lesson_block, offer_refusal
 from core.skill_registry_types import SkillRow
 from core.skill_scanning import omitted_row
 
 OVERRIDDEN = "overridden by a more specific skill"
-OVER_BUDGET = "the lesson index budget is full"
+PER_TASK = "trial lesson is delivered per task"
+CAP_OMITTED = "trial cap omitted it"
 UNCHECKED = "its review could not be checked"
 UNREADABLE = "its file could not be read"
 SAME_NAME = "an ordinary skill has its name"
@@ -56,7 +42,7 @@ class LessonPartition:
 
     offered: list[SkillRow]
     omitted: list[SkillRow]
-    lessons: list[dict[str, Any]]
+    per_task: list[SkillRow] = field(default_factory=list)
 
 
 def index_line(row: SkillRow) -> str:
@@ -76,36 +62,6 @@ def name_entry(name: str, path: object) -> str:
 def line_for(name: str, description: str, path: object, *, trial: bool = False) -> str:
     """The index line a skill with these fields would contribute."""
     return f"- {name}{TRIAL_MARK if trial else ''}: {description} ({path})"
-
-
-def fits_budget(lessons: list[dict[str, Any]], line: str, lesson_id: str) -> bool:
-    """Whether one more trial's line fits beside the offered ones.
-
-    ``lessons`` is an install's offered list; the candidate's own earlier
-    version does not count against it.
-    """
-    spent = sum(
-        line_tokens(str(lesson["index_line"])) for lesson in lessons if lesson["id"] != lesson_id
-    )
-    return spent + line_tokens(line) <= INDEX_TOKEN_BUDGET
-
-
-def line_tokens(line: str, model: str | None = None) -> int:
-    """The Skills estimator applied to one index line."""
-    from core.token_estimation import _text_tokens
-
-    return _text_tokens(line, model)
-
-
-def descriptor_estimates(
-    lessons: list[dict[str, Any]], *, skills_tokens: int, model: str | None = None,
-) -> dict[str, int]:
-    """Per-lesson index cost by id, never summing to more than the Skills total."""
-    raw = {str(lesson["id"]): line_tokens(str(lesson["index_line"]), model) for lesson in lessons}
-    total = sum(raw.values())
-    if total <= skills_tokens or total == 0:
-        return raw
-    return {key: tokens * max(0, skills_tokens) // total for key, tokens in raw.items()}
 
 
 def _review_state(db, lesson, behavioral_sha256: str) -> tuple[str | None, str]:
@@ -132,12 +88,8 @@ def _review_state(db, lesson, behavioral_sha256: str) -> tuple[str | None, str]:
 
 def _candidate(row: SkillRow, *, thread_id: str, db, now: datetime):
     """One trial row as (refusal, opened_at, record)."""
-    try:
-        data = row.path.read_bytes()
-        trial = read_trial(data.decode("utf-8"))
-    except (OSError, UnicodeDecodeError):
-        trial = None
-    if trial is None:
+    trial, digest = row.trial, row.raw_sha256
+    if trial is None or digest is None or row.source_data is None:
         return UNREADABLE, "", None
     # The review covers the owner's own file: a copy anywhere else is not the trial.
     if row.scope != "thread" or row.scope_id != trial.lesson.owner:
@@ -154,7 +106,7 @@ def _candidate(row: SkillRow, *, thread_id: str, db, now: datetime):
         "scope_id": row.scope_id,
         "inherited": not (row.scope == "thread" and row.scope_id == thread_id),
         "path": str(row.path),
-        "raw_sha256": raw_sha256(data),
+        "raw_sha256": digest,
         "review_after": trial.lesson.review_after,
         "index_line": index_line(row),
     }
@@ -213,8 +165,8 @@ def partition(
     moment = now or datetime.now(timezone.utc)
     remaining = list(omitted)
     held: list[SkillRow] = []
+    per_task: list[SkillRow] = []
     stands: list[SkillRow | None] = []
-    admitted: list[tuple[str, str, int, dict[str, Any]]] = []
     for index, row in enumerate(included):
         if lesson_block(row.metadata) is None:
             stands.append(row)
@@ -223,17 +175,10 @@ def partition(
         held.extend(standing.held)
         stands.append(standing.row)
         if standing.record is not None:
-            admitted.append((standing.opened, standing.record["id"], index, standing.record))
-    lessons: list[dict[str, Any]] = []
-    spent = 0
-    for _opened, _id, index, record in sorted(admitted):
-        cost = line_tokens(record["index_line"])
-        if spent + cost > INDEX_TOKEN_BUDGET:
-            # No ordinary skill is under a trial that passed, so nothing takes its place.
-            held.append(omitted_row(stands[index], HELD_PREFIX + OVER_BUDGET))
+            # The resolved row is held from every cached prefix. Its ordinary
+            # lesson file stays available to the per-task delivery seam.
+            held.append(omitted_row(standing.row, HELD_PREFIX + PER_TASK))
+            per_task.append(standing.row)
             stands[index] = None
-            continue
-        spent += cost
-        lessons.append(record)
     offered = [row for row in stands if row is not None]
-    return LessonPartition(offered=offered, omitted=[*remaining, *held], lessons=lessons)
+    return LessonPartition(offered=offered, omitted=[*remaining, *held], per_task=per_task)

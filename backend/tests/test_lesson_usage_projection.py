@@ -1,7 +1,8 @@
-"""Proposed usage projection: frozen lesson membership and estimated index cost.
+"""Usage projection of a frozen snapshot that carries historical lesson membership.
 
-Design-only acceptance tests until the display contract is ratified. Calls the
-existing live/reconstructed usage seam; never reads current lesson files.
+Trial lessons are delivered per task, so no usage edge derives a cached-index
+lesson estimate. A frozen snapshot recorded before that keeps its stored
+lesson metadata byte for byte, and measured totals are never replaced.
 """
 from __future__ import annotations
 
@@ -61,42 +62,12 @@ def test_projection_keeps_frozen_snapshot_and_measured_totals(continuity_mode):
     assert json.dumps(merged["context_snapshot"], sort_keys=True) == frozen_bytes
     assert merged["total_used"] == 900
     assert usage == {"total_used": 900, "token_usage_available": True}
-    [estimate] = merged["lesson_index_estimates"]["sources"][SOURCE]
-    assert estimate["id"] == "retained-expired"
-    assert estimate["behavioral_sha256"] == BEHAVIOR
-    assert 0 < estimate["prompt_tokens"] <= 120
+    assert "lesson_index_estimates" not in merged
     assert merged["attribution_delta_tokens"] == 780
-
-
-def test_absent_membership_and_known_empty_are_distinct():
-    unknown = merge_context_usage_with_snapshot(None, snapshot=snapshot(lessons=None))
-    empty = merge_context_usage_with_snapshot(None, snapshot=snapshot(lessons=[]))
-    assert unknown["lesson_index_estimates"]["sources"][SOURCE] is None
-    assert empty["lesson_index_estimates"]["sources"][SOURCE] == []
-
-
-def test_long_descriptors_are_capped_by_the_exact_skills_total():
-    rows = [lesson("first"), lesson("second")]
-    for row in rows:
-        row["index_line"] += " long trigger" * 500
-    merged = merge_context_usage_with_snapshot(None, snapshot=snapshot(lessons=rows, tokens=17))
-    estimates = merged["lesson_index_estimates"]["sources"][SOURCE]
-    assert {row["id"] for row in estimates} == {"first", "second"}
-    assert sum(row["prompt_tokens"] for row in estimates) <= 17
-    assert merged["total_used"] == 17
-
-
-def test_missing_cost_does_not_erase_known_membership():
-    merged = merge_context_usage_with_snapshot(None, snapshot=snapshot(lessons=[lesson()], tokens=None))
-    [estimate] = merged["lesson_index_estimates"]["sources"][SOURCE]
-    assert estimate["id"] == "retained-expired"
-    assert estimate["behavioral_sha256"] == BEHAVIOR
-    assert estimate["prompt_tokens"] is None
 
 
 def test_raw_lines_and_offer_metadata_are_not_replaced_by_cost_rows():
     frozen = snapshot(lessons=[lesson()])
     merged = merge_context_usage_with_snapshot(None, snapshot=frozen)
-    [estimate] = merged["lesson_index_estimates"]["sources"][SOURCE]
-    assert set(estimate) == {"id", "behavioral_sha256", "prompt_tokens"}
     assert merged["context_snapshot"]["source_inventory"][0]["metadata"]["lessons"] == [lesson()]
+    assert "lesson_index_estimates" not in merged

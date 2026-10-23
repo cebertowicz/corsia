@@ -544,12 +544,11 @@ def test_collection_cancellation_stops_after_first_count_chunk_and_closes_snapsh
 
     class CancelAfterFirstChunk:
         def __iter__(self):
-            yield {"id": "lesson", "version": "a" * 64, "n": 1, "calls": 1,
-                   "tasks": 0, "attempts": 0, "calls_without_task": 1}
+            yield {"id": "lesson", "version": "a" * 64, "n": 1, "receipts": 1, "tasks": 0}
             cancellation.set()
 
     def count_chunks(_db, sql, *_args, **_kwargs):
-        assert sql == lesson_report_offers._COUNTS
+        assert sql == lesson_report_offers.COUNTS_SQL
         facts["count_chunks"] += 1
         yield CancelAfterFirstChunk()
         pytest.fail("a second aggregate count chunk started after cancellation")
@@ -593,7 +592,7 @@ def test_collection_cancellation_stops_after_first_canonical_text_chunk(monkeypa
 
     monkeypatch.setattr(lesson_report_offers, "json_row_chunk_lists", count_chunks)
     monkeypatch.setattr(lesson_report_offers, "json_text_chunks", text_chunks)
-    offers = lesson_report_offers.DeferredOffers([], [], "user", "from", "to")
+    offers = lesson_report_offers.DeferredOffers([], "user", "from", "to")
 
     with pytest.raises(lesson_report_offers.LessonReportCollectionCancelled):
         offers.collect(object(), cancellation_event=cancellation)

@@ -269,10 +269,10 @@ def test_replaced_wording_of_an_active_rule_is_not_quoted(db):
 
 
 def test_each_lookup_emits_a_counts_only_product_event(db, monkeypatch):
-    from memory import node_start_recall
+    from memory import node_start_recall_telemetry
 
     events: list[tuple] = []
-    monkeypatch.setattr(node_start_recall, "emit_product_event", lambda *args, **kwargs: events.append((args, kwargs)))
+    monkeypatch.setattr(node_start_recall_telemetry, "emit_product_event", lambda *args, **kwargs: events.append((args, kwargs)))
     _message(db, "words", "past", "Export account ledger with CSV format.")
 
     _related(db)

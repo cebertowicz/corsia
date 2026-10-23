@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from typing import Any
 
 from loguru import logger
 
@@ -90,6 +91,7 @@ async def execute_tool_calls(
     cancel_event, on_step, tools_used, model,
     tools_already_streamed=False,
     tool_result_budget_tokens=None,
+    checkpoint_generation_id: str | None = None,
 ):
     """Execute tool calls, emit step events, and stitch results into messages."""
     with tool_loop_span(
@@ -101,6 +103,7 @@ async def execute_tool_calls(
             cancel_event, on_step, tools_used, model,
             tools_already_streamed=tools_already_streamed,
             tool_result_budget_tokens=tool_result_budget_tokens,
+            checkpoint_generation_id=checkpoint_generation_id,
         )
 
 
@@ -109,6 +112,7 @@ async def _execute_tool_calls_inner(
     cancel_event, on_step, tools_used, model,
     tools_already_streamed=False,
     tool_result_budget_tokens=None,
+    checkpoint_generation_id: str | None = None,
 ):
     """Body of ``execute_tool_calls`` — extracted so the OTel span wraps cleanly."""
     clean_text = agent._strip_think(response.content)
@@ -130,15 +134,14 @@ async def _execute_tool_calls_inner(
     )
 
     executed_tc_ids: set[str] = set()
-    canonical_results = []
+    canonical_results: list[tuple[Any, str, Any | None]] = []
     for tc in response.tool_calls:
         if cancel_event.is_set():
             break
         dispatch = dispatch_metadata(tc.name, tc.arguments)
         tools_used.append(dispatch.get("tool_name", tc.name))
         try:
-            with tool_invocation_context(tc.id, provider_call_id=tc.id):
-                result = await agent.tools.execute(tc.name, tc.arguments)
+            result = await _execute_native_tool(agent, tc, checkpoint_generation_id)
         except CompletedToolFailure as failure:
             identity = _current_turn_identity()
             enrich_completed_failure(
@@ -184,6 +187,14 @@ async def _execute_tool_calls_inner(
         if not completed:
             raise
         raise completed_tool_failure(completed, error, harness="native") from error
+
+
+async def _execute_native_tool(agent, tc, checkpoint_generation_id: str | None):
+    """Run one native tool call in its provider and installed-generation context."""
+    with tool_invocation_context(
+        tc.id, provider_call_id=tc.id, checkpoint_generation_id=checkpoint_generation_id,
+    ):
+        return await agent.tools.execute(tc.name, tc.arguments)
 
 
 async def _settle_unexecuted_calls(response, executed_tc_ids, on_step, canonical_results):

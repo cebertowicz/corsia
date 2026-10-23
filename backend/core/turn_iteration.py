@@ -7,11 +7,12 @@ import inspect
 from copy import deepcopy
 from dataclasses import dataclass, field
 from functools import partial
-from typing import TYPE_CHECKING, Any, Awaitable, Callable
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, NoReturn
 
 from loguru import logger
 
 from core import turn_iteration_context as iteration_context
+from core.turn_iteration_context import NativeSafeBoundaryInput
 from core import turn_provider_call, turns_steps
 from core.checkpoint_native_admission import IDLE_RECEIPT_KEY, freeze_idle_receipt
 from core.native_context_prefix import CONTEXT_WINDOW_UNSET, _freeze_tool_definitions
@@ -36,8 +37,6 @@ class TurnProviderError(RuntimeError):
 class ProviderDeliverySettlementError(RuntimeError):
     """Provider output whose durable user-delivery predecessor did not settle."""
 
-
-NativeSafeBoundaryInput = iteration_context.NativeSafeBoundaryInput
 
 
 @dataclass(slots=True)
@@ -218,7 +217,8 @@ async def _run_tool_phase(
         agent, response, state.messages, thread_id, cancel_event,
         provider_on_step, state.tools_used, model=state.turn_model,
         tools_already_streamed=tools_already_streamed,
-        tool_result_budget_tokens=HARNESS_TOOL_RESULT_BUDGET_TOKENS)
+        tool_result_budget_tokens=HARNESS_TOOL_RESULT_BUDGET_TOKENS,
+        checkpoint_generation_id=state.context_usage.get("checkpoint_generation_id"))
     # Keep the resumable Assistant Step, excluding tool results and provider-only
     # media, by using the known append boundary rather than trailing role guesses.
     state.checkpoint_source_messages = deepcopy(state.messages[:checkpoint_prefix_size + 1])
@@ -268,7 +268,7 @@ async def _finish_text_response(state, agent, response, provider_on_step) -> Non
     raise TurnProviderError(message)
 
 
-async def _raise_iteration_exception(state, cancel_event, on_step, exc) -> None:
+async def _raise_iteration_exception(state, cancel_event, on_step, exc) -> NoReturn:
     stopped = bool(getattr(cancel_event, "user_stop_requested", False))
     if not state.terminal_effect_emitted:
         payload = _terminal_payload(state) if stopped else _terminal_payload(state, message=str(exc) or type(exc).__name__)

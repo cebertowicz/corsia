@@ -10,7 +10,8 @@ from typing import Iterator
 
 __all__ = [
     "_current_thread_id", "_current_turn_identity", "_current_tool_invocation_id",
-    "_current_provider_call_id", "tool_invocation_context", "running_call_ids",
+    "_current_provider_call_id", "_current_checkpoint_generation_id", "tool_invocation_context",
+    "running_call_ids",
     "_browser_thread_last_activity", "_active_thread_models",
     "_active_warm_tasks",
 ]
@@ -36,11 +37,18 @@ _current_provider_call_id: contextvars.ContextVar[str | None] = contextvars.Cont
     "_current_provider_call_id", default=None
 )
 
+# The install that supplied this Turn's checkpoint prefix. It is bound by the
+# runtime/bridge that owns that delivery; tools must never infer it from a
+# current database row because a later install could race the read.
+_current_checkpoint_generation_id: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "_current_checkpoint_generation_id", default=None
+)
+
 
 @contextmanager
 def tool_invocation_context(
     invocation_id: str | None, *, fork_id: str | None = None,
-    provider_call_id: str | None = None,
+    provider_call_id: str | None = None, checkpoint_generation_id: str | None = None,
 ) -> Iterator[None]:
     """Bind the caller's exact invocation during execution, never a fallback.
 
@@ -55,9 +63,11 @@ def tool_invocation_context(
         current = None
     reset_handle = _current_tool_invocation_id.set(current)
     call_handle = _current_provider_call_id.set(provider_call_id if fork_id is None else None)
+    generation_handle = _current_checkpoint_generation_id.set(checkpoint_generation_id)
     try:
         yield
     finally:
+        _current_checkpoint_generation_id.reset(generation_handle)
         _current_provider_call_id.reset(call_handle)
         _current_tool_invocation_id.reset(reset_handle)
 

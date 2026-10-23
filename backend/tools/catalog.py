@@ -114,6 +114,20 @@ def is_reachable(name: str) -> bool:
     return _reachable(TOOL_CATALOG.get(name))
 
 
+def serious_effect_recorded_names() -> tuple[str, ...]:
+    """Return every harness spelling whose catalog effect proposes Serious."""
+    canonical = {name for name, entry in TOOL_CATALOG.items() if entry.serious_effect}
+    recorded = canonical | {f"{MCP_CORSIA_PREFIX}{name}" for name in canonical}
+    recorded.update(alias for alias, name in CC_BUILTIN_ALIASES.items() if name in canonical)
+    return tuple(sorted(recorded))
+
+
+def has_serious_effect(name: str | None) -> bool:
+    """Return whether a harness-recorded tool effect proposes Serious triage."""
+    entry = TOOL_CATALOG.get(normalize_tool_name(name)) if name else None
+    return bool(entry and entry.serious_effect)
+
+
 def tool_pack(name: str) -> str | None:
     """Return the pack id of a reachable non-core tool, else ``None``."""
     entry = TOOL_CATALOG.get(name)

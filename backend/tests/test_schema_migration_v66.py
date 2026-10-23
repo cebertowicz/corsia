@@ -24,6 +24,14 @@ _TABLES = (
 _NOW = "2026-09-29T00:00:00+00:00"
 
 
+def _historical_guidance_loads(db: sqlite3.Connection) -> None:
+    """Add the v47 table that a real v66 database already contains."""
+    from infra.migration_46_to_47_guidance_manifests import _GUIDANCE_47_DDL
+
+    for statement in _GUIDANCE_47_DDL:
+        db.execute(statement)
+
+
 def _add_thread_state(db: sqlite3.Connection, thread_id: str) -> None:
     """Write one row per cleared table for ``thread_id``."""
     checkpoint_id = f"cp-{thread_id}"
@@ -83,7 +91,7 @@ def test_migration_deletes_deleted_threads_rows_keeps_live_ones(
         with caplog.at_level(logging.INFO, logger="infra.migration_65_to_66_delete_orphaned_thread_state"):
             result = migrate_to_current(db, 66)
 
-        assert SCHEMA_VERSION == 144
+        assert SCHEMA_VERSION == 145
         assert (result.migrated, result.from_version, result.to_version) == (True, 65, 66)
         assert _counts(db) == dict.fromkeys(_TABLES, 1)
         for table in _TABLES:
@@ -127,11 +135,12 @@ def test_startup_migration_adds_comment_context_columns_idempotently() -> None:
             );
             PRAGMA user_version=66;
         """)
+        _historical_guidance_loads(db)
 
         result = migrate_to_current(db, SCHEMA_VERSION)
 
         columns = {row[1] for row in db.execute("PRAGMA table_info(doc_comments)")}
-        assert SCHEMA_VERSION == 144
+        assert SCHEMA_VERSION == 145
         assert (result.migrated, result.from_version, result.to_version) == (True, 66, SCHEMA_VERSION)
         assert {"anchor_prefix", "anchor_suffix"} <= columns
         assert not migrate_to_current(db, SCHEMA_VERSION).migrated

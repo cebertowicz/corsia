@@ -13,6 +13,15 @@ OLD_KEY = "workspace_conductor_session_id"
 NEW_KEY = "corsia_agent_thread_id"
 
 
+def _historical_c1_prerequisites(db: sqlite3.Connection) -> None:
+    """Add tables a real v117 database acquired at v47 and v77."""
+    from infra.migration_46_to_47_guidance_manifests import _GUIDANCE_47_DDL
+    from infra.migration_76_to_77_outcome_events import _OUTCOME_EVENTS_77_DDL
+
+    for statement in (*_GUIDANCE_47_DDL, *_OUTCOME_EVENTS_77_DDL):
+        db.execute(statement)
+
+
 def _db() -> sqlite3.Connection:
     db = sqlite3.connect(":memory:")
     db.row_factory = sqlite3.Row
@@ -47,7 +56,7 @@ def _keys(db: sqlite3.Connection) -> dict[str, str]:
 
 
 def test_registered_as_the_current_step():
-    assert SCHEMA_VERSION == 144
+    assert SCHEMA_VERSION == 145
     assert MIGRATIONS[117] is migrate_117_to_118
 
 
@@ -155,13 +164,14 @@ def test_runner_upgrades_a_117_database_in_one_transaction(tmp_path):
             """
         )
         _setting(connection, OLD_KEY, "ws")
+        _historical_c1_prerequisites(connection)
     with sqlite3.connect(path) as connection:
         result = migrate_to_current(connection, SCHEMA_VERSION)
         rows = connection.execute("SELECT key, value FROM settings").fetchall()
         title = connection.execute("SELECT title FROM threads").fetchone()[0]
         version = connection.execute("PRAGMA user_version").fetchone()[0]
     assert result.migrated is True
-    assert (result.from_version, result.to_version) == (117, 144)
-    assert version == 144
+    assert (result.from_version, result.to_version) == (117, 145)
+    assert version == 145
     assert [(k, json.loads(v)["session_id"]) for k, v in rows] == [(NEW_KEY, "ws")]
     assert title == "CORSIA"

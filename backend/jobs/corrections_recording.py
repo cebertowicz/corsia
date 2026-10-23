@@ -16,10 +16,14 @@ from core.corrections_recording import (
     SOURCE_KIND_DECISION_ANSWER,
     SOURCE_KIND_DOC_COMMENT,
     SOURCE_KIND_MESSAGE,
+    SELF_CAUGHT_FACT_KEYS,
+    SOURCE_KIND_SELF_CAUGHT,
     ClassifierVersion,
     CorrectionCandidate,
     dedupe_key,
     fact_attributes,
+    self_caught_attributes,
+    self_caught_dedupe_key,
     subject_key,
     version_match_sql,
 )
@@ -105,6 +109,39 @@ def _record_fact(
         except Exception:
             # The correction fact is committed before this best-effort report hook.
             logger.exception("learning report delivery hook failed")
+    return result.inserted
+
+
+def record_self_caught(candidate: CorrectionCandidate, *, db) -> bool:
+    """Write one observed agent failure and queue its normal triage note.
+
+    This deliberately bypasses classifier inference but reuses the correction
+    event, subject identity, note, triage, and terminal-outcome lifecycle.
+    """
+    from core.correction_notes import queue_correction_note
+    from infra.outcome_events import record_outcome_event
+
+    if candidate.source_kind != SOURCE_KIND_SELF_CAUGHT or not candidate.arrived:
+        raise ValueError("self-caught correction must be an arrived self_caught candidate")
+    attributes = self_caught_attributes(candidate)
+    if set(attributes) != set(SELF_CAUGHT_FACT_KEYS):
+        raise RuntimeError("self-caught correction fact attributes are incomplete")
+    result = record_outcome_event(
+        db,
+        dedupe_key=self_caught_dedupe_key(candidate),
+        event_name=CORRECTION_EVENT,
+        source="corsia",
+        provenance="agent_recorded",
+        ts=candidate.created_at,
+        subject_key=subject_key(candidate.source_kind, candidate.source_id),
+        project_id=candidate.project_id,
+        agent_thread_id=candidate.thread_id,
+        attributes=attributes,
+    )
+    if result.dropped_keys:
+        raise RuntimeError("self-caught correction fact attributes were dropped")
+    if result.inserted and result.event_id:
+        queue_correction_note(db, candidate, None, result.event_id)
     return result.inserted
 
 

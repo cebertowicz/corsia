@@ -26,7 +26,7 @@ def test_fresh_schema_has_nullable_workflow_fields():
             str(row[1]): row for row in db.execute("PRAGMA table_info(plan_nodes)")
         }
 
-    assert SCHEMA_VERSION == 144
+    assert SCHEMA_VERSION == 145
     assert _WORKFLOW_COLUMNS <= set(details)
     assert all(details[name][3] == 0 for name in _WORKFLOW_COLUMNS)
 

@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from core.correction_learning import CAUSES
 from core.lesson_trials import BODY_WORDS, TRIAL_SCHEMA, Trial, lesson_block, validate_trial
 
 Q1 = ("thread", "agent", "project", "everywhere")
@@ -81,6 +82,18 @@ ANSWER_SCHEMA: dict[str, Any] = {
         "skill_description": {"type": ["string", "null"]},
         "reference_file": {"type": ["string", "null"]},
         "rationale": {"type": "string"},
+        "target_file": {"type": ["string", "null"]},
+        "new_target_path": {"type": ["string", "null"]},
+        "target_section": {"type": ["string", "null"]},
+        "cause": {"type": ["string", "null"], "enum": [*CAUSES, None]},
+        "new_evidence": {"type": ["string", "null"], "enum": ["target_changed", "case_differs", None]},
+        "case": {
+            "type": ["object", "null"], "additionalProperties": False,
+            "properties": {
+                "what_happened": {"type": "string"}, "right_call": {"type": "string"},
+                "does_not_apply": {"type": "string"}, "correction_subject": {"type": "string"},
+            },
+        },
         "trial": TRIAL_SCHEMA,
     },
 }
@@ -101,7 +114,24 @@ class Decision:
     reference_file: str | None
     rationale: str
     trial: Trial | None = None
+    target_file: str | None = None
+    new_target_path: str | None = None
+    target_section: str | None = None
+    cause: str | None = None
+    case: dict[str, str] | None = None
+    new_evidence: str | None = None
     originating_subjects: tuple[str, ...] = ()
+
+
+def _case(raw: object) -> dict[str, str] | None:
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise InvalidDecision("case must be an object or null")
+    keys = ("what_happened", "right_call", "does_not_apply", "correction_subject")
+    if set(raw) != set(keys) or any(not _optional(raw, key) for key in keys):
+        raise InvalidDecision("case must name what_happened, right_call, does_not_apply and correction_subject")
+    return {key: str(raw[key]).strip() for key in keys}
 
 
 def _optional(raw: dict[str, Any], key: str) -> str | None:
@@ -141,6 +171,12 @@ def validate_decision(raw: object) -> Decision:
         reference_file=_optional(raw, "reference_file"),
         rationale=" ".join(rationale.split())[:200],
         trial=trial,
+        target_file=_optional(raw, "target_file"),
+        new_target_path=_optional(raw, "new_target_path"),
+        target_section=_optional(raw, "target_section"),
+        cause=_optional(raw, "cause"),
+        case=_case(raw.get("case")),
+        new_evidence=_optional(raw, "new_evidence"),
     )
 
 
