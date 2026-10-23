@@ -106,7 +106,7 @@ async function serve(page: Page, fixture: Fixture) {
 	});
 	await page.addInitScript(({ screen }) => {
 		if (screen === 'protected' || screen === 'unwritable') {
-			(window as unknown as { __TAURI_INTERNALS__: unknown }).__TAURI_INTERNALS__ = { invoke: async () => screen === 'protected' ? { state: 'ready', path: '~/Documents', protected_folder: { kind: 'personal_folder', folder: 'Documents' } } : { state: 'unwritable', path: '/Volumes/Archive/CORSIA', reason: 'read-only' } };
+			(window as unknown as { __TAURI_INTERNALS__: unknown }).__TAURI_INTERNALS__ = { invoke: async () => screen === 'protected' ? { state: 'ready', path: '~/Documents', folder_warning: { kind: 'personal_folder', folder: 'Documents' } } : { state: 'unwritable', path: '/Volumes/Archive/CORSIA', reason: 'read-only' } };
 		}
 	}, { screen: fixture.screen });
 	await page.route((url) => url.pathname.startsWith('/api/'), async (route: Route) => {
@@ -260,13 +260,13 @@ async function assertState(page: Page, fixture: Fixture) {
 	if (fixture.screen === 'mismatch') { await expect(text('Passwords don’t match.')).toBeVisible(); return; }
 	if (fixture.screen === 'account-exists') { await expect(text('This computer already has a CORSIA account. Sign in instead.')).toBeVisible(); return; }
 	if (fixture.screen === 'protected') {
-		await expect(text('Your Documents folder holds personal files. Agents open anything in the work folder without asking; outside it, CORSIA asks you first.')).toBeVisible();
+		await expect(text('Your Documents folder holds personal files. macOS may ask to let CORSIA use it. Agents open anything in the work folder without asking; outside it, CORSIA asks you first.')).toBeVisible();
 		await expect(page.getByRole('button', { name: 'Use ~/CORSIA', exact: true })).toBeVisible();
 		await expect(page.getByRole('button', { name: 'Keep this folder', exact: true })).toBeVisible();
 		await expect(page.getByRole('button', { name: 'Continue', exact: true })).toBeDisabled();
 		return;
 	}
-	if (fixture.screen === 'unwritable') { await expect(text('CORSIA can’t write to this folder. Choose another one.')).toBeVisible(); await expect(page.getByRole('button', { name: 'Continue', exact: true })).toBeDisabled(); return; }
+	if (fixture.screen === 'unwritable') { await expect(text('CORSIA couldn’t write to this folder. Choose another one.')).toBeVisible(); await expect(page.getByRole('button', { name: 'Continue', exact: true })).toBeDisabled(); return; }
 	if (fixture.screen === 'creating') { await expect(text('Starting CORSIA')).toBeVisible(); return; }
 	if (fixture.screen === 'create-failed') { await expect(text('Couldn’t create your account. Try again.')).toBeVisible(); await expect(page.getByRole('button', { name: 'Save a report', exact: true })).toBeVisible(); return; }
 	if (fixture.requiredUsername) { await expect(page.getByLabel('Username', { exact: true })).toHaveAttribute('readonly'); }
@@ -301,7 +301,7 @@ async function assertState(page: Page, fixture: Fixture) {
 			: fixture.local === 'start-failed' ? localSetupFix('connection')
 			: 'Free and private. Runs on this computer, even offline. 30 GB download.';
 		await expect(row).toContainText(expected);
-		if (['downloading', 'paused', 'starting', 'ready'].includes(fixture.local ?? '') && !fixture.cli && !fixture.api) await expect(row).toContainText('Good for private work. For now, to run many agents at once, add a cloud model.');
+		if (['downloading', 'paused', 'starting', 'ready'].includes(fixture.local ?? '') && !fixture.cli && !fixture.api) await expect(row).toContainText('Good for private work. To run many agents at once, add a cloud model.');
 		if (fixture.local === 'other-no-ref' || fixture.local === 'start-failed') await expect(row.getByText(/Reference:/)).toHaveCount(0);
 		if (fixture.local === 'setup-failed' || fixture.local === 'start-failed') await expect(row.getByRole('button', { name: 'Save a report', exact: true })).toBeVisible();
 	}

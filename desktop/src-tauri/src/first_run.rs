@@ -78,7 +78,7 @@ fn folder_warning(path: &Path, home: &Path) -> Result<Option<FolderWarning>, Str
         if path == personal {
             return Ok(Some(FolderWarning::PersonalFolder { folder: name }));
         }
-        if path.starts_with(home) && personal.starts_with(path) {
+        if personal.starts_with(path) {
             return Ok(Some(FolderWarning::ContainsPersonalFolder { folder: name }));
         }
     }
@@ -820,6 +820,10 @@ mod tests {
             (&downloads, FolderWarning::PersonalFolder { folder: "Downloads" }),
             (&cloud_docs, FolderWarning::PersonalFolder { folder: "iCloud Drive" }),
             (&library, FolderWarning::ContainsPersonalFolder { folder: "iCloud Drive" }),
+            (
+                home.0.parent().unwrap(),
+                FolderWarning::ContainsPersonalFolder { folder: "Documents" },
+            ),
         ] {
             assert_eq!(
                 classify_folder(path, &home.0, |_| Ok(())),

@@ -13,7 +13,7 @@ function render(choice: unknown) {
 	host = document.createElement('div');
 	document.body.appendChild(host);
 	Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: { invoke: vi.fn(async () => choice) } });
-	component = mount(SetupWorkFolder, { target: host, props: { folder: '~/CORSIA', changed: false, changing: false, notice: null } });
+	component = mount(SetupWorkFolder, { target: host, props: { folder: '~/CORSIA', defaultFolder: '~/CORSIA', changed: false, changing: false, notice: null } });
 	flushSync();
 }
 
@@ -61,7 +61,7 @@ describe('SetupWorkFolder', () => {
 	it('holds an unreadable choice until another folder is selected', async () => {
 		render({ state: 'unreadable', path: '/Volumes/Archive/corsia', reason: 'permission denied' });
 		button('Change').click(); await settle();
-		expect(host.textContent).toContain('CORSIA can’t inspect this folder. Choose another one.');
+		expect(host.textContent).toContain('CORSIA couldn’t inspect this folder. Choose another one.');
 	});
 
 	it('does not steer an empty new folder inside Documents or a normal folder', async () => {

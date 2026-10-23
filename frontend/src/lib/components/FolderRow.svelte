@@ -11,6 +11,7 @@
 
 	interface Props {
 		folder: string;
+		defaultFolder: string;
 		notice?: FolderNotice;
 		changing?: boolean;
 		onChange: () => void;
@@ -18,7 +19,7 @@
 		onKeepFolder?: () => void;
 	}
 
-	const { folder, notice = null, changing = false, onChange, onUseDefault, onKeepFolder }: Props = $props();
+	const { folder, defaultFolder, notice = null, changing = false, onChange, onUseDefault, onKeepFolder }: Props = $props();
 	function folderWarningNotice(folder: FolderWarning): string {
 		const safety = 'Agents open anything in the work folder without asking; outside it, CORSIA asks you first.';
 		if (folder.kind === 'personal_folder') return `Your ${folder.folder} folder holds personal files. macOS may ask to let CORSIA use it. ${safety}`;
@@ -37,13 +38,13 @@
 	{#if notice?.kind === 'warning'}
 		<p class="note">{folderWarningNotice(notice.warning)}</p>
 		<div class="choices">
-			<Button variant="chip" size="sm" onclick={onUseDefault}>Use ~/CORSIA</Button>
+			<Button variant="chip" size="sm" onclick={onUseDefault}>Use {defaultFolder}</Button>
 			<Button variant="chip" size="sm" onclick={onKeepFolder}>Keep this folder</Button>
 		</div>
 	{:else if notice?.kind === 'unwritable'}
-		<p class="note error">CORSIA can’t write to this folder. Choose another one.</p>
+		<p class="note error">CORSIA couldn’t write to this folder. Choose another one.</p>
 	{:else if notice?.kind === 'unreadable'}
-		<p class="note error">CORSIA can’t inspect this folder. Choose another one.</p>
+		<p class="note error">CORSIA couldn’t inspect this folder. Choose another one.</p>
 	{:else if notice?.kind === 'picker_failed'}
 		<p class="note error">Couldn’t check that folder. Choose it again.</p>
 	{/if}
