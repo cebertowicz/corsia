@@ -13,7 +13,7 @@ function render(choice: unknown) {
 	host = document.createElement('div');
 	document.body.appendChild(host);
 	Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: { invoke: vi.fn(async () => choice) } });
-	component = mount(SetupWorkFolder, { target: host, props: { folder: '~/CORSIA', defaultFolder: '~/CORSIA', changed: false, changing: false, notice: null } });
+	component = mount(SetupWorkFolder, { target: host, props: { folder: '~/CORSIA', defaultFolder: '~/CORSIA', defaultFolderPath: '/fixture/default-workspace', applyPath: '', savedFolder: false, changed: false, changing: false, notice: null } });
 	flushSync();
 }
 

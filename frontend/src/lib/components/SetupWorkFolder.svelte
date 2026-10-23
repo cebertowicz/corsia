@@ -4,8 +4,8 @@
 	type FolderWarning = { kind: 'personal_folder'; folder: string } | { kind: 'contains_personal_folder'; folder: string } | { kind: 'contains_files' };
 	export type FolderNotice = { kind: 'warning'; warning: FolderWarning } | { kind: 'unwritable'; reason: string } | { kind: 'unreadable'; reason: string } | { kind: 'picker_failed' } | null;
 	type Choice = { state: 'ready'; path: string; folder_warning: FolderWarning | null } | { state: 'unwritable'; path: string; reason: string } | { state: 'unreadable'; path: string; reason: string };
-	interface Props { folder: string; defaultFolder: string; changed: boolean; changing: boolean; notice: FolderNotice; error?: string }
-	let { folder = $bindable(), defaultFolder, changed = $bindable(), changing = $bindable(), notice = $bindable(), error = '' }: Props = $props();
+	interface Props { folder: string; defaultFolder: string; defaultFolderPath: string; applyPath: string; savedFolder: boolean; changed: boolean; changing: boolean; notice: FolderNotice; error?: string }
+	let { folder = $bindable(), defaultFolder, defaultFolderPath, applyPath = $bindable(), savedFolder, changed = $bindable(), changing = $bindable(), notice = $bindable(), error = '' }: Props = $props();
 	async function changeFolder() {
 		const invoke = (window as Window & { __TAURI_INTERNALS__?: { invoke: (command: string) => Promise<unknown> } }).__TAURI_INTERNALS__?.invoke;
 		if (!invoke || changing) return;
@@ -13,7 +13,7 @@
 		try {
 			const choice = await invoke('choose_work_folder') as Choice | null;
 			if (!choice) return;
-			folder = choice.path; changed = true;
+			folder = choice.path; applyPath = choice.path; changed = true;
 			notice = choice.state === 'ready' ? (choice.folder_warning ? { kind: 'warning', warning: choice.folder_warning } : null) : { kind: choice.state, reason: choice.reason };
 		} catch { notice = { kind: 'picker_failed' }; }
 		finally { changing = false; }
@@ -21,8 +21,9 @@
 
 	function useDefaultFolder() {
 		folder = defaultFolder;
-		// The desktop shell owns and creates its default workspace; do not send a display path back as a filesystem path.
-		changed = false;
+		applyPath = defaultFolderPath;
+		// The shell already owns an initial default workspace. A saved personal folder must move back to it first.
+		changed = savedFolder;
 		notice = null;
 	}
 
