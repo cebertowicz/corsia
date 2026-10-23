@@ -55,7 +55,7 @@ KEY = "selected_description"
 BRIEF_CAP = 16384
 CRITERIA = (
     "Every item is acknowledged, resolved, or replied to, and every change made for one is also made "
-    "wherever this document, or a document that repeats it, says the same thing in other words."
+    "wherever this document says the same thing in other words."
 )
 SMALL = "Comment c-1\nQuote: quoted source\nFeedback: Please check this point."
 #: Over the ceiling on its own, so the cut is the description's, not the block's.

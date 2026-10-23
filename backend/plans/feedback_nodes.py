@@ -16,7 +16,7 @@ from plans.plan_write import transaction
 PROVENANCE = "document.feedback_batch"
 COMMENT_ACCEPTANCE = (
     "Every item is acknowledged, resolved, or replied to, and every change made for one is also made "
-    "wherever this document, or a document that repeats it, says the same thing in other words."
+    "wherever this document says the same thing in other words."
 )
 EDIT_ACCEPTANCE = (
     "The edit is checked against current intent and kept, adjusted, or reverted "
