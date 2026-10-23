@@ -192,6 +192,24 @@ describe('the first-run opening live edge', () => {
 	});
 });
 
+describe('the shared bottom action', () => {
+	it('keeps its bottom contract when the opening is the final transcript row', async () => {
+		messages.set([{ id: 'opening', thread_id: THREAD_ID, role: 'assistant', content: 'Hi.', seq: 1,
+			created_at: '2026-08-01T00:00:00Z', metadata: { first_run_opening: true } }] as never);
+		const list = renderList();
+		const el = scroller();
+		el.querySelector<HTMLElement>('[data-message-id="opening"]')!.scrollIntoView = () => {};
+
+		list.scrollToBottomFromUser();
+		await tick();
+		flushSync();
+		runFrames();
+
+		expect(el.scrollTop).toBe(CONTENT);
+		expect(followingLiveEdge()).toBe(true);
+	});
+});
+
 describe('the composer growing is not a user scroll', () => {
 	/**
 	 * Reported as "queued messages hide the typing indicator", and reproduced on
@@ -278,6 +296,25 @@ describe('the composer growing is not a user scroll', () => {
 		runFrames();
 
 		expect(writes.length).toBeGreaterThan(0);
+		expect(writes.at(-1)).toBe(CONTENT);
+	});
+
+	it('keeps a reader at the bottom when the composer grows below a long opening', async () => {
+		messages.set([{ id: 'opening', thread_id: THREAD_ID, role: 'assistant', content: 'Hi.', seq: 1,
+			created_at: '2026-08-01T00:00:00Z', metadata: { first_run_opening: true } }] as never);
+		floater = installFloater(72);
+		const { fire } = mountWithFloater();
+		const el = scroller();
+		el.querySelector<HTMLElement>('[data-message-id="opening"]')!.scrollIntoView = () => {};
+		userScrollsTo(el, CONTENT - VIEWPORT);
+		const writes = recordScrollWrites(el);
+
+		Object.defineProperty(floater, 'getBoundingClientRect', {
+			configurable: true, value: () => ({ height: 110 }) as DOMRect,
+		});
+		fire();
+		runFrames();
+
 		expect(writes.at(-1)).toBe(CONTENT);
 	});
 

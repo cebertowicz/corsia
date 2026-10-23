@@ -49,17 +49,9 @@ export function landOnNewContent(messagesEl: HTMLElement | undefined): void {
 		?.scrollIntoView({ block: 'start' });
 }
 
-/**
- * The live edge of a transcript that ends in the first-run opening is that message's first line,
- * not its end: a long opening is read from its top. Any later row restores the bottom edge.
- */
-export function pinLiveEdge(messagesEl: HTMLElement | undefined, openingId: string | null): void {
-	if (!messagesEl) return;
-	const opening = openingId
-		? [...messagesEl.querySelectorAll<HTMLElement>('[data-message-id]')].find((row) => row.dataset.messageId === openingId)
-		: null;
-	if (opening) opening.scrollIntoView({ block: 'start' });
-	else messagesEl.scrollTop = messagesEl.scrollHeight;
+/** The first-run opening lands once at its first readable line, below the glass header. */
+export function landOnFirstRunOpening(messagesEl: HTMLElement | undefined): void {
+	messagesEl?.querySelector<HTMLElement>('[data-first-run-opening]')?.scrollIntoView({ block: 'start' });
 }
 
 export function hasLandingTarget(entries: readonly { kind: string; new?: boolean }[]): boolean {
