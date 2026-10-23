@@ -99,6 +99,7 @@
 	const easeOutQuint = cubicOut;
 	let mainEl = $state<HTMLElement | undefined>(undefined);
 	let artifactHeaderInset = $state<number | null>(null);
+	let headerRightControlsInset = $state(0);
 	const mainDrawer = createMainDrawerController({
 		getMainEl: () => mainEl,
 		getSidebarOpen: () => sidebarOpen,
@@ -235,6 +236,7 @@
 		class:open={sidebarOpen}
 		class:pane-open={paneVisible}
 		style:--artifact-header-inset={artifactHeaderInset === null ? undefined : `${artifactHeaderInset}px`}
+		style:--header-right-controls-inset={artifactHeaderInset === null ? undefined : `${headerRightControlsInset}px`}
 		bind:this={mainEl}
 		use:toastAnchorSurface
 		ontransitionstart={mainDrawer.onTransitionStart}
@@ -243,7 +245,7 @@
 		ontouchend={mainDrawer.onTouchEnd}
 		ontouchcancel={mainDrawer.onTouchEnd}
 	>
-		<Header onToggleSidebar={onToggleSidebar} onTogglePane={onTogglePane} {onMeasurement} {activeView} {conductorThreadId} hasPane={viewHasPane} {artifactHeaderInset} />
+		<Header onToggleSidebar={onToggleSidebar} onTogglePane={onTogglePane} onRightControlsWidth={(width) => { headerRightControlsInset = width; }} {onMeasurement} {activeView} {conductorThreadId} hasPane={viewHasPane} {artifactHeaderInset} />
 		<StatusBanners />
 		{#if $threadSettingsOpen && ($activeThread || (conductorThreadId != null && $activeThreadId === conductorThreadId))}
 			<ThreadSettingsView
