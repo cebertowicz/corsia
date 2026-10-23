@@ -39,10 +39,11 @@ def _record_existing_starts(conn, schema: dict[str, set[str]]) -> dict[str, str]
         return {}
     sources = tuple(dict.fromkeys(source for group in groups for source in legacy_sources(group)))
     row = conn.execute(source_first_rows_query(sources)).fetchone()
+    first = dict(zip(sources, row)) if row else {}
     values: dict[str, str] = {}
     for group in groups:
         if value := max(
-            (str(row[source]) for source in legacy_sources(group) if row and row[source]),
+            (str(first_value) for source in legacy_sources(group) if (first_value := first.get(source))),
             default=None,
         ):
             values[group] = value

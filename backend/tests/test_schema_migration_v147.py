@@ -17,8 +17,8 @@ def _breaks(db):
 
 
 def _legacy_db() -> sqlite3.Connection:
+    # Startup migrations receive sqlite's default positional rows.
     db = sqlite3.connect(":memory:")
-    db.row_factory = sqlite3.Row
     initialize_schema(db)
     db.execute("DROP TABLE measure_breaks")
     db.execute("PRAGMA user_version=146")
