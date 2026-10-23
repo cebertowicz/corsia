@@ -3,6 +3,10 @@
 Shipped behavior, newest first. When a later entry changes an earlier design,
 the later entry describes the current behavior.
 
+## Unreleased
+
+_Changes merged since the last release. Each PR that changes what you see or do adds a line here._
+
 ## v0.4.0 — A self-starting Mac app, updates you control, a shared browser, connected apps, and steadier plans
 
 Released 2026-10-16.
