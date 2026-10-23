@@ -276,8 +276,8 @@ def test_the_build_precompiles_and_immutability_checks_bundled_python():
     test = _repo_file("desktop", "scripts", "test-bundled-python-immutability.sh").read_text()
 
     assert '"$PYTHON" -m compileall -q -f --invalidation-mode unchecked-hash "$BUNDLE_ROOT"' in build
-    assert "cache_from_source" in build
     assert '"$ROOT/desktop/scripts/test-bundled-python-immutability.sh" "$APP"' in build
+    assert "cache_from_source" in test
     assert "env -i PATH=" in test
     for module in ("json", "ssl", "fastapi", "mlx", "core"):
         assert f"import {module}" in test
