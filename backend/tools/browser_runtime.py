@@ -60,7 +60,7 @@ async def _run(args: list[str], *, thread_id: str, lease_id: str | None = None,
 
 
 async def _declare_person_step(thread_id: str, instruction: str) -> str:
-    """Hand the current browser page to the person and wait for observed navigation."""
+    """Hand the current browser page to the person; a new page visit, or their ending the step, wakes the agent."""
     err = _check_installed()
     if err:
         return err

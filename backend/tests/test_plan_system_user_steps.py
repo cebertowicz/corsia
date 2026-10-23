@@ -29,7 +29,7 @@ from tests.test_plan_reconcile_release import db, seed_threads  # noqa: F401 - f
 
 PROVENANCE = "browser.password_guard"
 TITLE = "Enter your password in the browser (example.com)"
-DESCRIPTION = "Enter your password in the browser pane. The agent can't see this page and carries on once you're past it."
+DESCRIPTION = "Enter your password in the shared browser. The agent can't see this page and carries on once you're past it."
 
 
 def _open(db, key: str = "visit-1") -> str:
@@ -241,16 +241,30 @@ def test_settle_after_the_step_ended_does_nothing(db, ending):
     assert (row(db, step)["state"], row(db, step)["revision"]) == before
 
 
-def test_declining_the_step_releases_the_waiting_task(db):
+@pytest.mark.parametrize(("operation", "ended", "wake"), [
+    ("close_node", "closed", "plan-wake:prerequisite_settled:{task}:{revision}:{step}:closed"),
+    ("mark_done", "accepted", "plan-wake:work_selected:{task}:{revision}"),
+], ids=["declined", "marked-done"])
+def test_the_persons_own_ending_releases_and_wakes_the_waiting_task(db, operation, ended, wake):
+    """Declining the step or marking it done is the person's write, so the waiting agent is woken."""
+    from infra.db_fts import _init_messages_fts
+
+    _init_messages_fts(db)
     plan = owner_plan(db)
     mine = task(db, plan.id, "Read the page")
     select(db, plan.id, mine.id)
     step = _open(db)
 
-    plan_update(db, plan.id, "close_node", {**close_params(db, "close_node", step), "reason": "Not now"}, actor=HUMAN)
+    params = close_params(db, operation, step)
+    plan_update(db, plan.id, operation, {**params, "reason": "Not now"} if operation == "close_node" else params,
+                actor=HUMAN)
 
-    assert row(db, step)["state"] == "closed"
+    assert row(db, step)["state"] == ended
     assert open_attempt(db, mine.id) is not None
+    wakes = {r["id"] for r in db.execute(
+        "SELECT id FROM messages WHERE thread_id=? AND id LIKE 'plan-wake:%'", ("owner",),
+    ).fetchall()}
+    assert wake.format(task=mine.id, revision=row(db, mine.id)["revision"], step=step) in wakes
 
 
 def test_an_empty_key_is_refused(db):

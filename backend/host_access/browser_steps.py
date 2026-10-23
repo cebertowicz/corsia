@@ -1,0 +1,115 @@
+"""The two kinds of page the person completes in the shared browser, each owning its own lifecycle.
+
+A password step opens when the agent's own probe finds a visible password field, and stays open while
+one shows on its visit. A person step opens when the agent hands the person a page with no password
+field (an account chooser, a passkey or phone prompt), and stays open for its whole visit. Each is one
+page visit's step in the agent's plan; neither keeps any page value or text.
+"""
+from __future__ import annotations
+
+import asyncio
+from dataclasses import dataclass, field
+from typing import ClassVar
+
+from host_access import browser_pane_state
+from host_access.browser_cdp import PasswordProbe
+from host_access.browser_domain import registrable_domain
+from infra import state
+
+PASSWORD_STEP_DESCRIPTION = (
+    "Enter your password in the shared browser. The agent can't see this page and carries on once you're past it.")
+# The plan states a person's own Mark done leaves (``plans.node_states``); any other ending is a decline.
+DONE_STATES = frozenset({"accepted", "accepted_with_followup"})
+
+
+@dataclass(eq=False)
+class BrowserStep:
+    """One page visit the person completes in the shared browser."""
+
+    visit: str
+    host: str
+    # The page target the step's visit is on; a probe of any other target never settles it.
+    target: str = ""
+    node_id: str | None = None
+    # Set once the person's decline (AR7) has been counted, so a resumed re-probe never counts it again.
+    declined: bool = False
+    # The step's one re-probe loop, and the person's latest input that it waits to pause (AR6).
+    reprobe: asyncio.Task | None = field(default=None, repr=False)
+    last_input: float | None = None
+    input_seen: asyncio.Event = field(default_factory=asyncio.Event, repr=False)
+
+    provenance: ClassVar[str]
+    event_prefix: ClassVar[str]
+    settlement_evidence: ClassVar[str]
+
+    def domain(self) -> str:
+        # AR5: a title names the live page's registrable domain, the one the pane's address keeps visible.
+        return registrable_domain(self.host) or "this site"
+
+    def title(self) -> str:
+        raise NotImplementedError
+
+    def description(self) -> str:
+        raise NotImplementedError
+
+    def still_open(self, result: PasswordProbe) -> bool:
+        """Whether a probe of the step's own target leaves the step with the person."""
+        raise NotImplementedError
+
+    def ended(self, thread_id: str) -> None:
+        """Undo what the step showed beyond its plan row, once it has ended."""
+
+
+@dataclass(eq=False)
+class PasswordStep(BrowserStep):
+    """A visible password field the agent's probe found; it is also its visit's read guard (AR2)."""
+
+    # Every password node seen on the visit; reads of them stay refused until the document loader changes.
+    seen_nodes: frozenset[int] = frozenset()
+
+    provenance = "browser.password_guard"
+    event_prefix = "password_step"
+    settlement_evidence = "Password field no longer on the page"
+
+    def title(self) -> str:
+        return f"Enter your password in the browser ({self.domain()})"
+
+    def description(self) -> str:
+        return PASSWORD_STEP_DESCRIPTION
+
+    def still_open(self, result: PasswordProbe) -> bool:
+        return result.visit == self.visit and bool(result.visible_nodes)
+
+    def shown(self, thread_id: str) -> None:
+        publish_password_page(thread_id, True)
+
+    def ended(self, thread_id: str) -> None:
+        publish_password_page(thread_id, False)
+
+
+@dataclass(eq=False)
+class PersonStep(BrowserStep):
+    """A page the agent declared the person's to finish; the person keeps it for its whole visit."""
+
+    instruction: str = field(kw_only=True)
+
+    provenance = "browser.person_step"
+    event_prefix = "person_step"
+    settlement_evidence = "The browser page changed after the person completed this step"
+
+    def title(self) -> str:
+        return f"{self.instruction} ({self.domain()})"
+
+    def description(self) -> str:
+        return f"{self.instruction} in the shared browser. The agent can't see this page and carries on once you're past it."
+
+    def still_open(self, result: PasswordProbe) -> bool:
+        # Whatever the page shows, a password field included, it stays the person's until a new visit.
+        return result.visit == self.visit
+
+
+def publish_password_page(thread_id: str, visible: bool) -> None:
+    """Show or clear the password notice on the thread's pages and panes."""
+    message = {"type": "browser_password_page", "thread_id": thread_id, "visible": visible}
+    state.broadcast_to_thread(thread_id, message)
+    browser_pane_state.report(thread_id, message)

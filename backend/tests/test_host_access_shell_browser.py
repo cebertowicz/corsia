@@ -1229,22 +1229,53 @@ async def test_browser_commands_forward_exact_backend_identity(
 
 
 @pytest.mark.asyncio
-async def test_browser_person_step_forwards_the_authoritative_thread(monkeypatch) -> None:
-    from tools import browser_actions
+async def test_browser_person_step_runs_the_real_declaration_for_the_authoritative_thread(monkeypatch) -> None:
+    """Only the browser process and the plan write are stand-ins; the tool returns the declaration's success."""
+    from host_access import browser_cdp, browser_control
+    from host_access.browser_cdp import PasswordProbe
+    from host_access.browser_sessions import BrowserSessionOwner
+    from tools import browser_actions, browser_runtime
 
-    calls: list[tuple[str, str]] = []
+    owner = BrowserSessionOwner(namespace="corsia-person-step", instance_key="test")
+    admitted: list[str] = []
+    writes: list[tuple[str, object]] = []
 
-    async def declare(thread_id, instruction):
-        calls.append((thread_id, instruction))
-        return "Person step opened; end your turn."
+    async def pin() -> None:
+        return None
 
-    monkeypatch.setattr(browser_actions, "_declare_person_step", declare)
-    result = await browser_actions.BrowserPersonStepTool().execute(
-        "Sign in to Google", _thread_id="authoritative-thread", _thread_project_id="project-1",
-    )
+    async def admit(thread_id, **_kwargs):
+        admitted.append(thread_id)
+        return object()
+
+    async def page_endpoint(_command):
+        return "ws://page.test"
+
+    async def probe(_endpoint, _visit, _known):
+        return PasswordProbe("visit", "accounts.google.com", frozenset(), "ws://page.test")
+
+    monkeypatch.setattr(owner, "_pin_native", pin)
+    monkeypatch.setattr(owner, "_admit", admit)
+    monkeypatch.setattr(browser_cdp, "page_endpoint", page_endpoint)
+    monkeypatch.setattr(browser_cdp, "page_password_probe", probe)
+
+    def plan_write(operation, *_args, **kwargs):
+        writes.append((operation, kwargs["title"]))
+        return "step"
+
+    monkeypatch.setattr(browser_control, "_plan_write", plan_write)
+    monkeypatch.setattr(browser_control, "emit_product_event", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(browser_runtime, "_check_installed", lambda: None)
+    monkeypatch.setattr(browser_runtime, "PROCESS_OWNER", SimpleNamespace(browser_sessions=lambda: owner))
+    try:
+        result = await browser_actions.BrowserPersonStepTool().execute(
+            "Sign in to Google", _thread_id="authoritative-thread", _thread_project_id="project-1",
+        )
+    finally:
+        browser_control._steps.pop("authoritative-thread", None)
 
     assert result == "Person step opened; end your turn."
-    assert calls == [("authoritative-thread", "Sign in to Google")]
+    assert admitted == ["authoritative-thread"]
+    assert writes == [("open_user_step", "Sign in to Google (google.com)")]
 
 
 @pytest.mark.asyncio

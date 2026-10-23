@@ -7,7 +7,7 @@ import pytest
 from fastapi import HTTPException, WebSocketDisconnect
 
 from api import browser
-from host_access import browser_cdp, browser_cli, browser_control, browser_pane
+from host_access import browser_cdp, browser_cli, browser_control, browser_pane, browser_pane_state
 from host_access.browser_cli import CommandResult
 from host_access.browser_session_state import BrowserRuntime, BrowserSessionError, BrowserSessionRecord
 from host_access.browser_sessions import BrowserSessionOwner
@@ -20,23 +20,23 @@ _SCREENCAST = browser_pane.screencast
 
 @pytest.fixture(autouse=True)
 def _no_browser_guard_state():
-    browser_control._panes.clear()
-    browser_control._pane_probes.clear()
-    browser_control._episodes.clear()
+    browser_pane_state._panes.clear()
+    browser_pane_state._pane_probes.clear()
+    browser_control._steps.clear()
     browser_control._guarded_visits.clear()
     browser_control._probe_locks.clear()
-    browser_control._screencasts.clear()
-    browser_control._capture_sizes.clear()
-    browser_control._agent_seen.clear()
+    browser_pane_state._screencasts.clear()
+    browser_pane_state._capture_sizes.clear()
+    browser_pane_state._agent_seen.clear()
     yield
-    browser_control._panes.clear()
-    browser_control._pane_probes.clear()
-    browser_control._episodes.clear()
+    browser_pane_state._panes.clear()
+    browser_pane_state._pane_probes.clear()
+    browser_control._steps.clear()
     browser_control._guarded_visits.clear()
     browser_control._probe_locks.clear()
-    browser_control._screencasts.clear()
-    browser_control._capture_sizes.clear()
-    browser_control._agent_seen.clear()
+    browser_pane_state._screencasts.clear()
+    browser_pane_state._capture_sizes.clear()
+    browser_pane_state._agent_seen.clear()
 
 
 class FakePane:
@@ -203,7 +203,7 @@ async def test_relay_delivers_click_shortcut_text_then_enter_in_order_on_one_cdp
     # Every person event reached the page target in the order typed, so nothing could overtake
     # the shortcut, the text or the submit.
     assert len(screencast.started) == 1
-    # Each one is noted for an open password episode's re-probe, which uses this pane's own probe.
+    # Each one is noted for an open password step's re-probe, which uses this pane's own probe.
     assert inputs == ["thread-1"] * len(click + keys)
     [(_thread, token, _report, probe)] = connected
     assert probe.func is browser_pane.password_probe and probe.args == ("thread-1", token)
@@ -588,7 +588,7 @@ async def test_a_compact_appearance_that_beats_endpoint_resolution_sizes_the_lat
     assert log == [("capture_at", "later", 786, 1464, True)]
     browser_control.pane_connected("thread-1", "pane", lambda _message: None)
     browser_control.pane_disconnected("thread-1", "pane")
-    assert browser_control._capture_sizes == {}
+    assert browser_pane_state._capture_sizes == {}
 
 
 @pytest.mark.asyncio
@@ -609,7 +609,7 @@ async def test_each_pane_screencast_is_listed_only_while_it_runs(monkeypatch):
     remaining.ended.set()
     await second
     assert browser_control.screencasts("thread-1") == []
-    assert browser_control._screencasts == {}
+    assert browser_pane_state._screencasts == {}
 
 
 @pytest.mark.asyncio
@@ -672,9 +672,9 @@ def _password_page_owner(monkeypatch, opened):
     async def password_field(endpoint, _visit, _known):
         return browser_control.PasswordProbe("visit-1", "login.example.test", frozenset({42}), endpoint)
 
-    async def open_episode(_thread_id, episode):
-        episode.node_id = "password-step"
-        opened.append(episode.visit)
+    async def open_step(_thread_id, step):
+        step.node_id = "password-step"
+        opened.append(step.visit)
 
     monkeypatch.setattr(browser_runtime.browser_cli, "check_local_mode", lambda _args: None)
     monkeypatch.setattr(owner, "_pin_native", lambda: asyncio.sleep(0))
@@ -682,7 +682,7 @@ def _password_page_owner(monkeypatch, opened):
     monkeypatch.setattr(owner, "_run_admitted", run_admitted)
     monkeypatch.setattr(browser_cdp, "page_password_probe", password_field)
     monkeypatch.setattr(browser_cdp, "page_endpoint", lambda _run: asyncio.sleep(0, result="ws://page.test/current"))
-    monkeypatch.setattr(browser_control, "_open_episode", open_episode)
+    monkeypatch.setattr(browser_control, "_open_step", open_step)
     monkeypatch.setattr(browser_control.state, "broadcast_to_thread", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(browser_pane.PROCESS_OWNER, "browser_sessions", lambda: owner)
     return owner

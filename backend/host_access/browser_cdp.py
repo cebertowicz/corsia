@@ -26,7 +26,7 @@ _PASSWORD_AUTOCOMPLETE = {"current-password", "new-password"}
 class PasswordProbe:
     """The guarded page visit and visible password-node identities, never values.
 
-    ``target`` is the page target probed, so a probe of another tab never settles this one's episode.
+    ``target`` is the page target probed, so a probe of another tab never settles the step open on this one.
     """
 
     visit: str

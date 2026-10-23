@@ -191,7 +191,7 @@ TOOL_CATALOG: dict[str, ToolCatalogEntry] = {
         activity="Running script",
     ),
     "browser_person_step": _Entry(
-        "browser", summary="Let the person complete the current browser page", activity="Waiting for person",
+        "browser", summary="Let the person complete the current browser page", activity="Waiting for the person",
     ),
     "browser_wait": _Entry(
         "browser", summary="Wait for an element or a delay", activity="Waiting",
