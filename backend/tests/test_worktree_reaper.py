@@ -183,6 +183,68 @@ def test_allowlisted_ignored_directory_does_not_block_removal(repo, directory):
     assert not wt.exists()
 
 
+def _exclude(repo: Path, *patterns: str) -> None:
+    path = repo / ".git" / "info" / "exclude"
+    path.write_text("".join(f"{pattern}\n" for pattern in patterns))
+
+
+@pytest.mark.parametrize(
+    ("path", "pattern"),
+    [
+        (".check-pr-mypy-venv/site", ".check-pr-*/"),
+        (".check-pr-speed-gate/site", ".check-pr-*/"),
+        ("frontend/static/build-info.json", "frontend/static/build-info.json"),
+        ("frontend/src/lib/build-info.json", "frontend/src/lib/build-info.json"),
+    ],
+)
+def test_gate_scratch_and_generated_build_info_are_disposable(repo, path, pattern):
+    _exclude(repo, pattern)
+    wt = _add(repo, "generated")
+    target = wt / path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("generated\n")
+
+    assert worktree_reaper_probe.status_skip_reason(wt) is None
+
+
+@pytest.mark.parametrize("name", ["node_modules", ".venv"])
+def test_symlinked_dependency_entry_is_disposable(repo, tmp_path, name):
+    _exclude(repo, name)
+    wt = _add(repo, "symlink")
+    target = tmp_path / f"{name}-target"
+    target.mkdir()
+    (wt / name).symlink_to(target, target_is_directory=True)
+
+    status = _git(wt, "status", "--porcelain=v2", "--ignored=matching")
+
+    assert f"! {name}" in status
+    assert worktree_reaper_probe.status_skip_reason(wt) is None
+
+
+@pytest.mark.parametrize(
+    ("path", "pattern", "contents"),
+    [
+        (".qa/", ".qa/", "state"),
+        ("frontend/.qa/", "frontend/.qa/", "state"),
+        (".diagnosis/x/state/corsia.db", ".diagnosis/x/state/corsia.db", "state"),
+        (".env", ".env", "state"),
+        ("frontend/node_modules.bak", "frontend/node_modules.bak", "state"),
+    ],
+)
+def test_non_allowlisted_ignored_paths_remain_data(repo, path, pattern, contents):
+    _exclude(repo, pattern)
+    wt = _add(repo, "kept")
+    target = wt / path
+    if path.endswith("/"):
+        target.mkdir(parents=True)
+        (target / contents).write_text("kept\n")
+    else:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(f"{contents}\n")
+
+    assert worktree_reaper_probe.status_skip_reason(wt) == "ignored_data"
+
+
 # --- each skip reason -------------------------------------------------------
 
 def _prepare(repo: Path, kind: str) -> Path:
