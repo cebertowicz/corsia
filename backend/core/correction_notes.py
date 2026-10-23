@@ -13,6 +13,7 @@ import json
 import sqlite3
 from collections.abc import Iterable
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 from core.corrections_recording import (
     ACTIVE_VERSION_SETTING,
@@ -24,6 +25,9 @@ from core.corrections_recording import (
     subject_key,
     version_key,
 )
+
+if TYPE_CHECKING:
+    from memory.node_start_recall import EarlierCorrection
 
 NOTE_KIND = "correction_note"
 QUOTE_CHARS = 160
@@ -51,8 +55,8 @@ def local_clock(created_at: str) -> str:
     return f"{sent.astimezone():%Y-%m-%d %H:%M %Z}"
 
 
-def _note(where: str, words: str, arrived_as: str) -> str:
-    return (
+def _note(where: str, words: str, arrived_as: str, earlier: Iterable[EarlierCorrection] = ()) -> str:
+    note = (
         f'Correction recorded on your {where}: "{_quote(words)}"\n'
         "Proposed tier: none yet; you set it.\n"
         "Fix the work first. Then triage it with skill `memory-placement` section 4: "
@@ -60,11 +64,25 @@ def _note(where: str, words: str, arrived_as: str) -> str:
         "The triage is working state, not part of your reply. "
         f"If you already fixed and triaged it when the {arrived_as} arrived, do nothing more."
     )
+    earlier = tuple(earlier)
+    if not earlier:
+        return note
+    entries = "\n".join(
+        f'- {match.thread_title} ({local_clock(match.created_at)}): "{_quote(match.content)}"'
+        for match in earlier
+    )
+    return (
+        f"{note}\nEarlier corrections that may be the same miss:\n{entries}\n"
+        "If one is the same kind of miss, this is a repeat: name the decision both missed and "
+        "widen the lesson that covers it instead of adding a narrower one."
+    )
 
 
-def note_text(message_id: str, content: str, created_at: str) -> str:
+def note_text(
+    message_id: str, content: str, created_at: str, earlier: Iterable[EarlierCorrection] = (),
+) -> str:
     """The note one chat correction puts in its target's next turn."""
-    return _note(f"work (message {message_id}, sent {local_clock(created_at)})", content, "message")
+    return _note(f"work (message {message_id}, sent {local_clock(created_at)})", content, "message", earlier)
 
 
 def _source_note_text(candidate: CorrectionCandidate) -> str:
@@ -124,6 +142,7 @@ def queue_correction_note(
     candidate: CorrectionCandidate,
     version: ClassifierVersion,
     event_id: str,
+    earlier: Iterable[EarlierCorrection] = (),
 ) -> int | None:
     """Journal the note for a newly recorded correction, inside the fact's transaction.
 
@@ -144,7 +163,9 @@ def queue_correction_note(
         return None
     if candidate.source_kind == "message":
         row = db.execute("SELECT content FROM messages WHERE id=?", (candidate.source_id,)).fetchone()
-        summary = note_text(candidate.source_id, str(row[0] if row else candidate.content), candidate.created_at)
+        summary = note_text(
+            candidate.source_id, str(row[0] if row else candidate.content), candidate.created_at, earlier,
+        )
     else:
         summary = _source_note_text(candidate)
     from infra.passive_changes import REOFFER_UNWRITTEN, append_thread_context_note

@@ -66,6 +66,61 @@ def test_agent_send_and_routed_event_are_never_quoted(db):
     assert _related(db) == []
 
 
+def test_earlier_corrections_reuse_message_delivery_and_purge_scope(db, monkeypatch):
+    from core.corrections_recording import CORRECTION_EVENT, CorrectionCandidate
+    from memory.node_start_recall import earlier_correction_messages
+
+    events = []
+    monkeypatch.setattr(
+        "memory.node_start_recall.emit_product_event",
+        lambda category, action, **kwargs: events.append((category, action, kwargs)),
+    )
+    _message(db, "previous", "past", "Export account ledger as CSV format.")
+    db.execute(
+        "INSERT INTO outcome_events(id,dedupe_key,event_name,source,provenance,ts,observed_ts,subject_key,attributes) "
+        "VALUES ('fact','fact',?,'corsia','agent_recorded','2026-01-01','2026-01-01','message:previous','{}')",
+        (CORRECTION_EVENT,),
+    )
+    candidate = CorrectionCandidate(
+        "message", "current", "caller", None, "Export account ledger as CSV format.", "2026-02-01T00:00:00+00:00",
+    )
+
+    assert [match.content for match in earlier_correction_messages(db, candidate)] == ["Export account ledger as CSV format."]
+    assert events[0][:2] == ("prior_words", "delivered")
+    assert events[0][2]["thread_id"] == "caller"
+    assert events[0][2]["properties"].items() >= {
+        "trigger": "correction_note", "hits": 1, "kinds": "message:1,comment:0,decision:0,rule:0",
+    }.items()
+    db.execute("UPDATE messages SET delivery_state='queued' WHERE id='previous'")
+    assert earlier_correction_messages(db, candidate) == ()
+    db.execute("UPDATE messages SET delivery_state='delivered' WHERE id='previous'")
+    db.execute("UPDATE threads SET purged_at='2026-01-02' WHERE id='past'")
+    assert earlier_correction_messages(db, candidate) == ()
+
+
+def test_earlier_corrections_match_before_the_bounded_candidate_window(db):
+    from core.corrections_recording import CORRECTION_EVENT, CorrectionCandidate
+    from memory.node_start_recall import SOURCE_CANDIDATES, earlier_correction_messages
+
+    noise_ids = [f"noise-{index}" for index in range(SOURCE_CANDIDATES + 1)]
+    db.executemany(
+        "INSERT INTO messages (id,thread_id,role,content,metadata,created_at,seq,delivery_state) "
+        "VALUES (?,'past','user','Export only.','{}','2026-02-01T00:00:00+00:00',?,'delivered')",
+        [(message_id, index + 1) for index, message_id in enumerate(noise_ids)],
+    )
+    _message(db, "match", "past", "Export account ledger as CSV format.", seq=SOURCE_CANDIDATES + 2)
+    db.executemany(
+        "INSERT INTO outcome_events(id,dedupe_key,event_name,source,provenance,ts,observed_ts,subject_key,attributes) "
+        "VALUES (?,?,?,'corsia','agent_recorded','2026-01-01','2026-01-01',?,'{}')",
+        [(message_id, message_id, CORRECTION_EVENT, f"message:{message_id}") for message_id in [*noise_ids, "match"]],
+    )
+    candidate = CorrectionCandidate(
+        "message", "current", "caller", None, "Export account ledger as CSV format.", "2026-03-01T00:00:00+00:00",
+    )
+
+    assert [match.content for match in earlier_correction_messages(db, candidate)] == ["Export account ledger as CSV format."]
+
+
 def test_user_comment_targets_its_owner_without_an_author_thread_and_excludes_agent_comment(db):
     from doc_feedback_helpers import add_comment, seed_document
 

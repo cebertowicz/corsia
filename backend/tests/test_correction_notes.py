@@ -27,6 +27,13 @@ def _version(release: str = "v1"):
     return ClassifierVersion("corrections-classifier", release, "correction", 0.5, "modernbert-owner-context-v2-2048")
 
 
+@pytest.fixture(autouse=True)
+def messages_fts(main_db):
+    from infra.db_fts import _init_messages_fts
+
+    _init_messages_fts(main_db)
+
+
 @pytest.fixture
 def agent(main_db, monkeypatch):
     import plans.boundary as boundary
@@ -344,3 +351,67 @@ def test_a_lesson_placed_in_the_turn_the_note_arrived_is_stamped_with_it(agent, 
     assert _named(items) == ["merged"] and _notes(items) == ["message:c1"]
 
     assert current_owner_subjects(main_db, THREAD) == ("message:c1",)
+
+
+def _note_summaries(db) -> list[str]:
+    return [
+        str(row[0]) for row in db.execute(
+            "SELECT summary FROM context_change_journal WHERE object_kind='thread_context' ORDER BY seq"
+        )
+    ]
+
+
+def test_note_shows_earlier_matching_chat_corrections(agent, main_db):
+    agent.say("c1", "The account screen has duplicate navigation.")
+    assert agent.record("c1")
+    agent.deliver()
+    agent.say("c2", "The account screen has duplicate navigation again.")
+    assert agent.record("c2")
+
+    note = _note_summaries(main_db)[-1]
+    assert "Earlier corrections that may be the same miss:" in note
+    assert 'New Chat (2026-10-16 13:00 PDT): "The account screen has duplicate navigation."' in note
+    assert "name the decision both missed and widen the lesson that covers it instead of adding a narrower one" in note
+
+
+def test_note_omits_earlier_block_when_no_match():
+    from core.correction_notes import note_text
+
+    note = note_text("c1", "The account screen has duplicate navigation.", "2026-10-16T20:00:00Z")
+
+    assert "Earlier corrections that may be the same miss:" not in note
+
+
+
+def test_earlier_correction_messages_caps_matches_at_three(agent, main_db):
+    from infra.database import get_db
+    from jobs.corrections_recording import candidate_for_message
+    from memory.node_start_recall import earlier_correction_messages
+
+    for number in range(4):
+        message_id = f"c{number + 1}"
+        agent.say(message_id, f"Account navigation is duplicate item {number}.")
+        assert agent.record(message_id)
+        agent.deliver()
+    agent.say("c5", "Account navigation is duplicate again.")
+
+    matches = earlier_correction_messages(get_db(), candidate_for_message("c5"))
+
+    assert len(matches) == 3
+
+
+def test_lookup_finishes_before_the_fact_write_transaction(agent, monkeypatch):
+    import memory.node_start_recall
+
+    seen_in_transaction = []
+    original = memory.node_start_recall.earlier_correction_messages
+
+    def lookup(db, candidate):
+        seen_in_transaction.append(db.in_transaction)
+        return original(db, candidate)
+
+    monkeypatch.setattr(memory.node_start_recall, "earlier_correction_messages", lookup)
+    agent.say("c1", "The account screen has duplicate navigation.")
+
+    assert agent.record("c1")
+    assert seen_in_transaction == [False]
