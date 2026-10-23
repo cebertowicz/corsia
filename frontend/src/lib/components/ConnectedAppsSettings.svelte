@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import { Button } from '$lib/components/ui';
 	import { projects, loadProjects } from '$lib/stores/projects';
 	import { requestAppKey, settingsAnchor, settingsNavigation } from '$lib/stores/settingsNavigation';
@@ -249,6 +249,8 @@
 	function capabilityLabels(account: ConnectedAccount): string { return account.capabilities.map((capability) => ({ mail: 'Email', calendar: 'Calendar', files: 'Files' }[capability])).join(', '); }
 
 	function clearLinkedFocus(): void { linkedAccountId = null; }
+	/** Try again and Edit server's Save close the row and its pressed button with it: focus goes to that row's header. */
+	const closeRow = (id: string): void => { openId = null; void refresh(); void tick().then(() => [...document.querySelectorAll<HTMLElement>('[data-connected-account-id]')].find((item) => item.dataset.connectedAccountId === id)?.querySelector<HTMLElement>('.face.open')?.focus()); };
 
 	$effect(() => {
 		const accountId = $settingsNavigation.connectedAppId;
@@ -306,7 +308,7 @@
 								<div class="details">
 									{#if row.provider === 'mailhost'}
 									{#if errorId === row.id && actionError && actionId === null}<p class="error" role="alert">{actionError}</p>{/if}
-									<MailHostDetail account={row} {offline} onSetKey={() => requestAppKey({ name: row.provider_display_name, key_refs: row.mailhost?.key_refs }, { hosts: row.mailhost?.destination_hosts })} onWhere={() => { whereApprove = false; whereRow = row; }} onRemove={() => confirmingRemove = row} onChanged={() => { openId = null; void refresh(); }} />
+									<MailHostDetail account={row} {offline} onSetKey={() => requestAppKey({ name: row.provider_display_name, key_refs: row.mailhost?.key_refs }, { hosts: row.mailhost?.destination_hosts })} onWhere={() => { whereApprove = false; whereRow = row; }} onRemove={() => confirmingRemove = row} onChanged={() => closeRow(row.id)} />
 									{:else}
 									{#if errorId === row.id && actionError && actionId === null}<p class="error" role="alert">{actionError}</p>{/if}
 									<p class="capabilities"><span class="capability-label">Reaches</span><span>{capabilityLabels(row)}</span></p>

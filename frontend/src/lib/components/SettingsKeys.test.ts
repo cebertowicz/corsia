@@ -250,7 +250,6 @@ describe('Settings › Keys', () => {
 			entries = [{ ...maps, name: 'linear-key', label: 'Linear key' }];
 			requestConnectedAppKey('Linear', 'linear-key', [{ entry: 'linear-key', name: 'API key' }]);
 			await mountKeys('linear-key');
-			button('linear-key', 'Set').click();
 			await vi.waitFor(() => expect(host.querySelector('form')).not.toBeNull());
 			const form = host.querySelector('form')!;
 			const fields = form.querySelectorAll<HTMLInputElement>('input');
@@ -281,14 +280,14 @@ describe('Settings › Keys', () => {
 		const account = (problem: string | null) => ({
 			provider: 'mailhost', provider_display_name: 'example.com', mailhost: { problem, key_refs: [{ entry: ENTRY, name: LABEL, set: true }] },
 		});
-		async function openAccountKey(hosts?: string[], extra: Record<string, unknown> = {}) {
+		/** `requested: false` opens Keys on its own, with no Set key press from Connected apps behind it. */
+		async function openAccountKey(hosts?: string[], extra: Record<string, unknown> = {}, requested = true) {
 			Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: vi.fn() });
 			entries = [{ ...maps, name: ENTRY, label: LABEL, description: '', added_by: 'Mail host', ...extra }];
-			requestConnectedAppKey('example.com', ENTRY, [{ entry: ENTRY, name: LABEL }], { hosts });
+			if (requested) requestConnectedAppKey('example.com', ENTRY, [{ entry: ENTRY, name: LABEL }], { hosts });
 			await mountKeys(ENTRY);
 		}
 		async function saveAccountKey() {
-			button(ENTRY, 'Set').click();
 			await vi.waitFor(() => expect(host.querySelector('form')).not.toBeNull());
 			const form = host.querySelector('form')!;
 			const fields = form.querySelectorAll<HTMLInputElement>('input');
@@ -301,6 +300,30 @@ describe('Settings › Keys', () => {
 			await openAccountKey(['imap.example.com', 'smtp.example.net', 'imap.example.com']);
 			expect(host.querySelector(`[data-key-entry="${ENTRY}"]`)!.textContent).toContain(LABEL);
 			expect(host.querySelector('.destination')?.textContent).toBe('This password goes to imap.example.com and smtp.example.net.');
+		});
+		it('opens that key’s Set form on arrival, its field focused and the destination line above it', async () => {
+			await openAccountKey(['imap.example.com']);
+			await vi.waitFor(() => expect(document.activeElement).toBe(inputs(ENTRY).value));
+			const card = host.querySelector(`[data-key-entry="${ENTRY}"]`)!;
+			expect(inputs(ENTRY).value?.type).toBe('password');
+			expect(card.querySelectorAll('form')).toHaveLength(1);
+			expect(card.querySelector('.destination')!.compareDocumentPosition(inputs(ENTRY).form) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+			expect([...card.querySelectorAll('button')].map((candidate) => candidate.textContent?.trim())).toEqual(['Save', 'Cancel']);
+		});
+		it('opens nothing when Keys is opened on its own', async () => {
+			await openAccountKey(undefined, {}, false);
+			expect(host.querySelector('form')).toBeNull();
+			expect(button(ENTRY, 'Set')).toBeDefined();
+		});
+		it('keeps the destination line and the check result in the row’s text column, with the row', async () => {
+			connectedAppsAnswers = [{ servers: [], accounts: [account(null)] } as never];
+			await openAccountKey(['imap.example.com']);
+			const card = host.querySelector(`[data-key-entry="${ENTRY}"]`)!;
+			expect(card.querySelector('.copy .destination')?.textContent).toBe('This password goes to imap.example.com.');
+			expect(card.querySelector(':scope > .destination')).toBeNull();
+			await saveAccountKey();
+			await vi.waitFor(() => expect(card.querySelector('.copy [role="status"]')?.textContent).toBe('example.com is connected.'));
+			expect(card.querySelector(':scope > [role="status"]')).toBeNull();
 		});
 		it('says nothing about a destination for a known host', async () => {
 			await openAccountKey(undefined);
@@ -331,12 +354,12 @@ describe('Settings › Keys', () => {
 			await vi.waitFor(() => expect(host.textContent).toContain('Can’t reach imap.example.com'));
 		});
 		it('keeps Clear but hides Remove while the account row still needs the key', async () => {
-			await openAccountKey(undefined, { is_set: true, removable: false });
+			await openAccountKey(undefined, { is_set: true, removable: false }, false);
 			expect(button(ENTRY, 'Clear')).toBeDefined();
 			expect(() => button(ENTRY, 'Remove')).toThrow();
 		});
 		it('shows Remove for a key that can be removed', async () => {
-			await openAccountKey(undefined, { is_set: true, removable: true });
+			await openAccountKey(undefined, { is_set: true, removable: true }, false);
 			expect(button(ENTRY, 'Remove')).toBeDefined();
 		});
 	});

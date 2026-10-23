@@ -28,20 +28,27 @@
 	let passwordError = $state('');
 	let formError = $state('');
 	const reaches = $derived(account.capabilities.map((capability) => ({ mail: 'Email', calendar: 'Calendar', files: 'Files' }[capability])).join(', '));
-	const detail = $derived.by(() => {
+	const manageUrl = $derived(account.mailhost?.manage_url ?? '');
+	const product = $derived(account.mailhost?.product_name ?? '');
+	/** The body is text, and `link` is the words that go to the host's page when it has one: where the person must go next. */
+	const detail = $derived.by((): { before: string; link?: string; after?: string } => {
 		switch (problem) {
-			case 'waiting': return `${host} needs an app password before agents can use this account: a password just for CORSIA, made in your ${host} account settings. Press Set key, paste it and press Set.`;
-			case 'refused': return `${host} didn’t accept this app password. Make a new one in your ${host} account settings, then press Replace key.`;
-			case 'revoked': return `${host} stopped accepting the app password, so agents can’t use this account. ${host === 'iCloud' ? 'iCloud does this when your Apple password changes. ' : ''}Make a new one, then press Replace key.`;
-			case 'imap_off': return `${host} has email access for other apps turned off. Turn on IMAP in ${host} Mail settings, then press Try again.`;
-			case 'unreachable': return `CORSIA couldn’t reach ${server}. Check the server names with your host or IT.`;
-			default: return '';
+			case 'waiting': return { before: `${host} needs an app password before agents can use this account: make one in your `, link: `${host} account settings`, after: '. Press Set key, paste it and press Set.' };
+			case 'refused': return { before: `${host} didn’t accept this app password. Make a new one in your `, link: `${host} account settings`, after: ', then press Replace key.' };
+			case 'revoked': return { before: `${host} stopped accepting the app password, so agents can’t use this account. ${host === 'iCloud' ? 'iCloud does this when your Apple password changes. ' : ''}Make a new one, then press Replace key.` };
+			case 'imap_off': return product
+				? { before: `${host} has email access for other apps turned off. Turn on IMAP in `, link: `${product} settings`, after: ', then press Try again.' }
+				: { before: `${host} has email access for other apps turned off. Turn on IMAP with your host or IT, then press Try again.` };
+			case 'unreachable': return { before: `CORSIA couldn’t reach ${server}. Check the server names with your host or IT.` };
+			default: return { before: '' };
 		}
 	});
 	const failing = $derived(account.mailhost?.failing);
 	const dirty = $derived(imap !== (account.mailhost?.imap ?? '') || smtp !== (account.mailhost?.smtp ?? '') || caldav !== (account.mailhost?.caldav ?? ''));
 	const IMAP_HINT = 'mail.example.com or mail.example.com:993';
 	const SMTP_HINT = 'smtp.example.com or smtp.example.com:465';
+	const CALDAV_HINT = 'Leave empty if your host has no calendar.';
+	const PASSWORD_HINT = 'The password you sign in to CORSIA with. Needed to change where your app password is sent.';
 	const UNREACHABLE = 'CORSIA couldn’t reach this server.';
 	function reset(): void {
 		editing = false; password = ''; passwordError = ''; formError = '';
@@ -93,15 +100,15 @@
 </script>
 
 {#if problem === null}<p class="capabilities"><span class="capability-label">Reaches</span><span>{reaches}</span></p>{/if}
-{#if problem === null && account.mailhost?.calendar_missing}<p class="impact">{host} didn’t offer a calendar to CORSIA, so only email is connected.</p>{:else if detail}<p class="impact">{detail}</p>{/if}
+{#if problem === null && account.mailhost?.calendar_missing}<p class="impact">{host} didn’t offer a calendar to CORSIA, so only email is connected.</p>{:else if detail.before}<p class="impact">{detail.before}{#if detail.link}{#if manageUrl}<a href={manageUrl} target="_blank" rel="noopener">{detail.link}</a>{:else}{detail.link}{/if}{detail.after}{/if}</p>{/if}
 {#if editing}
 	<!-- Devices' outside-address pattern (SettingsDevicesView.svelte:107-115): a form of nested stacked Fields, Enter submits, Save only once a value has changed. Here Save and Cancel sit in the row's actions. -->
 	<form class="server" onsubmit={(event) => { event.preventDefault(); save(); }}>
 		<Field variant="nested" layout="stacked" label="Mail (IMAP) server" labelFor="mailhost-imap" hint={IMAP_HINT} error={failing === 'imap' && imap === (account.mailhost?.imap ?? '') ? UNREACHABLE : ''}><input id="mailhost-imap" type="text" autocapitalize="off" autocomplete="off" spellcheck="false" aria-invalid={failing === 'imap' && imap === (account.mailhost?.imap ?? '')} bind:value={imap} /></Field>
 		<Field variant="nested" layout="stacked" label="Sending (SMTP) server" labelFor="mailhost-smtp" hint={SMTP_HINT} error={failing === 'smtp' && smtp === (account.mailhost?.smtp ?? '') ? UNREACHABLE : ''}><input id="mailhost-smtp" type="text" autocapitalize="off" autocomplete="off" spellcheck="false" aria-invalid={failing === 'smtp' && smtp === (account.mailhost?.smtp ?? '')} bind:value={smtp} /></Field>
-		<Field variant="nested" layout="stacked" label="Calendar (CalDAV) address" labelFor="mailhost-caldav" error={failing === 'caldav' && caldav === (account.mailhost?.caldav ?? '') ? UNREACHABLE : ''}><input id="mailhost-caldav" type="text" autocapitalize="off" autocomplete="off" spellcheck="false" aria-invalid={failing === 'caldav' && caldav === (account.mailhost?.caldav ?? '')} bind:value={caldav} /></Field>
+		<Field variant="nested" layout="stacked" label="Calendar (CalDAV) address" labelFor="mailhost-caldav" hint={CALDAV_HINT} error={failing === 'caldav' && caldav === (account.mailhost?.caldav ?? '') ? UNREACHABLE : ''}><input id="mailhost-caldav" type="text" autocapitalize="off" autocomplete="off" spellcheck="false" aria-invalid={failing === 'caldav' && caldav === (account.mailhost?.caldav ?? '')} bind:value={caldav} /></Field>
 		{#if dirty}
-			<Field variant="nested" layout="stacked" label="CORSIA password" labelFor="mailhost-password" error={passwordError}><input id="mailhost-password" type="password" autocomplete="current-password" aria-invalid={!!passwordError} bind:value={password} /></Field>
+			<Field variant="nested" layout="stacked" label="CORSIA password" labelFor="mailhost-password" hint={PASSWORD_HINT} error={passwordError}><input id="mailhost-password" type="password" autocomplete="current-password" aria-invalid={!!passwordError} bind:value={password} /></Field>
 		{/if}
 	</form>
 {/if}
@@ -126,6 +133,8 @@
 	.capabilities { display: flex; gap: var(--space-2); margin: 0 0 var(--space-2); color: var(--text-secondary); font-size: var(--text-caption); line-height: var(--lh-normal); }
 	.capability-label { color: var(--text-tertiary); }
 	.impact { margin: 0 0 var(--space-2); color: var(--text-secondary); font-size: var(--text-subhead); line-height: var(--lh-normal); }
+	.impact a { color: var(--accent-text); text-decoration: none; }
+	.impact a:hover { text-decoration: underline; }
 	.failed { margin: 0 0 var(--space-2); color: var(--red-text); font-size: var(--text-subhead); line-height: var(--lh-normal); }
 	.offline-action-note { margin: 0 0 var(--space-2); color: var(--text-tertiary); font-size: var(--text-caption); line-height: var(--lh-normal); }
 	.server { display: flex; flex-direction: column; gap: var(--space-2); max-width: calc(var(--space-8) * 9); margin: 0 0 var(--space-2); }

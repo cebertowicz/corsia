@@ -23,6 +23,8 @@ class KnownHost:
     app_password_url: str
     click_path: str
     enable_imap_step: str | None = None
+    #: What the host calls its mail product, for "Turn on IMAP in <product> settings".
+    product: str = ""
     #: iCloud's IMAP username is the bare name; the full address also works, so both are tried.
     bare_name_alternate: bool = False
 
@@ -41,6 +43,7 @@ def _zoho(tld: str, domains: tuple[str, ...], imap_host: str, smtp_host: str, ca
         caldav=calendar, app_password_url=f"https://accounts.zoho.{tld}/",
         click_path="Zoho Accounts › Security › App passwords › Generate New Password",
         enable_imap_step="Turn on IMAP in Zoho Mail: Settings › Mail Accounts › your address › IMAP Access.",
+        product="Zoho Mail",
     )
 
 
@@ -50,6 +53,7 @@ def _gmx(domains: tuple[str, ...], tld: str) -> KnownHost:
         caldav=f"https://caldav.gmx.{tld}/", app_password_url="https://www.gmx.com/",
         click_path="GMX Settings › Security › Application-specific passwords",
         enable_imap_step="Turn on POP3 and IMAP in GMX: Settings › POP3 & IMAP › Allow access.",
+        product="GMX Mail",
     )
 
 
@@ -58,7 +62,7 @@ KNOWN_HOSTS: tuple[KnownHost, ...] = (
         "iCloud", ("icloud.com", "me.com", "mac.com"), Server("imap.mail.me.com", 993), Server("smtp.mail.me.com", 587),
         "https://caldav.icloud.com/", "https://account.apple.com/",
         "Sign-In and Security › App-Specific Passwords › Generate an app-specific password "
-        "(two-factor sign-in is required)", bare_name_alternate=True,
+        "(two-factor sign-in is required)", product="iCloud Mail", bare_name_alternate=True,
     ),
     KnownHost(
         "Yahoo", ("yahoo.com", "ymail.com", "rocketmail.com", "yahoo.co.uk", "yahoo.ca", "yahoo.com.au", "yahoo.fr",
@@ -66,13 +70,14 @@ KNOWN_HOSTS: tuple[KnownHost, ...] = (
         Server("imap.mail.yahoo.com", 993), Server("smtp.mail.yahoo.com", 465),
         "https://caldav.calendar.yahoo.com/", "https://login.yahoo.com/account/security",
         "Account Security › External connections › Create app password › Generate password",
+        product="Yahoo Mail",
     ),
     KnownHost(
         "Fastmail", ("fastmail.com", "fastmail.fm", "messagingengine.com"),
         Server("imap.fastmail.com", 993), Server("smtp.fastmail.com", 465),
         "https://caldav.fastmail.com/", "https://app.fastmail.com/settings/security/integrations",
         "Settings › Privacy & Security › Connected apps & API tokens › Manage app passwords and access › "
-        "New app password (choose Mail, Contacts & Calendars)",
+        "New app password (choose Mail, Contacts & Calendars)", product="Fastmail",
     ),
     # AOL: its own help page names export.imap.aol.com, the Thunderbird database imap.aol.com (Not verified),
     # and its CalDAV is reported dead; the check reports the calendar as not offered when it is.
@@ -80,7 +85,7 @@ KNOWN_HOSTS: tuple[KnownHost, ...] = (
         "AOL", ("aol.com", "aol.co.uk", "aol.de", "aol.fr", "aim.com"),
         Server("imap.aol.com", 993), Server("smtp.aol.com", 465),
         "https://caldav.aol.com/", "https://login.aol.com/account/security",
-        "Account Security › Generate app password",
+        "Account Security › Generate app password", product="AOL Mail",
     ),
     _zoho("com", ("zoho.com", "zohomail.com"), "imap.zoho.com", "smtp.zoho.com", "https://calendar.zoho.com/"),
     _zoho("eu", ("zoho.eu", "zohomail.eu"), "imap.zoho.eu", "smtp.zoho.eu", "https://calendar.zoho.eu/"),

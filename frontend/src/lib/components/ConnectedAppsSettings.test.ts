@@ -505,6 +505,30 @@ describe('ConnectedAppsSettings', () => {
 			expect(host.querySelector('[data-connected-account-id="a"] .details')).toBeNull();
 			expect(host.querySelector('[data-connected-account-id="a"] button')?.getAttribute('aria-expanded')).toBe('false');
 			expect(fetchMock.mock.calls.some(([url, init]) => String(url).endsWith('/accounts/a/mailhost/check') && (init as RequestInit).body === '{}')).toBe(true);
+			// The pressed button went with the row: focus is on that row's header, not the page.
+			await vi.waitFor(() => expect(document.activeElement).toBe(host.querySelector('[data-connected-account-id="a"] .face.open')));
+		});
+
+		it('puts focus on the row header when Edit server saves and the row closes', async () => {
+			let problem: string = 'unreachable';
+			const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+				if (init?.method === 'PUT' && String(input).includes('/mailhost/servers')) { problem = 'checking'; return { ok: true, json: async () => ({ row: {} }) }; }
+				return { ok: true, json: async () => ({ servers: [], accounts: [mailhost('a', 'example.com', { problem, server: 'imap.example.com', imap: 'imap.example.com', smtp: 'smtp.example.com', caldav: '' })] }) };
+			});
+			vi.stubGlobal('fetch', fetchMock);
+			component = mount(ConnectedAppsSettings, { target: host });
+			await vi.waitFor(() => expect(host.querySelector('[data-connected-account-id="a"]')).not.toBeNull());
+			openRow('a');
+			labelled('Edit server')!.click();
+			flushSync();
+			const imap = host.querySelector<HTMLInputElement>('#mailhost-imap')!;
+			imap.value = 'mail.example.com'; imap.dispatchEvent(new Event('input', { bubbles: true })); flushSync();
+			const password = host.querySelector<HTMLInputElement>('#mailhost-password')!;
+			password.value = 'typed'; password.dispatchEvent(new Event('input', { bubbles: true })); flushSync();
+			labelled('Save')!.click();
+			await vi.waitFor(() => expect(host.querySelector('[data-connected-account-id="a"] .sub')?.textContent).toContain('Checking…'));
+			expect(host.querySelector('[data-connected-account-id="a"] .details')).toBeNull();
+			await vi.waitFor(() => expect(document.activeElement).toBe(host.querySelector('[data-connected-account-id="a"] .face.open')));
 		});
 
 		it('reads the list again when the host says a check ended, and not on a timer', async () => {
@@ -532,8 +556,8 @@ describe('ConnectedAppsSettings', () => {
 			component = mount(ConnectedAppsSettings, { target: host });
 			await vi.waitFor(() => expect(host.querySelector('[data-connected-account-id="typed"]')).not.toBeNull());
 			const expected: Record<string, [string, string | null]> = {
-				icloud: ['Removed. To finish, delete the CORSIA app password in your iCloud account settings.', 'https://account.apple.com/'],
-				typed: ['Removed. To finish, delete the CORSIA app password in your example.com account settings.', null],
+				icloud: ['Removed. To finish, delete the app password in your iCloud account settings.', 'https://account.apple.com/'],
+				typed: ['Removed. To finish, delete the app password in your example.com account settings.', null],
 			};
 			for (const id of ['icloud', 'typed']) {
 				openRow(id);
@@ -543,6 +567,10 @@ describe('ConnectedAppsSettings', () => {
 				([...document.body.querySelectorAll<HTMLButtonElement>('button')].filter((candidate) => candidate.textContent?.trim() === 'Remove').at(-1) as HTMLButtonElement).click();
 				await vi.waitFor(() => expect(host.querySelector('.manual-removal')?.textContent).toBe(expected[id][0]));
 				expect(host.querySelector('.manual-removal a')?.getAttribute('href') ?? null).toBe(expected[id][1]);
+				// The row and its Remove button are gone: focus moves to the notice, not to the page.
+				await vi.waitFor(() => expect(document.activeElement).toBe(host.querySelector('.manual-removal')));
+				expect(host.querySelector('.manual-removal')?.getAttribute('tabindex')).toBe('-1');
+				expect(host.querySelector('.manual-removal')?.getAttribute('role')).toBe('status');
 			}
 		});
 	});

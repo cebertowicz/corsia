@@ -104,6 +104,7 @@ async def test_a_waiting_row_names_its_host_and_where_the_key_is(conductor, serv
     assert detail["destination_hosts"] == ["127.0.0.1"]
     assert detail["imap"].startswith("127.0.0.1:") and detail["smtp"].startswith("127.0.0.1:")
     assert "manage_url" not in detail and "server" not in detail and "failing" not in detail
+    assert "product_name" not in detail  # a typed-in host has no product to name
 
 
 async def test_connected_has_no_problem_and_mail_only_says_the_calendar_is_missing(conductor, servers, client) -> None:
@@ -156,6 +157,7 @@ async def test_a_known_host_row_carries_its_manage_page_and_no_destination_line(
     found = await _listed(client, account_id)
     assert found["provider_display_name"] == "iCloud"
     assert found["mailhost"]["manage_url"] == "https://account.apple.com/"
+    assert found["mailhost"]["product_name"] == "iCloud Mail"
     assert "destination_hosts" not in found["mailhost"]
 
 

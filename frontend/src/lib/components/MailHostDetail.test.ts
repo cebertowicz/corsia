@@ -39,11 +39,33 @@ describe('MailHostDetail', () => {
 	it('asks for the app password with Set key as the one primary action', () => {
 		const onSetKey = vi.fn();
 		const root = render(account('iCloud', { problem: 'waiting' }), { onSetKey });
-		expect(root.textContent).toContain('iCloud needs an app password before agents can use this account: a password just for CORSIA, made in your iCloud account settings. Press Set key, paste it and press Set.');
+		expect(root.textContent).toContain('iCloud needs an app password before agents can use this account: make one in your iCloud account settings. Press Set key, paste it and press Set.');
 		expect(button(root, 'Set key')?.className).toContain('primary');
 		expect(root.textContent).not.toContain('Reaches');
 		button(root, 'Set key')!.click();
 		expect(onSetKey).toHaveBeenCalledOnce();
+	});
+	it('links the host’s settings page where the person must go next, only when it is known', () => {
+		const body = (row: ConnectedAccount) => {
+			const root = render(row);
+			const result = { text: root.querySelector('.impact')!.textContent, links: [...root.querySelectorAll('.impact a')].map((link) => [link.textContent, link.getAttribute('href'), link.getAttribute('target'), link.getAttribute('rel')]) };
+			unmount(component!); component = null; host!.remove(); host = null;
+			return result;
+		};
+		const url = 'https://account.apple.com/';
+		expect(body(account('iCloud', { problem: 'waiting', manage_url: url })).links).toEqual([['iCloud account settings', url, '_blank', 'noopener']]);
+		expect(body(account('iCloud', { problem: 'refused', manage_url: url })).links).toEqual([['iCloud account settings', url, '_blank', 'noopener']]);
+		expect(body(account('Zoho', { problem: 'imap_off', manage_url: 'https://accounts.zoho.com/', product_name: 'Zoho Mail' })).links).toEqual([['Zoho Mail settings', 'https://accounts.zoho.com/', '_blank', 'noopener']]);
+		for (const problem of ['waiting', 'refused'] as const) expect(body(account('off.test', { problem })).links).toEqual([]);
+		expect(body(account('off.test', { problem: 'waiting' })).text).toBe('off.test needs an app password before agents can use this account: make one in your off.test account settings. Press Set key, paste it and press Set.');
+	});
+	it('names the product only for a known host: a typed-in host is sent to its host or IT', () => {
+		const known = render(account('Zoho', { problem: 'imap_off', manage_url: 'https://accounts.zoho.com/', product_name: 'Zoho Mail' }));
+		expect(known.querySelector('.impact')!.textContent).toBe('Zoho has email access for other apps turned off. Turn on IMAP in Zoho Mail settings, then press Try again.');
+		unmount(component!); component = null; host!.remove(); host = null;
+		const typed = render(account('off.test', { problem: 'imap_off' }));
+		expect(typed.querySelector('.impact')!.textContent).toBe('off.test has email access for other apps turned off. Turn on IMAP with your host or IT, then press Try again.');
+		expect(typed.textContent).not.toContain('Mail settings');
 	});
 	it('offers Replace key when the host refused the password', () => {
 		const root = render(account('iCloud', { problem: 'refused' }));
@@ -67,7 +89,7 @@ describe('MailHostDetail', () => {
 		expect([...root.querySelectorAll('input')].map((input) => input.value)).toEqual(['imap.example.com', 'smtp.example.com', 'https://mail.example.com/dav']);
 		expect([...root.querySelectorAll('.err')].map((error) => error.textContent)).toEqual(['CORSIA couldn’t reach this server.']);
 		// The failing field shows its error in place of its hint.
-		expect([...root.querySelectorAll('.hint')].map((hint) => hint.textContent)).toEqual(['smtp.example.com or smtp.example.com:465']);
+		expect([...root.querySelectorAll('.hint')].map((hint) => hint.textContent)).toEqual(['smtp.example.com or smtp.example.com:465', 'Leave empty if your host has no calendar.']);
 		expect(button(root, 'Edit server')).toBeUndefined();
 		expect(button(root, 'Save')).toBeUndefined();
 		expect(button(root, 'Cancel')).toBeDefined();
@@ -76,7 +98,7 @@ describe('MailHostDetail', () => {
 		expect(saveMailHostServers).not.toHaveBeenCalled();
 		type('#mailhost-imap', 'mail.example.com');
 		expect(root.querySelectorAll('.err')).toHaveLength(0);
-		expect([...root.querySelectorAll('.hint')].map((hint) => hint.textContent)).toEqual(['mail.example.com or mail.example.com:993', 'smtp.example.com or smtp.example.com:465']);
+		expect([...root.querySelectorAll('.hint')].map((hint) => hint.textContent)).toEqual(['mail.example.com or mail.example.com:993', 'smtp.example.com or smtp.example.com:465', 'Leave empty if your host has no calendar.', 'The password you sign in to CORSIA with. Needed to change where your app password is sent.']);
 		expect(button(root, 'Save')?.className).toContain('primary');
 		button(root, 'Cancel')!.click();
 		flushSync();

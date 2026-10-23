@@ -12,6 +12,7 @@ from urllib.parse import urlsplit
 
 from connections.mailhost import store
 from connections.mailhost.endpoints import Endpoints, Server
+from connections.mailhost.known_hosts import known_host
 from infra import key_store
 
 _PROBLEM = {
@@ -66,4 +67,6 @@ def row_detail(account_id: str, db: sqlite3.Connection) -> dict[str, Any]:
         detail["manage_url"] = endpoints.app_password_url
     if not endpoints.known:
         detail["destination_hosts"] = endpoints.password_destinations()
+    elif (known := known_host(endpoints.username)) and known.product:
+        detail["product_name"] = known.product
     return {"provider_display_name": endpoints.name, "mailhost": detail}

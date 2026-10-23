@@ -89,8 +89,10 @@ export interface MailHostDetail {
 	problem: 'waiting' | 'checking' | 'refused' | 'revoked' | 'imap_off' | 'unreachable' | null;
 	/** The server the check could not reach. */
 	server?: string;
-	/** The host's page for deleting the CORSIA app password. */
+	/** The host's page for making and deleting its app passwords. */
 	manage_url?: string;
+	/** What a known host calls its mail product ("Zoho Mail"); a typed-in host has none. */
+	product_name?: string;
 	calendar_missing?: boolean;
 	imap?: string;
 	smtp?: string;

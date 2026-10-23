@@ -24,6 +24,7 @@ def test_the_skill_is_named_and_never_handles_a_password() -> None:
 def test_the_skill_hands_gmail_and_microsoft_to_their_own_skills_and_posts_the_offer_verbatim() -> None:
     assert "follow `microsoft-setup`" in SKILL and "follow `google-setup` from its step 2" in SKILL
     assert "I can look after your <host> mail and calendar. <host> needs an app password for that" in SKILL
+    assert "<host> needs an app password for that, made on <host>'s site." in SKILL and "just for CORSIA" not in SKILL
     assert "Ask me any time to connect your email." in SKILL
     assert "press Set key on the <host> row in Settings › Connected apps, paste it and press Set" in SKILL
 
