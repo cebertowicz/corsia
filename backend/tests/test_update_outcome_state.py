@@ -136,11 +136,11 @@ def test_failure_log_tail_reads_only_the_end_of_a_large_log(tmp_path, monkeypatc
 
 @pytest.fixture
 def quiet_release(monkeypatch):
-    from automation import restart, update_failure_notice
+    from automation import update_failure_notice
     from infra import drain
 
     monkeypatch.setattr(drain, "cancel_drain_projection", lambda: None)
-    monkeypatch.setattr(restart, "resume_threads_detached", lambda *_args: None)
+    monkeypatch.setattr("automation.restart_settlement.resume_threads_detached", lambda *_args: None)
     monkeypatch.setattr(
         update_failure_notice, "tell_conductor_about_failed_update", AsyncMock(return_value=None)
     )

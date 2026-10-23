@@ -7,6 +7,8 @@ the later entry describes the current behavior.
 
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here._
 
+- Posting a document comment makes it appear right away and clears the box; the agent still gets it.
+- Setup keeps CORSIA’s own work folder as the default offer after you choose another folder.
 - Quitting the Mac app now also stops the local model server CORSIA started, so it no longer holds memory after you quit.
 - If you quit partway through first-run setup, the next launch starts setup fresh; downloaded models are kept.
 - When the app finds an earlier CORSIA install, Start fresh moves it into a dated folder under CORSIA backups in your home folder, then begins a clean setup.
@@ -20,6 +22,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - CORSIA's own local model defaults to medium reasoning effort unless you chose another.
 - CORSIA's own local model server handles two requests at once, and its group in the model picker is named CORSIA instead of Local.
 - Sending to a local model that isn't loaded yet waits until it loads, and Stop cancels a message still waiting on its model.
+- A Codex chat no longer stays stuck on running when Codex stops partway through receiving a message; your next message runs.
 - Agents can search the web with no search key while CORSIA's own local model is running.
 - Links in a chat open in your browser from the desktop app.
 - When an agent opens a page in the shared browser, the chat shows a chip with that site; clicking it reopens the browser there.
@@ -28,6 +31,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - Connections from paired devices work again.
 - An agent still waits for your yes before a newly connected command-line tool's first change, even when you asked for that change.
 - When a plan isn't moving, its note names each wait that is overdue.
+- A replaced image now shows right away in a document that is open, and when it is reopened, even if it has comments.
 
 ## v0.4.0 — A self-starting Mac app, updates you control, a shared browser, connected apps, and steadier plans
 

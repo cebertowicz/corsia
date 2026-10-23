@@ -50,11 +50,11 @@
       "sha256": "cfc5fc6853862c49b97b632e52e16064d9965d14b764ff1a731ac88c5099e7cc"
     },
     {
-      "bytes": 424,
+      "bytes": 371,
       "kind": "context",
       "path": "context/roles/conductor/00-operating-model.md",
       "role": "conductor",
-      "sha256": "658f0483112dd30bc4e183811fb22444732fa34b2ff42ac955a277175b9ae10c"
+      "sha256": "0dade921be29e8e13f997210e709253d2d3ea4cbc6a02a4c8e8db7c20b27d18a"
     },
     {
       "bytes": 856,
@@ -250,10 +250,16 @@
       "sha256": "40cc04d5b875d4eb5055f8927bc4f555a37e5f91285bdabdcc2526cc5abc2b45"
     },
     {
-      "bytes": 4409,
+      "bytes": 4525,
       "kind": "skill",
       "path": "skills/context-stewardship/SKILL.md",
-      "sha256": "81b5202ca8ca0907f005691d5fb08805313d29b9ae2f3de9fd8e31df2ff15df2"
+      "sha256": "885ed68250a5c494073fc16f5efe5282df6b52877c1603da4172b44894a2c28c"
+    },
+    {
+      "bytes": 3319,
+      "kind": "skill",
+      "path": "skills/context-stewardship/references/cross-agent-read.md",
+      "sha256": "054ecc7509908d112a733ed56b654af16324bb6f16e28f413d80f94fd3bfdc4c"
     },
     {
       "bytes": 10005,

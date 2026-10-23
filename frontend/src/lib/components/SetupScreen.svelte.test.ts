@@ -18,6 +18,7 @@ let component: ReturnType<typeof mount> | null = null;
 let calls: Array<{ url: string; method: string }>;
 let progressBodies: string[];
 let localEligible = false;
+let workFolder: string | undefined;
 let sources: Array<{ source: string; name: string; state: string }>;
 
 async function settle() { await tick(); await new Promise((done) => setTimeout(done)); await tick(); }
@@ -40,11 +41,11 @@ function fillAccount() {
 }
 
 beforeEach(() => {
-	token.set(null); user.set(null); localEligible = false; calls = []; progressBodies = []; sources = [];
+	token.set(null); user.set(null); localEligible = false; workFolder = '~/CORSIA'; calls = []; progressBodies = []; sources = [];
 	vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
 		const url = String(input); const method = init?.method ?? 'GET'; calls.push({ url, method });
 		if (url === '/api/setup/progress' && method === 'PUT') progressBodies.push(String(init?.body));
-		if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: localEligible, work_folder: '~/CORSIA' });
+		if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: localEligible, ...(workFolder ? { work_folder: workFolder } : {}) });
 		if (url === '/api/setup/first-account') return json({ token: 'setup-token', user: { id: 'user', name: 'Ada Lovelace' } });
 		if (url.includes('/sources')) return json({ sources });
 		if (url.includes('/corsia-agent')) return json({ target: { thread_id: 'corsia-thread' } });
@@ -67,7 +68,7 @@ const rowNames = () => Array.from(host.querySelectorAll('section.item')).map((ro
 
 afterEach(async () => {
 	if (component) await unmount(component);
-	host.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals();
+	host.remove(); delete (window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__; vi.restoreAllMocks(); vi.unstubAllGlobals();
 });
 
 // The approved Welcome copy (onboarding story section 2), spelled out here so a change to the shipped strings fails this test.
@@ -93,6 +94,12 @@ function expectWelcomeCopy() {
 }
 /** The Getting started screen's Continue, then the account form. */
 async function openAccount() { await settle(); button('Continue')?.click(); await settle(); }
+async function remountWithWorkFolder(next: string | undefined) {
+	if (component) await unmount(component);
+	host.replaceChildren(); workFolder = next;
+	component = mount(SetupScreen, { target: host, props: { onExistingAccount: vi.fn(), onAccountCreated: vi.fn(), onFinished: finished } });
+	flushSync();
+}
 /** Back on the account screen after the account was made and the person moved on to subscriptions. */
 let finished = vi.fn();
 async function backToAccount() {
@@ -176,6 +183,61 @@ describe('SetupScreen', () => {
 		expect(host.textContent).toContain('CORSIA needs one working model to continue setup.');
 		expect(button('Start using CORSIA')?.disabled).toBe(true);
 	});
+
+	it('keeps the shell-owned default when a warned folder is replaced', async () => {
+		const invoke = vi.fn(async (command: string) => command === 'choose_work_folder'
+			? { state: 'ready', path: '/fixture/Documents', folder_warning: { kind: 'personal_folder', folder: 'Documents' } }
+			: undefined);
+		Object.defineProperty(window, '__CORSIA_SHELL__', { configurable: true, value: { mode: 'local', default_workspace: { path: '/fixture/default-workspace', display: '~/CORSIA' } } });
+		Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: { invoke } });
+		await remountWithWorkFolder('~/CORSIA');
+		await openAccount(); button('Change')?.click(); await settle();
+		button('Use ~/CORSIA')?.click(); fillAccount(); await settle();
+		button('Continue')?.click(); await settle();
+		expect(invoke.mock.calls.filter(([command]) => command === 'configure_work_folder')).toHaveLength(0);
+		expect(calls.filter((call) => call.url === '/api/setup/first-account')).toHaveLength(1);
+	});
+
+	it('offers the canonical default after returning to setup and re-picking a saved personal folder', async () => {
+		const invoke = vi.fn(async (command: string) => command === 'choose_work_folder'
+			? { state: 'ready', path: '/fixture/personal-workspace', folder_warning: { kind: 'personal_folder', folder: 'Personal' } }
+			: undefined);
+		Object.defineProperty(window, '__CORSIA_SHELL__', { configurable: true, value: { mode: 'local', default_workspace: { path: '/fixture/default-workspace', display: '~/CORSIA' } } });
+		Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: { invoke } });
+		await remountWithWorkFolder('~/Personal');
+		await openAccount(); button('Back')?.click(); await settle(); button('Continue')?.click(); await settle();
+		button('Change')?.click(); await settle();
+		expect(button('Use ~/CORSIA')).toBeTruthy();
+	});
+
+	it('applies the real default path when replacing a saved personal folder before account submit', async () => {
+		const invoke = vi.fn(async (command: string) => command === 'choose_work_folder'
+			? { state: 'ready', path: '/fixture/personal-workspace', folder_warning: { kind: 'personal_folder', folder: 'Personal' } }
+			: undefined);
+		Object.defineProperty(window, '__CORSIA_SHELL__', { configurable: true, value: { mode: 'local', default_workspace: { path: '/fixture/default-workspace', display: '~/CORSIA' } } });
+		Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: { invoke } });
+		await remountWithWorkFolder('~/Personal');
+		await openAccount(); button('Back')?.click(); await settle(); button('Continue')?.click(); await settle();
+		button('Change')?.click(); await settle(); button('Use ~/CORSIA')?.click(); fillAccount(); await settle();
+		button('Continue')?.click(); await settle();
+		expect(invoke).toHaveBeenCalledWith('configure_work_folder', { path: '/fixture/default-workspace' });
+		expect(invoke).not.toHaveBeenCalledWith('configure_work_folder', { path: '~/CORSIA' });
+	});
+
+	for (const [state, reason] of [['unreadable', 'permission denied'], ['unwritable', 'the disk is read-only']] as const) {
+		it(`does not apply a ${state} folder or create an account`, async () => {
+			const invoke = vi.fn(async (command: string) => command === 'choose_work_folder'
+				? { state, path: '/fixture/unavailable', reason }
+				: undefined);
+			Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: { invoke } });
+			await openAccount(); button('Change')?.click(); await settle(); fillAccount(); await settle();
+
+			expect(button('Continue')).toHaveProperty('disabled', true);
+			button('Continue')?.click(); await settle();
+			expect(invoke.mock.calls.filter(([command]) => command === 'configure_work_folder')).toHaveLength(0);
+			expect(calls.filter((call) => call.url === '/api/setup/first-account')).toHaveLength(0);
+		});
+	}
 
 	it('asks which subscriptions they pay for, installs the picked tool at once and shows a row only for it', async () => {
 		sources = [{ source: 'claude-code', name: 'Claude Code', state: 'not_installed' }, { source: 'codex', name: 'Codex', state: 'not_installed' }];

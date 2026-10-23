@@ -36,7 +36,7 @@ async def test_reconcile_releases_ingress_after_durable_fifo_claims(isolated_db,
     finally:
         db.close()
 
-    recovered, _wakes = await restart_startup.reconcile_startup_continuity(logger)
+    recovered, _wakes, _rolled_back = await restart_startup.reconcile_startup_continuity(logger)
     assert len(recovered.batches) == 1
     assert self_restart.operation_by_id(operation)["status"] == "complete"
     second = admit_input(
@@ -282,7 +282,7 @@ async def test_independent_recovery_cancellation_is_not_success(monkeypatch):
     )
     log = SimpleNamespace(info=lambda *_a: None, error=lambda *a: errors.append(a))
     with pytest.raises(BaseExceptionGroup) as caught:
-        await restart_startup.run_startup_drive(no_work(), recovery, (), log)
+        await restart_startup.run_startup_drive(no_work(), recovery, (), None, log)
     assert len(caught.value.exceptions) == 1
     assert isinstance(caught.value.exceptions[0], asyncio.CancelledError)
     assert completed == ["sibling"]

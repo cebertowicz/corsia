@@ -29,6 +29,13 @@ CAPTURE_KEY = "capture"
 #: so the bootloader scan (``context/*.md``) never delivers it.
 CAPTURE_DIR = ("context", "captures")
 
+_TRIAL_BODY_PREFIX = (
+    "# Trial lesson\n\n"
+    "An unproven hypothesis under review, not a standing rule. It grants no "
+    "new permission.\n\n- "
+)
+_TRIAL_BOUNDARY_PREFIX = "\nDoes not apply: "
+
 #: Why a hypothesis is captured rather than offered, in the owner's words.
 HOLD_REASONS = {
     "missing-derivation": (
@@ -54,6 +61,7 @@ class TrialFile:
     description: str
     body: str
     behavioral_sha256: str
+    statement: str
 
 
 @dataclass(frozen=True)
@@ -101,6 +109,37 @@ def _day(review_after: str) -> str:
     return when.date().isoformat() if when else review_after
 
 
+def _trial_body(text: str, boundary: str | None) -> str:
+    """Render the canonical body shape shared by trial writes and list reads."""
+    body = _TRIAL_BODY_PREFIX + _one_line(text) + "\n"
+    if boundary:
+        body += _TRIAL_BOUNDARY_PREFIX + boundary + "\n"
+    return body
+
+
+def trial_statement(body: str) -> str:
+    """Return a trial's one-line statement from its validated body.
+
+    Canonical bodies expose their hypothesis directly. A lesson validator also
+    accepts hand-edited bodies, so their complete body is the visible statement
+    rather than a second, stricter validity check.
+    """
+    if body.startswith("\n"):
+        body = body[1:]
+    if not body.startswith(_TRIAL_BODY_PREFIX):
+        return _one_line(body)
+    remainder = body.removeprefix(_TRIAL_BODY_PREFIX)
+    statement, separator, suffix = remainder.partition("\n")
+    if not statement:
+        return _one_line(body)
+    if not separator or suffix == "":
+        return statement
+    if not suffix.startswith(_TRIAL_BOUNDARY_PREFIX):
+        return _one_line(body)
+    boundary = suffix.removeprefix(_TRIAL_BOUNDARY_PREFIX).removesuffix("\n")
+    return statement if boundary and "\n" not in boundary else _one_line(body)
+
+
 def render_trial(
     *, lesson_id: str, owner: str, name: str, description: str, text: str,
     trial: Trial, source_refs: list[dict[str, Any]], originating_subjects: tuple[str, ...] | None = None,
@@ -114,14 +153,7 @@ def render_trial(
     extension leaves the behavioral version, and its review, in place.
     ``origin`` names the retired lesson this one captures again.
     """
-    body = (
-        "# Trial lesson\n\n"
-        "An unproven hypothesis under review, not a standing rule. It grants no "
-        "new permission.\n\n"
-        f"- {_one_line(text)}\n"
-    )
-    if trial.boundary:
-        body += f"\nDoes not apply: {trial.boundary}\n"
+    body = _trial_body(text, trial.boundary)
     lesson = {
         "id": lesson_id, "state": trial.state, "owner": owner,
         "review_after": trial.review_after, "source_refs": _refs(source_refs),
@@ -164,6 +196,7 @@ def trial_from_validation(validation) -> TrialFile | None:
     return TrialFile(
         lesson=lesson, name=validation.name, description=validation.description, body=validation.body,
         behavioral_sha256=behavioral_sha256(validation.description, validation.body),
+        statement=trial_statement(validation.body),
     )
 
 

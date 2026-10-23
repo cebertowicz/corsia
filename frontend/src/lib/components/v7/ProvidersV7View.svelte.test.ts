@@ -115,7 +115,7 @@ describe('ProvidersV7View card request', () => {
 		expect(document.querySelector('[data-provider-card="local-setup"]')?.textContent).toContain('Set up');
 		expect(document.querySelector('[data-provider-card="local-setup"] .dot')?.classList.contains('disabled')).toBe(true);
 		expect(document.querySelector('[data-provider-card="local-setup"] [aria-label="Settings"]')).toBeNull();
-		expect(document.querySelector('[data-provider-card="local-setup"] [aria-label="Enable"]')).toBeNull();
+		expect(document.querySelector('[data-provider-card="local-setup"] button.tg')).toBeNull();
 		expect(document.querySelector('[data-provider-card="local-setup"] button.pr-expand')).toBeNull();
 		expect(document.querySelector('[data-provider-card="local-setup"] .chev')).toBeNull();
 		(document.querySelector('[data-provider-card="local-setup"] .setup-action') as HTMLButtonElement).click();

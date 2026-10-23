@@ -118,6 +118,13 @@ def _discard_prepared_release(
         raise RuntimeError("prepared frontend cleanup failed")
 
 
+def _packaged_previous_version(mode: str) -> str | None:
+    from infra.build_info import app_version
+    from infra.platform_paths import app_bundle_root
+
+    return app_version() if mode == "update" and app_bundle_root() is not None else None
+
+
 async def _acquire_settings_restart(
     user: dict | None,
     mode: str,
@@ -144,6 +151,7 @@ async def _acquire_settings_restart(
             kind="update" if mode == "update" else "restart",
             trigger=trigger if mode == "update" else None,
             target_version=version if mode == "update" else None,
+            previous_version=_packaged_previous_version(mode),
             changes=json.dumps(changes) if changes else None,
             claim=claim,
         )

@@ -21,12 +21,18 @@ GIT_TIMEOUT_SECONDS = 30.0
 LSOF_TIMEOUT_SECONDS = 60.0
 GH_TIMEOUT_SECONDS = 60.0
 
-# Ignored directories that are rebuilt from lockfiles or caches. Any other
-# ignored path (``.env``, seeded databases, local notes) blocks removal.
+# Ignored directories rebuilt from lockfiles or caches, gate scratch directories,
+# generated build metadata, and symlinked dependency entries. Any other ignored
+# path (``.env``, seeded databases, local notes) blocks removal.
 DISPOSABLE_DIRS = frozenset({
     "node_modules", ".venv", "__pycache__", ".pytest_cache", "dist", "build",
     ".svelte-kit", ".mypy_cache", ".ruff_cache", "test-results", "playwright-report",
 })
+DISPOSABLE_TOP_LEVEL_DIR_PREFIXES = (".check-pr-",)
+DISPOSABLE_FILES = frozenset({
+    "frontend/static/build-info.json", "frontend/src/lib/build-info.json",
+})
+DISPOSABLE_NON_DIRECTORY_NAMES = frozenset({"node_modules", ".venv"})
 
 
 class ReaperGitError(RuntimeError):
@@ -178,7 +184,19 @@ def git_lock_files(admin: Path) -> list[str]:
 def _is_disposable(ignored: str) -> bool:
     parts = [part for part in ignored.rstrip("/").split("/") if part]
     directories = parts if ignored.endswith("/") else parts[:-1]
-    return any(part in DISPOSABLE_DIRS for part in directories)
+    return (
+        ignored in DISPOSABLE_FILES
+        or (
+            bool(directories)
+            and directories[0].startswith(DISPOSABLE_TOP_LEVEL_DIR_PREFIXES)
+        )
+        or (
+            not ignored.endswith("/")
+            and bool(parts)
+            and parts[-1] in DISPOSABLE_NON_DIRECTORY_NAMES
+        )
+        or any(part in DISPOSABLE_DIRS for part in directories)
+    )
 
 
 def status_skip_reason(worktree: Path, *, tracked_only: bool = False) -> str | None:

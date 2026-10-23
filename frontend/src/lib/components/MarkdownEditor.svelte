@@ -9,7 +9,7 @@
 	import { GFM } from '@lezer/markdown';
 	import { docTheme, docHighlight } from '$lib/cm/theme';
 	import { markdownLivePreview } from '$lib/cm/markdown-live';
-	import { imageContext, imageOpener, type OpenImageRequest } from '$lib/cm/markdown-image';
+	import { imageContext, imageOpener, refreshMarkdownImages, type OpenImageRequest } from '$lib/cm/markdown-image';
 	import { linkOpener } from '$lib/cm/markdown-link';
 	import { token } from '$lib/stores/auth';
 	import { get } from 'svelte/store';
@@ -57,7 +57,7 @@
 		previews?: PreviewFrameSource | null;
 		readOnly?: boolean;
 		/** Where this document lives, so its markdown images resolve against it; none means they stay links. */
-		imageBase?: { path: string; projectId: string | null } | null;
+		imageBase?: { path: string; projectId: string | null; imageCacheKey?: string } | null;
 		/** Opens a drawn image larger in the canvas; without it an image is only selected. */
 		onOpenImage?: (request: OpenImageRequest) => void;
 		/** Follows a link written in this document, given its target as written; without it a link is only styled. */
@@ -223,7 +223,7 @@
 				docTheme,
 				docHighlight,
 				markdownLivePreview,
-				imageContext.of(() => imageBase && { docPath: imageBase.path, projectId: imageBase.projectId, token: get(token) ?? '' }),
+				imageContext.of(() => imageBase && { docPath: imageBase.path, projectId: imageBase.projectId, token: get(token) ?? '', imageCacheKey: imageBase.imageCacheKey }),
 				...(onOpenImage ? [imageOpener.of((request) => onOpenImage?.(request))] : []),
 				...(onOpenLink ? [linkOpener.of((href) => onOpenLink?.(href))] : []),
 				markdownTasks,
@@ -321,6 +321,11 @@
 	$effect(() => {
 		const ro = readOnly;
 		view?.dispatch({ effects: roComp.reconfigure(EditorState.readOnly.of(ro)) });
+	});
+
+	$effect(() => {
+		imageBase?.imageCacheKey;
+		view?.dispatch({ effects: refreshMarkdownImages.of() });
 	});
 
 	$effect(() => {

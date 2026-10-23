@@ -16,11 +16,21 @@ describe('shellInfo', () => {
 	it('is null in a browser or the phone app, where nothing injects it', () => {
 		expect(shellInfo()).toBeNull();
 	});
-	it('reads local and remote modes from the injected object', () => {
-		(window as unknown as Record<string, unknown>).__CORSIA_SHELL__ = { mode: 'local' };
-		expect(shellInfo()).toEqual({ mode: 'local' });
+	it('reads local default-workspace and remote modes from the injected object', () => {
+		(window as unknown as Record<string, unknown>).__CORSIA_SHELL__ = {
+			mode: 'local', default_workspace: { path: '/fixture/default-workspace', display: '~/CORSIA' },
+		};
+		expect(shellInfo()).toEqual({
+			mode: 'local', default_workspace: { path: '/fixture/default-workspace', display: '~/CORSIA' },
+		});
 		(window as unknown as Record<string, unknown>).__CORSIA_SHELL__ = { mode: 'remote', name: 'Studio' };
 		expect(shellInfo()).toEqual({ mode: 'remote', name: 'Studio' });
+	});
+	it('does not accept an incomplete default workspace as a path', () => {
+		(window as unknown as Record<string, unknown>).__CORSIA_SHELL__ = {
+			mode: 'local', default_workspace: { path: '~/CORSIA', display: 42 },
+		};
+		expect(shellInfo()).toEqual({ mode: 'local' });
 	});
 	it('treats a remote object with no name as local, never a blank computer', () => {
 		(window as unknown as Record<string, unknown>).__CORSIA_SHELL__ = { mode: 'remote' };

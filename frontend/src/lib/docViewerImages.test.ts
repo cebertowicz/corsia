@@ -19,16 +19,18 @@ const TARGET: DocViewerTarget = { instanceId: 'tab-1', path: 'doc.md', name: 'do
 const batch = { pendingCount: 0 } as unknown as DocFeedback;
 const DRAWN = { src: '/ws/a.png', alt: 'Mock', from: 10, to: 24, scrollTop: 0, top: 0 };
 
-function viewer(overrides: { onOpenImage?: ((request: unknown) => void) | null; target?: DocViewerTarget | null; artifactId?: string | null } = {}) {
+function viewer(overrides: { onOpenImage?: ((request: unknown) => void) | null; target?: DocViewerTarget | null; artifactId?: string | null; imageCacheKey?: string } = {}) {
 	const onOpenImage = overrides.onOpenImage === undefined ? vi.fn() : overrides.onOpenImage;
 	const showInText = vi.fn();
+	const imageCacheKey = { value: overrides.imageCacheKey ?? 'open-1' };
 	const comments = [onImage('one'), onImage('two'), onImage('later', 40, 54), comment('text', { from: 10, to: 24 })];
 	const images = createDocViewerImages({
 		onOpenImage: () => onOpenImage ?? undefined, root: () => document.createElement('div'), comments: () => comments,
 		artifactId: () => (overrides.artifactId === undefined ? 'a1' : overrides.artifactId), target: () => (overrides.target === undefined ? TARGET : overrides.target), readOnly: () => false,
 		text: () => '', session: () => undefined, accent: () => null, feedback: () => batch, showInText,
+		imageCacheKey: () => imageCacheKey.value,
 	});
-	return { images, onOpenImage, showInText };
+	return { images, onOpenImage, showInText, imageCacheKey };
 }
 
 describe('opening a document image from its comments', () => {
@@ -48,6 +50,15 @@ describe('opening a document image from its comments', () => {
 	it('gives the comments of a shown image from the document as it is now, and none without an artifact', () => {
 		expect(viewer().images.comments()).toEqual(expect.objectContaining({ artifactId: 'a1', projectId: 'p1', readOnly: false, feedback: batch }));
 		expect(viewer({ artifactId: null }).images.comments()).toBeUndefined();
+	});
+
+	it('uses the current document cache key for a comment thumbnail', () => {
+		const { images, imageCacheKey } = viewer({ imageCacheKey: 'open-1' });
+		const first = images.groups.srcOf(onImage('one'))!;
+		expect(new URL(first, 'http://x').searchParams.get('v')).toBe('open-1');
+		imageCacheKey.value = 'refresh-1';
+		const refreshed = images.groups.srcOf(onImage('one'))!;
+		expect(new URL(refreshed, 'http://x').searchParams.get('v')).toBe('refresh-1');
 	});
 
 	it('falls back when the comments are not all on one image, without trying to draw', () => {
