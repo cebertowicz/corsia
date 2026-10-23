@@ -82,7 +82,7 @@ def test_a_doc_batch_carries_one_marked_copy_per_image_and_judges_staleness_per_
         _region(db, artifact_id, cart, x=0.5, y=0.5, body="Total cut off.", stale=True)
         _region(db, artifact_id, login, x=0.6, y=0.6, body="Wrong icon.")
 
-        feedback_batches.close_batch(db, batches(db, state="open")[0]["id"], "quiet")
+        feedback_batches.close_due("2999-01-01T00:00:00+00:00", db=db)
         description = _node_description(db)
     finally:
         db.close()
