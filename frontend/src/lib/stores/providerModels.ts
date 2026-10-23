@@ -74,11 +74,13 @@ function _setState(key: string, patch: Partial<ProviderModelsState>) {
 
 /**
  * Puts a list the caller already holds into the store before its card opens: the open
- * renders it at once and its own read refreshes behind it. Never replaces a read in flight.
+ * paints it at once while its own read refreshes behind it. Only fills a card the store holds
+ * nothing for, so an older snapshot can never overwrite a newer read.
  */
 export function seedProviderModels(providerName: string, serverId: string | undefined, models: ProviderModel[]): void {
 	const k = _key(providerName, serverId);
-	if (get(_models)[k]?.loading) return;
+	const current = get(_models)[k];
+	if (current?.loading || current?.models.length) return;
 	_setState(k, { models, lastError: undefined });
 }
 

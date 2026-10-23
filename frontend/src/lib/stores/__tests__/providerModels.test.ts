@@ -337,11 +337,14 @@ describe('models ahead of the first open', () => {
 		vi.restoreAllMocks();
 
 	});
-	it('seeds a list the page already holds, but never over a read in flight', async () => {
+	it('seeds an empty card, but never over rows already held or a read in flight', async () => {
 		const p = { ...provider(), name: 'codex', type: 'harness' as const };
 		const row = { id: 'codex/x', name: 'X', state: 'loaded' as const, meta: '', caps: [] };
 
 		seedProviderModels('codex', undefined, [row]);
+		expect(modelsView(p).models).toEqual([row]);
+
+		seedProviderModels('codex', undefined, [{ ...row, name: 'older snapshot' }]);
 		expect(modelsView(p).models).toEqual([row]);
 
 		let release: (r: Response) => void = () => {};

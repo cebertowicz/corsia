@@ -79,7 +79,7 @@ describe('loadHostGroups harness cards', () => {
 		expect(codexSubline()).toBe('1 account · 1 model');
 	});
 
-	it('holds the harness models from the same two reads, so opening a card needs no read of its own', async () => {
+	it('holds the harness models from the same two reads, so opening a card paints them before its own read returns', async () => {
 		stubFetch(true, 'ready');
 		await loadHostGroups();
 
