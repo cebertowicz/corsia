@@ -103,11 +103,10 @@ def record_outcome_event(
             raise OutcomeInputRefusal("outcome event identity fields must not carry credentials")
     kept, dropped = filter_attributes(event_name, attributes, declared_specs)
     event_id = str(uuid.uuid4())
-    occurred_at = _utc(ts)
     cursor = db.execute(
         f"INSERT INTO outcome_events ({_COLUMNS}) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,NULL) "
         "ON CONFLICT(dedupe_key) DO NOTHING",
-        (event_id, dedupe_key, event_name, source, provenance, occurred_at, _now(),
+        (event_id, dedupe_key, event_name, source, provenance, _utc(ts), _now(),
          subject_key, project_id, agent_thread_id, attribution, corroborated_by,
          json.dumps(kept, separators=(",", ":"))),
     )

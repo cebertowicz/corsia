@@ -293,6 +293,41 @@ async def test_the_served_route_ranks_a_seeded_scope(isolated_db, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_served_route_allows_non_series_model_and_cost_comparisons(isolated_db, monkeypatch):
+    """Models, cost and dollar rows have no series break, and stay comparable by default."""
+    from api import measurement as page
+    from api import measurement_where_to_look as where
+
+    _freeze(monkeypatch, POST_BREAK)
+
+    def seed(db):
+        _seed_project(db, "p1")
+        _seed_agent(db, "one", project_id="p1")
+        _seed_period(db, "one", BEFORE, 30, not_first_try=3)
+        _seed_period(db, "one", LATEST, 30, not_first_try=12)
+
+    async def models_read(*_args, **_kwargs):
+        return {"size_overall": [{"size": "S", "cost_per_task": 2.0}],
+                "rows": [_model("Alpha", _cell("S", 20, 2.0, 3.0))]}
+
+    async def agents_payload(*_args, **_kwargs):
+        return {"rows": [_agent("one", "One", dollars_per_work_hour=(1.0, 30, 1.2, 30))], "overall": {}}
+
+    async def cost_read(*_args, **_kwargs):
+        return _cost(1.0, 1.5)
+
+    _seeded(seed)
+    monkeypatch.setattr(page, "models_read", models_read)
+    monkeypatch.setattr(page, "agents_payload", agents_payload)
+    monkeypatch.setattr(where, "cost_read", cost_read)
+    result = await where.measurement_where_to_look(
+        project="p1", agent="none", grain="weeks", timezone_name="UTC", user={"id": "steve"})
+    assert {row["measure"] for row in result["worse"]} >= {
+        "cost_per_task", "cost_per_hour", "dollars_per_hour",
+    }
+
+
+@pytest.mark.asyncio
 async def test_the_daily_all_work_read_an_agent_consumes_keeps_its_fields(isolated_db, monkeypatch):
     """The ``attention-watch`` skill's own query: every project's agents, the Days grain, these fields."""
     from api.measurement_where_to_look import measurement_where_to_look

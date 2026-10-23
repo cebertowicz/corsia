@@ -94,7 +94,12 @@ def _model_breaks(db, grain: Grain) -> list[dict[str, str]]:
     breaks: list[dict[str, str]] = []
     for _, started_at in versions[1:]:
         if period := _period(grain, str(started_at)):
-            breaks.append({"period": period, "kind": "model", "reason": "rater changed"})
+            breaks.append({
+                "period": period,
+                "kind": "model",
+                "reason": "rater changed",
+                "metric_group": "estimated_human_hours_per_active_hour",
+            })
     return breaks
 
 
@@ -200,7 +205,7 @@ def comparability_start(breaks: Iterable[dict[str, str]]) -> str | None:
     return max(marks, default=None)
 
 
-def period_comparable(metric: str, period: str, breaks: Iterable[dict[str, str]]) -> bool:
+def period_comparable(period: str, breaks: Iterable[dict[str, str]]) -> bool:
     """Use the one derived list for chart rows and Agents findings alike."""
     start = comparability_start(breaks)
     return start is None or period >= start

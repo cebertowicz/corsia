@@ -67,8 +67,8 @@ def test_derived_starts_and_world_break_come_from_rows_and_table(isolated_db) ->
         {"period": "2026-09-07", "kind": "source", "reason": "user-owned holds first recorded"},
         {"period": "2026-08-31", "kind": "world", "reason": "plan nodes got about 5 times smaller"},
     ]
-    assert not period_comparable("asks_per_outcome", "2026-08-24", breaks["asks_per_outcome"])
-    assert period_comparable("asks_per_outcome", "2026-09-07", breaks["asks_per_outcome"])
+    assert not period_comparable("2026-08-24", breaks["asks_per_outcome"])
+    assert period_comparable("2026-09-07", breaks["asks_per_outcome"])
     assert _row("outcomes", "2026-09-07", {"outcomes": 1}, False, breaks=breaks["outcomes"])["method_version"] == 1
 
 
@@ -231,8 +231,39 @@ def test_model_boundaries_use_accepted_pacific_periods_for_migration_and_writes(
     assert expected in written["estimated_human_hours_per_active_hour"]
     for breaks in (seeded, written):
         marks = breaks["estimated_human_hours_per_active_hour"]
-        assert not period_comparable("estimated_human_hours_per_active_hour", "2026-09-07", marks)
-        assert period_comparable("estimated_human_hours_per_active_hour", "2026-09-14", marks)
+        assert not period_comparable("2026-09-07", marks)
+        assert period_comparable("2026-09-14", marks)
+
+
+def test_model_boundary_keeps_the_earliest_settlement_when_ratings_arrive_out_of_order(isolated_db) -> None:
+    grain = resolve_grain("days", "America/Los_Angeles", now=datetime(2026, 10, 22, tzinfo=timezone.utc))
+    db = get_db()
+    try:
+        _thread(db)
+        with raw_plan_seed(db):
+            for node_id, settled_at in (
+                ("baseline", "2026-09-08T12:00:00Z"),
+                ("newer", "2026-09-16T12:00:00Z"),
+                ("older", "2026-09-15T05:30:00Z"),
+            ):
+                db.execute("INSERT INTO plan_nodes (id,plan_id,order_key,kind,title,acceptance_criteria,state,commitment_id,requirements_revision,revision,created_at,updated_at) VALUES (?,?,0,'task','t','t','accepted',?,1,1,'t','t')", (node_id, "plan", node_id))
+                db.execute("INSERT INTO plan_node_events (id,node_id,provenance,event,prior_state,new_state,created_at) VALUES (?,?, 'test','accepted','active','accepted',?)", (f"{node_id}-accepted", node_id, settled_at))
+            for node_id, rater in (("baseline", "rater-a"), ("newer", "rater-b"), ("older", "rater-b")):
+                record_outcome_event(
+                    db, dedupe_key=f"{node_id}-rating", event_name="measurement.size_rating", source="corsia",
+                    provenance="agent_recorded", ts="2026-10-01T12:00:00Z", subject_key=f"plan_node:{node_id}",
+                    attributes={"rater": rater},
+                )
+        versions = list(db.execute("SELECT identity,started_at FROM measurement_model_versions ORDER BY identity"))
+        breaks = derive_breaks(db, ("estimated_human_hours_per_active_hour",), grain)
+    finally:
+        db.close()
+    assert [tuple(row) for row in versions] == [
+        ("rater-a", "2026-09-08T12:00:00Z"), ("rater-b", "2026-09-15T05:30:00Z"),
+    ]
+    assert {"period": "2026-09-14", "kind": "model", "reason": "rater changed"} in breaks[
+        "estimated_human_hours_per_active_hour"
+    ]
 
 
 def test_availability_and_comparability_helpers_distinguish_source_and_definition_marks() -> None:
@@ -248,8 +279,8 @@ def test_availability_and_comparability_helpers_distinguish_source_and_definitio
     assert first_availability_period(source_only) == "2026-09-07"
     assert first_availability_period(start_then_completeness) == "2026-03-02"
     assert comparability_start(marks) == "2026-09-14"
-    assert not period_comparable("estimated_human_hours_per_active_hour", "2026-09-07", marks)
-    assert period_comparable("estimated_human_hours_per_active_hour", "2026-09-14", marks)
+    assert not period_comparable("2026-09-07", marks)
+    assert period_comparable("2026-09-14", marks)
 
 
 def test_token_completeness_break_keeps_earlier_available_token_periods(isolated_db) -> None:
@@ -296,10 +327,12 @@ def test_size_model_break_is_retained_once_and_never_reads_rating_history(isolat
         db.set_trace_callback(executed.append)
         nonsize = derive_breaks(db, ("outcomes",), _grain())
         sized = derive_breaks(db, ("estimated_human_hours_per_active_hour",), _grain())
+        unrelated = derive_breaks(db, ("first_try_acceptance", "fresh_tokens_per_outcome"), _grain())
     finally:
         db.close()
     assert nonsize["outcomes"] == [{"period": "2026-08-31", "kind": "start", "reason": "instrument source first recorded"}]
     assert {"period": "2026-09-14", "kind": "model", "reason": "rater changed"} in sized["estimated_human_hours_per_active_hour"]
+    assert not any(mark["kind"] == "model" for marks in unrelated.values() for mark in marks)
     assert not any("outcome_events" in sql for sql in executed)
 
 

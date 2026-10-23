@@ -116,7 +116,8 @@ def _store_model_version(db, identity: str | None, started_at: str) -> None:
         return
     with write_transaction(db, scope="record_measurement_model_version"):
         db.execute(
-            "INSERT OR IGNORE INTO measurement_model_versions(identity,started_at) VALUES (?,?)",
+            "INSERT INTO measurement_model_versions(identity,started_at) VALUES (?,?) "
+            "ON CONFLICT(identity) DO UPDATE SET started_at=MIN(started_at, excluded.started_at)",
             (identity, started_at),
         )
 

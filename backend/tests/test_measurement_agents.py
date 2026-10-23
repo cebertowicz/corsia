@@ -302,7 +302,7 @@ def _build(db_seed, *, metric="fresh_tokens_per_outcome", sort="ranked", compara
         breaks = derive_breaks(db, TABLE_METRICS, grain)
         rows, findings, summaries, count, _overall = build_agents(
             db, params, REGISTRY, metric, sort, grain,
-            comparable or (lambda name, period: period_comparable(name, period, breaks[name])),
+            comparable or (lambda name, period: period_comparable(period, breaks[name])),
             measured or (lambda name, period: period_measured(name, period, grain, first_presence)), chain_costs(db, params, grain)["cost_rows"])
         return {"rows": rows, "findings": findings, "project_summaries": summaries["active"],
                 "agent_count": count, "findings_state": derive_findings_state(rows, findings, count)}

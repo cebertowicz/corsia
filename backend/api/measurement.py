@@ -133,7 +133,7 @@ def _row(metric: str, period: str, source: dict[str, Any] | None, scoped_agent: 
         value, n = None, 0
     raw_value = value
     if n < definition.minimum_n or thin: value = None
-    comparable = period_comparable(metric, period, breaks or [])
+    comparable = period_comparable(period, breaks or [])
     result = {"period": period, "series": metric, "method_version": definition.method_version, "value": value, "raw_value": raw_value, "n": n, "proxy": definition.proxy,
               "partial": partial, "comparable": comparable, "break": None,
               "dimension": None, "thin": thin}
@@ -218,7 +218,7 @@ async def series_payload(requested: list[str], project: str, agent: str, page_gr
             return measured(name, period) and period >= start
         if family == "size":
             rows.extend(size_rows(metric, REGISTRY[metric].minimum_n, REGISTRY[metric].method_version, drawn, family_rows[family],
-                                  lambda name, period: period_comparable(name, period, breaks[name]), rate_measured,
+                                  lambda name, period: period_comparable(period, breaks[name]), rate_measured,
                                   dates={"data_start": rate_period, "comparability_before": comparability_start(breaks[metric])}))
         elif family == "tokens":
             by_period = {row["period"]: row for row in family_rows[family]}
@@ -344,7 +344,7 @@ async def agents_payload(project: str, agent: str, page_grain: Grain, sort: str,
             prepare_outcome_periods(db, params, roots=True)
             rows, findings, summaries, agent_count, overall = build_agents(
                 db, params, REGISTRY, metric, sort, page_grain,
-                lambda name, period: period_comparable(name, period, breaks[name]),
+                lambda name, period: period_comparable(period, breaks[name]),
                 lambda name, period: period_measured(name, period, page_grain, first_presence, first_availability_period(breaks[name])), cost_rows, with_dollars=dollars)
             return {
                 "definition_version": 1,
