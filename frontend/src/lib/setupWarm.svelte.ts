@@ -86,9 +86,15 @@ export function createSetupWarm() {
 				});
 				const query = new URLSearchParams({ token: session, model, progress: 'true' });
 				const url = `/api/threads/${encodeURIComponent(lookup.target.thread_id)}/warm?${query}`;
-				await fetch(`${url}&wait=true`, { method: 'POST', signal });
-			} catch { /* An unreachable local model leaves the normal cold-turn path available. */ }
-			finally { stopProgress(); running = false; }
+				const response = await fetch(`${url}&wait=true`, { method: 'POST', signal });
+				const body: { ok?: boolean; message?: string } | null = await response.json().catch(() => null);
+				// A warm that didn't finish leaves the normal cold-turn path; record why for diagnosis.
+				if (!response.ok || body?.ok === false) {
+					console.warn('Setup warm did not finish', response.status, body?.message ?? '');
+				}
+			} catch (error) {
+				if (!signal.aborted) console.warn('Setup warm failed', error);
+			} finally { stopProgress(); running = false; }
 		})();
 	}
 

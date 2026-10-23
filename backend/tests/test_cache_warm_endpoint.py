@@ -766,9 +766,9 @@ async def test_cold_probe_falls_back_to_warm_and_reports_starting_progress(monke
 
 
 def test_probe_memory_hot_allows_only_the_uncacheable_partial_tail():
-    from api.thread_cache_warm import _probe_is_memory_hot
+    from api.thread_cache_warm_probe import probe_is_memory_hot
 
-    assert _probe_is_memory_hot({
+    assert probe_is_memory_hot({
         "ok": True,
         "total_tokens": 16_253,
         "block_size": 2_048,
@@ -780,9 +780,9 @@ def test_probe_memory_hot_allows_only_the_uncacheable_partial_tail():
 
 
 def test_probe_memory_hot_requires_every_complete_block():
-    from api.thread_cache_warm import _probe_is_memory_hot
+    from api.thread_cache_warm_probe import probe_is_memory_hot
 
-    assert not _probe_is_memory_hot({
+    assert not probe_is_memory_hot({
         "ok": True,
         "total_tokens": 16_384,
         "block_size": 2_048,

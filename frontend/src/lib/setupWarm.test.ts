@@ -39,17 +39,21 @@ describe('setup local warm', () => {
 		warm.destroy();
 	});
 
-	it.each(['failure', 'unreachable'])('finishes normally when warm is %s', async (outcome) => {
+	it.each(['a server error', 'a failure', 'unreachable'])('records why and finishes normally when warm is %s', async (outcome) => {
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
 			if (String(input).startsWith('/api/corsia-agent')) return json({ target: { thread_id: 'agent' }, first_run_pending: true });
 			if (outcome === 'unreachable') throw new TypeError('Failed to fetch');
-			return json({ ok: false });
+			if (outcome === 'a server error') return new Response('Internal Server Error', { status: 500 });
+			return json({ ok: false, message: 'model not loaded' });
 		}));
 		const warm = createSetupWarm();
 		warm.start([local], 'session');
 		await warm.finish();
 		expect(warm.running).toBe(false);
 		expect(warm.percent).toBeNull();
+		expect(warn).toHaveBeenCalledTimes(1);
+		warn.mockRestore();
 		warm.destroy();
 	});
 
