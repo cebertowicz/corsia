@@ -56,7 +56,7 @@ describe('model sheet in a cloud-off project', () => {
 		expect(text()).not.toContain('No available models');
 		const buttons = Array.from(host.querySelectorAll('button')).map((b) => b.textContent?.trim());
 		expect(buttons).toContain('Open project settings'); expect(buttons).toContain('Add a local model');
-		expect(host.innerHTML.indexOf('no local model is ready')).toBeLessThan(host.innerHTML.indexOf('aria-label="Local"'));
+		expect(host.innerHTML.indexOf('no local model is ready')).toBeLessThan(host.innerHTML.indexOf('aria-label="CORSIA"'));
 	});
 	it('no local model at all, this computer setting up: its status shows below the line', () => {
 		setup.status.value = { line: 'Setting up the local model…', retry: null };
@@ -97,14 +97,14 @@ describe('a trusted device is not this computer', () => {
 		setup.canAdd.value = true;
 		models.set([cloud('cc/opus', 'Claude Opus'), external]); open();
 		expect(text()).toContain('Gemma'); expect(text()).toContain('Local · ready');
-		expect(host.innerHTML.indexOf('aria-label="LM Studio"')).toBeLessThan(host.innerHTML.indexOf('aria-label="Local"'));
+		expect(host.innerHTML.indexOf('aria-label="LM Studio"')).toBeLessThan(host.innerHTML.indexOf('aria-label="CORSIA"'));
 		expect(Array.from(host.querySelectorAll('button')).map((b) => b.textContent?.trim())).toContain('Add a local model');
 	});
 	it('private External group never shows this computer\'s setup status inside its own group', () => {
 		setup.status.value = { line: 'Setting up the local model…', retry: null };
 		models.set([external]); open();
 		expect(host.querySelector('section[aria-label="LM Studio"]')?.textContent).not.toContain('Setting up the local model…');
-		expect(host.querySelector('section[aria-label="Local"]')?.textContent).toContain('Setting up the local model…');
+		expect(host.querySelector('section[aria-label="CORSIA"]')?.textContent).toContain('Setting up the local model…');
 	});
 });
 

@@ -92,7 +92,7 @@
 	});
 
 	// The first read of a new login's models ends with models_updated: the list then shows whether the account has any.
-	const refreshAccounts = async () => { const result = await loadVendorAccounts(); if (!result.superseded) refreshError = result.ok ? '' : 'Couldn’t refresh your accounts.'; };
+	const refreshAccounts = async () => { const result = await loadVendorAccounts(); if (!result.superseded) refreshError = result.ok ? '' : `${result.error ?? 'Couldn’t load your accounts.'}${result.ref ? ` Reference: ${result.ref}` : ''}`; };
 	onMount(() => on('models_updated', refreshAccounts));
 
 	onMount(async () => {
@@ -100,7 +100,7 @@
 		const result = await loadVendorAccounts();
 		policyAccountIds = accountIdsKey;
 		if (!result.ok) {
-			if (!result.superseded) actionError = result.error ?? 'Could not load accounts.';
+			if (!result.superseded) actionError = result.error ?? 'Couldn’t load your accounts.';
 			return;
 		}
 		for (const account of accounts) {
@@ -235,8 +235,8 @@
 		if (!beginAction(accountId)) return;
 		const result = await loadVendorAccounts();
 		endAction(accountId);
-		if (editingId === accountId) editError = result.ok ? '' : result.error ?? 'Could not load accounts.';
-		else actionError = result.ok ? '' : result.error ?? 'Could not load accounts.';
+		if (editingId === accountId) editError = result.ok ? '' : result.error ?? 'Couldn’t load your accounts.';
+		else actionError = result.ok ? '' : result.error ?? 'Couldn’t load your accounts.';
 	}
 
 	async function signOut(account: VendorAccount) {
@@ -275,7 +275,7 @@
 {#if !showRows && accounts.length === 1}<OverageSwitch account={accounts[0]} />{/if}
 {#if actionError || policyError}<Message variant="err">{actionError || policyError}</Message>{/if}
 {#if policyError && !actionError}<Button size="sm" onclick={() => policyState.load()}>Reload</Button>{/if}
-{#if refreshError}<Message variant="err">{refreshError}</Message><Button size="sm" onclick={refreshAccounts}>Reload</Button>{/if}
+{#if refreshError}<Message variant="err">{refreshError}</Message><Button size="sm" onclick={refreshAccounts}>Retry</Button>{/if}
 <div class="accounts" aria-label={`${provider.label} accounts`}>
 	{#if !showRows}
 		<div class="empty-row">
@@ -341,7 +341,7 @@
 				{/if}
 				{#if account.state !== 'removed' && signIn && !(signIn.status === 'completed' && account.state === 'signed_in')}
 					<div class="signin-state" role="status">
-						<span>{signinMessage(signIn, accountName, signin)}</span>
+						<span>{signinMessage(signIn, accountName, signin, VENDORS[account.provider]?.cli ?? null)}</span>
 						{#if signIn.status === 'waiting'}
 							<div class="signin-actions">
 								<Button size="sm" disabled={!!pending[account.id]} onclick={() => checkSignin(account.id)}>Check</Button>

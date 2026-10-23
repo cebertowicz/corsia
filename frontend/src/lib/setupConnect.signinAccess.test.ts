@@ -30,12 +30,12 @@ function flowFor(source: typeof claude) {
 afterEach(() => { vi.unstubAllGlobals(); });
 
 describe('a sign-in the browser never returns to', () => {
-	it('says what happened, keeps the failure reference and offers a new sign-in or turning the tool off', async () => {
+	it('says what the browser may have shown, keeps the failure reference and offers a new sign-in or turning the tool off', async () => {
 		serve({ status: 'failed', cause: 'signin_timed_out', ref: 'ref-7' });
 		const flow = flowFor(claude);
 		await flow.signIn(claude);
 		const row = flow.row(claude);
-		expect(row.meta).toBe('Couldn’t finish signing in to Claude Code: your browser didn’t come back to CORSIA in time. Sign in again, or turn Claude Code off.');
+		expect(row.meta).toBe('Couldn’t finish signing in to Claude Code. If your browser said this account doesn’t include Claude Code, sign in with another account or turn Claude Code off. Otherwise, sign in again.');
 		expect(row.error).toBe(true);
 		expect(row.reference).toBe('ref-7');
 		expect(row.action?.label).toBe('Sign in');
@@ -46,7 +46,7 @@ describe('a sign-in the browser never returns to', () => {
 		const calls = serve({ status: 'failed', cause: 'signin_timed_out', ref: 'ref-8' });
 		const flow = flowFor(codex);
 		await flow.signIn(codex);
-		expect(flow.row(codex).meta).toBe('Couldn’t finish signing in to Codex: your browser didn’t come back to CORSIA in time. Sign in again, or turn Codex off.');
+		expect(flow.row(codex).meta).toBe('Couldn’t finish signing in to Codex. If your browser said this account doesn’t include Codex, sign in with another account or turn Codex off. Otherwise, sign in again.');
 		const starts = () => calls.filter((call) => call === 'POST /api/vendor-accounts/account-1/signin').length;
 		expect(starts()).toBe(1);
 		flow.row(codex).action?.run();
