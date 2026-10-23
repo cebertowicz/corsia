@@ -45,10 +45,9 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any
 
-from connections import binder
-from events.connectors.measurement import MEASUREMENT_CONNECTOR
-from events.platform import PlatformDelivery, deliver_platform_event_sync
-from infra.database import write_transaction
+from events.connectors.measurement import MOVEMENT_DIGEST_EVENT
+from events.platform import PlatformDelivery
+from events.report_delivery import deliver_measurement_report_sync
 from infra.db_async import run_in_db_unless_owned
 
 CHANGE_KINDS = ("instruction", "skill", "workflow", "model", "roster")
@@ -198,12 +197,10 @@ def deliver_movement_report_sync(
 ) -> list[PlatformDelivery]:
     """Validate, bind the scope's conductor, and deliver one report."""
     parsed = validated(report)
-    with write_transaction(db, scope="deliver_movement_report") as conn:
-        binder.ensure_designation_rule(
-            connector=MEASUREMENT_CONNECTOR, fact="scope", value=parsed.scope,
-            designation=parsed.scope, db=conn)
-        return deliver_platform_event_sync(
-            MEASUREMENT_CONNECTOR, parsed.as_event_payload(), db=conn)
+    return deliver_measurement_report_sync(
+        scope=parsed.scope, event_type=MOVEMENT_DIGEST_EVENT,
+        payload=parsed.as_event_payload(),
+        transaction_scope="deliver_movement_report", db=db)
 
 
 async def deliver_movement_report(
