@@ -13,8 +13,9 @@ is open and at least one of these holds:
 
 The user's time is cut out, whoever armed the wait: user-owned holds (the
 user's pause, a blocker on the user), whole-plan pauses, a decision on the
-node from its raise until it is answered, withdrawn or reopened for editing,
-and a dependency on a step assigned to the user while that step is open. So is
+node while it awaits the user's answer, and a dependency on a step assigned to
+the user while that step is open (a step they closed or failed is an unmet
+dependency the agent must re-plan, so that is waiting again). So is
 anything after the node settles. Causes that overlap count once. An interval
 still open runs to ``now``.
 
@@ -173,7 +174,7 @@ def _read(connection, ids: list[str], rows_in: Callable) -> dict[str, dict]:
 
 
 def _prerequisite_unmet(connection, prerequisites: list[str], rows_in, now: float):
-    """Each prerequisite's not-yet-accepted intervals, and which are the user's steps."""
+    """Each prerequisite's not-yet-accepted intervals, and a user step's open ones."""
     by_id: dict[str, dict] = {}
     for row in rows_in(
         connection,
@@ -186,52 +187,65 @@ def _prerequisite_unmet(connection, prerequisites: list[str], rows_in, now: floa
         entry = by_id.setdefault(str(row["id"]), {"node": dict(row), "transitions": []})
         if row["at"] is not None:
             entry["transitions"].append({**dict(row), "created_at": row["at"]})
-    unmet = {
-        node_id: _spans_where(
-            _state_spans(entry["node"], entry["transitions"], now),
-            lambda state: state not in _ACCEPTED_STATES,
-        )
+    spans = {
+        node_id: _state_spans(entry["node"], entry["transitions"], now)
         for node_id, entry in by_id.items()
     }
-    return unmet, {node_id for node_id, entry in by_id.items() if entry["node"]["assignee"] == "user"}
+    unmet = {
+        node_id: _spans_where(found, lambda state: state not in _ACCEPTED_STATES)
+        for node_id, found in spans.items()
+    }
+    user_open = {
+        node_id: _spans_where(spans[node_id], lambda state: state not in _TERMINAL_STATES)
+        for node_id, entry in by_id.items() if entry["node"]["assignee"] == "user"
+    }
+    return unmet, user_open
 
 
 def _decisions_raised(connection, node_ids: list[str], rows_in: Callable, now: float):
-    """Each task's raised-decision stretches, from its decisions' review-step events.
+    """Each task's raised-decision stretches: its decisions' review steps while in review.
 
-    A decision's body names its source task and its review step, the user's,
-    and neither ever changes; ``idx_artifact_identities_decision_source`` keys
-    the lookup on the task, so it costs that task's decisions alone. It is
-    named, because without statistics SQLite prefers the (integration, type)
-    key, a scan of every decision; the literal type and ``json_valid`` term
-    are what make the partial index usable. An answer, a withdrawal or an edit back to draft ends a raise; one
-    still unanswered runs to ``now``.
+    Raising a decision moves its review step, the user's, into
+    ``review_requested``; an answer, a withdrawal or an edit back to draft
+    moves it out. That stretch is the review-step condition
+    ``decision_projection.answerable`` settles on, so the two agree. A raise
+    still open ends where its attention was cleared out of band (the body's
+    last write, ``raised_decisions``' other condition), else at ``now``.
+
+    A decision's body names its source task and its review step, and neither
+    ever changes; ``idx_artifact_identities_decision_source`` keys the lookup
+    on the task, so it reads that task's decisions and their review steps'
+    transitions alone. It is named, because without statistics SQLite prefers
+    the (integration, type) key, a scan of every decision; the literal type
+    and ``json_valid`` term are what make the partial index usable.
     """
-    opened: dict[str, tuple[str, float]] = {}
+    opened: dict[str, tuple[str, float, float | None]] = {}
     found: dict[str, list[Interval]] = defaultdict(list)
     for row in rows_in(
         connection,
         """SELECT e.node_id,json_extract(i.metadata,'$.plan_decision.source_node_id') AS source_id,
-                  e.event,e.created_at
+                  e.prior_state,e.new_state,e.created_at,
+                  CASE WHEN json_extract(i.metadata,'$.attention_state')='raised' THEN NULL
+                       ELSE i.updated_at END AS cleared_at
            FROM artifact_identities i INDEXED BY idx_artifact_identities_decision_source
            CROSS JOIN plan_node_events e
              ON e.node_id=json_extract(i.metadata,'$.plan_decision.node_id')
            WHERE i.integration='local' AND i.type='plan-decision' AND json_valid(i.metadata)
              AND json_extract(i.metadata,'$.plan_decision.source_node_id') IN ({marks})
-             AND e.event IN ('decision_raised','decision_answered','decision_invalidated','decision_updated')
+             AND e.event='state_transition'
            ORDER BY e.created_at,e.rowid""",
         node_ids,
     ):
-        review, source, at = str(row["node_id"]), row["source_id"], _at(row["created_at"])
+        review, at = str(row["node_id"]), _at(row["created_at"])
         if at is None:
             continue
-        if row["event"] == "decision_raised":
-            opened.setdefault(review, (str(source), at))
-        elif review in opened:
-            source_id, start = opened.pop(review)
+        if row["new_state"] == "review_requested":
+            opened.setdefault(review, (str(row["source_id"]), at, _at(row["cleared_at"])))
+        elif row["prior_state"] == "review_requested" and review in opened:
+            source_id, start, _ = opened.pop(review)
             found[source_id].append((start, at))
-    for source_id, start in opened.values():
-        found[source_id].append((start, now))
+    for source_id, start, cleared in opened.values():
+        found[source_id].append((start, now if cleared is None else max(start, cleared)))
     return found
 
 
@@ -291,7 +305,7 @@ def own_waiting_intervals(
         str(row["depends_on"]) for fact in facts.values() for row in fact["edges"]
         if row["depends_on"] is not None
     } | {str(row["depends_on_node_id"]) for fact in facts.values() for row in fact["live"]})
-    unmet, user_steps = _prerequisite_unmet(connection, prerequisites, rows_in, clock)
+    unmet, user_open = _prerequisite_unmet(connection, prerequisites, rows_in, clock)
     result: dict[str, list[Interval]] = {}
     for node_id, fact in facts.items():
         if "node" not in fact:
@@ -304,10 +318,9 @@ def own_waiting_intervals(
         user_time = list(raised.get(node_id, []))
         for prerequisite, present in _edge_intervals(fact["edges"], fact["live"], clock).items():
             pending = intersect(present, unmet.get(prerequisite, []))
-            if prerequisite in user_steps:
-                user_time += pending
-            else:
-                causes += pending
+            theirs = intersect(pending, user_open.get(prerequisite, []))
+            user_time += theirs
+            causes += subtract(pending, theirs)
         linked = _at(fact.get("pr_linked_at"))
         if linked is not None:
             review = _spans_where(spans, lambda state: state == "review_requested")

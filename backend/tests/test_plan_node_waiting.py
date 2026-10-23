@@ -354,8 +354,14 @@ def _decision(db, plan, source, clock, raised):
 
 @pytest.fixture
 def clock(monkeypatch):
-    """Set the plan writers' clock to ``minutes`` after T0: events are append-only."""
-    return lambda minutes: monkeypatch.setattr(service, "_now", lambda: _at(minutes))
+    """Set the plan and registry writers' clock to ``minutes`` after T0: events are append-only."""
+    from registry import models
+
+    def set_clock(minutes):
+        monkeypatch.setattr(service, "_now", lambda: _at(minutes))
+        monkeypatch.setattr(models, "_now", lambda: _at(minutes))
+
+    return set_clock
 
 
 def test_a_raised_decision_is_the_users_time_until_it_is_answered(db, clock):
@@ -394,6 +400,30 @@ def test_an_unanswered_decision_cuts_to_now_and_an_edit_back_to_draft_ends_it(db
     assert _waited(db, edited, 90) == 30 * 60 + 30 * 60
 
 
+def test_a_withdrawn_decision_or_one_dismissed_out_of_band_stops_being_the_users_time(db, clock):
+    from registry import attention
+
+    plan = service.ensure_plan("thread", "child", db=db)
+    withdrawn = _task(db, plan.id, "Withdrawn")
+    dismissed = _task(db, plan.id, "Dismissed")
+    for node in (withdrawn, dismissed):
+        _move(db, node.id, "pending", "active", 0)
+        _watch(db, node, 0)
+    raised = _decision(db, plan, withdrawn, clock, 20)
+    shown = _decision(db, plan, dismissed, clock, 20)
+    clock(50)
+    decisions.invalidate(
+        raised["id"], expected_revision=raised["revision"], mutation_id=uuid.uuid4().hex,
+        actor=CHILD, provenance="test.waiting", db=db,
+    )
+    clock(60)
+    # The person dismissed it from their queue; the review step stays in review.
+    attention.clear_attention(shown["artifact_id"], outcome="dismiss", reason="not now", db=db)
+
+    assert _waited(db, withdrawn, 90) == 20 * 60 + 40 * 60
+    assert _waited(db, dismissed, 90) == 20 * 60 + 30 * 60
+
+
 def test_a_dependency_on_the_users_step_is_their_time_but_an_agents_step_waits(db):
     plan = service.ensure_plan("thread", "owner", db=db)
     person_step = _task(db, plan.id, "Sign in", assignee="user")
@@ -411,6 +441,18 @@ def test_a_dependency_on_the_users_step_is_their_time_but_an_agents_step_waits(d
     # A watch 0..10 overlaps the dependency 5..40: the user's 5..40 is cut whole.
     assert _waited(db, on_person, 90) == 5 * 60
     assert _waited(db, on_agent, 90) == 40 * 60
+
+
+def test_a_user_step_closed_unaccepted_leaves_an_unmet_dependency_that_waits_again(db):
+    plan = service.ensure_plan("thread", "owner", db=db)
+    person_step = _task(db, plan.id, "Sign in", assignee="user")
+    on_person = _task(db, plan.id, "After sign-in")
+    _move(db, on_person.id, "pending", "active", 0)
+    _depend(db, on_person, person_step, 0)
+    _move(db, person_step.id, "pending", "closed", 30)
+
+    # The user's 0..30 is cut; from their Won't do on, the agent must re-plan.
+    assert _waited(db, on_person, 90) == 60 * 60
 
 
 def test_open_waits_leave_out_a_decision_the_user_owes(db, clock):
