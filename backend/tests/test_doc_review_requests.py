@@ -31,6 +31,15 @@ def review_env(isolated_db, monkeypatch):
     db.close()
 
 
+def text_document(db, artifact_id, tmp_path, text="# PRD\n\nThe claim needs evidence.\n"):
+    """Give the seeded document a saved, image-free body, so a review start can fork on it."""
+    document = tmp_path / "PRD.md"
+    document.write_text(text)
+    db.execute("UPDATE artifact_identities SET path=? WHERE id=?", (str(document), artifact_id))
+    db.commit()
+    return document
+
+
 def request(db, artifact_id, *, kind="agent", reviewer="reviewer", note="Check claims", key="review-key"):
     from doceditor import review_requests
 

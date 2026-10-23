@@ -12,7 +12,7 @@ from core.artifact_review_fork_kind import ARTIFACT_REVIEW_KIND
 from core.fork_runtime import ForkHandle, handles
 from doceditor import review_requests
 from infra.db_async import run_in_db
-from test_doc_review_requests import request, review_env, fork_comment, stored
+from test_doc_review_requests import request, review_env, fork_comment, stored, text_document
 from tools import document_reviews
 
 
@@ -23,12 +23,13 @@ def _actor() -> review_requests.ReviewActor:
 
 
 @pytest.mark.asyncio
-async def test_cancelled_create_caller_starts_committed_fork(review_env, monkeypatch):
+async def test_cancelled_create_caller_starts_committed_fork(review_env, monkeypatch, tmp_path):
     """The DB worker submits the fork after commit before rethrowing caller cancellation."""
     from core import artifact_review_runtime as runtime
     from infra import app_loop
 
     db, artifact_id = review_env
+    text_document(db, artifact_id, tmp_path)
     entered, release = threading.Event(), threading.Event()
     running = asyncio.Event()
     previous_loop = app_loop._LOOP
