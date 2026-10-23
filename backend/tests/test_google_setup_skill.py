@@ -103,7 +103,7 @@ def test_email_and_calendar_route_to_google_setup_and_setup_hands_off_no_agent()
     """Step 5 loads google-setup without creating an agent, and the hand-off offers none."""
     app = FIRST_RUN_APP.read_text(encoding="utf-8")
     assert "follow skill `google-setup` from its step 2" in app and "it creates no agent" in app
-    hand_off = app.split("## The hand-off", 1)[1]
+    hand_off = app.split("## Hand over to your agents", 1)[1]
     assert "Setup offers no agent" in hand_off
     assert "only when they ask you to take that work off them (skill `time-to-agent`)" in hand_off
 

@@ -18,13 +18,15 @@ log = logging.getLogger(__name__)
 
 FIRST_RUN_REFERENCE = "skills/conductor-bootstrap/references/first-run.md"
 APP_REFERENCE = "skills/conductor-bootstrap/references/first-run-app.md"
-#: The whole set of fact reads shares this budget; the first model pick waits no longer.
+APP_START_REFERENCE = "skills/conductor-bootstrap/references/first-run-start.md"
+#: Fact reads share this budget; cancelled reads finish cleanup before the pick returns.
 FACTS_TIMEOUT_SECONDS = 5.0
 APP_FACT_KEYS = frozenset({
     "first_run_path", "harness_ready", "sources_missing", "agents_found", "local_download",
     "tool_attempts", "pays_for", "bound_model", "web_search_ready", "github_ready", "setup",
     "user_profile",
 })
+APP_PLAN_FACT_KEYS = APP_FACT_KEYS | {"connected_app_count", "email_calendar_ready"}
 UNAVAILABLE_READS = {
     "your_model": "none; omit task 1's bracket",
     "bound_model": "none; treat the bound model as unknown",
@@ -35,7 +37,7 @@ UNAVAILABLE_READS = {
     "web_search_key": "one web_search call",
     "harness_ready": "tool model_sources, once, without recheck",
     "sources_missing": "tool model_sources, once, without recheck",
-    "agents_found": "none; leave OpenClaw and Hermes Agent out of step 2",
+    "agents_found": "none; skip the import step unless its consent decision is available",
     "local_download": "corsia_api GET /api/providers/local/setup",
     "setup_handoff": "setup progress handoff saved before model binding",
     "tool_attempts": "setup progress handoff saved before model binding",
@@ -54,28 +56,27 @@ INLINE_SUMMARY = (
 )
 APP_INLINE_SUMMARY = (
     "First run of a new install. Your instructions are below: skill "
-    "conductor-bootstrap's references/first-run.md followed by first-run-app.md. "
-    "The Setup facts section holds the facts the app-path instructions read."
+    "conductor-bootstrap's references/first-run-start.md. The server has already "
+    "posted your opening and seeded your plan. Start the first applicable step."
 )
 
 
 def app_reference_served() -> bool:
     """Whether the app-path instruction reference is present in this System package."""
     from infra.system_package import system_resource_source
+    from onboarding.first_run_opening import OPENING_REFERENCE
 
-    return system_resource_source(APP_REFERENCE).is_file()
+    return all(system_resource_source(path).is_file() for path in (APP_REFERENCE, APP_START_REFERENCE, OPENING_REFERENCE))
 
 
 def instructions(path: str = "script") -> str:
-    """The served first-run reference, plus the app reference for the app path."""
+    """The script instructions, or the app's compact first-turn instructions."""
     from infra.system_package import system_resource_source
 
-    first_run = system_resource_source(FIRST_RUN_REFERENCE).read_text(encoding="utf-8").strip()
     if path == "script":
-        return first_run
+        return system_resource_source(FIRST_RUN_REFERENCE).read_text(encoding="utf-8").strip()
     if path == "app":
-        app = system_resource_source(APP_REFERENCE).read_text(encoding="utf-8").strip()
-        return f"{first_run}\n\n{app}"
+        return system_resource_source(APP_START_REFERENCE).read_text(encoding="utf-8").strip()
     raise ValueError("first_run_path must be 'app' or 'script'")
 
 
@@ -200,19 +201,24 @@ def _unavailable(name: str) -> dict[str, str]:
 
 async def _read_facts(reads: dict[str, Any]) -> dict[str, Any]:
     tasks = {name: asyncio.ensure_future(read()) for name, read in reads.items()}
-    await asyncio.wait(tasks.values(), timeout=FACTS_TIMEOUT_SECONDS)
-    results: dict[str, Any] = {}
-    for name, task in tasks.items():
-        if not task.done():
-            task.cancel()
-            log.error("first-run setup fact %s unavailable: unfinished after %ss", name, FACTS_TIMEOUT_SECONDS)
-            results[name] = _unavailable(name)
-        elif task.exception() is not None:
-            log.error("first-run setup fact %s unavailable: read failed", name, exc_info=task.exception())
-            results[name] = _unavailable(name)
-        else:
-            results[name] = task.result()
-    return results
+    try:
+        await asyncio.wait(tasks.values(), timeout=FACTS_TIMEOUT_SECONDS)
+        results: dict[str, Any] = {}
+        for name, task in tasks.items():
+            if not task.done() or task.cancelled():
+                log.error("first-run setup fact %s unavailable: unfinished after %ss", name, FACTS_TIMEOUT_SECONDS)
+                results[name] = _unavailable(name)
+            elif task.exception() is not None:
+                log.error("first-run setup fact %s unavailable: read failed", name, exc_info=task.exception())
+                results[name] = _unavailable(name)
+            else:
+                results[name] = task.result()
+        return results
+    finally:
+        for task in tasks.values():
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks.values(), return_exceptions=True)
 
 
 async def _script_setup_facts(model: str, path: str) -> dict[str, Any]:
@@ -237,7 +243,7 @@ async def _app_setup_facts(model: str) -> dict[str, Any]:
     from onboarding import setup_decisions
 
     reads = await _read_facts({
-        "bound_model": lambda: run_in_db(_bound_model, model),
+        **({"bound_model": lambda: run_in_db(_bound_model, model)} if model else {}),
         "model_sources": lambda: run_in_db(_model_sources),
         "agents_found": lambda: asyncio.to_thread(_app_agents_found),
         "local_download": lambda: asyncio.to_thread(_app_local_download),
@@ -273,7 +279,7 @@ async def _app_setup_facts(model: str) -> dict[str, Any]:
         tool_attempts = _unavailable("tool_attempts")
     else:
         tool_attempts = None
-    return {
+    facts = {
         "first_run_path": "app",
         "harness_ready": harness_ready,
         "sources_missing": sources_missing,
@@ -281,12 +287,14 @@ async def _app_setup_facts(model: str) -> dict[str, Any]:
         "local_download": reads["local_download"],
         "tool_attempts": tool_attempts,
         "pays_for": pays_for,
-        "bound_model": reads["bound_model"],
         "web_search_ready": reads["web_search_ready"],
         "github_ready": github_ready,
         "setup": reads["setup"],
         "user_profile": reads["user_profile"],
     }
+    if model:
+        facts["bound_model"] = reads["bound_model"]
+    return facts
 
 
 async def setup_facts(model: str, path: str = "script") -> dict[str, Any]:
@@ -310,10 +318,67 @@ def render(facts: dict[str, Any], instruction_text: str, summary: str = INLINE_S
     return format_event_input(FIRST_RUN_EVENT, summary, None, notice=body)
 
 
-async def render_for(model: str, path: str = "script") -> str:
-    """The full first-run wake for a conductor about to run on ``model``."""
+def first_app_step(facts: dict[str, Any]) -> str:
+    """Inline only the first applicable numbered section; keep later steps on demand."""
+    import re
+
+    from infra.system_package import system_resource_source
+    from onboarding.app_first_run import applicable_steps
+
+    steps = applicable_steps(facts)
+    number = steps[0]["step_number"] if steps else 9
+    reference = system_resource_source(APP_REFERENCE).read_text(encoding="utf-8")
+    if number == 9:
+        return reference[reference.index("## Hand over to your agents"):].strip()
+    match = re.search(rf"(?ms)^{number}\. \*\*.*?(?=^\d+\. \*\*|^Silently,|\Z)", reference)
+    if match is None:
+        raise ValueError(f"The first-run app reference has no step {number}")
+    section = match.group().strip()
+    if number == 3:
+        # The first question needs no helper/connection instructions until answered.
+        section = section.split("   - **Quick**", 1)[0].strip()
+    elif number == 4:
+        web = system_resource_source("skills/conductor-bootstrap/references/web-search.md").read_text(encoding="utf-8")
+        section += "\n\n" + web.split("## 1. Explain, then ask", 1)[1].split("## 2.", 1)[0].strip()
+    elif number == 5:
+        lookup = system_resource_source("skills/conductor-bootstrap/references/look-up-the-person.md").read_text(encoding="utf-8")
+        section += "\n\n" + lookup.split("## Before anything: ask when search was already set up", 1)[1].split("## A.", 1)[0].strip()
+    return "## Your first step\n\n" + section
+
+
+async def render_for(model: str, path: str = "script", *, thread_id: str | None = None) -> str:
+    """Render the first run; a completed app setup reuses its committed facts."""
     if path == "app" and app_reference_served():
-        return render(await setup_facts(model, "app"), instructions("app"), APP_INLINE_SUMMARY)
+        from infra.db_async import run_in_db
+        from onboarding.app_first_run import (
+            IMPORT_DECISION_TITLE,
+            read_app_facts,
+            read_cached_app_facts,
+            reconcile_rendered_app_facts,
+        )
+
+        facts = await run_in_db(read_cached_app_facts, thread_id) if thread_id else None
+        if facts is None:
+            facts = await read_app_facts(model)
+        else:
+            facts = {**facts, "bound_model": await run_in_db(_bound_model, model)}
+            # Consent names the person-selected provider, which was unknown in setup.
+            from onboarding import setup_decisions
+            harness_ready = facts.get("harness_ready", [])
+            ready = {"claude-code" if source == "claude_code" else source
+                     for source in harness_ready} if isinstance(harness_ready, list) else set()
+            setup = facts.get("setup")
+            cached_decisions = setup.get("setup_decisions") if isinstance(setup, dict) else None
+            # An unavailable marker stays as it is: it sends the agent to the live read, and a
+            # partial list beside it would pass for the complete one.
+            if isinstance(cached_decisions, list):
+                card = await run_in_db(setup_decisions.import_card, model, ready)
+                decisions = [item for item in cached_decisions if item.get("title") != IMPORT_DECISION_TITLE]
+                imported = setup_decisions.agent_import(card)
+                facts["setup"] = {"setup_decisions": ([imported] if imported else []) + decisions}
+        if thread_id:
+            await run_in_db(reconcile_rendered_app_facts, thread_id, facts)
+        return render(facts, instructions("app") + "\n\n" + first_app_step(facts), APP_INLINE_SUMMARY)
     if path == "app":
         log.warning("%s is not served; app first run is degrading to the script text", APP_REFERENCE)
     return render(await setup_facts(model, path), instructions())

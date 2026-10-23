@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { tick } from 'svelte';
+	import { firstRunOpeningPresentation } from '$lib/ws/firstRunOpeningReveal';
 	import { get } from 'svelte/store';
 	import { token } from '$lib/stores/auth';
 	import { loadDeferredToolResult } from '$lib/toolResultLoader';
@@ -52,10 +53,9 @@
 	} = $props();
 	let expandedTools = $state(new Set<string>());
 	let expandedReasoning = $state(new Set<string>());
-	// The shared store can retain a prior selection; filter at this transcript boundary (#1084).
 	const renderedThreadId = $derived(threadId ?? $activeThreadId);
-	const messageRows = $derived($messages.filter((m) => m.thread_id === renderedThreadId));
-	const renderedStreaming = $derived(isThreadTurnActive($turnStates, renderedThreadId));
+	const { rows: messageRows, opening: revealingOpening } = $derived(firstRunOpeningPresentation($messages, renderedThreadId));
+	const renderedStreaming = $derived(!revealingOpening && isThreadTurnActive($turnStates, renderedThreadId));
 	const focusLive = createFocusWorkBlock(() => renderedThreadId, () => focusMode);
 	const checkpointState = $derived(
 		renderedThreadId ? $checkpointsByThread.get(renderedThreadId) : undefined,
@@ -120,14 +120,14 @@
 		};
 	});
 	const liveTurn = $derived(
-		focusLive.current.active
+		!revealingOpening && focusLive.current.active
 			? { turnId: renderedThreadId ? $turnStates.get(renderedThreadId)?.turnId ?? null : null }
 			: null,
 	);
 	const transcriptEntries = $derived(mergeTranscriptUpdates(
 		buildTranscriptPresentation(transcriptMessages, focusMode, liveTurn, undefined,
 			focusMode ? focusRuns.filter((run) => runHasMore(run, runLoads[run.lastId])) : []),
-		(renderedThreadId ? $threadUpdateCards[renderedThreadId]?.cards ?? [] : []).filter((card) => card.after_seq >= windowFloor),
+		(revealingOpening ? [] : renderedThreadId ? $threadUpdateCards[renderedThreadId]?.cards ?? [] : []).filter((card) => card.after_seq >= windowFloor),
 		{
 			focusMode, divider: renderedThreadId ? $visitDividers[renderedThreadId]?.divider ?? null : null,
 			pauses: pauseDescriptors, turnSummaries,
@@ -321,8 +321,8 @@
 			{onOpenLightbox}
 			threadId={renderedThreadId}
 			{renderedStreaming}
-			liveRollup={focusLive.current}
-			checkpoint={transcriptCheckpoint}
+			liveRollup={revealingOpening ? undefined : focusLive.current}
+			checkpoint={revealingOpening ? null : transcriptCheckpoint}
 			{turnSummaries}
 			pauses={focusMode ? [] : pauseDescriptors}
 			historyComplete={historyComplete ?? !(hasMoreMessages || firstLoadPending || firstLoadFailed)}

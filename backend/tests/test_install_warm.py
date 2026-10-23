@@ -552,3 +552,47 @@ async def test_wait_true_joins_an_identical_warm_already_in_flight(monkeypatch):
     release.set()
     assert await asyncio.wait_for(joined, 1) == {"ok": True, "message": "Warm finished"}
     assert calls == 1
+
+
+@pytest.mark.asyncio
+async def test_only_a_progress_warm_probes_and_broadcasts_while_it_runs(monkeypatch):
+    import llm.providers
+    from core import thread_warm
+    from infra import state
+
+    release = asyncio.Event()
+
+    async def _warm(cfg, *, model_id, messages, tools=None, **_shape):
+        await release.wait()
+        return {"ok": True}
+
+    route = _wait_route(monkeypatch, _warm)
+    provider = llm.providers.for_provider("omlx")
+    provider.probe_cache = AsyncMock(return_value={
+        "ok": True, "total_blocks": 4, "blocks_cold": 4, "block_size": 16, "total_tokens": 64,
+    })
+    published: list[dict] = []
+    monkeypatch.setattr("infra.state.ws.broadcast_to_user", lambda _user, event: published.append(event))
+    monkeypatch.setattr(thread_warm, "WARM_PROGRESS_PROBE_SECONDS", 0.01)
+
+    # An ordinary warm: the one admission probe, then no probe loop or broadcast.
+    ordinary = asyncio.create_task(route.warm_session_cache("sess-1", token="", wait=True))
+    async with asyncio.timeout(5):
+        while "sess-1" not in state._active_warm_tasks:
+            await asyncio.sleep(0.01)
+    await asyncio.sleep(0.2)
+    assert provider.probe_cache.await_count == 1
+    assert published == []
+    release.set()
+    assert await asyncio.wait_for(ordinary, 1) == {"ok": True, "message": "Warm finished"}
+
+    # Setup's warm under the same conditions keeps probing and publishing.
+    release.clear()
+    provider.probe_cache.reset_mock()
+    setup = asyncio.create_task(route.warm_session_cache("sess-1", token="", wait=True, progress=True))
+    async with asyncio.timeout(5):
+        while provider.probe_cache.await_count < 3:
+            await asyncio.sleep(0.01)
+    assert published and all(event["type"] == "thread_warm_progress" for event in published)
+    release.set()
+    assert await asyncio.wait_for(setup, 1) == {"ok": True, "message": "Warm finished"}

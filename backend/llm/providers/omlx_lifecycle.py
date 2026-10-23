@@ -21,7 +21,9 @@ from llm.providers.omlx_endpoints import (
 log = logging.getLogger("llm.providers.omlx")
 
 _LOAD_TIMEOUT = 600.0
-_WARM_TIMEOUT = 60.0
+# A clean install can process tens of thousands of uncached prefix tokens.
+# Keep connection failure quick while allowing that one bounded warm to finish.
+_WARM_TIMEOUT = httpx.Timeout(600.0, connect=10.0)
 
 
 class OmlxLoadedStateError(RuntimeError):

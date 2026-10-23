@@ -250,6 +250,24 @@ def test_after_an_account_a_write_needs_a_session(client):
     assert _progress(client, token)["local_ai"] is None
 
 
+def test_only_the_first_run_owner_can_complete_the_held_app_setup(client):
+    _create_account(client)
+    accounts.create_user("other", "a-long-enough-password")
+    other_token, _expires = accounts.issue_token("other", kind="session", label="browser")
+
+    assert _put(client, {"completed": True}, other_token).status_code == 403
+
+
+def test_a_filesystem_permission_error_while_writing_progress_is_not_an_owner_refusal(client, monkeypatch):
+    token = _create_account(client)
+    monkeypatch.setattr(
+        setup_progress, "update", lambda **_kwargs: (_ for _ in ()).throw(PermissionError("disk denied")),
+    )
+
+    with pytest.raises(PermissionError, match="disk denied"):
+        _put(client, {"local_ai": True}, token)
+
+
 def test_an_unknown_step_is_refused(client):
     token = _create_account(client)
 

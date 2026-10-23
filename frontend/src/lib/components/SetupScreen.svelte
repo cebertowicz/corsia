@@ -32,12 +32,16 @@
 	import { setupLocalRow, setupStartNote, type LocalRowState } from '$lib/setupProviderRows';
 	import { measuredDownloadTime, showLocalOnlyGuidance } from '$lib/setupLocalPresentation';
 	import { ACCOUNT_LEDE, WELCOME_TITLE } from '$lib/setupWelcome';
+	import { createSetupWarm, finishSetupWarmHandoff } from '$lib/setupWarm.svelte';
 	interface Props { onExistingAccount: () => void; onAccountCreated: () => void; onFinished: () => void; startConnect?: boolean; onLeaveConnect?: () => void; resume?: boolean }
+
 	const { onExistingAccount, onAccountCreated, onFinished, startConnect = false, onLeaveConnect, resume = false }: Props = $props();
 	type Page = 'checking' | 'welcome' | 'account' | 'subscriptions' | 'models' | 'hard-stop' | 'error' | 'connect';
 	const CLI_VENDORS = ['claude-code', 'codex'] as const;
 	type Status = { apple_silicon?: boolean; macos_supported?: boolean; free_disk_gb?: number; local_eligible?: boolean; local_started?: boolean; work_folder?: string; required_username?: string | null; classifier?: ClassifierState };
 	const classifier = createSetupClassifier(), localPick = createSetupLocalPick(), remote = createSetupRemote();
+	const warm = createSetupWarm();
+	$effect(() => { warm.start(catalog, $token); });
 	let page = $state<Page>(untrack(() => startConnect) ? 'connect' : 'checking');
 	let shell: SetupShell | undefined = $state();
 	let status = $state<Status>({}), statusError = $state(''), reportError = $state('');
@@ -128,6 +132,7 @@
 		if (page === 'account' && $token && !accountKnown) return { title: 'Your account', primary: { label: 'Continue' }, onPrimary: afterAccount };
 		if (page === 'account') return { title: editing ? 'Your account' : 'Create your account', lede: ACCOUNT_LEDE, primary: { label: 'Continue', loading: accountBusy, disabled: !canSubmitAccount || accountBusy || folderChanging }, onPrimary: submitAccount };
 		if (page === 'subscriptions') return { title: 'Your subscriptions', lede: 'CORSIA’s agents can work through a Claude or ChatGPT subscription you already pay for.' };
+		if (page === 'models' && finishing && warm.running) return { title: 'Finishing setup', lede: warm.percent === null ? undefined : `${warm.percent}%` };
 		return { title: 'Providers & models', lede: 'CORSIA needs one working model to continue setup.', primary: { label: 'Start using CORSIA', disabled: !canFinish || finishing, loading: finishing, note: finishNote, noteAlways: true }, onPrimary: finishSetup };
 	});
 	/** Continue on the account screen creates the account, applying the chosen folder first, or saves what changed on one setup already made. */
@@ -308,18 +313,12 @@
 		} catch { catalog = []; sourceError = 'CORSIA couldn’t check your model sources. Try again.'; }
 	}
 	/** Setup never chooses a model: the person picks the CORSIA agent's on its first chat. */
-	async function finishSetup() {
-		const current = get(token); if (!current || finishing) return;
-		finishing = true; sourceError = '';
-		try {
-			if (!await recordSetupProgress({ completed: true, handoff: { tools: connectFlow.attempts }, ...(picks ? { picks } : {}) }, current)) {
-				sourceError = 'CORSIA couldn’t save setup progress. Try again.';
-				return;
-			}
-			// The mark leaves before the first chat takes over, so the hand-over is one motion.
-			await shell?.exitMark();
-			onFinished();
-		} finally { finishing = false; }
+	function finishSetup() {
+		return finishSetupWarmHandoff({
+			session: get(token), isFinishing: finishing, setFinishing: (next) => { finishing = next; }, setSourceError: (next) => { sourceError = next; },
+			recordProgress: (current) => recordSetupProgress({ completed: true, handoff: { tools: connectFlow.attempts }, ...(picks ? { picks } : {}) }, current),
+			getCatalog: () => catalog, warm, exitMark: () => shell?.exitMark(), onFinished: () => onFinished(),
+		});
 	}
 	async function resumeSetup() {
 		const progress = await fetchSetupProgress(get(token));
@@ -354,7 +353,7 @@
 		const offClassifier = on('classifier_updated', () => { void classifier.read(); });
 		const focus = () => { if (page === 'models') void refreshSources(true); void classifier.retryIfFailed(); };
 		window.addEventListener('focus', focus);
-		return () => { offModels(); offClassifier(); window.removeEventListener('focus', focus); };
+		return () => { warm.destroy(); offModels(); offClassifier(); window.removeEventListener('focus', focus); };
 	});
 </script>
 

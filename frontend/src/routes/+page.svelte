@@ -30,6 +30,7 @@
 	import { emitProductEvent } from '$lib/product_events';
 	import { registerHomeLifecycle } from '$lib/homeLifecycle';
 	import { createHomeThreadSelector } from '$lib/homeThreadSelection';
+	import FirstRunHandoff from '$lib/components/FirstRunHandoff.svelte';
 	import { buildPaneConfig, type View } from '$lib/homePaneConfig';
 	import { syncCanvasHeader } from '$lib/homeCanvasHeader';
 	import { buildNewThreadBody } from '$lib/threadCreate';
@@ -74,7 +75,9 @@
 	let chatPanelRef = $state<ChatPanel | undefined>(undefined);
 	// Each deliberate selection advances this route-local intent. A first-run
 	// opener holds one generation and must yield as soon as the user chooses.
-	let selectionIntent = 0;
+	let selectionIntent = $state(0);
+	let setupFinishedHandoff = $state(0);
+	let setupFinishedIntent = $state<number | null>(null);
 
 	async function pollSystem() {
 		if (!$token) return;
@@ -134,21 +137,6 @@
 		return false;
 	}
 
-	$effect(() => {
-		const [t, scope, authenticated] = [$token, $uiScope, $isAuthenticated];
-		conductorLookup = { kind: 'unknown' };
-		if (!authenticated) return;
-		let active = true;
-		const firstRunIntent = selectionIntent;
-		void fetchScopeTarget(t, scope).then((lookup) => {
-			if (!active) return;
-			conductorLookup = lookup;
-			const ownsFirstRunSelection = () =>
-				active && $isAuthenticated && $token === t && $uiScope === scope && selectionIntent === firstRunIntent;
-			landOnFirstRun(lookup, scope, (id) => (activeView === 'measurement' ? undefined : selectThread(id, 'other', ownsFirstRunSelection))); // a link naming Measurement keeps it
-		});
-		return () => { active = false; };
-	});
 
 	function goDocuments(lens: 'all' | 'skills' = 'all', documentId?: string) {
 		const attachTarget = get(contextAttachTarget);
@@ -464,9 +452,15 @@
 <svelte:window onkeydown={handleKeydown} />
 
 <CorsiaMessageRequestHandler {goConductor} chatPanel={chatPanelRef} />
+<FirstRunHandoff
+	authenticated={$isAuthenticated} token={$token} scope={$uiScope} {selectionIntent} {setupFinishedHandoff} {setupFinishedIntent}
+	chatPanelReady={!!chatPanelRef} activeThread={$activeThreadId} {activeView} {selectThread} bind:conductorLookup
+/>
+
 <HomePageView
 	isAuthenticated={$isAuthenticated} {activeView} bind:sidebarOpen bind:chatPanelRef
 	{conductorThreadId} {conductorKnownAbsent} {systemStatus} {isDraggingOver} {paneConfig}
+	onSetupFinished={() => { setupFinishedIntent = selectionIntent; setupFinishedHandoff++; }}
 	bind:lightboxUrl bind:lightboxOpen
 	{deleteConfirmId}
 	onNewChat={focusEmptyChat} onActivity={openActivity} onConductor={goConductor} onDocuments={goDocuments}

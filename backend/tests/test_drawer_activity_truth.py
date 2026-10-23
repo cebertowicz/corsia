@@ -330,7 +330,10 @@ async def test_event_dispatch_wires_cross_tab_owner_broadcast(ws_buckets, monkey
 
     from infra.send_dispatch import dispatch_native_event
 
-    thread_row = {"user_id": "owner", "model": "mock/model", "project_id": None}
+    thread_row = {
+        "user_id": "owner", "model": "mock/model", "project_id": None,
+        "reasoning_effort": "medium",
+    }
     target = _native_target()
     driver, turn_task, identity = await dispatch_native_event(
         "s1", thread_row, "hi", None, target=target, turn_id="event-turn-1",
@@ -345,7 +348,7 @@ async def test_event_dispatch_wires_cross_tab_owner_broadcast(ws_buckets, monkey
     assert captured["target"] is target
     assert captured["attachments"] == []
     assert captured["is_retry"] is False
-    assert captured["reasoning_effort"] is None
+    assert captured["reasoning_effort"] == "medium"
     assert captured["step_metadata"] is None
 
     # The wired broadcast must deliver a terminal to the owner's off-thread client.
@@ -382,6 +385,7 @@ async def test_event_dispatch_broadcast_one_arg_contract(ws_buckets, monkeypatch
         turn_id="event-turn-2",
     )
 
+    assert captured["reasoning_effort"] is None  # Missing persisted field remains compatible.
     broadcast = captured["broadcast"]
     # Must be async (StepHandler awaits it).
     assert inspect.iscoroutinefunction(broadcast), "_broadcast must be async"
