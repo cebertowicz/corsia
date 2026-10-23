@@ -52,6 +52,17 @@ def _rows(sql: str, *args):
         db.close()
 
 
+def _completed_app_facts() -> dict:
+    """The completion snapshot shape, before a model has been selected."""
+    return {
+        "first_run_path": "app", "harness_ready": [], "sources_missing": {},
+        "agents_found": ["openclaw"], "local_download": {}, "tool_attempts": None,
+        "pays_for": [], "web_search_ready": False, "github_ready": False,
+        "setup": {"setup_decisions": []}, "user_profile": {"name": None, "full_name": None},
+        "connected_app_count": 0, "email_calendar_ready": False,
+    }
+
+
 def test_app_account_holds_only_the_neutral_wake_until_the_first_model_pick(
     fresh_install, app_seed_facts,
 ):
@@ -356,6 +367,126 @@ async def test_uncached_first_pick_reconciles_current_facts_before_rendering(fre
         f"{step['step_number']}:{step.get('vendor', 'common')}"
         for step in app_first_run.applicable_steps(facts)
     }
+
+
+@pytest.mark.asyncio
+async def test_app_facts_omit_bound_model_before_the_person_picks_one(monkeypatch):
+    from onboarding import first_run_wake
+
+    monkeypatch.setattr(first_run_wake, "_read_facts", AsyncMock(return_value={
+        "bound_model": None,
+        "model_sources": {
+            "sources": [], "github": {"state": "unavailable"},
+            "github_agent": {"state": "unavailable"},
+        },
+        "agents_found": ["openclaw"], "local_download": {}, "web_search_ready": False,
+        "setup_handoff": None, "setup_picks": None, "setup": {"setup_decisions": []},
+        "user_profile": {"name": None, "full_name": None},
+    }))
+
+    facts = await first_run_wake._app_setup_facts("")
+
+    assert "bound_model" not in facts
+
+
+@pytest.mark.asyncio
+async def test_cached_pick_archives_a_discovered_import_when_its_card_is_absent(
+    fresh_install, app_seed_facts, monkeypatch,
+):
+    from infra import accounts
+    from onboarding import app_first_run, first_run_wake, setup_decisions
+
+    accounts.create_first_account("newcomer", PASSWORD, first_run_path="app")
+    conductor_id = _conductor_id()
+    cached = _completed_app_facts()
+    monkeypatch.setattr(app_first_run, "read_app_facts", AsyncMock(return_value=cached))
+    assert await app_first_run.complete_app_setup(
+        "newcomer", step=None, local_ai=None, picks=None, handoff=None,
+    ) is True
+    assert _rows(
+        "SELECT archived_at FROM plan_nodes WHERE workflow_ref='first-run-app' AND workflow_step='2:common'"
+    ) == [{"archived_at": None}]
+    monkeypatch.setattr(first_run_wake, "_bound_model", lambda model: {"model": model, "source": "omlx"})
+    monkeypatch.setattr(setup_decisions, "import_card", lambda model, ready: None)
+
+    wake = await first_run_wake.render_for("test/model", "app", thread_id=conductor_id)
+
+    assert "2. **Bring over what your other tools know" not in wake
+    assert "3. **Where your work lives" in wake
+    assert _rows(
+        "SELECT archived_at FROM plan_nodes WHERE workflow_ref='first-run-app' AND workflow_step='2:common'"
+    )[0]["archived_at"] is not None
+    assert _rows(
+        "SELECT title FROM plan_nodes WHERE workflow_ref='first-run-app' AND archived_at IS NULL "
+        "ORDER BY order_key LIMIT 1"
+    ) == [{"title": "Where your work lives"}]
+
+
+@pytest.mark.asyncio
+async def test_cached_pick_with_unchanged_facts_has_no_public_plan_mutations(
+    fresh_install, app_seed_facts, monkeypatch,
+):
+    from infra import accounts
+    from onboarding import app_first_run, first_run_wake, setup_decisions
+    from plans import public
+
+    accounts.create_first_account("newcomer", PASSWORD, first_run_path="app")
+    conductor_id = _conductor_id()
+    cached = _completed_app_facts()
+    monkeypatch.setattr(app_first_run, "read_app_facts", AsyncMock(return_value=cached))
+    assert await app_first_run.complete_app_setup(
+        "newcomer", step=None, local_ai=None, picks=None, handoff=None,
+    ) is True
+    [before] = _rows("SELECT revision FROM plans WHERE owner_id=?", conductor_id)
+    mutations = []
+    real_mutate = public.mutate
+
+    def record_mutation(*args, **kwargs):
+        mutations.append((args, kwargs))
+        return real_mutate(*args, **kwargs)
+
+    monkeypatch.setattr(public, "mutate", record_mutation)
+    monkeypatch.setattr(first_run_wake, "_bound_model", lambda model: {"model": model, "source": "omlx"})
+    monkeypatch.setattr(
+        setup_decisions, "import_card",
+        lambda model, ready: setup_decisions.ImportCard(("OpenClaw",), (), ""),
+    )
+
+    wake = await first_run_wake.render_for("test/model", "app", thread_id=conductor_id)
+
+    [after] = _rows("SELECT revision FROM plans WHERE owner_id=?", conductor_id)
+    assert "2. **Bring over what your other tools know" in wake
+    assert mutations == []
+    assert after["revision"] == before["revision"]
+
+
+@pytest.mark.asyncio
+async def test_cached_pick_with_an_import_card_keeps_import_open_and_first(
+    fresh_install, app_seed_facts, monkeypatch,
+):
+    from infra import accounts
+    from onboarding import app_first_run, first_run_wake, setup_decisions
+
+    accounts.create_first_account("newcomer", PASSWORD, first_run_path="app")
+    conductor_id = _conductor_id()
+    cached = _completed_app_facts()
+    monkeypatch.setattr(app_first_run, "read_app_facts", AsyncMock(return_value=cached))
+    assert await app_first_run.complete_app_setup(
+        "newcomer", step=None, local_ai=None, picks=None, handoff=None,
+    ) is True
+    monkeypatch.setattr(first_run_wake, "_bound_model", lambda model: {"model": model, "source": "omlx"})
+    monkeypatch.setattr(
+        setup_decisions, "import_card",
+        lambda model, ready: setup_decisions.ImportCard(("OpenClaw",), (), ""),
+    )
+
+    wake = await first_run_wake.render_for("test/model", "app", thread_id=conductor_id)
+
+    assert "2. **Bring over what your other tools know" in wake
+    assert _rows(
+        "SELECT title FROM plan_nodes WHERE workflow_ref='first-run-app' AND archived_at IS NULL "
+        "ORDER BY order_key LIMIT 1"
+    ) == [{"title": "Bring over what your other tools know"}]
 
 
 def test_completion_retry_uses_the_latest_facts_at_the_first_model_pick(fresh_install, app_seed_facts):

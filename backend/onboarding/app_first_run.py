@@ -10,6 +10,10 @@ from typing import Any
 IMPORT_DECISION_TITLE = "Bring over what your other tools know"
 
 
+class SetupOwnerError(Exception):
+    """The signed-in person does not own the still-held app setup."""
+
+
 def _is_unavailable(value: object) -> bool:
     return isinstance(value, Mapping) and "unavailable" in value
 
@@ -26,17 +30,17 @@ def _paid_missing_sources(facts: Mapping[str, Any]) -> tuple[str, ...]:
 
 
 def _has_import_step(facts: Mapping[str, Any]) -> bool:
-    """Whether setup statically found importable context before model selection.
+    """Whether import applies at this setup phase.
 
-    The consent itself must wait for the selected model, because it names where the
-    person’s data goes. The pre-pick plan can nevertheless show that this step
-    exists from the stat-only discovery result.
+    Before a model is bound, stat-only discovery makes the provisional plan visible.
+    Once a model is bound, only its provider-specific import decision card can keep
+    the step applicable.
     """
-    agents_found = facts.get("agents_found")
-    if isinstance(agents_found, (list, tuple, set, frozenset)) and any(
-        isinstance(tool, str) and tool for tool in agents_found
-    ):
-        return True
+    if "bound_model" not in facts:
+        agents_found = facts.get("agents_found")
+        return isinstance(agents_found, (list, tuple, set, frozenset)) and any(
+            isinstance(tool, str) and tool for tool in agents_found
+        )
     setup = facts.get("setup")
     if not isinstance(setup, Mapping):
         return False
@@ -185,7 +189,7 @@ async def complete_app_setup(
     if conductor_id is None:
         return False
     if not await run_in_db(lambda: is_first_run_owner(user_id, db=get_db())):
-        raise PermissionError("setup does not belong to this signed-in user")
+        raise SetupOwnerError("setup does not belong to this signed-in user")
 
     # The current handoff/picks must be committed before their fact projection.
     await run_in_db(lambda: setup_progress.update(

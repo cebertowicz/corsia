@@ -238,7 +238,7 @@ async def _app_setup_facts(model: str) -> dict[str, Any]:
     from onboarding import setup_decisions
 
     reads = await _read_facts({
-        "bound_model": lambda: run_in_db(_bound_model, model),
+        **({"bound_model": lambda: run_in_db(_bound_model, model)} if model else {}),
         "model_sources": lambda: run_in_db(_model_sources),
         "agents_found": lambda: asyncio.to_thread(_app_agents_found),
         "local_download": lambda: asyncio.to_thread(_app_local_download),
@@ -274,7 +274,7 @@ async def _app_setup_facts(model: str) -> dict[str, Any]:
         tool_attempts = _unavailable("tool_attempts")
     else:
         tool_attempts = None
-    return {
+    facts = {
         "first_run_path": "app",
         "harness_ready": harness_ready,
         "sources_missing": sources_missing,
@@ -282,12 +282,14 @@ async def _app_setup_facts(model: str) -> dict[str, Any]:
         "local_download": reads["local_download"],
         "tool_attempts": tool_attempts,
         "pays_for": pays_for,
-        "bound_model": reads["bound_model"],
         "web_search_ready": reads["web_search_ready"],
         "github_ready": github_ready,
         "setup": reads["setup"],
         "user_profile": reads["user_profile"],
     }
+    if model:
+        facts["bound_model"] = reads["bound_model"]
+    return facts
 
 
 async def setup_facts(model: str, path: str = "script") -> dict[str, Any]:
@@ -316,14 +318,9 @@ def first_app_step(facts: dict[str, Any]) -> str:
     import re
 
     from infra.system_package import system_resource_source
-    from onboarding.app_first_run import IMPORT_DECISION_TITLE, applicable_steps
+    from onboarding.app_first_run import applicable_steps
 
     steps = applicable_steps(facts)
-    has_import = any(item.get("title") == IMPORT_DECISION_TITLE
-                     for item in facts.get("setup", {}).get("setup_decisions", []))
-    # Setup can detect a tool before a provider-specific consent card exists.
-    # If it disappeared by the pick, its seeded step is silently skipped.
-    steps = [step for step in steps if step["step_number"] != 2 or has_import]
     number = steps[0]["step_number"] if steps else 9
     reference = system_resource_source(APP_REFERENCE).read_text(encoding="utf-8")
     if number == 9:
@@ -358,8 +355,6 @@ async def render_for(model: str, path: str = "script", *, thread_id: str | None 
         facts = await run_in_db(read_cached_app_facts, thread_id) if thread_id else None
         if facts is None:
             facts = await read_app_facts(model)
-            if thread_id:
-                await run_in_db(reconcile_rendered_app_facts, thread_id, facts)
         else:
             facts = {**facts, "bound_model": await run_in_db(_bound_model, model)}
             # Consent names the person-selected provider, which was unknown in setup.
@@ -372,6 +367,8 @@ async def render_for(model: str, path: str = "script", *, thread_id: str | None 
                          if item.get("title") != IMPORT_DECISION_TITLE]
             imported = setup_decisions.agent_import(card)
             facts["setup"] = {"setup_decisions": ([imported] if imported else []) + decisions}
+        if thread_id:
+            await run_in_db(reconcile_rendered_app_facts, thread_id, facts)
         return render(facts, instructions("app") + "\n\n" + first_app_step(facts), APP_INLINE_SUMMARY)
     if path == "app":
         log.warning("%s is not served; app first run is degrading to the script text", APP_REFERENCE)

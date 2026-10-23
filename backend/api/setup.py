@@ -27,6 +27,7 @@ from infra import accounts, config, setup_progress
 from infra.auth import authenticate, is_person_session, require_user, token_from_request
 from infra.db_async import run_in_db
 from infra.local_connection import is_direct_loopback
+from onboarding.app_first_run import SetupOwnerError
 
 router = APIRouter(prefix="/api/setup", tags=["setup"])
 
@@ -227,7 +228,7 @@ async def setup_progress_update(request: Request, authorization: str | None = He
             completed=body.completed))
     except setup_progress.SetupProgressError:
         return Response(status_code=422)
-    except PermissionError:
+    except SetupOwnerError:
         return Response(status_code=403)
     return {"ok": True}
 

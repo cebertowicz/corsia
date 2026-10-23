@@ -121,6 +121,15 @@ def test_the_key_how_to_says_never_in_chat_before_where_to_find_the_key():
     assert warning < web_search.index("Press Add API Key")
 
 
+def test_first_run_describes_brave_only_as_the_key_acquisition_path():
+    web_search = WEB_SEARCH.read_text(encoding="utf-8")
+
+    assert "It uses Brave Search." not in web_search
+    assert "Your searches go to Brave." not in web_search
+    assert "A Brave Search key is one way to turn it on." in web_search
+    assert "Searches using that key go to Brave." in web_search
+
+
 def test_first_run_sets_the_reviewer_in_chat_and_never_enables_auto_approve():
     first_run = FIRST_RUN.read_text(encoding="utf-8")
     task_3 = first_run.split("## Task 3:", 1)[1].split("## Task 4:", 1)[0]
