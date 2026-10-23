@@ -73,8 +73,8 @@ def _note(where: str, words: str, arrived_as: str, earlier: Iterable[EarlierCorr
     )
     return (
         f"{note}\nEarlier corrections that may be the same miss:\n{entries}\n"
-        "If one is the same kind of miss, this is a repeat: propose a project-wide rule to your "
-        "project's conductor rather than only your own file."
+        "If one is the same kind of miss, this is a repeat: name the decision both missed and "
+        "widen the lesson that covers it instead of adding a narrower one."
     )
 
 

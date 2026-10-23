@@ -371,7 +371,7 @@ def test_note_shows_earlier_matching_chat_corrections(agent, main_db):
     note = _note_summaries(main_db)[-1]
     assert "Earlier corrections that may be the same miss:" in note
     assert 'New Chat (2026-10-16 13:00 PDT): "The account screen has duplicate navigation."' in note
-    assert "propose a project-wide rule to your project's conductor" in note
+    assert "name the decision both missed and widen the lesson that covers it instead of adding a narrower one" in note
 
 
 def test_note_omits_earlier_block_when_no_match():
