@@ -154,7 +154,9 @@ test.describe('@surface:first-run setup landing', () => {
 			expect(Date.now() - pickedAt).toBeLessThan(2_500);
 			await expect(page.getByText('SETUP_LANDING_FIRST_RUN_REPLY', { exact: true })).toHaveCount(0);
 			await expect(page.locator('[aria-live="polite"][aria-atomic="true"]')).toContainText("I'm CORSIA.");
+			await shot(page, `opening-live-${slug}-${project}`);
 			await expect(page.locator('.typewriter-text')).toHaveCount(0, { timeout: 2_000 });
+			await shot(page, `opening-complete-${slug}-${project}`);
 			await expect(chip).toContainText('Vendor default');
 			await waitForWsConnected(page);
 			// Focus is on by default and tucks finished work behind a summary; open it to read a reply itself.
