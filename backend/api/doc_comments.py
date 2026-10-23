@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from api.doc_comment_models import CommentCreate
@@ -46,6 +46,27 @@ from infra.db_async import run_in_db
 from registry import models as registry_models
 
 router = APIRouter(prefix="/api", tags=["doc-comments"])
+
+
+async def _deliver_person_comment_after_response(batch_ids: list[str]) -> None:
+    """Run the existing close/deliver writer after a comment POST response.
+
+    A failed delivery leaves its batch open, so the continuation sweep remains
+    the durable retry path. Successful delivery emits the comment's single
+    change frame after its batch has closed.
+    """
+    def deliver() -> list[str]:
+        db = get_db()
+        try:
+            return feedback_batches.deliver_person_comment(db, batch_ids)
+        finally:
+            db.close()
+
+    woken = await run_in_db(deliver)
+    if woken:
+        from plans import public
+
+        await public.drive_threads(woken)
 
 
 def _assert_owns_artifact(artifact_id: str, user_id: str, db) -> None:
@@ -87,7 +108,9 @@ async def list_comments(artifact_id: str, token: str):
 
 
 @router.post("/artifacts/{artifact_id}/comments")
-async def create_comment(artifact_id: str, token: str, body: CommentCreate):
+async def create_comment(
+    artifact_id: str, token: str, body: CommentCreate, background: BackgroundTasks,
+):
     """Create a comment. Idempotent on ``client_id``."""
     user = authenticate(token)
     if not user:
@@ -144,6 +167,8 @@ async def create_comment(artifact_id: str, token: str, body: CommentCreate):
             409,
             "client_id collides with another artifact's comment — re-mint and retry",
         ) from exc
+    if feedback["batch_ids"]:
+        background.add_task(_deliver_person_comment_after_response, feedback["batch_ids"])
     if feedback["woken"]:
         from plans import public
 

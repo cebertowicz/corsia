@@ -246,6 +246,31 @@ def record_comment(
     return {"batch_ids": batch_ids, "undelivered_batches": notices, "woken": woken}
 
 
+def deliver_person_comment(db, batch_ids: list[str]) -> list[str]:
+    """Close a person's newly saved batches, then publish their one change frame.
+
+    This runs after the POST response. A failed close leaves its persisted batch
+    open for the continuation sweep to retry, and publishes no frame. Multiple
+    recipient batches for the same comment still produce one document update.
+    """
+    woken: list[str] = []
+    deliveries: list[str] = []
+    for batch_id in batch_ids:
+        row = db.execute(
+            "SELECT artifact_id,author_kind FROM doc_feedback_batches WHERE id=?", (batch_id,),
+        ).fetchone()
+        try:
+            closed, selected = close_batch(db, batch_id, "send")
+            woken.extend(selected)
+            if closed and row is not None and row["author_kind"] == "user":
+                artifact_id = str(row["artifact_id"])
+                if artifact_id not in deliveries:
+                    deliveries.append(artifact_id)
+        except Exception:
+            log.exception("immediate delivery of document feedback batch %s failed; it stays open to retry", batch_id)
+    comment_notifications.publish_due_user_feedback(deliveries)
+    return woken
+
 
 def _claim_and_deliver(db, batch_id: str, *, from_state: str, reason: str | None) -> tuple[bool, tuple[str, ...]]:
     now = _now()

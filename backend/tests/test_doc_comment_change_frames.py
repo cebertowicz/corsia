@@ -1,12 +1,11 @@
-"""Every comment row the store creates or updates tells open canvases: a second
-canvas on the same document must not go stale because the write came through a
-different adapter.
+"""Every comment row change tells open canvases, so another canvas cannot go
+stale because the write came through a different adapter.
 
-The frame is ``doc_comment_changed`` from ``comment_notifications``. The store
-announces it after the write commits, once per row, so the user routes, the
-native agent tools and the agent route the ``corsia doc`` CLI calls send none
-of their own. Anchor position saves and feedback send, leave, return and retry
-are not comment row writes and are not covered here.
+The frame is ``doc_comment_changed`` from ``comment_notifications``. Store
+writes announce after commit, except browser user creates: they suppress the
+creation announcement and post one frame after their post-response batch
+delivery closes. Anchor position saves and feedback send, leave, return and
+retry are not comment row writes and are not covered here.
 """
 
 from __future__ import annotations
@@ -70,21 +69,16 @@ async def test_user_create_patch_and_decision_each_send_one_frame(
 
 
 @pytest.mark.asyncio
-async def test_a_person_comment_post_commits_and_announces_without_inline_delivery(
+async def test_a_person_comment_announces_once_after_post_response_delivery(
     integration_client, doc, _registrable_roots, monkeypatch,
 ):
-    """The save acknowledgement must not wait for feedback delivery or a thread drive."""
-    from doceditor import comment_notifications, feedback_batches
+    """The sole user-comment frame follows background delivery, never the saved row."""
+    from doceditor import comment_notifications
     from infra.database import get_db
 
     _owner, artifact_id = await _own(integration_client, doc)
     open_at_frame: list[int] = []
 
-    class InlineDelivery(BaseException):
-        pass
-
-    def reject_inline_delivery(*_args, **_kwargs):
-        raise InlineDelivery("comment POST must not close a feedback batch")
 
     def frame(frame_artifact_id, **_kwargs):
         db = get_db()
@@ -98,11 +92,10 @@ async def test_a_person_comment_post_commits_and_announces_without_inline_delive
             db.close()
 
     monkeypatch.setattr(comment_notifications, "broadcast_doc_comment_changed", frame)
-    monkeypatch.setattr(feedback_batches, "close_batch", reject_inline_delivery)
     created = _user_comment(integration_client, artifact_id)
     assert created.status_code == 200, created.text
     assert created.json()["woken"] == []
-    assert open_at_frame == [1]
+    assert open_at_frame == [0]
 
 
 @pytest.mark.asyncio
