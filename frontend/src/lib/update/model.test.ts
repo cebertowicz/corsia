@@ -67,15 +67,25 @@ describe('update model', () => {
 		['checkout_detached', "This copy of CORSIA can't update itself because it isn't set up to follow updates.", null],
 		['checkout_dirty', 'This copy of CORSIA has local changes.', 'Try again'],
 		['restart_pending', 'An update is ready and waiting for a restart.', 'Restart now'],
+		['rolled_back', "Couldn't start the new version.", 'Try again'],
+		['version_unverified', "Couldn't confirm the new version.", 'Try again'],
+		['wrong_version_running', 'CORSIA started a different version.', 'Try again'],
 	] as const)('words %s truthfully and names its action', (code, headline, retryLabel) => {
 		const copy = failureCopy(failure(code));
 		expect(copy.headline).toBe(headline);
 		expect(copy.retryLabel).toBe(retryLabel);
 	});
 
-	it('sends restart_pending to a restart and every other failure to another update', () => {
+	it('offers a restart when it can recover an unfinished update', () => {
 		expect(failureCopy(failure('restart_pending')).retryAction).toBe('restart');
 		expect(failureCopy(failure('drain_failed')).retryAction).toBeUndefined();
+	});
+
+	it.each(['version_unverified', 'wrong_version_running'] as const)('never claims the previous version is running for %s', (code) => {
+		const copy = failureCopy(failure(code));
+		expect(copy.body).not.toContain('the version it had');
+		expect(copy.body).not.toContain('nothing was changed');
+		expect(copy.headline).not.toMatch(/rollback|verify|come up/);
 	});
 
 	it('claims nothing was changed only for refusals made before anything was touched', () => {
@@ -98,7 +108,7 @@ describe('update model', () => {
 
 	it('claims nothing was changed only where nothing was touched', () => {
 		const untouched = ['disk_space', 'fetch_failed'] as const;
-		const touched = ['build_failed', 'drain_cancelled', 'launch_failed', null] as const;
+		const touched = ['build_failed', 'drain_cancelled', 'launch_failed', 'rolled_back', null] as const;
 		for (const code of untouched) expect(failureCopy(failure(code)).body).toContain('nothing was changed');
 		for (const code of touched) expect(failureCopy(failure(code)).body).not.toContain('nothing was changed');
 		expect(failureCopy(failure('build_failed')).body).toBe('CORSIA is still running the version it had.');
@@ -109,6 +119,11 @@ describe('update model', () => {
 		expect(mismatch.title).toBe("The update didn't finish");
 		expect(mismatch.headline).toBe('The update finished, but CORSIA still shows the old version.');
 		expect(mismatch.body).toBe('Versions differ.');
+		const rolledBack = failureCopy(failure('rolled_back'));
+		expect(rolledBack.title).toBe("Update didn't finish");
+		expect(rolledBack.headline).toBe("Couldn't start the new version.");
+		expect(rolledBack.body).toBe('CORSIA is still running the version it had.');
+		expect(rolledBack.retryLabel).toBe('Try again');
 		const refused = failureCopy(failureFromVerdict({ kind: 'refused', message: 'A restart is already in flight.' }));
 		expect(refused.title).toBe("Update didn't start");
 		expect(refused.headline).toBe('A restart is already in flight.');
@@ -129,6 +144,8 @@ describe('update model', () => {
 		const operation: UpdateOperation = { operation_id: 'u1', kind: 'update', status: 'in_flight', phase: 'holding' };
 		expect(holdsNewWork(operation)).toBe(false);
 		expect(holdsNewWork({ ...operation, phase: 'draining' })).toBe(true);
+		expect(holdsNewWork({ ...operation, phase: 'verifying' })).toBe(false);
+		expect(stepMessage({ ...operation, phase: 'verifying' }, false)).toBe('Checking the new version');
 		expect(holdsNewWork({ ...operation, kind: 'restart', phase: 'draining' })).toBe(false);
 	});
 

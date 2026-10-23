@@ -185,7 +185,7 @@ def current_sources(workspace: Path, inputs: tuple[dict, list, list]) -> tuple[l
                 raise ValueError("source is outside the workspace")
             if path.stat().st_size > MAX_GUIDANCE_BYTES:
                 raise ValueError("source exceeds guidance limit")
-            record = source_record(path.read_text(encoding="utf-8"), str(path.resolve()))
+            record = source_record(path.read_text(encoding="utf-8"), str(path.resolve()), with_statement=True)
         except (OSError, UnicodeError, ValueError) as exc:
             unavailable.append({"path": str(path), "reason": type(exc).__name__})
             continue

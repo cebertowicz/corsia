@@ -28,27 +28,11 @@
 	import { createSetupLocalPick } from '$lib/setupLocalPick.svelte';
 	import { createSetupRemote } from '$lib/setupRemote.svelte';
 	import { applyWorkFolder, shellInfo } from '$lib/remoteShell';
+	import { accountRefusal, LOCAL_START_NETWORK_FAILURE, passwordConfirmationError, requestLocalStart } from '$lib/setupFormSupport';
 	import { setupLocalRow, setupStartNote, type LocalRowState } from '$lib/setupProviderRows';
 	import { measuredDownloadTime, showLocalOnlyGuidance } from '$lib/setupLocalPresentation';
 	import { ACCOUNT_LEDE, WELCOME_TITLE } from '$lib/setupWelcome';
 	interface Props { onExistingAccount: () => void; onAccountCreated: () => void; onFinished: () => void; startConnect?: boolean; onLeaveConnect?: () => void; resume?: boolean }
-	type LocalStartResponse = { result: 'started' | 'failed'; reference?: string; fix?: string };
-	const LOCAL_START_NETWORK_FAILURE = 'CORSIA couldn’t start local setup.';
-	async function requestLocalStart(session: string | null): Promise<LocalStartResponse> {
-		const response = await fetch(session ? '/api/providers/local/setup' : '/api/setup/local-download', {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json', ...(session ? { Authorization: `Bearer ${session}` } : {}) },
-			body: JSON.stringify(session ? { onboarding: true } : {}),
-		});
-		const body = await response.json().catch(() => null);
-		const reference = typeof body?.detail?.ref === 'string' ? body.detail.ref : typeof body?.ref === 'string' ? body.ref : undefined;
-		const fix = typeof body?.detail?.fix === 'string' ? body.detail.fix : typeof body?.fix === 'string' ? body.fix : undefined;
-		if (response.ok && body?.ok !== false) return { result: 'started', reference };
-		if (!fix) throw new Error('local start response omitted recovery');
-		return { result: 'failed', reference, fix };
-	}
-	/** The backend's own account refusal names the cause; a validation 422 has no string detail. */
-	function accountRefusal(detail: unknown): string | null { return typeof detail === 'string' && detail.trim() ? detail.trim() : null; }
 	const { onExistingAccount, onAccountCreated, onFinished, startConnect = false, onLeaveConnect, resume = false }: Props = $props();
 	type Page = 'checking' | 'welcome' | 'account' | 'subscriptions' | 'models' | 'hard-stop' | 'error' | 'connect';
 	const CLI_VENDORS = ['claude-code', 'codex'] as const;
@@ -58,7 +42,7 @@
 	let shell: SetupShell | undefined = $state();
 	let status = $state<Status>({}), statusError = $state(''), reportError = $state('');
 	let name = $state(''), username = $state(''), password = $state(''), confirmation = $state(''), email = $state('');
-	let folder = $state(''), defaultFolder = $state(''), folderChanged = $state(false), folderChanging = $state(false), folderNotice = $state<FolderNotice>(null);
+	let folder = $state(''), defaultFolder = $state(''), defaultFolderPath = $state(''), folderApplyPath = $state(''), savedFolder = $state(false), folderChanged = $state(false), folderChanging = $state(false), folderNotice = $state<FolderNotice>(null);
 	let accountBusy = $state(false), accountError = $state(''), accountExists = $state(false), confirmationError = $state('');
 	// Set once setup itself made the account: Back to the account screen then edits it, and only what differs from these is saved.
 	let accountKnown = $state(false), savedName = '', savedEmail = '';
@@ -150,10 +134,9 @@
 		if (page === 'subscriptions') return { title: 'Your subscriptions', lede: 'CORSIA’s agents can work through a Claude or ChatGPT subscription you already pay for.' };
 		return { title: 'Providers & models', lede: 'CORSIA needs one working model to continue setup.', primary: { label: 'Start using CORSIA', disabled: !canFinish || finishing, loading: finishing, note: finishNote, noteAlways: true }, onPrimary: finishSetup };
 	});
-	function validateConfirmation() { confirmationError = confirmation && password !== confirmation ? 'Passwords don’t match.' : ''; }
 	/** Continue on the account screen creates the account, applying the chosen folder first, or saves what changed on one setup already made. */
 	async function submitAccount() {
-		validateConfirmation();
+		confirmationError = passwordConfirmationError(password, confirmation);
 		if (!canSubmitAccount) return;
 		if (editing) await updateAccount(); else if (!get(token)) await createAccount();
 	}
@@ -183,13 +166,27 @@
 		page = 'models';
 	}
 	function leaveConnect() { if (startConnect) onLeaveConnect?.(); else page = 'welcome'; }
+	function setFolderState(next: Status) {
+		const info = shellInfo();
+		const workspace = info?.mode === 'local' ? info.default_workspace : undefined;
+		if (workspace) { defaultFolder = workspace.display; defaultFolderPath = workspace.path; }
+		if (next.work_folder) {
+			folder = next.work_folder;
+			// Status names the current display folder even for the initial shell-owned default.
+			savedFolder = workspace ? next.work_folder !== workspace.display : true;
+		} else {
+			savedFolder = false;
+			if (workspace) folder = workspace.display;
+		}
+		folderApplyPath = '';
+	}
 	async function readStatus() {
 		page = 'checking'; statusError = '';
 		try {
 			const response = await fetch('/api/setup/status');
 			if (response.status === 409) { onExistingAccount(); return; }
 			if (!response.ok) throw new Error('status');
-			status = await response.json(); if (status.work_folder) { folder = status.work_folder; defaultFolder = status.work_folder; }
+			status = await response.json(); setFolderState(status);
 			if (status.required_username) username = status.required_username;
 			if (status.classifier) classifier.accept(status.classifier);
 			if (status.macos_supported === false) { page = 'hard-stop'; return; }
@@ -253,7 +250,10 @@
 		if (!canSubmitAccount || accountBusy) return;
 		accountBusy = true; accountError = '';
 		try {
-			if (folderChanged) { await applyWorkFolder(folder); folderChanged = false; }
+			if (folderChanged) {
+				if (!folderApplyPath) throw new Error('work folder path is unavailable');
+				await applyWorkFolder(folderApplyPath); folderChanged = false;
+			}
 			const response = await fetch('/api/setup/first-account', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.trim(), username: username.trim(), password, email: email.trim() || null }) });
 			if (response.status === 409) { accountExists = true; accountError = 'This computer already has a CORSIA account. Sign in instead.'; page = 'account'; return; }
 			const result = await response.json().catch(() => null);
@@ -329,7 +329,7 @@
 		const progress = await fetchSetupProgress(get(token));
 		if (!progress) { page = 'error'; return; }
 		if (progress.setup_completed) { onFinished(); return; }
-		status = (progress.status ?? {}) as Status; if (status.work_folder) { folder = status.work_folder; defaultFolder = status.work_folder; }
+		status = (progress.status ?? {}) as Status; setFolderState(status);
 		page = 'models';
 		if (status.classifier) classifier.accept(status.classifier);
 		// A relaunch after the account step has no screen-1 start to rerun, so a local download that was never claimed starts here.
@@ -378,10 +378,10 @@
 		<p class="settled" data-testid="setup-account-made">{accountName ? `Your account is set up as ${accountName}.` : 'Your account is set up.'}</p>
 		<p class="settled" data-testid="setup-folder-made">CORSIA keeps your work in {folder}.</p>
 	{:else if page === 'account'}
-		<SetupAccountForm bind:name bind:username bind:password bind:confirmation bind:email {usernameError} {confirmationError} requiredUsername={status.required_username} {editing} {accountError} onSubmit={submitAccount} onValidateConfirmation={validateConfirmation} />
+		<SetupAccountForm bind:name bind:username bind:password bind:confirmation bind:email {usernameError} {confirmationError} requiredUsername={status.required_username} {editing} {accountError} onSubmit={submitAccount} onValidateConfirmation={() => confirmationError = passwordConfirmationError(password, confirmation)} />
 		<!-- Creating the account scaffolds the work folder, so after it the folder is read back, not offered. -->
 		{#if editing}<p class="settled" data-testid="setup-folder-made">CORSIA keeps your work in {folder}.</p>
-		{:else}<SetupWorkFolder bind:folder {defaultFolder} bind:changed={folderChanged} bind:changing={folderChanging} bind:notice={folderNotice} />{/if}
+		{:else}<SetupWorkFolder bind:folder {defaultFolder} {defaultFolderPath} bind:applyPath={folderApplyPath} {savedFolder} bind:changed={folderChanged} bind:changing={folderChanging} bind:notice={folderNotice} />{/if}
 		{#if accountExists}<Button variant="chip" onclick={onExistingAccount}>Sign in</Button>{/if}
 	{:else if page === 'subscriptions'}<SetupSubscriptions claudeReady={cliSignedIn('claude-code')} codexReady={cliSignedIn('codex')} {eligible} answer={picks} onAnswer={answerSubscriptions} />
 	{:else if page === 'models'}

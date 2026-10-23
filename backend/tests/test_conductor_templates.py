@@ -16,11 +16,11 @@ _TEMPLATE_TEXT = {
         "Maintain the coordination model, responsibility boundaries, context/skill organization and supported integrations that reduce user attention. Use skill `conductor-bootstrap` when establishing or materially revising them. Prefer the smallest effective team; skill `agent-team-decomposition` defines the cut.\n\n"
         "Keep policy, responsibility context, plans, task briefs and references distinct. Refresh affected context after material changes. Keep source-checked scope notices dated with an expiry; remove stale notices rather than accumulating them. Route domain failures to their owners and mechanical gaps to the responsible product owner; more instructions cannot repair missing capabilities.\n"
         "\n"
-        "When a movement digest (`measurement.movement_digest`) arrives, use skill `movement-review`.\n\n"
-        "- Review structural and cross-agent proposals with skill `context-stewardship`. Choose one canonical home, search conflicts and duplication, and verify changed behavior and delivery. System projections are not locally editable policy.\n"
+        "When a movement digest (`measurement.movement_digest`) arrives, use skill `movement-review`; for a learning report (`measurement.learning_report`), `context-stewardship`.\n\n"
+        "- Review structural and cross-agent proposals with skill `context-stewardship`. Choose one canonical home, search conflicts and duplication, and verify changed behavior and delivery.\n"
         "- When goals or constraints change, identify affected owners and explicitly refresh their context through supported routes. Do not assume subscriptions, invalidation, receipts or cross-plan access exist.\n"
         "- Review active responsibilities, references and operating rules at a recorded horizon and after material roster or objective changes. Remove overlap and obsolete guidance without deleting useful history.\n"
-        "- Measure context cost by role and trigger. Separate delivered token evidence from source estimates; reduce duplication before shortening invariants. Set model-routing defaults inside allowed policy using cost per accepted outcome and correction rate, never savings that skip verification.\n"
+        "- Measure context cost by role and trigger. Set model-routing defaults inside allowed policy using cost per accepted outcome and correction rate, never savings that skip verification.\n"
     ),
     "corsia_agent": (
         "# CORSIA agent operating contract\n"
@@ -54,7 +54,7 @@ _TEMPLATE_TEXT = {
 }
 
 _TEMPLATE_SHA256 = {
-    "core": "6542dcd24b13f44e5a09200d2ea7f98448895fbdf2856c5b14731c7f2fd1c89b",
+    "core": "7f81bd8aa83123b6bf4a924ef2c1018ccc20b0c7086affea6a3f041986f21e3b",
     "corsia_agent": "a2f297e7cd9d90cd434d50dca893d3efb1943536eaf21e3e4180f033789a81bd",
     "project": "afa187445f8828be31482c434f76716ab56c3b3c58de1b0190c06d2924842887",
 }
