@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { fade, fly } from 'svelte/transition';
+	import { fade } from 'svelte/transition';
 	import { backOut } from 'svelte/easing';
 	import { onMount, tick } from 'svelte';
 	import type { Snippet } from 'svelte';
@@ -65,6 +65,16 @@
 		if (e.target === e.currentTarget) onClose();
 	}
 
+	// `fly` also animates opacity. The glass lives in `.modal::before`, so opacity on
+	// its parent turns the card into a backdrop root and makes the blur sample nothing.
+	function modalSlide(_node: Element, { y = 12, duration = 380, easing = backOut } = {}) {
+		return {
+			duration,
+			easing,
+			css: (_t: number, u: number) => `transform: translateY(${u * y}px)`,
+		};
+	}
+
 	onMount(() => {
 		const previousFocus = document.activeElement instanceof HTMLElement
 			? document.activeElement
@@ -97,13 +107,14 @@
 	column or the open document, the scrim and card were clipped to that column in a
 	WebKit webview and sat behind the other panes.
 -->
-<!-- svelte-ignore a11y_click_events_have_key_events -->
-<!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="bg" onclick={onBackdropClick} transition:fade={{ duration: 120 }} use:portal>
+<div class="modal-layer" use:portal>
+	<!-- svelte-ignore a11y_click_events_have_key_events -->
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
+	<div class="bg" onclick={onBackdropClick} transition:fade={{ duration: 120 }}></div>
 	<div
 		bind:this={modalElement}
 		class="modal {size}"
-		transition:fly={{ y: 12, duration: 380, easing: backOut }}
+		transition:modalSlide={{ y: 12, duration: 380, easing: backOut }}
 		{role}
 		aria-modal="true"
 		aria-label={ariaLabel}
@@ -135,18 +146,24 @@
 </div>
 
 <style>
-	.bg {
+	.modal-layer {
 		position: fixed; inset: 0;
-		background: var(--glass-scrim);
 		z-index: 100;
 		display: flex; align-items: center; justify-content: center;
 		padding-top:    max(32px, var(--safe-top) + 8px);
 		padding-bottom: max(32px, env(safe-area-inset-bottom, 0px) + 8px);
 		padding-left: 32px; padding-right: 32px;
+		pointer-events: none;
+	}
+	.bg {
+		position: absolute; inset: 0;
+		background: var(--glass-scrim);
+		pointer-events: auto;
 	}
 	.modal {
 		position: relative;
-		z-index: 0;
+		z-index: 1;
+		pointer-events: auto;
 		border: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
 		border-radius: var(--radius);
 		box-shadow: var(--glass-elevation-3);
@@ -198,7 +215,7 @@
 	}
 
 	@media (max-width: 720px) {
-		.bg {
+		.modal-layer {
 			padding-top:    max(12px, var(--safe-top) + 4px);
 			padding-bottom: max(12px, env(safe-area-inset-bottom, 0px) + 4px);
 			padding-left: 12px; padding-right: 12px;
@@ -207,7 +224,7 @@
 		.modal { max-height: 100%; }
 	}
 	@media (max-width: 480px) {
-		.bg {
+		.modal-layer {
 			padding-top:    max(8px, var(--safe-top));
 			padding-bottom: max(8px, env(safe-area-inset-bottom, 0px));
 			padding-left: 8px; padding-right: 8px;

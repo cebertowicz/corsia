@@ -89,15 +89,18 @@ afterEach(() => {
 });
 
 describe('the overlay primitives leave the pane they were opened in', () => {
-	it('Modal renders its scrim and card directly under document.body', async () => {
+	it('Modal renders a portaled layer with sibling scrim and card', async () => {
 		component = mount(Modal, { target: pane(), props: { title: 'Add model', onClose: vi.fn(), children: (() => {}) as never } });
 		flushSync();
 		await tick();
+		const layer = document.querySelector<HTMLElement>('.modal-layer');
 		const scrim = document.querySelector<HTMLElement>('.bg');
-		expect(scrim).not.toBeNull();
-		expect(scrim!.parentElement).toBe(document.body);
-		expect(host.contains(scrim)).toBe(false);
-		expect(scrim!.querySelector('[role="dialog"]')).not.toBeNull();
+		const card = document.querySelector<HTMLElement>('[role="dialog"]');
+		expect(layer).not.toBeNull();
+		expect(layer!.parentElement).toBe(document.body);
+		expect(scrim?.parentElement).toBe(layer);
+		expect(card?.parentElement).toBe(layer);
+		expect(host.contains(layer)).toBe(false);
 	});
 
 	it('Popover renders its card directly under document.body', async () => {
