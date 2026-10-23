@@ -19,9 +19,18 @@ from typing import Any
 
 from core import lesson_files
 from core.correction_learning import CAUSES
+from core.lesson_trial_targeting import (
+    TrialRefused,
+    additive_only as _additive_only,
+    same_case as _same_case,
+    target as _target,
+    target_from_lesson as _target_from_lesson,
+    target_trials as _target_trials,
+    trial_row as _trial_row,
+)
 from core.lesson_trials import PERMANENT_KINDS, lesson_id, parse_instant
 from core.thread_identity import thread_agent_identity
-from core.placement_decide import Decision, Destination, InvalidDecision, ThreadPlace
+from core.placement_decide import Decision, Destination, ThreadPlace
 
 #: A source a person wrote: citing one does not make the agent's rule theirs.
 HUMAN_KINDS = frozenset({"user", "message"})
@@ -42,13 +51,6 @@ FIXES = {
     ),
 }
 
-
-class TrialRefused(InvalidDecision):
-    """The trial cannot be placed as answered; ``code`` is the worker's reason."""
-
-    def __init__(self, code: str, message: str) -> None:
-        super().__init__(message)
-        self.code = code
 
 
 @dataclass(frozen=True)
@@ -102,87 +104,6 @@ def _learning_metadata(decision: Decision) -> None:
         raise TrialRefused("invalid-learning-metadata", "new_evidence must be target_changed or case_differs.")
 
 
-def _target(decision: Decision) -> str:
-    from infra.config import WORKSPACE
-    from tools.filesystem_gate import canonical_target_path
-
-    raw = decision.new_target_path if decision.target_file == "new" else decision.target_file
-    target = canonical_target_path(str(raw), workspace=WORKSPACE)
-    if target == ".corsia" or target.startswith(".corsia/"):
-        raise TrialRefused("invalid-learning-metadata", "System projections cannot be lesson targets.")
-    return target
-
-
-def _additive_only(decision: Decision) -> None:
-    """Refuse an in-context trial that would change a section the target already has.
-
-    A file read on demand (a skill or a new file) can carry any trial. A file
-    already in context gets the trial body beside its own text, so the trial
-    may only add a section: one whose heading the target does not have yet.
-    """
-    from core.skill_validation import is_skill_file
-    from infra.config import WORKSPACE
-    from tools.filesystem_gate import _resolve_path
-
-    if decision.target_file == "new" or is_skill_file(Path(str(decision.target_file))):
-        return
-    target = _target(decision)
-    if Path(target).is_absolute():
-        raise TrialRefused("non-additive", (
-            f"{decision.target_file} is outside the workspace; a trial for a file already in "
-            "context must target a workspace file"
-        ))
-    try:
-        text = _resolve_path(target, workspace=Path(WORKSPACE)).read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError):
-        raise TrialRefused("non-additive", (
-            f"{decision.target_file} could not be read, so a trial cannot show it only adds a section"
-        )) from None
-    if lesson_files.has_section(text, str(decision.target_section)):
-        raise TrialRefused("non-additive", (
-            f"{decision.target_file} is already in context and has a '{decision.target_section}' "
-            "section; a trial there may only add a new section, so name a new target_section "
-            "or place the change without trial"
-        ))
-
-
-def _target_trials(
-    place: ThreadPlace, decision: Decision,
-) -> tuple[list[tuple[Path, Any]], list[tuple[Path, Any]]]:
-    """The owner's own lessons on this target; a trial is only ever in its owner's tray."""
-    if place.tray is None:
-        return [], []
-    open_trials, retired = [], []
-    target = _target(decision)
-    for path in sorted((place.tray / "skills").glob("*/SKILL.md")):
-        current = lesson_files.read_trial(path.read_text(encoding="utf-8", errors="replace"))
-        if (
-            current is None
-            or current.lesson.owner != place.thread_id
-            or _target_from_lesson(current) != target
-        ):
-            continue
-        if current.lesson.state in ("watch", "trial"):
-            open_trials.append((path, current))
-        elif current.lesson.state in ("retired", "promoted"):
-            retired.append((path, current))
-    return open_trials, retired
-
-
-def _same_case(current: Any, decision: Decision) -> bool:
-    return current.lesson.target_section == decision.target_section and current.lesson.cause == decision.cause
-
-
-def _target_from_lesson(current: Any) -> str | None:
-    from infra.config import WORKSPACE
-    from tools.filesystem_gate import canonical_target_path
-
-    raw = current.lesson.new_target_path if current.lesson.target_file == "new" else current.lesson.target_file
-    return canonical_target_path(str(raw), workspace=WORKSPACE) if raw else None
-
-
-def _trial_row(path: Path, current: Any) -> dict[str, str]:
-    return {"name": current.name, "target_file": _target_from_lesson(current) or "", "cause": current.lesson.cause or ""}
 
 
 def admit(
@@ -227,8 +148,8 @@ def admit(
             "skill_name must be a new lowercase-hyphenated name for the trial skill"
         ))
     open_trials, retired_trials = _target_trials(place, decision)
-    open_rows = tuple(_trial_row(path, current) for path, current in open_trials)
-    retired_rows = tuple(_trial_row(path, current) for path, current in retired_trials)
+    open_rows = tuple(_trial_row(current) for _path, current in open_trials)
+    retired_rows = tuple(_trial_row(current) for _path, current in retired_trials)
     retired_match = next(((path, current) for path, current in retired_trials if _same_case(current, decision)), None)
     if retired_match and decision.new_evidence is None:
         raise TrialRefused("retired-match", (
