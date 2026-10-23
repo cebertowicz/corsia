@@ -48,6 +48,8 @@ def wire_reasoning_effort(
 
     ``auto`` and ``none`` both omit it: ``auto`` defers to the server's own
     setting, and ``none`` is expressed by ``enable_thinking=False`` instead.
+    An unset level sends the shape's ``send_when_unset``, which only CORSIA's
+    own oMLX carries; anywhere else it is omitted and the server's default runs.
 
     ``reasoning_config`` is the shape the server reported for this model:
 
@@ -60,7 +62,7 @@ def wire_reasoning_effort(
       template), so the value passes through and the server validates it.
     """
     if not reasoning_effort:
-        return None
+        return (reasoning_config or {}).get("send_when_unset")
     effort = reasoning_effort.strip().lower()
     if effort in ("auto", "none", ""):
         return None

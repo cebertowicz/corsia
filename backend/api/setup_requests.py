@@ -2,7 +2,7 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
 
 from api.setup_handoff import SetupHandoff
 from infra import user_profile
@@ -60,3 +60,26 @@ class FirstAccountRequest(BaseModel):
         if not user_profile.one_line(value):
             raise ValueError("name is required")
         return value
+
+
+class AccountUpdateRequest(BaseModel):
+    """What the account screen may change once the account exists: only the fields that differ, never the username."""
+
+    model_config = ConfigDict(extra="forbid")
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    password: str | None = Field(default=None, min_length=1, max_length=1024)
+    email: str | None = Field(default=None, max_length=320)
+
+    @field_validator("name")
+    @classmethod
+    def _name_is_not_blank(cls, value: str | None) -> str | None:
+        """Reject whitespace before it can become a profile-file name."""
+        if value is not None and not user_profile.one_line(value):
+            raise ValueError("name is required")
+        return value
+
+    @model_validator(mode="after")
+    def _changes_something(self) -> "AccountUpdateRequest":
+        if not self.model_fields_set:
+            raise ValueError("nothing to change")
+        return self

@@ -187,9 +187,15 @@ def test_agent_emit_sets_origin_and_rejects_reserved_and_foreign_types(emit_worl
     ))
     db = get_db()
     rows = db.execute("SELECT origin,refusal_code FROM event_intake_records WHERE outcome='refused'").fetchall()
+    receipt = db.execute(
+        "SELECT origin,producer,rules_matched FROM event_intake_records WHERE event_id=?", (accepted["event_id"],),
+    ).fetchone()
+    delivered = _digested(db, accepted["event_id"])
     db.close()
 
     assert accepted["duplicate"] is False
+    assert tuple(receipt) == ("agent", OWNER, 0)
+    assert delivered == []
     assert foreign.startswith("Error: not_your_namespace:")
     assert worker.startswith("Error: reserved_type:")
     assert {tuple(row) for row in rows} == {("agent", "not_your_namespace"), ("agent", "reserved_type")}
@@ -216,7 +222,8 @@ def test_agent_emit_identity_is_scoped_to_declared_event_type(emit_world):
     assert first["duplicate"] is False and second["duplicate"] is False
     assert first["event_id"] != second["event_id"]
     assert retry == {**first, "duplicate": True}
-    assert delivered == [OWNER, OWNER]
+    # The emit tool's own events never come back to the chat that emitted them.
+    assert delivered == []
 
 
 def test_explain_takes_the_receipts_event_id_and_never_blames_routing_for_a_raw_identity(emit_world):

@@ -2,7 +2,7 @@ import { test } from '../support/test';
 import { expect, type Page } from '@playwright/test';
 import { TEST_SESSION_TOKEN } from '../support/corsia';
 
-// Every setup screen at the setup floor, a mid width and the common desktop sizes: from 1280 wide the logo sits in the
+// Every setup screen at the setup floor, a mid width and the common desktop sizes: from 1280 wide the living mark sits in the
 // right-hand brand column and no text or control touches it; below 1280 there is no brand column. What is mocked: the
 // setup routes only, as in setup-landing.spec.ts. Set SETUP_LAYOUT_SHOTS_DIR to also save a screenshot of each screen.
 
@@ -30,9 +30,11 @@ async function serve(page: Page, sources: readonly Record<string, unknown>[], sh
 /** Whether any text or control on the screen overlaps the logo, and where the logo is; null when it is not drawn. */
 async function logoReport(page: Page) {
 	return page.locator('.pane-scene').last().evaluate((scene) => {
-		const mark = scene.querySelector<HTMLElement>('.brand > .mark');
+		// The brand column is the scene's sibling: it stays mounted while the screens change.
+		const column = scene.parentElement!;
+		const mark = column.querySelector<HTMLElement>('.brand .living-mark');
 		if (!mark || getComputedStyle(mark).display === 'none') return null;
-		const m = mark.getBoundingClientRect(), brand = scene.querySelector('.brand')!.getBoundingClientRect();
+		const m = mark.getBoundingClientRect(), brand = column.querySelector('.brand')!.getBoundingClientRect();
 		const touching: string[] = [];
 		for (const node of scene.querySelectorAll<HTMLElement>('*')) {
 			if (node === mark || node.contains(mark) || mark.contains(node)) continue;
@@ -50,7 +52,7 @@ async function checkScreen(page: Page, width: number, name: string) {
 	// Measure the settled screen: the one before it has left and its slide-in has ended.
 	await expect(page.locator('.pane-scene')).toHaveCount(1);
 	await page.evaluate(() => Promise.all(document.getAnimations().filter((animation) => animation.effect?.getComputedTiming().iterations !== Infinity).map((animation) => animation.finished.catch(() => undefined))));
-	const brand = page.locator('.pane-scene').last().locator('.brand');
+	const brand = page.locator('.pane-scenes > .brand');
 	if (width < 1280) {
 		await expect(brand, `${name}: no brand column below 1280`).toBeHidden();
 	} else {
@@ -60,9 +62,7 @@ async function checkScreen(page: Page, width: number, name: string) {
 			expect(report.insideBrand, `${name}: the logo stays in the brand column`).toBe(true);
 			expect(report.markHeight, `${name}: the logo is shown only at its minimum size or more`).toBeGreaterThanOrEqual(120);
 		} else {
-			// Only Welcome, in the shortest windows, may go without the logo.
-			expect(name, `${name}: the logo may hide on Welcome alone`).toMatch(/^account/);
-			expect(await page.locator('.brand .welcome').count(), `${name}: the logo hides only where Welcome fills the column`).toBe(1);
+			expect(report, `${name}: the mark is drawn from 1280 wide`).not.toBeNull();
 		}
 	}
 	const body = page.locator('.pane-scene').last().locator('.body');
@@ -76,7 +76,7 @@ async function checkScreen(page: Page, width: number, name: string) {
 }
 
 async function createAccount(page: Page, width: number) {
-	if (width < 1280) await page.getByRole('button', { name: 'Continue', exact: true }).click();
+	await page.getByRole('button', { name: 'Continue', exact: true }).click();
 	await page.locator('input[autocomplete="name"]').fill('First Person');
 	await page.locator('input[autocomplete="username"]').fill('first');
 	await page.locator('input[autocomplete="new-password"]').nth(0).fill('correct-password');
@@ -91,7 +91,7 @@ test.describe('@surface:first-run setup layout', () => {
 			await serve(page, notInstalled);
 			await page.goto('/');
 			await expect(page.getByRole('heading', { name: 'Welcome to CORSIA' })).toBeVisible();
-			if (width < 1280) await checkScreen(page, width, 'welcome');
+			await checkScreen(page, width, 'welcome');
 			await createAccount(page, width);
 			await expect(page.getByText('Your projects and files live here.')).toBeVisible();
 			await checkScreen(page, width, 'account');

@@ -29,12 +29,12 @@ function flowFor(source: typeof claude) {
 afterEach(() => { vi.unstubAllGlobals(); });
 
 describe('a sign-in the browser never returns to', () => {
-	it('names the cause, keeps the failure reference and offers to sign in again', async () => {
+	it('says the browser did not finish, keeps the failure reference and offers to sign in again', async () => {
 		serve({ status: 'failed', cause: 'signin_timed_out', ref: 'ref-7' });
 		const flow = flowFor(claude);
 		await flow.signIn(claude);
 		const row = flow.row(claude);
-		expect(row.meta).toBe('Your browser never came back to CORSIA to finish signing in to Claude Code. Sign in again.');
+		expect(row.meta).toBe('Sign-in didn’t finish in your browser. Press Sign in to try again.');
 		expect(row.error).toBe(true);
 		expect(row.reference).toBe('ref-7');
 		expect(row.action?.label).toBe('Sign in');
@@ -44,7 +44,7 @@ describe('a sign-in the browser never returns to', () => {
 		const calls = serve({ status: 'failed', cause: 'signin_timed_out', ref: 'ref-8' });
 		const flow = flowFor(codex);
 		await flow.signIn(codex);
-		expect(flow.row(codex).meta).toBe('Your browser never came back to CORSIA to finish signing in to Codex. Sign in again.');
+		expect(flow.row(codex).meta).toBe('Sign-in didn’t finish in your browser. Press Sign in to try again.');
 		const starts = () => calls.filter((call) => call === 'POST /api/vendor-accounts/account-1/signin').length;
 		expect(starts()).toBe(1);
 		flow.row(codex).action?.run();

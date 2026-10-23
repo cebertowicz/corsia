@@ -22,7 +22,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 import pytest
 
-from connections import account_controls, account_signin, harness_models
+from connections import account_controls, account_login_wait, account_signin, harness_models
 from connections.account_receipts import account_receipt, receipt_is_current
 from connections.vendor_accounts import get_account, set_account_state
 from test_claude_catalog_usage_ownership import (  # noqa: F401
@@ -133,7 +133,9 @@ case "$*" in
     echo "vendor error text nobody may see" >&2
     while [ -n "$LOGIN_HOLD" ] && [ ! -f "$LOGIN_HOLD" ]; do sleep 0.05; done
     [ -n "$LOGIN_FAIL" ] && exit 1
-    touch "$CLAUDE_CONFIG_DIR/signed"; exit 0;;
+    touch "$CLAUDE_CONFIG_DIR/signed"
+    while [ -n "$LOGIN_LINGER" ] && [ ! -f "$LOGIN_LINGER" ]; do sleep 0.05; done
+    exit 0;;
   "auth logout")
     [ -n "$LOGOUT_FAIL" ] && exit 1
     rm -f "$CLAUDE_CONFIG_DIR/signed"; exit 0;;
@@ -225,6 +227,13 @@ def test_codex_identity_reads_email_from_the_existing_auth_file_reader(tmp_path)
 def _calls(log: Path) -> list[tuple[str, str]]:
     pairs = (line.partition("|") for line in log.read_text().splitlines())
     return [(home, args) for home, _, args in pairs]
+
+
+async def _baseline_read(log: Path) -> None:
+    """Wait until a held Claude Code login's status has been read once, before the person signs in."""
+    async with asyncio.timeout(30):
+        while "auth status" not in [args for _, args in _calls(log)]:
+            await asyncio.sleep(0.01)
 
 
 async def _started(log: Path, count: int = 1) -> None:
@@ -642,6 +651,93 @@ async def test_a_login_the_browser_never_returns_to_ends_failed_timed_out_and_th
     monkeypatch.delenv("LOGIN_HOLD")
     await account_controls.start_signin(account["id"])
     assert (await _finished(account["id"]))["status"] == "completed"
+
+
+@pytest.mark.real_harness_cli
+@pytest.mark.asyncio
+async def test_a_claude_login_that_stored_its_credentials_but_never_exits_completes_the_sign_in(scripted_vendor_clis, monkeypatch, tmp_path):
+    """The person signed in and the vendor's status says so; a lingering login must not keep the row on Sign in."""
+    from connections import account_controls
+
+    account = scripted_vendor_clis["claude-code"]
+    hold = tmp_path / "hold"
+    monkeypatch.setenv("LOGIN_HOLD", str(hold))
+    monkeypatch.setenv("LOGIN_LINGER", str(tmp_path / "never"))
+    monkeypatch.setattr(account_login_wait, "STATUS_POLL_SECONDS", 0.05)
+    monkeypatch.setattr(account_login_wait, "LINGER_SECONDS", 0.2)
+    await account_controls.start_signin(account["id"])
+    await _started(scripted_vendor_clis["log"])
+    process = account_controls._SIGNINS[account["id"]].process
+    await _baseline_read(scripted_vendor_clis["log"])
+    hold.touch()  # the person signs in after the baseline read
+    finished = await asyncio.wait_for(_finished(account["id"]), 10)
+    assert finished["status"] == "completed" and finished["cause"] is None
+    assert _account(account["id"])["state"] == "signed_in"
+    assert process.returncode is not None  # the lingering login was stopped, not left running
+
+
+@pytest.mark.real_harness_cli
+@pytest.mark.asyncio
+async def test_a_claude_login_that_exits_inside_the_linger_window_is_not_killed(scripted_vendor_clis, monkeypatch, tmp_path):
+    from connections import account_controls
+
+    account = scripted_vendor_clis["claude-code"]
+    hold, release = tmp_path / "hold", tmp_path / "release"
+    monkeypatch.setenv("LOGIN_HOLD", str(hold))
+    monkeypatch.setenv("LOGIN_LINGER", str(release))
+    monkeypatch.setattr(account_login_wait, "STATUS_POLL_SECONDS", 0.05)
+    monkeypatch.setattr(account_login_wait, "LINGER_SECONDS", 10.0)
+    await account_controls.start_signin(account["id"])
+    await _started(scripted_vendor_clis["log"])
+    process = account_controls._SIGNINS[account["id"]].process
+    await _baseline_read(scripted_vendor_clis["log"])
+    hold.touch()
+    while [args for _, args in _calls(scripted_vendor_clis["log"])].count("auth status") < 3:
+        await asyncio.sleep(0.01)
+    release.touch()
+    finished = await asyncio.wait_for(_finished(account["id"]), 10)
+    assert finished["status"] == "completed"
+    assert process.returncode == 0
+
+
+@pytest.mark.real_harness_cli
+@pytest.mark.asyncio
+async def test_credentials_already_in_the_home_never_end_a_new_login_early(scripted_vendor_clis, monkeypatch, tmp_path):
+    """A signed-out account can still hold credentials (a failed logout): only this login's own exit ends it."""
+    from connections import account_controls
+
+    account = scripted_vendor_clis["claude-code"]
+    (Path(account["source_home"]) / "signed").touch()
+    monkeypatch.setenv("LOGIN_HOLD", str(tmp_path / "never"))
+    monkeypatch.setattr(account_controls, "_SIGNIN_WAIT_SECONDS", 0.6)
+    monkeypatch.setattr(account_login_wait, "STATUS_POLL_SECONDS", 0.05)
+    await account_controls.start_signin(account["id"])
+    await _started(scripted_vendor_clis["log"])
+    ended = await _finished(account["id"])
+    assert ended["status"] == "failed" and ended["cause"] == "signin_timed_out"
+    assert _account(account["id"])["state"] == "signed_out"
+    # The one status read is the baseline; the old credentials are never polled again.
+    assert [args for _, args in _calls(scripted_vendor_clis["log"])].count("auth status") == 1
+
+
+@pytest.mark.real_harness_cli
+@pytest.mark.asyncio
+@both
+async def test_a_held_login_whose_status_never_reads_signed_in_still_times_out(scripted_vendor_clis, provider, monkeypatch, tmp_path):
+    from connections import account_controls
+
+    account = scripted_vendor_clis[provider]
+    monkeypatch.setenv("LOGIN_HOLD", str(tmp_path / "never"))
+    monkeypatch.setattr(account_controls, "_SIGNIN_WAIT_SECONDS", 0.6)
+    monkeypatch.setattr(account_login_wait, "STATUS_POLL_SECONDS", 0.05)
+    await account_controls.start_signin(account["id"])
+    await _started(scripted_vendor_clis["log"])
+    ended = await _finished(account["id"])
+    assert ended["status"] == "failed" and ended["cause"] == "signin_timed_out"
+    asked = [args for _, args in _calls(scripted_vendor_clis["log"])]
+    # Claude Code's status is read while it waits; Codex's login alone decides, so its status is never read.
+    assert (_ARGV[provider]["status"] in asked) == (provider == "claude-code")
+    assert _account(account["id"])["state"] == "signed_out"
 
 
 @pytest.mark.real_harness_cli

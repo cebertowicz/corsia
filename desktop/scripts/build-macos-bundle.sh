@@ -47,7 +47,7 @@ done
 fail() { echo "error: $*" >&2; exit 1; }
 fetch_verified() {
   local url="$1" file="$2" digest="$3"
-  curl --fail --location --retry 3 --silent --show-error "$url" --output "$file"
+  curl --fail --location --retry 3 --retry-all-errors --silent --show-error "$url" --output "$file"
   echo "${digest}  ${file}" | shasum --algorithm 256 --check --status || fail "SHA-256 mismatch for $(basename "$file")"
 }
 fetch_agent_browser() {
@@ -196,6 +196,7 @@ install -m 0755 "$ROOT/scripts/corsia" "$BUNDLE_ROOT/scripts/corsia"
 rsync -a --delete "$ROOT/scripts/corsia.d/" "$BUNDLE_ROOT/scripts/corsia.d/"
 
 node "$ROOT/desktop/scripts/gen-shell-tokens.mjs"
+node "$ROOT/desktop/scripts/gen-shell-logo.mjs"
 (
   cd "$ROOT/desktop/src-tauri"
   "$ROOT/frontend/node_modules/.bin/tauri" build --target aarch64-apple-darwin --bundles app --config "{\"version\":\"$app_version\",\"bundle\":{\"macOS\":{\"bundleVersion\":\"$macos_bundle_version\"}}}"

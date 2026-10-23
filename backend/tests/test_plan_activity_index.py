@@ -278,7 +278,7 @@ def test_compact_wait_ranges_keep_earliest_display_and_latest_overdue_clock(
         user_ready=0,
         user_blocked=0,
         paused_by_user=0,
-        wait_deadlines=[(row["wait_deadline"], row["wait_deadline_latest"])],
+        wait_deadlines=[(row["wait_deadline"], row["wait_deadline_latest"], None)],
     )
     assert facts == {
         "need_you": 0,
@@ -296,7 +296,7 @@ def test_compact_wait_ranges_keep_earliest_display_and_latest_overdue_clock(
         user_ready=0,
         user_blocked=0,
         paused_by_user=0,
-        wait_deadlines=[(row["wait_deadline"], row["wait_deadline_latest"])],
+        wait_deadlines=[(row["wait_deadline"], row["wait_deadline_latest"], None)],
     )
     assert overdue is not None
     assert overdue["overdue_waits"] == 1

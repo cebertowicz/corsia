@@ -14,7 +14,7 @@ readonly RUSTUP_INIT_SHA256="ec1b9233e7f72990ecd8e62063fa7f6c3dfc2bec8e97f88bff1
 
 mkdir -p "$TOOLCHAIN_ROOT"
 if [ ! -x "$RUSTUP_INIT" ]; then
-  curl --fail --location --retry 3 --silent --show-error "$RUSTUP_INIT_URL" --output "$RUSTUP_INIT"
+  curl --fail --location --retry 3 --retry-all-errors --silent --show-error "$RUSTUP_INIT_URL" --output "$RUSTUP_INIT"
   chmod 755 "$RUSTUP_INIT"
 fi
 echo "$RUSTUP_INIT_SHA256  $RUSTUP_INIT" | shasum --algorithm 256 --check --status || {
