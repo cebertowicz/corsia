@@ -57,7 +57,7 @@
 		onEdit: (mapPos: (position: number) => number) => void;
 		onLayout: (mapPos?: (position: number) => number) => void;
 		readOnly: boolean;
-		imageBase?: { path: string; projectId: string | null } | null;
+		imageBase?: { path: string; projectId: string | null; imageCacheKey?: string } | null;
 		onOpenImage?: (request: OpenImageRequest) => void;
 		saveError: string;
 		pendingSel: PendingSelection | null;

@@ -12,13 +12,14 @@ import { installPaintedFrames, type EachPaintedFrame } from '../support/paintedF
 // the margin marker and drawer group back in it, and the one feedback batch both show and send.
 
 const NATURAL = { width: 1600, height: 1000 };
+const REPLACED_NATURAL = { width: 1200, height: 800 };
 const filler = (from: number, to: number) => Array.from({ length: to - from }, (_, i) => `Paragraph ${from + i}: the walkthrough continues with enough words to wrap across a few lines of the document column.\n`).join('\n');
 const DOC = ['# Design walkthrough', '', filler(1, 4), '![Mock screen](shots/screen.png)', '', filler(4, 12)].join('\n');
 /** Two images, for many comments on each and a drawer with more than one image group. */
 const DOC_TWO = ['# Design walkthrough', '', filler(1, 2), '![Mock screen](shots/screen.png)', '', filler(2, 4), '![Settings screen](shots/settings.png)', '', filler(4, 12)].join('\n');
 const query = `?token=${encodeURIComponent(TEST_TOKEN)}`;
 
-interface Seeded { sessionTitle: string; artifactId: string }
+interface Seeded { sessionTitle: string; artifactId: string; imagePath: string }
 
 /** A document with one image near its top, open in its thread's canvas. */
 async function seedDocument(page: Page, request: APIRequestContext, label: string, splitWidth: number | null, doc = DOC): Promise<Seeded> {
@@ -49,7 +50,7 @@ async function seedDocument(page: Page, request: APIRequestContext, label: strin
 		},
 		{ threadId: sessionId, id: artifactId, tabPath: docPath, width: splitWidth },
 	);
-	return { sessionTitle, artifactId };
+	return { sessionTitle, artifactId, imagePath: path.join(dir, 'shots', 'screen.png') };
 }
 
 const overlay = (page: Page) => page.locator('.image-overlay');
@@ -126,6 +127,11 @@ async function openDocument(page: Page, seeded: Seeded, width: number) {
 	await page.getByText(seeded.sessionTitle).first().click();
 	await expect(docImage(page)).toBeVisible();
 	await expect.poll(() => docImage(page).evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(NATURAL.width);
+}
+/** The closed document, opened again from the thread's Artifacts list. */
+async function reopenDocument(page: Page) {
+	await page.getByRole('button', { name: /^walkthrough\.md/ }).click();
+	await expect(docImage(page)).toBeVisible();
 }
 /** Opens the document's image in the viewer and waits until it has drawn and fitted. */
 async function openImage(page: Page, which = 0) {
@@ -266,6 +272,33 @@ const mockOnly = (testInfo: TestInfo) => {
 };
 
 test.describe('@flow:image-region-comments @surface:documents comments on images inside a document', () => {
+	test('reopens a replaced image and keeps its region comment on the fresh image', async ({ page, request }, testInfo) => {
+		mockOnly(testInfo);
+		test.setTimeout(180_000);
+		await page.setViewportSize({ width: 1440, height: 900 });
+		const seeded = await seedDocument(page, request, 'doc-image-reopen', null);
+		await openDocument(page, seeded, 1440);
+		await openImage(page);
+		await commentOnRegion(page, 'Image replaced after this comment');
+		await page.keyboard.press('Escape');
+		await bar(page).getByRole('button', { name: 'Back to walkthrough.md' }).click();
+		await expect(overlay(page)).toHaveCount(0);
+		await expect(marker(page)).toBeVisible();
+
+		fs.writeFileSync(seeded.imagePath, syntheticPng(REPLACED_NATURAL.width, REPLACED_NATURAL.height));
+		await page.getByRole('button', { name: 'Close walkthrough.md' }).click();
+		await expect(page.getByRole('button', { name: 'Close walkthrough.md' })).toHaveCount(0);
+		await reopenDocument(page);
+		await expect.poll(() => docImage(page).evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(REPLACED_NATURAL.width);
+		await expect(marker(page)).toBeVisible();
+
+		await marker(page).click();
+		await expect(overlay(page)).toBeVisible();
+		await expect.poll(() => overlay(page).locator('.frame img').evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(REPLACED_NATURAL.width);
+		await expect(tag(page, 1)).toBeVisible();
+		await expect(tag(page, 1)).toHaveAttribute('aria-label', /image changed since this comment/);
+	});
+
 	test('comment on part of a document image, find it again in the document, and send from its drawer (1440)', async ({ page, request }, testInfo) => {
 		mockOnly(testInfo);
 		test.setTimeout(180_000);
