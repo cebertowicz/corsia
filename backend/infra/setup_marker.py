@@ -71,11 +71,26 @@ def record_created_file(relative: str, sha256: str) -> None:
     Does nothing when this install has no usable marker of its own. Raises ``OSError`` when the marker cannot be
     rewritten, so the caller can refuse to create the file.
     """
+    _record(relative, sha256, only_if_recorded=False)
+
+
+def update_created_file(relative: str, sha256: str) -> None:
+    """Replace the digest of a file this setup created and the person then edited on setup's Back step.
+
+    Does nothing for a file the marker does not list, so a file the person had before setup is never added.
+    Raises ``OSError`` when the marker cannot be rewritten.
+    """
+    _record(relative, sha256, only_if_recorded=True)
+
+
+def _record(relative: str, sha256: str, *, only_if_recorded: bool) -> None:
     _, data = _read()
     if data is None or data.get("wiped") is True:
         return
     recorded = data.get("files")
     files = recorded if isinstance(recorded, dict) else {}
+    if only_if_recorded and relative not in files:
+        return
     root = str(config.WORKSPACE)
     if files and data.get("files_root") != root:
         raise OSError("setup files are recorded for another work folder, so this one cannot be added")

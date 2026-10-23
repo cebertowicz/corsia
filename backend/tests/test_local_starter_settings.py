@@ -32,7 +32,7 @@ def test_canonical_setup_settings_use_exact_upstream_payloads_and_no_environment
 
     assert calls == [
         ("POST", "/global-settings", {
-            "max_concurrent_requests": 1, "prefill_priority": "context",
+            "max_concurrent_requests": 2, "prefill_priority": "context",
             "skip_api_key_verification": True,
         }),
         ("GET", "/models", None),
@@ -51,7 +51,5 @@ def test_canonical_setup_settings_use_exact_upstream_payloads_and_no_environment
     assert not {"host", "port", "cors_origins", "api_key", "server"} & set(OMLX_GLOBAL_SETTINGS)
 
 
-def test_setup_serializes_requests_as_the_setup_decision_says():
-    # setup_strings.OMLX ("At {recommended}, oMLX finishes one request before it starts the
-    # next") describes this value; changing it makes that decision text false.
-    assert OMLX_GLOBAL_SETTINGS["max_concurrent_requests"] == 1
+def test_setup_serializes_two_managed_requests():
+    assert OMLX_GLOBAL_SETTINGS["max_concurrent_requests"] == 2

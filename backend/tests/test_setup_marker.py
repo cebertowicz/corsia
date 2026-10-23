@@ -262,3 +262,39 @@ def test_steps_before_the_finish_keep_the_marker(app):
     _first_account()
     setup_progress.update(step="local-consent")
     assert (app / setup_marker.MARKER_FILE).exists()
+
+
+def test_editing_the_name_on_back_keeps_the_recorded_profile_matching_so_a_relaunch_still_removes_it(app):
+    from infra import account_update
+
+    _first_account()
+    account_update.update_account("pat", full_name="Pat Changed", email="new@example.test")
+    profile = (config.WORKSPACE / PROFILE).read_bytes()
+    assert b"Pat Changed" in profile
+    assert _marker(app)["files"] == {PROFILE: hashlib.sha256(profile).hexdigest()}
+
+
+def test_editing_a_profile_the_person_already_had_does_not_add_it_to_the_marker(app):
+    from infra import account_update
+
+    (config.WORKSPACE / "context").mkdir()
+    (config.WORKSPACE / PROFILE).write_text("# User profile\n- **Full name:** Pat\n", encoding="utf-8")
+    _first_account()
+    account_update.update_account("pat", full_name="Pat Changed")
+    assert _marker(app)["files"] == {}
+
+
+def test_a_marker_that_cannot_be_updated_undoes_the_edit_and_keeps_the_old_digest(app, monkeypatch):
+    from infra import account_update
+
+    _first_account()
+    before = (config.WORKSPACE / PROFILE).read_bytes()
+
+    def refuse(relative: str, sha256: str) -> None:
+        raise OSError("marker is read-only")
+
+    monkeypatch.setattr(setup_marker, "update_created_file", refuse)
+    with pytest.raises(OSError):
+        account_update.update_account("pat", full_name="Pat Changed")
+    assert (config.WORKSPACE / PROFILE).read_bytes() == before
+    assert _marker(app)["files"] == {PROFILE: hashlib.sha256(before).hexdigest()}

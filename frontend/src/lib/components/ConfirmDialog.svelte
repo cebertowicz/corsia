@@ -6,6 +6,7 @@
 		title,
 		description,
 		confirmLabel = 'Confirm',
+		cancelLabel = 'Cancel',
 		destructive = false,
 		onConfirm,
 		onCancel,
@@ -14,6 +15,7 @@
 		title: string;
 		description: string;
 		confirmLabel?: string;
+		cancelLabel?: string;
 		destructive?: boolean;
 		onConfirm: () => void;
 		onCancel: () => void;
@@ -25,7 +27,7 @@
 		<p class="desc">{description}</p>
 
 		{#snippet foot()}
-			<Button variant="ghost" onclick={onCancel}>Cancel</Button>
+			<Button variant="ghost" onclick={onCancel}>{cancelLabel}</Button>
 			<Button variant={destructive ? 'danger' : 'primary'} onclick={onConfirm}>{confirmLabel}</Button>
 		{/snippet}
 	</Modal>

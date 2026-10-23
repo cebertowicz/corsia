@@ -29,6 +29,18 @@ def load_settings(path: Path = _PATH) -> tuple[dict, dict, LocalModel]:
 
 OMLX_GLOBAL_SETTINGS, MODEL_SETTINGS, STARTER_MODEL = load_settings()
 
+# The level a turn on the managed oMLX runs at when neither the thread nor the
+# server sets one. Sent per request, never written to the server, so a person's
+# own server keeps its template default; see ``reasoning_shape_from_discovery``.
+MANAGED_REASONING_EFFORT = "medium"
+
+
+def managed_reasoning_effort(server: dict) -> str | None:
+    """``MANAGED_REASONING_EFFORT`` for CORSIA's own oMLX ``server``; None for anyone else's."""
+    from llm.managed_omlx_binary import is_corsia_managed_server
+
+    return MANAGED_REASONING_EFFORT if is_corsia_managed_server(server) else None
+
 
 def thinking_recommendation(thinking_default: object) -> dict[str, bool]:
     """What a model needs written so an agent turn on it thinks.
