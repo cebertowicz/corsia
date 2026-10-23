@@ -10,6 +10,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
+from dns.exception import DNSException
+
 from connections.mailhost.endpoints import Endpoints, Server
 
 Resolve = Callable[[str, str], Any]
@@ -25,7 +27,8 @@ def _record(domain: str, service: str, resolver: Resolve) -> Server | None:
         record = records[0]
         host = str(record.target).rstrip(".").lower()
         port = int(record.port)
-    except Exception:  # resolver failures and malformed public records mean "ask the person"
+    except (AttributeError, TypeError, ValueError, DNSException):
+        # Resolver failures and malformed public records mean the person should enter servers instead.
         return None
     if not host or host == "." or not 1 <= port <= 65535:
         return None
