@@ -163,6 +163,83 @@ _COUNT_TO_200K = (
 )
 
 
+def test_a_commit_with_unchanged_files_never_beats_and_joins_on_error(tmp_path, monkeypatch):
+    """An idle commit cannot be made to look healthy by the observer's timer."""
+    conn = sqlite3.connect(tmp_path / "corsia.db")
+    conn.execute("CREATE TABLE kept (x)")
+    conn.commit()
+    startup_progress.begin(tmp_path / "runtime")
+    before = read(tmp_path / "runtime")["seq"]
+    checked = threading.Event()
+    calls = []
+    real_stamp = startup_progress._file_stamp
+
+    def stamp(file):
+        result = real_stamp(file)
+        calls.append(file)
+        if len(calls) >= 12:  # baseline plus five observation cycles
+            checked.set()
+        return result
+
+    monkeypatch.setattr(startup_progress, "_file_stamp", stamp)
+    monkeypatch.setattr(startup_progress, "FILE_ACTIVITY_SECONDS", 0.001)
+    monkeypatch.setattr(startup_progress, "HEARTBEAT_SECONDS", 0.0)
+    try:
+        with pytest.raises(RuntimeError, match="commit stopped"):
+            with startup_progress.transaction_writes(conn):
+                assert checked.wait(5), "observer did not run"
+                assert read(tmp_path / "runtime")["seq"] == before
+                raise RuntimeError("commit stopped")
+        assert not any(t.name == "startup-database-writes" for t in threading.enumerate())
+    finally:
+        conn.close()
+
+
+def test_migration_commit_checkpoint_advances_seq_without_vm_callbacks(tmp_path, monkeypatch):
+    """A real WAL autocheckpoint writes the DB while COMMIT makes no VM calls."""
+    runtime = tmp_path / "runtime"
+    commits = []
+
+    class ObservedCommit(sqlite3.Connection):
+        def commit(self):
+            if startup_progress._state is None:
+                return super().commit()
+            before = read(runtime)["seq"]
+            vm_calls = []
+            self.set_progress_handler(lambda: vm_calls.append(1) or 0, 100_000)
+            super().commit()
+            commits.append((before, read(runtime)["seq"], len(vm_calls)))
+
+    conn = sqlite3.connect(tmp_path / "corsia.db", factory=ObservedCommit)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    conn.execute("CREATE TABLE kept (x)")
+    conn.execute("PRAGMA user_version=1")
+    conn.commit()
+
+    def migrate(connection):
+        connection.execute("CREATE TABLE big (x)")
+        connection.execute(
+            "WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n WHERE x<8192) "
+            "INSERT INTO big SELECT zeroblob(8192) FROM n"
+        )
+
+    monkeypatch.setitem(MIGRATIONS, 1, migrate)
+    monkeypatch.setattr(startup_progress, "HEARTBEAT_SECONDS", 0.0)
+    # Poll much faster than production for this small, real 64 MiB checkpoint.
+    monkeypatch.setattr(startup_progress, "FILE_ACTIVITY_SECONDS", 0.0001, raising=False)
+    try:
+        startup_progress.begin(runtime)
+        assert migrate_to_current(conn, 2).migrated
+    finally:
+        startup_progress.finish()
+        conn.close()
+    assert len(commits) == 1
+    before, after, vm_calls = commits[0]
+    assert vm_calls == 0
+    assert after > before, "COMMIT wrote the database but published no progress"
+
+
 def test_a_migration_publishes_backup_steps_and_heartbeats(tmp_path, monkeypatch):
     """A step that works for a long time keeps seq moving, and the counts land."""
     original = dict(MIGRATIONS)

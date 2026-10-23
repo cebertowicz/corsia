@@ -30,8 +30,11 @@ process named by ``pid`` is still making progress. The other fields:
 
 Heartbeats come from SQLite: every connection opened while startup publishes
 (and the migration's own) runs ``sqlite_beat`` from its progress handler, so any
-startup step doing database work keeps ``seq`` moving, in every phase. Work that
-never touches the database between two marks does not beat.
+startup step doing database work keeps ``seq`` moving, in every phase. During
+startup transactions, a scoped observer also beats on changed database/WAL
+mtime or size: COMMIT's autocheckpoint writes pages without VM callbacks. It
+never beats for unchanged files and is joined when the transaction exits.
+Work that never touches the database between two marks does not beat.
 
 Writes are no-ops until ``begin`` and after ``finish`` or ``fail``, so code
 shared with tools and tests (``migrate_to_current``) publishes nothing outside
@@ -62,6 +65,9 @@ HEARTBEAT_SECONDS = 1.0
 #: statement (a table rebuild, ``quick_check``) on a 4 GiB database measured
 #: well under one second between calls at this value.
 SQLITE_PROGRESS_OPS = 100_000
+#: COMMIT/autocheckpoint does no VM callbacks. Observe only actual writes to
+#: this transaction's database/WAL; unchanged files never produce a heartbeat.
+FILE_ACTIVITY_SECONDS = 0.5
 
 _state: dict | None = None
 _path: Path | None = None
@@ -112,6 +118,59 @@ def watch(conn: sqlite3.Connection) -> None:
     """Let ``conn``'s statements beat while startup publishes. Harmless after it ends."""
     if _state is not None:
         conn.set_progress_handler(sqlite_beat, SQLITE_PROGRESS_OPS)
+
+
+@contextmanager
+def transaction_writes(conn: sqlite3.Connection) -> Iterator[None]:
+    """Observe actual DB/WAL writes through a startup transaction and its commit.
+
+    The transaction already holds the write lock when this starts. Observe
+    only this connection's files, never logs or a timer alone. No SQLite calls
+    run in the observer, which is joined as soon as the transaction exits.
+    """
+    if _state is None:
+        yield
+        return
+    source = next((Path(filename) for _, name, filename in conn.execute("PRAGMA database_list")
+                   if name == "main" and filename), None)
+    if source is None:
+        yield
+        return
+    files = (source, source.with_name(source.name + "-wal"))
+    stopped, ready = threading.Event(), threading.Event()
+
+    def observe() -> None:
+        try:
+            previous = tuple(_file_stamp(file) for file in files)
+            ready.set()
+            while not stopped.wait(FILE_ACTIVITY_SECONDS) and _state is not None:
+                current = tuple(_file_stamp(file) for file in files)
+                if current != previous:
+                    beat()
+                previous = current
+        except Exception:
+            # Losing observation must not abort a database operation. An idle
+            # reader still times out; elapsed time alone never proves progress.
+            log.exception("Startup database write observation stopped")
+        finally:
+            ready.set()
+
+    observer = threading.Thread(target=observe, name="startup-database-writes", daemon=True)
+    observer.start()
+    ready.wait()
+    try:
+        yield
+    finally:
+        stopped.set()
+        observer.join()
+
+
+def _file_stamp(file: Path) -> tuple[int, int] | None:
+    try:
+        stat = file.stat()
+    except FileNotFoundError:
+        return None
+    return stat.st_mtime_ns, stat.st_size
 
 
 def mark(phase: str, *, done: int | None = None, total: int | None = None, **detail) -> None:

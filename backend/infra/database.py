@@ -225,8 +225,9 @@ def write_transaction(
             connection.execute("BEGIN IMMEDIATE")
             write_effects.begin(connection)
             started_at = time.monotonic()
-            yield connection
-            connection.commit()
+            with startup_progress.transaction_writes(connection):
+                yield connection
+                connection.commit()
             committed = write_effects.take(connection)
         except BaseException:
             write_effects.abort(connection)
