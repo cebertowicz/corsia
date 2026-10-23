@@ -67,18 +67,16 @@
 
 	// `fly` is a rise plus a fade. The blur has to sit on an element with no faded or
 	// filtered ancestor, or the browser makes that ancestor a backdrop root and the blur
-	// samples nothing. So the rise is on `.modal-frame` (transform only), and the fade is
-	// on `.modal` and, separately, on the glass layer beside it. Same duration and easing
-	// as `fly`, so the card's opacity and position match it frame for frame.
-	function modalRise(_node: Element, { y = 12, duration = 380, easing = backOut } = {}) {
+	// samples nothing. `fly` writes opacity into its animation even with `opacity: 1`, so it
+	// can't sit above the blur. So the rise is on `.modal-frame` (transform only), and `fade` is on `.modal`
+	// and, separately, on the glass layer beside it. One timing keeps the three in step.
+	const motion = { duration: 380, easing: backOut };
+	function modalRise(_node: Element, { y = 12, duration, easing }: { y?: number; duration: number; easing: (t: number) => number }) {
 		return {
 			duration,
 			easing,
 			css: (_t: number, u: number) => `transform: translateY(${u * y}px)`,
 		};
-	}
-	function modalFade(_node: Element, { duration = 380, easing = backOut } = {}) {
-		return { duration, easing, css: (t: number) => `opacity: ${t}` };
 	}
 
 	onMount(() => {
@@ -117,12 +115,12 @@
 	<!-- svelte-ignore a11y_click_events_have_key_events -->
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<div class="bg" onclick={onBackdropClick} transition:fade={{ duration: 120 }}></div>
-	<div class="modal-frame {size}" transition:modalRise={{ y: 12, duration: 380, easing: backOut }}>
-		<div class="modal-glass" transition:modalFade={{ duration: 380, easing: backOut }}></div>
+	<div class="modal-frame {size}" transition:modalRise={motion}>
+		<div class="modal-glass" transition:fade={motion}></div>
 		<div
 			bind:this={modalElement}
-			class="modal {size}"
-			transition:modalFade={{ duration: 380, easing: backOut }}
+			class="modal"
+			transition:fade={motion}
 			{role}
 			aria-modal="true"
 			aria-label={ariaLabel}
