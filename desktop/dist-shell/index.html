@@ -283,7 +283,10 @@
 				offerLine: (reason, preview) => `${reason} ${FRESH_COPY.previewLine(preview)}`,
 				insteadButton: 'Start fresh instead',
 				offerButton: 'Start fresh',
-				previewLine: (preview) => `CORSIA stops your earlier install, then moves ${preview.moves.length === 1 ? 'this' : 'these'} into a new folder in ${preview.backups}. Nothing is deleted.`,
+				previewLine: (preview) => `Start fresh stops your earlier install, then moves ${preview.moves.length === 1 ? 'this' : 'these'} into a new folder in ${preview.backups}. Nothing is deleted.`,
+				checkingFolders: 'Checking folders…',
+				checkFoldersAgain: 'Check folders again',
+				previewFailureLine: 'CORSIA couldn’t check what Start fresh will move. Check folders again before starting fresh.',
 				confirmCode: (folders) => `Its code folder stays where it is: ${folders.join(', ')}.`,
 				confirmWork: (folders) => `${folders.length === 1 ? 'Its work folder stays' : 'Its work folders stay'} where ${folders.length === 1 ? 'it is' : 'they are'}: ${folders.join(', ')}.`,
 				movingTitle: 'Moving your earlier install into a backup…',
@@ -363,7 +366,7 @@
 				saveReport.hidden = true;
 				retry.hidden = false;
 				retry.textContent = 'Take over';
-				startFreshButton.textContent = previewFailure ? 'Check folders again' : 'Checking folders…';
+				startFreshButton.textContent = previewFailure ? FRESH_COPY.checkFoldersAgain : FRESH_COPY.checkingFolders;
 				startFreshButton.hidden = false;
 				startFreshButton.disabled = !previewFailure;
 				startFreshButton.onclick = previewFailure ? () => showExistingInstall(workDir) : null;
@@ -691,7 +694,17 @@
 						why,
 					});
 				} catch (error) {
-					showFreshFailure(error, () => showFreshOffer(reason, details));
+					const previewDetails = error && typeof error === 'object'
+						? error.details ?? error.message ?? ''
+						: String(error ?? '');
+					showFreshCard({
+						title: FRESH_COPY.offerTitle,
+						text: said,
+						extra: FRESH_COPY.previewFailureLine,
+						button: FRESH_COPY.checkFoldersAgain,
+						action: () => showFreshOffer(reason, details),
+						why: previewDetails,
+					});
 				}
 			}
 
@@ -703,14 +716,14 @@
 				const stopFollowing = followProgress();
 				try {
 					await invoke('start_fresh');
-					stopFollowing();
-					await start();
 				} catch (error) {
-					stopFollowing();
 					showFreshFailure(error, retryChoice);
+					return;
 				} finally {
+					stopFollowing();
 					freshRunning = false;
 				}
+				await start();
 			}
 
 			// A Start fresh failure: the backend's line, its reason under Details, and the one next step. With nothing

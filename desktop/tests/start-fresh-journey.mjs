@@ -54,9 +54,9 @@ const backup = '~/CORSIA backups/2026-10-22 13-05';
 async function open(theme, answers) {
 	const page = await browser.newPage({ viewport, colorScheme: theme });
 	await page.exposeFunction('__answer', async (command, count) => {
-		const answer = answers[command];
+		const answer = typeof answers[command] === 'function' ? await answers[command](count) : answers[command];
 		if (answer && answer.throws) return { throws: answer.throws };
-		return { value: typeof answer === 'function' ? await answer(count) : answer ?? null };
+		return { value: answer ?? null };
 	});
 	await page.addInitScript(() => {
 		window.__calls = [];
@@ -113,7 +113,7 @@ for (const theme of ['dark', 'light']) {
 		await page.evaluate((said) => window.__corsiaShowStartup({ state: 'existing_install', reason: said }), reason);
 		compare(`${theme} offer`, await read(page), {
 			title: 'Start CORSIA fresh?',
-			line: 'CORSIA found an existing install on this computer (~/.corsia), and this app can’t open it. CORSIA stops your earlier install, then moves these into a new folder in ~/CORSIA backups. Nothing is deleted.',
+			line: 'CORSIA found an existing install on this computer (~/.corsia), and this app can’t open it. Start fresh stops your earlier install, then moves these into a new folder in ~/CORSIA backups. Nothing is deleted.',
 			note: 'Its code folder stays where it is: ~/.corsia.',
 			list: preview.moves,
 			details: null,
@@ -127,7 +127,7 @@ for (const theme of ['dark', 'light']) {
 		const plistReason = 'CORSIA found an existing install on this computer, and this app can’t take it over.';
 		await page.evaluate(([said, why]) => window.__corsiaShowStartup({ state: 'existing_install', reason: said, details: why }), [plistReason, cause]);
 		compare(`${theme} offer with a cause`, await read(page), {
-			line: `${plistReason} CORSIA stops your earlier install, then moves these into a new folder in ~/CORSIA backups. Nothing is deleted.`,
+			line: `${plistReason} Start fresh stops your earlier install, then moves these into a new folder in ~/CORSIA backups. Nothing is deleted.`,
 			list: preview.moves,
 			details: cause,
 			button: 'Start fresh',
@@ -178,6 +178,27 @@ for (const theme of ['dark', 'light']) {
 		const calls = await made(page);
 		if (JSON.stringify(calls) !== JSON.stringify(['start_fresh_preview', 'start_fresh', 'start_local_service'])) fail(`${theme} takeover fresh: ran ${JSON.stringify(calls)}`);
 		if (failed === before) console.log(`ok   ${theme} takeover Start fresh moves once and starts setup`);
+		await page.close();
+	}
+
+	// After Start fresh moves, a new takeover choice gets its own valid or refused preview rather than staying pending.
+	for (const { name, nextPreview, instead } of [
+		{ name: 'valid preview', nextPreview: preview, instead: 'Start fresh instead' },
+		{ name: 'refused preview', nextPreview: { throws: { message: 'CORSIA can’t inspect this earlier install.', details: 'permission denied' } }, instead: 'Check folders again' },
+	]) {
+		const page = await open(theme, {
+			start_fresh_preview: (count) => count === 1 ? preview : nextPreview,
+			start_fresh: backup,
+			start_local_service: { state: 'adoption_offered', workspace: '~/Corsia' },
+		});
+		const before = failed;
+		await page.evaluate((said) => window.__corsiaShowStartup({ state: 'existing_install', reason: said }), reason);
+		await page.click('#retry');
+		await page.waitForFunction((expected) => document.getElementById('start-fresh').textContent === expected, instead);
+		compare(`${theme} post-fresh ${name}`, await read(page), { button: 'Take over', instead, list: name === 'valid preview' ? preview.moves : null, quit: true });
+		const calls = await made(page);
+		if (JSON.stringify(calls) !== JSON.stringify(['start_fresh_preview', 'start_fresh', 'start_local_service', 'start_fresh_preview'])) fail(`${theme} post-fresh ${name}: ran ${JSON.stringify(calls)}`);
+		if (failed === before) console.log(`ok   ${theme} post-fresh ${name} is not stuck checking folders`);
 		await page.close();
 	}
 
@@ -254,21 +275,30 @@ for (const theme of ['dark', 'light']) {
 		await page.close();
 	}
 
-	// A refusal says what the person can do; Retry reads the computer again.
-	{
-		const refusal = 'CORSIA can’t move ~/Corsia because it’s on another disk.';
-		const page = await open(theme, { start_fresh_preview: { throws: { message: refusal, details: '', restored: true } } });
+	// A preview failure is not a move failure: its details stay visible and checking again still moves nothing.
+	for (const { name, error, details } of [
+		{ name: 'object', error: { message: 'CORSIA can’t inspect this earlier install.', details: 'permission denied' }, details: 'permission denied' },
+		{ name: 'scalar', error: 'preview service unavailable', details: 'preview service unavailable' },
+	]) {
+		const page = await open(theme, { start_fresh_preview: (count) => count === 1 ? { throws: error } : preview });
 		const before = failed;
 		await page.evaluate((said) => window.__corsiaShowStartup({ state: 'existing_install', reason: said }), reason);
+		await page.waitForFunction(() => document.getElementById('retry').textContent === 'Check folders again');
+		compare(`${theme} preview failure ${name}`, await read(page), {
+			title: 'Start CORSIA fresh?',
+			line: reason,
+			note: 'CORSIA couldn’t check what Start fresh will move. Check folders again before starting fresh.',
+			details,
+			button: 'Check folders again',
+			list: null,
+			quit: true,
+		});
+		await shot(page, theme, `5-preview-${name}`);
 		await page.click('#retry');
-		await page.waitForFunction(() => document.getElementById('status').textContent === 'CORSIA couldn’t start fresh');
-		compare(`${theme} refusal`, await read(page), { line: refusal, details: null, button: 'Retry', list: null, quit: true });
-		await shot(page, theme, '5-refusal');
-		await page.click('#retry');
-		await page.waitForTimeout(150);
+		await page.waitForFunction(() => document.getElementById('retry').textContent === 'Start fresh');
 		const calls = await made(page);
-		if (JSON.stringify(calls) !== JSON.stringify(['start_fresh_preview', 'start_fresh_preview', 'start_fresh_preview'])) fail(`${theme} refusal: ran ${JSON.stringify(calls)}`);
-		if (failed === before) console.log(`ok   ${theme} refusal`);
+		if (JSON.stringify(calls) !== JSON.stringify(['start_fresh_preview', 'start_fresh_preview'])) fail(`${theme} preview failure ${name}: moved data or ran ${JSON.stringify(calls)}`);
+		if (failed === before) console.log(`ok   ${theme} preview failure ${name}`);
 		await page.close();
 	}
 

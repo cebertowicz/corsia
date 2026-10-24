@@ -76,7 +76,7 @@ try {
 		await page.evaluate(drawn.refused);
 		await page.clock.runFor(50);
 		const seen = await read(page);
-		const offer = 'A file named ~/Corsia is in the way of CORSIA’s default workspace folder. CORSIA stops your earlier install, then moves this into a new folder in ~/CORSIA backups. Nothing is deleted.';
+		const offer = 'A file named ~/Corsia is in the way of CORSIA’s default workspace folder. Start fresh stops your earlier install, then moves this into a new folder in ~/CORSIA backups. Nothing is deleted.';
 		if (seen.status !== 'Start CORSIA fresh?' || seen.line !== offer || seen.retry !== 'Start fresh') fail(`refused: ${JSON.stringify(seen)}`);
 		else console.log('ok   refused launch shows its reason and Start fresh');
 	}
