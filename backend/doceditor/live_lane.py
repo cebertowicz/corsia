@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 from collections import deque
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 import logging
 import sqlite3
 from typing import TYPE_CHECKING, Literal
@@ -12,7 +12,6 @@ from typing import TYPE_CHECKING, Literal
 from doceditor import live_events
 from doceditor.live_author import agent_author
 from doceditor.live_candidate import build_candidate
-from doceditor.live_comments import candidate_ranges
 from doceditor.live_document import LiveDocument, file_hash
 from doceditor.live_store import StoreRefused
 from doceditor.live_lane_record import record_candidate
@@ -254,7 +253,6 @@ class DocumentLane:
         prior_hash = await self._import()
         fork, accepted, skipped, receipt, author = await build_candidate(self.live, operation)
         text = str(fork["text"])
-        ranges = candidate_ranges(self.live, fork)
         await self.validate_actor(text, operation.actor)
         publication = await self.policy(operation, text) if self.policy else None
         if operation.kind == "edit" and operation.multi_edit and text == self.live.text:
@@ -263,8 +261,7 @@ class DocumentLane:
         # Only for the typing reveal: looked up once the write is admitted, and
         # never able to fail it.
         writer = await agent_author(operation.actor, operation.kind)
-        if publication is not None:
-            publication = replace(publication, ranges=ranges)
+
         record = await record_candidate(self.live, fork, prior_hash, publication, operation)
         await _checkpoint("record")
         try:

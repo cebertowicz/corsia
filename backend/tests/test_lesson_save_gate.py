@@ -58,6 +58,8 @@ def test_an_agent_cannot_add_a_lesson_line_by_editing(tmp_path) -> None:
     assert (result.outcome, result.reason) == (REFUSED, REASON)
     assert "continuity_edit" in result.line and "place" in result.line
     assert "RESPONSIBILITY.md" in result.line
+    assert "entry_id, placement, decision, rule, second_case and not_when" in result.line
+    assert "Wrong decision" in result.line and "Right" in result.line
 
 
 def test_an_agent_can_reword_a_lesson_without_growing_the_item_count(tmp_path) -> None:

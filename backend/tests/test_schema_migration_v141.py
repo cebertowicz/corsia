@@ -113,7 +113,7 @@ def test_a_full_v140_install_takes_the_step_and_ends_where_a_fresh_install_start
     from infra.database_migrations import MIGRATIONS, migrate_to_current
     from infra.schema import SCHEMA_VERSION
 
-    assert SCHEMA_VERSION == 145 and MIGRATIONS[140] is migrate_140_to_141
+    assert SCHEMA_VERSION == 146 and MIGRATIONS[140] is migrate_140_to_141
     db = sqlite3.connect(":memory:")
     initialize_schema(db)
     for table in ("event_route_decisions", "event_rules"):
@@ -122,7 +122,7 @@ def test_a_full_v140_install_takes_the_step_and_ends_where_a_fresh_install_start
     db.execute("PRAGMA user_version=140")
     db.commit()
     result = migrate_to_current(db, SCHEMA_VERSION)
-    assert (result.migrated, result.from_version, result.to_version) == (True, 140, 145)
+    assert (result.migrated, result.from_version, result.to_version) == (True, 140, 146)
     fresh = sqlite3.connect(":memory:")
     initialize_schema(fresh)
     schema = "SELECT type,name,tbl_name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name"
