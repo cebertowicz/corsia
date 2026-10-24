@@ -9,10 +9,11 @@ outside the thread's own tray or its agent's reference.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from core import lesson_case
 from core.lesson_trials import BODY_WORDS, TRIAL_SCHEMA, Trial, lesson_block, validate_trial
 
 Q1 = ("thread", "agent", "project", "everywhere")
@@ -63,7 +64,8 @@ Then:
   With it: q1 agent, kind hypothesis, review_after (a future date), a new
   skill_name, skill_description (when it applies, at most 40 words) and
   boundary (when it does not). If it rests on a person's words, add derivation
-  (how the rule follows) and literal_ref (where their exact words are kept)."""
+  (how the rule follows) and literal_ref (where their exact words are kept).
+""" + lesson_case.GUIDE
 
 ANSWER_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -81,6 +83,7 @@ ANSWER_SCHEMA: dict[str, Any] = {
         "skill_description": {"type": ["string", "null"]},
         "reference_file": {"type": ["string", "null"]},
         "rationale": {"type": "string"},
+        **lesson_case.SCHEMA_PROPERTIES,
         "trial": TRIAL_SCHEMA,
     },
 }
@@ -101,6 +104,8 @@ class Decision:
     reference_file: str | None
     rationale: str
     trial: Trial | None = None
+    #: Optional case metadata, as ``lesson_case`` validates it; absent keys stay out.
+    case_metadata: dict[str, Any] = field(default_factory=dict)
     originating_subjects: tuple[str, ...] = ()
 
 
@@ -129,6 +134,7 @@ def validate_decision(raw: object) -> Decision:
         raise InvalidDecision("text must be one non-empty line of at most 600 characters")
     try:
         trial = validate_trial(raw.get("trial"))
+        case_metadata = lesson_case.validate_metadata(raw)
     except ValueError as invalid:
         raise InvalidDecision(str(invalid)) from invalid
     return Decision(
@@ -141,6 +147,7 @@ def validate_decision(raw: object) -> Decision:
         reference_file=_optional(raw, "reference_file"),
         rationale=" ".join(rationale.split())[:200],
         trial=trial,
+        case_metadata=case_metadata,
     )
 
 

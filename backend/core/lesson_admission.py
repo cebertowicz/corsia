@@ -12,12 +12,12 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from core import lesson_files
+from core import lesson_case, lesson_files
 from core.lesson_trials import PERMANENT_KINDS, lesson_id, parse_instant
 from core.thread_identity import thread_agent_identity
 from core.placement_decide import Decision, Destination, InvalidDecision, ThreadPlace
@@ -58,13 +58,15 @@ class Admission:
     ``capture_id`` is the entry's own derived identity. ``lesson_id`` differs
     from it only when the answer revises a trial the owner already holds.
     ``text`` is the trial file without its review reference, and is None while
-    ``hold`` says why the hypothesis is only captured.
+    ``hold`` says why the hypothesis is only captured. ``case_metadata`` is
+    what a capture keeps: the answer's over what its earlier capture held.
     """
 
     lesson_id: str
     capture_id: str
     hold: str | None = None
     text: str | None = None
+    case_metadata: dict[str, Any] = field(default_factory=dict)
 
 
 def human_refs(body: dict[str, Any]) -> set[tuple[str, str]]:
@@ -113,18 +115,27 @@ def admit(
         ))
     epoch = int(entry.get("history_epoch", row["history_epoch"]))
     capture_id = lesson_id(thread_id, epoch, int(entry["entry_id"]))
-    hold = _incomplete(db, thread_id, epoch, entry, decision)
-    if hold is not None:
-        return Admission(capture_id, capture_id, hold)
-    if destination.path is None:
+    revising = _revises(thread_id, destination.path)
+    if "new_evidence" in decision.case_metadata and not revising:
         raise TrialRefused("invalid-output", (
-            "skill_name must be a new lowercase-hyphenated name for the trial skill"
+            "new_evidence is only for revising your own watch or trial lesson; "
+            "leave it out and call again"
         ))
     capture = None
     if place.tray is not None:
         path = lesson_files.capture_path(place.tray, capture_id)
         capture = lesson_files.read_capture(path.read_text(encoding="utf-8")) if path.exists() else None
-    identity, text = _render(thread_id, capture_id, entry, decision, destination.path, capture)
+    pending = lesson_case.revised(
+        capture.case_metadata if capture is not None else {}, decision.case_metadata,
+    )
+    hold = _incomplete(db, thread_id, epoch, entry, decision)
+    if hold is not None:
+        return Admission(capture_id, capture_id, hold, case_metadata=pending)
+    if destination.path is None:
+        raise TrialRefused("invalid-output", (
+            "skill_name must be a new lowercase-hyphenated name for the trial skill"
+        ))
+    identity, text = _render(thread_id, capture_id, entry, decision, destination.path, capture, pending)
     offered = _offered_elsewhere(db, place, str(decision.skill_name), destination.path)
     line = _index_line(decision, destination.path)
     from core.lesson_index import fits_budget
@@ -220,13 +231,24 @@ def _on_trial(row: sqlite3.Row) -> bool:
     return (answer.get("placement") or {}).get("trial") is not None
 
 
+def _revises(thread_id: str, path: Path | None) -> bool:
+    """Whether ``path`` holds this thread's own watch or trial lesson."""
+    if path is None or not path.exists():
+        return False
+    current = lesson_files.read_trial(path.read_text(encoding="utf-8", errors="replace"))
+    return (current is not None and current.lesson.owner == thread_id
+            and current.lesson.state in ("watch", "trial"))
+
+
 def _render(
     thread_id: str, capture_id: str, entry: dict[str, Any], decision: Decision, path: Path,
-    capture: lesson_files.CaptureFile | None,
+    capture: lesson_files.CaptureFile | None, pending: dict[str, Any],
 ) -> tuple[str, str]:
     """The trial's identity and its file text, against what the path holds now.
 
-    An own trial already there is revised and keeps its identity and evidence.
+    ``pending`` is the answer's case metadata over its capture's. An own trial
+    already there is revised and keeps its identity, its evidence and any case
+    metadata the answer leaves out (``lesson_case.revised``).
     An own retired or promoted lesson is captured again, with its origin kept.
     Anything else at the path is someone else's name.
     """
@@ -236,7 +258,7 @@ def _render(
     assert trial is not None
     from core.lesson_corrections import merge_subjects
 
-    identity, origin, earlier = capture_id, None, ()
+    identity, origin, earlier, case_metadata = capture_id, None, (), pending
     subjects = merge_subjects(
         capture.originating_subjects if capture is not None else (), decision.originating_subjects,
     )
@@ -249,6 +271,7 @@ def _render(
             ))
         if current.lesson.state in ("watch", "trial"):
             identity, earlier = current.lesson.id, current.lesson.source_refs
+            case_metadata = lesson_case.revised(current.lesson.case_metadata, pending)
             subjects = merge_subjects(current.lesson.originating_subjects, subjects)
         elif current.lesson.id != capture_id:
             origin = {"id": current.lesson.id, "behavioral_sha256": current.behavioral_sha256}
@@ -256,7 +279,7 @@ def _render(
         lesson_id=identity, owner=thread_id, name=str(decision.skill_name),
         description=str(decision.skill_description), text=decision.text, trial=trial,
         source_refs=lesson_files.merged_refs(earlier, entry["body"].get("source_refs") or []),
-        originating_subjects=subjects, origin=origin,
+        originating_subjects=subjects, origin=origin, case_metadata=case_metadata,
     )
     errors = validate_skill_text(text).errors
     if errors:

@@ -219,6 +219,7 @@ def _capture(
         text=decision.text, trial=trial,
         source_refs=lesson_files.merged_refs(kept, entry["body"].get("source_refs") or []),
         originating_subjects=merge_subjects(subjects, decision.originating_subjects),
+        case_metadata=admission.case_metadata,
     )
     if current != text and not _save(
         entry, place, decision, relative, {path: text}, {path: digest(current)},
