@@ -82,7 +82,7 @@ async def test_accept_checks_quotes_at_lane_start_after_queueing(ownership_scope
 
 
 @pytest.mark.asyncio
-async def test_live_accept_carries_the_persisted_person_winner_to_its_writer_contract(
+async def test_live_accept_passes_the_persisted_person_winner_to_durable_registration(
     ownership_scope, tmp_path, monkeypatch,
 ):
     scope = ownership_scope
@@ -95,14 +95,17 @@ async def test_live_accept_carries_the_persisted_person_winner_to_its_writer_con
         anchor_text="b", from_off=2, to_off=3, replacement="B", db=scope["db"],
     )
     entry.live.track_range(row["id"], row["from_off"], row["to_off"])
+    from infra.guidance_messages import saver_author
+    from registry import service
+
     seen = []
-    original_policy = entry.lane.policy
+    original_register = service.register_write_strict
 
-    async def capture(operation, text):
-        seen.append(operation.actor.suggestion_author_user_id)
-        return await original_policy(operation, text)
+    def capture_author(author, *args, **kwargs):
+        seen.append(author)
+        return original_register(author, *args, **kwargs)
 
-    entry.lane.policy = capture
+    monkeypatch.setattr(service, "register_write_strict", capture_author)
     try:
         result = await comment_actions.decide_suggestion(
             row["id"], "accept", user_id=user_id(scope), decided_by="user",
@@ -110,7 +113,9 @@ async def test_live_accept_carries_the_persisted_person_winner_to_its_writer_con
         )
 
         assert result["decision"] == "accepted"
-        assert seen == ["person-immutable-id"]
+        assert entry.publisher.task is not None
+        await asyncio.wait_for(entry.publisher.task, 2)
+        assert seen == [saver_author(user_id="person-immutable-id")]
     finally:
         await manager.close()
 
