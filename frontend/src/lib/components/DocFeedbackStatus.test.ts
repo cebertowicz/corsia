@@ -17,6 +17,9 @@ function result(undelivered_batches: object[] = [], sent_count = 1) {
 		woken: [],
 		undelivered_batches: undelivered_batches.map((batch) => ({ delivery_policy: 'document-held', ...batch })),
 		sent_count,
+		open_count: 0,
+		document_held_count: 0,
+		image_held_count: 0,
 	}), { status: 200 });
 }
 
@@ -128,11 +131,14 @@ describe('DocFeedbackStatus', () => {
 		expect(host.querySelector('.sent')).toBeNull();
 	});
 
-	it('keeps Retry in the sending lane when an older send response omits its lane tag', async () => {
+	it('uses the server-provided lane tag for a failed send', async () => {
 		fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
 			woken: [],
-			undelivered_batches: [{ id: 'batch-1', item_count: 1, undelivered_reason: 'owner_unavailable', attempts: 1 }],
+			undelivered_batches: [{ id: 'batch-1', item_count: 1, undelivered_reason: 'owner_unavailable', attempts: 1, delivery_policy: 'document-held' }],
 			sent_count: 0,
+			open_count: 0,
+			document_held_count: 0,
+			image_held_count: 0,
 		})));
 		waitToSend();
 		flushSync();

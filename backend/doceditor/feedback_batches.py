@@ -27,6 +27,7 @@ log = logging.getLogger(__name__)
 
 AGENT_QUIET = 120
 USER_IDLE = 120
+IMMEDIATE_IDLE = 5
 IMMEDIATE = "immediate"
 DOCUMENT_HELD = "document-held"
 IMAGE_HELD = "image-held"
@@ -42,7 +43,9 @@ def _after(value: str, seconds: int) -> str:
 
 
 def _new_deadline(author_kind: str, delivery_policy: str, now: str) -> str:
-    return _after(now, AGENT_QUIET if author_kind == "agent" else USER_IDLE)
+    if author_kind == "agent":
+        return _after(now, AGENT_QUIET)
+    return _after(now, IMMEDIATE_IDLE if delivery_policy == IMMEDIATE else USER_IDLE)
 
 
 def _validate_policy(author_kind: str, delivery_policy: str) -> str:

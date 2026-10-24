@@ -58,7 +58,7 @@ beforeEach(() => {
 			return json({ request: made });
 		}
 		if (init?.method === 'DELETE') { rows = []; return json({ request: { state: 'withdrawn' } }); }
-		return json({ woken: [], undelivered_batches: [] });
+		return json({ woken: [], undelivered_batches: [], open_count: 0, document_held_count: 0, image_held_count: 0 });
 	});
 	vi.stubGlobal('fetch', fetchMock);
 });

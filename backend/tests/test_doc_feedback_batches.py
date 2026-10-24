@@ -207,6 +207,33 @@ async def test_record_turn_end_closes_agent_author_batch_through_turn_end_effect
         db.close()
 
 
+def test_person_batch_deadlines_keep_immediate_retries_fast_and_held_lanes_open(isolated_db):
+    db = get_db()
+    try:
+        seed_thread(db, "owner")
+        artifact_id = seed_document(db, "owner", name="deadlines.md")
+        add_comment(
+            db, artifact_id, author_kind="user", author_id=None, author="Steve", delivery_policy=feedback_batches.IMMEDIATE,
+        )
+        add_comment(
+            db, artifact_id, author_kind="user", author_id=None, author="Steve", delivery_policy=feedback_batches.DOCUMENT_HELD,
+        )
+
+        deadlines = {
+            row["delivery_policy"]: (
+                datetime.fromisoformat(row["closes_at"]) - datetime.fromisoformat(row["last_item_at"])
+            ).total_seconds()
+            for row in batches(db, state="open")
+        }
+
+        assert deadlines == {
+            feedback_batches.IMMEDIATE: feedback_batches.IMMEDIATE_IDLE,
+            feedback_batches.DOCUMENT_HELD: feedback_batches.USER_IDLE,
+        }
+    finally:
+        db.close()
+
+
 def test_user_edit_delivers_at_its_persisted_idle_deadline(isolated_db):
     db = get_db()
     try:

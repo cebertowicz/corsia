@@ -18,7 +18,7 @@ export interface DocFeedbackCounts {
 	image_held_count: number;
 }
 
-export interface DocFeedbackResult extends Partial<DocFeedbackCounts> {
+export interface DocFeedbackResult extends DocFeedbackCounts {
 	woken: string[];
 	undelivered_batches: UndeliveredBatch[];
 	/** How many comments this call closed; 0 when another sender closed them first. */

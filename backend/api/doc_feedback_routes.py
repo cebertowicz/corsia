@@ -86,6 +86,32 @@ def _user_feedback_write(
         db.close()
 
 
+def _thread_feedback_read(user_id: str, thread_id: str) -> dict:
+    """Read one thread's held-document projection without taking the writer lock."""
+    db = get_db()
+    try:
+        if not owns_thread(thread_id, user_id, db=db):
+            raise HTTPException(404, "Thread not found")
+        return {"woken": [], "sent_count": 0, **feedback_batches.held_for_thread(db, thread_id)}
+    finally:
+        db.close()
+
+
+def _send_thread_feedback(user_id: str, thread_id: str) -> dict:
+    """Close a thread's held-document batches and return the remaining projection."""
+    db = get_db()
+    try:
+        if not owns_thread(thread_id, user_id, db=db):
+            raise HTTPException(404, "Thread not found")
+        with write_transaction(db, scope="send_thread_doc_feedback") as connection:
+            sent_count = feedback_batches.held_for_thread(connection, thread_id)["open_count"]
+            woken = feedback_batches.close_for_thread(connection, thread_id=thread_id, reason="send")
+            feedback = feedback_batches.held_for_thread(connection, thread_id)
+        return {"woken": woken, "sent_count": sent_count, **feedback}
+    finally:
+        db.close()
+
+
 def add_feedback_routes(router, assert_owns_artifact: Callable[[str, str, object], None]) -> None:
     """Attach held-feedback routes to the comment API's ownership-scoped router."""
 
@@ -135,30 +161,17 @@ def add_feedback_routes(router, assert_owns_artifact: Callable[[str, str, object
 
         return await run_in_db(touch)
 
-    def thread_feedback_write(user_id: str, thread_id: str, send: bool) -> dict:
-        db = get_db()
-        try:
-            if not owns_thread(thread_id, user_id, db=db):
-                raise HTTPException(404, "Thread not found")
-            with write_transaction(db, scope="send_thread_doc_feedback") as connection:
-                sent_count = feedback_batches.held_for_thread(connection, thread_id)["open_count"] if send else 0
-                woken = feedback_batches.close_for_thread(connection, thread_id=thread_id, reason="send") if send else []
-                feedback = feedback_batches.held_for_thread(connection, thread_id)
-            return {"woken": woken, "sent_count": sent_count, **feedback}
-        finally:
-            db.close()
-
     @router.get("/doc-feedback/thread/{thread_id}")
     async def held_user_feedback_for_thread(thread_id: str, user: dict = Depends(require_user_header_only)):
         """Return the document-held person comments routed to the current thread, one row per document."""
-        return await run_in_db(thread_feedback_write, user["id"], thread_id, False)
+        return await run_in_db(_thread_feedback_read, user["id"], thread_id)
 
     @router.post("/doc-feedback/thread/send")
     async def send_held_user_feedback_for_thread(
         body: FeedbackThreadAction, user: dict = Depends(require_user_header_only),
     ):
         """Close and deliver every document-held person-comment lane routed to the current thread."""
-        result = await run_in_db(thread_feedback_write, user["id"], body.thread_id, True)
+        result = await run_in_db(_send_thread_feedback, user["id"], body.thread_id)
         if result["woken"]:
             from plans import public
 

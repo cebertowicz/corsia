@@ -226,6 +226,27 @@ def test_thread_projection_is_document_held_only_with_a_row_per_artifact(client,
     assert body["open_count"] == 4
 
 
+def test_thread_projection_reads_without_a_write_transaction(client, owner_thread, monkeypatch):
+    db = get_db()
+    try:
+        artifact = seed_document(db, owner_thread)
+        _held(db, artifact, feedback_batches.DOCUMENT_HELD)
+    finally:
+        db.close()
+
+    import api.doc_feedback_routes as routes
+
+    def fail_if_called(*_args, **_kwargs):
+        raise AssertionError("thread feedback GET must not open a write transaction")
+
+    monkeypatch.setattr(routes, "write_transaction", fail_if_called)
+
+    response = client.get(f"/api/doc-feedback/thread/{owner_thread}", headers=HEADERS)
+
+    assert response.status_code == 200, response.text
+    assert response.json()["artifacts"] == [{"artifact_id": artifact, "open_count": 1}]
+
+
 def test_thread_projection_counts_101_comments_on_one_document(client, owner_thread):
     db = get_db()
     try:

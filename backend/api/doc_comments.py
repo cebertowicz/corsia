@@ -16,7 +16,6 @@ resolve to 404 so foreign ids stay non-enumerable.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -39,7 +38,7 @@ from doceditor.comment_batch_actions import accept_all_open, decide_all_from_aut
 from doceditor.comments import CrossArtifactIdError
 from doceditor.doc_text import read_doc_text
 from doceditor.quote_anchor import anchor_context
-from infra.auth import authenticate, may_access_artifact, owns_thread, require_user_header_only
+from infra.auth import authenticate, may_access_artifact, require_user_header_only
 from infra.database import get_db, write_transaction
 from api.doc_comment_decisions import comment_action_status, decision_refusal
 from api.files import document_save_http_exception

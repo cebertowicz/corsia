@@ -120,7 +120,7 @@ export class DocFeedback {
 			document_held_count: current.document_held_count ?? 0,
 			image_held_count: current.image_held_count ?? 0,
 		});
-		this.undelivered = this.withKnownLanes(current.undelivered_batches);
+		this.undelivered = current.undelivered_batches;
 		this.unsynced = false;
 		if (this.pendingCount > 0) {
 			this.confirmSent(0);
@@ -133,34 +133,12 @@ export class DocFeedback {
 		this.imageHeld = counts.image_held_count;
 	}
 
-	/** A refresh keeps a lane reported by the preceding send when an older response omits that field. */
-	private withKnownLanes(batches: UndeliveredBatch[], sentLane: HeldLane | null = null): UndeliveredBatch[] {
-		return batches.map((batch) => {
-			if (batch.delivery_policy) return batch;
-			const previous = this.undelivered.find((known) => known.id === batch.id)?.delivery_policy;
-			return { ...batch, delivery_policy: previous ?? sentLane ?? 'document-held' };
-		});
-	}
-
 	/** What a send reports is the truth: the lane it closed is empty, and every other lane keeps the server's count. */
 	private applyResult(id: string, lane: HeldLane, result: DocFeedbackResult, revision: number) {
 		// A matching sync or new comment since the request began is newer than this send's snapshot.
 		if (this.artifactId === id && this.revision === revision) {
-			this.undelivered = this.withKnownLanes(result.undelivered_batches, lane);
-			if (result.open_count !== undefined) {
-				this.applyCounts({
-					open_count: result.open_count,
-					document_held_count: result.document_held_count ?? 0,
-					image_held_count: result.image_held_count ?? 0,
-				});
-			} else {
-				const closed = this.heldCount(lane);
-				this.applyCounts({
-					open_count: Math.max(0, this.pendingCount - closed),
-					document_held_count: lane === 'document-held' ? 0 : this.documentHeld,
-					image_held_count: lane === 'image-held' ? 0 : this.imageHeld,
-				});
-			}
+			this.undelivered = result.undelivered_batches;
+			this.applyCounts(result);
 			this.unsynced = false;
 		}
 		window.dispatchEvent(new Event('doc-feedback-changed'));

@@ -114,7 +114,7 @@ beforeEach(() => {
 	});
 	Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
 	docComments.set({});
-	for (const mock of [mocks.send, mocks.retry]) mock.mockReset().mockResolvedValue({ woken: [], undelivered_batches: [] });
+	for (const mock of [mocks.send, mocks.retry]) mock.mockReset().mockResolvedValue({ woken: [], undelivered_batches: [], open_count: 0, document_held_count: 0, image_held_count: 0 });
 	mocks.fetchComments.mockReset().mockResolvedValue({ comments: [onImage('here', 1)], feedback: pending(0) });
 	mocks.fetchRevision.mockReset().mockResolvedValue({ exists: true, path: '/ws/shot.png', revision: 'r-1', media_type: 'image/png', artifact_id: 'art-img' });
 });
