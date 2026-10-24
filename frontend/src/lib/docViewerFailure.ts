@@ -9,11 +9,8 @@ export function handleViewerFailure(error: unknown, opened: DraftOpen, handlers:
 }): void {
 	// A tab opened before the backend's type was known: the leaf swaps it to the image viewer.
 	if (error instanceof ImageFileError) { handlers.signal({ status: 'loading', renderer: 'image' }); return; }
-	// A 404 means the document is gone, which the tab shows as its
-	// explicit unavailable state rather than a raw load error.
-	// A confirmed missing file is terminal, not retryable. The queue remains server-owned:
-	// refresh it so any reply row the server has retired disappears with the unavailable tab.
-	if (error instanceof Error && /^404\b/.test(error.message) && /\bno such file\b/i.test(error.message)) {
+	// A 404 is terminal for this tab. Refresh server-owned reply attention as well.
+	if (error instanceof Error && /^404\b/.test(error.message)) {
 		handlers.signal({ status: 'unavailable' }); handlers.reloadAttention(); return;
 	}
 	const refusal = docOpenRefusal(error);

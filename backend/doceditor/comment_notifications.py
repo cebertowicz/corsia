@@ -47,6 +47,7 @@ def publish_due_user_feedback(deliveries: list[str]) -> None:
 
 def announce_after_commit(
     connection, artifact_id: str, *, comment_id: str | None = None, author_thread_id: str | None = None,
+    reply_attention_changed: bool = False,
 ) -> None:
     """Send the change frame once the comment write on ``connection`` commits.
 
@@ -59,6 +60,7 @@ def announce_after_commit(
         connection,
         lambda: broadcast_doc_comment_changed(
             artifact_id, comment_id=comment_id, author_thread_id=author_thread_id,
+            reply_attention_changed=reply_attention_changed,
         ),
     )
 
@@ -71,13 +73,16 @@ def _send(audience: str, message: dict) -> None:
 
 
 def broadcast_doc_comment_changed(
-    artifact_id: str, *, comment_id: str | None = None, author_thread_id: str | None = None, db=None,
+    artifact_id: str, *, comment_id: str | None = None, author_thread_id: str | None = None,
+    reply_attention_changed: bool = False, db=None,
 ) -> None:
     """Nudge every permitted open canvas after a comment projection changes."""
     try:
         audience = _comment_change_audience(artifact_id, db=db)
         if audience:
             message = {"type": "doc_comment_changed", "artifact_id": artifact_id}
+            if reply_attention_changed:
+                message['reply_attention_changed'] = True
             if comment_id and author_thread_id:
                 message.update(comment_id=comment_id, author_thread_id=author_thread_id)
             _send(audience, message)

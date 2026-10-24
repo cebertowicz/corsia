@@ -9,7 +9,7 @@
  * the payload that draws it — never because its type asserted someone would.
  */
 
-export type AttentionRenderer = 'decision' | 'external-review' | 'comment-reply';
+export type AttentionRenderer = 'decision' | 'external-review';
 
 export interface DecisionOption {
 	id: string;
@@ -83,26 +83,23 @@ export interface AttentionDestination {
 
 export interface CommentReplyDetail {
 	id: string;
-	/** The document title, never an opaque queue label. */
 	title: string;
-	/** The newest reply's short body. */
-	excerpt: string;
-	/** The text the reply answers. */
-	quoted_text?: string;
-	position: number;
-	total_count: number;
-	/** Unread replies represented by this thread item; legacy producers imply one. */
-	unread_count?: number;
-	/** The latest unread reply's timestamp, used when several documents wait. */
-	newest_at?: string;
+	unread_count: number;
+	newest_at: string;
 	destination: AttentionDestination;
-	source: AttentionSource;
+	source: { thread_id: string; thread_label: string };
+}
+
+export interface CommentReplyItem {
+	external_id: string;
+	renderer: 'comment-reply';
+	detail: CommentReplyDetail;
 }
 
 export interface AttentionQueueItem {
 	external_id: string;
 	renderer: AttentionRenderer;
-	detail: DecisionDetail | ExternalReviewDetail | CommentReplyDetail;
+	detail: DecisionDetail | ExternalReviewDetail;
 }
 
 export interface AttentionQueue {
@@ -113,7 +110,7 @@ export interface AttentionQueue {
 	/** The same order, capped; `items[0]` is `current`. */
 	items: AttentionQueueItem[];
 	/** Passive replies are separate from the capped Needs-you queue. */
-	reply_items?: AttentionQueueItem[];
+	reply_items?: CommentReplyItem[];
 }
 
 /** The backend supplies the item list; it is not reconstructed client-side. */
@@ -121,7 +118,7 @@ interface AttentionQueueResponse {
 	current?: AttentionQueueItem | null;
 	count?: number;
 	items: AttentionQueueItem[];
-	reply_items?: AttentionQueueItem[];
+	reply_items?: CommentReplyItem[];
 }
 
 /** The reserved answer id for free-form text (PRD-PLANS E4: never strand). */

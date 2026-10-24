@@ -578,16 +578,14 @@ describe("ThreadPlanPane", () => {
     const { __reset, queue } = await import("$lib/stores/attentionDock.svelte");
     __reset();
     activeThreadId.set("t1");
-    const reply: AttentionQueueItem = {
-      external_id: "reply-1",
-      renderer: "comment-reply",
+    queue.set({ ...queueBody(null, 0, []), reply_items: [{
+      external_id: "reply-1", renderer: "comment-reply",
       detail: {
-        id: "reply-1", title: "launch-plan.md", excerpt: "Owners now align.", position: 1, total_count: 1,
+        id: "reply-1", title: "launch-plan.md", unread_count: 1, newest_at: "2026-10-24",
         destination: { pane: "document-replies", id: "artifact-1" },
-        source: { ...SOURCE, thread_id: "t1", thread_label: "Maya Chen" },
+        source: { thread_id: "t1", thread_label: "Maya Chen" },
       },
-    };
-    queue.set(queueBody(reply, 1, [reply]));
+    }] });
     routedFetch({ "/api/plans/operator": () => ok(envelope("t1"), '"r1"') });
     component = mount(ThreadPlanPane, { target: host, props: { threadId: "t1" } });
     await settle();

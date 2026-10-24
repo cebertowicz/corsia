@@ -435,7 +435,7 @@ async function serveReplyQueue(
 				.filter((thread) => (thread.new_reply_ids?.length ?? 0) > 0)
 				.map((thread) => ({ document, thread })))
 			.sort((left, right) => (left.thread.from_off ?? 0) - (right.thread.from_off ?? 0));
-		const items = waiting.map(({ document, thread }, index) => {
+		const items = waiting.map(({ document, thread }) => {
 			const reply = thread.replies!.find((candidate) => candidate.id === thread.new_reply_ids!.at(-1))!;
 			return {
 				external_id: `reply-${thread.id}`,
@@ -443,14 +443,11 @@ async function serveReplyQueue(
 				detail: {
 					id: `reply-${thread.id}`,
 					title: document.name,
-					excerpt: reply.body,
-					quoted_text: thread.anchor_text ?? undefined,
-					position: index + 1,
-					total_count: waiting.length,
+
 					unread_count: thread.new_reply_ids!.length,
 					newest_at: reply.created_at,
 					destination: { pane: 'document-replies', id: document.artifactId, path: document.docPath, title: document.name },
-					source: { thread_id: threadId, thread_label: reply.author, project_id: null, project_label: null, parent_reviewed: true },
+					source: { thread_id: threadId, thread_label: reply.author },
 				},
 			};
 		});
@@ -462,9 +459,9 @@ async function serveReplyQueue(
 					options: [{ id: 'yes', label: 'Yes', detail: '' }], other_enabled: false, order_key: 0, revision: 1,
 					raised_at: null, source: { thread_id: 'release-review', thread_label: 'Release coordinator', project_id: null, project_label: null, parent_reviewed: true },
 				},
-			}, ...items]
-			: items;
-		await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ current: queueItems[0] ?? null, count: queueItems.length, items: queueItems }) });
+			}]
+			: [];
+		await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ current: queueItems[0] ?? null, count: queueItems.length, items: queueItems, reply_items: items }) });
 	});
 }
 
@@ -1094,7 +1091,7 @@ for (const theme of ['light', 'dark'] as const) {
 			documentAvailable = false;
 			await chip.click();
 			const removed = page.locator('.gone');
-			await expect(removed.getByText('launch-plan.md was removed.', { exact: true })).toBeVisible();
+			await expect(removed.getByText('launch-plan.md is no longer available.', { exact: true })).toBeVisible();
 			await expect(removed.getByRole('button', { name: 'Try again' })).toHaveCount(0);
 			await expect(page.locator('.row.openable', { hasText: 'launch-plan.md' })).toHaveCount(0);
 			await shot(page, `07b-removed-document-${theme}-${width}`);

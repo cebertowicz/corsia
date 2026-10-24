@@ -26,7 +26,7 @@
 	import DecisionChip from './DecisionChip.svelte';
 	import AdaptiveDrawer from '$lib/components/ui/AdaptiveDrawer.svelte';
 	import ExternalReviewRow from './ExternalReviewRow.svelte';
-	import { dockQueue as getDockQueue, label, decisionMeta, regionLabel as getRegionLabel } from './dockPresentation';
+	import { label, decisionMeta, regionLabel as getRegionLabel } from './dockPresentation';
 	import {
 		collapse,
 		EMPTY,
@@ -71,7 +71,7 @@
 	/** Bumped when focus moves or the typing window ends, so a waiting arrival is re-judged. */
 	let busyTick = $state(0);
 
-	const dockQueue = $derived(getDockQueue($visibleQueue));
+	const dockQueue = $derived($visibleQueue);
 	const current = $derived(shownItem(dockQueue, $activeId));
 	const hasReplies = $derived(replyItemsForThread($visibleQueue, $activeThreadId).length > 0);
 	$effect(() => { showing = !!current || hasReplies; });
@@ -187,6 +187,9 @@
 		// Reuses the existing invalidation signal rather than inventing one; a
 		// missed nudge is recovered on reconnect.
 		const offNudge = on('plans_changed', () => { void reload(); });
+		const offReplies = on('doc_comment_changed', (frame: unknown) => {
+			if (typeof frame === 'object' && frame !== null && 'reply_attention_changed' in frame && frame.reply_attention_changed === true) void reload();
+		});
 		// Typing, pasting or sending ends in a re-judge once the window has passed,
 		// so a hold on a draft is released when the draft is sent or cleared.
 		let idleTimer: ReturnType<typeof setTimeout> | undefined;
@@ -223,6 +226,7 @@
 			document.removeEventListener('focusout', rejudge);
 			forgetAutoOpen();
 			offNudge?.();
+			offReplies();
 			offConnection();
 			offToken();
 		};

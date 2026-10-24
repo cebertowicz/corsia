@@ -1,7 +1,7 @@
 import { flushSync, mount, tick, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import CommentReplyChipRow from './CommentReplyChipRow.svelte';
-import type { AttentionQueue, AttentionQueueItem, CommentReplyDetail } from '$lib/api/attentionQueue';
+import type { AttentionQueue, CommentReplyItem } from '$lib/api/attentionQueue';
 import { __reset } from '$lib/stores/attentionDock.svelte';
 import { token } from '$lib/stores/auth';
 import { activeThreadId } from '$lib/stores/threads';
@@ -10,21 +10,18 @@ let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
 let body: AttentionQueue;
 
-function reply(id: string, title: string, options: { threadId?: string; unreadCount?: number; newestAt?: string } = {}): AttentionQueueItem {
+function reply(id: string, title: string, options: { threadId?: string; unreadCount?: number; newestAt?: string } = {}): CommentReplyItem {
 	return {
 		external_id: `reply-${id}`,
 		renderer: 'comment-reply',
 		detail: {
 			id,
 			title,
-			excerpt: `Excerpt for ${title}`,
-			quoted_text: `Quoted text for ${title}`,
-			position: 1,
-			total_count: 2,
+
 			unread_count: options.unreadCount ?? 1,
-			newest_at: options.newestAt,
+			newest_at: options.newestAt ?? '2026-10-24T15:00:00Z',
 			destination: { pane: 'document-replies', id: `document-${id}`, path: `/tmp/${id}.md`, title },
-			source: { thread_id: options.threadId ?? 'thread-1', thread_label: 'Thread', project_id: null, project_label: null, parent_reviewed: true },
+			source: { thread_id: options.threadId ?? 'thread-1', thread_label: 'Thread' },
 		},
 	};
 }
@@ -64,6 +61,7 @@ describe('CommentReplyChipRow', () => {
 		body = { current: null, count: 0, items: [], reply_items: [first, newest, otherChat] };
 		const open = vi.fn();
 		component = mount(CommentReplyChipRow, { target: host, props: { onOpenDocument: open } });
+		await (await import('$lib/stores/attentionDock.svelte')).reload();
 		await settle();
 
 		const chip = host.querySelector<HTMLButtonElement>('button.tile.chip');
@@ -73,19 +71,20 @@ describe('CommentReplyChipRow', () => {
 		expect(chip?.querySelector('.ct-new')?.textContent).toBe('New');
 		expect(chip?.getAttribute('aria-label')).toBe('3 new replies · 2 documents, document');
 		chip!.click();
-		expect(open).toHaveBeenCalledWith((newest.detail as CommentReplyDetail).destination, 'thread-1');
+		expect(open).toHaveBeenCalledWith(newest.detail.destination, 'thread-1');
 	});
 
 	it('keeps the document name in the one-document chip and renders nothing for another chat', async () => {
-		body = { current: null, count: 1, items: [reply('other', 'private.md', { threadId: 'thread-2' })] };
+		body = { current: null, count: 0, items: [], reply_items: [reply('other', 'private.md', { threadId: 'thread-2' })] };
 		component = mount(CommentReplyChipRow, { target: host });
+		await (await import('$lib/stores/attentionDock.svelte')).reload();
 		await settle();
 		expect(host.querySelector('.reply-chip-notice')).toBeNull();
 		expect(host.querySelector('.ct-new-dot')).toBeNull();
 
 		unmount(component);
 		component = mount(CommentReplyChipRow, { target: host, props: {} });
-		body = { current: null, count: 1, items: [reply('one', 'launch-plan.md')] };
+		body = { current: null, count: 0, items: [], reply_items: [reply('one', 'launch-plan.md')] };
 		await (await import('$lib/stores/attentionDock.svelte')).reload();
 		await settle();
 		expect(host.querySelector('button.tile.chip')?.textContent).toContain('1 new reply · launch-plan.md');

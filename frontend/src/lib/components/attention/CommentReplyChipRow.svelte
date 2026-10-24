@@ -1,11 +1,9 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
-	import { on } from '$lib/ws';
-	import type { AttentionDestination, AttentionQueueItem, CommentReplyDetail } from '$lib/api/attentionQueue';
+	import type { AttentionDestination, CommentReplyItem } from '$lib/api/attentionQueue';
 	import type { MessageCard } from '$lib/api/messageCards';
 	import AttachmentRow from '$lib/components/AttachmentRow.svelte';
 	import { activeThreadId } from '$lib/stores/threads';
-	import { reload, visibleQueue } from '$lib/stores/attentionDock.svelte';
+	import { visibleQueue } from '$lib/stores/attentionDock.svelte';
 	import { replyItemsForThread } from './replyItems';
 
 	let {
@@ -17,17 +15,15 @@
 	// Reply notices belong to the agent who answered. They are not Needs-you work, so
 	// the dock keeps its single-job queue and this stable chip carries only unread replies.
 	const replies = $derived(replyItemsForThread($visibleQueue, $activeThreadId));
-	const unreadCount = $derived(replies.reduce((total, item) => total + (item.detail.unread_count ?? 1), 0));
+	const unreadCount = $derived(replies.reduce((total, item) => total + item.detail.unread_count, 0));
 	const documents = $derived.by(() => {
-		const unique = new Map<string, AttentionQueueItem & { detail: CommentReplyDetail }>();
+		const unique = new Map<string, CommentReplyItem>();
 		for (const item of replies) unique.set(item.detail.destination.id, item);
 		return [...unique.values()];
 	});
-	// Newer producers name the timestamp explicitly. Old queue rows retain their
-	// existing order, which is the server's ordering contract.
 	const newest = $derived.by(() => documents.reduce((latest, item) =>
-		!latest || (item.detail.newest_at ?? '') > (latest.detail.newest_at ?? '') ? item : latest,
-		null as (AttentionQueueItem & { detail: CommentReplyDetail }) | null,
+		!latest || item.detail.newest_at > latest.detail.newest_at ? item : latest,
+		null as CommentReplyItem | null,
 	));
 	const singleDocument = $derived(documents.length === 1 ? documents[0] : null);
 	const countLabel = $derived(`${unreadCount} new ${unreadCount === 1 ? 'reply' : 'replies'}`);
@@ -51,18 +47,12 @@
 
 	function openReplyDocument(event: MouseEvent): void {
 		// Capture keeps AttachmentRow's shared chip untouched while this source owns
-		// the reply-specific landing intent that R3 consumes in the document.
+		// the reply-specific landing intent opens the first unread reply.
 		event.stopPropagation();
 		const target = singleDocument ?? newest;
 		if (target) onOpenDocument(target.detail.destination, target.detail.source.thread_id);
 	}
 
-	onMount(() => {
-		void reload();
-		const offPlans = on('plans_changed', () => { void reload(); });
-		const offComments = on('doc_comment_changed', () => { void reload(); });
-		return () => { offPlans(); offComments(); };
-	});
 </script>
 
 {#if card && unreadCount}

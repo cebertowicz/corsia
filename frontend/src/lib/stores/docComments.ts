@@ -6,7 +6,7 @@ import { trackPlacements } from './docCommentPlacement';
 import { fromServer, type CommentAuthor, type DocComment } from './docCommentProjection';
 import { withhold } from './docCommentHolds';
 import { newClientId } from './documentWire';
-import { reload as reloadAttentionQueue } from './attentionDock.svelte';
+
 
 export { fromServer, hasNewReplies, regionFromServer } from './docCommentProjection';
 export type { CommentAuthor, CommentReply, DocComment } from './docCommentProjection';
@@ -171,8 +171,7 @@ export async function markThreadViewed(artifactId: string, rootId: string, seenR
 			comment.id === result.root_id ? { ...comment, newReplyIds: result.new_reply_ids } : comment
 		)),
 	}));
-	// A reply that has been on screen no longer waits in the dock: re-read the queue so it advances.
-	void reloadAttentionQueue();
+
 }
 
 export function resolveComment(artifactId: string, commentId: string, resolved = true) {

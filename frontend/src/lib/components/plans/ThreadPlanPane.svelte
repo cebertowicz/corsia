@@ -37,13 +37,13 @@
 	const plan = $derived(query.payload?.plans[0] ?? null);
 	const decisionCount = $derived(query.payload?.attention.awaiting_count ?? 0);
 	/**
-	 * This thread's own decisions, each a row, once the queue has them (a comment reply is a document hand-off, not a plan row). The plan's awaiting count also spans its
+	 * This thread's own decisions, each a row, once the queue has them. The plan's awaiting count also spans its
 	 * child plans, so whenever it exceeds the rows the indicator below them shows that total ("N decisions in all");
 	 * with no rows it stands alone. Each display reads one source, never a difference of the two.
 	 */
 	const activeDecisionItems = $derived(
 		$activeThreadId === threadId
-			? $visibleQueue.items.filter((item) => item.renderer !== 'comment-reply' && item.detail.source?.thread_id === threadId)
+			? $visibleQueue.items.filter((item) => item.detail.source?.thread_id === threadId)
 			: [],
 	);
 	/**

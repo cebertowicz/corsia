@@ -66,8 +66,6 @@ export function tabKey(tab: Pick<ArtifactTab, 'instanceId'>): string {
 	return tab.instanceId;
 }
 
-// Revision status is shared from artifactTabStatus.
-
 export function getActiveTab(ws: ThreadArtifactWorkspace): ArtifactTab | null {
 	return ws.tabs.find((t) => t.instanceId === ws.activeTabId) ?? null;
 }

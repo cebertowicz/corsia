@@ -741,7 +741,7 @@ describe('ArtifactLeaf load-status ownership', () => {
 		render();
 		await vi.waitFor(() => expect(tabsOf()[0].status).toBe('unavailable'));
 		flushSync();
-		expect(host.textContent).toContain('gone.md was removed.');
+		expect(host.textContent).toContain('gone.md is no longer available.');
 		expect(host.querySelector('.gone button')?.textContent).toContain('Close tab');
 		expect([...host.querySelectorAll('.gone button')].map((button) => button.textContent)).not.toContain('Try again');
 	});

@@ -15,7 +15,7 @@
 	import type {
 		AttentionQueue,
 		AttentionQueueItem,
-		CommentReplyDetail,
+		CommentReplyDetail, CommentReplyItem,
 		DecisionDetail,
 		ExternalReviewDetail,
 	} from '$lib/api/attentionQueue';
@@ -126,15 +126,14 @@
 		return { external_id: detail.id, renderer: 'decision', detail };
 	}
 
-	function commentReply(id: string, position: number): AttentionQueueItem {
+	function commentReply(id: string, position: number): CommentReplyItem {
 		const detail: CommentReplyDetail = {
 			id,
 			title: 'A reply arrived on “Clarify the delivery model”',
-			excerpt: 'The owner confirmed the document can stay open while you read.',
-			position,
-			total_count: 3,
+			unread_count: 1,
+			newest_at: `2026-10-24T15:00:0${position}Z`,
 			destination: { pane: 'document', id: 'artifact-comment-delivery' },
-			source: { ...source },
+			source: { thread_id: source.thread_id!, thread_label: source.thread_label },
 		};
 		return { external_id: id, renderer: 'comment-reply', detail };
 	}
@@ -198,7 +197,7 @@
 		}
 		if (scenario === 'comment-replies') {
 			const items = [commentReply('reply-1', 1), commentReply('reply-2', 2), commentReply('reply-3', 3)];
-			return { current: items[0], count: items.length, items };
+			return { current: null, count: 0, items: [], reply_items: items };
 		}
 		if (scenario === 'external-many') {
 			const detail = externalReview();

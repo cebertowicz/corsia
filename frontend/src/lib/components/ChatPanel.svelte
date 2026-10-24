@@ -97,6 +97,7 @@
 	const loadingOlderMessages = $derived(pager.loading);
 	const olderLoadFailed = $derived(pager.error);
 	export const scrollToBottom = () => messageListRef?.scrollToBottom();
+	const scrollToBottomFromUser = () => messageListRef?.scrollToBottomFromUser();
 	const { openPlanSubagent, openPlanDiscussion } = createPlanDestinations(() => $activeThreadId);
 	export const captureBottomOffset = () => messageListRef?.captureBottomOffset();
 	export const restoreBottomOffset = () => messageListRef?.restoreBottomOffset();
@@ -359,11 +360,11 @@
 				}}
 			>
 				{#snippet scrollControl()}
-					<MobileScrollFab threadId={$activeThreadId} {userIsNearBottom} docked onScrollToBottom={() => messageListRef?.scrollToBottomFromUser()} />
+					<MobileScrollFab threadId={$activeThreadId} {userIsNearBottom} docked onScrollToBottom={scrollToBottomFromUser} />
 				{/snippet}
 			</AttentionDock>
 			{#if !attentionDockShowing}
-				<MobileScrollFab threadId={$activeThreadId} {userIsNearBottom} onScrollToBottom={scrollToBottom} />
+				<MobileScrollFab threadId={$activeThreadId} {userIsNearBottom} onScrollToBottom={scrollToBottomFromUser} />
 			{/if}
 			{#if $isMobile && $activeThreadId}
 				<PlanDrawerControl
