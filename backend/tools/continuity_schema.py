@@ -266,8 +266,8 @@ _FIELD_SCHEMAS: dict[str, dict[str, Any]] = {
         "enum": list(_OPERATIONS),
         "description": (
             "inspect lists; add records; replace rewrites; drop retires. review is "
-            "checkpoint-only. written queues CORSIA's write; already needs a "
-            "receipt; proposed and trial queue."
+            "checkpoint-only. place: written queues CORSIA's write; already uses "
+            "a receipt; proposed files a proposal; trial writes a skill."
         ),
     },
     "field": {
@@ -337,7 +337,14 @@ _FIELD_SCHEMAS: dict[str, dict[str, Any]] = {
     **{
         name: (
             {"type": "integer", "minimum": 1} if name == "widens" else {"type": "string"}
-        ) | {"description": "See refusal."}
+        ) | {"description": {
+            "decision": "Wrong choice.",
+            "rule": "General rule.",
+            "second_case": "Other case.",
+            "not_when": "When it does not apply.",
+            "widens": "Earlier lesson id.",
+            "message_id": "Person message id; exact words skip fields.",
+        }[name]}
         for name in LESSON_DEFINITIONS
     },
 }
