@@ -306,7 +306,7 @@ async function seedScenario(
 		const from = DOCUMENT_TEXT.indexOf(passage.anchor);
 		expect(from).toBeGreaterThan(-1);
 		const root = await request.post(`/api/artifacts/${artifactId}/comments?token=${encodeURIComponent(TEST_TOKEN)}`, {
-			data: { body: passage.ask, anchor_text: passage.anchor, from_off: from, to_off: from + passage.anchor.length },
+			data: { body: passage.ask, anchor_text: passage.anchor, from_off: from, to_off: from + passage.anchor.length, delivery_policy: 'immediate' },
 		});
 		expect(root.ok(), await root.text()).toBeTruthy();
 		roots.push((await root.json()).comment.id as string);
@@ -353,7 +353,7 @@ async function seedAdditionalReplyDocumentBroken(
 	const passage = PASSAGES[0];
 	const from = DOCUMENT_TEXT.indexOf(passage.anchor);
 	const root = await request.post(`/api/artifacts/${artifactId}/comments?token=[REDACTED]encodeURIComponent(TEST_TOKEN)}`, {
-		data: { body: passage.ask, anchor_text: passage.anchor, from_off: from, to_off: from + passage.anchor.length },
+		data: { body: passage.ask, anchor_text: passage.anchor, from_off: from, to_off: from + passage.anchor.length, delivery_policy: 'immediate' },
 	});
 	expect(root.ok(), await root.text()).toBeTruthy();
 	const rootId = (await root.json()).comment.id as string;
@@ -382,7 +382,7 @@ async function seedAdditionalReplyDocument(
 	const from = DOCUMENT_TEXT.indexOf(passage.anchor);
 	const root = await request.post(`/api/artifacts/${artifactId}/comments`, {
 		params: { token: TEST_TOKEN },
-		data: { body: passage.ask, anchor_text: passage.anchor, from_off: from, to_off: from + passage.anchor.length },
+		data: { body: passage.ask, anchor_text: passage.anchor, from_off: from, to_off: from + passage.anchor.length, delivery_policy: 'immediate' },
 	});
 	expect(root.ok(), await root.text()).toBeTruthy();
 	const rootId = (await root.json()).comment.id as string;
@@ -1072,6 +1072,32 @@ for (const theme of ['light', 'dark'] as const) {
 		});
 	}
 }
+
+test(`${TAG} real queue: open the chip and read its reply`, async ({ page, request }, testInfo) => {
+	test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires isolated synthetic state');
+	skipMismatchedProject(1440, testInfo.project.name);
+	await page.setViewportSize({ width: 1440, height: 900 });
+	const threadId = await createSession(request, THREAD_TITLE);
+	await onlyThread(request, threadId);
+	const scenario = await seedScenario(page, request, threadId, 'real-reply-queue', [0]);
+	const queue = await request.get('/api/attention/queue', { params: { token: TEST_TOKEN } });
+	expect(queue.ok()).toBeTruthy();
+	expect((await queue.json()).reply_items[0].detail.unread_count).toBe(1);
+	await loginByUrl(page);
+	await openThread(page, THREAD_TITLE);
+	const notice = page.locator('.reply-chip-notice');
+	await expect(notice.getByRole('button')).toContainText('1 new reply · launch-plan.md');
+	await expect(notice.locator('.ct-new-dot')).toBeVisible();
+	await notice.getByRole('button').click();
+	await documentReady(page);
+	await expect(page.getByText(PASSAGES[0].reply, { exact: true })).toBeVisible();
+	await expect.poll(async () => {
+		const response = await request.get('/api/attention/queue', { params: { token: TEST_TOKEN } });
+		return ((await response.json()).reply_items ?? []).length;
+	}, { timeout: 10_000 }).toBe(0);
+	await expect(notice).toHaveCount(0);
+	expect(scenario.roots).toHaveLength(3);
+});
 
 // A reply counts as read once the document has shown it whole for the 1.5 s dwell (CommentThread.svelte, VIEWED_DWELL_MS).
 // The server then drops it from the thread's unread replies and the chip's count follows the queue.
