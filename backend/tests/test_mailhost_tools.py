@@ -22,6 +22,7 @@ from mailhost_helpers import (  # noqa: F401  (fixtures)
 from api import key_write_guard
 from api import keys as keys_api
 from connections import account_actions, mail_accounts
+from connections.account_errors import AccountError
 from connections.google import accounts as google_accounts
 from connections.google.client import GoogleError
 from connections.mail import email_screen
@@ -29,8 +30,8 @@ from connections.mailhost import check, store
 from infra import key_store
 from infra.database import get_db
 from tests.registry_helpers import make_session
-from tools.google_calendar import CalendarListTool
-from tools.google_email_read import EmailReadTool, EmailSearchTool
+from tools.calendar_list import CalendarListTool
+from tools.email_read import EmailReadTool, EmailSearchTool
 from tools.mail_host_connect import MailHostConnectTool
 
 pytestmark = pytest.mark.asyncio
@@ -261,15 +262,15 @@ async def test_a_waiting_or_refused_account_is_not_used_and_says_what_to_do(cond
     _no_leak(waiting, refused)
 
 
-async def test_a_password_the_host_stops_accepting_turns_the_account_to_refused(connected) -> None:
+async def test_a_password_the_host_stops_accepting_turns_the_account_to_revoked(connected) -> None:
     await _set_through_keys(connected)
     connected.built.imap.password = "revoked-at-the-host"
     out = await EmailSearchTool().execute(_thread_id=connected.thread, query="x")
     assert out.startswith("Error: mail.test didn’t accept this app password")
     found = row(connected.account_id)
-    assert found["check"]["status"] == store.REFUSED and found["state"] == "needs_sign_in" and found["capabilities"] == []
+    assert found["check"]["status"] == store.REVOKED and found["state"] == "needs_sign_in" and found["capabilities"] == []
     _no_leak(out, found["raw"])
-    assert "didn't accept its app password" in await EmailSearchTool().execute(_thread_id=connected.thread, query="x")
+    assert "stopped accepting its app password" in await EmailSearchTool().execute(_thread_id=connected.thread, query="x")
 
 
 async def test_two_accounts_need_an_account_id_and_it_names_the_choices(conductor, servers) -> None:
@@ -282,10 +283,9 @@ async def test_two_accounts_need_an_account_id_and_it_names_the_choices(conducto
     assert named["messages"]
 
 
-async def test_with_no_mail_host_account_the_resolver_is_the_google_one_unchanged(env, conductor) -> None:
-    with pytest.raises(GoogleError) as ours:
+async def test_with_no_email_account_the_resolver_names_every_connection_path(env, conductor) -> None:
+    with pytest.raises(AccountError) as refusal:
         mail_accounts.resolve_for_thread(None, conductor)
-    with pytest.raises(GoogleError) as google:
-        google_accounts.resolve_for_thread(None, conductor)
-    assert str(ours.value) == str(google.value)
-    assert (await EmailSearchTool().execute(_thread_id=conductor, query="x")).startswith("Error: ")
+    assert str(refusal.value) == mail_accounts.NO_EMAIL_ACCOUNT
+    output = await EmailSearchTool().execute(_thread_id=conductor, query="x")
+    assert "google-setup" in output and "microsoft-setup" in output and "mail-host-setup" in output

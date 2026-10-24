@@ -29,7 +29,7 @@ from llm.isolated_structured import (
     IsolatedStructuredUnavailableError,
 )
 from tests.registry_helpers import make_session
-from tools.google_email_read import UNSCREENED, EmailReadTool, EmailSearchTool, flagged_text
+from tools.email_read import UNSCREENED, EmailReadTool, EmailSearchTool, flagged_text
 
 ACCOUNT = "person@example.com"
 BODY_CANARY = "canary-body-text-7731"
@@ -468,7 +468,10 @@ async def test_not_connected_says_to_call_google_connect(isolated_db, tmp_path, 
     thread_id = make_session(db, prefix="conductor")
     assert set_corsia_agent(thread_id, db=db)
     out = await EmailSearchTool().execute(_thread_id=thread_id, query="x")
-    assert out == "Error: Google isn't connected. Call google_connect and give the person the link."
+    assert out == (
+        "Error: No email account is connected. Ask the person which email they use: Gmail or Google Workspace follows "
+        "google-setup, Microsoft follows microsoft-setup, any other host follows mail-host-setup."
+    )
 
 
 # -- retention ----------------------------------------------------------------------------------

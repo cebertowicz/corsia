@@ -563,7 +563,7 @@ describe('ConnectedAppsSettings', () => {
 				openRow(id);
 				labelled('Remove')!.click();
 				flushSync();
-				expect(document.body.textContent).toContain('Agents lose access now.');
+				expect(document.body.textContent).toContain('Agents lose access to it.');
 				// The notice from the first removal is reused for the second: focus has to move again, not only on mount.
 				(document.activeElement as HTMLElement | null)?.blur();
 				([...document.body.querySelectorAll<HTMLButtonElement>('button')].filter((candidate) => candidate.textContent?.trim() === 'Remove').at(-1) as HTMLButtonElement).click();

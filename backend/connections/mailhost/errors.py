@@ -6,7 +6,7 @@ and its text goes no further, so a row, a log line or a tool result never carrie
 
 from __future__ import annotations
 
-from connections.google.client import GoogleError
+from connections.account_errors import AccountError
 
 SERVER_UNREACHABLE = "server_unreachable"
 PASSWORD_REFUSED = "password_refused"
@@ -22,7 +22,7 @@ _MESSAGES = {
 }
 
 
-class MailHostError(GoogleError):
+class MailHostError(AccountError):
     """A named, fixed-text mail-host failure; ``host`` is the server the cause names."""
 
     def __init__(self, cause: str, *, host: str = "", name: str = "") -> None:

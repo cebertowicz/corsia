@@ -18,8 +18,8 @@ import re
 from dataclasses import dataclass, field
 from datetime import date
 
+from connections.account_errors import AccountError
 from connections.connected_accounts import resolve_credentials
-from connections.google.client import GoogleError
 from connections.mailhost import imap, store
 from connections.mailhost.endpoints import Endpoints
 from connections.mailhost.errors import PASSWORD_REFUSED, MailHostError
@@ -41,7 +41,7 @@ _TAGS = re.compile(r"<(script|style)\b.*?</\1>|<[^>]+>", re.DOTALL | re.IGNORECA
 _BLANKS = re.compile(r"\n{3,}")
 
 
-class MessageNotFound(GoogleError):
+class MessageNotFound(AccountError):
     """The message id names nothing in this mailbox; the text is safe to show."""
 
 
@@ -96,30 +96,30 @@ def parse(raw: bytes, *, with_body: bool) -> tuple[dict[str, str], str]:
     return _headers(msg), _text_of(msg) if with_body else ""  # type: ignore[arg-type]
 
 
-def credentials(account_id: str) -> tuple[Endpoints, str, str]:
-    """``(settings, username, app password)`` for a connected account; a fixed refusal otherwise."""
+def credentials(account_id: str) -> tuple[Endpoints, str, str, dict[str, object]]:
+    """``(settings, username, app password, check)`` for one connected account."""
     db = get_db()
     try:
-        endpoints = store.read(account_id, db=db)[0]
+        endpoints, check = store.read(account_id, db=db)
         bundle = resolve_credentials(account_id, db=db)
     finally:
         db.close()
     if endpoints is None or not bundle:
-        raise GoogleError(NEEDS_PASSWORD)
-    return endpoints, endpoints.imap_username or endpoints.username, str(bundle[PASSWORD])
+        raise AccountError(NEEDS_PASSWORD)
+    return endpoints, endpoints.imap_username or endpoints.username, str(bundle[PASSWORD]), check
 
 
-def _demote(account_id: str, endpoints: Endpoints) -> None:
+def _demote(account_id: str, check: dict[str, object]) -> None:
     """The host refused the saved password: the row stops reaching anything until it is replaced."""
-    store.write(account_id, endpoints, status=store.REFUSED)
+    store.demote_revoked(account_id, check)
 
 
-async def _guarded(account_id: str, endpoints: Endpoints, call):  # type: ignore[no-untyped-def]
+async def _guarded(account_id: str, check: dict[str, object], call):  # type: ignore[no-untyped-def]
     try:
         return await asyncio.to_thread(call)
     except MailHostError as exc:
         if exc.cause == PASSWORD_REFUSED:
-            await run_in_db(_demote, account_id, endpoints)
+            await run_in_db(_demote, account_id, check)
         raise
 
 
@@ -128,28 +128,28 @@ async def search(account_id: str, query: str, max_results: int) -> list[Message]
     try:
         wanted = criteria(query, today=date.today())
     except QueryRefused as exc:
-        raise GoogleError(str(exc)) from None
-    endpoints, username, password = await run_in_db(credentials, account_id)
+        raise AccountError(str(exc)) from None
+    endpoints, username, password, check = await run_in_db(credentials, account_id)
     limit = max(1, min(int(max_results), MAX_RESULTS))
 
     def call() -> tuple[int, list[tuple[int, bytes]]]:
         with imap.account_lock(account_id):
             return imap.search(endpoints, username, password, wanted, limit)
 
-    validity, found = await _guarded(account_id, endpoints, call)
+    validity, found = await _guarded(account_id, check, call)
     return [Message(f"{validity}-{uid}", "", parse(raw, with_body=False)[0]) for uid, raw in found]
 
 
 async def fetch(account_id: str, message_id: str) -> Message:
     """One message with its headers and decoded body."""
     validity, uid = parse_message_id(message_id)
-    endpoints, username, password = await run_in_db(credentials, account_id)
+    endpoints, username, password, check = await run_in_db(credentials, account_id)
 
     def call() -> bytes | None:
         with imap.account_lock(account_id):
             return imap.fetch(endpoints, username, password, validity, uid, MAX_FETCH_BYTES)
 
-    raw = await _guarded(account_id, endpoints, call)
+    raw = await _guarded(account_id, check, call)
     if raw is None:
         raise MessageNotFound(NOT_FOUND)
     headers, body = parse(raw, with_body=True)

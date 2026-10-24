@@ -291,7 +291,7 @@
 			<div class="entry" data-key-entry={entry.name} data-settings-anchor={`key-${entry.name}`} use:settingsAnchor={`key-${entry.name}`}>
 				<SettingsRow name={cardLabel(entry)} note={entry.ignored_env_var ? ignoredEnvironmentNote(entry.ignored_env_var) : ''} wrap stackActions>
 					<!-- The destination line and the check's result belong to this row: inside its text column, so they stay with it when the actions wrap below. -->
-					{#snippet sub()}{entryLine(entry)}{#if connectedAppKey?.entry === entry.name && connectedAppKey.hosts?.length}<span class="line destination">{destination(connectedAppKey.hosts)}</span>{/if}{#if connectedAppKey?.entry === entry.name && reconnectStatus}<span class="line" role="status">{reconnectStatus}</span>{/if}{/snippet}
+					{#snippet sub()}{entryLine(entry)}{#if entry.destination_hosts?.length}<span class="line destination">{destination(entry.destination_hosts)}</span>{/if}{#if connectedAppKey?.entry === entry.name && reconnectStatus}<span class="line" role="status">{reconnectStatus}</span>{/if}{/snippet}
 					{#snippet actions()}
 						{#if open?.name !== entry.name}
 							<Button variant="ghost" size="sm" onclick={() => openForm(entry.name, 'set')}>

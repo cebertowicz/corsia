@@ -16,7 +16,7 @@ from connections.mailhost.known_hosts import known_host
 from infra import key_store
 
 _PROBLEM = {
-    store.WAITING: "waiting", store.CHECKING: "checking", store.REFUSED: "refused",
+    store.WAITING: "waiting", store.CHECKING: "checking", store.REFUSED: "refused", store.REVOKED: "revoked",
     store.IMAP_OFF: "imap_off", store.UNREACHABLE: "unreachable",
 }
 
@@ -45,18 +45,13 @@ def _key_refs(account_id: str, db: sqlite3.Connection) -> list[dict[str, Any]]:
     return [{"entry": entry, "name": row["label"] if row and row["label"] else entry, "set": entry in stored}]
 
 
-def row_detail(account_id: str, db: sqlite3.Connection) -> dict[str, Any]:
-    """The extra fields of one mail-host list row: its host label and ``mailhost`` (the problem and servers)."""
-    endpoints, check = store.read(account_id, db=db)
-    if endpoints is None:
-        return {}
+def _detail(account_id: str, endpoints: Endpoints, check: dict[str, Any], key_ref: dict[str, Any]) -> dict[str, Any]:
     status = check.get("status", store.WAITING)
     problem = _PROBLEM.get(status)
     host = str(check.get("host") or "")
     detail: dict[str, Any] = {
         "problem": problem, "imap": server_text(endpoints.imap), "smtp": server_text(endpoints.smtp),
-        "caldav": endpoints.caldav or "", "key_refs": _key_refs(account_id, db),
-        "calendar_missing": status == store.MAIL_ONLY,
+        "caldav": endpoints.caldav or "", "key_refs": [key_ref], "calendar_missing": status == store.MAIL_ONLY,
     }
     if problem == "unreachable":
         detail["server"] = host or endpoints.imap.host
@@ -71,3 +66,57 @@ def row_detail(account_id: str, db: sqlite3.Connection) -> dict[str, Any]:
     elif known and known.product:
         detail["product_name"] = known.product
     return {"provider_display_name": endpoints.name, "mailhost": detail}
+
+
+def row_details(account_ids: list[str], db: sqlite3.Connection) -> dict[str, dict[str, Any]]:
+    """Mail-host row details in three queries regardless of how many rows are present."""
+    if not account_ids:
+        return {}
+    from connections.connected_accounts import MAILHOST_PROVIDER, credential_key
+
+    marks = ",".join("?" for _ in account_ids)
+    rows = db.execute(
+        f"SELECT id,endpoints_json FROM connected_accounts WHERE provider='mailhost' AND id IN ({marks})", account_ids,
+    ).fetchall()
+    by_id = {str(row["id"]): store._read(row) for row in rows}
+    entries = {account_id: credential_key(account_id, MAILHOST_PROVIDER) for account_id in by_id}
+    key_names = list(entries.values())
+    key_marks = ",".join("?" for _ in key_names)
+    labels = {
+        str(row["name"]): str(row["label"] or row["name"])
+        for row in db.execute(f"SELECT name,label FROM key_store_entries WHERE name IN ({key_marks})", key_names)
+    }
+    stored = key_store.resolve_names(key_names, db=db)
+    result: dict[str, dict[str, Any]] = {}
+    for account_id, (endpoints, check) in by_id.items():
+        if endpoints is None:
+            continue
+        entry = entries[account_id]
+        result[account_id] = _detail(
+            account_id, endpoints, check,
+            {"entry": entry, "name": labels.get(entry, entry), "set": entry in stored},
+        )
+    return result
+
+
+def destination_hosts_for_keys(db: sqlite3.Connection | None = None) -> dict[str, list[str]]:
+    """Destination disclosure hosts keyed by mail-host credential entry, in one row read."""
+    from connections.connected_accounts import MAILHOST_PROVIDER, credential_key
+    from infra.database import get_db
+
+    conn = db or get_db()
+    try:
+        result: dict[str, list[str]] = {}
+        for row in conn.execute("SELECT id,endpoints_json FROM connected_accounts WHERE provider='mailhost'"):
+            endpoints, _check = store._read(row)
+            if endpoints is not None and not endpoints.known:
+                result[credential_key(str(row["id"]), MAILHOST_PROVIDER)] = endpoints.password_destinations()
+        return result
+    finally:
+        if db is None:
+            conn.close()
+
+
+def row_detail(account_id: str, db: sqlite3.Connection) -> dict[str, Any]:
+    """The extra fields of one mail-host list row."""
+    return row_details([account_id], db).get(account_id, {})

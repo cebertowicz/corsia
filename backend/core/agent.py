@@ -262,9 +262,9 @@ def _register_delegation_tools(agent: CORSIAAgent) -> None:
 
 def _register_google_tools(agent: CORSIAAgent) -> None:
     from tools.google_account import GoogleConnectTool, GoogleStatusTool
-    from tools.google_calendar import CalendarDraftInviteTool, CalendarListTool, CalendarSendInviteTool
+    from tools.calendar_list import CalendarDraftInviteTool, CalendarListTool, CalendarSendInviteTool
     from tools.google_email import EmailDraftTool, EmailSendTool
-    from tools.google_email_read import EmailReadTool, EmailSearchTool
+    from tools.email_read import EmailReadTool, EmailSearchTool
     from tools.mail_host_connect import MailHostConnectTool
 
     for tool in (MailHostConnectTool(), EmailSearchTool(), EmailReadTool()):

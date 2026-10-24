@@ -87,8 +87,8 @@ async def main(thread: str) -> int:
     from connections.mailhost import check, store
     from infra import key_store
     from infra.db_async import run_in_db
-    from tools.google_calendar import CalendarListTool
-    from tools.google_email_read import EmailReadTool, EmailSearchTool
+    from tools.calendar_list import CalendarListTool
+    from tools.email_read import EmailReadTool, EmailSearchTool
     from tools.mail_host_connect import MailHostConnectTool
 
     login = {"user": ADDRESS, "password": APP_PASSWORD}

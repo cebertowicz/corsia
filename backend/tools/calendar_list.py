@@ -14,6 +14,7 @@ from typing import Any
 from urllib.parse import quote
 
 from connections import mail_accounts
+from connections.account_errors import AccountError
 from connections.connected_accounts import MAILHOST_PROVIDER
 from connections.google import client as google_client
 from connections.google.accounts import ACCOUNT_PARAM, resolve_for_thread
@@ -58,7 +59,7 @@ OTHER_ACCOUNT = "This invite was drafted from {address}; save a new one (omit dr
 
 
 async def _account(kwargs: dict[str, Any]) -> dict:
-    """The Gmail or mail-host account the call names and this thread may use, or :class:`GoogleError`."""
+    """The Gmail or mail-host account the call names and this thread may use, or :class:`AccountError`."""
     return await run_in_db(mail_accounts.resolve_for_thread, kwargs.get("account_id"), kwargs.get("_thread_id"))
 
 
@@ -103,7 +104,7 @@ class CalendarListTool(Tool):
     async def execute(self, **kwargs: Any) -> str:
         try:
             account = await _account(kwargs)
-        except GoogleError as exc:
+        except AccountError as exc:
             return f"Error: {exc}"
         account_id = str(account["id"])
         try:
@@ -126,7 +127,7 @@ class CalendarListTool(Tool):
             })
         except ValueError as exc:
             return f"Error: {exc}"
-        except GoogleError as exc:
+        except AccountError as exc:
             return f"Error: {exc}"
         except Exception:
             log.exception("calendar_list failed")
@@ -169,13 +170,13 @@ class CalendarDraftInviteTool(Tool):
     async def execute(self, **kwargs: Any) -> str:
         try:
             account = await _google_account(kwargs)
-        except GoogleError as exc:
+        except AccountError as exc:
             return f"Error: {exc}"
         try:
             return await self._save(str(kwargs["_thread_id"]), account, kwargs)
         except ValueError as exc:
             return f"Error: {exc}"
-        except GoogleError as exc:
+        except AccountError as exc:
             return f"Error: The invite was not saved. {exc}"
         except DraftError as exc:
             return f"Error: {exc}"
@@ -255,7 +256,7 @@ class CalendarSendInviteTool(Tool):
             return f"Error: {BAD_DOCUMENT}"
         try:
             account = await run_in_db(resolve_for_thread, draft.account_id, thread_id)
-        except GoogleError as exc:
+        except AccountError as exc:
             return f"Error: Not sent: {exc}"
         if str(account["address"]).lower() != draft.address.lower():
             return f"Error: {BAD_DOCUMENT}"

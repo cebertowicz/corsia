@@ -24,6 +24,7 @@ TIMEOUT_SECONDS = 20.0
 MAILBOX = "INBOX"
 _TRANSPORT = (OSError, EOFError, ssl.SSLError, socket.timeout, imaplib.IMAP4.error)
 _IMAP_OFF = re.compile(r"imap.{0,40}(disabled|not enabled|turned off|not allowed|not activated)|disabled.{0,40}imap", re.I)
+_TEMPORARY = re.compile(r"\[(?:UNAVAILABLE|SERVERBUG|LIMIT|INUSE)\]|too many connections|try again later", re.I)
 _FETCHED = re.compile(rb"UID (\d+)")
 _locks: dict[str, threading.Lock] = {}
 _locks_guard = threading.Lock()
@@ -63,6 +64,8 @@ def _login_failure(ep: Endpoints, reply: object) -> MailHostError:
         part.decode("utf-8", "replace") if isinstance(part, bytes) else str(part)
         for part in (reply if isinstance(reply, tuple) else (reply,))
     )
+    if _TEMPORARY.search(text):
+        return _unreachable(ep)
     if _IMAP_OFF.search(text):
         return MailHostError(IMAP_OFF, name=ep.name)
     return MailHostError(PASSWORD_REFUSED, name=ep.name)
@@ -75,6 +78,8 @@ def session(ep: Endpoints, username: str, password: str) -> Iterator[imaplib.IMA
     try:
         try:
             conn.login(username, password)
+        except imaplib.IMAP4.abort:
+            raise _unreachable(ep) from None
         except imaplib.IMAP4.error as exc:
             raise _login_failure(ep, exc.args) from None
         except _TRANSPORT:

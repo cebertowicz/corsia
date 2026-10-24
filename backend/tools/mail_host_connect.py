@@ -2,7 +2,7 @@
 
 Only the designated CORSIA thread may call it. It takes the address (and server names only for
 a host CORSIA doesn't know), adds one row waiting for an app password, and says where the
-person makes that password. The person pastes it into Settings › Keys themselves; the
+person makes that password. The person pastes it from that row in Settings › Connected apps; the
 password never passes through here or through the agent.
 """
 
@@ -25,12 +25,12 @@ log = logging.getLogger(__name__)
 NEXT_WAITING = (
     "Post the app-password page with post_update as a chat link the person opens in their own browser (its click "
     "path is in click_path); never open it yourself and never ask for, read or repeat the password. Then tell them: "
-    "in Settings › Keys, press Set key on that account's key and paste the app password. CORSIA checks it "
+    "on the account's row in Settings › Connected apps, press Set key and paste the app password. CORSIA checks it "
     "and the account shows Connected in Connected apps. {extra}"
 )
 NEXT_EXISTING = (
     "This address already has an account, so nothing was changed: its servers stay as they were. Status: {status}. "
-    "The person fixes it in Settings › Keys or Connected apps."
+    "The person fixes it on its row in Settings › Connected apps."
 )
 NEXT_CONNECTED = "This address is already connected; nothing was changed."
 

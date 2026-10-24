@@ -21,7 +21,7 @@ from infra.database import get_db, write_transaction
 from infra.time import utc_now_iso
 
 WAITING, CHECKING, OK, MAIL_ONLY = "waiting", "checking", "ok", "mail_only"
-REFUSED, IMAP_OFF, UNREACHABLE = "refused", "imap_off", "unreachable"
+REFUSED, REVOKED, IMAP_OFF, UNREACHABLE = "refused", "revoked", "imap_off", "unreachable"
 CONNECTED_STATUSES = frozenset((OK, MAIL_ONLY))
 CANNOT_STORE = "This password has a space or a character Keys can’t store. If {host} offers app passwords, make one and paste that."
 _WHITESPACE = re.compile(r"\s+")
@@ -91,6 +91,20 @@ def write(
             (json.dumps({**endpoints.as_dict(), "check": check}, separators=(",", ":")), state,
              json.dumps(list(capabilities), separators=(",", ":")), utc_now_iso(), account_id),
         ).rowcount == 1
+
+
+def demote_revoked(account_id: str, expected_check: dict[str, Any], *, db: sqlite3.Connection | None = None) -> bool:
+    """Mark a password revoked only if the exact check snapshot is still current.
+
+    A key replacement or server edit may finish while an IMAP read is in flight. The
+    comparison and write share one transaction, and the write preserves the row's
+    then-current endpoints instead of restoring the stale reader snapshot.
+    """
+    with write_transaction(db, scope="mail_host_demote") as conn:
+        endpoints, current_check = read(account_id, db=conn)
+        if endpoints is None or current_check != expected_check:
+            return False
+        return write(account_id, endpoints, status=REVOKED, db=conn)
 
 
 def begin_check(

@@ -12,12 +12,12 @@ import logging
 import re
 from typing import Any
 
+from connections.account_errors import AccountError
 from connections.connected_accounts import MAILHOST_PROVIDER
 from connections.google import gmail_read
 from connections.mail import email_screen
 from connections.mail_accounts import resolve_for_thread
 from connections.google.accounts import ACCOUNT_PARAM, thread_key
-from connections.google.client import GoogleError
 from connections.mailhost import read as mailhost_read
 from infra.db_async import run_in_db
 from tools.base import Tool
@@ -38,7 +38,7 @@ def flagged_text(rule: str) -> str:
 
 
 async def _account(kwargs: dict[str, Any]) -> dict:
-    """The account the call names and this thread may use, or :class:`GoogleError`."""
+    """The account the call names and this thread may use, or :class:`AccountError`."""
     return await run_in_db(resolve_for_thread, kwargs.get("account_id"), kwargs.get("_thread_id"))
 
 
@@ -83,7 +83,7 @@ class EmailSearchTool(Tool):
     async def execute(self, **kwargs: Any) -> str:
         try:
             resolved = await _account(kwargs)
-        except GoogleError as exc:
+        except AccountError as exc:
             return f"Error: {exc}"
         account = str(resolved["id"])
         query = kwargs.get("query")
@@ -92,7 +92,7 @@ class EmailSearchTool(Tool):
         try:
             found = await _backend(resolved).search(account, query.strip(), kwargs.get("max") or 10)
             screens = await run_in_db(email_screen.stored_screens, account, [m.message_id for m in found])
-        except GoogleError as exc:
+        except AccountError as exc:
             return f"Error: {exc}"
         except Exception:
             log.exception("email_search failed")
@@ -137,7 +137,7 @@ class EmailReadTool(Tool):
     async def execute(self, **kwargs: Any) -> str:
         try:
             resolved = await _account(kwargs)
-        except GoogleError as exc:
+        except AccountError as exc:
             return f"Error: {exc}"
         account, backend = str(resolved["id"]), _backend(resolved)
         try:
@@ -150,7 +150,7 @@ class EmailReadTool(Tool):
                 screen = await email_screen.screen_message(
                     account, message_id, message.headers, message.body,
                 )
-        except GoogleError as exc:
+        except AccountError as exc:
             return f"Error: {exc}"
         except Exception:
             log.exception("email_read failed")

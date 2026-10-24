@@ -19,6 +19,8 @@ export interface KeyEntry {
 	ignored_env_var: string | null;
 	/** False for a key whose account row still needs it: Clear stays, Remove hides (the account's own Remove deletes it). */
 	removable?: boolean;
+	/** Hosts that receive this account password, disclosed before Set or Replace. */
+	destination_hosts?: string[];
 }
 
 /** A provider's key status. The API never returns a value. */

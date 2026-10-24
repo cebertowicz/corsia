@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from connections.google.client import GoogleError
+from connections.account_errors import AccountError
 from connections.mailhost import caldav, events
 from connections.mailhost.read import credentials
 from infra.db_async import run_in_db
@@ -16,11 +16,11 @@ UNAVAILABLE = "This account's calendar isn't available right now. Try again late
 
 async def list_events(account_id: str, start: datetime, end: datetime) -> list[dict[str, Any]]:
     """Every event the host's calendars hold between ``start`` and ``end``, recurring ones expanded."""
-    endpoints, _username, password = await run_in_db(credentials, account_id)
+    endpoints, _username, password, _check = await run_in_db(credentials, account_id)
     if not endpoints.calendars:
-        raise GoogleError(MAIL_ONLY)
+        raise AccountError(MAIL_ONLY)
     try:
         texts = await caldav.fetch_calendar_data(endpoints, password, start, end)
     except caldav.CalendarUnavailable:
-        raise GoogleError(UNAVAILABLE) from None
+        raise AccountError(UNAVAILABLE) from None
     return events.summaries(texts, (start, end))

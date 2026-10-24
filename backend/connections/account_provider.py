@@ -54,6 +54,8 @@ class AccountProvider:
     #: Extra fields this provider's list row carries, from ``(account_id, db)``: its own label for the
     #: row and whatever its open row needs. Never a credential, a key value or a host's reply text.
     row_detail: Callable[[str, sqlite3.Connection], dict[str, Any]] | None = None
+    #: Batched row details keyed by account id. Providers without one use ``row_detail`` per row.
+    row_details: Callable[[list[str], sqlite3.Connection], dict[str, dict[str, Any]]] | None = None
 
     @property
     def required_fields(self) -> frozenset[str]:

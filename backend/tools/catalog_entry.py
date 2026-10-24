@@ -24,7 +24,7 @@ ToolCategory = Literal[
     "connection_admin",
     "host_access",
     "discovery",
-    "google",
+    "email",
     "microsoft",
     "microsoft_mail",
     "microsoft_calendar",

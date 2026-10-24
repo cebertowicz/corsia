@@ -15,10 +15,10 @@ from tests.test_action_gate import _admit, _bind, _draft, workspace  # noqa: F40
 from tests.test_google_email import mail  # noqa: F401 (fixture)
 from tests.test_google_sign_in import client_file, conductor, google  # noqa: F401 (mail dependencies)
 from connections.calendar_document import attendee_emails, compose_document
-from tools import action_gate, google_calendar
+from tools import action_gate, calendar_list
 from tools.action_drafts import record_draft
 from tools.action_gate import Approved, Refusal
-from tools.google_calendar import CalendarDraftInviteTool, CalendarListTool, CalendarSendInviteTool
+from tools.calendar_list import CalendarDraftInviteTool, CalendarListTool, CalendarSendInviteTool
 
 
 async def _allowed(_kwargs):
@@ -27,19 +27,19 @@ async def _allowed(_kwargs):
 
 @pytest.mark.asyncio
 async def test_list_requires_offset_and_refuses_ranges_over_31_days(monkeypatch):
-    monkeypatch.setattr(google_calendar, "_account", _allowed)
+    monkeypatch.setattr(calendar_list, "_account", _allowed)
     tool = CalendarListTool()
     assert await tool.execute(
         time_min="2026-10-15T09:00:00", time_max="2026-10-16T09:00:00-07:00",
-    ) == f"Error: {google_calendar.OFFSET_REQUIRED}"
+    ) == f"Error: {calendar_list.OFFSET_REQUIRED}"
     assert await tool.execute(
         time_min="2026-10-01T00:00:00-07:00", time_max="2026-11-01T00:00:01-07:00",
-    ) == f"Error: {google_calendar.RANGE_TOO_LARGE}"
+    ) == f"Error: {calendar_list.RANGE_TOO_LARGE}"
 
 
 @pytest.mark.asyncio
 async def test_list_defaults_to_primary_expands_recurring_and_preserves_google_times(monkeypatch):
-    monkeypatch.setattr(google_calendar, "_account", _allowed)
+    monkeypatch.setattr(calendar_list, "_account", _allowed)
     calls = []
 
     async def get_json(account_id, url, *, params):
@@ -52,11 +52,11 @@ async def test_list_defaults_to_primary_expands_recurring_and_preserves_google_t
              "summary": "Holiday", "transparency": "transparent"},
         ], "nextPageToken": "more"}
 
-    monkeypatch.setattr(google_calendar.google_client, "get_json", get_json)
+    monkeypatch.setattr(calendar_list.google_client, "get_json", get_json)
     result = json.loads(await CalendarListTool().execute(
         time_min="2026-10-15T00:00:00-07:00", time_max="2026-10-16T00:00:00-07:00",
     ))
-    assert calls == [("acct-1", google_calendar._event_url("primary"), {
+    assert calls == [("acct-1", calendar_list._event_url("primary"), {
         "timeMin": "2026-10-15T00:00:00-07:00", "timeMax": "2026-10-16T00:00:00-07:00",
         "maxResults": 250, "singleEvents": "true", "orderBy": "startTime",
     })]
@@ -65,7 +65,7 @@ async def test_list_defaults_to_primary_expands_recurring_and_preserves_google_t
          "title": "Standup", "attendees": ["sam@example.com"], "free/busy": "busy"},
         {"id": "all-day", "start": "2026-10-16", "end": "2026-10-17", "title": "Holiday",
          "attendees": [], "free/busy": "free"},
-    ], "note": google_calendar.CUT_NOTE}
+    ], "note": calendar_list.CUT_NOTE}
 
 
 def test_first_description_lines_and_email_refusal_bytes_are_pinned():
@@ -95,21 +95,21 @@ async def test_send_recovery_is_invite_specific_for_lost_stale_and_sending_draft
     async def run_direct(fn, *args):
         return fn(*args)
 
-    monkeypatch.setattr(google_calendar, "run_in_db", run_direct)
-    monkeypatch.setattr(google_calendar, "open_draft", lambda *_args: None)
+    monkeypatch.setattr(calendar_list, "run_in_db", run_direct)
+    monkeypatch.setattr(calendar_list, "open_draft", lambda *_args: None)
     tool = CalendarSendInviteTool()
-    assert await tool._prepare("thread", "lost", "revision") == f"Error: {google_calendar.NO_OPEN_DRAFT}"
+    assert await tool._prepare("thread", "lost", "revision") == f"Error: {calendar_list.NO_OPEN_DRAFT}"
 
-    monkeypatch.setattr(google_calendar, "open_draft", lambda *_args: {"state": "sending"})
-    assert await tool._prepare("thread", "sending", "revision") == f"Error: {google_calendar.STILL_SENDING}"
+    monkeypatch.setattr(calendar_list, "open_draft", lambda *_args: {"state": "sending"})
+    assert await tool._prepare("thread", "sending", "revision") == f"Error: {calendar_list.STILL_SENDING}"
 
-    monkeypatch.setattr(google_calendar, "open_draft", lambda *_args: {"state": "open"})
+    monkeypatch.setattr(calendar_list, "open_draft", lambda *_args: {"state": "open"})
 
     async def stale(*_args):
         return Refusal(action_gate.STALE_REVISION)
 
-    monkeypatch.setattr(google_calendar, "check_action", stale)
-    assert await tool._prepare("thread", "stale", "revision") == f"Error: {google_calendar.NO_OPEN_DRAFT}"
+    monkeypatch.setattr(calendar_list, "check_action", stale)
+    assert await tool._prepare("thread", "stale", "revision") == f"Error: {calendar_list.NO_OPEN_DRAFT}"
 
 
 @pytest.mark.asyncio
@@ -119,7 +119,7 @@ async def test_draft_and_send_follow_the_email_lifecycle_with_attendee_notificat
 
     def calendar_handler(request):
         url = str(request.url).split("?")[0]
-        if url == google_calendar._event_url("primary") and request.method == "POST":
+        if url == calendar_list._event_url("primary") and request.method == "POST":
             requests.append(request)
             return httpx.Response(200, json={"id": "event-1", "htmlLink": "https://calendar.google/e/1"})
         return inner(request)
@@ -145,7 +145,7 @@ async def test_draft_and_send_follow_the_email_lifecycle_with_attendee_notificat
         row = get_db().execute("SELECT * FROM action_drafts WHERE id=?", (draft_id,)).fetchone()
         return Approved(dict(row), (config.WORKSPACE / row["path"]).read_bytes())
 
-    monkeypatch.setattr(google_calendar, "check_action", approved)
+    monkeypatch.setattr(calendar_list, "check_action", approved)
     result = json.loads(await CalendarSendInviteTool().execute(
         _thread_id=mail.thread, draft_id=saved["draft_id"], revision=saved["revision"],
     ))
@@ -175,7 +175,7 @@ async def test_send_uses_the_real_gate_for_invite_refusals(deleg_db, workspace, 
         expected = f"Error: {action_gate.NOT_SEEN}"
     elif case == "stale":
         revision = "0" * 64
-        expected = f"Error: {google_calendar.NO_OPEN_DRAFT}"
+        expected = f"Error: {calendar_list.NO_OPEN_DRAFT}"
     else:
         path = workspace / "draft.md"
         before = path.stat()
@@ -207,7 +207,7 @@ async def test_provable_calendar_insert_failure_releases_the_claim(mail, monkeyp
     inner = mail.fake.handler
 
     def handler(request):
-        if str(request.url).split("?")[0] == google_calendar._event_url("primary"):
+        if str(request.url).split("?")[0] == calendar_list._event_url("primary"):
             return httpx.Response(400, json={})
         return inner(request)
 
@@ -215,7 +215,7 @@ async def test_provable_calendar_insert_failure_releases_the_claim(mail, monkeyp
         return await _approved_calendar_draft(draft_id)
 
     mail.fake.handler = handler
-    monkeypatch.setattr(google_calendar, "check_action", approved)
+    monkeypatch.setattr(calendar_list, "check_action", approved)
     saved = await _calendar_draft(mail)
     output = await CalendarSendInviteTool().execute(
         _thread_id=mail.thread, draft_id=saved["draft_id"], revision=saved["revision"],
@@ -232,7 +232,7 @@ async def test_uncertain_calendar_insert_keeps_the_claim_and_cannot_repeat(mail,
     inner = mail.fake.handler
 
     def handler(request):
-        if str(request.url).split("?")[0] == google_calendar._event_url("primary"):
+        if str(request.url).split("?")[0] == calendar_list._event_url("primary"):
             calls.append(request)
             if outcome == "500":
                 return httpx.Response(500, json={})
@@ -243,18 +243,18 @@ async def test_uncertain_calendar_insert_keeps_the_claim_and_cannot_repeat(mail,
         return await _approved_calendar_draft(draft_id)
 
     mail.fake.handler = handler
-    monkeypatch.setattr(google_calendar, "check_action", approved)
+    monkeypatch.setattr(calendar_list, "check_action", approved)
     saved = await _calendar_draft(mail)
     first = await CalendarSendInviteTool().execute(
         _thread_id=mail.thread, draft_id=saved["draft_id"], revision=saved["revision"],
     )
-    assert first == f"Error: {google_calendar.UNCONFIRMED}"
+    assert first == f"Error: {calendar_list.UNCONFIRMED}"
     row = get_db().execute("SELECT state FROM action_drafts WHERE id=?", (saved["draft_id"],)).fetchone()
     assert row["state"] == "sending"
     again = await CalendarSendInviteTool().execute(
         _thread_id=mail.thread, draft_id=saved["draft_id"], revision=saved["revision"],
     )
-    assert again == f"Error: {google_calendar.STILL_SENDING}"
+    assert again == f"Error: {calendar_list.STILL_SENDING}"
     assert len(calls) == 1
 
 
@@ -304,11 +304,11 @@ async def test_send_refuses_when_the_drafts_account_is_signed_out(mail, monkeypa
         calls.append(True)
         return {"id": "unexpected"}
 
-    monkeypatch.setattr(google_calendar, "check_action", approved)
+    monkeypatch.setattr(calendar_list, "check_action", approved)
     db = get_db()
     db.execute("UPDATE connected_accounts SET state='signed_out' WHERE id=?", (mail.account,))
     db.commit()
-    monkeypatch.setattr(google_calendar.google_client, "request_json", request_json)
+    monkeypatch.setattr(calendar_list.google_client, "request_json", request_json)
     output = await CalendarSendInviteTool().execute(
         _thread_id=mail.thread, draft_id=saved["draft_id"], revision=saved["revision"],
     )

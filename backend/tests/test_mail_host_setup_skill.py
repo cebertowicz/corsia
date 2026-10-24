@@ -53,8 +53,8 @@ def test_a_system_change_notice_that_adds_the_skill_is_handled_once() -> None:
 def test_every_tool_the_skill_names_exists_and_is_loaded_through_the_pack_it_lives_in() -> None:
     named = set(re.findall(r"`(mail_host_[a-z_]+)`", SKILL))
     assert named == {"mail_host_connect"}
-    assert MAILHOST_CATALOG_ENTRIES["mail_host_connect"].category == "google"
-    assert "Load pack `google` with `tools_load`" in SKILL
+    assert MAILHOST_CATALOG_ENTRIES["mail_host_connect"].category == "email"
+    assert "Load pack `email` with `tools_load`" in SKILL
 
 
 def test_first_run_hands_something_else_to_the_skill_after_the_profile_line_is_written() -> None:

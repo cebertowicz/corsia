@@ -82,6 +82,15 @@ def _provider_rows() -> list[dict]:
     return key_store_providers.provider_key_rows(key_store_providers.provider_keys(), labels, hidden)
 
 
+def _keys_with_destinations() -> list[dict]:
+    """Key metadata plus H19 destination disclosures for every relevant mail-host row."""
+    from connections.mailhost.row_detail import destination_hosts_for_keys
+
+    entries = key_store.list_entries()
+    destinations = destination_hosts_for_keys()
+    return [{**entry, **({"destination_hosts": destinations[entry["name"]]} if entry["name"] in destinations else {})} for entry in entries]
+
+
 def _server_rows() -> list[dict]:
     from infra.key_store_servers import server_key_rows
     from llm.network_discovery import get_servers
@@ -116,7 +125,7 @@ def _added_by(user: dict) -> tuple[str | None, str | None]:
 @router.get("")
 async def list_keys(user: dict = Depends(require_user)) -> dict:
     """Every entry's metadata. Never a value."""
-    entries = await run_in_db(key_store.list_entries)
+    entries = await run_in_db(_keys_with_destinations)
     return {
         "keys": [_public(entry) for entry in entries],
         "provider_keys": await run_in_db(_provider_rows),

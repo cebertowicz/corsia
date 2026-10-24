@@ -298,8 +298,8 @@ describe('Settings › Keys', () => {
 		/** `requested: false` opens Keys on its own, with no Set key press from Connected apps behind it. */
 		async function openAccountKey(hosts?: string[], extra: Record<string, unknown> = {}, requested = true) {
 			Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: vi.fn() });
-			entries = [{ ...maps, name: ENTRY, label: LABEL, description: '', added_by: 'Mail host', ...extra }];
-			if (requested) requestConnectedAppKey('example.com', ENTRY, [{ entry: ENTRY, name: LABEL }], { hosts });
+			entries = [{ ...maps, name: ENTRY, label: LABEL, description: '', added_by: 'Mail host', ...(hosts ? { destination_hosts: hosts } : {}), ...extra }];
+			if (requested) requestConnectedAppKey('example.com', ENTRY, [{ entry: ENTRY, name: LABEL }], true);
 			await mountKeys(ENTRY);
 		}
 		async function saveAccountKey() {
