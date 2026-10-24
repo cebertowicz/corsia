@@ -19,21 +19,19 @@
 	let starting = $state(false);
 	let startFailed = $state(false);
 	let manualStartFailed = $state(false);
-	let updateFinishing = $state(false);
 	let autoStartAttempted = $state(false);
 	let startActionEl: HTMLButtonElement | undefined = $state();
 	let screenEl: HTMLElement | undefined = $state();
 
 	const longer = $derived(view?.mode === 'longer');
 	const recovery = $derived(longer || view?.mode === 'start_failed' || (view?.mode === 'failed' && view.serviceDown));
-	const autoStartWaiting = $derived(longer && localDesktop && autoStartAttempted && !starting && !startFailed && !updateFinishing);
+	const autoStartWaiting = $derived(longer && localDesktop && autoStartAttempted && !starting && !startFailed);
 
 	$effect(() => {
 		if (view === null) {
 			starting = false;
 			startFailed = false;
 			manualStartFailed = false;
-			updateFinishing = false;
 			autoStartAttempted = false;
 			return;
 		}
@@ -44,7 +42,7 @@
 		}
 	});
 	$effect(() => {
-		if (recovery && localDesktop && startFailed && !updateFinishing) void tick().then(() => startActionEl?.focus());
+		if (recovery && localDesktop && startFailed) void tick().then(() => startActionEl?.focus());
 	});
 	$effect(() => {
 		if (screenEl) screenEl.focus({ preventScroll: true });
@@ -54,10 +52,8 @@
 		starting = true;
 		startFailed = false;
 		manualStartFailed = false;
-		updateFinishing = false;
 		try {
-			const outcome = await startLocalService();
-			if (outcome === 'update_finishing') updateFinishing = true;
+			await startLocalService();
 		} catch {
 			startFailed = true;
 			manualStartFailed = !automatic;
@@ -125,27 +121,25 @@
 				{:else if recovery}
 					{#if longer}<p class="detail strong">This is taking longer than usual.</p>{/if}
 					{#if localDesktop}
-						{#if updateFinishing}
-							<p class="detail">An update is finishing. This can take a few minutes. It comes back by itself.</p>
-						{:else if autoStartWaiting}
+						{#if autoStartWaiting}
 							<p class="detail">It’s taking longer than usual. CORSIA is still starting. Nothing you need to do yet.</p>
 						{:else if manualStartFailed}
 							<p class="detail" role="alert">It still didn’t start. Click Start CORSIA to try again, or quit CORSIA with ⌘Q and open it again.</p>
 						{:else if startFailed}
 							<p class="detail">It didn’t start on its own.</p>
 						{/if}
-						{#if startFailed && !updateFinishing}
+						{#if startFailed}
 							<div class="actions" in:actionsReveal={{ duration: ms('--dur-tight') }}>
 								<Button variant="primary" onclick={() => void startCorsia()} loading={starting} bind:el={startActionEl}>Start CORSIA</Button>
 							</div>
 						{/if}
 					{:else}
 						<p class="detail">Open CORSIA on {hostName}.</p>
-						<p class="detail">Progress shows on the host computer, {hostName}.</p>
+						<p class="detail">Progress shows on your main computer, {hostName}.</p>
 					{/if}
 				{:else}
 					<p class="detail">CORSIA comes back by itself. You can keep this window open.</p>
-					{#if view.estimated}<p class="detail">Progress shows on the host computer, {hostName}.</p>{/if}
+					{#if view.estimated}<p class="detail">Progress shows on your main computer, {hostName}.</p>{/if}
 				{/if}
 			</div>
 		</div>
@@ -154,7 +148,7 @@
 
 <style>
 	.update-screen { position: fixed; inset: 0; z-index: 10000; display: grid; place-items: center; padding: var(--space-5); box-sizing: border-box; overflow-y: auto; background: var(--bg-primary); color: var(--text-primary); outline: none; }
-	.column { display: flex; flex-direction: column; align-items: center; min-width: 0; width: min(100%, 420px); text-align: center; }
+	.column { display: flex; flex-direction: column; align-items: center; min-width: 0; width: min(100%, calc(var(--space-8) * 8 + var(--space-7) + var(--space-1))); text-align: center; }
 	.mark { width: calc(var(--space-8) + var(--space-6)); height: calc(var(--space-8) + var(--space-6)); margin-bottom: var(--space-4); }
 	h2 { margin: 0; font-size: var(--text-title2); font-weight: var(--fw-semibold); color: var(--text-primary); }
 	.step { min-height: calc(var(--text-body) * 1.5); margin-top: var(--space-2); }

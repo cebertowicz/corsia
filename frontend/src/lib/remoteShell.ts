@@ -45,12 +45,12 @@ function invoke(command: string, args?: Record<string, unknown>): Promise<unknow
 	return args === undefined ? call(command) : call(command, args);
 }
 
-export type LocalServiceStartOutcome = 'started' | 'update_finishing';
-
 /** Start the local managed service after a restart has exceeded its usual time. */
-export async function startLocalService(): Promise<LocalServiceStartOutcome> {
+export async function startLocalService(): Promise<void> {
 	const result = await invoke('start_local_service');
-	return result === 'update_finishing' ? 'update_finishing' : 'started';
+	if (!result || typeof result !== 'object') throw new Error('CORSIA did not start');
+	const startup = result as { state?: unknown; url?: unknown };
+	if (startup.state !== 'ready' || typeof startup.url !== 'string' || !startup.url.trim()) throw new Error('CORSIA did not start');
 }
 
 /** The desktop shell's PID-validated, redacted startup-progress record; absent for browsers and remote shells. */

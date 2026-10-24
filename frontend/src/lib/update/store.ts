@@ -8,14 +8,11 @@ import { isFailedOperation, isInFlight, isResolvedFailure, type ClientVerdict, t
 import { markOutcomeSeen } from './outcome';
 import { readVersionWithinFiveSeconds, versionHashesAgree } from './versionProbe';
 import { clearStartupProgress, refreshStartupProgress } from './startupProgress';
+import type { UpdateSchedule, UpdateStatus } from './types';
 
 const BASE = '';
 const POLL_MS = 1_000;
-
-import type { UpdateSchedule, UpdateStatus } from './types';
-
 export type { UpdateSchedule, UpdateStatus } from './types';
-
 export const updateStatus = writable<UpdateStatus | null>(null);
 /** The person shrank the progress toast to its pill; it lasts until the operation settles. */
 export const updateProgressMinimized = writable(false);
@@ -25,9 +22,7 @@ export const updateFailureVerdict = writable<ClientVerdict | null>(null);
 export const updateStarting = writable(false);
 /** Offset between this browser clock and the status response's server clock. */
 export const updateServerClockOffsetMs = writable(0);
-/** The new version was confirmed running: the update screen's cue to show 100% and leave. */
 export const updateConfirmed = writable<{ operationId: string; version: string | null } | null>(null);
-/** True only while the System Updates row is actually visible. */
 export const updateToastSuppressed = writable(false);
 export const updateOperation = derived(updateStatus, ($status) => $status?.operation ?? null);
 export const updateInFlight = derived(updateOperation, ($operation) => isInFlight($operation));
@@ -46,7 +41,6 @@ let latestNoticeStatus: UpdateStatus | null = null;
 // What this page already showed. The durable record of what any device showed is the operation's `outcome_seen_at`.
 const shownOutcomes = new Set<string>();
 const noticedVersions = new Set<string>();
-
 function stopStatusPolling(): void {
 	if (pollTimer !== null) clearInterval(pollTimer);
 	pollTimer = null;
@@ -78,7 +72,9 @@ function pollVersionWhileUnreachable(): void {
 	void refreshStartupProgress();
 }
 
-function dismissNotice(): void {
+function dismissNotice(forSuppression = false): void {
+	const visible = noticeToastId && get(toasts).some((toast) => toast.id === noticeToastId);
+	if (forSuppression && visible && latestNoticeStatus?.target_version) noticedVersions.delete(latestNoticeStatus.target_version);
 	if (noticeToastId) toasts.dismiss(noticeToastId);
 	noticeToastId = null;
 }
@@ -96,7 +92,7 @@ function showNotice(status: UpdateStatus): void {
 }
 
 updateToastSuppressed.subscribe((suppressed) => {
-	if (suppressed) dismissNotice();
+	if (suppressed) dismissNotice(true);
 	else if (latestNoticeStatus) showNotice(latestNoticeStatus);
 });
 

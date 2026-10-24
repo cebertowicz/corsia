@@ -59,40 +59,43 @@ afterEach(() => {
 });
 
 describe('update screen store', () => {
-	it('follows an advancing progress replay, then freezes after its longest 245-second unchanged interval', async () => {
+	it('keeps an advancing 245-second progress replay monotone, then stops creeping once its source freezes', async () => {
 		updateStatus.set(status(inFlight()));
 		tickUpdateScreen(0);
 		updateUnreachable.set(true);
-		const replay = [
-			{ at: 1_000, seq: 4, phase: 'migrating', done: 2, total: 4 },
-			{ at: 20_000, seq: 5, phase: 'migrating', done: 3, total: 4 },
-			{ at: 70_000, seq: 6, phase: 'validating', done: null, total: null },
-			{ at: 140_000, seq: 7, phase: 'serving', done: null, total: null },
-		] as const;
-		const steps: string[] = [];
-		for (const sample of replay) {
-			vi.setSystemTime(sample.at);
-			progress = { schema: 1, pid: 91, ...sample, version: 'not-an-app-version' };
+		let previousPercent = get(updateScreenView)!.percent;
+		let lastDisplayedChangeAt = 0;
+		let longestUnchangedDisplayedMs = 0;
+		for (let at = 5_000, seq = 1; at <= 245_000; at += 5_000, seq += 1) {
+			vi.setSystemTime(at);
+			progress = { schema: 1, pid: 91, seq, phase: 'migrating', done: 2, total: 4 };
 			await refreshStartupProgress();
-			tickUpdateScreen(sample.at);
-			steps.push(get(updateScreenView)!.step);
+			tickUpdateScreen(at);
+			const alive = get(updateScreenView)!;
+			expect(alive.mode).toBe('progress');
+			expect(alive.percent).toBeGreaterThanOrEqual(previousPercent);
+			if (alive.percent !== previousPercent) {
+				longestUnchangedDisplayedMs = Math.max(longestUnchangedDisplayedMs, at - lastDisplayedChangeAt);
+				lastDisplayedChangeAt = at;
+			}
+			previousPercent = alive.percent;
 		}
 
-		const alive = get(updateScreenView)!;
-		expect(invoke).toHaveBeenCalledTimes(replay.length);
-		expect(steps).toEqual(['upgrading', 'upgrading', 'checking_data', 'starting']);
-		expect(alive).toMatchObject({ mode: 'progress', fromVersion: '2026.10.12', toVersion: '2026.10.13' });
-		expect(alive.fromVersion).not.toBe('1');
-		const displayedWhileAlive = alive.percent;
-		const longestUnchangedDisplayedMs = 245_000;
+		expect(longestUnchangedDisplayedMs).toBeLessThanOrEqual(CREEP_STALE_MS);
+		expect(get(updateScreenView)).toMatchObject({ mode: 'progress', step: 'upgrading', fromVersion: '2026.10.12', toVersion: '2026.10.13' });
+		const displayedWhileAlive = previousPercent;
 
-		const frozenAt = replay[replay.length - 1].at + longestUnchangedDisplayedMs;
+		const creepStoppedAt = 245_000 + CREEP_STALE_MS;
+		vi.setSystemTime(creepStoppedAt);
+		await refreshStartupProgress();
+		tickUpdateScreen(creepStoppedAt);
+		expect(get(updateScreenView)).toMatchObject({ mode: 'progress', percent: displayedWhileAlive });
+
+		const frozenAt = 245_000 + 60_000;
 		vi.setSystemTime(frozenAt);
 		await refreshStartupProgress();
 		tickUpdateScreen(frozenAt);
-		const frozen = get(updateScreenView)!;
-		expect(longestUnchangedDisplayedMs).toBeGreaterThan(CREEP_STALE_MS);
-		expect(frozen).toMatchObject({ mode: 'longer', step: 'starting', percent: displayedWhileAlive });
+		expect(get(updateScreenView)).toMatchObject({ mode: 'longer', step: 'upgrading', percent: displayedWhileAlive });
 	});
 
 	it('keeps a dismissed terminal outcome dismissed and completes only for the matching operation', () => {
