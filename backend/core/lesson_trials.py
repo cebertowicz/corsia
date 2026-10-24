@@ -16,9 +16,11 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
+
+from core import lesson_case
 
 LESSON_KEY = "lesson"
 STATES = ("watch", "trial", "retired", "promoted")
@@ -37,7 +39,7 @@ INDEX_TOKEN_BUDGET = 1_000
 REVIEW_REF_PREFIX = "plan-node:"
 _FIELDS = frozenset({
     "id", "state", "owner", "review_after", "source_refs", "review_ref",
-    "origin", "destination", "originating_subjects",
+    "origin", "destination", "originating_subjects", *lesson_case.FIELDS,
 })
 
 TRIAL_SCHEMA: dict[str, Any] = {
@@ -92,6 +94,8 @@ class Lesson:
     review_ref: str | None = None
     origin: dict[str, str] | None = None
     destination: dict[str, str] | None = None
+    #: Optional case metadata, as ``lesson_case`` validates it.
+    case_metadata: dict[str, Any] = field(default_factory=dict)
 
     @property
     def review_node_id(self) -> str | None:
@@ -261,6 +265,10 @@ def lesson_errors(block: object, description: str | None, body: str) -> list[str
         errors.append("corsia.lesson.review_ref must be a non-empty string")
     if "origin" in block and _pair(block["origin"], "id", "behavioral_sha256") is None:
         errors.append("corsia.lesson.origin must be {id, behavioral_sha256}")
+    try:
+        lesson_case.validate_metadata(block)
+    except ValueError as invalid:
+        errors.append(f"corsia.lesson.{invalid}")
     if state == "promoted" and _pair(block.get("destination"), "path", "version") is None:
         errors.append("corsia.lesson.destination {path, version} is required when promoted")
     elif "destination" in block and _pair(block["destination"], "path", "version") is None:
@@ -293,6 +301,7 @@ def parse_lesson(metadata: dict[str, Any]) -> Lesson | None:
         review_ref=_clean(block.get("review_ref")),
         origin=_pair(block.get("origin"), "id", "behavioral_sha256"),
         destination=_pair(block.get("destination"), "path", "version"),
+        case_metadata=lesson_case.validate_metadata(block),
     )
 
 

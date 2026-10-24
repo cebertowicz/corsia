@@ -144,13 +144,14 @@ def trial_statement(body: str) -> str:
 def render_trial(
     *, lesson_id: str, owner: str, name: str, description: str, text: str,
     trial: Trial, source_refs: list[dict[str, Any]], originating_subjects: tuple[str, ...] | None = None,
-    origin: dict[str, str] | None = None,
+    origin: dict[str, str] | None = None, case_metadata: dict[str, Any] | None = None,
 ) -> str:
     """A trial skill with no ``review_ref``: written, and not yet offered.
 
     The body carries neither the name nor the review date, so a rename or an
     extension leaves the behavioral version, and its review, in place.
-    ``origin`` names the retired lesson this one captures again.
+    ``origin`` names the retired lesson this one captures again; ``case_metadata``
+    is its validated case metadata (``lesson_case``).
     """
     body = _trial_body(text, trial.boundary)
     lesson = {
@@ -161,6 +162,7 @@ def render_trial(
         lesson["originating_subjects"] = list(originating_subjects)
     if origin:
         lesson["origin"] = dict(origin)
+    lesson.update(case_metadata or {})
     return _dump(
         {"name": name, "description": _one_line(description), "corsia": {LESSON_KEY: lesson}},
         body,
