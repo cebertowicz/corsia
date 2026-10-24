@@ -34,6 +34,11 @@ DEFINITIONS = {
     "widens": "optional: the entry_id of an earlier lesson of yours that this one widens; it must exist.",
     "message_id": "optional: the id of a person-written message in this project; exact words skip the four fields for a lesson, and a proposed person instruction needs no exact match.",
 }
+#: The ``place`` parameters these definitions describe, as tool schema.
+PARAMETERS = {
+    name: ({"type": "integer", "minimum": 1} if name == "widens" else {"type": "string"}) | {"description": text}
+    for name, text in DEFINITIONS.items()
+}
 WRONG_RIGHT = (
     'Wrong decision (one check): "read the stamp on this frame". '
     'Right (the choice it belongs to): "accepting evidence that work is done".'

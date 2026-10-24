@@ -11,8 +11,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from core import lesson_gate
 from core.continuity_types import ENTRY_FIELD_MODELS, ENTRY_FIELDS
-from core.lesson_gate import DEFINITIONS as LESSON_DEFINITIONS
 from core.placement_decide import ANSWER_SCHEMA
 from core.placement_room import OPERATION_SCHEMA
 from infra.continuity_store import ContinuityError, validate_entry_body
@@ -193,7 +193,7 @@ _OPERATION_FIELDS = {
     "review": {
         "entry_id", "verdict", "destination", "quote", "placement", "room", "reason",
     },
-    "place": {"entry_id", "verdict", "destination", "quote", "placement", *LESSON_DEFINITIONS},
+    "place": {"entry_id", "verdict", "destination", "quote", "placement", *lesson_gate.PARAMETERS},
 }
 _REQUIRED_FIELDS = {
     "inspect": (),
@@ -266,8 +266,8 @@ _FIELD_SCHEMAS: dict[str, dict[str, Any]] = {
             "inspect lists current entries and ids; add records a new entry; "
             "replace rewrites one by id; drop retires one by id. review is "
             "only for a checkpoint's placement review. place: written with "
-            "placement has CORSIA write the lesson and retire the entry; written "
-            "or already with destination and quote is a receipt; proposed queues "
+            "placement has CORSIA write and retire it; written or already with "
+            "destination and quote is a receipt; proposed queues "
             "placement for CORSIA to file as a proposal; trial queues it as a "
             "trial skill with a review date."
         ),
@@ -304,7 +304,7 @@ _FIELD_SCHEMAS: dict[str, dict[str, Any]] = {
         "enum": sorted({v for verdicts in VERDICTS.values() for v in verdicts}),
         "description": (
             "review: reaffirm (keep it, with reason), select or already. "
-            "place: written, already, proposed or trial."
+            "place: as in operation."
         ),
     },
     "destination": {
@@ -326,7 +326,7 @@ _FIELD_SCHEMAS: dict[str, dict[str, Any]] = {
     "placement": {
         **ANSWER_SCHEMA,
         "description": (
-            "review select, or place written, proposed or trial: where the lesson "
+            "review select, place written, proposed or trial: where the lesson "
             "goes, as the placement review asks. trial is only for your own "
             "unproven hypothesis, never for what a person told you."
         ),
@@ -336,8 +336,7 @@ _FIELD_SCHEMAS: dict[str, dict[str, Any]] = {
         "items": OPERATION_SCHEMA,
         "description": "review select only, when the review refuses for the cap: make-room operations.",
     },
-    **{name: {"type": "string", "description": text} for name, text in LESSON_DEFINITIONS.items()},
-    "widens": {"type": "integer", "minimum": 1, "description": LESSON_DEFINITIONS["widens"]},
+    **lesson_gate.PARAMETERS,
 }
 
 
