@@ -243,7 +243,7 @@
 			const freshList = document.getElementById('fresh-list');
 			const ADOPTION_COPY = {
 				questionTitle: 'Use the CORSIA already on this computer?',
-				questionLine: (workDir) => `CORSIA found your existing install, with your work in ${workDir}. This app can run it from now on. It gives running work up to a minute to finish, stops whatever is still running, then backs up your data and restarts CORSIA from the app. Your data and work folder stay where they are. Nothing is deleted.`,
+				questionLine: (workDir) => `CORSIA found your existing install, with your work in ${workDir}. This app can run it from now on. It gives running work up to a minute to finish, stops whatever is still running, then backs up your data and restarts CORSIA from the app. Your data and work folder stay where they are.`,
 
 				waitingTitle: 'Giving running work up to a minute to finish…',
 				waitingCount: (count) => `${count} ${count === 1 ? 'task' : 'tasks'} still running`,
@@ -280,14 +280,15 @@
 			// Start fresh: the earlier install is moved by rename into a dated backup folder, never deleted.
 			const FRESH_COPY = {
 				offerTitle: 'Start CORSIA fresh?',
-				offerLine: (reason) => `${reason} Start fresh moves it into a backup folder and sets up CORSIA as new. Nothing is deleted.`,
+				offerLine: (reason, preview) => `${reason} ${FRESH_COPY.previewLine(preview)}`,
 				insteadButton: 'Start fresh instead',
 				offerButton: 'Start fresh',
-				confirmTitle: 'Move your earlier install into a backup?',
-				confirmLine: (preview) => `CORSIA stops it, then moves ${preview.moves.length === 1 ? 'this' : 'these'} into a new folder in ${preview.backups}. Nothing is deleted.`,
+				previewLine: (preview) => `Start fresh stops your earlier install, then moves ${preview.moves.length === 1 ? 'this' : 'these'} into a new folder in ${preview.backups}. Nothing is deleted.`,
+				checkingFolders: 'Checking folders…',
+				checkFoldersAgain: 'Check folders again',
+				previewFailureLine: 'CORSIA couldn’t check what Start fresh will move. Check folders again before starting fresh.',
 				confirmCode: (folders) => `Its code folder stays where it is: ${folders.join(', ')}.`,
 				confirmWork: (folders) => `${folders.length === 1 ? 'Its work folder stays' : 'Its work folders stay'} where ${folders.length === 1 ? 'it is' : 'they are'}: ${folders.join(', ')}.`,
-				confirmButton: 'Move and start fresh',
 				movingTitle: 'Moving your earlier install into a backup…',
 				quitPending: 'CORSIA will close once everything is in one place.',
 				doneButton: 'Set up CORSIA',
@@ -334,7 +335,15 @@
 				saveReport.hidden = true;
 			}
 
-			function showExistingInstall(workDir) {
+			function freshPreviewExtra(preview) {
+				return [
+					FRESH_COPY.previewLine(preview),
+					preview.code.length ? FRESH_COPY.confirmCode(preview.code) : '',
+					preview.work.length ? FRESH_COPY.confirmWork(preview.work) : '',
+				].filter(Boolean).join(' ');
+			}
+
+			async function showExistingInstall(workDir, previewFailure = null) {
 				clearInterval(approvalPoll);
 				adoptionPrompt = true;
 				adoptionRecovery = null;
@@ -344,8 +353,11 @@
 				status.textContent = ADOPTION_COPY.questionTitle;
 				line.textContent = ADOPTION_COPY.questionLine(workDir);
 				line.hidden = false;
-				note.hidden = true;
-				details.hidden = true;
+				note.textContent = previewFailure ? 'CORSIA couldn’t check what Start fresh will move. Take over is still available.' : '';
+				note.hidden = !note.textContent;
+				detailsText.textContent = previewFailure?.details ?? previewFailure?.message ?? '';
+				details.hidden = !detailsText.textContent;
+				details.open = false;
 				log.hidden = true;
 				spinner.hidden = true;
 				backgroundApproval.hidden = true;
@@ -354,11 +366,27 @@
 				saveReport.hidden = true;
 				retry.hidden = false;
 				retry.textContent = 'Take over';
-				startFreshButton.textContent = FRESH_COPY.insteadButton;
+				startFreshButton.textContent = previewFailure ? FRESH_COPY.checkFoldersAgain : FRESH_COPY.checkingFolders;
 				startFreshButton.hidden = false;
+				startFreshButton.disabled = !previewFailure;
+				startFreshButton.onclick = previewFailure ? () => showExistingInstall(workDir) : null;
 				actions.hidden = false;
 				retry.disabled = false;
 				retry.focus();
+				if (previewFailure) return;
+				try {
+					const preview = await invoke('start_fresh_preview');
+					if (!adoptionPrompt || freshRunning) return;
+					note.textContent = freshPreviewExtra(preview);
+					note.hidden = false;
+					freshList.replaceChildren(...preview.moves.map((item) => Object.assign(document.createElement('li'), { textContent: item })));
+					freshList.hidden = preview.moves.length === 0;
+					startFreshButton.textContent = FRESH_COPY.insteadButton;
+					startFreshButton.disabled = false;
+					startFreshButton.onclick = () => runFresh(() => showExistingInstall(workDir));
+				} catch (error) {
+					if (adoptionPrompt && !freshRunning) showExistingInstall(workDir, error);
+				}
 			}
 
 			// The backend names the phase and the window picks the approved line for it. The count is
@@ -571,11 +599,11 @@
 				if (startup.state === 'ready') {
 					continueToService(startup);
 				} else if (startup.state === 'adoption_offered') {
-					showExistingInstall(startup.workspace);
+					await showExistingInstall(startup.workspace);
 				} else if (startup.state === 'adoption_failed') {
 					await showAdoptionFailure(startup.failure);
 				} else if (startup.state === 'existing_install') {
-					showFreshOffer(startup.reason, startup.details);
+					await showFreshOffer(startup.reason, startup.details);
 				} else if (startup.state === 'start_fresh_failed') {
 					showFreshFailure(startup.failure);
 				} else if (startup.state === 'disk_image') {
@@ -646,64 +674,69 @@
 			}
 
 			// An earlier install this app can't open: offer to set it aside.
-			function showFreshOffer(reason, details) {
+			async function showFreshOffer(reason, details) {
 				clearInterval(approvalPoll);
 				const said = typeof reason === 'string' ? reason : '';
 				const why = typeof details === 'string' ? details : '';
-				showFreshCard({ title: FRESH_COPY.offerTitle, text: FRESH_COPY.offerLine(said), button: FRESH_COPY.offerButton, action: confirmFresh, why });
-			}
-
-			// The confirmation lists every item that moves and the code folder that stays, read from the computer now.
-			async function confirmFresh() {
 				showStarting();
-				let preview;
 				try {
-					preview = await invoke('start_fresh_preview');
+					const preview = await invoke('start_fresh_preview');
+					showFreshCard({
+						title: FRESH_COPY.offerTitle,
+						text: FRESH_COPY.offerLine(said, preview),
+						extra: [
+							preview.code.length ? FRESH_COPY.confirmCode(preview.code) : '',
+							preview.work.length ? FRESH_COPY.confirmWork(preview.work) : '',
+						].filter(Boolean).join(' '),
+						items: preview.moves,
+						button: FRESH_COPY.offerButton,
+						action: () => runFresh(() => showFreshOffer(reason, details)),
+						why,
+					});
 				} catch (error) {
-					showFreshFailure(error);
-					return;
+					const previewDetails = error && typeof error === 'object'
+						? error.details ?? error.message ?? ''
+						: String(error ?? '');
+					showFreshCard({
+						title: FRESH_COPY.offerTitle,
+						text: said,
+						extra: FRESH_COPY.previewFailureLine,
+						button: FRESH_COPY.checkFoldersAgain,
+						action: () => showFreshOffer(reason, details),
+						why: previewDetails,
+					});
 				}
-				showFreshCard({
-					title: FRESH_COPY.confirmTitle,
-					text: FRESH_COPY.confirmLine(preview),
-					extra: [
-						preview.code.length ? FRESH_COPY.confirmCode(preview.code) : '',
-						preview.work.length ? FRESH_COPY.confirmWork(preview.work) : '',
-					].filter(Boolean).join(' '),
-					items: preview.moves,
-					button: FRESH_COPY.confirmButton,
-					action: runFresh,
-				});
 			}
 
-			async function runFresh() {
+			async function runFresh(retryChoice) {
+				if (freshRunning) return;
+				freshRunning = true;
 				showStarting();
 				status.textContent = FRESH_COPY.movingTitle;
-				freshRunning = true;
 				const stopFollowing = followProgress();
 				try {
 					await invoke('start_fresh');
-					stopFollowing();
-					await start();
 				} catch (error) {
-					stopFollowing();
-					showFreshFailure(error);
+					showFreshFailure(error, retryChoice);
+					return;
 				} finally {
+					stopFollowing();
 					freshRunning = false;
 				}
+				await start();
 			}
 
 			// A Start fresh failure: the backend's line, its reason under Details, and the one next step. With nothing
-			// left to move, setup goes on; with every file where it was, Retry starts over from the confirmation;
+			// left to move, setup goes on; with every file where it was, Retry returns to the original choice and preview;
 			// otherwise reopening finishes the undo.
-			function showFreshFailure(error) {
+			function showFreshFailure(error, retryChoice = start) {
 				const given = error && typeof error === 'object'
 					? error
 					: { message: FRESH_COPY.unknownFailure, details: String(error ?? ''), restored: false };
 				const gone = given.nothing_to_move === true;
 				const [button, action] = gone
 					? [FRESH_COPY.doneButton, start]
-					: given.restored ? [FRESH_COPY.againButton, confirmFresh] : [FRESH_COPY.reopenButton, () => invoke('reopen_app')];
+					: given.restored ? [FRESH_COPY.againButton, retryChoice] : [FRESH_COPY.reopenButton, () => invoke('reopen_app')];
 				const title = gone ? FRESH_COPY.goneTitle : FRESH_COPY.failureTitle;
 				showFreshCard({ title, text: given.message, why: given.details ?? '', button, action });
 			}
@@ -731,6 +764,7 @@
 			}
 
 			async function retryFailure() {
+				if (freshRunning) return;
 				if (freshAction) return freshAction();
 				if (adoptionRecovery) return runRecovery(adoptionRecovery);
 				if (adoptionPrompt) return runAdoption();
@@ -807,7 +841,7 @@
 				}
 			});
 			setUpLocal.addEventListener('click', setUpThisComputer);
-			startFreshButton.addEventListener('click', confirmFresh);
+			// Start fresh gets its handler only when the current preview is valid.
 			if (window.location.hash === '#quit-failure') showFailure(undefined, true);
 		})();
 	</script>

@@ -285,17 +285,26 @@ def save_guidance(
     }
     logger.info("guidance save {}", properties)
     emit_product_event("guidance_history", "save", properties=properties)
+    warnings: list[str | None] = []
     if result.outcome == "written" and lesson_changes:
         from infra.lesson_save_gate import observe_written_save
 
-        if warning := observe_written_save(
+        warnings.append(observe_written_save(
             lesson_changes, author, stewardship_thread_id=lesson_observation_thread_id,
-        ):
-            result = SaveResult(
-                result.outcome, result.reason, result.sha,
-                line="\n".join(line for line in (result.line, warning) if line),
-                unsynced=result.unsynced, errors=result.errors,
-            )
+        ))
+    if result.outcome == "written" and result.sha and writes:
+        # Only a landed commit creates C1 work; matching remains off this request path.
+        from core.carry_in_facts import record_committed_save
+        from infra.carry_in_drain import request_drain
+
+        record_committed_save(workspace, list(writes), result.sha)
+        request_drain(workspace)
+    if any(warnings):
+        result = SaveResult(
+            result.outcome, result.reason, result.sha,
+            line="\n".join(line for line in (result.line, *warnings) if line),
+            unsynced=result.unsynced, errors=result.errors,
+        )
     return result
 
 
