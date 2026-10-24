@@ -27,12 +27,12 @@ SAVE_REASON = "lesson-outside-placement"
 _DECISION_CHARS = 300
 
 DEFINITIONS = {
-    "decision": "the kind of choice you were making when it went wrong, naming no single check or step.",
-    "rule": "what to do at that choice from now on, stated for any case of it.",
-    "second_case": "a different kind of work where this rule would also have prevented a miss.",
+    "decision": "the kind of choice that went wrong, naming no single check or step.",
+    "rule": "what to do at that choice from now on, for any case of it.",
+    "second_case": "different work where this rule would also have prevented a miss.",
     "not_when": "when the rule does not apply.",
-    "widens": "optional: the entry_id of an earlier lesson of yours that this one widens; it must exist.",
-    "message_id": "optional: the id of a person-written message in this project; exact words skip the four fields for a lesson, and a proposed person instruction needs no exact match.",
+    "widens": "optional: entry_id of your earlier lesson this widens; it must exist.",
+    "message_id": "optional: id of a person-written message in this project; its exact words skip the four fields (a proposal needs no exact match).",
 }
 #: The ``place`` parameters these definitions describe, as tool schema.
 PARAMETERS = {
