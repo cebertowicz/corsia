@@ -52,12 +52,6 @@ class Env:
 @pytest.fixture
 def env(tmp_path, monkeypatch) -> Env:
     from core import placement_worker
-    # Checkpoint readers import ``get_db`` by value. Load the readers exercised
-    # by this fixture before it redirects the database getter, so a later
-    # checkpoint test cannot retain this temporary database after monkeypatch
-    # restores the normal getter.
-    import infra.checkpoint_install_preflight
-    import infra.checkpoint_queries
 
     workspace = _repo(tmp_path)
     select_workspace(monkeypatch, workspace)
