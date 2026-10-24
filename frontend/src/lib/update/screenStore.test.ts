@@ -14,7 +14,7 @@ type ShellWindow = Window & {
 
 let progress: unknown;
 let readerFails = false;
-let invoke: ReturnType<typeof vi.fn>;
+let invoke: (command: string) => Promise<unknown>;
 
 function inFlight(operationId = 'update-1'): UpdateOperation {
 	return { operation_id: operationId, kind: 'update', status: 'in_flight', phase: 'restarting', target_version: '2026.10.13' };
@@ -110,13 +110,31 @@ describe('update screen store', () => {
 		await refreshStartupProgress();
 		tickUpdateScreen(60_000);
 		expect(get(startupProgress)).toMatchObject({ file: null, readError: 'unavailable' });
-		expect(get(updateScreenView)).toMatchObject({ mode: 'progress', estimated: false });
+		expect(get(updateScreenView)).toMatchObject({ mode: 'progress', estimated: false, startupProgressUnavailable: true });
 
 		readerFails = false;
 		await refreshStartupProgress();
 		tickUpdateScreen(60_001);
 		expect(get(startupProgress)).toMatchObject({ file: null, readError: null });
-		expect(get(updateScreenView)?.mode).toBe('longer');
+		expect(get(updateScreenView)).toMatchObject({ mode: 'longer', startupProgressUnavailable: false });
+	});
+
+	it('logs one sanitized reader failure until a successful read resets the bound', async () => {
+		const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+		updateStatus.set(status(inFlight()));
+		updateUnreachable.set(true);
+		readerFails = true;
+		await refreshStartupProgress();
+		await refreshStartupProgress();
+		expect(warning).toHaveBeenCalledTimes(1);
+		expect(warning).toHaveBeenCalledWith('[update] startup progress is unavailable');
+
+		readerFails = false;
+		await refreshStartupProgress();
+		readerFails = true;
+		await refreshStartupProgress();
+		expect(warning).toHaveBeenCalledTimes(2);
+		warning.mockRestore();
 	});
 
 	it('does not invent a remote estimate without history and retains a known usual time', () => {

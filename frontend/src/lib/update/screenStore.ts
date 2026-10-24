@@ -22,6 +22,8 @@ export interface UpdateScreenView {
 	toVersion: string | null;
 	failure: FailureCopy | null;
 	serviceDown: boolean;
+	/** The desktop shell cannot currently read the PID-validated local progress record. */
+	startupProgressUnavailable?: boolean;
 }
 
 /** After the new version is confirmed the screen stays this long at 100%, then leaves. */
@@ -161,7 +163,7 @@ export function tickUpdateScreen(now = Date.now()): void {
 	l.failure = currentFailure(l, own);
 	if (l.failure && !currentConfirmation) {
 		const copy = copyFor(l.failure, own);
-		updateScreenView.set({ mode: 'failed', step: l.model.step, label: STEP_LABEL[l.model.step], percent: l.model.percent, estimated: false, fromVersion: l.fromVersion, toVersion: l.toVersion, failure: copy, serviceDown: unreachable });
+		updateScreenView.set({ mode: 'failed', step: l.model.step, label: STEP_LABEL[l.model.step], percent: l.model.percent, estimated: false, fromVersion: l.fromVersion, toVersion: l.toVersion, failure: copy, serviceDown: unreachable, startupProgressUnavailable: false });
 		return;
 	}
 	if (currentConfirmation) {
@@ -171,16 +173,16 @@ export function tickUpdateScreen(now = Date.now()): void {
 			l.toVersion = currentConfirmation.version ?? l.toVersion;
 			exitTimer = setTimeout(() => resetUpdateScreen(true), EXIT_HOLD_MS);
 		}
-		updateScreenView.set({ mode: 'done', step: 'verifying', label: STEP_LABEL.verifying, percent: 100, estimated: false, fromVersion: l.fromVersion, toVersion: l.toVersion, failure: null, serviceDown: false });
+		updateScreenView.set({ mode: 'done', step: 'verifying', label: STEP_LABEL.verifying, percent: 100, estimated: false, fromVersion: l.fromVersion, toVersion: l.toVersion, failure: null, serviceDown: false, startupProgressUnavailable: false });
 		return;
 	}
 	if (unreachable && file?.phase === 'failed') {
-		updateScreenView.set({ mode: 'start_failed', step: l.model.step, label: STEP_LABEL[l.model.step], percent: l.model.percent, estimated: false, fromVersion: l.fromVersion, toVersion: l.toVersion, failure: null, serviceDown: true });
+		updateScreenView.set({ mode: 'start_failed', step: l.model.step, label: STEP_LABEL[l.model.step], percent: l.model.percent, estimated: false, fromVersion: l.fromVersion, toVersion: l.toVersion, failure: null, serviceDown: true, startupProgressUnavailable: false });
 		return;
 	}
 	const { input, longer, estimated } = readSources(now, l, own, unreachable, file, progress?.readError ?? null);
 	l.model.update(now, input);
-	updateScreenView.set({ mode: longer ? 'longer' : 'progress', step: l.model.step, label: STEP_LABEL[l.model.step], percent: l.model.percent, estimated, fromVersion: l.fromVersion, toVersion: l.toVersion, failure: null, serviceDown: unreachable });
+	updateScreenView.set({ mode: longer ? 'longer' : 'progress', step: l.model.step, label: STEP_LABEL[l.model.step], percent: l.model.percent, estimated, fromVersion: l.fromVersion, toVersion: l.toVersion, failure: null, serviceDown: unreachable, startupProgressUnavailable: unreachable && progress?.readError === 'unavailable' });
 }
 
 /** Dismiss a terminal service-up update failure without letting stale status polls remount it. */

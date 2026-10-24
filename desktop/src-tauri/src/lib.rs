@@ -979,9 +979,19 @@ fn local_start_answered<R: tauri::Runtime, E>(app: &tauri::AppHandle<R>, answer:
     answer
 }
 
-/// A local-service page cannot draw the startup shell's typed outcomes, so send non-ready or failed results back to it.
-fn return_nonready_local_start_to_shell<R: tauri::Runtime>(app: &tauri::AppHandle<R>, answer: &Result<ServiceStartup, String>) {
-    if matches!(answer, Ok(ServiceStartup::Ready { .. })) { return; }
+/// Only the currently granted local-service origin needs the startup shell to draw a non-ready answer. The startup
+/// shell awaits and draws its own answer; unknown or remote origins never gain this recovery path.
+fn local_service_start_needs_shell_handoff(calling_origin: Option<&str>, port: u16, answer: &Result<ServiceStartup, String>) -> bool {
+    !matches!(answer, Ok(ServiceStartup::Ready { .. }))
+        && calling_origin.is_some_and(|origin| {
+            !is_shell_origin(origin)
+                && tauri::Url::parse(origin).is_ok_and(|url| url.origin().ascii_serialization() == service_url(port))
+        })
+}
+
+/// A local-service page cannot draw the startup shell's typed outcomes, so send its non-ready or failed results back.
+fn return_nonready_local_start_to_shell<R: tauri::Runtime>(app: &tauri::AppHandle<R>, calling_origin: Option<&str>, port: u16, answer: &Result<ServiceStartup, String>) {
+    if !local_service_start_needs_shell_handoff(calling_origin, port, answer) { return; }
     show_launch_outcome(app, answer);
     return_to_shell(app);
 }
@@ -1748,7 +1758,15 @@ async fn check_service_started(app: tauri::AppHandle) -> Result<ServiceStartup, 
 }
 
 #[tauri::command]
-async fn start_local_service(app: tauri::AppHandle) -> Result<ServiceStartup, String> {
+async fn start_local_service(
+    app: tauri::AppHandle,
+    service: tauri::State<'_, AppServiceState>,
+    webview: tauri::Webview,
+) -> Result<ServiceStartup, String> {
+    // Capture the caller before the await: a local-service page cannot render typed non-ready answers, while the
+    // startup shell awaits and renders its own result. A URL failure is deliberately not treated as local.
+    let calling_origin = webview.url().ok().map(|url| url.to_string());
+    let service_port = lifecycle::service_port(&app, &service);
     // Finishing an interrupted adoption's undo can wait on the source service,
     // so it never runs on the thread that handles the window's events.
     local_start_began(&app);
@@ -1760,7 +1778,7 @@ async fn start_local_service(app: tauri::AppHandle) -> Result<ServiceStartup, St
     .await
     .map_err(|error| format!("starting CORSIA did not finish: {error}"))?;
     let answer = local_start_answered(&app, answer);
-    return_nonready_local_start_to_shell(&app, &answer);
+    return_nonready_local_start_to_shell(&app, calling_origin.as_deref(), service_port, &answer);
     answer
 }
 
@@ -2729,26 +2747,40 @@ mod tests {
     }
 
     #[test]
-    fn a_local_service_start_returns_typed_nonready_answers_to_the_startup_shell() {
+    fn only_the_actual_local_service_caller_hands_typed_nonready_answers_to_the_startup_shell() {
+        let local = service_url(47_895);
         for answer in [
             Ok(ServiceStartup::RequiresApproval),
             Ok(ServiceStartup::AdoptionOffered { workspace: "~/corsia".into() }),
             Err("did not start".to_string()),
         ] {
-            let app = launch_app();
-            let returned = local_start_answered(app.handle(), answer.clone());
-            return_nonready_local_start_to_shell(app.handle(), &returned);
-            assert_eq!(returned, answer);
-            assert!(shell_state_script(&launch_state(&app)).is_some(), "the startup shell lost {answer:?}");
-            assert!(is_shell_origin(app.get_webview_window("main").unwrap().url().unwrap().as_str()));
+            assert!(local_service_start_needs_shell_handoff(Some(&local), 47_895, &answer), "the local service lost {answer:?}");
+            for caller in [Some("tauri://localhost/index.html"), Some("http://127.0.0.1:47896"), Some("http://studio.example:47895"), None] {
+                assert!(!local_service_start_needs_shell_handoff(caller, 47_895, &answer), "non-local caller {caller:?} took over {answer:?}");
+            }
         }
+        assert!(!local_service_start_needs_shell_handoff(
+            Some(&local),
+            47_895,
+            &Ok(ServiceStartup::Ready { url: local.clone() }),
+        ));
+    }
+
+    #[test]
+    fn a_local_service_start_returns_typed_nonready_answers_to_the_startup_shell_once() {
+        let app = launch_app();
+        let answer = Ok(ServiceStartup::RequiresApproval);
+        let returned = local_start_answered(app.handle(), answer.clone());
+        return_nonready_local_start_to_shell(app.handle(), Some(&service_url(47_895)), 47_895, &returned);
+        assert_eq!(returned, answer);
+        assert!(shell_state_script(&launch_state(&app)).is_some());
 
         let app = launch_app();
-        let answer = Ok(ServiceStartup::Ready { url: service_url(47_895) });
         let returned = local_start_answered(app.handle(), answer.clone());
-        return_nonready_local_start_to_shell(app.handle(), &returned);
+        return_nonready_local_start_to_shell(app.handle(), Some("tauri://localhost/index.html"), 47_895, &returned);
         assert_eq!(returned, answer);
-        assert_eq!(launch_state(&app), shell_state::LaunchState::Local);
+        assert_eq!(launch_state(&app), shell_state::LaunchState::Local, "the shell caller draws its awaited answer itself");
+        assert_eq!(shell_state_script(&launch_state(&app)), None, "the shell caller received a duplicate redraw");
     }
 
     #[test]

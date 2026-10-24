@@ -24,7 +24,7 @@
 	let screenEl: HTMLElement | undefined = $state();
 
 	const longer = $derived(view?.mode === 'longer');
-	const recovery = $derived(longer || view?.mode === 'start_failed' || (view?.mode === 'failed' && view.serviceDown));
+	const recovery = $derived(longer || view?.startupProgressUnavailable === true || view?.mode === 'start_failed' || (view?.mode === 'failed' && view.serviceDown) || (!localDesktop && view?.serviceDown === true));
 	const autoStartWaiting = $derived(longer && localDesktop && autoStartAttempted && !starting && !startFailed);
 
 	$effect(() => {
@@ -121,14 +121,16 @@
 				{:else if recovery}
 					{#if longer}<p class="detail strong">This is taking longer than usual.</p>{/if}
 					{#if localDesktop}
-						{#if autoStartWaiting}
+						{#if view.startupProgressUnavailable}
+							<p class="detail" role="alert">Couldn’t read startup progress. If CORSIA doesn’t return, quit CORSIA with ⌘Q and open it again.</p>
+						{:else if autoStartWaiting}
 							<p class="detail">It’s taking longer than usual. CORSIA is still starting. Nothing you need to do yet.</p>
 						{:else if manualStartFailed}
 							<p class="detail" role="alert">It still didn’t start. Click Start CORSIA to try again, or quit CORSIA with ⌘Q and open it again.</p>
 						{:else if startFailed}
 							<p class="detail">It didn’t start on its own.</p>
 						{/if}
-						{#if startFailed}
+						{#if startFailed && !view.startupProgressUnavailable}
 							<div class="actions" in:actionsReveal={{ duration: ms('--dur-tight') }}>
 								<Button variant="primary" onclick={() => void startCorsia()} loading={starting} bind:el={startActionEl}>Start CORSIA</Button>
 							</div>
