@@ -116,6 +116,7 @@ def test_user_batch_uses_fixed_user_framing_and_ui_recipient_creates_no_node(iso
         feedback_batches.close_batch(db, user_batch["id"], "send")
         user_node = service.get_node(batches(db)[0]["delivered_node_id"], db=db)
         assert user_node.description.startswith(USER_FRAMING)
+        assert "Your replies reach the user through the chat's reply chip, so don't also send them a chat update about a reply." in user_node.description
         assert user_node.intent == "User document feedback: Please check this point.\nPlease check this point."
         words = db.execute(
             """SELECT author,role,source_kind,source_id,quote,requirements_revision
