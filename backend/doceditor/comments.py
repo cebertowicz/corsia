@@ -101,39 +101,12 @@ def list_for_artifact(artifact_id: str, *, db=None) -> list[dict]:
             _db.close()
 
 
-def _insert_comment(
-    connection, *, cid: str, artifact_id: str, parent_id: str | None, author: str,
-    author_kind: str, author_user_id: str | None, author_thread_id: str | None,
-    body: str, anchor_text: str | None, from_off: int | None, to_off: int | None,
-    anchor_prefix: str | None, anchor_suffix: str | None, review: bool,
-    replacement: str | None, now: str, region: tuple[float | None, float | None, float | None, float | None],
-    number: int | None, image_rev: str | None, image_src: str | None,
-):
-    """Insert one comment, retaining a person principal only for user-authored rows."""
-    return connection.execute(
-        """INSERT INTO doc_comments
-           (id, artifact_id, parent_id, author, author_kind, author_user_id, author_thread_id,
-            body, anchor_text, from_off, to_off, anchor_prefix, anchor_suffix,
-            review, resolved, acked, replacement, created_at, updated_at,
-            region_x, region_y, region_w, region_h, region_number, image_rev, image_src)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,0,?,?,?,?,?,?,?,?,?,?)
-           ON CONFLICT(id) DO NOTHING""",
-        (
-            cid, artifact_id, _thread_root_id(connection, parent_id), author, author_kind,
-            author_user_id if author_kind == "user" else None, author_thread_id,
-            body, anchor_text, from_off, to_off, anchor_prefix, anchor_suffix,
-            1 if review else 0, replacement, now, now, *region, number, image_rev, image_src,
-        ),
-    )
-
-
 def create_with_status(
     artifact_id: str,
     *,
     body: str,
     author: str = "you",
     author_kind: str = "user",
-    author_user_id: str | None = None,
     author_thread_id: str | None = None,
     parent_id: str | None = None,
     anchor_text: str | None = None,
@@ -168,13 +141,20 @@ def create_with_status(
                    WHERE artifact_id=? AND COALESCE(image_src, '')=COALESCE(?, '')""",
                 (artifact_id, image_src),
             ).fetchone()[0]
-        inserted = _insert_comment(
-            connection, cid=cid, artifact_id=artifact_id, parent_id=parent_id, author=author,
-            author_kind=author_kind, author_user_id=author_user_id, author_thread_id=author_thread_id,
-            body=body, anchor_text=anchor_text, from_off=from_off, to_off=to_off,
-            anchor_prefix=anchor_prefix, anchor_suffix=anchor_suffix, review=review,
-            replacement=replacement, now=now, region=(x, y, w, h), number=number,
-            image_rev=image_rev, image_src=image_src,
+        inserted = connection.execute(
+            """INSERT INTO doc_comments
+               (id, artifact_id, parent_id, author, author_kind, author_thread_id,
+                body, anchor_text, from_off, to_off, anchor_prefix, anchor_suffix,
+                review, resolved, acked, replacement, created_at, updated_at,
+                region_x, region_y, region_w, region_h, region_number, image_rev, image_src)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,0,0,?,?,?,?,?,?,?,?,?,?)
+               ON CONFLICT(id) DO NOTHING""",
+            (
+                cid, artifact_id, _thread_root_id(connection, parent_id), author, author_kind, author_thread_id,
+                body, anchor_text, from_off, to_off, anchor_prefix, anchor_suffix,
+                1 if review else 0, replacement, now, now,
+                x, y, w, h, number, image_rev, image_src,
+            ),
         )
         row = connection.execute(
             "SELECT * FROM doc_comments WHERE id=?", (cid,)

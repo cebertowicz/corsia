@@ -205,12 +205,14 @@ async def decide_suggestion(
         from doceditor.live_suggestions import accept_live
         live_receipt = await accept_live(artifact, project_id, [comment], actor_thread_id, user_id=user_id, single=True)
         if live_receipt is None:
+            from doceditor.suggestion_authorship import accepted_person_author_user_id
+
             document_text = await run_off_db(read_doc_text, artifact["path"])
             await write(
                 artifact["path"], applied_text(comment, document_text), project_id,
                 f"Accepted suggestion {comment_id} from {comment['author']}",
                 hashlib.sha256(document_text.encode()).hexdigest(),
-                comment.get("author_user_id") if comment["author_kind"] == "user" else None,
+                accepted_person_author_user_id([comment], [comment_id]),
             )
 
     def _record():

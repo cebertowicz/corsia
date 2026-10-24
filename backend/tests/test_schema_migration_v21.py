@@ -52,7 +52,7 @@ def test_fresh_and_migrated_schema_share_the_checkpoint_hold_index() -> None:
         fresh.executescript(SCHEMA_SQL)
         result = migrate_to_current(migrated, 21)
 
-        assert SCHEMA_VERSION == 146
+        assert SCHEMA_VERSION == 145
         assert result.migrated is True
         assert (result.from_version, result.to_version) == (20, 21)
         assert _index_sql(migrated) == _index_sql(fresh)

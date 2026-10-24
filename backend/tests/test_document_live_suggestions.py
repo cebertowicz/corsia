@@ -32,6 +32,44 @@ async def legacy_writer(*args):
     pytest.fail("Accept bypassed the live lane")
 
 
+@pytest.mark.asyncio
+async def test_live_accept_registers_under_the_real_actor_thread(
+    ownership_scope, tmp_path, monkeypatch,
+):
+    scope = ownership_scope
+    manager, entry, _ = await opened(scope, tmp_path, monkeypatch)
+    artifact_id = scope["db"].execute(
+        "SELECT id FROM artifact_identities WHERE path=?", (str(entry.live.path),)
+    ).fetchone()[0]
+    row, _ = comments.create_with_status(
+        artifact_id, body="", author="person-immutable-id", author_kind="user",
+        anchor_text="b", from_off=2, to_off=3, replacement="B", db=scope["db"],
+    )
+    entry.live.track_range(row["id"], row["from_off"], row["to_off"])
+    from registry import service
+
+    seen = []
+    original_register = service.register_write_strict
+
+    def capture_owner(owner, *args, **kwargs):
+        seen.append(owner)
+        return original_register(owner, *args, **kwargs)
+
+    monkeypatch.setattr(service, "register_write_strict", capture_owner)
+    try:
+        result = await comment_actions.decide_suggestion(
+            row["id"], "accept", user_id=user_id(scope), decided_by="user",
+            actor_thread_id=scope["owner"], write=legacy_writer,
+        )
+
+        assert result["decision"] == "accepted"
+        assert entry.publisher.task is not None
+        await asyncio.wait_for(entry.publisher.task, 2)
+        assert seen == [scope["owner"]]
+    finally:
+        await manager.close()
+
+
 def user_id(scope):
     return scope["db"].execute("SELECT user_id FROM threads WHERE id=?", (scope["owner"],)).fetchone()[0]
 
@@ -78,45 +116,6 @@ async def test_accept_checks_quotes_at_lane_start_after_queueing(ownership_scope
     finally:
         release.set()
         await asyncio.gather(task, return_exceptions=True)
-        await manager.close()
-
-
-@pytest.mark.asyncio
-async def test_live_accept_passes_the_persisted_person_winner_to_durable_registration(
-    ownership_scope, tmp_path, monkeypatch,
-):
-    scope = ownership_scope
-    manager, entry, _ = await opened(scope, tmp_path, monkeypatch)
-    artifact_id = scope["db"].execute(
-        "SELECT id FROM artifact_identities WHERE path=?", (str(entry.live.path),)
-    ).fetchone()[0]
-    row, _ = comments.create_with_status(
-        artifact_id, body="", author="Renamed person", author_kind="user", author_user_id="person-immutable-id",
-        anchor_text="b", from_off=2, to_off=3, replacement="B", db=scope["db"],
-    )
-    entry.live.track_range(row["id"], row["from_off"], row["to_off"])
-    from infra.guidance_messages import saver_author
-    from registry import service
-
-    seen = []
-    original_register = service.register_write_strict
-
-    def capture_author(author, *args, **kwargs):
-        seen.append(author)
-        return original_register(author, *args, **kwargs)
-
-    monkeypatch.setattr(service, "register_write_strict", capture_author)
-    try:
-        result = await comment_actions.decide_suggestion(
-            row["id"], "accept", user_id=user_id(scope), decided_by="user",
-            actor_thread_id=scope["owner"], write=legacy_writer,
-        )
-
-        assert result["decision"] == "accepted"
-        assert entry.publisher.task is not None
-        await asyncio.wait_for(entry.publisher.task, 2)
-        assert seen == [saver_author(user_id="person-immutable-id")]
-    finally:
         await manager.close()
 
 

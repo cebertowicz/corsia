@@ -13,7 +13,6 @@ from doceditor.live_store import LiveStore, StoreRefused
 from doceditor.live_failure_budget import FailureBudget
 from doceditor.live_text import clone
 from infra.database import get_db, write_transaction
-from infra.guidance_messages import saver_author
 from registry import service, write_preparation
 from registry.identity_metadata import parse_metadata
 from registry.registration_origin import RegistrationOrigin
@@ -54,11 +53,7 @@ def register_publication(publication: Publication, text: str, result_hash: str, 
     """
     path = publication.target_path()
     shared = publication.shared_target()
-    owner = (
-        saver_author(user_id=publication.suggestion_author_user_id)
-        if publication.suggestion_author_user_id
-        else (shared.actor_principal if shared else None) or publication.actor
-    )
+    owner = (shared.actor_principal if shared else None) or publication.actor
     prepared = write_preparation.prepare_file_write(str(path), owner, db=db)
     if prepared is None:
         raise ValueError("Live publication target is outside registrable roots")

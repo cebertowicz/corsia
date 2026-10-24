@@ -14,11 +14,10 @@ async def build_candidate(live, operation):
     from doceditor.live_lane import EditRefused, LaneRefused
     fork = clone(live.doc.get_update())
     accepted, skipped, receipt = (), (), None
-    suggestion_author_user_id = None
     author = None
     if operation.kind == "accept":
         from doceditor.live_suggestions import suggestion_text
-        text, accepted, skipped, suggestion_author_user_id = suggestion_text(live, operation)
+        text, accepted, skipped = suggestion_text(live, operation)
         await apply_text_async(fork, text)
     elif operation.kind == "write":
         base = live.bases.get(operation.base_hash)
@@ -45,4 +44,4 @@ async def build_candidate(live, operation):
         raise LaneRefused("Unknown live document operation")
     if author is None:
         author = fork.get_update(), file_hash(str(fork["text"]).encode("utf-8"))
-    return fork, accepted, skipped, receipt, author, suggestion_author_user_id
+    return fork, accepted, skipped, receipt, author

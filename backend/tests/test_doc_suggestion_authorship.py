@@ -1,18 +1,18 @@
-"""Suggestion acceptance attributes commits only to persisted person principals."""
+"""Accepted suggestions use existing person principals only for durable plain saves."""
 from __future__ import annotations
 
 import hashlib
 
 import pytest
 
-from delegation_docs_fixtures import _OWNER, _registrable_roots, doc
+from delegation_docs_fixtures import _registrable_roots, doc
 from test_doc_suggestions import _own, _thread_facts
 
 pytestmark = pytest.mark.integration
 
 
 @pytest.mark.asyncio
-async def test_plain_batch_uses_only_the_accepted_person_winner_for_commit_authorship(
+async def test_plain_legacy_user_suggestion_uses_its_existing_author_principal(
     integration_client, doc, _registrable_roots,
 ):
     from doceditor import comments
@@ -22,13 +22,9 @@ async def test_plain_batch_uses_only_the_accepted_person_winner_for_commit_autho
     quote = "A unique tail sentence"
     start = doc.read_text().index(quote)
     person, _ = comments.create_with_status(
-        artifact_id, body="", author="Renamed Person", author_kind="user", author_user_id="person-immutable-id",
-        anchor_text=quote, from_off=start, to_off=start + len(quote), replacement="A concise tail sentence",
-    )
-    agent, _ = comments.create_with_status(
-        artifact_id, body="", author="Reviewer", author_kind="agent", author_user_id="person-immutable-id",
-        author_thread_id="reviewer", anchor_text=quote, from_off=start, to_off=start + len(quote),
-        replacement="An overlapping agent suggestion",
+        artifact_id, body="", author="person-immutable-id", author_kind="user",
+        anchor_text=quote, from_off=start, to_off=start + len(quote),
+        replacement="A concise tail sentence",
     )
     writes = []
 
@@ -41,12 +37,11 @@ async def test_plain_batch_uses_only_the_accepted_person_winner_for_commit_autho
     )
 
     assert result["accepted"] == [person["id"]]
-    assert [item["id"] for item in result["skipped"]] == [agent["id"]]
     assert writes == [(hashlib.sha256(doc.read_bytes()).hexdigest(), "person-immutable-id")]
 
 
 @pytest.mark.asyncio
-async def test_plain_batch_keeps_accepting_agent_for_legacy_or_mixed_winners(
+async def test_plain_mixed_winners_keep_the_accepting_agent_as_guidance_author(
     integration_client, doc, _registrable_roots,
 ):
     from doceditor import comments
@@ -58,12 +53,14 @@ async def test_plain_batch_keeps_accepting_agent_for_legacy_or_mixed_winners(
     first_start = doc.read_text().index(first)
     second_start = doc.read_text().index(second)
     comments.create_with_status(
-        artifact_id, body="", author="Legacy display", author_kind="user",
-        anchor_text=first, from_off=first_start, to_off=first_start + len(first), replacement="# Revised design",
+        artifact_id, body="", author="person-immutable-id", author_kind="user",
+        anchor_text=first, from_off=first_start, to_off=first_start + len(first),
+        replacement="# Revised design",
     )
     comments.create_with_status(
-        artifact_id, body="", author="Reviewer", author_kind="agent", author_thread_id="reviewer",
-        anchor_text=second, from_off=second_start, to_off=second_start + len(second), replacement="A revised tail",
+        artifact_id, body="", author="reviewer", author_kind="agent", author_thread_id="reviewer",
+        anchor_text=second, from_off=second_start, to_off=second_start + len(second),
+        replacement="A revised tail",
     )
     writers = []
 
@@ -77,3 +74,20 @@ async def test_plain_batch_keeps_accepting_agent_for_legacy_or_mixed_winners(
 
     assert len(result["accepted"]) == 2
     assert writers == [None]
+
+
+def test_persisted_user_selection_requires_unanimous_nonempty_user_winners():
+    from doceditor.suggestion_authorship import accepted_person_author_user_id
+
+    user = {"id": "one", "author": "person", "author_kind": "user"}
+    same_user = {"id": "two", "author": "person", "author_kind": "user"}
+    another_user = {"id": "three", "author": "other-person", "author_kind": "user"}
+    agent = {"id": "four", "author": "reviewer", "author_kind": "agent"}
+    unknown = {"id": "five", "author": "person", "author_kind": "unknown"}
+
+    assert accepted_person_author_user_id([user, same_user], ["one", "two"]) == "person"
+    assert accepted_person_author_user_id([user, another_user], ["one", "three"]) is None
+    assert accepted_person_author_user_id([user, agent], ["one", "four"]) is None
+    assert accepted_person_author_user_id([user, unknown], ["one", "five"]) is None
+    assert accepted_person_author_user_id([user], []) is None
+    assert accepted_person_author_user_id([user], ["missing"]) is None

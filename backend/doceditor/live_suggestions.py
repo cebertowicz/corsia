@@ -28,14 +28,7 @@ def suggestion_text(live, operation: Operation):
     text, accepted, batch_skipped = _batch_text(valid, live.text)
     if operation.single_suggestion and not accepted:
         raise CommentActionError("stale", STALE_MESSAGE)
-    from doceditor.suggestion_authorship import accepted_person_author_user_id
-
-    return (
-        text,
-        tuple(accepted),
-        tuple(skipped + batch_skipped),
-        accepted_person_author_user_id(valid, accepted),
-    )
+    return text, tuple(accepted), tuple(skipped + batch_skipped)
 
 
 async def accept_live(artifact, project_id, rows, actor_thread_id, *, user_id=None, single=False,
