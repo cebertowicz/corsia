@@ -284,7 +284,7 @@ async def test_accept_writes_in_the_owner_threads_project_scope(integration_clie
     user_id, project_id = _thread_facts(owner)
     writes = []
 
-    async def write(path, text, project, reason, expected_sha256=None):
+    async def write(path, text, project, reason, expected_sha256=None, _suggestion_author=None):
         writes.append((path, project, reason))
 
     await decide_suggestion(suggestion["id"], "accept", user_id=user_id, decided_by="u",
@@ -319,7 +319,7 @@ async def test_accept_reports_an_applied_but_unrecorded_edit(integration_client,
     user_id = _thread_facts(owner)[0]
     writes = []
 
-    async def write(path, text, project, reason, expected_sha256=None):
+    async def write(path, text, project, reason, expected_sha256=None, _suggestion_author=None):
         writes.append(text)
 
     def fail(*_args, **_kwargs):

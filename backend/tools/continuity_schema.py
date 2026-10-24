@@ -261,11 +261,8 @@ _FIELD_SCHEMAS: dict[str, dict[str, Any]] = {
         "type": "string",
         "enum": list(_OPERATIONS),
         "description": (
-            "inspect lists entries; add records one; replace rewrites one; drop "
-            "retires one. review is only for a checkpoint. place files a lesson: "
-            "already retires the entry once destination holds quote; written "
-            "queues CORSIA to write the line; proposed queues a proposal; trial "
-            "queues a trial skill with a review date."
+            "inspect lists; add records; replace rewrites; drop retires. review is "
+            "checkpoint-only. place records a lesson; verdict and fields define outcome."
         ),
     },
     "field": {
@@ -321,8 +318,8 @@ _FIELD_SCHEMAS: dict[str, dict[str, Any]] = {
     "placement": {
         **ANSWER_SCHEMA,
         "description": (
-            "review select, place written, proposed or trial: where the lesson "
-            "goes. trial is only for your own unproven hypothesis."
+            "review select or place: destination. trial is only for your "
+            "own unproven hypothesis."
         ),
     },
     "room": {
@@ -333,7 +330,7 @@ _FIELD_SCHEMAS: dict[str, dict[str, Any]] = {
     **{
         name: (
             {"type": "integer", "minimum": 1} if name == "widens" else {"type": "string"}
-        ) | {"description": "place: " + text}
+        ) | {"description": text}
         for name, text in LESSON_DEFINITIONS.items()
     },
 }

@@ -243,10 +243,9 @@ def test_not_gated_the_named_call_sites_that_switch_it_off(tmp_path) -> None:
 
 
 _SRC = Path(__file__).resolve().parents[1]
-#: Reviewed library content, placement, outcome retirement, and conductor stewardship are the named bypasses.
+#: Reviewed library content, placement, and outcome retirement are the named bypasses.
 _GATE_OFF = {
     "core/placement_save.py": 1, "core/lesson_outcomes.py": 1, "infra/skill_install.py": 3,
-    "tools/conductor_instruction_files.py": 1,
 }
 
 

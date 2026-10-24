@@ -286,7 +286,7 @@ def _save(
     saved = save_guidance(
         {path: replacement}, workspace=Path(config.WORKSPACE), target=target,
         author=saver_author(thread_id=actor_thread_id), reason=kwargs.get("reason"),
-        evidence=kwargs.get("evidence"), expected={path: expected_revision}, lesson_gate=False,
+        evidence=kwargs.get("evidence"), expected={path: expected_revision},
     )
     if saved.outcome == "written":
         from core.lesson_gate import record_save_stewardship
