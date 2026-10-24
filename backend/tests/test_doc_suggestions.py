@@ -383,3 +383,40 @@ async def test_accepting_into_a_guidance_file_records_history(integration_client
         ["log", "-1", "--format=%ae%x00%B", "--", relative], cwd=integration_workspace).split("\x00", 1)
     assert author == f"{owner}@agents.corsia.local"
     assert f"Accepted suggestion {suggestion['id']} from {suggestion['author']}" in message
+
+
+@pytest.mark.asyncio
+async def test_browser_accept_of_another_persons_suggestion_uses_that_person_as_the_durable_author(
+    integration_client, integration_workspace, _registrable_roots,
+):
+    from doceditor import comments
+    from infra.database import get_db
+    from test_guidance_history import SKILL_BODY, _git
+
+    _git(["init", "--quiet"], cwd=integration_workspace)
+    owner = _mk_thread(integration_client, _OWNER, title="Skill Owner")
+    skill = integration_workspace / ".threads" / owner / "skills" / "demo" / "SKILL.md"
+    created = integration_client.put(f"/api/files/content?token={_OWNER}", json={
+        "path": str(skill), "text": SKILL_BODY, "thread_id": owner, "create": True})
+    assert created.status_code == 200, created.text
+    quote = SKILL_BODY.strip().splitlines()[-1]
+    start = skill.read_text(encoding="utf-8").index(quote)
+    db = get_db()
+    try:
+        artifact_id = db.execute(
+            "SELECT id FROM artifact_identities WHERE path=?", (str(skill),)
+        ).fetchone()[0]
+    finally:
+        db.close()
+    suggestion, _ = comments.create_with_status(
+        artifact_id, body="", author="Suggestion author", author_kind="user",
+        author_user_id="persisted-suggestion-person", anchor_text=quote,
+        from_off=start, to_off=start + len(quote), replacement=quote + " Now clearer.",
+    )
+
+    accepted = _user_decide(integration_client, suggestion["id"], "accept")
+
+    assert accepted.status_code == 200, accepted.text
+    relative = f".threads/{owner}/skills/demo/SKILL.md"
+    author = _git(["log", "-1", "--format=%ae", "--", relative], cwd=integration_workspace).strip()
+    assert author == "persisted-suggestion-person@users.corsia.local"

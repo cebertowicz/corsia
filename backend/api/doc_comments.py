@@ -40,6 +40,7 @@ from doceditor.doc_text import read_doc_text
 from doceditor.quote_anchor import anchor_context
 from infra.auth import authenticate, may_access_artifact, require_user_header_only
 from infra.database import get_db, write_transaction
+from infra.guidance_messages import saver_author
 from api.doc_comment_decisions import comment_action_status, decision_refusal
 from api.files import document_save_http_exception
 from doceditor.document_save import DocumentSave, DocumentSaveError, save_document_text
@@ -282,6 +283,7 @@ def _person_writer(user: dict, saved: dict):
             receipt = await save_document_text(
                 DocumentSave(path=path, text=text, project_id=project_id), user["id"], reason=reason,
                 expected_sha256=expected_sha256,
+                author=saver_author(user_id=_suggestion_author) if _suggestion_author else None,
             )
         except DocumentSaveError as exc:
             raise document_save_http_exception(exc) from exc
