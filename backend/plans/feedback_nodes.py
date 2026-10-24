@@ -45,7 +45,7 @@ USER_FRAMING = (
     + PERSON_COMMENT_RESOLVE_RULE
     + " Otherwise reply only to ask a question, give a reason for declining, or "
     "show evidence that a point is mistaken. Your replies reach the user through the chat's reply chip, "
-    "so don't also send them a chat update about a reply."
+    "so don't also send a post_update about a reply."
 )
 AGENT_EDIT_FRAMING = (
     "Another agent changed this directly and it is already applied. Treat it as evidence, "
