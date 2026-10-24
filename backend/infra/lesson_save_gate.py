@@ -30,14 +30,14 @@ def _same_scope_items(path: Path, workspace: Path | None, scope: str | None) -> 
     """Current lesson items in other on-disk guidance files of this save's scope."""
     if workspace is None or not scope:
         return Counter()
-    from core.guidance_paths import classify_guidance_path
+    from core.guidance_paths import classify_guidance_path, guidance_candidates
     from infra.database import get_db
 
     items: Counter[str] = Counter()
     db = get_db()
     try:
-        for candidate in workspace.rglob("*"):
-            if candidate == path or not candidate.is_file():
+        for candidate in guidance_candidates(workspace, db):
+            if candidate == path:
                 continue
             if classify_guidance_path(candidate, workspace=workspace, db=db) == scope:
                 items.update(lesson_items(candidate.read_text(encoding="utf-8", errors="replace")))
