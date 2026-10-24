@@ -24,6 +24,7 @@
 	import DecisionChip from './DecisionChip.svelte';
 	import AdaptiveDrawer from '$lib/components/ui/AdaptiveDrawer.svelte';
 	import ExternalReviewRow from './ExternalReviewRow.svelte';
+	import { dockQueue as getDockQueue, label, decisionMeta } from './dockPresentation';
 	import {
 		collapse,
 		EMPTY,
@@ -64,13 +65,7 @@
 	/** Bumped when focus moves or the typing window ends, so a waiting arrival is re-judged. */
 	let busyTick = $state(0);
 
-	// Unread document replies occupy their own persistent chip immediately above
-	// this dock. Needs-you retains its queue and one-at-a-time action semantics.
-	const dockQueue = $derived.by(() => {
-		const items = $visibleQueue.items.filter((item) => item.renderer !== 'comment-reply');
-		// The server's count can exceed the loaded rows; only the reply rows this dock hides come off it.
-		return { current: items[0] ?? null, count: $visibleQueue.count - ($visibleQueue.items.length - items.length), items };
-	});
+	const dockQueue = $derived(getDockQueue($visibleQueue));
 	const current = $derived(shownItem(dockQueue, $activeId));
 	const position = $derived(
 		current ? dockQueue.items.findIndex((i) => i.external_id === current.external_id) + 1 : 0,
@@ -90,9 +85,6 @@
 		!!current && !suppressed && $expandedId === current.external_id,
 	);
 
-	function decisionMeta(decision: DecisionDetail): string {
-		return `Decision · ${decision.source.thread_label}${decision.source.project_label ? ` · ${decision.source.project_label}` : ''}`;
-	}
 
 	/** Focus returns to the exact control that opened the chip. */
 	async function close() {
@@ -240,11 +232,7 @@
 		};
 	});
 
-	function label(item: NonNullable<typeof current>): string {
-		return item.renderer === 'decision'
-			? (item.detail as DecisionDetail).title
-			: (item.detail as ExternalReviewDetail).title;
-	}
+
 </script>
 
 {#if recording}

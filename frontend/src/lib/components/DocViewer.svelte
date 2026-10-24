@@ -4,7 +4,7 @@
 	import './DocViewer.css';
 	import { docCanvasBounds } from '$lib/actions/docCanvasBounds';
 	import { prefersReducedMotion } from '$lib/stores/viewport';
-	import { onDestroy, tick, untrack } from 'svelte';
+	import { onDestroy, untrack } from 'svelte';
 	import { ensureEditorArtifactId, releaseDocEditor } from '$lib/stores/activeDocEditor';
 	import { docComments, commentLoads, remapComments, markThreadViewed, reloadPlacements } from '$lib/stores/docComments';
 	import { suggestionRefusals } from '$lib/stores/suggestionRefusals';
@@ -12,6 +12,7 @@
 	import { commentDraft, commentDraftScope, discardCommentDraft, setCommentBody } from '$lib/stores/commentDraft';
 	import { createViewerCommentDraft } from '$lib/docViewerCommentDraft.svelte';
 	import { createCommentScrollTarget } from '$lib/docViewerScrollTarget.svelte';
+	import { createReplyLanding } from '$lib/docReplyLanding.svelte';
 	import { createDocViewerImages, type DocumentImageRequest } from '$lib/docViewerImages';
 	import { projects } from '$lib/stores/projects';
 	import { paneOpen, isPaneDrawer } from '$lib/stores/paneOpen';
@@ -131,7 +132,7 @@
 	});
 	let docRoot = $state<HTMLElement>();
 	let editorSurface = $state<ReturnType<typeof DocViewerEditorSurface>>();
-	let arrivedAt = $state<string | null>(null);
+
 	const commentUI = createCommentSurfaceState(() => focusDocumentEditor(docRoot), () => targetKey);
 	const shownFocus = $derived(commentUI.hovered ?? focusedComment);
 	const highlights = $derived(canvasCommentHighlights(listedComments, editText, shownFocus, focusMarker, suggestionBusyId));
@@ -154,26 +155,15 @@
 	/** The comments of the image shown over this document, bound to it as it is now: an image's host rebuilds them when it shows one. */
 	export function imageComments() { return images.comments(); }
 	function focusInText(id: string, placement?: 'top') { scroll.toComment(id, commentUI.state?.kind === 'list', placement === 'top' ? 'quote-tap' : 'navigation'); focusedDocComment.set(id); }
-	// A tab opened from a waiting reply lands once on the first unread root in document order,
-	// after the comments have loaded (an empty list mid-load would spend the landing on nothing).
-	// Ordinary document opens leave the comments surface alone.
-	$effect(() => {
-		const instance = target?.instanceId;
-		if (target?.landOn !== 'new-replies' || !loadedArtifactId || $commentLoads[loadedArtifactId]?.state !== 'ready' || !instance || docState !== 'ready' || arrivedAt === instance) return;
-		// A comment load can finish before its anchors are placed in the document. Do not spend this one-shot
-		// landing on a null target: wait for the first unread root to become scrollable, then land on its text.
-		if (firstUnreadThread?.placement === 'placing' && !firstUnreadTarget) return;
-		arrivedAt = instance;
-		const first = firstUnreadThread;
-		const landing = firstUnreadTarget;
-		void tick().then(() => {
-			if (first && landing) {
-				scroll.value = landing;
-				focusedDocComment.set(first.id);
-			}
+	createReplyLanding({
+		target: () => target,
+		ready: () => !!loadedArtifactId && $commentLoads[loadedArtifactId]?.state === 'ready' && docState === 'ready',
+		first: () => firstUnreadThread, landing: () => firstUnreadTarget,
+		open: (first, landing) => {
+			if (first && landing) { scroll.value = landing; focusedDocComment.set(first.id); }
 			commentUI.state = { kind: 'list' };
 			onLanded?.();
-		});
+		},
 	});
 	// A card for a comment on part of an image opens the image at its tag; any other card goes to its text.
 	function focusFromCard(id: string, placement?: 'top') { images.openOr([id], { id }, () => focusInText(id, placement)); }

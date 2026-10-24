@@ -20,6 +20,8 @@ import {
 	openSubagentTab as openAuxiliarySubagentTab,
 } from './artifactAuxiliaryTabs';
 import { relocatedTitle } from './artifactTabTitle';
+import { isTabChanged } from './artifactTabStatus';
+export { isTabChanged } from './artifactTabStatus';
 import { restoreWorkspace as restorePersistedWorkspace } from './artifactWorkspaceRestore';
 import type {
 	ArtifactTab,
@@ -64,12 +66,7 @@ export function tabKey(tab: Pick<ArtifactTab, 'instanceId'>): string {
 	return tab.instanceId;
 }
 
-/** A newer content revision exists than the one this tab last loaded. */
-export function isTabChanged(tab: ArtifactTab): boolean {
-	if (tab.kind !== 'document') return false;
-	if (tab.loadedRevision === null || tab.latestRevision === null) return false;
-	return tab.loadedRevision !== tab.latestRevision;
-}
+// Revision status is shared from artifactTabStatus.
 
 export function getActiveTab(ws: ThreadArtifactWorkspace): ArtifactTab | null {
 	return ws.tabs.find((t) => t.instanceId === ws.activeTabId) ?? null;
@@ -125,15 +122,7 @@ export function openTab(ws: ThreadArtifactWorkspace, input: OpenArtifactInput): 
 	};
 }
 
-/** Clears a tab's landing once the viewer has acted on it, so it never fires twice. */
-export function consumeLanding(ws: ThreadArtifactWorkspace, instanceId: string): ThreadArtifactWorkspace | null {
-	const idx = ws.tabs.findIndex((t) => t.instanceId === instanceId);
-	if (idx < 0 || !ws.tabs[idx].landOn) return null;
-	const tabs = ws.tabs.slice();
-	const { landOn: _consumed, ...rest } = tabs[idx];
-	tabs[idx] = rest;
-	return { ...ws, tabs };
-}
+export { consumeLanding } from './artifactTabLanding';
 
 /** Adds or selects a child conversation in the existing artifact leaf. */
 export function openSubagentTab(ws: ThreadArtifactWorkspace, input: OpenSubagentInput): ThreadArtifactWorkspace {

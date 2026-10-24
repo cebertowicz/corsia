@@ -32,9 +32,8 @@
 	import { toastAnchorSurface } from '$lib/stores/toastAnchor';
 	import PlanDrawerControl from './plans/PlanDrawerControl.svelte';
 	import { isMobile } from '$lib/stores/viewport';
-	import { openPlanSubagentLeaf, openPlanDiscussionLeaf } from '$lib/planLeafReturn';
-	import { openArtifactAndShowThread } from '$lib/openArtifactInThread';
-	import type { AttentionDestination } from '$lib/api/attentionQueue';
+	import { createPlanDestinations } from './chatPlanDestinations';
+	import { openDocumentOnReplies } from './chatReplyDestination';
 	import {
 		createPager,
 		adoptFirstPage,
@@ -74,14 +73,7 @@
 	 */
 	let leaseAwaitingUser = $state(false);
 	const attentionSuppressed = $derived(!!$activeThreadId && leaseAwaitingUser);
-	/** Opens a reply's document in the thread that owns it (else this chat) and carries the one-time reply landing intent. */
-	function openDocumentOnReplies(destination: AttentionDestination, threadId?: string | null): boolean {
-		if (!destination.path) return false;
-		return openArtifactAndShowThread(
-			{ artifactId: destination.id, path: destination.path, title: destination.title ?? destination.path.split('/').pop() ?? destination.path, landOn: 'new-replies' },
-			threadId ?? $activeThreadId,
-		) !== null;
-	}
+
 	const MSG_PAGE_SIZE = 50;
 	let pager = $state(createPager());
 	let pagerGeneration = 0;
@@ -105,12 +97,7 @@
 	const loadingOlderMessages = $derived(pager.loading);
 	const olderLoadFailed = $derived(pager.error);
 	export const scrollToBottom = () => messageListRef?.scrollToBottom();
-	function openPlanSubagent(nodeId: string, childThreadId: string, title: string, stepId?: string): void {
-		openPlanSubagentLeaf($activeThreadId, nodeId, childThreadId, title, stepId);
-	}
-	function openPlanDiscussion(artifactId: string, title: string): void {
-		openPlanDiscussionLeaf($activeThreadId, artifactId, title);
-	}
+	const { openPlanSubagent, openPlanDiscussion } = createPlanDestinations(() => $activeThreadId);
 	export const captureBottomOffset = () => messageListRef?.captureBottomOffset();
 	export const restoreBottomOffset = () => messageListRef?.restoreBottomOffset();
 	/** Warm the active thread's cache. Lives in `$lib/chatWarm`. */
@@ -364,14 +351,14 @@
 			{/if}
 			<CommentReplyChipRow
 				onOpenDocument={(destination, threadId) => {
-					if (destination.pane === 'document-replies') return openDocumentOnReplies(destination, threadId);
+					if (destination.pane === 'document-replies') return openDocumentOnReplies(destination, $activeThreadId, threadId);
 					if (destination.pane === 'documents') onOpenDocuments(destination.id);
 				}}
 			/>
 			<AttentionDock
 				suppressed={attentionSuppressed}
 				onOpenDestination={(destination, threadId) => {
-					if (destination.pane === 'document-replies') return openDocumentOnReplies(destination, threadId);
+					if (destination.pane === 'document-replies') return openDocumentOnReplies(destination, $activeThreadId, threadId);
 					if (destination.pane === 'documents') onOpenDocuments(destination.id);
 				}}
 			/>
