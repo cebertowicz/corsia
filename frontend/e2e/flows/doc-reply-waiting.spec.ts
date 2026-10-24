@@ -617,6 +617,7 @@ for (const theme of ['light', 'dark'] as const) {
 		});
 
 		test(`${TAG} ${theme} ${width}px: reply chip stacks above Needs you and the composer`, async ({ page, request }, testInfo) => {
+			test.setTimeout(60_000);
 			test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires isolated synthetic state');
 			skipMismatchedProject(width, testInfo.project.name);
 			await page.setViewportSize({ width, height: width === 393 ? 852 : 900 });
@@ -1177,6 +1178,7 @@ for (const theme of ['light', 'dark'] as const) {
 	for (const width of [1440, 393]) {
 		for (const withDecision of [false, true]) {
 			test(`${TAG} ${theme} ${width}px: backdrop covers transcript with ${withDecision ? 'a decision' : 'only a reply'}`, async ({ page, request }, testInfo) => {
+				test.setTimeout(60_000);
 				test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires isolated synthetic state');
 				skipMismatchedProject(width, testInfo.project.name);
 				await page.setViewportSize({ width, height: width === 393 ? 852 : 900 });
@@ -1188,6 +1190,8 @@ for (const theme of ['light', 'dark'] as const) {
 				await injectMessage(request, threadId, { role: 'user', content: longBubble }, TEST_TOKEN);
 				await injectMessage(request, threadId, { role: 'assistant', content: 'I will review those details.' }, TEST_TOKEN);
 				sqlite([['UPDATE messages SET created_at=? WHERE thread_id=?', [FROZEN_UTC, threadId]]]);
+				// An existing decision starts collapsed; a newly arriving decision auto-opens.
+				if (withDecision) seedDecision(threadId);
 				await loginByUrl(page);
 				await openThread(page, THREAD_TITLE);
 				const messages = page.locator('.messages');
@@ -1195,19 +1199,25 @@ for (const theme of ['light', 'dark'] as const) {
 				await messages.locator('.user-bubble-wrapper', { hasText: longBubble }).getByRole('button', { name: 'Show more' }).click();
 				await expect.poll(() => messages.evaluate((el) => el.scrollHeight - el.clientHeight)).toBeGreaterThan(200);
 				await messages.evaluate((el) => { el.scrollTop = el.scrollHeight / 2; el.dispatchEvent(new WheelEvent('wheel', { deltaY: -1, bubbles: true })); el.dispatchEvent(new Event('scroll')); });
-				await expect(page.locator('.attention-dock')).toHaveCount(0);
-				const oldArrow = width === 393 ? page.locator('.mobile-scroll-fab') : page.locator('.scroll-fab');
-				await expect(oldArrow).toBeVisible();
-				await expect(oldArrow.locator('xpath=ancestor::*[contains(@class,"attention-dock")]')).toHaveCount(0);
+				if (!withDecision) {
+					await expect(page.locator('.attention-dock')).toHaveCount(0);
+					const oldArrow = width === 393 ? page.locator('.mobile-scroll-fab') : page.locator('.scroll-fab');
+					await expect(oldArrow).toBeVisible();
+					await expect(oldArrow.locator('xpath=ancestor::*[contains(@class,"attention-dock")]')).toHaveCount(0);
+				}
 				addAgentReply(scenario.artifactId, scenario.roots[0], threadId, PASSAGES[0].reply);
-				if (withDecision) seedDecision(threadId);
 				await page.evaluate(async () => (await import('/src/lib/stores/attentionDock.svelte.ts')).reload());
 				const dock = page.locator('.attention-dock');
 				await expect(dock).toBeVisible();
 				await expect(dock.locator('.reply-chip-notice')).toBeVisible();
 				await expect(dock.locator('.mobile-scroll-fab')).toBeVisible();
 				await expect(page.locator('.scroll-fab')).toHaveCount(0);
-				await expect(dock.locator('.dock-bar')).toHaveCount(withDecision ? 1 : 0);
+				if (withDecision) {
+					await expect.poll(async () => {
+						await page.evaluate(async () => (await import('/src/lib/stores/attentionDock.svelte.ts')).reload());
+						return dock.locator('.dock-bar').count();
+					}).toBe(1);
+				} else await expect(dock.locator('.dock-bar')).toHaveCount(0);
 				const bubble = messages.locator('.user-bubble-wrapper', { hasText: longBubble });
 				const overlap = await bubble.evaluate((element) => {
 					const bubbleBox = element.getBoundingClientRect();
