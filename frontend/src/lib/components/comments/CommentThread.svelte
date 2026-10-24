@@ -119,7 +119,7 @@
 	// A reply becomes read only after a short uninterrupted visible dwell. Until then the server projection remains
 	// the sole source for its New marker, comment pill, and attention-dock item.
 	const VIEWED_DWELL_MS = 1_500;
-	let dwellTimer: ReturnType<typeof window.setTimeout> | null = null;
+	let dwellTimer: number | null = null;
 	let dwellingReplyId: string | null = null;
 	function cancelDwell(replyId?: string) {
 		if (replyId && dwellingReplyId !== replyId) return;
