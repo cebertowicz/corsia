@@ -802,7 +802,7 @@ for (const theme of ['light', 'dark'] as const) {
 			// The first two visible cards clear together after the dwell; the long third card stays below the sheet viewport.
 			await page.waitForTimeout(1_700);
 			await expect(page.getByRole('button', { name: '3 open threads, 1 unread', exact: true })).toBeVisible();
-			await expect(page.locator('.ct-new')).toHaveCount(1);
+			await expect(page.locator('[data-doc-comments-drawer] .ct-new')).toHaveCount(1);
 			// The remaining New reply must be wholly below the sheet viewport, not merely clipped at its edge.
 			const unreadCard = page.locator(`[data-comment-id="${scenario.roots[2]}"]`);
 			// The reader context keeps this agent reply beyond the viewport without changing the unread-thread count.
