@@ -28,19 +28,34 @@ export function parseStartupProgress(raw: unknown): StartupProgress | null {
 	};
 }
 
+/** The address the shell gives its update page once the service answers and no update holds it; checked again before use. */
+function parseReadyUrl(raw: unknown): string | null {
+	const url = raw && typeof raw === 'object' ? (raw as Record<string, unknown>).ready_url : null;
+	return typeof url === 'string' && url ? url : null;
+}
+
 /** The latest read: an absent file is valid; an unavailable reader is distinct and exposes only a sanitized diagnostic. */
-export const startupProgress = writable<{ file: StartupProgress | null; readAt: number; readError: 'unavailable' | null } | null>(null);
+export const startupProgress = writable<{ file: StartupProgress | null; readAt: number; readError: 'unavailable' | null; readyUrl?: string | null } | null>(null);
 let generation = 0;
 let readerFailureReported = false;
 
 /** One read through the shell's command; a browser or remote shell has no file to read. */
+/**
+ * The service address a reopened app's own launch start answered Ready with, as the shell draws it on its update page
+ * (`shellEntry.ts`). Followed like the reading's `readyUrl`; it is checked the same way and grants nothing.
+ */
+export const launchReadyUrl = writable<string | null>(null);
+
 export async function refreshStartupProgress(): Promise<void> {
 	if (shellInfo()?.mode !== 'local') return;
 	const mine = ++generation;
 	let file: StartupProgress | null = null;
+	let readyUrl: string | null = null;
 	let readError: 'unavailable' | null = null;
 	try {
-		file = parseStartupProgress(await readStartupProgress());
+		const reading = await readStartupProgress();
+		file = parseStartupProgress(reading);
+		readyUrl = parseReadyUrl(reading);
 		readerFailureReported = false;
 	} catch {
 		readError = 'unavailable';
@@ -49,7 +64,7 @@ export async function refreshStartupProgress(): Promise<void> {
 			readerFailureReported = true;
 		}
 	}
-	if (mine === generation) startupProgress.set({ file, readAt: Date.now(), readError });
+	if (mine === generation) startupProgress.set({ file, readAt: Date.now(), readError, readyUrl });
 }
 
 export function clearStartupProgress(): void {

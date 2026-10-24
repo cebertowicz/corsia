@@ -8,7 +8,9 @@
 	import CreateProjectModal from './CreateProjectModal.svelte';
 	import UpdateProgressToast from '$lib/update/UpdateProgressToast.svelte';
 	import UpdateScreen from './UpdateScreen.svelte';
-	import { startUpdateScreen, updateScreenVisible } from '$lib/update/screenStore';
+	import { continueHandedOverScreen, startUpdateScreen, updateScreenVisible } from '$lib/update/screenStore';
+	import { goto } from '$app/navigation';
+	import { routeToRestore, takeHandoffFromLocation } from '$lib/update/shellHandoff';
 	import type { ProjectPick } from '$lib/stores/projects';
 
 	let {
@@ -37,7 +39,17 @@
 		onUpdateFinished?: () => void | Promise<void>;
 	} = $props();
 
-	onMount(() => startUpdateScreen(onUpdateFinished));
+	onMount(() => {
+		const stop = startUpdateScreen(onUpdateFinished);
+		// Back from the shell's update page: the same screen continues until this page confirms the new version.
+		const handedBack = takeHandoffFromLocation();
+		if (handedBack) {
+			continueHandedOverScreen(handedBack, false);
+			const route = routeToRestore(handedBack.route, window.location.pathname, window.location.search);
+			if (route) void goto(route, { replaceState: true, noScroll: true, keepFocus: true });
+		}
+		return stop;
+	});
 </script>
 
 <div inert={$updateScreenVisible} aria-hidden={$updateScreenVisible}>

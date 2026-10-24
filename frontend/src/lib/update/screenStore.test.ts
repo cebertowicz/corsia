@@ -3,7 +3,7 @@ import { get } from 'svelte/store';
 import { token } from '$lib/stores/auth';
 import { clearStartupProgress, refreshStartupProgress, startupProgress } from './startupProgress';
 import { CREEP_STALE_MS } from './screenProgress';
-import { dismissUpdateScreen, EXIT_HOLD_MS, startUpdateScreen, stopUpdateScreen, tickUpdateScreen, updateScreenView } from './screenStore';
+import { continueHandedOverScreen, dismissUpdateScreen, EXIT_HOLD_MS, handOverScreen, showLaunchStartFailed, startUpdateScreen, stopUpdateScreen, tickUpdateScreen, updateScreenView } from './screenStore';
 import { resetUpdateStoreForTests, updateConfirmed, updateStatus, updateUnreachable, type UpdateStatus } from './store';
 import type { UpdateOperation } from './model';
 
@@ -62,6 +62,20 @@ afterEach(() => {
 });
 
 describe('update screen store', () => {
+	it('shares its existing clock with the shell reader without rereading on store notifications', () => {
+		const read = vi.fn();
+		const stop = startUpdateScreen(undefined, read);
+		updateStatus.set(status(inFlight()));
+		startupProgress.set({ file: null, readAt: 0, readError: null });
+		expect(read).not.toHaveBeenCalled();
+		vi.advanceTimersByTime(2_000);
+		expect(read).toHaveBeenCalledTimes(2);
+		startupProgress.set({ file: null, readAt: 2_000, readError: null });
+		expect(read).toHaveBeenCalledTimes(2);
+		stop();
+		vi.advanceTimersByTime(2_000);
+		expect(read).toHaveBeenCalledTimes(2);
+	});
 	it('keeps an advancing 245-second progress replay monotone, then stops creeping once its source freezes', async () => {
 		updateStatus.set(status(inFlight()));
 		tickUpdateScreen(0);
@@ -184,5 +198,125 @@ describe('update screen store', () => {
 		vi.advanceTimersByTime(EXIT_HOLD_MS);
 		tickUpdateScreen(4_003);
 		expect(get(updateScreenView)).toBeNull();
+	});
+
+	describe('a screen handed between pages', () => {
+		/** A new page: nothing carried over in memory, only what the handoff holds. */
+		function freshPage(serviceDown: boolean): void {
+			stopUpdateScreen();
+			resetUpdateStoreForTests();
+			clearStartupProgress();
+			startUpdateScreen();
+			updateUnreachable.set(serviceDown);
+		}
+
+		async function runningUpgrade(until: number, operationId = 'update-1'): Promise<number> {
+			updateStatus.set(status(inFlight(operationId)));
+			tickUpdateScreen(0);
+			updateUnreachable.set(true);
+			for (let at = 5_000, seq = 1; at <= until; at += 5_000, seq += 1) {
+				vi.setSystemTime(at);
+				progress = { schema: 1, pid: 91, seq, phase: 'migrating', done: 2, total: 4 };
+				await refreshStartupProgress();
+				tickUpdateScreen(at);
+			}
+			return get(updateScreenView)!.percent;
+		}
+
+		it('continues on the shell page at the same percentage, step, versions and stall clock', async () => {
+			const shown = await runningUpgrade(120_000);
+			const frozenFor = 50_000;
+			vi.setSystemTime(120_000 + frozenFor);
+			await refreshStartupProgress();
+			tickUpdateScreen(120_000 + frozenFor);
+			const before = get(updateScreenView)!;
+			expect(before).toMatchObject({ mode: 'progress', step: 'upgrading' });
+			const handoff = handOverScreen('light', '/');
+			expect(handoff).not.toBeNull();
+
+			// The shell page reads the progress record before it continues the screen, as shellEntry.ts does.
+			freshPage(true);
+			await refreshStartupProgress();
+			continueHandedOverScreen(handoff!, true);
+			expect(get(updateScreenView)).toMatchObject({ mode: 'progress', step: 'upgrading', percent: before.percent, fromVersion: '2026.10.12', toVersion: '2026.10.13', serviceDown: true });
+			expect(before.percent).toBeGreaterThanOrEqual(shown);
+
+			// The same frozen record on the shell page reaches "longer" when the original page would have, not 60 s later.
+			const longerAt = 120_000 + 60_000;
+			vi.setSystemTime(longerAt);
+			await refreshStartupProgress();
+			tickUpdateScreen(longerAt);
+			expect(get(updateScreenView)).toMatchObject({ mode: 'longer', percent: before.percent });
+		});
+
+		it('shows a reopened app’s launch start that answered anything but Ready as a start that failed, at the same screen', async () => {
+			await runningUpgrade(60_000);
+			const handoff = handOverScreen('light', '/');
+			freshPage(true);
+			await refreshStartupProgress();
+			continueHandedOverScreen(handoff!, true);
+			const before = get(updateScreenView)!;
+			expect(before.mode).toBe('progress');
+			showLaunchStartFailed();
+			expect(get(updateScreenView)).toMatchObject({ mode: 'start_failed', percent: before.percent, step: before.step, serviceDown: true, failure: null });
+			// A fresh page starts without it.
+			freshPage(true);
+			await refreshStartupProgress();
+			continueHandedOverScreen(handoff!, true);
+			expect(get(updateScreenView)!.mode).toBe('progress');
+		});
+
+		it('continues back on the service page only for the same operation, then confirms and leaves', async () => {
+			await runningUpgrade(60_000);
+			const percent = get(updateScreenView)!.percent;
+			const handoff = handOverScreen('dark', '/');
+
+			freshPage(false);
+			continueHandedOverScreen(handoff!, false);
+			expect(get(updateScreenView)).toBeNull();
+
+			updateStatus.set(status({ ...inFlight('update-1'), phase: 'verifying' }));
+			tickUpdateScreen(61_000);
+			expect(get(updateScreenView)).toMatchObject({ step: 'verifying', fromVersion: '2026.10.12' });
+			expect(get(updateScreenView)!.percent).toBeGreaterThanOrEqual(percent);
+
+			updateConfirmed.set({ operationId: 'update-1', version: '2026.10.13' });
+			tickUpdateScreen(62_000);
+			expect(get(updateScreenView)).toMatchObject({ mode: 'done', percent: 100 });
+		});
+
+		it('drops a handoff for another operation or an outcome already shown', async () => {
+			await runningUpgrade(10_000, 'update-3');
+			const handoff = handOverScreen('dark', '/')!;
+
+			freshPage(false);
+			continueHandedOverScreen(handoff, false);
+			updateStatus.set(status({ operation_id: 'update-9', kind: 'update', status: 'complete', target_version: '2026.10.13' }));
+			tickUpdateScreen(11_000);
+			expect(get(updateScreenView)).toBeNull();
+
+			freshPage(false);
+			continueHandedOverScreen(handoff, false);
+			updateStatus.set(status({ operation_id: 'update-3', kind: 'update', status: 'complete', target_version: '2026.10.13', outcome_seen_at: '2026-10-24T21:00:00Z' }));
+			tickUpdateScreen(12_000);
+			expect(get(updateScreenView)).toBeNull();
+		});
+	});
+});
+
+describe('the shell’s ready address', () => {
+	it('is kept beside the record, and alone does not count as a record', async () => {
+		progress = { schema: 1, pid: 91, seq: 3, phase: 'migrating', done: 1, total: 4, ready_url: 'http://127.0.0.1:47895' };
+		await refreshStartupProgress();
+		expect(get(startupProgress)).toMatchObject({ file: { seq: 3 }, readyUrl: 'http://127.0.0.1:47895' });
+		progress = { ready_url: 'http://127.0.0.1:47895' };
+		await refreshStartupProgress();
+		expect(get(startupProgress)).toMatchObject({ file: null, readyUrl: 'http://127.0.0.1:47895' });
+	});
+
+	it.each([null, { schema: 1, pid: 91, seq: 3, phase: 'migrating', done: 1, total: 4 }, { ready_url: 42 }, { ready_url: '' }])('is absent from %j', async (reading) => {
+		progress = reading;
+		await refreshStartupProgress();
+		expect(get(startupProgress)?.readyUrl ?? null).toBeNull();
 	});
 });

@@ -335,7 +335,8 @@ pub fn finish_leftovers(app_dir: &Path) {
 /// backend's model store, classifier assets and logs folders by a test.
 pub const KEPT: [&str; 3] = ["managed-omlx/models", "assets", "logs"];
 
-/// Whether a state folder holds nothing but the folders in [`KEPT`] and the folders on the way to them.
+/// Whether a state folder holds nothing but the folders in [`KEPT`] and the folders on the way to them. Its update
+/// lock is not setup state either: a start makes it in a state folder that already exists.
 fn holds_only_downloads(dir: &Path, within: &Path) -> bool {
     let Ok(entries) = fs::read_dir(dir) else { return false };
     entries.flatten().all(|entry| {
@@ -343,6 +344,8 @@ fn holds_only_downloads(dir: &Path, within: &Path) -> bool {
         let Ok(relative) = path.strip_prefix(within) else { return false };
         let relative = relative.to_string_lossy();
         KEPT.contains(&relative.as_ref())
+            || (relative == crate::app_paths::UPDATE_LOCK_FILE
+                && fs::symlink_metadata(&path).is_ok_and(|metadata| metadata.is_file()))
             || (KEPT.iter().any(|kept| kept.starts_with(&format!("{relative}/")))
                 && fs::symlink_metadata(&path).is_ok_and(|metadata| metadata.is_dir())
                 && holds_only_downloads(&path, within))
@@ -607,6 +610,12 @@ mod tests {
         assert!(app_dir.join(MARKER_FILE).is_file());
         fs::create_dir_all(app_dir.join("state")).unwrap();
         assert!(mark(&app_dir, &home.workspace()).unwrap(), "an empty state folder is still new");
+        // The lock a start takes in an existing state folder is not setup state.
+        drop(crate::app_paths::wait_for_update_lock(&app_dir.join("state")).unwrap().expect("the start's lock"));
+        assert!(app_dir.join("state").join(crate::app_paths::UPDATE_LOCK_FILE).is_file());
+        assert!(mark(&app_dir, &home.workspace()).unwrap(), "a state folder holding only its update lock is still new");
+        fs::write(app_dir.join("state").join("corsia.db"), b"db").unwrap();
+        assert!(!mark(&app_dir, &home.workspace()).unwrap(), "any other file still makes it an existing install");
     }
 
     #[test]

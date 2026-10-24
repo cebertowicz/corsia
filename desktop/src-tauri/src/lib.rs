@@ -50,6 +50,7 @@ mod trust;
 mod unfinished_setup;
 mod version_check;
 mod window_placement;
+mod update_recovery;
 mod update_stage;
 mod update_swap;
 
@@ -87,6 +88,9 @@ struct AppServiceState {
     adoption_cancel_requested: AtomicBool,
     /// What the adoption in progress is doing now, for the window to show.
     adoption_phase: Mutex<Option<adoption::Phase>>,
+    /// The update screen the replaced app handed over when it reopened this one (`--update-screen`), carried once to
+    /// the first Ready address this window follows. Presentation only: it starts, skips or grants nothing.
+    relaunched_screen: Mutex<Option<String>>,
 }
 
 #[derive(Default)]
@@ -94,6 +98,75 @@ struct RemoteRuntime {
     browser: Mutex<Option<discovery::Browser>>,
     shell: Mutex<shell_state::ShellState>,
     proxy: Mutex<Option<proxy::ProxyHandle>>,
+}
+
+/// The argument the replaced app reopens this one with, carrying its update screen's URL fragment.
+const UPDATE_SCREEN_ARGUMENT: &str = "--update-screen=";
+/// The update screen's fragment key and the longest fragment any page reads (`shellHandoff.ts`).
+const UPDATE_SCREEN_KEY: &str = "corsia-update=";
+const UPDATE_SCREEN_MAX_CHARS: usize = 2_048;
+
+/// An update screen fragment as `encodeURIComponent` writes it, or nothing: percent escapes and the characters it leaves
+/// unescaped. None of them can start a new URL part or an argument, and it only ever reaches a page as a JSON string or
+/// a URL fragment; the page that reads it checks every field again.
+fn update_screen_fragment(value: &str) -> Option<&str> {
+    let encoded = value.strip_prefix(UPDATE_SCREEN_KEY)?;
+    if value.len() > UPDATE_SCREEN_MAX_CHARS || encoded.is_empty() {
+        return None;
+    }
+    let bytes = encoded.as_bytes();
+    let mut at = 0;
+    while at < bytes.len() {
+        match bytes[at] {
+            b'%' if bytes.get(at + 1..at + 3).is_some_and(|hex| hex.iter().all(u8::is_ascii_hexdigit)) => at += 3,
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' | b'!' | b'*' | b'\'' | b'(' | b')' => at += 1,
+            _ => return None,
+        }
+    }
+    Some(value)
+}
+
+/// The update screen handed over on the command line: exactly one well-formed `--update-screen=` argument, or nothing.
+fn relaunched_update_screen(args: &[OsString]) -> Option<String> {
+    let mut screens = args.iter().filter_map(|arg| arg.to_str()?.strip_prefix(UPDATE_SCREEN_ARGUMENT));
+    let screen = screens.next()?;
+    if screens.next().is_some() {
+        return None;
+    }
+    update_screen_fragment(screen).map(str::to_owned)
+}
+
+/// `open`'s arguments to reopen the replacement: the update screen goes with it when this window shows one, on the
+/// shell's update page or on this computer's own service page (`local_origin`), which keeps its latest screen in its
+/// address. Presentation only: the reopened app starts as it always does.
+fn relaunch_arguments(bundle: &Path, window_url: Option<&str>, local_origin: &str) -> Vec<OsString> {
+    let mut arguments = vec![OsString::from("-n"), bundle.as_os_str().to_owned()];
+    let screen = window_url
+        .and_then(|url| tauri::Url::parse(url).ok())
+        .filter(|url| is_shell_update_page(url.as_str()) || url.origin().ascii_serialization() == local_origin)
+        .and_then(|url| url.fragment().and_then(update_screen_fragment).map(str::to_owned));
+    if let Some(screen) = screen {
+        arguments.push("--args".into());
+        arguments.push(format!("{UPDATE_SCREEN_ARGUMENT}{screen}").into());
+    }
+    arguments
+}
+
+/// The page a reopened app's window opens on: with a handed-over screen, the shell's update page drawing it while the
+/// launch start runs exactly as it always does; with none, nothing changes.
+fn relaunched_start_page(screen: Option<&str>) -> Option<tauri::Url> {
+    tauri::Url::parse(&format!("tauri://localhost/update.html#{}", screen?)).ok()
+}
+
+/// The first Ready address this window follows carries the screen the replaced app handed over, once.
+fn with_relaunched_screen<E>(slot: &Mutex<Option<String>>, answer: Result<ServiceStartup, E>) -> Result<ServiceStartup, E> {
+    match answer {
+        Ok(ServiceStartup::Ready { url }) => match slot.lock().unwrap_or_else(PoisonError::into_inner).take() {
+            Some(screen) => Ok(ServiceStartup::Ready { url: format!("{}/#{screen}", url.trim_end_matches('/')) }),
+            None => Ok(ServiceStartup::Ready { url }),
+        },
+        other => other,
+    }
 }
 
 /// The app binary's command-line modes; anything else opens the window.
@@ -436,13 +509,13 @@ fn service_url(port: u16) -> String {
 }
 
 /// The commands the pages the local service serves call: first-run folder choice and the setup report, Connect to
-/// another computer, recovery after a delayed update restart, and the window-drag handler injected on every page. Never
-/// `disconnect_remote` (the remote page's own command) or the quit and login-item commands (the startup shell's).
+/// another computer, and the window-drag handler injected on every page. Never `disconnect_remote` (the remote page's
+/// own command), the quit and login-item commands, or `start_local_service`, which runs migrations, recovery and
+/// registration: only the startup shell starts the service.
 const LOCAL_SERVICE_PERMISSIONS: &[&str] = &[
     "allow-choose-work-folder",
     "allow-configure-work-folder",
     "allow-read-startup-progress",
-    "allow-start-local-service",
     "allow-remote-discovered",
     "allow-remote-pair",
     "allow-save-setup-report",
@@ -636,7 +709,9 @@ fn relaunch(app: &tauri::AppHandle, bundle: &Path) -> bool {
     let service = app.state::<AppServiceState>();
     // The service now belongs to the new app: this exit must never unregister it.
     let cleanup_was_pending = !service.exit_cleanup_attempted.swap(true, Ordering::AcqRel);
-    match Command::new("/usr/bin/open").arg("-n").arg(bundle).status() {
+    let window_url = app.get_webview_window("main").and_then(|window| window.url().ok()).map(|url| url.to_string());
+    let local_origin = service_url(lifecycle::service_port(app, &service));
+    match Command::new("/usr/bin/open").args(relaunch_arguments(bundle, window_url.as_deref(), &local_origin)).status() {
         Ok(status) if status.success() => {
             service.quitting.store(true, Ordering::Relaxed);
             app.exit(0);
@@ -652,6 +727,8 @@ fn relaunch(app: &tauri::AppHandle, bundle: &Path) -> bool {
     }
 }
 
+/// Watches the installed app under this window. Each reading is also the only source of the update screen's automatic
+/// recovery start (`ShellState::observe_install`), so nothing a page sends can arm one.
 fn watch_for_swapped_app(app: tauri::AppHandle) {
     let Ok(bundle) = update_stage::running_bundle() else {
         return;
@@ -663,6 +740,13 @@ fn watch_for_swapped_app(app: tauri::AppHandle) {
         thread::sleep(RELAUNCH_POLL_INTERVAL);
         let installed = bundle_generation(&bundle);
         let service = app.state::<AppServiceState>();
+        let local_session = service.app_dir.lock().unwrap_or_else(PoisonError::into_inner).is_some();
+        app.state::<RemoteRuntime>().shell.lock().unwrap_or_else(PoisonError::into_inner).observe_install(
+            &bundle,
+            &launched,
+            installed.as_deref(),
+            local_session,
+        );
         let port = lifecycle::service_port(&app, &service);
         if should_relaunch(&launched, installed.as_deref(), || probe_health(port)) {
             let _ = relaunch(&app, &bundle);
@@ -683,6 +767,10 @@ fn start_service<R: tauri::Runtime>(
         return Ok(ServiceStartup::DiskImage);
     }
     let app_dir = default_app_dir(app)?;
+    // An update holds its lock from stopping the service until the new app is proven or rolled back, so a start waits
+    // for it instead of starting either app in the middle. A state root that can't be resolved refuses the start here,
+    // before anything is recovered or written.
+    let _update = app_paths::wait_for_update_lock(&app_paths::state_dir_for(&app_dir)?)?;
     // The undo finishes before anything else, then launch goes on as if
     // nothing had been tried: the restored install is offered for adoption again.
     let resources = bundled_resource_dir(app).unwrap_or_default();
@@ -1391,6 +1479,16 @@ fn is_shell_origin(actual: &str) -> bool {
     tauri::Url::parse(actual).is_ok_and(|url| url.scheme() == "tauri" && url.host_str() == Some("localhost"))
 }
 
+/// Why `start_local_service` refuses this caller, if it does: only the startup shell's page starts the service, and a
+/// caller whose page can't be read is not that page.
+fn local_start_refusal(calling_origin: Option<&str>) -> Option<String> {
+    if calling_origin.is_some_and(is_shell_origin) {
+        None
+    } else {
+        Some("Only CORSIA's startup window can start CORSIA.".into())
+    }
+}
+
 /// What a disconnect removes from the webview so the host's session token does not outlive the pairing: the remote
 /// page's own token when the call comes from that page, or all of the webview's stored data when it comes from the
 /// startup shell, which cannot reach the proxy origin's storage any other way. The second also signs the person out of
@@ -1757,15 +1855,63 @@ async fn check_service_started(app: tauri::AppHandle) -> Result<ServiceStartup, 
     local_start_answered(&app, answer)
 }
 
+/// What `start_local_service` answers: the full start's outcome, or a recovery start's.
+#[derive(Debug, PartialEq, Eq, Serialize)]
+#[serde(untagged)]
+enum LocalStartAnswer {
+    Startup(ServiceStartup),
+    Recovery(update_recovery::RecoveryAnswer),
+}
+
+/// A recovery start from the startup shell's update screen. It never touches the launch answer the shell keeps, so a
+/// refusal or failure stays on the update screen.
+async fn recover_local_service(app: tauri::AppHandle, intent: update_recovery::RecoveryIntent) -> Result<update_recovery::RecoveryAnswer, String> {
+    let recovering = app.clone();
+    let answer = tauri::async_runtime::spawn_blocking(move || {
+        let service = recovering.state::<AppServiceState>();
+        let Some(app_dir) = service.app_dir.lock().unwrap_or_else(PoisonError::into_inner).clone() else {
+            return Ok(update_recovery::RecoveryAnswer::Unavailable);
+        };
+        let bundle = update_stage::running_bundle()?;
+        let port = lifecycle::service_port(&recovering, &service);
+        let answer = update_recovery::recover(
+            intent,
+            &recovering.state::<RemoteRuntime>().shell,
+            &bundle,
+            &app_paths::state_dir_for(&app_dir)?,
+            true,
+            &service_url(port),
+            &update_recovery::SystemRecovery { port, app_dir: &app_dir },
+        );
+        if matches!(answer, update_recovery::RecoveryAnswer::Ready { .. }) {
+            grant_local_service_origin(&recovering, &service, port)?;
+        }
+        Ok::<_, String>(answer)
+    })
+    .await
+    .map_err(|error| format!("bringing CORSIA back did not finish: {error}"))?;
+    answer
+}
+
 #[tauri::command]
 async fn start_local_service(
     app: tauri::AppHandle,
     service: tauri::State<'_, AppServiceState>,
     webview: tauri::Webview,
-) -> Result<ServiceStartup, String> {
+    recovery: Option<update_recovery::RecoveryIntent>,
+) -> Result<LocalStartAnswer, String> {
     // Capture the caller before the await: a local-service page cannot render typed non-ready answers, while the
     // startup shell awaits and renders its own result. A URL failure is deliberately not treated as local.
     let calling_origin = webview.url().ok().map(|url| url.to_string());
+    // Refused before anything runs or the shell hears of a start: the capability already refuses other origins, and
+    // this holds if a grant ever widens.
+    if let Some(refusal) = local_start_refusal(calling_origin.as_deref()) {
+        return Err(refusal);
+    }
+    // The update screen's recovery start never runs the full start below.
+    if let Some(intent) = recovery {
+        return recover_local_service(app, intent).await.map(LocalStartAnswer::Recovery);
+    }
     let service_port = lifecycle::service_port(&app, &service);
     // Finishing an interrupted adoption's undo can wait on the source service,
     // so it never runs on the thread that handles the window's events.
@@ -1777,29 +1923,90 @@ async fn start_local_service(
     })
     .await
     .map_err(|error| format!("starting CORSIA did not finish: {error}"))?;
+    // Only the startup shell runs this start (refused above otherwise), and it follows the Ready address itself.
+    let answer = with_relaunched_screen(&service.relaunched_screen, answer);
     let answer = local_start_answered(&app, answer);
     return_nonready_local_start_to_shell(&app, calling_origin.as_deref(), service_port, &answer);
-    answer
+    answer.map(LocalStartAnswer::Startup)
+}
+
+/// One progress reading: the service's record, and for the startup shell's update page the local service's address
+/// once it answers. Without an address it serializes exactly as the bare record did.
+#[derive(Serialize, Debug, PartialEq)]
+struct ProgressReading {
+    #[serde(flatten)]
+    progress: Option<StartupProgress>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    ready_url: Option<String>,
+}
+
+/// Whether the calling page is the startup shell's update page (`update.html`), the only page told the service is back.
+fn is_shell_update_page(actual: &str) -> bool {
+    is_shell_origin(actual) && tauri::Url::parse(actual).is_ok_and(|url| url.path() == "/update.html")
+}
+
+/// Set while one readiness check runs, so readings that overlap never stack their health waits.
+static READINESS_CHECK: AtomicBool = AtomicBool::new(false);
+
+/// The local service's address for the update page, only when this process already served that page (`served`), the
+/// window is on this computer's own service, the service answers healthy, it reports no update or restart in flight,
+/// and nothing holds the update lock: a rollback records its failed row before it stops the service and puts the old
+/// app back under that lock, so a terminal row alone is not an idle updater. The lock is tried last, without waiting,
+/// and let go at once. Each check is one bounded request; none starts, registers or grants anything.
+fn update_page_ready_url(
+    checking: &AtomicBool,
+    served: bool,
+    local: bool,
+    port: u16,
+    healthy: impl FnOnce(u16) -> bool,
+    operation_active: impl FnOnce(u16) -> Result<bool, String>,
+    update_lock_free: impl FnOnce() -> bool,
+) -> Option<String> {
+    if !served || !local || checking.swap(true, Ordering::AcqRel) {
+        return None;
+    }
+    let ready = healthy(port) && operation_active(port) == Ok(false) && update_lock_free();
+    checking.store(false, Ordering::Release);
+    ready.then(|| service_url(port))
+}
+
+/// Whether no update, rollback or start holds the update lock now: taken without waiting and dropped at once.
+fn update_lock_is_free(state_dir: &Path) -> bool {
+    matches!(app_paths::try_lock_update_in_existing(state_dir), Ok(Some(_)))
 }
 
 /// Reads the current local service's own progress record while HTTP is unavailable.
 /// Missing, malformed, stale-PID, and unsupported-schema records all return `None`; the raw
 /// diagnostic and database-schema version fields never cross this command boundary.
 #[tauri::command]
-fn read_startup_progress(
+async fn read_startup_progress(
     app: tauri::AppHandle,
-    service: tauri::State<'_, AppServiceState>,
-) -> Result<Option<StartupProgress>, String> {
-    let app_dir = service
-        .app_dir
-        .lock()
-        .map_err(|_| "could not read startup progress")?
-        .clone()
-        .unwrap_or(default_app_dir(&app).map_err(|_| "could not read startup progress")?);
-    let state = app_paths::state_dir_for(&app_dir).map_err(|_| "could not read startup progress")?;
-    let target = format!("gui/{}/{}", unsafe { libc::geteuid() }, service_label());
-    let pid = release_proof::launchd_pid(&target);
-    Ok(current_startup_progress(&state.join("runtime").join("startup-progress.json"), pid))
+    _service: tauri::State<'_, AppServiceState>,
+    webview: tauri::Webview,
+) -> Result<Option<ProgressReading>, String> {
+    let on_update_page = webview.url().is_ok_and(|url| is_shell_update_page(url.as_str()));
+    let reading = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let service = reading.state::<AppServiceState>();
+        let session_dir = service.app_dir.lock().map_err(|_| "could not read startup progress")?.clone();
+        let local_session = session_dir.is_some();
+        let app_dir = session_dir.unwrap_or(default_app_dir(&reading).map_err(|_| "could not read startup progress")?);
+        let state = app_paths::state_dir_for(&app_dir).map_err(|_| "could not read startup progress")?;
+        let target = format!("gui/{}/{}", unsafe { libc::geteuid() }, service_label());
+        let pid = release_proof::launchd_pid(&target);
+        let progress = current_startup_progress(&state.join("runtime").join("startup-progress.json"), pid);
+        let ready_url = if on_update_page && local_session {
+            let port = lifecycle::service_port(&reading, &service);
+            let served = service.granted_local_ports.lock().unwrap_or_else(PoisonError::into_inner).contains(&port);
+            let local = reading.state::<RemoteRuntime>().shell.lock().unwrap_or_else(PoisonError::into_inner).allows_manual_recovery();
+            update_page_ready_url(&READINESS_CHECK, served, local, port, probe_health, operation_is_active, || update_lock_is_free(&state))
+        } else {
+            None
+        };
+        Ok((progress.is_some() || ready_url.is_some()).then_some(ProgressReading { progress, ready_url }))
+    })
+    .await
+    .map_err(|_| "could not read startup progress")?
 }
 
 #[tauri::command]
@@ -2007,7 +2214,8 @@ fn is_shell_log_target(target: &str) -> bool {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Every command-line mode is dispatched here, before any window exists.
-    let mode = match command_line_mode(&env::args_os().skip(1).collect::<Vec<_>>()) {
+    let arguments = env::args_os().skip(1).collect::<Vec<_>>();
+    let mode = match command_line_mode(&arguments) {
         Ok(mode) => mode,
         Err(error) => {
             eprintln!("usage error: {error}");
@@ -2030,6 +2238,8 @@ pub fn run() {
     if let Some(CommandLineMode::UpdateStage(operation_id)) = mode {
         std::process::exit(update_stage::run(context, operation_id));
     }
+    // Only the window reads it; every command-line mode has already exited.
+    let relaunched_screen = relaunched_update_screen(&arguments);
 
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -2119,7 +2329,8 @@ pub fn run() {
             let (log_plugin, level, logger) = shell_logger(app.handle(), log_file)?;
             app.handle().plugin(log_plugin)?;
             tauri_plugin_log::attach_logger(level, logger)?;
-            app.manage(AppServiceState::default());
+            let start_page = relaunched_start_page(relaunched_screen.as_deref());
+            app.manage(AppServiceState { relaunched_screen: Mutex::new(relaunched_screen), ..AppServiceState::default() });
             app.manage(RemoteRuntime::default());
             watch_for_swapped_app(app.handle().clone());
             match app.path().app_config_dir() {
@@ -2150,13 +2361,22 @@ pub fn run() {
                     return Ok(());
                 }
             }
+            // A reopened app's handed-over update screen goes on drawing on the
+            // shell's update page while the same launch start runs below; that
+            // page follows its Ready answer and keeps any other on the screen.
+            if let (Some(page), Some(window)) = (start_page, app.get_webview_window("main")) {
+                if let Err(error) = window.navigate(page) {
+                    log::error!("could not show the update screen the replaced app handed over: {error}");
+                }
+            }
             // The default window loads the static startup shell while Tauri
             // owns the first service launch. Retrying after a visible failure
             // stays available through start_local_service.
             let app_handle = app.handle().clone();
             thread::spawn(move || {
                 let service = app_handle.state::<AppServiceState>();
-                show_launch_outcome(&app_handle, &start_service(&app_handle, &service));
+                let outcome = with_relaunched_screen(&service.relaunched_screen, start_service(&app_handle, &service));
+                show_launch_outcome(&app_handle, &outcome);
             });
             Ok(())
         })
@@ -2253,6 +2473,104 @@ mod tests {
         assert!(response.get("error").is_none());
         assert!(response.get("from_version").is_none());
         assert!(response.get("to_version").is_none());
+    }
+
+    #[test]
+    fn a_progress_reading_without_an_address_is_the_bare_record() {
+        let progress = StartupProgress { schema: 1, pid: 42, seq: 7, phase: "migrating".into(), done: Some(3), total: None };
+        let bare = serde_json::to_value(&progress).unwrap();
+        let reading = ProgressReading { progress: Some(progress), ready_url: None };
+        assert_eq!(serde_json::to_value(&reading).unwrap(), bare);
+        let ready = ProgressReading { progress: None, ready_url: Some(service_url(47_895)) };
+        assert_eq!(serde_json::to_value(&ready).unwrap(), serde_json::json!({ "ready_url": "http://127.0.0.1:47895" }));
+    }
+
+    #[test]
+    fn only_the_shell_update_page_is_told_the_service_is_back() {
+        assert!(is_shell_update_page("tauri://localhost/update.html"));
+        assert!(is_shell_update_page("tauri://localhost/update.html#corsia-update=x"));
+        for other in [
+            "tauri://localhost/index.html", "tauri://localhost", "http://127.0.0.1:47895/update.html",
+            "tauri://evil.example/update.html", "tauri://localhost/update.html/x", "",
+        ] {
+            assert!(!is_shell_update_page(other), "{other}");
+        }
+    }
+
+    #[test]
+    fn the_update_page_hears_ready_only_from_a_served_local_healthy_and_idle_service() {
+        let guard = AtomicBool::new(false);
+        let probes = std::cell::Cell::new(0);
+        let healthy = |answer: bool| {
+            let probes = &probes;
+            move |_: u16| {
+                probes.set(probes.get() + 1);
+                answer
+            }
+        };
+        let ready = |served: bool, local: bool, healthy: &dyn Fn(u16) -> bool, active: &dyn Fn(u16) -> Result<bool, String>| {
+            update_page_ready_url(&guard, served, local, 47_895, healthy, active, || true)
+        };
+        assert_eq!(ready(true, true, &healthy(true), &|_| Ok(false)), Some(service_url(47_895)));
+        // The update lock is asked last, and only of a healthy, idle service: it is never held through a health wait.
+        assert_eq!(update_page_ready_url(&guard, true, true, 47_895, |_| false, |_| Ok(false), || panic!("asked the lock of a down service")), None);
+        assert_eq!(update_page_ready_url(&guard, true, true, 47_895, |_| true, |_| Ok(true), || panic!("asked the lock of a busy service")), None);
+        assert_eq!(update_page_ready_url(&guard, true, true, 47_895, |_| true, |_| Ok(false), || false), None);
+        // A busy update or restart, or an answer that can't be read, is never ready.
+        assert_eq!(ready(true, true, &healthy(true), &|_| Ok(true)), None);
+        assert_eq!(ready(true, true, &healthy(true), &|_| Err("unreadable".into())), None);
+        assert_eq!(ready(true, true, &healthy(false), &|_| panic!("asked a down service")), None);
+        probes.set(0);
+        // A port this process never served, or a remote or pairing window, isn't even probed.
+        assert_eq!(ready(false, true, &healthy(true), &|_| Ok(false)), None);
+        assert_eq!(ready(true, false, &healthy(true), &|_| Ok(false)), None);
+        assert_eq!(probes.get(), 0);
+        assert!(!guard.load(Ordering::Acquire), "a check left the guard set");
+    }
+
+    #[test]
+    fn a_held_update_lock_keeps_the_update_page_waiting_even_after_a_terminal_row() {
+        if !app_paths::tests::alone("tests::a_held_update_lock_keeps_the_update_page_waiting_even_after_a_terminal_row") {
+            return;
+        }
+        let temp = tempfile::tempdir().unwrap();
+        let state = temp.path().join("state");
+        std::fs::create_dir_all(&state).unwrap();
+        let guard = AtomicBool::new(false);
+        // The service answers healthy and its row is terminal (no update in flight), as a rollback records its failure
+        // before it stops the service and puts the old app back, still holding the update lock.
+        let ready = || update_page_ready_url(&guard, true, true, 47_895, |_| true, |_| Ok(false), || update_lock_is_free(&state));
+        let rollback = app_paths::try_lock_update_in_existing(&state).unwrap().expect("the rollback's lock");
+        assert_eq!(ready(), None, "a held update lock was called ready");
+        assert_eq!(ready(), None);
+        drop(rollback);
+        assert_eq!(ready(), Some(service_url(47_895)));
+        // The check held the lock only for its own instant.
+        assert!(app_paths::try_lock_update_in_existing(&state).unwrap().is_some());
+        // A state folder that can't be read is never free.
+        assert!(!update_lock_is_free(&temp.path().join("missing")));
+    }
+
+    #[test]
+    fn overlapping_readiness_checks_never_stack_their_health_waits() {
+        let guard = AtomicBool::new(false);
+        let inner = std::cell::Cell::new(None);
+        let outer = update_page_ready_url(
+            &guard,
+            true,
+            true,
+            47_895,
+            |port| {
+                inner.set(Some(update_page_ready_url(&guard, true, true, port, |_| panic!("a second health wait ran"), |_| Ok(false), || true)));
+                true
+            },
+            |_| Ok(false),
+            || true,
+        );
+        assert_eq!(inner.take(), Some(None), "the overlapping reading waited");
+        assert_eq!(outer, Some(service_url(47_895)));
+        // The guard is released after each check.
+        assert_eq!(update_page_ready_url(&guard, true, true, 1, |_| true, |_| Ok(false), || true), Some(service_url(1)));
     }
 
     #[test]
@@ -2535,6 +2853,9 @@ mod tests {
     /// The commands only the remote page calls (Settings > Disconnect): its own origin gets it, the local service's does not.
     const REMOTE_PAGE_ONLY: &[&str] = &["disconnect_remote"];
 
+    /// The commands the frontend calls that only the startup shell's page may: the local service's page is refused.
+    const SHELL_PAGE_ONLY: &[&str] = &["start_local_service"];
+
     fn service_origin_app(port: u16) -> (tauri::App<tauri::test::MockRuntime>, tauri::WebviewWindow<tauri::test::MockRuntime>) {
         let app = acl_test_app();
         let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default()).build().unwrap();
@@ -2548,14 +2869,60 @@ mod tests {
         assert_eq!(
             called.iter().map(String::as_str).collect::<Vec<_>>(),
             ["choose_work_folder", "configure_work_folder", "disconnect_remote", "read_startup_progress", "remote_discovered", "remote_pair", "save_setup_report", "start_local_service"],
-            "the frontend's commands changed: grant each page its commands, or add it to the remote-page-only list"
+            "the frontend's commands changed: grant each page its commands, or add it to the remote-page-only or shell-page-only list"
         );
         let (_app, webview) = service_origin_app(47895);
         let origin = service_url(47895);
         for command in called.iter().map(String::as_str).chain(["start_window_drag"]) {
             let allowed = invoke_from(&webview, command, &origin).is_ok();
-            assert_eq!(allowed, !REMOTE_PAGE_ONLY.contains(&command), "{command} from {origin}");
+            let refused = REMOTE_PAGE_ONLY.contains(&command) || SHELL_PAGE_ONLY.contains(&command);
+            assert_eq!(allowed, !refused, "{command} from {origin}");
         }
+    }
+
+    #[test]
+    fn a_start_takes_the_update_lock_before_its_first_effect_and_refuses_an_unresolved_state_root() {
+        let start = include_str!("lib.rs").split("\nfn start_service<").nth(1).unwrap();
+        let lock = start.find("app_paths::wait_for_update_lock(&app_paths::state_dir_for(&app_dir)?)?").expect("the start's lock");
+        for effect in ["adoption::recover_on_launch(", "start_fresh::recover_on_launch(", "start_over_if_unfinished(", "unfinished_setup::mark(", "first_run::apply("] {
+            assert!(lock < start.find(effect).unwrap(), "{effect} runs before the update lock");
+        }
+    }
+
+    #[test]
+    fn only_the_startup_shell_can_start_the_local_service() {
+        let (_app, webview) = service_origin_app(47895);
+        for origin in [service_url(47895), "http://localhost:47895".into(), "http://127.0.0.1:47911".into()] {
+            let refusal = invoke_from(&webview, "start_local_service", &origin).unwrap_err();
+            assert!(refusal.to_string().contains("not allowed"), "start_local_service was not ACL-refused from {origin}: {refusal}");
+        }
+        assert!(invoke_from(&webview, "start_local_service", "tauri://localhost").is_ok());
+
+        // The command refuses any other caller itself, before its first effect, should a grant ever widen.
+        let start = include_str!("lib.rs").split("async fn start_local_service(").nth(1).unwrap();
+        let refusal = start.find("local_start_refusal(").unwrap();
+        assert!(refusal < start.find("local_start_began(").unwrap() && refusal < start.find("start_service(").unwrap());
+        assert_eq!(local_start_refusal(Some("tauri://localhost")), None);
+        assert_eq!(local_start_refusal(Some("tauri://localhost/index.html")), None);
+        for caller in [Some("http://127.0.0.1:47895/"), Some("http://localhost:47895/"), Some("https://tauri.localhost/"), Some("tauri://evil.example"), None] {
+            assert!(local_start_refusal(caller).is_some(), "{caller:?}");
+        }
+    }
+
+    #[test]
+    fn a_recovery_start_is_routed_after_the_caller_check_and_before_any_full_start_step() {
+        let start = include_str!("lib.rs").split("async fn start_local_service(").nth(1).unwrap();
+        let recovery = start.find("recover_local_service(").expect("the recovery route");
+        assert!(start.find("local_start_refusal(").unwrap() < recovery);
+        for full in ["local_start_began(", "start_service(", "local_start_answered(", "return_nonready_local_start_to_shell("] {
+            assert!(recovery < start.find(full).unwrap(), "{full} runs before the recovery route");
+        }
+        let route = include_str!("lib.rs").split("async fn recover_local_service(").nth(1).unwrap();
+        let route = &route[..route.find("\n}\n").unwrap()];
+        for forbidden in ["start_service(", "local_start_began(", "local_start_answered(", "show_launch_outcome(", "report_shell_state(", "register"] {
+            assert!(!route.contains(forbidden), "the recovery route reaches {forbidden}");
+        }
+        assert!(route.contains("spawn_blocking"), "the recovery start runs on the window's event thread");
     }
 
     #[test]
@@ -3287,6 +3654,120 @@ mod tests {
         ] {
             assert!(command_line_mode(&args(refused)).is_err(), "{refused:?}");
         }
+    }
+
+    const SCREEN: &str = "corsia-update=%7B%22v%22%3A1%2C%22route%22%3A%22%2F%3Fproject%3Dabc%22%7D";
+
+    #[test]
+    fn a_handed_over_update_screen_never_changes_a_command_line_mode() {
+        let args = |values: &[&str]| values.iter().map(OsString::from).collect::<Vec<_>>();
+        let screen = format!("--update-screen={SCREEN}");
+        assert_eq!(command_line_mode(&args(&[&screen])), Ok(None), "the window opens as it always does");
+        assert_eq!(command_line_mode(&args(&["--service", "status", &screen])), Ok(Some(CommandLineMode::Service)));
+        assert!(command_line_mode(&args(&["--update-swap", "op-1", &screen])).is_err(), "a mode still takes nothing else");
+    }
+
+    #[test]
+    fn only_one_well_formed_bounded_update_screen_is_read_from_the_command_line() {
+        let args = |values: &[&str]| values.iter().map(OsString::from).collect::<Vec<_>>();
+        assert_eq!(relaunched_update_screen(&args(&[&format!("--update-screen={SCREEN}")])), Some(SCREEN.to_owned()));
+        let oversized = format!("--update-screen=corsia-update={}", "a".repeat(UPDATE_SCREEN_MAX_CHARS));
+        for refused in [
+            vec![],
+            vec![format!("--update-screen={SCREEN}"), format!("--update-screen={SCREEN}")],
+            vec![oversized],
+            vec!["--update-screen=".into()],
+            vec!["--update-screen=corsia-update=".into()],
+            vec!["--update-screen=other=%7B%7D".into()],
+            vec!["--update-screen=corsia-update=%7B\"%7D".into()],
+            vec!["--update-screen=corsia-update=%7B<%7D".into()],
+            vec!["--update-screen=corsia-update=%7B\\%7D".into()],
+            vec!["--update-screen=corsia-update=%7B{%7D".into()],
+            vec!["--update-screen=corsia-update=%7B\u{7}%7D".into()],
+            vec!["--update-screen=corsia-update=%7B%2".into()],
+            vec!["--update-screen=corsia-update=%zz".into()],
+            vec!["--update-screen=corsia-update=a b".into()],
+            vec!["--update-screen=corsia-update=a#b".into()],
+            vec!["--update-screen corsia-update=abc".into()],
+        ] {
+            let args = refused.iter().map(OsString::from).collect::<Vec<_>>();
+            assert_eq!(relaunched_update_screen(&args), None, "{refused:?}");
+        }
+    }
+
+    /// A screen as `encodeURIComponent` writes it for a route holding every character it leaves unescaped.
+    const SCREEN_UNESCAPED: &str = "corsia-update=%7B%22route%22%3A%22%2F%3Fq%3D(it's)!*~-_.%22%7D";
+
+    #[test]
+    fn every_character_the_page_leaves_unescaped_is_carried() {
+        let args = vec![OsString::from(format!("--update-screen={SCREEN_UNESCAPED}"))];
+        assert_eq!(relaunched_update_screen(&args), Some(SCREEN_UNESCAPED.to_owned()));
+        let carried = relaunch_arguments(Path::new("/Applications/CORSIA.app"), Some(&format!("tauri://localhost/update.html#{SCREEN_UNESCAPED}")), &service_url(47_895));
+        assert_eq!(carried.last(), Some(&OsString::from(format!("--update-screen={SCREEN_UNESCAPED}"))));
+    }
+
+    #[test]
+    fn the_replacement_reopens_with_the_update_screen_of_the_shell_page_or_this_computers_service_page() {
+        let bundle = Path::new("/Applications/CORSIA.app");
+        let local = service_url(47_895);
+        let plain = vec![OsString::from("-n"), OsString::from("/Applications/CORSIA.app")];
+        let screen = [OsString::from("--args"), OsString::from(format!("--update-screen={SCREEN}"))];
+        for window in [format!("tauri://localhost/update.html#{SCREEN}"), format!("http://127.0.0.1:47895/?project=abc#{SCREEN}"), format!("http://127.0.0.1:47895/#{SCREEN}")] {
+            let carried = relaunch_arguments(bundle, Some(&window), &local);
+            assert_eq!(carried[..2], plain[..], "{window}");
+            assert_eq!(carried[2..], screen, "{window}");
+        }
+        for window in [
+            None,
+            Some("tauri://localhost/index.html".to_owned()),
+            Some(format!("tauri://localhost/index.html#{SCREEN}")),
+            Some(format!("http://127.0.0.1:47896/#{SCREEN}")),
+            Some(format!("http://localhost:47895/#{SCREEN}")),
+            Some(format!("https://127.0.0.1:47895/#{SCREEN}")),
+            Some(format!("http://studio.example:47895/#{SCREEN}")),
+            Some("http://127.0.0.1:47895/".to_owned()),
+            Some("tauri://localhost/update.html".to_owned()),
+            Some("tauri://localhost/update.html#corsia-update=%7B%zz".to_owned()),
+            Some("http://127.0.0.1:47895/#corsia-update=%7B%zz".to_owned()),
+            Some(format!("tauri://localhost/update.html#corsia-update={}", "a".repeat(UPDATE_SCREEN_MAX_CHARS))),
+        ] {
+            assert_eq!(relaunch_arguments(bundle, window.as_deref(), &local), plain, "{window:?}");
+        }
+    }
+
+    #[test]
+    fn a_handed_over_screen_opens_the_window_on_the_shell_update_page_and_nothing_else_does() {
+        let page = relaunched_start_page(Some(SCREEN)).expect("the update page");
+        assert_eq!(page.as_str(), format!("tauri://localhost/update.html#{SCREEN}"));
+        assert!(is_shell_update_page(page.as_str()));
+        assert_eq!(relaunched_start_page(None), None, "an ordinary launch opens the startup page as always");
+    }
+
+    #[test]
+    fn the_first_ready_address_carries_the_handed_over_screen_once() {
+        let slot = Mutex::new(Some(SCREEN.to_owned()));
+        let answer = |startup: ServiceStartup| with_relaunched_screen::<String>(&slot, Ok(startup));
+        // A start that is not Ready leaves it for the start that is.
+        assert_eq!(answer(ServiceStartup::RequiresApproval), Ok(ServiceStartup::RequiresApproval));
+        assert_eq!(with_relaunched_screen(&slot, Err::<ServiceStartup, _>("did not start".to_owned())), Err("did not start".into()));
+        assert_eq!(
+            answer(ServiceStartup::Ready { url: service_url(47_895) }),
+            Ok(ServiceStartup::Ready { url: format!("http://127.0.0.1:47895/#{SCREEN}") })
+        );
+        assert_eq!(answer(ServiceStartup::Ready { url: service_url(47_895) }), Ok(ServiceStartup::Ready { url: service_url(47_895) }));
+        let empty = Mutex::new(None);
+        assert_eq!(
+            with_relaunched_screen::<String>(&empty, Ok(ServiceStartup::Ready { url: service_url(1) })),
+            Ok(ServiceStartup::Ready { url: service_url(1) })
+        );
+    }
+
+    #[test]
+    fn a_saved_remote_still_owns_launch_before_any_handed_over_screen() {
+        let setup = include_str!("lib.rs").split("// A saved remote owns launch").nth(1).unwrap();
+        let remote_return = setup.find("return Ok(());").unwrap();
+        let carried = setup.find("with_relaunched_screen(").unwrap();
+        assert!(remote_return < carried, "the handed-over screen is applied before a saved remote takes launch");
     }
 
     #[test]

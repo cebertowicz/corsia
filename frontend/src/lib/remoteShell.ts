@@ -45,12 +45,44 @@ function invoke(command: string, args?: Record<string, unknown>): Promise<unknow
 	return args === undefined ? call(command) : call(command, args);
 }
 
-/** Start the local managed service after a restart has exceeded its usual time. */
-export async function startLocalService(): Promise<void> {
-	const result = await invoke('start_local_service');
-	if (!result || typeof result !== 'object') throw new Error('CORSIA did not start');
-	const startup = result as { state?: unknown; url?: unknown };
-	if (startup.state !== 'ready' || typeof startup.url !== 'string' || !startup.url.trim()) throw new Error('CORSIA did not start');
+let startupShellPage = false;
+
+/** Set only by the shell's bundled update page (update/shellEntry.ts); the app the service serves never sets it. */
+export function markStartupShellPage(): void {
+	startupShellPage = true;
+}
+
+/**
+ * Whether this is the desktop shell's own update page, the only page the shell lets ask for a recovery start. It picks
+ * which path the screen takes and grants nothing: the shell checks the caller itself.
+ */
+export function onStartupShellPage(): boolean {
+	return startupShellPage;
+}
+
+/** Why the update screen asks: its own wait ran long, or the person pressed Start CORSIA. */
+export type RecoveryIntent = 'automatic' | 'manual';
+
+/**
+ * A recovery start's answer. `ready` carries the service's URL; `deferred` means an update holds the lock and nothing
+ * was done; `unavailable` means no start applies; `not_started` means the one start ran and the service did not come up.
+ */
+export type RecoveryAnswer = { recovery: 'ready'; url: string } | { recovery: 'deferred' | 'unavailable' | 'not_started' };
+
+/** Ask the shell to bring this computer's service back during an update. Only the shell's own page may ask. */
+export async function recoverLocalService(intent: RecoveryIntent): Promise<RecoveryAnswer> {
+	let result: unknown;
+	try {
+		result = await invoke('start_local_service', { recovery: intent });
+	} catch {
+		return { recovery: 'not_started' };
+	}
+	const answer = result && typeof result === 'object' ? result as { recovery?: unknown; url?: unknown } : {};
+	if (answer.recovery === 'ready') {
+		return typeof answer.url === 'string' && answer.url.trim() ? { recovery: 'ready', url: answer.url } : { recovery: 'not_started' };
+	}
+	if (answer.recovery === 'deferred' || answer.recovery === 'unavailable' || answer.recovery === 'not_started') return { recovery: answer.recovery };
+	return { recovery: 'not_started' };
 }
 
 /** The desktop shell's PID-validated, redacted startup-progress record; absent for browsers and remote shells. */

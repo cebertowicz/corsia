@@ -5,6 +5,7 @@ import { failureCopy, failureFromOperation, failureFromVerdict, type FailureCopy
 import { isFailedOperation, isInFlight, isResolvedFailure, type UpdateFailureCode, type UpdateOperation } from './model';
 import { CREEP_STALE_MS, drainCount, NO_PROCESS_WINDOW_MS, ProgressModel, remoteEstimate, STEP_LABEL, TAKING_LONGER_MS, type ProgressInput, type StepId } from './screenProgress';
 import { markOutcomeSeen } from './outcome';
+import type { ScreenHandoff } from './shellHandoff';
 import { startupProgress, type StartupProgress } from './startupProgress';
 import { updateConfirmed, updateFailureVerdict, updateStatus, updateUnreachable } from './store';
 
@@ -51,7 +52,10 @@ interface Latch {
 }
 
 let latch: Latch | null = null;
+/** A screen another page handed over, waiting for this page's own reading of the same operation. */
+let handoff: { screen: ScreenHandoff; serviceDown: boolean } | null = null;
 let dismissedFailureOperationId: string | null = null;
+let launchStartFailed = false;
 /** A confirmed operation stays gone while the last status poll still calls it in flight. */
 let completedOperationId: string | null = null;
 let timer: ReturnType<typeof setInterval> | null = null;
@@ -130,6 +134,7 @@ function copyFor(failure: NonNullable<Latch['failure']>, operation: UpdateOperat
 export function tickUpdateScreen(now = Date.now()): void {
 	const status = get(updateStatus);
 	const operation = status?.operation ?? null;
+	if (!latch && handoff) adoptHandoff(operation);
 	if (!latch) {
 		if (operation?.operation_id === completedOperationId) return;
 		if (operation && completedOperationId !== null) completedOperationId = null;
@@ -176,7 +181,7 @@ export function tickUpdateScreen(now = Date.now()): void {
 		updateScreenView.set({ mode: 'done', step: 'verifying', label: STEP_LABEL.verifying, percent: 100, estimated: false, fromVersion: l.fromVersion, toVersion: l.toVersion, failure: null, serviceDown: false, startupProgressUnavailable: false });
 		return;
 	}
-	if (unreachable && file?.phase === 'failed') {
+	if (unreachable && (file?.phase === 'failed' || launchStartFailed)) {
 		updateScreenView.set({ mode: 'start_failed', step: l.model.step, label: STEP_LABEL[l.model.step], percent: l.model.percent, estimated: false, fromVersion: l.fromVersion, toVersion: l.toVersion, failure: null, serviceDown: true, startupProgressUnavailable: false });
 		return;
 	}
@@ -195,6 +200,49 @@ export function dismissUpdateScreen(): void {
 	resetUpdateScreen(true);
 }
 
+function adoptHandoff(operation: UpdateOperation | null): void {
+	const { screen, serviceDown } = handoff!;
+	// The shell's page reads no update status: the service is down, which is why it holds the screen. A local-service
+	// page continues the screen only once its own status names the same operation.
+	if (!serviceDown && !operation) return;
+	handoff = null;
+	// An outcome some device already showed is history; the screen it was waiting for is gone.
+	if (!serviceDown && (operation!.operation_id !== screen.operationId || (!isInFlight(operation) && operation!.outcome_seen_at))) return;
+	latch = {
+		operationId: screen.operationId, model: ProgressModel.restore(screen.model),
+		fromVersion: screen.fromVersion, toVersion: screen.toVersion,
+		downAt: screen.downAt, seqChangedAt: screen.seqChangedAt, lastSeq: screen.lastSeq, lastPid: screen.lastPid,
+		estimateFrom: null, failure: screen.failure && { code: screen.failure.code, detail: null, verdict: screen.failure.verdict },
+		doneAt: null, usualSeconds: screen.usualSeconds,
+	};
+}
+
+/**
+ * A reopened app's own launch start answered without a ready service (`shellEntry.ts`): while the service is down the
+ * screen shows it as a start that failed, at the same percentage, never the startup page's own choices.
+ */
+export function showLaunchStartFailed(): void {
+	launchStartFailed = true;
+	tickUpdateScreen();
+}
+
+/** Continue a screen another page handed over, from the next recompute on. */
+export function continueHandedOverScreen(screen: ScreenHandoff, serviceDown: boolean): void {
+	handoff = { screen, serviceDown };
+	tickUpdateScreen();
+}
+
+/** The screen as it stands, for the page it moves to; null when no update screen is showing. */
+export function handOverScreen(theme: ScreenHandoff['theme'], route: string): ScreenHandoff | null {
+	if (!latch) return null;
+	const failure = latch.failure && { code: latch.failure.code, verdict: latch.failure.verdict };
+	return {
+		v: 1, operationId: latch.operationId, model: latch.model.snapshot(), fromVersion: latch.fromVersion, toVersion: latch.toVersion,
+		usualSeconds: latch.usualSeconds, downAt: latch.downAt, seqChangedAt: latch.seqChangedAt, lastSeq: latch.lastSeq, lastPid: latch.lastPid,
+		failure, theme, route,
+	};
+}
+
 /** Leave the screen. Returning to chat hands the composer its focus back. */
 export function resetUpdateScreen(focusComposer = false): void {
 	latch = null;
@@ -208,13 +256,13 @@ export function resetUpdateScreen(focusComposer = false): void {
 	});
 }
 
-/** Follow update state for as long as the app shell is mounted. */
-export function startUpdateScreen(onReturnToChat?: () => void | Promise<void>): () => void {
+/** Follow update state while mounted; the static shell shares this clock for its native progress reading. */
+export function startUpdateScreen(onReturnToChat?: () => void | Promise<void>, onClockTick?: () => void): () => void {
 	stopUpdateScreen();
 	returnToChat = onReturnToChat;
 	const recompute = () => tickUpdateScreen();
 	unsubscribers = [updateStatus, updateUnreachable, startupProgress, updateConfirmed, updateFailureVerdict].map((source) => source.subscribe(recompute));
-	timer = setInterval(recompute, 1_000);
+	timer = setInterval(() => { onClockTick?.(); recompute(); }, 1_000);
 	return stopUpdateScreen;
 }
 
@@ -225,5 +273,7 @@ export function stopUpdateScreen(): void {
 	unsubscribers = [];
 	returnToChat = undefined;
 	dismissedFailureOperationId = null;
+	handoff = null;
+	launchStartFailed = false;
 	resetUpdateScreen(false);
 }

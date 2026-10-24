@@ -1,12 +1,14 @@
 <script lang="ts">
-	import { onDestroy, tick } from 'svelte';
+	import { onDestroy, tick, untrack } from 'svelte';
 	import { fade, slide } from 'svelte/transition';
 	import { portal } from '$lib/actions/portal';
 	import { ms } from '$lib/popoverMotion';
 	import { prefersReducedMotion } from '$lib/stores/viewport';
-	import { shellInfo, startLocalService } from '$lib/remoteShell';
+	import { onStartupShellPage, recoverLocalService, shellInfo, type RecoveryIntent } from '$lib/remoteShell';
 	import { restartToFinishUpdate } from '$lib/update/restartToFinish';
-	import { dismissUpdateScreen, updateScreenView } from '$lib/update/screenStore';
+	import { dismissUpdateScreen, handOverScreen, updateScreenView } from '$lib/update/screenStore';
+	import { currentTheme, encodeHandoff, keepScreenInAddress, keptReturnRoute, moveWindow, returnUrl, SHELL_UPDATE_PAGE } from '$lib/update/shellHandoff';
+	import { launchReadyUrl, startupProgress } from '$lib/update/startupProgress';
 	import { retryUpdate, updateStarting } from '$lib/update/store';
 	import Button from './ui/Button.svelte';
 	import LivingMark from './LivingMark.svelte';
@@ -15,17 +17,26 @@
 	const shell = $derived(shellInfo());
 	const localDesktop = $derived(shell?.mode === 'local');
 	const hostName = $derived(shell?.mode === 'remote' && shell.name.trim() ? shell.name : null);
+	// Only the shell's own page may ask for a start; a local-service page hands the screen to it instead.
+	const onShell = onStartupShellPage();
 
 	let starting = $state(false);
 	let startFailed = $state(false);
 	let manualStartFailed = $state(false);
 	let autoStartAttempted = $state(false);
+	/** An update or start holds the lock: nothing was done, the screen keeps waiting and asks again on its next second. */
+	let deferred = $state(false);
+	/** The start that was deferred, asked again as itself (a press stays a press) until an answer that isn't deferred. */
+	let pending: RecoveryIntent | null = null;
+	let askedAt = 0;
+	let handedOver = false;
+	let returned = false;
 	let startActionEl: HTMLButtonElement | undefined = $state();
 	let screenEl: HTMLElement | undefined = $state();
 
 	const longer = $derived(view?.mode === 'longer');
 	const recovery = $derived(longer || view?.startupProgressUnavailable === true || view?.mode === 'start_failed' || (view?.mode === 'failed' && view.serviceDown) || (!localDesktop && view?.serviceDown === true));
-	const autoStartWaiting = $derived(longer && localDesktop && autoStartAttempted && !starting && !startFailed);
+	const autoStartWaiting = $derived(localDesktop && !startFailed && (deferred || (longer && autoStartAttempted && !starting)));
 
 	$effect(() => {
 		if (view === null) {
@@ -33,13 +44,38 @@
 			startFailed = false;
 			manualStartFailed = false;
 			autoStartAttempted = false;
+			deferred = false;
+			pending = null;
 			return;
 		}
-		if ((view.mode === 'start_failed' || (view.mode === 'failed' && view.serviceDown)) && !starting) startFailed = true;
+		if ((view.mode === 'start_failed' || (view.mode === 'failed' && view.serviceDown)) && !starting && !deferred) startFailed = true;
+		if (!onShell && localDesktop && (longer || startFailed)) {
+			handOver();
+			return;
+		}
 		if (longer && localDesktop && !autoStartAttempted) {
 			autoStartAttempted = true;
-			void startCorsia(true);
+			void startCorsia('automatic');
 		}
+	});
+	// A deferred start did nothing, so it is asked again as the screen recomputes, at most once a second, as the start it
+	// was: a press stays the press it answers, and the shell decides whether it is still allowed. It lives only in this
+	// page, so a reload or Back never replays it.
+	$effect(() => {
+		if (view) untrack(() => { if (deferred && pending && !starting && Date.now() - askedAt >= 1_000) void startCorsia(pending); });
+	});
+	// The shell's progress read says the service answers again with no update holding it, or a reopened app's own launch
+	// start answered Ready: back to its page, as on Ready.
+	$effect(() => {
+		const readyUrl = $startupProgress?.readyUrl ?? $launchReadyUrl;
+		if (onShell && view && readyUrl) untrack(() => { if (!starting) returnTo(readyUrl); });
+	});
+	// On this computer's own service page the latest screen also stays in the address, for an app the update reopens to
+	// carry; it is taken out once the screen ends. Presentation only.
+	$effect(() => {
+		if (onShell || !localDesktop) return;
+		const showing = view !== null;
+		untrack(() => keepScreenInAddress(showing ? handOverScreen(currentTheme(), `${window.location.pathname}${window.location.search}`) : null));
 	});
 	$effect(() => {
 		if (recovery && localDesktop && startFailed) void tick().then(() => startActionEl?.focus());
@@ -48,19 +84,40 @@
 		if (screenEl) screenEl.focus({ preventScroll: true });
 	});
 
-	async function startCorsia(automatic = false): Promise<void> {
+	/** Move the screen, as it stands, to the shell's update page. */
+	function handOver(again = false): void {
+		if (handedOver && !again) return;
+		const screen = handOverScreen(currentTheme(), `${window.location.pathname}${window.location.search}`);
+		if (!screen) return;
+		handedOver = true;
+		moveWindow(`${SHELL_UPDATE_PAGE}#${encodeHandoff(screen)}`);
+	}
+
+	/** Back to the service's page, which confirms the new version itself; nothing here calls it done. */
+	function returnTo(url: string): boolean {
+		if (returned) return true;
+		const screen = handOverScreen(currentTheme(), keptReturnRoute());
+		const target = screen && returnUrl(url, screen);
+		if (!target) return false;
+		returned = true;
+		moveWindow(target);
+		return true;
+	}
+
+	async function startCorsia(intent: RecoveryIntent): Promise<void> {
+		askedAt = Date.now();
 		starting = true;
 		startFailed = false;
 		manualStartFailed = false;
-		try {
-			await startLocalService();
-		} catch {
-			startFailed = true;
-			manualStartFailed = !automatic;
-			if (!automatic) autoStartAttempted = true;
-		} finally {
-			starting = false;
-		}
+		const answer = await recoverLocalService(intent);
+		starting = false;
+		deferred = answer.recovery === 'deferred';
+		pending = deferred ? intent : null;
+		if (deferred) return;
+		if (answer.recovery === 'ready' && returnTo(answer.url)) return;
+		startFailed = true;
+		manualStartFailed = intent === 'manual';
+		if (intent === 'manual') autoStartAttempted = true;
 	}
 
 	function retry(): void {
@@ -132,7 +189,7 @@
 						{/if}
 						{#if startFailed && !view.startupProgressUnavailable}
 							<div class="actions" in:actionsReveal={{ duration: ms('--dur-tight') }}>
-								<Button variant="primary" onclick={() => void startCorsia()} loading={starting} bind:el={startActionEl}>Start CORSIA</Button>
+								<Button variant="primary" onclick={() => (onShell ? void startCorsia('manual') : handOver(true))} loading={starting} bind:el={startActionEl}>Start CORSIA</Button>
 							</div>
 						{/if}
 					{:else if hostName}

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
-	SETTINGS_PATH, codeRefusalLine, disconnectRemote, parseAddress, refusesOnCodeScreen, remoteDiscovered, remotePair, shellInfo, startLocalService,
+	SETTINGS_PATH, codeRefusalLine, disconnectRemote, parseAddress, onStartupShellPage, recoverLocalService, refusesOnCodeScreen, remoteDiscovered, remotePair, shellInfo,
 	unreachableLine, type PairReason,
 } from './remoteShell';
 import pairRequests from '../../../testdata/remote-pair-requests.json';
@@ -39,15 +39,29 @@ describe('shellInfo', () => {
 });
 
 describe('the shell commands', () => {
-	it('accepts only the existing ready startup response', async () => {
-		const invoke = vi.fn(async () => ({ state: 'ready', url: 'http://127.0.0.1:1956' }));
+	it('asks for a recovery start only, never the full start, and passes the typed answers through', async () => {
+		const invoke = vi.fn(async () => ({ recovery: 'ready', url: 'http://127.0.0.1:1956' }));
 		vi.stubGlobal('__TAURI_INTERNALS__', { invoke });
-		await expect(startLocalService()).resolves.toBeUndefined();
-		expect(invoke).toHaveBeenCalledWith('start_local_service');
+		expect(await recoverLocalService('automatic')).toEqual({ recovery: 'ready', url: 'http://127.0.0.1:1956' });
+		expect(await recoverLocalService('manual')).toEqual({ recovery: 'ready', url: 'http://127.0.0.1:1956' });
+		expect(invoke.mock.calls).toEqual([['start_local_service', { recovery: 'automatic' }], ['start_local_service', { recovery: 'manual' }]]);
+		for (const recovery of ['deferred', 'unavailable', 'not_started'] as const) {
+			vi.stubGlobal('__TAURI_INTERNALS__', { invoke: vi.fn(async () => ({ recovery })) });
+			expect(await recoverLocalService('automatic')).toEqual({ recovery });
+		}
 	});
-	it.each([{ state: 'requires_approval' }, { state: 'adoption_failed', failure: {} }, { state: 'ready', url: '' }, null, 'started'])('rejects a non-ready or malformed startup response: %j', async (response) => {
+	it.each([{ state: 'ready', url: 'http://127.0.0.1:1956' }, { state: 'requires_approval' }, { recovery: 'ready', url: '' }, { recovery: 'started' }, null, 'started'])('treats a full-start or malformed answer as not started: %j', async (response) => {
 		vi.stubGlobal('__TAURI_INTERNALS__', { invoke: vi.fn(async () => response) });
-		await expect(startLocalService()).rejects.toThrow('CORSIA did not start');
+		expect(await recoverLocalService('automatic')).toEqual({ recovery: 'not_started' });
+	});
+	it('treats a refused or missing shell as not started', async () => {
+		vi.stubGlobal('__TAURI_INTERNALS__', { invoke: vi.fn(async () => { throw new Error('Only CORSIA’s startup window can start CORSIA.'); }) });
+		expect(await recoverLocalService('manual')).toEqual({ recovery: 'not_started' });
+		vi.unstubAllGlobals();
+		expect(await recoverLocalService('manual')).toEqual({ recovery: 'not_started' });
+	});
+	it('is never the shell update page in the app the service serves', () => {
+		expect(onStartupShellPage()).toBe(false);
 	});
 	it('calls remote_discovered, remote_pair and disconnect_remote with the contract arguments', async () => {
 		const invoke = vi.fn(async (command: string) => command === 'remote_discovered' ? { names: ['Studio'] } : command === 'remote_pair' ? { ok: true, name: 'Studio' } : undefined);

@@ -6,7 +6,8 @@
 // always holds a runnable app. The swapped-out app becomes
 // `CORSIA.app.previous`, which the post-swap handoff deletes once the new
 // version is proven. The service is stopped by the caller first; nothing here
-// touches operational state.
+// touches operational state. The caller's shell holds the update lock across
+// the whole update and passes its descriptor down (`app_paths::lock_update_for_swap`).
 
 use std::{
     fs,
@@ -34,7 +35,7 @@ pub fn run(_operation_id: &str) -> i32 {
             return SWAP_FAILED;
         }
     };
-    let _lock = match app_paths::try_lock_update(&state_dir) {
+    let _lock = match app_paths::lock_update_for_swap(&state_dir) {
         Ok(Some(lock)) => lock,
         Ok(None) => {
             eprintln!("update swap refused: another update is in progress");
@@ -80,7 +81,7 @@ pub fn rollback(_operation_id: &str) -> i32 {
             return SWAP_FAILED;
         }
     };
-    let _lock = match app_paths::try_lock_update(&state_dir) {
+    let _lock = match app_paths::lock_update_for_swap(&state_dir) {
         Ok(Some(lock)) => lock,
         Ok(None) => {
             eprintln!("update rollback refused: another update is in progress");

@@ -115,6 +115,31 @@ export class ProgressModel {
 	get percent(): number {
 		return Math.min(99.9, Math.floor(this.shown * 10 + 1e-8) / 10);
 	}
+
+	/** Everything the model carries, so the same screen can continue on another page without resetting. */
+	snapshot(): ProgressSnapshot {
+		return { value: this.value, step: this.step, mode: this.mode, lifted: this.lifted, visitedMigration: this.visitedMigration, lastAt: this.lastAt };
+	}
+
+	static restore(snapshot: ProgressSnapshot): ProgressModel {
+		const model = new ProgressModel();
+		model.value = snapshot.value;
+		model.step = snapshot.step;
+		model.mode = snapshot.mode;
+		model.lifted = snapshot.lifted;
+		model.visitedMigration = snapshot.visitedMigration;
+		model.lastAt = snapshot.lastAt;
+		return model;
+	}
+}
+
+export interface ProgressSnapshot {
+	value: number;
+	step: StepId;
+	mode: BandMode;
+	lifted: number;
+	visitedMigration: boolean;
+	lastAt: number | null;
 }
 
 /** Drain progress as a count: agents already safe out of those the drain waited on. */
