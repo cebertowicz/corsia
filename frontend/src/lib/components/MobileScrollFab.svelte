@@ -11,18 +11,21 @@
 		threadId,
 		userIsNearBottom,
 		onScrollToBottom,
+		docked = false,
 	}: {
 		threadId: string | null;
 		userIsNearBottom: boolean;
 		onScrollToBottom: () => void;
+		docked?: boolean;
 	} = $props();
 
-	const visible = $derived($isMobile && !userIsNearBottom && !!threadId);
+	const visible = $derived(($isMobile || docked) && !userIsNearBottom && !!threadId);
 </script>
 
 {#if visible}
 	<button
 		class="rail-control mobile-scroll-fab press-tint"
+		class:docked
 		type="button"
 		onclick={onScrollToBottom}
 		aria-label="Scroll to bottom"
@@ -44,6 +47,10 @@
 		box-shadow: var(--glass-elevation-1), var(--glass-rim);
 		color: var(--text-secondary);
 		cursor: pointer;
+	}
+	.mobile-scroll-fab.docked { display: flex; margin: var(--space-2) auto 0; }
+	@media (min-width: 769px) {
+		.mobile-scroll-fab.docked { width: 36px; height: 36px; }
 	}
 	.mobile-scroll-fab svg {
 		width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2;

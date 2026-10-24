@@ -25,7 +25,6 @@
 	import HostAccessLeaseControl from './HostAccessLeaseControl.svelte';
 	import MobileScrollFab from './MobileScrollFab.svelte';
 	import AttentionDock from './attention/AttentionDock.svelte';
-	import CommentReplyChipRow from './attention/CommentReplyChipRow.svelte';
 	import ChatAttentionStack from './attention/ChatAttentionStack.svelte';
 	import HeldDocFeedbackControl from './attention/HeldDocFeedbackControl.svelte';
 	import ChatThreadBindings from './ChatThreadBindings.svelte';
@@ -62,6 +61,7 @@
 	} = $props();
 	let messagesEl = $state<HTMLDivElement | undefined>(undefined);
 	let userIsNearBottom = $state(true);
+	let attentionDockShowing = $state(false);
 	let ignoreScrollEvents = $state(false);
 	let messageListRef: MessageList;
 	let inputBarRef: InputBar;
@@ -317,6 +317,7 @@
 			bind:messagesEl
 			bind:userIsNearBottom
 			bind:ignoreScrollEvents
+			hideScrollFab={attentionDockShowing}
 			onOpenLightbox={(url) => onOpenLightbox(url)}
 			{hasMoreMessages}
 			{loadingOlderMessages}
@@ -349,24 +350,21 @@
 					bind:awaitingUser={leaseAwaitingUser}
 				/>
 			{/if}
-			<CommentReplyChipRow
-				onOpenDocument={(destination, threadId) => {
-					if (destination.pane === 'document-replies') return openDocumentOnReplies(destination, $activeThreadId, threadId);
-					if (destination.pane === 'documents') onOpenDocuments(destination.id);
-				}}
-			/>
 			<AttentionDock
+				bind:showing={attentionDockShowing}
 				suppressed={attentionSuppressed}
 				onOpenDestination={(destination, threadId) => {
 					if (destination.pane === 'document-replies') return openDocumentOnReplies(destination, $activeThreadId, threadId);
 					if (destination.pane === 'documents') onOpenDocuments(destination.id);
 				}}
-			/>
-			<MobileScrollFab
-				threadId={$activeThreadId}
-				{userIsNearBottom}
-				onScrollToBottom={scrollToBottom}
-			/>
+			>
+				{#snippet scrollControl()}
+					<MobileScrollFab threadId={$activeThreadId} {userIsNearBottom} docked onScrollToBottom={() => messageListRef?.scrollToBottomFromUser()} />
+				{/snippet}
+			</AttentionDock>
+			{#if !attentionDockShowing}
+				<MobileScrollFab threadId={$activeThreadId} {userIsNearBottom} onScrollToBottom={scrollToBottom} />
+			{/if}
 			{#if $isMobile && $activeThreadId}
 				<PlanDrawerControl
 					threadId={$activeThreadId}

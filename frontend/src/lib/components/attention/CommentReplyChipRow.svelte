@@ -6,6 +6,7 @@
 	import AttachmentRow from '$lib/components/AttachmentRow.svelte';
 	import { activeThreadId } from '$lib/stores/threads';
 	import { reload, visibleQueue } from '$lib/stores/attentionDock.svelte';
+	import { replyItemsForThread } from './replyItems';
 
 	let {
 		onOpenDocument = () => {},
@@ -15,11 +16,7 @@
 
 	// Reply notices belong to the agent who answered. They are not Needs-you work, so
 	// the dock keeps its single-job queue and this stable chip carries only unread replies.
-	const replies = $derived(
-		($visibleQueue.reply_items ?? $visibleQueue.items).filter((item): item is AttentionQueueItem & { detail: CommentReplyDetail } =>
-			item.renderer === 'comment-reply' && (item.detail as CommentReplyDetail).source.thread_id === $activeThreadId,
-		),
-	);
+	const replies = $derived(replyItemsForThread($visibleQueue, $activeThreadId));
 	const unreadCount = $derived(replies.reduce((total, item) => total + (item.detail.unread_count ?? 1), 0));
 	const documents = $derived.by(() => {
 		const unique = new Map<string, AttentionQueueItem & { detail: CommentReplyDetail }>();

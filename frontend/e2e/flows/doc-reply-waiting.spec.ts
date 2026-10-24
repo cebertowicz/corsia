@@ -203,12 +203,12 @@ async function hideDevStamp(page: Page): Promise<void> {
 	await expect(page.locator('.version-overlay')).toHaveCount(0);
 }
 
-async function shot(page: Page, name: string): Promise<void> {
+async function shot(page: Page, name: string, chatRows = 4): Promise<void> {
 	if (!screenshotDir) return;
 	await settled(page);
 	await hideDevStamp(page);
 	// The four seeded chat rows appear in every capture state. Assert their visible timestamps before persisting a frame.
-	await expect(page.locator('.msg-time')).toHaveText(['3:45 PM', '3:45 PM', '3:45 PM', '3:45 PM']);
+	await expect(page.locator('.msg-time')).toHaveText(Array(chatRows).fill('3:45 PM'));
 	// No test identity or fixture wording may be on screen in a frame the reviewer reads as the real product.
 	expect(await page.evaluate(() => document.body.innerText), `Frame ${name} shows test wording`).not.toMatch(/\be2e\b|fixture|Another agent|e2e-/i);
 	const output = path.join(screenshotDir, `${name}.png`);
@@ -643,7 +643,7 @@ for (const theme of ['light', 'dark'] as const) {
 			await expect(dock).toContainText('Choose the launch approach');
 			await expect(dock).not.toContainText(' of ');
 			await expect(composer).toBeVisible();
-			await expect.poll(() => stackProblems(page, { chip, dock, composer })).toEqual([]);
+			await expect.poll(() => stackProblems(page, { chip, dock: dock.locator('.dock-bar'), composer })).toEqual([]);
 			await shot(page, `03a-reply-chip-needs-you-stack-${theme}-${width}`);
 			if (width === 393) {
 				// The transcript outgrows the phone screen, so the frame above is scrolled to the newest message and the oldest rows
@@ -1170,6 +1170,62 @@ for (const theme of ['light', 'dark'] as const) {
 			await expect(chatComposer(page)).toBeVisible();
 			await shot(page, `11b-reply-chip-all-read-${theme}-${width}`);
 		});
+	}
+}
+
+for (const theme of ['light', 'dark'] as const) {
+	for (const width of [1440, 393]) {
+		for (const withDecision of [false, true]) {
+			test(`${TAG} ${theme} ${width}px: backdrop covers transcript with ${withDecision ? 'a decision' : 'only a reply'}`, async ({ page, request }, testInfo) => {
+				test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires isolated synthetic state');
+				skipMismatchedProject(width, testInfo.project.name);
+				await page.setViewportSize({ width, height: width === 393 ? 852 : 900 });
+				await page.emulateMedia({ colorScheme: theme });
+				const threadId = await createSession(request, THREAD_TITLE);
+				await onlyThread(request, threadId);
+				const scenario = await seedScenario(page, request, threadId, `backdrop-${theme}-${width}-${withDecision}`, []);
+				const longBubble = Array(80).fill('Please check the launch owners, the release schedule, and the support coverage before the announcement.').join(' ');
+				await injectMessage(request, threadId, { role: 'user', content: longBubble }, TEST_TOKEN);
+				await injectMessage(request, threadId, { role: 'assistant', content: 'I will review those details.' }, TEST_TOKEN);
+				sqlite([['UPDATE messages SET created_at=? WHERE thread_id=?', [FROZEN_UTC, threadId]]]);
+				await loginByUrl(page);
+				await openThread(page, THREAD_TITLE);
+				const messages = page.locator('.messages');
+				await expect(messages.getByText(longBubble)).toBeAttached();
+				await messages.locator('.user-bubble-wrapper', { hasText: longBubble }).getByRole('button', { name: 'Show more' }).click();
+				await expect.poll(() => messages.evaluate((el) => el.scrollHeight - el.clientHeight)).toBeGreaterThan(200);
+				await messages.evaluate((el) => { el.scrollTop = el.scrollHeight / 2; el.dispatchEvent(new WheelEvent('wheel', { deltaY: -1, bubbles: true })); el.dispatchEvent(new Event('scroll')); });
+				await expect(page.locator('.attention-dock')).toHaveCount(0);
+				const oldArrow = width === 393 ? page.locator('.mobile-scroll-fab') : page.locator('.scroll-fab');
+				await expect(oldArrow).toBeVisible();
+				await expect(oldArrow.locator('xpath=ancestor::*[contains(@class,"attention-dock")]')).toHaveCount(0);
+				addAgentReply(scenario.artifactId, scenario.roots[0], threadId, PASSAGES[0].reply);
+				if (withDecision) seedDecision(threadId);
+				await page.evaluate(async () => (await import('/src/lib/stores/attentionDock.svelte.ts')).reload());
+				const dock = page.locator('.attention-dock');
+				await expect(dock).toBeVisible();
+				await expect(dock.locator('.reply-chip-notice')).toBeVisible();
+				await expect(dock.locator('.mobile-scroll-fab')).toBeVisible();
+				await expect(page.locator('.scroll-fab')).toHaveCount(0);
+				await expect(dock.locator('.dock-bar')).toHaveCount(withDecision ? 1 : 0);
+				const bubble = messages.locator('.user-bubble-wrapper', { hasText: longBubble });
+				const overlap = await bubble.evaluate((element) => {
+					const bubbleBox = element.getBoundingClientRect();
+					const chipBox = document.querySelector('.reply-chip-notice')!.getBoundingClientRect();
+					return bubbleBox.left < chipBox.right && bubbleBox.right > chipBox.left && bubbleBox.top < chipBox.bottom && bubbleBox.bottom > chipBox.top;
+				});
+				expect(overlap, 'The long user bubble is directly behind the reply chip').toBe(true);
+				await shot(page, `12-backdrop-${withDecision ? 'needs-you' : 'reply-only'}-${theme}-${width}`, 5);
+				if (withDecision) {
+					const queue = await request.get('/api/attention/queue', { params: { token: TEST_TOKEN } });
+					const decision = (await queue.json()).current.detail;
+					const answer = await request.post(`/api/plans/decisions/${decision.id}/answer`, {
+						params: { token: TEST_SESSION_TOKEN }, data: { option_id: 'A', expected_revision: decision.revision, mutation_id: `answer-${threadId}` },
+					});
+					expect(answer.ok(), await answer.text()).toBeTruthy();
+				}
+			});
+		}
 	}
 }
 

@@ -13,7 +13,9 @@
 	 * `suppressed` defers to a higher-precedence control in the same physical
 	 * slot (a host-access lease awaiting the user). Deferred, never hidden.
 	 */
-	import { onMount, tick } from 'svelte';
+	import { onMount, tick, type Snippet } from 'svelte';
+	import CommentReplyChipRow from './CommentReplyChipRow.svelte';
+	import { replyItemsForThread } from './replyItems';
 	import { get } from 'svelte/store';
 	import { on } from '$lib/ws';
 	import { connectionState } from '$lib/stores/connection';
@@ -47,11 +49,15 @@
 		writesDisabled = false,
 		suppressed = false,
 		onOpenDestination = () => {},
+		showing = $bindable(false),
+		scrollControl,
 	}: {
 		writesDisabled?: boolean;
 		/** A higher-precedence control holds this slot right now. */
 		suppressed?: boolean;
 		onOpenDestination?: (destination: AttentionDestination, threadId?: string | null) => void;
+		showing?: boolean;
+		scrollControl?: Snippet;
 	} = $props();
 
 	let openTrigger = $state<HTMLButtonElement | null>(null);
@@ -67,6 +73,8 @@
 
 	const dockQueue = $derived(getDockQueue($visibleQueue));
 	const current = $derived(shownItem(dockQueue, $activeId));
+	const hasReplies = $derived(replyItemsForThread($visibleQueue, $activeThreadId).length > 0);
+	$effect(() => { showing = !!current || hasReplies; });
 	const position = $derived(
 		current ? dockQueue.items.findIndex((i) => i.external_id === current.external_id) + 1 : 0,
 	);
@@ -243,15 +251,15 @@
 	<!-- The question left the queue before this answer reached it. -->
 	<p class="dock-receipt" role="status">{$answerNotice}</p>
 {/if}
-{#if current}
+{#if current || hasReplies}
 	<div
 		class="attention-dock"
 		class:expanded={showChip}
-		data-attention-dock
-		bind:this={region}
-		role="region"
-		aria-label={regionLabel}
+		data-attention-dock={current ? '' : undefined}
 	>
+		<CommentReplyChipRow onOpenDocument={onOpenDestination} />
+		{#if current}
+		<section bind:this={region} role="region" aria-label={regionLabel}>
 		<p class="sr-only" aria-live="polite">{regionLabel}</p>
 		{#if !showChip}
 			<div class="dock-row">
@@ -318,6 +326,9 @@
 		{#if $stale}
 			<p class="dock-stale" role="status">Showing last known items.</p>
 		{/if}
+		</section>
+		{/if}
+		{@render scrollControl?.()}
 	</div>
 {/if}
 
@@ -344,6 +355,7 @@
 		overflow-y: auto;
 		overscroll-behavior: contain;
 	}
+	.attention-dock :global(.reply-chip-notice) { margin-bottom: var(--space-2); }
 	.dock-row { display: flex; align-items: center; gap: var(--space-2); }
 	.dock-bar {
 		display: flex; align-items: center; gap: var(--space-3); width: 100%;
