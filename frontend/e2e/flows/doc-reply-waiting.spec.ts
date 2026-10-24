@@ -661,7 +661,7 @@ for (const theme of ['light', 'dark'] as const) {
 			// this checks R4.2's cross-document destination rule rather than relying on a tie in server order.
 			await page.waitForTimeout(1_100);
 			const newest = await seedAdditionalReplyDocument(request, first, threadId);
-			await serveReplyQueue(page, request, first, threadId, () => true, false, [newest]);
+			// Use the real queue projection for cross-document aggregation.
 			await loginByUrl(page);
 			await openThread(page, THREAD_TITLE);
 			const notice = page.locator('.reply-chip-notice');
@@ -787,7 +787,6 @@ for (const theme of ['light', 'dark'] as const) {
 			const scenario = await seedScenario(page, request, threadId, `${theme}-${width}`, [0, 1, 2], {
 				readerFollowups: partialReadFollowups(width),
 			});
-			await serveReplyQueue(page, request, scenario, threadId);
 			// The dock belongs on Chat. Keep this journey there until its explicit
 			// destination action opens the seeded document.
 			await loginByUrl(page);
@@ -1111,7 +1110,6 @@ for (const theme of ['light', 'dark'] as const) {
 			const threadId = await createSession(request, THREAD_TITLE);
 			await onlyThread(request, threadId);
 			const scenario = await seedScenario(page, request, threadId, `read-${theme}-${width}`, [0, 1, 2], { readerFollowups: partialReadFollowups(width) });
-			await serveReplyQueue(page, request, scenario, threadId);
 			await loginByUrl(page);
 			await openThread(page, THREAD_TITLE);
 			const notice = page.locator('.reply-chip-notice');
@@ -1128,7 +1126,7 @@ for (const theme of ['light', 'dark'] as const) {
 				}, { id: threadId, next: surface })
 				: Promise.resolve();
 			const reloadQueue = async () => {
-				// The backend would push the new queue; the stand-in queue is read again.
+				// Re-read the server projection after the viewed stamp.
 				await page.evaluate(async () => (await import('/src/lib/stores/attentionDock.svelte.ts')).reload());
 			};
 			await showSurface('chat');
