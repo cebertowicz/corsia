@@ -14,6 +14,7 @@ from typing import Any
 
 import httpx
 
+from connections.account_errors import AccountError
 from infra import key_store
 from infra.db_async import run_in_db
 
@@ -45,8 +46,8 @@ UNREACHABLE = "Couldn't reach Google. Try again later."
 _NEVER_SENT = (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)
 
 
-class GoogleError(Exception):
-    """Base of every error this package raises; its text is safe to show."""
+class GoogleError(AccountError):
+    """Base of every Google-only error this package raises; its text is safe to show."""
 
 
 class GoogleNotConnected(GoogleError):

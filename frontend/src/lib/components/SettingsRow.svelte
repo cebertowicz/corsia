@@ -71,7 +71,7 @@
 	{#if trailing}<span class="trailing">{trailing}</span>{/if}
 {/snippet}
 
-<div class="settings-row" class:stack={stackActions} data-settings-row={rowName} {...menu.rowHandlers(rowName)}>
+<div class="settings-row" class:stack={stackActions} class:with-chev={chevron} data-settings-row={rowName} {...menu.rowHandlers(rowName)}>
 	{#if onOpen}
 		<button type="button" class="face open" aria-label={ariaLabel} aria-expanded={expanded} onclick={onOpen}>{@render content()}</button>
 	{:else}
@@ -112,6 +112,9 @@
 	.stack .face { flex: 1 1 16rem; }
 	.stack .actions { margin-left: auto; }
 	.face:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+	/* An opening row's hover fill takes in the chevron, so its focus ring does too, unless the row carries its own button. */
+	.with-chev:not(:has(> .actions button)):has(.face:focus-visible) { outline: 2px solid var(--accent); outline-offset: -2px; }
+	.with-chev:not(:has(> .actions button)) .face:focus-visible { outline: none; }
 	.mark {
 		flex-shrink: 0;
 		width: var(--project-mark-size); height: var(--project-mark-size);

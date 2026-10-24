@@ -38,7 +38,7 @@ def test_fresh_schema_has_the_ordered_delivery_attempt_index() -> None:
     try:
         db.executescript(SCHEMA_SQL)
 
-        assert SCHEMA_VERSION == 144
+        assert SCHEMA_VERSION == 145
         definition = db.execute(
             "SELECT sql FROM sqlite_master WHERE type='index' "
             "AND name='idx_messages_delivery_attempt'"

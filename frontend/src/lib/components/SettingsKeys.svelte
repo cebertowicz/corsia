@@ -19,8 +19,8 @@
 		type ServerKeyRow,
 	} from '$lib/stores/keys';
 	import { requestProviderCard, requestServerCard, settingsAnchor, settingsNavigation } from '$lib/stores/settingsNavigation';
-	import { connectedAppStateLine, loadConnectedAppsList } from '$lib/api/connectedApps';
-	import { ms } from '$lib/popoverMotion';
+	import { connectedAppStateLine, loadConnectedAppsList, loadMailHostAccount } from '$lib/api/connectedApps';
+	import { mailHostStateLine } from '$lib/api/mailHostAccounts';
 
 	type Action = 'set' | 'clear' | 'remove';
 
@@ -29,6 +29,9 @@
 	let serverRows = $state<ServerKeyRow[]>([]);
 	let loadError = $state('');
 	let open = $state<{ name: string; action: Action } | null>(null);
+	/** A mail-host key is the app password the person made on their host; every other key stays "Key". */
+	const MAIL_HOST_KEY_PREFIX = 'connected-account--mailhost--';
+	const fieldLabel = $derived(open?.name.startsWith(MAIL_HOST_KEY_PREFIX) ? 'App password' : 'Key');
 	// Both fields are write-only: emptied after every submit and never restored.
 	let keyValue = $state('');
 	let password = $state('');
@@ -38,7 +41,6 @@
 	let checkResults = $state<Record<string, { ok: boolean; text: string }>>({});
 	let reconnectStatus = $state('');
 	let arrivedFor: string | null = null;
-	let arrivalEntry = $state<string | null>(null);
 	const connectedAppKey = $derived($settingsNavigation.connectedAppKey);
 	const RECONNECT_TIMEOUT_MS = 30_000;
 	const RECONNECT_RETRY_MS = 1_000;
@@ -64,35 +66,24 @@
 
 	onMount(load);
 
-	/** The target action pulses for two hero-plus tokens (1.2s with the current token), then retains keyboard focus in its normal state. */
+	/** Set key on Connected apps lands here with that key's Set form open and its field focused, so the person pastes without hunting through the list. */
 	$effect(() => {
 		const target = connectedAppKey;
-		if (!target) {
-			arrivedFor = null;
-			arrivalEntry = null;
-			return;
-		}
-		if (!entries.some((entry) => entry.name === target.entry) || arrivedFor === target.entry || open?.name === target.entry) return;
-		let cancelled = false;
-		let timer: ReturnType<typeof setTimeout> | undefined;
+		if (!target) { arrivedFor = null; return; }
+		if (!entries.some((entry) => entry.name === target.entry) || arrivedFor === target.entry) return;
 		arrivedFor = target.entry;
-		arrivalEntry = target.entry;
-		void tick().then(() => {
-			if (cancelled) return;
-			const card = document.querySelector<HTMLElement>(`[data-key-entry="${target.entry}"]`);
-			const action = card?.querySelector<HTMLButtonElement>('.actions .btn');
-			if (!action) return;
-			action.focus({ preventScroll: true });
-			timer = setTimeout(() => {
-				if (arrivalEntry === target.entry) arrivalEntry = null;
-			}, ms('--dur-hero-plus') * 2);
+		void tick().then(async () => {
+			openForm(target.entry, 'set');
+			await tick();
+			[...document.querySelectorAll<HTMLElement>('[data-key-entry]')].find((card) => card.dataset.keyEntry === target.entry)?.querySelector<HTMLInputElement>('.key-form input[type="password"]')?.focus();
 		});
-		return () => { cancelled = true; if (timer) clearTimeout(timer); if (arrivalEntry === target.entry) arrivalEntry = null; };
 	});
 
 	function cardLabel(entry: KeyEntry): string {
 		const ref = connectedAppKey?.refs.find((candidate) => candidate.entry === entry.name);
 		if (!connectedAppKey || !ref) return entry.label;
+		// An account's key names its account (`iCloud key: you@icloud.com`), as its Keys entry does.
+		if (connectedAppKey.account) return entry.label;
 		return connectedAppKey.refs.length > 1 ? `${connectedAppKey.app} key: ${ref.name}` : `${connectedAppKey.app} key`;
 	}
 
@@ -124,6 +115,36 @@
 		keyValue = '';
 		password = '';
 		formError = '';
+	}
+
+	/** The destination line (H19): every distinct host the typed-in password will go to, in full. */
+	function destination(hosts: string[]): string {
+		const distinct = [...new Set(hosts)];
+		const list = distinct.length < 3 ? distinct.join(' and ') : `${distinct.slice(0, -1).join(', ')}, and ${distinct[distinct.length - 1]}`;
+		return `This password goes to ${list}.`;
+	}
+
+	/** A mail-host account's check after its app password is set, read from its row until the check ends. */
+	async function checkAccountAfterKeySave(entry: string, appName: string) {
+		const deadline = Date.now() + RECONNECT_TIMEOUT_MS;
+		try {
+			while (true) {
+				const account = await loadMailHostAccount(entry);
+				if (!account) break;
+				const problem = account.mailhost?.problem ?? null;
+				if (problem === null) { reconnectStatus = `${appName} is connected.`; return; }
+				if (problem === 'refused' || problem === 'revoked') {
+					reconnectStatus = `${appName} didn’t accept this app password. Make a new one in your ${appName} account settings, then press Replace.`;
+					return;
+				}
+				if (problem !== 'checking' && problem !== 'waiting') { reconnectStatus = mailHostStateLine(account); return; }
+				if (Date.now() >= deadline) break;
+				await new Promise<void>((resolve) => setTimeout(resolve, RECONNECT_RETRY_MS));
+			}
+		} catch {
+			// The key already saved; do not turn a check lookup failure into a failed save.
+		}
+		reconnectStatus = 'Saved.';
 	}
 
 	async function reconnectAfterKeySave(appName: string) {
@@ -182,11 +203,19 @@
 		}
 		open = null;
 		delete checkResults[name];
+		// A saved key reads Set from this moment, not once the list reloads after any check that follows.
+		if (action === 'set') entries = entries.map((entry) => entry.name === name ? { ...entry, is_set: true, set_at: new Date().toISOString() } : entry);
 		try {
 			if (action === 'set' && connectedAppKey?.entry === name) {
-				reconnectStatus = `Saved. Reconnecting ${connectedAppKey.app}…`;
-				await tick();
-				await reconnectAfterKeySave(connectedAppKey.app);
+				if (connectedAppKey.account) {
+					reconnectStatus = `Saved. Checking ${connectedAppKey.app}…`;
+					await tick();
+					await checkAccountAfterKeySave(name, connectedAppKey.app);
+				} else {
+					reconnectStatus = `Saved. Reconnecting ${connectedAppKey.app}…`;
+					await tick();
+					await reconnectAfterKeySave(connectedAppKey.app);
+				}
 			}
 		} finally {
 			await load();
@@ -226,10 +255,10 @@
 	{#if open}
 	<form class="key-form" onsubmit={submit}>
 		{#if open.action === 'set'}
-			<Field label="Key">
+			<Field label={fieldLabel}>
 				<input
 					type="password"
-					aria-label="Key"
+					aria-label={fieldLabel}
 					autocomplete="off"
 					data-1p-ignore
 					data-lpignore="true"
@@ -259,8 +288,10 @@
 {#if entries.length}
 	<SettingsGroup label="Service keys" hint="Agents can use these keys but can never see them. They're stored on this Mac, and a backup of CORSIA's state folder includes them.">
 		{#each entries as entry (entry.name)}
-			<div class="entry" class:arrival={arrivalEntry === entry.name} data-key-entry={entry.name} data-settings-anchor={`key-${entry.name}`} use:settingsAnchor={`key-${entry.name}`}>
-				<SettingsRow name={cardLabel(entry)} sub={entryLine(entry)} note={entry.ignored_env_var ? ignoredEnvironmentNote(entry.ignored_env_var) : ''} wrap stackActions>
+			<div class="entry" data-key-entry={entry.name} data-settings-anchor={`key-${entry.name}`} use:settingsAnchor={`key-${entry.name}`}>
+				<SettingsRow name={cardLabel(entry)} note={entry.ignored_env_var ? ignoredEnvironmentNote(entry.ignored_env_var) : ''} wrap stackActions>
+					<!-- The destination line and the check's result belong to this row: inside its text column, so they stay with it when the actions wrap below. -->
+					{#snippet sub()}{entryLine(entry)}{#if entry.destination_hosts?.length}<span class="line destination">{destination(entry.destination_hosts)}</span>{/if}{#if connectedAppKey?.entry === entry.name && reconnectStatus}<span class="line" role="status">{reconnectStatus}</span>{/if}{/snippet}
 					{#snippet actions()}
 						{#if open?.name !== entry.name}
 							<Button variant="ghost" size="sm" onclick={() => openForm(entry.name, 'set')}>
@@ -272,13 +303,12 @@
 							{#if entry.checkable && entry.is_set}
 								<Button variant="ghost" size="sm" loading={checking === entry.name} onclick={() => check(entry.name)}>Check</Button>
 							{/if}
-							{#if !entry.builtin}
+							{#if !entry.builtin && entry.removable !== false}
 								<Button variant="ghost" size="sm" onclick={() => openForm(entry.name, 'remove')}>Remove</Button>
 							{/if}
 						{/if}
 					{/snippet}
 				</SettingsRow>
-				{#if connectedAppKey?.entry === entry.name && reconnectStatus}<p class="note" role="status">{reconnectStatus}</p>{/if}
 				{#if open?.name === entry.name}
 					{@render keyForm()}
 				{:else if checkResults[entry.name]}
@@ -329,13 +359,8 @@
 	.note { margin: 0 0 var(--space-1); padding: 0 var(--space-2); font-size: var(--text-caption); line-height: 1.45; color: var(--text-tertiary); }
 	.note.ok { color: var(--green-text); }
 	.note.failed { color: var(--red-text); }
+	.line { display: block; }
+	.line.destination { color: var(--text-secondary); }
 	.key-form { padding: 0 var(--space-2) var(--space-2); }
 	.form-actions { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; margin-top: var(--space-3); }
-	.entry.arrival :global(.actions .btn:first-child) { animation: key-action-arrival calc(var(--dur-hero-plus) * 2) var(--ease-entrance); }
-	@keyframes key-action-arrival {
-		0% { opacity: 0.72; transform: scale(0.96); }
-		20% { opacity: 1; transform: scale(1.04); }
-		45%, 100% { opacity: 1; transform: scale(1); }
-	}
-	@media (prefers-reduced-motion: reduce) { .entry.arrival :global(.actions .btn:first-child) { animation: none; } }
 </style>

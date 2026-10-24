@@ -64,7 +64,7 @@ export function isOnlyCorsia(reach: AccountReach): boolean {
 export interface ConnectedAccount {
 	kind: 'account';
 	id: string;
-	provider: 'google' | 'microsoft';
+	provider: 'google' | 'microsoft' | 'mailhost';
 	/** The server-owned provider label for row and action copy. */
 	provider_display_name: string;
 	/** Display only: the address can change at the provider. */
@@ -79,7 +79,30 @@ export interface ConnectedAccount {
 	/** Microsoft Application (client) ID only; no credential or key-store reference leaves the server. */
 	client_id?: string | null;
 	tenant_id?: string | null;
+	/** Mail-host accounts only (iCloud, Yahoo, a work server): what the last check found. Never a credential. */
+	mailhost?: MailHostDetail;
 	reach: AccountReach;
+}
+
+/** What a mail-host row says about its last check. `problem: null` is Connected; a mail-only account sets `calendar_missing`. */
+export interface MailHostDetail {
+	problem: 'waiting' | 'checking' | 'refused' | 'revoked' | 'imap_off' | 'unreachable' | null;
+	/** The server the check could not reach. */
+	server?: string;
+	/** The host's page for making and deleting its app passwords. */
+	manage_url?: string;
+	/** What a known host calls its mail product ("Zoho Mail"); a typed-in host has none. */
+	product_name?: string;
+	calendar_missing?: boolean;
+	imap?: string;
+	smtp?: string;
+	caldav?: string;
+	/** The server field the check could not reach, so the open Edit server form can put the error on it. */
+	failing?: 'imap' | 'smtp' | 'caldav';
+	/** The Keys card entry that holds the app password. */
+	key_refs?: { entry: string; name: string; set: boolean }[];
+	/** Servers that came from the agent or the person (H19): the Keys card names each before the password is set. */
+	destination_hosts?: string[];
 }
 
 /** A hosted or local app row, as `/api/mcp/servers` returns it, tagged for the union. */
@@ -95,7 +118,7 @@ export function needsManualGoogleStep(cause: RevocationCause): boolean {
 
 /** Only the provider's fixed manual-removal cause exposes its provider-specific next step. */
 export function needsManualAccountStep(account: Pick<ConnectedAccount, 'provider'>, cause: RevocationCause): boolean {
-	return account.provider === 'microsoft' ? cause === 'manual_only' : needsManualGoogleStep(cause);
+	return account.provider === 'microsoft' || account.provider === 'mailhost' ? cause === 'manual_only' : needsManualGoogleStep(cause);
 }
 
 export interface AccountSignOutResult { row: ConnectedAccount; revocation: RevocationCause }
@@ -146,6 +169,12 @@ async function response<T>(path: string, init?: RequestInit, fallback = 'Could n
 	const result = await fetch(url(path), init);
 	if (!result.ok) throw new Error(await plainResponseError(result, fallback));
 	return result.json() as Promise<T>;
+}
+
+/** One mail-host account by the Keys entry that holds its app password, for the Keys card's check after the password is set. */
+export async function loadMailHostAccount(entry: string): Promise<ConnectedAccount | undefined> {
+	const result = await response<{ accounts?: ConnectedAccount[] }>('/api/mcp/servers');
+	return (result.accounts ?? []).find((account) => account.provider === 'mailhost' && account.mailhost?.key_refs?.some((ref) => ref.entry === entry));
 }
 
 export async function loadConnectedAppsList(): Promise<{ servers: ConnectedApp[]; signInHere: boolean }> {

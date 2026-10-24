@@ -44,6 +44,7 @@ CONNECTED_ACCOUNTS_SCHEMA_SQL = f"""
         signed_in_by_id TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
+        endpoints_json TEXT CHECK(endpoints_json IS NULL OR json_valid(endpoints_json)),
         CHECK((signed_in_by_kind IS NULL) = (signed_in_by_id IS NULL)),
         UNIQUE(provider, provider_subject)
     );

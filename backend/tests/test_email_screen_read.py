@@ -16,7 +16,7 @@ import httpx
 import pytest
 
 from connections.connected_accounts import store_credentials
-from connections.google.accounts import NONE_AVAILABLE
+from connections.mail_accounts import NONE_AVAILABLE
 from google_account_helpers import only_corsia_account
 from connections.google import client as google_client
 from connections.google import gmail_read
@@ -29,7 +29,7 @@ from llm.isolated_structured import (
     IsolatedStructuredUnavailableError,
 )
 from tests.registry_helpers import make_session
-from tools.google_email_read import UNSCREENED, EmailReadTool, EmailSearchTool, flagged_text
+from tools.email_read import UNSCREENED, EmailReadTool, EmailSearchTool, flagged_text
 
 ACCOUNT = "person@example.com"
 BODY_CANARY = "canary-body-text-7731"
@@ -352,7 +352,7 @@ async def test_a_flagged_message_returns_the_refusal_and_no_body(mail, conductor
     out = await EmailReadTool().execute(_thread_id=conductor, account_id=mail.account, message_id="m1")
     assert out == "Error: " + (
         "This message was flagged as a possible prompt injection (R1). "
-        "Its body is withheld; the person can open it in Gmail."
+        "Its body is withheld; the person can open it in their own mail app."
     )
     assert out == f"Error: {flagged_text('R1')}"
     assert BODY_CANARY not in out and SUBJECT_CANARY not in out
@@ -453,7 +453,7 @@ async def test_no_account_named_returns_the_clarification_never_a_default(mail, 
     for tool, args in ((EmailSearchTool(), {"query": "x"}), (EmailReadTool(), {"message_id": "m1"})):
         out = await tool.execute(_thread_id=conductor, **args)
         assert out == (
-            f"Error: Pass account_id to say which Google account to use: {ACCOUNT} (account_id "
+            f"Error: Pass account_id to say which account to use: {ACCOUNT} (account_id "
             f"{mail.account}), work@example.com (account_id {second['id']}). If the person hasn't said "
             "which account, ask them; never pick one for them."
         )
@@ -468,7 +468,11 @@ async def test_not_connected_says_to_call_google_connect(isolated_db, tmp_path, 
     thread_id = make_session(db, prefix="conductor")
     assert set_corsia_agent(thread_id, db=db)
     out = await EmailSearchTool().execute(_thread_id=thread_id, query="x")
-    assert out == "Error: Google isn't connected. Call google_connect and give the person the link."
+    assert out == (
+        "Error: No Gmail or other mail-host account is connected. For Microsoft mail, use microsoft_status, then "
+        "microsoft_mail_search or microsoft_mail_read. To connect Gmail or Google Workspace, follow google-setup; "
+        "any other host follows mail-host-setup."
+    )
 
 
 # -- retention ----------------------------------------------------------------------------------

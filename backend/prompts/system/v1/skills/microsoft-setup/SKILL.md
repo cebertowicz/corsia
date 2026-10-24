@@ -1,6 +1,6 @@
 ---
 name: microsoft-setup
-description: Use when the person wants Outlook mail, calendar or files connected, or their Microsoft account needs sign-in. You set up their own private Microsoft app in a browser they can watch; they only sign in, complete their own card/phone/terms steps where needed, and click Accept.
+description: Use when the person wants Outlook mail, calendar or files connected, or their Microsoft account needs sign-in.
 ---
 
 # Connect Microsoft

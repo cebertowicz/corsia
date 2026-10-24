@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import { Button } from '$lib/components/ui';
 	import { projects, loadProjects } from '$lib/stores/projects';
 	import { requestAppKey, settingsAnchor, settingsNavigation } from '$lib/stores/settingsNavigation';
@@ -13,10 +13,13 @@
 	import ConfirmDialog from './ConfirmDialog.svelte';
 	import SettingsRow from './SettingsRow.svelte';
 	import WhereItWorks from './WhereItWorks.svelte';
+	import MailHostDetail from './MailHostDetail.svelte';
 	import ConnectAppFlow from './ConnectAppFlow.svelte';
 	import AccountManualNotice from './AccountManualNotice.svelte';
-	type AccountAddress = { localPrefix: string; localSuffix: string; domain: string };
-	const accountName = (account: ConnectedAccount) => `${account.provider_display_name} — ${account.address}`;
+	import AccountClosedTitle from './AccountClosedTitle.svelte';
+	import { on } from '$lib/ws/events';
+	import { mailHostStateLine } from '$lib/api/mailHostAccounts';
+	import { accountName } from '$lib/accountAddress';
 	const accountAnchor = (id: string) => `connected-account-${id}`;
 	const isAccount = (row: ConnectedAppsRow): row is ConnectedAccount => row.kind === 'account';
 	const accountNeedsSignIn = (account: ConnectedAccount) => account.state === 'needs_sign_in' || account.state === 'signed_out';
@@ -41,14 +44,15 @@
 	let removedManualStep = $state<ConnectedAccount | null>(null);
 	/** A hosted-app approval that returns needs-sign-in begins its existing one-shot repair path. */
 	let signInAfterApprove = $state<string | null>(null);
-	let closedLocalPrefixes = $state(new Map<string, string>());
 	let linkedAccountId = $state<string | null>(null);
 	let copiedAdminMessageId = $state<string | null>(null);
-	let textContext: CanvasRenderingContext2D | null = null;
 	const stateLine = (app: ConnectedApp) => connectedAppStateLine(app, signedOut.has(app.id));
+	/** The accounts a closed title must stay distinct from: every other closed one. */
+	const closedPeers = $derived(rows.filter(isAccount).filter((account) => account.id !== openId));
 	const isMicrosoft = (account: ConnectedAccount) => account.provider === 'microsoft';
 	const microsoftCause = (account: ConnectedAccount, cause: string) => isMicrosoft(account) && account.cause === cause;
 	function accountStateLine(account: ConnectedAccount): string {
+		if (account.provider === 'mailhost') return mailHostStateLine(account);
 		if (microsoftCause(account, 'admin_approval_required')) return 'Needs admin approval';
 		if (microsoftCause(account, 'registration_misconfigured')) return 'Microsoft app needs fixing';
 		if (microsoftCause(account, 'provider_unavailable')) return 'Sign-in didn’t finish';
@@ -59,6 +63,7 @@
 		}
 	}
 	function tone(row: ConnectedAppsRow): 'quiet' | 'failed' | 'attention' {
+		if (isAccount(row) && row.provider === 'mailhost') { const problem = row.mailhost?.problem ?? null; return problem === null || problem === 'checking' ? 'quiet' : problem === 'waiting' ? 'attention' : 'failed'; }
 		if (isAccount(row)) return microsoftCause(row, 'provider_unavailable') || microsoftCause(row, 'registration_misconfigured') ? 'failed' : row.state === 'connected' || row.state === 'signed_out' ? 'quiet' : 'attention';
 		if (row.state === 'failed' || (row.sign_in?.status === 'failed' && !row.sign_in.signed_in)) return 'failed';
 		return row.state === 'working' ? 'quiet' : 'attention';
@@ -165,103 +170,11 @@
 		catch (cause) { actionError = cause instanceof Error ? cause.message : `Couldn't change this ${account.provider_display_name} account. Try again.`; }
 		finally { confirmingRemove = null; actionId = null; }
 	}
-	function accountAddress(address: string): AccountAddress | null {
-		const at = address.lastIndexOf('@');
-		if (at <= 0 || at === address.length - 1) return null;
-		const local = address.slice(0, at);
-		const suffixStart = Math.max(local.lastIndexOf('.'), local.lastIndexOf('_'), local.lastIndexOf('-'), local.lastIndexOf('+'));
-		return { localPrefix: suffixStart > 0 ? local.slice(0, suffixStart) : local, localSuffix: suffixStart > 0 ? local.slice(suffixStart) : '', domain: address.slice(at + 1) };
-	}
-	function localSegments(prefix: string): string[] { return prefix.split(/[._+\-]+/).filter(Boolean); }
-	function width(text: string, style: CSSStyleDeclaration): number {
-		if (!textContext && typeof document !== 'undefined') textContext = document.createElement('canvas').getContext('2d');
-		if (!textContext) return text.length * 8;
-		textContext.font = style.font || `${style.fontSize} ${style.fontFamily}`;
-		const letterSpacing = Number.parseFloat(style.letterSpacing) || 0;
-		return textContext.measureText(text).width + Math.max(0, text.length - 1) * letterSpacing;
-	}
-	function clippedPrefix(prefix: string, available: number, style: CSSStyleDeclaration): string {
-		if (width(prefix, style) <= available) return prefix;
-		const chars = [...prefix];
-		let low = 0; let high = chars.length;
-		while (low < high) {
-			const middle = Math.ceil((low + high) / 2);
-			if (width(`${chars.slice(0, middle).join('')}…`, style) <= available) low = middle;
-			else high = middle - 1;
-		}
-		return `${chars.slice(0, low).join('').replace(/[._+\-]+$/, '')}…`;
-	}
-	function displayKey(prefix: string, suffix: string, domain: string): string {
-		return `${prefix}${prefix.includes('…') && /^[._+\-]/.test(suffix) ? suffix.slice(1) : suffix}@${domain}`;
-	}
-	function distinctPrefix(account: ConnectedAccount, available: number, style: CSSStyleDeclaration): string {
-		const address = accountAddress(account.address);
-		if (!address || width(address.localPrefix, style) <= available) return address?.localPrefix ?? account.address;
-		const ownSegments = localSegments(address.localPrefix);
-		const siblings = rows.filter(isAccount).filter((candidate) => {
-			const other = accountAddress(candidate.address);
-			return candidate.id !== account.id && candidate.id !== openId && other?.domain === address.domain && localSegments(other.localPrefix)[0] === ownSegments[0];
-		});
-		const distinctIndex = ownSegments.findIndex((segment, index) => siblings.every((candidate) => localSegments(accountAddress(candidate.address)!.localPrefix)[index] !== segment));
-		if (distinctIndex < 0) return clippedPrefix(address.localPrefix, available, style);
-		if (distinctIndex === 0) return clippedPrefix(address.localPrefix, available, style);
-		const distinctive = ownSegments[distinctIndex];
-		const lead = ownSegments[0];
-		const candidate = `${lead}…${distinctive}`;
-		if (width(candidate, style) <= available) return candidate;
-		for (let length = [...lead].length - 1; length > 0; length--) {
-			const shortened = `${[...lead].slice(0, length).join('')}…${distinctive}`;
-			if (width(shortened, style) <= available) return shortened;
-		}
-		return clippedPrefix(address.localPrefix, available, style);
-	}
-	function observeClosedTitle(node: HTMLElement, account: ConnectedAccount) {
-		let current = account;
-		let frame = 0;
-		const update = () => {
-			cancelAnimationFrame(frame);
-			frame = requestAnimationFrame(() => {
-				if (openId === current.id) return;
-				const parts = accountAddress(current.address);
-				const prefix = node.querySelector<HTMLElement>('.account-local-prefix');
-				const provider = node.querySelector<HTMLElement>('.account-provider');
-				const suffix = node.querySelector<HTMLElement>('.account-local-suffix');
-				const domain = node.querySelector<HTMLElement>('.account-domain');
-				if (!parts || !prefix || !provider || !suffix || !domain) return;
-				const providerStyle = getComputedStyle(provider);
-				const providerGap = Number.parseFloat(providerStyle.marginInlineEnd) || 0;
-				const available = Math.max(0, node.clientWidth - provider.getBoundingClientRect().width - providerGap - suffix.getBoundingClientRect().width - domain.getBoundingClientRect().width);
-				const next = distinctPrefix(current, available, getComputedStyle(prefix));
-				if (closedLocalPrefixes.get(current.id) === next) return;
-				closedLocalPrefixes = new Map(closedLocalPrefixes).set(current.id, next);
-				requestAnimationFrame(() => {
-					const domainRange = document.createRange();
-					if (typeof domainRange.getBoundingClientRect !== 'function') return;
-					domainRange.selectNodeContents(domain);
-					const overflow = domainRange.getBoundingClientRect().right - node.getBoundingClientRect().right;
-					if (overflow <= 0.5) return;
-					const fallback = distinctPrefix(current, Math.max(0, available - overflow - 1), getComputedStyle(prefix));
-					if (closedLocalPrefixes.get(current.id) !== fallback) closedLocalPrefixes = new Map(closedLocalPrefixes).set(current.id, fallback);
-				});
-			});
-		};
-		const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(update);
-		observer?.observe(node); update();
-		return { update(next: ConnectedAccount) { current = next; update(); }, destroy() { cancelAnimationFrame(frame); observer?.disconnect(); } };
-	}
-	function shownPrefix(account: ConnectedAccount): string {
-		const parts = accountAddress(account.address);
-		return parts ? closedLocalPrefixes.get(account.id) ?? parts.localPrefix : account.address;
-	}
-	function shownSuffix(account: ConnectedAccount): string {
-		const parts = accountAddress(account.address);
-		if (!parts) return '';
-		const prefix = shownPrefix(account);
-		return prefix.endsWith('…') && /^[._+\-]/.test(parts.localSuffix) ? parts.localSuffix.slice(1) : parts.localSuffix;
-	}
 	function capabilityLabels(account: ConnectedAccount): string { return account.capabilities.map((capability) => ({ mail: 'Email', calendar: 'Calendar', files: 'Files' }[capability])).join(', '); }
 
 	function clearLinkedFocus(): void { linkedAccountId = null; }
+	/** Try again and Edit server's Save close the row and its pressed button with it: focus goes to that row's header. */
+	const closeRow = (id: string): void => { openId = null; void refresh(); void tick().then(() => [...document.querySelectorAll<HTMLElement>('[data-connected-account-id]')].find((item) => item.dataset.connectedAccountId === id)?.querySelector<HTMLElement>('.face.open')?.focus()); };
 
 	$effect(() => {
 		const accountId = $settingsNavigation.connectedAppId;
@@ -283,7 +196,9 @@
 		void loadProjects(); void load();
 		const afterSignIn = () => { void refresh(); };
 		window.addEventListener('focus', afterSignIn);
-		return () => window.removeEventListener('focus', afterSignIn);
+		// A mail-host check runs in the background and the host says when it ends.
+		const offChecked = on('connected_apps_updated', afterSignIn);
+		return () => { window.removeEventListener('focus', afterSignIn); offChecked(); };
 	});
 </script>
 
@@ -309,12 +224,16 @@
 				{#each rows as row (row.id)}
 					{#if isAccount(row)}
 						<div class="item account-item" data-connected-account-id={row.id} data-settings-anchor={accountAnchor(row.id)} use:settingsAnchor={accountAnchor(row.id)}>
-							{#snippet accountTitle()}{#if openId === row.id}<span class="account-open-name">{accountName(row)}</span>{:else}<span class="account-closed-name" use:observeClosedTitle={row}><span class="account-provider">{row.provider_display_name} —</span><span class="account-local-prefix">{shownPrefix(row)}</span><span class="account-local-suffix">{shownSuffix(row)}</span><span class="account-domain">@{accountAddress(row.address)?.domain}</span></span>{/if}{/snippet}
+							{#snippet accountTitle()}{#if openId === row.id}<span class="account-open-name">{accountName(row)}</span>{:else}<AccountClosedTitle account={row} peers={closedPeers} />{/if}{/snippet}
 							<SettingsRow name={accountTitle} ariaLabel={accountName(row)} subTone={tone(row)} wrapName={openId === row.id} chevron expanded={openId === row.id} onOpen={() => openId = openId === row.id ? null : row.id}>
 								{#snippet sub()}{accountStateLine(row)}<span class="place">{` · ${placeLine(row)}`}</span>{/snippet}
 							</SettingsRow>
 							{#if openId === row.id}
 								<div class="details">
+									{#if row.provider === 'mailhost'}
+									{#if errorId === row.id && actionError && actionId === null}<p class="error" role="alert">{actionError}</p>{/if}
+									<MailHostDetail account={row} {offline} onSetKey={() => requestAppKey({ name: row.provider_display_name, key_refs: row.mailhost?.key_refs }, true)} onWhere={() => { whereApprove = false; whereRow = row; }} onRemove={() => confirmingRemove = row} onChanged={() => closeRow(row.id)} />
+									{:else}
 									{#if errorId === row.id && actionError && actionId === null}<p class="error" role="alert">{actionError}</p>{/if}
 									<p class="capabilities"><span class="capability-label">Reaches</span><span>{capabilityLabels(row)}</span></p>
 									{#if microsoftCause(row, 'admin_approval_required')}<p class="impact">Your organization needs to approve CORSIA before it can connect this account. Send this to your IT admin, then press Sign in.</p>{:else if microsoftCause(row, 'consent_cancelled')}<p class="impact">Sign-in was cancelled. Press Sign in to try again.</p>{:else if microsoftCause(row, 'refresh_token_invalid')}<p class="impact">Microsoft signed you out, so agents can’t use this account until you sign in again.</p>{:else if microsoftCause(row, 'provider_unavailable')}<p class="impact">Microsoft had a problem with sign-in. Try again.</p>{:else if microsoftCause(row, 'registration_misconfigured')}<p class="impact">Your Microsoft app for CORSIA isn’t set up correctly. Ask CORSIA in chat to fix it, then press Sign in.</p>{:else if row.state === 'needs_sign_in'}<p class="impact">{row.provider_display_name} signed you out, so agents can’t use this account until you sign in again.</p>{/if}
@@ -327,6 +246,7 @@
 										<span class="danger-text account-action"><Button variant="ghost" size="sm" disabled={offline} loading={actionId === row.id} onclick={() => confirmingRemove = row}>Remove</Button></span>
 									</div>
 									{#if copiedAdminMessageId === row.id}<p class="copied" role="status">Message copied</p>{/if}
+									{/if}
 								</div>
 							{/if}
 						</div>
@@ -348,7 +268,7 @@
 									{:else if !isOpenApp(row) && row.state === 'token_rejected'}<Button variant="ghost" size="sm" onclick={() => requestAppKey(row)}>Replace key</Button>{/if}
 								{/snippet}
 							</SettingsRow>
-							{#if isOpenApp(row)}<div class="details">{#if errorId === row.id && actionError && actionId === null}<p class="error" role="alert">{actionError}</p>{/if}<AppSignInPanel app={row} {signInHere} confirmOut={confirmingAppOut === row.id} onConfirmOut={(on) => confirmingAppOut = on ? row.id : null} onChange={(patch) => replaceApp({ ...row, ...patch })} onRefresh={refresh} onSignedOut={() => signedOut = new Set(signedOut).add(row.id)} autoStart={signInAfterApprove === row.id} onAutoStarted={() => signInAfterApprove = null} />{#if row.state === 'needs_token'}<p class="key-detail">{row.name} needs a key before agents can use it: a code {row.name} gives you so other apps can use your account ({row.name} may call it a token or an API key). Create one in your {row.name} settings. Then press Set key next to {row.name}. That opens the Keys page: paste the key there and press Set.</p>{:else if row.state === 'token_rejected'}<p class="key-detail">{row.name} didn't accept its key. Create a new one in your {row.name} settings, then press Replace key.</p>{:else if row.state === 'failed' && row.failure_class === 'runtime_download_failed'}<p class="key-detail">{runtimeDownloadFailureBody}</p>{/if}<div class="actions">{#if row.state === 'expired'}<Button variant="ghost" size="sm" loading={actionId === row.id} onclick={() => runApp(row, 'decline')}>Dismiss</Button>{:else}{#if row.state === 'needs_token'}<Button variant="ghost" size="sm" onclick={() => requestAppKey(row)}>Set key</Button>{:else if row.state === 'token_rejected'}<Button variant="ghost" size="sm" onclick={() => requestAppKey(row)}>Replace key</Button>{/if}<Button variant="ghost" size="sm" onclick={() => { whereApprove = false; whereRow = row; }}>Where it works…</Button>{#if row.state !== 'needs_token' && row.state !== 'token_rejected'}<Button variant="ghost" size="sm" loading={actionId === row.id} onclick={() => runApp(row, 'reconnect')}>Reconnect</Button>{/if}{#if row.sign_in?.signed_in && confirmingAppOut !== row.id}<Button variant="ghost" size="sm" onclick={() => confirmingAppOut = row.id}>Sign out</Button>{/if}<span class="danger-text"><Button variant="ghost" size="sm" loading={actionId === row.id} onclick={() => runApp(row, 'remove')}>Remove</Button></span>{/if}</div></div>{/if}
+							{#if isOpenApp(row)}<div class="details">{#if errorId === row.id && actionError && actionId === null}<p class="error" role="alert">{actionError}</p>{/if}<AppSignInPanel app={row} {signInHere} confirmOut={confirmingAppOut === row.id} onConfirmOut={(on) => confirmingAppOut = on ? row.id : null} onChange={(patch) => replaceApp({ ...row, ...patch })} onRefresh={refresh} onSignedOut={() => signedOut = new Set(signedOut).add(row.id)} autoStart={signInAfterApprove === row.id} onAutoStarted={() => signInAfterApprove = null} />{#if row.state === 'needs_token'}<p class="key-detail">{row.name} needs a key before agents can use it: a code {row.name} gives you so other apps can use your account ({row.name} may call it a token or an API key). Create one in your {row.name} settings, then press Set key.</p>{:else if row.state === 'token_rejected'}<p class="key-detail">{row.name} didn't accept its key. Create a new one in your {row.name} settings, then press Replace key.</p>{:else if row.state === 'failed' && row.failure_class === 'runtime_download_failed'}<p class="key-detail">{runtimeDownloadFailureBody}</p>{/if}<div class="actions">{#if row.state === 'expired'}<Button variant="ghost" size="sm" loading={actionId === row.id} onclick={() => runApp(row, 'decline')}>Dismiss</Button>{:else}{#if row.state === 'needs_token'}<Button variant="ghost" size="sm" onclick={() => requestAppKey(row)}>Set key</Button>{:else if row.state === 'token_rejected'}<Button variant="ghost" size="sm" onclick={() => requestAppKey(row)}>Replace key</Button>{/if}<Button variant="ghost" size="sm" onclick={() => { whereApprove = false; whereRow = row; }}>Where it works…</Button>{#if row.state !== 'needs_token' && row.state !== 'token_rejected'}<Button variant="ghost" size="sm" loading={actionId === row.id} onclick={() => runApp(row, 'reconnect')}>Reconnect</Button>{/if}{#if row.sign_in?.signed_in && confirmingAppOut !== row.id}<Button variant="ghost" size="sm" onclick={() => confirmingAppOut = row.id}>Sign out</Button>{/if}<span class="danger-text"><Button variant="ghost" size="sm" loading={actionId === row.id} onclick={() => runApp(row, 'remove')}>Remove</Button></span>{/if}</div></div>{/if}
 						</div>
 					{/if}
 				{/each}
@@ -360,7 +280,7 @@
 {#if whereRow}<WhereItWorks app={whereRow} approve={whereApprove} onClose={() => whereRow = null} onSaved={(row) => { if (whereApprove && !isAccount(row)) approved(row); else replace(row); whereRow = null; }} />{/if}
 {#if connectAppOpen}<ConnectAppFlow onClose={() => connectAppOpen = false} onConnected={(app) => { rows = [...rows, { ...app, kind: 'hosted_app' }]; }} onSignIn={(app) => { openId = app.id; signInAfterApprove = app.id; }} />{/if}
 {#if confirmingOut}<ConfirmDialog open title={`Sign out of ${accountName(confirmingOut)}?`} description="Agents will no longer be able to use this account, including in conversations already running. You can sign in again any time." confirmLabel="Sign out" onConfirm={() => signOut(confirmingOut!)} onCancel={() => confirmingOut = null} />{/if}
-{#if confirmingRemove}<ConfirmDialog open title={`Remove ${accountName(confirmingRemove)}?`} description={confirmingRemove.provider === 'microsoft' ? 'Agents will no longer be able to use this account. CORSIA deletes its sign-in from this computer. Microsoft may still list CORSIA as allowed; remove it on Microsoft’s page.' : confirmingRemove.provider === 'google' ? 'Agents will no longer be able to use this account, including in conversations already running. This signs CORSIA out and revokes CORSIA’s access to this Google account.' : ''} confirmLabel="Remove" destructive onConfirm={() => remove(confirmingRemove!)} onCancel={() => confirmingRemove = null} />{/if}
+{#if confirmingRemove}<ConfirmDialog open title={`Remove ${accountName(confirmingRemove)}?`} description={confirmingRemove.provider === 'mailhost' ? `Agents lose access to it. The app password still works until you delete it in your ${confirmingRemove.provider_display_name} account settings.` : confirmingRemove.provider === 'microsoft' ? 'Agents will no longer be able to use this account. CORSIA deletes its sign-in from this computer. Microsoft may still list CORSIA as allowed; remove it on Microsoft’s page.' : confirmingRemove.provider === 'google' ? 'Agents will no longer be able to use this account, including in conversations already running. This signs CORSIA out and revokes CORSIA’s access to this Google account.' : ''} confirmLabel="Remove" destructive onConfirm={() => remove(confirmingRemove!)} onCancel={() => confirmingRemove = null} />{/if}
 
 <style>
 	.connected-apps { width: 100%; scroll-margin-top: var(--space-5); }
@@ -386,12 +306,7 @@
 	.impact { margin: 0 0 var(--space-2); color: var(--text-secondary); font-size: var(--text-subhead); line-height: var(--lh-normal); }
 	.capabilities { display: flex; gap: var(--space-2); margin: 0 0 var(--space-2); color: var(--text-secondary); font-size: var(--text-caption); line-height: var(--lh-normal); }
 	.capability-label { color: var(--text-tertiary); }
-	.account-closed-name, .account-open-name { min-width: 0; font-size: var(--text-subhead); color: var(--text-primary); }
-	.account-closed-name { display: flex; overflow: hidden; white-space: nowrap; }
-	.account-provider, .account-local-prefix, .account-local-suffix, .account-domain { flex: 0 0 auto; }
-	.account-provider { margin-inline-end: var(--space-1); }
-	.account-local-prefix { overflow: hidden; text-overflow: clip; }
-	.account-open-name { overflow-wrap: anywhere; }
+	.account-open-name { min-width: 0; font-size: var(--text-subhead); color: var(--text-primary); overflow-wrap: anywhere; }
 	.account-action { position: relative; display: inline-flex; }
 	/* A chat link moves focus here after opening the account, so retain a visible arrival mark even without keyboard modality. */
 	.account-action.deep-link-focus :global(.btn) { outline: medium solid var(--accent); outline-offset: var(--space-1); }

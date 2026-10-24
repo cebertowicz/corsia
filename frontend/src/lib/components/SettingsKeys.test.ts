@@ -184,6 +184,21 @@ describe('Settings › Keys', () => {
 		expect(password.getAttribute('autocomplete')).toBe('current-password');
 	});
 
+	it('calls the field App password for a mail-host key and Key for every other key', async () => {
+		const mailKey = { ...maps, name: 'connected-account--mailhost--abc', label: 'you@work.test', description: 'App password for this email account.' };
+		entries = [{ ...webSearch }, mailKey];
+		await mountKeys();
+		button('connected-account--mailhost--abc', 'Set').click();
+		flushSync();
+		const mailForm = host.querySelector('[data-key-entry="connected-account--mailhost--abc"] form')!;
+		expect(mailForm.querySelector('input[aria-label="App password"]')).not.toBeNull();
+		expect(mailForm.querySelector('input[aria-label="Key"]')).toBeNull();
+		expect(mailForm.textContent).toContain('App password');
+		button('web-search', 'Set').click();
+		flushSync();
+		expect(inputs('web-search').value).not.toBeNull();
+	});
+
 	it('asks for both fields before sending anything', async () => {
 		await mountKeys();
 		button('web-search', 'Set').click();
@@ -250,7 +265,6 @@ describe('Settings › Keys', () => {
 			entries = [{ ...maps, name: 'linear-key', label: 'Linear key' }];
 			requestConnectedAppKey('Linear', 'linear-key', [{ entry: 'linear-key', name: 'API key' }]);
 			await mountKeys('linear-key');
-			button('linear-key', 'Set').click();
 			await vi.waitFor(() => expect(host.querySelector('form')).not.toBeNull());
 			const form = host.querySelector('form')!;
 			const fields = form.querySelectorAll<HTMLInputElement>('input');
@@ -272,6 +286,100 @@ describe('Settings › Keys', () => {
 			await vi.runAllTimersAsync();
 			await vi.waitFor(() => expect(host.textContent).toContain(expected));
 			vi.useRealTimers();
+		});
+	});
+
+	describe('mail-host account keys', () => {
+		const ENTRY = 'mailhost-example';
+		const LABEL = 'example.com key: you@example.com';
+		const account = (problem: string | null) => ({
+			provider: 'mailhost', provider_display_name: 'example.com', mailhost: { problem, key_refs: [{ entry: ENTRY, name: LABEL, set: true }] },
+		});
+		/** `requested: false` opens Keys on its own, with no Set key press from Connected apps behind it. */
+		async function openAccountKey(hosts?: string[], extra: Record<string, unknown> = {}, requested = true) {
+			Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: vi.fn() });
+			entries = [{ ...maps, name: ENTRY, label: LABEL, description: '', added_by: 'Mail host', ...(hosts ? { destination_hosts: hosts } : {}), ...extra }];
+			if (requested) requestConnectedAppKey('example.com', ENTRY, [{ entry: ENTRY, name: LABEL }], true);
+			await mountKeys(ENTRY);
+		}
+		async function saveAccountKey() {
+			await vi.waitFor(() => expect(host.querySelector('form')).not.toBeNull());
+			const form = host.querySelector('form')!;
+			const fields = form.querySelectorAll<HTMLInputElement>('input');
+			type(fields[0], VALUE);
+			type(fields[1], PASSWORD);
+			form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+		}
+
+		it('names the account on its key and every host a typed-in password goes to', async () => {
+			await openAccountKey(['imap.example.com', 'smtp.example.net', 'imap.example.com']);
+			expect(host.querySelector(`[data-key-entry="${ENTRY}"]`)!.textContent).toContain(LABEL);
+			expect(host.querySelector('.destination')?.textContent).toBe('This password goes to imap.example.com and smtp.example.net.');
+		});
+		it('opens that key’s Set form on arrival, its field focused and the destination line above it', async () => {
+			await openAccountKey(['imap.example.com']);
+			await vi.waitFor(() => expect(document.activeElement).toBe(inputs(ENTRY).value));
+			const card = host.querySelector(`[data-key-entry="${ENTRY}"]`)!;
+			expect(inputs(ENTRY).value?.type).toBe('password');
+			expect(card.querySelectorAll('form')).toHaveLength(1);
+			expect(card.querySelector('.destination')!.compareDocumentPosition(inputs(ENTRY).form) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+			expect([...card.querySelectorAll('button')].map((candidate) => candidate.textContent?.trim())).toEqual(['Save', 'Cancel']);
+		});
+		it('opens nothing when Keys is opened on its own', async () => {
+			await openAccountKey(undefined, {}, false);
+			expect(host.querySelector('form')).toBeNull();
+			expect(button(ENTRY, 'Set')).toBeDefined();
+		});
+		it('keeps the destination line and the check result in the row’s text column, with the row', async () => {
+			connectedAppsAnswers = [{ servers: [], accounts: [account(null)] } as never];
+			await openAccountKey(['imap.example.com']);
+			const card = host.querySelector(`[data-key-entry="${ENTRY}"]`)!;
+			expect(card.querySelector('.copy .destination')?.textContent).toBe('This password goes to imap.example.com.');
+			expect(card.querySelector(':scope > .destination')).toBeNull();
+			await saveAccountKey();
+			await vi.waitFor(() => expect(card.querySelector('.copy [role="status"]')?.textContent).toBe('example.com is connected.'));
+			expect(card.querySelector(':scope > [role="status"]')).toBeNull();
+		});
+		it('shows destination disclosure when Keys opens on its own', async () => {
+			await openAccountKey(['imap.example.com'], {}, false);
+			expect(host.querySelector('.destination')?.textContent).toBe('This password goes to imap.example.com.');
+		});
+		it('says nothing about a destination for a known host', async () => {
+			await openAccountKey(undefined);
+			expect(host.querySelector('.destination')).toBeNull();
+		});
+		it('reads Set at once and then Connected once the check passes', async () => {
+			vi.useFakeTimers();
+			connectedAppsAnswers = [{ servers: [], accounts: [account('checking')] } as never, { servers: [], accounts: [account(null)] } as never];
+			await openAccountKey(undefined);
+			await saveAccountKey();
+			await vi.waitFor(() => expect(host.textContent).toContain('Saved. Checking example.com…'));
+			expect(host.querySelector(`[data-key-entry="${ENTRY}"]`)!.textContent).not.toContain('Not set');
+			expect(button(ENTRY, 'Replace')).toBeDefined();
+			await vi.runAllTimersAsync();
+			await vi.waitFor(() => expect(host.textContent).toContain('example.com is connected.'));
+			vi.useRealTimers();
+		});
+		it('says the host did not accept the app password and points to Replace', async () => {
+			connectedAppsAnswers = [{ servers: [], accounts: [account('refused')] } as never];
+			await openAccountKey(undefined);
+			await saveAccountKey();
+			await vi.waitFor(() => expect(host.textContent).toContain('example.com didn’t accept this app password. Make a new one in your example.com account settings, then press Replace.'));
+		});
+		it('shows the row status line for any other failed check', async () => {
+			connectedAppsAnswers = [{ servers: [], accounts: [{ ...account('unreachable'), mailhost: { ...account('unreachable').mailhost, server: 'imap.example.com' } }] } as never];
+			await openAccountKey(undefined);
+			await saveAccountKey();
+			await vi.waitFor(() => expect(host.textContent).toContain('Can’t reach imap.example.com'));
+		});
+		it('keeps Clear but hides Remove while the account row still needs the key', async () => {
+			await openAccountKey(undefined, { is_set: true, removable: false }, false);
+			expect(button(ENTRY, 'Clear')).toBeDefined();
+			expect(() => button(ENTRY, 'Remove')).toThrow();
+		});
+		it('shows Remove for a key that can be removed', async () => {
+			await openAccountKey(undefined, { is_set: true, removable: true }, false);
+			expect(button(ENTRY, 'Remove')).toBeDefined();
 		});
 	});
 

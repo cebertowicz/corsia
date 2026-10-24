@@ -63,7 +63,9 @@ if (
 
 // Open-time memory and its retry timers outlive a mount, so no test inherits another's.
 // Imported lazily: the module reads localStorage, which is shimmed above.
+// The first call in a worker transforms the module cold, which can pass the 10 s hook default on a
+// loaded host; a test file's vi.setConfig can't raise it, since this hook's timeout is fixed here.
 afterEach(async () => {
 	const { _resetOpenTimeForTests } = await import('$lib/openTime');
 	_resetOpenTimeForTests();
-});
+}, 30_000);
