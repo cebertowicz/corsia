@@ -243,11 +243,10 @@
 	<div
 		class="attention-dock"
 		class:expanded={showChip}
-		data-attention-dock={current ? '' : undefined}
 	>
 		<CommentReplyChipRow onOpenDocument={onOpenDestination} />
 		{#if current}
-		<section bind:this={region} role="region" aria-label={regionLabel}>
+		<section data-attention-dock bind:this={region} role="region" aria-label={regionLabel}>
 		<p class="sr-only" aria-live="polite">{regionLabel}</p>
 		{#if !showChip}
 			<div class="dock-row">
