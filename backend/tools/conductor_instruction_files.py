@@ -273,13 +273,10 @@ def _save(
 ):
     """Blocking. Save through the one guidance-history owner, which rechecks the read
     revision under its lock, so a concurrent guidance save is never overwritten."""
-    from core.lesson_items import lesson_count
     from infra.guidance_git import save_guidance
     from infra.guidance_targets import GuidanceTarget, guidance_target
     from infra.guidance_messages import saver_author
 
-    items_before = lesson_count(path.read_text(encoding="utf-8", errors="replace"))
-    items_after = lesson_count(replacement.decode("utf-8", errors="replace"))
     target = guidance_target(path) or GuidanceTarget(
         "unknown", "this attached instruction file is not classified as guidance",
     )
@@ -287,13 +284,8 @@ def _save(
         {path: replacement}, workspace=Path(config.WORKSPACE), target=target,
         author=saver_author(thread_id=actor_thread_id), reason=kwargs.get("reason"),
         evidence=kwargs.get("evidence"), expected={path: expected_revision},
+        lesson_observation_thread_id=target_thread_id,
     )
-    if saved.outcome == "written":
-        from core.lesson_gate import record_save_stewardship
-
-        record_save_stewardship(
-            target_thread_id, items_before=items_before, items_after=items_after,
-        )
     return saved
 
 

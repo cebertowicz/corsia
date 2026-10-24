@@ -251,8 +251,12 @@ def _field_description() -> str:
         if operation != "add" and "field" in _OPERATION_FIELDS[operation]
     )
     return (
-        "The entry's field. Required on add. Optional on " + ", ".join(optional) + ": "
-        "without entry_id, inspect filters by it; otherwise it must match the stored field."
+        "The continuity field for the entry. Required on add, selecting "
+        "the new entry's field. Optional on " + ", ".join(optional) + ": "
+        "on inspect without entry_id it filters the listing to that field; "
+        "on inspect with entry_id, and on replace and drop, it is a "
+        "redundant but correct confirmation that must match the entry's "
+        "stored field, or the call is refused naming the mismatch."
     )
 
 
@@ -261,8 +265,13 @@ _FIELD_SCHEMAS: dict[str, dict[str, Any]] = {
         "type": "string",
         "enum": list(_OPERATIONS),
         "description": (
-            "inspect lists; add records; replace rewrites; drop retires. review is "
-            "checkpoint-only. place records a lesson; verdict and fields define outcome."
+            "inspect lists current entries and ids; add records a new entry; "
+            "replace rewrites one by id; drop retires one by id. review is "
+            "only for a checkpoint's placement review; place written queues "
+            "CORSIA to write the lesson and retire the entry; place already "
+            "retires an entry once destination is read and contains quote; "
+            "proposed queues placement for CORSIA to file as a proposal; trial "
+            "queues it as a trial skill with a review date."
         ),
     },
     "field": {
@@ -275,7 +284,8 @@ _FIELD_SCHEMAS: dict[str, dict[str, Any]] = {
         "type": "integer",
         "minimum": 1,
         "description": (
-            "The entry, as listed in the continuity index or by inspect."
+            "The entry to inspect, replace, or drop, as listed in the frozen "
+            "continuity index or returned by inspect."
         ),
     },
     "reason": {
@@ -318,14 +328,15 @@ _FIELD_SCHEMAS: dict[str, dict[str, Any]] = {
     "placement": {
         **ANSWER_SCHEMA,
         "description": (
-            "review select or place: destination. trial is only for your "
-            "own unproven hypothesis."
+            "review select, place proposed or place trial: where the lesson "
+            "goes, as the placement review asks. trial is only for your own "
+            "unproven hypothesis, never for what a person told you."
         ),
     },
     "room": {
         "type": "array",
         "items": OPERATION_SCHEMA,
-        "description": "review select only: make-room operations when the file is at its cap.",
+        "description": "review select only, when the review refuses for the cap: make-room operations.",
     },
     **{
         name: (

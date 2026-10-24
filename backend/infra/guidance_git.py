@@ -26,7 +26,7 @@ from infra.guidance_cas import stale_path
 from infra.guidance_history_paths import digest, file_version, find_commit
 from infra.guidance_messages import (
     SAVE_COMMITTED, SAVE_FAILED, SAVE_HISTORY_OFF, SAVE_STALE, SAVE_UNRECORDED, SAVE_UNSYNCED,
-    commit_message, recorded_reason,
+    commit_message, is_person_author, recorded_reason,
 )
 from infra.guidance_targets import GuidanceTarget
 from infra.skill_save_validation import refused_save
@@ -274,13 +274,21 @@ def save_guidance(
     binary_safe_history: bool = False,
     write: Callable[[Path, bytes], object] = _write_bytes,
     lesson_gate: bool = True,
+    lesson_observation_thread_id: str | None = None,
 ) -> SaveResult:
     """Save writes and compare-and-swap deletes in one guidance-history commit.
 
     Binary-safe reviewed bundles use raw SHA-256 and a 1 MB file ceiling; ordinary guidance is text-only.
     An agent's new or changed lesson is refused unless the caller passes ``lesson_gate=False``.
     """
-    if (refused := refused_save(writes, author=author, lesson_gate=lesson_gate, workspace=workspace, scope=target.scope)) is not None:
+    lesson_changes = ()
+    if lesson_gate and not is_person_author(author):
+        from infra.lesson_save_gate import lesson_changes as assess_lesson_changes
+
+        lesson_changes = assess_lesson_changes(writes)
+    if (refused := refused_save(
+        writes, author=author, lesson_gate=lesson_gate, lesson_changes=lesson_changes,
+    )) is not None:
         return refused
     deletes = deletes or {}
     if set(writes) & set(deletes):
@@ -305,6 +313,17 @@ def save_guidance(
     }
     logger.info("guidance save {}", properties)
     emit_product_event("guidance_history", "save", properties=properties)
+    if result.outcome == "written" and lesson_changes:
+        from infra.lesson_save_gate import observe_written_save
+
+        if warning := observe_written_save(
+            lesson_changes, author, stewardship_thread_id=lesson_observation_thread_id,
+        ):
+            result = SaveResult(
+                result.outcome, result.reason, result.sha,
+                line="\n".join(line for line in (result.line, warning) if line),
+                unsynced=result.unsynced, errors=result.errors,
+            )
     return result
 
 

@@ -12,7 +12,6 @@ which the learning status report counts.
 from __future__ import annotations
 
 import json
-import re
 import sqlite3
 import uuid
 from dataclasses import dataclass
@@ -40,7 +39,6 @@ WRONG_RIGHT = (
     'Right (the choice it belongs to): "accepting evidence that work is done".'
 )
 _LINE_VERDICTS = ("written",)
-_AUTHOR_THREAD = re.compile(r"<([^<>@\s]+)@agents\.corsia\.local>\s*$")
 
 
 @dataclass(frozen=True)
@@ -175,29 +173,15 @@ def save_refusal_line(path: Path, *, removed: bool = False) -> str:
     ])
 
 
-def author_thread(author: str | None) -> str | None:
-    """The thread a guidance author names, or None for the person and CORSIA."""
-    found = _AUTHOR_THREAD.search(author or "")
-    return found.group(1) if found else None
-
-
 def record(
     db: sqlite3.Connection, thread_id: str | None, *, result: str, reason: str, verdict: str,
     fields: tuple[str, ...] = (), decision: str | None = None, widens: int | None = None,
     items_before: int | None = None, items_after: int | None = None,
 ) -> None:
     """One outcome fact on the caller's open transaction; nothing here commits."""
-    from infra.outcome_event_attributes import count_attr, enum_attr, text_attr
     from infra.outcome_events import record_outcome_event
 
     attributes: dict[str, Any] = {"result": result, "reason": reason, "verdict": verdict}
-    specs = {
-        "result": enum_attr("accepted", "refused"),
-        "reason": enum_attr("fields", "verbatim", "lesson-outside-placement", "rewording", "stewardship", "widens"),
-        "verdict": enum_attr("written", "proposed", "trial", "save"),
-        "fields": text_attr(200), "decision": text_attr(_DECISION_CHARS), "widens": text_attr(32),
-        "items_before": count_attr(), "items_after": count_attr(),
-    }
     if fields:
         attributes["fields"] = ",".join(fields)
     if decision:
@@ -211,7 +195,7 @@ def record(
     record_outcome_event(
         db, dedupe_key=f"lesson-gate:{uuid.uuid4()}", event_name=EVENT, source="corsia",
         provenance="instrumented", ts=datetime.now(timezone.utc).isoformat(),
-        agent_thread_id=thread_id, attributes=attributes, declared_specs=specs,
+        agent_thread_id=thread_id, attributes=attributes,
     )
 
 
@@ -232,30 +216,17 @@ def record_accepted(db: sqlite3.Connection, thread_id: str, verdict: str, gate: 
         )
 
 
-def record_save_reword(author: str | None, *, items_before: int, items_after: int) -> None:
-    """Record one rewritten guidance file's canonical lesson-item counts."""
+def record_save_observation(
+    thread_id: str | None, *, reason: str, items_before: int, items_after: int,
+) -> None:
+    """Record one completed save observation, never an accepted placed lesson."""
     from infra.database import get_db, write_transaction
 
     db = get_db()
     try:
         with write_transaction(db, scope="lesson_gate") as connection:
             record(
-                connection, author_thread(author), result="accepted", reason="rewording", verdict="save",
-                items_before=items_before, items_after=items_after,
-            )
-    finally:
-        db.close()
-
-
-def record_save_stewardship(thread_id: str, *, items_before: int, items_after: int) -> None:
-    """Record a managed-file update against its target with canonical item counts."""
-    from infra.database import get_db, write_transaction
-
-    db = get_db()
-    try:
-        with write_transaction(db, scope="lesson_gate") as connection:
-            record(
-                connection, thread_id, result="accepted", reason="stewardship", verdict="save",
+                connection, thread_id, result="observed", reason=reason, verdict="save",
                 items_before=items_before, items_after=items_after,
             )
     finally:
@@ -265,12 +236,13 @@ def record_save_stewardship(thread_id: str, *, items_before: int, items_after: i
 def record_save_refusal(author: str | None) -> None:
     """Record a refused file save. A failure to record is logged, never raised: the refusal stands."""
     from infra.database import get_db, write_transaction
+    from infra.guidance_messages import saver_thread
 
     try:
         db = get_db()
         try:
             with write_transaction(db, scope="lesson_gate") as connection:
-                record(connection, author_thread(author), result="refused", reason=SAVE_REASON, verdict="save")
+                record(connection, saver_thread(author), result="refused", reason=SAVE_REASON, verdict="save")
         finally:
             db.close()
     except Exception:
@@ -278,7 +250,7 @@ def record_save_refusal(author: str | None) -> None:
 
 
 def gate_counts(db: sqlite3.Connection, thread_ids: tuple[str, ...], from_ts: str, to_ts: str) -> dict[str, int]:
-    """Refusals, accepted lessons and widens links for these threads in ``[from_ts, to_ts)``."""
+    """Refusals and accepted placed lessons (never save observations) in ``[from_ts, to_ts)``."""
     counts = {"refused": 0, "accepted": 0, "widens": 0}
     if not thread_ids:
         return counts
@@ -286,6 +258,7 @@ def gate_counts(db: sqlite3.Connection, thread_ids: tuple[str, ...], from_ts: st
         "SELECT json_extract(attributes,'$.result') AS result, count(*) AS n, "
         "sum(json_extract(attributes,'$.widens') IS NOT NULL) AS widens FROM outcome_events "
         "WHERE event_name=? AND retracted_at IS NULL AND ts>=? AND ts<? "
+        "AND json_extract(attributes,'$.result') IN ('refused','accepted') "
         "AND agent_thread_id IN (SELECT value FROM json_each(?)) GROUP BY result",
         (EVENT, from_ts, to_ts, json.dumps(list(thread_ids))),
     ).fetchall()

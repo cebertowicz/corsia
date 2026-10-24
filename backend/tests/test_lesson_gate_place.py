@@ -331,7 +331,7 @@ def test_a_folded_save_records_before_and_after_lesson_items(env: Env) -> None:
 
     assert saved.outcome == "written"
     assert _facts(env) == [{
-        "result": "accepted", "reason": "rewording", "verdict": "save",
+        "result": "observed", "reason": "rewording", "verdict": "save",
         "items_before": 2, "items_after": 1, "thread": THREAD,
     }]
 

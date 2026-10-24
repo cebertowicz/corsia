@@ -197,13 +197,14 @@ ATTRIBUTE_ALLOWLISTS: dict[str, dict[str, AttributeSpec]] = {
         "truncated": enum_attr("true", "false"),
         "original_tokens": count_attr(),
     },
-    # The lesson gate's refusals and accepted lessons (core/lesson_gate.py). The decision is the
-    # agent's own one-line statement of the choice, kept so lessons per decision can be counted.
+    # The lesson gate's refusals, accepted placed lessons, and completed-save observations.
+    # Only accepted placement carries a decision, so reports never treat observations as lessons.
     LESSON_GATE_EVENT: {
-        "result": enum_attr("refused", "accepted"),
-        "reason": enum_attr("fields", "widens", "verbatim", "lesson-outside-placement"),
+        "result": enum_attr("refused", "accepted", "observed"),
+        "reason": enum_attr("fields", "widens", "verbatim", "lesson-outside-placement", "rewording", "stewardship"),
         "verdict": enum_attr("written", "proposed", "trial", "save"),
         "fields": text_attr(80), "decision": text_attr(300), "widens": id_attr(),
+        "items_before": count_attr(), "items_after": count_attr(),
     },
     "github.issue.opened": {**_ISSUE_ATTRS},
     "github.issue.closed": {

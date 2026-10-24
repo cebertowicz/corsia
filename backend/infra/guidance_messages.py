@@ -15,6 +15,7 @@ from host_access.credential_sanitizer import contains_credential
 
 _CORSIA = "CORSIA <corsia@localhost>"
 _SAFE_RE = re.compile(r"[^\w.-]")
+_AGENT_AUTHOR = re.compile(r"<([^<>@\s]+)@agents\.corsia\.local>\s*$")
 _EVIDENCE_RE = re.compile(r"https?://\S+|[A-Za-z0-9][\w.:/#+-]{0,119}")
 
 SAVE_COMMITTED = "Saved and committed {sha} ({scope}). Reason recorded."
@@ -50,6 +51,12 @@ def saver_author(*, thread_id: str | None = None, user_id: str | None = None) ->
 def is_person_author(author: str | None) -> bool:
     """Whether a guidance author is the person: only a user-route save names a user address."""
     return author is not None and author.endswith("@users.corsia.local>")
+
+
+def saver_thread(author: str | None) -> str | None:
+    """Return the saving agent's thread id, if its Git author carries one."""
+    found = _AGENT_AUTHOR.search(author or "")
+    return found.group(1) if found else None
 
 
 def recorded_reason(reason: str | None) -> str:

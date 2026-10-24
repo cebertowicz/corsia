@@ -133,51 +133,26 @@ def test_wrapped_item_reword_and_reflow_pass_without_item_growth(tmp_path) -> No
     assert _refuse({path: reflowed}) is None
 
 
-def test_shared_parser_ignores_fenced_headings_and_joins_wrapped_items() -> None:
-    from core.lesson_items import lesson_items
+def test_save_parser_ignores_fenced_headings_and_joins_wrapped_items() -> None:
+    from infra.lesson_save_gate import lesson_items
 
     assert lesson_items("## Lessons\n- Real item\n```md\n## Lessons\n- Not an item\n```\n") == {"Real item": 1}
 
 
-def test_a_new_wrapped_item_passes_when_it_exists_in_another_same_scope_file(tmp_path, monkeypatch) -> None:
-    source = _on_disk(tmp_path, "context/source.md", "## Lessons\n- Keep commits\n  focused.\n")
+def test_a_matching_item_in_another_file_does_not_bypass_the_target_only_gate(tmp_path, monkeypatch) -> None:
+    _on_disk(tmp_path, "context/source.md", "## Lessons\n- Keep commits\n  focused.\n")
     target = tmp_path / "context" / "target.md"
 
-    def no_rglob(*_args, **_kwargs):
-        raise AssertionError("the save gate must use the bounded guidance inventory")
+    monkeypatch.setattr(Path, "rglob", lambda *_args, **_kwargs: pytest.fail("workspace walk"))
 
-    monkeypatch.setattr(Path, "rglob", no_rglob)
-
-    assert source.exists()
-    assert _refuse(
-        {target: "## Lessons\n- Keep commits focused.\n"},
-        workspace=tmp_path, scope="context, workspace scope",
-    ) is None
-
-
-def test_same_scope_inventory_never_walks_unrelated_workspace_files(tmp_path, monkeypatch) -> None:
-    from core.guidance_paths import guidance_candidates
-
-    expected = _on_disk(tmp_path, "context/source.md", "## Lessons\n- Keep commits focused.\n")
-    _on_disk(tmp_path, ".git/objects/pack/unrelated", "not guidance")
-    _on_disk(tmp_path, "artifacts/nested/unrelated.md", "not guidance")
-
-    def no_rglob(*_args, **_kwargs):
-        raise AssertionError("guidance inventory must use its bounded path shapes")
-
-    monkeypatch.setattr(Path, "rglob", no_rglob)
-
-    assert guidance_candidates(tmp_path, db=None) == [expected]
+    assert _reason(_refuse({target: "## Lessons\n- Keep commits focused.\n"})) == REASON
 
 
 def test_one_genuinely_new_item_is_refused_even_when_another_item_exists(tmp_path) -> None:
     _on_disk(tmp_path, "context/source.md", "## Lessons\n- Keep commits focused.\n")
     target = tmp_path / "context" / "target.md"
 
-    result = _refuse(
-        {target: "## Lessons\n- Keep commits focused.\n- Read the release notes.\n"},
-        workspace=tmp_path, scope="context, workspace scope",
-    )
+    result = _refuse({target: "## Lessons\n- Keep commits focused.\n- Read the release notes.\n"})
 
     assert _reason(result) == REASON
 
