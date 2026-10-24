@@ -9,6 +9,7 @@ from connections.mail import email_screen
 from connections.google.accounts import thread_key as google_thread_key
 from connections.microsoft import client as microsoft_client, mail as microsoft_mail
 from connections.microsoft.mail import thread_key as microsoft_thread_key
+from connections.mailhost import inbox as mailhost_inbox
 from events.connectors import gmail_feed as feed
 
 
@@ -80,7 +81,34 @@ class MicrosoftRead:
         return {}
 
 
-ADAPTERS: dict[str, GmailRead | MicrosoftRead] = {"google": GmailRead(), "microsoft": MicrosoftRead()}
+class MailHostRead:
+    connector = "mailhost"
+    cursor_key = "imap_uid"
+
+    @staticmethod
+    def thread_key(_account_id: str, _message_thread_id: object) -> None:
+        return None
+
+    async def floor(self, account_id: str) -> str:
+        return await mailhost_inbox.floor(account_id)
+
+    async def read(self, account_id: str, position: str) -> tuple[str, list[Any]]:
+        return await mailhost_inbox.added(account_id, position)
+
+    async def messages(self, account_id: str, page: Any) -> AsyncIterator[tuple[Any, Any]]:
+        for message in page:
+            yield message, message
+
+    def date(self, headers: dict[str, str]) -> str | None:
+        return headers.get("date") or None
+
+    def cursor_facts(self, position: str) -> dict[str, str]:
+        return {}
+
+
+ADAPTERS: dict[str, GmailRead | MicrosoftRead | MailHostRead] = {
+    "google": GmailRead(), "microsoft": MicrosoftRead(), "mailhost": MailHostRead(),
+}
 
 
 def event_payload(

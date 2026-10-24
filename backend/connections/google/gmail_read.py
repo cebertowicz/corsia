@@ -35,8 +35,11 @@ class Message:
     body: str = ""
 
 
-def check_message_id(value: object) -> str:
-    """The id as Gmail issues them, or a fixed refusal; keeps a model-supplied value out of the URL path."""
+def check_message_id(value: object, _account_id: str | None = None) -> str:
+    """The id as Gmail issues them, or a fixed refusal; keeps a model-supplied value out of the URL path.
+
+    Gmail's ids are already unique to a mailbox; the account is taken so every mail backend answers one call.
+    """
     if not isinstance(value, str) or not _ID.match(value.strip()):
         raise GmailRequestError("That message can't be found.")
     return value.strip()

@@ -4,11 +4,12 @@ message ids, message parsing and event expansion."""
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
+from types import SimpleNamespace
 
 import pytest
 from mailhost_fakes import SAMPLE_EVENTS, message
 
-from connections.mailhost import account, events, query, read
+from connections.mailhost import account, dns, events, query, read
 from connections.mailhost.endpoints import (
     BAD_ADDRESS, Endpoints, EndpointsRefused, Server, parse_address, parse_caldav, parse_server,
 )
@@ -33,6 +34,28 @@ def test_a_known_address_gets_the_tables_servers_and_icloud_tries_the_bare_name(
     assert (found.imap.host, found.smtp.host, found.known) == ("imap.mail.me.com", "smtp.mail.me.com", True)
     assert found.usernames(None) == ("Sam.Lee@iCloud.com", "Sam.Lee")
     assert known_host("pat@example.org") is None
+
+
+def test_unknown_host_uses_complete_rfc_srv_discovery_before_asking_for_servers() -> None:
+    records = {
+        "_imaps._tcp.example.test": [SimpleNamespace(priority=0, weight=0, target="imap.example.test.", port=993)],
+        "_submission._tcp.example.test": [SimpleNamespace(priority=0, weight=0, target="smtp.example.test.", port=587)],
+        "_caldavs._tcp.example.test": [SimpleNamespace(priority=0, weight=0, target="cal.example.test.", port=443)],
+    }
+    found = dns.discover("example.test", "sam@example.test", resolver=lambda name, kind: records[name])
+    assert found is not None
+    assert found.imap == Server("imap.example.test", 993)
+    assert found.smtp == Server("smtp.example.test", 587)
+    assert found.caldav == "https://cal.example.test:443/"
+
+
+def test_unknown_host_ignores_partial_or_unusable_srv_answers() -> None:
+    assert dns.discover("example.test", "sam@example.test", resolver=lambda *_: []) is None
+    records = {
+        "_imaps._tcp.example.test": [SimpleNamespace(priority=0, weight=0, target=".", port=993)],
+        "_submission._tcp.example.test": [SimpleNamespace(priority=0, weight=0, target="smtp.example.test.", port=587)],
+    }
+    assert dns.discover("example.test", "sam@example.test", resolver=lambda name, kind: records[name]) is None
 
 
 def test_zoho_and_gmx_say_to_turn_imap_on_first() -> None:
@@ -111,13 +134,26 @@ def test_non_ascii_search_text_gets_its_own_line() -> None:
     assert str(raised.value) == query.NOT_ASCII
 
 
-def test_message_ids_are_uidvalidity_dash_uid_and_nothing_else() -> None:
-    assert read.parse_message_id("7-12") == (7, 12)
-    assert read.check_message_id(" 007-0012 ") == "7-12"
-    for bad in ("7", "7-12 ALL", "7-12;", "a-b", "", None, "-1-2", "1234567890123-1"):
+def test_message_ids_are_account_tag_uidvalidity_uid_and_nothing_else() -> None:
+    mine = read.mint_message_id("account-a", 7, 12)
+    assert read.parse_message_id("account-a", mine) == (7, 12)
+    tag = mine.split("-")[0]
+    assert read.check_message_id(f" {tag}-007-0012 ", "account-a") == f"{tag}-7-12"
+    for bad in ("7", "7-12", f"{tag}-7-12 ALL", f"{tag}-7-12;", "a-b-c", "", None, f"{tag}--1-2", f"{tag}-1234567890123-1"):
         with pytest.raises(read.MessageNotFound) as raised:
-            read.parse_message_id(bad)
+            read.parse_message_id("account-a", bad)
         assert str(raised.value) == read.NOT_FOUND
+
+
+def test_another_accounts_message_id_is_not_found_even_with_the_same_uidvalidity_and_uid() -> None:
+    theirs = read.mint_message_id("account-b", 7, 12)
+    assert theirs != read.mint_message_id("account-a", 7, 12)
+    with pytest.raises(read.MessageNotFound) as raised:
+        read.parse_message_id("account-a", theirs)
+    assert str(raised.value) == read.NOT_FOUND
+    with pytest.raises(read.MessageNotFound):
+        read.check_message_id(theirs, "account-a")
+    assert read.check_message_id(theirs, "account-b") == theirs
 
 
 def test_a_message_parses_to_headers_and_a_text_body_and_html_loses_its_tags() -> None:

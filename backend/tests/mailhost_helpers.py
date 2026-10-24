@@ -12,7 +12,7 @@ from types import SimpleNamespace
 import pytest
 from mailhost_fakes import SAMPLE_EVENTS, FakeCalDav, FakeImap, FakeSmtp, make_authority, message
 
-from connections.mailhost import account, check, store, tls
+from connections.mailhost import account, check, folders, store, tls
 from infra import key_store
 from infra.corsia_agent import set_corsia_agent
 from infra.database import get_db
@@ -35,6 +35,7 @@ def env(isolated_db, tmp_path, monkeypatch, authority):
     root.mkdir()
     monkeypatch.setattr("infra.config.STATE_ROOT", root)
     monkeypatch.setattr(tls, "context", authority.client_context)
+    folders._cache.clear()
     return authority
 
 
@@ -73,9 +74,12 @@ def add_account(built, conductor_thread, *, address=ADDRESS, **extra) -> dict:
         "imap": f"127.0.0.1:{built.imap.port}", "smtp": f"127.0.0.1:{built.smtp.port}",
         "caldav": built.caldav.url if built.caldav else None, **extra,
     }
+    clean = account.checked_address(address)
     db = get_db()
     try:
-        return account.connect(address, thread_id=conductor_thread, db=db, **arguments)
+        return account.existing(clean, db=db) or account.create(
+            clean, account.settings(clean, **arguments), thread_id=conductor_thread, db=db,
+        )
     finally:
         db.close()
 

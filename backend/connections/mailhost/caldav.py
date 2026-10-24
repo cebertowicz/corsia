@@ -155,3 +155,19 @@ async def fetch_calendar_data(ep: Endpoints, password: str, start: datetime, end
                 if data is not None and data.text:
                     texts.append(data.text)
     return texts
+
+
+async def put_event(ep: Endpoints, secret: str, uid: str, ics: str) -> bool:
+    """Store one event on the account's first calendar; False (and nothing else) when it cannot be stored."""
+    if not ep.calendars or not ep.caldav_username:
+        return False
+    url = f"{ep.calendars[0].rstrip('/')}/{uid}.ics"
+    try:
+        async with _client(ep.caldav_username, secret) as client:
+            response = await client.put(
+                url, content=ics.encode("utf-8"),
+                headers={"Content-Type": "text/calendar; charset=utf-8", "If-None-Match": "*"},
+            )
+    except httpx.HTTPError:
+        return False
+    return response.status_code in (200, 201, 204)

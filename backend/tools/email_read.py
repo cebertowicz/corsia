@@ -13,14 +13,13 @@ import re
 from typing import Any
 
 from connections.account_errors import AccountError
-from connections.connected_accounts import MAILHOST_PROVIDER
 from connections.google import gmail_read
 from connections.mail import email_screen
 from connections.mail_accounts import MAIL_ACCOUNT_PARAM, resolve_for_thread
 from connections.google.accounts import thread_key
-from connections.mailhost import read as mailhost_read
 from infra.db_async import run_in_db
 from tools.base import Tool
+from tools.mail_backends import MailReader, backend_for
 
 log = logging.getLogger(__name__)
 
@@ -37,14 +36,10 @@ def flagged_text(rule: str) -> str:
     )
 
 
-async def _account(kwargs: dict[str, Any]) -> dict:
-    """The account the call names and this thread may use, or :class:`AccountError`."""
-    return await run_in_db(resolve_for_thread, kwargs.get("account_id"), kwargs.get("_thread_id"))
-
-
-def _backend(account: dict) -> Any:
-    """The module that reads this account's mailbox: Gmail's, or the mail host's."""
-    return mailhost_read if account["provider"] == MAILHOST_PROVIDER else gmail_read
+async def _reader(kwargs: dict[str, Any]) -> tuple[str, MailReader]:
+    """The account the call names and this thread may use, and its reader; or :class:`AccountError`."""
+    account = await run_in_db(resolve_for_thread, kwargs.get("account_id"), kwargs.get("_thread_id"))
+    return str(account["id"]), backend_for(account).read
 
 
 class EmailSearchTool(Tool):
@@ -82,15 +77,14 @@ class EmailSearchTool(Tool):
 
     async def execute(self, **kwargs: Any) -> str:
         try:
-            resolved = await _account(kwargs)
+            account, reader = await _reader(kwargs)
         except AccountError as exc:
             return f"Error: {exc}"
-        account = str(resolved["id"])
         query = kwargs.get("query")
         if not isinstance(query, str) or not query.strip():
             return "Error: query is required."
         try:
-            found = await _backend(resolved).search(account, query.strip(), kwargs.get("max") or 10)
+            found = await reader.search(account, query.strip(), kwargs.get("max") or 10)
             screens = await run_in_db(email_screen.stored_screens, account, [m.message_id for m in found])
         except AccountError as exc:
             return f"Error: {exc}"
@@ -136,16 +130,15 @@ class EmailReadTool(Tool):
 
     async def execute(self, **kwargs: Any) -> str:
         try:
-            resolved = await _account(kwargs)
+            account, reader = await _reader(kwargs)
         except AccountError as exc:
             return f"Error: {exc}"
-        account, backend = str(resolved["id"]), _backend(resolved)
         try:
-            message_id = backend.check_message_id(kwargs.get("message_id"))
+            message_id = reader.check_message_id(kwargs.get("message_id"), account)
             screen = (await run_in_db(email_screen.stored_screens, account, [message_id])).get(message_id)
             if screen is not None and screen.flagged:
                 return f"Error: {flagged_text(screen.rule)}"
-            message = await backend.fetch(account, message_id)
+            message = await reader.fetch(account, message_id)
             if screen is None or screen.status != email_screen.STATUS_SCREENED:
                 screen = await email_screen.screen_message(
                     account, message_id, message.headers, message.body,

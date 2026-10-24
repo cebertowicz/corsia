@@ -15,7 +15,7 @@ import httpx
 import pytest
 from auth_fixtures import OWNER_SESSION_TOKEN, OWNER_USER, TEST_PASSWORD, seed_account
 from fastapi import FastAPI
-from mailhost_fakes import HOST_REPLY_MARKER
+from mailhost_fakes import HOST_REPLY_MARKER, message
 from mailhost_helpers import (  # noqa: F401  (fixtures)
     ADDRESS, BODY_CANARY, PASSWORD, add_account, authority, conductor, count_rows, env, row, run_check, servers,
 )
@@ -27,9 +27,11 @@ from api.connected_account_rows import list_account_rows
 from connections import account_actions, mail_accounts
 from connections.account_errors import AccountError
 from connections.google import accounts as google_accounts
-from connections.google.client import GoogleError
+from connections.google.client import NOT_CONNECTED, GoogleError
 from connections.mail import email_screen
+from events.connectors import mail_poller as poller
 from connections.mailhost import check, imap, read as mailhost_read, store
+from connections.mailhost import read as mail_read
 from connections.mailhost.errors import IMAP_OFF, PASSWORD_REFUSED, SERVER_UNREACHABLE, MailHostError
 from infra import key_store
 from infra.database import get_db
@@ -50,6 +52,10 @@ def _no_leak(*texts: str) -> None:
 async def _connect(conductor_thread: str, **arguments) -> Any:
     out = await MailHostConnectTool().execute(_thread_id=conductor_thread, **arguments)
     return out if out.startswith("Error") else json.loads(out)
+
+
+def mint(found, uid: int, *, validity: int = 7) -> str:
+    return mail_read.mint_message_id(found.account_id, validity, uid)
 
 
 def _typed(built, **extra) -> dict:
@@ -324,16 +330,17 @@ async def test_search_and_read_work_on_a_connected_mail_host_account(connected, 
     found = json.loads(await EmailSearchTool().execute(_thread_id=connected.thread, query="from:sam", max=5))
     assert connected.built.imap.searches[-1] == 'FROM "sam"'
     ids = [item["message_id"] for item in found["messages"]]
-    assert ids == ["7-2", "7-1"] and found["messages"][0]["from"].endswith("<billing@example.com>")
+    assert ids == [mint(connected, 2), mint(connected, 1)] and found["messages"][0]["from"].endswith("<billing@example.com>")
     assert all("body" not in item for item in found["messages"])
-    read = json.loads(await EmailReadTool().execute(_thread_id=connected.thread, message_id="7-2"))
+    read = json.loads(await EmailReadTool().execute(_thread_id=connected.thread, message_id=mint(connected, 2)))
     assert read["subject"] == "Invoice 42" and BODY_CANARY in read["body"] and read["body"].startswith("<untrusted-email>")
     _no_leak(json.dumps(found), json.dumps(read))
 
 
 async def test_a_message_from_before_the_mailbox_was_rebuilt_reads_as_not_found(connected, clean_screen) -> None:
     await _set_through_keys(connected)
-    for stale in ("8-2", "7-99", "7-2; DELETE", "abc"):
+    for stale in (mint(connected, 2, validity=8), mint(connected, 99), mint(connected, 2) + "; DELETE", "7-2", "abc",
+                  mail_read.mint_message_id("another-account", 7, 2)):
         out = await EmailReadTool().execute(_thread_id=connected.thread, message_id=stale)
         assert out.startswith("Error") and "can't be found" in out and "DELETE" not in out.split("found")[-1]
 
@@ -435,12 +442,71 @@ async def test_two_accounts_need_an_account_id_and_it_names_the_choices(conducto
     assert named["messages"]
 
 
+async def test_scheduled_poller_floors_then_delivers_new_mail_and_resets_a_rebuilt_mailbox(
+    connected, clean_screen, monkeypatch,
+) -> None:
+    await _set_through_keys(connected)
+    for name in ("_accounts", "_inflight", "_due"):
+        monkeypatch.setattr(poller, name, {})
+    monkeypatch.setattr(poller, "_status", poller._fresh_status())
+    monkeypatch.setenv(poller.TEST_ENABLE_ENV, "1")
+    delivered = []
+
+    def deliver(_source, payload, **_kw):
+        delivered.append(payload)
+        return []
+
+    monkeypatch.setattr(poller, "deliver_platform_event_sync", deliver)
+
+    await poller.run_cycle()
+    assert delivered == []
+    db = get_db()
+    try:
+        first = db.execute("SELECT cursor_json FROM connected_accounts WHERE id=?", (connected.account_id,)).fetchone()[0]
+    finally:
+        db.close()
+    assert json.loads(first)["imap_uid"] == "7:2"
+
+    connected.built.imap.messages[3] = message("New invoice", "new body", sender="new@example.com")
+    poller._due[connected.account_id] = 0
+    await poller.run_cycle()
+    assert [item["message_id"] for item in delivered] == [mint(connected, 3)]
+
+    connected.built.imap.validity = 8
+    poller._due[connected.account_id] = 0
+    await poller.run_cycle()
+    assert [item["message_id"] for item in delivered] == [mint(connected, 3)]
+    db = get_db()
+    try:
+        rebuilt = db.execute("SELECT cursor_json FROM connected_accounts WHERE id=?", (connected.account_id,)).fetchone()[0]
+    finally:
+        db.close()
+    assert json.loads(rebuilt)["imap_uid"] == "8:3"
+
+    # A rebuild that renumbers below the old cursor floors at its own last UID, so mail
+    # numbered between the two is still delivered.
+    connected.built.imap.validity = 9
+    connected.built.imap.messages = {1: connected.built.imap.messages[3]}
+    poller._due[connected.account_id] = 0
+    await poller.run_cycle()
+    connected.built.imap.messages[2] = message("After the rebuild", "body", sender="later@example.com")
+    poller._due[connected.account_id] = 0
+    await poller.run_cycle()
+    assert [item["message_id"] for item in delivered] == [mint(connected, 3), mint(connected, 2, validity=9)]
+
+
 async def test_with_no_email_account_the_resolver_names_every_connection_path(env, conductor) -> None:
     with pytest.raises(AccountError) as refusal:
         mail_accounts.resolve_for_thread(None, conductor)
     assert str(refusal.value) == mail_accounts.NO_EMAIL_ACCOUNT
     output = await EmailSearchTool().execute(_thread_id=conductor, query="x")
     assert "google-setup" in output and "microsoft_status" in output and "microsoft_mail_search" in output and "microsoft_mail_read" in output and "mail-host-setup" in output
+
+
+async def test_with_no_mail_host_account_the_resolver_is_the_google_one_unchanged(env, conductor) -> None:
+    with pytest.raises(GoogleError) as ours:
+        google_accounts.resolve_for_thread(None, conductor)
+    assert str(ours.value) == NOT_CONNECTED
 
 
 async def test_mail_account_parameters_describe_every_supported_mail_account() -> None:

@@ -88,6 +88,15 @@ class _Connection:
         line, _, self.buffer = self.buffer.partition(b"\r\n")
         return line
 
+    def read_exact(self, size: int) -> bytes:
+        while len(self.buffer) < size:
+            chunk = self.sock.recv(65536)
+            if not chunk:
+                break
+            self.buffer += chunk
+        data, self.buffer = self.buffer[:size], self.buffer[size:]
+        return data
+
     def send(self, *lines: str | bytes) -> None:
         for line in lines:
             self.sock.sendall((line.encode() if isinstance(line, str) else line) + b"\r\n")
@@ -149,21 +158,33 @@ class _LineServer:
 
 class FakeImap(_LineServer):
     def __init__(self, authority: Authority, *, user: str, password: str, messages: dict[int, bytes] | None = None,
-                 implicit_tls: bool = True, offer_starttls: bool = False, imap_off: bool = False, validity: int = 7) -> None:
-        self.user, self.password, self.messages = user, password, messages or {}
+                 implicit_tls: bool = True, offer_starttls: bool = False, imap_off: bool = False, validity: int = 7,
+                 folders: dict[str, str] | None = None, uidplus: bool = False, refuse_append: bool = False) -> None:
+        self.user, self.password, self.messages = user, password, dict(messages or {})
         self.offer_starttls, self.imap_off, self.validity = offer_starttls, imap_off, validity
+        self.uidplus, self.refuse_append = uidplus, refuse_append
         self.searches: list[str] = []
+        #: Every APPEND the host accepted, in order, and the flags each carried.
+        self.appended: list[tuple[str, bytes]] = []
+        self.append_flags: list[tuple[str, str]] = []
+        #: Copies still in a non-inbox folder: uid -> [folder, raw, flags]; ``UID`` sub-commands as sent.
+        self.copies: dict[int, list] = {}
+        self.uid_commands: list[str] = []
+        #: Folder name -> its RFC 6154 flags, as LIST shows them.
+        self.folders = {"INBOX": "", "Drafts": "\\Drafts", "Sent": "\\Sent"} if folders is None else folders
         super().__init__(authority, implicit_tls=implicit_tls)
 
     def session(self, conn: _Connection) -> None:
         conn.send("* OK IMAP ready")
+        logged_in, selected = False, "INBOX"
         while (line := self.read(conn)) is not None:
             tag, _, rest = line.partition(" ")
             verb, _, args = rest.partition(" ")
             verb = verb.upper()
             self.commands.append((conn.tls, verb))
             if verb == "CAPABILITY":
-                conn.send("* CAPABILITY IMAP4rev1" + (" STARTTLS" if self.offer_starttls and not conn.tls else ""), f"{tag} OK done")
+                offered = "* CAPABILITY IMAP4rev1" + (" STARTTLS" if self.offer_starttls and not conn.tls else "")
+                conn.send(offered + (" UIDPLUS" if self.uidplus and logged_in else ""), f"{tag} OK done")
             elif verb == "STARTTLS" and self.offer_starttls and not conn.tls:
                 conn.send(f"{tag} OK begin TLS")
                 conn.upgrade(self.authority.server_context())
@@ -172,24 +193,80 @@ class FakeImap(_LineServer):
                 if self.imap_off:
                     conn.send(f"{tag} NO [ALERT] IMAP access is disabled for this account {HOST_REPLY_MARKER}")
                 elif given == [self.user, self.password]:
+                    logged_in = True
                     conn.send(f"{tag} OK logged in")
                 else:
                     conn.send(f"{tag} NO [AUTHENTICATIONFAILED] invalid credentials {HOST_REPLY_MARKER}")
             elif verb in ("SELECT", "EXAMINE"):
-                conn.send(f"* {len(self.messages)} EXISTS", f"* OK [UIDVALIDITY {self.validity}] ok", f"{tag} OK [READ-ONLY] done")
+                selected = shlex.split(args)[0]
+                access = "READ-ONLY" if verb == "EXAMINE" else "READ-WRITE"
+                conn.send(f"* {len(self.messages)} EXISTS", f"* OK [UIDVALIDITY {self.validity}] ok", f"{tag} OK [{access}] done")
+            elif verb == "UID" and selected != "INBOX":
+                self._copy_uid(conn, tag, args, selected)
             elif verb == "UID":
                 self._uid(conn, tag, args)
+            elif verb == "LIST":
+                conn.send(*(f'* LIST ({flags}) "/" "{name}"' for name, flags in self.folders.items()), f"{tag} OK done")
+            elif verb == "APPEND":
+                folder, _, size = args.rpartition(" ")
+                conn.send("+ ready")
+                raw = conn.read_exact(int(size.strip("{}+")))
+                conn.readline()
+                name = shlex.split(folder)[0]
+                flags = folder.partition("(")[2].partition(")")[0]
+                if name in self.folders and self.refuse_append:
+                    conn.send(f"{tag} NO [OVERQUOTA] mailbox full {HOST_REPLY_MARKER}")
+                elif name in self.folders:
+                    self.appended.append((name, raw))
+                    self.append_flags.append((name, flags))
+                    self.copies[1000 + len(self.appended)] = [name, raw, flags]
+                    conn.send(f"{tag} OK appended")
+                else:
+                    conn.send(f"{tag} NO [TRYCREATE] no such folder")
             elif verb == "LOGOUT":
                 conn.send("* BYE", f"{tag} OK bye")
                 return
             else:
                 conn.send(f"{tag} OK done")
 
+    def kept(self, folder: str) -> list[bytes]:
+        """The copies still in ``folder``: appended and not expunged, whether or not flagged deleted."""
+        return [raw for name, raw, _flags in self.copies.values() if name == folder]
+
+    def _copy_uid(self, conn: _Connection, tag: str, args: str, folder: str) -> None:
+        """``UID SEARCH HEADER Message-ID``, ``UID STORE +FLAGS.SILENT`` and ``UID EXPUNGE`` over the copies."""
+        self.uid_commands.append(args)
+        sub, _, rest = args.partition(" ")
+        sub = sub.upper()
+        if sub == "SEARCH":
+            wanted = shlex.split(rest)[-1].encode()
+            found = [uid for uid, (name, raw, _flags) in self.copies.items()
+                     if name == folder and b"\nMessage-ID: " + wanted + b"\r" in b"\n" + raw]
+            conn.send("* SEARCH " + " ".join(str(uid) for uid in found), f"{tag} OK done")
+        elif sub == "STORE":
+            for uid in (int(part) for part in rest.split(" ", 1)[0].split(",")):
+                if uid in self.copies:
+                    self.copies[uid][2] += " \\Deleted"
+            conn.send(f"{tag} OK done")
+        elif sub == "EXPUNGE" and self.uidplus:
+            for uid in (int(part) for part in rest.split(",")):
+                if "\\Deleted" in self.copies.get(uid, ["", b"", ""])[2]:
+                    del self.copies[uid]
+            conn.send(f"{tag} OK done")
+        else:
+            conn.send(f"{tag} BAD unknown command")
+
     def _uid(self, conn: _Connection, tag: str, args: str) -> None:
         sub, _, rest = args.partition(" ")
         if sub.upper() == "SEARCH":
             self.searches.append(rest)
-            conn.send("* SEARCH " + " ".join(str(uid) for uid in sorted(self.messages)), f"{tag} OK done")
+            uids = sorted(self.messages)
+            if rest.upper().startswith("UID "):
+                start, _, end = rest[4:].partition(":")
+                lower = int(start)
+                upper = max(uids, default=0) if end == "*" else int(end)
+                uids = [uid for uid in uids if lower <= uid <= upper]
+            conn.send("* SEARCH " + " ".join(str(uid) for uid in uids), f"{tag} OK done")
             return
         wanted, _, items = rest.partition(" ")
         for uid in (int(part) for part in wanted.split(",")):
@@ -205,13 +282,20 @@ class FakeImap(_LineServer):
 
 class FakeSmtp(_LineServer):
     def __init__(self, authority: Authority, *, user: str, password: str, implicit_tls: bool = True,
-                 offer_starttls: bool = False, plain_auth_without_tls: bool = False) -> None:
-        self.user, self.password = user, password
+                 offer_starttls: bool = False, plain_auth_without_tls: bool = False,
+                 refused_recipients: set[str] | None = None, refuse_sender: bool = False,
+                 drop_after_data: bool = False, refuse_data: bool = False) -> None:
+        self.user, self.password, self.refuse_data = user, password, refuse_data
         self.offer_starttls, self.plain_auth_without_tls = offer_starttls, plain_auth_without_tls
+        self.refused_recipients = refused_recipients or set()
+        self.refuse_sender, self.drop_after_data = refuse_sender, drop_after_data
+        self.mail_from: list[str] = []
+        self.sent: list[tuple[list[str], bytes]] = []
         super().__init__(authority, implicit_tls=implicit_tls)
 
     def session(self, conn: _Connection) -> None:
         conn.send("220 localhost ESMTP")
+        recipients: list[str] = []
         while (line := self.read(conn)) is not None:
             verb, _, args = line.partition(" ")
             verb = verb.upper()
@@ -230,6 +314,32 @@ class FakeSmtp(_LineServer):
                 decoded = base64.b64decode(args.split(" ", 1)[1]).split(b"\0") if " " in args else []
                 ok = decoded == [b"", self.user.encode(), self.password.encode()]
                 conn.send("235 accepted" if ok else f"535 rejected {HOST_REPLY_MARKER}")
+            elif verb == "MAIL":
+                sender = args.split(":", 1)[1].strip(" <>")
+                self.mail_from.append(sender)
+                conn.send("550 sender refused" if self.refuse_sender else "250 OK")
+            elif verb == "RCPT":
+                recipient = args.split(":", 1)[1].strip(" <>")
+                if recipient in self.refused_recipients:
+                    conn.send("550 recipient refused")
+                else:
+                    recipients.append(recipient)
+                    conn.send("250 OK")
+            elif verb == "DATA":
+                conn.send("354 go ahead")
+                body: list[bytes] = []
+                while (data_line := conn.readline()) not in (None, b"."):
+                    body.append(data_line)
+                if self.refuse_data:
+                    recipients.clear()
+                    conn.send(f"554 message refused as spam {HOST_REPLY_MARKER}")
+                    continue
+                self.sent.append((recipients[:], b"\r\n".join(body)))
+                recipients.clear()
+                if self.drop_after_data:
+                    conn.sock.close()
+                    return
+                conn.send("250 queued")
             elif verb == "QUIT":
                 conn.send("221 bye")
                 return
@@ -244,6 +354,9 @@ class FakeCalDav:
                  calendars: tuple[str, ...] = ("/calendars/home/work/",), principal_href: str = "/principal/",
                  supports: str = "VEVENT") -> None:
         self.requests: list[tuple[str, str, str]] = []
+        #: Every PUT: ``(path, body)``; ``put_status`` is what the host answers.
+        self.puts: list[tuple[str, str]] = []
+        self.put_status = 201
         outer = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -264,6 +377,15 @@ class FakeCalDav:
                 self._send(207, outer.body(self.command, self.path))
 
             do_PROPFIND = do_REPORT = _answer  # noqa: N815
+
+            def do_PUT(self) -> None:  # noqa: N802
+                body = self.rfile.read(int(self.headers.get("Content-Length") or 0)).decode()
+                given = self.headers.get("Authorization", "")
+                login = base64.b64decode(given.split(" ", 1)[1]).decode() if given.startswith("Basic ") else ""
+                if login != f"{user}:{password}":
+                    return self._send(401, "")
+                outer.puts.append((self.path, body))
+                self._send(outer.put_status, "")
 
             def _send(self, status: int, body: str) -> None:
                 data = body.encode()

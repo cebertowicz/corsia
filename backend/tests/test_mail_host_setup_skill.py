@@ -3,6 +3,7 @@ and the first-run step that hands "something else" to it."""
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
@@ -65,3 +66,13 @@ def test_first_run_hands_something_else_to_the_skill_after_the_profile_line_is_w
     assert email.index("`- **Email app:**") < email.index("**Something else:**")
     assert "no ready way to connect that email" not in FIRST_RUN_APP
     assert "noted which one you use" not in FIRST_RUN_APP
+
+
+def test_an_install_whose_baseline_lacks_the_skill_is_told_it_was_added() -> None:
+    from infra import bulletins
+
+    path = "skills/mail-host-setup/SKILL.md"
+    current = bulletins.system_identity()
+    assert path in dict(current.files)
+    baseline = json.dumps([[name, digest] for name, digest in current.files if name != path])
+    assert bulletins._identity_changes(baseline, current) == {"added": [path], "changed": [], "removed": []}

@@ -13,6 +13,7 @@ import asyncio
 import email
 import email.policy
 import html
+import hashlib
 import logging
 import re
 from dataclasses import dataclass, field
@@ -37,7 +38,7 @@ HEADER_NAMES = ("from", "to", "cc", "date", "subject")
 HEADER_CHARS = 500
 NOT_FOUND = "That message can't be found."
 NEEDS_PASSWORD = "This email account needs an app password. Ask the person to set it on its row in Connected apps."
-_ID = re.compile(r"^(\d{1,12})-(\d{1,12})$")
+_ID = re.compile(r"^([0-9a-f]{8})-(\d{1,12})-(\d{1,12})$")
 _TAGS = re.compile(r"<(script|style)\b.*?</\1>|<[^>]+>", re.DOTALL | re.IGNORECASE)
 _BLANKS = re.compile(r"\n{3,}")
 
@@ -54,17 +55,26 @@ class Message:
     body: str = ""
 
 
-def parse_message_id(value: object) -> tuple[int, int]:
-    """``(uidvalidity, uid)`` from a message id, or a fixed refusal that keeps model text out of IMAP commands."""
+def account_tag(account_id: str) -> str:
+    """A short tag of the account, so a message id names the mailbox it came from."""
+    return hashlib.sha256(account_id.encode("utf-8")).hexdigest()[:8]
+
+
+def mint_message_id(account_id: str, validity: int, uid: int) -> str:
+    return f"{account_tag(account_id)}-{validity}-{uid}"
+
+
+def parse_message_id(account_id: str, value: object) -> tuple[int, int]:
+    """``(uidvalidity, uid)`` of a message id minted for this account; any other id is a fixed refusal."""
     found = _ID.match(value.strip()) if isinstance(value, str) else None
-    if found is None:
+    if found is None or found.group(1) != account_tag(account_id):
         raise MessageNotFound(NOT_FOUND)
-    return int(found.group(1)), int(found.group(2))
+    return int(found.group(2)), int(found.group(3))
 
 
-def check_message_id(value: object) -> str:
-    """The message id in its one canonical form, or a fixed refusal."""
-    return "{}-{}".format(*parse_message_id(value))
+def check_message_id(value: object, account_id: str) -> str:
+    """The message id in its one canonical form, or a fixed refusal; it must have been minted for this account."""
+    return mint_message_id(account_id, *parse_message_id(account_id, value))
 
 
 def _headers(msg: email.message.EmailMessage) -> dict[str, str]:
@@ -139,12 +149,12 @@ async def search(account_id: str, query: str, max_results: int) -> list[Message]
             return imap.search(endpoints, username, password, wanted, limit)
 
     validity, found = await _guarded(account_id, check, call)
-    return [Message(f"{validity}-{uid}", "", parse(raw, with_body=False)[0]) for uid, raw in found]
+    return [Message(mint_message_id(account_id, validity, uid), "", parse(raw, with_body=False)[0]) for uid, raw in found]
 
 
 async def fetch(account_id: str, message_id: str) -> Message:
     """One message with its headers and decoded body."""
-    validity, uid = parse_message_id(message_id)
+    validity, uid = parse_message_id(account_id, message_id)
     endpoints, username, password, check = await run_in_db(credentials, account_id)
 
     def call() -> bytes | None:
@@ -155,4 +165,4 @@ async def fetch(account_id: str, message_id: str) -> Message:
     if raw is None:
         raise MessageNotFound(NOT_FOUND)
     headers, body = parse(raw, with_body=True)
-    return Message(f"{validity}-{uid}", "", headers, body)
+    return Message(mint_message_id(account_id, validity, uid), "", headers, body)

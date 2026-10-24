@@ -16,9 +16,9 @@ import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 
-from connections.mailhost import tls
+from connections.mailhost import folders, tls
 from connections.mailhost.endpoints import Endpoints
-from connections.mailhost.errors import IMAP_OFF, PASSWORD_REFUSED, SERVER_UNREACHABLE, MailHostError
+from connections.mailhost.errors import COPY_REFUSED, IMAP_OFF, PASSWORD_REFUSED, SERVER_UNREACHABLE, MailHostError
 
 TIMEOUT_SECONDS = 20.0
 MAILBOX = "INBOX"
@@ -26,6 +26,8 @@ _TRANSPORT = (OSError, EOFError, ssl.SSLError, socket.timeout, imaplib.IMAP4.err
 _IMAP_OFF = re.compile(r"imap.{0,40}(disabled|not enabled|turned off|not allowed|not activated)|disabled.{0,40}imap", re.I)
 _TEMPORARY = re.compile(r"\[(?:UNAVAILABLE|SERVERBUG|LIMIT|INUSE)\]|too many connections|try again later", re.I)
 _FETCHED = re.compile(rb"UID (\d+)")
+# What the person's own mail app sets: a draft it can open and edit, and sent mail already read.
+_APPEND_FLAGS = {folders.DRAFTS: r"(\Draft \Seen)", folders.SENT: r"(\Seen)"}
 _locks: dict[str, threading.Lock] = {}
 _locks_guard = threading.Lock()
 
@@ -143,6 +145,119 @@ def search(ep: Endpoints, username: str, password: str, criteria: list[str], lim
             raise _unreachable(ep)
         by_uid = dict(_items(data))
         return validity, [(int(uid), by_uid[int(uid)]) for uid in uids if int(uid) in by_uid]
+
+
+def _quoted(folder: str) -> str:
+    """imaplib sends an APPEND mailbox name as given, so a name with a space needs its quotes."""
+    return '"' + folder.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def _folder_key(ep: Endpoints, username: str) -> tuple[str, str]:
+    return f"{ep.imap.host}:{ep.imap_port()}", username
+
+
+def append(ep: Endpoints, username: str, password: str, kind: str, raw: bytes) -> bool:
+    """Save a reviewed RFC 822 message in the host's Drafts or Sent folder; False when the host shows no such folder.
+
+    A host that refuses the APPEND after login (over quota, a read-only folder) is a refused copy, not an
+    unreachable server.
+    """
+    with session(ep, username, password) as conn:
+        key = _folder_key(ep, username)
+        folder = folders.resolve(conn, key, kind)
+        if folder is None:
+            return False
+        status, _ = conn.append(_quoted(folder), _APPEND_FLAGS[kind], None, raw)
+        if status != "OK":
+            folders.forget(key)
+            raise MailHostError(COPY_REFUSED, name=ep.name)
+        return True
+
+
+def _uidplus(conn: imaplib.IMAP4) -> bool:
+    """Whether the logged-in host offers ``UID EXPUNGE`` (many list UIDPLUS only after login)."""
+    status, data = conn.capability()
+    return status == "OK" and b"UIDPLUS" in b" ".join(part for part in data if isinstance(part, bytes)).upper().split()
+
+
+def remove_copy(ep: Endpoints, username: str, password: str, kind: str, message_id: str) -> None:
+    """Delete CORSIA's own copy, found by its Message-ID, from the host's Drafts or Sent folder.
+
+    Only that copy is flagged ``\\Deleted``. It is expunged by UID when the host offers UIDPLUS and otherwise
+    left flagged: a plain EXPUNGE would also purge every message the person deleted and hasn't purged.
+    """
+    with session(ep, username, password) as conn:
+        folder = folders.resolve(conn, _folder_key(ep, username), kind)
+        if folder is None:
+            return
+        status, _ = conn.select(_quoted(folder))
+        if status != "OK":
+            raise _unreachable(ep)
+        status, found = conn.uid("SEARCH", "HEADER", "Message-ID", _quoted(message_id))
+        if status != "OK":
+            raise _unreachable(ep)
+        uids = ",".join(uid.decode() for uid in (found[0] or b"").split())
+        if not uids:
+            return
+        status, _ = conn.uid("STORE", uids, "+FLAGS.SILENT", r"(\Deleted)")
+        if status != "OK":
+            raise _unreachable(ep)
+        if _uidplus(conn):
+            conn.uid("EXPUNGE", uids)
+
+
+def reply_headers(ep: Endpoints, username: str, password: str, validity: int, uid: int) -> bytes | None:
+    """The threading and address headers of one inbox message, or None when it is gone or its mailbox was rebuilt."""
+    fields = "(UID BODY.PEEK[HEADER.FIELDS (MESSAGE-ID REFERENCES REPLY-TO FROM SUBJECT)])"
+    with session(ep, username, password) as conn:
+        if _select(conn, ep) != validity:
+            return None
+        status, data = conn.uid("FETCH", str(uid), fields)
+        if status != "OK":
+            raise _unreachable(ep)
+        return dict(_items(data)).get(uid)
+
+
+def _last_uid(conn: imaplib.IMAP4, ep: Endpoints) -> int:
+    status, found = conn.uid("SEARCH", "ALL")
+    if status != "OK":
+        raise _unreachable(ep)
+    return max((int(uid) for uid in (found[0] or b"").split()), default=0)
+
+
+def inbox_cursor(ep: Endpoints, username: str, password: str) -> tuple[int, int]:
+    """The inbox UIDVALIDITY and current last UID, used as a no-replay poll floor."""
+    with session(ep, username, password) as conn:
+        validity = _select(conn, ep)
+        return validity, _last_uid(conn, ep)
+
+
+POLL_BATCH_SIZE = 50
+
+
+def added_after(
+    ep: Endpoints, username: str, password: str, validity: int, last_uid: int, max_bytes: int,
+) -> tuple[int, int, list[tuple[int, bytes]]]:
+    """Fetch one bounded, oldest-first batch newer than the durable UID cursor."""
+    with session(ep, username, password) as conn:
+        current_validity = _select(conn, ep)
+        if current_validity != validity:
+            # A rebuilt mailbox: the old cursor means nothing here, so take the whole mailbox's
+            # last UID as the new no-replay floor.  Rare, so the full search is acceptable.
+            return current_validity, _last_uid(conn, ep), []
+        status, found = conn.uid("SEARCH", "UID", f"{last_uid + 1}:*")
+        if status != "OK":
+            raise _unreachable(ep)
+        # RFC 3501 permits a range starting beyond the current highest UID to include
+        # that highest UID, so enforce the durable cursor again client-side.
+        wanted = sorted(uid for uid in (int(uid) for uid in (found[0] or b"").split()) if uid > last_uid)[:POLL_BATCH_SIZE]
+        if not wanted:
+            return current_validity, last_uid, []
+        status, data = conn.uid("FETCH", ",".join(str(uid) for uid in wanted), f"(UID BODY.PEEK[]<0.{max_bytes}>)")
+        if status != "OK":
+            raise _unreachable(ep)
+        by_uid = dict(_items(data))
+        return current_validity, wanted[-1], [(uid, by_uid[uid]) for uid in wanted if uid in by_uid]
 
 
 def fetch(ep: Endpoints, username: str, password: str, validity: int, uid: int, max_bytes: int) -> bytes | None:

@@ -15,7 +15,7 @@ _NAMESPACE = re.compile(r"[a-z][a-z0-9_]{0,31}\Z")
 # registered connector is missing here.
 _RESERVED = {
     "corsia", "test", "script", "agent", "otel", "worker",
-    "document", "github", "gmail", "library", "measurement", "microsoft", "plan",
+    "document", "github", "gmail", "library", "mailhost", "measurement", "microsoft", "plan",
 }
 # The one definition of what the server stamps on every declared event: a file can't declare these,
 # the registry adds them to each event's specs, and admission removes them from an emitter's attributes.
