@@ -64,7 +64,13 @@ def list_account_rows(thread_id: str | None, *, db: sqlite3.Connection) -> list[
         provider = provider_of(provider_name)
         if provider.row_details:
             details.update(provider.row_details(account_ids, db))
-    return [account_row(account, db=db, detail=details.get(str(account["id"]))) for account in accounts]
+    return [
+        account_row(
+            account, db=db,
+            detail=details.get(str(account["id"]), {}) if provider_of(str(account["provider"])).row_details else None,
+        )
+        for account in accounts
+    ]
 
 
 def _authorize(account_id: str, user: dict, *, person_only: bool = False) -> str:

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import asyncio
+import imaplib
 import json
 import logging
 import uuid
@@ -21,12 +22,15 @@ from mailhost_helpers import (  # noqa: F401  (fixtures)
 
 from api import key_write_guard
 from api import keys as keys_api
+from api import mcp as mcp_api
+from api.connected_account_rows import list_account_rows
 from connections import account_actions, mail_accounts
 from connections.account_errors import AccountError
 from connections.google import accounts as google_accounts
 from connections.google.client import GoogleError
 from connections.mail import email_screen
-from connections.mailhost import check, store
+from connections.mailhost import check, imap, read as mailhost_read, store
+from connections.mailhost.errors import IMAP_OFF, PASSWORD_REFUSED, SERVER_UNREACHABLE, MailHostError
 from infra import key_store
 from infra.database import get_db
 from tests.registry_helpers import make_session
@@ -59,6 +63,7 @@ def client(env, monkeypatch):
     monkeypatch.setattr(key_write_guard, "_pending", {})
     app = FastAPI()
     app.include_router(keys_api.router)
+    app.include_router(mcp_api.router)
     return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")
 
 
@@ -171,6 +176,16 @@ async def test_pasting_the_password_runs_the_check_and_the_account_connects(conn
     _no_leak(listed.text, caplog.text, found["raw"])
 
 
+async def test_keys_list_discloses_typed_server_destinations_but_not_known_hosts(conductor, servers, client) -> None:
+    typed = add_account(servers(), conductor)
+    known = await _connect(conductor, address="pat@icloud.com")
+    listing = await client.get("/api/keys", headers=_auth())
+    assert listing.status_code == 200, listing.text
+    entries = {entry["name"]: entry for entry in listing.json()["keys"]}
+    assert entries[typed["key_name"]]["destination_hosts"] == ["127.0.0.1"]
+    assert "destination_hosts" not in entries[known["key_name"]]
+
+
 async def test_clearing_the_key_through_keys_returns_the_account_to_waiting(connected) -> None:
     await _set_through_keys(connected)
     cleared = await connected.client.post(f"/api/keys/{connected.key}/clear", headers=_auth(), json={"password": TEST_PASSWORD})
@@ -202,6 +217,103 @@ async def test_a_known_hosts_pasted_password_loses_all_whitespace_and_a_typed_ho
     with pytest.raises(key_store.KeyStoreError) as refused:
         key_store.set_value(typed, "secret word")
     assert "mail.test" in str(refused.value) and "secret" not in str(refused.value)
+
+
+def _account_row_selects() -> list[str]:
+    db = get_db()
+    statements: list[str] = []
+    db.set_trace_callback(statements.append)
+    try:
+        list_account_rows(None, db=db)
+    finally:
+        db.set_trace_callback(None)
+        db.close()
+    return [statement for statement in statements if statement.lstrip().upper().startswith("SELECT")]
+
+
+def _mailhost_detail_reads(statements: list[str]) -> list[str]:
+    return [
+        statement for statement in statements
+        if "FROM CONNECTED_ACCOUNTS WHERE PROVIDER='MAILHOST' AND ID IN" in statement.upper()
+        or "SELECT NAME,LABEL FROM KEY_STORE_ENTRIES WHERE NAME IN" in statement.upper()
+        or "SELECT NAME, VALUE_REF FROM KEY_STORE_ENTRIES WHERE NAME IN" in statement.upper()
+    ]
+
+
+async def test_account_rows_batch_mailhost_details_for_one_or_three_accounts(conductor, servers) -> None:
+    add_account(servers(), conductor)
+    one = _account_row_selects()
+    add_account(servers(), conductor, address="second@mail.test")
+    add_account(servers(), conductor, address="third@mail.test")
+    three = _account_row_selects()
+
+    assert (len(one), len(three)) == (8, 16)
+    assert len(_mailhost_detail_reads(one)) == len(_mailhost_detail_reads(three)) == 3
+
+
+async def test_account_rows_do_not_fall_back_to_per_row_details_when_batch_omits_a_row(conductor, servers) -> None:
+    account_id = add_account(servers(), conductor)["account_id"]
+    db = get_db()
+    try:
+        db.execute("UPDATE connected_accounts SET endpoints_json=NULL WHERE id=?", (account_id,))
+        db.commit()
+    finally:
+        db.close()
+
+    statements = _account_row_selects()
+    assert len(_mailhost_detail_reads(statements)) == 3
+
+
+@pytest.mark.parametrize(
+    ("reply", "cause"),
+    [
+        ("[UNAVAILABLE] busy", SERVER_UNREACHABLE), ("[SERVERBUG] retry", SERVER_UNREACHABLE),
+        ("[LIMIT] retry", SERVER_UNREACHABLE), ("[INUSE] busy", SERVER_UNREACHABLE),
+        ("too many connections", SERVER_UNREACHABLE), ("try again later", SERVER_UNREACHABLE),
+        ("NO login refused", PASSWORD_REFUSED), ("IMAP is disabled", IMAP_OFF),
+    ],
+)
+async def test_login_refusals_keep_temporary_and_host_states_distinct(connected, monkeypatch, reply, cause) -> None:
+    endpoints = store.read(connected.account_id, db=get_db())[0]
+    assert endpoints is not None
+
+    class RefusingLogin:
+        def login(self, *_args):
+            raise imaplib.IMAP4.error(reply)
+
+        def logout(self):
+            return None
+
+    monkeypatch.setattr(imap, "_open", lambda _endpoints: RefusingLogin())
+    with pytest.raises(MailHostError) as error:
+        with imap.session(endpoints, endpoints.username, PASSWORD):
+            pass
+    assert error.value.cause == cause
+
+
+async def test_login_abort_is_unreachable_and_does_not_demote_the_row(connected, monkeypatch) -> None:
+    endpoints, before = store.read(connected.account_id, db=get_db())
+    assert endpoints is not None
+
+    class AbortOnLogin:
+        def login(self, *_args):
+            raise imaplib.IMAP4.abort("BYE")
+
+        def logout(self):
+            return None
+
+    monkeypatch.setattr(imap, "_open", lambda _endpoints: AbortOnLogin())
+    with pytest.raises(MailHostError, match="couldn’t reach") as error:
+        with imap.session(endpoints, endpoints.username, PASSWORD):
+            pass
+    assert error.value.cause == SERVER_UNREACHABLE
+
+    def unreachable():
+        raise MailHostError(SERVER_UNREACHABLE, host=endpoints.imap.host)
+
+    with pytest.raises(MailHostError):
+        await mailhost_read._guarded(connected.account_id, before, unreachable)
+    assert store.read(connected.account_id, db=get_db())[1] == before
 
 
 # -- reading mail and calendar --------------------------------------------------------------------
@@ -271,6 +383,43 @@ async def test_a_password_the_host_stops_accepting_turns_the_account_to_revoked(
     assert found["check"]["status"] == store.REVOKED and found["state"] == "needs_sign_in" and found["capabilities"] == []
     _no_leak(out, found["raw"])
     assert "stopped accepting its app password" in await EmailSearchTool().execute(_thread_id=connected.thread, query="x")
+
+
+async def test_refusal_does_not_revoke_a_key_replaced_after_credentials_were_read(connected) -> None:
+    await _set_through_keys(connected)
+    _endpoints, _username, _password, snapshot = mailhost_read.credentials(connected.account_id)
+    replaced = await _put(connected.client, connected.key)
+    assert replaced.status_code == 200, replaced.text
+
+    def refused():
+        raise MailHostError(PASSWORD_REFUSED, name="mail.test")
+
+    with pytest.raises(MailHostError):
+        await mailhost_read._guarded(connected.account_id, snapshot, refused)
+    await check.wait_for_checks()
+    _saved, current = store.read(connected.account_id, db=get_db())
+    assert current != snapshot and current["status"] == store.OK
+
+
+async def test_refusal_does_not_restore_servers_saved_after_credentials_were_read(connected, servers) -> None:
+    await _set_through_keys(connected)
+    _endpoints, _username, _password, snapshot = mailhost_read.credentials(connected.account_id)
+    replacement = servers()
+    saved = await connected.client.put(
+        f"/api/mcp/accounts/{connected.account_id}/mailhost/servers", headers=_auth(),
+        json={**_typed(replacement), "password": TEST_PASSWORD},
+    )
+    assert saved.status_code == 200, saved.text
+
+    def refused():
+        raise MailHostError(PASSWORD_REFUSED, name="mail.test")
+
+    with pytest.raises(MailHostError):
+        await mailhost_read._guarded(connected.account_id, snapshot, refused)
+    await check.wait_for_checks()
+    endpoints, current = store.read(connected.account_id, db=get_db())
+    assert endpoints is not None and endpoints.imap.host == "127.0.0.1" and endpoints.imap.port == replacement.imap.port
+    assert current != snapshot and current["status"] == store.OK
 
 
 async def test_two_accounts_need_an_account_id_and_it_names_the_choices(conductor, servers) -> None:

@@ -340,6 +340,10 @@ describe('Settings › Keys', () => {
 			await vi.waitFor(() => expect(card.querySelector('.copy [role="status"]')?.textContent).toBe('example.com is connected.'));
 			expect(card.querySelector(':scope > [role="status"]')).toBeNull();
 		});
+		it('shows destination disclosure when Keys opens on its own', async () => {
+			await openAccountKey(['imap.example.com'], {}, false);
+			expect(host.querySelector('.destination')?.textContent).toBe('This password goes to imap.example.com.');
+		});
 		it('says nothing about a destination for a known host', async () => {
 			await openAccountKey(undefined);
 			expect(host.querySelector('.destination')).toBeNull();
