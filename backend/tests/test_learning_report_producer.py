@@ -407,6 +407,44 @@ def test_recorded_lessons_count_each_lesson_once_with_a_reference_per_version(db
     assert (recorded()["count"], len(recorded()["refs"])) == (2, 4)
 
 
+def test_consolidated_lessons_use_gate_facts_and_remain_unknown_before_measurement(db):
+    from core.lesson_gate import EVENT
+    from jobs.learning_report import build_report
+
+    db.execute("INSERT INTO projects (id,name,created_at,updated_at) VALUES ('proj','Project','t','t')")
+    db.execute("INSERT INTO threads (id,user_id,project_id,model,created_at,updated_at) "
+               "VALUES ('owner','user','proj','test/model','t','t')")
+    _event(
+        db, event_name=EVENT, ts="2026-10-21T18:00:00+00:00", agent_thread_id="owner",
+        subject_key="first", attributes={"result": "accepted", "verdict": "written"},
+    )
+    _event(
+        db, event_name=EVENT, ts="2026-10-22T18:00:00+00:00", agent_thread_id="owner",
+        subject_key="save-fold", attributes={
+            "result": "observed", "verdict": "save", "reason": "rewording",
+            "items_before": 2, "items_after": 1,
+        },
+    )
+    _event(
+        db, event_name=EVENT, ts="2026-10-22T19:00:00+00:00", agent_thread_id="owner",
+        subject_key="place-fold", attributes={
+            "result": "accepted", "verdict": "written", "widens": "7",
+        },
+    )
+    db.commit()
+
+    before_measurement = build_report(db, scope="proj", report_date="2026-10-20")
+    fold_day = build_report(db, scope="proj", report_date="2026-10-22")
+    known_quiet_day = build_report(db, scope="proj", report_date="2026-10-23")
+
+    assert before_measurement["items"]["lessons"]["consolidated"] is None
+    assert fold_day["items"]["lessons"]["consolidated"] == {
+        "count": 2,
+        "refs": [f"{EVENT}:save-fold", f"{EVENT}:place-fold"],
+    }
+    assert known_quiet_day["items"]["lessons"]["consolidated"] == {"count": 0, "refs": []}
+
+
 def test_daily_report_is_passive_without_qualifying_facts(db):
     from jobs.learning_report import build_report
 
