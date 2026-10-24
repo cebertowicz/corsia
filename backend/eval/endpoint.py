@@ -4,6 +4,7 @@ import asyncio
 import json
 import time
 import uuid
+from dataclasses import dataclass
 from functools import partial
 from typing import Any
 
@@ -66,15 +67,23 @@ def _new_eval_session_id() -> str:
     return f"eval-{uuid.uuid4().hex[:12]}"
 
 
-async def _open_eval_thread(user_id: str, model: str) -> tuple[str, dict]:
-    """Create the eval turn's thread row and return it as the send path's row."""
+async def open_eval_thread(
+    user_id: str, model: str, *, thread_id: str | None = None, title: str = "Eval turn",
+    project_id: str | None = None, parent_thread_id: str | None = None,
+) -> tuple[str, dict]:
+    """Create the eval turn's thread row and return it as the send path's row.
+
+    ``parent_thread_id`` lets ordinary ancestor resolution deliver that thread's
+    guidance to the fresh turn; the row still binds only ``model``.
+    """
     from infra.db_async import run_in_db
     from infra.fresh_threads import create_fresh_thread
 
-    thread_id = _new_eval_session_id()
+    thread_id = thread_id or _new_eval_session_id()
     await run_in_db(partial(
         create_fresh_thread, user_id=user_id, thread_id=thread_id,
-        title="Eval turn", model=model,
+        title=title, model=model, project_id=project_id,
+        parent_thread_id=parent_thread_id,
     ))
     return thread_id, await run_in_db(_read_thread_row, thread_id)
 
@@ -106,15 +115,30 @@ def _required_model(metadata: dict[str, Any]) -> str:
 
 # Eval admission is owned by infra.thread_driver.admit_input.
 
+#: Where an eval Turn stopped short of a settled Turn: its input was not admitted or
+#: claimed; it was held for a restart; the claimed batch never reached a Native
+#: runtime; the running Turn failed; or it outran its timeout.
+EVAL_FAILURES = ("admission", "interrupted", "handoff", "provider", "timeout")
 
-async def _run_eval_turn(
-    *,
-    thread_id: str,
-    thread_row: dict,
-    prompt: str,
-    model: str,
-    timeout_seconds: float,
-) -> tuple[str | None, str | None]:
+
+@dataclass(frozen=True)
+class EvalTurnFailure:
+    """Why ``run_eval_turn`` has no Turn: one ``EVAL_FAILURES`` kind and its caller-facing detail.
+
+    The kind comes from the step that stopped, never from the detail's text.
+    """
+
+    kind: str
+    detail: str
+
+    def __str__(self) -> str:
+        return self.detail
+
+
+async def run_eval_turn(
+    *, thread_id: str, thread_row: dict, prompt: str, model: str, timeout_seconds: float,
+    after_manifest_before_dispatch=None,
+) -> tuple[str | None, EvalTurnFailure | None]:
     """Run one canonical Native Turn for the eval route and await its settlement.
 
     The route admits its input the way every programmatic ingress does
@@ -131,6 +155,9 @@ async def _run_eval_turn(
     the thread has not seen) would otherwise be part of the measured provider
     request, and the perf scenarios record their prefill and cache numbers from
     exactly this path.
+
+    ``after_manifest_before_dispatch`` receives the recorded context manifest id
+    before the provider call; raising there refuses the Turn with no write.
     """
     from core.turn_core import BOOT_EPOCH
     from infra.db_async import run_in_db
@@ -158,34 +185,35 @@ async def _run_eval_turn(
             materialize_passive_digest=False,
         )
     except Exception as exc:
-        return None, f"Eval turn errored: {_failure_detail(exc)}"
+        return None, EvalTurnFailure("admission", f"Eval turn errored: {_failure_detail(exc)}")
     if admission.held_for_restart:
-        return None, "Eval turn is held during restart"
+        return None, EvalTurnFailure("interrupted", "Eval turn is held during restart")
     batch = admission.batch
     if isinstance(batch, FailedInputBatch):
         await drive_turn_admission(batch)
-        return None, f"Eval turn errored: {batch.error_text}"
+        return None, EvalTurnFailure("admission", f"Eval turn errored: {batch.error_text}")
     if batch is None:
-        return None, "Eval turn could not claim an idle Turn for its input"
+        return None, EvalTurnFailure("admission", "Eval turn could not claim an idle Turn for its input")
     try:
         send_result = await execute_claimed_batch(
             batch,
             thread_row=thread_row,
             target=target,
             user={"id": str(thread_row.get("user_id") or "")},
+            after_manifest_before_dispatch=after_manifest_before_dispatch,
         )
     except Exception as exc:
-        return None, f"Eval turn errored: {_failure_detail(exc)}"
+        return None, EvalTurnFailure("handoff", f"Eval turn errored: {_failure_detail(exc)}")
     if isinstance(send_result, InboxQueuedInput) or send_result.turn_task is None:
-        return None, "Eval turn was not handed to a Native runtime"
+        return None, EvalTurnFailure("handoff", "Eval turn was not handed to a Native runtime")
     try:
         await asyncio.wait_for(send_result.turn_task, timeout=timeout_seconds)
     except asyncio.TimeoutError:
-        return None, f"Eval turn timed out after {timeout_seconds}s"
+        return None, EvalTurnFailure("timeout", f"Eval turn timed out after {timeout_seconds}s")
     except Exception as exc:
-        return None, f"Eval turn errored: {_failure_detail(exc)}"
+        return None, EvalTurnFailure("provider", f"Eval turn errored: {_failure_detail(exc)}")
     if not send_result.turn_id:
-        return None, "Eval turn completed without a Turn identity"
+        return None, EvalTurnFailure("handoff", "Eval turn completed without a Turn identity")
     return send_result.turn_id, None
 
 
@@ -220,14 +248,14 @@ async def eval_turn(
         model_override=model, tools_in_scope=tools_in_scope,
     )
 
-    thread_id, thread_row = await _open_eval_thread(user["id"], model)
+    thread_id, thread_row = await open_eval_thread(user["id"], model)
 
     t0 = time.perf_counter()
 
     from eval.otel import get_tracer
     tracer = get_tracer("corsia.eval.endpoint")
     trace_id_hex: str | None = None
-    err: str | None = None
+    err: EvalTurnFailure | None = None
     result: EvalTurnResult | None = None
 
     try:
@@ -238,7 +266,7 @@ async def eval_turn(
             eval_span.set_attribute("eval.mode", str(metadata.get("mode") or ""))
             trace_id_hex = current_trace_id_hex()
 
-            turn_id, err = await _run_eval_turn(
+            turn_id, err = await run_eval_turn(
                 thread_id=thread_id, thread_row=thread_row,
                 prompt=body.input, model=model,
                 timeout_seconds=timeout_seconds,
@@ -272,7 +300,7 @@ async def eval_turn(
         span_summary={"spans": spans, "trace_id": trace_id_hex or ""},
         model=model,
         ms_total=round(ms_total, 3),
-        error=err or (result.error if result else None),
+        error=err.detail if err else (result.error if result else None),
     )
 
     if trace_id_hex:
@@ -285,4 +313,4 @@ def _count_llm_iterations(spans: list[dict[str, Any]]) -> int:
     return sum(1 for s in spans if s.get("name") == "corsia.llm_call")
 
 
-__all__ = ["router"]
+__all__ = ["EVAL_FAILURES", "EvalTurnFailure", "open_eval_thread", "router", "run_eval_turn"]

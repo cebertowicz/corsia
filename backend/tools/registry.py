@@ -22,6 +22,7 @@ from tools.tool_surface import (
 
 
 from eval.otel import get_tracer, set_attrs, SPAN_TOOL_CALL
+from eval.tool_allowlist import record_only_result
 _RESERVED_EXECUTION_PREFIXES = (
     "_thread_",
     "_host_access_",
@@ -223,14 +224,13 @@ class ToolRegistry:
         return execution_params
 
     async def _execute_unredacted(
-        self,
-        name: str,
-        params: dict[str, Any],
-        *, review_request_id: str | None = None,
+        self, name: str, params: dict[str, Any], *, review_request_id: str | None = None,
     ) -> str:
         """Execute once, a ``tool_call`` as the tool it names; the boundary sanitizes."""
         _HINT = "\n\n[Analyze the error above and try a different approach.]"
         name, params, dispatcher = resolve_dispatch(name, params)
+        if (recorded := await record_only_result(name, params)) is not None:
+            return recorded  # a carry-in sample's non-read-only call never reaches its tool
 
         _tracer = get_tracer("corsia.tools")
         with _tracer.start_as_current_span(SPAN_TOOL_CALL) as _tool_span:
