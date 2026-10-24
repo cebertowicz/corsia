@@ -56,6 +56,7 @@ def add_comment(
     replacement: str | None = None,
     submit: bool = False,
     client_id: str | None = None,
+    delivery_policy: str = feedback_batches.IMMEDIATE,
 ) -> tuple[dict, dict]:
     """Create and batch one comment in one transaction."""
     with write_transaction(db, scope="test_add_feedback_comment") as connection:
@@ -75,7 +76,7 @@ def add_comment(
             db=connection,
         )
         feedback = feedback_batches.record_comment(
-            connection, row, created=created, submit=submit,
+            connection, row, created=created, submit=submit, delivery_policy=delivery_policy,
         )
     return row, feedback
 

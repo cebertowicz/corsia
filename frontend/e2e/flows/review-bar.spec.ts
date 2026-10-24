@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { test } from '../support/test';
 import { expect, type APIRequestContext, type Page, type TestInfo } from '@playwright/test';
 import { loginByUrl } from '../support/corsia';
-import { leaveUnsent, visibleHeaderSends } from '../support/docFeedbackFooter';
+import { expectSenders, headerSend, leaveUnsent } from '../support/heldComments';
 import { journey, type Case, seed, type Doc, seedImage, comment, type Mode, WIDTH, open, selectThread, shot, hitAtCentre, settled } from '../support/reviewFixtures';
 
 /**
@@ -83,6 +83,32 @@ function orphanComments(artifactId: string): void {
 }
 
 const bar = (page: Page) => page.locator('.review-bar');
+for (const width of [1280, 1440, 393] as const) for (const theme of ['light', 'dark'] as const) test.describe(`delivery header ${width} ${theme}`, () => {
+	if (width === 393) test.use({ hasTouch: true, isMobile: true });
+	test('long person name and every header action remain reachable', async ({ page, request }) => {
+		const doc = await seed(request, 'Person with a very long agent name closed');
+		addPersonStep(doc.threadId, doc.artifactId);
+		await open(page, doc, width === 1440 ? 'closed' : width === 393 ? 'phone' : 'default', theme);
+		await page.setViewportSize({ width, height: width === 393 ? 852 : 900 }); await settled(page);
+		const geometry = await page.locator('.document-header').evaluate((header) => {
+			const who = header.querySelector('.rb-who')!, range = document.createRange(); range.selectNodeContents(who);
+			const text = range.getBoundingClientRect(), box = header.getBoundingClientRect(), style = getComputedStyle(header);
+			return { text: text.toJSON(), contentRight: box.right - parseFloat(style.paddingRight),
+				name: who.textContent, tools: header.querySelector('.document-tools')!.getBoundingClientRect().toJSON(),
+				paneOverlay: !!document.querySelector('.pane.overlay') };
+		});
+		console.info('Delivery header geometry:', JSON.stringify({ width, theme, ...geometry }));
+		expect(geometry.name).toBe(`${doc.title}:`);
+		expect(geometry.text.right, 'full name stays before the pane').toBeLessThanOrEqual(geometry.contentRight + 0.5);
+		for (const button of await page.locator('.document-header button:visible').all()) expect(await hitAtCentre(button), await button.getAttribute('aria-label') ?? await button.innerText()).toBe(true);
+		expect(await hitAtCentre(bar(page).getByRole('button', { name: 'Done', exact: true }))).toBe(true);
+		if (width === 1280) expect(geometry.paneOverlay).toBe(true);
+		const output = process.env.HELD_COMMENT_DELIVERY_FRAMES_OUT;
+		if (output) await page.screenshot({ path: path.join(output, `reviewbar-header-long-name-${width}-${theme}.png`), scale: 'css' });
+		await bar(page).getByRole('button', { name: 'Done', exact: true }).click();
+		await expect(bar(page).locator('.rb-receipt')).toHaveText('Done');
+	});
+});
 /** The bar's geometry per surface: one compact row, a stacked bar with compact right-aligned buttons, or 44px touch buttons. */
 async function expectLayout(page: Page, mode: Mode) {
 	const canvas = () => page.locator('.document-canvas, .image-canvas').first().evaluate((el) => el.getBoundingClientRect().width);
@@ -271,9 +297,10 @@ journey('approve with changes after two comments', ALL, async ({ page, request, 
 	await expect(approve).toBeVisible();
 	await expectLayout(page, mode);
 	await expect(page.getByText('Place again')).toHaveCount(0);
-	// One primary on screen: the bar's Approve. Send now waits in the comments drawer's footer; the header shows no Send and its pill marks the unsent pair.
-	expect(await visibleHeaderSends(page), 'no Send shows in the header').toEqual([]);
-	await expect(page.locator('.document-header').getByRole('button', { name: /^Send\b/ })).toHaveCount(0);
+	// One primary on screen: the bar's Approve. The held pair has the header's Send, a secondary beside it, and its pill marks the unsent pair.
+	await expect(headerSend(page)).toHaveText('Send 2 comments');
+	await expect(headerSend(page)).not.toHaveClass(/primary/);
+	await expectSenders(page, ['header: Send 2 comments']);
 	await expect(page.locator('.comment-status')).toHaveAttribute('aria-label', /, 2 messages not sent yet$/);
 	await expect(approve).toHaveClass(/primary/);
 	await shot(page, 'ask-with-changes', info);
@@ -421,7 +448,7 @@ journey('the comments drawer keeps 44px touch targets', [['393 light', 'phone', 
 	await expect(drawer).toBeHidden();
 });
 
-journey('unsent comments end the comments drawer in a Send now footer', [
+journey('held comments have the header Send, whole at every size, and the drawer has no footer', [
 	['1440 light', 'default', 'light'], ['1440 dark', 'default', 'dark'],
 	['1440 light pane closed', 'closed', 'light'], ['1440 dark pane closed', 'closed', 'dark'],
 	['393 light', 'phone', 'light'], ['393 dark', 'phone', 'dark'],
@@ -432,15 +459,49 @@ journey('unsent comments end the comments drawer in a Send now footer', [
 	for (const [index, note] of notes.entries()) waiting.push(await comment(request, doc, note, index * 2 + 2));
 	for (const id of waiting) await leaveUnsent(request, id);
 	await open(page, doc, mode, theme);
-	// The header keeps only the pill's unsent dot; Send now is in the drawer.
+	// The header carries the held comments' one Send beside the pill's unsent dot; the drawer has no footer.
 	await expect(page.locator('.comment-status .unsent-dot')).toBeVisible();
-	expect(await visibleHeaderSends(page), 'no Send shows in the header').toEqual([]);
+	const send = headerSend(page);
+	await expect(send).toHaveText('Send 6 comments');
+	await expectSenders(page, ['header: Send 6 comments']);
+	await settled(page);
+	await expect(send).toBeInViewport({ ratio: 1 });
+	const fit = await send.evaluate((button) => {
+		const label = document.createRange();
+		label.selectNodeContents(button);
+		const box = button.getBoundingClientRect(), text = label.getBoundingClientRect();
+		return {
+			lines: new Set([...label.getClientRects()].map((rect) => Math.round(rect.top))).size,
+			clipped: Math.max(text.right - box.right, box.left - text.left, 0),
+			right: box.right,
+			page: Math.max(0, document.documentElement.scrollWidth - document.documentElement.clientWidth),
+		};
+	});
+	expect(fit.lines, 'the label is one line').toBe(1);
+	expect(fit.clipped, 'the label is not clipped').toBeLessThanOrEqual(0);
+	expect(fit.right, 'the Send is inside the screen').toBeLessThanOrEqual(WIDTH[mode] + 0.5);
+	expect(fit.page, 'nothing scrolls sideways').toBe(0);
+	expect(await hitAtCentre(send), 'Send is hit-testable').toBe(true);
+	if (mode === 'phone') {
+		const touchArea = await send.evaluate((button) => {
+			const box = button.getBoundingClientRect(), pseudo = getComputedStyle(button, '::after');
+			return { box: box.toJSON(), pseudo: { top: pseudo.top, bottom: pseudo.bottom, content: pseudo.content },
+				paddingHits: [(box.top + box.bottom) / 2 - 21, (box.top + box.bottom) / 2 + 21].map((y) => button.contains(document.elementFromPoint(box.x + box.width / 2, y))) };
+		});
+		console.info('Header Send touch area:', JSON.stringify(touchArea));
+		expect(touchArea.paddingHits, 'both ends of the touch padding remain inside the header clip').toEqual([true, true]);
+		expect(touchArea.box.height, 'native touch target').toBeGreaterThanOrEqual(44);
+	}
+	await shot(page, mode === 'phone' ? 'rs-12-header-send-phone' : 'rs-11-header-send', info);
+	const output = process.env.HELD_COMMENT_DELIVERY_FRAMES_OUT;
+	if (output && mode === 'phone') await page.screenshot({ path: path.join(output, `reviewbar-held-send-393-${theme}.png`), scale: 'css' });
+
+	// The drawer lists the threads and ends with the last card: no footer, no second Send.
 	await page.getByRole('button', { name: /^6 open threads, 6 messages not sent yet$/ }).click();
 	const drawer = page.getByRole('region', { name: 'Document comments' });
-	const footer = drawer.locator('[data-drawer-unsent]');
-	await expect(footer.getByRole('status')).toHaveText(`6 messages not sent yet · they go to ${doc.title} in a few seconds.`);
-	const send = footer.getByRole('button', { name: 'Send now', exact: true });
-	await expect(send).toBeVisible();
+	await expect(drawer).toBeVisible();
+	await expect(drawer.locator('[data-drawer-unsent]')).toHaveCount(0);
+	await expect(drawer.getByRole('button', { name: /^Send\b/ })).toHaveCount(0);
 	await settled(page);
 	if (mode === 'closed') {
 		const [sheet, column] = await Promise.all([
@@ -450,57 +511,29 @@ journey('unsent comments end the comments drawer in a Send now footer', [
 		expect(sheet!.x, 'the narrow-canvas sheet starts at the document column').toBeCloseTo(column!.x, 0);
 		expect(sheet!.width, 'the narrow-canvas sheet spans only the document column').toBeCloseTo(column!.width, 0);
 	}
+	await shot(page, 'drawer-without-footer', info);
+	await drawer.getByRole('button', { name: 'Close comments', exact: true }).click();
+	await expect(drawer).toBeHidden();
 
-	// Pinned to the drawer's foot, opaque, and the list still scrolls above it: its last card ends above the footer.
-	const list = drawer.locator('.drawer-comments');
-	await list.evaluate((el) => { el.scrollTop = el.scrollHeight; });
-	const fit = await footer.evaluate((element) => {
-		const frame = element.closest<HTMLElement>('[data-doc-comments-drawer]')!;
-		const list = frame.querySelector<HTMLElement>('.drawer-comments')!;
-		const cards = [...list.querySelectorAll<HTMLElement>('[data-comment-id]')];
-		const probe = document.createElement('div');
-		probe.style.background = 'var(--bg-secondary)';
-		frame.append(probe);
-		const token = getComputedStyle(probe).backgroundColor;
-		probe.remove();
-		const box = element.getBoundingClientRect(), drawer = frame.getBoundingClientRect();
-		return {
-			bottomGap: drawer.bottom - box.bottom, inside: box.left >= drawer.left - 0.5 && box.right <= drawer.right + 0.5,
-			listOverflow: getComputedStyle(list).overflowY, listBottom: list.getBoundingClientRect().bottom,
-			lastCardBottom: Math.min(cards.at(-1)!.getBoundingClientRect().bottom, list.getBoundingClientRect().bottom), footerTop: box.top,
-			background: getComputedStyle(element).backgroundColor, token,
-			drawerHeight: drawer.height, listHeight: list.getBoundingClientRect().height, footerHeight: box.height,
-			docContentHeight: (() => { const doc = frame.closest<HTMLElement>('.doc'); if (!doc) return null; const style = getComputedStyle(doc); return doc.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom); })(),
-			measuredFooter: frame.closest<HTMLElement>('.doc')?.style.getPropertyValue('--doc-drawer-footer-height') ?? '',
-		};
-	});
-	expect(fit.bottomGap, 'the footer sits on the drawer\'s bottom border').toBeLessThanOrEqual(1.5);
-	expect(fit.inside, 'the footer stays inside the drawer').toBe(true);
-	expect(fit.listOverflow, 'the thread list scrolls').toBe('auto');
-	expect(fit.listBottom, 'the list ends where the footer starts').toBeLessThanOrEqual(fit.footerTop + 0.5);
-	expect(fit.lastCardBottom, 'scrolled to the end, the last card is above the footer').toBeLessThanOrEqual(fit.footerTop + 0.5);
-	expect(fit.background, 'the footer is opaque --bg-secondary').toBe(fit.token);
-	await shot(page, mode === 'phone' ? 'rs-12-send-now-sheet' : 'rs-11-send-now-inline', info);
-	// The inline drawer extends its grid cap by the measured footer. The phone sheet is portaled outside that grid.
-	if (fit.docContentHeight !== null) {
-		const drawerCap = fit.docContentHeight * 0.36;
-		const preFooterDrawer = Math.min(drawerCap, 260);
-		const expectedDrawer = preFooterDrawer + fit.footerHeight;
-		const drawerChrome = fit.drawerHeight - fit.listHeight - fit.footerHeight;
-		expect(Number.parseFloat(fit.measuredFooter), 'the grid receives the measured footer height').toBeCloseTo(fit.footerHeight, 0);
-		expect(fit.drawerHeight, 'the drawer adds the footer beneath its existing cap').toBeCloseTo(expectedDrawer, 0);
-		expect(fit.listHeight, 'six-thread list keeps its pre-footer height').toBeGreaterThanOrEqual(preFooterDrawer - drawerChrome - 1);
-	}
-	// The measured footer can resize its drawer after scrolling; wait for that final layout before proving its center lands on the control.
-	await settled(page);
-	await expect(send).toBeInViewport();
-	expect(await hitAtCentre(send), 'Send now is hit-testable').toBe(true);
-	if (mode === 'phone') expect((await send.boundingBox())!.height, 'touch target').toBeGreaterThanOrEqual(44);
-	await shot(page, 'unsent-footer', info);
-
-	await send.click();
-	await expect(footer).toHaveCount(0);
+	if (mode === 'phone') {
+		const pointer = await send.evaluateHandle((button) => {
+			const seen = { hit: false, pointerType: '' };
+			window.addEventListener('pointerdown', (event) => { seen.hit = button.contains(event.target as Node); seen.pointerType = event.pointerType; }, { capture: true, once: true });
+			return seen;
+		});
+		const box = (await send.boundingBox())!;
+		await page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2 + (theme === 'light' ? -21 : 21));
+		const native = await pointer.jsonValue(); await pointer.dispose();
+		console.info('Header Send native padding tap:', JSON.stringify({ edge: theme === 'light' ? 'top' : 'bottom', ...native }));
+		expect(native, 'native touch reaches the padding outside Send’s former 28px box').toEqual({ hit: true, pointerType: 'touch' });
+	} else await send.click();
+	await expect(send).toHaveCount(0);
 	await expect(page.locator('.comment-status')).not.toHaveAttribute('aria-label', /not sent yet/);
+	if (output && mode === 'phone') {
+		await expect(page.locator('.document-header .sent')).toHaveText('Sent');
+		await settled(page);
+		await page.screenshot({ path: path.join(output, `reviewbar-held-sent-393-${theme}.png`), scale: 'css' });
+	}
 });
 
 journey('a long agent name never hides the ask', [['1440 light pane closed', 'closed', 'light'], ['393 light', 'phone', 'light'], ['393 dark', 'phone', 'dark']], async ({ page, request, info, mode, theme }) => {

@@ -1,0 +1,9 @@
+@media (max-width: 48rem) {
+	.image-lightbox .bar { min-height: var(--touch-target); }
+	/* Keep the held Send whole with Back, Comment and Fit; the comments pill reflows first. */
+	.image-lightbox .bar:has(.sending-now) { flex-wrap: wrap; }
+	.image-lightbox .bar:has(.sending-now) [data-image-comments-pill] { order: 1; }
+	.image-lightbox .control { min-height: var(--touch-target); padding: 0 var(--space-3); }
+	.image-lightbox .back { padding-left: var(--space-2); }
+	.image-lightbox .viewport { border-radius: 0; }
+}

@@ -209,6 +209,11 @@
 			justify-self: end;
 			order: 2;
 		}
+		/* Held document comments' Send: a full-width row under the dock, above the rail. */
+		.chat-attention-stack > :global(.held-doc-feedback) {
+			grid-column: 1 / -1;
+			order: 1;
+		}
 		/* The held-thread line describes the composer, so it sits nearest it. */
 		.chat-attention-stack > :global(.plan-limit-held) {
 			grid-column: 1 / -1;

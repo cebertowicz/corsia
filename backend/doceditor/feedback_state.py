@@ -15,9 +15,9 @@ def _now() -> str:
 
 
 def undelivered_for_document(db, *, author_kind: str, author_id: str, artifact_id: str) -> list[dict]:
-    """Return the visible retry state for one author's document."""
+    """Return retry state for one author's document, preserving each batch's owning lane."""
     rows = db.execute(
-        """SELECT id,item_count,undelivered_reason,attempts FROM doc_feedback_batches
+        """SELECT id,item_count,undelivered_reason,attempts,delivery_policy FROM doc_feedback_batches
            WHERE state='undelivered' AND author_kind=? AND author_id=? AND artifact_id=?
            ORDER BY updated_at,id""",
         (author_kind, author_id, artifact_id),
@@ -53,22 +53,34 @@ def has_pending_for_document(
     ).fetchone() is not None
 
 
-def user_feedback_for_document(db, artifact_id: str) -> dict[str, Any]:
-    """Project the user's durable feedback state for one document canvas."""
-    count = db.execute(
-        """SELECT COUNT(DISTINCT item.comment_id) FROM doc_feedback_batches batch
+def open_counts_for_document(db, artifact_id: str) -> dict[str, int]:
+    """The user's unsent comments on one document: the total and each held lane."""
+    rows = db.execute(
+        """SELECT batch.delivery_policy AS policy, COUNT(DISTINCT item.comment_id) AS count
+           FROM doc_feedback_batches batch
            JOIN doc_feedback_batch_items item ON item.batch_id=batch.id
            WHERE batch.state='open' AND batch.author_kind='user'
-             AND batch.author_id=? AND batch.artifact_id=?""",
+             AND batch.author_id=? AND batch.artifact_id=?
+           GROUP BY batch.delivery_policy""",
         (USER_AUTHOR_ID, artifact_id),
-    ).fetchone()[0]
+    ).fetchall()
+    by_policy = {row["policy"]: int(row["count"]) for row in rows}
+    return {
+        "open_count": sum(by_policy.values()),
+        "document_held_count": by_policy.get("document-held", 0),
+        "image_held_count": by_policy.get("image-held", 0),
+    }
+
+
+def user_feedback_for_document(db, artifact_id: str) -> dict[str, Any]:
+    """Project the user's durable feedback state for one document canvas."""
     artifact = registry_models.get_artifact(artifact_id, db=db)
     owner = db.execute(
         "SELECT title FROM threads WHERE id=?",
         (artifact["parent_thread_id"],),
     ).fetchone() if artifact else None
     return {
-        "open_count": count,
+        **open_counts_for_document(db, artifact_id),
         "owner_label": owner["title"] if owner else None,
         "undelivered_batches": undelivered_for_document(
             db,

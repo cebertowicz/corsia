@@ -1,10 +1,15 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync } from 'svelte';
 import { createClassComponent } from 'svelte/legacy';
 import DocViewerStatus from './DocViewerStatus.svelte';
 import docViewerStatusSource from './DocViewerStatus.svelte?raw';
 import type { DocumentFreshness } from '$lib/docFreshness';
 import type { CommentFeedback } from '$lib/api/docs';
+import { setDeliverCommentsImmediately } from '$lib/commentDeliveryPreference';
+import { get } from 'svelte/store';
+import { token } from '$lib/stores/auth';
+import { toasts } from '$lib/stores/toast';
+import { deliveryConfirmation } from '$lib/stores/deliveryConfirmation';
 
 let host: HTMLElement;
 let component: ({ commentCreated: () => void; sync: (id: string, feedback: CommentFeedback) => void } & { $destroy: () => void; $set: (props: Record<string, unknown>) => void }) | null = null;
@@ -51,6 +56,8 @@ afterEach(() => {
 	component = null;
 	host?.remove();
 	vi.useRealTimers();
+	setDeliverCommentsImmediately(true);
+	deliveryConfirmation.dismiss();
 });
 
 describe('DocViewerStatus freshness metadata', () => {
@@ -60,6 +67,12 @@ describe('DocViewerStatus freshness metadata', () => {
 		expect(header?.textContent).toContain('Review document');
 		expect(header?.textContent).toContain('Owner: Structured Plans');
 		expect(header?.querySelector('.comment-status')?.getAttribute('aria-label')).toBe('0 open threads');
+		const delivery = header?.querySelector<HTMLButtonElement>('[aria-label="Deliver comments immediately"]');
+		expect(delivery?.getAttribute('aria-pressed')).toBe('true');
+		delivery?.click();
+		flushSync();
+		expect(delivery?.getAttribute('aria-pressed')).toBe('false');
+		expect(localStorage.getItem('corsia.document-comments.deliver-immediately')).toBe('false');
 		const details = header?.querySelector<HTMLButtonElement>('[aria-label="Document details"]');
 		expect(details?.getAttribute('aria-expanded')).toBe('false');
 		details!.click();
@@ -67,7 +80,7 @@ describe('DocViewerStatus freshness metadata', () => {
 		expect(details?.getAttribute('aria-expanded')).toBe('true');
 	});
 
-	it('names unsent feedback in the comment pill while Send stays in the drawer', () => {
+	it('names unsent feedback in the comment pill; Send waits for held document comments', () => {
 		render(value(), undefined, { commentCount: 2 });
 		component!.sync('artifact-1', { open_count: 3, owner_label: 'Style', undelivered_batches: [] });
 		flushSync();
@@ -75,10 +88,43 @@ describe('DocViewerStatus freshness metadata', () => {
 		expect(pill?.getAttribute('aria-label')).toBe('2 open threads, 3 messages not sent yet');
 		expect(pill?.querySelector('.unsent-dot')).toBeTruthy();
 		expect(host.textContent).not.toContain('Send 3 comments');
-		// Send and its countdown live in the comments drawer's footer: none of it is in the header, not even clipped.
+		// Nothing is held back for the document, so no Send shows, not even clipped.
 		expect(host.querySelector('.sending-now')).toBeNull();
 		expect([...host.querySelectorAll('button')].map((button) => button.textContent?.trim())).not.toContain('Send now');
 		expect(host.textContent).not.toContain('Sending to');
+	});
+
+	it('turning immediate delivery on sends the held document lane once with its toast, leaving the image lane held', async () => {
+		setDeliverCommentsImmediately(false);
+		token.set('test-token');
+		const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(new Response(JSON.stringify({
+			reviews: [], woken: [], undelivered_batches: [], sent_count: 2,
+			open_count: 3, document_held_count: 0, image_held_count: 3,
+		}))));
+		const sends = () => fetchMock.mock.calls.filter(([url]) => url === '/api/doc-feedback/send');
+		vi.stubGlobal('fetch', fetchMock);
+		try {
+			render(value(), undefined, { commentCount: 5, imageOpen: true });
+			component!.sync('artifact-1', { open_count: 5, document_held_count: 2, image_held_count: 3, owner_label: 'Style', undelivered_batches: [] });
+			flushSync();
+			const toggle = host.querySelector<HTMLButtonElement>('[aria-label="Deliver comments immediately"]')!;
+			expect(toggle.getAttribute('aria-pressed')).toBe('false');
+			toggle.click(); flushSync();
+			await vi.waitFor(() => expect(sends()).toHaveLength(1));
+			expect(JSON.parse(sends()[0][1].body)).toEqual({ artifact_id: 'artifact-1', delivery_policy: 'document-held' });
+			await vi.waitFor(() => expect(get(deliveryConfirmation)?.message).toBe('2 comments sent'));
+			expect(get(toasts).some((toast) => toast.message === '2 comments sent')).toBe(false);
+			expect(toggle.getAttribute('aria-pressed')).toBe('true');
+			expect(localStorage.getItem('corsia.document-comments.deliver-immediately')).toBe('true');
+			await vi.waitFor(() => expect(host.textContent).not.toContain('Send 2 comments'));
+			expect(host.querySelector('.comment-status')?.getAttribute('aria-label')).toContain('3 messages not sent yet');
+			toggle.click(); flushSync();
+			expect(sends()).toHaveLength(1);
+		} finally {
+			vi.unstubAllGlobals();
+			token.set(null);
+			for (const toast of get(toasts)) toasts.dismiss(toast.id);
+		}
 	});
 
 	it('updates the comment-pill count and unsent indicator as feedback changes', () => {
@@ -135,12 +181,12 @@ describe('DocViewerStatus freshness metadata', () => {
 		const mark = render(value({ state: 'overdue' }));
 		host.querySelector<HTMLButtonElement>('button.btn.ghost')!.click();
 		await vi.waitFor(() => expect(mark).toHaveBeenCalledOnce());
-		await vi.waitFor(() => expect(host.querySelector('[role="status"]')?.textContent).toBe('Document marked verified.'));
+		await vi.waitFor(() => expect(host.querySelector('.metadata-status[role="status"]')?.textContent).toBe('Document marked verified.'));
 
 		component!.$set({ artifactId: 'artifact-2', freshness: value({ age_days: 94 }) });
 		flushSync();
 		expect(host.textContent).toContain('verified 94 days ago');
-		expect(host.querySelector('[role="status"]')?.textContent).toBe('');
+		expect(host.querySelector('.metadata-status[role="status"]')?.textContent).toBe('');
 	});
 
 	it.each([
@@ -196,7 +242,7 @@ describe('DocViewerStatus freshness metadata', () => {
 describe('DocViewerStatus toolbar', () => {
 	it('announces the stale state through the status region once it starts, and clears it on reload', () => {
 		render(value(), undefined, { stale: false });
-		const status = () => host.querySelector('[role="status"]')?.textContent ?? '';
+		const status = () => host.querySelector('.metadata-status[role="status"]')?.textContent ?? '';
 		expect(status()).not.toContain('File changed');
 
 		component!.$set({ stale: true });
@@ -211,12 +257,12 @@ describe('DocViewerStatus toolbar', () => {
 
 	it('does not announce stale before the document is ready', () => {
 		render(value(), undefined, { stale: true, ready: false });
-		expect(host.querySelector('[role="status"]')?.textContent).toBe('');
+		expect(host.querySelector('.metadata-status[role="status"]')?.textContent).toBe('');
 	});
 
 	it('keeps the stale announcement screen-reader only, since the visible control already shows it', () => {
 		render(value(), undefined, { stale: true });
-		const status = host.querySelector('[role="status"]')!;
+		const status = host.querySelector('.metadata-status[role="status"]')!;
 		expect(status.textContent).toContain('File changed since you opened it');
 		expect(status.classList.contains('sr-only')).toBe(true);
 	});
@@ -228,5 +274,80 @@ describe('DocViewerStatus toolbar', () => {
 		expect(dot.parentElement?.classList.contains('icon-anchor')).toBe(true);
 		expect(dot.parentElement?.querySelector('svg.tool-icon')).not.toBeNull();
 		expect(button.getAttribute('aria-label')).toBe("2 open threads, 1 comment couldn't be placed");
+	});
+});
+
+describe('DocViewerStatus held comments', () => {
+	const held = (document_held_count: number, image_held_count: number, undelivered_batches: unknown[] = []) => ({
+		open_count: document_held_count + image_held_count, document_held_count, image_held_count, owner_label: 'Style', undelivered_batches,
+	}) as unknown as CommentFeedback;
+	const fetchMock = vi.fn();
+	/** The feedback sends the component made; its other reads (review requests) are not under test. */
+	const sends = () => fetchMock.mock.calls.filter(([url]) => String(url).startsWith('/api/doc-feedback/'));
+
+	beforeEach(() => {
+		fetchMock.mockReset();
+		fetchMock.mockImplementation((url: string) => Promise.resolve(new Response(JSON.stringify(
+			String(url).startsWith('/api/doc-feedback/')
+				? { woken: [], undelivered_batches: [], sent_count: 1, open_count: 0, document_held_count: 0, image_held_count: 0 }
+				: { reviews: [], reviewers: [] },
+		), { status: 200 })));
+		vi.stubGlobal('fetch', fetchMock);
+	});
+	afterEach(() => { vi.unstubAllGlobals(); });
+
+	it('shows a Send for the held document comments only, with the owner in its name', () => {
+		render(value(), undefined, { commentCount: 2 });
+		component!.sync('artifact-1', held(3, 2));
+		flushSync();
+		const send = [...host.querySelectorAll('button')].find((button) => /^Send/.test(button.textContent?.trim() ?? ''))!;
+		expect(send.textContent!.trim()).toBe('Send 3 comments');
+		expect(send.getAttribute('aria-label')).toBe('Send 3 comments to Style');
+		const identity = host.querySelector('.document-identity')!;
+		expect(identity.contains(send)).toBe(true);
+		expect([...identity.children].indexOf(send.closest('.feedback-controls')!)).toBeLessThan(
+			[...identity.children].indexOf(identity.querySelector<HTMLElement>('.document-tools')!),
+		);
+		// The pill's dot still counts everything unsent on the document.
+		expect(host.querySelector('.comment-status')!.getAttribute('aria-label')).toContain('5 messages not sent yet');
+	});
+
+	it('keeps a read that arrives before the identity-row sender exists, and shows it once that sender mounts', () => {
+		render(value(), undefined, { artifactId: null });
+		expect(host.querySelector('.feedback-controls')).toBeNull();
+		expect(host.querySelector('.document-notices')).toBeNull();
+		component!.sync('artifact-1', held(2, 0));
+		component!.$set({ artifactId: 'artifact-1' });
+		flushSync();
+		const send = [...host.querySelectorAll('button')].find((button) => /^Send/.test(button.textContent?.trim() ?? ''));
+		expect(send?.textContent?.trim()).toBe('Send 2 comments');
+	});
+
+	it('does not carry a read for another document into this one', () => {
+		render(value(), undefined, { artifactId: null });
+		component!.sync('artifact-2', held(2, 0));
+		component!.$set({ artifactId: 'artifact-1' });
+		flushSync();
+		expect([...host.querySelectorAll('button')].some((button) => /^Send/.test(button.textContent?.trim() ?? ''))).toBe(false);
+	});
+
+	it('sends image comments left held when no image viewer is open, once', async () => {
+		render(value(), undefined, { imageOpen: false });
+		component!.sync('artifact-1', held(0, 2));
+		flushSync();
+		await vi.waitFor(() => expect(sends()).toHaveLength(1));
+		expect(JSON.parse(sends()[0][1].body)).toEqual({ artifact_id: 'artifact-1', delivery_policy: 'image-held' });
+		component!.sync('artifact-1', held(0, 2));
+		flushSync();
+		await Promise.resolve();
+		expect(sends()).toHaveLength(1);
+	});
+
+	it('leaves the image lane to its viewer while an image is open', async () => {
+		render(value(), undefined, { imageOpen: true });
+		component!.sync('artifact-1', held(0, 2));
+		flushSync();
+		await Promise.resolve();
+		expect(sends()).toHaveLength(0);
 	});
 });

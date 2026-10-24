@@ -7,6 +7,7 @@
 	import LegacyPlanDiscussionLeaf from './LegacyPlanDiscussionLeaf.svelte';
 	import BrowserLeaf from './BrowserLeaf.svelte';
 	import ArtifactTabStrip from './ArtifactTabStrip.svelte';
+	import DeliveryConfirmation from './attention/DeliveryConfirmation.svelte';
 	import type { DocViewerTarget } from '$lib/docViewerTarget';
 	import type { ImageViewportPlace, TabLoadSignal } from '$lib/artifactTabs';
 	import { returnToPlanNode } from '$lib/planLeafReturn';
@@ -324,6 +325,8 @@
 						onPlace={(camera) => recordDocumentImageCamera(target.instanceId, camera)}
 					/>
 				{/if}
+				<!-- This notice belongs to the document canvas, which remains the visible surface on phone. -->
+				<DeliveryConfirmation artifactId={target.artifactId} />
 			{/if}
 		</div>
 	</div>

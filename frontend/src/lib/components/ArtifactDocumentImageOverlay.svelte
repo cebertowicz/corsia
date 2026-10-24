@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { leaveImageOnExit } from '$lib/docFeedbackLifecycle.svelte';
 	import ImageLightbox from './ImageLightbox.svelte';
 	import ImageCommentLightbox from './ImageCommentLightbox.svelte';
 	import type { DocViewerTarget } from '$lib/docViewerTarget';
@@ -15,6 +16,10 @@
 		onBack: () => void;
 		onPlace: (place: ImageViewportPlace) => void;
 	} = $props();
+
+	// Back, Escape, another tab, a collapsed canvas or another thread all end this overlay: each is this one send of
+	// the image comments the viewer still holds.
+	leaveImageOnExit(() => ({ feedback: comments?.feedback, artifactId: comments?.artifactId, key: target.instanceId }));
 </script>
 
 <div class="image-overlay">
