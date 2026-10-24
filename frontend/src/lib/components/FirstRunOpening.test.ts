@@ -25,7 +25,15 @@ const opening: Omit<Message, 'thread_id'> = { id: `first-run-opening:${thread}`,
 	created_at: '2026-10-22T00:00:00Z', metadata: { for_user: true, first_run_opening: true } };
 let host: HTMLElement;
 let component: ReturnType<typeof mount> | undefined;
+let frames: FrameRequestCallback[] = [];
+let realRaf: typeof requestAnimationFrame;
 async function settle() { flushSync(); await tick(); flushSync(); }
+function runFrames() {
+	const pending = frames;
+	frames = [];
+	for (const frame of pending) frame(0);
+	flushSync();
+}
 async function show() {
 	component = mount(MessageList, { target: host, props: { messagesEl: undefined, userIsNearBottom: true,
 		ignoreScrollEvents: false, onOpenLightbox: () => {}, historyComplete: true } });
@@ -34,6 +42,12 @@ async function show() {
 function receive(message = opening) { handleMessage({ type: 'message_added', thread_id: thread, message }, () => {}); }
 beforeEach(() => {
 	vi.useFakeTimers(); vi.stubGlobal('matchMedia', () => ({ matches: false }));
+	realRaf = globalThis.requestAnimationFrame;
+	frames = [];
+	globalThis.requestAnimationFrame = ((callback: FrameRequestCallback) => {
+		frames.push(callback);
+		return frames.length;
+	}) as typeof requestAnimationFrame;
 	host = document.createElement('div'); document.body.appendChild(host);
 	_resetTurnStateForTests(); _resetLiveStepForTests(); _resetFirstRunOpeningRevealForTests(); _resetTypewritersForTests();
 	messages.set([]); activeThreadId.set(thread); token.set(null); coreSettings.set(null);
@@ -45,6 +59,7 @@ afterEach(async () => {
 	_resetTypewritersForTests(); _resetFirstRunOpeningRevealForTests(); _resetTurnStateForTests(); _resetLiveStepForTests();
 	messages.set([]); activeThreadId.set(null); coreSettings.set(null);
 	activeToolsByThread.set(new Map()); streamContentByThread.set(new Map()); liveReasoningByThread.set(new Map());
+	globalThis.requestAnimationFrame = realRaf;
 	vi.useRealTimers(); vi.unstubAllGlobals();
 });
 
@@ -87,5 +102,49 @@ describe('first-run transcript composition', () => {
 		expect(host.textContent).toContain("Here's mine for finishing your setup.");
 		expect(host.querySelector('.typewriter-text')).toBeNull();
 		expect(host.querySelector('[aria-atomic="true"]')).toBeNull();
+	});
+
+	it.each(['history', 'live reveal'] as const)('lands a %s opening at its first line without waiting for update cards', async (kind) => {
+		if (kind === 'history') messages.set([{ ...opening, thread_id: thread }] as never);
+		await show();
+		if (kind === 'live reveal') { awaitFirstRunOpening(thread); receive(); await settle(); }
+		const scroller = host.querySelector<HTMLElement>('.messages')!;
+		const row = scroller.querySelector<HTMLElement>('[data-first-run-opening]')!;
+		const scrollIntoView = vi.fn();
+		row.scrollIntoView = scrollIntoView;
+
+		runFrames();
+
+		expect(scrollIntoView).toHaveBeenCalledWith({ block: 'start' });
+	});
+
+	it('lands the opening after a requested divider resolves without a target', async () => {
+		openAtDivider.set(thread);
+		visitDividers.set({ [thread]: { divider: null, failed: false } });
+		messages.set([{ ...opening, thread_id: thread }] as never);
+		await show();
+		const scroller = host.querySelector<HTMLElement>('.messages')!;
+		const row = scroller.querySelector<HTMLElement>('[data-first-run-opening]')!;
+		const scrollIntoView = vi.fn();
+		row.scrollIntoView = scrollIntoView;
+
+		runFrames();
+
+		expect(scrollIntoView).toHaveBeenCalledWith({ block: 'start' });
+	});
+
+	it('lets a user gesture cancel a deferred opening landing', async () => {
+		visitDividers.set({ [thread]: { divider: null, failed: false } });
+		messages.set([{ ...opening, thread_id: thread }] as never);
+		await show();
+		const scroller = host.querySelector<HTMLElement>('.messages')!;
+		const row = scroller.querySelector<HTMLElement>('[data-first-run-opening]')!;
+		const scrollIntoView = vi.fn();
+		row.scrollIntoView = scrollIntoView;
+
+		scroller.dispatchEvent(new Event('wheel'));
+		runFrames();
+
+		expect(scrollIntoView).not.toHaveBeenCalled();
 	});
 });

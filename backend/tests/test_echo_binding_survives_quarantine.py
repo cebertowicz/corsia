@@ -96,6 +96,10 @@ _MARKER = '\n\n[CORSIA_TOOL_INVOCATION reference={"invocation_id": "orig-inv-1"}
     "label,echo",
     [
         ("original_invocation_marker", "partial bytes" + _MARKER),
+        (
+            "marker_before_harness_image_blocks",
+            "partial bytes" + _MARKER + "\n[image: image/png]\n[Image: resized note]",
+        ),
         ("no_marker_call_id_only", "plain echoed bytes"),
         (
             "synthetic_marker",

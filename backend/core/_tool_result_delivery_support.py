@@ -11,10 +11,7 @@ from typing import Any
 
 from loguru import logger
 
-from core.tool_result_invocation import (
-    invocation_id_from_echo,
-    with_invocation_reference,
-)
+from core.tool_result_invocation import with_invocation_reference
 from core.tool_result_projection import render_tool_result_for_model
 from tools.catalog import normalize_tool_name
 

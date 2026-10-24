@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ActivityPlanRow } from '$lib/activityHome';
 import type { ThreadPlanStateEntry } from '$lib/api/plans';
 import { threadPlanStates } from '$lib/stores/threadPlanStates';
+import ActivityGroupBlock from './ActivityGroupBlock.svelte';
 import ActivityPlanRowView from './ActivityPlanRow.svelte';
 
 const NOW = new Date(2026, 9, 2, 10, 30, 0);
@@ -15,7 +16,7 @@ let component: Record<string, unknown> | null = null;
 function row(threadId: string, label: string): ActivityPlanRow {
 	return {
 		entry: {
-			plan: { revision: 1 }, owner: { thread_id: threadId, label, type: 'thread' },
+			plan: { id: `plan-${threadId}`, revision: 1 }, owner: { thread_id: threadId, label, type: 'thread' },
 			progress: { open: 1, liveness: 'waiting' }, has_nodes: false,
 			display: { label_key: 'waiting', tone_key: 'waiting' }, priority_at: at(0),
 		},
@@ -65,6 +66,31 @@ describe('Activity waiting rows', () => {
 		expect(host.querySelector('.state-word')).toBeNull();
 	});
 
+	it('a plan still working or owing you keeps its own state beside set-aside work, and names its count', () => {
+		for (const state of ['moving', 'needs_input'] as const) {
+			threadPlanStates.set({ t6: entry({ state, set_aside_until: at(24 * 60) }) });
+			const working = row('t6', 'Release agent');
+			working.entry.progress = { ...working.entry.progress, open: 15, liveness: 'advancing' };
+			working.entry.display = { label_key: 'working', tone_key: 'active' } as typeof working.entry.display;
+			component = mount(ActivityPlanRowView, { target: host, props: { row: working, onSelectThread: () => {} } });
+			flushSync();
+
+			expect(host.textContent).not.toMatch(/Set aside/);
+			expect(host.querySelector('.plan-state .snooze-clock')).toBeNull();
+			expect(host.querySelector('.state-word')).not.toBeNull();
+			expect(host.querySelector('.progress')?.textContent).toBe('15 tasks left');
+			unmount(component);
+			component = null;
+		}
+	});
+
+	it('one open task reads in the singular', () => {
+		threadPlanStates.set({ t7: entry({ state: 'idle', set_aside_until: at(24 * 60) }) });
+		render('t7');
+
+		expect(host.querySelector('.progress')?.textContent).toBe('1 task left');
+	});
+
 	it('a set-aside row whose time has passed reads due now', () => {
 		threadPlanStates.set({ t3: entry({ state: 'idle', set_aside_until: at(-5) }) });
 		render('t3');
@@ -91,5 +117,28 @@ describe('Activity waiting rows', () => {
 		render('t5');
 
 		expect(host.querySelector('.owner-copy > .set-aside')?.textContent).toMatch(/^Set aside until /);
+	});
+
+	it('the Waiting group lists outside waits soonest first, then set-aside plans, then the rest; a working plan is not set aside', () => {
+		threadPlanStates.set({
+			idle: entry({ state: 'idle' }),
+			working: entry({ state: 'moving', set_aside_until: at(10) }),
+			later: entry({ state: 'idle', set_aside_until: at(48 * 60) }),
+			soon: entry({ state: 'idle', set_aside_until: at(24 * 60) }),
+			ci: entry({ wait: { label: 'CI', until: at(90), more: 0 } }),
+			review: entry({ wait: { label: 'Review', until: at(30), more: 0 } }),
+		});
+		const ids = ['idle', 'working', 'later', 'soon', 'ci', 'review'];
+		const group = {
+			id: 'g', projectId: null, label: null, summary: { moving: 0, needsYou: 0, waiting: ids.length, left: ids.length },
+			current: [], complete: [], waiting: ids.map((id) => row(id, id)),
+		};
+		component = mount(ActivityGroupBlock, { target: host, props: { group, kind: 'waiting', showHead: false, onSelectThread: () => {} } });
+		flushSync();
+		host.querySelector<HTMLButtonElement>('button.more-toggle')!.click();
+		flushSync();
+
+		const order = [...host.querySelectorAll('button.row-summary')].map((el) => el.getAttribute('aria-label')?.replace('Open ', ''));
+		expect(order).toEqual(['review', 'ci', 'soon', 'later', 'idle', 'working']);
 	});
 });

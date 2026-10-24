@@ -19,7 +19,9 @@ async function readCatalog(scope: string | null, refreshUsage: boolean): Promise
 	if (scope) params.set('thread_id', scope);
 	const query = params.toString();
 	const path = query ? `/api/models?${query}` : '/api/models';
-	const res = await (scope ? fetch(path, { headers: { Authorization: `Bearer ${get(token)}` } }) : fetch(path));
+	// The network listener refuses any API read without the person's session, unscoped ones included.
+	const session = get(token);
+	const res = await (session ? fetch(path, { headers: { Authorization: `Bearer ${session}` } }) : fetch(path));
 	if (res.ok === false) throw new Error(`catalog read returned ${res.status}`);
 	const rows = (await res.json()).models;
 	if (!Array.isArray(rows)) throw new Error('catalog read carried no rows');

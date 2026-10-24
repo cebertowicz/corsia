@@ -13,7 +13,7 @@
 	import ActivityIdentityGlyph from './ActivityIdentityGlyph.svelte';
 	import ThreadWaitingMark from '$lib/components/ThreadWaitingMark.svelte';
 	import SnoozeClock from '$lib/components/plans/SnoozeClock.svelte';
-	import { threadPlanStates } from '$lib/stores/threadPlanStates';
+	import { planSetAsideUntil, threadPlanStates } from '$lib/stores/threadPlanStates';
 	import { setAsideLine, waitBack, waitChecksBack } from '$lib/components/plans/planWaits';
 	import { openWaitArtifact, UNOPENABLE_DOCUMENT } from '$lib/openWaitArtifact';
 	import { minuteClock } from '$lib/time';
@@ -77,8 +77,8 @@
 	});
 	// Every wait is set aside by its agent: the plan comes back at a time it chose (EW7); no state word.
 	const setAside = $derived.by(() => {
-		const entry = $threadPlanStates[threadId];
-		return !wait && entry?.set_aside_until ? setAsideLine(entry.set_aside_until, $minuteClock) : null;
+		const until = planSetAsideUntil($threadPlanStates[threadId]);
+		return !wait && until ? setAsideLine(until, $minuteClock) : null;
 	});
 	// A host-like label ("github.com/…/checks") stays as written; any other starts a sentence.
 	const waitLabel = $derived(!wait ? '' : /^[\w-]+(\.[\w-]+)+(\/|$)/.test(wait.label) ? wait.label
@@ -187,7 +187,7 @@
 					{#if !setAside}<span class="state-word {tone}">{stateLabel}</span>{/if}
 					<!-- Failure state is carried by the canonical plan display above. -->
 					{#if row.entry.progress.open > 0}
-						<span class="progress">{row.entry.progress.open} left</span>
+						<span class="progress">{row.entry.progress.open} {row.entry.progress.open === 1 ? 'task' : 'tasks'} left</span>
 					{/if}
 				</span>
 				<!-- A wide row expands with this chevron and opens with the Open button.
