@@ -496,6 +496,38 @@ def test_validate_decision_refuses_answers_outside_the_table() -> None:
     assert _decision(text="a\n  b").text == "a b"
 
 
+def test_case_metadata_is_optional_and_refused_before_it_is_stored() -> None:
+    from core import placement_answer
+    from core.placement_decide import InvalidDecision
+
+    assert _decision().case_metadata == {}
+    case = {
+        "what_happened": "A placement case was lost.",
+        "right_call": "Keep it with the lesson.",
+        "does_not_apply": "A lesson with no case.",
+    }
+    decision = _decision(case=case, cause="rule_gap", target_file=" context/rule.md ", new_target_path=None)
+    assert decision.case_metadata == {"target_file": "context/rule.md", "cause": "rule_gap", "case": case}
+    assert placement_answer.load({"placement": placement_answer._stored(decision)})[0] == decision
+
+    actions = {
+        "required_actions": [{"tool": "read_file", "params": {}}],
+        "forbidden_actions": [],
+        "decisive_action": {"tool": "write_file", "params": {}},
+    }
+    for invalid, message in (
+        ({"cause": "bad_luck"}, "cause must be one of wrong_rule, no_foundation, rule_gap"),
+        ({"new_evidence": "unsupported"}, "new_evidence must be one of target_changed, case_differs"),
+        ({"case": {**case, "correction_subject": "continuity-entry:1"}}, "case may name only"),
+        ({"case": {**case, "actions": actions}}, "decisive_action must be one declared"),
+        ({"target_file": 3}, "target_file must be a string or null"),
+        ({"target_file": "context/rule.md", "new_target_path": "context/new.md"},
+         "target_file and new_target_path do not go together"),
+    ):
+        with pytest.raises(InvalidDecision, match=message):
+            _decision(**invalid)
+
+
 def test_destination_mapping_never_leaves_the_tray_or_reference(tmp_path) -> None:
     from core.placement_decide import InvalidDecision, map_destination
 

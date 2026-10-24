@@ -347,6 +347,127 @@ async def test_a_revision_keeps_the_lesson_and_replaces_its_review(env: Env) -> 
     assert [lesson["behavioral_sha256"] for lesson in _offered(env)] == [after.behavioral_sha256]
 
 
+CASE = {
+    "what_happened": "The placement case was not saved.",
+    "right_call": "Persist the case through the existing lesson writer.",
+    "does_not_apply": "A lesson with no case.",
+    "actions": {
+        "required_actions": [
+            {"tool": "read_file", "params": {"path": "context/rule.md"}},
+            {"tool": "plan_update", "params": {"operation": "mark_done"}},
+        ],
+        "forbidden_actions": [{"tool": "write_file", "params": {"path": "context/rule.md"}}],
+        "decisive_action": {"tool": "plan_update", "params": {"operation": "mark_done"}},
+    },
+}
+
+
+async def test_a_trial_keeps_its_case_and_a_revision_replaces_only_what_it_supplies(env: Env) -> None:
+    first = _entry(env)
+    _place(env, first, _answer(
+        case=CASE, cause="rule_gap", target_file="context/rule.md", target_section="Lessons",
+    ))
+    await _drain(env.worker)
+    before = lesson_files.read_trial(_skill(env).read_text())
+    assert before is not None
+    assert before.lesson.case_metadata == {
+        "target_file": "context/rule.md", "target_section": "Lessons", "cause": "rule_gap", "case": CASE,
+    }
+
+    second = _entry(env, [{"kind": "turn", "reference": "turn-19"}], "also name the branch")
+    revised = _place(env, second, _answer(
+        text="Name the exact commit and branch a check ran on.",
+        target_section="Checks", new_evidence="target_changed",
+    ))
+    await _drain(env.worker)
+
+    assert not revised.startswith("Error")
+
+    after = lesson_files.read_trial(_skill(env).read_text())
+    assert after is not None and after.lesson.id == before.lesson.id
+    assert after.lesson.case_metadata == {
+        **before.lesson.case_metadata, "target_section": "Checks", "new_evidence": "target_changed",
+    }
+
+
+async def test_a_revision_never_keeps_stale_evidence_or_an_old_target(env: Env) -> None:
+    _place(env, _entry(env), _answer(case=CASE, target_file="context/rule.md", target_section="Lessons"))
+    await _drain(env.worker)
+    _place(env, _entry(env, [{"kind": "turn", "reference": "turn-19"}], "a new file"), _answer(
+        text="Name the exact commit and branch a check ran on.",
+        new_target_path="context/checks.md", new_evidence="target_changed",
+    ))
+    await _drain(env.worker)
+    retargeted = lesson_files.read_trial(_skill(env).read_text())
+    assert retargeted.lesson.case_metadata == {
+        "new_target_path": "context/checks.md", "case": CASE, "new_evidence": "target_changed",
+    }
+
+    _place(env, _entry(env, [{"kind": "turn", "reference": "turn-23"}], "and the repo"), _answer(
+        text="Name the exact repo, commit and branch a check ran on.",
+    ))
+    await _drain(env.worker)
+
+    after = lesson_files.read_trial(_skill(env).read_text())
+    assert after.lesson.id == retargeted.lesson.id
+    assert after.lesson.case_metadata == {"new_target_path": "context/checks.md", "case": CASE}
+
+
+async def test_a_held_revision_offered_later_keeps_only_the_new_evidence_it_states(env: Env) -> None:
+    _place(env, _entry(env), _answer(case=CASE))
+    await _drain(env.worker)
+    entry = _entry(env, [{"kind": "turn", "reference": "turn-19"}], "also name the branch")
+    revision = _answer(text="Name the exact commit and branch a check ran on.", target_section="Checks")
+
+    _place(env, entry, {**revision, "trial": {**revision["trial"], "boundary": None},
+                        "new_evidence": "case_differs"})
+    await _drain(env.worker)
+    [capture] = (env.tray / "context" / "captures").glob("*.md")
+    assert lesson_files.read_capture(capture.read_text()).case_metadata == {
+        "target_section": "Checks", "new_evidence": "case_differs",
+    }
+
+    _place(env, entry, revision)
+    await _drain(env.worker)
+
+    after = lesson_files.read_trial(_skill(env).read_text())
+    assert after.statement == "Name the exact commit and branch a check ran on."
+    assert after.lesson.case_metadata == {"case": CASE, "target_section": "Checks"}
+
+
+async def test_a_held_capture_keeps_its_case_and_its_offer_carries_it(env: Env) -> None:
+    literal = _entry(env, SAID, "the user said: that answer was wrong")
+    entry = _entry(env, SAID, "always search the history first")
+    case = {"case": CASE, "cause": "rule_gap", "target_file": "context/rule.md"}
+
+    held = _place(env, entry, _answer(**case))
+    await _drain(env.worker)
+
+    assert held.startswith(f"Entry {entry} queued as a captured hypothesis")
+    [capture] = (env.tray / "context" / "captures").glob("*.md")
+    assert lesson_files.read_capture(capture.read_text()).case_metadata == case
+
+    _place(env, entry, _answer(trial={
+        "derivation": "they rejected an answer that skipped the earlier decision",
+        "literal_ref": {"entry_id": literal},
+    }, target_section="Lessons"))
+    await _drain(env.worker)
+
+    trial = lesson_files.read_trial(_skill(env).read_text())
+    assert trial.lesson.case_metadata == {**case, "target_section": "Lessons"}
+
+
+async def test_a_held_answer_gives_new_evidence_only_when_it_revises(env: Env) -> None:
+    entry = _entry(env, SAID, "always search the history first")
+
+    reply = _place(env, entry, _answer(new_evidence="case_differs"))
+    await _drain(env.worker)
+
+    assert reply.startswith("Error: new_evidence is only for revising your own watch or trial lesson")
+    assert _state(env, entry) == ("active", None)
+    assert list((env.tray / "context" / "captures").glob("*.md")) == []
+
+
 async def test_a_retired_lesson_tried_again_is_a_new_lesson_naming_its_origin(env: Env) -> None:
     first = _entry(env)
     _place(env, first)
@@ -425,6 +546,8 @@ async def test_a_checkpoint_stages_a_trial_and_its_install_hands_it_to_the_worke
     (_answer(skill_name="Not A Slug"), "Error: skill_name must be a new lowercase-hyphenated"),
     (_answer(duplicate_of="- some line"), "Error: duplicate_of and trial do not go together"),
     (_answer(trial={"boundary": "word " * 160}), "Error: a lesson body is at most 150 words"),
+    (_answer(new_evidence="case_differs"),
+     "Error: new_evidence is only for revising your own watch or trial lesson"),
 ])
 async def test_an_answer_that_cannot_be_a_trial_goes_back_to_be_corrected(
     env: Env, answer, message,
