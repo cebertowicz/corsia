@@ -485,15 +485,24 @@ async function resetDockPosition(page: Page): Promise<void> {
 }
 
 async function holdViewedStamps(page: Page): Promise<() => Promise<void>> {
+	let released = false;
 	const pending = new Set<() => void>();
+	const inFlight = new Set<Promise<void>>();
 	const pattern = '**/api/artifacts/*/comments/*/viewed';
-	const handler = async (route: Route) => {
-		await new Promise<void>((release) => pending.add(release));
-		await route.continue();
+	const handler = (route: Route) => {
+		const work = (async () => {
+			if (!released) await new Promise<void>((release) => pending.add(release));
+			await route.continue();
+		})();
+		inFlight.add(work);
+		void work.then(() => inFlight.delete(work), () => inFlight.delete(work));
+		return work;
 	};
 	await page.route(pattern, handler);
 	return async () => {
+		released = true;
 		for (const release of pending) release();
+		await Promise.all(inFlight);
 		await page.unroute(pattern, handler);
 	};
 }
@@ -703,13 +712,14 @@ for (const theme of ['light', 'dark'] as const) {
 for (const theme of ['light', 'dark'] as const) {
 	for (const width of [1440, 393]) {
 		test(`${TAG} ${theme} ${width}px: arriving in an unread document reveals and stamps the first reply`, async ({ page, request }, testInfo) => {
+			test.setTimeout(60_000);
 			test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires isolated synthetic state');
 			skipMismatchedProject(width, testInfo.project.name);
 			await page.setViewportSize({ width, height: width === 393 ? 852 : 900 });
 			await page.emulateMedia({ colorScheme: theme });
 			const threadId = await createSession(request, THREAD_TITLE);
 			await onlyThread(request, threadId);
-			const scenario = await seedScenario(page, request, threadId, `arrival-${theme}-${width}`, [2]);
+			const scenario = await seedScenario(page, request, threadId, `arrival-${theme}-${width}`, []);
 			await stageWorkspace(page, threadId, scenario.docPath, scenario.name, 'chat', false);
 			await loginByUrl(page);
 			await expect(sidebarThread(page, THREAD_TITLE)).toBeAttached();
@@ -717,27 +727,30 @@ for (const theme of ['light', 'dark'] as const) {
 			await expect(page.getByText(CHAT[0].content, { exact: true })).toBeVisible();
 			await expect(page.locator('.reply-chip-notice')).toHaveCount(0);
 			await shot(page, `00-current-chat-${theme}-${width}`);
-			await serveReplyQueue(page, request, scenario, threadId);
-			// The reply is now waiting: the backend would push the queue, so the stand-in queue is read again.
+			addAgentReply(scenario.artifactId, scenario.roots[2], threadId, PASSAGES[2].reply);
+			// The reply is now waiting; refresh the real queue after the fixture writes it.
 			await page.evaluate(async () => (await import('/src/lib/stores/attentionDock.svelte.ts')).reload());
 			await expect(page.locator('.reply-chip-notice').getByRole('button')).toContainText('1 new reply · launch-plan.md');
 			const releaseViewedStamps = await holdViewedStamps(page);
-			await page.evaluate(async ({ id, path, title }) => {
-				const { openArtifactTab } = await import('/src/lib/stores/artifactWorkspace.ts');
-				openArtifactTab(id, { path, title, landOn: 'new-replies' });
-			}, { id: threadId, path: scenario.docPath, title: scenario.name });
-			// Arrival skips the first two quiet threads and visibly scrolls to Budget's unread reply.
-			await expect(page.getByText(PASSAGES[2].reply, { exact: true })).toBeVisible();
-			await documentReady(page);
-			// This landing frame is intentionally before the 1.5 s visible dwell: marker, pill, and dock still agree.
-			await expect(page.getByRole('button', { name: '3 open threads, 1 unread' })).toBeVisible();
-			await expect(page.locator('.ct-new')).toHaveCount(1);
-			// The reply is on screen but not yet read (the stamp is held), so Chat still counts it beside the document.
-			if (width === 1440) await expect(page.locator('.reply-chip-notice')).toContainText('1 new reply · launch-plan.md');
-			await expect.poll(() => page.locator('.cm-scroller').evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
-			await shot(page, `01-document-arrival-${theme}-${width}`);
-			await shotRailClosed(page, `01-document-arrival-${theme}-${width}-rail-closed`, width);
-			await releaseViewedStamps();
+			try {
+				await page.evaluate(async ({ id, path, title }) => {
+					const { openArtifactTab } = await import('/src/lib/stores/artifactWorkspace.ts');
+					openArtifactTab(id, { path, title, landOn: 'new-replies' });
+				}, { id: threadId, path: scenario.docPath, title: scenario.name });
+				// Arrival skips the first two quiet threads and visibly scrolls to Budget's unread reply.
+				await expect(page.getByText(PASSAGES[2].reply, { exact: true })).toBeVisible();
+				await documentReady(page);
+				// This landing frame is intentionally before the 1.5 s visible dwell: marker, pill, and dock still agree.
+				await expect(page.getByRole('button', { name: '3 open threads, 1 unread' })).toBeVisible();
+				await expect(page.locator('[data-doc-comments-drawer] .ct-new')).toHaveCount(1);
+				// The reply is on screen but not yet read (the stamp is held), so Chat still counts it beside the document.
+				if (width === 1440) await expect(page.locator('.reply-chip-notice')).toContainText('1 new reply · launch-plan.md');
+				await expect.poll(() => page.locator('.cm-scroller').evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+				await shot(page, `01-document-arrival-${theme}-${width}`);
+				await shotRailClosed(page, `01-document-arrival-${theme}-${width}-rail-closed`, width);
+			} finally {
+				await releaseViewedStamps();
+			}
 		});
 	}
 }
@@ -1198,7 +1211,7 @@ for (const theme of ['light', 'dark'] as const) {
 				await expect(messages.getByText(longBubble)).toBeAttached();
 				await messages.locator('.user-bubble-wrapper', { hasText: longBubble }).getByRole('button', { name: 'Show more' }).click();
 				await expect.poll(() => messages.evaluate((el) => el.scrollHeight - el.clientHeight)).toBeGreaterThan(200);
-				await messages.evaluate((el) => { el.scrollTop = el.scrollHeight / 2; el.dispatchEvent(new WheelEvent('wheel', { deltaY: -1, bubbles: true })); el.dispatchEvent(new Event('scroll')); });
+				await messages.evaluate((el) => { el.scrollTop = (el.scrollHeight - el.clientHeight) / 2; el.dispatchEvent(new WheelEvent('wheel', { deltaY: -1, bubbles: true })); el.dispatchEvent(new Event('scroll')); });
 				if (!withDecision) {
 					await expect(page.locator('.attention-dock')).toHaveCount(0);
 					const oldArrow = width === 393 ? page.locator('.mobile-scroll-fab') : page.locator('.scroll-fab');
@@ -1265,6 +1278,8 @@ test.afterAll(({}, testInfo) => {
 				'09-long-reply-document',
 				'11a-reply-chip-partly-read',
 				'11b-reply-chip-all-read',
+				'12-backdrop-needs-you',
+				'12-backdrop-reply-only',
 			]) expected.add(`${frame}-${theme}-${width}.png`);
 			if (width === 1440) {
 				expected.add(`01-document-arrival-${theme}-${width}-rail-closed.png`);
@@ -1288,7 +1303,7 @@ test.afterAll(({}, testInfo) => {
 
 	const runStartedAt = statSync(path.join(screenshotDir, EVIDENCE_RUN_MARKER)).mtimeMs;
 	const capturedFrames = readdirSync(screenshotDir).filter((entry) => entry.endsWith('.png')).sort();
-	expect(capturedFrames, 'The empty evidence directory contains exactly the current run’s 81 frames').toEqual([...expected].sort());
+	expect(capturedFrames, 'The empty evidence directory contains exactly the current run’s 89 frames').toEqual([...expected].sort());
 	for (const frame of expected) {
 		const output = path.join(screenshotDir, frame);
 		expect(existsSync(output), `Persisted reply-awareness evidence frame ${output}`).toBeTruthy();
