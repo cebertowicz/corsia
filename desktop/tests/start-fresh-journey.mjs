@@ -56,7 +56,7 @@ async function open(theme, answers) {
 	await page.exposeFunction('__answer', async (command, count) => {
 		const answer = answers[command];
 		if (answer && answer.throws) return { throws: answer.throws };
-		return { value: typeof answer === 'function' ? answer(count) : answer ?? null };
+		return { value: typeof answer === 'function' ? await answer(count) : answer ?? null };
 	});
 	await page.addInitScript(() => {
 		window.__calls = [];
@@ -113,7 +113,7 @@ for (const theme of ['dark', 'light']) {
 		await page.evaluate((said) => window.__corsiaShowStartup({ state: 'existing_install', reason: said }), reason);
 		compare(`${theme} offer`, await read(page), {
 			title: 'Start CORSIA fresh?',
-			line: 'CORSIA found an existing install on this computer (~/.corsia), and this app can’t open it. Start fresh moves these into a new folder in ~/CORSIA backups. Nothing is deleted.',
+			line: 'CORSIA found an existing install on this computer (~/.corsia), and this app can’t open it. CORSIA stops your earlier install, then moves these into a new folder in ~/CORSIA backups. Nothing is deleted.',
 			note: 'Its code folder stays where it is: ~/.corsia.',
 			list: preview.moves,
 			details: null,
@@ -127,7 +127,7 @@ for (const theme of ['dark', 'light']) {
 		const plistReason = 'CORSIA found an existing install on this computer, and this app can’t take it over.';
 		await page.evaluate(([said, why]) => window.__corsiaShowStartup({ state: 'existing_install', reason: said, details: why }), [plistReason, cause]);
 		compare(`${theme} offer with a cause`, await read(page), {
-			line: `${plistReason} Start fresh moves these into a new folder in ~/CORSIA backups. Nothing is deleted.`,
+			line: `${plistReason} CORSIA stops your earlier install, then moves these into a new folder in ~/CORSIA backups. Nothing is deleted.`,
 			list: preview.moves,
 			details: cause,
 			button: 'Start fresh',
@@ -184,14 +184,17 @@ for (const theme of ['dark', 'light']) {
 	// A rejected preview never allows movement and leaves Take over usable.
 	{
 		const refusal = { message: 'CORSIA can’t inspect this earlier install.', details: 'permission denied', restored: true };
-		const page = await open(theme, { start_fresh_preview: { throws: refusal }, adopt_existing_install: { pending: true } });
+		const page = await open(theme, { start_fresh_preview: (count) => count === 1 ? { throws: refusal } : preview, adopt_existing_install: { pending: true } });
 		const before = failed;
 		await page.evaluate(() => window.__corsiaShowStartup({ state: 'adoption_offered', workspace: '~/Corsia' }));
-		compare(`${theme} takeover preview refusal`, await read(page), { button: 'Take over', instead: 'Retry Start fresh', list: null, quit: true });
+		compare(`${theme} takeover preview refusal`, await read(page), { button: 'Take over', instead: 'Check folders again', list: null, quit: true });
+		await page.click('#start-fresh');
+		await page.waitForFunction(() => document.getElementById('start-fresh').textContent === 'Start fresh instead');
+		if (JSON.stringify(await made(page)) !== JSON.stringify(['start_fresh_preview', 'start_fresh_preview'])) fail(`${theme} preview retry: moved data or ran ${JSON.stringify(await made(page))}`);
 		await page.click('#retry');
 		await page.waitForFunction(() => window.__calls.includes('adopt_existing_install'));
 		const calls = await made(page);
-		if (JSON.stringify(calls) !== JSON.stringify(['start_fresh_preview', 'adopt_existing_install'])) fail(`${theme} takeover preview refusal: ran ${JSON.stringify(calls)}`);
+		if (JSON.stringify(calls) !== JSON.stringify(['start_fresh_preview', 'start_fresh_preview', 'adopt_existing_install'])) fail(`${theme} takeover preview refusal: ran ${JSON.stringify(calls)}`);
 		if (failed === before) console.log(`ok   ${theme} rejected preview keeps Take over usable`);
 		await page.close();
 	}
@@ -204,6 +207,7 @@ for (const theme of ['dark', 'light']) {
 		const before = failed;
 		await page.evaluate(() => { void window.__corsiaShowStartup({ state: 'adoption_offered', workspace: '~/Corsia' }); });
 		await page.waitForFunction(() => document.getElementById('retry').textContent === 'Take over');
+		compare(`${theme} checking folders`, await read(page), { button: 'Take over', instead: 'Checking folders…', list: null, quit: true });
 		await page.click('#retry');
 		await page.waitForFunction(() => document.getElementById('status').textContent === 'Giving running work up to a minute to finish…');
 		releasePreview(preview);
