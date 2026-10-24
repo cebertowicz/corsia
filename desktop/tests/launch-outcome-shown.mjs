@@ -84,7 +84,7 @@ try {
 		await page.evaluate(drawn.offered);
 		await page.clock.runFor(50);
 		const seen = await read(page);
-		if (seen.status !== 'Use the CORSIA already on this computer?' || seen.retry !== 'Use it') fail(`offered: ${JSON.stringify(seen)}`);
+		if (seen.status !== 'Use the CORSIA already on this computer?' || seen.retry !== 'Take over') fail(`offered: ${JSON.stringify(seen)}`);
 		else console.log('ok   offered install is asked about');
 	}
 	{

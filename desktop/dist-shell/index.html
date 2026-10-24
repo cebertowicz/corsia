@@ -290,8 +290,6 @@
 				confirmButton: 'Move and start fresh',
 				movingTitle: 'Moving your earlier install into a backup…',
 				quitPending: 'CORSIA will close once everything is in one place.',
-				doneTitle: 'Your earlier install is in a backup',
-				doneLine: (backup) => `It’s in ${backup}. Nothing was deleted.`,
 				doneButton: 'Set up CORSIA',
 				failureTitle: 'CORSIA couldn’t start fresh',
 				// The earlier install's pieces went away before Start fresh could move them.
@@ -355,7 +353,7 @@
 				quit.hidden = false;
 				saveReport.hidden = true;
 				retry.hidden = false;
-				retry.textContent = 'Use it';
+				retry.textContent = 'Take over';
 				startFreshButton.textContent = FRESH_COPY.insteadButton;
 				startFreshButton.hidden = false;
 				actions.hidden = false;
@@ -684,9 +682,9 @@
 				freshRunning = true;
 				const stopFollowing = followProgress();
 				try {
-					const backup = await invoke('start_fresh');
+					await invoke('start_fresh');
 					stopFollowing();
-					showFreshCard({ title: FRESH_COPY.doneTitle, text: FRESH_COPY.doneLine(backup), button: FRESH_COPY.doneButton, action: start });
+					await start();
 				} catch (error) {
 					stopFollowing();
 					showFreshFailure(error);
