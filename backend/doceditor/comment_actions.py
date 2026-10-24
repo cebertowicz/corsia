@@ -41,8 +41,21 @@ DocumentWriter = Callable[
 ]
 
 
-
-
+def accepted_person_author_user_id(
+    rows: list[dict[str, Any]], accepted_ids: list[str],
+) -> str | None:
+    """Return one immutable user ID only when every accepted suggestion shares it."""
+    accepted = set(accepted_ids)
+    winners = [row for row in rows if row.get("id") in accepted]
+    if not accepted or len(winners) != len(accepted):
+        return None
+    if any(row.get("author_kind") != "user" for row in winners):
+        return None
+    author_user_ids = {row.get("author_user_id") for row in winners}
+    if len(author_user_ids) != 1:
+        return None
+    author_user_id = author_user_ids.pop()
+    return author_user_id if isinstance(author_user_id, str) and author_user_id else None
 
 
 def suggestion_span(comment: dict[str, Any], document_text: str) -> tuple[int, int]:
@@ -210,7 +223,7 @@ async def decide_suggestion(
                 artifact["path"], applied_text(comment, document_text), project_id,
                 f"Accepted suggestion {comment_id} from {comment['author']}",
                 hashlib.sha256(document_text.encode()).hexdigest(),
-                str(comment["author"]) if comment["author_kind"] == "user" else None,
+                accepted_person_author_user_id([comment], [comment_id]),
             )
 
     def _record():

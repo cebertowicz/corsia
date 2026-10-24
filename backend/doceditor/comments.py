@@ -101,12 +101,50 @@ def list_for_artifact(artifact_id: str, *, db=None) -> list[dict]:
             _db.close()
 
 
+def _insert_comment(
+    connection, *, cid: str, artifact_id: str, parent_id: str | None, author: str,
+    author_user_id: str | None, author_kind: str, author_thread_id: str | None,
+    body: str, anchor_text: str | None, from_off: int | None, to_off: int | None,
+    anchor_prefix: str | None, anchor_suffix: str | None, review: bool,
+    replacement: str | None, now: str, region: tuple[float, float, float, float] | None,
+    image_rev: str | None, image_src: str | None,
+):
+    """Insert one comment, retaining immutable person identity only for user rows."""
+    x, y, w, h = region if region is not None else (None, None, None, None)
+    number = None
+    if region is not None and connection.execute(
+        "SELECT 1 FROM doc_comments WHERE id=?", (cid,)
+    ).fetchone() is None:
+        number = connection.execute(
+            """SELECT COALESCE(MAX(region_number), 0) + 1 FROM doc_comments
+               WHERE artifact_id=? AND COALESCE(image_src, '')=COALESCE(?, '')""",
+            (artifact_id, image_src),
+        ).fetchone()[0]
+    return connection.execute(
+        """INSERT INTO doc_comments
+           (id, artifact_id, parent_id, author, author_user_id, author_kind, author_thread_id,
+            body, anchor_text, from_off, to_off, anchor_prefix, anchor_suffix,
+            review, resolved, acked, replacement, created_at, updated_at,
+            region_x, region_y, region_w, region_h, region_number, image_rev, image_src)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,0,?,?,?,?,?,?,?,?,?,?)
+           ON CONFLICT(id) DO NOTHING""",
+        (
+            cid, artifact_id, _thread_root_id(connection, parent_id), author,
+            author_user_id if author_kind == "user" else None, author_kind, author_thread_id,
+            body, anchor_text, from_off, to_off, anchor_prefix, anchor_suffix,
+            1 if review else 0, replacement, now, now,
+            x, y, w, h, number, image_rev, image_src,
+        ),
+    )
+
+
 def create_with_status(
     artifact_id: str,
     *,
     body: str,
     author: str = "you",
     author_kind: str = "user",
+    author_user_id: str | None = None,
     author_thread_id: str | None = None,
     parent_id: str | None = None,
     anchor_text: str | None = None,
@@ -130,31 +168,13 @@ def create_with_status(
     """
     cid = client_id or str(uuid.uuid4())[:12]
     now = _now()
-    x, y, w, h = region if region is not None else (None, None, None, None)
     with write_transaction(db, scope="create_doc_comment") as connection:
-        number = None
-        if region is not None and connection.execute(
-            "SELECT 1 FROM doc_comments WHERE id=?", (cid,)
-        ).fetchone() is None:
-            number = connection.execute(
-                """SELECT COALESCE(MAX(region_number), 0) + 1 FROM doc_comments
-                   WHERE artifact_id=? AND COALESCE(image_src, '')=COALESCE(?, '')""",
-                (artifact_id, image_src),
-            ).fetchone()[0]
-        inserted = connection.execute(
-            """INSERT INTO doc_comments
-               (id, artifact_id, parent_id, author, author_kind, author_thread_id,
-                body, anchor_text, from_off, to_off, anchor_prefix, anchor_suffix,
-                review, resolved, acked, replacement, created_at, updated_at,
-                region_x, region_y, region_w, region_h, region_number, image_rev, image_src)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,0,0,?,?,?,?,?,?,?,?,?,?)
-               ON CONFLICT(id) DO NOTHING""",
-            (
-                cid, artifact_id, _thread_root_id(connection, parent_id), author, author_kind, author_thread_id,
-                body, anchor_text, from_off, to_off, anchor_prefix, anchor_suffix,
-                1 if review else 0, replacement, now, now,
-                x, y, w, h, number, image_rev, image_src,
-            ),
+        inserted = _insert_comment(
+            connection, cid=cid, artifact_id=artifact_id, parent_id=parent_id, author=author,
+            author_user_id=author_user_id, author_kind=author_kind, author_thread_id=author_thread_id,
+            body=body, anchor_text=anchor_text, from_off=from_off, to_off=to_off,
+            anchor_prefix=anchor_prefix, anchor_suffix=anchor_suffix, review=review,
+            replacement=replacement, now=now, region=region, image_rev=image_rev, image_src=image_src,
         )
         row = connection.execute(
             "SELECT * FROM doc_comments WHERE id=?", (cid,)
@@ -165,10 +185,11 @@ def create_with_status(
                 f"client_id '{cid}' belongs to artifact '{r['artifact_id']}', "
                 f"not '{artifact_id}'"
             )
-        if r["author"] != author:
+        if r["author"] != author or (
+            author_kind == "user" and r["author_user_id"] != author_user_id
+        ):
             raise CrossArtifactIdError(
-                f"client_id '{cid}' was created by author '{r['author']}', "
-                f"not '{author}'"
+                f"client_id '{cid}' was created by another author"
             )
         created = inserted.rowcount == 1
         if created:
@@ -179,7 +200,9 @@ def create_with_status(
                     connection, artifact_id, comment_id=cid if named else None,
                     author_thread_id=author_thread_id if named else None)
             if region is not None:
-                live_events.region_after_commit(connection, "placed", artifact_id, w, h, author_kind=author_kind)
+                live_events.region_after_commit(
+                    connection, "placed", artifact_id, region[2], region[3], author_kind=author_kind,
+                )
         return r, created
 
 
