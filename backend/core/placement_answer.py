@@ -202,8 +202,9 @@ def _originating_subjects(db: sqlite3.Connection, thread_id: str) -> tuple[str, 
 
 
 def _stored(decision: Decision) -> dict[str, Any]:
-    """The answer as the mark keeps it; an answer without a trial is unchanged."""
+    """The answer as the mark keeps it; an answer without a trial or case is unchanged."""
     stored = asdict(decision)
+    stored.update(stored.pop("case_metadata"))
     if stored["trial"] is None:
         del stored["trial"]
     if not stored["originating_subjects"]:
