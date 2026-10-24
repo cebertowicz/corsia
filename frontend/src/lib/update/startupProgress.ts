@@ -28,8 +28,8 @@ export function parseStartupProgress(raw: unknown): StartupProgress | null {
 	};
 }
 
-/** The latest read: the file (null when the shell returned nothing) and when this page saw it. */
-export const startupProgress = writable<{ file: StartupProgress | null; readAt: number } | null>(null);
+/** The latest read: an absent file is valid; an unavailable reader is distinct and exposes only a sanitized diagnostic. */
+export const startupProgress = writable<{ file: StartupProgress | null; readAt: number; readError: 'unavailable' | null } | null>(null);
 let generation = 0;
 
 /** One read through the shell's command; a browser or remote shell has no file to read. */
@@ -37,12 +37,13 @@ export async function refreshStartupProgress(): Promise<void> {
 	if (shellInfo()?.mode !== 'local') return;
 	const mine = ++generation;
 	let file: StartupProgress | null = null;
+	let readError: 'unavailable' | null = null;
 	try {
 		file = parseStartupProgress(await readStartupProgress());
 	} catch {
-		file = null;
+		readError = 'unavailable';
 	}
-	if (mine === generation) startupProgress.set({ file, readAt: Date.now() });
+	if (mine === generation) startupProgress.set({ file, readAt: Date.now(), readError });
 }
 
 export function clearStartupProgress(): void {

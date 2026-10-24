@@ -14,7 +14,7 @@
 	const view = $derived($updateScreenView);
 	const shell = $derived(shellInfo());
 	const localDesktop = $derived(shell?.mode === 'local');
-	const hostName = $derived(shell?.mode === 'remote' ? shell.name : 'the computer CORSIA runs on');
+	const hostName = $derived(shell?.mode === 'remote' && shell.name.trim() ? shell.name : null);
 
 	let starting = $state(false);
 	let startFailed = $state(false);
@@ -133,13 +133,16 @@
 								<Button variant="primary" onclick={() => void startCorsia()} loading={starting} bind:el={startActionEl}>Start CORSIA</Button>
 							</div>
 						{/if}
-					{:else}
+					{:else if hostName}
 						<p class="detail">Open CORSIA on {hostName}.</p>
 						<p class="detail">Progress shows on your main computer, {hostName}.</p>
+					{:else}
+						<p class="detail">Open CORSIA on your main computer.</p>
+						<p class="detail">Progress shows on your main computer.</p>
 					{/if}
 				{:else}
 					<p class="detail">CORSIA comes back by itself. You can keep this window open.</p>
-					{#if view.estimated}<p class="detail">Progress shows on your main computer, {hostName}.</p>{/if}
+					{#if view.estimated}<p class="detail">Progress shows on your main computer{hostName ? `, ${hostName}` : ''}.</p>{/if}
 				{/if}
 			</div>
 		</div>

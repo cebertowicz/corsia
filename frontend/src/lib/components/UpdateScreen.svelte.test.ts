@@ -5,8 +5,8 @@ import { updateScreenView } from '$lib/update/screenStore';
 
 let component: Record<string, unknown> | null = null;
 
-function showRemote(view: Parameters<typeof updateScreenView.set>[0]): void {
-	(window as unknown as Record<string, unknown>).__CORSIA_SHELL__ = { mode: 'remote', name: 'Studio Mac' };
+function showRemote(view: Parameters<typeof updateScreenView.set>[0], name = 'Studio Mac'): void {
+	(window as unknown as Record<string, unknown>).__CORSIA_SHELL__ = { mode: 'remote', name };
 	updateScreenView.set(view);
 	component = mount(UpdateScreen, { target: document.body }) as Record<string, unknown>;
 	flushSync();
@@ -29,5 +29,12 @@ describe('UpdateScreen remote copy', () => {
 		showRemote({ mode: 'longer', step: 'restarting', label: 'Restarting CORSIA', percent: 80, estimated: true, fromVersion: null, toVersion: null, failure: null, serviceDown: true });
 		expect(document.body.textContent).toContain('Open CORSIA on Studio Mac.');
 		expect(document.body.textContent).toContain('Progress shows on your main computer, Studio Mac.');
+	});
+
+	it('uses the main-computer fallback once when the remote name is absent', () => {
+		showRemote({ mode: 'longer', step: 'restarting', label: 'Restarting CORSIA', percent: 80, estimated: true, fromVersion: null, toVersion: null, failure: null, serviceDown: true }, '');
+		expect(document.body.textContent).toContain('Open CORSIA on your main computer.');
+		expect(document.body.textContent).toContain('Progress shows on your main computer.');
+		expect(document.body.textContent).not.toContain('your main computer, your main computer');
 	});
 });

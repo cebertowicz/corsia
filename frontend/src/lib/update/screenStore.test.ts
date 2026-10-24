@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { get } from 'svelte/store';
 import { token } from '$lib/stores/auth';
-import { clearStartupProgress, refreshStartupProgress } from './startupProgress';
+import { clearStartupProgress, refreshStartupProgress, startupProgress } from './startupProgress';
 import { CREEP_STALE_MS } from './screenProgress';
 import { dismissUpdateScreen, EXIT_HOLD_MS, startUpdateScreen, stopUpdateScreen, tickUpdateScreen, updateScreenView } from './screenStore';
 import { resetUpdateStoreForTests, updateConfirmed, updateStatus, updateUnreachable, type UpdateStatus } from './store';
@@ -13,16 +13,17 @@ type ShellWindow = Window & {
 };
 
 let progress: unknown;
+let readerFails = false;
 let invoke: ReturnType<typeof vi.fn>;
 
 function inFlight(operationId = 'update-1'): UpdateOperation {
 	return { operation_id: operationId, kind: 'update', status: 'in_flight', phase: 'restarting', target_version: '2026.10.13' };
 }
 
-function status(operation: UpdateOperation): UpdateStatus {
+function status(operation: UpdateOperation, usualSeconds: number | null = 45): UpdateStatus {
 	return {
 		branch: 'dev', current_sha: 'old', remote_sha: 'new', commits_behind: 1, available: true,
-		checked_at: 0, error: null, current_version: '2026.10.12', target_version: '2026.10.13', usual_seconds: 45,
+		checked_at: 0, error: null, current_version: '2026.10.12', target_version: '2026.10.13', usual_seconds: usualSeconds,
 		operation,
 	};
 }
@@ -34,8 +35,10 @@ beforeEach(() => {
 	resetUpdateStoreForTests();
 	clearStartupProgress();
 	progress = null;
+	readerFails = false;
 	invoke = vi.fn(async (command: string) => {
 		expect(command).toBe('read_startup_progress');
+		if (readerFails) throw new Error('reader unavailable');
 		return progress;
 	});
 	const shell = window as ShellWindow;
@@ -96,6 +99,44 @@ describe('update screen store', () => {
 		await refreshStartupProgress();
 		tickUpdateScreen(frozenAt);
 		expect(get(updateScreenView)).toMatchObject({ mode: 'longer', step: 'upgrading', percent: displayedWhileAlive });
+	});
+
+	it('keeps a reader failure distinct from a validated absent record', async () => {
+		updateStatus.set(status(inFlight()));
+		tickUpdateScreen(0);
+		updateUnreachable.set(true);
+		readerFails = true;
+		vi.setSystemTime(60_000);
+		await refreshStartupProgress();
+		tickUpdateScreen(60_000);
+		expect(get(startupProgress)).toMatchObject({ file: null, readError: 'unavailable' });
+		expect(get(updateScreenView)).toMatchObject({ mode: 'progress', estimated: false });
+
+		readerFails = false;
+		await refreshStartupProgress();
+		tickUpdateScreen(60_001);
+		expect(get(startupProgress)).toMatchObject({ file: null, readError: null });
+		expect(get(updateScreenView)?.mode).toBe('longer');
+	});
+
+	it('does not invent a remote estimate without history and retains a known usual time', () => {
+		const shell = window as ShellWindow;
+		shell.__CORSIA_SHELL__ = { mode: 'remote', name: 'Studio Mac' };
+		updateStatus.set(status(inFlight(), null));
+		tickUpdateScreen(0);
+		updateUnreachable.set(true);
+		tickUpdateScreen(120_000);
+		expect(get(updateScreenView)).toMatchObject({ mode: 'progress', estimated: false });
+
+		stopUpdateScreen();
+		updateScreenView.set(null);
+		updateStatus.set(status(inFlight(), 45));
+		startUpdateScreen();
+		tickUpdateScreen(0);
+		updateStatus.set(status(inFlight(), null));
+		updateUnreachable.set(true);
+		tickUpdateScreen(1_000);
+		expect(get(updateScreenView)).toMatchObject({ estimated: true });
 	});
 
 	it('keeps a dismissed terminal outcome dismissed and completes only for the matching operation', () => {

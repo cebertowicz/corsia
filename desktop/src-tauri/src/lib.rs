@@ -436,12 +436,13 @@ fn service_url(port: u16) -> String {
 }
 
 /// The commands the pages the local service serves call: first-run folder choice and the setup report, Connect to
-/// another computer, and the window-drag handler injected on every page. Never `disconnect_remote` (the remote page's
-/// own command), `start_local_service` or the quit and login-item commands (the startup shell's).
+/// another computer, recovery after a delayed update restart, and the window-drag handler injected on every page. Never
+/// `disconnect_remote` (the remote page's own command) or the quit and login-item commands (the startup shell's).
 const LOCAL_SERVICE_PERMISSIONS: &[&str] = &[
     "allow-choose-work-folder",
     "allow-configure-work-folder",
     "allow-read-startup-progress",
+    "allow-start-local-service",
     "allow-remote-discovered",
     "allow-remote-pair",
     "allow-save-setup-report",
@@ -534,9 +535,8 @@ pub(crate) struct ProgressWatch<'a> {
     pub(crate) stall: Duration,
 }
 
-/// The fields of a progress file the wait needs; the service writes others.
-/// The PID-validated, redacted subset of the service's startup-progress file the UI can use.
-/// Diagnostic error text and database schema versions deliberately remain in the service file.
+/// The PID-validated, redacted subset of the service's startup-progress file the UI can use; diagnostic error text and
+/// database schema versions deliberately remain in the service file.
 #[derive(Deserialize, Serialize, Debug, PartialEq)]
 struct StartupProgress {
     schema: u8,
@@ -977,6 +977,13 @@ fn local_start_answered<R: tauri::Runtime, E>(app: &tauri::AppHandle<R>, answer:
         report_shell_state(app, shell_state::ShellState::service_recovered);
     }
     answer
+}
+
+/// A local-service page cannot draw the startup shell's typed outcomes, so send non-ready or failed results back to it.
+fn return_nonready_local_start_to_shell<R: tauri::Runtime>(app: &tauri::AppHandle<R>, answer: &Result<ServiceStartup, String>) {
+    if matches!(answer, Ok(ServiceStartup::Ready { .. })) { return; }
+    show_launch_outcome(app, answer);
+    return_to_shell(app);
 }
 
 /// Records a state the shell cannot act on. The state is already stored when drawing it fails, and the next page
@@ -1752,7 +1759,9 @@ async fn start_local_service(app: tauri::AppHandle) -> Result<ServiceStartup, St
     })
     .await
     .map_err(|error| format!("starting CORSIA did not finish: {error}"))?;
-    local_start_answered(&app, answer)
+    let answer = local_start_answered(&app, answer);
+    return_nonready_local_start_to_shell(&app, &answer);
+    answer
 }
 
 /// Reads the current local service's own progress record while HTTP is unavailable.
@@ -2520,7 +2529,7 @@ mod tests {
         let called = frontend_commands();
         assert_eq!(
             called.iter().map(String::as_str).collect::<Vec<_>>(),
-            ["choose_work_folder", "configure_work_folder", "disconnect_remote", "read_startup_progress", "remote_discovered", "remote_pair", "save_setup_report"],
+            ["choose_work_folder", "configure_work_folder", "disconnect_remote", "read_startup_progress", "remote_discovered", "remote_pair", "save_setup_report", "start_local_service"],
             "the frontend's commands changed: grant each page its commands, or add it to the remote-page-only list"
         );
         let (_app, webview) = service_origin_app(47895);
@@ -2717,6 +2726,29 @@ mod tests {
         local_start_began(app.handle());
         assert_eq!(launch_state(&app), shell_state::LaunchState::Local);
         assert_eq!(shell_state_script(&launch_state(&app)), None);
+    }
+
+    #[test]
+    fn a_local_service_start_returns_typed_nonready_answers_to_the_startup_shell() {
+        for answer in [
+            Ok(ServiceStartup::RequiresApproval),
+            Ok(ServiceStartup::AdoptionOffered { workspace: "~/corsia".into() }),
+            Err("did not start".to_string()),
+        ] {
+            let app = launch_app();
+            let returned = local_start_answered(app.handle(), answer.clone());
+            return_nonready_local_start_to_shell(app.handle(), &returned);
+            assert_eq!(returned, answer);
+            assert!(shell_state_script(&launch_state(&app)).is_some(), "the startup shell lost {answer:?}");
+            assert!(is_shell_origin(app.get_webview_window("main").unwrap().url().unwrap().as_str()));
+        }
+
+        let app = launch_app();
+        let answer = Ok(ServiceStartup::Ready { url: service_url(47_895) });
+        let returned = local_start_answered(app.handle(), answer.clone());
+        return_nonready_local_start_to_shell(app.handle(), &returned);
+        assert_eq!(returned, answer);
+        assert_eq!(launch_state(&app), shell_state::LaunchState::Local);
     }
 
     #[test]

@@ -4,7 +4,7 @@
 	import { onMount, tick } from 'svelte';
 	import type { Snippet } from 'svelte';
 	import { portal } from '$lib/actions/portal';
-	import { restartOverlayVisible as updateScreenVisible } from '$lib/stores/restartExpectation';
+	import { updateScreenVisible } from '$lib/update/screenStore';
 	import IconButton from './IconButton.svelte';
 
 	interface Props {

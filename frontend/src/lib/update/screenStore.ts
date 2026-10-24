@@ -45,6 +45,7 @@ interface Latch {
 	estimateFrom: number | null;
 	failure: { code: UpdateFailureCode | null; detail: string | null; verdict: boolean } | null;
 	doneAt: number | null;
+	usualSeconds: number | null;
 }
 
 let latch: Latch | null = null;
@@ -72,8 +73,9 @@ function httpStep(operation: UpdateOperation | null): StepId {
 	}
 }
 
-function readSources(now: number, l: Latch, operation: UpdateOperation | null, unreachable: boolean, file: StartupProgress | null): { input: ProgressInput; longer: boolean; estimated: boolean } {
-	const usual = get(updateStatus)?.usual_seconds ?? 45;
+function readSources(now: number, l: Latch, operation: UpdateOperation | null, unreachable: boolean, file: StartupProgress | null, readError: 'unavailable' | null): { input: ProgressInput; longer: boolean; estimated: boolean } {
+	const usual = get(updateStatus)?.usual_seconds;
+	if (typeof usual === 'number' && Number.isFinite(usual) && usual > 0) l.usualSeconds = usual;
 	if (!unreachable) {
 		l.downAt = null;
 		l.lastSeq = null;
@@ -84,11 +86,13 @@ function readSources(now: number, l: Latch, operation: UpdateOperation | null, u
 		return { input: { step, count: drain, alive: true }, longer: false, estimated: false };
 	}
 	l.downAt ??= now;
+	if (readError) return { input: { step: 'restarting', count: null, alive: false }, longer: false, estimated: false };
 	if (shellInfo()?.mode !== 'local') {
+		if (l.usualSeconds === null) return { input: { step: 'restarting', count: null, alive: false }, longer: false, estimated: false };
 		l.estimateFrom ??= l.model.shown;
 		const elapsed = now - l.downAt;
-		l.model.lift(remoteEstimate(l.estimateFrom, elapsed, usual));
-		return { input: { step: 'restarting', count: null, alive: false }, longer: elapsed >= usual * 2_000, estimated: true };
+		l.model.lift(remoteEstimate(l.estimateFrom, elapsed, l.usualSeconds));
+		return { input: { step: 'restarting', count: null, alive: false }, longer: elapsed >= l.usualSeconds * 2_000, estimated: true };
 	}
 	if (file && file.phase !== 'failed') {
 		if (file.seq !== l.lastSeq || file.pid !== l.lastPid) {
@@ -136,6 +140,7 @@ export function tickUpdateScreen(now = Date.now()): void {
 			operationId: operation.operation_id, model: new ProgressModel(),
 			fromVersion: status?.current_version ?? null, toVersion: operation.target_version ?? status?.target_version ?? null,
 			downAt: null, seqChangedAt: null, lastSeq: null, lastPid: null, estimateFrom: null, failure: null, doneAt: null,
+				usualSeconds: typeof status?.usual_seconds === 'number' && Number.isFinite(status.usual_seconds) && status.usual_seconds > 0 ? status.usual_seconds : null,
 		};
 	}
 	const l = latch;
@@ -146,7 +151,8 @@ export function tickUpdateScreen(now = Date.now()): void {
 		return;
 	}
 	const unreachable = get(updateUnreachable);
-	const file = get(startupProgress)?.file ?? null;
+	const progress = get(startupProgress);
+	const file = progress?.file ?? null;
 	const confirmation = get(updateConfirmed);
 	const currentConfirmation = confirmation?.operationId === l.operationId ? confirmation : null;
 	l.toVersion = own?.target_version ?? l.toVersion;
@@ -172,7 +178,7 @@ export function tickUpdateScreen(now = Date.now()): void {
 		updateScreenView.set({ mode: 'start_failed', step: l.model.step, label: STEP_LABEL[l.model.step], percent: l.model.percent, estimated: false, fromVersion: l.fromVersion, toVersion: l.toVersion, failure: null, serviceDown: true });
 		return;
 	}
-	const { input, longer, estimated } = readSources(now, l, own, unreachable, file);
+	const { input, longer, estimated } = readSources(now, l, own, unreachable, file, progress?.readError ?? null);
 	l.model.update(now, input);
 	updateScreenView.set({ mode: longer ? 'longer' : 'progress', step: l.model.step, label: STEP_LABEL[l.model.step], percent: l.model.percent, estimated, fromVersion: l.fromVersion, toVersion: l.toVersion, failure: null, serviceDown: unreachable });
 }
