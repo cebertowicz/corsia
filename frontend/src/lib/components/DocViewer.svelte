@@ -293,6 +293,8 @@
 					if (seq !== loadSeq) return;
 					// A tab opened before the backend's type was known: the leaf swaps it to the image viewer.
 					if (e instanceof ImageFileError) { signal({ status: 'loading', renderer: 'image' }); return; }
+					// A 404 means the document is gone, which the tab shows as its
+					// explicit unavailable state rather than a raw load error.
 					// A confirmed missing file is terminal, not retryable. The queue remains server-owned:
 					// refresh it so any reply row the server has retired disappears with the unavailable tab.
 					if (isMissingDocument(e)) { signal({ status: 'unavailable' }); void reloadAttentionQueue(); return; }

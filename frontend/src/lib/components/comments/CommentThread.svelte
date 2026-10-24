@@ -109,6 +109,11 @@
 	let observeTick = $state(0);
 	// Plain variable: the newest reply this mounted thread has stamped, so a repeat callback cannot stamp it twice.
 	let lastStamped: string | null = null;
+	// Previously this view kept a mounted set of replies shown as new:
+	// What this view shows as new. The store's `newReplyIds` says whether anything is unseen and empties once a reply
+	// is stamped; the New marks and the collapse point must outlast that, or the thread would re-expand and lose its
+	// marks as it is read. So this set only grows while mounted: it takes each id the store reports and drops none.
+	// The reply chip now follows the server projection, so the marker clears on the viewed stamp instead.
 	// A reply becomes read only after a short uninterrupted visible dwell. Until then the server projection remains
 	// the sole source for its New marker, comment pill, and attention-dock item.
 	const VIEWED_DWELL_MS = 1_500;
