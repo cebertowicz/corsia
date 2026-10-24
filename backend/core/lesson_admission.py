@@ -257,6 +257,8 @@ def _render(
         description=str(decision.skill_description), text=decision.text, trial=trial,
         source_refs=lesson_files.merged_refs(earlier, entry["body"].get("source_refs") or []),
         originating_subjects=subjects, origin=origin,
+        target_file=decision.target_file, new_target_path=decision.new_target_path,
+        target_section=decision.target_section, cause=decision.cause, case=decision.case,
     )
     errors = validate_skill_text(text).errors
     if errors:
