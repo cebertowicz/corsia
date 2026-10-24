@@ -15,7 +15,7 @@
 	 */
 	import { onMount, tick, type Snippet } from 'svelte';
 	import CommentReplyChipRow from './CommentReplyChipRow.svelte';
-	import { replyItemsForThread } from './replyItems';
+	import { replyItemsForThread, subscribeReplyAttention } from './replyItems';
 	import { get } from 'svelte/store';
 	import { on } from '$lib/ws';
 	import { connectionState } from '$lib/stores/connection';
@@ -187,9 +187,7 @@
 		// Reuses the existing invalidation signal rather than inventing one; a
 		// missed nudge is recovered on reconnect.
 		const offNudge = on('plans_changed', () => { void reload(); });
-		const offReplies = on('doc_comment_changed', (frame: unknown) => {
-			if (typeof frame === 'object' && frame !== null && 'reply_attention_changed' in frame && frame.reply_attention_changed === true) void reload();
-		});
+		const offReplies = subscribeReplyAttention(() => { void reload(); });
 		// Typing, pasting or sending ends in a re-judge once the window has passed,
 		// so a hold on a draft is released when the draft is sent or cleared.
 		let idleTimer: ReturnType<typeof setTimeout> | undefined;
