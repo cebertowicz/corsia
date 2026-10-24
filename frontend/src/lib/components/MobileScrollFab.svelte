@@ -37,7 +37,7 @@
 
 <style>
 	.mobile-scroll-fab {
-		display: inline-flex; width: 44px; height: 44px; padding: 0;
+		display: inline-flex; width: var(--touch-target); height: var(--touch-target); padding: 0;
 		align-items: center; justify-content: center;
 		border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
 		border-radius: var(--radius-pill);
