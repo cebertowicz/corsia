@@ -661,7 +661,7 @@ for (const theme of ['light', 'dark'] as const) {
 			}
 			const decision = projected.current.detail;
 			const answer = await request.post(`/api/plans/decisions/${decision.id}/answer`, {
-				params: { token: TEST_TOKEN }, data: { option_id: 'A', expected_revision: decision.revision, mutation_id: `answer-${threadId}` },
+				params: { token: TEST_SESSION_TOKEN }, data: { option_id: 'A', expected_revision: decision.revision, mutation_id: `answer-${threadId}` },
 			});
 			expect(answer.ok(), await answer.text()).toBeTruthy();
 		});
