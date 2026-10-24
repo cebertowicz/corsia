@@ -23,6 +23,7 @@
 		stale,
 		readonly,
 		commentCount,
+		unreadCount = 0,
 		orphanedCount,
 		artifactId,
 		targetInstanceId,
@@ -53,6 +54,7 @@
 		stale: boolean;
 		readonly: boolean;
 		commentCount: number;
+		unreadCount?: number;
 		orphanedCount: number;
 		artifactId: string | null;
 		targetInstanceId: string | null;
@@ -176,8 +178,8 @@
 			{/if}
 			{#if stale && ready}<button type="button" class="doc-tool warn stale-control" onclick={() => onReload?.()}>File changed · Reload</button>{/if}
 			{#if saveStatus !== 'idle'}<span class="save-ghost" class:saving={saveStatus === 'saving'}>{saveStatus === 'saving' ? 'Saving…' : '✓ Saved'}</span>{/if}
-			<CommentsPill class="doc-tool comment-status" count={commentCount} {unsent} unplaced={orphanedCount}
-				loading={commentsLoading} expanded={commentsOpen} disabled={!ready || commentsLoading} onOpen={onOpenComments} />
+			<CommentsPill class="doc-tool comment-status" count={commentCount} unread={unreadCount} {unsent} unplaced={orphanedCount}
+				loading={commentsLoading} unknown={!ready} expanded={commentsOpen} disabled={!ready || commentsLoading} onOpen={onOpenComments} />
 			{#if artifactId}
 				<span class="delivery-toggle" title="When off, comments send when you close the document or pause for two minutes.">
 					<span>Deliver immediately</span>

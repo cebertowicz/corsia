@@ -44,6 +44,7 @@ function arrive(comment: Partial<CommentThreadData>) {
 }
 const newMarks = () => host.querySelectorAll('.ct-new').length;
 async function settle() { await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync(); }
+const dwell = () => new Promise((resolve) => setTimeout(resolve, 1_550));
 
 afterEach(() => {
 	if (component) unmount(component);
@@ -60,6 +61,7 @@ describe('CommentThread stamping', () => {
 		state.comment = { ...state.comment, replies: [reply('r1')], newReplyIds: ['r1'] };
 		render(onViewed);
 		FakeObserver.live()[0].report(true);
+		await dwell();
 		expect(onViewed.mock.calls).toEqual([['c1', 'r1']]);
 
 		// The store answers the stamp, then another reply arrives; its element has not reported yet.
@@ -70,10 +72,11 @@ describe('CommentThread stamping', () => {
 		FakeObserver.live()[0].report(false);
 		expect(onViewed).toHaveBeenCalledTimes(1);
 		FakeObserver.live()[0].report(true);
+		await dwell();
 		expect(onViewed.mock.calls).toEqual([['c1', 'r1'], ['c1', 'r2']]);
 	});
 
-	it('does not stamp in a hidden document, and stamps once when it becomes visible with the reply still fully visible', () => {
+	it('does not stamp in a hidden document, and stamps once when it becomes visible with the reply still fully visible', async () => {
 		const onViewed = vi.fn().mockResolvedValue(undefined);
 		setVisibility('hidden');
 		FakeObserver.visibleOnObserve = true;
@@ -83,6 +86,7 @@ describe('CommentThread stamping', () => {
 
 		setVisibility('visible');
 		document.dispatchEvent(new Event('visibilitychange', { bubbles: true })); flushSync();
+		await dwell();
 		expect(onViewed.mock.calls).toEqual([['c1', 'r1']]);
 		document.dispatchEvent(new Event('visibilitychange', { bubbles: true })); flushSync();
 		// A reply stamped from this mount is not stamped again by a later visibility change.
@@ -107,17 +111,19 @@ describe('CommentThread stamping', () => {
 		FakeObserver.visibleOnObserve = true;
 		state.comment = { ...state.comment, replies: [reply('r1')], newReplyIds: ['r1'] };
 		render(onViewed);
+		await dwell();
 		await vi.waitFor(() => expect(warn).toHaveBeenCalled());
 		await settle(); await settle();
 		expect(onViewed).toHaveBeenCalledTimes(1);
 		document.dispatchEvent(new Event('visibilitychange', { bubbles: true })); flushSync();
+		await dwell();
 		await vi.waitFor(() => expect(onViewed).toHaveBeenCalledTimes(2));
 		await settle();
 		expect(onViewed).toHaveBeenCalledTimes(2);
 		warn.mockRestore();
 	});
 
-	it('keeps the New marks and the collapse point while the store empties after a stamp', async () => {
+	it('clears the New marks and recalculates the collapse point when the store confirms a stamp', async () => {
 		const onViewed = vi.fn().mockResolvedValue(undefined);
 		const replies = Array.from({ length: 6 }, (_, index) => reply(`r${index}`, `2026-10-16T18:0${index}:00Z`));
 		state.comment = { ...state.comment, replies, newReplyIds: ['r4', 'r5'] };
@@ -126,21 +132,22 @@ describe('CommentThread stamping', () => {
 		expect(host.textContent).toContain('Show 4 earlier replies');
 
 		FakeObserver.live()[0].report(true);
+		await dwell();
 		expect(onViewed).toHaveBeenCalledWith('c1', 'r5');
 		arrive({ newReplyIds: [] });
-		expect(newMarks()).toBe(2);
-		expect(host.textContent).toContain('Show 4 earlier replies');
+		expect(newMarks()).toBe(0);
+		expect(host.textContent).toContain('Show 5 earlier replies');
 		expect(host.textContent).not.toContain('reply 0');
 	});
 
-	it('marks a reply that arrives while the thread is open, and no mark clears itself', () => {
+	it('shows only the server-reported unread reply while the thread is open', () => {
 		const replies = [reply('r1'), reply('r2', '2026-10-16T18:01:00Z')];
 		state.comment = { ...state.comment, replies, newReplyIds: ['r1'] };
 		render(vi.fn().mockResolvedValue(undefined));
 		expect(newMarks()).toBe(1);
 		arrive({ newReplyIds: ['r2'] });
-		expect(newMarks()).toBe(2);
+		expect(newMarks()).toBe(1);
 		arrive({ newReplyIds: [] });
-		expect(newMarks()).toBe(2);
+		expect(newMarks()).toBe(0);
 	});
 });

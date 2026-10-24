@@ -109,15 +109,17 @@
 	let observeTick = $state(0);
 	// Plain variable: the newest reply this mounted thread has stamped, so a repeat callback cannot stamp it twice.
 	let lastStamped: string | null = null;
-
-	// What this view shows as new. The store's `newReplyIds` says whether anything is unseen and empties once a reply
-	// is stamped; the New marks and the collapse point must outlast that, or the thread would re-expand and lose its
-	// marks as it is read. So this set only grows while mounted: it takes each id the store reports and drops none.
-	const shownAsNew = new Set<string>();
-	const shownAsNewIds = $derived.by(() => {
-		for (const id of comment.newReplyIds ?? []) shownAsNew.add(id);
-		return new Set(shownAsNew);
-	});
+	// A reply becomes read only after a short uninterrupted visible dwell. Until then the server projection remains
+	// the sole source for its New marker, comment pill, and attention-dock item.
+	const VIEWED_DWELL_MS = 1_500;
+	let dwellTimer: ReturnType<typeof window.setTimeout> | null = null;
+	let dwellingReplyId: string | null = null;
+	function cancelDwell(replyId?: string) {
+		if (replyId && dwellingReplyId !== replyId) return;
+		if (dwellTimer !== null) window.clearTimeout(dwellTimer);
+		dwellTimer = null;
+		dwellingReplyId = null;
+	}
 
 	$effect(() => { if ((focusReply || (focused && selectable)) && !readOnly) replyField?.focus({ preventScroll: true }); });
 	$effect(() => { if (focused && el && scrollOnFocus) el.scrollIntoView({ block: 'nearest' }); });
@@ -143,6 +145,16 @@
 			if (lastStamped === replyId) lastStamped = previous;
 		});
 	}
+	function dwellThenStamp(replyId: string) {
+		if (dwellingReplyId === replyId || lastStamped === replyId) return;
+		cancelDwell();
+		dwellingReplyId = replyId;
+		dwellTimer = window.setTimeout(() => {
+			dwellTimer = null;
+			dwellingReplyId = null;
+			stamp(replyId);
+		}, VIEWED_DWELL_MS);
+	}
 	$effect(() => {
 		observeTick;
 		const element = newestReply;
@@ -150,13 +162,16 @@
 		const replyId = element.dataset.replyId;
 		const observer = new IntersectionObserver((entries) => {
 			const entry = entries.at(-1);
-			if (replyId && entry?.isIntersecting && entry.intersectionRatio === 1) stamp(replyId);
+			if (!replyId) return;
+			if (entry?.isIntersecting && entry.intersectionRatio === 1) dwellThenStamp(replyId);
+			else cancelDwell(replyId);
 		}, { root: scrollContainer(element), threshold: 1 });
 		observer.observe(element);
-		return () => observer.disconnect();
+		return () => { observer.disconnect(); cancelDwell(replyId); };
 	});
 	function onVisibilityChange() {
 		if (document.visibilityState === 'visible') observeTick++;
+		else cancelDwell();
 	}
 
 	async function postReply() {
@@ -276,7 +291,7 @@
 		{/if}
 
 		{#if comment.replies.length && !leaving}
-			<CommentReplyList replies={comment.replies} newReplyIds={shownAsNewIds} onNewestReplyRendered={(element) => (newestReply = element)} />
+			<CommentReplyList replies={comment.replies} newReplyIds={new Set(comment.newReplyIds ?? [])} onNewestReplyRendered={(element) => (newestReply = element)} />
 		{/if}
 
 		{#if !isSuggestion && comment.acked && !comment.resolved}

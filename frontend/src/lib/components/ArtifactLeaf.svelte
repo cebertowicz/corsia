@@ -20,7 +20,7 @@
 	import { requestArtifactTabClose } from '$lib/artifactTabClose';
 	import {
 		threadWorkspaces, emptyWorkspace, getActiveTab, isTabChanged, type ArtifactTab,
-		setActiveTab, setActiveSurface, setLeafVisible, applyTabLoadSignal, markTabSaved,
+		setActiveTab, setActiveSurface, setLeafVisible, applyTabLoadSignal, consumeTabLanding, markTabSaved,
 	} from '$lib/stores/artifactWorkspace';
 	import {
 		tabViewState, tabDocumentImage, recordTabDocumentPlace, recordTabImagePlace, openTabDocumentImage,
@@ -51,6 +51,7 @@
 			projectId: $uiScope?.id ?? null,
 			threadId: threadId,
 			artifactId: t.artifactId,
+			landOn: t.landOn,
 		};
 	}
 
@@ -284,7 +285,7 @@
 			{:else if activeTab?.status === 'unavailable'}
 				<div class="gone" role="status">
 					<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" /></svg>
-					<p>{activeTab.title} is no longer available.</p>
+					<p>{activeTab.title} was removed.</p>
 					<span>It was deleted, moved out of this scope, or unregistered.</span>
 					<button type="button" onclick={() => requestCloseTab(activeTab.instanceId)}>Close tab</button>
 				</div>
@@ -312,6 +313,7 @@
 						onOpenImage={openImage}
 						onDocumentPlace={recordDocumentPlace}
 						covered={imageOpen}
+						onLanded={() => { if (threadId && activeTab) consumeTabLanding(threadId, activeTab.instanceId); }}
 					/>
 				</div>
 				<!-- Shown once the document under it is bound, so its comments come from that document from the first frame. -->

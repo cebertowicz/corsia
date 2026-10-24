@@ -9,6 +9,7 @@ import { token } from "$lib/stores/auth";
 import { connectionState } from "$lib/stores/connection";
 import { activeThreadId } from "$lib/stores/threads";
 import type { OperatorEnvelope } from "$lib/api/plans";
+import type { AttentionQueueItem } from "$lib/api/attentionQueue";
 import { SOURCE, decisionItem, queueBody } from "./fixtures/attentionQueue";
 import { EMPTY_DISTRIBUTION, operatorNode, planDisplay } from "./fixtures/operatorPlan";
 import {
@@ -570,6 +571,28 @@ describe("ThreadPlanPane", () => {
     const indicator = host.querySelector(".decision-indicator");
     expect(indicator?.textContent?.replace(/\s+/g, " ").trim()).toBe("2 decisions in all Open");
     expect(host.textContent).not.toContain("Decision for another thread");
+    __reset();
+  });
+
+  it("never lists a comment reply from this thread as a decision row", async () => {
+    const { __reset, queue } = await import("$lib/stores/attentionDock.svelte");
+    __reset();
+    activeThreadId.set("t1");
+    const reply: AttentionQueueItem = {
+      external_id: "reply-1",
+      renderer: "comment-reply",
+      detail: {
+        id: "reply-1", title: "launch-plan.md", excerpt: "Owners now align.", position: 1, total_count: 1,
+        destination: { pane: "document-replies", id: "artifact-1" },
+        source: { ...SOURCE, thread_id: "t1", thread_label: "Maya Chen" },
+      },
+    };
+    queue.set(queueBody(reply, 1, [reply]));
+    routedFetch({ "/api/plans/operator": () => ok(envelope("t1"), '"r1"') });
+    component = mount(ThreadPlanPane, { target: host, props: { threadId: "t1" } });
+    await settle();
+
+    expect(host.querySelectorAll(".decision-row")).toHaveLength(0);
     __reset();
   });
 

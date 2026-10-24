@@ -13,7 +13,7 @@
 	 * `suppressed` defers to a higher-precedence control in the same physical
 	 * slot (a host-access lease awaiting the user). Deferred, never hidden.
 	 */
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import { get } from 'svelte/store';
 	import { on } from '$lib/ws';
 	import { connectionState } from '$lib/stores/connection';
@@ -40,7 +40,7 @@
 		visibleQueue,
 	} from '$lib/stores/attentionDock.svelte';
 	import { answerNotice, answers } from '$lib/stores/attentionAnswerState';
-	import type { DecisionDetail, ExternalReviewDetail } from '$lib/api/attentionQueue';
+	import type { AttentionDestination, DecisionDetail, ExternalReviewDetail } from '$lib/api/attentionQueue';
 
 	let {
 		writesDisabled = false,
@@ -50,7 +50,7 @@
 		writesDisabled?: boolean;
 		/** A higher-precedence control holds this slot right now. */
 		suppressed?: boolean;
-		onOpenDestination?: (destination: { pane: string; id: string }) => void;
+		onOpenDestination?: (destination: AttentionDestination, threadId?: string | null) => void;
 	} = $props();
 
 	let openTrigger = $state<HTMLButtonElement | null>(null);
@@ -64,11 +64,18 @@
 	/** Bumped when focus moves or the typing window ends, so a waiting arrival is re-judged. */
 	let busyTick = $state(0);
 
-	const current = $derived(shownItem($visibleQueue, $activeId));
+	// Unread document replies occupy their own persistent chip immediately above
+	// this dock. Needs-you retains its queue and one-at-a-time action semantics.
+	const dockQueue = $derived.by(() => {
+		const items = $visibleQueue.items.filter((item) => item.renderer !== 'comment-reply');
+		// The server's count can exceed the loaded rows; only the reply rows this dock hides come off it.
+		return { current: items[0] ?? null, count: $visibleQueue.count - ($visibleQueue.items.length - items.length), items };
+	});
+	const current = $derived(shownItem(dockQueue, $activeId));
 	const position = $derived(
-		current ? $visibleQueue.items.findIndex((i) => i.external_id === current.external_id) + 1 : 0,
+		current ? dockQueue.items.findIndex((i) => i.external_id === current.external_id) + 1 : 0,
 	);
-	const canSkip = $derived($visibleQueue.items.length > 1);
+	const canSkip = $derived(dockQueue.items.length > 1);
 	const effectiveWritesDisabled = $derived(
 		writesDisabled || $stale || $connectionState !== 'connected',
 	);
@@ -106,14 +113,18 @@
 	const regionLabel = $derived(
 		!current
 			? 'Needs you'
-			: $visibleQueue.count > 1
-				? `Needs you — ${label(current)}, ${$visibleQueue.count} waiting`
+			: dockQueue.count > 1
+				? `Needs you — ${label(current)}, ${dockQueue.count} waiting`
 				: `Needs you — ${label(current)}`,
 	);
 
-	function open() {
+	async function open() {
 		if (!current || suppressed) return;
 		expand(current, suppressed);
+		// Opening replaces the focused bar. Move keyboard focus into the new card
+		// so the next Tab continues from its controls rather than falling to the page.
+		await tick();
+		region?.querySelector<HTMLElement>('[aria-label="Collapse reply"]')?.focus();
 	}
 
 	$effect(() => {
@@ -146,7 +157,7 @@
 		// nothing holds the slot and they've had time to read what came before it (see the store).
 		void busyTick;
 		const typingLeft = lastKeydown + TYPING_IDLE_MS - Date.now();
-		const outcome = judgeAutoOpen($visibleQueue.items, {
+		const outcome = judgeAutoOpen(dockQueue.items, {
 			viewedThreadId: $activeThreadId,
 			expandedId: $expandedId,
 			suppressed,
@@ -269,8 +280,8 @@
 					<b>{label(current)}</b>
 					{#if current.detail.source}<small>{current.detail.source.thread_label}</small>{/if}
 				</span>
-				{#if $visibleQueue.count > 1}
-					<span class="dock-count">{position} of {$visibleQueue.count}</span>
+				{#if dockQueue.count > 1}
+					<span class="dock-count">{position} of {dockQueue.count}</span>
 				{/if}
 				<span class="dock-action">
 					{failed ? 'Not saved — Retry' : current.renderer === 'decision' ? 'Answer' : 'Review'}

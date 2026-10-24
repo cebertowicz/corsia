@@ -25,6 +25,7 @@
 	import HostAccessLeaseControl from './HostAccessLeaseControl.svelte';
 	import MobileScrollFab from './MobileScrollFab.svelte';
 	import AttentionDock from './attention/AttentionDock.svelte';
+	import CommentReplyChipRow from './attention/CommentReplyChipRow.svelte';
 	import ChatAttentionStack from './attention/ChatAttentionStack.svelte';
 	import HeldDocFeedbackControl from './attention/HeldDocFeedbackControl.svelte';
 	import ChatThreadBindings from './ChatThreadBindings.svelte';
@@ -32,6 +33,8 @@
 	import PlanDrawerControl from './plans/PlanDrawerControl.svelte';
 	import { isMobile } from '$lib/stores/viewport';
 	import { openPlanSubagentLeaf, openPlanDiscussionLeaf } from '$lib/planLeafReturn';
+	import { openArtifactAndShowThread } from '$lib/openArtifactInThread';
+	import type { AttentionDestination } from '$lib/api/attentionQueue';
 	import {
 		createPager,
 		adoptFirstPage,
@@ -71,6 +74,14 @@
 	 */
 	let leaseAwaitingUser = $state(false);
 	const attentionSuppressed = $derived(!!$activeThreadId && leaseAwaitingUser);
+	/** Opens a reply's document in the thread that owns it (else this chat) and carries the one-time reply landing intent. */
+	function openDocumentOnReplies(destination: AttentionDestination, threadId?: string | null): boolean {
+		if (!destination.path) return false;
+		return openArtifactAndShowThread(
+			{ artifactId: destination.id, path: destination.path, title: destination.title ?? destination.path.split('/').pop() ?? destination.path, landOn: 'new-replies' },
+			threadId ?? $activeThreadId,
+		) !== null;
+	}
 	const MSG_PAGE_SIZE = 50;
 	let pager = $state(createPager());
 	let pagerGeneration = 0;
@@ -351,9 +362,16 @@
 					bind:awaitingUser={leaseAwaitingUser}
 				/>
 			{/if}
+			<CommentReplyChipRow
+				onOpenDocument={(destination, threadId) => {
+					if (destination.pane === 'document-replies') return openDocumentOnReplies(destination, threadId);
+					if (destination.pane === 'documents') onOpenDocuments(destination.id);
+				}}
+			/>
 			<AttentionDock
 				suppressed={attentionSuppressed}
-				onOpenDestination={(destination) => {
+				onOpenDestination={(destination, threadId) => {
+					if (destination.pane === 'document-replies') return openDocumentOnReplies(destination, threadId);
 					if (destination.pane === 'documents') onOpenDocuments(destination.id);
 				}}
 			/>

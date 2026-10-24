@@ -4,7 +4,7 @@
 	import './DocViewer.css';
 	import { docCanvasBounds } from '$lib/actions/docCanvasBounds';
 	import { prefersReducedMotion } from '$lib/stores/viewport';
-	import { onDestroy, untrack } from 'svelte';
+	import { onDestroy, tick, untrack } from 'svelte';
 	import { ensureEditorArtifactId, releaseDocEditor } from '$lib/stores/activeDocEditor';
 	import { docComments, commentLoads, remapComments, markThreadViewed, reloadPlacements } from '$lib/stores/docComments';
 	import { suggestionRefusals } from '$lib/stores/suggestionRefusals';
@@ -22,7 +22,7 @@
 	import { acceptAllOpen, openSuggestionCount } from '$lib/docAcceptAll';
 	import { createCommentSurfaceState, focusDocumentEditor } from '$lib/docCommentSurfaceState.svelte';
 	import { railWidth } from '$lib/cm/comment-clusters';
-	import { awaitsFirstMark, canvasCommentHighlights, commentSurfaceStatus, commentsInDocumentOrder } from '$lib/docCanvasComments';
+	import { awaitsFirstMark, canvasCommentHighlights, canvasCommentScrollTarget, commentSurfaceStatus, commentsInDocumentOrder } from '$lib/docCanvasComments';
 	import { loadViewerContent, openFromDraft, type ViewerContent } from '$lib/docViewerLoading';
 	import { liveDocumentBindings } from '$lib/stores/liveDocuments';
 	import { connectionState } from '$lib/stores/connection';
@@ -36,6 +36,7 @@
 	} from '$lib/stores/docSaveQueue';
 	import { createDocSaveState } from '$lib/docViewerSaveState.svelte';
 	import { liveConnectionDescriptionId } from '$lib/liveConnectionDescription';
+	import { reload as reloadAttentionQueue } from '$lib/stores/attentionDock.svelte';
 	import DocCommentSurface from './DocCommentSurface.svelte';
 	import DocViewerEditorSurface from './DocViewerEditorSurface.svelte';
 	import DocPresenceStatus from './DocPresenceStatus.svelte';
@@ -49,6 +50,10 @@
 
 	type DocState = 'loading' | 'ready' | 'error';
 
+	function isMissingDocument(error: unknown): boolean {
+		return error instanceof Error && /^404\b/.test(error.message) && /\bno such file\b/i.test(error.message);
+	}
+
 	let {
 		target,
 		onClose = () => {},
@@ -59,6 +64,7 @@
 		onOpenImage,
 		onDocumentPlace,
 		covered = false,
+		onLanded,
 	}: {
 		target: DocViewerTarget | null;
 		onClose?: () => void;
@@ -73,6 +79,8 @@
 		onDocumentPlace?: (instanceId: string, place: { from: number; top: number; scrollTop: number }) => void;
 		/** The canvas shows an image viewer over this document; it keeps its state but answers no keys. */
 		covered?: boolean;
+		/** The tab's reply landing was acted on, or had no readable replies; the tab drops it. */
+		onLanded?: () => void;
 	} = $props();
 
 	let docState = $state<DocState>('loading');
@@ -115,11 +123,15 @@
 
 	const listedComments = $derived(commentsInDocumentOrder(loadedArtifactId ? ($docComments[loadedArtifactId] ?? []) : [], editText, loadedArtifactId ? $suggestionRefusals[loadedArtifactId] : undefined));
 	const commentStatus = $derived(commentSurfaceStatus(listedComments));
+	const unreadThreads = $derived(listedComments.filter((comment) => (comment.newReplyIds?.length ?? 0) > 0));
+	const firstUnreadThread = $derived(unreadThreads[0] ?? null);
+	const firstUnreadTarget = $derived(firstUnreadThread ? canvasCommentScrollTarget(listedComments, editText, firstUnreadThread.id, false, 'quote-tap') : null);
 	const scroll = createCommentScrollTarget({
 		focused: () => focusedComment, comments: () => listedComments, text: () => editText, listOpen: () => commentUI.state?.kind === 'list',
 	});
 	let docRoot = $state<HTMLElement>();
 	let editorSurface = $state<ReturnType<typeof DocViewerEditorSurface>>();
+	let arrivedAt = $state<string | null>(null);
 	const commentUI = createCommentSurfaceState(() => focusDocumentEditor(docRoot), () => targetKey);
 	const shownFocus = $derived(commentUI.hovered ?? focusedComment);
 	const highlights = $derived(canvasCommentHighlights(listedComments, editText, shownFocus, focusMarker, suggestionBusyId));
@@ -142,6 +154,27 @@
 	/** The comments of the image shown over this document, bound to it as it is now: an image's host rebuilds them when it shows one. */
 	export function imageComments() { return images.comments(); }
 	function focusInText(id: string, placement?: 'top') { scroll.toComment(id, commentUI.state?.kind === 'list', placement === 'top' ? 'quote-tap' : 'navigation'); focusedDocComment.set(id); }
+	// A tab opened from a waiting reply lands once on the first unread root in document order,
+	// after the comments have loaded (an empty list mid-load would spend the landing on nothing).
+	// Ordinary document opens leave the comments surface alone.
+	$effect(() => {
+		const instance = target?.instanceId;
+		if (target?.landOn !== 'new-replies' || !loadedArtifactId || $commentLoads[loadedArtifactId]?.state !== 'ready' || !instance || docState !== 'ready' || arrivedAt === instance) return;
+		// A comment load can finish before its anchors are placed in the document. Do not spend this one-shot
+		// landing on a null target: wait for the first unread root to become scrollable, then land on its text.
+		if (firstUnreadThread?.placement === 'placing' && !firstUnreadTarget) return;
+		arrivedAt = instance;
+		const first = firstUnreadThread;
+		const landing = firstUnreadTarget;
+		void tick().then(() => {
+			if (first && landing) {
+				scroll.value = landing;
+				focusedDocComment.set(first.id);
+			}
+			commentUI.state = { kind: 'list' };
+			onLanded?.();
+		});
+	});
 	// A card for a comment on part of an image opens the image at its tag; any other card goes to its text.
 	function focusFromCard(id: string, placement?: 'top') { images.openOr([id], { id }, () => focusInText(id, placement)); }
 
@@ -260,15 +293,19 @@
 					if (seq !== loadSeq) return;
 					// A tab opened before the backend's type was known: the leaf swaps it to the image viewer.
 					if (e instanceof ImageFileError) { signal({ status: 'loading', renderer: 'image' }); return; }
+					// A confirmed missing file is terminal, not retryable. The queue remains server-owned:
+					// refresh it so any reply row the server has retired disappears with the unavailable tab.
+					if (isMissingDocument(e)) { signal({ status: 'unavailable' }); void reloadAttentionQueue(); return; }
 					openRefusal = docOpenRefusal(e);
 					loadError = e instanceof Error ? e.message : String(e);
 					docState = openRefusal || opened.unsaved ? 'ready' : 'error';
 					if (opened.text !== null) editText = opened.text;
 					readonly = Boolean(openRefusal);
 					confirming = false;
-					// A 404 means the document is gone, which the tab shows as its
-					// explicit unavailable state rather than a raw load error.
-					signal({ status: /(^|\s)404(\s|$)/.test(loadError) ? 'unavailable' : 'error' });
+					// Keep a failed reply-open mounted so its file-specific recovery can
+					// render. The tab remains an error until the reader retries; marking
+					// it unavailable would remove this surface and strand them in chat.
+					signal({ status: 'error' });
 				});
 		});
 	});
@@ -308,6 +345,7 @@
 		stale={stale && !liveSession}
 		readonly={readonly && !confirming && !openRefusal}
 		commentCount={commentStatus.commentCount}
+		unreadCount={unreadThreads.length}
 		orphanedCount={commentStatus.orphanedCount}
 		artifactId={loadedArtifactId}
 		viewingThreadId={target?.threadId ?? null}
@@ -340,6 +378,8 @@
 		bind:this={editorSurface}
 		{docState}
 		{loadError}
+		documentName={target?.name ?? 'this document'}
+		onRetry={() => reloadNonce += 1}
 		bind:value={editText}
 		liveText={liveSession?.text ?? null} typingAllowed={liveConnection === 'connected'} previews={liveSession ?? null}
 		{highlights}

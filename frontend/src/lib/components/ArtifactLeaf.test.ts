@@ -741,8 +741,9 @@ describe('ArtifactLeaf load-status ownership', () => {
 		render();
 		await vi.waitFor(() => expect(tabsOf()[0].status).toBe('unavailable'));
 		flushSync();
-		expect(host.textContent).toContain('no longer available');
+		expect(host.textContent).toContain('gone.md was removed.');
 		expect(host.querySelector('.gone button')?.textContent).toContain('Close tab');
+		expect([...host.querySelectorAll('.gone button')].map((button) => button.textContent)).not.toContain('Try again');
 	});
 
 	it('keeps a genuine load failure as an error rather than claiming the doc is gone', async () => {

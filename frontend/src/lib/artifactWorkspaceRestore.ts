@@ -52,6 +52,7 @@ export function restoreWorkspace(
 			loadedRevision: typeof entry.loadedRevision === 'string' ? entry.loadedRevision : null,
 			latestRevision: null,
 			status: 'loading',
+			...(entry.landOn === 'new-replies' ? { landOn: 'new-replies' as const } : {}),
 		});
 	}
 	if (!tabs.length) return null;

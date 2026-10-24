@@ -95,6 +95,7 @@ export function openTab(ws: ThreadArtifactWorkspace, input: OpenArtifactInput): 
 		if (input.artifactId && !tabs[existing].artifactId) {
 			tabs[existing] = { ...tabs[existing], artifactId: input.artifactId };
 		}
+		if (input.landOn) tabs[existing] = { ...tabs[existing], landOn: input.landOn };
 		return {
 			...ws,
 			tabs,
@@ -113,6 +114,7 @@ export function openTab(ws: ThreadArtifactWorkspace, input: OpenArtifactInput): 
 		loadedRevision: null,
 		latestRevision: null,
 		status: 'loading',
+		...(input.landOn ? { landOn: input.landOn } : {}),
 	};
 	return {
 		...ws,
@@ -121,6 +123,16 @@ export function openTab(ws: ThreadArtifactWorkspace, input: OpenArtifactInput): 
 		visible: true,
 		activeSurface: 'artifact',
 	};
+}
+
+/** Clears a tab's landing once the viewer has acted on it, so it never fires twice. */
+export function consumeLanding(ws: ThreadArtifactWorkspace, instanceId: string): ThreadArtifactWorkspace | null {
+	const idx = ws.tabs.findIndex((t) => t.instanceId === instanceId);
+	if (idx < 0 || !ws.tabs[idx].landOn) return null;
+	const tabs = ws.tabs.slice();
+	const { landOn: _consumed, ...rest } = tabs[idx];
+	tabs[idx] = rest;
+	return { ...ws, tabs };
 }
 
 /** Adds or selects a child conversation in the existing artifact leaf. */

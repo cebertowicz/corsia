@@ -15,13 +15,14 @@
 	import type {
 		AttentionQueue,
 		AttentionQueueItem,
+		CommentReplyDetail,
 		DecisionDetail,
 		ExternalReviewDetail,
 	} from '$lib/api/attentionQueue';
 
 	type Scenario =
 		| 'empty' | 'one' | 'pick-any' | 'no-recommendation' | 'long-rationale' | 'many' | 'root-direct'
-		| 'external' | 'external-many' | 'suppressed' | 'stale';
+		| 'external' | 'external-many' | 'comment-replies' | 'suppressed' | 'stale';
 
 	const SCENARIOS: Array<{ id: Scenario; label: string }> = [
 		{ id: 'empty', label: '0 waiting' },
@@ -31,6 +32,7 @@
 		{ id: 'root-direct', label: 'No parent review' },
 		{ id: 'external', label: 'External review' },
 		{ id: 'external-many', label: 'Review, then decisions' },
+		{ id: 'comment-replies', label: 'Comment replies' },
 		{ id: 'suppressed', label: 'Host lease holds the slot' },
 		{ id: 'stale', label: 'Stale / offline' },
 	];
@@ -124,6 +126,19 @@
 		return { external_id: detail.id, renderer: 'decision', detail };
 	}
 
+	function commentReply(id: string, position: number): AttentionQueueItem {
+		const detail: CommentReplyDetail = {
+			id,
+			title: 'A reply arrived on “Clarify the delivery model”',
+			excerpt: 'The owner confirmed the document can stay open while you read.',
+			position,
+			total_count: 3,
+			destination: { pane: 'document', id: 'artifact-comment-delivery' },
+			source: { ...source },
+		};
+		return { external_id: id, renderer: 'comment-reply', detail };
+	}
+
 	function body(): AttentionQueue {
 		if (scenario === 'empty') return { current: null, count: 0, items: [] };
 		if (scenario === 'pick-any') {
@@ -180,6 +195,10 @@
 				count: 1,
 				items: [{ external_id: 'pr-9', renderer: 'external-review', detail }],
 			};
+		}
+		if (scenario === 'comment-replies') {
+			const items = [commentReply('reply-1', 1), commentReply('reply-2', 2), commentReply('reply-3', 3)];
+			return { current: items[0], count: items.length, items };
 		}
 		if (scenario === 'external-many') {
 			const detail = externalReview();

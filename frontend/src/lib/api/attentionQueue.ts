@@ -9,7 +9,7 @@
  * the payload that draws it — never because its type asserted someone would.
  */
 
-export type AttentionRenderer = 'decision' | 'external-review';
+export type AttentionRenderer = 'decision' | 'external-review' | 'comment-reply';
 
 export interface DecisionOption {
 	id: string;
@@ -72,10 +72,37 @@ export interface ExternalReviewDetail {
 	source: AttentionSource | null;
 }
 
+/** A dock hand-off. Comment replies also name the file needed by the artifact tab. */
+export interface AttentionDestination {
+	version?: number;
+	pane: string;
+	id: string;
+	path?: string;
+	title?: string;
+}
+
+export interface CommentReplyDetail {
+	id: string;
+	/** The document title, never an opaque queue label. */
+	title: string;
+	/** The newest reply's short body. */
+	excerpt: string;
+	/** The text the reply answers. */
+	quoted_text?: string;
+	position: number;
+	total_count: number;
+	/** Unread replies represented by this thread item; legacy producers imply one. */
+	unread_count?: number;
+	/** The latest unread reply's timestamp, used when several documents wait. */
+	newest_at?: string;
+	destination: AttentionDestination;
+	source: AttentionSource;
+}
+
 export interface AttentionQueueItem {
 	external_id: string;
 	renderer: AttentionRenderer;
-	detail: DecisionDetail | ExternalReviewDetail;
+	detail: DecisionDetail | ExternalReviewDetail | CommentReplyDetail;
 }
 
 export interface AttentionQueue {
