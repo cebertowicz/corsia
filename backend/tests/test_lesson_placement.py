@@ -391,7 +391,6 @@ async def test_a_checkpoint_case_persists_through_the_real_tool_and_trial_revisi
     after = lesson_files.read_trial(_skill(env).read_text())
     assert after is not None and after.lesson.id == initial.lesson.id
     assert after.lesson.case == revised
-    assert after.lesson.case["actions"]["required_actions"] == revised["actions"]["required_actions"]
     assert after.lesson.new_evidence == "target_changed"
 
 
