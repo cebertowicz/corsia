@@ -341,7 +341,7 @@ async def test_single_accept_passes_the_snapshot_hash_to_its_writer(
     suggestion, _ = comments.create_with_status(
         artifact_id,
         body="",
-        author="Steve",
+        author="Person",
         author_kind="user",
         anchor_text=quote,
         from_off=start,
@@ -364,7 +364,7 @@ async def test_single_accept_passes_the_snapshot_hash_to_its_writer(
         write=write,
     )
 
-    assert writes == [(expected, "Steve")]
+    assert writes == [(expected, "Person")]
 
 
 @pytest.mark.asyncio
