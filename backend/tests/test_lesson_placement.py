@@ -92,9 +92,18 @@ def _entry(env: Env, refs: list[dict] = TURN, text: str = "citing the head avoid
     return _add(env.db, "decisions", {"statement": text, "rationale": "r", "source_refs": refs}, THREAD)
 
 
+GATE_FIELDS = {
+    "decision": "reporting a check result as evidence",
+    "rule": "Name the exact commit the check ran on before reporting it.",
+    "second_case": "Quoting a figure from a spreadsheet: name the sheet revision it came from.",
+    "not_when": "When the person asked for a rough guess.",
+}
+
+
 def _place(env: Env, entry: int, answer: dict | None = None) -> str:
     return env.continuity._run(
-        THREAD, "place", {"entry_id": entry, "verdict": "trial", "placement": answer or _answer()},
+        THREAD, "place",
+        {"entry_id": entry, "verdict": "trial", "placement": answer or _answer(), **GATE_FIELDS},
     )
 
 
@@ -508,7 +517,7 @@ def test_a_hand_written_trial_is_not_a_receipt(env: Env) -> None:
     entry = _entry(env)
 
     reply = env.continuity._run(THREAD, "place", {
-        "entry_id": entry, "verdict": "written",
+        "entry_id": entry, "verdict": "written", **GATE_FIELDS,
         "destination": ".threads/owner/skills/cite-the-head/SKILL.md",
         "quote": "Name the exact commit.",
     })
@@ -708,14 +717,14 @@ async def test_a_file_keeps_the_words_only_where_an_entry_citing_them_was_placed
 
     unrelated = _entry(env, TURN, "an unrelated note")
     placed = env.continuity._run(THREAD, "place", {
-        "entry_id": unrelated, "verdict": "written", "destination": destination,
+        "entry_id": unrelated, "verdict": "written", **GATE_FIELDS, "destination": destination,
         "quote": "An unrelated line.",
     })
     assert not placed.startswith("Error"), placed
     assert HELD in _place(env, entry, _derived(**kept))
 
     literal = _entry(env, SAID, "the user said: that answer was wrong")
-    placed = env.continuity._run(THREAD, "place", {"entry_id": literal, "verdict": "written", **kept})
+    placed = env.continuity._run(THREAD, "place", {"entry_id": literal, "verdict": "written", **GATE_FIELDS, **kept})
     assert not placed.startswith("Error"), placed
 
     assert QUEUED in _place(env, entry, _derived(**kept))

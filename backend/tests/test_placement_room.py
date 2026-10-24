@@ -161,6 +161,19 @@ def test_fold_carries_the_lesson_without_appending_it(tmp_path) -> None:
     assert "Small commits." not in text and lesson_count(text) == 5
 
 
+def test_at_cap_fold_remedy_keeps_the_lesson_count_within_cap(tmp_path) -> None:
+    from core.placement_decide import over_cap
+
+    assert lesson_count(_FULL) == 5
+    assert over_cap("context", append_lesson(_FULL, "Small commits.", _DAY)[0])
+    text, _, _ = _apply(_ops({
+        "op": "fold", "start": 8, "text": "Run the smallest affected tests; Small commits.",
+    }), tmp_path)
+
+    assert not over_cap("context", text)
+    assert lesson_count(text) == lesson_count(_FULL)
+
+
 def test_move_copies_lines_verbatim_and_leaves_a_pointer(tmp_path) -> None:
     overflow = tmp_path / "shared" / "LESSONS-HISTORY.md"
     room = _ops({"op": "move", "start": 10, "end": 10})

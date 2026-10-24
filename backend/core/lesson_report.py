@@ -188,13 +188,15 @@ def collect_report(db, *, scope: ReportScope, sources: list[dict[str, Any]],
     bodies = read_bodies(db, user_id=scope.user_id, thread_ids=scope.thread_ids,
                          facts=sources + retained)
     from core.lesson_corrections import correction_facts, placement_check_counts, source_subjects
+    from core.lesson_gate import gate_counts
 
     # The adapter passes no sources here and joins corrections after reading lesson files.
     subjects = source_subjects(sources)
     return {"history": history, "missing_owners": missing_owners, "boundaries": boundaries,
             "retained": retained, "period": period, "bodies": bodies,
             "correction_facts": correction_facts(db, subjects),
-            "placement_checks": placement_check_counts(db, scope.thread_ids)}
+            "placement_checks": placement_check_counts(db, scope.thread_ids),
+            "lesson_gate": gate_counts(db, scope.thread_ids, scope.from_ts, scope.to_ts)}
 
 
 def detail_request(lesson_id: str | None, version: str | None, cursor: str | None,
@@ -302,6 +304,7 @@ def read_report(
     boundaries, retained, period = data["boundaries"], data["retained"], data["period"]
     correction_facts = data["correction_facts"]
     placement_checks = data["placement_checks"]
+    lesson_gate = data.get("lesson_gate")
     bodies = data["bodies"]
     bodies = bodies | {"reads": identify_recorded_reads(bodies["reads"], blob_reader, sources)}
     reads = [read for read in bodies["reads"] if scope.from_ts <= read["created_at"] < scope.to_ts]
@@ -312,6 +315,8 @@ def read_report(
     coverage = _coverage(inventory, period, reads, unidentified, missing_owners, bodies)
     if placement_checks["fires"] or any("originating_subjects" in row for row in inventory):
         coverage["placement_checks"] = placement_checks
+    if lesson_gate and any(lesson_gate.values()):
+        coverage["lesson_gate"] = lesson_gate
     coverage.update(source_coverage or {})
     snapshot = {"rows": inventory, "period": period, "reads": reads, "coverage": coverage}
     fingerprint = snapshot_fingerprint(snapshot, _canonical)

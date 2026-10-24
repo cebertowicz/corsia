@@ -10,13 +10,11 @@ from __future__ import annotations
 
 import fcntl
 import os
-import shlex
 import stat
 import subprocess
 import tempfile
 import time
 from contextlib import closing, contextmanager
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Iterator
 
@@ -25,9 +23,10 @@ from loguru import logger
 from infra.guidance_cas import stale_path
 from infra.guidance_history_paths import digest, file_version, find_commit
 from infra.guidance_messages import (
-    SAVE_COMMITTED, SAVE_FAILED, SAVE_HISTORY_OFF, SAVE_STALE, SAVE_UNRECORDED, SAVE_UNSYNCED,
-    commit_message, recorded_reason,
+    SAVE_COMMITTED, SAVE_FAILED, SAVE_HISTORY_OFF, SAVE_STALE, SAVE_UNRECORDED,
+    commit_message, is_person_author, recorded_reason,
 )
+from infra.guidance_save_types import SaveResult, _Commit
 from infra.guidance_targets import GuidanceTarget
 from infra.skill_save_validation import refused_save
 
@@ -47,34 +46,7 @@ class _LockBusy(GitFault):
     pass
 
 
-
-@dataclass(frozen=True)
-class SaveResult:
-    """``outcome``: written, unchanged, failed, deferred, stale, history-off, ordinary or refused; ``sha`` is full.
-    ``unsynced`` names paths whose commit landed while the real index kept the old blob (reason
-    ``index-unsynced``): a partial success the caller must show, never a plain "committed". ``refused``
-    (reason ``invalid-skill``) wrote nothing; ``errors`` holds the validation errors and ``line`` the fix."""
-
-    outcome: str
-    reason: str = ""
-    sha: str | None = None
-    line: str | None = None
-    unsynced: tuple[str, ...] = ()
-    errors: tuple[str, ...] = ()
-
-
-@dataclass(frozen=True)
-class _Commit:
-    """A landed commit and the paths whose real-index sync failed after it, with that fault."""
-
-    sha: str
-    unsynced: tuple[str, ...] = ()
-    fault: str = ""
-
-    def unsynced_line(self) -> list[str]:
-        command = shlex.join(["git", "reset", "-q", "--", *self.unsynced])
-        paths = ", ".join(self.unsynced)
-        return [SAVE_UNSYNCED.format(sha=self.sha[:7], paths=paths, error=self.fault, command=command)] if self.unsynced else []
+# SaveResult stays importable from here for existing callers.
 
 
 def _git_bytes(repo: Path, *args: str, env: dict[str, str] | None = None,
@@ -273,12 +245,22 @@ def save_guidance(
     atomic: bool = False,
     binary_safe_history: bool = False,
     write: Callable[[Path, bytes], object] = _write_bytes,
+    lesson_gate: bool = True,
+    lesson_observation_thread_id: str | None = None,
 ) -> SaveResult:
     """Save writes and compare-and-swap deletes in one guidance-history commit.
 
     Binary-safe reviewed bundles use raw SHA-256 and a 1 MB file ceiling; ordinary guidance is text-only.
+    An agent's new or changed lesson is refused unless the caller passes ``lesson_gate=False``.
     """
-    if (refused := refused_save(writes)) is not None:
+    lesson_changes = ()
+    if lesson_gate and not is_person_author(author):
+        from infra.lesson_save_gate import lesson_changes as assess_lesson_changes
+
+        lesson_changes = assess_lesson_changes(writes)
+    if (refused := refused_save(
+        writes, author=author, lesson_gate=lesson_gate, lesson_changes=lesson_changes,
+    )) is not None:
         return refused
     deletes = deletes or {}
     if set(writes) & set(deletes):
@@ -303,6 +285,17 @@ def save_guidance(
     }
     logger.info("guidance save {}", properties)
     emit_product_event("guidance_history", "save", properties=properties)
+    if result.outcome == "written" and lesson_changes:
+        from infra.lesson_save_gate import observe_written_save
+
+        if warning := observe_written_save(
+            lesson_changes, author, stewardship_thread_id=lesson_observation_thread_id,
+        ):
+            result = SaveResult(
+                result.outcome, result.reason, result.sha,
+                line="\n".join(line for line in (result.line, warning) if line),
+                unsynced=result.unsynced, errors=result.errors,
+            )
     return result
 
 

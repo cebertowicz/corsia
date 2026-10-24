@@ -332,16 +332,28 @@ async def test_single_accept_passes_the_snapshot_hash_to_its_writer(
     doc,
     _registrable_roots,
 ):
+    from doceditor import comments
     from doceditor.comment_actions import decide_suggestion
 
-    owner, _ = await _own(integration_client, doc)
-    suggestion = await _suggest(owner, doc)
+    owner, artifact_id = await _own(integration_client, doc)
+    quote = "A unique tail sentence"
+    start = doc.read_text().index(quote)
+    suggestion, _ = comments.create_with_status(
+        artifact_id,
+        body="",
+        author="Person",
+        author_kind="user",
+        anchor_text=quote,
+        from_off=start,
+        to_off=start + len(quote),
+        replacement="A rewritten tail sentence",
+    )
     user_id = _thread_facts(owner)[0]
     expected = hashlib.sha256(doc.read_bytes()).hexdigest()
-    hashes = []
+    writes = []
 
-    async def write(_path, _text, _project, _reason, expected_sha256=None):
-        hashes.append(expected_sha256)
+    async def write(_path, _text, _project, _reason, expected_sha256=None, suggestion_author=None):
+        writes.append((expected_sha256, suggestion_author))
 
     await decide_suggestion(
         suggestion["id"],
@@ -352,7 +364,7 @@ async def test_single_accept_passes_the_snapshot_hash_to_its_writer(
         write=write,
     )
 
-    assert hashes == [expected]
+    assert writes == [(expected, "Person")]
 
 
 @pytest.mark.asyncio
@@ -375,7 +387,7 @@ async def test_accept_all_passes_one_snapshot_hash_to_its_writer(
     expected = hashlib.sha256(doc.read_bytes()).hexdigest()
     hashes = []
 
-    async def write(_path, _text, _project, _reason, expected_sha256=None):
+    async def write(_path, _text, _project, _reason, expected_sha256=None, _suggestion_author=None):
         hashes.append(expected_sha256)
         return {"revision": "r2"}
 

@@ -276,7 +276,7 @@ def skill_body(text: str) -> str:
 
 
 def lesson_count(text: str) -> int:
-    """List items under every ``## Lessons`` heading."""
+    """Count legacy ``## Lessons`` dash-items for placement caps only."""
     inside, count = False, 0
     for line in text.split("\n"):
         if line.startswith("## "):
@@ -321,17 +321,14 @@ def skill_description(text: str) -> str | None:
 
 
 def append_lesson(text: str | None, line: str, day: str) -> tuple[str, int]:
-    """Add one dated lesson under ``## Lessons``; return the text and lesson count."""
+    """Add one dated lesson under exact ``## Lessons``; return text and legacy count."""
     body = text if text is not None else "# Lessons\n"
     lesson = f"- {day}: {line}"
     if not re.search(r"^## Lessons\s*$", body, re.MULTILINE):
         body = body.rstrip("\n") + "\n\n## Lessons\n"
     lines = body.rstrip("\n").split("\n")
     start = next(i for i, row in enumerate(lines) if re.match(r"^## Lessons\s*$", row))
-    end = next(
-        (i for i in range(start + 1, len(lines)) if lines[i].startswith("## ")),
-        len(lines),
-    )
+    end = next((i for i in range(start + 1, len(lines)) if lines[i].startswith("## ")), len(lines))
     insert_at = end
     while insert_at > start + 1 and not lines[insert_at - 1].strip():
         insert_at -= 1
