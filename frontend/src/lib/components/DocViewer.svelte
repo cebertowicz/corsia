@@ -16,7 +16,11 @@
 	import { createDocViewerImages, type DocumentImageRequest } from '$lib/docViewerImages';
 	import { projects } from '$lib/stores/projects';
 	import { paneOpen, isPaneDrawer } from '$lib/stores/paneOpen';
-	import { docOpenRefusal, ImageFileError, type DocOpenRefusal } from '$lib/docOpenRefusal';
+	import type { DocOpenRefusal } from '$lib/docOpenRefusal';
+	import { handleViewerFailure } from '$lib/docViewerFailure';
+	import { applyDocumentContent } from '$lib/docViewerApplyContent';
+	import { bindViewerSession, reopenOnReconnect } from '$lib/docViewerLiveBinding.svelte';
+	import { bindViewerDraft } from '$lib/docViewerDraftBinding.svelte';
 	import type { DocumentFreshness } from '$lib/docFreshness';
 	import { createCommentRetryToast, createThreadActions, prepareDocumentReload, reloadDocumentFeedback, teardownDocumentViewer, verifyAndApplyDocumentFreshness } from '$lib/docViewerOperations';
 	import { handleDocumentKey } from '$lib/docViewerKeyboard';
@@ -32,8 +36,8 @@
 	import type { DocViewerTarget } from '$lib/docViewerTarget';
 	import type { TabLoadSignal } from '$lib/artifactTabs';
 	import {
-		withDraftArtifactId, existingDraft, seedDraft,
-		enrichDraftTarget, setDraftText, flushDraft,
+		withDraftArtifactId, existingDraft,
+		flushDraft,
 	} from '$lib/stores/docSaveQueue';
 	import { createDocSaveState } from '$lib/docViewerSaveState.svelte';
 	import { liveConnectionDescriptionId } from '$lib/liveConnectionDescription';
@@ -51,9 +55,6 @@
 
 	type DocState = 'loading' | 'ready' | 'error';
 
-	function isMissingDocument(error: unknown): boolean {
-		return error instanceof Error && /^404\b/.test(error.message) && /\bno such file\b/i.test(error.message);
-	}
 
 	let {
 		target,
@@ -103,15 +104,12 @@
 	let liveConnection = $state<LiveDocumentSession['connection'] | null>(null);
 	let liveGeneration = $state(0);
 	let legacyAwaitingSave = $state(false);
-	$effect(() => {
-		const session = liveSession;
-		if (!session) { liveConnection = null; return; }
-		return session.subscribe(state => {
-			editText = state.text.toString();
-			readonly = !state.writable;
-			liveConnection = state.connection;
-			liveGeneration = state.textGeneration;
-		});
+	bindViewerSession(() => liveSession, (state) => {
+		if (!state) { liveConnection = null; return; }
+		editText = state.text.toString();
+		readonly = !state.writable;
+		liveConnection = state.connection;
+		liveGeneration = state.textGeneration;
 	});
 
 	const commentRetryToast = createCommentRetryToast(toasts);
@@ -196,41 +194,27 @@
 
 	let prevTarget: DocViewerTarget | null = null;
 	let reloadNonce = $state(0);
-	let wasConnected = false;
+
 	export function reload() {
 		if (liveSession) reloadDocumentFeedback(loadedArtifactId, undefined, () => loadSeq, feedbackStatus);
 		else reloadNonce += 1;
 	}
 
 	let loadSeq = 0;
-	// Feedback loads share the comment store; each call only decides whether this tab may apply its result.
-	// The freshness state remains here; the verifier performs only the API transition.
 	function applyViewerContent(d: DocViewerTarget, content: ViewerContent, seq: number): void {
-		if (seq !== loadSeq) return;
-		seedDraft(d, content.text, content.revision);
-		if (content.artifactId && !d.artifactId) enrichDraftTarget(d, content.artifactId);
-		editText = content.text;
-		loadedArtifactId = content.artifactId;
-		readonly = !content.writable;
-		confirming = false;
-		freshness = content.freshness;
-		const shown = docState === 'ready';
-		docState = 'ready';
-		legacyAwaitingSave = !content.live && Boolean(existingDraft(d)?.editText !== existingDraft(d)?.savedText);
-		onSignal?.({ status: 'ready', artifactId: content.artifactId, revision: content.revision, writable: content.writable, shown, instanceId: d.instanceId });
-		reloadDocumentFeedback(content.artifactId, seq, () => loadSeq, feedbackStatus);
+		applyDocumentContent(d, content, seq, { loadSeq: () => loadSeq, shown: () => docState === 'ready', signal: onSignal,
+			feedback: () => feedbackStatus, apply: (value, awaiting) => {
+				editText = value.text; loadedArtifactId = value.artifactId; readonly = !value.writable; confirming = false;
+				freshness = value.freshness; docState = 'ready'; legacyAwaitingSave = awaiting;
+			},
+		});
 	}
 	$effect(() => {
 		if (!legacyAwaitingSave || !save.draft || save.draft.status !== 'saved') return;
 		legacyAwaitingSave = false;
 		reloadNonce += 1;
 	});
-	$effect(() => {
-		const connected = $connectionState === 'connected';
-		const shouldReopen = connected && !wasConnected && openRefusal?.code === 'not_connected';
-		wasConnected = connected;
-		if (shouldReopen) reloadNonce += 1;
-	});
+	reopenOnReconnect(() => $connectionState === 'connected', () => openRefusal?.code === 'not_connected', () => { reloadNonce += 1; });
 	function onPrepareCleanReload(): Promise<(() => void) | null> {
 		const d = target;
 		if (!d || liveSession) return Promise.resolve(null);
@@ -281,36 +265,17 @@
 			})
 				.catch((e) => {
 					if (seq !== loadSeq) return;
-					// A tab opened before the backend's type was known: the leaf swaps it to the image viewer.
-					if (e instanceof ImageFileError) { signal({ status: 'loading', renderer: 'image' }); return; }
-					// A 404 means the document is gone, which the tab shows as its
-					// explicit unavailable state rather than a raw load error.
-					// A confirmed missing file is terminal, not retryable. The queue remains server-owned:
-					// refresh it so any reply row the server has retired disappears with the unavailable tab.
-					if (isMissingDocument(e)) { signal({ status: 'unavailable' }); void reloadAttentionQueue(); return; }
-					openRefusal = docOpenRefusal(e);
-					loadError = e instanceof Error ? e.message : String(e);
-					docState = openRefusal || opened.unsaved ? 'ready' : 'error';
-					if (opened.text !== null) editText = opened.text;
-					readonly = Boolean(openRefusal);
-					confirming = false;
-					// Keep a failed reply-open mounted so its file-specific recovery can
-					// render. The tab remains an error until the reader retries; marking
-					// it unavailable would remove this surface and strand them in chat.
-					signal({ status: 'error' });
+					handleViewerFailure(e, opened, { signal, reloadAttention: () => { void reloadAttentionQueue(); },
+						fail: (failure) => { openRefusal = failure.refusal; loadError = failure.message; docState = failure.state;
+							if (failure.text !== null) editText = failure.text; readonly = failure.readonly; confirming = false; },
+					});
 				});
 		});
 	});
 
-	$effect(() => {
-		const text = editText;
-		if (docState !== 'ready' || !target || readonly || confirming || openRefusal) return;
-		setDraftText(target, text);
-	});
-
-	function flushNow() {
-		if (target && !readonly && !confirming) void flushDraft(target);
-	}
+	const flushNow = bindViewerDraft({ target: () => target, text: () => editText,
+		canEdit: () => docState === 'ready' && !readonly && !confirming && !openRefusal,
+		canFlush: () => !readonly && !confirming });
 
 	onDestroy(() => teardownDocumentViewer(target, flushNow, releaseDocEditor));
 
