@@ -17,8 +17,8 @@ from typing import Any
 from doceditor import comments as store, feedback_suggestion_decisions
 from doceditor.comment_action_errors import CommentActionError
 from doceditor.comment_actions import (
-    DECISIONS, DocumentWriter, _record_decision_row, splice_suggestion, suggestion_span,
-    validate_decision_reason,
+    DECISIONS, DocumentWriter, _record_decision_row, accepted_person_author_user_id, splice_suggestion,
+    suggestion_span, validate_decision_reason,
 )
 from doceditor.comment_permissions import check_decider, owner_row
 from doceditor.doc_text import read_doc_text
@@ -118,10 +118,7 @@ async def _accept_batch(
     text, accepted, skipped = _batch_text(rows, source)
     if accepted:
         authors = ", ".join(dict.fromkeys(row["author"] for row in rows))
-        person_authors = {str(row["author"]) for row in rows if row["author_kind"] == "user"}
-        suggestion_author = next(iter(person_authors)) if len(person_authors) == 1 and all(
-            row["author_kind"] == "user" for row in rows
-        ) else None
+        suggestion_author = accepted_person_author_user_id(rows, accepted)
         receipt = await write(
             artifact["path"], text, project_id, f"Accepted {len(accepted)} suggestions from {authors}",
             hashlib.sha256(source.encode()).hexdigest(), suggestion_author,

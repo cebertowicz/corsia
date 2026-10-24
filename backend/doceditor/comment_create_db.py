@@ -110,7 +110,7 @@ def create_in_db(request: CommentInput, anchor: Anchor | None, identifier: str, 
                 )["id"]
             row, created = comments.create_with_status(
                 artifact_id, body=request.body, author=request.author, author_kind=request.author_kind,
-                author_thread_id=request.author_thread_id, parent_id=request.parent_id,
+                author_user_id=request.user_id, author_thread_id=request.author_thread_id, parent_id=request.parent_id,
                 anchor_text=quote, from_off=start, to_off=end, anchor_prefix=prefix, anchor_suffix=suffix,
                 review=request.review, replacement=request.replacement, client_id=identifier,
                 region=request.region, image_rev=image_rev, image_src=image_src, announce=request.author_kind != "user", db=connection,

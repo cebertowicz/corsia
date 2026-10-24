@@ -82,6 +82,45 @@ async def test_accept_checks_quotes_at_lane_start_after_queueing(ownership_scope
 
 
 @pytest.mark.asyncio
+async def test_live_accept_keeps_registry_owner_and_persisted_person_identity(
+    ownership_scope, tmp_path, monkeypatch,
+):
+    scope = ownership_scope
+    manager, entry, _ = await opened(scope, tmp_path, monkeypatch)
+    artifact_id = scope["db"].execute(
+        "SELECT id FROM artifact_identities WHERE path=?", (str(entry.live.path),)
+    ).fetchone()[0]
+    row, _ = comments.create_with_status(
+        artifact_id, body="", author="Renamed person", author_kind="user", author_user_id="person-immutable-id",
+        anchor_text="b", from_off=2, to_off=3, replacement="B", db=scope["db"],
+    )
+    entry.live.track_range(row["id"], row["from_off"], row["to_off"])
+    from registry import service
+
+    owners = []
+    original_register = service.register_write_strict
+
+    def capture_owner(owner, *args, **kwargs):
+        owners.append(owner)
+        return original_register(owner, *args, **kwargs)
+
+    monkeypatch.setattr(service, "register_write_strict", capture_owner)
+    try:
+        result = await comment_batch_actions.accept_all_open(
+            artifact_id, user_id=user_id(scope), decided_by="user",
+            actor_thread_id=scope["owner"], write=legacy_writer,
+        )
+
+        assert result["accepted"] == [row["id"]]
+        assert entry.publisher.task is not None
+        await asyncio.wait_for(entry.publisher.task, 2)
+        assert owners == [scope["owner"]]
+        assert comments.get_comment(row["id"], db=scope["db"])["author_user_id"] == "person-immutable-id"
+    finally:
+        await manager.close()
+
+
+@pytest.mark.asyncio
 async def test_accept_preserves_unsaved_browser_text(ownership_scope, tmp_path, monkeypatch):
     scope = ownership_scope
     manager, entry, _ = await opened(scope, tmp_path, monkeypatch)

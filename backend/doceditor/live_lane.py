@@ -265,6 +265,7 @@ class DocumentLane:
         writer = await agent_author(operation.actor, operation.kind)
         if publication is not None:
             publication = replace(publication, ranges=ranges)
+
         record = await record_candidate(self.live, fork, prior_hash, publication, operation)
         await _checkpoint("record")
         try:

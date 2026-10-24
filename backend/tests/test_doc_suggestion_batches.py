@@ -338,17 +338,18 @@ async def test_single_accept_passes_the_snapshot_hash_to_its_writer(
     owner, artifact_id = await _own(integration_client, doc)
     quote = "A unique tail sentence"
     start = doc.read_text().index(quote)
+    user_id = _thread_facts(owner)[0]
     suggestion, _ = comments.create_with_status(
         artifact_id,
         body="",
         author="Person",
         author_kind="user",
+        author_user_id=user_id,
         anchor_text=quote,
         from_off=start,
         to_off=start + len(quote),
         replacement="A rewritten tail sentence",
     )
-    user_id = _thread_facts(owner)[0]
     expected = hashlib.sha256(doc.read_bytes()).hexdigest()
     writes = []
 
@@ -364,7 +365,7 @@ async def test_single_accept_passes_the_snapshot_hash_to_its_writer(
         write=write,
     )
 
-    assert writes == [(expected, "Person")]
+    assert writes == [(expected, user_id)]
 
 
 @pytest.mark.asyncio
@@ -402,3 +403,88 @@ async def test_accept_all_passes_one_snapshot_hash_to_its_writer(
 
     assert hashes == [expected]
     assert result["revision"] == "r2"
+
+
+@pytest.mark.asyncio
+async def test_plain_batch_uses_the_unanimous_persisted_user_of_accepted_winners(
+    integration_client, doc, _registrable_roots,
+):
+    from doceditor import comments
+    from doceditor.comment_batch_actions import accept_all_open
+
+    owner, artifact_id = await _own(integration_client, doc)
+    quote = "A unique tail sentence"
+    start = doc.read_text().index(quote)
+    person, _ = comments.create_with_status(
+        artifact_id, body="", author="Renamed Person", author_kind="user",
+        author_user_id="person-immutable-id", anchor_text=quote, from_off=start,
+        to_off=start + len(quote), replacement="A concise tail sentence",
+    )
+    comments.create_with_status(
+        artifact_id, body="", author="Reviewer", author_kind="agent", author_thread_id="reviewer",
+        anchor_text=quote, from_off=start, to_off=start + len(quote), replacement="An overlapping agent suggestion",
+    )
+    writers = []
+
+    async def write(_path, _text, _project, _reason, _expected_sha256, suggestion_author):
+        writers.append(suggestion_author)
+        return {"revision": "r2"}
+
+    result = await accept_all_open(
+        artifact_id, user_id=_thread_facts(owner)[0], decided_by="Owner", actor_thread_id=owner, write=write,
+    )
+
+    assert result["accepted"] == [person["id"]]
+    assert writers == ["person-immutable-id"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("case", ["legacy", "agent", "mixed", "different_users"])
+async def test_plain_batch_falls_back_for_legacy_agent_mixed_or_different_user_winners(
+    integration_client, doc, _registrable_roots, case,
+):
+    from doceditor import comments
+    from doceditor.comment_batch_actions import accept_all_open
+
+    owner, artifact_id = await _own(integration_client, doc)
+    first = "# Design"
+    second = "A unique tail sentence"
+    first_start = doc.read_text().index(first)
+    second_start = doc.read_text().index(second)
+    if case in {"legacy", "mixed"}:
+        comments.create_with_status(
+            artifact_id, body="", author="Legacy display", author_kind="user",
+            author_user_id=None, anchor_text=first, from_off=first_start,
+            to_off=first_start + len(first), replacement="# Revised design",
+        )
+    if case == "different_users":
+        comments.create_with_status(
+            artifact_id, body="", author="First user", author_kind="user", author_user_id="first-user",
+            anchor_text=first, from_off=first_start, to_off=first_start + len(first), replacement="# Revised design",
+        )
+        comments.create_with_status(
+            artifact_id, body="", author="Second user", author_kind="user", author_user_id="second-user",
+            anchor_text=second, from_off=second_start, to_off=second_start + len(second), replacement="A revised tail",
+        )
+    if case == "agent":
+        comments.create_with_status(
+            artifact_id, body="", author="Reviewer", author_kind="agent", author_thread_id="reviewer",
+            anchor_text=first, from_off=first_start, to_off=first_start + len(first), replacement="# Revised design",
+        )
+    if case == "mixed":
+        comments.create_with_status(
+            artifact_id, body="", author="Reviewer", author_kind="agent", author_thread_id="reviewer",
+            anchor_text=second, from_off=second_start, to_off=second_start + len(second), replacement="A revised tail",
+        )
+    writers = []
+
+    async def write(_path, _text, _project, _reason, _expected_sha256, suggestion_author):
+        writers.append(suggestion_author)
+        return {"revision": "r2"}
+
+    result = await accept_all_open(
+        artifact_id, user_id=_thread_facts(owner)[0], decided_by="Owner", actor_thread_id=owner, write=write,
+    )
+
+    assert result["accepted"]
+    assert writers == [None]
