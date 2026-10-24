@@ -93,7 +93,6 @@
 		!!current && !suppressed && $expandedId === current.external_id,
 	);
 
-
 	/** Focus returns to the exact control that opened the chip. */
 	async function close() {
 		collapse();
@@ -102,7 +101,6 @@
 		priorFocus = null;
 		back?.focus();
 	}
-
 
 	const deferredId = 'attention-dock-deferred';
 
