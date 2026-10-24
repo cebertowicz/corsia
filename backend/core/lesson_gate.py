@@ -284,3 +284,34 @@ def gate_counts(db: sqlite3.Connection, thread_ids: tuple[str, ...], from_ts: st
     if observations:
         counts["observed"] = observations
     return counts
+
+
+def consolidation_facts(
+    db: sqlite3.Connection, thread_ids: tuple[str, ...], from_ts: str, to_ts: str,
+) -> list[str] | None:
+    """Recorded consolidation event ids, or ``None`` before gate measurement begins.
+
+    A consolidation is either a completed save that reduced its lesson-item count,
+    or an accepted ``place`` that widened an existing lesson. The report reads this
+    facade instead of restating the outcome-event rule.
+    """
+    if not thread_ids:
+        return None
+    first = db.execute(
+        "SELECT MIN(ts) FROM outcome_events WHERE event_name=? AND retracted_at IS NULL "
+        "AND agent_thread_id IN (SELECT value FROM json_each(?))",
+        (EVENT, json.dumps(list(thread_ids))),
+    ).fetchone()[0]
+    if first is None or str(first) >= to_ts:
+        return None
+    rows = db.execute(
+        "SELECT id FROM outcome_events WHERE event_name=? AND retracted_at IS NULL "
+        "AND ts>=? AND ts<? AND agent_thread_id IN (SELECT value FROM json_each(?)) AND ("
+        "(json_extract(attributes,'$.result')='observed' "
+        "AND json_extract(attributes,'$.verdict')='save' "
+        "AND json_extract(attributes,'$.items_after') < json_extract(attributes,'$.items_before')) "
+        "OR (json_extract(attributes,'$.result')='accepted' "
+        "AND json_extract(attributes,'$.widens') IS NOT NULL)) ORDER BY ts,id",
+        (EVENT, from_ts, to_ts, json.dumps(list(thread_ids))),
+    ).fetchall()
+    return [str(row["id"]) for row in rows]

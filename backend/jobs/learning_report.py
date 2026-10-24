@@ -10,6 +10,7 @@ from typing import Any
 
 from loguru import logger
 
+from core import lesson_gate
 from core.corrections_recording import (
     CORRECTION_EVENT,
     LABEL_CORRECTION,
@@ -42,6 +43,12 @@ _PERSON_CORRECTION_SOURCE_ARGS = (SOURCE_KIND_MESSAGE, *PERSON_CORRECTION_SOURCE
 
 def _scope_where(scope: str) -> tuple[str, tuple[str, ...]]:
     return "project_id=?", (scope,)
+
+
+def _scope_thread_ids(db: sqlite3.Connection, scope: str) -> tuple[str, ...]:
+    return tuple(str(row["id"]) for row in db.execute(
+        "SELECT id FROM threads WHERE project_id=? ORDER BY id", (scope,),
+    ))
 
 
 def install_timezone() -> tzinfo:
@@ -145,11 +152,12 @@ def _lessons(
     refs = [str(row["source_event_id"]) for row in rows]
     # a review key is <prefix>:<id>:...; a capture and the trial it became share the id
     distinct = len({ref.split(":")[1] for ref in refs})
+    consolidated_refs = lesson_gate.consolidation_facts(db, _scope_thread_ids(db, scope), start, end)
     return ({
         "recorded": {**_count(refs), "count": distinct},
         "in_use": _in_use(db, scope, start, end),
         "confirmed": None,
-        "consolidated": None,
+        "consolidated": _count(consolidated_refs) if consolidated_refs is not None else None,
         "repeated": None,
     }, {str(row["owner_id"]) for row in rows})
 
