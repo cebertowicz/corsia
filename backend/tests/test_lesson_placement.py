@@ -438,7 +438,7 @@ async def test_a_held_revision_offered_later_keeps_only_the_new_evidence_it_stat
 async def test_a_held_capture_keeps_its_case_and_its_offer_carries_it(env: Env) -> None:
     literal = _entry(env, SAID, "the user said: that answer was wrong")
     entry = _entry(env, SAID, "always search the history first")
-    case = {"case": CASE, "cause": "rule_gap", "target_file": "context/rule.md"}
+    case: dict[str, Any] = {"case": CASE, "cause": "rule_gap", "target_file": "context/rule.md"}
 
     held = _place(env, entry, _answer(**case))
     await _drain(env.worker)
