@@ -338,17 +338,18 @@ async def test_single_accept_passes_the_snapshot_hash_to_its_writer(
     owner, artifact_id = await _own(integration_client, doc)
     quote = "A unique tail sentence"
     start = doc.read_text().index(quote)
+    user_id = _thread_facts(owner)[0]
     suggestion, _ = comments.create_with_status(
         artifact_id,
         body="",
         author="Person",
         author_kind="user",
+        author_user_id=user_id,
         anchor_text=quote,
         from_off=start,
         to_off=start + len(quote),
         replacement="A rewritten tail sentence",
     )
-    user_id = _thread_facts(owner)[0]
     expected = hashlib.sha256(doc.read_bytes()).hexdigest()
     writes = []
 
@@ -364,7 +365,7 @@ async def test_single_accept_passes_the_snapshot_hash_to_its_writer(
         write=write,
     )
 
-    assert writes == [(expected, "Person")]
+    assert writes == [(expected, user_id)]
 
 
 @pytest.mark.asyncio
