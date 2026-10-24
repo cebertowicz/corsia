@@ -1,7 +1,6 @@
-// Walks Start fresh in the real launch shell: the offer for an install this app can't open, the
-// "Start fresh instead" choice beside a takeover, the confirmation listing what moves and the code
-// and work folders that stay, the move itself, automatic setup after a successful backup, and every failure card:
-// a refusal, a failed move, and an undo finished at launch. Each button must run the right command and nothing else.
+// Walks Start fresh in the real launch shell: the initial choices fetch and show the folder preview,
+// Start fresh moves it directly, and automatic setup follows a successful backup. It also covers preview refusal,
+// failure recovery, the independent Take over choice, and a restored launch failure. Each action runs only its command.
 //
 // usage: node desktop/tests/start-fresh-journey.mjs [--screenshots <dir>]
 import { createRequire } from 'node:module';
@@ -55,9 +54,9 @@ const backup = '~/CORSIA backups/2026-10-22 13-05';
 async function open(theme, answers) {
 	const page = await browser.newPage({ viewport, colorScheme: theme });
 	await page.exposeFunction('__answer', async (command, count) => {
-		const answer = answers[command];
+		const answer = typeof answers[command] === 'function' ? await answers[command](count) : answers[command];
 		if (answer && answer.throws) return { throws: answer.throws };
-		return { value: typeof answer === 'function' ? answer(count) : answer ?? null };
+		return { value: answer ?? null };
 	});
 	await page.addInitScript(() => {
 		window.__calls = [];
@@ -114,9 +113,9 @@ for (const theme of ['dark', 'light']) {
 		await page.evaluate((said) => window.__corsiaShowStartup({ state: 'existing_install', reason: said }), reason);
 		compare(`${theme} offer`, await read(page), {
 			title: 'Start CORSIA fresh?',
-			line: 'CORSIA found an existing install on this computer (~/.corsia), and this app can’t open it. Start fresh moves it into a backup folder and sets up CORSIA as new. Nothing is deleted.',
-			note: null,
-			list: null,
+			line: 'CORSIA found an existing install on this computer (~/.corsia), and this app can’t open it. Start fresh stops your earlier install, then moves these into a new folder in ~/CORSIA backups. Nothing is deleted.',
+			note: 'Its code folder stays where it is: ~/.corsia.',
+			list: preview.moves,
 			details: null,
 			button: 'Start fresh',
 			instead: null,
@@ -128,24 +127,16 @@ for (const theme of ['dark', 'light']) {
 		const plistReason = 'CORSIA found an existing install on this computer, and this app can’t take it over.';
 		await page.evaluate(([said, why]) => window.__corsiaShowStartup({ state: 'existing_install', reason: said, details: why }), [plistReason, cause]);
 		compare(`${theme} offer with a cause`, await read(page), {
-			line: `${plistReason} Start fresh moves it into a backup folder and sets up CORSIA as new. Nothing is deleted.`,
+			line: `${plistReason} Start fresh stops your earlier install, then moves these into a new folder in ~/CORSIA backups. Nothing is deleted.`,
+			list: preview.moves,
 			details: cause,
 			button: 'Start fresh',
 		});
 		await page.evaluate((said) => window.__corsiaShowStartup({ state: 'existing_install', reason: said }), reason);
-		await page.click('#retry');
-		await page.waitForFunction(() => document.getElementById('status').textContent === 'Move your earlier install into a backup?');
-		compare(`${theme} confirm`, await read(page), {
-			line: 'CORSIA stops it, then moves these into a new folder in ~/CORSIA backups. Nothing is deleted.',
-			note: 'Its code folder stays where it is: ~/.corsia.',
-			list: preview.moves,
-			button: 'Move and start fresh',
-			instead: null,
-			quit: true,
-		});
-		await shot(page, theme, '2-confirm');
-		await page.click('#retry');
+		if (await page.getByText('Move and start fresh', { exact: true }).count()) fail(`${theme} choice: showed a second confirmation action`);
+		await page.evaluate(() => { document.getElementById('retry').click(); document.getElementById('retry').click(); });
 		await page.waitForFunction(() => window.__calls.filter((command) => command === 'start_local_service').length === 1);
+		await shot(page, theme, '2-direct-start');
 		compare(`${theme} starting`, await read(page), {
 			title: 'Starting CORSIA…',
 			line: null,
@@ -156,28 +147,96 @@ for (const theme of ['dark', 'light']) {
 		});
 		await shot(page, theme, '4-starting');
 		const calls = await made(page);
-		const expected = ['start_fresh_preview', 'start_fresh', 'start_local_service'];
+		const expected = ['start_fresh_preview', 'start_fresh_preview', 'start_fresh_preview', 'start_fresh', 'start_local_service'];
 		if (JSON.stringify(calls) !== JSON.stringify(expected)) fail(`${theme} journey: ran ${JSON.stringify(calls)}, expected ${JSON.stringify(expected)}`);
-		if (failed === before) console.log(`ok   ${theme} offer, confirm, move, setup starts`);
+		if (failed === before) console.log(`ok   ${theme} previewed choice, move, setup starts`);
 		await page.close();
 	}
 
-	// Beside a takeover, "Start fresh instead" opens the same confirmation; Take over starts adoption.
+	// Beside a takeover, Start fresh has a valid preview but Take over remains an independent main action.
 	{
 		const page = await open(theme, { start_fresh_preview: preview, adopt_existing_install: { pending: true } });
 		const before = failed;
 		await page.evaluate(() => window.__corsiaShowStartup({ state: 'adoption_offered', workspace: '~/Corsia' }));
-		compare(`${theme} takeover`, await read(page), { button: 'Take over', instead: 'Start fresh instead', quit: true });
+		compare(`${theme} takeover`, await read(page), { button: 'Take over', instead: 'Start fresh instead', list: preview.moves, quit: true });
 		await shot(page, theme, '0-takeover');
-		await page.click('#start-fresh');
-		await page.waitForFunction(() => document.getElementById('status').textContent === 'Move your earlier install into a backup?');
-		compare(`${theme} takeover confirm`, await read(page), { instead: null, button: 'Move and start fresh' });
-		if (JSON.stringify(await made(page)) !== JSON.stringify(['start_fresh_preview'])) fail(`${theme} takeover: ran ${JSON.stringify(await made(page))}`);
-		await page.evaluate(() => window.__corsiaShowStartup({ state: 'adoption_offered', workspace: '~/Corsia' }));
 		await page.click('#retry');
 		await page.waitForFunction(() => window.__calls.includes('adopt_existing_install'));
 		if (JSON.stringify(await made(page)) !== JSON.stringify(['start_fresh_preview', 'adopt_existing_install'])) fail(`${theme} takeover: Take over ran ${JSON.stringify(await made(page))}`);
-		if (failed === before) console.log(`ok   ${theme} start fresh instead of a takeover`);
+		if (failed === before) console.log(`ok   ${theme} takeover remains independent of preview`);
+		await page.close();
+	}
+
+	// Start fresh from the takeover choice runs the backup and automatic setup directly, without a confirmation card.
+	{
+		const page = await open(theme, { start_fresh_preview: preview, start_fresh: backup, start_local_service: { pending: true } });
+		const before = failed;
+		await page.evaluate(() => window.__corsiaShowStartup({ state: 'adoption_offered', workspace: '~/Corsia' }));
+		await page.click('#start-fresh');
+		await page.waitForFunction(() => window.__calls.filter((command) => command === 'start_local_service').length === 1);
+		if (await page.getByText('Move and start fresh', { exact: true }).count()) fail(`${theme} takeover fresh: showed a second confirmation action`);
+		const calls = await made(page);
+		if (JSON.stringify(calls) !== JSON.stringify(['start_fresh_preview', 'start_fresh', 'start_local_service'])) fail(`${theme} takeover fresh: ran ${JSON.stringify(calls)}`);
+		if (failed === before) console.log(`ok   ${theme} takeover Start fresh moves once and starts setup`);
+		await page.close();
+	}
+
+	// After Start fresh moves, a new takeover choice gets its own valid or refused preview rather than staying pending.
+	for (const { name, nextPreview, instead } of [
+		{ name: 'valid preview', nextPreview: preview, instead: 'Start fresh instead' },
+		{ name: 'refused preview', nextPreview: { throws: { message: 'CORSIA can’t inspect this earlier install.', details: 'permission denied' } }, instead: 'Check folders again' },
+	]) {
+		const page = await open(theme, {
+			start_fresh_preview: (count) => count === 1 ? preview : nextPreview,
+			start_fresh: backup,
+			start_local_service: { state: 'adoption_offered', workspace: '~/Corsia' },
+		});
+		const before = failed;
+		await page.evaluate((said) => window.__corsiaShowStartup({ state: 'existing_install', reason: said }), reason);
+		await page.click('#retry');
+		await page.waitForFunction((expected) => document.getElementById('start-fresh').textContent === expected, instead);
+		compare(`${theme} post-fresh ${name}`, await read(page), { button: 'Take over', instead, list: name === 'valid preview' ? preview.moves : null, quit: true });
+		const calls = await made(page);
+		if (JSON.stringify(calls) !== JSON.stringify(['start_fresh_preview', 'start_fresh', 'start_local_service', 'start_fresh_preview'])) fail(`${theme} post-fresh ${name}: ran ${JSON.stringify(calls)}`);
+		if (failed === before) console.log(`ok   ${theme} post-fresh ${name} is not stuck checking folders`);
+		await page.close();
+	}
+
+	// A rejected preview never allows movement and leaves Take over usable.
+	{
+		const refusal = { message: 'CORSIA can’t inspect this earlier install.', details: 'permission denied', restored: true };
+		const page = await open(theme, { start_fresh_preview: (count) => count === 1 ? { throws: refusal } : preview, adopt_existing_install: { pending: true } });
+		const before = failed;
+		await page.evaluate(() => window.__corsiaShowStartup({ state: 'adoption_offered', workspace: '~/Corsia' }));
+		compare(`${theme} takeover preview refusal`, await read(page), { button: 'Take over', instead: 'Check folders again', list: null, quit: true });
+		await page.click('#start-fresh');
+		await page.waitForFunction(() => document.getElementById('start-fresh').textContent === 'Start fresh instead');
+		if (JSON.stringify(await made(page)) !== JSON.stringify(['start_fresh_preview', 'start_fresh_preview'])) fail(`${theme} preview retry: moved data or ran ${JSON.stringify(await made(page))}`);
+		await page.click('#retry');
+		await page.waitForFunction(() => window.__calls.includes('adopt_existing_install'));
+		const calls = await made(page);
+		if (JSON.stringify(calls) !== JSON.stringify(['start_fresh_preview', 'start_fresh_preview', 'adopt_existing_install'])) fail(`${theme} takeover preview refusal: ran ${JSON.stringify(calls)}`);
+		if (failed === before) console.log(`ok   ${theme} rejected preview keeps Take over usable`);
+		await page.close();
+	}
+
+	// A late preview cannot replace Take over's progress after adoption has started.
+	{
+		let releasePreview;
+		const delayedPreview = new Promise((resolve) => { releasePreview = resolve; });
+		const page = await open(theme, { start_fresh_preview: () => delayedPreview, adopt_existing_install: { pending: true } });
+		const before = failed;
+		await page.evaluate(() => { void window.__corsiaShowStartup({ state: 'adoption_offered', workspace: '~/Corsia' }); });
+		await page.waitForFunction(() => document.getElementById('retry').textContent === 'Take over');
+		compare(`${theme} checking folders`, await read(page), { button: 'Take over', instead: 'Checking folders…', list: null, quit: true });
+		await page.click('#retry');
+		await page.waitForFunction(() => document.getElementById('status').textContent === 'Giving running work up to a minute to finish…');
+		releasePreview(preview);
+		await page.waitForTimeout(50);
+		compare(`${theme} held takeover preview`, await read(page), { title: 'Giving running work up to a minute to finish…', actions: false });
+		const calls = await made(page);
+		if (JSON.stringify(calls) !== JSON.stringify(['start_fresh_preview', 'adopt_existing_install'])) fail(`${theme} held takeover preview: ran ${JSON.stringify(calls)}`);
+		if (failed === before) console.log(`ok   ${theme} late preview cannot replace takeover progress`);
 		await page.close();
 	}
 
@@ -190,8 +249,6 @@ for (const theme of ['dark', 'light']) {
 		});
 		const before = failed;
 		await page.evaluate((said) => window.__corsiaShowStartup({ state: 'existing_install', reason: said }), reason);
-		await page.click('#retry');
-		await page.waitForFunction(() => document.getElementById('retry').textContent === 'Move and start fresh');
 		await page.click('#retry');
 		await page.waitForFunction(() => window.__calls.includes('adoption_progress'), null, { timeout: 4000 });
 		await page.waitForTimeout(100);
@@ -206,13 +263,11 @@ for (const theme of ['dark', 'light']) {
 		await page.close();
 	}
 
-	// A work folder named in the settings stays, and the confirmation says so after the code folder.
+	// A work folder named in the settings stays, and the initial choice says so after the code folder.
 	{
 		const page = await open(theme, { start_fresh_preview: { ...preview, work: ['~/Developer'] } });
 		const before = failed;
 		await page.evaluate((said) => window.__corsiaShowStartup({ state: 'existing_install', reason: said }), reason);
-		await page.click('#retry');
-		await page.waitForFunction(() => document.getElementById('retry').textContent === 'Move and start fresh');
 		compare(`${theme} work folder`, await read(page), {
 			note: 'Its code folder stays where it is: ~/.corsia. Its work folder stays where it is: ~/Developer.',
 		});
@@ -220,21 +275,30 @@ for (const theme of ['dark', 'light']) {
 		await page.close();
 	}
 
-	// A refusal says what the person can do; Retry reads the computer again.
-	{
-		const refusal = 'CORSIA can’t move ~/Corsia because it’s on another disk.';
-		const page = await open(theme, { start_fresh_preview: { throws: { message: refusal, details: '', restored: true } } });
+	// A preview failure is not a move failure: its details stay visible and checking again still moves nothing.
+	for (const { name, error, details } of [
+		{ name: 'object', error: { message: 'CORSIA can’t inspect this earlier install.', details: 'permission denied' }, details: 'permission denied' },
+		{ name: 'scalar', error: 'preview service unavailable', details: 'preview service unavailable' },
+	]) {
+		const page = await open(theme, { start_fresh_preview: (count) => count === 1 ? { throws: error } : preview });
 		const before = failed;
 		await page.evaluate((said) => window.__corsiaShowStartup({ state: 'existing_install', reason: said }), reason);
+		await page.waitForFunction(() => document.getElementById('retry').textContent === 'Check folders again');
+		compare(`${theme} preview failure ${name}`, await read(page), {
+			title: 'Start CORSIA fresh?',
+			line: reason,
+			note: 'CORSIA couldn’t check what Start fresh will move. Check folders again before starting fresh.',
+			details,
+			button: 'Check folders again',
+			list: null,
+			quit: true,
+		});
+		await shot(page, theme, `5-preview-${name}`);
 		await page.click('#retry');
-		await page.waitForFunction(() => document.getElementById('status').textContent === 'CORSIA couldn’t start fresh');
-		compare(`${theme} refusal`, await read(page), { line: refusal, details: null, button: 'Retry', list: null, quit: true });
-		await shot(page, theme, '5-refusal');
-		await page.click('#retry');
-		await page.waitForTimeout(150);
+		await page.waitForFunction(() => document.getElementById('retry').textContent === 'Start fresh');
 		const calls = await made(page);
-		if (JSON.stringify(calls) !== JSON.stringify(['start_fresh_preview', 'start_fresh_preview'])) fail(`${theme} refusal: ran ${JSON.stringify(calls)}`);
-		if (failed === before) console.log(`ok   ${theme} refusal`);
+		if (JSON.stringify(calls) !== JSON.stringify(['start_fresh_preview', 'start_fresh_preview'])) fail(`${theme} preview failure ${name}: moved data or ran ${JSON.stringify(calls)}`);
+		if (failed === before) console.log(`ok   ${theme} preview failure ${name}`);
 		await page.close();
 	}
 
@@ -246,13 +310,13 @@ for (const theme of ['dark', 'light']) {
 			restored: true,
 			left_stopped: true,
 		};
-		const page = await open(theme, { start_fresh_preview: preview });
+		const page = await open(theme, { start_local_service: { state: 'existing_install', reason }, start_fresh_preview: preview });
 		const before = failed;
 		await page.evaluate((given) => window.__corsiaShowStartup({ state: 'start_fresh_failed', failure: given }), failure);
 		compare(`${theme} launch undo`, await read(page), { title: 'CORSIA couldn’t start fresh', line: failure.message, details: failure.details, button: 'Retry', quit: true });
 		await shot(page, theme, '6-launch-undo');
 		await page.click('#retry');
-		await page.waitForFunction(() => document.getElementById('retry').textContent === 'Move and start fresh');
+		await page.waitForFunction(() => document.getElementById('status').textContent === 'Start CORSIA fresh?');
 		if (failed === before) console.log(`ok   ${theme} launch undo`);
 		await page.close();
 	}
@@ -290,8 +354,6 @@ for (const theme of ['dark', 'light']) {
 		const page = await open(theme, { start_fresh_preview: preview, start_fresh: { throws: error }, start_local_service: { pending: true } });
 		const before = failed;
 		await page.evaluate((said) => window.__corsiaShowStartup({ state: 'existing_install', reason: said }), reason);
-		await page.click('#retry');
-		await page.waitForFunction(() => document.getElementById('retry').textContent === 'Move and start fresh');
 		await page.click('#retry');
 		await page.waitForFunction((expected) => document.getElementById('status').textContent === expected, title);
 		compare(`${theme} failure ${name}`, await read(page), { title, line, details, button, list: null, quit: true });
