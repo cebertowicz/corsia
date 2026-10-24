@@ -100,6 +100,29 @@ def test_due_work_is_visible_when_selected_period_has_no_calls(db):
     assert result["rows"][0]["indexed"]["efficacy"] is None
 
 
+def test_report_keeps_save_observations_separate_from_lesson_gate_counts(db):
+    from infra.outcome_events import record_outcome_event
+
+    for reason in ("rewording", "stewardship"):
+        record_outcome_event(
+            db,
+            dedupe_key=f"lesson-gate-observed:{reason}",
+            event_name="measurement.lesson_gate",
+            source="corsia",
+            provenance="instrumented",
+            ts="2026-09-22T12:00:00+00:00",
+            agent_thread_id="owner",
+            attributes={"result": "observed", "reason": reason, "verdict": "save"},
+        )
+
+    gate = report(db)["coverage"]["lesson_gate"]
+
+    assert gate["observed"] == {"rewording": 1, "stewardship": 1}
+    assert {key: gate[key] for key in ("accepted", "refused", "widens")} == {
+        "accepted": 0, "refused": 0, "widens": 0,
+    }
+
+
 def test_report_hides_only_old_watches_without_a_recent_correction_anchor():
     rows = _correction_inventory([
         {"id": "old", "version": "v", "state": "watch", "originating_subjects": [],

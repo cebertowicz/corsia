@@ -354,3 +354,25 @@ def test_a_file_edit_refusal_is_recorded_and_the_learning_report_counts_it(env: 
     assert not path.exists()
     assert _facts(env)[0] == {"result": "refused", "reason": "lesson-outside-placement", "verdict": "save", "thread": THREAD}
     assert gate_counts(env.db, (THREAD,), "0000", "9999") == {"refused": 2, "accepted": 1, "widens": 0}
+
+
+def test_a_file_edit_refusal_surfaces_when_its_metric_cannot_be_recorded(env: Env, monkeypatch) -> None:
+    from core import lesson_gate
+    from infra.guidance_git import save_guidance
+    from infra.guidance_targets import GuidanceTarget
+
+    def unavailable(*_args, **_kwargs):
+        raise RuntimeError("outcome events unavailable")
+
+    monkeypatch.setattr(lesson_gate, "record", unavailable)
+    path = env.tray / "context" / "RESPONSIBILITY.md"
+    saved = save_guidance(
+        {path: b"# Role\n\n## Lessons\n\n- 2026-10-23: read the stamp on this frame.\n"},
+        workspace=env.workspace, target=GuidanceTarget("agent"),
+        author=f"Lane <{THREAD}@agents.corsia.local>",
+    )
+
+    assert (saved.outcome, saved.reason) == ("refused", "lesson-outside-placement")
+    assert "continuity_edit" in str(saved.line) and "place" in str(saved.line)
+    assert "measurement was not recorded" in str(saved.line)
+    assert not path.exists()

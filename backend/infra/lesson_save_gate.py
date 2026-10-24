@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from infra.guidance_git import SaveResult
 
 
-_HEADING = re.compile(r"^#{1,6}\s+")
+_HEADING = re.compile(r"^(?P<marks>#{1,6})\s+")
 _LESSONS = re.compile(r"^##\s+Lessons\b")
 _ITEM = re.compile(r"^\s*(?:[-*]|\d+\.)\s+(.+)$")
 _FENCE = re.compile(r"^\s*(`{3,}|~{3,})")
@@ -48,9 +48,12 @@ def lesson_items(text: str) -> Counter[str]:
             current.clear()
 
     for line in text.split("\n"):
-        if _HEADING.match(line) and not fenced:
+        if (heading := _HEADING.match(line)) and not fenced:
             finish()
-            inside = bool(_LESSONS.match(line))
+            # A Lessons section owns its lower-level subsections. Only a level-one
+            # or level-two heading starts or ends that section.
+            if len(heading.group("marks")) <= 2:
+                inside = bool(_LESSONS.match(line))
             continue
         if _FENCE.match(line):
             fenced = not fenced
@@ -105,9 +108,11 @@ def lesson_refusal(
     if refused is None:
         return None
     path, removed = refused
-    record_save_refusal(author)
+    line = save_refusal_line(path, removed=removed)
+    if warning := record_save_refusal(author):
+        line = "\n".join((line, warning))
     return SaveResult(
-        REFUSED, SAVE_REASON, line=save_refusal_line(path, removed=removed),
+        REFUSED, SAVE_REASON, line=line,
         errors=("a new lesson item or lesson block was added outside placement",),
     )
 

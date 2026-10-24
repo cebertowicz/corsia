@@ -238,8 +238,12 @@ def record_save_observation(
         db.close()
 
 
-def record_save_refusal(author: str | None) -> None:
-    """Record a refused file save. A failure to record is logged, never raised: the refusal stands."""
+def record_save_refusal(author: str | None) -> str | None:
+    """Record a refused file save, or return the visible metric-loss warning.
+
+    The refusal remains authoritative when measurement is unavailable, but the
+    caller must not mistake an unrecorded refusal for a counted one.
+    """
     from infra.database import get_db, write_transaction
     from infra.guidance_messages import saver_thread
 
@@ -252,23 +256,31 @@ def record_save_refusal(author: str | None) -> None:
             db.close()
     except Exception:
         logger.opt(exception=True).warning("lesson gate refusal could not be recorded")
+        return "Lesson gate measurement was not recorded. The save remains refused; report this."
+    return None
 
 
-def gate_counts(db: sqlite3.Connection, thread_ids: tuple[str, ...], from_ts: str, to_ts: str) -> dict[str, int]:
-    """Refusals and accepted placed lessons (never save observations) in ``[from_ts, to_ts)``."""
-    counts = {"refused": 0, "accepted": 0, "widens": 0}
+def gate_counts(db: sqlite3.Connection, thread_ids: tuple[str, ...], from_ts: str, to_ts: str) -> dict[str, Any]:
+    """Lesson-gate facts in ``[from_ts, to_ts)``, with save observations kept separate."""
+    counts: dict[str, Any] = {"refused": 0, "accepted": 0, "widens": 0}
     if not thread_ids:
         return counts
     rows = db.execute(
-        "SELECT json_extract(attributes,'$.result') AS result, count(*) AS n, "
-        "sum(json_extract(attributes,'$.widens') IS NOT NULL) AS widens FROM outcome_events "
+        "SELECT json_extract(attributes,'$.result') AS result, json_extract(attributes,'$.reason') AS reason, "
+        "count(*) AS n, sum(json_extract(attributes,'$.widens') IS NOT NULL) AS widens FROM outcome_events "
         "WHERE event_name=? AND retracted_at IS NULL AND ts>=? AND ts<? "
-        "AND json_extract(attributes,'$.result') IN ('refused','accepted') "
-        "AND agent_thread_id IN (SELECT value FROM json_each(?)) GROUP BY result",
+        "AND json_extract(attributes,'$.result') IN ('refused','accepted','observed') "
+        "AND agent_thread_id IN (SELECT value FROM json_each(?)) GROUP BY result, reason",
         (EVENT, from_ts, to_ts, json.dumps(list(thread_ids))),
     ).fetchall()
+    observations: dict[str, int] = {}
     for row in rows:
-        if row["result"] in counts:
-            counts[row["result"]] = int(row["n"])
+        result, reason = row["result"], row["reason"]
+        if result in {"refused", "accepted"}:
+            counts[result] += int(row["n"])
             counts["widens"] += int(row["widens"] or 0)
+        elif result == "observed" and reason in {"rewording", "stewardship"}:
+            observations[reason] = int(row["n"])
+    if observations:
+        counts["observed"] = observations
     return counts

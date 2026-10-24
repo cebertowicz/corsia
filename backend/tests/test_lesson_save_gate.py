@@ -139,6 +139,18 @@ def test_save_parser_ignores_fenced_headings_and_joins_wrapped_items() -> None:
     assert lesson_items("## Lessons\n- Real item\n```md\n## Lessons\n- Not an item\n```\n") == {"Real item": 1}
 
 
+@pytest.mark.parametrize("marker", ["-", "*", "1."])
+def test_an_item_below_a_lower_heading_in_lessons_is_refused(tmp_path, marker: str) -> None:
+    path = _on_disk(
+        tmp_path,
+        "RESPONSIBILITY.md",
+        "# Role\n\n## Lessons learned\n\n### Evidence\n\n- Keep commits focused.\n",
+    )
+    added = path.read_text() + f"{marker} Read the real thing first.\n"
+
+    assert _reason(_refuse({path: added})) == REASON
+
+
 def test_a_matching_item_in_another_file_does_not_bypass_the_target_only_gate(tmp_path, monkeypatch) -> None:
     _on_disk(tmp_path, "context/source.md", "## Lessons\n- Keep commits\n  focused.\n")
     target = tmp_path / "context" / "target.md"
