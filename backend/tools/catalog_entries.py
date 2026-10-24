@@ -239,7 +239,7 @@ TOOL_CATALOG: dict[str, ToolCatalogEntry] = {
     ),
     "email_search": _Entry(
         "email", status="active", authority="conductor-api",
-        summary="Search the person's Gmail: headers only, no body text",
+        summary="Search the person's Gmail or other-host email: headers only, no body text",
         activity="Searching mail",
     ),
     "email_read": _Entry(
@@ -269,7 +269,8 @@ TOOL_CATALOG: dict[str, ToolCatalogEntry] = {
     ),
     "calendar_list": _Entry(
         "email", status="active", authority="conductor-api",
-        summary="List the person's Google Calendar events, up to 31 days at a time", activity="Reading calendar",
+        summary="List the person's Google or other-host calendar events, up to 31 days at a time",
+        activity="Reading calendar",
     ),
     "calendar_draft_invite": _Entry(
         "email", status="active", authority="conductor-api",

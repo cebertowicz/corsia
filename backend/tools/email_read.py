@@ -16,8 +16,8 @@ from connections.account_errors import AccountError
 from connections.connected_accounts import MAILHOST_PROVIDER
 from connections.google import gmail_read
 from connections.mail import email_screen
-from connections.mail_accounts import resolve_for_thread
-from connections.google.accounts import ACCOUNT_PARAM, thread_key
+from connections.mail_accounts import MAIL_ACCOUNT_PARAM, resolve_for_thread
+from connections.google.accounts import thread_key
 from connections.mailhost import read as mailhost_read
 from infra.db_async import run_in_db
 from tools.base import Tool
@@ -33,7 +33,7 @@ def flagged_text(rule: str) -> str:
     named = f" ({rule})" if rule != "none" else ""
     return (
         f"This message was flagged as a possible prompt injection{named}. "
-        "Its body is withheld; the person can open it in Gmail."
+        "Its body is withheld; the person can open it in their own mail app."
     )
 
 
@@ -76,7 +76,7 @@ class EmailSearchTool(Tool):
                     ),
                 },
                 "max": {"type": "integer", "minimum": 1, "maximum": gmail_read.MAX_RESULTS},
-                "account_id": ACCOUNT_PARAM,
+                "account_id": MAIL_ACCOUNT_PARAM,
             },
         }
 
@@ -131,7 +131,7 @@ class EmailReadTool(Tool):
     def parameters(self) -> dict[str, Any]:
         return {
             "type": "object", "additionalProperties": False, "required": ["message_id"],
-            "properties": {"message_id": {"type": "string"}, "account_id": ACCOUNT_PARAM},
+            "properties": {"message_id": {"type": "string"}, "account_id": MAIL_ACCOUNT_PARAM},
         }
 
     async def execute(self, **kwargs: Any) -> str:

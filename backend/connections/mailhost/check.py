@@ -120,7 +120,8 @@ async def reset_after_key_clear(name: str) -> None:
     """After the person cleared a key: for a mail-host key, the row waits for an app password again."""
     account_id = store.account_id_for_key(name)
     if account_id is not None:
-        await run_in_db(store.reset_to_waiting, account_id)
+        if await run_in_db(store.reset_to_waiting, account_id):
+            notify_connected_apps_updated()
 
 
 async def settle_after_restart() -> int:

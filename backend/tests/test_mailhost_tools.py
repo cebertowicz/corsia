@@ -374,13 +374,16 @@ async def test_a_waiting_or_refused_account_is_not_used_and_says_what_to_do(cond
     _no_leak(waiting, refused)
 
 
-async def test_a_password_the_host_stops_accepting_turns_the_account_to_revoked(connected) -> None:
+async def test_a_password_the_host_stops_accepting_turns_the_account_to_revoked(connected, monkeypatch) -> None:
+    told: list[str] = []
+    monkeypatch.setattr(mailhost_read, "notify_connected_apps_updated", lambda: told.append("updated"))
     await _set_through_keys(connected)
     connected.built.imap.password = "revoked-at-the-host"
     out = await EmailSearchTool().execute(_thread_id=connected.thread, query="x")
     assert out.startswith("Error: mail.test didn’t accept this app password")
     found = row(connected.account_id)
     assert found["check"]["status"] == store.REVOKED and found["state"] == "needs_sign_in" and found["capabilities"] == []
+    assert told == ["updated"]
     _no_leak(out, found["raw"])
     assert "stopped accepting its app password" in await EmailSearchTool().execute(_thread_id=connected.thread, query="x")
 
@@ -437,4 +440,22 @@ async def test_with_no_email_account_the_resolver_names_every_connection_path(en
         mail_accounts.resolve_for_thread(None, conductor)
     assert str(refusal.value) == mail_accounts.NO_EMAIL_ACCOUNT
     output = await EmailSearchTool().execute(_thread_id=conductor, query="x")
-    assert "google-setup" in output and "microsoft-setup" in output and "mail-host-setup" in output
+    assert "google-setup" in output and "microsoft_status" in output and "microsoft_mail_search" in output and "microsoft_mail_read" in output and "mail-host-setup" in output
+
+
+async def test_mail_account_parameters_describe_every_supported_mail_account() -> None:
+    expected = mail_accounts.MAIL_ACCOUNT_PARAM
+    assert EmailSearchTool().parameters["properties"]["account_id"] == expected
+    assert EmailReadTool().parameters["properties"]["account_id"] == expected
+    assert CalendarListTool().parameters["properties"]["account_id"] == expected
+
+
+async def test_mail_host_connect_description_uses_the_connected_apps_key_route() -> None:
+    assert "Settings › Connected apps" in MailHostConnectTool().description
+    assert "Settings › Keys" not in MailHostConnectTool().description
+
+
+async def test_missing_mail_host_password_uses_the_connected_apps_key_route() -> None:
+    assert mailhost_read.NEEDS_PASSWORD == (
+        "This email account needs an app password. Ask the person to set it on its row in Connected apps."
+    )

@@ -28,6 +28,8 @@ def test_the_skill_hands_gmail_and_microsoft_to_their_own_skills_and_posts_the_o
     assert "I can look after your <host> mail and calendar. <host> needs an app password for that" in SKILL
     assert "<host> needs an app password for that, made on <host>'s site." in SKILL and "just for CORSIA" not in SKILL
     assert "Ask me any time to connect your email." in SKILL
+    assert "I'll show you where; you paste it into Settings, never into chat. Go ahead?" in SKILL
+    assert "Keys entry" not in SKILL
     assert "press Set key on the <host> row in Settings › Connected apps and paste it." in SKILL and "press Set." not in SKILL
 
 

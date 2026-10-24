@@ -27,9 +27,17 @@ CHOOSE = (
 UNKNOWN = "No account matches that name. Pass account_id as one of: {choices}."
 UNAVAILABLE = "{address} isn't available right now. Try again later."
 NO_EMAIL_ACCOUNT = (
-    "No email account is connected. Ask the person which email they use: Gmail or Google Workspace follows "
-    "google-setup, Microsoft follows microsoft-setup, any other host follows mail-host-setup."
+    "No Gmail or other mail-host account is connected. For Microsoft mail, use microsoft_status, then "
+    "microsoft_mail_search or microsoft_mail_read. To connect Gmail or Google Workspace, follow google-setup; "
+    "any other host follows mail-host-setup."
 )
+MAIL_ACCOUNT_PARAM = {
+    "type": "string",
+    "description": (
+        "The email account to use: its account_id or the address the person named. Required when the person has "
+        "more than one account; with none given, the result lists the accounts you can use."
+    ),
+}
 _BY_STATUS = {
     store.WAITING: "{address} is waiting for an app password. Ask the person to set it on its row in Connected apps.",
     store.CHECKING: "{address} is still being checked. Try again in a minute.",

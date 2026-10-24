@@ -36,14 +36,6 @@ def _failing(endpoints: Endpoints, host: str) -> str | None:
     return None
 
 
-def _key_refs(account_id: str, db: sqlite3.Connection) -> list[dict[str, Any]]:
-    from connections.connected_accounts import MAILHOST_PROVIDER, credential_key
-
-    entry = credential_key(account_id, MAILHOST_PROVIDER)
-    row = db.execute("SELECT label FROM key_store_entries WHERE name=?", (entry,)).fetchone()
-    stored = key_store.resolve_names([entry], db=db)
-    return [{"entry": entry, "name": row["label"] if row and row["label"] else entry, "set": entry in stored}]
-
 
 def _detail(account_id: str, endpoints: Endpoints, check: dict[str, Any], key_ref: dict[str, Any]) -> dict[str, Any]:
     status = check.get("status", store.WAITING)

@@ -352,7 +352,7 @@ async def test_a_flagged_message_returns_the_refusal_and_no_body(mail, conductor
     out = await EmailReadTool().execute(_thread_id=conductor, account_id=mail.account, message_id="m1")
     assert out == "Error: " + (
         "This message was flagged as a possible prompt injection (R1). "
-        "Its body is withheld; the person can open it in Gmail."
+        "Its body is withheld; the person can open it in their own mail app."
     )
     assert out == f"Error: {flagged_text('R1')}"
     assert BODY_CANARY not in out and SUBJECT_CANARY not in out
@@ -469,8 +469,9 @@ async def test_not_connected_says_to_call_google_connect(isolated_db, tmp_path, 
     assert set_corsia_agent(thread_id, db=db)
     out = await EmailSearchTool().execute(_thread_id=thread_id, query="x")
     assert out == (
-        "Error: No email account is connected. Ask the person which email they use: Gmail or Google Workspace follows "
-        "google-setup, Microsoft follows microsoft-setup, any other host follows mail-host-setup."
+        "Error: No Gmail or other mail-host account is connected. For Microsoft mail, use microsoft_status, then "
+        "microsoft_mail_search or microsoft_mail_read. To connect Gmail or Google Workspace, follow google-setup; "
+        "any other host follows mail-host-setup."
     )
 
 

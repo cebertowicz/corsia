@@ -146,12 +146,13 @@ def settle_orphaned_checks(*, db: sqlite3.Connection | None = None) -> int:
         return len(stuck)
 
 
-def reset_to_waiting(account_id: str, *, db: sqlite3.Connection | None = None) -> None:
+def reset_to_waiting(account_id: str, *, db: sqlite3.Connection | None = None) -> bool:
     """After Clear: the row waits for an app password again, with no capability and no check pending."""
     with write_transaction(db, scope="mail_host_waiting") as conn:
         endpoints = read(account_id, db=conn)[0]
         if endpoints is not None:
-            write(account_id, endpoints, status=WAITING, db=conn)
+            return write(account_id, endpoints, status=WAITING, db=conn)
+        return False
 
 
 def row_exists_for_address(address: str, *, db: sqlite3.Connection | None = None) -> str | None:

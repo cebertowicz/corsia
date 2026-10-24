@@ -73,8 +73,8 @@ class MailHostConnectTool(Tool):
             "Pass imap and smtp (host or host:port), and optionally caldav (https address) and username, only for a "
             "host it doesn't know: ask the person for them, since they decide where the password is sent. One account "
             "per address: a second call returns the existing one and never changes its servers. It returns the page "
-            "where the person makes an app password; they paste it into Settings › Keys themselves, so never ask for "
-            "or handle the password. After that, email_search, email_read and calendar_list take this account_id."
+            "where the person makes an app password; they set it on the account's row in Settings › Connected apps themselves, "
+            "so never ask for or handle the password. After that, email_search, email_read and calendar_list take this account_id."
         )
 
     @property

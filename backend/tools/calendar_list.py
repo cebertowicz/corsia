@@ -14,6 +14,7 @@ from typing import Any
 from urllib.parse import quote
 
 from connections import mail_accounts
+from connections.mail_accounts import MAIL_ACCOUNT_PARAM
 from connections.account_errors import AccountError
 from connections.connected_accounts import MAILHOST_PROVIDER
 from connections.google import client as google_client
@@ -96,7 +97,7 @@ class CalendarListTool(Tool):
                 "time_min": {"type": "string", "description": "RFC3339 time with a UTC offset."},
                 "time_max": {"type": "string", "description": "RFC3339 time with a UTC offset."},
                 "calendar_id": {"type": "string", "description": "Google calendar id; defaults to primary."},
-                "account_id": ACCOUNT_PARAM,
+                "account_id": MAIL_ACCOUNT_PARAM,
             },
             "required": ["time_min", "time_max"],
         }

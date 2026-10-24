@@ -230,14 +230,17 @@ async def test_a_bug_inside_a_check_ends_it_instead_of_leaving_the_row_checking(
     assert not _leaks(caplog.text) and not _leaks(row(account_id)["raw"])
 
 
-async def test_clearing_the_key_returns_the_row_to_waiting_with_no_capabilities(conductor, servers) -> None:
+async def test_clearing_the_key_returns_the_row_to_waiting_and_tells_the_open_screens(conductor, servers, monkeypatch) -> None:
     account_id = add_account(servers(), conductor)["account_id"]
     assert await run_check(account_id) == store.OK
+    told: list[str] = []
+    monkeypatch.setattr(check, "notify_connected_apps_updated", lambda: told.append("updated"))
     name = key_store.MAILHOST_PREFIX + account_id
     key_store.clear_value(name)
     await check.reset_after_key_clear(name)
     found = row(account_id)
     assert found["check"]["status"] == store.WAITING and found["state"] == "needs_sign_in" and found["capabilities"] == []
+    assert told == ["updated"]
 
 
 async def test_a_name_that_is_not_a_mail_host_key_starts_nothing(conductor, servers) -> None:

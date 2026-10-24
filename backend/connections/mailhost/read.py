@@ -27,6 +27,7 @@ from connections.mailhost.provider import PASSWORD
 from connections.mailhost.query import QueryRefused, criteria
 from infra.database import get_db
 from infra.db_async import run_in_db
+from infra.state.ws import notify_connected_apps_updated
 
 log = logging.getLogger(__name__)
 
@@ -35,7 +36,7 @@ MAX_FETCH_BYTES = 500_000
 HEADER_NAMES = ("from", "to", "cc", "date", "subject")
 HEADER_CHARS = 500
 NOT_FOUND = "That message can't be found."
-NEEDS_PASSWORD = "This account has no app password set. Ask the person to set it in Settings › Keys."
+NEEDS_PASSWORD = "This email account needs an app password. Ask the person to set it on its row in Connected apps."
 _ID = re.compile(r"^(\d{1,12})-(\d{1,12})$")
 _TAGS = re.compile(r"<(script|style)\b.*?</\1>|<[^>]+>", re.DOTALL | re.IGNORECASE)
 _BLANKS = re.compile(r"\n{3,}")
@@ -109,9 +110,9 @@ def credentials(account_id: str) -> tuple[Endpoints, str, str, dict[str, object]
     return endpoints, endpoints.imap_username or endpoints.username, str(bundle[PASSWORD]), check
 
 
-def _demote(account_id: str, check: dict[str, object]) -> None:
-    """The host refused the saved password: the row stops reaching anything until it is replaced."""
-    store.demote_revoked(account_id, check)
+def _demote(account_id: str, check: dict[str, object]) -> bool:
+    """Demote a row only when the failing credential snapshot is still current."""
+    return store.demote_revoked(account_id, check)
 
 
 async def _guarded(account_id: str, check: dict[str, object], call):  # type: ignore[no-untyped-def]
@@ -119,7 +120,8 @@ async def _guarded(account_id: str, check: dict[str, object], call):  # type: ig
         return await asyncio.to_thread(call)
     except MailHostError as exc:
         if exc.cause == PASSWORD_REFUSED:
-            await run_in_db(_demote, account_id, check)
+            if await run_in_db(_demote, account_id, check):
+                notify_connected_apps_updated()
         raise
 
 
