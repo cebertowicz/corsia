@@ -35,7 +35,7 @@ def test_v109_upgrade_marks_a_legacy_token_plan_endpoint_interactive_only(isolat
 
     result = migrate_to_current(db, SCHEMA_VERSION)
 
-    assert (result.from_version, result.to_version) == (108, 145)
+    assert (result.from_version, result.to_version) == (108, 146)
     assert endpoint_agent_use("external@legacy/glm-5.3") == "interactive_only"
 
 
@@ -102,7 +102,7 @@ def test_v109_upgrade_leaves_existing_endpoint_allowed(isolated_db):
 
     result = migrate_to_current(db, SCHEMA_VERSION)
 
-    assert (result.from_version, result.to_version) == (108, 145)
+    assert (result.from_version, result.to_version) == (108, 146)
     assert endpoint_agent_use("external@existing/model") == "allowed"
 
 

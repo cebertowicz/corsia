@@ -13,7 +13,13 @@ def _v145() -> sqlite3.Connection:
     db = sqlite3.connect(":memory:")
     db.row_factory = sqlite3.Row
     initialize_schema(db)
-    db.execute("ALTER TABLE doc_comments DROP COLUMN author_user_id")
+    db.execute("DROP TABLE doc_comments")
+    db.execute(
+        "CREATE TABLE doc_comments ("
+        "id TEXT PRIMARY KEY, artifact_id TEXT NOT NULL, author TEXT NOT NULL, "
+        "author_kind TEXT NOT NULL DEFAULT 'user', author_thread_id TEXT, body TEXT NOT NULL, "
+        "created_at TEXT NOT NULL, updated_at TEXT NOT NULL)"
+    )
     db.execute(
         "INSERT INTO doc_comments(id, artifact_id, author, body, created_at, updated_at) "
         "VALUES ('legacy-comment', 'artifact', 'Legacy display name', 'Existing comment', 't', 't')"

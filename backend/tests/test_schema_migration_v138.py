@@ -45,7 +45,7 @@ def test_existing_plan_nodes_survive_the_intent_migration() -> None:
 
         result = migrate_to_current(db, SCHEMA_VERSION)
 
-        assert (result.from_version, result.to_version) == (137, 145)
+        assert (result.from_version, result.to_version) == (137, 146)
         row = db.execute("SELECT intent,intent_node_id FROM plan_nodes WHERE id=?", (node.id,)).fetchone()
         assert tuple(row) == (None, None)
 
