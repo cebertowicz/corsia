@@ -45,6 +45,19 @@ function invoke(command: string, args?: Record<string, unknown>): Promise<unknow
 	return args === undefined ? call(command) : call(command, args);
 }
 
+export type LocalServiceStartOutcome = 'started' | 'update_finishing';
+
+/** Start the local managed service after a restart has exceeded its usual time. */
+export async function startLocalService(): Promise<LocalServiceStartOutcome> {
+	const result = await invoke('start_local_service');
+	return result === 'update_finishing' ? 'update_finishing' : 'started';
+}
+
+/** The desktop shell's PID-validated, redacted startup-progress record; absent for browsers and remote shells. */
+export async function readStartupProgress(): Promise<unknown> {
+	return invoke('read_startup_progress');
+}
+
 export async function remoteDiscovered(): Promise<DiscoveredResult> {
 	const result = await invoke('remote_discovered') as DiscoveredResult | null;
 	return { names: Array.isArray(result?.names) ? result.names : [], denied: result?.denied === true };

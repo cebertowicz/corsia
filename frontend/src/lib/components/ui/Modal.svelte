@@ -4,6 +4,7 @@
 	import { onMount, tick } from 'svelte';
 	import type { Snippet } from 'svelte';
 	import { portal } from '$lib/actions/portal';
+	import { restartOverlayVisible as updateScreenVisible } from '$lib/stores/restartExpectation';
 	import IconButton from './IconButton.svelte';
 
 	interface Props {
@@ -38,6 +39,7 @@
 	}
 
 	function onKeydown(e: KeyboardEvent) {
+		if ($updateScreenVisible) return;
 		if (closeOnEscape && e.key === 'Escape') onClose();
 		if (e.key !== 'Tab') return;
 
@@ -61,7 +63,7 @@
 	}
 
 	function onBackdropClick(e: MouseEvent) {
-		if (!closeOnBackdrop) return;
+		if ($updateScreenVisible || !closeOnBackdrop) return;
 		if (e.target === e.currentTarget) onClose();
 	}
 
@@ -86,7 +88,7 @@
 		const element = modalElement;
 		let mounted = true;
 		void tick().then(() => {
-			if (!mounted || !element.isConnected) return;
+			if (!mounted || !element.isConnected || $updateScreenVisible) return;
 			(focusableElements(element)[0] ?? element).focus();
 		});
 
@@ -111,7 +113,7 @@
 	column or the open document, the scrim and card were clipped to that column in a
 	WebKit webview and sat behind the other panes.
 -->
-<div class="modal-layer" use:portal>
+<div class="modal-layer" use:portal inert={$updateScreenVisible} aria-hidden={$updateScreenVisible}>
 	<!-- svelte-ignore a11y_click_events_have_key_events -->
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<div class="bg" onclick={onBackdropClick} transition:fade={{ duration: 120 }}></div>

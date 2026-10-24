@@ -441,6 +441,7 @@ fn service_url(port: u16) -> String {
 const LOCAL_SERVICE_PERMISSIONS: &[&str] = &[
     "allow-choose-work-folder",
     "allow-configure-work-folder",
+    "allow-read-startup-progress",
     "allow-remote-discovered",
     "allow-remote-pair",
     "allow-save-setup-report",
@@ -534,15 +535,26 @@ pub(crate) struct ProgressWatch<'a> {
 }
 
 /// The fields of a progress file the wait needs; the service writes others.
-#[derive(Deserialize)]
+/// The PID-validated, redacted subset of the service's startup-progress file the UI can use.
+/// Diagnostic error text and database schema versions deliberately remain in the service file.
+#[derive(Deserialize, Serialize, Debug, PartialEq)]
 struct StartupProgress {
+    schema: u8,
     pid: u32,
     seq: u64,
     phase: String,
+    done: Option<u64>,
+    total: Option<u64>,
 }
 
-fn read_startup_progress(file: &Path) -> Option<StartupProgress> {
+fn read_startup_progress_file(file: &Path) -> Option<StartupProgress> {
     serde_json::from_slice(&std::fs::read(file).ok()?).ok()
+}
+
+/// A stale file can only describe another service process, never the one the screen follows.
+fn current_startup_progress(file: &Path, service_pid: Option<u32>) -> Option<StartupProgress> {
+    let pid = service_pid?;
+    read_startup_progress_file(file).filter(|reading| reading.schema == 1 && reading.pid == pid)
 }
 
 /// Health is the readiness signal. A changed launchd PID proves the service
@@ -584,7 +596,7 @@ pub(crate) fn wait_for_startup(
             _ => {}
         }
         if let (Some(watch), Some(pid)) = (&progress, initial_pid) {
-            if let Some(reading) = read_startup_progress(watch.file).filter(|reading| reading.pid == pid) {
+            if let Some(reading) = current_startup_progress(watch.file, Some(pid)) {
                 // A failed startup exits next; the log may name a refusal.
                 if reading.phase == "failed" {
                     return Err(StartupFailure::exited(log));
@@ -1743,6 +1755,26 @@ async fn start_local_service(app: tauri::AppHandle) -> Result<ServiceStartup, St
     local_start_answered(&app, answer)
 }
 
+/// Reads the current local service's own progress record while HTTP is unavailable.
+/// Missing, malformed, stale-PID, and unsupported-schema records all return `None`; the raw
+/// diagnostic and database-schema version fields never cross this command boundary.
+#[tauri::command]
+fn read_startup_progress(
+    app: tauri::AppHandle,
+    service: tauri::State<'_, AppServiceState>,
+) -> Result<Option<StartupProgress>, String> {
+    let app_dir = service
+        .app_dir
+        .lock()
+        .map_err(|_| "could not read startup progress")?
+        .clone()
+        .unwrap_or(default_app_dir(&app).map_err(|_| "could not read startup progress")?);
+    let state = app_paths::state_dir_for(&app_dir).map_err(|_| "could not read startup progress")?;
+    let target = format!("gui/{}/{}", unsafe { libc::geteuid() }, service_label());
+    let pid = release_proof::launchd_pid(&target);
+    Ok(current_startup_progress(&state.join("runtime").join("startup-progress.json"), pid))
+}
+
 #[tauri::command]
 fn open_login_items() {
     service_management::open_login_items();
@@ -1979,6 +2011,7 @@ pub fn run() {
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .invoke_handler(tauri::generate_handler![
             start_local_service,
+            read_startup_progress,
             adopt_existing_install,
             start_existing_again,
             start_fresh,
@@ -2177,6 +2210,25 @@ mod tests {
     }
 
     #[test]
+    fn startup_progress_returns_only_the_current_pid_and_redacts_diagnostics() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("startup-progress.json");
+        fs::write(
+            &file,
+            r#"{"schema":1,"pid":42,"seq":7,"phase":"migrating","done":3,"total":9,"from_version":48,"to_version":49,"error":"private diagnostic"}"#,
+        )
+        .unwrap();
+
+        assert_eq!(current_startup_progress(&file, Some(41)), None, "stale PID is ignored");
+        let current = current_startup_progress(&file, Some(42)).unwrap();
+        assert_eq!(current, StartupProgress { schema: 1, pid: 42, seq: 7, phase: "migrating".into(), done: Some(3), total: Some(9) });
+        let response = serde_json::to_value(current).unwrap();
+        assert!(response.get("error").is_none());
+        assert!(response.get("from_version").is_none());
+        assert!(response.get("to_version").is_none());
+    }
+
+    #[test]
     fn a_startup_that_keeps_progressing_waits_past_the_stall_until_the_ceiling() {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("startup-progress.json");
@@ -2232,6 +2284,7 @@ mod tests {
 
     const SHELL_COMMANDS: &[&str] = &[
         "start_local_service",
+        "read_startup_progress",
         "adopt_existing_install",
         "adoption_progress",
         "check_service_started",
@@ -2467,7 +2520,7 @@ mod tests {
         let called = frontend_commands();
         assert_eq!(
             called.iter().map(String::as_str).collect::<Vec<_>>(),
-            ["choose_work_folder", "configure_work_folder", "disconnect_remote", "remote_discovered", "remote_pair", "save_setup_report"],
+            ["choose_work_folder", "configure_work_folder", "disconnect_remote", "read_startup_progress", "remote_discovered", "remote_pair", "save_setup_report"],
             "the frontend's commands changed: grant each page its commands, or add it to the remote-page-only list"
         );
         let (_app, webview) = service_origin_app(47895);

@@ -7,6 +7,7 @@ import { failureCopy, failureFromOperation } from './failureCopy';
 import { isFailedOperation, isInFlight, isResolvedFailure, type ClientVerdict, type UpdateChanges, type UpdateOperation } from './model';
 import { markOutcomeSeen } from './outcome';
 import { readVersionWithinFiveSeconds, versionHashesAgree } from './versionProbe';
+import { clearStartupProgress, refreshStartupProgress } from './startupProgress';
 
 const BASE = '';
 const POLL_MS = 1_000;
@@ -24,6 +25,10 @@ export const updateFailureVerdict = writable<ClientVerdict | null>(null);
 export const updateStarting = writable(false);
 /** Offset between this browser clock and the status response's server clock. */
 export const updateServerClockOffsetMs = writable(0);
+/** The new version was confirmed running: the update screen's cue to show 100% and leave. */
+export const updateConfirmed = writable<{ operationId: string; version: string | null } | null>(null);
+/** True only while the System Updates row is actually visible. */
+export const updateToastSuppressed = writable(false);
 export const updateOperation = derived(updateStatus, ($status) => $status?.operation ?? null);
 export const updateInFlight = derived(updateOperation, ($operation) => isInFlight($operation));
 /** The server is down or coming back: the composer cannot send. */
@@ -37,6 +42,7 @@ let versionPollTimer: ReturnType<typeof setInterval> | null = null;
 let terminalCheckRunning = false;
 let versionMismatchStartedAt: number | null = null;
 let noticeToastId: string | null = null;
+let latestNoticeStatus: UpdateStatus | null = null;
 // What this page already showed. The durable record of what any device showed is the operation's `outcome_seen_at`.
 const shownOutcomes = new Set<string>();
 const noticedVersions = new Set<string>();
@@ -61,13 +67,15 @@ async function observeRecovery(): Promise<void> {
 	if (!version) return;
 	updateUnreachable.set(false);
 	stopVersionPolling();
+	clearStartupProgress();
 	await loadUpdateStatus();
 }
 
 function pollVersionWhileUnreachable(): void {
 	if (versionPollTimer !== null) return;
-	versionPollTimer = setInterval(() => { void observeRecovery(); }, POLL_MS);
+	versionPollTimer = setInterval(() => { void observeRecovery(); void refreshStartupProgress(); }, POLL_MS);
 	void observeRecovery();
+	void refreshStartupProgress();
 }
 
 function dismissNotice(): void {
@@ -76,11 +84,21 @@ function dismissNotice(): void {
 }
 
 function showNotice(status: UpdateStatus): void {
+	latestNoticeStatus = status;
 	const version = status.target_version;
+	if (get(updateToastSuppressed)) {
+		dismissNotice();
+		return;
+	}
 	if (!status.available || isInFlight(status.operation) || status.operation?.target_version === version || !version || noticedVersions.has(version)) return;
 	noticedVersions.add(version);
 	noticeToastId = toasts.showButton('Update ready. Open Updates', openUpdates);
 }
+
+updateToastSuppressed.subscribe((suppressed) => {
+	if (suppressed) dismissNotice();
+	else if (latestNoticeStatus) showNotice(latestNoticeStatus);
+});
 
 /** Remove the progress toast; a tab that reads a terminal status second must never keep a spinner. */
 function dropProgressToast(): void {
@@ -123,6 +141,7 @@ async function verifyComplete(operation: UpdateOperation): Promise<void> {
 		}
 		if (versionHashesAgree(version)) {
 			versionMismatchStartedAt = null;
+			updateConfirmed.set({ operationId: operation.operation_id, version: operation.target_version ?? get(updateStatus)?.target_version ?? null });
 			showTerminal(operation);
 			return;
 		}
@@ -279,4 +298,7 @@ export function resetUpdateStoreForTests(): void {
 	updateFailureVerdict.set(null);
 	updateStarting.set(false);
 	updateServerClockOffsetMs.set(0);
+	updateConfirmed.set(null);
+	updateToastSuppressed.set(false);
+	latestNoticeStatus = null;
 }
