@@ -66,15 +66,23 @@ def _new_eval_session_id() -> str:
     return f"eval-{uuid.uuid4().hex[:12]}"
 
 
-async def _open_eval_thread(user_id: str, model: str) -> tuple[str, dict]:
-    """Create the eval turn's thread row and return it as the send path's row."""
+async def open_eval_thread(
+    user_id: str, model: str, *, thread_id: str | None = None, title: str = "Eval turn",
+    project_id: str | None = None, parent_thread_id: str | None = None,
+) -> tuple[str, dict]:
+    """Create the eval turn's thread row and return it as the send path's row.
+
+    ``parent_thread_id`` lets ordinary ancestor resolution deliver that thread's
+    guidance to the fresh turn; the row still binds only ``model``.
+    """
     from infra.db_async import run_in_db
     from infra.fresh_threads import create_fresh_thread
 
-    thread_id = _new_eval_session_id()
+    thread_id = thread_id or _new_eval_session_id()
     await run_in_db(partial(
         create_fresh_thread, user_id=user_id, thread_id=thread_id,
-        title="Eval turn", model=model,
+        title=title, model=model, project_id=project_id,
+        parent_thread_id=parent_thread_id,
     ))
     return thread_id, await run_in_db(_read_thread_row, thread_id)
 
@@ -107,13 +115,9 @@ def _required_model(metadata: dict[str, Any]) -> str:
 # Eval admission is owned by infra.thread_driver.admit_input.
 
 
-async def _run_eval_turn(
-    *,
-    thread_id: str,
-    thread_row: dict,
-    prompt: str,
-    model: str,
-    timeout_seconds: float,
+async def run_eval_turn(
+    *, thread_id: str, thread_row: dict, prompt: str, model: str, timeout_seconds: float,
+    after_manifest_before_dispatch=None,
 ) -> tuple[str | None, str | None]:
     """Run one canonical Native Turn for the eval route and await its settlement.
 
@@ -131,6 +135,9 @@ async def _run_eval_turn(
     the thread has not seen) would otherwise be part of the measured provider
     request, and the perf scenarios record their prefill and cache numbers from
     exactly this path.
+
+    ``after_manifest_before_dispatch`` receives the recorded context manifest id
+    before the provider call; raising there refuses the Turn with no write.
     """
     from core.turn_core import BOOT_EPOCH
     from infra.db_async import run_in_db
@@ -173,6 +180,7 @@ async def _run_eval_turn(
             thread_row=thread_row,
             target=target,
             user={"id": str(thread_row.get("user_id") or "")},
+            after_manifest_before_dispatch=after_manifest_before_dispatch,
         )
     except Exception as exc:
         return None, f"Eval turn errored: {_failure_detail(exc)}"
@@ -220,7 +228,7 @@ async def eval_turn(
         model_override=model, tools_in_scope=tools_in_scope,
     )
 
-    thread_id, thread_row = await _open_eval_thread(user["id"], model)
+    thread_id, thread_row = await open_eval_thread(user["id"], model)
 
     t0 = time.perf_counter()
 
@@ -238,7 +246,7 @@ async def eval_turn(
             eval_span.set_attribute("eval.mode", str(metadata.get("mode") or ""))
             trace_id_hex = current_trace_id_hex()
 
-            turn_id, err = await _run_eval_turn(
+            turn_id, err = await run_eval_turn(
                 thread_id=thread_id, thread_row=thread_row,
                 prompt=body.input, model=model,
                 timeout_seconds=timeout_seconds,
@@ -285,4 +293,4 @@ def _count_llm_iterations(spans: list[dict[str, Any]]) -> int:
     return sum(1 for s in spans if s.get("name") == "corsia.llm_call")
 
 
-__all__ = ["router"]
+__all__ = ["open_eval_thread", "router", "run_eval_turn"]

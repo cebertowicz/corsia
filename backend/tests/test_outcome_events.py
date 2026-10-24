@@ -298,6 +298,8 @@ def test_only_registered_events_are_the_test_seed_and_the_github_intake():
         "measurement.size_rating",
         "measurement.correction", "measurement.lesson_gate",
         "measurement.verdict.planned", "measurement.verdict.reached",
+        "lesson.carry_in.pending", "lesson.carry_in.claimed", "lesson.carry_in.waiting",
+        "lesson.carry_in.result", "lesson.carry_in.retired", "lesson.carry_in.coverage",
     }
 
 
