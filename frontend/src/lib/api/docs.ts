@@ -1,4 +1,5 @@
 import { get } from 'svelte/store';
+import { documentCommentDeliveryPolicy } from '$lib/commentDeliveryPreference';
 import { docOpenFailure } from '$lib/docOpenRefusal';
 import { token } from '$lib/stores/auth';
 import type { PaneData } from './artifactPane';
@@ -157,11 +158,11 @@ export async function fetchComments(artifactId: string): Promise<CommentList> {
 
 export async function postComment(
 	artifactId: string,
-	c: { body: string; parent_id?: string; anchor_text?: string; from_off?: number; to_off?: number; review?: boolean; author?: string; author_kind?: 'user' | 'agent'; client_id?: string; live_capture?: boolean; region?: ImageRegion }
+	c: { body: string; parent_id?: string; anchor_text?: string; from_off?: number; to_off?: number; review?: boolean; author?: string; author_kind?: 'user' | 'agent'; client_id?: string; live_capture?: boolean; region?: ImageRegion; delivery_policy?: 'immediate' | 'document-held' }
 ): Promise<ServerComment> {
 	const data = await ok(await fetchWithTimeout(
 		`/api/artifacts/${artifactId}/comments?token=${tok()}`,
-		{ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(c) },
+		{ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...c, delivery_policy: c.delivery_policy ?? documentCommentDeliveryPolicy() }) },
 		COMMENT_POST_TIMEOUT_MS
 	));
 	return data.comment;

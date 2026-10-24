@@ -5,11 +5,12 @@
 	import type { DocOpenRefusal, LiveUnavailable } from '$lib/docOpenRefusal';
 	import DocReviewControls from './DocReviewControls.svelte';
 	import CommentsPill from './comments/CommentsPill.svelte';
-	import { Button, StatePill } from '$lib/components/ui';
+	import { Button, StatePill, Toggle } from '$lib/components/ui';
 	import { formatFreshness, type DocumentFreshness, shouldOfferVerification } from '$lib/docFreshness';
 	import type { CommentFeedback } from '$lib/api/docs';
 	import type { DocFeedback } from '$lib/docFeedback.svelte';
 	import { liveConnectionDescriptionId } from '$lib/liveConnectionDescription';
+	import { deliverCommentsImmediately, setDeliverCommentsImmediately } from '$lib/commentDeliveryPreference';
 
 	let {
 		title = 'Document',
@@ -38,6 +39,7 @@
 		tabText = '',
 		onReopen,
 		onRead,
+		imageOpen = false,
 	}: {
 		title?: string;
 		presence?: import('svelte').Snippet;
@@ -58,7 +60,7 @@
 		onReload?: () => void;
 		onOpenComments: (opener: HTMLElement) => void;
 		freshness: DocumentFreshness | null;
-		onFeedbackChanged?: () => void;
+		onFeedbackChanged?: () => void | Promise<void>;
 		onMarkVerified?: () => Promise<void>;
 		liveSession?: LiveDocumentSession | null;
 		openRefusal?: DocOpenRefusal | null;
@@ -66,6 +68,8 @@
 		tabText?: string;
 		onReopen?: () => void;
 		onRead?: () => void;
+		/** An image of this document covers it; its viewer owns the image lane's Send until it is left. */
+		imageOpen?: boolean;
 	} = $props();
 
 	let feedbackStatus = $state<DocFeedbackStatus>();
@@ -75,6 +79,7 @@
 	let verificationNotice = $state('');
 	// The unsent comments, for the pill's dot and accessible summary; the batch itself is the one source.
 	const unsent = $derived(feedbackStatus?.controller().pendingCount ?? 0);
+	// Delivery controls mount in the identity row so Send holds the compact header line.
 	// A live region only announces a change, so the stale state needs text that appears when it starts.
 	const staleAnnouncement = $derived(stale && ready ? 'File changed since you opened it. Reload to see the latest.' : '');
 	const freshnessPresentation = $derived(freshness ? formatFreshness(freshness) : null);
@@ -86,6 +91,12 @@
 		verificationError = '';
 		verificationNotice = '';
 	});
+
+	function changeImmediateDelivery(value: boolean): void {
+		setDeliverCommentsImmediately(value);
+		const held = feedbackStatus?.controller();
+		if (value && held && held.documentHeld > 0) void held.sendDocument();
+	}
 
 	async function markVerified(): Promise<void> {
 		if (!onMarkVerified || verifying) return;
@@ -115,8 +126,34 @@
 		return { destroy() { element.removeEventListener('keydown', onKey); } };
 	}
 
+	// The viewer reads the document's feedback once, often before this row's status child exists (it mounts only once
+	// there is something to show). The latest read waits here and goes to the matching child when it mounts, so the
+	// initial state is never dropped and no second read is needed.
+	let buffered: { id: string; feedback: CommentFeedback } | null = null;
+	$effect(() => {
+		const child = feedbackStatus;
+		const current = artifactId;
+		if (!buffered) return;
+		if (buffered.id !== current) buffered = null;
+		else if (child) child.sync(buffered.id, buffered.feedback);
+	});
+
+	// An image exit that never completed (a reload or teardown) leaves its lane held with no viewer to send it. The
+	// next time this document mounts uncovered, it sends that remainder once, before the lane can stay hidden.
+	let recoveredFor: string | null = null;
+	$effect(() => {
+		const held = feedbackStatus?.controller();
+		if (!held || imageOpen || !held.artifactId || held.imageHeld === 0) return;
+		if (recoveredFor === held.artifactId) return;
+		recoveredFor = held.artifactId;
+		void held.sendImage();
+	});
+
 	export function commentCreated(): void { feedbackStatus?.commentCreated(); }
-	export function sync(id: string, feedback: CommentFeedback): void { feedbackStatus?.sync(id, feedback); }
+	export function sync(id: string, feedback: CommentFeedback): void {
+		buffered = { id, feedback };
+		feedbackStatus?.sync(id, feedback);
+	}
 	export function feedback(): DocFeedback | undefined { return feedbackStatus?.controller(); }
 </script>
 
@@ -130,13 +167,24 @@
 		</button>
 		{#if freshnessPresentation?.overdue}<StatePill state="warning" size="sm" label="Overdue" />{/if}
 		{#if presence}{@render presence()}{/if}
-		<span class="document-tools">
+		<span class="document-tools document-status-row">
+			{#if artifactId}
+				<!-- Send belongs to this compact tool row with the comment count, delivery preference, and review action. -->
+				<span class="feedback-controls"><DocFeedbackStatus bind:this={feedbackStatus} {artifactId} {targetInstanceId} {onFeedbackChanged} lane="document-held" /></span>
+			{/if}
 			{#if stale && ready}<button type="button" class="doc-tool warn stale-control" onclick={() => onReload?.()}>File changed · Reload</button>{/if}
 			{#if saveStatus !== 'idle'}<span class="save-ghost" class:saving={saveStatus === 'saving'}>{saveStatus === 'saving' ? 'Saving…' : '✓ Saved'}</span>{/if}
 			<CommentsPill class="doc-tool comment-status" count={commentCount} {unsent} unplaced={orphanedCount}
 				loading={commentsLoading} expanded={commentsOpen} disabled={!ready || commentsLoading} onOpen={onOpenComments} />
-			{#if artifactId}<DocReviewControls {artifactId} {viewingThreadId} targetKey={reviewTargetKey ?? targetInstanceId} />{/if}
+			{#if artifactId}
+				<span class="delivery-toggle" title="When off, comments send when you close the document or pause for two minutes.">
+					<span>Deliver immediately</span>
+					<Toggle size="sm" checked={$deliverCommentsImmediately} onchange={changeImmediateDelivery} ariaLabel="Deliver comments immediately" />
+				</span>
+				<DocReviewControls {artifactId} {viewingThreadId} targetKey={reviewTargetKey ?? targetInstanceId} />
+			{/if}
 		</span>
+		<!-- Document-held sender is mounted above, in the identity row. -->
 	</div>
 {#if freshness && freshnessPresentation}
 	<div class="document-metadata" class:expanded={detailsOpen}>
@@ -159,20 +207,16 @@
 
 <DocLiveStatus session={liveSession} {openRefusal} {liveUnavailable} {tabText} {onReopen} {onRead}
 	connectionStatusId={connectionDescriptionId} />
-<span class:sr-only={!verificationError} class:metadata-error={!!verificationError} role="status">{verificationError || verificationNotice || staleAnnouncement}</span>
+<span class="metadata-status" class:sr-only={!verificationError} class:metadata-error={!!verificationError} role="status">{verificationError || verificationNotice || staleAnnouncement}</span>
 {#if readonly && ready}
 	<div class="readonly-note">Read-only — this file is owned by the system bootloader.</div>
 {/if}
-{#if commentCount || orphanedCount || artifactId || (stale && ready)}
-	<div class="document-status-row document-notices">
-		<span class="feedback-controls"><DocFeedbackStatus bind:this={feedbackStatus} {artifactId} {targetInstanceId} {onFeedbackChanged} withSend={false} /></span>
-	</div>
-{/if}
+<!-- Delivery controls above remain mounted with the document identity so they never force a second header row. -->
 </header>
 
 <style>
 	.document-header { grid-area: header; min-width: 0; flex: none; display: flex; flex-direction: column; gap: 6px; padding-left: var(--doc-phone-inset, var(--doc-rail, 44px)); background: var(--bg-primary); }
-	.document-identity { display: flex; align-items: center; gap: 6px; min-width: 0; }
+	.document-identity { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
 	.identity-details { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; border: 0; padding: 2px 0; background: none; color: var(--text-primary); cursor: pointer; text-align: left; }
 	.document-title { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-subhead); font-weight: var(--fw-semibold); }
 	.identity-age { display: none; }
@@ -213,18 +257,31 @@
 	.document-identity { justify-content: flex-end; }
 	.identity-details { display: none; }
 	.document-tools { position: relative; z-index: 1; flex: none; display: inline-flex; align-items: center; gap: var(--space-1); }
-	.document-notices:not(:has(.undelivered:not(.idle))) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); }
-	.document-header :global(.doc-tool) { position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 28px; padding: 0 8px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-secondary); font-family: var(--font-sans); font-size: var(--text-footnote); font-weight: var(--fw-medium); white-space: nowrap; cursor: pointer; }
-	.document-header :global(.doc-tool:hover:not(:disabled)) { background: var(--bg-tertiary); color: var(--text-primary); }
-	.document-header :global(.doc-tool:focus-visible) { outline: 2px solid var(--accent); outline-offset: -2px; }
-	.document-header :global(.doc-tool:disabled) { opacity: 0.5; cursor: not-allowed; }
-	.document-header :global(.doc-tool.warn) { background: var(--amber-bg); color: var(--amber-text); }
-	.document-header :global(.doc-tool.warn:hover:not(:disabled)) { background: color-mix(in srgb, var(--amber) 18%, transparent); color: var(--amber-text); }
-	.document-header :global(.doc-tool[aria-disabled='true']) { opacity: 0.65; cursor: not-allowed; }
-	@container doc-canvas (max-width: 600px) {
+	/* Send holds the identity line at compact widths; the existing tool cluster is the element that yields and wraps. */
+	.feedback-controls { flex: none; min-width: max-content; }
+	.delivery-toggle { display: inline-flex; align-items: center; gap: var(--chip-inline-padding); color: var(--text-secondary); font-size: var(--text-footnote); white-space: nowrap; }
+	@container doc-header (max-width: 32.5rem) {
+		/* At chat-split and phone widths, the approved labelled controls remain one centered compact row. */
+		.document-tools { flex-wrap: nowrap; align-items: center; gap: 0; }
+	}
+	@media (max-width: 768px) {
+		@container doc-header (width < 408px) {
+			/* A phone's 99 and 100+ counts need the shorter visible preference label; its accessible name and 44px target stay unchanged. */
+			:global(.document-tools:has(.sending-now [data-short='Send 99'])) .delivery-toggle,
+			:global(.document-tools:has(.sending-now [data-short='Send 99+'])) .delivery-toggle { gap: 0; }
+			:global(.document-tools:has(.sending-now [data-short='Send 99'])) .delivery-toggle > span,
+			:global(.document-tools:has(.sending-now [data-short='Send 99+'])) .delivery-toggle > span { font-size: 0; }
+			:global(.document-tools:has(.sending-now [data-short='Send 99'])) .delivery-toggle > span::after,
+			:global(.document-tools:has(.sending-now [data-short='Send 99+'])) .delivery-toggle > span::after { content: 'Deliver'; font-size: var(--text-footnote); }
+		}
+	}
+	@container doc-canvas (max-width: 37.5rem) {
 		.identity-details:has(.identity-age) { display: flex; }
 		.document-title { display: none; }
-		.document-header :global(.doc-tool) { min-height: 44px; padding: 0 12px; }
+		/* Keep the approved visible delivery label; compact tool padding yields before any label does. */
+		.document-header :global(.doc-tool) { min-height: var(--touch-target); padding: 0 var(--space-2); }
+		.delivery-toggle { min-height: var(--touch-target); }
+		.delivery-toggle :global(.tg) { width: var(--touch-target); height: var(--touch-target); }
 		/* The tool row cannot shrink, and with Reload, the count and the review controls the save pill pushes it past the left edge: the save state is transient and Reload is not, so the pill yields. */
 		.stale-control ~ .save-ghost { display: none; }
 	}
@@ -237,10 +294,18 @@
 	.document-header:has(:global(.rb-slot)) :global(.presence-row) { grid-column: 2; grid-row: 1; align-self: start; min-height: var(--space-7); position: relative; z-index: 1; }
 	.document-header:has(:global(.rb-slot)) .document-tools { grid-column: 3; grid-row: 1; align-self: start; min-height: var(--space-7); position: relative; z-index: 1; }
 	.document-header:has(:global(.rb-slot)) :global(.doc-tool) { min-height: var(--space-7); }
+	@container doc-header (width < 408px) {
+		/* The compact toolbar remains one row even when the review surface occupies the header. */
+		.document-header:has(:global(.rb-slot)) .document-tools { grid-column: 1 / -1; min-width: 0; justify-content: flex-end; }
+		.document-header:has(:global(.rb-slot)) > :global(.rb-slot) { grid-row: 2 / 3; }
+	}
+	@media (max-width: 768px) {
+		.delivery-toggle :global(.tg) { width: var(--touch-target); height: var(--touch-target); }
+	}
 	@media (any-pointer: coarse) {
 		@container doc-canvas (max-width: 600px) {
 			.document-header:has(:global(.rb-slot)) { align-items: center; }
-			.document-header:has(:global(.rb-slot)) :global(.doc-tool) { min-height: 44px; }
+			.document-header:has(:global(.rb-slot)) :global(.doc-tool) { min-height: var(--touch-target); }
 		}
 	}
 </style>

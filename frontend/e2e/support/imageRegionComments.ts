@@ -87,6 +87,9 @@ export async function showImage(page: Page, title: string, naturalWidth = NATURA
 		last = now;
 		return same;
 	}, { intervals: [150] }).toBe(true);
+	// Image geometry can settle before comments load and their tags finish in:fade.
+	await expect(viewer(page).locator('[data-image-comments-pill]')).toBeEnabled();
+	await settled(page);
 }
 export async function openThread(page: Page, title: string, width: number) {
 	await loginByUrl(page);

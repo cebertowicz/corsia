@@ -66,11 +66,11 @@
 	const colorOf = (comment: DocComment) => regionColor(comment, projectId, accent);
 	const canComment = $derived(!readOnly && !!artifactId);
 	function reload(id: string) {
-		void loadComments(id).then((current) => feedback?.sync(id, current)).catch(() => undefined);
+		return loadComments(id).then((current) => feedback?.sync(id, current)).catch(() => undefined);
 	}
 	/** Reads the comments (and their batch) again: the user came back to the browser tab. */
 	export function refresh() {
-		if (artifactId) reload(artifactId);
+		if (artifactId) return reload(artifactId);
 	}
 	const image = createImageComments({
 		artifactId: () => artifactId,
@@ -84,7 +84,10 @@
 			lightbox?.revealFraction(centre.x, centre.y);
 		},
 		post: () => (inDocument ? { create: inDocument.post, failure: inDocument.failure } : null),
-		onCreated: () => feedback?.commentCreated(),
+		onCreated: () => {
+			feedback?.commentCreated();
+			if (artifactId) reload(artifactId);
+		},
 	});
 
 	// Opened from a comment in the document: once the image has drawn, its card shows at its tag, once.
@@ -179,9 +182,9 @@
 						onToggle={toggleBoxMode}
 						onOpenList={image.ui.openList}
 					/>
-					<!-- The bar is narrow at any window size (a canvas panel beside the chat): it keeps the batch's Retry and undelivered status; Send lives in the drawer footer (RSR-5), as in the document row. -->
-					{#if feedback && !inDocument}
-						<DocFeedbackControls {feedback} compact withSend={false} />
+					<!-- The bar is narrow at any window size (a canvas panel beside the chat): the image lane's Send is the one control here, so leaving the image and pressing it send the same comments. -->
+					{#if feedback}
+						<DocFeedbackControls {feedback} compact lane="image-held" />
 					{/if}
 				{/if}
 			{/snippet}
@@ -234,7 +237,6 @@
 			target={null}
 			{artifactId}
 			readOnly={!canComment}
-			feedback={inDocument ? null : feedback}
 			onDrawerShown={(shown) => drawerShown = shown}
 			image={{ src, alt, colorOf, onMovePin: image.movePin, onOpen: image.close, showThumbnail: false, imageBounds: () => lightbox?.imageBounds() ?? null, hoveredId: image.ui.hovered, onHover: image.ui.hover, picks: image.listPicks }}
 		/>

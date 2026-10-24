@@ -5,15 +5,16 @@ from __future__ import annotations
 import logging
 import uuid
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from typing import Any
 
-from doceditor import comment_notifications, feedback_comments, feedback_delivery, feedback_edits
-from doceditor.review_lifecycle import settle_for_batch
+from doceditor import comment_notifications, feedback_comments
+from doceditor.feedback_batch_delivery import claim_and_deliver
+from doceditor.feedback_batch_edits import record_edit, record_reopen
 from doceditor.feedback_state import (
     USER_AUTHOR_ID,
     annotate_pane,
     reply_waiting_ids,
+    open_counts_for_document,
     take_unreported_undelivered,
     undelivered_for_document,
     user_feedback_for_document,
@@ -25,7 +26,11 @@ from infra.write_effects import after_commit
 log = logging.getLogger(__name__)
 
 AGENT_QUIET = 120
-USER_IDLE = 5
+USER_IDLE = 120
+IMMEDIATE = "immediate"
+DOCUMENT_HELD = "document-held"
+IMAGE_HELD = "image-held"
+HELD_POLICIES = (DOCUMENT_HELD, IMAGE_HELD)
 
 
 def _now() -> str:
@@ -36,8 +41,16 @@ def _after(value: str, seconds: int) -> str:
     return (datetime.fromisoformat(value) + timedelta(seconds=seconds)).isoformat()
 
 
-def _new_deadline(author_kind: str, now: str) -> str:
+def _new_deadline(author_kind: str, delivery_policy: str, now: str) -> str:
     return _after(now, AGENT_QUIET if author_kind == "agent" else USER_IDLE)
+
+
+def _validate_policy(author_kind: str, delivery_policy: str) -> str:
+    if author_kind == "agent":
+        return IMMEDIATE
+    if delivery_policy not in {IMMEDIATE, DOCUMENT_HELD, IMAGE_HELD}:
+        raise ValueError("invalid user feedback delivery policy")
+    return delivery_policy
 
 
 def _open_batch(
@@ -47,26 +60,28 @@ def _open_batch(
     author_id: str,
     artifact_id: str,
     recipient_id: str,
+    delivery_policy: str,
     now: str,
 ) -> str:
-    """Return the canonical open batch for one author, artifact, and recipient."""
+    """Return the canonical open batch for one author, artifact, recipient, and lane."""
+    delivery_policy = _validate_policy(author_kind, delivery_policy)
     row = db.execute(
         """SELECT id FROM doc_feedback_batches
            WHERE author_kind=? AND author_id=? AND artifact_id=?
-             AND recipient_id=? AND state='open'""",
-        (author_kind, author_id, artifact_id, recipient_id),
+             AND recipient_id=? AND delivery_policy=? AND state='open'""",
+        (author_kind, author_id, artifact_id, recipient_id, delivery_policy),
     ).fetchone()
     if row is not None:
         return str(row["id"])
     batch_id = str(uuid.uuid4())
     db.execute(
         """INSERT INTO doc_feedback_batches
-           (id,artifact_id,author_kind,author_id,recipient_id,state,
+           (id,artifact_id,author_kind,author_id,recipient_id,delivery_policy,state,
             opened_at,last_item_at,closes_at,item_count,created_at,updated_at)
-           VALUES (?,?,?,?,?,'open',?,?,?,0,?,?)""",
+           VALUES (?,?,?,?,?,?,'open',?,?,?,0,?,?)""",
         (
-            batch_id, artifact_id, author_kind, author_id, recipient_id,
-            now, now, _new_deadline(author_kind, now), now, now,
+            batch_id, artifact_id, author_kind, author_id, recipient_id, delivery_policy,
+            now, now, _new_deadline(author_kind, delivery_policy, now), now, now,
         ),
     )
     # A new deadline can be earlier than the one the continuation loop is sleeping toward.
@@ -79,6 +94,7 @@ def _touch_batch(
     batch_id: str,
     *,
     author_kind: str,
+    delivery_policy: str,
     now: str,
     item_delta: int,
 ) -> None:
@@ -86,7 +102,7 @@ def _touch_batch(
         """UPDATE doc_feedback_batches
            SET last_item_at=?,closes_at=?,closed_reason=NULL,
                item_count=item_count+?,updated_at=? WHERE id=?""",
-        (now, _new_deadline(author_kind, now), item_delta, now, batch_id),
+        (now, _new_deadline(author_kind, delivery_policy, now), item_delta, now, batch_id)
     )
 
 
@@ -96,6 +112,7 @@ def _add_comment_item(
     batch_id: str,
     comment_id: str,
     author_kind: str,
+    delivery_policy: str,
     now: str,
     event: str | None = None,
     event_by: str | None = None,
@@ -108,11 +125,13 @@ def _add_comment_item(
     )
     if not inserted.rowcount:
         return False
-    _touch_batch(db, batch_id, author_kind=author_kind, now=now, item_delta=1)
+    _touch_batch(
+        db, batch_id, author_kind=author_kind, delivery_policy=delivery_policy, now=now, item_delta=1,
+    )
     return True
 
 
-def _join_open_batch(db, comment: dict[str, Any], recipient_id: str) -> str:
+def _join_open_batch(db, comment: dict[str, Any], recipient_id: str, delivery_policy: str) -> str:
     author_kind = str(comment["author_kind"])
     now = str(comment["created_at"])
     batch_id = _open_batch(
@@ -121,6 +140,7 @@ def _join_open_batch(db, comment: dict[str, Any], recipient_id: str) -> str:
         author_id=feedback_comments.author_id(comment),
         artifact_id=str(comment["artifact_id"]),
         recipient_id=recipient_id,
+        delivery_policy=delivery_policy,
         now=now,
     )
     _add_comment_item(
@@ -128,83 +148,11 @@ def _join_open_batch(db, comment: dict[str, Any], recipient_id: str) -> str:
         batch_id=batch_id,
         comment_id=str(comment["id"]),
         author_kind=author_kind,
+        delivery_policy=delivery_policy,
         now=now,
     )
     return batch_id
 
-
-def record_reopen(
-    db,
-    comment: dict[str, Any],
-    *,
-    user_id: str,
-    user_display: str,
-    now: str | None = None,
-) -> str | None:
-    """Queue a user's resolved-comment re-open through canonical recipients."""
-    if not user_id:
-        return None
-    at = now or _now()
-    recipient_id, = feedback_comments.recipients(db, comment, document_owner_only=True)
-    batch_id = _open_batch(
-        db,
-        author_kind="user",
-        author_id=USER_AUTHOR_ID,
-        artifact_id=str(comment["artifact_id"]),
-        recipient_id=recipient_id,
-        now=at,
-    )
-    _add_comment_item(
-        db,
-        batch_id=batch_id,
-        comment_id=str(comment["id"]),
-        author_kind="user",
-        now=at,
-        event="reopened",
-        event_by=user_display.strip() or user_id,
-    )
-    return batch_id
-
-
-def record_edit(
-    db,
-    *,
-    artifact_id: str,
-    recipient_id: str,
-    author_kind: str,
-    author_id: str,
-    actor_display: str,
-    path: Path,
-    before: bytes,
-    after: bytes,
-    at: str | None = None,
-    prepared: dict | None = None,
-) -> str:
-    """Coalesce one substantive non-owner save into the canonical feedback batch."""
-    if author_kind not in {"agent", "user"}:
-        raise ValueError("edit feedback author_kind must be 'agent' or 'user'")
-    now = at or _now()
-
-    batch_id = _open_batch(
-        db,
-        author_kind=author_kind,
-        author_id=author_id,
-        artifact_id=artifact_id,
-        recipient_id=recipient_id,
-        now=now,
-    )
-    item_delta = feedback_edits.record_edit_item(
-        db,
-        batch_id=batch_id,
-        actor_display=actor_display,
-        path=path,
-        before=before,
-        after=after,
-        now=now,
-        prepared=prepared,
-    )
-    _touch_batch(db, batch_id, author_kind=author_kind, now=now, item_delta=item_delta)
-    return batch_id
 
 
 def record_comment(
@@ -213,6 +161,7 @@ def record_comment(
     *,
     created: bool,
     submit: bool = False,
+    delivery_policy: str = IMMEDIATE,
 ) -> dict[str, Any]:
     """Attach a newly inserted comment to recipient batches in the caller's write."""
     batch_ids: list[str] = []
@@ -225,7 +174,10 @@ def record_comment(
     if created:
         feedback_comments.make_user_document_durable(db, comment)
         feedback_comments.emit_comment_created(db, comment)
-        batch_ids = [_join_open_batch(db, comment, recipient) for recipient in feedback_comments.recipients(db, comment)]
+        batch_ids = [
+            _join_open_batch(db, comment, recipient, delivery_policy)
+            for recipient in feedback_comments.recipients(db, comment)
+        ]
         if submit and comment["author_kind"] == "agent":
             woken = close_for_document(
                 db,
@@ -266,45 +218,9 @@ def deliver_person_comment(db, batch_ids: list[str], artifact_id: str) -> list[s
 def _claim_and_deliver(db, batch_id: str, *, from_state: str, reason: str | None, due_by: str | None = None) -> tuple[bool, tuple[str, ...]]:
     if (reason is not None) + (due_by is not None) != (from_state == "open"):
         raise ValueError("an open-batch claim names exactly one of a reason or a due cutoff; a retry names neither")
-    now = _now()
-    closed_sql = "closed_reason=?" if reason is not None else "closed_reason=closed_reason"
-    due_sql = " AND closes_at<=?" if due_by is not None else ""
-    params: list[Any] = [now]
-    if reason is not None:
-        params.append(reason)
-    params.extend([batch_id, from_state])
-    if due_by is not None:
-        closed_sql = "closed_reason=COALESCE(NULLIF(closed_reason,''),CASE author_kind WHEN 'agent' THEN 'quiet' ELSE 'idle' END)"
-        params.append(due_by)
-    changed = db.execute(
-        f"""UPDATE doc_feedback_batches SET state='delivered',updated_at=?,
-            {closed_sql},undelivered_reason=NULL,attempts=attempts+1
-            WHERE id=? AND state=?{due_sql}""",
-        params,
+    return claim_and_deliver(
+        db, batch_id, from_state=from_state, reason=reason, due_by=due_by, now=_now(),
     )
-    if changed.rowcount == 0:
-        return False, ()
-    batch = db.execute("SELECT * FROM doc_feedback_batches WHERE id=?", (batch_id,)).fetchone()
-    delivered = feedback_delivery.deliver_claimed(db, batch)
-    review_woken: tuple[str, ...] = ()
-    if delivered.reason is not None:
-        db.execute(
-            """UPDATE doc_feedback_batches
-               SET state='undelivered',undelivered_reason=?,delivery_outcome=NULL,
-                   updated_at=? WHERE id=?""",
-            (delivered.reason, now, batch_id),
-        )
-    else:
-        if delivered.outcome is None:
-            raise RuntimeError("successful feedback delivery has no typed outcome")
-        db.execute(
-            """UPDATE doc_feedback_batches
-               SET delivered_node_id=?,delivery_outcome=?,updated_at=? WHERE id=?""",
-            (delivered.node_id, delivered.outcome, now, batch_id),
-        )
-        db.execute("DELETE FROM doc_feedback_edit_items WHERE batch_id=?", (batch_id,))
-        review_woken = settle_for_batch(db, batch)
-    return True, delivered.woken_threads + review_woken
 
 
 def close_batch(db, batch_id: str, reason: str) -> tuple[bool, tuple[str, ...]]:
@@ -332,12 +248,70 @@ def close_for_document(
     author_id: str,
     artifact_id: str,
     reason: str,
+    delivery_policy: str | None = None,
 ) -> list[str]:
-    """Close all matching open recipient batches for one document."""
+    """Close all matching open recipient batches for one document and optional lane."""
+    policy_sql = " AND delivery_policy=?" if delivery_policy else ""
+    params: tuple[str, ...] = (author_kind, author_id, artifact_id)
+    if delivery_policy:
+        params += (delivery_policy,)
     rows = db.execute(
         """SELECT id FROM doc_feedback_batches WHERE state='open'
-           AND author_kind=? AND author_id=? AND artifact_id=? ORDER BY opened_at,id""",
-        (author_kind, author_id, artifact_id),
+           AND author_kind=? AND author_id=? AND artifact_id=?""" + policy_sql + " ORDER BY opened_at,id",
+        params,
+    ).fetchall()
+    woken: list[str] = []
+    for row in rows:
+        _closed, selected = close_batch(db, row["id"], reason)
+        woken.extend(selected)
+    return woken
+
+
+def touch_for_document(db, *, artifact_id: str, delivery_policy: str) -> int:
+    """Extend one held document or image lane without allowing a policy mix."""
+    if delivery_policy not in HELD_POLICIES:
+        raise ValueError("only held feedback lanes may be touched")
+    now = _now()
+    changed = db.execute(
+        """UPDATE doc_feedback_batches
+           SET last_item_at=?, closes_at=?, updated_at=?
+           WHERE state='open' AND author_kind='user' AND author_id=?
+             AND artifact_id=? AND delivery_policy=?""",
+        (now, _new_deadline("user", delivery_policy, now), now, USER_AUTHOR_ID, artifact_id, delivery_policy),
+    )
+    return changed.rowcount
+
+
+def held_for_thread(db, thread_id: str) -> dict[str, Any]:
+    """Project the document-held person comments whose recipient is the current thread.
+
+    Image-held work belongs to its image viewer and never appears here. One row per
+    held document, so the result is bounded by open documents, not comments.
+    """
+    rows = db.execute(
+        """SELECT batch.artifact_id AS artifact_id, COUNT(DISTINCT item.comment_id) AS count
+           FROM doc_feedback_batches batch
+           JOIN doc_feedback_batch_items item ON item.batch_id=batch.id
+           WHERE batch.state='open' AND batch.author_kind='user' AND batch.author_id=?
+             AND batch.recipient_id=? AND batch.delivery_policy=?
+           GROUP BY batch.artifact_id ORDER BY MIN(batch.opened_at), batch.artifact_id""",
+        (USER_AUTHOR_ID, thread_id, DOCUMENT_HELD),
+    ).fetchall()
+    artifacts = [{"artifact_id": row["artifact_id"], "open_count": int(row["count"])} for row in rows]
+    return {"open_count": sum(item["open_count"] for item in artifacts), "artifacts": artifacts}
+
+
+def close_for_thread(db, *, thread_id: str, reason: str) -> list[str]:
+    """Deliver every document-held person-comment lane routed to the current thread.
+
+    Each batch closes conditionally on being open, so a document sender that won
+    first leaves nothing here and the same comments are never delivered twice.
+    """
+    rows = db.execute(
+        """SELECT id FROM doc_feedback_batches
+           WHERE state='open' AND author_kind='user' AND author_id=? AND recipient_id=?
+             AND delivery_policy=? ORDER BY opened_at,id""",
+        (USER_AUTHOR_ID, thread_id, DOCUMENT_HELD),
     ).fetchall()
     woken: list[str] = []
     for row in rows:
@@ -386,12 +360,15 @@ def close_due(now: str, *, db=None) -> list[str]:
             connection.close()
 
 
-def retry_for_document(db, *, author_kind: str, author_id: str, artifact_id: str) -> list[str]:
-    """Retry every undelivered recipient batch for one author's document."""
+def retry_for_document(
+    db, *, author_kind: str, author_id: str, artifact_id: str, delivery_policy: str,
+) -> list[str]:
+    """Retry one owning lane's undelivered recipient batches for one document."""
     rows = db.execute(
         """SELECT id FROM doc_feedback_batches WHERE state='undelivered'
-           AND author_kind=? AND author_id=? AND artifact_id=? ORDER BY updated_at,id""",
-        (author_kind, author_id, artifact_id),
+           AND author_kind=? AND author_id=? AND artifact_id=? AND delivery_policy=?
+           ORDER BY updated_at,id""",
+        (author_kind, author_id, artifact_id, delivery_policy),
     ).fetchall()
     woken: list[str] = []
     for row in rows:

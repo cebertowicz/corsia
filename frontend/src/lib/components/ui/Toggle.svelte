@@ -41,9 +41,8 @@
 		--h: 17px;
 		--knob: 12px;
 		width: var(--w); height: var(--h);
-		background: var(--bg-tertiary);
-		/* An off switch reads as a control, not a faint field: a darker outline. */
-		border: 1px solid var(--text-tertiary);
+		background: transparent;
+		border: 0;
 		border-radius: var(--radius-pill);
 		position: relative;
 		cursor: pointer;
@@ -55,22 +54,36 @@
 		--h: 19px;
 		--knob: 14px;
 	}
+	/* The button owns focus and its hit box; its centered track keeps the same visual size. */
+	.tg::before {
+		content: '';
+		position: absolute;
+		width: var(--w); height: var(--h);
+		box-sizing: border-box;
+		top: 50%; left: 50%;
+		transform: translate(-50%, -50%);
+		background: var(--bg-tertiary);
+		/* An off switch reads as a control, not a faint field: a darker outline. */
+		border: 1px solid var(--text-tertiary);
+		border-radius: var(--radius-pill);
+		transition: all var(--dur-tight) var(--ease-snap);
+	}
 	.tg::after {
 		content: '';
 		position: absolute;
 		width: var(--knob); height: var(--knob);
 		border-radius: var(--radius-circle);
 		background: linear-gradient(180deg, #d8d8e0, #b8b8c0);
-		top: 50%; left: 1.5px;
+		top: 50%; left: calc((100% - var(--w)) / 2 + 2.5px);
 		transform: translateY(-50%);
 		transition: all var(--dur-tight) var(--ease-snap);
 	}
-	.tg.on {
+	.tg.on::before {
 		background: linear-gradient(180deg, var(--accent-hover, var(--accent)), var(--accent));
 		border-color: var(--accent);
 	}
 	.tg.on::after {
-		left: calc(var(--w) - var(--knob) - 2.5px);
+		left: calc((100% - var(--w)) / 2 + var(--w) - var(--knob) - 1.5px);
 		background: linear-gradient(180deg, #ffffff, #f0f0f5);
 	}
 	.tg:disabled {

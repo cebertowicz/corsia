@@ -322,6 +322,8 @@ def test_user_feedback_projection_has_no_open_comment_after_immediate_delivery(i
 
         assert feedback_batches.user_feedback_for_document(db, artifact_id) == {
             "open_count": 0,
+            "document_held_count": 0,
+            "image_held_count": 0,
             "owner_label": "Documents & Artifacts",
             "undelivered_batches": [],
         }

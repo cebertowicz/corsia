@@ -111,6 +111,10 @@
   --header-badge-slot: 86px;
   --list-row-min-height: 38px;
   --button-pad-x-sm: 10px;
+  /* Shared notice geometry preserves the established toast treatment without raw component values. */
+  --toast-detail-icon-offset: 3px;
+  --toast-close-inline-padding: 2px;
+  --toast-action-underline-offset: 2px;
   --project-mark-size: 9px;
   --project-mark-ring: 0 0 0 1px color-mix(in srgb, var(--text-primary) 8%, transparent);
   --safe-bottom: env(safe-area-inset-bottom, 0px);

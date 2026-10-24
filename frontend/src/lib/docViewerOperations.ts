@@ -105,9 +105,9 @@ export function reloadDocumentFeedback(
 	sequence: number | undefined,
 	currentSequence: () => number,
 	sync: { sync?: (id: string, feedback: Awaited<ReturnType<typeof loadComments>>) => void } | undefined,
-): void {
-	if (!artifactId) return;
-	void loadComments(artifactId)
+): Promise<void> {
+	if (!artifactId) return Promise.resolve();
+	return loadComments(artifactId)
 		.then((feedback) => {
 			if (sequence === undefined || sequence === currentSequence()) sync?.sync?.(artifactId, feedback);
 		})

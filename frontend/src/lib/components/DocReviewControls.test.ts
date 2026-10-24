@@ -74,8 +74,9 @@ describe('document review toolbar and popover', () => {
 		render({ commentCount: 1, stale: true }); await settle();
 		expect(document.body.querySelector('.reviewer-group')).toBeNull();
 		const names = [...document.body.querySelectorAll<HTMLElement>('.document-tools button')].map(nameOf);
-		expect(names).toEqual(['File changed · Reload', '1 open thread', 'Request review']);
-		expect([...document.body.querySelectorAll('.document-tools button')].every((item) => item.classList.contains('doc-tool'))).toBe(true);
+		expect(names).toEqual(['File changed · Reload', '1 open thread', 'Deliver comments immediately', 'Request review']);
+		// The delivery switch is a Toggle, not a text tool: every other control shares the one style.
+		expect([...document.body.querySelectorAll('.document-tools button:not(.tg)')].every((item) => item.classList.contains('doc-tool'))).toBe(true);
 	});
 	it('lists the chosen agents as chips, removes the last on Backspace, and keeps Send disabled with its reason until one is chosen', async () => {
 		render(); const search = await picker(); expect(document.activeElement).toBe(search);
@@ -229,6 +230,42 @@ describe('document review toolbar and popover', () => {
 		expect(document.body.querySelector('[data-adaptive-drawer]')).toBeTruthy(); expect(document.body.querySelector('[data-popover]')).toBeNull();
 		expect(document.body.querySelectorAll('h2')).toHaveLength(1); expect(document.body.querySelector('h2')?.textContent).toBe('Request review');
 		expect(search.placeholder).toBe('Find an agent'); button('Close').click(); await settle(); expect(document.activeElement).toBe(button('Request review'));
+	});
+	it.each(['mouse', 'touch', 'touch-delayed'])('keeps the picker choices through a %s press on the drawer Close outside its form', async (pointer) => {
+		width = 393; rows = [row('review-1')]; render(); await settle();
+		const group = document.body.querySelector<HTMLButtonElement>('.reviewer-group')!;
+		group.click(); await settle();
+		const search = document.body.querySelector<HTMLInputElement>('[role="combobox"]')!;
+		const choices = optionNames();
+		expect(choices.length).toBeGreaterThan(0);
+		expect(document.activeElement).toBe(search);
+		const close = button('Close');
+		close.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+		// Touch focuses during its compatibility mouse events, after pointerup and before click.
+		if (pointer.startsWith('touch')) close.dispatchEvent(new Event('pointerup', { bubbles: true }));
+		if (pointer === 'touch-delayed') await settle();
+		close.dispatchEvent(new Event('mousedown', { bubbles: true }));
+		close.focus(); flushSync();
+		// Removing choices before click moves this bottom-anchored drawer's Close away from the press.
+		expect(optionNames()).toEqual(choices);
+		if (pointer === 'mouse') close.dispatchEvent(new Event('pointerup', { bubbles: true }));
+		close.dispatchEvent(new Event('mouseup', { bubbles: true })); close.click();
+		await settle(); await settle();
+		expect(document.body.querySelector('[data-review-surface]')).toBeNull();
+		expect(document.activeElement).toBe(group);
+	});
+	it('releases the picker guard after a cancelled pointer gesture', async () => {
+		width = 393; render(); const search = await picker();
+		const close = button('Close');
+		close.dispatchEvent(new Event('pointerdown', { bubbles: true })); close.focus(); flushSync();
+		expect(optionNames().length).toBeGreaterThan(0);
+		close.dispatchEvent(new Event('pointercancel', { bubbles: true })); await settle();
+		expect(optionNames()).toEqual([]);
+		search.focus(); flushSync(); expect(optionNames().length).toBeGreaterThan(0);
+		// A later keyboard blur is immediate again; the cancelled press is no longer holding it.
+		close.focus(); flushSync(); expect(optionNames()).toEqual([]);
+		expect(document.body.querySelector('[data-review-surface]')).not.toBeNull();
+		close.click(); await settle(); expect(document.body.querySelector('[data-review-surface]')).toBeNull();
 	});
 	it('removes its narrow review drawer synchronously when its caller is destroyed', async () => {
 		width = 393; render(); await picker();

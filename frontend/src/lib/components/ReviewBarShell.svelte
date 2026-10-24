@@ -228,6 +228,11 @@
 	:global(.document-header) .review-bar.receipt, :global(.document-header) .review-bar.stale { align-items: flex-start; }
 	:global(.document-header) .review-bar.receipt .rb-icon, :global(.document-header) .review-bar.stale .rb-icon { margin-block: calc((var(--space-7) - var(--text-subhead)) / 2); }
 	:global(.document-header) .rb-receipt, :global(.document-header) .review-bar.stale .rb-text, :global(.document-header) .review-bar.stale .rb-sub { line-height: var(--space-7); }
+	/* A person step has no one-line ask beside its name: let its existing column wrap the full name at every width. */
+	:global(.document-header) .review-bar.ask.static .rb-who { display: block; overflow: visible; white-space: normal; overflow-wrap: anywhere; }
+	:global(.document-header) .review-bar.ask.static .rb-who strong { overflow: visible; white-space: normal; }
+	:global(.document-header) .review-bar.ask.static .rb-who :global(.name) { display: inline; white-space: normal; }
+	:global(.document-header) .review-bar.ask.static .rb-who :global(.name-head) { overflow: visible; }
 	/* A 16ch ask needs more room than the prior 48px floor. Below this point the tools keep their row, while the review line keeps the avatar, full name and chevron together and gives the ellipsized ask the next full-width row. A long name there truncates in the middle, keeping its suffix (MiddleName); with no one-line ask (the person step) the name has the row to itself and wraps instead. Line 2 is unchanged.
 	   Threshold, measured at a fine pointer with a narrow canvas (the pill shows its count only):
 	     avatar 19 + gap 8 + 21-character name 129 + gap 8 + ask minimum 16ch (122) + gap 8 + chevron 13
@@ -235,18 +240,14 @@
 	   Measured header content: 195px at 1280 with the pane overlaid, 345px on a 393 phone, 355px at 1440 with the pane docked,
 	   635px with it closed. The first three use this fallback. An ask with no one-line text (the person step) has no third row. */
 	@container doc-header (width < 408px) {
-		:global(.document-header) .review-bar.ask { grid-template-rows: var(--space-7) var(--space-7) auto; }
+		/* The tools own the preceding header row; their intrinsic height needs no reserved spacer here. */
+		:global(.document-header) .review-bar.ask { grid-template-rows: 0 var(--space-7) auto; }
 		:global(.document-header) .review-bar.ask .rb-line { display: grid; grid-column: 1 / -1; grid-row: 1 / span 3; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: subgrid; }
 		:global(.document-header) .review-bar.ask .rb-lead { grid-column: 1; grid-row: 2; display: flex; align-items: center; gap: var(--space-2); min-width: 0; min-height: var(--space-7); }
 		:global(.document-header) .review-bar.ask .rb-who { max-width: none; }
-		/* The person step: release every nowrap/ellipsis layer around the name, MiddleName's included, and flow its head, tail and colon as one inline run so a long name wraps as text. */
-		:global(.document-header) .review-bar.ask.static .rb-who { display: block; overflow: visible; white-space: normal; overflow-wrap: anywhere; }
-		:global(.document-header) .review-bar.ask.static .rb-who strong { overflow: visible; white-space: normal; }
-		:global(.document-header) .review-bar.ask.static .rb-who :global(.name) { display: inline; white-space: normal; }
-		:global(.document-header) .review-bar.ask.static .rb-who :global(.name-head) { overflow: visible; }
 		:global(.document-header) .review-bar.ask .rb-chev { grid-column: 2; grid-row: 2; align-self: center; margin-left: 0; }
 		:global(.document-header) .review-bar.ask .rb-ask { grid-column: 1 / -1; grid-row: 3; min-height: var(--space-7); }
-		:global(.document-header) .review-bar.ask.static { grid-template-rows: var(--space-7) minmax(var(--space-7), auto); }
+		:global(.document-header) .review-bar.ask.static { grid-template-rows: 0 minmax(var(--space-7), auto); }
 		:global(.document-header) .review-bar.ask.static .rb-line { grid-row: 1 / span 2; }
 	}
 

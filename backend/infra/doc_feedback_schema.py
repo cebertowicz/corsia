@@ -7,6 +7,8 @@ DOC_FEEDBACK_SCHEMA_SQL = """
         author_kind TEXT NOT NULL CHECK (author_kind IN ('agent','user')),
         author_id TEXT NOT NULL,
         recipient_id TEXT NOT NULL,
+        delivery_policy TEXT NOT NULL DEFAULT 'immediate'
+            CHECK (delivery_policy IN ('immediate','document-held','image-held')),
         state TEXT NOT NULL DEFAULT 'open'
             CHECK (state IN ('open','delivered','undelivered')),
         opened_at TEXT NOT NULL,
@@ -29,12 +31,14 @@ DOC_FEEDBACK_SCHEMA_SQL = """
         updated_at TEXT NOT NULL
     );
     CREATE UNIQUE INDEX IF NOT EXISTS idx_doc_feedback_batches_open
-        ON doc_feedback_batches(author_kind, author_id, artifact_id, recipient_id)
+        ON doc_feedback_batches(author_kind, author_id, artifact_id, recipient_id, delivery_policy)
         WHERE state='open';
     CREATE INDEX IF NOT EXISTS idx_doc_feedback_batches_due
         ON doc_feedback_batches(state, closes_at);
     CREATE INDEX IF NOT EXISTS idx_doc_feedback_batches_author
         ON doc_feedback_batches(author_kind, author_id, state, updated_at);
+    CREATE INDEX IF NOT EXISTS idx_doc_feedback_batches_recipient_open
+        ON doc_feedback_batches(recipient_id, author_kind, author_id, delivery_policy, state);
 
     CREATE TABLE IF NOT EXISTS doc_feedback_batch_items (
         batch_id TEXT NOT NULL REFERENCES doc_feedback_batches(id) ON DELETE CASCADE,

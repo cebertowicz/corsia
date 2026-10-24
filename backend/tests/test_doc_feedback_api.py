@@ -87,7 +87,7 @@ async def test_comment_handler_returns_before_a_blocked_background_delivery(isol
     started = asyncio.Event()
     release = asyncio.Event()
 
-    async def blocked_delivery(_batch_ids, _artifact_id):
+    async def blocked_delivery(_batch_ids, _artifact_id, _delivery_policy):
         started.set()
         await release.wait()
 
@@ -115,6 +115,43 @@ async def test_comment_handler_returns_before_a_blocked_background_delivery(isol
     await asyncio.wait_for(started.wait(), timeout=1)
     running.cancel()
     await asyncio.gather(running, return_exceptions=True)
+
+
+def test_held_user_comment_returns_before_delivery_and_keeps_its_policy_batch_open(client, isolated_db, monkeypatch):
+    from doceditor import comment_notifications, live_runtime
+    from plans import public
+
+    monkeypatch.setattr(live_runtime, "_manager", None)
+    db = get_db()
+    try:
+        seed_thread(db, "owner")
+        db.execute("UPDATE threads SET user_id=? WHERE id='owner'", (OWNER_USER,))
+        created_artifact_id = seed_document(db, "owner")
+    finally:
+        db.close()
+    frames: list[str] = []
+    drives: list[list[str]] = []
+    monkeypatch.setattr(comment_notifications, "broadcast_doc_comment_changed", lambda artifact_id, **_kwargs: frames.append(artifact_id))
+
+    async def drive_threads(thread_ids):
+        drives.append(list(thread_ids))
+
+    monkeypatch.setattr(public, "drive_threads", drive_threads)
+    response = client.post(
+        f"/api/artifacts/{created_artifact_id}/comments?token={OWNER_TOKEN}",
+        json={"body": "Keep this with the document.", "client_id": "held-comment", "delivery_policy": "document-held"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["delivery_policy"] == "document-held"
+    db = get_db()
+    try:
+        [batch] = batches(db)
+        assert (batch["state"], batch["delivery_policy"], batch["attempts"]) == ("open", "document-held", 0)
+    finally:
+        db.close()
+    assert frames == []
+    assert drives == []
 
 
 def test_no_recipient_person_comment_still_sends_one_frame(client, isolated_db, monkeypatch):
