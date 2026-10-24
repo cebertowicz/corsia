@@ -24,6 +24,8 @@ class WriteActor:
     call_id: str | None = None
     #: The write applies suggestions the person accepted, so its words are the helpers', not the person's edit.
     suggestion_accept: bool = False
+    #: One immutable person principal for every accepted suggestion winner, if they agree.
+    suggestion_author_user_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -37,6 +39,7 @@ class Publication:
     decision: dict
     ranges: dict[str, tuple[int, int]] | None = None
     suggestion_accept: bool = False
+    suggestion_author_user_id: str | None = None
 
     @staticmethod
     def decision_for(path: Path, shared: SharedTarget | None, authority: WriteAuthority | None = None) -> dict:

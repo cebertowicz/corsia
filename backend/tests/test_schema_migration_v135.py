@@ -35,7 +35,7 @@ def test_a_fresh_schema_lists_the_same_column_last():
     fresh = sqlite3.connect(":memory:")
     fresh.executescript(SCHEMA_SQL)
 
-    assert _columns(fresh)[-1] == "decided_in_bulk"
+    assert _columns(fresh)[-1] == "author_user_id"
 
 
 def test_a_database_without_doc_comments_passes():

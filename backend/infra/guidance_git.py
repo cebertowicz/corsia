@@ -251,7 +251,7 @@ def save_guidance(
     """Save writes and compare-and-swap deletes in one guidance-history commit.
 
     Binary-safe reviewed bundles use raw SHA-256 and a 1 MB file ceiling; ordinary guidance is text-only.
-    An agent's new or changed lesson is refused unless the caller passes ``lesson_gate=False``.
+    An agent save that grows lesson items is refused unless the caller passes ``lesson_gate=False``.
     """
     lesson_changes = ()
     if lesson_gate and not is_person_author(author):

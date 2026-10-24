@@ -210,7 +210,7 @@ async def decide_suggestion(
                 artifact["path"], applied_text(comment, document_text), project_id,
                 f"Accepted suggestion {comment_id} from {comment['author']}",
                 hashlib.sha256(document_text.encode()).hexdigest(),
-                str(comment["author"]) if comment["author_kind"] == "user" else None,
+                comment.get("author_user_id") if comment["author_kind"] == "user" else None,
             )
 
     def _record():

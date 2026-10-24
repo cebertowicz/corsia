@@ -82,6 +82,40 @@ async def test_accept_checks_quotes_at_lane_start_after_queueing(ownership_scope
 
 
 @pytest.mark.asyncio
+async def test_live_accept_carries_the_persisted_person_winner_to_its_writer_contract(
+    ownership_scope, tmp_path, monkeypatch,
+):
+    scope = ownership_scope
+    manager, entry, _ = await opened(scope, tmp_path, monkeypatch)
+    artifact_id = scope["db"].execute(
+        "SELECT id FROM artifact_identities WHERE path=?", (str(entry.live.path),)
+    ).fetchone()[0]
+    row, _ = comments.create_with_status(
+        artifact_id, body="", author="Renamed person", author_kind="user", author_user_id="person-immutable-id",
+        anchor_text="b", from_off=2, to_off=3, replacement="B", db=scope["db"],
+    )
+    entry.live.track_range(row["id"], row["from_off"], row["to_off"])
+    seen = []
+    original_policy = entry.lane.policy
+
+    async def capture(operation, text):
+        seen.append(operation.actor.suggestion_author_user_id)
+        return await original_policy(operation, text)
+
+    entry.lane.policy = capture
+    try:
+        result = await comment_actions.decide_suggestion(
+            row["id"], "accept", user_id=user_id(scope), decided_by="user",
+            actor_thread_id=scope["owner"], write=legacy_writer,
+        )
+
+        assert result["decision"] == "accepted"
+        assert seen == ["person-immutable-id"]
+    finally:
+        await manager.close()
+
+
+@pytest.mark.asyncio
 async def test_accept_preserves_unsaved_browser_text(ownership_scope, tmp_path, monkeypatch):
     scope = ownership_scope
     manager, entry, _ = await opened(scope, tmp_path, monkeypatch)

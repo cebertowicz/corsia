@@ -252,7 +252,12 @@ class DocumentLane:
         generation = await asyncio.to_thread(self.live.store.failure_generation)
         await self._barrier()
         prior_hash = await self._import()
-        fork, accepted, skipped, receipt, author = await build_candidate(self.live, operation)
+        fork, accepted, skipped, receipt, author, suggestion_author_user_id = await build_candidate(self.live, operation)
+        if operation.kind == "accept" and operation.actor is not None:
+            operation = replace(
+                operation,
+                actor=replace(operation.actor, suggestion_author_user_id=suggestion_author_user_id),
+            )
         text = str(fork["text"])
         ranges = candidate_ranges(self.live, fork)
         await self.validate_actor(text, operation.actor)

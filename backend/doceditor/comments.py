@@ -107,6 +107,7 @@ def create_with_status(
     body: str,
     author: str = "you",
     author_kind: str = "user",
+    author_user_id: str | None = None,
     author_thread_id: str | None = None,
     parent_id: str | None = None,
     anchor_text: str | None = None,
@@ -143,14 +144,15 @@ def create_with_status(
             ).fetchone()[0]
         inserted = connection.execute(
             """INSERT INTO doc_comments
-               (id, artifact_id, parent_id, author, author_kind, author_thread_id,
+               (id, artifact_id, parent_id, author, author_kind, author_user_id, author_thread_id,
                 body, anchor_text, from_off, to_off, anchor_prefix, anchor_suffix,
                 review, resolved, acked, replacement, created_at, updated_at,
                 region_x, region_y, region_w, region_h, region_number, image_rev, image_src)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,0,0,?,?,?,?,?,?,?,?,?,?)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,0,?,?,?,?,?,?,?,?,?,?)
                ON CONFLICT(id) DO NOTHING""",
             (
-                cid, artifact_id, _thread_root_id(connection, parent_id), author, author_kind, author_thread_id,
+                cid, artifact_id, _thread_root_id(connection, parent_id), author, author_kind,
+                author_user_id if author_kind == "user" else None, author_thread_id,
                 body, anchor_text, from_off, to_off, anchor_prefix, anchor_suffix,
                 1 if review else 0, replacement, now, now,
                 x, y, w, h, number, image_rev, image_src,
