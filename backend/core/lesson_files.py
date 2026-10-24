@@ -144,7 +144,10 @@ def trial_statement(body: str) -> str:
 def render_trial(
     *, lesson_id: str, owner: str, name: str, description: str, text: str,
     trial: Trial, source_refs: list[dict[str, Any]], originating_subjects: tuple[str, ...] | None = None,
-    origin: dict[str, str] | None = None,
+    origin: dict[str, str] | None = None, target_file: str | None = None,
+    new_target_path: str | None = None, target_section: str | None = None,
+    cause: str | None = None, case: dict[str, Any] | None = None,
+    new_evidence: str | None = None,
 ) -> str:
     """A trial skill with no ``review_ref``: written, and not yet offered.
 
@@ -161,6 +164,16 @@ def render_trial(
         lesson["originating_subjects"] = list(originating_subjects)
     if origin:
         lesson["origin"] = dict(origin)
+    for key, value in (
+        ("target_file", target_file),
+        ("new_target_path", new_target_path),
+        ("target_section", target_section),
+        ("cause", cause),
+        ("case", case),
+        ("new_evidence", new_evidence),
+    ):
+        if value is not None:
+            lesson[key] = value
     return _dump(
         {"name": name, "description": _one_line(description), "corsia": {LESSON_KEY: lesson}},
         body,
