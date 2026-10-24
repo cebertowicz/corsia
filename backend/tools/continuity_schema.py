@@ -265,13 +265,9 @@ _FIELD_SCHEMAS: dict[str, dict[str, Any]] = {
         "type": "string",
         "enum": list(_OPERATIONS),
         "description": (
-            "inspect lists current entries and ids; add records a new entry; "
-            "replace rewrites one by id; drop retires one by id. review is "
-            "only for a checkpoint's placement review; place written queues "
-            "CORSIA to write the lesson and retire the entry; place already "
-            "retires an entry once destination is read and contains quote; "
-            "proposed queues placement for CORSIA to file as a proposal; trial "
-            "queues it as a trial skill with a review date."
+            "inspect lists; add records; replace rewrites; drop retires. review is "
+            "checkpoint-only. written queues CORSIA's write; already needs a "
+            "receipt; proposed and trial queue."
         ),
     },
     "field": {
@@ -341,8 +337,8 @@ _FIELD_SCHEMAS: dict[str, dict[str, Any]] = {
     **{
         name: (
             {"type": "integer", "minimum": 1} if name == "widens" else {"type": "string"}
-        ) | {"description": text}
-        for name, text in LESSON_DEFINITIONS.items()
+        ) | {"description": "See refusal."}
+        for name in LESSON_DEFINITIONS
     },
 }
 
