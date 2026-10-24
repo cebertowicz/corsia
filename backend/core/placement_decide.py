@@ -13,9 +13,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from core.lesson_trials import (
-    BODY_WORDS, TRIAL_SCHEMA, Trial, lesson_block, validate_case, validate_trial,
-)
+from core.lesson_case import CASE_SCHEMA, validate_case
+from core.lesson_trials import BODY_WORDS, TRIAL_SCHEMA, Trial, lesson_block, validate_trial
+from core.placement_text import append_lesson, append_to_reference, append_to_skill
 
 Q1 = ("thread", "agent", "project", "everywhere")
 Q2 = ("every_turn", "task_start", "lookup")
@@ -100,45 +100,7 @@ ANSWER_SCHEMA: dict[str, Any] = {
             ],
         },
         "new_evidence": {"type": ["string", "null"], "enum": ["target_changed", "case_differs", None]},
-        "case": {
-            "type": ["object", "null"],
-            "additionalProperties": False,
-            "required": ["what_happened", "right_call", "does_not_apply", "correction_subject"],
-            "properties": {
-                "what_happened": {"type": "string"},
-                "right_call": {"type": "string"},
-                "does_not_apply": {"type": "string"},
-                "correction_subject": {"type": "string"},
-                "actions": {
-                    "type": "object",
-                    "additionalProperties": False,
-                    "required": ["required_actions", "forbidden_actions", "decisive_action"],
-                    "properties": {
-                        "required_actions": {
-                            "type": "array", "minItems": 1,
-                            "items": {
-                                "type": "object", "additionalProperties": False,
-                                "required": ["tool", "params"],
-                                "properties": {"tool": {"type": "string"}, "params": {"type": "object"}},
-                            },
-                        },
-                        "forbidden_actions": {
-                            "type": "array",
-                            "items": {
-                                "type": "object", "additionalProperties": False,
-                                "required": ["tool", "params"],
-                                "properties": {"tool": {"type": "string"}, "params": {"type": "object"}},
-                            },
-                        },
-                        "decisive_action": {
-                            "type": "object", "additionalProperties": False,
-                            "required": ["tool", "params"],
-                            "properties": {"tool": {"type": "string"}, "params": {"type": "object"}},
-                        },
-                    },
-                }
-            },
-        },
+        "case": CASE_SCHEMA,
         "trial": TRIAL_SCHEMA,
     },
 }
@@ -392,38 +354,3 @@ def skill_description(text: str) -> str | None:
     from core.skill_validation import validate_skill_text
 
     return validate_skill_text(text).description
-
-
-def append_lesson(text: str | None, line: str, day: str) -> tuple[str, int]:
-    """Add one dated lesson under exact ``## Lessons``; return text and legacy count."""
-    body = text if text is not None else "# Lessons\n"
-    lesson = f"- {day}: {line}"
-    if not re.search(r"^## Lessons\s*$", body, re.MULTILINE):
-        body = body.rstrip("\n") + "\n\n## Lessons\n"
-    lines = body.rstrip("\n").split("\n")
-    start = next(i for i, row in enumerate(lines) if re.match(r"^## Lessons\s*$", row))
-    end = next((i for i in range(start + 1, len(lines)) if lines[i].startswith("## ")), len(lines))
-    insert_at = end
-    while insert_at > start + 1 and not lines[insert_at - 1].strip():
-        insert_at -= 1
-    lines.insert(insert_at, lesson)
-    result = "\n".join(lines) + "\n"
-    return result, lesson_count(result)
-
-
-def append_to_skill(
-    text: str | None, name: str, line: str, description: str | None
-) -> str:
-    """Add one line to a skill, creating it with frontmatter when new."""
-    if text is None:
-        from core.skill_validation import skill_template
-
-        template = skill_template(name, description or line)
-        frontmatter, _title, _placeholder = template.partition(f"# {name}\n")
-        return frontmatter.rstrip("\n") + f"\n\n# {name}\n\n- {line}\n"
-    return text.rstrip("\n") + f"\n- {line}\n"
-
-
-def append_to_reference(text: str, line: str) -> str:
-    """Add one line to the end of an agent reference file."""
-    return text.rstrip("\n") + f"\n\n- {line}\n"
