@@ -112,6 +112,8 @@ export interface AttentionQueue {
 	count: number;
 	/** The same order, capped; `items[0]` is `current`. */
 	items: AttentionQueueItem[];
+	/** Passive replies are separate from the capped Needs-you queue. */
+	reply_items?: AttentionQueueItem[];
 }
 
 /** The backend supplies the item list; it is not reconstructed client-side. */
@@ -119,6 +121,7 @@ interface AttentionQueueResponse {
 	current?: AttentionQueueItem | null;
 	count?: number;
 	items: AttentionQueueItem[];
+	reply_items?: AttentionQueueItem[];
 }
 
 /** The reserved answer id for free-form text (PRD-PLANS E4: never strand). */
@@ -158,6 +161,7 @@ export async function fetchAttentionQueue(bearer: string): Promise<AttentionQueu
 		current,
 		count: data.count ?? 0,
 		items: data.items,
+		reply_items: data.reply_items,
 	};
 }
 

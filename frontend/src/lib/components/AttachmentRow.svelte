@@ -11,12 +11,14 @@
 	import { submittedAnswers } from '$lib/stores/cardAnswers';
 	import ArtifactGlyph from './ArtifactGlyph.svelte';
 	import OutcomeTime from './OutcomeTime.svelte';
+	import NewMarker from './comments/NewMarker.svelte';
 
 	let {
 		card,
 		threadId,
 		variant = 'row',
 		chipWidth = 'default',
+		newMarker = false,
 		task,
 		time,
 	}: {
@@ -26,6 +28,8 @@
 		variant?: 'row' | 'chip';
 		/** Opt-in for a chip whose title is its only location cue; ordinary attachment chips retain 220px. */
 		chipWidth?: 'default' | 'content';
+		/** Show the shared unread marker on a chip. */
+		newMarker?: boolean;
 		/** The plan item whose block this ask answers; a context-line segment that truncates before the state. */
 		task?: string;
 		/** When the block happened; read through the transcript's own short time. */
@@ -96,6 +100,7 @@
 	<span class="text">
 		<span class="head">
 			<span class="title">{card.title}</span>
+			{#if variant === 'chip' && newMarker}<NewMarker />{/if}
 			{#if variant === 'row' && time}<span class="when"><OutcomeTime value={time} compact /></span>{/if}
 		</span>
 		{#if variant === 'row' && (stateLabel || detail)}

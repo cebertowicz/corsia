@@ -16,7 +16,7 @@
 	// Reply notices belong to the agent who answered. They are not Needs-you work, so
 	// the dock keeps its single-job queue and this stable chip carries only unread replies.
 	const replies = $derived(
-		$visibleQueue.items.filter((item): item is AttentionQueueItem & { detail: CommentReplyDetail } =>
+		($visibleQueue.reply_items ?? $visibleQueue.items).filter((item): item is AttentionQueueItem & { detail: CommentReplyDetail } =>
 			item.renderer === 'comment-reply' && (item.detail as CommentReplyDetail).source.thread_id === $activeThreadId,
 		),
 	);
@@ -62,12 +62,14 @@
 
 	onMount(() => {
 		void reload();
-		return on('plans_changed', () => { void reload(); });
+		const offPlans = on('plans_changed', () => { void reload(); });
+		const offComments = on('doc_comment_changed', () => { void reload(); });
+		return () => { offPlans(); offComments(); };
 	});
 </script>
 
 {#if card && unreadCount}
 	<section class="reply-chip-notice" aria-label="Unread agent replies" onclickcapture={openReplyDocument}>
-		<AttachmentRow {card} threadId={$activeThreadId} variant="chip" chipWidth="content" />
+		<AttachmentRow {card} threadId={$activeThreadId} variant="chip" chipWidth="content" newMarker />
 	</section>
 {/if}

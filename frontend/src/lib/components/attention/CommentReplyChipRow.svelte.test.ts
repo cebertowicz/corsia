@@ -61,7 +61,7 @@ describe('CommentReplyChipRow', () => {
 		const first = reply('one', 'launch-plan.md', { unreadCount: 2, newestAt: '2026-10-24T15:00:00Z' });
 		const newest = reply('two', 'roadmap.md', { newestAt: '2026-10-24T16:00:00Z' });
 		const otherChat = reply('three', 'private.md', { threadId: 'thread-2', newestAt: '2026-10-24T17:00:00Z' });
-		body = { current: first, count: 3, items: [first, newest, otherChat] };
+		body = { current: null, count: 0, items: [], reply_items: [first, newest, otherChat] };
 		const open = vi.fn();
 		component = mount(CommentReplyChipRow, { target: host, props: { onOpenDocument: open } });
 		await settle();
@@ -69,6 +69,8 @@ describe('CommentReplyChipRow', () => {
 		const chip = host.querySelector<HTMLButtonElement>('button.tile.chip');
 		expect(chip).not.toBeNull();
 		expect(chip?.textContent).toContain('3 new replies · 2 documents');
+		expect(chip?.querySelector('.ct-new-dot')).not.toBeNull();
+		expect(chip?.querySelector('.ct-new')?.textContent).toBe('New');
 		expect(chip?.getAttribute('aria-label')).toBe('3 new replies · 2 documents, document');
 		chip!.click();
 		expect(open).toHaveBeenCalledWith((newest.detail as CommentReplyDetail).destination, 'thread-1');
@@ -79,6 +81,7 @@ describe('CommentReplyChipRow', () => {
 		component = mount(CommentReplyChipRow, { target: host });
 		await settle();
 		expect(host.querySelector('.reply-chip-notice')).toBeNull();
+		expect(host.querySelector('.ct-new-dot')).toBeNull();
 
 		unmount(component);
 		component = mount(CommentReplyChipRow, { target: host, props: {} });
