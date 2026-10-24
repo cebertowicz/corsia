@@ -20,7 +20,7 @@ from connections.google import client as google_client
 from connections.google.accounts import thread_key
 from connections.mail_accounts import MAIL_ACCOUNT_PARAM, resolve_for_thread
 from connections.mailhost import outbound as mailhost_outbound, reply as mailhost_reply
-from connections.mailhost.errors import MESSAGE_REFUSED, PASSWORD_REFUSED, SERVER_UNREACHABLE, MailHostError
+from connections.mailhost.errors import MailHostError
 from connections.google.client import GoogleError, GoogleRequestFailed
 from connections.mail.email_document import (
     NEEDS_BODY,
@@ -144,13 +144,6 @@ def _mailhost_send_success(sent: Any, message_id: str, account_id: str) -> str:
     if sent.sent_copy_missing:
         result["sent_copy_note"] = "The email was sent, but a copy was not saved in the account's Sent folder."
     return json.dumps(result)
-
-
-def _refused_before_send(exc: Exception) -> bool:
-    """Known mail-host refusals happen before SMTP accepts any message."""
-    return isinstance(exc, AccountError) or isinstance(exc, MailHostError) and exc.cause in {
-        PASSWORD_REFUSED, SERVER_UNREACHABLE, MESSAGE_REFUSED,
-    }
 
 
 # Reviewed-draft storage is shared by provider families in tools.reviewed_drafts.
@@ -368,7 +361,7 @@ class EmailSendTool(Tool):
             acquire=lambda: _none(), provider_errors=(GoogleError,),
             send=lambda _token: mailhost_outbound.send(account_id, body), result_id=lambda result: result.message_id,
             success=lambda result, message_id: _mailhost_send_success(result, message_id, account_id),
-            sign_in_error=lambda exc: str(exc), request_error=str, never_sent=_refused_before_send,
+            sign_in_error=lambda exc: str(exc), request_error=str, never_sent=mailhost_outbound.refused_before_send,
             still_sending=STILL_SENDING, claim_error="Not sent: couldn't check the draft. Try again.",
             unconfirmed=MAILHOST_UNCONFIRMED, label="email_send",
         )

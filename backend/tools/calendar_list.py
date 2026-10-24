@@ -22,7 +22,6 @@ from connections.calendar_document import OFFSET_REQUIRED, compose_document, par
 from connections.google.calendar_document import event_summaries
 from connections.google.client import GoogleError, GoogleRequestFailed
 from connections.mailhost import agenda, outbound as mailhost_outbound
-from connections.mailhost.errors import MESSAGE_REFUSED, PASSWORD_REFUSED, SERVER_UNREACHABLE, MailHostError
 from infra import config
 from infra.db_async import run_in_db
 from tools.action_delivery import deliver_claimed
@@ -204,12 +203,6 @@ def _google_invite_body(invite) -> dict[str, Any]:
             "attendees": [{"email": email} for email in invite.attendees], "description": invite.description}
 
 
-def _refused_before_send(exc: Exception) -> bool:
-    return isinstance(exc, AccountError) or isinstance(exc, MailHostError) and exc.cause in {
-        PASSWORD_REFUSED, SERVER_UNREACHABLE, MESSAGE_REFUSED,
-    }
-
-
 # Google takes a request body; a mail host is handed the validated invite itself.
 _INVITE_BODIES = {"google": _google_invite_body}
 _INVITE_PROVIDERS = ("google", "mailhost")
@@ -320,8 +313,11 @@ class CalendarSendInviteTool(Tool):
             draft_id, acquire=no_token, provider_errors=(GoogleError,),
             send=lambda _token: mailhost_outbound.send_invite(account_id, address, body), result_id=lambda sent: sent.uid,
             success=_mailhost_invite_success, sign_in_error=str,
-            request_error=str, never_sent=_refused_before_send, still_sending=STILL_SENDING,
+            request_error=str, never_sent=mailhost_outbound.refused_before_send, still_sending=STILL_SENDING,
             claim_error="Not sent: couldn't check the invite draft. Try again.",
-            unconfirmed="The mail host didn't confirm the invite send, so it may have gone out. Check the person's calendar first.",
+            unconfirmed=(
+                "The mail host didn't confirm the invite send, so the invitation may have gone out, but the "
+                "event isn't on the person's calendar. Don't send this invite again: check the person's Sent mail first."
+            ),
             label="calendar_send_invite",
         )

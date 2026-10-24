@@ -103,6 +103,7 @@ async def test_send_submits_over_smtp_to_every_recipient_and_keeps_a_sent_copy(h
     sent = message_from_bytes(data, policy=policy.default)
     assert sent["Subject"] == "Lunch" and sent["From"] == ADDRESS and out["account_id"] == host.account_id
     assert out["sent_message_id"] == sent["Message-ID"]
+    assert sent["Message-ID"].endswith("@" + ADDRESS.rpartition("@")[2] + ">")
     assert [folder for folder, _ in host.built.imap.appended] == ["Drafts", "Sent"]
     assert message_from_bytes(host.built.imap.appended[1][1], policy=policy.default)["Message-ID"] == sent["Message-ID"]
     assert _row(saved["draft_id"])["state"] == "sent"

@@ -20,7 +20,7 @@ _MESSAGES = {
     PASSWORD_REFUSED: "{name} didn’t accept this app password. Make a new one in your {name} account settings.",
     IMAP_OFF: "{name} has email access for other apps turned off. Turn on IMAP in {name} settings, then try again.",
     CALENDAR_NOT_OFFERED: "{name} didn’t offer a calendar to CORSIA, so only email is connected.",
-    MESSAGE_REFUSED: "The mail server refused this message, so it wasn't sent. Check the addresses.",
+    MESSAGE_REFUSED: "The mail server refused this message, so it wasn’t sent. Check the addresses.",
 }
 
 

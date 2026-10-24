@@ -12,6 +12,7 @@ from email.message import EmailMessage
 from email.utils import make_msgid
 from uuid import uuid4
 
+from connections.account_errors import AccountError
 from connections.calendar_document import Invite
 from connections.connected_accounts import get_account
 from connections.mailhost import caldav, folders, imap, invites, read, smtp
@@ -34,6 +35,16 @@ class InviteSent:
     on_calendar: bool
     not_delivered_to: tuple[str, ...]
     sent_copy_missing: bool
+
+
+def refused_before_send(exc: Exception) -> bool:
+    """Whether a failed :func:`send` or :func:`send_invite` proves nothing went out.
+
+    Every account or mail-host refusal (``MailHostError`` is an ``AccountError``) happens
+    before SMTP accepts the message; after acceptance a transport error propagates as itself
+    and a Sent-copy or calendar failure becomes a flag on the result.
+    """
+    return isinstance(exc, AccountError)
 
 
 def _from_account(message: EmailMessage, address: str) -> None:
@@ -76,7 +87,8 @@ async def send(account_id: str, message: EmailMessage) -> SentMessage:
     address = await run_in_db(_account_address, account_id)
     _from_account(message, address)
     if not message.get("Message-ID"):
-        message["Message-ID"] = make_msgid()
+        # The account's own domain: the default would put this computer's name in every recipient's copy.
+        message["Message-ID"] = make_msgid(domain=address.rpartition("@")[2] or "localhost")
 
     def deliver() -> list[str]:
         return smtp.send_message(endpoints, endpoints.username, password, message, from_addr=address)
