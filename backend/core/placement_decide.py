@@ -13,13 +13,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from core.lesson_trials import (
-    BODY_WORDS, TRIAL_SCHEMA, Trial, lesson_block, validate_case, validate_trial,
-)
+from core.lesson_case import CASE_SCHEMA, CORRECTION_CAUSES, NEW_EVIDENCE, validate_case
+from core.lesson_trials import BODY_WORDS, TRIAL_SCHEMA, Trial, lesson_block, validate_trial
 
 Q1 = ("thread", "agent", "project", "everywhere")
 Q2 = ("every_turn", "task_start", "lookup")
-NEW_EVIDENCE = ("target_changed", "case_differs")
 
 #: WORKSPACE-STANDARD.md §Caps. A non-agent thread's context files take the
 #: RESPONSIBILITY.md row (Context & Memory, 2026-09-24).
@@ -92,53 +90,9 @@ ANSWER_SCHEMA: dict[str, Any] = {
         "target_file": {"type": ["string", "null"]},
         "new_target_path": {"type": ["string", "null"]},
         "target_section": {"type": ["string", "null"]},
-        "cause": {
-            "type": ["string", "null"],
-            "enum": [
-                "wrong_rule", "no_foundation", "rule_gap", "process_gap", "not_delivered",
-                "not_followed", "cant_be_done", None,
-            ],
-        },
-        "new_evidence": {"type": ["string", "null"], "enum": ["target_changed", "case_differs", None]},
-        "case": {
-            "type": ["object", "null"],
-            "additionalProperties": False,
-            "required": ["what_happened", "right_call", "does_not_apply", "correction_subject"],
-            "properties": {
-                "what_happened": {"type": "string"},
-                "right_call": {"type": "string"},
-                "does_not_apply": {"type": "string"},
-                "correction_subject": {"type": "string"},
-                "actions": {
-                    "type": "object",
-                    "additionalProperties": False,
-                    "required": ["required_actions", "forbidden_actions", "decisive_action"],
-                    "properties": {
-                        "required_actions": {
-                            "type": "array", "minItems": 1,
-                            "items": {
-                                "type": "object", "additionalProperties": False,
-                                "required": ["tool", "params"],
-                                "properties": {"tool": {"type": "string"}, "params": {"type": "object"}},
-                            },
-                        },
-                        "forbidden_actions": {
-                            "type": "array",
-                            "items": {
-                                "type": "object", "additionalProperties": False,
-                                "required": ["tool", "params"],
-                                "properties": {"tool": {"type": "string"}, "params": {"type": "object"}},
-                            },
-                        },
-                        "decisive_action": {
-                            "type": "object", "additionalProperties": False,
-                            "required": ["tool", "params"],
-                            "properties": {"tool": {"type": "string"}, "params": {"type": "object"}},
-                        },
-                    },
-                }
-            },
-        },
+        "cause": {"type": ["string", "null"], "enum": [*CORRECTION_CAUSES, None]},
+        "new_evidence": {"type": ["string", "null"], "enum": [*NEW_EVIDENCE, None]},
+        "case": CASE_SCHEMA,
         "trial": TRIAL_SCHEMA,
     },
 }
