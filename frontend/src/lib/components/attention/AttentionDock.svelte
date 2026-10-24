@@ -26,7 +26,7 @@
 	import DecisionChip from './DecisionChip.svelte';
 	import AdaptiveDrawer from '$lib/components/ui/AdaptiveDrawer.svelte';
 	import ExternalReviewRow from './ExternalReviewRow.svelte';
-	import { dockQueue as getDockQueue, label, decisionMeta } from './dockPresentation';
+	import { dockQueue as getDockQueue, label, decisionMeta, regionLabel as getRegionLabel } from './dockPresentation';
 	import {
 		collapse,
 		EMPTY,
@@ -106,17 +106,7 @@
 
 	const deferredId = 'attention-dock-deferred';
 
-	/**
-	 * The landmark's name carries the state a sighted user reads off the bar, so
-	 * assistive tech gains it on arrival rather than after exploring.
-	 */
-	const regionLabel = $derived(
-		!current
-			? 'Needs you'
-			: dockQueue.count > 1
-				? `Needs you — ${label(current)}, ${dockQueue.count} waiting`
-				: `Needs you — ${label(current)}`,
-	);
+	const regionLabel = $derived(getRegionLabel(current, dockQueue.count));
 
 	async function open() {
 		if (!current || suppressed) return;
