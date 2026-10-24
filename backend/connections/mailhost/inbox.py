@@ -6,8 +6,6 @@ new UIDVALIDITY establishes a floor; neither path emits historical mail.
 
 from __future__ import annotations
 
-import asyncio
-
 from connections.mailhost import imap, read
 from infra.db_async import run_in_db
 

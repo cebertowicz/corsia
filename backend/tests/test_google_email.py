@@ -35,7 +35,7 @@ from tests.test_google_sign_in import (  # noqa: F401  (fixtures)
     conductor,
     google,
 )
-from tools import action_delivery, action_gate, google_email
+from tools import action_delivery, action_gate, gmail_backend, google_email
 from tools.action_drafts import claim_for_send, create_draft, mark_sent, record_draft
 from tools.action_gate import Approved
 from tools.google_email import EmailDraftTool, EmailSendTool
@@ -405,7 +405,7 @@ async def test_a_send_whose_outcome_is_unknown_stays_claimed_and_is_not_repeated
     mail.send_mode = mode
     saved = await _draft(mail)
     out = await _send(mail, saved)
-    assert out == f"Error: {google_email.UNCONFIRMED}"
+    assert out == f"Error: {gmail_backend.EMAIL_UNCONFIRMED}"
     assert _row(saved["draft_id"])["state"] == "sending"
     mail.send_mode = "ok"
     again = await _send(mail, saved)

@@ -16,11 +16,19 @@ from email.utils import getaddresses
 
 from connections.mailhost import tls
 from connections.mailhost.endpoints import Endpoints, Server
-from connections.mailhost.errors import MESSAGE_REFUSED, PASSWORD_REFUSED, SERVER_UNREACHABLE, MailHostError
+from connections.mailhost.errors import (
+    MESSAGE_REFUSED, PASSWORD_REFUSED, RECIPIENTS_REFUSED, SENDER_REFUSED, SERVER_UNREACHABLE, MailHostError,
+)
 
 TIMEOUT_SECONDS = 20.0
 _LOGIN_TRANSPORT = (OSError, ssl.SSLError, socket.timeout, smtplib.SMTPException)
-_SUBMISSION_REFUSED = (smtplib.SMTPRecipientsRefused, smtplib.SMTPSenderRefused, smtplib.SMTPDataError)
+# Each refusal proves nothing was accepted; its cause decides what the person is told to check.
+_SUBMISSION_REFUSED: tuple[tuple[type[smtplib.SMTPException], str], ...] = (
+    (smtplib.SMTPRecipientsRefused, RECIPIENTS_REFUSED),
+    (smtplib.SMTPSenderRefused, SENDER_REFUSED),
+    (smtplib.SMTPDataError, MESSAGE_REFUSED),
+)
+_REFUSALS = tuple(kind for kind, _cause in _SUBMISSION_REFUSED)
 log = logging.getLogger(__name__)
 
 
@@ -97,8 +105,9 @@ def send_message(
     client = _logged_in_client(ep, username, password)
     try:
         refused = client.send_message(message, from_addr=from_addr, to_addrs=_recipients(message))
-    except _SUBMISSION_REFUSED:
-        raise MailHostError(MESSAGE_REFUSED, host=ep.name) from None
+    except _REFUSALS as exc:
+        cause = next(cause for kind, cause in _SUBMISSION_REFUSED if isinstance(exc, kind))
+        raise MailHostError(cause, host=ep.name) from None
     finally:
         _close(client)
     return list(refused)

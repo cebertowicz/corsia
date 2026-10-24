@@ -20,6 +20,7 @@ import infra.config as config
 from connections.mailhost import check, read as mailhost_read, store
 from connections.mailhost import endpoints as mailhost_endpoints
 from connections.mailhost.endpoints import Server
+from connections.mailhost.errors import SENDER_REFUSED, MailHostError
 from events.connectors import mail_poller as poller
 from infra.database import get_db
 from infra.platform_paths import WorkspaceSelection
@@ -126,7 +127,7 @@ async def test_a_sender_refusal_reopens_the_draft_and_never_retries_submission(m
     host = await make_host(smtp={"refuse_sender": True})
     saved = await _draft(host)
     out = await _send(host, saved)
-    assert out.startswith("Error: Not sent: The mail server refused this message")
+    assert out == f"Error: Not sent: {MailHostError(SENDER_REFUSED, host='mail.test')}"
     assert _row(saved["draft_id"])["state"] == "open"
     assert host.built.smtp.sent == [] and len(host.built.smtp.mail_from) == 1
     _no_leak(out)

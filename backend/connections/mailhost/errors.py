@@ -12,15 +12,29 @@ SERVER_UNREACHABLE = "server_unreachable"
 PASSWORD_REFUSED = "password_refused"
 IMAP_OFF = "imap_off"
 CALENDAR_NOT_OFFERED = "calendar_not_offered"
+RECIPIENTS_REFUSED = "recipients_refused"
+SENDER_REFUSED = "sender_refused"
 MESSAGE_REFUSED = "message_refused"
-CAUSES = frozenset((SERVER_UNREACHABLE, PASSWORD_REFUSED, IMAP_OFF, CALENDAR_NOT_OFFERED, MESSAGE_REFUSED))
+COPY_REFUSED = "copy_refused"
+CAUSES = frozenset((
+    SERVER_UNREACHABLE, PASSWORD_REFUSED, IMAP_OFF, CALENDAR_NOT_OFFERED, RECIPIENTS_REFUSED, SENDER_REFUSED,
+    MESSAGE_REFUSED, COPY_REFUSED,
+))
 
 _MESSAGES = {
     SERVER_UNREACHABLE: "CORSIA couldn’t reach {host}. Check the server names with your host or IT.",
     PASSWORD_REFUSED: "{name} didn’t accept this app password. Make a new one in your {name} account settings.",
     IMAP_OFF: "{name} has email access for other apps turned off. Turn on IMAP in {name} settings, then try again.",
     CALENDAR_NOT_OFFERED: "{name} didn’t offer a calendar to CORSIA, so only email is connected.",
-    MESSAGE_REFUSED: "The mail server refused this message, so it wasn’t sent. Check the addresses.",
+    RECIPIENTS_REFUSED: "{host} refused the recipient addresses, so it wasn’t sent. Check the addresses.",
+    SENDER_REFUSED: (
+        "{host} refused to send from this account, so it wasn’t sent. Check the account in the person’s own mail app."
+    ),
+    MESSAGE_REFUSED: (
+        "{host} refused this message, so it wasn’t sent. It may be too large or look like spam to the host; "
+        "ask the person what to change."
+    ),
+    COPY_REFUSED: "The copy wasn’t saved: {name} refused it, so the folder may be full or read-only.",
 }
 
 

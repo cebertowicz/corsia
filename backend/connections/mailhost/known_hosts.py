@@ -29,6 +29,7 @@ class KnownHost:
     bare_name_alternate: bool = False
     #: False when ``app_password_url`` is only the host's homepage: the row then names the page in plain text, not as a link.
     shows_account_link: bool = True
+
     def endpoints(self, address: str) -> Endpoints:
         alternates = (address.split("@", 1)[0],) if self.bare_name_alternate else ()
         return Endpoints(

@@ -1,8 +1,11 @@
 """RFC 6186/6764 SRV discovery for an unknown mail host.
 
-DNS is consulted only for the address's own domain and only before CORSIA asks the
-person for server names.  A partial answer is ignored: using it would leave the
-person with a row that cannot send mail.  Resolver replies never reach an agent.
+Only the lookup name is the address's own domain: the SRV target a record names is
+not checked against it, since plain DNS can't prove who answered.  So the person is
+told where the app password goes (``password_goes_to``) before they enter it, and
+DNS is consulted only before CORSIA asks them for server names.  A partial answer
+is ignored: using it would leave the person with a row that cannot send mail.
+Resolver replies never reach an agent.
 """
 
 from __future__ import annotations

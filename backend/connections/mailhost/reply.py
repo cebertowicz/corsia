@@ -12,7 +12,7 @@ import email.policy
 import json
 from email.utils import getaddresses
 
-from connections.google.client import GoogleError
+from connections.account_errors import AccountError
 from connections.mail.email_document import DraftRefused, is_plain_address, reply_target_label
 from connections.mailhost import imap, read
 from infra.db_async import run_in_db
@@ -55,7 +55,8 @@ async def reply_target(account_id: str, message_id: str) -> tuple[dict, str]:
 async def kept_reply_label(account_id: str, existing: dict | None) -> str | None:
     """The line for an update that names no new reply target but still threads under the old.
 
-    A message that can no longer be read must not block the person's edit.
+    A message that can no longer be read, an unreachable host or a refused password must not block the
+    person's edit.
     """
     try:
         kept = json.loads(existing["target_json"] or "{}").get("reply_to") if existing else None
@@ -65,5 +66,5 @@ async def kept_reply_label(account_id: str, existing: dict | None) -> str | None
         return None
     try:
         return (await reply_target(account_id, str(kept)))[1]
-    except (DraftRefused, GoogleError):
+    except (DraftRefused, AccountError):
         return reply_target_label(None, None)

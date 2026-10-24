@@ -18,7 +18,7 @@ from contextlib import contextmanager
 
 from connections.mailhost import folders, tls
 from connections.mailhost.endpoints import Endpoints
-from connections.mailhost.errors import IMAP_OFF, PASSWORD_REFUSED, SERVER_UNREACHABLE, MailHostError
+from connections.mailhost.errors import COPY_REFUSED, IMAP_OFF, PASSWORD_REFUSED, SERVER_UNREACHABLE, MailHostError
 
 TIMEOUT_SECONDS = 20.0
 MAILBOX = "INBOX"
@@ -26,6 +26,8 @@ _TRANSPORT = (OSError, EOFError, ssl.SSLError, socket.timeout, imaplib.IMAP4.err
 _IMAP_OFF = re.compile(r"imap.{0,40}(disabled|not enabled|turned off|not allowed|not activated)|disabled.{0,40}imap", re.I)
 _TEMPORARY = re.compile(r"\[(?:UNAVAILABLE|SERVERBUG|LIMIT|INUSE)\]|too many connections|try again later", re.I)
 _FETCHED = re.compile(rb"UID (\d+)")
+# What the person's own mail app sets: a draft it can open and edit, and sent mail already read.
+_APPEND_FLAGS = {folders.DRAFTS: r"(\Draft \Seen)", folders.SENT: r"(\Seen)"}
 _locks: dict[str, threading.Lock] = {}
 _locks_guard = threading.Lock()
 
@@ -150,18 +152,58 @@ def _quoted(folder: str) -> str:
     return '"' + folder.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
+def _folder_key(ep: Endpoints, username: str) -> tuple[str, str]:
+    return f"{ep.imap.host}:{ep.imap_port()}", username
+
+
 def append(ep: Endpoints, username: str, password: str, kind: str, raw: bytes) -> bool:
-    """Save a reviewed RFC 822 message in the host's Drafts or Sent folder; False when the host shows no such folder."""
+    """Save a reviewed RFC 822 message in the host's Drafts or Sent folder; False when the host shows no such folder.
+
+    A host that refuses the APPEND after login (over quota, a read-only folder) is a refused copy, not an
+    unreachable server.
+    """
     with session(ep, username, password) as conn:
-        key = (f"{ep.imap.host}:{ep.imap_port()}", username)
+        key = _folder_key(ep, username)
         folder = folders.resolve(conn, key, kind)
         if folder is None:
             return False
-        status, _ = conn.append(_quoted(folder), None, None, raw)
+        status, _ = conn.append(_quoted(folder), _APPEND_FLAGS[kind], None, raw)
         if status != "OK":
             folders.forget(key)
-            raise _unreachable(ep)
+            raise MailHostError(COPY_REFUSED, name=ep.name)
         return True
+
+
+def _uidplus(conn: imaplib.IMAP4) -> bool:
+    """Whether the logged-in host offers ``UID EXPUNGE`` (many list UIDPLUS only after login)."""
+    status, data = conn.capability()
+    return status == "OK" and b"UIDPLUS" in b" ".join(part for part in data if isinstance(part, bytes)).upper().split()
+
+
+def remove_copy(ep: Endpoints, username: str, password: str, kind: str, message_id: str) -> None:
+    """Delete CORSIA's own copy, found by its Message-ID, from the host's Drafts or Sent folder.
+
+    Only that copy is flagged ``\\Deleted``. It is expunged by UID when the host offers UIDPLUS and otherwise
+    left flagged: a plain EXPUNGE would also purge every message the person deleted and hasn't purged.
+    """
+    with session(ep, username, password) as conn:
+        folder = folders.resolve(conn, _folder_key(ep, username), kind)
+        if folder is None:
+            return
+        status, _ = conn.select(_quoted(folder))
+        if status != "OK":
+            raise _unreachable(ep)
+        status, found = conn.uid("SEARCH", "HEADER", "Message-ID", _quoted(message_id))
+        if status != "OK":
+            raise _unreachable(ep)
+        uids = ",".join(uid.decode() for uid in (found[0] or b"").split())
+        if not uids:
+            return
+        status, _ = conn.uid("STORE", uids, "+FLAGS.SILENT", r"(\Deleted)")
+        if status != "OK":
+            raise _unreachable(ep)
+        if _uidplus(conn):
+            conn.uid("EXPUNGE", uids)
 
 
 def reply_headers(ep: Endpoints, username: str, password: str, validity: int, uid: int) -> bytes | None:

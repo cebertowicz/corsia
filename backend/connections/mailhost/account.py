@@ -4,6 +4,9 @@ The agent supplies an address and, only for a host CORSIA doesn't know, server n
 host's settings come from the table alone, and an address that already has a row gets that
 row back with its servers untouched: a server name decides where the person's password goes,
 so neither an agent nor a second call can redirect it (G3). Refusal texts are fixed.
+
+An address that already has a row is answered before any DNS lookup, and SRV discovery runs
+off the database pool: its network wait never holds a database worker or the write lock.
 """
 
 from __future__ import annotations
@@ -19,7 +22,8 @@ from connections.mailhost.endpoints import (
 )
 from connections.mailhost.known_hosts import known_host
 from infra import key_store
-from infra.database import write_transaction
+from infra.database import get_db, write_transaction
+from infra.db_async import run_in_db, run_off_db
 
 GOOGLE_DOMAINS = frozenset(("gmail.com", "googlemail.com"))
 MICROSOFT_DOMAINS = frozenset(("outlook.com", "hotmail.com", "live.com", "msn.com"))
@@ -92,23 +96,34 @@ def describe(account_id: str, *, db: sqlite3.Connection, existing: bool) -> dict
     return described
 
 
-def connect(
-    address: object, *, thread_id: str, imap: object = None, smtp: object = None, caldav: object = None,
-    username: object = None, db: sqlite3.Connection,
-) -> dict[str, Any]:
-    """Add the address's row and Keys entry, or return the row it already has unchanged."""
+def checked_address(address: object) -> str:
+    """The address in its clean form; a Gmail or Microsoft address is sent to its own connect tool."""
     clean = parse_address(address)
     if domain_of(clean) in GOOGLE_DOMAINS:
         raise EndpointsRefused(USE_GOOGLE)
     if domain_of(clean) in MICROSOFT_DOMAINS:
         raise EndpointsRefused(USE_MICROSOFT)
-    # DNS discovery can take several network round trips; never hold the write lock for it.
-    # Keep a refused candidate until the in-transaction existing-row check, preserving the
-    # documented idempotent retry behavior for an address already connected.
+    return clean
+
+
+def existing(clean: str, *, db: sqlite3.Connection) -> dict[str, Any] | None:
+    """The row an address already has, described, or None."""
+    found = store.row_exists_for_address(clean, db=db)
+    return describe(found, db=db, existing=True) if found is not None else None
+
+
+def settings(
+    clean: str, imap: object = None, smtp: object = None, caldav: object = None, username: object = None,
+) -> Endpoints | EndpointsRefused:
+    """A new row's settings, or the refusal kept until :func:`create` re-checks for a row (may look up DNS)."""
     try:
-        endpoints = _endpoints(clean, imap, smtp, caldav, username)
+        return _endpoints(clean, imap, smtp, caldav, username)
     except EndpointsRefused as exc:
-        endpoints = exc
+        return exc
+
+
+def create(clean: str, endpoints: Endpoints | EndpointsRefused, *, thread_id: str, db: sqlite3.Connection) -> dict[str, Any]:
+    """Add the address's row and Keys entry, or return the row another call added meanwhile, unchanged."""
     with write_transaction(db, scope="mail_host_connect") as conn:
         found = store.row_exists_for_address(clean, db=conn)
         if found is not None:
@@ -127,3 +142,24 @@ def connect(
         result = describe(account_id, db=conn, existing=False)
     emit_lifecycle_event("connect_started", account_id, MAILHOST_PROVIDER)
     return result
+
+
+def _with_db(job: Any, *args: Any, **kwargs: Any) -> Any:
+    db = get_db()
+    try:
+        return job(*args, db=db, **kwargs)
+    finally:
+        db.close()
+
+
+async def connect(
+    address: object, *, thread_id: str, imap: object = None, smtp: object = None, caldav: object = None,
+    username: object = None,
+) -> dict[str, Any]:
+    """Add the address's row and Keys entry, or return the row it already has unchanged."""
+    clean = checked_address(address)
+    found = await run_in_db(_with_db, existing, clean)
+    if found is not None:
+        return found
+    endpoints = await run_off_db(settings, clean, imap, smtp, caldav, username)
+    return await run_in_db(_with_db, create, clean, endpoints, thread_id=thread_id)

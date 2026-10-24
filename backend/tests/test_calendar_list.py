@@ -15,14 +15,14 @@ from tests.test_action_gate import _admit, _bind, _draft, workspace  # noqa: F40
 from tests.test_google_email import mail  # noqa: F401 (fixture)
 from tests.test_google_sign_in import client_file, conductor, google  # noqa: F401 (mail dependencies)
 from connections.calendar_document import attendee_emails, compose_document
-from tools import action_gate, calendar_list
+from tools import action_gate, calendar_list, gmail_backend
 from tools.action_drafts import record_draft
 from tools.action_gate import Approved, Refusal
 from tools.calendar_list import CalendarDraftInviteTool, CalendarListTool, CalendarSendInviteTool
 
 
 async def _allowed(_kwargs):
-    return {"id": "acct-1", "address": "person@example.com", "state": "connected"}
+    return {"id": "acct-1", "address": "person@example.com", "state": "connected", "provider": "google"}
 
 
 @pytest.mark.asyncio
@@ -52,11 +52,11 @@ async def test_list_defaults_to_primary_expands_recurring_and_preserves_google_t
              "summary": "Holiday", "transparency": "transparent"},
         ], "nextPageToken": "more"}
 
-    monkeypatch.setattr(calendar_list.google_client, "get_json", get_json)
+    monkeypatch.setattr(gmail_backend.google_client, "get_json", get_json)
     result = json.loads(await CalendarListTool().execute(
         time_min="2026-10-15T00:00:00-07:00", time_max="2026-10-16T00:00:00-07:00",
     ))
-    assert calls == [("acct-1", calendar_list._event_url("primary"), {
+    assert calls == [("acct-1", gmail_backend.event_url("primary"), {
         "timeMin": "2026-10-15T00:00:00-07:00", "timeMax": "2026-10-16T00:00:00-07:00",
         "maxResults": 250, "singleEvents": "true", "orderBy": "startTime",
     })]
@@ -65,7 +65,7 @@ async def test_list_defaults_to_primary_expands_recurring_and_preserves_google_t
          "title": "Standup", "attendees": ["sam@example.com"], "free/busy": "busy"},
         {"id": "all-day", "start": "2026-10-16", "end": "2026-10-17", "title": "Holiday",
          "attendees": [], "free/busy": "free"},
-    ], "note": calendar_list.CUT_NOTE}
+    ], "note": gmail_backend.CUT_NOTE}
 
 
 def test_first_description_lines_and_email_refusal_bytes_are_pinned():
@@ -119,7 +119,7 @@ async def test_draft_and_send_follow_the_email_lifecycle_with_attendee_notificat
 
     def calendar_handler(request):
         url = str(request.url).split("?")[0]
-        if url == calendar_list._event_url("primary") and request.method == "POST":
+        if url == gmail_backend.event_url("primary") and request.method == "POST":
             requests.append(request)
             return httpx.Response(200, json={"id": "event-1", "htmlLink": "https://calendar.google/e/1"})
         return inner(request)
@@ -207,7 +207,7 @@ async def test_provable_calendar_insert_failure_releases_the_claim(mail, monkeyp
     inner = mail.fake.handler
 
     def handler(request):
-        if str(request.url).split("?")[0] == calendar_list._event_url("primary"):
+        if str(request.url).split("?")[0] == gmail_backend.event_url("primary"):
             return httpx.Response(400, json={})
         return inner(request)
 
@@ -232,7 +232,7 @@ async def test_uncertain_calendar_insert_keeps_the_claim_and_cannot_repeat(mail,
     inner = mail.fake.handler
 
     def handler(request):
-        if str(request.url).split("?")[0] == calendar_list._event_url("primary"):
+        if str(request.url).split("?")[0] == gmail_backend.event_url("primary"):
             calls.append(request)
             if outcome == "500":
                 return httpx.Response(500, json={})
@@ -248,7 +248,7 @@ async def test_uncertain_calendar_insert_keeps_the_claim_and_cannot_repeat(mail,
     first = await CalendarSendInviteTool().execute(
         _thread_id=mail.thread, draft_id=saved["draft_id"], revision=saved["revision"],
     )
-    assert first == f"Error: {calendar_list.UNCONFIRMED}"
+    assert first == f"Error: {gmail_backend.INVITE_UNCONFIRMED}"
     row = get_db().execute("SELECT state FROM action_drafts WHERE id=?", (saved["draft_id"],)).fetchone()
     assert row["state"] == "sending"
     again = await CalendarSendInviteTool().execute(
@@ -308,7 +308,7 @@ async def test_send_refuses_when_the_drafts_account_is_signed_out(mail, monkeypa
     db = get_db()
     db.execute("UPDATE connected_accounts SET state='signed_out' WHERE id=?", (mail.account,))
     db.commit()
-    monkeypatch.setattr(calendar_list.google_client, "request_json", request_json)
+    monkeypatch.setattr(gmail_backend.google_client, "request_json", request_json)
     output = await CalendarSendInviteTool().execute(
         _thread_id=mail.thread, draft_id=saved["draft_id"], revision=saved["revision"],
     )

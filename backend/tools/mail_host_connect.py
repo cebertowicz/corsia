@@ -15,7 +15,6 @@ from typing import Any
 from connections.connected_accounts import ConnectedAccountError
 from connections.mailhost import account, store
 from connections.mailhost.endpoints import EndpointsRefused
-from infra.database import get_db
 from infra.db_async import run_in_db
 from tools.base import Tool
 from tools.corsia_api import ApiCallError, conductor_user
@@ -33,17 +32,6 @@ NEXT_EXISTING = (
     "The person fixes it on its row in Settings › Connected apps."
 )
 NEXT_CONNECTED = "This address is already connected; nothing was changed."
-
-
-def _connect(thread_id: str, arguments: dict[str, Any]) -> dict[str, Any]:
-    db = get_db()
-    try:
-        return account.connect(
-            arguments.get("address"), thread_id=thread_id, imap=arguments.get("imap"), smtp=arguments.get("smtp"),
-            caldav=arguments.get("caldav"), username=arguments.get("username"), db=db,
-        )
-    finally:
-        db.close()
 
 
 def _next(result: dict[str, Any]) -> str:
@@ -100,7 +88,10 @@ class MailHostConnectTool(Tool):
         except ApiCallError:
             return "Error: Only the designated CORSIA thread can use mail host tools."
         try:
-            result = await run_in_db(_connect, actor, kwargs)
+            result = await account.connect(
+                kwargs.get("address"), thread_id=actor, imap=kwargs.get("imap"), smtp=kwargs.get("smtp"),
+                caldav=kwargs.get("caldav"), username=kwargs.get("username"),
+            )
         except EndpointsRefused as exc:
             return f"Error: {exc}"
         except ConnectedAccountError:
