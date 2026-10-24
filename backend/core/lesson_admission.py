@@ -226,7 +226,8 @@ def _render(
 ) -> tuple[str, str]:
     """The trial's identity and its file text, against what the path holds now.
 
-    An own trial already there is revised and keeps its identity and evidence.
+    An own trial already there is revised and keeps its identity, its evidence
+    and any case metadata the new answer leaves out.
     An own retired or promoted lesson is captured again, with its origin kept.
     Anything else at the path is someone else's name.
     """
@@ -236,7 +237,8 @@ def _render(
     assert trial is not None
     from core.lesson_corrections import merge_subjects
 
-    identity, origin, earlier = capture_id, None, ()
+    identity, origin, earlier, case_metadata = capture_id, None, (), decision.case_metadata
+    revising = False
     subjects = merge_subjects(
         capture.originating_subjects if capture is not None else (), decision.originating_subjects,
     )
@@ -248,15 +250,22 @@ def _render(
                 "your trial lesson; choose a new name"
             ))
         if current.lesson.state in ("watch", "trial"):
+            revising = True
             identity, earlier = current.lesson.id, current.lesson.source_refs
+            case_metadata = {**current.lesson.case_metadata, **decision.case_metadata}
             subjects = merge_subjects(current.lesson.originating_subjects, subjects)
         elif current.lesson.id != capture_id:
             origin = {"id": current.lesson.id, "behavioral_sha256": current.behavioral_sha256}
+    if "new_evidence" in decision.case_metadata and not revising:
+        raise TrialRefused("invalid-output", (
+            "new_evidence is only for revising your own watch or trial lesson; "
+            "leave it out and call again"
+        ))
     text = lesson_files.render_trial(
         lesson_id=identity, owner=thread_id, name=str(decision.skill_name),
         description=str(decision.skill_description), text=decision.text, trial=trial,
         source_refs=lesson_files.merged_refs(earlier, entry["body"].get("source_refs") or []),
-        originating_subjects=subjects, origin=origin,
+        originating_subjects=subjects, origin=origin, case_metadata=case_metadata,
     )
     errors = validate_skill_text(text).errors
     if errors:

@@ -347,6 +347,49 @@ async def test_a_revision_keeps_the_lesson_and_replaces_its_review(env: Env) -> 
     assert [lesson["behavioral_sha256"] for lesson in _offered(env)] == [after.behavioral_sha256]
 
 
+CASE = {
+    "what_happened": "The placement case was not saved.",
+    "right_call": "Persist the case through the existing lesson writer.",
+    "does_not_apply": "A lesson with no case.",
+    "actions": {
+        "required_actions": [
+            {"tool": "read_file", "params": {"path": "context/rule.md"}},
+            {"tool": "plan_update", "params": {"operation": "mark_done"}},
+        ],
+        "forbidden_actions": [{"tool": "write_file", "params": {"path": "context/rule.md"}}],
+        "decisive_action": {"tool": "plan_update", "params": {"operation": "mark_done"}},
+    },
+}
+
+
+async def test_a_trial_keeps_its_case_and_a_revision_replaces_only_what_it_supplies(env: Env) -> None:
+    first = _entry(env)
+    _place(env, first, _answer(
+        case=CASE, cause="rule_gap", target_file="context/rule.md", target_section="Lessons",
+    ))
+    await _drain(env.worker)
+    before = lesson_files.read_trial(_skill(env).read_text())
+    assert before is not None
+    assert before.lesson.case_metadata == {
+        "target_file": "context/rule.md", "target_section": "Lessons", "cause": "rule_gap", "case": CASE,
+    }
+
+    second = _entry(env, [{"kind": "turn", "reference": "turn-19"}], "also name the branch")
+    revised = _place(env, second, _answer(
+        text="Name the exact commit and branch a check ran on.",
+        target_section="Checks", new_evidence="target_changed",
+    ))
+    await _drain(env.worker)
+
+    assert not revised.startswith("Error")
+
+    after = lesson_files.read_trial(_skill(env).read_text())
+    assert after is not None and after.lesson.id == before.lesson.id
+    assert after.lesson.case_metadata == {
+        **before.lesson.case_metadata, "target_section": "Checks", "new_evidence": "target_changed",
+    }
+
+
 async def test_a_retired_lesson_tried_again_is_a_new_lesson_naming_its_origin(env: Env) -> None:
     first = _entry(env)
     _place(env, first)
@@ -420,6 +463,8 @@ async def test_a_checkpoint_stages_a_trial_and_its_install_hands_it_to_the_worke
     (_answer(skill_name="Not A Slug"), "Error: skill_name must be a new lowercase-hyphenated"),
     (_answer(duplicate_of="- some line"), "Error: duplicate_of and trial do not go together"),
     (_answer(trial={"boundary": "word " * 160}), "Error: a lesson body is at most 150 words"),
+    (_answer(new_evidence="case_differs"),
+     "Error: new_evidence is only for revising your own watch or trial lesson"),
 ])
 async def test_an_answer_that_cannot_be_a_trial_goes_back_to_be_corrected(
     env: Env, answer, message,

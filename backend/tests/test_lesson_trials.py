@@ -70,6 +70,11 @@ def test_a_plain_skill_and_a_valid_lesson_both_validate():
         (VALID_BLOCK.replace("state: trial", "state: promoted"),
          "corsia.lesson.destination {path, version} is required when promoted"),
         (VALID_BLOCK + "    review_ref: ''\n", "corsia.lesson.review_ref must be a non-empty string"),
+        (VALID_BLOCK + "    cause: bad_luck\n",
+         "corsia.lesson.cause must be one of wrong_rule, no_foundation, rule_gap, process_gap, "
+         "not_delivered, not_followed, cant_be_done"),
+        (VALID_BLOCK + "    new_evidence: maybe\n",
+         "corsia.lesson.new_evidence must be one of target_changed, case_differs"),
     ],
 )
 def test_a_malformed_lesson_is_a_skill_error(block, error):
