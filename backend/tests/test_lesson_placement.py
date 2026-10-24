@@ -52,6 +52,12 @@ class Env:
 @pytest.fixture
 def env(tmp_path, monkeypatch) -> Env:
     from core import placement_worker
+    # Checkpoint readers import ``get_db`` by value. Load the readers exercised
+    # by this fixture before it redirects the database getter, so a later
+    # checkpoint test cannot retain this temporary database after monkeypatch
+    # restores the normal getter.
+    import infra.checkpoint_install_preflight
+    import infra.checkpoint_queries
 
     workspace = _repo(tmp_path)
     select_workspace(monkeypatch, workspace)
@@ -371,8 +377,13 @@ async def test_a_retired_lesson_tried_again_is_a_new_lesson_naming_its_origin(en
 async def test_a_checkpoint_stages_a_trial_and_its_install_hands_it_to_the_worker(
     env: Env,
 ) -> None:
+    import infra.database as database
+    from infra import checkpoint_install_preflight, checkpoint_queries
     from infra.checkpoints import create_running
     from tests.test_continuity_staging import _capture_install, _request
+
+    assert checkpoint_install_preflight.get_db is not database.get_db
+    assert checkpoint_queries.get_db is not database.get_db
 
     complete = _entry(env)
     held = _entry(env, SAID, "always search the history first")
