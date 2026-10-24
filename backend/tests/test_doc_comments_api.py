@@ -56,6 +56,19 @@ def test_comment_thread_roundtrip(integration_client, artifact_id):
     # username they signed in with — not the capitalized name the old
     # hardcoded token table carried.
     assert threads[0]["replies"][0]["author"] == OWNER_USER
+    assert threads[0]["author_user_id"] == OWNER_USER
+    assert threads[0]["replies"][0]["author_user_id"] == OWNER_USER
+
+
+def test_agent_comment_cannot_claim_a_person_author_id(integration_client, artifact_id):
+    from doceditor import comments
+
+    row = comments.create(
+        artifact_id, body="Agent comment.", author="Reviewer", author_kind="agent",
+        author_user_id=OWNER_USER, author_thread_id="reviewer",
+    )
+
+    assert row["author_user_id"] is None
 
 
 def test_comment_create_idempotent_on_client_id(integration_client, artifact_id):
