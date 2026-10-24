@@ -1,7 +1,7 @@
 // Walks Start fresh in the real launch shell: the offer for an install this app can't open, the
 // "Start fresh instead" choice beside a takeover, the confirmation listing what moves and the code
-// and work folders that stay, the move itself, the done card, and every failure card: a refusal, a
-// failed move, and an undo finished at launch. Each button must run the right command and nothing else.
+// and work folders that stay, the move itself, automatic setup after a successful backup, and every failure card:
+// a refusal, a failed move, and an undo finished at launch. Each button must run the right command and nothing else.
 //
 // usage: node desktop/tests/start-fresh-journey.mjs [--screenshots <dir>]
 import { createRequire } from 'node:module';
@@ -16,6 +16,8 @@ const shell = path.join(repo, 'desktop/dist-shell');
 const { chromium } = createRequire(path.join(process.env.PLAYWRIGHT_FROM ?? repo, 'frontend/package.json'))('playwright');
 const flag = process.argv.indexOf('--screenshots');
 const screenshots = flag > -1 ? process.argv[flag + 1] : null;
+const viewportName = process.env.CORSIA_SHELL_VIEWPORT === 'small' ? 'small' : 'wide';
+const viewport = viewportName === 'small' ? { width: 390, height: 844 } : { width: 1280, height: 900 };
 if (screenshots) await mkdir(screenshots, { recursive: true });
 
 const types = { '.html': 'text/html', '.css': 'text/css', '.svg': 'image/svg+xml' };
@@ -51,7 +53,7 @@ const backup = '~/CORSIA backups/2026-10-22 13-05';
 
 // `answers` maps a command to what it returns; a function answer receives the call count and may throw.
 async function open(theme, answers) {
-	const page = await browser.newPage({ viewport: { width: 1280, height: 900 }, colorScheme: theme });
+	const page = await browser.newPage({ viewport, colorScheme: theme });
 	await page.exposeFunction('__answer', async (command, count) => {
 		const answer = answers[command];
 		if (answer && answer.throws) return { throws: answer.throws };
@@ -101,11 +103,11 @@ function compare(label, shown, expected) {
 const made = async (page) => (await page.evaluate(() => window.__calls)).filter((command) => !['get_service_log_path', 'adoption_progress'].includes(command));
 
 async function shot(page, theme, name) {
-	if (screenshots) await page.screenshot({ path: path.join(screenshots, `${theme}-${name}.png`) });
+	if (screenshots) await page.screenshot({ path: path.join(screenshots, `${theme}-${viewportName}-${name}.png`) });
 }
 
 for (const theme of ['dark', 'light']) {
-	// The offer, the confirmation, the move and the done card, end to end.
+	// The offer, confirmation, move and automatic setup, end to end.
 	{
 		const page = await open(theme, { start_fresh_preview: preview, start_fresh: backup, start_local_service: { pending: true } });
 		const before = failed;
@@ -143,30 +145,29 @@ for (const theme of ['dark', 'light']) {
 		});
 		await shot(page, theme, '2-confirm');
 		await page.click('#retry');
-		await page.waitForFunction(() => document.getElementById('status').textContent === 'Your earlier install is in a backup');
-		compare(`${theme} done`, await read(page), {
-			line: `It’s in ${backup}. Nothing was deleted.`,
+		await page.waitForFunction(() => window.__calls.filter((command) => command === 'start_local_service').length === 1);
+		compare(`${theme} starting`, await read(page), {
+			title: 'Starting CORSIA…',
+			line: null,
 			note: null,
 			list: null,
 			details: null,
-			button: 'Set up CORSIA',
+			actions: false,
 		});
-		await shot(page, theme, '4-done');
-		await page.click('#retry');
-		await page.waitForTimeout(150);
+		await shot(page, theme, '4-starting');
 		const calls = await made(page);
 		const expected = ['start_fresh_preview', 'start_fresh', 'start_local_service'];
 		if (JSON.stringify(calls) !== JSON.stringify(expected)) fail(`${theme} journey: ran ${JSON.stringify(calls)}, expected ${JSON.stringify(expected)}`);
-		if (failed === before) console.log(`ok   ${theme} offer, confirm, move, set up`);
+		if (failed === before) console.log(`ok   ${theme} offer, confirm, move, setup starts`);
 		await page.close();
 	}
 
-	// Beside a takeover, "Start fresh instead" opens the same confirmation; "Use it" is unchanged.
+	// Beside a takeover, "Start fresh instead" opens the same confirmation; Take over starts adoption.
 	{
 		const page = await open(theme, { start_fresh_preview: preview, adopt_existing_install: { pending: true } });
 		const before = failed;
 		await page.evaluate(() => window.__corsiaShowStartup({ state: 'adoption_offered', workspace: '~/Corsia' }));
-		compare(`${theme} takeover`, await read(page), { button: 'Use it', instead: 'Start fresh instead', quit: true });
+		compare(`${theme} takeover`, await read(page), { button: 'Take over', instead: 'Start fresh instead', quit: true });
 		await shot(page, theme, '0-takeover');
 		await page.click('#start-fresh');
 		await page.waitForFunction(() => document.getElementById('status').textContent === 'Move your earlier install into a backup?');
@@ -174,8 +175,8 @@ for (const theme of ['dark', 'light']) {
 		if (JSON.stringify(await made(page)) !== JSON.stringify(['start_fresh_preview'])) fail(`${theme} takeover: ran ${JSON.stringify(await made(page))}`);
 		await page.evaluate(() => window.__corsiaShowStartup({ state: 'adoption_offered', workspace: '~/Corsia' }));
 		await page.click('#retry');
-		await page.waitForTimeout(150);
-		if (!(await made(page)).includes('adopt_existing_install')) fail(`${theme} takeover: Use it no longer takes over`);
+		await page.waitForFunction(() => window.__calls.includes('adopt_existing_install'));
+		if (JSON.stringify(await made(page)) !== JSON.stringify(['start_fresh_preview', 'adopt_existing_install'])) fail(`${theme} takeover: Take over ran ${JSON.stringify(await made(page))}`);
 		if (failed === before) console.log(`ok   ${theme} start fresh instead of a takeover`);
 		await page.close();
 	}
@@ -294,6 +295,7 @@ for (const theme of ['dark', 'light']) {
 		await page.click('#retry');
 		await page.waitForFunction((expected) => document.getElementById('status').textContent === expected, title);
 		compare(`${theme} failure ${name}`, await read(page), { title, line, details, button, list: null, quit: true });
+		if ((await made(page)).includes('start_local_service')) fail(`${theme} failure ${name}: started setup before the person chose recovery`);
 		await shot(page, theme, `5-failure-${name}`);
 		await page.click('#retry');
 		await page.waitForTimeout(150);
