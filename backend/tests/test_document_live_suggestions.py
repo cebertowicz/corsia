@@ -143,6 +143,31 @@ async def test_the_bars_accept_in_the_live_lane_leaves_no_edit_feedback_but_a_pl
 
 
 @pytest.mark.asyncio
+async def test_live_batch_accept_keeps_the_accepting_actor_as_writer(
+    ownership_scope, tmp_path, monkeypatch,
+):
+    scope = ownership_scope
+    manager, entry, _ = await opened(scope, tmp_path, monkeypatch)
+    row = suggestion(scope, entry)
+    submit = entry.lane.submit
+
+    async def capture_actor(operation):
+        assert operation.actor.thread_id == scope["owner"]
+        assert operation.actor.user_id == user_id(scope)
+        return await submit(operation)
+
+    monkeypatch.setattr(entry.lane, "submit", capture_actor)
+    try:
+        result = await comment_batch_actions.accept_all_open(
+            row["artifact_id"], user_id=user_id(scope), decided_by="user", actor_thread_id=scope["owner"],
+            write=legacy_writer,
+        )
+        assert result["accepted"] == [row["id"]]
+    finally:
+        await manager.close()
+
+
+@pytest.mark.asyncio
 async def test_the_bars_flush_publishes_the_persons_typing_before_the_accept_so_it_stays_feedback(
     ownership_scope, tmp_path, monkeypatch,
 ):
