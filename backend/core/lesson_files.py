@@ -147,6 +147,7 @@ def render_trial(
     origin: dict[str, str] | None = None, target_file: str | None = None,
     new_target_path: str | None = None, target_section: str | None = None,
     cause: str | None = None, case: dict[str, Any] | None = None,
+    new_evidence: str | None = None,
 ) -> str:
     """A trial skill with no ``review_ref``: written, and not yet offered.
 
@@ -169,6 +170,7 @@ def render_trial(
         ("target_section", target_section),
         ("cause", cause),
         ("case", case),
+        ("new_evidence", new_evidence),
     ):
         if value is not None:
             lesson[key] = value

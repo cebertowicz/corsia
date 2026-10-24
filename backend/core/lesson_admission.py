@@ -259,6 +259,7 @@ def _render(
         originating_subjects=subjects, origin=origin,
         target_file=decision.target_file, new_target_path=decision.new_target_path,
         target_section=decision.target_section, cause=decision.cause, case=decision.case,
+        new_evidence=decision.new_evidence,
     )
     errors = validate_skill_text(text).errors
     if errors:
