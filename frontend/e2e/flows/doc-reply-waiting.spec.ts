@@ -24,6 +24,16 @@ function makeAgentReply(replyId: string, threadId: string): void {
 		].join('\n'), path.join(stateRoot, 'corsia.db'), replyId, threadId,
 	], { cwd: repoRoot, encoding: 'utf8' });
 }
+function seedDecision(threadId: string): void {
+	const python = process.env.CORSIA_E2E_BACKEND_PYTHON;
+	const workspace = process.env.CORSIA_E2E_WORKSPACE;
+	const state = process.env.CORSIA_E2E_STATE_DIR;
+	if (!python || !workspace || !state || process.env.CORSIA_E2E_MOCK !== '1') throw new Error('Requires isolated synthetic state');
+	execFileSync(python, [path.join(repoRoot, 'frontend/e2e/support/reply-decision.py'), threadId], {
+		cwd: repoRoot,
+		env: { ...process.env, PYTHONPATH: 'backend', CORSIA_TEST_MODE: '1', CORSIA_ANALYTICS_DISABLE: '1', CORSIA_WORKSPACE: workspace, CORSIA_STATE_DIR: state },
+	});
+}
 // `e2e-local` passes its isolated workspace through the narrow environment
 // allowlist. Unlike state, it survives each test reset so the run can copy
 // its frames into task-owned evidence after Playwright finishes.
@@ -613,8 +623,14 @@ for (const theme of ['light', 'dark'] as const) {
 			await page.emulateMedia({ colorScheme: theme });
 			const threadId = await createSession(request, THREAD_TITLE);
 			await onlyThread(request, threadId);
-			const scenario = await seedScenario(page, request, threadId, `stacked-needs-you-${theme}-${width}`, [0]);
-			await serveReplyQueue(page, request, scenario, threadId, () => true, true);
+			await seedScenario(page, request, threadId, `stacked-needs-you-${theme}-${width}`, [0]);
+			seedDecision(threadId);
+			const queue = await request.get('/api/attention/queue', { params: { token: TEST_TOKEN } });
+			expect(queue.ok()).toBeTruthy();
+			const projected = await queue.json();
+			expect(projected.current.renderer).toBe('decision');
+			expect(projected.current.detail.source.thread_id).toBe(threadId);
+			expect(projected.reply_items.filter((item: { detail: { source: { thread_id: string } } }) => item.detail.source.thread_id === threadId)).toHaveLength(1);
 			await loginByUrl(page);
 			await openThread(page, THREAD_TITLE);
 			const chip = page.locator('.reply-chip-notice');
@@ -624,7 +640,7 @@ for (const theme of ['light', 'dark'] as const) {
 			// The chip is the shared AttachmentRow chip and counts only replies; the decision stays the dock's one job.
 			await expect(chip.getByRole('button')).toContainText('1 new reply · launch-plan.md');
 			await expect(dock).toBeVisible();
-			await expect(dock).toContainText('Confirm launch timing');
+			await expect(dock).toContainText('Choose the launch approach');
 			await expect(dock).not.toContainText(' of ');
 			await expect(composer).toBeVisible();
 			await expect.poll(() => stackProblems(page, { chip, dock, composer })).toEqual([]);
@@ -643,6 +659,11 @@ for (const theme of ['light', 'dark'] as const) {
 				});
 				expect(firstMessageReachable, 'The first message is clear of the header when the transcript is scrolled to the top').toBe(true);
 			}
+			const decision = projected.current.detail;
+			const answer = await request.post(`/api/plans/decisions/${decision.id}/answer`, {
+				params: { token: TEST_TOKEN }, data: { option_id: 'A', expected_revision: decision.revision, mutation_id: `answer-${threadId}` },
+			});
+			expect(answer.ok(), await answer.text()).toBeTruthy();
 		});
 	}
 }
