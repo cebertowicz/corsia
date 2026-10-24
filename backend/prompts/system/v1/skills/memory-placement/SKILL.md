@@ -34,7 +34,7 @@ Apply the core causal-lesson check. Preserve incident evidence in the reference,
 4. **Widen deliberately.** In Thread and Agent rows the user's words may stay verbatim. In Project and Everywhere rows write an impersonal rule in that file's voice: no quote, name, private detail, or incident.
 5. **User provenance.** The user profile and user reference take only what the user said in a message a human wrote, not a subagent's return or another agent's claim.
 6. **Scope words decide reach.** "For this report", "here", "this time" mean Thread. "Always", "every project", "everyone" widen it.
-7. **Place Lessons items, never hand-write them.** `place written` makes CORSIA write and retire it. Supply the four fields; `already` names its receipt.
+7. **Place Lessons items, never hand-write them.** Use `place` `written` with `placement`, and CORSIA writes it: give `decision`, `rule`, `second_case` and `not_when`, or `message_id` if the line is a person's exact words. `already` takes `destination` and `quote`. A `proposed` entry is kept until CORSIA files it.
 8. **Your own hypothesis is a trial.** An unproven rule you inferred about how to work gets no permanent line. `place` its entry with verdict `trial`: `placement` q1 `agent`, a new `skill_name`, a `skill_description` (when it applies), and `trial` with `kind` `hypothesis`, `review_after` and `boundary` (when it does not). CORSIA writes the skill and opens your review task. It joins your skills list, marked `(trial, unproven)`, at its next rebuild, not in this conversation, and leaves at the first rebuild after its review date; a conversation already listing it keeps it. It grants no permission.
 9. **A person's words are never a trial.** Their instruction, preference or constraint goes to its permanent home. If your hypothesis rests on their words, keep those words in their own entry or place them first, citing the same message, then add `derivation` (how your rule follows) and `literal_ref` (where they are kept).
 10. **Report it** in one plain line: what changed and where.
@@ -67,10 +67,10 @@ When a person corrects you, or a correction note arrives in your turn: fix the w
 
 The user tells a persistent agent: "Stop posting the daily summary in chat. Put it in the plan."
 - **Wrong:** add the quote to project rules yourself.
-- **Right:** `place written` with placement and `message_id`; for everyone, `place proposed` with project scope and impersonal text.
+- **Right:** Agent, every turn: `place written` with their words as the placement text and `message_id`. If everyone should, `place proposed` with q1 `project` and the text "Keep daily summaries in the plan, not in chat."
 
 After three declined invitations you suspect people in Europe accept morning Pacific times.
 - **Wrong:** add it to `RESPONSIBILITY.md` or hand-write a `SKILL.md`.
-- **Right:** `place trial` with the required lesson fields and trial placement. At review, retire, promote, extend or revise with evidence.
+- **Right:** `place trial` with decision "choosing a meeting time", rule "use stated availability before time-zone assumptions", second_case "scheduling a call with a new customer", not_when "they stated availability". At review, retire, promote, extend or revise with evidence.
 
-Done when `place` accepts.
+Done when `place` accepted or queued it and you reported it (rule 10).
