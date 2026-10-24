@@ -367,7 +367,10 @@ CASE = {
 
 async def test_a_checkpoint_case_persists_through_the_real_tool_and_trial_revision(env: Env) -> None:
     first = _entry(env)
-    _place(env, first, _answer(case=CASE, target_file="context/rule.md", target_section="Lessons"))
+    _place(env, first, _answer(
+        case=CASE, target_file="context/rule.md", target_section="Lessons",
+        new_evidence="case_differs",
+    ))
     await _drain(env.worker)
 
     initial = lesson_files.read_trial(_skill(env).read_text())
@@ -375,12 +378,13 @@ async def test_a_checkpoint_case_persists_through_the_real_tool_and_trial_revisi
     assert initial.lesson.case == CASE
     assert initial.lesson.target_file == "context/rule.md"
     assert initial.lesson.target_section == "Lessons"
+    assert initial.lesson.new_evidence == "case_differs"
 
     second = _entry(env, [{"kind": "turn", "reference": "turn-19"}], "case persists on revision")
     revised = {**CASE, "right_call": "Keep the case metadata when revising the lesson."}
     _place(env, second, _answer(
         text="Keep the selected case when revising a lesson.", case=revised,
-        target_file="context/rule.md", target_section="Lessons",
+        target_file="context/rule.md", target_section="Lessons", new_evidence="target_changed",
     ))
     await _drain(env.worker)
 
@@ -388,6 +392,7 @@ async def test_a_checkpoint_case_persists_through_the_real_tool_and_trial_revisi
     assert after is not None and after.lesson.id == initial.lesson.id
     assert after.lesson.case == revised
     assert after.lesson.case["actions"]["required_actions"] == revised["actions"]["required_actions"]
+    assert after.lesson.new_evidence == "target_changed"
 
 
 async def test_a_retired_lesson_tried_again_is_a_new_lesson_naming_its_origin(env: Env) -> None:

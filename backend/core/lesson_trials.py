@@ -38,7 +38,7 @@ REVIEW_REF_PREFIX = "plan-node:"
 _FIELDS = frozenset({
     "id", "state", "owner", "review_after", "source_refs", "review_ref",
     "origin", "destination", "originating_subjects", "target_file", "new_target_path",
-    "target_section", "cause", "case",
+    "target_section", "cause", "case", "new_evidence",
 })
 
 _CORRECTION_CAUSES = (
@@ -105,6 +105,7 @@ class Lesson:
     target_section: str | None = None
     cause: str | None = None
     case: dict[str, Any] | None = None
+    new_evidence: str | None = None
 
     @property
     def review_node_id(self) -> str | None:
@@ -343,6 +344,8 @@ def lesson_errors(block: object, description: str | None, body: str) -> list[str
         errors.append("corsia.lesson.target_section must be a non-empty string")
     if "cause" in block and block.get("cause") not in _CORRECTION_CAUSES:
         errors.append("corsia.lesson.cause must be a System correction cause")
+    if "new_evidence" in block and block.get("new_evidence") not in ("target_changed", "case_differs"):
+        errors.append("corsia.lesson.new_evidence must be target_changed or case_differs")
     if "case" in block:
         try:
             validate_case(block["case"])
@@ -385,6 +388,7 @@ def parse_lesson(metadata: dict[str, Any]) -> Lesson | None:
         target_section=_clean(block.get("target_section")),
         cause=_clean(block.get("cause")),
         case=validate_case(block.get("case")),
+        new_evidence=_clean(block.get("new_evidence")),
     )
 
 

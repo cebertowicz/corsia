@@ -500,7 +500,7 @@ def test_case_metadata_is_optional_and_refuses_invalid_actions() -> None:
     from core.placement_decide import InvalidDecision
 
     legacy = _decision()
-    assert legacy.case is None and legacy.target_file is None
+    assert legacy.case is None and legacy.target_file is None and legacy.new_evidence is None
 
     invalid = {
         "what_happened": "A case needs action metadata.",
@@ -515,6 +515,8 @@ def test_case_metadata_is_optional_and_refuses_invalid_actions() -> None:
     }
     with pytest.raises(InvalidDecision, match="decisive_action"):
         _decision(case=invalid)
+    with pytest.raises(InvalidDecision, match="new_evidence"):
+        _decision(new_evidence="unsupported")
 
 
 def test_destination_mapping_never_leaves_the_tray_or_reference(tmp_path) -> None:

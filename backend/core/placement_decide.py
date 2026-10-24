@@ -19,6 +19,7 @@ from core.lesson_trials import (
 
 Q1 = ("thread", "agent", "project", "everywhere")
 Q2 = ("every_turn", "task_start", "lookup")
+NEW_EVIDENCE = ("target_changed", "case_differs")
 
 #: WORKSPACE-STANDARD.md §Caps. A non-agent thread's context files take the
 #: RESPONSIBILITY.md row (Context & Memory, 2026-09-24).
@@ -195,6 +196,9 @@ def validate_decision(raw: object) -> Decision:
         case = validate_case(raw.get("case"))
     except ValueError as invalid:
         raise InvalidDecision(str(invalid)) from invalid
+    new_evidence = _optional(raw, "new_evidence")
+    if new_evidence is not None and new_evidence not in NEW_EVIDENCE:
+        raise InvalidDecision("new_evidence must be target_changed or case_differs")
     return Decision(
         q1=str(raw["q1"]),
         q2=str(raw["q2"]),
@@ -210,7 +214,7 @@ def validate_decision(raw: object) -> Decision:
         target_section=_optional(raw, "target_section"),
         cause=_optional(raw, "cause"),
         case=case,
-        new_evidence=_optional(raw, "new_evidence"),
+        new_evidence=new_evidence,
     )
 
 
