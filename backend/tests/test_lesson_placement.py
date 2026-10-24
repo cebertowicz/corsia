@@ -347,6 +347,49 @@ async def test_a_revision_keeps_the_lesson_and_replaces_its_review(env: Env) -> 
     assert [lesson["behavioral_sha256"] for lesson in _offered(env)] == [after.behavioral_sha256]
 
 
+CASE = {
+    "what_happened": "The placement case was not saved.",
+    "right_call": "Persist the selected case through the existing lesson writer.",
+    "does_not_apply": "A legacy lesson with no case metadata.",
+    "correction_subject": "continuity-entry:case-persistence",
+    "actions": {
+        "required_actions": [
+            {"tool": "read_file", "params": {"path": "context/rule.md"}},
+            {"tool": "plan_update", "params": {"operation": "mark_done"}},
+        ],
+        "forbidden_actions": [
+            {"tool": "write_file", "params": {"path": "context/rule.md"}},
+        ],
+        "decisive_action": {"tool": "plan_update", "params": {"operation": "mark_done"}},
+    },
+}
+
+
+async def test_a_checkpoint_case_persists_through_the_real_tool_and_trial_revision(env: Env) -> None:
+    first = _entry(env)
+    _place(env, first, _answer(case=CASE, target_file="context/rule.md", target_section="Lessons"))
+    await _drain(env.worker)
+
+    initial = lesson_files.read_trial(_skill(env).read_text())
+    assert initial is not None
+    assert initial.lesson.case == CASE
+    assert initial.lesson.target_file == "context/rule.md"
+    assert initial.lesson.target_section == "Lessons"
+
+    second = _entry(env, [{"kind": "turn", "reference": "turn-19"}], "case persists on revision")
+    revised = {**CASE, "right_call": "Keep the case metadata when revising the lesson."}
+    _place(env, second, _answer(
+        text="Keep the selected case when revising a lesson.", case=revised,
+        target_file="context/rule.md", target_section="Lessons",
+    ))
+    await _drain(env.worker)
+
+    after = lesson_files.read_trial(_skill(env).read_text())
+    assert after is not None and after.lesson.id == initial.lesson.id
+    assert after.lesson.case == revised
+    assert after.lesson.case["actions"]["required_actions"] == revised["actions"]["required_actions"]
+
+
 async def test_a_retired_lesson_tried_again_is_a_new_lesson_naming_its_origin(env: Env) -> None:
     first = _entry(env)
     _place(env, first)

@@ -13,7 +13,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from core.lesson_trials import BODY_WORDS, TRIAL_SCHEMA, Trial, lesson_block, validate_trial
+from core.lesson_trials import (
+    BODY_WORDS, TRIAL_SCHEMA, Trial, lesson_block, validate_case, validate_trial,
+)
 
 Q1 = ("thread", "agent", "project", "everywhere")
 Q2 = ("every_turn", "task_start", "lookup")
@@ -56,6 +58,11 @@ Then:
 - reference_file: for agent + lookup, one file name from the reference list;
   otherwise null.
 - rationale: one short line on why this destination.
+- case: optional trial metadata: what_happened, right_call, does_not_apply and
+  correction_subject; actions, when present, gives ordered required_actions,
+  forbidden_actions and a decisive_action, each with a tool and subset params.
+- target_file, new_target_path, target_section, cause and new_evidence: optional
+  target metadata retained with a trial case.
 - trial: only for your own unproven hypothesis about how to work, to try as a
   skill until a review date; otherwise leave it out. Set state watch when the
   hypothesis should be recorded but not delivered yet; trial is the default. Never for what a person
@@ -81,6 +88,56 @@ ANSWER_SCHEMA: dict[str, Any] = {
         "skill_description": {"type": ["string", "null"]},
         "reference_file": {"type": ["string", "null"]},
         "rationale": {"type": "string"},
+        "target_file": {"type": ["string", "null"]},
+        "new_target_path": {"type": ["string", "null"]},
+        "target_section": {"type": ["string", "null"]},
+        "cause": {
+            "type": ["string", "null"],
+            "enum": [
+                "wrong_rule", "no_foundation", "rule_gap", "process_gap", "not_delivered",
+                "not_followed", "cant_be_done", None,
+            ],
+        },
+        "new_evidence": {"type": ["string", "null"], "enum": ["target_changed", "case_differs", None]},
+        "case": {
+            "type": ["object", "null"],
+            "additionalProperties": False,
+            "required": ["what_happened", "right_call", "does_not_apply", "correction_subject"],
+            "properties": {
+                "what_happened": {"type": "string"},
+                "right_call": {"type": "string"},
+                "does_not_apply": {"type": "string"},
+                "correction_subject": {"type": "string"},
+                "actions": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["required_actions", "forbidden_actions", "decisive_action"],
+                    "properties": {
+                        "required_actions": {
+                            "type": "array", "minItems": 1,
+                            "items": {
+                                "type": "object", "additionalProperties": False,
+                                "required": ["tool", "params"],
+                                "properties": {"tool": {"type": "string"}, "params": {"type": "object"}},
+                            },
+                        },
+                        "forbidden_actions": {
+                            "type": "array",
+                            "items": {
+                                "type": "object", "additionalProperties": False,
+                                "required": ["tool", "params"],
+                                "properties": {"tool": {"type": "string"}, "params": {"type": "object"}},
+                            },
+                        },
+                        "decisive_action": {
+                            "type": "object", "additionalProperties": False,
+                            "required": ["tool", "params"],
+                            "properties": {"tool": {"type": "string"}, "params": {"type": "object"}},
+                        },
+                    },
+                }
+            },
+        },
         "trial": TRIAL_SCHEMA,
     },
 }
@@ -101,6 +158,12 @@ class Decision:
     reference_file: str | None
     rationale: str
     trial: Trial | None = None
+    target_file: str | None = None
+    new_target_path: str | None = None
+    target_section: str | None = None
+    cause: str | None = None
+    case: dict[str, Any] | None = None
+    new_evidence: str | None = None
     originating_subjects: tuple[str, ...] = ()
 
 
@@ -129,6 +192,7 @@ def validate_decision(raw: object) -> Decision:
         raise InvalidDecision("text must be one non-empty line of at most 600 characters")
     try:
         trial = validate_trial(raw.get("trial"))
+        case = validate_case(raw.get("case"))
     except ValueError as invalid:
         raise InvalidDecision(str(invalid)) from invalid
     return Decision(
@@ -141,6 +205,12 @@ def validate_decision(raw: object) -> Decision:
         reference_file=_optional(raw, "reference_file"),
         rationale=" ".join(rationale.split())[:200],
         trial=trial,
+        target_file=_optional(raw, "target_file"),
+        new_target_path=_optional(raw, "new_target_path"),
+        target_section=_optional(raw, "target_section"),
+        cause=_optional(raw, "cause"),
+        case=case,
+        new_evidence=_optional(raw, "new_evidence"),
     )
 
 

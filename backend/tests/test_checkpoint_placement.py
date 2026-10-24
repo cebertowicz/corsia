@@ -496,6 +496,27 @@ def test_validate_decision_refuses_answers_outside_the_table() -> None:
     assert _decision(text="a\n  b").text == "a b"
 
 
+def test_case_metadata_is_optional_and_refuses_invalid_actions() -> None:
+    from core.placement_decide import InvalidDecision
+
+    legacy = _decision()
+    assert legacy.case is None and legacy.target_file is None
+
+    invalid = {
+        "what_happened": "A case needs action metadata.",
+        "right_call": "Use the canonical writer.",
+        "does_not_apply": "Legacy lessons.",
+        "correction_subject": "continuity-entry:case",
+        "actions": {
+            "required_actions": [{"tool": "read_file", "params": {}}],
+            "forbidden_actions": [],
+            "decisive_action": {"tool": "write_file", "params": {}},
+        },
+    }
+    with pytest.raises(InvalidDecision, match="decisive_action"):
+        _decision(case=invalid)
+
+
 def test_destination_mapping_never_leaves_the_tray_or_reference(tmp_path) -> None:
     from core.placement_decide import InvalidDecision, map_destination
 
