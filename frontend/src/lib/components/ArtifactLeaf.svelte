@@ -9,6 +9,7 @@
 	import ArtifactTabStrip from './ArtifactTabStrip.svelte';
 	import DeliveryConfirmation from './attention/DeliveryConfirmation.svelte';
 	import type { DocViewerTarget } from '$lib/docViewerTarget';
+	import { targetForTab } from '$lib/artifactViewerTarget';
 	import type { ImageViewportPlace, TabLoadSignal } from '$lib/artifactTabs';
 	import { returnToPlanNode } from '$lib/planLeafReturn';
 	import { pushBackLayer } from '$lib/historyBackLayer';
@@ -42,18 +43,7 @@
 	const workspace = $derived(threadId ? ($threadWorkspaces[threadId] ?? emptyWorkspace()) : emptyWorkspace());
 	const activeTab = $derived(getActiveTab(workspace));
 
-	function targetForTab(t: ArtifactTab): DocViewerTarget {
-		if (t.kind !== 'document') throw new Error('Only document tabs have DocViewer targets');
-		return {
-			instanceId: t.instanceId,
-			path: t.path,
-			name: t.title,
-			projectId: $uiScope?.id ?? null,
-			threadId: threadId,
-			artifactId: t.artifactId,
-			landOn: t.landOn,
-		};
-	}
+	const viewerTarget = (t: ArtifactTab) => targetForTab(t, $uiScope?.id ?? null, threadId);
 
 	// Every tab opens in the document viewer. A file the backend says is an image
 	// is switched to the image viewer for as long as this leaf is mounted; nothing
@@ -63,7 +53,7 @@
 	const imageKey = (instanceId: string) => `${threadId}\u0000${instanceId}`;
 	const imageTabIds = $derived(new Set(workspace.tabs.filter((t) => imageTabs.includes(imageKey(t.instanceId))).map((t) => t.instanceId)));
 	const showable = $derived<DocViewerTarget | null>(
-		activeTab?.kind === 'document' && threadId && activeTab.status !== 'unavailable' ? targetForTab(activeTab) : null
+		activeTab?.kind === 'document' && threadId && activeTab.status !== 'unavailable' ? viewerTarget(activeTab) : null
 	);
 	const showsImage = $derived(showable !== null && !!activeTab && imageTabs.includes(imageKey(activeTab.instanceId)));
 	const target = $derived(showsImage ? null : showable);
