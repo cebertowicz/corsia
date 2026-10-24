@@ -30,6 +30,9 @@ from core.carry_in_facts import (
     RETIRED as CARRY_IN_RETIRED, VERDICTS as CARRY_IN_VERDICTS,
     WAITING as CARRY_IN_WAITING, WAITING_REASONS as CARRY_IN_WAITING_REASONS,
 )
+from core.carry_in_scan import (
+    SCAN_OWED as CARRY_IN_SCAN_OWED, SCAN_REASONS as CARRY_IN_SCAN_REASONS, SCANNED as CARRY_IN_SCANNED,
+)
 from core.corrections_recording import CORRECTION_EVENT, FACT_KEYS as CORRECTION_FACT_KEYS, LABELS as CORRECTION_LABELS
 from core.lesson_gate import EVENT as LESSON_GATE_EVENT
 from core.size_rating import BASES, FACT_KEYS, SIZE_CLASSES, SIZE_EVENT
@@ -213,14 +216,14 @@ ATTRIBUTE_ALLOWLISTS: dict[str, dict[str, AttributeSpec]] = {
         "fields": text_attr(80), "decision": text_attr(300), "widens": id_attr(),
         "items_before": count_attr(), "items_after": count_attr(),
     },
-    # C1 carry-in facts (core/carry_in_facts.py): ids, hashes, state and counts,
+    # C1 carry-in facts (core/carry_in_facts.py, core/carry_in_scan.py): ids, hashes, state and counts,
     # never case text or transcripts. Every fact names its identity.
     CARRY_IN_PENDING: {
         "identity": id_attr(), "lesson_id": id_attr(), "behavioral_sha256": id_attr(),
         "case_sha256": id_attr(), "owner_thread_id": id_attr(), "target_commit": id_attr(),
         "lesson_path": text_attr(500), "target_path": text_attr(500),
     },
-    CARRY_IN_CLAIMED: {"identity": id_attr(), "model": text_attr(300)},
+    CARRY_IN_CLAIMED: {"identity": id_attr(), "model": text_attr(300), "boot": id_attr()},
     CARRY_IN_WAITING: {"identity": id_attr(), "reason": enum_attr(*CARRY_IN_WAITING_REASONS)},
     CARRY_IN_RESULT: {
         "identity": id_attr(), "verdict": enum_attr(*CARRY_IN_VERDICTS),
@@ -232,6 +235,12 @@ ATTRIBUTE_ALLOWLISTS: dict[str, dict[str, AttributeSpec]] = {
         "identity": id_attr(), "reason": enum_attr(*CARRY_IN_COVERAGE_REASONS),
         "samples_completed": count_attr(),
     },
+    # A save's lesson scan the drain owes (over the save's budget, or its recorder failed).
+    CARRY_IN_SCAN_OWED: {
+        "identity": id_attr(), "commit": id_attr(), "target_path": text_attr(500),
+        "reason": enum_attr(*CARRY_IN_SCAN_REASONS),
+    },
+    CARRY_IN_SCANNED: {"identity": id_attr(), "pending": count_attr()},
     "github.issue.opened": {**_ISSUE_ATTRS},
     "github.issue.closed": {
         **_ISSUE_ATTRS, "state_reason": enum_attr("completed", "not_planned", "reopened", "duplicate"),

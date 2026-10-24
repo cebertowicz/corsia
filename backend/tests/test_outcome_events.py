@@ -300,6 +300,7 @@ def test_only_registered_events_are_the_test_seed_and_the_github_intake():
         "measurement.verdict.planned", "measurement.verdict.reached",
         "lesson.carry_in.pending", "lesson.carry_in.claimed", "lesson.carry_in.waiting",
         "lesson.carry_in.result", "lesson.carry_in.retired", "lesson.carry_in.coverage",
+        "lesson.carry_in.scan_owed", "lesson.carry_in.scanned",
     }
 
 

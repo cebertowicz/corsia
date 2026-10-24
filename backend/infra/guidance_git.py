@@ -294,7 +294,7 @@ def save_guidance(
         ))
     if result.outcome == "written" and result.sha and writes:
         # Only a landed commit puts lesson cases to the test (C1); an unsynced index still landed.
-        from core.carry_in_facts import record_committed_save
+        from core.carry_in_scan import record_committed_save
 
         warnings.append(record_committed_save(workspace, list(writes), result.sha))
     if any(warnings):

@@ -1,9 +1,9 @@
 """The C1 carry-in drain: one bounded pending case per wake on the application loop.
 
 ``core.carry_in_facts`` owns the append-only facts this reads. Each wake
-settles a claim an earlier boot left open, reaps finished eval threads, then
-reads only the oldest pending case. It runs only on the one ready local oMLX
-Native catalog row while ``infra.carry_in_capacity`` proves it idle; otherwise that oldest case
+settles a claim no running wake owns, reaps finished eval threads, runs the
+oldest scan a save deferred to it, then reads only the oldest pending case.
+It runs only on the one ready local oMLX Native catalog row while ``infra.carry_in_capacity`` proves it idle; otherwise that oldest case
 shows ``no_ready_local_model`` and waits for the next save or restart. The
 same check, on the claimed model only, runs again just before every sample's
 provider call; failing it ends the claimed case in coverage, never a call.
@@ -21,7 +21,7 @@ from typing import Any
 
 from loguru import logger
 
-from core import carry_in_facts as facts
+from core import carry_in_facts as facts, carry_in_scan as scans
 from core.carry_in_facts import CarryInFact, EligibleCase
 from infra import carry_in_capacity as capacity
 from infra.db_async import run_in_db, run_off_db
@@ -110,10 +110,15 @@ def _read(fn, *args, **kwargs):
 
 
 def _settle_interrupted(db) -> int:
+    """End every claim no wake is running: an earlier boot's was interrupted by its restart;
+    this boot's lost its own terminal write to a fault (one wake runs at a time per process)."""
+    from core.turn_core import BOOT_EPOCH
+
     stale = facts.open_facts(db, claimed=True)
     now = _now()
     for fact in stale:
-        facts.record_terminal(db, fact, now, facts.COVERAGE, reason="interrupted")
+        reason = "error" if facts.claim_boot(db, fact) == BOOT_EPOCH else "interrupted"
+        facts.record_terminal(db, fact, now, facts.COVERAGE, reason=reason)
     return len(stale)
 
 
@@ -162,15 +167,14 @@ def _manifest_carries(db, manifest_id: str | None, lesson_id: str, version: str)
 
 
 def _blobs(workspace: Path, fact: CarryInFact) -> tuple[bytes | None, bytes] | None:
-    """The target before its commit (None when new) and at it; None when unusable."""
-    from infra.guidance_git import GitFault
+    """The target before its commit (None when new) and at it; None when its owner must act.
 
-    try:
-        parent = facts.commit_parent(workspace, fact.target_commit)
-        before = facts.committed_bytes(workspace, parent, fact.target_path) if parent else None
-        after = facts.committed_bytes(workspace, fact.target_commit, fact.target_path)
-    except GitFault:
-        return None
+    None means the commit holds no such file or a revision over ``MAX_TARGET_BYTES``.
+    A Git fault reading the history raises ``GitFault``: that is no fact about the case.
+    """
+    parent = facts.commit_parent(workspace, fact.target_commit)
+    before = facts.committed_bytes(workspace, parent, fact.target_path) if parent else None
+    after = facts.committed_bytes(workspace, fact.target_commit, fact.target_path)
     if after is None or any(len(blob) > MAX_TARGET_BYTES for blob in (before or b"", after)):
         return None
     return before, after
@@ -209,7 +213,7 @@ async def _sample(
     thread_id = f"{EVAL_THREAD_PREFIX}{fact.identity[:16]}-{label}"
     try:
         thread_id, row = await open_eval_thread(
-            owner["user_id"], model, thread_id=thread_id, title="Lesson regression check",
+            owner["user_id"], model, thread_id=thread_id, title="Skill re-test",
             project_id=owner["project_id"], parent_thread_id=fact.owner_thread_id,
         )
     except Exception as exc:
@@ -227,18 +231,16 @@ async def _sample(
             raise refused[0]
 
     with carry_in_tool_isolation():
-        turn_id, error = await run_eval_turn(
+        turn_id, failure = await run_eval_turn(
             thread_id=thread_id, thread_row=row, prompt=prompt, model=model,
             timeout_seconds=SAMPLE_TIMEOUT_SECONDS, after_manifest_before_dispatch=before_dispatch,
         )
     if refused:
         raise refused[0]
     if turn_id is None:
-        detail = error or "no Turn"
-        reason = "timeout" if "timed out" in detail else (
-            "provider" if detail.startswith("Eval turn errored") else "admission"
-        )
-        raise _SampleFailed(reason, detail)
+        if failure is None:
+            raise _SampleFailed("handoff", "the eval route returned neither a Turn nor a failure")
+        raise _SampleFailed(failure.kind, failure.detail)
     result = await read_turn_result(thread_id, turn_id)
     if result.error:
         raise _SampleFailed("provider", result.error)
@@ -298,6 +300,9 @@ async def _evaluate(
         terminal = {"event": facts.COVERAGE, "reason": "interrupted"}
         await _settle(fact, terminal, completed[0], created)
         raise
+    except Exception:  # a fault in this check's own code: never reported as a restart or a sample
+        logger.opt(exception=True).warning("carry-in case {} failed in its check", fact.identity[:16])
+        terminal = {"event": facts.COVERAGE, "reason": "error"}
     await _settle(fact, terminal, completed[0], created)
 
 
@@ -317,11 +322,15 @@ async def wake(workspace: Path) -> bool:
 
     The result informs callers and tests only: ``drain`` never runs another wake on it.
 
-    Without one ready, idle local model that case alone records ``no_ready_local_model``
-    and the drain stops: younger cases wait behind it, unread.
+    Without one ready, idle local model, or with an unreadable guidance history, that
+    case alone records why it waits and the drain stops: younger cases wait behind it, unread.
     """
+    from core.turn_core import BOOT_EPOCH
+    from infra.guidance_git import GitFault
+
     await run_in_db(partial(_write, _settle_interrupted, scope="carry_in_interrupted"))
     await _delete_threads(await run_in_db(_read, _stranded_threads))
+    await _run_owed_scan(workspace)
     oldest = await run_in_db(_read, facts.open_facts, claimed=False, limit=1)
     if not oldest:
         return False
@@ -332,7 +341,14 @@ async def wake(workspace: Path) -> bool:
         "owner_missing" if owner is None else
         "not_mechanically_executable" if case.actions is None else None
     )
-    blobs = None if reason is not None else await run_off_db(_blobs, workspace, fact)
+    try:
+        blobs = None if reason is not None else await run_off_db(_blobs, workspace, fact)
+    except GitFault as fault:  # the history, not the case, failed: it stays the oldest pending case
+        logger.warning("carry-in case {} waits: guidance history unreadable: {}", fact.identity[:16], fault)
+        await run_in_db(partial(
+            _write, facts.record_waiting, fact, _now(), "history_unavailable", scope="carry_in_waiting",
+        ))
+        return False
     if reason is not None or blobs is None:
         await run_in_db(partial(
             _write, facts.record_terminal, fact, _now(), facts.RETIRED,
@@ -345,7 +361,21 @@ async def wake(workspace: Path) -> bool:
             _write, facts.record_waiting, fact, _now(), UNAVAILABLE, scope="carry_in_waiting",
         ))
         return False
-    if not await run_in_db(partial(_write, facts.record_claim, fact, _now(), model, scope="carry_in_claim")):
+    if not await run_in_db(partial(
+        _write, facts.record_claim, fact, _now(), model, BOOT_EPOCH, scope="carry_in_claim",
+    )):
         return True
     await _evaluate(fact, case, owner, model, *blobs)
     return True
+
+
+async def _run_owed_scan(workspace: Path) -> None:
+    """Run the oldest scan a save deferred here; a failure leaves it owed for a later wake."""
+    scan = await run_in_db(_read, scans.oldest_owed_scan)
+    if scan is None:
+        return
+    try:
+        keys = await run_off_db(scans.lesson_keys, workspace)
+        await run_in_db(_read, scans.record_owed_scan, workspace, scan, keys)
+    except Exception:
+        logger.opt(exception=True).warning("carry-in owed scan for {} still owed", scan.commit[:12])

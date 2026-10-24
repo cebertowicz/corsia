@@ -59,28 +59,41 @@ def c1(isolated_db, tmp_path, monkeypatch):
     return SimpleNamespace(workspace=workspace, owner=owner, drains=drains, request_drain=request_drain)
 
 
-def _lesson_path(c1) -> Path:
-    return c1.workspace / ".threads" / c1.owner / "skills" / "demo-lesson" / "SKILL.md"
+def _lesson_path(c1, name="demo-lesson") -> Path:
+    return c1.workspace / ".threads" / c1.owner / "skills" / name / "SKILL.md"
 
 
-def _write_lesson(c1, *, actions=ACTIONS, text="Read the rule before closing.", state="trial") -> Path:
+def _write_lesson(
+    c1, *, actions=ACTIONS, text="Read the rule before closing.", state="trial",
+    name="demo-lesson", lesson_id=LESSON_ID, target=TARGET, commit=True,
+) -> Path:
     from core.lesson_files import render_trial
     from core.lesson_trials import Trial
 
     case = {"what_happened": "A node closed unread.", "right_call": "Read first.", "does_not_apply": "No rule."}
     if actions is not None:
         case["actions"] = actions
-    path = _lesson_path(c1)
+    path = _lesson_path(c1, name)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(render_trial(
-        lesson_id=LESSON_ID, owner=c1.owner, name="demo-lesson", description="Use when closing a node.",
+        lesson_id=lesson_id, owner=c1.owner, name=name, description="Use when closing a node.",
         text=text, trial=Trial(kind="hypothesis", review_after="2099-01-01", state=state),
         source_refs=[{"kind": "message", "reference": "m1"}],
-        case_metadata={"target_file": TARGET, "case": case},
+        case_metadata={"target_file": target, "case": case},
     ))
-    _git(["add", "-A"], cwd=c1.workspace)
-    _git([*_IDENTITY, "commit", "-qm", "lesson"], cwd=c1.workspace)
+    if commit:
+        _git(["add", "-A"], cwd=c1.workspace)
+        _git([*_IDENTITY, "commit", "-qm", "lesson"], cwd=c1.workspace)
     return path
+
+
+def _write_lessons(c1, count: int) -> None:
+    import uuid
+
+    for index in range(count):
+        _write_lesson(c1, name=f"lesson-{index}", lesson_id=str(uuid.uuid4()), commit=False)
+    _git(["add", "-A"], cwd=c1.workspace)
+    _git([*_IDENTITY, "commit", "-qm", "lessons"], cwd=c1.workspace)
 
 
 def _save(c1, text: str):
@@ -163,7 +176,7 @@ def test_an_unsynced_index_commit_still_records_its_case(c1, monkeypatch):
 
 
 def test_a_retried_recorder_is_a_no_op_and_a_later_commit_is_a_new_identity(c1):
-    from core.carry_in_facts import record_committed_save
+    from core.carry_in_scan import record_committed_save
 
     _write_lesson(c1)
     first = _save(c1, "rule v1\n")
@@ -182,20 +195,173 @@ def test_a_save_of_an_unrelated_file_or_a_retired_lesson_records_nothing(c1):
     assert _events() == []
 
 
-def test_a_recorder_failure_keeps_the_save_and_says_so(c1, monkeypatch):
-    from core import carry_in_facts
+@pytest.mark.asyncio
+async def test_a_recorder_failure_keeps_the_save_owes_its_scan_and_the_drain_recovers_it(c1, monkeypatch, no_samples):
+    """C11/C9: the receipt names who acts with no raw error text; the scan is owed durably."""
+    from core import carry_in_facts, carry_in_scan
+    from infra.carry_in_drain import wake
 
     _write_lesson(c1)
+    committed_cases = carry_in_facts.committed_cases
 
     def broken(*_args, **_kwargs):
-        raise RuntimeError("grep failed")
+        raise RuntimeError("secret /private/path grep failed")
 
     monkeypatch.setattr(carry_in_facts, "committed_cases", broken)
     result = _save(c1, "rule v1\n")
 
     assert result.outcome == "written"
-    assert "regression check was not queued: grep failed" in result.line
     assert (c1.workspace / TARGET).read_text() == "rule v1\n"
+    assert carry_in_scan.SCAN_RETRYING in result.line
+    assert "grep failed" not in result.line and "/private" not in result.line
+    owed = _events("lesson.carry_in.scan_owed")
+    assert [(e["commit"], e["target_path"], e["reason"]) for e in owed] == [(result.sha, TARGET, "failed")]
+    assert _events("lesson.carry_in.pending") == [] and c1.drains == [c1.workspace]
+
+    monkeypatch.setattr(carry_in_facts, "committed_cases", committed_cases)
+    _local(monkeypatch, None)
+    await wake(c1.workspace)
+    assert _pending_fact().target_commit == result.sha
+    assert [e["pending"] for e in _events("lesson.carry_in.scanned")] == [1]
+    await wake(c1.workspace)  # a closed scan never runs again
+    assert len(_events("lesson.carry_in.pending")) == 1
+
+
+def test_an_unschedulable_scan_says_what_the_person_can_do_without_the_error(c1, monkeypatch):
+    from core import carry_in_facts, carry_in_scan
+
+    _write_lesson(c1)
+
+    def broken(*_args, **_kwargs):
+        raise RuntimeError("database is locked")
+
+    monkeypatch.setattr(carry_in_facts, "committed_cases", broken)
+    monkeypatch.setattr(carry_in_scan, "_owe_scans", broken)
+    result = _save(c1, "rule v1\n")
+
+    assert result.outcome == "written"
+    assert carry_in_scan.SCAN_LOST.format(ref=result.sha[:12]) in result.line
+    assert "locked" not in result.line
+    assert _events() == [] and c1.drains == []
+
+
+# --- request-path budget (EAS21) --------------------------------------------
+
+
+def test_a_differently_named_symlink_target_is_matched_on_save(c1):
+    """The save scan resolves a target the way the matcher does, never by its spelling."""
+    (c1.workspace / "context").mkdir()
+    (c1.workspace / "context" / "alias.md").symlink_to("demo.md")
+    _write_lesson(c1, target="context/alias.md")
+
+    result = _save(c1, "rule v1\n")
+
+    fact = _pending_fact()
+    assert (fact.lesson_id, fact.target_path, fact.target_commit) == (LESSON_ID, TARGET, result.sha)
+
+
+def test_the_save_scan_drops_only_lessons_proven_to_target_another_file(c1):
+    from infra.database import get_db
+
+    from core.carry_in_scan import candidate_lessons, lesson_keys
+
+    _write_lesson(c1)
+    _write_lesson(c1, name="dotted", lesson_id="8b1c2a9e-3b7d-4c2e-9a1f-0d5e8b7c4a21", target="context/x/../demo.md")
+    _write_lesson(c1, name="other", lesson_id="7a1c2a9e-3b7d-4c2e-9a1f-0d5e8b7c4a21", target="context/other.md")
+    unprovable = {
+        "block": f"target_file: >-\n      {TARGET}",
+        "quoted": f'target_file: "{TARGET}"',
+        "flow": f"{{target_file: {TARGET}}}",
+        "continued": "target_file: context/\n      demo.md",
+    }
+    for name, line in unprovable.items():
+        path = _lesson_path(c1, name)
+        path.parent.mkdir(parents=True)
+        path.write_text(_lesson_path(c1).read_text().replace(f"target_file: {TARGET}", line))
+    _git(["add", "-A"], cwd=c1.workspace)
+    _git([*_IDENTITY, "commit", "-qm", "forms"], cwd=c1.workspace)
+
+    keys = lesson_keys(c1.workspace)
+    rel = lambda name: _lesson_path(c1, name).relative_to(c1.workspace).as_posix()  # noqa: E731
+    assert keys[rel("demo-lesson")].owner == c1.owner and keys[rel("demo-lesson")].target == TARGET
+    assert all(keys[rel(name)].target is None for name in unprovable)
+    db = get_db()
+    try:
+        found = candidate_lessons(db, c1.workspace, {TARGET}, keys)
+        assert sorted(found) == sorted([rel("demo-lesson"), rel("dotted"), *map(rel, unprovable)])
+        assert rel("other") in candidate_lessons(db, c1.workspace, {"context/other.md"}, keys)
+        assert candidate_lessons(db, c1.workspace, {TARGET}, keys, owner_budget=0) is None
+    finally:
+        db.close()
+
+
+@pytest.mark.parametrize("raw", [
+    "context/demo.md", "'context/it''s.md'", "context/a b.md", "~/notes.md", "context/x\t#tab-comment",
+    "context/x: y", "context/x:\ty", "'unclosed", "*alias", '"double"', "null", "0o17", "true",
+])
+def test_the_scalar_reader_returns_what_yaml_reads_or_nothing(raw):
+    import yaml
+
+    from core.carry_in_scan import _scalar
+
+    value = _scalar(raw)
+    if value is not None:  # whatever it proves, YAML itself reads the same string
+        assert yaml.safe_load(f"k: {raw}") == {"k": value}
+
+
+@pytest.mark.asyncio
+async def test_a_save_over_its_owner_budget_defers_the_whole_scan_to_the_drain(c1, monkeypatch, no_samples):
+    from core import carry_in_scan
+    from infra.carry_in_drain import wake
+
+    _write_lesson(c1)
+    monkeypatch.setattr(carry_in_scan, "SAVE_OWNER_BUDGET", 0)
+
+    result = _save(c1, "rule v1\n")
+    assert _events("lesson.carry_in.pending") == []
+    owed = _events("lesson.carry_in.scan_owed")
+    assert [(e["target_path"], e["reason"]) for e in owed] == [(TARGET, "over_budget")]
+
+    _local(monkeypatch, None)
+    await wake(c1.workspace)  # the drain has no owner budget
+    assert _pending_fact().target_commit == result.sha
+
+
+def test_an_inline_save_scan_resolves_each_owner_once(c1, monkeypatch):
+    from core import placement_answer
+
+    _write_lessons(c1, 3)
+    places = []
+    thread_place = placement_answer.thread_place
+    monkeypatch.setattr(placement_answer, "thread_place", lambda db, owner: places.append(owner) or thread_place(db, owner))
+
+    _save(c1, "rule v1\n")
+    assert len(_events("lesson.carry_in.pending")) == 3
+    assert places == [c1.owner]
+
+
+@pytest.mark.asyncio
+async def test_a_save_over_its_case_budget_defers_the_whole_scan_to_the_drain(c1, monkeypatch, no_samples):
+    from core import carry_in_facts, carry_in_scan
+    from infra.carry_in_drain import wake
+
+    _write_lessons(c1, carry_in_scan.SAVE_CASE_BUDGET + 1)
+    read = []
+    real = carry_in_facts._read_lesson
+    monkeypatch.setattr(carry_in_facts, "_read_lesson", lambda path: read.append(path) or real(path))
+
+    result = _save(c1, "rule v1\n")
+    assert result.line is None or "CORSIA" not in result.line  # nothing failed: no receipt line
+    assert read == [] and _events("lesson.carry_in.pending") == []
+    owed = _events("lesson.carry_in.scan_owed")
+    assert [(e["target_path"], e["reason"]) for e in owed] == [(TARGET, "over_budget")]
+    assert c1.drains == [c1.workspace]
+
+    _local(monkeypatch, None)
+    await wake(c1.workspace)
+    pending = _events("lesson.carry_in.pending")
+    assert len(pending) == carry_in_scan.SAVE_CASE_BUDGET + 1  # no eligible case dropped
+    assert {p["target_commit"] for p in pending} == {result.sha}
 
 
 # --- drain ------------------------------------------------------------------
@@ -284,7 +450,7 @@ async def test_an_interrupted_claim_becomes_coverage_and_its_eval_thread_is_reap
     _save(c1, "rule v1\n")
     fact = _pending_fact()
     with write_transaction(get_db(), scope="test") as db:
-        record_claim(db, fact, "2026-10-24T00:00:00+00:00", "omlx@srv/model")
+        record_claim(db, fact, "2026-10-24T00:00:00+00:00", "omlx@srv/model", "an-earlier-boot")
         db.execute(
             "INSERT INTO threads (id,user_id,title,model,created_at,updated_at) VALUES (?,?,?,?,?,?)",
             (f"eval-c1-{fact.identity[:16]}-b1", "steve", "x", "native/test", "t", "t"),
@@ -447,7 +613,7 @@ async def test_a_sample_is_a_fresh_isolated_child_of_the_owner_checked_before_di
         try:
             await after_manifest_before_dispatch("absent-manifest")
         except Exception as exc:
-            return None, f"Eval turn errored: {exc}"
+            return None, endpoint.EvalTurnFailure("handoff", f"Eval turn errored: {exc}")
         return "turn-1", None
 
     monkeypatch.setattr(endpoint, "run_eval_turn", run_eval_turn)
@@ -483,7 +649,7 @@ async def test_each_sample_rechecks_exact_idle_capacity_right_before_its_provide
         try:
             await after_manifest_before_dispatch("m1")
         except Exception as exc:
-            return None, f"Eval turn errored: {exc}"
+            return None, endpoint.EvalTurnFailure("handoff", f"Eval turn errored: {exc}")
         dispatched.append(model)
         return "turn-1", None
 
@@ -497,6 +663,128 @@ async def test_each_sample_rechecks_exact_idle_capacity_right_before_its_provide
         await carry_in_drain._sample(fact, owner, "omlx@srv/m0", ACTIONS, "prompt", "c1", [])
     assert checks == [("omlx@srv/m0", f"eval-c1-{fact.identity[:16]}-c1")]
     assert dispatched == []
+
+
+@pytest.mark.asyncio
+async def test_a_git_fault_reading_the_target_waits_instead_of_retiring_the_case(c1, monkeypatch, no_samples):
+    from core import carry_in_facts
+    from infra import carry_in_capacity
+    from infra.carry_in_drain import wake
+    from infra.guidance_git import GitFault
+
+    _write_lesson(c1)
+    _save(c1, "rule v1\n")
+    committed_bytes = carry_in_facts.committed_bytes
+
+    def fault(*_args):
+        raise GitFault("cat-file: object store unreadable")
+
+    monkeypatch.setattr(carry_in_facts, "committed_bytes", fault)
+    monkeypatch.setattr(carry_in_capacity, "ready_idle", lambda *a, **k: pytest.fail("selected a model"))
+    assert await wake(c1.workspace) is False
+    assert [(e["event"], e.get("reason")) for e in _events()][-1] == ("lesson.carry_in.waiting", "history_unavailable")
+    assert _events("lesson.carry_in.retired") == []
+
+    monkeypatch.setattr(carry_in_facts, "committed_bytes", committed_bytes)
+    _local(monkeypatch, None)
+    await wake(c1.workspace)  # the history is back: the same case advances
+    assert _events()[-1]["reason"] == "no_ready_local_model"
+
+
+@pytest.mark.asyncio
+async def test_an_unexpected_check_error_ends_in_error_coverage_and_reaps_after_it(c1, monkeypatch):
+    _first, calls = await _run_scored(c1, monkeypatch, [False, KeyError("what_happened")])
+    terminal = _events()[-1]
+    assert (terminal["event"], terminal["reason"], terminal["samples_completed"]) == (
+        "lesson.carry_in.coverage", "error", 1,
+    )
+    assert calls[-1] == ("deleted", ["eval-c1-b1", "eval-c1-b2"], "lesson.carry_in.coverage")
+
+
+@pytest.mark.asyncio
+async def test_a_claim_this_boot_left_open_is_an_error_not_a_restart(c1, monkeypatch, no_samples):
+    from core.carry_in_facts import CarryInFact, record_claim
+    from core.turn_core import BOOT_EPOCH
+    from infra import carry_in_drain
+    from infra.database import get_db, write_transaction
+
+    _write_lesson(c1)
+    _save(c1, "rule v1\n")
+    _save(c1, "rule v2\n")
+    this_boot, earlier = (CarryInFact.from_attributes(e) for e in _events("lesson.carry_in.pending"))
+    with write_transaction(get_db(), scope="test") as db:
+        record_claim(db, this_boot, "2026-10-24T00:00:00+00:00", "omlx@srv/model", BOOT_EPOCH)
+        record_claim(db, earlier, "2026-10-24T00:00:00+00:00", "omlx@srv/model", "an-earlier-boot")
+
+    await carry_in_drain.wake(c1.workspace)
+    reasons = {e["identity"]: e["reason"] for e in _events("lesson.carry_in.coverage")}
+    assert reasons == {this_boot.identity: "error", earlier.identity: "interrupted"}
+
+
+@pytest.mark.asyncio
+async def test_a_failed_sample_keeps_the_eval_routes_failure_kind_whatever_its_text(c1, monkeypatch):
+    from eval import endpoint
+    from infra import carry_in_drain
+
+    _write_lesson(c1)
+    _save(c1, "rule v1\n")
+    fact = _pending_fact()
+
+    async def run_eval_turn(**_kwargs):
+        return None, endpoint.EvalTurnFailure("provider", "Eval turn errored: httpx connect timed out")
+
+    monkeypatch.setattr(endpoint, "run_eval_turn", run_eval_turn)
+    with pytest.raises(carry_in_drain._SampleFailed) as failed:
+        await carry_in_drain._sample(fact, {"user_id": "steve", "project_id": None}, "omlx@srv/m0", ACTIONS, "p", "b1", [])
+    assert failed.value.reason == "provider"
+
+
+def _eval_route(monkeypatch, *, admit=None, held=False, batch="batch", execute=None, task=None):
+    from infra import thread_driver, thread_execution
+    from llm import resolution
+
+    def admit_input(*_a, **_k):
+        if admit:
+            raise admit
+        return SimpleNamespace(held_for_restart=held, batch=batch)
+
+    async def execute_claimed_batch(*_a, **_k):
+        if execute:
+            raise execute
+        return SimpleNamespace(turn_task=asyncio.ensure_future(task()), turn_id="turn-1")
+
+    monkeypatch.setattr(resolution, "resolve_execution_target", lambda model: model)
+    monkeypatch.setattr(thread_driver, "admit_input", admit_input)
+    monkeypatch.setattr(thread_execution, "execute_claimed_batch", execute_claimed_batch)
+
+
+async def _raises_timed_out():
+    raise RuntimeError("provider connect timed out")
+
+
+async def _hangs():
+    await asyncio.sleep(5)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("route", "kind"), [
+    ({"admit": RuntimeError("timed out acquiring lock")}, "admission"),
+    ({"held": True}, "interrupted"),
+    ({"batch": None}, "admission"),
+    ({"execute": RuntimeError("Eval turn errored")}, "handoff"),
+    ({"task": _raises_timed_out}, "provider"),
+    ({"task": _hangs}, "timeout"),
+])
+async def test_the_eval_route_names_its_failure_kind_by_step(isolated_db, monkeypatch, route, kind):
+    from core.carry_in_facts import COVERAGE_REASONS
+    from eval.endpoint import EVAL_FAILURES, run_eval_turn
+
+    _eval_route(monkeypatch, **route)
+    turn_id, failure = await run_eval_turn(
+        thread_id="t", thread_row={"user_id": "steve"}, prompt="p", model="m", timeout_seconds=0.05,
+    )
+    assert turn_id is None and failure.kind == kind
+    assert set(EVAL_FAILURES) <= set(COVERAGE_REASONS)
 
 
 @pytest.mark.asyncio
