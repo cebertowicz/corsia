@@ -12,9 +12,10 @@
 		createdAt?: string;
 	};
 
-	let { replies, newReplyIds = new Set<string>(), onNewestReplyRendered }: {
+	let { replies, newReplyIds = new Set<string>(), collapseReplyIds = newReplyIds, onNewestReplyRendered }: {
 		replies: CommentReplyData[];
 		newReplyIds?: ReadonlySet<string>;
+		collapseReplyIds?: ReadonlySet<string>;
 		onNewestReplyRendered?: (element: HTMLElement | undefined) => void;
 	} = $props();
 
@@ -25,7 +26,7 @@
 
 	const visibleFrom = $derived.by(() => {
 		if (expanded || replies.length <= 3) return 0;
-		const firstNew = replies.findIndex((reply) => !!reply.id && newReplyIds.has(reply.id));
+		const firstNew = replies.findIndex((reply) => !!reply.id && collapseReplyIds.has(reply.id));
 		return firstNew >= 0 ? firstNew : replies.length - 1;
 	});
 	const hiddenCount = $derived(visibleFrom);

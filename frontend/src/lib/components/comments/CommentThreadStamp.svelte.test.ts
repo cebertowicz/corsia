@@ -123,7 +123,7 @@ describe('CommentThread stamping', () => {
 		warn.mockRestore();
 	});
 
-	it('clears the New marks and recalculates the collapse point when the store confirms a stamp', async () => {
+	it('clears New marks without moving replies when the store confirms a stamp', async () => {
 		const onViewed = vi.fn().mockResolvedValue(undefined);
 		const replies = Array.from({ length: 6 }, (_, index) => reply(`r${index}`, `2026-10-16T18:0${index}:00Z`));
 		state.comment = { ...state.comment, replies, newReplyIds: ['r4', 'r5'] };
@@ -136,8 +136,9 @@ describe('CommentThread stamping', () => {
 		expect(onViewed).toHaveBeenCalledWith('c1', 'r5');
 		arrive({ newReplyIds: [] });
 		expect(newMarks()).toBe(0);
-		expect(host.textContent).toContain('Show 5 earlier replies');
-		expect(host.textContent).not.toContain('reply 0');
+		expect(host.textContent).toContain('Show 4 earlier replies');
+		expect(host.textContent).toContain('reply r4');
+		expect(host.textContent).not.toContain('reply r0');
 	});
 
 	it('shows only the server-reported unread reply while the thread is open', () => {
