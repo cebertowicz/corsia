@@ -154,21 +154,45 @@ class TestFirstModelChoice:
         assert "unavailable" not in facts["your_model"]
 
     @pytest.mark.asyncio
-    async def test_an_unfinished_fact_is_unavailable_after_the_total_bound(self, fresh_install, monkeypatch):
+    async def test_a_failed_selected_model_fact_remains_unavailable(self):
         import asyncio
 
         from onboarding import first_run_wake
 
-        async def never(*_args, **_kwargs):
-            await asyncio.sleep(60)
+        failed = asyncio.get_running_loop().create_future()
+        failed.set_exception(OSError("catalog unavailable"))
 
-        monkeypatch.setattr(first_run_wake, "FACTS_TIMEOUT_SECONDS", 0.2)
-        monkeypatch.setattr("onboarding.setup_decisions.setup_plan", never)
+        facts = await first_run_wake._read_facts({"your_model": lambda: failed})
 
-        facts = await asyncio.wait_for(first_run_wake.setup_facts("claude-code/sonnet"), 5)
+        assert facts == {
+            "your_model": {"unavailable": first_run_wake.UNAVAILABLE_READS["your_model"]},
+        }
 
-        assert facts["setup"] == {"unavailable": first_run_wake.UNAVAILABLE_READS["setup"]}
-        assert "unavailable" not in facts["your_model"]
+    @pytest.mark.asyncio
+    async def test_an_unfinished_fact_is_unavailable_after_the_total_bound(self, monkeypatch):
+        import asyncio
+
+        from onboarding import first_run_wake
+
+        async def never():
+            await asyncio.Event().wait()
+
+        ready = asyncio.get_running_loop().create_future()
+        ready.set_result({"display_name": "Sonnet", "local": False})
+        # The completed future makes the successful fact independent of event
+        # loop and DB-pool timing; only the deliberate never-ending read uses
+        # the zero shared budget.
+        monkeypatch.setattr(first_run_wake, "FACTS_TIMEOUT_SECONDS", 0)
+
+        facts = await first_run_wake._read_facts({
+            "your_model": lambda: ready,
+            "setup": never,
+        })
+
+        assert facts == {
+            "your_model": {"display_name": "Sonnet", "local": False},
+            "setup": {"unavailable": first_run_wake.UNAVAILABLE_READS["setup"]},
+        }
 
     @pytest.mark.asyncio
     async def test_no_search_runs_while_the_facts_are_read(self, fresh_install, monkeypatch):
