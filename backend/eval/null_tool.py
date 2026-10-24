@@ -44,26 +44,4 @@ class NullProbeTool(Tool):
         return json.dumps({"ok": True, "probe_id_echo": probe_id})
 
 
-class RecordOnlyTool(Tool):
-    """A per-call eval stub that reports success without an external effect."""
-
-    def __init__(self, tool_name: str) -> None:
-        self._tool_name = tool_name
-
-    @property
-    def name(self) -> str:
-        return self._tool_name
-
-    @property
-    def description(self) -> str:
-        return "Records an isolated evaluation call without executing it."
-
-    @property
-    def parameters(self) -> dict[str, Any]:
-        return {"type": "object", "additionalProperties": True}
-
-    async def execute(self, **_kwargs: Any) -> str:
-        return json.dumps({"ok": True, "record_only": True, "tool": self._tool_name})
-
-
-__all__ = ["NullProbeTool", "RecordOnlyTool", "NULL_TOOL_NAME"]
+__all__ = ["NullProbeTool", "NULL_TOOL_NAME"]

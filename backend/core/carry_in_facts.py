@@ -1,12 +1,12 @@
-"""C1 carry-in facts: which kept lesson cases a committed guidance save puts to the test.
+"""C1 carry-in facts: written saves become bounded work off the request path.
 
-A trial lesson's case names the file its rule changes. When a guidance save
-commits that file, ``core.carry_in_scan`` appends one ``lesson.carry_in.pending``
-outcome event per matching, currently eligible case, within the save's budget.
-That append-only sequence is the whole work list: claim, result, retirement,
-coverage and waiting facts follow it under the same identity, and nothing
-mirrors it in another table. Facts carry ids, hashes, state and counts only,
-never case text or transcripts.
+A trial lesson's case names the file its rule changes. A written guidance save
+first appends one ``lesson.carry_in.saved`` outcome event per changed target.
+The drain discovers matching cases from that saved fact off the request path,
+then appends pending facts. That append-only sequence is the whole work list:
+claim, result, retirement, coverage and waiting facts follow it under the same
+identity, and nothing mirrors it in another table. Facts carry ids, hashes,
+state and counts only, never case text or transcripts.
 
 The drain (``infra.carry_in_drain``) reads these facts; ``infra.guidance_git``
 owns the commits they point at.
@@ -22,6 +22,8 @@ from pathlib import Path
 from typing import Any
 
 PENDING = "lesson.carry_in.pending"
+SAVED = "lesson.carry_in.saved"
+SAVED_PROCESSED = "lesson.carry_in.saved_processed"
 CLAIMED = "lesson.carry_in.claimed"
 RESULT = "lesson.carry_in.result"
 RETIRED = "lesson.carry_in.retired"
@@ -93,6 +95,29 @@ class CarryInFact:
         except (KeyError, TypeError):
             return None
         return fact if fact.identity == attrs.get("identity") else None
+
+
+@dataclass(frozen=True)
+class SavedCommit:
+    """One written target that the drain must match against trial lessons."""
+
+    commit: str
+    target_path: str
+
+    @property
+    def identity(self) -> str:
+        return hashlib.sha256(f"{self.commit}\0{self.target_path}".encode("utf-8")).hexdigest()
+
+    @property
+    def dedupe_key(self) -> str:
+        return f"lesson.carry_in.saved:{self.identity}"
+
+    @property
+    def processed_key(self) -> str:
+        return f"lesson.carry_in.saved:{self.identity}:processed"
+
+    def attributes(self) -> dict[str, str]:
+        return {"identity": self.identity, "commit": self.commit, "target_path": self.target_path}
 
 
 @dataclass(frozen=True)
@@ -186,7 +211,10 @@ def _lesson_case(db, workspace: Path, lesson_path: str, trays: dict[str, Path | 
                    if trial.lesson.case_metadata.get(key)), None)
     if not isinstance(case, dict) or not target:
         return "case_changed"
-    rel = canonical_target(tray, workspace, str(target))
+    try:
+        rel = canonical_target(tray, workspace, str(target))
+    except (OSError, RuntimeError, ValueError):
+        return "target_moved"
     if rel is None:
         return "target_moved"
     return trial, rel, case
@@ -209,28 +237,82 @@ def eligible_case(db: sqlite3.Connection, workspace: Path, fact: CarryInFact) ->
     return EligibleCase(case=case, actions=case.get("actions"))
 
 
-def committed_cases(
-    db: sqlite3.Connection, workspace: Path, saved: set[str], commit: str, lessons: list[str],
-    trays: dict[str, Path | None] | None = None,
-) -> list[CarryInFact]:
-    """Every eligible case among ``lessons`` whose canonical target is one of the saved paths.
+def committed_cases(db: sqlite3.Connection, workspace: Path, saved: SavedCommit) -> list[CarryInFact]:
+    """Current eligible cases whose canonical target is one saved target.
 
-    Reads each lesson file once and each distinct owner's place once (``trays``
-    carries those across one scan).
+    This is deliberately the one parser path: ``_lesson_case`` uses
+    ``lesson_files.read_trial``. Bad lesson files and unresolvable targets are
+    non-matches, never a failure of this saved work item.
     """
     facts = []
-    trays = {} if trays is None else trays
-    for lesson_path in lessons:
-        found = _lesson_case(db, workspace, lesson_path, trays)
-        if isinstance(found, str) or found[1] not in saved:
+    for path in workspace.glob(".threads/*/skills/*/SKILL.md"):
+        lesson_path = path.relative_to(workspace).as_posix()
+        found = _lesson_case(db, workspace, lesson_path)
+        if isinstance(found, str) or found[1] != saved.target_path:
             continue
         trial, rel, case = found
         facts.append(CarryInFact(
             lesson_id=trial.lesson.id, behavioral_sha256=trial.behavioral_sha256,
             case_sha256=case_sha256(case), owner_thread_id=trial.lesson.owner,
-            lesson_path=lesson_path, target_path=rel, target_commit=commit,
+            lesson_path=lesson_path, target_path=rel, target_commit=saved.commit,
         ))
     return facts
+
+
+def record_committed_save(workspace: Path, paths: list[Path], commit: str) -> None:
+    """Record written targets only; lesson discovery belongs to the drain, not the save."""
+    from contextlib import closing
+
+    from infra.database import get_db, write_transaction
+    from infra.outcome_events import record_outcome_event
+    from infra.time import utc_now_iso
+
+    root = workspace.resolve()
+    saved = {
+        SavedCommit(commit, path.resolve(strict=False).relative_to(root).as_posix())
+        for path in paths
+        if path.resolve(strict=False).is_relative_to(root)
+    }
+    if not saved:
+        return
+    with closing(get_db()) as db, write_transaction(db, scope="carry_in_saved") as tx:
+        for saved_commit in sorted(saved, key=lambda item: item.target_path):
+            record_outcome_event(
+                tx, dedupe_key=saved_commit.dedupe_key, event_name=SAVED, source="corsia",
+                provenance="instrumented", ts=utc_now_iso(), subject_key=f"c1save:{saved_commit.identity}",
+                attributes=saved_commit.attributes(),
+            )
+
+
+def oldest_saved_commit(db: sqlite3.Connection) -> SavedCommit | None:
+    """The oldest saved target not yet matched; one drain wake handles one."""
+    row = db.execute(
+        """SELECT json_extract(s.attributes, '$.commit'), json_extract(s.attributes, '$.target_path')
+           FROM outcome_events s
+           WHERE s.event_name=? AND s.retracted_at IS NULL
+             AND NOT EXISTS (SELECT 1 FROM outcome_events p
+                             WHERE p.dedupe_key = 'lesson.carry_in.saved:' ||
+                                   json_extract(s.attributes, '$.identity') || ':processed')
+           ORDER BY s.ts, s.observed_ts, s.id LIMIT 1""",
+        (SAVED,),
+    ).fetchone()
+    return SavedCommit(str(row[0]), str(row[1])) if row and row[0] and row[1] else None
+
+
+def process_saved_commit(db: sqlite3.Connection, workspace: Path, saved: SavedCommit, ts: str) -> int:
+    """Append matching pending facts and close one saved work item atomically."""
+    from infra.database import write_transaction
+    from infra.outcome_events import record_outcome_event
+
+    matches = committed_cases(db, workspace, saved)
+    with write_transaction(db, scope="carry_in_match_saved") as tx:
+        inserted = sum(record_pending(tx, fact, ts) for fact in matches)
+        record_outcome_event(
+            tx, dedupe_key=saved.processed_key, event_name=SAVED_PROCESSED, source="corsia",
+            provenance="instrumented", ts=ts, subject_key=f"c1save:{saved.identity}",
+            attributes={"identity": saved.identity, "pending": inserted},
+        )
+    return inserted
 
 
 def _record(db, fact: CarryInFact, event: str, key: str, ts: str, **extra: Any) -> bool:

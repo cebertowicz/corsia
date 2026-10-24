@@ -1,8 +1,8 @@
-"""The C1 carry-in drain: one bounded pending case per wake on the application loop.
+"""The C1 carry-in drain: one bounded saved or pending item per app-loop wake.
 
 ``core.carry_in_facts`` owns the append-only facts this reads. Each wake
-settles a claim no running wake owns, reaps finished eval threads, runs the
-oldest scan a save deferred to it, then reads only the oldest pending case.
+settles a claim no running wake owns, reaps finished eval threads, then either
+matches the oldest saved target or advances the oldest pending case.
 It runs only on the one ready local oMLX Native catalog row while ``infra.carry_in_capacity`` proves it idle; otherwise that oldest case
 shows ``no_ready_local_model`` and waits for the next save or restart. The
 same check, on the claimed model only, runs again just before every sample's
@@ -21,7 +21,7 @@ from typing import Any
 
 from loguru import logger
 
-from core import carry_in_facts as facts, carry_in_scan as scans
+from core import carry_in_facts as facts
 from core.carry_in_facts import CarryInFact, EligibleCase
 from infra import carry_in_capacity as capacity
 from infra.db_async import run_in_db, run_off_db
@@ -318,7 +318,7 @@ async def _settle(fact: CarryInFact, terminal: dict[str, Any], completed: int, c
 
 
 async def wake(workspace: Path) -> bool:
-    """Advance only the oldest pending case; True when a later wake may find runnable work.
+    """Advance one oldest saved target or pending case; True when later work may run.
 
     The result informs callers and tests only: ``drain`` never runs another wake on it.
 
@@ -330,7 +330,8 @@ async def wake(workspace: Path) -> bool:
 
     await run_in_db(partial(_write, _settle_interrupted, scope="carry_in_interrupted"))
     await _delete_threads(await run_in_db(_read, _stranded_threads))
-    await _run_owed_scan(workspace)
+    if await _run_saved_commit(workspace):
+        return True
     oldest = await run_in_db(_read, facts.open_facts, claimed=False, limit=1)
     if not oldest:
         return False
@@ -369,13 +370,12 @@ async def wake(workspace: Path) -> bool:
     return True
 
 
-async def _run_owed_scan(workspace: Path) -> None:
-    """Run the oldest scan a save deferred here; a failure leaves it owed for a later wake."""
-    scan = await run_in_db(_read, scans.oldest_owed_scan)
-    if scan is None:
-        return
-    try:
-        keys = await run_off_db(scans.lesson_keys, workspace)
-        await run_in_db(_read, scans.record_owed_scan, workspace, scan, keys)
-    except Exception:
-        logger.opt(exception=True).warning("carry-in owed scan for {} still owed", scan.commit[:12])
+async def _run_saved_commit(workspace: Path) -> bool:
+    """Match and close exactly one oldest saved target off the save request path."""
+    saved = await run_in_db(_read, facts.oldest_saved_commit)
+    if saved is None:
+        return False
+    await run_in_db(partial(
+        _read, facts.process_saved_commit, workspace, saved, _now(),
+    ))
+    return True

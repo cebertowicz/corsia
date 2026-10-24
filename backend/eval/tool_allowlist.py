@@ -44,12 +44,10 @@ def is_carry_in_record_only(tool_name: str) -> bool:
 
 
 async def record_only_result(tool_name: str, params: dict) -> str | None:
-    """The record-only stub's result for an isolated non-read-only call, else None."""
+    """The record-only receipt for an isolated non-read-only call, else None."""
     if not is_carry_in_record_only(tool_name):
         return None
-    from eval.null_tool import RecordOnlyTool
-
-    return await RecordOnlyTool(tool_name).execute(**params)
+    return json.dumps({"ok": True, "record_only": True, "tool": tool_name})
 
 
 def eval_tool_allowlist() -> tuple[str, ...] | None:

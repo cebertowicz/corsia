@@ -293,10 +293,12 @@ def save_guidance(
             lesson_changes, author, stewardship_thread_id=lesson_observation_thread_id,
         ))
     if result.outcome == "written" and result.sha and writes:
-        # Only a landed commit puts lesson cases to the test (C1); an unsynced index still landed.
-        from core.carry_in_scan import record_committed_save
+        # Only a landed commit creates C1 work; matching remains off this request path.
+        from core.carry_in_facts import record_committed_save
+        from infra.carry_in_drain import request_drain
 
-        warnings.append(record_committed_save(workspace, list(writes), result.sha))
+        record_committed_save(workspace, list(writes), result.sha)
+        request_drain(workspace)
     if any(warnings):
         result = SaveResult(
             result.outcome, result.reason, result.sha,
