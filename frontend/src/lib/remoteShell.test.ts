@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
-	SETTINGS_PATH, codeRefusalLine, disconnectRemote, parseAddress, refusesOnCodeScreen, remoteDiscovered, remotePair, shellInfo,
+	SETTINGS_PATH, codeRefusalLine, disconnectRemote, parseAddress, refusesOnCodeScreen, remoteDiscovered, remotePair, shellInfo, startLocalService,
 	unreachableLine, type PairReason,
 } from './remoteShell';
 import pairRequests from '../../../testdata/remote-pair-requests.json';
@@ -39,6 +39,16 @@ describe('shellInfo', () => {
 });
 
 describe('the shell commands', () => {
+	it('accepts only the existing ready startup response', async () => {
+		const invoke = vi.fn(async () => ({ state: 'ready', url: 'http://127.0.0.1:1956' }));
+		vi.stubGlobal('__TAURI_INTERNALS__', { invoke });
+		await expect(startLocalService()).resolves.toBeUndefined();
+		expect(invoke).toHaveBeenCalledWith('start_local_service');
+	});
+	it.each([{ state: 'requires_approval' }, { state: 'adoption_failed', failure: {} }, { state: 'ready', url: '' }, null, 'started'])('rejects a non-ready or malformed startup response: %j', async (response) => {
+		vi.stubGlobal('__TAURI_INTERNALS__', { invoke: vi.fn(async () => response) });
+		await expect(startLocalService()).rejects.toThrow('CORSIA did not start');
+	});
 	it('calls remote_discovered, remote_pair and disconnect_remote with the contract arguments', async () => {
 		const invoke = vi.fn(async (command: string) => command === 'remote_discovered' ? { names: ['Studio'] } : command === 'remote_pair' ? { ok: true, name: 'Studio' } : undefined);
 		vi.stubGlobal('__TAURI_INTERNALS__', { invoke });

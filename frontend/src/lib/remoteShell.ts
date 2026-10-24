@@ -45,6 +45,19 @@ function invoke(command: string, args?: Record<string, unknown>): Promise<unknow
 	return args === undefined ? call(command) : call(command, args);
 }
 
+/** Start the local managed service after a restart has exceeded its usual time. */
+export async function startLocalService(): Promise<void> {
+	const result = await invoke('start_local_service');
+	if (!result || typeof result !== 'object') throw new Error('CORSIA did not start');
+	const startup = result as { state?: unknown; url?: unknown };
+	if (startup.state !== 'ready' || typeof startup.url !== 'string' || !startup.url.trim()) throw new Error('CORSIA did not start');
+}
+
+/** The desktop shell's PID-validated, redacted startup-progress record; absent for browsers and remote shells. */
+export async function readStartupProgress(): Promise<unknown> {
+	return invoke('read_startup_progress');
+}
+
 export async function remoteDiscovered(): Promise<DiscoveredResult> {
 	const result = await invoke('remote_discovered') as DiscoveredResult | null;
 	return { names: Array.isArray(result?.names) ? result.names : [], denied: result?.denied === true };

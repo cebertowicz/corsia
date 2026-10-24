@@ -11,6 +11,7 @@
 	import type { View } from '$lib/homePaneConfig';
 	import type { ProjectPick } from '$lib/stores/projects';
 	import { token } from '$lib/stores/auth';
+	import { settingsNavigation } from '$lib/stores/settingsNavigation';
 	import { fetchSetupProgress } from '$lib/setupProgress';
 
 	let {
@@ -195,4 +196,8 @@
 	onProjectCreated={onProjectCreated}
 	onConfirmDeleteThread={onConfirmDeleteThread}
 	onCancelDeleteThread={onCancelDeleteThread}
+	onUpdateFinished={() => {
+		if (activeView !== 'settings') return;
+		return get(settingsNavigation).homeThread ? onCloseSettings() : onNewChat();
+	}}
 />

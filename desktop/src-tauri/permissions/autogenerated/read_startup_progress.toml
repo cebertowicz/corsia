@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-read-startup-progress"
+description = "Enables the read_startup_progress command without any pre-configured scope."
+commands.allow = ["read_startup_progress"]
+
+[[permission]]
+identifier = "deny-read-startup-progress"
+description = "Denies the read_startup_progress command without any pre-configured scope."
+commands.deny = ["read_startup_progress"]

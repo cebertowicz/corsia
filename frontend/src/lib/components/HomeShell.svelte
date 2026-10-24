@@ -3,6 +3,8 @@
 	import { cubicOut } from 'svelte/easing';
 	import { activeThread, activeThreadId } from '$lib/stores/threads';
 	import { uiScope } from '$lib/stores/uiScope';
+	import { updateScreenVisible } from '$lib/update/screenStore';
+	import { isMobile } from '$lib/stores/viewport';
 
 	import { paneOpen } from '$lib/stores/paneOpen';
 	import { paneDragging } from '$lib/stores/paneOpen';
@@ -116,6 +118,8 @@
 	// Views without a pane (project Activity, Measurement, Settings) hide the toggle.
 	const viewHasPane = $derived(paneView === 'detail' || paneConfig != null);
 	const paneVisible = $derived($paneOpen && viewHasPane);
+	// On phones an open rail covers the Settings content; the System Updates row is then not visible.
+	const settingsSurfaceVisible = $derived(!$isMobile || !sidebarOpen);
 
 	function browseDocumentsForThread(threadId: string) {
 		docPickerTarget.set({ threadId });
@@ -214,6 +218,7 @@
 		}
 	}}
 >
+	<div class="app-content" inert={$updateScreenVisible}>
 	<Sidebar
 		bind:open={sidebarOpen}
 		onNewChat={onNewChat}
@@ -276,6 +281,7 @@
 		{:else if activeView === 'settings'}
 			<SettingsView
 				onClose={onCloseSettings}
+				updateSurfaceVisible={settingsSurfaceVisible}
 				{systemStatus}
 				onBrowseContextFiles={openDocumentsForContextAttach}
 				onBrowseSkills={openDocumentsForSkills}
@@ -306,10 +312,12 @@
 			onBrowseDocuments={browseDocumentsForThread}
 		/>
 	{/if}
+	</div>
 </div>
 
 <style>
 	.app { position: fixed; inset: 0; display: flex; overflow: hidden; background: transparent; }
+	.app-content { flex: 1; display: flex; min-width: 0; }
 	@media (max-width: 1024px) {
 		.main { transition: transform var(--dur-spring) var(--ease-entrance); }
 		.main.pane-open { transform: translateX(calc(-1 * min(420px, 92vw))); }

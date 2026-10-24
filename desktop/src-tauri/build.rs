@@ -11,6 +11,7 @@ fn main() {
                 "get_service_log_path",
                 "open_login_items",
                 "quit_app",
+                "read_startup_progress",
                 "remote_discovered",
                 "remote_pair",
                 "reopen_app",

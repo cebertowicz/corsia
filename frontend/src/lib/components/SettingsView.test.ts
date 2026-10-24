@@ -6,6 +6,7 @@ import { token } from '$lib/stores/auth';
 import { SETTINGS_SECTIONS, closeSettingsProject, openProjectSettings, requestConnectedAppKey, requestSettingsSection, resetSettingsNavigation, selectSettingsSection, settingsNavigation } from '$lib/stores/settingsNavigation';
 import { get } from 'svelte/store';
 import { projects } from '$lib/stores/projects';
+import { updateToastSuppressed } from '$lib/update/store';
 
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
@@ -31,6 +32,7 @@ afterEach(() => {
 	token.set(null);
 	resetSettingsNavigation();
 	projects.set([]);
+	updateToastSuppressed.set(false);
 });
 
 describe('SettingsView navigation', () => {
@@ -67,6 +69,17 @@ describe('SettingsView navigation', () => {
 		expect(host.textContent).not.toContain('Costs');
 		expect(host.textContent).toContain('System');
 		expect(host.textContent).toContain('Debug');
+	});
+
+	it('suppresses update toasts only while desktop System content is visible', () => {
+		selectSettingsSection('system');
+		component = mount(SettingsView, { target: host, props: { systemStatus: {} } });
+		flushSync();
+		expect(get(updateToastSuppressed)).toBe(true);
+
+		selectSettingsSection('providers');
+		flushSync();
+		expect(get(updateToastSuppressed)).toBe(false);
 	});
 
 	it('opens directly to a requested settings section', async () => {
@@ -120,6 +133,28 @@ describe('SettingsView navigation', () => {
 		flushSync();
 
 		expect(host.querySelector('.settings-content')?.classList.contains('mobile-section')).toBe(false);
+	});
+
+	it('suppresses only when open mobile System content is not covered', () => {
+		vi.stubGlobal('matchMedia', (query: string) => ({ matches: true, media: query, addEventListener: () => {}, removeEventListener: () => {} }));
+		selectSettingsSection('system');
+		component = mount(SettingsView, { target: host, props: { systemStatus: {}, updateSurfaceVisible: true } });
+		flushSync();
+		expect(get(updateToastSuppressed)).toBe(false);
+		unmount(component);
+		component = null;
+
+		requestSettingsSection('system');
+		component = mount(SettingsView, { target: host, props: { systemStatus: {}, updateSurfaceVisible: false } });
+		flushSync();
+		expect(get(updateToastSuppressed)).toBe(false);
+		unmount(component);
+		component = null;
+
+		requestSettingsSection('system');
+		component = mount(SettingsView, { target: host, props: { systemStatus: {}, updateSurfaceVisible: true } });
+		flushSync();
+		expect(get(updateToastSuppressed)).toBe(true);
 	});
 
 	it('mounts a phone section only once it is open, so an anchor scrolls in shown content', () => {
