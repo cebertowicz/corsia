@@ -50,7 +50,7 @@
 	}
 	.mobile-scroll-fab.docked { display: flex; margin: var(--space-2) auto 0; }
 	@media (min-width: 769px) {
-		.mobile-scroll-fab.docked { width: 36px; height: 36px; }
+		.mobile-scroll-fab.docked { width: calc(var(--space-7) + var(--space-1)); height: calc(var(--space-7) + var(--space-1)); }
 	}
 	.mobile-scroll-fab svg {
 		width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2;
