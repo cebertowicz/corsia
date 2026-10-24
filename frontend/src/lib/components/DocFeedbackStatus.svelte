@@ -15,6 +15,7 @@
 		onFeedbackChanged,
 		compact = false,
 		lane = null,
+		activityRoot = null,
 	}: {
 		artifactId: string | null;
 		targetInstanceId: string | null;
@@ -23,6 +24,8 @@
 		compact?: boolean;
 		/** The held lane whose Send shows here (DocFeedbackControls); none where another surface shows it. */
 		lane?: HeldLane | null;
+		/** Document canvas whose active use extends the document-held delivery deadline. */
+		activityRoot?: HTMLElement | null;
 	} = $props();
 
 	const feedback = holdDocFeedback(() => ({ artifactId, targetInstanceId }), () => onFeedbackChanged?.());
@@ -34,6 +37,27 @@
 	export function sync(id: string, current: CommentFeedback) { feedback.sync(id, current); }
 	/** The batch itself, for the header's unsent mark and an image viewer over this document. */
 	export function controller(): DocFeedback { return feedback; }
+
+	$effect(() => {
+		const root = activityRoot;
+		const id = artifactId;
+		if (!root || !id || lane !== 'document-held' || feedback.documentHeld === 0) return;
+		const touch = () => feedback.touchDocument();
+		const selectionChanged = () => {
+			const selection = document.getSelection();
+			if (selection && (root.contains(selection.anchorNode) || root.contains(selection.focusNode))) touch();
+		};
+		root.addEventListener('scroll', touch, { capture: true, passive: true });
+		root.addEventListener('keydown', touch, { passive: true });
+		root.addEventListener('pointerdown', touch, { passive: true });
+		document.addEventListener('selectionchange', selectionChanged, { passive: true });
+		return () => {
+			root.removeEventListener('scroll', touch, true);
+			root.removeEventListener('keydown', touch);
+			root.removeEventListener('pointerdown', touch);
+			document.removeEventListener('selectionchange', selectionChanged);
+		};
+	});
 
 	onMount(() => {
 		const unsubscribe = subscribeToDocumentCommentChanges(

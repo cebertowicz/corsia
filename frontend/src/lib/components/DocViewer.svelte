@@ -313,7 +313,7 @@
 		viewingThreadId={target?.threadId ?? null}
 		reviewTargetKey={targetKey}
 		targetInstanceId={target?.instanceId ?? null}
-		imageOpen={covered}
+		imageOpen={covered} activityRoot={docRoot}
 		{onReload}
 		onOpenComments={commentUI.openList}
 		{freshness}

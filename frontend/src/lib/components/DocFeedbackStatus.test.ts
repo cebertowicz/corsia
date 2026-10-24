@@ -28,7 +28,7 @@ function render() {
 	document.body.appendChild(host);
 	component = mount(DocFeedbackStatus, {
 		target: host,
-		props: { artifactId: 'artifact-1', targetInstanceId: 'tab-1', onFeedbackChanged, lane: 'document-held' },
+		props: { artifactId: 'artifact-1', targetInstanceId: 'tab-1', onFeedbackChanged, activityRoot: host, lane: 'document-held' },
 	});
 	flushSync();
 }
@@ -88,6 +88,30 @@ describe('DocFeedbackStatus', () => {
 			headers: expect.objectContaining({ Authorization: 'Bearer test-token' }),
 		}));
 		await vi.waitFor(() => expect(host.textContent).not.toContain('Send 1 comment'));
+	});
+
+	it('touches the document-held lane from activity only while it has held work, with the controller throttle', async () => {
+		const now = vi.spyOn(Date, 'now').mockReturnValue(100_000);
+		try {
+			host.dispatchEvent(new Event('scroll', { bubbles: true }));
+			await Promise.resolve();
+			expect(fetchMock).not.toHaveBeenCalled();
+
+			waitToSend();
+			flushSync();
+			await Promise.resolve();
+			host.dispatchEvent(new Event('scroll', { bubbles: true }));
+			await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/doc-feedback/touch', expect.objectContaining({ body: JSON.stringify({ artifact_id: 'artifact-1', delivery_policy: 'document-held' }) })));
+			host.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true }));
+			await Promise.resolve();
+			expect(fetchMock).toHaveBeenCalledTimes(1);
+
+			now.mockReturnValue(130_000);
+			host.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+			await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+		} finally {
+			now.mockRestore();
+		}
 	});
 
 	it('reloads feedback after a newly posted comment so held batches show without a delivery frame', () => {

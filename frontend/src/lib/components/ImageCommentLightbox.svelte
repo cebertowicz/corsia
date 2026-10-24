@@ -112,6 +112,19 @@
 	$effect(() => { if (loaded && comments.length) void showFocus(); });
 
 	$effect(() => { draftOpen = image.hasDraftText; });
+	$effect(() => {
+		const currentRoot = root;
+		const id = artifactId;
+		const controller = feedback;
+		if (!currentRoot || !id || !controller || controller.imageHeld === 0) return;
+		const touch = () => controller.touchImage();
+		for (const event of ['pointermove', 'pointerdown', 'keydown', 'wheel']) {
+			currentRoot.addEventListener(event, touch, { passive: true });
+		}
+		return () => {
+			for (const event of ['pointermove', 'pointerdown', 'keydown', 'wheel']) currentRoot.removeEventListener(event, touch);
+		};
+	});
 	// A new revision of the image comes with a new `src`: read the comments again, so pins placed on the old one show as stale.
 	$effect(() => {
 		void src;

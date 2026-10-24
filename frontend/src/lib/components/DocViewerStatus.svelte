@@ -40,6 +40,7 @@
 		onReopen,
 		onRead,
 		imageOpen = false,
+		activityRoot = null,
 	}: {
 		title?: string;
 		presence?: import('svelte').Snippet;
@@ -70,6 +71,7 @@
 		onRead?: () => void;
 		/** An image of this document covers it; its viewer owns the image lane's Send until it is left. */
 		imageOpen?: boolean;
+		activityRoot?: HTMLElement | null;
 	} = $props();
 
 	let feedbackStatus = $state<DocFeedbackStatus>();
@@ -170,7 +172,7 @@
 		<span class="document-tools document-status-row">
 			{#if artifactId}
 				<!-- Send belongs to this compact tool row with the comment count, delivery preference, and review action. -->
-				<span class="feedback-controls"><DocFeedbackStatus bind:this={feedbackStatus} {artifactId} {targetInstanceId} {onFeedbackChanged} lane="document-held" /></span>
+				<span class="feedback-controls"><DocFeedbackStatus bind:this={feedbackStatus} {artifactId} {targetInstanceId} {onFeedbackChanged} {activityRoot} lane="document-held" /></span>
 			{/if}
 			{#if stale && ready}<button type="button" class="doc-tool warn stale-control" onclick={() => onReload?.()}>File changed · Reload</button>{/if}
 			{#if saveStatus !== 'idle'}<span class="save-ghost" class:saving={saveStatus === 'saving'}>{saveStatus === 'saving' ? 'Saving…' : '✓ Saved'}</span>{/if}

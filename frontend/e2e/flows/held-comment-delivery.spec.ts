@@ -502,6 +502,23 @@ test.describe('@flow:held-comment-delivery @surface:documents held comments have
 	test.describe('idle delivery', () => {
 		test.use({ seedPerTest: true });
 
+		test('document activity extends a held lane through the touch route', async ({ page, request }, testInfo) => {
+			mockOnly(testInfo);
+			const title = `held-touch-${Date.now()}`;
+			const threadId = await createSession(request, title);
+			const doc = await seedTextDocument(request, threadId, title, 'activity');
+			await seedHeldComments(request, doc.artifactId, 1);
+			await installWorkspace(page, threadId, [doc], 0);
+			await openThread(page, threadId, title);
+			await turnOffDocumentComments(page);
+			await expect(headerSend(page)).toHaveText('Send 1 comment');
+
+			const touched = page.waitForResponse((response) => response.url().endsWith('/api/doc-feedback/touch') && response.request().method() === 'POST');
+			await page.locator('.document-canvas').hover();
+			await page.mouse.wheel(0, 120);
+			expect(await (await touched).json()).toEqual({ touched: 1 });
+		});
+
 		test('in an open document clears Send without a confirmation', async ({ page, request }, testInfo) => {
 			mockOnly(testInfo);
 			test.setTimeout(90_000);
