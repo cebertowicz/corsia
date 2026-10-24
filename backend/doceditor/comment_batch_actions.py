@@ -100,6 +100,21 @@ def _drop_edit_feedback(artifact_id: str, text: str) -> None:
         db.close()
 
 
+def _accepted_user_author(rows: list[dict[str, Any]], accepted_ids: list[str]) -> str | None:
+    """Return a user author only when every accepted row has the same stored author."""
+    accepted = set(accepted_ids)
+    winners = [row for row in rows if row.get("id") in accepted]
+    if not accepted or len(winners) != len(accepted):
+        return None
+    if any(row.get("author_kind") != "user" for row in winners):
+        return None
+    authors = {row.get("author") for row in winners}
+    if len(authors) != 1:
+        return None
+    author = authors.pop()
+    return author if isinstance(author, str) and author else None
+
+
 async def _accept_batch(
     artifact: dict[str, Any], project_id: str | None, rows: list[dict[str, Any]],
     actor_thread_id: str | None, *, user_id: str, write: DocumentWriter, suggestion_accept: bool = False,
@@ -118,10 +133,7 @@ async def _accept_batch(
     text, accepted, skipped = _batch_text(rows, source)
     if accepted:
         authors = ", ".join(dict.fromkeys(row["author"] for row in rows))
-        person_authors = {str(row["author"]) for row in rows if row["author_kind"] == "user"}
-        suggestion_author = next(iter(person_authors)) if len(person_authors) == 1 and all(
-            row["author_kind"] == "user" for row in rows
-        ) else None
+        suggestion_author = _accepted_user_author(rows, accepted)
         receipt = await write(
             artifact["path"], text, project_id, f"Accepted {len(accepted)} suggestions from {authors}",
             hashlib.sha256(source.encode()).hexdigest(), suggestion_author,
