@@ -16,6 +16,7 @@ resolve to 404 so foreign ids stay non-enumerable.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -288,6 +289,8 @@ class CommentPatch(BaseModel):
     from_off: int | None = None
     to_off: int | None = None
     anchor_text: str | None = None
+    # The lane a re-open queues in; the browser sends the person's document preference with it.
+    delivery_policy: Literal["immediate", "document-held"] = "document-held"
     # Moves an image comment's pin; the pin then counts as placed on the current image.
     region: dict | None = None
 
@@ -297,7 +300,7 @@ async def patch_comment(comment_id: str, token: str, body: CommentPatch):
     user = authenticate(token)
     if not user:
         raise HTTPException(401)
-    fields = {k: v for k, v in body.model_dump().items() if v is not None}
+    fields = {k: v for k, v in body.model_dump(exclude={"delivery_policy"}).items() if v is not None}
     if not fields:
         raise HTTPException(400, "No fields to update")
 
@@ -319,7 +322,7 @@ async def patch_comment(comment_id: str, token: str, body: CommentPatch):
                 raise HTTPException(comment_action_status(exc), exc.message) from exc
             with write_transaction(db, scope="patch_user_comment") as connection:
                 row = update_comment(connection, comment_id, patch, user_name=user["name"])
-                apply_user_transition(connection, comment, patch, user)
+                apply_user_transition(connection, comment, patch, user, body.delivery_policy)
                 return row
         finally:
             db.close()

@@ -1,6 +1,7 @@
 import {
 	retryDocFeedback,
 	sendDocFeedback,
+	type DeliveryPolicy,
 	type DocFeedbackResult,
 	type UndeliveredBatch,
 } from '$lib/api/docFeedback';
@@ -21,6 +22,12 @@ export const SENT_HOLD_MS = 1500;
 
 /** The two held lanes a person can send: a document's comments, and the comments on its images. */
 export type HeldLane = 'document-held' | 'image-held';
+
+/** The batches each lane's control shows a failure for: the document header also carries a failed immediate delivery. */
+const LANE_POLICIES: Record<HeldLane, readonly DeliveryPolicy[]> = {
+	'document-held': ['document-held', 'immediate'],
+	'image-held': ['image-held'],
+};
 
 const plural = (count: number) => `${count} comment${count === 1 ? '' : 's'}`;
 
@@ -59,7 +66,7 @@ export class DocFeedback {
 	readonly sending = $derived(this.sendingLane !== null);
 
 	undeliveredFor(lane: HeldLane | null): UndeliveredBatch[] {
-		return lane === null ? [] : this.undelivered.filter((batch) => batch.delivery_policy === lane);
+		return lane === null ? [] : this.undelivered.filter((batch) => LANE_POLICIES[lane].includes(batch.delivery_policy));
 	}
 
 	undeliveredCount(lane: HeldLane | null): number {
@@ -144,6 +151,18 @@ export class DocFeedback {
 		window.dispatchEvent(new Event('doc-feedback-changed'));
 	}
 
+	/**
+	 * Say what one call delivered, from its own result alone: the server counts only comments whose batches ended
+	 * delivered, so a send or retry that ended undelivered, or that another sender won, confirms nothing. Every held-lane
+	 * trigger (button, image exit, pagehide, thread change, retry) reaches this one canvas-local confirmation.
+	 */
+	private reportDelivered(id: string, lane: HeldLane, result: DocFeedbackResult) {
+		const sent = result.sent_count ?? 0;
+		if (sent === 0) return;
+		if (this.artifactId === id) this.confirmSent(sent, lane);
+		deliveryConfirmation.show(id, sent);
+	}
+
 	/** Say `count` comments just went, for SENT_HOLD_MS; 0 stops saying it. */
 	private confirmSent(count: number, lane: HeldLane | null = null) {
 		clearTimeout(this.sentTimer);
@@ -186,18 +205,11 @@ export class DocFeedback {
 			this.sendingLane = lane;
 			this.handedToRetry = false;
 		}
-		const undeliveredBefore = this.undeliveredCount(lane);
 		try {
 			const result = await sendDocFeedback(id, lane, keepalive);
 			this.applyResult(id, lane, result, revision);
-			const sent = result.sent_count ?? 0;
-			if (this.artifactId === id) this.handedToRetry = this.undeliveredCount(lane) > undeliveredBefore;
-			// A batch that could not be delivered says so in its own line; only one that went confirms delivery.
-			if (!this.handedToRetry && sent > 0) {
-				if (this.artifactId === id) this.confirmSent(sent, lane);
-				// Every held-lane trigger reaches this one canvas-local confirmation, including image exit and thread change.
-				deliveryConfirmation.show(id, sent);
-			}
+			if (this.artifactId === id) this.handedToRetry = (result.undelivered_count ?? 0) > 0;
+			this.reportDelivered(id, lane, result);
 			// Keep the lane busy until its owning reader settles any overlapping mutation.
 			if (this.artifactId === id) await this.refresh?.();
 		} catch {
@@ -221,17 +233,18 @@ export class DocFeedback {
 		this[field] = now;
 		void import('$lib/api/docFeedback')
 			.then(({ touchDocFeedback }) => touchDocFeedback(id, policy))
-			.catch(() => undefined);
+			.catch((error) => console.warn('[doc feedback] activity touch failed', error));
 	}
 
 	retry = async (lane: HeldLane) => {
 		const id = this.artifactId;
 		if (!id || this.retryingLane !== null) return;
 		this.retryingLane = lane;
+		const revision = this.revision;
 		try {
 			const result = await retryDocFeedback(id, lane);
-			if (this.artifactId === id) this.undelivered = result.undelivered_batches;
-			window.dispatchEvent(new Event('doc-feedback-changed'));
+			this.applyResult(id, lane, result, revision);
+			this.reportDelivered(id, lane, result);
 		} catch {
 			toasts.show("Couldn't send your comments — try again", 'error');
 		} finally {

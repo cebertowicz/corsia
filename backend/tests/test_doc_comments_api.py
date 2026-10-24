@@ -205,7 +205,7 @@ def test_user_reopen_records_feedback_but_resolve_ack_and_edit_stay_silent(
     assert integration_client.patch(url, json={"resolved": False}).status_code == 200
     assert integration_client.patch(url, json={"resolved": True}).status_code == 200
 
-    assert seen == [{"user_id": OWNER_USER, "user_display": OWNER_USER}]
+    assert seen == [{"user_id": OWNER_USER, "user_display": OWNER_USER, "delivery_policy": "document-held"}]
     assert discarded == [cid, cid]
 
 

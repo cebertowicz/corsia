@@ -8,7 +8,7 @@ from typing import Literal
 from fastapi import Depends, HTTPException
 from pydantic import BaseModel
 
-from doceditor import feedback_batches
+from doceditor import feedback_batches, feedback_state
 from infra.auth import owns_thread, require_user_header_only
 from infra.database import get_db, write_transaction
 from infra.db_async import run_in_db
@@ -28,10 +28,6 @@ class FeedbackThreadAction(BaseModel):
     thread_id: str
 
 
-# Which open count a lane-scoped send closes; an unscoped send closes every lane.
-_SENT_COUNT_KEY: dict[str | None, str] = {"document-held": "document_held_count", "image-held": "image_held_count"}
-
-
 def _user_feedback_write(
     assert_owns_artifact: Callable[[str, str, object], None],
     user_id: str,
@@ -44,10 +40,23 @@ def _user_feedback_write(
         assert_owns_artifact(artifact_id, user_id, db)
         with write_transaction(db, scope=f"user_doc_feedback_{action}") as connection:
             woken: list[str] = []
-            sent_count = 0
+            state, lanes = "open", None if delivery_policy is None else (delivery_policy,)
+            if action == "retry":
+                if delivery_policy is None and feedback_batches.undelivered_for_document(
+                    connection,
+                    author_kind="user",
+                    author_id=feedback_batches.USER_AUTHOR_ID,
+                    artifact_id=artifact_id,
+                ):
+                    raise HTTPException(422, "delivery_policy is required when retrying document feedback")
+                state = "undelivered"
+                lanes = None if delivery_policy is None else feedback_state.RETRY_LANES[delivery_policy]
+            # What the attempt ends in is read from the batches themselves, so every trigger reports the same truth.
+            batch_ids = [] if action == "retry" and delivery_policy is None else feedback_state.user_batch_ids(
+                connection, state, artifact_id=artifact_id, policies=lanes,
+            )
+            held_items = feedback_state.pending_item_keys(connection, batch_ids)
             if action == "send":
-                before = feedback_batches.open_counts_for_document(connection, artifact_id)
-                sent_count = before[_SENT_COUNT_KEY.get(delivery_policy, "open_count")]
                 woken = feedback_batches.close_for_document(
                     connection,
                     author_kind="user",
@@ -56,23 +65,15 @@ def _user_feedback_write(
                     reason="send",
                     delivery_policy=delivery_policy,
                 )
-            elif action == "retry":
-                pending = feedback_batches.undelivered_for_document(
+            elif delivery_policy is not None:
+                woken = feedback_batches.retry_for_document(
                     connection,
                     author_kind="user",
                     author_id=feedback_batches.USER_AUTHOR_ID,
                     artifact_id=artifact_id,
+                    delivery_policy=delivery_policy,
                 )
-                if delivery_policy is None and pending:
-                    raise HTTPException(422, "delivery_policy is required when retrying document feedback")
-                if delivery_policy is not None:
-                    woken = feedback_batches.retry_for_document(
-                        connection,
-                        author_kind="user",
-                        author_id=feedback_batches.USER_AUTHOR_ID,
-                        artifact_id=artifact_id,
-                        delivery_policy=delivery_policy,
-                    )
+            outcome = feedback_state.outcome_counts(connection, held_items)
             undelivered = feedback_batches.undelivered_for_document(
                 connection,
                 author_kind="user",
@@ -80,8 +81,9 @@ def _user_feedback_write(
                 artifact_id=artifact_id,
             )
             remaining = feedback_batches.open_counts_for_document(connection, artifact_id)
-        # sent_count is what this call closed (0 when another sender won first); the counts are what remains.
-        return {"woken": woken, "undelivered_batches": undelivered, "sent_count": sent_count, **remaining}
+        # sent_count is what this call delivered: 0 when another sender won first or the batch ended undelivered.
+        # The counts are what remains.
+        return {"woken": woken, "undelivered_batches": undelivered, **outcome, **remaining}
     finally:
         db.close()
 
@@ -92,22 +94,26 @@ def _thread_feedback_read(user_id: str, thread_id: str) -> dict:
     try:
         if not owns_thread(thread_id, user_id, db=db):
             raise HTTPException(404, "Thread not found")
-        return {"woken": [], "sent_count": 0, **feedback_batches.held_for_thread(db, thread_id)}
+        return {"woken": [], "sent_count": 0, "undelivered_count": 0, **feedback_batches.held_for_thread(db, thread_id)}
     finally:
         db.close()
 
 
 def _send_thread_feedback(user_id: str, thread_id: str) -> dict:
-    """Close a thread's held-document batches and return the remaining projection."""
+    """Close a thread's held-document batches; report what was delivered, what was not, and what remains."""
     db = get_db()
     try:
         if not owns_thread(thread_id, user_id, db=db):
             raise HTTPException(404, "Thread not found")
         with write_transaction(db, scope="send_thread_doc_feedback") as connection:
-            sent_count = feedback_batches.held_for_thread(connection, thread_id)["open_count"]
+            batch_ids = feedback_state.user_batch_ids(
+                connection, "open", recipient_id=thread_id, policies=(feedback_batches.DOCUMENT_HELD,),
+            )
+            held_items = feedback_state.pending_item_keys(connection, batch_ids)
             woken = feedback_batches.close_for_thread(connection, thread_id=thread_id, reason="send")
+            outcome = feedback_state.outcome_counts(connection, held_items)
             feedback = feedback_batches.held_for_thread(connection, thread_id)
-        return {"woken": woken, "sent_count": sent_count, **feedback}
+        return {"woken": woken, **outcome, **feedback}
     finally:
         db.close()
 

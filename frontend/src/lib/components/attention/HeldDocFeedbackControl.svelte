@@ -61,7 +61,12 @@
 		try {
 			const result = await sendHeldDocFeedbackForThread(id);
 			// The chat only sends documents whose canvases are off screen, so it has no canvas-local confirmation host.
-			// Do not fall back to the global success-toast path; the action simply clears its sender.
+			// Do not fall back to the global success-toast path; the sender clearing is the confirmation. What did not
+			// go is said once, here, and left on its documents, whose headers carry the Retry.
+			const failed = result.undelivered_count ?? 0;
+			if (failed > 0) {
+				toasts.show(`${failed} comment${failed === 1 ? '' : 's'} couldn’t be delivered. Open the document and choose Retry.`, 'error');
+			}
 			if (id === threadId) held = { open_count: result.open_count, artifacts: result.artifacts };
 			// Open documents read what they still hold.
 			window.dispatchEvent(new Event(THREAD_SENT_EVENT));

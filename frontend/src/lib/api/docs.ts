@@ -172,7 +172,8 @@ export async function patchComment(commentId: string, fields: Partial<{ resolved
 	const data = await ok(await fetch(`/api/comments/${commentId}?token=${tok()}`, {
 		method: 'PATCH',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify(fields)
+		// A reopen queues feedback in the lane the person's preference names, as a new comment does.
+		body: JSON.stringify(fields.resolved === false ? { ...fields, delivery_policy: documentCommentDeliveryPolicy() } : fields)
 	}));
 	return data.comment;
 }

@@ -13,9 +13,10 @@ def record_reopen(
     *,
     user_id: str,
     user_display: str,
+    delivery_policy: str = "document-held",
     now: str | None = None,
 ) -> str | None:
-    """Queue a user's resolved-comment re-open through canonical recipients."""
+    """Queue a user's resolved-comment re-open through canonical recipients, in the lane the person chose."""
     if not user_id:
         return None
     at = now or feedback_batches._now()
@@ -26,7 +27,7 @@ def record_reopen(
         author_id=feedback_batches.USER_AUTHOR_ID,
         artifact_id=str(comment["artifact_id"]),
         recipient_id=recipient_id,
-        delivery_policy=feedback_batches.DOCUMENT_HELD,
+        delivery_policy=delivery_policy,
         now=at,
     )
     feedback_batches._add_comment_item(
@@ -34,7 +35,7 @@ def record_reopen(
         batch_id=batch_id,
         comment_id=str(comment["id"]),
         author_kind="user",
-        delivery_policy=feedback_batches.DOCUMENT_HELD,
+        delivery_policy=delivery_policy,
         now=at,
         event="reopened",
         event_by=user_display.strip() or user_id,

@@ -14,6 +14,8 @@ from doceditor.feedback_state import (
     USER_AUTHOR_ID,
     annotate_pane,
     reply_waiting_ids,
+    RETRY_LANES,
+    held_counts_for_thread,
     open_counts_for_document,
     take_unreported_undelivered,
     undelivered_for_document,
@@ -291,16 +293,7 @@ def held_for_thread(db, thread_id: str) -> dict[str, Any]:
     Image-held work belongs to its image viewer and never appears here. One row per
     held document, so the result is bounded by open documents, not comments.
     """
-    rows = db.execute(
-        """SELECT batch.artifact_id AS artifact_id, COUNT(DISTINCT item.comment_id) AS count
-           FROM doc_feedback_batches batch
-           JOIN doc_feedback_batch_items item ON item.batch_id=batch.id
-           WHERE batch.state='open' AND batch.author_kind='user' AND batch.author_id=?
-             AND batch.recipient_id=? AND batch.delivery_policy=?
-           GROUP BY batch.artifact_id ORDER BY MIN(batch.opened_at), batch.artifact_id""",
-        (USER_AUTHOR_ID, thread_id, DOCUMENT_HELD),
-    ).fetchall()
-    artifacts = [{"artifact_id": row["artifact_id"], "open_count": int(row["count"])} for row in rows]
+    artifacts = held_counts_for_thread(db, thread_id, DOCUMENT_HELD)
     return {"open_count": sum(item["open_count"] for item in artifacts), "artifacts": artifacts}
 
 
@@ -366,12 +359,14 @@ def close_due(now: str, *, db=None) -> list[str]:
 def retry_for_document(
     db, *, author_kind: str, author_id: str, artifact_id: str, delivery_policy: str,
 ) -> list[str]:
-    """Retry one owning lane's undelivered recipient batches for one document."""
+    """Retry one lane's undelivered recipient batches for one document, with what failed beside it (RETRY_LANES)."""
+    policies = RETRY_LANES[delivery_policy]
     rows = db.execute(
-        """SELECT id FROM doc_feedback_batches WHERE state='undelivered'
-           AND author_kind=? AND author_id=? AND artifact_id=? AND delivery_policy=?
-           ORDER BY updated_at,id""",
-        (author_kind, author_id, artifact_id, delivery_policy),
+        f"""SELECT id FROM doc_feedback_batches WHERE state='undelivered'
+            AND author_kind=? AND author_id=? AND artifact_id=?
+            AND delivery_policy IN ({','.join('?' * len(policies))})
+            ORDER BY updated_at,id""",
+        (author_kind, author_id, artifact_id, *policies),
     ).fetchall()
     woken: list[str] = []
     for row in rows:

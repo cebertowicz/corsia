@@ -91,6 +91,27 @@ describe('HeldDocFeedbackControl', () => {
 		expect(button()).toBeNull();
 	});
 
+	it('says once what did not go, and confirms nothing as sent', async () => {
+		held = heldOf(['doc-a', 2], ['doc-b', 1]);
+		await render();
+		fetchMock.mockImplementation((url: string) => (String(url).endsWith('/thread/send')
+			? json({ ...heldOf(), sent_count: 1, undelivered_count: 2 })
+			: json(held)));
+		button()!.click();
+		await settle();
+		const messages = get(toasts).map((toast) => toast.message);
+		expect(messages).toEqual(['2 comments couldn’t be delivered. Open the document and choose Retry.']);
+		expect(get(toasts)[0].type).toBe('error');
+	});
+
+	it('says nothing is wrong when everything went', async () => {
+		held = heldOf(['doc-a', 2]);
+		await render();
+		button()!.click();
+		await settle();
+		expect(get(toasts)).toEqual([]);
+	});
+
 	it('a failed send keeps the control and says so', async () => {
 		held = heldOf(['doc-a', 2]);
 		await render();

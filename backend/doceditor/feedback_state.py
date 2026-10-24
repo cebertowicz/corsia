@@ -53,16 +53,27 @@ def has_pending_for_document(
     ).fetchone() is not None
 
 
+# The person's unsent items: each comment once, plus one for a batch's coalesced document edit. Every count of
+# what is waiting reads this one projection, so an edit-only batch has a Send too.
+_USER_ITEMS = """
+    SELECT batch.id AS batch_id, batch.artifact_id AS artifact_id, batch.recipient_id AS recipient_id,
+           batch.delivery_policy AS policy, batch.opened_at AS opened_at, item.comment_id AS item_key
+      FROM doc_feedback_batches batch JOIN doc_feedback_batch_items item ON item.batch_id=batch.id
+     WHERE batch.state IN ({states}) AND batch.author_kind='user' AND batch.author_id=?
+    UNION ALL
+    SELECT batch.id, batch.artifact_id, batch.recipient_id, batch.delivery_policy, batch.opened_at,
+           'edit:' || batch.id
+      FROM doc_feedback_batches batch JOIN doc_feedback_edit_items edit ON edit.batch_id=batch.id
+     WHERE batch.state IN ({states}) AND batch.author_kind='user' AND batch.author_id=?"""
+_OPEN_USER_ITEMS = _USER_ITEMS.format(states="'open'")
+_PENDING_USER_ITEMS = _USER_ITEMS.format(states="'open','undelivered'")
+
+
 def open_counts_for_document(db, artifact_id: str) -> dict[str, int]:
-    """The user's unsent comments on one document: the total and each held lane."""
+    """The user's unsent items on one document: the total and each held lane."""
     rows = db.execute(
-        """SELECT batch.delivery_policy AS policy, COUNT(DISTINCT item.comment_id) AS count
-           FROM doc_feedback_batches batch
-           JOIN doc_feedback_batch_items item ON item.batch_id=batch.id
-           WHERE batch.state='open' AND batch.author_kind='user'
-             AND batch.author_id=? AND batch.artifact_id=?
-           GROUP BY batch.delivery_policy""",
-        (USER_AUTHOR_ID, artifact_id),
+        f"SELECT policy, COUNT(DISTINCT item_key) AS count FROM ({_OPEN_USER_ITEMS}) WHERE artifact_id=? GROUP BY policy",
+        (USER_AUTHOR_ID, USER_AUTHOR_ID, artifact_id),
     ).fetchall()
     by_policy = {row["policy"]: int(row["count"]) for row in rows}
     return {
@@ -70,6 +81,69 @@ def open_counts_for_document(db, artifact_id: str) -> dict[str, int]:
         "document_held_count": by_policy.get("document-held", 0),
         "image_held_count": by_policy.get("image-held", 0),
     }
+
+
+def held_counts_for_thread(db, thread_id: str, policy: str) -> list[dict[str, Any]]:
+    """One row per document the thread holds in one lane: the artifact and its unsent items."""
+    rows = db.execute(
+        f"""SELECT artifact_id, COUNT(DISTINCT item_key) AS count FROM ({_OPEN_USER_ITEMS})
+            WHERE recipient_id=? AND policy=? GROUP BY artifact_id ORDER BY MIN(opened_at), artifact_id""",
+        (USER_AUTHOR_ID, USER_AUTHOR_ID, thread_id, policy),
+    ).fetchall()
+    return [{"artifact_id": row["artifact_id"], "open_count": int(row["count"])} for row in rows]
+
+
+# A retry from one lane's control also retries the immediate batches that failed beside it, since a
+# document header is where those show; an image lane's retry stays image-only.
+RETRY_LANES = {
+    "immediate": ("immediate",),
+    "document-held": ("document-held", "immediate"),
+    "image-held": ("image-held",),
+}
+
+
+def user_batch_ids(
+    db, state: str, *, artifact_id: str | None = None, recipient_id: str | None = None,
+    policies: tuple[str, ...] | None = None,
+) -> list[str]:
+    """The user's batches in one state, optionally narrowed to a document, a recipient thread and lanes."""
+    where, params = ["state=?", "author_kind='user'", "author_id=?"], [state, USER_AUTHOR_ID]
+    for column, value in (("artifact_id", artifact_id), ("recipient_id", recipient_id)):
+        if value is not None:
+            where.append(f"{column}=?")
+            params.append(value)
+    if policies is not None:
+        where.append(f"delivery_policy IN ({','.join('?' * len(policies))})")
+        params.extend(policies)
+    rows = db.execute(
+        f"SELECT id FROM doc_feedback_batches WHERE {' AND '.join(where)} ORDER BY opened_at,id", params,
+    ).fetchall()
+    return [row["id"] for row in rows]
+
+
+def pending_item_keys(db, batch_ids: list[str]) -> dict[str, set[str]]:
+    """The items each named user batch holds now, read before a close or retry consumes them."""
+    keys: dict[str, set[str]] = {batch_id: set() for batch_id in batch_ids}
+    marks = ",".join("?" * len(batch_ids))
+    rows = db.execute(
+        f"SELECT batch_id, item_key FROM ({_PENDING_USER_ITEMS}) WHERE batch_id IN ({marks})",
+        (USER_AUTHOR_ID, USER_AUTHOR_ID, *batch_ids),
+    ).fetchall() if batch_ids else []
+    for row in rows:
+        keys[row["batch_id"]].add(row["item_key"])
+    return keys
+
+
+def outcome_counts(db, keys: dict[str, set[str]]) -> dict[str, int]:
+    """What the batches read by `pending_item_keys` ended in: items delivered, and items left undelivered."""
+    rows = db.execute(
+        f"SELECT id,state FROM doc_feedback_batches WHERE id IN ({','.join('?' * len(keys))})", tuple(keys),
+    ).fetchall() if keys else []
+    ended: dict[str, set[str]] = {"delivered": set(), "undelivered": set()}
+    for row in rows:
+        if row["state"] in ended:
+            ended[row["state"]] |= keys[row["id"]]
+    return {"sent_count": len(ended["delivered"]), "undelivered_count": len(ended["undelivered"])}
 
 
 def user_feedback_for_document(db, artifact_id: str) -> dict[str, Any]:

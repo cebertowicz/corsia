@@ -12,11 +12,13 @@ let component: { commentCreated: () => void; sync: (id: string, feedback: { open
 const fetchMock = vi.fn();
 const onFeedbackChanged = vi.fn();
 
-function result(undelivered_batches: object[] = [], sent_count = 1) {
+/** What the server returns: a send ends delivered or undelivered, and counts only what was delivered as sent. */
+function result(undelivered_batches: object[] = [], sent_count = undelivered_batches.length ? 0 : 1) {
 	return new Response(JSON.stringify({
 		woken: [],
 		undelivered_batches: undelivered_batches.map((batch) => ({ delivery_policy: 'document-held', ...batch })),
 		sent_count,
+		undelivered_count: undelivered_batches.reduce((count: number, batch: any) => count + (batch.item_count ?? 0), 0),
 		open_count: 0,
 		document_held_count: 0,
 		image_held_count: 0,
@@ -114,6 +116,19 @@ describe('DocFeedbackStatus', () => {
 		}
 	});
 
+	it('logs a failed activity touch rather than swallowing it', async () => {
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+		fetchMock.mockRejectedValueOnce(new Error('offline'));
+		try {
+			waitToSend();
+			flushSync();
+			host.dispatchEvent(new Event('scroll', { bubbles: true }));
+			await vi.waitFor(() => expect(warn).toHaveBeenCalledWith('[doc feedback] activity touch failed', expect.any(Error)));
+		} finally {
+			warn.mockRestore();
+		}
+	});
+
 	it('reloads feedback after a newly posted comment so held batches show without a delivery frame', () => {
 		component!.commentCreated();
 		expect(onFeedbackChanged).toHaveBeenCalledOnce();
@@ -170,6 +185,60 @@ describe('DocFeedbackStatus', () => {
 
 		await vi.waitFor(() => expect(host.querySelector('button')?.textContent).toContain('Retry'));
 		expect(host.textContent).toContain('1 comment not delivered: its owner is unavailable');
+	});
+
+	it('shows a failed default-mode delivery with Retry in the document header, and Retry delivers it', async () => {
+		component!.sync('artifact-1', {
+			open_count: 0,
+			owner_label: null,
+			undelivered_batches: [{ id: 'immediate-failure', item_count: 2, undelivered_reason: 'no_owner', attempts: 1, delivery_policy: 'immediate' }],
+		});
+		flushSync();
+
+		expect(host.textContent).toContain('2 comments not delivered: this document has no owner');
+		fetchMock.mockResolvedValueOnce(result([], 2));
+		host.querySelector<HTMLButtonElement>('button')!.click();
+		await vi.waitFor(() => expect(host.textContent).not.toContain('not delivered'));
+
+		expect(fetchMock.mock.calls[0][0]).toBe('/api/doc-feedback/retry');
+		expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ artifact_id: 'artifact-1', delivery_policy: 'document-held' });
+		expect(get(deliveryConfirmation)?.message).toBe('2 comments sent');
+	});
+
+	it('does not offer the image Retry for a failed default-mode delivery', () => {
+		unmount(component!);
+		host.remove();
+		host = document.createElement('div');
+		document.body.appendChild(host);
+		component = mount(DocFeedbackStatus, { target: host, props: { artifactId: 'artifact-1', targetInstanceId: 'tab-1', onFeedbackChanged, lane: 'image-held' } });
+		flushSync();
+		component!.sync('artifact-1', {
+			open_count: 0,
+			owner_label: null,
+			undelivered_batches: [{ id: 'immediate-failure', item_count: 1, undelivered_reason: 'no_owner', attempts: 1, delivery_policy: 'immediate' }],
+		});
+		flushSync();
+
+		expect(host.querySelector('button')).toBeNull();
+	});
+
+	it('confirms nothing for a send of another document that ended undelivered', async () => {
+		fetchMock.mockResolvedValueOnce(result([{ id: 'batch-1', item_count: 1, undelivered_reason: 'no_owner', attempts: 1, delivery_policy: 'image-held' }]));
+
+		await (component as any).controller().leaveImage('artifact-2', true);
+
+		expect(fetchMock).toHaveBeenCalledOnce();
+		expect(get(deliveryConfirmation)).toBeNull();
+	});
+
+	it('confirms only what a mixed send delivered, and says what did not go', async () => {
+		fetchMock.mockResolvedValueOnce(result([{ id: 'batch-1', item_count: 3, undelivered_reason: 'owner_unavailable', attempts: 1, delivery_policy: 'document-held' }], 2));
+		waitToSend(5);
+		flushSync();
+		host.querySelector<HTMLButtonElement>('button')!.click();
+
+		await vi.waitFor(() => expect(host.textContent).toContain('3 comments not delivered: its owner is unavailable'));
+		expect(get(deliveryConfirmation)?.message).toBe('2 comments sent');
 	});
 
 	it('Send grows in when the first comment arrives and Sent leaves the way it came, not by growing again', async () => {

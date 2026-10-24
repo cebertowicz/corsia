@@ -21,16 +21,19 @@ export interface DocFeedbackCounts {
 export interface DocFeedbackResult extends DocFeedbackCounts {
 	woken: string[];
 	undelivered_batches: UndeliveredBatch[];
-	/** How many comments this call closed; 0 when another sender closed them first. */
+	/** How many comments this call delivered: 0 when another sender won first or the batch ended undelivered. */
 	sent_count?: number;
+	/** How many comments this call tried and left undelivered. */
+	undelivered_count?: number;
 }
 
 /** A thread's document-held comments, one row per held document. */
 export interface HeldThreadFeedback {
 	open_count: number;
 	artifacts: { artifact_id: string; open_count: number }[];
-	/** Only on a send: how many comments it closed. */
+	/** Only on a send: how many comments it delivered, and how many it tried and left undelivered. */
 	sent_count?: number;
+	undelivered_count?: number;
 }
 
 export class DocFeedbackError extends Error {
