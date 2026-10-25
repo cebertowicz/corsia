@@ -500,7 +500,7 @@ def test_a_managed_row_on_an_older_base_never_starts_there(isolated_runtime, mon
     from llm.providers.omlx_supervisor_config import MOVED_SETTINGS_UNREPOINTED
 
     current = tmp_path / "CORSIA" / "state" / "managed-omlx"
-    older = tmp_path / "com.cebertowicz.corsia" / "state" / "managed-omlx"
+    older = tmp_path / "older-root" / "state" / "managed-omlx"
     row = {"corsia_managed": True, "base_path": str(older)}
     argv: list[str] = []
 
