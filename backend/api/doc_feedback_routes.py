@@ -8,7 +8,7 @@ from typing import Literal
 from fastapi import Depends, HTTPException
 from pydantic import BaseModel
 
-from doceditor import feedback_batches, feedback_state
+from doceditor import delivery_preference, feedback_batches, feedback_state
 from infra.auth import owns_thread, require_user_header_only
 from infra.database import get_db, write_transaction
 from infra.db_async import run_in_db
@@ -31,6 +31,10 @@ class FeedbackTouch(BaseModel):
 
 class FeedbackThreadAction(BaseModel):
     thread_id: str
+
+
+class DeliveryPreference(BaseModel):
+    immediate: bool
 
 
 def _user_feedback_write(
@@ -167,6 +171,21 @@ def add_feedback_routes(router, assert_owns_artifact: Callable[[str, str, object
                 db.close()
 
         return await run_in_db(touch)
+
+    @router.get("/doc-feedback/delivery-preference")
+    async def read_delivery_preference(user: dict = Depends(require_user_header_only)):
+        """Return the person's "Deliver immediately" choice, and whether they have made one (unset reads as on)."""
+        immediate, stored = await run_in_db(delivery_preference.read, user["id"])
+        return {"immediate": immediate, "stored": stored}
+
+    @router.put("/doc-feedback/delivery-preference")
+    async def write_delivery_preference(
+        body: DeliveryPreference, user: dict = Depends(require_user_header_only),
+    ):
+        """Store the person's choice and tell their other open clients."""
+        await run_in_db(delivery_preference.write, user["id"], body.immediate)
+        delivery_preference.announce(user["id"], body.immediate)
+        return {"immediate": body.immediate, "stored": True}
 
     @router.get("/doc-feedback/thread/{thread_id}")
     async def held_user_feedback_for_thread(thread_id: str, user: dict = Depends(require_user_header_only)):

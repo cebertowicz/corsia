@@ -5,7 +5,7 @@ import { expect, type Locator, type Page, type TestInfo } from '@playwright/test
 import { createSession, loadPastFirstRunLanding } from '../support/corsia';
 import {
 	chatSend, chatSendGroup, deliveredBatches, headerSend, heldIn, imageBarSend, installWorkspace,
-	openThread, seedHeldComments, seedTextDocument, expectSenders, senderLines, sentToast, watchSendRequests, watchSenders, holdPersonBatches, turnOffDocumentComments, DELIVER_IMMEDIATELY_KEY, setDebugVersionOverlay, setMockCorsiaAgentModel, makeHeldBatchDue,
+	openThread, seedHeldComments, seedTextDocument, expectSenders, senderLines, sentToast, watchSendRequests, watchSenders, holdPersonBatches, turnOffDocumentComments, readDeliveryPreference, setDebugVersionOverlay, setMockCorsiaAgentModel, makeHeldBatchDue,
 } from '../support/heldComments';
 import {
 	bar, commentOnRegion, expectBarFits, openDocument, openImage, overlay, putSheetAway, seedImageDocument,
@@ -23,7 +23,7 @@ const mockOnly = (testInfo: TestInfo) => {
 const framesOut = process.env.HELD_COMMENT_DELIVERY_FRAMES_OUT;
 async function captureFrame(page: Page, state: string, viewport: '1440' | '393') {
 	if (state !== 'toggle-on-sent') {
-		expect(await page.evaluate((key) => localStorage.getItem(key), DELIVER_IMMEDIATELY_KEY), `${state}: held journeys have immediate delivery OFF`).toBe('false');
+		expect((await readDeliveryPreference(page.request)).immediate, `${state}: held journeys have immediate delivery OFF`).toBe(false);
 		const toggle = page.getByRole('button', { name: 'Deliver comments immediately', exact: true });
 		if (await toggle.isVisible()) await expect(toggle).toHaveAttribute('aria-pressed', 'false');
 	}
@@ -36,7 +36,8 @@ async function captureFrame(page: Page, state: string, viewport: '1440' | '393')
 		await expect(page.getByText('Stalled: its last Turn failed', { exact: true }), `${state}: no unrelated stalled plan`).toHaveCount(0);
 		await expect(page.locator('.version-overlay'), `${state}: capture excludes developer provenance`).toHaveCount(0);
 		await page.screenshot({ path: join(framesOut, `${state}-${viewport}-${theme}.png`), animations: 'disabled', scale: 'css' });
-		const evidence = await page.evaluate(() => {
+		const preference = (await readDeliveryPreference(page.request)).immediate;
+		const evidence = await page.evaluate((preference) => {
 			const marker = document.querySelector('.cm-comment-marker');
 			const box = marker?.getBoundingClientRect();
 			const ancestors = []; let parent = marker?.parentElement;
@@ -62,13 +63,13 @@ async function captureFrame(page: Page, state: string, viewport: '1440' | '393')
 					}),
 			} : null;
 			return {
-				preference: localStorage.getItem('corsia.document-comments.deliver-immediately'),
+				preference,
 				toggle: document.querySelector('[aria-label="Deliver comments immediately"]')?.getAttribute('aria-pressed'),
 				toast: document.querySelector('.toast')?.textContent,
 				headerTools,
 				marker: box ? { text: marker?.textContent, left: box.left, right: box.right, ancestors } : null,
 			};
-		});
+		}, preference);
 		writeFileSync(join(framesOut, `${state}-${viewport}-${theme}.json`), JSON.stringify(evidence, null, 2));
 	}
 }

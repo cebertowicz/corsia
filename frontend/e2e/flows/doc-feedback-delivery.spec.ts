@@ -5,7 +5,7 @@ import { test } from '../support/test';
 import { expect } from '@playwright/test';
 import { showAllThreads } from '../support/commentDrawer';
 import { createSession, loginByUrl, TEST_TOKEN } from '../support/corsia';
-import { deliveredBatches, headerSend, heldIn, leaveUnsent } from '../support/heldComments';
+import { deliveredBatches, headerSend, heldIn, leaveUnsent, setDeliveryPreference } from '../support/heldComments';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 
@@ -201,15 +201,15 @@ for (const deliverImmediately of [false, true]) test(`@surface:doc-reopen-feedba
 	const commentId = (await created.json()).comment.id as string;
 	seedAgentComment(artifactId, commentId, threadId);
 
-	await page.addInitScript(({ threadId, docPath, fileName, deliverImmediately }) => {
-		localStorage.setItem('corsia.document-comments.deliver-immediately', String(deliverImmediately));
+	await setDeliveryPreference(request, deliverImmediately);
+	await page.addInitScript(({ threadId, docPath, fileName }) => {
 		localStorage.setItem('corsia:artifactWorkspace:v1', JSON.stringify({
 			threads: { [threadId]: {
 				tabs: [{ instanceId: 'reopen-tab', artifactId: null, path: docPath, title: fileName, loadedRevision: null, latestRevision: null, status: 'loading' }],
 				activeTabId: 'reopen-tab', visible: true, activeSurface: 'artifact',
 			} }, splitWidth: 420,
 		}));
-	}, { threadId, docPath, fileName, deliverImmediately });
+	}, { threadId, docPath, fileName });
 	await loginByUrl(page);
 	if ((page.viewportSize()?.width ?? 0) <= 768) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 	await page.getByText(title, { exact: true }).first().click();
