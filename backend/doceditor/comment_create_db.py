@@ -123,8 +123,8 @@ def create_in_db(request: CommentInput, anchor: Anchor | None, identifier: str, 
                     author_id=request.author_thread_id, artifact_id=artifact_id,
                 )
             delivery_policy = (
-                feedback_batches.IMAGE_HELD
-                if request.author_kind == "user" and request.region is not None
+                feedback_batch_core.person_comment_lane(request.delivery_policy, region=request.region is not None)
+                if request.author_kind == "user"
                 else request.delivery_policy
             )
             feedback = feedback_batches.record_comment(

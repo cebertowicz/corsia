@@ -25,6 +25,11 @@ def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def person_comment_lane(requested: str, *, region: bool) -> str:
+    """The lane a person's new comment or re-open queues in: an image-region comment is always image-held, whatever lane was asked for."""
+    return IMAGE_HELD if region else requested
+
+
 def _after(value: str, seconds: int) -> str:
     return (datetime.fromisoformat(value) + timedelta(seconds=seconds)).isoformat()
 

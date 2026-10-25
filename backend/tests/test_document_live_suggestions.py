@@ -1,5 +1,6 @@
 """Accept runs against live text in the lane, including unsaved browser edits."""
 import asyncio
+from datetime import datetime
 
 import pytest
 
@@ -138,6 +139,13 @@ async def test_the_bars_accept_in_the_live_lane_leaves_no_edit_feedback_but_a_pl
         assert result["accepted"] == [row["id"]]
         await manager.close()
         assert _edit_items(scope) == (0 if bar_accept else 1)
+        if not bar_accept:
+            # A plain accept is a person's save: it shares the save lane, immediate with the 5 s deadline.
+            lane = scope["db"].execute(
+                "SELECT delivery_policy, opened_at, closes_at FROM doc_feedback_batches WHERE author_kind='user'"
+            ).fetchall()
+            assert [row["delivery_policy"] for row in lane] == ["immediate"]
+            assert (datetime.fromisoformat(lane[0]["closes_at"]) - datetime.fromisoformat(lane[0]["opened_at"])).total_seconds() == 5
     finally:
         await manager.close()
 

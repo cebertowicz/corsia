@@ -16,6 +16,9 @@
 	import { chatSend, THREAD_SENT_EVENT } from '$lib/heldDocFeedbackScope';
 	import { toasts } from '$lib/stores/toast';
 
+	/** How long the not-delivered notice stays: it carries the only way back to the comments, so it outlasts an ordinary toast. */
+	const NOT_DELIVERED_MS = 8000;
+
 	let { threadId, visibleArtifactId = null }: { threadId: string; visibleArtifactId?: string | null } = $props();
 
 	let held = $state<HeldThreadFeedback | null>(null);
@@ -71,7 +74,10 @@
 				const what = only?.title && others.length === 0
 					? `${failed === 1 ? 'Your comment' : 'Your comments'} on “${only.title}”`
 					: `${failed} comment${failed === 1 ? '' : 's'}`;
-				toasts.show(`${what} couldn’t be delivered. Open the document and choose Retry.`, 'error');
+				// Several documents did not go: each holds its own Retry. The chat's Send is gone, so this is the only
+				// direction the person has; it stays long enough to read and act on (the action-toast lifetime).
+				const where = (result.undelivered_documents?.length ?? 0) > 1 ? 'each document' : 'the document';
+				toasts.show(`${what} couldn’t be delivered. Open ${where} and choose Retry.`, 'error', NOT_DELIVERED_MS);
 			}
 			if (id === threadId) held = { open_count: result.open_count, artifacts: result.artifacts };
 			// Open documents read what they still hold.

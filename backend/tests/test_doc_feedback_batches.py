@@ -234,7 +234,7 @@ def test_person_batch_deadlines_keep_immediate_retries_fast_and_held_lanes_open(
         db.close()
 
 
-def test_user_edit_delivers_at_its_persisted_idle_deadline(isolated_db):
+def test_user_edit_delivers_at_its_persisted_immediate_deadline(isolated_db):
     db = get_db()
     try:
         seed_thread(db, "owner")
@@ -245,7 +245,7 @@ def test_user_edit_delivers_at_its_persisted_idle_deadline(isolated_db):
         assert (
             datetime.fromisoformat(open_batch["closes_at"])
             - datetime.fromisoformat(open_batch["last_item_at"])
-        ).total_seconds() == feedback_batches.USER_IDLE
+        ).total_seconds() == feedback_batches.IMMEDIATE_IDLE
 
         feedback_batches.close_due(open_batch["closes_at"], db=db)
         [delivered] = batches(db)

@@ -193,7 +193,7 @@ def test_a_retry_that_delivers_reports_what_it_delivered(client, owner_thread, d
     assert (body["sent_count"], body["undelivered_batches"]) == (1, [])
 
 
-def test_an_edit_only_held_batch_counts_so_it_can_be_sent(client, owner_thread, drives):
+def test_an_edit_only_batch_is_open_but_never_held_so_no_send_is_offered(client, owner_thread):
     db = get_db()
     try:
         artifact = seed_document(db, owner_thread)
@@ -208,13 +208,9 @@ def test_an_edit_only_held_batch_counts_so_it_can_be_sent(client, owner_thread, 
 
     feedback = _feedback(client, artifact)
     held = client.get(f"/api/doc-feedback/thread/{owner_thread}", headers=HEADERS).json()
-    assert (feedback["open_count"], feedback["document_held_count"]) == (1, 1)
-    assert held["artifacts"] == [{"artifact_id": artifact, "open_count": 1}]
-
-    body = _post(client, "send", artifact_id=artifact, delivery_policy="document-held")
-
-    assert (body["sent_count"], body["open_count"]) == (1, 0)
-    assert drives == [[owner_thread]]
+    # A person's save is immediate: open until its 5 s deadline, delivered by the server, never held for a Send.
+    assert (feedback["open_count"], feedback["document_held_count"], feedback["image_held_count"]) == (1, 0, 0)
+    assert held["artifacts"] == []
 
 
 def test_a_reopen_follows_the_persons_delivery_policy(client, owner_thread):

@@ -509,13 +509,19 @@ test.describe('@flow:held-comment-delivery @surface:documents held comments have
 			const doc = await seedTextDocument(request, threadId, title, 'activity');
 			await seedHeldComments(request, doc.artifactId, 1);
 			await installWorkspace(page, threadId, [doc], 0);
+			// Any pointer activity in the document touches it, and touches are throttled for 30 s, so the toggle click can
+			// take the touch before the click below does. Record every touch response from the start and read the first.
+			const touched: Array<Promise<unknown>> = [];
+			page.on('response', (response) => {
+				if (response.url().endsWith('/api/doc-feedback/touch') && response.request().method() === 'POST') touched.push(response.json());
+			});
 			await openThread(page, threadId, title);
 			await turnOffDocumentComments(page);
 			await expect(headerSend(page)).toHaveText('Send 1 comment');
 
-			const touched = page.waitForResponse((response) => response.url().endsWith('/api/doc-feedback/touch') && response.request().method() === 'POST');
 			await page.locator('.document-canvas').click({ position: { x: 8, y: 8 } });
-			expect(await (await touched).json()).toEqual({ touched: 1 });
+			await expect.poll(() => touched.length, 'the document activity touch').toBeGreaterThan(0);
+			expect(await touched[0]).toEqual({ touched: 1 });
 		});
 
 		test('in an open document clears Send without a confirmation', async ({ page, request }, testInfo) => {
@@ -527,9 +533,15 @@ test.describe('@flow:held-comment-delivery @surface:documents held comments have
 			const doc = await seedTextDocument(request, threadId, title, 'idle');
 			await seedHeldComments(request, doc.artifactId, 1);
 			await installWorkspace(page, threadId, [doc], 0);
+			const touches: string[] = [];
+			page.on('response', (response) => { if (response.url().endsWith('/api/doc-feedback/touch') && response.request().method() === 'POST') touches.push(response.url()); });
 			await openThread(page, threadId, title);
 			await turnOffDocumentComments(page);
 			await expect(headerSend(page)).toHaveText('Send 1 comment');
+			// The document's first activity extends the batch's deadline, and activity is then throttled for 30 s. Take that
+			// touch (this click, or one the page already made) before the batch is made due, so none lands after it.
+			await page.locator('.document-canvas').click({ position: { x: 8, y: 8 } });
+			await expect.poll(() => touches.length, 'the document activity touch').toBeGreaterThan(0);
 
 			// Shorten the two-minute server deadline only in the disposable mock DB, then make a separate real feedback write
 			// wake the continuation loop. The visible document receives the real doc_comment_changed socket event.

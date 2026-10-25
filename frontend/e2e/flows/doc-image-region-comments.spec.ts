@@ -5,7 +5,8 @@ import { expect, type APIRequestContext, type Page, type TestInfo } from '@playw
 import { createSession, loginByUrl, saveEvidenceScreenshot, TEST_TOKEN } from '../support/corsia';
 import { syntheticPng } from '../support/syntheticImages';
 import { drag, settled, shoot } from '../support/imageRegionComments';
-import { headerSend, leaveUserCommentsUnsent, sendByKeyboard, watchSendRequests, turnOffDocumentComments } from '../support/heldComments';
+import { headerSend, holdPersonBatches, leaveUserCommentsUnsent, sendByKeyboard, watchSendRequests, turnOffDocumentComments } from '../support/heldComments';
+import { beginComment, submitButton } from '../support/liveCommentProof';
 import { installPaintedFrames, type EachPaintedFrame } from '../support/paintedFrames';
 import { expectBarFits } from '../support/docImageComments';
 
@@ -21,6 +22,22 @@ const svgImage = ({ width, height }: typeof NATURAL) => `<svg xmlns="http://www.
 /** Two images, for many comments on each and a drawer with more than one image group. */
 const DOC_TWO = ['# Design walkthrough', '', filler(1, 2), '![Mock screen](shots/screen.png)', '', filler(2, 4), '![Settings screen](shots/settings.png)', '', filler(4, 12)].join('\n');
 const query = `?token=${encodeURIComponent(TEST_TOKEN)}`;
+
+/**
+ * A comment a person makes in the document itself, with the delivery preference off, is document-held: the header's Send
+ * is its sender. A re-opened image comment is image-held again, so it never stands in for one.
+ */
+async function holdOneDocumentComment(page: Page) {
+	holdPersonBatches(true);
+	try {
+		await beginComment(page, 'Paragraph 2:', 'Reword this paragraph');
+		await submitButton(page).click();
+		await expect(page.getByPlaceholder('Comment…')).toHaveCount(0);
+		await putSheetAway(page);
+	} finally {
+		holdPersonBatches(false);
+	}
+}
 
 interface Seeded { sessionTitle: string; sessionId: string; artifactId: string; imagePath: string }
 
@@ -352,9 +369,9 @@ test.describe('@flow:image-region-comments @surface:documents comments on images
 		await shoot(page, testInfo, 'doc-1440-06-drawer-image-group', true);
 		await cardOpensViewerAndReturns(page, testInfo, 'The header crowds the logo', 'back', 'doc-1440-06b-drawer-card');
 
-		// A re-opened comment is held for the document's owner: the header's Send is its one sender, from the keyboard.
+		// A comment made in the document is held for its owner: the header's Send is its one sender, from the keyboard.
 		await closeDocumentDrawer(page);
-		await leaveUserCommentsUnsent(request, seeded.artifactId);
+		await holdOneDocumentComment(page);
 		await expect(docComments(page)).toHaveAttribute('aria-label', unsentName(1));
 		await expect(headerSend(page)).toHaveText('Send 1 comment');
 		await expect(headerSend(page)).toBeInViewport({ ratio: 1 });
@@ -410,9 +427,9 @@ test.describe('@flow:image-region-comments @surface:documents comments on images
 		await shoot(page, testInfo, 'doc-393-05-drawer-image-group', true);
 		await cardOpensViewerAndReturns(page, testInfo, 'Tap target too small', 'escape', 'doc-393-05b-drawer-card');
 
-		// A re-opened comment is held for the owner: the header's Send, whole inside the screen, sends it.
+		// A comment made in the document is held for its owner: the header's Send, whole inside the screen, sends it.
 		await closeDocumentDrawer(page);
-		await leaveUserCommentsUnsent(request, seeded.artifactId);
+		await holdOneDocumentComment(page);
 		await expect(headerSend(page)).toHaveText('Send 1 comment');
 		await expect(headerSend(page)).toBeInViewport({ ratio: 1 });
 		await shoot(page, testInfo, 'doc-393-05c-header-send', true);
@@ -492,7 +509,7 @@ test.describe('@flow:image-region-comments @surface:documents comments on images
 		await expectBarFits(page);
 		await bar(page).getByRole('button', { name: 'Back to walkthrough.md' }).click();
 		await expect(overlay(page)).toHaveCount(0);
-		await leaveUserCommentsUnsent(request, seeded.artifactId);
+		await holdOneDocumentComment(page);
 		await expect(headerSend(page)).toHaveText('Send 1 comment');
 		await expect(headerSend(page)).toBeInViewport({ ratio: 1 });
 		await shoot(page, testInfo, `doc-${width}-09-header-send`, true);
@@ -553,7 +570,7 @@ test.describe('@flow:image-region-comments @surface:documents comments on images
 				if (width > 768) await page.keyboard.press('Escape');
 				await bar(page).getByRole('button', { name: 'Back to walkthrough.md' }).click();
 				await expect(overlay(page)).toHaveCount(0);
-				await leaveUserCommentsUnsent(request, seeded.artifactId);
+				await holdOneDocumentComment(page);
 				await expect(headerSend(page)).toBeVisible();
 				await page.route('**/api/doc-feedback/send', async (route) => { await new Promise((resolve) => setTimeout(resolve, 800)); await route.fallback(); });
 				// Finish the setup's Send entrance before slowing and filming this send's lifecycle.

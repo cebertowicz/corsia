@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -164,7 +165,7 @@ def test_record_reopen_and_the_transition_have_no_default_lane(isolated_db):
         db.close()
 
 
-def test_a_person_edit_is_always_document_held(isolated_db):
+def test_a_person_save_opens_an_immediate_batch_with_a_five_second_deadline(isolated_db):
     db = get_db()
     try:
         seed_thread(db, "owner")
@@ -176,6 +177,8 @@ def test_a_person_edit_is_always_document_held(isolated_db):
                 actor_display="Steve", path=Path("/workspace/shared/doc.md"),
                 before=b"old\n", after=b"new\n",
             )
-        assert [batch["delivery_policy"] for batch in batches(db)] == [feedback_batches.DOCUMENT_HELD]
+        [batch] = batches(db)
+        assert batch["delivery_policy"] == feedback_batches.IMMEDIATE
+        assert (datetime.fromisoformat(batch["closes_at"]) - datetime.fromisoformat(batch["last_item_at"])).total_seconds() == 5
     finally:
         db.close()

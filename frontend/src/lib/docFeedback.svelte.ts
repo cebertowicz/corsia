@@ -110,7 +110,7 @@ export class DocFeedback {
 		this.feedback = null;
 	}
 
-	/** A person's comment is delivered as it is made, so it leaves nothing unsent; only a stale "sent" line goes. */
+	/** A new comment may join a held lane or go at once, so the counts are unknown until the server is read again; a stale "sent" line goes now. */
 	commentCreated() {
 		this.revision += 1;
 		this.confirmSent(0);
@@ -252,5 +252,3 @@ export class DocFeedback {
 		}
 	};
 }
-
-// Lifecycle effects live in docFeedbackLifecycle.svelte.ts; this module owns only state and transitions.

@@ -5,7 +5,9 @@ from __future__ import annotations
 from pathlib import Path
 
 from doceditor import feedback_comments, feedback_edits
-from doceditor.feedback_batch_core import DOCUMENT_HELD, add_comment_item, open_batch, touch_batch, utc_now
+from doceditor.feedback_batch_core import (
+    IMMEDIATE, add_comment_item, open_batch, person_comment_lane, touch_batch, utc_now,
+)
 from doceditor.feedback_state import USER_AUTHOR_ID
 
 
@@ -18,9 +20,13 @@ def record_reopen(
     delivery_policy: str,
     now: str | None = None,
 ) -> str | None:
-    """Queue a user's resolved-comment re-open through canonical recipients, in the lane the person chose."""
+    """Queue a user's resolved-comment re-open through canonical recipients, in the lane the person chose.
+
+    A re-opened image-region comment is image-held whatever lane was named, as when it was created.
+    """
     if not user_id:
         return None
+    delivery_policy = person_comment_lane(delivery_policy, region=comment.get("region_x") is not None)
     at = now or utc_now()
     recipient_id, = feedback_comments.recipients(db, comment, document_owner_only=True)
     batch_id = open_batch(
@@ -61,7 +67,8 @@ def record_edit(
 ) -> str:
     """Coalesce one substantive non-owner save into the canonical feedback batch.
 
-    A save is always document-held (agents are immediate by the lane rules); the lane is a constant, not a caller choice.
+    A save goes in the immediate lane, a person's included (5 s idle, as before holds existed); the lane is a constant,
+    not a caller choice. Suggestion accepts write through here and share it.
     """
     if author_kind not in {"agent", "user"}:
         raise ValueError("edit feedback author_kind must be 'agent' or 'user'")
@@ -72,7 +79,7 @@ def record_edit(
         author_id=author_id,
         artifact_id=artifact_id,
         recipient_id=recipient_id,
-        delivery_policy=DOCUMENT_HELD,
+        delivery_policy=IMMEDIATE,
         now=now,
     )
     item_delta = feedback_edits.record_edit_item(
@@ -89,7 +96,7 @@ def record_edit(
         db,
         batch_id,
         author_kind=author_kind,
-        delivery_policy=DOCUMENT_HELD,
+        delivery_policy=IMMEDIATE,
         now=now,
         item_delta=item_delta,
     )

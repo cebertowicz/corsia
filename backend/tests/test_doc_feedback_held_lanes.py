@@ -224,6 +224,8 @@ def test_thread_projection_is_document_held_only_with_a_row_per_artifact(client,
         {"artifact_id": second, "open_count": 2},
     ]
     assert body["open_count"] == 4
+    # A read delivers nothing, so it carries no send outcome.
+    assert not {"woken", "sent_count", "undelivered_count"} & body.keys()
 
 
 def test_thread_projection_reads_without_a_write_transaction(client, owner_thread, monkeypatch):
