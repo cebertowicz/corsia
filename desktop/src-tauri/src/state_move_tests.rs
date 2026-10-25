@@ -7,11 +7,18 @@ fn install(home: &Path) -> Paths {
     let app_dir = home.join("Library/Application Support/CORSIA");
     let paths = Paths::for_home(home, &app_dir);
     fs::create_dir_all(&paths.legacy).unwrap();
-    fs::create_dir_all(&app_dir).unwrap();
     fs::write(paths.legacy.join("corsia.db"), b"db").unwrap();
     fs::create_dir_all(paths.legacy.join("workspace")).unwrap();
     fs::write(paths.legacy.join("workspace/notes.md"), b"kept").unwrap();
     fs::write(paths.legacy_parent().join("person-file.txt"), b"theirs").unwrap();
+    pin(home, &paths);
+    paths
+}
+
+/// The files outside the state root that name it, as adoption leaves them.
+fn pin(home: &Path, paths: &Paths) {
+    let app_dir = &paths.app_dir;
+    fs::create_dir_all(app_dir).unwrap();
     let legacy = paths.legacy.to_str().unwrap();
     fs::write(
         app_dir.join(SERVICE_FILE),
@@ -54,7 +61,6 @@ fn install(home: &Path) -> Paths {
     fs::create_dir_all(&runtime).unwrap();
     fs::write(runtime.join("python3"), b"").unwrap();
     fs::set_permissions(&runtime, fs::Permissions::from_mode(0o555)).unwrap();
-    paths
 }
 
 #[derive(Default)]
@@ -465,4 +471,33 @@ fn a_kill_at_any_step_is_finished_by_the_next_launch() {
 fn rebased_replaces_only_whole_path_segments() {
     let old = "/h/com.cebertowicz.corsia/state";
     assert_eq!(rebased(&format!("{old}/x {old}2 \"{old}\""), old, "/h/CORSIA/state"), "/h/CORSIA/state/x /h/com.cebertowicz.corsia/state2 \"/h/CORSIA/state\"");
+}
+
+/// T12 scale run. Point `CORSIA_T12_HOME` at a disposable HOME whose legacy
+/// root holds real data and `CORSIA_T12_PYTHON` at a Python; prints step times.
+#[test]
+#[ignore = "scale run: needs CORSIA_T12_HOME with real data"]
+fn moves_a_large_install_in_constant_time() {
+    let home = PathBuf::from(std::env::var("CORSIA_T12_HOME").unwrap());
+    let python = PathBuf::from(std::env::var("CORSIA_T12_PYTHON").unwrap());
+    let paths = Paths::for_home(&home, &home.join("Library/Application Support/CORSIA"));
+    pin(&home, &paths);
+    let db = paths.legacy.join("corsia.db");
+    let released = std::rc::Rc::new(std::cell::Cell::new(Duration::ZERO));
+    let seen = released.clone();
+    let mut fake = Fake {
+        on_release: Some(Box::new(move || {
+            let start = Instant::now();
+            crate::release_proof::database_released(&python, &db).unwrap();
+            seen.set(start.elapsed());
+        })),
+        ..Fake::default()
+    };
+    let start = Instant::now();
+    let (outcome, _) = run_with(&paths, &mut fake);
+    let total = start.elapsed();
+    assert!(outcome.is_ok(), "{outcome:?}");
+    assert!(!exists(paths.legacy_parent()) && paths.target.join("corsia.db").exists());
+    println!("T12 release proof {:?}, whole move {:?}", released.get(), total);
+    wait_for_cache_removal(&paths);
 }
