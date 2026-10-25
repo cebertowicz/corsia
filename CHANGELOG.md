@@ -7,7 +7,7 @@ the later entry describes the current behavior.
 
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here._
 
-- After an update finishes, Settings shows its completed result instead of offering the same version again.
+- Settings stays current after an update finishes.
 - During an update restart, CORSIA shows a full-window progress screen and offers recovery if it takes longer than expected.
 - You can choose to send document comments immediately or hold them until you finish reviewing the document or image.
 - On Activity, an agent that is working reads Working even while one of its tasks is set aside, and each row's count says how many tasks are left.

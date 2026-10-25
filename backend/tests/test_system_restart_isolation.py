@@ -498,14 +498,12 @@ _PREPARE_WAIT_SECONDS = 15
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("current_version", ["1.1.0", "1.2.0"])
-async def test_repeating_a_completed_packaged_update_returns_its_existing_outcome(isolated_db, monkeypatch, current_version):
+async def test_completed_operation_does_not_skip_a_new_update(isolated_db, monkeypatch):
     from starlette.requests import Request
 
     import api.system_admin as system_admin
     from automation import self_restart
     from infra.database import write_transaction
-    from infra import update_status
 
     operation_id = await asyncio.to_thread(
         self_restart.try_acquire,
@@ -529,11 +527,6 @@ async def test_repeating_a_completed_packaged_update_returns_its_existing_outcom
 
     await asyncio.to_thread(complete)
 
-    monkeypatch.setattr(
-        update_status,
-        "update_status",
-        lambda _refresh: SimpleNamespace(current_version=current_version, target_version="1.1.0"),
-    )
     launch = AsyncMock(return_value=("new-operation", object()))
     monkeypatch.setattr(system_admin, "launch_update", launch)
 
@@ -541,8 +534,8 @@ async def test_repeating_a_completed_packaged_update_returns_its_existing_outcom
         Request({"type": "http", "server": ("testserver", 3001)}), _valid_token(), mode="update"
     )
 
-    assert result["operation_id"] == operation_id
-    launch.assert_not_awaited()
+    assert result["operation_id"] == "new-operation"
+    launch.assert_awaited_once()
 
 
 @pytest.mark.asyncio
