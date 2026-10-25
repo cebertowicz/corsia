@@ -500,6 +500,27 @@ def test_launcher_refuses_a_damaged_service_json_instead_of_opening_the_default_
     assert not (app_dir / "state").exists()
 
 
+def test_launcher_refuses_to_start_while_the_app_moves_the_data_folder(tmp_path):
+    """T9: no start between the rename and the service.json rewrite."""
+    launcher = _bundle_with_recording_python(tmp_path / "CORSIA.app" / "Contents")
+    state = tmp_path / "state"
+    legacy = _home(state) / "Library" / "Application Support" / "com.cebertowicz.corsia"
+    _service_file(state, {"state_dir": str(legacy), "workspace": "/w", "port": 18788})
+    (_app_dir(state) / "state-move.json").write_text(json.dumps({"from": str(legacy), "step": "moved"}))
+
+    result = subprocess.run(
+        [str(launcher)],
+        env={"PATH": "/usr/bin:/bin", "HOME": str(_home(state)),
+             "CORSIA_TEST_LAUNCHCTL": str(launcher.parent / "launchctl")},
+        capture_output=True, text=True, timeout=30,
+    )
+
+    assert result.returncode == 0
+    assert "refused to start" in result.stderr and "moving its data folder" in result.stderr
+    assert "ARGS=" not in result.stdout
+    assert not legacy.exists()
+
+
 def test_launcher_ignores_invalid_values(tmp_path):
     launcher = _bundle_with_recording_python(tmp_path)
     state = tmp_path / "state"

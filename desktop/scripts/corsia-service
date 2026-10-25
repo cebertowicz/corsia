@@ -9,6 +9,13 @@ bundle="$(CDPATH= cd -- "$contents/.." && pwd -P)"
 # test holds the three equal.
 CORSIA_APP_FOLDER=CORSIA
 app_dir="$HOME/Library/Application Support/$CORSIA_APP_FOLDER"
+# The app is moving the data folder: a start now could recreate an empty folder
+# at the old path between the rename and the service.json rewrite. The app
+# starts the service itself once the move is done.
+if [ -e "$app_dir/state-move.json" ]; then
+  printf 'CORSIA bundled backend refused to start: the app is moving its data folder\n' >&2
+  exit 0
+fi
 # Resolve the state root after parsing service.json below, so an adopted
 # in-place install pins its original root before the backend opens anything.
 # The service identity comes from the bundle that launchd started, never an

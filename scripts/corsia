@@ -91,6 +91,7 @@ BOOTSTRAP_CONFIG="$HOME/.corsia/config.json"
 ENV_FILE="${_CORSIA_REQUEST_ENV_FILE:-$CORSIA_DIR/.env}"
 if is_app_mode; then
     app_mode_checkout || exit 1
+    app_mode_refuse_during_state_move "$@" || exit 1
 fi
 if [ -n "$_CORSIA_REQUEST_PYTHON" ]; then
     export CORSIA_PYTHON="$_CORSIA_REQUEST_PYTHON"

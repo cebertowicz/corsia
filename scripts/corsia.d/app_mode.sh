@@ -83,6 +83,19 @@ if (app_dir / SERVICE_FILE).is_file():
     fi
 }
 
+# While the app moves the data folder (CORSIA/state-move.json exists), nothing
+# may start the service: a start between the rename and the service.json rewrite
+# would recreate an empty folder at the old path. Stopping and reading stay
+# allowed, since the move itself stops the service through `corsia stop`.
+app_mode_refuse_during_state_move() {
+    [ -e "$_corsia_app_dir/state-move.json" ] || return 0
+    case "${1:-status} ${2:-}" in
+        "stop "*|"status "*|"logs "*|"service stop"|"service status") return 0 ;;
+    esac
+    echo "CORSIA refused to run: the app is moving CORSIA's data to its new folder. Open CORSIA to finish the move, then try again." >&2
+    return 1
+}
+
 app_mode_runtime_identity() {
     if [ -z "${CORSIA_WORKSPACE:-}" ]; then
         echo "This CORSIA app has no workspace recorded in $_corsia_app_dir/service.json; open CORSIA to finish setting it up." >&2
@@ -414,13 +427,13 @@ def supported(source):
 
 newest = supported(sys.argv[3])
 db = runtime_db_paths(Path(sys.argv[2]))[0]
-current = 0
-if db.exists():
-    conn = sqlite3.connect(f"{db.as_uri()}?mode=ro", uri=True, timeout=10)
-    try:
-        current = conn.execute("PRAGMA user_version").fetchone()[0]
-    finally:
-        conn.close()
+# A missing database cannot be read, so it counts as newer: after the data
+# folder moves, a stale state path must never approve a downgrade.
+conn = sqlite3.connect(f"{db.as_uri()}?mode=ro", uri=True, timeout=10)
+try:
+    current = conn.execute("PRAGMA user_version").fetchone()[0]
+finally:
+    conn.close()
 print(current, newest)
 ' "$BACKEND_DIR" "$CORSIA_STATE_DIR" "$previous/Contents/Resources/backend/infra/schema.py" 2>/dev/null)" \
         || ! [[ "$versions" =~ ^([0-9]+)\ ([0-9]+)$ ]]; then

@@ -308,6 +308,8 @@ class App:
         (app_dir / "service.json").write_text(
             f'{{"workspace": "{workspace}", "port": {PORT}}}'
         )
+        # An installed app has data at the schema it ships.
+        _database_at(app_dir / "state", APP_SCHEMA_VERSION)
 
     @property
     def script(self) -> Path:
@@ -445,6 +447,22 @@ def test_app_mode_refuses_a_service_json_it_cannot_honour_instead_of_using_the_d
     # An explicit state root from the caller is the caller's choice, as for the launcher.
     explicit = app.run("stop", CORSIA_STATE_DIR=str(app.root / "explicit-state"))
     assert "no other state folder was opened" not in explicit.stderr
+
+
+def test_app_mode_refuses_to_start_while_the_app_moves_the_data_folder(app):
+    """T9: only stopping and reading run while CORSIA/state-move.json exists."""
+    journal = app.home / "Library" / "Application Support" / "CORSIA" / "state-move.json"
+    journal.write_text('{"step": "moved"}')
+
+    for verb in (["start"], ["restart"], ["service", "start"], ["restart-prepared"]):
+        result = app.run(*verb, CORSIA_RESTART_OPERATION_ID=OPERATION_ID)
+        assert result.returncode != 0, verb
+        assert "moving CORSIA's data to its new folder" in result.stderr, verb
+    assert app.launchd_calls() == []
+    assert app.calls("app") == []
+
+    stopped = app.run("stop")
+    assert "moving CORSIA's data" not in stopped.stderr
 
 
 def test_the_same_scripts_outside_an_app_bundle_are_a_checkout(app):
@@ -864,6 +882,25 @@ def test_after_the_swap_data_the_old_app_cannot_open_keeps_the_new_app(app):
     assert (app.launchd / "generation").read_text() == "2.0.0+2"
     assert (app.launchd / "failed_operation").read_text() == OPERATION_ID
     assert app.bundle.with_name("CORSIA.app.previous").is_dir()
+
+
+def test_a_stale_state_path_with_no_database_keeps_the_new_app(app):
+    """T10: a state path whose data moved away can't prove a downgrade is safe."""
+    app.load()
+    app.stage("2.0.0", "2")
+    (app.launchd / "health_fail_generation").write_text("2.0.0+2")
+    moved_away = app.root / "com.cebertowicz.corsia"
+
+    result = app.run("restart-prepared", CORSIA_RESTART_OPERATION_ID=OPERATION_ID,
+                     CORSIA_STATE_DIR=str(moved_away))
+
+    assert result.returncode != 0
+    output = result.stdout + result.stderr
+    assert "Could not tell whether" in output
+    assert "went back to version" not in output
+    assert not any("--update-rollback" in call for call in app.calls("app"))
+    assert app.generation() == "2.0.0+2"
+    assert not (moved_away / "corsia.db").exists()
 
 
 def test_a_migration_committed_as_the_rollback_stops_the_service_keeps_the_new_app(app):
