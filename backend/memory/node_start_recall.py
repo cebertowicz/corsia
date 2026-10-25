@@ -38,6 +38,9 @@ _STARTED_HOWS = frozenset({"started", "auto_selected"})
 _HEADER = "Earlier words from the person that match this task, newest first; where they differ, the newer one governs."
 _MATCH_FUNCTION = "prior_words_match"
 _OWNER_FUNCTION = "prior_words_owner"
+# Off until the precision fix: on real history most lines were agent-written rows
+# stored as the person's, or off-topic, at p95 1.7 s per plan call.
+DELIVERY_ON = False
 
 
 @dataclass(frozen=True)
@@ -71,7 +74,7 @@ def attach_to_result(
 ) -> None:
     """Attach ``prior_words`` to a plan result that starts a task or raises a decision."""
     result = getattr(result, "result", result)
-    if not isinstance(result, dict):
+    if not DELIVERY_ON or not isinstance(result, dict):
         return
     try:
         subject = _subject(db, operation, result)
@@ -90,7 +93,7 @@ def related_for_next(
     db: sqlite3.Connection, block: dict, *, caller_thread_id: str,
 ) -> list[str]:
     """Return prior words for the task a wake's ``next`` block reports started."""
-    node_id = _started_node_id(block)
+    node_id = _started_node_id(block) if DELIVERY_ON else None
     if node_id is None:
         return []
     try:
