@@ -54,7 +54,7 @@ export async function comment(request: APIRequestContext, doc: Doc, body: string
 	const from = doc.text.indexOf(`Step ${step}:`), to = from + 'Step'.length;
 	expect(from).toBeGreaterThan(-1);
 	const created = await request.post(`/api/artifacts/${doc.artifactId}/comments`, {
-		params: { token: TEST_TOKEN }, data: { body, anchor_text: 'Step', from_off: from, to_off: to },
+		params: { token: TEST_TOKEN }, data: { body, anchor_text: 'Step', from_off: from, to_off: to, delivery_policy: 'immediate' },
 	});
 	expect(created.ok(), await created.text()).toBeTruthy();
 	return (await created.json()).comment.id as string;

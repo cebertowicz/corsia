@@ -70,7 +70,7 @@ async def test_the_user_route_notes_the_author_of_a_resolve_but_not_a_reopen_tha
     _owner, author, _bystander, cid = await _setup(integration_client, doc)
 
     assert _user_patch(integration_client, cid, resolved=True).status_code == 200
-    assert _user_patch(integration_client, cid, resolved=False).status_code == 200
+    assert _user_patch(integration_client, cid, resolved=False, delivery_policy="document-held").status_code == 200
 
     notes = _notes(author)
     assert len(notes) == 1 and notes[0].endswith(f"resolved your comment on {doc.stem}.")
@@ -90,7 +90,7 @@ async def test_a_user_comment_resolved_by_an_agent_sends_no_note(integration_cli
     owner, author, _bystander, _cid = await _setup(integration_client, doc)
     created = integration_client.post(
         f"/api/artifacts/{_artifact_id(doc)}/comments?token={_OWNER}",
-        json={"body": "User note.", "anchor_text": "A unique tail sentence", "from_off": 0, "to_off": 5},
+        json={"delivery_policy": "immediate", "body": "User note.", "anchor_text": "A unique tail sentence", "from_off": 0, "to_off": 5},
     )
     assert created.status_code == 200, created.text
     user_cid = created.json()["comment"]["id"]

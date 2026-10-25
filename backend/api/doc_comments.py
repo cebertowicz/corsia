@@ -18,7 +18,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from api.doc_comment_delivery import deliver_person_comment_after_response
 from api.doc_comment_models import CommentCreate
@@ -27,6 +27,7 @@ from doceditor import comments as store, doc_images, feedback_batches, feedback_
 from doceditor.comment_anchoring import anchored_threads
 from doceditor.comment_creation import CommentSelectionChanged, create_validated_comment
 from doceditor.comment_create_db import CommentAccessDenied, CommentInput
+from doceditor.feedback_batch_core import PersonDocumentLane
 from infra.app_loop import AppLoopUnavailable
 from doceditor.comment_feedback_transitions import apply_user_transition
 from doceditor.comment_state_updates import update_comment
@@ -133,6 +134,7 @@ async def create_comment(
         parent_id=body.parent_id, review=body.review, replacement=body.replacement,
         quote=body.anchor_text, start=body.from_off, end=body.to_off, browser=True, live_capture=body.live_capture,
         region=region,
+        delivery_policy=body.delivery_policy,
     )
     try:
         row, _registered, feedback, created = await create_validated_comment(request, body.client_id)
@@ -148,73 +150,18 @@ async def create_comment(
             "client_id collides with another artifact's comment — re-mint and retry",
         ) from exc
     if created:
-        background.add_task(deliver_person_comment_after_response, feedback["batch_ids"], artifact_id)
-    if feedback["woken"]:
-        from plans import public
-
-        await public.drive_threads(feedback["woken"])
+        background.add_task(
+            deliver_person_comment_after_response,
+            feedback["batch_ids"],
+            artifact_id,
+            feedback["delivery_policy"],
+        )
     return {"comment": row, **feedback}
 
 
-class FeedbackDocumentAction(BaseModel):
-    artifact_id: str
+from api.doc_feedback_routes import add_feedback_routes
 
-
-def _user_feedback_write(user_id: str, artifact_id: str, action: str) -> dict:
-    db = get_db()
-    try:
-        _assert_owns_artifact(artifact_id, user_id, db)
-        with write_transaction(db, scope=f"user_doc_feedback_{action}") as connection:
-            woken: list[str] = []
-            if action == "send":
-                woken = feedback_batches.close_for_document(
-                    connection,
-                    author_kind="user",
-                    author_id=feedback_batches.USER_AUTHOR_ID,
-                    artifact_id=artifact_id,
-                    reason="send",
-                )
-            elif action == "retry":
-                woken = feedback_batches.retry_for_document(
-                    connection,
-                    author_kind="user",
-                    author_id=feedback_batches.USER_AUTHOR_ID,
-                    artifact_id=artifact_id,
-                )
-            undelivered = feedback_batches.undelivered_for_document(
-                connection,
-                author_kind="user",
-                author_id=feedback_batches.USER_AUTHOR_ID,
-                artifact_id=artifact_id,
-            )
-        return {"woken": woken, "undelivered_batches": undelivered}
-    finally:
-        db.close()
-
-
-async def _user_feedback_action(user_id: str, body: FeedbackDocumentAction, action: str) -> dict:
-    result = await run_in_db(_user_feedback_write, user_id, body.artifact_id, action)
-    if result["woken"]:
-        from plans import public
-
-        await public.drive_threads(result["woken"])
-    return result
-
-
-@router.post("/doc-feedback/send")
-async def send_user_feedback(
-    body: FeedbackDocumentAction, user: dict = Depends(require_user_header_only),
-):
-    """Close and deliver the user's open batches for one document."""
-    return await _user_feedback_action(user["id"], body, "send")
-
-
-@router.post("/doc-feedback/retry")
-async def retry_user_feedback(
-    body: FeedbackDocumentAction, user: dict = Depends(require_user_header_only),
-):
-    """Retry the user's undelivered batches for one document."""
-    return await _user_feedback_action(user["id"], body, "retry")
+add_feedback_routes(router, _assert_owns_artifact)
 
 
 class PositionUpdates(BaseModel):
@@ -342,8 +289,17 @@ class CommentPatch(BaseModel):
     from_off: int | None = None
     to_off: int | None = None
     anchor_text: str | None = None
+    # The lane a re-open queues in; the browser sends the person's document preference with every re-open.
+    delivery_policy: PersonDocumentLane | None = None
     # Moves an image comment's pin; the pin then counts as placed on the current image.
     region: dict | None = None
+
+    @model_validator(mode="after")
+    def _reopen_names_its_lane(self) -> "CommentPatch":
+        """A re-open queues feedback, so it must say which lane; no other patch has one."""
+        if self.resolved is False and self.delivery_policy is None:
+            raise ValueError("delivery_policy is required when re-opening a comment")
+        return self
 
 
 @router.patch("/comments/{comment_id}")
@@ -351,7 +307,7 @@ async def patch_comment(comment_id: str, token: str, body: CommentPatch):
     user = authenticate(token)
     if not user:
         raise HTTPException(401)
-    fields = {k: v for k, v in body.model_dump().items() if v is not None}
+    fields = {k: v for k, v in body.model_dump(exclude={"delivery_policy"}).items() if v is not None}
     if not fields:
         raise HTTPException(400, "No fields to update")
 
@@ -373,7 +329,7 @@ async def patch_comment(comment_id: str, token: str, body: CommentPatch):
                 raise HTTPException(comment_action_status(exc), exc.message) from exc
             with write_transaction(db, scope="patch_user_comment") as connection:
                 row = update_comment(connection, comment_id, patch, user_name=user["name"])
-                apply_user_transition(connection, comment, patch, user)
+                apply_user_transition(connection, comment, patch, user, body.delivery_policy)
                 return row
         finally:
             db.close()

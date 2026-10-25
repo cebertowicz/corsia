@@ -13,7 +13,7 @@ vi.mock('$lib/api/docs', () => ({
 }));
 vi.mock('$lib/api/docFeedback', async (importOriginal) => ({
 	...(await importOriginal<typeof import('$lib/api/docFeedback')>()),
-	sendDocFeedback: vi.fn(async () => ({ undelivered_batches: [] })),
+	sendDocFeedback: vi.fn(async () => ({ woken: [], undelivered_batches: [], open_count: 0, document_held_count: 0, image_held_count: 0 })),
 }));
 vi.mock('$lib/stores/liveDocuments', async (importOriginal) => ({
 	...(await importOriginal<typeof import('$lib/stores/liveDocuments')>()),

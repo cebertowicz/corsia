@@ -8,7 +8,7 @@ import pytest
 
 import infra.database as database
 from doc_feedback_helpers import add_comment, seed_document, seed_thread
-from doceditor import feedback_batches
+from doceditor import feedback_batch_core, feedback_batches
 from infra.database import TransactionOwnershipError, get_db
 from infra.db_async import run_bulk, run_read
 from infra.db_connection import LaneWriteError
@@ -69,8 +69,9 @@ def test_batch_touched_after_selection_stays_open_and_undelivered(isolated_db, m
 
         def touch_then_close(connection, batch_id, now):
             if batch_id == first:
-                feedback_batches._touch_batch(
-                    connection, first, author_kind="agent", now=feedback_batches._now(), item_delta=1,
+                feedback_batch_core.touch_batch(
+                    connection, first, author_kind="agent", delivery_policy=feedback_batches.IMMEDIATE,
+                    now=feedback_batch_core.utc_now(), item_delta=1,
                 )
                 connection.commit()
             return original(connection, batch_id, now)

@@ -13,6 +13,8 @@
 	} from '$lib/stores/artifactWorkspace';
 	import { computeSplitLayout, ARTIFACT_MIN, DIVIDER_WIDTH, isCompactCanvas } from '$lib/artifactSplitLayout';
 	import { documentOpenCapability } from '$lib/artifactDocumentOpenCapability';
+	import { visibleDocumentArtifactId } from '$lib/heldDocFeedbackScope';
+	import { tabDocumentImage } from '$lib/stores/tabViewState';
 	import { returnToPlanNode } from '$lib/planLeafReturn';
 	import { releaseDisplayedDocument, updateDocumentOpenCapability } from '$lib/ws/presence';
 
@@ -70,6 +72,13 @@
 	);
 	const artifactWidth = $derived(layout.mode === 'split' ? layout.artifactWidth : ARTIFACT_MIN);
 	const artifactHeaderInset = $derived(leafMode === 'expanded' ? artifactWidth + DIVIDER_WIDTH : null);
+	// The one document whose header Send is on screen, so the chat does not offer a second sender for it.
+	const visibleDocumentId = $derived(visibleDocumentArtifactId({
+		expanded: leafMode === 'expanded',
+		activeTabKind: activeTab?.kind ?? null,
+		artifactId: activeTab?.artifactId ?? null,
+		imageOpen: !!(threadId && activeTab && tabDocumentImage(threadId, activeTab.instanceId)),
+	}));
 
 	// Header and leaf are siblings. Publish the exact occupied right-column width on
 	// their shared ancestor, rather than making either duplicate split layout rules.
@@ -146,7 +155,7 @@
 	<!-- ChatPanel stays mounted in compact so its scroll position, composer
 	     draft, and in-flight turn survive flipping to the artifact and back. -->
 	<div class="chat-col" data-drop-default-surface class:offscreen={artifactFullCanvas} onclick={onChatClick} onkeydown={onChatKeydown} oninput={onChatInput}>
-		<ChatPanel bind:this={chatPanelRef} {isDraggingOver} {onOpenLightbox} {onAutoCreateThread} {onOpenDocuments} />
+		<ChatPanel bind:this={chatPanelRef} {isDraggingOver} {onOpenLightbox} {onAutoCreateThread} {onOpenDocuments} visibleDocumentArtifactId={visibleDocumentId} />
 	</div>
 	{#if leafMode === 'expanded'}
 		<CanvasSplitDivider {artifactWidth} {canvasWidth} onResize={onDividerResize} />

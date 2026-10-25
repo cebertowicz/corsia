@@ -79,7 +79,7 @@
 	{/if}
 	{#if open}
 		<ReviewSurface {model} {id} {anchor} {narrow} canRequest={!!viewingThreadId}
-			onSent={sent} onHide={() => open = false} {restoreFocus} />
+			onSent={sent} onHide={() => { open = false; restoreFocus(); }} {restoreFocus} />
 	{/if}
 </span>
 {/if}

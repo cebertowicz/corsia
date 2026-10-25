@@ -50,7 +50,7 @@ def test_duplicate_comment_with_submit_delivers_existing_ordinary_feedback(revie
     row = request(db, aid)
     fork_comment(db, aid, row["id"])
     _comment, _registered, result, _created = fork_comment(db, aid, row["id"], submit=True)
-    assert set(result) == {"batch_ids", "undelivered_batches", "woken"}
+    assert set(result) == {"batch_ids", "delivery_policy", "undelivered_batches", "woken"}
     assert not result["undelivered_batches"]
     assert stored(db, row["id"])["state"] == "submitted"
     with write_transaction(db, scope="test_repeated_duplicate_fork_submit"):
