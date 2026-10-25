@@ -390,4 +390,6 @@
 	.load-error p { margin: 0; font-size: var(--text-subhead); color: var(--red); font-weight: var(--fw-medium); }
 	.load-error code { font-size: var(--text-caption); color: var(--text-tertiary); word-break: break-all; }
 	.load-error :global(.control) { background: var(--amber-bg); color: var(--amber-text); }
+
+	/* Responsive control layout is isolated in ImageLightboxResponsive.css. */
 </style>

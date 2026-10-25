@@ -274,6 +274,7 @@
 		await fetchThreadMessages(sid);
 	}
 
+	// Presence, model selection, and checkpoints are chat-wide bindings, outside transcript paging.
 	$effect(() => {
 		const unsubscribeEvents = subscribeChatPanelEvents({
 			activeThreadId,
