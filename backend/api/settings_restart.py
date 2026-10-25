@@ -118,6 +118,20 @@ def _discard_prepared_release(
         raise RuntimeError("prepared frontend cleanup failed")
 
 
+async def completed_update_for_stale_offer() -> dict | None:
+    """Find the durable completed outcome when a retained client asks for it again."""
+    from automation.update_outcome import completed_update_for_installed_version
+    from infra.db_async import run_in_db
+    from infra.update_status import update_status
+
+    status = await asyncio.to_thread(update_status, False)
+    return await run_in_db(
+        completed_update_for_installed_version,
+        status.current_version,
+        status.target_version,
+    )
+
+
 def _packaged_previous_version(mode: str) -> str | None:
     from infra.build_info import app_version
     from infra.platform_paths import app_bundle_root

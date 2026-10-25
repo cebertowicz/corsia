@@ -208,6 +208,23 @@ describe('SettingsUpdate', () => {
 		expect(host.querySelector('.installed')?.textContent).toMatch(/^Updated overnight at /);
 	});
 
+	it('shows the completed update instead of a stale offer for its installed version', () => {
+		updateStatus.set(status({
+			available: true,
+			target_version: '1.1.0',
+			current_version: '1.1.0',
+			operation: {
+				operation_id: 'update-1', kind: 'update', status: 'complete', target_version: '1.1.0',
+				settled_at: new Date().toISOString(), changes: { kind: 'changelog', headline: null, items: ['Faster search'], more: 0 },
+			},
+		}));
+		component = mount(SettingsUpdate, { target: host });
+		flushSync();
+
+		expect(host.querySelector('.offer')).toBeNull();
+		expect(host.querySelector('.notes h4')?.textContent).toBe("What's new in 1.1.0");
+	});
+
 	it('keeps Update now and offers Cancel tonight when tonight is scheduled', () => {
 		updateStatus.set(status({
 			available: true, target_version: '1.1.0',

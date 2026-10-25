@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import semver
+
 from automation.self_restart import _now_iso
 from infra.database import get_db, write_transaction
 
@@ -25,6 +27,32 @@ def mark_outcome_seen(operation_id: str, *, db=None) -> bool | None:
             (_now_iso(), operation_id),
         )
         return True
+
+
+def completed_update_for_installed_version(
+    current_version: str | None, target_version: str | None, *, db=None
+) -> dict | None:
+    """Return the last completed update when a stale offer targets its installed version."""
+    if not current_version or not target_version:
+        return None
+    try:
+        current = semver.Version.parse(current_version)
+        target = semver.Version.parse(target_version)
+    except ValueError:
+        return None
+    if target > current:
+        return None
+
+    from automation.self_restart import latest_update_operation
+
+    operation = latest_update_operation(db=db)
+    if operation is None or operation.get("status") != "complete":
+        return None
+    try:
+        operation_target = semver.Version.parse(str(operation.get("target_version") or ""))
+    except ValueError:
+        return None
+    return operation if operation_target == target else None
 
 
 def staged_update_activated(operation: dict, *, db=None) -> bool:

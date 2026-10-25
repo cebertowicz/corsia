@@ -7,6 +7,7 @@ import sqlite3
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 import threading
 from unittest.mock import AsyncMock, mock_open, patch
 
@@ -494,6 +495,54 @@ class TestRestartInstanceIsolation:
 # request crosses the DB pool and the drain, which take seconds on a loaded
 # CI runner.
 _PREPARE_WAIT_SECONDS = 15
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("current_version", ["1.1.0", "1.2.0"])
+async def test_repeating_a_completed_packaged_update_returns_its_existing_outcome(isolated_db, monkeypatch, current_version):
+    from starlette.requests import Request
+
+    import api.system_admin as system_admin
+    from automation import self_restart
+    from infra.database import write_transaction
+    from infra import update_status
+
+    operation_id = await asyncio.to_thread(
+        self_restart.try_acquire,
+        None,
+        "steve",
+        None,
+        None,
+        "update",
+        kind="update",
+        trigger="manual",
+        target_version="1.1.0",
+    )
+    assert operation_id is not None
+
+    def complete() -> None:
+        with write_transaction(None, scope="test") as connection:
+            connection.execute(
+                "UPDATE self_restart_requests SET status='complete',phase=NULL,settled_at='then' WHERE id=?",
+                (operation_id,),
+            )
+
+    await asyncio.to_thread(complete)
+
+    monkeypatch.setattr(
+        update_status,
+        "update_status",
+        lambda _refresh: SimpleNamespace(current_version=current_version, target_version="1.1.0"),
+    )
+    launch = AsyncMock(return_value=("new-operation", object()))
+    monkeypatch.setattr(system_admin, "launch_update", launch)
+
+    result = await system_admin.system_restart(
+        Request({"type": "http", "server": ("testserver", 3001)}), _valid_token(), mode="update"
+    )
+
+    assert result["operation_id"] == operation_id
+    launch.assert_not_awaited()
 
 
 @pytest.mark.asyncio
