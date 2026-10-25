@@ -56,10 +56,6 @@ mod update_stage;
 mod update_swap;
 
 const DEFAULT_SERVICE_PORT: u16 = 47_895;
-/// How long the window holds a skipped move's line before CORSIA starts: a plain
-/// "tries again" line, and a longer one that asks the person to act.
-const MOVE_SKIPPED_SHOWN: Duration = Duration::from_secs(4);
-const MOVE_SKIPPED_READ: Duration = Duration::from_secs(8);
 const ACTIVE_OPERATION_ERROR: &str = "CORSIA is still completing an operation";
 const HEALTH_POLL_INTERVAL: Duration = Duration::from_millis(250);
 /// The fixed cap for a service that publishes no startup progress (an existing
@@ -817,10 +813,9 @@ fn start_service_in<R: tauri::Runtime>(
         });
         // A skip the person watched start says why before CORSIA starts where it was.
         if let Ok(state_move::Outcome::Skipped(state_move::Skip { tell: Some(told), .. })) = &outcome {
-            // A line that asks something of the person, or says jobs stopped, stays long enough to read.
-            let plain = told.reason == state_move::SkipReason::Other && !told.jobs_stopped;
+            // The line stays long enough to read before CORSIA starts on the old folder.
             set_adoption_phase(service, Some(adoption::Phase::MoveSkipped { told: told.clone() }));
-            thread::sleep(if plain { MOVE_SKIPPED_SHOWN } else { MOVE_SKIPPED_READ });
+            thread::sleep(told.hold());
         }
         set_adoption_phase(service, None);
         outcome? == state_move::Outcome::Moved

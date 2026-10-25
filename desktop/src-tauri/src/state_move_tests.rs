@@ -583,3 +583,14 @@ fn a_skipped_phase_carries_what_the_window_reads() {
         serde_json::json!({ "phase": "move_skipped", "reason": "other_app", "app": "Finder", "jobs_stopped": true })
     );
 }
+
+// Each line stays about 0.3 s per word: the longest (a reason and the background sentence, 50 words) 15 s.
+#[test]
+fn a_skip_line_stays_long_enough_to_read() {
+    let hold = |reason, jobs_stopped| Told { reason, app: None, jobs_stopped }.hold().as_secs();
+    assert_eq!(hold(SkipReason::Other, false), 4);
+    assert_eq!(hold(SkipReason::Terminal, false), 8);
+    assert_eq!(hold(SkipReason::OtherApp, false), 8);
+    assert_eq!(hold(SkipReason::Other, true), 11);
+    assert_eq!(hold(SkipReason::Terminal, true), 15);
+}

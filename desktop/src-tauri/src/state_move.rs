@@ -137,6 +137,17 @@ pub struct Told {
     pub jobs_stopped: bool,
 }
 
+impl Told {
+    /// How long the window holds the line: about 0.3 s per word the window shows. The plain
+    /// two sentences (16 words) take 4 s, a reason the person can act on (12 to 14 words) 4 s
+    /// more, and the background-jobs sentence (22 words) 7 s more.
+    pub fn hold(&self) -> Duration {
+        let reason = if self.reason == SkipReason::Other { 0 } else { 4 };
+        let jobs = if self.jobs_stopped { 7 } else { 0 };
+        Duration::from_secs(4 + reason + jobs)
+    }
+}
+
 fn told(reason: SkipReason, app: Option<String>, jobs_stopped: bool) -> Option<Told> {
     Some(Told { reason, app, jobs_stopped })
 }
