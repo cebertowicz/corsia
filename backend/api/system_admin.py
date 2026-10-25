@@ -11,10 +11,8 @@ from pathlib import Path
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 
 from api.restart_shell import spawn_restart_lifecycle
-from api.self_restart_response import (
-    emit_self_restart_audit as _emit_self_restart_audit,
-    self_restart_response as _self_restart_response,
-)
+from api.self_restart_response import emit_self_restart_audit as _emit_self_restart_audit
+from api.self_restart_response import self_restart_response as _self_restart_response
 from api.settings_restart import prelaunch_settings_restart
 from infra.auth import authenticate, require_human_user, require_user
 
@@ -26,7 +24,7 @@ _AUTH_QUERY_KEY = "to" + "ken"
 
 
 def _authenticated_user(request: Request) -> dict | None:
-    """Return the caller authenticated by the compatibility query parameter."""
+    """Resolve the caller from the shared auth query param, or None."""
     return authenticate(request.query_params.get(_AUTH_QUERY_KEY))
 
 
@@ -104,6 +102,8 @@ async def system_restart(
     require_human_user(user)
 
     corsia_script = Path(__file__).parent.parent.parent / "scripts" / "corsia"
+    if not corsia_script.exists():
+        raise HTTPException(500, "CORSIA management script not found")
 
     # Update prepares the current release before the restart; restart-only
     # preserves old-browser compatibility.
@@ -120,8 +120,6 @@ async def system_restart(
 
     port = _own_backend_port(request)
     prepared = mode == "update"
-    if not corsia_script.exists():
-        raise HTTPException(500, "CORSIA management script not found")
     if prepared:
         operation_id, _process = await launch_update(
             user,

@@ -128,42 +128,6 @@ describe('update store', () => {
 		expect(get(updateStatus)?.available).toBe(false);
 	});
 
-	it('does not post a stale completed offer after its preflight is unavailable', async () => {
-		updateStatus.set({ ...completed({ outcome_seen_at: 'seen' }), available: true });
-		const latest = { ...completed({ outcome_seen_at: 'seen' }), available: false, current_sha: 'installed', remote_sha: 'installed', commits_behind: 0 };
-		const fetchMock = vi.fn(async () => ({ ok: true, json: async () => latest }));
-		vi.stubGlobal('fetch', fetchMock);
-
-		await startUpdate();
-
-		expect(fetchMock).toHaveBeenCalledWith('/api/system/update-status?refresh=true', expect.anything());
-		expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/api/system/restart'))).toBe(false);
-		expect(get(updateStatus)?.available).toBe(false);
-	});
-
-	it('posts a real same-version source update after its preflight', async () => {
-		const latest = {
-			...completed({ outcome_seen_at: 'seen', target_version: '1.1.0' }),
-			available: true,
-			current_version: '1.1.0',
-			target_version: '1.1.0',
-			current_sha: 'installed',
-			remote_sha: 'newer',
-			commits_behind: 1,
-		};
-		updateStatus.set(latest);
-		const fetchMock = vi.fn(async (url: string) => (
-			url.includes('/api/system/restart')
-				? { ok: true, json: async () => ({ ok: true, operation_id: 'update-2' }) }
-				: { ok: true, json: async () => latest }
-		));
-		vi.stubGlobal('fetch', fetchMock);
-
-		await startUpdate();
-
-		expect(fetchMock).toHaveBeenCalledWith('/api/system/update-status?refresh=true', expect.anything());
-		expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/api/system/restart'))).toBe(true);
-	});
 
 	it.each(['holding', 'steering', 'draining', 'ready', 'restarting', 'resuming', 'verifying'] as const)(
 		'adopts the durable %s phase on load', async (phase) => {

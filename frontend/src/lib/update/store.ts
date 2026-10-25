@@ -41,11 +41,19 @@ let latestNoticeStatus: UpdateStatus | null = null;
 // What this page already showed. The durable record of what any device showed is the operation's `outcome_seen_at`.
 const shownOutcomes = new Set<string>();
 const noticedVersions = new Set<string>();
-function stopStatusPolling(): void { if (pollTimer !== null) clearInterval(pollTimer); pollTimer = null; }
+function stopStatusPolling(): void {
+	if (pollTimer !== null) clearInterval(pollTimer);
+	pollTimer = null;
+}
+function stopVersionPolling(): void {
+	if (versionPollTimer !== null) clearInterval(versionPollTimer);
+	versionPollTimer = null;
+}
 
-function stopVersionPolling(): void { if (versionPollTimer !== null) clearInterval(versionPollTimer); versionPollTimer = null; }
-
-function pollStatusWhileRunning(): void { if (pollTimer === null && get(updateInFlight)) pollTimer = setInterval(() => { void loadUpdateStatus(); }, POLL_MS); }
+function pollStatusWhileRunning(): void {
+	if (pollTimer !== null || !get(updateInFlight)) return;
+	pollTimer = setInterval(() => { void loadUpdateStatus(); }, POLL_MS);
+}
 
 async function observeRecovery(): Promise<void> {
 	const version = await readVersionWithinFiveSeconds();
@@ -164,9 +172,9 @@ function reconcileOperation(status: UpdateStatus): void {
 }
 
 /** Read the durable operation projection and start polling only while it is active. */
-export async function loadUpdateStatus(refresh = false): Promise<UpdateStatus | null> {
+export async function loadUpdateStatus(refresh = false): Promise<void> {
 	const authToken = get(token);
-	if (!authToken) return null;
+	if (!authToken) return;
 	try {
 		const response = await fetch(`${BASE}/api/system/update-status?refresh=${refresh ? 'true' : 'false'}`, {
 			headers: { Authorization: `Bearer ${authToken}` },
@@ -180,14 +188,13 @@ export async function loadUpdateStatus(refresh = false): Promise<UpdateStatus | 
 		updateUnreachable.set(false);
 		showNotice(status);
 		reconcileOperation(status);
-		return status;
 	} catch (error) {
 		const previous = get(updateStatus);
 		if (isInFlight(previous?.operation)) {
 			updateUnreachable.set(true);
 			stopStatusPolling();
 			pollVersionWhileUnreachable();
-			return null;
+			return;
 		}
 		updateStatus.update((current) => ({
 			branch: current?.branch ?? null,
@@ -206,7 +213,6 @@ export async function loadUpdateStatus(refresh = false): Promise<UpdateStatus | 
 			operation: current?.operation ?? null,
 			schedule: current?.schedule ?? null,
 		}));
-		return null;
 	}
 }
 
@@ -249,11 +255,6 @@ export async function startUpdate(): Promise<void> {
 	const previous = get(updateStatus)?.operation;
 	const previousOperationId = previous?.operation_id;
 	updateStarting.set(true);
-	const latest = await loadUpdateStatus(true);
-	if (!latest?.available) {
-		updateStarting.set(false);
-		return;
-	}
 	// Retrying is acting on the failure: it no longer needs to greet any device.
 	if (isFailedOperation(previous)) void markOutcomeSeen(previous.operation_id);
 	// The request answers only once the update is built; adopt the operation record meanwhile so the surface shows progress.

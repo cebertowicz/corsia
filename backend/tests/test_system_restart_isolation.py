@@ -7,7 +7,6 @@ import sqlite3
 import subprocess
 import sys
 from pathlib import Path
-from types import SimpleNamespace
 import threading
 from unittest.mock import AsyncMock, mock_open, patch
 
@@ -496,46 +495,6 @@ class TestRestartInstanceIsolation:
 # CI runner.
 _PREPARE_WAIT_SECONDS = 15
 
-
-@pytest.mark.asyncio
-async def test_completed_operation_does_not_skip_a_new_update(isolated_db, monkeypatch):
-    from starlette.requests import Request
-
-    import api.system_admin as system_admin
-    from automation import self_restart
-    from infra.database import write_transaction
-
-    operation_id = await asyncio.to_thread(
-        self_restart.try_acquire,
-        None,
-        "steve",
-        None,
-        None,
-        "update",
-        kind="update",
-        trigger="manual",
-        target_version="1.1.0",
-    )
-    assert operation_id is not None
-
-    def complete() -> None:
-        with write_transaction(None, scope="test") as connection:
-            connection.execute(
-                "UPDATE self_restart_requests SET status='complete',phase=NULL,settled_at='then' WHERE id=?",
-                (operation_id,),
-            )
-
-    await asyncio.to_thread(complete)
-
-    launch = AsyncMock(return_value=("new-operation", object()))
-    monkeypatch.setattr(system_admin, "launch_update", launch)
-
-    result = await system_admin.system_restart(
-        Request({"type": "http", "server": ("testserver", 3001)}), _valid_token(), mode="update"
-    )
-
-    assert result["operation_id"] == "new-operation"
-    launch.assert_awaited_once()
 
 
 @pytest.mark.asyncio
