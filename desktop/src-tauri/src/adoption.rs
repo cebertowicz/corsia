@@ -198,6 +198,11 @@ pub enum Phase {
     MovingData {
         percent: u8,
     },
+    /// The move stopped after the window showed it; the line says why and what
+    /// the person can do, then CORSIA starts on the old folder.
+    MoveSkipped {
+        reason: crate::state_move::SkipReason,
+    },
 }
 
 /// Production runs the source's lifecycle owner and the app's bundled backend.

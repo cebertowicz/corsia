@@ -70,6 +70,8 @@ struct Fake {
     stop_fails: bool,
     /// Scan the real process table rather than report no holders.
     real_scan: bool,
+    /// Holders to report instead of none, as (pid, name).
+    held_by: Vec<(i32, String)>,
     /// Run during `prove_released`, after the recorded-process stop.
     on_release: Option<Box<dyn FnMut()>>,
     on_recorded: Option<Box<dyn FnMut()>>,
@@ -103,11 +105,11 @@ impl Service for Fake {
         Ok(())
     }
     fn holders(&mut self, state: &Path) -> Result<Vec<(i32, String)>, String> {
-        if self.real_scan { holders(state) } else { Ok(Vec::new()) }
+        if self.real_scan { holders(state) } else { Ok(self.held_by.clone()) }
     }
 }
 
-fn run_with(paths: &Paths, fake: &mut Fake) -> (Result<Outcome, String>, Vec<u8>) {
+fn run_with(paths: &Paths, fake: &mut Fake) -> (Result<Outcome, MoveError>, Vec<u8>) {
     let mut seen = Vec::new();
     let outcome = run(paths, fake, &mut |percent| seen.push(percent));
     (outcome, seen)
@@ -216,7 +218,7 @@ fn a_target_that_holds_files_skips_the_move_and_changes_nothing() {
 
     let (outcome, seen) = run_with(&paths, &mut fake);
 
-    assert!(matches!(outcome, Ok(Outcome::Skipped(ref reason)) if reason.contains("already holds files")), "{outcome:?}");
+    assert!(matches!(outcome, Ok(Outcome::Skipped(ref skip)) if skip.detail.contains("already holds files")), "{outcome:?}");
     assert!(fake.calls.is_empty(), "the service is not stopped for a move that can't happen");
     assert!(seen.is_empty(), "no move window for a move that can't happen: {seen:?}");
     assert_unchanged(&paths);
@@ -276,7 +278,7 @@ fn a_linked_old_folder_skips_the_move() {
 
     let (outcome, _) = run_with(&linked, &mut fake);
 
-    assert!(matches!(outcome, Ok(Outcome::Skipped(ref reason)) if reason.contains("link")), "{outcome:?}");
+    assert!(matches!(outcome, Ok(Outcome::Skipped(ref skip)) if skip.detail.contains("link")), "{outcome:?}");
     assert!(fake.calls.is_empty());
     assert_eq!(read(&paths.legacy.join("corsia.db")), "db");
 }
@@ -298,7 +300,7 @@ fn a_refused_process_list_skips_the_move() {
     let home = tempfile::tempdir().unwrap();
     let paths = install(home.path());
     let (outcome, _) = run_with(&paths, &mut Fake { real_scan: true, ..Fake::default() });
-    assert!(matches!(outcome, Ok(Outcome::Skipped(ref reason)) if reason.contains("could not check")), "{outcome:?}");
+    assert!(matches!(outcome, Ok(Outcome::Skipped(ref skip)) if skip.detail.contains("could not check")), "{outcome:?}");
     assert_unchanged(&paths);
 }
 
@@ -330,7 +332,7 @@ fn a_process_holding_the_old_folder_refuses_the_move_and_is_named() {
         child.kill().unwrap();
         child.wait().unwrap();
         assert!(
-            matches!(outcome, Ok(Outcome::Skipped(ref reason)) if reason.contains("sleep") && reason.contains(&child.id().to_string())),
+            matches!(outcome, Ok(Outcome::Skipped(ref skip)) if skip.detail.contains("sleep") && skip.detail.contains(&child.id().to_string())),
             "{script}: {outcome:?}"
         );
         assert_unchanged(&paths);
@@ -370,7 +372,7 @@ fn a_held_update_lock_or_an_active_operation_skips_the_move() {
     let held = app_paths::try_lock_update_in_existing(&paths.legacy).unwrap().unwrap();
     let mut fake = Fake::default();
     let (outcome, seen) = run_with(&paths, &mut fake);
-    assert!(matches!(outcome, Ok(Outcome::Skipped(ref reason)) if reason.contains("update")), "{outcome:?}");
+    assert!(matches!(outcome, Ok(Outcome::Skipped(ref skip)) if skip.detail.contains("update")), "{outcome:?}");
     assert!(fake.calls.is_empty());
     // Nothing was stopped, so the move window never showed.
     assert!(seen.is_empty(), "{seen:?}");
@@ -394,10 +396,34 @@ fn an_unknown_port_or_bundle_skips_the_move_before_stopping_anything() {
         (AppService::new(Err("no resource folder".into()), Some(1956)), "bundled files"),
     ] {
         let outcome = run(&paths, &mut service, &mut |_| {});
-        assert!(matches!(outcome, Ok(Outcome::Skipped(ref reason)) if reason.contains(said)), "{outcome:?}");
+        assert!(matches!(outcome, Ok(Outcome::Skipped(ref skip)) if skip.detail.contains(said)), "{outcome:?}");
         assert_unchanged(&paths);
         assert!(!paths.app_dir.join(JOURNAL).exists());
     }
+}
+
+// A skip the person watched start tells them why: Terminal, another app, or only that it tries again.
+#[test]
+fn a_skip_after_the_stop_says_why_and_one_before_it_says_nothing() {
+    let home = tempfile::tempdir().unwrap();
+    let paths = install(home.path());
+    let held = |names: &[&str]| names.iter().enumerate().map(|(pid, name)| (pid as i32 + 100, name.to_string())).collect();
+    for (held_by, tell) in [
+        (held(&["zsh"]), SkipReason::Terminal),
+        (held(&["zsh", "bash"]), SkipReason::Terminal),
+        (held(&["zsh", "python3"]), SkipReason::OtherApp),
+        (held(&["Preview"]), SkipReason::OtherApp),
+    ] {
+        let (outcome, _) = run_with(&paths, &mut Fake { held_by, ..Fake::default() });
+        assert!(matches!(outcome, Ok(Outcome::Skipped(Skip { tell: Some(t), .. })) if t == tell), "{outcome:?}");
+        assert_unchanged(&paths);
+    }
+
+    let (outcome, _) = run_with(&paths, &mut Fake { stop_fails: true, ..Fake::default() });
+    assert!(matches!(outcome, Ok(Outcome::Skipped(Skip { tell: Some(SkipReason::Other), .. }))), "{outcome:?}");
+
+    let (outcome, _) = run_with(&paths, &mut Fake { active: true, ..Fake::default() });
+    assert!(matches!(outcome, Ok(Outcome::Skipped(Skip { tell: None, .. }))), "{outcome:?}");
 }
 
 // T16 (shell side is in test_service_scripts.py): a failed stop leaves everything in place.
@@ -409,7 +435,7 @@ fn a_failed_stop_skips_the_move_without_unregistering() {
 
     let (outcome, _) = run_with(&paths, &mut fake);
 
-    assert!(matches!(outcome, Ok(Outcome::Skipped(ref reason)) if reason.contains("stop-local-model")), "{outcome:?}");
+    assert!(matches!(outcome, Ok(Outcome::Skipped(ref skip)) if skip.detail.contains("stop-local-model")), "{outcome:?}");
     assert_eq!(fake.calls, ["operation_active", "stop"]);
     assert_unchanged(&paths);
 }
@@ -424,7 +450,7 @@ fn data_in_both_folders_refuses_to_start() {
 
     let outcome = run_with(&paths, &mut Fake::default()).0;
 
-    assert!(matches!(outcome, Err(ref message) if message.contains("two places")), "{outcome:?}");
+    assert!(matches!(outcome, Err(ref error) if error.line == TWO_PLACES && error.detail.contains("two places")), "{outcome:?}");
     assert_eq!(read(&paths.legacy.join("corsia.db")), "db");
     assert_eq!(read(&paths.target.join("corsia.db")), "other");
 }

@@ -106,6 +106,27 @@ pub trait Service {
 /// Gets the move's whole-run percentage; ticked from a timer thread during long steps.
 pub type Progress<'a> = dyn FnMut(u8) + Send + 'a;
 
+/// Why a skip that the person saw start is telling them it stopped. The window
+/// holds one approved line for each; the reason itself goes only to the log.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SkipReason {
+    /// Only shells (a Terminal window's working folder) hold the old folder.
+    Terminal,
+    /// Some other app holds the old folder.
+    OtherApp,
+    /// Nothing the person can do; the next launch tries again.
+    Other,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct Skip {
+    /// For the log: what stopped the move.
+    pub detail: String,
+    /// What the window says, only when the move had started stopping things.
+    pub tell: Option<SkipReason>,
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum Outcome {
     /// Nothing to move: a fresh, source or already-moved install.
@@ -113,91 +134,116 @@ pub enum Outcome {
     Moved,
     /// The move did not run this launch and nothing was changed; the service
     /// starts on the old folder and the next launch tries again.
-    Skipped(String),
+    Skipped(Skip),
+}
+
+/// A state the app must not start on. `line` is what the person reads, with
+/// the on-screen button that helps; `detail` goes only to the log.
+#[derive(Debug, PartialEq, Eq)]
+pub struct MoveError {
+    pub line: &'static str,
+    pub detail: String,
+}
+
+pub const NOT_MOVED: &str = "CORSIA couldn’t get ready to move your data and left it where it was, so nothing is lost. Choose Retry.";
+pub const NOT_FINISHED: &str = "CORSIA moved your data but couldn’t finish setting up its new folder. Nothing is lost. Choose Retry.";
+pub const TWO_PLACES: &str = "CORSIA found its data in two folders and changed neither, so nothing is lost. Choose Save a report.";
+pub const RECORD_UNREADABLE: &str = "CORSIA couldn’t read its record of moving your data, so it changed nothing more and nothing is lost. Choose Save a report.";
+
+fn fatal(line: &'static str) -> impl FnOnce(String) -> MoveError {
+    move |detail| MoveError { line, detail }
 }
 
 /// Run the move if this install needs one. `progress` gets one percentage for
 /// the whole move. An `Err` is a state the app must not start on (the data in
 /// two places); everything else either moves or leaves the install as it was.
-pub fn run(paths: &Paths, service: &mut dyn Service, progress: &mut Progress<'_>) -> Result<Outcome, String> {
-    let journal = read_journal(paths)?;
-    if journal.is_none() && !service_file_names(paths, &paths.legacy)? {
+pub fn run(paths: &Paths, service: &mut dyn Service, progress: &mut Progress<'_>) -> Result<Outcome, MoveError> {
+    let journal = read_journal(paths).map_err(fatal(RECORD_UNREADABLE))?;
+    if journal.is_none() && !service_file_names(paths, &paths.legacy).map_err(fatal(NOT_MOVED))? {
         return Ok(Outcome::NotNeeded);
     }
     // An unfinished adoption or Start fresh recovers first; the move waits for a later launch.
-    if adoption::interrupted_plan(&paths.app_dir)?.is_some() || paths.app_dir.join("start-fresh.json").exists() {
+    if adoption::interrupted_plan(&paths.app_dir).map_err(fatal(NOT_MOVED))?.is_some()
+        || paths.app_dir.join("start-fresh.json").exists()
+    {
         log::info!("data folder move: waiting for an unfinished adoption or Start fresh to finish first");
         return Ok(Outcome::NotNeeded);
     }
     match journal.map(|journal| journal.step) {
         Some(Step::Moved) => {
             progress(1);
-            finish(paths, progress)
+            finish(paths, progress).map_err(fatal(NOT_FINISHED))
         }
         Some(_) if !exists(&paths.legacy) && holds_data(&paths.target) => {
             // Renamed, but stopped before the journal said so: go on from the commit.
             progress(1);
-            write_journal(paths, Step::Moved)?;
-            finish(paths, progress)
+            write_journal(paths, Step::Moved).and_then(|()| finish(paths, progress)).map_err(fatal(NOT_FINISHED))
         }
-        Some(_) if exists(&paths.legacy) && holds_data(&paths.target) => Err(two_places(paths)),
-        _ => move_now(paths, service, progress),
+        Some(_) if exists(&paths.legacy) && holds_data(&paths.target) => Err(fatal(TWO_PLACES)(two_places(paths))),
+        // Once the folder is at its new path, an error is about finishing; before, nothing moved.
+        _ => move_now(paths, service, progress).map_err(|detail| {
+            let renamed = !exists(&paths.legacy) && holds_data(&paths.target);
+            fatal(if renamed { NOT_FINISHED } else { NOT_MOVED })(detail)
+        }),
     }
 }
 
 fn move_now(paths: &Paths, service: &mut dyn Service, progress: &mut Progress<'_>) -> Result<Outcome, String> {
+    // Before anything stops, a skip is silent: the window never showed the move.
     if let Err(reason) = preflight(paths) {
-        return skip(paths, reason);
+        return skip(paths, reason, None);
     }
     // Held to the end: an update can't swap or restart the service mid-move,
     // and flock follows the folder through the rename.
     let _lock = match app_paths::try_lock_update_in_existing(&paths.legacy) {
         Ok(Some(lock)) => lock,
-        Ok(None) => return skip(paths, "an update is running".into()),
-        Err(error) => return skip(paths, format!("could not take the update lock: {error}")),
+        Ok(None) => return skip(paths, "an update is running".into(), None),
+        Err(error) => return skip(paths, format!("could not take the update lock: {error}"), None),
     };
     match service.operation_active() {
         Ok(false) => {}
-        Ok(true) => return skip(paths, "an update or restart is in progress".into()),
-        Err(error) => return skip(paths, format!("could not read whether an update is running: {error}")),
+        Ok(true) => return skip(paths, "an update or restart is in progress".into(), None),
+        Err(error) => return skip(paths, format!("could not read whether an update is running: {error}"), None),
     }
+    let other = Some(SkipReason::Other);
     // The move window, and its line that background jobs stop, appear only once the stop is next.
     progress(1);
     write_journal(paths, Step::Stopping)?;
     checkpoint("stopping");
     progress(2);
     if let Err(error) = timed(progress, 2, 70, DRAIN_CAP, || service.stop()) {
-        return skip(paths, format!("could not stop the service: {error}"));
+        return skip(paths, format!("could not stop the service: {error}"), other);
     }
     if let Err(error) = service.unregister() {
-        return skip(paths, format!("could not unregister the service: {error}"));
+        return skip(paths, format!("could not unregister the service: {error}"), other);
     }
     if let Err(error) = service.stop_recorded_processes(&paths.legacy) {
         log::warn!("data folder move: recorded processes: {error}");
     }
     if let Err(error) = timed(progress, 70, 85, RELEASE_CAP, || service.prove_released(&paths.legacy)) {
-        return skip(paths, format!("the service did not let go of its data: {error}"));
+        return skip(paths, format!("the service did not let go of its data: {error}"), other);
     }
     let holders = match service.holders(&paths.legacy) {
         Ok(holders) => holders,
-        Err(error) => return skip(paths, error),
+        Err(error) => return skip(paths, error, other),
     };
     if !holders.is_empty() {
         let named: Vec<String> = holders.iter().map(|(pid, name)| format!("{name} (pid {pid})")).collect();
         log::warn!("data folder move: {} process(es) hold the old folder: {}", named.len(), named.join(", "));
-        return skip(paths, format!("{} still has CORSIA’s old data folder open", named.join(", ")));
+        let tell = if holders.iter().all(|(_, name)| is_shell(name)) { SkipReason::Terminal } else { SkipReason::OtherApp };
+        return skip(paths, format!("{} still has CORSIA’s old data folder open", named.join(", ")), Some(tell));
     }
     write_journal(paths, Step::Stopped)?;
     checkpoint("stopped");
     progress(88);
     if let Err(error) = rename(paths) {
-        return skip(paths, error);
+        return skip(paths, error, other);
     }
     checkpoint("renamed");
     if let Err(error) = write_journal(paths, Step::Moved) {
         // Before the commit a failure puts the folder back where it was.
         return match rename_excl(&paths.target, &paths.legacy) {
-            Ok(()) => skip(paths, format!("could not record the move, so it was undone: {error}")),
+            Ok(()) => skip(paths, format!("could not record the move, so it was undone: {error}"), other),
             Err(undo) => Err(format!("CORSIA moved its data but could not record it ({error}) or undo it ({undo})")),
         };
     }
@@ -241,10 +287,15 @@ pub fn check_legacy_gone(paths: &Paths) -> Result<(), String> {
     ))
 }
 
-fn skip(paths: &Paths, reason: String) -> Result<Outcome, String> {
-    log::warn!("data folder move skipped this launch: {reason}");
+fn skip(paths: &Paths, detail: String, tell: Option<SkipReason>) -> Result<Outcome, String> {
+    log::warn!("data folder move skipped this launch: {detail}");
     clear_journal(paths)?;
-    Ok(Outcome::Skipped(reason))
+    Ok(Outcome::Skipped(Skip { detail, tell }))
+}
+
+/// A shell holds a folder as a Terminal window's working folder.
+fn is_shell(name: &str) -> bool {
+    matches!(name, "zsh" | "bash" | "sh" | "fish" | "tcsh" | "csh" | "ksh" | "dash" | "nu" | "login" | "tmux" | "screen")
 }
 
 fn two_places(paths: &Paths) -> String {

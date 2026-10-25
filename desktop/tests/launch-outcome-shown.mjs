@@ -144,6 +144,44 @@ try {
 		if (after.percent !== null || after.bar !== null || after.status !== 'Start CORSIA fresh?') fail(`moving data then outcome: ${JSON.stringify(after)}`);
 		else console.log('ok   a drawn launch outcome replaces the move and stops following it');
 	}
+	// A move that stopped after it showed says why, with no percentage, before CORSIA starts where it was.
+	{
+		const lines = {
+			terminal: 'Your data stays where it is for now. A Terminal window is open in CORSIA’s old data folder; close that window. CORSIA tries again the next time it opens.',
+			other_app: 'Your data stays where it is for now. Another app has CORSIA’s old data folder open; quit it, or restart your Mac. CORSIA tries again the next time it opens.',
+			other: 'Your data stays where it is for now. CORSIA tries again the next time it opens.',
+		};
+		for (const [reason, expected] of Object.entries(lines)) {
+			const page = await open({ phase: 'move_skipped', reason, quit_pending: false });
+			await page.clock.runFor(1_100);
+			const seen = await read(page);
+			const percent = await page.evaluate(() => !document.getElementById('move-percent').hidden);
+			if (seen.status !== 'Starting CORSIA…' || seen.line !== expected || percent) fail(`move skipped (${reason}): ${JSON.stringify(seen)}`);
+			else console.log(`ok   a skipped move says why (${reason})`);
+		}
+	}
+	// A move error the app can't start on is a plain line with the screen's own buttons.
+	{
+		const twoPlaces = 'CORSIA found its data in two folders and changed neither, so nothing is lost. Choose Save a report.';
+		const page = await open();
+		await page.evaluate((why) => window.__corsiaShowServiceFailure(why), twoPlaces);
+		await page.clock.runFor(50);
+		const seen = await read(page);
+		const report = await page.evaluate(() => document.getElementById('save-report').hidden ? null : document.getElementById('save-report').textContent);
+		if (seen.status !== 'CORSIA couldn’t start' || seen.line !== twoPlaces || report !== 'Save a report') fail(`move error: ${JSON.stringify({ ...seen, report })}`);
+		else console.log('ok   a move error names the button that helps');
+		if (process.argv.includes('--screenshots')) {
+			const dir = process.argv[process.argv.indexOf('--screenshots') + 1];
+			const viewport = { width: 1440, height: 900 };
+			const skipped = await open({ phase: 'move_skipped', reason: 'terminal', quit_pending: false }, viewport);
+			await skipped.clock.runFor(1_100);
+			await skipped.screenshot({ path: path.join(dir, 'move-skipped-terminal-1440.png') });
+			const failed = await open(null, viewport);
+			await failed.evaluate((why) => window.__corsiaShowServiceFailure(why), twoPlaces);
+			await failed.clock.runFor(50);
+			await failed.screenshot({ path: path.join(dir, 'move-error-two-places-1440.png') });
+		}
+	}
 	// A service already running answers Ready before the page is up; the load hook's script must still open it.
 	{
 		const page = await open();
