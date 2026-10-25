@@ -111,6 +111,24 @@ describe('update store', () => {
 		expect(get(settingsNavigation).openRequest).toBe(opened);
 	});
 
+	it('refreshes a completed update into the restarted server status', async () => {
+		const stale = { ...completed(), available: true, current_sha: 'old', remote_sha: 'installed', commits_behind: 1 };
+		const current = { ...stale, available: false, current_sha: 'installed', remote_sha: 'installed', commits_behind: 0 };
+		let statusReads = 0;
+		vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+			if (url.startsWith('/api/version')) return { ok: true, json: async () => sameVersions };
+			if (url.includes('/outcome-seen')) return { ok: true, json: async () => ({}) };
+			statusReads += 1;
+			return { ok: true, json: async () => (statusReads === 1 ? stale : current) };
+		}));
+
+		await loadUpdateStatus();
+		await vi.advanceTimersByTimeAsync(10);
+
+		expect(get(updateStatus)?.available).toBe(false);
+	});
+
+
 	it.each(['holding', 'steering', 'draining', 'ready', 'restarting', 'resuming', 'verifying'] as const)(
 		'adopts the durable %s phase on load', async (phase) => {
 			vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => running(phase) })));

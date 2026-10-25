@@ -496,6 +496,7 @@ class TestRestartInstanceIsolation:
 _PREPARE_WAIT_SECONDS = 15
 
 
+
 @pytest.mark.asyncio
 async def test_update_requests_are_single_flight_through_launch(isolated_db):
     from fastapi import HTTPException

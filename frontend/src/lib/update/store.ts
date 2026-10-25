@@ -45,7 +45,6 @@ function stopStatusPolling(): void {
 	if (pollTimer !== null) clearInterval(pollTimer);
 	pollTimer = null;
 }
-
 function stopVersionPolling(): void {
 	if (versionPollTimer !== null) clearInterval(versionPollTimer);
 	versionPollTimer = null;
@@ -139,6 +138,7 @@ async function verifyComplete(operation: UpdateOperation): Promise<void> {
 			versionMismatchStartedAt = null;
 			updateConfirmed.set({ operationId: operation.operation_id, version: operation.target_version ?? get(updateStatus)?.target_version ?? null });
 			showTerminal(operation);
+			void loadUpdateStatus();
 			return;
 		}
 		versionMismatchStartedAt ??= Date.now();
@@ -254,9 +254,9 @@ export async function startUpdate(): Promise<void> {
 	updateFailureVerdict.set(null);
 	const previous = get(updateStatus)?.operation;
 	const previousOperationId = previous?.operation_id;
+	updateStarting.set(true);
 	// Retrying is acting on the failure: it no longer needs to greet any device.
 	if (isFailedOperation(previous)) void markOutcomeSeen(previous.operation_id);
-	updateStarting.set(true);
 	// The request answers only once the update is built; adopt the operation record meanwhile so the surface shows progress.
 	const adopt = setInterval(() => { void loadUpdateStatus(); }, POLL_MS);
 	const result = await restartSystem('update').finally(() => { clearInterval(adopt); updateStarting.set(false); });

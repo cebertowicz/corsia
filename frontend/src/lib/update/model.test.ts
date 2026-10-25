@@ -68,12 +68,13 @@ describe('update model', () => {
 		['checkout_dirty', 'This copy of CORSIA has local changes.', 'Try again'],
 		['restart_pending', 'An update is ready and waiting for a restart.', 'Restart now'],
 		['rolled_back', "Couldn't start the new version.", 'Try again'],
-		['version_unverified', "Couldn't confirm the new version.", 'Try again'],
-		['wrong_version_running', 'CORSIA started a different version.', 'Try again'],
-	] as const)('words %s truthfully and names its action', (code, headline, retryLabel) => {
+		['version_unverified', "Couldn't confirm the new version.", 'Try again', "The update's last check didn't pass, so CORSIA can't tell which version is running."],
+		['wrong_version_running', 'CORSIA started a different version.', 'Try again', "It isn't the version this update was for."],
+	] as const)('words %s truthfully and names its action', (code, headline, retryLabel, body) => {
 		const copy = failureCopy(failure(code));
 		expect(copy.headline).toBe(headline);
 		expect(copy.retryLabel).toBe(retryLabel);
+		if (body) expect(copy.body).toBe(body);
 	});
 
 	it('offers a restart when it can recover an unfinished update', () => {
