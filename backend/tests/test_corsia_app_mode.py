@@ -103,6 +103,19 @@ if "POST" in sys.argv:
     with open(state / "curl_post", "a") as log:
         log.write(url.split("?")[0] + "\\n")
 serving = (state / "loaded").exists()
+# A drain the shell already owns: quiet at once, ready on request, and its
+# release recorded with the operation id the cancel names.
+base = url.split("?")[0]
+operation = os.environ.get("CORSIA_RESTART_OPERATION_ID", "")
+if base.endswith("/api/system/drain") and serving and operation:
+    if "DELETE" in sys.argv:
+        (state / "released_drain").write_text(url.split("operation_id=")[-1])
+    else:
+        print(json.dumps({"active": True, "operation_id": operation, "activeProcesses": 0}))
+    sys.exit(0)
+if base.endswith("/api/system/drain/ready") and serving and operation:
+    print(json.dumps({"ok": True, "operation_id": operation}) + "\\n200")
+    sys.exit(0)
 if url.endswith("/api/health") and serving:
     failed_generation = state / "health_fail_generation"
     if failed_generation.exists() and (state / "generation").read_text() == failed_generation.read_text():
@@ -481,10 +494,15 @@ def test_app_mode_stop_keeps_the_service_when_the_local_model_will_not_stop(app)
     app.load()
     (app.launchd / "fail_stop_local_model").write_text("")
 
-    result = app.run("stop", "--stop-local-model")
+    result = app.run("stop", "--stop-local-model", CORSIA_RESTART_OPERATION_ID=OPERATION_ID)
 
+    output = result.stdout + result.stderr
     assert result.returncode != 0
-    assert "Could not stop the local model" in result.stdout + result.stderr
+    assert "Drain complete" in output
+    assert "Could not stop the local model" in output
+    # The drain hold is released, so the service that stays up takes turns again.
+    assert (app.launchd / "released_drain").read_text() == OPERATION_ID
+    assert "Could not cancel drain mode" not in output
     assert app.launchd_calls() == []
     assert (app.launchd / "loaded").exists()
 
@@ -950,3 +968,14 @@ def test_a_migration_committed_as_the_rollback_stops_the_service_keeps_the_new_a
     assert app.calls("app")[-2:] == ["--service unregister", "--service register"]
     assert app.generation() == "2.0.0+2"
     assert (app.launchd / "generation").read_text() == "2.0.0+2"
+
+
+def test_app_mode_stop_says_when_it_cannot_stop_the_local_model(app):
+    app.load()
+
+    result = app.run("stop", "--force", "--stop-local-model")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "--stop-local-model skipped: the backend is not answering" in result.stdout + result.stderr
+    assert not any(call.endswith("/stop-local-model") for call in app.calls("curl_post"))
+    assert app.launchd_calls() == [f"bootout --wait gui/{os.getuid()}/{LABEL}"]

@@ -580,6 +580,8 @@ service_stop() {
             fail "Could not stop the local model; $label is still running"
             return 1
         fi
+    elif [ "${STOP_LOCAL_MODEL:-false}" = true ]; then
+        warn "--stop-local-model skipped: the backend is not answering"
     fi
     if bootout_service_and_wait "$domain" "$label"; then
         :

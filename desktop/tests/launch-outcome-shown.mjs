@@ -120,7 +120,7 @@ try {
 		const seen = { ...(await read(page)), ...(await bar()) };
 		const expected = {
 			status: 'Moving CORSIA’s data to its new folder',
-			line: 'This happens once. CORSIA pauses while it moves, then starts again by itself. Anything an agent was still running in the background stops; ask the agent to run it again if you still need it.',
+			line: 'This happens once, and CORSIA starts again by itself when it’s done. Anything an agent left running in the background has stopped; ask the agent to run it again if you still need it.',
 			spinner: false,
 			retry: null,
 			percent: '42%',
