@@ -17,7 +17,7 @@ use std::{
 /// `APP_FOLDER` and the launcher's `CORSIA_APP_FOLDER` by a parity test.
 pub const APP_FOLDER: &str = "CORSIA";
 pub(crate) const STATE_DIRECTORY: &str = "state";
-const UPDATE_LOCK_FILE: &str = "update.lock";
+pub(crate) const UPDATE_LOCK_FILE: &str = "update.lock";
 
 pub fn app_dir_for_home(home: &Path) -> PathBuf {
     home.join("Library")
@@ -90,18 +90,116 @@ pub fn app_dir() -> Result<PathBuf, String> {
 }
 
 /// Holds the update lock until dropped; the kernel releases it if the process
-/// dies, so a crashed update never wedges the next one.
+/// dies, so a crashed update never wedges the next one. An inherited lock has
+/// no file of its own: it belongs to the parent's open descriptor, which this
+/// process never closes.
 pub struct UpdateLock {
-    _file: File,
+    _file: Option<File>,
+}
+
+/// The descriptor of the update lock an update's shell holds and passes down.
+pub const UPDATE_LOCK_FD_VARIABLE: &str = "CORSIA_UPDATE_LOCK_FD";
+
+/// Take the update lock for a swap or rollback. The update's shell holds it
+/// across the whole update and names its descriptor in `CORSIA_UPDATE_LOCK_FD`;
+/// opening the file again would be refused by that same lock, so the named
+/// descriptor is checked to be this state root's `update.lock` and locked
+/// itself. Unset, the lock is taken as [`try_lock_update`] takes it.
+/// `Ok(None)` means another holder has it.
+pub fn lock_update_for_swap(state_dir: &Path) -> Result<Option<UpdateLock>, String> {
+    match env::var_os(UPDATE_LOCK_FD_VARIABLE) {
+        None => try_lock_update(state_dir),
+        Some(descriptor) => lock_inherited_update(state_dir, &descriptor),
+    }
+}
+
+fn lock_inherited_update(state_dir: &Path, descriptor: &std::ffi::OsStr) -> Result<Option<UpdateLock>, String> {
+    use std::os::unix::fs::MetadataExt;
+
+    let refused = |why: String| format!("the inherited update lock was refused: {why}");
+    let fd: libc::c_int = descriptor
+        .to_str()
+        .and_then(|text| text.parse().ok())
+        .filter(|fd| *fd >= 0)
+        .ok_or_else(|| refused(format!("{UPDATE_LOCK_FD_VARIABLE} is not a descriptor number")))?;
+    let path = state_dir.join(UPDATE_LOCK_FILE);
+    let lock = fs::metadata(&path).map_err(|error| refused(format!("could not check {}: {error}", path.display())))?;
+    // SAFETY: fstat only writes the zeroed struct it is given.
+    let mut held: libc::stat = unsafe { std::mem::zeroed() };
+    if unsafe { libc::fstat(fd, &mut held) } != 0 {
+        return Err(refused(format!("descriptor {fd} is not open: {}", io::Error::last_os_error())));
+    }
+    let regular = held.st_mode & libc::S_IFMT == libc::S_IFREG;
+    if !regular || held.st_dev as u64 != lock.dev() || held.st_ino as u64 != lock.ino() {
+        return Err(refused(format!("descriptor {fd} is not {}", path.display())));
+    }
+    // SAFETY: flock only reads the descriptor, which the parent keeps open.
+    if unsafe { libc::flock(fd, libc::LOCK_EX | libc::LOCK_NB) } == 0 {
+        return Ok(Some(UpdateLock { _file: None }));
+    }
+    let error = io::Error::last_os_error();
+    if error.raw_os_error() == Some(libc::EWOULDBLOCK) {
+        Ok(None)
+    } else {
+        Err(format!("could not lock {}: {error}", path.display()))
+    }
+}
+
+/// Wait for any update in this state root to finish, then hold its lock while
+/// the app starts its service, so a start never runs into a swap. A state root
+/// that does not exist yet is never created, so a first run still makes its own
+/// and has no update to wait for; in one that exists, `update.lock` is made if
+/// it is missing, so the start excludes an update that begins while it runs.
+pub fn wait_for_update_lock(state_dir: &Path) -> Result<Option<UpdateLock>, String> {
+    use std::os::unix::{fs::OpenOptionsExt, io::AsRawFd};
+
+    let path = state_dir.join(UPDATE_LOCK_FILE);
+    let opened = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .mode(0o600)
+        .open(&path);
+    let file = match opened {
+        Ok(file) => file,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(format!("could not open {}: {error}", path.display())),
+    };
+    loop {
+        // SAFETY: flock only reads the descriptor, which `file` keeps open.
+        if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) } == 0 {
+            return Ok(Some(UpdateLock { _file: Some(file) }));
+        }
+        let error = io::Error::last_os_error();
+        if error.kind() != io::ErrorKind::Interrupted {
+            return Err(format!("could not lock {}: {error}", path.display()));
+        }
+    }
 }
 
 /// Take the one update lock in the state root without waiting. `Ok(None)`
 /// means another stage or swap holds it.
 pub fn try_lock_update(state_dir: &Path) -> Result<Option<UpdateLock>, String> {
-    use std::os::unix::{fs::OpenOptionsExt, io::AsRawFd};
-
     fs::create_dir_all(state_dir)
         .map_err(|error| format!("could not create {}: {error}", state_dir.display()))?;
+    lock_update_now(state_dir)
+}
+
+/// Take the update lock without waiting for a recovery start, which only
+/// brings back a service an install already has: a state root that does not
+/// exist refuses rather than being made. `Ok(None)` means an update or a
+/// start holds it.
+pub fn try_lock_update_in_existing(state_dir: &Path) -> Result<Option<UpdateLock>, String> {
+    if !state_dir.is_dir() {
+        return Err(format!("{} does not exist", state_dir.display()));
+    }
+    lock_update_now(state_dir)
+}
+
+fn lock_update_now(state_dir: &Path) -> Result<Option<UpdateLock>, String> {
+    use std::os::unix::{fs::OpenOptionsExt, io::AsRawFd};
+
     let path = state_dir.join(UPDATE_LOCK_FILE);
     let file = OpenOptions::new()
         .read(true)
@@ -113,7 +211,7 @@ pub fn try_lock_update(state_dir: &Path) -> Result<Option<UpdateLock>, String> {
         .map_err(|error| format!("could not open {}: {error}", path.display()))?;
     // SAFETY: flock only reads the descriptor, which `file` keeps open.
     if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
-        return Ok(Some(UpdateLock { _file: file }));
+        return Ok(Some(UpdateLock { _file: Some(file) }));
     }
     let error = io::Error::last_os_error();
     if error.raw_os_error() == Some(libc::EWOULDBLOCK) {
@@ -124,7 +222,7 @@ pub fn try_lock_update(state_dir: &Path) -> Result<Option<UpdateLock>, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     #[test]
@@ -213,24 +311,41 @@ mod tests {
         assert!(cases >= 6);
     }
 
+    /// A flock lives until the last copy of its descriptor closes, and a
+    /// concurrent test's fork briefly holds a copy, so lock checks run in a
+    /// test process of their own. True in that process; in the outer one it
+    /// runs the test there and asserts it passed.
+    pub(crate) fn alone(name: &str) -> bool {
+        if std::env::var_os("CORSIA_UPDATE_LOCK_ALONE").is_some() {
+            return true;
+        }
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", name, "--test-threads=1"])
+            .env("CORSIA_UPDATE_LOCK_ALONE", "1")
+            .env_remove(UPDATE_LOCK_FD_VARIABLE)
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            output.status.success() && stdout.contains("1 passed"),
+            "{stdout}{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        false
+    }
+
+    fn open_lock(state: &Path) -> File {
+        OpenOptions::new().read(true).write(true).open(state.join(UPDATE_LOCK_FILE)).unwrap()
+    }
+
+    fn flock_now(file: &File) -> bool {
+        use std::os::unix::io::AsRawFd;
+        unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) == 0 }
+    }
+
     #[test]
     fn update_lock_admits_one_holder_and_frees_on_drop() {
-        // A flock lives until the last copy of its descriptor closes, and a
-        // concurrent test's fork briefly holds a copy, so the check runs in a
-        // test process of its own.
-        const NAME: &str = "app_paths::tests::update_lock_admits_one_holder_and_frees_on_drop";
-        if std::env::var_os("CORSIA_UPDATE_LOCK_ALONE").is_none() {
-            let output = std::process::Command::new(std::env::current_exe().unwrap())
-                .args(["--exact", NAME, "--test-threads=1"])
-                .env("CORSIA_UPDATE_LOCK_ALONE", "1")
-                .output()
-                .unwrap();
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            assert!(
-                output.status.success() && stdout.contains("1 passed"),
-                "{stdout}{}",
-                String::from_utf8_lossy(&output.stderr)
-            );
+        if !alone("app_paths::tests::update_lock_admits_one_holder_and_frees_on_drop") {
             return;
         }
 
@@ -241,5 +356,88 @@ mod tests {
         assert!(try_lock_update(&state).unwrap().is_none());
         drop(held);
         assert!(try_lock_update(&state).unwrap().is_some());
+    }
+
+    #[test]
+    fn a_swap_takes_the_lock_its_shell_holds_and_nothing_else() {
+        use std::os::unix::io::AsRawFd;
+        if !alone("app_paths::tests::a_swap_takes_the_lock_its_shell_holds_and_nothing_else") {
+            return;
+        }
+        let temp = tempfile::tempdir().unwrap();
+        let state = temp.path().join("state");
+        drop(try_lock_update(&state).unwrap());
+
+        // The shell's own open file, locked: the swap is admitted on it, and
+        // an independent opener is still refused while the swap runs.
+        let shell = open_lock(&state);
+        assert!(flock_now(&shell));
+        let fd = shell.as_raw_fd().to_string();
+        assert!(lock_inherited_update(&state, fd.as_ref()).unwrap().is_some());
+        // Opening the file again, as a swap without the descriptor would, is refused.
+        assert!(try_lock_update(&state).unwrap().is_none());
+        drop(shell);
+
+        // A descriptor of the right file whose open file another holder has
+        // locked is busy, never admitted.
+        let other = try_lock_update(&state).unwrap().expect("another holder");
+        let passed = open_lock(&state);
+        assert!(lock_inherited_update(&state, passed.as_raw_fd().to_string().as_ref()).unwrap().is_none());
+        drop(other);
+
+        // Anything but this state root's update.lock is refused outright.
+        let elsewhere = tempfile::tempdir().unwrap();
+        let forged = try_lock_update(elsewhere.path()).unwrap();
+        drop(forged);
+        let forged = open_lock(elsewhere.path());
+        let refusal = lock_inherited_update(&state, forged.as_raw_fd().to_string().as_ref()).err().unwrap();
+        assert!(refusal.contains("is not"), "{refusal}");
+        let directory = File::open(&state).unwrap();
+        assert!(lock_inherited_update(&state, directory.as_raw_fd().to_string().as_ref()).is_err());
+        for text in ["", "seven", "-1", "999999"] {
+            assert!(lock_inherited_update(&state, text.as_ref()).is_err(), "{text:?}");
+        }
+
+        // The variable chooses the path: unset, the swap opens its own.
+        std::env::remove_var(UPDATE_LOCK_FD_VARIABLE);
+        assert!(lock_update_for_swap(&state).unwrap().is_some());
+        let shell = open_lock(&state);
+        assert!(flock_now(&shell));
+        assert!(lock_update_for_swap(&state).unwrap().is_none());
+        std::env::set_var(UPDATE_LOCK_FD_VARIABLE, shell.as_raw_fd().to_string());
+        assert!(lock_update_for_swap(&state).unwrap().is_some());
+        std::env::remove_var(UPDATE_LOCK_FD_VARIABLE);
+    }
+
+    #[test]
+    fn a_start_waits_for_an_update_and_never_creates_the_state_folder() {
+        if !alone("app_paths::tests::a_start_waits_for_an_update_and_never_creates_the_state_folder") {
+            return;
+        }
+        let temp = tempfile::tempdir().unwrap();
+        let state = temp.path().join("state");
+
+        assert!(wait_for_update_lock(&state).unwrap().is_none());
+        assert!(!state.exists(), "waiting created the state folder");
+
+        // An existing state folder with no lock yet: the start holds a lock
+        // an update that begins meanwhile is refused by.
+        fs::create_dir(&state).unwrap();
+        let start = wait_for_update_lock(&state).unwrap().expect("the start's lock");
+        assert!(try_lock_update(&state).unwrap().is_none(), "an update ran into the start");
+        drop(start);
+
+        let update = try_lock_update(&state).unwrap().expect("the update");
+        let (started, waited) = std::sync::mpsc::channel();
+        let starting = state.clone();
+        let start = std::thread::spawn(move || {
+            let lock = wait_for_update_lock(&starting).unwrap();
+            started.send(()).unwrap();
+            lock.is_some()
+        });
+        assert!(waited.recv_timeout(std::time::Duration::from_millis(300)).is_err(), "the start ran into the update");
+        drop(update);
+        waited.recv_timeout(std::time::Duration::from_secs(10)).expect("the start went on once the update finished");
+        assert!(start.join().unwrap());
     }
 }

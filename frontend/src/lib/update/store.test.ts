@@ -14,6 +14,7 @@ import {
 	updateStarting,
 	updateProgressMinimized,
 	updateStatus,
+	updateToastSuppressed,
 	updateUnreachable,
 } from './store';
 
@@ -150,6 +151,34 @@ describe('update store', () => {
 		const notice = get(toasts).find((toast) => toast.message === 'Update ready. Open Updates');
 		expect(notice?.button).toBe(true);
 		expect(notice?.pinned).toBeUndefined();
+	});
+
+	it('holds the update-ready notice while System Updates is visible, then shows it elsewhere', async () => {
+		const settled = { ...running('resuming'), operation: { operation_id: 'update-0', kind: 'update', status: 'complete', target_version: '2026.10.12', settled_at: '2026-10-12T22:00:00Z' } };
+		vi.stubGlobal('fetch', vi.fn(async (url: string) => (url.startsWith('/api/version') ? { ok: false } : { ok: true, json: async () => settled })));
+		updateToastSuppressed.set(true);
+		await loadUpdateStatus();
+		expect(get(toasts).some((toast) => toast.message === 'Update ready. Open Updates')).toBe(false);
+		updateToastSuppressed.set(false);
+		expect(get(toasts).some((toast) => toast.message === 'Update ready. Open Updates')).toBe(true);
+	});
+
+	it('restores a ready notice after System hides it, but not after the person opens it', async () => {
+		const settled = { ...running('resuming'), operation: { operation_id: 'update-0', kind: 'update', status: 'complete', target_version: '2026.10.12', settled_at: '2026-10-12T22:00:00Z' } };
+		vi.stubGlobal('fetch', vi.fn(async (url: string) => (url.startsWith('/api/version') ? { ok: false } : { ok: true, json: async () => settled })));
+		await loadUpdateStatus();
+		expect(get(toasts).some((toast) => toast.message === 'Update ready. Open Updates')).toBe(true);
+
+		updateToastSuppressed.set(true);
+		expect(get(toasts).some((toast) => toast.message === 'Update ready. Open Updates')).toBe(false);
+		updateToastSuppressed.set(false);
+		const restored = get(toasts).find((toast) => toast.message === 'Update ready. Open Updates')!;
+		expect(restored).toBeDefined();
+
+		await toasts.runAction(restored.id);
+		updateToastSuppressed.set(true);
+		updateToastSuppressed.set(false);
+		expect(get(toasts).some((toast) => toast.message === 'Update ready. Open Updates')).toBe(false);
 	});
 
 	it('opens Settings at the Updates card from the notice', async () => {

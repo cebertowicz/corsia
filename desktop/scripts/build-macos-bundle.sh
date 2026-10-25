@@ -197,6 +197,7 @@ rsync -a --delete "$ROOT/scripts/corsia.d/" "$BUNDLE_ROOT/scripts/corsia.d/"
 
 node "$ROOT/desktop/scripts/gen-shell-tokens.mjs"
 node "$ROOT/desktop/scripts/gen-shell-logo.mjs"
+node "$ROOT/desktop/scripts/gen-shell-update.mjs"
 (
   cd "$ROOT/desktop/src-tauri"
   "$ROOT/frontend/node_modules/.bin/tauri" build --target aarch64-apple-darwin --bundles app --config "{\"version\":\"$app_version\",\"bundle\":{\"macOS\":{\"bundleVersion\":\"$macos_bundle_version\"}}}"

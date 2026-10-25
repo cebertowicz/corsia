@@ -14,6 +14,7 @@
 	import IconButton from '$lib/components/ui/IconButton.svelte';
 	import { toastAnchorSurface } from '$lib/stores/toastAnchor';
 	import { isMobile } from '$lib/stores/viewport';
+	import { updateToastSuppressed } from '$lib/update/store';
 	import { projects } from '$lib/stores/projects';
 	import {
 		closeSettingsProject,
@@ -27,11 +28,13 @@
 		type SettingsSection,
 	} from '$lib/stores/settingsNavigation';
 
-	let { onClose, onBrowseContextFiles, onBrowseSkills, systemStatus = {} as any }: {
+	let { onClose, onBrowseContextFiles, onBrowseSkills, systemStatus = {} as any, updateSurfaceVisible = true }: {
 		onClose?: () => void;
 		onBrowseContextFiles?: () => void;
 		onBrowseSkills?: () => void;
 		systemStatus?: { memory?: any; cpu?: any };
+		/** False only when a mobile drawer covers this mounted Settings surface. */
+		updateSurfaceVisible?: boolean;
 	} = $props();
 
 	// Effects read these, not the whole store: the drill this view writes must not re-run them.
@@ -98,6 +101,12 @@
 		setSettingsDrill(drill);
 	});
 	$effect(() => () => setSettingsDrill(null));
+
+	// This component alone knows whether its System content is mounted on a phone. The shell adds whether a drawer covers it.
+	$effect(() => {
+		updateToastSuppressed.set(section === 'system' && (!$isMobile || mobileOpen) && updateSurfaceVisible);
+		return () => updateToastSuppressed.set(false);
+	});
 </script>
 
 <div class="settings-view">

@@ -66,19 +66,37 @@ pub enum DisconnectError<E> {
 
 /// Leaves remote mode: forget the remote first, so a failure to write the
 /// config changes nothing and the page keeps its working proxy; only then
-/// stop the proxy and bring the local service back. After the forget the
-/// person is local whatever happens next, and a later launch starts the local
-/// service on its own.
-pub fn disconnect<E, S>(
-    forget_remote: impl FnOnce() -> Result<(), E>,
+/// stop the proxy and bring the local service back. The disk and service
+/// steps may wait off the window's event executor; the state handoff stays
+/// between them. After the forget the person is local whatever happens next,
+/// and a later launch starts the local service on its own.
+pub async fn disconnect<
+    E,
+    S,
+    Forget,
+    ForgetFuture,
+    Register,
+    RegisterFuture,
+    Start,
+    StartFuture,
+>(
+    forget_remote: Forget,
     stop_proxy: impl FnOnce(),
-    register_service: impl FnOnce() -> Result<(), E>,
-    start_service: impl FnOnce() -> Result<S, E>,
-) -> Result<S, DisconnectError<E>> {
-    forget_remote().map_err(DisconnectError::NotForgotten)?;
+    register_service: Register,
+    start_service: Start,
+) -> Result<S, DisconnectError<E>>
+where
+    Forget: FnOnce() -> ForgetFuture,
+    ForgetFuture: std::future::Future<Output = Result<(), E>>,
+    Register: FnOnce() -> RegisterFuture,
+    RegisterFuture: std::future::Future<Output = Result<(), E>>,
+    Start: FnOnce() -> StartFuture,
+    StartFuture: std::future::Future<Output = Result<S, E>>,
+{
+    forget_remote().await.map_err(DisconnectError::NotForgotten)?;
     stop_proxy();
-    register_service().map_err(DisconnectError::Forgotten)?;
-    start_service().map_err(DisconnectError::Forgotten)
+    register_service().await.map_err(DisconnectError::Forgotten)?;
+    start_service().await.map_err(DisconnectError::Forgotten)
 }
 
 #[cfg(test)]
@@ -172,12 +190,12 @@ mod tests {
             }
         };
         let (forget, register, start) = (step("forget"), step("register"), step("start"));
-        let result = disconnect(
-            forget,
+        let result = tauri::async_runtime::block_on(disconnect(
+            move || async move { forget() },
             { let events = events.clone(); move || log(&events, "stop_proxy") },
-            register,
-            move || start().map(|()| "ready"),
-        );
+            move || async move { register() },
+            move || async move { start().map(|()| "ready") },
+        ));
         let recorded = events.borrow().clone();
         (result, recorded)
     }
@@ -202,5 +220,40 @@ mod tests {
             let (result, _) = leave(Some(failing));
             assert_eq!(result, Err(DisconnectError::Forgotten(failing)));
         }
+    }
+
+    #[test]
+    fn pending_disconnect_worker_keeps_the_async_runtime_responsive() {
+        let (entered, waiting) = std::sync::mpsc::sync_channel(1);
+        let (release, continue_work) = std::sync::mpsc::sync_channel(0);
+        let pending = tauri::async_runtime::spawn(async move {
+            disconnect(
+                move || async move {
+                    tauri::async_runtime::spawn_blocking(move || {
+                        entered.send(()).unwrap();
+                        continue_work.recv().unwrap();
+                        Ok::<_, &'static str>(())
+                    })
+                    .await
+                    .unwrap()
+                },
+                || {},
+                || async { Ok(()) },
+                || async { Ok("ready") },
+            )
+            .await
+        });
+        waiting
+            .recv_timeout(std::time::Duration::from_secs(1))
+            .expect("the disconnect worker started");
+        let responsive = tauri::async_runtime::block_on(async {
+            tauri::async_runtime::spawn(async { 42_u8 }).await.unwrap()
+        });
+        assert_eq!(responsive, 42, "the pending disconnect held the async runtime");
+        release.send(()).unwrap();
+        assert_eq!(
+            tauri::async_runtime::block_on(pending).unwrap(),
+            Ok("ready")
+        );
     }
 }

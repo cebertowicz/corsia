@@ -183,10 +183,49 @@ app_mode_require_owned_service() {
 
 # Every shipped app already understands these two SMAppService operations. Keep
 # the restart sequence here rather than requiring a newer CLI verb: rollback
-# starts the previously installed app, which can predate this script.
+# starts the previously installed app, which can predate this script. Neither
+# is handed the update lock's descriptor.
 app_mode_service_reload() {
-    "$_corsia_app_bundle/Contents/MacOS/CORSIA" --service unregister \
-        && "$_corsia_app_bundle/Contents/MacOS/CORSIA" --service register
+    "$_corsia_app_bundle/Contents/MacOS/CORSIA" --service unregister 7>&- \
+        && "$_corsia_app_bundle/Contents/MacOS/CORSIA" --service register 7>&-
+}
+
+# The one update lock (update.lock in the state root), which the app binary's
+# stage, swap and rollback take, held from before the service stops until the
+# new or restored app is proven. The bundled Python locks descriptor 7, which
+# this shell opened, so the lock belongs to the shell's open file: it outlives
+# that Python child and carries through the handoff's source or exec into the
+# new app's script. Called again after the handoff, it confirms the inherited
+# lock. A descriptor 7 that is not this state root's update.lock is replaced.
+# Returns 75 when another holder has it.
+app_mode_hold_update_lock() {
+    local lock="$CORSIA_STATE_DIR/update.lock" status
+    mkdir -p "$CORSIA_STATE_DIR" && (umask 077 && : >> "$lock") || return 1
+    { : >&7; } 2>/dev/null || exec 7<> "$lock" || return 1
+    "$PYTHON" -I -B -c 'import fcntl, os, stat, sys
+held, lock = os.fstat(7), os.stat(sys.argv[1])
+if not stat.S_ISREG(held.st_mode) or (held.st_dev, held.st_ino) != (lock.st_dev, lock.st_ino):
+    raise SystemExit(3)
+try:
+    fcntl.flock(7, fcntl.LOCK_EX | fcntl.LOCK_NB)
+except BlockingIOError:
+    raise SystemExit(75)' "$lock"
+    status=$?
+    if [ "$status" -eq 3 ]; then
+        exec 7<> "$lock" || return 1
+        app_mode_hold_update_lock
+        return $?
+    fi
+    return "$status"
+}
+
+app_mode_release_update_lock() { exec 7>&-; }
+
+# Swap and rollback are the only children told about the held lock: the app
+# binary checks the descriptor is this state root's update.lock and locks that
+# same open file instead of opening its own, which the shell's lock would refuse.
+app_mode_update_binary() {
+    CORSIA_UPDATE_LOCK_FD=7 "$_corsia_app_bundle/Contents/MacOS/CORSIA" "$@"
 }
 
 app_mode_service_start() {
@@ -269,13 +308,26 @@ app_mode_discard_staged() { rm -rf "$(app_mode_staged_path)"; }
 #   CORSIA.app.previous  after the swap (the new app's script): start, prove
 #                        health and the new generation, then delete the old app
 app_mode_restart_prepared() {
-    local staged previous
+    local staged previous status
     staged="$(app_mode_staged_path)"
     previous="$(app_mode_previous_path)"
     if [ -d "$staged" ]; then
         app_mode_swap_staged_update "$staged"
+        status=$?
+        app_mode_release_update_lock
+        return "$status"
     elif [ -d "$previous" ]; then
+        # Inherited from the swap. An app from before the lock hands off
+        # without it, so it is taken here; another holder stops the update
+        # before it starts, checks or rolls back anything.
+        if ! app_mode_hold_update_lock; then
+            fail "Update stopped: another update or start of CORSIA is in progress, so the installed app was neither started, checked nor rolled back. The previous app remains at $previous."
+            return 1
+        fi
         app_mode_start_swapped_update "$previous"
+        status=$?
+        app_mode_release_update_lock
+        return "$status"
     else
         fail "There is no staged update to install at $staged"
         return 1
@@ -292,6 +344,11 @@ app_mode_swap_staged_update() {
         fi
     else
         require_no_unmanaged_backend "$BACKEND_PORT" || return 1
+    fi
+    # Held through the stop, the swap and the new app's proof, or the rollback.
+    if ! app_mode_hold_update_lock; then
+        fail "Update stopped: another update or start of CORSIA is in progress, so the staged update was kept at $staged and CORSIA was left as it was"
+        return 1
     fi
     if [ "$FORCE" = "false" ]; then
         if ! is_backend_running; then
@@ -317,7 +374,7 @@ app_mode_swap_staged_update() {
     fi
     # The exchange is atomic, so the installed path always holds a whole app;
     # a failure leaves this one there, and it is started again.
-    if "$_corsia_app_bundle/Contents/MacOS/CORSIA" --update-swap "$operation_id"; then
+    if app_mode_update_binary --update-swap "$operation_id"; then
         :
     else
         swap_status=$?
@@ -465,7 +522,7 @@ app_mode_rollback_swapped_update() {
         app_mode_keep_swapped_update "$previous" "$reason" stopped && return 0
         return 1
     fi
-    if "$_corsia_app_bundle/Contents/MacOS/CORSIA" --update-rollback "$operation_id"; then
+    if app_mode_update_binary --update-rollback "$operation_id"; then
         :
     else
         rollback_status=$?
@@ -518,7 +575,7 @@ app_mode_start_swapped_update() {
             fail "$(service_label) is running from another copy of CORSIA; the update was installed but not started"
             return 1
         fi
-        if ! launchctl kickstart -k "$(service_domain)/$(service_label)"; then
+        if ! launchctl kickstart -k "$(service_domain)/$(service_label)" 7>&-; then
             app_mode_abandon_swapped_update "$previous" "The updated service could not be restarted." && return 0
             return 1
         fi

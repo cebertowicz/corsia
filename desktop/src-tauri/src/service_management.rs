@@ -169,6 +169,37 @@ fn owns_job(output: &str, bundle: &Path) -> bool {
     })
 }
 
+/// The program launchd runs for the app's agent, relative to its bundle (`BundleProgram` in the agent's plist).
+pub(crate) const SERVICE_PROGRAM: &str = "Contents/Resources/bin/corsia-service";
+
+/// Whether the canonical job's own metadata names exactly this bundle's agent: its program is this bundle's service
+/// program, and every location it names is this bundle's program or plist. `owns_job` accepts any path inside the
+/// bundle because it only decides whether registration may be repaired; a start without registration needs this
+/// stricter answer, so a missing program or any other named location refuses.
+pub(crate) fn is_exactly_this_agent(details: &str, bundle: &Path) -> bool {
+    let bundle = normalized(bundle);
+    let program = bundle.join(SERVICE_PROGRAM);
+    let plist = bundle.join("Contents/Library/LaunchAgents").join(PLIST_NAME);
+    let mut names_program = false;
+    for (key, value) in metadata_fields(details) {
+        let value = value.split_once(" (mode: ").map_or(value, |(value, _)| value).trim().trim_matches('"');
+        let path = Path::new(value);
+        let exact = match key {
+            "path" => path.is_absolute() && normalized(path) == plist,
+            "program" => path.is_absolute() && normalized(path) == program,
+            "program identifier" => {
+                !value.is_empty() && normalized(&if path.is_absolute() { path.to_path_buf() } else { bundle.join(path) }) == program
+            }
+            _ => continue,
+        };
+        if !exact {
+            return false;
+        }
+        names_program |= key != "path";
+    }
+    names_program
+}
+
 fn ownership_diagnostic(label: &str, details: &str) -> String {
     let metadata = metadata_fields(details)
         .map(|(key, value)| format!("{key} = {value}"))
@@ -505,6 +536,17 @@ pub fn ensure_registered_from_app(
 #[cfg(target_os = "macos")]
 pub fn open_login_items() {
     NativeServiceManager.open_login_items();
+}
+
+/// What ServiceManagement reports for the app's agent, and launchd's own record of the canonical job, read only.
+#[cfg(target_os = "macos")]
+pub(crate) fn registered_agent() -> Result<(ServiceStatus, String), String> {
+    Ok((NativeServiceManager.status()?, SystemLaunchctl.job_details(service_label())?))
+}
+
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn registered_agent() -> Result<(ServiceStatus, String), String> {
+    Err("CORSIA service management is only available on macOS".into())
 }
 
 

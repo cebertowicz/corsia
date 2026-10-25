@@ -99,6 +99,9 @@ state = Path(os.environ["FAKE_LAUNCHD"])
 url = next(arg for arg in reversed(sys.argv[1:]) if arg.startswith("http"))
 with open(state / "curl", "a") as log:
     log.write(url.split("?")[0] + "\\n")
+if "POST" in sys.argv:
+    with open(state / "curl_post", "a") as log:
+        log.write(url.split("?")[0] + "\\n")
 serving = (state / "loaded").exists()
 if url.endswith("/api/health") and serving:
     failed_generation = state / "health_fail_generation"
@@ -114,6 +117,19 @@ if "/api/system/drain/update?" in url and serving:
     print(json.dumps({"operation_id": body["operation_id"], "status": outcome}))
     sys.exit(0)
 if url.endswith("/api/version") and serving:
+    # Whether the lifecycle shell holds the update lock while it proves a version.
+    if os.environ.get("CORSIA_STATE_DIR"):
+        import fcntl
+        lock_path = Path(os.environ["CORSIA_STATE_DIR"]) / "update.lock"
+        busy = False
+        if lock_path.exists():
+            with open(lock_path, "rb") as probe:
+                try:
+                    fcntl.flock(probe, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    busy = True
+        with open(state / "version_lock", "a") as log:
+            log.write(f"held={busy}\\n")
     print(json.dumps({
         "backend": {
             "start_iso": (state / "starts").read_text(),
@@ -161,6 +177,27 @@ bundle = Path(__file__).resolve().parents[2]
 mode, operation = sys.argv[1], sys.argv[2]
 with open(state / "app", "a") as log:
     log.write(mode + " " + operation + "\\n")
+# What this call saw of the update lock: the descriptor it was told about,
+# whether it holds descriptor 7 at all, and whether an opener of its own is
+# refused because the lifecycle shell holds the lock.
+if (mode in {"--update-swap", "--update-rollback"} or operation == "register") and os.environ.get("CORSIA_STATE_DIR"):
+    import fcntl
+    lock_path = Path(os.environ["CORSIA_STATE_DIR"]) / "update.lock"
+    try:
+        os.fstat(7)
+        fd7 = "open"
+    except OSError:
+        fd7 = "closed"
+    busy = False
+    if lock_path.exists():
+        with open(lock_path, "rb") as probe:
+            try:
+                fcntl.flock(probe, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                busy = True
+    with open(state / "lock", "a") as log:
+        told = os.environ.get("CORSIA_UPDATE_LOCK_FD", "-")
+        log.write(f"{mode} {operation} told={told} fd7={fd7} held={busy}\\n")
 control = state / (mode.strip("-") + "_exit")
 if control.exists():
     sys.exit(int(control.read_text()))
@@ -277,6 +314,20 @@ class App:
         return self.bundle / "Contents" / "Resources" / "scripts" / "corsia"
 
     @property
+    def update_lock(self) -> Path:
+        return self.home / "Library" / "Application Support" / "CORSIA" / "state" / "update.lock"
+
+    def update_lock_is_free(self) -> bool:
+        import fcntl
+
+        with open(self.update_lock, "rb") as probe:
+            try:
+                fcntl.flock(probe, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                return False
+        return True
+
+    @property
     def plist(self) -> str:
         return str(self.bundle / "Contents" / "Library" / "LaunchAgents" / f"{LABEL}.plist")
 
@@ -318,6 +369,9 @@ class App:
         assert result.returncode == 0, result.stdout + result.stderr
         (self.launchd / "calls").write_text("")
         (self.launchd / "app").write_text("")
+        (self.launchd / "lock").unlink(missing_ok=True)
+        (self.launchd / "curl_post").unlink(missing_ok=True)
+        (self.launchd / "version_lock").unlink(missing_ok=True)
 
     def stage(self, short: str, build: str) -> Path:
         staged = self.bundle.with_name("CORSIA.app.staged")
@@ -524,6 +578,68 @@ def test_update_swaps_the_staged_app_and_hands_off_to_its_own_script(app):
     assert (app.launchd / "settled_operation").read_text() == OPERATION_ID
     assert not app.bundle.with_name("CORSIA.app.staged").exists()
     assert not app.bundle.with_name("CORSIA.app.previous").exists()
+    # One lock from before the stop through the new app's start: the swap
+    # reuses the shell's descriptor, and the start is never handed it.
+    assert app.calls("lock") == [
+        f"--update-swap {OPERATION_ID} told=7 fd7=open held=True",
+        "--service register told=- fd7=closed held=True",
+    ]
+    # Still held while the new version is proven: once taken, every later
+    # version check runs under it (the old app's read before the stop need not).
+    checks = app.calls("version_lock")
+    assert "held=True" in checks and set(checks[checks.index("held=True"):]) == {"held=True"}, checks
+    assert app.update_lock_is_free()
+
+
+def test_the_update_refuses_before_any_effect_while_another_holds_the_update_lock(app):
+    app.load()
+    staged = app.stage("2.0.0", "2")
+    app.update_lock.parent.mkdir(parents=True, exist_ok=True)
+    holder = subprocess.Popen(
+        [sys.executable, "-c", "import fcntl, sys, time\n"
+         "f = open(sys.argv[1], 'a')\nfcntl.flock(f, fcntl.LOCK_EX)\nprint('held', flush=True)\ntime.sleep(60)",
+         str(app.update_lock)],
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert holder.stdout.readline().strip() == "held"
+        result = app.run("restart-prepared", CORSIA_RESTART_OPERATION_ID=OPERATION_ID)
+    finally:
+        holder.kill()
+        holder.wait()
+
+    assert result.returncode != 0
+    assert "another update or start of CORSIA is in progress" in result.stdout
+    assert app.launchd_calls() == []
+    assert app.calls("app") == []
+    assert not any("/drain" in call for call in app.calls("curl_post"))
+    assert staged.is_dir() and app.generation() == "1.0.0+1"
+    assert (app.launchd / "loaded").exists()
+
+
+def test_a_descriptor_7_that_is_not_the_update_lock_is_replaced_never_trusted(app):
+    app.load()
+    app.stage("2.0.0", "2")
+    other = app.root / "other.lock"
+    other.write_text("")
+
+    result = subprocess.run(
+        ["/bin/bash", "-c", 'exec 7<>"$1"; exec "$2" restart-prepared', "forged", str(other), str(app.script)],
+        env=app.env(CORSIA_RESTART_OPERATION_ID=OPERATION_ID),
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    # Run directly, outside the backend's envelope, the handoff execs the new
+    # app's script, and the lock still carries through it to the new start.
+    assert app.calls("lock") == [
+        f"--update-swap {OPERATION_ID} told=7 fd7=open held=True",
+        "--service register told=- fd7=closed held=True",
+    ]
+    assert app.update_lock_is_free()
 
 
 def test_a_completion_failure_rolls_back_the_healthy_swapped_app(app):
@@ -545,6 +661,14 @@ def test_a_completion_failure_rolls_back_the_healthy_swapped_app(app):
         "--service unregister",
         "--service register",
     ]
+    # The exec'd new script keeps the same lock through the rollback's proof.
+    assert app.calls("lock") == [
+        f"--update-swap {OPERATION_ID} told=7 fd7=open held=True",
+        "--service register told=- fd7=closed held=True",
+        f"--update-rollback {OPERATION_ID} told=7 fd7=open held=True",
+        "--service register told=- fd7=closed held=True",
+    ]
+    assert app.update_lock_is_free()
 
 
 def test_failed_rollback_stop_leaves_an_acknowledged_failure_and_the_new_service(app):
@@ -578,6 +702,51 @@ def test_unacknowledged_failure_keeps_the_running_service_in_place(app):
     assert not (app.launchd / "failed_operation").exists()
     assert not any("--update-rollback" in call for call in app.calls("app"))
     assert previous.is_dir() and app.generation() == "2.0.0+2"
+
+
+def test_after_a_handoff_without_the_lock_the_new_app_takes_its_own(app):
+    # An app from before the lock hands off with descriptor 7 closed.
+    previous = app.bundle.with_name("CORSIA.app.previous")
+    shutil.copytree(app.bundle, previous, symlinks=True)
+    _set_version(app.bundle, "2.0.0", "2")
+    app.load()
+
+    result = app.run("restart-prepared", CORSIA_RESTART_OPERATION_ID=OPERATION_ID)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "update lock could not be held" not in result.stdout + result.stderr
+    assert not previous.exists()
+    assert app.calls("version_lock") and set(app.calls("version_lock")) == {"held=True"}
+    assert app.update_lock_is_free()
+
+
+def test_after_the_swap_another_holder_of_the_lock_stops_the_update_before_any_effect(app):
+    previous = app.bundle.with_name("CORSIA.app.previous")
+    shutil.copytree(app.bundle, previous, symlinks=True)
+    _set_version(app.bundle, "2.0.0", "2")
+    app.load()
+    app.update_lock.parent.mkdir(parents=True, exist_ok=True)
+    holder = subprocess.Popen(
+        [sys.executable, "-c", "import fcntl, sys, time\n"
+         "f = open(sys.argv[1], 'a')\nfcntl.flock(f, fcntl.LOCK_EX)\nprint('held', flush=True)\ntime.sleep(60)",
+         str(app.update_lock)],
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert holder.stdout.readline().strip() == "held"
+        result = app.run("restart-prepared", CORSIA_RESTART_OPERATION_ID=OPERATION_ID)
+    finally:
+        holder.kill()
+        holder.wait()
+
+    assert result.returncode != 0
+    assert "another update or start of CORSIA is in progress" in result.stdout
+    assert app.launchd_calls() == []
+    assert app.calls("app") == []
+    assert app.calls("curl_post") == []
+    assert previous.is_dir() and app.generation() == "2.0.0+2"
+    assert (app.launchd / "loaded").exists()
 
 
 def test_a_failed_swap_starts_the_installed_app_again(app):

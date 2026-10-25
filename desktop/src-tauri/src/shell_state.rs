@@ -1,3 +1,5 @@
+use std::{collections::BTreeSet, path::{Path, PathBuf}};
+
 use crate::{classify::ConnectFailure, remote_config::RemoteRecord};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -21,6 +23,18 @@ pub enum LaunchState {
 /// shell pages themselves.
 pub struct ShellState {
     state: LaunchState,
+    /// An update this process's own observer saw replace the app under the open window; it allows one automatic
+    /// recovery start. Only `observe_install` arms it: nothing a page sends can.
+    replacement: Option<Replacement>,
+    /// Replaced generations whose automatic start was used or invalidated; seeing one again never re-arms it.
+    spent: BTreeSet<String>,
+}
+
+/// The installed app the observer saw replace the one this process launched from: its path and generation.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Replacement {
+    pub bundle: PathBuf,
+    pub generation: String,
 }
 
 impl Default for ShellState {
@@ -33,7 +47,60 @@ impl ShellState {
         let state = saved.map_or(LaunchState::Local, |remote| LaunchState::Connecting {
             name: remote.name.clone(),
         });
-        Self { state }
+        Self { state, replacement: None, spent: BTreeSet::new() }
+    }
+
+    /// One reading of the installed app by the replacement observer. A generation other than the launched one, seen
+    /// while this computer's own service session is up, arms the automatic recovery start once; the launched
+    /// generation coming back, a different replacement, or leaving local mode invalidates it for good. An install that
+    /// can't be read changes nothing: the start re-reads it before any effect.
+    pub fn observe_install(&mut self, bundle: &Path, launched: &str, installed: Option<&str>, local_session: bool) {
+        if !self.is_local_start() {
+            self.forget_replacement();
+            return;
+        }
+        let Some(installed) = installed else { return };
+        if installed == launched {
+            self.forget_replacement();
+            return;
+        }
+        if self.replacement.as_ref().is_some_and(|seen| seen.bundle == bundle && seen.generation == installed) {
+            return;
+        }
+        self.forget_replacement();
+        if local_session && !self.spent.contains(installed) {
+            self.replacement = Some(Replacement { bundle: bundle.to_path_buf(), generation: installed.to_owned() });
+        }
+    }
+
+    /// The armed replacement, while the window is on this computer's own service.
+    pub fn automatic_recovery(&self) -> Option<&Replacement> {
+        self.replacement.as_ref().filter(|_| self.is_local_start())
+    }
+
+    /// Spends the automatic start for `expected` before its effect; false when it is no longer the armed one.
+    pub fn consume_automatic_recovery(&mut self, expected: &Replacement) -> bool {
+        if self.automatic_recovery() != Some(expected) {
+            return false;
+        }
+        self.forget_replacement();
+        true
+    }
+
+    /// Ends the armed automatic start without running it, as when the registered agent is not exactly this app's.
+    pub fn invalidate_automatic_recovery(&mut self) {
+        self.forget_replacement();
+    }
+
+    /// Whether a manual recovery start may run: only while the window is on this computer's own service.
+    pub fn allows_manual_recovery(&self) -> bool {
+        self.is_local_start()
+    }
+
+    fn forget_replacement(&mut self) {
+        if let Some(replacement) = self.replacement.take() {
+            self.spent.insert(replacement.generation);
+        }
     }
 
     pub fn state(&self) -> &LaunchState {
@@ -41,18 +108,22 @@ impl ShellState {
     }
 
     pub fn begin_pairing(&mut self) {
+        self.forget_replacement();
         self.state = LaunchState::Pairing;
     }
 
     pub fn connected(&mut self, name: impl Into<String>) {
+        self.forget_replacement();
         self.state = LaunchState::Remote { name: name.into() };
     }
 
     pub fn failed(&mut self, name: impl Into<String>, failure: ConnectFailure) {
+        self.forget_replacement();
         self.state = LaunchState::Failed { name: name.into(), failure };
     }
 
     pub fn retry(&mut self, name: impl Into<String>) {
+        self.forget_replacement();
         self.state = LaunchState::Connecting { name: name.into() };
     }
 
@@ -108,6 +179,7 @@ impl ShellState {
     }
 
     pub fn begin_disconnect(&mut self) {
+        self.forget_replacement();
         self.state = LaunchState::Disconnecting;
     }
 
