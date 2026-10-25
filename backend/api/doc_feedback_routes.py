@@ -94,7 +94,7 @@ def _thread_feedback_read(user_id: str, thread_id: str) -> dict:
     try:
         if not owns_thread(thread_id, user_id, db=db):
             raise HTTPException(404, "Thread not found")
-        return {"woken": [], "sent_count": 0, "undelivered_count": 0, **feedback_batches.held_for_thread(db, thread_id)}
+        return feedback_batches.held_for_thread(db, thread_id)
     finally:
         db.close()
 

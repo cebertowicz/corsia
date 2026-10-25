@@ -186,7 +186,6 @@
 				<DocReviewControls {artifactId} {viewingThreadId} targetKey={reviewTargetKey ?? targetInstanceId} />
 			{/if}
 		</span>
-		<!-- Document-held sender is mounted above, in the identity row. -->
 	</div>
 {#if freshness && freshnessPresentation}
 	<div class="document-metadata" class:expanded={detailsOpen}>
@@ -213,7 +212,6 @@
 {#if readonly && ready}
 	<div class="readonly-note">Read-only — this file is owned by the system bootloader.</div>
 {/if}
-<!-- Delivery controls above remain mounted with the document identity so they never force a second header row. -->
 </header>
 
 <style>
