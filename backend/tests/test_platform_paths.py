@@ -576,9 +576,12 @@ def test_default_state_root_for_the_app_is_the_app_folder_state_child(tmp_path):
     ],
 )
 def test_a_source_install_with_only_legacy_data_keeps_using_it(
-    tmp_path, caplog, platform, env_key, new_folder
+    tmp_path, caplog, monkeypatch, platform, env_key, new_folder
 ):
     paths = _platform_paths()
+    # The warning is reported once per process; pytest may reuse a deleted
+    # passing case's tmp_path, so each case starts with nothing reported.
+    monkeypatch.setattr(paths, "_reported_legacy_roots", set())
     env = {env_key: str(tmp_path / "base")} if env_key else {}
     if platform == "darwin":
         base = tmp_path / "Library" / "Application Support"

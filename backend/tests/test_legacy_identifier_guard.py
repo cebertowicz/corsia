@@ -29,6 +29,7 @@ ALLOWED = {
     "backend/tests/fixtures/state_dir_validity.txt",
     "backend/tests/test_corsia_app_mode.py",
     "backend/tests/test_desktop_service_launcher.py",
+    "backend/tests/test_devices_after_state_move.py",
     "backend/tests/test_moved_state_heal.py",
     "backend/tests/test_platform_paths.py",
     "backend/tests/test_stop_recorded_processes.py",
