@@ -20,6 +20,7 @@ from llm.providers import omlx_process as process
 from llm.providers.omlx_endpoints import _resolve_endpoint as _resolve_endpoint_via_freshness
 from llm.providers.omlx_supervisor_config import (
     listen_host as _listen_host,
+    managed_launch_settings as _managed_launch_settings,
     resolve_endpoint as _resolve_endpoint,
     resolve_settings as _resolve_settings,
 )
@@ -90,17 +91,6 @@ def _process_exited(pid: int) -> bool:
 
 def _port_owner_pid(host: str, port: int) -> process.PortOwnerPid:
     return process.port_owner_pid(host, port)
-
-
-MOVED_SETTINGS_UNREPOINTED = (
-    "The local model didn’t start because CORSIA couldn’t update its settings after moving your data. "
-    "Start it again in Settings › Providers to retry."
-)
-
-
-def _names_older_base(settings: dict, base: str) -> bool:
-    stored = settings.get("base_path")
-    return isinstance(stored, str) and bool(stored) and stored != base
 
 
 def _build_argv(
@@ -272,25 +262,9 @@ async def start_server(cfg: dict) -> dict[str, Any]:
     settings = await run_in_db(_resolve_settings, cfg)
     managed = _is_managed_omlx_row(settings)
     if managed:
-        from llm.local_profiles import OMLX_GLOBAL_SETTINGS
-        from llm.managed_omlx_binary import managed_omlx_paths
-
-        # The state root owns where the managed server writes. A row still on an
-        # older base means the startup heal could not repoint every oMLX file, and
-        # starting there would recreate the old data folder.
-        base = str(managed_omlx_paths().base_path)
-        if _names_older_base(settings, base):
-            from infra.moved_state_heal import heal_managed_omlx
-
-            await run_in_db(heal_managed_omlx)
-            settings = await run_in_db(_resolve_settings, cfg)
-        if _names_older_base(settings, base):
-            log.warning("start_server: managed oMLX row %s still names an older base; not starting", sid)
-            return {"ok": False, "message": MOVED_SETTINGS_UNREPOINTED}
-        # This is a launch-time setting too: applying it here updates existing
-        # CORSIA-managed installs at their next restart, without writing to a
-        # person's oMLX row or server settings.
-        settings = {**settings, **OMLX_GLOBAL_SETTINGS, "base_path": base}
+        settings, refused = await _managed_launch_settings(cfg, settings, _resolve_settings)
+        if refused:
+            return refused
     argv = _managed_omlx_argv(host, int(port), settings)
     if isinstance(argv, dict):
         return argv

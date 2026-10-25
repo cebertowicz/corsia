@@ -3,10 +3,18 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
+from typing import Any
 
+from infra.db_async import run_in_db
 from llm.providers.omlx_endpoints import _resolve_endpoint as _resolve_endpoint_via_freshness
 
 log = logging.getLogger("llm.providers.omlx.supervisor")
+
+MOVED_SETTINGS_UNREPOINTED = (
+    "Local models didn’t start: CORSIA moved your data but couldn’t update their settings to match. "
+    "Choose Start to try again."
+)
 
 
 def resolve_settings(cfg: dict) -> dict:
@@ -68,3 +76,34 @@ def listen_host(resolved: str) -> str:
         log.warning("oMLX bind host unreadable (%s); using %s", exc, LOCAL_BIND)
         bind = LOCAL_BIND
     return LOCAL_BIND if bind == LOCAL_BIND else resolved
+
+
+def _names_older_base(settings: dict, base: str) -> bool:
+    stored = settings.get("base_path")
+    return isinstance(stored, str) and bool(stored) and stored != base
+
+
+async def managed_launch_settings(
+    cfg: dict, settings: dict, reread: Callable[[dict], dict],
+) -> tuple[dict, dict[str, Any] | None]:
+    """Return CORSIA's managed row's launch settings, or a refusal to start."""
+    from llm.local_profiles import OMLX_GLOBAL_SETTINGS
+    from llm.managed_omlx_binary import managed_omlx_paths
+
+    # The state root owns where the managed server writes. A row still on an
+    # older base means the startup heal could not repoint every oMLX file, and
+    # starting there would recreate the old data folder.
+    base = str(managed_omlx_paths().base_path)
+    if _names_older_base(settings, base):
+        from infra.moved_state_heal import heal_managed_omlx
+
+        await run_in_db(heal_managed_omlx)
+        settings = await run_in_db(reread, cfg)
+    if _names_older_base(settings, base):
+        log.warning("start_server: managed oMLX row %s still names an older base; not starting",
+                    cfg.get("server_id"))
+        return settings, {"ok": False, "message": MOVED_SETTINGS_UNREPOINTED}
+    # This is a launch-time setting too: applying it here updates existing
+    # CORSIA-managed installs at their next restart, without writing to a
+    # person's oMLX row or server settings.
+    return {**settings, **OMLX_GLOBAL_SETTINGS, "base_path": base}, None

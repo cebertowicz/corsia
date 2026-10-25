@@ -497,6 +497,7 @@ def test_a_managed_row_on_an_older_base_never_starts_there(isolated_runtime, mon
     from infra import moved_state_heal
     from llm import managed_omlx_binary
     from llm.providers import omlx_supervisor as sup
+    from llm.providers.omlx_supervisor_config import MOVED_SETTINGS_UNREPOINTED
 
     current = tmp_path / "CORSIA" / "state" / "managed-omlx"
     older = tmp_path / "com.cebertowicz.corsia" / "state" / "managed-omlx"
@@ -535,5 +536,5 @@ def test_a_managed_row_on_an_older_base_never_starts_there(isolated_runtime, mon
         assert result["ok"] is True
         assert argv[argv.index("--base-path") + 1] == str(current)
     else:
-        assert result == {"ok": False, "message": sup.MOVED_SETTINGS_UNREPOINTED}
+        assert result == {"ok": False, "message": MOVED_SETTINGS_UNREPOINTED}
         assert argv == []

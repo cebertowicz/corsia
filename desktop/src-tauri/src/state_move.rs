@@ -181,7 +181,7 @@ pub struct MoveError {
 }
 
 pub const NOT_MOVED: &str = "CORSIA couldn’t get ready to move your data and left it where it was, so nothing is lost. Choose Retry.";
-pub const NOT_FINISHED: &str = "CORSIA moved your data but couldn’t finish setting it up there. Nothing is lost. Choose Retry.";
+pub const NOT_FINISHED: &str = "CORSIA moved your data but couldn’t finish switching over to it. Nothing is lost. Choose Retry.";
 pub const TWO_PLACES: &str = "CORSIA found its data in two folders and changed neither, so nothing is lost. Choose Save a report.";
 pub const RECORD_UNREADABLE: &str = "CORSIA couldn’t read its record of moving your data, so it stopped before changing anything else. Nothing is lost. Choose Save a report.";
 
