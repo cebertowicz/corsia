@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 
+import pytest
 from loguru import logger
 
 from infra.context_preview_timing import (
@@ -9,6 +10,15 @@ from infra.context_preview_timing import (
     ContextPreviewTiming,
     record_projection_lock_wait,
 )
+
+
+@pytest.fixture(autouse=True)
+def _isolated_summary(monkeypatch):
+    # The class-level summary is process-wide; once its interval passes in a long
+    # test process it logs a line here. Each test gets its own that never fires.
+    monkeypatch.setattr(
+        ContextPreviewTiming, "_summary", ContextPreviewSummary(interval_seconds=float("inf")),
+    )
 
 
 def test_context_preview_timing_emits_one_content_free_structured_line():
@@ -21,8 +31,6 @@ def test_context_preview_timing_emits_one_content_free_structured_line():
     finally:
         logger.remove(sink)
 
-    # The periodic summary line also fires once its interval has passed since process start; it is not this line.
-    records = [r for r in records if not r["message"].startswith("context_preview_summary ")]
     assert len(records) == 1
     name, encoded = records[0]["message"].split(" ", 1)
     assert name == "context_preview_timing"
