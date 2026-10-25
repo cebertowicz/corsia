@@ -133,18 +133,29 @@ try {
 	const kept = readFragment(await page.evaluate(() => window.location.hash));
 	if (kept.model.value < 52.4 || kept.lastSeq <= 7) fail('the address does not carry the latest screen');
 
-	// A record that stops for 60 s runs long: exactly one automatic ask, then the start offer once it is unavailable.
-	const stalled = await open(fragment(handoff({ seqChangedAt: NOW - 55_000 })), { progress: 'frozen' });
+	// A record that stops for 60 s runs long: one automatic ask, then the admitted manual offer without an effect.
+	const stalled = await open(fragment(handoff({ seqChangedAt: NOW - 55_000 })), { progress: 'frozen', answers: [{ recovery: 'manual_available' }] });
 	if ((await starts(stalled)).length) fail('the stalled screen asked before the wait ran long');
 	await stalled.clock.runFor(6_000);
 	await stalled.clock.runFor(5_000);
 	const asked = await starts(stalled);
 	if (JSON.stringify(asked) !== JSON.stringify([{ recovery: 'automatic' }])) fail(`a long wait asked ${JSON.stringify(asked)}, not one automatic start`);
-	if (!(await text(stalled)).includes('It didn’t start on its own.')) fail('an unavailable automatic start does not offer Start CORSIA');
+	if (!(await text(stalled)).includes('It didn’t start on its own.')) fail('an available manual recovery does not offer Start CORSIA');
 	await stalled.getByRole('button', { name: 'Start CORSIA' }).click();
 	await stalled.clock.runFor(100);
 	const pressed = await starts(stalled);
 	if (JSON.stringify(pressed.slice(1)) !== JSON.stringify([{ recovery: 'manual' }])) fail(`the press asked ${JSON.stringify(pressed.slice(1))}, not one manual start`);
+	if (!(await text(stalled)).includes('Couldn’t start CORSIA. Quit CORSIA with ⌘Q and open it again.')) fail('a refused press has no quit/reopen exit');
+	if (await stalled.getByRole('button', { name: 'Start CORSIA' }).count()) fail('a refused press still offers Start CORSIA');
+	await stalled.clock.runFor(5_000);
+	if ((await starts(stalled)).length !== 2) fail('a refused press was automatically retried');
+
+	// An automatic refusal never offers an impossible retry.
+	const unavailable = await open(fragment(handoff({ seqChangedAt: NOW - 61_000 })), { progress: 'frozen' });
+	await unavailable.clock.runFor(6_000);
+	if (!(await text(unavailable)).includes('Couldn’t start CORSIA. Quit CORSIA with ⌘Q and open it again.')) fail('an automatic refusal has no quit/reopen exit');
+	if (await unavailable.getByRole('button', { name: 'Start CORSIA' }).count()) fail('an automatic refusal still offers Start CORSIA');
+	if (JSON.stringify(await starts(unavailable)) !== JSON.stringify([{ recovery: 'automatic' }])) fail('an automatic refusal was retried');
 
 	// Deferred: the waiting line stays and the automatic start is asked again once a second, then Ready returns home.
 	const deferred = await open(fragment(handoff({ seqChangedAt: NOW - 61_000 })), {
@@ -169,7 +180,7 @@ try {
 	// Ready here, so reaching home proves the intent.
 	const pressDeferred = await open(fragment(handoff({ seqChangedAt: NOW - 61_000 })), {
 		progress: 'frozen',
-		answers: [{ recovery: 'unavailable' }, { recovery: 'deferred' }, { recovery: 'deferred' }, { recovery: 'ready', onlyFor: 'manual' }],
+		answers: [{ recovery: 'manual_available' }, { recovery: 'deferred' }, { recovery: 'deferred' }, { recovery: 'ready', onlyFor: 'manual' }],
 	});
 	await pressDeferred.clock.runFor(1_100);
 	await pressDeferred.getByRole('button', { name: 'Start CORSIA' }).click();
@@ -188,8 +199,8 @@ try {
 	await pressDeferred.clock.runFor(2_000);
 	await pressedHome.catch(() => fail('the deferred press did not run as a press once the lock was free'));
 
-	// The service comes back by itself after the start was unavailable: the next reading returns home, asking nothing.
-	const late = await open(fragment(handoff({ seqChangedAt: NOW - 61_000 })), { progress: 'frozen', readyAfter: 3 });
+	// The service comes back by itself after a manual offer: the next reading returns home, asking nothing.
+	const late = await open(fragment(handoff({ seqChangedAt: NOW - 61_000 })), { progress: 'frozen', readyAfter: 3, answers: [{ recovery: 'manual_available' }] });
 	await late.clock.runFor(1_100);
 	if (!(await text(late)).includes('It didn’t start on its own.')) fail('the late-recovery case did not first offer Start CORSIA');
 	// Every start this page will ask is in by now; the service page that follows keeps its own list.

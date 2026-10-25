@@ -45,20 +45,20 @@ describe('the shell commands', () => {
 		expect(await recoverLocalService('automatic')).toEqual({ recovery: 'ready', url: 'http://127.0.0.1:1956' });
 		expect(await recoverLocalService('manual')).toEqual({ recovery: 'ready', url: 'http://127.0.0.1:1956' });
 		expect(invoke.mock.calls).toEqual([['start_local_service', { recovery: 'automatic' }], ['start_local_service', { recovery: 'manual' }]]);
-		for (const recovery of ['deferred', 'unavailable', 'not_started'] as const) {
+		for (const recovery of ['deferred', 'manual_available', 'unavailable', 'not_started'] as const) {
 			vi.stubGlobal('__TAURI_INTERNALS__', { invoke: vi.fn(async () => ({ recovery })) });
 			expect(await recoverLocalService('automatic')).toEqual({ recovery });
 		}
 	});
-	it.each([{ state: 'ready', url: 'http://127.0.0.1:1956' }, { state: 'requires_approval' }, { recovery: 'ready', url: '' }, { recovery: 'started' }, null, 'started'])('treats a full-start or malformed answer as not started: %j', async (response) => {
+	it.each([{ state: 'ready', url: 'http://127.0.0.1:1956' }, { state: 'requires_approval' }, { recovery: 'ready', url: '' }, { recovery: 'ready', url: 'https://evil.example' }, { recovery: 'started' }, null, 'started'])('treats a full-start or malformed answer as unavailable: %j', async (response) => {
 		vi.stubGlobal('__TAURI_INTERNALS__', { invoke: vi.fn(async () => response) });
-		expect(await recoverLocalService('automatic')).toEqual({ recovery: 'not_started' });
+		expect(await recoverLocalService('automatic')).toEqual({ recovery: 'unavailable' });
 	});
-	it('treats a refused or missing shell as not started', async () => {
+	it('treats a refused or missing shell as unavailable because it proves no admission', async () => {
 		vi.stubGlobal('__TAURI_INTERNALS__', { invoke: vi.fn(async () => { throw new Error('Only CORSIA’s startup window can start CORSIA.'); }) });
-		expect(await recoverLocalService('manual')).toEqual({ recovery: 'not_started' });
+		expect(await recoverLocalService('manual')).toEqual({ recovery: 'unavailable' });
 		vi.unstubAllGlobals();
-		expect(await recoverLocalService('manual')).toEqual({ recovery: 'not_started' });
+		expect(await recoverLocalService('manual')).toEqual({ recovery: 'unavailable' });
 	});
 	it('is never the shell update page in the app the service serves', () => {
 		expect(onStartupShellPage()).toBe(false);

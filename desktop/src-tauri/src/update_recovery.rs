@@ -35,8 +35,11 @@ pub(crate) enum RecoveryAnswer {
     Ready { url: String },
     /// An update or another start holds the update lock: nothing was done, and an automatic start is still unspent.
     Deferred,
-    /// No recovery start applies here (no observed replacement, not this computer's service, an agent that is not
-    /// exactly this app's): nothing was done.
+    /// Automatic recovery cannot start, but a current manual request may pass the same narrow admission. Nothing was
+    /// started or consumed.
+    ManualAvailable,
+    /// No recovery start applies here (not this computer's service, a stale or mismatched observed replacement, or an
+    /// agent that is not exactly this app's): nothing was done.
     Unavailable,
     /// The one start ran and the service did not prove itself.
     NotStarted,
@@ -71,12 +74,23 @@ pub(crate) fn recover(
     if !local_session {
         return RecoveryAnswer::Unavailable;
     }
-    let expected = match intent {
-        RecoveryIntent::Automatic => match shell_state().automatic_recovery().cloned() {
-            Some(replacement) if replacement.bundle == bundle => Some(replacement),
-            _ => return RecoveryAnswer::Unavailable,
+    // Take one short snapshot of the shell state. Calling `shell_state` again while this guard is live would deadlock.
+    let (automatic_recovery, manual_allowed, manual_offer_allowed) = {
+        let state = shell_state();
+        (
+            state.automatic_recovery().cloned(),
+            state.allows_manual_recovery(),
+            state.allows_manual_recovery_offer(),
+        )
+    };
+    let (expected, manual_available) = match intent {
+        RecoveryIntent::Automatic => match automatic_recovery {
+            Some(replacement) if replacement.bundle == bundle => (Some(replacement), false),
+            Some(_) => return RecoveryAnswer::Unavailable,
+            None if manual_offer_allowed => (None, true),
+            None => return RecoveryAnswer::Unavailable,
         },
-        RecoveryIntent::Manual if shell_state().allows_manual_recovery() => None,
+        RecoveryIntent::Manual if manual_allowed => (None, false),
         RecoveryIntent::Manual => return RecoveryAnswer::Unavailable,
     };
     let still_installed = || {
@@ -108,6 +122,15 @@ pub(crate) fn recover(
             shell_state().invalidate_automatic_recovery();
             return RecoveryAnswer::Unavailable;
         }
+    }
+    // The automatic no-observation answer rechecks manual eligibility under the canonical lock and admission before
+    // inviting an explicit request; it never consumes the automatic attempt or reaches a start effect.
+    if manual_available {
+        return if shell_state().allows_manual_recovery_offer() {
+            RecoveryAnswer::ManualAvailable
+        } else {
+            RecoveryAnswer::Unavailable
+        };
     }
     // Checked again now the lock is held, and the automatic start is spent before its one effect.
     let admitted = still_installed() && {
@@ -350,16 +373,19 @@ mod tests {
     }
 
     #[test]
-    fn without_a_native_observation_nothing_starts_automatically() {
+    fn without_a_native_observation_automatic_recovery_only_offers_an_exact_manual_start() {
+        if !alone("without_a_native_observation_automatic_recovery_only_offers_an_exact_manual_start") {
+            return;
+        }
         let fixture = fixture();
         let host = spy(&fixture);
         // A page that arrives with a forged snapshot or fragment reaches native code only as this request: nothing
-        // it carries can arm the start, so the fresh shell state (no observation) is exactly its case.
+        // it carries can arm the start. The native preflight may only offer the existing narrow manual request.
         let untouched = Mutex::new(ShellState::default());
-        assert_eq!(run(RecoveryIntent::Automatic, &untouched, &fixture, &host), RecoveryAnswer::Unavailable);
-        // The observer saw only the launched app, or could not read the install.
-        assert_eq!(run(RecoveryIntent::Automatic, &observed(&fixture, Some(LAUNCHED)), &fixture, &host), RecoveryAnswer::Unavailable);
-        assert_eq!(run(RecoveryIntent::Automatic, &observed(&fixture, None), &fixture, &host), RecoveryAnswer::Unavailable);
+        assert_eq!(run(RecoveryIntent::Automatic, &untouched, &fixture, &host), RecoveryAnswer::ManualAvailable);
+        // The observer saw only the launched app, or could not read the install: neither is an automatic candidate.
+        assert_eq!(run(RecoveryIntent::Automatic, &observed(&fixture, Some(LAUNCHED)), &fixture, &host), RecoveryAnswer::ManualAvailable);
+        assert_eq!(run(RecoveryIntent::Automatic, &observed(&fixture, None), &fixture, &host), RecoveryAnswer::ManualAvailable);
         assert_eq!(host.effects(), 0);
     }
 
@@ -495,6 +521,30 @@ mod tests {
     }
 
     #[test]
+    fn automatic_manual_availability_still_refuses_a_foreign_unregistered_or_unapproved_agent() {
+        if !alone("automatic_manual_availability_still_refuses_a_foreign_unregistered_or_unapproved_agent") {
+            return;
+        }
+        let fixture = fixture();
+        let foreign = format!(
+            "gui/501/ai.corsia.service = {{\n\tprogram = {}/Contents/Resources/bin/corsia-service\n}}\n",
+            fixture.bundle.parent().unwrap().join("Old CORSIA.app").display()
+        );
+        for (status, details) in [
+            (ServiceStatus::Enabled, Ok(foreign)),
+            (ServiceStatus::NotRegistered, Ok(agent(&fixture.bundle))),
+            (ServiceStatus::RequiresApproval, Ok(agent(&fixture.bundle))),
+        ] {
+            for intent in [RecoveryIntent::Automatic, RecoveryIntent::Manual] {
+                let shell = Mutex::new(ShellState::default());
+                let host = Spy { status, details: details.clone(), ..spy(&fixture) };
+                assert_eq!(run(intent, &shell, &fixture, &host), RecoveryAnswer::Unavailable, "{intent:?} {status:?}");
+                assert_eq!(host.effects(), 0, "{intent:?} {status:?}");
+            }
+        }
+    }
+
+    #[test]
     fn a_refusal_before_the_lock_leaves_the_automatic_start_armed() {
         if !alone("a_refusal_before_the_lock_leaves_the_automatic_start_armed") {
             return;
@@ -554,6 +604,7 @@ mod tests {
     #[test]
     fn the_answers_the_shell_reads_are_typed() {
         assert_eq!(serde_json::to_value(RecoveryAnswer::Deferred).unwrap(), serde_json::json!({ "recovery": "deferred" }));
+        assert_eq!(serde_json::to_value(RecoveryAnswer::ManualAvailable).unwrap(), serde_json::json!({ "recovery": "manual_available" }));
         assert_eq!(
             serde_json::to_value(RecoveryAnswer::Ready { url: "http://127.0.0.1:1".into() }).unwrap(),
             serde_json::json!({ "recovery": "ready", "url": "http://127.0.0.1:1" })

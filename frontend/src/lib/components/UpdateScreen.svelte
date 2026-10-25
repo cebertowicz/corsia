@@ -21,8 +21,7 @@
 	const onShell = onStartupShellPage();
 
 	let starting = $state(false);
-	let startFailed = $state(false);
-	let manualStartFailed = $state(false);
+	let recoveryFailure = $state<'automatic' | 'manual' | 'unavailable' | null>(null);
 	let autoStartAttempted = $state(false);
 	/** An update or start holds the lock: nothing was done, the screen keeps waiting and asks again on its next second. */
 	let deferred = $state(false);
@@ -36,20 +35,20 @@
 
 	const longer = $derived(view?.mode === 'longer');
 	const recovery = $derived(longer || view?.startupProgressUnavailable === true || view?.mode === 'start_failed' || (view?.mode === 'failed' && view.serviceDown) || (!localDesktop && view?.serviceDown === true));
-	const autoStartWaiting = $derived(localDesktop && !startFailed && (deferred || (longer && autoStartAttempted && !starting)));
+	const hasStartAction = $derived(recoveryFailure === 'automatic' || recoveryFailure === 'manual');
+	const autoStartWaiting = $derived(localDesktop && recoveryFailure === null && (deferred || (longer && autoStartAttempted && !starting)));
 
 	$effect(() => {
 		if (view === null) {
 			starting = false;
-			startFailed = false;
-			manualStartFailed = false;
+			recoveryFailure = null;
 			autoStartAttempted = false;
 			deferred = false;
 			pending = null;
 			return;
 		}
-		if ((view.mode === 'start_failed' || (view.mode === 'failed' && view.serviceDown)) && !starting && !deferred) startFailed = true;
-		if (!onShell && localDesktop && (longer || startFailed)) {
+		if ((view.mode === 'start_failed' || (view.mode === 'failed' && view.serviceDown)) && recoveryFailure === null && !starting && !deferred) recoveryFailure = 'automatic';
+		if (!onShell && localDesktop && (longer || hasStartAction)) {
 			handOver();
 			return;
 		}
@@ -78,7 +77,7 @@
 		untrack(() => keepScreenInAddress(showing ? handOverScreen(currentTheme(), `${window.location.pathname}${window.location.search}`) : null));
 	});
 	$effect(() => {
-		if (recovery && localDesktop && startFailed) void tick().then(() => startActionEl?.focus());
+		if (recovery && localDesktop && hasStartAction) void tick().then(() => startActionEl?.focus());
 	});
 	$effect(() => {
 		if (screenEl) screenEl.focus({ preventScroll: true });
@@ -107,16 +106,14 @@
 	async function startCorsia(intent: RecoveryIntent): Promise<void> {
 		askedAt = Date.now();
 		starting = true;
-		startFailed = false;
-		manualStartFailed = false;
+		recoveryFailure = null;
 		const answer = await recoverLocalService(intent);
 		starting = false;
 		deferred = answer.recovery === 'deferred';
 		pending = deferred ? intent : null;
 		if (deferred) return;
 		if (answer.recovery === 'ready' && returnTo(answer.url)) return;
-		startFailed = true;
-		manualStartFailed = intent === 'manual';
+		recoveryFailure = answer.recovery === 'unavailable' ? 'unavailable' : intent;
 		if (intent === 'manual') autoStartAttempted = true;
 	}
 
@@ -182,12 +179,14 @@
 							<p class="detail" role="alert">Couldn’t read startup progress. If CORSIA doesn’t return, quit CORSIA with ⌘Q and open it again.</p>
 						{:else if autoStartWaiting}
 							<p class="detail">It’s taking longer than usual. CORSIA is still starting. Nothing you need to do yet.</p>
-						{:else if manualStartFailed}
+						{:else if recoveryFailure === 'unavailable'}
+							<p class="detail" role="alert">Couldn’t start CORSIA. Quit CORSIA with ⌘Q and open it again.</p>
+						{:else if recoveryFailure === 'manual'}
 							<p class="detail" role="alert">It still didn’t start. Click Start CORSIA to try again, or quit CORSIA with ⌘Q and open it again.</p>
-						{:else if startFailed}
+						{:else if recoveryFailure === 'automatic'}
 							<p class="detail">It didn’t start on its own.</p>
 						{/if}
-						{#if startFailed && !view.startupProgressUnavailable}
+						{#if hasStartAction && !view.startupProgressUnavailable}
 							<div class="actions" in:actionsReveal={{ duration: ms('--dur-tight') }}>
 								<Button variant="primary" onclick={() => (onShell ? void startCorsia('manual') : handOver(true))} loading={starting} bind:el={startActionEl}>Start CORSIA</Button>
 							</div>

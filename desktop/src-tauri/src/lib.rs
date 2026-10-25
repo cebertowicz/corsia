@@ -1067,23 +1067,6 @@ fn local_start_answered<R: tauri::Runtime, E>(app: &tauri::AppHandle<R>, answer:
     answer
 }
 
-/// Only the currently granted local-service origin needs the startup shell to draw a non-ready answer. The startup
-/// shell awaits and draws its own answer; unknown or remote origins never gain this recovery path.
-fn local_service_start_needs_shell_handoff(calling_origin: Option<&str>, port: u16, answer: &Result<ServiceStartup, String>) -> bool {
-    !matches!(answer, Ok(ServiceStartup::Ready { .. }))
-        && calling_origin.is_some_and(|origin| {
-            !is_shell_origin(origin)
-                && tauri::Url::parse(origin).is_ok_and(|url| url.origin().ascii_serialization() == service_url(port))
-        })
-}
-
-/// A local-service page cannot draw the startup shell's typed outcomes, so send its non-ready or failed results back.
-fn return_nonready_local_start_to_shell<R: tauri::Runtime>(app: &tauri::AppHandle<R>, calling_origin: Option<&str>, port: u16, answer: &Result<ServiceStartup, String>) {
-    if !local_service_start_needs_shell_handoff(calling_origin, port, answer) { return; }
-    show_launch_outcome(app, answer);
-    return_to_shell(app);
-}
-
 /// Records a state the shell cannot act on. The state is already stored when drawing it fails, and the next page
 /// load draws it, so the failure is logged and never dropped.
 fn report_shell_state<R: tauri::Runtime>(app: &tauri::AppHandle<R>, update: impl FnOnce(&mut shell_state::ShellState)) {
@@ -1912,7 +1895,6 @@ async fn start_local_service(
     if let Some(intent) = recovery {
         return recover_local_service(app, intent).await.map(LocalStartAnswer::Recovery);
     }
-    let service_port = lifecycle::service_port(&app, &service);
     // Finishing an interrupted adoption's undo can wait on the source service,
     // so it never runs on the thread that handles the window's events.
     local_start_began(&app);
@@ -1926,7 +1908,6 @@ async fn start_local_service(
     // Only the startup shell runs this start (refused above otherwise), and it follows the Ready address itself.
     let answer = with_relaunched_screen(&service.relaunched_screen, answer);
     let answer = local_start_answered(&app, answer);
-    return_nonready_local_start_to_shell(&app, calling_origin.as_deref(), service_port, &answer);
     answer.map(LocalStartAnswer::Startup)
 }
 
@@ -2914,7 +2895,7 @@ mod tests {
         let start = include_str!("lib.rs").split("async fn start_local_service(").nth(1).unwrap();
         let recovery = start.find("recover_local_service(").expect("the recovery route");
         assert!(start.find("local_start_refusal(").unwrap() < recovery);
-        for full in ["local_start_began(", "start_service(", "local_start_answered(", "return_nonready_local_start_to_shell("] {
+        for full in ["local_start_began(", "start_service(", "local_start_answered("] {
             assert!(recovery < start.find(full).unwrap(), "{full} runs before the recovery route");
         }
         let route = include_str!("lib.rs").split("async fn recover_local_service(").nth(1).unwrap();
@@ -3113,42 +3094,6 @@ mod tests {
         assert_eq!(shell_state_script(&launch_state(&app)), None);
     }
 
-    #[test]
-    fn only_the_actual_local_service_caller_hands_typed_nonready_answers_to_the_startup_shell() {
-        let local = service_url(47_895);
-        for answer in [
-            Ok(ServiceStartup::RequiresApproval),
-            Ok(ServiceStartup::AdoptionOffered { workspace: "~/corsia".into() }),
-            Err("did not start".to_string()),
-        ] {
-            assert!(local_service_start_needs_shell_handoff(Some(&local), 47_895, &answer), "the local service lost {answer:?}");
-            for caller in [Some("tauri://localhost/index.html"), Some("http://127.0.0.1:47896"), Some("http://studio.example:47895"), None] {
-                assert!(!local_service_start_needs_shell_handoff(caller, 47_895, &answer), "non-local caller {caller:?} took over {answer:?}");
-            }
-        }
-        assert!(!local_service_start_needs_shell_handoff(
-            Some(&local),
-            47_895,
-            &Ok(ServiceStartup::Ready { url: local.clone() }),
-        ));
-    }
-
-    #[test]
-    fn a_local_service_start_returns_typed_nonready_answers_to_the_startup_shell_once() {
-        let app = launch_app();
-        let answer = Ok(ServiceStartup::RequiresApproval);
-        let returned = local_start_answered(app.handle(), answer.clone());
-        return_nonready_local_start_to_shell(app.handle(), Some(&service_url(47_895)), 47_895, &returned);
-        assert_eq!(returned, answer);
-        assert!(shell_state_script(&launch_state(&app)).is_some());
-
-        let app = launch_app();
-        let returned = local_start_answered(app.handle(), answer.clone());
-        return_nonready_local_start_to_shell(app.handle(), Some("tauri://localhost/index.html"), 47_895, &returned);
-        assert_eq!(returned, answer);
-        assert_eq!(launch_state(&app), shell_state::LaunchState::Local, "the shell caller draws its awaited answer itself");
-        assert_eq!(shell_state_script(&launch_state(&app)), None, "the shell caller received a duplicate redraw");
-    }
 
     #[test]
     fn a_failure_card_survives_a_retry_that_fails_and_ends_when_a_start_answers() {

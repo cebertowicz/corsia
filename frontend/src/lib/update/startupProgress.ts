@@ -39,13 +39,13 @@ export const startupProgress = writable<{ file: StartupProgress | null; readAt: 
 let generation = 0;
 let readerFailureReported = false;
 
-/** One read through the shell's command; a browser or remote shell has no file to read. */
 /**
  * The service address a reopened app's own launch start answered Ready with, as the shell draws it on its update page
  * (`shellEntry.ts`). Followed like the reading's `readyUrl`; it is checked the same way and grants nothing.
  */
 export const launchReadyUrl = writable<string | null>(null);
 
+/** One read through the shell's command; a browser or remote shell has no file to read. */
 export async function refreshStartupProgress(): Promise<void> {
 	if (shellInfo()?.mode !== 'local') return;
 	const mine = ++generation;

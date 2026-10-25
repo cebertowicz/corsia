@@ -64,10 +64,21 @@ export function onStartupShellPage(): boolean {
 export type RecoveryIntent = 'automatic' | 'manual';
 
 /**
- * A recovery start's answer. `ready` carries the service's URL; `deferred` means an update holds the lock and nothing
- * was done; `unavailable` means no start applies; `not_started` means the one start ran and the service did not come up.
+ * A recovery start's answer. `ready` carries the proven service URL; `deferred` means an update holds the lock and
+ * nothing was done; `manual_available` means the automatic request did nothing but a current manual request may apply;
+ * `unavailable` means no start applies; `not_started` means the one start ran and the service did not come up.
  */
-export type RecoveryAnswer = { recovery: 'ready'; url: string } | { recovery: 'deferred' | 'unavailable' | 'not_started' };
+export type RecoveryAnswer = { recovery: 'ready'; url: string } | { recovery: 'deferred' | 'manual_available' | 'unavailable' | 'not_started' };
+
+function isRecoveryUrl(value: unknown): value is string {
+	if (typeof value !== 'string' || !value.trim()) return false;
+	try {
+		const url = new URL(value);
+		return url.protocol === 'http:' && (url.hostname === '127.0.0.1' || url.hostname === 'localhost');
+	} catch {
+		return false;
+	}
+}
 
 /** Ask the shell to bring this computer's service back during an update. Only the shell's own page may ask. */
 export async function recoverLocalService(intent: RecoveryIntent): Promise<RecoveryAnswer> {
@@ -75,14 +86,15 @@ export async function recoverLocalService(intent: RecoveryIntent): Promise<Recov
 	try {
 		result = await invoke('start_local_service', { recovery: intent });
 	} catch {
-		return { recovery: 'not_started' };
+		// A refused or malformed invoke proves no narrow admission, so it must not offer another start.
+		return { recovery: 'unavailable' };
 	}
 	const answer = result && typeof result === 'object' ? result as { recovery?: unknown; url?: unknown } : {};
 	if (answer.recovery === 'ready') {
-		return typeof answer.url === 'string' && answer.url.trim() ? { recovery: 'ready', url: answer.url } : { recovery: 'not_started' };
+		return isRecoveryUrl(answer.url) ? { recovery: 'ready', url: answer.url } : { recovery: 'unavailable' };
 	}
-	if (answer.recovery === 'deferred' || answer.recovery === 'unavailable' || answer.recovery === 'not_started') return { recovery: answer.recovery };
-	return { recovery: 'not_started' };
+	if (answer.recovery === 'deferred' || answer.recovery === 'manual_available' || answer.recovery === 'unavailable' || answer.recovery === 'not_started') return { recovery: answer.recovery };
+	return { recovery: 'unavailable' };
 }
 
 /** The desktop shell's PID-validated, redacted startup-progress record; absent for browsers and remote shells. */

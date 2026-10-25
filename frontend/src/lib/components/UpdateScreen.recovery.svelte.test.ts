@@ -163,7 +163,7 @@ describe('the update screen on the shell page', () => {
 		expect(text()).toContain('CORSIA is still starting. Nothing you need to do yet.');
 	});
 
-	it.each(['unavailable', 'not_started'])('offers Start CORSIA after an automatic start that is %s, and asks for a manual one only on its press', async (recovery) => {
+	it.each(['manual_available', 'not_started'])('offers Start CORSIA after an automatic start that is %s, and asks for a manual one only on its press', async (recovery) => {
 		answers = [{ recovery }, { recovery }];
 		show(longer);
 		await settle();
@@ -178,6 +178,27 @@ describe('the update screen on the shell page', () => {
 		expect(state.moves).toEqual([]);
 	});
 
+	it('shows no Start CORSIA action after an unavailable automatic or manual answer', async () => {
+		answers = [{ recovery: 'unavailable' }];
+		show(longer);
+		await settle();
+		expect(text()).toContain('Couldn’t start CORSIA. Quit CORSIA with ⌘Q and open it again.');
+		expect(startButton()).toBeUndefined();
+		expect(intents()).toEqual(['automatic']);
+
+		component && unmount(component);
+		component = null;
+		updateScreenView.set(null);
+		answers = [{ recovery: 'unavailable' }];
+		show(startFailed);
+		await settle();
+		startButton()?.click();
+		await settle();
+		expect(text()).toContain('Couldn’t start CORSIA. Quit CORSIA with ⌘Q and open it again.');
+		expect(startButton()).toBeUndefined();
+		expect(intents()).toEqual(['automatic', 'manual']);
+	});
+
 	it('never starts anything on its own for a start failure until the person presses Start CORSIA', async () => {
 		answers = [{ recovery: 'ready', url: 'http://127.0.0.1:47895' }];
 		show(startFailed);
@@ -190,12 +211,13 @@ describe('the update screen on the shell page', () => {
 		expect(state.moves).toHaveLength(1);
 	});
 
-	it('does not leave for a Ready answer that is not this computer’s service', async () => {
+	it('does not offer a start for a malformed Ready answer', async () => {
 		answers = [{ recovery: 'ready', url: 'https://evil.example' }];
 		show(longer);
 		await settle();
 		expect(state.moves).toEqual([]);
-		expect(text()).toContain('It didn’t start on its own.');
+		expect(text()).toContain('Couldn’t start CORSIA. Quit CORSIA with ⌘Q and open it again.');
+		expect(startButton()).toBeUndefined();
 	});
 
 	const intents = () => invoke.mock.calls.map(([, args]) => (args as { recovery: string }).recovery);
@@ -206,7 +228,7 @@ describe('the update screen on the shell page', () => {
 	};
 
 	it('keeps a deferred press a press: asked again as itself once a second, never as the spent automatic start, until it is answered', async () => {
-		answers = [{ recovery: 'unavailable' }, { recovery: 'deferred' }, { recovery: 'deferred' }, { recovery: 'ready', url: 'http://127.0.0.1:47895' }];
+		answers = [{ recovery: 'manual_available' }, { recovery: 'deferred' }, { recovery: 'deferred' }, { recovery: 'ready', url: 'http://127.0.0.1:47895' }];
 		state.route = '/?project=abc';
 		show(longer);
 		await settle();
@@ -235,7 +257,7 @@ describe('the update screen on the shell page', () => {
 	});
 
 	it('says it still didn’t start only after the deferred press really ran and failed', async () => {
-		answers = [{ recovery: 'unavailable' }, { recovery: 'deferred' }, { recovery: 'not_started' }];
+		answers = [{ recovery: 'manual_available' }, { recovery: 'deferred' }, { recovery: 'not_started' }];
 		show(longer);
 		await settle();
 		startButton()?.click();
@@ -250,7 +272,7 @@ describe('the update screen on the shell page', () => {
 	});
 
 	it('never replays a deferred press after a reload', async () => {
-		answers = [{ recovery: 'unavailable' }, { recovery: 'deferred' }];
+		answers = [{ recovery: 'manual_available' }, { recovery: 'deferred' }];
 		show(longer);
 		await settle();
 		startButton()?.click();
@@ -279,7 +301,7 @@ describe('the update screen on the shell page', () => {
 	});
 
 	it('returns to the kept page once the shell reads that the service is back, with no start of its own', async () => {
-		answers = [{ recovery: 'unavailable' }];
+		answers = [{ recovery: 'manual_available' }];
 		state.route = '/?project=abc';
 		show(longer);
 		await settle();
