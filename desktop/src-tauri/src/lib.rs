@@ -43,6 +43,7 @@ mod shell_state;
 mod source_lifecycle;
 mod start_fresh;
 mod startup_failure;
+mod state_move;
 #[cfg(test)]
 mod test_tls;
 use startup_failure::StartupFailure;
@@ -793,6 +794,22 @@ fn start_service_in<R: tauri::Runtime>(
     service: &AppServiceState,
     app_dir: PathBuf,
 ) -> Result<ServiceStartup, String> {
+    let home = app
+        .path()
+        .home_dir()
+        .map_err(|error| format!("could not resolve the home folder: {error}"))?;
+    // An adopted install's data leaves the folder named for the old identifier before
+    // anything attaches to or starts the service; a skip starts it where it is.
+    let move_paths = state_move::Paths::for_home(&home, &app_dir);
+    let moved = {
+        let port = first_run::recorded_port(&app_dir).unwrap_or(DEFAULT_SERVICE_PORT);
+        let mut mover = state_move::AppService::new(bundled_resource_dir(app).unwrap_or_default(), port);
+        let outcome = state_move::run(&move_paths, &mut mover, &mut |percent| {
+            set_adoption_phase(service, Some(adoption::Phase::MovingData { percent }))
+        });
+        set_adoption_phase(service, None);
+        outcome? == state_move::Outcome::Moved
+    };
     if let Some(startup) = attach_healthy_active_service(app, service, &app_dir)? {
         return Ok(startup);
     }
@@ -812,10 +829,6 @@ fn start_service_in<R: tauri::Runtime>(
         log::error!("interrupted adoption could not be undone: {}", failure.message);
         return Ok(ServiceStartup::AdoptionFailed { failure });
     }
-    let home = app
-        .path()
-        .home_dir()
-        .map_err(|error| format!("could not resolve the home folder: {error}"))?;
     // A Start fresh the app did not finish is put back first, so the earlier install is found whole.
     let recovered = start_fresh::recover_on_launch(&app_dir, |stop| {
         use start_fresh::OldService;
@@ -881,6 +894,9 @@ fn start_service_in<R: tauri::Runtime>(
     match register_or_report_status(port)? {
         service_management::ServiceStatus::Enabled => {
             wait_for_service(port, &app_dir)?;
+            if moved {
+                state_move::check_legacy_gone(&move_paths)?;
+            }
             grant_local_service_origin(app, service, port)?;
             Ok(ServiceStartup::Ready {
                 url: service_url(port),

@@ -193,6 +193,11 @@ pub enum Phase {
     MovingToBackup,
     /// A rollback is putting the existing install back.
     StartingExisting,
+    /// The one-time move of an adopted install's data to `CORSIA/state`, as one
+    /// percentage for the whole move (`state_move`).
+    MovingData {
+        percent: u8,
+    },
 }
 
 /// Production runs the source's lifecycle owner and the app's bundled backend.
