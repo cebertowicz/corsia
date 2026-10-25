@@ -16,7 +16,7 @@ def endpoint_on_this_mac(api_base) -> bool:
         return host == "localhost"
 
 
-def _server_id(row: dict) -> str | None:
+def row_server_id(row: dict) -> str | None:
     """Return the network server identity encoded by one catalog row."""
     selector = str(row.get("litellm_model") or row.get("selector") or "")
     prefix, separator, remainder = selector.partition("@")
@@ -96,7 +96,7 @@ def row_is_local(
     if connection in {"claude-code", "codex"} or backend != "network":
         return False
 
-    server_id = _server_id(row)
+    server_id = row_server_id(row)
     if server_id:
         return server_id in (private_servers or set()) or server_id in (local_servers or set())
     selector = str(row.get("litellm_model") or row.get("selector") or "")
@@ -181,7 +181,7 @@ def locality_refusal(row: dict, *, thread_local_only: bool, project_id, db) -> s
         return None
     private_servers: set[str] = set()
     local_servers: set[str] = set()
-    server_id = _server_id(row)
+    server_id = row_server_id(row)
     if server_id:
         server = db.execute("SELECT * FROM network_servers WHERE id = ?", (server_id,)).fetchone()
         if server:

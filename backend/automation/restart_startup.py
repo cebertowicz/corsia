@@ -207,8 +207,11 @@ async def drive_startup_continuity(recovered, wake_threads, logger) -> None:
     """Drive independent conversations; their durable claims preserve FIFO order."""
     from infra.thread_execution import drive_thread
     from infra.thread_input_types import HeldAdmission
+    from infra.carry_in_drain import request_drain
     from infra.turn_admission_driver import drive_turn_admission
 
+    # Recovery has settled prior-boot Turns, so an open C1 claim is now interrupted work.
+    request_drain()
     claimed_threads = {admission.thread_id for admission in recovered.batches}
     claimed_threads.update(item.thread_id for item in recovered.settlements)
     ended = dict(recovered.ended_turns)  # idx_active_turns_one_active: one per thread

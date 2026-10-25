@@ -19,6 +19,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - If you quit partway through first-run setup, the next launch starts setup fresh; downloaded models are kept.
 - When the app finds an earlier CORSIA install, Start fresh moves it into a dated folder under CORSIA backups in your home folder, then begins a clean setup.
 - After Start fresh backs up an earlier install, setup begins right away, and taking over an earlier install is labeled Take over.
+- Start fresh now shows what it will back up on the first choice and starts in one step.
 - Setup opens with a Getting started page and four steps in the side rail, with Back on every step after the first, and you can edit your account from Back.
 - Pressing Download in setup always starts the download with progress, or says why it didn't and offers Retry.
 - A Claude Code or Codex sign-in that never returns from the browser now stops after five minutes and says what to do, instead of waiting forever.
