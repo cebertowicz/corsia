@@ -12,7 +12,8 @@ from types import SimpleNamespace
 import pytest
 
 
-APPLICATION_ID = "com.cebertowicz.corsia"
+# The folder pre-release source installs used. Only the legacy fallback reads it.
+LEGACY_FOLDER = "com.cebertowicz.corsia"
 
 
 def _platform_paths():
@@ -121,7 +122,7 @@ def test_service_file_lines_accept_state_dir_without_an_unsupported_key_note(tmp
 
 def test_adoption_snapshot_restores_database_files_and_permissions(tmp_path):
     snapshots = importlib.import_module("infra.adoption_snapshot")
-    state = tmp_path / "Application Support" / "com.cebertowicz.corsia" / "state"
+    state = tmp_path / "Application Support" / LEGACY_FOLDER / "state"
     state.mkdir(parents=True)
     database = state / "corsia.db"
     with sqlite3.connect(database) as connection:
@@ -546,10 +547,103 @@ def test_default_state_root_for_a_source_install_never_uses_the_app_folder(tmp_p
         app_bundle=None,
     )
 
-    assert result == (
-        tmp_path / "Library" / "Application Support" / APPLICATION_ID / "state"
+    # A child of the app folder that is never the app's own state root, so a
+    # missed adoption check still cannot open the other install's database.
+    assert result == app_folder / "source-state"
+    assert result != app_folder / "state"
+    assert "cebertowicz" not in str(result)
+
+
+def test_default_state_root_for_the_app_is_the_app_folder_state_child(tmp_path):
+    paths = _platform_paths()
+
+    result = paths.default_state_root(
+        env={},
+        platform="darwin",
+        home=tmp_path,
+        app_bundle=tmp_path / "Applications" / "CORSIA.app",
     )
-    assert not result.is_relative_to(app_folder)
+
+    assert result == tmp_path / "Library" / "Application Support" / "CORSIA" / "state"
+
+
+@pytest.mark.parametrize(
+    ("platform", "env_key", "new_folder"),
+    [
+        ("darwin", None, None),
+        ("linux", "XDG_STATE_HOME", "corsia"),
+        ("win32", "LOCALAPPDATA", "CORSIA"),
+    ],
+)
+def test_a_source_install_with_only_legacy_data_keeps_using_it(
+    tmp_path, caplog, platform, env_key, new_folder
+):
+    paths = _platform_paths()
+    env = {env_key: str(tmp_path / "base")} if env_key else {}
+    if platform == "darwin":
+        base = tmp_path / "Library" / "Application Support"
+        new_root = base / "CORSIA" / "source-state"
+    else:
+        base = tmp_path / "base"
+        new_root = base / new_folder / "state"
+    legacy = base / LEGACY_FOLDER / "state"
+    legacy.mkdir(parents=True)
+    (legacy / "corsia.db").write_text("db", encoding="utf-8")
+
+    with caplog.at_level("WARNING", logger="infra.platform_paths"):
+        result = paths.default_state_root(
+            env=env, platform=platform, home=tmp_path, app_bundle=None
+        )
+
+    assert result == legacy
+    assert not new_root.exists(), "the fallback never creates the new folder"
+    assert [record.getMessage() for record in caplog.records if str(legacy) in record.getMessage()]
+
+    # Once the new root holds a database, it wins and the legacy root is ignored.
+    new_root.mkdir(parents=True)
+    (new_root / "corsia.db").write_text("db", encoding="utf-8")
+    assert paths.default_state_root(
+        env=env, platform=platform, home=tmp_path, app_bundle=None
+    ) == new_root
+
+
+def test_the_legacy_fallback_never_applies_to_the_app_or_creates_the_legacy_folder(tmp_path):
+    paths = _platform_paths()
+    base = tmp_path / "Library" / "Application Support"
+    legacy = base / LEGACY_FOLDER / "state"
+    legacy.mkdir(parents=True)
+    (legacy / "corsia.db").write_text("db", encoding="utf-8")
+
+    app = paths.default_state_root(
+        env={}, platform="darwin", home=tmp_path,
+        app_bundle=tmp_path / "Applications" / "CORSIA.app",
+    )
+    assert app == base / "CORSIA" / "state"
+
+    # No legacy database: the new default, and nothing is created anywhere.
+    other_home = tmp_path / "other"
+    fresh = paths.default_state_root(
+        env={}, platform="darwin", home=other_home, app_bundle=None
+    )
+    assert fresh == other_home / "Library" / "Application Support" / "CORSIA" / "source-state"
+    assert not other_home.exists()
+
+
+def test_no_default_and_no_cache_root_names_the_personal_id(tmp_path):
+    paths = _platform_paths()
+    managed_runtime = importlib.import_module("tools.managed_runtime")
+
+    assert not hasattr(paths, "APPLICATION_ID")
+    for platform in ("darwin", "linux", "win32"):
+        for bundle in (None, tmp_path / "CORSIA.app"):
+            root = paths.default_state_root(
+                env={"CORSIA_APPLICATION_ID": "com.example.other"},
+                platform=platform,
+                home=tmp_path,
+                app_bundle=bundle,
+            )
+            assert "cebertowicz" not in str(root) and "example" not in str(root)
+    assert managed_runtime.application_cache_root(home=tmp_path) == tmp_path / "Library" / "Caches" / "CORSIA"
 
 
 def test_default_state_root_reads_app_mode_from_the_module_location(tmp_path):
@@ -557,7 +651,7 @@ def test_default_state_root_reads_app_mode_from_the_module_location(tmp_path):
 
     # This checkout's module is not inside a bundle: the source-install rule.
     assert paths.default_state_root(env={}, platform="darwin", home=tmp_path) == (
-        tmp_path / "Library" / "Application Support" / APPLICATION_ID / "state"
+        tmp_path / "Library" / "Application Support" / "CORSIA" / "source-state"
     )
 
 
@@ -671,7 +765,7 @@ def test_default_state_root_uses_xdg_state_home(tmp_path):
         home=tmp_path / "home",
     )
 
-    assert result == xdg_state / APPLICATION_ID / "state"
+    assert result == xdg_state / "corsia" / "state"
 
 
 def test_default_state_root_uses_xdg_fallback(tmp_path):
@@ -683,7 +777,7 @@ def test_default_state_root_uses_xdg_fallback(tmp_path):
         home=tmp_path,
     )
 
-    assert result == tmp_path / ".local" / "state" / APPLICATION_ID / "state"
+    assert result == tmp_path / ".local" / "state" / "corsia" / "state"
 
 
 def test_default_state_root_uses_windows_local_app_data(tmp_path):
@@ -696,7 +790,7 @@ def test_default_state_root_uses_windows_local_app_data(tmp_path):
         home=tmp_path / "home",
     )
 
-    assert result == local_app_data / APPLICATION_ID / "state"
+    assert result == local_app_data / "CORSIA" / "state"
 
 
 def test_state_directory_override_wins_on_every_platform(tmp_path):

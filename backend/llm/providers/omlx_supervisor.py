@@ -105,7 +105,10 @@ def _build_argv(
 def _is_managed_omlx_row(settings: dict) -> bool:
     from llm.managed_omlx_binary import managed_omlx_paths
 
-    return settings.get("base_path") == str(managed_omlx_paths().base_path)
+    # Identity first: a moved state folder leaves an older base_path behind.
+    return settings.get("corsia_managed") is True or settings.get("base_path") == str(
+        managed_omlx_paths().base_path
+    )
 
 
 def _managed_omlx_argv(host: str, port: int, settings: dict) -> list[str] | dict[str, Any]:

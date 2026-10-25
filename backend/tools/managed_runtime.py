@@ -17,7 +17,7 @@ import urllib.error
 import urllib.request
 import zipfile
 
-from infra.platform_paths import APPLICATION_ID
+from infra.platform_paths import APP_FOLDER
 
 
 class ManagedRuntimeError(RuntimeError):
@@ -76,7 +76,7 @@ def macos_arch(machine: str | None = None) -> str:
 
 def application_cache_root(home: Path | None = None) -> Path:
     """The CORSIA-owned cache parent whose children must not be agent-replaceable."""
-    return (Path.home() if home is None else Path(home)) / "Library" / "Caches" / APPLICATION_ID
+    return (Path.home() if home is None else Path(home)) / "Library" / "Caches" / APP_FOLDER
 
 
 def runtime_cache_root(home: Path | None = None) -> Path:

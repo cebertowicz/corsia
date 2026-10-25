@@ -160,7 +160,7 @@ describe('StatusBanners', () => {
 
 	it('renders the authoritative security audit report path', () => {
 		const report =
-			'/Users/alice/Library/Application Support/com.cebertowicz.corsia/state/security/audit-2026-07-22.md';
+			'/Users/alice/Library/Application Support/CORSIA/state/security/audit-2026-07-22.md';
 		securityAlert.set({
 			vulns: 2,
 			errors: 0,
