@@ -1461,6 +1461,10 @@ fn saved_proxy_origin_allows(remote: Option<&remote_config::RemoteRecord>, actua
     remote.is_some_and(|saved| actual.trim_end_matches('/') == format!("http://127.0.0.1:{}", saved.proxy_port))
 }
 
+fn disconnect_origin_allows(remote: Option<&remote_config::RemoteRecord>, actual: &str) -> bool {
+    is_shell_origin(actual) || saved_proxy_origin_allows(remote, actual)
+}
+
 /// The startup shell's own page, the only caller besides the saved proxy origin: its launch-failure actions
 /// (Set up this computer instead, Pair again) have to be able to forget the saved remote.
 fn is_shell_origin(actual: &str) -> bool {
@@ -1535,28 +1539,51 @@ fn return_to_shell<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
 /// Forgets the saved remote and brings the local service back. Called by the remote page's Disconnect and by the
 /// startup shell's launch-failure actions; it answers like `start_local_service`.
 #[tauri::command]
-fn disconnect_remote(
+async fn disconnect_remote(
     app: tauri::AppHandle,
-    service: tauri::State<'_, AppServiceState>,
+    _service: tauri::State<'_, AppServiceState>,
     remote: tauri::State<'_, RemoteRuntime>,
     webview: tauri::Webview,
 ) -> Result<ServiceStartup, String> {
+    // The invoking page can navigate while the service work waits, so its authority is fixed before the first await.
+    let actual = webview
+        .url()
+        .map_err(|error| format!("could not read calling origin: {error}"))?;
     let app_dir = default_app_dir(&app)?;
     let saved = remote_config::load_remote(&app_dir)?;
-    let actual = webview.url().map_err(|error| format!("could not read calling origin: {error}"))?;
-    if !is_shell_origin(actual.as_str()) && !saved_proxy_origin_allows(saved.as_ref(), actual.as_str()) {
+    if !disconnect_origin_allows(saved.as_ref(), actual.as_str()) {
         return Err("disconnect_remote is allowed only from the startup shell or the saved proxy origin".into());
     }
+
+    let starting = app.clone();
     let outcome = remote_lifecycle::disconnect(
-        || remote_config::forget_remote(&app_dir),
+        move || async move {
+            tauri::async_runtime::spawn_blocking(move || remote_config::forget_remote(&app_dir))
+                .await
+                .map_err(|error| error.to_string())?
+        },
         || {
+            // Webview and window state stay on this task, after forgetting and before the
+            // local service is brought back.
             clear_remote_session(&app, &remote_session_clear(actual.as_str()));
             replace_proxy(&remote, None);
             report_shell_state(&app, |connection| connection.begin_disconnect());
         },
-        || run_service_command("register"),
-        || start_service(&app, &service),
-    );
+        || async {
+            tauri::async_runtime::spawn_blocking(|| run_service_command("register"))
+                .await
+                .map_err(|error| error.to_string())?
+        },
+        move || async move {
+            tauri::async_runtime::spawn_blocking(move || {
+                let service = starting.state::<AppServiceState>();
+                start_service(&starting, &service)
+            })
+            .await
+            .map_err(|error| error.to_string())?
+        },
+    )
+    .await;
     match outcome {
         Ok(startup) => {
             report_shell_state(&app, |connection| connection.local());
@@ -1858,7 +1885,7 @@ enum LocalStartAnswer {
 /// Records an exceptional update-recovery wrapper error through the startup shell's existing failure path.
 fn show_recovery_failure<R: tauri::Runtime>(app: &tauri::AppHandle<R>, error: String) -> String {
     log::error!("update recovery did not finish: {error}");
-    show_shell_failure(app, &error);
+    show_shell_failure(app, "");
     error
 }
 
@@ -2792,12 +2819,14 @@ mod tests {
             identity: None,
             outside: None,
         };
-        assert!(saved_proxy_origin_allows(Some(&remote), "http://127.0.0.1:47911"));
-        assert!(!saved_proxy_origin_allows(Some(&remote), "http://127.0.0.1:47912"));
-        assert!(!saved_proxy_origin_allows(Some(&remote), "https://127.0.0.1:47911"));
-        assert!(!saved_proxy_origin_allows(Some(&remote), "http://127.0.0.1:47895"));
-        assert!(!saved_proxy_origin_allows(None, "http://127.0.0.1:47911"));
+        assert!(disconnect_origin_allows(Some(&remote), "tauri://localhost"));
+        assert!(disconnect_origin_allows(Some(&remote), "http://127.0.0.1:47911"));
+        assert!(!disconnect_origin_allows(Some(&remote), "http://127.0.0.1:47912"));
+        assert!(!disconnect_origin_allows(Some(&remote), "https://127.0.0.1:47911"));
+        assert!(!disconnect_origin_allows(Some(&remote), "http://127.0.0.1:47895"));
+        assert!(!disconnect_origin_allows(None, "http://127.0.0.1:47911"));
     }
+
 
     #[test]
     fn disconnect_also_accepts_the_startup_shell_so_its_launch_failures_can_forget_the_remote() {
@@ -3157,8 +3186,9 @@ mod tests {
             let window = app.get_webview_window("main").unwrap();
             window.navigate(tauri::Url::parse("tauri://localhost/update.html#corsia-update=fixture").unwrap()).unwrap();
             assert_eq!(finish_recovery(app.handle(), answer), Err(error.to_owned()));
-            let script = format!("window.__corsiaShowServiceFailure?.({});", serde_json::to_string(error).unwrap());
-            assert_eq!(shell_state_script(&launch_state(&app)).as_deref(), Some(script.as_str()));
+            let script = shell_state_script(&launch_state(&app)).expect("the failure remains retained");
+            assert_eq!(script, "window.__corsiaShowServiceFailure?.(\"\");");
+            assert!(!script.contains(error), "the recovery diagnostic reached the retained script");
             assert_eq!(window.url().unwrap().as_str(), "tauri://localhost/index.html");
         }
     }
