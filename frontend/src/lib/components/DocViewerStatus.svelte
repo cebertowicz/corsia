@@ -263,6 +263,8 @@
 	@container doc-header (max-width: 32.5rem) {
 		/* At chat-split and phone widths, the approved labelled controls remain one centered compact row. */
 		.document-tools { flex-wrap: nowrap; align-items: center; gap: 0; }
+		/* A reason and its Retry take their own line, so the reason is whole and reachable instead of running off the left edge. */
+		.document-tools:has(:global(.undelivered:not(.idle))) { flex-wrap: wrap; max-inline-size: 100%; justify-content: flex-end; }
 	}
 	@media (max-width: 768px) {
 		@container doc-header (width < 408px) {

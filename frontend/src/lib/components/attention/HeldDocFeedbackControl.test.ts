@@ -132,7 +132,12 @@ describe('HeldDocFeedbackControl', () => {
 			undelivered_count: 3,
 			undelivered_documents: [{ artifact_id: 'doc-a', title: 'A.md' }, { artifact_id: 'doc-b', title: 'B.md' }],
 		});
-		expect(messages).toEqual(['3 comments couldn’t be delivered. Open the document and choose Retry.']);
+		expect(messages).toEqual(['3 comments couldn’t be delivered. Open each document and choose Retry.']);
+	});
+
+	it('keeps the not-delivered notice for 8 s, since it holds the only way back', async () => {
+		await sendWithUndelivered({ undelivered_count: 1, undelivered_documents: [{ artifact_id: 'doc-b', title: 'Plan.md' }] });
+		expect(get(toasts)[0].duration).toBe(8000);
 	});
 
 	it('counts the comments when the one document has no title', async () => {
@@ -157,6 +162,7 @@ describe('HeldDocFeedbackControl', () => {
 		button()!.click();
 		await settle();
 		expect(get(toasts).map((toast) => toast.message)).toContain('Couldn’t send your comments — try again');
+		expect(get(toasts).find((toast) => toast.message.startsWith('Couldn’t send'))?.duration).toBe(3000);
 		expect(button()!.textContent!.trim()).toBe('Send 2 comments');
 	});
 

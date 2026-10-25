@@ -15,7 +15,7 @@ const HOLD_LATER = "strftime('%Y-%m-%dT%H:%M:%f+00:00','now','+1 hour')";
 export const DELIVER_IMMEDIATELY_KEY = 'corsia.document-comments.deliver-immediately';
 
 /** Runs a short script against the isolated E2E database; only synthetic mock state may be touched. */
-function isolatedDb(script: string[], ...args: string[]): string {
+export function isolatedDb(script: string[], ...args: string[]): string {
 	const stateRoot = process.env.CORSIA_E2E_STATE_DIR;
 	if (process.env.CORSIA_E2E_MOCK !== '1' || !stateRoot) throw new Error('Requires isolated E2E mock state');
 	return execFileSync(process.env.CORSIA_E2E_BACKEND_PYTHON ?? path.join(repoRoot, '.venv/bin/python'), [
