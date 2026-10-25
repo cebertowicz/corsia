@@ -146,6 +146,19 @@ def outcome_counts(db, keys: dict[str, set[str]]) -> dict[str, int]:
     return {"sent_count": len(ended["delivered"]), "undelivered_count": len(ended["undelivered"])}
 
 
+def undelivered_documents(db, keys: dict[str, set[str]]) -> list[dict[str, Any]]:
+    """The documents whose batches read by `pending_item_keys` ended undelivered, each with its title."""
+    rows = db.execute(
+        f"SELECT DISTINCT artifact_id FROM doc_feedback_batches WHERE state='undelivered' "
+        f"AND id IN ({','.join('?' * len(keys))}) ORDER BY artifact_id", tuple(keys),
+    ).fetchall() if keys else []
+    documents = []
+    for row in rows:
+        artifact = registry_models.get_artifact(row["artifact_id"], db=db)
+        documents.append({"artifact_id": row["artifact_id"], "title": artifact["title"] if artifact else None})
+    return documents
+
+
 def user_feedback_for_document(db, artifact_id: str) -> dict[str, Any]:
     """Project the user's durable feedback state for one document canvas."""
     artifact = registry_models.get_artifact(artifact_id, db=db)

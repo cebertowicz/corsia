@@ -15,7 +15,7 @@ test('@flow:artifact-tab-relocate keeps an open document tab at its relocated pa
 	const from = `# ${a.name}\n\n`.length + a.body.indexOf(anchorText);
 	const comment = await request.post(`/api/artifacts/${a.artifactId}/comments`, {
 		params: { token: TEST_TOKEN },
-		data: { body: commentText, anchor_text: anchorText, from_off: from, to_off: from + anchorText.length },
+		data: { body: commentText, anchor_text: anchorText, from_off: from, to_off: from + anchorText.length, delivery_policy: 'immediate' },
 	});
 	expect(comment.ok(), await comment.text()).toBeTruthy();
 	await postLinks(page, request, `[Open document](<${a.docPath}>)`);

@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 
 from auth_fixtures import OWNER_TOKEN, OWNER_USER
 from doc_feedback_helpers import add_comment, add_person_comment, batches, seed_document, seed_thread
-from doceditor import feedback_batches, feedback_delivery
+from doceditor import feedback_batch_edits, feedback_batches, feedback_delivery
 from infra.database import get_db, write_transaction
 
 HEADERS = {"Authorization": f"Bearer {OWNER_TOKEN}"}
@@ -174,6 +174,7 @@ def test_thread_send_reports_delivered_and_undelivered_counts(client, owner_thre
     body = _post(client, "thread/send", thread_id=owner_thread)
 
     assert (body["sent_count"], body["undelivered_count"]) == (2, 3)
+    assert body["undelivered_documents"] == [{"artifact_id": refused, "title": "refused.md"}]
 
 
 def test_a_retry_that_delivers_reports_what_it_delivered(client, owner_thread, drives):
@@ -197,7 +198,7 @@ def test_an_edit_only_held_batch_counts_so_it_can_be_sent(client, owner_thread, 
     try:
         artifact = seed_document(db, owner_thread)
         with write_transaction(db, scope="test_edit") as connection:
-            feedback_batches.record_edit(
+            feedback_batch_edits.record_edit(
                 connection, artifact_id=artifact, recipient_id=owner_thread, author_kind="user",
                 author_id=feedback_batches.USER_AUTHOR_ID, actor_display="The user",
                 path=Path("/workspace/shared/doc.md"), before=b"one\n", after=b"two\n",

@@ -99,7 +99,7 @@ test('@surface:doc-feedback-delivery sends a held user batch from the header in 
 	expect(seeded.ok(), await seeded.text()).toBeTruthy();
 	const artifactId = (await seeded.json()).artifact.id as string;
 	const created = await request.post(`/api/artifacts/${artifactId}/comments?token=${token}`, {
-		data: { body: 'This pending comment is delivered by the due-batch seam.', anchor_text: 'comment', from_off: commentOffset, to_off: commentOffset + 'comment'.length },
+		data: { body: 'This pending comment is delivered by the due-batch seam.', anchor_text: 'comment', from_off: commentOffset, to_off: commentOffset + 'comment'.length, delivery_policy: 'immediate' },
 	});
 	expect(created.ok(), await created.text()).toBeTruthy();
 	await leaveUnsent(request, (await created.json()).comment.id);
@@ -195,7 +195,7 @@ for (const deliverImmediately of [false, true]) test(`@surface:doc-reopen-feedba
 	expect(seeded.ok(), await seeded.text()).toBeTruthy();
 	const artifactId = (await seeded.json()).artifact.id as string;
 	const created = await request.post(`/api/artifacts/${artifactId}/comments?token=${token}`, {
-		data: { body: 'Please revisit this comment.', anchor_text: 'comment', from_off: 9, to_off: 16 },
+		data: { body: 'Please revisit this comment.', anchor_text: 'comment', from_off: 9, to_off: 16, delivery_policy: 'immediate' },
 	});
 	expect(created.ok(), await created.text()).toBeTruthy();
 	const commentId = (await created.json()).comment.id as string;

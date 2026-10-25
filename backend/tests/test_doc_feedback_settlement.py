@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from doc_feedback_helpers import add_comment, batches, seed_document, seed_thread
-from doceditor import comment_actions, comments, feedback_batches
+from doceditor import comment_actions, comments, feedback_batch_edits, feedback_batches
 from infra.database import get_db, write_transaction
 from plans import admission, admission_attempts, holds, lifecycle, rejection, service
 from plans.feedback_nodes import settle_feedback_node
@@ -22,7 +22,7 @@ def _delivered(db, *, suggestions: int = 1, comments_: int = 0, edit: bool = Fal
     suggested = [add_comment(db, artifact_id, replacement=f"New {n}")[0] for n in range(suggestions)]
     plain = [add_comment(db, artifact_id)[0] for _ in range(comments_)]
     if edit:
-        feedback_batches.record_edit(
+        feedback_batch_edits.record_edit(
             db, artifact_id=artifact_id, recipient_id="owner", author_kind="agent", author_id="author",
             actor_display="Reviewer", path=Path("/workspace/shared/Design.md"), before=b"old\n", after=b"new\n",
         )

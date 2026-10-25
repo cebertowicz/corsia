@@ -37,7 +37,7 @@ for (const width of WIDTHS) {
 		const artifactId: string = (await seeded.json()).artifact.id;
 		const quoted = 'ordinary prose';
 		const from = TEXT.indexOf(quoted);
-		const comment = await request.post(`/api/artifacts/${artifactId}/comments`, { params, data: { body: 'A comment', anchor_text: quoted, from_off: from, to_off: from + quoted.length } });
+		const comment = await request.post(`/api/artifacts/${artifactId}/comments`, { params, data: { body: 'A comment', anchor_text: quoted, from_off: from, to_off: from + quoted.length, delivery_policy: 'immediate' } });
 		expect(comment.ok(), await comment.text()).toBeTruthy();
 		await page.addInitScript(({ threadId, docPath, fileName, artifactId }) => {
 			localStorage.setItem('corsia_theme', 'light');

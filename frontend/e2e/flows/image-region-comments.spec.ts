@@ -173,7 +173,7 @@ test.describe('@flow:image-region-comments @surface:documents comments on parts 
 			// An agent's comment carries its name beside the number.
 			const tok = encodeURIComponent(TEST_TOKEN);
 			const agentComment = await request.post(`/api/artifacts/${seeded.artifactId}/comments?token=${tok}`, {
-				data: { body: 'The call-to-action is clipped at this width.', region: { x: 0.55, y: 0.6, w: 0.3, h: 0.25 } },
+				data: { body: 'The call-to-action is clipped at this width.', region: { x: 0.55, y: 0.6, w: 0.3, h: 0.25 }, delivery_policy: 'immediate' },
 			});
 			expect(agentComment.ok(), await agentComment.text()).toBeTruthy();
 			const agentId = (await agentComment.json()).comment.id as string;

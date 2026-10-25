@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from doceditor import comments, doc_images, feedback_batches, image_regions, review_feedback, review_lifecycle
+from doceditor import comments, doc_images, feedback_batch_core, feedback_batches, image_regions, review_feedback, review_lifecycle
 from doceditor.comment_creation import Anchor, CommentSelectionChanged, CreateReceipt
 from doceditor.doc_text import read_doc_text
 from doceditor.quote_anchor import anchor_context, resolve_quote
@@ -40,7 +40,8 @@ class CommentInput:
     review_request_id: str | None = None
     # A checked (x, y, w, h) in fractions of the image (DCOL-FR13.3).
     region: tuple[float, float, float, float] | None = None
-    delivery_policy: str = "immediate"
+    # An agent comment is always immediate (the batch layer enforces it); a person's caller names the lane.
+    delivery_policy: str = feedback_batch_core.IMMEDIATE
 
 
 def _anchor(request: CommentInput, anchor: Anchor | None, duplicate: dict | None) -> tuple:

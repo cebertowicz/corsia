@@ -34,6 +34,8 @@ export interface HeldThreadFeedback {
 	/** Only on a send: how many comments it delivered, and how many it tried and left undelivered. */
 	sent_count?: number;
 	undelivered_count?: number;
+	/** Only on a send: each document whose comments did not go, so a message can name it. */
+	undelivered_documents?: { artifact_id: string; title: string | null }[];
 }
 
 export class DocFeedbackError extends Error {

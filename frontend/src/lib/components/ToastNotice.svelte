@@ -1,21 +1,32 @@
+<script module lang="ts">
+	import { ms } from '$lib/popoverMotion';
+
+	/** How long a notice takes to fade out: 70% of its entrance (motion.md). The stack waits this long before it glides. */
+	export const toastLeaveMs = () => ms('--dur-standard') * 0.7;
+</script>
+
 <script lang="ts">
 	import { toasts, type Toast } from '$lib/stores/toast';
 	import { toastFit } from '$lib/stores/toastFit';
-	import { cssVar, ms } from '$lib/popoverMotion';
+	import { cssVar } from '$lib/popoverMotion';
 	import { prefersReducedMotion } from '$lib/stores/viewport';
 	import { get } from 'svelte/store';
 	import Spinner from '$lib/components/ui/Spinner.svelte';
 
-	let { toast, onDismiss, animateOut = true }: { toast: Toast; onDismiss?: () => void; animateOut?: boolean } = $props();
+	let { toast, onDismiss, onLeave, animateOut = true }: { toast: Toast; onDismiss?: () => void; onLeave?: (until: number) => void; animateOut?: boolean } = $props();
 	const type = $derived(toast.type ?? 'info');
 	const pinned = $derived(toast.pinned);
 	const press = $derived(onPress(toast));
-	const leaveMs = () => ms('--dur-standard') * 0.7;
 
+	/**
+	 * A notice fades and drops a few pixels as it leaves, at 70% of its entrance (motion.md); reduced
+	 * motion keeps the fade only. The leave is `global` so the last notice also plays it when the whole
+	 * stack goes. `onLeave` tells the stack until when this one is fading, so the notice above waits.
+	 */
 	function toastLeave(node: HTMLElement) {
 		if (!animateOut) return { duration: 0 };
-		const duration = leaveMs();
-		// The container separately moves remaining notices into the freed position.
+		const duration = toastLeaveMs();
+		onLeave?.(Date.now() + duration);
 		const from = get(prefersReducedMotion) ? { opacity: 1 } : { opacity: 1, transform: 'none' };
 		const to = get(prefersReducedMotion) ? { opacity: 0 } : { opacity: 0, transform: 'translateY(-8px)' };
 		node.animate([from, to], { duration, easing: cssVar('--ease-snap') || 'ease-out', fill: 'forwards' });

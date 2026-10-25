@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from doceditor import feedback_batches
+from doceditor import feedback_batch_edits
 
 
 def reopen_queues_feedback(comment: dict[str, Any]) -> bool:
@@ -21,13 +21,18 @@ def apply_user_transition(
     comment: dict[str, Any] | None,
     patch: dict[str, Any],
     user: dict[str, Any],
-    delivery_policy: str = feedback_batches.DOCUMENT_HELD,
+    delivery_policy: str | None,
 ) -> None:
-    """Queue a user reopen in the person's lane; ``comments.update`` drops it if the comment is resolved again."""
+    """Queue a user reopen in the lane the caller names; ``comments.update`` drops it if the comment is resolved again.
+
+    There is no default lane: a patch that is not a re-open passes ``None``, and a re-open without one is a caller bug.
+    """
     if not comment or not (comment.get("resolved") and patch.get("resolved") is False):
         return
     if not reopen_queues_feedback(comment):
         return
-    feedback_batches.record_reopen(
+    if delivery_policy is None:
+        raise ValueError("a re-open names its delivery lane")
+    feedback_batch_edits.record_reopen(
         db, comment, user_id=user["id"], user_display=user["name"], delivery_policy=delivery_policy,
     )

@@ -294,7 +294,7 @@ export async function pressFrame(page: Page, target: Locator, testInfo: TestInfo
 
 /** Seeds a comment through the disposable mock API, for many-of-N evidence only. */
 export async function apiComment(request: APIRequestContext, artifactId: string, body: string, region?: Region): Promise<string> {
-	const response = await request.post(`/api/artifacts/${artifactId}/comments?token=${tok()}`, { data: { body, ...(region ? { region } : {}) } });
+	const response = await request.post(`/api/artifacts/${artifactId}/comments?token=${tok()}`, { data: { body, delivery_policy: 'immediate', ...(region ? { region } : {}) } });
 	expect(response.ok(), `comment seed failed: ${response.status()}`).toBeTruthy();
 	return (await response.json()).comment.id as string;
 }

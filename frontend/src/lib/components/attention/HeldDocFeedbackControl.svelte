@@ -30,8 +30,9 @@
 			const current = await heldDocFeedbackForThread(id);
 			// Only a real reading is shown: anything else (an error body, a proxy page) leaves what is there.
 			if (seq === loadSeq && Array.isArray(current?.artifacts)) held = current;
-		} catch {
-			// A failed read leaves what is shown; the next change reads again.
+		} catch (error) {
+			// A failed read leaves what is shown; the next change reads again. The warning keeps it findable.
+			console.warn('[held doc feedback] held read failed', { threadId: id, artifactId: visibleArtifactId, error });
 		}
 	}
 
@@ -65,13 +66,18 @@
 			// go is said once, here, and left on its documents, whose headers carry the Retry.
 			const failed = result.undelivered_count ?? 0;
 			if (failed > 0) {
-				toasts.show(`${failed} comment${failed === 1 ? '' : 's'} couldn’t be delivered. Open the document and choose Retry.`, 'error');
+				// One document that did not go is named; several are counted, since the toast cannot name them all.
+				const [only, ...others] = result.undelivered_documents ?? [];
+				const what = only?.title && others.length === 0
+					? `${failed === 1 ? 'Your comment' : 'Your comments'} on “${only.title}”`
+					: `${failed} comment${failed === 1 ? '' : 's'}`;
+				toasts.show(`${what} couldn’t be delivered. Open the document and choose Retry.`, 'error');
 			}
 			if (id === threadId) held = { open_count: result.open_count, artifacts: result.artifacts };
 			// Open documents read what they still hold.
 			window.dispatchEvent(new Event(THREAD_SENT_EVENT));
 		} catch {
-			toasts.show("Couldn't send your comments — try again", 'error');
+			toasts.show('Couldn’t send your comments — try again', 'error');
 		} finally {
 			sending = false;
 		}

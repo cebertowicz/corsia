@@ -19,6 +19,11 @@ class FeedbackDocumentAction(BaseModel):
     delivery_policy: Literal["immediate", "document-held", "image-held"] | None = None
 
 
+class FeedbackRetry(BaseModel):
+    artifact_id: str
+    delivery_policy: Literal["immediate", "document-held", "image-held"]
+
+
 class FeedbackTouch(BaseModel):
     artifact_id: str
     delivery_policy: Literal["document-held", "image-held"]
@@ -35,6 +40,8 @@ def _user_feedback_write(
     action: str,
     delivery_policy: str | None = None,
 ) -> dict:
+    if action == "retry" and delivery_policy is None:
+        raise ValueError("a retry names the lane it retries")
     db = get_db()
     try:
         assert_owns_artifact(artifact_id, user_id, db)
@@ -42,17 +49,10 @@ def _user_feedback_write(
             woken: list[str] = []
             state, lanes = "open", None if delivery_policy is None else (delivery_policy,)
             if action == "retry":
-                if delivery_policy is None and feedback_batches.undelivered_for_document(
-                    connection,
-                    author_kind="user",
-                    author_id=feedback_batches.USER_AUTHOR_ID,
-                    artifact_id=artifact_id,
-                ):
-                    raise HTTPException(422, "delivery_policy is required when retrying document feedback")
                 state = "undelivered"
-                lanes = None if delivery_policy is None else feedback_state.RETRY_LANES[delivery_policy]
+                lanes = feedback_state.RETRY_LANES[delivery_policy]
             # What the attempt ends in is read from the batches themselves, so every trigger reports the same truth.
-            batch_ids = [] if action == "retry" and delivery_policy is None else feedback_state.user_batch_ids(
+            batch_ids = feedback_state.user_batch_ids(
                 connection, state, artifact_id=artifact_id, policies=lanes,
             )
             held_items = feedback_state.pending_item_keys(connection, batch_ids)
@@ -65,7 +65,7 @@ def _user_feedback_write(
                     reason="send",
                     delivery_policy=delivery_policy,
                 )
-            elif delivery_policy is not None:
+            else:
                 woken = feedback_batches.retry_for_document(
                     connection,
                     author_kind="user",
@@ -112,8 +112,9 @@ def _send_thread_feedback(user_id: str, thread_id: str) -> dict:
             held_items = feedback_state.pending_item_keys(connection, batch_ids)
             woken = feedback_batches.close_for_thread(connection, thread_id=thread_id, reason="send")
             outcome = feedback_state.outcome_counts(connection, held_items)
+            undelivered_documents = feedback_state.undelivered_documents(connection, held_items)
             feedback = feedback_batches.held_for_thread(connection, thread_id)
-        return {"woken": woken, **outcome, **feedback}
+        return {"woken": woken, **outcome, "undelivered_documents": undelivered_documents, **feedback}
     finally:
         db.close()
 
@@ -121,7 +122,7 @@ def _send_thread_feedback(user_id: str, thread_id: str) -> dict:
 def add_feedback_routes(router, assert_owns_artifact: Callable[[str, str, object], None]) -> None:
     """Attach held-feedback routes to the comment API's ownership-scoped router."""
 
-    async def user_feedback_action(user_id: str, body: FeedbackDocumentAction, action: str) -> dict:
+    async def user_feedback_action(user_id: str, body: FeedbackDocumentAction | FeedbackRetry, action: str) -> dict:
         result = await run_in_db(
             _user_feedback_write, assert_owns_artifact, user_id, body.artifact_id, action, body.delivery_policy,
         )
@@ -140,9 +141,9 @@ def add_feedback_routes(router, assert_owns_artifact: Callable[[str, str, object
 
     @router.post("/doc-feedback/retry")
     async def retry_user_feedback(
-        body: FeedbackDocumentAction, user: dict = Depends(require_user_header_only),
+        body: FeedbackRetry, user: dict = Depends(require_user_header_only),
     ):
-        """Retry the user's undelivered batches for one document."""
+        """Retry the user's undelivered batches for one document, in the lane the caller names."""
         return await user_feedback_action(user["id"], body, "retry")
 
     @router.post("/doc-feedback/touch")

@@ -10,7 +10,7 @@ import pytest
 
 from automation.continuation import loop
 from doc_feedback_helpers import seed_document, seed_thread
-from doceditor.feedback_batches import record_edit
+from doceditor.feedback_batch_edits import record_edit
 import infra.sweep_wake as sweep_wake
 from infra.database import get_db, write_transaction
 

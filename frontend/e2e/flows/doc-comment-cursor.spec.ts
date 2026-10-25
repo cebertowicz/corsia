@@ -102,7 +102,7 @@ async function openDocument(page: Page, testInfo: TestInfo, motion: Motion, name
 		const from = text.indexOf(comment.anchor);
 		expect(from, `setup: "${comment.anchor}" is in the document`).toBeGreaterThanOrEqual(0);
 		const created = await request.post(`/api/artifacts/${artifactId}/comments?token=${token}`, {
-			data: { body: comment.body, anchor_text: comment.anchor, from_off: from, to_off: from + comment.anchor.length },
+			data: { body: comment.body, anchor_text: comment.anchor, from_off: from, to_off: from + comment.anchor.length, delivery_policy: 'immediate' },
 		});
 		expect(created.ok(), await created.text()).toBeTruthy();
 	}

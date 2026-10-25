@@ -66,7 +66,7 @@ async def test_browser_region_in_a_live_doc_adopts_its_captured_image_range(owne
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post(
                 f"/api/artifacts/{entry.artifact_id}/comments", params={"token": OWNER_TOKEN},
-                json=dict(body="Too dark.", anchor_text=MARKDOWN, from_off=start, to_off=end, live_capture=True,
+                json=dict(delivery_policy="immediate", body="Too dark.", anchor_text=MARKDOWN, from_off=start, to_off=end, live_capture=True,
                           client_id="user-box", region={"x": 0.2, "y": 0.2}))
 
         assert response.status_code == 200, response.text

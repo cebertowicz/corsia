@@ -21,7 +21,7 @@ async def post(entry, identifier='refused', **fields):
     app.include_router(doc_comments.router)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://test') as client:
         return await client.post(f'/api/artifacts/{entry.artifact_id}/comments', params={'token': OWNER_TOKEN},
-            json=dict(body='countercase', anchor_text='b', from_off=2, to_off=3,
+            json=dict(delivery_policy="immediate", body='countercase', anchor_text='b', from_off=2, to_off=3,
                       client_id=identifier, **{'live_capture': True, **fields}))
 
 
@@ -50,7 +50,7 @@ async def test_missing_reservation_and_wrong_quote_bounds_refuse_live_http(owner
         # The reserved range covers a different UTF-16 character than the submitted quote.
         reserve(ownership_scope, entry, 'wrong-bounds', 0, 1)
         value = doc_comments.CommentCreate(body='bad bounds', anchor_text='b', from_off=0, to_off=1,
-                                          live_capture=True, client_id='wrong-bounds')
+                                          live_capture=True, client_id='wrong-bounds', delivery_policy='immediate')
         with pytest.raises(HTTPException) as refused:
             await doc_comments.create_comment(entry.artifact_id, OWNER_TOKEN, value, BackgroundTasks())
         assert refused.value.status_code == 409

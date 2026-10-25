@@ -33,14 +33,14 @@ def artifact_id(integration_client, doc_file):
 def test_comment_thread_roundtrip(integration_client, artifact_id):
     r = integration_client.post(
         f"/api/artifacts/{artifact_id}/comments?token={_TOKEN}",
-        json={"body": "Tighten this.", "anchor_text": "router decides", "from_off": 10, "to_off": 24},
+        json={"delivery_policy": "immediate", "body": "Tighten this.", "anchor_text": "router decides", "from_off": 10, "to_off": 24},
     )
     assert r.status_code == 200
     top = r.json()["comment"]
 
     r2 = integration_client.post(
         f"/api/artifacts/{artifact_id}/comments?token={_TOKEN}",
-        json={"body": "Done.", "parent_id": top["id"], "author": "jarvis", "author_kind": "agent"},
+        json={"delivery_policy": "immediate", "body": "Done.", "parent_id": top["id"], "author": "jarvis", "author_kind": "agent"},
     )
     assert r2.status_code == 200
 
@@ -68,6 +68,7 @@ def test_comment_create_idempotent_on_client_id(integration_client, artifact_id)
         "from_off": 4,
         "to_off": 13,
         "client_id": cid,
+        "delivery_policy": "immediate",
     }
 
     r1 = integration_client.post(
@@ -94,7 +95,7 @@ def test_comment_create_idempotent_on_client_id(integration_client, artifact_id)
 
 
 def test_comment_create_mints_id_when_no_client_id(integration_client, artifact_id):
-    body = {"body": "No client id here.", "anchor_text": "router", "from_off": 0, "to_off": 6}
+    body = {"body": "No client id here.", "anchor_text": "router", "from_off": 0, "to_off": 6, "delivery_policy": "immediate"}
     r1 = integration_client.post(
         f"/api/artifacts/{artifact_id}/comments?token={_TOKEN}", json=body
     )
@@ -109,7 +110,7 @@ def test_comment_create_mints_id_when_no_client_id(integration_client, artifact_
 def test_comment_patch_resolve_ack_and_positions(integration_client, artifact_id, doc_file):
     cid = integration_client.post(
         f"/api/artifacts/{artifact_id}/comments?token={_TOKEN}",
-        json={"body": "Anchor me.", "anchor_text": "Spec", "from_off": 2, "to_off": 6},
+        json={"delivery_policy": "immediate", "body": "Anchor me.", "anchor_text": "Spec", "from_off": 2, "to_off": 6},
     ).json()["comment"]["id"]
 
     r = integration_client.patch(
@@ -137,7 +138,7 @@ def test_comment_patch_404_and_empty_400(integration_client, artifact_id):
         f"/api/comments/nope?token={_TOKEN}", json={"resolved": True}
     ).status_code == 404
     assert integration_client.post(
-        f"/api/artifacts/{artifact_id}/comments?token={_TOKEN}", json={"body": "   "}
+        f"/api/artifacts/{artifact_id}/comments?token={_TOKEN}", json={"delivery_policy": "immediate", "body": "   "}
     ).status_code == 400
 
 
@@ -158,7 +159,7 @@ def _agent_comment(artifact_id: str) -> str:
 
 def test_user_edits_own_comment_text(integration_client, artifact_id):
     cid = integration_client.post(
-        f"/api/artifacts/{artifact_id}/comments?token={_TOKEN}", json={"body": "First wording."},
+        f"/api/artifacts/{artifact_id}/comments?token={_TOKEN}", json={"delivery_policy": "immediate", "body": "First wording."},
     ).json()["comment"]["id"]
     r = integration_client.patch(f"/api/comments/{cid}?token={_TOKEN}", json={"body": "Second wording."})
     assert r.status_code == 200
@@ -178,7 +179,7 @@ def test_user_still_resolves_reopens_and_moves_agent_comment(integration_client,
     cid = _agent_comment(artifact_id)
     url = f"/api/comments/{cid}?token={_TOKEN}"
     assert integration_client.patch(url, json={"resolved": True}).json()["comment"]["resolved"] == 1
-    assert integration_client.patch(url, json={"resolved": False}).json()["comment"]["resolved"] == 0
+    assert integration_client.patch(url, json={"resolved": False, "delivery_policy": "document-held"}).json()["comment"]["resolved"] == 0
     moved = integration_client.patch(url, json={"from_off": 2, "to_off": 6, "anchor_text": "Spec"})
     assert moved.status_code == 200 and moved.json()["comment"]["from_off"] == 2
 
@@ -186,11 +187,11 @@ def test_user_still_resolves_reopens_and_moves_agent_comment(integration_client,
 def test_user_reopen_records_feedback_but_resolve_ack_and_edit_stay_silent(
     integration_client, artifact_id, monkeypatch,
 ):
-    from doceditor import feedback_batches, feedback_reopens
+    from doceditor import feedback_batch_edits, feedback_reopens
 
     seen = []
     discarded = []
-    monkeypatch.setattr(feedback_batches, "record_reopen", lambda *args, **kwargs: seen.append(kwargs))
+    monkeypatch.setattr(feedback_batch_edits, "record_reopen", lambda *args, **kwargs: seen.append(kwargs))
     monkeypatch.setattr(
         feedback_reopens, "discard_open_item", lambda _db, comment_id, _now: discarded.append(comment_id)
     )
@@ -202,7 +203,7 @@ def test_user_reopen_records_feedback_but_resolve_ack_and_edit_stay_silent(
     assert integration_client.patch(
         url, json={"from_off": 2, "to_off": 6, "anchor_text": "Spec"}
     ).status_code == 200
-    assert integration_client.patch(url, json={"resolved": False}).status_code == 200
+    assert integration_client.patch(url, json={"resolved": False, "delivery_policy": "document-held"}).status_code == 200
     assert integration_client.patch(url, json={"resolved": True}).status_code == 200
 
     assert seen == [{"user_id": OWNER_USER, "user_display": OWNER_USER, "delivery_policy": "document-held"}]
@@ -225,7 +226,7 @@ def test_cross_artifact_client_id_returns_409(integration_client, artifact_id, s
 
     r1 = integration_client.post(
         f"/api/artifacts/{artifact_id}/comments?token={_TOKEN}",
-        json={"body": "Comment on artifact A.", "client_id": cid},
+        json={"delivery_policy": "immediate", "body": "Comment on artifact A.", "client_id": cid},
     )
     assert r1.status_code == 200
     first = r1.json()["comment"]
@@ -234,7 +235,7 @@ def test_cross_artifact_client_id_returns_409(integration_client, artifact_id, s
 
     r2 = integration_client.post(
         f"/api/artifacts/{second_artifact_id}/comments?token={_TOKEN}",
-        json={"body": "Attempted replay on artifact B.", "client_id": cid},
+        json={"delivery_policy": "immediate", "body": "Attempted replay on artifact B.", "client_id": cid},
     )
     assert r2.status_code == 409, (
         f"Expected 409 for cross-artifact id replay, got {r2.status_code}: {r2.text}"
@@ -248,7 +249,7 @@ def test_client_id_too_long_returns_422(integration_client, artifact_id):
     long_id = "a" * 65
     r = integration_client.post(
         f"/api/artifacts/{artifact_id}/comments?token={_TOKEN}",
-        json={"body": "Should be rejected.", "client_id": long_id},
+        json={"delivery_policy": "immediate", "body": "Should be rejected.", "client_id": long_id},
     )
     assert r.status_code == 422, f"Expected 422 for oversized client_id, got {r.status_code}"
 
@@ -257,7 +258,7 @@ def test_client_id_invalid_chars_returns_422(integration_client, artifact_id):
     for bad_id in ["id with spaces", "id/slash", "id@symbol", "id\nnewline"]:
         r = integration_client.post(
             f"/api/artifacts/{artifact_id}/comments?token={_TOKEN}",
-            json={"body": "Should be rejected.", "client_id": bad_id},
+            json={"delivery_policy": "immediate", "body": "Should be rejected.", "client_id": bad_id},
         )
         assert r.status_code == 422, (
             f"Expected 422 for client_id={bad_id!r}, got {r.status_code}"
@@ -268,14 +269,14 @@ def test_client_id_valid_boundary_values(integration_client, artifact_id):
     max_id = "A" * 64
     r = integration_client.post(
         f"/api/artifacts/{artifact_id}/comments?token={_TOKEN}",
-        json={"body": "Max-length id.", "client_id": max_id},
+        json={"delivery_policy": "immediate", "body": "Max-length id.", "client_id": max_id},
     )
     assert r.status_code == 200, f"Expected 200 for 64-char client_id, got {r.status_code}"
 
     mixed_id = "Az09-_abcDEF"
     r2 = integration_client.post(
         f"/api/artifacts/{artifact_id}/comments?token={_TOKEN}",
-        json={"body": "Mixed allowed chars.", "client_id": mixed_id},
+        json={"delivery_policy": "immediate", "body": "Mixed allowed chars.", "client_id": mixed_id},
     )
     assert r2.status_code == 200, f"Expected 200 for mixed-charset client_id, got {r2.status_code}"
 
@@ -295,7 +296,7 @@ def test_list_reanchors_external_file_changes_and_orphans(integration_client, ar
     start = original.index(quote)
     created = integration_client.post(
         f"/api/artifacts/{artifact_id}/comments?token={_TOKEN}",
-        json={"body": "Keep this.", "anchor_text": quote,
+        json={"delivery_policy": "immediate", "body": "Keep this.", "anchor_text": quote,
               "from_off": start, "to_off": start + len(quote)},
     ).json()["comment"]
     assert created["anchor_prefix"] == "# Spec\n\nThe "

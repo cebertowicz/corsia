@@ -42,7 +42,7 @@ export async function leaveUnsent(request: APIRequestContext, commentId: string)
 	holdPersonBatches(true);
 	try {
 		for (const resolved of [true, false]) {
-			const patched = await request.patch(`/api/comments/${commentId}`, { params: { token: TEST_TOKEN }, data: { resolved } });
+			const patched = await request.patch(`/api/comments/${commentId}`, { params: { token: TEST_TOKEN }, data: { resolved, delivery_policy: 'document-held' } });
 			expect(patched.ok(), await patched.text()).toBeTruthy();
 		}
 	} finally {

@@ -6,7 +6,7 @@ import sqlite3
 from contextlib import closing
 
 from doc_feedback_helpers import add_comment, batches, seed_document, seed_thread
-from doceditor import comment_actions, comments, feedback_batches
+from doceditor import comment_actions, comments, feedback_batch_edits, feedback_batches
 from infra.database import get_db, initialize_schema, write_transaction
 from infra.database_migrations import migrate_to_current
 from infra.schema import SCHEMA_VERSION
@@ -21,11 +21,12 @@ def _resolved_comment(db, artifact_id: str, *, replacement: str | None = None) -
 
 def _record_reopen(db, comment: dict, *, user_display: str = "Steve") -> None:
     with write_transaction(db, scope="test_record_reopen") as connection:
-        feedback_batches.record_reopen(
+        feedback_batch_edits.record_reopen(
             connection,
             comment,
             user_id="owner-token",
             user_display=user_display,
+            delivery_policy=feedback_batches.DOCUMENT_HELD,
             now="2026-10-02T22:00:00+00:00",
         )
 

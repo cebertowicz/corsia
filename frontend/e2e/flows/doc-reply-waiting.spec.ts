@@ -38,10 +38,10 @@ for (const theme of ['light', 'dark'] as const) {
 			const saved = await request.put(`/api/files/content?token=${TEST_TOKEN}`, { data: { path: docPath, text, thread_id: threadId, create: true } });
 			expect(saved.ok(), await saved.text()).toBeTruthy();
 			const artifactId = (await saved.json()).artifact.id as string;
-			const root = await request.post(`/api/artifacts/${artifactId}/comments?token=${TEST_TOKEN}`, { data: { body: 'Please review.', anchor_text: 'reply marker', from_off: 2, to_off: 14 } });
+			const root = await request.post(`/api/artifacts/${artifactId}/comments?token=${TEST_TOKEN}`, { data: { body: 'Please review.', anchor_text: 'reply marker', from_off: 2, to_off: 14, delivery_policy: 'immediate' } });
 			expect(root.ok(), await root.text()).toBeTruthy();
 			const rootId = (await root.json()).comment.id as string;
-			const reply = await request.post(`/api/artifacts/${artifactId}/comments?token=${TEST_TOKEN}`, { data: { body: 'Reviewed.', parent_id: rootId } });
+			const reply = await request.post(`/api/artifacts/${artifactId}/comments?token=${TEST_TOKEN}`, { data: { body: 'Reviewed.', parent_id: rootId, delivery_policy: 'immediate' } });
 			expect(reply.ok(), await reply.text()).toBeTruthy();
 			makeAgentReply((await reply.json()).comment.id as string, threadId);
 

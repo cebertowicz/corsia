@@ -104,6 +104,44 @@ describe('HeldDocFeedbackControl', () => {
 		expect(get(toasts)[0].type).toBe('error');
 	});
 
+	async function sendWithUndelivered(body: Record<string, unknown>) {
+		held = heldOf(['doc-a', 2], ['doc-b', 1]);
+		await render();
+		fetchMock.mockImplementation((url: string) => (String(url).endsWith('/thread/send') ? json({ ...heldOf(), ...body }) : json(held)));
+		button()!.click();
+		await settle();
+		return get(toasts).map((toast) => toast.message);
+	}
+
+	it('names the document when exactly one did not go', async () => {
+		const messages = await sendWithUndelivered({
+			sent_count: 1, undelivered_count: 2, undelivered_documents: [{ artifact_id: 'doc-b', title: 'Plan.md' }],
+		});
+		expect(messages).toEqual(['Your comments on “Plan.md” couldn’t be delivered. Open the document and choose Retry.']);
+	});
+
+	it('names the document for a single comment in the singular', async () => {
+		const messages = await sendWithUndelivered({
+			undelivered_count: 1, undelivered_documents: [{ artifact_id: 'doc-b', title: 'Plan.md' }],
+		});
+		expect(messages).toEqual(['Your comment on “Plan.md” couldn’t be delivered. Open the document and choose Retry.']);
+	});
+
+	it('counts the comments when several documents did not go', async () => {
+		const messages = await sendWithUndelivered({
+			undelivered_count: 3,
+			undelivered_documents: [{ artifact_id: 'doc-a', title: 'A.md' }, { artifact_id: 'doc-b', title: 'B.md' }],
+		});
+		expect(messages).toEqual(['3 comments couldn’t be delivered. Open the document and choose Retry.']);
+	});
+
+	it('counts the comments when the one document has no title', async () => {
+		const messages = await sendWithUndelivered({
+			undelivered_count: 1, undelivered_documents: [{ artifact_id: 'doc-b', title: null }],
+		});
+		expect(messages).toEqual(['1 comment couldn’t be delivered. Open the document and choose Retry.']);
+	});
+
 	it('says nothing is wrong when everything went', async () => {
 		held = heldOf(['doc-a', 2]);
 		await render();
@@ -118,8 +156,27 @@ describe('HeldDocFeedbackControl', () => {
 		fetchMock.mockImplementation((url: string) => (String(url).endsWith('/thread/send') ? Promise.reject(new Error('offline')) : json(held)));
 		button()!.click();
 		await settle();
-		expect(get(toasts).map((toast) => toast.message)).toContain("Couldn't send your comments — try again");
+		expect(get(toasts).map((toast) => toast.message)).toContain('Couldn’t send your comments — try again');
 		expect(button()!.textContent!.trim()).toBe('Send 2 comments');
+	});
+
+	it('a failed held read keeps what is shown and warns with the thread and document', async () => {
+		held = heldOf(['doc-a', 2]);
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+		try {
+			await render({ visibleArtifactId: 'doc-b' });
+			expect(button()!.textContent!.trim()).toBe('Send 2 comments');
+			const failure = new Error('offline');
+			fetchMock.mockImplementation(() => Promise.reject(failure));
+			window.dispatchEvent(new Event('doc-feedback-changed'));
+			await settle();
+			expect(button()!.textContent!.trim()).toBe('Send 2 comments');
+			expect(warn).toHaveBeenCalledWith('[held doc feedback] held read failed', {
+				threadId: 'thread-1', artifactId: 'doc-b', error: failure,
+			});
+		} finally {
+			warn.mockRestore();
+		}
 	});
 
 	it('a reading that is not a held-comments body shows nothing and breaks nothing', async () => {

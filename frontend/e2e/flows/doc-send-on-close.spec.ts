@@ -8,7 +8,7 @@ import {
 
 async function addUserComment(request: Parameters<typeof createSession>[0], artifactId: string): Promise<string> {
 	const created = await request.post(`/api/artifacts/${artifactId}/comments?token=${encodeURIComponent(TEST_TOKEN)}`, {
-		data: { body: 'Deliver this as document feedback.', anchor_text: 'commentable', from_off: 2, to_off: 13 },
+		data: { body: 'Deliver this as document feedback.', anchor_text: 'commentable', from_off: 2, to_off: 13, delivery_policy: 'immediate' },
 	});
 	expect(created.ok(), await created.text()).toBeTruthy();
 	return (await created.json()).comment.id as string;

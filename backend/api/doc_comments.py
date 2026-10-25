@@ -16,10 +16,9 @@ resolve to 404 so foreign ids stay non-enumerable.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from api.doc_comment_delivery import deliver_person_comment_after_response
 from api.doc_comment_models import CommentCreate
@@ -28,6 +27,7 @@ from doceditor import comments as store, doc_images, feedback_batches, feedback_
 from doceditor.comment_anchoring import anchored_threads
 from doceditor.comment_creation import CommentSelectionChanged, create_validated_comment
 from doceditor.comment_create_db import CommentAccessDenied, CommentInput
+from doceditor.feedback_batch_core import PersonDocumentLane
 from infra.app_loop import AppLoopUnavailable
 from doceditor.comment_feedback_transitions import apply_user_transition
 from doceditor.comment_state_updates import update_comment
@@ -289,10 +289,17 @@ class CommentPatch(BaseModel):
     from_off: int | None = None
     to_off: int | None = None
     anchor_text: str | None = None
-    # The lane a re-open queues in; the browser sends the person's document preference with it.
-    delivery_policy: Literal["immediate", "document-held"] = "document-held"
+    # The lane a re-open queues in; the browser sends the person's document preference with every re-open.
+    delivery_policy: PersonDocumentLane | None = None
     # Moves an image comment's pin; the pin then counts as placed on the current image.
     region: dict | None = None
+
+    @model_validator(mode="after")
+    def _reopen_names_its_lane(self) -> "CommentPatch":
+        """A re-open queues feedback, so it must say which lane; no other patch has one."""
+        if self.resolved is False and self.delivery_policy is None:
+            raise ValueError("delivery_policy is required when re-opening a comment")
+        return self
 
 
 @router.patch("/comments/{comment_id}")

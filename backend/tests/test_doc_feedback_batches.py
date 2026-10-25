@@ -10,14 +10,14 @@ import pytest
 from automation.plan_liveness_terminal import on_thread_turn_complete
 from automation.turn_end_effects import record_turn_end
 from doc_feedback_helpers import add_comment, add_person_comment, batches, linked_comment_ids, seed_document, seed_thread
-from doceditor import comment_notifications, feedback_batches
+from doceditor import comment_notifications, feedback_batch_edits, feedback_batches
 import infra.database as database
 from infra.database import get_db, write_transaction
 
 
 def add_user_edit(db, artifact_id: str, recipient_id: str = "owner") -> None:
     with write_transaction(db, scope="test_add_user_feedback_edit") as connection:
-        feedback_batches.record_edit(
+        feedback_batch_edits.record_edit(
             connection,
             artifact_id=artifact_id,
             recipient_id=recipient_id,
@@ -300,7 +300,7 @@ def test_due_user_feedback_for_sentinel_document_broadcasts_to_all(isolated_db, 
     try:
         artifact_id = seed_document(db, "ui")
         with write_transaction(db, scope="test_sentinel_due") as connection:
-            feedback_batches.record_edit(
+            feedback_batch_edits.record_edit(
                 connection,
                 artifact_id=artifact_id,
                 recipient_id="ui",

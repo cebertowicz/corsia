@@ -130,7 +130,7 @@ async def test_accept_all_credits_an_api_created_person_suggestion_despite_anoth
         start = doc.read_text().index(quote)
         response = integration_client.post(
             f"/api/artifacts/{artifact_id}/comments?token={token}",
-            json={
+            json={"delivery_policy": "immediate", 
                 "body": "", "anchor_text": quote, "from_off": start, "to_off": start + len(quote),
                 "replacement": replacement,
             },
@@ -234,7 +234,7 @@ async def test_reopening_a_rejected_suggestion_clears_its_bulk_flag(integration_
     assert _row(suggestion["id"])["decided_in_bulk"] == 1
 
     reopened = integration_client.patch(
-        f"/api/comments/{suggestion['id']}?token={_OWNER}", json={"resolved": False})
+        f"/api/comments/{suggestion['id']}?token={_OWNER}", json={"delivery_policy": "document-held", "resolved": False})
 
     assert reopened.status_code == 200
     assert _row(suggestion["id"])["decided_in_bulk"] is None
@@ -272,7 +272,7 @@ async def test_the_persons_own_comment_still_makes_it_approved_with_changes(
     await asyncio.to_thread(_raise_ask, artifact_id)
     note = integration_client.post(
         f"/api/artifacts/{artifact_id}/comments?token={_OWNER}",
-        json={"body": "Check this", "anchor_text": TAIL, "from_off": 0, "to_off": len(TAIL)})
+        json={"delivery_policy": "immediate", "body": "Check this", "anchor_text": TAIL, "from_off": 0, "to_off": len(TAIL)})
     assert note.status_code == 200, note.text
 
     assert _accept_all(integration_client, artifact_id).status_code == 200

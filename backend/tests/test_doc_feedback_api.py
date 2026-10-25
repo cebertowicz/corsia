@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 
 from auth_fixtures import OWNER_TOKEN, OWNER_USER
 from doc_feedback_helpers import add_comment, batches, seed_document, seed_thread
-from doceditor import feedback_batches
+from doceditor import feedback_batch_edits, feedback_batches
 from infra.database import get_db, write_transaction
 
 
@@ -50,7 +50,7 @@ def test_user_comment_background_delivery_drives_only_after_the_saved_response(c
         drives.append(list(thread_ids))
 
     monkeypatch.setattr(public, "drive_threads", drive_threads)
-    payload = {"body": "Please change this.", "client_id": "immediate-comment"}
+    payload = {"body": "Please change this.", "client_id": "immediate-comment", "delivery_policy": "immediate"}
     first = client.post(f"/api/artifacts/{artifact_id}/comments?token={OWNER_TOKEN}", json=payload)
     replay = client.post(f"/api/artifacts/{artifact_id}/comments?token={OWNER_TOKEN}", json=payload)
 
@@ -96,7 +96,7 @@ async def test_comment_handler_returns_before_a_blocked_background_delivery(isol
     result = await doc_comments.create_comment(
         created_artifact_id,
         OWNER_TOKEN,
-        CommentCreate(body="Save before delivery.", client_id="blocked-delivery"),
+        CommentCreate(body="Save before delivery.", client_id="blocked-delivery", delivery_policy="immediate"),
         background,
     )
 
@@ -175,7 +175,7 @@ def test_no_recipient_person_comment_still_sends_one_frame(client, isolated_db, 
 
     response = client.post(
         f"/api/artifacts/{created_artifact_id}/comments?token={OWNER_TOKEN}",
-        json={"body": "Keep canvases current.", "client_id": "no-recipient-comment"},
+        json={"delivery_policy": "immediate", "body": "Keep canvases current.", "client_id": "no-recipient-comment"},
     )
 
     assert response.status_code == 200, response.text
@@ -188,7 +188,7 @@ def test_feedback_actions_accept_bearer_header_only(client, artifact_id, path):
     response = client.post(
         f"/api/doc-feedback/{path}",
         headers={"Authorization": f"Bearer {OWNER_TOKEN}"},
-        json={"artifact_id": artifact_id},
+        json={"artifact_id": artifact_id, **({"delivery_policy": "document-held"} if path == "retry" else {})},
     )
 
     assert response.status_code == 200, response.text
@@ -208,7 +208,7 @@ def test_listing_comments_does_not_change_open_feedback(client, isolated_db):
         db.execute("UPDATE threads SET user_id=? WHERE id='owner'", (OWNER_USER,))
         artifact_id = seed_document(db, "owner")
         with write_transaction(db, scope="test_open_user_edit") as connection:
-            feedback_batches.record_edit(
+            feedback_batch_edits.record_edit(
                 connection,
                 artifact_id=artifact_id,
                 recipient_id="owner",
