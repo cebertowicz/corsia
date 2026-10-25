@@ -19,9 +19,15 @@ fn install(home: &Path) -> Paths {
     )
     .unwrap();
     fs::create_dir_all(paths.bootstrap_config.parent().unwrap()).unwrap();
+    // A version 2 bootstrap, the only kind that names a state root outside the workspace.
     fs::write(
         &paths.bootstrap_config,
-        serde_json::to_vec(&serde_json::json!({"state_root": legacy, "workspace": format!("{legacy}/workspace")})).unwrap(),
+        serde_json::to_vec(&serde_json::json!({
+            "version": 2,
+            "workspace": {"id": "w1", "name": "Corsia", "root": home.join("Corsia")},
+            "state_root": legacy,
+        }))
+        .unwrap(),
     )
     .unwrap();
     let adopted = app_dir.join("adopted");
@@ -117,7 +123,8 @@ fn assert_moved(paths: &Paths) {
     assert_eq!(service["port"], 47895);
     let config: serde_json::Value = serde_json::from_str(&read(&paths.bootstrap_config)).unwrap();
     assert_eq!(config["state_root"], target);
-    assert_eq!(config["workspace"], format!("{target}/workspace"));
+    assert_eq!(config["version"], 2);
+    assert_eq!(config["workspace"]["root"], home_of(paths).join("Corsia").to_str().unwrap());
     let adopted = paths.app_dir.join("adopted");
     // Only a whole path segment is rewritten; `…/state2` is another folder.
     assert_eq!(
@@ -126,6 +133,10 @@ fn assert_moved(paths: &Paths) {
     );
     assert_eq!(read(&adopted.join("service.env")), format!("CORSIA_STATE_ROOT={target}\n"));
     assert!(read(&adopted.join("adoption.json")).contains(target));
+}
+
+fn home_of(paths: &Paths) -> PathBuf {
+    paths.bootstrap_config.parent().and_then(Path::parent).unwrap().to_path_buf()
 }
 
 fn assert_unchanged(paths: &Paths) {
@@ -155,6 +166,9 @@ fn moves_an_adopted_install_and_repoints_every_file_that_names_it() {
     assert!(seen.windows(2).all(|pair| pair[0] <= pair[1]), "progress only rises: {seen:?}");
     assert_eq!(seen.last(), Some(&95));
     assert_moved(&paths);
+    // T11: this resolver is unchanged from the build before the move, so an older
+    // build opened on a moved install starts on the new folder too.
+    assert_eq!(app_paths::state_dir_with_override(&paths.app_dir, None), Ok(paths.target.clone()));
     wait_for_cache_removal(&paths);
     assert_eq!(check_legacy_gone(&paths), Ok(()));
     assert_eq!(run_with(&paths, &mut Fake::default()).0, Ok(Outcome::NotNeeded), "a second launch has nothing to do");
