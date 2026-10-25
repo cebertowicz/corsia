@@ -16,6 +16,13 @@ KEY = "prior_words"
 
 
 @pytest.fixture
+def delivery_on(monkeypatch):
+    from memory import node_start_recall
+
+    monkeypatch.setattr(node_start_recall, "DELIVERY_ON", True)
+
+
+@pytest.fixture
 def recall_db(isolated_db):
     from infra.db_fts import _init_fts
 
@@ -48,7 +55,7 @@ async def _activate(db, thread_id: str, title: str) -> dict:
 
 
 @pytest.mark.asyncio
-async def test_task_start_delivers_header_and_matching_person_message(recall_db):
+async def test_task_start_delivers_header_and_matching_person_message(recall_db, delivery_on):
     prior, now = mk_session("prior"), mk_session("now")
     _message(recall_db, prior, "The export account ledger needs CSV format with stable columns.")
 
@@ -62,7 +69,7 @@ async def test_task_start_delivers_header_and_matching_person_message(recall_db)
 
 
 @pytest.mark.asyncio
-async def test_agent_send_and_routed_event_are_not_delivered(recall_db):
+async def test_agent_send_and_routed_event_are_not_delivered(recall_db, delivery_on):
     prior, now = mk_session("prior-agent"), mk_session("now-agent")
     recall_db.execute(
         "INSERT INTO messages (id,thread_id,role,content,metadata,created_at,seq,delivery_state) "
@@ -77,7 +84,7 @@ async def test_agent_send_and_routed_event_are_not_delivered(recall_db):
     assert KEY not in result
 
 
-def test_wake_carries_prior_words(recall_db):
+def test_wake_carries_prior_words(recall_db, delivery_on):
     prior, worker = mk_session("prior-wake"), mk_session("worker-wake")
     _message(recall_db, prior, "The export account ledger needs CSV format with stable columns.")
     plan = service.ensure_plan("thread", worker, db=recall_db)
@@ -90,3 +97,24 @@ def test_wake_carries_prior_words(recall_db):
 
     assert facts[KEY][0].startswith("Earlier words from the person")
     assert len(facts[KEY]) == 2
+
+
+@pytest.mark.asyncio
+async def test_delivery_is_off_by_default_on_start_and_wake(recall_db, monkeypatch):
+    from memory import node_start_recall
+
+    looked_up = []
+    monkeypatch.setattr(node_start_recall, "related", lambda *args, **kwargs: looked_up.append(1) or ["x"])
+    prior, now, worker = mk_session("prior-off"), mk_session("now-off"), mk_session("worker-off")
+    _message(recall_db, prior, "The export account ledger needs CSV format with stable columns.")
+
+    result = await _activate(recall_db, now, "Export account ledger in CSV format")
+    plan = service.ensure_plan("thread", worker, db=recall_db)
+    task = add_task(recall_db, plan.id, "Export account ledger in CSV format")
+    admission.activate(task.id, expected_revision=task.revision, actor_id=worker, provenance="test", db=recall_db)
+    recall_db.commit()
+    from plans.plan_wake import with_next
+    facts = json.loads(with_next(recall_db, plan.id, worker, "Work was assigned.").split("\n", 1)[1])
+
+    assert KEY not in result and KEY not in facts
+    assert looked_up == []  # no lookup cost while off
