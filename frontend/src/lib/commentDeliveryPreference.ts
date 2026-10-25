@@ -33,6 +33,8 @@ async function call(method: 'GET' | 'PUT', immediate?: boolean): Promise<{ immed
 }
 
 let reading: Promise<void> | null = null;
+// Counts the person's own toggles, so a read that began before one cannot put the old value back.
+let toggles = 0;
 
 /**
  * Reads the person's choice from the server. A browser that chose "off" before the server kept it hands that choice over
@@ -41,8 +43,9 @@ let reading: Promise<void> | null = null;
 export function refreshDeliveryPreference(): Promise<void> {
 	if (!get(token)) return Promise.resolve();
 	reading ??= (async () => {
+		const seen = toggles;
 		const server = await call('GET');
-		if (!server) return;
+		if (!server || seen !== toggles) return;
 		if (!server.stored && legacyValue() === false) {
 			const carried = await call('PUT', false);
 			if (!carried) return;
@@ -58,6 +61,7 @@ export function refreshDeliveryPreference(): Promise<void> {
 /** Saves the person's choice; resolves false, and puts the toggle back, when the server did not keep it. */
 export async function setDeliverCommentsImmediately(value: boolean): Promise<boolean> {
 	const before = get(deliverCommentsImmediately);
+	toggles += 1;
 	deliverCommentsImmediately.set(value);
 	const saved = await call('PUT', value);
 	if (saved) return true;

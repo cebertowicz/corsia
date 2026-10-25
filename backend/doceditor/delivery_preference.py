@@ -33,6 +33,11 @@ def lane_for_thread_owner(db, thread_id: str) -> str:
     return IMMEDIATE if immediate else DOCUMENT_HELD
 
 
+def lane_for_edit(db, author_kind: str, recipient_id: str) -> str:
+    """The lane an edit's batch lives in: an agent's save is immediate, a person's follows the owner's preference."""
+    return IMMEDIATE if author_kind == "agent" else lane_for_thread_owner(db, recipient_id)
+
+
 def announce(user_id: str, immediate: bool) -> None:
     """Best-effort nudge so the person's other open clients follow; opening a document re-reads it."""
     from infra import state

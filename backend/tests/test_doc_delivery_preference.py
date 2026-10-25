@@ -127,3 +127,42 @@ def test_a_save_aimed_at_a_thread_with_no_row_is_immediate(isolated_db):
         assert delivery_preference.lane_for_thread_owner(db, "no-such-thread") == feedback_batches.IMMEDIATE
     finally:
         db.close()
+
+
+def _prepared_save(db, artifact, owner_thread, before: bytes, after: bytes):
+    """A save the way the live publisher makes it: snapshot outside the transaction, write inside it."""
+    from doceditor.feedback_edit_preparation import prepare_edit
+
+    kwargs = dict(
+        artifact_id=artifact, recipient_id=owner_thread, author_kind="user", author_id=feedback_batches.USER_AUTHOR_ID,
+        actor_display="Steve", path=Path("/workspace/shared/doc.md"), before=before, after=after,
+    )
+    prepared = prepare_edit(db, **kwargs)
+    with write_transaction(db, scope="test_prepared_save_lane") as connection:
+        feedback_batch_edits.record_edit(connection, prepared=prepared, **kwargs)
+
+
+@pytest.mark.parametrize("first", [True, False])
+def test_a_save_after_the_preference_changes_keeps_each_lane_its_own_batch(isolated_db, first):
+    """An open batch in the other lane must not stand in for this lane's batch in the prepared snapshot."""
+    db = get_db()
+    try:
+        seed_thread(db, "owner")
+        artifact = seed_document(db, "owner")
+        db.commit()
+        delivery_preference.write("owner-token", first, db=db)
+        _prepared_save(db, artifact, "owner", b"one\n", b"two\n")
+        delivery_preference.write("owner-token", not first, db=db)
+        _prepared_save(db, artifact, "owner", b"two\n", b"three\n")
+        _prepared_save(db, artifact, "owner", b"three\n", b"four\n")
+        saves = {
+            row["delivery_policy"]: row["save_count"]
+            for row in db.execute(
+                "SELECT b.delivery_policy, i.save_count FROM doc_feedback_batches b"
+                " JOIN doc_feedback_edit_items i ON i.batch_id=b.id WHERE b.state='open'"
+            ).fetchall()
+        }
+        first_lane, second_lane = (feedback_batches.IMMEDIATE, feedback_batches.DOCUMENT_HELD)[::1 if first else -1]
+        assert saves == {first_lane: 1, second_lane: 2}
+    finally:
+        db.close()

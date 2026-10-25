@@ -93,6 +93,19 @@ describe('comment delivery preference', () => {
 		expect(localStorage.getItem(KEY)).toBe('false');
 	});
 
+	it('does not let a read that began before a toggle put the old value back', async () => {
+		let release: (response: Response) => void = () => {};
+		const late = new Promise<Response>((resolve) => { release = resolve; });
+		const normal = fetchMock.getMockImplementation()!;
+		fetchMock.mockImplementationOnce(() => late);
+		fetchMock.mockImplementation(normal);
+		const reading = refreshDeliveryPreference();
+		await setDeliverCommentsImmediately(false);
+		release(new Response(JSON.stringify({ immediate: true, stored: true })));
+		await reading;
+		expect(get(deliverCommentsImmediately)).toBe(false);
+	});
+
 	it('follows a change made on another client, and re-reads on connect', async () => {
 		const stop = startDeliveryPreferenceSync();
 		try {

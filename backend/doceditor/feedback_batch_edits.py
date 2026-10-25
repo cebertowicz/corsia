@@ -6,7 +6,7 @@ from pathlib import Path
 
 from doceditor import delivery_preference, feedback_comments, feedback_edits
 from doceditor.feedback_batch_core import (
-    IMMEDIATE, add_comment_item, open_batch, person_comment_lane, touch_batch, utc_now,
+    add_comment_item, open_batch, person_comment_lane, touch_batch, utc_now,
 )
 from doceditor.feedback_state import USER_AUTHOR_ID
 
@@ -74,7 +74,7 @@ def record_edit(
     if author_kind not in {"agent", "user"}:
         raise ValueError("edit feedback author_kind must be 'agent' or 'user'")
     now = at or utc_now()
-    lane = IMMEDIATE if author_kind == "agent" else delivery_preference.lane_for_thread_owner(db, recipient_id)
+    lane = delivery_preference.lane_for_edit(db, author_kind, recipient_id)
     batch_id = open_batch(
         db,
         author_kind=author_kind,
