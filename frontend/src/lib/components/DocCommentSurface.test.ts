@@ -12,7 +12,6 @@ vi.mock('$lib/stores/docSaveQueue', () => ({ flushDraft: mocks.flushDraft, seedD
 vi.mock('$lib/stores/docComments', () => ({ loadComments: mocks.loadComments }));
 
 import DocCommentSurface from './DocCommentSurface.svelte';
-import { DocFeedback } from '$lib/docFeedback.svelte';
 import { SuggestionRefused } from '$lib/api/commentSuggestions';
 import { suggestionRefusals } from '$lib/stores/suggestionRefusals';
 
@@ -90,39 +89,10 @@ describe('DocCommentSurface suggestions', () => {
 		expect(drawer.querySelector('[data-comment-id]')?.getAttribute('data-comment-id')).toBe('comment-1');
 	});
 
-	it('ends the drawer in a Send now footer only while messages are not sent', async () => {
-		// The open document's one batch: the footer reads it and Send now is its own Send.
-		const feedback = new DocFeedback();
-		const send = vi.fn(async () => {});
-		feedback.send = send;
-		feedback.pendingCount = 2;
-		feedback.feedback = { open_count: 2, owner_label: 'Style', undelivered_batches: [] };
-		render({ state: { kind: 'list' }, comments: [suggestion], feedback });
-		const footer = () => document.body.querySelector<HTMLElement>('[data-doc-comments-drawer] [data-drawer-unsent]');
-		expect(footer()?.querySelector('[role="status"]')?.textContent).toBe('2 messages not sent yet · they go to Style in a few seconds.');
-		const owner = footer()!.querySelector<HTMLElement>('.drawer-footer-owner')!;
-		expect(owner.textContent).toBe('Style');
-		expect(owner.title).toBe('Style');
-		const button = footer()!.querySelector<HTMLButtonElement>('button')!;
-		expect(button.textContent?.trim()).toBe('Send now');
-		button.click();
-		expect(send).toHaveBeenCalledOnce();
-		// The measured footer wrapper is last, after the scrolling list, so the list scrolls and either footer stays pinned.
-		expect(document.body.querySelector('[data-doc-comments-drawer]')!.lastElementChild).toBe(footer()!.parentElement);
-
-		feedback.feedback = { open_count: 1, owner_label: null, undelivered_batches: [] };
-		feedback.pendingCount = 1;
-		feedback.sending = true; flushSync();
-		expect(footer()?.querySelector('[role="status"]')?.textContent).toBe('1 message not sent yet · it goes to the owner in a few seconds.');
-		expect(footer()!.querySelector('button')!.disabled).toBe(true);
-
-		// Sending from the keyboard: the footer leaves with focus in it, which lands on the drawer's heading, not the page.
-		feedback.sending = false; flushSync();
-		footer()!.querySelector('button')!.focus();
-		feedback.pendingCount = 0; flushSync();
-		expect(footer()).toBeNull();
-		await Promise.resolve();
-		expect(document.activeElement).toBe(document.body.querySelector('[data-drawer-focus-home]'));
+	it('has no Send footer: each held lane is sent from its own header or bar', () => {
+		render({ state: { kind: 'list' }, comments: [suggestion] });
+		expect(document.body.querySelector('[data-doc-comments-drawer] [data-drawer-unsent]')).toBeNull();
+		expect(document.body.querySelector('[data-doc-comments-drawer]')!.textContent).not.toContain('Send now');
 	});
 
 	it('shows no Place again footer when every unplaced comment is detached, though its card stays in the drawer', () => {

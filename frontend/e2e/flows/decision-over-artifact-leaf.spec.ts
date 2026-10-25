@@ -41,7 +41,7 @@ test('@surface:attention decision drawer stays above an open artifact leaf', asy
 	expect(seeded.ok(), await seeded.text()).toBeTruthy();
 	const artifactId = (await seeded.json()).artifact.id;
 	const comment = await request.post(`/api/artifacts/${artifactId}/comments?token=${TEST_TOKEN}`, {
-		data: { body: 'Keep this decision visible over the document.', anchor_text: 'real document', from_off: 27, to_off: 40 },
+		data: { body: 'Keep this decision visible over the document.', anchor_text: 'real document', from_off: 27, to_off: 40, delivery_policy: 'immediate' },
 	});
 	expect(comment.ok(), await comment.text()).toBeTruthy();
 	await page.addInitScript(({ threadId, artifactId, docPath }) => {

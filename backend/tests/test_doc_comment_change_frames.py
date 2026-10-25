@@ -36,7 +36,7 @@ def frames(monkeypatch):
 def _user_comment(client, artifact_id, **fields):
     return client.post(
         f"/api/artifacts/{artifact_id}/comments", params={"token": _OWNER},
-        json={"body": "Tighten this.", "anchor_text": QUOTE, "from_off": 0, "to_off": len(QUOTE), **fields},
+        json={"delivery_policy": "immediate", "body": "Tighten this.", "anchor_text": QUOTE, "from_off": 0, "to_off": len(QUOTE), **fields},
     )
 
 

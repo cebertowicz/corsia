@@ -225,6 +225,7 @@ async def agent_feedback_action(action: str, token: str, body: AgentFeedbackActi
                         author_kind="agent",
                         author_id=body.as_session_id,
                         artifact_id=artifact_id,
+                        delivery_policy=feedback_batches.IMMEDIATE,
                     )
                 undelivered = feedback_batches.undelivered_for_document(
                     connection,

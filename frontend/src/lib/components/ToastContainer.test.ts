@@ -2,7 +2,7 @@ import { get } from 'svelte/store';
 import { flushSync, mount, tick, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { toasts } from '$lib/stores/toast';
-import ToastContainer from './ToastContainer.svelte';
+import ToastContainer, { toastFlipParams } from './ToastContainer.svelte';
 
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
@@ -392,5 +392,30 @@ describe('ToastContainer leave', () => {
 		const frames = await leaveKeyframes(true);
 		expect(frames.some((frame) => 'opacity' in frame)).toBe(true);
 		expect(frames.some((frame) => 'transform' in frame)).toBe(false);
+	});
+});
+
+describe('ToastContainer glide into the freed place', () => {
+	const root = document.documentElement.style;
+
+	beforeEach(() => root.setProperty('--dur-standard', '200ms'));
+	afterEach(() => root.removeProperty('--dur-standard'));
+
+	it('glides over the standard duration token, not a fixed number', () => {
+		expect(toastFlipParams(0, 1000, false).duration).toBe(200);
+		root.setProperty('--dur-standard', '300ms');
+		expect(toastFlipParams(0, 1000, false).duration).toBe(300);
+	});
+
+	it('waits for a leaving toast to finish fading before it glides', () => {
+		expect(toastFlipParams(1100, 1000, false).delay).toBe(140);
+		expect(toastFlipParams(1000, 1000, false).delay).toBe(0);
+		expect(toastFlipParams(0, 1000, false).delay).toBe(0);
+	});
+
+	it('does not move or wait under reduced motion', () => {
+		const params = toastFlipParams(1100, 1000, true);
+		expect(params.duration).toBe(0);
+		expect(params.delay).toBe(0);
 	});
 });

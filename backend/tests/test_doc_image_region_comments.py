@@ -58,7 +58,7 @@ def _post(client, artifact_id: str, doc: Path, markdown: str, region: dict, *, o
     start = -1
     for _ in range(occurrence + 1):
         start = text.index(markdown, start + 1)
-    return client.post(_url(f"/api/artifacts/{artifact_id}/comments"), json={
+    return client.post(_url(f"/api/artifacts/{artifact_id}/comments"), json={"delivery_policy": "immediate", 
         "body": body, "region": region, "anchor_text": markdown, "from_off": start, "to_off": start + len(markdown),
     })
 
@@ -158,7 +158,7 @@ def test_a_doc_region_without_its_image_is_refused(integration_client, doc):
     artifact_id = _register(integration_client, doc)
 
     r = integration_client.post(
-        _url(f"/api/artifacts/{artifact_id}/comments"), json={"body": "x", "region": {"x": 0.1, "y": 0.1}},
+        _url(f"/api/artifacts/{artifact_id}/comments"), json={"delivery_policy": "immediate", "body": "x", "region": {"x": 0.1, "y": 0.1}},
     )
 
     assert r.status_code == 400

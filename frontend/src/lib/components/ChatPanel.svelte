@@ -3,7 +3,7 @@
 	import { get } from 'svelte/store';
 	import { token } from '$lib/stores/auth';
 	import { threads, activeThreadId, activeThread, messages, isStreaming, reasoningEffort } from '$lib/stores/threads';
-	import { activeModelId, bindActiveThreadModel, threadModelVersion } from '$lib/stores/models';
+	import { activeModelId } from '$lib/stores/models';
 	import { corsiaAgentId } from '$lib/utils/conductor';
 	import ConductorSourcesPanel from './ConductorSourcesPanel.svelte';
 	import { loadCheckpoints } from '$lib/stores/checkpoints';
@@ -11,7 +11,6 @@
 	import { hydrateSubagentThread } from '$lib/stores/subagents';
 	import { clearWarmKeysForThread, warmActiveThread } from '$lib/chatWarm';
 	import { subscribeChatPanelEvents } from './chatPanelEvents';
-	import { startPresence, stopPresence } from '$lib/ws/presence';
 	import { hydrateFetchedMessages, mergeFetchedHistoryRows } from '$lib/messageHistory';
 	import { adoptThreadSnapshot, retainDisplayedRows } from '$lib/stores/displayedThreads';
 	import { beginThreadOpen, failThreadOpen, markFirstPageRendered, type ThreadOpenSource } from '$lib/openTimingRuntime';
@@ -27,6 +26,8 @@
 	import MobileScrollFab from './MobileScrollFab.svelte';
 	import AttentionDock from './attention/AttentionDock.svelte';
 	import ChatAttentionStack from './attention/ChatAttentionStack.svelte';
+	import HeldDocFeedbackControl from './attention/HeldDocFeedbackControl.svelte';
+	import ChatThreadBindings from './ChatThreadBindings.svelte';
 	import { toastAnchorSurface } from '$lib/stores/toastAnchor';
 	import PlanDrawerControl from './plans/PlanDrawerControl.svelte';
 	import { isMobile } from '$lib/stores/viewport';
@@ -47,11 +48,14 @@
 		onOpenLightbox,
 		onAutoCreateThread,
 		onOpenDocuments = () => {},
+		visibleDocumentArtifactId = null,
 	}: {
 		isDraggingOver?: boolean;
 		onOpenLightbox: (url: string) => void;
 		/** Where an external review in the attention dock hands off. */
 		onOpenDocuments?: (documentId?: string) => void;
+		/** The document whose own header Send is on screen, so this chat does not offer a second sender for it. */
+		visibleDocumentArtifactId?: string | null;
 		onAutoCreateThread?: () => Promise<void>;
 	} = $props();
 	let messagesEl = $state<HTMLDivElement | undefined>(undefined);
@@ -270,24 +274,7 @@
 		await fetchThreadMessages(sid);
 	}
 
-	// The main panel is the sole view that reports its displayed thread.
-	$effect(() => {
-		const threadId = $activeThreadId;
-		if (threadId) startPresence(threadId);
-		else stopPresence();
-	});
-	onDestroy(stopPresence);
-
-	// Every navigation path binds the composer to the opened thread's saved model.
-	$effect(() => {
-		const id = $activeThreadId;
-		void $threadModelVersion; // a worker's model arrives as a read after the thread opens
-		if (id) bindActiveThreadModel(id, $threads);
-	});
-	$effect(() => {
-		if ($activeThreadId && $token)
-			void loadCheckpoints($activeThreadId, $token).catch(() => null);
-	});
+	// Presence, model selection, and checkpoints are chat-wide bindings, outside transcript paging.
 	$effect(() => {
 		const unsubscribeEvents = subscribeChatPanelEvents({
 			activeThreadId,
@@ -325,6 +312,7 @@
 	});
 </script>
 <div class="chat-shell">
+	<ChatThreadBindings />
 	<div class="chat-content" use:toastAnchorSurface>
 		<MessageList
 			bind:this={messageListRef}
@@ -380,6 +368,9 @@
 					onOpenChild={openPlanSubagent}
 					onOpenLegacyDiscussion={openPlanDiscussion}
 				/>
+			{/if}
+			{#if $activeThreadId}
+				<HeldDocFeedbackControl threadId={$activeThreadId} visibleArtifactId={visibleDocumentArtifactId} />
 			{/if}
 		</ChatAttentionStack>
 		<InputBar

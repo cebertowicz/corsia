@@ -10,7 +10,7 @@ import pytest
 from automation.continuation import runner
 from automation.continuation.sources.feedback_batches import FeedbackBatchSource
 from doc_feedback_helpers import add_comment, batches, seed_document, seed_thread
-from doceditor import feedback_batches
+from doceditor import feedback_batch_edits, feedback_batches
 from infra.database import get_db, write_transaction
 from plans.feedback_nodes import PROVENANCE
 
@@ -57,7 +57,7 @@ async def test_due_user_feedback_notifies_the_open_document_canvas(isolated_db, 
         seed_thread(db, "idle-owner")
         artifact_id = seed_document(db, "idle-owner")
         with write_transaction(db, scope="test_user_edit_feedback") as connection:
-            feedback_batches.record_edit(
+            feedback_batch_edits.record_edit(
                 connection,
                 artifact_id=artifact_id,
                 recipient_id="idle-owner",

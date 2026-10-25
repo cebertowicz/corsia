@@ -48,7 +48,7 @@ async def invoke(kind, scope, entry, identifier, quote='b'):
     app.include_router(doc_comments.router)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://test') as client:
         response = await client.post(f'/api/artifacts/{entry.artifact_id}/comments', params={'token': OWNER_TOKEN},
-            json=dict(body='anchor evidence', anchor_text=quote, from_off=2, to_off=3,
+            json=dict(delivery_policy="immediate", body='anchor evidence', anchor_text=quote, from_off=2, to_off=3,
                       live_capture=True, client_id=identifier))
         assert response.status_code == 200, response.text
         return response.json()

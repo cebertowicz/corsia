@@ -107,7 +107,7 @@ async def test_create_validation_is_one_rule_set_across_adapters(integration_cli
         if fields.get("quote"):
             user_fields.update(anchor_text=fields["quote"], from_off=0, to_off=len(fields["quote"]))
         user = integration_client.post(
-            f"/api/artifacts/{artifact_id}/comments?token={_OWNER}", json={"body": "", **user_fields})
+            f"/api/artifacts/{artifact_id}/comments?token={_OWNER}", json={"delivery_policy": "immediate", "body": "", **user_fields})
         assert (user.status_code, user.json()["detail"]) == (400, message), fields
 
     deletion = await _suggest(owner, doc, replacement="")
@@ -240,13 +240,13 @@ async def test_rejected_suggestion_reopens_and_accepted_one_cannot(integration_c
     again = _user_decide(integration_client, rejected["id"], "accept")
     assert (again.status_code, again.json()["detail"].startswith("This suggestion was already rejected")) == (409, True)
 
-    reopened = integration_client.patch(f"/api/comments/{rejected['id']}?token={_OWNER}", json={"resolved": False})
+    reopened = integration_client.patch(f"/api/comments/{rejected['id']}?token={_OWNER}", json={"delivery_policy": "document-held", "resolved": False})
     assert reopened.status_code == 200, reopened.text
     row = reopened.json()["comment"]
     assert (row["resolved"], row["decision"], row["decided_by"], row["decided_at"]) == (0, None, None, None)
 
     json.loads(await _tool_decide(owner, rejected["id"], "accept"))
-    cannot = integration_client.patch(f"/api/comments/{rejected['id']}?token={_OWNER}", json={"resolved": False})
+    cannot = integration_client.patch(f"/api/comments/{rejected['id']}?token={_OWNER}", json={"delivery_policy": "document-held", "resolved": False})
     assert cannot.status_code == 409
     from tools.documents import DocCommentUpdateTool
     tool = await DocCommentUpdateTool().execute(comment_id=rejected["id"], resolved=False, _thread_id=owner)

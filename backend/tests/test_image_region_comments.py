@@ -45,7 +45,7 @@ def _register(client, path: Path, thread_id: str | None = None) -> str:
 
 
 def _region_comment(client, artifact_id: str, region: dict, body: str = "Fix this.") -> dict:
-    r = client.post(_url(f"/api/artifacts/{artifact_id}/comments"), json={"body": body, "region": region})
+    r = client.post(_url(f"/api/artifacts/{artifact_id}/comments"), json={"delivery_policy": "immediate", "body": body, "region": region})
     assert r.status_code == 200, r.text
     return r.json()["comment"]
 
@@ -89,7 +89,7 @@ def test_numbers_are_per_image_and_never_reused_after_resolve(integration_client
     assert [first["region_number"], second["region_number"], third["region_number"]] == [1, 2, 3]
     assert elsewhere["region_number"] == 1
     reply = integration_client.post(
-        _url(f"/api/artifacts/{artifact_id}/comments"), json={"body": "Agreed.", "parent_id": first["id"]},
+        _url(f"/api/artifacts/{artifact_id}/comments"), json={"delivery_policy": "immediate", "body": "Agreed.", "parent_id": first["id"]},
     ).json()["comment"]
     assert reply["region_number"] is None
     other.unlink(missing_ok=True)
@@ -108,7 +108,7 @@ def test_numbers_are_per_image_and_never_reused_after_resolve(integration_client
 def test_malformed_region_requests_are_refused(integration_client, image_file, body, detail):
     artifact_id = _register(integration_client, image_file)
 
-    r = integration_client.post(_url(f"/api/artifacts/{artifact_id}/comments"), json=body)
+    r = integration_client.post(_url(f"/api/artifacts/{artifact_id}/comments"), json={**body, "delivery_policy": "immediate"})
 
     assert r.status_code in (400, 422), r.text
     assert detail in r.text.lower()
@@ -120,7 +120,7 @@ def test_region_on_a_text_document_is_refused(integration_client, integration_wo
     artifact_id = _register(integration_client, doc)
 
     r = integration_client.post(
-        _url(f"/api/artifacts/{artifact_id}/comments"), json={"body": "x", "region": {"x": 0.1, "y": 0.1}},
+        _url(f"/api/artifacts/{artifact_id}/comments"), json={"delivery_policy": "immediate", "body": "x", "region": {"x": 0.1, "y": 0.1}},
     )
 
     assert r.status_code == 400

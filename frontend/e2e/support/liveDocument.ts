@@ -96,7 +96,7 @@ export async function createComment(request: APIRequestContext, document: LiveDo
 	for (let index = 0; index <= occurrence; index += 1) from = document.body.indexOf(anchorText, from + 1);
 	expect(from, `setup: occurrence ${occurrence} of ${anchorText}`).toBeGreaterThanOrEqual(0);
 	const created = await request.post(`/api/artifacts/${document.artifactId}/comments?token=${encodeURIComponent(TEST_TOKEN)}`, {
-		data: { body, anchor_text: anchorText, from_off: from, to_off: from + anchorText.length },
+		data: { body, anchor_text: anchorText, from_off: from, to_off: from + anchorText.length, delivery_policy: 'immediate' },
 	});
 	expect(created.ok(), await created.text()).toBeTruthy();
 }
