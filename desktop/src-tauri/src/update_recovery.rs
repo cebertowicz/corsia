@@ -60,38 +60,46 @@ pub(crate) trait RecoveryHost {
 }
 
 /// Runs one recovery start. Every refusal comes before any effect; the update lock, taken without waiting, is held
-/// until the startup proof answers.
-pub(crate) fn recover(
+/// until the startup proof answers. The initialized local session is read only after that lock is acquired, so an
+/// ordinary start still waiting for it cannot leave a historical refusal behind.
+pub(crate) fn recover<F>(
     intent: RecoveryIntent,
     shell: &Mutex<ShellState>,
     bundle: &Path,
     state_dir: &Path,
-    local_session: bool,
+    local_session: F,
     url: &str,
     host: &impl RecoveryHost,
-) -> RecoveryAnswer {
+) -> RecoveryAnswer
+where
+    F: FnOnce() -> bool,
+{
     let shell_state = || shell.lock().unwrap_or_else(PoisonError::into_inner);
-    if !local_session {
+    let _update = match app_paths::try_lock_update_in_existing(state_dir) {
+        Ok(Some(lock)) => lock,
+        Ok(None) => return RecoveryAnswer::Deferred,
+        Err(error) => {
+            log::error!("a recovery start could not take the update lock: {error}");
+            return RecoveryAnswer::Unavailable;
+        }
+    };
+    if !local_session() {
         return RecoveryAnswer::Unavailable;
     }
-    // Take one short snapshot of the shell state. Calling `shell_state` again while this guard is live would deadlock.
-    let (automatic_recovery, manual_allowed, manual_offer_allowed) = {
+    // The current shell state is read under the same lock. It is checked again before an effect because pairing can
+    // change independently of the updater lock.
+    let (expected, manual_available) = {
         let state = shell_state();
-        (
-            state.automatic_recovery().cloned(),
-            state.allows_manual_recovery(),
-            state.allows_manual_recovery_offer(),
-        )
-    };
-    let (expected, manual_available) = match intent {
-        RecoveryIntent::Automatic => match automatic_recovery {
-            Some(replacement) if replacement.bundle == bundle => (Some(replacement), false),
-            Some(_) => return RecoveryAnswer::Unavailable,
-            None if manual_offer_allowed => (None, true),
-            None => return RecoveryAnswer::Unavailable,
-        },
-        RecoveryIntent::Manual if manual_allowed => (None, false),
-        RecoveryIntent::Manual => return RecoveryAnswer::Unavailable,
+        match intent {
+            RecoveryIntent::Automatic => match state.automatic_recovery().cloned() {
+                Some(replacement) if replacement.bundle == bundle => (Some(replacement), false),
+                Some(_) => return RecoveryAnswer::Unavailable,
+                None if state.allows_manual_recovery_offer() => (None, true),
+                None => return RecoveryAnswer::Unavailable,
+            },
+            RecoveryIntent::Manual if state.allows_manual_recovery() => (None, false),
+            RecoveryIntent::Manual => return RecoveryAnswer::Unavailable,
+        }
     };
     let still_installed = || {
         expected.as_ref().is_none_or(|replacement| {
@@ -101,14 +109,6 @@ pub(crate) fn recover(
     if !still_installed() {
         return RecoveryAnswer::Unavailable;
     }
-    let _update = match app_paths::try_lock_update_in_existing(state_dir) {
-        Ok(Some(lock)) => lock,
-        Ok(None) => return RecoveryAnswer::Deferred,
-        Err(error) => {
-            log::error!("a recovery start could not take the update lock: {error}");
-            return RecoveryAnswer::Unavailable;
-        }
-    };
     // A missing, foreign or mismatched agent ends the automatic start for good, decided under the lock.
     match host.registered_agent() {
         Ok((ServiceStatus::Enabled, details)) if service_management::is_exactly_this_agent(&details, bundle) => {}
@@ -304,7 +304,7 @@ mod tests {
     }
 
     fn run(intent: RecoveryIntent, shell: &Mutex<ShellState>, fixture: &Fixture, host: &Spy) -> RecoveryAnswer {
-        recover(intent, shell, &fixture.bundle, &fixture.state, true, "http://127.0.0.1:47895", host)
+        recover(intent, shell, &fixture.bundle, &fixture.state, || true, "http://127.0.0.1:47895", host)
     }
 
     /// A test that takes the update lock runs in a process of its own, as `app_paths`' lock tests do: a concurrent
@@ -379,6 +379,83 @@ mod tests {
     }
 
     #[test]
+    fn a_pending_start_is_read_only_after_the_lock_then_can_offer_manual_recovery() {
+        if !alone("a_pending_start_is_read_only_after_the_lock_then_can_offer_manual_recovery") {
+            return;
+        }
+        let fixture = fixture();
+        let shell = Mutex::new(ShellState::default());
+        let host = spy(&fixture);
+        let session_initialized = Cell::new(false);
+        let session_reads = Cell::new(0);
+        let updater = app_paths::try_lock_update_in_existing(&fixture.state).unwrap().unwrap();
+        assert_eq!(
+            recover(
+                RecoveryIntent::Automatic,
+                &shell,
+                &fixture.bundle,
+                &fixture.state,
+                || {
+                    session_reads.set(session_reads.get() + 1);
+                    session_initialized.get()
+                },
+                "u",
+                &host,
+            ),
+            RecoveryAnswer::Deferred
+        );
+        assert_eq!(session_reads.get(), 0, "a busy update lock read the provisional session");
+        assert_eq!(host.effects(), 0);
+        drop(updater);
+        session_initialized.set(true);
+        assert_eq!(
+            recover(
+                RecoveryIntent::Automatic,
+                &shell,
+                &fixture.bundle,
+                &fixture.state,
+                || {
+                    session_reads.set(session_reads.get() + 1);
+                    session_initialized.get()
+                },
+                "u",
+                &host,
+            ),
+            RecoveryAnswer::ManualAvailable
+        );
+        assert_eq!(session_reads.get(), 1);
+        assert_eq!(host.effects(), 0);
+    }
+
+    #[test]
+    fn a_free_lock_with_no_current_session_refuses_without_an_effect() {
+        if !alone("a_free_lock_with_no_current_session_refuses_without_an_effect") {
+            return;
+        }
+        let fixture = fixture();
+        let shell = Mutex::new(ShellState::default());
+        let host = spy(&fixture);
+        let session_reads = Cell::new(0);
+        assert_eq!(
+            recover(
+                RecoveryIntent::Automatic,
+                &shell,
+                &fixture.bundle,
+                &fixture.state,
+                || {
+                    session_reads.set(session_reads.get() + 1);
+                    false
+                },
+                "u",
+                &host,
+            ),
+            RecoveryAnswer::Unavailable
+        );
+        assert_eq!(session_reads.get(), 1);
+        assert_eq!(host.effects(), 0);
+    }
+
+    #[test]
     fn without_a_native_observation_automatic_recovery_only_offers_an_exact_manual_start() {
         if !alone("without_a_native_observation_automatic_recovery_only_offers_an_exact_manual_start") {
             return;
@@ -396,15 +473,15 @@ mod tests {
     }
 
     #[test]
-    fn a_replacement_seen_outside_an_initialized_local_session_does_not_arm() {
+    fn a_past_missing_session_does_not_deny_a_current_initialized_manual_offer() {
         let fixture = fixture();
         let mut shell = ShellState::default();
         shell.observe_install(&fixture.bundle, LAUNCHED, Some(INSTALLED), false);
         let host = spy(&fixture);
-        assert_eq!(run(RecoveryIntent::Automatic, &Mutex::new(shell), &fixture, &host), RecoveryAnswer::Unavailable);
+        assert_eq!(run(RecoveryIntent::Automatic, &Mutex::new(shell), &fixture, &host), RecoveryAnswer::ManualAvailable);
         let armed = observed(&fixture, Some(INSTALLED));
         assert_eq!(
-            recover(RecoveryIntent::Automatic, &armed, &fixture.bundle, &fixture.state, false, "u", &host),
+            recover(RecoveryIntent::Automatic, &armed, &fixture.bundle, &fixture.state, || false, "u", &host),
             RecoveryAnswer::Unavailable
         );
         assert_eq!(host.effects(), 0);
@@ -428,10 +505,11 @@ mod tests {
         assert_eq!(run(RecoveryIntent::Automatic, &shell, &fixture, &host), RecoveryAnswer::Unavailable);
         *host.installed.borrow_mut() = None;
         assert_eq!(run(RecoveryIntent::Automatic, &shell, &fixture, &host), RecoveryAnswer::Unavailable);
-        // A mismatch is not deferred behind a held lock as if a start were still owed.
+        // A busy update lock defers before any live-session or installed-generation read; the unchanged observation
+        // remains unspent until the current updater releases it.
         *host.installed.borrow_mut() = Some(LAUNCHED.into());
         let updater = app_paths::try_lock_update_in_existing(&fixture.state).unwrap().unwrap();
-        assert_eq!(run(RecoveryIntent::Automatic, &shell, &fixture, &host), RecoveryAnswer::Unavailable);
+        assert_eq!(run(RecoveryIntent::Automatic, &shell, &fixture, &host), RecoveryAnswer::Deferred);
         drop(updater);
         // Observed at another path than this app's.
         *host.installed.borrow_mut() = Some(INSTALLED.into());
@@ -572,7 +650,7 @@ mod tests {
         let host = spy(&fixture);
         let missing = fixture.state.join("gone");
         assert_eq!(
-            recover(RecoveryIntent::Automatic, &shell, &fixture.bundle, &missing, true, "u", &host),
+            recover(RecoveryIntent::Automatic, &shell, &fixture.bundle, &missing, || true, "u", &host),
             RecoveryAnswer::Unavailable
         );
         assert!(!missing.exists());

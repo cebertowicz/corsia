@@ -1898,6 +1898,15 @@ fn finish_recovery<R: tauri::Runtime>(
     answer.and_then(|answer| answer).map_err(|error| show_recovery_failure(app, error))
 }
 
+/// Uses the initialized service folder when present, otherwise the same canonical folder ordinary startup resolves.
+/// The result only identifies the existing update lock and never initializes or repairs service state.
+fn recovery_app_dir(
+    current: Option<PathBuf>,
+    resolve_default: impl FnOnce() -> Result<PathBuf, String>,
+) -> Result<PathBuf, String> {
+    current.map(Ok).unwrap_or_else(resolve_default)
+}
+
 /// A recovery start from the startup shell's update screen. Typed recovery answers leave the retained launch answer
 /// alone. An exceptional wrapper error instead becomes the shell's retained failure and returns there, so its existing
 /// page-load hook owns the failure card.
@@ -1905,9 +1914,10 @@ async fn recover_local_service(app: tauri::AppHandle, intent: update_recovery::R
     let recovering = app.clone();
     let answer = tauri::async_runtime::spawn_blocking(move || {
         let service = recovering.state::<AppServiceState>();
-        let Some(app_dir) = service.app_dir.lock().unwrap_or_else(PoisonError::into_inner).clone() else {
-            return Ok(update_recovery::RecoveryAnswer::Unavailable);
-        };
+        let app_dir = recovery_app_dir(
+            service.app_dir.lock().unwrap_or_else(PoisonError::into_inner).clone(),
+            || default_app_dir(&recovering),
+        )?;
         let bundle = update_stage::running_bundle()?;
         let port = lifecycle::service_port(&recovering, &service);
         let answer = update_recovery::recover(
@@ -1915,7 +1925,7 @@ async fn recover_local_service(app: tauri::AppHandle, intent: update_recovery::R
             &recovering.state::<RemoteRuntime>().shell,
             &bundle,
             &app_paths::state_dir_for(&app_dir)?,
-            true,
+            || service.app_dir.lock().unwrap_or_else(PoisonError::into_inner).is_some(),
             &service_url(port),
             &update_recovery::SystemRecovery { port, app_dir: &app_dir },
         );
@@ -2923,6 +2933,18 @@ mod tests {
         for effect in ["adoption::recover_on_launch(", "start_fresh::recover_on_launch(", "start_over_if_unfinished(", "unfinished_setup::mark(", "first_run::apply("] {
             assert!(lock < start.find(effect).unwrap(), "{effect} runs before the update lock");
         }
+    }
+
+    #[test]
+    fn recovery_without_an_initialized_session_uses_the_ordinary_canonical_folder() {
+        let canonical = PathBuf::from("/Applications/CORSIA.app/Contents/Resources/corsia");
+        assert_eq!(recovery_app_dir(None, || Ok(canonical.clone())).unwrap(), canonical);
+
+        let initialized = PathBuf::from("/existing/corsia");
+        assert_eq!(
+            recovery_app_dir(Some(initialized.clone()), || Err("the default folder was read".into())).unwrap(),
+            initialized
+        );
     }
 
     #[test]

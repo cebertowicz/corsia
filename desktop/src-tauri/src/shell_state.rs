@@ -28,9 +28,6 @@ pub struct ShellState {
     replacement: Option<Replacement>,
     /// Replaced generations whose automatic start was used or invalidated; seeing one again never re-arms it.
     spent: BTreeSet<String>,
-    /// An automatic request with no candidate may offer manual recovery only until an observer says this shell was not
-    /// in an initialized local session. This is in-memory shell state, not a page-provided grant.
-    automatic_manual_offer_allowed: bool,
 }
 
 /// The installed app the observer saw replace the one this process launched from: its path and generation.
@@ -50,7 +47,7 @@ impl ShellState {
         let state = saved.map_or(LaunchState::Local, |remote| LaunchState::Connecting {
             name: remote.name.clone(),
         });
-        Self { state, replacement: None, spent: BTreeSet::new(), automatic_manual_offer_allowed: true }
+        Self { state, replacement: None, spent: BTreeSet::new() }
     }
 
     /// One reading of the installed app by the replacement observer. A generation other than the launched one, seen
@@ -58,9 +55,6 @@ impl ShellState {
     /// generation coming back, a different replacement, or leaving local mode invalidates it for good. An install that
     /// can't be read changes nothing: the start re-reads it before any effect.
     pub fn observe_install(&mut self, bundle: &Path, launched: &str, installed: Option<&str>, local_session: bool) {
-        if !local_session {
-            self.automatic_manual_offer_allowed = false;
-        }
         if !self.is_local_start() {
             self.forget_replacement();
             return;
@@ -106,7 +100,7 @@ impl ShellState {
     /// Whether an automatic request without an observed replacement may offer that existing manual recovery. An
     /// automatic replacement already spent or invalidated stays unavailable; it is not a fresh no-observation case.
     pub fn allows_manual_recovery_offer(&self) -> bool {
-        self.allows_manual_recovery() && self.automatic_manual_offer_allowed && self.spent.is_empty()
+        self.allows_manual_recovery() && self.spent.is_empty()
     }
 
     fn forget_replacement(&mut self) {
