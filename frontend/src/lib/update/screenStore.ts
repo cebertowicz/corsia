@@ -1,6 +1,7 @@
 import { tick } from 'svelte';
 import { derived, get, writable } from 'svelte/store';
 import { shellInfo } from '$lib/remoteShell';
+import { toasts } from '$lib/stores/toast';
 import { failureCopy, failureFromOperation, failureFromVerdict, type FailureCopy } from './failureCopy';
 import { isFailedOperation, isInFlight, isResolvedFailure, type UpdateFailureCode, type UpdateOperation } from './model';
 import { CREEP_STALE_MS, drainCount, NO_PROCESS_WINDOW_MS, ProgressModel, remoteEstimate, STEP_LABEL, TAKING_LONGER_MS, type ProgressInput, type StepId } from './screenProgress';
@@ -67,6 +68,12 @@ function activeOperation(operation: UpdateOperation | null | undefined): operati
 	// The existing holding phase stays in the toast. The screen begins only when the operation enters restart work.
 	return operation.phase === 'steering' || operation.phase === 'draining' || operation.phase === 'ready'
 		|| operation.phase === 'restarting' || operation.phase === 'resuming' || operation.phase === 'verifying';
+}
+
+/** Only these durable results prove the restart began and failed; preparation failures stay in the toast and Settings. */
+function failedAfterRestart(operation: UpdateOperation | null | undefined): boolean {
+	return operation?.failure_code === 'rolled_back' || operation?.failure_code === 'version_unverified'
+		|| operation?.failure_code === 'wrong_version_running';
 }
 
 function httpStep(operation: UpdateOperation | null): StepId {
@@ -138,7 +145,7 @@ export function tickUpdateScreen(now = Date.now()): void {
 		if (operation?.operation_id === completedOperationId) return;
 		if (operation && completedOperationId !== null) completedOperationId = null;
 		const terminalFailure = operation?.kind === 'update' && isFailedOperation(operation)
-			&& !isResolvedFailure(operation) && !operation.outcome_seen_at && operation.failure_code !== 'restart_pending'
+			&& failedAfterRestart(operation) && !isResolvedFailure(operation) && !operation.outcome_seen_at
 			&& operation.operation_id !== dismissedFailureOperationId;
 		if (!activeOperation(operation) && !terminalFailure) return;
 		if (operation.operation_id !== dismissedFailureOperationId) dismissedFailureOperationId = null;
@@ -193,8 +200,11 @@ export function tickUpdateScreen(now = Date.now()): void {
 export function dismissUpdateScreen(): void {
 	const view = get(updateScreenView);
 	if (!latch || view?.mode !== 'failed' || view.serviceDown) return;
+	const operation = get(updateStatus)?.operation;
 	dismissedFailureOperationId = latch.operationId;
 	updateFailureVerdict.set(null);
+	// The store owns the keyed terminal notice. It is this outcome only while the current durable row still names it.
+	if (operation?.operation_id === latch.operationId && isFailedOperation(operation)) toasts.unpin('update');
 	void markOutcomeSeen(latch.operationId);
 	resetUpdateScreen(true);
 }

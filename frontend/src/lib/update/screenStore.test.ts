@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { get } from 'svelte/store';
 import { token } from '$lib/stores/auth';
+import { toasts } from '$lib/stores/toast';
 import { clearStartupProgress, refreshStartupProgress, startupProgress } from './startupProgress';
 import { CREEP_STALE_MS } from './screenProgress';
 import { continueHandedOverScreen, dismissUpdateScreen, EXIT_HOLD_MS, handOverScreen, startUpdateScreen, stopUpdateScreen, tickUpdateScreen, updateScreenView } from './screenStore';
-import { resetUpdateStoreForTests, updateConfirmed, updateStatus, updateUnreachable, type UpdateStatus } from './store';
+import { loadUpdateStatus, resetUpdateStoreForTests, updateConfirmed, updateStatus, updateUnreachable, type UpdateStatus } from './store';
 import type { UpdateOperation } from './model';
 
 type ShellWindow = Window & {
@@ -171,20 +172,16 @@ describe('update screen store', () => {
 		expect(get(updateScreenView)).toMatchObject({ estimated: true });
 	});
 
-	it('keeps a dismissed terminal outcome dismissed and completes only for the matching operation', () => {
-		updateStatus.set(status(inFlight()));
-		tickUpdateScreen(0);
-		updateUnreachable.set(false);
-		updateStatus.set(status({ ...inFlight(), status: 'failed', failure_code: 'fetch_failed', settled_at: '2026-10-13T00:00:00Z' }));
-		updateConfirmed.set({ operationId: 'another-update', version: '2026.10.99' });
+	it.each(['fetch_failed', 'disk_space', 'launch_failed', null] as const)('keeps %s preparation or unknown failure out of the restart screen', (failureCode) => {
+		updateStatus.set(status({ ...inFlight(), status: 'failed', failure_code: failureCode, settled_at: '2026-10-13T00:00:00Z' }));
+		tickUpdateScreen(1_000);
+		expect(get(updateScreenView)).toBeNull();
+	});
+
+	it('keeps post-restart failures on the restart screen and completes only for the matching operation', () => {
+		updateStatus.set(status({ ...inFlight(), status: 'failed', failure_code: 'rolled_back', settled_at: '2026-10-13T00:00:00Z' }));
 		tickUpdateScreen(1_000);
 		expect(get(updateScreenView)?.mode).toBe('failed');
-		updateConfirmed.set(null);
-
-		dismissUpdateScreen();
-		expect(get(updateScreenView)).toBeNull();
-		tickUpdateScreen(2_000);
-		expect(get(updateScreenView)).toBeNull();
 
 		updateStatus.set(status(inFlight('update-2')));
 		tickUpdateScreen(3_000);
@@ -198,6 +195,33 @@ describe('update screen store', () => {
 		vi.advanceTimersByTime(EXIT_HOLD_MS);
 		tickUpdateScreen(4_003);
 		expect(get(updateScreenView)).toBeNull();
+	});
+
+	it('dismisses its matching terminal screen and toast together', async () => {
+		const response = status({ ...inFlight('update-1'), status: 'failed', failure_code: 'rolled_back', settled_at: '2026-10-13T00:00:00Z' });
+		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => response })));
+
+		await loadUpdateStatus();
+		expect(get(updateScreenView)?.mode).toBe('failed');
+		expect(get(toasts).find((toast) => toast.pinned?.key === 'update')?.type).toBe('error');
+		dismissUpdateScreen();
+		expect(get(updateScreenView)).toBeNull();
+		expect(get(toasts).find((toast) => toast.pinned?.key === 'update')).toBeUndefined();
+	});
+
+	it('does not dismiss a newer operation toast from a stale terminal screen', async () => {
+		const first = status({ ...inFlight('update-1'), status: 'failed', failure_code: 'rolled_back', settled_at: '2026-10-13T00:00:00Z' });
+		const next = status({ ...inFlight('update-2'), status: 'failed', failure_code: 'rolled_back', settled_at: '2026-10-13T00:01:00Z' });
+		let response = first;
+		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => response })));
+
+		await loadUpdateStatus();
+		response = next;
+		await loadUpdateStatus();
+		expect(get(updateScreenView)?.mode).toBe('failed');
+		expect(get(toasts).find((toast) => toast.pinned?.key === 'update')?.type).toBe('error');
+		dismissUpdateScreen();
+		expect(get(toasts).find((toast) => toast.pinned?.key === 'update')?.type).toBe('error');
 	});
 
 	describe('a screen handed between pages', () => {
@@ -247,6 +271,19 @@ describe('update screen store', () => {
 			await refreshStartupProgress();
 			tickUpdateScreen(longerAt);
 			expect(get(updateScreenView)).toMatchObject({ mode: 'longer', percent: before.percent });
+		});
+
+		it('keeps a latched launch failure across the shell handoff', () => {
+			updateStatus.set(status(inFlight()));
+			tickUpdateScreen(1_000);
+			updateStatus.set(status({ ...inFlight(), status: 'failed', failure_code: 'launch_failed', settled_at: '2026-10-13T00:00:00Z' }));
+			tickUpdateScreen(1_001);
+			const handoff = handOverScreen('dark', '/');
+			expect(handoff?.failure).toMatchObject({ code: 'launch_failed' });
+
+			freshPage(true);
+			continueHandedOverScreen(handoff!, true);
+			expect(get(updateScreenView)).toMatchObject({ mode: 'failed', failure: { title: "Update didn't finish" }, serviceDown: true });
 		});
 
 		it('continues back on the service page only for the same operation, then confirms and leaves', async () => {

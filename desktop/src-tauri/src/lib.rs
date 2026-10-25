@@ -759,6 +759,24 @@ fn register_or_report_status(port: u16) -> Result<service_management::ServiceSta
     service_management::ensure_registered_from_app(|| operation_is_active(port))
 }
 
+/// Attach to the recorded local service only while it proves an update operation is still active and it is healthy.
+/// This path reads the existing record and service only; every unavailable or unproven case continues to the locked start.
+fn attach_healthy_active_service<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    service: &AppServiceState,
+    app_dir: &Path,
+) -> Result<Option<ServiceStartup>, String> {
+    let Some(port) = first_run::recorded_port(app_dir) else {
+        return Ok(None);
+    };
+    if operation_is_active(port).ok() != Some(true) || !probe_health(port) {
+        return Ok(None);
+    }
+    *service.app_dir.lock().map_err(|_| "service state is unavailable")? = Some(app_dir.to_path_buf());
+    grant_local_service_origin(app, service, port)?;
+    Ok(Some(ServiceStartup::Ready { url: service_url(port) }))
+}
+
 fn start_service<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     service: &AppServiceState,
@@ -766,8 +784,19 @@ fn start_service<R: tauri::Runtime>(
     if running_from_disk_image()? {
         return Ok(ServiceStartup::DiskImage);
     }
-    let app_dir = default_app_dir(app)?;
-    // An update holds its lock from stopping the service until the new app is proven or rolled back, so a start waits
+    start_service_in(app, service, default_app_dir(app)?)
+}
+
+/// Start from an already-resolved app folder. The public startup wrapper resolves that folder once before this path.
+fn start_service_in<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    service: &AppServiceState,
+    app_dir: PathBuf,
+) -> Result<ServiceStartup, String> {
+    if let Some(startup) = attach_healthy_active_service(app, service, &app_dir)? {
+        return Ok(startup);
+    }
+    // An update holds its lock before draining until the new app is proven or rolled back, so a start waits
     // for it instead of starting either app in the middle. A state root that can't be resolved refuses the start here,
     // before anything is recovered or written.
     let _update = app_paths::wait_for_update_lock(&app_paths::state_dir_for(&app_dir)?)?;
@@ -2926,13 +2955,135 @@ mod tests {
         }
     }
 
-    #[test]
-    fn a_start_takes_the_update_lock_before_its_first_effect_and_refuses_an_unresolved_state_root() {
-        let start = include_str!("lib.rs").split("\nfn start_service<").nth(1).unwrap();
-        let lock = start.find("app_paths::wait_for_update_lock(&app_paths::state_dir_for(&app_dir)?)?").expect("the start's lock");
-        for effect in ["adoption::recover_on_launch(", "start_fresh::recover_on_launch(", "start_over_if_unfinished(", "unfinished_setup::mark(", "first_run::apply("] {
-            assert!(lock < start.find(effect).unwrap(), "{effect} runs before the update lock");
+    #[derive(Clone, Copy, Debug)]
+    enum ProofReply { Active, Inactive, Unknown, Unhealthy }
+
+    fn proof_server(reply: ProofReply) -> (u16, std::sync::Arc<AtomicBool>, thread::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let stopped = std::sync::Arc::new(AtomicBool::new(false));
+        let stop = stopped.clone();
+        let worker = thread::spawn(move || while !stop.load(Ordering::Acquire) {
+            match listener.accept() {
+                Ok((mut stream, _)) => {
+                    let mut request = [0; 512];
+                    let read = stream.read(&mut request).unwrap_or(0);
+                    let operation = String::from_utf8_lossy(&request[..read]).contains("/api/system/operation-active");
+                    let (status, body) = if operation {
+                        match reply {
+                            ProofReply::Active | ProofReply::Unhealthy => ("200 OK", r#"{"active":true}"#),
+                            ProofReply::Inactive => ("200 OK", r#"{"active":false}"#),
+                            ProofReply::Unknown => ("200 OK", "{}"),
+                        }
+                    } else if matches!(reply, ProofReply::Unhealthy) {
+                        ("503 Service Unavailable", "")
+                    } else {
+                        ("200 OK", "")
+                    };
+                    let response = format!("HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+                    let _ = stream.write_all(response.as_bytes());
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => thread::sleep(Duration::from_millis(1)),
+                Err(error) => panic!("proof server failed: {error}"),
+            }
+        });
+        (port, stopped, worker)
+    }
+
+    fn recorded_service(folder: &Path, state: &Path, port: u16) {
+        fs::create_dir_all(folder).unwrap();
+        fs::create_dir_all(state).unwrap();
+        fs::write(folder.join("service.json"), format!(r#"{{"state_dir":"{}","port":{port}}}"#, state.display())).unwrap();
+    }
+
+    fn test_app() -> tauri::App<tauri::test::MockRuntime> {
+        tauri::test::mock_builder().build(generated_context()).unwrap()
+    }
+
+    /// The held lock and server live in the parent test process. The child starts with a disposable HOME so MockRuntime
+    /// resolves the production wrapper's default app folder there, while its bounded timeout prevents an old lock-first
+    /// implementation from hanging the suite.
+    fn alone_at_home(name: &str, home: &Path) -> bool {
+        if std::env::var_os("CORSIA_START_SERVICE_ALONE").is_some() {
+            return true;
         }
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", name, "--test-threads=1"])
+            .env("CORSIA_START_SERVICE_ALONE", "1")
+            .env("HOME", home)
+            .env_remove(app_paths::UPDATE_LOCK_FD_VARIABLE)
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(output.status.success() && stdout.contains("1 passed"), "{stdout}{}", String::from_utf8_lossy(&output.stderr));
+        false
+    }
+
+    #[test]
+    fn a_healthy_active_service_attaches_before_the_held_update_lock_without_startup_mutation() {
+        if std::env::var_os("CORSIA_START_SERVICE_ALONE").is_none() {
+            let temp = tempfile::tempdir().unwrap();
+            let app_dir = app_paths::app_dir_for_home(temp.path());
+            let state = temp.path().join("state");
+            let (port, stopped, server) = proof_server(ProofReply::Active);
+            recorded_service(&app_dir, &state, port);
+            let update = app_paths::try_lock_update(&state).unwrap().expect("the updater lock");
+            assert!(!alone_at_home("tests::a_healthy_active_service_attaches_before_the_held_update_lock_without_startup_mutation", temp.path()));
+            drop(update);
+            stopped.store(true, Ordering::Release);
+            server.join().unwrap();
+            return;
+        }
+        let home = PathBuf::from(std::env::var_os("HOME").unwrap());
+        let app_dir = app_paths::app_dir_for_home(&home);
+        let state = home.join("state");
+        let port = first_run::recorded_port(&app_dir).unwrap();
+        let app = test_app();
+        let service = std::sync::Arc::new(AppServiceState::default());
+        let (sent, received) = std::sync::mpsc::channel();
+        let starting = app.handle().clone();
+        let state_for_start = service.clone();
+        thread::spawn(move || { let _ = sent.send(start_service(&starting, &state_for_start)); });
+        let outcome = received.recv_timeout(Duration::from_millis(300)).expect("healthy active service waited for update lock").unwrap();
+        assert_eq!(outcome, ServiceStartup::Ready { url: service_url(port) });
+        assert_eq!(*service.app_dir.lock().unwrap(), Some(app_dir));
+        assert!(app_paths::try_lock_update_in_existing(&state).unwrap().is_none(), "attachment took the updater lock");
+    }
+
+    #[test]
+    fn inactive_unknown_or_unhealthy_service_stays_excluded_while_the_update_lock_is_held() {
+        if !app_paths::tests::alone("tests::inactive_unknown_or_unhealthy_service_stays_excluded_while_the_update_lock_is_held") {
+            return;
+        }
+        let mut held = Vec::new();
+        let mut roots = Vec::new();
+        let mut apps = Vec::new();
+        let mut servers = Vec::new();
+        for reply in [ProofReply::Inactive, ProofReply::Unknown, ProofReply::Unhealthy] {
+            let temp = tempfile::tempdir().unwrap();
+            let app_dir = temp.path().join("app");
+            let state = temp.path().join("state");
+            let (port, stopped, server) = proof_server(reply);
+            recorded_service(&app_dir, &state, port);
+            held.push(app_paths::try_lock_update(&state).unwrap().expect("the updater lock"));
+            let app = test_app();
+            let service = std::sync::Arc::new(AppServiceState::default());
+            let (sent, received) = std::sync::mpsc::channel();
+            let starting = app.handle().clone();
+            let state_for_start = service.clone();
+            thread::spawn(move || { let _ = sent.send(start_service_in(&starting, &state_for_start, app_dir)); });
+            assert!(received.recv_timeout(Duration::from_millis(300)).is_err(), "{reply:?} bypassed the update lock");
+            assert!(service.app_dir.lock().unwrap().is_none(), "{reply:?} created a local session before lock admission");
+            servers.push((stopped, server));
+            roots.push(temp);
+            apps.push(app);
+        }
+        for (stopped, server) in servers {
+            stopped.store(true, Ordering::Release);
+            server.join().unwrap();
+        }
+        assert_eq!((held.len(), roots.len(), apps.len()), (3, 3, 3));
     }
 
     #[test]
