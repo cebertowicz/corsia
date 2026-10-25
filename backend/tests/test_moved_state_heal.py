@@ -94,6 +94,28 @@ def test_heal_is_a_no_op_when_paths_agree(isolated_db, tmp_path, monkeypatch) ->
     assert discovery.get_server(server_id)["updated_at"] == before
 
 
+def test_a_file_that_fails_to_heal_keeps_the_row_on_the_old_base(isolated_db, tmp_path, monkeypatch, caplog) -> None:
+    from infra.moved_state_heal import heal_moved_state_paths
+    from llm import network_discovery as discovery
+
+    server_id, old_root, new_root = _register_moved_install(tmp_path, monkeypatch)
+    old_base, new_base = old_root / "managed-omlx", new_root / "managed-omlx"
+    damaged = new_base / "settings.json"
+    damaged.write_text(f'{{"model_dir": "{old_base}/models"', encoding="utf-8")
+
+    with caplog.at_level("WARNING", logger="infra.moved_state_heal"):
+        heal_moved_state_paths()
+
+    assert discovery.get_server_metadata(server_id)["base_path"] == str(old_base)
+    assert any("settings.json" in record.getMessage() for record in caplog.records)
+
+    # Once the file can be read, the next start finishes the heal.
+    damaged.write_text(json.dumps({"model_dir": f"{old_base}/models"}), encoding="utf-8")
+    heal_moved_state_paths()
+    assert discovery.get_server_metadata(server_id)["base_path"] == str(new_base)
+    assert json.loads(damaged.read_text())["model_dir"] == f"{new_base}/models"
+
+
 def test_moved_row_without_matching_base_still_counts_as_managed() -> None:
     from llm.providers.omlx_supervisor import _is_managed_omlx_row
 

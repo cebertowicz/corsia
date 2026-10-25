@@ -129,11 +129,14 @@ pub fn run(paths: &Paths, service: &mut dyn Service, progress: &mut Progress<'_>
         log::info!("data folder move: waiting for an unfinished adoption or Start fresh to finish first");
         return Ok(Outcome::NotNeeded);
     }
-    progress(1);
     match journal.map(|journal| journal.step) {
-        Some(Step::Moved) => finish(paths, progress),
+        Some(Step::Moved) => {
+            progress(1);
+            finish(paths, progress)
+        }
         Some(_) if !exists(&paths.legacy) && holds_data(&paths.target) => {
             // Renamed, but stopped before the journal said so: go on from the commit.
+            progress(1);
             write_journal(paths, Step::Moved)?;
             finish(paths, progress)
         }
@@ -158,6 +161,8 @@ fn move_now(paths: &Paths, service: &mut dyn Service, progress: &mut Progress<'_
         Ok(true) => return skip(paths, "an update or restart is in progress".into()),
         Err(error) => return skip(paths, format!("could not read whether an update is running: {error}")),
     }
+    // The move window, and its line that background jobs stop, appear only once the stop is next.
+    progress(1);
     write_journal(paths, Step::Stopping)?;
     checkpoint("stopping");
     progress(2);
@@ -593,11 +598,18 @@ pub struct AppService {
     pub resources: PathBuf,
     pub port: u16,
     pid: Option<u32>,
+    /// Why the move can't check or stop the service; it skips before stopping anything.
+    unknown: Option<String>,
 }
 
 impl AppService {
-    pub fn new(resources: PathBuf, port: u16) -> Self {
-        Self { resources, port, pid: None }
+    pub fn new(resources: Result<PathBuf, String>, port: Option<u16>) -> Self {
+        let unknown = match (&resources, port) {
+            (Err(error), _) => Some(format!("could not find the app's bundled files: {error}")),
+            (Ok(_), None) => Some("service.json records no port for the service".to_string()),
+            _ => None,
+        };
+        Self { resources: resources.unwrap_or_default(), port: port.unwrap_or_default(), pid: None, unknown }
     }
 
     fn python(&self) -> PathBuf {
@@ -607,6 +619,9 @@ impl AppService {
 
 impl Service for AppService {
     fn operation_active(&mut self) -> Result<bool, String> {
+        if let Some(reason) = &self.unknown {
+            return Err(reason.clone());
+        }
         if !crate::probe_health(self.port) {
             return Ok(false);
         }

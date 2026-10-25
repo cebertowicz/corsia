@@ -214,10 +214,11 @@ fn a_target_that_holds_files_skips_the_move_and_changes_nothing() {
     fs::write(paths.target.join("corsia.db"), b"other").unwrap();
     let mut fake = Fake::default();
 
-    let (outcome, _) = run_with(&paths, &mut fake);
+    let (outcome, seen) = run_with(&paths, &mut fake);
 
     assert!(matches!(outcome, Ok(Outcome::Skipped(ref reason)) if reason.contains("already holds files")), "{outcome:?}");
     assert!(fake.calls.is_empty(), "the service is not stopped for a move that can't happen");
+    assert!(seen.is_empty(), "no move window for a move that can't happen: {seen:?}");
     assert_unchanged(&paths);
     assert_eq!(read(&paths.target.join("corsia.db")), "other");
 }
@@ -368,16 +369,35 @@ fn a_held_update_lock_or_an_active_operation_skips_the_move() {
 
     let held = app_paths::try_lock_update_in_existing(&paths.legacy).unwrap().unwrap();
     let mut fake = Fake::default();
-    let (outcome, _) = run_with(&paths, &mut fake);
+    let (outcome, seen) = run_with(&paths, &mut fake);
     assert!(matches!(outcome, Ok(Outcome::Skipped(ref reason)) if reason.contains("update")), "{outcome:?}");
     assert!(fake.calls.is_empty());
+    // Nothing was stopped, so the move window never showed.
+    assert!(seen.is_empty(), "{seen:?}");
     drop(held);
 
     let mut fake = Fake { active: true, ..Fake::default() };
-    let (outcome, _) = run_with(&paths, &mut fake);
+    let (outcome, seen) = run_with(&paths, &mut fake);
     assert!(matches!(outcome, Ok(Outcome::Skipped(_))), "{outcome:?}");
     assert_eq!(fake.calls, ["operation_active"]);
+    assert!(seen.is_empty(), "{seen:?}");
     assert_unchanged(&paths);
+}
+
+// An unknown port or bundle is never guessed: the move skips before it stops anything.
+#[test]
+fn an_unknown_port_or_bundle_skips_the_move_before_stopping_anything() {
+    let home = tempfile::tempdir().unwrap();
+    let paths = install(home.path());
+    for (mut service, said) in [
+        (AppService::new(Ok(home.path().join("resources")), None), "port"),
+        (AppService::new(Err("no resource folder".into()), Some(1956)), "bundled files"),
+    ] {
+        let outcome = run(&paths, &mut service, &mut |_| {});
+        assert!(matches!(outcome, Ok(Outcome::Skipped(ref reason)) if reason.contains(said)), "{outcome:?}");
+        assert_unchanged(&paths);
+        assert!(!paths.app_dir.join(JOURNAL).exists());
+    }
 }
 
 // T16 (shell side is in test_service_scripts.py): a failed stop leaves everything in place.

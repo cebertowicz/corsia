@@ -54,26 +54,25 @@ def _write_atomically(path: Path, text: str) -> None:
     os.replace(staged, path)
 
 
-def _heal_config_file(path: Path, old: str, new: str) -> bool:
+def _heal_config_file(path: Path, old: str, new: str) -> bool | None:
+    """Rebase one file: True when rewritten, False when nothing to do, None when it failed."""
     try:
         if not path.is_file() or path.is_symlink() or path.stat().st_size > _CONFIG_MAX_BYTES:
             return False
         text = path.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError):
-        return False
-    if old not in text:
-        return False
-    if path.suffix == ".json":
-        try:
-            healed = json.dumps(_rebase_tree(json.loads(text), old, new), sort_keys=True)
-        except ValueError:
+        if old not in text:
             return False
-    else:
-        pattern = re.escape(old) + r"(?=[/\"'\s]|$)"
-        healed = re.sub(pattern, lambda _match: new, text, flags=re.MULTILINE)
-    if healed == text:
-        return False
-    _write_atomically(path, healed)
+        if path.suffix == ".json":
+            healed = json.dumps(_rebase_tree(json.loads(text), old, new), sort_keys=True)
+        else:
+            pattern = re.escape(old) + r"(?=[/\"'\s]|$)"
+            healed = re.sub(pattern, lambda _match: new, text, flags=re.MULTILINE)
+        if healed == text:
+            return False
+        _write_atomically(path, healed)
+    except (OSError, ValueError) as error:
+        log.warning("moved state: could not repoint managed oMLX file %s: %s", path.name, type(error).__name__)
+        return None
     return True
 
 
@@ -90,11 +89,21 @@ def _heal_managed_omlx() -> None:
         old_base = metadata.get("base_path")
         if not isinstance(old_base, str) or not old_base or old_base == new_base:
             continue
-        # Files first: once the row names the new base, the old prefix is gone.
+        # Files first: once the row names the new base, the old prefix is gone,
+        # so a file that failed keeps the row on the old base for the next start.
+        failed = False
         if paths.base_path.is_dir():
             for entry in sorted(paths.base_path.iterdir()):
-                if entry.suffix in _CONFIG_SUFFIXES and _heal_config_file(entry, old_base, new_base):
+                if entry.suffix not in _CONFIG_SUFFIXES:
+                    continue
+                result = _heal_config_file(entry, old_base, new_base)
+                if result is None:
+                    failed = True
+                elif result:
                     log.info("moved state: repointed managed oMLX file %s", entry.name)
+        if failed:
+            log.warning("moved state: managed oMLX server %s keeps its old folder until every file is repointed", row["id"])
+            continue
         healed = {
             key: _rebase(metadata.get(key), old_base, new_base)
             for key in ("model_dir", "paged_ssd_cache_dir")

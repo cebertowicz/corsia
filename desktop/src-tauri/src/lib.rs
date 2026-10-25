@@ -802,8 +802,8 @@ fn start_service_in<R: tauri::Runtime>(
     // anything attaches to or starts the service; a skip starts it where it is.
     let move_paths = state_move::Paths::for_home(&home, &app_dir);
     let moved = {
-        let port = first_run::recorded_port(&app_dir).unwrap_or(DEFAULT_SERVICE_PORT);
-        let mut mover = state_move::AppService::new(bundled_resource_dir(app).unwrap_or_default(), port);
+        let mut mover =
+            state_move::AppService::new(bundled_resource_dir(app), first_run::recorded_port(&app_dir));
         let outcome = state_move::run(&move_paths, &mut mover, &mut |percent| {
             set_adoption_phase(service, Some(adoption::Phase::MovingData { percent }))
         });
