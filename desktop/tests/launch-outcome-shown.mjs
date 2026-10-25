@@ -146,18 +146,23 @@ try {
 	}
 	// A move that stopped after it showed says why, with no percentage, before CORSIA starts where it was.
 	{
-		const lines = {
-			terminal: 'Your data stays where it is for now. A Terminal window is open in CORSIA’s old data folder; close that window. CORSIA tries again the next time it opens.',
-			other_app: 'Your data stays where it is for now. Another app has CORSIA’s old data folder open; quit it, or restart your Mac. CORSIA tries again the next time it opens.',
-			other: 'Your data stays where it is for now. CORSIA tries again the next time it opens.',
-		};
-		for (const [reason, expected] of Object.entries(lines)) {
-			const page = await open({ phase: 'move_skipped', reason, quit_pending: false });
+		const stays = 'Your data stays where it is for now.';
+		const jobs = 'Anything an agent left running in the background has stopped; ask the agent to run it again if you still need it.';
+		const again = 'CORSIA tries again the next time it opens.';
+		const cases = [
+			[{ reason: 'terminal', app: null, jobs_stopped: true }, `${stays} A terminal window is open in CORSIA’s old data folder. Close it. ${jobs} ${again}`],
+			[{ reason: 'other_app', app: 'Finder', jobs_stopped: true }, `${stays} Finder has CORSIA’s old data folder open. Quit Finder, or restart your Mac. ${jobs} ${again}`],
+			[{ reason: 'other_app', app: null, jobs_stopped: true }, `${stays} Another app has CORSIA’s old data folder open. Quit it, or restart your Mac. ${jobs} ${again}`],
+			[{ reason: 'other', app: null, jobs_stopped: true }, `${stays} ${jobs} ${again}`],
+			[{ reason: 'other', app: null, jobs_stopped: false }, `${stays} ${again}`],
+		];
+		for (const [told, expected] of cases) {
+			const page = await open({ phase: 'move_skipped', ...told, quit_pending: false });
 			await page.clock.runFor(1_100);
 			const seen = await read(page);
 			const percent = await page.evaluate(() => !document.getElementById('move-percent').hidden);
-			if (seen.status !== 'Starting CORSIA…' || seen.line !== expected || percent) fail(`move skipped (${reason}): ${JSON.stringify(seen)}`);
-			else console.log(`ok   a skipped move says why (${reason})`);
+			if (seen.status !== 'Starting CORSIA…' || seen.line !== expected || percent) fail(`move skipped (${JSON.stringify(told)}): ${JSON.stringify(seen)}`);
+			else console.log(`ok   a skipped move says why (${told.reason}${told.app ? `, ${told.app}` : ''}${told.jobs_stopped ? ', jobs stopped' : ''})`);
 		}
 	}
 	// A move error the app can't start on is a plain line with the screen's own buttons.
@@ -173,7 +178,7 @@ try {
 		if (process.argv.includes('--screenshots')) {
 			const dir = process.argv[process.argv.indexOf('--screenshots') + 1];
 			const viewport = { width: 1440, height: 900 };
-			const skipped = await open({ phase: 'move_skipped', reason: 'terminal', quit_pending: false }, viewport);
+			const skipped = await open({ phase: 'move_skipped', reason: 'terminal', app: null, jobs_stopped: true, quit_pending: false }, viewport);
 			await skipped.clock.runFor(1_100);
 			await skipped.screenshot({ path: path.join(dir, 'move-skipped-terminal-1440.png') });
 			const failed = await open(null, viewport);

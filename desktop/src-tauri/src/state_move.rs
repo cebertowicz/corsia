@@ -98,7 +98,7 @@ pub trait Service {
     /// The service process is gone, its port refuses and its database is free.
     fn prove_released(&mut self, state: &Path) -> Result<(), String>;
     /// Every process still holding `state`, from the kernel's process table.
-    fn holders(&mut self, state: &Path) -> Result<Vec<(i32, String)>, String> {
+    fn holders(&mut self, state: &Path) -> Result<Vec<Holder>, String> {
         holders(state)
     }
 }
@@ -111,7 +111,7 @@ pub type Progress<'a> = dyn FnMut(u8) + Send + 'a;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SkipReason {
-    /// Only shells (a Terminal window's working folder) hold the old folder.
+    /// Only shells (a terminal window's working folder) hold the old folder.
     Terminal,
     /// Some other app holds the old folder.
     OtherApp,
@@ -124,7 +124,31 @@ pub struct Skip {
     /// For the log: what stopped the move.
     pub detail: String,
     /// What the window says, only when the move had started stopping things.
-    pub tell: Option<SkipReason>,
+    pub tell: Option<Told>,
+}
+
+/// What a skip the person watched start tells them.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Told {
+    pub reason: SkipReason,
+    /// The one app holding the old folder, when it is an app the person can quit by name.
+    pub app: Option<String>,
+    /// Agents' background jobs were already stopped; the line says so.
+    pub jobs_stopped: bool,
+}
+
+fn told(reason: SkipReason, app: Option<String>, jobs_stopped: bool) -> Option<Told> {
+    Some(Told { reason, app, jobs_stopped })
+}
+
+/// A process holding the old folder.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Holder {
+    pub pid: i32,
+    /// The process name, for the log.
+    pub name: String,
+    /// The app it belongs to (`Finder` for `/System/Library/CoreServices/Finder.app/...`), if any.
+    pub app: Option<String>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -148,7 +172,7 @@ pub struct MoveError {
 pub const NOT_MOVED: &str = "CORSIA couldn’t get ready to move your data and left it where it was, so nothing is lost. Choose Retry.";
 pub const NOT_FINISHED: &str = "CORSIA moved your data but couldn’t finish setting up its new folder. Nothing is lost. Choose Retry.";
 pub const TWO_PLACES: &str = "CORSIA found its data in two folders and changed neither, so nothing is lost. Choose Save a report.";
-pub const RECORD_UNREADABLE: &str = "CORSIA couldn’t read its record of moving your data, so it changed nothing more and nothing is lost. Choose Save a report.";
+pub const RECORD_UNREADABLE: &str = "CORSIA couldn’t read its record of moving your data, so it stopped before changing anything else. Nothing is lost. Choose Save a report.";
 
 fn fatal(line: &'static str) -> impl FnOnce(String) -> MoveError {
     move |detail| MoveError { line, detail }
@@ -205,21 +229,22 @@ fn move_now(paths: &Paths, service: &mut dyn Service, progress: &mut Progress<'_
         Ok(true) => return skip(paths, "an update or restart is in progress".into(), None),
         Err(error) => return skip(paths, format!("could not read whether an update is running: {error}"), None),
     }
-    let other = Some(SkipReason::Other);
     // The move window, and its line that background jobs stop, appear only once the stop is next.
     progress(1);
     write_journal(paths, Step::Stopping)?;
     checkpoint("stopping");
     progress(2);
     if let Err(error) = timed(progress, 2, 70, DRAIN_CAP, || service.stop()) {
-        return skip(paths, format!("could not stop the service: {error}"), other);
+        return skip(paths, format!("could not stop the service: {error}"), told(SkipReason::Other, None, false));
     }
     if let Err(error) = service.unregister() {
-        return skip(paths, format!("could not unregister the service: {error}"), other);
+        return skip(paths, format!("could not unregister the service: {error}"), told(SkipReason::Other, None, false));
     }
+    // From here agents' background jobs have been stopped, and every skip line says so.
     if let Err(error) = service.stop_recorded_processes(&paths.legacy) {
         log::warn!("data folder move: recorded processes: {error}");
     }
+    let other = told(SkipReason::Other, None, true);
     if let Err(error) = timed(progress, 70, 85, RELEASE_CAP, || service.prove_released(&paths.legacy)) {
         return skip(paths, format!("the service did not let go of its data: {error}"), other);
     }
@@ -228,10 +253,21 @@ fn move_now(paths: &Paths, service: &mut dyn Service, progress: &mut Progress<'_
         Err(error) => return skip(paths, error, other),
     };
     if !holders.is_empty() {
-        let named: Vec<String> = holders.iter().map(|(pid, name)| format!("{name} (pid {pid})")).collect();
+        let named: Vec<String> = holders.iter().map(|holder| format!("{} (pid {})", holder.name, holder.pid)).collect();
         log::warn!("data folder move: {} process(es) hold the old folder: {}", named.len(), named.join(", "));
-        let tell = if holders.iter().all(|(_, name)| is_shell(name)) { SkipReason::Terminal } else { SkipReason::OtherApp };
-        return skip(paths, format!("{} still has CORSIA’s old data folder open", named.join(", ")), Some(tell));
+        let detail = format!("{} still has CORSIA’s old data folder open", named.join(", "));
+        let others: Vec<&Holder> = holders.iter().filter(|holder| !is_shell(&holder.name)).collect();
+        if others.is_empty() {
+            return skip(paths, detail, told(SkipReason::Terminal, None, true));
+        }
+        // An app is named only when it is the one app holding the folder; otherwise the window says "another app".
+        let mut apps: Vec<Option<&String>> = others.iter().map(|holder| holder.app.as_ref()).collect();
+        apps.dedup();
+        let app = match apps.as_slice() {
+            [Some(app)] => Some((*app).clone()),
+            _ => None,
+        };
+        return skip(paths, detail, told(SkipReason::OtherApp, app, true));
     }
     write_journal(paths, Step::Stopped)?;
     checkpoint("stopped");
@@ -287,13 +323,13 @@ pub fn check_legacy_gone(paths: &Paths) -> Result<(), String> {
     ))
 }
 
-fn skip(paths: &Paths, detail: String, tell: Option<SkipReason>) -> Result<Outcome, String> {
+fn skip(paths: &Paths, detail: String, tell: Option<Told>) -> Result<Outcome, String> {
     log::warn!("data folder move skipped this launch: {detail}");
     clear_journal(paths)?;
     Ok(Outcome::Skipped(Skip { detail, tell }))
 }
 
-/// A shell holds a folder as a Terminal window's working folder.
+/// A shell holds a folder as a terminal window's working folder (Terminal, iTerm, an editor's terminal).
 fn is_shell(name: &str) -> bool {
     matches!(name, "zsh" | "bash" | "sh" | "fish" | "tcsh" | "csh" | "ksh" | "dash" | "nu" | "login" | "tmux" | "screen")
 }
@@ -555,7 +591,7 @@ fn timed<T>(progress: &mut Progress<'_>, from: u8, to: u8, cap: Duration, work: 
 /// Every other process with a file or its working folder under `root`. A
 /// process list the system refuses is an error, never an empty list: an
 /// unseen holder would keep writing to a folder that has moved.
-pub fn holders(root: &Path) -> Result<Vec<(i32, String)>, String> {
+pub fn holders(root: &Path) -> Result<Vec<Holder>, String> {
     let root = fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
     let me = std::process::id() as i32;
     // SAFETY: a null buffer asks only for the count.
@@ -575,7 +611,7 @@ pub fn holders(root: &Path) -> Result<Vec<(i32, String)>, String> {
     Ok(pids
         .into_iter()
         .filter(|pid| *pid > 0 && *pid != me && holds(*pid, &root))
-        .map(|pid| (pid, process_name(pid)))
+        .map(|pid| Holder { pid, name: process_name(pid), app: app_name(pid) })
         .collect())
 }
 
@@ -618,6 +654,24 @@ fn holds(pid: i32, root: &Path) -> bool {
                 && under(&info.path.vip_path)
         })
     }
+}
+
+/// The app bundle a process runs from: the first `.app` folder in its executable's path.
+fn app_name(pid: i32) -> Option<String> {
+    let mut path = vec![0u8; libc::PROC_PIDPATHINFO_MAXSIZE as usize];
+    // SAFETY: the buffer is as large as the size passed.
+    let length = unsafe { libc::proc_pidpath(pid, path.as_mut_ptr().cast(), path.len() as u32) };
+    if length <= 0 {
+        return None;
+    }
+    bundle_name(Path::new(std::ffi::OsStr::from_bytes(&path[..length as usize])))
+}
+
+fn bundle_name(executable: &Path) -> Option<String> {
+    executable.components().find_map(|part| {
+        let part = part.as_os_str().to_str()?;
+        part.strip_suffix(".app").filter(|name| !name.is_empty()).map(str::to_string)
+    })
 }
 
 fn process_name(pid: i32) -> String {

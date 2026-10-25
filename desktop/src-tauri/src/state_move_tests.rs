@@ -70,8 +70,8 @@ struct Fake {
     stop_fails: bool,
     /// Scan the real process table rather than report no holders.
     real_scan: bool,
-    /// Holders to report instead of none, as (pid, name).
-    held_by: Vec<(i32, String)>,
+    /// Holders to report instead of none.
+    held_by: Vec<Holder>,
     /// Run during `prove_released`, after the recorded-process stop.
     on_release: Option<Box<dyn FnMut()>>,
     on_recorded: Option<Box<dyn FnMut()>>,
@@ -104,7 +104,7 @@ impl Service for Fake {
         }
         Ok(())
     }
-    fn holders(&mut self, state: &Path) -> Result<Vec<(i32, String)>, String> {
+    fn holders(&mut self, state: &Path) -> Result<Vec<Holder>, String> {
         if self.real_scan { holders(state) } else { Ok(self.held_by.clone()) }
     }
 }
@@ -308,7 +308,7 @@ fn hold(dir: &Path, script: &str) -> Child {
     let child = Command::new("/bin/sh").arg("-c").arg(script).current_dir(dir).spawn().unwrap();
     // Wait until the shell has opened what it holds.
     let deadline = Instant::now() + Duration::from_secs(5);
-    while holders(dir).unwrap().iter().all(|(pid, _)| *pid != child.id() as i32) && Instant::now() < deadline {
+    while holders(dir).unwrap().iter().all(|holder| holder.pid != child.id() as i32) && Instant::now() < deadline {
         thread::sleep(Duration::from_millis(20));
     }
     child
@@ -402,28 +402,53 @@ fn an_unknown_port_or_bundle_skips_the_move_before_stopping_anything() {
     }
 }
 
-// A skip the person watched start tells them why: Terminal, another app, or only that it tries again.
+// A skip the person watched start tells them why: a terminal, a named or unnamed app, or only that it
+// tries again; past the recorded-process stop it also says background jobs stopped.
 #[test]
 fn a_skip_after_the_stop_says_why_and_one_before_it_says_nothing() {
     let home = tempfile::tempdir().unwrap();
     let paths = install(home.path());
-    let held = |names: &[&str]| names.iter().enumerate().map(|(pid, name)| (pid as i32 + 100, name.to_string())).collect();
-    for (held_by, tell) in [
-        (held(&["zsh"]), SkipReason::Terminal),
-        (held(&["zsh", "bash"]), SkipReason::Terminal),
-        (held(&["zsh", "python3"]), SkipReason::OtherApp),
-        (held(&["Preview"]), SkipReason::OtherApp),
+    let held = |holders: &[(&str, Option<&str>)]| -> Vec<Holder> {
+        holders
+            .iter()
+            .enumerate()
+            .map(|(pid, (name, app))| Holder { pid: pid as i32 + 100, name: name.to_string(), app: app.map(str::to_string) })
+            .collect()
+    };
+    let finder = Some("Finder");
+    for (held_by, reason, app) in [
+        (held(&[("zsh", None)]), SkipReason::Terminal, None),
+        (held(&[("zsh", None), ("bash", None)]), SkipReason::Terminal, None),
+        (held(&[("Finder", finder)]), SkipReason::OtherApp, Some("Finder")),
+        (held(&[("zsh", None), ("Finder", finder), ("Finder", finder)]), SkipReason::OtherApp, Some("Finder")),
+        (held(&[("Finder", finder), ("Preview", Some("Preview"))]), SkipReason::OtherApp, None),
+        (held(&[("python3", None)]), SkipReason::OtherApp, None),
     ] {
         let (outcome, _) = run_with(&paths, &mut Fake { held_by, ..Fake::default() });
-        assert!(matches!(outcome, Ok(Outcome::Skipped(Skip { tell: Some(t), .. })) if t == tell), "{outcome:?}");
+        let expected = Told { reason, app: app.map(str::to_string), jobs_stopped: true };
+        assert!(matches!(outcome, Ok(Outcome::Skipped(Skip { tell: Some(ref t), .. })) if *t == expected), "{outcome:?}");
         assert_unchanged(&paths);
     }
 
+    // A failed stop leaves the service, and so every background job, running.
     let (outcome, _) = run_with(&paths, &mut Fake { stop_fails: true, ..Fake::default() });
-    assert!(matches!(outcome, Ok(Outcome::Skipped(Skip { tell: Some(SkipReason::Other), .. }))), "{outcome:?}");
+    let expected = Told { reason: SkipReason::Other, app: None, jobs_stopped: false };
+    assert!(matches!(outcome, Ok(Outcome::Skipped(Skip { tell: Some(ref t), .. })) if *t == expected), "{outcome:?}");
 
     let (outcome, _) = run_with(&paths, &mut Fake { active: true, ..Fake::default() });
     assert!(matches!(outcome, Ok(Outcome::Skipped(Skip { tell: None, .. }))), "{outcome:?}");
+}
+
+#[test]
+fn an_app_is_named_from_its_bundle_folder() {
+    let name = |path: &str| bundle_name(Path::new(path));
+    assert_eq!(name("/System/Library/CoreServices/Finder.app/Contents/MacOS/Finder").as_deref(), Some("Finder"));
+    assert_eq!(
+        name("/Applications/Google Chrome.app/Contents/Frameworks/Helpers/Google Chrome Helper.app/Contents/MacOS/x").as_deref(),
+        Some("Google Chrome")
+    );
+    assert_eq!(name("/opt/homebrew/bin/python3"), None);
+    assert_eq!(name("/Users/you/.app/bin/tool"), None);
 }
 
 // T16 (shell side is in test_service_scripts.py): a failed stop leaves everything in place.
@@ -546,4 +571,15 @@ fn moves_a_large_install_in_constant_time() {
     assert!(!exists(paths.legacy_parent()) && paths.target.join("corsia.db").exists());
     println!("T12 release proof {:?}, whole move {:?}", released.get(), total);
     wait_for_cache_removal(&paths);
+}
+
+// The window reads these exact keys from the phase; renaming one would show the wrong line.
+#[test]
+fn a_skipped_phase_carries_what_the_window_reads() {
+    let told = Told { reason: SkipReason::OtherApp, app: Some("Finder".into()), jobs_stopped: true };
+    let json = serde_json::to_value(crate::adoption::Phase::MoveSkipped { told }).unwrap();
+    assert_eq!(
+        json,
+        serde_json::json!({ "phase": "move_skipped", "reason": "other_app", "app": "Finder", "jobs_stopped": true })
+    );
 }

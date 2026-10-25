@@ -56,8 +56,10 @@ mod update_stage;
 mod update_swap;
 
 const DEFAULT_SERVICE_PORT: u16 = 47_895;
-/// How long the window holds a skipped move's line before CORSIA starts.
+/// How long the window holds a skipped move's line before CORSIA starts: a plain
+/// "tries again" line, and a longer one that asks the person to act.
 const MOVE_SKIPPED_SHOWN: Duration = Duration::from_secs(4);
+const MOVE_SKIPPED_READ: Duration = Duration::from_secs(8);
 const ACTIVE_OPERATION_ERROR: &str = "CORSIA is still completing an operation";
 const HEALTH_POLL_INTERVAL: Duration = Duration::from_millis(250);
 /// The fixed cap for a service that publishes no startup progress (an existing
@@ -814,9 +816,11 @@ fn start_service_in<R: tauri::Runtime>(
             error.line.to_string()
         });
         // A skip the person watched start says why before CORSIA starts where it was.
-        if let Ok(state_move::Outcome::Skipped(state_move::Skip { tell: Some(reason), .. })) = &outcome {
-            set_adoption_phase(service, Some(adoption::Phase::MoveSkipped { reason: *reason }));
-            thread::sleep(MOVE_SKIPPED_SHOWN);
+        if let Ok(state_move::Outcome::Skipped(state_move::Skip { tell: Some(told), .. })) = &outcome {
+            // A line that asks something of the person, or says jobs stopped, stays long enough to read.
+            let plain = told.reason == state_move::SkipReason::Other && !told.jobs_stopped;
+            set_adoption_phase(service, Some(adoption::Phase::MoveSkipped { told: told.clone() }));
+            thread::sleep(if plain { MOVE_SKIPPED_SHOWN } else { MOVE_SKIPPED_READ });
         }
         set_adoption_phase(service, None);
         outcome? == state_move::Outcome::Moved
@@ -1676,17 +1680,15 @@ struct AdoptionProgress {
 
 impl AdoptionProgress {
     fn new(phase: adoption::Phase, quit_asked: bool) -> Self {
-        Self {
-            phase,
-            quit_pending: quit_asked
-                && matches!(
-                    phase,
-                    adoption::Phase::Waiting { .. }
-                        | adoption::Phase::BackingUp
-                        | adoption::Phase::MovingToBackup
-                        | adoption::Phase::StartingExisting
-                ),
-        }
+        let quit_pending = quit_asked
+            && matches!(
+                phase,
+                adoption::Phase::Waiting { .. }
+                    | adoption::Phase::BackingUp
+                    | adoption::Phase::MovingToBackup
+                    | adoption::Phase::StartingExisting
+            );
+        Self { phase, quit_pending }
     }
 }
 
@@ -1699,7 +1701,7 @@ fn set_adoption_phase(service: &AppServiceState, phase: Option<adoption::Phase>)
 /// What adoption is doing now: the window picks the line from the phase, never from text.
 #[tauri::command]
 fn adoption_progress(service: tauri::State<'_, AppServiceState>) -> Option<AdoptionProgress> {
-    let phase = service.adoption_phase.lock().ok().and_then(|phase| *phase)?;
+    let phase = service.adoption_phase.lock().ok().and_then(|phase| phase.clone())?;
     Some(AdoptionProgress::new(
         phase,
         service.adoption_cancel_requested.load(Ordering::Acquire),
@@ -3680,7 +3682,7 @@ mod tests {
             (Starting, true, false),
             (StartingExisting, true, true),
         ] {
-            assert_eq!(AdoptionProgress::new(phase, quit_asked).quit_pending, pending, "{phase:?}");
+            assert_eq!(AdoptionProgress::new(phase.clone(), quit_asked).quit_pending, pending, "{phase:?}");
         }
         assert_eq!(
             serde_json::to_value(AdoptionProgress::new(Waiting { running: Some(2) }, true)).unwrap(),
