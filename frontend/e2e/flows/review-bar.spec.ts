@@ -84,12 +84,15 @@ function orphanComments(artifactId: string): void {
 
 const bar = (page: Page) => page.locator('.review-bar');
 for (const width of [1280, 1440, 393] as const) for (const theme of ['light', 'dark'] as const) test.describe(`delivery header ${width} ${theme}`, () => {
-	if (width === 393) test.use({ hasTouch: true, isMobile: true });
+	// A desktop width is measured as a desktop (pointer, no mobile viewport), also under the phone project, where the Pixel 7 device would otherwise give it the touch layout.
+	test.use(width === 393 ? { hasTouch: true, isMobile: true } : { hasTouch: false, isMobile: false });
 	test('long person name and every header action remain reachable', async ({ page, request }) => {
 		const doc = await seed(request, 'Person with a very long agent name closed');
 		addPersonStep(doc.threadId, doc.artifactId);
 		await open(page, doc, width === 1440 ? 'closed' : width === 393 ? 'phone' : 'default', theme);
 		await page.setViewportSize({ width, height: width === 393 ? 852 : 900 }); await settled(page);
+		// The plan pane takes the overlay layout once the resize reaches it; measure only after it has.
+		if (width === 1280) await expect(page.locator('.pane.overlay')).toHaveCount(1);
 		const geometry = await page.locator('.document-header').evaluate((header) => {
 			const who = header.querySelector('.rb-who')!, range = document.createRange(); range.selectNodeContents(who);
 			const text = range.getBoundingClientRect(), box = header.getBoundingClientRect(), style = getComputedStyle(header);

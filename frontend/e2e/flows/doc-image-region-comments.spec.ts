@@ -206,7 +206,7 @@ async function expectMarkersBesideImages(page: Page, testInfo: TestInfo, name: s
 	}
 }
 /** One painted frame: ms since sampling began, the header Send's state, and the editor's top. */
-type Sample = [number, 'pending' | 'sending' | 'sent' | 'collapsing' | 'gone', number];
+type Sample = [number, 'pending' | 'sending' | 'sent' | 'gone', number];
 /**
  * Reads, every frame until stopped, the document header Send's state (Send, sending, Sent, or gone) and where the
  * editor's content sits, as that frame paints them: a Send that arrives or leaves must not move the document.
@@ -220,8 +220,7 @@ async function startSampling(page: Page) {
 		const measure = (): Sample => {
 			const slot = document.querySelector<HTMLElement>('.document-header .sending-now');
 			const button = slot?.querySelector('.btn');
-			const collapsing = document.querySelector('.document-header .document-notices.empty');
-			const status = !slot ? 'gone' : collapsing ? 'collapsing' : !button ? 'sent' : button.classList.contains('loading') ? 'sending' : 'pending';
+			const status = !slot ? 'gone' : !button ? 'sent' : button.classList.contains('loading') ? 'sending' : 'pending';
 			return [Math.round(performance.now() - start), status, Math.round((document.querySelector('.cm-content')?.getBoundingClientRect().top ?? 0) * 10) / 10];
 		};
 		const keep = (sample: Sample) => {
@@ -236,20 +235,15 @@ const stopSampling = (page: Page) => page.evaluate(() => {
 	state.on = false;
 	return state.seen;
 });
-/** A successful Send holds its confirmation, then collapses its empty row and leaves. */
+/** A successful Send holds its confirmation in its own place, then leaves; the header has no separate notice row to collapse. */
 function expectSendStates(seen: Sample[], what: string) {
 	const states = seen.map(([, state]) => state).filter((state, index, all) => index === 0 || state !== all[index - 1]);
-	expect(states, `${what}: send states`).toEqual(['pending', 'sending', 'sent', 'collapsing', 'gone']);
+	expect(states, `${what}: send states`).toEqual(['pending', 'sending', 'sent', 'gone']);
 }
-/** Stable through confirmation; afterward the row releases its space monotonically, without a permanent gap. */
-function expectStill(seen: Sample[], what: string, reduced: boolean) {
-	const active = seen.filter(([, state]) => ['pending', 'sending', 'sent'].includes(state)).map(([, , top]) => top);
-	expect(Math.max(...active) - Math.min(...active), `${what}: active confirmation stays still`).toBeLessThanOrEqual(1);
-	const leaving = seen.filter(([, state]) => state === 'collapsing' || state === 'gone').map(([, , top]) => top);
-	const from = active[0], to = leaving.at(-1)!;
-	expect(to, `${what}: the empty row releases its space`).toBeLessThan(from);
-	for (let index = 1; index < leaving.length; index++) expect(leaving[index], `${what}: collapse is monotonic`).toBeLessThanOrEqual(leaving[index - 1] + 0.2);
-	if (!reduced) expect(new Set(leaving.filter((top) => top < from - 0.5 && top > to + 0.5)).size, `${what}: collapse has painted intermediate positions`).toBeGreaterThanOrEqual(3);
+/** The Send arrives, confirms and leaves inside the tool row, so the document never moves: not while it confirms, and not after it goes. */
+function expectStill(seen: Sample[], what: string) {
+	const tops = seen.map(([, , top]) => top);
+	expect(Math.max(...tops) - Math.min(...tops), `${what}: the document stays still through the whole send`).toBeLessThanOrEqual(1);
 }
 const mockOnly = (testInfo: TestInfo) => {
 	test.skip(testInfo.project.name !== 'chromium-desktop', 'Sizes are set by the spec itself');
@@ -503,8 +497,12 @@ test.describe('@flow:image-region-comments @surface:documents comments on images
 		await expect(headerSend(page)).toBeInViewport({ ratio: 1 });
 		await shoot(page, testInfo, `doc-${width}-09-header-send`, true);
 
-		inject.undelivered = [{ id: 'batch-1', item_count: 1, undelivered_reason: 'owner_unavailable', attempts: 1 }];
-		await page.route('**/api/doc-feedback/send', (route) => route.fulfill({ json: { woken: [], undelivered_batches: inject.undelivered } }));
+		inject.undelivered = [{ id: 'batch-1', item_count: 1, undelivered_reason: 'owner_unavailable', attempts: 1, delivery_policy: 'document-held' }];
+		// The server's answer to a send that ended undelivered: nothing delivered, one comment left undelivered, none held.
+		await page.route('**/api/doc-feedback/send', (route) => route.fulfill({ json: {
+			woken: [], undelivered_batches: inject.undelivered, sent_count: 0, undelivered_count: 1,
+			open_count: 0, document_held_count: 0, image_held_count: 0,
+		} }));
 		await headerSend(page).click();
 		// Not delivered: the document's own row offers Retry and claims nothing was sent.
 		const retry = docDelivery(page).getByRole('button', { name: /Retry/ });
@@ -532,7 +530,7 @@ test.describe('@flow:image-region-comments @surface:documents comments on images
 				if (!output || width !== 393) return;
 				// Still frames show the normal painted state, not the recording's deliberately slowed entrance.
 				await cdp.send('Animation.setPlaybackRate', { playbackRate: 1 });
-				await page.locator('.document-notices').evaluate(async (element) => {
+				await page.locator('.document-header').evaluate(async (element) => {
 					await Promise.all(element.getAnimations({ subtree: true }).map((animation) => animation.finished.catch(() => undefined)));
 				});
 				for (const colorScheme of ['light', 'dark'] as const) {
@@ -578,9 +576,8 @@ test.describe('@flow:image-region-comments @surface:documents comments on images
 				fs.writeFileSync(testInfo.outputPath('samples.json'), JSON.stringify({ playbackRate: 0.1, seen }));
 
 				expectSendStates(seen, label);
-				expectStill(seen, label, reduced);
-				expect((await page.locator('.document-notices').boundingBox())!.height, 'zero leaves no reserved notice row').toBe(0);
-				await expect(page.locator('.document-notices')).toHaveAttribute('inert', '');
+				expectStill(seen, label);
+				await expect(page.locator('.document-notices'), 'no separate notice row is left to reserve space').toHaveCount(0);
 				await captureCollapseFrame('header-after-collapse');
 			} finally {
 				await cdp.send('Animation.setPlaybackRate', { playbackRate: 1 }).catch(() => {});

@@ -514,8 +514,7 @@ test.describe('@flow:held-comment-delivery @surface:documents held comments have
 			await expect(headerSend(page)).toHaveText('Send 1 comment');
 
 			const touched = page.waitForResponse((response) => response.url().endsWith('/api/doc-feedback/touch') && response.request().method() === 'POST');
-			await page.locator('.document-canvas').hover();
-			await page.mouse.wheel(0, 120);
+			await page.locator('.document-canvas').click({ position: { x: 8, y: 8 } });
 			expect(await (await touched).json()).toEqual({ touched: 1 });
 		});
 

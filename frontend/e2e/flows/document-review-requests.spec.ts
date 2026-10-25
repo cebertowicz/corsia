@@ -157,7 +157,8 @@ async function captureLayout(page: Page, info: TestInfo, label: string) {
 			root: geometry(root), header: geometry(root.querySelector('.document-header')!),
 			row: geometry(row), retryInset, descendants: [...row.querySelectorAll('*')].map(geometry),
 			headerDescendants: [...root.querySelector('.document-header')!.querySelectorAll('*')].map(geometry),
-			controls: [...tools.querySelectorAll('button'), ...row.querySelectorAll('button')].map((button) => {
+			// The status row is the tools row, so a button reached through both is one control, never two.
+			controls: [...new Set([...tools.querySelectorAll('button'), ...row.querySelectorAll('button')])].map((button) => {
 				const rect = button.getBoundingClientRect();
 				// Toolbar controls and phone actions are 44px; desktop Toggle and small Button keep their own sizes.
 				const minimum = window.innerWidth <= 768 || button.matches('.doc-tool') ? 44 : button.matches('.tg') ? 17 : 28;
@@ -202,7 +203,8 @@ for (const fixture of composedFixtures) for (const theme of ['light', 'dark'] as
 		await openDocument(page, doc, splitWidth);
 		await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
 		await settled(page);
-		if (width === 393) {
+		// A narrow canvas, whatever the screen, gives the delivery Toggle its 44px target; a wide one keeps the desktop Toggle.
+		if (expectedNarrow) {
 			const toggle = page.getByRole('button', { name: 'Deliver comments immediately', exact: true });
 			const targetBox = (await toggle.boundingBox())!;
 			const track = await toggle.evaluate((element) => { const style = getComputedStyle(element, '::before'); return { width: parseFloat(style.width), height: parseFloat(style.height) }; });

@@ -176,7 +176,8 @@ test('@surface:doc-feedback-delivery sends a held user batch from the header in 
 	)).toBe(0);
 });
 
-test('@surface:doc-reopen-feedback-delivery sends a re-opened comment to the document owner', async ({ page, request }) => {
+// A re-open follows the person's delivery preference like a new comment: held for the header's Send when it is off, sent at once when it is on.
+for (const deliverImmediately of [false, true]) test(`@surface:doc-reopen-feedback-delivery sends a re-opened comment to the document owner (deliver immediately ${deliverImmediately ? 'on' : 'off'})`, async ({ page, request }) => {
 	test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires isolated synthetic state');
 	const title = `reopen-feedback-${Date.now()}`;
 	const threadId = await createSession(request, title);
@@ -200,14 +201,15 @@ test('@surface:doc-reopen-feedback-delivery sends a re-opened comment to the doc
 	const commentId = (await created.json()).comment.id as string;
 	seedAgentComment(artifactId, commentId, threadId);
 
-	await page.addInitScript(({ threadId, docPath, fileName }) => {
+	await page.addInitScript(({ threadId, docPath, fileName, deliverImmediately }) => {
+		localStorage.setItem('corsia.document-comments.deliver-immediately', String(deliverImmediately));
 		localStorage.setItem('corsia:artifactWorkspace:v1', JSON.stringify({
 			threads: { [threadId]: {
 				tabs: [{ instanceId: 'reopen-tab', artifactId: null, path: docPath, title: fileName, loadedRevision: null, latestRevision: null, status: 'loading' }],
 				activeTabId: 'reopen-tab', visible: true, activeSurface: 'artifact',
 			} }, splitWidth: 420,
 		}));
-	}, { threadId, docPath, fileName });
+	}, { threadId, docPath, fileName, deliverImmediately });
 	await loginByUrl(page);
 	if ((page.viewportSize()?.width ?? 0) <= 768) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 	await page.getByText(title, { exact: true }).first().click();
@@ -224,8 +226,11 @@ test('@surface:doc-reopen-feedback-delivery sends a re-opened comment to the doc
 	await resolved.getByRole('button', { name: 'Re-open', exact: true }).click();
 	// The re-opened comment is held for the owner: the header's Send is its one sender, reachable once the drawer is closed.
 	await page.getByRole('region', { name: 'Document comments', exact: true }).getByRole('button', { name: 'Close comments', exact: true }).click();
-	await expect(headerSend(page)).toHaveText('Send 1 comment');
-	await headerSend(page).click();
+	if (deliverImmediately) await expect(headerSend(page)).toHaveCount(0);
+	else {
+		await expect(headerSend(page)).toHaveText('Send 1 comment');
+		await headerSend(page).click();
+	}
 	await expect.poll(() => deliveredOwnerTask(artifactId), { timeout: 20_000 }).toMatchObject({
 		title: expect.stringMatching(/re-opened 1 comment/),
 		description: expect.stringContaining(`Comment ${commentId} (re-opened by`),

@@ -268,13 +268,16 @@
 	}
 	@media (max-width: 768px) {
 		@container doc-header (width < 408px) {
-			/* A phone's 99 and 100+ counts need the shorter visible preference label; its accessible name and 44px target stay unchanged. */
+			/* A phone's 99 and 100+ counts, and a reviewer group that overflows into "+N", need the shorter visible preference label so Send stays whole in one row; the accessible name and 44px target stay unchanged. */
 			:global(.document-tools:has(.sending-now [data-short='Send 99'])) .delivery-toggle,
-			:global(.document-tools:has(.sending-now [data-short='Send 99+'])) .delivery-toggle { gap: 0; }
+			:global(.document-tools:has(.sending-now [data-short='Send 99+'])) .delivery-toggle,
+			:global(.document-tools:has(.reviewer-group .more)) .delivery-toggle { gap: 0; }
 			:global(.document-tools:has(.sending-now [data-short='Send 99'])) .delivery-toggle > span,
-			:global(.document-tools:has(.sending-now [data-short='Send 99+'])) .delivery-toggle > span { font-size: 0; }
+			:global(.document-tools:has(.sending-now [data-short='Send 99+'])) .delivery-toggle > span,
+			:global(.document-tools:has(.reviewer-group .more)) .delivery-toggle > span { font-size: 0; }
 			:global(.document-tools:has(.sending-now [data-short='Send 99'])) .delivery-toggle > span::after,
-			:global(.document-tools:has(.sending-now [data-short='Send 99+'])) .delivery-toggle > span::after { content: 'Deliver'; font-size: var(--text-footnote); }
+			:global(.document-tools:has(.sending-now [data-short='Send 99+'])) .delivery-toggle > span::after,
+			:global(.document-tools:has(.reviewer-group .more)) .delivery-toggle > span::after { content: 'Deliver'; font-size: var(--text-footnote); }
 		}
 	}
 	@container doc-canvas (max-width: 37.5rem) {
