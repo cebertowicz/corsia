@@ -3,7 +3,7 @@ import { get } from 'svelte/store';
 import { token } from '$lib/stores/auth';
 import { clearStartupProgress, refreshStartupProgress, startupProgress } from './startupProgress';
 import { CREEP_STALE_MS } from './screenProgress';
-import { continueHandedOverScreen, dismissUpdateScreen, EXIT_HOLD_MS, handOverScreen, showLaunchStartFailed, startUpdateScreen, stopUpdateScreen, tickUpdateScreen, updateScreenView } from './screenStore';
+import { continueHandedOverScreen, dismissUpdateScreen, EXIT_HOLD_MS, handOverScreen, startUpdateScreen, stopUpdateScreen, tickUpdateScreen, updateScreenView } from './screenStore';
 import { resetUpdateStoreForTests, updateConfirmed, updateStatus, updateUnreachable, type UpdateStatus } from './store';
 import type { UpdateOperation } from './model';
 
@@ -247,23 +247,6 @@ describe('update screen store', () => {
 			await refreshStartupProgress();
 			tickUpdateScreen(longerAt);
 			expect(get(updateScreenView)).toMatchObject({ mode: 'longer', percent: before.percent });
-		});
-
-		it('shows a reopened app’s launch start that answered anything but Ready as a start that failed, at the same screen', async () => {
-			await runningUpgrade(60_000);
-			const handoff = handOverScreen('light', '/');
-			freshPage(true);
-			await refreshStartupProgress();
-			continueHandedOverScreen(handoff!, true);
-			const before = get(updateScreenView)!;
-			expect(before.mode).toBe('progress');
-			showLaunchStartFailed();
-			expect(get(updateScreenView)).toMatchObject({ mode: 'start_failed', percent: before.percent, step: before.step, serviceDown: true, failure: null });
-			// A fresh page starts without it.
-			freshPage(true);
-			await refreshStartupProgress();
-			continueHandedOverScreen(handoff!, true);
-			expect(get(updateScreenView)!.mode).toBe('progress');
 		});
 
 		it('continues back on the service page only for the same operation, then confirms and leaves', async () => {

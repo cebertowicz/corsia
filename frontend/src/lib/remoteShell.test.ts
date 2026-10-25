@@ -60,6 +60,17 @@ describe('the shell commands', () => {
 		vi.unstubAllGlobals();
 		expect(await recoverLocalService('manual')).toEqual({ recovery: 'unavailable' });
 	});
+	it('reports one fixed diagnostic for rejected or malformed recovery IPC without exposing its input', async () => {
+		vi.stubGlobal('__TAURI_INTERNALS__', { invoke: vi.fn(async () => ({ recovery: 'deferred' })) });
+		await recoverLocalService('automatic');
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+		vi.stubGlobal('__TAURI_INTERNALS__', { invoke: vi.fn(async () => { throw new Error('private recovery failure: /fixture/secret'); }) });
+		expect(await recoverLocalService('automatic')).toEqual({ recovery: 'unavailable' });
+		vi.stubGlobal('__TAURI_INTERNALS__', { invoke: vi.fn(async () => ({ recovery: 'unexpected', detail: 'private recovery failure: /fixture/secret' })) });
+		expect(await recoverLocalService('manual')).toEqual({ recovery: 'unavailable' });
+		expect(warn).toHaveBeenCalledTimes(1);
+		expect(warn).toHaveBeenCalledWith('[update] recovery start is unavailable');
+	});
 	it('is never the shell update page in the app the service serves', () => {
 		expect(onStartupShellPage()).toBe(false);
 	});

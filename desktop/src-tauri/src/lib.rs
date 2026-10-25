@@ -1025,17 +1025,22 @@ fn shell_state_script(state: &shell_state::LaunchState) -> Option<String> {
     }
 }
 
+fn retain_shell_state<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    update: impl FnOnce(&mut shell_state::ShellState),
+) -> shell_state::LaunchState {
+    let runtime = app.state::<RemoteRuntime>();
+    // A poisoned lock still holds a whole state: every writer replaces it in one assignment.
+    let mut connection = runtime.shell.lock().unwrap_or_else(PoisonError::into_inner);
+    update(&mut connection);
+    connection.state().clone()
+}
+
 fn update_shell_state<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     update: impl FnOnce(&mut shell_state::ShellState),
 ) -> Result<(), String> {
-    let runtime = app.state::<RemoteRuntime>();
-    let state = {
-        // A poisoned lock still holds a whole state: every writer replaces it in one assignment.
-        let mut connection = runtime.shell.lock().unwrap_or_else(PoisonError::into_inner);
-        update(&mut connection);
-        connection.state().clone()
-    };
+    let state = retain_shell_state(app, update);
     if let (Some(window), Some(script)) = (app.get_webview_window("main"), shell_state_script(&state)) {
         window.eval(script).map_err(|error| error.to_string())?;
     }
@@ -1501,22 +1506,26 @@ fn clear_remote_session<R: tauri::Runtime>(app: &tauri::AppHandle<R>, clear: &Re
 
 /// Puts the startup shell back in front of the person with a failure card that carries its action. Used when the
 /// page they are on has nothing left to recover with (its proxy is stopped and the local service did not come up).
-/// The failure is a state of the connection; the page-load hook draws it once the shell page's own script is running.
+/// The failure is retained before the sole navigation; the page-load hook draws it after its own script is ready.
 fn show_shell_failure<R: tauri::Runtime>(app: &tauri::AppHandle<R>, reason: &str) {
-    report_shell_state(app, |connection| connection.service_failed(reason));
+    retain_shell_state(app, |connection| connection.service_failed(reason));
     return_to_shell(app);
 }
 
-/// Navigates the window to the startup shell unless it is already there.
+fn is_startup_shell_page(actual: &str) -> bool {
+    is_shell_origin(actual) && tauri::Url::parse(actual).is_ok_and(|url| matches!(url.path(), "/" | "/index.html"))
+}
+
+/// Navigates the window to the startup shell's index page unless it is already there.
 fn return_to_shell<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     let navigated = app
         .get_webview_window("main")
         .ok_or_else(|| "the CORSIA window is unavailable".to_owned())
         .and_then(|window| {
-            if window.url().is_ok_and(|url| is_shell_origin(url.as_str())) {
+            if window.url().is_ok_and(|url| is_startup_shell_page(url.as_str())) {
                 return Ok(());
             }
-            window.navigate(tauri::Url::parse("tauri://localhost").expect("a valid URL")).map_err(|error| error.to_string())
+            window.navigate(tauri::Url::parse("tauri://localhost/index.html").expect("a valid URL")).map_err(|error| error.to_string())
         });
     if let Err(error) = navigated {
         log::error!("could not return to the startup shell: {error}");
@@ -1846,8 +1855,25 @@ enum LocalStartAnswer {
     Recovery(update_recovery::RecoveryAnswer),
 }
 
-/// A recovery start from the startup shell's update screen. It never touches the launch answer the shell keeps, so a
-/// refusal or failure stays on the update screen.
+/// Records an exceptional update-recovery wrapper error through the startup shell's existing failure path.
+fn show_recovery_failure<R: tauri::Runtime>(app: &tauri::AppHandle<R>, error: String) -> String {
+    log::error!("update recovery did not finish: {error}");
+    show_shell_failure(app, &error);
+    error
+}
+
+/// Flattens a recovery worker answer: either an inner recovery-wrapper error or a worker join error reaches the same
+/// retained failure path, while typed recovery answers remain untouched.
+fn finish_recovery<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    answer: Result<Result<update_recovery::RecoveryAnswer, String>, String>,
+) -> Result<update_recovery::RecoveryAnswer, String> {
+    answer.and_then(|answer| answer).map_err(|error| show_recovery_failure(app, error))
+}
+
+/// A recovery start from the startup shell's update screen. Typed recovery answers leave the retained launch answer
+/// alone. An exceptional wrapper error instead becomes the shell's retained failure and returns there, so its existing
+/// page-load hook owns the failure card.
 async fn recover_local_service(app: tauri::AppHandle, intent: update_recovery::RecoveryIntent) -> Result<update_recovery::RecoveryAnswer, String> {
     let recovering = app.clone();
     let answer = tauri::async_runtime::spawn_blocking(move || {
@@ -1872,8 +1898,8 @@ async fn recover_local_service(app: tauri::AppHandle, intent: update_recovery::R
         Ok::<_, String>(answer)
     })
     .await
-    .map_err(|error| format!("bringing CORSIA back did not finish: {error}"))?;
-    answer
+    .map_err(|error| format!("bringing CORSIA back did not finish: {error}"));
+    finish_recovery(&app, answer)
 }
 
 #[tauri::command]
@@ -3121,6 +3147,23 @@ mod tests {
     }
 
     #[test]
+    fn every_exceptional_update_recovery_failure_is_retained_then_navigates_once_to_the_startup_shell() {
+        let answers: [(Result<Result<update_recovery::RecoveryAnswer, String>, String>, &str); 2] = [
+            (Ok(Err("the recovery state directory is unavailable".into())), "the recovery state directory is unavailable"),
+            (Err("bringing CORSIA back did not finish: the recovery worker stopped".into()), "bringing CORSIA back did not finish: the recovery worker stopped"),
+        ];
+        for (answer, error) in answers {
+            let app = launch_app();
+            let window = app.get_webview_window("main").unwrap();
+            window.navigate(tauri::Url::parse("tauri://localhost/update.html#corsia-update=fixture").unwrap()).unwrap();
+            assert_eq!(finish_recovery(app.handle(), answer), Err(error.to_owned()));
+            let script = format!("window.__corsiaShowServiceFailure?.({});", serde_json::to_string(error).unwrap());
+            assert_eq!(shell_state_script(&launch_state(&app)).as_deref(), Some(script.as_str()));
+            assert_eq!(window.url().unwrap().as_str(), "tauri://localhost/index.html");
+        }
+    }
+
+    #[test]
     fn a_disconnect_that_cannot_bring_the_local_service_back_returns_to_a_shell_card_with_an_action() {
         let app = launch_app();
         show_shell_failure(app.handle(), "CORSIA service registration did not persist");
@@ -3602,6 +3645,22 @@ mod tests {
     }
 
     const SCREEN: &str = "corsia-update=%7B%22v%22%3A1%2C%22route%22%3A%22%2F%3Fproject%3Dabc%22%7D";
+
+    #[test]
+    fn update_screen_fragment_constants_match_the_renderer() {
+        const HANDOFF: &str = include_str!("../../../frontend/src/lib/update/shellHandoff.ts");
+        let key = UPDATE_SCREEN_KEY.strip_suffix('=').unwrap();
+        assert!(HANDOFF.contains(&format!("export const HANDOFF_KEY = '{key}';")));
+        let renderer_limit = HANDOFF
+            .lines()
+            .find_map(|line| line.strip_prefix("export const HANDOFF_MAX_CHARS = "))
+            .and_then(|value| value.strip_suffix(';'))
+            .expect("the renderer handoff limit")
+            .replace('_', "")
+            .parse::<usize>()
+            .expect("a numeric renderer handoff limit");
+        assert_eq!(renderer_limit, UPDATE_SCREEN_MAX_CHARS);
+    }
 
     #[test]
     fn a_handed_over_update_screen_never_changes_a_command_line_mode() {

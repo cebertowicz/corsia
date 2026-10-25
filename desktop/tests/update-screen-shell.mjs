@@ -68,13 +68,19 @@ const readFragment = (hash) => JSON.parse(decodeURIComponent(hash.replace(/^#cor
 const browser = await chromium.launch();
 
 /** Opens the update page with stubbed shell commands; `answers` are the recovery answers, in order. */
-async function open(hash, { answers = [], progress = 'advancing', reducedMotion = 'no-preference', readyAfter = Infinity } = {}) {
+async function open(hash, { answers = [], progress = 'advancing', reducedMotion = 'no-preference', readyAfter = Infinity, replay = null } = {}) {
 	const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, reducedMotion });
 	const page = await context.newPage();
 	await page.clock.install({ time: NOW });
-	await page.addInitScript(({ answers, progress, origin, readyAfter }) => {
+	await page.addInitScript(({ answers, progress, origin, readyAfter, replay }) => {
 		window.__CORSIA_SHELL__ = { mode: 'local' };
 		window.__calls = [];
+		if (replay && window.location.pathname === '/index.html') {
+			window.addEventListener('DOMContentLoaded', () => {
+				if (replay.kind === 'startup') window.__corsiaShowStartup?.(replay.value);
+				else window.__corsiaShowServiceFailure?.(replay.value);
+			}, { once: true });
+		}
 		let seq = 7;
 		let reads = 0;
 		window.__TAURI_INTERNALS__ = { invoke: async (command, args) => {
@@ -87,6 +93,7 @@ async function open(hash, { answers = [], progress = 'advancing', reducedMotion 
 				return { schema: 1, pid: 4242, seq, phase: 'migrating', done: 1, total: 4 };
 			}
 			if (command === 'start_local_service') {
+				sessionStorage.setItem('__corsiaStartCalls', String(Number(sessionStorage.getItem('__corsiaStartCalls') ?? '0') + 1));
 				const answer = answers.shift() ?? { recovery: 'unavailable' };
 				// An answer meant for one kind of start only: any other kind is not this computer's start to run.
 				if (answer.onlyFor && answer.onlyFor !== args?.recovery) return { recovery: 'unavailable' };
@@ -94,7 +101,7 @@ async function open(hash, { answers = [], progress = 'advancing', reducedMotion 
 			}
 			return null;
 		} };
-	}, { answers, progress, origin, readyAfter: Number.isFinite(readyAfter) ? readyAfter : Number.MAX_SAFE_INTEGER });
+	}, { answers, progress, origin, readyAfter: Number.isFinite(readyAfter) ? readyAfter : Number.MAX_SAFE_INTEGER, replay });
 	await page.goto(`${origin}/update.html#${hash}`, { waitUntil: 'load' });
 	await page.clock.runFor(50);
 	return page;
@@ -212,38 +219,34 @@ try {
 	if ((await late.evaluate(() => window.__calls.length)) !== 0) fail('the service page asked the shell for anything on arrival');
 	if (JSON.stringify(lateStarts) !== JSON.stringify([{ recovery: 'automatic' }])) fail(`the late return asked ${JSON.stringify(lateStarts)}, not only the one automatic start`);
 
-	// An app the update reopened: the window opens here with the screen native carried on the command line (a route with
-	// every character encodeURIComponent leaves alone), while its own launch start runs.
+	// An app the update reopened opens here with the screen native carried on the command line. A non-Ready answer is
+	// retained by native ShellState, then this generated hook returns to index.html; its normal page-load hook draws the
+	// existing startup guidance without asking for another start.
+	for (const [name, replay, expected] of [
+		['approval', { kind: 'startup', value: { state: 'requires_approval' } }, 'Keep CORSIA running'],
+		['disk image', { kind: 'startup', value: { state: 'disk_image' } }, 'Move CORSIA to Applications'],
+		['launch failure', { kind: 'failure', value: 'could not finish startup' }, 'CORSIA couldn’t start'],
+	]) {
+		const relaunched = await open(fragment(handoff({ route: "/?q=(it's)!*~", seqChangedAt: NOW - 5_000 })), { replay });
+		if (!relaunched.url().includes('/update.html#corsia-update=')) fail(`the ${name} page left for ${relaunched.url()} before its answer`);
+		if ((await percent(relaunched)) !== 52.4) fail(`the ${name} page did not draw the carried percentage before its answer`);
+		if (replay.kind === 'startup') await relaunched.evaluate((startup) => window.__corsiaShowStartup?.(startup), replay.value);
+		else await relaunched.evaluate((reason) => window.__corsiaShowServiceFailure?.(reason), replay.value);
+		await relaunched.waitForURL(`${origin}/index.html`, { timeout: 5_000 }).catch(() => fail(`the ${name} hook did not return to the startup page`));
+		await relaunched.waitForFunction((line) => document.body.innerText.includes(line), expected, { timeout: 5_000 }).catch(() => fail(`the startup page did not render ${name} guidance`));
+		if (Number(await relaunched.evaluate(() => sessionStorage.getItem('__corsiaStartCalls') ?? '0')) !== 0) fail(`the ${name} guidance started CORSIA again`);
+	}
+
+	// Ready retains the original handoff and returns to the service page as before.
 	const carriedRoute = "/?q=(it's)!*~";
-	const relaunched = await open(fragment(handoff({ route: carriedRoute, seqChangedAt: NOW - 5_000 })));
-	if (!relaunched.url().includes('/update.html#corsia-update=')) fail(`the reopened app's page left for ${relaunched.url()} before any answer`);
-	if ((await percent(relaunched)) !== 52.4) fail('the reopened app does not draw the handed-over percentage before its start answers');
-	const before = await text(relaunched);
-	if (!before.includes('Updating CORSIA') || before.includes('Start fresh')) fail('the reopened app does not draw the update screen alone before its start answers');
-	// Its launch start answered without a ready service: the same screen shows a start that failed, never the startup
-	// page's choices, and nothing is started for it.
-	await relaunched.evaluate(() => window.__corsiaShowStartup?.({ state: 'requires_approval' }));
-	await relaunched.clock.runFor(100);
-	const failedBody = await text(relaunched);
-	if (!failedBody.includes('It didn’t start on its own.')) fail('a launch start that is not Ready is not shown as a start that failed');
-	if (failedBody.includes('Start fresh') || failedBody.includes('Allow in Login Items')) fail('a launch start that is not Ready showed the startup page’s choices');
-	if (!(await relaunched.getByRole('button', { name: 'Start CORSIA' }).isVisible())) fail('a launch start that is not Ready offers no Start CORSIA');
-	if ((await percent(relaunched)) < 52.4) fail('a launch start that is not Ready reset the percentage');
-	if ((await starts(relaunched)).length) fail('a launch answer asked for a start');
-	// A later Ready (the launch start's, as the shell draws it on load) returns to the kept page with the latest screen.
-	const launchHome = relaunched.waitForURL((url) => url.pathname === '/' && url.hash.startsWith('#corsia-update='), { timeout: 5_000 });
-	await relaunched.evaluate((o) => window.__corsiaShowStartup?.({ state: 'ready', url: `${o}/#corsia-update=older` }), origin);
-	await relaunched.clock.runFor(100);
+	const readyLaunch = await open(fragment(handoff({ route: carriedRoute, seqChangedAt: NOW - 5_000 })));
+	const launchHome = readyLaunch.waitForURL((url) => url.pathname === '/' && url.hash.startsWith('#corsia-update='), { timeout: 5_000 });
+	await readyLaunch.evaluate((o) => window.__corsiaShowStartup?.({ state: 'ready', url: `${o}/#corsia-update=older` }), origin);
+	await readyLaunch.clock.runFor(100);
 	await launchHome.catch(() => fail('a Ready launch answer did not return to the service page'));
-	const landed = new URL(relaunched.url());
+	const landed = new URL(readyLaunch.url());
 	if (landed.search !== new URL(carriedRoute, origin).search) fail(`a Ready launch answer returned to ${landed.search}, not the kept page`);
 	if (readFragment(landed.hash).operationId !== 'update-1' || readFragment(landed.hash).model.value < 52.4) fail('a Ready launch answer returned without the latest screen');
-
-	// A launch start that failed outright shows the same start failure.
-	const failedLaunch = await open(fragment(handoff()));
-	await failedLaunch.evaluate(() => window.__corsiaShowServiceFailure?.('could not start'));
-	await failedLaunch.clock.runFor(100);
-	if (!(await text(failedLaunch)).includes('It didn’t start on its own.')) fail('a failed launch start is not shown as a start that failed');
 
 	// Reduced motion keeps the bar still.
 	const still = await open(fragment(handoff()), { reducedMotion: 'reduce' });

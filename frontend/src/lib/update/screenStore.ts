@@ -55,7 +55,6 @@ let latch: Latch | null = null;
 /** A screen another page handed over, waiting for this page's own reading of the same operation. */
 let handoff: { screen: ScreenHandoff; serviceDown: boolean } | null = null;
 let dismissedFailureOperationId: string | null = null;
-let launchStartFailed = false;
 /** A confirmed operation stays gone while the last status poll still calls it in flight. */
 let completedOperationId: string | null = null;
 let timer: ReturnType<typeof setInterval> | null = null;
@@ -181,7 +180,7 @@ export function tickUpdateScreen(now = Date.now()): void {
 		updateScreenView.set({ mode: 'done', step: 'verifying', label: STEP_LABEL.verifying, percent: 100, estimated: false, fromVersion: l.fromVersion, toVersion: l.toVersion, failure: null, serviceDown: false, startupProgressUnavailable: false });
 		return;
 	}
-	if (unreachable && (file?.phase === 'failed' || launchStartFailed)) {
+	if (unreachable && file?.phase === 'failed') {
 		updateScreenView.set({ mode: 'start_failed', step: l.model.step, label: STEP_LABEL[l.model.step], percent: l.model.percent, estimated: false, fromVersion: l.fromVersion, toVersion: l.toVersion, failure: null, serviceDown: true, startupProgressUnavailable: false });
 		return;
 	}
@@ -215,15 +214,6 @@ function adoptHandoff(operation: UpdateOperation | null): void {
 		estimateFrom: null, failure: screen.failure && { code: screen.failure.code, detail: null, verdict: screen.failure.verdict },
 		doneAt: null, usualSeconds: screen.usualSeconds,
 	};
-}
-
-/**
- * A reopened app's own launch start answered without a ready service (`shellEntry.ts`): while the service is down the
- * screen shows it as a start that failed, at the same percentage, never the startup page's own choices.
- */
-export function showLaunchStartFailed(): void {
-	launchStartFailed = true;
-	tickUpdateScreen();
 }
 
 /** Continue a screen another page handed over, from the next recompute on. */
@@ -274,6 +264,5 @@ export function stopUpdateScreen(): void {
 	returnToChat = undefined;
 	dismissedFailureOperationId = null;
 	handoff = null;
-	launchStartFailed = false;
 	resetUpdateScreen(false);
 }

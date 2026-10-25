@@ -80,21 +80,35 @@ function isRecoveryUrl(value: unknown): value is string {
 	}
 }
 
+let recoveryFailureReported = false;
+function unavailableRecovery(): RecoveryAnswer {
+	if (!recoveryFailureReported) {
+		console.warn('[update] recovery start is unavailable');
+		recoveryFailureReported = true;
+	}
+	return { recovery: 'unavailable' };
+}
+
 /** Ask the shell to bring this computer's service back during an update. Only the shell's own page may ask. */
 export async function recoverLocalService(intent: RecoveryIntent): Promise<RecoveryAnswer> {
 	let result: unknown;
 	try {
 		result = await invoke('start_local_service', { recovery: intent });
 	} catch {
-		// A refused or malformed invoke proves no narrow admission, so it must not offer another start.
-		return { recovery: 'unavailable' };
+		// A refused invoke proves no narrow admission, so it must not offer another start.
+		return unavailableRecovery();
 	}
 	const answer = result && typeof result === 'object' ? result as { recovery?: unknown; url?: unknown } : {};
 	if (answer.recovery === 'ready') {
-		return isRecoveryUrl(answer.url) ? { recovery: 'ready', url: answer.url } : { recovery: 'unavailable' };
+		if (!isRecoveryUrl(answer.url)) return unavailableRecovery();
+		recoveryFailureReported = false;
+		return { recovery: 'ready', url: answer.url };
 	}
-	if (answer.recovery === 'deferred' || answer.recovery === 'manual_available' || answer.recovery === 'unavailable' || answer.recovery === 'not_started') return { recovery: answer.recovery };
-	return { recovery: 'unavailable' };
+	if (answer.recovery === 'deferred' || answer.recovery === 'manual_available' || answer.recovery === 'unavailable' || answer.recovery === 'not_started') {
+		recoveryFailureReported = false;
+		return { recovery: answer.recovery };
+	}
+	return unavailableRecovery();
 }
 
 /** The desktop shell's PID-validated, redacted startup-progress record; absent for browsers and remote shells. */

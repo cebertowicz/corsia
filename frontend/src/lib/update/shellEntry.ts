@@ -6,24 +6,28 @@
  *
  * An app the update reopened opens its window here with the screen it was handed while its launch start runs as it
  * always does. The shell draws that start's answer on every page it loads, through the hooks below: Ready returns to
- * the service's page like the shell's own ready reading; any other answer stays on this screen as a start that failed.
+ * the service's page like the shell's own ready reading; every other answer returns to the startup page, where native
+ * ShellState and its normal hook render the answer's existing guidance.
  */
 import '../../app.css';
 import { mount } from 'svelte';
 import UpdateScreen from '$lib/components/UpdateScreen.svelte';
 import { markStartupShellPage } from '$lib/remoteShell';
-import { continueHandedOverScreen, handOverScreen, showLaunchStartFailed, startUpdateScreen } from './screenStore';
+import { continueHandedOverScreen, handOverScreen, startUpdateScreen } from './screenStore';
 import { encodeHandoff, keepReturnRoute, readHandoff } from './shellHandoff';
 import { launchReadyUrl, refreshStartupProgress } from './startupProgress';
 import { updateUnreachable } from './store';
 
 const shellHooks = window as unknown as { __corsiaShowStartup?: (startup: unknown) => void; __corsiaShowServiceFailure?: (reason: unknown) => void };
+function showStartupShell(): void {
+	window.location.replace('index.html');
+}
 shellHooks.__corsiaShowStartup = (startup) => {
 	const answer = startup && typeof startup === 'object' ? (startup as { state?: unknown; url?: unknown }) : null;
 	if (answer?.state === 'ready' && typeof answer.url === 'string') launchReadyUrl.set(answer.url);
-	else showLaunchStartFailed();
+	else showStartupShell();
 };
-shellHooks.__corsiaShowServiceFailure = () => showLaunchStartFailed();
+shellHooks.__corsiaShowServiceFailure = () => showStartupShell();
 
 async function begin(): Promise<void> {
 	const handoff = readHandoff(window.location.hash);

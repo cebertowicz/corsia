@@ -240,6 +240,7 @@ mod tests {
         kickstarts: Cell<u32>,
         proofs: Cell<u32>,
         state: &'a Path,
+        held_at_first_effect: Cell<Option<bool>>,
         held_through_proof: Cell<Option<bool>>,
     }
 
@@ -254,6 +255,7 @@ mod tests {
             kickstarts: Cell::new(0),
             proofs: Cell::new(0),
             state: &fixture.state,
+            held_at_first_effect: Cell::new(None),
             held_through_proof: Cell::new(None),
         }
     }
@@ -280,6 +282,9 @@ mod tests {
         }
         fn kickstart(&self) -> Result<(), String> {
             self.kickstarts.set(self.kickstarts.get() + 1);
+            // An independent opener is refused before the first start effect, not only while its proof runs.
+            let busy = app_paths::try_lock_update_in_existing(self.state).unwrap().is_none();
+            self.held_at_first_effect.set(Some(busy));
             Ok(())
         }
         fn wait_for_startup(&self) -> Result<(), String> {
@@ -321,6 +326,7 @@ mod tests {
             RecoveryAnswer::Ready { url: "http://127.0.0.1:47895".into() }
         );
         assert_eq!((host.kickstarts.get(), host.proofs.get()), (1, 1));
+        assert_eq!(host.held_at_first_effect.get(), Some(true), "the update lock was not held at the first start effect");
         assert_eq!(host.held_through_proof.get(), Some(true), "the update lock was not held through the startup proof");
         assert!(app_paths::try_lock_update_in_existing(&fixture.state).unwrap().is_some(), "the lock outlived the start");
 
