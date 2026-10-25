@@ -116,6 +116,8 @@ if "/api/system/drain/update?" in url and serving:
     (state / ("settled_operation" if body["healthy"] else "failed_operation")).write_text(body["operation_id"])
     print(json.dumps({"operation_id": body["operation_id"], "status": outcome}))
     sys.exit(0)
+if url.endswith("/api/system/stop-local-model") and serving:
+    sys.exit(22 if (state / "fail_stop_local_model").exists() else 0)
 if url.endswith("/api/version") and serving:
     # Whether the lifecycle shell holds the update lock while it proves a version.
     if os.environ.get("CORSIA_STATE_DIR"):
@@ -463,6 +465,28 @@ def test_app_mode_refuses_to_start_while_the_app_moves_the_data_folder(app):
 
     stopped = app.run("stop")
     assert "moving CORSIA's data" not in stopped.stderr
+
+
+def test_app_mode_stop_can_stop_the_local_model_before_bootout(app):
+    app.load()
+
+    result = app.run("stop", "--stop-local-model")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert app.calls("curl_post")[-1].endswith("/api/system/stop-local-model")
+    assert app.launchd_calls() == [f"bootout --wait gui/{os.getuid()}/{LABEL}"]
+
+
+def test_app_mode_stop_keeps_the_service_when_the_local_model_will_not_stop(app):
+    app.load()
+    (app.launchd / "fail_stop_local_model").write_text("")
+
+    result = app.run("stop", "--stop-local-model")
+
+    assert result.returncode != 0
+    assert "Could not stop the local model" in result.stdout + result.stderr
+    assert app.launchd_calls() == []
+    assert (app.launchd / "loaded").exists()
 
 
 def test_the_same_scripts_outside_an_app_bundle_are_a_checkout(app):

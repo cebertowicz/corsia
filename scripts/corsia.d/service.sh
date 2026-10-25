@@ -541,6 +541,12 @@ service_start() {
         && ok "$(service_label) bootstrapped using the installed definition (RunAtLoad starts it). Source changes are not rendered by start; run corsia service install before start, or corsia service restart."
 }
 
+stop_local_model_before_bootout() {
+    local port="$1"
+    curl -sf --max-time 60 -X POST "http://127.0.0.1:$port/api/system/stop-local-model" \
+        -H "Content-Type: application/json" -d '{}' > /dev/null 2>&1
+}
+
 service_stop() {
     local port="$BACKEND_PORT" drain_attempted=false plist label domain bootout_status
     if ! service_is_loaded; then
@@ -566,6 +572,14 @@ service_stop() {
         drain_attempted=true
         DRAIN_FAILURE_ACTION=hold drain_and_wait "service stop" "$port" \
             || warn "Drain did not complete; stopping anyway"
+        # Opt-in (--stop-local-model): stop the local model CORSIA started only
+        # once in-flight turns have finished, while the service can still
+        # answer. A failure here aborts with the service up and accepting turns.
+        if [ "${STOP_LOCAL_MODEL:-false}" = true ] && ! stop_local_model_before_bootout "$port"; then
+            cancel_failed_drain "$(current_drain_url "$port")" "$CORSIA_RESTART_OPERATION_ID" || :
+            fail "Could not stop the local model; $label is still running"
+            return 1
+        fi
     fi
     if bootout_service_and_wait "$domain" "$label"; then
         :

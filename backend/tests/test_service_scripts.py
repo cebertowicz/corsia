@@ -1162,6 +1162,74 @@ service_stop
     assert "failure-action=hold" in trace.read_text()
 
 
+def test_service_stop_stops_the_local_model_after_the_drain_and_before_bootout(
+    tmp_path: Path,
+) -> None:
+    """T15: in-flight turns finish (drain) before the local model stops."""
+    trace = tmp_path / "launchctl.log"
+    result = _run_bash(
+        _SERVICE_STOP_PREAMBLE
+        + """
+CORSIA_RESTART_OPERATION_ID=op-stop
+drain_and_wait() { printf 'drain\\n' >> "$LAUNCHCTL_TRACE"; }
+curl() { printf 'curl %s\\n' "$*" >> "$LAUNCHCTL_TRACE"; }
+cancel_failed_drain() { printf 'cancel-drain\\n' >> "$LAUNCHCTL_TRACE"; }
+STOP_LOCAL_MODEL=true
+service_stop
+""",
+        env={"LAUNCHCTL_TRACE": str(trace)},
+    )
+
+    assert result.returncode == 0, result.stderr
+    steps = trace.read_text().splitlines()
+    assert steps[0] == "drain"
+    assert "-X POST http://127.0.0.1:" in steps[1] and steps[1].endswith(
+        "/api/system/stop-local-model -H Content-Type: application/json -d {}"
+    )
+    assert steps[2:] == ["bootout com.corsia.prod"]
+
+
+def test_service_stop_without_the_flag_leaves_the_local_model_alone(tmp_path: Path) -> None:
+    trace = tmp_path / "launchctl.log"
+    result = _run_bash(
+        _SERVICE_STOP_PREAMBLE
+        + """
+drain_and_wait() { printf 'drain\\n' >> "$LAUNCHCTL_TRACE"; }
+curl() { printf 'curl %s\\n' "$*" >> "$LAUNCHCTL_TRACE"; }
+service_stop
+""",
+        env={"LAUNCHCTL_TRACE": str(trace)},
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert trace.read_text().splitlines() == ["drain", "bootout com.corsia.prod"]
+
+
+def test_a_local_model_stop_failure_cancels_the_drain_and_keeps_the_service(
+    tmp_path: Path,
+) -> None:
+    """T16: an abort after the drain leaves the running service accepting turns."""
+    trace = tmp_path / "launchctl.log"
+    result = _run_bash(
+        _SERVICE_STOP_PREAMBLE
+        + """
+CORSIA_RESTART_OPERATION_ID=op-stop
+drain_and_wait() { printf 'drain\\n' >> "$LAUNCHCTL_TRACE"; }
+curl() { return 22; }
+cancel_failed_drain() {
+    printf 'cancel-drain %s action=%s\\n' "$2" "${DRAIN_FAILURE_ACTION:-release}" >> "$LAUNCHCTL_TRACE"
+}
+STOP_LOCAL_MODEL=true
+service_stop
+""",
+        env={"LAUNCHCTL_TRACE": str(trace)},
+    )
+
+    assert result.returncode != 0
+    assert "Could not stop the local model" in result.stdout + result.stderr
+    assert trace.read_text().splitlines() == ["drain", "cancel-drain op-stop action=release"]
+
+
 def test_service_stop_refuses_to_drain_a_listener_not_owned_by_launchd(
     tmp_path: Path,
 ) -> None:
