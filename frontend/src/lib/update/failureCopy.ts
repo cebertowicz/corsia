@@ -124,7 +124,7 @@ export function failureCopy(failure: UpdateFailure): FailureCopy {
 			return {
 				title: "Update didn't finish",
 				headline: "Couldn't confirm the new version.",
-				body: "The update didn't finish its checks. The running version isn't confirmed.",
+				body: "The update's last check didn't pass, so CORSIA can't tell which version is running.",
 				toastLine: null,
 				retryLabel: 'Try again',
 			};
@@ -132,7 +132,7 @@ export function failureCopy(failure: UpdateFailure): FailureCopy {
 			return {
 				title: "Update didn't finish",
 				headline: 'CORSIA started a different version.',
-				body: 'The running version differs from the update requested.',
+				body: "It isn't the version this update was for.",
 				toastLine: null,
 				retryLabel: 'Try again',
 			};
