@@ -103,18 +103,18 @@ def _build_argv(
     return process.build_argv(host, port, settings, executable=executable)
 
 
-def _is_managed_omlx_row(settings: dict) -> bool:
-    from llm.managed_omlx_binary import managed_omlx_paths
+def _is_managed_omlx_server(server_id: str) -> bool:
+    from llm.managed_omlx_binary import is_corsia_managed_server
+    from llm.network_discovery import get_server
 
-    # Identity first: a moved state folder leaves an older base_path behind.
-    return settings.get("corsia_managed") is True or settings.get("base_path") == str(
-        managed_omlx_paths().base_path
-    )
+    return is_corsia_managed_server(get_server(server_id) or {})
 
 
-def _managed_omlx_argv(host: str, port: int, settings: dict) -> list[str] | dict[str, Any]:
+def _managed_omlx_argv(
+    host: str, port: int, settings: dict, *, managed: bool,
+) -> list[str] | dict[str, Any]:
     """Resolve the bundled executable only for CORSIA's setup-created row."""
-    if _is_managed_omlx_row(settings):
+    if managed:
         install_error = process.managed_omlx_install_error()
         if install_error:
             return {"ok": False, "message": install_error}
@@ -260,12 +260,10 @@ async def start_server(cfg: dict) -> dict[str, Any]:
         }
 
     settings = await run_in_db(_resolve_settings, cfg)
-    managed = _is_managed_omlx_row(settings)
+    managed = await run_in_db(_is_managed_omlx_server, sid)
     if managed:
-        settings, refused = await _managed_launch_settings(cfg, settings, _resolve_settings)
-        if refused:
-            return refused
-    argv = _managed_omlx_argv(host, int(port), settings)
+        settings = _managed_launch_settings(settings)
+    argv = _managed_omlx_argv(host, int(port), settings, managed=managed)
     if isinstance(argv, dict):
         return argv
 

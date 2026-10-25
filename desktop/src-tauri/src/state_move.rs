@@ -320,18 +320,6 @@ fn finish(paths: &Paths, progress: &mut Progress<'_>) -> Result<Outcome, String>
     Ok(Outcome::Moved)
 }
 
-/// On every launch of a moved install: the old folder should stay gone, since
-/// something writing there would split the data. It is logged, by count only, and
-/// never stops CORSIA from starting.
-pub fn report_legacy_reappeared(paths: &Paths) -> Option<usize> {
-    if !matches!(service_file_names(paths, &paths.target), Ok(true)) {
-        return None;
-    }
-    let count = fs::read_dir(&paths.legacy).ok()?.count();
-    log::warn!("data folder move: the old data folder exists again with {count} entries");
-    Some(count)
-}
-
 fn skip(paths: &Paths, detail: String, tell: Option<Told>) -> Result<Outcome, String> {
     log::warn!("data folder move skipped this launch: {detail}");
     clear_journal(paths)?;

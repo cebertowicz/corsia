@@ -218,7 +218,6 @@ def _runtime_paths_for_workspace(
 ) -> RuntimePaths:
     """Build a v2 selection, preserving an existing workspace identity."""
     root = workspace.expanduser().resolve()
-    fallback_state = default_state_root()
     bootstrap_status = _bootstrap_path_status()
     if bootstrap_status is None:
         raise _sandboxed_bootstrap_denial_error()
@@ -229,8 +228,9 @@ def _runtime_paths_for_workspace(
         if workspace_name is not None
         else (existing.workspace.name if existing else root.name or "workspace")
     )
+    # Resolved only when used: a bootstrapped install keeps its own state root.
     state_root = (
-        fallback_state
+        default_state_root()
         if os.environ.get("CORSIA_STATE_DIR") or existing is None
         else existing.state_root
     )

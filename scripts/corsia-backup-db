@@ -48,22 +48,15 @@ elif bootstrap.is_file():
     else:
         raise SystemExit("invalid CORSIA bootstrap")
 elif workspace_override:
-    # The source-install default of backend/infra/platform_paths.py, inlined
-    # because this runs on the system Python: a pre-release install still on
-    # the legacy folder keeps it until its new root has a database.
     home = pathlib.Path.home()
     if sys.platform == "darwin":
-        base = home / "Library" / "Application Support"
-        state_root = base / "CORSIA" / "source-state"
+        state_root = home / "Library" / "Application Support" / "CORSIA" / "source-state"
     elif sys.platform.startswith("win"):
         base = pathlib.Path(os.environ.get("LOCALAPPDATA") or home / "AppData" / "Local")
         state_root = base / "CORSIA" / "state"
     else:
         base = pathlib.Path(os.environ.get("XDG_STATE_HOME") or home / ".local" / "state")
         state_root = base / "corsia" / "state"
-    legacy = base / "com.cebertowicz.corsia" / "state"
-    if not (state_root / "corsia.db").exists() and (legacy / "corsia.db").is_file():
-        state_root = legacy
     state_root = state_root.expanduser().resolve()
 else:
     raise SystemExit("CORSIA runtime is not configured")

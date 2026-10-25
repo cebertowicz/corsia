@@ -2,19 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import logging
-from collections.abc import Callable
-from typing import Any
+from pathlib import Path
 
-from infra.db_async import run_in_db
 from llm.providers.omlx_endpoints import _resolve_endpoint as _resolve_endpoint_via_freshness
 
 log = logging.getLogger("llm.providers.omlx.supervisor")
-
-MOVED_SETTINGS_UNREPOINTED = (
-    "Local models didn’t start: CORSIA moved your data but couldn’t update their settings to match. "
-    "Choose Start to try again."
-)
 
 
 def resolve_settings(cfg: dict) -> dict:
@@ -78,32 +72,35 @@ def listen_host(resolved: str) -> str:
     return LOCAL_BIND if bind == LOCAL_BIND else resolved
 
 
-def _names_older_base(settings: dict, base: str) -> bool:
-    stored = settings.get("base_path")
-    return isinstance(stored, str) and bool(stored) and stored != base
+def _ssd_cache_enabled(settings_path: Path) -> bool:
+    """Whether oMLX's own settings leave its SSD cache on (its default when unread)."""
+    try:
+        raw = json.loads(settings_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return True
+    cache = raw.get("cache") if isinstance(raw, dict) else None
+    return not (isinstance(cache, dict) and cache.get("enabled") is False)
 
 
-async def managed_launch_settings(
-    cfg: dict, settings: dict, reread: Callable[[dict], dict],
-) -> tuple[dict, dict[str, Any] | None]:
-    """Return CORSIA's managed row's launch settings, or a refusal to start."""
+def managed_launch_settings(settings: dict) -> dict:
+    """Return CORSIA's managed server's launch settings, every folder from the current state root.
+
+    oMLX's command-line folders beat the ones its own settings.json stores, so a
+    state root that moved never leaves the server reading or writing an older
+    folder, whatever that file or the server row still names. A cache that
+    oMLX's settings turn off stays off: passing the cache folder would turn it on.
+    """
     from llm.local_profiles import OMLX_GLOBAL_SETTINGS
     from llm.managed_omlx_binary import managed_omlx_paths
 
-    # The state root owns where the managed server writes. A row still on an
-    # older base means the startup heal could not repoint every oMLX file, and
-    # starting there would recreate the old data folder.
-    base = str(managed_omlx_paths().base_path)
-    if _names_older_base(settings, base):
-        from infra.moved_state_heal import heal_managed_omlx
-
-        await run_in_db(heal_managed_omlx)
-        settings = await run_in_db(reread, cfg)
-    if _names_older_base(settings, base):
-        log.warning("start_server: managed oMLX row %s still names an older base; not starting",
-                    cfg.get("server_id"))
-        return settings, {"ok": False, "message": MOVED_SETTINGS_UNREPOINTED}
-    # This is a launch-time setting too: applying it here updates existing
-    # CORSIA-managed installs at their next restart, without writing to a
-    # person's oMLX row or server settings.
-    return {**settings, **OMLX_GLOBAL_SETTINGS, "base_path": base}, None
+    paths = managed_omlx_paths()
+    cache_on = not settings.get("no_cache") and _ssd_cache_enabled(paths.settings_path)
+    folders = {
+        "base_path": str(paths.base_path),
+        "model_dir": str(paths.model_dir),
+        "paged_ssd_cache_dir": str(paths.base_path / "cache") if cache_on else None,
+    }
+    # The global values are launch-time settings too: applying them here updates
+    # existing CORSIA-managed installs at their next restart, without writing to
+    # a person's oMLX row or server settings.
+    return {**settings, **OMLX_GLOBAL_SETTINGS, **folders}

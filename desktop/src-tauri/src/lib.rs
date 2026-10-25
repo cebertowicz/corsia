@@ -801,7 +801,7 @@ fn start_service_in<R: tauri::Runtime>(
     // An adopted install's data leaves the folder named for the old identifier before
     // anything attaches to or starts the service; a skip starts it where it is.
     let move_paths = state_move::Paths::for_home(&home, &app_dir);
-    let moved = {
+    {
         let mut mover =
             state_move::AppService::new(bundled_resource_dir(app), first_run::recorded_port(&app_dir));
         let outcome = state_move::run(&move_paths, &mut mover, &mut |percent| {
@@ -818,8 +818,8 @@ fn start_service_in<R: tauri::Runtime>(
             thread::sleep(told.hold());
         }
         set_adoption_phase(service, None);
-        outcome? == state_move::Outcome::Moved
-    };
+        outcome?;
+    }
     if let Some(startup) = attach_healthy_active_service(app, service, &app_dir)? {
         return Ok(startup);
     }
@@ -904,7 +904,6 @@ fn start_service_in<R: tauri::Runtime>(
     match register_or_report_status(port)? {
         service_management::ServiceStatus::Enabled => {
             wait_for_service(port, &app_dir)?;
-            state_move::report_legacy_reappeared(&move_paths);
             grant_local_service_origin(app, service, port)?;
             Ok(ServiceStartup::Ready {
                 url: service_url(port),

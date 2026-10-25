@@ -1,18 +1,19 @@
-"""T7: after the state folder moves, startup repoints the stored state paths."""
+"""T7: after the state folder moves, nothing keeps reading or writing the old one."""
 
 from __future__ import annotations
 
+import asyncio
 import json
 
 import pytest
 
 
-def _register_moved_install(tmp_path, monkeypatch):
+def _register_moved_install(tmp_path, monkeypatch, *, cache: dict | None = None):
     from infra.managed_process_store import upsert_transition
     from llm import network_discovery as discovery
     from llm.managed_omlx_binary import MANAGED_INSTANCE_ID
 
-    old_root = tmp_path / "com.cebertowicz.corsia"
+    old_root = tmp_path / "older-root" / "state"
     new_root = tmp_path / "CORSIA" / "state"
     old_base = old_root / "managed-omlx"
     new_base = new_root / "managed-omlx"
@@ -20,19 +21,21 @@ def _register_moved_install(tmp_path, monkeypatch):
     (new_root / "runtime" / "managed-processes").mkdir(parents=True)
     monkeypatch.setattr("infra.config.STATE_ROOT", new_root)
     monkeypatch.setattr("infra.config.RUNTIME_DIR", new_root / "runtime")
+    # The moved oMLX folder still names the old place everywhere it stores a path.
     (new_base / "settings.json").write_text(json.dumps({
+        "base_path": str(old_base),
         "server": {"port": 8210},
-        "model": {"model_dir": str(old_base / "models")},
-        "cache": {"paged_ssd_cache_dir": str(old_base / "cache"), "label": "com.cebertowicz.corsia-ish"},
+        "model": {"model_dir": str(old_base / "models"), "model_dirs": [str(old_base / "models")]},
+        "cache": cache if cache is not None else {"ssd_cache_dir": str(old_base / "cache")},
     }))
-    (new_base / "extra.yaml").write_text(f"log_dir: {old_base}/logs\nother: {old_base}x\n")
     server_id = discovery.upsert_server(
         provider="omlx", instance_id=MANAGED_INSTANCE_ID, instance_name="Local",
         host="127.0.0.1", port=8210, status="offline", kind="managed", source="corsia",
     )
+    # A row written before setup flagged it: identity is the row's own columns.
     discovery.set_server_metadata(
         server_id, base_path=str(old_base), model_dir=str(old_base / "models"),
-        paged_ssd_cache_dir=str(old_base / "cache"), corsia_managed=True,
+        paged_ssd_cache_dir=str(old_base / "cache"),
     )
     row = {
         "handle": "h-live", "thread_id": "t1", "turn_id": "turn-1", "long_running": 1,
@@ -46,81 +49,90 @@ def _register_moved_install(tmp_path, monkeypatch):
     return server_id, old_root, new_root
 
 
-def test_heal_repoints_managed_omlx_and_live_handles(isolated_db, tmp_path, monkeypatch) -> None:
-    from infra.database import get_db
-    from infra.moved_state_heal import heal_moved_state_paths
-    from llm import network_discovery as discovery
-    from llm.providers import omlx_process
-    from llm.providers.omlx_supervisor import _is_managed_omlx_row
+def _launch_argv(server_id: str, monkeypatch) -> tuple[dict, list[str]]:
+    from llm.providers import omlx_supervisor as sup
 
+    argv: list[str] = []
+
+    class Spawned:
+        pid = 1234
+
+    async def healthy(*_args, **_kwargs):
+        return "healthy"
+
+    def spawn(observed_argv, _log_path):
+        argv.extend(observed_argv)
+        return Spawned()
+
+    monkeypatch.setattr(sup, "_port_owner_pid", lambda *_args: None)
+    monkeypatch.setattr(sup.process, "managed_omlx_install_error", lambda: None)
+    monkeypatch.setattr(sup.process, "managed_omlx_executable", lambda: "/bundled/omlx")
+    monkeypatch.setattr(sup, "_spawn_process", spawn)
+    monkeypatch.setattr(sup, "_wait_for_healthy", healthy)
+    monkeypatch.setattr(sup, "_mark_endpoint_alive", lambda *_args: None)
+    result = asyncio.run(sup.start_server({"server_id": server_id, "host": "127.0.0.1", "port": 8210}))
+    return result, argv
+
+
+def _flag(argv: list[str], flag: str) -> str | None:
+    return argv[argv.index(flag) + 1] if flag in argv else None
+
+
+def test_a_moved_managed_omlx_launches_only_on_current_folders(isolated_db, tmp_path, monkeypatch) -> None:
     server_id, old_root, new_root = _register_moved_install(tmp_path, monkeypatch)
     new_base = new_root / "managed-omlx"
 
+    result, argv = _launch_argv(server_id, monkeypatch)
+
+    assert result["ok"] is True
+    assert argv[0] == "/bundled/omlx"
+    assert _flag(argv, "--base-path") == str(new_base)
+    assert _flag(argv, "--model-dir") == str(new_base / "models")
+    assert _flag(argv, "--paged-ssd-cache-dir") == str(new_base / "cache")
+    assert not any(str(old_root) in arg for arg in argv)
+
+
+def test_a_cache_that_omlx_settings_turn_off_stays_off(isolated_db, tmp_path, monkeypatch) -> None:
+    server_id, old_root, _new_root = _register_moved_install(tmp_path, monkeypatch, cache={"enabled": False})
+
+    result, argv = _launch_argv(server_id, monkeypatch)
+
+    assert result["ok"] is True
+    assert "--paged-ssd-cache-dir" not in argv
+    assert not any(str(old_root) in arg for arg in argv)
+
+
+def test_a_person_s_own_omlx_keeps_its_own_folders(isolated_db, tmp_path, monkeypatch) -> None:
+    from llm import network_discovery as discovery
+
+    monkeypatch.setattr("infra.config.STATE_ROOT", tmp_path / "CORSIA" / "state")
+    server_id = discovery.upsert_server(
+        provider="omlx", instance_id="theirs", instance_name="Mine",
+        host="127.0.0.1", port=8000, status="offline", kind="network", source="discovered",
+    )
+    discovery.set_server_metadata(server_id, base_path="/Users/someone/.omlx", model_dir="/Volumes/models")
+    monkeypatch.setattr("llm.providers.omlx_supervisor.shutil.which", lambda _name: "/opt/homebrew/bin/omlx")
+
+    result, argv = _launch_argv(server_id, monkeypatch)
+
+    assert result["ok"] is True
+    assert argv[0] == "/opt/homebrew/bin/omlx"
+    assert _flag(argv, "--base-path") == "/Users/someone/.omlx"
+    assert _flag(argv, "--model-dir") == "/Volumes/models"
+
+
+def test_heal_repoints_live_handles_only(isolated_db, tmp_path, monkeypatch) -> None:
+    from infra.database import get_db
+    from infra.moved_state_heal import heal_moved_state_paths
+
+    _server_id, old_root, new_root = _register_moved_install(tmp_path, monkeypatch)
+
     heal_moved_state_paths()
 
-    metadata = discovery.get_server_metadata(server_id)
-    assert metadata["base_path"] == str(new_base)
-    assert metadata["model_dir"] == str(new_base / "models")
-    assert metadata["paged_ssd_cache_dir"] == str(new_base / "cache")
-    assert discovery.get_server(server_id)["id"] == server_id
-    assert _is_managed_omlx_row(metadata)
-    argv = omlx_process.build_argv("127.0.0.1", 8210, metadata, executable="/bundle/omlx")
-    assert argv[argv.index("--base-path") + 1] == str(new_base)
-    settings = json.loads((new_base / "settings.json").read_text())
-    assert settings["model"]["model_dir"] == str(new_base / "models")
-    assert settings["cache"] == {"paged_ssd_cache_dir": str(new_base / "cache"),
-                                 "label": "com.cebertowicz.corsia-ish"}
-    assert (new_base / "extra.yaml").read_text() == (
-        f"log_dir: {new_base}/logs\nother: {old_root / 'managed-omlx'}x\n"
-    )
     logs = dict(get_db().execute("SELECT handle, log_path FROM managed_process_handles").fetchall())
     assert logs["h-live"] == str(new_root / "runtime" / "managed-processes" / "h-live.log")
     assert logs["h-done"] == str(old_root / "runtime" / "managed-processes" / "h-done.log")
     assert not old_root.exists()
-
-
-def test_heal_is_a_no_op_when_paths_agree(isolated_db, tmp_path, monkeypatch) -> None:
-    from infra.moved_state_heal import heal_moved_state_paths
-    from llm import network_discovery as discovery
-
-    server_id, _old, new_root = _register_moved_install(tmp_path, monkeypatch)
-    heal_moved_state_paths()
-    settings = (new_root / "managed-omlx" / "settings.json").stat().st_mtime_ns
-    before = discovery.get_server(server_id)["updated_at"]
-
-    heal_moved_state_paths()
-
-    assert (new_root / "managed-omlx" / "settings.json").stat().st_mtime_ns == settings
-    assert discovery.get_server(server_id)["updated_at"] == before
-
-
-def test_a_file_that_fails_to_heal_keeps_the_row_on_the_old_base(isolated_db, tmp_path, monkeypatch, caplog) -> None:
-    from infra.moved_state_heal import heal_moved_state_paths
-    from llm import network_discovery as discovery
-
-    server_id, old_root, new_root = _register_moved_install(tmp_path, monkeypatch)
-    old_base, new_base = old_root / "managed-omlx", new_root / "managed-omlx"
-    damaged = new_base / "settings.json"
-    damaged.write_text(f'{{"model_dir": "{old_base}/models"', encoding="utf-8")
-
-    with caplog.at_level("WARNING", logger="infra.moved_state_heal"):
-        heal_moved_state_paths()
-
-    assert discovery.get_server_metadata(server_id)["base_path"] == str(old_base)
-    assert any("settings.json" in record.getMessage() for record in caplog.records)
-
-    # Once the file can be read, the next start finishes the heal.
-    damaged.write_text(json.dumps({"model_dir": f"{old_base}/models"}), encoding="utf-8")
-    heal_moved_state_paths()
-    assert discovery.get_server_metadata(server_id)["base_path"] == str(new_base)
-    assert json.loads(damaged.read_text())["model_dir"] == f"{new_base}/models"
-
-
-def test_moved_row_without_matching_base_still_counts_as_managed() -> None:
-    from llm.providers.omlx_supervisor import _is_managed_omlx_row
-
-    assert _is_managed_omlx_row({"base_path": "/elsewhere/managed-omlx", "corsia_managed": True})
-    assert not _is_managed_omlx_row({"base_path": "/elsewhere/managed-omlx"})
 
 
 @pytest.mark.parametrize("state", ["interrupted_by_restart", "exited"])

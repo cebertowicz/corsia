@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import json
-import logging
 import os
+import shlex
 import sys
 import tempfile
 from collections.abc import Mapping
@@ -21,11 +21,9 @@ STATE_DIRECTORY = "state"
 # A source install's state on macOS: a child of the app folder that is never
 # the app's own state root.
 SOURCE_STATE_DIRECTORY = "source-state"
-# The folder pre-release source installs kept their state in. Only read, by the
-# fallback below, so an existing source install keeps its data; never created.
+# The folder pre-release source installs kept their state in. Only checked, so
+# a source install still there is told how to move it; never opened or created.
 LEGACY_FOLDER = "com.cebertowicz.corsia"
-_logger = logging.getLogger(__name__)
-_reported_legacy_roots: set[Path] = set()
 BOOTSTRAP_VERSION = 2
 _UNSET = object()
 
@@ -145,8 +143,9 @@ def default_state_root(
     platforms ``<XDG state>/corsia/state`` (``~/.local/state`` by default).
 
     A source install whose new root has no database while the pre-release
-    legacy root has one keeps using the legacy root: that is an existing
-    install, and starting on an empty root would look like data loss.
+    legacy root has one exits with the command that moves it: starting on an
+    empty root would look like data loss. The check runs here, before anything
+    can create the new root.
     """
     environment = os.environ if env is None else env
     platform_name = sys.platform if platform is None else platform
@@ -173,21 +172,29 @@ def default_state_root(
         base = Path(xdg_state) if xdg_state else home_dir / ".local" / "state"
         root = base / APP_FOLDER.lower() / STATE_DIRECTORY
 
-    return _source_root_or_legacy(_resolved(root), _resolved(base / LEGACY_FOLDER / STATE_DIRECTORY))
+    root = _resolved(root)
+    _refuse_legacy_only(root, _resolved(base / LEGACY_FOLDER / STATE_DIRECTORY))
+    return root
 
 
-def _source_root_or_legacy(root: Path, legacy: Path) -> Path:
-    """Keep a pre-release source install on its legacy root until it moves."""
+def _refuse_legacy_only(root: Path, legacy: Path) -> None:
+    """Exit when a source install's data is still only in the legacy root."""
     if (root / "corsia.db").exists() or not (legacy / "corsia.db").is_file():
-        return root
-    if legacy not in _reported_legacy_roots:
-        _reported_legacy_roots.add(legacy)
-        _logger.warning(
-            "CORSIA source install: using the existing data folder %s (%s has no database)",
-            legacy,
-            root,
+        return
+    if root.exists() and any(root.iterdir()):
+        raise SystemExit(
+            f"CORSIA found data in two folders, {legacy} and {root}, so it opened neither. "
+            "Keep the folder you want, move the other one somewhere else, "
+            "then start CORSIA again."
         )
-    return legacy
+    # An empty new root would make mv put the old folder inside it.
+    clear = f"rmdir {shlex.quote(str(root))} && " if root.exists() else ""
+    raise SystemExit(
+        f"CORSIA's data is still in its old folder, {legacy}. To move it, run:\n"
+        f"  {clear}mkdir -p {shlex.quote(str(root.parent))} "
+        f"&& mv {shlex.quote(str(legacy))} {shlex.quote(str(root))}\n"
+        "then start CORSIA again."
+    )
 
 
 def runtime_db_paths(state_root: Path) -> tuple[Path, Path, Path]:

@@ -16,10 +16,9 @@ REPO = Path(__file__).resolve().parents[2]
 LEGACY = "com.cebertowicz.corsia"
 
 ALLOWED = {
-    # Legacy-folder detection and its fallbacks.
+    # Legacy-folder detection: refusals that name the folder to move.
     "backend/infra/platform_paths.py",
     "desktop/src-tauri/src/first_run.rs",
-    "scripts/corsia-backup-db",
     # The one-time move and its tests.
     "desktop/src-tauri/src/state_move.rs",
     "desktop/src-tauri/src/state_move_tests.rs",
