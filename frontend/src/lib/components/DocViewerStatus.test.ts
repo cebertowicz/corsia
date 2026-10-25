@@ -5,7 +5,7 @@ import DocViewerStatus from './DocViewerStatus.svelte';
 import docViewerStatusSource from './DocViewerStatus.svelte?raw';
 import type { DocumentFreshness } from '$lib/docFreshness';
 import type { CommentFeedback } from '$lib/api/docs';
-import { setDeliverCommentsImmediately } from '$lib/commentDeliveryPreference';
+import { deliverCommentsImmediately } from '$lib/commentDeliveryPreference';
 import { get } from 'svelte/store';
 import { token } from '$lib/stores/auth';
 import { toasts } from '$lib/stores/toast';
@@ -56,12 +56,15 @@ afterEach(() => {
 	component = null;
 	host?.remove();
 	vi.useRealTimers();
-	setDeliverCommentsImmediately(true);
+	deliverCommentsImmediately.set(true);
 	deliveryConfirmation.dismiss();
 });
 
 describe('DocViewerStatus freshness metadata', () => {
-	it('keeps document identity and zero-comment navigation in its header', () => {
+	it('keeps document identity and zero-comment navigation in its header', async () => {
+		const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(new Response(JSON.stringify({ immediate: false, stored: true }))));
+		vi.stubGlobal('fetch', fetchMock);
+		token.set('test-token');
 		render(value());
 		const header = host.querySelector('header');
 		expect(header?.textContent).toContain('Review document');
@@ -72,7 +75,9 @@ describe('DocViewerStatus freshness metadata', () => {
 		delivery?.click();
 		flushSync();
 		expect(delivery?.getAttribute('aria-pressed')).toBe('false');
-		expect(localStorage.getItem('corsia.document-comments.deliver-immediately')).toBe('false');
+		await vi.waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) => url === '/api/doc-feedback/delivery-preference' && init.method === 'PUT' && init.body === '{"immediate":false}')).toBe(true));
+		vi.unstubAllGlobals();
+		token.set(null);
 		const details = header?.querySelector<HTMLButtonElement>('[aria-label="Document details"]');
 		expect(details?.getAttribute('aria-expanded')).toBe('false');
 		details!.click();
@@ -95,7 +100,7 @@ describe('DocViewerStatus freshness metadata', () => {
 	});
 
 	it('turning immediate delivery on sends the held document lane once with its toast, leaving the image lane held', async () => {
-		setDeliverCommentsImmediately(false);
+		deliverCommentsImmediately.set(false);
 		token.set('test-token');
 		const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(new Response(JSON.stringify({
 			reviews: [], woken: [], undelivered_batches: [], sent_count: 2,
@@ -115,7 +120,7 @@ describe('DocViewerStatus freshness metadata', () => {
 			await vi.waitFor(() => expect(get(deliveryConfirmation)?.message).toBe('2 comments sent'));
 			expect(get(toasts).some((toast) => toast.message === '2 comments sent')).toBe(false);
 			expect(toggle.getAttribute('aria-pressed')).toBe('true');
-			expect(localStorage.getItem('corsia.document-comments.deliver-immediately')).toBe('true');
+			expect(get(deliverCommentsImmediately)).toBe(true);
 			await vi.waitFor(() => expect(host.textContent).not.toContain('Send 2 comments'));
 			expect(host.querySelector('.comment-status')?.getAttribute('aria-label')).toContain('3 messages not sent yet');
 			toggle.click(); flushSync();

@@ -94,8 +94,8 @@
 		verificationNotice = '';
 	});
 
-	function changeImmediateDelivery(value: boolean): void {
-		setDeliverCommentsImmediately(value);
+	async function changeImmediateDelivery(value: boolean): Promise<void> {
+		if (!(await setDeliverCommentsImmediately(value))) return;
 		const held = feedbackStatus?.controller();
 		if (value && held && held.documentHeld > 0) void held.sendDocument();
 	}

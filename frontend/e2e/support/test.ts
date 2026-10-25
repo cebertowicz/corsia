@@ -1,5 +1,6 @@
 import { test as base } from '@playwright/test';
 import { resetBackendToSeed, SEED_ENABLED } from './backendSeed';
+import { setDeliveryPreference } from './heldComments';
 
 const filesReset = new Set<string>();
 
@@ -9,7 +10,7 @@ const filesReset = new Set<string>();
  * the first run pending and no thread, comment batch, setting or session an earlier file left. Tests of one file
  * share that state. A file whose every test needs the seed (each ends the first run, say) sets `seedPerTest`.
  */
-export const test = base.extend<{ seedPerTest: boolean; seededBackend: void }>({
+export const test = base.extend<{ seedPerTest: boolean; seededBackend: void; deliveryPreferenceOn: void }>({
 	seedPerTest: [false, { option: true }],
 	seededBackend: [
 		async ({ seedPerTest }, use, testInfo) => {
@@ -18,6 +19,15 @@ export const test = base.extend<{ seedPerTest: boolean; seededBackend: void }>({
 				await resetBackendToSeed();
 				filesReset.add(file);
 			}
+			await use();
+		},
+		{ auto: true },
+	],
+	// The person's "Deliver comments immediately" choice lives on the server, so a test that turns it off must not leave it off.
+	deliveryPreferenceOn: [
+		async ({ request, seededBackend }, use) => {
+			void seededBackend;
+			if (SEED_ENABLED) await setDeliveryPreference(request, true);
 			await use();
 		},
 		{ auto: true },

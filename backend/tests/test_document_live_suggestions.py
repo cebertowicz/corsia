@@ -4,7 +4,7 @@ from datetime import datetime
 
 import pytest
 
-from doceditor import comments, comment_actions, comment_batch_actions
+from doceditor import comments, comment_actions, comment_batch_actions, delivery_preference
 from doceditor.live_store import BrowserMessage
 from doceditor.live_text import clone
 from tests.test_document_live_file_tools import opened
@@ -124,10 +124,13 @@ def _edit_items(scope):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("bar_accept", [True, False])
+@pytest.mark.parametrize(("immediate", "lane", "seconds"), [(True, "immediate", 5), (False, "document-held", 120)])
 async def test_the_bars_accept_in_the_live_lane_leaves_no_edit_feedback_but_a_plain_accept_does(
-    ownership_scope, tmp_path, monkeypatch, bar_accept,
+    ownership_scope, tmp_path, monkeypatch, bar_accept, immediate, lane, seconds,
 ):
     scope = ownership_scope
+    delivery_preference.write(user_id(scope), immediate, db=scope["db"])
+    scope["db"].commit()
     manager, entry, _ = await opened(scope, tmp_path, monkeypatch)
     row = suggestion(scope, entry)
     try:
@@ -140,12 +143,13 @@ async def test_the_bars_accept_in_the_live_lane_leaves_no_edit_feedback_but_a_pl
         await manager.close()
         assert _edit_items(scope) == (0 if bar_accept else 1)
         if not bar_accept:
-            # A plain accept is a person's save: it shares the save lane, immediate with the 5 s deadline.
-            lane = scope["db"].execute(
-                "SELECT delivery_policy, opened_at, closes_at FROM doc_feedback_batches WHERE author_kind='user'"
+            # A plain accept is a person's save: it queues in the lane that person's preference names.
+            batches = scope["db"].execute(
+                "SELECT delivery_policy, last_item_at, closes_at FROM doc_feedback_batches WHERE author_kind='user'"
             ).fetchall()
-            assert [row["delivery_policy"] for row in lane] == ["immediate"]
-            assert (datetime.fromisoformat(lane[0]["closes_at"]) - datetime.fromisoformat(lane[0]["opened_at"])).total_seconds() == 5
+            assert [row["delivery_policy"] for row in batches] == [lane]
+            gap = datetime.fromisoformat(batches[0]["closes_at"]) - datetime.fromisoformat(batches[0]["last_item_at"])
+            assert gap.total_seconds() == seconds
     finally:
         await manager.close()
 

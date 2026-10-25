@@ -11,8 +11,23 @@ import { loginByUrl, TEST_TOKEN } from './corsia';
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const HOLD_LATER = "strftime('%Y-%m-%dT%H:%M:%f+00:00','now','+1 hour')";
 
-/** The browser-local "Deliver comments immediately" preference; off, a document comment is held until it is sent. */
+/** The key this browser kept the preference under before the server did; the app hands an "off" over once. */
 export const DELIVER_IMMEDIATELY_KEY = 'corsia.document-comments.deliver-immediately';
+
+const DELIVERY_PREFERENCE_ROUTE = '/api/doc-feedback/delivery-preference';
+
+/** Writes the signed-in person's "Deliver comments immediately" preference on the server, as the header toggle does. */
+export async function setDeliveryPreference(request: APIRequestContext, immediate: boolean): Promise<void> {
+	const saved = await request.put(DELIVERY_PREFERENCE_ROUTE, { headers: { Authorization: `Bearer ${TEST_TOKEN}` }, data: { immediate } });
+	expect(saved.ok(), await saved.text()).toBeTruthy();
+}
+
+/** What the server holds for the signed-in person: the choice, and whether they have made one. */
+export async function readDeliveryPreference(request: APIRequestContext): Promise<{ immediate: boolean; stored: boolean }> {
+	const read = await request.get(DELIVERY_PREFERENCE_ROUTE, { headers: { Authorization: `Bearer ${TEST_TOKEN}` } });
+	expect(read.ok(), await read.text()).toBeTruthy();
+	return read.json();
+}
 
 /** Runs a short script against the isolated E2E database; only synthetic mock state may be touched. */
 export function isolatedDb(script: string[], ...args: string[]): string {
@@ -63,9 +78,9 @@ export async function setDebugVersionOverlay(request: APIRequestContext, enabled
 	expect(updated.ok(), await updated.text()).toBeTruthy();
 }
 
-/** Turns the "Deliver comments immediately" preference off before the app loads, so the page's own comments are held. */
-export async function holdDocumentComments(page: Page): Promise<void> {
-	await page.addInitScript((key) => localStorage.setItem(key, 'false'), DELIVER_IMMEDIATELY_KEY);
+/** Turns the "Deliver comments immediately" preference off on the server before the app loads, so the page's own comments are held. */
+export async function holdDocumentComments(request: APIRequestContext): Promise<void> {
+	await setDeliveryPreference(request, false);
 }
 
 /** Set the preference through the real document header, as a person does. */
@@ -74,7 +89,7 @@ export async function turnOffDocumentComments(page: Page): Promise<void> {
 	await expect(toggle).toBeVisible();
 	if (await toggle.getAttribute('aria-pressed') === 'true') await toggle.click();
 	await expect(toggle).toHaveAttribute('aria-pressed', 'false');
-	await expect.poll(() => page.evaluate((key) => localStorage.getItem(key), DELIVER_IMMEDIATELY_KEY)).toBe('false');
+	await expect.poll(async () => (await readDeliveryPreference(page.request)).immediate).toBe(false);
 }
 
 /** Makes `count` document-held comments on a document, as a person's would be with delivery-immediately off. */

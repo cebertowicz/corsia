@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from doceditor import feedback_comments, feedback_edits
+from doceditor import delivery_preference, feedback_comments, feedback_edits
 from doceditor.feedback_batch_core import (
-    IMMEDIATE, add_comment_item, open_batch, person_comment_lane, touch_batch, utc_now,
+    add_comment_item, open_batch, person_comment_lane, touch_batch, utc_now,
 )
 from doceditor.feedback_state import USER_AUTHOR_ID
 
@@ -67,19 +67,21 @@ def record_edit(
 ) -> str:
     """Coalesce one substantive non-owner save into the canonical feedback batch.
 
-    A save goes in the immediate lane, a person's included (5 s idle, as before holds existed); the lane is a constant,
-    not a caller choice. Suggestion accepts write through here and share it.
+    An agent's save is immediate. A person's save takes the lane the owner of the document's thread has chosen
+    ("Deliver immediately"), read here at write time, so a save that publishes after the editor's socket has closed
+    still lands in the lane the person had set. Suggestion accepts write through here and share it.
     """
     if author_kind not in {"agent", "user"}:
         raise ValueError("edit feedback author_kind must be 'agent' or 'user'")
     now = at or utc_now()
+    lane = delivery_preference.lane_for_edit(db, author_kind, recipient_id)
     batch_id = open_batch(
         db,
         author_kind=author_kind,
         author_id=author_id,
         artifact_id=artifact_id,
         recipient_id=recipient_id,
-        delivery_policy=IMMEDIATE,
+        delivery_policy=lane,
         now=now,
     )
     item_delta = feedback_edits.record_edit_item(
@@ -96,7 +98,7 @@ def record_edit(
         db,
         batch_id,
         author_kind=author_kind,
-        delivery_policy=IMMEDIATE,
+        delivery_policy=lane,
         now=now,
         item_delta=item_delta,
     )
