@@ -288,7 +288,7 @@
 			// Start fresh: the earlier install is moved by rename into a dated backup folder, never deleted.
 			const MOVE_COPY = {
 				title: 'Moving CORSIA’s data to its new folder',
-				line: 'This happens once. CORSIA stops while it moves, and any job an agent left running is stopped.',
+				line: 'This happens once. CORSIA pauses while it moves, then starts again by itself. Anything an agent was still running in the background stops; ask the agent to run it again if you still need it.',
 			};
 			const movePercent = document.getElementById('move-percent');
 			const moveBar = document.getElementById('move-bar');

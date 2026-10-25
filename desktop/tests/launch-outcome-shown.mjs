@@ -25,8 +25,8 @@ const fail = (message) => {
 const browser = await chromium.launch();
 
 // `progress` is what the app's start at launch reports to `adoption_progress` (null: nothing to show).
-async function open(progress = null) {
-	const page = await (await browser.newContext({ viewport: { width: 1280, height: 900 } })).newPage();
+async function open(progress = null, viewport = { width: 1280, height: 900 }) {
+	const page = await (await browser.newContext({ viewport })).newPage();
 	await page.clock.install();
 	await page.addInitScript((progress) => {
 		window.__progress = progress;
@@ -120,7 +120,7 @@ try {
 		const seen = { ...(await read(page)), ...(await bar()) };
 		const expected = {
 			status: 'Moving CORSIA’s data to its new folder',
-			line: 'This happens once. CORSIA stops while it moves, and any job an agent left running is stopped.',
+			line: 'This happens once. CORSIA pauses while it moves, then starts again by itself. Anything an agent was still running in the background stops; ask the agent to run it again if you still need it.',
 			spinner: false,
 			retry: null,
 			percent: '42%',
@@ -129,7 +129,15 @@ try {
 		};
 		if (JSON.stringify(seen) !== JSON.stringify(expected)) fail(`moving data: ${JSON.stringify(seen)}`);
 		else console.log('ok   the data folder move shows its percentage during the launch start');
-		if (process.argv.includes('--screenshots')) await page.screenshot({ path: process.argv[process.argv.indexOf('--screenshots') + 1] });
+		// `--screenshots <dir>` draws the move at desktop and phone widths.
+		if (process.argv.includes('--screenshots')) {
+			const dir = process.argv[process.argv.indexOf('--screenshots') + 1];
+			for (const viewport of [{ width: 1440, height: 900 }, { width: 393, height: 852 }]) {
+				const shot = await open({ phase: 'moving_data', percent: 42, quit_pending: false }, viewport);
+				await shot.clock.runFor(1_100);
+				await shot.screenshot({ path: path.join(dir, `moving-data-${viewport.width}.png`) });
+			}
+		}
 		await page.evaluate(drawn.refused);
 		await page.clock.runFor(2_100);
 		const after = { ...(await read(page)), ...(await bar()) };
