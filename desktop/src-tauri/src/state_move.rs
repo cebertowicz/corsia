@@ -29,7 +29,7 @@ pub const JOURNAL: &str = "state-move.json";
 const SERVICE_FILE: &str = "service.json";
 /// Where entries the person left beside the old state folder are kept.
 const EARLIER_FOLDER: &str = "earlier-app-folder";
-/// `renamex_np` and every check run on paths this long at most.
+/// How long the stop may wait for running turns to finish before the move is skipped.
 const DRAIN_CAP: Duration = Duration::from_secs(1800);
 const RELEASE_CAP: Duration = Duration::from_secs(55);
 
@@ -181,7 +181,7 @@ pub struct MoveError {
 }
 
 pub const NOT_MOVED: &str = "CORSIA couldn’t get ready to move your data and left it where it was, so nothing is lost. Choose Retry.";
-pub const NOT_FINISHED: &str = "CORSIA moved your data but couldn’t finish setting up its new folder. Nothing is lost. Choose Retry.";
+pub const NOT_FINISHED: &str = "CORSIA moved your data but couldn’t finish setting it up there. Nothing is lost. Choose Retry.";
 pub const TWO_PLACES: &str = "CORSIA found its data in two folders and changed neither, so nothing is lost. Choose Save a report.";
 pub const RECORD_UNREADABLE: &str = "CORSIA couldn’t read its record of moving your data, so it stopped before changing anything else. Nothing is lost. Choose Save a report.";
 
@@ -320,18 +320,16 @@ fn finish(paths: &Paths, progress: &mut Progress<'_>) -> Result<Outcome, String>
     Ok(Outcome::Moved)
 }
 
-/// After the moved service is ready: the old folder must stay gone. Something
-/// that recreated it would split the data, so it is reported, by count only.
-pub fn check_legacy_gone(paths: &Paths) -> Result<(), String> {
-    let Ok(entries) = fs::read_dir(&paths.legacy) else {
-        return Ok(());
-    };
-    let count = entries.count();
-    log::error!("data folder move: the old data folder reappeared with {count} entries");
-    Err(format!(
-        "CORSIA moved its data to its new folder, but something recreated the old one ({count} items). \
-         Quit any other copy of CORSIA, then reopen it."
-    ))
+/// On every launch of a moved install: the old folder should stay gone, since
+/// something writing there would split the data. It is logged, by count only, and
+/// never stops CORSIA from starting.
+pub fn report_legacy_reappeared(paths: &Paths) -> Option<usize> {
+    if !matches!(service_file_names(paths, &paths.target), Ok(true)) {
+        return None;
+    }
+    let count = fs::read_dir(&paths.legacy).ok()?.count();
+    log::warn!("data folder move: the old data folder exists again with {count} entries");
+    Some(count)
 }
 
 fn skip(paths: &Paths, detail: String, tell: Option<Told>) -> Result<Outcome, String> {

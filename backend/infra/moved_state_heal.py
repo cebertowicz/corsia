@@ -26,7 +26,7 @@ _CONFIG_MAX_BYTES = 1024 * 1024
 
 def heal_moved_state_paths() -> None:
     """Rebase the managed oMLX row, its config files, and live process logs."""
-    _heal_managed_omlx()
+    heal_managed_omlx()
     _heal_process_log_paths()
 
 
@@ -76,7 +76,7 @@ def _heal_config_file(path: Path, old: str, new: str) -> bool | None:
     return True
 
 
-def _heal_managed_omlx() -> None:
+def heal_managed_omlx() -> None:
     from llm.managed_omlx_binary import is_corsia_managed_server, managed_omlx_paths
     from llm.network_discovery import get_servers, parse_server_metadata, set_server_metadata
 

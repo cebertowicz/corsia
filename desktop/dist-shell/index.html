@@ -285,16 +285,16 @@
 				},
 				switched: { title: 'CORSIA switched over and is still starting.', button: 'Check again' },
 			};
-			// Start fresh: the earlier install is moved by rename into a dated backup folder, never deleted.
+			// The one-time move of CORSIA's data folder, and what a skipped move says.
 			const MOVE_COPY = {
-				title: 'Moving CORSIA’s data to its new folder',
-				line: 'This happens once, and CORSIA starts again by itself when it’s done. Anything an agent left running in the background has stopped; ask the agent to run it again if you still need it.',
+				title: 'Moving CORSIA’s data',
+				line: 'This happens once, and CORSIA starts again by itself when it’s done. Anything an agent left running in the background will stop; ask the agent to run it again if you still need it.',
 				// A move that stopped after it showed: why, what the person can do, then CORSIA starts where it was.
 				skipped: {
-					stays: 'Your data stays where it is for now.',
+					stays: 'Your data stays where it is.',
 					terminal: 'A terminal window is open in CORSIA’s old data folder. Close it.',
-					namedApp: (app) => `${app} has CORSIA’s old data folder open. Quit ${app}, or restart your Mac.`,
-					otherApp: 'Another app has CORSIA’s old data folder open. Quit it, or restart your Mac.',
+					namedApp: (app) => `${app} has CORSIA’s old data folder open. Quit ${app}, or restart this computer.`,
+					otherApp: 'Another app has CORSIA’s old data folder open. Quit it, or restart this computer.',
 					jobsStopped: 'Anything an agent left running in the background has stopped; ask the agent to run it again if you still need it.',
 					tryAgain: 'CORSIA tries again the next time it opens.',
 				},
@@ -320,6 +320,7 @@
 				moveBar.setAttribute('aria-label', MOVE_COPY.title);
 				moveBar.firstElementChild.style.width = `${shown}%`;
 			}
+			// Start fresh: the earlier install is moved by rename into a dated backup folder, never deleted.
 			const FRESH_COPY = {
 				offerTitle: 'Start CORSIA fresh?',
 				offerLine: (reason, preview) => `${reason} ${FRESH_COPY.previewLine(preview)}`,

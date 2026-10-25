@@ -178,7 +178,7 @@ fn moves_an_adopted_install_and_repoints_every_file_that_names_it() {
     // build opened on a moved install starts on the new folder too.
     assert_eq!(app_paths::state_dir_with_override(&paths.app_dir, None), Ok(paths.target.clone()));
     wait_for_cache_removal(&paths);
-    assert_eq!(check_legacy_gone(&paths), Ok(()));
+    assert_eq!(report_legacy_reappeared(&paths), None);
     assert_eq!(run_with(&paths, &mut Fake::default()).0, Ok(Outcome::NotNeeded), "a second launch has nothing to do");
 }
 
@@ -480,18 +480,19 @@ fn data_in_both_folders_refuses_to_start() {
     assert_eq!(read(&paths.target.join("corsia.db")), "other");
 }
 
+// Checked on every launch of a moved install, not only the one that moved it; never on one that hasn't moved.
 #[test]
-fn a_recreated_old_folder_is_reported_by_count_only() {
+fn a_recreated_old_folder_is_logged_by_count_on_every_launch() {
     let home = tempfile::tempdir().unwrap();
     let paths = install(home.path());
+    assert_eq!(report_legacy_reappeared(&paths), None, "not moved yet: the old folder is the data");
     assert_eq!(run_with(&paths, &mut Fake::default()).0, Ok(Outcome::Moved));
     fs::create_dir_all(&paths.legacy).unwrap();
     fs::write(paths.legacy.join("private-name.db"), b"").unwrap();
 
-    let message = check_legacy_gone(&paths).unwrap_err();
-
-    assert!(message.contains("(1 items)"), "{message}");
-    assert!(!message.contains("private-name"));
+    assert_eq!(report_legacy_reappeared(&paths), Some(1));
+    assert_eq!(run_with(&paths, &mut Fake::default()).0, Ok(Outcome::NotNeeded));
+    assert_eq!(report_legacy_reappeared(&paths), Some(1), "a later launch still reports it");
 }
 
 const KILL_HOME: &str = "CORSIA_STATE_MOVE_KILL_HOME";

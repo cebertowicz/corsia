@@ -119,8 +119,8 @@ try {
 		}));
 		const seen = { ...(await read(page)), ...(await bar()) };
 		const expected = {
-			status: 'Moving CORSIA’s data to its new folder',
-			line: 'This happens once, and CORSIA starts again by itself when it’s done. Anything an agent left running in the background has stopped; ask the agent to run it again if you still need it.',
+			status: 'Moving CORSIA’s data',
+			line: 'This happens once, and CORSIA starts again by itself when it’s done. Anything an agent left running in the background will stop; ask the agent to run it again if you still need it.',
 			spinner: false,
 			retry: null,
 			percent: '42%',
@@ -146,13 +146,13 @@ try {
 	}
 	// A move that stopped after it showed says why, with no percentage, before CORSIA starts where it was.
 	{
-		const stays = 'Your data stays where it is for now.';
+		const stays = 'Your data stays where it is.';
 		const jobs = 'Anything an agent left running in the background has stopped; ask the agent to run it again if you still need it.';
 		const again = 'CORSIA tries again the next time it opens.';
 		const cases = [
 			[{ reason: 'terminal', app: null, jobs_stopped: true }, `${stays} A terminal window is open in CORSIA’s old data folder. Close it. ${jobs} ${again}`],
-			[{ reason: 'other_app', app: 'Finder', jobs_stopped: true }, `${stays} Finder has CORSIA’s old data folder open. Quit Finder, or restart your Mac. ${jobs} ${again}`],
-			[{ reason: 'other_app', app: null, jobs_stopped: true }, `${stays} Another app has CORSIA’s old data folder open. Quit it, or restart your Mac. ${jobs} ${again}`],
+			[{ reason: 'other_app', app: 'Finder', jobs_stopped: true }, `${stays} Finder has CORSIA’s old data folder open. Quit Finder, or restart this computer. ${jobs} ${again}`],
+			[{ reason: 'other_app', app: null, jobs_stopped: true }, `${stays} Another app has CORSIA’s old data folder open. Quit it, or restart this computer. ${jobs} ${again}`],
 			[{ reason: 'other', app: null, jobs_stopped: true }, `${stays} ${jobs} ${again}`],
 			[{ reason: 'other', app: null, jobs_stopped: false }, `${stays} ${again}`],
 		];

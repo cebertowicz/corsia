@@ -472,7 +472,7 @@ def test_app_mode_refuses_to_start_while_the_app_moves_the_data_folder(app):
     for verb in (["start"], ["restart"], ["service", "start"], ["restart-prepared"]):
         result = app.run(*verb, CORSIA_RESTART_OPERATION_ID=OPERATION_ID)
         assert result.returncode != 0, verb
-        assert "moving CORSIA's data to its new folder" in result.stderr, verb
+        assert "the app is moving CORSIA's data." in result.stderr, verb
     assert app.launchd_calls() == []
     assert app.calls("app") == []
 

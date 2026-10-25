@@ -92,7 +92,7 @@ app_mode_refuse_during_state_move() {
     case "${1:-status} ${2:-}" in
         "stop "*|"status "*|"logs "*|"service stop"|"service status") return 0 ;;
     esac
-    echo "CORSIA refused to run: the app is moving CORSIA's data to its new folder. Open CORSIA to finish the move, then try again." >&2
+    echo "CORSIA refused to run: the app is moving CORSIA's data. Open CORSIA to finish the move, then try again." >&2
     return 1
 }
 

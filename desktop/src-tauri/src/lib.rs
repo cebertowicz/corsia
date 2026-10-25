@@ -904,9 +904,7 @@ fn start_service_in<R: tauri::Runtime>(
     match register_or_report_status(port)? {
         service_management::ServiceStatus::Enabled => {
             wait_for_service(port, &app_dir)?;
-            if moved {
-                state_move::check_legacy_gone(&move_paths)?;
-            }
+            state_move::report_legacy_reappeared(&move_paths);
             grant_local_service_origin(app, service, port)?;
             Ok(ServiceStartup::Ready {
                 url: service_url(port),

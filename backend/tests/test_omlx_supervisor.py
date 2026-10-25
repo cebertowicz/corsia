@@ -490,3 +490,50 @@ def test_stop_all_servers_with_nothing_recorded_is_a_no_op(isolated_runtime):
     from llm.providers.omlx_supervisor import stop_all_servers
 
     assert asyncio.run(stop_all_servers()) == []
+
+
+@pytest.mark.parametrize("heals", [False, True])
+def test_a_managed_row_on_an_older_base_never_starts_there(isolated_runtime, monkeypatch, tmp_path, heals):
+    from infra import moved_state_heal
+    from llm import managed_omlx_binary
+    from llm.providers import omlx_supervisor as sup
+
+    current = tmp_path / "CORSIA" / "state" / "managed-omlx"
+    older = tmp_path / "com.cebertowicz.corsia" / "state" / "managed-omlx"
+    row = {"corsia_managed": True, "base_path": str(older)}
+    argv: list[str] = []
+
+    class Spawned:
+        pid = 1234
+
+    async def healthy(*_args, **_kwargs):
+        return "healthy"
+
+    def spawn(observed_argv, _log_path):
+        argv.extend(observed_argv)
+        return Spawned()
+
+    def heal():
+        if heals:
+            row["base_path"] = str(current)
+
+    monkeypatch.setattr(
+        managed_omlx_binary, "managed_omlx_paths",
+        lambda: managed_omlx_binary.ManagedOmlxPaths(current, current / "models", current / "settings.json"),
+    )
+    monkeypatch.setattr(moved_state_heal, "heal_managed_omlx", heal)
+    monkeypatch.setattr(sup, "_resolve_settings", lambda _cfg: dict(row))
+    monkeypatch.setattr(sup, "_port_owner_pid", lambda *_args: None)
+    monkeypatch.setattr(sup.process, "managed_omlx_install_error", lambda: None)
+    monkeypatch.setattr(sup.process, "managed_omlx_executable", lambda: "/bundled/omlx")
+    monkeypatch.setattr(sup, "_spawn_process", spawn)
+    monkeypatch.setattr(sup, "_wait_for_healthy", healthy)
+
+    result = asyncio.run(sup.start_server({"server_id": "moved", "host": "127.0.0.1", "port": 9999}))
+
+    if heals:
+        assert result["ok"] is True
+        assert argv[argv.index("--base-path") + 1] == str(current)
+    else:
+        assert result == {"ok": False, "message": sup.MOVED_SETTINGS_UNREPOINTED}
+        assert argv == []
