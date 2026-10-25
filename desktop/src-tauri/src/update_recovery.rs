@@ -94,7 +94,7 @@ where
             RecoveryIntent::Automatic => match state.automatic_recovery().cloned() {
                 Some(replacement) if replacement.bundle == bundle => (Some(replacement), false),
                 Some(_) => return RecoveryAnswer::Unavailable,
-                None if state.allows_manual_recovery_offer() => (None, true),
+                None if state.allows_manual_recovery() => (None, true),
                 None => return RecoveryAnswer::Unavailable,
             },
             RecoveryIntent::Manual if state.allows_manual_recovery() => (None, false),
@@ -123,10 +123,10 @@ where
             return RecoveryAnswer::Unavailable;
         }
     }
-    // The automatic no-observation answer rechecks manual eligibility under the canonical lock and admission before
-    // inviting an explicit request; it never consumes the automatic attempt or reaches a start effect.
+    // The automatic no-observation answer rechecks current manual eligibility under the canonical lock and admission
+    // before inviting an explicit request; it never consumes an automatic attempt or reaches a start effect.
     if manual_available {
-        return if shell_state().allows_manual_recovery_offer() {
+        return if shell_state().allows_manual_recovery() {
             RecoveryAnswer::ManualAvailable
         } else {
             RecoveryAnswer::Unavailable
@@ -332,7 +332,7 @@ mod tests {
 
         // The same replacement seen again, a repeat request, a reload or Back: the attempt is spent.
         shell.lock().unwrap().observe_install(&fixture.bundle, LAUNCHED, Some(INSTALLED), true);
-        assert_eq!(run(RecoveryIntent::Automatic, &shell, &fixture, &host), RecoveryAnswer::Unavailable);
+        assert_eq!(run(RecoveryIntent::Automatic, &shell, &fixture, &host), RecoveryAnswer::ManualAvailable);
         assert_eq!(host.effects(), 2);
     }
 
@@ -357,7 +357,7 @@ mod tests {
         let shell = observed(&fixture, Some(INSTALLED));
         let host = Spy { proof: Err("timed out".into()), ..spy(&fixture) };
         assert_eq!(run(RecoveryIntent::Automatic, &shell, &fixture, &host), RecoveryAnswer::NotStarted);
-        assert_eq!(run(RecoveryIntent::Automatic, &shell, &fixture, &host), RecoveryAnswer::Unavailable);
+        assert_eq!(run(RecoveryIntent::Automatic, &shell, &fixture, &host), RecoveryAnswer::ManualAvailable);
         assert_eq!(host.kickstarts.get(), 1);
     }
 
@@ -474,6 +474,9 @@ mod tests {
 
     #[test]
     fn a_past_missing_session_does_not_deny_a_current_initialized_manual_offer() {
+        if !alone("a_past_missing_session_does_not_deny_a_current_initialized_manual_offer") {
+            return;
+        }
         let fixture = fixture();
         let mut shell = ShellState::default();
         shell.observe_install(&fixture.bundle, LAUNCHED, Some(INSTALLED), false);
@@ -488,6 +491,39 @@ mod tests {
     }
 
     #[test]
+    fn spent_automatic_history_offers_current_manual_recovery_without_replaying_it() {
+        if !alone("spent_automatic_history_offers_current_manual_recovery_without_replaying_it") {
+            return;
+        }
+        let fixture = fixture();
+        for history in ["invalidated", "rolled_back", "used"] {
+            let shell = observed(&fixture, Some(INSTALLED));
+            let host = spy(&fixture);
+            let prior_effects = match history {
+                "invalidated" => {
+                    shell.lock().unwrap().invalidate_automatic_recovery();
+                    0
+                }
+                "rolled_back" => {
+                    shell.lock().unwrap().observe_install(&fixture.bundle, LAUNCHED, Some(LAUNCHED), true);
+                    0
+                }
+                "used" => {
+                    assert!(matches!(run(RecoveryIntent::Automatic, &shell, &fixture, &host), RecoveryAnswer::Ready { .. }));
+                    host.effects()
+                }
+                _ => unreachable!(),
+            };
+            assert!(shell.lock().unwrap().automatic_recovery().is_none(), "{history}");
+
+            assert_eq!(run(RecoveryIntent::Automatic, &shell, &fixture, &host), RecoveryAnswer::ManualAvailable, "{history}");
+            assert_eq!(host.effects(), prior_effects, "{history} replayed an automatic effect");
+            assert!(matches!(run(RecoveryIntent::Manual, &shell, &fixture, &host), RecoveryAnswer::Ready { .. }), "{history}");
+            assert_eq!(host.effects(), prior_effects + 2, "{history} manual admission did not run exactly once");
+        }
+    }
+
+    #[test]
     fn a_stale_or_mismatched_replacement_starts_nothing() {
         if !alone("a_stale_or_mismatched_replacement_starts_nothing") {
             return;
@@ -498,7 +534,7 @@ mod tests {
         let shell = observed(&fixture, Some(INSTALLED));
         shell.lock().unwrap().observe_install(&fixture.bundle, LAUNCHED, Some(LAUNCHED), true);
         shell.lock().unwrap().observe_install(&fixture.bundle, LAUNCHED, Some(INSTALLED), true);
-        assert_eq!(run(RecoveryIntent::Automatic, &shell, &fixture, &host), RecoveryAnswer::Unavailable);
+        assert_eq!(run(RecoveryIntent::Automatic, &shell, &fixture, &host), RecoveryAnswer::ManualAvailable);
         // Disk changed before the observer's next reading.
         let shell = observed(&fixture, Some(INSTALLED));
         *host.installed.borrow_mut() = Some("0.4.2+42".into());
@@ -535,6 +571,9 @@ mod tests {
 
     #[test]
     fn a_remote_window_never_recovers_and_its_observation_does_not_come_back() {
+        if !alone("a_remote_window_never_recovers_and_its_observation_does_not_come_back") {
+            return;
+        }
         let fixture = fixture();
         let host = spy(&fixture);
         let shell = observed(&fixture, Some(INSTALLED));
@@ -543,13 +582,13 @@ mod tests {
         assert_eq!(run(RecoveryIntent::Manual, &shell, &fixture, &host), RecoveryAnswer::Unavailable);
         shell.lock().unwrap().local();
         shell.lock().unwrap().observe_install(&fixture.bundle, LAUNCHED, Some(INSTALLED), true);
-        assert_eq!(run(RecoveryIntent::Automatic, &shell, &fixture, &host), RecoveryAnswer::Unavailable);
+        assert_eq!(run(RecoveryIntent::Automatic, &shell, &fixture, &host), RecoveryAnswer::ManualAvailable);
         let pairing = observed(&fixture, Some(INSTALLED));
         pairing.lock().unwrap().begin_pairing();
         assert_eq!(run(RecoveryIntent::Automatic, &pairing, &fixture, &host), RecoveryAnswer::Unavailable);
         pairing.lock().unwrap().end_pairing();
         pairing.lock().unwrap().observe_install(&fixture.bundle, LAUNCHED, Some(INSTALLED), true);
-        assert_eq!(run(RecoveryIntent::Automatic, &pairing, &fixture, &host), RecoveryAnswer::Unavailable);
+        assert_eq!(run(RecoveryIntent::Automatic, &pairing, &fixture, &host), RecoveryAnswer::ManualAvailable);
         assert_eq!(host.effects(), 0);
     }
 
@@ -598,7 +637,7 @@ mod tests {
                 // replacement seen again, or an agent that later reads right, never brings it back.
                 assert!(shell.lock().unwrap().automatic_recovery().is_none(), "{intent:?} {status:?} {details:?}");
                 shell.lock().unwrap().observe_install(&fixture.bundle, LAUNCHED, Some(INSTALLED), true);
-                assert_eq!(run(RecoveryIntent::Automatic, &shell, &fixture, &good), RecoveryAnswer::Unavailable);
+                assert_eq!(run(RecoveryIntent::Automatic, &shell, &fixture, &good), RecoveryAnswer::ManualAvailable);
                 assert_eq!(good.effects(), 0);
             }
         }

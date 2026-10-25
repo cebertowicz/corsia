@@ -97,12 +97,6 @@ impl ShellState {
         self.is_local_start()
     }
 
-    /// Whether an automatic request without an observed replacement may offer that existing manual recovery. An
-    /// automatic replacement already spent or invalidated stays unavailable; it is not a fresh no-observation case.
-    pub fn allows_manual_recovery_offer(&self) -> bool {
-        self.allows_manual_recovery() && self.spent.is_empty()
-    }
-
     fn forget_replacement(&mut self) {
         if let Some(replacement) = self.replacement.take() {
             self.spent.insert(replacement.generation);
