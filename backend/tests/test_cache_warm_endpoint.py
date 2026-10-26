@@ -1008,7 +1008,15 @@ def test_changed_prefix_rechecks_turn_admission_after_join(monkeypatch, main_db)
     main_db.execute(
         "UPDATE threads SET model='oMLX/qwen' WHERE id='main-1'",
     )
+    # The person's input admitted mid-warm goes to a loaded model, so send admission takes it.
+    main_db.execute(
+        "INSERT INTO network_servers (id,instance_id,instance_name,port,status,last_seen_at,created_at,updated_at) "
+        "VALUES ('srv-1','srv-1','srv-1',8210,'online','t0','t0','t0')",
+    )
     main_db.commit()
+    from llm import network_discovery
+
+    monkeypatch.setitem(network_discovery._LOADED_BY_SERVER, "srv-1", {"qwen"})
     install_warm_endpoint_session(
         monkeypatch,
         api_runtime,

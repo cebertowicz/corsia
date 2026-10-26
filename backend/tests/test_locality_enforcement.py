@@ -141,7 +141,7 @@ async def test_local_row_and_unscoped_threads_still_resolve(world):
     from infra import send_target
     from infra.unavailable_model_recovery import resolve_or_hold
 
-    batch = SimpleNamespace(thread_id="actor")
+    batch = SimpleNamespace(thread_id="actor", items=())
     assert (await send_target.resolve_target(LOCAL, thread_id="actor")).catalog_id == LOCAL
     assert (await resolve_or_hold(LOCAL, batch)).catalog_id == LOCAL
     for thread in ("noproject", "destination", None):

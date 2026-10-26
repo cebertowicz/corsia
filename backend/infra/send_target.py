@@ -15,9 +15,17 @@ from llm.resolution import ExecutionTarget, ModelUnavailableError
 
 
 SELECTED_MODEL_UNAVAILABLE = "selected_model_unavailable"
+MODEL_LOAD_FAILED = "model_load_failed"
+MODEL_LOAD_UNREACHABLE = "model_load_unreachable"
+LOCAL_LOAD_REFUSALS = frozenset({"no_room", "no_memory", "unreachable"})
 # The same FIFO-head hold, for a thread that has no model yet. Only the user
 # choosing one lifts it (``thread.model_row.select_first_model``), so no catalog wake looks for it.
 NO_MODEL_SELECTED = "no_model_selected"
+
+
+def model_load_error(cause: str) -> str:
+    """Map local load causes to the durable delivery error."""
+    return MODEL_LOAD_UNREACHABLE if cause == "unreachable" else MODEL_LOAD_FAILED
 
 
 class TargetUnavailable(RuntimeError):
@@ -79,7 +87,7 @@ async def resolve_target(model: str, *, thread_id: str | None = None) -> Executi
 
 def _resolve_target_in_scope(model: str, *, thread_id: str | None) -> ExecutionTarget:
     """Resolve one target, marked unavailable when its thread's policy forbids the model."""
-    return _ready_target(model_resolution.resolve_thread_target(model, thread_id=thread_id))
+    return _admitted_target(model_resolution.resolve_thread_target(model, thread_id=thread_id))
 
 
 async def scope_supplied_target(target: ExecutionTarget, *, thread_id: str) -> ExecutionTarget:
@@ -89,7 +97,7 @@ async def scope_supplied_target(target: ExecutionTarget, *, thread_id: str) -> E
     def _scope() -> ExecutionTarget:
         db = get_db()
         try:
-            return _ready_target(model_resolution.scope_to_thread(target, thread_id=thread_id, db=db), db=db)
+            return _admitted_target(model_resolution.scope_to_thread(target, thread_id=thread_id, db=db), db=db)
         finally:
             db.close()
 
@@ -138,6 +146,38 @@ def _ready_target(target: ExecutionTarget, *, db=None) -> ExecutionTarget:
     ))
 
 
+def _admitted_target(target: ExecutionTarget, *, db=None, readiness=None, person_send: bool = True) -> ExecutionTarget:
+    """A person's send may run on a local model that fits now (the turn loads it); other work waits for it loaded.
+
+    Readiness ``None`` (not a local oMLX model, or one this thread can't use) keeps ``_ready_target``'s verdict.
+    Other work re-admitting a target a person's send refused waits on it like any not-loaded model.
+    """
+    from llm import local_model_load
+    from infra.database import get_db
+
+    if not person_send and target.availability_reason in LOCAL_LOAD_REFUSALS:
+        return replace(target, availability_reason=(
+            "model_unavailable" if target.availability_reason == "unreachable" else "model_not_loaded"
+        ))
+    connection = db if db is not None else get_db()
+    try:
+        scoped = _ready_target(target, db=connection)
+        if not person_send or scoped.available:
+            return scoped
+        readiness = readiness or local_model_load.readiness(target, db=connection)
+    finally:
+        if db is None:
+            connection.close()
+    if readiness is None:
+        return scoped
+    state = readiness.state
+    if state in ("loaded", "fits_now"):
+        return target
+    if not target.available and state != "unreachable":
+        return target
+    return replace(target, available=False, availability_reason=state)
+
+
 TargetAdmission = Literal["run", "wait", "fail"]
 
 
@@ -150,12 +190,12 @@ def classify_target_admission(target: ExecutionTarget) -> TargetAdmission:
     """
     if target.available:
         return "run"
-    if target.availability_reason == "connection_unavailable":
+    if target.availability_reason == "connection_unavailable" or target.availability_reason in LOCAL_LOAD_REFUSALS:
         return "fail"
     return "wait"
 
 
-def model_admission(model: str, *, db=None, thread_id: str | None = None) -> TargetAdmission:
+def model_admission(model: str, *, db=None, thread_id: str | None = None, person_send: bool = True) -> TargetAdmission:
     """Classify the current catalog target from a claim transaction.
 
     Permanent resolution errors release an existing hold for the normal driver
@@ -165,7 +205,8 @@ def model_admission(model: str, *, db=None, thread_id: str | None = None) -> Tar
     """
     try:
         return classify_target_admission(
-            _ready_target(model_resolution.resolve_thread_target(model, thread_id=thread_id, db=db), db=db),
+            _admitted_target(model_resolution.resolve_thread_target(model, thread_id=thread_id, db=db),
+                             db=db, person_send=person_send),
         )
     except (ModelUnavailableError, ValueError):
         return "fail"
@@ -184,12 +225,18 @@ def lifted_hold_ids(rows, model: str, *, db, thread_id: str | None = None) -> fr
     )
     from connections.account_holds import ACCOUNT_HOLD_REASONS
 
+    from core.message_history import is_human_input
+    from infra.thread_inputs import _claimed_item
+
+    person_send = any(is_human_input(item.role, item.metadata) for item in
+                      (_claimed_item(row, {}) for row in rows if str(row['id']) in held))
     # Idle callers have already admitted the current durable account choice.
     account_held = frozenset(str(row['id']) for row in rows
                             if row['write_outcome'] == 'proved_no_write'
                             and row['delivery_error'] in ACCOUNT_HOLD_REASONS)
     return account_held | (
-        held if held and model_admission(model, db=db, thread_id=thread_id) != 'wait' else frozenset()
+        held if held and model_admission(model, db=db, thread_id=thread_id, person_send=person_send) != 'wait'
+        else frozenset()
     )
 
 

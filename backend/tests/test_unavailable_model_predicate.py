@@ -42,10 +42,10 @@ def _active_cloud(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_available_but_unloaded_network_model_keeps_its_held_head(
+async def test_available_unloaded_model_that_fits_releases_its_held_head(
     isolated_db, monkeypatch, driven,
 ) -> None:
-    """Disk availability alone cannot release a model the provider requires loaded."""
+    """A downloaded model that fits can release a previously held input."""
     import infra.unavailable_model_recovery as recovery
     from llm.model_status import get_model_status_rows
     from llm.resolution import resolve_execution_target
@@ -54,14 +54,16 @@ async def test_available_but_unloaded_network_model_keeps_its_held_head(
     set_model_available("omlx@srv/m", 1)
     monkeypatch.setattr("llm.model_status._network_server_status", lambda *_a: {"srv": "online"})
     monkeypatch.setattr("llm.model_status._loaded_model_ids_fn", lambda: lambda _sid: set())
+    from llm.local_model_load import Readiness
+    monkeypatch.setattr("llm.local_model_load.readiness", lambda *_a, **_k: Readiness("fits_now"))
     assert resolve_execution_target("omlx@srv/m").available is True
     statuses = {row["id"]: row["status"] for row in get_model_status_rows()}
     assert statuses["omlx@srv/m"] == "available"
 
     await recovery._resume_held_heads()
 
-    driven.assert_not_awaited()
-    assert message_row("m1") == HELD
+    driven.assert_awaited_once()
+    assert message_row("m1")[0] == "queued"
 
 
 @pytest.mark.asyncio
@@ -102,16 +104,21 @@ async def test_unavailable_cloud_row_stays_held(isolated_db, monkeypatch, driven
 
 
 @pytest.mark.asyncio
-async def test_offline_network_server_stays_held(isolated_db, monkeypatch, driven) -> None:
-    import infra.unavailable_model_recovery as recovery
+async def test_offline_network_server_stays_held(isolated_db, monkeypatch) -> None:
+    from infra import unavailable_model_recovery as recovery
+    from infra.thread_execution import drive_claimed_batch
+    from tests.test_unloaded_send_owned_turn import _claimed
 
-    monkeypatch.setattr("llm.model_status._network_server_status", lambda *_a: {"srv": "offline"})
-    await hold_head(monkeypatch, "t", "omlx@srv/m", "m1")
-
-    await recovery._resume_held_heads()
-
-    driven.assert_not_awaited()
-    assert message_row("m1") == HELD
+    # The fixture's server ``srv`` has no online row.
+    batch, _thread, _target, provider = _claimed(monkeypatch, metadata={"sender_kind": "agent", "from_thread": "parent"})
+    monkeypatch.setattr("infra.unavailable_model_recovery.schedule_unavailable_model_recovery", lambda: None)
+    held = AsyncMock(wraps=recovery.hold_unavailable_model_input)
+    monkeypatch.setattr(recovery, "hold_unavailable_model_input", held)
+    await drive_claimed_batch(batch)
+    assert held.await_args is not None
+    assert held.await_args.args[1].availability_reason == "model_unavailable"
+    provider.assert_not_awaited()
+    assert message_row("m") == HELD
 
 
 @pytest.mark.asyncio

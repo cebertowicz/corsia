@@ -280,7 +280,7 @@ def accept_thread_input(
             require_current(thread_id, continuation, db=connection)
         input_order = int(state["next_input_order"])
         epoch, model = _input_destination(state, input_order)
-        hold = _admission_hold(connection, model, thread_id=thread_id)
+        hold = _admission_hold(connection, model, thread_id=thread_id, role=role, metadata=metadata)
         from plans.public import schedule_for_accepted_input
 
         schedule_for_accepted_input(thread_id, db=connection)
@@ -324,7 +324,32 @@ def accept_thread_input(
     )
 
 
-def _admission_hold(db: sqlite3.Connection, model: str, *, thread_id: str) -> str | None:
+def _refuse_unready_person_send(db, model: str, thread_id: str, role: str, metadata: dict | None) -> None:
+    """Refuse an unready local model before accepting a new human input."""
+    from core.message_history import is_human_input
+    from infra.send_types import SendRejected
+    from llm import local_model_load
+    from llm.resolution import ModelUnavailableError, resolve_thread_target
+
+    if not model or not is_human_input(role, metadata):
+        return
+    try:
+        target = resolve_thread_target(model, thread_id=thread_id, db=db)
+    except (ModelUnavailableError, ValueError):
+        return
+    from infra.send_target import LOCAL_LOAD_REFUSALS, _admitted_target, classify_target_admission
+
+    readiness = local_model_load.readiness(target, db=db)
+    if readiness is None:
+        return
+    target = _admitted_target(target, db=db, readiness=readiness)
+    if classify_target_admission(target) == "fail" and target.availability_reason in LOCAL_LOAD_REFUSALS:
+        raise SendRejected(409, "The selected local model cannot load now.", metadata={
+            "cause": target.availability_reason, "other_loaded": readiness.other_loaded,
+        })
+
+
+def _admission_hold(db: sqlite3.Connection, model: str, *, thread_id: str, role: str, metadata: dict | None) -> str | None:
     """Check ``model`` can take the input, or name the hold for having none.
 
     A thread with no model to run on takes the FIFO-head hold
@@ -332,6 +357,7 @@ def _admission_hold(db: sqlite3.Connection, model: str, *, thread_id: str) -> st
     kept, never failed or sent to a model nobody chose, and only the user
     choosing a model lifts it (``thread.model_row.select_first_model``).
     """
+    _refuse_unready_person_send(db, model, thread_id, role, metadata)
     if model:
         from connections.account_holds import model_account_hold
 

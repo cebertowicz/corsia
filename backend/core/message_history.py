@@ -24,6 +24,11 @@ REPLY_VIA_POST_UPDATE_KEY = "reply_via_post_update"
 #: this rule and the envelope renders by it, so the two cannot drift.
 NON_HUMAN_MARKERS = ("sender_kind", "completion", "routed_event")
 
+
+def is_human_input(role: str, metadata: dict | None) -> bool:
+    """Whether a durable input was written by the person."""
+    return role == "user" and not any((metadata or {}).get(key) for key in NON_HUMAN_MARKERS)
+
 #: The human-message footer: the reply affordance, then the no-reply line.
 HUMAN_REPLY_FOOTER = (
     '[To reply, call post_update(text="<your reply>")]\n'

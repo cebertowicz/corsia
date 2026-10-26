@@ -63,6 +63,7 @@ async def test_send_path_hold_failure_settles_the_claimed_turn(
     import infra.send_service as service
 
     seed_model("omlx@srv/m", available=0)
+    mark_model_loaded(monkeypatch, "omlx@srv/m")
     thread_row = _thread_row("t", "omlx@srv/m")
 
     def release_fails(*_args, **_kwargs):

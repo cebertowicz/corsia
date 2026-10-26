@@ -123,12 +123,23 @@ async def hold_unless_runnable(
     Only the classifier's model-recoverable state is a wait; nothing outside
     admission asks.
     """
+    from core.message_history import is_human_input
+    from infra.send_target import _admitted_target, omlx_seat_and_model
+
+    # Only a local model's admission depends on who wrote the batch: a person's send may load it.
+    if omlx_seat_and_model(target) is not None and not any(
+            is_human_input(item.role, item.metadata) for item in batch.items):
+        target = await run_in_db(lambda: _admitted_target(target, person_send=False))
     admission = classify_target_admission(target)
     if admission == "run":
         return target
     if admission == "wait":
         return await hold_unavailable_model_input(batch, target)
     reason = target.availability_reason or "target_unavailable"
+    from infra.send_target import LOCAL_LOAD_REFUSALS, model_load_error
+
+    if reason in LOCAL_LOAD_REFUSALS:
+        raise TargetUnavailable(model_load_error(reason), side=DeliveryFailureSide.PROVIDER)
     raise TargetUnavailable(
         f"Selected target cannot run: {target.catalog_id} ({reason})",
         side=DeliveryFailureSide.PROVIDER,

@@ -60,6 +60,8 @@ class NativeTurnRequest(NamedTuple):
         Callable[[str, str | BaseException | None], Awaitable[None]] | None
     )
     media_projection: Any
+    person_send: bool = False
+    input_ids: tuple[str, ...] = ()
 
 
 def resolve_future(future: asyncio.Future | None, value: Any) -> None:

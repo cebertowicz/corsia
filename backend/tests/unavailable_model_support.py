@@ -43,8 +43,8 @@ def set_model_available(model_id: str, available: int) -> None:
         db.close()
 
 
-def mark_model_loaded(monkeypatch, model_id: str) -> None:
-    """Publish the cached loaded fact and online server separately from disk availability."""
+def mark_model_loaded(monkeypatch, model_id: str, *, loaded: bool = True) -> None:
+    """Publish the online server and the cached loaded fact (or its absence) separately from disk availability."""
     from infra.database import get_db
     from llm import network_discovery
 
@@ -57,7 +57,7 @@ def mark_model_loaded(monkeypatch, model_id: str) -> None:
     )
     db.commit()
     db.close()
-    monkeypatch.setitem(network_discovery._LOADED_BY_SERVER, server_id, {provider_model})
+    monkeypatch.setitem(network_discovery._LOADED_BY_SERVER, server_id, {provider_model} if loaded else set())
 
 
 def admit_held_candidate(thread_id: str, model: str, message_id: str):
@@ -106,6 +106,8 @@ async def hold_head(monkeypatch, thread_id: str, model: str, message_id: str, **
 
     monkeypatch.setattr(recovery, "schedule_unavailable_model_recovery", Mock())
     seed_model(model, available=0, **seed)
+    if model.startswith("omlx@"):
+        mark_model_loaded(monkeypatch, model)
     held = await _drive_claimed_batch(
         admit_held_candidate(thread_id, model, message_id),
     )
