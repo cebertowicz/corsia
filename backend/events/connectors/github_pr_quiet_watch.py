@@ -41,6 +41,8 @@ JITTER_S = 10.0
 HEALTH_REPORT_INTERVAL = timedelta(hours=6)
 REPORT_SETTING = "pr_quiet_ingress_report"
 _ETAG_CACHE_MAX = 512
+#: Status reason while the shared read budget keeps this sweep out of its reserve.
+RESERVE_HELD = "reserve_held"
 
 _status: dict[str, Any] = {
     "state": "starting", "reason": None, "last_run": None, "fired_count": 0, "last_error": None,
@@ -319,12 +321,13 @@ async def sweep_once(runner: feed.GhRunner) -> None:
     """Evaluate every candidate once; one PR's failure never stops the others.
 
     While the shared read budget keeps the sweep out of its reserve the sweep
-    is skipped, not failed: the budget's own status says why.
+    is skipped, not failed: the status reason is ``reserve_held`` and the
+    budget's own status says why. A real GitHub refusal still degrades it.
     """
     from events.connectors.github_pr_notice import webhook_configured
 
     if budget.sweep_paused():
-        _status.update({"state": "enabled", "reason": None})
+        _status.update({"state": "enabled", "reason": RESERVE_HELD})
         return
 
     candidates = await run_in_db(_candidates)
@@ -332,19 +335,24 @@ async def sweep_once(runner: feed.GhRunner) -> None:
     answers_from = await run_in_db(_log_answers_from)
     affected: list[str] = []
     error: str | None = None
+    held = False
     for candidate in candidates:
         try:
             faults = await sweep_candidate(
                 runner, candidate, webhook=webhook, log_answers_from=answers_from,
             )
         except Exception as exc:  # noqa: BLE001 — surfaced in status, next PR still swept
-            error = getattr(exc, "error_class", type(exc).__name__)
+            failure = getattr(exc, "error_class", type(exc).__name__)
+            if failure == RESERVE_HELD:
+                held = True
+                continue
+            error = failure
             log.warning("pr-quiet-watch: %s failed: %s", candidate.external_id, error)
             continue
         affected += [f"{candidate.external_id} ({fault})" for fault in faults]
     await run_in_db(_report_ingress, affected, _now())
     _status.update({
-        "state": "degraded" if error else "enabled", "reason": error,
+        "state": "degraded" if error else "enabled", "reason": error or (RESERVE_HELD if held else None),
         "last_run": _now().isoformat(), "last_error": error or _status["last_error"],
     })
 
@@ -356,9 +364,9 @@ async def pr_quiet_watch_loop(runner: feed.GhRunner | None = None) -> None:
     the notice and the receipt keep writing them, and it rechecks the reason.
     """
     if runner is None:
-        from reviewer.gh_api import run_gh
+        from connections.github_broker import default_broker
 
-        runner = run_gh
+        runner = default_broker()
     while True:
         reason = await asyncio.to_thread(disabled_reason, runner)
         if reason is not None:

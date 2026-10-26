@@ -70,12 +70,12 @@ def _sweep_read(runner, repo: str):
     return asyncio.run(watch._get(runner, f"repos/{repo}/pulls/1"))
 
 
-def _rate_limited(call):
+def _rate_limited(call, error_class="rate_limited"):
     from events.connectors.github_notifications_feed import FeedError
 
     with pytest.raises(FeedError) as caught:
         call()
-    assert caught.value.error_class == "rate_limited"
+    assert caught.value.error_class == error_class
 
 
 def test_two_pollers_and_two_repos_share_one_budget():
@@ -146,7 +146,7 @@ def test_the_reserve_is_five_percent_of_the_accounts_limit():
     assert budget.reserve() == 250
     _notifications_read(Runner(200, x_ratelimit_limit="15000", x_ratelimit_remaining="600", x_ratelimit_reset=str(int(RESET))))
     assert budget.reserve() == 750
-    _rate_limited(lambda: _sweep_read(Runner(), "o/r"))  # 600 left is under 750
+    _rate_limited(lambda: _sweep_read(Runner(), "o/r"), "reserve_held")  # 600 left is under 750
     assert _notifications_read(Runner()).status == 200
 
 
@@ -156,7 +156,7 @@ def test_sweep_skips_under_the_reserve_while_notifications_still_reads():
     low = Runner(200, x_ratelimit_remaining=str(budget.reserve() - 1), x_ratelimit_reset=str(int(RESET)))
     _notifications_read(low)
     reader = Runner()
-    _rate_limited(lambda: _sweep_read(reader, "o/r"))
+    _rate_limited(lambda: _sweep_read(reader, "o/r"), "reserve_held")
     assert reader.paths == []
     assert _notifications_read(reader).status == 200
     assert reader.paths == ["notifications?all=true"]
@@ -187,12 +187,31 @@ def test_the_sweep_skips_under_the_reserve_without_degrading(_one_candidate):
     reader = Runner()
     status = _sweep_once(reader)
     assert reader.paths == [], "the sweep read inside the reserve"
-    assert status["state"] == "enabled" and status["last_error"] is None
+    assert status["state"] == "enabled" and status["reason"] == "reserve_held" and status["last_error"] is None
+
+
+def test_a_reserve_hold_reached_mid_sweep_is_not_degraded_and_names_the_reserve(_one_candidate, monkeypatch):
+    from events.connectors import github_pr_quiet_watch as watch
+    from events.connectors.github_read_budget import budget
+
+    _notifications_read(Runner(200, x_ratelimit_remaining=str(budget.reserve() + 5), x_ratelimit_reset=str(int(RESET))))
+    monkeypatch.setattr(watch, "_candidates", lambda: [
+        watch.Candidate("t", "github:o/r#1", "o/r", 1), watch.Candidate("t", "github:o/r#2", "o/r", 2),
+    ])
+    reader = Runner(200, x_ratelimit_remaining=str(budget.reserve() - 1), x_ratelimit_reset=str(int(RESET)))
+    status = _sweep_once(reader)
+    assert reader.paths == ["repos/o/r/pulls/1"], "the second read went into the reserve"
+    assert status["state"] == "enabled" and status["reason"] == "reserve_held" and status["last_error"] is None
 
 
 def test_a_real_refusal_still_degrades_the_sweep(_one_candidate):
     status = _sweep_once(Runner(403, retry_after="30"))
-    assert status["state"] == "degraded" and status["last_error"] == "rate_limited"
+    assert status["state"] == "degraded" and status["reason"] == status["last_error"] == "rate_limited"
+
+
+def test_a_real_429_still_degrades_the_sweep(_one_candidate):
+    status = _sweep_once(Runner(429))
+    assert status["state"] == "degraded" and status["reason"] == status["last_error"] == "rate_limited"
 
 
 def _cursor() -> dict:

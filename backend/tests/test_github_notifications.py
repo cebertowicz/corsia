@@ -95,11 +95,15 @@ def _delivery_rows() -> list[dict]:
     )]
 
 
-def test_every_github_call_is_a_read():
+@pytest.mark.parametrize("through_broker", [False, True], ids=["runner", "read_broker"])
+def test_every_github_call_is_a_read(through_broker):
+    from connections.github_broker import GithubReadBroker
+
     gh = FakeGh()
     gh.issue_comments = [comment_object(501)]
     gh.review_comments = [comment_object(601)]
-    asyncio.run(_poll(gh))
+    # The broker refuses a write or an untracked repository by raising, which fails the poll.
+    asyncio.run(_poll(GithubReadBroker(gh, tracked=lambda: frozenset({REPO})) if through_broker else gh))
     assert gh.api_calls(), "the poll made no GitHub reads"
     for call in gh.api_calls():
         assert call[:4] == ["api", "--method", "GET", "-i"]

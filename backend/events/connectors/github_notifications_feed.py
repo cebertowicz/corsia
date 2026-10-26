@@ -19,6 +19,8 @@ from datetime import datetime
 from email.utils import parsedate_to_datetime
 from typing import Any, Callable
 
+from connections import github_tracked_repos as tracked_repos
+from connections.github_read_request import GithubReadRefused
 from events.connectors.github_read_budget import budget
 
 GhRunner = Callable[..., subprocess.CompletedProcess]
@@ -58,47 +60,20 @@ class GhSignedOut(FeedError):
         super().__init__("gh_signed_out")
 
 
-def _remotes(policy: Any) -> set[str]:
-    """The GitHub repositories one registered source repository's remotes name."""
-    from infra.worktree_reaper_probe import github_remote_full_name
-
-    if not policy.source_binding_valid or policy.enforcement_error:
-        return set()
-    return {repository for remote in ("origin", "upstream")
-            if (repository := github_remote_full_name(policy.path, remote)) is not None}
-
-
-def _policies(project_id: str | None = None) -> list[Any]:
-    from infra.project_repo_policy import RepoPolicyQueryError, list_registered_repo_policies
-
-    try:
-        return (list_registered_repo_policies(project_id=project_id) if project_id
-                else list_registered_repo_policies())
-    except RepoPolicyQueryError as exc:
-        raise FeedError("repo_scope_unavailable") from exc
-
-
 def tracked_github_repositories(project_id: str | None = None) -> frozenset[str]:
-    """Resolve tracked GitHub repositories from the registered source repositories,
-    of one project when ``project_id`` is given."""
-    from infra.worktree_reaper_probe import ReaperGitError
-
+    """The tracked GitHub repositories (``connections.github_tracked_repos``), of
+    one project when ``project_id`` is given; unreadable scope is a ``FeedError``."""
     try:
-        return frozenset(repo for policy in _policies(project_id) for repo in _remotes(policy))
-    except ReaperGitError as exc:
+        return tracked_repos.tracked_github_repositories(project_id)
+    except tracked_repos.RepoScopeUnavailable as exc:
         raise FeedError("repo_scope_unavailable") from exc
 
 
 def projects_tracking_github_repository(repository: str) -> frozenset[str]:
-    """The inverse: the projects whose registered source repositories track
-    ``repository``. Bounded by the registered repositories, never by any rule."""
-    from infra.worktree_reaper_probe import ReaperGitError
-
-    wanted = repository.lower()
+    """The projects whose registered source repositories track ``repository``."""
     try:
-        return frozenset(policy.project_id for policy in _policies()
-                         if wanted in _remotes(policy))
-    except ReaperGitError as exc:
+        return tracked_repos.projects_tracking_github_repository(repository)
+    except tracked_repos.RepoScopeUnavailable as exc:
         raise FeedError("repo_scope_unavailable") from exc
 
 
@@ -151,11 +126,17 @@ def gh_get(
 ) -> GhResponse:
     """Run one GET through ``gh``; raise ``FeedError`` unless it is 2xx or 304.
 
+    ``runner`` is the read broker in production, which refuses anything but a
+    read of a tracked repository (``FeedError("read_refused")`` names why).
+
     The shared read budget is asked first: while core is exhausted, or under a
-    Retry-After, GitHub is not called. A ``low_priority`` read also stays out
-    of the budget's reserve. The budget also decides what counts as a rate limit.
+    Retry-After, GitHub is not called (``rate_limited``). A ``low_priority``
+    read also stays out of the budget's reserve, which is a hold, not a limit
+    (``reserve_held``). The budget also decides what counts as a rate limit.
     """
     if budget.blocked_until(low_priority=low_priority) is not None:
+        if low_priority and budget.blocked_until() is None:
+            raise FeedError("reserve_held", "kept for the notifications poller")
         raise FeedError("rate_limited", "shared read budget")
     args = ["api", "--method", "GET", "-i"]
     for name, value in (headers or {}).items():
@@ -166,6 +147,8 @@ def gh_get(
         raise FeedError("gh_missing") from exc
     except subprocess.TimeoutExpired as exc:
         raise FeedError("timeout") from exc
+    except GithubReadRefused as exc:
+        raise FeedError("read_refused", f"{exc.reason} {exc.detail}".strip()) from exc
     response = _parse(result.stdout or "")
     if response is None:
         raise FeedError("gh_error", (result.stderr or "")[:200])

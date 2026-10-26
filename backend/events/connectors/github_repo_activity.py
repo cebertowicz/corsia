@@ -367,8 +367,8 @@ async def poll_once(runner: feed.GhRunner, repositories: frozenset[str] | None =
 
 async def repo_activity_poll_loop(runner: feed.GhRunner | None = None) -> None:
     if runner is None:
-        from reviewer.gh_api import run_gh
-        runner = run_gh
+        from connections.github_broker import default_broker
+        runner = default_broker()
     repos = await run_off_db(feed.tracked_github_repositories)
     if disabled_reason() is None:
         for repo in sorted(repos):
