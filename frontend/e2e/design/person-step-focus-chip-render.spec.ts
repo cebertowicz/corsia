@@ -160,6 +160,8 @@ type Scene = {
   turns: Turn[];
   docStepId?: string;
   reviewTile?: boolean;
+  /** The review tile beside a retired ask and a counted verdict (the pixel checks against the build before the extraction). */
+  reviewStates?: boolean;
 };
 
 const ONE_TURN = (step: Step): Turn[] => [
@@ -181,6 +183,16 @@ const SCENES: Record<string, Scene> = {
     turns: [
       ...SEVEN.map((step, i) => ({ lead: `Working through item ${i + 1} of the release checklist.`, step, working: 1 })),
       { lead: "Summarising.", text: "Seven things are waiting on you; I'll carry on with the rest until they're done." },
+    ],
+  },
+  // The three NeedsYouTile rules that moved across the component boundary, with no step card: the open ask, a retired ask, a counted verdict.
+  "review-states": {
+    steps: [],
+    reviewTile: true,
+    reviewStates: true,
+    turns: [
+      { lead: "Reading the proof requirements.", text: "I drafted the sign-in proof plan. It needs your review before I run anything." },
+      { lead: "Drafting the verification write-up.", text: "The write-up is drafted. It is waiting on the proof result.", working: 2 },
     ],
   },
   neighbour: {
@@ -393,6 +405,7 @@ const CASES: Array<{ id: string; scene: keyof typeof SCENES; focus: boolean[] }>
   { id: "group-do", scene: "seven", focus: [true] },
   { id: "group-settle", scene: "seven", focus: [true] },
   { id: "neighbour", scene: "neighbour", focus: [true] },
+  { id: "review-states", scene: "review-states", focus: [true] },
   { id: "settle-elsewhere", scene: "one-plain", focus: [true] },
   { id: "reduced-motion", scene: "one-plain", focus: [true] },
   // Design-review Gate 0 references: the chat as it is with no step cards ("before" is rendered on the dev base the chip branch started from).
@@ -528,6 +541,20 @@ for (const size of SIZES) {
                 for (const m of body?.messages ?? []) {
                   if (m.role === "assistant" && String(m.content).startsWith("I drafted the sign-in proof plan")) {
                     m.cards = [
+                      ...(scene.reviewStates
+                        ? [
+                            {
+                              kind: "ask", artifact_id: "artifact-retired", title: "Old sign-in proof plan", type: "markdown", icon: "file-text",
+                              name: "old-sign-in-proof-plan.md", path: "shared/planning/old.md", available: false, opens: false,
+                              hold_id: "hold-retired", state: "unavailable",
+                            },
+                            {
+                              kind: "ask", artifact_id: "artifact-counted", title: "Sign-in proof write-up", type: "markdown", icon: "file-text",
+                              name: "sign-in-proof-write-up.md", path: "shared/planning/write-up.md", available: true, opens: true,
+                              hold_id: "hold-counted", state: "changes_requested", feedback: { comments: 3, suggestions: 2, edits: 1 },
+                            },
+                          ]
+                        : []),
                       {
                         kind: "ask",
                         artifact_id: "artifact-proof-plan",
@@ -569,6 +596,20 @@ for (const size of SIZES) {
             await expect(page.getByText("The write-up is drafted. It is waiting on the proof result.")).toBeVisible({ timeout: 20_000 });
             await expect(rows).toHaveCount(0);
             await shot(page, `${id}-${size.w}-${theme}`);
+            return;
+          }
+          if (id === "review-states") {
+            await expect(page.getByText("Needs your review").first()).toBeVisible({ timeout: 20_000 });
+            await expect(rows).toHaveCount(0);
+            // Let the layout settle first, so the boxes read below are where the frame draws the tiles.
+            await page.waitForTimeout(2500);
+            const tiles = Object.fromEntries(
+              await Promise.all(
+                ["artifact-proof-plan", "artifact-retired", "artifact-counted"].map(async (artifact) => [artifact, await page.locator(`[data-artifact-id="${artifact}"]`).first().boundingBox()]),
+              ),
+            );
+            if (process.env.CHIP_BOXES) fs.writeFileSync(path.join(process.env.CHIP_BOXES, `review-states-${size.w}-${theme}.json`), JSON.stringify(tiles));
+            await shot(page, `review-states-${size.w}-${theme}`);
             return;
           }
           await expect(rows.first()).toBeVisible({ timeout: 20_000 });
