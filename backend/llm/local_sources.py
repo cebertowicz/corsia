@@ -135,7 +135,8 @@ def _omlx_state(membership: tuple[set[str], set[str]] | None = None,
     from llm.local_setup_prepare import known_model
     from onboarding.local_download_state import current as local_download_state
 
-    eligible = local_memory_ok()
+    never_local = host_never_runs_local()
+    eligible = local_memory_ok() and not never_local
     model = known_model() if eligible else None
     settings_flight = setup_kind() == "settings"
     flight = None if settings_flight else local_download_state()
@@ -145,7 +146,7 @@ def _omlx_state(membership: tuple[set[str], set[str]] | None = None,
         result = _source("omlx", "Local model", state, reason, fix, checked_at)
         result.update(
             eligible=eligible,
-            never_local=host_never_runs_local(),
+            never_local=never_local,
             context_window=model.context_window if model else None,
             download_size=format_size(model.download_size_bytes) if model else None,
         )

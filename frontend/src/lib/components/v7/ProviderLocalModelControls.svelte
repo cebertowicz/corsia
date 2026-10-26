@@ -19,7 +19,7 @@
 	let source = $state<ModelSource | undefined>(undefined);
 	let showAddLocal = $state(false);
 	let stop: (() => void) | null = null;
-	const lowMemory = $derived(source?.eligible === false);
+	const lowMemory = $derived(source?.eligible === false && source.never_local !== true);
 
 	async function refresh() {
 		const t = get(token);

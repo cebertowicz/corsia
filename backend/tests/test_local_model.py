@@ -356,9 +356,10 @@ def test_the_local_row_says_a_host_that_is_not_macos_never_runs_a_local_model(mo
 
     source = local_sources.omlx_source((set(), set()))
 
-    # Memory still decides ``eligible``; the host fact is separate, so a low-memory Mac keeps its own message.
+    # On a Mac memory alone decides ``eligible`` (a low-memory Mac keeps its own message); a host that is
+    # not macOS is never eligible, whatever its memory, so a consumer keying on ``eligible`` offers nothing.
     assert source["never_local"] is never_local
-    assert source["eligible"] is (gib >= 24)
+    assert source["eligible"] is (gib >= 24 and not never_local)
 
 
 @pytest.mark.parametrize("gib, allowed", [(23.9, False), (24, True)])
