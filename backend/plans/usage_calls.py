@@ -7,10 +7,11 @@ on to task B billed B's calls to A. Each call now carries the executor's valid
 selection captured when the call begins -- the same validity rule a starting
 Turn snapshots after ``plans.turn_admission.snapshot_after_admission`` -- and
 falls back to the Turn's snapshot only when the executor holds no valid
-selection. The native loop captures it before dispatching the provider call
-(``binding_at_call_start``) and hands it
-in with the measurement; an external harness reports a call only once it has
-happened, so its binding is read at that first observation, which precedes
+selection. A delegated child holding none is billed to the step it parked
+or was handed (``plans.delegated_usage``). The native loop captures it before
+dispatching the provider call (``binding_at_call_start``) and hands it in with
+the measurement; an external harness reports a call only once it has happened,
+so its binding is read at that first observation, which precedes
 any tool the call made. Plans answers the question; ``infra.llm_usage`` only
 persists the answer, so ``infra`` still never imports ``plans``.
 """
@@ -40,7 +41,7 @@ def call_binding(thread_id: str, *, db=None) -> dict[str, Any] | None:
     from plans import admission_origin, service
 
     with service._connection(db) as connection:
-        return admission_origin.turn_snapshot(thread_id, db=connection)
+        return admission_origin.call_snapshot(thread_id, db=connection)
 
 
 #: Attribution that could not be read: the row carries no task, and says so,
@@ -53,8 +54,9 @@ def binding_at_call_start(thread_id: str) -> dict[str, Any] | None:
 
     Read before the provider is dispatched, so the call is billed to the task
     current when it began even if the Turn moves on before the measurement
-    arrives. None means the executor holds no valid selection, and the ledger
-    falls back to the Turn's own snapshot -- the one legitimate fallback.
+    arrives. None means the executor holds no valid selection and is no delegated
+    child doing a handed step's work, and the ledger falls back to the Turn's own
+    snapshot -- the one legitimate fallback.
     A read that fails is ``UNATTRIBUTED``: the call is still recorded, its
     task fields empty, and the failure is logged; nothing here stops the call.
     """
@@ -86,8 +88,8 @@ def record_call_usage(
 
     ``binding`` is what ``binding_at_call_start`` captured for this call, or
     ``UNATTRIBUTED`` when that read failed, or None when the caller has no
-    single call to bind: the executor held no valid selection at call start,
-    or the measurement is a whole-Turn aggregate (an external harness's
+    single call to bind: the executor held no valid selection (nor a delegated
+    child's handed or parked step) at call start, or the measurement is a whole-Turn aggregate (an external harness's
     terminal total). None is the Turn's own snapshot, the ledger's existing
     rule, and is never presented as call-time attribution. This entry does
     not resolve attribution itself: what it records is what the caller knew.
