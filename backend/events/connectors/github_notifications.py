@@ -183,7 +183,8 @@ async def _admit(event_type: str, payload: dict[str, Any]) -> bool:
     comment_id = payload["comment"].get("id")
     try:
         await admit_github_delivery_async(
-            event_type, payload, f"gh-notifications:{event_type}:{comment_id}",
+            event_type, payload,
+            f"{webhook_delivery_log.NOTIFICATIONS_DELIVERY_PREFIX}{event_type}:{comment_id}",
             source="notifications",
         )
         return True

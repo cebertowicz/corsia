@@ -1,0 +1,32 @@
+{
+ "actor": {
+  "id": 7285414,
+  "login": "cebertowicz",
+  "type": "User"
+ },
+ "created_at": "2026-10-24T06:25:11Z",
+ "event": "labeled",
+ "id": 34114590651,
+ "issue": {
+  "closed_at": "2026-10-24T09:37:20Z",
+  "created_at": "2026-10-24T06:25:10Z",
+  "labels": [
+   {
+    "name": "connectors"
+   }
+  ],
+  "number": 1421,
+  "pull_request": {
+   "merged_at": "2026-10-24T09:37:19Z"
+  },
+  "state": "closed",
+  "state_reason": null,
+  "updated_at": "2026-10-24T09:37:20Z",
+  "user": {
+   "login": "cebertowicz"
+  }
+ },
+ "label": {
+  "name": "connectors"
+ }
+}
