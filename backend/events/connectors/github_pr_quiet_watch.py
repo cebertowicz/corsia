@@ -17,6 +17,7 @@ reads its status.
 from __future__ import annotations
 
 import asyncio
+import functools
 import logging
 import os
 import random
@@ -62,7 +63,7 @@ def quiet_watch_status() -> dict[str, Any]:
     ``fired_count`` counts wakes the owner's FIFO accepted, not wakes delivered
     to a Turn; a later admission failure is reported by the wake's settlement.
     """
-    return dict(_status)
+    return dict(_status)  # the shared read budget is shown with the notifications poller
 
 
 def _now() -> datetime:
@@ -106,7 +107,9 @@ async def _get(runner: feed.GhRunner, path: str) -> Any:
     """One conditional GitHub read in a worker thread; a 304 reuses the cached body."""
     cached = _etags.get(path)
     headers = {"If-None-Match": cached[0]} if cached else None
-    response = await asyncio.to_thread(feed.gh_get, runner, path, headers)
+    response = await asyncio.to_thread(
+        functools.partial(feed.gh_get, runner, path, headers, low_priority=True),
+    )
     if response.status == 304 and cached is not None:
         return cached[1]
     etag = response.headers.get("etag")
