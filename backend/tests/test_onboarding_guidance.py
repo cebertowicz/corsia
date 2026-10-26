@@ -333,10 +333,11 @@ def test_where_your_work_lives_never_ends_at_i_cant_and_hands_the_rest_to_helper
     assert "Nothing connects to [app]. I'll build a connection after setup." in work and "community" not in work
     assert "two questions are never open at once" in work
     # An app its maker admits only approved clients to is named up front, never added to be refused.
-    assert "**Never add an app you expect to be refused:**" in work
-    assert "`[App] doesn't let CORSIA connect yet. It's on my list.`" in work
+    assert "**Never add an app you expect to be refused,**" in work
+    assert "by the rule and line in skill `connect-tools`" in work and "add no `Connect [app]` task for it" in work
     skill = (BOOTSTRAP_SKILL.parents[1] / "connect-tools/SKILL.md").read_text(encoding="utf-8")
     assert "Never offer or add a connection you expect the provider to refuse" in skill
+    assert "`[App] only lets approved apps connect, so I'm leaving it out.`" in skill
     assert "I can't" not in work.replace('Never end on "I can\'t".', "")
     # The helper has no corsia_api, so the CORSIA agent adds the app it returns.
     assert "it has no `corsia_api`" in work

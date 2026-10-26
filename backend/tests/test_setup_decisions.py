@@ -42,7 +42,7 @@ EXPECTED_COMMUNITY = {
                 "improvements other people proved, and offer yours. You can always turn down a change and "
                 "keep your own version, and nothing private ever goes into what's shared."),
     "tradeoff": ("Sharing goes through GitHub, a free site where people share code, so choosing Use and "
-                 "share leads to a GitHub step next."),
+                 "share leads to GitHub next."),
     "recommendation": "A",
     "rationale": "You get what others prove, and a proven change helps everyone using CORSIA.",
     "options": [

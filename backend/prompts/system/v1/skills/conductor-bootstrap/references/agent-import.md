@@ -38,13 +38,15 @@ Also gather the connected apps (next section) before you post. When there are no
 
 Leave out an empty group. With more than 15 about-you lines, end with `I found [N] more. Say "show more" to see the next 15.` With one tool, name it in the skills line; with several, group the skills under `From [tool]`, with no tool on the rows. After the message, post the other skill states, none of which asks the person to do anything. `already_here`, all on one line: `Already here, so I left them: [a, b, c].`
 
-A skill that can't come over is never something the person fixes, shrinks or retries, so no line names a step for them. Name every such skill once, all together on one line, `I left out [name] ([reason]), [name] ([reason]).`, with the reason in plain words by state:
+A skill that can't come over is left out without asking the person to do anything. Name every such skill once, all together on one line, `I left out [name] ([reason]), [name] ([reason]).`, with the reason in plain words by state:
 
 - `name_reserved`: `CORSIA already has a skill with that name`
 - `name_clash`: `[tool] and [tool] both have one with that name`
 - `has_secret`: `it has a key or password in it`
 - `too_large`: `too big to bring over`
 - `unreadable`, whatever its `reason` or none: `I couldn’t read it`
+
+If they ask about a left-out skill, say what to change in plain words and try it again (for `changed`, show the current version first), or offer to write a CORSIA skill that does the same.
 
 ## Their answer
 

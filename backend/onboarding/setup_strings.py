@@ -93,7 +93,7 @@ COMMUNITY = {
                 "improvements other people proved, and offer yours. You can always turn down a change and "
                 "keep your own version, and nothing private ever goes into what's shared."),
     "tradeoff": ("Sharing goes through GitHub, a free site where people share code, so choosing Use and "
-                 "share leads to a GitHub step next."),
+                 "share leads to GitHub next."),
     "options": (
         ("Use and share", "Agents take improvements other people proved and offer the ones proven here."),
         ("Only use", "Agents take proven improvements and share nothing."),
