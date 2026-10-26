@@ -143,7 +143,7 @@ async def test_previous_head_closed_merged_and_dedupe_shapes(monkeypatch):
     merged = {"number": 4, "state": "closed", "merged": True, "updated_at": "now", "closed_at": "closed-4", "head": {"sha": "m"}}
     closed = {"number": 5, "state": "closed", "merged": False, "updated_at": "now", "closed_at": "closed-5", "head": {"sha": "c"}}
     answers = [GhResponse(200, {}, []), GhResponse(200, {}, [open_pull]),
-               GhResponse(200, {}, [merged, closed]), GhResponse(200, {}, {"workflow_runs": []}),
+               GhResponse(200, {}, [merged, closed]), GhResponse(304, {}, None), GhResponse(200, {}, {"workflow_runs": []}),
                GhResponse(200, {}, {"workflow_runs": []})]
     monkeypatch.setattr(poller, "_recent_webhook", lambda *_args: False)
     monkeypatch.setattr(poller, "_repo_state", lambda _repo: state)
@@ -186,7 +186,7 @@ async def test_normal_issue_cursor_traverses_pages_and_never_replays_history(mon
 @pytest.mark.asyncio
 async def test_settled_head_admits_only_completed_suites(monkeypatch):
     state, emitted = {"pending": ["a"], "reads": []}, []
-    answers = [GhResponse(200, {}, []), GhResponse(200, {}, []), GhResponse(200, {}, []),
+    answers = [GhResponse(200, {}, []), GhResponse(200, {}, []), GhResponse(200, {}, []), GhResponse(200, {}, []),
                GhResponse(200, {}, {"workflow_runs": []}), GhResponse(200, {}, {"workflow_runs": []}),
                GhResponse(200, {}, {"check_suites": [suite(1, "queued"), suite(2)]})]
     monkeypatch.setattr(poller, "_recent_webhook", lambda *_args: False)
@@ -234,7 +234,7 @@ async def test_first_poll_does_not_replay_history(monkeypatch):
     state, emitted = {}, []
     labeled = {"id": 1, "created_at": "2026-01-01T00:00:00Z", "event": "labeled", "issue": {"pull_request": {}}}
     answers = [GhResponse(200, {}, [labeled]), GhResponse(200, {}, [{"number": 3, "head": {"sha": "h"}}]),
-               GhResponse(200, {}, [{"number": 4, "state": "closed", "updated_at": "t", "closed_at": "closed-4"}]),
+               GhResponse(200, {}, [{"number": 4, "state": "closed", "updated_at": "t", "closed_at": "closed-4"}]), GhResponse(200, {}, []),
                GhResponse(200, {}, {"workflow_runs": []}), GhResponse(200, {}, {"workflow_runs": []})]
     monkeypatch.setattr(poller, "_recent_webhook", lambda *_a: False)
     monkeypatch.setattr(poller, "_repo_state", lambda _r: state)
@@ -250,7 +250,7 @@ async def test_first_poll_does_not_replay_history(monkeypatch):
 @pytest.mark.parametrize("complete_runs", [0, 1])
 async def test_budget_stop_keeps_pending_heads(monkeypatch, complete_runs):
     state = {"pending": ["a"], "heads": {}, "closed": {}, "issues_cursor": "x", "reads": []}
-    answers = [GhResponse(304, {}, None), GhResponse(200, {}, []), GhResponse(200, {}, [])]
+    answers = [GhResponse(304, {}, None), GhResponse(200, {}, []), GhResponse(200, {}, []), GhResponse(200, {}, [])]
     answers += [GhResponse(200, {}, {"workflow_runs": []})] * complete_runs + [None]
     monkeypatch.setattr(poller, "_recent_webhook", lambda *_a: False)
     monkeypatch.setattr(poller, "_repo_state", lambda _r: state)
@@ -329,7 +329,7 @@ async def test_startup_catchup_without_cursor_or_boundary_reads_nothing(monkeypa
 async def test_304_open_pulls_and_runs_keep_saved_heads_and_pending(monkeypatch):
     state = {"issues_cursor": "x", "heads": {"3": "h"}, "closed": {}, "pending": ["a"],
              "runs": {"in_progress": ["a"], "queued": []}, "reads": []}
-    answers = [GhResponse(304, {}, None)] * 3 + [GhResponse(304, {}, None), GhResponse(304, {}, None)]
+    answers = [GhResponse(304, {}, None)] * 6
     monkeypatch.setattr(poller, "_recent_webhook", lambda *_a: False)
     monkeypatch.setattr(poller, "_repo_state", lambda _r: state)
     monkeypatch.setattr(poller, "_get", lambda *_a, **_k: asyncio.sleep(0, result=answers.pop(0)))
@@ -340,7 +340,7 @@ async def test_304_open_pulls_and_runs_keep_saved_heads_and_pending(monkeypatch)
 @pytest.mark.asyncio
 async def test_gate_stopped_suite_read_keeps_the_head_pending(monkeypatch):
     state = {"issues_cursor": "x", "heads": {}, "closed": {}, "pending": ["a", "b"], "reads": []}
-    answers = [GhResponse(304, {}, None), GhResponse(200, {}, []), GhResponse(200, {}, []),
+    answers = [GhResponse(304, {}, None), GhResponse(200, {}, []), GhResponse(200, {}, []), GhResponse(200, {}, []),
                GhResponse(200, {}, {"workflow_runs": []}), GhResponse(200, {}, {"workflow_runs": []}), None]
     monkeypatch.setattr(poller, "_recent_webhook", lambda *_a: False)
     monkeypatch.setattr(poller, "_repo_state", lambda _r: state)

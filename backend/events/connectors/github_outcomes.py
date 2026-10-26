@@ -276,7 +276,7 @@ def _check_suite_drafts(payload: dict[str, Any], repo: str) -> list[OutcomeDraft
     )]
 
 
-def _label_attributes(labels: list[dict[str, Any]]) -> dict[str, Any]:
+def label_attributes(labels: list[dict[str, Any]]) -> dict[str, Any]:
     """Scalar label facts: highest priority, lane, kind, and the label count."""
     names = sorted({shape.text(shape.required(shape.mapping(label), "name"))
                     for label in shape.members(labels)})
@@ -301,7 +301,7 @@ def _issue_drafts(payload: dict[str, Any], repo: str) -> list[OutcomeDraft]:
     subject = f"github:issue:{repo}#{number}"
     attrs = {"repo": repo, "issue": str(number)}
     if "labels" in issue:
-        attrs.update(_label_attributes(issue["labels"]))
+        attrs.update(label_attributes(issue["labels"]))
     if action == "opened":
         return [OutcomeDraft(
             f"{subject}:opened", "github.issue.opened",
@@ -317,11 +317,13 @@ def _issue_drafts(payload: dict[str, Any], repo: str) -> list[OutcomeDraft]:
 
 # The public entry owns supported-action selection; private mappers consume it.
 _MAPPERS = {
-    "pull_request": (("opened", "synchronize", "reopened", "closed", "edited"), _pr_drafts),
+    "pull_request": (("opened", "synchronize", "reopened", "closed", "edited", "labeled", "unlabeled"), _pr_drafts),
     "check_suite": (("completed",), _check_suite_drafts),
     "workflow_run": (("completed",), _workflow_run_drafts),
-    "issues": (("opened", "closed"), _issue_drafts),
+    "issues": (("opened", "closed", "reopened", "labeled", "unlabeled"), _issue_drafts),
 }
+# Label changes and issue reopens map in github_label_outcomes, from the shared normalization.
+_LABEL_ACTIONS = {"pull_request": ("labeled", "unlabeled"), "issues": ("reopened", "labeled", "unlabeled")}
 
 
 def map_github_outcomes(event_type: str, payload: dict[str, Any]) -> list[OutcomeDraft]:
@@ -343,6 +345,9 @@ def map_github_outcomes(event_type: str, payload: dict[str, Any]) -> list[Outcom
         return []
     repository = shape.mapping(shape.required(payload, "repository"))
     repo = shape.text(shape.required(repository, "full_name")).lower()
+    if action in _LABEL_ACTIONS.get(event_type, ()):
+        from events.connectors.github_label_outcomes import label_drafts
+        return label_drafts(event_type, payload, repo)
     if base_from is not None:
         return _retarget_drafts(payload, repo, base_from)
     return mapper(payload, repo)

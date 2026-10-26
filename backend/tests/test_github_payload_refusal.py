@@ -144,7 +144,6 @@ def test_optional_absent_and_null_values_are_not_fabricated():
 
 
 @pytest.mark.parametrize("event_type,action", [
-    ("pull_request", "labeled"), ("issues", "labeled"),
     ("workflow_run", "requested"), ("check_suite", "requested"),
 ])
 def test_non_fact_action_does_not_validate_unconsumed_payload(event_type, action):

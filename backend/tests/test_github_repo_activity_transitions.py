@@ -30,7 +30,7 @@ def lifecycle(monkeypatch):
 
     async def poll(open_pulls, closed_pulls):
         responses = [GhResponse(304 if saved.state.get("issues_cursor") else 200, {}, []), GhResponse(200, {}, open_pulls),
-                     GhResponse(200, {}, closed_pulls),
+                     GhResponse(200, {}, closed_pulls), GhResponse(200, {}, []),
                      GhResponse(200, {}, {"workflow_runs": []}), GhResponse(200, {}, {"workflow_runs": []})]
         monkeypatch.setattr(poller, "_get", lambda *_a, **_k: asyncio.sleep(0, result=responses.pop(0)))
         await poller._poll_repo(lambda *_a: None, "o/r", datetime(2026, 1, 4, tzinfo=UTC))

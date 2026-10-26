@@ -1,10 +1,10 @@
 """Debounce completed GitHub check suites into one per-head event.
 
 This module owns only the connector-side aggregation.  It deliberately has no
-router dependency: the injected sink is the future generic event intake, while
-the default sink makes the currently unwired integration visible in logs.  Its
-reads pass the repo-activity poller's budget and backoff gate, and the
-admission hook stays off unless explicitly enabled.
+router dependency: the injected sink is the generic event intake (``admit_event``,
+origin ``connector``), and ``event_id`` comes from the head's check suites, never
+from a delivery.  Its reads pass the repo-activity poller's budget and backoff
+gate, and the admission hook stays off unless explicitly enabled.
 """
 from __future__ import annotations
 
@@ -14,7 +14,6 @@ import json
 import logging
 import os
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol
 
 from events.connectors import github_notifications_feed as feed
@@ -23,25 +22,24 @@ from events.connectors import github_repo_activity as poller
 log = logging.getLogger(__name__)
 DEBOUNCE_SECONDS = 30
 ENABLE_ENV = "CORSIA_GITHUB_HEAD_CHECKS_ENABLE"
-# No GitHub declarations file exists on dev; this is the local declaration until
-# the package adopts the shipped declarations schema.
-HEAD_CHECKS_COMPLETED_DECLARATION = {
-    "type": "github.head.checks_completed",
-    "use": "route",
-    "facts": ("repo", "head_sha", "head_branch", "pr_number", "conclusion"),
-}
 
 
 class Refusal(Protocol):
-    code: str
-    text: str
+    @property
+    def code(self) -> str: ...
+    @property
+    def text(self) -> str: ...
 
 
 class IntakeResult(Protocol):
-    accepted: bool
-    duplicate: bool
-    refusal: Refusal | None
-    rules_matched: list[str]
+    @property
+    def accepted(self) -> bool: ...
+    @property
+    def duplicate(self) -> bool: ...
+    @property
+    def refusal(self) -> Refusal | None: ...
+    @property
+    def rules_matched(self) -> int: ...
 
 
 class EventSink(Protocol):
@@ -52,20 +50,18 @@ class EventSink(Protocol):
     ) -> IntakeResult: ...
 
 
-class LoggingSink:
-    """Temporary default until the generic event intake is wired."""
+class IntakeSink:
+    """The generic event intake; ``github.head.checks_completed`` is declared in the connector manifest."""
 
-    async def admit_event(self, **kwargs: Any) -> IntakeResult:
-        log.info("github-head-checks: event intake unwired: %s", kwargs["event_id"])
-        return _LoggedResult()
-
-
-@dataclass
-class _LoggedResult:
-    accepted: bool = False
-    duplicate: bool = False
-    refusal: Refusal | None = None
-    rules_matched: list[str] = field(default_factory=list)
+    async def admit_event(
+        self, *, event_type: str, facts: dict[str, Any],
+        origin: Literal["connector", "emitter", "agent", "platform"], producer: str,
+        event_id: str, external_id: str | None = None, occurred_at: str | None = None,
+    ) -> IntakeResult:
+        # The PR artifact is built from the facts, so intake takes neither external_id nor occurred_at.
+        from events.intake import admit_event
+        return await admit_event(event_type=event_type, facts=facts, origin=origin,
+                                 producer=producer, event_id=event_id)
 
 
 def _object(value: Any) -> dict[str, Any]:
@@ -172,5 +168,5 @@ def observe_admitted_check_suite(payload: dict[str, Any]) -> None:
         return
     if _default is None:
         from reviewer.gh_api import run_gh
-        _default = HeadCheckAggregator(run_gh, LoggingSink())
+        _default = HeadCheckAggregator(run_gh, IntakeSink())
     _default.observe(payload)

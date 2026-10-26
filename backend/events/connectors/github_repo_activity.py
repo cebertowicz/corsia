@@ -14,6 +14,7 @@ import os
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from events.connectors import github_issue_activity as issue_activity
 from events.connectors import github_notifications_feed as feed
 
 log = logging.getLogger(__name__)
@@ -213,14 +214,10 @@ async def _issue_events(runner: feed.GhRunner, repo: str, state: dict[str, Any],
         return False
     changed = False
     for row in reversed(candidates):
-        issue = row.get("issue")
-        if row.get("event") != "labeled" or not isinstance(issue, dict):
-            continue
-        event = "pull_request" if issue.get("pull_request") else "issues"
-        payload = _payload(repo, "labeled", issue) if event == "pull_request" else {
-            "action": "labeled", "repository": {"full_name": repo}, "issue": issue}
-        await _admit(event, payload, f"labeled:{repo}:{row.get('id')}")
-        changed = True
+        delivery = issue_activity.row_delivery(repo, row, state.get("heads", {}))
+        if delivery is not None:
+            await _admit(*delivery)
+            changed = True
     if persist:
         _commit_cursor(state, newest, now, first, first_etag)
     return changed
@@ -276,6 +273,12 @@ async def _closed_pulls(runner: feed.GhRunner, repo: str, state: dict[str, Any],
     return changed
 
 
+async def _new_issues(runner: feed.GhRunner, repo: str, state: dict[str, Any], now: datetime) -> bool | None:
+    async def get(path: str, saved: dict[str, Any], at: datetime) -> feed.GhResponse | None:
+        return await _get(runner, path, saved, at)
+    return await issue_activity.new_issues(get, _admit, repo, state, now)
+
+
 async def _pending_heads(runner: feed.GhRunner, repo: str, state: dict[str, Any], now: datetime) -> None:
     """Admit completed suites for heads that left the pending set.
 
@@ -313,7 +316,7 @@ async def _poll_repo(runner: feed.GhRunner, repo: str, now: datetime) -> bool:
     async with _lock(repo):
         state = _repo_state(repo)
         changed = await _issue_events(runner, repo, state, now)
-        for read in (_open_pulls, _closed_pulls):
+        for read in (_open_pulls, _closed_pulls, _new_issues):
             result = await read(runner, repo, state, now)
             if result is None:
                 _save_state(repo, state)
