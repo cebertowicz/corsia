@@ -100,7 +100,7 @@ async def test_a_person_step_stays_open_on_its_visit_settles_on_a_new_one_and_wa
 
     await page.reprobed()
     [step] = _steps(db)
-    assert (step["title"], step["state"]) == ("Complete this step in the browser (example.test)", "pending")
+    assert (step["title"], step["state"]) == ("Finish this in the browser (example.test)", "pending")
     assert not browser_control.password_page(THREAD)
 
     # A password field on the step's own visit (an email-first page's second screen) keeps it the person's.
@@ -215,6 +215,37 @@ async def test_a_second_declare_on_the_same_visit_keeps_the_one_open_step(plan):
     await browser_control.declare_person_step(THREAD, page.agent_probe, "Choose your account")
     await browser_control.declare_person_step(THREAD, page.agent_probe, "Choose your account")
     assert len(_steps(db)) == 1 and plan["events"] == ["person_step_opened"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("ending", ["accepted", "declined"])
+async def test_a_password_field_shown_again_on_the_same_visit_opens_a_live_step(plan, monkeypatch, ending):
+    """A wrong password on a single-page app re-shows the field: the agent must not wait on an ended row."""
+    page, db = Page(), plan["db"]
+    monkeypatch.setattr(browser_control, "REPROBE_EVERY", 60)
+    browser_control.pane_connected(THREAD, "pane", None, page.pane_probe)
+    page.show("visit-one", frozenset({42}))
+    with pytest.raises(BrowserSessionError, match="asks for a password"):
+        await browser_control.require_page_access(THREAD, page.agent_probe, ("snapshot",))
+    [first] = _steps(db)
+    if ending == "declined":
+        plan_update(db, plan["plan"].id, "close_node",
+                    {**close_params(db, "close_node", first["id"]), "reason": "Not now"}, actor=HUMAN)
+    page.show("visit-one")
+    await browser_control.require_page_access(THREAD, page.agent_probe, ("snapshot",))
+    assert THREAD not in browser_control._steps
+    assert row(db, first["id"])["state"] == ("accepted" if ending == "accepted" else "closed")
+
+    page.show("visit-one", frozenset({42}))
+    with pytest.raises(BrowserSessionError, match="asks for a password"):
+        await browser_control.require_page_access(THREAD, page.agent_probe, ("snapshot",))
+    first, second = _steps(db)
+    live = browser_control._steps[THREAD]
+    assert second["id"] != first["id"] and second["state"] == "pending"
+    assert live.node_id == second["id"] and live.reprobe is not None and not live.reprobe.done()
+    assert browser_control.password_page(THREAD)
+    assert plan["events"].count("password_step_opened") == 2
+    assert plan["events"].count("password_step_settled") == (1 if ending == "accepted" else 0)
 
 
 @pytest.mark.asyncio
@@ -410,9 +441,9 @@ async def test_a_password_guard_outlives_leaving_its_tab_and_clears_when_the_bro
 @pytest.mark.parametrize("instruction", ["Choose your account.", "Your phone needs approval", "Sign in"])
 def test_person_step_keeps_free_form_instruction_out_of_product_chrome(instruction):
     step = browser_steps.PersonStep("visit", "accounts.example.test", instruction=instruction)
-    assert step.title() == "Complete this step in the browser (example.test)"
+    assert step.title() == "Finish this in the browser (example.test)"
     assert step.description() == (
-        "Complete this step in the shared browser. The agent can't see this page and carries on once you're past it."
+        "The agent can't see this page and carries on once you're past it."
         f"\n\n{instruction}"
     )
 

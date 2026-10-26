@@ -232,19 +232,28 @@ async def _open_step(thread_id: str, step: BrowserStep) -> None:
     """Publish an active step only after its per-kind receipt succeeds and its row is checked."""
     if step.node_id is not None:
         return
-    step.node_id = await asyncio.to_thread(
-        _plan_write, "open_user_step", thread_id, key=f"{step.event_prefix}:{step.visit}",
-        title=step.title(), description=step.description(), provenance=step.provenance,
-    )
-    if not isinstance(step.node_id, str) or not step.node_id:
-        raise RuntimeError("browser step row creation returned no node")
-    ended = await asyncio.to_thread(_step_row_state, step.node_id)
-    if isinstance(step, PersonStep) and ended is not None:
-        raise BrowserSessionError(PERSON_STEP_ENDED)
+    # One receipt per occurrence: the first is `<kind>:<visit>`, and a password field that shows again on the
+    # same document after its row ended (a wrong password on a single-page app) is `<kind>:<visit>:<n>`, so it
+    # gets a fresh row. A person's ended row is the person's answer for the visit and stays refused.
+    base = f"{step.event_prefix}:{step.visit}"
+    occurrence = 1
+    while True:
+        node_id = await asyncio.to_thread(
+            _plan_write, "open_user_step", thread_id, key=base if occurrence == 1 else f"{base}:{occurrence}",
+            title=step.title(), description=step.description(), provenance=step.provenance,
+        )
+        if not isinstance(node_id, str) or not node_id:
+            raise RuntimeError("browser step row creation returned no node")
+        ended = await asyncio.to_thread(_step_row_state, node_id)
+        if ended is None:
+            break
+        if isinstance(step, PersonStep):
+            raise BrowserSessionError(PERSON_STEP_ENDED)
+        occurrence += 1
+    step.node_id = node_id
     _steps[thread_id] = step
-    if ended is None:
-        _start_reprobe(thread_id, step)
-        await _emit(f"{step.event_prefix}_opened", thread_id)
+    _start_reprobe(thread_id, step)
+    await _emit(f"{step.event_prefix}_opened", thread_id)
 
 
 async def _end_step(thread_id: str, step: BrowserStep, *, settle: bool) -> None:

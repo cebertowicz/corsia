@@ -85,14 +85,14 @@ class PersonStep(BrowserStep):
 
     provenance = "browser.person_step"
     event_prefix = "person_step"
-    settlement_evidence = "The browser page changed after the person completed this step"
+    settlement_evidence = "The page on this tab changed to a new document, which ends the person's part"
 
     def title(self) -> str:
-        return f"Complete this step in the browser ({self.domain()})"
+        return f"Finish this in the browser ({self.domain()})"
 
     def description(self) -> str:
         return (
-            "Complete this step in the shared browser. The agent can't see this page and carries on once you're past it."
+            "The agent can't see this page and carries on once you're past it."
             f"\n\n{self.instruction}"
         )
 

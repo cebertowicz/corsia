@@ -1276,7 +1276,7 @@ async def test_browser_person_step_runs_the_real_declaration_for_the_authoritati
 
     assert result == "Person step opened; end your turn."
     assert admitted == ["authoritative-thread"]
-    assert writes == [("open_user_step", "Complete this step in the browser (google.com)")]
+    assert writes == [("open_user_step", "Finish this in the browser (google.com)")]
 
 
 @pytest.mark.asyncio
