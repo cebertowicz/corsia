@@ -1,0 +1,35 @@
+{
+ "actor": {
+  "id": 7285414,
+  "login": "cebertowicz",
+  "type": "User"
+ },
+ "created_at": "2026-10-26T17:56:54Z",
+ "event": "labeled",
+ "id": 34289213267,
+ "issue": {
+  "closed_at": null,
+  "created_at": "2026-10-26T17:56:52Z",
+  "labels": [
+   {
+    "name": "bug"
+   },
+   {
+    "name": "infrastructure"
+   },
+   {
+    "name": "p3"
+   }
+  ],
+  "number": 1462,
+  "state": "open",
+  "state_reason": null,
+  "updated_at": "2026-10-26T17:56:52Z",
+  "user": {
+   "login": "cebertowicz"
+  }
+ },
+ "label": {
+  "name": "p3"
+ }
+}

@@ -273,7 +273,10 @@ export function declineConnectedApp(id: string): Promise<ConnectedApp> {
 	return response(`/api/mcp/servers/${encodeURIComponent(id)}/decline`, { method: 'POST' });
 }
 
-export function reconnectConnectedApp(id: string): Promise<ConnectedApp> {
+/** What Reconnect answers with: the app's new runtime state, not the whole row. */
+export type ReconnectedApp = Pick<ConnectedApp, 'id' | 'state' | 'tool_count' | 'failure_class'>;
+
+export function reconnectConnectedApp(id: string): Promise<ReconnectedApp> {
 	return response(`/api/mcp/servers/${encodeURIComponent(id)}/reconnect`, { method: 'POST' });
 }
 

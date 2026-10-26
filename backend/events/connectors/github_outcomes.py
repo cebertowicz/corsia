@@ -8,7 +8,9 @@ dedupe promises here, and nothing more.
 
 The keys then split into two kinds, and a backfill has to know which is which. The
 PR open, push, close and merge keys, the issue keys and the run id plus
-``run_attempt`` in ``github.workflow_run.completed`` are built from identities the
+``run_attempt`` in ``github.workflow_run.completed``, the job id in
+``github.workflow_job.completed`` and the check run id plus ``completed_at`` in
+``github.check_run.completed`` are built from identities the
 repository still reports — a head or merge SHA, a close timestamp, a run's
 ``run_attempt`` — so a later read can reconstruct the same key. ``github.pr.reopened``,
 ``github.pr.retargeted`` and ``github.check_suite.completed`` are keyed on the
@@ -276,7 +278,7 @@ def _check_suite_drafts(payload: dict[str, Any], repo: str) -> list[OutcomeDraft
     )]
 
 
-def _label_attributes(labels: list[dict[str, Any]]) -> dict[str, Any]:
+def label_attributes(labels: list[dict[str, Any]]) -> dict[str, Any]:
     """Scalar label facts: highest priority, lane, kind, and the label count."""
     names = sorted({shape.text(shape.required(shape.mapping(label), "name"))
                     for label in shape.members(labels)})
@@ -301,7 +303,7 @@ def _issue_drafts(payload: dict[str, Any], repo: str) -> list[OutcomeDraft]:
     subject = f"github:issue:{repo}#{number}"
     attrs = {"repo": repo, "issue": str(number)}
     if "labels" in issue:
-        attrs.update(_label_attributes(issue["labels"]))
+        attrs.update(label_attributes(issue["labels"]))
     if action == "opened":
         return [OutcomeDraft(
             f"{subject}:opened", "github.issue.opened",
@@ -315,13 +317,27 @@ def _issue_drafts(payload: dict[str, Any], repo: str) -> list[OutcomeDraft]:
     )]
 
 
+def _workflow_job_drafts(payload: dict[str, Any], repo: str) -> list[OutcomeDraft]:
+    from events.connectors.github_ci_outcomes import workflow_job_drafts
+    return workflow_job_drafts(payload, repo)
+
+
+def _check_run_drafts(payload: dict[str, Any], repo: str) -> list[OutcomeDraft]:
+    from events.connectors.github_ci_outcomes import check_run_drafts
+    return check_run_drafts(payload, repo)
+
+
 # The public entry owns supported-action selection; private mappers consume it.
 _MAPPERS = {
-    "pull_request": (("opened", "synchronize", "reopened", "closed", "edited"), _pr_drafts),
+    "pull_request": (("opened", "synchronize", "reopened", "closed", "edited", "labeled", "unlabeled"), _pr_drafts),
     "check_suite": (("completed",), _check_suite_drafts),
     "workflow_run": (("completed",), _workflow_run_drafts),
-    "issues": (("opened", "closed"), _issue_drafts),
+    "workflow_job": (("completed",), _workflow_job_drafts),
+    "check_run": (("completed",), _check_run_drafts),
+    "issues": (("opened", "closed", "reopened", "labeled", "unlabeled"), _issue_drafts),
 }
+# Label changes and issue reopens map in github_label_outcomes, from the shared normalization.
+_LABEL_ACTIONS = {"pull_request": ("labeled", "unlabeled"), "issues": ("reopened", "labeled", "unlabeled")}
 
 
 def map_github_outcomes(event_type: str, payload: dict[str, Any]) -> list[OutcomeDraft]:
@@ -343,6 +359,9 @@ def map_github_outcomes(event_type: str, payload: dict[str, Any]) -> list[Outcom
         return []
     repository = shape.mapping(shape.required(payload, "repository"))
     repo = shape.text(shape.required(repository, "full_name")).lower()
+    if action in _LABEL_ACTIONS.get(event_type, ()):
+        from events.connectors.github_label_outcomes import label_drafts
+        return label_drafts(event_type, payload, repo)
     if base_from is not None:
         return _retarget_drafts(payload, repo, base_from)
     return mapper(payload, repo)
