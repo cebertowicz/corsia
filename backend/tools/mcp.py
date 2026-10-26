@@ -19,6 +19,7 @@ from tools.mcp_local_transport import (
     mcp_oserror_detail as _mcp_oserror_detail,
     safehouse_stdio_parameters as _safehouse_stdio_parameters,
 )
+from tools.mcp_stamp import ConnectedAppResult, build_stamp
 from tools.registry import ToolRegistry, _is_reserved_execution_param
 
 
@@ -121,8 +122,8 @@ class MCPToolWrapper(Tool):
         self.mcp_server_config = config
         # The server's own description of itself, from its initialize result.
         self.mcp_instructions = instructions
-        self.mcp_tool_name = tool_def.name
-        self._original_name = tool_def.name
+        self.mcp_tool_name = self._original_name = tool_def.name
+        self._stamp = build_stamp(config, tool_def.name)  # fixed at connect, carried on every result
         self._name = public_name(server_name, tool_def.name, config)
         self._auth = auth
         self._connection = None
@@ -164,21 +165,18 @@ class MCPToolWrapper(Tool):
         try:
             result = await self._call(arguments)
         except Exception as error:
-            return f"Error: MCP tool '{self._name}': {safe_error(error)}."
+            return ConnectedAppResult(f"Error: MCP tool '{self._name}': {safe_error(error)}.", self._stamp)
         parts = [block.text if isinstance(block, types.TextContent) else str(block)
                  for block in result.content]
         output = self._redact("\n".join(parts) or "(no output)")
         if not getattr(result, "isError", False):
-            return output
-        if guidance := _mcp_denial_guidance(output):
-            return f"Error: {guidance}"
-        return f"Error: {output}"
+            return ConnectedAppResult(output, self._stamp)
+        return ConnectedAppResult(f"Error: {_mcp_denial_guidance(output) or output}", self._stamp)
 
     async def _authorized_user(self):
         if self._allowed_user_ids is None:
             return True
         from infra import state
-        from infra.db_async import run_in_db
         from infra.queries import load_thread_row
 
         thread_id = state._current_thread_id.get(None)

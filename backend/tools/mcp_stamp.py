@@ -1,14 +1,20 @@
 """Which connected app and which upstream tool produced a persisted result.
 
-The stamp is read from the live wrapper when a result row is written. It names
-the server by what it is (a remote server's URL, a local server's package) and
-never by CORSIA's alias or a harness's ``mcp__<server>__<tool>`` name, so an
-import from another client or a rename leaves both values unchanged. It holds no
-header, token, environment value or call argument.
+The wrapper that ran a call builds the stamp once and returns it on the result
+(``ConnectedAppResult``); the result row copies it from there. It names the
+server by what it is (a remote server's URL, a local server's package or image)
+and never by CORSIA's alias or a harness's ``mcp__<server>__<tool>`` name, so an
+import from another client or a rename leaves both values unchanged.
+
+The stamp never holds a header, token, environment value or call argument. The
+launch command is the one place a secret can sit beside a name, so the rule is
+structural: a flag's value is never read as the package, and a candidate that
+does not look like a package name falls back to the bare command.
 """
 
 from __future__ import annotations
 
+import os
 import re
 from pathlib import PurePath
 from urllib.parse import urlsplit
@@ -18,14 +24,31 @@ TOOL_FIELD = "mcp_tool"
 
 # Runners whose first positional argument is the package they start.
 _PACKAGE_RUNNERS = {"npx", "bunx", "pnpx", "uvx"}
-# Runners that need a subcommand first: ``pnpm dlx <package>``.
 _SUBCOMMAND_RUNNERS = {
-    "pnpm": ("dlx",), "yarn": ("dlx",), "npm": ("exec",), "pipx": ("run",), "uv": ("tool", "run"),
+    "pnpm": ["dlx"], "yarn": ["dlx"], "npm": ["exec"], "pipx": ["run"], "uv": ["tool", "run"],
 }
-# Interpreters name no server; the script they run does.
+_CONTAINER_RUNNERS = {"docker", "podman"}
+# Interpreters name no server; the script (or ``-m`` module) they run does.
 _INTERPRETERS = {"node", "bun", "deno", "python", "python3", "ruby"}
-_PACKAGE_FLAGS = {"--from", "--package", "-p"}
-_VERSION_SUFFIX = re.compile(r"(?<=.)(@|==|~=|>=|<=)[^/@]*$")
+_SCRIPT_SUFFIXES = (".js", ".mjs", ".cjs", ".ts", ".mts", ".py", ".rb")
+# Interpreter flags are overwhelmingly boolean, so only these take a value.
+_INTERPRETER_VALUE_FLAGS = {"-r", "--require", "--import", "--loader", "--env-file", "-W", "-X"}
+_PACKAGE_FLAGS = {"--from", "--package"}
+# A flag without ``=`` consumes the next token (it may be a secret) unless it is
+# known to take no value. Kept small on purpose: an unknown boolean flag makes the
+# stamp fall back to the bare command, never to a wrong or secret name.
+_NO_VALUE_FLAGS = {
+    "-y", "--yes", "-q", "--quiet", "--offline", "--prefer-offline", "--no-install",
+    "--refresh", "--isolated", "--no-cache",
+}
+_CONTAINER_NO_VALUE_FLAGS = {
+    "-i", "-t", "-it", "-d", "--rm", "--init", "--interactive", "--tty", "--detach",
+    "--read-only", "--privileged",
+}
+_PACKAGE_NAME = re.compile(r"^(?:@[A-Za-z0-9][\w.~-]*/)?[A-Za-z0-9][\w.~-]*(?:\[[\w,.-]+\])?$")
+_VERSION_PIN = re.compile(r"(?<=.)(@|==|~=|>=|<=|!=|>|<)[^/@]*$")
+_IMAGE_NAME = re.compile(r"^[A-Za-z0-9][\w.-]*(?::\d+)?(?:/[\w.-]+)+$")
+_HOME_PREFIX = re.compile(r"^(?:/Users|/home)/[^/]+")
 
 
 def _remote_identity(url: str) -> str | None:
@@ -37,44 +60,80 @@ def _remote_identity(url: str) -> str | None:
     return f"{parts.scheme}://{parts.hostname.lower()}{port}{parts.path.rstrip('/')}"
 
 
-def _package_name(token: str) -> str:
-    """One package token without its version pin, and never a credential-bearing URL."""
+def _package_name(token: str) -> str | None:
+    """A package token without its version pin; None unless it has a package name's shape."""
     if "://" in token:
-        return _remote_identity(token) or ""
-    return _VERSION_SUFFIX.sub("", token)
+        return _remote_identity(token)
+    name = _VERSION_PIN.sub("", token)
+    return name if _PACKAGE_NAME.match(name) else None
 
 
-def _first_positional(args: list[str]) -> str | None:
-    """The package a runner names: its package flag's value, else the first non-flag argument."""
+def _positional(args: list[str], no_value: set[str]) -> str | None:
+    """The first argument that is neither a flag nor a flag's value."""
     iterator = iter(args)
     for token in iterator:
-        if token in _PACKAGE_FLAGS:
+        if token == "--":
             return next(iterator, None)
-        flag, _, value = token.partition("=")
-        if value and flag in _PACKAGE_FLAGS:
-            return value
-        if not token.startswith("-"):
-            return token
+        flag, has_value, value = token.partition("=")
+        if flag in _PACKAGE_FLAGS:
+            return value if has_value else next(iterator, None)
+        if token.startswith("-"):
+            if not has_value and token not in no_value:
+                next(iterator, None)
+            continue
+        return token
     return None
 
 
+def _interpreter_target(args: list[str]) -> str | None:
+    """The script (home prefix replaced by ``~``) or module an interpreter starts."""
+    iterator = iter(args)
+    for token in iterator:
+        if token == "-m":
+            return next(iterator, None)
+        if token in _INTERPRETER_VALUE_FLAGS:
+            next(iterator, None)
+        elif not token.startswith("-") and token.endswith(_SCRIPT_SUFFIXES):
+            home = str(PurePath(os.path.expanduser("~")))
+            if home != "/" and token.startswith(home + "/"):
+                token = "~" + token[len(home):]
+            return _HOME_PREFIX.sub("~", token)
+    return None
+
+
+def _image_identity(args: list[str]) -> str | None:
+    """The image a ``docker run`` starts, without tag or digest; None for a bare name.
+
+    A single-segment image (``alpine``) is refused: with no registry or namespace
+    it is indistinguishable from a stray positional value.
+    """
+    if not args or args[0] != "run":
+        return None
+    image = _positional(args[1:], _CONTAINER_NO_VALUE_FLAGS)
+    if not image:
+        return None
+    image = image.split("@", 1)[0]
+    head, slash, last = image.rpartition("/")
+    image = f"{head}{slash}{last.split(':', 1)[0]}"
+    return image if _IMAGE_NAME.match(image) else None
+
+
 def _local_identity(command: str, args: object) -> str | None:
-    """The package a local server starts, or its command when it names no package."""
+    """The package, image or script a local server starts, or its command when it names none."""
     base = PurePath(command).name
     arguments = [value for value in args if isinstance(value, str)] if isinstance(args, list) else []
-    package: str | None = None
+    target: str | None = None
     if base in _PACKAGE_RUNNERS:
-        package = _first_positional(arguments)
+        target = _package_name(_positional(arguments, _NO_VALUE_FLAGS) or "")
     elif base in _SUBCOMMAND_RUNNERS:
-        subcommand = _SUBCOMMAND_RUNNERS[base]
-        if arguments[: len(subcommand)] == list(subcommand):
-            package = _first_positional(arguments[len(subcommand):])
+        words = _SUBCOMMAND_RUNNERS[base]
+        if arguments[: len(words)] == words:
+            target = _package_name(_positional(arguments[len(words):], _NO_VALUE_FLAGS) or "")
+    elif base in _CONTAINER_RUNNERS:
+        target = _image_identity(arguments)
     elif base in _INTERPRETERS:
-        script = _first_positional(arguments)
-        return PurePath(script).name if script else base
-    if package:
-        return _package_name(package) or base
-    return base or None
+        target = _interpreter_target(arguments)
+    return target or base or None
 
 
 def app_identity(config: dict) -> str | None:
@@ -88,16 +147,28 @@ def app_identity(config: dict) -> str | None:
     return None
 
 
-def result_stamp(tool_name: str) -> dict[str, str]:
-    """Return the result-row fields for a live connected-app tool, or nothing for any other tool."""
-    from tools.mcp_runtime import live_mcp_tool
+def build_stamp(config: dict, upstream_tool: str) -> dict[str, str]:
+    """The result-row fields for one connected-app tool; empty when no identity can be named."""
+    app = app_identity(config)
+    return {APP_FIELD: app, TOOL_FIELD: upstream_tool} if app and upstream_tool else {}
 
-    wrapper = live_mcp_tool(tool_name)
-    if wrapper is None:
-        return {}
-    config = getattr(wrapper, "mcp_server_config", None)
-    app = app_identity(config) if isinstance(config, dict) else None
-    upstream = getattr(wrapper, "mcp_tool_name", None)
-    if app is None or not isinstance(upstream, str) or not upstream:
-        return {}
-    return {APP_FIELD: app, TOOL_FIELD: upstream}
+
+class ConnectedAppResult(str):
+    """Tool-result text that carries the stamp of the wrapper that produced it."""
+
+    mcp_stamp: dict[str, str]
+
+    def __new__(cls, value: str, stamp: dict[str, str]) -> "ConnectedAppResult":
+        instance = super().__new__(cls, value)
+        instance.mcp_stamp = stamp
+        return instance
+
+    def __getnewargs__(self) -> tuple[str, dict[str, str]]:  # type: ignore[override]
+        """Preserve the stamp across copy/pickle."""
+        return str(self), self.mcp_stamp
+
+
+def result_stamp(content: object) -> dict[str, str]:
+    """The stamp a result carries; nothing for any result that did not come from a connected app."""
+    stamp = getattr(content, "mcp_stamp", None)
+    return dict(stamp) if isinstance(stamp, dict) else {}

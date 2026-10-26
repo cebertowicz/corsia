@@ -8,6 +8,7 @@ from typing import Any
 from host_access.credential_sanitizer import CredentialSafeText, sanitize_credential_text
 from infra.tool_result_errors import is_error_result
 from tools.base import Tool
+from tools.mcp_stamp import ConnectedAppResult, result_stamp
 from tools.post_update_reminder import remind_current_turn
 from tools.recorded_call import CompletedToolFailure, execute_recorded_call
 from tools.tool_execution_context import inject_context, mcp_reach_refusal, strip_reserved_context
@@ -87,7 +88,11 @@ class ToolRegistry:
             result = self._sanitize_result(await self._execute_unredacted(
                 name, params, review_request_id=review_request_id,
             ))
-            result = await remind_current_turn(result, name, params)
+            stamp = result_stamp(result)
+            # The reminder only touches plain text, so a stamped result earns it as text.
+            result = await remind_current_turn(str(result) if stamp else result, name, params)
+            if stamp:
+                result = ConnectedAppResult(str(result), stamp)
         except CompletedToolFailure as failure:
             # Retained output answers the provider's own call: a dispatched
             # call is bound and replayed under ``tool_call``, not the tool it ran.
@@ -111,6 +116,8 @@ class ToolRegistry:
         if not isinstance(result, str):
             return result
         redacted = sanitize_credential_text(result)
+        if stamp := result_stamp(result):
+            return ConnectedAppResult(redacted, stamp)  # keeps the wrapper that ran the call
         media = getattr(result, "media", None)
         if media is None:
             return redacted

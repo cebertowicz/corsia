@@ -77,7 +77,7 @@ def _result_metadata(
         "name": name,
         "arguments": arguments,
         **dispatch,
-        **mcp_result_stamp(dispatch.get("tool_name", name)),
+        **mcp_result_stamp(content),
         **tool_result_integrity_metadata(content),
     }
     if provider_call_id is not None:
