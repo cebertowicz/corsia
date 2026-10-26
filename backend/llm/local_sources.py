@@ -13,7 +13,7 @@ from llm.managed_omlx_binary import is_corsia_managed_server, managed_omlx_execu
 from llm.locality import endpoint_on_this_mac
 from llm.network_endpoints import endpoint_base, get_endpoints
 from llm.local_setup_executable import omlx_on_path
-from llm.local_setup_gates import local_memory_ok
+from llm.local_setup_gates import host_never_runs_local, local_memory_ok
 from llm.local_profiles import format_size
 from llm.network_discovery import get_servers, parse_server_metadata
 
@@ -145,6 +145,7 @@ def _omlx_state(membership: tuple[set[str], set[str]] | None = None,
         result = _source("omlx", "Local model", state, reason, fix, checked_at)
         result.update(
             eligible=eligible,
+            never_local=host_never_runs_local(),
             context_window=model.context_window if model else None,
             download_size=format_size(model.download_size_bytes) if model else None,
         )

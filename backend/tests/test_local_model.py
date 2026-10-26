@@ -345,6 +345,22 @@ def test_the_switch_stops_only_its_private_managed_server(monkeypatch):
 
 
 
+@pytest.mark.parametrize(
+    ("system", "gib", "never_local"),
+    [("Darwin", 16, False), ("Darwin", 64, False), ("Linux", 16, True), ("Linux", 64, True)],
+)
+def test_the_local_row_says_a_host_that_is_not_macos_never_runs_a_local_model(monkeypatch, system, gib, never_local):
+    _mac(monkeypatch, gib)
+    monkeypatch.setattr(local_sources, "get_servers", lambda **_kwargs: [])
+    monkeypatch.setattr("llm.local_setup_gates.platform.system", lambda: system)
+
+    source = local_sources.omlx_source((set(), set()))
+
+    # Memory still decides ``eligible``; the host fact is separate, so a low-memory Mac keeps its own message.
+    assert source["never_local"] is never_local
+    assert source["eligible"] is (gib >= 24)
+
+
 @pytest.mark.parametrize("gib, allowed", [(23.9, False), (24, True)])
 def test_the_24_gib_gate_decides_whether_there_is_a_local_model(monkeypatch, gib, allowed):
     mac = _mac(monkeypatch, gib)

@@ -2,6 +2,7 @@
 	import Toggle from './ui/Toggle.svelte';
 	import { loadCloudModelsOff, saveCloudModelsOff } from '$lib/api/providerPolicy';
 	import { models } from '$lib/stores/models';
+	import { neverLocalHost, watchLocalStatus } from '$lib/stores/localPickerStatus';
 	import { requestSettingsSection } from '$lib/stores/settingsNavigation';
 	import { saveFailureText } from '$lib/saveFailure';
 
@@ -15,6 +16,8 @@
 	const hasReadyLocalModel = $derived($models.some((model) => model.is_local && model.status === 'ready'));
 
 	$effect(() => { void load(projectId); });
+	// The Set up link is offered only where a local model can run: the server says when it never can.
+	$effect(() => watchLocalStatus());
 	async function load(id: string) {
 		loaded = false; error = ''; loadFailed = false;
 		const result = await loadCloudModelsOff(id);
@@ -47,7 +50,7 @@
 		<span class="label">Local models only</span>
 		<p>Chats and agents in this project use only models on this computer or on a trusted device. A chat on a cloud model waits until you switch it to a local one.</p>
 		{#if !hasReadyLocalModel}
-			<p class="status" class:warning={off}>{off ? 'No local model is ready, so nothing in this project can run.' : 'No local model is ready.'} <button type="button" onclick={() => requestSettingsSection('providers')}>Set up a local model</button></p>
+			<p class="status" class:warning={off}>{off ? 'No local model is ready, so nothing in this project can run.' : 'No local model is ready.'} {#if !$neverLocalHost}<button type="button" onclick={() => requestSettingsSection('providers')}>Set up a local model</button>{/if}</p>
 		{/if}
 		{#if error}<p class="status error" role="alert">{error} {#if loadFailed}<button type="button" onclick={() => load(projectId)}>Try again</button>{/if}</p>{/if}
 	</div>

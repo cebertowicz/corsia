@@ -81,9 +81,9 @@
 	});
 
 	const baseGroups = $derived($hostGroups.length > 0 ? $hostGroups : $liveHostGroups);
-	// CORSIA's own oMLX, online or offline, is the local model: Set up shows only without one.
+	// CORSIA's own oMLX, online or offline, is the local model: Set up shows only without one, and never on a server that cannot run it.
 	const localSetupRow = $derived.by<HostProvider | null>(() => {
-		if (!localSource || localSource.corsia_omlx === true) return null;
+		if (!localSource || localSource.corsia_omlx === true || localSource.never_local === true) return null;
 		return {
 			name: 'local-setup', label: 'Local model', type: 'local', statusDot: setupFailed ? 'error' : 'disabled', subline: setupLine,
 			raw: { name: 'local-setup', label: 'Local model' } as ProviderEntry,

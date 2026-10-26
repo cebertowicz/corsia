@@ -117,6 +117,19 @@ describe('the picker\'s Local group', () => {
 		expect(button('Set up')).toBeDefined();
 	});
 
+	// The Local only row's "Set up a local model" link (an eligible Mac's Local section hosts Set up itself): a Mac too small for a local model keeps it; a server that is not macOS never has it.
+	it.each([
+		['a low-memory Apple Silicon Mac', { eligible: false }, true],
+		['a Mac whose reply predates the host fact', { eligible: false, never_local: undefined }, true],
+		['a server that is not macOS with enough memory', { eligible: true, never_local: true }, false],
+		['a server that is not macOS with little memory', { eligible: false, never_local: true }, false],
+	])('Local only row on %s: Set up a local model is %s', async (_name, source, offered) => {
+		omlx = source;
+		await render();
+		expect(host.textContent).toContain('No local model is ready.');
+		expect(button('Set up a local model') !== undefined).toBe(offered);
+	});
+
 	it('uses the shared status-less Local fallback header while the starter model downloads', async () => {
 		omlx = { local_state: 'downloading', download_percent: 40 };
 		await render();

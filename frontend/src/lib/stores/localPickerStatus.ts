@@ -9,13 +9,15 @@ const localSource = writable<ModelSource | undefined>(undefined);
 
 /** What the picker's Local group says about a download or a failed setup; null when neither. */
 export const localStatus = derived(localSource, localPickerStatus);
+/** This server can never run a local model (not macOS): nothing local is offered, whatever its memory. */
+export const neverLocalHost = derived(localSource, (source) => source?.never_local === true);
 /** The picker may offer the shared add-model sheet only on CORSIA's online local service. */
 export const canAddLocalModel = derived(localSource, (source) =>
-	source?.eligible === true && source.corsia_omlx_online === true,
+	source?.eligible === true && source.never_local !== true && source.corsia_omlx_online === true,
 );
 /** Without CORSIA's local service, online or offline, preserve the existing setup route. */
 export const canSetUpLocalModel = derived(localSource, (source) =>
-	source?.eligible === true && source.corsia_omlx !== true,
+	source?.eligible === true && source.never_local !== true && source.corsia_omlx !== true,
 );
 
 async function read(): Promise<void> {

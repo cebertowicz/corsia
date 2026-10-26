@@ -30,6 +30,12 @@ async function mountSetting() {
 	flushSync();
 	await vi.waitFor(() => expect((host.querySelector('button[role="switch"], input, button') as HTMLButtonElement | null)?.disabled).toBeFalsy());
 }
+// Serve the project's setting and the local source row, so the Set up link can follow the server's host fact.
+function stubWithLocalRow(row: Record<string, unknown>) {
+	vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => (String(input) === '/api/providers/sources'
+		? { ok: true, json: async () => ({ sources: [{ source: 'omlx', name: 'Local model', state: 'needs_setup', ...row }] }) }
+		: { ok: true, json: async () => ({ cloud_models_off: false }) })));
+}
 const toggle = () => host.querySelector('[aria-label="Local models only"]') as HTMLElement;
 const text = () => (host.textContent ?? '').replace(/\s+/g, ' ');
 
@@ -109,5 +115,17 @@ describe('CloudModelsOffSetting', () => {
 		toggle().click(); flushSync();
 		await vi.waitFor(() => expect(text()).toContain('Couldn’t save this change. Your permission changed.'));
 		expect(toggle().getAttribute('aria-pressed')).toBe('true');
+	});
+	it.each([
+		['an eligible Mac', { eligible: true }, true],
+		['a Mac too small for a local model', { eligible: false }, true],
+		['a server that is not macOS', { eligible: true, never_local: true }, false],
+		['a server that is not macOS with little memory', { eligible: false, never_local: true }, false],
+	])('no local model ready on %s: the Set up a local model link is %s', async (_name, row, offered) => {
+		models.set([cloud]); stubWithLocalRow(row); await mountSetting();
+		await vi.waitFor(() => expect(text()).toContain(NONE_READY_OFF));
+		// The statement is true everywhere; the link only where a local model can run.
+		await new Promise((resolve) => setTimeout(resolve, 20)); flushSync();
+		expect(text().includes('Set up a local model')).toBe(offered);
 	});
 });

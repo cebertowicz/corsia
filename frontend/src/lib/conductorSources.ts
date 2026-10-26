@@ -24,6 +24,8 @@ export interface ModelSource {
 	limited?: boolean;
 	resets_at?: string | null;
 	eligible?: boolean;
+	/** True on the local row when this server's operating system can never run a local model (not macOS). */
+	never_local?: boolean;
 	/** The picked local model's context window; null before there is a pick. */
 	context_window?: number | null;
 	/** The picked local model's download size, formatted by the backend; null before there is a pick. */
