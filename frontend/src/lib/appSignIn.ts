@@ -30,15 +30,24 @@ export function signInStateLine(app: ConnectedApp, signedOutHere: boolean): stri
 	return null;
 }
 
-/** Failures that another try won't fix; the row offers a fresh Sign in rather than Try again. */
-export const NO_RETRY = new Set(['permissions']);
+/** Failures only someone else can fix: a second press would fail the same way, so the row offers no button. Remove is the way out. */
+const NEEDS_SOMEONE_ELSE = new Set(['permissions', 'not_allowed']);
+/** Failures a Try again may not fix until a client ID exists; the row says Sign in rather than promise a retry. */
+const NEEDS_CLIENT_ID = new Set(['address_mismatch']);
+
+/** The button a failed sign-in's row shows, or null when pressing it again could not help. */
+export function retryLabel(failureClass: string | undefined): 'Try again' | 'Sign in' | null {
+	const name = failureClass ?? 'unknown';
+	if (NEEDS_SOMEONE_ELSE.has(name)) return null;
+	return NEEDS_CLIENT_ID.has(name) ? 'Sign in' : 'Try again';
+}
 
 /** The sentence in the open row for a failed sign-in. `words` is the app's own text, shown only for an unknown class. */
 export function failureText(name: string, failureClass: string): string {
 	switch (failureClass) {
 		case 'timed_out': return "Sign-in wasn't finished within 5 minutes, or the tab was closed.";
 		case 'declined': return `The sign-in was declined on ${name}'s page. If you didn't mean to, try again.`;
-		case 'not_allowed': return `${name} doesn't allow CORSIA to sign in. Ask whoever manages ${name} for your team to allow CORSIA in ${name}'s settings.`;
+		case 'not_allowed': return `${name} doesn't allow CORSIA to sign in. Ask whoever manages ${name} for your team to allow CORSIA in ${name}'s settings, or press Remove to take it off this list.`;
 		case 'permissions': return `${name} can't give CORSIA the access it needs. There's nothing to fix on your side; ${name}'s maker may need to update it.`;
 		case 'app_error': return `${name} had a problem with the sign-in. Try again.`;
 		case 'app_busy': return `${name} is busy. Try again in a few minutes.`;

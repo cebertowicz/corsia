@@ -52,6 +52,7 @@ def runtime(monkeypatch):
     monkeypatch.setattr(mcp_runtime, "_app_configs", {})
     monkeypatch.setattr(mcp_runtime, "_app_states", {})
     monkeypatch.setattr(mcp_runtime, "_reconnect_at", {})
+    monkeypatch.setattr(mcp_runtime, "_connecting", {})
     monkeypatch.setattr(state, "_agent", None)
     tools: list[_FakeTool] = []
     gate = {"hold": None}
@@ -304,6 +305,52 @@ def test_connected_app_reconnect_and_remove_own_only_their_app_runtime(runtime, 
 
     assert [tool.name for tool in tools] == ["GitHub_1", "GitHub_2"]
     assert not any(tool.session_open for tool in tools)
+
+
+def test_remove_ends_a_stuck_connect_and_never_queues_behind_it(runtime, monkeypatch):
+    mcp_runtime, tools, gate = runtime
+    _runtime_db(monkeypatch, mcp_runtime, {
+        "app-1": ("Figma", {"connected_app_id": "app-1"}),
+        "app-2": ("Linear", {"connected_app_id": "app-2"}),
+    })
+    gate["hold"] = asyncio.Event()  # a server that never answers
+    gate["entered"] = asyncio.Event()
+
+    async def scenario():
+        stuck = asyncio.create_task(mcp_runtime.apply_connected_app_runtime("reconnect", "app-1"))
+        await asyncio.wait_for(gate["entered"].wait(), 2)
+        # Another app's Remove does not wait for the stuck connect's lock.
+        other = await asyncio.wait_for(mcp_runtime.apply_connected_app_runtime("remove", "app-2"), 2)
+        assert other["state"] == "disconnected"
+        # This app's own Remove ends the stuck connect at once and frees the lock.
+        removed = await asyncio.wait_for(mcp_runtime.apply_connected_app_runtime("remove", "app-1"), 2)
+        assert removed["state"] == "disconnected"
+        assert (await asyncio.wait_for(stuck, 2))["state"] == "disconnected"
+        assert mcp_runtime._connecting == {} and not mcp_runtime._lock.locked()
+        gate["hold"] = None
+        again = await asyncio.wait_for(mcp_runtime.apply_connected_app_runtime("connect", "app-2"), 2)
+        assert again["state"] == "working"
+        await mcp_runtime.stop_mcp_runtime()
+
+    asyncio.run(scenario())
+    assert not any(tool.session_open for tool in tools)
+
+
+def test_shutdown_still_cancels_a_stuck_connect(runtime, monkeypatch):
+    mcp_runtime, _tools, gate = runtime
+    _runtime_db(monkeypatch, mcp_runtime, {"app-1": ("Figma", {"connected_app_id": "app-1"})})
+    gate["hold"] = asyncio.Event()
+    gate["entered"] = asyncio.Event()
+
+    async def scenario():
+        stuck = asyncio.create_task(mcp_runtime.apply_connected_app_runtime("connect", "app-1"))
+        await asyncio.wait_for(gate["entered"].wait(), 2)
+        stuck.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await stuck
+        assert mcp_runtime._connecting == {} and not mcp_runtime._lock.locked()
+
+    asyncio.run(scenario())
 
 
 def test_connected_app_with_an_unset_key_never_attempts_a_connection(runtime, monkeypatch):

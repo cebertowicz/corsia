@@ -31,6 +31,8 @@ _app_servers: dict[str, str] = {}
 _app_configs: dict[str, tuple[str, dict[str, object]]] = {}
 _app_states: dict[str, dict[str, object]] = {}
 _reconnect_at: dict[str, float] = {}
+# The connect, restart or reconnect now running for an app, so that app's Remove can end it.
+_connecting: dict[str, asyncio.Task] = {}
 
 
 class MCPReconnectRateLimitError(RuntimeError):
@@ -135,70 +137,102 @@ async def apply_connected_app_runtime(action: str, app_id: str) -> dict[str, obj
     button or an agent), so it alone is limited to one per ten seconds. An app that is not
     approved never loads a config here: ``runtime_app_config`` refuses a waiting or expired one.
     """
+    if action == "remove":
+        # Remove touches only this app's own state, so it never queues behind another app's connect,
+        # and it ends this app's own connect when one is stuck.
+        await _cancel_connecting(app_id)
+        return await _remove_app_runtime(app_id)
     async with _lock:
-        if action == "remove":
-            return await _remove_app_runtime(app_id)
         if _stopped:
             return {"state": "failed", "state_since": utc_now_iso(), "tool_count": 0, "failure_class": "cannot_start"}
         if action == "sign_out":
             return await _await_sign_in(app_id)
-        from connections.app_reach import load_missing_app_key_refs, load_runtime_app_config
-
-        if action == "reconnect":
-            _admit_reconnect(app_id)
-        if action in {"restart", "reconnect"}:
-            await _remove_connected_app(app_id)
-        name, config = await run_in_db(load_runtime_app_config, app_id)
-        if app_id in _app_stacks:
-            if _app_configs.get(app_id) == (name, config):
-                return _app_states[app_id]
-            await _remove_connected_app(app_id)
-        connecting = {"state": "connecting", "state_since": utc_now_iso(), "tool_count": 0, "failure_class": None}
-        await _publish_app_state(app_id, connecting)
-        stack: AsyncExitStack | None = None
+        work = asyncio.ensure_future(_connect_app(action, app_id))
+        _connecting[app_id] = work
         try:
-            result = _needs_token_result(config, await run_in_db(load_missing_app_key_refs, app_id))
-            if result is not None:
-                await _publish_app_state(app_id, result)
-                return result
-            await _prepare_managed_runtime(config)
-            _app_servers[app_id] = name
-            stack = AsyncExitStack()
-            errors = await connect_mcp_servers({name: config}, _registry, stack)
-            if error := errors.get(name):
-                await stack.aclose()
-                _app_servers.pop(app_id, None)
-                failure = getattr(error, "failure_class", "protocol_error")
-                result = {
-                    "state": "needs_sign_in" if failure == "needs_sign_in" else "failed",
-                    "state_since": utc_now_iso(), "tool_count": 0,
-                    "failure_class": None if failure == "needs_sign_in" else failure,
-                }
-            else:
-                names = {
-                    name for name in _registry.tool_names
-                    if getattr(_registry.get(name), "mcp_app_id", None) == app_id
-                }
-                _app_stacks[app_id] = stack
-                _app_tools[app_id] = names
-                _app_configs[app_id] = (name, config)
-                result = {"state": "working", "state_since": utc_now_iso(), "tool_count": len(names), "failure_class": None}
+            return await work
+        except asyncio.CancelledError:
+            if work.cancelled() and not (asyncio.current_task() or work).cancelling():
+                return {"state": "disconnected", "state_since": utc_now_iso(), "tool_count": 0, "failure_class": None}
+            raise
+        finally:
+            if _connecting.get(app_id) is work:
+                del _connecting[app_id]
+
+
+async def _cancel_connecting(app_id: str) -> None:
+    """End this app's connect, if one is running, and wait for it to close what it opened."""
+    work = _connecting.get(app_id)
+    if work is not None and not work.done():
+        work.cancel()
+        await asyncio.wait({work})
+
+
+async def _connect_app(action: str, app_id: str) -> dict[str, object]:
+    """One connect, restart or reconnect of one app; the caller holds the runtime lock."""
+    from connections.app_reach import load_missing_app_key_refs, load_runtime_app_config
+
+    if action == "reconnect":
+        _admit_reconnect(app_id)
+    if action in {"restart", "reconnect"}:
+        await _remove_connected_app(app_id)
+    name, config = await run_in_db(load_runtime_app_config, app_id)
+    if app_id in _app_stacks:
+        if _app_configs.get(app_id) == (name, config):
+            return _app_states[app_id]
+        await _remove_connected_app(app_id)
+    connecting = {"state": "connecting", "state_since": utc_now_iso(), "tool_count": 0, "failure_class": None}
+    await _publish_app_state(app_id, connecting)
+    stack: AsyncExitStack | None = None
+    try:
+        result = _needs_token_result(config, await run_in_db(load_missing_app_key_refs, app_id))
+        if result is not None:
             await _publish_app_state(app_id, result)
-            if state._agent is not None:
-                register_mcp_tools(state._agent.tools)
             return result
-        except Exception as error:
-            logger.exception("connected-app runtime failed for app_id={}", app_id)
-            registered = _app_stacks.get(app_id) is stack
-            await _remove_connected_app(app_id)
-            if stack is not None and not registered:
-                await stack.aclose()
+        await _prepare_managed_runtime(config)
+        _app_servers[app_id] = name
+        stack = AsyncExitStack()
+        errors = await connect_mcp_servers({name: config}, _registry, stack)
+        if error := errors.get(name):
+            await stack.aclose()
+            _app_servers.pop(app_id, None)
+            failure = getattr(error, "failure_class", "protocol_error")
             result = {
-                "state": "failed", "state_since": utc_now_iso(), "tool_count": 0,
-                "failure_class": mcp_failure_class(error, config) if isinstance(error, ManagedRuntimeDownloadError) else "cannot_start",
+                "state": "needs_sign_in" if failure == "needs_sign_in" else "failed",
+                "state_since": utc_now_iso(), "tool_count": 0,
+                "failure_class": None if failure == "needs_sign_in" else failure,
             }
-            await _publish_app_state(app_id, result)
-            return result
+        else:
+            names = {
+                name for name in _registry.tool_names
+                if getattr(_registry.get(name), "mcp_app_id", None) == app_id
+            }
+            _app_stacks[app_id] = stack
+            _app_tools[app_id] = names
+            _app_configs[app_id] = (name, config)
+            result = {"state": "working", "state_since": utc_now_iso(), "tool_count": len(names), "failure_class": None}
+        await _publish_app_state(app_id, result)
+        if state._agent is not None:
+            register_mcp_tools(state._agent.tools)
+        return result
+    except asyncio.CancelledError:
+        registered = _app_stacks.get(app_id) is stack
+        await _remove_connected_app(app_id)
+        if stack is not None and not registered:
+            await stack.aclose()
+        raise
+    except Exception as error:
+        logger.exception("connected-app runtime failed for app_id={}", app_id)
+        registered = _app_stacks.get(app_id) is stack
+        await _remove_connected_app(app_id)
+        if stack is not None and not registered:
+            await stack.aclose()
+        result = {
+            "state": "failed", "state_since": utc_now_iso(), "tool_count": 0,
+            "failure_class": mcp_failure_class(error, config) if isinstance(error, ManagedRuntimeDownloadError) else "cannot_start",
+        }
+        await _publish_app_state(app_id, result)
+        return result
 
 
 async def start_connected_app_runtime() -> dict[str, dict[str, object]]:
