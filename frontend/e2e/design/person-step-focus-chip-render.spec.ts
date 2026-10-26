@@ -269,7 +269,13 @@ async function routeSocket(page: Page, threadId: string, world: World) {
 async function shot(page: Page, name: string, park = true) {
   if (!OUT) return;
   fs.mkdirSync(OUT, { recursive: true });
-  if (park) await page.mouse.move(2, 2);
+  if (park) {
+    await page.mouse.move(2, 2);
+    // A Tab walk or a back button can leave keyboard focus on a header or sidebar control; no frame but the focus-ring one shows it.
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    const stray = await page.evaluate(() => document.querySelector(":focus-visible")?.outerHTML.slice(0, 80) ?? null);
+    expect(stray, `${name}: keyboard focus is showing on a control other than the chip`).toBeNull();
+  }
   // The plan pane re-sorts a settled row for about a second; frame it after.
   await page.waitForTimeout(1500);
   await page.screenshot({ path: path.join(OUT, `${name}.png`), fullPage: false });
@@ -388,7 +394,11 @@ const CASES: Array<{ id: string; scene: keyof typeof SCENES; focus: boolean[] }>
   { id: "neighbour", scene: "neighbour", focus: [true] },
   { id: "settle-elsewhere", scene: "one-plain", focus: [true] },
   { id: "reduced-motion", scene: "one-plain", focus: [true] },
+  // Design-review Gate 0 references: the chat as it is with no step cards ("before" is rendered on the dev base the chip branch started from).
+  { id: "before", scene: "one-plain", focus: [true] },
+  { id: "canvas-reference", scene: "one-plain", focus: [true] },
 ];
+const BARE: Record<string, string[]> = { before: ["1440-light", "393-dark"], "canvas-reference": ["1440-light"] };
 
 for (const size of SIZES) {
   for (const theme of THEMES) {
@@ -396,6 +406,7 @@ for (const size of SIZES) {
       for (const focusOn of focus) {
         // Reduced motion needs only one theme per width.
         if (id === "reduced-motion" && theme === "dark") continue;
+        if (BARE[id] && !BARE[id].includes(`${size.w}-${theme}`)) continue;
         const tag = `${size.w}-${theme}-focus-${focusOn ? "on" : "off"}`;
         const name = `${id} ${tag}`;
         if (ONLY && !name.includes(ONLY)) continue;
@@ -420,7 +431,7 @@ for (const size of SIZES) {
           };
 
           await page.route("**/api/threads/*/updates*", (route) => {
-            const cards = scene.turns.flatMap((turn, i) => {
+            const cards = BARE[id] ? [] : scene.turns.flatMap((turn, i) => {
               const step = turn.step;
               if (!step) return [];
               const outcome = world.settled[step.id];
@@ -548,6 +559,12 @@ for (const size of SIZES) {
           await openThread(page, title, threadId, phone);
           await socket.connected();
           const rows = page.locator("[data-person-step]");
+          if (BARE[id]) {
+            await expect(page.getByText("The write-up is drafted. It is waiting on the proof result.")).toBeVisible({ timeout: 20_000 });
+            await expect(rows).toHaveCount(0);
+            await shot(page, `${id}-${size.w}-${theme}`);
+            return;
+          }
           await expect(rows.first()).toBeVisible({ timeout: 20_000 });
           const row = (step: Step) => page.locator(`[data-person-step="${step.id}"]`);
           const chip = (step: Step) => row(step).locator("[data-step-chip]");
