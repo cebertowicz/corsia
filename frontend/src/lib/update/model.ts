@@ -133,7 +133,11 @@ export function elapsedSeconds(op: UpdateOperation | null, nowMs: number, server
 
 /** "a minute", "2 minutes", "30 seconds": the way a person says a duration. */
 export function humanDuration(seconds: number): string {
-	if (seconds < 90) return seconds < 45 ? `${Math.max(1, Math.round(seconds))} seconds` : 'a minute';
+	if (seconds < 90) {
+		if (seconds >= 45) return 'a minute';
+		const whole = Math.max(1, Math.round(seconds));
+		return `${whole} second${whole === 1 ? '' : 's'}`;
+	}
 	const minutes = Math.round(seconds / 60);
 	return `${minutes} minutes`;
 }

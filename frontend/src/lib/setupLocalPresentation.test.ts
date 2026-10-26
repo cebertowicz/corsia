@@ -18,7 +18,8 @@ describe('measured download time', () => {
 	});
 
 	it('rounds to minutes, then hours', () => {
-		expect(measuredDownloadTime(30)).toBe('1 min left');
+		expect(measuredDownloadTime(30)).toBe('Under 1 min left');
+		expect(measuredDownloadTime(75)).toBe('1 min left');
 		expect(measuredDownloadTime(12 * 60)).toBe('12 min left');
 		expect(measuredDownloadTime(3 * 3600)).toBe('3 hr left');
 	});
