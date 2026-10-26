@@ -17,7 +17,7 @@ from registry.observation_result import (
     observe_settled_tool_result,
 )
 from registry import models
-from registry.command_match import command_matches_trigger  # noqa: F401  (re-exported)
+from registry.command_match import command_matches_trigger
 from registry.observed_write import register_observed_write
 from registry.registration_writer import RegistrationOrigin
 from registry.service import register_observed_artifact
@@ -108,7 +108,9 @@ def _observe(
     name = normalize_tool_name(raw_name)
 
     arg_keys = _WRITERS.get(name)
-    is_shell = name in observe_rules.SHELL_TOOLS
+    # CORSIA's bash observes its own result; only a legacy built-in Bash
+    # needs observation when its persisted result is delivered.
+    is_shell = name in observe_rules.SHELL_TOOLS and raw_name in CC_BUILTIN_ALIASES
     if (
         arg_keys is None
         and not is_shell
@@ -178,6 +180,17 @@ def _record(db, thread_id, rule, outcome, artifact, reason) -> None:
         "external_id": artifact.external_id}, reason)
 
 
+def _extractor(rule, db, thread_id, told):
+    extract = connectors.artifact_extractor(rule.connector, rule.item_type)
+    if extract is None:
+        reason = f"connector {rule.connector} cannot read {rule.item_type.replace('-', ' ')} from command output"
+        logger.error("registry observer: rule {}: {}", rule.id, reason)
+        _record(db, thread_id, rule, "not_registered", None, reason)
+        if told is not None:
+            told.append(f"Not registered: {reason}.")
+    return extract
+
+
 def observe_command_result(
     thread_id: str,
     raw_tool_name: str | None,
@@ -192,8 +205,7 @@ def observe_command_result(
 ) -> dict | None:
     """Run the observe rules that cover this thread against one confirmed shell result.
 
-    Returns the registered artifact, or ``None``; what happened is appended to ``told`` (when
-    given) in words for the caller, and recorded for ``explain``.
+    Returns the artifact or ``None``; appends what happened to ``told`` and records it for ``explain``.
     """
     name = normalize_tool_name(raw_tool_name)
     if not thread_id or is_error or name not in observe_rules.SHELL_TOOLS:
@@ -205,18 +217,20 @@ def observe_command_result(
     finally:
         if not db:
             rule_db.close()
-    owned: dict | None = None  # the registration returned: the owner's first, else a follower's
-    followed: dict | None = None
+    owned, followed = None, None  # the owner's registration first, else a follower's
     seen: set[tuple[str, str, str]] = set()
     for rule in covering:
         if not command_matches_trigger(args.get(rule.command_arg), rule):
             continue
-        extract = connectors.artifact_extractor(rule.connector, rule.item_type)
-        artifact = extract(content) if extract else None
+        extract = _extractor(rule, db, thread_id, told)
+        if extract is None:
+            continue
+        item_name = rule.item_type.replace("-", " ")
+        artifact = extract(content)
         if artifact is None:
-            _record(db, thread_id, rule, "not_registered", None, f"the output named no {rule.item_type}")
+            _record(db, thread_id, rule, "not_registered", None, f"the output named no {item_name}")
             if told is not None:
-                told.append(f"Not registered: the command's output named no {rule.item_type}.")
+                told.append(f"Not registered: the command's output named no {item_name}.")
             continue
         key = (artifact.integration, artifact.type, artifact.external_id)
         if key in seen:
@@ -237,7 +251,7 @@ def observe_command_result(
         except Exception as error:
             _record(db, thread_id, rule, "not_registered", artifact, str(error))
             raise CommandArtifactRegistrationError(artifact, error) from error
-        label = f"{artifact.type} {artifact.external_id}"
+        label = f"{artifact.type.replace('-', ' ')} {artifact.external_id}"
         if registered is None:  # this thread already has a current registration: owner or follower
             current = models.resolve(artifact.integration, artifact.type, artifact.external_id, db=db)
             owns = bool(current) and current["parent_thread_id"] == thread_id

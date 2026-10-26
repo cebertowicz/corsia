@@ -108,7 +108,7 @@ async def test_an_agent_writes_an_observe_row_that_registers_its_own_command_and
     assert (other, other_told) == (None, []) and _owner() is None
     mine, told = _run("a", "ship-pr --fast")
     assert mine["parent_thread_id"] == "a" and _owner() == "a"
-    assert told == ["Registered pull-request owner/repo#42 to you."]
+    assert told == ["Registered pull request owner/repo#42 to you."]
 
 
 @pytest.mark.asyncio
@@ -147,7 +147,7 @@ def test_the_shipped_rule_registers_gh_pr_create_for_every_caller(isolated_db):
     for thread, url, external_id in ("a", _URL, PR), ("loner", OTHER_URL, "owner/repo#43"):
         artifact, told = _run(thread, "gh pr create --title x", url + "\n")
         assert artifact["parent_thread_id"] == thread == _owner(external_id)
-        assert told == [f"Registered pull-request {external_id} to you."]
+        assert told == [f"Registered pull request {external_id} to you."]
     [shipped] = _rows("SELECT * FROM event_rules WHERE origin LIKE 'rule_set:%'")
     assert (shipped["id"], shipped["scope"], shipped["kind"], shipped["connector"], shipped["tool"]) == (
         "ruleset_github_pr_create", "global", "observe", "github", "bash")
@@ -156,12 +156,39 @@ def test_the_shipped_rule_registers_gh_pr_create_for_every_caller(isolated_db):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("harness", ["native", "codex"])
+async def test_shell_execution_and_result_settlement_observe_once(isolated_db, monkeypatch, harness):
+    from tests import test_registry_command_observer as seam
+
+    _agent("a")
+    _stub_process(monkeypatch, stdout="no url here\n")
+    monkeypatch.setattr(seam, "_URL", "no url here")
+    await BashTool().execute("gh pr create --title durable-seam", **_direct_shell_context("a"))
+    db = get_db()
+    await seam._drive_durable_result_seam(harness, "a", db)
+    decisions = _rows("SELECT outcome, reason FROM event_route_decisions WHERE thread_id='a'")
+    assert len(decisions) == 1
+    assert decisions[0]["outcome"] == "not_registered"
+
+
+def test_missing_extractor_is_reported_and_recorded(isolated_db, monkeypatch):
+    _agent("a")
+    monkeypatch.setattr(connectors, "artifact_extractor", lambda *_: None)
+    artifact, told = _run("a", "gh pr create")
+    reason = "connector github cannot read pull request from command output"
+    assert artifact is None
+    assert told == [f"Not registered: {reason}."]
+    [decision] = _rows("SELECT outcome, reason FROM event_route_decisions WHERE thread_id='a'")
+    assert decision == {"outcome": "not_registered", "reason": reason}
+
+
+@pytest.mark.asyncio
 async def test_an_agent_row_registers_only_in_a_repository_its_project_has_registered(isolated_db, monkeypatch):
     _agent("a")
     await _observe_rule("a")
     artifact, told = _run("a", "ship-pr --fast", FOREIGN_URL + "\n")
     assert (artifact, _owner(FOREIGN)) == (None, None)  # it has no owner, and is still not claimed
-    assert told == [f"Not registered: pull-request {FOREIGN} isn't in a repository your project has registered."]
+    assert told == [f"Not registered: pull request {FOREIGN} isn't in a repository your project has registered."]
     [why] = (await _tool("a", operation="explain", artifact=FOREIGN))["decisions"]
     assert why["outcome"] == "not_registered" and "isn't in a repository" in why["reason"]
     assert _run("a", "ship-pr --fast")[0]["parent_thread_id"] == "a"  # a registered repository still is
@@ -189,7 +216,7 @@ def test_the_outcome_is_written_through_the_callers_open_transaction(isolated_db
     assert db.in_transaction
     told: list[str] = []
     artifact = observe_command_result("a", "bash", {"command": "gh pr create"}, _URL + "\n", db=db, told=told)
-    assert artifact["parent_thread_id"] == "a" and told == ["Registered pull-request owner/repo#42 to you."]
+    assert artifact["parent_thread_id"] == "a" and told == ["Registered pull request owner/repo#42 to you."]
     rows = db.execute("SELECT outcome, thread_id FROM event_route_decisions WHERE artifact_external_id=?",
                       (PR,)).fetchall()
     assert [(row["outcome"], row["thread_id"]) for row in rows] == [("registered", "a")]
@@ -205,7 +232,7 @@ async def test_an_observe_row_never_takes_an_owned_artifact_from_its_owner(isola
     claimed, told = _run("rival", "ship-pr --fast")
     assert _owner() == "owner"
     assert claimed is not None and claimed["external_id"] == PR  # the follower's registration is returned
-    assert told == ["Not registered to you: pull-request owner/repo#42 already belongs to another chat, "
+    assert told == ["Not registered to you: pull request owner/repo#42 already belongs to another chat, "
                     "which keeps it; you follow it."]
     [row] = _rows("SELECT relationship_state FROM artifact_registrations WHERE parent_thread_id='rival'")
     assert row["relationship_state"] == "subscriber-recent"
@@ -218,10 +245,10 @@ async def test_a_second_run_tells_the_owner_and_a_follower_apart(isolated_db):
     await _observe_rule("rival")
     _run("owner", "gh pr create")
     _run("rival", "ship-pr --fast")
-    assert _run("owner", "gh pr create") == (None, ["pull-request owner/repo#42 is already registered to you."])
+    assert _run("owner", "gh pr create") == (None, ["pull request owner/repo#42 is already registered to you."])
     again, told = _run("rival", "ship-pr --fast")
     assert (again, _owner()) == (None, "owner")
-    assert told == ["Not registered to you: pull-request owner/repo#42 belongs to another chat; "
+    assert told == ["Not registered to you: pull request owner/repo#42 belongs to another chat; "
                     "you already follow it."]
 
 
@@ -248,7 +275,7 @@ async def test_only_a_rules_writer_turns_off_an_observe_row_and_a_shipped_one_st
         "Refused: Only the rule's writer can turn off an observe rule")
     assert (await _tool("c", operation="disable", rule_id=mine)).startswith("Refused: no rule")
     shipped = await _tool("a", operation="disable", rule_id="ruleset_github_pr_create")
-    assert shipped == "Refused: This is one of CORSIA's built-in rules, so it can't be turned off."
+    assert shipped == "Refused: This is one of CORSIA's built-in rules, so it can't be turned off here."
     assert _rows("SELECT enabled FROM event_rules WHERE id='ruleset_github_pr_create'") == [{"enabled": 1}]
     assert (await _tool("a", operation="disable", rule_id=mine))["enabled"] is False
     assert _run("a", "ship-pr --fast") == (None, [])
@@ -267,14 +294,14 @@ async def test_the_caller_is_told_in_the_shell_result_what_the_rules_did(isolate
     thread = make_session(get_db(), prefix="told")  # in no project, as the shell tool's own tests are
     _stub_process(monkeypatch, stdout=_URL + "\n")
     result = await BashTool().execute("gh pr create --title t", **_direct_shell_context(thread))
-    assert result.startswith(_URL) and "Registered pull-request owner/repo#42 to you." in result
+    assert result.startswith(_URL) and "Registered pull request owner/repo#42 to you." in result
     assert "Warning" not in result
     again = await BashTool().execute("gh pr create --title t", **_direct_shell_context(thread))
-    assert "pull-request owner/repo#42 is already registered to you." in again
+    assert "pull request owner/repo#42 is already registered to you." in again
 
     _stub_process(monkeypatch, stdout="no url here\n")
     nothing = await BashTool().execute("gh pr create --title t", **_direct_shell_context(thread))
-    assert "Not registered: the command's output named no pull-request." in nothing
+    assert "Not registered: the command's output named no pull request." in nothing
 
     _stub_process(monkeypatch, stdout="", stderr="boom", returncode=1)
     failed = await BashTool().execute("gh pr create --title t", **_direct_shell_context(thread))

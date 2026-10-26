@@ -95,13 +95,14 @@ def outside_project(rule: ObserveRule, artifact: Any, project_id: str | None) ->
     if rule.scope == SHIPPED_SCOPE:
         return None
     manifest = connectors.get_manifest(rule.connector)
+    label = f"{artifact.type.replace('-', ' ')} {artifact.external_id}"
     if manifest.project_repositories is None or not artifact.repository or not project_id:
-        return f"{artifact.type} {artifact.external_id} isn't in a repository your project has registered."
+        return f"{label} isn't in a repository your project has registered."
     tracked = manifest.project_repositories(project_id)
     if tracked is None:
         return "your project's repositories couldn't be read, so its repository wasn't checked."
     if artifact.repository.lower() not in {name.lower() for name in tracked}:
-        return f"{artifact.type} {artifact.external_id} isn't in a repository your project has registered."
+        return f"{label} isn't in a repository your project has registered."
     return None
 
 
@@ -180,7 +181,7 @@ def create(
 def check_disable(rule: ObserveRule, caller: str) -> None:
     """Only an observe row's writer turns it off; a shipped rule set's row applies to everyone."""
     if rule.origin.startswith(RULE_SET_ORIGIN):
-        raise RuleRefused("This is one of CORSIA's built-in rules, so it can't be turned off.")
+        raise RuleRefused("This is one of CORSIA's built-in rules, so it can't be turned off here.")
     if caller != rule.created_by:
         raise RuleRefused("Only the rule's writer can turn off an observe rule: it registers to its writer.")
 

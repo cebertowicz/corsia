@@ -14,7 +14,7 @@ from infra.database import get_db
 from infra.event_rule_schema import EVENT_RULES_WITH_SHIPPED_SQL
 from infra.thread_driver import admit_input
 from registry import models
-from registry.observer import command_matches_trigger
+from registry.command_match import command_matches_trigger
 from subagents.child_thread import persist_tool_use
 from subagents.harness_tool_bridge import execute_tool
 from tests.registry_helpers import artifact_rows_for_thread, make_session
