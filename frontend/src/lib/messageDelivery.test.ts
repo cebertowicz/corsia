@@ -1,4 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { describe, expect, it, vi } from 'vitest';
 import {
 	deliveryPresentation as presentDelivery,
 	isAwaitingDelivery as awaitingDelivery,
@@ -85,15 +87,48 @@ describe('deliveryPresentation', () => {
 		expect(isAwaitingDelivery(held)).toBe(true);
 		expect(isProviderPendingApplyNow(held)).toBe(false);
 	});
-	it('keeps the checkpoint label for every other held reason', () => {
-		const held = {
-			delivery_state: 'queued' as const, write_outcome: 'proved_no_write' as const,
-			active_turn_id: null, delivery_error: 'checkpoint unavailable',
-			metadata: {},
-		};
-		expect(deliveryPresentation(held)).toMatchObject({
+	const heldOn = (delivery_error: string | null) => deliveryPresentation({
+		delivery_state: 'queued', write_outcome: 'proved_no_write', active_turn_id: null, delivery_error, metadata: {},
+	});
+	const SIGN_IN_AGAIN = 'Your message is saved and will send as soon as you sign in again in Settings › Providers.';
+	const SIGN_IN_MISSING = `CORSIA can’t find this chat’s account sign-in on this computer. ${SIGN_IN_AGAIN}`;
+	it.each([
+		['account_signed_out', `This chat’s account is signed out. ${SIGN_IN_AGAIN}`],
+		['account_login_unverified', `CORSIA couldn’t confirm this chat’s account is still signed in. ${SIGN_IN_AGAIN}`],
+		['account_home_mismatch', SIGN_IN_MISSING],
+		['codex_auth_source_missing', SIGN_IN_MISSING],
+		['codex_auth_projection_changed', SIGN_IN_MISSING],
+		['account_model_not_discovered', 'CORSIA couldn’t find this model on this chat’s account. Your message is saved and will send as soon as you switch models, or sign in again in Settings › Providers.'],
+		['account_removed', 'This chat’s account isn’t set up in CORSIA. Your message is saved and will send as soon as you switch models.'],
+		['account_project_denied', 'This project doesn’t allow this chat’s account. Your message is saved and will send as soon as you switch models, or allow the account in this project’s settings.'],
+		['project_policy_missing', 'This project doesn’t allow this chat’s account. Your message is saved and will send as soon as you switch models.'],
+		['account_runtime_pending', 'This chat’s account isn’t ready to run. Your message is saved and will send when it is.'],
+	])('names the account, not a checkpoint, for an account hold %s', (code, title) => {
+		expect(heldOn(code)).toEqual({ label: 'Waiting for account', title, pending: true, failed: false });
+	});
+	it('has copy for every hold reason the server writes', () => {
+		const source = readFileSync(resolve(__dirname, '../../../backend/connections/account_holds.py'), 'utf8');
+		const tuple = /ACCOUNT_HOLD_REASONS = \(([\s\S]*?)\)/.exec(source)?.[1] ?? '';
+		const codes = [...tuple.matchAll(/"([a-z_]+)"/g)].map((match) => match[1]);
+		if (tuple.includes('PROJECT_POLICY_MISSING')) codes.push('project_policy_missing');
+		expect(codes.length).toBeGreaterThan(5);
+		for (const code of codes) expect(heldOn(code)?.label, code).toBe('Waiting for account');
+	});
+	it('keeps the checkpoint label for a checkpoint refusal', () => {
+		expect(heldOn('checkpoint unavailable')).toMatchObject({
 			label: 'Waiting for checkpoint', pending: true, failed: false,
 		});
+	});
+	it('names no cause for a hold code it has no copy for, and logs the code', () => {
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+		expect(heldOn('some_future_hold')).toEqual({
+			label: 'Waiting to send',
+			title: 'Your message is saved and will send when CORSIA can deliver it.',
+			pending: true,
+			failed: false,
+		});
+		expect(warn).toHaveBeenCalledWith(expect.any(String), 'some_future_hold');
+		warn.mockRestore();
 	});
 	it('shows no descriptor while an ordinary send is still optimistic', () => {
 		expect(deliveryPresentation({ _optimistic: true })).toBeNull();
