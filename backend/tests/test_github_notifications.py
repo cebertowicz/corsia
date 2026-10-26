@@ -65,22 +65,18 @@ async def _settle_dispatch() -> None:
 
 
 async def _post_webhook(event_type: str, payload: dict, delivery_id: str):
-    from api.webhooks import github_webhook
+    import httpx
+    from main import app
 
     raw = json.dumps(payload).encode()
-
-    class _Request:
-        headers = {
-            "X-GitHub-Event": event_type, "X-GitHub-Delivery": delivery_id,
-            "X-Hub-Signature-256": _make_signature(raw),
-        }
-
-        async def body(self):
-            return raw
-
-    response = await github_webhook(_Request())
+    headers = {
+        "X-GitHub-Event": event_type, "X-GitHub-Delivery": delivery_id,
+        "X-Hub-Signature-256": _make_signature(raw),
+    }
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post("/webhooks/github", content=raw, headers=headers)
     await _settle_dispatch()
-    return response
+    return response.json()
 
 
 async def _poll(gh: FakeGh) -> int:
