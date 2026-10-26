@@ -17,6 +17,7 @@ from api.measurement_join import joined_read
 from api.measurement_limits import first_recorded_period, limits_by_period, router as limits_router
 from api.measurement_recent import router as recent_router
 from api.measurement_presence import PresenceCoverage, presence_coverage
+from api.measurement_corrections import corrections_family
 from api.measurement_breaks import (
     COMPARABILITY_UNRESTRICTED, comparability_start, derive_breaks, first_availability_period,
     next_comparability_boundary, period_comparable,
@@ -110,6 +111,9 @@ def _row(metric: str, period: str, source: dict[str, Any] | None, scoped_agent: 
     elif metric == "time_on_platform_h": value, n = source.get("value", 0), int(source.get("n", 0) or 0)
     elif metric == "limit_hits": value, n = int(source.get("hits", 0) or 0), int(source.get("hits", 0) or 0)
     elif metric == "asks_per_outcome": value = (source.get("raised", 0) + source.get("user_holds", 0)) / n if n else None
+    elif metric == "corrections_per_outcome": value = source.get("corrections", 0) / n if n else None
+    elif metric == "asks_plus_corrections_per_outcome":
+        value = (source.get("raised", 0) + source.get("user_holds", 0) + source.get("corrections", 0)) / n if n else None
     elif metric == "took_recommendation_pct":
         n = int(source.get("answered", 0) or 0)
         value = source.get("recommendation", 0) / n if n else None
@@ -167,8 +171,11 @@ def _series_read(requested: list[str], project: str, agent: str, page_grain: Gra
         first_limit_period = first_recorded_period(db, params) if "limits" in families else None
         breaks = derive_breaks(db, requested, page_grain)
         prepare_outcome_periods(db, params)
+        decision_rows = query_family(db, "decisions", params) if families & {"decisions", "corrections"} else []
         family_rows = {family: (size_family(db, params) if family == "size" else
                                 [{"period": period, "hits": hits} for period, hits in limits_by_period(db, params).items()] if family == "limits" else
+                                corrections_family(db, page_grain, decision_rows) if family == "corrections" else
+                                decision_rows if family == "decisions" else
                                 query_family(db, family, params))
                        for family in families}
         return selected_scope.response(), family_rows, first_limit_period, so_far, coverage, breaks
