@@ -87,6 +87,7 @@ def _initialize_startup(logger) -> None:
     from infra.config import LOGS_DIR, RUNTIME_DIR, UPLOADS_DIR, WORKSPACE, WORKSPACE_SELECTION
     from infra import setup_progress
     from infra.ignored_environment import drop_ignored_environment, note_ignored_environment
+    from infra.moved_state_paths import heal_moved_state_paths
     from infra.startup_prerequisites import prepare_startup_prerequisites
     from plans.public import sweep_owed_status
     from registry.durable_writes import recover_write_intents
@@ -99,6 +100,7 @@ def _initialize_startup(logger) -> None:
     phase_started = time.monotonic()
     logger.info("startup phase: database initialization started")
     init_db()
+    heal_moved_state_paths()
     drop_ignored_environment()
     setup_progress.release_marker_at_startup(logger)
     key_store_values.sweep_at_startup()

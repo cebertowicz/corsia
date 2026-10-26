@@ -7,6 +7,7 @@ the later entry describes the current behavior.
 
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here._
 
+- After the data move, accounts you added to Claude Code or Codex work again: CORSIA now points their saved folders at the new data location when it starts.
 - Setup now opens in a normal-sized window in the middle of the screen, and the app grows to fill the screen when setup finishes.
 - A Claude Code you only just signed in to is no longer offered for import: only skills and notes you made there are brought over.
 - The "Bring over what your other tools know" step no longer shows twice in the setup plan.
