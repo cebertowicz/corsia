@@ -78,7 +78,7 @@ _SOURCES_SQL = f"""
       WHERE f.subject_key LIKE '{DECISION_SUBJECT_PREFIX}%'
       UNION ALL
       SELECT '{SOURCE_KIND_SELF_CAUGHT}',substr(f.subject_key,length('{SELF_CAUGHT_SUBJECT_PREFIX}') + 1),
-        json_extract(f.attributes,'$.recorded_at'),f.agent_thread_id,NULL,f.attributes
+        json_extract(f.attributes,'$.recorded_at'),f.agent_thread_id,NULL,f.attributes,f.agent_thread_id
       FROM facts f WHERE f.subject_key LIKE '{SELF_CAUGHT_SUBJECT_PREFIX}%'
     )
 """

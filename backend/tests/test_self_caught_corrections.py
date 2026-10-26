@@ -177,6 +177,19 @@ def test_a_fault_deriving_correction_sources_keeps_the_raw_facts(db, monkeypatch
     assert db.execute("SELECT COUNT(*) FROM outcome_events WHERE event_name='github.issue.reopened'").fetchone()[0] == 1
 
 
+def test_self_caught_facts_read_with_attribution_but_are_not_a_persons_corrections(db):
+    from core.correction_attribution import attributed_facts, person_corrections
+
+    register_pr(REPO, 3191, "owner")
+    reopened = _fixture("issue_reopened")
+    closes = _fixture("pr_closes_merged")
+    _write_raw_facts(db, closes["event"], map_github_outcomes(closes["event"], closes["payload"]), "close")
+    _write_raw_facts(db, reopened["event"], map_github_outcomes(reopened["event"], reopened["payload"]), "reopen")
+
+    assert [fact.source_kind for fact in attributed_facts(db)] == ["self_caught"]
+    assert person_corrections(db, "2000-01-01 00", "2100-01-01 00") == []
+
+
 def test_a_person_failing_a_node_is_not_a_self_caught_correction(db):
     plan = service.ensure_plan("thread", "owner", db=db)
     task = _task(db, plan.id, "Fail me")
