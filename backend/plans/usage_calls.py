@@ -7,7 +7,8 @@ on to task B billed B's calls to A. Each call now carries the executor's valid
 selection captured when the call begins -- the same validity rule a starting
 Turn snapshots after ``plans.turn_admission.snapshot_after_admission`` -- and
 falls back to the Turn's snapshot only when the executor holds no valid
-selection. The native loop captures it before dispatching the provider call
+selection. A delegated child holding none is billed to the step it parked
+or was handed (``plans.delegated_usage``). The native loop captures it before dispatching the provider call
 (``binding_at_call_start``) and hands it
 in with the measurement; an external harness reports a call only once it has
 happened, so its binding is read at that first observation, which precedes
@@ -40,7 +41,7 @@ def call_binding(thread_id: str, *, db=None) -> dict[str, Any] | None:
     from plans import admission_origin, service
 
     with service._connection(db) as connection:
-        return admission_origin.turn_snapshot(thread_id, db=connection)
+        return admission_origin.call_snapshot(thread_id, db=connection)
 
 
 #: Attribution that could not be read: the row carries no task, and says so,
