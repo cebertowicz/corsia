@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import math
 from functools import lru_cache
-from typing import Any
+from typing import Any, Literal
 
 logger = logging.getLogger(__name__)
 
@@ -244,6 +244,28 @@ async def get_host_resources() -> dict[str, Any]:
 def fits_now(needed_gb: float, safe_free_gb: float) -> bool:
     """The one "fits now" rule: a model fits when what it needs is within the room a model may take now."""
     return safe_free_gb - needed_gb >= 0
+
+
+def load_verdict(
+    size_bytes: int | None, other_loaded_sizes: list[int | None], room_bytes: int,
+) -> Literal["fits_now", "no_room", "no_memory"]:
+    """The one verdict on loading a model now, from the memory a model may take (``room_bytes``).
+
+    ``fits_now``: it fits beside what is loaded; a model oMLX gave no size for can't be judged
+    and counts as fitting, as in ``local_model.fits_now``. ``no_room``: it doesn't, but
+    unloading the other loaded models (``other_loaded_sizes``, None for one with no reported
+    size) would free enough; a loaded model with no size can't be judged either, so there it
+    reads ``no_room`` without a promise. ``no_memory``: nothing else is loaded, or unloading
+    all of them still wouldn't be enough.
+    """
+    if size_bytes is None or fits_now(size_bytes / GIB, room_bytes / GIB):
+        return "fits_now"
+    if not other_loaded_sizes:
+        return "no_memory"
+    if None in other_loaded_sizes:
+        return "no_room"
+    freed = room_bytes + sum(s for s in other_loaded_sizes if s)
+    return "no_room" if fits_now(size_bytes / GIB, freed / GIB) else "no_memory"
 
 
 def pin_fits(size_bytes: int, other_pinned_bytes: int, room_bytes: int) -> bool:
