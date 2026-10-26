@@ -2,7 +2,7 @@
 from infra.accounts_schema import ACCOUNTS_SCHEMA_SQL
 from infra.action_drafts_schema import ACTION_DRAFTS_SCHEMA_SQL
 from infra.email_screens_schema import EMAIL_SCREENS_SCHEMA_SQL
-from infra.event_rule_schema import EVENT_RULE_SCHEMA_SQL
+from infra.event_rule_schema import EVENT_RULES_WITH_SHIPPED_SQL
 from infra.event_watch_schema import EXPECTED_EVENT_WATCH_SCHEMA_SQL
 from infra.artifact_identity_schema import ARTIFACT_IDENTITY_SCHEMA_SQL
 from infra.bulletin_schema import BULLETIN_SCHEMA_SQL
@@ -332,7 +332,7 @@ SCHEMA_SQL = f"""
     {CONNECTION_SCHEMA_SQL}
     {VENDOR_SUBSCRIPTION_SCHEMA_SQL}
     {EXPECTED_EVENT_WATCH_SCHEMA_SQL}
-    {EVENT_RULE_SCHEMA_SQL}
+    {EVENT_RULES_WITH_SHIPPED_SQL}
 
     -- Restart drain registrations (coordination MVP S7). Active work registers
     -- for a post-restart wake; the drain wakes each once or surfaces it loud.

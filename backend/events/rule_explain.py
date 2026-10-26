@@ -16,6 +16,8 @@ _TEXT = {
     outcomes.DEAD_LETTERED: "rule {rule} could not deliver it",
     outcomes.ENDED: "rule {rule} did not fire: the file had already ended",
     outcomes.DUPLICATE: "rule {rule}: {thread} already had it",
+    outcomes.REGISTERED: "rule {rule} registered the artifact its tool call created to {thread}",
+    outcomes.NOT_REGISTERED: "rule {rule} did not register the artifact its tool call created to {thread}",
 }
 # A script or worker rule delivers nothing, so what it did is told in its own words. A
 # script that never started (refused at its claim, or its owner gone at evaluation) reads

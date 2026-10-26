@@ -163,5 +163,5 @@ def test_a_v137_install_takes_both_steps_and_ends_where_a_fresh_install_starts()
     for table in altered:
         info = f"SELECT name, type, \"notnull\", dflt_value, pk FROM pragma_table_info('{table}') ORDER BY name"
         assert db.execute(info).fetchall() == fresh.execute(info).fetchall()
-    assert db.execute("SELECT id, script_id FROM event_rules").fetchall() == [("r1", None)]
+    assert db.execute("SELECT id, script_id FROM event_rules WHERE kind='route'").fetchall() == [("r1", None)]
     assert not migrate_to_current(db, SCHEMA_VERSION).migrated

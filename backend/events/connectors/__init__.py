@@ -13,7 +13,7 @@ Adding a new integration = register a new manifest here. No release.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from events.connectors.receiver import ReceiverDecl
@@ -60,12 +60,16 @@ class ObservedArtifactDecl:
 
 @dataclass(frozen=True)
 class CommandTriggerDecl:
-    """One direct command a connector can observe for artifact ownership."""
+    """The shipped observe row a connector declares for one direct command.
+
+    The row itself is data in ``event_rules`` (``infra.event_rule_schema``) and a test fails
+    when it disagrees with this declaration. ``item_type`` names the connector's extractor.
+    """
 
     name: str
     tool_name: str
     argv_prefix: tuple[str, ...]
-    extract_artifact: Callable[[str], ObservedArtifactDecl | None]
+    item_type: str
     command_arg: str = "command"
 
 
@@ -82,6 +86,11 @@ class ConnectorManifest:
     extract_facts: Callable[[dict, Mapping[str, Any] | None], dict]
     build_artifact_ref: Callable[[str, dict, dict], dict | None]
     command_triggers: tuple[CommandTriggerDecl, ...] = ()
+    # One extractor per artifact type a tool result can create: it takes the artifact's identity
+    # from the result's own created-artifact output, never from text the artifact carries. An
+    # ``observe`` rule names one by its artifact type (``item_type``).
+    artifact_extractors: Mapping[str, Callable[[str], ObservedArtifactDecl | None]] = field(
+        default_factory=dict)
     resolve_relationships: Callable[[str, dict, dict], tuple[dict, ...]] = (
         lambda event_type, facts, raw: ()
     )
@@ -158,6 +167,20 @@ def registered_command_triggers(
         for trigger in _REGISTRY[connector].command_triggers
         if trigger.tool_name == tool_name
     )
+
+
+def artifact_extractor(
+    connector: str, item_type: str,
+) -> Callable[[str], ObservedArtifactDecl | None] | None:
+    """The connector's extractor for one artifact type, or ``None`` when it declares none."""
+    manifest = _REGISTRY.get(connector)
+    return manifest.artifact_extractors.get(item_type) if manifest else None
+
+
+def extractor_connectors(item_type: str) -> tuple[str, ...]:
+    """The connectors that declare an extractor for ``item_type``."""
+    return tuple(connector for connector in sorted(_REGISTRY)
+                 if item_type in _REGISTRY[connector].artifact_extractors)
 
 
 def _load_builtin_manifests() -> None:

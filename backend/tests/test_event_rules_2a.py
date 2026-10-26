@@ -248,7 +248,7 @@ async def test_a_self_rule_on_a_pr_merging_wakes_its_owner_with_the_note(isolate
     refused = await _tool("other", operation="create", connector="github",
                           event_type="pr.merged", to="thread:owner", note="wake them")
     assert refused.startswith("Refused: Your rules deliver only to you")
-    assert len(_rows("SELECT id FROM event_rules")) == 1
+    assert len(_rows("SELECT id FROM event_rules WHERE origin LIKE 'agent:%'")) == 1
 
     result = await route(MERGED, _merged(88))
 
@@ -548,7 +548,7 @@ async def test_writer_limits(isolated_db, sent, resolved, monkeypatch):
     [hit] = _decisions(rule_id=by_author["id"])
     assert (hit["thread_id"], hit["outcome"]) == ("a", "woke")
     assert hit["artifact_external_id"] == pr_external_id(REPO, 5)
-    assert len(_rows("SELECT id FROM event_rules")) == 4
+    assert len(_rows("SELECT id FROM event_rules WHERE origin LIKE 'agent:%'")) == 4
 
 
 @pytest.mark.asyncio

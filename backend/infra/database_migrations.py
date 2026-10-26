@@ -205,6 +205,7 @@ from infra.migration_144_to_145_mail_host_endpoints import migrate_144_to_145
 from infra.migration_145_to_146_doc_feedback_delivery_policy import migrate_145_to_146
 from infra.migration_146_to_147_measure_breaks import migrate_146_to_147
 from infra.migration_147_to_148_correction_learning import migrate_147_to_148
+from infra.migration_148_to_149_observe_rules import migrate_148_to_149
 from infra.migration_mcp_secrets import FROM_VERSION as MCP_SECRETS_FROM_VERSION
 from infra.migration_mcp_secrets import migrate_mcp_secrets
 
@@ -841,6 +842,7 @@ MIGRATIONS[144] = migrate_144_to_145
 MIGRATIONS[145] = migrate_145_to_146
 MIGRATIONS[146] = migrate_146_to_147
 MIGRATIONS[147] = migrate_147_to_148
+MIGRATIONS[148] = migrate_148_to_149
 
 
 def _connection_database_path(conn: sqlite3.Connection) -> Path | None:

@@ -1,8 +1,10 @@
 """Agent-written event rules and the record of what each one did.
 
-Shared by fresh installs and migrations 136, 138 and 141. ``event_rules`` holds only
-rules an agent wrote through the ``event_rules`` tool: no row is seeded, and
-today's routing stays in code. ``event_route_decisions`` is the one outcome
+Shared by fresh installs and migrations 136, 138, 141 and 148. ``event_rules`` holds
+the rules an agent wrote through the ``event_rules`` tool, of two kinds: ``route`` rules
+act on events (today's routing stays in code), and ``observe`` rules register the
+artifact a tool call created to its caller. The only seeded rows are the shipped rule
+sets' observe rows (``SHIPPED_OBSERVE_RULES_SQL``). ``event_route_decisions`` is the one outcome
 record for those rules; the tool's list, explain and the hourly wake budget read
 it, a ``run_script`` rule's row is also its run's queue until the script
 runner settles it, and a ``start_worker`` rule's row is its start's queue, its
@@ -35,17 +37,22 @@ EVENT_RULE_SCHEMA_SQL = f"""
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
-        scope TEXT NOT NULL CHECK (scope LIKE 'project:_%'),
+        -- route: act on events. observe: register what a tool call created to its caller.
+        kind TEXT NOT NULL DEFAULT 'route' CHECK (kind IN ('route', 'observe')),
+        -- Only a shipped rule set's observe row applies to every project, as global.
+        scope TEXT NOT NULL CHECK (scope LIKE 'project:_%'
+                                   OR (scope = 'global' AND kind = 'observe' AND origin LIKE 'rule_set:_%')),
         connector TEXT NOT NULL,
-        event_type TEXT NOT NULL,
+        event_type TEXT,
         "match" TEXT NOT NULL DEFAULT '[]'
             CHECK (json_valid("match") AND json_type("match") = 'array'
                    AND json_array_length("match") <= 4)
             CHECK ({_MATCH_CHECKS}),
-        action TEXT NOT NULL CHECK (action IN ('deliver', 'drop', 'run_script', 'start_worker')),
-        "to" TEXT NOT NULL CHECK ("to" = 'registered_owner' OR "to" LIKE 'thread:_%'),
+        action TEXT CHECK (action IN ('deliver', 'drop', 'run_script', 'start_worker')),
+        "to" TEXT CHECK ("to" = 'registered_owner' OR "to" LIKE 'thread:_%'),
         mode TEXT CHECK (COALESCE((action = 'deliver' AND mode IN ('wake', 'digest'))
-                                  OR (action != 'deliver' AND mode IS NULL), 0)),
+                                  OR (action != 'deliver' AND mode IS NULL)
+                                  OR (kind = 'observe' AND mode IS NULL), 0)),
         note TEXT CHECK (note IS NULL OR (action = 'deliver' AND length(note) <= 500)),
         origin TEXT NOT NULL,
         created_by TEXT NOT NULL,
@@ -56,14 +63,27 @@ EVENT_RULE_SCHEMA_SQL = f"""
         workflow_id TEXT CHECK ((action = 'start_worker') = (workflow_id IS NOT NULL)),
         request_identity_fact TEXT
             CHECK ((action = 'start_worker') = (request_identity_fact IS NOT NULL)),
+        -- observe: the tool whose result is read, the command's leading arguments (a shell only)
+        -- and the connector's artifact type its extractor reads from the result.
+        tool TEXT,
+        argv_prefix TEXT CHECK (argv_prefix IS NULL OR (json_valid(argv_prefix)
+                                AND json_type(argv_prefix) = 'array'
+                                AND json_array_length(argv_prefix) > 0)),
+        item_type TEXT,
+        -- A route rule names its event type, action and recipient and an observe rule names its tool
+        -- and artifact type, never both. (No semicolon in these comments: migration 139 runs this
+        -- text statement by statement.)
+        CHECK ((kind = 'route') = (event_type IS NOT NULL AND action IS NOT NULL AND "to" IS NOT NULL)),
+        CHECK ((kind = 'observe') = (tool IS NOT NULL AND item_type IS NOT NULL)),
         -- A drop removes only its writer's own deliveries, and a script run or worker is the writer's own.
-        -- (No semicolon in these comments: migration 139 runs this text statement by statement.)
-        CHECK (action = 'deliver' OR "to" = 'thread:' || created_by)
+        CHECK (kind = 'observe' OR action = 'deliver' OR "to" = 'thread:' || created_by)
     );
     CREATE INDEX IF NOT EXISTS idx_event_rules_type
         ON event_rules(connector, event_type, enabled, scope, created_at);
     CREATE INDEX IF NOT EXISTS idx_event_rules_scope
         ON event_rules(scope, created_at);
+    CREATE INDEX IF NOT EXISTS idx_event_rules_observe
+        ON event_rules(tool, enabled, scope) WHERE kind = 'observe';
 
     CREATE TABLE IF NOT EXISTS event_route_decisions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -80,7 +100,8 @@ EVENT_RULE_SCHEMA_SQL = f"""
         outcome TEXT NOT NULL CHECK (outcome IN (
             'woke', 'digested', 'dropped', 'held', 'dead_lettered', 'ended', 'duplicate',
             'queued', 'running', 'ran', 'failed', 'skipped',
-            'started', 'returned', 'invalid', 'no_result', 'refused')),
+            'started', 'returned', 'invalid', 'no_result', 'refused',
+            'registered', 'not_registered')),
         -- 'routed': the rule rode a delivery today's routing already made.
         via TEXT NOT NULL CHECK (via IN ('rule', 'routed')),
         reason TEXT,
@@ -110,3 +131,17 @@ EVENT_RULE_SCHEMA_SQL = f"""
     CREATE INDEX IF NOT EXISTS idx_event_route_decisions_worker
         ON event_route_decisions(worker_thread_id);
 """
+
+# A shipped rule set's observe rows: data in the release, one row per declared command, applying
+# to every caller. A connector's manifest declares the same row (``command_triggers``), and a
+# test fails when the two disagree. A new version ships by migration.
+SHIPPED_OBSERVE_RULES_SQL = """
+    INSERT OR IGNORE INTO event_rules (id, created_at, updated_at, enabled, kind, scope, connector,
+        origin, created_by, authority_ref, tool, argv_prefix, item_type)
+    VALUES ('ruleset_github_pr_create', '2026-10-26T00:00:00+00:00', '2026-10-26T00:00:00+00:00', 1,
+        'observe', 'global', 'github', 'rule_set:github@1', 'rule_set:github@1', 'shipped:github@1',
+        'bash', '["gh","pr","create"]', 'pull-request');
+"""
+
+# What a fresh install runs: the tables, then the shipped rows.
+EVENT_RULES_WITH_SHIPPED_SQL = EVENT_RULE_SCHEMA_SQL + SHIPPED_OBSERVE_RULES_SQL

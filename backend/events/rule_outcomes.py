@@ -42,6 +42,10 @@ INVALID = "invalid"
 NO_RESULT = "no_result"
 REFUSED = "refused"
 
+# An observe rule's outcome: the caller was registered to what its tool call created, or not.
+REGISTERED = "registered"
+NOT_REGISTERED = "not_registered"
+
 WAKE_CAP = "wake cap"  # the reason R9's hourly cap turned a rule's wake into a digest
 
 
