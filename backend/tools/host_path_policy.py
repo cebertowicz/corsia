@@ -106,7 +106,7 @@ class ProtectedHostPathPolicy:
         The System hard floor covers protected credentials and a lease never
         opens it. Add a root here only with the project owner's approval.
         """
-        return (self.state_root / "keys",)
+        return (self.state_root / "keys", self.state_root / "browser-profile")
 
     @property
     def control_files(self) -> tuple[Path, ...]:

@@ -63,6 +63,23 @@ is not rebuilt
 from those directories after restart. Session IDs are random and never contain
 thread IDs. There is no unsupported `--namespace` or `session info` command.
 
+## Saved sign-ins and stealth
+
+The first session of an owning user launches with a persistent Chrome profile
+under the CORSIA state root (`browser-profile/<user>`, or `instance` when there
+is no owner). It is private state on the host-access hard floor and is never the
+person's own Chrome profile. Chrome allows one process per profile, so a
+concurrent second session starts from a `state save` copy of the holder's
+sign-ins, stored `0600` under `browser-profile/copies/` and deleted on close.
+An untrusted worker's session gets neither the profile nor a copy.
+
+Agents cannot read the saved sign-ins: `cookies`, `state`, `storage`, `auth`,
+`profiles`, `network har|requests` and the `--state` / `--profile` flags are
+refused. Headless launches drop the `AutomationControlled` blink feature, use a
+user agent derived from the installed Chrome without the `Headless` token, and
+run `browser_stealth_init.js` on every document. Launch flags apply only to a
+session's first command.
+
 ## Observation and attempt outcomes
 
 The same observation validates exact sidecars/socket artifacts, daemon birth,

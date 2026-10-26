@@ -9,7 +9,10 @@ import secrets
 import time
 from typing import Literal, Sequence, TypeAlias
 
-from host_access import browser_cli, browser_session_commands, browser_identity as identity, browser_reporting
+from host_access import (
+    browser_cli, browser_identity as identity, browser_launch, browser_reporting,
+    browser_session_commands, browser_session_launch as launch,
+)
 from host_access.browser_session_state import (
     BrowserRuntime, BrowserSessionCleanupError as BrowserSessionCleanupError,
     BrowserSessionError as BrowserSessionError, BrowserSessionRecord,
@@ -44,6 +47,7 @@ class BrowserSessionOwner:
         self.close_timeout = max(0.01, float(close_timeout))
         self._native: browser_cli.NativeExecutable | None = None
         self._chrome: str | None = None
+        self._user_agent: str | None = None
         self._native_lock = asyncio.Lock()
         self._owner_lock = asyncio.Lock()
         self._sessions: dict[str, BrowserRuntime] = {}
@@ -61,13 +65,14 @@ class BrowserSessionOwner:
 
     async def run(self, thread_id: str, args: Sequence[str], *,
                   lease_id: str | None = None, timeout: float = 30.0,
-                  show_window: bool | None = None,
-                  session: SessionAdmission = "any", pane: bool = False) -> str:
+                  show_window: bool | None = None, session: SessionAdmission = "any",
+                  pane: bool = False, untrusted: bool = False) -> str:
         """Run one command through the shared-browser command path; `pane` marks the person's own
-        command from the browser pane, which the password guard never refuses."""
+        command from the browser pane, which the password guard never refuses. An `untrusted` session
+        (one that reads outside content for a worker nobody vouches for) never gets the saved sign-in."""
         from host_access.browser_session_commands import run
-        return await run(self, thread_id, args, lease_id=lease_id, timeout=timeout,
-                         show_window=show_window, session=session, pane=pane)
+        return await run(self, thread_id, args, lease_id=lease_id, timeout=timeout, show_window=show_window,
+                         session=session, pane=pane, untrusted=untrusted)
 
     async def page_endpoint(self, thread_id: str) -> str:
         """The thread's shared page target, resolved exactly as for its agent's commands."""
@@ -97,6 +102,8 @@ class BrowserSessionOwner:
                     raise BrowserSessionCleanupError("browser daemon exited without close acknowledgement")
                 if runtime.record.binding is None and not before.artifacts_absent:
                     raise BrowserSessionCleanupError("browser startup ownership is unresolved")
+                if runtime.record.binding is None and runtime.record.copy_of:
+                    await launch.seed_copy(self, runtime)
                 started = True
                 runtime.attempt_started_at = time.time()
                 runtime.attempt = CommandResult(-1, "", "", completion="unknown")
@@ -131,8 +138,10 @@ class BrowserSessionOwner:
         finally:
             self._active_commands -= 1
 
-    async def _admit(self, thread_id: str, *, lease_id: str | None,
-                     show_window: bool | None = None, session: SessionAdmission = "any") -> BrowserRuntime:
+    async def _admit(self, thread_id: str, *, lease_id: str | None, show_window: bool | None = None,
+                     session: SessionAdmission = "any", untrusted: bool = False) -> BrowserRuntime:
+        # Resolved before the lock, and only for a session that does not exist yet.
+        profile = None if thread_id in self._sessions else await launch.resolve_profile(thread_id, untrusted=untrusted)
         async with self._owner_lock:
             if self._shutting_down or lease_id in self._closed_leases:
                 raise BrowserSessionError("browser session admission is closed")
@@ -140,7 +149,9 @@ class BrowserSessionOwner:
             if runtime is None and session == "existing":
                 raise BrowserSessionError("the browser is no longer open")
             if runtime is None:
-                runtime = BrowserRuntime(BrowserSessionRecord(thread_id, secrets.token_urlsafe(12), lease_id, bool(show_window)))
+                shared, copy_of = launch.assign(self._sessions, profile)
+                runtime = BrowserRuntime(BrowserSessionRecord(
+                    thread_id, secrets.token_urlsafe(12), lease_id, bool(show_window), profile=shared, copy_of=copy_of))
                 self._sessions[thread_id] = runtime
             elif session == "new":
                 raise BrowserSessionError("the browser is already open; take over in the pane to navigate it")
@@ -184,20 +195,11 @@ class BrowserSessionOwner:
                 version = browser_cli.admitted_version(result.stdout)
                 if await asyncio.to_thread(browser_cli.resolve_native, self.binary) != (path, fingerprint):
                     raise identity.BrowserIdentityChanged(_EXECUTABLE_CHANGED)
-                chrome, source = await asyncio.to_thread(browser_cli.chrome_executable)
-                if source == "default" and await asyncio.to_thread(browser_cli.chrome_download_missing):
-                    # No Chrome on this Mac: agent-browser's own install fetches Chrome for Testing
-                    # into the person's home, with no admin step.
-                    install = await self._invoke((path, "install"), timeout=browser_cli.CHROME_INSTALL_TIMEOUT)
-                    if install.completion != "exited" or install.timed_out or install.returncode:
-                        logger.warning("agent-browser install failed: completion=%s timed_out=%s exit=%s stderr=%s",
-                                       install.completion, install.timed_out, install.returncode,
-                                       (install.stderr or "")[-500:])
-                        raise identity.BrowserIdentityError(
-                            "agent-browser could not download its browser (Chrome for Testing); "
-                            "try again, and tell the person if it keeps failing")
+                chrome, source = await launch.select_chrome(self, path)
                 self._native = browser_cli.NativeExecutable(path, fingerprint, version)
                 self._chrome = chrome
+                self._user_agent = browser_launch.user_agent(await asyncio.to_thread(browser_launch.chrome_major, chrome))
+                await asyncio.to_thread(launch.prepare_directories)
                 logger.info("agent-browser launches Chrome from %s (%s)", self._chrome or "its default", source)
             except identity.BrowserIdentityError as exc:
                 # Setup refusal precedes admission; it never enters cleanup state.
@@ -207,7 +209,9 @@ class BrowserSessionOwner:
         assert self._native is not None
         return (self._native.path, "--session", runtime.record.session,
                 *(("--executable-path", self._chrome) if self._chrome else ()),
-                *(("--headed",) if runtime.record.show_window else ()), "--json", *args)
+                *(("--headed",) if runtime.record.show_window else ()),
+                *(launch.flags(runtime.record, self._user_agent) if runtime.record.binding is None else ()),
+                "--json", *args)
 
     async def _observe(self, runtime: BrowserRuntime, peer_socket: socket.socket | None = None) -> identity.Observation:
         """All identity consumers use this one observation; psutil never blocks the loop."""
@@ -341,6 +345,7 @@ class BrowserSessionOwner:
     async def _remove_runtime(self, runtime: BrowserRuntime) -> None:
         async with self._owner_lock:
             runtime.record = replace(runtime.record, terminal_state="closed")
+            launch.drop_copy(runtime.record)
             thread_id = runtime.record.thread_id
             if self._sessions.get(thread_id) is runtime:
                 self._sessions.pop(thread_id)

@@ -1,6 +1,7 @@
 import asyncio
 import contextlib
 import json
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
@@ -412,23 +413,27 @@ async def test_agent_close_remains_available_while_a_pane_is_connected(monkeypat
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(("returncode", "show_window", "announced"), [
-    (0, False, ["thread-1", "thread-1"]),
-    (0, True, ["thread-1", "thread-1"]),
-    (1, True, []),
-])
-async def test_browser_opened_is_announced_after_every_successful_shared_open(monkeypatch, returncode, show_window, announced):
+@pytest.mark.parametrize(("returncode", "announced"), [(0, ["thread-1"]), (1, [])])
+async def test_browser_opened_is_announced_only_when_an_open_starts_the_session(monkeypatch, returncode, announced):
+    """A later open leaves a pane tab the person closed shut; only a new session reveals it again."""
     owner = BrowserSessionOwner(namespace="corsia-pane-test")
-    runtime = BrowserRuntime(BrowserSessionRecord("thread-1", "test-session", show_window=show_window))
+    runtime = BrowserRuntime(BrowserSessionRecord("thread-1", "test-session", show_window=True))
     seen = []
+
+    async def run_admitted(*_args, **_kwargs):
+        # The daemon is bound once the first command has run it.
+        runtime.record = replace(runtime.record, binding=object())
+        return CommandResult(returncode, "", "failed"), False
+
     monkeypatch.setattr(browser_runtime.browser_cli, "check_local_mode", lambda _args: None)
     monkeypatch.setattr(owner, "_pin_native", lambda: asyncio.sleep(0))
     monkeypatch.setattr(owner, "_admit", lambda *_args, **_kwargs: asyncio.sleep(0, result=runtime))
-    monkeypatch.setattr(owner, "_run_admitted", lambda *_args, **_kwargs: asyncio.sleep(
-        0, result=(CommandResult(returncode, "", "failed"), False)))
+    monkeypatch.setattr(owner, "_run_admitted", run_admitted)
     monkeypatch.setattr(browser_control, "announce_browser_opened", seen.append)
+    monkeypatch.setattr(browser_control, "require_page_access", lambda *_args, **_kwargs: asyncio.sleep(0))
+    monkeypatch.setattr(browser_cdp, "page_endpoint", lambda _command: asyncio.sleep(0, result="ws://page"))
     await owner.run("thread-1", ("open", "https://example.test"), session="new")
-    await owner.run("thread-1", ("open", "https://example.test"), session="new")
+    await owner.run("thread-1", ("open", "https://example.test"), session="existing")
     assert seen == announced
 
 

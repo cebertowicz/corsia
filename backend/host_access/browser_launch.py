@@ -1,0 +1,107 @@
+"""What a managed agent-browser session launches with: the saved sign-in profile and headless stealth.
+
+The profile directory holds the cookie database, so it is a secret: it lives under CORSIA private state,
+and ``tools.host_path_policy`` closes that root to every agent route, leases included.
+"""
+from __future__ import annotations
+
+import os
+import platform
+import re
+import sqlite3
+import subprocess
+from pathlib import Path
+from typing import Sequence
+
+PROFILE_ROOT_NAME = "browser-profile"
+# Copies of the saved sign-in for sessions that cannot share the profile; they live inside the profile root.
+COPIES_DIR_NAME = "copies"
+STEALTH_INIT_SCRIPT = Path(__file__).with_name("browser_stealth_init.js")
+_OWNER_KEY = re.compile(r"[A-Za-z0-9_-]{1,128}")
+_CHROME_VERSION = re.compile(r"(\d+)\.\d+\.\d+\.\d+")
+_PLATFORM_TOKENS = {
+    "Darwin": "Macintosh; Intel Mac OS X 10_15_7",
+    "Windows": "Windows NT 10.0; Win64; x64",
+}
+
+
+def profile_root() -> Path:
+    """The folder of saved sign-in profiles, under the instance's state root."""
+    from infra.config import STATE_ROOT
+    return STATE_ROOT / PROFILE_ROOT_NAME
+
+
+def profile_dir(thread_id: str) -> Path:
+    """The one place that decides which saved sign-in a thread's browser uses.
+
+    One profile per owning user, shared by every project and agent that user owns (the owner's call:
+    a sign-in must carry over to the next agent). A thread whose owner cannot be read falls back to the
+    instance-wide profile, so a lookup failure never splits the sign-in or reaches a person's own Chrome.
+    """
+    return profile_root() / _owner_key(thread_id)
+
+
+def copy_path(session: str) -> Path:
+    """Where a concurrent session's copy of the saved sign-in is kept; removed when it closes."""
+    return profile_root() / COPIES_DIR_NAME / f"{session}.json"
+
+
+def _owner_key(thread_id: str) -> str:
+    from infra.database import get_db
+    try:
+        db = get_db()
+        try:
+            row = db.execute("SELECT user_id FROM threads WHERE id = ?", (thread_id,)).fetchone()
+        finally:
+            db.close()
+    except sqlite3.Error:
+        return "instance"
+    owner = row[0] if row is not None else None
+    return owner if isinstance(owner, str) and _OWNER_KEY.fullmatch(owner) else "instance"
+
+
+def chrome_major(chrome: str | None) -> str | None:
+    """The major version of the Chrome that will launch, or None when it cannot be told."""
+    if chrome:
+        try:
+            out = subprocess.run([chrome, "--version"], capture_output=True, text=True, timeout=10).stdout
+        except (OSError, subprocess.SubprocessError):
+            return None
+        if match := _CHROME_VERSION.search(out):
+            return match[1]
+        return None
+    # agent-browser's own download is a folder named chrome-<version>.
+    for folder in sorted((Path.home() / ".agent-browser" / "browsers").glob("chrome-*"), reverse=True):
+        if match := _CHROME_VERSION.search(folder.name):
+            return match[1]
+    return None
+
+
+def user_agent(major: str | None) -> str | None:
+    """Chrome's own user agent for this version, without the ``HeadlessChrome`` token."""
+    if major is None:
+        return None
+    token = _PLATFORM_TOKENS.get(platform.system(), "X11; Linux x86_64")
+    return f"Mozilla/5.0 ({token}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{major}.0.0.0 Safari/537.36"
+
+
+def stealth_args(ua: str | None, *, headless: bool) -> str:
+    """The ``--args`` value: what the environment already set, plus the evasions.
+
+    agent-browser splits this value on commas or newlines, and a user agent holds a comma, so newlines it is.
+    """
+    inherited = [part.strip() for part in re.split(r"[,\n]", os.environ.get("AGENT_BROWSER_ARGS", "")) if part.strip()]
+    ours = ["--disable-blink-features=AutomationControlled"]
+    if headless and ua:
+        ours.append(f"--user-agent={ua}")
+    return "\n".join([*inherited, *(arg for arg in ours if arg not in inherited)])
+
+
+def launch_argv(ua: str | None, *, headless: bool, profile: Path | None, state_copy: Path | None) -> Sequence[str]:
+    """Launch-only flags for a session's first command; a running daemon ignores the browser's launch settings."""
+    argv = ["--args", stealth_args(ua, headless=headless), "--init-script", str(STEALTH_INIT_SCRIPT)]
+    if profile is not None:
+        argv += ["--profile", str(profile)]
+    elif state_copy is not None and state_copy.is_file():
+        argv += ["--state", str(state_copy)]
+    return argv

@@ -15,10 +15,16 @@ from infra.product_events import emit_product_event
 # and theme. They are not agent commands, so the password guard (AR3, AR4) does not refuse them.
 _PANE_COMMANDS = {("open",), ("back",), ("forward",), ("reload",), ("get", "cdp-url"), ("get", "url"),
                   ("get", "title"), ("set", "viewport"), ("set", "media")}
+# Commands that read, write or save a session's cookies, storage or saved logins, or capture request headers.
+# The saved sign-in is a secret no agent route may return (HttpOnly cookies included), so the shared path
+# refuses them for agents and the pane alike; CORSIA's own state copy goes through the owner's private invoke.
+_COOKIE_COMMANDS = {"cookies", "state", "storage", "auth", "profiles", ("network", "har"), ("network", "requests")}
+_SECRET_REFUSAL = "browser cookies, saved sign-ins and stored logins are not available to agents"
 
 
 async def run(owner: Any, thread_id: str, args: Sequence[str], *, lease_id: str | None,
-              timeout: float, show_window: bool | None, session: str, pane: bool = False) -> str:
+              timeout: float, show_window: bool | None, session: str, pane: bool = False,
+              untrusted: bool = False) -> str:
     """Guard agent commands; a connected pane's own commands pass, so the person can leave a password page."""
     _validate(thread_id, args, timeout, show_window, pane)
     try:
@@ -26,7 +32,8 @@ async def run(owner: Any, thread_id: str, args: Sequence[str], *, lease_id: str 
     except identity.BrowserIdentityError as exc:
         raise BrowserSetupError(str(exc)) from exc
     await owner._pin_native()
-    runtime = await owner._admit(thread_id, lease_id=lease_id, show_window=show_window, session=session)
+    runtime = await owner._admit(thread_id, lease_id=lease_id, show_window=show_window, session=session,
+                                 untrusted=untrusted)
     command = partial(_command, owner, runtime, lease_id)
     opening_unlaunched_session = args[0] == "open" and runtime.record.binding is None
     guarded = not pane and not opening_unlaunched_session
@@ -57,7 +64,9 @@ async def run(owner: Any, thread_id: str, args: Sequence[str], *, lease_id: str 
     if result.timed_out and args[0] == "wait":
         return browser_cli.WAIT_TIMED_OUT
     rendered = owner._model_result(result, runtime.record)
-    if args[0] == "open" and not unfinished and not rendered.startswith("Error:"):
+    # Only the open that starts a session reveals the pane tab, so a tab the person closed stays shut until
+    # the next session instead of coming back on every later open.
+    if opening_unlaunched_session and not unfinished and not rendered.startswith("Error:"):
         browser_control.announce_browser_opened(thread_id)
     return rendered
 
@@ -136,5 +145,7 @@ def _validate(thread_id: str, args: Sequence[str], timeout: float, show_window: 
         raise BrowserSessionError("browser command is invalid")
     if args[0] in {"close", "quit", "exit"}:
         raise BrowserSessionError("browser close requires owned session teardown")
+    if args[0] in _COOKIE_COMMANDS or tuple(args[:2]) in _COOKIE_COMMANDS or "--state" in args or "--profile" in args:
+        raise BrowserSessionError(_SECRET_REFUSAL)
     if pane and tuple(args[:1]) not in _PANE_COMMANDS and tuple(args[:2]) not in _PANE_COMMANDS:
         raise BrowserSessionError("a browser pane only navigates, reads its page's address and title, and sizes the page")

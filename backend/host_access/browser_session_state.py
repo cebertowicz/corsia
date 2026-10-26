@@ -22,6 +22,10 @@ class BrowserSessionRecord:
     admitted_at: float = field(default_factory=time.time, repr=False)
     binding: identity.DaemonBinding | None = field(default=None, repr=False)
     terminal_state: BrowserTerminalState = "running"
+    # The saved sign-in profile this session launches with, or None when it runs on a throwaway profile.
+    profile: str | None = field(default=None, repr=False)
+    # The thread whose open session holds that profile; this session starts from a copy of its sign-in.
+    copy_of: str | None = field(default=None, repr=False)
 
     @property
     def pid(self) -> int | None:

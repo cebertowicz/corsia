@@ -7,7 +7,7 @@ import asyncio
 from dataclasses import replace
 
 import pytest
-from host_access import browser_cdp, browser_cli, browser_sessions as sessions
+from host_access import browser_cdp, browser_cli, browser_launch, browser_sessions as sessions
 from tests.browser_process_fixture import EXIT_TIMEOUT, synthetic_browser  # noqa: F401
 
 
@@ -16,8 +16,9 @@ async def test_opaque_sessions_and_canonical_native_argv(synthetic_browser):
     await fake.owner.run('raw-a', ['snapshot'])
     await fake.owner.run('raw-a', ['snapshot'])
     await fake.owner.run('raw-b', ['snapshot'])
-    assert fake.calls[0][2] == fake.calls[1][2] != fake.calls[2][2]
-    for call in fake.calls:
+    calls = [call for call in fake.calls if 'state' not in call]  # raw-b's start saves raw-a's sign-in first
+    assert calls[0][2] == calls[1][2] != calls[2][2]
+    for call in calls:
         assert call[0] == fake.owner._native.path
         assert call[1] == '--session'
         assert 'raw-a' not in call and 'raw-b' not in call
@@ -30,7 +31,7 @@ async def test_visible_browser_mode_is_pinned_when_the_session_starts(synthetic_
     fake = synthetic_browser
     await fake.owner.run("visible", ["open", "about:blank"], show_window=True)
     await fake.owner.run("headless", ["open", "about:blank"], show_window=False)
-    visible, headless = fake.calls
+    visible, headless = (call for call in fake.calls if "state" not in call)
     assert "--headed" in visible
     assert "--headed" not in headless
     await fake.owner.shutdown()
@@ -63,9 +64,13 @@ async def test_chosen_chrome_is_a_launch_option_resolved_once(synthetic_browser,
         launch = call[:call.index("--json")]
         assert launch[1] == "--session"
         assert (launch[3:5] == ("--executable-path", chrome)) if chrome else ("--executable-path" not in call)
-        # Only the binary changes: agent-browser keeps its temporary profile, never the person's.
-        assert not {"--profile", "--user-data-dir", "--args"} & set(call)
-    assert "--headed" in fake.calls[0]
+        # Never the person's own Chrome profile, in any form.
+        assert "--user-data-dir" not in call
+        if "--profile" in call:
+            # The one CORSIA-owned profile, under the state root, and only on a session's first command.
+            assert call[call.index("--profile") + 1].startswith(str(browser_launch.profile_root()) + "/")
+    first_commands = [call for call in fake.calls if "--profile" in call or "--state" in call]
+    assert len(first_commands) <= 1 and "--headed" in fake.calls[0]
     await fake.owner.shutdown()
 
 
