@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import sqlite3
 
+from connections.account_policy import AccountAdmissionError
 from core.stop_causes import PlanLimitStop
 from infra.database import write_transaction
 from infra.plan_limit_continue import queue_limit_refusal_continue, queue_plan_limit_continue
@@ -222,7 +223,6 @@ def finish_turn(
                 TerminalResult.CONFLICTING_TERMINAL, thread_id,
             )
         from plans.public import settle_turn_dispatches as settle_plan_dispatches
-
         unknown_dispatches = settle_plan_dispatches(turn_id, db=connection)
         failed_message_ids = settle_unwritten_turn_inputs(
             connection, turn_id, outcome=outcome, error=error,
@@ -243,6 +243,7 @@ def finish_turn(
             mark_idle_checkpoint=mark_idle_checkpoint,
             hold_expired_limit_at_startup=hold_expired_limit_at_startup,
             fail_closed=limits.fail_closed,
+            account_refused=outcome == "error" and isinstance(error, AccountAdmissionError),
         )
     _end_turn_previews(turn_id, outcome)
     wakes = () if parent is None else (parent,)
@@ -272,6 +273,7 @@ def _claim_after_terminal(
     mark_idle_checkpoint: bool,
     hold_expired_limit_at_startup: bool,
     fail_closed: str | None = None,
+    account_refused: bool = False,
 ):
     """Claim switch/successor work and derive its idle-marker consequence.
 
@@ -292,6 +294,13 @@ def _claim_after_terminal(
     held_input = False
     if fail_closed is not None:
         successor = fail_claimable_prefix(connection, thread_id, error=fail_closed)
+    elif account_refused and switch_transition is None:
+        # An account refusal leaves its inputs held under the launch's reason.
+        # The idle claim's account check can pass a launch that refuses, so
+        # claiming here would loop; the hold lifts on an account change (a
+        # switch committed just now claims normally), a new send or Retry (#1493).
+        successor = None
+        held_input = True
     elif restart_holds_new_work(db=connection):
         # A restart hold admits no new work: inputs stay queued until the hold
         # releases, then startup or the abort wake claims them in FIFO order.
