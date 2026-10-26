@@ -75,9 +75,10 @@ def _bound(db, node, executor: str | None, role: str) -> dict | None:
     """The node's fields on its latest attempt (the executor's own, when named)."""
     if node["commitment_id"] is None:
         return None
-    where, params = ("node_id=?", (node["id"],))
+    where = "node_id=?"
+    params: tuple = (node["id"],)
     if executor is not None:
-        where, params = ("node_id=? AND executor_thread_id=?", (node["id"], executor))
+        where, params = "node_id=? AND executor_thread_id=?", (node["id"], executor)
     attempt = db.execute(
         f"SELECT id FROM plan_node_attempts WHERE {where} ORDER BY selected_at DESC,id DESC LIMIT 1",
         params,
