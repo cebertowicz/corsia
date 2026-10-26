@@ -65,7 +65,7 @@ const DOC_TEXT = [
   "Sign in on the disposable instance and run the proof script, so the agent can confirm the new sign-in path end to end.",
   "```\nscripts/signin-proof --fresh\n```",
   "It opens a browser window. Sign in with the test account and close the window when the terminal prints PASS.",
-  "Then tap Done below. If you can't run it, tap Won't do and the agent will follow up in chat.",
+  "Then mark this step Done. If you can't run it, mark it Won't do and the agent will follow up in chat.",
 ].join("\n\n");
 
 type Outcome = "done" | "closed";
@@ -270,7 +270,8 @@ async function shot(page: Page, name: string, park = true) {
   if (!OUT) return;
   fs.mkdirSync(OUT, { recursive: true });
   if (park) await page.mouse.move(2, 2);
-  await page.waitForTimeout(450);
+  // The plan pane re-sorts a settled row for about a second; frame it after.
+  await page.waitForTimeout(1500);
   await page.screenshot({ path: path.join(OUT, `${name}.png`), fullPage: false });
   const check = await page.evaluate(() => {
     const over = document.documentElement.scrollWidth - window.innerWidth;
@@ -313,10 +314,21 @@ async function assertInert(page: Page, row: Locator, settled: boolean) {
 }
 
 /** Sample the one-step slot while it changes: the row never collapses, and a face is always visible. */
-function sampleSwap(page: Page) {
-  return page.evaluate(async () => {
+async function sampleSwap(page: Page) {
+  const run = page.evaluate(async () => {
+    const mut: string[] = [];
+    const observer = new MutationObserver((records) => {
+      for (const r of records)
+        for (const n of [...r.removedNodes]) {
+          const el = n as HTMLElement;
+          if (el.nodeType === 1 && (el.matches?.("[data-person-step]") || el.querySelector?.("[data-person-step]")))
+            mut.push(`removed <${el.tagName} class="${el.className}"> from <${(r.target as HTMLElement).tagName} class="${(r.target as HTMLElement).className}">`);
+        }
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+    (window as unknown as { __mut: string[] }).__mut = mut;
     const frames: Array<{ state: string; slot: number; visible: boolean; faces: number[] }> = [];
-    for (let i = 0; i < 30; i += 1) {
+    for (let i = 0; i < 45; i += 1) {
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       const row = document.querySelector<HTMLElement>("[data-person-step]");
       const layers = [...(row?.querySelectorAll<HTMLElement>(".slot-layer") ?? [])];
@@ -327,25 +339,37 @@ function sampleSwap(page: Page) {
         faces: layers.map((l) => l.getBoundingClientRect().height),
       });
     }
+    observer.disconnect();
     return frames;
+  }).then(async (frames) => {
+    const removed = await page.evaluate(() => (window as unknown as { __mut: string[] }).__mut);
+    return Object.assign(frames, { removed });
   });
+  // The sampler is running before the caller changes anything.
+  await page.waitForFunction(() => Array.isArray((window as unknown as { __mut?: string[] }).__mut));
+  return { result: run };
 }
 
-function assertNoJump(samples: Awaited<ReturnType<typeof sampleSwap>>) {
+function assertNoJump(samples: Awaited<Awaited<ReturnType<typeof sampleSwap>>["result"]>) {
   expect(samples.some((s) => s.state !== "open")).toBe(true);
-  expect(samples.every((s) => s.visible)).toBe(true);
+  expect(samples.filter((s) => !s.visible), `frames with no visible face; removed=${JSON.stringify(samples.removed)} frames=${JSON.stringify(samples.map((s) => s.state + ':' + s.slot))}`).toEqual([]);
   expect(samples.every((s) => s.slot > 0)).toBe(true);
   for (const s of samples) {
     const smallest = Math.min(...s.faces.filter((h) => h > 0));
     expect(s.slot).toBeGreaterThanOrEqual(smallest - 1);
   }
+  if (OUT) fs.mkdirSync(OUT, { recursive: true });
   if (OUT) fs.appendFileSync(path.join(OUT, "_checks.txt"), `swap slot heights=${JSON.stringify([...new Set(samples.map((s) => Math.round(s.slot)))])}\n`);
 }
 
-async function openThread(page: Page, title: string, phone: boolean) {
+async function openThread(page: Page, title: string, threadId: string, phone: boolean) {
   await openAppByUrl(page);
   if (phone) await page.getByRole("button", { name: "Toggle sidebar" }).click();
+  // The app lands on the last thread, which an earlier case also filled with chips; its rows go the moment this one opens.
+  // Wait for this thread's own history, or a row that is about to be removed reads as this thread's.
+  const loaded = page.waitForResponse((r) => r.url().includes(`/threads/${threadId}/messages`));
   await page.getByText(title).first().click();
+  await loaded;
   await expect(page.getByRole("textbox", { name: "Message CORSIA" })).toBeVisible({ timeout: 20_000 });
 }
 
@@ -362,7 +386,8 @@ const CASES: Array<{ id: string; scene: keyof typeof SCENES; focus: boolean[] }>
   { id: "group-do", scene: "seven", focus: [true] },
   { id: "group-settle", scene: "seven", focus: [true] },
   { id: "neighbour", scene: "neighbour", focus: [true] },
-  { id: "reduced-motion", scene: "one-doc", focus: [true] },
+  { id: "settle-elsewhere", scene: "one-plain", focus: [true] },
+  { id: "reduced-motion", scene: "one-plain", focus: [true] },
 ];
 
 for (const size of SIZES) {
@@ -480,28 +505,33 @@ for (const size of SIZES) {
           }
           if (scene.reviewTile) {
             await page.route("**/api/threads/*/messages*", async (route) => {
-              const res = await route.fetch();
-              const body = await res.json();
-              for (const m of body?.messages ?? []) {
-                if (m.role === "assistant" && String(m.content).startsWith("I drafted the sign-in proof plan")) {
-                  m.cards = [
-                    {
-                      kind: "ask",
-                      artifact_id: "artifact-proof-plan",
-                      title: "Sign-in proof plan",
-                      type: "markdown",
-                      icon: "file-text",
-                      name: "sign-in-proof-plan.md",
-                      path: "shared/planning/sign-in-proof-plan.md",
-                      available: true,
-                      opens: true,
-                      hold_id: "hold-proof-plan",
-                      state: "needs_review",
-                    },
-                  ];
+              try {
+                const res = await route.fetch();
+                const body = await res.json();
+                for (const m of body?.messages ?? []) {
+                  if (m.role === "assistant" && String(m.content).startsWith("I drafted the sign-in proof plan")) {
+                    m.cards = [
+                      {
+                        kind: "ask",
+                        artifact_id: "artifact-proof-plan",
+                        title: "Sign-in proof plan",
+                        type: "markdown",
+                        icon: "file-text",
+                        name: "sign-in-proof-plan.md",
+                        path: "shared/planning/sign-in-proof-plan.md",
+                        available: true,
+                        opens: true,
+                        hold_id: "hold-proof-plan",
+                        state: "needs_review",
+                      },
+                    ];
+                  }
                 }
+                await route.fulfill({ response: res, json: body });
+              } catch (error) {
+                if (page.isClosed()) return;
+                throw error;
               }
-              await route.fulfill({ response: res, json: body });
             });
           }
           const socket = await routeSocket(page, threadId, world);
@@ -515,7 +545,7 @@ for (const size of SIZES) {
             socket.push();
           });
 
-          await openThread(page, title, phone);
+          await openThread(page, title, threadId, phone);
           await socket.connected();
           const rows = page.locator("[data-person-step]");
           await expect(rows.first()).toBeVisible({ timeout: 20_000 });
@@ -559,29 +589,44 @@ for (const size of SIZES) {
             await shot(page, `do-document-${size.w}-${theme}`);
           }
 
-          if (id === "done" || id === "wontdo" || id === "reduced-motion") {
+          if (id === "done" || id === "wontdo") {
             await chip(first).click();
             const action = id === "wontdo" ? "Won’t do" : "Done";
             await expect(page.getByRole("button", { name: action, exact: true })).toBeVisible({ timeout: 15_000 });
-            const swap = sampleSwap(page);
+            // Desktop keeps the chat beside the document, so the swap is on screen; a phone shows the document alone.
+            const swap = phone ? null : await sampleSwap(page);
             await page.getByRole("button", { name: action, exact: true }).click();
             await expect(row(first)).toHaveAttribute("data-step-state", id === "wontdo" ? "closed" : "done", { timeout: 15_000 });
-            const samples = await swap;
-            assertNoJump(samples);
-            if (id === "reduced-motion") {
-              // Reduced motion: the faces swap on one frame, never half-faded.
-              const mid = samples.filter((s) => s.state !== "open").slice(0, 3);
-              if (OUT) fs.appendFileSync(path.join(OUT, "_checks.txt"), `reduced-motion first settled frames=${JSON.stringify(mid)}\n`);
-            }
+            if (swap) assertNoJump(await swap.result);
             expect(mutated.map((m) => m.operation)).toEqual([id === "wontdo" ? "close_node" : "mark_done"]);
+            await shot(page, `${id}-document-${size.w}-${theme}`);
+            if (phone) {
+              await page.locator(".shell-header .h-back").click();
+              await expect(page.getByRole("textbox", { name: "Message CORSIA" })).toBeVisible();
+            }
             await expect(row(first).locator(".ev-chip .ev-label")).toHaveText(id === "wontdo" ? "Won’t do" : "Done");
             await expect(row(first).locator(".ev-chip .ev-summary")).toHaveText(first.title);
             await assertInert(page, row(first), true);
-            // The document stays open on a phone; close it so the receipt in the chat is the frame.
-            if (phone) {
-              const back = page.getByRole("button", { name: /^(Back|Close)/ }).first();
-              if (await back.isVisible()) await back.click();
+            await shot(page, `${id}-${size.w}-${theme}`);
+          }
+
+          if (id === "settle-elsewhere" || id === "reduced-motion") {
+            // Settled from the plan row or by the agent: the chat is on screen, so the swap itself is what is checked.
+            await expect(chip(first)).toBeVisible();
+            await assertInert(page, row(first), false);
+            const swap = await sampleSwap(page);
+            settle(first.id, "done");
+            socket.push();
+            await expect(row(first)).toHaveAttribute("data-step-state", "done", { timeout: 15_000 });
+            const samples = await swap.result;
+            assertNoJump(samples);
+            if (id === "reduced-motion") {
+              const durations = await row(first).locator(".slot-layer").evaluateAll((layers) => layers.map((l) => getComputedStyle(l).transitionDuration));
+              if (OUT) fs.appendFileSync(path.join(OUT, "_checks.txt"), `reduced-motion ${tag} layer transition durations=${JSON.stringify(durations)}\n`);
+              expect(durations.every((d) => d.split(",").every((part) => parseFloat(part) <= 0.001))).toBe(true);
             }
+            await expect(row(first).locator(".ev-chip .ev-label")).toHaveText("Done");
+            await assertInert(page, row(first), true);
             await shot(page, `${id}-${size.w}-${theme}`);
           }
 

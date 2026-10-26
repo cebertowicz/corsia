@@ -42,7 +42,9 @@
 		};
 	}
 
-	function press(): void {
+	function press(event: MouseEvent): void {
+		// The chat column takes every click as "the chat is active" and would put the chat back over the document just opened (`AttachmentRow` stops it the same way).
+		event.stopPropagation();
 		if (waiting.length > 1) void doFirstOf(waiting);
 		else if (waiting[0]) void doStep(waiting[0]);
 	}

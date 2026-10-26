@@ -51,6 +51,16 @@ describe('PersonStepRow', () => {
 		expect(host.querySelector('[data-person-step]')!.getAttribute('data-step-state')).toBe('open');
 	});
 
+	it('does not let the press reach the chat column, which would put the chat back over the opened document', () => {
+		render({ card: card(1) });
+		// Svelte delegates `onclick` at the mount target, so the chat column's handler is reached by its walk or by bubbling past it.
+		const above = vi.fn();
+		document.body.addEventListener('click', above);
+		chip()!.click();
+		document.body.removeEventListener('click', above);
+		expect(above).not.toHaveBeenCalled();
+	});
+
 	it('the plan settles it: the chip becomes the receipt and the hidden face is hidden from assistive tech', () => {
 		nav.plan.nodes = [{ id: 'n1', state: 'accepted' }];
 		render({ card: card(1) });
