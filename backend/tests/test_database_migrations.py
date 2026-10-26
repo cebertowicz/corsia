@@ -178,6 +178,9 @@ def test_a_passing_migration_checks_only_changed_tables(tmp_path, ladder):
         if statement.startswith("PRAGMA integrity_check(")
     ]
     assert integrity_checks == ['PRAGMA integrity_check("added")']
+    # A whole-database quick_check walks every b-tree in one VM operation and
+    # starves startup progress on a large database.
+    assert not [statement for statement in statements if "quick_check" in statement.lower()]
 
 
 def test_a_rebuild_with_identical_ddl_still_checks_the_table(tmp_path, ladder):

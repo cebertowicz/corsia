@@ -226,8 +226,14 @@ def _record_legacy_marks(conn, starts: dict[str, str]) -> None:
 
 
 def migrate_146_to_147(conn) -> None:
-    """Create immutable Measurement boundaries from this migration's frozen upgrade-time SQL."""
-    conn.executescript(_V147_BREAKS_SCHEMA_SQL)
+    """Create immutable Measurement boundaries from this migration's frozen upgrade-time SQL.
+
+    Runs inside the runner's transaction and never commits: statements go through
+    ``execute`` one at a time because ``executescript`` would commit.
+    """
+    for statement in _V147_BREAKS_SCHEMA_SQL.split(";"):
+        if statement.strip():
+            conn.execute(statement)
 
     tables = [str(row[0]) for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")]
     schema = {

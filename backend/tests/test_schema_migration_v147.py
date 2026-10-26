@@ -3,8 +3,10 @@ from __future__ import annotations
 
 import sqlite3
 
+import pytest
+
 from infra.database import initialize_schema
-from infra.database_migrations import MIGRATIONS, migrate_to_current
+from infra.database_migrations import MIGRATIONS, MigrationError, migrate_to_current
 from infra.migration_146_to_147_measure_breaks import migrate_146_to_147
 from infra.schema import SCHEMA_VERSION
 from tests.plan_writer_authorizer import raw_plan_seed
@@ -47,6 +49,26 @@ def test_v147_fresh_schema_has_no_install_history_rows() -> None:
     db.row_factory = sqlite3.Row
     initialize_schema(db)
     assert _breaks(db) == []
+
+
+def test_v147_failure_after_the_step_rolls_back_every_v147_object(monkeypatch) -> None:
+    def failing_step(db):
+        migrate_146_to_147(db)
+        raise RuntimeError("synthetic failure after the v147 step")
+
+    monkeypatch.setitem(MIGRATIONS, 146, failing_step)
+    db = _legacy_db()
+    try:
+        _accepted(db, "2026-08-10T12:00:00Z")
+        db.commit()
+        before = list(db.iterdump())
+        with pytest.raises(MigrationError, match="synthetic failure after the v147 step"):
+            migrate_to_current(db, SCHEMA_VERSION)
+        assert not db.in_transaction
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 146
+        assert list(db.iterdump()) == before
+    finally:
+        db.close()
 
 
 def test_v147_upgrade_leaves_a_history_free_install_empty() -> None:
