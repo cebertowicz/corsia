@@ -131,7 +131,8 @@ def test_unit_jobs_use_hosted_runners_and_controlled_shards() -> None:
     assert "/private/tmp/corsia-ci-" not in workflow
     assert "CORSIA_WORKSPACE=$RUNNER_TEMP" not in workflow
     assert "actions/setup-node" not in backend_job
-    assert "matrix:" not in workflow
+    assert "fail-fast: false" in backend_job
+    assert "shard: [core-cdgmr, remainder, core-aehilostuw]" in backend_job
     assert "pytest-xdist" not in workflow
     assert "run_backend_shard()" in workflow
     assert "mapfile -t cdgmr_files < <(linux_files backend/tests/test_[cdgmr]*.py)" in workflow
@@ -145,8 +146,9 @@ def test_unit_jobs_use_hosted_runners_and_controlled_shards() -> None:
     assert "'--ignore-glob=backend/tests/test_[cdgmr]*.py'" in workflow
     assert "'--ignore-glob=backend/tests/test_[aehilostuw]*.py'" in workflow
     assert workflow.count("--ignore-glob=") == 2
-    assert 'pids+=("$!")' in workflow
-    assert 'wait "${pids[$index]}"' in workflow
+    assert 'case "${{ matrix.shard }}" in' in backend_job
+    assert 'status=$?' in backend_job
+    assert 'exit "$status"' in backend_job
     assert "run_with_test_capacity.py" not in workflow
     assert "backend-full-suite" not in workflow
     assert "--maxfail" not in workflow
@@ -160,20 +162,51 @@ def test_unit_jobs_use_hosted_runners_and_controlled_shards() -> None:
     assert "continue-on-error: true" in workflow
     assert "### Backend test shards" in workflow
     assert "Backend aggregate:" in workflow
-    assert 'glob("backend-*.log")' in workflow
+    assert 'shards = ["core-cdgmr", "remainder", "core-aehilostuw"]' in workflow
     assert "BACKEND_SHARDS" not in workflow
     assert "except (OSError, ET.ParseError)" in workflow
     assert "incomplete_logs = []" in workflow
-    assert 'touch "$RUNNER_TEMP/backend-${names[$index]}.log.printed"' in workflow
+    assert '2>&1 | tee "$RUNNER_TEMP/backend-${shard}.log"' in backend_job
     assert 'f"::group::Incomplete backend shard {shard} log "' in workflow
     assert 'f"({status}; log follows)"' in workflow
-    assert 'if log.with_suffix(".log.printed").exists():' in workflow
+    assert 'name: backend-test-report-${{ github.run_id }}-${{ matrix.shard }}' in backend_job
     assert 'print(log.read_text(errors="replace"), end="")' in workflow
     assert 'print(f"::warning::Unable to read {log.name}: {error}")' in workflow
     assert "{len(complete_rows)}/{len(shards)} reports" in workflow
     assert ".venv/bin/pip install -r backend/requirements.txt" in workflow
     assert ".venv/bin/pip install -r backend/requirements-test.txt" in workflow
     assert "RUNNER_TOOL_CACHE" not in workflow
+    aggregate = _workflow_job(workflow, "backend-aggregate")
+    assert "needs: [relevance, backend]" in aggregate
+    assert "if: ${{ !cancelled() }}" in aggregate
+    assert "name: Backend unit tests\n" in aggregate
+    assert "${{ needs.backend.result }}" in aggregate
+    assert '[ "$BACKEND_RESULT" != success ]' in aggregate
+    assert '[ "$RELEVANCE_RESULT" != success ]' in aggregate
+    assert '[ "$RELEVANT" = true ]' in aggregate
+    assert "pattern: backend-test-report-${{ github.run_id }}-*" in aggregate
+
+
+def test_backend_aggregate_fails_closed_for_relevant_shards() -> None:
+    aggregate = _workflow_job(WORKFLOW.read_text(), "backend-aggregate")
+    step = aggregate.split("      - name: Require successful backend shards\n", 1)[1]
+    script = textwrap.dedent(step.split("        run: |\n", 1)[1])
+    cases = (
+        ("success", "true", "success", 0),
+        ("success", "true", "failure", 1),
+        ("success", "true", "cancelled", 1),
+        ("success", "true", "skipped", 1),
+        ("success", "false", "skipped", 0),
+        ("failure", "", "skipped", 1),
+    )
+    for relevance, relevant, backend, expected in cases:
+        result = subprocess.run(
+            ["/bin/bash", "-e", "-c", script],
+            env={**os.environ, "RELEVANCE_RESULT": relevance,
+                 "RELEVANT": relevant, "BACKEND_RESULT": backend},
+            text=True, capture_output=True, check=False,
+        )
+        assert result.returncode == expected, (relevance, relevant, backend, result.stdout)
 
 
 def test_l3_enables_contract_suite_for_integration_matrix() -> None:

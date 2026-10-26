@@ -34,11 +34,13 @@ jobs:
   backend:
     needs: relevance
     if: ${{ !cancelled() && (needs.relevance.result != 'success' || needs.relevance.outputs.relevant == 'true') }}
-    name: Backend unit tests
+    name: Backend unit tests shard (${{ matrix.shard }})
     runs-on: ubuntu-24.04
-    # The Mac Studios finished the three shards in about 6 minutes; a hosted
-    # runner has four slower cores, so the cap leaves room for that hardware.
-    timeout-minutes: 25
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [core-cdgmr, remainder, core-aehilostuw]
     env:
       # A GitHub-hosted runner is a throwaway VM with no CORSIA install, so
       # the HOME-prefix guard (it protects a shared host's live workspace)
@@ -113,10 +115,9 @@ jobs:
 
       - name: Run backend tests
         run: |
+          set +e
           set -uo pipefail
 
-          pids=()
-          names=()
           run_backend_shard() {
             local shard="$1"
             shift
@@ -134,9 +135,7 @@ jobs:
                 -o tmp_path_retention_policy=failed \
                 --durations=50 --durations-min=0.25 \
                 --junitxml="$RUNNER_TEMP/backend-junit-${shard}.xml"
-            ) > "$RUNNER_TEMP/backend-${shard}.log" 2>&1 &
-            pids+=("$!")
-            names+=("$shard")
+            ) 2>&1 | tee "$RUNNER_TEMP/backend-${shard}.log"
           }
 
           # Files listed in macos_only_tests.txt run in the macOS job instead,
@@ -158,44 +157,60 @@ jobs:
           mapfile -t cdgmr_files < <(linux_files backend/tests/test_[cdgmr]*.py)
           mapfile -t aehilostuw_files < <(linux_files backend/tests/test_[aehilostuw]*.py)
 
-          # One CI job owns all concurrency: three shards on the hosted
-          # runner's four cores; worktree agents remain targeted-test only.
-          # The letter split keeps the three shards' summed test time within
-          # a few percent of each other (measured from the junit reports); a
-          # lopsided shard is what pushes the job past its timeout under load.
-          run_backend_shard core-cdgmr "${cdgmr_files[@]}"
-          run_backend_shard remainder backend/tests \
-            '--ignore-glob=backend/tests/test_[cdgmr]*.py' \
-            '--ignore-glob=backend/tests/test_[aehilostuw]*.py' \
-            "${macos_ignores[@]}"
-          run_backend_shard core-aehilostuw "${aehilostuw_files[@]}"
-
-          status=0
-          for index in "${!pids[@]}"; do
-            if ! wait "${pids[$index]}"; then
-              status=1
-            fi
-            echo "::group::Backend shard ${names[$index]}"
-            cat "$RUNNER_TEMP/backend-${names[$index]}.log"
-            touch "$RUNNER_TEMP/backend-${names[$index]}.log.printed"
-            echo "::endgroup::"
-          done
+          # Stream output as well as saving it, including if the leg times out.
+          echo "::group::Backend shard ${{ matrix.shard }}"
+          # Keep the measured letter split identical across the independent VMs.
+          case "${{ matrix.shard }}" in
+            core-cdgmr) run_backend_shard core-cdgmr "${cdgmr_files[@]}" ;;
+            remainder) run_backend_shard remainder backend/tests \
+              '--ignore-glob=backend/tests/test_[cdgmr]*.py' \
+              '--ignore-glob=backend/tests/test_[aehilostuw]*.py' \
+              "${macos_ignores[@]}" ;;
+            core-aehilostuw) run_backend_shard core-aehilostuw "${aehilostuw_files[@]}" ;;
+          esac
+          status=$?
+          echo "::endgroup::"
           exit "$status"
 
-      - name: Summarize backend test shards
+      - name: Upload backend timing report
         if: always()
+        # Diagnostics only: a failed upload must not turn a passing job red.
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-test-report-${{ github.run_id }}-${{ matrix.shard }}
+          path: |
+            ${{ runner.temp }}/backend-junit-*.xml
+            ${{ runner.temp }}/backend-*.log
+          if-no-files-found: warn
+
+  backend-aggregate:
+    needs: [relevance, backend]
+    if: ${{ !cancelled() }}
+    name: Backend unit tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Download backend timing reports
+        if: ${{ needs.relevance.result == 'success' && needs.relevance.outputs.relevant == 'true' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          pattern: backend-test-report-${{ github.run_id }}-*
+          path: ${{ runner.temp }}
+          merge-multiple: true
+
+      - name: Summarize backend test shards
+        if: ${{ needs.relevance.result == 'success' && needs.relevance.outputs.relevant == 'true' }}
         continue-on-error: true
         run: |
-          .venv/bin/python - <<'PY'
+          python3 - <<'PY'
           import os
           from pathlib import Path
           import xml.etree.ElementTree as ET
 
           runner_temp = Path(os.environ["RUNNER_TEMP"])
-          shards = [
-              path.stem.removeprefix("backend-")
-              for path in sorted(runner_temp.glob("backend-*.log"))
-          ]
+          shards = ["core-cdgmr", "remainder", "core-aehilostuw"]
           rows = []
           incomplete_logs = []
           for shard in shards:
@@ -217,10 +232,16 @@ jobs:
                   rows.append({"shard": shard, "status": status})
                   incomplete_logs.append((shard, status))
                   continue
-              counts = {
-                  key: sum(int(suite.get(key, 0)) for suite in suites)
-                  for key in ("tests", "skipped", "failures", "errors")
-              }
+              try:
+                  counts = {
+                      key: sum(int(suite.get(key, 0)) for suite in suites)
+                      for key in ("tests", "skipped", "failures", "errors")
+                  }
+              except ValueError:
+                  status = "invalid report counts"
+                  rows.append({"shard": shard, "status": status})
+                  incomplete_logs.append((shard, status))
+                  continue
               counts.update(
                   shard=shard,
                   status="complete",
@@ -231,8 +252,6 @@ jobs:
 
           for shard, status in incomplete_logs:
               log = runner_temp / f"backend-{shard}.log"
-              if log.with_suffix(".log.printed").exists():
-                  continue
               print(
                   f"::group::Incomplete backend shard {shard} log "
                   f"({status}; log follows)"
@@ -281,17 +300,21 @@ jobs:
           )
           PY
 
-      - name: Upload backend timing report
-        if: always()
-        # Diagnostics only: a failed upload must not turn a passing job red.
-        continue-on-error: true
-        uses: actions/upload-artifact@v4
-        with:
-          name: backend-test-report-${{ github.run_id }}
-          path: |
-            ${{ runner.temp }}/backend-junit-*.xml
-            ${{ runner.temp }}/backend-*.log
-          if-no-files-found: warn
+      - name: Require successful backend shards
+        if: ${{ always() }}
+        env:
+          RELEVANCE_RESULT: ${{ needs.relevance.result }}
+          RELEVANT: ${{ needs.relevance.outputs.relevant }}
+          BACKEND_RESULT: ${{ needs.backend.result }}
+        run: |
+          if [ "$RELEVANCE_RESULT" != success ]; then
+            echo "::error::relevance preflight ended with '$RELEVANCE_RESULT'; refusing to skip this required context"
+            exit 1
+          fi
+          if [ "$RELEVANT" = true ] && [ "$BACKEND_RESULT" != success ]; then
+            echo "::error::backend shards ended with '$BACKEND_RESULT'"
+            exit 1
+          fi
 
   backend-macos:
     needs: relevance
