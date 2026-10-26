@@ -15,7 +15,7 @@ from core import turn_iteration_context as iteration_context
 from core import turn_provider_call, turns_steps
 from core.checkpoint_native_admission import IDLE_RECEIPT_KEY, freeze_idle_receipt
 from core.native_context_prefix import CONTEXT_WINDOW_UNSET, _freeze_tool_definitions
-from tools.catalog import advertised_tool_definitions
+from tools import confined_reads
 from core.tool_result_projection import HARNESS_TOOL_RESULT_BUDGET_TOKENS
 from core.turn_context import prepare_turn_context
 from core.turn_safe_boundary import claim_safe_boundary, resolve_unconsumed_boundary_input
@@ -70,7 +70,7 @@ async def _prepare_iteration_state(
     project_id: str | None, channel: str, chat_id: str, media, model_context_window, prepared_context,
 ) -> _IterationState:
     if prepared_context is None:
-        tool_definitions = _freeze_tool_definitions(advertised_tool_definitions(agent.tools))
+        tool_definitions = _freeze_tool_definitions(await confined_reads.advertised(agent.tools, thread_id))
         messages, context_usage = await prepare_turn_context(
             agent, thread_id, user_content, turn_model, fresh_context, project_id,
             channel, chat_id, media, model_context_window=model_context_window,

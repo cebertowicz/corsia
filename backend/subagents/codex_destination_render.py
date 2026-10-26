@@ -15,6 +15,7 @@ from subagents.codex_destination import (
     build_prepared_codex_destination,
     validate_live_compaction,
 )
+from subagents.cc_confinement import ConfinementRefused
 from subagents.codex_runtime_errors import CodexPreparedContextStale
 from subagents.codex_runtime_state import (
     _APP_SESSIONS,
@@ -44,10 +45,12 @@ def codex_destination_scope(
     db,
 ) -> tuple[str | None, str]:
     row = db.execute(
-        "SELECT project_id,model FROM threads WHERE id=?", (thread_id,)
+        "SELECT project_id,model,confinement FROM threads WHERE id=?", (thread_id,)
     ).fetchone()
     if row is None:
         raise CodexPreparedContextStale("Codex destination thread no longer exists")
+    if row["confinement"] is not None:
+        raise ConfinementRefused(f"no confined launch for {target_catalog_id}")
     selected_model = (
         target_catalog_id
         if expected_selected_model is None

@@ -197,11 +197,14 @@ def broadcast_all(message: dict):
 
 
 def notify_models_changed() -> None:
-    """Broadcast catalog changes and resume any now-runnable held FIFO heads."""
+    """Broadcast catalog changes, resume any now-runnable held FIFO heads, and let the
+    worker runner start a Local only start a newly ready local model can take."""
     broadcast_all({"type": "models_updated"})
+    from automation.worker_runner import poke_on_catalog_change
     from infra.unavailable_model_recovery import schedule_unavailable_model_recovery
 
     schedule_unavailable_model_recovery()
+    poke_on_catalog_change()
 
 
 def notify_devices_updated() -> None:

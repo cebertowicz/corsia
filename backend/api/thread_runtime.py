@@ -169,12 +169,12 @@ async def next_turn_context_snapshot(
     if provider == "native":
         from core.agent import get_agent
         from core.native_context_prefix import _freeze_tool_definitions
-        from tools.catalog import advertised_tool_definitions
+        from tools import confined_reads
 
         agent = await get_agent()
         await agent._connect_mcp()
         tool_definitions = _freeze_tool_definitions(
-            advertised_tool_definitions(agent.tools)
+            await confined_reads.advertised(agent.tools, thread_id)
         )
     elif provider in {"cc", "codex"}:
         # Same catalog-filtered ledger Native uses, built from a throwaway

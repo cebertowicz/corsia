@@ -143,11 +143,14 @@ class ToolRegistry:
                 plan dispatch could not be settled.
         """
         from infra.repo_policy_transition import admit_repo_effect
+        from tools import confined_reads
         from tools.host_access_gate import (
             authorize_host_action,
             host_action_permit_scope,
         )
 
+        if refusal := confined_reads.call_refusal(name, thread_context):
+            return refusal
         authorization = await authorize_host_action(
             thread_id=thread_context["id"],
             project_id=thread_context.get("project_id"),
@@ -172,7 +175,7 @@ class ToolRegistry:
             if name in _REPO_TRANSITION_OWNERS
             else admit_repo_effect()
         )
-        with repo_effect:
+        with repo_effect, confined_reads.scope(thread_context):
             with host_action_permit_scope(authorization):
                 return await execute_recorded_call(
                     tool, name, execution_params, thread_context,
@@ -339,7 +342,8 @@ class ToolRegistry:
             db = get_db()
             try:
                 row = db.execute(
-                    "SELECT id,user_id,project_id FROM threads WHERE id=?",
+                    "SELECT id,user_id,project_id,confinement,confined_read_dirs "
+                    "FROM threads WHERE id=?",
                     (thread_id,),
                 ).fetchone()
                 context = dict(row) if row is not None else None

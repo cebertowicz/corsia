@@ -177,25 +177,9 @@ async def test_a_paused_owner_skips_and_a_request_after_resume_starts(world, mon
     assert len(_workers()) == 1
 
 
-# 12 -- a Local-only owner's start is refused with what to do, never bound to cloud.
-@pytest.mark.asyncio
-async def test_a_local_only_owner_is_refused_and_no_worker_is_made(world):
-    from infra.database import write_transaction
+# 12 -- a Local only owner's start runs local or waits: test_rule_workers_local_only.
 
-    rule = await make_rule()
-    with write_transaction(None, scope="rule_worker_local") as db:
-        db.execute("UPDATE threads SET local_only=1 WHERE id=?", (OWNER,))
-    await request()
-    await settle_all()
-    said = ("this chat is set to Local only, and a rule can start a workflow only on a cloud "
-            "model. Run the workflow yourself, or turn off Local only for this chat.")
-    assert starts(rule)[0][:2] == ("refused", said)
-    assert _workers() == []
-    [wake] = owner_wakes()
-    assert f"Summary: A rule couldn’t start worker-flow: {said}\n" in wake
-
-
-# Non-Claude-Code owners: the confined launch exists only for Claude Code.
+# A Codex owner: Codex has no confined launch, so the start is refused and the owner told.
 @pytest.mark.asyncio
 async def test_an_owner_on_a_harness_without_a_confined_launch_is_refused(world):
     from infra.database import get_db, write_transaction
@@ -209,7 +193,7 @@ async def test_an_owner_on_a_harness_without_a_confined_launch_is_refused(world)
     await settle_all()
     outcome, reason = starts(rule)[0][:2]
     assert outcome == "refused" and reason.startswith("no confined launch for")
-    assert _workers() == []
+    assert _workers() == [] and "no confined launch for" in owner_wakes()[0]
 
 
 # 13 -- worker.* is CORSIA's alone: an agent's emit and a script or CLI line are refused.

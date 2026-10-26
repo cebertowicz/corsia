@@ -2,6 +2,7 @@
 from infra.accounts_schema import ACCOUNTS_SCHEMA_SQL
 from infra.action_drafts_schema import ACTION_DRAFTS_SCHEMA_SQL
 from infra.email_screens_schema import EMAIL_SCREENS_SCHEMA_SQL
+from infra.fact_extraction_schema import FACT_EXTRACTION_SCHEMA_SQL
 from infra.event_rule_schema import EVENT_RULE_SCHEMA_SQL
 from infra.event_watch_schema import EXPECTED_EVENT_WATCH_SCHEMA_SQL
 from infra.artifact_identity_schema import ARTIFACT_IDENTITY_SCHEMA_SQL
@@ -60,6 +61,8 @@ SCHEMA_SQL = f"""
         parent_thread_id TEXT REFERENCES threads(id),
         spawned_by TEXT REFERENCES threads(id),
         local_only INTEGER NOT NULL DEFAULT 0,
+        confinement TEXT,
+        confined_read_dirs TEXT,
         bootloader_files TEXT,
         pending_compaction_trigger TEXT,
         pending_compaction_detail TEXT,
@@ -238,13 +241,7 @@ SCHEMA_SQL = f"""
     {KEY_STORE_SCHEMA_SQL}
     {CONNECTED_APPS_SCHEMA_SQL}
     {CONNECTED_ACCOUNTS_SCHEMA_SQL}
-
-    CREATE TABLE IF NOT EXISTS fact_extraction_runs (
-        run_date TEXT PRIMARY KEY,
-        status TEXT NOT NULL DEFAULT 'ok',
-        result_json TEXT,
-        ran_at TEXT NOT NULL
-    );
+    {FACT_EXTRACTION_SCHEMA_SQL}
 
     CREATE TABLE IF NOT EXISTS network_servers (
         id TEXT PRIMARY KEY,

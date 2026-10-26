@@ -124,6 +124,9 @@ async def test_review_spawn_and_cold_start_stay_confined(
     _assert_confined(launches[0], reviewed_dir, child_id)
     stored = _stored_invocation(child_db, child_id)
     assert stored["confinement"] == "review" and stored["add_dirs"] == [reviewed_dir]
+    # On its row too, so a switch to another harness can't launch it unconfined.
+    from infra.thread_confinement import read_dirs
+    assert read_dirs(child_id, child_db) == (reviewed_dir,)
 
     # Retirement drops every in-memory handle, as a restart does; the cold
     # start can learn the confinement only from the stored launch record.
@@ -322,7 +325,7 @@ async def test_delegate_task_review_needs_paths_and_a_claude_code_model(child_db
     )
     codex = await delegate_task._spawn(
         "parent", {}, "task",
-        {"model": "codex/gpt-5.6-terra", "confinement": "review", "read_paths": ["/w"]},
+        {"model": "codex/gpt-5-codex", "confinement": "review", "read_paths": ["/w"]},
     )
     assert codex.startswith("Error: refused: no confined launch for ")
 

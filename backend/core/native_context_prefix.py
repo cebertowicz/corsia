@@ -269,7 +269,7 @@ async def build_real_send_prefix(
     selected_model: str | None = None,
 ) -> tuple[list[dict], dict]:
     """Build the strict-prefix ``[system, ...history]`` message sequence."""
-    from tools.catalog import advertised_tool_definitions
+    from tools import confined_reads
 
     if fresh_context and replay_selection is not None:
         raise ValueError("fresh Native context cannot consume a replay selection")
@@ -285,7 +285,7 @@ async def build_real_send_prefix(
     collection, system_prompt, entries, handled = material[:4]
     checkpoint_prompt, checkpoint_component = material[4:]
     frozen_tools = _selected_tool_definitions(
-        advertised_tool_definitions(agent.tools)
+        await confined_reads.advertised(agent.tools, thread_id)
         if tool_definitions is None else tool_definitions
     )
     canonical_tools = _canonical_tool_definitions(frozen_tools)

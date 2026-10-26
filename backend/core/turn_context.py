@@ -150,10 +150,10 @@ async def prepare_turn_context(
     ``snapshot_out`` the effective snapshot; neither enters the published usage.
     """
     from core.thread_history import prepare_history_for_llm
-    from tools.catalog import advertised_tool_definitions
+    from tools import confined_reads
 
     frozen_tools = native_prefix._selected_tool_definitions(
-        advertised_tool_definitions(agent.tools)
+        await confined_reads.advertised(agent.tools, thread_id)
         if tool_definitions is None else tool_definitions
     )
     source_content = (
@@ -208,12 +208,12 @@ async def prepare_native_context_payload(
     """Render and freeze the exact Native payload used after admission."""
     from core.agent import get_agent
     from infra.context_receipts import ContextReceiptIdentity
-    from tools.catalog import advertised_tool_definitions
+    from tools import confined_reads
 
     agent = await get_agent()
     await agent._connect_mcp()
     frozen_tools = native_prefix._freeze_tool_definitions(
-        advertised_tool_definitions(agent.tools)
+        await confined_reads.advertised(agent.tools, thread_id)
     )
     installed: list[Any] = []
     snapshot: list[Any] = []

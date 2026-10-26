@@ -122,11 +122,11 @@ async def _build_warm_prefix(
     from llm.base import sanitize_empty_content, sanitize_messages
     from llm.providers.omlx import make_prompt_extra_body
     from llm.reasoning_config import reasoning_config_for_model
-    from tools.catalog import advertised_tool_definitions
+    from tools import confined_reads
 
     agent = await get_agent()
     await agent._connect_mcp()
-    tool_defs = _freeze_tool_definitions(advertised_tool_definitions(agent.tools))
+    tool_defs = _freeze_tool_definitions(await confined_reads.advertised(agent.tools, thread_id))
     wire_tool_defs = list(tool_defs)
     candidates, eager_checkpoint_id, pending_opening = await run_in_db(
         _warm_replay_candidates, thread_id, target.catalog_id,

@@ -66,6 +66,11 @@ def _ready_local_selectors() -> tuple[str, ...]:
     }))
 
 
+def ready_local_selectors() -> tuple[str, ...]:
+    """The catalog's ready local models, sorted: what a Local only start may bind."""
+    return _ready_local_selectors()
+
+
 def require_local_only_model(
     model: str | None,
     *,
