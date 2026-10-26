@@ -74,7 +74,7 @@ def test_fresh_install_live_start_is_primary_and_reads_do_not_write(isolated_db)
         rows = db.execute("SELECT COUNT(*) FROM measure_breaks").fetchone()[0]
     finally:
         db.close()
-    expected = [{"period": "2026-08-10", "kind": "start", "reason": "first recorded on this install"}]
+    expected = [{"period": "2026-08-10", "kind": "start", "reason": "first recorded on this computer"}]
     assert first["first_try_acceptance"] == second["first_try_acceptance"] == expected
     assert rows == 0
     assert after == before
@@ -85,7 +85,7 @@ def test_legacy_floor_is_used_instead_of_the_live_start(isolated_db) -> None:
     try:
         _thread(db)
         _accepted(db, "node", "2026-08-10T12:00:00Z")
-        _mark(db, "2026-09-14T12:00:00Z", "start", "first_try", "first recorded on this install")
+        _mark(db, "2026-09-14T12:00:00Z", "start", "first_try", "first recorded on this computer")
         db.execute(
             "INSERT INTO plan_node_events (id,node_id,provenance,event,prior_state,new_state,created_at) "
             "VALUES ('rejected','node','test','review_rejected','active','active','2026-09-14T12:00:00Z')"
@@ -105,7 +105,7 @@ def test_seeded_and_live_starts_share_the_days_viewer_zone_bucket(isolated_db) -
         _accepted(db, "node", "2026-09-15T00:30:00Z")
         db.commit()
         live = derive_breaks(db, ("outcomes",), grain)
-        _mark(db, "2026-09-15T00:30:00Z", "start", "outcomes", "first recorded on this install")
+        _mark(db, "2026-09-15T00:30:00Z", "start", "outcomes", "first recorded on this computer")
         db.commit()
         seeded = derive_breaks(db, ("outcomes",), grain)
     finally:
@@ -138,7 +138,7 @@ def test_legacy_asks_seed_gates_pre_hold_periods_but_fresh_live_start_is_decisio
             "INSERT INTO plan_node_holds (id,node_id,kind,reason_key,reason,owner_kind,provenance,created_at) "
             "VALUES ('hold','node','blocked','test','test','user','test','2026-09-07T12:00:00Z')"
         )
-        _mark(db, "2026-09-07T12:00:00Z", "start", "asks_per_outcome", "first recorded on this install")
+        _mark(db, "2026-09-07T12:00:00Z", "start", "asks_per_outcome", "first recorded on this computer")
         db.commit()
         legacy = derive_breaks(db, ("asks_per_outcome",), _grain())
         db.execute("DELETE FROM measure_breaks")
@@ -168,6 +168,63 @@ def test_model_marks_derive_from_rating_facts_and_are_size_scoped(isolated_db) -
     assert not any(mark["kind"] == "model" for marks in unrelated.values() for mark in marks)
 
 
+def test_model_marks_each_rater_change_and_deduplicates_one_period(isolated_db) -> None:
+    db = get_db()
+    try:
+        _thread(db)
+        for node, when, rater in (
+            ("baseline", "2026-09-01T12:00:00Z", "rater-a"),
+            ("b", "2026-09-15T12:00:00Z", "rater-b"),
+            ("a-again", "2026-09-22T12:00:00Z", "rater-a"),
+        ):
+            _accepted(db, node, when)
+            _rating(db, node, rater)
+        db.commit()
+        marks = [
+            mark for mark in derive_breaks(db, ("estimated_human_hours_per_active_hour",), _grain())["estimated_human_hours_per_active_hour"]
+            if mark["kind"] == "model"
+        ]
+    finally:
+        db.close()
+    assert [mark["period"] for mark in marks] == ["2026-09-14", "2026-09-21"]
+
+
+def test_model_marks_deduplicate_changes_inside_one_period(isolated_db) -> None:
+    db = get_db()
+    try:
+        _thread(db)
+        for node, when, rater in (
+            ("baseline", "2026-09-01T12:00:00Z", "rater-a"),
+            ("b", "2026-09-15T12:00:00Z", "rater-b"),
+            ("a-again", "2026-09-16T12:00:00Z", "rater-a"),
+        ):
+            _accepted(db, node, when)
+            _rating(db, node, rater)
+        db.commit()
+        marks = [
+            mark for mark in derive_breaks(db, ("estimated_human_hours_per_active_hour",), _grain())["estimated_human_hours_per_active_hour"]
+            if mark["kind"] == "model"
+        ]
+    finally:
+        db.close()
+    assert [mark["period"] for mark in marks] == ["2026-09-14"]
+
+
+def test_seeded_start_skips_its_live_query(isolated_db, monkeypatch) -> None:
+    from api import measurement_breaks
+
+    db = get_db()
+    try:
+        _thread(db)
+        _mark(db, "2026-09-14T12:00:00Z", "start", "outcomes", "first recorded on this computer")
+        db.commit()
+        monkeypatch.setattr(measurement_breaks, "live_starts_query", lambda groups: (_ for _ in ()).throw(AssertionError(groups)))
+        breaks = derive_breaks(db, ("outcomes",), _grain())
+    finally:
+        db.close()
+    assert breaks["outcomes"][0]["period"] == "2026-09-14"
+
+
 def test_model_mark_uses_each_raters_earliest_accepted_settlement(isolated_db) -> None:
     grain = resolve_grain("days", "America/Los_Angeles", now=datetime(2026, 10, 22, tzinfo=timezone.utc))
     db = get_db()
@@ -190,8 +247,8 @@ def test_model_mark_uses_each_raters_earliest_accepted_settlement(isolated_db) -
 
 def test_availability_and_comparability_helpers_distinguish_start_and_marks() -> None:
     start_then_completeness = [
-        {"period": "2026-03-02", "kind": "start", "reason": "first recorded on this install"},
-        {"period": "2026-09-07", "kind": "source", "reason": "token totals cover every agent from this week"},
+        {"period": "2026-03-02", "kind": "start", "reason": "first recorded on this computer"},
+        {"period": "2026-09-07", "kind": "source", "reason": "token totals cover every agent from Sep 7, 2026 on"},
     ]
     marks = [
         {"period": "2026-08-31", "kind": "world", "reason": "counting changed"},

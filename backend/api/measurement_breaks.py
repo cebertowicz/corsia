@@ -58,8 +58,10 @@ def _seeded_starts(db, groups: Iterable[str]) -> dict[str, str | None]:
 def _model_marks(db, grain: Grain) -> list[dict[str, str]]:
     """Derive rater changes from current facts; the first rater is the baseline."""
     marks: list[dict[str, str]] = []
-    for _, started_at in list(db.execute(MODEL_VERSION_ROWS_SQL))[1:]:
-        if period := _period(grain, str(started_at)):
+    periods: set[str] = set()
+    for _, started_at in db.execute(MODEL_VERSION_ROWS_SQL):
+        if (period := _period(grain, str(started_at))) and period not in periods:
+            periods.add(period)
             marks.append({
                 "period": period,
                 "kind": "model",
@@ -73,10 +75,11 @@ def _metadata(db, metrics: Iterable[str], grain: Grain) -> tuple[dict[str, str |
     """The one read-only resolver for metric starts and comparable marks."""
     requested = tuple(metrics)
     groups = tuple(dict.fromkeys(source_group(metric) for metric in requested))
-    row = db.execute(_breaks_query(groups)).fetchone()
     seeded = _seeded_starts(db, groups)
+    live_groups = tuple(group for group in groups if not seeded[group] and has_live_start(group))
+    row = db.execute(_breaks_query(live_groups)).fetchone()
     live = {
-        group: str(row[group]) if has_live_start(group) and row and row[group] else None
+        group: str(row[group]) if group in live_groups and row and row[group] else None
         for group in groups
     }
     starts = {group: _period(grain, seeded[group] or live[group]) for group in groups}
@@ -99,7 +102,7 @@ def derive_breaks(db, metrics: Iterable[str], grain: Grain) -> dict[str, list[di
         start = starts[source_group(metric)]
         rows: list[dict[str, str]] = []
         if start:
-            rows.append({"period": start, "kind": "start", "reason": "first recorded on this install"})
+            rows.append({"period": start, "kind": "start", "reason": "first recorded on this computer"})
         rows.extend(
             {key: value for key, value in mark.items() if key != "metric_group"}
             for mark in marks

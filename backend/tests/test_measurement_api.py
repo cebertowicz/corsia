@@ -758,7 +758,7 @@ async def test_fresh_asks_series_starts_at_decisions_without_recording_user_hold
 
     assert ("asks_per_outcome", "2026-08-24") in rows and ("asks_per_outcome", "2026-08-31") in rows
     assert result["breaks"]["asks_per_outcome"] == [
-        {"period": "2026-08-24", "kind": "start", "reason": "first recorded on this install"}
+        {"period": "2026-08-24", "kind": "start", "reason": "first recorded on this computer"}
     ]
     assert all(row["break"] is None and row["comparable"] for row in result["rows"] if row["series"] == "outcomes")
 

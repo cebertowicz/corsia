@@ -22,7 +22,7 @@ from infra.key_store_schema import KEY_STORE_SCHEMA_SQL
 from infra.learning_schema import LEARNING_INDEX_SQL
 from infra.lesson_placement_check_schema import LESSON_PLACEMENT_CHECK_SCHEMA_SQL
 from infra.managed_process_schema import MANAGED_PROCESS_SCHEMA_SQL
-from infra.measurement_schema import MEASUREMENT_INDEX_SQL
+from infra.measurement_schema import MEASUREMENT_BREAKS_SCHEMA_SQL, MEASUREMENT_INDEX_SQL
 from infra.message_schema import MESSAGE_SCHEMA_SQL
 from infra.outcome_events_schema import OUTCOME_EVENTS_SCHEMA_SQL
 from infra.plan_liveness_schema import PLAN_LIVENESS_SCHEMA_SQL
@@ -492,7 +492,7 @@ SCHEMA_SQL = f"""
     );
     {REVIEWER_GATE_SCHEMA_SQL}
     {DOCUMENT_SCHEMA_SQL}
-    {MEASUREMENT_INDEX_SQL}
+    {MEASUREMENT_BREAKS_SCHEMA_SQL}{MEASUREMENT_INDEX_SQL}
     {WRITE_HOLD_INDEX_SQL}
     {LEARNING_INDEX_SQL}
 """

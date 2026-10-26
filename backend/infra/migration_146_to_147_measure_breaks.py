@@ -192,7 +192,7 @@ def _record_existing_starts(conn, schema: dict[str, set[str]]) -> dict[str, str]
     conn.executemany(
         "INSERT OR IGNORE INTO measure_breaks(period,kind,metric_group,reason) VALUES (?,?,?,?)",
         [
-            (value, "start", group, "first recorded on this install")
+            (value, "start", group, "first recorded on this computer")
             for group, value in values.items()
         ],
     )
@@ -205,7 +205,7 @@ def _record_legacy_marks(conn, starts: dict[str, str]) -> None:
     if (outcomes_start := starts.get("outcomes")) and outcomes_start < "2026-08-31":
         rows.append(("2026-08-31", "world", None, "tasks got about 5 times smaller"))
     if (tokens_start := starts.get("tokens")) and tokens_start < "2026-09-07":
-        rows.append(("2026-09-07", "source", "tokens", "token totals cover every agent from this week"))
+        rows.append(("2026-09-07", "source", "tokens", "token totals cover every agent from Sep 7, 2026 on"))
     conn.executemany(
         "INSERT OR IGNORE INTO measure_breaks(period,kind,metric_group,reason) VALUES (?,?,?,?)",
         rows,

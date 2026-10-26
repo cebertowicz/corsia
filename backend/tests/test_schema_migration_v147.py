@@ -69,7 +69,7 @@ def test_v147_migration_seeds_legacy_first_try_at_latest_required_source() -> No
         )
         db.commit()
         migrate_146_to_147(db)
-        assert ("2026-09-14T12:00:00Z", "start", "first_try", "first recorded on this install") in _breaks(db)
+        assert ("2026-09-14T12:00:00Z", "start", "first_try", "first recorded on this computer") in _breaks(db)
     finally:
         db.close()
 
@@ -88,7 +88,7 @@ def test_v147_migration_seeds_legacy_asks_at_user_hold_boundary() -> None:
         )
         db.commit()
         migrate_146_to_147(db)
-        assert ("2026-09-07T12:00:00Z", "start", "asks_per_outcome", "first recorded on this install") in _breaks(db)
+        assert ("2026-09-07T12:00:00Z", "start", "asks_per_outcome", "first recorded on this computer") in _breaks(db)
     finally:
         db.close()
 
@@ -104,7 +104,7 @@ def test_v147_migration_keeps_only_legacy_marks_supported_by_history() -> None:
         db.commit()
         migrate_146_to_147(db)
         assert ("2026-08-31", "world", None, "tasks got about 5 times smaller") in _breaks(db)
-        assert ("2026-09-07", "source", "tokens", "token totals cover every agent from this week") in _breaks(db)
+        assert ("2026-09-07", "source", "tokens", "token totals cover every agent from Sep 7, 2026 on") in _breaks(db)
     finally:
         db.close()
 

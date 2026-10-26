@@ -1,8 +1,6 @@
-"""Canonical Measurement source first-row queries.
+"""Canonical Measurement live source first-row queries.
 
-The read resolver uses a metric's live value source.  The v147 migration uses the
-same primitive for each source a legacy metric reads, then records the latest
-first-row instant as that installation's immutable legacy floor.
+The v147 migration keeps its own frozen copies of the historical source queries.
 """
 
 from __future__ import annotations
@@ -30,8 +28,10 @@ def source_group(metric: str) -> str:
 
 _FIRST_ROW_SQL = {
     "accepted_outcomes": """
-        SELECT MIN(e.created_at) FROM plan_node_events e JOIN plan_nodes n ON n.id=e.node_id
+        SELECT e.created_at FROM plan_node_events e INDEXED BY idx_plan_node_events_created
+        JOIN plan_nodes n ON n.id=e.node_id
         WHERE n.kind='task' AND e.new_state IN ('accepted','accepted_with_followup')
+        ORDER BY e.created_at LIMIT 1
     """,
     "rejected_outcomes": """
         SELECT MIN(e.created_at) FROM plan_node_events e WHERE e.event='review_rejected'
@@ -64,8 +64,7 @@ _FIRST_ROW_SQL = {
     """,
     "presence": "SELECT MIN(v.entered_at) FROM presence_visits v",
     "accepted_size_ratings": f"""
-        SELECT MIN(e.created_at)
-        FROM plan_node_events e INDEXED BY idx_plan_node_events_created
+        SELECT e.created_at FROM plan_node_events e INDEXED BY idx_plan_node_events_created
         JOIN plan_nodes n ON n.id=e.node_id
         WHERE n.kind='task' AND e.new_state IN ('accepted','accepted_with_followup')
           AND (n.size IS NOT NULL AND n.size != 'unknown' OR EXISTS (
@@ -74,6 +73,7 @@ _FIRST_ROW_SQL = {
               AND f.subject_key='plan_node:'||n.id
               AND json_extract(f.attributes,'$.rater') > ''
           ))
+        ORDER BY e.created_at LIMIT 1
     """,
     "limit_hits": """
         SELECT MIN(started_at) FROM active_turns WHERE status > ''
@@ -94,40 +94,14 @@ _LIVE_SOURCE = {
 }
 
 
-_LEGACY_SOURCES = {
-    "outcomes": ("accepted_outcomes",),
-    "first_try": (
-        "accepted_outcomes", "rejected_outcomes", "released_bad_attempts", "failed_outcomes", "outcome_corrections",
-    ),
-    "rejections_per_outcome": ("rejected_outcomes",),
-    "asks_per_outcome": ("raised_decisions", "user_holds"),
-    "decisions": ("answered_decisions",),
-    "tokens": ("priceable_usage",),
-    "presence": ("presence",),
-    "estimated_human_hours_per_active_hour": ("accepted_size_ratings",),
-    "limit_hits": ("limit_hits",),
-}
-
-
 def source_first_row_sql(source: str) -> str:
     """Return the only SQL definition of one source's first-row UTC instant."""
     return _FIRST_ROW_SQL[source]
 
 
-def legacy_sources(group: str) -> tuple[str, ...]:
-    """Return every source a legacy group reads when computing its value."""
-    return _LEGACY_SOURCES[group]
-
-
 def has_live_start(group: str) -> bool:
     """Say whether a metric group has a live value source."""
     return group in _LIVE_SOURCE
-
-
-def source_first_rows_query(sources: Iterable[str]) -> str:
-    """Read named source first-row instants once each."""
-    requested = tuple(dict.fromkeys(sources))
-    return "SELECT " + ", ".join(f"({source_first_row_sql(source)}) AS {source}" for source in requested)
 
 
 def live_starts_query(groups: Iterable[str]) -> str:
@@ -139,14 +113,22 @@ def live_starts_query(groups: Iterable[str]) -> str:
 
 
 MODEL_VERSION_ROWS_SQL = f"""
-    SELECT json_extract(f.attributes,'$.rater') AS identity, MIN(e.created_at) AS started_at
-    FROM outcome_events f INDEXED BY idx_measurement_size_rater
-    CROSS JOIN plan_nodes n ON n.id=substr(f.subject_key,11)
-    JOIN plan_node_events e ON e.node_id=n.id
-      AND e.new_state IN ('accepted','accepted_with_followup')
-    WHERE f.event_name='{SIZE_EVENT}' AND f.retracted_at IS NULL
-      AND f.subject_key GLOB 'plan_node:*'
-      AND json_extract(f.attributes,'$.rater') > ''
-    GROUP BY identity
+    WITH ratings AS (
+        SELECT json_extract(f.attributes,'$.rater') AS identity, e.created_at AS started_at,
+               f.id AS rating_id
+        FROM outcome_events f INDEXED BY idx_measurement_size_rater
+        CROSS JOIN plan_nodes n ON n.id=substr(f.subject_key,11)
+        JOIN plan_node_events e ON e.node_id=n.id
+          AND e.new_state IN ('accepted','accepted_with_followup')
+        WHERE f.event_name='{SIZE_EVENT}' AND f.retracted_at IS NULL
+          AND f.subject_key GLOB 'plan_node:*'
+          AND json_extract(f.attributes,'$.rater') > ''
+    ), ordered AS (
+        SELECT identity, started_at,
+               LAG(identity) OVER (ORDER BY started_at, rating_id) AS prior_identity
+        FROM ratings
+    )
+    SELECT identity, started_at FROM ordered
+    WHERE prior_identity IS NOT NULL AND identity != prior_identity
     ORDER BY started_at, identity
 """
