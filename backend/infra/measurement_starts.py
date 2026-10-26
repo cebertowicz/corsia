@@ -110,25 +110,3 @@ def live_starts_query(groups: Iterable[str]) -> str:
     return "SELECT " + ", ".join(
         f"({source_first_row_sql(_LIVE_SOURCE[group])}) AS {group}" for group in requested
     )
-
-
-MODEL_VERSION_ROWS_SQL = f"""
-    WITH ratings AS (
-        SELECT json_extract(f.attributes,'$.rater') AS identity, e.created_at AS started_at,
-               f.id AS rating_id
-        FROM outcome_events f INDEXED BY idx_measurement_size_rater
-        CROSS JOIN plan_nodes n ON n.id=substr(f.subject_key,11)
-        JOIN plan_node_events e ON e.node_id=n.id
-          AND e.new_state IN ('accepted','accepted_with_followup')
-        WHERE f.event_name='{SIZE_EVENT}' AND f.retracted_at IS NULL
-          AND f.subject_key GLOB 'plan_node:*'
-          AND json_extract(f.attributes,'$.rater') > ''
-    ), ordered AS (
-        SELECT identity, started_at,
-               LAG(identity) OVER (ORDER BY started_at, rating_id) AS prior_identity
-        FROM ratings
-    )
-    SELECT identity, started_at FROM ordered
-    WHERE prior_identity IS NOT NULL AND identity != prior_identity
-    ORDER BY started_at, identity
-"""

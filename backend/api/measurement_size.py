@@ -56,6 +56,15 @@ _PREPARED_ALL_FACTS_SQL = "WITH " + _newest_facts_sql(_PREPARED_ALL_NODES_SQL)
 _PREPARED_NODES_SQL = (_nodes_sql("o.node_id", "measurement_outcome_nodes", "o.root_id")
                        + " WHERE o.period IN (SELECT value FROM json_each(:periods))")
 _PREPARED_FACTS_SQL = "WITH " + _newest_facts_sql(_PREPARED_NODES_SQL)
+# Every accepted task with any size fact, at its first accepted settlement.
+_RATED_SETTLEMENTS_SQL = f"""(
+    SELECT e.node_id,MIN(e.created_at) AS period FROM plan_node_events e JOIN plan_nodes n ON n.id=e.node_id
+    WHERE n.kind='task' AND e.new_state IN ('accepted','accepted_with_followup')
+      AND e.node_id IN (SELECT substr(f.subject_key,{len(SUBJECT_PREFIX) + 1}) FROM outcome_events f
+                        WHERE f.event_name='{SIZE_EVENT}' AND f.subject_key GLOB '{SUBJECT_PREFIX}*')
+    GROUP BY e.node_id)"""
+_RATED_NODES_SQL = _nodes_sql("o.node_id", _RATED_SETTLEMENTS_SQL, "NULL")
+_RATED_FACTS_SQL = "WITH " + _newest_facts_sql(_RATED_NODES_SQL)
 
 
 def _newest_status(facts: list[tuple[str, str | None]], current: tuple[str, int, str]) -> tuple[str, dict | None]:
@@ -109,6 +118,18 @@ def _sized_nodes(db, params: dict[str, Any]) -> list[tuple[str, str, int, str, d
     rows = _classified(db.execute(_PREPARED_ALL_NODES_SQL).fetchall(), db.execute(_PREPARED_ALL_FACTS_SQL).fetchall())
     return [(node_id, period, int(first_try), status, attributes, size_class)
             for node_id, period, first_try, status, attributes, size_class in rows]
+
+
+def counted_raters(db) -> list[tuple[str, str]]:
+    """Each rated accepted task's first settlement instant and the rater of the rating that counts, oldest first.
+
+    The same newest-fact rule the series counts hours by decides, so a superseded, retracted,
+    stale, malformed or conflicting rating names no rater.
+    """
+    rows = _classified(db.execute(_RATED_NODES_SQL).fetchall(), db.execute(_RATED_FACTS_SQL).fetchall())
+    return [(str(period), str(attributes["rater"])) for period, node_id, attributes in sorted(
+        (period, node_id, attributes) for node_id, period, _, _, attributes, _ in rows if attributes
+    )]
 
 
 def outcome_sizes(db, params: dict[str, Any]) -> dict[str, tuple[str | None, int]]:

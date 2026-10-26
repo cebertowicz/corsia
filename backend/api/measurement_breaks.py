@@ -7,8 +7,9 @@ from collections.abc import Iterable
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
+from api.measurement_size import counted_raters
 from core.measurement_scope import Grain
-from infra.measurement_starts import MODEL_VERSION_ROWS_SQL, has_live_start, live_starts_query, source_group
+from infra.measurement_starts import has_live_start, live_starts_query, source_group
 
 
 def local_date(grain: Grain, value: str) -> str:
@@ -59,11 +60,13 @@ def _seeded_starts(db, groups: Iterable[str]) -> dict[str, str | None]:
 
 
 def _model_marks(db, grain: Grain) -> list[dict[str, str]]:
-    """Derive rater changes from current facts; the first rater is the baseline."""
+    """Derive rater changes from the ratings that count; the first rater is the baseline."""
     marks: list[dict[str, str]] = []
     periods: set[str] = set()
-    for _, started_at in db.execute(MODEL_VERSION_ROWS_SQL):
-        if (period := _period(grain, str(started_at))) and period not in periods:
+    prior: str | None = None
+    for started_at, rater in counted_raters(db):
+        changed, prior = prior is not None and rater != prior, rater
+        if changed and (period := _period(grain, started_at)) and period not in periods:
             periods.add(period)
             marks.append({
                 "period": period,

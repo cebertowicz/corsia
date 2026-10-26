@@ -48,12 +48,24 @@ def _accepted(db, node_id: str, when: str) -> None:
         )
 
 
-def _rating(db, node_id: str, rater: str) -> None:
+def _rating(db, node_id: str, rater: str, observed: str = "2026-10-01T12:00:00Z", *, retracted: bool = False) -> None:
+    """Write one well-formed size fact for the node's current snapshot."""
+    from core.size_rating import current_snapshots
+
+    snap = current_snapshots(db, [node_id])[node_id]
+    attributes = {
+        "node_id": node_id, "plan_id": snap.plan_id, "node_revision": snap.node_revision,
+        "evidence_event_id": snap.evidence_event_id, "source_snapshot_sha256": snap.sha256(),
+        "rater_input_sha256": "a" * 64, "method": "offline_proxy", "method_version": "1",
+        "rubric_version": "1.3p", "rubric_sha256": "a" * 64, "rater": rater,
+        "rater_version": "2026-10-01", "basis": snap.basis, "size_class": "M",
+    }
+    key = f"{node_id}-{observed}"
     db.execute(
-        "INSERT INTO outcome_events (id,dedupe_key,event_name,source,provenance,ts,observed_ts,subject_key,attributes) "
-        "VALUES (?,?,?,?,?,?,?,?,?)",
-        (f"{node_id}-rating", f"{node_id}-rating", "measurement.size_rating", "corsia", "agent_recorded",
-         "2026-10-01T12:00:00Z", "2026-10-01T12:00:00Z", f"plan_node:{node_id}", json.dumps({"rater": rater})),
+        "INSERT INTO outcome_events (id,dedupe_key,event_name,source,provenance,ts,observed_ts,subject_key,attributes,retracted_at) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?)",
+        (key, key, "measurement.size_rating", "corsia", "agent_recorded", observed, observed, f"plan_node:{node_id}",
+         '{"retracted":true}' if retracted else json.dumps(attributes), observed if retracted else None),
     )
 
 
@@ -208,6 +220,27 @@ def test_model_marks_deduplicate_changes_inside_one_period(isolated_db) -> None:
     finally:
         db.close()
     assert [mark["period"] for mark in marks] == ["2026-09-14"]
+
+
+def test_model_marks_follow_only_the_rating_that_counts(isolated_db) -> None:
+    db = get_db()
+    try:
+        _thread(db)
+        for node, when in (("one", "2026-09-01T12:00:00Z"), ("two", "2026-09-15T12:00:00Z"), ("three", "2026-09-22T12:00:00Z")):
+            _accepted(db, node, when)
+            _rating(db, node, "rater-a", "2026-10-01T12:00:00Z")
+            _rating(db, node, "rater-b", "2026-10-02T12:00:00Z")
+        _accepted(db, "withdrawn", "2026-09-29T12:00:00Z")
+        _rating(db, "withdrawn", "rater-c", "2026-10-01T12:00:00Z")
+        _rating(db, "withdrawn", "rater-c", "2026-10-02T12:00:00Z", retracted=True)
+        db.commit()
+        marks = [
+            mark for mark in derive_breaks(db, ("estimated_human_hours_per_active_hour",), _grain())["estimated_human_hours_per_active_hour"]
+            if mark["kind"] == "model"
+        ]
+    finally:
+        db.close()
+    assert marks == []
 
 
 def test_seeded_start_skips_its_live_query(isolated_db, monkeypatch) -> None:

@@ -6,6 +6,8 @@ from core.measurement_token_contract import priceable_usage_predicate
 
 
 MEASUREMENT_BREAKS_SCHEMA_SQL = """
+-- period: a UTC instant for kind='start', bucketed in the viewer's zone at read time;
+-- a calendar date for world and source marks.
 CREATE TABLE IF NOT EXISTS measure_breaks (
     period TEXT NOT NULL,
     kind TEXT NOT NULL CHECK(kind IN ('start','world','source')),
