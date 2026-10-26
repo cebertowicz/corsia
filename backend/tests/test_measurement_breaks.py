@@ -258,6 +258,25 @@ def test_seeded_start_skips_its_live_query(isolated_db, monkeypatch) -> None:
     assert breaks["outcomes"][0]["period"] == "2026-09-14"
 
 
+def test_one_recorded_rater_skips_the_history_wide_rating_read(isolated_db, monkeypatch) -> None:
+    from api import measurement_breaks
+
+    db = get_db()
+    try:
+        _thread(db)
+        for node, when in (("baseline", "2026-09-01T12:00:00Z"), ("later", "2026-09-15T12:00:00Z")):
+            _accepted(db, node, when)
+            _rating(db, node, "rater-a")
+        db.commit()
+        plan = " ".join(str(row[-1]) for row in db.execute("EXPLAIN QUERY PLAN " + measurement_breaks._TWO_RATERS_SQL))
+        monkeypatch.setattr(measurement_breaks, "counted_raters", lambda db: (_ for _ in ()).throw(AssertionError("read")))
+        breaks = derive_breaks(db, ("estimated_human_hours_per_active_hour",), _grain())
+    finally:
+        db.close()
+    assert plan.count("USING INDEX idx_measurement_size_rater") == 2
+    assert [item["kind"] for item in breaks["estimated_human_hours_per_active_hour"]] == ["start"]
+
+
 def test_start_only_callers_skip_the_mark_reads(isolated_db) -> None:
     db = get_db()
     statements: list[str] = []

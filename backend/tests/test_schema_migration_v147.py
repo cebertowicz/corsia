@@ -117,3 +117,23 @@ def test_v147_upgrade_skips_starts_when_legacy_source_tables_are_absent() -> Non
         assert _breaks(db) == []
     finally:
         db.close()
+
+
+def test_v147_upgrade_uses_its_frozen_shape_that_matches_today_fresh_install() -> None:
+    import infra.migration_146_to_147_measure_breaks as step
+
+    assert not hasattr(step, "MEASUREMENT_BREAKS_SCHEMA_SQL")
+
+    def shape(conn: sqlite3.Connection) -> list[tuple[str, str, str]]:
+        rows = conn.execute("SELECT type,name,sql FROM sqlite_master WHERE tbl_name='measure_breaks' ORDER BY name")
+        return [(kind, name, " ".join((sql or "").split())) for kind, name, sql in rows]
+
+    fresh = sqlite3.connect(":memory:")
+    db = _legacy_db()
+    try:
+        initialize_schema(fresh)
+        migrate_to_current(db, SCHEMA_VERSION)
+        assert shape(db) == shape(fresh)
+    finally:
+        db.close()
+        fresh.close()

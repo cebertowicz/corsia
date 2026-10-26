@@ -26,6 +26,15 @@ def _period(grain: Grain, value: str | None) -> str | None:
 
 
 COMPARABILITY_UNRESTRICTED = frozenset({"outcomes", "fresh_tokens"})
+# Two index probes: whether two raters were ever recorded. With one, no rater can change,
+# so the request path skips reading every rating in install history.
+_RATINGS = """FROM outcome_events INDEXED BY idx_measurement_size_rater
+    WHERE event_name='measurement.size_rating' AND retracted_at IS NULL
+      AND json_extract(attributes, '$.rater') > ''"""
+_TWO_RATERS_SQL = (
+    f"SELECT (SELECT MIN(json_extract(attributes, '$.rater')) {_RATINGS})"
+    f" < (SELECT MAX(json_extract(attributes, '$.rater')) {_RATINGS})"
+)
 
 
 def _breaks_query(groups: Iterable[str], with_marks: bool) -> str:
@@ -62,6 +71,8 @@ def _seeded_starts(db, groups: Iterable[str]) -> dict[str, str | None]:
 def _model_marks(db, grain: Grain) -> list[dict[str, str]]:
     """Derive rater changes from the ratings that count; the first rater is the baseline."""
     marks: list[dict[str, str]] = []
+    if not db.execute(_TWO_RATERS_SQL).fetchone()[0]:
+        return marks
     periods: set[str] = set()
     prior: str | None = None
     for started_at, rater in counted_raters(db):

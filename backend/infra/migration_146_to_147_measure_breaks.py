@@ -6,8 +6,21 @@ ones change; the runtime read path retains its single definition in measurement_
 
 from __future__ import annotations
 
-from infra.measurement_schema import MEASUREMENT_BREAKS_SCHEMA_SQL
-
+# Frozen at schema v147. This historical step must never inherit a later
+# measure_breaks shape that a later migration then alters again.
+_V147_BREAKS_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS measure_breaks (
+    period TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK(kind IN ('start','world','source')),
+    metric_group TEXT,
+    reason TEXT NOT NULL,
+    PRIMARY KEY(period, kind, metric_group)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_measure_breaks_identity
+    ON measure_breaks(period, kind, COALESCE(metric_group, ''));
+CREATE UNIQUE INDEX IF NOT EXISTS idx_measure_break_starts_group
+    ON measure_breaks(metric_group) WHERE kind='start';
+"""
 _MIGRATION_FIRST_ROW_SQL = {
     "accepted_outcomes": """
         SELECT MIN(e.created_at) FROM plan_node_events e JOIN plan_nodes n ON n.id=e.node_id
@@ -214,7 +227,7 @@ def _record_legacy_marks(conn, starts: dict[str, str]) -> None:
 
 def migrate_146_to_147(conn) -> None:
     """Create immutable Measurement boundaries from this migration's frozen upgrade-time SQL."""
-    conn.executescript(MEASUREMENT_BREAKS_SCHEMA_SQL)
+    conn.executescript(_V147_BREAKS_SCHEMA_SQL)
 
     tables = [str(row[0]) for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")]
     schema = {
