@@ -23,24 +23,25 @@ WEB = "Connect web search"
 
 SESSIONS = ("Claude Code", "Codex")
 GITHUB_OPTIONS = [
-    {"id": "A", "label": "Their own account",
-     "detail": "I open the browser and fill in the sign-up. You type the password and any code."},
-    {"id": "B", "label": "Use mine",
+    {"id": "A", "label": "Make a separate GitHub account",
+     "detail": "I give you the sign-up link and the address. You sign up in your own browser."},
+    {"id": "B", "label": "Use my account",
      "detail": ("Agents use the GitHub sign-in already on this computer, or I sign the GitHub CLI in "
                 "to your account and you approve that sign-in in your browser.")},
     {"id": "C", "label": "Not now", "detail": "Ask me any time."},
 ]
 GITHUB_NO_ACCOUNT_OPTIONS = [
-    {"id": "A", "label": "Make their account",
-     "detail": "I open the browser and fill in the sign-up. You type the password and any code."},
+    {"id": "A", "label": "Make a GitHub account",
+     "detail": "I give you the sign-up link and the address. You sign up in your own browser."},
     {"id": "B", "label": "Not now", "detail": "Ask me any time."},
 ]
 EXPECTED_COMMUNITY = {
     "task_title": GITHUB_TASK,
-    "title": "Use and share community improvements?",
-    "context": ("You can always turn down a change and keep your own version, and nothing private ever goes "
-                "into what's shared."),
-    "tradeoff": "Sharing goes through GitHub, so choosing Use and share leads to one question about your account.",
+    "title": "Use and share improvements with the CORSIA community?",
+    "context": ("CORSIA tests changes to workflows and skills and keeps what works. Your agents can use the "
+                "improvements other people proved, and offer yours. You can always turn down a change and "
+                "keep your own version, and nothing private ever goes into what's shared."),
+    "tradeoff": "Sharing goes through GitHub, so choosing Use and share leads to a GitHub step next.",
     "recommendation": "A",
     "rationale": "You get what others prove, and a proven change helps everyone using CORSIA.",
     "options": [
@@ -63,8 +64,8 @@ def _github(sign_up_with: str) -> dict:
             "Reports to CORSIA are text only and go only with your OK, from whichever you choose."
         ),
         "tradeoff": (
-            "Their own account takes a few minutes in a browser you can watch: I fill in the "
-            f"sign-up with {sign_up_with}, and you type the password and any verification code. "
+            "A separate account takes a few minutes in your own browser: I give you the sign-up link and "
+            f"{sign_up_with} to use, and you type the password and any verification code. "
             "Using yours takes one sign-in, and everything agents post shows your name."
         ),
         "recommendation": "A",
@@ -83,8 +84,8 @@ def _github_no_account(sign_up_with: str) -> dict:
             "your repositories. GitHub allows each person one extra machine account for this."
         ),
         "tradeoff": (
-            "It takes a few minutes in a browser you can watch: I fill in the sign-up with "
-            f"{sign_up_with}, and you type the password and any verification code."
+            "It takes a few minutes in your own browser: I give you the sign-up link and "
+            f"{sign_up_with} to use, and you type the password and any verification code."
         ),
         "recommendation": "A",
         "rationale": "You can always tell what you wrote from what an agent wrote.",
@@ -185,7 +186,7 @@ def test_the_community_decision_comes_first_and_the_github_cards_drop_the_reason
     decisions = [d for d in setup.build_decisions(_facts(True)) if d["task_title"] == GITHUB_TASK]
 
     assert [d["title"] for d in decisions] == [
-        "Use and share community improvements?",
+        "Use and share improvements with the CORSIA community?",
         "How should your agents post on GitHub?", "Make an account for your agents on GitHub?"]
     assert [o["label"] for o in decisions[0]["options"]] == ["Use and share", "Only use", "Neither"]
     assert decisions[0]["recommendation"] == "A"

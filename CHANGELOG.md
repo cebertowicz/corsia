@@ -7,6 +7,7 @@ the later entry describes the current behavior.
 
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here._
 
+- First-chat setup reads more clearly and at your pace: a decision card waits until you've had time to read what came before it, GitHub profiles are read through GitHub's public data, the import ends in one short line, the GitHub step is one message and one choice, and you sign up for the agents' GitHub account in your own browser.
 - CORSIA now keeps its data in `~/Library/Application Support/CORSIA`. An install that took over an earlier one moves its data there once, as soon as the update that brings this finishes or on the next launch, without copying it; if anything still uses the old folder, CORSIA leaves the data where it is and says why.
 - Settings no longer offers an update after it finishes.
 - During an update restart, CORSIA shows a full-window progress screen and offers recovery if it takes longer than expected.

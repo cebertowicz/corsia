@@ -88,10 +88,11 @@ ASK_FOR_ADDRESS = "the address you give me in chat"
 # The community card comes first: whether agents use and offer the community's proven improvements.
 # It sits under the GitHub task; GitHub comes up only on a yes to sharing, as whichever GitHub card fits.
 COMMUNITY = {
-    "title": "Use and share community improvements?",
-    "context": ("You can always turn down a change and keep your own version, and nothing private ever goes "
-                "into what's shared."),
-    "tradeoff": "Sharing goes through GitHub, so choosing Use and share leads to one question about your account.",
+    "title": "Use and share improvements with the CORSIA community?",
+    "context": ("CORSIA tests changes to workflows and skills and keeps what works. Your agents can use the "
+                "improvements other people proved, and offer yours. You can always turn down a change and "
+                "keep your own version, and nothing private ever goes into what's shared."),
+    "tradeoff": "Sharing goes through GitHub, so choosing Use and share leads to a GitHub step next.",
     "options": (
         ("Use and share", "Agents take improvements other people proved and offer the ones proven here."),
         ("Only use", "Agents take proven improvements and share nothing."),
@@ -100,7 +101,8 @@ COMMUNITY = {
     "rationale": "You get what others prove, and a proven change helps everyone using CORSIA.",
 }
 
-# The person has a GitHub account: their agents use it or have their own.
+# Raised unless the person has already said they have no GitHub account: their agents use
+# theirs or have a separate one.
 GITHUB = {
     "title": "How should your agents post on GitHub?",
     "context": (
@@ -109,14 +111,14 @@ GITHUB = {
         "Reports to CORSIA are text only and go only with your OK, from whichever you choose."
     ),
     "tradeoff": (
-        "Their own account takes a few minutes in a browser you can watch: I fill in the sign-up with "
-        "{sign_up_with}, and you type the password and any verification code. Using yours takes one "
-        "sign-in, and everything agents post shows your name."
+        "A separate account takes a few minutes in your own browser: I give you the sign-up link and "
+        "{sign_up_with} to use, and you type the password and any verification code. Using yours takes "
+        "one sign-in, and everything agents post shows your name."
     ),
     "options": (
-        ("Their own account",
-         "I open the browser and fill in the sign-up. You type the password and any code."),
-        ("Use mine",
+        ("Make a separate GitHub account",
+         "I give you the sign-up link and the address. You sign up in your own browser."),
+        ("Use my account",
          "Agents use the GitHub sign-in already on this computer, or I sign the GitHub CLI in to "
          "your account and you approve that sign-in in your browser."),
         ("Not now", "Ask me any time."),
@@ -132,12 +134,12 @@ GITHUB_NO_ACCOUNT = {
         "repositories. GitHub allows each person one extra machine account for this."
     ),
     "tradeoff": (
-        "It takes a few minutes in a browser you can watch: I fill in the sign-up with "
-        "{sign_up_with}, and you type the password and any verification code."
+        "It takes a few minutes in your own browser: I give you the sign-up link and "
+        "{sign_up_with} to use, and you type the password and any verification code."
     ),
     "options": (
-        ("Make their account",
-         "I open the browser and fill in the sign-up. You type the password and any code."),
+        ("Make a GitHub account",
+         "I give you the sign-up link and the address. You sign up in your own browser."),
         ("Not now", "Ask me any time."),
     ),
     "rationale": "You can always tell what you wrote from what an agent wrote.",

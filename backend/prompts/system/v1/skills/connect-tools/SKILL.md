@@ -10,6 +10,7 @@ description: Use when work needs a tool, service or account you can't reach yet,
 Settle who it is for, what it must read, change and hear about, when and where it happens, and why. That decides how to connect.
 
 - A one-off lookup connects nothing.
+- Never offer or add a connection you expect the provider to refuse because it lets only its own or approved partner clients connect (Figma's connected app and Slack's, for example). Say so in one plain line, `[App] doesn't let CORSIA connect yet. It's on my list.`, and move on.
 - A source you notice mid-work is offered once. After a decline, offer it again only if what the work needs changes, and note the decline with that work so other agents see it.
 
 ## Reuse first

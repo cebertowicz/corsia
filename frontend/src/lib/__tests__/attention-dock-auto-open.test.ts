@@ -666,3 +666,84 @@ describe("the judge", () => {
     ).toBe("none");
   });
 });
+
+describe("reading time before a decision opens", () => {
+  const idle = { expandedId: null, suppressed: false, busy: false } as const;
+  const ms = (n: number) => Date.parse(at(n));
+  const words = (count: number) => Array.from({ length: count }, () => "word").join(" ");
+  const say = (n: number, count: number, role = "assistant") => ({
+    thread_id: VIEWED, role, content: words(count), created_at: at(n),
+  });
+
+  it("waits for the text just before it to be read, then opens", () => {
+    noteLoad([], VIEWED);
+    const items = [from("d1", 10)];
+    const messages = [say(0, 100)];
+    const held = judgeAutoOpen(items, { ...idle, viewedThreadId: VIEWED, messages, now: ms(10) });
+    expect(held).toEqual({ state: "wait", retryInMs: 14_000 });
+    expect(judgeAutoOpen(items, { ...idle, viewedThreadId: VIEWED, messages, now: ms(24) }).state).toBe("open");
+  });
+
+  it("adds nothing when the text took longer than that to arrive", () => {
+    noteLoad([], VIEWED);
+    const verdict = judgeAutoOpen([from("d1", 60)], {
+      ...idle, viewedThreadId: VIEWED, messages: [say(0, 100)], now: ms(60),
+    });
+    expect(verdict.state).toBe("open");
+  });
+
+  it("reads consecutive messages one after another", () => {
+    noteLoad([], VIEWED);
+    const verdict = judgeAutoOpen([from("d1", 5)], {
+      ...idle, viewedThreadId: VIEWED, messages: [say(0, 100), say(3, 50)], now: ms(5),
+    });
+    // 100 words end at 24 s, then 50 more words take 12 s.
+    expect(verdict).toEqual({ state: "wait", retryInMs: 31_000 });
+  });
+
+  it("never holds longer than 45 s after the decision was raised", () => {
+    noteLoad([], VIEWED);
+    const verdict = judgeAutoOpen([from("d1", 10)], {
+      ...idle, viewedThreadId: VIEWED, messages: [say(0, 1000)], now: ms(10),
+    });
+    expect(verdict).toEqual({ state: "wait", retryInMs: 45_000 });
+  });
+
+  it("counts only what came after the person's last message", () => {
+    noteLoad([], VIEWED);
+    const verdict = judgeAutoOpen([from("d1", 10)], {
+      ...idle,
+      viewedThreadId: VIEWED,
+      messages: [say(0, 400), say(1, 3, "user"), say(2, 5)],
+      now: ms(10),
+    });
+    expect(verdict.state).toBe("open");
+  });
+
+  it("ignores another thread's messages and ones that landed after the decision", () => {
+    noteLoad([], VIEWED);
+    const verdict = judgeAutoOpen([from("d1", 10)], {
+      ...idle,
+      viewedThreadId: VIEWED,
+      messages: [{ ...say(0, 400), thread_id: "elsewhere" }, say(20, 400)],
+      now: ms(10),
+    });
+    expect(verdict.state).toBe("open");
+  });
+
+  it("holds the chip in the dock, which shows the bar meanwhile, until the text could be read", async () => {
+    const { messages } = await import("$lib/stores/threads");
+    messages.set([{ id: "m1", ...say(0, 100) }] as never);
+    await mountDock();
+    await load();
+    await load(from("d1", 0));
+
+    expect(chips()).toBe(0);
+    expect(host.querySelector(".dock-bar")).toBeTruthy();
+    await advance(23_000);
+    expect(chips()).toBe(0);
+    await advance(2_000);
+    expect(chips()).toBe(1);
+    messages.set([]);
+  });
+});

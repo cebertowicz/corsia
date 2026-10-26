@@ -345,21 +345,18 @@ def test_first_run_raises_the_card_first_and_the_reference_carries_appendix_a():
         "I looked, and they don’t hold much about you, so I kept nothing.",
         "Ask me any time to bring things over from them.",
         "I couldn’t read them this time, so I kept nothing. Ask me any time to try again.",
-        "a CORSIA skill already has that name. Rename it in [tool] and ask me again.",
-        "it has a key or password in it, so I left it. Remove that and ask me again.",
-        # C9: every held-back or failed skill says why and what to do next.
-        "too big to bring over. Make it smaller in [tool] and ask me again.",
-        # C11: an unreadable skill names its one cause; C3: "symbolic link", not "link".
-        "`link`: `it has a symbolic link in it. Replace the link with the file itself in [tool]",
-        "`not_text`: `it has a file that isn’t text.",
-        "`no_skill_md`: `it has no SKILL.md. Add one in [tool] and ask me again.`",
-        "`bad_header`: `the header at the top of its SKILL.md has a formatting error.",
-        "`bad_name`: `its name can’t be used as a skill name. Start it with a letter or number,",
-        "`no_description`: `its SKILL.md has no description. Add one in [tool] and ask me again.`",
-        "I couldn’t read it this time. Ask me again to try once more.",
-        "is different from the version I showed you. Ask me again to see the current version.",
-        "so I left it out. Ask me to try again, or to write a CORSIA skill that does the same.",
+        # A skill that can't come over is named once with its reason and never asks the person to act.
+        "`I left out [name] ([reason]), [name] ([reason]).`",
+        "`name_reserved`: `CORSIA already has a skill with that name`",
+        "`has_secret`: `it has a key or password in it`",
+        "`too_large`: `too big to bring over`",
+        "`unreadable`, whatever its `reason` or none: `I couldn’t read it`",
+        "`it changed since I showed you`",
+        "`I couldn’t add it`",
         "`sha256`",
     ):
         assert line in guide
+    for asks_the_person in ("ask me again", "Ask me again", "Make it smaller", "Rename it", "Remove that"):
+        assert asks_the_person not in guide.split("## Their answer", 1)[0].split("After the message,", 1)[1]
+        assert asks_the_person not in guide.split("**Skills:**", 1)[1].split("- **Connected apps:**", 1)[0]
     assert "`references/agent-import.md`" in (skill / "SKILL.md").read_text(encoding="utf-8")

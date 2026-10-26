@@ -55,15 +55,55 @@ export function noteLoad(
   };
 }
 
+/** About 250 words a minute: the pace a person takes to read a message through. */
+const READ_MS_PER_WORD = 240;
+/** However much text came before, a decision never waits longer than this after it was raised. */
+const MAX_READ_HOLD_MS = 45_000;
+
+export interface ReadableMessage {
+  thread_id: string;
+  role: string;
+  content: string;
+  created_at: string;
+}
+
+/**
+ * When the person can be expected to have finished reading what the agent said
+ * just before a decision was raised: the assistant messages since their last
+ * one, read one after another, each starting when it landed or when the
+ * previous one is done. A slow model that streamed for longer than the text
+ * takes to read has already used up the time, so nothing is added for it.
+ */
+export function readingEndsAt(
+  messages: ReadableMessage[],
+  threadId: string,
+  raisedAtMs: number,
+): number {
+  const unread: { at: number; words: number }[] = [];
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const message = messages[i];
+    if (message.thread_id !== threadId) continue;
+    if (message.role === "user") break;
+    const at = Date.parse(message.created_at);
+    if (message.role !== "assistant" || Number.isNaN(at) || at > raisedAtMs) continue;
+    unread.unshift({ at, words: message.content.split(/\s+/).filter(Boolean).length });
+  }
+  let done = 0;
+  for (const { at, words } of unread) done = Math.max(done, at) + words * READ_MS_PER_WORD;
+  return Math.min(done, raisedAtMs + MAX_READ_HOLD_MS);
+}
+
 export type AutoOpenVerdict =
-  | { state: "none" | "wait" | "dropped" }
+  | { state: "none" | "dropped" }
+  | { state: "wait"; retryInMs?: number }
   | { state: "open"; item: AttentionQueueItem };
 
 /**
  * Judges the oldest decision raised in the viewed thread after the anchor.
  * Judging one, opened or dropped, moves the anchor to it, so each decision is
  * offered once; a dropped one stays in the dock as today. While the person is
- * busy or the slot is suppressed the anchor stays, so the next judge retries.
+ * busy, the slot is suppressed or the text before it is still being read, the
+ * anchor stays, so the next judge retries.
  */
 export function judgeAutoOpen(
   items: AttentionQueueItem[],
@@ -72,6 +112,9 @@ export function judgeAutoOpen(
     expandedId: string | null;
     suppressed: boolean;
     busy: boolean;
+    /** The viewed thread's transcript, so a decision waits for the text before it to be read. */
+    messages?: ReadableMessage[];
+    now?: number;
   },
 ): AutoOpenVerdict {
   if (!view || view.threadId !== context.viewedThreadId) return { state: "none" };
@@ -83,6 +126,12 @@ export function judgeAutoOpen(
   if (!candidate) return { state: "none" };
   if (context.expandedId === null && (context.suppressed || context.busy)) {
     return { state: "wait" };
+  }
+  if (context.expandedId === null && context.messages) {
+    const readyIn =
+      readingEndsAt(context.messages, view.threadId, raisedAt(candidate)!) -
+      (context.now ?? Date.now());
+    if (readyIn > 0) return { state: "wait", retryInMs: readyIn };
   }
   view.anchor = raisedAt(candidate);
   return context.expandedId === null
