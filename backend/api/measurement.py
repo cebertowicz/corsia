@@ -165,7 +165,7 @@ def _series_read(requested: list[str], project: str, agent: str, page_grain: Gra
         families = {REGISTRY[metric].family for metric in requested}
         coverage = presence_coverage(db, user_id, page_grain.zone)
         first_limit_period = first_recorded_period(db, params) if "limits" in families else None
-        breaks = derive_breaks(db, requested, page_grain)
+        breaks = derive_breaks(db, requested, page_grain, periods=page_grain.periods)
         prepare_outcome_periods(db, params)
         family_rows = {family: (size_family(db, params) if family == "size" else
                                 [{"period": period, "hits": hits} for period, hits in limits_by_period(db, params).items()] if family == "limits" else
@@ -217,7 +217,7 @@ async def series_payload(requested: list[str], project: str, agent: str, page_gr
         if family == "size":
             rows.extend(size_rows(metric, REGISTRY[metric].minimum_n, REGISTRY[metric].method_version, drawn, family_rows[family],
                                   lambda name, period: period_comparable(period, breaks[name]),
-                                  lambda name: comparability_break_kind(breaks[name]), rate_measured,
+                                  lambda name, period: comparability_break_kind(period, breaks[name]), rate_measured,
                                   dates={"data_start": rate_period, "comparability_before": comparability_start(breaks[metric])}))
         elif family == "tokens":
             by_period = {row["period"]: row for row in family_rows[family]}
@@ -263,7 +263,8 @@ async def measurement_index(project: str = Query(...), agent: str = Query(...),
                 FROM llm_usage WHERE thread_id IN (SELECT id FROM scope_threads)
             """, params).fetchone()
             total = int(cost["n"] or 0)
-            breaks = derive_breaks(db, REGISTRY, resolve_grain("days", zone))
+            index_grain = resolve_grain("days", zone)
+            breaks = derive_breaks(db, REGISTRY, index_grain, periods=index_grain.periods)
             return selected_scope.response(), {"known_cost_usd": float(cost["known_cost_usd"] or 0),
                                                "unknown_cost_share": (int(cost["unknown_cost_rows"] or 0) / total if total else 0)}, presence_coverage(db, user["id"], zone), breaks
         finally:
@@ -336,7 +337,7 @@ async def agents_payload(project: str, agent: str, page_grain: Grain, sort: str,
             params = {**selected_scope.params(user["id"]), "grain": page_grain}
             first_presence = presence_coverage(db, user["id"], page_grain.zone).start_period(page_grain)
             # One prepared window covers every period the grain draws, so nothing reads live plans.
-            breaks = derive_breaks(db, TABLE_METRICS, page_grain)
+            breaks = derive_breaks(db, TABLE_METRICS, page_grain, periods=page_grain.periods)
             prepare_outcome_periods(db, params, roots=True)
             rows, findings, summaries, agent_count, overall = build_agents(
                 db, params, REGISTRY, metric, sort, page_grain,

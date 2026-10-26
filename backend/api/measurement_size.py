@@ -56,15 +56,25 @@ _PREPARED_ALL_FACTS_SQL = "WITH " + _newest_facts_sql(_PREPARED_ALL_NODES_SQL)
 _PREPARED_NODES_SQL = (_nodes_sql("o.node_id", "measurement_outcome_nodes", "o.root_id")
                        + " WHERE o.period IN (SELECT value FROM json_each(:periods))")
 _PREPARED_FACTS_SQL = "WITH " + _newest_facts_sql(_PREPARED_NODES_SQL)
-# Every accepted task with any size fact, at its first accepted settlement.
-_RATED_SETTLEMENTS_SQL = f"""(
-    SELECT e.node_id,MIN(e.created_at) AS period FROM plan_node_events e JOIN plan_nodes n ON n.id=e.node_id
-    WHERE n.kind='task' AND e.new_state IN ('accepted','accepted_with_followup')
-      AND e.node_id IN (SELECT substr(f.subject_key,{len(SUBJECT_PREFIX) + 1}) FROM outcome_events f
-                        WHERE f.event_name='{SIZE_EVENT}' AND f.subject_key GLOB '{SUBJECT_PREFIX}*')
-    GROUP BY e.node_id)"""
-_RATED_NODES_SQL = _nodes_sql("o.node_id", _RATED_SETTLEMENTS_SQL, "NULL")
-_RATED_FACTS_SQL = "WITH " + _newest_facts_sql(_RATED_NODES_SQL)
+# Every accepted task with any size fact, at its first accepted settlement. Bounds limit a
+# Measurement page's rater scan to its display range (or one earlier display period).
+def _rated_nodes_sql() -> str:
+    settlements = f"""(
+        SELECT e.node_id,MIN(e.created_at) AS period
+        FROM plan_node_events e JOIN plan_nodes n ON n.id=e.node_id
+        WHERE n.kind='task' AND e.new_state IN ('accepted','accepted_with_followup')
+          AND replace(substr(e.created_at,1,16),'T',' ') >= :rater_from
+          AND replace(substr(e.created_at,1,16),'T',' ') < :rater_to
+          AND NOT EXISTS (
+            SELECT 1 FROM plan_node_events earlier
+            WHERE earlier.node_id=e.node_id
+              AND earlier.new_state IN ('accepted','accepted_with_followup')
+              AND earlier.created_at < e.created_at
+          )
+          AND e.node_id IN (SELECT substr(f.subject_key,{len(SUBJECT_PREFIX) + 1}) FROM outcome_events f
+                            WHERE f.event_name='{SIZE_EVENT}' AND f.subject_key GLOB '{SUBJECT_PREFIX}*')
+        GROUP BY e.node_id)"""
+    return _nodes_sql("o.node_id", settlements, "NULL")
 
 
 def _newest_status(facts: list[tuple[str, str | None]], current: tuple[str, int, str]) -> tuple[str, dict | None]:
@@ -120,16 +130,38 @@ def _sized_nodes(db, params: dict[str, Any]) -> list[tuple[str, str, int, str, d
             for node_id, period, first_try, status, attributes, size_class in rows]
 
 
-def counted_raters(db) -> list[tuple[str, str]]:
-    """Each rated accepted task's first settlement instant and the rater of the rating that counts, oldest first.
+def latest_rated_settlement(db, *, before_ts: str) -> str | None:
+    """Find one latest candidate settlement before a display range; fact usability stays with ``counted_raters``."""
+    row = db.execute(f"""
+        SELECT e.created_at FROM plan_node_events e JOIN plan_nodes n ON n.id=e.node_id
+        WHERE n.kind='task' AND e.new_state IN ('accepted','accepted_with_followup')
+          AND replace(substr(e.created_at,1,16),'T',' ') < :rater_before
+          AND NOT EXISTS (
+            SELECT 1 FROM plan_node_events earlier
+            WHERE earlier.node_id=e.node_id
+              AND earlier.new_state IN ('accepted','accepted_with_followup')
+              AND earlier.created_at < e.created_at
+          )
+          AND EXISTS (SELECT 1 FROM outcome_events f
+                      WHERE f.event_name='{SIZE_EVENT}' AND f.subject_key='{SUBJECT_PREFIX}'||e.node_id)
+        ORDER BY replace(substr(e.created_at,1,16),'T',' ') DESC LIMIT 1
+    """, {"rater_before": before_ts}).fetchone()
+    return str(row[0]) if row else None
 
-    The same newest-fact rule the series counts hours by decides, so a superseded, retracted,
-    stale, malformed or conflicting rating names no rater.
+
+def counted_raters(db, *, from_ts: str, to_ts: str) -> list[tuple[str, str]]:
+    """Each usable rated task's first settlement and rater, restricted to one UTC display range.
+
+    The shared node/fact readers and ``_classified`` keep this consumer on the one newest-fact and
+    usability rule used by the size series. Callers compose larger ranges from these bounded reads.
     """
-    rows = _classified(db.execute(_RATED_NODES_SQL).fetchall(), db.execute(_RATED_FACTS_SQL).fetchall())
-    return [(str(period), str(attributes["rater"])) for period, node_id, attributes in sorted(
-        (period, node_id, attributes) for node_id, period, _, _, attributes, _ in rows if attributes
-    )]
+    nodes_sql = _rated_nodes_sql()
+    params = {"rater_from": from_ts, "rater_to": to_ts}
+    rows = _classified(
+        db.execute(nodes_sql, params).fetchall(),
+        db.execute("WITH " + _newest_facts_sql(nodes_sql), params).fetchall(),
+    )
+    return [(str(period), str(attributes["rater"])) for node_id, period, _, _, attributes, _ in rows if attributes]
 
 
 def outcome_sizes(db, params: dict[str, Any]) -> dict[str, tuple[str | None, int]]:
@@ -233,7 +265,7 @@ def size_rows(metric: str, minimum_n: int, method_version: int, spine: list[str]
         # Before the minimum is applied: still a figure when the ratings are few, never when there are none.
         raw_value = source["estimated_hours"] / active_hours if rate_reason in (None, "below_minimum") else None
         n = 0 if rate_reason == "before_data_start" else sized
-        kind = comparability_kind(metric) if not comparable(metric, period) else None
+        kind = comparability_kind(metric, period) if not comparable(metric, period) else None
         reason = "judging_model_changed" if kind == "model" else "outcome_definition_changed" if kind else None
         rows.append({
             "period": period, "series": metric, "method_version": method_version, "value": value, "raw_value": raw_value, "n": n, "proxy": True,
