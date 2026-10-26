@@ -26,6 +26,7 @@ from connections.account_state import CONSENT_CANCELLED, PROVIDER_UNAVAILABLE, e
 from connections.connected_accounts import Actor
 from connections.google import client
 from connections.google.client import STATUS_CONNECTED, TIMEOUT_SECONDS, TOKEN_URL, GoogleError, GoogleRequestFailed
+from connections.sign_in_notice import notify_starting_agent
 from infra import key_store
 from infra.db_async import run_in_db
 from infra.default_port import DEFAULT_BACKEND_PORT
@@ -146,7 +147,6 @@ def _check_reconnect(account_id: str, db) -> None:  # type: ignore[no-untyped-de
         raise GoogleSignInError(STILL_CONNECTED.format(address=account["address"]))
 
 
-
 def _begin(
     client_file: object, account_id: str | None, actor: Actor, adding_thread_id: str | None,
     reach: AppReach | None,
@@ -196,7 +196,8 @@ async def start_sign_in(
 
     With ``account_id`` it signs that row in again. Without it, it adds an
     account whose reach comes from ``adding_thread_id``'s scope or, for a
-    person's session, the given ``reach``.
+    person's session, the given ``reach``. An agent's ``adding_thread_id`` is
+    also the thread woken with the outcome, for an add and a sign in again.
     """
     url, pending_account_id = await run_in_db(_begin, client_file, account_id, actor, adding_thread_id, reach)
     emit_lifecycle_event("connect_started", pending_account_id, "google")
@@ -314,6 +315,10 @@ def _failure_cause(error: GoogleError) -> str:
     return CONSENT_CANCELLED if isinstance(error, GoogleSignInError) else PROVIDER_UNAVAILABLE
 
 
+async def _tell_agent(pending: _Pending, **result: str | None) -> None:
+    await notify_starting_agent(pending.adding_thread_id, pending.state, "google", pending.account_id, **result)
+
+
 async def complete_sign_in(code: object, state: object) -> str:
     """Finish one pending sign-in from Google's redirect; returns the connected address."""
     pending = _take_pending(state)
@@ -350,12 +355,16 @@ async def complete_sign_in(code: object, state: object) -> str:
 
         schedule_account(pending.account_id)
     except GoogleError as error:
-        emit_lifecycle_event("connect_failed", pending.account_id, "google", cause=_failure_cause(error))
+        cause = _failure_cause(error)
+        emit_lifecycle_event("connect_failed", pending.account_id, "google", cause=cause)
+        await _tell_agent(pending, cause=cause, message=str(error))
         raise
     except Exception:
         emit_lifecycle_event("connect_failed", pending.account_id, "google", cause=PROVIDER_UNAVAILABLE)
+        await _tell_agent(pending, cause=PROVIDER_UNAVAILABLE)
         raise
     emit_lifecycle_event("connect_succeeded", pending.account_id, "google")
+    await _tell_agent(pending, address=email)
     return email
 
 

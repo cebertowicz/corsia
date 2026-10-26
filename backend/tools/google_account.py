@@ -147,7 +147,10 @@ class GoogleConnectTool(Tool):
             return "Error: Couldn't start the Google sign-in."
         return json.dumps({
             "url": url, "account_id": signing_in,
-            "next": "Give the person this link to open and sign in, then call google_status.",
+            "next": (
+                "Give the person this link to open and sign in. CORSIA wakes you with the result when they "
+                "finish, so you needn't ask them to tell you; then call google_status."
+            ),
         })
 
 

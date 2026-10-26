@@ -31,6 +31,7 @@ from connections.microsoft.errors import (
     DIFFERENT_ACCOUNT, INPUT_REFUSAL, INTERNAL, SIGN_IN_BUSY, MicrosoftError, exchange_error_cause,
     message, redirect_codes_cause,
 )
+from connections.sign_in_notice import notify_starting_agent
 from infra.database import get_db
 from infra.db_async import run_in_db
 from tools.mcp_oauth_listener import CallbackListener, allowed_hosts
@@ -203,6 +204,10 @@ async def _record_failure(pending: _Pending, error: MicrosoftError) -> None:
         await run_in_db(mark_sign_in_failed, pending.account_id, error.state_cause)
 
 
+async def _tell_agent(pending: _Pending, **result: str | None) -> None:
+    await notify_starting_agent(pending.adding_thread_id, pending.state, MICROSOFT_PROVIDER, pending.account_id, **result)
+
+
 async def start_sign_in(
     client_id: object, kind: object, tenant_id: object = None, *, actor: Actor, account_id: str | None = None,
     adding_thread_id: str | None = None, reach: AppReach | None = None,
@@ -213,6 +218,7 @@ async def start_sign_in(
     ``client_id``, ``kind`` and ``tenant_id`` are then ignored, and ``adding_thread_id``
     (None for the person) must be able to see the row. Without it, it adds an account
     whose reach comes from ``adding_thread_id``'s scope or, for the person, ``reach``.
+    An agent's ``adding_thread_id`` is also the thread woken with the outcome.
     """
     if account_id is not None:
         client_id, kind, tenant_id = await run_in_db(account_store.saved_registration, account_id, adding_thread_id)
@@ -230,10 +236,11 @@ async def start_sign_in(
             if "error" in query:
                 _take_pending(given)
                 raise _redirect_error(query)
-            await _complete_sign_in(query.get("code"), given)
+            address = await _complete_sign_in(query.get("code"), given)
         except MicrosoftError as exc:
             await _record_failure(pending, exc)
             emit_lifecycle_event("connect_failed", pending.account_id, MICROSOFT_PROVIDER, cause=exc.cause)
+            await _tell_agent(pending, cause=exc.cause, message=exc.message)
             return 400, exc.browser_message, True, None
         except Exception as exc:
             # A fault in CORSIA, not Microsoft: logged by type only, since its text may carry account data.
@@ -241,10 +248,12 @@ async def start_sign_in(
             internal = MicrosoftError(INTERNAL)
             await _record_failure(pending, internal)
             emit_lifecycle_event("connect_failed", pending.account_id, MICROSOFT_PROVIDER, cause=PROVIDER_UNAVAILABLE)
+            await _tell_agent(pending, cause=PROVIDER_UNAVAILABLE, message=message(PROVIDER_UNAVAILABLE))
             return 500, internal.browser_message, True, None
         if pending.adding:
             _clear_add_failure(_adder(pending))
         emit_lifecycle_event("connect_succeeded", pending.account_id, MICROSOFT_PROVIDER)
+        await _tell_agent(pending, address=address)
         log.info("Microsoft account %s signed in", pending.account_id)
         return 200, CONNECTED_PAGE, True, None
 

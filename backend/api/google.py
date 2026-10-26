@@ -97,14 +97,14 @@ async def connect(request: Request, user: dict = Depends(require_user)) -> dict[
     person = is_person_session(user)
     if account_id is not None and person and not await run_in_db(_visible, account_id, None):
         raise HTTPException(404, oauth.UNKNOWN_ACCOUNT)
+    adding_thread_id = None
     if account_id is not None and not person:
-        thread_id = await run_in_db(
+        adding_thread_id = await run_in_db(
             _agent_thread_id, user,
             "Google account sign-in from an agent needs its current thread context; call this through corsia_api from that thread.",
         )
-        if not await run_in_db(_visible, account_id, thread_id):
+        if not await run_in_db(_visible, account_id, adding_thread_id):
             raise HTTPException(400, oauth.UNKNOWN_ACCOUNT)  # Exactly what an unknown id gets below.
-    adding_thread_id = None
     if account_id is None and not person:
         adding_thread_id = await run_in_db(
             _agent_thread_id, user,
