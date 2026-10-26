@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import Any
 
 from infra.packed_rows import fetch_all
 from infra.turn_usage_remainder import pending_measurement_counts
-from plans import service, usage_pricing
+from plans import service, usage_cost
 from plans.node_cost import settle_known, sum_known
 
 #: The release reasons that mean a try ended in failure. The one definition of
@@ -149,12 +150,12 @@ def _load(commitment_ids: list[str], *, db) -> dict[str, Any]:
     # names an attempt, so a commitment never selected is owed none and a plan
     # of idle work costs no read.
     pending = pending_measurement_counts(db, commitment_ids) if attempts else {}
-    # One row per commitment and Turn, not per call; a plan write reads no cost (#2489).
-    usage = usage_pricing.priced_usage(
-        db, ("plan_commitment_id", "turn_id"), commitment_ids,
-        lambda sql, ids: fetch_all(
-            db, sql.format(marks=",".join("?" for _ in ids)), tuple(ids),
-        ),
+    # One row per commitment and Turn, not per call.
+    usage = fetch_all(
+        db, f"""SELECT plan_commitment_id,turn_id,{usage_cost.USAGE_TOKENS} FROM llm_usage
+            WHERE plan_commitment_id IN ({marks})
+            GROUP BY plan_commitment_id,turn_id""",
+        params,
     )
     effort = {
         str(row["commitment_id"]): int(row["count"])
@@ -203,8 +204,13 @@ def project_many(
     *,
     db=None,
     now: datetime | None = None,
+    dollars: Mapping[str, dict] | None = None,
 ) -> dict[str, dict[str, Any]]:
-    """Aggregate many commitments with a bounded query count."""
+    """Aggregate many commitments with a bounded query count.
+
+    ``dollars`` is each commitment's ``model_cost_usd`` when the caller already priced the
+    ledger (``node_cost.project_with_commitments``); None prices it here.
+    """
 
     ids = sorted({str(value) for value in commitment_ids})
     if not ids:
@@ -212,10 +218,15 @@ def project_many(
     clock = now or datetime.now(timezone.utc)
     with service._connection(db) as connection:
         loaded = _load(ids, db=connection)
+        if dollars is None:
+            dollars = usage_cost.usage_dollars(
+                connection, {"plan_commitment_id": list(loaded["usage"])},
+            )["plan_commitment_id"]
         result = {}
         for commitment_id in ids:
             nodes = loaded["nodes"].get(commitment_id, [])
             usage = loaded["usage"].get(commitment_id, [])
+            priced = dollars.get(commitment_id, {})
             turns = loaded["turns"].get(commitment_id, [])
             attempts = loaded["attempts"].get(commitment_id, [])
             unmeasured = _unmeasured_rows(
@@ -232,11 +243,8 @@ def project_many(
                     ),
                 },
                 "model_cost_usd": {
-                    "known": sum_known(row["cost"] for row in usage),
-                    "unknown_rows": (
-                        sum(row["unknown_cost"] for row in usage)
-                        + unmeasured
-                    ),
+                    "known": priced.get("known"),
+                    "unknown_rows": priced.get("unknown_rows", 0) + unmeasured,
                 },
                 # Calls that began but could not be recorded: a defect, so no
                 # total presented here is silently short.

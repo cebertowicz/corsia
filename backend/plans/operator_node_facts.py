@@ -12,7 +12,7 @@ from datetime import datetime
 
 from infra.packed_rows import fetch_all
 from plans import (
-    closure, commitment_cost, node_cost, node_cost_scoped, node_states, review_evidence, usage_pricing,
+    closure, commitment_cost, node_cost, node_cost_scoped, node_states, review_evidence, usage_cost,
 )
 from plans.commitment_cost import FAILED_RELEASES
 
@@ -46,6 +46,8 @@ def project_costs(
     cost alone and rolls up, with its commitment and initiative totals, only the nodes it
     names; every other node's rolled, commitment and initiative figures are None.
     """
+    if wanted and detail_ids is not None:
+        return _scoped_costs(node_plans, db=db, now=now, detail_ids=detail_ids)
     if not wanted:
         nodes: dict[str, dict] = defaultdict(dict)
         for node, plan in node_plans:
@@ -54,23 +56,24 @@ def project_costs(
             {str(node["commitment_id"]): None for node, _plan in node_plans}, dict(nodes),
             {str(node["id"]): None for node, _plan in node_plans},
         )
-    # The commitment and node totals both price the usage ledger: one read builds
-    # Measurement's identity resolver and endpoint listings once for both.
-    with usage_pricing.one_read(db):
-        if detail_ids is not None:
-            return _scoped_costs(node_plans, db=db, now=now, detail_ids=detail_ids)
-        costs = commitment_cost.project_many(
-            {str(node["commitment_id"]) for node, _plan in node_plans}, db=db, now=now,
-        )
-        node_costs, initiatives = node_cost.project_with_initiatives(
-            {str(plan["id"]) for _node, plan in node_plans}, db=db, now=now,
-        )
-        return costs, node_costs, initiatives
+    commitment_ids = {str(node["commitment_id"]) for node, _plan in node_plans}
+    # One priced ledger read serves both: the node read passes the commitments' dollars on.
+    node_costs, initiatives, dollars = node_cost.project_with_commitments(
+        {str(plan["id"]) for _node, plan in node_plans}, commitment_ids, db=db, now=now,
+    )
+    costs = commitment_cost.project_many(commitment_ids, db=db, now=now, dollars=dollars)
+    return costs, node_costs, initiatives
 
 
 def _scoped_costs(node_plans, *, db, now: datetime, detail_ids: frozenset[str]) -> tuple[dict, dict, dict]:
     listed = [str(node["id"]) for node, _plan in node_plans]
-    known = node_cost_scoped.own_timed(listed, db=db, now=now)
+    roots = [
+        str(node["id"]) for node, _plan in node_plans
+        if str(node["id"]) in detail_ids and str(node["commitment_id"]) == str(node["id"])
+    ]
+    # One priced ledger read serves the listed nodes and the commitments they root.
+    dollars = usage_cost.usage_dollars(db, {"plan_node_id": listed, "plan_commitment_id": roots})
+    known = node_cost_scoped.own_timed(listed, db=db, now=now, dollars=dollars["plan_node_id"])
     own = node_cost_scoped.own_listed(listed, db=db, now=now, known=known)
     wanted = [node_id for node_id in listed if node_id in detail_ids]
     rolled = node_cost_scoped.rolled_many(wanted, db=db, now=now, known=known)
@@ -78,11 +81,10 @@ def _scoped_costs(node_plans, *, db, now: datetime, detail_ids: frozenset[str]) 
     for node, plan in node_plans:
         node_id = str(node["id"])
         nodes[str(plan["id"])][node_id] = {"own": own[node_id], "rolled": rolled.get(node_id)}
-    roots = [
-        str(node["id"]) for node, _plan in node_plans
-        if str(node["id"]) in detail_ids and str(node["commitment_id"]) == str(node["id"])
-    ]
-    commitments = commitment_cost.project_many(roots, db=db, now=now) if roots else {}
+    commitments = (
+        commitment_cost.project_many(roots, db=db, now=now, dollars=dollars["plan_commitment_id"])
+        if roots else {}
+    )
     initiatives: dict[str, dict | None] = {str(node["id"]): None for node, _plan in node_plans}
     initiatives.update(node_cost_scoped.initiatives_of(wanted, db=db, now=now, known=known))
     return commitments, dict(nodes), initiatives

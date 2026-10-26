@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Mapping
 from datetime import datetime, timezone
 
 from infra.packed_rows import fetch_all
@@ -14,11 +15,16 @@ _CHUNK = 400
 Known = tuple[dict[str, dict], dict[str, node_time.Span]]
 
 
-def own_timed(node_ids, *, db, now: datetime | None = None) -> Known:
-    """These nodes' own cost facts and time intervals, unsettled: what a later roll reuses."""
+def own_timed(
+    node_ids, *, db, now: datetime | None = None, dollars: Mapping[str, dict] | None = None,
+) -> Known:
+    """These nodes' own cost facts and time intervals, unsettled: what a later roll reuses.
+
+    ``dollars`` is these nodes' ``usage_cost.usage_dollars`` when the caller already priced them.
+    """
     ids = sorted({str(value) for value in node_ids})
     with service._connection(db) as connection:
-        return node_cost.own_many_timed(ids, db=connection, now=now)
+        return node_cost.own_many_timed(ids, db=connection, now=now, dollars=dollars)
 
 
 def own_listed(node_ids, *, db, now: datetime | None = None, known: Known | None = None) -> dict[str, dict]:

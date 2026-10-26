@@ -13,6 +13,7 @@ from infra.llm_usage import (
     record_llm_usage,
 )
 from infra.schema import SCHEMA_SQL
+from llm.api_equivalent import api_equivalent
 from plans import (
     admission,
     commitment_cost,
@@ -58,6 +59,22 @@ def db():
     connection.commit()
     yield connection
     connection.close()
+
+
+#: A model with a public list price, so its calls carry an API-equivalent price.
+CLAUDE = "claude-code/claude-opus-5-5"
+
+
+def _call(tokens: int, cost: float) -> dict:
+    """One provider call's measurement: ``tokens`` input tokens and the stored ``cost``."""
+    return {
+        "prompt_tokens": tokens, "completion_tokens": 0, "cache_creation_tokens": 0,
+        "cache_read_tokens": 0, "total_tokens": tokens, "cost_usd": cost,
+    }
+
+
+def _price(tokens: int) -> float:
+    return api_equivalent(CLAUDE, tokens, 0, 0, 0)
 
 
 def _task(db, plan_id, title, **kwargs):
@@ -128,8 +145,8 @@ def test_plan_bound_usage_snapshots_turn_binding_and_preserves_unknowns(db, monk
 
     record_llm_usage(
         "owner",
-        "test-model",
-        {"total_tokens": 12, "cost_usd": 0.25},
+        CLAUDE,
+        _call(12, 0.25),
         turn_id="turn-1",
         usage_key="provider-call:1",
         _emit_product_event=lambda *_args, **_kwargs: None,
@@ -168,7 +185,7 @@ def test_plan_bound_usage_snapshots_turn_binding_and_preserves_unknowns(db, monk
         now=datetime(2026, 9, 9, 0, 1, tzinfo=timezone.utc),
     )
     assert projected["tokens"] == {"known": 12, "unknown_rows": 1}
-    assert projected["model_cost_usd"] == {"known": 0.25, "unknown_rows": 1}
+    assert projected["model_cost_usd"] == {"known": pytest.approx(_price(12)), "unknown_rows": 1}
     assert projected["attempts"] == {
         "total": 1,
         "failed": 0,
@@ -502,8 +519,8 @@ def test_a_lost_plan_bound_row_is_declared_unknown_not_silently_short(
     monkeypatch.setattr("infra.database.get_db", lambda: _KeepOpen(db))
     turns_util._log_llm_usage(
         "owner",
-        "test-model",
-        {"total_tokens": 11, "cost_usd": 0.25},
+        CLAUDE,
+        _call(11, 0.25),
         turn_id="turn-partial",
         usage_key="provider-call:1",
     )
@@ -512,8 +529,8 @@ def test_a_lost_plan_bound_row_is_declared_unknown_not_silently_short(
     with caplog.at_level(logging.ERROR):
         turns_util._log_llm_usage(
             "owner",
-            "test-model",
-            {"total_tokens": 9, "cost_usd": 0.5},
+            CLAUDE,
+            _call(9, 0.5),
             turn_id="turn-partial",
             usage_key="provider-call:2",
         )
@@ -526,12 +543,14 @@ def test_a_lost_plan_bound_row_is_declared_unknown_not_silently_short(
 
     projected = commitment_cost.project(node.commitment_id, db=db)
     assert projected["tokens"] == {"known": 11, "unknown_rows": 1}
-    assert projected["model_cost_usd"] == {"known": 0.25, "unknown_rows": 1}
+    assert projected["model_cost_usd"] == {"known": pytest.approx(_price(11)), "unknown_rows": 1}
 
     assert reconcile_pending_turn_usage(db) == 1
     recovered = commitment_cost.project(node.commitment_id, db=db)
     assert recovered["tokens"] == {"known": 20, "unknown_rows": 0}
-    assert recovered["model_cost_usd"] == {"known": 0.75, "unknown_rows": 0}
+    assert recovered["model_cost_usd"] == {
+        "known": pytest.approx(_price(11) + _price(9)), "unknown_rows": 0,
+    }
 
 
 def test_a_lost_row_is_unknown_on_the_task_its_call_was_billed_to(
@@ -626,8 +645,8 @@ def test_a_failed_plan_bound_projection_is_recoverable_without_false_zero(
     with caplog.at_level(logging.ERROR):
         turns_util._log_llm_usage(
             "owner",
-            "test-model",
-            {"total_tokens": 9, "cost_usd": 0.5},
+            CLAUDE,
+            _call(9, 0.5),
             turn_id="turn-lost",
             usage_key="provider-call:1",
         )
@@ -645,4 +664,4 @@ def test_a_failed_plan_bound_projection_is_recoverable_without_false_zero(
     assert reconcile_pending_turn_usage(db) == 1
     recovered = commitment_cost.project(node.commitment_id, db=db)
     assert recovered["tokens"] == {"known": 9, "unknown_rows": 0}
-    assert recovered["model_cost_usd"] == {"known": 0.5, "unknown_rows": 0}
+    assert recovered["model_cost_usd"] == {"known": pytest.approx(_price(9)), "unknown_rows": 0}

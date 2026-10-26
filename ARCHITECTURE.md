@@ -324,14 +324,16 @@ without a wake; a blocker raised again after it cleared wakes the parent anew.
 node's `own` figure holds tokens, model cost, usage-recording failures,
 `execution` (Turn seconds from `active_turns`) and `waiting` (seconds). The
 `rolled` figure adds every descendant and the rolled total of each attached
-child plan, folding each plan exactly once. Model cost is dollars at API price,
-never what a subscription charged: a row's recorded `cost_usd` is kept as it is
-(an API-billed call's charge, a local model's known 0), and a row with none
-(Claude Code, Codex, External) is priced by Measurement's path
-(`plans/usage_pricing.py` runs its admission SQL, identity resolution and
-`classify_usage_rows`; the node and commitment totals share it). Only a read of
-the cost prices; a plan write and its journaled status read none (#2489). A
-group Measurement cannot price counts its unstored rows unknown. Waiting is wall clock, never spend:
+child plan, folding each plan exactly once. Model cost is Measurement's
+API-equivalent price for every usage row, never a stored `cost_usd` and never
+what a subscription charged: `plans/usage_cost.py` prices rows through
+`core/measurement_pricing.py`, the admission SQL, grouped read and
+`classify_usage_rows` that Measurement's Cost and Models read, with
+`core/cost_identity.py` resolving each row's model. A local model's rows have no
+API price and add nothing; a row Measurement cannot price counts unknown. An
+operator read prices its nodes and their commitments in one grouped read and
+hands the commitments' dollars to `plans/commitment_cost.py`.
+Waiting is wall clock, never spend:
 it rolls up beside execution and is never added to tokens or cost.
 `plans/node_waiting.py` derives it on read with no stored column. A node waits
 while it is open and has an armed watch (other than a task its agent set

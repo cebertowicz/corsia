@@ -15,6 +15,8 @@ import sqlite3
 import threading
 import time
 
+import pytest
+
 from plans import (
     commitment_cost,
     node_cost,
@@ -25,12 +27,13 @@ from plans import (
     service,
     status_context,
     status_drain,
-    usage_pricing,
+    usage_cost,
 )
 from infra import write_admission
 from infra.database import write_transaction
 from infra.turn_usage_remainder import pending_measurement_counts
 from infra.schema import SCHEMA_SQL
+from llm.api_equivalent import api_equivalent
 from plans.boundary import mutate
 from tests.plan_scene import (  # noqa: F401 - shared plan fixtures
     ACTOR,
@@ -69,16 +72,20 @@ class _RowCounter:
         return _Fetched(rows)
 
 
+CLAUDE = "claude-code/claude-opus-5-5"
+
+
 def _usage(db, node, count: int, *, start: int = 0) -> None:
+    """Claude Code rows of 10 input tokens; the first reports no token buckets, so it has no price."""
     db.executemany(
         """INSERT INTO llm_usage (
-               id,thread_id,turn_id,model,total_tokens,cost_usd,
-               plan_id,plan_node_id,plan_attempt_id,plan_commitment_id,
+               id,thread_id,turn_id,model,prompt_tokens,completion_tokens,cache_creation_tokens,
+               cache_read_tokens,total_tokens,plan_id,plan_node_id,plan_attempt_id,plan_commitment_id,
                plan_usage_role,source,created_at
-           ) VALUES (?,'root','turn-1','test-model',?,?,?,?,'attempt-1',?,
-                     'execution','test','t')""",
+           ) VALUES (?,'root','turn-1',?,?,0,0,0,10,?,?,'attempt-1',?,
+                     'execution','external_harness:claude-code','t')""",
         [
-            (f"usage-{index}", 10, None if index == 0 else 0.5,
+            (f"usage-{index}", CLAUDE, None if index == 0 else 10,
              node.plan_id, node.id, node.commitment_id)
             for index in range(start, start + count)
         ],
@@ -227,8 +234,8 @@ def test_a_plan_write_reads_no_cost_under_the_writer_lock(db, scene, monkeypatch
 
     monkeypatch.setattr(commitment_cost, "project_many", refuse)
     monkeypatch.setattr(node_cost, "project_many", refuse)
-    # Nor does any read of usage at API price (``plans.usage_pricing``), however it is reached.
-    monkeypatch.setattr(usage_pricing, "priced_usage", refuse)
+    # Nor does any read of usage at API price.
+    monkeypatch.setattr(usage_cost, "usage_dollars", refuse)
     journaled: list[str] = []
     real = status_context.compute_status
     monkeypatch.setattr(
@@ -395,9 +402,11 @@ def test_cost_reads_do_not_grow_with_usage_rows(db, scene):
     grown_own, grown_commitment, many_rows = _costs(db, node)
 
     assert own["tokens"] == {"known": 30, "unknown_rows": 0}
-    assert own["model_cost_usd"] == {"known": 1.0, "unknown_rows": 1}
+    assert own["model_cost_usd"] == {"known": pytest.approx(api_equivalent(CLAUDE, 20, 0, 0, 0)), "unknown_rows": 1}
     assert grown_own["tokens"] == {"known": 330, "unknown_rows": 0}
-    assert grown_own["model_cost_usd"] == {"known": 16.0, "unknown_rows": 1}
+    assert grown_own["model_cost_usd"] == {
+        "known": pytest.approx(api_equivalent(CLAUDE, 320, 0, 0, 0)), "unknown_rows": 1,
+    }
     assert grown_commitment["tokens"] == grown_own["tokens"]
     assert grown_commitment["model_cost_usd"] == grown_own["model_cost_usd"]
     assert commitment["tokens"] == own["tokens"]
