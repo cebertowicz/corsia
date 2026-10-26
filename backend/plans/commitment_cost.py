@@ -8,8 +8,8 @@ from typing import Any
 
 from infra.packed_rows import fetch_all
 from infra.turn_usage_remainder import pending_measurement_counts
-from plans import service
-from plans.node_cost import USAGE_TOTALS, settle_known, sum_known
+from plans import service, usage_pricing
+from plans.node_cost import settle_known, sum_known
 
 #: The release reasons that mean a try ended in failure. The one definition of
 #: friction: the commitment's failed attempts and a plan row's retry count.
@@ -150,11 +150,9 @@ def _load(commitment_ids: list[str], *, db) -> dict[str, Any]:
     # of idle work costs no read.
     pending = pending_measurement_counts(db, commitment_ids) if attempts else {}
     # One row per commitment and Turn, not per call: this runs inside every plan write.
-    usage = fetch_all(
-        db, f"""SELECT plan_commitment_id,turn_id,{USAGE_TOTALS} FROM llm_usage
-            WHERE plan_commitment_id IN ({marks})
-            GROUP BY plan_commitment_id,turn_id""",
-        params,
+    usage = usage_pricing.priced_usage(
+        db, ("plan_commitment_id", "turn_id"),
+        lambda sql: fetch_all(db, sql.format(marks=marks), params),
     )
     effort = {
         str(row["commitment_id"]): int(row["count"])

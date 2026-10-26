@@ -324,7 +324,11 @@ without a wake; a blocker raised again after it cleared wakes the parent anew.
 node's `own` figure holds tokens, model cost, usage-recording failures,
 `execution` (Turn seconds from `active_turns`) and `waiting` (seconds). The
 `rolled` figure adds every descendant and the rolled total of each attached
-child plan, folding each plan exactly once. Waiting is wall clock, never spend:
+child plan, folding each plan exactly once. Model cost is Measurement's price
+for the same rows (`plans/usage_pricing.py` runs its admission SQL, identity
+resolution and `classify_usage_rows`; the node and commitment totals share it); a group
+Measurement cannot price keeps the stored sum and counts its unstored rows
+unknown. Waiting is wall clock, never spend:
 it rolls up beside execution and is never added to tokens or cost.
 `plans/node_waiting.py` derives it on read with no stored column. A node waits
 while it is open and has an armed watch (other than a task its agent set

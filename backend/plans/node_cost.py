@@ -23,7 +23,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from infra.packed_rows import fetch_all
-from plans import hierarchy, node_time, node_waiting, service
+from plans import hierarchy, node_time, node_waiting, service, usage_pricing
 from plans.status_time import parse as _parse
 
 #: Every ``active_turns.status`` the schema allows; ``_add`` keeps only these.
@@ -109,18 +109,10 @@ def _add(left: dict, right: dict) -> dict:
     }
 
 
-#: Usage summed in SQL, so a read returns one row per group however many calls
-#: the ledger holds. ``SUM`` is NULL when every value is: "no known amount".
-USAGE_TOTALS = """SUM(total_tokens) AS tokens,SUM(total_tokens IS NULL) AS unknown_tokens,
-                  SUM(cost_usd) AS cost,SUM(cost_usd IS NULL) AS unknown_cost"""
-
-
 def _own_usage(connection, node_ids: list[str]) -> dict[str, dict]:
-    rows = _rows_in(
-        connection,
-        f"""SELECT plan_node_id,{USAGE_TOTALS} FROM llm_usage
-            WHERE plan_node_id IN ({{marks}}) GROUP BY plan_node_id""",
-        node_ids,
+    """Each node's tokens and dollars; dollars are Measurement's (``usage_pricing``)."""
+    rows = usage_pricing.priced_usage(
+        connection, ("plan_node_id",), lambda sql: _rows_in(connection, sql, node_ids),
     )
     return {
         str(row["plan_node_id"]): {
