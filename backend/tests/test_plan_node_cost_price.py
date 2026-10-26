@@ -120,3 +120,18 @@ def test_the_commitment_total_reads_the_same_dollars_as_its_node(db):
 
     assert rolled["model_cost_usd"]["known"] == pytest.approx(_measurement(db, node))
     assert total["model_cost_usd"] == rolled["model_cost_usd"]
+
+
+def test_a_stored_cost_is_kept_and_only_unstored_rows_are_priced(db):
+    """A recorded charge is never repriced; the node adds Measurement's dollars for the rest."""
+    plan = service.ensure_plan("thread", "owner", db=db)
+    node = _task(db, plan.id, "Mixed")
+    other = _task(db, plan.id, "Claude alone")
+    _row(db, node, "u-cloud", "openai/gpt-5", source="conversation", cost=1.25)
+    _row(db, node, "u-claude", CLAUDE, source="external_harness:claude-code")
+    _row(db, other, "u-claude-alone", CLAUDE, source="external_harness:claude-code")
+
+    own = node_cost.project_many([plan.id], db=db)[plan.id][node.id]["own"]
+
+    assert own["model_cost_usd"]["unknown_rows"] == 0
+    assert own["model_cost_usd"]["known"] == pytest.approx(1.25 + _measurement(db, other))

@@ -151,8 +151,10 @@ def _load(commitment_ids: list[str], *, db) -> dict[str, Any]:
     pending = pending_measurement_counts(db, commitment_ids) if attempts else {}
     # One row per commitment and Turn, not per call: this runs inside every plan write.
     usage = usage_pricing.priced_usage(
-        db, ("plan_commitment_id", "turn_id"),
-        lambda sql: fetch_all(db, sql.format(marks=marks), params),
+        db, ("plan_commitment_id", "turn_id"), commitment_ids,
+        lambda sql, ids: fetch_all(
+            db, sql.format(marks=",".join("?" for _ in ids)), tuple(ids),
+        ),
     )
     effort = {
         str(row["commitment_id"]): int(row["count"])

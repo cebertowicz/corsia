@@ -112,7 +112,8 @@ def _add(left: dict, right: dict) -> dict:
 def _own_usage(connection, node_ids: list[str]) -> dict[str, dict]:
     """Each node's tokens and dollars; dollars are Measurement's (``usage_pricing``)."""
     rows = usage_pricing.priced_usage(
-        connection, ("plan_node_id",), lambda sql: _rows_in(connection, sql, node_ids),
+        connection, ("plan_node_id",), node_ids,
+        lambda sql, ids: _rows_in(connection, sql, list(ids)),
     )
     return {
         str(row["plan_node_id"]): {
