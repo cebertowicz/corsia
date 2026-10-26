@@ -41,17 +41,26 @@ class Seat:
         self.loaded: set[str] = set()
         self.room_gib = 100.0
         self.loads: list[str] = []
+        self.on_this_mac = True
         db = self.connect()
         db.executescript(
-            "CREATE TABLE network_servers (id TEXT PRIMARY KEY, status TEXT);"
+            "CREATE TABLE network_servers (id TEXT PRIMARY KEY, status TEXT, kind TEXT, port INTEGER, metadata_json TEXT);"
+            "CREATE TABLE network_server_endpoints (server_id TEXT, host TEXT);"
             "CREATE TABLE models (litellm_model TEXT PRIMARY KEY, metadata_json TEXT);"
         )
-        db.execute("INSERT INTO network_servers VALUES (?, 'online')", (SERVER,))
+        db.execute("INSERT INTO network_servers (id, status, kind) VALUES (?, 'online', 'omlx')", (SERVER,))
+        db.execute("INSERT INTO network_server_endpoints VALUES (?, '127.0.0.1')", (SERVER,))
         db.commit()
         db.close()
         monkeypatch.setattr(network_discovery, "_LOADED_BY_SERVER", {SERVER: self.loaded})
         monkeypatch.setattr(local_model_load, "model_room_bytes", lambda: int(self.room_gib * GIB))
         monkeypatch.setattr("infra.database.get_db", self.connect)
+        # Locality is llm.locality's to decide; this checks the row and endpoints readiness hands it.
+        monkeypatch.setattr("llm.locality.server_on_this_mac", self._locality)
+
+    def _locality(self, server: dict, endpoints: list[dict]) -> bool:
+        assert server["id"] == SERVER and [e["host"] for e in endpoints] == ["127.0.0.1"]
+        return self.on_this_mac
 
     def connect(self) -> sqlite3.Connection:
         db = sqlite3.connect(self.path)
@@ -179,6 +188,14 @@ def test_a_loaded_model_with_no_reported_size_cant_be_judged_so_it_reads_no_room
     seat.model("a", None, loaded=True)
     seat.room_gib = 1
     assert seat.readiness() == Readiness("no_room", 1)
+
+
+def test_a_server_on_another_computer_cant_be_judged_by_this_macs_memory_so_it_fits(seat) -> None:
+    seat.model("target", 30)
+    seat.model("a", 8, loaded=True)
+    seat.room_gib = 1
+    seat.on_this_mac = False
+    assert seat.readiness() == Readiness("fits_now", 1)
 
 
 def test_a_model_omlx_reported_no_size_for_counts_as_fitting(seat) -> None:

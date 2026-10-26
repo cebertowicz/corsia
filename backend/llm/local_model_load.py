@@ -81,6 +81,16 @@ def _reported_sizes(db, server_id: str, model_ids: list[str]) -> dict[str, int |
     return sizes
 
 
+def _on_this_mac(db, server_id: str) -> bool:
+    """Whether the seat's server runs on this Mac, read through ``db`` so a claim transaction opens nothing."""
+    from llm.locality import server_on_this_mac
+
+    row = db.execute("SELECT id,kind,port,metadata_json FROM network_servers WHERE id=?", (server_id,)).fetchone()
+    endpoints = [dict(e) for e in db.execute(
+        "SELECT * FROM network_server_endpoints WHERE server_id=?", (server_id,)).fetchall()]
+    return row is not None and server_on_this_mac(dict(row), endpoints)
+
+
 def readiness(target: ExecutionTarget, *, db) -> Readiness:
     """What a send to ``target`` can do now, from cached catalog and sweep state and one host memory read.
 
@@ -102,6 +112,10 @@ def readiness(target: ExecutionTarget, *, db) -> Readiness:
     others = sorted(loaded - {model_id})
     if model_id in loaded:
         return Readiness("loaded", len(others))
+    if not _on_this_mac(db, server_id):
+        # The free memory read here is this Mac's, which says nothing about another
+        # computer's: its fit can't be judged, so it counts as fitting, like a model with no size.
+        return Readiness("fits_now", len(others))
     sizes = _reported_sizes(db, server_id, [model_id, *others])
     verdict = load_verdict(sizes[model_id], [sizes[other] for other in others], model_room_bytes())
     return Readiness(verdict, len(others))
