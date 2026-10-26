@@ -192,7 +192,7 @@ def test_reached_verdicts_remain_skipped_after_an_old_event(db) -> None:
     assert subject in snapshot.reached and compute(snapshot) == []
 
 
-def test_open_snapshot_selects_only_planned_workflows_without_reached_verdicts(db) -> None:
+def test_open_snapshot_selects_unplanned_versions_and_planned_workflows_without_reached_verdicts(db) -> None:
     node(db, "run")
     node(db, "unplanned", workflow="decision-brief", version="v9")
     correction(db, "bounded", "run")
@@ -207,11 +207,14 @@ def test_open_snapshot_selects_only_planned_workflows_without_reached_verdicts(d
                    "attributes) VALUES (?,?,?,'corsia','instrumented','2026-10-01','2026-10-01',?,?)",
                    (f"event-{index}", f"event-{index}", event, subject, attributes))
 
-    assert open_workflow_subjects(db) == {open_subject}
+    first_seen = "workflow:decision-brief@v9"
+    assert open_workflow_subjects(db) == {open_subject, first_seen}
     snapshot = read_open_snapshot(db, now=NOW)
-    assert snapshot.subjects == {open_subject}
-    assert [history.ref for history in snapshot.workflows] == ["sdlc-process"]
-    assert snapshot.workflows[0].runs[0].corrections[0].source_id == "bounded"
+    assert snapshot.subjects == {open_subject, first_seen}
+    assert [history.ref for history in snapshot.workflows] == ["decision-brief", "sdlc-process"]
+    assert snapshot.workflows[1].runs[0].corrections[0].source_id == "bounded"
+    new_plans = {item.subject for item in compute(price_snapshot(db, snapshot)) if item.plan_is_new}
+    assert new_plans == {first_seen}
     details = [str(row["detail"]) for row in db.execute(
         f"EXPLAIN QUERY PLAN {_OPEN_WORKFLOWS_SQL}",
         {"planned": "measurement.verdict.planned", "reached": "measurement.verdict.reached", "limit": 100},

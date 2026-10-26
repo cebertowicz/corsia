@@ -174,7 +174,7 @@ def _run(
                 if gate is not None:
                     lesson_gate.record_accepted(connection, thread_id, str(params["verdict"]), gate)
         return _result_text(result, staged=bool(checkpoint_id))
-    except (ContinuityError, ValueError) as exc:
+    except ContinuityError as exc:
         return f"Error: {exc}"
     finally:
         db.close()

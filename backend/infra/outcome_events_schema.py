@@ -51,6 +51,9 @@ OUTCOME_EVENTS_SCHEMA_SQL = """
     CREATE UNIQUE INDEX IF NOT EXISTS idx_learning_loop_outcome_subject
         ON outcome_events(subject_key)
         WHERE event_name='learning_loop.correction_outcome';
+    CREATE INDEX IF NOT EXISTS idx_learning_loop_closes_issue
+        ON outcome_events(json_extract(attributes,'$.issue_repo'), json_extract(attributes,'$.issue'))
+        WHERE event_name='github.pr.closes_issue';
     CREATE TABLE IF NOT EXISTS outcome_event_counters (
         counter TEXT NOT NULL CHECK (counter IN (
             'duplicate_ignored', 'attribute_dropped', 'mapping_failed',

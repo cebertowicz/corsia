@@ -22,7 +22,6 @@ from events.connectors.github_outcomes import (
     closes_issue_refs,
     introduced_by_numbers,
     map_github_outcomes,
-    reverts_pr_refs,
     pr_subject,
 )
 
@@ -106,22 +105,6 @@ def test_merged_pr_emits_merged_introduced_by_and_closes():
     assert set(names) == {"github.pr.merged", "github.pr.reverts"}
     assert [draft.attributes for draft in names["github.pr.reverts"]] == [
         {"repo": REPO, "pr": "3200", "reverted_repo": REPO, "reverted_pr": "3191", "confidence": "stated"},
-        {"repo": REPO, "pr": "3200", "reverted_repo": REPO, "reverted_pr": "1627", "confidence": "stated"},
-    ]
-
-
-def test_reverts_parser_accepts_only_explicit_line_start_footers():
-    body = (
-        "GitHub's button says this reverts a commit.\n"
-        "Reverts #12\n"
-        "Reverts: #13\n"
-        "A sentence Reverts #14 is not a footer.\n"
-        "  reverts cebertowicz/OtherRepo#7\n"
-        "Reverts cebertowicz/maestro#8\r\n"
-        "Reverts #12"
-    )
-    assert reverts_pr_refs(body, REPO) == [
-        (REPO.lower(), 12), ("cebertowicz/otherrepo", 7), (REPO.lower(), 8),
     ]
 
 

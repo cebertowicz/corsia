@@ -11,7 +11,7 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
 from typing import Iterable, Mapping, Sequence
 
-POLICY_VERSION = "workflow-verdict-v1"
+POLICY_VERSION = "workflow-verdict-v2"  # v2: 80% default interval, look 3, no_gain_not_cheaper reverts
 DEFAULT_MINIMUM = 20
 GROUP_MINIMUM = 5
 BOOTSTRAP_DRAWS = 2_000

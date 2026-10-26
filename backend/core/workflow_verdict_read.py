@@ -28,6 +28,7 @@ from core.measurement_scope import Grain
 from core.workflow_verdict_rules import Definition, FrozenPlan, Snapshot, WorkflowHistory
 from core.workflow_verdicts import MIXED, OUTCOME_STATES, TERMINAL_STATES, CorrectionFact, KpiRow, Run, parse_ts
 from tools.workflow_owners import thread_workflow_owners
+from infra.guidance_history_paths import LOCAL_EDIT_MARK
 from tools.workflow_task_fields import judged_version
 
 MODEL_SHARE = 0.8  # design §3.3: the run's own fresh tokens on one identity
@@ -43,6 +44,19 @@ _OPEN_WORKFLOWS_SQL = """
           AND reached.subject_key=planned.subject_key
       )
     ORDER BY planned.ts,planned.subject_key LIMIT :limit
+"""
+_UNPLANNED_WORKFLOWS_SQL = """
+    SELECT 'workflow:' || n.workflow_ref || '@' || n.workflow_version AS subject_key, MIN(n.created_at) AS first_seen
+    FROM plan_nodes n
+    WHERE n.workflow_ref IS NOT NULL AND n.workflow_ref != ''
+      AND trim(COALESCE(n.workflow_version, '')) != '' AND instr(n.workflow_version, :mark) = 0
+      AND NOT EXISTS (SELECT 1 FROM plan_nodes p WHERE p.id=n.parent_id AND p.workflow_ref=n.workflow_ref)
+      AND NOT EXISTS (
+        SELECT 1 FROM outcome_events planned
+        WHERE planned.event_name=:planned AND planned.retracted_at IS NULL
+          AND planned.subject_key='workflow:' || n.workflow_ref || '@' || n.workflow_version
+      )
+    GROUP BY subject_key ORDER BY first_seen, subject_key LIMIT :limit
 """
 _BANDS = {"XS": "XS-S", "S": "XS-S", "M": "M", "L": "L+", "XL": "L+", "XXL": "L+"}
 # The KPI formula engine (KPI slice 2) supplies these rows; with no reader every deciding KPI is Not comparable.
@@ -174,11 +188,18 @@ def _definitions(db: sqlite3.Connection) -> tuple[dict[str, list[Definition]], d
 
 
 def open_workflow_subjects(db: sqlite3.Connection, *, limit: int = OPEN_BATCH_LIMIT) -> frozenset[str]:
-    """The bounded planned-without-reached workflow set; lesson trials join this set after F4."""
+    """One bounded batch of workflow versions to evaluate: first-seen versions and planned-without-reached ones.
+
+    A version is planned only by its first evaluation, so versions with a judged run and no plan yet
+    are part of the set, or no version would ever enter it.
+    """
     if not 1 <= limit <= OPEN_BATCH_LIMIT:
         raise ValueError(f"limit must be between 1 and {OPEN_BATCH_LIMIT}")
-    rows = db.execute(_OPEN_WORKFLOWS_SQL, {"planned": PLANNED_EVENT, "reached": REACHED_EVENT, "limit": limit})
-    return frozenset(str(row["subject_key"]) for row in rows)
+    open_rows = db.execute(_OPEN_WORKFLOWS_SQL, {"planned": PLANNED_EVENT, "reached": REACHED_EVENT, "limit": limit})
+    unplanned = db.execute(_UNPLANNED_WORKFLOWS_SQL, {
+        "planned": PLANNED_EVENT, "mark": LOCAL_EDIT_MARK, "limit": limit,
+    })
+    return frozenset(str(row["subject_key"]) for rows in (open_rows, unplanned) for row in rows)
 
 
 def _recorded(db: sqlite3.Connection, subjects: Iterable[str] | None = None) -> tuple[dict[str, FrozenPlan], frozenset[str]]:

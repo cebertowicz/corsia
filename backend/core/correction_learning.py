@@ -7,6 +7,8 @@ import sqlite3
 from datetime import datetime, timezone
 from typing import Any
 
+from loguru import logger
+
 TRIAGE_EVENT = "learning_loop.correction_triage"
 OUTCOME_EVENT = "learning_loop.correction_outcome"
 TIERS = ("not_correction", "instruction", "note", "miss", "serious")
@@ -31,6 +33,7 @@ def manifest_paths(db: sqlite3.Connection, manifest_id: str | None) -> list[str]
     try:
         entries = json.loads(row[0]) if row else []
     except (TypeError, ValueError):
+        logger.warning("context manifest {} has unreadable entries_json", manifest_id)
         entries = []
     found: list[str] = []
     for entry in entries if isinstance(entries, list) else []:
@@ -96,6 +99,7 @@ def serious_proposed(db: sqlite3.Connection, thread_id: str) -> bool:
                 "id": row["id"], "active_turn_id": row["active_turn_id"], "_meta": metadata,
             })
         except (TypeError, ValueError, TurnProvenanceError):
+            logger.warning("tool message {} has unreadable turn metadata; skipped for the serious-effect check", row["id"])
             continue
         if turn_id == active["id"] and has_serious_effect(metadata.get("name")):
             return True

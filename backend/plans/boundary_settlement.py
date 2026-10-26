@@ -96,9 +96,10 @@ def fail(node_id: str, params: dict, common: dict, db, acting: str | None) -> di
     """Record a failed verdict, transition it, and notify the prior executor."""
     record_verdict(params, "Failed", common)
     mutations.fail_node(node_id, **fields.expected(params), **common)
-    from core.self_caught_corrections import record_failed_plan_node
+    if acting is not None:  # a person's verdict is not a self-caught correction
+        from core.self_caught_corrections import record_failed_plan_node
 
-    record_failed_plan_node(db, node_id)
+        record_failed_plan_node(db, node_id)
     return after.after_close(node_id, "failed", params, common, executor=acting)
 
 

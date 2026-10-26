@@ -43,10 +43,6 @@ _CLOSES = re.compile(
     r"((?:[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)?#\d+)",
     re.I,
 )
-_REVERTS = re.compile(
-    r"^[ \t]*reverts[ \t]+((?:[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)?#\d+)[ \t\r]*$",
-    re.I | re.M,
-)
 _LANE_PREFIX = "lane:"
 
 
@@ -108,24 +104,6 @@ def closes_issue_refs(body: str, default_repo: str) -> list[tuple[str, int]]:
     """
     pairs = []
     for ref in dict.fromkeys(m.lower() for m in _CLOSES.findall(body or "")):
-        repo_part, _, number = ref.rpartition("#")
-        try:
-            parsed = shape.reference_number(number)
-        except shape.PayloadRefusal:
-            continue
-        pairs.append((repo_part or default_repo.lower(), parsed))
-    return list(dict.fromkeys(pairs))
-
-
-def reverts_pr_refs(body: str, default_repo: str) -> list[tuple[str, int]]:
-    """Explicit, line-start ``Reverts [owner/repo]#N`` footers in stable order.
-
-    A merge's title or commit text is never evidence of a reversion.  This
-    matches the existing raw-relation policy: the source is retained only as a
-    compact stated relation, not PR prose.
-    """
-    pairs = []
-    for ref in dict.fromkeys(m.lower() for m in _REVERTS.findall(body or "")):
         repo_part, _, number = ref.rpartition("#")
         try:
             parsed = shape.reference_number(number)
@@ -207,12 +185,13 @@ def _pr_drafts(payload: dict[str, Any], repo: str) -> list[OutcomeDraft]:
             {"repo": repo, "pr": str(number), "issue_repo": issue_repo,
              "issue": str(issue_number), "confidence": "stated"},
         ))
-    for reverted_repo, reverted_pr in reverts_pr_refs(body, repo):
+    if revert_pr is not None:
+        # The same stated relation as `reverts_pr` above: one parser decides whether a PR reverts another.
         drafts.append(OutcomeDraft(
-            f"{key}reverts:{reverted_repo}#{reverted_pr}", "github.pr.reverts",
+            f"{key}reverts:{repo.lower()}#{revert_pr}", "github.pr.reverts",
             merged_at, subject,
-            {"repo": repo, "pr": str(number), "reverted_repo": reverted_repo,
-             "reverted_pr": str(reverted_pr), "confidence": "stated"},
+            {"repo": repo, "pr": str(number), "reverted_repo": repo.lower(),
+             "reverted_pr": revert_pr, "confidence": "stated"},
         ))
     return drafts
 

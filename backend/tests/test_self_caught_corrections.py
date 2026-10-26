@@ -1,6 +1,7 @@
 """Self-caught failures enter the existing correction lifecycle without inference."""
 from __future__ import annotations
 
+import copy
 import json
 from pathlib import Path
 
@@ -161,6 +162,33 @@ def test_github_reopen_and_explicit_merged_revert_target_owned_prs(db):
     assert {attributes["source_kind"] for _subject, _thread_id, attributes in facts} == {"self_caught"}
     assert any("github:issue:cebertowicz/maestro#1627:reopened" in subject for subject, *_ in facts)
     assert any("github:pr:cebertowicz/maestro#3200:reverts:cebertowicz/maestro#3191" in subject for subject, *_ in facts)
+
+
+def test_a_person_failing_a_node_is_not_a_self_caught_correction(db):
+    plan = service.ensure_plan("thread", "owner", db=db)
+    task = _task(db, plan.id, "Fail me")
+    active = _mutate(db, plan.id, "activate", {"node_id": task.id, "expected_revision": task.revision}, "start")
+
+    _mutate(db, plan.id, "fail", {"node_id": task.id, "expected_revision": active["node"]["revision"]}, "fail", actor=None)
+
+    assert _facts(db) == []
+
+
+def test_reopened_issue_blames_only_the_pr_that_last_closed_it(db):
+    register_pr(REPO, 3191, "reporter")
+    register_pr(REPO, 3192, "owner")
+    first = _fixture("pr_closes_merged")
+    _write_raw_facts(db, first["event"], map_github_outcomes(first["event"], first["payload"]), "close-first")
+    second = copy.deepcopy(first)
+    pr = second["payload"]["pull_request"]
+    second["payload"]["number"] = pr["number"] = 3192
+    pr["merged_at"] = pr["closed_at"] = pr["updated_at"] = "2026-10-10T14:33:48Z"
+    pr["merge_commit_sha"] = "1" * 40
+    _write_raw_facts(db, second["event"], map_github_outcomes(second["event"], second["payload"]), "close-second")
+    reopened = _fixture("issue_reopened")
+    _write_raw_facts(db, reopened["event"], map_github_outcomes(reopened["event"], reopened["payload"]), "reopen")
+
+    assert {thread_id for _subject, thread_id, _attributes in _facts(db)} == {"owner"}
 
 
 def test_red_checks_do_not_create_self_caught_corrections(db):

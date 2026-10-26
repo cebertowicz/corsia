@@ -167,9 +167,10 @@ def _dispatch_structure(plan_id, operation, params, common, db, workflow_version
         ),
         **fields.expected(params), **common,
     )
-    from core.self_caught_corrections import record_plan_correction
+    if acting is not None:  # a person's correction is not a self-caught correction
+        from core.self_caught_corrections import record_plan_correction
 
-    record_plan_correction(db, params["node_id"], result["correction"]["id"])
+        record_plan_correction(db, params["node_id"], result["correction"]["id"])
     return result
 
 

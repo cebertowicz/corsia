@@ -36,7 +36,7 @@ LEARNING_FIELD_SCHEMAS: dict[str, dict[str, object]] = {
     },
     "target_file": {
         "type": "string", "minLength": 1,
-        "description": "triage: a file loaded in this turn; trial admission: the changed file or new.",
+        "description": "A file loaded in this turn that the correction changes.",
     },
     "serious_lowered_reason": {
         "type": "string", "minLength": 1,

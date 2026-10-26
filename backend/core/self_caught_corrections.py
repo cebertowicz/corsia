@@ -100,31 +100,33 @@ def _artifact_owner(db, repo: str, pr: str) -> str | None:
 
 
 def record_reopened_issue(db, *, repo: str, issue: str, source_id: str, created_at: str) -> int:
-    """Record one correction per owned merged PR that explicitly closed a reopened issue."""
-    rows = db.execute(
+    """Record one correction against the owner of the merged PR that last stated it closes a reopened issue.
+
+    Earlier PRs that said the same are not blamed again for a later close; the lookup is the
+    ``idx_learning_loop_closes_issue`` index, so it does not grow with GitHub history.
+    """
+    row = db.execute(
         """SELECT json_extract(c.attributes,'$.repo') AS repo,
                   json_extract(c.attributes,'$.pr') AS pr
-           FROM outcome_events c
+           FROM outcome_events c INDEXED BY idx_learning_loop_closes_issue
+           CROSS JOIN outcome_events m INDEXED BY idx_outcome_events_subject ON m.subject_key=c.subject_key
+            AND m.event_name='github.pr.merged' AND m.retracted_at IS NULL AND m.ts<=?
            WHERE c.event_name='github.pr.closes_issue' AND c.retracted_at IS NULL
              AND json_extract(c.attributes,'$.issue_repo')=?
              AND json_extract(c.attributes,'$.issue')=?
-             AND EXISTS (
-                 SELECT 1 FROM outcome_events m
-                 WHERE m.event_name='github.pr.merged' AND m.retracted_at IS NULL
-                   AND m.subject_key=c.subject_key
-             )""",
-        (repo, issue),
-    ).fetchall()
-    recorded = 0
-    for row in rows:
-        pr_repo, pr = str(row[0]), str(row[1])
-        owner = _artifact_owner(db, pr_repo, pr)
-        if owner:
-            recorded += _record(
-                db, source_id=f"{source_id}:closed-by:{pr_repo}#{pr}",
-                thread_id=owner, created_at=created_at,
-            )
-    return recorded
+           ORDER BY m.ts DESC LIMIT 1""",
+        (created_at, repo, issue),
+    ).fetchone()
+    if row is None:
+        return 0
+    pr_repo, pr = str(row[0]), str(row[1])
+    owner = _artifact_owner(db, pr_repo, pr)
+    if not owner:
+        return 0
+    return _record(
+        db, source_id=f"{source_id}:closed-by:{pr_repo}#{pr}",
+        thread_id=owner, created_at=created_at,
+    )
 
 
 def record_github_outcome_drafts(db, drafts) -> int:

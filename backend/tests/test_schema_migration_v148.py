@@ -10,7 +10,9 @@ from infra.database_migrations import MIGRATIONS, MigrationError, migrate_to_cur
 from infra.migration_147_to_148_correction_learning import migrate_147_to_148
 from infra.schema import SCHEMA_VERSION
 
-_INDEXES = ("idx_learning_loop_triage_subject", "idx_learning_loop_outcome_subject")
+_INDEXES = (
+    "idx_learning_loop_closes_issue", "idx_learning_loop_outcome_subject", "idx_learning_loop_triage_subject",
+)
 
 
 def _indexes(db) -> list[str]:

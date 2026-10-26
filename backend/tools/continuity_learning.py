@@ -8,19 +8,17 @@ from typing import Any
 
 def live_operation(db: Any, thread_id: str, operation: str, params: dict[str, Any]) -> dict[str, Any] | None:
     """Record immutable learning facts, or leave another operation to continuity."""
+    if operation not in {"triage", "outcome"}:
+        return None
+    from core import correction_learning
+    from infra.continuity_store import ContinuityError
+
     arguments = {key: value for key, value in params.items() if key != "operation"}
-    if operation == "triage":
-        from core.correction_learning import record_triage
-
-        return {"operation": operation, **record_triage(db, thread_id=thread_id, **arguments)}
-    if operation == "outcome":
-        from core.correction_learning import record_terminal_outcome
-
-        return {
-            "operation": operation,
-            **record_terminal_outcome(db, thread_id=thread_id, **arguments),
-        }
-    return None
+    record = correction_learning.record_triage if operation == "triage" else correction_learning.record_terminal_outcome
+    try:
+        return {"operation": operation, **record(db, thread_id=thread_id, **arguments)}
+    except ValueError as exc:  # a refused field of this fact, returned to the caller to correct
+        raise ContinuityError(str(exc)) from exc
 
 
 def result_text(result: dict[str, Any]) -> str | None:
