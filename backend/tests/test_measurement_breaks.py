@@ -225,6 +225,7 @@ def test_model_marks_deduplicate_changes_inside_one_period(isolated_db) -> None:
             ("baseline", "2026-09-01T12:00:00Z", "rater-a"),
             ("b", "2026-09-15T12:00:00Z", "rater-b"),
             ("a-again", "2026-09-16T12:00:00Z", "rater-a"),
+            ("b-again", "2026-09-17T12:00:00Z", "rater-b"),
         ):
             _accepted(db, node, when)
             _rating(db, node, rater)
@@ -236,6 +237,54 @@ def test_model_marks_deduplicate_changes_inside_one_period(isolated_db) -> None:
     finally:
         db.close()
     assert [mark["period"] for mark in marks] == ["2026-09-14"]
+
+
+def test_mixed_raters_choose_one_dominant_rater_per_period(isolated_db) -> None:
+    """Alternating task order cannot invent a boundary while a period's dominant rater is unchanged."""
+    db = get_db()
+    try:
+        _thread(db)
+        ratings = (
+            ("baseline", "2026-09-01T12:00:00Z", "rater-a"),
+            ("b-1", "2026-09-15T12:00:00Z", "rater-b"),
+            ("a-1", "2026-09-16T12:00:00Z", "rater-a"),
+            ("b-2", "2026-09-17T12:00:00Z", "rater-b"),
+            ("b-3", "2026-09-22T12:00:00Z", "rater-b"),
+            ("a-2", "2026-09-23T12:00:00Z", "rater-a"),
+            ("b-4", "2026-09-24T12:00:00Z", "rater-b"),
+        )
+        for node, when, rater in ratings:
+            _accepted(db, node, when)
+            _rating(db, node, rater)
+        db.commit()
+        marks = [mark for mark in derive_breaks(db, ("estimated_human_hours_per_active_hour",), _grain())[
+            "estimated_human_hours_per_active_hour"] if mark["kind"] == "model"]
+    finally:
+        db.close()
+    assert [mark["period"] for mark in marks] == ["2026-09-14"]
+
+
+def test_partial_rerate_of_old_tasks_keeps_the_old_periods_dominant_rater(isolated_db) -> None:
+    db = get_db()
+    try:
+        _thread(db)
+        for week, prefix in (("2026-09-01", "one"), ("2026-09-08", "two"), ("2026-09-15", "three")):
+            for suffix in "abc":
+                node = f"{prefix}-{suffix}"
+                _accepted(db, node, f"{week}T12:00:00Z")
+                _rating(db, node, "rater-a", "2026-10-01T12:00:00Z")
+                if suffix == "c":
+                    _rating(db, node, "rater-b", "2026-10-02T12:00:00Z")
+        for suffix in "abc":
+            node = f"new-{suffix}"
+            _accepted(db, node, "2026-09-22T12:00:00Z")
+            _rating(db, node, "rater-b")
+        db.commit()
+        marks = [mark for mark in derive_breaks(db, ("estimated_human_hours_per_active_hour",), _grain())[
+            "estimated_human_hours_per_active_hour"] if mark["kind"] == "model"]
+    finally:
+        db.close()
+    assert [mark["period"] for mark in marks] == ["2026-09-21"]
 
 
 def test_model_marks_follow_only_the_rating_that_counts(isolated_db) -> None:

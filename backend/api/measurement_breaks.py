@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections import Counter, defaultdict
 from collections.abc import Iterable
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
@@ -68,24 +69,38 @@ def _seeded_starts(db, groups: Iterable[str]) -> dict[str, str | None]:
     return {group: found.get(group) for group in requested}
 
 
-def _model_marks(db, grain: Grain) -> list[dict[str, str]]:
-    """Derive rater changes from the ratings that count; the first rater is the baseline."""
+def _dominant_rater(raters: Counter[str]) -> str:
+    """Choose the largest period population, resolving an exact tie lexically."""
+    largest = max(raters.values())
+    return min(rater for rater, count in raters.items() if count == largest)
+
+
+def _model_marks_from_raters(grain: Grain, rows: Iterable[tuple[str, str]]) -> list[dict[str, str]]:
+    """Mark each period whose dominant rater differs from the previous rated period's."""
+    by_period: dict[str, Counter[str]] = defaultdict(Counter)
+    for started_at, rater in rows:
+        if period := _period(grain, started_at):
+            by_period[period][rater] += 1
     marks: list[dict[str, str]] = []
-    if not db.execute(_TWO_RATERS_SQL).fetchone()[0]:
-        return marks
-    periods: set[str] = set()
     prior: str | None = None
-    for started_at, rater in counted_raters(db):
-        changed, prior = prior is not None and rater != prior, rater
-        if changed and (period := _period(grain, started_at)) and period not in periods:
-            periods.add(period)
+    for period in sorted(by_period):
+        rater = _dominant_rater(by_period[period])
+        if prior is not None and rater != prior:
             marks.append({
                 "period": period,
                 "kind": "model",
                 "reason": "judging model changed",
                 "metric_group": "estimated_human_hours_per_active_hour",
             })
+        prior = rater
     return marks
+
+
+def _model_marks(db, grain: Grain) -> list[dict[str, str]]:
+    """Derive rater changes from the ratings that count; the first dominant rater is the baseline."""
+    if not db.execute(_TWO_RATERS_SQL).fetchone()[0]:
+        return []
+    return _model_marks_from_raters(grain, counted_raters(db))
 
 
 def _metadata(
