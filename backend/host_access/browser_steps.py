@@ -18,6 +18,7 @@ from infra import state
 PASSWORD_STEP_DESCRIPTION = (
     "Enter your password in the shared browser. The agent can't see this page and carries on once you're past it.")
 # The plan states a person's own Mark done leaves (``plans.node_states``); any other ending is a decline.
+# Local copy until plans.public exports its accepted states (#1481); the equality test pins it meanwhile.
 DONE_STATES = frozenset({"accepted", "accepted_with_followup"})
 
 

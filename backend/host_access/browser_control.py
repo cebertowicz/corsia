@@ -221,8 +221,8 @@ async def _reprobe(thread_id: str, step: BrowserStep) -> bool:
             # its page, or a probe of the step's own tab can end it; a popup sign-in returns to that tab.
             log.info("browser-step re-probe for %s reached another page target", thread_id)
             return True
-        current = await _observe_step(thread_id, result)
-        return current is step and step.reprobe is not None
+        still_open = await _observe_step(thread_id, result)
+        return still_open is not None and still_open is step and still_open.reprobe is not None
 
 
 async def _open_step(thread_id: str, step: BrowserStep) -> None:

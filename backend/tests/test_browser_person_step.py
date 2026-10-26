@@ -369,6 +369,12 @@ def test_person_step_keeps_free_form_instruction_out_of_product_chrome(instructi
     )
 
 
+def test_the_person_step_tool_row_is_addressed_to_the_person():
+    from tools.tool_activity import tool_activity
+
+    assert tool_activity("browser_person_step", {"instruction": "Sign in to Google"}).phrase == "Your turn in the browser"
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("kind", ["person", "password"])
 @pytest.mark.parametrize("stage", ["write", "read"])
