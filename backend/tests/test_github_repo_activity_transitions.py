@@ -95,5 +95,84 @@ def test_synthetic_pollers_do_not_count_as_live_webhooks():
                     repo=repo, payload=base)
     record_delivery(event_type="issue_comment", action="created",
                     delivery_id="gh-notifications:issue_comment:9", repo=repo, payload=base)
-    assert not poller._recent_webhook(repo, datetime.now(UTC))
-    assert poller._startup_boundary(repo, {}) is None
+    assert poller._last_delivery(repo) is None
+    assert not poller._recent_webhook(poller._last_delivery(repo), datetime.now(UTC))
+    assert poller._startup_boundary(poller._last_delivery(repo), {}) is None
+
+
+# One fallback rule for every read: an item at or before the last real delivery is skipped, saved state still moves.
+DELIVERED = datetime(2026, 1, 2, 0, 0, 30, tzinfo=UTC)
+BEFORE, AFTER = "2026-01-02T00:00:10Z", "2026-01-02T00:01:00Z"
+
+
+class Seen(list):
+    """The admitted delivery keys; ``answer`` queues the fake reads."""
+
+    def __init__(self, monkeypatch):
+        super().__init__()
+        self.monkeypatch = monkeypatch
+
+    def answer(self, *responses):
+        queue = list(responses)
+        self.monkeypatch.setattr(poller, "_get", lambda *_a, **_k: asyncio.sleep(0, result=queue.pop(0)))
+
+
+@pytest.fixture
+def seen(monkeypatch):
+    emitted = Seen(monkeypatch)
+    monkeypatch.setattr(poller, "_admit", lambda event, payload, key: emitted.append(key) or asyncio.sleep(0))
+    return emitted
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("delivered,at,admitted", [(DELIVERED, BEFORE, False), (DELIVERED, AFTER, True), (None, BEFORE, True)])
+async def test_open_pulls_synchronize_and_opened_follow_the_rule(seen, delivered, at, admitted):
+    state = {"heads": {"3": "old"}}
+    seen.answer(GhResponse(200, {}, [pull(3, head="new", updated_at=at), pull(4, updated_at=at)]))
+    await poller._open_pulls(lambda *_a: None, "o/r", state, datetime(2026, 1, 4, tzinfo=UTC), delivered)
+    assert seen == (["synchronize:o/r#3:new", "opened:o/r#4"] if admitted else [])
+    assert state["heads"] == {"3": "new", "4": "h"}  # saved heads move past a skipped item
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("delivered,closed_at,admitted", [(DELIVERED, BEFORE, False), (DELIVERED, AFTER, True), (None, BEFORE, True)])
+async def test_closed_pulls_follow_the_rule(seen, delivered, closed_at, admitted):
+    state = {"closed": {}}
+    seen.answer(GhResponse(200, {}, [pull(7, state="closed", closed_at=closed_at)]))
+    await poller._closed_pulls(lambda *_a: None, "o/r", state, datetime(2026, 1, 4, tzinfo=UTC), delivered)
+    assert seen == ([f"closed:o/r#7:{closed_at}"] if admitted else [])
+    assert state["closed"] == {"7": closed_at}  # the marker moves past a skipped item
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("delivered,created_at,admitted", [(DELIVERED, BEFORE, False), (DELIVERED, AFTER, True), (None, BEFORE, True)])
+async def test_new_issues_follow_the_rule(seen, delivered, created_at, admitted):
+    state = {"issues_opened_at": "2026-01-01T00:00:00Z"}
+    seen.answer(GhResponse(200, {}, [{"number": 9, "created_at": created_at, "user": {"login": "u"}}]))
+    await poller._new_issues(lambda *_a: None, "o/r", state, datetime(2026, 1, 4, tzinfo=UTC), delivered)
+    assert seen == (["opened:o/r#9"] if admitted else []) and state["issues_opened_at"] == created_at
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("delivered,updated_at,admitted", [(DELIVERED, BEFORE, False), (DELIVERED, AFTER, True), (None, BEFORE, True)])
+async def test_settled_check_suites_follow_the_rule(seen, delivered, updated_at, admitted):
+    state = {"pending": ["a"]}
+    suite = {"id": 5, "status": "completed", "updated_at": updated_at}
+    seen.answer(GhResponse(200, {}, {"workflow_runs": []}), GhResponse(200, {}, {"workflow_runs": []}),
+                GhResponse(200, {}, {"check_suites": [suite]}))
+    await poller._pending_heads(lambda *_a: None, "o/r", state, datetime(2026, 1, 4, tzinfo=UTC), delivered)
+    assert seen == ([f"check_suite:o/r:5:{updated_at}"] if admitted else []) and state["pending"] == []
+
+
+@pytest.mark.asyncio
+async def test_a_poll_and_the_startup_catchup_read_the_delivery_log_once(lifecycle, monkeypatch):
+    from infra import webhook_delivery_log
+    reads = []
+    monkeypatch.setattr(webhook_delivery_log, "repo_last_delivered_at", lambda repo: reads.append(repo) or None)
+    lifecycle.state = {"issues_cursor": "x", "heads": {}, "closed": {}, "pending": []}
+    await lifecycle.poll([], [])
+    assert reads == ["o/r"]
+    reads.clear()
+    monkeypatch.setattr(poller, "_get", lambda *_a, **_k: asyncio.sleep(0, result=GhResponse(304, {}, None)))
+    await poller._startup_catchup(lambda *_a: None, "o/r", datetime(2026, 1, 4, tzinfo=UTC))
+    assert reads == ["o/r"]

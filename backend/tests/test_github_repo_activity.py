@@ -43,10 +43,9 @@ async def test_poller_skips_recent_webhook_and_cap_holds_cursor(monkeypatch):
     assert state["cursor"] == "hold"
 
 
-def test_startup_boundary_uses_webhook_overlap(monkeypatch):
-    from infra import webhook_delivery_log
-    monkeypatch.setattr(webhook_delivery_log, "repo_last_delivered_at", lambda _repo: "2026-01-03T02:00:00Z")
-    assert poller._startup_boundary("o/r", {"issues_cursor_at": "2026-01-01T00:00:00Z"}) == "2026-01-03T01:50:00Z"
+def test_startup_boundary_uses_webhook_overlap():
+    delivered = datetime(2026, 1, 3, 2, tzinfo=UTC)
+    assert poller._startup_boundary(delivered, {"issues_cursor_at": "2026-01-01T00:00:00Z"}) == "2026-01-03T01:50:00Z"
 
 
 @pytest.mark.asyncio
@@ -140,18 +139,18 @@ def _label_row(identifier, created_at):
 
 @pytest.mark.asyncio
 async def test_a_row_the_last_real_delivery_covers_is_skipped_and_the_cursor_still_advances(monkeypatch):
-    from infra import webhook_delivery_log
-    monkeypatch.setattr(webhook_delivery_log, "repo_last_delivered_at", lambda _repo: "2026-01-02T00:00:30Z")
+    delivered = datetime(2026, 1, 2, 0, 0, 30, tzinfo=UTC)
     rows = [_label_row("late", "2026-01-02T00:01:00Z"), _label_row("at", "2026-01-02T00:00:30Z"),
             _label_row("early", "2026-01-02T00:00:10Z"), {"id": "old", "created_at": "2026-01-01T00:00:00Z"}]
     state, emitted = {"issues_cursor": "old", "reads": []}, []
     monkeypatch.setattr(poller, "_get", lambda *_a, **_k: asyncio.sleep(0, result=GhResponse(200, {}, rows)))
     monkeypatch.setattr(poller, "_admit", lambda _event, _payload, key: emitted.append(key) or asyncio.sleep(0))
-    assert await poller._issue_events(lambda *_a: None, "o/r", state, datetime(2026, 1, 3, tzinfo=UTC))
+    assert await poller._issue_events(lambda *_a: None, "o/r", state, datetime(2026, 1, 3, tzinfo=UTC), delivered=delivered)
     assert emitted == ["labeled:o/r:late"] and state["issues_cursor"] == "late"
     rows[:] = [_label_row("covered", "2026-01-02T00:00:20Z"), {"id": "late", "created_at": "2026-01-02T00:01:00Z"}]
     emitted.clear()
-    assert not await poller._issue_events(lambda *_a: None, "o/r", state, datetime(2026, 1, 3, tzinfo=UTC))
+    assert not await poller._issue_events(lambda *_a: None, "o/r", state, datetime(2026, 1, 3, tzinfo=UTC),
+                                          delivered=delivered)
     assert emitted == [] and state["issues_cursor"] == "covered"
 
 
@@ -165,12 +164,12 @@ async def test_with_no_real_delivery_the_row_is_admitted(monkeypatch):
     assert emitted == ["labeled:o/r:new"]
 
 
-def test_delivered_event_compares_instants_not_strings():
+def test_covered_compares_instants_not_strings():
     stamp = datetime(2026, 1, 2, 0, 0, 30, tzinfo=UTC)
-    assert poller._delivered_event({"created_at": "2026-01-02T00:00:30Z"}, stamp)
-    assert poller._delivered_event({"created_at": "2026-01-02T01:00:00+02:00"}, stamp)  # an earlier instant
-    assert not poller._delivered_event({"created_at": "2026-01-02T00:00:31Z"}, stamp)
-    assert not poller._delivered_event({"created_at": "2026-01-01T23:59:59Z"}, None)
+    assert poller._covered("2026-01-02T00:00:30Z", stamp)
+    assert poller._covered("2026-01-02T01:00:00+02:00", stamp)  # an earlier instant
+    assert not poller._covered("2026-01-02T00:00:31Z", stamp)
+    assert not poller._covered("2026-01-01T23:59:59Z", None)
 
 
 @pytest.mark.asyncio

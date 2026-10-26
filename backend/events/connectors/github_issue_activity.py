@@ -43,8 +43,10 @@ def row_delivery(repo: str, row: dict[str, Any], heads: dict[str, str]) -> tuple
 
 
 async def new_issues(get: Callable[..., Awaitable[Any]], admit: Admit, repo: str, state: dict[str, Any],
-                     now: Any) -> bool | None:
+                     now: Any, covered: Callable[[Any], bool] = lambda _at: False) -> bool | None:
     """Admit issues opened since the saved time; the first read only seeds it.
+
+    An issue whose creation time ``covered`` accepts is skipped, and the saved time still moves past it.
 
     ``None`` when the budget or a backoff stops the read; ``False`` on a 304 or an error.
     """
@@ -59,7 +61,7 @@ async def new_issues(get: Callable[..., Awaitable[Any]], admit: Admit, repo: str
     state["issues_opened_at"] = max([seen, *(row["created_at"] for row in rows)])
     changed = False
     for row in sorted(rows, key=lambda r: r["created_at"]):
-        if seeding or row["created_at"] <= seen:
+        if seeding or row["created_at"] <= seen or covered(row["created_at"]):
             continue
         user: dict[str, Any] = row["user"] if isinstance(row.get("user"), dict) else {}
         await admit("issues", {"action": "opened", "repository": {"full_name": repo}, "issue": row,
