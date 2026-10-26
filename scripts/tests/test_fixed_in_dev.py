@@ -124,6 +124,7 @@ class FakeGitHub:
         self.label_status = label_status
         self.label_created = 0
         self.labeled: list[int] = []
+        self.unlabeled: list[int] = []
         self.commented: list[tuple[int, str]] = []
         self.closed: list[int] = []
 
@@ -144,18 +145,33 @@ class FakeGitHub:
 
     def add_label(self, number):
         self.labeled.append(number)
+        self.issues[number]["labeled"] = True
         return 201
 
+    def remove_label(self, number):
+        self.unlabeled.append(number)
+        self.issues[number]["labeled"] = False
+        return 200
+
     def open_labeled_issues(self):
-        return 200, [{"number": n, **i} for n, i in self.issues.items() if i.get("state") == "open"]
+        return 200, [
+            {"number": n, **i}
+            for n, i in self.issues.items()
+            if i.get("state") == "open" and i.get("labeled")
+        ]
 
     def close(self, number):
         self.closed.append(number)
+        self.issues[number]["state"] = "closed"
         return 200
 
 
-def _open_issue():
-    return {"state": "open"}
+def _open_issue(labeled=False):
+    return {"state": "open", "labeled": labeled}
+
+
+def _labeled_issue():
+    return _open_issue(labeled=True)
 
 
 def test_dev_path_labels_and_comments_with_marker_but_never_closes():
@@ -183,6 +199,13 @@ def test_dev_path_skips_pr_itself_prs_and_closed():
     failures = resolve(gh, pr_number=9, merge_sha=SHA_A, run_url="u", numbers=[9, 51, 52])
     assert failures == []
     assert gh.labeled == [] and gh.commented == [] and gh.closed == []
+
+
+def test_dev_path_empty_merge_sha_fails_before_writing():
+    gh = FakeGitHub(issues={56: _open_issue()})
+    failures = resolve(gh, 9, "", "u", [56])
+    assert failures and "not a commit SHA" in failures[0]
+    assert gh.labeled == [] and gh.commented == [] and gh.label_created == 0
 
 
 def test_dev_path_reports_missing_issue_label_and_comment_failures():
@@ -235,35 +258,48 @@ def _marked(*shas):
 def test_main_path_closes_ancestor_and_keeps_non_ancestor_open(tmp_path):
     main_sha, in_main, not_in_main = _promotion_repo(tmp_path)
     gh = FakeGitHub(
-        issues={1: _open_issue(), 2: _open_issue()},
+        issues={1: _labeled_issue(), 2: _labeled_issue()},
         comments={1: _marked(in_main), 2: _marked(not_in_main)},
     )
     failures = close_reached_main(gh, main_sha, "u", repo_dir=str(tmp_path))
     assert failures == []
     assert gh.closed == [1]
+    assert gh.unlabeled == [1]
     assert main_sha[:7] in gh.commented[0][1]
+
+
+def test_main_path_reopened_issue_stays_open_on_next_push(tmp_path):
+    main_sha, in_main, _ = _promotion_repo(tmp_path)
+    gh = FakeGitHub(issues={6: _labeled_issue()}, comments={6: _marked(in_main)})
+    assert close_reached_main(gh, main_sha, "u", repo_dir=str(tmp_path)) == []
+    assert gh.closed == [6]
+    gh.issues[6]["state"] = "open"  # a person reopens it: the fix was incomplete
+    assert close_reached_main(gh, main_sha, "u", repo_dir=str(tmp_path)) == []
+    assert gh.closed == [6]
+    assert gh.issues[6]["state"] == "open"
 
 
 def test_main_path_needs_every_marked_sha_in_main(tmp_path):
     main_sha, in_main, not_in_main = _promotion_repo(tmp_path)
     gh = FakeGitHub(
-        issues={3: _open_issue()},
+        issues={3: _labeled_issue()},
         comments={3: _marked(in_main, not_in_main)},
     )
     assert close_reached_main(gh, main_sha, "u", repo_dir=str(tmp_path)) == []
     assert gh.closed == []
 
 
-def test_main_path_unknown_sha_stays_open(tmp_path):
+def test_main_path_unknown_sha_fails_loudly_and_stays_open(tmp_path):
     main_sha, in_main, _ = _promotion_repo(tmp_path)
-    gh = FakeGitHub(issues={4: _open_issue()}, comments={4: _marked("c" * 40)})
-    assert close_reached_main(gh, main_sha, "u", repo_dir=str(tmp_path)) == []
+    gh = FakeGitHub(issues={4: _labeled_issue()}, comments={4: _marked("c" * 40)})
+    failures = close_reached_main(gh, main_sha, "u", repo_dir=str(tmp_path))
+    assert len(failures) == 1 and failures[0].startswith("#4:")
     assert gh.closed == []
 
 
 def test_main_path_ignores_issue_without_marker(tmp_path):
     main_sha, _, _ = _promotion_repo(tmp_path)
-    gh = FakeGitHub(issues={5: _open_issue()})
+    gh = FakeGitHub(issues={5: _labeled_issue()})
     assert close_reached_main(gh, main_sha, "u", repo_dir=str(tmp_path)) == []
     assert gh.closed == []
 

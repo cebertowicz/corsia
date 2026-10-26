@@ -9,7 +9,9 @@ fire. The ``fixed-in-dev`` workflow runs this module in two modes:
   gets the ``fixed-in-dev`` label and a comment with the merge SHA, PR number
   and a hidden marker. The issue stays open.
 - ``push`` (to ``main``): each open ``fixed-in-dev`` issue is closed once every
-  SHA in its markers is an ancestor of the pushed main commit. The label stays.
+  SHA in its markers is an ancestor of the pushed main commit, and the label is
+  removed. A person who reopens it therefore keeps it open; a new fix merged to
+  ``dev`` labels it again.
 
 Keyword semantics follow GitHub's:
 
@@ -40,6 +42,7 @@ LABEL = "fixed-in-dev"
 LABEL_COLOR = "0e8a16"
 LABEL_DESCRIPTION = "Fix merged to dev; closes when it reaches main"
 BOT_LOGIN = "github-actions[bot]"
+_SHA = re.compile(r"[0-9a-f]{7,40}")
 _MARKER = re.compile(r"<!--\s*fixed-in-dev sha=([0-9a-f]{7,40}) pr=(\d+)\s*-->")
 
 # A short ``#N`` must not be preceded by a word char, path separator or another
@@ -180,6 +183,11 @@ class GitHub:
         status, _ = self._request("POST", f"/issues/{number}/labels", {"labels": [LABEL]})
         return status
 
+    def remove_label(self, number: int) -> int:
+        status, _ = self._request("DELETE", f"/issues/{number}/labels/{LABEL}")
+        # 404 means the label is already gone.
+        return 200 if status == 404 else status
+
     def open_labeled_issues(self) -> tuple[int, list[dict]]:
         return self._pages(f"/issues?state=open&labels={LABEL}")
 
@@ -197,8 +205,12 @@ def resolve(gh: GitHub, pr_number: int, merge_sha: str, run_url: str, numbers: l
     numbers and already-closed issues are skipped without failing. A re-run
     does not comment twice: an existing marker for this SHA is detected.
     """
+    if not _SHA.fullmatch(merge_sha or ""):
+        # A marker without a valid SHA never parses, so the issue would be
+        # labeled but never closed.
+        return [f"merge SHA {merge_sha!r} is not a commit SHA; nothing labeled"]
     failures: list[str] = []
-    short_sha = merge_sha[:7] if merge_sha else "unknown SHA"
+    short_sha = merge_sha[:7]
     label_status = gh.ensure_label()
     if label_status not in (200, 201):
         return [f"label create failed with HTTP {label_status}"]
@@ -241,13 +253,19 @@ def resolve(gh: GitHub, pr_number: int, merge_sha: str, run_url: str, numbers: l
 
 
 def is_ancestor(sha: str, ref: str, repo_dir: str) -> bool:
-    """True when ``sha`` is reachable from ``ref`` in the checkout at repo_dir."""
+    """True when ``sha`` is reachable from ``ref`` in the checkout at repo_dir.
+
+    Raises ``LookupError`` when git cannot answer (exit other than 0 or 1),
+    e.g. a marked SHA lost to a rewrite, so it is never read as "not yet".
+    """
     proc = subprocess.run(
         ["git", "merge-base", "--is-ancestor", sha, ref],
         cwd=repo_dir,
         capture_output=True,
         text=True,
     )
+    if proc.returncode not in (0, 1):
+        raise LookupError(f"git exit {proc.returncode}: {proc.stderr.strip()}")
     return proc.returncode == 0
 
 
@@ -270,7 +288,11 @@ def close_reached_main(gh: GitHub, main_sha: str, run_url: str, repo_dir: str = 
         if not shas:
             print(f"#{number}: no fixed-in-dev marker; leaving open")
             continue
-        missing = [s for s in shas if not is_ancestor(s, main_sha, repo_dir)]
+        try:
+            missing = [s for s in shas if not is_ancestor(s, main_sha, repo_dir)]
+        except LookupError as exc:
+            failures.append(f"#{number}: a marked SHA is not a commit in this checkout ({exc})")
+            continue
         if missing:
             print(f"#{number}: not yet in main ({', '.join(s[:7] for s in missing)}); leaving open")
             continue
@@ -278,6 +300,9 @@ def close_reached_main(gh: GitHub, main_sha: str, run_url: str, repo_dir: str = 
         if close_status != 200:
             failures.append(f"#{number}: close failed with HTTP {close_status}")
             continue
+        unlabel_status = gh.remove_label(number)
+        if unlabel_status != 200:
+            failures.append(f"#{number}: closed but label removal failed with HTTP {unlabel_status}")
         text = (
             f"Closed: the fix ({', '.join(s[:7] for s in shas)}) is in `main` as "
             f"{short_main} ([workflow run]({run_url}))."
