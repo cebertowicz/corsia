@@ -33,7 +33,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Any
 
-from events.connectors import github_outcomes
+from events.connectors import github_label_window, github_outcomes
 from events.connectors.github_outcome_input import PayloadRefusal
 from infra import outcome_events, webhook_delivery_log
 from infra.outcome_event_input import OutcomeInputRefusal
@@ -146,16 +146,17 @@ def record_delivery_for_admission(
     drafts = _map_raw_facts(event_type, payload, delivery_id)
     with write_transaction(None, scope="webhook_ingress") as connection:
         held = self_restart.restart_holds_new_work(db=connection)
+        copy = not held and github_label_window.seen_in_window(connection, drafts)
         record = webhook_delivery_log.record_delivery(
             event_type=event_type,
             action=action,
             delivery_id=delivery_id,
             repo=repo,
             payload=payload,
-            status="held_restart" if held else "received",
+            status="held_restart" if held else github_label_window.STATUS if copy else "received",
             db=connection,
         )
-        if record.created:
+        if record.created and not copy:
             _write_raw_facts(connection, event_type, drafts, delivery_id)
     return record, delivery_id, held
 
@@ -253,6 +254,8 @@ def _record_phase(
         return AdmissionOutcome(200, {"status": "duplicate", "delivery_id": delivery_id}), delivery_id
     if held:
         return _held_outcome(delivery_id), delivery_id
+    if record.status == github_label_window.STATUS:
+        return AdmissionOutcome(200, {"status": "duplicate", "delivery_id": delivery_id}), delivery_id
     return None, delivery_id
 
 
