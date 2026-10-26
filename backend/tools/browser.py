@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
-import tempfile
 from typing import Any
 from urllib.parse import unquote, urlsplit
 
@@ -19,6 +18,7 @@ from tools.browser_runtime import (
 )
 from tools.filesystem_effects import copy_bound_file
 from tools.filesystem_gate import _resolve_path
+from tools.private_runtime_files import BROWSER_STAGING_DIR, private_mkdtemp
 
 
 class BrowserOpenTool(Tool):
@@ -150,8 +150,8 @@ class BrowserOpenTool(Tool):
                 "document and its resources into the workspace first."
             )
         try:
-            with tempfile.TemporaryDirectory(
-                prefix="corsia-browser-open-"
+            with private_mkdtemp(
+                BROWSER_STAGING_DIR, prefix="corsia-browser-open-"
             ) as stage_dir:
                 stage_path = (
                     Path(stage_dir).resolve(strict=True)
@@ -243,8 +243,8 @@ class BrowserScreenshotTool(Tool):
             lease_id = None
 
         try:
-            with tempfile.TemporaryDirectory(
-                prefix="corsia-browser-screenshot-"
+            with private_mkdtemp(
+                BROWSER_STAGING_DIR, prefix="corsia-browser-screenshot-"
             ) as stage_dir:
                 stage_path = Path(stage_dir).resolve(strict=True) / "screenshot.png"
                 args = ["screenshot", str(stage_path)]
