@@ -116,12 +116,16 @@ SHA_B = "b" * 40
 class FakeGitHub:
     """Scriptable stand-in for the GitHub client."""
 
-    def __init__(self, issues=None, comments=None, comment_status=201, label_status=201):
+    def __init__(
+        self, issues=None, comments=None, comment_status=201, label_status=201, add_label_status=201
+    ):
         self.repo = REPO
         self.issues = issues or {}
         self.comment_log = comments or {}
         self.comment_status = comment_status
         self.label_status = label_status
+        self.add_label_status = add_label_status
+        self.writes: list[str] = []
         self.label_created = 0
         self.labeled: list[int] = []
         self.unlabeled: list[int] = []
@@ -136,7 +140,9 @@ class FakeGitHub:
 
     def comment(self, number, text):
         self.commented.append((number, text))
-        self.comment_log.setdefault(number, []).append({"user": BOT, "body": text})
+        if self.comment_status in (200, 201):
+            self.writes.append("comment")
+            self.comment_log.setdefault(number, []).append({"user": BOT, "body": text})
         return self.comment_status
 
     def ensure_label(self):
@@ -145,8 +151,10 @@ class FakeGitHub:
 
     def add_label(self, number):
         self.labeled.append(number)
-        self.issues[number]["labeled"] = True
-        return 201
+        if self.add_label_status in (200, 201):
+            self.writes.append("label")
+            self.issues[number]["labeled"] = True
+        return self.add_label_status
 
     def remove_label(self, number):
         self.unlabeled.append(number)
@@ -184,6 +192,8 @@ def test_dev_path_labels_and_comments_with_marker_but_never_closes():
     assert number == 50
     assert "PR #9" in text and SHA_A[:7] in text
     assert f"<!-- fixed-in-dev sha={SHA_A} pr=9 -->" in text
+    # The marker is recorded before the label makes the issue visible to main.
+    assert gh.writes == ["comment", "label"]
 
 
 def test_dev_path_rerun_does_not_double_comment():
@@ -191,6 +201,26 @@ def test_dev_path_rerun_does_not_double_comment():
     mark_fixed_in_dev(gh, 9, SHA_A, "u", [50])
     mark_fixed_in_dev(gh, 9, SHA_A, "u", [50])
     assert len(gh.commented) == 1
+    assert gh.closed == []
+
+
+def test_dev_path_rerun_after_label_failure_labels_without_recommenting():
+    gh = FakeGitHub(issues={57: _open_issue()}, add_label_status=500)
+    assert mark_fixed_in_dev(gh, 9, SHA_A, "u", [57]) != []
+    gh.add_label_status = 201
+    assert mark_fixed_in_dev(gh, 9, SHA_A, "u", [57]) == []
+    assert len(gh.commented) == 1 and gh.issues[57]["labeled"]
+
+
+def test_dev_path_comment_failure_leaves_reopened_issue_unlabeled(tmp_path):
+    # A reopened issue still carries a marker for a SHA already in main. If the
+    # new marker fails to post, the issue must not be labeled, or the next main
+    # push would close it on the old fix.
+    main_sha, in_main, _ = _promotion_repo(tmp_path)
+    gh = FakeGitHub(issues={58: _open_issue()}, comments={58: _marked(in_main)}, comment_status=500)
+    assert mark_fixed_in_dev(gh, 9, SHA_B, "u", [58]) != []
+    assert not gh.issues[58]["labeled"]
+    assert close_reached_main(gh, main_sha, "u", repo_dir=str(tmp_path)) == []
     assert gh.closed == []
 
 
@@ -212,6 +242,7 @@ def test_dev_path_reports_missing_issue_label_and_comment_failures():
     assert mark_fixed_in_dev(FakeGitHub(issues={}), 9, SHA_A, "u", [54]) != []
     assert mark_fixed_in_dev(FakeGitHub(issues={53: _open_issue()}, comment_status=403), 9, SHA_A, "u", [53]) != []
     assert mark_fixed_in_dev(FakeGitHub(issues={55: _open_issue()}, label_status=403), 9, SHA_A, "u", [55]) != []
+    assert mark_fixed_in_dev(FakeGitHub(issues={59: _open_issue()}, add_label_status=403), 9, SHA_A, "u", [59]) != []
 
 
 def test_marker_shas_ignore_non_bot_comments():
@@ -297,10 +328,11 @@ def test_main_path_unknown_sha_fails_loudly_and_stays_open(tmp_path):
     assert gh.closed == []
 
 
-def test_main_path_ignores_issue_without_marker(tmp_path):
+def test_main_path_label_without_marker_fails_loudly(tmp_path):
     main_sha, _, _ = _promotion_repo(tmp_path)
     gh = FakeGitHub(issues={5: _labeled_issue()})
-    assert close_reached_main(gh, main_sha, "u", repo_dir=str(tmp_path)) == []
+    failures = close_reached_main(gh, main_sha, "u", repo_dir=str(tmp_path))
+    assert len(failures) == 1 and failures[0].startswith("#5:") and "no marker" in failures[0]
     assert gh.closed == []
 
 

@@ -199,11 +199,15 @@ class GitHub:
 
 
 def mark_fixed_in_dev(gh: GitHub, pr_number: int, merge_sha: str, run_url: str, numbers: list[int]) -> list[str]:
-    """Label each still-open referenced issue and comment the dev merge.
+    """Comment the dev merge on each still-open referenced issue, then label it.
 
-    Returns a list of human-readable failures (empty on success). Pull-request
-    numbers and already-closed issues are skipped without failing. A re-run
-    does not comment twice: an existing marker for this SHA is detected.
+    The marker comment goes first: the label is what the main path lists, so
+    an issue is labeled only once its marker names this SHA. Otherwise a main
+    push between the two writes (or a failed comment) could close the issue
+    on an older marker. Returns a list of human-readable failures (empty on
+    success). Pull-request numbers and already-closed issues are skipped
+    without failing. A re-run does not comment twice: an existing marker for
+    this SHA is detected.
     """
     if not _SHA.fullmatch(merge_sha or ""):
         # A marker without a valid SHA never parses, so the issue would be
@@ -228,25 +232,25 @@ def mark_fixed_in_dev(gh: GitHub, pr_number: int, merge_sha: str, run_url: str, 
         if issue.get("state") != "open":
             print(f"#{number}: already {issue.get('state')}; skipping")
             continue
-        label_status = gh.add_label(number)
-        if label_status not in (200, 201):
-            failures.append(f"#{number}: label failed with HTTP {label_status}")
-            continue
         comments_status, comments = gh.comments(number)
         if comments_status != 200:
             failures.append(f"#{number}: comment lookup failed with HTTP {comments_status}")
             continue
         if merge_sha in marker_shas(comments):
             print(f"#{number}: already marked for {short_sha}; skipping comment")
-            continue
-        text = (
-            f"Fixed in `dev` by PR #{pr_number}, merged as {short_sha} "
-            f"([workflow run]({run_url})). This issue closes when that commit "
-            f"reaches `main`.\n\n{marker(merge_sha, pr_number)}"
-        )
-        comment_status = gh.comment(number, text)
-        if comment_status not in (200, 201):
-            failures.append(f"#{number}: comment failed with HTTP {comment_status}")
+        else:
+            text = (
+                f"Fixed in `dev` by PR #{pr_number}, merged as {short_sha} "
+                f"([workflow run]({run_url})). This issue closes when that commit "
+                f"reaches `main`.\n\n{marker(merge_sha, pr_number)}"
+            )
+            comment_status = gh.comment(number, text)
+            if comment_status not in (200, 201):
+                failures.append(f"#{number}: comment failed with HTTP {comment_status}")
+                continue
+        label_status = gh.add_label(number)
+        if label_status not in (200, 201):
+            failures.append(f"#{number}: marked but label failed with HTTP {label_status}")
             continue
         print(f"#{number}: labeled {LABEL} ({short_sha})")
     return failures
@@ -286,7 +290,11 @@ def close_reached_main(gh: GitHub, main_sha: str, run_url: str, repo_dir: str = 
             continue
         shas = marker_shas(comments)
         if not shas:
-            print(f"#{number}: no fixed-in-dev marker; leaving open")
+            # Labeled by hand, or a marker was deleted: it could never close.
+            failures.append(
+                f"#{number}: labeled {LABEL} but has no marker; remove the label "
+                "or re-run the dev merge's workflow"
+            )
             continue
         try:
             missing = [s for s in shas if not is_ancestor(s, main_sha, repo_dir)]
