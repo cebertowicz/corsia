@@ -91,15 +91,31 @@ def record_install_week(
     return result.inserted
 
 
-def record_current_install_week() -> None:
-    """Startup hook: record this week for this install; a failure is logged and never stops the app."""
+_recorded_week: str | None = None  # this process's last recorded week, so a repeat costs no DB call
+
+
+def install_week_due(now: datetime | None = None) -> bool:
+    """Whether this process has yet to record the current ISO week; a string compare, no DB."""
+    return iso_week(now or datetime.now(timezone.utc)) != _recorded_week
+
+
+def record_current_install_week(now: datetime | None = None) -> None:
+    """Record this week once per process week, at startup and from the periodic sweep.
+
+    A failure is logged and never stops the app; the week is retried on the next call.
+    """
+    global _recorded_week
     from loguru import logger
 
     from infra.build_info import app_version
     from infra.database import get_db
 
+    moment = now or datetime.now(timezone.utc)
+    if not install_week_due(moment):
+        return
     try:
-        record_install_week(get_db(), version=app_version())
+        record_install_week(get_db(), now=moment, version=app_version())
+        _recorded_week = iso_week(moment)
     except Exception as exc:  # noqa: BLE001  # local usage recording is non-load-bearing
         logger.warning("usage summary: could not record this install-week: {}", exc)
 

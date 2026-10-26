@@ -47,6 +47,26 @@ def test_recording_is_once_per_week_and_local(db):
     assert tuple(row) == ("corsia", "instrumented")
 
 
+def test_an_install_left_open_across_a_week_records_both_weeks(db, monkeypatch):
+    import infra.usage_summary as usage
+
+    calls = []
+    real = usage.record_install_week
+    monkeypatch.setattr(usage, "_recorded_week", None)
+    monkeypatch.setattr("infra.database.get_db", lambda: db)
+    monkeypatch.setattr("infra.build_info.app_version", lambda: "0.4.1")
+    monkeypatch.setattr(usage, "record_install_week", lambda *a, **k: calls.append(k["now"]) or real(*a, **k))
+    week_n, week_after = NOW, datetime(2026, 11, 3, 12, 0, tzinfo=timezone.utc)
+    assert usage.install_week_due(week_n)
+    usage.record_current_install_week(week_n)
+    usage.record_current_install_week(week_n)  # same week: no second DB call
+    assert not usage.install_week_due(week_n) and usage.install_week_due(week_after)
+    usage.record_current_install_week(week_after)  # same process, a week later
+    assert len(calls) == 2
+    weeks = [r[0] for r in db.execute("SELECT dedupe_key FROM outcome_events WHERE event_name=? ORDER BY 1", (USAGE_EVENT,))]
+    assert weeks == [f"{USAGE_EVENT}:2026-W44", f"{USAGE_EVENT}:2026-W45"]
+
+
 def test_unlisted_machine_leaves_os_and_chip_out(db):
     record_install_week(db, now=NOW, version=None, fields={})
     assert build_summary(db, "2026-W44") == {"week": "2026-W44", "release": "dev"}

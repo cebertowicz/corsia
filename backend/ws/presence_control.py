@@ -27,7 +27,7 @@ from datetime import timedelta
 from fastapi import WebSocket
 from loguru import logger
 
-from infra import presence, state, thread_updates
+from infra import presence, state, thread_updates, usage_summary
 from infra.database import get_db
 from infra.db_async import run_in_db
 from infra.time import utc_now
@@ -158,3 +158,5 @@ async def presence_sweep_loop() -> None:
             await _apply(presence.sweep)
         except Exception as exc:
             logger.warning(f"presence: sweep failed: {exc}")
+        if usage_summary.install_week_due():  # an app left open across a week boundary
+            await run_in_db(usage_summary.record_current_install_week)
