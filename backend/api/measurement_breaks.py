@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import json
-from collections import Counter, defaultdict
 from collections.abc import Iterable
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
-from api.measurement_size import counted_raters, latest_rated_settlement
+from api.measurement_size import counted_raters
 from core.measurement_scope import Grain
 from infra.measurement_starts import has_live_start, live_starts_query, source_group
 
@@ -69,61 +68,29 @@ def _seeded_starts(db, groups: Iterable[str]) -> dict[str, str | None]:
     return {group: found.get(group) for group in requested}
 
 
-def _dominant_rater(raters: Counter[str]) -> str:
-    """Choose the largest period population, resolving an exact tie lexically."""
-    largest = max(raters.values())
-    return min(rater for rater, count in raters.items() if count == largest)
-
-
-def _model_marks_from_raters(grain: Grain, rows: Iterable[tuple[str, str]], prior: str | None = None) -> list[dict[str, str]]:
-    """Turn canonical usable ratings into deterministic period boundaries."""
-    by_period: dict[str, Counter[str]] = defaultdict(Counter)
-    for started_at, rater in rows:
-        if period := _period(grain, started_at):
-            by_period[period][rater] += 1
+def _model_marks(db, grain: Grain) -> list[dict[str, str]]:
+    """Derive rater changes from the ratings that count; the first rater is the baseline."""
     marks: list[dict[str, str]] = []
-    for period in sorted(by_period):
-        rater = _dominant_rater(by_period[period])
-        if prior is not None and rater != prior:
+    if not db.execute(_TWO_RATERS_SQL).fetchone()[0]:
+        return marks
+    periods: set[str] = set()
+    prior: str | None = None
+    for started_at, rater in counted_raters(db):
+        changed, prior = prior is not None and rater != prior, rater
+        if changed and (period := _period(grain, started_at)) and period not in periods:
+            periods.add(period)
             marks.append({
                 "period": period,
                 "kind": "model",
                 "reason": "judging model changed",
                 "metric_group": "estimated_human_hours_per_active_hour",
             })
-        prior = rater
     return marks
 
 
-def _previous_dominant_rater(db, grain: Grain, first_period: str, floor: str | None) -> str | None:
-    """Read the nearest earlier rated period, never probing every empty calendar period."""
-    before, _ = grain.period_instants(first_period)
-    while candidate := latest_rated_settlement(db, before_ts=before, precision=grain.precision):
-        period = _period(grain, candidate)
-        if period is None or (floor is not None and period < floor):
-            return None
-        start, end = grain.period_instants(period)
-        rows = counted_raters(db, from_ts=start, to_ts=end, precision=grain.precision)
-        if rows:
-            return _dominant_rater(Counter(rater for _, rater in rows))
-        before = start
-    return None
-
-
-def _model_marks(db, grain: Grain, floor: str | None) -> list[dict[str, str]]:
-    """Mark dominant-rater changes only in the page range and one relevant earlier period."""
-    if not db.execute(_TWO_RATERS_SQL).fetchone()[0]:
-        return []
-    first = grain.periods[0]
-    prior = _previous_dominant_rater(db, grain, first, floor)
-    return _model_marks_from_raters(
-        grain, counted_raters(
-            db, from_ts=grain.starts[0], to_ts=grain.current_end, precision=grain.precision,
-        ), prior,
-    )
-
-
-def _metadata(db, metrics: Iterable[str], grain: Grain, *, with_marks: bool = True) -> tuple[dict[str, str | None], list[dict[str, str]]]:
+def _metadata(
+    db, metrics: Iterable[str], grain: Grain, *, with_marks: bool = True,
+) -> tuple[dict[str, str | None], list[dict[str, str]]]:
     """The one read-only resolver for metric starts and, unless only starts are asked for, comparable marks."""
     requested = tuple(metrics)
     groups = tuple(dict.fromkeys(source_group(metric) for metric in requested))
@@ -141,7 +108,7 @@ def _metadata(db, metrics: Iterable[str], grain: Grain, *, with_marks: bool = Tr
         for item in json.loads(str(row["marks"]) if with_marks and row and row["marks"] else "[]")
     ]
     if with_marks and "estimated_human_hours_per_active_hour" in requested:
-        marks.extend(_model_marks(db, grain, starts[source_group("estimated_human_hours_per_active_hour")]))
+        marks.extend(_model_marks(db, grain))
     return starts, marks
 
 
@@ -190,10 +157,10 @@ def comparability_start(breaks: Iterable[dict[str, str]]) -> str | None:
     return max(marks, default=None)
 
 
-def comparability_break_kind(period: str, breaks: Iterable[dict[str, str]]) -> str | None:
-    """Return the nearest later boundary's kind for one incomparable period."""
+def next_comparability_boundary(period: str, breaks: Iterable[dict[str, str]]) -> dict[str, str] | None:
+    """Return the nearest later model/world boundary for one incomparable period."""
     marks = [item for item in breaks if item["kind"] in {"world", "model"} and item["period"] > period]
-    return min(marks, key=lambda item: item["period"])["kind"] if marks else None
+    return min(marks, key=lambda item: item["period"]) if marks else None
 
 
 def period_comparable(period: str, breaks: Iterable[dict[str, str]]) -> bool:
