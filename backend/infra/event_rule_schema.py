@@ -1,6 +1,6 @@
 """Agent-written event rules and the record of what each one did.
 
-Shared by fresh installs and migrations 136, 138, 141 and 148. ``event_rules`` holds
+Shared by fresh installs and migrations 136, 138, 141 and 149. ``event_rules`` holds
 the rules an agent wrote through the ``event_rules`` tool, of two kinds: ``route`` rules
 act on events (today's routing stays in code), and ``observe`` rules register the
 artifact a tool call created to its caller. The only seeded rows are the shipped rule

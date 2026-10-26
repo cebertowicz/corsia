@@ -20,7 +20,7 @@ _OBJECTS = (
 
 
 def _v148() -> sqlite3.Connection:
-    """The 147 shape of both tables, with a route rule and its decision, from the 140 fixture."""
+    """The 148 shape of both tables, with a route rule and its decision, from the 140 fixture."""
     db = sqlite3.connect(":memory:")
     db.executescript(_V140)
     db.execute("BEGIN")
@@ -70,15 +70,15 @@ def test_storage_ties_each_kind_to_its_own_fields_and_global_scope_to_a_shipped_
 
 
 def test_a_full_v148_install_takes_the_step_and_ends_where_a_fresh_install_starts():
-    assert SCHEMA_VERSION == 148 and MIGRATIONS[147] is migrate_148_to_149
+    assert SCHEMA_VERSION == 149 and MIGRATIONS[148] is migrate_148_to_149
     db = sqlite3.connect(":memory:")
     initialize_schema(db)
     for table in ("event_route_decisions", "event_rules"):
         db.execute(f"DROP TABLE {table}")
     db.executescript(_V140.split("CREATE TABLE automation_schedules")[0])
-    db.execute("PRAGMA user_version=147")
+    db.execute("PRAGMA user_version=148")
     db.commit()
-    assert migrate_to_current(db, SCHEMA_VERSION).to_version == 148
+    assert migrate_to_current(db, SCHEMA_VERSION).to_version == 149
     fresh = sqlite3.connect(":memory:")
     initialize_schema(fresh)
     schema = "SELECT type,name,tbl_name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name"
