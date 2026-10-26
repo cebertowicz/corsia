@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import pytest
 
-from plans import boundary_dispatch, holds, service
+from plans import boundary_settlement, holds, service
 from plans.boundary import mutate
 from tests.test_attention_queue import _mid
 from tests.test_plan_archival import OWNER, _plan, _row, _task, db  # noqa: F401 - fixture
@@ -179,7 +179,7 @@ def test_accept_on_active_work_without_evidence_names_the_fix(db):
         _accept(db, plan.id, node)
 
     assert _row(db, node.id)["state"] == "active"
-    assert boundary_dispatch.FINISHED_WORK_NEEDS_EVIDENCE.endswith(
+    assert boundary_settlement.FINISHED_WORK_NEEDS_EVIDENCE.endswith(
         "work you are not doing."
     )
 

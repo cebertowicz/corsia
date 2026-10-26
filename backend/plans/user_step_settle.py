@@ -35,13 +35,13 @@ def mark_done(params: dict[str, Any], actor, common: dict, db) -> dict:
     end with it, as on the user's own Mark done: the step is done, so the
     questions drafted from it are withdrawn too.
     """
-    from plans import archival, boundary_dispatch, decision_lifecycle, holds
+    from plans import archival, boundary_settlement, decision_lifecycle, holds
 
     node_id = params["node_id"]
     node = service._node_row(db, node_id)
     state = node["state"]
     if state == "review_requested":
-        raise service.PlanError(boundary_dispatch.MARK_DONE_REVIEW)
+        raise service.PlanError(boundary_settlement.MARK_DONE_REVIEW)
     if state not in {"pending", "active"}:
         raise service.PlanError(
             f"mark_done settles pending or active work; this task is {state}"
@@ -64,7 +64,7 @@ def mark_done(params: dict[str, Any], actor, common: dict, db) -> dict:
             expected_revision=service._node_row(db, node_id)["revision"], **common,
         )
     params = {**params, "expected_revision": service._node_row(db, node_id)["revision"]}
-    expected = boundary_dispatch._submit_finished_work(
+    expected = boundary_settlement.submit_finished_work(
         node_id, params, common, actor.thread_id, db,
     )
     service.transition_node(

@@ -40,8 +40,8 @@ def detail_text(verdict: Verdict) -> str:
     raise AssertionError("unreachable: a look alone fits")
 
 
-def write_verdicts(connection: sqlite3.Connection, evaluations: Iterable[Evaluation]) -> int:
-    """Record new frozen plans and reached verdicts on the caller's open transaction; returns verdicts recorded.
+def write_verdicts(connection: sqlite3.Connection, evaluations: Iterable[Evaluation], *, wake_owners: bool = False) -> int:
+    """Record new frozen plans and reached verdicts; optional wakes are only for newly reached results.
 
     Idempotent through each record's dedupe key, so a reached verdict is never replaced (VR-3).
     """
@@ -61,4 +61,12 @@ def write_verdicts(connection: sqlite3.Connection, evaluations: Iterable[Evaluat
                                           attributes={"verdict": verdict.word, "reason": verdict.reason,
                                                       "detail": detail_text(verdict)})
             recorded += int(result.inserted)
+            if result.inserted and wake_owners and evaluation.owner is not None:
+                from events.delivery import enqueue_event_wake
+
+                enqueue_event_wake(
+                    evaluation.owner, REACHED_EVENT, f"Workflow verdict reached: {verdict.word}.",
+                    {"subject": plan.subject, "verdict": verdict.word, "reason": verdict.reason},
+                    message_id=f"verdict:wake:{plan.subject}", db=connection,
+                )
     return recorded

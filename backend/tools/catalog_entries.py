@@ -263,7 +263,7 @@ TOOL_CATALOG: dict[str, ToolCatalogEntry] = {
         activity="Drafting email",
     ),
     "email_send": _Entry(
-        "email", status="active", authority="conductor-api",
+        "email", status="active", authority="conductor-api", serious_effect=True,
         summary="Send a saved email draft after the person says to send it",
         activity="Sending email",
     ),
@@ -278,7 +278,7 @@ TOOL_CATALOG: dict[str, ToolCatalogEntry] = {
         activity="Drafting invite",
     ),
     "calendar_send_invite": _Entry(
-        "email", status="active", authority="conductor-api",
+        "email", status="active", authority="conductor-api", serious_effect=True,
         summary="Send a saved invite draft after the person says to send it; attendees get emails",
         activity="Sending invite",
     ),

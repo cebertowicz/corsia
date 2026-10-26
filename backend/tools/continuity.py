@@ -21,6 +21,8 @@ from infra.continuity_store import (
 )
 from infra.database import get_db, write_transaction
 from infra.db_async import run_in_db
+import tools.continuity_learning as continuity_learning
+import tools.continuity_runtime as continuity_runtime
 from tools.base import Tool
 from tools.continuity_place import _place, _place_error, _queued, _trial_text
 from tools.continuity_schema import (
@@ -33,23 +35,11 @@ from tools.continuity_schema import (
 )
 
 
-def _require_context(kwargs: dict[str, Any]):
-    from tools.delegation import _require_context as require_context
-
-    return require_context(kwargs)
-
-
-def _epoch(db, thread_id: str) -> int:
-    row = db.execute(
-        "SELECT history_epoch FROM threads WHERE id=?", (thread_id,)
-    ).fetchone()
-    if row is None:
-        raise ContinuityError(f"thread {thread_id} does not exist")
-    return int(row["history_epoch"])
-
-
 def _live_operation(db, thread_id: str, operation: str, params: dict[str, Any]):
-    epoch = _epoch(db, thread_id)
+    learning = continuity_learning.live_operation(db, thread_id, operation, params)
+    if learning is not None:
+        return learning
+    epoch = continuity_runtime.epoch(db, thread_id)
     field = params.get("field")
     if operation == "inspect":
         entry_id = params.get("entry_id")
@@ -113,6 +103,9 @@ def _live_operation(db, thread_id: str, operation: str, params: dict[str, Any]):
 
 
 def _result_text(result: dict[str, Any], *, staged: bool) -> str:
+    learning = continuity_learning.result_text(result)
+    if learning is not None:
+        return learning
     if "entries" in result or "entry" in result:
         return json.dumps(result, indent=2, sort_keys=True)
     operation = result["operation"]
@@ -146,13 +139,6 @@ def _result_text(result: dict[str, Any], *, staged: bool) -> str:
     return f"Entry {entry_id} {verb}."
 
 
-_NEXT_ACTIONS_REFUSAL = "Error: next_actions takes no new entries. {} Drop a finished one here."
-_NEXT_STEP_HOME = (  # (turn, checkpoint): a checkpoint cannot reach the plan
-    "A next step belongs on the plan: use plan_update to add or change it.",
-    "Name the step in progress and the exact next action in your narrative.",
-)
-
-
 def _run(
     thread_id: str,
     operation: str,
@@ -161,16 +147,16 @@ def _run(
 ) -> str:
     """Apply one transaction, returning individual refusals as tool results."""
     if operation == "add" and params.get("field") == "next_actions":
-        return _NEXT_ACTIONS_REFUSAL.format(_NEXT_STEP_HOME[bool(checkpoint_id)])
+        return continuity_runtime.next_actions_refusal(checkpoint_id)
     db = get_db()
     try:
-        if checkpoint_id and operation == "place":
-            return "Error: place records an in-turn placement; use review here"
+        if checkpoint_id and operation in {"place", "triage", "outcome"}:
+            return f"Error: {operation} records an in-turn fact; use it outside a checkpoint"
         if not checkpoint_id and operation == "review":
             return "Error: review runs only inside a checkpoint"
         gate = None
         if operation == "place":  # read first; a refusal is its own short write
-            gate = lesson_gate.check_place(db, thread_id, _epoch(db, thread_id), params)
+            gate = lesson_gate.check_place(db, thread_id, continuity_runtime.epoch(db, thread_id), params)
             if gate.refusal is not None:
                 lesson_gate.record_refusal(db, thread_id, str(params["verdict"]), gate)
                 return gate.refusal
@@ -188,7 +174,7 @@ def _run(
                 if gate is not None:
                     lesson_gate.record_accepted(connection, thread_id, str(params["verdict"]), gate)
         return _result_text(result, staged=bool(checkpoint_id))
-    except ContinuityError as exc:
+    except (ContinuityError, ValueError) as exc:
         return f"Error: {exc}"
     finally:
         db.close()
@@ -197,6 +183,9 @@ def _run(
 def _execution_error(operation: Any, params: dict[str, Any]) -> str | None:
     if operation not in _OPERATIONS:
         return f"Error: unknown operation {operation!r}"
+    learning = continuity_learning.execution_error(operation, params)
+    if learning is not None:
+        return learning
     if operation == "add" and not params.get("field"):
         return "Error: add requires field"
     if operation == "inspect" and params.get("entry_id") is not None:
@@ -274,7 +263,8 @@ class ContinuityEditTool(Tool):
         error = _execution_error(operation, kwargs)
         if error is not None:
             return error
-        context = _require_context(kwargs)
+        assert isinstance(operation, str)
+        context = continuity_runtime.require_context(kwargs)
         if isinstance(context, str):
             return context
         thread_id, _ = context

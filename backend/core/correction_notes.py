@@ -19,6 +19,7 @@ from core.corrections_recording import (
     CORRECTION_EVENT,
     ClassifierVersion,
     CorrectionCandidate,
+    SOURCE_KIND_SELF_CAUGHT,
     is_owner_authored_message,
     owner_message_sql_predicate,
     subject_key,
@@ -68,11 +69,19 @@ def note_text(message_id: str, content: str, created_at: str) -> str:
 
 
 def _source_note_text(candidate: CorrectionCandidate) -> str:
-    """The note for a comment (its artifact) or a decision answer (its decision title)."""
+    """The note for a non-message correction source without retaining its text."""
     clock = local_clock(candidate.created_at)
     if candidate.source_kind == "doc_comment":
         where = f"artifact {candidate.about} (comment {candidate.source_id}, sent {clock})"
         note = _note(where, candidate.quote or "", "comment")
+    elif candidate.source_kind == SOURCE_KIND_SELF_CAUGHT:
+        return (
+            f"Self-caught failure recorded on work you settled (source {candidate.source_id}, observed {clock}).\n"
+            "Proposed tier: none yet; you set it.\n"
+            "Fix the work first. Then triage it with skill `memory-placement` section 4: "
+            "set the tier, and for a Miss or Serious answer why it was missed, then watch or act. "
+            "The triage is working state, not part of your reply."
+        )
     else:
         note = _note(f'plan decision "{candidate.about}" (answered {clock})', candidate.quote or "", "answer")
     return note + "\n" + TRIAGE_TOGETHER
@@ -122,7 +131,7 @@ def _newer_owner_message(db: sqlite3.Connection, candidate: CorrectionCandidate)
 def queue_correction_note(
     db: sqlite3.Connection,
     candidate: CorrectionCandidate,
-    version: ClassifierVersion,
+    version: ClassifierVersion | None,
     event_id: str,
 ) -> int | None:
     """Journal the note for a newly recorded correction, inside the fact's transaction.
@@ -139,7 +148,8 @@ def queue_correction_note(
     if not _first_record(db, subject, event_id):
         return None
     if not candidate.arrived and (
-        candidate.source_kind != "message" or not _is_active(db, version) or _newer_owner_message(db, candidate)
+        candidate.source_kind != "message" or version is None or not _is_active(db, version)
+        or _newer_owner_message(db, candidate)
     ):
         return None
     if candidate.source_kind == "message":
