@@ -7,6 +7,6 @@ Here's how help is organized:
 - Work that needs its own private context, or several agents working together: it becomes a project.
 - Everything else: it stays with me, including keeping CORSIA itself set up and running.
 
-Knowing what deserves an agent is the hard part, and you don't have to work it out: tell me what's taking your time and I'll suggest the right setup.
+Tell me what's taking your time and I'll suggest the right setup.
 
 Anything bigger than a step or two gets a plan, so it's clear what done means and how it went. My plan for finishing your setup is in the Plan section on the right (on a phone, the "N left" button above the message box). One thing at a time. Any step can wait: say "not now" to one, or "skip the rest" to stop here.

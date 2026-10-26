@@ -20,7 +20,7 @@ Once an agents' account exists, `gh` and `git push` in agent shells fail on purp
 
 Only when no agents' account exists and the person chose to create one, never on a reconnect. The person signs up in their own browser: GitHub flags sign-ups typed by an automated browser, so never open the sign-up in the shared browser and never type into or click its form.
 
-1. Post `[Open GitHub's sign-up](https://github.com/signup) in a private window, so it stays apart from your own account. Use [address] for the email. The username, password and any code from your email are yours to type. Tell me here when you're done.` with [address] the one the setup decision named, or the one the person gave you in chat; outside setup, ask in chat which address to use first. Offer a username if they ask.
+1. Post `Open a private window in your browser (⇧⌘N in Safari or Chrome) so this stays apart from your own GitHub account, then paste this link into it: https://github.com/signup. Use [address] for the email. The username, password and any code from your email are yours to type. Tell me here when you're done.` with [address] the one the setup decision named, or the one the person gave you in chat; outside setup, ask in chat which address to use first. Offer a username if they ask.
 2. Wait for them. Then `connect`.
 
 ## Posting as the person
@@ -37,7 +37,7 @@ Done when `gh auth status` succeeds.
 ## Connect
 
 1. Call `action: "connect"`. It returns `signin.user_code` and `signin.verification_uri`; or `signin.cause`, with `signin.next` when there is a recovery step (do it instead of waiting; a cause with no `next` has none, so tell the person in plain words what failed and stop); or, when no sign-in started, the account's status: do its top-level `next` if set, otherwise act on its row in the table above.
-2. Tell the person to open `signin.verification_uri` in a browser signed in **as the agents' GitHub account** (the private window they signed up in works), never their own, and give them `signin.user_code` to enter; never type it yourself.
+2. Tell the person to open `signin.verification_uri` in a browser signed in **as the agents' GitHub account** (a private window, so it isn't their own), and give them `signin.user_code` to enter; never type it yourself.
 3. Call `action: "check"` every few seconds while `signin.status` is `waiting`: the person is still entering the code, so keep checking even though `account` reads `needs_auth` until they finish. Any other status means the sign-in is over. On `failed`, follow `signin.next` when it is there, including what it says to do if the cause repeats; a failure with no `next` has none, so tell the person in plain words what failed and stop. Otherwise (`completed`, `superseded`, or no `signin` at all) act on `account`'s row in the table above; `ready` means done. If the same cause returns after a second `connect`, tell the person in plain words what failed and stop.
 
 For the agents' account, never run `gh auth login`, `gh auth logout`, `gh auth setup-git` or `git config` for credentials or identity in the shell, and never ask for a token, name or email. The account's home is read-only to shells and its identity comes from GitHub.

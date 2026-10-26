@@ -76,7 +76,7 @@ def test_github_sign_up_is_the_persons_own_browser_never_the_shared_one():
     """GitHub flags a sign-up an automated browser types, so the person signs up themselves."""
     account = (SKILLS / "github/references/agent-account.md").read_text(encoding="utf-8")
     assert "never open the sign-up in the shared browser and never type into or click its form" in account
-    assert "[Open GitHub's sign-up](https://github.com/signup) in a private window" in account
+    assert "paste this link into it: https://github.com/signup" in account
     assert "`browser_open`" not in account.split("## Creating the account", 1)[1].split("## Posting as the person", 1)[0]
 
 

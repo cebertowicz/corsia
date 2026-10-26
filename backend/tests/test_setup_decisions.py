@@ -26,8 +26,8 @@ GITHUB_OPTIONS = [
     {"id": "A", "label": "Make a separate GitHub account",
      "detail": "I give you the sign-up link and the address. You sign up in your own browser."},
     {"id": "B", "label": "Use my account",
-     "detail": ("Agents use the GitHub sign-in already on this computer, or I sign the GitHub CLI in "
-                "to your account and you approve that sign-in in your browser.")},
+     "detail": ("Agents use the GitHub sign-in already on this computer, or I help you sign in once in "
+                "your browser.")},
     {"id": "C", "label": "Not now", "detail": "Ask me any time."},
 ]
 GITHUB_NO_ACCOUNT_OPTIONS = [
@@ -41,7 +41,8 @@ EXPECTED_COMMUNITY = {
     "context": ("CORSIA tests changes to workflows and skills and keeps what works. Your agents can use the "
                 "improvements other people proved, and offer yours. You can always turn down a change and "
                 "keep your own version, and nothing private ever goes into what's shared."),
-    "tradeoff": "Sharing goes through GitHub, so choosing Use and share leads to a GitHub step next.",
+    "tradeoff": ("Sharing goes through GitHub, a free site where people share code, so choosing Use and "
+                 "share leads to a GitHub step next."),
     "recommendation": "A",
     "rationale": "You get what others prove, and a proven change helps everyone using CORSIA.",
     "options": [
