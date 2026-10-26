@@ -15,7 +15,7 @@ from tools.mcp_secrets import entry_name
 
 
 def test_v122_registers_connected_apps_step() -> None:
-    assert SCHEMA_VERSION == 146
+    assert SCHEMA_VERSION == 147
     assert MIGRATIONS[122] is migrate_122_to_123
 
 

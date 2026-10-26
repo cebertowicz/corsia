@@ -17,15 +17,19 @@ from fastapi import Depends, Query
 from api.cost_identity import IDENTITY_GROUP, IdentityResolver, identity_columns, identity_join
 from api.measurement_actual import build_actual
 from api.measurement_average import cost_average
+from api.measurement_breaks import source_started_period
 from api.measurement_join import joined_read
 from api.measurement_queries import (
     PREPARED_OUTCOMES, PREPARED_SCOPE, prepare_outcome_periods, prepare_scope_threads,
 )
-from api.measurement_registry import REGISTRY, period_measured
+from api.measurement_registry import REGISTRY
 from api.measurement_scope import validate_scope
 from api.measurement_size import size_period_totals
 from api.usage_rollup import usage_params, usage_source
 from core.measurement_scope import Grain, Window, query_params
+from core.measurement_token_contract import (
+    CLAUDE_CODE_SOURCE, CODEX_SOURCE, TOKEN_BUCKETS, buckets_reported_sql, contract_proven_sql, total_agrees_sql,
+)
 from infra.database import get_db
 from infra.db_async import run_bulk
 from llm.api_equivalent import (
@@ -34,11 +38,8 @@ from llm.api_equivalent import (
 from llm.list_prices import LIST_PRICES, OPENAI_LONG_CONTEXT_INPUT_TOKENS, listing_for_host
 from llm.network_endpoints import is_cloud_server
 
-CLAUDE_CODE_SOURCE = "external_harness:claude-code"
-CODEX_SOURCE = "external_harness:codex"
 # The size family's minimum n: the same rule that withholds Work per hour of your attention.
 MINIMUM_SIZED = REGISTRY["estimated_human_hours_per_active_hour"].minimum_n
-_BUCKETS = ("prompt_tokens", "completion_tokens", "cache_creation_tokens", "cache_read_tokens")
 # OpenAI's public Standard boundary is based on an individual call's input,
 # not its output or a period's aggregate. A row within the short bound is safe
 # even if it combines usage records; above it, opaque Codex receipts cannot prove tier.
@@ -91,25 +92,12 @@ IDLE_HOURS_SQL = f"CASE {_IDLE_CASES} ELSE 0 END" if _IDLE_CASES else "0"
 # this repository's first commit, and the later rows carry cache reads larger
 # than their prompt, impossible in the older cache-inclusive shape. Anything else
 # prices only without cache, where the disjoint and cache-inclusive contracts agree.
-_BUCKETS_REPORTED = " AND ".join(f"typeof(u.{bucket})='integer' AND u.{bucket}>=0" for bucket in _BUCKETS)
-_TOTAL_AGREES = (
-    "(u.total_tokens IS NULL OR u.total_tokens=" + "+".join(f"u.{bucket}" for bucket in _BUCKETS) + ")"
-)
-_REVIEW_SOURCES = "'host_access_action_review','host_access_application_review'"
 # Evaluated as an explicit 0/1 so a NULL source or model can never reach
-# ``NOT NULL`` (which is NULL, not true) and fall through to 'ok'.
-_CONTRACT_PROVEN = (
-    f"(CASE WHEN COALESCE(u.source,'') IN ('{CLAUDE_CODE_SOURCE}','checkpoint',{_REVIEW_SOURCES}) "
-    "AND COALESCE(u.model,'') LIKE 'claude-code/%' THEN 1 "
-    f"WHEN COALESCE(u.source,'') IN ('{CODEX_SOURCE}','checkpoint') AND COALESCE(u.model,'') LIKE 'codex/%' "
-    f"AND length(u.id)=24 AND u.id NOT GLOB '*[^0-9a-f]*' THEN 1 "
-    f"WHEN COALESCE(u.source,'') IN ({_REVIEW_SOURCES}) AND COALESCE(u.model,'') LIKE 'codex/%' THEN 1 "
-    f"WHEN COALESCE(u.source,'')='conversation' AND COALESCE(u.model,'') LIKE 'external@%' "
-    f"AND u.created_at>='2026-09-17' THEN 1 "
-    f"WHEN u.cache_creation_tokens=0 AND u.cache_read_tokens=0 "
-    f"AND COALESCE(u.source,'')<>'{CODEX_SOURCE}' AND COALESCE(u.model,'') NOT LIKE 'codex/%' THEN 1 "
-    f"ELSE 0 END)=1"
-)
+# ``NOT NULL`` (which is NULL, not true) and fall through to 'ok'. These are
+# the same alias-aware clauses the partial source-start index uses.
+_BUCKETS_REPORTED = buckets_reported_sql("u")
+_TOTAL_AGREES = total_agrees_sql("u")
+_CONTRACT_PROVEN = contract_proven_sql("u")
 ADMISSION_SQL = (
     f"CASE WHEN NOT ({_BUCKETS_REPORTED}) THEN 'tokens_unreported' "
     f"WHEN NOT {_TOTAL_AGREES} THEN 'tokens_inconsistent' "
@@ -259,7 +247,7 @@ def classify_usage_rows(rows: list[dict[str, Any]], listings: Mapping[str, str])
                 and has_public_long_context_price(model, listing)):
             reason = "context_tier_unproven"
         idle_hours = bool(row.get("idle_hours"))
-        buckets = tuple(int(row[bucket]) for bucket in _BUCKETS)
+        buckets = tuple(int(row[bucket]) for bucket in TOKEN_BUCKETS)
         dollars = None if reason else api_equivalent(model, *buckets, idle_hours=idle_hours, listing=listing)
         if dollars is None and reason is None:
             reason = ("cache_rate_unpublished" if has_unpublished_cache_rate(
@@ -276,9 +264,11 @@ def _series(db, classified: list[dict[str, Any]], sized: Mapping[str, Mapping[st
     ``sized`` is the week's size-rated accepted outcomes and their hours of work. All priced
     spend in a period divided by those hours is the all-in cost per hour of delivered work; it
     is withheld, never zero, when fewer than ``MINIMUM_SIZED`` outcomes stand behind it.
-    The series starts at the later of its first priced period and the size-rating instrument's
-    first period, where Work per hour starts, so no leading period reads as no data.
+    The series starts at its first priced period. Work per hour also waits for the first
+    accepted outcome with a size rating, so no leading period reads as no data while a
+    spend-only subtotal remains observable.
     """
+    size_start = source_started_period(db, "estimated_human_hours_per_active_hour", grain)
     outcomes = {row["period"]: int(row["outcomes"]) for row in db.execute(
         f"SELECT period,outcomes FROM {PREPARED_OUTCOMES}"
     ).fetchall()}
@@ -291,7 +281,7 @@ def _series(db, classified: list[dict[str, Any]], sized: Mapping[str, Mapping[st
         return []
     series: list[dict[str, Any]] = []
     for period in sorted(set(outcomes) | set(by_period)):
-        if period < first_priced or not period_measured("estimated_human_hours_per_active_hour", period, grain):
+        if period < first_priced or (size_start is not None and period < size_start):
             continue
         rows = by_period[period]
         priced = [row for row in rows if row["outcome"] == "priced"]

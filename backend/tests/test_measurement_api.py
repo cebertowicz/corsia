@@ -98,8 +98,10 @@ def _seed_outcomes(db, thread_id: str, count: int = 762) -> None:
         )
 
 
-def _seed_decision(db, index: int, answer: str | None, *, raised: str = "2026-09-15T12:00:00Z", thread_id: str = "root", recommendation: str | None = "B") -> None:
-    decision: dict[str, object] = {"thread_id": thread_id, "raised_at": raised, "answered_at": "2026-09-23T12:00:00Z", "state": "answered", "recommendation": recommendation}
+def _seed_decision(db, index: int, answer: str | None, *, raised: str = "2026-09-15T12:00:00Z",
+                   answered: str = "2026-09-23T12:00:00Z", thread_id: str = "root",
+                   recommendation: str | None = "B") -> None:
+    decision: dict[str, object] = {"thread_id": thread_id, "raised_at": raised, "answered_at": answered, "state": "answered", "recommendation": recommendation}
     if answer is not None:
         decision["answer"] = {"option_id": answer}
     metadata = {"plan_decision": decision}
@@ -126,6 +128,9 @@ async def test_alignment_common_no_answer_minimum_and_thin_rules(isolated_db, co
         _seed_outcomes(db, "root", count=20)
         for index in range(count):
             _seed_decision(db, index, "A")
+        if count == 0:
+            _seed_thread(db, "foreign", user_id="another-user")
+            _seed_decision(db, 0, "A", thread_id="foreign")
         db.commit()
     finally:
         db.close()
@@ -238,7 +243,8 @@ async def test_series_returns_762_aggregate_only_outcomes(isolated_db):
     result = await measurement_series("outcomes", project="all", agent="none", grain="weeks", timezone_name="UTC", user=USER)
     row = next(row for row in result["rows"] if row["n"] == 762)
     assert row["value"] == row["n"] == 762
-    assert set(row) == {"period", "series", "value", "raw_value", "n", "proxy", "partial", "comparable", "break", "dimension", "thin", "average"}
+    assert set(row) == {"period", "series", "method_version", "value", "raw_value", "n", "proxy", "partial", "comparable", "break", "dimension", "thin", "average"}
+    assert row["method_version"] == 1  # MR-9: every point carries its method identity
     assert not {"thread_id", "node_id", "message_id", "content"} & set(row)
 
 
@@ -395,9 +401,10 @@ async def test_tokens_are_one_total_line_and_index_marks_dollars_unavailable(iso
         _seed_outcomes(db, "root")
         db.execute("INSERT INTO context_manifests (id,harness,entries_json,entry_count,created_at) VALUES ('manifest','native','[]',0,'t')")
         db.executemany(
-            "INSERT INTO llm_usage (id,thread_id,model,total_tokens,cost_usd,source,created_at,context_manifest_id) VALUES (?,?,?,?,?,?,?,?)",
-            [("usage-native", "root", "test", 7620, 1.0, "test", "2026-09-23T12:00:00Z", "manifest"),
-             ("usage-unknown", "root", "test", 762, None, "test", "2026-09-23T12:00:00Z", None)],
+            "INSERT INTO llm_usage (id,thread_id,model,total_tokens,prompt_tokens,completion_tokens,cache_creation_tokens,cache_read_tokens,cost_usd,source,created_at,context_manifest_id) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            [("usage-native", "root", "claude-code/test", 7620, 7620, 0, 0, 0, 1.0, "external_harness:claude-code", "2026-09-23T12:00:00Z", "manifest"),
+             ("usage-unknown", "root", "claude-code/test", 762, 762, 0, 0, 0, None, "external_harness:claude-code", "2026-09-23T12:00:00Z", None)],
         )
         db.commit()
     finally:
@@ -411,7 +418,8 @@ async def test_tokens_are_one_total_line_and_index_marks_dollars_unavailable(iso
     index = await measurement_index(project="all", agent="none", user=USER)
     definitions = {item["id"]: item for item in index["definitions"]}
     assert definitions["dollar_trend"]["availability"] == "unavailable"
-    assert definitions["asks_per_outcome"]["breaks"] == [{"period": "2026-09-07", "kind": "definition"}]
+    # There is no ask receipt in this fixture, so it has no source boundary; the world break remains global.
+    assert all(item["kind"] != "source" for item in definitions["asks_per_outcome"]["breaks"])
     assert index["cost_metadata"] == {"known_cost_usd": 1.0, "unknown_cost_share": 0.5}
 
 
@@ -727,15 +735,31 @@ async def test_validation_rejects_unknown_ids_and_grains(isolated_db):
 
 
 @pytest.mark.asyncio
-async def test_asks_series_starts_where_user_owned_holds_were_recorded_so_it_has_no_definition_break(isolated_db):
-    """No served asks row predates the definition change, so no row carries a break the chart must mark."""
+async def test_fresh_asks_series_starts_at_first_outcome_without_recording_user_hold(isolated_db):
+    """A live read starts the ratio at its first accepted outcome and creates no hold boundary."""
     from api.measurement import measurement_series
+    from infra.database import get_db
+
+    db = get_db()
+    try:
+        _seed_thread(db, "root")
+        _seed_outcomes(db, "root")
+        _seed_decision(db, 1, None, raised="2026-08-24T12:00:00Z", thread_id="root")
+        db.execute(
+            "INSERT INTO plan_node_holds (id,node_id,kind,reason_key,reason,owner_kind,provenance,created_at) "
+            "VALUES ('hold','node-0','blocked','test','test','user','test','2026-09-07T12:00:00Z')"
+        )
+        db.commit()
+    finally:
+        db.close()
 
     result = await measurement_series("asks_per_outcome,outcomes", project="all", agent="none", grain="weeks", timezone_name="UTC", user=USER)
     rows = {(row["series"], row["period"]): row for row in result["rows"]}
 
-    assert ("asks_per_outcome", "2026-08-24") not in rows and ("asks_per_outcome", "2026-08-31") not in rows
-    assert rows[("asks_per_outcome", "2026-09-07")]["break"] is None
+    assert ("asks_per_outcome", "2026-09-21") in rows and ("asks_per_outcome", "2026-08-24") not in rows
+    assert result["breaks"]["asks_per_outcome"] == [
+        {"period": "2026-09-21", "kind": "start", "reason": "first recorded on this computer"}
+    ]
     assert all(row["break"] is None and row["comparable"] for row in result["rows"] if row["series"] == "outcomes")
 
 
@@ -750,6 +774,14 @@ async def test_each_series_is_the_same_alone_or_batched(isolated_db, monkeypatch
     from api.measurement_registry import REGISTRY
 
     _pin_series_now(monkeypatch, 2026, 10, 8, 12, 0)
+    from infra.database import get_db
+    db = get_db()
+    try:
+        _seed_thread(db, "root")
+        _seed_outcomes(db, "root")
+        db.commit()
+    finally:
+        db.close()
     ids = [metric for metric, definition in REGISTRY.items() if definition.available]
     for grain in ("weeks", "days"):
         batch = await measurement_series(",".join(ids), project="all", agent="none", grain=grain, timezone_name="UTC", user=USER)
@@ -758,7 +790,7 @@ async def test_each_series_is_the_same_alone_or_batched(isolated_db, monkeypatch
             alone = await measurement_series(metric, project="all", agent="none", grain=grain, timezone_name="UTC", user=USER)
             expected = [row for row in alone["rows"] if row["series"] == metric]
             assert [row for row in batch["rows"] if row["series"] == metric] == expected, (grain, metric)
-            assert batch["windows"][metric] == alone["windows"][metric], (grain, metric)
+            assert batch["windows"][metric] == alone["windows"][metric], (grain, metric, batch["breaks"][metric], alone["breaks"][metric])
 
 
 @pytest.mark.asyncio
@@ -778,6 +810,14 @@ async def test_quality_all_range_serves_the_measured_period(isolated_db):
     try:
         _seed_thread(db, "root")
         _seed_outcomes(db, "root")
+        # The start is installation-wide, while the selected scope can still have no rejections.
+        _seed_thread(db, "foreign", user_id="another-user")
+        _seed_plan(db, "foreign-plan", "foreign")
+        _seed_task(db, "foreign-plan", "foreign-node")
+        db.execute(
+            "INSERT INTO plan_node_events (id,node_id,provenance,event,prior_state,new_state,created_at) "
+            "VALUES ('foreign-rejection','foreign-node','test','review_rejected','review_requested','active','2026-09-23T12:00:00Z')"
+        )
         db.commit()
     finally:
         db.close()
@@ -803,6 +843,7 @@ def test_http_sparse_token_periods_serve_one_total_row_per_period(isolated_db):
             for number in range(24):
                 _seed_task(db, "sparse-plan", f"{period}-{number}", settled=f"{period}T12:00:00Z")
         _seed_manifest(db)
+        _seed_token_contract_start(db, "2026-09-14T00:00:00Z")
         db.executemany(
             "INSERT INTO llm_usage (id,thread_id,model,total_tokens,cost_usd,source,created_at,context_manifest_id) "
             "VALUES (?, 'root', 'test', ?, 0.0, 'test', ?, ?)",
@@ -828,17 +869,39 @@ def test_http_sparse_token_periods_serve_one_total_row_per_period(isolated_db):
         assert row["partial"] is False
 
 
-def test_http_empty_token_family_serves_one_gap_per_period(isolated_db):
-    """An empty token family still serves one gap per period, on the one total line."""
+def test_http_empty_token_family_has_no_rows_before_its_contract_source(isolated_db):
+    """Without a complete raw token receipt, this instrument has not begun measurement."""
     response = _measurement_client().get(
         "/api/measurement/series?ids=fresh_tokens_per_outcome&grain=weeks&timezone=UTC&project=all&agent=none"
     )
     assert response.status_code == 200, response.text
     rows = response.json()["rows"]
-    assert rows
-    assert len({row["period"] for row in rows}) == len(rows)
-    assert all(row["dimension"] is None and row["proxy"] is False for row in rows)
-    assert all(row["value"] is None and row["n"] == 0 for row in rows)
+    # MR-9/10: no complete raw token contract means the instrument does not exist yet.
+    assert rows == []
+
+
+def test_http_token_family_keeps_an_empty_period_as_a_gap_after_its_contract_start(isolated_db):
+    """A measured token series retains a quiet intervening period as unknown, never zero."""
+    from infra.database import get_db
+
+    db = get_db()
+    try:
+        _seed_thread(db, "root")
+        _seed_manifest(db)
+        _seed_usage(db, "first", total=100, prompt=100, completion=0, cache_creation=0, cache_read=0,
+                    created_at="2026-09-14T12:00:00Z")
+        _seed_usage(db, "later", total=100, prompt=100, completion=0, cache_creation=0, cache_read=0,
+                    created_at="2026-09-28T12:00:00Z")
+        db.commit()
+    finally:
+        db.close()
+
+    response = _measurement_client().get(
+        "/api/measurement/series?ids=fresh_tokens_per_outcome&grain=weeks&timezone=UTC&project=all&agent=none"
+    )
+    assert response.status_code == 200, response.text
+    gap = next(row for row in response.json()["rows"] if row["period"] == "2026-09-21")
+    assert (gap["value"], gap["n"]) == (None, 0)
 
 
 def _measurement_client():
@@ -916,13 +979,20 @@ def _seed_task(db, plan_id: str, node_id: str, *, settled: str = _WEEK) -> None:
         )
 
 
-def _seed_usage(db, row_id: str, *, total, prompt, completion, cache_creation, cache_read) -> None:
+def _seed_usage(db, row_id: str, *, total, prompt, completion, cache_creation, cache_read,
+                created_at: str = _WEEK) -> None:
+    """Seed a real Claude Code token-contract row for Measurement source boundaries."""
     db.execute(
         "INSERT INTO llm_usage (id,thread_id,model,total_tokens,prompt_tokens,completion_tokens,"
         "cache_creation_tokens,cache_read_tokens,cost_usd,source,created_at,context_manifest_id) "
-        "VALUES (?, 'root', 'test', ?, ?, ?, ?, ?, 0.0, 'test', ?, 'manifest')",
-        (row_id, total, prompt, completion, cache_creation, cache_read, _WEEK),
+        "VALUES (?, 'root', 'claude-code/test', ?, ?, ?, ?, ?, 0.0, 'external_harness:claude-code', ?, 'manifest')",
+        (row_id, total, prompt, completion, cache_creation, cache_read, created_at),
     )
+
+
+def _seed_token_contract_start(db, created_at: str, row_id: str = "token-start") -> None:
+    """Make the raw first complete token-contract record explicit in a fixture."""
+    _seed_usage(db, row_id, total=0, prompt=0, completion=0, cache_creation=0, cache_read=0, created_at=created_at)
 
 
 def _seed_manifest(db) -> None:
@@ -1087,6 +1157,7 @@ async def test_a_period_of_only_uncounted_calls_has_no_token_figure_never_zero(i
     try:
         _seed_thread(db, "root")
         _seed_manifest(db)
+        _seed_token_contract_start(db, "2026-09-14T12:00:00Z")
         _seed_usage(db, "u-blank", total=None, prompt=None, completion=None, cache_creation=None, cache_read=None)
         db.commit()
     finally:
@@ -1095,7 +1166,7 @@ async def test_a_period_of_only_uncounted_calls_has_no_token_figure_never_zero(i
     series = await measurement_series("fresh_tokens", project="all", agent="none", grain="weeks", timezone_name="UTC", user=USER)
     row = next(row for row in series["rows"] if row["period"] == "2026-09-21")
     assert (row["value"], row["unknown"], row["n"]) == (None, 1, 1)
-    assert all(other["value"] is None for other in series["rows"] if other["period"] != "2026-09-21")
+    assert all(other["value"] is None for other in series["rows"] if other["period"] not in {"2026-09-14", "2026-09-21"})
 
 
 @pytest.mark.asyncio
@@ -1111,10 +1182,8 @@ async def test_fresh_tokens_also_serves_the_period_in_progress_flagged_partial(i
         _seed_outcomes(db, "root", count=24)
         _seed_manifest(db)
         _seed_usage(db, "u-done", total=1000, prompt=600, completion=100, cache_creation=0, cache_read=300)
-        db.execute(
-            "INSERT INTO llm_usage (id,thread_id,model,total_tokens,cache_read_tokens,cost_usd,source,created_at,context_manifest_id) "
-            "VALUES ('u-now','root','test',500,100,0.0,'test','2026-10-06T09:00:00Z','manifest')"
-        )
+        _seed_usage(db, "u-now", total=500, prompt=400, completion=0, cache_creation=0, cache_read=100,
+                    created_at="2026-10-06T09:00:00Z")
         db.commit()
     finally:
         db.close()
@@ -1140,10 +1209,9 @@ async def test_days_serve_today_so_far_flagged_partial_for_the_token_total_withi
         _seed_thread(db, "root")
         _seed_outcomes(db, "root", count=24)
         _seed_manifest(db)
-        db.execute(
-            "INSERT INTO llm_usage (id,thread_id,model,total_tokens,cache_read_tokens,cost_usd,source,created_at,context_manifest_id) "
-            "VALUES ('u-first-minutes','root','test',500,100,0.0,'test','2026-10-08T00:10:00Z','manifest')"
-        )
+        _seed_token_contract_start(db, "2026-10-07T12:00:00Z")
+        _seed_usage(db, "u-first-minutes", total=500, prompt=400, completion=0, cache_creation=0, cache_read=100,
+                    created_at="2026-10-08T00:10:00Z")
         db.commit()
     finally:
         db.close()
@@ -1172,10 +1240,9 @@ async def test_days_serve_the_outcome_count_so_far_today_flagged_partial_and_nev
             _seed_task(db, "plan-two", f"today-{number}", settled="2026-10-08T00:10:00Z")
         _seed_task(db, "plan-two", "tomorrow", settled="2026-10-09T00:00:00Z")
         _seed_manifest(db)
-        db.execute(
-            "INSERT INTO llm_usage (id,thread_id,model,total_tokens,cache_read_tokens,cost_usd,source,created_at,context_manifest_id) "
-            "VALUES ('u-first-minutes','root','test',500,100,0.0,'test','2026-10-08T00:10:00Z','manifest')"
-        )
+        _seed_token_contract_start(db, "2026-10-07T12:00:00Z")
+        _seed_usage(db, "u-first-minutes", total=500, prompt=400, completion=0, cache_creation=0, cache_read=100,
+                    created_at="2026-10-08T00:10:00Z")
         db.commit()
     finally:
         db.close()
@@ -1203,10 +1270,9 @@ async def test_a_token_total_is_comparable_in_every_period_a_per_outcome_rate_is
     try:
         _seed_thread(db, "root")
         _seed_manifest(db)
-        db.execute(
-            "INSERT INTO llm_usage (id,thread_id,model,total_tokens,cache_read_tokens,cost_usd,source,created_at,context_manifest_id) "
-            "VALUES ('u-aug','root','test',500,100,0.0,'test','2026-08-11T09:00:00Z','manifest')"
-        )
+        _seed_usage(db, "u-aug", total=500, prompt=400, completion=0, cache_creation=0, cache_read=100,
+                    created_at="2026-08-11T09:00:00Z")
+        db.execute("INSERT INTO measure_breaks(period,kind,metric_group,reason) VALUES ('2026-08-31','world',NULL,'tasks were split about 5 times finer from Aug 31, 2026 on')")
         db.commit()
     finally:
         db.close()
@@ -1393,8 +1459,12 @@ async def test_no_series_serves_a_period_before_its_instrument_existed(isolated_
         return (row["value"], row["n"])
 
     assert answer("outcomes", before)[0] == 24, "outcomes ran before 08-31, so its own start still serves it"
+    # Both source events are retained in the earlier period, so it is measured rather than
+    # suppressed by an obsolete release-date boundary.
+    assert answer("asks_per_outcome", before) == (pytest.approx(1 / 24), 24)
+    assert answer("first_try_acceptance", before) == (1.0, 24)
     for metric in ("asks_per_outcome", "first_try_acceptance"):
-        assert (metric, before) not in served, f"{metric} serves no period before its instrument existed"
+        assert (metric, "2026-08-17") not in served, f"{metric} serves no period before its instrument existed"
         assert answer(metric, after)[0] is not None, metric
     # Retained presence, not a hard-coded release date, defines the first observable attention period.
     assert answer("active_hours_per_outcome", before)[0] == pytest.approx(1 / 24)

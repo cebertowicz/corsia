@@ -47,9 +47,9 @@ export interface SizeCoverage {
 	comparable_reason: string | null;
 	rate_reason: string | null;
 	class_midpoint_hours: Record<string, number>;
-	/** The registry's data start and comparability break (ISO dates), served with the row. */
+	/** The data-derived rate start and latest comparability break (ISO dates); null when no break exists. */
 	data_start: string;
-	comparability_before: string;
+	comparability_before: string | null;
 }
 
 /** How one measurement value is rendered. */

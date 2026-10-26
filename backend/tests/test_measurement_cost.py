@@ -586,6 +586,7 @@ def test_cost_per_hour_without_any_size_is_unknown(isolated_db, measurement_cloc
 @pytest.mark.parametrize("grain, before, first", [("weeks", "2026-08-30", "2026-08-31"), ("days", "2026-08-30", "2026-08-31")])
 def test_the_cost_series_starts_with_the_size_rating_instrument_not_with_the_first_spend(isolated_db, monkeypatch, grain, before, first):
     from infra.database import get_db
+    from tests.plan_writer_authorizer import raw_plan_seed
     from tests.test_measurement_api import _seed_thread
 
     # Tuesday 2026-09-08: both grains' spines reach back over the size series' start (2026-08-31).
@@ -593,6 +594,19 @@ def test_the_cost_series_starts_with_the_size_rating_instrument_not_with_the_fir
     db = get_db()
     try:
         _seed_thread(db, "root", agent=True)
+        db.execute("INSERT INTO plans (id,owner_kind,owner_id,state,revision,created_at,updated_at) VALUES ('cost-plan','thread','root','active',1,'t','t')")
+        with raw_plan_seed(db):
+            db.execute(
+                "INSERT INTO plan_nodes (id,plan_id,order_key,kind,title,acceptance_criteria,state,commitment_id,"
+                "requirements_revision,revision,size,created_at,updated_at) "
+                "VALUES ('cost-size','cost-plan',0,'task','t','t','accepted','cost-size',1,1,'S',?,?)",
+                (f"{first}T12:00:00Z", f"{first}T12:00:00Z"),
+            )
+            db.execute(
+                "INSERT INTO plan_node_events (id,node_id,provenance,event,prior_state,new_state,created_at) "
+                "VALUES ('cost-size-event','cost-size','test','accepted','active','accepted',?)",
+                (f"{first}T12:00:00Z",),
+            )
         for day in (before, first, "2026-09-02"):
             db.execute(
                 "INSERT INTO llm_usage (id,thread_id,model,prompt_tokens,completion_tokens,cache_creation_tokens,cache_read_tokens,"
