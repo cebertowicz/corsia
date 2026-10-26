@@ -16,6 +16,7 @@ from registry.observation_result import (
     observation_result,
     observe_settled_tool_result,
 )
+from registry import models
 from registry.command_match import command_matches_trigger  # noqa: F401  (re-exported)
 from registry.observed_write import register_observed_write
 from registry.registration_writer import RegistrationOrigin
@@ -203,7 +204,8 @@ def observe_command_result(
     finally:
         if not db:
             rule_db.close()
-    first: dict | None = None
+    owned: dict | None = None  # the registration returned: the owner's first, else a follower's
+    followed: dict | None = None
     seen: set[tuple[str, str, str]] = set()
     for rule in covering:
         if not command_matches_trigger(args.get(rule.command_arg), rule):
@@ -229,21 +231,25 @@ def observe_command_result(
             _record(thread_id, rule, "not_registered", artifact, str(error))
             raise CommandArtifactRegistrationError(artifact, error) from error
         label = f"{artifact.type} {artifact.external_id}"
-        if registered is None:
+        if registered is None:  # this thread already has a current registration: owner or follower
+            current = models.resolve(artifact.integration, artifact.type, artifact.external_id, db=db)
+            owns = bool(current) and current["parent_thread_id"] == thread_id
             if told is not None:
-                told.append(f"{label} was already registered to you.")
+                told.append(f"{label} is already registered to you." if owns else
+                            f"Not registered to you: {label} belongs to another chat; you already follow it.")
         elif registered.get("parent_thread_id") == thread_id:
             _record(thread_id, rule, "registered", artifact, None)
             if told is not None:
                 told.append(f"Registered {label} to you.")
-            first = first or registered
+            owned = owned or registered
             logger.info("registry observer: rule {} registered {} to {}", rule.id, artifact.external_id, thread_id)
         else:
             _record(thread_id, rule, "not_registered", artifact, "it already belongs to another chat")
             if told is not None:
                 told.append(f"Not registered to you: {label} already belongs to another chat, "
                             f"which keeps it; you follow it.")
-    return first
+            followed = followed or registered
+    return owned or followed
 
 
 def _call_args_from_metadata(

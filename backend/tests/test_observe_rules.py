@@ -6,6 +6,7 @@ disposable database; only the shell's subprocess is stubbed.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import datetime, timezone
 
@@ -147,11 +148,39 @@ async def test_an_observe_row_never_takes_an_owned_artifact_from_its_owner(isola
     assert _run("owner", "gh pr create")[0]["parent_thread_id"] == "owner"
     await _observe_rule("rival")
     claimed, told = _run("rival", "ship-pr --fast")
-    assert claimed is None and _owner() == "owner"
+    assert _owner() == "owner"
+    assert claimed is not None and claimed["external_id"] == PR  # the follower's registration is returned
     assert told == ["Not registered to you: pull-request owner/repo#42 already belongs to another chat, "
                     "which keeps it; you follow it."]
     [row] = _rows("SELECT relationship_state FROM artifact_registrations WHERE parent_thread_id='rival'")
     assert row["relationship_state"] == "subscriber-recent"
+
+
+@pytest.mark.asyncio
+async def test_a_second_run_tells_the_owner_and_a_follower_apart(isolated_db):
+    _agent("owner")
+    _agent("rival")
+    await _observe_rule("rival")
+    _run("owner", "gh pr create")
+    _run("rival", "ship-pr --fast")
+    assert _run("owner", "gh pr create") == (None, ["pull-request owner/repo#42 is already registered to you."])
+    again, told = _run("rival", "ship-pr --fast")
+    assert (again, _owner()) == (None, "owner")
+    assert told == ["Not registered to you: pull-request owner/repo#42 belongs to another chat; "
+                    "you already follow it."]
+
+
+def test_a_follower_gets_the_pane_refresh_through_the_shell_tool(isolated_db, monkeypatch):
+    _agent("owner")
+    # In no project, as the shell tool's own tests are, and the owner's user, so it can follow.
+    rival = make_session(get_db(), prefix="rival", user_id="user-1")
+    _run("owner", "gh pr create")
+    notified: list[dict] = []
+    monkeypatch.setattr("tools.shell.notify_changed", notified.append)
+    _stub_process(monkeypatch, stdout=_URL + "\n")
+    result = asyncio.run(BashTool().execute("gh pr create --title t", **_direct_shell_context(rival)))
+    assert "Registered" not in result and _owner() == "owner"
+    assert [item["external_id"] for item in notified] == [PR]
 
 
 @pytest.mark.asyncio
@@ -186,7 +215,7 @@ async def test_the_caller_is_told_in_the_shell_result_what_the_rules_did(isolate
     assert result.startswith(_URL) and "Registered pull-request owner/repo#42 to you." in result
     assert "Warning" not in result
     again = await BashTool().execute("gh pr create --title t", **_direct_shell_context(thread))
-    assert "pull-request owner/repo#42 was already registered to you." in again
+    assert "pull-request owner/repo#42 is already registered to you." in again
 
     _stub_process(monkeypatch, stdout="no url here\n")
     nothing = await BashTool().execute("gh pr create --title t", **_direct_shell_context(thread))
