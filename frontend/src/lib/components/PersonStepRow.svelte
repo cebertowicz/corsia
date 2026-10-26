@@ -100,6 +100,7 @@
 		{title}
 		lead={mark}
 		aside={more ? moreMark : undefined}
+		follow
 		ctx={stateLine}
 		trailing={doMark}
 		data-step-chip

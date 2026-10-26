@@ -16,6 +16,7 @@
 		title,
 		lead,
 		aside,
+		follow = false,
 		ctx,
 		trailing,
 		...rest
@@ -31,6 +32,8 @@
 		lead: Snippet;
 		/** Beside the title, never truncated: the time of an ask, the "+N more" of a group. */
 		aside?: Snippet;
+		/** The aside follows the title directly, as one phrase, instead of sitting at the far edge. */
+		follow?: boolean;
 		ctx?: Snippet;
 		trailing?: Snippet;
 	} & Omit<HTMLAttributes<HTMLElement>, 'title' | 'children'> = $props();
@@ -48,7 +51,7 @@
 >
 	{@render lead()}
 	<span class="text">
-		<span class="head">
+		<span class="head" class:follow>
 			<span class="title">{title}</span>
 			{#if aside}<span class="when">{@render aside()}</span>{/if}
 		</span>
@@ -95,6 +98,7 @@
 	}
 	/* The title and its aside share one line, the aside on the title's baseline; only the title gives way. */
 	.head { display: flex; align-items: baseline; gap: var(--space-2); min-width: 0; }
+	.head.follow .title { flex: 0 1 auto; }
 	.when { flex: 0 0 auto; font-size: var(--text-footnote); line-height: var(--lh-tight); color: var(--text-secondary); font-variant-numeric: tabular-nums; }
 	.ctx {
 		display: flex;
