@@ -49,8 +49,10 @@ class PasswordReadGuard:
 
 
 _steps: dict[str, BrowserStep] = {}
-# A document stays read-guarded independently of whether any step is open.
-_guarded_visits: dict[str, PasswordReadGuard] = {}
+# A document stays read-guarded independently of whether any step is open, and a thread keeps one guard
+# per document it has guarded: leaving a tab never lifts it, and a loader id never recurs, so a new
+# document is never over-refused. Cleared when the thread's browser closes.
+_guarded_visits: dict[str, dict[str, PasswordReadGuard]] = {}
 _probe_locks: dict[str, asyncio.Lock] = {}
 
 
@@ -79,11 +81,11 @@ async def require_page_access(thread_id: str, probe: browser_pane_state.Probe, a
     refused (AR2); without it, such a read on a guarded visit is refused.
     """
     async with _probe_locks.setdefault(thread_id, asyncio.Lock()):
-        _result, prior = await _guarded_probe(thread_id, probe)
+        result, prior = await _guarded_probe(thread_id, probe)
         if isinstance(prior, PersonStep):
             # The person's step is still on this visit: the agent's command never touches the page or settles it.
             raise BrowserSessionError(PERSON_STEP)
-        if (guarded := _guarded_visits.get(thread_id)) is not None:
+        if (guarded := _guarded_visits.get(thread_id, {}).get(result.visit)) is not None:
             await _refuse_password_read(guarded, args, resolve)
 
 
@@ -109,15 +111,12 @@ async def declare_person_step(thread_id: str, probe: browser_pane_state.Probe, i
 async def _guarded_probe(thread_id: str, probe: browser_pane_state.Probe, *, declaring: bool = False) -> tuple[PasswordProbe, BrowserStep | None]:
     """Probe the agent's page under its lock; return the result and the step still open on its visit.
 
-    A new visit ends the prior step and lifts the read guard. A person step the person has ended is
+    A new visit ends the prior step; read guards stay per visit. A person step the person has ended is
     dropped, and a visible password field opens or keeps the visit's password step and is refused.
+    The probe gets every guarded visit's nodes and re-checks those of whichever visit the tab is on.
     """
-    prior = _steps.get(thread_id)
-    guarded = _guarded_visits.get(thread_id)
-    known_visit = prior.visit if prior is not None else guarded.visit if guarded is not None else None
-    known = _known_nodes(thread_id, known_visit) if known_visit is not None else frozenset()
     try:
-        result = await probe(known_visit, known)
+        result = await probe(_known_nodes(thread_id))
     except Exception as exc:
         if isinstance(exc, BrowserSessionError) and str(exc) == PAGE_CHECK_FAILED:
             raise
@@ -142,15 +141,14 @@ def _ending(thread_id: str) -> str:
 
 def _guard(thread_id: str, result: PasswordProbe, *, nodes: frozenset[int] | None = None) -> None:
     """Retain password node identities independently of the step lifecycle (AR2)."""
-    guarded = _guarded_visits.get(thread_id)
-    if guarded is None or guarded.visit != result.visit:
-        guarded = _guarded_visits[thread_id] = PasswordReadGuard(result.visit)
+    guards = _guarded_visits.setdefault(thread_id, {})
+    guarded = guards.setdefault(result.visit, PasswordReadGuard(result.visit))
     guarded.seen_nodes = guarded.seen_nodes | (result.visible_nodes if nodes is None else nodes)
 
 
-def _known_nodes(thread_id: str, visit: str) -> frozenset[int]:
-    guarded = _guarded_visits.get(thread_id)
-    return guarded.seen_nodes if guarded is not None and guarded.visit == visit else frozenset()
+def _known_nodes(thread_id: str) -> dict[str, frozenset[int]]:
+    """Each guarded visit's password node identities, for the probe to match against the live page's visit."""
+    return {visit: guarded.seen_nodes for visit, guarded in _guarded_visits.get(thread_id, {}).items()}
 
 
 def person_input(thread_id: str) -> None:
@@ -164,6 +162,7 @@ def person_input(thread_id: str) -> None:
 def browser_closed(thread_id: str) -> None:
     """Stop an open step's re-probe once the thread's browser has closed; the agent is in no page."""
     browser_pane_state.agent_left(thread_id)
+    _guarded_visits.pop(thread_id, None)
     if (step := _steps.get(thread_id)) is not None:
         _stop_reprobe(step)
 
@@ -214,7 +213,7 @@ async def _reprobe(thread_id: str, step: BrowserStep) -> bool:
             if step.reprobe is None:
                 return False
         try:
-            result = await probes[0](step.visit, _known_nodes(thread_id, step.visit))
+            result = await probes[0](_known_nodes(thread_id))
         except Exception as exc:
             # A page mid-navigation can fail one probe. The step stays open, as an agent command's
             # failed probe fails closed, and the next interval probes again.
@@ -259,12 +258,9 @@ async def _end_step(thread_id: str, step: BrowserStep, *, settle: bool) -> None:
 async def _observe_step(thread_id: str, result: PasswordProbe | None, *, declaring: bool = False) -> BrowserStep | None:
     """The shared transition path for agent and own-tab pane probes, under the probe lock.
 
-    A new document lifts the old read guard. A person step ends on a row ending or document change;
-    a password step ends when its field disappears. An ended password row stops monitoring but keeps
+    A person step ends on a row ending or document change; a password step ends when its field disappears. An ended password row stops monitoring but keeps
     refusing commands while its field shows. No row ending can discard this document's hidden inputs.
     """
-    if result is not None and (guarded := _guarded_visits.get(thread_id)) is not None and guarded.visit != result.visit:
-        _guarded_visits.pop(thread_id, None)
     step = _steps.get(thread_id)
     row_state = await asyncio.to_thread(_step_row_state, step.node_id) if step is not None else None
     ends = step is not None and result is not None and (
@@ -273,7 +269,10 @@ async def _observe_step(thread_id: str, result: PasswordProbe | None, *, declari
         or isinstance(step, PasswordStep) and not declaring and not result.visible_nodes
     )
     # A handoff never converts an open password step; its ordinary command or pane probe settles it first.
-    if result is not None and (result.visible_nodes or isinstance(step, PersonStep) and ends and result.present_nodes):
+    # A person step that ends on the same visit keeps that document's hidden inputs guarded; one that ends
+    # on a new visit guards nothing there, since no password was shown on that document.
+    same_visit_end = isinstance(step, PersonStep) and ends and result is not None and result.visit == step.visit
+    if result is not None and (result.visible_nodes or same_visit_end and result.present_nodes):
         _guard(thread_id, result, nodes=result.present_nodes | result.visible_nodes)
     if step is None:
         return None

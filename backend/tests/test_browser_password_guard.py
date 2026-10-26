@@ -41,7 +41,7 @@ async def test_password_step_settles_then_keeps_eval_and_hidden_password_reads_r
     ))
     events, opened, settled = [], [], []
 
-    async def probe(_visit, _known):
+    async def probe(_known):
         return next(responses)
 
     async def open_step(_thread_id, step):
@@ -51,7 +51,7 @@ async def test_password_step_settles_then_keeps_eval_and_hidden_password_reads_r
         opened.append(step.visit)
 
     async def settle_step(_thread_id, step):
-        settled.append((step.node_id, browser_control._guarded_visits[_thread_id].seen_nodes))
+        settled.append((step.node_id, browser_control._guarded_visits[_thread_id][step.visit].seen_nodes))
 
     monkeypatch.setattr(browser_control, "_open_step", open_step)
     monkeypatch.setattr(browser_control, "_settle_step", settle_step)
@@ -72,7 +72,7 @@ async def test_password_step_settles_then_keeps_eval_and_hidden_password_reads_r
         with pytest.raises(BrowserSessionError, match="asks for a password"):
             await browser_control.require_page_access("thread", probe, command)
 
-    # Snapshot does not request a password value, and a fresh navigation resets the visit guard.
+    # Snapshot does not request a password value, and a fresh document has no guard of its own.
     await browser_control.require_page_access("thread", probe, ("snapshot",))
     await browser_control.require_page_access("thread", probe, ("eval", "document.title"))
 
@@ -87,7 +87,7 @@ async def test_new_password_visit_opens_a_new_step_and_reports_to_the_pane(monke
     ))
     opened, settled, pane_events = [], [], []
 
-    async def probe(_visit, _known):
+    async def probe(_known):
         return next(responses)
 
     async def open_step(_thread_id, step):
@@ -138,9 +138,9 @@ async def test_password_probe_keeps_known_nodes_only_on_their_own_visit(monkeypa
             }[method]
 
     monkeypatch.setattr(browser_cdp, "CdpClient", FakeCdp)
-    assert (await browser_cdp.page_password_probe("ws://page.test", "visit-one", frozenset({42}))).visible_nodes == frozenset()
+    assert (await browser_cdp.page_password_probe("ws://page.test", {"visit-one": frozenset({42})})).visible_nodes == frozenset()
     # Within one visit a known field stays guarded even after a reveal toggle changes its type.
-    probe = await browser_cdp.page_password_probe("ws://page.test", "visit-two", frozenset({42}))
+    probe = await browser_cdp.page_password_probe("ws://page.test", {"visit-two": frozenset({42})})
     assert probe.visible_nodes == frozenset({42}) and probe.target == "ws://page.test"
 
 
@@ -179,7 +179,7 @@ async def test_password_probe_reads_only_search_matches_and_keeps_only_password_
             }[method]
 
     monkeypatch.setattr(browser_cdp, "CdpClient", FakeCdp)
-    probe = await browser_cdp.page_password_probe("ws://page.test", None, frozenset())
+    probe = await browser_cdp.page_password_probe("ws://page.test", {})
     assert probe.visible_nodes == (frozenset({77}) if visible else frozenset())
     assert probe.present_nodes == frozenset({77}) and probe.host == "accounts.example.co.uk"
     assert set(vars(probe)) == {"visit", "host", "target", "visible_nodes", "present_nodes"}
@@ -195,7 +195,7 @@ async def test_a_hidden_password_read_is_refused_by_the_node_its_ref_or_selector
     responses = iter((PasswordProbe("visit", "example.test", frozenset({42}), present_nodes=frozenset({42})),))
     hidden = PasswordProbe("visit", "example.test", frozenset(), present_nodes=frozenset({42}))
 
-    async def probe(_visit, _known):
+    async def probe(_known):
         return next(responses, hidden)
 
     async def open_step(_thread_id, step):
@@ -229,7 +229,7 @@ async def test_a_hidden_password_read_is_refused_by_the_node_its_ref_or_selector
 
 @pytest.mark.asyncio
 async def test_password_probe_failure_fails_closed():
-    async def broken_probe(_visit, _known):
+    async def broken_probe(_known):
         raise RuntimeError("CDP went away")
 
     with pytest.raises(BrowserSessionError, match="couldn't be checked"):
@@ -250,11 +250,11 @@ class SignInPage:
         return PasswordProbe("visit-one", "example.test", frozenset() if self.submitted else frozenset({42}),
                              present_nodes=frozenset({42}))
 
-    async def agent_probe(self, _visit, _known):
+    async def agent_probe(self, _known):
         self.agent_probes += 1
         return self._probe()
 
-    async def pane_probe(self, _visit, _known):
+    async def pane_probe(self, _known):
         self.pane_probes += 1
         self.probed.set()
         if self.failures:

@@ -337,7 +337,7 @@ async def test_the_password_probe_finds_frame_and_shadow_fields_on_a_page_over_o
                 size = await cdp.call("Runtime.evaluate", returnByValue=True,
                                       expression="document.documentElement.outerHTML.length")
             assert size["result"]["value"] > 2**20
-            probe = await browser_cdp.page_password_probe(endpoint, None, frozenset())
+            probe = await browser_cdp.page_password_probe(endpoint, {})
             # The frame's, both shadow roots' and the autocomplete-named field; never the hidden one.
             assert len(probe.visible_nodes) == 4, probe
             assert probe.target == endpoint

@@ -38,10 +38,10 @@ class Page:
         self.now = PasswordProbe(visit, "accounts.example.test", nodes, target,
                                  present_nodes=nodes if present is None else present)
 
-    async def agent_probe(self, _visit, _known):
+    async def agent_probe(self, _known):
         return self.now
 
-    async def pane_probe(self, _visit, _known):
+    async def pane_probe(self, _known):
         self.pane_probes += 1
         self.probed.set()
         return self.now
@@ -319,7 +319,7 @@ async def test_a_settled_password_then_a_person_step_on_the_same_visit_opens_its
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("ending_probe", ["agent", "pane", "pane-navigation"])
+@pytest.mark.parametrize("ending_probe", ["agent", "pane"])
 @pytest.mark.parametrize("command", [("eval", "document.querySelector('#password').value"),
                                     ("get", "value", "#password")], ids=["eval", "get-value"])
 async def test_a_password_hidden_between_probes_is_guarded_before_the_person_step_is_dropped(
@@ -337,11 +337,8 @@ async def test_a_password_hidden_between_probes_is_guarded_before_the_person_ste
     page.show("visit-one", present=frozenset({42}))
     assert THREAD not in browser_control._guarded_visits
     [person] = _steps(db)
-    if ending_probe == "pane-navigation":
-        page.show("visit-two", present=frozenset({42}))
-    else:
-        plan_update(db, plan["plan"].id, "mark_done", close_params(db, "mark_done", person["id"]), actor=HUMAN)
-    if ending_probe.startswith("pane"):
+    plan_update(db, plan["plan"].id, "mark_done", close_params(db, "mark_done", person["id"]), actor=HUMAN)
+    if ending_probe == "pane":
         assert not await browser_control._reprobe(THREAD, active)
 
     async def resolve(_selector):
@@ -351,12 +348,63 @@ async def test_a_password_hidden_between_probes_is_guarded_before_the_person_ste
         await browser_control.require_page_access(THREAD, page.agent_probe, command, resolve=resolve)
     await asyncio.gather(loop, return_exceptions=True)
     assert THREAD not in browser_control._steps
-    assert browser_control._guarded_visits[THREAD].seen_nodes == frozenset({42})
+    guard = browser_control._guarded_visits[THREAD]["visit-one"]
+    assert guard.seen_nodes == frozenset({42})
     assert set(vars(page.now)) == {"visit", "host", "target", "visible_nodes", "present_nodes"}
-    assert not any("value" in name or "text" in name for name in vars(browser_control._guarded_visits[THREAD]))
-    assert plan["events"] == ["person_step_opened"] + (
-        ["person_step_settled"] if ending_probe == "pane-navigation" else []
-    )
+    assert not any("value" in name or "text" in name for name in vars(guard))
+    assert plan["events"] == ["person_step_opened"]
+
+
+@pytest.mark.asyncio
+async def test_a_person_step_ending_on_a_new_visit_guards_nothing_on_the_new_document(plan, monkeypatch):
+    """NB1: no password was shown on the new document, so its inputs are not guarded and reads there work."""
+    page, db = Page(), plan["db"]
+    monkeypatch.setattr(browser_control, "REPROBE_EVERY", 60)
+    browser_control.pane_connected(THREAD, "pane", None, page.pane_probe)
+    await browser_control.declare_person_step(THREAD, page.agent_probe, "Sign in to your account")
+    active = browser_control._steps[THREAD]
+    loop = active.reprobe
+    page.show("visit-two", present=frozenset({42}))
+    assert not await browser_control._reprobe(THREAD, active)
+    await asyncio.gather(loop, return_exceptions=True)
+    assert THREAD not in browser_control._steps
+    assert THREAD not in browser_control._guarded_visits
+
+    async def resolve(_selector):
+        return 42
+
+    for command in (("eval", "document.title"), ("get", "value", "#field")):
+        await browser_control.require_page_access(THREAD, page.agent_probe, command, resolve=resolve)
+    assert plan["events"] == ["person_step_opened", "person_step_settled"]
+
+
+@pytest.mark.asyncio
+async def test_a_password_guard_outlives_leaving_its_tab_and_clears_when_the_browser_closes(plan):
+    """B1: tab A guarded, tab B, back to tab A: the reads on A's password node are still refused."""
+    page = Page()
+    page.show("visit-a", frozenset({42}))
+    with pytest.raises(BrowserSessionError, match="asks for a password"):
+        await browser_control.require_page_access(THREAD, page.agent_probe, ("snapshot",))
+    page.show("visit-a", present=frozenset({42}))
+    await browser_control.require_page_access(THREAD, page.agent_probe, ("snapshot",))
+    page.show("visit-b")
+    await browser_control.require_page_access(THREAD, page.agent_probe, ("eval", "document.title"))
+    page.show("visit-a", present=frozenset({42}))
+
+    async def resolve(_selector):
+        return 42
+
+    for command in (("eval", "document.title"), ("get", "value", "#password")):
+        with pytest.raises(BrowserSessionError, match="asks for a password"):
+            await browser_control.require_page_access(THREAD, page.agent_probe, command, resolve=resolve)
+    # A document the guard never covered is not over-refused.
+    page.show("visit-c", present=frozenset({42}))
+    await browser_control.require_page_access(THREAD, page.agent_probe, ("eval", "document.title"), resolve=resolve)
+    assert set(browser_control._guarded_visits[THREAD]) == {"visit-a"}
+    browser_control.browser_closed(THREAD)
+    assert THREAD not in browser_control._guarded_visits
+    page.show("visit-a", present=frozenset({42}))
+    await browser_control.require_page_access(THREAD, page.agent_probe, ("eval", "document.title"), resolve=resolve)
 
 
 @pytest.mark.parametrize("instruction", ["Choose your account.", "Your phone needs approval", "Sign in"])

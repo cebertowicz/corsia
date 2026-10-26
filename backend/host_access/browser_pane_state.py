@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 import time
-from typing import Awaitable, Callable
+from typing import Awaitable, Callable, Mapping
 
 from host_access.browser_cdp import PasswordProbe, Rect
 from host_access.browser_screencast import PaneScreencast
 
-Probe = Callable[[str | None, frozenset[int]], Awaitable[PasswordProbe]]
+# Each guarded visit's known password nodes; the probe applies those of the visit the page is on.
+KnownNodes = Mapping[str, frozenset[int]]
+Probe = Callable[[KnownNodes], Awaitable[PasswordProbe]]
 
 _panes: dict[str, set[str]] = {}
 _capture_sizes: dict[str, tuple[int, int, bool]] = {}

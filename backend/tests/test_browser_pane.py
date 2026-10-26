@@ -669,7 +669,7 @@ def _password_page_owner(monkeypatch, opened):
     async def run_admitted(_runtime, args, **_kwargs):
         return CommandResult(0, json.dumps({"success": True, "data": answers[tuple(args[:2])]}), ""), False
 
-    async def password_field(endpoint, _visit, _known):
+    async def password_field(endpoint, _known):
         return browser_control.PasswordProbe("visit-1", "login.example.test", frozenset({42}), endpoint,
                                              present_nodes=frozenset({42}))
 

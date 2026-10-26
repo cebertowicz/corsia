@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 from dataclasses import dataclass, field
-from typing import Awaitable, Callable, Sequence
+from typing import Awaitable, Callable, Mapping, Sequence
 from urllib.parse import urlparse, urlunparse
 from urllib.request import urlopen
 
@@ -75,8 +75,10 @@ class CdpClient:
         await self.socket.close()
 
 
-async def page_password_probe(endpoint: str, known_visit: str | None, known_nodes: frozenset[int]) -> PasswordProbe:
+async def page_password_probe(endpoint: str, known: Mapping[str, frozenset[int]]) -> PasswordProbe:
     """Find visible password inputs on the page target, preserving this visit's reveal-toggle nodes (AR3).
+
+    ``known`` maps each guarded visit to its password nodes; only those of the page's own visit apply.
 
     It covers the top document, in-process (same-origin) frames, and open and closed shadow roots,
     and transfers only the matching nodes, never the whole DOM.
@@ -87,9 +89,9 @@ async def page_password_probe(endpoint: str, known_visit: str | None, known_node
         host = _host(frame)
         # A node seen on an earlier visit can still resolve to a box after the page navigates away,
         # which would report a password field the new page does not have.
-        known = known_nodes if known_visit == loader else frozenset()
+        known_here = known.get(loader, frozenset())
         current = await _password_inputs(cdp)
-        visible = {node for node in current | known if await _visible(cdp, node)}
+        visible = {node for node in current | known_here if await _visible(cdp, node)}
         return PasswordProbe(loader, host, frozenset(visible), endpoint, present_nodes=frozenset(current))
 
 

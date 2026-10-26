@@ -1250,7 +1250,7 @@ async def test_browser_person_step_runs_the_real_declaration_for_the_authoritati
     async def page_endpoint(_command):
         return "ws://page.test"
 
-    async def probe(_endpoint, _visit, _known):
+    async def probe(_endpoint, _known):
         return PasswordProbe("visit", "accounts.google.com", frozenset(), "ws://page.test", present_nodes=frozenset())
 
     monkeypatch.setattr(owner, "_pin_native", pin)
