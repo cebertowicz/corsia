@@ -92,5 +92,5 @@ def store(pending: _Pending, grant: dict[str, object], identity: client.Identity
         store_credentials(pending.account_id, bundle, db=conn)
         record_audit(pending.account_id, "connect" if pending.adding else "sign_in", pending.actor, db=conn)
         wake_on_connect(
-            conn, pending.adding_thread_id, pending.state, MICROSOFT_PROVIDER, pending.account_id, identity.address,
+            conn, pending.starting_thread_id, pending.state, MICROSOFT_PROVIDER, pending.account_id, identity.address,
         )

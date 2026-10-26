@@ -8,10 +8,12 @@ from urllib.parse import parse_qs, urlparse
 
 import pytest
 
+from connections.account_state import CONSENT_CANCELLED, PROVIDER_UNAVAILABLE
 from connections.microsoft import account_store, oauth
-from connections.sign_in_notice import notify_starting_agent, wake_on_connect
+from connections.sign_in_notice import EXPIRED_MESSAGE, UNAVAILABLE_MESSAGE, notify_starting_agent, wake_on_connect
 from infra.database import get_db, write_transaction
-from sign_in_wake_helpers import wakes
+from infra.send_types import SendRejected
+from sign_in_wake_helpers import no_account_artifact, registry_rows, wakes
 from tests.registry_helpers import make_session
 from tests.test_microsoft_sign_in import (  # noqa: F401  (the fixtures)
     CLIENT_ID, EVERYWHERE, PERSON, TENANT_A, _accounts, _connect, _finish, agent_adds, microsoft,
@@ -28,10 +30,15 @@ def _agent() -> str:
         db.close()
 
 
-async def _agent_flow(thread_id: str, **kwargs):
+async def _agent_flow(thread_id: str, *, starting_thread_id: str | None = None, **kwargs):
     return await oauth.start_sign_in(
-        CLIENT_ID, "work", TENANT_A, actor=("agent", thread_id), adding_thread_id=thread_id, **kwargs,
+        CLIENT_ID, "work", TENANT_A, actor=("agent", thread_id), adding_thread_id=thread_id,
+        starting_thread_id=starting_thread_id or thread_id, **kwargs,
     )
+
+
+def _state(url: str) -> str:
+    return parse_qs(urlparse(url).query)["state"][0]
 
 
 async def test_an_agent_added_account_wakes_the_starting_thread_with_the_address(microsoft, isolated_db, agent_adds):
@@ -47,6 +54,7 @@ async def test_an_agent_added_account_wakes_the_starting_thread_with_the_address
         "microsoft", "connected", ADDRESS, account_id,
     )
     assert "cause" not in wake
+    assert wake["chip"] == "Microsoft sign-in finished" and "about" not in wake["chip"].lower()
     assert "authorization-code" not in wake["content"] and oauth._pending == {}
 
 
@@ -54,6 +62,7 @@ async def test_an_agent_signing_an_account_in_again_wakes_that_thread(microsoft,
     account_id = await _connect(microsoft)
     thread_id = _agent()
     url, _ = await _agent_flow(thread_id, account_id=account_id)
+    assert oauth._pending[_state(url)].starting_thread_id == thread_id
 
     status, _page = await _finish(url)
 
@@ -73,6 +82,7 @@ async def test_a_cancelled_sign_in_wakes_the_thread_with_the_cause(microsoft, is
     [wake] = wakes()
     assert (wake["thread_id"], wake["outcome"], wake["cause"]) == (thread_id, "failed", "consent_cancelled")
     assert wake["message"] == "Microsoft sign-in was cancelled. Call microsoft_connect for a new link."
+    assert wake["chip"] == "Microsoft sign-in didn't finish"
     assert "address" not in wake and _accounts() == []
 
 
@@ -89,7 +99,7 @@ async def test_a_refused_code_exchange_wakes_the_thread_without_the_providers_te
     assert "token-error-canary" not in wake["content"]
 
 
-async def test_a_fault_inside_corsia_wakes_the_thread_with_provider_unavailable(
+async def test_a_fault_inside_corsia_wakes_the_thread_with_the_shared_provider_unavailable_facts(
     microsoft, isolated_db, agent_adds, monkeypatch,
 ):
     thread_id = _agent()
@@ -104,26 +114,28 @@ async def test_a_fault_inside_corsia_wakes_the_thread_with_provider_unavailable(
 
     assert status == 500
     [wake] = wakes()
-    assert (wake["outcome"], wake["cause"]) == ("failed", "provider_unavailable")
+    assert (wake["outcome"], wake["cause"], wake["message"]) == ("failed", PROVIDER_UNAVAILABLE, UNAVAILABLE_MESSAGE)
     assert "canary-internal-detail" not in wake["content"]
 
 
-async def test_one_sign_in_is_one_event_whatever_arrives_after_it(microsoft, isolated_db, agent_adds):
+async def test_one_sign_in_is_one_input_whatever_arrives_after_it(microsoft, isolated_db, agent_adds):
     thread_id = _agent()
     url, account_id = await _agent_flow(thread_id)
     await _finish(url)
-    state = parse_qs(urlparse(url).query)["state"][0]
+    state = _state(url)
 
     # A replayed callback that raced the first one would report success again, or a late failure.
     with write_transaction(None, scope="test_replayed_success") as conn:
         wake_on_connect(conn, thread_id, state, "microsoft", account_id, ADDRESS)
-    await notify_starting_agent(thread_id, state, "microsoft", account_id, cause="consent_cancelled")
+    await notify_starting_agent(thread_id, state, "microsoft", account_id, cause=CONSENT_CANCELLED)
+    await notify_starting_agent(thread_id, state, "microsoft", account_id, cause=CONSENT_CANCELLED)
 
     assert len(wakes()) == 1
 
 
 async def test_a_person_started_sign_in_wakes_no_one(microsoft, isolated_db):
     url, _ = await oauth.start_sign_in(CLIENT_ID, "work", TENANT_A, actor=PERSON, reach=EVERYWHERE)
+    assert oauth._pending[_state(url)].starting_thread_id is None
 
     status, _page = await _finish(url)
 
@@ -139,15 +151,65 @@ async def test_a_person_started_failure_wakes_no_one(microsoft, isolated_db):
     assert status == 400 and wakes() == []
 
 
-async def test_a_delivery_failure_leaves_the_account_and_the_page_alone_and_is_logged(
-    microsoft, isolated_db, agent_adds, monkeypatch, caplog,
-):
-    def broken(*_args, **_kwargs):
-        raise ValueError("event wake target is unavailable")
-
-    monkeypatch.setattr("events.platform.deliver_platform_event_sync", broken)
+async def test_a_sign_in_leaves_no_registry_row_behind(microsoft, isolated_db, agent_adds):
     thread_id = _agent()
-    url, account_id = await _agent_flow(thread_id)
+    before = registry_rows()
+    refused, _ = await _agent_flow(thread_id)
+    assert (await _finish(refused, error="access_denied", error_subcode="cancel"))[0] == 400
+    url, _ = await _agent_flow(thread_id)
+
+    assert (await _finish(url))[0] == 200
+
+    assert len(wakes()) == 2
+    assert registry_rows() == before and no_account_artifact()
+
+
+async def test_an_unfinished_sign_in_wakes_the_thread_when_it_expires(microsoft, isolated_db, agent_adds, monkeypatch):
+    thread_id = _agent()
+    url, _ = await _agent_flow(thread_id)
+    state = _state(url)
+    pending = oauth._pending[state]
+    oauth._pending_expiries[state].cancel()
+    monkeypatch.setattr(oauth, "PENDING_SECONDS", 0)
+
+    await oauth._expire(pending)
+
+    [wake] = wakes()
+    assert (wake["thread_id"], wake["outcome"], wake["cause"], wake["message"]) == (
+        thread_id, "failed", CONSENT_CANCELLED, EXPIRED_MESSAGE,
+    )
+    assert oauth._pending == {} and pending.listener.bound_addresses() == [] and _accounts() == []
+
+
+async def test_a_sign_in_found_expired_when_the_next_one_starts_wakes_its_thread(
+    microsoft, isolated_db, agent_adds, monkeypatch,
+):
+    thread_id = _agent()
+    url, _ = await _agent_flow(thread_id)
+    monkeypatch.setattr(oauth, "PENDING_SECONDS", 0)
+
+    await _agent_flow(_agent())
+
+    [wake] = wakes()
+    assert (wake["thread_id"], wake["cause"], wake["message"]) == (thread_id, CONSENT_CANCELLED, EXPIRED_MESSAGE)
+    assert _state(url) not in oauth._pending and _state(url) not in oauth._pending_expiries
+
+
+async def test_a_sign_in_the_callback_took_is_not_also_reported_expired(
+    microsoft, isolated_db, agent_adds, monkeypatch,
+):
+    url, _ = await _agent_flow(_agent())
+    pending = oauth._pending[_state(url)]
+    assert (await _finish(url))[0] == 200
+    monkeypatch.setattr(oauth, "PENDING_SECONDS", 0)
+
+    await oauth._expire(pending)
+
+    assert [wake["outcome"] for wake in wakes()] == ["connected"]
+
+
+async def test_an_unavailable_target_keeps_the_account_and_is_logged(microsoft, isolated_db, agent_adds, caplog):
+    url, account_id = await _agent_flow(_agent(), starting_thread_id="no-such-thread")
 
     with caplog.at_level(logging.WARNING, logger="connections.sign_in_notice"):
         status, page = await _finish(url)
@@ -155,8 +217,40 @@ async def test_a_delivery_failure_leaves_the_account_and_the_page_alone_and_is_l
     assert status == 200 and b"Microsoft is connected" in page
     [account] = _accounts()
     assert account["state"] == "connected"
-    assert f"sign-in result for account {account_id} not delivered to thread {thread_id}: ValueError" in caplog.text
+    assert f"sign-in result for account {account_id} not delivered to thread no-such-thread: ValueError" in caplog.text
     assert wakes() == []
+
+
+async def test_a_refused_send_keeps_the_account_and_is_logged(microsoft, isolated_db, agent_adds, monkeypatch, caplog):
+    def refused(*_args, **_kwargs):
+        raise SendRejected(409, "held")
+
+    monkeypatch.setattr("events.delivery.enqueue_event_wake", refused)
+    url, _ = await _agent_flow(_agent())
+
+    with caplog.at_level(logging.WARNING, logger="connections.sign_in_notice"):
+        status, _page = await _finish(url)
+
+    assert status == 200 and len(_accounts()) == 1
+    assert "not delivered to thread" in caplog.text and "SendRejected" in caplog.text
+
+
+async def test_a_defect_in_the_wake_keeps_the_account_and_is_logged_with_its_traceback(
+    microsoft, isolated_db, agent_adds, monkeypatch, caplog,
+):
+    def defect(*_args, **_kwargs):
+        raise RuntimeError("canary-defect")
+
+    monkeypatch.setattr("events.delivery.enqueue_event_wake", defect)
+    url, _ = await _agent_flow(_agent())
+
+    with caplog.at_level(logging.ERROR, logger="connections.sign_in_notice"):
+        status, page = await _finish(url)
+
+    assert status == 200 and b"Microsoft is connected" in page
+    assert [account["state"] for account in _accounts()] == ["connected"]
+    [record] = [r for r in caplog.records if r.name == "connections.sign_in_notice"]
+    assert record.exc_info is not None and "canary-defect" in str(record.exc_info[1])
 
 
 async def test_the_success_wake_commits_and_rolls_back_with_the_stored_account(
@@ -189,7 +283,7 @@ async def test_a_cancelled_callback_after_the_store_still_leaves_one_wake(
 
     monkeypatch.setattr("events.connectors.mail_poller.schedule_account", cancelled)
     with pytest.raises(asyncio.CancelledError):
-        await oauth._complete_sign_in("authorization-code", parse_qs(urlparse(url).query)["state"][0])
+        await oauth._complete_sign_in("authorization-code", _state(url))
 
     [wake] = wakes()
     assert (wake["thread_id"], wake["outcome"], wake["account_id"]) == (thread_id, "connected", account_id)

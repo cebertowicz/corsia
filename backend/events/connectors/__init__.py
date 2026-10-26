@@ -163,7 +163,6 @@ def registered_command_triggers(
 def _load_builtin_manifests() -> None:
     """Import the built-in connector modules so they self-register."""
     from events.connectors import (  # noqa: F401
-        account,
         document,
         github,
         gmail,

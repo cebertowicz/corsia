@@ -62,6 +62,7 @@ class MicrosoftConnectTool(Tool):
             url, account_id = await oauth.start_sign_in(
                 kwargs.get("client_id"), kwargs.get("kind"), kwargs.get("tenant_id"), actor=("agent", thread_id),
                 account_id=kwargs.get("account_id") or None, adding_thread_id=thread_id,
+                starting_thread_id=thread_id,
             )
         except MicrosoftError as exc:
             return f"Error: {exc.cause}: {exc.message}"
@@ -70,8 +71,8 @@ class MicrosoftConnectTool(Tool):
             return f"Error: {INTERNAL}: {MicrosoftError(INTERNAL).message}"
         return json.dumps({
             "url": url, "account_id": account_id,
-            "next": "Give the person this link to open. CORSIA wakes you with the result when they finish, "
-                    "so you needn't ask them to tell you; then call microsoft_status.",
+            "next": "Give the person this link to open. CORSIA wakes you once, when they finish or when the "
+                    "link expires after ten minutes; then call microsoft_status.",
         })
 
 

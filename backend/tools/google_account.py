@@ -138,7 +138,7 @@ class GoogleConnectTool(Tool):
                 return json.dumps({"reply": reply, "link": link})
             url, signing_in = await oauth.start_sign_in(
                 kwargs.get("client_file"), actor=("agent", thread_id),
-                adding_thread_id=thread_id,
+                adding_thread_id=thread_id, starting_thread_id=thread_id,
             )
         except GoogleError as exc:
             return f"Error: {exc}"
@@ -148,8 +148,8 @@ class GoogleConnectTool(Tool):
         return json.dumps({
             "url": url, "account_id": signing_in,
             "next": (
-                "Give the person this link to open and sign in. CORSIA wakes you with the result when they "
-                "finish, so you needn't ask them to tell you; then call google_status."
+                "Give the person this link to open and sign in. CORSIA wakes you once, when they finish "
+                "or when the link expires after ten minutes; then call google_status."
             ),
         })
 

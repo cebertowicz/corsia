@@ -31,7 +31,7 @@ from connections.microsoft.errors import (
     DIFFERENT_ACCOUNT, INPUT_REFUSAL, INTERNAL, SIGN_IN_BUSY, MicrosoftError, exchange_error_cause,
     message, redirect_codes_cause,
 )
-from connections.sign_in_notice import notify_starting_agent
+from connections.sign_in_notice import notify_expired, notify_starting_agent
 from infra.database import get_db
 from infra.db_async import run_in_db
 from tools.mcp_oauth_listener import CallbackListener, allowed_hosts
@@ -59,6 +59,8 @@ class _Pending:
     adding: bool
     actor: Actor
     adding_thread_id: str | None
+    #: The thread that started this sign-in, an add or a sign in again; the one woken with how it ended.
+    starting_thread_id: str | None
     reach: AppReach | None
     kind: str
     authority: str
@@ -120,14 +122,15 @@ def _challenge(verifier: str) -> str:
 
 def _new_pending(
     client_id: object, kind: object, tenant_id: object, account_id: str | None, actor: Actor,
-    adding_thread_id: str | None, reach: AppReach | None, listener: CallbackListener,
+    adding_thread_id: str | None, starting_thread_id: str | None, reach: AppReach | None, listener: CallbackListener,
 ) -> _Pending:
     if account_id is None and (adding_thread_id is None) == (reach is None):
         raise ValueError("an added account takes its reach from exactly one adding scope")
     valid_client, valid_kind, valid_tenant, authority = validate_connect_input(client_id, kind, tenant_id)
     return _Pending(
         state=secrets.token_urlsafe(32), account_id=account_id or str(uuid.uuid4()), adding=account_id is None,
-        actor=actor, adding_thread_id=adding_thread_id, reach=reach, kind=valid_kind, authority=authority,
+        actor=actor, adding_thread_id=adding_thread_id, starting_thread_id=starting_thread_id, reach=reach,
+        kind=valid_kind, authority=authority,
         verifier=secrets.token_urlsafe(64), client_id=valid_client, tenant_id=valid_tenant,
         redirect_uri=f"http://localhost:{listener.port}", listener=listener, created_at=time.monotonic(),
     )
@@ -147,6 +150,7 @@ async def _expire(pending: _Pending) -> None:
         _pending.pop(pending.state)
         _pending_expiries.pop(pending.state, None)
     await pending.listener.stop()
+    await _tell_expired(pending)
 
 
 async def _close_expired() -> None:
@@ -158,6 +162,7 @@ async def _close_expired() -> None:
         _clear_expired_add_failures()
     for pending in expired:
         await pending.listener.stop()
+        await _tell_expired(pending)
 
 
 def _clear_expired_add_failures() -> None:
@@ -206,13 +211,17 @@ async def _record_failure(pending: _Pending, error: MicrosoftError) -> None:
 
 async def _tell_agent(pending: _Pending, *, cause: str, message: str | None = None) -> None:
     await notify_starting_agent(
-        pending.adding_thread_id, pending.state, MICROSOFT_PROVIDER, pending.account_id, cause=cause, message=message,
+        pending.starting_thread_id, pending.state, MICROSOFT_PROVIDER, pending.account_id, cause=cause, message=message,
     )
+
+
+async def _tell_expired(pending: _Pending) -> None:
+    await notify_expired(pending.starting_thread_id, pending.state, MICROSOFT_PROVIDER, pending.account_id)
 
 
 async def start_sign_in(
     client_id: object, kind: object, tenant_id: object = None, *, actor: Actor, account_id: str | None = None,
-    adding_thread_id: str | None = None, reach: AppReach | None = None,
+    adding_thread_id: str | None = None, starting_thread_id: str | None = None, reach: AppReach | None = None,
 ) -> tuple[str, str]:
     """Open a one-flow loopback listener, then return the Microsoft authorization link.
 
@@ -220,7 +229,8 @@ async def start_sign_in(
     ``client_id``, ``kind`` and ``tenant_id`` are then ignored, and ``adding_thread_id``
     (None for the person) must be able to see the row. Without it, it adds an account
     whose reach comes from ``adding_thread_id``'s scope or, for the person, ``reach``.
-    An agent's ``adding_thread_id`` is also the thread woken with the outcome.
+    ``starting_thread_id`` is the agent thread that started the sign-in, either kind; it is
+    woken once with how it ended, including when nobody finishes it in time.
     """
     if account_id is not None:
         client_id, kind, tenant_id = await run_in_db(account_store.saved_registration, account_id, adding_thread_id)
@@ -250,7 +260,7 @@ async def start_sign_in(
             internal = MicrosoftError(INTERNAL)
             await _record_failure(pending, internal)
             emit_lifecycle_event("connect_failed", pending.account_id, MICROSOFT_PROVIDER, cause=PROVIDER_UNAVAILABLE)
-            await _tell_agent(pending, cause=PROVIDER_UNAVAILABLE, message=message(PROVIDER_UNAVAILABLE))
+            await _tell_agent(pending, cause=PROVIDER_UNAVAILABLE)
             return 500, internal.browser_message, True, None
         if pending.adding:
             _clear_add_failure(_adder(pending))
@@ -266,7 +276,9 @@ async def start_sign_in(
     listener = CallbackListener(path="/", allowed_hosts=allowed_hosts("localhost"), handler=handler, on_cap=on_cap)
     try:
         await listener.start()
-        pending = _new_pending(client_id, kind, tenant_id, account_id, actor, adding_thread_id, reach, listener)
+        pending = _new_pending(
+            client_id, kind, tenant_id, account_id, actor, adding_thread_id, starting_thread_id, reach, listener,
+        )
         holder["pending"] = pending
         with _pending_lock:
             if len(_pending) >= PENDING_MAX:
