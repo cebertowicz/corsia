@@ -112,7 +112,7 @@ def _holds_more_than_tool_made(marker: Path, tool_made: frozenset[str]) -> bool:
 
 
 def found_tools(roots: Roots) -> list[str]:
-    """The tools with any fixed location present, from stats alone; nothing is opened."""
+    """The tools with any fixed location present; nothing is opened, but Claude Code's ``skills`` folder is listed."""
     found = []
     for tool, root in tool_roots(roots).items():
         tool_made = TOOL_MADE_SKILL_FOLDERS.get(tool, frozenset())

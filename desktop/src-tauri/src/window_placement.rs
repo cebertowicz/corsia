@@ -13,9 +13,6 @@ use tauri::{Manager, PhysicalPosition, PhysicalSize};
 const MAIN: &str = "main";
 /// The plugin's default file name, in the app config directory.
 const STATE_FILE: &str = ".window-state.json";
-/// The window's default size in logical pixels: `tauri.conf.json`'s width and height, whose width is also
-/// the setup layout's widest breakpoint.
-const DEFAULT_LOGICAL: (f64, f64) = (1280.0, 900.0);
 
 /// A rectangle in physical pixels.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -62,10 +59,17 @@ pub fn saved_place_is_visible(saved: Option<Rect>, screens: &[Rect]) -> bool {
     saved.is_some_and(|rect| screens.iter().any(|screen| rect.intersects(screen)))
 }
 
+/// The main window's default size in logical pixels, read from `tauri.conf.json` so the config stays its one
+/// home (its width is also the setup layout's widest breakpoint).
+fn configured_default(config: &tauri::Config) -> Option<(f64, f64)> {
+    let window = config.app.windows.iter().find(|window| window.label == MAIN)?;
+    Some((window.width, window.height))
+}
+
 /// The default window, centered in a screen's usable area and shrunk to fit a smaller one.
-pub fn centered_default(area: Rect, scale: f64) -> Rect {
+pub fn centered_default(area: Rect, scale: f64, logical: (f64, f64)) -> Rect {
     let fit = |logical: f64, available: u32| ((logical * scale).round() as u32).min(available);
-    let (width, height) = (fit(DEFAULT_LOGICAL.0, area.width), fit(DEFAULT_LOGICAL.1, area.height));
+    let (width, height) = (fit(logical.0, area.width), fit(logical.1, area.height));
     Rect {
         x: area.x + ((area.width - width) / 2) as i32,
         y: area.y + ((area.height - height) / 2) as i32,
@@ -89,13 +93,19 @@ fn work_area(monitor: &tauri::Monitor) -> Rect {
 /// Fill the usable area when setup finishes (the shell's `finish_setup_window` command).
 pub fn expand_main_window_after_setup(window: &tauri::WebviewWindow) {
     let Some(monitor) = window.current_monitor().ok().flatten().or_else(|| window.primary_monitor().ok().flatten()) else {
+        log::warn!("setup finished, but no screen was found; the main window keeps its size");
         return;
     };
     let (Ok(size), Ok(maximized), Ok(full)) = (window.inner_size(), window.is_maximized(), window.is_fullscreen()) else {
+        log::warn!("setup finished, but the main window's size and state could not be read; it keeps its size");
+        return;
+    };
+    let Some(logical) = configured_default(window.app_handle().config()) else {
+        log::warn!("setup finished, but the config has no main window default size; the window keeps its size");
         return;
     };
     let area = work_area(&monitor);
-    let default = centered_default(area, monitor.scale_factor());
+    let default = centered_default(area, monitor.scale_factor(), logical);
     let Some(fill) = grow_after_setup((size.width, size.height), default, area, maximized || full) else {
         return;
     };
@@ -131,7 +141,11 @@ pub fn place_main_window(app: &tauri::App, state_dir: &Path) {
             log::info!("main window {}x{} at ({}, {}) restored from the saved place", size.width, size.height, position.x, position.y);
         }
     } else if let Some(monitor) = window.current_monitor().ok().flatten().or_else(|| window.primary_monitor().ok().flatten()) {
-        let place = centered_default(work_area(&monitor), monitor.scale_factor());
+        let Some(logical) = configured_default(app.config()) else {
+            log::warn!("config has no main window default size; leaving its placement to the OS");
+            return;
+        };
+        let place = centered_default(work_area(&monitor), monitor.scale_factor(), logical);
         log::info!("main window: no saved place on a connected screen; opening {}x{} centered", place.width, place.height);
         if let Err(error) = window.set_size(PhysicalSize::new(place.width, place.height)) {
             log::warn!("could not size the main window to its default: {error}");
@@ -148,6 +162,20 @@ mod tests {
 
     const SCREEN: Rect = Rect { x: 0, y: 0, width: 2560, height: 1415 };
     const SECOND: Rect = Rect { x: 2560, y: 0, width: 1920, height: 1055 };
+    const DEFAULT: (f64, f64) = (1280.0, 900.0);
+
+    #[test]
+    fn the_default_size_is_the_one_in_the_shipped_config() {
+        let raw = include_str!("../tauri.conf.json");
+        let json: serde_json::Value = serde_json::from_str(raw).expect("tauri.conf.json parses");
+        let config: tauri::Config = serde_json::from_value(json.clone()).expect("tauri.conf.json is a tauri config");
+        let main = &json["app"]["windows"][0];
+        assert_eq!(
+            configured_default(&config),
+            Some((main["width"].as_f64().unwrap(), main["height"].as_f64().unwrap()))
+        );
+        assert_eq!(configured_default(&config), Some(DEFAULT));
+    }
 
     fn saved(x: i32, y: i32) -> Option<Rect> {
         Some(Rect { x, y, width: 1000, height: 700 })
@@ -177,28 +205,28 @@ mod tests {
 
     #[test]
     fn the_default_window_is_centered_at_the_setup_layouts_widest_width() {
-        let retina = centered_default(Rect { x: 0, y: 38, width: 3000, height: 1900 }, 2.0);
+        let retina = centered_default(Rect { x: 0, y: 38, width: 3000, height: 1900 }, 2.0, DEFAULT);
         assert_eq!(retina, Rect { x: 220, y: 88, width: 2560, height: 1800 });
-        let one_x = centered_default(Rect { x: 0, y: 25, width: 1920, height: 1055 }, 1.0);
+        let one_x = centered_default(Rect { x: 0, y: 25, width: 1920, height: 1055 }, 1.0, DEFAULT);
         assert_eq!(one_x, Rect { x: 320, y: 25 + 77, width: 1280, height: 900 });
     }
 
     #[test]
     fn the_default_window_shrinks_to_a_screen_too_small_for_it() {
         let small = Rect { x: 0, y: 25, width: 1100, height: 700 };
-        assert_eq!(centered_default(small, 1.0), small);
+        assert_eq!(centered_default(small, 1.0, DEFAULT), small);
     }
 
     #[test]
     fn setup_finishing_grows_only_a_window_still_at_its_default_size() {
         let area = Rect { x: 0, y: 25, width: 2560, height: 1415 };
-        let default = centered_default(area, 1.0);
+        let default = centered_default(area, 1.0, DEFAULT);
         assert_eq!(grow_after_setup((1280, 900), default, area, false), Some(area));
         // Resized by the person, maximized, or full screen: left alone.
         assert_eq!(grow_after_setup((1500, 900), default, area, false), None);
         assert_eq!(grow_after_setup((1280, 900), default, area, true), None);
         // A screen that only fits the default has nothing to grow into.
         let snug = Rect { x: 0, y: 25, width: 1280, height: 900 };
-        assert_eq!(grow_after_setup((1280, 900), centered_default(snug, 1.0), snug, false), None);
+        assert_eq!(grow_after_setup((1280, 900), centered_default(snug, 1.0, DEFAULT), snug, false), None);
     }
 }

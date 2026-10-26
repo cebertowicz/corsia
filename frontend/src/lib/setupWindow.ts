@@ -7,7 +7,8 @@ export async function finishSetupWindow(): Promise<void> {
 	if (!invoke) return;
 	try {
 		await invoke('finish_setup_window');
-	} catch {
-		// The window just keeps the size it has.
+	} catch (error) {
+		// The window just keeps the size it has; say why, so a missing grant is findable.
+		console.warn('finish_setup_window failed', error);
 	}
 }
