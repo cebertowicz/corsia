@@ -156,7 +156,7 @@ function agentsLabel(count: number): string {
 /** What an update costs, in one sentence: the restart, and what working agents do through it. */
 export function costLine(usualSeconds: number | null | undefined, agents: number): string {
 	if (agents <= 0) return 'CORSIA restarts to finish.';
-	const restart = usualSeconds != null ? `CORSIA usually restarts in ${humanDuration(usualSeconds)}` : 'CORSIA restarts to finish';
+	const restart = usualSeconds != null ? `The restart usually takes ${humanDuration(usualSeconds)}` : 'CORSIA restarts to finish';
 	return agents === 1
 		? `${restart}; 1 working agent pauses and picks up where it left off.`
 		: `${restart}; ${agents} working agents pause and pick up where they left off.`;

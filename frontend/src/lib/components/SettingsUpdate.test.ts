@@ -169,7 +169,7 @@ describe('SettingsUpdate', () => {
 		const offer = host.querySelector('.offer')!;
 		expect(offer.querySelector('h4')?.textContent).toBe("What's new");
 		expect(offer.querySelectorAll('li')).toHaveLength(3);
-		expect(offer.textContent).toContain('CORSIA usually restarts in a minute; 2 working agents pause and pick up where they left off.');
+		expect(offer.textContent).toContain('The restart usually takes a minute; 2 working agents pause and pick up where they left off.');
 		const labels = Array.from(offer.querySelectorAll('button')).map((button) => button.textContent?.trim());
 		expect(labels).toContain('Update now');
 		expect(labels).toContain('Tonight at 3:00 AM');
