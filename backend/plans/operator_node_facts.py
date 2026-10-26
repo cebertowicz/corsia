@@ -11,7 +11,9 @@ from collections import defaultdict
 from datetime import datetime
 
 from infra.packed_rows import fetch_all
-from plans import closure, commitment_cost, node_cost, node_cost_scoped, node_states, review_evidence
+from plans import (
+    closure, commitment_cost, node_cost, node_cost_scoped, node_states, review_evidence, usage_pricing,
+)
 from plans.commitment_cost import FAILED_RELEASES
 
 _ID_CHUNK = 400
@@ -44,8 +46,6 @@ def project_costs(
     cost alone and rolls up, with its commitment and initiative totals, only the nodes it
     names; every other node's rolled, commitment and initiative figures are None.
     """
-    if wanted and detail_ids is not None:
-        return _scoped_costs(node_plans, db=db, now=now, detail_ids=detail_ids)
     if not wanted:
         nodes: dict[str, dict] = defaultdict(dict)
         for node, plan in node_plans:
@@ -54,13 +54,18 @@ def project_costs(
             {str(node["commitment_id"]): None for node, _plan in node_plans}, dict(nodes),
             {str(node["id"]): None for node, _plan in node_plans},
         )
-    costs = commitment_cost.project_many(
-        {str(node["commitment_id"]) for node, _plan in node_plans}, db=db, now=now,
-    )
-    node_costs, initiatives = node_cost.project_with_initiatives(
-        {str(plan["id"]) for _node, plan in node_plans}, db=db, now=now,
-    )
-    return costs, node_costs, initiatives
+    # The commitment and node totals both price the usage ledger: one read builds
+    # Measurement's identity resolver and endpoint listings once for both.
+    with usage_pricing.one_read(db):
+        if detail_ids is not None:
+            return _scoped_costs(node_plans, db=db, now=now, detail_ids=detail_ids)
+        costs = commitment_cost.project_many(
+            {str(node["commitment_id"]) for node, _plan in node_plans}, db=db, now=now,
+        )
+        node_costs, initiatives = node_cost.project_with_initiatives(
+            {str(plan["id"]) for _node, plan in node_plans}, db=db, now=now,
+        )
+        return costs, node_costs, initiatives
 
 
 def _scoped_costs(node_plans, *, db, now: datetime, detail_ids: frozenset[str]) -> tuple[dict, dict, dict]:

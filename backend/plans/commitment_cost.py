@@ -149,7 +149,7 @@ def _load(commitment_ids: list[str], *, db) -> dict[str, Any]:
     # names an attempt, so a commitment never selected is owed none and a plan
     # of idle work costs no read.
     pending = pending_measurement_counts(db, commitment_ids) if attempts else {}
-    # One row per commitment and Turn, not per call: this runs inside every plan write.
+    # One row per commitment and Turn, not per call; a plan write reads no cost (#2489).
     usage = usage_pricing.priced_usage(
         db, ("plan_commitment_id", "turn_id"), commitment_ids,
         lambda sql, ids: fetch_all(

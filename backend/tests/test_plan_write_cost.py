@@ -25,6 +25,7 @@ from plans import (
     service,
     status_context,
     status_drain,
+    usage_pricing,
 )
 from infra import write_admission
 from infra.database import write_transaction
@@ -226,6 +227,8 @@ def test_a_plan_write_reads_no_cost_under_the_writer_lock(db, scene, monkeypatch
 
     monkeypatch.setattr(commitment_cost, "project_many", refuse)
     monkeypatch.setattr(node_cost, "project_many", refuse)
+    # Nor does any read of usage at API price (``plans.usage_pricing``), however it is reached.
+    monkeypatch.setattr(usage_pricing, "priced_usage", refuse)
     journaled: list[str] = []
     real = status_context.compute_status
     monkeypatch.setattr(

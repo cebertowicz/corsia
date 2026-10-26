@@ -1,21 +1,26 @@
-"""A node's model cost is Measurement's price for the same ``llm_usage`` rows.
+"""A node's model cost is dollars at API price: stored charges kept, the rest priced by Measurement.
 
 ``llm_usage.cost_usd`` is NULL for subscription-harness and External rows, so the
 stored sum left a Claude Code or Codex task's dollars unknown. ``node_cost`` prices
-the node's rows through ``api.measurement_cost`` (admission, identity and
-``classify_usage_rows``); a group Measurement cannot price keeps the stored sum and
-counts its unstored rows as unknown, as before.
+those rows through ``api.measurement_cost`` (admission, identity and
+``classify_usage_rows``) and equals Measurement's figure for rows stored NULL; a
+row with a stored ``cost_usd`` keeps that recorded charge, and a group Measurement
+cannot price counts its unstored rows as unknown, as before.
 """
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import pytest
 
+import api.cost_identity
+import api.measurement_cost
 from api.cost_identity import IdentityResolver
 from api.measurement_cost import (
     ADMISSION_SQL, IDLE_HOURS_SQL, INPUT_TIER_SQL, classify_usage_rows, endpoint_listings,
 )
-from plans import node_cost, service
+from plans import commitment_cost, node_cost, operator_node_facts, service, usage_pricing
 from tests.test_plan_node_cost import _task, db  # noqa: F401  (db is the fixture)
 
 CLAUDE = "claude-code/claude-opus-5-5"
@@ -135,3 +140,82 @@ def test_a_stored_cost_is_kept_and_only_unstored_rows_are_priced(db):
 
     assert own["model_cost_usd"]["unknown_rows"] == 0
     assert own["model_cost_usd"]["known"] == pytest.approx(1.25 + _measurement(db, other))
+
+
+def _count_builds(monkeypatch) -> dict[str, int]:
+    """Count how often pricing builds Measurement's identity resolver and endpoint listings."""
+    built = {"resolver": 0, "listings": 0}
+    resolver, listings = api.cost_identity.IdentityResolver, api.measurement_cost.endpoint_listings
+
+    def new_resolver(connection):
+        built["resolver"] += 1
+        return resolver(connection)
+
+    def new_listings(connection):
+        built["listings"] += 1
+        return listings(connection)
+
+    monkeypatch.setattr(api.cost_identity, "IdentityResolver", new_resolver)
+    monkeypatch.setattr(api.measurement_cost, "endpoint_listings", new_listings)
+    return built
+
+
+def test_one_read_builds_the_identity_resolver_and_listings_once_for_both_callers(db, monkeypatch):
+    plan = service.ensure_plan("thread", "owner", db=db)
+    node = _task(db, plan.id, "Cross-vendor")
+    _row(db, node, "u-claude", CLAUDE, source="external_harness:claude-code")
+    built = _count_builds(monkeypatch)
+
+    commitment_cost.project_many([node.id], db=db)
+    node_cost.project_many([plan.id], db=db)
+    assert built == {"resolver": 2, "listings": 2}
+
+    built.update(resolver=0, listings=0)
+    with usage_pricing.one_read(db):
+        total = commitment_cost.project_many([node.id], db=db)[node.id]
+        own = node_cost.project_many([plan.id], db=db)[plan.id][node.id]["own"]
+    assert built == {"resolver": 1, "listings": 1}
+    assert total["model_cost_usd"] == own["model_cost_usd"]
+    assert own["model_cost_usd"]["known"] == pytest.approx(_measurement(db, node))
+
+
+@pytest.mark.parametrize("detail_ids", [None, frozenset()])
+def test_a_cost_read_of_the_operator_projection_prices_with_one_resolver(db, monkeypatch, detail_ids):
+    """The request's both callers (commitment totals, node totals) share one build, scoped or not."""
+    plan = service.ensure_plan("thread", "owner", db=db)
+    node = _task(db, plan.id, "Cross-vendor")
+    _row(db, node, "u-claude", CLAUDE, source="external_harness:claude-code")
+    node_plans = [(dict(row), dict(db.execute("SELECT * FROM plans WHERE id=?", (plan.id,)).fetchone()))
+                  for row in db.execute("SELECT * FROM plan_nodes WHERE plan_id=?", (plan.id,))]
+    built = _count_builds(monkeypatch)
+
+    operator_node_facts.project_costs(
+        node_plans, db=db, now=datetime.now(timezone.utc), detail_ids=detail_ids,
+    )
+
+    assert built == {"resolver": 1, "listings": 1}
+
+
+def test_the_pricing_queries_do_not_grow_with_the_unstored_rows(db):
+    """Rows are grouped in SQL: the query count follows the distinct shapes, never the rows."""
+    plan = service.ensure_plan("thread", "owner", db=db)
+    node = _task(db, plan.id, "Many calls")
+
+    def queries() -> int:
+        seen: list[str] = []
+        db.set_trace_callback(seen.append)
+        try:
+            own = node_cost.project_many([plan.id], db=db)[plan.id][node.id]["own"]
+            commitment_cost.project_many([node.id], db=db)
+        finally:
+            db.set_trace_callback(None)
+        assert own["model_cost_usd"]["unknown_rows"] == 0
+        return len(seen)
+
+    for number in range(3):
+        _row(db, node, f"u-claude-{number}", CLAUDE, source="external_harness:claude-code")
+    few = queries()
+    for number in range(3, 60):
+        _row(db, node, f"u-claude-{number}", CLAUDE, source="external_harness:claude-code")
+
+    assert queries() == few
