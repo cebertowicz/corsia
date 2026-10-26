@@ -136,6 +136,16 @@ async def test_low_remaining_stops_later_reads_and_holds_cursor(monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("error", [poller.feed.FeedError("rate_limited"), poller.feed.GhSignedOut()])
+async def test_failed_read_degrades_and_holds_cursor(monkeypatch, error):
+    state = {"reads": [], "issues_cursor": "held"}
+    monkeypatch.setattr(poller.feed, "gh_get", lambda *_args: (_ for _ in ()).throw(error))
+    assert await poller._get(lambda *_args: None, "x", state, datetime(2026, 1, 2, tzinfo=UTC)) is None
+    assert state == {"reads": [], "issues_cursor": "held"}
+    assert poller.poller_status()["degraded"] == error.error_class
+
+
+@pytest.mark.asyncio
 async def test_previous_head_closed_merged_and_dedupe_shapes(monkeypatch):
     state = {"heads": {"3": "old"}, "closed": {}, "pending": [], "reads": []}
     emitted = []

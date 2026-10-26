@@ -106,7 +106,7 @@ def _counted(response: feed.GhResponse, state: dict[str, Any], now: datetime) ->
 
 async def _get(runner: feed.GhRunner, path: str, state: dict[str, Any], now: datetime, *,
                send_etag: bool = True, keep_etag: bool = True) -> feed.GhResponse | None:
-    """The one gated read: None when the hourly budget or a rate backoff stops it."""
+    """The one gated read: None when the hourly budget, a rate backoff or a failed read stops it."""
     if len(_prune_reads(state, now)) >= MAX_HOURLY_READS:
         _status.update(state="degraded", degraded="budget_exhausted")
         return None
@@ -117,7 +117,12 @@ async def _get(runner: feed.GhRunner, path: str, state: dict[str, Any], now: dat
     if until is not None:
         _status.update(backoff=False, backoff_until=None)
     etag = state.get("etags", {}).get(path) if send_etag else None
-    response = await asyncio.to_thread(feed.gh_get, runner, path, {"If-None-Match": etag} if etag else None)
+    try:
+        response = await asyncio.to_thread(feed.gh_get, runner, path, {"If-None-Match": etag} if etag else None)
+    except feed.FeedError as exc:
+        # A refused or failed read holds the cursor like a budget stop; the next cycle retries.
+        _status.update(state="degraded", degraded=exc.error_class)
+        return None
     if keep_etag and response.headers.get("etag"):
         state.setdefault("etags", {})[path] = response.headers["etag"]
     _counted(response, state, now)
