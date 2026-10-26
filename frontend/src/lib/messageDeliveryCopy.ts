@@ -29,7 +29,7 @@ export const SET_ASIDE_COPY: Readonly<Record<string, {
 	},
 	stale_plan_wake: {
 		label: 'Not needed',
-		title: 'The work this was about moved on before the agent picked it up.',
+		title: 'The task this message was for moved on before the agent picked it up.',
 	},
 });
 
