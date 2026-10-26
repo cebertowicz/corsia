@@ -788,7 +788,17 @@ fn move_after_update(app: tauri::AppHandle) {
         local_start_began(&app);
         let service = app.state::<AppServiceState>();
         let outcome = start_service(&app, &service);
-        show_launch_outcome(&app, &outcome);
+        let on_shell = app.get_webview_window("main").and_then(|window| window.url().ok()).is_some_and(|url| is_startup_shell_page(url.as_str()));
+        match (&outcome, on_shell) {
+            (_, true) => show_launch_outcome(&app, &outcome),
+            // A skip left the person on their page: a Ready answer kept as shell state would be replayed by a later
+            // shell load, so only a failure is shown, on the shell with its Try again.
+            (Err(reason), false) => {
+                log::error!("bundled CORSIA service did not start: {reason}");
+                show_shell_failure(&app, reason);
+            }
+            (Ok(_), false) => {}
+        }
     });
 }
 
@@ -4047,6 +4057,11 @@ mod tests {
         assert!(rerun.contains("start_service(") && rerun.contains("show_launch_outcome("));
         // The window leaves the person's page only from the move's own first reading, never up front.
         assert!(!rerun.contains("return_to_shell("));
+        // Its answer is shell state only once the window is on the shell; a skip that left the person on their page
+        // keeps no Ready for a later shell load to replay.
+        let kept = rerun.find("(_, true) => show_launch_outcome(").expect("the answer is kept only on the shell");
+        assert!(rerun.find("is_startup_shell_page(").unwrap() < kept);
+        assert!(rerun.contains("(Ok(_), false) => {}"));
         let progress = &start[moved..recorded];
         assert!(progress.find("return_to_shell(app)").unwrap() < progress.find("MovingData").unwrap());
     }
