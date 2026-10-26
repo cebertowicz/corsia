@@ -34,6 +34,7 @@ from core.carry_in_facts import (
 from core.corrections_recording import CORRECTION_EVENT, FACT_KEYS as CORRECTION_FACT_KEYS, LABELS as CORRECTION_LABELS
 from core.lesson_gate import EVENT as LESSON_GATE_EVENT
 from core.size_rating import BASES, FACT_KEYS, SIZE_CLASSES, SIZE_EVENT
+from core.usage_fields import CHIPS, OS_FAMILIES, USAGE_EVENT
 from host_access.credential_sanitizer import contains_credential, sanitize_credential_data
 from infra.outcome_event_input import OutcomeInputRefusal
 
@@ -195,6 +196,11 @@ ATTRIBUTE_ALLOWLISTS: dict[str, dict[str, AttributeSpec]] = {
         "node_revision": count_attr(),
         "basis": enum_attr(*BASES),
         "size_class": enum_attr(*SIZE_CLASSES),
+    },
+    # This install's weekly usage summary (core/usage_fields.py): the closed field list, no identity.
+    USAGE_EVENT: {
+        "week": id_attr(), "release": id_attr(),
+        "os": enum_attr(*OS_FAMILIES), "chip": enum_attr(*CHIPS),
     },
     # Local correction classifications retain only versioned result metadata,
     # never source-message text or an LLM explanation.

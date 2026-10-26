@@ -295,7 +295,7 @@ def test_only_registered_events_are_the_test_seed_and_the_github_intake():
         "github.pr.introduced_by", "github.pr.closes_issue",
         "github.check_suite.completed", "github.workflow_run.completed",
         "github.issue.opened", "github.issue.closed",
-        "measurement.size_rating",
+        "measurement.size_rating", "corsia.usage.install_week",
         "measurement.correction", "measurement.lesson_gate",
         "measurement.verdict.planned", "measurement.verdict.reached",
         "lesson.carry_in.saved", "lesson.carry_in.saved_processed",
