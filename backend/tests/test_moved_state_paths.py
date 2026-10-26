@@ -125,3 +125,34 @@ def test_rows_outside_the_legacy_root_are_untouched(isolated_db, roots, tmp_path
 
     assert _homes("o1")[:2] == (str(own), str(own.parent / "runtime"))
     assert _homes("o2")[:2] == (str(sibling), str(sibling.parent / "runtime"))
+
+
+def test_emptied_old_homes_are_removed_but_never_a_file_or_the_root(isolated_db, roots):
+    legacy, current = roots
+    for account in ("e1", "f1"):
+        _make_homes(current, account)
+        for leaf in ("source", "runtime"):
+            (legacy / "runtime/vendor-accounts" / account / leaf).mkdir(parents=True)
+        _insert(account, "claude-code", str(legacy / f"runtime/vendor-accounts/{account}/source"),
+                str(legacy / f"runtime/vendor-accounts/{account}/runtime"))
+    (legacy / "runtime/vendor-accounts/f1/runtime/keep.txt").write_text("x")
+
+    heal_moved_state_paths(legacy_root=legacy, state_root=current)
+
+    assert not (legacy / "runtime/vendor-accounts/e1").exists()
+    assert (legacy / "runtime/vendor-accounts/f1/runtime/keep.txt").read_text() == "x"
+    assert legacy.is_dir()
+
+
+def test_an_empty_recreated_tree_is_gone_after_the_heal(isolated_db, roots):
+    legacy, current = roots
+    _make_homes(current, "g1")
+    for leaf in ("source", "runtime"):
+        (legacy / "runtime/vendor-accounts/g1" / leaf).mkdir(parents=True)
+    _insert("g1", "claude-code", str(legacy / "runtime/vendor-accounts/g1/source"),
+            str(legacy / "runtime/vendor-accounts/g1/runtime"))
+
+    heal_moved_state_paths(legacy_root=legacy, state_root=current)
+
+    assert not (legacy / "runtime").exists()
+    assert legacy.is_dir()

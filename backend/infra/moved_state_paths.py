@@ -57,14 +57,40 @@ def heal_moved_state_paths(
             for row in rows:
                 changes = rewriter.row_changes(table, row, columns, json_columns)
                 if changes:
+                    rewriter.vacated.extend(row[c] for c in columns if c in changes)
+                if changes:
                     sets = ", ".join(f"{column}=?" for column in changes)
                     connection.execute(f"UPDATE {table} SET {sets} WHERE id=?", (*changes.values(), row["id"]))
+    for old_home in rewriter.vacated:
+        _remove_empty_dirs(old_home, prefixes)
     return rewriter.moved
+
+
+def _remove_empty_dirs(home: str, prefixes: tuple[str, ...]) -> None:
+    """rmdir an old home and each emptied parent under the legacy root; never a file, never the root."""
+    for prefix in prefixes:
+        if home.startswith(prefix + os.sep):
+            root = Path(prefix)
+            break
+    else:
+        return
+    folder = Path(home)
+    while folder != root and root in folder.parents:
+        try:
+            folder.rmdir()
+        except FileNotFoundError:
+            pass
+        except OSError:  # not empty, not a folder, or not ours to remove: stop here
+            return
+        else:
+            logger.info("removed empty folder {} left under the old state root", folder)
+        folder = folder.parent
 
 
 class _Rewriter:
     def __init__(self, prefixes: tuple[str, ...], current: str) -> None:
         self.prefixes, self.current, self.moved = prefixes, current, 0
+        self.vacated: list[str] = []
 
     def under_legacy(self, value: str) -> str | None:
         for prefix in self.prefixes:
