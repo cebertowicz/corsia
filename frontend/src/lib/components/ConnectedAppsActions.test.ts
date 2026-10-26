@@ -34,9 +34,10 @@ const button = (label: string): HTMLButtonElement | undefined => [...host.queryS
 const rowButtons = (): string[] => [...host.querySelectorAll('.item .btn')].map((b) => b.textContent?.trim() ?? '');
 
 /** The list answers with `rows`; POST /reconnect and DELETE answer through the given handlers. */
-function stubApi(rows: () => ConnectedApp[], handlers: { reconnect?: () => Promise<unknown>; remove?: () => Promise<unknown> } = {}) {
+function stubApi(rows: () => ConnectedApp[], handlers: { reconnect?: () => Promise<unknown>; remove?: () => Promise<unknown>; approve?: () => Promise<unknown> } = {}) {
 	const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
 		const url = String(input);
+		if (url.includes('/approve') && handlers.approve) return handlers.approve();
 		if (url.includes('/reconnect')) return handlers.reconnect ? handlers.reconnect() : reply({});
 		if (init?.method === 'DELETE') return handlers.remove ? handlers.remove() : reply({});
 		return reply({ servers: rows(), sign_in_here: true });
@@ -59,9 +60,9 @@ describe('a hosted app row: state to actions', () => {
 		['needs sign-in', figma(), ['Sign in', 'Where it works…', 'Remove']],
 		['sign-in failed, retryable', failedSignIn('app_busy'), ['Try again', 'Where it works…', 'Remove']],
 		['sign-in failed, no client ID', failedSignIn('address_mismatch'), ['Sign in', 'Where it works…', 'Remove']],
-		['sign-in refused by the app', failedSignIn('not_allowed'), ['Where it works…', 'Remove']],
+		['sign-in blocked by an admin, who can lift it', failedSignIn('not_allowed'), ['Try again', 'Where it works…', 'Remove']],
 		['sign-in refused, app only lets in approved apps', failedSignIn('not_approved'), ['Where it works…', 'Remove']],
-		['sign-in cannot get the access it needs', failedSignIn('permissions'), ['Where it works…', 'Remove']],
+		['sign-in cannot get the access it needs', failedSignIn('permissions'), ['Sign in', 'Where it works…', 'Remove']],
 	])('%s', async (_name, app, buttons) => {
 		stubApi(() => [app]);
 		await openRow('Figma');
@@ -96,6 +97,15 @@ describe('a hosted app row: pressing Reconnect', () => {
 		button('Remove')!.click();
 		await vi.waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/api/mcp/servers/figma'), expect.objectContaining({ method: 'DELETE' })));
 		await vi.waitFor(() => expect(host.querySelector('[data-settings-row="Figma"]')).toBeNull());
+	});
+
+	it('locks Decline while Approve is working, since the two decisions exclude each other', async () => {
+		stubApi(() => [figma({ state: 'awaiting_approval', sign_in: undefined })], { approve: () => new Promise(() => {}) });
+		component = mount(ConnectedAppsSettings, { target: host });
+		await vi.waitFor(() => expect(button('Approve')).toBeDefined());
+		button('Approve')!.click();
+		flushSync();
+		expect(button('Decline')!.disabled).toBe(true);
 	});
 
 	it('spins only the Remove button while Remove is working, and not Reconnect', async () => {

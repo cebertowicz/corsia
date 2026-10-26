@@ -266,7 +266,7 @@
 						<div class="item">
 							<SettingsRow name={row.name} subTone={tone(row)} stackActions>
 								{#snippet sub()}{@render appSecondLine(row)}{#if row.notice}<span class="line">{row.notice}</span>{/if}{/snippet}
-								{#snippet actions()}{#if needsPlace(row)}<Button variant="primary" size="sm" onclick={() => { whereApprove = true; whereRow = row; }}>Choose where it works…</Button>{:else}<Button variant="primary" size="sm" loading={isBusy(row.id, 'approve')} onclick={() => runApp(row, 'approve')}>Approve</Button>{/if}<Button variant="ghost" size="sm" loading={isBusy(row.id, 'decline')} onclick={() => runApp(row, 'decline')}>Decline</Button>{/snippet}
+								{#snippet actions()}{#if needsPlace(row)}<Button variant="primary" size="sm" onclick={() => { whereApprove = true; whereRow = row; }}>Choose where it works…</Button>{:else}<Button variant="primary" size="sm" loading={isBusy(row.id, 'approve')} disabled={isBusy(row.id, 'decline')} onclick={() => runApp(row, 'approve')}>Approve</Button>{/if}<Button variant="ghost" size="sm" loading={isBusy(row.id, 'decline')} disabled={isBusy(row.id, 'approve')} onclick={() => runApp(row, 'decline')}>Decline</Button>{/snippet}
 							</SettingsRow>
 							{#if errorId === row.id && actionError && !rowBusy(row.id)}<p class="error" role="alert">{actionError}</p>{/if}
 							{#if hasSignInToShow(row)}<div class="details"><AppSignInPanel app={row} {signInHere} confirmOut={confirmingAppOut === row.id} onConfirmOut={(on) => confirmingAppOut = on ? row.id : null} onChange={(patch) => replaceApp({ ...row, ...patch })} onRefresh={refresh} onSignedOut={() => signedOut = new Set(signedOut).add(row.id)} /></div>{/if}

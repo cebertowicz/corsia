@@ -119,7 +119,7 @@ describe('AppSignInPanel', () => {
 	])('names the %s failure in plain words', (failureClass, text) => {
 		mountPanel(linear({ sign_in: { status: 'failed', signed_in: false, failure_class: failureClass } }));
 		expect(host.textContent).toContain(text);
-		const labels: Record<string, string | null> = { permissions: null, not_allowed: null, not_approved: null, address_mismatch: 'Sign in' };
+		const labels: Record<string, string | null> = { permissions: 'Sign in', not_approved: null, address_mismatch: 'Sign in' };
 		const label = failureClass in labels ? labels[failureClass] : 'Try again';
 		if (label) expect(button(label)!.classList.contains('primary')).toBe(true);
 		else expect(host.querySelectorAll('.actions .btn')).toHaveLength(0);

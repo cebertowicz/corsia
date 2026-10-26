@@ -336,7 +336,7 @@ def test_remove_ends_a_stuck_connect_and_never_queues_behind_it(runtime, monkeyp
     assert not any(tool.session_open for tool in tools)
 
 
-def test_shutdown_still_cancels_a_stuck_connect(runtime, monkeypatch):
+def test_cancelling_the_caller_ends_a_stuck_connect_and_frees_the_lock(runtime, monkeypatch):
     mcp_runtime, _tools, gate = runtime
     _runtime_db(monkeypatch, mcp_runtime, {"app-1": ("Figma", {"connected_app_id": "app-1"})})
     gate["hold"] = asyncio.Event()

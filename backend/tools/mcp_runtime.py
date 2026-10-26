@@ -4,8 +4,12 @@ Discovery completes at startup, before any turn is prepared. A later import
 only adds servers: reload connects the newly configured ones into the live
 session set and leaves every existing session untouched.
 
-Start, reload and stop serialize on one lock, and a stop is final until the
+Start, reload, sign-out and stop serialize on one lock, and a stop is final until the
 next explicit start: a reload that lands during or after shutdown opens nothing.
+An app's Remove is the one exception: it never waits on the lock. It first ends every
+action for that app, running or still queued on the lock (all are tracked in
+``_connecting``), then clears the app's state, so nothing for a removed app publishes
+state or opens a session afterwards.
 """
 
 import asyncio
