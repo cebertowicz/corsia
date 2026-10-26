@@ -316,6 +316,11 @@ def query_family(db, family: str, params: dict[str, Any], *, grouping: str = "sc
             sql = active_family_sql(grain, scope_threads, outcomes, rolled=rolled)
     elif family == "decisions":
         sql = decision_family_sql(grain, scope_threads, outcomes)
+    elif family == "corrections":
+        from api.measurement_corrections import corrections_family  # it imports this module's tables
+
+        decided = _in_range(db.execute(decision_family_sql(grain, scope_threads, outcomes), bound).fetchall())
+        return corrections_family(db, grain, decided)
     elif family == "tokens":
         sql = _token_family_sql(grain, scope_threads, outcomes)
     elif family == "models":

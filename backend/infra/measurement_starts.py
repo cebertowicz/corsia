@@ -54,6 +54,11 @@ _FIRST_ROW_SQL = {
           ))
         ORDER BY e.created_at LIMIT 1
     """,
+    "classified_corrections": """
+        SELECT MIN(m.created_at) FROM outcome_events f INDEXED BY idx_outcome_events_name_ts
+        JOIN messages m ON m.id=substr(f.subject_key,9)
+        WHERE f.event_name='measurement.correction' AND f.retracted_at IS NULL AND f.subject_key LIKE 'message:%'
+    """,
     "limit_hits": """
         SELECT MIN(started_at) FROM active_turns WHERE status > ''
     """,
@@ -67,6 +72,9 @@ _LIVE_SOURCE = {
     "first_try": "accepted_outcomes",
     "rejections_per_outcome": "accepted_outcomes",
     "asks_per_outcome": "accepted_outcomes",
+    # Corrections are measured from the earliest classified message: an earlier period had no classifier, so it is not a zero.
+    "corrections_per_outcome": "classified_corrections",
+    "asks_plus_corrections_per_outcome": "classified_corrections",
     "decisions": "answered_decisions",
     "tokens": "priceable_usage",
     "presence": "presence",

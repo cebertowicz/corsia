@@ -47,7 +47,7 @@ def _ts(column: str) -> str:
     return f"replace({column},'T',' ')"
 
 
-_ATTRIBUTED_SQL = f"""
+_SOURCES_SQL = f"""
     WITH facts AS (
       SELECT f.subject_key,f.agent_thread_id,f.attributes
       FROM outcome_events f
@@ -56,29 +56,37 @@ _ATTRIBUTED_SQL = f"""
     ), sources AS (
       SELECT '{SOURCE_KIND_MESSAGE}' AS source_kind,
         substr(f.subject_key,length('{MESSAGE_SUBJECT_PREFIX}') + 1) AS source_id,
-        m.created_at AS source_at,m.thread_id,m.active_turn_id,f.attributes
+        m.created_at AS source_at,m.thread_id,m.active_turn_id,f.attributes,m.thread_id AS target_thread
       FROM facts f LEFT JOIN messages m
         ON m.id=substr(f.subject_key,length('{MESSAGE_SUBJECT_PREFIX}') + 1)
       WHERE f.subject_key LIKE '{MESSAGE_SUBJECT_PREFIX}%'
       UNION ALL
       SELECT '{SOURCE_KIND_DOC_COMMENT}',substr(f.subject_key,length('{COMMENT_SUBJECT_PREFIX}') + 1),
-        c.created_at,f.agent_thread_id,NULL,f.attributes
+        c.created_at,f.agent_thread_id,NULL,f.attributes,f.agent_thread_id
       FROM facts f LEFT JOIN doc_comments c
         ON c.id=substr(f.subject_key,length('{COMMENT_SUBJECT_PREFIX}') + 1)
       WHERE f.subject_key LIKE '{COMMENT_SUBJECT_PREFIX}%'
       UNION ALL
       SELECT '{SOURCE_KIND_DECISION_ANSWER}',substr(f.subject_key,length('{DECISION_SUBJECT_PREFIX}') + 1),
-        {decision_answer_arrived_at_sql('d')},f.agent_thread_id,NULL,f.attributes
+        {decision_answer_arrived_at_sql('d')},f.agent_thread_id,NULL,f.attributes,f.agent_thread_id
       FROM facts f LEFT JOIN artifact_identities d ON f.subject_key={decision_answer_subject_key_sql('d')}
         AND d.integration='local' AND d.type='plan-decision'
       WHERE f.subject_key LIKE '{DECISION_SUBJECT_PREFIX}%'
     )
+"""
+
+_ATTRIBUTED_SQL = _SOURCES_SQL + f"""
     SELECT s.source_kind,s.source_id,s.source_at,s.attributes,
       (SELECT t.plan_node_id FROM active_turns t
         WHERE t.thread_id=s.thread_id AND t.id IS NOT s.active_turn_id
           AND {_ts('t.started_at')} < {_ts('s.source_at')}
         ORDER BY {_ts('t.started_at')} DESC,t.turn_order DESC LIMIT 1) AS node_id
     FROM sources s
+"""
+
+
+_TIMED_SQL = _SOURCES_SQL + """
+    SELECT s.source_kind,s.source_id,s.source_at,s.attributes,s.target_thread FROM sources s
 """
 
 
@@ -111,6 +119,29 @@ def attributed_facts(db: sqlite3.Connection) -> list[AttributedFact]:
             None if row["node_id"] is None else str(row["node_id"]),
         ))
     return facts
+
+
+def person_corrections(db: sqlite3.Connection) -> list[tuple[str, str | None]]:
+    """The person's corrections as (arrival time, target thread), one per source.
+
+    Messages, document comments and decision answers only: a sent-back review is the reviewer's
+    and is counted as a rejection. A source classified under several versions counts once, by its
+    latest classification. A source whose arrival cannot be resolved has no time and is left out.
+    """
+    rows = db.execute(_TIMED_SQL, {
+        "event": CORRECTION_EVENT, "correction": LABEL_CORRECTION, "not_correction": LABEL_NOT_CORRECTION,
+    }).fetchall()
+    latest: dict[tuple[str, str], tuple[str, bool, str, str | None]] = {}
+    for row in rows:
+        if row["source_at"] is None:
+            continue
+        attributes = json.loads(row["attributes"])
+        key = (str(row["source_kind"]), str(row["source_id"]))
+        seen = str(attributes.get("classified_at") or "")
+        if key not in latest or seen > latest[key][0]:
+            latest[key] = (seen, attributes.get("label") == LABEL_CORRECTION, str(row["source_at"]),
+                           None if row["target_thread"] is None else str(row["target_thread"]))
+    return [(at, thread) for _, is_correction, at, thread in latest.values() if is_correction]
 
 
 def workflow_run_of(node_id: str | None, parents: Mapping[str, str | None], runs: Iterable[str]) -> str:

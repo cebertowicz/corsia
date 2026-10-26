@@ -110,6 +110,9 @@ def _row(metric: str, period: str, source: dict[str, Any] | None, scoped_agent: 
     elif metric == "time_on_platform_h": value, n = source.get("value", 0), int(source.get("n", 0) or 0)
     elif metric == "limit_hits": value, n = int(source.get("hits", 0) or 0), int(source.get("hits", 0) or 0)
     elif metric == "asks_per_outcome": value = (source.get("raised", 0) + source.get("user_holds", 0)) / n if n else None
+    elif metric == "corrections_per_outcome": value = source.get("corrections", 0) / n if n else None
+    elif metric == "asks_plus_corrections_per_outcome":
+        value = (source.get("raised", 0) + source.get("user_holds", 0) + source.get("corrections", 0)) / n if n else None
     elif metric == "took_recommendation_pct":
         n = int(source.get("answered", 0) or 0)
         value = source.get("recommendation", 0) / n if n else None
