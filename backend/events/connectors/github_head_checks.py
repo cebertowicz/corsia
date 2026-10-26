@@ -59,9 +59,10 @@ class IntakeSink:
         event_id: str, external_id: str | None = None, occurred_at: str | None = None,
     ) -> IntakeResult:
         # The PR artifact is built from the facts, so intake takes neither external_id nor occurred_at.
+        from events.connectors.github_label_events import admit_change
         from events.intake import admit_event
-        return await admit_event(event_type=event_type, facts=facts, origin=origin,
-                                 producer=producer, event_id=event_id)
+        return await admit_change(admit_event, event_type=event_type, facts=facts, origin=origin,
+                                  producer=producer, event_id=event_id)
 
 
 def _object(value: Any) -> dict[str, Any]:

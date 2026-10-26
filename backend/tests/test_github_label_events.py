@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from events import intake
@@ -220,3 +220,53 @@ def test_new_issues_seed_then_emit_only_issues_and_drop_pull_requests():
     assert asyncio.run(activity.new_issues(get, admit, REPO, state, now)) is False
     assert asyncio.run(activity.new_issues(get, admit, REPO, state, now)) is True
     assert admitted == [("issues", "opened", f"opened:{REPO}#1463")]
+
+
+def _admit(item, at=None):
+    facts = {**item.facts, **({"at": at} if at else {})}
+    event_id = item.event_id if at is None else events.compute_event_id(
+        events.CONNECTOR, item.type, facts, events.IDENTITY[item.type])
+    return asyncio.run(events.admit_change(
+        intake.admit_event, event_type=f"github.{item.type}", facts=facts, origin="connector",
+        producer="github", event_id=event_id))
+
+
+def _copy_at(seconds: int):
+    """The poller copy of PR 1421's label, its time ``seconds`` after the webhook's."""
+    row = fixture("row_pr_labeled")
+    at = datetime.fromisoformat(row["created_at"].replace("Z", "+00:00")) + timedelta(seconds=seconds)
+    event, payload, _ = poller_copy({**row, "created_at": at.strftime("%Y-%m-%dT%H:%M:%SZ")})
+    return events.change_event(event, payload)
+
+
+def test_a_copy_one_second_apart_is_a_duplicate_in_either_order(isolated_db):
+    webhook = events.change_event("pull_request", pr_webhook())
+    late, early = _copy_at(1), _copy_at(-4)
+    assert webhook and late and early and late.event_id != webhook.event_id
+    first = _admit(webhook)
+    assert first.accepted and not first.duplicate
+    assert _admit(late).duplicate and _admit(early).duplicate and _admit(webhook).duplicate
+
+
+def test_the_reverse_order_poller_first_then_webhook_is_a_duplicate(isolated_db):
+    webhook = events.change_event("pull_request", pr_webhook())
+    assert not _admit(_copy_at(1)).duplicate
+    assert _admit(webhook).duplicate
+
+
+def test_copies_six_seconds_apart_or_a_re_add_minutes_apart_are_two_events(isolated_db):
+    webhook = events.change_event("pull_request", pr_webhook())
+    assert not _admit(webhook).duplicate
+    assert not _admit(_copy_at(6)).duplicate
+    assert not _admit(_copy_at(180)).duplicate
+
+
+def test_opened_and_closed_stay_exact_only(isolated_db):
+    assert "issue.opened" not in events.WINDOWED and "issue.closed" not in events.WINDOWED
+    row = fixture("row_issue_closed")
+    event, payload, _ = poller_copy(row)
+    closed = events.change_event(event, payload)
+    assert closed and closed.type == "issue.closed" and not _admit(closed).duplicate
+    other = events.compute_event_id(events.CONNECTOR, "issue.closed", {**closed.facts, "at": "2026-10-26T17:56:07Z"},
+                                    events.IDENTITY["issue.closed"])
+    assert other != closed.event_id

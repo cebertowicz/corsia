@@ -5,8 +5,13 @@ The webhook translator, the repo-activity poller and the outcome mapper all call
 ``event_id`` (event rules §5.2, §5.3 "One intake, one event_id"). The input is the
 webhook payload shape. The poller builds that shape from an ``issues/events`` row
 (see ``github_issue_rows``), putting the row's own event time where a webhook
-carries the item's ``updated_at``; GitHub sets the two together, so both copies
-read the same second.
+carries the item's ``updated_at``.
+
+Identity is exact for ``issue.opened`` (no time) and ``issue.closed`` (``closed_at``
+matched the row time on 3 of 3 recorded pairs). The label and reopen types take
+``at`` from ``updated_at``, which drifted one second on 1 of 3 recorded pairs, so
+``admit_change`` matches their copies within ``WINDOW_SECONDS`` of ``at`` before
+it admits with the exact id.
 
 Identity is per change: two labels added to one PR head are two events, and the
 same label removed and added again is two more, told apart by ``at``. Titles,
@@ -14,8 +19,10 @@ bodies and label descriptions are never facts.
 """
 from __future__ import annotations
 
+import asyncio
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from events.identity_formula import compute_event_id
@@ -126,3 +133,37 @@ def change_event(event_type: str, payload: Any) -> Change | None:
         return None
     suffix, facts = built
     return Change(suffix, facts, compute_event_id(CONNECTOR, suffix, facts, IDENTITY[suffix]))
+
+
+#: Types whose webhook copy takes ``at`` from ``updated_at``; their copies are matched within a window.
+WINDOWED = frozenset({"pr.labeled", "pr.unlabeled", "issue.labeled", "issue.unlabeled", "issue.reopened"})
+WINDOW_SECONDS = 5
+
+
+def window_ids(suffix: str, facts: dict[str, Any]) -> list[str]:
+    """The ``event_id`` a copy of this change would carry for each ``at`` within the window, exact first."""
+    try:
+        at = datetime.fromisoformat(str(facts["at"]).replace("Z", "+00:00"))
+    except (KeyError, ValueError):
+        return []
+    shifts = sorted(range(-WINDOW_SECONDS, WINDOW_SECONDS + 1), key=abs)
+    return [
+        compute_event_id(CONNECTOR, suffix, {**facts, "at": (at + timedelta(seconds=n)).strftime("%Y-%m-%dT%H:%M:%SZ")},
+                         IDENTITY[suffix])
+        for n in shifts
+    ]
+
+
+async def admit_change(admit: Callable[..., Awaitable[Any]], *, event_type: str, facts: dict[str, Any],
+                       event_id: str, **rest: Any) -> Any:
+    """Admit one change through ``admit`` (the intake's ``admit_event``), deduplicating windowed copies.
+
+    A copy within ``WINDOW_SECONDS`` of an accepted one is a duplicate and is not admitted; the
+    admitted copy keeps its exact ``event_id``. Every other type goes straight through.
+    """
+    suffix = event_type.removeprefix(f"{CONNECTOR}.")
+    if suffix in WINDOWED and (ids := window_ids(suffix, facts)):
+        from events.intake import IntakeResult, accepted_event_id
+        if await asyncio.to_thread(accepted_event_id, ids) is not None:
+            return IntakeResult(True, True, None, 0)
+    return await admit(event_type=event_type, facts=facts, event_id=event_id, **rest)

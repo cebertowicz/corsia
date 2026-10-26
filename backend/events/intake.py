@@ -269,6 +269,13 @@ def _prune_expired(conn) -> None:
     )
 
 
+def accepted_event_id(event_ids: list[str]) -> str | None:
+    """The first of ``event_ids`` already accepted, or ``None``; read-only."""
+    row = get_db().execute("SELECT event_id FROM event_intake_records WHERE outcome='accepted' AND event_id IN (%s)"
+                           % ",".join("?" * len(event_ids)), event_ids).fetchone()
+    return None if row is None else str(row["event_id"])
+
+
 def _record_acceptance(conn, *, event_id: str, event_type: str, origin: str,
                        producer: str, rules_matched: int) -> None:
     conn.execute(
