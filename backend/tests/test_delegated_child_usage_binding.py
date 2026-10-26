@@ -13,7 +13,7 @@ from __future__ import annotations
 import pytest
 
 from delegation_fixtures import deleg_db  # noqa: F401
-from plans import admission, public, selection_validity, service
+from plans import admission, delegated_usage, public, selection_validity, service
 from plans.boundary import PlanActor, mutate
 from plans.delegate_attach import Step
 from plans.usage_calls import binding_at_call_start, record_call_usage
@@ -201,3 +201,53 @@ def test_calls_recorded_before_the_hand_over_are_billed_when_it_commits(deleg_db
     )
     assert _rows(deleg_db) == [expected, expected]
     assert _turn_binding(deleg_db) is None
+
+
+def test_a_thread_nothing_was_handed_to_keeps_its_calls_unbound(deleg_db):
+    """A top-level thread with one parked step is not a delegated child."""
+    _threads(deleg_db)
+    own = _started(deleg_db, service.ensure_plan("thread", PARENT, db=deleg_db).id, PARENT, "Own")
+    mutate(
+        own.plan_id, "arm_watch",
+        {
+            "node_id": own.id, "expected_revision": service.get_node(own.id, db=deleg_db).revision,
+            "condition": {"type": "deadline", "value": "2099-01-01T00:00:00+00:00"},
+            "expected_event": "proof.ready",
+        },
+        actor=PlanActor(PARENT, "u-test", "proj-1"), provenance="test",
+        mutation_id="park-top", db=deleg_db,
+    )
+    deleg_db.commit()
+    seen: list[str] = []
+    deleg_db.set_trace_callback(seen.append)
+    fields = delegated_usage.binding(PARENT, db=deleg_db)
+    deleg_db.set_trace_callback(None)
+
+    assert fields is None
+    assert len(seen) == 1
+
+
+def test_a_reused_worker_bills_its_new_hand_over_despite_earlier_finished_steps(deleg_db):
+    """The child's plan outlives a hand-over: steps it settled before this one don't count."""
+    _threads(deleg_db)
+    old = _started(
+        deleg_db, service.ensure_plan("thread", CHILD, db=deleg_db).id, CHILD, "Earlier step",
+    )
+    service.transition_node(old.id, "closed", db=deleg_db)
+    deleg_db.commit()
+    parent_step = _started(
+        deleg_db, service.ensure_plan("thread", PARENT, db=deleg_db).id, PARENT, "Parent step",
+    )
+    public.hand_over_delegated_step(
+        Step(str(parent_step.plan_id), str(parent_step.id), "Parent step"),
+        CHILD, PARENT_ROW, db=deleg_db,
+    )
+    deleg_db.commit()
+    persist_turn(CHILD, "turn-1")
+
+    _call("provider-call:1")
+
+    assert _rows(deleg_db) == [(
+        parent_step.id, "delegation", parent_step.commitment_id,
+        _parent_attempt(deleg_db, parent_step.id),
+    )]

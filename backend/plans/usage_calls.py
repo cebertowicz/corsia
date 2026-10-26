@@ -8,10 +8,10 @@ selection captured when the call begins -- the same validity rule a starting
 Turn snapshots after ``plans.turn_admission.snapshot_after_admission`` -- and
 falls back to the Turn's snapshot only when the executor holds no valid
 selection. A delegated child holding none is billed to the step it parked
-or was handed (``plans.delegated_usage``). The native loop captures it before dispatching the provider call
-(``binding_at_call_start``) and hands it
-in with the measurement; an external harness reports a call only once it has
-happened, so its binding is read at that first observation, which precedes
+or was handed (``plans.delegated_usage``). The native loop captures it before
+dispatching the provider call (``binding_at_call_start``) and hands it in with
+the measurement; an external harness reports a call only once it has happened,
+so its binding is read at that first observation, which precedes
 any tool the call made. Plans answers the question; ``infra.llm_usage`` only
 persists the answer, so ``infra`` still never imports ``plans``.
 """

@@ -9,13 +9,22 @@ parent's task cost did not carry them.
 
 This module answers only the usage question; it never writes ``active_turns``
 and never selects, so admission, liveness and the working label are unchanged.
+That is deliberate: ``infra.turn_plan_binding`` owns the Turn's snapshot (which
+drives admission and the working label) and this fallback must not move it. So
+for these Turns cost follows the handed or parked step, while the Turn snapshot,
+registrations and the terminal-total fallback stay unbound.
+
+It applies only to a thread some step was handed to; any other thread costs one
+indexed read and keeps its calls as before.
 
 1. One open active step of the child's own plan, parked rather than eligible:
    the calls belong to that step, on its latest attempt (``plan_usage`` requires
    an attempt) and its own commitment.
 2. Otherwise, while the child has no active, returned or finished step of its
-   own and the step it was handed is still pending or active: the calls belong
-   to that handed step, as ``delegation`` on the parent's commitment.
+   own since the latest hand-over and the step it was handed is still pending or
+   active: the calls belong to that handed step, as ``delegation`` on the
+   parent's commitment. Steps settled before the hand-over (a reused worker's
+   earlier assignment) are not this hand-over's work.
 
 Anything else stays unbound on purpose: work already returned for review or
 finished is not the task's work, and more than one candidate is not guessed.
@@ -34,6 +43,9 @@ _PAST_WORK_STATES = ("review_requested", *sorted(node_states._TERMINAL_STATES))
 
 def binding(executor: str, *, db) -> dict | None:
     """Return the plan fields the executor's calls now belong to, or None."""
+    handed = _handed_node(db, executor)
+    if handed is None:
+        return None
     plan = db.execute(
         "SELECT * FROM plans WHERE owner_kind='thread' AND owner_id=?", (executor,),
     ).fetchone()
@@ -43,9 +55,31 @@ def binding(executor: str, *, db) -> dict | None:
             return None
         if own is not None:
             return _step_binding(db, plan, own, executor)
-        if _has_past_work(db, plan):
+        if _has_past_work(db, plan, _attached_at(db, handed["id"])):
             return None
-    return _handed_binding(db, executor)
+    if handed["state"] not in _HANDED_STATES:
+        return None
+    return _handed_binding(db, handed)
+
+
+def _handed_node(db, executor: str):
+    """Return the live step handed to the executor, an open one first, or None."""
+    marks = ",".join("?" for _ in _HANDED_STATES)
+    return db.execute(
+        f"""SELECT * FROM plan_nodes WHERE spawned_thread_id=? AND archived_at IS NULL
+            ORDER BY state IN ({marks}) DESC, id LIMIT 1""",
+        (executor, *_HANDED_STATES),
+    ).fetchone()
+
+
+def _attached_at(db, node_id) -> str:
+    event = db.execute(
+        """SELECT created_at FROM plan_node_events
+           WHERE node_id=? AND event='spawned_thread_attached'
+           ORDER BY created_at DESC,rowid DESC LIMIT 1""",
+        (node_id,),
+    ).fetchone()
+    return event["created_at"] if event is not None else ""
 
 
 def _own_active_step(db, plan):
@@ -62,11 +96,13 @@ def _own_active_step(db, plan):
     return billable[0] if billable else None
 
 
-def _has_past_work(db, plan) -> bool:
+def _has_past_work(db, plan, since: str) -> bool:
+    """Whether the child returned or finished a step of its own since ``since``."""
     marks = ",".join("?" for _ in _PAST_WORK_STATES)
     return db.execute(
-        f"SELECT 1 FROM plan_nodes WHERE plan_id=? AND kind='task' AND state IN ({marks}) LIMIT 1",
-        (plan["id"], *_PAST_WORK_STATES),
+        f"""SELECT 1 FROM plan_nodes WHERE plan_id=? AND kind='task'
+            AND state IN ({marks}) AND updated_at>=? LIMIT 1""",
+        (plan["id"], *_PAST_WORK_STATES, since),
     ).fetchone() is not None
 
 
@@ -81,15 +117,7 @@ def _step_binding(db, plan, node, executor: str) -> dict | None:
     return _fields(plan["id"], node, attempt["id"], commitments.usage_role(str(node["id"]), db=db))
 
 
-def _handed_binding(db, executor: str) -> dict | None:
-    marks = ",".join("?" for _ in _HANDED_STATES)
-    node = db.execute(
-        f"""SELECT * FROM plan_nodes WHERE spawned_thread_id=? AND archived_at IS NULL
-            AND state IN ({marks}) ORDER BY id LIMIT 1""",
-        (executor, *_HANDED_STATES),
-    ).fetchone()
-    if node is None:
-        return None
+def _handed_binding(db, node) -> dict | None:
     attempt = db.execute(
         "SELECT id FROM plan_node_attempts WHERE node_id=? ORDER BY selected_at DESC,id DESC LIMIT 1",
         (node["id"],),
