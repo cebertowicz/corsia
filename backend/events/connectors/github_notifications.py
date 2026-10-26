@@ -96,7 +96,7 @@ def _parse_time(value: Any) -> datetime | None:
 
 def poller_status() -> dict[str, Any]:
     """The poller's state, reason, last success, last error and skipped-thread count,
-    and the read budget both GitHub pollers share (``read_budget``, per resource)."""
+    and the read budget both GitHub pollers share (``read_budget``)."""
     return {
         **_status, "last_error": dict(_status["last_error"] or {}) or None,
         "read_budget": budget.status(),

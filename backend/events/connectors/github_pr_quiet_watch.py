@@ -29,6 +29,7 @@ from events import delivery
 from events.connectors import github_pr_quiet_reasons as reasons
 from events.connectors import github_pr_quiet_rows as rows
 from events.connectors import github_notifications_feed as feed
+from events.connectors.github_read_budget import budget
 from infra.db_async import run_in_db
 from reviewer.reviewer_categories import STATUS_CHECK_CONTEXT
 
@@ -315,8 +316,16 @@ def _report_ingress(affected: list[str], now: datetime) -> None:
 
 
 async def sweep_once(runner: feed.GhRunner) -> None:
-    """Evaluate every candidate once; one PR's failure never stops the others."""
+    """Evaluate every candidate once; one PR's failure never stops the others.
+
+    While the shared read budget keeps the sweep out of its reserve the sweep
+    is skipped, not failed: the budget's own status says why.
+    """
     from events.connectors.github_pr_notice import webhook_configured
+
+    if budget.sweep_paused():
+        _status.update({"state": "enabled", "reason": None})
+        return
 
     candidates = await run_in_db(_candidates)
     webhook = await run_in_db(webhook_configured)
