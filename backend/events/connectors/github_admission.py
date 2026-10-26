@@ -228,22 +228,16 @@ def _delivery_metadata(payload: dict[str, Any]) -> tuple[str | None, str | None]
 
 def _record_phase(
     event_type: str, payload: dict[str, Any], delivery_id: str, source: str,
-    *, announce: bool = True,
 ) -> tuple[AdmissionOutcome | None, str]:
-    """Durably record the delivery; return a terminal outcome, or None to schedule.
-
-    ``announce`` is False on a re-run after a refused lock, so one delivery emits one
-    ``received`` event.
-    """
+    """Durably record the delivery; return a terminal outcome, or None to schedule."""
     action, repo = _delivery_metadata(payload)
-    if announce:
-        emit_product_event(
-            "webhook", "received",
-            properties={
-                "event_type": event_type, "action": action,
-                "delivery_id": delivery_id, "repo": repo, "source": source,
-            },
-        )
+    emit_product_event(
+        "webhook", "received",
+        properties={
+            "event_type": event_type, "action": action,
+            "delivery_id": delivery_id, "repo": repo, "source": source,
+        },
+    )
     record, delivery_id, held = record_delivery_for_admission(
         event_type, action, delivery_id, repo, payload,
     )
@@ -307,16 +301,12 @@ async def _admission_unit(
 ) -> AdmissionOutcome:
     """Record, schedule and settle one delivery; holds ``admission`` until it ends."""
     started.append(True)
-    from events.connectors.github_writer_wait import record_when_writer_free
     from infra.db_async import run_in_db
     from infra.drain import finish_turn_admission
 
     try:
-        outcome, delivery_id = await record_when_writer_free(
-            lambda announce: run_in_db(
-                _record_phase, event_type, payload, delivery_id, source, announce=announce,
-            ),
-            delivery_id,
+        outcome, delivery_id = await run_in_db(
+            _record_phase, event_type, payload, delivery_id, source,
         )
         if outcome is not None:
             return outcome

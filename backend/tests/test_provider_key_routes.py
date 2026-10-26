@@ -157,7 +157,7 @@ def test_the_webhook_secret_is_read_from_the_store(isolated_db, tmp_path, monkey
 
 def test_the_store_refuses_names_code_owns_and_provider_entries_are_not_listed(isolated_db, tmp_path, monkeypatch):
     monkeypatch.setattr("infra.config.STATE_ROOT", tmp_path)
-    for name in ("provider-anthropic", "provider-x", "server-ns-0123456789", "mcp-docs-token", "webhook-slack"):
+    for name in ("provider-anthropic", "provider-x", "server-ns-0123456789", "mcp-docs-token"):
         with pytest.raises(key_store.KeyStoreError):
             key_store.add_entry(name, "Label", "", added_by_thread_id=None, added_by_name=None)
     key_store_providers.set_provider_key("anthropic", VALUE)

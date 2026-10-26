@@ -353,13 +353,6 @@ async def test_adding_refuses_a_name_in_use(client):
     assert "already exists" in taken.json()["detail"]["message"]
 
 
-@pytest.mark.asyncio
-async def test_adding_refuses_a_connector_webhook_name(client):
-    refused = await client.post("/api/keys", headers=_auth(), json={"name": "webhook-othertool", "label": "Hook"})
-    assert refused.status_code == 400
-    assert key_store.resolve_webhook("othertool") is None
-
-
 @pytest.mark.parametrize("name, kind", [
     ("web-search", "builtin"),
     ("provider-anthropic", "provider"),

@@ -114,8 +114,7 @@ async def test_an_operational_store_failure_aborts_the_admission_and_can_be_rede
     main_db, monkeypatch, scheduler,
 ):
     event_type, payload = delivery(FAULTY_DELIVERY)
-    # A lock refusal is waited out (github_writer_wait); any other operational fault is not.
-    writer = _FaultyWriter(sqlite3.OperationalError("disk I/O error"))
+    writer = _FaultyWriter(sqlite3.OperationalError("database is locked"))
     monkeypatch.setattr(outcome_events_module, "record_outcome_event", writer)
 
     with pytest.raises(sqlite3.OperationalError):
