@@ -85,10 +85,10 @@ def _trusted_json_post(request: Request) -> bool:
     return True
 
 
-def _macos_supported() -> bool:
-    """Whether this Mac meets the approved macOS 15 floor."""
+def _macos_supported() -> bool | None:
+    """Whether this Mac meets the approved macOS 15 floor; None off macOS, where it does not apply."""
     if platform.system() != "Darwin":
-        return False
+        return None
     try:
         return int(platform.mac_ver()[0].split(".", 1)[0]) >= _MINIMUM_MACOS_MAJOR
     except (TypeError, ValueError):

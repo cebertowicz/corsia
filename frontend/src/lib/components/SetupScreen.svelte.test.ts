@@ -18,6 +18,7 @@ let component: ReturnType<typeof mount> | null = null;
 let calls: Array<{ url: string; method: string }>;
 let progressBodies: string[];
 let localEligible = false;
+let macosSupported: boolean | null = true;
 let workFolder: string | undefined;
 let sources: Array<{ source: string; name: string; state: string }>;
 
@@ -41,11 +42,11 @@ function fillAccount() {
 }
 
 beforeEach(() => {
-	token.set(null); user.set(null); localEligible = false; workFolder = '~/CORSIA'; calls = []; progressBodies = []; sources = [];
+	token.set(null); user.set(null); localEligible = false; macosSupported = true; workFolder = '~/CORSIA'; calls = []; progressBodies = []; sources = [];
 	vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
 		const url = String(input); const method = init?.method ?? 'GET'; calls.push({ url, method });
 		if (url === '/api/setup/progress' && method === 'PUT') progressBodies.push(String(init?.body));
-		if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: localEligible, ...(workFolder ? { work_folder: workFolder } : {}) });
+		if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: macosSupported, local_eligible: localEligible, ...(workFolder ? { work_folder: workFolder } : {}) });
 		if (url === '/api/setup/first-account') return json({ token: 'setup-token', user: { id: 'user', name: 'Ada Lovelace' } });
 		if (url.includes('/sources')) return json({ sources });
 		if (url.includes('/corsia-agent')) return json({ target: { thread_id: 'corsia-thread' } });
@@ -118,6 +119,15 @@ async function remountWide() {
 }
 
 describe('SetupScreen', () => {
+	it.each([
+		{ supported: false, title: 'Update macOS to open CORSIA' },
+		{ supported: null, title: APPROVED_WELCOME.title },
+	])('shows $title when the macOS floor is $supported', async ({ supported, title }) => {
+		macosSupported = supported;
+		await remountWithWorkFolder('~/CORSIA'); await settle();
+		expect(host.querySelector('h1')?.textContent).toBe(title);
+	});
+
 	it('opens on Getting started, the first of four rail steps, with Continue to the account form', async () => {
 		await settle();
 		expect(host.querySelector('h1')?.textContent).toBe(APPROVED_WELCOME.title);
