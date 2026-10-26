@@ -353,6 +353,44 @@ def test_shutdown_still_cancels_a_stuck_connect(runtime, monkeypatch):
     asyncio.run(scenario())
 
 
+def test_a_reconnect_queued_behind_another_apps_connect_is_ended_by_its_apps_remove(runtime, monkeypatch):
+    mcp_runtime, tools, gate = runtime
+    apps = {"app-a": ("Figma", {"connected_app_id": "app-a"}), "app-b": ("Linear", {"connected_app_id": "app-b"})}
+    published = []
+
+    async def load(fn, *args):
+        if fn.__name__ == "load_runtime_app_config":
+            return apps[args[0]]  # the row is gone once its app is removed
+        if fn.__name__ == "load_missing_app_key_refs":
+            return []
+        if fn.__name__ == "record_runtime_app_state":
+            published.append((args[0], args[1]["state"]))
+            return None
+        raise AssertionError(fn.__name__)
+
+    monkeypatch.setattr(mcp_runtime, "run_in_db", load)
+    gate["hold"], gate["entered"] = asyncio.Event(), asyncio.Event()  # app B's server never answers
+
+    async def scenario():
+        holding = asyncio.create_task(mcp_runtime.apply_connected_app_runtime("connect", "app-b"))
+        await asyncio.wait_for(gate["entered"].wait(), 2)
+        queued = asyncio.create_task(mcp_runtime.apply_connected_app_runtime("reconnect", "app-a"))
+        await asyncio.sleep(0.05)  # Reconnect A now waits on the lock
+        del apps["app-a"]
+        removed = await asyncio.wait_for(mcp_runtime.apply_connected_app_runtime("remove", "app-a"), 2)
+        assert removed["state"] == "disconnected"
+        published.clear()
+        gate["hold"].set()
+        assert (await asyncio.wait_for(holding, 2))["state"] == "working"
+        assert (await asyncio.wait_for(queued, 2))["state"] == "disconnected"
+        await mcp_runtime.stop_mcp_runtime()
+
+    asyncio.run(scenario())
+    assert not any(app_id == "app-a" for app_id, _state in published)
+    assert "app-a" not in mcp_runtime._app_states and not any(tool.name.startswith("Figma") for tool in tools)
+    assert mcp_runtime._connecting == {}
+
+
 def test_connected_app_with_an_unset_key_never_attempts_a_connection(runtime, monkeypatch):
     mcp_runtime, _tools, _gate = runtime
     published = []

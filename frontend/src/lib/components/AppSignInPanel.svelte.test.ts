@@ -111,6 +111,7 @@ describe('AppSignInPanel', () => {
 		['timed_out', "Sign-in wasn't finished within 5 minutes, or the tab was closed."],
 		['declined', "The sign-in was declined on Linear's page."],
 		['not_allowed', "Linear doesn't allow CORSIA to sign in."],
+		['not_approved', "Linear only lets in apps it has approved, and CORSIA isn't one of them."],
 		['permissions', "Linear can't give CORSIA the access it needs."],
 		['app_error', 'Linear had a problem with the sign-in.'],
 		['app_busy', 'Linear is busy.'],
@@ -118,15 +119,22 @@ describe('AppSignInPanel', () => {
 	])('names the %s failure in plain words', (failureClass, text) => {
 		mountPanel(linear({ sign_in: { status: 'failed', signed_in: false, failure_class: failureClass } }));
 		expect(host.textContent).toContain(text);
-		const labels: Record<string, string | null> = { permissions: null, not_allowed: null, address_mismatch: 'Sign in' };
+		const labels: Record<string, string | null> = { permissions: null, not_allowed: null, not_approved: null, address_mismatch: 'Sign in' };
 		const label = failureClass in labels ? labels[failureClass] : 'Try again';
 		if (label) expect(button(label)!.classList.contains('primary')).toBe(true);
 		else expect(host.querySelectorAll('.actions .btn')).toHaveLength(0);
 	});
 
-	it('says Remove is the way out when the app will not allow CORSIA', () => {
+	it('tells the truth about each refusal: an admin can lift not_allowed, nobody can lift not_approved', () => {
 		mountPanel(linear({ sign_in: { status: 'failed', signed_in: false, failure_class: 'not_allowed' } }));
-		expect(host.textContent).toContain('or press Remove to take it off this list.');
+		expect(host.textContent).toContain("allow CORSIA in Linear's settings.");
+		expect(host.textContent).not.toContain('Remove');
+	});
+
+	it('says Remove is the way out when the app only lets in apps it has approved', () => {
+		mountPanel(linear({ sign_in: { status: 'failed', signed_in: false, failure_class: 'not_approved' } }));
+		expect(host.textContent).toContain('Press Remove to take it off this list.');
+		expect(host.textContent).not.toContain('Ask whoever manages');
 	});
 
 	it('offers Sign in, not Try again, while the app has no client ID, and starts a fresh sign-in', async () => {

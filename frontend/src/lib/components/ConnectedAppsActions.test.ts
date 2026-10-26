@@ -60,6 +60,7 @@ describe('a hosted app row: state to actions', () => {
 		['sign-in failed, retryable', failedSignIn('app_busy'), ['Try again', 'Where it works…', 'Remove']],
 		['sign-in failed, no client ID', failedSignIn('address_mismatch'), ['Sign in', 'Where it works…', 'Remove']],
 		['sign-in refused by the app', failedSignIn('not_allowed'), ['Where it works…', 'Remove']],
+		['sign-in refused, app only lets in approved apps', failedSignIn('not_approved'), ['Where it works…', 'Remove']],
 		['sign-in cannot get the access it needs', failedSignIn('permissions'), ['Where it works…', 'Remove']],
 	])('%s', async (_name, app, buttons) => {
 		stubApi(() => [app]);

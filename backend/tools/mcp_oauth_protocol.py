@@ -21,7 +21,7 @@ import httpx
 
 from tools.mcp_config import url_origin
 import tools.mcp_oauth_secrets as mcp_oauth_secrets
-from tools.mcp_oauth_errors import SignInError, from_provider_error
+from tools.mcp_oauth_errors import SignInError, from_provider_error, from_registration_status
 
 TIMEOUT = httpx.Timeout(10.0)
 REVOKE_TIMEOUT = httpx.Timeout(5.0)
@@ -247,8 +247,8 @@ async def register_client(
         raise SignInError("app_busy") from None
     data = _json(raw)
     code = response.status_code
-    if code >= 400:  # a refusal to register CORSIA is the app's own to lift; a busy or broken app may recover
-        raise SignInError("app_busy" if code in (429, 503) else "app_error" if code >= 500 else "not_allowed")
+    if code >= 400:
+        raise from_registration_status(code, data)
     if response.status_code not in (200, 201) or not data or not isinstance(data.get("client_id"), str):
         raise SignInError("address_mismatch")
     secret, token = data.get("client_secret"), data.get("registration_access_token")

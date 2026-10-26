@@ -31,8 +31,9 @@ _app_servers: dict[str, str] = {}
 _app_configs: dict[str, tuple[str, dict[str, object]]] = {}
 _app_states: dict[str, dict[str, object]] = {}
 _reconnect_at: dict[str, float] = {}
-# The connect, restart or reconnect now running for an app, so that app's Remove can end it.
-_connecting: dict[str, asyncio.Task] = {}
+# Every connect, restart, reconnect or sign-out for an app, running or still queued on the lock,
+# so that app's Remove can end them all before it clears the app's state.
+_connecting: dict[str, set[asyncio.Task]] = {}
 
 
 class MCPReconnectRateLimitError(RuntimeError):
@@ -139,33 +140,40 @@ async def apply_connected_app_runtime(action: str, app_id: str) -> dict[str, obj
     """
     if action == "remove":
         # Remove touches only this app's own state, so it never queues behind another app's connect,
-        # and it ends this app's own connect when one is stuck.
+        # and it ends this app's connects, stuck or still queued, so none publishes state after it.
         await _cancel_connecting(app_id)
         return await _remove_app_runtime(app_id)
+    work = asyncio.ensure_future(_run_locked(action, app_id))
+    _connecting.setdefault(app_id, set()).add(work)
+    try:
+        return await work
+    except asyncio.CancelledError:
+        if work.cancelled() and not (asyncio.current_task() or work).cancelling():
+            return {"state": "disconnected", "state_since": utc_now_iso(), "tool_count": 0, "failure_class": None}
+        raise
+    finally:
+        pending = _connecting.get(app_id, set())
+        pending.discard(work)
+        if not pending:
+            _connecting.pop(app_id, None)
+
+
+async def _run_locked(action: str, app_id: str) -> dict[str, object]:
     async with _lock:
         if _stopped:
             return {"state": "failed", "state_since": utc_now_iso(), "tool_count": 0, "failure_class": "cannot_start"}
         if action == "sign_out":
             return await _await_sign_in(app_id)
-        work = asyncio.ensure_future(_connect_app(action, app_id))
-        _connecting[app_id] = work
-        try:
-            return await work
-        except asyncio.CancelledError:
-            if work.cancelled() and not (asyncio.current_task() or work).cancelling():
-                return {"state": "disconnected", "state_since": utc_now_iso(), "tool_count": 0, "failure_class": None}
-            raise
-        finally:
-            if _connecting.get(app_id) is work:
-                del _connecting[app_id]
+        return await _connect_app(action, app_id)
 
 
 async def _cancel_connecting(app_id: str) -> None:
-    """End this app's connect, if one is running, and wait for it to close what it opened."""
-    work = _connecting.get(app_id)
-    if work is not None and not work.done():
+    """End this app's connects, running or queued, and wait for them to close what they opened."""
+    works = {work for work in _connecting.get(app_id, ()) if not work.done()}
+    for work in works:
         work.cancel()
-        await asyncio.wait({work})
+    if works:
+        await asyncio.wait(works)
 
 
 async def _connect_app(action: str, app_id: str) -> dict[str, object]:
