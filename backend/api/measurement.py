@@ -17,6 +17,7 @@ from api.measurement_join import joined_read
 from api.measurement_limits import first_recorded_period, limits_by_period, router as limits_router
 from api.measurement_recent import router as recent_router
 from api.measurement_presence import PresenceCoverage, presence_coverage
+from api.measurement_corrections import corrections_family
 from api.measurement_breaks import (
     COMPARABILITY_UNRESTRICTED, comparability_start, derive_breaks, first_availability_period,
     next_comparability_boundary, period_comparable,
@@ -172,6 +173,7 @@ def _series_read(requested: list[str], project: str, agent: str, page_grain: Gra
         prepare_outcome_periods(db, params)
         family_rows = {family: (size_family(db, params) if family == "size" else
                                 [{"period": period, "hits": hits} for period, hits in limits_by_period(db, params).items()] if family == "limits" else
+                                corrections_family(db, page_grain, query_family(db, "decisions", params)) if family == "corrections" else
                                 query_family(db, family, params))
                        for family in families}
         return selected_scope.response(), family_rows, first_limit_period, so_far, coverage, breaks

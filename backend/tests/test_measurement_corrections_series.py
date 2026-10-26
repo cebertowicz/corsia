@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 
 import pytest
-from fastapi import HTTPException
 
 from tests.test_measurement_api import USER, WEEK, _freeze_clock, _seed_decision, _seed_outcomes, _seed_thread
 
@@ -158,13 +157,23 @@ async def test_a_thin_period_serves_no_value(isolated_db, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_the_already_said_type_is_not_a_series_until_a_type_exists(isolated_db, monkeypatch):
-    from api.measurement import measurement_series
-    from api.measurement_registry import REGISTRY
+async def test_a_document_comment_as_the_first_correction_starts_and_counts_the_series(isolated_db, monkeypatch):
+    from infra.database import get_db
 
-    assert not [name for name in REGISTRY if "already_said" in name or name.endswith("_by_type")]
-    _freeze_clock(monkeypatch)
-    with pytest.raises(HTTPException) as refused:
-        await measurement_series("already_said_per_outcome", project="all", agent="none", grain="weeks",
-                                 timezone_name="UTC", user=USER)
-    assert refused.value.status_code == 400
+    db = get_db()
+    try:
+        _seed(db)
+        db.execute(
+            "INSERT INTO doc_comments (id,artifact_id,author,author_kind,body,created_at,updated_at) "
+            "VALUES ('c1','a1','steve','user','x','2026-09-22T12:00:00Z','2026-09-22T12:00:00Z')")
+        db.execute(
+            "INSERT INTO outcome_events (id,dedupe_key,event_name,source,provenance,ts,observed_ts,subject_key,"
+            "agent_thread_id,attributes) VALUES ('f1','f1','measurement.correction','corsia','instrumented',"
+            "'2026-10-01','2026-10-01','doc-comment:c1','root',?)",
+            (json.dumps({"label": "correction", "asset_version": "v1", "classified_at": "2026-10-01T00:00:00Z"}),))
+        db.commit()
+    finally:
+        db.close()
+
+    rows = await _rows(monkeypatch)
+    assert rows[("corrections_per_outcome", WEEK)]["value"] == pytest.approx(1 / 20)

@@ -51,8 +51,8 @@ _SOURCES_SQL = f"""
     WITH facts AS (
       SELECT f.subject_key,f.agent_thread_id,f.attributes
       FROM outcome_events f
-      WHERE f.event_name=:event AND f.retracted_at IS NULL
-        AND json_extract(f.attributes,'$.label') IN (:correction, :not_correction)
+      WHERE f.event_name='{CORRECTION_EVENT}' AND f.retracted_at IS NULL
+        AND json_extract(f.attributes,'$.label') IN ('{LABEL_CORRECTION}', '{LABEL_NOT_CORRECTION}')
     ), sources AS (
       SELECT '{SOURCE_KIND_MESSAGE}' AS source_kind,
         substr(f.subject_key,length('{MESSAGE_SUBJECT_PREFIX}') + 1) AS source_id,
@@ -85,8 +85,12 @@ _ATTRIBUTED_SQL = _SOURCES_SQL + f"""
 """
 
 
-_TIMED_SQL = _SOURCES_SQL + """
+FIRST_ARRIVAL_SQL = _SOURCES_SQL + "SELECT MIN(source_at) FROM sources"
+"""The earliest arrival of any classified source: where corrections began to be measured."""
+
+_TIMED_SQL = _SOURCES_SQL + f"""
     SELECT s.source_kind,s.source_id,s.source_at,s.attributes,s.target_thread FROM sources s
+    WHERE {_ts('s.source_at')} >= :start AND {_ts('s.source_at')} < :end
 """
 
 
@@ -104,9 +108,7 @@ class AttributedFact:
 
 def attributed_facts(db: sqlite3.Connection) -> list[AttributedFact]:
     """Every readable correction fact with the plan node it is attributed to, or None (Unattributed)."""
-    rows = db.execute(_ATTRIBUTED_SQL, {
-        "event": CORRECTION_EVENT, "correction": LABEL_CORRECTION, "not_correction": LABEL_NOT_CORRECTION,
-    }).fetchall()
+    rows = db.execute(_ATTRIBUTED_SQL).fetchall()
     facts = []
     for row in rows:
         attributes = json.loads(row["attributes"])
@@ -121,16 +123,17 @@ def attributed_facts(db: sqlite3.Connection) -> list[AttributedFact]:
     return facts
 
 
-def person_corrections(db: sqlite3.Connection) -> list[tuple[str, str | None]]:
-    """The person's corrections as (arrival time, target thread), one per source.
+def person_corrections(db: sqlite3.Connection, start: str, end: str) -> list[tuple[str, str | None]]:
+    """The person's corrections arriving in [start, end) as (arrival time, target thread), one per source.
+
+    ``start`` and ``end`` are stored UTC instants (``YYYY-MM-DD HH``), so rows outside the window are
+    dropped by the read and never decoded.
 
     Messages, document comments and decision answers only: a sent-back review is the reviewer's
     and is counted as a rejection. A source classified under several versions counts once, by its
     latest classification. A source whose arrival cannot be resolved has no time and is left out.
     """
-    rows = db.execute(_TIMED_SQL, {
-        "event": CORRECTION_EVENT, "correction": LABEL_CORRECTION, "not_correction": LABEL_NOT_CORRECTION,
-    }).fetchall()
+    rows = db.execute(_TIMED_SQL, {"start": start, "end": end}).fetchall()
     latest: dict[tuple[str, str], tuple[str, bool, str, str | None]] = {}
     for row in rows:
         if row["source_at"] is None:

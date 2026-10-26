@@ -22,7 +22,7 @@ def corrections_by_period(db, grain: Grain) -> Counter[str]:
     in_scope = {str(row[0]) for row in db.execute(f"SELECT id FROM {PREPARED_SCOPE}")}
     drawn = {*grain.periods, grain.current}
     counts: Counter[str] = Counter()
-    for arrived, thread in person_corrections(db):
+    for arrived, thread in person_corrections(db, grain.starts[0], grain.current_end):
         period = grain.period_of(local_date(grain, arrived))
         if thread in in_scope and period in drawn:
             counts[period] += 1
