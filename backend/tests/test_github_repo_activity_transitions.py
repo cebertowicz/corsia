@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 from copy import deepcopy
 from datetime import UTC, datetime
 from types import SimpleNamespace
@@ -98,6 +99,54 @@ def test_synthetic_pollers_do_not_count_as_live_webhooks():
     assert poller._last_delivery(repo) is None
     assert not poller._recent_webhook(poller._last_delivery(repo), datetime.now(UTC))
     assert poller._startup_boundary(poller._last_delivery(repo), {}) is None
+
+
+def _record(repo, delivery_id):
+    from infra.webhook_delivery_log import record_delivery
+    record_delivery(event_type="pull_request", action="opened", delivery_id=delivery_id, repo=repo,
+                    payload={"action": "opened", "repository": {"full_name": repo}})
+
+
+def test_the_last_delivery_matches_the_repo_whatever_its_case():
+    # Tracked names are lowercased; a payload's full_name is stored as GitHub spelled it.
+    _record("Octo-Org/Mixed-Case", "guid-mixed-case-1")
+    assert poller._last_delivery("octo-org/mixed-case") is not None
+    assert poller._last_delivery("OCTO-ORG/MIXED-CASE") is not None
+    assert poller._last_delivery("octo-org/other") is None
+
+
+def test_the_last_delivery_lookup_reads_only_the_newest_rows(monkeypatch):
+    from infra import webhook_delivery_log as log
+    monkeypatch.setattr(log, "LAST_DELIVERY_WINDOW_ROWS", 3)
+    _record("o/windowed", "guid-windowed-old")
+    for index in range(2):
+        _record("o/busy", f"guid-busy-{index}")
+    assert log.repo_last_delivered_at("o/windowed") is not None  # still among the newest three
+    _record("o/busy", "guid-busy-2")
+    assert log.repo_last_delivered_at("o/windowed") is None  # pushed out of the window: the bound
+    assert log.repo_last_delivered_at("o/busy") is not None
+
+
+@pytest.mark.asyncio
+async def test_state_delivery_log_and_repo_reads_and_writes_run_off_the_event_loop(monkeypatch):
+    loop_thread, ran = threading.get_ident(), {}
+
+    def off_loop(name, result):
+        def run(*_args):
+            ran[name] = threading.get_ident()
+            return result
+        return run
+
+    monkeypatch.setattr(poller, "disabled_reason", lambda: None)
+    monkeypatch.setattr(poller, "_recent_webhook", lambda *_a: False)
+    monkeypatch.setattr(poller, "_repo_state", off_loop("state", {"issues_cursor": "c"}))
+    monkeypatch.setattr(poller, "_save_state", off_loop("save", None))
+    monkeypatch.setattr(poller, "_last_delivery", off_loop("delivery", None))
+    monkeypatch.setattr(poller.feed, "tracked_github_repositories", off_loop("tracked", frozenset({"o/r"})))
+    monkeypatch.setattr(poller, "_get", lambda *_a, **_k: asyncio.sleep(0, result=GhResponse(304, {}, None)))
+    await poller.poll_once(lambda *_a: None)
+    assert set(ran) == {"state", "save", "delivery", "tracked"}
+    assert loop_thread not in ran.values()
 
 
 # One fallback rule for every read: an item at or before the last real delivery is skipped, saved state still moves.
