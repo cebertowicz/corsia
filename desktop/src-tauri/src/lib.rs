@@ -779,13 +779,13 @@ fn update_is_over(app: &tauri::AppHandle, service: &AppServiceState, port: u16) 
         .is_some()
 }
 
-/// Runs the launch start again for the move an update held: the window returns to the startup shell, which shows the
-/// move as a launch does, and the service comes back on the moved folder the way a launch brings it up.
+/// Runs the launch start again for the move an update held, and the service comes back on the moved folder the way a
+/// launch brings it up. The window leaves the page the person is on only once the move is about to stop the service
+/// (`start_service_in`); a move that skips before that leaves them where they are.
 fn move_after_update(app: tauri::AppHandle) {
     thread::spawn(move || {
         log::info!("data folder move: the update is over, so the move runs now");
         local_start_began(&app);
-        return_to_shell(&app);
         let service = app.state::<AppServiceState>();
         let outcome = start_service(&app, &service);
         show_launch_outcome(&app, &outcome);
@@ -841,6 +841,10 @@ fn start_service_in<R: tauri::Runtime>(
         let mut mover =
             state_move::AppService::new(bundled_resource_dir(app), first_run::recorded_port(&app_dir));
         let outcome = state_move::run(&move_paths, &mut mover, &mut |percent| {
+            // The move window is the startup shell's; its first reading comes just before the service stops.
+            if percent <= 1 {
+                return_to_shell(app);
+            }
             set_adoption_phase(service, Some(adoption::Phase::MovingData { percent }))
         });
         service.move_after_update.launched(&outcome);
@@ -4040,8 +4044,11 @@ mod tests {
         assert!(watch.find("relaunch(&app, &bundle)").unwrap() < watch.find("take_when_over(").unwrap());
         let rerun = source.split("fn move_after_update(").nth(1).unwrap();
         let rerun = &rerun[..rerun.find("\n}\n").unwrap()];
-        let shell = rerun.find("return_to_shell(").unwrap();
-        assert!(shell < rerun.find("start_service(").unwrap() && rerun.contains("show_launch_outcome("));
+        assert!(rerun.contains("start_service(") && rerun.contains("show_launch_outcome("));
+        // The window leaves the person's page only from the move's own first reading, never up front.
+        assert!(!rerun.contains("return_to_shell("));
+        let progress = &start[moved..recorded];
+        assert!(progress.find("return_to_shell(app)").unwrap() < progress.find("MovingData").unwrap());
     }
 
     #[test]

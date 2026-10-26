@@ -405,7 +405,7 @@ fn a_move_an_update_held_runs_once_in_the_same_session_when_the_update_is_over()
         let held = (!active).then(|| app_paths::try_lock_update_in_existing(&paths.legacy).unwrap().unwrap());
         let mut fake = Fake { active, ..Fake::default() };
         let (launch, seen) = run_with(&paths, &mut fake);
-        assert!(matches!(launch, Ok(Outcome::Skipped(Skip { update: true, tell: None, .. }))), "{launch:?}");
+        assert!(matches!(launch, Ok(Outcome::Skipped(Skip { held: true, tell: None, .. }))), "{launch:?}");
         assert!(seen.is_empty(), "the move window never showed: {seen:?}");
         after.launched(&launch);
 
@@ -445,7 +445,7 @@ fn a_move_an_update_held_never_runs_after_the_update_puts_the_earlier_app_back()
     // A skip that is not an update's (a busy target folder) never runs after one.
     fs::create_dir_all(paths.target.join("stray")).unwrap();
     let (other, _) = run_with(&paths, &mut Fake::default());
-    assert!(matches!(other, Ok(Outcome::Skipped(Skip { update: false, .. }))), "{other:?}");
+    assert!(matches!(other, Ok(Outcome::Skipped(Skip { held: false, .. }))), "{other:?}");
     after.launched(&other);
     assert!(!after.take_when_over(true, || true));
     assert_unchanged(&paths);

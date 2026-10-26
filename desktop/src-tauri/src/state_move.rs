@@ -126,8 +126,8 @@ pub struct Skip {
     pub detail: String,
     /// What the window says, only when the move had started stopping things.
     pub tell: Option<Told>,
-    /// An update held the folder: this session runs the move once that update is over ([`AfterUpdate`]).
-    pub update: bool,
+    /// An update or restart held the folder: this session runs the move once it is over ([`AfterUpdate`]).
+    pub held: bool,
 }
 
 /// What a skip the person watched start tells them.
@@ -235,12 +235,12 @@ fn move_now(paths: &Paths, service: &mut dyn Service, progress: &mut Progress<'_
     // and flock follows the folder through the rename.
     let _lock = match app_paths::try_lock_update_in_existing(&paths.legacy) {
         Ok(Some(lock)) => lock,
-        Ok(None) => return skip_for_update(paths, "an update is running"),
+        Ok(None) => return skip_while_held(paths, "an update is running"),
         Err(error) => return skip(paths, format!("could not take the update lock: {error}"), None),
     };
     match service.operation_active() {
         Ok(false) => {}
-        Ok(true) => return skip_for_update(paths, "an update or restart is in progress"),
+        Ok(true) => return skip_while_held(paths, "an update or restart is in progress"),
         Err(error) => return skip(paths, format!("could not read whether an update is running: {error}"), None),
     }
     // The move window, and its line that background jobs stop, appear only once the stop is next.
@@ -331,12 +331,12 @@ fn finish(paths: &Paths, progress: &mut Progress<'_>) -> Result<Outcome, String>
 }
 
 fn skip(paths: &Paths, detail: String, tell: Option<Told>) -> Result<Outcome, String> {
-    skipped(paths, Skip { detail, tell, update: false })
+    skipped(paths, Skip { detail, tell, held: false })
 }
 
-/// Nothing was stopped yet, so this skip is silent too; the session runs the move once the update is over.
-fn skip_for_update(paths: &Paths, detail: &str) -> Result<Outcome, String> {
-    skipped(paths, Skip { detail: format!("{detail}; it runs once the update is over"), tell: None, update: true })
+/// Nothing was stopped yet, so this skip is silent too; the session runs the move once what held it is over.
+fn skip_while_held(paths: &Paths, detail: &str) -> Result<Outcome, String> {
+    skipped(paths, Skip { detail: format!("{detail}; the move runs once that is over"), tell: None, held: true })
 }
 
 fn skipped(paths: &Paths, skip: Skip) -> Result<Outcome, String> {
@@ -345,8 +345,8 @@ fn skipped(paths: &Paths, skip: Skip) -> Result<Outcome, String> {
     Ok(Outcome::Skipped(skip))
 }
 
-/// A move a launch skipped because an update held the folder, run once in the same session when that update is
-/// over. An update relaunches the new app while it still verifies it, so its first start always skips. "Over" is
+/// A move a launch skipped because an update (or a restart) held the folder, run once in the same session when that
+/// is over. An update relaunches the new app while it still verifies it, so its first start always skips. "Over" is
 /// the update page's own reading (`update_page_ready_url`): the service answers, reports nothing in flight, and the
 /// update lock is free. The update's shell holds that lock through the verification and any rollback, so a free
 /// lock means the new build was proven or put back. An update that put the earlier app back ends the wait: that
@@ -357,7 +357,7 @@ pub struct AfterUpdate(AtomicBool);
 impl AfterUpdate {
     /// Records what a start's move did: only a skip for an update waits, and any other outcome ends a wait.
     pub fn launched(&self, outcome: &Result<Outcome, MoveError>) {
-        let waits = matches!(outcome, Ok(Outcome::Skipped(Skip { update: true, .. })));
+        let waits = matches!(outcome, Ok(Outcome::Skipped(Skip { held: true, .. })));
         self.0.store(waits, Ordering::Release);
     }
 
