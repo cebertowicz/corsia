@@ -40,7 +40,7 @@ def _seed(days: dict[str, int]) -> None:
         db.close()
 
 
-def _seed_source_start(day: str, *, rejected: bool = False, rejected_at: str | None = None) -> None:
+def _seed_source_start(day: str) -> None:
     """Seed install-wide raw starts outside the selected user's measurement scope."""
     from infra.database import get_db
 
@@ -58,12 +58,6 @@ def _seed_source_start(day: str, *, rejected: bool = False, rejected_at: str | N
                 "VALUES ('foreign-start-event','foreign-start','test','accepted','active','accepted',?)",
                 (f"{day}T12:00:00Z",),
             )
-            if rejected:
-                db.execute(
-                    "INSERT INTO plan_node_events (id,node_id,provenance,event,prior_state,new_state,created_at) "
-                    "VALUES ('foreign-rejection','foreign-start','test','review_rejected','review_requested','active',?)",
-                    (f"{(rejected_at or day)}T12:00:00Z",),
-                )
         db.commit()
     finally:
         db.close()

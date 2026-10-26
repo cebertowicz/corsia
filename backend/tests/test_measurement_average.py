@@ -37,7 +37,7 @@ async def test_days_average_a_rate_pooled_over_seven_days_and_a_count_as_the_spa
     # the mean of the busy days' own ratios would be 0.28. The raw starts are installation-wide
     # but this selected scope starts on 10-02, so the earlier source receipt remains out of scope.
     _seed({"2026-10-02": 8, "2026-10-04": 12, "2026-10-08": 10, "2026-10-09": 3})
-    _seed_source_start("2026-09-26", rejected=True, rejected_at="2026-09-25")
+    _seed_source_start("2026-09-25")
     _reject("2026-10-04", 3)
     _reject("2026-10-08", 6)
 
@@ -49,9 +49,9 @@ async def test_days_average_a_rate_pooled_over_seven_days_and_a_count_as_the_spa
     assert count["2026-10-08"]["average"] == pytest.approx(30 / 7)
     assert count["2026-10-07"]["average"] == pytest.approx(20 / 7)
     # A point is drawn only where its whole span lies inside the drawn range: 09-25 is the first drawn day, so
-    # no average precedes the first full span, and the scoped outcomes remain outside the source lead-in.
+    # no average precedes the first full span; the first full span, before any scoped outcome, is a measured zero.
     assert "2026-09-24" not in rate and rate["2026-09-25"]["average"] is None
-    assert [day for day in sorted(count) if count[day]["average"] is not None][0] == "2026-10-02"
+    assert [(day, count[day]["average"]) for day in sorted(count) if count[day]["average"] is not None][0] == ("2026-10-01", 0)
     assert count["2026-10-02"]["average"] == pytest.approx(8 / 7)
     # Under the series' minimum the average is withheld, as the window is, and never drawn as zero.
     assert rate["2026-10-03"]["average"] is None and count["2026-10-03"]["average"] == pytest.approx(8 / 7)
@@ -80,7 +80,7 @@ async def test_periods_average_over_four_periods_and_skip_the_period_in_progress
     # Weeks start on Monday; 10-05 is the week in progress. The four weeks ending 09-28 hold 60 outcomes
     # (none in the period of 09-07), 12 of them rejected, over a lead-in that begins before the drawn range.
     _seed({"2026-09-15": 10, "2026-09-22": 20, "2026-09-29": 30, "2026-10-06": 7})
-    _seed_source_start("2026-09-07", rejected=True)
+    _seed_source_start("2026-09-07")
     _reject("2026-09-23", 6)
     _reject("2026-09-30", 6)
 

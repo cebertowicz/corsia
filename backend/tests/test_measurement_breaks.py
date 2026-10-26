@@ -141,10 +141,24 @@ def test_size_live_start_requires_a_size_rating_on_an_accepted_outcome(isolated_
     assert after_rating["estimated_human_hours_per_active_hour"][0]["period"] == "2026-08-31"
 
 
-def test_legacy_asks_seed_gates_pre_hold_periods_but_fresh_live_start_is_decision(isolated_db) -> None:
+def test_per_outcome_ratios_start_at_the_first_outcome_with_no_numerator_event(isolated_db) -> None:
     db = get_db()
     try:
         _thread(db)
+        _accepted(db, "node", "2026-08-10T12:00:00Z")
+        db.commit()
+        breaks = derive_breaks(db, ("rejections_per_outcome", "asks_per_outcome"), _grain())
+    finally:
+        db.close()
+    assert breaks["rejections_per_outcome"][0]["period"] == "2026-08-10"
+    assert breaks["asks_per_outcome"][0]["period"] == "2026-08-10"
+
+
+def test_legacy_asks_seed_gates_pre_hold_periods_but_fresh_live_start_is_first_outcome(isolated_db) -> None:
+    db = get_db()
+    try:
+        _thread(db)
+        _accepted(db, "node", "2026-08-24T12:00:00Z")
         _seed_decision(db, 1, None, raised="2026-09-01T12:00:00Z", thread_id="thread")
         db.execute(
             "INSERT INTO plan_node_holds (id,node_id,kind,reason_key,reason,owner_kind,provenance,created_at) "
@@ -158,7 +172,7 @@ def test_legacy_asks_seed_gates_pre_hold_periods_but_fresh_live_start_is_decisio
     finally:
         db.close()
     assert legacy["asks_per_outcome"][0]["period"] == "2026-09-07"
-    assert fresh["asks_per_outcome"][0]["period"] == "2026-08-31"
+    assert fresh["asks_per_outcome"][0]["period"] == "2026-08-24"
 
 
 def test_model_marks_derive_from_rating_facts_and_are_size_scoped(isolated_db) -> None:

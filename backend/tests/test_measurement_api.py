@@ -735,8 +735,8 @@ async def test_validation_rejects_unknown_ids_and_grains(isolated_db):
 
 
 @pytest.mark.asyncio
-async def test_fresh_asks_series_starts_at_decisions_without_recording_user_hold(isolated_db):
-    """A live read uses its primary decision source and creates no hold boundary."""
+async def test_fresh_asks_series_starts_at_first_outcome_without_recording_user_hold(isolated_db):
+    """A live read starts the ratio at its first accepted outcome and creates no hold boundary."""
     from api.measurement import measurement_series
     from infra.database import get_db
 
@@ -756,9 +756,9 @@ async def test_fresh_asks_series_starts_at_decisions_without_recording_user_hold
     result = await measurement_series("asks_per_outcome,outcomes", project="all", agent="none", grain="weeks", timezone_name="UTC", user=USER)
     rows = {(row["series"], row["period"]): row for row in result["rows"]}
 
-    assert ("asks_per_outcome", "2026-08-24") in rows and ("asks_per_outcome", "2026-08-31") in rows
+    assert ("asks_per_outcome", "2026-09-21") in rows and ("asks_per_outcome", "2026-08-24") not in rows
     assert result["breaks"]["asks_per_outcome"] == [
-        {"period": "2026-08-24", "kind": "start", "reason": "first recorded on this computer"}
+        {"period": "2026-09-21", "kind": "start", "reason": "first recorded on this computer"}
     ]
     assert all(row["break"] is None and row["comparable"] for row in result["rows"] if row["series"] == "outcomes")
 

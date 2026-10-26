@@ -33,14 +33,6 @@ _FIRST_ROW_SQL = {
         WHERE n.kind='task' AND e.new_state IN ('accepted','accepted_with_followup')
         ORDER BY e.created_at LIMIT 1
     """,
-    "rejected_outcomes": """
-        SELECT MIN(e.created_at) FROM plan_node_events e WHERE e.event='review_rejected'
-    """,
-    "raised_decisions": """
-        SELECT MIN(json_extract(ai.metadata,'$.plan_decision.raised_at'))
-        FROM artifact_identities AS ai INDEXED BY idx_measurement_decisions_raised
-        WHERE ai.integration='local' AND ai.type='plan-decision' AND json_valid(ai.metadata)
-    """,
     "answered_decisions": """
         SELECT MIN(json_extract(ai.metadata,'$.plan_decision.answered_at'))
         FROM artifact_identities AS ai INDEXED BY idx_measurement_decisions_answered
@@ -68,11 +60,13 @@ _FIRST_ROW_SQL = {
 }
 
 
+# A per-outcome ratio is measured from its first accepted outcome: a live install records its
+# numerator from day one, so a period with no rejection or ask is a measured zero.
 _LIVE_SOURCE = {
     "outcomes": "accepted_outcomes",
     "first_try": "accepted_outcomes",
-    "rejections_per_outcome": "rejected_outcomes",
-    "asks_per_outcome": "raised_decisions",
+    "rejections_per_outcome": "accepted_outcomes",
+    "asks_per_outcome": "accepted_outcomes",
     "decisions": "answered_decisions",
     "tokens": "priceable_usage",
     "presence": "presence",
