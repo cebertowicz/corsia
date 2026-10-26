@@ -198,7 +198,7 @@ class GitHub:
         return status
 
 
-def resolve(gh: GitHub, pr_number: int, merge_sha: str, run_url: str, numbers: list[int]) -> list[str]:
+def mark_fixed_in_dev(gh: GitHub, pr_number: int, merge_sha: str, run_url: str, numbers: list[int]) -> list[str]:
     """Label each still-open referenced issue and comment the dev merge.
 
     Returns a list of human-readable failures (empty on success). Pull-request
@@ -343,7 +343,7 @@ def main() -> int:
         pr_number = int(env.get("PR_NUMBER", "0") or "0")
         merge_sha = env.get("MERGE_SHA", "")
         if not pr_number:
-            print("REPO and PR_NUMBER are required", file=sys.stderr)
+            print("PR_NUMBER is required for pull_request events", file=sys.stderr)
             return 2
         numbers = extract_closing_issues(body, repo)
         if not numbers:
@@ -351,12 +351,12 @@ def main() -> int:
             return 0
         print(f"closing keywords reference: {', '.join(f'#{n}' for n in numbers)}")
         if env.get("DRY_RUN") == "1":
-            print(f"DRY_RUN: would resolve {numbers} against {repo}")
+            print(f"DRY_RUN: would mark {numbers} fixed in dev against {repo}")
             return 0
         if not auth:
             print("GH_TOKEN is required unless DRY_RUN=1", file=sys.stderr)
             return 2
-        failures = resolve(GitHub(auth, repo), pr_number, merge_sha, run_url, numbers)
+        failures = mark_fixed_in_dev(GitHub(auth, repo), pr_number, merge_sha, run_url, numbers)
 
     for failure in failures:
         print(f"FAIL {failure}", file=sys.stderr)

@@ -12,9 +12,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from fixed_in_dev import (  # noqa: E402
     close_reached_main,
     extract_closing_issues,
+    mark_fixed_in_dev,
     marker,
     marker_shas,
-    resolve,
 )
 
 SCRIPT = Path(__file__).resolve().parents[1] / "fixed_in_dev.py"
@@ -176,7 +176,7 @@ def _labeled_issue():
 
 def test_dev_path_labels_and_comments_with_marker_but_never_closes():
     gh = FakeGitHub(issues={50: _open_issue()})
-    failures = resolve(gh, pr_number=9, merge_sha=SHA_A, run_url="u", numbers=[50])
+    failures = mark_fixed_in_dev(gh, pr_number=9, merge_sha=SHA_A, run_url="u", numbers=[50])
     assert failures == []
     assert gh.labeled == [50] and gh.closed == []
     assert gh.label_created == 1
@@ -188,30 +188,30 @@ def test_dev_path_labels_and_comments_with_marker_but_never_closes():
 
 def test_dev_path_rerun_does_not_double_comment():
     gh = FakeGitHub(issues={50: _open_issue()})
-    resolve(gh, 9, SHA_A, "u", [50])
-    resolve(gh, 9, SHA_A, "u", [50])
+    mark_fixed_in_dev(gh, 9, SHA_A, "u", [50])
+    mark_fixed_in_dev(gh, 9, SHA_A, "u", [50])
     assert len(gh.commented) == 1
     assert gh.closed == []
 
 
 def test_dev_path_skips_pr_itself_prs_and_closed():
     gh = FakeGitHub(issues={9: _open_issue(), 51: {"state": "open", "pull_request": {}}, 52: {"state": "closed"}})
-    failures = resolve(gh, pr_number=9, merge_sha=SHA_A, run_url="u", numbers=[9, 51, 52])
+    failures = mark_fixed_in_dev(gh, pr_number=9, merge_sha=SHA_A, run_url="u", numbers=[9, 51, 52])
     assert failures == []
     assert gh.labeled == [] and gh.commented == [] and gh.closed == []
 
 
 def test_dev_path_empty_merge_sha_fails_before_writing():
     gh = FakeGitHub(issues={56: _open_issue()})
-    failures = resolve(gh, 9, "", "u", [56])
+    failures = mark_fixed_in_dev(gh, 9, "", "u", [56])
     assert failures and "not a commit SHA" in failures[0]
     assert gh.labeled == [] and gh.commented == [] and gh.label_created == 0
 
 
 def test_dev_path_reports_missing_issue_label_and_comment_failures():
-    assert resolve(FakeGitHub(issues={}), 9, SHA_A, "u", [54]) != []
-    assert resolve(FakeGitHub(issues={53: _open_issue()}, comment_status=403), 9, SHA_A, "u", [53]) != []
-    assert resolve(FakeGitHub(issues={55: _open_issue()}, label_status=403), 9, SHA_A, "u", [55]) != []
+    assert mark_fixed_in_dev(FakeGitHub(issues={}), 9, SHA_A, "u", [54]) != []
+    assert mark_fixed_in_dev(FakeGitHub(issues={53: _open_issue()}, comment_status=403), 9, SHA_A, "u", [53]) != []
+    assert mark_fixed_in_dev(FakeGitHub(issues={55: _open_issue()}, label_status=403), 9, SHA_A, "u", [55]) != []
 
 
 def test_marker_shas_ignore_non_bot_comments():
