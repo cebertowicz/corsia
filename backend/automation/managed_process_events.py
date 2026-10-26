@@ -292,13 +292,7 @@ async def abort_thread_close(token: ThreadCloseToken) -> None:
 def stage_thread_close(
     db: sqlite3.Connection, thread_ids: Sequence[str],
 ) -> tuple[str, ...]:
-    from host_access import processes
-
-    return stage_thread_family_retirements(
-        db,
-        thread_ids,
-        process_dir=processes.PROCESS_OWNER.process_dir,
-    )
+    return stage_thread_family_retirements(db, thread_ids)
 
 
 async def finish_thread_close(token: ThreadCloseToken) -> None:

@@ -78,7 +78,6 @@ def _isolate_lifespan(monkeypatch) -> None:
             return 0
 
     monkeypatch.setattr(app_lifecycle, "init_db", lambda: None)
-    monkeypatch.setattr("infra.moved_state_heal.heal_moved_state_paths", lambda: None)
     monkeypatch.setattr(frontend_build, "ensure_frontend_built", lambda: None)
     monkeypatch.setattr(app_startup_runtime, "rearm_idle_checkpoints", _noop)
     monkeypatch.setattr(app_startup_runtime, "nightly_job_loop", _noop)

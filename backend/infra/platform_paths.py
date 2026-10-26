@@ -173,11 +173,13 @@ def default_state_root(
         root = base / APP_FOLDER.lower() / STATE_DIRECTORY
 
     root = _resolved(root)
-    _refuse_legacy_only(root, _resolved(base / LEGACY_FOLDER / STATE_DIRECTORY))
+    _refuse_legacy_only(
+        root, _resolved(base / LEGACY_FOLDER / STATE_DIRECTORY), posix=platform_name != "win32",
+    )
     return root
 
 
-def _refuse_legacy_only(root: Path, legacy: Path) -> None:
+def _refuse_legacy_only(root: Path, legacy: Path, *, posix: bool) -> None:
     """Exit when a source install's data is still only in the legacy root."""
     if (root / "corsia.db").exists() or not (legacy / "corsia.db").is_file():
         return
@@ -185,6 +187,12 @@ def _refuse_legacy_only(root: Path, legacy: Path) -> None:
         raise SystemExit(
             f"CORSIA found data in two folders, {legacy} and {root}, so it opened neither. "
             "Keep the folder you want, move the other one somewhere else, "
+            "then start CORSIA again."
+        )
+    if not posix:
+        first = "Remove the empty folder at the new place first, then move" if root.exists() else "Move"
+        raise SystemExit(
+            f"CORSIA's data is still in its old folder, {legacy}. {first} that folder to {root}, "
             "then start CORSIA again."
         )
     # An empty new root would make mv put the old folder inside it.

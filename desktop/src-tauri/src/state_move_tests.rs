@@ -68,6 +68,8 @@ struct Fake {
     calls: Vec<&'static str>,
     active: bool,
     stop_fails: bool,
+    /// A recorded background job could not be proven stopped.
+    recorded_fails: bool,
     /// Scan the real process table rather than report no holders.
     real_scan: bool,
     /// Holders to report instead of none.
@@ -95,7 +97,7 @@ impl Service for Fake {
         if let Some(hook) = self.on_recorded.as_mut() {
             hook();
         }
-        Ok(())
+        if self.recorded_fails { Err("a recorded job was not proven stopped".into()) } else { Ok(()) }
     }
     fn prove_released(&mut self, _state: &Path) -> Result<(), String> {
         self.calls.push("prove_released");
@@ -436,6 +438,22 @@ fn a_skip_after_the_stop_says_why_and_one_before_it_says_nothing() {
 
     let (outcome, _) = run_with(&paths, &mut Fake { active: true, ..Fake::default() });
     assert!(matches!(outcome, Ok(Outcome::Skipped(Skip { tell: None, .. }))), "{outcome:?}");
+
+    // A job that may still run is never called stopped, and a shell may be that job, not a terminal window.
+    for (held_by, app) in [(held(&[("zsh", None)]), None), (held(&[("Finder", finder)]), Some("Finder"))] {
+        let (outcome, _) = run_with(&paths, &mut Fake { recorded_fails: true, held_by, ..Fake::default() });
+        let expected = Told { reason: SkipReason::OtherApp, app: app.map(str::to_string), jobs_stopped: false };
+        assert!(matches!(outcome, Ok(Outcome::Skipped(Skip { tell: Some(ref t), .. })) if *t == expected), "{outcome:?}");
+        assert_unchanged(&paths);
+    }
+}
+
+#[test]
+fn a_process_list_the_system_does_not_fill_is_an_error() {
+    assert!(listed_pids(vec![7; 8], 0).is_err());
+    assert!(listed_pids(vec![7; 8], -1).is_err());
+    assert_eq!(listed_pids(vec![1, 2, 3, 0, 0], 3), Ok(vec![1, 2, 3]));
+    assert_eq!(listed_pids(vec![1, 2], 9), Ok(vec![1, 2]));
 }
 
 #[test]
@@ -448,6 +466,11 @@ fn an_app_is_named_from_its_bundle_folder() {
     );
     assert_eq!(name("/opt/homebrew/bin/python3"), None);
     assert_eq!(name("/Users/you/.app/bin/tool"), None);
+
+    // Quitting CORSIA won't release its own helper once the service has stopped, so it is never named.
+    let app = |path: &str| holder_app(Path::new(path), Some("CORSIA"));
+    assert_eq!(app("/Applications/CORSIA.app/Contents/Resources/bin/omlx"), None);
+    assert_eq!(app("/System/Library/CoreServices/Finder.app/Contents/MacOS/Finder").as_deref(), Some("Finder"));
 }
 
 // T16 (shell side is in test_service_scripts.py): a failed stop leaves everything in place.

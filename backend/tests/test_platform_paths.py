@@ -574,7 +574,6 @@ def test_default_state_root_for_the_app_is_the_app_folder_state_child(tmp_path):
     [
         ("darwin", None, None),
         ("linux", "XDG_STATE_HOME", "corsia"),
-        ("win32", "LOCALAPPDATA", "CORSIA"),
     ],
 )
 def test_a_source_install_with_only_legacy_data_is_told_how_to_move_it(
@@ -611,6 +610,28 @@ def test_a_source_install_with_only_legacy_data_is_told_how_to_move_it(
     assert resolve() == new_root
     assert (new_root / "corsia.db").read_text(encoding="utf-8") == "db"
     assert not legacy.exists()
+
+
+@pytest.mark.parametrize("new_root_exists", [False, True])
+def test_windows_is_told_in_words_not_a_posix_command(tmp_path, new_root_exists):
+    paths = _platform_paths()
+    base = tmp_path / "base"
+    new_root = base / "CORSIA" / "state"
+    legacy = base / LEGACY_FOLDER / "state"
+    legacy.mkdir(parents=True)
+    (legacy / "corsia.db").write_text("db", encoding="utf-8")
+    if new_root_exists:
+        new_root.mkdir(parents=True)
+
+    with pytest.raises(SystemExit) as refused:
+        paths.default_state_root(env={"LOCALAPPDATA": str(base)}, platform="win32", home=tmp_path)
+
+    first = "Remove the empty folder at the new place first, then move" if new_root_exists else "Move"
+    assert str(refused.value.code) == (
+        f"CORSIA's data is still in its old folder, {legacy}. {first} that folder to {new_root}, "
+        "then start CORSIA again."
+    )
+    assert (legacy / "corsia.db").is_file()
 
 
 def test_an_empty_new_root_is_cleared_before_the_move(tmp_path):
@@ -682,20 +703,30 @@ def test_the_legacy_check_never_applies_to_the_app_or_creates_the_legacy_folder(
     assert not other_home.exists()
 
 
-def test_no_default_and_no_cache_root_names_the_personal_id(tmp_path):
+@pytest.mark.parametrize(
+    ("platform", "in_app", "expected"),
+    [
+        ("darwin", False, "Library/Application Support/CORSIA/source-state"),
+        ("darwin", True, "Library/Application Support/CORSIA/state"),
+        ("linux", False, ".local/state/corsia/state"),
+        ("linux", True, ".local/state/corsia/state"),
+        ("win32", False, "AppData/Local/CORSIA/state"),
+        ("win32", True, "AppData/Local/CORSIA/state"),
+    ],
+)
+def test_default_roots_live_in_the_corsia_folder(tmp_path, platform, in_app, expected):
     paths = _platform_paths()
+
+    root = paths.default_state_root(
+        env={}, platform=platform, home=tmp_path, app_bundle=tmp_path / "CORSIA.app" if in_app else None,
+    )
+
+    assert root == tmp_path / expected
+
+
+def test_the_cache_root_lives_in_the_corsia_folder(tmp_path):
     managed_runtime = importlib.import_module("tools.managed_runtime")
 
-    assert not hasattr(paths, "APPLICATION_ID")
-    for platform in ("darwin", "linux", "win32"):
-        for bundle in (None, tmp_path / "CORSIA.app"):
-            root = paths.default_state_root(
-                env={"CORSIA_APPLICATION_ID": "com.example.other"},
-                platform=platform,
-                home=tmp_path,
-                app_bundle=bundle,
-            )
-            assert "cebertowicz" not in str(root) and "example" not in str(root)
     assert managed_runtime.application_cache_root(home=tmp_path) == tmp_path / "Library" / "Caches" / "CORSIA"
 
 

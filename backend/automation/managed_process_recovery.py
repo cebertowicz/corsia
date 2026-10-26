@@ -72,8 +72,10 @@ def read_persisted_logs(
     long_running = bool(row["long_running"])
     cap = owner.long_running_tail_bytes if long_running else owner.max_log_bytes
     bounded = max(1, min(int(limit_bytes), cap))
+    # Found from the handle, not the stored path, which names the folder the
+    # state was in when the process started.
     payload = read_log_tail(
-        Path(row["log_path"]),
+        owner.process_dir / f"{row['handle']}.log",
         long_running=long_running,
         limit_bytes=bounded,
     )

@@ -24,15 +24,15 @@ ALLOWED = {
     "desktop/src-tauri/src/state_move_tests.rs",
     # Older signed builds carry the old identifier in their code signature.
     "desktop/src-tauri/src/update_stage.rs",
-    # Fixtures shaped like a pre-move install.
+    # Tests with fixtures shaped like a pre-move install.
     "backend/tests/fixtures/state_dir_validity.txt",
     "backend/tests/test_corsia_app_mode.py",
     "backend/tests/test_desktop_service_launcher.py",
     "backend/tests/test_devices_after_state_move.py",
-    "backend/tests/test_moved_state_heal.py",
     "backend/tests/test_platform_paths.py",
     "backend/tests/test_stop_recorded_processes.py",
     "backend/tests/test_legacy_identifier_guard.py",
+    # Only their #[cfg(test)] modules: adoption and Start fresh tests on a pre-move install.
     "desktop/src-tauri/src/adoption.rs",
     "desktop/src-tauri/src/app_paths.rs",
     "desktop/src-tauri/src/start_fresh.rs",

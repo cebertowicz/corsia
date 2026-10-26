@@ -251,11 +251,16 @@ fn move_now(paths: &Paths, service: &mut dyn Service, progress: &mut Progress<'_
     if let Err(error) = service.unregister() {
         return skip(paths, format!("could not unregister the service: {error}"), told(SkipReason::Other, None, false));
     }
-    // From here agents' background jobs have been stopped, and every skip line says so.
-    if let Err(error) = service.stop_recorded_processes(&paths.legacy) {
-        log::warn!("data folder move: recorded processes: {error}");
-    }
-    let other = told(SkipReason::Other, None, true);
+    // From here agents' background jobs have been stopped, and every skip line says so, unless one
+    // could not be proven stopped.
+    let jobs_stopped = match service.stop_recorded_processes(&paths.legacy) {
+        Ok(()) => true,
+        Err(error) => {
+            log::warn!("data folder move: recorded processes: {error}");
+            false
+        }
+    };
+    let other = told(SkipReason::Other, None, jobs_stopped);
     if let Err(error) = timed(progress, 70, 85, RELEASE_CAP, || service.prove_released(&paths.legacy)) {
         return skip(paths, format!("the service did not let go of its data: {error}"), other);
     }
@@ -267,7 +272,9 @@ fn move_now(paths: &Paths, service: &mut dyn Service, progress: &mut Progress<'_
         let named: Vec<String> = holders.iter().map(|holder| format!("{} (pid {})", holder.name, holder.pid)).collect();
         log::warn!("data folder move: {} process(es) hold the old folder: {}", named.len(), named.join(", "));
         let detail = format!("{} still has CORSIA’s old data folder open", named.join(", "));
-        let others: Vec<&Holder> = holders.iter().filter(|holder| !is_shell(&holder.name)).collect();
+        // A shell is a terminal window only once every agent's job is known to be stopped.
+        let others: Vec<&Holder> =
+            holders.iter().filter(|holder| !(jobs_stopped && is_shell(&holder.name))).collect();
         if others.is_empty() {
             return skip(paths, detail, told(SkipReason::Terminal, None, true));
         }
@@ -278,7 +285,7 @@ fn move_now(paths: &Paths, service: &mut dyn Service, progress: &mut Progress<'_
             [Some(app)] => Some((*app).clone()),
             _ => None,
         };
-        return skip(paths, detail, told(SkipReason::OtherApp, app, true));
+        return skip(paths, detail, told(SkipReason::OtherApp, app, jobs_stopped));
     }
     write_journal(paths, Step::Stopped)?;
     checkpoint("stopped");
@@ -591,6 +598,7 @@ fn timed<T>(progress: &mut Progress<'_>, from: u8, to: u8, cap: Duration, work: 
 pub fn holders(root: &Path) -> Result<Vec<Holder>, String> {
     let root = fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
     let me = std::process::id() as i32;
+    let own = std::env::current_exe().ok().and_then(|exe| bundle_name(&exe));
     // SAFETY: a null buffer asks only for the count.
     let count = unsafe { libc::proc_listallpids(std::ptr::null_mut(), 0) };
     if count <= 0 {
@@ -604,12 +612,26 @@ pub fn holders(root: &Path) -> Result<Vec<Holder>, String> {
     let listed = unsafe {
         libc::proc_listallpids(pids.as_mut_ptr().cast(), (pids.len() * std::mem::size_of::<i32>()) as libc::c_int)
     };
-    pids.truncate(listed.max(0) as usize);
-    Ok(pids
+    Ok(listed_pids(pids, listed)?
         .into_iter()
         .filter(|pid| *pid > 0 && *pid != me && holds(*pid, &root))
-        .map(|pid| Holder { pid, name: process_name(pid), app: app_name(pid) })
+        .map(|pid| Holder { pid, name: process_name(pid), app: app_name(pid, own.as_deref()) })
         .collect())
+}
+
+/// The pids the system filled in; none filled is a refusal, never an empty table.
+fn listed_pids(mut pids: Vec<i32>, listed: libc::c_int) -> Result<Vec<i32>, String> {
+    if listed <= 0 {
+        return Err(format!("could not check which programs have CORSIA’s data open: {}", io::Error::last_os_error()));
+    }
+    pids.truncate(listed as usize);
+    Ok(pids)
+}
+
+/// The app to name to the person: never CORSIA itself, since quitting it won't
+/// release a helper that outlived its stopped service.
+fn holder_app(executable: &Path, own: Option<&str>) -> Option<String> {
+    bundle_name(executable).filter(|app| Some(app.as_str()) != own)
 }
 
 /// `struct vnode_fdinfowithpath`: a `proc_fileinfo` (24 bytes) then the path.
@@ -654,14 +676,14 @@ fn holds(pid: i32, root: &Path) -> bool {
 }
 
 /// The app bundle a process runs from: the first `.app` folder in its executable's path.
-fn app_name(pid: i32) -> Option<String> {
+fn app_name(pid: i32, own: Option<&str>) -> Option<String> {
     let mut path = vec![0u8; libc::PROC_PIDPATHINFO_MAXSIZE as usize];
     // SAFETY: the buffer is as large as the size passed.
     let length = unsafe { libc::proc_pidpath(pid, path.as_mut_ptr().cast(), path.len() as u32) };
     if length <= 0 {
         return None;
     }
-    bundle_name(Path::new(std::ffi::OsStr::from_bytes(&path[..length as usize])))
+    holder_app(Path::new(std::ffi::OsStr::from_bytes(&path[..length as usize])), own)
 }
 
 fn bundle_name(executable: &Path) -> Option<String> {

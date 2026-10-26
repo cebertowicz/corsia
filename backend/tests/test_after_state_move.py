@@ -1,4 +1,8 @@
-"""T7: after the state folder moves, nothing keeps reading or writing the old one."""
+"""T7: after the state folder moves, nothing keeps reading or writing the old one.
+
+Nothing is repointed at startup: managed oMLX gets its folders at launch, and a
+managed process's log is found from its handle under the current runtime folder.
+"""
 
 from __future__ import annotations
 
@@ -121,35 +125,32 @@ def test_a_person_s_own_omlx_keeps_its_own_folders(isolated_db, tmp_path, monkey
     assert _flag(argv, "--model-dir") == "/Volumes/models"
 
 
-def test_heal_repoints_live_handles_only(isolated_db, tmp_path, monkeypatch) -> None:
-    from infra.database import get_db
-    from infra.moved_state_heal import heal_moved_state_paths
+@pytest.mark.parametrize("handle", ["h-live", "h-done"])
+def test_a_moved_handle_s_log_reads_from_the_current_folder(isolated_db, tmp_path, monkeypatch, handle) -> None:
+    from automation.managed_process_recovery import read_persisted_logs
+    from host_access.processes import ProcessOwner
+    from infra.managed_process_store import get_handle
 
     _server_id, old_root, new_root = _register_moved_install(tmp_path, monkeypatch)
+    owner = ProcessOwner(runtime_dir=new_root / "runtime")
+    (owner.process_dir / f"{handle}.tail.log").write_text("moved with the folder")
 
-    heal_moved_state_paths()
-
-    logs = dict(get_db().execute("SELECT handle, log_path FROM managed_process_handles").fetchall())
-    assert logs["h-live"] == str(new_root / "runtime" / "managed-processes" / "h-live.log")
-    assert logs["h-done"] == str(old_root / "runtime" / "managed-processes" / "h-done.log")
+    assert read_persisted_logs(owner, get_handle(handle), 1_000) == "moved with the folder"
     assert not old_root.exists()
 
 
-@pytest.mark.parametrize("state", ["interrupted_by_restart", "exited"])
-def test_heal_leaves_ended_handles_as_history(isolated_db, tmp_path, monkeypatch, state) -> None:
+def test_a_moved_thread_s_handles_still_retire(isolated_db, tmp_path, monkeypatch) -> None:
     from infra.database import get_db
-    from infra.managed_process_store import upsert_transition
-    from infra.moved_state_heal import heal_moved_state_paths
+    from infra.managed_process_store import stage_thread_family_retirements
 
-    monkeypatch.setattr("infra.config.RUNTIME_DIR", tmp_path / "runtime")
-    upsert_transition({
-        "handle": "h", "thread_id": "t", "turn_id": "u", "long_running": 0, "pid": 1, "pgid": 1,
-        "creation_fingerprint": "fp", "log_path": "/old/runtime/managed-processes/h.log",
-        "state": state, "started_at": "2026-10-25T00:00:00Z", "log_truncated": 0,
-    })
+    _register_moved_install(tmp_path, monkeypatch)
 
-    heal_moved_state_paths()
+    db = get_db()
+    try:
+        staged = stage_thread_family_retirements(db, ("t1",))
+        names = {row[0] for row in db.execute("SELECT head_log_name FROM managed_process_retirements")}
+    finally:
+        db.close()
 
-    assert get_db().execute("SELECT log_path FROM managed_process_handles").fetchone()[0] == (
-        "/old/runtime/managed-processes/h.log"
-    )
+    assert set(staged) == {"h-live", "h-done"}
+    assert names == {"h-live.log", "h-done.log"}
