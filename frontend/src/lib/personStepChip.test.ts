@@ -70,7 +70,7 @@ describe('doStep', () => {
 	it('focuses the step in the plan when it has no document', async () => {
 		calls.payload = read(step());
 		await doStep(card);
-		expect(calls.focus).toHaveBeenCalledWith('t1', 'step-1');
+		expect(calls.focus).toHaveBeenCalledWith('t1', 'step-1', null, true);
 		expect(calls.ask).not.toHaveBeenCalled();
 	});
 

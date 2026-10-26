@@ -129,6 +129,11 @@
 		return reveal.revealNode(nodeId);
 	}
 
+	/** Open one row's details, as pressing its row does. */
+	export function openDetails(nodeId: string): void {
+		if (!detailsExpanded(nodeId)) reveal.byRequest(() => toggleDetails(nodeId));
+	}
+
 	/** Open a node the read did not list (older finished work): page its levels' history down to it, then reveal it. */
 	export async function revealFolded(nodeId: string): Promise<boolean> {
 		return reveal.revealFolded(nodeId);

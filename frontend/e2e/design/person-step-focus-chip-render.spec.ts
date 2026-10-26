@@ -177,7 +177,6 @@ const SCENES: Record<string, Scene> = {
   // The steps were raised through working lines with one shown message after them: one Focus stretch.
   seven: {
     steps: SEVEN,
-    docStepId: SEVEN[0].id,
     turns: [
       ...SEVEN.map((step, i) => ({ lead: `Working through item ${i + 1} of the release checklist.`, step, working: 1 })),
       { lead: "Summarising.", text: "Seven things are waiting on you; I'll carry on with the rest until they're done." },
@@ -596,7 +595,9 @@ for (const size of SIZES) {
           if (id === "group-do") {
             await rows.first().locator("[data-step-chip]").click();
             if (phone) await expect(page.getByRole("dialog", { name: /^Plan —/ })).toBeVisible({ timeout: 15_000 });
-            await expect(page.getByRole("region", { name: `${SEVEN[0].title} details` })).toBeVisible({ timeout: 15_000 });
+            // A group's Do → shows the plan at the first waiting step; each step opens by its own row.
+            const rowBody = page.getByRole("listitem").filter({ hasText: SEVEN[0].title }).locator(".row-body").first();
+            await expect(rowBody).toBeFocused({ timeout: 15_000 });
             await shot(page, `group-do-${size.w}-${theme}`);
           }
 

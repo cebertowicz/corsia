@@ -50,7 +50,7 @@ export async function doStep(card: Pick<UpdateCard, 'thread_id' | 'node_id' | 't
 		openPlanAsk(card.thread_id, target.artifact, card.title ?? node?.title ?? 'Step', () => {});
 		return;
 	}
-	await focusPlanNode(card.thread_id, card.node_id);
+	await focusPlanNode(card.thread_id, card.node_id, null, true);
 }
 
 /** Do → on a group: the plan, at the first step still waiting, where each step opens by its own row. */
