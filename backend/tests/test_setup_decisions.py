@@ -24,7 +24,7 @@ WEB = "Connect web search"
 SESSIONS = ("Claude Code", "Codex")
 GITHUB_OPTIONS = [
     {"id": "A", "label": "Make a separate GitHub account",
-     "detail": "I give you the sign-up link and the address. You sign up in your own browser."},
+     "detail": "I give you the sign-up link and the address to use, or ask you for one. You sign up in your own browser."},
     {"id": "B", "label": "Use my account",
      "detail": ("Agents use the GitHub sign-in already on this computer, or I help you sign in once in "
                 "your browser.")},
@@ -32,15 +32,14 @@ GITHUB_OPTIONS = [
 ]
 GITHUB_NO_ACCOUNT_OPTIONS = [
     {"id": "A", "label": "Make a GitHub account",
-     "detail": "I give you the sign-up link and the address. You sign up in your own browser."},
+     "detail": "I give you the sign-up link and the address to use, or ask you for one. You sign up in your own browser."},
     {"id": "B", "label": "Not now", "detail": "Ask me any time."},
 ]
 EXPECTED_COMMUNITY = {
     "task_title": GITHUB_TASK,
     "title": "Use and share improvements with the CORSIA community?",
-    "context": ("CORSIA tests changes to workflows and skills and keeps what works. Your agents can use the "
-                "improvements other people proved, and offer yours. You can always turn down a change and "
-                "keep your own version, and nothing private ever goes into what's shared."),
+    "context": ("You can always turn down a change and keep your own version, and nothing private "
+                "ever goes into what's shared."),
     "tradeoff": ("Sharing goes through GitHub, a free site where people share code, so choosing Use and "
                  "share leads to GitHub next."),
     "recommendation": "A",
@@ -66,7 +65,7 @@ def _github(sign_up_with: str) -> dict:
         ),
         "tradeoff": (
             "A separate account takes a few minutes in your own browser: I give you the sign-up link and "
-            f"{sign_up_with} to use, and you type the password and any verification code. "
+            f"{sign_up_with}, and you type the password and any verification code. "
             "Using yours takes one sign-in, and everything agents post shows your name."
         ),
         "recommendation": "A",
@@ -86,7 +85,7 @@ def _github_no_account(sign_up_with: str) -> dict:
         ),
         "tradeoff": (
             "It takes a few minutes in your own browser: I give you the sign-up link and "
-            f"{sign_up_with} to use, and you type the password and any verification code."
+            f"{sign_up_with}, and you type the password and any verification code."
         ),
         "recommendation": "A",
         "rationale": "You can always tell what you wrote from what an agent wrote.",
@@ -95,9 +94,9 @@ def _github_no_account(sign_up_with: str) -> dict:
     }
 
 
-EXPECTED_GITHUB = _github("you+agents@gmail.com")
-EXPECTED_GITHUB_NO_ACCOUNT = _github_no_account("you+agents@gmail.com")
-EXPECTED_GITHUB_NO_ADDRESS = _github("the address you give me in chat")
+EXPECTED_GITHUB = _github("you+agents@gmail.com to use")
+EXPECTED_GITHUB_NO_ACCOUNT = _github_no_account("you+agents@gmail.com to use")
+EXPECTED_GITHUB_NO_ADDRESS = _github("ask you in chat for an address to use")
 EXPECTED_FIND_PROJECTS = {
     "task_title": PROJECT_TASK,
     "title": "Look for the projects you already work on?",

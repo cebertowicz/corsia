@@ -684,6 +684,16 @@ describe("reading time before a decision opens", () => {
     expect(judgeAutoOpen(items, { ...idle, viewedThreadId: VIEWED, messages, now: ms(24) }).state).toBe("open");
   });
 
+  it("is the same on a device whose clock is an hour off the server's", () => {
+    noteLoad([], VIEWED);
+    const items = [from("d1", 10)];
+    const messages = [say(0, 100)];
+    const skew = 3_600_000;
+    const held = judgeAutoOpen(items, { ...idle, viewedThreadId: VIEWED, messages, now: ms(10) + skew });
+    expect(held).toEqual({ state: "wait", retryInMs: 14_000 });
+    expect(judgeAutoOpen(items, { ...idle, viewedThreadId: VIEWED, messages, now: ms(24) + skew }).state).toBe("open");
+  });
+
   it("adds nothing when the text took longer than that to arrive", () => {
     noteLoad([], VIEWED);
     const verdict = judgeAutoOpen([from("d1", 60)], {

@@ -83,15 +83,14 @@ FIND_PROJECTS = {
 
 # {sign_up_with} is the agents' address, or ASK_FOR_ADDRESS when the saved email is not
 # Gmail: on option A the conductor then asks in chat for an address.
-ASK_FOR_ADDRESS = "the address you give me in chat"
+ASK_FOR_ADDRESS = "ask you in chat for an address to use"
 
 # The community card comes first: whether agents use and offer the community's proven improvements.
 # It sits under the GitHub task; GitHub comes up only on a yes to sharing, as whichever GitHub card fits.
 COMMUNITY = {
     "title": "Use and share improvements with the CORSIA community?",
-    "context": ("CORSIA tests changes to workflows and skills and keeps what works. Your agents can use the "
-                "improvements other people proved, and offer yours. You can always turn down a change and "
-                "keep your own version, and nothing private ever goes into what's shared."),
+    "context": ("You can always turn down a change and keep your own version, and nothing private "
+                "ever goes into what's shared."),
     "tradeoff": ("Sharing goes through GitHub, a free site where people share code, so choosing Use and "
                  "share leads to GitHub next."),
     "options": (
@@ -113,12 +112,12 @@ GITHUB = {
     ),
     "tradeoff": (
         "A separate account takes a few minutes in your own browser: I give you the sign-up link and "
-        "{sign_up_with} to use, and you type the password and any verification code. Using yours takes "
+        "{sign_up_with}, and you type the password and any verification code. Using yours takes "
         "one sign-in, and everything agents post shows your name."
     ),
     "options": (
         ("Make a separate GitHub account",
-         "I give you the sign-up link and the address. You sign up in your own browser."),
+         "I give you the sign-up link and the address to use, or ask you for one. You sign up in your own browser."),
         ("Use my account",
          "Agents use the GitHub sign-in already on this computer, or I help you sign in once in "
          "your browser."),
@@ -136,11 +135,11 @@ GITHUB_NO_ACCOUNT = {
     ),
     "tradeoff": (
         "It takes a few minutes in your own browser: I give you the sign-up link and "
-        "{sign_up_with} to use, and you type the password and any verification code."
+        "{sign_up_with}, and you type the password and any verification code."
     ),
     "options": (
         ("Make a GitHub account",
-         "I give you the sign-up link and the address. You sign up in your own browser."),
+         "I give you the sign-up link and the address to use, or ask you for one. You sign up in your own browser."),
         ("Not now", "Ask me any time."),
     ),
     "rationale": "You can always tell what you wrote from what an agent wrote.",

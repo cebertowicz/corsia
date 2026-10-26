@@ -9,7 +9,7 @@
 import type { AttentionQueueItem, DecisionDetail } from "$lib/api/attentionQueue";
 
 /** `anchor` is the newest `raised_at` (ms) already accounted for in `threadId`. */
-let view: { threadId: string; anchor: number | null } | null = null;
+let view: { threadId: string; anchor: number | null; seen: Map<number, number> } | null = null;
 
 /** Sign-out, dock unmount and test resets: the next load re-anchors. */
 export function forgetAutoOpen(): void {
@@ -52,6 +52,7 @@ export function noteLoad(
   view = {
     threadId: viewedThreadId,
     anchor: stamps.length ? Math.max(...stamps) : null,
+    seen: new Map(),
   };
 }
 
@@ -68,13 +69,14 @@ export interface ReadableMessage {
 }
 
 /**
- * When the person can be expected to have finished reading what the agent said
- * just before a decision was raised: the assistant messages since their last
- * one, read one after another, each starting when it landed or when the
- * previous one is done. A slow model that streamed for longer than the text
- * takes to read has already used up the time, so nothing is added for it.
+ * How long after a decision was raised the person can be expected to still be
+ * reading what the agent said just before it: the assistant messages since
+ * their last one, read one after another, each starting when it landed or when
+ * the previous one is done. A slow model that streamed for longer than the text
+ * takes to read has already used up the time, so nothing is added for it. Only
+ * server timestamps are compared, so a device's own clock cannot move the hold.
  */
-export function readingEndsAt(
+export function readingHoldAfterRaise(
   messages: ReadableMessage[],
   threadId: string,
   raisedAtMs: number,
@@ -90,7 +92,7 @@ export function readingEndsAt(
   }
   let done = 0;
   for (const { at, words } of unread) done = Math.max(done, at) + words * READ_MS_PER_WORD;
-  return Math.min(done, raisedAtMs + MAX_READ_HOLD_MS);
+  return Math.max(0, Math.min(done, raisedAtMs + MAX_READ_HOLD_MS) - raisedAtMs);
 }
 
 export type AutoOpenVerdict =
@@ -128,9 +130,12 @@ export function judgeAutoOpen(
     return { state: "wait" };
   }
   if (context.expandedId === null && context.messages) {
+    // The hold runs from when this device first saw the decision, on its own clock.
+    const raised = raisedAt(candidate)!;
+    const now = context.now ?? Date.now();
+    if (!view.seen.has(raised)) view.seen.set(raised, now);
     const readyIn =
-      readingEndsAt(context.messages, view.threadId, raisedAt(candidate)!) -
-      (context.now ?? Date.now());
+      readingHoldAfterRaise(context.messages, view.threadId, raised) - (now - view.seen.get(raised)!);
     if (readyIn > 0) return { state: "wait", retryInMs: readyIn };
   }
   view.anchor = raisedAt(candidate);

@@ -282,7 +282,7 @@ def test_app_path_uses_server_opening_and_plan_then_steps_and_handoff():
     assert app.index("first-run-opening.md") < app.index("## The steps")
     opening = (FIRST_RUN_APP.parent / "first-run-opening.md").read_text()
     assert "My job is to give you back your time, and I measure it" in opening
-    assert "My plan for finishing your setup is in the Plan section on the right" in opening and '"N left" button' in opening
+    assert "My plan for finishing your setup is in the Plan section on the right" in opening and 'shows how many tasks are left' in opening
     assert "Never post or repeat it" in app
     # The doc's order: the other subscription, the one import, Where your work lives, search, About you.
     assert [title.rstrip(".,") for title in titles] == [
@@ -336,7 +336,7 @@ def test_where_your_work_lives_never_ends_at_i_cant_and_hands_the_rest_to_helper
     assert "**Never add an app you expect to be refused,**" in work
     assert "by the rule and line in skill `connect-tools`" in work and "add no `Connect [app]` task for it" in work
     skill = (BOOTSTRAP_SKILL.parents[1] / "connect-tools/SKILL.md").read_text(encoding="utf-8")
-    assert "Never offer or add a connection you expect the provider to refuse" in skill
+    assert "don't offer or add that connection" in skill
     assert "`[App] only lets approved apps connect, so I'm leaving it out.`" in skill
     assert "I can't" not in work.replace('Never end on "I can\'t".', "")
     # The helper has no corsia_api, so the CORSIA agent adds the app it returns.
@@ -408,7 +408,7 @@ def test_github_comes_only_on_a_yes_to_sharing_and_answers_the_bot_account_quest
     assert "When `github_ready`, skip the rest of this step" in github
     # One message, then one decision: the chat never asks whether they have an account.
     assert "Never ask in chat whether they have an account" in github
-    assert "A separate account keeps their posts apart from yours. You'd accept GitHub's terms for it and answer for what it does." in github
+    assert "A separate account keeps your agents' posts apart from yours. You'd accept GitHub's terms for it and answer for what it does." in github
     assert github.index("`How should your agents post on GitHub?`") < github.index("`Make an account for your agents on GitHub?`")
     assert "Do you have a GitHub account?" not in step
 
@@ -427,7 +427,7 @@ def test_files_step_carries_the_sandbox_auto_approve_recommendation_and_off_the_
     assert "no safeguard is perfect" in step and "its own macOS user account" in step
     assert "unless Local only is on for a chat, the agents it starts can run on cloud models" in step
     assert "the toggle at the top of the model picker, which the model button in the message box opens" in step
-    assert "It needs a ready local model, and the chat switched to it" in step
+    assert "It needs a local model that's ready, and the chat has to be switched to it" in step
     assert "A chat on a cloud model sends what you say to that provider" in step
     assert "helpers" not in step
     assert "Claim no safeguard beyond those stated here" in step
@@ -590,9 +590,9 @@ def test_the_about_you_doc_opens_after_the_chat_answers_and_is_filled_by_suggest
     assert "`bound_model` `source` is `omlx`): start no helper. Write the suggestions yourself, one heading at a time." in doc
     # One review ask, worded for the review bar with or without the accept-all button.
     ask = "Change anything that's wrong, reject any suggestion that isn't right, or add a note"
-    assert doc.count(f"`I put what I know in your About you doc. Every agent and chat here reads it once you approve, including any on a cloud model. {ask} on a line, then press Approve. It accepts the rest for you.`") == 1
+    assert doc.count(f"`I put what I know in your About you doc. Every agent and chat here works from what's in it once you approve, including any on a cloud model. {ask} on a line, then press Approve. It accepts the rest for you.`") == 1
     assert doc.count(f"{ask}, then press Approve.") == 1  # the ask's reason
-    assert "`Saved. Every agent and chat now works from this, including any on a cloud model. Edit it any time in Settings › Context; I'll keep it current.`" in doc
+    assert "`Saved. Every agent and chat works from what's in it, including any on a cloud model. Edit your profile any time in Settings › Context; I'll keep it current.`" in doc
     assert "`block_node` with `owner_kind` `user`" in doc and "`ask_artifact_id` the document's artifact id" in doc  # Approve only shows with an ask
     assert "Whenever you read the document (on Approve in section 4, or on the person's reply), suggest again yourself" in doc
     assert "any suggestion that can no longer apply to it. Never wait on a helper" in doc

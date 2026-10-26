@@ -9,4 +9,4 @@ Here's how help is organized:
 
 Tell me what's taking your time and I'll suggest the right setup.
 
-Anything bigger than a task or two gets a plan, so it's clear what done means and how it went. My plan for finishing your setup is in the Plan section on the right (on a phone, the "N left" button above the message box). One thing at a time. Any task can wait: say "not now" to one, or "skip the rest" to stop here.
+Anything bigger than a task or two gets a plan, so it's clear what done means and how it went. My plan for finishing your setup is in the Plan section on the right (on a phone, the button above the message box that shows how many tasks are left). One thing at a time. Any task can wait: say "not now" to one, or "skip the rest" to stop here.
