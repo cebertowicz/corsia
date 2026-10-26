@@ -87,11 +87,11 @@
 {#snippet mark()}
 	<span class="lead"><PlanStateIcon state="needs-you" tone="" label="Needs you"><span aria-hidden="true">!</span></PlanStateIcon></span>
 {/snippet}
-{#snippet moreMark()}<span>· {more}</span>{/snippet}
 {#snippet stateLine()}
 	<span class="state ask"><span class="dot" aria-hidden="true"></span>Needs you</span>
 	<span class="sep" aria-hidden="true">·</span>
 	<OutcomeTime value={waiting[0]?.created_at ?? card.created_at} compact />
+	{#if more}<span class="sep" aria-hidden="true">·</span><span class="more">{more}</span>{/if}
 {/snippet}
 {#snippet doMark()}<span class="act" aria-hidden="true">Do →</span>{/snippet}
 {#snippet tile()}
@@ -99,8 +99,7 @@
 		needsYou
 		{title}
 		lead={mark}
-		aside={more ? moreMark : undefined}
-		follow
+		twoLine
 		ctx={stateLine}
 		trailing={doMark}
 		data-step-chip
@@ -152,6 +151,7 @@
 	.slot.ready .slot-layer.active { opacity: 1; pointer-events: auto; }
 	/* The tile's lead slot is 36 px, as an artifact's type tile; the mark sits centred in it. */
 	.lead { display: flex; flex: 0 0 auto; align-items: center; justify-content: center; width: 36px; height: 36px; }
+	.more { flex: 0 0 auto; }
 	.sep { flex: 0 0 auto; color: var(--text-tertiary); }
 	/* Where the tile has a chevron: the step's action, in its own word. */
 	.act { flex: 0 0 auto; padding-right: var(--space-2); color: var(--accent); font-size: var(--text-footnote); font-weight: var(--fw-medium); }

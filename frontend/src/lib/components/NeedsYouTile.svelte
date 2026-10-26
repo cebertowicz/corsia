@@ -16,7 +16,7 @@
 		title,
 		lead,
 		aside,
-		follow = false,
+		twoLine = false,
 		ctx,
 		trailing,
 		...rest
@@ -30,10 +30,10 @@
 		counted?: boolean;
 		title: string;
 		lead: Snippet;
-		/** Beside the title, never truncated: the time of an ask, the "+N more" of a group. */
+		/** Beside the title, never truncated: the time of an ask. */
 		aside?: Snippet;
-		/** The aside follows the title directly, as one phrase, instead of sitting at the far edge. */
-		follow?: boolean;
+		/** The title wraps to a second line before it is cut, so a typical title reads whole on a phone. */
+		twoLine?: boolean;
 		ctx?: Snippet;
 		trailing?: Snippet;
 	} & Omit<HTMLAttributes<HTMLElement>, 'title' | 'children'> = $props();
@@ -51,8 +51,8 @@
 >
 	{@render lead()}
 	<span class="text">
-		<span class="head" class:follow>
-			<span class="title">{title}</span>
+		<span class="head">
+			<span class="title" class:two-line={twoLine}>{title}</span>
 			{#if aside}<span class="when">{@render aside()}</span>{/if}
 		</span>
 		{#if ctx}<span class="ctx" class:counted>{@render ctx()}</span>{/if}
@@ -78,7 +78,7 @@
 	}
 	/* An open ask is the same frosted card as the pinned question and the composer. It is a
 	   needs-you object, not a worked artifact chip or a canvas review control. */
-	.tile.needs-you { border: 1px solid var(--border); border-radius: var(--radius-xl); background: var(--glass-thin); box-shadow: var(--glass-rim), var(--shadow-chip); }
+	.tile.needs-you { border: 1px solid var(--border); border-radius: var(--radius-xl); max-width: var(--needs-you-tile-max-width); background: var(--glass-thin); box-shadow: var(--glass-rim), var(--shadow-chip); }
 	button.tile { cursor: pointer; }
 	@media (hover: hover) { button.tile:hover { background: var(--bg-secondary); } }
 	/* Inset: the message clips at the prose edge, so an outward ring would be cut off.
@@ -98,7 +98,14 @@
 	}
 	/* The title and its aside share one line, the aside on the title's baseline; only the title gives way. */
 	.head { display: flex; align-items: baseline; gap: var(--space-2); min-width: 0; }
-	.head.follow .title { flex: 0 1 auto; }
+	.title.two-line {
+		display: -webkit-box;
+		-webkit-box-orient: vertical;
+		-webkit-line-clamp: 2;
+		line-clamp: 2;
+		white-space: normal;
+		overflow-wrap: anywhere;
+	}
 	.when { flex: 0 0 auto; font-size: var(--text-footnote); line-height: var(--lh-tight); color: var(--text-secondary); font-variant-numeric: tabular-nums; }
 	.ctx {
 		display: flex;

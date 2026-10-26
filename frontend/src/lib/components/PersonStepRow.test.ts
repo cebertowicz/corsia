@@ -87,11 +87,20 @@ describe('PersonStepRow', () => {
 		render({ card: cards[2], group: cards });
 		expect(host.querySelectorAll('[data-step-chip]')).toHaveLength(1);
 		expect(chip()!.querySelector('.title')!.textContent).toBe('Step 1');
-		expect(chip()!.querySelector('.when')!.textContent).toBe('· +2 more');
+		// "+N more" ends the state line, so the title's clamp can never cut it; the head line holds the title alone.
+		expect(chip()!.querySelector('.when')).toBeNull();
+		const ctx = chip()!.querySelector('.ctx')!;
+		expect(ctx.lastElementChild!.textContent).toBe('+2 more');
+		expect(ctx.textContent).toMatch(/Needs you\s*·.*·\s*\+2 more$/);
 		expect(chip()!.getAttribute('aria-label')).toBe('Do: Step 1, 2 more, Needs you');
 		chip()!.click();
 		expect(nav.doStep).toHaveBeenCalledTimes(1);
 		expect(nav.doStep).toHaveBeenCalledWith(expect.objectContaining({ id: 1 }));
+	});
+
+	it('the title clamps at two lines on the chip; the review tile keeps one', () => {
+		render({ card: card(1) });
+		expect(chip()!.querySelector('.title')!.classList.contains('two-line')).toBe(true);
 	});
 
 	it('as tasks settle, the count falls and each leaves its own receipt; the last one reads as a plain chip', () => {

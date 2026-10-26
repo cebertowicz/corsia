@@ -243,6 +243,7 @@
 	.sep { flex: 0 0 auto; }
 	.rest { display: flex; align-items: center; gap: var(--space-1); flex: 0 1 auto; min-width: 0; }
 	.name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+	/* The rest of the counted-row behaviour (the wrapping, one-line cap) is in NeedsYouTile.svelte. */
 	:global(.ctx.counted) .rest { flex: 0 0 auto; }
 	:global(.ctx.counted) .name { overflow: visible; }
 	.state { animation: state-in var(--dur-tight) var(--ease-snap); }
