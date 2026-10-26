@@ -1092,16 +1092,17 @@ def _changed_tables(
 def _validate(conn: sqlite3.Connection, changed_tables: list[str]) -> None:
     """Check the migrated database inside the transaction, before commit.
 
-    Foreign keys and page structure are checked across the whole database;
+    Foreign keys are checked across the whole database; page structure and
     row-to-index agreement only for tables the migration created or rebuilt.
     Data-only steps rely on SQLite maintaining their indexes.
+
+    No whole-database ``quick_check``: its b-tree walk is one VM operation, so
+    on a 25 GB database it ran 61 s without a progress callback, past the
+    desktop's 60 s startup stall, while checking pages no step touched.
     """
     broken = conn.execute("PRAGMA foreign_key_check").fetchall()
     if broken:
         raise MigrationError(f"foreign_key_check failed after migration: {broken[:5]}")
-    quick = conn.execute("PRAGMA quick_check").fetchone()[0]
-    if quick != "ok":
-        raise MigrationError(f"quick_check failed after migration: {quick}")
     for table in changed_tables:
         quoted_table = table.replace('"', '""')
         integrity = conn.execute(

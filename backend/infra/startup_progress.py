@@ -62,8 +62,9 @@ FILE_NAME = "startup-progress.json"
 #: liveness by ``seq`` changing, so this bounds how stale a live reading gets.
 HEARTBEAT_SECONDS = 1.0
 #: SQLite virtual-machine operations between progress-handler calls. A long
-#: statement (a table rebuild, ``quick_check``) on a 4 GiB database measured
-#: well under one second between calls at this value.
+#: statement (a table rebuild) on a 4 GiB database measured well under one
+#: second between calls at this value. A single operation that walks a whole
+#: b-tree (``quick_check``'s page walk) makes no calls at all while it runs.
 SQLITE_PROGRESS_OPS = 100_000
 #: COMMIT/autocheckpoint does no VM callbacks. Observe only actual writes to
 #: this transaction's database/WAL; unchanged files never produce a heartbeat.
