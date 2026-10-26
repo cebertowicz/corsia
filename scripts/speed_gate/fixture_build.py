@@ -172,6 +172,7 @@ def build_into(db: sqlite3.Connection) -> dict:
     plans.attribute_usage(db)
     manifest["tables"]["plan_node_events"] = {"target": spec.target_rows("plan_node_events"),
                                               "rows": plans.seed_node_events(db, rng)}
+    manifest["size_ratings"] = plans.seed_size_ratings(db)
     manifest["tables"]["presence_visits"] = {"target": spec.target_rows("presence_visits"),
                                              "rows": presence.seed_visits(db, rng)}
     manifest["tables"]["thread_presence"] = {"target": spec.target_rows("thread_presence"),

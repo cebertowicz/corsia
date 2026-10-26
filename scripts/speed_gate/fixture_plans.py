@@ -7,6 +7,7 @@ hang under the project scope plan, as they do in a real workspace.
 
 from __future__ import annotations
 
+import json
 import random
 from collections.abc import Iterator
 from datetime import datetime
@@ -20,6 +21,7 @@ PLAN_COUNT = round(spec.PRODUCTION_ROWS["plans"] * spec.SCALE)
 PLANS_WITH_NODES = round(2_612 * spec.SCALE)
 NODE_STATES = ("pending", "active", "review_requested", "accepted", "accepted", "accepted",
                "accepted_with_followup", "failed", "closed")
+SIZE_RATING_COUNT = 500
 
 
 def seed_plans(db: sqlite3.Connection, rng: random.Random, pools: Pools) -> list[str]:
@@ -154,6 +156,38 @@ def seed_node_events(db: sqlite3.Connection, rng: random.Random) -> int:
     return db.executemany(
         "INSERT INTO plan_node_events (id,node_id,actor_id,provenance,event,prior_state,new_state,created_at)"
         " VALUES (?,?,?,?,?,?,?,?)", rows()).rowcount
+
+
+def seed_size_ratings(db: sqlite3.Connection) -> int:
+    """Seed a realistic two-rater population through the same usable-fact contract Measurement reads."""
+    from core.size_rating import SIZE_EVENT, current_snapshots, subject_key
+
+    node_ids = [row[0] for row in db.execute(
+        "SELECT e.node_id FROM plan_node_events e JOIN plan_nodes n ON n.id=e.node_id "
+        "WHERE n.kind='task' AND e.new_state IN ('accepted','accepted_with_followup') "
+        "GROUP BY e.node_id ORDER BY MIN(e.created_at),e.node_id LIMIT ?", (SIZE_RATING_COUNT,)
+    )]
+    snapshots = current_snapshots(db, node_ids)
+    rows = []
+    for index, node_id in enumerate(node_ids):
+        snapshot = snapshots[node_id]
+        rater = "fixture-rater-a" if index < len(node_ids) // 2 else "fixture-rater-b"
+        attributes = {
+            "node_id": node_id, "plan_id": snapshot.plan_id, "node_revision": snapshot.node_revision,
+            "evidence_event_id": snapshot.evidence_event_id, "source_snapshot_sha256": snapshot.sha256(),
+            "rater_input_sha256": "a" * 64, "method": "fixture", "method_version": "1",
+            "rubric_version": "1", "rubric_sha256": "b" * 64, "rater": rater,
+            "rater_version": "1", "basis": snapshot.basis, "size_class": "M",
+        }
+        observed = f"2026-10-01T12:{index % 60:02d}:00Z"
+        key = f"fixture-size-{index:04d}"
+        rows.append((key, key, SIZE_EVENT, "corsia", "imported", observed, observed, subject_key(node_id),
+                     json.dumps(attributes, sort_keys=True)))
+    db.executemany(
+        "INSERT INTO outcome_events (id,dedupe_key,event_name,source,provenance,ts,observed_ts,subject_key,attributes) "
+        "VALUES (?,?,?,?,?,?,?,?,?)", rows,
+    )
+    return len(rows)
 
 
 def attribute_usage(db: sqlite3.Connection) -> int:
