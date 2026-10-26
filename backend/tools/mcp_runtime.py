@@ -244,6 +244,12 @@ def tool_server_index() -> dict[str, str]:
     return index
 
 
+def live_mcp_tool(name: str):
+    """Return the live connected-app tool registered under this public name, if any."""
+    tool = _registry.get(name)
+    return tool if getattr(tool, "mcp_server_name", None) else None
+
+
 async def _close() -> None:
     """Close every connected-app session and reset the registry under the lock."""
     global _registry

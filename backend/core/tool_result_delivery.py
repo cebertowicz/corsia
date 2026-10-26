@@ -11,6 +11,7 @@ from core.tool_result_projection import tool_result_integrity_metadata
 from infra.delivery_states import TOOL_RESULT_BOUND, TOOL_RESULT_PROVISIONAL
 from infra.queries import insert_message
 from tools.tool_display import SettledResult, project_tool_display
+from tools.mcp_stamp import result_stamp as mcp_result_stamp
 from tools.tool_surface import dispatch_metadata
 
 
@@ -63,6 +64,7 @@ def _result_metadata(
     is_error: bool,
     extra_metadata: dict[str, Any] | None,
 ) -> dict[str, Any]:
+    dispatch = dispatch_metadata(name, arguments)
     metadata: dict[str, Any] = {
         "turn_id": turn_id,
         "assistant_step_id": assistant_step_id,
@@ -74,7 +76,8 @@ def _result_metadata(
         ),
         "name": name,
         "arguments": arguments,
-        **dispatch_metadata(name, arguments),
+        **dispatch,
+        **mcp_result_stamp(dispatch.get("tool_name", name)),
         **tool_result_integrity_metadata(content),
     }
     if provider_call_id is not None:
