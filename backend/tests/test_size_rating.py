@@ -465,7 +465,7 @@ async def test_a_change_of_rater_version_across_weeks_keeps_every_week_comparabl
 
 @pytest.mark.asyncio
 async def test_the_headline_window_pools_every_period_across_raters(isolated_db, monkeypatch):
-    """Weeks rated by different raters stay comparable, and the window the card names is pooled whole."""
+    """A rater change breaks comparability before it, and the window the card names is pooled whole."""
     from datetime import datetime, timezone
 
     from api.measurement import measurement_series

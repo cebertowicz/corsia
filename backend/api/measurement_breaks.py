@@ -27,8 +27,8 @@ def _period(grain: Grain, value: str | None) -> str | None:
 COMPARABILITY_UNRESTRICTED = frozenset({"outcomes", "fresh_tokens"})
 
 
-def _breaks_query(groups: Iterable[str]) -> str:
-    """Reuse canonical live starts with immutable migration marks."""
+def _breaks_query(groups: Iterable[str], with_marks: bool) -> str:
+    """Reuse canonical live starts, with immutable migration marks when the caller needs them."""
     requested = tuple(dict.fromkeys(groups))
     live_groups = tuple(group for group in requested if has_live_start(group))
     live = live_starts_query(live_groups).removeprefix("SELECT ") if live_groups else ""
@@ -41,7 +41,7 @@ def _breaks_query(groups: Iterable[str]) -> str:
             WHERE kind != 'start' ORDER BY period,kind,metric_group
         )
     ) AS marks"""
-    return f"SELECT {', '.join(item for item in (live, marks) if item)}"
+    return f"SELECT {', '.join(item for item in (live, marks if with_marks else '') if item)}"
 
 
 def _seeded_starts(db, groups: Iterable[str]) -> dict[str, str | None]:
@@ -74,13 +74,15 @@ def _model_marks(db, grain: Grain) -> list[dict[str, str]]:
     return marks
 
 
-def _metadata(db, metrics: Iterable[str], grain: Grain) -> tuple[dict[str, str | None], list[dict[str, str]]]:
-    """The one read-only resolver for metric starts and comparable marks."""
+def _metadata(
+    db, metrics: Iterable[str], grain: Grain, *, with_marks: bool = True,
+) -> tuple[dict[str, str | None], list[dict[str, str]]]:
+    """The one read-only resolver for metric starts and, unless only starts are asked for, comparable marks."""
     requested = tuple(metrics)
     groups = tuple(dict.fromkeys(source_group(metric) for metric in requested))
     seeded = _seeded_starts(db, groups)
     live_groups = tuple(group for group in groups if not seeded[group] and has_live_start(group))
-    row = db.execute(_breaks_query(live_groups)).fetchone()
+    row = db.execute(_breaks_query(live_groups, with_marks)).fetchone() if live_groups or with_marks else None
     live = {
         group: str(row[group]) if group in live_groups and row and row[group] else None
         for group in groups
@@ -89,9 +91,9 @@ def _metadata(db, metrics: Iterable[str], grain: Grain) -> tuple[dict[str, str |
     marks = [
         {"period": grain.period_of(str(item["period"])), "kind": str(item["kind"]),
          "reason": str(item["reason"]), "metric_group": item["metric_group"]}
-        for item in json.loads(str(row["marks"]) if row and row["marks"] else "[]")
+        for item in json.loads(str(row["marks"]) if with_marks and row and row["marks"] else "[]")
     ]
-    if "estimated_human_hours_per_active_hour" in requested:
+    if with_marks and "estimated_human_hours_per_active_hour" in requested:
         marks.extend(_model_marks(db, grain))
     return starts, marks
 
@@ -119,7 +121,7 @@ def derive_breaks(db, metrics: Iterable[str], grain: Grain) -> dict[str, list[di
 
 def source_started_period(db, metric: str, grain: Grain) -> str | None:
     """Return a non-series caller's canonical start from the same resolver."""
-    return _metadata(db, (metric,), grain)[0][source_group(metric)]
+    return _metadata(db, (metric,), grain, with_marks=False)[0][source_group(metric)]
 
 
 def first_availability_period(breaks: Iterable[dict[str, str]]) -> str | None:

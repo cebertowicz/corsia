@@ -9,7 +9,7 @@ import pytest
 from api import measurement
 from api.measurement import _row
 from api.measurement_breaks import (
-    comparability_start, derive_breaks, first_availability_period, period_comparable,
+    comparability_start, derive_breaks, first_availability_period, period_comparable, source_started_period,
 )
 from core.measurement_scope import resolve_grain
 from infra.database import get_db
@@ -223,6 +223,24 @@ def test_seeded_start_skips_its_live_query(isolated_db, monkeypatch) -> None:
     finally:
         db.close()
     assert breaks["outcomes"][0]["period"] == "2026-09-14"
+
+
+def test_start_only_callers_skip_the_mark_reads(isolated_db) -> None:
+    db = get_db()
+    statements: list[str] = []
+    try:
+        _thread(db)
+        for node, when, rater in (("baseline", "2026-09-01T12:00:00Z", "rater-a"), ("b", "2026-09-15T12:00:00Z", "rater-b")):
+            _accepted(db, node, when)
+            _rating(db, node, rater)
+        db.commit()
+        db.set_trace_callback(statements.append)
+        start = source_started_period(db, "estimated_human_hours_per_active_hour", _grain())
+        db.set_trace_callback(None)
+    finally:
+        db.close()
+    assert start == "2026-08-31"
+    assert statements and not any("LAG(" in sql or "json_group_array" in sql for sql in statements)
 
 
 def test_model_mark_uses_each_raters_earliest_accepted_settlement(isolated_db) -> None:
