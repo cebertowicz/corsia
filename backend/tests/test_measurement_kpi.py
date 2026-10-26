@@ -217,6 +217,26 @@ async def test_kpi_says_whether_a_window_began_after_the_tokens_were_fully_recor
 
 
 @pytest.mark.asyncio
+async def test_kpi_east_of_utc_counts_the_first_recorded_local_day_as_recorded(isolated_db, monkeypatch):
+    measurement = _pin_now(monkeypatch)
+    from infra.database import get_db
+
+    db = get_db()
+    try:
+        _seed_scope(db)
+        # Berlin's current window opens at its Oct 1 midnight, 2026-09-30T22:00Z; the first call lands later that local day.
+        _usage(db, "first-call", "root", "2026-10-01T09:00:00.000000", parts=(1, 1, 1, 1), total=4)
+        db.commit()
+    finally:
+        db.close()
+
+    kpi = (await measurement.measurement_key_figures(
+        project="p1", agent="none", timezone_name="Europe/Berlin", grain="days", user=USER,
+    ))["kpi"]
+    assert (kpi["current"]["tokens_recorded"], kpi["previous"]["tokens_recorded"]) == (True, False)
+
+
+@pytest.mark.asyncio
 async def test_kpi_on_the_periods_grain_compares_the_last_four_completed_weeks_with_the_four_before(isolated_db, monkeypatch):
     measurement = _pin_now(monkeypatch)
     from infra.database import get_db

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any, NamedTuple
 
-from api.measurement_breaks import latest_source_mark_period, source_started_period
+from api.measurement_breaks import latest_source_mark_period, local_date, source_started_period
 from core.measurement_scope import Grain
 from api.measurement_token_sql import TOKEN_FIGURE_SQL
 
@@ -49,7 +49,7 @@ def build_kpi(db, current: Period, previous: Period, grain: Grain) -> dict[str, 
     return {
         name: {
             "start": period.start, "end": period.end,
-            "tokens_recorded": bool(recorded_from and period.start >= str(recorded_from)[:10]),
+            "tokens_recorded": bool(recorded_from and local_date(grain, period.start) >= str(recorded_from)[:10]),
             "tokens": {key: _token_figure(tokens.get(name), key) for key, _, _ in TOKEN_FIGURE_SQL},
         }
         for name, period in (("current", current), ("previous", previous))

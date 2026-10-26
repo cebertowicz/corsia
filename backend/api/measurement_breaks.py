@@ -11,14 +11,17 @@ from core.measurement_scope import Grain
 from infra.measurement_starts import MODEL_VERSION_ROWS_SQL, has_live_start, live_starts_query, source_group
 
 
-def _period(grain: Grain, value: str | None) -> str | None:
-    """Return the viewer-local bucket containing one stored UTC timestamp."""
-    if not value:
-        return None
+def local_date(grain: Grain, value: str) -> str:
+    """Return the viewer-local calendar date of one stored UTC timestamp."""
     instant = datetime.fromisoformat(value.replace("Z", "+00:00"))
     if instant.tzinfo is None:
         instant = instant.replace(tzinfo=timezone.utc)
-    return grain.period_of(instant.astimezone(ZoneInfo(grain.zone)).date().isoformat())
+    return instant.astimezone(ZoneInfo(grain.zone)).date().isoformat()
+
+
+def _period(grain: Grain, value: str | None) -> str | None:
+    """Return the viewer-local bucket containing one stored UTC timestamp."""
+    return grain.period_of(local_date(grain, value)) if value else None
 
 
 COMPARABILITY_UNRESTRICTED = frozenset({"outcomes", "fresh_tokens"})
