@@ -34,6 +34,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from events.connectors import github_label_events as label_events
 from events.connectors.github_ownership import declared_owner_thread_ids
 from events.connectors import github_outcome_input as shape
 from events.connectors import github_outcome_measurements as measurements
@@ -296,6 +297,39 @@ def label_attributes(labels: list[dict[str, Any]]) -> dict[str, Any]:
     return attrs
 
 
+def label_drafts(event_type: str, payload: dict[str, Any], repo: str) -> list[OutcomeDraft]:
+    """The drafts one ``labeled``, ``unlabeled`` or issue ``reopened`` delivery carries.
+
+    Facts and identity come from ``github_label_events.change_event``; label names, logins and counts
+    only. A change with no ``labels`` (a poller copy) records no label-derived attributes.
+    """
+    change = label_events.change_event(event_type, payload)
+    if change is None:
+        return []
+    facts = change.facts
+    at = shape.timestamp(facts["at"])
+    label = facts.get("label")
+    if event_type == "pull_request":
+        subject = pr_subject(repo, facts["pr_number"])
+        attrs: dict[str, Any] = {"repo": repo, "pr": str(facts["pr_number"])}
+        if "labels" in facts:
+            attrs["label_count"] = len(facts["labels"])
+        if "sha" in facts:
+            attrs["head_sha"] = facts["sha"]
+    else:
+        subject = f"github:issue:{repo}#{facts['issue_number']}"
+        attrs = {"repo": repo, "issue": str(facts["issue_number"])}
+        if "labels" in facts:
+            attrs.update(label_attributes(payload["issue"]["labels"]))
+        if "minutes_since_opened" in facts:
+            attrs["minutes_since_opened"] = facts["minutes_since_opened"]
+    if label is not None:
+        attrs["label"] = label
+    if "actor" in facts:
+        attrs["actor"] = facts["actor"]
+    return [OutcomeDraft(f"{subject}:{change.type}:{label or ''}:{at}", f"github.{change.type}", at, subject, attrs)]
+
+
 def _issue_drafts(payload: dict[str, Any], repo: str) -> list[OutcomeDraft]:
     action = payload.get("action")
     issue = shape.mapping(shape.required(payload, "issue"))
@@ -329,14 +363,14 @@ def _check_run_drafts(payload: dict[str, Any], repo: str) -> list[OutcomeDraft]:
 
 # The public entry owns supported-action selection; private mappers consume it.
 _MAPPERS = {
-    "pull_request": (("opened", "synchronize", "reopened", "closed", "edited", "labeled", "unlabeled"), _pr_drafts),
+    "pull_request": (("opened", "synchronize", "reopened", "closed", "edited"), _pr_drafts),
     "check_suite": (("completed",), _check_suite_drafts),
     "workflow_run": (("completed",), _workflow_run_drafts),
     "workflow_job": (("completed",), _workflow_job_drafts),
     "check_run": (("completed",), _check_run_drafts),
-    "issues": (("opened", "closed", "reopened", "labeled", "unlabeled"), _issue_drafts),
+    "issues": (("opened", "closed"), _issue_drafts),
 }
-# Label changes and issue reopens map in github_label_outcomes, from the shared normalization.
+# The one declaration of the label changes and issue reopens that ``label_drafts`` maps.
 _LABEL_ACTIONS = {"pull_request": ("labeled", "unlabeled"), "issues": ("reopened", "labeled", "unlabeled")}
 
 
@@ -352,7 +386,7 @@ def map_github_outcomes(event_type: str, payload: dict[str, Any]) -> list[Outcom
     actions, mapper = dispatch
     payload = shape.mapping(payload)
     action = payload.get("action")
-    if action not in actions:
+    if action not in (*actions, *_LABEL_ACTIONS.get(event_type, ())):
         return []
     base_from = _retarget_base_from(payload) if event_type == "pull_request" and action == "edited" else None
     if event_type == "pull_request" and action == "edited" and base_from is None:
@@ -360,7 +394,6 @@ def map_github_outcomes(event_type: str, payload: dict[str, Any]) -> list[Outcom
     repository = shape.mapping(shape.required(payload, "repository"))
     repo = shape.text(shape.required(repository, "full_name")).lower()
     if action in _LABEL_ACTIONS.get(event_type, ()):
-        from events.connectors.github_label_outcomes import label_drafts
         return label_drafts(event_type, payload, repo)
     if base_from is not None:
         return _retarget_drafts(payload, repo, base_from)
