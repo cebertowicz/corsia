@@ -47,14 +47,12 @@ async def _read_body(request: Request, headers: Mapping[str, str], limit: int) -
     declared = headers.get("content-length", "")
     if declared.isdigit() and int(declared) > limit:
         return None
-    chunks: list[bytes] = []
-    size = 0
+    body = bytearray()
     async for chunk in request.stream():
-        size += len(chunk)
-        if size > limit:
+        if len(body) + len(chunk) > limit:
             return None
-        chunks.append(chunk)
-    return b"".join(chunks)
+        body += chunk
+    return bytes(body)
 
 
 def _check_signature(
