@@ -16,6 +16,7 @@ from delegation_fixtures import deleg_db  # noqa: F401
 from plans import admission, delegated_usage, public, selection_validity, service
 from plans.boundary import PlanActor, mutate
 from plans.delegate_attach import Step
+from plans import usage_calls
 from plans.usage_calls import binding_at_call_start, record_call_usage
 from tests.external_harness_usage_helpers import persist_turn
 
@@ -241,3 +242,16 @@ def test_a_parked_own_step_after_the_handed_step_was_returned_stays_unbound(dele
     _call("provider-call:1")
 
     assert _rows(deleg_db) == [(None, None, None, None)]
+
+
+def test_an_ambiguous_attachment_is_reported_not_swallowed(deleg_db, monkeypatch):
+    """The attachment resolver raises on a corrupt state; the call records it unattributed."""
+    _handed_step(deleg_db)
+    persist_turn(CHILD, "turn-1")
+
+    def ambiguous(plan_id, *, db):
+        raise service.PlanError("child plan has multiple live task attachments")
+
+    monkeypatch.setattr("plans.commitments.attached_parent_node", ambiguous)
+
+    assert binding_at_call_start(CHILD) == usage_calls.UNATTRIBUTED

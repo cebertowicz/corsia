@@ -8,8 +8,9 @@ reviewer or message wakes such a Turn and its calls were left unbound, so the
 parent's task cost did not carry them.
 
 The step handed to the child is the canonical live attachment
-(``commitments.attached_parent_node``, which refuses an ambiguous one), and
-only while it is still pending or active is the child doing its work. Then:
+(``commitments.attached_parent_node``). It raises on an ambiguous one on
+purpose; that is left to ``usage_calls.binding_at_call_start``, which logs it,
+records the call ``UNATTRIBUTED`` and reports the defect. Only while it is still pending or active is the child doing its work. Then:
 
 1. A child step that is active and parked rather than eligible owns the calls,
    on its latest attempt (``plan_usage`` requires an attempt); two such steps
@@ -29,7 +30,7 @@ unbound.
 from __future__ import annotations
 
 import plans.selection_validity as validity
-from plans import commitments, service
+from plans import commitments
 
 _BILLABLE_BLOCKERS = (None, validity.HELD)
 #: A handed step the child is still working: not yet returned for review.
@@ -43,10 +44,7 @@ def binding(executor: str, *, db) -> dict | None:
     ).fetchone()
     if plan is None:
         return None
-    try:
-        handed = commitments.attached_parent_node(plan["id"], db=db)
-    except service.PlanError:
-        return None
+    handed = commitments.attached_parent_node(plan["id"], db=db)
     if handed is None or handed["state"] not in _HANDED_STATES:
         return None
     own = _own_parked_step(db, plan)
