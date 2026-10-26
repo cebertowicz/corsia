@@ -16,9 +16,9 @@ export interface UpdateScreenView {
 	mode: ScreenMode;
 	step: StepId;
 	label: string;
-	/** The percentage on screen and bar, with one decimal until confirmed. */
+	/** The real percentage; the screen counts a whole number up to it and the bar follows that number. */
 	percent: number;
-	/** A remote client's time-based guess, shown with "about". */
+	/** A remote client's time-based guess; the screen adds a line saying progress shows on the main computer. */
 	estimated: boolean;
 	fromVersion: string | null;
 	toVersion: string | null;
