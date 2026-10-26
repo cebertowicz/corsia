@@ -15,23 +15,47 @@ _REMOTE = {"url": "https://mcp.example.com/v1/", "secret_headers": ["Authorizati
 _LOCAL = {"command": "npx", "args": ["-y", "@scope/server-github@1.2.3", "--token", "ghp_SECRETVALUE"]}
 
 
-def _wrapper(server: str, tool: str, config: dict, *, app_id: str = "app-1", output: str = "result text"):
+def _wrapper(server: str, tool: str, config: dict, *, app_id: str = "app-1", output: str = "result text",
+             is_error: bool = False, schema: dict | None = None):
     from tools.mcp import MCPToolWrapper
 
     definition = SimpleNamespace(
-        name=tool, description="upstream tool", inputSchema={"type": "object", "properties": {}},
+        name=tool, description="upstream tool", inputSchema=schema or {"type": "object", "properties": {}},
     )
     session = SimpleNamespace(
-        call_tool=AsyncMock(return_value=SimpleNamespace(content=[output], isError=False)),
+        call_tool=AsyncMock(return_value=SimpleNamespace(content=[output], isError=is_error)),
     )
     return MCPToolWrapper(session, server, definition, config=config, app_id=app_id)
 
 
-def _run(wrapper) -> str:
-    """The wrapper's result as the registry hands it on, after its own sanitizing."""
+def _run(wrapper, *, params=None, authorized=None, dispatch=False) -> str:
+    """One call through ``ToolRegistry.execute``, the path every real call takes."""
     from tools.registry import ToolRegistry
 
-    return ToolRegistry._sanitize_result(asyncio.run(wrapper.execute()))
+    async def context():
+        return {"id": "thread-1", "user_id": "user-1"}, None
+
+    async def run_the_tool(tool, _name, model_params, _execution_params, _thread_context):
+        return await tool.execute(**model_params)
+
+    async def none(*_args):
+        return None
+
+    async def unchanged(result, _name, _params):
+        return result
+
+    registry = ToolRegistry()
+    registry.register(wrapper)
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(registry, "_load_thread_context", context)
+        patch.setattr(registry, "_authorized_execute", authorized or run_the_tool)
+        patch.setattr(registry, "_restart_drain_refusal", none)
+        patch.setattr("tools.registry.mcp_reach_refusal", none)
+        patch.setattr("tools.registry.remind_current_turn", unchanged)
+        arguments = params or {}
+        if dispatch:
+            return asyncio.run(registry.execute("tool_call", {"name": wrapper.name, "arguments": arguments}))
+        return asyncio.run(registry.execute(wrapper.name, arguments))
 
 
 def _persist(name: str, content: str = "result text") -> dict:
@@ -69,20 +93,73 @@ def test_a_remote_and_a_local_call_persist_their_own_stamp(isolated_db):
     local = _wrapper("alias_local", "create_issue", _LOCAL, app_id="app-2")
 
     assert _stamp_of(_persist(remote.name, _run(remote))) == {
-        "mcp_app": "https://mcp.example.com/v1", "mcp_tool": "search_issues",
+        "mcp_app": "https://mcp.example.com", "mcp_tool": "search_issues",
     }
     assert _stamp_of(_persist(local.name, _run(local))) == {
         "mcp_app": "@scope/server-github", "mcp_tool": "create_issue",
     }
 
 
-def test_an_error_result_from_the_app_carries_the_stamp_too(isolated_db):
+def _upstream_exception():
     wrapper = _wrapper("alias", "search_issues", _REMOTE)
     wrapper._session.call_tool.side_effect = RuntimeError("upstream failed")
+    return _run(wrapper), "Error: MCP tool"
 
-    assert _stamp_of(_persist(wrapper.name, _run(wrapper))) == {
-        "mcp_app": "https://mcp.example.com/v1", "mcp_tool": "search_issues",
+
+def _is_error_result():
+    wrapper = _wrapper("alias", "search_issues", _REMOTE, output="upstream said no", is_error=True)
+    return _run(wrapper), "Error: upstream said no"
+
+
+def _not_authorized():
+    wrapper = _wrapper("alias", "search_issues", {**_REMOTE, "allowed_user_ids": ["someone-else"]})
+    return _run(wrapper), "Error: This MCP server is not authorized"
+
+
+def _invalid_parameters():
+    schema = {"type": "object", "properties": {"q": {"type": "string"}}, "required": ["q"]}
+    return _run(_wrapper("alias", "search_issues", _REMOTE, schema=schema)), "Error: Invalid parameters"
+
+
+def _registry_error():
+    async def broken(*_args):
+        raise RuntimeError("gate failed")
+
+    return _run(_wrapper("alias", "search_issues", _REMOTE), authorized=broken), "Error executing"
+
+
+@pytest.mark.parametrize(
+    "produce",
+    [_upstream_exception, _is_error_result, _not_authorized, _invalid_parameters, _registry_error],
+)
+def test_every_error_through_the_registry_carries_the_stamp_too(isolated_db, produce):
+    """The registry stamps from the tool it ran, whichever return path the error took."""
+    result, expected_text = produce()
+
+    assert result.startswith(expected_text)
+    assert _stamp_of(_persist("search", result)) == {
+        "mcp_app": "https://mcp.example.com", "mcp_tool": "search_issues",
     }
+
+
+def test_a_call_dispatched_through_tool_call_is_stamped_with_the_tool_it_ran(isolated_db):
+    wrapper = _wrapper("alias", "search_issues", _REMOTE)
+
+    assert _stamp_of(_persist(wrapper.name, _run(wrapper, dispatch=True))) == {
+        "mcp_app": "https://mcp.example.com", "mcp_tool": "search_issues",
+    }
+
+
+def test_a_url_path_secret_reaches_neither_the_stamp_nor_the_stored_row(isolated_db):
+    secret = "pathsecret-9f8e7d"
+    wrapper = _wrapper("hosted", "search", {"url": f"https://Hosted.Example.com:8443/mcp/{secret}/sse?x=1#frag"})
+
+    stored = _persist(wrapper.name, _run(wrapper))
+
+    assert wrapper.mcp_stamp == {"mcp_app": "https://hosted.example.com:8443", "mcp_tool": "search"}
+    assert _stamp_of(stored) == wrapper.mcp_stamp
+    assert secret not in json.dumps(stored)
+    assert app_identity({"command": "npx", "args": [f"https://h.example/{secret}/pkg.tgz"]}) == "https://h.example"
 
 
 def test_an_alias_rename_or_a_second_import_leaves_the_stamp_unchanged(isolated_db):
@@ -94,7 +171,7 @@ def test_an_alias_rename_or_a_second_import_leaves_the_stamp_unchanged(isolated_
 
 
 def test_a_restart_or_removal_between_the_call_and_the_write_cannot_change_the_stamp(isolated_db):
-    """The stamp rides on the result of the wrapper that ran; no registry is read at write time."""
+    """The stamp rides on the result of the tool that ran; no registry is read at write time."""
     from tools import mcp_runtime
     from tools.registry import ToolRegistry
 
@@ -112,7 +189,7 @@ def test_a_restart_or_removal_between_the_call_and_the_write_cannot_change_the_s
     finally:
         mcp_runtime._registry = ToolRegistry()
 
-    expected = {"mcp_app": "https://mcp.example.com/v1", "mcp_tool": "search"}
+    expected = {"mcp_app": "https://mcp.example.com", "mcp_tool": "search"}
     assert _stamp_of(swapped) == expected
     assert _stamp_of(removed) == expected
 
@@ -144,16 +221,12 @@ def test_a_native_tool_result_has_no_stamp(isolated_db):
     assert result_stamp("plain text") == {}
 
 
-def test_a_stamp_survives_the_registry_boundary_unchanged():
-    wrapper = _wrapper("alias", "search_issues", _REMOTE)
-
-    assert result_stamp(_run(wrapper)) == {"mcp_app": "https://mcp.example.com/v1", "mcp_tool": "search_issues"}
-
-
 @pytest.mark.parametrize(
     ("config", "expected"),
     [
-        ({"url": "https://Mcp.Example.com:8443/path/?k=v"}, "https://mcp.example.com:8443/path"),
+        ({"url": "https://Mcp.Example.com:8443/path/?k=v"}, "https://mcp.example.com:8443"),
+        ({"url": "http://[::1]:9000/mcp"}, "http://[::1]:9000"),
+        ({"url": "https://host.example:notaport/mcp"}, None),
         ({"command": "npx", "args": ["-y", "pkg@latest"]}, "pkg"),
         ({"command": "npx", "args": ["--api-key", "sk-live-abc", "pkg"]}, "pkg"),
         ({"command": "npx", "args": ["--api-key=sk-live-abc", "pkg"]}, "pkg"),
@@ -166,7 +239,7 @@ def test_a_stamp_survives_the_registry_boundary_unchanged():
         ({"command": "pnpm", "args": ["dlx", "@scope/pkg"]}, "@scope/pkg"),
         ({"command": "npm", "args": ["exec", "--", "pkg"]}, "pkg"),
         ({"command": "/usr/local/bin/my-server", "args": ["--token", "secret"]}, "my-server"),
-        ({"command": "npx", "args": ["https://user:pw@host.example/pkg.tgz"]}, "https://host.example/pkg.tgz"),
+        ({"command": "npx", "args": ["https://user:pw@host.example/pkg.tgz"]}, "https://host.example"),
         ({"command": "docker", "args": ["run", "-e", "KEY=v", "--rm", "-i", "ghcr.io/x/y:1"]}, "ghcr.io/x/y"),
         ({"command": "docker", "args": ["run", "-e", "TOKEN", "secret", "img"]}, "docker"),
         ({"command": "podman", "args": ["run", "--name", "n", "reg.example:5000/team/img@sha256:abc"]},
@@ -224,4 +297,4 @@ def test_the_registry_keeps_the_stamp_through_the_reminder_and_hands_it_on(monke
     result = asyncio.run(registry.execute(wrapper.name, {}))
 
     assert result == "result text\n\nreminder"
-    assert result_stamp(result) == {"mcp_app": "https://mcp.example.com/v1", "mcp_tool": "search_issues"}
+    assert result_stamp(result) == {"mcp_app": "https://mcp.example.com", "mcp_tool": "search_issues"}

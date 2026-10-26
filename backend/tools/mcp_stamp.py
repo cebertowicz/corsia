@@ -1,10 +1,12 @@
 """Which connected app and which upstream tool produced a persisted result.
 
-The wrapper that ran a call builds the stamp once and returns it on the result
-(``ConnectedAppResult``); the result row copies it from there. It names the
-server by what it is (a remote server's URL, a local server's package or image)
-and never by CORSIA's alias or a harness's ``mcp__<server>__<tool>`` name, so an
-import from another client or a rename leaves both values unchanged.
+The wrapper builds the stamp once at connect and exposes it as ``mcp_stamp``.
+``ToolRegistry`` attaches it, from the tool object that ran the call, to every
+string that call returns (``ConnectedAppResult``); the result row copies it from
+there. It names the server by what it is (a remote server's host, a local
+server's package or image) and never by CORSIA's alias or a harness's
+``mcp__<server>__<tool>`` name, so an import from another client or a rename
+leaves both values unchanged.
 
 The stamp never holds a header, token, environment value or call argument. The
 launch command is the one place a secret can sit beside a name, so the rule is
@@ -17,6 +19,7 @@ from __future__ import annotations
 import os
 import re
 from pathlib import PurePath
+from typing import Any
 from urllib.parse import urlsplit
 
 APP_FIELD = "mcp_app"
@@ -52,12 +55,17 @@ _HOME_PREFIX = re.compile(r"^(?:/Users|/home)/[^/]+")
 
 
 def _remote_identity(url: str) -> str | None:
-    """The server's endpoint without credentials, query or fragment."""
-    parts = urlsplit(url)
+    """``scheme://host[:port]`` only: hosted endpoints put API keys in the path or query."""
+    try:
+        parts = urlsplit(url)
+        port = parts.port
+    except ValueError:
+        return None
     if not parts.hostname:
         return None
-    port = f":{parts.port}" if parts.port else ""
-    return f"{parts.scheme}://{parts.hostname.lower()}{port}{parts.path.rstrip('/')}"
+    host = parts.hostname.lower()
+    host = f"[{host}]" if ":" in host else host
+    return f"{parts.scheme.lower()}://{host}{f':{port}' if port else ''}"
 
 
 def _package_name(token: str) -> str | None:
@@ -154,7 +162,7 @@ def build_stamp(config: dict, upstream_tool: str) -> dict[str, str]:
 
 
 class ConnectedAppResult(str):
-    """Tool-result text that carries the stamp of the wrapper that produced it."""
+    """Tool-result text that carries the stamp of the connected-app tool that ran the call."""
 
     mcp_stamp: dict[str, str]
 
@@ -166,6 +174,20 @@ class ConnectedAppResult(str):
     def __getnewargs__(self) -> tuple[str, dict[str, str]]:  # type: ignore[override]
         """Preserve the stamp across copy/pickle."""
         return str(self), self.mcp_stamp
+
+
+def with_connected_app_stamp(tool: object, result: Any) -> Any:
+    """Stamp a string result with the tool that ran the call; any other result passes through."""
+    stamp = getattr(tool, "mcp_stamp", None)
+    if isinstance(result, str) and isinstance(stamp, dict) and stamp:
+        return ConnectedAppResult(result, stamp)
+    return result
+
+
+def restamp(source: object, text: Any) -> Any:
+    """``text``, a transformed copy of ``source``, keeping the stamp ``source`` carried."""
+    stamp = result_stamp(source)
+    return ConnectedAppResult(text, stamp) if stamp and isinstance(text, str) else text
 
 
 def result_stamp(content: object) -> dict[str, str]:
