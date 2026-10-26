@@ -92,6 +92,8 @@ struct AppServiceState {
     /// The update screen the replaced app handed over when it reopened this one (`--update-screen`), carried once to
     /// the first Ready address this window follows. Presentation only: it starts, skips or grants nothing.
     relaunched_screen: Mutex<Option<String>>,
+    /// A data folder move the launch start skipped because an update held the folder; it runs once that update is over.
+    move_after_update: state_move::AfterUpdate,
 }
 
 #[derive(Default)]
@@ -753,6 +755,50 @@ fn watch_for_swapped_app(app: tauri::AppHandle) {
             let _ = relaunch(&app, &bundle);
             return;
         }
+        // An install that can't be read changes nothing; the next reading decides.
+        if let Some(installed) = installed.as_deref() {
+            if service.move_after_update.take_when_over(installed == launched, || update_is_over(&app, &service, port)) {
+                move_after_update(app.clone());
+            }
+        }
+    });
+}
+
+/// The update is over by the update page's own reading (`update_page_ready_url`): this computer's service, already
+/// served to this window, answers healthy with nothing in flight, and nothing holds the update lock.
+fn update_is_over(app: &tauri::AppHandle, service: &AppServiceState, port: u16) -> bool {
+    let Some(app_dir) = service.app_dir.lock().unwrap_or_else(PoisonError::into_inner).clone() else {
+        return false;
+    };
+    let Ok(state) = app_paths::state_dir_for(&app_dir) else {
+        return false;
+    };
+    let served = service.granted_local_ports.lock().unwrap_or_else(PoisonError::into_inner).contains(&port);
+    let local = app.state::<RemoteRuntime>().shell.lock().unwrap_or_else(PoisonError::into_inner).allows_manual_recovery();
+    update_page_ready_url(&READINESS_CHECK, served, local, port, probe_health, operation_is_active, || update_lock_is_free(&state))
+        .is_some()
+}
+
+/// Runs the launch start again for the move an update held, and the service comes back on the moved folder the way a
+/// launch brings it up. The window leaves the page the person is on only once the move is about to stop the service
+/// (`start_service_in`); a move that skips before that leaves them where they are.
+fn move_after_update(app: tauri::AppHandle) {
+    thread::spawn(move || {
+        log::info!("data folder move: the update is over, so the move runs now");
+        local_start_began(&app);
+        let service = app.state::<AppServiceState>();
+        let outcome = start_service(&app, &service);
+        let on_shell = app.get_webview_window("main").and_then(|window| window.url().ok()).is_some_and(|url| is_startup_shell_page(url.as_str()));
+        match (&outcome, on_shell) {
+            (_, true) => show_launch_outcome(&app, &outcome),
+            // A skip left the person on their page: a Ready answer kept as shell state would be replayed by a later
+            // shell load, so only a failure is shown, on the shell with its Try again.
+            (Err(reason), false) => {
+                log::error!("bundled CORSIA service did not start: {reason}");
+                show_shell_failure(&app, reason);
+            }
+            (Ok(_), false) => {}
+        }
     });
 }
 
@@ -805,8 +851,13 @@ fn start_service_in<R: tauri::Runtime>(
         let mut mover =
             state_move::AppService::new(bundled_resource_dir(app), first_run::recorded_port(&app_dir));
         let outcome = state_move::run(&move_paths, &mut mover, &mut |percent| {
+            // The move window is the startup shell's; its first reading comes just before the service stops.
+            if percent <= 1 {
+                return_to_shell(app);
+            }
             set_adoption_phase(service, Some(adoption::Phase::MovingData { percent }))
         });
+        service.move_after_update.launched(&outcome);
         let outcome = outcome.map_err(|error| {
             log::error!("data folder move: {}", error.detail);
             error.line.to_string()
@@ -3988,6 +4039,31 @@ mod tests {
             with_relaunched_screen::<String>(&empty, Ok(ServiceStartup::Ready { url: service_url(1) })),
             Ok(ServiceStartup::Ready { url: service_url(1) })
         );
+    }
+
+    #[test]
+    fn a_move_an_update_held_is_recorded_by_every_start_and_rerun_by_the_install_watcher_after_its_relaunch_check() {
+        let source = include_str!("lib.rs");
+        let start = source.split("fn start_service_in<").nth(1).unwrap();
+        let moved = start.find("state_move::run(").unwrap();
+        let recorded = start.find("move_after_update.launched(&outcome)").expect("every start records its move");
+        assert!(moved < recorded && recorded < start.find("attach_healthy_active_service(").unwrap());
+        let watch = source.split("fn watch_for_swapped_app(").nth(1).unwrap();
+        let watch = &watch[..watch.find("\n}\n").unwrap()];
+        // A swapped-in app relaunches first: the move never runs in a window that belongs to a replaced app.
+        assert!(watch.find("relaunch(&app, &bundle)").unwrap() < watch.find("take_when_over(").unwrap());
+        let rerun = source.split("fn move_after_update(").nth(1).unwrap();
+        let rerun = &rerun[..rerun.find("\n}\n").unwrap()];
+        assert!(rerun.contains("start_service(") && rerun.contains("show_launch_outcome("));
+        // The window leaves the person's page only from the move's own first reading, never up front.
+        assert!(!rerun.contains("return_to_shell("));
+        // Its answer is shell state only once the window is on the shell; a skip that left the person on their page
+        // keeps no Ready for a later shell load to replay.
+        let kept = rerun.find("(_, true) => show_launch_outcome(").expect("the answer is kept only on the shell");
+        assert!(rerun.find("is_startup_shell_page(").unwrap() < kept);
+        assert!(rerun.contains("(Ok(_), false) => {}"));
+        let progress = &start[moved..recorded];
+        assert!(progress.find("return_to_shell(app)").unwrap() < progress.find("MovingData").unwrap());
     }
 
     #[test]

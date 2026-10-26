@@ -387,6 +387,70 @@ fn a_held_update_lock_or_an_active_operation_skips_the_move() {
     assert_unchanged(&paths);
 }
 
+/// The update page's reading of a finished update, as `update_page_ready_url` takes it: nothing in flight, and the
+/// update lock free (taken without waiting and let go at once).
+fn update_over(paths: &Paths, active: bool) -> bool {
+    !active && matches!(app_paths::try_lock_update_in_existing(&paths.legacy), Ok(Some(_)))
+}
+
+// An update relaunches the new app while it still verifies it, holding the lock: the move waits, then runs in the
+// same session once the update is over, exactly once.
+#[test]
+fn a_move_an_update_held_runs_once_in_the_same_session_when_the_update_is_over() {
+    for active in [false, true] {
+        let home = tempfile::tempdir().unwrap();
+        let paths = install(home.path());
+        let after = AfterUpdate::default();
+        // The relaunched app's start at `verifying`: the update's shell holds the lock (or reports its operation).
+        let held = (!active).then(|| app_paths::try_lock_update_in_existing(&paths.legacy).unwrap().unwrap());
+        let mut fake = Fake { active, ..Fake::default() };
+        let (launch, seen) = run_with(&paths, &mut fake);
+        assert!(matches!(launch, Ok(Outcome::Skipped(Skip { held: true, tell: None, .. }))), "{launch:?}");
+        assert!(seen.is_empty(), "the move window never showed: {seen:?}");
+        after.launched(&launch);
+
+        // Still verifying: nothing runs.
+        assert!(!after.take_when_over(true, || update_over(&paths, active)));
+        assert_unchanged(&paths);
+
+        // Proven: the shell lets go of the lock and the operation ends.
+        drop(held);
+        assert!(after.take_when_over(true, || update_over(&paths, false)));
+        let (rerun, _) = run_with(&paths, &mut Fake::default());
+        after.launched(&rerun);
+        assert_eq!(rerun, Ok(Outcome::Moved));
+        assert_moved(&paths);
+        assert!(!after.take_when_over(true, || true), "the move runs once a session");
+        assert!(!after.take_when_over(true, || true), "the move runs once a session");
+    }
+}
+
+// An update that failed and put the earlier app back never moves the data in this session, even once its lock is
+// free; the earlier app's own next launch decides. A skip for any other reason never waits for an update.
+#[test]
+fn a_move_an_update_held_never_runs_after_the_update_puts_the_earlier_app_back() {
+    let home = tempfile::tempdir().unwrap();
+    let paths = install(home.path());
+    let after = AfterUpdate::default();
+    let held = app_paths::try_lock_update_in_existing(&paths.legacy).unwrap().unwrap();
+    let (launch, _) = run_with(&paths, &mut Fake::default());
+    after.launched(&launch);
+
+    // Rolling back, still under the lock: the installed app is the earlier one again.
+    assert!(!after.take_when_over(false, || panic!("never read once another app is installed")));
+    drop(held);
+    assert!(!after.take_when_over(true, || update_over(&paths, false)), "the wait ended for good");
+    assert_unchanged(&paths);
+
+    // A skip that is not an update's (a busy target folder) never runs after one.
+    fs::create_dir_all(paths.target.join("stray")).unwrap();
+    let (other, _) = run_with(&paths, &mut Fake::default());
+    assert!(matches!(other, Ok(Outcome::Skipped(Skip { held: false, .. }))), "{other:?}");
+    after.launched(&other);
+    assert!(!after.take_when_over(true, || true));
+    assert_unchanged(&paths);
+}
+
 // An unknown port or bundle is never guessed: the move skips before it stops anything.
 #[test]
 fn an_unknown_port_or_bundle_skips_the_move_before_stopping_anything() {
