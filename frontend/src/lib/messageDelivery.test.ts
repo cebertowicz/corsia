@@ -100,7 +100,7 @@ describe('deliveryPresentation', () => {
 		['codex_auth_projection_changed', SIGN_IN_MISSING],
 		['account_model_not_discovered', 'CORSIA couldn’t find this model on this chat’s account. Your message is saved and will send as soon as you switch models, or sign in again in Settings › Providers.'],
 		['account_removed', 'This chat’s account isn’t set up in CORSIA. Your message is saved and will send as soon as you switch models.'],
-		['account_project_denied', 'This project doesn’t allow this chat’s account. Your message is saved and will send as soon as you switch models, or allow the account in this project’s settings.'],
+		['account_project_denied', 'Your provider settings don’t allow this chat’s account. Your message is saved and will send as soon as you switch models.'],
 		['project_policy_missing', 'This project doesn’t allow this chat’s account. Your message is saved and will send as soon as you switch models.'],
 		['account_runtime_pending', 'This chat’s account isn’t ready to run. Your message is saved and will send when it is.'],
 	])('names the account, not a checkpoint, for an account hold %s', (code, title) => {

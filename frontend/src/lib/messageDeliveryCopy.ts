@@ -73,7 +73,6 @@ export const WAITING_FOR_ACCOUNT = 'Waiting for account';
 const SIGN_IN_AGAIN = 'Your message is saved and will send as soon as you sign in again in Settings › Providers.';
 const SWITCH_MODELS = 'Your message is saved and will send as soon as you switch models';
 const SIGN_IN_MISSING = `CORSIA can’t find this chat’s account sign-in on this computer. ${SIGN_IN_AGAIN}`;
-const PROJECT_DENIED = 'This project doesn’t allow this chat’s account.';
 
 /**
  * Account holds by cause, keyed by `connections.account_holds.ACCOUNT_HOLD_REASONS`.
@@ -95,11 +94,16 @@ export const ACCOUNT_HOLD_COPY: Readonly<Record<string, { label: typeof WAITING_
 		title: `CORSIA couldn’t find this model on this chat’s account. ${SWITCH_MODELS}, or sign in again in Settings › Providers.`,
 	},
 	account_removed: { label: WAITING_FOR_ACCOUNT, title: `This chat’s account isn’t set up in CORSIA. ${SWITCH_MODELS}.` },
+	// The denying policy may be the workspace's or the project's and the hold
+	// does not say which, so no settings pointer: it could name a place with no toggle.
 	account_project_denied: {
 		label: WAITING_FOR_ACCOUNT,
-		title: `${PROJECT_DENIED} ${SWITCH_MODELS}, or allow the account in this project’s settings.`,
+		title: `Your provider settings don’t allow this chat’s account. ${SWITCH_MODELS}.`,
 	},
-	project_policy_missing: { label: WAITING_FOR_ACCOUNT, title: `${PROJECT_DENIED} ${SWITCH_MODELS}.` },
+	project_policy_missing: {
+		label: WAITING_FOR_ACCOUNT,
+		title: `This project doesn’t allow this chat’s account. ${SWITCH_MODELS}.`,
+	},
 	account_runtime_pending: {
 		label: WAITING_FOR_ACCOUNT,
 		title: 'This chat’s account isn’t ready to run. Your message is saved and will send when it is.',
