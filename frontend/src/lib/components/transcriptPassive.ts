@@ -14,7 +14,14 @@ export function isPassive(card: UpdateCard): boolean {
  */
 export function asksYou(card: UpdateCard): boolean {
 	return (card.kind === 'failed' && card.asks_user)
-		|| (card.kind === 'blocked' && card.blocked_asks_user);
+		|| (card.kind === 'blocked' && card.blocked_asks_user)
+		// A person step stands on its own in any state: open it is an ask, settled it is the receipt of one.
+		|| card.kind === 'person_step';
+}
+
+/** A person step the server still read as waiting on you. */
+export function isReadyStep(card: UpdateCard): boolean {
+	return card.kind === 'person_step' && (card.step_state ?? 'open') === 'open';
 }
 
 /** B6, B22: the card asks nothing and is not a completion: a line inside its block. */

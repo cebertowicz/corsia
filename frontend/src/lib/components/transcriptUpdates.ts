@@ -3,7 +3,7 @@ import type { RunStub } from '$lib/focusRuns';
 import { sourceMembers, sourceRange } from './contextEventModel';
 import { partitionMessageAtCards } from './messageListModel';
 import { partitionAtVisit, fencePlanLimitPauses } from './transcriptFences';
-import { asksYou, isBlockLine, isPassive, placePassive } from './transcriptPassive';
+import { asksYou, isBlockLine, isPassive, isReadyStep, placePassive } from './transcriptPassive';
 import type { PlanLimitPauseDescriptor } from './planLimitPause';
 import type { SourcePlacementContext } from './contextEventModel';
 import {
@@ -82,7 +82,22 @@ function groupRun(run: TranscriptUpdateEntry[]): TranscriptUpdateEntry[] {
 		if (nodeId && latest.get(nodeId) !== index) return;
 		kept.push(earlier ? { ...entry, earlier } : entry);
 	});
-	return kept;
+	return gatherReadySteps(kept);
+}
+
+/**
+ * Focus: several person steps still waiting on you read as one line, at the latest of them.
+ * A settled step keeps its own line, so its receipt shows where it was raised.
+ */
+function gatherReadySteps(entries: TranscriptUpdateEntry[]): TranscriptUpdateEntry[] {
+	const ready = entries.filter((entry) => isReadyStep(entry.card));
+	if (ready.length < 2) return entries;
+	const last = ready[ready.length - 1];
+	const group = ready.map((entry) => entry.card);
+	return entries.flatMap((entry) => {
+		if (!isReadyStep(entry.card)) return [entry];
+		return entry === last ? [{ ...entry, group }] : [];
+	});
 }
 
 function partitionItem(item: TranscriptMessageEntry, cuts: readonly number[]): TranscriptMessageEntry[] {

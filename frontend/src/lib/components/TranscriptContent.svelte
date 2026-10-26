@@ -226,7 +226,7 @@
 	{#if entry.kind === 'message'}
 		{@render messageRow(entry)}
 	{:else if entry.kind === 'update'}
-		<UpdateCard card={entry.card} earlier={entry.earlier} />
+		<UpdateCard card={entry.card} earlier={entry.earlier} group={entry.group} />
 	{:else if entry.kind === 'passive'}
 		{#key boundThreadId}<PassiveOutcomeList cards={entry.cards} id={`${uid}-${entry.id}`} />{/key}
 	{:else if entry.kind === 'divider'}

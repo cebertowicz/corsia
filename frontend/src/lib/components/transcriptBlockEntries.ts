@@ -64,6 +64,7 @@ const OUTCOMES: Record<UpdateCard['kind'], string> = {
 	failed: 'Failed',
 	closed: 'Closed',
 	blocked: 'Blocked',
+	person_step: 'Ready for you',
 };
 
 function firstLine(text: unknown): string {
