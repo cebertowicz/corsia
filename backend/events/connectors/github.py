@@ -30,6 +30,7 @@ from events.identity import (
 )
 from events.connectors.github_label_events import IDENTITY, change_event
 from events.connectors.github_ownership import declaration_facts
+from events.connectors.github_receiver import GITHUB_RECEIVER
 from events.identity_formula import MalformedEventError, RelationshipDecl
 
 _CHECK_TO_PR = RelationshipDecl("check_suite", "check_to_pull_request", "pull-request")
@@ -298,6 +299,7 @@ MANIFEST = register(ConnectorManifest(
     repository_fact="repo",
     project_repositories=_project_repositories,
     repository_projects=_repository_projects,
+    receiver=GITHUB_RECEIVER,
 ))
 
 

@@ -1,25 +1,24 @@
-"""GitHub webhook ingress endpoint."""
+"""Webhook ingress: every route under ``/webhooks/`` is a signed receiver.
+
+The platform handler (``api.webhook_receivers``) serves ``/webhooks/<connector>/``
+from the connector manifest's receiver declaration. ``/webhooks/github`` and
+``/webhooks/github/`` stay explicit routes, with no slash redirect (GitHub does not
+follow the 307 that turns its POST into a GET), and keep the existing GitHub secret.
+Settings, list and test APIs live under ``/api/``, never here.
+"""
 
 from __future__ import annotations
 
-import asyncio
-import hashlib
-import hmac
-import json
 import logging
 from typing import Any
 
 from fastapi import APIRouter, Request
-from fastapi.responses import JSONResponse
 
-from infra.product_events import emit_product_event
+from api.webhook_receivers import handle_receiver
+from events.connectors.receiver import verify_hmac_sha256
 
 router = APIRouter(tags=["webhooks"])
 log = logging.getLogger(__name__)
-
-# GitHub sends ping events for health/setup checks. They may be unsigned before
-# a webhook secret is configured, but signed once GitHub knows the secret.
-_UNSIGNED_ALLOWED_EVENTS: frozenset[str] = frozenset({"ping"})
 
 
 def _get_webhook_secret() -> str | None:
@@ -32,40 +31,7 @@ def _get_webhook_secret() -> str | None:
 
 def verify_signature(payload_body: bytes, signature_header: str, secret: str) -> bool:
     """Verify the GitHub HMAC-SHA256 signature."""
-    if not signature_header.startswith("sha256="):
-        return False
-    expected_sig = signature_header[7:]  # strip "sha256=" prefix
-    mac = hmac.new(secret.encode(), payload_body, hashlib.sha256)
-    return hmac.compare_digest(mac.hexdigest(), expected_sig)
-
-
-def _check_signature(body: bytes, sig_header: str, secret: str | None) -> JSONResponse | None:
-    """Validate HMAC signature."""
-    if not secret:
-        log.error("GitHub webhook secret not configured — rejecting delivery")
-        emit_product_event(
-            "webhook", "signature_invalid",
-            properties={"reason": "secret_not_configured"},
-        )
-        return JSONResponse(content={"error": "webhook secret not configured"}, status_code=401)
-
-    if not sig_header:
-        log.warning("Missing X-Hub-Signature-256 header")
-        emit_product_event(
-            "webhook", "signature_invalid",
-            properties={"reason": "missing_signature"},
-        )
-        return JSONResponse(content={"error": "missing signature"}, status_code=401)
-
-    if not verify_signature(body, sig_header, secret):
-        log.warning("Invalid webhook signature")
-        emit_product_event(
-            "webhook", "signature_invalid",
-            properties={"reason": "invalid_signature"},
-        )
-        return JSONResponse(content={"error": "invalid signature"}, status_code=401)
-
-    return None
+    return verify_hmac_sha256(payload_body, signature_header, "sha256=", secret)
 
 
 def _record_delivery_for_admission(
@@ -97,45 +63,24 @@ def _handle_dedup_and_log(
 @router.post("/webhooks/github")
 async def github_webhook(request: Request):
     """Receive a GitHub webhook delivery."""
-    body = await request.body()
-    event_type = request.headers.get("X-GitHub-Event", "")
-    sig_header = request.headers.get("X-Hub-Signature-256", "")
-    secret = _get_webhook_secret()
-
-    # Ping events are GitHub health/setup checks. When no webhook secret exists
-    # yet the ping arrives unsigned; once a secret exists, unsigned pings are
-    # anomalous and must fail like every other unsigned delivery.
-    if event_type in _UNSIGNED_ALLOWED_EVENTS:
-        if secret:
-            # Signature present: verify it so misconfigurations are caught early.
-            rejection = _check_signature(body, sig_header, secret)
-            if rejection is not None:
-                return rejection
-        log.info("GitHub %s event received — webhook endpoint healthy", event_type)
-        emit_product_event(
-            "webhook", "ping",
-            properties={"event_type": event_type},
-        )
-        return {"status": "ok", "event": event_type}
-
-    rejection = _check_signature(body, sig_header, secret)
-    if rejection is not None:
-        return rejection
-
-    try:
-        payload: dict[str, Any] = json.loads(body)
-    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-        log.error("Failed to parse webhook payload: %s", exc)
-        return JSONResponse(
-            content={"status": "error", "message": "invalid JSON payload"},
-            status_code=400,
-        )
-
-    from events.connectors.github_admission import admit_github_delivery_async
-
-    outcome = await admit_github_delivery_async(
-        event_type, payload, request.headers.get("X-GitHub-Delivery", ""),
+    return await handle_receiver(
+        "github", "", request, secret_lookup=lambda _connector: _get_webhook_secret(),
     )
-    if outcome.status_code == 200:
-        return outcome.content
-    return JSONResponse(content=outcome.content, status_code=outcome.status_code)
+
+
+@router.post("/webhooks/github/")
+async def github_webhook_slash(request: Request):
+    """The same receiver at the trailing-slash path; an explicit route, never a redirect."""
+    return await github_webhook(request)
+
+
+@router.post("/webhooks/{connector}")
+async def connector_webhook(connector: str, request: Request):
+    """Receive a delivery for an installed connector's receiver."""
+    return await handle_receiver(connector, "", request)
+
+
+@router.post("/webhooks/{connector}/{subpath:path}")
+async def connector_webhook_subpath(connector: str, subpath: str, request: Request):
+    """A connector owns its whole ``/webhooks/<connector>/`` subtree."""
+    return await handle_receiver(connector, subpath, request)
