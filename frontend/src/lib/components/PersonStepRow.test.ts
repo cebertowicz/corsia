@@ -3,14 +3,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { UpdateCard } from '$lib/api/threadUpdates';
 import PersonStepRow from './PersonStepRow.svelte';
 
-const nav = vi.hoisted(() => ({ doStep: vi.fn(), doFirstOf: vi.fn(), plan: { nodes: [] as Array<{ id: string; state: string }> } }));
+const nav = vi.hoisted(() => ({ doStep: vi.fn(), plan: { nodes: [] as Array<{ id: string; state: string }> } }));
 vi.mock('$lib/stores/planQuery.svelte', () => ({
 	planQuery: () => ({ get payload() { return { plans: [{ nodes: nav.plan.nodes }] }; } }),
 }));
 vi.mock('$lib/personStepChip', async (original) => ({
 	...(await original<typeof import('$lib/personStepChip')>()),
 	doStep: nav.doStep,
-	doFirstOf: nav.doFirstOf,
 }));
 
 const card = (id: number, over: Partial<UpdateCard> = {}): UpdateCard => ({
@@ -33,19 +32,21 @@ afterEach(async () => {
 	component = undefined;
 	host?.remove();
 	nav.doStep.mockClear();
-	nav.doFirstOf.mockClear();
 	nav.plan.nodes = [];
 });
 
 const chip = () => host.querySelector<HTMLButtonElement>('[data-step-chip]');
 
 describe('PersonStepRow', () => {
-	it('one open step: a chip with its title, the amber state and Do →, which opens that step', () => {
+	it('one open task: a chip with its title, the amber "Needs you" and Do →, which opens that task', () => {
 		render({ card: card(1) });
 		expect(chip()!.textContent).toContain('Step 1');
-		expect(chip()!.textContent).toContain('Ready for you');
+		expect(chip()!.textContent).toContain('Needs you');
+		expect(chip()!.textContent).toContain('·');
+		// The lead is the plan row's needs-you mark, not a drawing of its own.
+		expect(chip()!.querySelector('.state-icon.needs-you')?.textContent).toBe('!');
 		expect(chip()!.textContent).toContain('Do →');
-		expect(chip()!.getAttribute('aria-label')).toBe('Do: Step 1, Ready for you');
+		expect(chip()!.getAttribute('aria-label')).toBe('Do: Step 1, Needs you');
 		chip()!.click();
 		expect(nav.doStep).toHaveBeenCalledWith(expect.objectContaining({ id: 1 }));
 		expect(host.querySelector('[data-person-step]')!.getAttribute('data-step-state')).toBe('open');
@@ -81,27 +82,30 @@ describe('PersonStepRow', () => {
 		expect(host.querySelectorAll('.slot-layer')[1].textContent).toContain('Won’t do');
 	});
 
-	it('several ready steps: one line with the count; Do → opens the plan at the first', () => {
+	it('several waiting tasks: one line, the first task and "+N more"; Do → runs that first task, as a single chip does', () => {
 		const cards = [card(1), card(2), card(3)];
 		render({ card: cards[2], group: cards });
 		expect(host.querySelectorAll('[data-step-chip]')).toHaveLength(1);
-		expect(chip()!.textContent).toContain('3 steps');
+		expect(chip()!.querySelector('.title')!.textContent).toBe('Step 1');
+		expect(chip()!.querySelector('.when')!.textContent).toBe('· +2 more');
+		expect(chip()!.getAttribute('aria-label')).toBe('Do: Step 1, 2 more, Needs you');
 		chip()!.click();
-		expect(nav.doFirstOf).toHaveBeenCalledWith(cards);
-		expect(nav.doStep).not.toHaveBeenCalled();
+		expect(nav.doStep).toHaveBeenCalledTimes(1);
+		expect(nav.doStep).toHaveBeenCalledWith(expect.objectContaining({ id: 1 }));
 	});
 
-	it('as steps settle, the count falls and each leaves its own receipt; the last one reads by title', () => {
+	it('as tasks settle, the count falls and each leaves its own receipt; the last one reads as a plain chip', () => {
 		const cards = [card(1), card(2), card(3)];
 		nav.plan.nodes = [{ id: 'n1', state: 'accepted' }, { id: 'n3', state: 'closed' }];
 		render({ card: cards[2], group: cards });
 		expect(chip()!.textContent).toContain('Step 2');
+		expect(chip()!.querySelector('.when')).toBeNull();
 		expect(host.querySelectorAll('.ev-chip')).toHaveLength(2);
 		chip()!.click();
 		expect(nav.doStep).toHaveBeenCalledWith(expect.objectContaining({ id: 2 }));
 	});
 
-	it('every step settled: only receipts remain', () => {
+	it('every task settled: only receipts remain', () => {
 		const cards = [card(1), card(2)];
 		nav.plan.nodes = [{ id: 'n1', state: 'accepted' }, { id: 'n2', state: 'accepted' }];
 		render({ card: cards[1], group: cards });

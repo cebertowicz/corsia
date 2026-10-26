@@ -46,7 +46,7 @@ describe('a person step in the transcript', () => {
 		expect(updates(merged)[0].card.kind).toBe('person_step');
 	});
 
-	it('Focus: several ready steps in one stretch read as one line, at the latest of them', () => {
+	it('Focus: several waiting tasks in one stretch read as one line, at the latest of them', () => {
 		nextId = 1;
 		const a = step(2);
 		const b = step(2);

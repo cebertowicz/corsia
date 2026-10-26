@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { OperatorArtifactLink, OperatorNode } from '$lib/api/plans';
 import { operatorNode } from '$lib/__tests__/fixtures/operatorPlan';
-import { doFirstOf, doStep, doTarget, groupLabel, stepState } from './personStepChip';
+import { doStep, doTarget, moreLabel, stepState } from './personStepChip';
 
 const calls = vi.hoisted(() => ({
 	focus: vi.fn(async () => {}),
@@ -88,10 +88,9 @@ describe('doStep', () => {
 	});
 });
 
-describe('group', () => {
-	it('names the count and opens the plan at the first step still waiting', async () => {
-		expect(groupLabel(7)).toBe('7 steps');
-		await doFirstOf([{ thread_id: 't1', node_id: 'a' }, { thread_id: 't1', node_id: 'b' }]);
-		expect(calls.focus).toHaveBeenCalledWith('t1', 'a');
+describe('group line', () => {
+	it('adds "+N more" to the first task for the rest of the group', () => {
+		expect(moreLabel(7)).toBe('+6 more');
+		expect(moreLabel(2)).toBe('+1 more');
 	});
 });

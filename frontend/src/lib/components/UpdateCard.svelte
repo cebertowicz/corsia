@@ -14,7 +14,7 @@
 		failed: 'Failed',
 		closed: 'Closed',
 		blocked: 'Blocked',
-		person_step: 'Ready for you',
+		person_step: 'Needs you',
 	};
 
 	let { card, earlier = 0, group = undefined }: { card: UpdateCard; earlier?: number; group?: UpdateCard[] } = $props();

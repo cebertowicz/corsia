@@ -1,20 +1,24 @@
 <script lang="ts">
 	/**
-	 * A person step in the transcript (corsia#687): the "Needs your review" tile's own look and
-	 * geometry, with the step's action ("Do →") where the tile has its chevron. Do → opens what the
-	 * plan row opens: the step's instructions document, else its details in the plan.
+	 * A person task in the transcript (corsia#687): the "Needs your review" tile itself (`NeedsYouTile`),
+	 * with the plan row's needs-you mark as its lead and the task's action ("Do →") where the tile has
+	 * its chevron. Do → opens what the plan row opens: the task's instructions document, else its
+	 * details in the plan.
 	 *
-	 * Settled, the chip becomes the EventChip receipt in place. Several ready steps in one Focus
-	 * stretch read as one line; as each settles, it leaves the line and shows its own receipt.
+	 * Settled, the chip becomes the EventChip receipt in place. Several waiting tasks in one Focus
+	 * stretch read as one line, the first task's title and "+N more", and Do → opens that first task;
+	 * as each settles, it leaves the line and shows its own receipt.
 	 */
 	import { onMount, tick } from 'svelte';
 	import { slide } from 'svelte/transition';
 	import type { UpdateCard } from '$lib/api/threadUpdates';
-	import { doFirstOf, doStep, groupLabel, stepState } from '$lib/personStepChip';
+	import { doStep, moreLabel, stepState } from '$lib/personStepChip';
 	import { planQuery } from '$lib/stores/planQuery.svelte';
 	import { prefersReducedMotion } from '$lib/stores/viewport';
 	import EventChip from './EventChip.svelte';
+	import NeedsYouTile from './NeedsYouTile.svelte';
 	import OutcomeTime from './OutcomeTime.svelte';
+	import PlanStateIcon from './plans/PlanStateIcon.svelte';
 
 	let { card, group = undefined }: { card: UpdateCard; group?: UpdateCard[] } = $props();
 
@@ -24,8 +28,9 @@
 	const states = $derived(members.map((member) => stepState(member, member.node_id ? nodes.get(member.node_id) : undefined)));
 	const waiting = $derived(members.filter((_, index) => states[index] === 'open'));
 	const settled = $derived(members.flatMap((member, index) => (states[index] === 'open' ? [] : [{ member, state: states[index] }])));
-	// The line: one step reads as its title; two or more as a count, and the count falls as steps settle.
-	const title = $derived(waiting.length > 1 ? groupLabel(waiting.length) : ((waiting[0] ?? card).title || 'A step for you'));
+	// The line: the first waiting task's title; with more waiting, "+N more", and the count falls as they settle.
+	const title = $derived((waiting[0] ?? card).title || 'A task for you');
+	const more = $derived(waiting.length > 1 ? moreLabel(waiting.length) : null);
 	const single = $derived(members.length === 1);
 	const motion = $derived($prefersReducedMotion ? 0 : 200);
 
@@ -36,8 +41,8 @@
 			content: '',
 			metadata: {
 				event_type: state === 'closed' ? 'person_step.wont_do' : 'person_step.done',
-				// EventChip owns the outcome word; the summary is the step alone.
-				summary: member.title || 'A step for you',
+				// EventChip owns the outcome word; the summary is the task alone.
+				summary: member.title || 'A task for you',
 			},
 		};
 	}
@@ -45,8 +50,7 @@
 	function press(event: MouseEvent): void {
 		// The chat column takes every click as "the chat is active" and would put the chat back over the document just opened (`AttachmentRow` stops it the same way).
 		event.stopPropagation();
-		if (waiting.length > 1) void doFirstOf(waiting);
-		else if (waiting[0]) void doStep(waiting[0]);
+		if (waiting[0]) void doStep(waiting[0]);
 	}
 
 	// One step: both faces stay mounted, so the row keeps its height until the next face is measured, then
@@ -80,27 +84,28 @@
 	});
 </script>
 
+{#snippet mark()}
+	<span class="lead"><PlanStateIcon state="needs-you" tone="" label="Needs you"><span aria-hidden="true">!</span></PlanStateIcon></span>
+{/snippet}
+{#snippet moreMark()}<span>· {more}</span>{/snippet}
+{#snippet stateLine()}
+	<span class="state ask"><span class="dot" aria-hidden="true"></span>Needs you</span>
+	<span class="sep" aria-hidden="true">·</span>
+	<OutcomeTime value={waiting[0]?.created_at ?? card.created_at} compact />
+{/snippet}
+{#snippet doMark()}<span class="act" aria-hidden="true">Do →</span>{/snippet}
 {#snippet tile()}
-	<button
-		type="button"
-		class="tile press-tint"
+	<NeedsYouTile
+		needsYou
+		{title}
+		lead={mark}
+		aside={more ? moreMark : undefined}
+		ctx={stateLine}
+		trailing={doMark}
 		data-step-chip
-		title={title}
-		aria-label={`Do: ${title}, Ready for you`}
+		aria-label={`Do: ${title}${more ? `, ${waiting.length - 1} more` : ''}, Needs you`}
 		onclick={press}
-	>
-		<span class="ic" aria-hidden="true">
-			<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="3" /><path d="m8.5 12.3 2.4 2.4 4.6-4.9" /></svg>
-		</span>
-		<span class="text">
-			<span class="head">
-				<span class="title">{title}</span>
-				<span class="when"><OutcomeTime value={waiting[0]?.created_at ?? card.created_at} compact /></span>
-			</span>
-			<span class="ctx"><span class="state"><span class="dot" aria-hidden="true"></span>Ready for you</span></span>
-		</span>
-		<span class="act" aria-hidden="true">Do →</span>
-	</button>
+	/>
 {/snippet}
 
 <div class="step-row" data-person-step={card.node_id} data-step-state={single ? own : waiting.length ? 'open' : 'settled'} data-step-count={members.length}>
@@ -144,49 +149,12 @@
 		transition: opacity var(--dur-standard) var(--ease-snap);
 	}
 	.slot.ready .slot-layer.active { opacity: 1; pointer-events: auto; }
-	/* The "Needs your review" row's own values (AttachmentRow `.tile.row.needs-you`): the frosted card of an open ask. */
-	.tile {
-		display: flex;
-		align-items: center;
-		gap: var(--space-3);
-		width: 100%;
-		min-width: 0;
-		padding: var(--space-2) var(--space-2) var(--space-2) 2px;
-		border: 1px solid var(--border);
-		border-radius: var(--radius-xl);
-		background: var(--glass-thin);
-		box-shadow: var(--glass-rim), var(--shadow-chip);
-		color: var(--text-primary);
-		font: inherit;
-		text-align: left;
-		cursor: pointer;
-		transition: background var(--dur-tight) var(--ease-snap);
-	}
-	@media (hover: hover) { .tile:hover { background: var(--bg-secondary); } }
-	/* Inset, as the tile's: the row clips at the prose edge, so an outward ring would be cut off. */
-	.tile:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-	@media (pointer: coarse) { .tile { min-height: 44px; } }
-	.ic { display: flex; flex: 0 0 auto; align-items: center; justify-content: center; width: 36px; height: 36px; color: var(--text-tertiary); }
-	.ic svg { width: 55%; height: 55%; }
-	.text { display: flex; flex: 1 1 auto; flex-direction: column; min-width: 0; }
-	.head { display: flex; align-items: baseline; gap: var(--space-2); min-width: 0; }
-	.title {
-		flex: 1 1 auto;
-		min-width: 0;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-		font-size: var(--text-callout);
-		font-weight: var(--fw-semibold);
-		line-height: var(--lh-tight);
-	}
-	.when { flex: 0 0 auto; font-size: var(--text-footnote); line-height: var(--lh-tight); color: var(--text-secondary); font-variant-numeric: tabular-nums; }
-	.ctx { display: flex; align-items: center; gap: var(--space-1); min-width: 0; font-size: var(--text-footnote); line-height: var(--lh-tight); color: var(--text-secondary); white-space: nowrap; }
-	.state { display: inline-flex; align-items: center; gap: var(--space-1); color: var(--amber-text); }
-	.dot { flex: 0 0 auto; width: 8px; height: 8px; border-radius: var(--radius-circle); background: var(--amber); }
+	/* The tile's lead slot is 36 px, as an artifact's type tile; the mark sits centred in it. */
+	.lead { display: flex; flex: 0 0 auto; align-items: center; justify-content: center; width: 36px; height: 36px; }
+	.sep { flex: 0 0 auto; color: var(--text-tertiary); }
 	/* Where the tile has a chevron: the step's action, in its own word. */
 	.act { flex: 0 0 auto; padding-right: var(--space-2); color: var(--accent); font-size: var(--text-footnote); font-weight: var(--fw-medium); }
 	@media (prefers-reduced-motion: reduce) {
-		.tile, .slot.ready, .slot.ready .slot-layer { transition: none; }
+		.slot.ready, .slot.ready .slot-layer { transition: none; }
 	}
 </style>

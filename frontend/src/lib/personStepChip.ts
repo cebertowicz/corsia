@@ -14,7 +14,7 @@ export function stepState(card: Pick<UpdateCard, 'step_state'>, node: Pick<Opera
 	return card.step_state ?? 'open';
 }
 
-/** What Do → opens: the step's instructions document when it has one, else the step's details in the plan. */
+/** What Do → opens: the step's instructions document when it has one, else the task's details in the plan. */
 export type DoTarget =
 	| { kind: 'document'; artifact: OperatorArtifactLink }
 	| { kind: 'details' };
@@ -24,9 +24,9 @@ export function doTarget(node: OperatorNode | undefined): DoTarget {
 	return artifact ? { kind: 'document', artifact } : { kind: 'details' };
 }
 
-/** The one line a group of ready steps reads as: "7 steps". */
-export function groupLabel(count: number): string {
-	return `${count} steps`;
+/** What a group of waiting tasks adds to its first task's title: "+6 more" for 7. */
+export function moreLabel(count: number): string {
+	return `+${count - 1} more`;
 }
 
 function threadNode(threadId: string, nodeId: string): OperatorNode | undefined {
@@ -47,14 +47,8 @@ export async function doStep(card: Pick<UpdateCard, 'thread_id' | 'node_id' | 't
 	}
 	const target = doTarget(node);
 	if (target.kind === 'document') {
-		openPlanAsk(card.thread_id, target.artifact, card.title ?? node?.title ?? 'Step', () => {});
+		openPlanAsk(card.thread_id, target.artifact, card.title ?? node?.title ?? 'Task', () => {});
 		return;
 	}
 	await focusPlanNode(card.thread_id, card.node_id, null, true);
-}
-
-/** Do → on a group: the plan, at the first step still waiting, where each step opens by its own row. */
-export async function doFirstOf(cards: Array<Pick<UpdateCard, 'thread_id' | 'node_id'>>): Promise<void> {
-	const first = cards.find((card) => card.node_id);
-	if (first?.node_id) await focusPlanNode(first.thread_id, first.node_id);
 }

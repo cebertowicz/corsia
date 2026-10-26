@@ -1,8 +1,9 @@
-import { expect, test, type APIRequestContext, type Locator, type Page, type WebSocketRoute } from "@playwright/test";
+import type { APIRequestContext, Locator, Page, WebSocketRoute } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
 import { createSession, openAppByUrl, TEST_TOKEN } from "../support/corsia";
 import { setFocusMode } from "../support/focusMode";
+import { expect, test } from "../support/test";
 import { setDebugVersionOverlay } from "../support/heldComments";
 import { injectMessage } from "../support/mock";
 import { operatorNode, planDisplay, withPlanContract } from "../../src/lib/__tests__/fixtures/operatorPlan";
@@ -400,6 +401,11 @@ const CASES: Array<{ id: string; scene: keyof typeof SCENES; focus: boolean[] }>
 ];
 const BARE: Record<string, string[]> = { before: ["1440-light", "393-dark"], "canvas-reference": ["1440-light"] };
 
+// Focus is a persisted server setting: put it back whatever a case turned off, failing midway included.
+test.afterEach(async ({ request }) => {
+  await setFocusMode(request, true);
+});
+
 for (const size of SIZES) {
   for (const theme of THEMES) {
     for (const { id, scene: sceneName, focus } of CASES) {
@@ -573,14 +579,15 @@ for (const size of SIZES) {
           if (id === "one-doc" || id === "one-plain" || id === "long-title") {
             await expect(chip(first)).toBeVisible();
             await expect(chip(first)).toContainText("Do →");
-            await expect(chip(first)).toContainText("Ready for you");
+            await expect(chip(first)).toContainText("Needs you");
             await shot(page, `${id}-focus-${focusOn ? "on" : "off"}-${size.w}-${theme}`);
           }
 
           if (id === "seven") {
             if (focusOn) {
               await expect(rows).toHaveCount(1);
-              await expect(rows.first()).toContainText("7 steps");
+              await expect(rows.first()).toContainText(SEVEN[0].title);
+              await expect(rows.first()).toContainText("+6 more");
               await expect(rows.first()).toContainText("Do →");
             } else {
               await expect(rows).toHaveCount(7);
@@ -657,19 +664,18 @@ for (const size of SIZES) {
           if (id === "group-do") {
             await rows.first().locator("[data-step-chip]").click();
             if (phone) await expect(page.getByRole("dialog", { name: /^Plan —/ })).toBeVisible({ timeout: 15_000 });
-            // A group's Do → shows the plan at the first waiting step; each step opens by its own row.
-            const rowBody = page.getByRole("listitem").filter({ hasText: SEVEN[0].title }).locator(".row-body").first();
-            await expect(rowBody).toBeFocused({ timeout: 15_000 });
+            // A group's Do → does what a single chip does for its first waiting task: here its details in the plan.
+            await expect(page.getByRole("region", { name: `${SEVEN[0].title} details` })).toBeVisible({ timeout: 15_000 });
             await shot(page, `group-do-${size.w}-${theme}`);
           }
 
           if (id === "group-settle") {
-            await expect(rows.first()).toContainText("7 steps");
-            // The first step is settled somewhere else (the document bar or the plan row); the push follows.
+            await expect(rows.first()).toContainText("+6 more");
+            // The first task is settled somewhere else (the document bar or the plan row); the push follows.
             settle(SEVEN[0].id, "done");
             socket.push();
             await expect(page.locator(`[data-person-step]`).first()).toBeVisible();
-            await expect(page.getByText("6 steps")).toBeVisible({ timeout: 15_000 });
+            await expect(rows.first()).toContainText("+5 more", { timeout: 15_000 });
             await expect(page.locator(".ev-chip").filter({ hasText: SEVEN[0].title })).toBeVisible();
             await shot(page, `group-settle-${size.w}-${theme}`);
           }
@@ -677,6 +683,9 @@ for (const size of SIZES) {
           if (id === "neighbour") {
             await expect(chip(first)).toBeVisible();
             await expect(page.getByText("Needs your review").first()).toBeVisible({ timeout: 15_000 });
+            // Where AttachmentRow's own tile sits, so a before/after comparison can look at exactly it.
+            const tile = await page.locator("[data-artifact-id]").filter({ hasText: "Needs your review" }).first().boundingBox();
+            if (process.env.CHIP_BOXES) fs.writeFileSync(path.join(process.env.CHIP_BOXES, `neighbour-${size.w}-${theme}.json`), JSON.stringify(tile));
             await shot(page, `neighbour-${size.w}-${theme}`);
           }
         });
