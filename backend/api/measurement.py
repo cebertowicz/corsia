@@ -165,7 +165,7 @@ def _series_read(requested: list[str], project: str, agent: str, page_grain: Gra
         families = {REGISTRY[metric].family for metric in requested}
         coverage = presence_coverage(db, user_id, page_grain.zone)
         first_limit_period = first_recorded_period(db, params) if "limits" in families else None
-        breaks = derive_breaks(db, requested, page_grain, periods=page_grain.periods)
+        breaks = derive_breaks(db, requested, page_grain)
         prepare_outcome_periods(db, params)
         family_rows = {family: (size_family(db, params) if family == "size" else
                                 [{"period": period, "hits": hits} for period, hits in limits_by_period(db, params).items()] if family == "limits" else
@@ -264,7 +264,7 @@ async def measurement_index(project: str = Query(...), agent: str = Query(...),
             """, params).fetchone()
             total = int(cost["n"] or 0)
             index_grain = resolve_grain("days", zone)
-            breaks = derive_breaks(db, REGISTRY, index_grain, periods=index_grain.periods)
+            breaks = derive_breaks(db, REGISTRY, index_grain)
             return selected_scope.response(), {"known_cost_usd": float(cost["known_cost_usd"] or 0),
                                                "unknown_cost_share": (int(cost["unknown_cost_rows"] or 0) / total if total else 0)}, presence_coverage(db, user["id"], zone), breaks
         finally:
@@ -337,7 +337,7 @@ async def agents_payload(project: str, agent: str, page_grain: Grain, sort: str,
             params = {**selected_scope.params(user["id"]), "grain": page_grain}
             first_presence = presence_coverage(db, user["id"], page_grain.zone).start_period(page_grain)
             # One prepared window covers every period the grain draws, so nothing reads live plans.
-            breaks = derive_breaks(db, TABLE_METRICS, page_grain, periods=page_grain.periods)
+            breaks = derive_breaks(db, TABLE_METRICS, page_grain)
             prepare_outcome_periods(db, params, roots=True)
             rows, findings, summaries, agent_count, overall = build_agents(
                 db, params, REGISTRY, metric, sort, page_grain,

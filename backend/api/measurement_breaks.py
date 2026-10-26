@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from collections import Counter, defaultdict
 from collections.abc import Iterable
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 from api.measurement_size import counted_raters, latest_rated_settlement
@@ -69,17 +69,6 @@ def _seeded_starts(db, groups: Iterable[str]) -> dict[str, str | None]:
     return {group: found.get(group) for group in requested}
 
 
-def _period_bounds(grain: Grain, period: str) -> tuple[str, str]:
-    """Return exact UTC bounds for one display period without touching the shared connection."""
-    start = date.fromisoformat(period)
-    end = start + timedelta(days=1 if grain.kind == "days" else 7)
-    zone = ZoneInfo(grain.zone)
-    pattern = "%Y-%m-%d %H" if grain.precision == 13 else "%Y-%m-%d %H:%M"
-    start_text = datetime.combine(start, time.min, zone).astimezone(timezone.utc).strftime(pattern)
-    end_text = datetime.combine(end, time.min, zone).astimezone(timezone.utc).strftime(pattern)
-    return start_text, end_text
-
-
 def _dominant_rater(raters: Counter[str]) -> str:
     """Choose the largest period population, resolving an exact tie lexically."""
     largest = max(raters.values())
@@ -108,37 +97,33 @@ def _model_marks_from_raters(grain: Grain, rows: Iterable[tuple[str, str]], prio
 
 def _previous_dominant_rater(db, grain: Grain, first_period: str, floor: str | None) -> str | None:
     """Read the nearest earlier rated period, never probing every empty calendar period."""
-    before, _ = _period_bounds(grain, first_period)
-    while candidate := latest_rated_settlement(db, before_ts=before):
+    before, _ = grain.period_instants(first_period)
+    while candidate := latest_rated_settlement(db, before_ts=before, precision=grain.precision):
         period = _period(grain, candidate)
         if period is None or (floor is not None and period < floor):
             return None
-        start, end = _period_bounds(grain, period)
-        rows = counted_raters(db, from_ts=start, to_ts=end)
+        start, end = grain.period_instants(period)
+        rows = counted_raters(db, from_ts=start, to_ts=end, precision=grain.precision)
         if rows:
             return _dominant_rater(Counter(rater for _, rater in rows))
         before = start
     return None
 
 
-def _model_marks(db, grain: Grain, periods: tuple[str, ...] | None, floor: str | None) -> list[dict[str, str]]:
+def _model_marks(db, grain: Grain, floor: str | None) -> list[dict[str, str]]:
     """Mark dominant-rater changes only in the page range and one relevant earlier period."""
     if not db.execute(_TWO_RATERS_SQL).fetchone()[0]:
         return []
-    if not periods:
-        return _model_marks_from_raters(
-            grain, counted_raters(db, from_ts="0000-01-01", to_ts="9999-12-31"),
-        )
-    first, last = periods[0], periods[-1]
-    start, _ = _period_bounds(grain, first)
-    _, end = _period_bounds(grain, last)
+    first = grain.periods[0]
     prior = _previous_dominant_rater(db, grain, first, floor)
-    return _model_marks_from_raters(grain, counted_raters(db, from_ts=start, to_ts=end), prior)
+    return _model_marks_from_raters(
+        grain, counted_raters(
+            db, from_ts=grain.starts[0], to_ts=grain.current_end, precision=grain.precision,
+        ), prior,
+    )
 
 
-def _metadata(
-    db, metrics: Iterable[str], grain: Grain, *, with_marks: bool = True, periods: tuple[str, ...] | None = None,
-) -> tuple[dict[str, str | None], list[dict[str, str]]]:
+def _metadata(db, metrics: Iterable[str], grain: Grain, *, with_marks: bool = True) -> tuple[dict[str, str | None], list[dict[str, str]]]:
     """The one read-only resolver for metric starts and, unless only starts are asked for, comparable marks."""
     requested = tuple(metrics)
     groups = tuple(dict.fromkeys(source_group(metric) for metric in requested))
@@ -156,16 +141,14 @@ def _metadata(
         for item in json.loads(str(row["marks"]) if with_marks and row and row["marks"] else "[]")
     ]
     if with_marks and "estimated_human_hours_per_active_hour" in requested:
-        marks.extend(_model_marks(db, grain, periods, starts[source_group("estimated_human_hours_per_active_hour")]))
+        marks.extend(_model_marks(db, grain, starts[source_group("estimated_human_hours_per_active_hour")]))
     return starts, marks
 
 
-def derive_breaks(
-    db, metrics: Iterable[str], grain: Grain, *, periods: tuple[str, ...] | None = None,
-) -> dict[str, list[dict[str, str]]]:
+def derive_breaks(db, metrics: Iterable[str], grain: Grain) -> dict[str, list[dict[str, str]]]:
     """Return each requested metric's deterministic source start and definition marks."""
     requested = tuple(metrics)
-    starts, marks = _metadata(db, requested, grain, periods=periods)
+    starts, marks = _metadata(db, requested, grain)
     result: dict[str, list[dict[str, str]]] = {}
     for metric in requested:
         start = starts[source_group(metric)]

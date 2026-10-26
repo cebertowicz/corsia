@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from datetime import datetime, timezone
 
 import pytest
@@ -289,6 +290,16 @@ def test_partial_rerate_of_old_tasks_keeps_the_old_periods_dominant_rater(isolat
 def test_bounded_model_marks_match_full_history_for_drawn_periods(isolated_db) -> None:
     db = get_db()
     drawn = ("2026-09-14", "2026-09-21")
+    full_grain = _grain()
+    first = full_grain.periods.index(drawn[0])
+    narrow_grain = replace(
+        full_grain,
+        current=full_grain.periods[first + len(drawn)],
+        periods=drawn,
+        starts=full_grain.starts[first:first + len(drawn) + 1],
+        end=full_grain.starts[first + len(drawn)],
+        current_end=full_grain.starts[first + len(drawn) + 1],
+    )
     try:
         _thread(db)
         for node, when, rater in (
@@ -301,8 +312,8 @@ def test_bounded_model_marks_match_full_history_for_drawn_periods(isolated_db) -
             _accepted(db, node, when)
             _rating(db, node, rater)
         db.commit()
-        full = derive_breaks(db, ("estimated_human_hours_per_active_hour",), _grain())
-        bounded = derive_breaks(db, ("estimated_human_hours_per_active_hour",), _grain(), periods=drawn)
+        full = derive_breaks(db, ("estimated_human_hours_per_active_hour",), full_grain)
+        bounded = derive_breaks(db, ("estimated_human_hours_per_active_hour",), narrow_grain)
     finally:
         db.close()
     full_marks = [mark for mark in full["estimated_human_hours_per_active_hour"]
@@ -385,7 +396,7 @@ def test_start_only_callers_skip_the_mark_reads(isolated_db) -> None:
 
 
 def test_model_mark_uses_each_raters_earliest_accepted_settlement(isolated_db) -> None:
-    grain = resolve_grain("days", "America/Los_Angeles", now=datetime(2026, 10, 22, tzinfo=timezone.utc))
+    grain = resolve_grain("days", "America/Los_Angeles", now=datetime(2026, 9, 17, tzinfo=timezone.utc))
     db = get_db()
     try:
         _thread(db)

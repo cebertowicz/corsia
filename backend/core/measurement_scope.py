@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from datetime import date, datetime, time, timedelta, timezone
-from typing import Any
+from typing import Any, Iterable
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 _TREND_RANGES = ("12w", "26w", "all")
@@ -232,6 +232,19 @@ class Grain:
         last = date.fromisoformat(key) + timedelta(days=0 if self.kind == "days" else 6)
         return last.isoformat()
 
+    @staticmethod
+    def utc_midnights(days: Iterable[date], zone: ZoneInfo) -> tuple[datetime, ...]:
+        """Convert local calendar midnights into the UTC instants Measurement stores."""
+        return tuple(datetime.combine(day, time.min, zone).astimezone(timezone.utc) for day in days)
+
+    def period_instants(self, key: str) -> tuple[str, str]:
+        """The exact half-open UTC interval for one display period at this grain's precision."""
+        start = date.fromisoformat(key)
+        stop = start + timedelta(days=1 if self.kind == "days" else 7)
+        pattern = "%Y-%m-%d %H" if self.precision == 13 else "%Y-%m-%d %H:%M"
+        before, after = self.utc_midnights((start, stop), parse_zone(self.zone))
+        return before.strftime(pattern), after.strftime(pattern)
+
     def period_of(self, day: str) -> str:
         """Key of the period a local date falls in."""
         value = date.fromisoformat(day[:10])
@@ -310,8 +323,7 @@ def resolve_grain(kind: str, zone_name: str, *, now: datetime | None = None, ave
     lead = _COMPARE_PERIODS[kind] - 1 if averaged else 0
     count = _RANGE_PERIODS[kind] + lead
     firsts = [current - timedelta(days=step * back) for back in range(count, -1, -1)]
-    instants = [datetime.combine(day, time.min, zone).astimezone(timezone.utc)
-                for day in (*firsts, current + timedelta(days=step))]
+    instants = Grain.utc_midnights((*firsts, current + timedelta(days=step)), zone)
     precision = 13 if all(instant.minute == 0 for instant in instants) else 16
     text = [instant.strftime("%Y-%m-%d %H" if precision == 13 else "%Y-%m-%d %H:%M") for instant in instants]
     return Grain(kind=kind, zone=zone_name, current=current.isoformat(),

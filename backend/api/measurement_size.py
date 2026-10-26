@@ -58,13 +58,13 @@ _PREPARED_NODES_SQL = (_nodes_sql("o.node_id", "measurement_outcome_nodes", "o.r
 _PREPARED_FACTS_SQL = "WITH " + _newest_facts_sql(_PREPARED_NODES_SQL)
 # Every accepted task with any size fact, at its first accepted settlement. Bounds limit a
 # Measurement page's rater scan to its display range (or one earlier display period).
-def _rated_nodes_sql() -> str:
+def _rated_nodes_sql(precision: int) -> str:
     settlements = f"""(
         SELECT e.node_id,MIN(e.created_at) AS period
         FROM plan_node_events e JOIN plan_nodes n ON n.id=e.node_id
         WHERE n.kind='task' AND e.new_state IN ('accepted','accepted_with_followup')
-          AND replace(substr(e.created_at,1,16),'T',' ') >= :rater_from
-          AND replace(substr(e.created_at,1,16),'T',' ') < :rater_to
+          AND replace(substr(e.created_at,1,{precision}),'T',' ') >= :rater_from
+          AND replace(substr(e.created_at,1,{precision}),'T',' ') < :rater_to
           AND NOT EXISTS (
             SELECT 1 FROM plan_node_events earlier
             WHERE earlier.node_id=e.node_id
@@ -130,12 +130,12 @@ def _sized_nodes(db, params: dict[str, Any]) -> list[tuple[str, str, int, str, d
             for node_id, period, first_try, status, attributes, size_class in rows]
 
 
-def latest_rated_settlement(db, *, before_ts: str) -> str | None:
+def latest_rated_settlement(db, *, before_ts: str, precision: int) -> str | None:
     """Find one latest candidate settlement before a display range; fact usability stays with ``counted_raters``."""
     row = db.execute(f"""
         SELECT e.created_at FROM plan_node_events e JOIN plan_nodes n ON n.id=e.node_id
         WHERE n.kind='task' AND e.new_state IN ('accepted','accepted_with_followup')
-          AND replace(substr(e.created_at,1,16),'T',' ') < :rater_before
+          AND replace(substr(e.created_at,1,{precision}),'T',' ') < :rater_before
           AND NOT EXISTS (
             SELECT 1 FROM plan_node_events earlier
             WHERE earlier.node_id=e.node_id
@@ -144,18 +144,18 @@ def latest_rated_settlement(db, *, before_ts: str) -> str | None:
           )
           AND EXISTS (SELECT 1 FROM outcome_events f
                       WHERE f.event_name='{SIZE_EVENT}' AND f.subject_key='{SUBJECT_PREFIX}'||e.node_id)
-        ORDER BY replace(substr(e.created_at,1,16),'T',' ') DESC LIMIT 1
+        ORDER BY replace(substr(e.created_at,1,{precision}),'T',' ') DESC LIMIT 1
     """, {"rater_before": before_ts}).fetchone()
     return str(row[0]) if row else None
 
 
-def counted_raters(db, *, from_ts: str, to_ts: str) -> list[tuple[str, str]]:
+def counted_raters(db, *, from_ts: str, to_ts: str, precision: int) -> list[tuple[str, str]]:
     """Each usable rated task's first settlement and rater, restricted to one UTC display range.
 
     The shared node/fact readers and ``_classified`` keep this consumer on the one newest-fact and
     usability rule used by the size series. Callers compose larger ranges from these bounded reads.
     """
-    nodes_sql = _rated_nodes_sql()
+    nodes_sql = _rated_nodes_sql(precision)
     params = {"rater_from": from_ts, "rater_to": to_ts}
     rows = _classified(
         db.execute(nodes_sql, params).fetchall(),
