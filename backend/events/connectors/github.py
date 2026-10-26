@@ -13,7 +13,6 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, Literal
 
 from events.connectors import (
-    CommandTriggerDecl,
     ConnectorManifest,
     EventTypeDecl,
     ObservedArtifactDecl,
@@ -127,6 +126,7 @@ def _created_pr_artifact(result_text: str) -> ObservedArtifactDecl | None:
         external_id=pr_external_id(repo, number),
         title=f"PR #{number}",
         path=f"https://github.com/{repo}/pull/{number}",
+        repository=repo,
     )
 
 
@@ -291,14 +291,6 @@ MANIFEST = register(ConnectorManifest(
     classify=_classify,
     extract_facts=_extract_facts,
     build_artifact_ref=_artifact_ref,
-    command_triggers=(
-        CommandTriggerDecl(
-            name="github.pr.create",
-            tool_name="bash",
-            argv_prefix=("gh", "pr", "create"),
-            item_type=PR_TYPE,
-        ),
-    ),
     artifact_extractors={PR_TYPE: _created_pr_artifact},
     resolve_relationships=_relationships,
     repository_fact="repo",

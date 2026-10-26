@@ -56,21 +56,9 @@ class ObservedArtifactDecl:
     title: str | None = None
     path: str | None = None
     metadata: Mapping[str, Any] | None = None
-
-
-@dataclass(frozen=True)
-class CommandTriggerDecl:
-    """The shipped observe row a connector declares for one direct command.
-
-    The row itself is data in ``event_rules`` (``infra.event_rule_schema``) and a test fails
-    when it disagrees with this declaration. ``item_type`` names the connector's extractor.
-    """
-
-    name: str
-    tool_name: str
-    argv_prefix: tuple[str, ...]
-    item_type: str
-    command_arg: str = "command"
+    # The repository the artifact lives in, for a connector that declares project_repositories:
+    # an observe rule registers it only when the caller's project tracks that repository.
+    repository: str | None = None
 
 
 @dataclass(frozen=True)
@@ -85,7 +73,6 @@ class ConnectorManifest:
     # raw payload + what routing already resolved for it (or None) -> flat facts
     extract_facts: Callable[[dict, Mapping[str, Any] | None], dict]
     build_artifact_ref: Callable[[str, dict, dict], dict | None]
-    command_triggers: tuple[CommandTriggerDecl, ...] = ()
     # One extractor per artifact type a tool result can create: it takes the artifact's identity
     # from the result's own created-artifact output, never from text the artifact carries. An
     # ``observe`` rule names one by its artifact type (``item_type``).
@@ -155,18 +142,6 @@ def get_manifest(connector: str) -> ConnectorManifest:
 def registered_connectors() -> tuple[str, ...]:
     """All registered connector names."""
     return tuple(sorted(_REGISTRY))
-
-
-def registered_command_triggers(
-    tool_name: str,
-) -> tuple[tuple[str, CommandTriggerDecl], ...]:
-    """Return connector-declared command triggers for one canonical tool."""
-    return tuple(
-        (connector, trigger)
-        for connector in sorted(_REGISTRY)
-        for trigger in _REGISTRY[connector].command_triggers
-        if trigger.tool_name == tool_name
-    )
 
 
 def artifact_extractor(

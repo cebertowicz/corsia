@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 import pytest
 
 from events import connectors
+from events.connectors.github_notifications_feed import FeedError
 from infra.database import get_db
 from registry import models
 from registry.observer import CommandArtifactRegistrationError, observe_command_result
@@ -27,6 +28,22 @@ Q = "proj-b"
 PR = "owner/repo#42"
 SHIP = ["ship-pr", "--fast"]
 OTHER_URL = "https://github.com/owner/repo/pull/43"
+FOREIGN_URL = "https://github.com/elsewhere/repo/pull/7"
+FOREIGN = "elsewhere/repo#7"
+_tracked: dict[str, set[str]] = {}
+
+
+def _unreadable(project_id=None):
+    raise FeedError("repo_scope_unavailable")
+
+
+@pytest.fixture(autouse=True)
+def _project_repositories(monkeypatch):
+    """Project P has registered owner/repo; Q has registered nothing."""
+    _tracked.clear()
+    _tracked[P] = {"owner/repo"}
+    monkeypatch.setattr("events.connectors.github_notifications_feed.tracked_github_repositories",
+                        lambda project_id=None: frozenset(_tracked.get(project_id, ())))
 
 
 def _write(sql: str, *args) -> None:
@@ -109,7 +126,8 @@ async def test_create_refuses_what_an_observe_row_cannot_do(isolated_db):
     _agent("a")
     _agent("w", temporary_of="a")
     connected = await _observe_rule("a", tool="mcp__github__create_pull_request")
-    assert connected.startswith("Refused:") and "connected app" in connected and "bash" in connected
+    assert connected.startswith("Refused: Observe rules can't watch a connected app's actions.")
+    assert "bash" in connected and "yet" not in connected and "stamp" not in connected
     unknown = await _observe_rule("a", item_type="calendar-event")
     assert unknown.startswith("Refused: no connector reports on 'calendar-event'")
     assert "pull-request" in unknown
@@ -123,7 +141,7 @@ async def test_create_refuses_what_an_observe_row_cannot_do(isolated_db):
     assert len(_rows("SELECT id FROM event_rules WHERE kind='observe' AND origin LIKE 'agent:%'")) == 1
 
 
-def test_the_shipped_rule_registers_gh_pr_create_for_every_caller_and_matches_its_declaration(isolated_db):
+def test_the_shipped_rule_registers_gh_pr_create_for_every_caller(isolated_db):
     _agent("a")
     mk_session("loner")  # in no project: the shipped rule still covers it
     for thread, url, external_id in ("a", _URL, PR), ("loner", OTHER_URL, "owner/repo#43"):
@@ -131,14 +149,51 @@ def test_the_shipped_rule_registers_gh_pr_create_for_every_caller_and_matches_it
         assert artifact["parent_thread_id"] == thread == _owner(external_id)
         assert told == [f"Registered pull-request {external_id} to you."]
     [shipped] = _rows("SELECT * FROM event_rules WHERE origin LIKE 'rule_set:%'")
-    [declared] = connectors.registered_command_triggers("bash")
-    connector, trigger = declared
-    assert (shipped["scope"], shipped["kind"], shipped["connector"], shipped["tool"]) == (
-        "global", "observe", connector, trigger.tool_name)
-    assert (json.loads(shipped["argv_prefix"]), shipped["item_type"]) == (
-        list(trigger.argv_prefix), trigger.item_type)
-    assert shipped["id"] == "ruleset_github_pr_create"
-    assert connectors.artifact_extractor(connector, trigger.item_type) is not None
+    assert (shipped["id"], shipped["scope"], shipped["kind"], shipped["connector"], shipped["tool"]) == (
+        "ruleset_github_pr_create", "global", "observe", "github", "bash")
+    assert (json.loads(shipped["argv_prefix"]), shipped["item_type"]) == (["gh", "pr", "create"], "pull-request")
+    assert connectors.artifact_extractor("github", "pull-request") is not None
+
+
+@pytest.mark.asyncio
+async def test_an_agent_row_registers_only_in_a_repository_its_project_has_registered(isolated_db, monkeypatch):
+    _agent("a")
+    await _observe_rule("a")
+    artifact, told = _run("a", "ship-pr --fast", FOREIGN_URL + "\n")
+    assert (artifact, _owner(FOREIGN)) == (None, None)  # it has no owner, and is still not claimed
+    assert told == [f"Not registered: pull-request {FOREIGN} isn't in a repository your project has registered."]
+    [why] = (await _tool("a", operation="explain", artifact=FOREIGN))["decisions"]
+    assert why["outcome"] == "not_registered" and "isn't in a repository" in why["reason"]
+    assert _run("a", "ship-pr --fast")[0]["parent_thread_id"] == "a"  # a registered repository still is
+
+    _tracked[P] = {"Elsewhere/Repo"}  # a remote's own capitalisation
+    assert _run("a", "ship-pr --fast", FOREIGN_URL + "\n")[0]["parent_thread_id"] == "a"
+
+    monkeypatch.setattr("events.connectors.github_notifications_feed.tracked_github_repositories", _unreadable)
+    unread, told = _run("a", "ship-pr --fast", OTHER_URL + "\n")
+    assert (unread, _owner("owner/repo#43")) == (None, None)
+    assert told == ["Not registered: your project's repositories couldn't be read, so its repository wasn't checked."]
+
+
+def test_a_shipped_row_is_not_held_to_the_projects_repositories(isolated_db):
+    _agent("a")
+    artifact, _ = _run("a", "gh pr create", FOREIGN_URL + "\n")
+    assert artifact["parent_thread_id"] == "a" == _owner(FOREIGN)
+
+
+def test_the_outcome_is_written_through_the_callers_open_transaction(isolated_db):
+    _agent("a")
+    db = get_db()
+    db.execute("BEGIN")
+    db.execute("UPDATE threads SET title='mid-transaction' WHERE id='a'")
+    assert db.in_transaction
+    told: list[str] = []
+    artifact = observe_command_result("a", "bash", {"command": "gh pr create"}, _URL + "\n", db=db, told=told)
+    assert artifact["parent_thread_id"] == "a" and told == ["Registered pull-request owner/repo#42 to you."]
+    rows = db.execute("SELECT outcome, thread_id FROM event_route_decisions WHERE artifact_external_id=?",
+                      (PR,)).fetchall()
+    assert [(row["outcome"], row["thread_id"]) for row in rows] == [("registered", "a")]
+    db.commit()
 
 
 @pytest.mark.asyncio
@@ -193,7 +248,7 @@ async def test_only_a_rules_writer_turns_off_an_observe_row_and_a_shipped_one_st
         "Refused: Only the rule's writer can turn off an observe rule")
     assert (await _tool("c", operation="disable", rule_id=mine)).startswith("Refused: no rule")
     shipped = await _tool("a", operation="disable", rule_id="ruleset_github_pr_create")
-    assert shipped.startswith("Refused: A shipped rule set's rule applies to every agent")
+    assert shipped == "Refused: This is one of CORSIA's built-in rules, so it can't be turned off."
     assert _rows("SELECT enabled FROM event_rules WHERE id='ruleset_github_pr_create'") == [{"enabled": 1}]
     assert (await _tool("a", operation="disable", rule_id=mine))["enabled"] is False
     assert _run("a", "ship-pr --fast") == (None, [])
@@ -254,6 +309,22 @@ async def test_list_explain_and_types_show_both_kinds(isolated_db):
                for item in github["event_types"])
     assert (await _tool("a", operation="types", connector="nope")).startswith("Refused: no connector")
     assert {item["connector"] for item in (await _tool("a", operation="types"))["connectors"]} >= {"github"}
+
+
+@pytest.mark.asyncio
+async def test_types_shows_exactly_the_enabled_shipped_rows(isolated_db):
+    _agent("a")
+
+    async def shown() -> list[dict]:
+        [github] = (await _tool("a", operation="types", connector="github"))["connectors"]
+        return [command for item in github["artifact_types"] for command in item["shipped_commands"]]
+
+    assert await shown() == [{"tool": "bash", "argv_prefix": ["gh", "pr", "create"]}]
+    _write("UPDATE event_rules SET enabled=0 WHERE id='ruleset_github_pr_create'")
+    assert await shown() == []  # the row is the only home: nothing declared elsewhere remains
+    _write("UPDATE event_rules SET enabled=1, argv_prefix='[\"gh\",\"pr\",\"new\"]' WHERE origin LIKE 'rule_set:%'")
+    assert await shown() == [{"tool": "bash", "argv_prefix": ["gh", "pr", "new"]}]
+    assert _run("a", "gh pr new", OTHER_URL + "\n")[0]["parent_thread_id"] == "a"  # the observer applies that row
 
 
 def test_a_registration_the_registry_refuses_is_recorded_and_raised(isolated_db):

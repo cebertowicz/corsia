@@ -2,14 +2,16 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import sqlite3
 import time
 
 import pytest
 
 from core.turn_core import TurnIdentity
 from core.turn_core import persist_turn_start
-from events.connectors import registered_command_triggers
+from events import observe_rules
 from infra.database import get_db
+from infra.event_rule_schema import EVENT_RULES_WITH_SHIPPED_SQL
 from infra.thread_driver import admit_input
 from registry import models
 from registry.observer import command_matches_trigger
@@ -25,7 +27,17 @@ from tools.shell import (
 
 
 _URL = "https://github.com/owner/repo/pull/42"
-_GITHUB_TRIGGER = registered_command_triggers("bash")[0][1]
+
+
+def _shipped_rule() -> observe_rules.ObserveRule:
+    """The shipped gh pr create row, as a fresh install seeds it."""
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    db.executescript(EVENT_RULES_WITH_SHIPPED_SQL)
+    return observe_rules.from_row(db.execute("SELECT * FROM event_rules").fetchone())
+
+
+_GITHUB_TRIGGER = _shipped_rule()
 
 
 def _direct_shell_context(thread_id: str) -> dict[str, object]:

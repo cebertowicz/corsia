@@ -6,7 +6,6 @@ from datetime import datetime, timezone
 
 import pytest
 
-from events.connectors import registered_command_triggers
 from infra.database import get_db
 from registry.observer import observe_record
 from registry.service import register_observed_artifact
@@ -90,13 +89,15 @@ def _insert_result(
     return metadata
 
 
-def test_github_connector_declares_pr_create_trigger():
-    triggers = registered_command_triggers("bash")
+def test_the_shipped_row_is_the_github_pr_create_rule(isolated_db):
+    db = get_db()
+    shipped = db.execute(
+        "SELECT connector, tool, argv_prefix, item_type FROM event_rules WHERE scope='global'"
+    ).fetchall()
 
-    assert [(connector, trigger.name) for connector, trigger in triggers] == [
-        ("github", "github.pr.create")
+    assert [tuple(row) for row in shipped] == [
+        ("github", "bash", '["gh","pr","create"]', "pull-request")
     ]
-    assert triggers[0][1].argv_prefix == ("gh", "pr", "create")
 
 
 @pytest.mark.parametrize("tool_name", ["bash", "mcp__corsia__bash", "Bash"])

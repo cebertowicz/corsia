@@ -67,15 +67,42 @@ def shape(rule: ObserveRule) -> dict[str, Any]:
     }
 
 
-def applicable(db: sqlite3.Connection, thread_id: str, tool: str) -> list[ObserveRule]:
+def applicable(db: sqlite3.Connection, project_id: str | None, thread_id: str, tool: str) -> list[ObserveRule]:
     """The enabled observe rows that cover ``thread_id``'s call of ``tool``: a shipped rule set's
-    and the thread's own in its project. One read through the partial index on observe rows."""
+    (scope ``global``) and the thread's own in its project. One statement served by the partial
+    index on observe rows (tool, enabled, scope); it reads the shipped rows and the caller's own."""
+    scopes = (SHIPPED_SCOPE, rules.project_scope(project_id) if project_id else SHIPPED_SCOPE)
     return [from_row(row) for row in db.execute(
-        "SELECT * FROM event_rules WHERE kind='observe' AND enabled=1 AND tool=? "
-        "AND (scope=? OR scope=? || (SELECT project_id FROM threads WHERE id=?)) "
-        "AND (origin LIKE ? || '%' OR created_by=?) ORDER BY created_at, id",
-        (tool, SHIPPED_SCOPE, rules.PROJECT_PREFIX, thread_id, RULE_SET_ORIGIN, thread_id),
+        "SELECT * FROM event_rules WHERE kind='observe' AND enabled=1 AND tool=? AND scope IN (?, ?) "
+        "AND (scope=? OR created_by=?) ORDER BY created_at, id",
+        (tool, *scopes, SHIPPED_SCOPE, thread_id),
     ).fetchall()]
+
+
+def project_of(db: sqlite3.Connection, thread_id: str) -> str | None:
+    """The project a chat is in: one primary-key read."""
+    row = db.execute("SELECT project_id FROM threads WHERE id=?", (thread_id,)).fetchone()
+    return row["project_id"] if row else None
+
+
+def outside_project(rule: ObserveRule, artifact: Any, project_id: str | None) -> str | None:
+    """Why an agent-written row may not register ``artifact``, or ``None`` when it may.
+
+    An agent's row registers only an artifact in a repository its own project has registered, so
+    it can't claim another project's pull request. A shipped row reads only what the command
+    itself created and is not held to this. Reads the project's registered repositories (runs
+    git): call it before registering, never under the write lock."""
+    if rule.scope == SHIPPED_SCOPE:
+        return None
+    manifest = connectors.get_manifest(rule.connector)
+    if manifest.project_repositories is None or not artifact.repository or not project_id:
+        return f"{artifact.type} {artifact.external_id} isn't in a repository your project has registered."
+    tracked = manifest.project_repositories(project_id)
+    if tracked is None:
+        return "your project's repositories couldn't be read, so its repository wasn't checked."
+    if artifact.repository.lower() not in {name.lower() for name in tracked}:
+        return f"{artifact.type} {artifact.external_id} isn't in a repository your project has registered."
+    return None
 
 
 def _known_types() -> list[str]:
@@ -105,9 +132,8 @@ def _tool(tool: Any) -> str:
     name = normalize_tool_name(tool if isinstance(tool, str) else None)
     if name not in SHELL_TOOLS:
         raise RuleRefused(
-            f"{tool!r} can't be observed yet: observing a connected app's tool needs the app's own "
-            f"stamp on its results, which isn't built. An observe rule covers shell commands: "
-            f"tool {sorted(SHELL_TOOLS)[0]!r} with an argv_prefix such as ['gh', 'pr', 'create'].")
+            f"Observe rules can't watch a connected app's actions. An observe rule covers shell "
+            f"commands: tool {sorted(SHELL_TOOLS)[0]!r} with an argv_prefix such as ['gh', 'pr', 'create'].")
     return name
 
 
@@ -154,24 +180,25 @@ def create(
 def check_disable(rule: ObserveRule, caller: str) -> None:
     """Only an observe row's writer turns it off; a shipped rule set's row applies to everyone."""
     if rule.origin.startswith(RULE_SET_ORIGIN):
-        raise RuleRefused("A shipped rule set's rule applies to every agent in the project; "
-                          "only the person turns it off.")
+        raise RuleRefused("This is one of CORSIA's built-in rules, so it can't be turned off.")
     if caller != rule.created_by:
         raise RuleRefused("Only the rule's writer can turn off an observe rule: it registers to its writer.")
 
 
 def record(
-    thread_id: str, rule: ObserveRule, outcome: str, artifact: Mapping[str, Any] | None, reason: str | None,
+    db: sqlite3.Connection | None, thread_id: str, rule: ObserveRule, outcome: str,
+    artifact: Mapping[str, Any] | None, reason: str | None,
 ) -> None:
     """One observe outcome (``registered`` or ``not_registered``) in the rule outcome record, which
-    ``explain`` reads. Never fails the call."""
+    ``explain`` reads. Written through the caller's ``db`` when it has one (a savepoint inside its
+    transaction), else on the thread's own connection. Never fails the call."""
     ref = {"integration": artifact["integration"], "type": artifact["type"],
            "external_id": artifact["external_id"]} if artifact else None
     event = RuleEvent(
         event_id="observe_" + uuid.uuid4().hex[:12], connector=rule.connector,
         event_type=f"observe:{rule.tool}", watch_event="", facts={}, artifact_ref=ref)
     try:
-        with write_transaction(None, scope="observe_rule_outcome") as db:
-            rules.record(db, event, [Outcome(rule.id, thread_id, outcome, reason=reason)])
+        with write_transaction(db, scope="observe_rule_outcome") as conn:
+            rules.record(conn, event, [Outcome(rule.id, thread_id, outcome, reason=reason)])
     except Exception:
         logger.exception("observe rule {} outcome was not recorded", rule.id)

@@ -26,8 +26,6 @@ def _context(kwargs: dict[str, Any]):
 
 def _run(operation: str, thread_id: str, project_id: str | None, kwargs: dict[str, Any]) -> Any:
     now = datetime.now(timezone.utc).isoformat()
-    if operation == "types":
-        return rule_types.types(kwargs.get("connector"))
     if operation in ("create", "disable"):
         # Resolving the project's repositories runs git: never under the write lock.
         tracked = (rule_authoring.tracked_repositories(
@@ -57,6 +55,8 @@ def _run(operation: str, thread_id: str, project_id: str | None, kwargs: dict[st
         return result
     db = get_db()
     try:
+        if operation == "types":
+            return rule_types.types(db, kwargs.get("connector"))
         if operation == "list":
             return {"rules": rule_authoring.list_rules(db, project_id=project_id, now=now),
                     "rule_sets": rule_authoring.rule_set_rows(db, now=now)}

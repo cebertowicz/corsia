@@ -132,9 +132,9 @@ EVENT_RULE_SCHEMA_SQL = f"""
         ON event_route_decisions(worker_thread_id);
 """
 
-# A shipped rule set's observe rows: data in the release, one row per declared command, applying
-# to every caller. A connector's manifest declares the same row (``command_triggers``), and a
-# test fails when the two disagree. A new version ships by migration.
+# A shipped rule set's observe rows: data in the release, one row per command, applying to every
+# caller. The row is the only home of a shipped command rule: the observer applies it and ``types``
+# reads it. A new connector's shipped command is a row seeded here and by a migration.
 SHIPPED_OBSERVE_RULES_SQL = """
     INSERT OR IGNORE INTO event_rules (id, created_at, updated_at, enabled, kind, scope, connector,
         origin, created_by, authority_ref, tool, argv_prefix, item_type)

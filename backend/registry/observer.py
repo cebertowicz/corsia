@@ -172,8 +172,8 @@ class CommandArtifactRegistrationError(RuntimeError):
         super().__init__(str(error))
 
 
-def _record(thread_id, rule, outcome, artifact, reason) -> None:
-    observe_rules.record(thread_id, rule, outcome, artifact and {
+def _record(db, thread_id, rule, outcome, artifact, reason) -> None:
+    observe_rules.record(db, thread_id, rule, outcome, artifact and {
         "integration": artifact.integration, "type": artifact.type,
         "external_id": artifact.external_id}, reason)
 
@@ -200,7 +200,8 @@ def observe_command_result(
         return None
     rule_db = db or get_db()
     try:
-        covering = observe_rules.applicable(rule_db, thread_id, name)
+        project_id = observe_rules.project_of(rule_db, thread_id)
+        covering = observe_rules.applicable(rule_db, project_id, thread_id, name)
     finally:
         if not db:
             rule_db.close()
@@ -213,7 +214,7 @@ def observe_command_result(
         extract = connectors.artifact_extractor(rule.connector, rule.item_type)
         artifact = extract(content) if extract else None
         if artifact is None:
-            _record(thread_id, rule, "not_registered", None, f"the output named no {rule.item_type}")
+            _record(db, thread_id, rule, "not_registered", None, f"the output named no {rule.item_type}")
             if told is not None:
                 told.append(f"Not registered: the command's output named no {rule.item_type}.")
             continue
@@ -221,6 +222,12 @@ def observe_command_result(
         if key in seen:
             continue
         seen.add(key)
+        outside = observe_rules.outside_project(rule, artifact, project_id)
+        if outside:
+            _record(db, thread_id, rule, "not_registered", artifact, outside)
+            if told is not None:
+                told.append(f"Not registered: {outside}")
+            continue
         try:
             registered = register_observed_artifact(
                 thread_id, integration=artifact.integration, type=artifact.type,
@@ -228,7 +235,7 @@ def observe_command_result(
                 metadata=artifact.metadata, origin=origin, db=db, notify=notify,
             )
         except Exception as error:
-            _record(thread_id, rule, "not_registered", artifact, str(error))
+            _record(db, thread_id, rule, "not_registered", artifact, str(error))
             raise CommandArtifactRegistrationError(artifact, error) from error
         label = f"{artifact.type} {artifact.external_id}"
         if registered is None:  # this thread already has a current registration: owner or follower
@@ -238,13 +245,13 @@ def observe_command_result(
                 told.append(f"{label} is already registered to you." if owns else
                             f"Not registered to you: {label} belongs to another chat; you already follow it.")
         elif registered.get("parent_thread_id") == thread_id:
-            _record(thread_id, rule, "registered", artifact, None)
+            _record(db, thread_id, rule, "registered", artifact, None)
             if told is not None:
                 told.append(f"Registered {label} to you.")
             owned = owned or registered
             logger.info("registry observer: rule {} registered {} to {}", rule.id, artifact.external_id, thread_id)
         else:
-            _record(thread_id, rule, "not_registered", artifact, "it already belongs to another chat")
+            _record(db, thread_id, rule, "not_registered", artifact, "it already belongs to another chat")
             if told is not None:
                 told.append(f"Not registered to you: {label} already belongs to another chat, "
                             f"which keeps it; you follow it.")
