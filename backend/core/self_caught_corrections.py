@@ -141,11 +141,11 @@ def record_github_outcome_drafts(db, drafts) -> int:
                 source_id=draft.dedupe_key,
                 created_at=draft.ts,
             )
-        elif draft.event_name == "github.pr.reverts":
+        elif draft.event_name == "github.pr.merged" and "reverts_pr" in draft.attributes:
             recorded += int(record_merged_revert(
                 db,
-                reverted_repo=str(draft.attributes["reverted_repo"]),
-                reverted_pr=str(draft.attributes["reverted_pr"]),
+                reverted_repo=str(draft.attributes["repo"]).lower(),
+                reverted_pr=str(draft.attributes["reverts_pr"]),
                 source_id=draft.dedupe_key,
                 created_at=draft.ts,
             ))

@@ -292,7 +292,7 @@ def test_only_registered_events_are_the_test_seed_and_the_github_intake():
         EVENT,
         "github.pr.opened", "github.pr.pushed", "github.pr.reopened",
         "github.pr.closed", "github.pr.retargeted", "github.pr.merged",
-        "github.pr.introduced_by", "github.pr.closes_issue", "github.pr.reverts",
+        "github.pr.introduced_by", "github.pr.closes_issue",
         "github.check_suite.completed", "github.workflow_run.completed",
         "github.issue.opened", "github.issue.reopened", "github.issue.closed",
         "measurement.size_rating",

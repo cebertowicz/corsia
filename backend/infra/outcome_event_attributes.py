@@ -188,10 +188,6 @@ ATTRIBUTE_ALLOWLISTS: dict[str, dict[str, AttributeSpec]] = {
         "repo": id_attr(), "pr": id_attr(), "issue_repo": id_attr(),
         "issue": id_attr(), "confidence": enum_attr("stated"),
     },
-    "github.pr.reverts": {
-        "repo": id_attr(), "pr": id_attr(), "reverted_repo": id_attr(),
-        "reverted_pr": id_attr(), "confidence": enum_attr("stated"),
-    },
     "github.workflow_run.completed": {
         "repo": id_attr(), "run_id": id_attr(), "attempt": count_attr(),
         "workflow_id": id_attr(), "head_sha": id_attr(), "head_branch": id_attr(),

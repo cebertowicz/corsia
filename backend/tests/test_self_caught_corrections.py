@@ -161,20 +161,21 @@ def test_github_reopen_and_explicit_merged_revert_target_owned_prs(db):
     assert {thread_id for _subject, thread_id, _attributes in facts} == {"owner"}
     assert {attributes["source_kind"] for _subject, _thread_id, attributes in facts} == {"self_caught"}
     assert any("github:issue:cebertowicz/maestro#1627:reopened" in subject for subject, *_ in facts)
-    assert any("github:pr:cebertowicz/maestro#3200:reverts:cebertowicz/maestro#3191" in subject for subject, *_ in facts)
+    assert any("github:pr:cebertowicz/maestro#3200:merged" in subject for subject, *_ in facts)
 
 
-def test_a_fault_deriving_correction_sources_keeps_the_raw_facts(db, monkeypatch):
+def test_a_fault_deriving_correction_sources_aborts_the_delivery_facts(db, monkeypatch):
     def broken(*_args, **_kwargs):
         raise RuntimeError("owner resolution failed")
 
     monkeypatch.setattr("core.self_caught_corrections.record_github_outcome_drafts", broken)
     reopened = _fixture("issue_reopened")
 
-    _write_raw_facts(db, reopened["event"], map_github_outcomes(reopened["event"], reopened["payload"]), "reopen")
+    with pytest.raises(RuntimeError):
+        _write_raw_facts(db, reopened["event"], map_github_outcomes(reopened["event"], reopened["payload"]), "reopen")
 
     assert _facts(db) == []
-    assert db.execute("SELECT COUNT(*) FROM outcome_events WHERE event_name='github.issue.reopened'").fetchone()[0] == 1
+    assert db.execute("SELECT COUNT(*) FROM outcome_events WHERE event_name='github.issue.reopened'").fetchone()[0] == 0
 
 
 def test_self_caught_facts_read_with_attribution_but_are_not_a_persons_corrections(db):

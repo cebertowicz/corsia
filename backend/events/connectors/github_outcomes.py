@@ -185,14 +185,6 @@ def _pr_drafts(payload: dict[str, Any], repo: str) -> list[OutcomeDraft]:
             {"repo": repo, "pr": str(number), "issue_repo": issue_repo,
              "issue": str(issue_number), "confidence": "stated"},
         ))
-    if revert_pr is not None:
-        # The same stated relation as `reverts_pr` above: one parser decides whether a PR reverts another.
-        drafts.append(OutcomeDraft(
-            f"{key}reverts:{repo.lower()}#{revert_pr}", "github.pr.reverts",
-            merged_at, subject,
-            {"repo": repo, "pr": str(number), "reverted_repo": repo.lower(),
-             "reverted_pr": revert_pr, "confidence": "stated"},
-        ))
     return drafts
 
 

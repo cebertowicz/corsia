@@ -102,10 +102,8 @@ def test_merged_pr_emits_merged_introduced_by_and_closes():
 
     reverted = fixture("pr_reverts_merged")["payload"]
     names = drafts_by_name(map_github_outcomes("pull_request", reverted))
-    assert set(names) == {"github.pr.merged", "github.pr.reverts"}
-    assert [draft.attributes for draft in names["github.pr.reverts"]] == [
-        {"repo": REPO, "pr": "3200", "reverted_repo": REPO, "reverted_pr": "3191", "confidence": "stated"},
-    ]
+    assert set(names) == {"github.pr.merged"}
+    assert names["github.pr.merged"][0].attributes["reverts_pr"] == "3191"
 
 
 def test_body_parsers_are_order_stable_deduped_and_repo_qualified():

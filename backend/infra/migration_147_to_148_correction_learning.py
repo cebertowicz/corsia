@@ -16,7 +16,7 @@ _V148_INDEXES = (
 
 
 def migrate_147_to_148(conn: sqlite3.Connection) -> None:
-    """Add the two partial unique indexes inside the caller's migration transaction.
+    """Add the three indexes inside the caller's migration transaction.
 
     A database without ``outcome_events`` has nothing to index; the table is created with them.
     """

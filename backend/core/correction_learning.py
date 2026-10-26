@@ -9,13 +9,11 @@ from typing import Any
 
 from loguru import logger
 
+from core.lesson_case import CORRECTION_CAUSES as CAUSES
+
 TRIAGE_EVENT = "learning_loop.correction_triage"
 OUTCOME_EVENT = "learning_loop.correction_outcome"
 TIERS = ("not_correction", "instruction", "note", "miss", "serious")
-CAUSES = (
-    "wrong_rule", "no_foundation", "rule_gap", "process_gap", "not_delivered",
-    "not_followed", "cant_be_done",
-)
 NEW_WORK_SIGNALS = ("task_kind", "agent", "workflow_version")
 TERMINAL_OUTCOMES = ("fixed", "instruction", "watch", "lesson", "workflow", "dropped")
 
