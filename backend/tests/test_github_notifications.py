@@ -29,7 +29,7 @@ def _poller_env(isolated_db, monkeypatch):
     from infra.settings import set_setting
 
     monkeypatch.setenv("CORSIA_ANALYTICS_DISABLE", "1")
-    monkeypatch.setattr("api.webhooks._get_webhook_secret", lambda: WEBHOOK_SECRET)
+    monkeypatch.setattr("api.webhook_receivers.receiver_secret", lambda connector: WEBHOOK_SECRET)
     monkeypatch.setattr(poller, "_status", {
         "state": "starting", "reason": None, "last_success_at": None, "last_error": None,
         "skipped_threads": 0, "dropped_notifications": 0,

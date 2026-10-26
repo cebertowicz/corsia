@@ -145,19 +145,19 @@ def test_a_hidden_provider_keeps_its_key_listed_until_it_is_removed(client):
 
 
 def test_the_webhook_secret_is_read_from_the_store(isolated_db, tmp_path, monkeypatch):
-    from api.webhooks import _get_webhook_secret
+    from api.webhook_receivers import receiver_secret
     from infra.settings import set_setting
 
     monkeypatch.setattr("infra.config.STATE_ROOT", tmp_path)
     set_setting("webhook", {"github_webhook_secret": "settings-hook-value"})
-    assert _get_webhook_secret() is None
+    assert receiver_secret("github") is None
     key_store.set_value("github-webhook", "stored-hook-value-1")
-    assert _get_webhook_secret() == "stored-hook-value-1"
+    assert receiver_secret("github") == "stored-hook-value-1"
 
 
 def test_the_store_refuses_names_code_owns_and_provider_entries_are_not_listed(isolated_db, tmp_path, monkeypatch):
     monkeypatch.setattr("infra.config.STATE_ROOT", tmp_path)
-    for name in ("provider-anthropic", "provider-x", "server-ns-0123456789", "mcp-docs-token"):
+    for name in ("provider-anthropic", "provider-x", "server-ns-0123456789", "mcp-docs-token", "webhook-slack"):
         with pytest.raises(key_store.KeyStoreError):
             key_store.add_entry(name, "Label", "", added_by_thread_id=None, added_by_name=None)
     key_store_providers.set_provider_key("anthropic", VALUE)

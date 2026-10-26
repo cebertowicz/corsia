@@ -167,45 +167,6 @@ def test_receiver_defaults_and_github_limit():
                      signature_scheme="rot13")
 
 
-@pytest.mark.asyncio
-async def test_redelivered_delivery_id_is_dropped_at_the_receiver(receivers, client):
-    body = json.dumps({"id": 1}).encode()
-    headers = _headers(body, SECRETS["alpha"], "delivery-1")
-    async with client:
-        first = await client.post("/webhooks/alpha/", content=body, headers=headers)
-        again = await client.post("/webhooks/alpha/", content=body, headers=headers)
-        other = await client.post("/webhooks/beta/", content=body, headers=_headers(body, SECRETS["beta"], "delivery-1"))
-    assert first.status_code == 202
-    assert (again.status_code, again.json()["status"]) == (200, "duplicate")
-    assert other.status_code == 202  # a delivery id is scoped to its connector
-    assert [d.connector for d in receivers] == ["alpha", "beta"]
-
-
-@pytest.mark.asyncio
-async def test_a_failed_admission_is_admitted_again_on_redelivery(_isolated_db, monkeypatch, client):
-    calls: list[int] = []
-
-    async def translate(delivery):
-        calls.append(1)
-        if len(calls) == 1:
-            raise RuntimeError("boom")
-        return ReceiverOutcome()
-
-    monkeypatch.setattr("api.webhook_receivers.receiver_secret", lambda connector: SECRETS.get(connector))
-    register(_test_manifest("alpha", translate))
-    try:
-        body = b"{}"
-        headers = _headers(body, SECRETS["alpha"], "d-1")
-        transport = httpx.ASGITransport(app=__import__("main").app, raise_app_exceptions=False)
-        async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
-            failed = await c.post("/webhooks/alpha/", content=body, headers=headers)
-            retried = await c.post("/webhooks/alpha/", content=body, headers=headers)
-    finally:
-        _REGISTRY.pop("alpha", None)
-    assert (failed.status_code, retried.status_code) == (500, 202)
-    assert len(calls) == 2
-
-
 def _post_github(client, payload: dict, delivery_id: str, path: str = "/webhooks/github"):
     body = json.dumps(payload).encode()
     return client.post(
@@ -226,7 +187,7 @@ async def _no_route(internal_event, payload, delivery_id=None):
 
 @pytest.mark.asyncio
 async def test_redelivered_github_delivery_id_is_dropped(_isolated_db, monkeypatch, client):
-    monkeypatch.setattr("api.webhooks._get_webhook_secret", lambda: WEBHOOK_SECRET)
+    monkeypatch.setattr("api.webhook_receivers.receiver_secret", lambda connector: WEBHOOK_SECRET)
     with patch("events.ingress.route_leg", side_effect=_no_route), patch("events.ingress.review_leg"):
         async with client:
             first = await _post_github(client, _pr_opened_payload(), "gh-delivery-1")
@@ -237,7 +198,7 @@ async def test_redelivered_github_delivery_id_is_dropped(_isolated_db, monkeypat
 
 @pytest.mark.asyncio
 async def test_legacy_github_paths_answer_2xx_with_no_redirect(_isolated_db, monkeypatch, client):
-    monkeypatch.setattr("api.webhooks._get_webhook_secret", lambda: WEBHOOK_SECRET)
+    monkeypatch.setattr("api.webhook_receivers.receiver_secret", lambda connector: WEBHOOK_SECRET)
     with patch("events.ingress.route_leg", side_effect=_no_route), patch("events.ingress.review_leg"):
         async with client:
             plain = await _post_github(client, _pr_opened_payload(), "gh-plain", "/webhooks/github")
@@ -263,8 +224,13 @@ def _hold_writer(db_path, acquired: threading.Event, seconds: float) -> threadin
 
 @pytest.mark.asyncio
 async def test_signed_delivery_answers_within_10s_while_the_writer_is_held_15s(_isolated_db, monkeypatch, client):
-    monkeypatch.setattr("api.webhooks._get_webhook_secret", lambda: WEBHOOK_SECRET)
+    monkeypatch.setattr("api.webhook_receivers.receiver_secret", lambda connector: WEBHOOK_SECRET)
     acquired = threading.Event()
+    announced: list[tuple] = []
+    monkeypatch.setattr(
+        "events.connectors.github_admission.emit_product_event",
+        lambda category, action, **kw: announced.append((category, action)),
+    )
     holder = _hold_writer(_isolated_db, acquired, 15.0)
     assert acquired.wait(5.0)
     with patch("events.ingress.route_leg", side_effect=_no_route), patch("events.ingress.review_leg"):
@@ -292,6 +258,7 @@ async def test_signed_delivery_answers_within_10s_while_the_writer_is_held_15s(_
                     break
                 await asyncio.sleep(0.2)
     assert recorded() == "dispatched"
+    assert announced.count(("webhook", "received")) == 1, "a re-run of the record step must not re-announce"
 
 
 @pytest.mark.asyncio
@@ -334,7 +301,7 @@ async def test_the_secret_reaches_no_translator_event_log_or_row(receivers, clie
     from infra.database import get_db
 
     rows = get_db().execute("SELECT * FROM webhook_deliveries").fetchall()
-    assert rows and secret not in repr([tuple(row) for row in rows])
+    assert secret not in repr([tuple(row) for row in rows])
 
 
 def _route_table(routes, prefix: str = ""):
@@ -352,7 +319,7 @@ def _route_table(routes, prefix: str = ""):
 async def test_every_webhooks_route_verifies_a_signature_first(receivers, client, monkeypatch):
     from main import app
 
-    monkeypatch.setattr("api.webhooks._get_webhook_secret", lambda: WEBHOOK_SECRET)
+    monkeypatch.setattr("api.webhook_receivers.receiver_secret", lambda connector: WEBHOOK_SECRET)
     routes = [(path, route) for path, route in _route_table(app.routes) if path.startswith("/webhooks")]
     assert len(routes) >= 4
     async with client:
@@ -366,3 +333,140 @@ async def test_every_webhooks_route_verifies_a_signature_first(receivers, client
                 response = await client.post(path, content=b'{"x": 1}')
                 assert response.status_code in (401, 404), (path, response.status_code)
     assert receivers == []
+
+
+@pytest.mark.asyncio
+async def test_only_a_code_owned_webhook_entry_is_a_secret(_isolated_db, tmp_path, monkeypatch, client):
+    from infra import key_store
+
+    monkeypatch.setattr("infra.config.STATE_ROOT", tmp_path)
+    seen: list[ReceiverDelivery] = []
+
+    async def translate(delivery: ReceiverDelivery) -> ReceiverOutcome:
+        seen.append(delivery)
+        return ReceiverOutcome()
+
+    for name in ("alpha", "othertool"):
+        register(_test_manifest(name, translate))
+    try:
+        key_store.set_managed_value("webhook-alpha", SECRETS["alpha"])
+        # An entry an agent can add under the old `<connector>-webhook` form is never read.
+        key_store.add_entry(
+            "othertool-webhook", "Forged", "", added_by_thread_id=None, added_by_name=None,
+        )
+        key_store.set_value("othertool-webhook", "forged-secret-value")
+        body = b"{}"
+        async with client:
+            real = await client.post("/webhooks/alpha/", content=body, headers=_headers(body, SECRETS["alpha"]))
+            upper = await client.post("/webhooks/ALPHA/", content=body, headers=_headers(body, SECRETS["alpha"]))
+            forged = await client.post(
+                "/webhooks/othertool/", content=body, headers=_headers(body, "forged-secret-value"),
+            )
+    finally:
+        for name in ("alpha", "othertool"):
+            _REGISTRY.pop(name, None)
+    assert (real.status_code, upper.status_code, forged.status_code) == (202, 202, 401)
+    assert [d.connector for d in seen] == ["alpha", "alpha"]
+
+
+def test_the_receiver_secret_reader(_isolated_db, tmp_path, monkeypatch):
+    from api.webhook_receivers import receiver_secret
+    from infra import key_store
+
+    monkeypatch.setattr("infra.config.STATE_ROOT", tmp_path)
+    key_store.set_value("github-webhook", "gh-secret-value")
+    key_store.set_managed_value("webhook-slack", "slack-secret-value")
+    assert receiver_secret("github") == "gh-secret-value"
+    assert receiver_secret("slack") == "slack-secret-value"
+    for bad in ("", "Slack", "9slack", "sl ack", "../x", "x" * 40, "unset"):
+        assert receiver_secret(bad) is None
+
+
+@pytest.mark.asyncio
+async def test_a_failure_after_the_202_is_reported_without_its_text(_isolated_db, monkeypatch, client):
+    events: list[tuple[str, str, dict]] = []
+    finished = asyncio.Event()
+
+    async def translate(delivery):
+        await asyncio.sleep(0.2)
+        try:
+            raise RuntimeError("a value from the delivery body")
+        finally:
+            asyncio.get_running_loop().call_later(0.05, finished.set)
+
+    monkeypatch.setattr("api.webhook_receivers.receiver_secret", lambda connector: SECRETS.get(connector))
+    monkeypatch.setattr("api.webhook_receivers.ADMIT_WAIT_SECONDS", 0.05)
+    monkeypatch.setattr(
+        "api.webhook_receivers.emit_product_event",
+        lambda category, action, **kw: events.append((category, action, kw.get("properties", {}))),
+    )
+    register(_test_manifest("alpha", translate))
+    try:
+        body = b"{}"
+        async with client:
+            response = await client.post(
+                "/webhooks/alpha/", content=body, headers=_headers(body, SECRETS["alpha"], "late-1"),
+            )
+            assert response.status_code == 202
+            await asyncio.wait_for(finished.wait(), 5)
+    finally:
+        _REGISTRY.pop("alpha", None)
+    failed = [props for category, action, props in events if action == "admission_failed"]
+    assert failed == [{"connector": "alpha", "delivery_id": "late-1", "error": "RuntimeError"}]
+
+
+@pytest.mark.asyncio
+async def test_a_fault_inside_the_deadline_answers_500_and_no_late_event(_isolated_db, monkeypatch):
+    events: list[str] = []
+
+    async def translate(delivery):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr("api.webhook_receivers.receiver_secret", lambda connector: SECRETS.get(connector))
+    monkeypatch.setattr(
+        "api.webhook_receivers.emit_product_event", lambda category, action, **kw: events.append(action),
+    )
+    register(_test_manifest("alpha", translate))
+    try:
+        from main import app
+
+        body = b"{}"
+        transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+            response = await c.post("/webhooks/alpha/", content=body, headers=_headers(body, SECRETS["alpha"]))
+            await asyncio.sleep(0.1)
+    finally:
+        _REGISTRY.pop("alpha", None)
+    assert response.status_code == 500
+    assert "admission_failed" not in events
+
+
+@pytest.mark.asyncio
+async def test_the_record_wait_retries_only_a_lock_refusal_and_only_until_its_deadline(monkeypatch):
+    from events.connectors import github_writer_wait as wait
+
+    monkeypatch.setattr(wait, "_PAUSE_SECONDS", 0.01)
+    firsts: list[bool] = []
+
+    def flaky(refusals: int, error: Exception):
+        async def attempt(first: bool) -> str:
+            firsts.append(first)
+            if len(firsts) <= refusals:
+                raise error
+            return "recorded"
+        return attempt
+
+    locked = sqlite3.OperationalError("database is locked")
+    assert await wait.record_when_writer_free(flaky(2, locked), "d-1") == "recorded"
+    assert firsts == [True, False, False], "a re-run never repeats the first attempt's side effects"
+
+    firsts.clear()
+    with pytest.raises(sqlite3.OperationalError, match="disk I/O"):
+        await wait.record_when_writer_free(flaky(1, sqlite3.OperationalError("disk I/O error")), "d-2")
+    assert firsts == [True], "only a lock refusal is waited out"
+
+    firsts.clear()
+    monkeypatch.setattr(wait, "RECORD_WAIT_SECONDS", 0.05)
+    with pytest.raises(sqlite3.OperationalError, match="locked"):
+        await wait.record_when_writer_free(flaky(10**6, locked), "d-3")
+    assert len(firsts) > 1, "it waited, then gave up at the deadline"

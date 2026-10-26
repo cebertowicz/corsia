@@ -12,8 +12,8 @@ commit point: a rolled-back write leaves the entry on its old value.
 Nothing here turns an entry's name into its value for a caller. What uses a
 key is fixed in code: :func:`resolve_builtin`, :func:`resolve_provider`,
 ``connections.connected_accounts.resolve_credentials`` and
-``infra.key_store_servers.resolve_server`` are the only readers, and only a
-built-in, a cloud-provider, a connected account or a server entry has one. An entry an agent adds does nothing until code
+``infra.key_store_servers.resolve_server`` and :func:`resolve_webhook` are the only readers, and only a
+built-in, a cloud-provider, a connected account, a server or a connector's webhook entry has one. An entry an agent adds does nothing until code
 that uses it ships, and cannot claim a name code owns (``RESERVED_PREFIXES``).
 
 Errors raised here carry fixed text and never a value.
@@ -54,7 +54,13 @@ GOOGLE_PREFIX = "google-"
 CONNECTED_ACCOUNT_PREFIX = "connected-account--google--"
 #: A mail-host account's app password; the suffix is the account's id.
 MAILHOST_PREFIX = "connected-account--mailhost--"
-RESERVED_PREFIXES = (PROVIDER_PREFIX, SERVER_PREFIX, MCP_PREFIX, GOOGLE_PREFIX, CONNECTED_ACCOUNT_PREFIX, MAILHOST_PREFIX)
+#: An installed connector package's webhook secret; the suffix is the connector's name. Only package install writes these.
+WEBHOOK_PREFIX = "webhook-"
+WEBHOOK_CONNECTOR_PATTERN = re.compile(r"^[a-z][a-z0-9-]{0,31}$")
+RESERVED_PREFIXES = (
+    PROVIDER_PREFIX, SERVER_PREFIX, MCP_PREFIX, GOOGLE_PREFIX, CONNECTED_ACCOUNT_PREFIX, MAILHOST_PREFIX,
+    WEBHOOK_PREFIX,
+)
 ACCOUNT_ID_PATTERN = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 #: The platform-held Google sign-in: the person's OAuth client and the refresh token it earned.
 GOOGLE_CLIENT_ID = f"{GOOGLE_PREFIX}client-id"
@@ -108,6 +114,7 @@ def is_managed_name(name: str) -> bool:
         or (name.startswith(MAILHOST_PREFIX) and bool(ACCOUNT_ID_PATTERN.match(name[len(MAILHOST_PREFIX):])))
         or (name.startswith(PROVIDER_PREFIX) and name[len(PROVIDER_PREFIX):] in PROVIDER_NAMES)
         or (name.startswith(SERVER_PREFIX) and bool(SERVER_ID_PATTERN.match(name[len(SERVER_PREFIX):])))
+        or (name.startswith(WEBHOOK_PREFIX) and bool(WEBHOOK_CONNECTOR_PATTERN.match(name[len(WEBHOOK_PREFIX):])))
         or is_mcp_entry_name(name)
     )
 
@@ -291,6 +298,14 @@ def resolve_provider(name: str, *, db: sqlite3.Connection | None = None) -> str 
     if name not in PROVIDER_NAMES:
         return None
     return resolve_names([f"{PROVIDER_PREFIX}{name}"], db=db).get(f"{PROVIDER_PREFIX}{name}")
+
+
+def resolve_webhook(connector: str, *, db: sqlite3.Connection | None = None) -> str | None:
+    """The stored webhook secret of an installed connector, or None. Server code only."""
+    if not WEBHOOK_CONNECTOR_PATTERN.match(connector):
+        return None
+    name = f"{WEBHOOK_PREFIX}{connector}"
+    return resolve_names([name], db=db).get(name)
 
 
 def resolve_names(names: Iterable[str], *, db: sqlite3.Connection | None = None) -> dict[str, str]:

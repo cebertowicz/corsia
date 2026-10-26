@@ -219,11 +219,11 @@ def test_poll_detection_matches_only_literal_polling_commands(command, matches):
 
 
 def test_wording_follows_the_webhook_endpoints_own_secret(isolated_db, monkeypatch):
-    from api import webhooks
+    from api import webhook_receivers
 
     pr = notices.OwnedPr("o/r#12", REPO, 12, False)
     _webhook(False)
-    assert webhooks._get_webhook_secret() is None
+    assert webhook_receivers.receiver_secret("github") is None
     poller_only = notices._notice(pr)
     assert "This instance does not receive CI or reviewer results." in poller_only
     assert "run `gh pr checks 12` once. Do not poll in a loop." in poller_only
@@ -231,5 +231,5 @@ def test_wording_follows_the_webhook_endpoints_own_secret(isolated_db, monkeypat
     _webhook(True)
     assert "CORSIA wakes you when its CI finishes" in notices._notice(pr)
 
-    monkeypatch.setattr(webhooks, "_get_webhook_secret", lambda: None)
+    monkeypatch.setattr(webhook_receivers, "receiver_secret", lambda connector: None)
     assert notices.webhook_configured() is False, "reads through the endpoint's helper"

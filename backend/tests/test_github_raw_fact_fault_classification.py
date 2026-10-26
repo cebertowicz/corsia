@@ -114,7 +114,8 @@ async def test_an_operational_store_failure_aborts_the_admission_and_can_be_rede
     main_db, monkeypatch, scheduler,
 ):
     event_type, payload = delivery(FAULTY_DELIVERY)
-    writer = _FaultyWriter(sqlite3.OperationalError("database is locked"))
+    # A lock refusal is waited out (github_writer_wait); any other operational fault is not.
+    writer = _FaultyWriter(sqlite3.OperationalError("disk I/O error"))
     monkeypatch.setattr(outcome_events_module, "record_outcome_event", writer)
 
     with pytest.raises(sqlite3.OperationalError):
@@ -267,7 +268,7 @@ def test_the_route_answers_500_and_the_same_delivery_is_admitted_afterwards(
     from fastapi.testclient import TestClient
     from main import app
 
-    monkeypatch.setattr("api.webhooks._get_webhook_secret", lambda: WEBHOOK_SECRET)
+    monkeypatch.setattr("api.webhook_receivers.receiver_secret", lambda connector: WEBHOOK_SECRET)
 
     def schedule(event_type, payload, *, delivery_id=None, on_settled=None):
         if on_settled is not None:

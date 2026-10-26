@@ -20,34 +20,39 @@ from webhook_ingress_fixtures import (  # noqa: F401
 class TestHmacVerification:
 
     def test_valid_signature(self):
-        from api.webhooks import verify_signature
+        from events.connectors.github_receiver import GITHUB_RECEIVER
+        from events.connectors.receiver import verify_signature
         body = b'{"hello":"world"}'
         sig = _make_signature(body)
-        assert verify_signature(body, sig, WEBHOOK_SECRET) is True
+        assert verify_signature(GITHUB_RECEIVER, body, sig, WEBHOOK_SECRET) is True
 
     def test_invalid_signature(self):
-        from api.webhooks import verify_signature
+        from events.connectors.github_receiver import GITHUB_RECEIVER
+        from events.connectors.receiver import verify_signature
         body = b'{"hello":"world"}'
         sig = _make_signature(body, secret="wrong-secret")
-        assert verify_signature(body, sig, WEBHOOK_SECRET) is False
+        assert verify_signature(GITHUB_RECEIVER, body, sig, WEBHOOK_SECRET) is False
 
     def test_missing_prefix(self):
-        from api.webhooks import verify_signature
+        from events.connectors.github_receiver import GITHUB_RECEIVER
+        from events.connectors.receiver import verify_signature
         body = b'{"hello":"world"}'
         mac = hmac.new(WEBHOOK_SECRET.encode(), body, hashlib.sha256)
         sig_no_prefix = mac.hexdigest()
-        assert verify_signature(body, sig_no_prefix, WEBHOOK_SECRET) is False
+        assert verify_signature(GITHUB_RECEIVER, body, sig_no_prefix, WEBHOOK_SECRET) is False
 
     def test_empty_signature(self):
-        from api.webhooks import verify_signature
-        assert verify_signature(b"body", "", WEBHOOK_SECRET) is False
+        from events.connectors.github_receiver import GITHUB_RECEIVER
+        from events.connectors.receiver import verify_signature
+        assert verify_signature(GITHUB_RECEIVER, b"body", "", WEBHOOK_SECRET) is False
 
     def test_tampered_body(self):
-        from api.webhooks import verify_signature
+        from events.connectors.github_receiver import GITHUB_RECEIVER
+        from events.connectors.receiver import verify_signature
         original = b'{"original":"body"}'
         sig = _make_signature(original)
         tampered = b'{"tampered":"body"}'
-        assert verify_signature(tampered, sig, WEBHOOK_SECRET) is False
+        assert verify_signature(GITHUB_RECEIVER, tampered, sig, WEBHOOK_SECRET) is False
 
 
 

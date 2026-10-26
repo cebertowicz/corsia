@@ -48,6 +48,5 @@ GITHUB_RECEIVER = ReceiverDecl(
     signature_prefix="sha256=",
     delivery_id_header="x-github-delivery",
     max_body_bytes=GITHUB_BODY_LIMIT,
-    translator_dedupes=True,
     open_probe=_is_ping,
 )

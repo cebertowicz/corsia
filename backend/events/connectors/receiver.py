@@ -1,9 +1,10 @@
 """A connector's webhook receiver, declared as data on its manifest.
 
 The platform's one handler (``api.webhook_receivers``) serves
-``/webhooks/<connector>/`` from these declarations. It checks the signature,
-the body limit and the delivery id itself, before any connector code runs, so a
-translator only ever sees a verified delivery and never holds the secret.
+``/webhooks/<connector>/`` from these declarations. It enforces the body limit and
+verifies the signature itself, before any connector code runs, so a translator only
+ever sees a verified delivery and never holds the secret. What happens next, redelivery
+dedupe included, belongs to the connector's own admission.
 """
 
 from __future__ import annotations
@@ -51,9 +52,6 @@ class ReceiverDecl:
     delivery_id_header: str
     signature_scheme: str = SIGNATURE_SCHEMES[0]
     max_body_bytes: int = DEFAULT_BODY_LIMIT
-    #: The translator keeps its own delivery log and drain accounting (GitHub's admission does),
-    #: so the platform neither drops a redelivery before it nor holds a drain admission for it.
-    translator_dedupes: bool = False
     #: A health check the platform answers without a secret, only while none is configured.
     open_probe: Callable[[Mapping[str, str]], bool] | None = None
 
