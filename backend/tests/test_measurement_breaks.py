@@ -264,6 +264,25 @@ def test_mixed_raters_choose_one_dominant_rater_per_period(isolated_db) -> None:
     assert [mark["period"] for mark in marks] == ["2026-09-14"]
 
 
+def test_tied_period_keeps_the_prior_dominant_rater(isolated_db) -> None:
+    """A tie is not a rater change, whichever name sorts first."""
+    db = get_db()
+    try:
+        _thread(db)
+        ratings = [(f"one-{n}", "2026-09-01T12:00:00Z", "rater-b") for n in range(3)]
+        ratings += [("two-a", "2026-09-08T12:00:00Z", "rater-a"), ("two-b", "2026-09-09T12:00:00Z", "rater-b")]
+        ratings += [(f"three-{n}", "2026-09-15T12:00:00Z", "rater-b") for n in range(3)]
+        for node, when, rater in ratings:
+            _accepted(db, node, when)
+            _rating(db, node, rater)
+        db.commit()
+        marks = [mark for mark in derive_breaks(db, ("estimated_human_hours_per_active_hour",), _grain())[
+            "estimated_human_hours_per_active_hour"] if mark["kind"] == "model"]
+    finally:
+        db.close()
+    assert marks == []
+
+
 def test_partial_rerate_of_old_tasks_keeps_the_old_periods_dominant_rater(isolated_db) -> None:
     db = get_db()
     try:

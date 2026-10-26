@@ -69,10 +69,11 @@ def _seeded_starts(db, groups: Iterable[str]) -> dict[str, str | None]:
     return {group: found.get(group) for group in requested}
 
 
-def _dominant_rater(raters: Counter[str]) -> str:
-    """Choose the largest period population, resolving an exact tie lexically."""
+def _dominant_rater(raters: Counter[str], prior: str | None) -> str:
+    """Choose the largest period population; a tie keeps the prior rater, else resolves lexically."""
     largest = max(raters.values())
-    return min(rater for rater, count in raters.items() if count == largest)
+    tied = {rater for rater, count in raters.items() if count == largest}
+    return prior if prior in tied else min(tied)
 
 
 def _model_marks_from_raters(grain: Grain, rows: Iterable[tuple[str, str]]) -> list[dict[str, str]]:
@@ -84,7 +85,7 @@ def _model_marks_from_raters(grain: Grain, rows: Iterable[tuple[str, str]]) -> l
     marks: list[dict[str, str]] = []
     prior: str | None = None
     for period in sorted(by_period):
-        rater = _dominant_rater(by_period[period])
+        rater = _dominant_rater(by_period[period], prior)
         if prior is not None and rater != prior:
             marks.append({
                 "period": period,
@@ -166,19 +167,20 @@ def latest_source_mark_period(db, group: str) -> str | None:
     return str(row[0]) if row and row[0] else None
 
 
+_DEFINITION_KINDS = frozenset({"world", "model"})
+
+
 def comparability_start(breaks: Iterable[dict[str, str]]) -> str | None:
     """Return the final definition boundary a period must reach to be comparable."""
-    marks = [item["period"] for item in breaks if item["kind"] in {"world", "model"}]
-    return max(marks, default=None)
+    return max((item["period"] for item in breaks if item["kind"] in _DEFINITION_KINDS), default=None)
 
 
 def next_comparability_boundary(period: str, breaks: Iterable[dict[str, str]]) -> dict[str, str] | None:
-    """Return the nearest later model/world boundary for one incomparable period."""
-    marks = [item for item in breaks if item["kind"] in {"world", "model"} and item["period"] > period]
+    """Return the nearest later model/world boundary; none means the period is comparable."""
+    marks = [item for item in breaks if item["kind"] in _DEFINITION_KINDS and item["period"] > period]
     return min(marks, key=lambda item: item["period"]) if marks else None
 
 
 def period_comparable(period: str, breaks: Iterable[dict[str, str]]) -> bool:
-    """Use the one derived list for chart rows and Agents findings alike."""
-    start = comparability_start(breaks)
-    return start is None or period >= start
+    """Use the one derived rule for chart rows, size rows and Agents findings alike."""
+    return next_comparability_boundary(period, breaks) is None
