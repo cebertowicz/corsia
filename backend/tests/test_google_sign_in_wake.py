@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from urllib.parse import parse_qs, urlparse
+
+import pytest
 
 from connections.app_reach import AppReach
 from connections.google import oauth
@@ -129,10 +132,10 @@ async def test_a_person_started_sign_in_wakes_no_one(google, conductor, client_f
 async def test_a_delivery_failure_leaves_the_account_and_the_page_alone_and_is_logged(
     google, conductor, client_file, monkeypatch, caplog,
 ):
-    async def broken(*_args, **_kwargs):
+    def broken(*_args, **_kwargs):
         raise ValueError("event wake target is unavailable")
 
-    monkeypatch.setattr("events.platform.deliver_platform_event", broken)
+    monkeypatch.setattr("events.platform.deliver_platform_event_sync", broken)
     _, state = await _start(google, conductor, client_file)
 
     with caplog.at_level(logging.WARNING, logger="connections.sign_in_notice"):
@@ -146,10 +149,10 @@ async def test_a_delivery_failure_leaves_the_account_and_the_page_alone_and_is_l
 
 
 async def test_a_dead_lettered_result_is_logged_with_its_reason(google, conductor, client_file, monkeypatch, caplog):
-    async def parked(*_args, **_kwargs):
+    def parked(*_args, **_kwargs):
         return [PlatformDelivery("account:event", None, DEAD_LETTERED, "owner_inactive")]
 
-    monkeypatch.setattr("events.platform.deliver_platform_event", parked)
+    monkeypatch.setattr("events.platform.deliver_platform_event_sync", parked)
     _, state = await _start(google, conductor, client_file)
 
     with caplog.at_level(logging.WARNING, logger="connections.sign_in_notice"):
@@ -157,6 +160,55 @@ async def test_a_dead_lettered_result_is_logged_with_its_reason(google, conducto
 
     assert status == 200
     assert "not delivered to thread" in caplog.text and "owner_inactive" in caplog.text
+
+
+async def test_a_failure_delivery_error_leaves_the_page_alone_and_is_logged(
+    google, conductor, client_file, monkeypatch, caplog,
+):
+    async def broken(*_args, **_kwargs):
+        raise ValueError("event wake target is unavailable")
+
+    monkeypatch.setattr("events.platform.deliver_platform_event", broken)
+    _, state = await _start(google, conductor, client_file)
+
+    with caplog.at_level(logging.WARNING, logger="connections.sign_in_notice"):
+        status, _page = await _callback(state, error="access_denied")
+
+    assert status == 400 and wakes() == []
+    assert "not delivered to thread" in caplog.text and "ValueError" in caplog.text
+
+
+async def test_the_success_wake_commits_and_rolls_back_with_the_stored_account(
+    google, conductor, client_file, monkeypatch,
+):
+    _, state = await _start(google, conductor, client_file)
+    real = oauth.wake_on_connect
+
+    def wake_then_fail(*args):
+        real(*args)
+        raise RuntimeError("store fails after the wake was written")
+
+    monkeypatch.setattr(oauth, "wake_on_connect", wake_then_fail)
+    status, _page = await _callback(state, code="auth-code")
+
+    # Neither the account nor its success wake survives; only the failure is reported.
+    assert status == 500 and _accounts() == []
+    assert [wake["outcome"] for wake in wakes()] == ["failed"]
+
+
+async def test_a_cancelled_callback_after_the_store_still_leaves_one_wake(google, conductor, client_file, monkeypatch):
+    _, state = await _start(google, conductor, client_file)
+
+    def cancelled(_account_id):
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr("events.connectors.mail_poller.schedule_account", cancelled)
+    with pytest.raises(asyncio.CancelledError):
+        await oauth.complete_sign_in("auth-code", state)
+
+    [account] = _accounts()
+    [wake] = wakes()
+    assert (wake["thread_id"], wake["outcome"], wake["account_id"]) == (conductor, "connected", account["id"])
 
 
 def test_the_event_type_is_declared_actionable_with_the_sign_in_as_its_identity():

@@ -204,8 +204,10 @@ async def _record_failure(pending: _Pending, error: MicrosoftError) -> None:
         await run_in_db(mark_sign_in_failed, pending.account_id, error.state_cause)
 
 
-async def _tell_agent(pending: _Pending, **result: str | None) -> None:
-    await notify_starting_agent(pending.adding_thread_id, pending.state, MICROSOFT_PROVIDER, pending.account_id, **result)
+async def _tell_agent(pending: _Pending, *, cause: str, message: str | None = None) -> None:
+    await notify_starting_agent(
+        pending.adding_thread_id, pending.state, MICROSOFT_PROVIDER, pending.account_id, cause=cause, message=message,
+    )
 
 
 async def start_sign_in(
@@ -236,7 +238,7 @@ async def start_sign_in(
             if "error" in query:
                 _take_pending(given)
                 raise _redirect_error(query)
-            address = await _complete_sign_in(query.get("code"), given)
+            await _complete_sign_in(query.get("code"), given)
         except MicrosoftError as exc:
             await _record_failure(pending, exc)
             emit_lifecycle_event("connect_failed", pending.account_id, MICROSOFT_PROVIDER, cause=exc.cause)
@@ -253,7 +255,6 @@ async def start_sign_in(
         if pending.adding:
             _clear_add_failure(_adder(pending))
         emit_lifecycle_event("connect_succeeded", pending.account_id, MICROSOFT_PROVIDER)
-        await _tell_agent(pending, address=address)
         log.info("Microsoft account %s signed in", pending.account_id)
         return 200, CONNECTED_PAGE, True, None
 

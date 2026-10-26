@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from urllib.parse import parse_qs, urlparse
 
-from connections.microsoft import oauth
-from connections.sign_in_notice import notify_starting_agent
-from infra.database import get_db
+import pytest
+
+from connections.microsoft import account_store, oauth
+from connections.sign_in_notice import notify_starting_agent, wake_on_connect
+from infra.database import get_db, write_transaction
 from sign_in_wake_helpers import wakes
 from tests.registry_helpers import make_session
 from tests.test_microsoft_sign_in import (  # noqa: F401  (the fixtures)
@@ -112,7 +115,8 @@ async def test_one_sign_in_is_one_event_whatever_arrives_after_it(microsoft, iso
     state = parse_qs(urlparse(url).query)["state"][0]
 
     # A replayed callback that raced the first one would report success again, or a late failure.
-    await notify_starting_agent(thread_id, state, "microsoft", account_id, address=ADDRESS)
+    with write_transaction(None, scope="test_replayed_success") as conn:
+        wake_on_connect(conn, thread_id, state, "microsoft", account_id, ADDRESS)
     await notify_starting_agent(thread_id, state, "microsoft", account_id, cause="consent_cancelled")
 
     assert len(wakes()) == 1
@@ -138,10 +142,10 @@ async def test_a_person_started_failure_wakes_no_one(microsoft, isolated_db):
 async def test_a_delivery_failure_leaves_the_account_and_the_page_alone_and_is_logged(
     microsoft, isolated_db, agent_adds, monkeypatch, caplog,
 ):
-    async def broken(*_args, **_kwargs):
+    def broken(*_args, **_kwargs):
         raise ValueError("event wake target is unavailable")
 
-    monkeypatch.setattr("events.platform.deliver_platform_event", broken)
+    monkeypatch.setattr("events.platform.deliver_platform_event_sync", broken)
     thread_id = _agent()
     url, account_id = await _agent_flow(thread_id)
 
@@ -153,3 +157,40 @@ async def test_a_delivery_failure_leaves_the_account_and_the_page_alone_and_is_l
     assert account["state"] == "connected"
     assert f"sign-in result for account {account_id} not delivered to thread {thread_id}: ValueError" in caplog.text
     assert wakes() == []
+
+
+async def test_the_success_wake_commits_and_rolls_back_with_the_stored_account(
+    microsoft, isolated_db, agent_adds, monkeypatch,
+):
+    thread_id = _agent()
+    url, _ = await _agent_flow(thread_id)
+    real = account_store.wake_on_connect
+
+    def wake_then_fail(*args):
+        real(*args)
+        raise RuntimeError("store fails after the wake was written")
+
+    monkeypatch.setattr(account_store, "wake_on_connect", wake_then_fail)
+    status, _page = await _finish(url)
+
+    # Neither the account nor its success wake survives; only the failure is reported.
+    assert status == 500 and _accounts() == []
+    assert [wake["outcome"] for wake in wakes()] == ["failed"]
+
+
+async def test_a_cancelled_callback_after_the_store_still_leaves_one_wake(
+    microsoft, isolated_db, agent_adds, monkeypatch,
+):
+    thread_id = _agent()
+    url, account_id = await _agent_flow(thread_id)
+
+    def cancelled(_account_id):
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr("events.connectors.mail_poller.schedule_account", cancelled)
+    with pytest.raises(asyncio.CancelledError):
+        await oauth._complete_sign_in("authorization-code", parse_qs(urlparse(url).query)["state"][0])
+
+    [wake] = wakes()
+    assert (wake["thread_id"], wake["outcome"], wake["account_id"]) == (thread_id, "connected", account_id)
+    assert [account["id"] for account in _accounts()] == [account_id]

@@ -26,7 +26,7 @@ from connections.account_state import CONSENT_CANCELLED, PROVIDER_UNAVAILABLE, e
 from connections.connected_accounts import Actor
 from connections.google import client
 from connections.google.client import STATUS_CONNECTED, TIMEOUT_SECONDS, TOKEN_URL, GoogleError, GoogleRequestFailed
-from connections.sign_in_notice import notify_starting_agent
+from connections.sign_in_notice import notify_starting_agent, wake_on_connect
 from infra import key_store
 from infra.db_async import run_in_db
 from infra.default_port import DEFAULT_BACKEND_PORT
@@ -309,14 +309,17 @@ def _store(
                 pending.account_id, address=email, provider_subject=provider_subject, actor=pending.actor, db=conn,
             )
         record_audit(pending.account_id, "connect" if pending.adding else "sign_in", pending.actor, db=conn)
+        wake_on_connect(conn, pending.adding_thread_id, pending.state, "google", pending.account_id, email)
 
 
 def _failure_cause(error: GoogleError) -> str:
     return CONSENT_CANCELLED if isinstance(error, GoogleSignInError) else PROVIDER_UNAVAILABLE
 
 
-async def _tell_agent(pending: _Pending, **result: str | None) -> None:
-    await notify_starting_agent(pending.adding_thread_id, pending.state, "google", pending.account_id, **result)
+async def _tell_agent(pending: _Pending, *, cause: str, message: str | None = None) -> None:
+    await notify_starting_agent(
+        pending.adding_thread_id, pending.state, "google", pending.account_id, cause=cause, message=message,
+    )
 
 
 async def complete_sign_in(code: object, state: object) -> str:
@@ -364,7 +367,6 @@ async def complete_sign_in(code: object, state: object) -> str:
         await _tell_agent(pending, cause=PROVIDER_UNAVAILABLE)
         raise
     emit_lifecycle_event("connect_succeeded", pending.account_id, "google")
-    await _tell_agent(pending, address=email)
     return email
 
 
