@@ -54,8 +54,9 @@ def binding_at_call_start(thread_id: str) -> dict[str, Any] | None:
 
     Read before the provider is dispatched, so the call is billed to the task
     current when it began even if the Turn moves on before the measurement
-    arrives. None means the executor holds no valid selection, and the ledger
-    falls back to the Turn's own snapshot -- the one legitimate fallback.
+    arrives. None means the executor holds no valid selection and is no delegated
+    child doing a handed step's work, and the ledger falls back to the Turn's own
+    snapshot -- the one legitimate fallback.
     A read that fails is ``UNATTRIBUTED``: the call is still recorded, its
     task fields empty, and the failure is logged; nothing here stops the call.
     """
@@ -87,8 +88,8 @@ def record_call_usage(
 
     ``binding`` is what ``binding_at_call_start`` captured for this call, or
     ``UNATTRIBUTED`` when that read failed, or None when the caller has no
-    single call to bind: the executor held no valid selection at call start,
-    or the measurement is a whole-Turn aggregate (an external harness's
+    single call to bind: the executor held no valid selection (nor a delegated
+    child's handed or parked step) at call start, or the measurement is a whole-Turn aggregate (an external harness's
     terminal total). None is the Turn's own snapshot, the ledger's existing
     rule, and is never presented as call-time attribution. This entry does
     not resolve attribution itself: what it records is what the caller knew.

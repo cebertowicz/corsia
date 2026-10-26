@@ -239,9 +239,6 @@ def attach_spawned_thread(
             connection, node_id, spawned_thread_id, child_plan.id,
             actor_id=actor_id, provenance=provenance,
         )
-        from plans import delegated_usage
-
-        delegated_usage.stamp_running_turn(connection, spawned_thread_id)
         return service._node_from_row(
             connection, service._node_row(connection, node_id)
         )

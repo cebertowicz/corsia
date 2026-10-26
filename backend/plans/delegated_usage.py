@@ -7,82 +7,57 @@ for a child that never plans) it has nothing selected at all. A webhook,
 reviewer or message wakes such a Turn and its calls were left unbound, so the
 parent's task cost did not carry them.
 
-This module answers only the usage question; it never writes ``active_turns``
-and never selects, so admission, liveness and the working label are unchanged.
-That is deliberate: ``infra.turn_plan_binding`` owns the Turn's snapshot (which
-drives admission and the working label) and this fallback must not move it. So
-for these Turns cost follows the handed or parked step, while the Turn snapshot,
-registrations and the terminal-total fallback stay unbound.
+The step handed to the child is the canonical live attachment
+(``commitments.attached_parent_node``, which refuses an ambiguous one), and
+only while it is still pending or active is the child doing its work. Then:
 
-It applies only to a thread some step was handed to; any other thread costs one
-indexed read and keeps its calls as before.
+1. A child step that is active and parked rather than eligible owns the calls,
+   on its latest attempt (``plan_usage`` requires an attempt); two such steps
+   are not guessed between.
+2. Otherwise the handed step owns them, as ``delegation``.
 
-1. One open active step of the child's own plan, parked rather than eligible:
-   the calls belong to that step, on its latest attempt (``plan_usage`` requires
-   an attempt) and its own commitment.
-2. Otherwise, while the child has no active, returned or finished step of its
-   own since the latest hand-over and the step it was handed is still pending or
-   active: the calls belong to that handed step, as ``delegation`` on the
-   parent's commitment. Steps settled before the hand-over (a reused worker's
-   earlier assignment) are not this hand-over's work.
+Anything else stays unbound: work returned for review or finished is not the
+task's work, and a thread nothing was handed to is not a delegated child.
 
-Anything else stays unbound on purpose: work already returned for review or
-finished is not the task's work, and more than one candidate is not guessed.
+This answers only the usage question; it never writes ``active_turns`` or a
+selection. ``infra.turn_plan_binding`` still owns the Turn's snapshot (which
+drives admission and the working label), so for these Turns cost follows the
+step above while the snapshot, registrations and terminal-total fallback stay
+unbound.
 """
 
 from __future__ import annotations
 
 import plans.selection_validity as validity
-from plans import commitments, node_states
+from plans import commitments, service
 
 _BILLABLE_BLOCKERS = (None, validity.HELD)
 #: A handed step the child is still working: not yet returned for review.
 _HANDED_STATES = ("pending", "active")
-_PAST_WORK_STATES = ("review_requested", *sorted(node_states._TERMINAL_STATES))
 
 
 def binding(executor: str, *, db) -> dict | None:
     """Return the plan fields the executor's calls now belong to, or None."""
-    handed = _handed_node(db, executor)
-    if handed is None:
-        return None
     plan = db.execute(
         "SELECT * FROM plans WHERE owner_kind='thread' AND owner_id=?", (executor,),
     ).fetchone()
-    if plan is not None:
-        own = _own_active_step(db, plan)
-        if own == "ambiguous":
-            return None
-        if own is not None:
-            return _step_binding(db, plan, own, executor)
-        if _has_past_work(db, plan, _attached_at(db, handed["id"])):
-            return None
-    if handed["state"] not in _HANDED_STATES:
+    if plan is None:
         return None
-    return _handed_binding(db, handed)
+    try:
+        handed = commitments.attached_parent_node(plan["id"], db=db)
+    except service.PlanError:
+        return None
+    if handed is None or handed["state"] not in _HANDED_STATES:
+        return None
+    own = _own_parked_step(db, plan)
+    if own == "ambiguous":
+        return None
+    if own is not None:
+        return _bound(db, own, executor, commitments.usage_role(str(own["id"]), db=db))
+    return _bound(db, handed, None, "delegation")
 
 
-def _handed_node(db, executor: str):
-    """Return the live step handed to the executor, an open one first, or None."""
-    marks = ",".join("?" for _ in _HANDED_STATES)
-    return db.execute(
-        f"""SELECT * FROM plan_nodes WHERE spawned_thread_id=? AND archived_at IS NULL
-            ORDER BY state IN ({marks}) DESC, id LIMIT 1""",
-        (executor, *_HANDED_STATES),
-    ).fetchone()
-
-
-def _attached_at(db, node_id) -> str:
-    event = db.execute(
-        """SELECT created_at FROM plan_node_events
-           WHERE node_id=? AND event='spawned_thread_attached'
-           ORDER BY created_at DESC,rowid DESC LIMIT 1""",
-        (node_id,),
-    ).fetchone()
-    return event["created_at"] if event is not None else ""
-
-
-def _own_active_step(db, plan):
+def _own_parked_step(db, plan):
     """Return the plan's one active step that is parked or eligible, 'ambiguous', or None."""
     rows = db.execute(
         """SELECT * FROM plan_nodes WHERE plan_id=? AND kind='task'
@@ -96,66 +71,23 @@ def _own_active_step(db, plan):
     return billable[0] if billable else None
 
 
-def _has_past_work(db, plan, since: str) -> bool:
-    """Whether the child returned or finished a step of its own since ``since``."""
-    marks = ",".join("?" for _ in _PAST_WORK_STATES)
-    return db.execute(
-        f"""SELECT 1 FROM plan_nodes WHERE plan_id=? AND kind='task'
-            AND state IN ({marks}) AND updated_at>=? LIMIT 1""",
-        (plan["id"], *_PAST_WORK_STATES, since),
-    ).fetchone() is not None
-
-
-def _step_binding(db, plan, node, executor: str) -> dict | None:
-    attempt = db.execute(
-        """SELECT id FROM plan_node_attempts WHERE node_id=? AND executor_thread_id=?
-           ORDER BY selected_at DESC,id DESC LIMIT 1""",
-        (node["id"], executor),
-    ).fetchone()
-    if attempt is None:
-        return None
-    return _fields(plan["id"], node, attempt["id"], commitments.usage_role(str(node["id"]), db=db))
-
-
-def _handed_binding(db, node) -> dict | None:
-    attempt = db.execute(
-        "SELECT id FROM plan_node_attempts WHERE node_id=? ORDER BY selected_at DESC,id DESC LIMIT 1",
-        (node["id"],),
-    ).fetchone()
-    if attempt is None:
-        return None
-    return _fields(node["plan_id"], node, attempt["id"], "delegation")
-
-
-def _fields(plan_id, node, attempt_id, role: str) -> dict | None:
+def _bound(db, node, executor: str | None, role: str) -> dict | None:
+    """The node's fields on its latest attempt (the executor's own, when named)."""
     if node["commitment_id"] is None:
         return None
+    where, params = ("node_id=?", (node["id"],))
+    if executor is not None:
+        where, params = ("node_id=? AND executor_thread_id=?", (node["id"], executor))
+    attempt = db.execute(
+        f"SELECT id FROM plan_node_attempts WHERE {where} ORDER BY selected_at DESC,id DESC LIMIT 1",
+        params,
+    ).fetchone()
+    if attempt is None:
+        return None
     return {
-        "plan_id": plan_id,
+        "plan_id": node["plan_id"],
         "plan_node_id": node["id"],
-        "plan_attempt_id": attempt_id,
+        "plan_attempt_id": attempt["id"],
         "plan_commitment_id": node["commitment_id"],
         "plan_usage_role": role,
     }
-
-
-def stamp_running_turn(db, executor: str) -> None:
-    """Bill the calls a just-attached child already made this Turn, if still unbound.
-
-    A worker can start its first Turn before the hand-over commits, so its
-    first calls were recorded with nothing to bind them. Called inside the
-    attach write, it gives only the Turn's own unbound rows and pending
-    receipts the binding later calls will get; it changes no ``active_turns``
-    snapshot and no row that already names a task.
-    """
-    from infra.turn_usage_receipts import attribute_unbound_turn_usage
-    from plans import admission_attempts
-
-    turn = admission_attempts.turn_binding(db, executor)
-    if turn is None or turn["plan_attempt_id"] is not None:
-        return
-    fields = binding(executor, db=db)
-    if fields is not None:
-        attribute_unbound_turn_usage(
-            db, thread_id=executor, turn_id=str(turn["id"]), binding=fields,
-        )
