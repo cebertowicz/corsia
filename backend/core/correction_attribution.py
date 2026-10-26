@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from typing import Iterable, Mapping
 
 from core.corrections_recording import (
+    ACTIVE_VERSION_SETTING,
     COMMENT_SUBJECT_PREFIX,
     CORRECTION_EVENT,
     DECISION_SUBJECT_PREFIX,
@@ -36,6 +37,7 @@ from core.corrections_recording import (
     SOURCE_KIND_MESSAGE,
     decision_answer_arrived_at_sql,
     decision_answer_subject_key_sql,
+    version_key_sql,
 )
 
 NOT_IN_WORKFLOW = "not_in_workflow"
@@ -85,12 +87,16 @@ _ATTRIBUTED_SQL = _SOURCES_SQL + f"""
 """
 
 
-FIRST_ARRIVAL_SQL = _SOURCES_SQL + "SELECT MIN(source_at) FROM sources"
-"""The earliest arrival of any classified source: where corrections began to be measured."""
+_ACTIVE_VERSION_ONLY = f"""{version_key_sql('s.attributes')}=(
+      SELECT json_extract(value,'$.key') FROM settings WHERE key='{ACTIVE_VERSION_SETTING}')"""
+"""Measurement reads the one activated classifier version; with none activated nothing matches."""
+
+FIRST_ARRIVAL_SQL = _SOURCES_SQL + f"SELECT MIN(source_at) FROM sources s WHERE {_ACTIVE_VERSION_ONLY}"
+"""The earliest arrival of a source the active version classified: where corrections began to be measured."""
 
 _TIMED_SQL = _SOURCES_SQL + f"""
     SELECT s.source_kind,s.source_id,s.source_at,s.attributes,s.target_thread FROM sources s
-    WHERE {_ts('s.source_at')} >= :start AND {_ts('s.source_at')} < :end
+    WHERE {_ts('s.source_at')} >= :start AND {_ts('s.source_at')} < :end AND {_ACTIVE_VERSION_ONLY}
 """
 
 
@@ -130,8 +136,10 @@ def person_corrections(db: sqlite3.Connection, start: str, end: str) -> list[tup
     dropped by the read and never decoded.
 
     Messages, document comments and decision answers only: a sent-back review is the reviewer's
-    and is counted as a rejection. A source classified under several versions counts once, by its
-    latest classification. A source whose arrival cannot be resolved has no time and is left out.
+    and is counted as a rejection. Only facts of the activated classifier version are read
+    (``active_corrections_version``): a version still backfilling, or never activated, is not
+    served. A source that version classified more than once counts once, by its latest fact.
+    A source whose arrival cannot be resolved has no time and is left out.
     """
     rows = db.execute(_TIMED_SQL, {"start": start, "end": end}).fetchall()
     latest: dict[tuple[str, str], tuple[str, bool, str, str | None]] = {}

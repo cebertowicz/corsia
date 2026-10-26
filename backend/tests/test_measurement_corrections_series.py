@@ -6,9 +6,21 @@ import json
 
 import pytest
 
+from core.corrections_recording import ACTIVE_VERSION_SETTING, ClassifierVersion, version_attributes, version_key
+from infra.settings import set_setting
 from tests.test_measurement_api import USER, WEEK, _freeze_clock, _seed_decision, _seed_outcomes, _seed_thread
 
 IDS = "corrections_per_outcome,asks_plus_corrections_per_outcome,asks_per_outcome"
+
+
+def _version(version: str) -> dict[str, str]:
+    return version_attributes(ClassifierVersion("asset", version, "head", 0.5, "policy"))
+
+
+def _activate(db, version: str) -> None:
+    """Activate one classifier version the way the backfill does: Measurement reads only that one."""
+    key = version_key(ClassifierVersion("asset", version, "head", 0.5, "policy"))
+    set_setting(ACTIVE_VERSION_SETTING, {"key": key}, db=db)
 
 
 def _fact(db, source_id: str, *, thread: str = "root", at: str = "2026-09-22T12:00:00Z", label: str = "correction",
@@ -22,7 +34,7 @@ def _fact(db, source_id: str, *, thread: str = "root", at: str = "2026-09-22T12:
         "INSERT INTO outcome_events (id,dedupe_key,event_name,source,provenance,ts,observed_ts,subject_key,"
         "agent_thread_id,attributes,retracted_at) VALUES (?,?,'measurement.correction','corsia','instrumented',?,?,?,?,?,?)",
         (f"{key}:{version}", f"{key}:{version}", at, at, key, thread,
-         json.dumps({"label": label, "asset_version": version, "classified_at": classified_at}),
+         json.dumps({"label": label, **_version(version), "classified_at": classified_at}),
          "2026-10-02" if retracted else None),
     )
 
@@ -35,9 +47,11 @@ async def _rows(monkeypatch, ids: str = IDS) -> dict[tuple[str, str], dict]:
     return {(row["series"], row["period"]): row for row in result["rows"]}
 
 
-def _seed(db, outcomes: int = 20) -> None:
+def _seed(db, outcomes: int = 20, active: str | None = "v1") -> None:
     _seed_thread(db, "root")
     _seed_outcomes(db, "root", count=outcomes)
+    if active:
+        _activate(db, active)
 
 
 @pytest.mark.asyncio
@@ -102,22 +116,38 @@ async def test_no_recorded_corrections_means_not_measured_never_zero(isolated_db
 
 
 @pytest.mark.asyncio
-async def test_a_source_classified_under_two_versions_counts_once_by_its_latest(isolated_db, monkeypatch):
+async def test_only_the_activated_classifier_version_is_read(isolated_db, monkeypatch):
     from infra.database import get_db
 
     db = get_db()
     try:
-        _seed(db)
-        _fact(db, "twice", version="v1", classified_at="2026-10-01T00:00:00Z")
-        _fact(db, "twice", version="v2", classified_at="2026-10-02T00:00:00Z")
-        _fact(db, "withdrawn", version="v1", classified_at="2026-10-01T00:00:00Z")
-        _fact(db, "withdrawn", version="v2", classified_at="2026-10-02T00:00:00Z", label="not_correction")
+        _seed(db, active="v1")
+        _fact(db, "active", version="v1")
+        _fact(db, "filling", version="v2")  # a version still backfilling is not served
+        _fact(db, "both", version="v1")
+        _fact(db, "both", version="v2", label="not_correction")
         db.commit()
     finally:
         db.close()
 
     rows = await _rows(monkeypatch)
-    assert rows[("corrections_per_outcome", WEEK)]["value"] == pytest.approx(1 / 20)
+    assert rows[("corrections_per_outcome", WEEK)]["value"] == pytest.approx(2 / 20)
+
+
+@pytest.mark.asyncio
+async def test_a_filling_version_does_not_move_the_series_start_or_serve_a_value(isolated_db, monkeypatch):
+    from infra.database import get_db
+
+    db = get_db()
+    try:
+        _seed(db, active=None)  # no version activated yet
+        _fact(db, "filling", version="v2", at="2026-09-08T12:00:00Z")
+        db.commit()
+    finally:
+        db.close()
+
+    rows = await _rows(monkeypatch)
+    assert not [key for key in rows if key[0] in {"corrections_per_outcome", "asks_plus_corrections_per_outcome"}]
 
 
 @pytest.mark.asyncio
@@ -170,7 +200,7 @@ async def test_a_document_comment_as_the_first_correction_starts_and_counts_the_
             "INSERT INTO outcome_events (id,dedupe_key,event_name,source,provenance,ts,observed_ts,subject_key,"
             "agent_thread_id,attributes) VALUES ('f1','f1','measurement.correction','corsia','instrumented',"
             "'2026-10-01','2026-10-01','doc-comment:c1','root',?)",
-            (json.dumps({"label": "correction", "asset_version": "v1", "classified_at": "2026-10-01T00:00:00Z"}),))
+            (json.dumps({"label": "correction", **_version("v1"), "classified_at": "2026-10-01T00:00:00Z"}),))
         db.commit()
     finally:
         db.close()

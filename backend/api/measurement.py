@@ -171,9 +171,11 @@ def _series_read(requested: list[str], project: str, agent: str, page_grain: Gra
         first_limit_period = first_recorded_period(db, params) if "limits" in families else None
         breaks = derive_breaks(db, requested, page_grain)
         prepare_outcome_periods(db, params)
+        decision_rows = query_family(db, "decisions", params) if families & {"decisions", "corrections"} else []
         family_rows = {family: (size_family(db, params) if family == "size" else
                                 [{"period": period, "hits": hits} for period, hits in limits_by_period(db, params).items()] if family == "limits" else
-                                corrections_family(db, page_grain, query_family(db, "decisions", params)) if family == "corrections" else
+                                corrections_family(db, page_grain, decision_rows) if family == "corrections" else
+                                decision_rows if family == "decisions" else
                                 query_family(db, family, params))
                        for family in families}
         return selected_scope.response(), family_rows, first_limit_period, so_far, coverage, breaks
