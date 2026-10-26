@@ -277,7 +277,7 @@ ensure_python_env() {
     if [ -x "$python" ] && "$python" -c 'import fastapi, uvicorn' 2> /dev/null; then
         return 0
     fi
-    say "3/8  Building (about 2 minutes)"
+    say "3/8  Building"
     "$(service_which python3.11)" -m venv "$CORSIA_HOME/.venv"
     "$python" -m pip install --quiet --disable-pip-version-check \
         -r "$CORSIA_HOME/backend/requirements.lock"
