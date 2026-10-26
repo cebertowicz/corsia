@@ -1,6 +1,8 @@
-"""Direct, text-free correction sources for failures CORSIA catches itself.
+"""Direct, text-free correction sources for failures observed without a person's correction.
 
-These adapters only identify the authoritative target and source identity.  The
+A failed plan node or a GitHub reopen or revert shows that settled work did not hold; it
+does not show who noticed, so these sources never claim a person did not (agents push under
+the person's login, so a GitHub actor cannot separate the two). These adapters only identify the authoritative target and source identity.  The
 existing correction event writer remains the single store and the existing note,
 triage, and terminal-outcome paths remain the single lifecycle.
 """

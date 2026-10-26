@@ -83,6 +83,13 @@ def test_fail_records_one_direct_correction_and_replay_is_idempotent(db):
         "thread_id": "owner", "label": "correction",
         "recorded_at": attributes["recorded_at"],
     }
+    # The note is all the agent sees, so it must carry the key triage and outcome require.
+    summaries = [row[0] for row in db.execute(
+        "SELECT summary FROM context_change_journal WHERE object_kind='thread_context' "
+        "AND details_json LIKE '%correction_note%'"
+    )]
+    assert len(summaries) == 1
+    assert summaries[0].endswith(f"Subject key for triage and outcome: self-caught:plan-failed:{task.id}")
 
 
 def test_terminal_add_correction_targets_the_plan_owner_after_person_settlement(db):

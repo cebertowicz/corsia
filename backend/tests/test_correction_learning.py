@@ -259,3 +259,29 @@ def test_terminal_outcome_is_immutable_and_dropped_needs_reason(tmp_path: Path) 
         record_terminal_outcome(db, thread_id=THREAD, subject_key=SUBJECT, outcome="watch")
     with pytest.raises(ValueError, match="requires reason"):
         record_terminal_outcome(db, thread_id=THREAD, subject_key="message:other", outcome="dropped")
+
+
+def test_triage_and_outcome_run_through_the_continuity_tool(tmp_path: Path) -> None:
+    from infra.continuity_store import ContinuityError
+    from tools.continuity import _execution_error, _live_operation, _result_text
+
+    db = _db()
+    path = tmp_path / "SKILL.md"
+    path.write_text("# Rule\n", encoding="utf-8")
+    _record_manifest(db, _file_source(path))
+    triage = {
+        "subject_key": SUBJECT, "tier": "note", "cause": "process_gap", "new_work": "no",
+        "new_work_signal": None, "target_file": str(path),
+    }
+
+    assert _execution_error("triage", {}) == "Error: triage requires subject_key"
+    assert _execution_error("outcome", {"subject_key": " "}) == "Error: outcome requires subject_key"
+    with pytest.raises(ContinuityError, match="target_file is not a file loaded"):
+        _live_operation(db, THREAD, "triage", {**triage, "target_file": "elsewhere.md"})
+    with pytest.raises(ContinuityError, match="not a recorded correction"):
+        _live_operation(db, THREAD, "outcome", {"subject_key": "message:other", "outcome": "fixed"})
+
+    recorded = _live_operation(db, THREAD, "triage", {"operation": "triage", **triage})
+    assert json.loads(_result_text(recorded, staged=False))["operation"] == "triage"
+    finished = _live_operation(db, THREAD, "outcome", {"operation": "outcome", "subject_key": SUBJECT, "outcome": "fixed"})
+    assert json.loads(_result_text(finished, staged=False))["outcome"] == "fixed"

@@ -52,13 +52,18 @@ def local_clock(created_at: str) -> str:
     return f"{sent.astimezone():%Y-%m-%d %H:%M %Z}"
 
 
+# The one wording of what a correction note asks; the self-caught note reuses it.
+TRIAGE_STEPS = (
+    "Proposed tier: none yet; you set it.\n"
+    "Fix the work first. Then triage it with skill `memory-placement` section 4: "
+    "set the tier, and for a Miss or Serious answer why it was missed, then watch or act. "
+    "The triage is working state, not part of your reply."
+)
+
+
 def _note(where: str, words: str, arrived_as: str) -> str:
     return (
-        f'Correction recorded on your {where}: "{_quote(words)}"\n'
-        "Proposed tier: none yet; you set it.\n"
-        "Fix the work first. Then triage it with skill `memory-placement` section 4: "
-        "set the tier, and for a Miss or Serious answer why it was missed, then watch or act. "
-        "The triage is working state, not part of your reply. "
+        f'Correction recorded on your {where}: "{_quote(words)}"\n{TRIAGE_STEPS} '
         f"If you already fixed and triaged it when the {arrived_as} arrived, do nothing more."
     )
 
@@ -77,10 +82,7 @@ def _source_note_text(candidate: CorrectionCandidate) -> str:
     elif candidate.source_kind == SOURCE_KIND_SELF_CAUGHT:
         return (
             f"Self-caught failure recorded on work you settled (source {candidate.source_id}, observed {clock}).\n"
-            "Proposed tier: none yet; you set it.\n"
-            "Fix the work first. Then triage it with skill `memory-placement` section 4: "
-            "set the tier, and for a Miss or Serious answer why it was missed, then watch or act. "
-            "The triage is working state, not part of your reply."
+            f"{TRIAGE_STEPS}"
         )
     else:
         note = _note(f'plan decision "{candidate.about}" (answered {clock})', candidate.quote or "", "answer")
@@ -157,6 +159,8 @@ def queue_correction_note(
         summary = note_text(candidate.source_id, str(row[0] if row else candidate.content), candidate.created_at)
     else:
         summary = _source_note_text(candidate)
+    # `continuity_edit` triage and outcome name the correction by this exact key; the agent sees only the summary.
+    summary += f"\nSubject key for triage and outcome: {subject}"
     from infra.passive_changes import REOFFER_UNWRITTEN, append_thread_context_note
 
     return append_thread_context_note(

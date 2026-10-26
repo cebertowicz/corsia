@@ -16,8 +16,6 @@ from core.corrections_recording import (
     SOURCE_KIND_DECISION_ANSWER,
     SOURCE_KIND_DOC_COMMENT,
     SOURCE_KIND_MESSAGE,
-    SELF_CAUGHT_FACT_KEYS,
-    SOURCE_KIND_SELF_CAUGHT,
     ClassifierVersion,
     CorrectionCandidate,
     dedupe_key,
@@ -121,11 +119,9 @@ def record_self_caught(candidate: CorrectionCandidate, *, db) -> bool:
     from core.correction_notes import queue_correction_note
     from infra.outcome_events import record_outcome_event
 
-    if candidate.source_kind != SOURCE_KIND_SELF_CAUGHT or not candidate.arrived:
-        raise ValueError("self-caught correction must be an arrived self_caught candidate")
+    if not candidate.arrived:
+        raise ValueError("self-caught correction must be an arrived candidate")
     attributes = self_caught_attributes(candidate)
-    if set(attributes) != set(SELF_CAUGHT_FACT_KEYS):
-        raise RuntimeError("self-caught correction fact attributes are incomplete")
     result = record_outcome_event(
         db,
         dedupe_key=self_caught_dedupe_key(candidate),
