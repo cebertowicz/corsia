@@ -132,7 +132,7 @@ impl SourceLifecycle {
             .args(["print", &Self::target()])
             .output()
             .map_err(|error| {
-                format!("could not ask launchd about the existing install: {error}")
+                format!("macOS didn't answer when CORSIA checked whether the existing install is running ({error}). Quit CORSIA and open it again.")
             })?;
         Ok(output
             .status
@@ -856,13 +856,13 @@ mod tests {
             wait_for_startup(
                 home.lifecycle.source.port,
                 None,
-                || Err("could not ask launchd about the existing install".into()),
+                || Err("macOS didn't answer when CORSIA checked whether the existing install is running. Quit CORSIA and open it again.".into()),
                 Duration::from_secs(3),
                 Duration::from_secs(3),
                 None,
             )
             .unwrap_err(),
-            StartupFailure::PidUnreadable("could not ask launchd about the existing install".into())
+            StartupFailure::PidUnreadable("macOS didn't answer when CORSIA checked whether the existing install is running. Quit CORSIA and open it again.".into())
         );
     }
 

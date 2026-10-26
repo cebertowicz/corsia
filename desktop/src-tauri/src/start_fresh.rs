@@ -688,7 +688,7 @@ impl Launchd for SystemLaunchd {
             .args(["print", &Self::target()])
             .output()
             .map(|output| output.status.success())
-            .map_err(|error| format!("could not ask launchd about the earlier install: {error}"))
+            .map_err(|error| format!("macOS didn't answer when CORSIA checked whether the earlier install is running ({error}). Retry, or quit CORSIA and open it again."))
     }
 
     fn port_answers(&mut self) -> bool {

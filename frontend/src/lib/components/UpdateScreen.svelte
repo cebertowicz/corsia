@@ -5,6 +5,7 @@
 	import { ms } from '$lib/popoverMotion';
 	import { prefersReducedMotion } from '$lib/stores/viewport';
 	import { onStartupShellPage, recoverLocalService, shellInfo, type RecoveryIntent } from '$lib/remoteShell';
+	import { countUp } from '$lib/update/percentCountUp';
 	import { restartToFinishUpdate } from '$lib/update/restartToFinish';
 	import { dismissUpdateScreen, handOverScreen, updateScreenView } from '$lib/update/screenStore';
 	import { currentTheme, encodeHandoff, keepScreenInAddress, keptReturnRoute, moveWindow, returnUrl, SHELL_UPDATE_PAGE } from '$lib/update/shellHandoff';
@@ -35,9 +36,30 @@
 
 	const longer = $derived(view?.mode === 'longer');
 	const recovery = $derived(longer || view?.startupProgressUnavailable === true || view?.mode === 'start_failed' || (view?.mode === 'failed' && view.serviceDown) || (!localDesktop && view?.serviceDown === true));
+	// The percentage on screen counts up to the real one; under reduced motion it steps straight to it.
+	const target = $derived(view === null ? null : view.mode === 'done' ? 100 : view.percent);
+	let shown = $state(0);
+	let frameId = 0;
+	let frameAt = 0;
+	let counting = false;
+	const percentText = $derived(Math.floor(shown + 1e-6));
 	const hasStartAction = $derived(recoveryFailure === 'automatic' || recoveryFailure === 'manual');
 	const autoStartWaiting = $derived(localDesktop && recoveryFailure === null && (deferred || (longer && autoStartAttempted && !starting)));
 
+	$effect(() => {
+		if (target === null) {
+			cancelFrame();
+			shown = 0;
+			counting = false;
+			return;
+		}
+		untrack(() => {
+			// A screen that appears already under way (another page handed it over) starts where it stands.
+			if (!counting || $prefersReducedMotion) shown = Math.max(shown, target);
+			else if (frameId === 0 && shown < target) { frameAt = performance.now(); frameId = requestAnimationFrame(advance); }
+			counting = true;
+		});
+	});
 	$effect(() => {
 		if (view === null) {
 			starting = false;
@@ -82,6 +104,19 @@
 	$effect(() => {
 		if (screenEl) screenEl.focus({ preventScroll: true });
 	});
+
+	function advance(now: number): void {
+		frameId = 0;
+		if (target === null) return;
+		shown = countUp(shown, target, now - frameAt);
+		frameAt = now;
+		if (shown < target) frameId = requestAnimationFrame(advance);
+	}
+
+	function cancelFrame(): void {
+		if (frameId !== 0) cancelAnimationFrame(frameId);
+		frameId = 0;
+	}
 
 	/** Move the screen, as it stands, to the shell's update page. */
 	function handOver(again = false): void {
@@ -132,7 +167,7 @@
 		return { duration, easing: sliding.easing, css: (t: number, u: number) => `${sliding.css?.(t, u) ?? ''};${fading.css?.(t, u) ?? ''}` };
 	}
 
-	onDestroy(() => { starting = false; });
+	onDestroy(() => { starting = false; cancelFrame(); });
 </script>
 
 {#if view}
@@ -157,9 +192,9 @@
 					<p class="step-label">{view.label}</p>
 				{/if}
 			</div>
-			<div class="percent" data-state={view.mode} aria-hidden="true">{view.estimated ? 'About ' : ''}{view.mode === 'done' ? '100' : view.percent.toFixed(1)}%</div>
-			<div class="bar" role="progressbar" aria-label={view.mode === 'failed' && view.failure ? view.failure.title : view.label} aria-valuemin="0" aria-valuemax="100" aria-valuenow={view.percent}>
-				<i style:width={`${view.percent}%`}></i>
+			<div class="percent" data-state={view.mode} aria-hidden="true">{percentText}%</div>
+			<div class="bar" role="progressbar" aria-label={view.mode === 'failed' && view.failure ? view.failure.title : view.label} aria-valuemin="0" aria-valuemax="100" aria-valuenow={percentText}>
+				<i style:width={`${shown}%`}></i>
 			</div>
 			{#if view.fromVersion && view.toVersion && view.mode !== 'done'}
 				<p class="versions">{view.fromVersion} → {view.toVersion}</p>
@@ -219,11 +254,10 @@
 	.percent { margin-top: var(--space-4); font-size: calc(var(--text-title1) * 2); line-height: 1.1; font-weight: var(--fw-semibold); font-variant-numeric: tabular-nums; color: var(--text-primary); }
 	.percent[data-state='failed'] { color: var(--text-tertiary); }
 	.bar { width: 100%; height: var(--space-2); margin-top: var(--space-3); border-radius: var(--radius-pill); overflow: hidden; background: var(--bg-tertiary); }
-	.bar i { display: block; height: 100%; background: var(--accent); border-radius: inherit; transition: width var(--dur-hero-plus) linear; }
+	.bar i { display: block; height: 100%; background: var(--accent); border-radius: inherit; }
 	.versions { margin: var(--space-3) 0 0; color: var(--text-tertiary); font-size: var(--text-footnote); font-variant-numeric: tabular-nums; }
 	.copy { margin-top: var(--space-4); display: flex; flex-direction: column; align-items: center; gap: var(--space-1); min-height: calc(var(--text-body) * 3); }
 	.detail.strong { color: var(--text-primary); }
 	.actions { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--space-2); margin-top: var(--space-3); }
 	h2, .step, .copy, .versions, .detail, .failure-headline { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
-	@media (prefers-reduced-motion: reduce) { .bar i { transition: none; } }
 </style>

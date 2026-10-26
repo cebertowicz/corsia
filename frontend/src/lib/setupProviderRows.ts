@@ -85,6 +85,6 @@ export function setupLocalRow(input: LocalRowInput): AiRow {
 export function setupStartNote(ready: boolean, eligible: boolean, downloading: boolean, eta?: number | null): string {
 	if (ready) return downloading ? 'The local model keeps downloading. Follow it in Settings › Providers.' : '';
 	if (!eligible) return 'Set up a subscription or add an API provider to continue.';
-	if (downloading) return `Ready when the local model finishes downloading${measuredDownloadTime(eta) ? `, in ${measuredDownloadTime(eta)}` : ''}.`;
+	if (downloading) return `Ready when the local model finishes downloading${measuredDownloadTime(eta) ? ` (${measuredDownloadTime(eta)})` : ''}.`;
 	return 'Download the local model, set up a subscription or add an API provider to continue.';
 }

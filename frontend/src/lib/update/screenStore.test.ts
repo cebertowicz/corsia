@@ -3,7 +3,8 @@ import { get } from 'svelte/store';
 import { token } from '$lib/stores/auth';
 import { toasts } from '$lib/stores/toast';
 import { clearStartupProgress, refreshStartupProgress, startupProgress } from './startupProgress';
-import { CREEP_STALE_MS } from './screenProgress';
+import { countUp } from './percentCountUp';
+import { CREEP_STALE_MS, REMOTE_ESTIMATE_CEILING } from './screenProgress';
 import { continueHandedOverScreen, dismissUpdateScreen, EXIT_HOLD_MS, handOverScreen, startUpdateScreen, stopUpdateScreen, tickUpdateScreen, updateScreenView } from './screenStore';
 import { loadUpdateStatus, resetUpdateStoreForTests, updateConfirmed, updateStatus, updateUnreachable, type UpdateStatus } from './store';
 import type { UpdateOperation } from './model';
@@ -170,6 +171,39 @@ describe('update screen store', () => {
 		updateUnreachable.set(true);
 		tickUpdateScreen(1_000);
 		expect(get(updateScreenView)).toMatchObject({ estimated: true });
+	});
+
+	it('counts a remote screen up across the restart and the handoff to real steps, never back and never in a jump', () => {
+		const shell = window as ShellWindow;
+		shell.__CORSIA_SHELL__ = { mode: 'remote', name: 'Studio Mac' };
+		updateStatus.set(status(inFlight('update-remote'), 45));
+		tickUpdateScreen(0);
+		const seen: number[] = [];
+		const read = (at: number) => { tickUpdateScreen(at); seen.push(get(updateScreenView)?.mode === 'done' ? 100 : get(updateScreenView)?.percent ?? 0); };
+		updateUnreachable.set(true);
+		for (let at = 1_000; at <= 120_000; at += 1_000) read(at);
+		expect(Math.max(...seen)).toBeLessThanOrEqual(REMOTE_ESTIMATE_CEILING);
+		updateUnreachable.set(false);
+		updateStatus.set(status({ ...inFlight('update-remote'), phase: 'resuming' }, 45));
+		for (let at = 121_000; at <= 131_000; at += 1_000) read(at);
+		updateStatus.set(status({ ...inFlight('update-remote'), phase: 'verifying' }, 45));
+		for (let at = 132_000; at <= 136_000; at += 1_000) read(at);
+		updateConfirmed.set({ operationId: 'update-remote', version: '2026.10.13' });
+		read(137_000);
+		expect(seen.at(-1)).toBe(100);
+		for (let i = 1; i < seen.length; i += 1) expect(seen[i]).toBeGreaterThanOrEqual(seen[i - 1]);
+
+		// What the screen draws: each reading becomes the target, and the number counts up to it frame by frame.
+		let shown = seen[0];
+		for (const target of seen) {
+			for (let elapsed = 0; elapsed < 1_000; elapsed += 16) {
+				const next = countUp(shown, target, 16);
+				expect(next).toBeGreaterThanOrEqual(shown);
+				expect(next - shown).toBeLessThanOrEqual(Math.max((target - shown) * 4, 20) * 0.016 + 1e-9);
+				shown = next;
+			}
+			expect(shown).toBe(target);
+		}
 	});
 
 	it.each(['fetch_failed', 'disk_space', 'launch_failed', null] as const)('keeps %s preparation or unknown failure out of the restart screen', (failureCode) => {
