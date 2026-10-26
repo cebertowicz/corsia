@@ -92,6 +92,8 @@ struct AppServiceState {
     /// The update screen the replaced app handed over when it reopened this one (`--update-screen`), carried once to
     /// the first Ready address this window follows. Presentation only: it starts, skips or grants nothing.
     relaunched_screen: Mutex<Option<String>>,
+    /// A data folder move the launch start skipped because an update held the folder; it runs once that update is over.
+    move_after_update: state_move::AfterUpdate,
 }
 
 #[derive(Default)]
@@ -753,6 +755,40 @@ fn watch_for_swapped_app(app: tauri::AppHandle) {
             let _ = relaunch(&app, &bundle);
             return;
         }
+        // An install that can't be read changes nothing; the next reading decides.
+        if let Some(installed) = installed.as_deref() {
+            if service.move_after_update.take_when_over(installed == launched, || update_is_over(&app, &service, port)) {
+                move_after_update(app.clone());
+            }
+        }
+    });
+}
+
+/// The update is over by the update page's own reading (`update_page_ready_url`): this computer's service, already
+/// served to this window, answers healthy with nothing in flight, and nothing holds the update lock.
+fn update_is_over(app: &tauri::AppHandle, service: &AppServiceState, port: u16) -> bool {
+    let Some(app_dir) = service.app_dir.lock().unwrap_or_else(PoisonError::into_inner).clone() else {
+        return false;
+    };
+    let Ok(state) = app_paths::state_dir_for(&app_dir) else {
+        return false;
+    };
+    let served = service.granted_local_ports.lock().unwrap_or_else(PoisonError::into_inner).contains(&port);
+    let local = app.state::<RemoteRuntime>().shell.lock().unwrap_or_else(PoisonError::into_inner).allows_manual_recovery();
+    update_page_ready_url(&READINESS_CHECK, served, local, port, probe_health, operation_is_active, || update_lock_is_free(&state))
+        .is_some()
+}
+
+/// Runs the launch start again for the move an update held: the window returns to the startup shell, which shows the
+/// move as a launch does, and the service comes back on the moved folder the way a launch brings it up.
+fn move_after_update(app: tauri::AppHandle) {
+    thread::spawn(move || {
+        log::info!("data folder move: the update is over, so the move runs now");
+        local_start_began(&app);
+        return_to_shell(&app);
+        let service = app.state::<AppServiceState>();
+        let outcome = start_service(&app, &service);
+        show_launch_outcome(&app, &outcome);
     });
 }
 
@@ -807,6 +843,7 @@ fn start_service_in<R: tauri::Runtime>(
         let outcome = state_move::run(&move_paths, &mut mover, &mut |percent| {
             set_adoption_phase(service, Some(adoption::Phase::MovingData { percent }))
         });
+        service.move_after_update.launched(&outcome);
         let outcome = outcome.map_err(|error| {
             log::error!("data folder move: {}", error.detail);
             error.line.to_string()
@@ -3988,6 +4025,23 @@ mod tests {
             with_relaunched_screen::<String>(&empty, Ok(ServiceStartup::Ready { url: service_url(1) })),
             Ok(ServiceStartup::Ready { url: service_url(1) })
         );
+    }
+
+    #[test]
+    fn a_move_an_update_held_is_recorded_by_every_start_and_rerun_by_the_install_watcher_after_its_relaunch_check() {
+        let source = include_str!("lib.rs");
+        let start = source.split("fn start_service_in<").nth(1).unwrap();
+        let moved = start.find("state_move::run(").unwrap();
+        let recorded = start.find("move_after_update.launched(&outcome)").expect("every start records its move");
+        assert!(moved < recorded && recorded < start.find("attach_healthy_active_service(").unwrap());
+        let watch = source.split("fn watch_for_swapped_app(").nth(1).unwrap();
+        let watch = &watch[..watch.find("\n}\n").unwrap()];
+        // A swapped-in app relaunches first: the move never runs in a window that belongs to a replaced app.
+        assert!(watch.find("relaunch(&app, &bundle)").unwrap() < watch.find("take_when_over(").unwrap());
+        let rerun = source.split("fn move_after_update(").nth(1).unwrap();
+        let rerun = &rerun[..rerun.find("\n}\n").unwrap()];
+        let shell = rerun.find("return_to_shell(").unwrap();
+        assert!(shell < rerun.find("start_service(").unwrap() && rerun.contains("show_launch_outcome("));
     }
 
     #[test]
