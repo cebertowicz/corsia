@@ -18,8 +18,8 @@ from api.measurement_limits import first_recorded_period, limits_by_period, rout
 from api.measurement_recent import router as recent_router
 from api.measurement_presence import PresenceCoverage, presence_coverage
 from api.measurement_breaks import (
-    COMPARABILITY_UNRESTRICTED, comparability_break_kind, comparability_start, derive_breaks,
-    first_availability_period, period_comparable,
+    COMPARABILITY_UNRESTRICTED, comparability_start, derive_breaks, first_availability_period,
+    next_comparability_boundary, period_comparable,
 )
 from api.measurement_registry import REGISTRY, period_measured
 from api.measurement_series_selection import metric_spine, requested_series
@@ -216,9 +216,8 @@ async def series_payload(requested: list[str], project: str, agent: str, page_gr
             return measured(name, period) and period >= start
         if family == "size":
             rows.extend(size_rows(metric, REGISTRY[metric].minimum_n, REGISTRY[metric].method_version, drawn, family_rows[family],
-                                  lambda name, period: period_comparable(period, breaks[name]),
-                                  lambda name: comparability_break_kind(breaks[name]), rate_measured,
-                                  dates={"data_start": rate_period, "comparability_before": comparability_start(breaks[metric])}))
+                                  lambda name, period: next_comparability_boundary(period, breaks[name]), rate_measured,
+                                  data_start=rate_period))
         elif family == "tokens":
             by_period = {row["period"]: row for row in family_rows[family]}
             periods = [*drawn, current_period] if metric == "fresh_tokens" else drawn

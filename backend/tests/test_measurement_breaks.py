@@ -9,8 +9,10 @@ import pytest
 from api import measurement
 from api.measurement import _row
 from api.measurement_breaks import (
-    comparability_start, derive_breaks, first_availability_period, period_comparable, source_started_period,
+    comparability_start, derive_breaks, first_availability_period, next_comparability_boundary, period_comparable,
+    source_started_period,
 )
+from api.measurement_size import size_rows
 from core.measurement_scope import resolve_grain
 from infra.database import get_db
 from tests.plan_writer_authorizer import raw_plan_seed
@@ -223,6 +225,7 @@ def test_model_marks_deduplicate_changes_inside_one_period(isolated_db) -> None:
             ("baseline", "2026-09-01T12:00:00Z", "rater-a"),
             ("b", "2026-09-15T12:00:00Z", "rater-b"),
             ("a-again", "2026-09-16T12:00:00Z", "rater-a"),
+            ("b-again", "2026-09-17T12:00:00Z", "rater-b"),
         ):
             _accepted(db, node, when)
             _rating(db, node, rater)
@@ -234,6 +237,73 @@ def test_model_marks_deduplicate_changes_inside_one_period(isolated_db) -> None:
     finally:
         db.close()
     assert [mark["period"] for mark in marks] == ["2026-09-14"]
+
+
+def test_mixed_raters_choose_one_dominant_rater_per_period(isolated_db) -> None:
+    """Alternating task order cannot invent a boundary while a period's dominant rater is unchanged."""
+    db = get_db()
+    try:
+        _thread(db)
+        ratings = (
+            ("baseline", "2026-09-01T12:00:00Z", "rater-a"),
+            ("b-1", "2026-09-15T12:00:00Z", "rater-b"),
+            ("a-1", "2026-09-16T12:00:00Z", "rater-a"),
+            ("b-2", "2026-09-17T12:00:00Z", "rater-b"),
+            ("b-3", "2026-09-22T12:00:00Z", "rater-b"),
+            ("a-2", "2026-09-23T12:00:00Z", "rater-a"),
+            ("b-4", "2026-09-24T12:00:00Z", "rater-b"),
+        )
+        for node, when, rater in ratings:
+            _accepted(db, node, when)
+            _rating(db, node, rater)
+        db.commit()
+        marks = [mark for mark in derive_breaks(db, ("estimated_human_hours_per_active_hour",), _grain())[
+            "estimated_human_hours_per_active_hour"] if mark["kind"] == "model"]
+    finally:
+        db.close()
+    assert [mark["period"] for mark in marks] == ["2026-09-14"]
+
+
+def test_tied_period_keeps_the_prior_dominant_rater(isolated_db) -> None:
+    """A tie is not a rater change, whichever name sorts first."""
+    db = get_db()
+    try:
+        _thread(db)
+        ratings = [(f"one-{n}", "2026-09-01T12:00:00Z", "rater-b") for n in range(3)]
+        ratings += [("two-a", "2026-09-08T12:00:00Z", "rater-a"), ("two-b", "2026-09-09T12:00:00Z", "rater-b")]
+        ratings += [(f"three-{n}", "2026-09-15T12:00:00Z", "rater-b") for n in range(3)]
+        for node, when, rater in ratings:
+            _accepted(db, node, when)
+            _rating(db, node, rater)
+        db.commit()
+        marks = [mark for mark in derive_breaks(db, ("estimated_human_hours_per_active_hour",), _grain())[
+            "estimated_human_hours_per_active_hour"] if mark["kind"] == "model"]
+    finally:
+        db.close()
+    assert marks == []
+
+
+def test_partial_rerate_of_old_tasks_keeps_the_old_periods_dominant_rater(isolated_db) -> None:
+    db = get_db()
+    try:
+        _thread(db)
+        for week, prefix in (("2026-09-01", "one"), ("2026-09-08", "two"), ("2026-09-15", "three")):
+            for suffix in "abc":
+                node = f"{prefix}-{suffix}"
+                _accepted(db, node, f"{week}T12:00:00Z")
+                _rating(db, node, "rater-a", "2026-10-01T12:00:00Z")
+                if suffix == "c":
+                    _rating(db, node, "rater-b", "2026-10-02T12:00:00Z")
+        for suffix in "abc":
+            node = f"new-{suffix}"
+            _accepted(db, node, "2026-09-22T12:00:00Z")
+            _rating(db, node, "rater-b")
+        db.commit()
+        marks = [mark for mark in derive_breaks(db, ("estimated_human_hours_per_active_hour",), _grain())[
+            "estimated_human_hours_per_active_hour"] if mark["kind"] == "model"]
+    finally:
+        db.close()
+    assert [mark["period"] for mark in marks] == ["2026-09-21"]
 
 
 def test_model_marks_follow_only_the_rating_that_counts(isolated_db) -> None:
@@ -340,8 +410,26 @@ def test_availability_and_comparability_helpers_distinguish_start_and_marks() ->
     ]
     assert first_availability_period(start_then_completeness) == "2026-03-02"
     assert comparability_start(marks) == "2026-09-14"
+    assert next_comparability_boundary("2026-08-24", marks) == marks[0]
+    assert next_comparability_boundary("2026-09-07", marks) == marks[1]
     assert not period_comparable("2026-09-07", marks)
     assert period_comparable("2026-09-14", marks)
+
+
+def test_size_rows_pair_each_reason_with_its_nearest_boundary_date() -> None:
+    marks = [
+        {"period": "2026-09-07", "kind": "model", "reason": "judging model changed"},
+        {"period": "2026-09-14", "kind": "world", "reason": "outcomes changed"},
+    ]
+    rows = size_rows(
+        "estimated_human_hours_per_active_hour", 1, 1, ["2026-08-31", "2026-09-07", "2026-09-14"], [],
+        lambda _, period: next_comparability_boundary(period, marks), lambda *_: True, data_start="2026-08-31",
+    )
+    assert [(row["size"]["comparable_reason"], row["size"]["comparability_before"]) for row in rows] == [
+        ("judging_model_changed", "2026-09-07"),
+        ("outcome_definition_changed", "2026-09-14"),
+        (None, None),
+    ]
 
 
 @pytest.mark.asyncio

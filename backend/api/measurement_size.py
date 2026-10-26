@@ -212,15 +212,15 @@ def pooled_size_window(pooled: dict[str, Any], measured: bool, minimum_n: int) -
 
 
 def size_rows(metric: str, minimum_n: int, method_version: int, spine: list[str], sources: list[dict[str, Any]],
-              comparable: Any, comparability_kind: Any, measured: Any, *, dates: dict[str, str]) -> list[dict[str, Any]]:
+              comparability_boundary: Any, measured: Any, *, data_start: str) -> list[dict[str, Any]]:
     """Serve one row per completed period, including periods with no outcomes or time.
 
     The rate is null before the series' data start, when active time is absent
     or zero, or when fewer usable ratings than the registry minimum stand
     behind it; ``size.rate_reason`` names which. The known subtotal and the
     coverage counts are served either way, and a period where any outcome lacks
-    a usable size is marked partial. ``dates`` carries the registry's data start
-    and comparability break, so a reader names them without a second copy.
+    a usable size is marked partial. The one nearest later boundary supplies both
+    an incomparable row's reason and the date that explanation names.
     """
     by_period = {row["period"]: row for row in sources}
     rows = []
@@ -233,12 +233,13 @@ def size_rows(metric: str, minimum_n: int, method_version: int, spine: list[str]
         # Before the minimum is applied: still a figure when the ratings are few, never when there are none.
         raw_value = source["estimated_hours"] / active_hours if rate_reason in (None, "below_minimum") else None
         n = 0 if rate_reason == "before_data_start" else sized
-        kind = comparability_kind(metric) if not comparable(metric, period) else None
+        boundary = comparability_boundary(metric, period)
+        kind = boundary["kind"] if boundary else None
         reason = "judging_model_changed" if kind == "model" else "outcome_definition_changed" if kind else None
         rows.append({
             "period": period, "series": metric, "method_version": method_version, "value": value, "raw_value": raw_value, "n": n, "proxy": True,
             "partial": sized < source["outcomes"],
-            "comparable": reason is None, "break": None, "dimension": None, "thin": False,
+            "comparable": boundary is None, "break": None, "dimension": None, "thin": False,
             "size": {
                 "outcomes": source["outcomes"], "sized": sized, "estimated_hours": source["estimated_hours"],
                 "active_hours": active_hours, "unsized": source["unsized"],
@@ -247,7 +248,8 @@ def size_rows(metric: str, minimum_n: int, method_version: int, spine: list[str]
                 "profiles": [dict(zip(PROFILE_KEYS, item), outcomes=count)
                              for item, count in sorted(source["profiles"].items())],
                 "comparable_reason": reason, "rate_reason": rate_reason,
-                "class_midpoint_hours": CLASS_MIDPOINT_HOURS, **dates,
+                "class_midpoint_hours": CLASS_MIDPOINT_HOURS, "data_start": data_start,
+                "comparability_before": boundary["period"] if boundary else None,
             },
         })
     return rows

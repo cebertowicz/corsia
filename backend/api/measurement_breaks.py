@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections import Counter, defaultdict
 from collections.abc import Iterable
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
@@ -68,24 +69,39 @@ def _seeded_starts(db, groups: Iterable[str]) -> dict[str, str | None]:
     return {group: found.get(group) for group in requested}
 
 
-def _model_marks(db, grain: Grain) -> list[dict[str, str]]:
-    """Derive rater changes from the ratings that count; the first rater is the baseline."""
+def _dominant_rater(raters: Counter[str], prior: str | None) -> str:
+    """Choose the largest period population; a tie keeps the prior rater, else resolves lexically."""
+    largest = max(raters.values())
+    tied = {rater for rater, count in raters.items() if count == largest}
+    return prior if prior in tied else min(tied)
+
+
+def _model_marks_from_raters(grain: Grain, rows: Iterable[tuple[str, str]]) -> list[dict[str, str]]:
+    """Mark each period whose dominant rater differs from the previous rated period's."""
+    by_period: dict[str, Counter[str]] = defaultdict(Counter)
+    for started_at, rater in rows:
+        if period := _period(grain, started_at):
+            by_period[period][rater] += 1
     marks: list[dict[str, str]] = []
-    if not db.execute(_TWO_RATERS_SQL).fetchone()[0]:
-        return marks
-    periods: set[str] = set()
     prior: str | None = None
-    for started_at, rater in counted_raters(db):
-        changed, prior = prior is not None and rater != prior, rater
-        if changed and (period := _period(grain, started_at)) and period not in periods:
-            periods.add(period)
+    for period in sorted(by_period):
+        rater = _dominant_rater(by_period[period], prior)
+        if prior is not None and rater != prior:
             marks.append({
                 "period": period,
                 "kind": "model",
                 "reason": "judging model changed",
                 "metric_group": "estimated_human_hours_per_active_hour",
             })
+        prior = rater
     return marks
+
+
+def _model_marks(db, grain: Grain) -> list[dict[str, str]]:
+    """Derive rater changes from the ratings that count; the first dominant rater is the baseline."""
+    if not db.execute(_TWO_RATERS_SQL).fetchone()[0]:
+        return []
+    return _model_marks_from_raters(grain, counted_raters(db))
 
 
 def _metadata(
@@ -151,19 +167,20 @@ def latest_source_mark_period(db, group: str) -> str | None:
     return str(row[0]) if row and row[0] else None
 
 
+_DEFINITION_KINDS = frozenset({"world", "model"})
+
+
 def comparability_start(breaks: Iterable[dict[str, str]]) -> str | None:
     """Return the final definition boundary a period must reach to be comparable."""
-    marks = [item["period"] for item in breaks if item["kind"] in {"world", "model"}]
-    return max(marks, default=None)
+    return max((item["period"] for item in breaks if item["kind"] in _DEFINITION_KINDS), default=None)
 
 
-def comparability_break_kind(breaks: Iterable[dict[str, str]]) -> str | None:
-    """Return the kind of the latest boundary that makes prior periods incomparable."""
-    marks = [item for item in breaks if item["kind"] in {"world", "model"}]
-    return max(marks, key=lambda item: item["period"])["kind"] if marks else None
+def next_comparability_boundary(period: str, breaks: Iterable[dict[str, str]]) -> dict[str, str] | None:
+    """Return the nearest later model/world boundary; none means the period is comparable."""
+    marks = [item for item in breaks if item["kind"] in _DEFINITION_KINDS and item["period"] > period]
+    return min(marks, key=lambda item: item["period"]) if marks else None
 
 
 def period_comparable(period: str, breaks: Iterable[dict[str, str]]) -> bool:
-    """Use the one derived list for chart rows and Agents findings alike."""
-    start = comparability_start(breaks)
-    return start is None or period >= start
+    """Use the one derived rule for chart rows, size rows and Agents findings alike."""
+    return next_comparability_boundary(period, breaks) is None
