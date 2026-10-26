@@ -28,6 +28,7 @@ from events.identity import (
     check_suite_pr_metadata_from_event,
     pr_external_id,
 )
+from events.connectors.github_label_events import IDENTITY, change_event
 from events.connectors.github_ownership import declaration_facts
 from events.identity_formula import MalformedEventError, RelationshipDecl
 
@@ -132,6 +133,8 @@ def _classify(raw: dict[str, Any]) -> str:
     if raw.get("check_suite"):
         return "check.completed"
     action = raw.get("action", "")
+    if raw.get("issue") and not raw.get("pull_request") and f"issue.{action}" in IDENTITY:
+        return f"issue.{action}"
     if action == "closed":
         end = pr_end_state(raw)
         if end is None:
@@ -149,8 +152,8 @@ def _classify(raw: dict[str, Any]) -> str:
         return "pr.synchronize"
     if action == "ready_for_review":
         return "pr.ready_for_review"
-    if action == "labeled":
-        return "pr.labeled"
+    if action in ("labeled", "unlabeled"):
+        return f"pr.{action}"
     return "pr.opened"
 
 
@@ -167,6 +170,9 @@ def _extract_facts(raw: dict[str, Any], resolved: Mapping[str, Any] | None = Non
             "branch": (pr.get("base") or {}).get("ref"),
             "sha": (pr.get("head") or {}).get("sha"), "author": user.get("login"),
         })
+    kind = "pull_request" if pr else "issues" if raw.get("issue") else None
+    change = change_event(kind, raw) if kind else None
+    facts.update(change.facts if change else {})
     cs = raw.get("check_suite") or {}
     if cs:
         selected = (resolved[CHECK_SUITE_PR] if resolved is not None and CHECK_SUITE_PR in resolved
@@ -227,6 +233,10 @@ def _repository_projects(repository: str) -> frozenset[str] | None:
 
 
 _PR_FILTERABLE = ("repo", "branch", "sha", "pr_number", "author")
+# A label change adds the one name changed, the item's names after it, who did it and when.
+_PR_LABEL_FILTERABLE = (*_PR_FILTERABLE, "label", "labels", "actor", "at")
+_ISSUE_FILTERABLE = ("repo", "issue_number", "label", "labels", "actor", "at",
+                     "minutes_since_opened", "state_reason")
 _CHECK_FILTERABLE = ("repo", "branch", "head_sha", "check_suite_id", "conclusion")
 
 MANIFEST = register(ConnectorManifest(
@@ -248,10 +258,15 @@ MANIFEST = register(ConnectorManifest(
             artifact_integration=GITHUB_INTEGRATION, event_class="informational",
             routed_event=GITHUB_ROUTED_EVENTS["pr.ready_for_review"]),
         "pr.labeled": EventTypeDecl(
-            "pr.labeled", ("repo", "pr_number", "action", "sha"),
-            _PR_FILTERABLE, artifact_type=PR_TYPE,
+            "pr.labeled", IDENTITY["pr.labeled"],
+            _PR_LABEL_FILTERABLE, artifact_type=PR_TYPE,
             artifact_integration=GITHUB_INTEGRATION, event_class="informational",
             routed_event=GITHUB_ROUTED_EVENTS["pr.labeled"]),
+        "pr.unlabeled": EventTypeDecl(
+            "pr.unlabeled", IDENTITY["pr.unlabeled"], _PR_LABEL_FILTERABLE,
+            artifact_type=PR_TYPE, artifact_integration=GITHUB_INTEGRATION),
+        **{suffix: EventTypeDecl(suffix, facts, _ISSUE_FILTERABLE)
+           for suffix, facts in IDENTITY.items() if suffix.startswith("issue.")},
         "pr.merged": EventTypeDecl(
             "pr.merged", ("repo", "pr_number", "action"), _PR_FILTERABLE,
             artifact_type=PR_TYPE, artifact_integration=GITHUB_INTEGRATION,

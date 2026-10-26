@@ -346,13 +346,24 @@ def test_concurrent_first_account_requests_have_one_winner(client, monkeypatch):
 
 @pytest.mark.parametrize(
     ("system", "version", "expected"),
-    [("Darwin", "15.0.0", True), ("Darwin", "14.6.1", False), ("Linux", "15.0.0", False), ("Darwin", "unknown", False)],
+    [("Darwin", "15.0.0", True), ("Darwin", "14.6.1", False), ("Linux", "15.0.0", None), ("Darwin", "unknown", False)],
 )
 def test_macos_support_uses_the_approved_major_version_floor(monkeypatch, system, version, expected):
     monkeypatch.setattr(setup_api.platform, "system", lambda: system)
     monkeypatch.setattr(setup_api.platform, "mac_ver", lambda: (version, ("", "", ""), ""))
     assert setup_api._macos_supported() is expected
 
+
+
+def test_status_off_macos_is_not_blocked_by_the_macos_floor_and_not_local_eligible(monkeypatch, tmp_path):
+    monkeypatch.setattr(setup_api.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(setup_api.platform, "machine", lambda: "aarch64")
+    monkeypatch.setattr(setup_api.config, "STATE_ROOT", tmp_path)
+    monkeypatch.setattr(setup_api.config, "WORKSPACE", tmp_path / "workspace")
+    status = setup_api._setup_status()
+    assert status["macos_supported"] is None
+    assert status["apple_silicon"] is False
+    assert status["local_eligible"] is False
 
 
 def test_work_folder_display_hides_the_home_name(monkeypatch, tmp_path):

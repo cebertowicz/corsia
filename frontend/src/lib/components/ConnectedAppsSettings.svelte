@@ -29,6 +29,15 @@
 	let offline = $state(false);
 	let error = $state('');
 	let actionId = $state<string | null>(null);
+	/** The `<app id>:<action>` presses in flight on app rows: each button spins for its own press, so a slow Reconnect never locks Remove. */
+	let appBusy = $state<Set<string>>(new Set());
+	const isBusy = (id: string, action: string): boolean => appBusy.has(`${id}:${action}`);
+	const rowBusy = (id: string): boolean => [...appBusy].some((key) => key.startsWith(`${id}:`));
+	function setBusy(id: string, action: string, on: boolean): void {
+		const next = new Set(appBusy);
+		if (on) next.add(`${id}:${action}`); else next.delete(`${id}:${action}`);
+		appBusy = next;
+	}
 	let actionError = $state('');
 	let errorId = $state<string | null>(null);
 	let whereRow = $state<ConnectedAppsRow | null>(null);
@@ -82,7 +91,10 @@
 		return names.length > 2 ? `${names.slice(0, 2).join(', ')}, ${names.length - 2} more` : names.join(', ');
 	}
 	function replace(next: ConnectedAppsRow): void { rows = rows.map((row) => row.id === next.id ? next : row); }
-	function replaceApp(next: ConnectedApp): void { replace({ ...next, kind: 'hosted_app' }); }
+	/** Lay an answer over the row it is about: a short answer (Reconnect returns only the state) never wipes the rest of the row. */
+	function replaceApp(next: Partial<ConnectedApp> & { id: string }): void {
+		rows = rows.map((row) => row.id === next.id && !isAccount(row) ? { ...row, ...next, kind: 'hosted_app' } : row);
+	}
 	function approved(next: ConnectedApp): void {
 		replaceApp(next);
 		if (next.state === 'needs_sign_in') signInAfterApprove = next.id;
@@ -111,16 +123,16 @@
 		} catch { if (rows.length) offline = true; }
 	}
 	async function runApp(app: ConnectedApp, action: 'approve' | 'decline' | 'reconnect' | 'remove'): Promise<void> {
-		actionId = app.id; errorId = app.id; actionError = '';
+		setBusy(app.id, action, true); errorId = app.id; actionError = '';
 		try {
 			if (action === 'approve') approved(await approveConnectedApp(app));
 			else if (action === 'decline') {
 				const next = await declineConnectedApp(app.id);
 				if (next.removed) rows = rows.filter((row) => row.id !== app.id); else replaceApp(next);
-			} else if (action === 'reconnect') replaceApp(await reconnectConnectedApp(app.id));
+			} else if (action === 'reconnect') { replaceApp(await reconnectConnectedApp(app.id)); void refresh(); }
 			else { await removeConnectedApp(app.id); rows = rows.filter((row) => row.id !== app.id); }
 		} catch (cause) { actionError = cause instanceof Error ? cause.message : "Couldn't update this app. Try again."; }
-		finally { actionId = null; }
+		finally { setBusy(app.id, action, false); }
 	}
 	async function startSignIn(account: ConnectedAccount): Promise<void> {
 		actionId = account.id; errorId = account.id; actionError = '';
@@ -254,9 +266,9 @@
 						<div class="item">
 							<SettingsRow name={row.name} subTone={tone(row)} stackActions>
 								{#snippet sub()}{@render appSecondLine(row)}{#if row.notice}<span class="line">{row.notice}</span>{/if}{/snippet}
-								{#snippet actions()}{#if needsPlace(row)}<Button variant="primary" size="sm" onclick={() => { whereApprove = true; whereRow = row; }}>Choose where it works…</Button>{:else}<Button variant="primary" size="sm" loading={actionId === row.id} onclick={() => runApp(row, 'approve')}>Approve</Button>{/if}<Button variant="ghost" size="sm" loading={actionId === row.id} onclick={() => runApp(row, 'decline')}>Decline</Button>{/snippet}
+								{#snippet actions()}{#if needsPlace(row)}<Button variant="primary" size="sm" onclick={() => { whereApprove = true; whereRow = row; }}>Choose where it works…</Button>{:else}<Button variant="primary" size="sm" loading={isBusy(row.id, 'approve')} disabled={isBusy(row.id, 'decline')} onclick={() => runApp(row, 'approve')}>Approve</Button>{/if}<Button variant="ghost" size="sm" loading={isBusy(row.id, 'decline')} disabled={isBusy(row.id, 'approve')} onclick={() => runApp(row, 'decline')}>Decline</Button>{/snippet}
 							</SettingsRow>
-							{#if errorId === row.id && actionError && actionId === null}<p class="error" role="alert">{actionError}</p>{/if}
+							{#if errorId === row.id && actionError && !rowBusy(row.id)}<p class="error" role="alert">{actionError}</p>{/if}
 							{#if hasSignInToShow(row)}<div class="details"><AppSignInPanel app={row} {signInHere} confirmOut={confirmingAppOut === row.id} onConfirmOut={(on) => confirmingAppOut = on ? row.id : null} onChange={(patch) => replaceApp({ ...row, ...patch })} onRefresh={refresh} onSignedOut={() => signedOut = new Set(signedOut).add(row.id)} /></div>{/if}
 						</div>
 					{:else}
@@ -268,7 +280,7 @@
 									{:else if !isOpenApp(row) && row.state === 'token_rejected'}<Button variant="ghost" size="sm" onclick={() => requestAppKey(row)}>Replace key</Button>{/if}
 								{/snippet}
 							</SettingsRow>
-							{#if isOpenApp(row)}<div class="details">{#if errorId === row.id && actionError && actionId === null}<p class="error" role="alert">{actionError}</p>{/if}<AppSignInPanel app={row} {signInHere} confirmOut={confirmingAppOut === row.id} onConfirmOut={(on) => confirmingAppOut = on ? row.id : null} onChange={(patch) => replaceApp({ ...row, ...patch })} onRefresh={refresh} onSignedOut={() => signedOut = new Set(signedOut).add(row.id)} autoStart={signInAfterApprove === row.id} onAutoStarted={() => signInAfterApprove = null} />{#if row.state === 'needs_token'}<p class="key-detail">{row.name} needs a key before agents can use it: a code {row.name} gives you so other apps can use your account ({row.name} may call it a token or an API key). Create one in your {row.name} settings, then press Set key.</p>{:else if row.state === 'token_rejected'}<p class="key-detail">{row.name} didn't accept its key. Create a new one in your {row.name} settings, then press Replace key.</p>{:else if row.state === 'failed' && row.failure_class === 'runtime_download_failed'}<p class="key-detail">{runtimeDownloadFailureBody}</p>{/if}<div class="actions">{#if row.state === 'expired'}<Button variant="ghost" size="sm" loading={actionId === row.id} onclick={() => runApp(row, 'decline')}>Dismiss</Button>{:else}{#if row.state === 'needs_token'}<Button variant="ghost" size="sm" onclick={() => requestAppKey(row)}>Set key</Button>{:else if row.state === 'token_rejected'}<Button variant="ghost" size="sm" onclick={() => requestAppKey(row)}>Replace key</Button>{/if}<Button variant="ghost" size="sm" onclick={() => { whereApprove = false; whereRow = row; }}>Where it works…</Button>{#if row.state !== 'needs_token' && row.state !== 'token_rejected'}<Button variant="ghost" size="sm" loading={actionId === row.id} onclick={() => runApp(row, 'reconnect')}>Reconnect</Button>{/if}{#if row.sign_in?.signed_in && confirmingAppOut !== row.id}<Button variant="ghost" size="sm" onclick={() => confirmingAppOut = row.id}>Sign out</Button>{/if}<span class="danger-text"><Button variant="ghost" size="sm" loading={actionId === row.id} onclick={() => runApp(row, 'remove')}>Remove</Button></span>{/if}</div></div>{/if}
+							{#if isOpenApp(row)}<div class="details">{#if errorId === row.id && actionError && !rowBusy(row.id)}<p class="error" role="alert">{actionError}</p>{/if}<AppSignInPanel app={row} {signInHere} confirmOut={confirmingAppOut === row.id} onConfirmOut={(on) => confirmingAppOut = on ? row.id : null} onChange={(patch) => replaceApp({ ...row, ...patch })} onRefresh={refresh} onSignedOut={() => signedOut = new Set(signedOut).add(row.id)} autoStart={signInAfterApprove === row.id} onAutoStarted={() => signInAfterApprove = null} />{#if row.state === 'needs_token'}<p class="key-detail">{row.name} needs a key before agents can use it: a code {row.name} gives you so other apps can use your account ({row.name} may call it a token or an API key). Create one in your {row.name} settings, then press Set key.</p>{:else if row.state === 'token_rejected'}<p class="key-detail">{row.name} didn't accept its key. Create a new one in your {row.name} settings, then press Replace key.</p>{:else if row.state === 'failed' && row.failure_class === 'runtime_download_failed'}<p class="key-detail">{runtimeDownloadFailureBody}</p>{/if}<div class="actions">{#if row.state === 'expired'}<Button variant="ghost" size="sm" loading={isBusy(row.id, 'decline')} onclick={() => runApp(row, 'decline')}>Dismiss</Button>{:else}{#if row.state === 'needs_token'}<Button variant="ghost" size="sm" onclick={() => requestAppKey(row)}>Set key</Button>{:else if row.state === 'token_rejected'}<Button variant="ghost" size="sm" onclick={() => requestAppKey(row)}>Replace key</Button>{/if}<Button variant="ghost" size="sm" onclick={() => { whereApprove = false; whereRow = row; }}>Where it works…</Button>{#if row.state !== 'needs_token' && row.state !== 'token_rejected' && row.state !== 'needs_sign_in'}<Button variant="ghost" size="sm" loading={isBusy(row.id, 'reconnect')} disabled={isBusy(row.id, 'remove')} onclick={() => runApp(row, 'reconnect')}>Reconnect</Button>{/if}{#if row.sign_in?.signed_in && confirmingAppOut !== row.id}<Button variant="ghost" size="sm" onclick={() => confirmingAppOut = row.id}>Sign out</Button>{/if}<span class="danger-text"><Button variant="ghost" size="sm" loading={isBusy(row.id, 'remove')} onclick={() => runApp(row, 'remove')}>Remove</Button></span>{/if}</div></div>{/if}
 						</div>
 					{/if}
 				{/each}

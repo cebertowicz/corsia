@@ -175,7 +175,7 @@ def test_issue_reopen_has_a_delivery_stable_key():
     (draft,) = map_github_outcomes("issues", reopened)
     assert (draft.event_name, draft.dedupe_key, draft.ts) == (
         "github.issue.reopened",
-        f"github:issue:{REPO}#1627:reopened:{reopened['issue']['updated_at']}",
+        f"github:issue:{REPO}#1627:issue.reopened::{reopened['issue']['updated_at']}",
         reopened["issue"]["updated_at"],
     )
 

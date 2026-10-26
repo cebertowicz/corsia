@@ -13,6 +13,7 @@
     "allow-choose-work-folder",
     "allow-configure-work-folder",
     "allow-disconnect-remote",
+    "allow-finish-setup-window",
     "allow-get-service-log-path",
     "allow-open-login-items",
     "allow-quit-app",

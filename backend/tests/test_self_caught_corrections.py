@@ -160,7 +160,7 @@ def test_github_reopen_and_explicit_merged_revert_target_owned_prs(db):
     assert len(facts) == 2
     assert {thread_id for _subject, thread_id, _attributes in facts} == {"owner"}
     assert {attributes["source_kind"] for _subject, _thread_id, attributes in facts} == {"self_caught"}
-    assert any("github:issue:cebertowicz/maestro#1627:reopened" in subject for subject, *_ in facts)
+    assert any("github:issue:cebertowicz/maestro#1627:issue.reopened" in subject for subject, *_ in facts)
     assert any("github:pr:cebertowicz/maestro#3200:merged" in subject for subject, *_ in facts)
 
 

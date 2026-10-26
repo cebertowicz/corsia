@@ -600,3 +600,12 @@ def _system_projection_readable(monkeypatch):
     monkeypatch.setattr(
         "core.system_projection._agent_readable", lambda _projection: True,
     )
+
+
+@pytest.fixture(autouse=True)
+def _github_read_budget_starts_empty():
+    """The GitHub read budget is process-wide; each test starts with none learned."""
+    budget = sys.modules.get("events.connectors.github_read_budget")
+    if budget is not None:
+        budget.budget.clear()
+    yield

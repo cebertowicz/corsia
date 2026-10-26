@@ -19,6 +19,8 @@ from datetime import datetime
 from email.utils import parsedate_to_datetime
 from typing import Any, Callable
 
+from events.connectors.github_read_budget import budget
+
 GhRunner = Callable[..., subprocess.CompletedProcess]
 log = logging.getLogger(__name__)
 
@@ -144,8 +146,17 @@ def _parse(stdout: str) -> GhResponse | None:
     return GhResponse(int(match.group(1)), headers, body)
 
 
-def gh_get(runner: GhRunner, path: str, headers: dict[str, str] | None = None) -> GhResponse:
-    """Run one GET through ``gh``; raise ``FeedError`` unless it is 2xx or 304."""
+def gh_get(
+    runner: GhRunner, path: str, headers: dict[str, str] | None = None, *, low_priority: bool = False,
+) -> GhResponse:
+    """Run one GET through ``gh``; raise ``FeedError`` unless it is 2xx or 304.
+
+    The shared read budget is asked first: while core is exhausted, or under a
+    Retry-After, GitHub is not called. A ``low_priority`` read also stays out
+    of the budget's reserve. The budget also decides what counts as a rate limit.
+    """
+    if budget.blocked_until(low_priority=low_priority) is not None:
+        raise FeedError("rate_limited", "shared read budget")
     args = ["api", "--method", "GET", "-i"]
     for name, value in (headers or {}).items():
         args += ["-H", f"{name}: {value}"]
@@ -158,12 +169,10 @@ def gh_get(runner: GhRunner, path: str, headers: dict[str, str] | None = None) -
     response = _parse(result.stdout or "")
     if response is None:
         raise FeedError("gh_error", (result.stderr or "")[:200])
+    rate_limited = budget.record(response.status, response.headers, response.body)
     if response.status == 401:
         raise GhSignedOut()
-    if response.status == 403 and (
-        response.headers.get("x-ratelimit-remaining") == "0"
-        or "retry-after" in response.headers
-    ):
+    if rate_limited:
         raise FeedError("rate_limited")
     if response.status != 304 and not 200 <= response.status < 300:
         raise FeedError(f"http_{response.status}")
