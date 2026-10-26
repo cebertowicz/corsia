@@ -1272,7 +1272,7 @@ async def test_a_token_total_is_comparable_in_every_period_a_per_outcome_rate_is
         _seed_manifest(db)
         _seed_usage(db, "u-aug", total=500, prompt=400, completion=0, cache_creation=0, cache_read=100,
                     created_at="2026-08-11T09:00:00Z")
-        db.execute("INSERT INTO measure_breaks(period,kind,metric_group,reason) VALUES ('2026-08-31','world',NULL,'plan nodes got about 5 times smaller')")
+        db.execute("INSERT INTO measure_breaks(period,kind,metric_group,reason) VALUES ('2026-08-31','world',NULL,'tasks were split about 5 times finer from Aug 31, 2026 on')")
         db.commit()
     finally:
         db.close()

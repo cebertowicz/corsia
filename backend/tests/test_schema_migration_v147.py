@@ -103,7 +103,7 @@ def test_v147_migration_keeps_only_legacy_marks_supported_by_history() -> None:
         )
         db.commit()
         migrate_146_to_147(db)
-        assert ("2026-08-31", "world", None, "tasks got about 5 times smaller") in _breaks(db)
+        assert ("2026-08-31", "world", None, "tasks were split about 5 times finer from Aug 31, 2026 on") in _breaks(db)
         assert ("2026-09-07", "source", "tokens", "token totals cover every agent from Sep 7, 2026 on") in _breaks(db)
     finally:
         db.close()
@@ -119,21 +119,39 @@ def test_v147_upgrade_skips_starts_when_legacy_source_tables_are_absent() -> Non
         db.close()
 
 
-def test_v147_upgrade_uses_its_frozen_shape_that_matches_today_fresh_install() -> None:
-    import infra.migration_146_to_147_measure_breaks as step
+def _shape(conn: sqlite3.Connection) -> list[tuple[str, str, str]]:
+    rows = conn.execute("SELECT type,name,sql FROM sqlite_master WHERE tbl_name='measure_breaks' ORDER BY name")
+    return [(kind, name, " ".join((sql or "").split())) for kind, name, sql in rows]
 
-    assert not hasattr(step, "MEASUREMENT_BREAKS_SCHEMA_SQL")
 
-    def shape(conn: sqlite3.Connection) -> list[tuple[str, str, str]]:
-        rows = conn.execute("SELECT type,name,sql FROM sqlite_master WHERE tbl_name='measure_breaks' ORDER BY name")
-        return [(kind, name, " ".join((sql or "").split())) for kind, name, sql in rows]
-
+def test_v147_upgrade_matches_today_fresh_install() -> None:
     fresh = sqlite3.connect(":memory:")
     db = _legacy_db()
     try:
         initialize_schema(fresh)
         migrate_to_current(db, SCHEMA_VERSION)
-        assert shape(db) == shape(fresh)
+        assert _shape(db) == _shape(fresh)
     finally:
         db.close()
         fresh.close()
+
+
+def test_v147_step_keeps_its_shape_when_the_live_definition_changes(monkeypatch) -> None:
+    import importlib
+
+    import infra.measurement_schema as live
+    import infra.migration_146_to_147_measure_breaks as step
+
+    # Reloading under a changed live definition is what a later schema version looks like to this step.
+    monkeypatch.setattr(live, "MEASUREMENT_BREAKS_SCHEMA_SQL", "CREATE TABLE measure_breaks (period TEXT, later TEXT);")
+    db = sqlite3.connect(":memory:")
+    try:
+        importlib.reload(step).migrate_146_to_147(db)
+        columns = [row[1] for row in db.execute("PRAGMA table_info(measure_breaks)")]
+        indexes = {row[1] for row in db.execute("PRAGMA index_list(measure_breaks)")}
+        assert columns == ["period", "kind", "metric_group", "reason"]
+        assert {"idx_measure_breaks_identity", "idx_measure_break_starts_group"} <= indexes
+    finally:
+        db.close()
+        monkeypatch.undo()
+        importlib.reload(step)

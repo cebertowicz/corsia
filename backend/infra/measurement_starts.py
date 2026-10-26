@@ -36,23 +36,10 @@ _FIRST_ROW_SQL = {
     "rejected_outcomes": """
         SELECT MIN(e.created_at) FROM plan_node_events e WHERE e.event='review_rejected'
     """,
-    "released_bad_attempts": """
-        SELECT MIN(released_at) FROM plan_node_attempts
-        WHERE release_reason IN ('failed','requirements_changed')
-    """,
-    "failed_outcomes": """
-        SELECT MIN(created_at) FROM plan_node_events WHERE new_state='failed'
-    """,
-    "outcome_corrections": """
-        SELECT MIN(created_at) FROM plan_node_events WHERE event='correction_created'
-    """,
     "raised_decisions": """
         SELECT MIN(json_extract(ai.metadata,'$.plan_decision.raised_at'))
         FROM artifact_identities AS ai INDEXED BY idx_measurement_decisions_raised
         WHERE ai.integration='local' AND ai.type='plan-decision' AND json_valid(ai.metadata)
-    """,
-    "user_holds": """
-        SELECT MIN(created_at) FROM plan_node_holds WHERE owner_kind='user'
     """,
     "answered_decisions": """
         SELECT MIN(json_extract(ai.metadata,'$.plan_decision.answered_at'))

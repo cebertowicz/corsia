@@ -216,7 +216,7 @@ def _record_legacy_marks(conn, starts: dict[str, str]) -> None:
     """Keep only historical marks that describe this installation's own data."""
     rows: list[tuple[str, str, str | None, str]] = []
     if (outcomes_start := starts.get("outcomes")) and outcomes_start < "2026-08-31":
-        rows.append(("2026-08-31", "world", None, "tasks got about 5 times smaller"))
+        rows.append(("2026-08-31", "world", None, "tasks were split about 5 times finer from Aug 31, 2026 on"))
     if (tokens_start := starts.get("tokens")) and tokens_start < "2026-09-07":
         rows.append(("2026-09-07", "source", "tokens", "token totals cover every agent from Sep 7, 2026 on"))
     conn.executemany(
