@@ -1,10 +1,10 @@
 """Outcome drafts for GitHub label changes and issue reopens, from the shared normalization.
 
 ``github_outcomes`` hands a ``pull_request`` or ``issues`` payload here for the actions
-it does not map itself. Facts and identity come from ``github_label_events.change_event``,
-so the webhook copy and the poller copy of one change carry the same attributes and the
-same ``dedupe_key``: the second is a no-op in the store. Label names, logins and counts
-only; the item's whole label set stays on the routed event, not in the row.
+it does not map itself. Facts and identity come from ``github_label_events.change_event``.
+Label names, logins and counts only; the item's whole label set stays on the routed event,
+not in the row. A change carrying no ``labels`` (a poller copy) records no label-derived
+attributes (count, priority, lane, kind).
 """
 from __future__ import annotations
 
@@ -32,13 +32,16 @@ def label_drafts(event_type: str, payload: dict[str, Any], repo: str) -> list[Ou
     label = facts.get("label")
     if event_type == "pull_request":
         subject = f"github:pr:{repo}#{facts['pr_number']}"
-        attrs: dict[str, Any] = {"repo": repo, "pr": str(facts["pr_number"]), "label_count": len(facts["labels"])}
+        attrs: dict[str, Any] = {"repo": repo, "pr": str(facts["pr_number"])}
+        if "labels" in facts:
+            attrs["label_count"] = len(facts["labels"])
         if "sha" in facts:
             attrs["head_sha"] = facts["sha"]
     else:
         subject = f"github:issue:{repo}#{facts['issue_number']}"
-        attrs = {"repo": repo, "issue": str(facts["issue_number"]),
-                 **label_attributes((payload.get("issue") or {}).get("labels", []))}
+        attrs = {"repo": repo, "issue": str(facts["issue_number"])}
+        if "labels" in facts:
+            attrs.update(label_attributes(payload["issue"]["labels"]))
         if "minutes_since_opened" in facts:
             attrs["minutes_since_opened"] = facts["minutes_since_opened"]
     if label is not None:

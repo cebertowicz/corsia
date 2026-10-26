@@ -1,12 +1,12 @@
 """Webhook-shaped payloads for the issue and label activity the repo-activity poller reads.
 
 ``issues/events`` rows give labels, closes and reopens; GitHub has no row for an issue
-being opened, so ``new_issues`` reads the issue list. Both build the payload GitHub's
-webhook would send, so ``github_label_events.change_event`` normalizes the poller copy
-and the webhook copy the same way. The event's own time stands where a webhook carries
-the item's ``updated_at``: GitHub sets the two together (checked on recorded closed and
-merged deliveries against their ``issues/events`` rows, one second for one second).
-A pull request's head is the one the poller last saw for it, because the event row has none.
+being opened, so ``new_issues`` reads the issue list. Both build a webhook-shaped payload
+so ``github_label_events.change_event`` can read it, but a poller copy is its own event:
+it carries only what its row proves (label, actor, the row's time and the item's number),
+never the item's label set, which the embedded issue holds as of the read, not of the change.
+The row's time stands where a webhook carries the item's ``updated_at``. A pull request's
+head is the one the poller last saw for it, because the event row has none.
 """
 from __future__ import annotations
 
@@ -29,7 +29,8 @@ def row_delivery(repo: str, row: dict[str, Any], heads: dict[str, str]) -> tuple
     is_pr = bool(issue.get("pull_request"))
     if is_pr and action not in ("labeled", "unlabeled"):
         return None
-    item = {**issue, "updated_at": at, **({"closed_at": at} if action == "closed" else {})}
+    item = {**{key: value for key, value in issue.items() if key != "labels"}, "updated_at": at,
+            **({"closed_at": at} if action == "closed" else {})}
     payload: dict[str, Any] = {"action": action, "repository": {"full_name": repo},
                                ("pull_request" if is_pr else "issue"): item}
     if is_pr and (sha := heads.get(str(issue.get("number")))):

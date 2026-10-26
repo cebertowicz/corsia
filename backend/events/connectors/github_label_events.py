@@ -1,14 +1,15 @@
 """One normalization of GitHub label and issue-lifecycle changes, whatever source read them.
 
 The webhook translator, the repo-activity poller and the outcome mapper all call
-``change_event``, so every copy of one change carries the same facts and the same
-``event_id`` (event rules §5.2, §5.3 "One intake, one event_id"). The input is the
-webhook payload shape. The poller builds that shape from an ``issues/events`` row
-(see ``github_issue_rows``), putting the row's own event time where a webhook
-carries the item's ``updated_at``.
+``change_event`` (event rules §5.2, §5.3). The input is the webhook payload shape. The
+poller builds that shape from an ``issues/events`` row (see
+``github_issue_activity.row_delivery``), putting the row's own event time where a webhook
+carries the item's ``updated_at``, and leaves out the item's label set, which a row does
+not prove. A webhook change carries ``labels`` (the item's names after it); a poller
+change has none.
 
-The event_id here is exact. Whether a label or reopen copy whose time differs by a second
-is the same change is decided where the copies meet, in ``github_label_window``.
+The event_id is exact: ``IDENTITY`` below is the whole of it, with no matching window.
+Which source delivered a change is settled once, by the poller reading the delivery log.
 
 Identity is per change: two labels added to one PR head are two events, and the
 same label removed and added again is two more, told apart by ``at``. Titles,
@@ -80,7 +81,9 @@ def _shared(payload: dict[str, Any], item: dict[str, Any], number_fact: str, at:
     repo, number = _text(_object(payload.get("repository")).get("full_name")), item.get("number")
     if repo is None or not isinstance(number, int) or isinstance(number, bool):
         return None
-    facts: dict[str, Any] = {"repo": repo, number_fact: number, "labels": label_names(item.get("labels")), "at": at}
+    facts: dict[str, Any] = {"repo": repo, number_fact: number, "at": at}
+    if "labels" in item:
+        facts["labels"] = label_names(item["labels"])
     if login := _text(_object(payload.get("sender")).get("login")):
         facts["actor"] = login
     if payload.get("action") in _LABEL_ACTIONS:

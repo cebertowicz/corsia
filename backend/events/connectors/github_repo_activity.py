@@ -3,8 +3,9 @@
 Every emitted item is a webhook-shaped delivery through GitHub admission.  The
 issue-event reader is shared by normal polling and startup catch-up so both use
 the same bounded cursor traversal and never replay historic labels.  A repo's
-first poll only seeds its cursor, heads and closed markers.  Every read, the
-head-check aggregator's included, passes one budget and backoff gate.
+first poll only seeds its cursor, heads and closed markers.  Every read passes
+one budget and backoff gate.  The poller is a fallback: an issue event at or
+before the repo's last real webhook delivery is assumed delivered by it.
 """
 from __future__ import annotations
 
@@ -26,7 +27,7 @@ WEBHOOK_QUIET = timedelta(minutes=30)
 ACTIVE_INTERVAL, IDLE_INTERVAL = 60, 300
 _status: dict[str, Any] = {"state": "starting", "reason": None, "counted_reads": 0,
                            "backoff": False, "backoff_until": None, "degraded": None}
-# One writer per repo state: the poll and an aggregator read never interleave a save.
+# One writer per repo state: two polls of one repo never interleave a save.
 _locks: dict[str, asyncio.Lock] = {}
 
 
@@ -74,6 +75,14 @@ def _parse_time(value: str | None) -> datetime | None:
 def _recent_webhook(repo: str, now: datetime) -> bool:
     from infra.webhook_delivery_log import repo_delivered_since
     return repo_delivered_since(repo, _stamp(now - WEBHOOK_QUIET))
+
+
+def _delivered_event(row: dict[str, Any], delivered: datetime | None) -> bool:
+    """Whether a real webhook delivery at or after the row's time makes it already delivered."""
+    if delivered is None:
+        return False
+    at = _parse_time(row.get("created_at"))
+    return at is None or at <= delivered
 
 
 def _startup_boundary(repo: str, state: dict[str, Any]) -> str | None:
@@ -129,17 +138,6 @@ async def _get(runner: feed.GhRunner, path: str, state: dict[str, Any], now: dat
     return response
 
 
-async def gated_read(runner: feed.GhRunner, repo: str, path: str,
-                     now: datetime | None = None) -> feed.GhResponse | None:
-    """One unconditional read for another connector, counted in this poller's budget."""
-    async with _lock(repo):
-        state = _repo_state(repo)
-        response = await _get(runner, path, state, now or _now(), send_etag=False, keep_etag=False)
-        if response is not None:
-            _save_state(repo, state)
-        return response
-
-
 def _payload(repo: str, action: str, pull: dict[str, Any]) -> dict[str, Any]:
     return {"action": action, "repository": {"full_name": repo}, "pull_request": pull}
 
@@ -173,7 +171,8 @@ async def _issue_events(runner: feed.GhRunner, repo: str, state: dict[str, Any],
 
     With no cursor and no floor, a poll only seeds the cursor and catch-up does
     nothing.  Candidates are held until a stop is proven; a 304, a non-200 or a
-    budget/backoff stop leaves every cursor field as it was.  Only three complete
+    budget/backoff stop leaves every cursor field as it was.  A candidate the
+    last real webhook delivery already covers is skipped, not admitted.  Only three complete
     pages without a stop mark the cursor lost, which emits no history and
     advances to now.  A startup boundary is never saved.
     """
@@ -217,8 +216,12 @@ async def _issue_events(runner: feed.GhRunner, repo: str, state: dict[str, Any],
         state["issues_cursor_at"] = _stamp(now)
         _save_state(repo, state)
         return False
+    from infra.webhook_delivery_log import repo_last_delivered_at
+    delivered = _parse_time(repo_last_delivered_at(repo))  # the one delivery-log read of this poll
     changed = False
     for row in reversed(candidates):
+        if _delivered_event(row, delivered):
+            continue  # the webhook owns it; the cursor still moves past it
         delivery = issue_activity.row_delivery(repo, row, state.get("heads", {}))
         if delivery is not None:
             await _admit(*delivery)

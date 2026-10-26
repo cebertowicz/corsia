@@ -237,7 +237,6 @@ _PR_FILTERABLE = ("repo", "branch", "sha", "pr_number", "author")
 _PR_LABEL_FILTERABLE = (*_PR_FILTERABLE, "label", "labels", "actor", "at")
 _ISSUE_FILTERABLE = ("repo", "issue_number", "label", "labels", "actor", "at",
                      "minutes_since_opened", "state_reason")
-_HEAD_CHECKS_FILTERABLE = ("repo", "head_sha", "head_branch", "pr_number", "conclusion")
 _CHECK_FILTERABLE = ("repo", "branch", "head_sha", "check_suite_id", "conclusion")
 
 MANIFEST = register(ConnectorManifest(
@@ -268,9 +267,6 @@ MANIFEST = register(ConnectorManifest(
             artifact_type=PR_TYPE, artifact_integration=GITHUB_INTEGRATION),
         **{suffix: EventTypeDecl(suffix, facts, _ISSUE_FILTERABLE)
            for suffix, facts in IDENTITY.items() if suffix.startswith("issue.")},
-        "head.checks_completed": EventTypeDecl(
-            "head.checks_completed", ("repo", "head_sha"), _HEAD_CHECKS_FILTERABLE,
-            artifact_type=PR_TYPE, artifact_integration=GITHUB_INTEGRATION),
         "pr.merged": EventTypeDecl(
             "pr.merged", ("repo", "pr_number", "action"), _PR_FILTERABLE,
             artifact_type=PR_TYPE, artifact_integration=GITHUB_INTEGRATION,

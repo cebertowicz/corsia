@@ -1,4 +1,4 @@
-"""Label and issue-lifecycle events: one normalization for the webhook copy and the poller copy.
+"""Label and issue-lifecycle events: one normalization of what a webhook or a poller row says.
 
 Fixtures in ``fixtures/github_activity`` are GitHub's own ``issues/events`` rows and issue
 list, and real ``pull_request.closed`` deliveries, recorded once from the repo and trimmed to
@@ -13,7 +13,10 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
+
 from events import intake
+from events.connectors import github_admission as admission
 from events.connectors import github_issue_activity as activity
 from events.connectors import github_label_events as events
 from events.connectors.github import MANIFEST
@@ -48,12 +51,18 @@ def poller_copy(row: dict, heads: dict | None = None) -> tuple[str, dict, str]:
     return delivery
 
 
-def test_pr_labeled_webhook_and_poller_copies_match():
+def row_facts(change):
+    """A change's facts less the item's label set, which only a webhook carries."""
+    return {key: value for key, value in change.facts.items() if key != "labels"}
+
+
+def test_pr_labeled_poller_copy_carries_what_the_row_proves_and_no_label_set():
     webhook = events.change_event("pull_request", pr_webhook())
     event, payload, key = poller_copy(fixture("row_pr_labeled"))
     poller = events.change_event(event, payload)
     assert webhook and poller and event == "pull_request"
-    assert (poller.type, poller.facts, poller.event_id) == (webhook.type, webhook.facts, webhook.event_id)
+    assert "labels" not in poller.facts and "labels" not in payload["pull_request"]
+    assert (poller.type, poller.facts) == (webhook.type, row_facts(webhook))
     assert webhook.type == "pr.labeled" and key == "labeled:cebertowicz/corsia:34114590651"
     assert webhook.facts == {
         "repo": REPO, "pr_number": 1421, "label": "connectors", "labels": ["connectors"],
@@ -61,7 +70,7 @@ def test_pr_labeled_webhook_and_poller_copies_match():
     }
 
 
-def test_issue_labeled_copies_match_and_carry_minutes_not_sha():
+def test_issue_labeled_poller_copy_carries_minutes_not_sha_or_labels():
     row = fixture("row_issue_labeled")
     issue = row["issue"]
     webhook = events.change_event("issues", {
@@ -71,8 +80,8 @@ def test_issue_labeled_copies_match_and_carry_minutes_not_sha():
     })
     event, payload, _ = poller_copy(row)
     poller = events.change_event(event, payload)
-    assert event == "issues" and webhook and poller and poller == webhook
-    assert webhook.type == "issue.labeled" and "sha" not in webhook.facts
+    assert event == "issues" and webhook and poller and (poller.type, poller.facts) == (webhook.type, row_facts(webhook))
+    assert webhook.type == "issue.labeled" and "sha" not in webhook.facts and "labels" not in poller.facts
     assert webhook.facts["minutes_since_opened"] >= 0 and webhook.facts["issue_number"] == issue["number"]
     assert set(webhook.facts) == {"repo", "issue_number", "label", "labels", "actor", "at", "minutes_since_opened"}
 
@@ -86,7 +95,7 @@ def test_unlabeled_carries_label_and_actor_with_its_own_type_and_id():
     assert (unlabeled.facts["label"], unlabeled.facts["actor"]) == ("connectors", "cebertowicz")
     assert unlabeled.event_id != labeled.event_id
     webhook = events.change_event("pull_request", pr_webhook("unlabeled"))
-    assert webhook == unlabeled
+    assert webhook and row_facts(webhook) == unlabeled.facts
 
 
 def test_two_labels_on_one_head_are_two_events_and_a_re_add_is_a_third():
@@ -161,10 +170,12 @@ def test_the_legacy_envelope_and_the_intake_id_are_the_same_id():
     assert "action" not in MANIFEST.decl("pr.labeled").identity_facts
 
 
-def test_outcome_drafts_match_between_copies_and_survive_the_allowlist():
+def test_outcome_drafts_survive_the_allowlist_and_a_poller_copy_has_no_label_derived_attributes():
     webhook = map_github_outcomes("pull_request", pr_webhook())
     event, payload, _ = poller_copy(fixture("row_pr_labeled"))
-    assert webhook == map_github_outcomes(event, payload) and len(webhook) == 1
+    copy = map_github_outcomes(event, payload)
+    assert len(webhook) == 1 and len(copy) == 1 and "label_count" not in copy[0].attributes
+    assert copy[0].dedupe_key == webhook[0].dedupe_key  # same row time, so the exact identity agrees here
     draft = webhook[0]
     assert draft.event_name == "github.pr.labeled" and draft.ts == "2026-10-24T06:25:11Z"
     kept, dropped = filter_attributes(draft.event_name, draft.attributes)
@@ -177,12 +188,13 @@ def test_outcome_drafts_match_between_copies_and_survive_the_allowlist():
     assert [d.event_name for d in drafts] == ["github.issue.labeled"]
     kept, dropped = filter_attributes(drafts[0].event_name, drafts[0].attributes)
     assert dropped == [] and "minutes_since_opened" in kept and "head_sha" not in kept
+    assert not {"label_count", "priority", "lane", "kind"} & set(kept)
     reopened = map_github_outcomes(*poller_copy({**issue_row, "event": "reopened"})[:2])
     assert [d.event_name for d in reopened] == ["github.issue.reopened"]
     assert {"github.pr.unlabeled", "github.issue.unlabeled"} <= set(ATTRIBUTE_ALLOWLISTS)
 
 
-def test_the_two_copies_are_admitted_once_and_the_second_is_a_duplicate(isolated_db):
+def test_one_event_id_is_admitted_once_and_the_second_is_a_duplicate(isolated_db):
     change = events.change_event("pull_request", pr_webhook())
     event, payload, _ = poller_copy(fixture("row_pr_labeled"))
     copy = events.change_event(event, payload)
@@ -196,6 +208,21 @@ def test_the_two_copies_are_admitted_once_and_the_second_is_a_duplicate(isolated
     first, second = admit(change), admit(copy)
     assert first.accepted and not first.duplicate and first.refusal is None
     assert second.accepted and second.duplicate
+
+
+def pr_delivery_at(seconds: int, action: str = "labeled") -> dict:
+    stamp = f"2026-10-24T06:25:{11 + seconds:02d}Z"
+    return pr_webhook(action, at=stamp)
+
+
+@pytest.mark.asyncio
+async def test_a_label_removed_and_added_again_within_five_seconds_is_two_labeled_events(main_db, monkeypatch):
+    scheduled = []
+    monkeypatch.setattr(admission, "_schedule", lambda _event, _payload, delivery_id: scheduled.append(delivery_id) or "routed")
+    for number, (seconds, action) in enumerate([(0, "labeled"), (2, "unlabeled"), (4, "labeled")]):
+        await admission.admit_github_delivery_async("pull_request", pr_delivery_at(seconds, action), f"guid-{number}")
+    names = [row[0] for row in main_db.execute("SELECT event_name FROM outcome_events ORDER BY ts")]
+    assert len(scheduled) == 3 and names.count("github.pr.labeled") == 2 and names.count("github.pr.unlabeled") == 1
 
 
 def test_new_issues_seed_then_emit_only_issues_and_drop_pull_requests():

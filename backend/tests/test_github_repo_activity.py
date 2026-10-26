@@ -5,14 +5,15 @@ from datetime import UTC, datetime
 
 import pytest
 
-from events.connectors import github_head_checks as checks
 from events.connectors import github_repo_activity as poller
 from events.connectors.github_notifications_feed import GhResponse
 
 
 @pytest.fixture(autouse=True)
 def _memory_state(monkeypatch):
-    """Repo state lives in memory and the shared gate starts open for every test."""
+    """Repo state lives in memory, the gate starts open and no webhook has ever been delivered."""
+    from infra import webhook_delivery_log
+    monkeypatch.setattr(webhook_delivery_log, "repo_last_delivered_at", lambda _repo: None)
     stored = {}
     monkeypatch.setattr(poller, "_repo_state", lambda repo: stored.setdefault(repo, {}))
     monkeypatch.setattr(poller, "_save_state", lambda repo, state: stored.__setitem__(repo, state))
@@ -22,60 +23,11 @@ def _memory_state(monkeypatch):
     return stored
 
 
-class Sink:
-    def __init__(self):
-        self.events = []
-
-    async def admit_event(self, **event):
-        self.events.append(event)
-        return type("Result", (), {"accepted": True, "duplicate": False,
-                                    "refusal": None, "rules_matched": []})()
-
-
 def suite(identifier, status="completed", conclusion="success", updated_at=None, runs=1):
     # GET commits/{sha}/check-suites shape: no run_attempt, no workflow_run.
     return {"id": identifier, "head_sha": "a", "status": status, "conclusion": conclusion,
             "updated_at": updated_at or f"2026-01-01T00:00:0{identifier}Z", "pull_requests": [],
             "app": {"id": 15368, "slug": "github-actions"}, "latest_check_runs_count": runs}
-
-
-@pytest.mark.asyncio
-async def test_debounce_aggregates_three_suites_once_and_allows_no_pr(monkeypatch):
-    reads, sink = [], Sink()
-    response = GhResponse(200, {}, {"check_suites": [suite(1), suite(2), suite(3)]})
-    monkeypatch.setattr(checks.feed, "gh_get", lambda *args: reads.append(args) or response)
-    aggregator = checks.HeadCheckAggregator(lambda *_args, **_kwargs: None, sink, sleep=lambda _n: asyncio.sleep(0))
-    payload = {"repository": {"full_name": "o/r"}, "check_suite": {"head_sha": "a", "head_branch": "main"}}
-    aggregator.observe(payload); aggregator.observe(payload); aggregator.observe(payload)
-    await asyncio.sleep(0.02)
-    assert len(reads) == 1 and sink.events[0]["facts"] == {
-        "repo": "o/r", "head_sha": "a", "head_branch": "main", "pr_number": None, "conclusion": "success"}
-
-
-@pytest.mark.asyncio
-async def test_pending_emits_nothing_and_rerun_changes_event_id(monkeypatch):
-    sink = Sink()
-    responses = [GhResponse(200, {}, {"check_suites": [suite(1, "queued")]}),
-                 GhResponse(200, {}, {"check_suites": [suite(1, updated_at="2026-01-01T01:00:00Z")]})]
-    monkeypatch.setattr(checks.feed, "gh_get", lambda *_args: responses.pop(0))
-    aggregator = checks.HeadCheckAggregator(lambda *_args, **_kwargs: None, sink, sleep=lambda _n: asyncio.sleep(0))
-    payload = {"repository": {"full_name": "o/r"}, "check_suite": {"head_sha": "a", "pull_requests": [{"number": 7}]}}
-    aggregator.observe(payload); await asyncio.sleep(0.02)
-    assert not sink.events
-    aggregator.observe(payload); await asyncio.sleep(0.02)
-    first = sink.events[0]["event_id"]
-    assert sink.events[0]["external_id"] == "o/r#7"
-    assert first != checks._event_id("o/r", "a", [suite(1)])
-
-
-@pytest.mark.asyncio
-async def test_cancelled_is_preserved(monkeypatch):
-    sink = Sink()
-    monkeypatch.setattr(checks.feed, "gh_get", lambda *_args: GhResponse(200, {}, {"check_suites": [suite(1, conclusion="cancelled")]}))
-    aggregator = checks.HeadCheckAggregator(lambda *_args, **_kwargs: None, sink, sleep=lambda _n: asyncio.sleep(0))
-    aggregator.observe({"repository": {"full_name": "o/r"}, "check_suite": {"head_sha": "a"}})
-    await asyncio.sleep(0.02)
-    assert sink.events[0]["facts"]["conclusion"] == "cancelled"
 
 
 @pytest.mark.asyncio
@@ -182,6 +134,45 @@ async def test_startup_catchup_processes_only_webhook_overlap_without_persisting
     assert emitted == ["labeled:o/r:new"] and not saved and "issues_boundary" not in state
 
 
+def _label_row(identifier, created_at):
+    return {"id": identifier, "created_at": created_at, "event": "labeled", "issue": {"pull_request": {}}}
+
+
+@pytest.mark.asyncio
+async def test_a_row_the_last_real_delivery_covers_is_skipped_and_the_cursor_still_advances(monkeypatch):
+    from infra import webhook_delivery_log
+    monkeypatch.setattr(webhook_delivery_log, "repo_last_delivered_at", lambda _repo: "2026-01-02T00:00:30Z")
+    rows = [_label_row("late", "2026-01-02T00:01:00Z"), _label_row("at", "2026-01-02T00:00:30Z"),
+            _label_row("early", "2026-01-02T00:00:10Z"), {"id": "old", "created_at": "2026-01-01T00:00:00Z"}]
+    state, emitted = {"issues_cursor": "old", "reads": []}, []
+    monkeypatch.setattr(poller, "_get", lambda *_a, **_k: asyncio.sleep(0, result=GhResponse(200, {}, rows)))
+    monkeypatch.setattr(poller, "_admit", lambda _event, _payload, key: emitted.append(key) or asyncio.sleep(0))
+    assert await poller._issue_events(lambda *_a: None, "o/r", state, datetime(2026, 1, 3, tzinfo=UTC))
+    assert emitted == ["labeled:o/r:late"] and state["issues_cursor"] == "late"
+    rows[:] = [_label_row("covered", "2026-01-02T00:00:20Z"), {"id": "late", "created_at": "2026-01-02T00:01:00Z"}]
+    emitted.clear()
+    assert not await poller._issue_events(lambda *_a: None, "o/r", state, datetime(2026, 1, 3, tzinfo=UTC))
+    assert emitted == [] and state["issues_cursor"] == "covered"
+
+
+@pytest.mark.asyncio
+async def test_with_no_real_delivery_the_row_is_admitted(monkeypatch):
+    state, emitted = {"issues_cursor": "old", "reads": []}, []
+    rows = [_label_row("new", "2026-01-02T00:00:00Z"), {"id": "old", "created_at": "2026-01-01T00:00:00Z"}]
+    monkeypatch.setattr(poller, "_get", lambda *_a, **_k: asyncio.sleep(0, result=GhResponse(200, {}, rows)))
+    monkeypatch.setattr(poller, "_admit", lambda _event, _payload, key: emitted.append(key) or asyncio.sleep(0))
+    assert await poller._issue_events(lambda *_a: None, "o/r", state, datetime(2026, 1, 3, tzinfo=UTC))
+    assert emitted == ["labeled:o/r:new"]
+
+
+def test_delivered_event_compares_instants_not_strings():
+    stamp = datetime(2026, 1, 2, 0, 0, 30, tzinfo=UTC)
+    assert poller._delivered_event({"created_at": "2026-01-02T00:00:30Z"}, stamp)
+    assert poller._delivered_event({"created_at": "2026-01-02T01:00:00+02:00"}, stamp)  # an earlier instant
+    assert not poller._delivered_event({"created_at": "2026-01-02T00:00:31Z"}, stamp)
+    assert not poller._delivered_event({"created_at": "2026-01-01T23:59:59Z"}, None)
+
+
 @pytest.mark.asyncio
 async def test_normal_issue_cursor_traverses_pages_and_never_replays_history(monkeypatch):
     state, emitted = {"issues_cursor": "old", "reads": []}, []
@@ -206,19 +197,6 @@ async def test_settled_head_admits_only_completed_suites(monkeypatch):
     monkeypatch.setattr(poller, "_admit", lambda event, _payload, key: emitted.append((event, key)) or asyncio.sleep(0))
     await poller._poll_repo(lambda *_args: None, "o/r", datetime.now(UTC))
     assert emitted == [("check_suite", "check_suite:o/r:2:2026-01-01T00:00:02Z")]
-
-
-@pytest.mark.asyncio
-async def test_transient_sink_error_propagates(monkeypatch):
-    class FailingSink:
-        async def admit_event(self, **_event):
-            raise RuntimeError("transient database failure")
-    monkeypatch.setattr(checks.feed, "gh_get", lambda *_args: GhResponse(200, {}, {"check_suites": [suite(1)]}))
-    aggregator = checks.HeadCheckAggregator(lambda *_args: None, FailingSink(), sleep=lambda _n: asyncio.sleep(0))
-    key = ("o/r", "a")
-    aggregator._facts[key] = (None, None)
-    with pytest.raises(RuntimeError, match="transient"):
-        await aggregator._settle(key)
 
 
 # Integration review repros: each failed on 78564172.
@@ -269,27 +247,6 @@ async def test_budget_stop_keeps_pending_heads(monkeypatch, complete_runs):
     monkeypatch.setattr(poller, "_admit", lambda *_a: asyncio.sleep(0))
     await poller._poll_repo(lambda *_a: None, "o/r", datetime.now(UTC))
     assert state["pending"] == ["a"] and answers == []  # no suite read after either incomplete run read
-
-
-def _rest_suite(updated_at):
-    # Real GET commits/{sha}/check-suites shape: no run_attempt, no workflow_run.
-    return {"id": 9, "head_sha": "a", "head_branch": "b", "status": "completed", "conclusion": "success",
-            "app": {"id": 15368, "slug": "github-actions"}, "updated_at": updated_at,
-            "latest_check_runs_count": 2, "pull_requests": []}
-
-
-def test_rerun_of_same_suite_gets_new_event_id():
-    first = checks._event_id("o/r", "a", [_rest_suite("2026-01-01T00:00:00Z")])
-    rerun = checks._event_id("o/r", "a", [_rest_suite("2026-01-01T01:00:00Z")])
-    assert first != rerun
-
-
-def test_admission_hook_is_off_in_test_mode(monkeypatch):
-    monkeypatch.setenv("CORSIA_TEST_MODE", "1")
-    started = []
-    monkeypatch.setattr(checks, "_default", type("A", (), {"observe": lambda self, p: started.append(p)})())
-    checks.observe_admitted_check_suite({"repository": {"full_name": "o/r"}, "check_suite": {"head_sha": "a"}})
-    assert started == []
 
 
 # Edges sharing those causes.
@@ -358,43 +315,3 @@ async def test_gate_stopped_suite_read_keeps_the_head_pending(monkeypatch):
     await poller._poll_repo(lambda *_a: None, "o/r", datetime.now(UTC))
     assert answers == [] and state["pending"] == ["a", "b"]
 
-
-def test_admission_hook_is_off_by_default_and_needs_explicit_enable(monkeypatch):
-    started = []
-    monkeypatch.setattr(checks, "_default", type("A", (), {"observe": lambda self, p: started.append(p)})())
-    monkeypatch.delenv("CORSIA_TEST_MODE", raising=False)
-    monkeypatch.delenv(checks.ENABLE_ENV, raising=False)
-    checks.observe_admitted_check_suite({})
-    assert checks.hook_disabled_reason() == "not_enabled" and started == []
-    monkeypatch.setenv(checks.ENABLE_ENV, "1")
-    monkeypatch.setenv(poller.DISABLE_ENV, "1")
-    checks.observe_admitted_check_suite({})
-    assert checks.hook_disabled_reason() == "config_off" and started == []
-    monkeypatch.delenv(poller.DISABLE_ENV)
-    checks.observe_admitted_check_suite({})
-    assert started == [{}]
-
-
-@pytest.mark.asyncio
-async def test_aggregate_read_uses_the_shared_gate(monkeypatch, _memory_state):
-    sink, calls = Sink(), []
-    monkeypatch.setattr(checks.feed, "gh_get", lambda *a: calls.append(a) or GhResponse(200, {}, {"check_suites": [suite(1)]}))
-    aggregator = checks.HeadCheckAggregator(lambda *_a: None, sink, sleep=lambda _n: asyncio.sleep(0))
-    aggregator._facts[("o/r", "a")] = (None, None)
-    poller._status["backoff_until"] = "2999-01-01T00:00:00Z"
-    await aggregator._settle(("o/r", "a"))
-    assert calls == [] and sink.events == [] and poller._status["degraded"] == "rate_limited"
-    poller._status["backoff_until"] = None
-    await aggregator._settle(("o/r", "a"))
-    assert calls[0][2] is None and len(sink.events) == 1 and len(_memory_state["o/r"]["reads"]) == 1
-
-
-@pytest.mark.asyncio
-async def test_queued_suite_without_runs_keeps_the_head_pending(monkeypatch):
-    sink = Sink()
-    body = {"check_suites": [suite(1), suite(2, status="queued", conclusion=None, runs=0)]}
-    monkeypatch.setattr(checks.feed, "gh_get", lambda *_a: GhResponse(200, {}, body))
-    aggregator = checks.HeadCheckAggregator(lambda *_a: None, sink, sleep=lambda _n: asyncio.sleep(0))
-    aggregator._facts[("o/r", "a")] = (None, None)
-    await aggregator._settle(("o/r", "a"))
-    assert sink.events == []
