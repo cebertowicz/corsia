@@ -63,7 +63,7 @@ describe('SystemBulletinsSetting', () => {
 		expect(toggle().disabled).toBe(true);
 		expect(toggle().getAttribute('aria-pressed')).toBe('false');
 		expect(host.textContent).toContain('System bulletins');
-		expect(host.textContent).toContain('does not stop the notice your conductor gets');
+		expect(host.textContent).toContain('does not stop the notice your agents get');
 
 		coreSettings.set({ live_bulletins: { enabled: true } });
 		flushSync();
