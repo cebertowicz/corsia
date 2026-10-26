@@ -35,6 +35,10 @@ REGISTRY: dict[str, MetricDefinition] = {
     # A plain total: a measured period with no presence is a true zero, so nothing is withheld.
     "time_on_platform_h": MetricDefinition("presence", "hours", 0, presence_backed=True),
     "asks_per_outcome": MetricDefinition("decisions", "ratio", 20, proxy=True),
+    # The person's classified corrections (messages, comments, decision answers) in the scope, counted by arrival;
+    # the asks term is the one asks_per_outcome counts. No typed series exists: no correction carries a type yet.
+    "corrections_per_outcome": MetricDefinition("corrections", "ratio", 20),
+    "asks_plus_corrections_per_outcome": MetricDefinition("corrections", "ratio", 20),
     "took_recommendation_pct": MetricDefinition("decisions", "ratio", 10, companion="answered_other_pct"),
     "answered_other_pct": MetricDefinition("decisions", "ratio", 10, companion="took_recommendation_pct"),
     "answered_neither_pct": MetricDefinition("decisions", "ratio", 10),

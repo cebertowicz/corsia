@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
+from core.correction_attribution import FIRST_ARRIVAL_SQL
 from core.measurement_token_contract import priceable_usage_predicate
 from core.size_rating import SIZE_EVENT
 
@@ -54,6 +55,7 @@ _FIRST_ROW_SQL = {
           ))
         ORDER BY e.created_at LIMIT 1
     """,
+    "classified_corrections": FIRST_ARRIVAL_SQL,
     "limit_hits": """
         SELECT MIN(started_at) FROM active_turns WHERE status > ''
     """,
@@ -67,6 +69,9 @@ _LIVE_SOURCE = {
     "first_try": "accepted_outcomes",
     "rejections_per_outcome": "accepted_outcomes",
     "asks_per_outcome": "accepted_outcomes",
+    # Corrections are measured from the earliest classified source (message, comment or decision answer): an earlier period had no classifier, so it is not a zero.
+    "corrections_per_outcome": "classified_corrections",
+    "asks_plus_corrections_per_outcome": "classified_corrections",
     "decisions": "answered_decisions",
     "tokens": "priceable_usage",
     "presence": "presence",

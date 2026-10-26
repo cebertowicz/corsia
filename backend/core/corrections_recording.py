@@ -117,6 +117,12 @@ def version_key(version: ClassifierVersion) -> str:
     return ":".join(version_attributes(version).values())
 
 
+def version_key_sql(attributes: str) -> str:
+    """SQL for ``version_key`` read from a fact's ``attributes`` expression."""
+    fields = version_attributes(ClassifierVersion("", "", "", 0, ""))
+    return "||':'||".join(f"json_extract({attributes},'$.{name}')" for name in fields)
+
+
 def version_match_sql(alias: str, version: ClassifierVersion) -> tuple[str, dict[str, str]]:
     """SQL matching ``alias.attributes`` to one version, with its named parameters."""
     params = {f"version_{key}": value for key, value in version_attributes(version).items()}

@@ -69,6 +69,13 @@ jobs:
       # parser and query planner differ from what CORSIA runs on.
       - uses: astral-sh/setup-uv@v6
 
+      # Cache pip's download/wheel cache only, never the venv.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ runner.os }}-py3.11-${{ hashFiles('backend/requirements.txt', 'backend/requirements-test.txt') }}
+          restore-keys: |
+            pip-${{ runner.os }}-py3.11-
 
       - name: Install deps
         run: |
@@ -314,6 +321,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: pip
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/requirements-test.txt
 
       # The jailed-export cases require the real Safehouse sandbox.
       - name: Install Safehouse
@@ -367,6 +378,8 @@ jobs:
         with:
           # Active LTS; the frontend declares no engines constraint.
           node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
 
       - name: Install deps + run tests
         working-directory: frontend
