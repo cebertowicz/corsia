@@ -193,8 +193,12 @@ async def _reprobe_loop(thread_id: str, step: BrowserStep) -> None:
             except TimeoutError:
                 break
         step.last_input = None
-        if not await _reprobe(thread_id, step):
-            return
+        try:
+            if not await _reprobe(thread_id, step):
+                return
+        except Exception:
+            # A failed plan write leaves the step recorded and its loop running; the next interval retries it.
+            log.warning("browser-step transition for %s failed; retrying on the next re-probe", thread_id, exc_info=True)
 
 
 async def _reprobe(thread_id: str, step: BrowserStep) -> bool:
@@ -245,9 +249,9 @@ async def _open_step(thread_id: str, step: BrowserStep) -> None:
 
 
 async def _end_step(thread_id: str, step: BrowserStep, *, settle: bool) -> None:
-    _stop_reprobe(step)
     if settle:
         await _settle_step(thread_id, step)
+    _stop_reprobe(step)
     _steps.pop(thread_id, None)
     step.ended(thread_id)
 

@@ -413,6 +413,43 @@ async def test_failed_row_open_never_publishes_an_active_step_and_retry_can_open
     assert plan["events"] == [f"{kind}_step_opened"]
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["person", "password"])
+async def test_a_failed_settle_write_keeps_the_step_and_the_next_reprobe_settles_it(plan, monkeypatch, kind):
+    """The person is past the page but the plan write failed: the agent must still be woken once it recovers."""
+    from plans.public import PlanError
+
+    page, db = Page(), plan["db"]
+    browser_control.pane_connected(THREAD, "pane", None, page.pane_probe)
+    if kind == "person":
+        await browser_control.declare_person_step(THREAD, page.agent_probe, "Choose your account")
+    else:
+        page.show("visit-one", frozenset({42}))
+        with pytest.raises(BrowserSessionError, match="asks for a password"):
+            await browser_control.require_page_access(THREAD, page.agent_probe, ("snapshot",))
+    [step] = _steps(db)
+    original = browser_control._plan_write
+    failures = []
+
+    def settle_fails(operation, *args, **kwargs):
+        if operation == "settle_user_step":
+            failures.append(operation)
+            raise PlanError("fixture settle failure")
+        return original(operation, *args, **kwargs)
+
+    monkeypatch.setattr(browser_control, "_plan_write", settle_fails)
+    page.show("visit-two")
+    await _until(lambda: len(failures) >= 2)
+    assert row(db, step["id"])["state"] == "pending"
+    assert browser_control._steps[THREAD].node_id == step["id"]
+    assert "person_step_settled" not in plan["events"] and "password_step_settled" not in plan["events"]
+
+    monkeypatch.setattr(browser_control, "_plan_write", original)
+    await _until(lambda: THREAD not in browser_control._steps)
+    assert row(db, step["id"])["state"] == "accepted"
+    assert plan["events"] == [f"{kind}_step_opened", f"{kind}_step_settled"]
+
+
 def test_the_done_states_a_decline_is_told_from_are_the_plans_accepted_states():
     """A person's Mark done must never read as a decline, whatever states the plan accepts."""
     assert browser_steps.DONE_STATES == node_states._ACCEPTED_STATES
