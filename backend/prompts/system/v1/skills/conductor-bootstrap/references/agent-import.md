@@ -1,6 +1,6 @@
 # Bringing over what other tools know
 
-For the CORSIA agent: in first run when `setup.setup_decisions` holds the import decision (title `Bring over what your other tools know`), and any time the person asks to bring things over from Claude Code, Codex, OpenClaw or Hermes. Use tool `agent_import`; each refusal names the missing step. Post every line below with `post_update`, one message at a time, and wait for the answer. It is one import: what the tools know about the person, their skills and their connected apps, shown together and answered once. Show plain lines, never checkboxes, and never ask the person to tick or untick anything.
+For the CORSIA agent: in first run when `setup.setup_decisions` holds the import decision (title `Read what your other tools know?`), and any time the person asks to bring things over from Claude Code, Codex, OpenClaw or Hermes. Use tool `agent_import`; each refusal names the missing step. Post every line below with `post_update`, one message at a time, and wait for the answer. It is one import: what the tools know about the person, their skills and their connected apps, shown together and answered once. Show plain lines, never checkboxes, and never ask the person to tick or untick anything.
 
 ## The consent
 

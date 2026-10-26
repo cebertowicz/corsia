@@ -20,7 +20,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from onboarding.agent_import import (
-    CLAUDE_CODE, CODEX, HERMES, LABELS, OPENCLAW, inside, checked_root, display_path, tool_roots,
+    CLAUDE_CODE, CODEX, HERMES, LABELS, OPENCLAW, TOOL_MADE_SKILL_FOLDERS, inside, checked_root, display_path,
+    tool_roots,
 )
 from onboarding.project_discovery import Roots
 
@@ -124,7 +125,8 @@ def candidates(roots: Roots, tools: list[str]) -> list[Candidate]:
                if tool in tools and (real := checked_root(root)) is not None}
     found: list[Candidate] = []
     if claude := checked.get(CLAUDE_CODE):
-        found += [Candidate(CLAUDE_CODE, path) for path in _dirs(claude / "skills", claude)]
+        found += [Candidate(CLAUDE_CODE, path) for path in _dirs(claude / "skills", claude)
+                  if path.name not in TOOL_MADE_SKILL_FOLDERS[CLAUDE_CODE]]
         found += [Candidate(CLAUDE_CODE, path, command)
                   for path, command in _commands(claude / "commands", claude)]
     if codex := checked.get(CODEX):

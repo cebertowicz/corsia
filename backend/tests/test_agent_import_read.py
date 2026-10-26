@@ -97,6 +97,18 @@ def test_found_tools_is_stats_only_and_opens_nothing(home, monkeypatch):
     assert opened == []
 
 
+def test_a_fresh_claude_code_sign_in_is_not_found_until_the_person_has_made_something(tmp_path, monkeypatch):
+    """Sign-in alone fills ``skills/synced`` with Claude's own bundles; that is nothing of the person's."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+    skills = tmp_path / ".claude" / "skills"
+    (skills / "synced" / "account_bundle").mkdir(parents=True)
+    (skills / "synced" / ".bucket-account_bundle").write_text("")
+    assert reader.found_tools(Roots.for_user()) == []
+    (skills / "mine").mkdir()
+    assert reader.found_tools(Roots.for_user()) == ["claude-code"]
+
+
 def test_no_tool_folders_means_nothing_found(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     assert reader.found_tools(Roots.for_user()) == []

@@ -36,7 +36,12 @@ DAILY_NOTE_DAYS = 30
 AUTO_MEMORY_TYPES = frozenset({"user", "feedback"})
 OPENCLAW_WORKSPACES = ("workspace", "workspace-main", "workspace.default")
 
-#: What a stat may find, per tool, before consent: nothing is listed or opened.
+#: Folders a tool fills in itself under ``skills``: Claude Code's sign-in fills ``synced`` with the
+#: account's own bundles, so neither a found tool nor a skill the person made.
+TOOL_MADE_SKILL_FOLDERS = {CLAUDE_CODE: frozenset({"synced"})}
+
+#: What a stat may find, per tool, before consent: nothing is opened, and a folder that a tool fills in
+#: itself is named, never read.
 FOUND_MARKERS = {
     CLAUDE_CODE: ("CLAUDE.md", "projects", "skills", "commands"),
     CODEX: ("memories", "AGENTS.md", "skills"),
@@ -96,14 +101,25 @@ def tool_roots(roots: Roots) -> dict[str, Path]:
     return {CLAUDE_CODE: roots.claude, CODEX: roots.codex, OPENCLAW: roots.openclaw, HERMES: roots.hermes}
 
 
+def _holds_more_than_tool_made(marker: Path, tool_made: frozenset[str]) -> bool:
+    """``marker`` exists and, when a tool fills it in itself, holds something besides that."""
+    if not tool_made or not os.path.isdir(marker):
+        return os.path.exists(marker)
+    try:
+        return any(entry.name not in tool_made and not entry.name.startswith(".") for entry in os.scandir(marker))
+    except OSError:
+        return False
+
+
 def found_tools(roots: Roots) -> list[str]:
     """The tools with any fixed location present, from stats alone; nothing is opened."""
     found = []
     for tool, root in tool_roots(roots).items():
-        markers = [root / name for name in FOUND_MARKERS[tool]]
+        tool_made = TOOL_MADE_SKILL_FOLDERS.get(tool, frozenset())
+        markers = [(root / name, tool_made if name == "skills" else frozenset()) for name in FOUND_MARKERS[tool]]
         if tool == CODEX:
-            markers.append(roots.agents / "skills")
-        if any(os.path.exists(marker) for marker in markers) and checked_root(root) is not None:
+            markers.append((roots.agents / "skills", frozenset()))
+        if any(_holds_more_than_tool_made(marker, made) for marker, made in markers) and checked_root(root) is not None:
             found.append(tool)
     return found
 
