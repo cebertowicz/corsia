@@ -21,38 +21,38 @@ class TestHmacVerification:
 
     def test_valid_signature(self):
         from events.connectors.github_receiver import GITHUB_RECEIVER
-        from events.connectors.receiver import verify_signature
+        from events.connectors.receiver import verify_hmac_sha256
         body = b'{"hello":"world"}'
         sig = _make_signature(body)
-        assert verify_signature(GITHUB_RECEIVER, body, sig, WEBHOOK_SECRET) is True
+        assert verify_hmac_sha256(body, sig, GITHUB_RECEIVER.signature_prefix, WEBHOOK_SECRET) is True
 
     def test_invalid_signature(self):
         from events.connectors.github_receiver import GITHUB_RECEIVER
-        from events.connectors.receiver import verify_signature
+        from events.connectors.receiver import verify_hmac_sha256
         body = b'{"hello":"world"}'
         sig = _make_signature(body, secret="wrong-secret")
-        assert verify_signature(GITHUB_RECEIVER, body, sig, WEBHOOK_SECRET) is False
+        assert verify_hmac_sha256(body, sig, GITHUB_RECEIVER.signature_prefix, WEBHOOK_SECRET) is False
 
     def test_missing_prefix(self):
         from events.connectors.github_receiver import GITHUB_RECEIVER
-        from events.connectors.receiver import verify_signature
+        from events.connectors.receiver import verify_hmac_sha256
         body = b'{"hello":"world"}'
         mac = hmac.new(WEBHOOK_SECRET.encode(), body, hashlib.sha256)
         sig_no_prefix = mac.hexdigest()
-        assert verify_signature(GITHUB_RECEIVER, body, sig_no_prefix, WEBHOOK_SECRET) is False
+        assert verify_hmac_sha256(body, sig_no_prefix, GITHUB_RECEIVER.signature_prefix, WEBHOOK_SECRET) is False
 
     def test_empty_signature(self):
         from events.connectors.github_receiver import GITHUB_RECEIVER
-        from events.connectors.receiver import verify_signature
-        assert verify_signature(GITHUB_RECEIVER, b"body", "", WEBHOOK_SECRET) is False
+        from events.connectors.receiver import verify_hmac_sha256
+        assert verify_hmac_sha256(b"body", "", GITHUB_RECEIVER.signature_prefix, WEBHOOK_SECRET) is False
 
     def test_tampered_body(self):
         from events.connectors.github_receiver import GITHUB_RECEIVER
-        from events.connectors.receiver import verify_signature
+        from events.connectors.receiver import verify_hmac_sha256
         original = b'{"original":"body"}'
         sig = _make_signature(original)
         tampered = b'{"tampered":"body"}'
-        assert verify_signature(GITHUB_RECEIVER, tampered, sig, WEBHOOK_SECRET) is False
+        assert verify_hmac_sha256(tampered, sig, GITHUB_RECEIVER.signature_prefix, WEBHOOK_SECRET) is False
 
 
 

@@ -8,6 +8,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from events.connectors.receiver import ReceiverDecl, ReceiverDelivery, ReceiverOutcome
+from infra.key_store import GITHUB_WEBHOOK
 
 log = logging.getLogger(__name__)
 
@@ -44,6 +45,7 @@ async def translate_github(delivery: ReceiverDelivery) -> ReceiverOutcome:
 
 GITHUB_RECEIVER = ReceiverDecl(
     translator=translate_github,
+    secret=GITHUB_WEBHOOK,
     signature_header="x-hub-signature-256",
     signature_prefix="sha256=",
     delivery_id_header="x-github-delivery",

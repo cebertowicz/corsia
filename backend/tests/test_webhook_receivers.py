@@ -7,6 +7,7 @@ import json
 import sqlite3
 import threading
 import uuid
+from dataclasses import replace
 from unittest.mock import patch
 
 import httpx
@@ -26,7 +27,10 @@ from events.connectors import (
     register,
 )
 from events.connectors.receiver import ReceiverDecl, ReceiverDelivery, ReceiverOutcome
-from infra import webhook_delivery_log
+from infra import key_store, webhook_delivery_log
+from infra.key_store import BuiltinKey
+
+TEST_KEY = BuiltinKey("alpha-webhook", "Alpha webhook", "Alpha signature checks")
 
 SECRETS = {"alpha": "alpha-secret-value", "beta": "beta-secret-value", "github": WEBHOOK_SECRET}
 
@@ -46,6 +50,7 @@ def _test_manifest(name: str, translator, *, max_body_bytes: int = 1024 * 1024) 
         build_artifact_ref=lambda event_type, facts, raw: None,
         receiver=ReceiverDecl(
             translator=translator,
+            secret=TEST_KEY,
             signature_header="x-test-signature",
             signature_prefix="sha256=",
             delivery_id_header="x-test-delivery",
@@ -56,19 +61,19 @@ def _test_manifest(name: str, translator, *, max_body_bytes: int = 1024 * 1024) 
 
 @pytest.fixture()
 def receivers(_isolated_db, monkeypatch):
-    """Two in-tree test connectors, each with its own secret, and what their translators saw."""
+    """A manifest-declared test connector and its code-owned key."""
     seen: list[ReceiverDelivery] = []
 
     async def translate(delivery: ReceiverDelivery) -> ReceiverOutcome:
         seen.append(delivery)
         return ReceiverOutcome()
 
-    monkeypatch.setattr("api.webhook_receivers.receiver_secret", lambda connector: SECRETS.get(connector))
-    for name in ("alpha", "beta"):
-        register(_test_manifest(name, translate))
+    monkeypatch.setitem(key_store.BUILTINS, TEST_KEY.name, TEST_KEY)
+    key_store.set_value(TEST_KEY.name, SECRETS["alpha"])
+    key_store.set_value("github-webhook", WEBHOOK_SECRET)
+    register(_test_manifest("alpha", translate))
     yield seen
-    for name in ("alpha", "beta"):
-        _REGISTRY.pop(name, None)
+    _REGISTRY.pop("alpha", None)
 
 
 @pytest.fixture()
@@ -93,15 +98,14 @@ async def test_each_connector_verifies_only_its_own_secret(receivers, client):
     body = json.dumps({"id": 1}).encode()
     async with client:
         own = await client.post("/webhooks/alpha/", content=body, headers=_headers(body, SECRETS["alpha"]))
-        other = await client.post("/webhooks/alpha/", content=body, headers=_headers(body, SECRETS["beta"]))
-        beta_own = await client.post("/webhooks/beta", content=body, headers=_headers(body, SECRETS["beta"]))
-        beta_other = await client.post("/webhooks/beta", content=body, headers=_headers(body, SECRETS["alpha"]))
-        sub = await client.post("/webhooks/beta/events/x", content=body, headers=_headers(body, SECRETS["beta"]))
-    assert (own.status_code, other.status_code) == (202, 401)
-    assert (beta_own.status_code, beta_other.status_code) == (202, 401)
-    assert sub.status_code == 202
-    assert [d.connector for d in receivers] == ["alpha", "beta", "beta"]
-    assert receivers[2].subpath == "events/x"
+        other = await client.post("/webhooks/alpha/", content=body, headers=_headers(body, WEBHOOK_SECRET))
+        github_other = await client.post("/webhooks/github", content=body, headers={
+            "x-hub-signature-256": _sign(body, SECRETS["alpha"]), "x-github-event": "pull_request",
+        })
+        sub = await client.post("/webhooks/alpha/events/x", content=body, headers=_headers(body, SECRETS["alpha"]))
+    assert (own.status_code, other.status_code, github_other.status_code) == (202, 401, 401)
+    assert sub.status_code in (404, 405)
+    assert [d.connector for d in receivers] == ["alpha"]
 
 
 @pytest.mark.asyncio
@@ -119,7 +123,7 @@ async def test_missing_secret_or_signature_gets_401_and_no_translator_runs(recei
     body = b"{}"
     async with client:
         unsigned = await client.post("/webhooks/alpha/", content=body)
-        monkeypatch.setattr("api.webhook_receivers.receiver_secret", lambda connector: None)
+        key_store.clear_value(TEST_KEY.name)
         no_secret = await client.post("/webhooks/alpha/", content=body, headers=_headers(body, "x"))
     assert (unsigned.status_code, no_secret.status_code) == (401, 401)
     assert receivers == []
@@ -130,7 +134,6 @@ async def test_oversized_body_gets_413_before_a_signature_is_checked(_isolated_d
     async def translate(delivery):
         raise AssertionError("an oversized body must never reach a translator")
 
-    monkeypatch.setattr("api.webhook_receivers.receiver_secret", lambda connector: SECRETS.get(connector))
     register(_test_manifest("alpha", translate, max_body_bytes=64))
     try:
         body = b"x" * 65
@@ -154,17 +157,14 @@ async def test_oversized_body_gets_413_before_a_signature_is_checked(_isolated_d
 
 def test_receiver_defaults_and_github_limit():
     from events.connectors.github_receiver import GITHUB_RECEIVER
-    from events.connectors.receiver import DEFAULT_BODY_LIMIT, SIGNATURE_SCHEMES
+    from events.connectors.receiver import DEFAULT_BODY_LIMIT
 
     assert DEFAULT_BODY_LIMIT == 1024 * 1024
     assert GITHUB_RECEIVER.max_body_bytes == 25 * 1024 * 1024
-    assert SIGNATURE_SCHEMES[0] == "hmac_sha256"
+    assert GITHUB_RECEIVER.secret == key_store.GITHUB_WEBHOOK
     assert (GITHUB_RECEIVER.signature_header, GITHUB_RECEIVER.signature_prefix) == (
         "x-hub-signature-256", "sha256=",
     )
-    with pytest.raises(ValueError):
-        ReceiverDecl(translator=None, signature_header="x", signature_prefix="", delivery_id_header="y",
-                     signature_scheme="rot13")
 
 
 def _post_github(client, payload: dict, delivery_id: str, path: str = "/webhooks/github"):
@@ -186,8 +186,7 @@ async def _no_route(internal_event, payload, delivery_id=None):
 
 
 @pytest.mark.asyncio
-async def test_redelivered_github_delivery_id_is_dropped(_isolated_db, monkeypatch, client):
-    monkeypatch.setattr("api.webhook_receivers.receiver_secret", lambda connector: WEBHOOK_SECRET)
+async def test_redelivered_github_delivery_id_is_dropped(receivers, client):
     with patch("events.ingress.route_leg", side_effect=_no_route), patch("events.ingress.review_leg"):
         async with client:
             first = await _post_github(client, _pr_opened_payload(), "gh-delivery-1")
@@ -197,8 +196,7 @@ async def test_redelivered_github_delivery_id_is_dropped(_isolated_db, monkeypat
 
 
 @pytest.mark.asyncio
-async def test_legacy_github_paths_answer_2xx_with_no_redirect(_isolated_db, monkeypatch, client):
-    monkeypatch.setattr("api.webhook_receivers.receiver_secret", lambda connector: WEBHOOK_SECRET)
+async def test_legacy_github_paths_answer_2xx_with_no_redirect(receivers, client):
     with patch("events.ingress.route_leg", side_effect=_no_route), patch("events.ingress.review_leg"):
         async with client:
             plain = await _post_github(client, _pr_opened_payload(), "gh-plain", "/webhooks/github")
@@ -240,10 +238,9 @@ def _route_table(routes, prefix: str = ""):
 
 
 @pytest.mark.asyncio
-async def test_every_webhooks_route_verifies_a_signature_first(receivers, client, monkeypatch):
+async def test_every_webhooks_route_verifies_a_signature_first(receivers, client):
     from main import app
 
-    monkeypatch.setattr("api.webhook_receivers.receiver_secret", lambda connector: WEBHOOK_SECRET)
     routes = [(path, route) for path, route in _route_table(app.routes) if path.startswith("/webhooks")]
     assert len(routes) >= 4
     async with client:
@@ -271,7 +268,9 @@ async def test_an_agent_added_entry_is_never_a_receiver_secret(_isolated_db, tmp
         seen.append(delivery)
         return ReceiverOutcome()
 
-    register(_test_manifest("othertool", translate))
+    manifest = _test_manifest("othertool", translate)
+    forged_key = BuiltinKey("othertool-webhook", "Forged", "")
+    register(replace(manifest, receiver=replace(manifest.receiver, secret=forged_key)))
     try:
         forged = {}
         async with client:
@@ -283,8 +282,10 @@ async def test_an_agent_added_entry_is_never_a_receiver_secret(_isolated_db, tmp
                     "/webhooks/othertool/", content=body, headers=_headers(body, "forged-" + name),
                 )
         key_store.set_value("github-webhook", "gh-secret-value")
-        assert receiver_secret("github") == "gh-secret-value"
-        assert receiver_secret("othertool") is None
+        from events.connectors.github_receiver import GITHUB_RECEIVER
+
+        assert receiver_secret(GITHUB_RECEIVER) == "gh-secret-value"
+        assert receiver_secret(replace(manifest.receiver, secret=forged_key)) is None
     finally:
         _REGISTRY.pop("othertool", None)
     assert {name: r.status_code for name, r in forged.items()} == {
@@ -298,7 +299,8 @@ async def test_a_fault_in_admission_answers_500(_isolated_db, monkeypatch):
     async def translate(delivery):
         raise RuntimeError("boom")
 
-    monkeypatch.setattr("api.webhook_receivers.receiver_secret", lambda connector: SECRETS.get(connector))
+    monkeypatch.setitem(key_store.BUILTINS, TEST_KEY.name, TEST_KEY)
+    key_store.set_value(TEST_KEY.name, SECRETS["alpha"])
     register(_test_manifest("alpha", translate))
     try:
         from main import app
@@ -333,11 +335,11 @@ async def test_a_request_cancelled_mid_admission_is_still_admitted_once(_isolate
         release.wait(5.0)
         return real_update(*args, **kwargs)
 
-    monkeypatch.setattr("api.webhook_receivers.receiver_secret", lambda connector: WEBHOOK_SECRET)
+    key_store.set_value("github-webhook", WEBHOOK_SECRET)
     monkeypatch.setattr(github_webhook, "schedule_github_webhook", schedule)
     monkeypatch.setattr(webhook_delivery_log, "update_delivery_status", held_settle)
     request = _direct_webhook_request(_pr_opened_payload(), delivery_id="gh-cancelled")
-    task = asyncio.create_task(handle_receiver("github", "", request))
+    task = asyncio.create_task(handle_receiver("github", request))
     try:
         assert await asyncio.wait_for(asyncio.to_thread(entered.wait, 5.0), 6.0)
         task.cancel()

@@ -19,22 +19,22 @@ router = APIRouter(tags=["webhooks"])
 @router.post("/webhooks/github")
 async def github_webhook(request: Request):
     """Receive a GitHub webhook delivery."""
-    return await handle_receiver("github", "", request)
+    return await handle_receiver("github", request)
 
 
 @router.post("/webhooks/github/")
 async def github_webhook_slash(request: Request):
     """The same receiver at the trailing-slash path; an explicit route, never a redirect."""
-    return await handle_receiver("github", "", request)
+    return await handle_receiver("github", request)
 
 
 @router.post("/webhooks/{connector}")
 async def connector_webhook(connector: str, request: Request):
     """Receive a delivery for an installed connector's receiver."""
-    return await handle_receiver(connector, "", request)
+    return await handle_receiver(connector, request)
 
 
-@router.post("/webhooks/{connector}/{subpath:path}")
-async def connector_webhook_subpath(connector: str, subpath: str, request: Request):
-    """A connector owns its whole ``/webhooks/<connector>/`` subtree."""
-    return await handle_receiver(connector, subpath, request)
+@router.post("/webhooks/{connector}/")
+async def connector_webhook_slash(connector: str, request: Request):
+    """Receive the same delivery without a redirect."""
+    return await handle_receiver(connector, request)

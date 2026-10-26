@@ -120,8 +120,9 @@ def release_notice(thread_id: str, identity: Any) -> None:
 def webhook_configured() -> bool:
     """Whether GitHub webhooks can reach this instance: the endpoint's own secret read."""
     from api.webhook_receivers import receiver_secret
+    from events.connectors.github_receiver import GITHUB_RECEIVER
 
-    return bool(receiver_secret("github"))
+    return bool(receiver_secret(GITHUB_RECEIVER))
 
 
 def parse_pr_external_id(external_id: str) -> tuple[str, int] | None:

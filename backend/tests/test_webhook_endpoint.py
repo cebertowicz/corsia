@@ -7,6 +7,7 @@ from threading import Event
 from unittest.mock import patch
 
 import pytest
+from fastapi import Request
 from fastapi.testclient import TestClient
 
 from webhook_ingress_fixtures import (  # noqa: F401
@@ -20,31 +21,26 @@ from webhook_ingress_fixtures import (  # noqa: F401
 )
 
 
-class _DirectWebhookRequest:
-    def __init__(self, body: bytes, headers: dict[str, str]) -> None:
-        self._body = body
-        self.headers = headers
-
-    async def body(self) -> bytes:
-        return self._body
-
-
 def _direct_webhook_request(
     payload: dict,
     *,
     event_type: str = "pull_request",
     delivery_id: str | None = None,
-) -> _DirectWebhookRequest:
+) -> Request:
     body = json.dumps(payload).encode()
-    return _DirectWebhookRequest(
-        body,
-        {
-            "X-GitHub-Event": event_type,
-            "X-GitHub-Delivery": delivery_id or str(uuid.uuid4()),
-            "X-Hub-Signature-256": _make_signature(body),
-            "Content-Type": "application/json",
-        },
-    )
+    headers = {
+        "x-github-event": event_type,
+        "x-github-delivery": delivery_id or str(uuid.uuid4()),
+        "x-hub-signature-256": _make_signature(body),
+        "content-type": "application/json",
+    }
+
+    async def receive():
+        return {"type": "http.request", "body": body, "more_body": False}
+
+    scope = {"type": "http", "method": "POST", "path": "/webhooks/github",
+             "headers": [(k.encode(), v.encode()) for k, v in headers.items()]}
+    return Request(scope, receive)
 
 
 class TestWebhookEndpoint:

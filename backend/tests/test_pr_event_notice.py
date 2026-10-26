@@ -220,10 +220,11 @@ def test_poll_detection_matches_only_literal_polling_commands(command, matches):
 
 def test_wording_follows_the_webhook_endpoints_own_secret(isolated_db, monkeypatch):
     from api import webhook_receivers
+    from events.connectors.github_receiver import GITHUB_RECEIVER
 
     pr = notices.OwnedPr("o/r#12", REPO, 12, False)
     _webhook(False)
-    assert webhook_receivers.receiver_secret("github") is None
+    assert webhook_receivers.receiver_secret(GITHUB_RECEIVER) is None
     poller_only = notices._notice(pr)
     assert "This instance does not receive CI or reviewer results." in poller_only
     assert "run `gh pr checks 12` once. Do not poll in a loop." in poller_only
