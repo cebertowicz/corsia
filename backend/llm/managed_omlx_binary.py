@@ -82,6 +82,24 @@ def managed_omlx_paths() -> ManagedOmlxPaths:
     return ManagedOmlxPaths(base, base / "models", base / "settings.json")
 
 
+def managed_model_on_disk() -> bool:
+    """Whether the managed model folder, on the current state root, holds a finished model download."""
+    model_dir = managed_omlx_paths().model_dir
+    if not model_dir.is_dir():
+        return False
+    for config in model_dir.glob("*/config.json"):
+        if _finished_folder(config.parent):
+            return True
+    for config in model_dir.glob("*/*/config.json"):
+        if _finished_folder(config.parent):
+            return True
+    return False
+
+
+def _finished_folder(folder: Path) -> bool:
+    return not any(name.endswith(".incomplete") for _root, _dirs, files in os.walk(folder) for name in files)
+
+
 def reserve_managed_omlx_port() -> tuple[ManagedOmlxPaths, int]:
     """Prepare private directories and record a port for the managed launch."""
     from llm.providers.omlx_process import port_is_free

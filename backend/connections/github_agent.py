@@ -199,7 +199,10 @@ def _resolve(db, *, wait: float | None) -> AgentAccountView:
     if len(rows) > 1:
         return AgentAccountView("needs_auth", "multiple_accounts")
     row = rows[0]
-    account_id, home = str(row["id"]), str(row["source_home"])
+    from connections.account_row_shape import current_home
+
+    account_id = str(row["id"])
+    home = str(current_home(str(row["source_home"]), PROVIDER, account_id))
     base = AgentAccountView("needs_auth", account_id=account_id, home=home)
     binary = _agent_binary(_config(row["config"]))
     if binary is None:

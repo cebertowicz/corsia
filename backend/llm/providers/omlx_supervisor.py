@@ -76,6 +76,21 @@ def _clear_pid(server_id: str) -> None:
     process.clear_pid(RUNTIME_DIR, server_id)
 
 
+def _person_stopped_path(server_id: str):
+    return RUNTIME_DIR / f"omlx-{server_id}.person-stopped"
+
+
+def mark_person_stopped(server_id: str) -> None:
+    """Record that the person stopped this server, so startup leaves it stopped."""
+    path = _person_stopped_path(server_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.touch()
+
+
+def person_stopped(server_id: str) -> bool:
+    return _person_stopped_path(server_id).exists()
+
+
 def _process_alive(pid: int) -> bool:
     return process.process_alive(pid)
 
@@ -274,6 +289,7 @@ async def start_server(cfg: dict) -> dict[str, Any]:
     proc = spawned
 
     _write_pid(sid, proc.pid)
+    _person_stopped_path(sid).unlink(missing_ok=True)
     log.info("start_server: spawned omlx pid=%s for server_id=%s on %s:%s",
              proc.pid, sid, host, port)
 

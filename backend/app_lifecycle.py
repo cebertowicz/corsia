@@ -22,6 +22,7 @@ import infra.startup_progress as startup_progress
 from infra import key_store_values, state
 from infra.db_async import run_in_db
 from infra.database import init_db, shutdown_pool
+from llm.omlx_startup import reconcile_omlx_servers as _reconcile_omlx_servers, start_in_background
 
 
 async def _discover_network_servers(logger) -> int:
@@ -43,22 +44,6 @@ async def _discover_network_servers(logger) -> int:
     return len(online)
 
 
-def _reconcile_omlx_servers(servers: list[dict], logger) -> None:
-    from llm.providers.omlx_supervisor import reconcile
-
-    for server in servers:
-        if server.get("provider") != "omlx":
-            continue
-        result = reconcile({"server_id": server["id"]})
-        if result.get("adopted"):
-            logger.info(
-                f"oMLX supervisor: adopted pid {result['pid']} for {server['id']}"
-            )
-        elif result.get("cleared"):
-            logger.info(
-                f"oMLX supervisor: cleared stale pid {result['pid']} for {server['id']}"
-            )
-
 async def _startup_network_discovery() -> None:
     from llm.network_discovery import _sweep_all_servers, get_servers
     from loguru import logger
@@ -66,7 +51,10 @@ async def _startup_network_discovery() -> None:
     try:
         servers = await run_in_db(get_servers)
         try:
-            await run_in_db(_reconcile_omlx_servers, servers or [], logger)
+            to_start = await run_in_db(_reconcile_omlx_servers, servers or [], logger)
+            if to_start:
+                # Its own task: a cold start can take minutes and must not delay discovery or Ready.
+                start_in_background(to_start, logger)
         except Exception as exc:
             logger.warning(f"oMLX pid reconciliation failed: {exc}")
         if not servers:

@@ -62,6 +62,10 @@ async def lifecycle_action(server_id: str, action: str):
             await run_in_db(nd.update_server_status, server_id, status="online")
         elif action == "stop":
             await run_in_db(nd.update_server_status, server_id, status="offline")
+            if provider == "omlx":
+                from llm.providers.omlx_supervisor import mark_person_stopped
+
+                mark_person_stopped(server_id)
     else:
         # The reference ties the failure the person sees to this line.
         result = {**result, "ref": new_reference("local")}
