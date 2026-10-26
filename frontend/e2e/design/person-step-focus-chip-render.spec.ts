@@ -675,7 +675,8 @@ for (const size of SIZES) {
             settle(SEVEN[0].id, "done");
             socket.push();
             await expect(page.locator(`[data-person-step]`).first()).toBeVisible();
-            await expect(rows.first()).toContainText("+5 more", { timeout: 15_000 });
+            // The settled task becomes its own receipt row; the rest stay one group line, one fewer.
+            await expect(rows.filter({ hasText: "+5 more" })).toHaveCount(1, { timeout: 15_000 });
             await expect(page.locator(".ev-chip").filter({ hasText: SEVEN[0].title })).toBeVisible();
             await shot(page, `group-settle-${size.w}-${theme}`);
           }
