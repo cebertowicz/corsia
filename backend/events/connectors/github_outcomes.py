@@ -9,8 +9,9 @@ dedupe promises here, and nothing more.
 The keys then split into two kinds, and a backfill has to know which is which. The
 PR open, push, close and merge keys, the issue keys and the run id plus
 ``run_attempt`` in ``github.workflow_run.completed``, the job id in
-``github.workflow_job.completed`` and the check run id plus ``completed_at`` in
-``github.check_run.completed`` are built from identities the
+``github.workflow_job.completed``, the check run id plus ``completed_at`` in
+``github.check_run.completed``, and the review or comment id (plus the action, for a
+review) in the review and comment events are built from identities the
 repository still reports — a head or merge SHA, a close timestamp, a run's
 ``run_attempt`` — so a later read can reconstruct the same key. ``github.pr.reopened``,
 ``github.pr.retargeted`` and ``github.check_suite.completed`` are keyed on the
@@ -327,6 +328,21 @@ def _check_run_drafts(payload: dict[str, Any], repo: str) -> list[OutcomeDraft]:
     return check_run_drafts(payload, repo)
 
 
+def _review_drafts(payload: dict[str, Any], repo: str) -> list[OutcomeDraft]:
+    from events.connectors.github_reply_outcomes import review_drafts
+    return review_drafts(payload, repo)
+
+
+def _review_comment_drafts(payload: dict[str, Any], repo: str) -> list[OutcomeDraft]:
+    from events.connectors.github_reply_outcomes import review_comment_drafts
+    return review_comment_drafts(payload, repo)
+
+
+def _issue_comment_drafts(payload: dict[str, Any], repo: str) -> list[OutcomeDraft]:
+    from events.connectors.github_reply_outcomes import issue_comment_drafts
+    return issue_comment_drafts(payload, repo)
+
+
 # The public entry owns supported-action selection; private mappers consume it.
 _MAPPERS = {
     "pull_request": (("opened", "synchronize", "reopened", "closed", "edited", "labeled", "unlabeled"), _pr_drafts),
@@ -335,6 +351,9 @@ _MAPPERS = {
     "workflow_job": (("completed",), _workflow_job_drafts),
     "check_run": (("completed",), _check_run_drafts),
     "issues": (("opened", "closed", "reopened", "labeled", "unlabeled"), _issue_drafts),
+    "pull_request_review": (("submitted", "dismissed"), _review_drafts),
+    "pull_request_review_comment": (("created",), _review_comment_drafts),
+    "issue_comment": (("created",), _issue_comment_drafts),
 }
 # Label changes and issue reopens map in github_label_outcomes, from the shared normalization.
 _LABEL_ACTIONS = {"pull_request": ("labeled", "unlabeled"), "issues": ("reopened", "labeled", "unlabeled")}
