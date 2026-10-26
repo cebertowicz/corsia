@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Awaitable, Callable, Sequence
 from urllib.parse import urlparse, urlunparse
 from urllib.request import urlopen
@@ -24,15 +24,16 @@ _PASSWORD_AUTOCOMPLETE = {"current-password", "new-password"}
 
 @dataclass(frozen=True)
 class PasswordProbe:
-    """The guarded page visit and visible password-node identities, never values.
+    """The guarded page visit and visible/present password-node identities, never values or text.
 
-    ``target`` is the page target probed, so a probe of another tab never settles this one's episode.
+    ``target`` is the page target probed, so a probe of another tab never settles the step open on this one.
     """
 
     visit: str
     host: str
     visible_nodes: frozenset[int]
     target: str = ""
+    present_nodes: frozenset[int] = field(kw_only=True)
 
 
 class CdpClient:
@@ -89,7 +90,7 @@ async def page_password_probe(endpoint: str, known_visit: str | None, known_node
         known = known_nodes if known_visit == loader else frozenset()
         current = await _password_inputs(cdp)
         visible = {node for node in current | known if await _visible(cdp, node)}
-        return PasswordProbe(loader, host, frozenset(visible), endpoint)
+        return PasswordProbe(loader, host, frozenset(visible), endpoint, present_nodes=frozenset(current))
 
 
 async def _password_inputs(cdp: CdpClient) -> set[int]:

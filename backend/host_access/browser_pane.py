@@ -5,7 +5,7 @@ import asyncio
 from dataclasses import dataclass
 from typing import Awaitable, Callable
 
-from host_access import browser_cdp, browser_cli, browser_control, browser_screencast
+from host_access import browser_cdp, browser_cli, browser_control, browser_pane_state, browser_screencast
 from host_access.processes import PROCESS_OWNER
 
 __all__ = ["HISTORY_ACTIONS", "PaneAppearance", "clear_page_endpoint", "go", "is_open", "key_event", "match_pane", "mouse_event", "open_url", "page_info", "password_probe", "screencast", "watch_page_metadata"]
@@ -54,17 +54,17 @@ async def screencast(thread_id: str, connection_token: str, deliver: Callable[[s
     """Show the shared page in this pane until it leaves, restarting after each page-metrics change."""
     endpoint = await _page_endpoint(thread_id, connection_token, "This page couldn't be shown")
     cast = browser_screencast.PaneScreencast(endpoint, deliver)
-    browser_control.screencast_started(thread_id, connection_token, cast)
+    browser_pane_state.screencast_started(thread_id, connection_token, cast)
     try:
         await cast.run()
     finally:
-        browser_control.screencast_ended(thread_id, connection_token, cast)
+        browser_pane_state.screencast_ended(thread_id, connection_token, cast)
 
 
 async def password_probe(thread_id: str, connection_token: str, known_visit: str | None,
                          known_nodes: frozenset[int]) -> browser_cdp.PasswordProbe:
     """Probe the shared page for a password field over this pane's page endpoint."""
-    endpoint = await _page_endpoint(thread_id, connection_token, browser_control.PASSWORD_CHECK_FAILED)
+    endpoint = await _page_endpoint(thread_id, connection_token, browser_control.PAGE_CHECK_FAILED)
     return await browser_cdp.page_password_probe(endpoint, known_visit, known_nodes)
 
 
@@ -129,7 +129,7 @@ async def match_pane(thread_id: str, appearance: PaneAppearance) -> None:
     # Every pane on this thread shows the one shared page, so each captures at the new size from the
     # restart that follows the viewport command and sends the resized picture at once.
     # Size the JPEG to the pane's physical pixels; compact layouts use smaller JPEGs.
-    browser_control.capture_at(thread_id, round(appearance.width * appearance.scale),
+    browser_pane_state.capture_at(thread_id, round(appearance.width * appearance.scale),
                                round(appearance.height * appearance.scale), compact=appearance.width <= 480)
     owner = PROCESS_OWNER.browser_sessions()
     for args in (("set", "viewport", str(appearance.width), str(appearance.height), f"{appearance.scale:g}"),

@@ -1148,6 +1148,11 @@ async def test_browser_http_open_stages_navigation_before_waiting(monkeypatch) -
         ),
         (lambda _tmp: __import__(
             "tools.browser_actions",
+            fromlist=["BrowserPersonStepTool"],
+        ).BrowserPersonStepTool(), ("Sign in to Google",),
+        ),
+        (lambda _tmp: __import__(
+            "tools.browser_actions",
             fromlist=["BrowserWaitTool"],
         ).BrowserWaitTool(), ("10",),
         ),
@@ -1221,6 +1226,80 @@ async def test_browser_commands_forward_exact_backend_identity(
             ),
         )
     ]
+
+
+@pytest.mark.asyncio
+async def test_browser_person_step_runs_the_real_declaration_for_the_authoritative_thread(monkeypatch) -> None:
+    """Only the browser process and the plan write are stand-ins; the tool returns the declaration's success."""
+    from host_access import browser_cdp, browser_control
+    from host_access.browser_cdp import PasswordProbe
+    from host_access.browser_sessions import BrowserSessionOwner
+    from tools import browser_actions, browser_runtime
+
+    owner = BrowserSessionOwner(namespace="corsia-person-step", instance_key="test")
+    admitted: list[str] = []
+    writes: list[tuple[str, object]] = []
+
+    async def pin() -> None:
+        return None
+
+    async def admit(thread_id, **_kwargs):
+        admitted.append(thread_id)
+        return object()
+
+    async def page_endpoint(_command):
+        return "ws://page.test"
+
+    async def probe(_endpoint, _visit, _known):
+        return PasswordProbe("visit", "accounts.google.com", frozenset(), "ws://page.test", present_nodes=frozenset())
+
+    monkeypatch.setattr(owner, "_pin_native", pin)
+    monkeypatch.setattr(owner, "_admit", admit)
+    monkeypatch.setattr(browser_cdp, "page_endpoint", page_endpoint)
+    monkeypatch.setattr(browser_cdp, "page_password_probe", probe)
+
+    def plan_write(operation, *_args, **kwargs):
+        writes.append((operation, kwargs["title"]))
+        return "step"
+
+    monkeypatch.setattr(browser_control, "_plan_write", plan_write)
+    monkeypatch.setattr(browser_control, "_step_row_state", lambda _node_id: None)
+    monkeypatch.setattr(browser_control, "emit_product_event", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(browser_runtime, "_check_installed", lambda: None)
+    monkeypatch.setattr(browser_runtime, "PROCESS_OWNER", SimpleNamespace(browser_sessions=lambda: owner))
+    try:
+        result = await browser_actions.BrowserPersonStepTool().execute(
+            "Sign in to Google", _thread_id="authoritative-thread", _thread_project_id="project-1",
+        )
+    finally:
+        browser_control._steps.pop("authoritative-thread", None)
+
+    assert result == "Person step opened; end your turn."
+    assert admitted == ["authoritative-thread"]
+    assert writes == [("open_user_step", "Complete this step in the browser (google.com)")]
+
+
+@pytest.mark.asyncio
+async def test_browser_person_step_failure_logs_its_cause_without_claiming_success(monkeypatch, caplog) -> None:
+    import logging
+    from tools import browser_actions, browser_runtime
+    from plans.public import PlanError
+
+    class FailingOwner:
+        async def declare_person_step(self, _thread_id, _instruction):
+            raise PlanError("fixture receipt write failed")
+
+    monkeypatch.setattr(browser_runtime, "_check_installed", lambda: None)
+    monkeypatch.setattr(browser_runtime, "PROCESS_OWNER", SimpleNamespace(browser_sessions=lambda: FailingOwner()))
+    with caplog.at_level(logging.ERROR, logger=browser_runtime.__name__):
+        result = await browser_actions.BrowserPersonStepTool().execute(
+            "Choose your account", _thread_id="authoritative-thread", _thread_project_id="project-1",
+        )
+    assert result.startswith("Error: browser person step could not be opened.")
+    [record] = caplog.records
+    assert "declaration failed for thread authoritative-thread" in record.message
+    assert isinstance(record.exc_info[1], PlanError)
+    assert "fixture receipt write failed" in caplog.text
 
 
 @pytest.mark.asyncio

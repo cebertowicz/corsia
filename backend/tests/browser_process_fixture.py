@@ -168,7 +168,8 @@ def synthetic_browser(monkeypatch):
         return 'ws://synthetic.test/devtools/page/1'
 
     async def no_password_field(endpoint, _visit, _known):
-        return browser_cdp.PasswordProbe('synthetic-visit', 'synthetic.test', frozenset(), endpoint)
+        return browser_cdp.PasswordProbe('synthetic-visit', 'synthetic.test', frozenset(), endpoint,
+                                         present_nodes=frozenset())
     monkeypatch.setattr(browser_cdp, 'page_endpoint', synthetic_page)
     monkeypatch.setattr(browser_cdp, 'page_password_probe', no_password_field)
     monkeypatch.setattr(browser_cli, 'chrome_executable', lambda: (None, 'default'))

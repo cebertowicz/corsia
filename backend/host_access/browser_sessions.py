@@ -74,6 +74,11 @@ class BrowserSessionOwner:
         from host_access.browser_session_commands import page_endpoint
         return await page_endpoint(self, thread_id)
 
+    async def declare_person_step(self, thread_id: str, instruction: str) -> None:
+        """Open a system-observed step for the person on the current browser page."""
+        from host_access.browser_session_commands import declare_person_step
+        await declare_person_step(self, thread_id, instruction)
+
     async def has_session(self, thread_id: str) -> bool:
         """Report whether this thread has a browser for a pane to show."""
         async with self._owner_lock:
