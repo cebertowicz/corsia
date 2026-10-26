@@ -48,9 +48,7 @@ def test_managed_supervisor_argv_uses_the_bundled_binary_only_for_the_managed_ro
     bundled = "/Applications/CORSIA.app/Contents/Resources/bin/omlx"
     monkeypatch.setattr(sup.process, "managed_omlx_executable", lambda: bundled)
     monkeypatch.setattr(sup.shutil, "which", lambda _name: "/opt/homebrew/bin/omlx")
-    monkeypatch.setattr(sup, "_is_managed_omlx_row", lambda _settings: True)
-
-    argv = sup._managed_omlx_argv("127.0.0.1", 5200, {})
+    argv = sup._managed_omlx_argv("127.0.0.1", 5200, {}, managed=True)
 
     assert isinstance(argv, list)
     assert argv[:2] == [bundled, "serve"]
@@ -61,9 +59,7 @@ def test_legacy_supervisor_argv_uses_path_binary(monkeypatch):
 
     monkeypatch.setattr(sup.process, "managed_omlx_executable", lambda: "/Applications/CORSIA.app/Contents/Resources/bin/omlx")
     monkeypatch.setattr(sup.shutil, "which", lambda _name: "/opt/homebrew/bin/omlx")
-    monkeypatch.setattr(sup, "_is_managed_omlx_row", lambda _settings: False)
-
-    argv = sup._managed_omlx_argv("127.0.0.1", 8000, {})
+    argv = sup._managed_omlx_argv("127.0.0.1", 8000, {}, managed=False)
 
     assert isinstance(argv, list)
     assert argv[:2] == ["/opt/homebrew/bin/omlx", "serve"]
@@ -407,7 +403,7 @@ def test_new_omlx_start_uses_the_managed_cap_only_for_the_bundled_row(isolated_r
         return Spawned()
 
     monkeypatch.setattr(sup, "_port_owner_pid", lambda *_args: None)
-    monkeypatch.setattr(sup, "_is_managed_omlx_row", lambda _settings: managed)
+    monkeypatch.setattr(sup, "_is_managed_omlx_server", lambda _server_id: managed)
     monkeypatch.setattr(sup.process, "managed_omlx_install_error", lambda: None)
     monkeypatch.setattr(sup.process, "managed_omlx_executable", lambda: "/bundled/omlx")
     monkeypatch.setattr(sup.shutil, "which", lambda _name: "/path/omlx")

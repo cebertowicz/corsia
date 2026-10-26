@@ -3,8 +3,10 @@ from __future__ import annotations
 import importlib
 import os
 import re
+import shlex
 import sqlite3
 import stat
+import subprocess
 from dataclasses import FrozenInstanceError
 from pathlib import Path
 from types import SimpleNamespace
@@ -12,7 +14,8 @@ from types import SimpleNamespace
 import pytest
 
 
-APPLICATION_ID = "com.cebertowicz.corsia"
+# The folder pre-release source installs used. Only the legacy-folder check reads it.
+LEGACY_FOLDER = "com.cebertowicz.corsia"
 
 
 def _platform_paths():
@@ -121,7 +124,7 @@ def test_service_file_lines_accept_state_dir_without_an_unsupported_key_note(tmp
 
 def test_adoption_snapshot_restores_database_files_and_permissions(tmp_path):
     snapshots = importlib.import_module("infra.adoption_snapshot")
-    state = tmp_path / "Application Support" / "com.cebertowicz.corsia" / "state"
+    state = tmp_path / "Application Support" / LEGACY_FOLDER / "state"
     state.mkdir(parents=True)
     database = state / "corsia.db"
     with sqlite3.connect(database) as connection:
@@ -546,10 +549,185 @@ def test_default_state_root_for_a_source_install_never_uses_the_app_folder(tmp_p
         app_bundle=None,
     )
 
-    assert result == (
-        tmp_path / "Library" / "Application Support" / APPLICATION_ID / "state"
+    # A child of the app folder that is never the app's own state root, so a
+    # missed adoption check still cannot open the other install's database.
+    assert result == app_folder / "source-state"
+    assert result != app_folder / "state"
+    assert "cebertowicz" not in str(result)
+
+
+def test_default_state_root_for_the_app_is_the_app_folder_state_child(tmp_path):
+    paths = _platform_paths()
+
+    result = paths.default_state_root(
+        env={},
+        platform="darwin",
+        home=tmp_path,
+        app_bundle=tmp_path / "Applications" / "CORSIA.app",
     )
-    assert not result.is_relative_to(app_folder)
+
+    assert result == tmp_path / "Library" / "Application Support" / "CORSIA" / "state"
+
+
+@pytest.mark.parametrize(
+    ("platform", "env_key", "new_folder"),
+    [
+        ("darwin", None, None),
+        ("linux", "XDG_STATE_HOME", "corsia"),
+    ],
+)
+def test_a_source_install_with_only_legacy_data_is_told_how_to_move_it(
+    tmp_path, platform, env_key, new_folder
+):
+    paths = _platform_paths()
+    env = {env_key: str(tmp_path / "base")} if env_key else {}
+    if platform == "darwin":
+        base = tmp_path / "Library" / "Application Support"
+        new_root = base / "CORSIA" / "source-state"
+    else:
+        base = tmp_path / "base"
+        new_root = base / new_folder / "state"
+    legacy = base / LEGACY_FOLDER / "state"
+    legacy.mkdir(parents=True)
+    (legacy / "corsia.db").write_text("db", encoding="utf-8")
+
+    def resolve():
+        return paths.default_state_root(env=env, platform=platform, home=tmp_path, app_bundle=None)
+
+    with pytest.raises(SystemExit) as refused:
+        resolve()
+    message = str(refused.value.code)
+    assert message == (
+        f"CORSIA's data is still in its old folder, {legacy}. To move it, run:\n"
+        f"  mkdir -p {shlex.quote(str(new_root.parent))} "
+        f"&& mv {shlex.quote(str(legacy))} {shlex.quote(str(new_root))}\n"
+        "then start CORSIA again."
+    )
+    assert not new_root.exists(), "the refusal never creates the new folder"
+
+    # The printed command moves the folder whole, and the next start opens it.
+    subprocess.run(["/bin/sh", "-c", message.splitlines()[1]], check=True)
+    assert resolve() == new_root
+    assert (new_root / "corsia.db").read_text(encoding="utf-8") == "db"
+    assert not legacy.exists()
+
+
+@pytest.mark.parametrize("new_root_exists", [False, True])
+def test_windows_is_told_in_words_not_a_posix_command(tmp_path, new_root_exists):
+    paths = _platform_paths()
+    base = tmp_path / "base"
+    new_root = base / "CORSIA" / "state"
+    legacy = base / LEGACY_FOLDER / "state"
+    legacy.mkdir(parents=True)
+    (legacy / "corsia.db").write_text("db", encoding="utf-8")
+    if new_root_exists:
+        new_root.mkdir(parents=True)
+
+    with pytest.raises(SystemExit) as refused:
+        paths.default_state_root(env={"LOCALAPPDATA": str(base)}, platform="win32", home=tmp_path)
+
+    first = "Remove the empty folder at the new place first, then move" if new_root_exists else "Move"
+    assert str(refused.value.code) == (
+        f"CORSIA's data is still in its old folder, {legacy}. {first} that folder to {new_root}, "
+        "then start CORSIA again."
+    )
+    assert (legacy / "corsia.db").is_file()
+
+
+def test_an_empty_new_root_is_cleared_before_the_move(tmp_path):
+    paths = _platform_paths()
+    base = tmp_path / "Library" / "Application Support"
+    new_root = base / "CORSIA" / "source-state"
+    legacy = base / LEGACY_FOLDER / "state"
+    legacy.mkdir(parents=True)
+    (legacy / "corsia.db").write_text("db", encoding="utf-8")
+    new_root.mkdir(parents=True)
+
+    with pytest.raises(SystemExit) as refused:
+        paths.default_state_root(env={}, platform="darwin", home=tmp_path, app_bundle=None)
+
+    # mv into an existing folder would nest the old one inside it.
+    subprocess.run(["/bin/sh", "-c", str(refused.value.code).splitlines()[1]], check=True)
+    assert (new_root / "corsia.db").is_file() and not (new_root / "state").exists()
+
+
+def test_data_in_both_folders_is_never_merged_or_chosen(tmp_path):
+    paths = _platform_paths()
+    base = tmp_path / "Library" / "Application Support"
+    new_root = base / "CORSIA" / "source-state"
+    legacy = base / LEGACY_FOLDER / "state"
+    legacy.mkdir(parents=True)
+    (legacy / "corsia.db").write_text("db", encoding="utf-8")
+    (new_root / "logs").mkdir(parents=True)
+
+    with pytest.raises(SystemExit) as refused:
+        paths.default_state_root(env={}, platform="darwin", home=tmp_path, app_bundle=None)
+
+    assert str(refused.value.code) == (
+        f"CORSIA found data in two folders, {legacy} and {new_root}, so it opened neither. "
+        "Keep the folder you want, move the other one somewhere else, then start CORSIA again."
+    )
+
+
+def test_an_explicit_state_root_is_never_refused(tmp_path):
+    paths = _platform_paths()
+    legacy = tmp_path / "Library" / "Application Support" / LEGACY_FOLDER / "state"
+    legacy.mkdir(parents=True)
+    (legacy / "corsia.db").write_text("db", encoding="utf-8")
+    chosen = tmp_path / "chosen"
+
+    assert paths.default_state_root(
+        env={"CORSIA_STATE_DIR": str(chosen)}, platform="darwin", home=tmp_path, app_bundle=None,
+    ) == chosen.resolve()
+
+
+def test_the_legacy_check_never_applies_to_the_app_or_creates_the_legacy_folder(tmp_path):
+    paths = _platform_paths()
+    base = tmp_path / "Library" / "Application Support"
+    legacy = base / LEGACY_FOLDER / "state"
+    legacy.mkdir(parents=True)
+    (legacy / "corsia.db").write_text("db", encoding="utf-8")
+
+    app = paths.default_state_root(
+        env={}, platform="darwin", home=tmp_path,
+        app_bundle=tmp_path / "Applications" / "CORSIA.app",
+    )
+    assert app == base / "CORSIA" / "state"
+
+    # No legacy database: the new default, and nothing is created anywhere.
+    other_home = tmp_path / "other"
+    fresh = paths.default_state_root(
+        env={}, platform="darwin", home=other_home, app_bundle=None
+    )
+    assert fresh == other_home / "Library" / "Application Support" / "CORSIA" / "source-state"
+    assert not other_home.exists()
+
+
+@pytest.mark.parametrize(
+    ("platform", "in_app", "expected"),
+    [
+        ("darwin", False, "Library/Application Support/CORSIA/source-state"),
+        ("darwin", True, "Library/Application Support/CORSIA/state"),
+        ("linux", False, ".local/state/corsia/state"),
+        ("linux", True, ".local/state/corsia/state"),
+        ("win32", False, "AppData/Local/CORSIA/state"),
+        ("win32", True, "AppData/Local/CORSIA/state"),
+    ],
+)
+def test_default_roots_live_in_the_corsia_folder(tmp_path, platform, in_app, expected):
+    paths = _platform_paths()
+
+    root = paths.default_state_root(
+        env={}, platform=platform, home=tmp_path, app_bundle=tmp_path / "CORSIA.app" if in_app else None,
+    )
+
+    assert root == tmp_path / expected
+
+
+def test_the_cache_root_lives_in_the_corsia_folder(tmp_path):
+    managed_runtime = importlib.import_module("tools.managed_runtime")
+
+    assert managed_runtime.application_cache_root(home=tmp_path) == tmp_path / "Library" / "Caches" / "CORSIA"
 
 
 def test_default_state_root_reads_app_mode_from_the_module_location(tmp_path):
@@ -557,7 +735,7 @@ def test_default_state_root_reads_app_mode_from_the_module_location(tmp_path):
 
     # This checkout's module is not inside a bundle: the source-install rule.
     assert paths.default_state_root(env={}, platform="darwin", home=tmp_path) == (
-        tmp_path / "Library" / "Application Support" / APPLICATION_ID / "state"
+        tmp_path / "Library" / "Application Support" / "CORSIA" / "source-state"
     )
 
 
@@ -671,7 +849,7 @@ def test_default_state_root_uses_xdg_state_home(tmp_path):
         home=tmp_path / "home",
     )
 
-    assert result == xdg_state / APPLICATION_ID / "state"
+    assert result == xdg_state / "corsia" / "state"
 
 
 def test_default_state_root_uses_xdg_fallback(tmp_path):
@@ -683,7 +861,7 @@ def test_default_state_root_uses_xdg_fallback(tmp_path):
         home=tmp_path,
     )
 
-    assert result == tmp_path / ".local" / "state" / APPLICATION_ID / "state"
+    assert result == tmp_path / ".local" / "state" / "corsia" / "state"
 
 
 def test_default_state_root_uses_windows_local_app_data(tmp_path):
@@ -696,7 +874,7 @@ def test_default_state_root_uses_windows_local_app_data(tmp_path):
         home=tmp_path / "home",
     )
 
-    assert result == local_app_data / APPLICATION_ID / "state"
+    assert result == local_app_data / "CORSIA" / "state"
 
 
 def test_state_directory_override_wins_on_every_platform(tmp_path):

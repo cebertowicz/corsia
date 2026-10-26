@@ -32,7 +32,7 @@ def home(tmp_path, monkeypatch):
 
 
 def _runtime_dir(kind: str, home: Path) -> str:
-    return str(managed_runtime.runtime_bin_dir(kind, root=home / "Library" / "Caches" / "com.cebertowicz.corsia" / "runtimes"))
+    return str(managed_runtime.runtime_bin_dir(kind, root=home / "Library" / "Caches" / "CORSIA" / "runtimes"))
 
 
 def _pin_dirs(home: Path) -> list[str]:

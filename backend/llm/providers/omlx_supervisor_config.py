@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import logging
+from pathlib import Path
 
 from llm.providers.omlx_endpoints import _resolve_endpoint as _resolve_endpoint_via_freshness
 
@@ -68,3 +70,37 @@ def listen_host(resolved: str) -> str:
         log.warning("oMLX bind host unreadable (%s); using %s", exc, LOCAL_BIND)
         bind = LOCAL_BIND
     return LOCAL_BIND if bind == LOCAL_BIND else resolved
+
+
+def _ssd_cache_enabled(settings_path: Path) -> bool:
+    """Whether oMLX's own settings leave its SSD cache on (its default when unread)."""
+    try:
+        raw = json.loads(settings_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return True
+    cache = raw.get("cache") if isinstance(raw, dict) else None
+    return not (isinstance(cache, dict) and cache.get("enabled") is False)
+
+
+def managed_launch_settings(settings: dict) -> dict:
+    """Return CORSIA's managed server's launch settings, every folder from the current state root.
+
+    oMLX's command-line folders beat the ones its own settings.json stores, so a
+    state root that moved never leaves the server reading or writing an older
+    folder, whatever that file or the server row still names. A cache that
+    oMLX's settings turn off stays off: passing the cache folder would turn it on.
+    """
+    from llm.local_profiles import OMLX_GLOBAL_SETTINGS
+    from llm.managed_omlx_binary import managed_omlx_paths
+
+    paths = managed_omlx_paths()
+    cache_on = not settings.get("no_cache") and _ssd_cache_enabled(paths.settings_path)
+    folders = {
+        "base_path": str(paths.base_path),
+        "model_dir": str(paths.model_dir),
+        "paged_ssd_cache_dir": str(paths.base_path / "cache") if cache_on else None,
+    }
+    # The global values are launch-time settings too: applying them here updates
+    # existing CORSIA-managed installs at their next restart, without writing to
+    # a person's oMLX row or server settings.
+    return {**settings, **OMLX_GLOBAL_SETTINGS, **folders}

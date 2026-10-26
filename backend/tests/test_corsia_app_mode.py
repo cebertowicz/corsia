@@ -103,6 +103,19 @@ if "POST" in sys.argv:
     with open(state / "curl_post", "a") as log:
         log.write(url.split("?")[0] + "\\n")
 serving = (state / "loaded").exists()
+# A drain the shell already owns: quiet at once, ready on request, and its
+# release recorded with the operation id the cancel names.
+base = url.split("?")[0]
+operation = os.environ.get("CORSIA_RESTART_OPERATION_ID", "")
+if base.endswith("/api/system/drain") and serving and operation:
+    if "DELETE" in sys.argv:
+        (state / "released_drain").write_text(url.split("operation_id=")[-1])
+    else:
+        print(json.dumps({"active": True, "operation_id": operation, "activeProcesses": 0}))
+    sys.exit(0)
+if base.endswith("/api/system/drain/ready") and serving and operation:
+    print(json.dumps({"ok": True, "operation_id": operation}) + "\\n200")
+    sys.exit(0)
 if url.endswith("/api/health") and serving:
     failed_generation = state / "health_fail_generation"
     if failed_generation.exists() and (state / "generation").read_text() == failed_generation.read_text():
@@ -116,6 +129,8 @@ if "/api/system/drain/update?" in url and serving:
     (state / ("settled_operation" if body["healthy"] else "failed_operation")).write_text(body["operation_id"])
     print(json.dumps({"operation_id": body["operation_id"], "status": outcome}))
     sys.exit(0)
+if url.endswith("/api/system/stop-local-model") and serving:
+    sys.exit(22 if (state / "fail_stop_local_model").exists() else 0)
 if url.endswith("/api/version") and serving:
     # Whether the lifecycle shell holds the update lock while it proves a version.
     if os.environ.get("CORSIA_STATE_DIR"):
@@ -308,6 +323,8 @@ class App:
         (app_dir / "service.json").write_text(
             f'{{"workspace": "{workspace}", "port": {PORT}}}'
         )
+        # An installed app has data at the schema it ships.
+        _database_at(app_dir / "state", APP_SCHEMA_VERSION)
 
     @property
     def script(self) -> Path:
@@ -445,6 +462,49 @@ def test_app_mode_refuses_a_service_json_it_cannot_honour_instead_of_using_the_d
     # An explicit state root from the caller is the caller's choice, as for the launcher.
     explicit = app.run("stop", CORSIA_STATE_DIR=str(app.root / "explicit-state"))
     assert "no other state folder was opened" not in explicit.stderr
+
+
+def test_app_mode_refuses_to_start_while_the_app_moves_the_data_folder(app):
+    """T9: only stopping and reading run while CORSIA/state-move.json exists."""
+    journal = app.home / "Library" / "Application Support" / "CORSIA" / "state-move.json"
+    journal.write_text('{"step": "moved"}')
+
+    for verb in (["start"], ["restart"], ["service", "start"], ["restart-prepared"]):
+        result = app.run(*verb, CORSIA_RESTART_OPERATION_ID=OPERATION_ID)
+        assert result.returncode != 0, verb
+        assert "the app is moving CORSIA's data." in result.stderr, verb
+    assert app.launchd_calls() == []
+    assert app.calls("app") == []
+
+    stopped = app.run("stop")
+    assert "moving CORSIA's data" not in stopped.stderr
+
+
+def test_app_mode_stop_can_stop_the_local_model_before_bootout(app):
+    app.load()
+
+    result = app.run("stop", "--stop-local-model")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert app.calls("curl_post")[-1].endswith("/api/system/stop-local-model")
+    assert app.launchd_calls() == [f"bootout --wait gui/{os.getuid()}/{LABEL}"]
+
+
+def test_app_mode_stop_keeps_the_service_when_the_local_model_will_not_stop(app):
+    app.load()
+    (app.launchd / "fail_stop_local_model").write_text("")
+
+    result = app.run("stop", "--stop-local-model", CORSIA_RESTART_OPERATION_ID=OPERATION_ID)
+
+    output = result.stdout + result.stderr
+    assert result.returncode != 0
+    assert "Drain complete" in output
+    assert "Could not stop the local model" in output
+    # The drain hold is released, so the service that stays up takes turns again.
+    assert (app.launchd / "released_drain").read_text() == OPERATION_ID
+    assert "Could not cancel drain mode" not in output
+    assert app.launchd_calls() == []
+    assert (app.launchd / "loaded").exists()
 
 
 def test_the_same_scripts_outside_an_app_bundle_are_a_checkout(app):
@@ -866,6 +926,25 @@ def test_after_the_swap_data_the_old_app_cannot_open_keeps_the_new_app(app):
     assert app.bundle.with_name("CORSIA.app.previous").is_dir()
 
 
+def test_a_stale_state_path_with_no_database_keeps_the_new_app(app):
+    """T10: a state path whose data moved away can't prove a downgrade is safe."""
+    app.load()
+    app.stage("2.0.0", "2")
+    (app.launchd / "health_fail_generation").write_text("2.0.0+2")
+    moved_away = app.root / "com.cebertowicz.corsia"
+
+    result = app.run("restart-prepared", CORSIA_RESTART_OPERATION_ID=OPERATION_ID,
+                     CORSIA_STATE_DIR=str(moved_away))
+
+    assert result.returncode != 0
+    output = result.stdout + result.stderr
+    assert "Could not tell whether" in output
+    assert "went back to version" not in output
+    assert not any("--update-rollback" in call for call in app.calls("app"))
+    assert app.generation() == "2.0.0+2"
+    assert not (moved_away / "corsia.db").exists()
+
+
 def test_a_migration_committed_as_the_rollback_stops_the_service_keeps_the_new_app(app):
     app.load()
     app.stage("2.0.0", "2")
@@ -889,3 +968,14 @@ def test_a_migration_committed_as_the_rollback_stops_the_service_keeps_the_new_a
     assert app.calls("app")[-2:] == ["--service unregister", "--service register"]
     assert app.generation() == "2.0.0+2"
     assert (app.launchd / "generation").read_text() == "2.0.0+2"
+
+
+def test_app_mode_stop_says_when_it_cannot_stop_the_local_model(app):
+    app.load()
+
+    result = app.run("stop", "--force", "--stop-local-model")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "--stop-local-model skipped: the backend is not answering" in result.stdout + result.stderr
+    assert not any(call.endswith("/stop-local-model") for call in app.calls("curl_post"))
+    assert app.launchd_calls() == [f"bootout --wait gui/{os.getuid()}/{LABEL}"]

@@ -24,18 +24,21 @@ const fail = (message) => {
 
 const browser = await chromium.launch();
 
-async function open() {
-	const page = await (await browser.newContext({ viewport: { width: 1280, height: 900 } })).newPage();
+// `progress` is what the app's start at launch reports to `adoption_progress` (null: nothing to show).
+async function open(progress = null, viewport = { width: 1280, height: 900 }) {
+	const page = await (await browser.newContext({ viewport })).newPage();
 	await page.clock.install();
-	await page.addInitScript(() => {
+	await page.addInitScript((progress) => {
+		window.__progress = progress;
 		window.__calls = [];
 		window.__TAURI__ = { core: { invoke: async (command) => {
 			window.__calls.push(command);
 			if (command === 'get_service_log_path') return '/Users/you/Library/Application Support/CORSIA/state/logs/service.log';
 			if (command === 'start_fresh_preview') return { moves: ['~/Corsia'], code: ['~/.corsia'], work: [], backups: '~/CORSIA backups' };
+			if (command === 'adoption_progress') return window.__progress;
 			return null;
 		} } };
-	});
+	}, progress);
 	await page.goto(shellUrl, { waitUntil: 'load' });
 	await page.clock.runFor(50);
 	return page;
@@ -103,6 +106,86 @@ try {
 		const seen = await read(page);
 		if (seen.spinner || !seen.retry || seen.status === 'Starting CORSIA…') fail(`undo unfinished: ${JSON.stringify(seen)}`);
 		else console.log(`ok   an unfinished undo is drawn with its recovery (${seen.retry})`);
+	}
+	// The one-time data folder move runs inside the launch start: the page shows its one percentage and bar,
+	// then the drawn outcome replaces it.
+	{
+		const page = await open({ phase: 'moving_data', percent: 42, quit_pending: false });
+		await page.clock.runFor(1_100);
+		const bar = () => page.evaluate(() => ({
+			percent: document.getElementById('move-percent').hidden ? null : document.getElementById('move-percent').textContent,
+			bar: document.getElementById('move-bar').hidden ? null : document.getElementById('move-bar').getAttribute('aria-valuenow'),
+			width: document.querySelector('#move-bar i').style.width,
+		}));
+		const seen = { ...(await read(page)), ...(await bar()) };
+		const expected = {
+			status: 'Moving CORSIA’s data',
+			line: 'This happens once, and CORSIA starts again by itself when it’s done. Anything an agent left running in the background will stop; ask the agent to run it again if you still need it.',
+			spinner: false,
+			retry: null,
+			percent: '42%',
+			bar: '42',
+			width: '42%',
+		};
+		if (JSON.stringify(seen) !== JSON.stringify(expected)) fail(`moving data: ${JSON.stringify(seen)}`);
+		else console.log('ok   the data folder move shows its percentage during the launch start');
+		// `--screenshots <dir>` draws the move at desktop and phone widths.
+		if (process.argv.includes('--screenshots')) {
+			const dir = process.argv[process.argv.indexOf('--screenshots') + 1];
+			for (const viewport of [{ width: 1440, height: 900 }, { width: 393, height: 852 }]) {
+				const shot = await open({ phase: 'moving_data', percent: 42, quit_pending: false }, viewport);
+				await shot.clock.runFor(1_100);
+				await shot.screenshot({ path: path.join(dir, `moving-data-${viewport.width}.png`) });
+			}
+		}
+		await page.evaluate(drawn.refused);
+		await page.clock.runFor(2_100);
+		const after = { ...(await read(page)), ...(await bar()) };
+		if (after.percent !== null || after.bar !== null || after.status !== 'Start CORSIA fresh?') fail(`moving data then outcome: ${JSON.stringify(after)}`);
+		else console.log('ok   a drawn launch outcome replaces the move and stops following it');
+	}
+	// A move that stopped after it showed says why, with no percentage, before CORSIA starts where it was.
+	{
+		const stays = 'Your data stays where it is.';
+		const jobs = 'Anything an agent left running in the background has stopped; ask the agent to run it again if you still need it.';
+		const again = 'CORSIA tries again the next time it opens.';
+		const cases = [
+			[{ reason: 'terminal', app: null, jobs_stopped: true }, `${stays} A terminal window is open in CORSIA’s old data folder. Close it. ${jobs} ${again}`],
+			[{ reason: 'other_app', app: 'Finder', jobs_stopped: true }, `${stays} Finder has CORSIA’s old data folder open. Quit Finder, or restart this computer. ${jobs} ${again}`],
+			[{ reason: 'other_app', app: null, jobs_stopped: true }, `${stays} Another app has CORSIA’s old data folder open. Quit it, or restart this computer. ${jobs} ${again}`],
+			[{ reason: 'other', app: null, jobs_stopped: true }, `${stays} ${jobs} ${again}`],
+			[{ reason: 'other', app: null, jobs_stopped: false }, `${stays} ${again}`],
+		];
+		for (const [told, expected] of cases) {
+			const page = await open({ phase: 'move_skipped', ...told, quit_pending: false });
+			await page.clock.runFor(1_100);
+			const seen = await read(page);
+			const percent = await page.evaluate(() => !document.getElementById('move-percent').hidden);
+			if (seen.status !== 'Starting CORSIA…' || seen.line !== expected || percent) fail(`move skipped (${JSON.stringify(told)}): ${JSON.stringify(seen)}`);
+			else console.log(`ok   a skipped move says why (${told.reason}${told.app ? `, ${told.app}` : ''}${told.jobs_stopped ? ', jobs stopped' : ''})`);
+		}
+	}
+	// A move error the app can't start on is a plain line with the screen's own buttons.
+	{
+		const twoPlaces = 'CORSIA found its data in two folders and changed neither, so nothing is lost. Choose Save a report.';
+		const page = await open();
+		await page.evaluate((why) => window.__corsiaShowServiceFailure(why), twoPlaces);
+		await page.clock.runFor(50);
+		const seen = await read(page);
+		const report = await page.evaluate(() => document.getElementById('save-report').hidden ? null : document.getElementById('save-report').textContent);
+		if (seen.status !== 'CORSIA couldn’t start' || seen.line !== twoPlaces || report !== 'Save a report') fail(`move error: ${JSON.stringify({ ...seen, report })}`);
+		else console.log('ok   a move error names the button that helps');
+		if (process.argv.includes('--screenshots')) {
+			const dir = process.argv[process.argv.indexOf('--screenshots') + 1];
+			const viewport = { width: 1440, height: 900 };
+			const skipped = await open({ phase: 'move_skipped', reason: 'terminal', app: null, jobs_stopped: true, quit_pending: false }, viewport);
+			await skipped.clock.runFor(1_100);
+			await skipped.screenshot({ path: path.join(dir, 'move-skipped-terminal-1440.png') });
+			const failed = await open(null, viewport);
+			await failed.evaluate((why) => window.__corsiaShowServiceFailure(why), twoPlaces);
+			await failed.clock.runFor(50);
+			await failed.screenshot({ path: path.join(dir, 'move-error-two-places-1440.png') });
+		}
 	}
 	// A service already running answers Ready before the page is up; the load hook's script must still open it.
 	{

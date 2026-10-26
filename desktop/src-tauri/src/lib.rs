@@ -43,6 +43,7 @@ mod shell_state;
 mod source_lifecycle;
 mod start_fresh;
 mod startup_failure;
+mod state_move;
 #[cfg(test)]
 mod test_tls;
 use startup_failure::StartupFailure;
@@ -793,6 +794,32 @@ fn start_service_in<R: tauri::Runtime>(
     service: &AppServiceState,
     app_dir: PathBuf,
 ) -> Result<ServiceStartup, String> {
+    let home = app
+        .path()
+        .home_dir()
+        .map_err(|error| format!("could not resolve the home folder: {error}"))?;
+    // An adopted install's data leaves the folder named for the old identifier before
+    // anything attaches to or starts the service; a skip starts it where it is.
+    let move_paths = state_move::Paths::for_home(&home, &app_dir);
+    {
+        let mut mover =
+            state_move::AppService::new(bundled_resource_dir(app), first_run::recorded_port(&app_dir));
+        let outcome = state_move::run(&move_paths, &mut mover, &mut |percent| {
+            set_adoption_phase(service, Some(adoption::Phase::MovingData { percent }))
+        });
+        let outcome = outcome.map_err(|error| {
+            log::error!("data folder move: {}", error.detail);
+            error.line.to_string()
+        });
+        // A skip the person watched start says why before CORSIA starts where it was.
+        if let Ok(state_move::Outcome::Skipped(state_move::Skip { tell: Some(told), .. })) = &outcome {
+            // The line stays long enough to read before CORSIA starts on the old folder.
+            set_adoption_phase(service, Some(adoption::Phase::MoveSkipped { told: told.clone() }));
+            thread::sleep(told.hold());
+        }
+        set_adoption_phase(service, None);
+        outcome?;
+    }
     if let Some(startup) = attach_healthy_active_service(app, service, &app_dir)? {
         return Ok(startup);
     }
@@ -812,10 +839,6 @@ fn start_service_in<R: tauri::Runtime>(
         log::error!("interrupted adoption could not be undone: {}", failure.message);
         return Ok(ServiceStartup::AdoptionFailed { failure });
     }
-    let home = app
-        .path()
-        .home_dir()
-        .map_err(|error| format!("could not resolve the home folder: {error}"))?;
     // A Start fresh the app did not finish is put back first, so the earlier install is found whole.
     let recovered = start_fresh::recover_on_launch(&app_dir, |stop| {
         use start_fresh::OldService;
@@ -1649,17 +1672,15 @@ struct AdoptionProgress {
 
 impl AdoptionProgress {
     fn new(phase: adoption::Phase, quit_asked: bool) -> Self {
-        Self {
-            phase,
-            quit_pending: quit_asked
-                && matches!(
-                    phase,
-                    adoption::Phase::Waiting { .. }
-                        | adoption::Phase::BackingUp
-                        | adoption::Phase::MovingToBackup
-                        | adoption::Phase::StartingExisting
-                ),
-        }
+        let quit_pending = quit_asked
+            && matches!(
+                phase,
+                adoption::Phase::Waiting { .. }
+                    | adoption::Phase::BackingUp
+                    | adoption::Phase::MovingToBackup
+                    | adoption::Phase::StartingExisting
+            );
+        Self { phase, quit_pending }
     }
 }
 
@@ -1672,7 +1693,7 @@ fn set_adoption_phase(service: &AppServiceState, phase: Option<adoption::Phase>)
 /// What adoption is doing now: the window picks the line from the phase, never from text.
 #[tauri::command]
 fn adoption_progress(service: tauri::State<'_, AppServiceState>) -> Option<AdoptionProgress> {
-    let phase = service.adoption_phase.lock().ok().and_then(|phase| *phase)?;
+    let phase = service.adoption_phase.lock().ok().and_then(|phase| phase.clone())?;
     Some(AdoptionProgress::new(
         phase,
         service.adoption_cancel_requested.load(Ordering::Acquire),
@@ -3653,7 +3674,7 @@ mod tests {
             (Starting, true, false),
             (StartingExisting, true, true),
         ] {
-            assert_eq!(AdoptionProgress::new(phase, quit_asked).quit_pending, pending, "{phase:?}");
+            assert_eq!(AdoptionProgress::new(phase.clone(), quit_asked).quit_pending, pending, "{phase:?}");
         }
         assert_eq!(
             serde_json::to_value(AdoptionProgress::new(Waiting { running: Some(2) }, true)).unwrap(),

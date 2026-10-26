@@ -26,6 +26,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     adoption::{self, Phase, StopProcess},
+    app_paths,
     first_run::{self, FirstRun},
     release_proof,
     source_lifecycle::SourceLifecycle,
@@ -753,6 +754,8 @@ impl LaunchdService {
                 .join(first_run::LEGACY_STATE_FOLDER)
                 .join("state"),
         );
+        // Where the data folder move puts an adopted install's data.
+        states.push(app_paths::app_dir_for_home(home).join(app_paths::STATE_DIRECTORY));
         let databases = states.into_iter().map(|state| state.join("corsia.db")).collect();
         let launchd = SystemLaunchd { plist, port: roots.port, databases, python };
         Self { source, launchd, timeout: STOP_TIMEOUT }
@@ -826,6 +829,16 @@ impl<L: adoption::Lifecycle, D: Launchd> OldService for LaunchdService<L, D> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_release_check_covers_a_moved_install_s_database() {
+        let home = Path::new("/tmp/corsia-release-list");
+        let service = LaunchdService::new(home, None, PathBuf::from("python3"));
+        assert!(service
+            .launchd
+            .databases
+            .contains(&home.join("Library/Application Support/CORSIA/state/corsia.db")));
+    }
 
     struct Home(PathBuf);
 
