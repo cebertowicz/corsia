@@ -42,7 +42,7 @@ REAL_TOOLS = (
     "grep head tail sed awk tr sort chmod touch ls cut sha256sum"
 ).split()
 
-APT_BASE = "build-essential curl ca-certificates xz-utils unzip jq sqlite3 python3-venv"
+APT_BASE = "build-essential curl ca-certificates xz-utils unzip jq sqlite3 python3"
 APT_ENV = "env DEBIAN_FRONTEND=noninteractive apt-get"
 
 GIT = (
@@ -135,7 +135,7 @@ def env(tmp_path: Path) -> dict[str, str]:
     for arch, url in NODE_URL.items():
         shas[("node", arch)] = _tarball(
             downloads / url.rsplit("/", 1)[1], "w:xz",
-            {f"node-v{NODE_VERSION}/bin/{tool}": NODE for tool in ("node", "npm", "npx")},
+            {f"node-v{NODE_VERSION}-linux-{'arm64' if arch == 'aarch64' else 'x64'}/bin/{tool}": NODE for tool in ("node", "npm", "npx")},
         )
     for arch, url in UV_URL.items():
         shas[("uv", arch)] = _tarball(
@@ -147,6 +147,29 @@ def env(tmp_path: Path) -> dict[str, str]:
     checkout = home / ".corsia"
     (checkout / "scripts").mkdir(parents=True)
     (checkout / "backend").mkdir()
+    shutil.copytree(REPO / "backend" / "infra", checkout / "backend" / "infra")
+    (checkout / "backend" / "tools").mkdir()
+    runtime = checkout / "backend" / "tools" / "managed_runtime.py"
+    shutil.copy2(REPO / "backend" / "tools" / "managed_runtime.py", runtime)
+    with runtime.open("a") as file:
+        file.write('''\n# Test-only local archive transport; the real verifier and extractor remain in use.
+from dataclasses import replace
+for _kind in ("node", "uv"):
+    for _arch in ("arm64", "x86_64"):
+        _key = "linux-" + _arch
+        _pin_value = RUNTIME_PINS[_kind][_key]
+        _digest = os.environ["STUB_SHA_" + _kind.upper() + "_" + _arch.upper()]
+        if os.environ.get("STUB_BAD_CHECKSUM") == _kind:
+            _digest = "0" * 64
+        RUNTIME_PINS[_kind][_key] = replace(_pin_value, sha256=_digest)
+def _download(url, destination):
+    with open(os.environ["STUB_LOG"], "a") as log:
+        log.write("curl " + url + "\\n")
+    source = Path(os.environ["STUB_DOWNLOADS"]) / url.rsplit("/", 1)[-1]
+    shutil.copyfile(source, destination)
+    return hashlib.sha256(destination.read_bytes()).hexdigest()
+''')
+    (tools / "python3").symlink_to(sys.executable)
     shutil.copy2(INSTALL, checkout / "scripts" / "install.sh")
     (checkout / "backend" / "requirements.lock").write_text("")
     corsia = checkout / "scripts" / "corsia"
@@ -159,7 +182,7 @@ def env(tmp_path: Path) -> dict[str, str]:
     answers = tmp_path / "answers"
     answers.write_text("terminal-answer\n")
     os_release = tmp_path / "os-release"
-    os_release.write_text('ID=ubuntu\nID_LIKE=debian\nPRETTY_NAME="Ubuntu 24.04.4 LTS"\n')
+    os_release.write_text('ID=ubuntu\nVERSION_ID="24.04"\nPRETTY_NAME="Ubuntu 24.04.4 LTS"\n')
 
     return {
         "PATH": f"{stub_bin}:{tools}",
@@ -175,8 +198,10 @@ def env(tmp_path: Path) -> dict[str, str]:
         "CORSIA_INSTALL_TTY": str(answers),
         "CORSIA_INSTALL_SUDO": str(stub_bin / "sudo"),
         "CORSIA_INSTALL_OS_RELEASE": str(os_release),
-        "CORSIA_INSTALL_NODE_SHA256": shas[("node", "aarch64")],
-        "CORSIA_INSTALL_UV_SHA256": shas[("uv", "aarch64")],
+        "STUB_SHA_NODE_ARM64": shas[("node", "aarch64")],
+        "STUB_SHA_NODE_X86_64": shas[("node", "x86_64")],
+        "STUB_SHA_UV_ARM64": shas[("uv", "aarch64")],
+        "STUB_SHA_UV_X86_64": shas[("uv", "x86_64")],
     }
 
 
@@ -235,7 +260,7 @@ def test_a_fresh_ubuntu_installs_apt_packages_uv_python_and_node_then_starts(env
     local_bin = _local_bin(env)
     assert (local_bin / "python3.11").resolve() == Path(env["STUB_MANAGED_PYTHON"]).resolve()
     for tool in ("node", "npm", "npx"):
-        assert (local_bin / tool).resolve().parent.parent.name == f"node-v{NODE_VERSION}"
+        assert (local_bin / tool).resolve().parent.parent.name == f"node-v{NODE_VERSION}-linux-arm64"
     assert (local_bin / "uv").is_file()
     assert (local_bin / "corsia").resolve() == _script(env).with_name("corsia").resolve()
     assert (Path(env["HOME"]) / ".corsia" / ".venv" / "bin" / "python").exists()
@@ -244,12 +269,7 @@ def test_a_fresh_ubuntu_installs_apt_packages_uv_python_and_node_then_starts(env
 
 
 def test_x86_64_downloads_the_x86_64_builds(env):
-    env["CORSIA_INSTALL_NODE_SHA256"] = hashlib.sha256(
-        (Path(env["STUB_DOWNLOADS"]) / NODE_URL["x86_64"].rsplit("/", 1)[1]).read_bytes()
-    ).hexdigest()
-    env["CORSIA_INSTALL_UV_SHA256"] = hashlib.sha256(
-        (Path(env["STUB_DOWNLOADS"]) / UV_URL["x86_64"].rsplit("/", 1)[1]).read_bytes()
-    ).hexdigest()
+    # The fixture pins each architecture to its own local archive.
     result = _run(env, STUB_ARCH="x86_64")
 
     assert result.returncode == 0, result.stderr
@@ -290,10 +310,11 @@ def test_a_python_with_an_old_sqlite_is_replaced_by_the_managed_one(env):
 
 
 def test_a_download_that_does_not_match_its_checksum_is_refused_and_unused(env):
-    result = _run(env, CORSIA_INSTALL_NODE_SHA256="0" * 64)
+    result = _run(env, STUB_BAD_CHECKSUM="node")
 
     assert result.returncode == 1
-    assert "The Node" in result.stderr and "did not match its published checksum" in result.stderr
+    assert "Couldn’t verify the node download. Run this again." in result.stderr
+    assert "Traceback" not in result.stderr
     assert not (_local_bin(env) / "node").exists()
     assert not any(call.startswith("corsia") for call in _calls(env))
 
@@ -334,15 +355,22 @@ def test_a_distro_without_apt_is_refused_before_anything_installs(env, release, 
     result = _run(env)
 
     assert result.returncode == 1
-    assert result.stderr.strip() == (
-        f"CORSIA installs on Ubuntu or Debian Linux only, because it installs with apt (found {shown})."
-    )
+    assert result.stderr.strip() == "CORSIA needs Ubuntu 24.04 or later, or Debian 12 or later."
     assert _calls(env) == []
 
 
-def test_debian_and_derivatives_are_accepted(env):
-    Path(env["CORSIA_INSTALL_OS_RELEASE"]).write_text('ID=linuxmint\nID_LIKE="ubuntu debian"\n')
+def test_debian_12_is_accepted(env):
+    Path(env["CORSIA_INSTALL_OS_RELEASE"]).write_text('ID=debian\nVERSION_ID="12"\n')
     assert _run(env).returncode == 0
+
+
+@pytest.mark.parametrize("distro, version", [("ubuntu", "22.04"), ("debian", "11"), ("ubuntu", "")])
+def test_older_and_unknown_versions_are_refused_before_install(env, distro, version):
+    Path(env["CORSIA_INSTALL_OS_RELEASE"]).write_text(f'ID={distro}\nVERSION_ID="{version}"\n')
+    result = _run(env)
+    assert result.returncode == 1
+    assert "Ubuntu 24.04 or later, or Debian 12 or later" in result.stderr
+    assert _calls(env) == []
 
 
 def test_an_unsupported_cpu_is_refused(env):
@@ -405,14 +433,14 @@ def test_the_linux_branch_never_touches_the_mac_only_steps(env):
         assert mac_only not in joined
 
 
-def test_the_pins_match_the_managed_runtimes_and_every_hash_is_a_sha256():
+def test_linux_pins_are_only_in_the_managed_runtime():
     source = INSTALL.read_text()
-    assert f'LINUX_NODE_VERSION="{NODE_VERSION}"' in source
-    assert f'LINUX_UV_VERSION="{UV_VERSION}"' in source
-    pinned = re.findall(r"sha=([0-9a-f]+) ;;", source)
-    assert len(pinned) == 4 and all(len(sha) == 64 for sha in pinned)
-    assert "https://nodejs.org/dist/v$LINUX_NODE_VERSION/" in source
-    assert "https://github.com/astral-sh/uv/releases/download/$LINUX_UV_VERSION/" in source
+    for kind in ("node", "uv"):
+        for arch in ("arm64", "x86_64"):
+            pin = RUNTIME_PINS[kind][f"linux-{arch}"]
+            assert re.fullmatch(r"[0-9a-f]{64}", pin.sha256)
+            assert pin.sha256 not in source and pin.url not in source
+    assert "managed_runtime_linux" in source
 
 
 def test_darwin_still_takes_the_macos_path(env):
