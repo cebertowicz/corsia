@@ -324,7 +324,7 @@ def test_preparing_a_statement_is_not_counted(counted):
 
 
 
-MANIFEST = {"size_bytes": 1, "sqlite_version": VERSION, "builder_sha256": "x", "schema": "s", "excluded": {}, "short": {}}
+MANIFEST = {"size_bytes": 1, "size_ratings": 1, "sqlite_version": VERSION, "builder_sha256": "x", "schema": "s", "excluded": {}, "short": {}}
 
 
 def disagreements(first, second):
