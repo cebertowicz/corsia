@@ -94,7 +94,8 @@ def _write_raw_facts(
     the lost facts. Logs carry the delivery id, never payload or exception text.
     An unexpected fault aborts the caller's whole transaction, including the
     receipt, allowing manual same-id re-entry after recovery. Raw facts carry
-    no agent, project or attribution.
+    no agent, project or attribution; correction sources derived from them are
+    written afterwards and cannot fail the delivery.
     """
     from infra.database import write_transaction
 
@@ -112,9 +113,7 @@ def _write_raw_facts(
                         subject_key=draft.subject_key,
                         attributes=draft.attributes,
                     )
-                from core.self_caught_corrections import record_github_outcome_drafts
-
-                record_github_outcome_drafts(connection, drafts)
+            _record_correction_sources(connection, drafts, delivery_id)
             return
         except OutcomeInputRefusal as exc:
             # Deliberate credential/budget rejection, never an incidental exception
@@ -126,6 +125,20 @@ def _write_raw_facts(
     if drafts is None or drafts:
         outcome_events.count_outcome_event(
             connection, "mapping_failed", event_type or "unknown",
+        )
+
+
+def _record_correction_sources(connection, drafts: list[github_outcomes.OutcomeDraft], delivery_id: str) -> None:
+    """Derive correction sources from stored raw facts; a fault here never blocks intake."""
+    from core.self_caught_corrections import record_github_outcome_drafts
+    from infra.database import write_transaction
+
+    try:
+        with write_transaction(connection, scope="github_correction_sources"):
+            record_github_outcome_drafts(connection, drafts)
+    except Exception as exc:
+        log.warning(
+            "GitHub correction sources not recorded for delivery %s: %s", delivery_id, type(exc).__name__,
         )
 
 

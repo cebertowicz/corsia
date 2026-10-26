@@ -28,36 +28,10 @@ from core.measurement_scope import Grain
 from core.workflow_verdict_rules import Definition, FrozenPlan, Snapshot, WorkflowHistory
 from core.workflow_verdicts import MIXED, OUTCOME_STATES, TERMINAL_STATES, CorrectionFact, KpiRow, Run, parse_ts
 from tools.workflow_owners import thread_workflow_owners
-from infra.guidance_history_paths import LOCAL_EDIT_MARK
 from tools.workflow_task_fields import judged_version
 
 MODEL_SHARE = 0.8  # design §3.3: the run's own fresh tokens on one identity
 PLANNED_EVENT, REACHED_EVENT = "measurement.verdict.planned", "measurement.verdict.reached"
-OPEN_BATCH_LIMIT = 100
-_OPEN_WORKFLOWS_SQL = """
-    SELECT planned.subject_key FROM outcome_events planned
-    WHERE planned.event_name=:planned AND planned.retracted_at IS NULL
-      AND planned.subject_key GLOB 'workflow:*@*'
-      AND NOT EXISTS (
-        SELECT 1 FROM outcome_events reached
-        WHERE reached.event_name=:reached AND reached.retracted_at IS NULL
-          AND reached.subject_key=planned.subject_key
-      )
-    ORDER BY planned.ts,planned.subject_key LIMIT :limit
-"""
-_UNPLANNED_WORKFLOWS_SQL = """
-    SELECT 'workflow:' || n.workflow_ref || '@' || n.workflow_version AS subject_key, MIN(n.created_at) AS first_seen
-    FROM plan_nodes n
-    WHERE n.workflow_ref IS NOT NULL AND n.workflow_ref != ''
-      AND trim(COALESCE(n.workflow_version, '')) != '' AND instr(n.workflow_version, :mark) = 0
-      AND NOT EXISTS (SELECT 1 FROM plan_nodes p WHERE p.id=n.parent_id AND p.workflow_ref=n.workflow_ref)
-      AND NOT EXISTS (
-        SELECT 1 FROM outcome_events planned
-        WHERE planned.event_name=:planned AND planned.retracted_at IS NULL
-          AND planned.subject_key='workflow:' || n.workflow_ref || '@' || n.workflow_version
-      )
-    GROUP BY subject_key ORDER BY first_seen, subject_key LIMIT :limit
-"""
 _BANDS = {"XS": "XS-S", "S": "XS-S", "M": "M", "L": "L+", "XL": "L+", "XXL": "L+"}
 # The KPI formula engine (KPI slice 2) supplies these rows; with no reader every deciding KPI is Not comparable.
 KpiReader = Callable[[sqlite3.Connection, Sequence[Run], Sequence[Definition]],
@@ -111,34 +85,12 @@ def _terminal_times(db: sqlite3.Connection, node_ids: Sequence[str]) -> dict[tup
     return {(row["node_id"], row["state"]): row["at"] for row in rows}
 
 
-def _nodes(db: sqlite3.Connection, plan_ids: Iterable[str] | None = None,
-           workflow_refs: Iterable[str] | None = None) -> list[dict[str, Any]]:
-    """Nodes in all plans, selected plans, or plans that contain selected workflows."""
-    if plan_ids is not None and workflow_refs is not None:
-        raise ValueError("select nodes by plan ids or workflow refs, not both")
-    if workflow_refs is not None:
-        refs = _ids(workflow_refs)
-        if refs == "[]":
-            return []
-        query = """
-            WITH selected_plans AS (
-              SELECT DISTINCT plan_id FROM plan_nodes
-              WHERE workflow_ref IN (SELECT value FROM json_each(:workflow_refs))
-            )
-            SELECT id, plan_id, parent_id, kind, state, assignee, workflow_ref, workflow_version, difficulty, size,
-              created_at, updated_at FROM plan_nodes
-            WHERE plan_id IN selected_plans
-        """
-        params = {"workflow_refs": refs}
-    else:
-        query = """
-            SELECT id, plan_id, parent_id, kind, state, assignee, workflow_ref, workflow_version, difficulty, size,
-              created_at, updated_at FROM plan_nodes
-        """
-        params = {} if plan_ids is None else {"plans": _ids(plan_ids)}
-        if plan_ids is not None:
-            query += " WHERE plan_id IN (SELECT value FROM json_each(:plans))"
-    return [dict(row) for row in db.execute(query, params).fetchall()]
+def _nodes(db: sqlite3.Connection, plan_ids: Iterable[str] | None = None) -> list[dict[str, Any]]:
+    where = "" if plan_ids is None else "WHERE plan_id IN (SELECT value FROM json_each(:plans))"
+    return [dict(row) for row in db.execute(f"""
+        SELECT id, plan_id, parent_id, kind, state, assignee, workflow_ref, workflow_version, difficulty, size,
+          created_at, updated_at FROM plan_nodes {where}
+    """, {} if plan_ids is None else {"plans": _ids(plan_ids)}).fetchall()]
 
 
 def run_roots(nodes: Sequence[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
@@ -187,36 +139,13 @@ def _definitions(db: sqlite3.Connection) -> tuple[dict[str, list[Definition]], d
     return by_workflow, owners
 
 
-def open_workflow_subjects(db: sqlite3.Connection, *, limit: int = OPEN_BATCH_LIMIT) -> frozenset[str]:
-    """One bounded batch of workflow versions to evaluate: first-seen versions and planned-without-reached ones.
-
-    A version is planned only by its first evaluation, so versions with a judged run and no plan yet
-    are part of the set, or no version would ever enter it.
-    """
-    if not 1 <= limit <= OPEN_BATCH_LIMIT:
-        raise ValueError(f"limit must be between 1 and {OPEN_BATCH_LIMIT}")
-    open_rows = db.execute(_OPEN_WORKFLOWS_SQL, {"planned": PLANNED_EVENT, "reached": REACHED_EVENT, "limit": limit})
-    unplanned = db.execute(_UNPLANNED_WORKFLOWS_SQL, {
-        "planned": PLANNED_EVENT, "mark": LOCAL_EDIT_MARK, "limit": limit,
-    })
-    return frozenset(str(row["subject_key"]) for rows in (open_rows, unplanned) for row in rows)
-
-
-def _recorded(db: sqlite3.Connection, subjects: Iterable[str] | None = None) -> tuple[dict[str, FrozenPlan], frozenset[str]]:
-    """Recorded plan and reached state, optionally for one bounded subject batch."""
-    query = """
-        SELECT subject_key, event_name, attributes FROM outcome_events
-        WHERE event_name IN (:planned, :reached) AND retracted_at IS NULL AND subject_key IS NOT NULL
-    """
-    params: dict[str, object] = {"planned": PLANNED_EVENT, "reached": REACHED_EVENT}
-    if subjects is not None:
-        encoded = _ids(subjects)
-        if encoded == "[]":
-            return {}, frozenset()
-        query += " AND subject_key IN (SELECT value FROM json_each(:subjects))"
-        params["subjects"] = encoded
+def _recorded(db: sqlite3.Connection) -> tuple[dict[str, FrozenPlan], frozenset[str]]:
+    """All recorded plan and reached state; one event per version, so the read grows with recorded versions."""
     plans, reached = {}, set()
-    for row in db.execute(query, params).fetchall():
+    for row in db.execute("""
+        SELECT subject_key, event_name, attributes FROM outcome_events
+        WHERE event_name IN (?, ?) AND retracted_at IS NULL AND subject_key IS NOT NULL
+    """, (PLANNED_EVENT, REACHED_EVENT)).fetchall():
         if row["event_name"] == REACHED_EVENT:
             reached.add(row["subject_key"])
         else:
@@ -232,21 +161,16 @@ def _terminal_at(node: Mapping[str, Any], times: Mapping[tuple[str, str], str]) 
 
 
 def read_snapshot(db: sqlite3.Connection, *, now: datetime | None = None,
-                  kpi_reader: KpiReader | None = None,
-                  workflow_refs: Iterable[str] | None = None) -> Snapshot:
-    """Every judged workflow run, optionally only for selected workflow references."""
+                  kpi_reader: KpiReader | None = None) -> Snapshot:
+    """Every judged workflow run, with costs added later."""
     now = now or datetime.now(timezone.utc)
-    selected = None if workflow_refs is None else frozenset(workflow_refs)
     definitions, owners = _definitions(db)
-    nodes = _nodes(db, workflow_refs=selected)
+    nodes = _nodes(db)
     parents = {node["id"]: node["parent_id"] for node in nodes}
     roots = run_roots(nodes)
-    if selected is not None:
-        roots = [root for root in roots if root["workflow_ref"] in selected]
     facts: dict[str, list[CorrectionFact]] = defaultdict(list)
     root_ids = [node["id"] for node in roots]
-    attributed = attributed_facts(db) if selected is None else attributed_facts(db, node_ids=parents)
-    for fact in attributed:
+    for fact in attributed_facts(db):
         run_id = workflow_run_of(fact.node_id, parents, root_ids)
         facts[run_id].append(CorrectionFact(
             fact.source_kind, fact.source_id, fact.source_at or "", fact.counter, fact.is_correction,
@@ -278,16 +202,6 @@ def read_snapshot(db: sqlite3.Connection, *, now: datetime | None = None,
         ))
     plans, reached = _recorded(db)
     return Snapshot(now.isoformat(), tuple(histories), plans, reached)
-
-
-def read_open_snapshot(db: sqlite3.Connection, *, now: datetime | None = None,
-                       limit: int = OPEN_BATCH_LIMIT, kpi_reader: KpiReader | None = None) -> Snapshot:
-    """One bounded open-verdict batch; selected workflows retain only their own full history."""
-    subjects = open_workflow_subjects(db, limit=limit)
-    refs = {subject.removeprefix("workflow:").rpartition("@")[0] for subject in subjects}
-    snapshot = read_snapshot(db, now=now, kpi_reader=kpi_reader, workflow_refs=refs)
-    plans, reached = _recorded(db, subjects)
-    return replace(snapshot, plans=plans, reached=reached, subjects=subjects)
 
 
 def history_grain(first: date, now: datetime) -> Grain:

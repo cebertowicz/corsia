@@ -13,11 +13,10 @@ import pytest
 
 import core.workflow_verdict_evaluator as evaluator
 from core.workflow_verdict_rules import (
-    Evaluation, FrozenPlan, Snapshot, TwoArms, WorkflowHistory, baseline_runs, choose_baseline, compute, decide,
-    decide_arms, freeze_plan,
+    Evaluation, FrozenPlan, Snapshot, WorkflowHistory, baseline_runs, choose_baseline, compute, decide, freeze_plan,
 )
 from core.workflow_verdicts import (
-    BUILTIN_WINDOW_DAYS, CORRECTIONS, COST, MIXED, CorrectionFact, KpiRow, MeasureCall, PlannedMeasure, Run, measure_call,
+    BUILTIN_WINDOW_DAYS, CORRECTIONS, COST, MIXED, CorrectionFact, KpiRow, PlannedMeasure, Run, measure_call,
     parse_ts,
 )
 from infra.outcome_events_schema import OUTCOME_EVENTS_SCHEMA_SQL
@@ -372,89 +371,18 @@ def test_rule_3_cost_worse_with_no_gain_reverts() -> None:
     assert (result.word, result.reason, result.inputs["cost_worse"]) == ("revert", "cost_worse_no_gain", [COST])
 
 
-@pytest.mark.parametrize(("cost", "expected", "cheaper"), [
-    (0.5, ("keep", "no_worse"), True),
-    (1.0, ("revert", "no_gain_not_cheaper"), False),
-])
-def test_rule_3_no_worse_keeps_only_when_cheaper(cost, expected, cheaper) -> None:
+@pytest.mark.parametrize(("cost", "cheaper"), [(0.5, True), (1.0, False)])
+def test_rule_3_no_worse_keeps_and_says_when_cheaper(cost, cheaper) -> None:
     result = verdict(history(_priced("v1", 1, 1.0, started=40, ended=30), _priced("v2", 1, cost)))
-    assert (result.word, result.reason) == expected
-    assert (result.inputs.get("cheaper") is True) is cheaper
+    assert (result.word, result.reason, result.inputs["cheaper"]) == ("keep", "no_worse", cheaper)
 
 
-def test_rule_3_unclear_spend_with_no_quality_gain_reverts() -> None:
-    from core.workflow_verdict_rules import _rule
-
-    result = _rule([
-        MeasureCall(CORRECTIONS, "quality", "no_worse", difference=0.0, interval=(-0.01, 0.01), margin=0.02),
-        MeasureCall(COST, "spend", "unclear"),
-    ], (), 1)
-
-    assert result is not None and (result.word, result.reason) == ("revert", "no_gain_not_cheaper")
-
-
-def test_rule_4_unclear_at_40_continues_once_to_80_then_reverts() -> None:
-    old = runs("v1", 1, count=80, started=60, ended=30)
+def test_rule_4_unclear_waits_for_look_2_then_keeps() -> None:
+    old = runs("v1", 1, count=40, started=60, ended=30)
     first = verdict(history(old, runs("v2", NOISY, count=20)))
     assert (first.word, first.reason, first.look) == ("collecting", "wait_for_look_2", 1)
-    second = verdict(history(old, runs("v2", NOISY, count=40)))
-    assert (second.word, second.reason, second.look) == ("collecting", "wait_for_look_3", 2)
-    final = verdict(history(old, runs("v2", NOISY, count=80)))
-    assert (final.word, final.reason, final.look) == ("revert", "unclear_after_look_3", 3)
-
-
-def test_generic_two_arm_rule_does_not_depend_on_workflow_version_names() -> None:
-    control = runs("anything", 1, count=20, started=40, ended=30)
-    changed = runs("different", 2, count=20)
-    source = history(control, changed)
-    plan = plan_for(source, "different")
-
-    result = decide_arms(plan, TwoArms(tuple(control), tuple(changed)), NOW)
-
-    assert (result.word, result.reason, result.look) == ("revert", "quality_worse", 1)
-
-
-def test_guard_measure_keeps_the_current_arm_when_the_final_result_is_unclear() -> None:
-    guarded = PlannedMeasure(CORRECTIONS, "quality", "lower", "builtin", BUILTIN_WINDOW_DAYS,
-                             floor=0.02, guard_against_harm=True)
-    source = history(runs("v1", 1, count=80, started=60, ended=30), runs("v2", NOISY, count=80))
-
-    result = verdict(source, guarded)
-
-    assert (result.word, result.reason, result.look, result.inputs["guards"]) == (
-        "revert", "guard_unclear", 3, [CORRECTIONS],
-    )
-
-
-def test_cheaper_arm_is_not_kept_when_quality_is_not_measured_near_zero() -> None:
-    source = history(_priced("v1", 5, 1.0, started=40, ended=30), _priced("v2", 6, 0.5))
-
-    result = verdict(source)
-
-    assert (result.word, result.reason) == ("revert", "cheaper_not_near_zero")
-
-
-def test_frozen_plan_carries_raised_confidence_and_reason() -> None:
-    source = WorkflowHistory("sdlc-process", "owner", tuple(
-        runs("v1", 1, started=40, ended=30) + runs("v2", 1)), verdict_confidence=0.95,
-        verdict_confidence_reason="security")
-
-    frozen = freeze_plan(source, "v2")
-
-    assert FrozenPlan.decoded(frozen.encoded()).confidence == pytest.approx(0.95)
-    assert FrozenPlan.decoded(frozen.encoded()).confidence_reason == "security"
-
-
-@pytest.mark.parametrize(("confidence", "reason"), [
-    (0.85, "security"), (0.9, None), (0.8, "security"),
-])
-def test_frozen_plan_rejects_unapproved_or_unexplained_confidence(confidence, reason) -> None:
-    source = WorkflowHistory("sdlc-process", "owner", tuple(
-        runs("v1", 1, started=40, ended=30) + runs("v2", 1)), verdict_confidence=confidence,
-        verdict_confidence_reason=reason)
-
-    with pytest.raises(ValueError, match="verdict confidence"):
-        freeze_plan(source, "v2")
+    final = verdict(history(old, runs("v2", NOISY, count=40)))
+    assert (final.word, final.reason, final.look) == ("keep", "no_clear_difference", 2)
 
 
 def test_a_look_reads_only_its_fixed_prefix_so_later_runs_do_not_move_it() -> None:
@@ -496,25 +424,6 @@ def test_reached_verdict_does_not_flip_on_new_data(monkeypatch) -> None:
     assert FrozenPlan.decoded(json.loads(planned["attributes"])["plan"]) == frozen
     snapshot = Snapshot(NOW.isoformat(), (flipped,), {}, frozenset({frozen.subject}))
     assert [e.subject for e in compute(snapshot)] == ["workflow:sdlc-process@v1"]
-
-
-def test_switched_on_reached_verdict_wakes_its_owner_once(monkeypatch) -> None:
-    from events import delivery
-
-    monkeypatch.setattr(evaluator, "VERDICT_WRITES_ENABLED", True)
-    wakes = []
-    monkeypatch.setattr(delivery, "enqueue_event_wake", lambda *args, **kwargs: wakes.append((args, kwargs)))
-    db = sqlite3.connect(":memory:")
-    db.executescript(OUTCOME_EVENTS_SCHEMA_SQL)
-    source = history(runs("v1", 1, started=40, ended=30), runs("v2", 2))
-    frozen = plan_for(source)
-    reached = Evaluation(frozen.subject, "owner", frozen, decide(source, frozen, NOW), True)
-
-    assert evaluator.write_verdicts(db, [reached], wake_owners=True) == 1
-    assert evaluator.write_verdicts(db, [reached], wake_owners=True) == 0
-    assert wakes == [(("owner", "measurement.verdict.reached", "Workflow verdict reached: revert.",
-                      {"subject": frozen.subject, "verdict": "revert", "reason": "quality_worse"}),
-                     {"message_id": f"verdict:wake:{frozen.subject}", "db": db})]
 
 
 def test_writes_stay_off_by_default() -> None:

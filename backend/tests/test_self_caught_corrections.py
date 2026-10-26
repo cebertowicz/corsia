@@ -164,6 +164,19 @@ def test_github_reopen_and_explicit_merged_revert_target_owned_prs(db):
     assert any("github:pr:cebertowicz/maestro#3200:reverts:cebertowicz/maestro#3191" in subject for subject, *_ in facts)
 
 
+def test_a_fault_deriving_correction_sources_keeps_the_raw_facts(db, monkeypatch):
+    def broken(*_args, **_kwargs):
+        raise RuntimeError("owner resolution failed")
+
+    monkeypatch.setattr("core.self_caught_corrections.record_github_outcome_drafts", broken)
+    reopened = _fixture("issue_reopened")
+
+    _write_raw_facts(db, reopened["event"], map_github_outcomes(reopened["event"], reopened["payload"]), "reopen")
+
+    assert _facts(db) == []
+    assert db.execute("SELECT COUNT(*) FROM outcome_events WHERE event_name='github.issue.reopened'").fetchone()[0] == 1
+
+
 def test_a_person_failing_a_node_is_not_a_self_caught_correction(db):
     plan = service.ensure_plan("thread", "owner", db=db)
     task = _task(db, plan.id, "Fail me")

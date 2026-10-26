@@ -100,19 +100,11 @@ class AttributedFact:
     node_id: str | None
 
 
-def attributed_facts(db: sqlite3.Connection, *, node_ids: Iterable[str] | None = None) -> list[AttributedFact]:
-    """Readable correction facts, optionally only where attribution lands in selected nodes."""
-    query = _ATTRIBUTED_SQL
-    params: dict[str, object] = {
+def attributed_facts(db: sqlite3.Connection) -> list[AttributedFact]:
+    """Every readable correction fact with the plan node it is attributed to, or None (Unattributed)."""
+    rows = db.execute(_ATTRIBUTED_SQL, {
         "event": CORRECTION_EVENT, "correction": LABEL_CORRECTION, "not_correction": LABEL_NOT_CORRECTION,
-    }
-    if node_ids is not None:
-        encoded = json.dumps(sorted(set(node_ids)))
-        if encoded == "[]":
-            return []
-        query = f"SELECT * FROM ({query}) WHERE node_id IN (SELECT value FROM json_each(:node_ids))"
-        params["node_ids"] = encoded
-    rows = db.execute(query, params).fetchall()
+    }).fetchall()
     facts = []
     for row in rows:
         attributes = json.loads(row["attributes"])

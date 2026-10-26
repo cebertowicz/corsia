@@ -11,12 +11,10 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
 from typing import Iterable, Mapping, Sequence
 
-POLICY_VERSION = "workflow-verdict-v2"  # v2: 80% default interval, look 3, no_gain_not_cheaper reverts
+POLICY_VERSION = "workflow-verdict-v1"
 DEFAULT_MINIMUM = 20
 GROUP_MINIMUM = 5
 BOOTSTRAP_DRAWS = 2_000
-DEFAULT_CONFIDENCE = 0.8
-RAISED_CONFIDENCES = frozenset({0.9, 0.95})
 BUILTIN_WINDOW_DAYS = 3
 BUILTIN_MARGIN = 0.25
 CORRECTION_FLOOR = 0.02
@@ -99,7 +97,6 @@ class PlannedMeasure:
     margin_gap: float | None = None
     floor: float = 0.0
     coverage: bool = False
-    guard_against_harm: bool = False
 
     def margin(self, baseline_value: float) -> float:
         if self.margin_gap is not None:
@@ -218,10 +215,8 @@ def _pooled(new: Mapping[Group, Sequence[_Sample]], old: Mapping[Group, Sequence
 
 
 def _interval(new: Mapping[Group, Sequence[_Sample]], old: Mapping[Group, Sequence[_Sample]],
-              groups: Sequence[Group], seed: int, confidence: float) -> tuple[float, float]:
-    """A configurable bootstrap interval, resampled within each side and group."""
-    if not 0 < confidence < 1:
-        raise ValueError("confidence must be between zero and one")
+              groups: Sequence[Group], seed: int) -> tuple[float, float]:
+    """A 90% bootstrap interval: runs resampled within each side and group, seeded from the subject."""
     rng, draws = random.Random(seed), []
     for _ in range(BOOTSTRAP_DRAWS):
         resampled_new = {g: [rng.choice(new[g]) for _ in new[g]] for g in groups}
@@ -230,8 +225,7 @@ def _interval(new: Mapping[Group, Sequence[_Sample]], old: Mapping[Group, Sequen
         if pooled is not None:
             draws.append(pooled[0])
     draws.sort()
-    tail = (1 - confidence) / 2
-    return draws[int(tail * (len(draws) - 1))], draws[int((1 - tail) * (len(draws) - 1))]
+    return draws[int(0.05 * (len(draws) - 1))], draws[int(0.95 * (len(draws) - 1))]
 
 
 def _call_from(better: str, difference: float, interval: tuple[float, float], margin: float) -> str:
@@ -255,8 +249,7 @@ def eligible(measure: PlannedMeasure, new: Sequence[Run], old: Sequence[Run], co
 
 
 def measure_call(measure: PlannedMeasure, new: Sequence[Run], old: Sequence[Run], *, minimum: int,
-                 now: datetime, seed: int, confidence: float = DEFAULT_CONFIDENCE,
-                 bootstrap: bool = True, base_minimum: int | None = None) -> MeasureCall:
+                 now: datetime, seed: int, bootstrap: bool = True, base_minimum: int | None = None) -> MeasureCall:
     """One measure's call at a look: Worse, Better, No worse, Unclear, Too few, Not comparable or unknown.
 
     ``base_minimum`` (default ``minimum``) is the baseline side's bar: look 2 doubles only the new side's,
@@ -286,14 +279,14 @@ def measure_call(measure: PlannedMeasure, new: Sequence[Run], old: Sequence[Run]
     margin = measure.margin(baseline_value)
     if not bootstrap:
         return replace(base, call="counted", reason=None, margin=margin)
-    interval = _interval(new_g, old_g, groups, seed, confidence)
+    interval = _interval(new_g, old_g, groups, seed)
     call, reason = _call_from(measure.better, difference, interval, margin), None
     if measure.role == "quality" and call != "worse":
         for group in groups:
             if sum(s.n for s in new_g[group]) >= minimum and sum(s.n for s in old_g[group]) >= minimum:
                 one = _pooled(new_g, old_g, [group])
                 assert one is not None
-                interval_g = _interval(new_g, old_g, [group], seed + 1, confidence)
+                interval_g = _interval(new_g, old_g, [group], seed + 1)
                 if _call_from(measure.better, one[0], interval_g, measure.margin(one[1])) == "worse":
                     call, reason = "worse", "harm_in_group"
     return MeasureCall(measure.name, measure.role, call, reason, difference, interval, margin, tuple(groups),

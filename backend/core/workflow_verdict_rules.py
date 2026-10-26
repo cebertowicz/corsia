@@ -13,8 +13,7 @@ from typing import Mapping, Sequence
 
 from core.workflow_verdicts import (
     BLOCKED, BUILTIN_WINDOW_DAYS, CORRECTION_FLOOR, CORRECTIONS, COST, DEFAULT_MINIMUM, MINUTES, MIXED,
-    DEFAULT_CONFIDENCE, POLICY_VERSION, RAISED_CONFIDENCES, MeasureCall, PlannedMeasure, Run, measure_call,
-    parse_ts,
+    POLICY_VERSION, MeasureCall, PlannedMeasure, Run, measure_call, parse_ts,
 )
 from infra.measure_validation import deciding_refusal
 
@@ -49,8 +48,6 @@ class WorkflowHistory:
     definitions: tuple[Definition, ...] = ()
     version_attr: str | None = None  # not persisted by measure_sync yet, so the read side passes None
     excluded: Mapping[str, int] = field(default_factory=dict)  # never-judged runs, counted: unversioned, local_edit
-    verdict_confidence: float = DEFAULT_CONFIDENCE
-    verdict_confidence_reason: str | None = None
 
     def _in_start_order(self) -> list[Run]:
         return sorted(self.runs, key=lambda item: (parse_ts(item.started_at), item.run_id))
@@ -93,8 +90,6 @@ class FrozenPlan:
     refusals: tuple[tuple[str, str], ...]
     seed: int
     policy_version: str = POLICY_VERSION
-    confidence: float = DEFAULT_CONFIDENCE
-    confidence_reason: str | None = None
 
     def encoded(self) -> str:
         """The plan as the ``measurement.verdict.planned`` text; refusals keep only the KPI names."""
@@ -110,8 +105,7 @@ class FrozenPlan:
         data = json.loads(text)
         return cls(data["subject"], data["version"], data["baseline"], tuple(data["skipped"]),
                    tuple(PlannedMeasure(*item) for item in data["measures"]), int(data["minimum"]),
-                   tuple((name, "") for name in data["refusals"]), int(data["seed"]), data["policy_version"],
-                   float(data.get("confidence", DEFAULT_CONFIDENCE)), data.get("confidence_reason"))
+                   tuple((name, "") for name in data["refusals"]), int(data["seed"]), data["policy_version"])
 
 
 @dataclass(frozen=True)
@@ -133,21 +127,11 @@ class Evaluation:
 
 
 @dataclass(frozen=True)
-class TwoArms:
-    """A neutral comparison input: the current/control arm and the changed arm."""
-
-    control: tuple[Run, ...]
-    changed: tuple[Run, ...]
-    continue_if_unclear: bool = True
-
-
-@dataclass(frozen=True)
 class Snapshot:
     now: str
     workflows: tuple[WorkflowHistory, ...]
     plans: Mapping[str, FrozenPlan] = field(default_factory=dict)
     reached: frozenset[str] = frozenset()
-    subjects: frozenset[str] | None = None  # None: all versions; set: this bounded open batch
 
 
 def definitions_in_force(definitions: Sequence[Definition], at: str) -> list[Definition]:
@@ -181,8 +165,7 @@ def assert_evaluator_fields(definitions: Sequence[Definition], workflow: str, ve
             continue
         gap = abs(float(spec["target"]) - float(spec["review"]))  # type: ignore[arg-type]
         measures.append(PlannedMeasure(item.name, role, str(spec["better"]), "kpi", int(spec.get("settle_days") or 0),  # type: ignore[call-overload]
-                                       item.version, margin_gap=gap, coverage=bool(spec.get("coverage")),
-                                       guard_against_harm=spec.get("guard_against_harm") is True))
+                                       item.version, margin_gap=gap, coverage=bool(spec.get("coverage"))))
         minimum = max(minimum, int(spec.get("min_n") or 0))  # type: ignore[call-overload]
     return tuple(measures), tuple(refusals), minimum
 
@@ -213,18 +196,8 @@ def choose_baseline(history: WorkflowHistory, version: str, minimum: int, window
     return None, tuple(skipped)
 
 
-def _validated_confidence(history: WorkflowHistory) -> tuple[float, str | None]:
-    """Accept only the default confidence or an explicitly justified approved elevation."""
-    confidence, reason = history.verdict_confidence, history.verdict_confidence_reason
-    if confidence == DEFAULT_CONFIDENCE and reason is None:
-        return confidence, None
-    if confidence in RAISED_CONFIDENCES and isinstance(reason, str) and reason.strip():
-        return confidence, reason
-    raise ValueError("verdict confidence must be the default or an approved raised value with a reason")
-
-
 def freeze_plan(history: WorkflowHistory, version: str) -> FrozenPlan:
-    """Freeze definitions, baseline eligibility, and validated confidence at first use."""
+    """Freeze definitions and baseline eligibility at the version's first use (design §3.4)."""
     subject = f"workflow:{history.ref}@{version}"
     started = history.first_use(version)
     first_use = parse_ts(started)
@@ -234,9 +207,7 @@ def freeze_plan(history: WorkflowHistory, version: str) -> FrozenPlan:
     window = max(measure.window_days for measure in measures)
     baseline, skipped = choose_baseline(history, version, minimum, window, first_use)
     seed = int.from_bytes(hashlib.sha256(subject.encode("utf-8")).digest()[:8], "big")
-    confidence, confidence_reason = _validated_confidence(history)
-    return FrozenPlan(subject, version, baseline, skipped, measures, minimum, refusals, seed,
-                      confidence=confidence, confidence_reason=confidence_reason)
+    return FrozenPlan(subject, version, baseline, skipped, measures, minimum, refusals, seed)
 
 
 def _not_enough(calls: Sequence[MeasureCall], extra: Sequence[str] = ()) -> Verdict | None:
@@ -254,21 +225,13 @@ def _not_enough(calls: Sequence[MeasureCall], extra: Sequence[str] = ()) -> Verd
     return Verdict("not_enough_data", known[0], 0, tuple(calls), inputs)
 
 
-def _near_zero(call: MeasureCall) -> bool:
-    """A neutral result has no directional interval and stays inside the measure's declared margin."""
-    if call.difference is None or call.interval is None or call.margin is None:
-        return False
-    return call.interval[0] <= 0 <= call.interval[1] and abs(call.difference) < call.margin
-
-
-def _rule(calls: Sequence[MeasureCall], measures: Sequence[PlannedMeasure], look: int) -> Verdict | None:
-    """Apply the keep-only-for-improvement-or-cheaper rule at one look."""
+def _rule(calls: Sequence[MeasureCall], look: int) -> Verdict | None:
+    """Rules 1 to 4 at a look; None means wait for look 2."""
     quality = [c for c in calls if c.role == "quality" and c.call not in BLOCKED]
     spend = [c for c in calls if c.role == "spend"]
     worse = [c.name for c in quality if c.call == "worse"]
     better = [c.name for c in quality if c.call == "better"]
     costly = [c.name for c in spend if c.call == "worse"]
-    guards = {measure.name for measure in measures if measure.guard_against_harm}
     if worse:
         reason = "quality_disagree" if better else "quality_worse"
         return Verdict("revert", reason, look, tuple(calls), {"worse": worse, "better": better})
@@ -278,25 +241,18 @@ def _rule(calls: Sequence[MeasureCall], measures: Sequence[PlannedMeasure], look
         if costly:
             return Verdict("revert", "cost_worse_no_gain", look, tuple(calls), {"cost_worse": costly})
         cheaper = any(c.call == "better" for c in spend)
-        if not cheaper:
-            return Verdict("revert", "no_gain_not_cheaper", look, tuple(calls))
-        if not all(_near_zero(c) for c in quality):
-            return Verdict("revert", "cheaper_not_near_zero", look, tuple(calls))
-        return Verdict("keep", "no_worse", look, tuple(calls), {"cheaper": True})
-    guarded = sorted({c.name for c in quality if c.name in guards and c.call == "unclear"})
-    if look == 3:
-        if guarded:
-            return Verdict("revert", "guard_unclear", look, tuple(calls), {"guards": guarded})
-        return Verdict("revert", "unclear_after_look_3", look, tuple(calls))
-    return None
+        return Verdict("keep", "no_worse", look, tuple(calls), {"cheaper": cheaper})
+    return Verdict("keep", "no_clear_difference", look, tuple(calls)) if look == 2 else None
 
 
-def _prefix(plan: FrozenPlan, deciding: Sequence[PlannedMeasure], changed: Sequence[Run], control: Sequence[Run],
+def _prefix(plan: FrozenPlan, deciding: Sequence[PlannedMeasure], new: Sequence[Run], old: Sequence[Run],
             target: int, now: datetime) -> int | None:
-    """The fewest changed-arm runs at which every deciding measure reaches ``target`` in its own denominator."""
-    for length in range(1, len(changed) + 1):
-        counts = [measure_call(m, changed[:length], control, minimum=target, now=now, seed=plan.seed,
-                               confidence=plan.confidence, bootstrap=False, base_minimum=plan.minimum) for m in deciding]
+    """The fewest earliest-settled new runs at which every deciding measure has ``target`` new runs and the
+    minimum baseline runs in eligible groups. Looking only at that fixed prefix keeps a look's verdict the
+    same however many runs arrive after it."""
+    for length in range(1, len(new) + 1):
+        counts = [measure_call(m, new[:length], old, minimum=target, now=now, seed=plan.seed, bootstrap=False,
+                               base_minimum=plan.minimum) for m in deciding]
         if all(c.call == "counted" for c in counts):
             return length
     return None
@@ -311,61 +267,45 @@ def sides(history: WorkflowHistory, plan: FrozenPlan) -> tuple[list[Run], list[R
     return old, new
 
 
-def decide_arms(plan: FrozenPlan, arms: TwoArms, now: datetime, *, inputs: Mapping[str, object] | None = None) -> Verdict:
-    """Judge generic control and changed arms; callers own how they select or name those arms."""
-    control, changed = list(arms.control), list(arms.changed)
-    call = lambda measure, runs, bootstrap=True: measure_call(  # noqa: E731
-        measure, runs, control, minimum=plan.minimum, now=now, seed=plan.seed + len(measure.name),
-        confidence=plan.confidence, bootstrap=bootstrap,
-    )
-    overall = [call(measure, changed, bootstrap=False) for measure in plan.measures]
+def decide(history: WorkflowHistory, plan: FrozenPlan, now: datetime,
+           replaced_by: tuple[str, str] | None = None) -> Verdict:
+    """Collecting, Changed again, Not enough data, or the verdict at look 1 or look 2.
+
+    ``replaced_by`` is the replacing version and when it took over (``WorkflowHistory.successor``)."""
+    if plan.baseline is None:
+        return Verdict("not_enough_data", "no_baseline", 0, (), {"minimum": plan.minimum, "skipped": list(plan.skipped)})
+    window = max(m.window_days for m in plan.measures)
+    old, new = sides(history, plan)
+    call = lambda m, runs, bootstrap=True: measure_call(m, runs, old, minimum=plan.minimum, now=now,  # noqa: E731
+                                                        seed=plan.seed + len(m.name), bootstrap=bootstrap)
+    overall = [call(m, new, bootstrap=False) for m in plan.measures]
     blocked = _not_enough(overall)
     if blocked is not None:
         return blocked
-    deciding = [measure for measure, result in zip(plan.measures, overall)
-                if measure.role != "shown" and result.call not in BLOCKED | {"unknown"}]
-    context = dict(inputs or {})
-    first = _prefix(plan, deciding, changed, control, plan.minimum, now)
-    if first is None:
-        counted = [result for result in overall if result.role != "shown" and result.call not in BLOCKED | {"unknown"}]
-        groups = sorted({group for result in counted for group in result.groups})
-        return Verdict("collecting", "below_minimum", 0, tuple(counted),
-                       {**context, "n": min((result.n_new for result in counted), default=0),
-                        "minimum": plan.minimum, "groups": [list(group) for group in groups]})
-    verdict = _rule([call(measure, changed[:first]) for measure in plan.measures], plan.measures, 1)
-    if verdict is not None:
-        return Verdict(verdict.word, verdict.reason, 1, verdict.calls, {**context, **verdict.inputs})
-    second = _prefix(plan, deciding, changed, control, 2 * plan.minimum, now)
-    if second is None:
-        return Verdict("collecting", "wait_for_look_2", 1, (), {**context, "minimum": 2 * plan.minimum})
-    verdict = _rule([call(measure, changed[:second]) for measure in plan.measures], plan.measures, 2)
-    if verdict is not None:
-        return Verdict(verdict.word, verdict.reason, 2, verdict.calls, {**context, **verdict.inputs})
-    if not arms.continue_if_unclear:
-        return Verdict("revert", "queued_after_look_2", 2, (), context)
-    third = _prefix(plan, deciding, changed, control, 4 * plan.minimum, now)
-    if third is None:
-        return Verdict("collecting", "wait_for_look_3", 2, (), {**context, "minimum": 4 * plan.minimum})
-    final = _rule([call(measure, changed[:third]) for measure in plan.measures], plan.measures, 3)
-    assert final is not None
-    return Verdict(final.word, final.reason, 3, final.calls, {**context, **final.inputs})
-
-
-def decide(history: WorkflowHistory, plan: FrozenPlan, now: datetime,
-           replaced_by: tuple[str, str] | None = None) -> Verdict:
-    """Adapt the workflow-version history into the generic two-arm verdict rule."""
-    if plan.baseline is None:
-        return Verdict("not_enough_data", "no_baseline", 0, (), {"minimum": plan.minimum, "skipped": list(plan.skipped)})
-    window = max(measure.window_days for measure in plan.measures)
-    control, changed = sides(history, plan)
+    deciding = [m for m, c in zip(plan.measures, overall) if m.role != "shown" and c.call not in BLOCKED | {"unknown"}]
+    first = _prefix(plan, deciding, new, old, plan.minimum, now)
     inputs = {"baseline": plan.baseline, "skipped": list(plan.skipped)}
-    if replaced_by is not None and all(run.settled(window, now) for run in _side(history, plan.version)):
-        reached = decide_arms(plan, TwoArms(tuple(control), tuple(changed)), now, inputs=inputs)
-        if reached.word == "collecting" and reached.reason == "below_minimum":
+    if replaced_by is not None:
+        # The successor first ran after this version's last run, so every run of this version predates it.
+        own = _side(history, plan.version)
+        if first is None and all(r.settled(window, now) for r in own):
             return Verdict("changed_early", "replaced_before_look_1", 0, (),
-                           {**inputs, "version": plan.version, "k": len(changed), "next": replaced_by[0]})
-        return reached
-    return decide_arms(plan, TwoArms(tuple(control), tuple(changed)), now, inputs=inputs)
+                           {**inputs, "version": plan.version, "k": len(own), "next": replaced_by[0]})
+    if first is None:
+        counted = [c for c in overall if c.role != "shown" and c.call not in BLOCKED | {"unknown"}]
+        groups = sorted({g for c in counted for g in c.groups})
+        return Verdict("collecting", "below_minimum", 0, tuple(counted),
+                       {**inputs, "n": min((c.n_new for c in counted), default=0), "minimum": plan.minimum,
+                        "groups": [list(g) for g in groups]})
+    verdict = _rule([call(m, new[:first]) for m in plan.measures], 1)
+    if verdict is not None:
+        return Verdict(verdict.word, verdict.reason, 1, verdict.calls, {**inputs, **verdict.inputs})
+    second = _prefix(plan, deciding, new, old, 2 * plan.minimum, now)
+    if second is None:
+        return Verdict("collecting", "wait_for_look_2", 1, (), {**inputs, "minimum": 2 * plan.minimum})
+    final = _rule([call(m, new[:second]) for m in plan.measures], 2)
+    assert final is not None
+    return Verdict(final.word, final.reason, 2, final.calls, {**inputs, **final.inputs})
 
 
 def compute(snapshot: Snapshot) -> list[Evaluation]:
@@ -374,7 +314,7 @@ def compute(snapshot: Snapshot) -> list[Evaluation]:
     for history in snapshot.workflows:
         for version in history.versions():
             subject = f"workflow:{history.ref}@{version}"
-            if (snapshot.subjects is not None and subject not in snapshot.subjects) or subject in snapshot.reached:
+            if subject in snapshot.reached:
                 continue
             existing = snapshot.plans.get(subject)
             plan = existing or freeze_plan(history, version)

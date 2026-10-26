@@ -10,10 +10,8 @@ import pytest
 
 from api.cost_identity import IdentityResolver
 from api.measurement_model_cost import query_model_costs
-from core.workflow_verdict_read import (
-    _OPEN_WORKFLOWS_SQL, open_workflow_subjects, price_snapshot, read_open_snapshot, read_snapshot,
-)
-from core.workflow_verdict_rules import FrozenPlan, compute, freeze_plan
+from core.workflow_verdict_read import price_snapshot, read_snapshot
+from core.workflow_verdict_rules import compute, freeze_plan
 from core.workflow_verdicts import MIXED, KpiRow
 from infra.guidance_history_paths import LOCAL_EDIT_MARK
 from model_identity_fixtures import seed_identity_catalog, seed_manifest
@@ -190,36 +188,6 @@ def test_reached_verdicts_remain_skipped_after_an_old_event(db) -> None:
                "'{}')", (old, old, subject))
     snapshot = read_snapshot(db, now=NOW)
     assert subject in snapshot.reached and compute(snapshot) == []
-
-
-def test_open_snapshot_selects_unplanned_versions_and_planned_workflows_without_reached_verdicts(db) -> None:
-    node(db, "run")
-    node(db, "unplanned", workflow="decision-brief", version="v9")
-    correction(db, "bounded", "run")
-    open_subject, reached_subject = "workflow:sdlc-process@v1", "workflow:sdlc-process@v0"
-    plan = FrozenPlan(open_subject, "v1", None, (), (), 20, (), 1).encoded()
-    for index, (event, subject, attributes) in enumerate((
-        ("measurement.verdict.planned", open_subject, json.dumps({"plan": plan})),
-        ("measurement.verdict.planned", reached_subject, json.dumps({"plan": plan})),
-        ("measurement.verdict.reached", reached_subject, "{}"),
-    )):
-        db.execute("INSERT INTO outcome_events (id,dedupe_key,event_name,source,provenance,ts,observed_ts,subject_key,"
-                   "attributes) VALUES (?,?,?,'corsia','instrumented','2026-10-01','2026-10-01',?,?)",
-                   (f"event-{index}", f"event-{index}", event, subject, attributes))
-
-    first_seen = "workflow:decision-brief@v9"
-    assert open_workflow_subjects(db) == {open_subject, first_seen}
-    snapshot = read_open_snapshot(db, now=NOW)
-    assert snapshot.subjects == {open_subject, first_seen}
-    assert [history.ref for history in snapshot.workflows] == ["decision-brief", "sdlc-process"]
-    assert snapshot.workflows[1].runs[0].corrections[0].source_id == "bounded"
-    new_plans = {item.subject for item in compute(price_snapshot(db, snapshot)) if item.plan_is_new}
-    assert new_plans == {first_seen}
-    details = [str(row["detail"]) for row in db.execute(
-        f"EXPLAIN QUERY PLAN {_OPEN_WORKFLOWS_SQL}",
-        {"planned": "measurement.verdict.planned", "reached": "measurement.verdict.reached", "limit": 100},
-    )]
-    assert not any("SCAN outcome_events" in detail for detail in details)
 
 
 def test_kpi_rows_come_only_from_an_injected_reader(db) -> None:
