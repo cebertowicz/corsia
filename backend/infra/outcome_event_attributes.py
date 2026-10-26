@@ -196,6 +196,20 @@ ATTRIBUTE_ALLOWLISTS: dict[str, dict[str, AttributeSpec]] = {
         "pr_count": count_attr(),
         "conclusion": enum_attr(*_CONCLUSION_VALUES),
     },
+    # CI jobs and check runs (events/connectors/github_ci_outcomes.py). Names are text, not ids:
+    # they hold spaces and parentheses. Runner labels are one bounded, sorted, comma-joined
+    # text, and the two check-run times are ids (the id shape admits an ISO timestamp).
+    "github.workflow_job.completed": {
+        "repo": id_attr(), "run_id": id_attr(), "job_id": id_attr(), "run_attempt": count_attr(),
+        "name": text_attr(200), "workflow_name": text_attr(200), "head_sha": id_attr(),
+        "runner_labels": text_attr(200), "conclusion": enum_attr(*_CONCLUSION_VALUES),
+        "queue_seconds": count_attr(),
+    },
+    "github.check_run.completed": {
+        "repo": id_attr(), "check_run_id": id_attr(), "name": text_attr(200),
+        "head_sha": id_attr(), "conclusion": enum_attr(*_CONCLUSION_VALUES),
+        "started_at": id_attr(), "completed_at": id_attr(),
+    },
     # Estimated outcome size; core/size_rating.py owns the fact's keys, enums and
     # meaning. Ids, counts and enums only: no task text or hours.
     SIZE_EVENT: {
