@@ -44,7 +44,7 @@ def test_first_step_distinguishes_a_failed_signin_from_an_unsigned_source():
 def test_import_with_consent_is_first_but_missing_consent_skips_it():
     base = facts(agents_found=["hermes"], bound_model={"model": "test-local"})
     assert "3. **Where your work lives" in first_run_wake.first_app_step(base)
-    base["setup"]["setup_decisions"] = [{"title": "Bring over what your other tools know"}]
+    base["setup"]["setup_decisions"] = [{"title": "Read what your other tools know?"}]
     text = first_run_wake.first_app_step(base)
     assert "2. **Bring over what your other tools know" in text
     assert "3. **Where your work lives" not in text

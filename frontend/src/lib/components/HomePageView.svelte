@@ -13,6 +13,7 @@
 	import { token } from '$lib/stores/auth';
 	import { settingsNavigation } from '$lib/stores/settingsNavigation';
 	import { fetchSetupProgress } from '$lib/setupProgress';
+	import { finishSetupWindow } from '$lib/setupWindow';
 
 	let {
 		isAuthenticated,
@@ -137,6 +138,7 @@
 			onFinished={() => {
 				setupMode = 'login';
 				setupResume = false;
+				void finishSetupWindow();
 				// The route owns first-run selection. It waits for its actual ChatPanel
 				// binding before retrying a lookup that completed during setup.
 				onSetupFinished();

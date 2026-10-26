@@ -268,6 +268,12 @@ const DRAG_INIT_SCRIPT: &str = r#"
 })();
 "#;
 
+/// Setup is over: a window the person left at its default size grows to fill the screen's usable area.
+#[tauri::command]
+fn finish_setup_window(window: tauri::WebviewWindow) {
+    window_placement::expand_main_window_after_setup(&window);
+}
+
 #[tauri::command]
 fn start_window_drag(window: tauri::Window) -> Result<(), String> {
     window.start_dragging().map_err(|e| e.to_string())
@@ -511,13 +517,14 @@ fn service_url(port: u16) -> String {
     format!("http://127.0.0.1:{port}")
 }
 
-/// The commands the pages the local service serves call: first-run folder choice and the setup report, Connect to
-/// another computer, and the window-drag handler injected on every page. Never `disconnect_remote` (the remote page's
+/// The commands the pages the local service serves call: first-run folder choice, the setup report and the window
+/// growing when setup finishes, Connect to another computer, and the window-drag handler injected on every page. Never `disconnect_remote` (the remote page's
 /// own command), the quit and login-item commands, or `start_local_service`, which runs migrations, recovery and
 /// registration: only the startup shell starts the service.
 const LOCAL_SERVICE_PERMISSIONS: &[&str] = &[
     "allow-choose-work-folder",
     "allow-configure-work-folder",
+    "allow-finish-setup-window",
     "allow-read-startup-progress",
     "allow-remote-discovered",
     "allow-remote-pair",
@@ -2415,6 +2422,7 @@ pub fn run() {
             get_service_log_path,
             save_setup_report,
             start_window_drag,
+            finish_setup_window,
         ])
         .on_page_load(|webview, payload| {
             if matches!(payload.event(), tauri::webview::PageLoadEvent::Finished) && is_shell_origin(payload.url().as_str()) {
@@ -2791,6 +2799,7 @@ mod tests {
         "retry_saved_remote",
         "choose_work_folder",
         "configure_work_folder",
+        "finish_setup_window",
         "retry_quit",
         "open_login_items",
         "get_service_log_path",
@@ -3015,7 +3024,7 @@ mod tests {
         let called = frontend_commands();
         assert_eq!(
             called.iter().map(String::as_str).collect::<Vec<_>>(),
-            ["choose_work_folder", "configure_work_folder", "disconnect_remote", "read_startup_progress", "remote_discovered", "remote_pair", "save_setup_report", "start_local_service"],
+            ["choose_work_folder", "configure_work_folder", "disconnect_remote", "finish_setup_window", "read_startup_progress", "remote_discovered", "remote_pair", "save_setup_report", "start_local_service"],
             "the frontend's commands changed: grant each page its commands, or add it to the remote-page-only or shell-page-only list"
         );
         let (_app, webview) = service_origin_app(47895);
