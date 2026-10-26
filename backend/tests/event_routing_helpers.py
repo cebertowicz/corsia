@@ -118,3 +118,10 @@ def statements():
 def read_statements(seen: list[str]) -> list[str]:
     """The reads among the statements ``statements`` captured."""
     return [s for s in seen if s.lstrip().upper().startswith(("SELECT", "WITH"))]
+
+
+def track_repositories(monkeypatch, *repos: str) -> None:
+    """Make ``repos`` the tracked GitHub repositories the PR notice and the quiet
+    sweep read (the broker's cached set), without touching a database or a cache."""
+    names = frozenset(repos)
+    monkeypatch.setattr("connections.github_broker.shared_tracked_repositories", lambda: names)

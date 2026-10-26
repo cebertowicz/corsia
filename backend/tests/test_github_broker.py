@@ -173,16 +173,119 @@ def test_a_malformed_repositories_path_is_refused(broker, inner, path) -> None:
     assert refusal(broker, inner, ["api", path]) == "path_invalid"
 
 
-def test_an_id_the_broker_cannot_read_leaves_that_repository_out_of_scope(inner) -> None:
-    def unreadable(args, *, timeout=30.0):
-        if "--jq" in args:
-            return subprocess.CompletedProcess(args, 1, "", "HTTP 404")
+def _failing_id_lookup(inner: Inner, status: str = "403 Forbidden", headers: str = ""):
+    """An inner runner whose read of ``repos/{REPO}`` fails with ``status``; the rest go to ``inner``."""
+    reads: list[list[str]] = []
+
+    def run(args, *, timeout=30.0):
+        if args[-1] == f"repos/{REPO}":
+            reads.append(list(args))
+            return subprocess.CompletedProcess(args, 1, f'HTTP/2.0 {status}\r\n{headers}\r\n{{"message": "no"}}', "")
         return inner(args, timeout=timeout)
 
-    broker = GithubReadBroker(unreadable, tracked=lambda: frozenset({REPO}))
-    with pytest.raises(GithubReadRefused) as caught:
+    return run, reads
+
+
+@pytest.fixture
+def clean_budget():
+    from events.connectors.github_read_budget import budget
+
+    budget.clear()
+    yield budget
+    budget.clear()
+
+
+def test_an_id_lookup_that_fails_is_a_read_failure_not_a_scope_refusal(inner, clean_budget, caplog) -> None:
+    run, _reads = _failing_id_lookup(inner)
+    broker = GithubReadBroker(run, tracked=lambda: frozenset({REPO}))
+    with caplog.at_level(logging.WARNING), pytest.raises(GithubReadRefused) as caught:
         broker(["api", f"repositories/{REPO_ID}/issues/1/comments"], timeout=5.0)
-    assert caught.value.reason == "repo_out_of_scope" and inner.calls == []
+    assert caught.value.reason == "repository_id_unavailable" and "http_403" in caught.value.detail
+    assert inner.calls == []
+    assert "repository id lookup failed" in caplog.text and "http_403" in caplog.text
+    with pytest.raises(feed.FeedError) as as_feed:
+        feed.gh_get(broker, f"repositories/{REPO_ID}/issues/1/comments")
+    assert as_feed.value.error_class == "read_refused" and "repository_id_unavailable" in str(as_feed.value)
+
+
+def test_a_transport_failure_of_the_id_lookup_names_its_cause(inner, clean_budget) -> None:
+    def broken(args, *, timeout=30.0):
+        if args[-1] == f"repos/{REPO}":
+            raise subprocess.TimeoutExpired(args, timeout)
+        return inner(args, timeout=timeout)
+
+    broker = GithubReadBroker(broken, tracked=lambda: frozenset({REPO}))
+    with pytest.raises(GithubReadRefused) as caught:
+        broker(["api", f"repositories/{REPO_ID}/pulls/1/comments"], timeout=5.0)
+    assert caught.value.reason == "repository_id_unavailable" and "TimeoutExpired" in caught.value.detail
+
+
+def test_a_failed_id_lookup_is_not_repeated_within_the_failure_interval(inner, clean_budget, monkeypatch) -> None:
+    from connections import github_broker
+
+    now = {"t": 100.0}
+    monkeypatch.setattr(github_broker.time, "monotonic", lambda: now["t"])
+    run, reads = _failing_id_lookup(inner, "404 Not Found")
+    broker = GithubReadBroker(run, tracked=lambda: frozenset({REPO}))
+    path = ["api", f"repositories/{REPO_ID}/issues/1/comments"]
+    for _ in range(3):
+        with pytest.raises(GithubReadRefused) as caught:
+            broker(path, timeout=5.0)
+        assert caught.value.reason == "repository_id_unavailable"
+    assert len(reads) == 1, "a failing lookup was read again for every request"
+    now["t"] += github_broker.ID_FAILURE_TTL_S + 1
+    with pytest.raises(GithubReadRefused):
+        broker(path, timeout=5.0)
+    assert len(reads) == 2
+    broker2 = GithubReadBroker(inner, tracked=lambda: frozenset({REPO}))
+    assert broker2(path, timeout=5.0).returncode == 0
+
+
+def test_the_id_lookup_is_counted_against_the_shared_read_budget(inner, clean_budget) -> None:
+    run, reads = _failing_id_lookup(inner, "429 Too Many Requests", "Retry-After: 120\r\n")
+    broker = GithubReadBroker(run, tracked=lambda: frozenset({REPO}))
+    with pytest.raises(GithubReadRefused):
+        broker(["api", f"repositories/{REPO_ID}/issues/1/comments"], timeout=5.0)
+    assert clean_budget.blocked_until() is not None, "the lookup's 429 never reached the budget"
+    again = GithubReadBroker(run, tracked=lambda: frozenset({REPO}))
+    with pytest.raises(GithubReadRefused) as caught:
+        again(["api", f"repositories/{REPO_ID}/issues/1/comments"], timeout=5.0)
+    assert caught.value.reason == "repository_id_unavailable" and "shared read budget" in caught.value.detail
+    assert len(reads) == 1, "the lookup ran while the budget was backing off"
+
+
+def test_a_successful_id_lookup_feeds_the_budget_headers(inner, clean_budget) -> None:
+    def run(args, *, timeout=30.0):
+        if args[-1] == f"repos/{REPO}":
+            head = "HTTP/2.0 200 OK\r\nX-RateLimit-Limit: 5000\r\nX-RateLimit-Remaining: 4321\r\nX-RateLimit-Reset: 4102444800"
+            return subprocess.CompletedProcess(args, 0, f'{head}\r\n\r\n{{"id": {REPO_ID}}}', "")
+        return inner(args, timeout=timeout)
+
+    GithubReadBroker(run, tracked=lambda: frozenset({REPO}))(
+        ["api", f"repositories/{REPO_ID}/issues/1/comments"], timeout=5.0,
+    )
+    assert clean_budget.status()["remaining"] == 4321
+
+
+def test_a_known_id_is_served_even_while_another_tracked_repository_cannot_be_read(inner, clean_budget) -> None:
+    def run(args, *, timeout=30.0):
+        if args[-1] == "repos/o/bad":
+            return subprocess.CompletedProcess(args, 1, 'HTTP/2.0 500 X\r\n\r\n{}', "")
+        return inner(args, timeout=timeout)
+
+    broker = GithubReadBroker(run, tracked=lambda: frozenset({REPO, "o/bad"}))
+    broker(["api", f"repositories/{REPO_ID}/issues/1/comments"], timeout=5.0)  # o/r resolves first
+    with pytest.raises(GithubReadRefused) as caught:
+        broker(["api", "repositories/999/issues/1/comments"], timeout=5.0)
+    assert caught.value.reason == "repository_id_unavailable" and "o/bad" in caught.value.detail
+
+
+def test_the_broker_takes_the_parameters_run_gh_takes_and_no_others(broker, inner) -> None:
+    extras: list[dict[str, Any]] = [{"cwd": "/tmp"}, {"check": True}, {"env": {}}]
+    for extra in extras:
+        with pytest.raises(TypeError):
+            broker(["api", "user"], timeout=5.0, **extra)
+    assert inner.calls == []
 
 
 # --- the rest of the contract ---------------------------------------------
@@ -215,7 +318,10 @@ def test_the_tracked_set_is_resolved_once_a_minute(monkeypatch) -> None:
         calls.append(1)
         return frozenset({REPO})
 
+    from connections import github_broker
+
     monkeypatch.setattr("connections.github_broker.tracked_github_repositories", resolve)
+    monkeypatch.setattr(github_broker, "_shared_tracked", github_broker._CachedTracked())
     broker = GithubReadBroker(Inner())
     for _ in range(3):
         broker(["api", f"repos/{REPO}/pulls/1"], timeout=5.0)

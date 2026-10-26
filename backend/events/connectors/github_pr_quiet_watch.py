@@ -89,16 +89,28 @@ def disabled_reason(runner: feed.GhRunner) -> str | None:
 
 
 def _candidates() -> list[Candidate]:
-    """Owned, not-ended GitHub PRs whose owner thread is live; one owner per PR."""
+    """Owned, not-ended GitHub PRs whose owner thread is live; one owner per PR.
+
+    Only PRs of tracked repositories (the broker's own cached set): an untracked
+    one is never read, so it cannot hold the sweep status at degraded, and its
+    owner was told at registration that CORSIA does not watch it. While the
+    tracked set cannot be read nothing is filtered; the broker then refuses the
+    read by name.
+    """
+    from connections.github_broker import known_tracked_repositories
     from events.connectors.github_pr_notice import OWNED_PR_SQL, parse_pr_external_id
     from infra.database import get_db
 
+    known = known_tracked_repositories()
+    tracked = None if known is None else {name.lower() for name in known}
     rows = get_db().execute(OWNED_PR_SQL.format(thread_filter="")).fetchall()
     seen: set[str] = set()
     candidates: list[Candidate] = []
     for row in rows:
         parsed = parse_pr_external_id(row["external_id"])
         if parsed is None or row["external_id"] in seen:
+            continue
+        if tracked is not None and parsed[0].lower() not in tracked:
             continue
         seen.add(row["external_id"])
         if delivery.thread_exists_and_active(row["parent_thread_id"]):

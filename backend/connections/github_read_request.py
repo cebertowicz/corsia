@@ -67,7 +67,7 @@ class ReadRequest:
 
 
 def _vet_path(
-    path: str, tracked: Callable[[], frozenset[str]], repository_ids: Callable[[], frozenset[str]],
+    path: str, tracked: Callable[[], frozenset[str]], repository_in_scope: Callable[[str], bool],
 ) -> str:
     """The path without its leading slash, or a refusal."""
     if unquote(path.partition("?")[0]).strip("/").lower() == "graphql":
@@ -92,7 +92,7 @@ def _vet_path(
     elif parts[0].lower() == "repositories":
         if len(parts) < 3 or not REPOSITORY_ID.match(parts[1]):
             raise GithubReadRefused("path_invalid", "a repositories path names a numeric id and a resource")
-        if parts[1] not in repository_ids():
+        if not repository_in_scope(parts[1]):
             raise GithubReadRefused("repo_out_of_scope", f"repositories/{parts[1]}")
     elif base not in NON_REPO_PATHS:
         raise GithubReadRefused("path_not_allowed", parts[0])
@@ -146,19 +146,21 @@ def _scan(args: list[str]) -> tuple[str | None, list[str], list[tuple[str, str]]
 
 
 def parse_gh_args(
-    args: list[str], tracked: Callable[[], frozenset[str]], repository_ids: Callable[[], frozenset[str]],
+    args: list[str], tracked: Callable[[], frozenset[str]], repository_in_scope: Callable[[str], bool],
 ) -> ReadRequest:
     """Vet ``["api", ...]`` into a ``ReadRequest``.
 
-    ``tracked`` names the repositories in scope and ``repository_ids`` their
-    numeric ids (asked only when a ``repositories/{id}`` path needs them).
+    ``tracked`` names the repositories in scope and ``repository_in_scope``
+    says whether a numeric id is one of theirs (asked only for a
+    ``repositories/{id}`` path; it may raise ``GithubReadRefused`` when it
+    cannot tell).
     """
     if not args or args[0] != "api":
         raise GithubReadRefused("command_not_allowed", args[0] if args else "")
     method, paths, headers, include = _scan(args)
     if len(paths) != 1:
         raise GithubReadRefused("malformed_args", "exactly one API path is required")
-    path = _vet_path(paths[0], tracked, repository_ids)
+    path = _vet_path(paths[0], tracked, repository_in_scope)
     if (method or "GET") not in READ_METHODS:
         raise GithubReadRefused("method_not_allowed", method or "")
     return ReadRequest(method or "GET", path, tuple(headers), include)

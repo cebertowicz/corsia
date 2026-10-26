@@ -8,7 +8,8 @@ the ``GhRunner`` callable they already take: same arguments in, a
 (see ``github_read_request`` for the policy), runs a ``gh`` argv it rebuilt
 itself, pins the host to github.com, and scrubs token-shaped text from what
 comes back and from every error it raises or logs. The rate budget stays with
-the caller (``github_notifications_feed.gh_get``).
+the caller (``github_notifications_feed.gh_get``); the broker's own repository-id
+lookup reports to the same budget.
 
 ``gh api`` follows redirects itself, so the broker cannot refuse a cross-host
 redirect before it is followed. What keeps the token on github.com is that the
@@ -30,8 +31,11 @@ from typing import Any, Callable
 
 from connections.github_read_request import REPOSITORY_ID, GithubReadRefused, parse_gh_args
 from connections.github_tracked_repos import RepoScopeUnavailable, tracked_github_repositories
+from events.connectors.github_read_budget import budget
 
-__all__ = ["GithubReadBroker", "GithubReadRefused", "default_broker", "scrub"]
+__all__ = [
+    "GithubReadBroker", "GithubReadRefused", "default_broker", "known_tracked_repositories", "scrub",
+]
 
 log = logging.getLogger(__name__)
 
@@ -45,8 +49,11 @@ _TOKEN_SHAPES = re.compile(
 )
 _BLANK_LINE = re.compile(r"\r?\n\r?\n")
 _REPOSITORY_NAME = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
+_STATUS = re.compile(r"^HTTP/\S+\s+(\d{3})")
 TRACKED_TTL_S = 60.0
 _ID_READ_TIMEOUT_S = 30.0
+#: A failed id lookup is not retried for this long, so a 403 or 429 is not re-read per request.
+ID_FAILURE_TTL_S = 60.0
 
 
 def scrub(text: str) -> str:
@@ -117,12 +124,49 @@ class _CachedTracked:
         return self._value
 
 
-class _RepositoryIds:
-    """Numeric ids of the tracked repositories, each read once from ``repos/{name}``.
+_shared_tracked = _CachedTracked()
 
-    GitHub's next-page links name a repository by id (``repositories/{id}/...``).
-    Such a path is allowed only for an id this resolves, so a link to any other
-    repository is refused like any other out-of-scope read.
+
+def shared_tracked_repositories() -> frozenset[str]:
+    """The tracked set through the process-wide cache the default broker reads."""
+    return _shared_tracked()
+
+
+def known_tracked_repositories() -> frozenset[str] | None:
+    """The same tracked set for a caller that is not itself a read (the PR notice,
+    the quiet-watch candidates), or ``None`` while it cannot be read."""
+    try:
+        return shared_tracked_repositories()
+    except GithubReadRefused:
+        return None
+
+
+def _parse_response(stdout: str) -> tuple[int | None, dict[str, str], Any]:
+    """``(status, lower-cased headers, JSON body or None)`` of ``gh api -i`` output."""
+    boundary = _BLANK_LINE.search(stdout)
+    head, raw = (stdout[:boundary.start()], stdout[boundary.end():]) if boundary else (stdout, "")
+    lines = head.replace("\r\n", "\n").split("\n")
+    match = _STATUS.match(lines[0]) if lines else None
+    headers = {
+        name.strip().lower(): value.strip()
+        for name, sep, value in (line.partition(":") for line in lines[1:]) if sep
+    }
+    try:
+        body = json.loads(raw) if raw.strip() else None
+    except ValueError:
+        body = None
+    return (int(match.group(1)) if match else None), headers, body
+
+
+class _RepositoryIds:
+    """Whether a numeric id is the id of a tracked repository.
+
+    GitHub's next-page links name a repository by id (``repositories/{id}/...``),
+    and such a path is allowed only for the id of a tracked repository. Each
+    tracked repository's id is read once from ``repos/{name}``, through the
+    shared read budget, and kept. A failed read is logged with its cause, kept
+    for ``ID_FAILURE_TTL_S`` and raised as ``repository_id_unavailable``: failing
+    to look an id up is never reported as the id being out of scope.
     """
 
     def __init__(
@@ -131,33 +175,69 @@ class _RepositoryIds:
         self._tracked = tracked
         self._inner = inner
         self._known: dict[str, str] = {}
+        self._failed: dict[str, tuple[float, str]] = {}
 
-    def __call__(self) -> frozenset[str]:
-        ids: set[str] = set()
-        for name in self._tracked():
-            key = name.lower()
-            if key not in self._known and (found := self._read(name)) is not None:
-                self._known[key] = found
+    def __call__(self, wanted: str) -> bool:
+        names = {name.lower(): name for name in self._tracked()}
+        if any(self._known.get(key) == wanted for key in names):
+            return True
+        failures: list[str] = []
+        for key, name in names.items():
             if key in self._known:
-                ids.add(self._known[key])
-        return frozenset(ids)
+                continue
+            try:
+                self._known[key] = self._read(name, key)
+            except GithubReadRefused as exc:
+                failures.append(exc.detail)
+            else:
+                if self._known[key] == wanted:
+                    return True
+        if failures:
+            raise GithubReadRefused("repository_id_unavailable", "; ".join(failures)[:200])
+        return False
 
-    def _read(self, name: str) -> str | None:
-        if not _REPOSITORY_NAME.fullmatch(name):
-            return None
+    def _read(self, name: str, key: str) -> str:
+        now = time.monotonic()
+        failed = self._failed.get(key)
+        if failed is not None and now - failed[0] < ID_FAILURE_TTL_S:
+            raise GithubReadRefused("repository_id_unavailable", failed[1])
         try:
-            result = self._inner(
-                ["api", "--method", "GET", "--jq", ".id", f"repos/{name}"], timeout=_ID_READ_TIMEOUT_S,
-            )
-        except (OSError, subprocess.SubprocessError):
-            return None
-        found = str(result.stdout or "").strip()
-        return found if result.returncode == 0 and REPOSITORY_ID.fullmatch(found) else None
+            found = self._fetch(name)
+        except GithubReadRefused as exc:
+            self._failed[key] = (now, exc.detail)
+            log.warning("github-broker: repository id lookup failed (%s)", scrub(exc.detail)[:160])
+            raise
+        self._failed.pop(key, None)
+        return found
+
+    def _fetch(self, name: str) -> str:
+        def failure(cause: str) -> GithubReadRefused:
+            return GithubReadRefused("repository_id_unavailable", f"{name}: {cause}")
+
+        if budget.blocked_until() is not None:
+            raise failure("shared read budget")
+        if not _REPOSITORY_NAME.fullmatch(name):
+            raise failure("not an owner/name pair")
+        try:
+            result = self._inner(["api", "--method", "GET", "-i", f"repos/{name}"], timeout=_ID_READ_TIMEOUT_S)
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise failure(type(exc).__name__) from None
+        status, headers, body = _parse_response(str(result.stdout or ""))
+        if status is None:
+            raise failure(f"gh exit {result.returncode}: {scrub(str(result.stderr or ''))[:80]}")
+        budget.record(status, headers, body)
+        if not 200 <= status < 300:
+            raise failure(f"http_{status}")
+        found = str(body.get("id")) if isinstance(body, dict) else ""
+        if not REPOSITORY_ID.fullmatch(found):
+            raise failure("no numeric id in the response")
+        return found
 
 
 class GithubReadBroker:
     """A ``GhRunner`` that refuses everything but a REST read of a tracked repository.
 
+    It takes the parameters ``reviewer.gh_api.run_gh`` takes and no others.
     ``inner`` runs the vetted ``gh`` argv (a fake in tests) and ``tracked``
     names the repositories in scope; both default to the real ones.
     """
@@ -168,11 +248,11 @@ class GithubReadBroker:
         tracked: Callable[[], frozenset[str]] | None = None,
     ) -> None:
         self._inner = inner or _run_gh
-        self._tracked = tracked or _CachedTracked()
+        self._tracked = tracked or shared_tracked_repositories
         self._repository_ids = _RepositoryIds(self._tracked, self._inner)
 
     def __call__(
-        self, args: list[str], *, timeout: float = 30.0, input_text: str | None = None, **_: Any,
+        self, args: list[str], *, input_text: str | None = None, timeout: float = 30.0,
     ) -> subprocess.CompletedProcess:
         try:
             argv = self._vet(list(args), input_text)

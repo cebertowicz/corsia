@@ -140,26 +140,26 @@ async def test_real_script_receives_no_agent_account_environment(sandbox) -> Non
     assert run.returncode == 0, run.stderr
 
 
+@pytest.mark.xfail(
+    strict=False,
+    reason="open until a script's GitHub reads go through the read broker (the follow-up to the broker PR): "
+    "with no agents' account, a script still reads the person's gh login",
+)
 @pytest.mark.asyncio
-async def test_real_script_reaches_the_persons_gh_login_unless_the_agents_account_exists(
-    sandbox, monkeypatch,
-) -> None:
-    """Settles, for the GitHub read broker, whether a script can use the person's ``gh`` login.
+async def test_a_sandboxed_script_cannot_read_the_persons_gh_login(sandbox, monkeypatch) -> None:
+    """The boundary the GitHub read broker needs: a script cannot reach the person's gh login.
 
-    A script gets the owner's shell envelope and no agents' account. The one
-    rule hiding ``~/.config/gh`` applies only once the agents' account exists
-    (``github_agent.default_home_deny``), so with no such account a script's
-    ``gh`` is the person's own and can bypass the broker. The script prints two
-    exit codes (the credential file is readable; ``gh`` reports a login, output
-    discarded); no token is read or printed. Skipped where the person has no
-    ``gh`` login to reach.
+    A script gets the owner's shell envelope and no agents' account, and the one
+    rule hiding the gh config directory applies only once the agents' account
+    exists (``github_agent.default_home_deny``), so today a script's ``gh`` is
+    the person's own and can bypass the broker. The script prints two exit codes
+    (the credential file is readable; ``gh`` reports a login, output discarded);
+    no token is read or printed. Skipped where the person has no ``gh`` login to
+    reach. Expected to fail until scripts read GitHub through the broker.
     """
-    from connections import github_agent
-
     hosts = Path(REAL_HOME) / ".config" / "gh" / "hosts.yml"
     if shutil.which("gh") is None or not hosts.is_file():
         pytest.skip("no gh login to reach on this machine")
-    reachable = github_agent.default_home_deny(github_agent.view()) is None
     monkeypatch.setenv("HOME", REAL_HOME)
     path = _script(
         sandbox, "gh-reach.sh",
@@ -169,8 +169,8 @@ async def test_real_script_reaches_the_persons_gh_login_unless_the_agents_accoun
     run = await _run(path)
     answers = dict(line.split("=") for line in run.stdout.decode().split())
     assert run.returncode == 0, run.stderr
-    print(f"SCRIPT_GH_REACH reachable_expected={reachable} {answers}")
-    assert (answers["hosts_file"] == "0") is reachable, answers
+    assert answers["hosts_file"] != "0", f"the script can read the person's gh hosts file: {answers}"
+    assert answers["auth_status"] != "0", f"the script's gh is signed in as the person: {answers}"
 
 
 @pytest.mark.asyncio

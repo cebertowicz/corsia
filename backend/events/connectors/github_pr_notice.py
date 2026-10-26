@@ -192,8 +192,26 @@ def _polled_pr(owned: list[OwnedPr], command: str) -> OwnedPr:
     return next((pr for pr in owned if pr.number in numbers), owned[0])
 
 
+def _watched(pr: OwnedPr) -> bool:
+    """Whether CORSIA watches this PR's repository (the broker's cached tracked set).
+
+    An unreadable set counts as watched: the notice never claims a repository
+    is untracked on a guess.
+    """
+    from connections.github_broker import known_tracked_repositories
+
+    known = known_tracked_repositories()
+    return known is None or pr.repo.lower() in {name.lower() for name in known}
+
+
 def _notice(pr: OwnedPr) -> str:
     """The design §4 wording for this instance's delivery (webhook or poller only)."""
+    if not _watched(pr):
+        return (
+            f"[CORSIA PR notice] You own PR {pr.repo}#{pr.number}. CORSIA does not watch "
+            f"{pr.repo}, so it will not wake you when this PR's CI or review is overdue. "
+            f"Check its state yourself when you need it, for example with `gh pr checks {pr.number}`."
+        )
     if webhook_configured():
         return (
             f"[CORSIA PR notice] You own PR {pr.repo}#{pr.number}. CORSIA wakes you when "

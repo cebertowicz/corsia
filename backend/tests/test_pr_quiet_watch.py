@@ -24,7 +24,7 @@ from events.connectors import github_pr_quiet_reasons as reasons
 from events.connectors import github_pr_quiet_rows as rows
 from events.connectors import github_pr_quiet_watch as watch
 from infra.settings import get_setting, set_setting
-from tests.event_routing_helpers import mk_session, register_pr
+from tests.event_routing_helpers import mk_session, register_pr, track_repositories
 
 REPO = "o/r"
 H = "a" * 40
@@ -111,6 +111,7 @@ def _received(head: str, at: datetime = T0, repo: str = REPO, *, suite: int = 1)
 
 @pytest.fixture()
 def gh(isolated_db, monkeypatch):
+    track_repositories(monkeypatch, REPO)
     watch._etags.clear()
     watch._status.update({"fired_count": 0})
     _received("0" * 40, T0 - timedelta(days=30), suite=0)  # the log has recorded suites for a month
@@ -1181,3 +1182,37 @@ def test_signed_out_gh_disables_the_sweep(gh, monkeypatch):
     assert watch.disabled_reason(gh) == "gh_signed_out"
     monkeypatch.setenv(watch.DISABLE_ENV, "1")
     assert watch.disabled_reason(gh) == "config_off"
+
+
+@pytest.mark.asyncio
+async def test_an_owned_pr_of_an_untracked_repository_is_never_read_or_degrading(gh, wakes, parked, monkeypatch):
+    """The broker would refuse the read by name; the sweep skips the PR instead, so
+    one such PR cannot hold the sweep status at degraded."""
+    _webhook()
+    _owner(11)
+    gh.pr(11)
+    set_setting("pr_quiet:o/r#11", {"head": H, "first_seen_at": T0.isoformat(), "fired": []})
+    track_repositories(monkeypatch, "o/other")
+
+    await _sweep(gh, T0 + timedelta(days=3), monkeypatch)
+    assert gh.reads == []
+    assert wakes.await_count == 0
+    assert watch.quiet_watch_status()["state"] == "enabled"
+
+    track_repositories(monkeypatch, REPO)
+    await _sweep(gh, T0 + timedelta(days=3), monkeypatch)
+    assert gh.reads, "the same PR is read once its repository is tracked"
+
+
+@pytest.mark.asyncio
+async def test_an_unreadable_tracked_set_filters_nothing(gh, wakes, parked, monkeypatch):
+    from connections.github_broker import GithubReadRefused
+
+    def refuse():
+        raise GithubReadRefused("repo_scope_unavailable")
+
+    _webhook()
+    _owner(11)
+    gh.pr(11)
+    monkeypatch.setattr("connections.github_broker.shared_tracked_repositories", refuse)
+    assert [c.number for c in watch._candidates()] == [11]

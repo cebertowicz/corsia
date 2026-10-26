@@ -27,9 +27,10 @@ class Inner:
         self.result = (stdout, stderr, returncode)
 
     def __call__(self, args: list[str], *, timeout: float = 30.0) -> subprocess.CompletedProcess:
-        if "--jq" in args:  # the broker's own read of a repository's numeric id
+        if args[-1] == f"repos/{REPO}":  # the broker's own read of a repository's numeric id
             self.id_reads.append(args[-1])
-            return subprocess.CompletedProcess(args, 0, REPO_ID + "\n", "")
+            body = f'{{"id": {REPO_ID}, "full_name": "{REPO}"}}'
+            return subprocess.CompletedProcess(args, 0, f"HTTP/2.0 200 OK\r\n\r\n{body}", "")
         self.calls.append(list(args))
         stdout, stderr, returncode = self.result
         return subprocess.CompletedProcess(args, returncode, stdout, stderr)
