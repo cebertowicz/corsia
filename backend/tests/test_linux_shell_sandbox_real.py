@@ -92,7 +92,7 @@ def test_runtime_cache_is_readable_but_cannot_be_replaced(linux_box):
     env = dict(box.env, PATH=f'{binary.parent}:/usr/bin:/bin')
     def run(command):
         argv = build_protected_argv(command, box.workspace, path_policy=box.policy,
-            rw_roots=[box.home], ro_roots=[], readonly_overlays=[], env=env,
+            rw_roots=[box.home, box.workspace], ro_roots=[], readonly_overlays=[], env=env,
             thread_id='one', executable=shutil.which('bwrap'))
         return subprocess.run(argv, capture_output=True, text=True, timeout=20)
     result = run('node')
