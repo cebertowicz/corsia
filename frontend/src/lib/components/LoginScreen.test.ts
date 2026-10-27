@@ -185,6 +185,16 @@ describe('LoginScreen', () => {
 		expect(host.textContent).not.toContain('Disconnect from Studio?');
 	});
 
+	it('uses a truthful fallback when disconnecting an unnamed computer fails', async () => {
+		remoteShellMocks.shellInfo.mockReturnValue({ mode: 'remote', name: '  ', localConfigured: true });
+		remoteShellMocks.disconnectRemote.mockRejectedValue(new Error('disconnect failed'));
+		vi.stubGlobal('fetch', vi.fn(async () => statusResponse(true)));
+		mountScreen();
+		await vi.waitFor(() => expect(usernameField()).not.toBeNull());
+		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Use this computer instead'))!.click();
+		await vi.waitFor(() => expect(host.textContent).toContain('CORSIA couldn’t disconnect from the other computer. Try again.'));
+	});
+
 	it('labels the remote return action as setup when this computer is not configured', async () => {
 		remoteShellMocks.shellInfo.mockReturnValue({ mode: 'remote', name: 'Studio', localConfigured: false });
 		vi.stubGlobal('fetch', vi.fn(async () => statusResponse(true)));

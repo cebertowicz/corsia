@@ -106,7 +106,7 @@
 		try {
 			await disconnectRemote();
 		} catch {
-			loginError = `CORSIA couldn’t disconnect from ${shell?.mode === 'remote' ? shell.name : 'the other computer'}. Try again.`;
+			loginError = `CORSIA couldn’t disconnect from ${remoteName || 'the other computer'}. Try again.`;
 			returningToThisComputer = false;
 		}
 	}
