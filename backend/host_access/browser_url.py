@@ -18,6 +18,8 @@ def normalize_browser_url(text: object) -> str | None:
     if not isinstance(text, str):
         return None
     text = text.strip()
+    if text == "about:blank":
+        return text
     if not text or any(char.isspace() for char in text):
         return None
     if re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", text):

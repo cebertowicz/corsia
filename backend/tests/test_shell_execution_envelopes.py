@@ -266,11 +266,15 @@ def test_leased_execution_profile_contains_only_permanent_invariant_denials(
     assert f'(deny file-write* (literal "{profile.resolve(strict=False)}"))' in leased
     state_root_text = str(state_root.resolve(strict=False))
     assert state_root_text in protected
-    # Only the credential folder inside the state root is closed under a lease.
+    # Credential and browser profile roots remain closed under a lease.
     keys_deny = (
         f'(deny file-read* file-write* (subpath "{state_root.resolve() / "keys"}"))'
     )
+    browser_profile_deny = (
+        f'(deny file-read* file-write* (subpath "{state_root.resolve() / "browser-profile"}"))'
+    )
     assert keys_deny in leased
+    assert browser_profile_deny in leased
     assert f'(subpath "{state_root_text}")' not in leased
     assert str((Path.home() / ".corsia").resolve(strict=False)) not in leased
     assert (
@@ -282,13 +286,17 @@ def test_leased_execution_profile_contains_only_permanent_invariant_denials(
     assert "(allow process-info* (target same-sandbox))" in leased
     assert '(regex #"^/dev/(r?disk|rdisk)' not in leased
     assert "(deny signal)" in leased
-    # The only outbound denies are the generated-projection AF_UNIX denies.
+    # Browser listener and daemon boundaries remain closed in both profiles.
+    from host_access.browser_ports import sandbox_rules
+    browser_rules = sandbox_rules()
+    assert browser_rules in protected and browser_rules in leased
     assert all(
-        "(remote unix-socket (subpath " in line
+        "(remote unix-socket (subpath " in line or line in browser_rules.splitlines()
         for line in protected.splitlines()
         if line.startswith("(deny network-outbound")
     )
-    assert "(deny network-outbound" not in leased
+    assert all(line in browser_rules.splitlines() for line in leased.splitlines()
+               if line.startswith("(deny network-outbound"))
 
     # Invariant 1: the reviewed process cannot rewrite or re-enter the
     # process-private profile/Safehouse authority that confines this action.
@@ -311,6 +319,8 @@ def test_leased_execution_profile_contains_only_permanent_invariant_denials(
         "(deny signal)",
         "(deny mach-priv-task-port)",
         keys_deny,
+        browser_profile_deny,
+        *(line for line in browser_rules.splitlines() if line.startswith("(deny ")),
     }
     assert denied_lines == expected_denied_lines
     for executable in (

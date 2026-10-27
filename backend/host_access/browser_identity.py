@@ -124,10 +124,13 @@ def is_zombie(pid: int) -> bool:
 
 
 def default_socket_root() -> Path:
-    return Path("/tmp")
+    from host_access.browser_ports import SOCKET_ROOT
+    return SOCKET_ROOT
 
 
 def ensure_private_dir(path: Path) -> Path:
+    if path.parent == default_socket_root():
+        ensure_private_dir(path.parent)
     try:
         path.mkdir(mode=0o700, exist_ok=True)
         metadata = path.lstat()
