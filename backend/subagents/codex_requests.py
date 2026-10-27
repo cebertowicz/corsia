@@ -8,24 +8,6 @@ from subagents.codex_app_server_errors import CodexAppServerError
 from subagents.vendor_write_admission import require_session_write
 
 
-def handle_response(session, msg: dict) -> None:
-    """Resolve a live request; late acknowledgements of cancelled requests are inert."""
-    request_method = session._pending_methods.pop(msg["id"], None)
-    fut = session._pending.pop(msg["id"], None)
-    if fut is None or fut.done():
-        return
-    if "error" in msg:
-        fut.set_exception(CodexAppServerError(str(msg["error"]), msg["error"]))
-        return
-    result = msg.get("result")
-    if request_method == "turn/start" and isinstance(result, dict):
-        turn = result.get("turn")
-        turn_id = turn.get("id") if isinstance(turn, dict) else None
-        if isinstance(turn_id, str) and turn_id:
-            session._track_active_turn(turn_id)
-    fut.set_result(result)
-
-
 async def request(session, method, params=None, *, on_write_observed=None, on_drain_confirmed=None):
     """Write one request; paid Turn writes revalidate the session's frozen account."""
     from subagents.codex_app_server import REQUEST_TIMEOUT, STEER_ACK_TIMEOUT, _STEER_NOT_WRITTEN

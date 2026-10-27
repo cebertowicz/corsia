@@ -2,10 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
-import io
-import traceback
-
 from loguru import logger
 
 from automation.continuation import settlement, triggers
@@ -13,31 +9,6 @@ from automation.continuation.models import StaleContinuation
 from infra.database import TransactionOwnershipError, write_transaction
 from infra.db_async import run_in_db_unless_owned
 from infra.product_events import emit_product_event
-
-
-async def _deliver_with_diagnostic(deliver, trigger, event, summary, details):
-    """Warn once at a missed sweep cadence, then await the original outcome."""
-    from automation.continuation.loop import CONTINUATION_SWEEP_INTERVAL
-    from ws.ingress import track_background_task
-
-    task = asyncio.create_task(deliver(trigger.thread_id, event, summary, details))
-    track_background_task(task)
-    done, _ = await asyncio.wait({task}, timeout=CONTINUATION_SWEEP_INTERVAL)
-    if not done:
-        stack = io.StringIO()
-        task.print_stack(file=stack)
-        # Task.get_stack() alone omits frames of nested awaited coroutines.
-        awaited = getattr(task.get_coro(), "cr_await", None)
-        while awaited is not None:
-            frame = getattr(awaited, "cr_frame", None) or getattr(awaited, "gi_frame", None)
-            if frame is not None:
-                stack.write("".join(traceback.format_stack(frame, limit=1)))
-            awaited = getattr(awaited, "cr_await", None) or getattr(awaited, "gi_yieldfrom", None)
-        logger.warning(
-            "continuation: slow delivery kind={} thread={} trigger={} stack:\n{}",
-            trigger.kind, trigger.thread_id, trigger.id, stack.getvalue(),
-        )
-    return await asyncio.shield(task)
 
 
 def event_for(request: triggers.TriggerRequest) -> tuple[str, str, dict]:
@@ -164,7 +135,7 @@ async def deliver_one(
         return
     resolved_deliver = getattr(source, "deliver", None) or deliver
     try:
-        landed = await _deliver_with_diagnostic(resolved_deliver, trigger, event, summary, details)
+        landed = await resolved_deliver(trigger.thread_id, event, summary, details)
     except StaleContinuation:
         outcome, reason = "cancelled", "stale_source_state"
     except Exception as exc:  # noqa: BLE001 - logged, reported, and settled failed
