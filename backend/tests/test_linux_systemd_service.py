@@ -63,6 +63,7 @@ ok() { echo "$*"; }
 resolve_bind_host() { echo 127.0.0.1; }
 is_backend_running() { return 1; }
 backend_pids() { :; }
+backend_pid_serves_this_checkout() { [ "${STUB_FOREIGN_PID:-no}" = no ]; }
 source "$SERVICE_SCRIPT"
 FORCE=false
 ''' + body
@@ -124,6 +125,13 @@ def test_stop_rejects_foreign_or_stale_manager_even_when_unhealthy(service_env, 
     assert Path(service_env["STUB_ACTIVE"]).exists()
 
 
+def test_stop_rejects_a_foreign_running_process_even_when_forced(service_env):
+    assert run_service(service_env, "service_install; service_start").returncode == 0
+    result = run_service({**service_env, "STUB_FOREIGN_PID": "yes"}, "FORCE=true; service_stop")
+    assert result.returncode != 0
+    assert Path(service_env["STUB_ACTIVE"]).exists()
+
+
 @pytest.mark.parametrize("failure", ["daemon-reload", "enable"])
 def test_start_recovers_interrupted_install(service_env, failure):
     env = {**service_env, "STUB_FAIL_ONCE": failure}
@@ -138,8 +146,11 @@ def test_start_recovers_interrupted_install(service_env, failure):
 def test_restart_refreshes_old_owned_template_after_stopping(service_env):
     assert run_service(service_env, "service_install; service_start").returncode == 0
     unit = Path(service_env["HOME"]) / ".config/systemd/user/com.corsia.prod.service"
-    unit.write_text(unit.read_text().replace("RestartSec=5s", "RestartSec=10s"))
-    result = run_service(service_env, "service_restart")
+    result = run_service(service_env, '''
+        eval "$(declare -f render_systemd_unit | sed '1s/render_systemd_unit/render_old_unit/')"
+        render_systemd_unit() { render_old_unit | sed 's/RestartSec=5s/RestartSec=10s/'; }
+        service_restart
+    ''')
     assert result.returncode == 0, result.stderr
-    assert "RestartSec=5s" in unit.read_text()
+    assert "RestartSec=10s" in unit.read_text()
     assert Path(service_env["STUB_ACTIVE"]).exists()

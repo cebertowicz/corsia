@@ -146,6 +146,13 @@ service_stop() {
     service_installed || { fail "The systemd unit is absent or belongs to another checkout: $(service_unit_path)"; return 1; }
     service_is_loaded || return 0
     require_manager_service_definition || return 1
+    local pid
+    pid="$(service_loaded_pid)" || return 1
+    case "$pid" in ''|0|*[!0-9]*) fail "Cannot determine the systemd service PID"; return 1 ;; esac
+    backend_pid_serves_this_checkout "$pid" || {
+        fail "The running systemd service does not belong to this checkout"
+        return 1
+    }
     if [ "$FORCE" = false ] && is_backend_running; then
         require_loaded_service_owns_port || return 1
         drain_attempted=true

@@ -499,7 +499,7 @@ link_corsia_command_linux() {
         if link_points_into_corsia "$command_path"; then
             rm "$command_path"
         else
-            say "     A different corsia command already exists at $command_path; leaving it unchanged."
+            say "     A different corsia command is already at $command_path."
             return 1
         fi
     fi

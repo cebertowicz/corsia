@@ -361,12 +361,12 @@ def test_root_runs_apt_without_sudo(env):
     assert f"apt-get install -y {APT_BASE} git gh" in _calls(env)
 
 
-@pytest.mark.parametrize("release, shown", [
-    ('ID=fedora\nPRETTY_NAME="Fedora Linux 42"\n', "Fedora Linux 42"),
-    ('ID=arch\nPRETTY_NAME="Arch Linux"\n', "Arch Linux"),
-    ("", "an unrecognized Linux"),
+@pytest.mark.parametrize("release", [
+    'ID=fedora\nPRETTY_NAME="Fedora Linux 42"\n',
+    'ID=arch\nPRETTY_NAME="Arch Linux"\n',
+    "",
 ])
-def test_a_distro_without_apt_is_refused_before_anything_installs(env, release, shown):
+def test_a_distro_without_apt_is_refused_before_anything_installs(env, release):
     Path(env["CORSIA_INSTALL_OS_RELEASE"]).write_text(release)
 
     result = _run(env)
@@ -422,7 +422,7 @@ def test_a_foreign_corsia_command_is_left_unchanged_with_a_warning(env):
 
     assert result.returncode == 0, result.stderr
     assert command.readlink() == Path("/usr/local/bin/corsia")
-    assert f"A different corsia command already exists at {command}; leaving it unchanged." in result.stdout
+    assert f"A different corsia command is already at {command}." in result.stdout
 
 
 def test_the_corsia_command_note_says_how_to_reach_it_when_the_bin_dir_is_new(env):

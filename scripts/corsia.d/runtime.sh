@@ -1301,7 +1301,11 @@ restart_prepared() {
     # owner bounce_server/service_restart would prove before that first effect.
     # Revalidation inside the bounce remains intentional across the drain gap.
     if service_installed; then
-        require_owned_service_definition || return 1
+        if [ "${CORSIA_SERVICE_MANAGER:-}" = systemd ]; then
+            require_manager_service_definition || return 1
+        else
+            require_owned_service_definition || return 1
+        fi
         if service_is_loaded; then
             if is_backend_running || [ -n "$(backend_pids)" ]; then
                 require_loaded_service_owns_port || return 1
