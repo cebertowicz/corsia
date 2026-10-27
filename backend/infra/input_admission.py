@@ -12,6 +12,7 @@ from core.viewing_context import VIEWING_DOCUMENT_KEY, VIEWING_DOCUMENT_TARGET_K
 from infra.database import get_db, write_transaction
 from infra.document_viewing import PreparedViewingDocument
 from infra.reply_context import require_every_comment, validate_reply_context
+from infra.send_target import load_authors
 from infra.thread_inputs import thread_admission_state
 from infra.time import utc_now_iso
 from infra.vendor_login import LOGIN_KEY, public_metadata
@@ -279,8 +280,6 @@ def accept_thread_input(
             require_current(thread_id, continuation, db=connection)
         input_order = int(state["next_input_order"])
         epoch, model = _input_destination(state, input_order)
-        from infra.send_target import load_authors
-
         hold = _admission_hold(connection, model, thread_id=thread_id, load_for=load_authors(((message_id, role, metadata),)))
         from plans.public import schedule_for_accepted_input
 

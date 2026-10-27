@@ -35,17 +35,14 @@ def _settle_load_failure(batch, error, attempt_id: str | None, db=None) -> tuple
         elif rest.items:
             release_batch_after_proved_no_write(rest, attempt_id=attempt_id, error=None, db=connection)
         # Rows stopped, deleted or claimed by another Turn meanwhile are left alone.
-        rows = connection.execute(
-            f"SELECT id,thread_id FROM messages WHERE id IN ({','.join('?' * len(authors))}) "
-            "AND delivery_state='queued' AND (active_turn_id IS NULL OR active_turn_id=?) ORDER BY input_order",
-            (*authors, batch.turn_id),
-        ).fetchall()
+        rows = sorted(connection.execute(
+            "UPDATE messages SET metadata=json_set(COALESCE(metadata, '{}'), '$.model_load_cause', ?) "
+            f"WHERE id IN ({','.join('?' * len(authors))}) AND delivery_state='queued' "
+            "AND (active_turn_id IS NULL OR active_turn_id=?) RETURNING id,thread_id,input_order",
+            (error.cause, *authors, batch.turn_id),
+        ).fetchall(), key=lambda row: row['input_order'])
         if not rows:
             return ()
-        connection.executemany(
-            "UPDATE messages SET metadata=json_set(COALESCE(metadata, '{}'), '$.model_load_cause', ?) WHERE id=?",
-            [(error.cause, row['id']) for row in rows],
-        )
         return sequence_attempt(
             connection, rows, state="failed", outcome="proved_no_write", error=model_load_error(error.cause),
         )

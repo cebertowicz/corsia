@@ -230,7 +230,7 @@ def _claimable_prefix(
     rows = _deliverable_prefix(rows, lifted)
     if not rows or not any(starts_turn(row) for row in rows):
         return None
-    claimed = {row['id'] for row in rows}  # only claimed people authorize this Turn's load
+    claimed = {row['id'] for row in rows}  # only the people this Turn claims authorize its load
     return epoch, model, rows, lifted, held, Admission(admission.kind, admission.cause, tuple(i for i in load_for if i in claimed))
 
 
