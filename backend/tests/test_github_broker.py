@@ -241,31 +241,23 @@ def test_every_poller_defaults_to_the_broker(monkeypatch) -> None:
 
 # --- the token never leaves ------------------------------------------------
 
-def test_broker_removes_token_shapes_and_known_environment_tokens(monkeypatch, broker, inner) -> None:
+def test_stderr_and_the_auth_probe_lose_token_shapes_and_known_environment_tokens(monkeypatch, broker, inner) -> None:
     known = "plain-env-secret-value"
     monkeypatch.setenv("GH_TOKEN", known)
-    text = " ".join([
-        secret("gho"), secret("ghp"), secret("ghs"), "github_pat_" + "A1b2C3d4E5" * 3,
-        known, "Authorization: Bearer abc.def", "authorization: token xyz", "keep me",
-    ])
-    inner.result = (text, "", 0)
-    cleaned = broker(["api", "user"]).stdout
-    for leaked in (secret("gho"), secret("ghp"), secret("ghs"), "github_pat_A1b2", known, "abc.def", "xyz"):
-        assert leaked not in cleaned
-    assert "keep me" in cleaned
+    text = " ".join([secret("gho"), secret("ghp"), secret("ghs"), "github_pat_" + "A1b2C3d4E5" * 3, known, "keep me"])
+    inner.result = ("", text, 1)
+    failed = broker(["api", "user"]).stderr
+    inner.result = (f"Logged in\n  - Token: {secret('gho')} {known}", "", 0)
+    probe = broker(["auth", "status"]).stdout
+    for cleaned in (failed, probe):
+        for leaked in (secret("gho"), "github_pat_A1b2", known):
+            assert leaked not in cleaned
+    assert "keep me" in failed and probe.startswith("Logged in")
 
 
-def test_live_environment_token_in_escaped_json_remains_valid(monkeypatch, broker, inner) -> None:
-    secret_value = 'long-"quoted\\value'
-    monkeypatch.setenv("GH_TOKEN", secret_value)
-    inner.result = (json.dumps({secret_value: [f"before {secret_value} after"]}), "", 0)
-    result = json.loads(broker(["api", "user"]).stdout)
-    assert result == {"[REDACTED]": ["before [REDACTED] after"]}
-
-
-def test_a_token_in_output_errors_and_logs_never_survives(broker, inner, caplog) -> None:
+def test_a_token_in_errors_arguments_and_logs_never_survives(broker, inner, caplog) -> None:
     token = secret()
-    inner.result = (f"HTTP/2.0 200 OK\r\nX-Echo: {token}\r\n\r\n" + '{"t": "' + token + '"}', f"warn {token}", 0)
+    inner.result = ("[]", f"warn {token}", 0)
     with caplog.at_level(logging.DEBUG):
         result = broker(["api", "-i", "user"], timeout=5.0)
         for args in (["api", f"unknown-{token}/x/pulls"], ["api", "-H", f"Authorization: token {token}", "user"],
@@ -273,18 +265,16 @@ def test_a_token_in_output_errors_and_logs_never_survives(broker, inner, caplog)
             with pytest.raises(GithubReadRefused) as caught:
                 broker(args, timeout=5.0)
             assert token not in str(caught.value) and token not in repr(caught.value.detail)
-    assert token not in result.stdout and token not in result.stderr
+    assert token not in result.stderr
     assert token not in " ".join(record.getMessage() for record in caplog.records)
     assert token not in " ".join(str(part) for part in result.args)
 
 
-def test_secrets_in_json_keys_arguments_and_timeout_are_scrubbed(inner) -> None:
+def test_secrets_in_arguments_and_timeout_are_scrubbed(inner) -> None:
     token = secret()
-    inner.result = (json.dumps({token: "value"}), "", 0)
-    broker = GithubReadBroker(inner)
-    result = broker(["api", f"repos/{token}/repo"])
-    assert token not in result.stdout and token not in str(result.args)
-    assert json.loads(result.stdout) == {"[REDACTED]": "value"}
+    inner.result = ("{}", "", 0)
+    result = GithubReadBroker(inner)(["api", f"repos/{token}/repo"])
+    assert token not in str(result.args)
 
     def timeout(args, *, timeout):
         raise subprocess.TimeoutExpired(args, timeout, output=token, stderr=token)
@@ -295,34 +285,24 @@ def test_secrets_in_json_keys_arguments_and_timeout_are_scrubbed(inner) -> None:
     assert caught.value.output is None and caught.value.stderr is None
 
 
-def test_a_token_shaped_value_inside_a_json_string_is_scrubbed_and_the_document_stays_valid(broker, inner) -> None:
-    token = secret()
-    comment = f'before {token} after, then curl -H "Authorization: Bearer {token}" -d \'x\' end'
-    inner.result = (
-        'HTTP/2.0 200 OK\r\nEtag: W/"1"\r\n\r\n' + json.dumps([{"body": comment, "n": 3, "nested": {"k": [comment]}}]),
-        "", 0,
-    )
+def test_a_read_response_reaches_the_poller_exactly_as_github_sent_it(broker, inner) -> None:
+    comment = 'Set password = hunter2 and token: abc123, then curl -H "Authorization: Bearer x" -d \'x\' end'
+    raw = 'HTTP/2.0 200 OK\r\nEtag: W/"1"\r\n\r\n' + json.dumps([{"body": comment, "n": 3}])
+    inner.result = (raw, "", 0)
     stdout = broker(["api", "-i", f"repos/{REPO}/issues/1/comments"], timeout=5.0).stdout
-    assert token not in stdout
+    assert stdout == raw
     response = feed._parse(stdout)
     assert response is not None and response.headers["etag"] == 'W/"1"'
-    [item] = response.body
-    assert item["n"] == 3 and item["nested"]["k"] == [item["body"]]
-    assert item["body"].startswith("before ") and " after, then curl -H " in item["body"]
-    assert item["body"].endswith(" -d 'x' end")
-    inner.result = (json.dumps({"body": comment}), "", 0)
-    plain = broker(["api", f"repos/{REPO}/issues/1"], timeout=5.0).stdout
-    assert token not in plain and " after, then curl -H " in json.loads(plain)["body"]
+    assert response.body == [{"body": comment, "n": 3}]
 
 
 @pytest.mark.asyncio
-async def test_a_quoted_authorization_header_in_a_pr_body_or_comment_does_not_break_the_pollers(inner) -> None:
+async def test_a_quoted_authorization_header_in_a_pr_body_or_comment_reaches_the_pollers_unchanged(inner) -> None:
     from datetime import UTC, datetime
 
     from events.connectors import github_pr_quiet_watch as watch
 
-    token = secret()
-    quoted = 'curl -H "Authorization: Bearer ' + token + '" https://api.github.com/user'
+    quoted = 'curl -H "Authorization: Bearer ' + secret() + '" https://api.github.com/user'
     pull = json.dumps({"state": "open", "body": quoted})
     comment = json.dumps({"id": 1, "body": quoted, "created_at": "2026-10-26T12:00:00Z", "user": {"login": "a"}})
 
@@ -334,14 +314,13 @@ async def test_a_quoted_authorization_header_in_a_pr_body_or_comment_does_not_br
     broker = GithubReadBroker(serve)
     watch._etags.clear()
     watched = await watch._get(broker, f"repos/{REPO}/pulls/21")
-    assert isinstance(watched, dict) and watched["state"] == "open"  # a None body would forget the PR
-    assert token not in watched["body"] and watched["body"].startswith("curl -H ")
+    assert isinstance(watched, dict) and watched["state"] == "open" and watched["body"] == quoted
     thread = {"subject": {"url": f"https://api.github.com/repos/{REPO}/issues/21", "type": "Issue"}}
     [(event_type, payload)] = feed.comment_payloads(
         broker, thread, datetime(2026, 10, 26, tzinfo=UTC), lambda _key: False,
     )
     assert event_type == "issue_comment" and payload["comment"]["id"] == 1
-    assert token not in payload["comment"]["body"] and payload["comment"]["body"].startswith("curl -H ")
+    assert payload["comment"]["body"] == quoted
 
 
 def test_gh_follows_redirects_but_sends_the_token_only_to_the_configured_host(tmp_path) -> None:

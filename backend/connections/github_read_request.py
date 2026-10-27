@@ -5,7 +5,8 @@
 passed through: the broker rebuilds the argv from the vetted request, so what
 runs is exactly what was checked. The policy, in one place:
 
-* REST only, methods ``GET`` and ``HEAD``; GraphQL is refused by name;
+* REST only, methods ``GET`` and ``HEAD``; GraphQL is refused because its
+  path is not listed;
 * an API path, never a URL: ``gh api`` itself accepts any URL, and would send
   the person's token to its host;
 * repository paths and GitHub's numeric repository pagination paths, plus
