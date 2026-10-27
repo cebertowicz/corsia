@@ -86,6 +86,11 @@ def record_install_week(
     """
     moment = now or datetime.now(timezone.utc)
     week = iso_week(moment)
+    dedupe_key = f"{USAGE_EVENT}:{week}"
+    # Look first: a restart after the week's first record is normal, and a conflicting insert would
+    # count it as a duplicate delivery in the intake-health counters.
+    if db.execute("SELECT 1 FROM outcome_events WHERE dedupe_key=?", (dedupe_key,)).fetchone():
+        return False
     # Drawn once, here: the week's record is written once, so every rebuild of this week's summary
     # carries the same id and a retried upload is recognised. Random, never derived from the install.
     summary = validate_summary({
@@ -94,7 +99,7 @@ def record_install_week(
     })
     with write_transaction(db, scope="record_install_week") as connection:
         result = record_outcome_event(
-            connection, dedupe_key=f"{USAGE_EVENT}:{week}", event_name=USAGE_EVENT, source="corsia",
+            connection, dedupe_key=dedupe_key, event_name=USAGE_EVENT, source="corsia",
             provenance="instrumented", ts=moment.isoformat(), attribution="none", attributes=summary,
         )
     return result.inserted

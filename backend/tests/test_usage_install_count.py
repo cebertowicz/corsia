@@ -50,6 +50,21 @@ def test_recording_is_once_per_week_and_local(db):
     assert tuple(row) == ("corsia", "instrumented")
 
 
+def test_a_restart_in_a_recorded_week_is_not_counted_as_a_duplicate_delivery(db):
+    record_install_week(db, now=NOW, version="0.4.1", fields=FIELDS)
+    for _ in range(3):  # app restarts later in the same week
+        assert record_install_week(db, now=NOW, version="0.4.1", fields=FIELDS) is False
+    assert db.execute("SELECT COUNT(*) FROM outcome_event_counters WHERE event_name=?", (USAGE_EVENT,)).fetchone()[0] == 0
+    assert db.execute("SELECT COUNT(*) FROM outcome_events WHERE event_name=?", (USAGE_EVENT,)).fetchone()[0] == 1
+
+
+def test_the_outcome_event_allowlist_takes_its_fields_from_the_usage_field_list():
+    from core.usage_fields import FIELDS as USAGE_FIELDS
+    from infra.outcome_event_attributes import ATTRIBUTE_ALLOWLISTS
+
+    assert set(ATTRIBUTE_ALLOWLISTS[USAGE_EVENT]) == set(USAGE_FIELDS)
+
+
 def test_an_install_left_open_across_a_week_records_both_weeks(db, monkeypatch):
     import infra.usage_summary as usage
 
