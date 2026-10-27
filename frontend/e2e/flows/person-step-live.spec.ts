@@ -99,8 +99,32 @@ for (const action of ['done', 'closed'] as const) {
     await page.getByRole('menuitem', { name: action === 'done' ? 'Mark done' : 'Won’t do' }).click();
     await expect(chip).toHaveAttribute('data-step-state', action);
     await expect(chip.getByRole('button', { name: /Do: Run proof 1/ })).toBeHidden();
+    await expect(page.locator('.passive-toggle')).toHaveCount(0);
   });
 }
+
+test('person-step live group focus off 393', async ({ page, request }, testInfo) => {
+  if (!out) throw new Error('PERSON_STEP_LIVE_OUT is required');
+  const output = path.join(out, testInfo.project.name);
+  fs.mkdirSync(output, { recursive: true });
+  await page.setViewportSize({ width: 393, height: 852 });
+  await page.addInitScript(() => localStorage.setItem('corsia_theme', 'light'));
+  await setFocusMode(request, false);
+  const title = 'Live person steps focus off';
+  const thread = await createSession(request, title);
+  await injectMessage(request, thread, { role: 'assistant', content: 'The proof is ready for you.' }, TEST_TOKEN);
+  seed(thread, 2);
+  await openAppByUrl(page);
+  await page.getByRole('button', { name: 'Toggle sidebar' }).click();
+  const loaded = page.waitForResponse(r => r.url().includes(`/threads/${thread}/messages`));
+  await page.getByText(title).first().click();
+  await loaded;
+  const rows = page.locator('[data-person-step]');
+  await expect(rows).toHaveCount(2);
+  await expect(rows.nth(0)).toContainText('Run proof 1');
+  await expect(rows.nth(1)).toContainText('Run proof 2');
+  await page.screenshot({ path: path.join(output, 'group-focus-off-393.png'), animations: 'disabled' });
+});
 
 for (const width of [393, 1440]) {
   for (const scene of ['waiting', 'group', 'done', 'closed'] as const) {
@@ -132,7 +156,10 @@ for (const width of [393, 1440]) {
       await expect(row).toBeVisible();
       if (scene === 'group') await expect(row).toContainText('+1 more');
       else if (scene === 'waiting') await expect(row).toContainText('Needs you');
-      else await expect(row).toHaveAttribute('data-step-state', scene);
+      else {
+        await expect(row).toHaveAttribute('data-step-state', scene);
+        await expect(page.locator('.passive-toggle')).toHaveCount(0);
+      }
       await page.screenshot({ path: path.join(output, `${scene}-${width}.png`), animations: 'disabled' });
     });
   }

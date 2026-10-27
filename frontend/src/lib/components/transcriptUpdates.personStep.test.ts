@@ -73,10 +73,43 @@ describe('a person step in the transcript', () => {
 		expect(merged[0].group).toBeUndefined();
 	});
 
-	it('Focus off: each step keeps its own line', () => {
+	it.each([['done', 'done'], ['closed', 'closed']] as const)(
+		'Focus: a displayed %s receipt replaces its %s outcome, leaving other outcomes', (state, kind) => {
+			nextId = 1;
+			const receipt = step(1, { node_id: 'person', step_state: state });
+			const outcomes = ['person', 'other1', 'other2'].map((node_id) => step(2, { node_id, kind }));
+			const merged = mergeTranscriptUpdates([work(1, 2, 3)], [receipt, ...outcomes], on);
+			const passive = merged.filter((entry) => entry.kind === 'passive');
+			expect(passive.flatMap((entry) => entry.cards.map((card) => card.node_id))).toEqual(['other1', 'other2']);
+			expect(updates(merged).some((entry) => entry.card.id === receipt.id)).toBe(true);
+		},
+	);
+
+	it.each([['done', 'done'], ['done', 'done_follow_up'], ['closed', 'closed']] as const)(
+		'Focus: no passive row remains when its only %s receipt replaces %s', (state, kind) => {
 		nextId = 1;
-		const merged = updates(mergeTranscriptUpdates([message(1), message(2)], [step(1), step(1), step(2)], off));
-		expect(merged).toHaveLength(3);
+		const receipt = step(1, { node_id: 'person', step_state: state });
+		const outcome = step(2, { node_id: 'person', kind });
+		const merged = mergeTranscriptUpdates([work(1, 2, 3)], [receipt, outcome], on);
+		expect(merged.some((entry) => entry.kind === 'passive')).toBe(false);
+	});
+
+	it('keeps outcomes when the receipt is outside the card window or grouped away', () => {
+		nextId = 1;
+		const outcome = step(2, { node_id: 'person', kind: 'done' });
+		expect(mergeTranscriptUpdates([work(1, 2, 3)], [outcome], on).some((entry) => entry.kind === 'passive')).toBe(true);
+		const receipt = step(1, { node_id: 'person', step_state: 'done' });
+		const laterAsk = step(1, { node_id: 'person', kind: 'blocked', blocked_asks_user: true });
+		expect(mergeTranscriptUpdates([work(1, 2, 3)], [receipt, laterAsk, outcome], on).some((entry) => entry.kind === 'passive')).toBe(true);
+	});
+
+	it('Focus off: each step and its outcome keeps its own line', () => {
+		nextId = 1;
+		const receipt = step(1, { node_id: 'person', step_state: 'done' });
+		const outcome = step(2, { node_id: 'person', kind: 'done' });
+		const another = step(1);
+		const merged = updates(mergeTranscriptUpdates([message(1), message(2)], [receipt, another, outcome], off));
+		expect(merged.map((entry) => entry.card.id)).toEqual([receipt.id, another.id, outcome.id]);
 		expect(merged.every((entry) => entry.group === undefined)).toBe(true);
 	});
 });

@@ -270,11 +270,21 @@ export function mergeTranscriptUpdates(
 	const structural = split
 		? [...closeRunsAtCards(partitioned.slice(0, at), oldCards), visitEntry(divider!), ...closeRunsAtCards(partitioned.slice(at), freshCards)]
 		: closeRunsAtCards(partitioned, sorted);
-	const fenced = fencePlanLimitPauses(structural, options.pauses ?? [], options.turnSummaries ?? {}, options.sourceContext, sorted.some(isPassive));
+	// Only receipts retained as visible update rows replace their corresponding outcome.
+	// The card window and grouping can omit a receipt, in which case the outcome stays.
+	const receipts = new Map(structural.flatMap((entry) => entry.kind === 'update'
+		&& entry.card.kind === 'person_step' && entry.card.node_id
+		&& (entry.card.step_state === 'done' || entry.card.step_state === 'closed')
+		? [[entry.card.node_id, entry.card.step_state] as const] : []));
+	const passive = (card: UpdateCard) => isPassive(card) && !(card.node_id && (
+		(receipts.get(card.node_id) === 'done' && (card.kind === 'done' || card.kind === 'done_follow_up'))
+		|| (receipts.get(card.node_id) === 'closed' && card.kind === 'closed')
+	));
+	const fenced = fencePlanLimitPauses(structural, options.pauses ?? [], options.turnSummaries ?? {}, options.sourceContext, sorted.some(passive));
 	const boundary = fenced.findIndex((entry) => entry.kind === 'divider');
-	const placed = boundary < 0 ? placePassive(fenced, sorted.filter(isPassive)) : [
-		...placePassive(fenced.slice(0, boundary), oldCards.filter(isPassive)), fenced[boundary],
-		...placePassive(fenced.slice(boundary + 1), freshCards.filter(isPassive)),
+	const placed = boundary < 0 ? placePassive(fenced, sorted.filter(passive)) : [
+		...placePassive(fenced.slice(0, boundary), oldCards.filter(passive)), fenced[boundary],
+		...placePassive(fenced.slice(boundary + 1), freshCards.filter(passive)),
 	];
 	const lined = lines.length ? attachCardLines(placed, lines) : { entries: placed, host: new Map<number, TranscriptFoldEntry>() };
 	if (!divider || !together) return lined.entries;
