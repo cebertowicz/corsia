@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from functools import partial
 from typing import Any, Sequence
 
 from host_access import browser_cdp, browser_cli, browser_control, browser_dom_write, browser_identity as identity
-from host_access.browser_session_state import BrowserSessionError, BrowserSetupError
+from host_access import browser_pane_state, browser_step_lifecycle
+from host_access.browser_session_state import BrowserSessionCleanupError, BrowserSessionError, BrowserSetupError
 from infra.product_events import emit_product_event
 
 # A pane's own commands: the person's navigation, the page metadata their pane shows, and their pane's size
@@ -29,29 +31,29 @@ async def run(owner: Any, thread_id: str, args: Sequence[str], *, lease_id: str 
     opening_unlaunched_session = args[0] == "open" and runtime.record.binding is None
     guarded = not pane and not opening_unlaunched_session
     # A pane command is never a DOM write (_PANE_COMMANDS), so a marked field is always the agent's.
-    shared_write = browser_control.has_pane(thread_id) and browser_dom_write.is_dom_write(args)
+    shared_write = browser_pane_state.has_pane(thread_id) and browser_dom_write.is_dom_write(args)
     # One page target per command: the probe, a read's target and a write all act on the same page.
     endpoint = await browser_cdp.page_endpoint(command) if guarded or shared_write else ""
     if guarded:
         await browser_control.require_page_access(
             thread_id, partial(browser_cdp.page_password_probe, endpoint), tuple(args),
-            resolve=partial(browser_dom_write.target_node, command, endpoint))
+            resolve=partial(browser_dom_write.target_node, command, endpoint), session=runtime.record.session)
     if not pane:
         # Only a command the guard let through puts the agent in the page.
-        browser_control.agent_acted(thread_id)
+        browser_pane_state.agent_acted(thread_id)
     if shared_write:
         try:
-            return await browser_dom_write.shared_action(command, endpoint, args, partial(browser_control.agent_acted, thread_id))
+            return await browser_dom_write.shared_action(command, endpoint, args, partial(browser_pane_state.agent_acted, thread_id))
         except browser_dom_write.DomWriteRefused as exc:
             await asyncio.to_thread(emit_product_event, "browser_pane", "agent_write_refused", thread_id=thread_id,
                                     properties={"command": args[0], "reason": exc.reason})
             raise
-    browser_control.page_command_starting(thread_id, tuple(args))
+    browser_pane_state.page_command_starting(thread_id, tuple(args))
     try:
         result, unfinished = await owner._run_admitted(runtime, args, lease_id=lease_id, timeout=timeout)
     finally:
         # A held pane shows nothing until this restart, so it runs however the command ends.
-        await browser_control.page_command_finished(thread_id, tuple(args))
+        await browser_pane_state.page_command_finished(thread_id, tuple(args))
     if result.timed_out and args[0] == "wait":
         return browser_cli.WAIT_TIMED_OUT
     rendered = owner._model_result(result, runtime.record)
@@ -65,6 +67,59 @@ async def page_endpoint(owner: Any, thread_id: str) -> str:
     await owner._pin_native()
     runtime = await owner._admit(thread_id, lease_id=None, show_window=None, session="existing")
     return await browser_cdp.page_endpoint(partial(_command, owner, runtime, None))
+
+
+async def declare_person_step(owner: Any, thread_id: str, instruction: str) -> None:
+    """Give the current shared-browser page to the person and arrange its observed completion."""
+    await owner._pin_native()
+    runtime = await owner._admit(thread_id, lease_id=None, show_window=None, session="existing")
+    command = partial(_command, owner, runtime, None)
+    endpoint = await browser_cdp.page_endpoint(command)
+    await browser_control.declare_person_step(
+        thread_id, partial(browser_cdp.page_password_probe, endpoint), instruction, session=runtime.record.session,
+    )
+
+
+async def close_thread(owner: Any, thread_id: str) -> str:
+    """Guard the agent's close command before entering the common session-end path."""
+    if not isinstance(thread_id, str) or not thread_id:
+        raise BrowserSessionError("browser close requires exact thread identity")
+    runtime = owner._sessions.get(thread_id)
+    if runtime is None:
+        return "Browser session is already closed."
+    if browser_step_lifecycle.has_step(thread_id):
+        await guard_close(owner, runtime)
+    await owner._close_runtime(runtime)
+    return "Browser session closed."
+
+
+async def guard_close(owner: Any, runtime: Any) -> None:
+    """Refuse a healthy page still owned by a step; unreachable pages cannot block cleanup."""
+    if runtime.record.terminal_state != "running":
+        return
+    command = partial(_command, owner, runtime, None)
+    try:
+        endpoint = await browser_cdp.page_endpoint(command)
+        await browser_control.require_page_access(
+            runtime.record.thread_id, partial(browser_cdp.page_password_probe, endpoint),
+            ("close",), session=runtime.record.session,
+        )
+    except BrowserSessionCleanupError:
+        return
+    except BrowserSessionError as exc:
+        if str(exc) != browser_control.PAGE_CHECK_FAILED:
+            raise
+
+
+async def end_session(thread_id: str, session: str) -> None:
+    """Keep a failed step hook observable without preventing producer teardown."""
+    try:
+        await browser_step_lifecycle.step_event(thread_id, browser_step_lifecycle.Event("session_ended", session=session))
+    except Exception:
+        logging.getLogger(__name__).exception("browser session-end step hook failed for %s", thread_id)
+        browser_step_lifecycle.discard_session(thread_id)
+    finally:
+        browser_control.browser_closed(thread_id)
 
 
 async def _command(owner: Any, runtime: Any, lease_id: str | None, args: Sequence[str], timeout: float) -> browser_cli.CommandResult:

@@ -1,10 +1,10 @@
-"""Schema 147 -> 148: totals of admitted install usage summaries, and the delivery ids already counted."""
+"""Schema 148 -> 149: totals of admitted install usage summaries, and the delivery ids already counted."""
 from __future__ import annotations
 
 import sqlite3
 
-# Frozen at schema v148; a later change to the live table gets its own migration.
-_V148_USAGE_TOTALS_SQL = """
+# Frozen at schema v149; a later change to the live table gets its own migration.
+_V149_USAGE_TOTALS_SQL = """
     CREATE TABLE IF NOT EXISTS usage_install_totals (
         week TEXT NOT NULL,
         release_tag TEXT NOT NULL,
@@ -21,8 +21,8 @@ _V148_USAGE_TOTALS_SQL = """
 """
 
 
-def migrate_147_to_148(conn: sqlite3.Connection) -> None:
+def migrate_148_to_149(conn: sqlite3.Connection) -> None:
     """Create the totals and delivery-id tables inside the runner's transaction; ``execute``, never ``executescript``."""
-    for statement in _V148_USAGE_TOTALS_SQL.split(";"):
+    for statement in _V149_USAGE_TOTALS_SQL.split(";"):
         if statement.strip():
             conn.execute(statement)

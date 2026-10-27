@@ -6,7 +6,7 @@ the ``query_only`` read lane refuses, so it runs on ``run_bulk`` as Measurement'
 the main database; ``core.workflow_verdict_rules.compute`` then runs off the database.
 
 Owners this module calls rather than copies: ``tools.workflow_task_fields.judged_version`` (which versions are
-judged), ``core.correction_attribution`` (which run a correction belongs to), ``api.cost_identity`` (model
+judged), ``core.correction_attribution`` (which run a correction belongs to), ``core.cost_identity`` (model
 identity) and ``api.measurement_model_cost`` with ``api.measurement_queries.outcome_ctes`` (cost).
 """
 from __future__ import annotations
@@ -19,7 +19,7 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
-from api.cost_identity import IDENTITY_GROUP, IdentityResolver, identity_columns, identity_join
+from core.cost_identity import IDENTITY_GROUP, IdentityResolver, identity_columns, identity_join
 from api.measurement_model_cost import clear_chain, materialize_chain, query_model_costs, query_recording_gaps
 from api.measurement_queries import outcome_ctes
 from api.measurement_scope import query_params, scope_cte

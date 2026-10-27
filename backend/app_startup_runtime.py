@@ -223,6 +223,7 @@ async def _start_runtime_services() -> None:
     state._presence_sweep_task = asyncio.create_task(presence_sweep_loop())
     state._cc_idle_retirement_task = asyncio.create_task(idle_retirement_loop())
     state._github_notifications_task = asyncio.create_task(notifications_poll_loop())
+    # TODO(99e36462316848ccb9dbe2e8299ed066): wire repo-activity polling after lifecycle approval.
     state._mail_poller_task = asyncio.create_task(mail_poll_loop())
     state._library_refresh_task = asyncio.create_task(library_refresh_loop())
     state._pr_quiet_watch_task = asyncio.create_task(pr_quiet_watch_loop())

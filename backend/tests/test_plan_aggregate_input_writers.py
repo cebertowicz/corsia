@@ -219,6 +219,9 @@ KNOWN_INDIRECT: dict[str, str] = {
     "api/measurement_chain_costs.py::chain_costs": (
         "table is materialize_chain's return value, CHAIN_TABLE"
     ),
+    "infra/moved_state_paths.py::heal_moved_state_paths": (
+        "table comes from _TABLES: vendor_accounts, whose stored paths follow the state move"
+    ),
 }
 
 #: Files whose indirect writes are accepted must never mention the plan table.

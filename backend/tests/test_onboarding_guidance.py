@@ -350,7 +350,7 @@ def test_the_import_is_one_plain_list_with_no_checklist_and_no_ai():
 
     assert "[x]" not in import_text and "unticked" not in import_text and "untick" not in import_text.replace("never ask the person to tick or untick", "")
     assert "**Your connected apps**" in import_text and "**Your skills**" in import_text
-    assert "Bring over what your other tools know" in import_text
+    assert "Read what your other tools know?" in import_text
     for text in (app, import_text, (FIRST_RUN_APP.parent / "web-search.md").read_text(encoding="utf-8")):
         assert not re.search(r"\bAI\b", text)
 

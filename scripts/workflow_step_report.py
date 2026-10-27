@@ -46,9 +46,8 @@ def _attribution(db: sqlite3.Connection, ids: list[str]) -> dict[str, list[dict]
     rows = db.execute(
         f"""SELECT plan_node_id,COALESCE(model,'unknown') AS model,
                    COALESCE(plan_usage_role,'unknown') AS role,
-                   SUM(total_tokens) AS tokens,SUM(cost_usd) AS cost,
-                   SUM(total_tokens IS NULL) AS unknown_tokens,
-                   SUM(cost_usd IS NULL) AS unknown_cost
+                   SUM(total_tokens) AS tokens,
+                   SUM(total_tokens IS NULL) AS unknown_tokens
             FROM llm_usage WHERE plan_node_id IN ({marks})
             GROUP BY plan_node_id,model,role""", ids,
     ).fetchall()
@@ -173,8 +172,6 @@ def _model_metrics(nodes: list[dict]) -> list[dict]:
         correction_tokens = sum((row["tokens"] or 0) for row in rows if row["role"] == "correction")
         result.append({"model": model, "scope": "own-only", "tokens_known": tokens,
                        "tokens_unknown_rows": sum(row["unknown_tokens"] for row in rows),
-                       "cost_known": sum(row["cost"] or 0 for row in rows),
-                       "cost_unknown_rows": sum(row["unknown_cost"] for row in rows),
                        "correction_token_share": correction_tokens / tokens if tokens else None,
                        "roles": {role: sum((row["tokens"] or 0) for row in rows if row["role"] == role)
                                  for role in sorted({row["role"] for row in rows})}})
@@ -227,13 +224,9 @@ def report(db: sqlite3.Connection, workflow: str | None = None) -> dict:
         rolled_totals = [costs[node["plan_id"]][node["id"]]["rolled"] for node in chain]
         rows = [row for node_id in chain_ids for row in usage.get(node_id, [])]
         own_tokens = _sum_amounts([total["tokens"] for total in own_totals])
-        own_cost = _sum_amounts([total["model_cost_usd"] for total in own_totals])
-        usage_tokens = sum(row["tokens"] or 0 for row in rows)
-        usage_cost = sum(row["cost"] or 0 for row in rows)
-        mismatch = (usage_tokens != (own_tokens["known"] or 0)
-                    or usage_cost != (own_cost["known"] or 0)
-                    or sum(row["unknown_tokens"] for row in rows) != own_tokens["unknown_rows"]
-                    or sum(row["unknown_cost"] for row in rows) != own_cost["unknown_rows"])
+        # Tokens alone reconcile: the cost is Measurement's API-equivalent price, not a ledger sum.
+        mismatch = (sum(row["tokens"] or 0 for row in rows) != (own_tokens["known"] or 0)
+                    or sum(row["unknown_tokens"] for row in rows) != own_tokens["unknown_rows"])
         final = chain[-1]
         attempt = _chain_attempts(attempt_counts, chain_ids, final["state"])
         records.append({"task_id": root["id"], "chain_node_ids": chain_ids, "run_id": _run_id(root, by_id),
@@ -259,7 +252,8 @@ def report(db: sqlite3.Connection, workflow: str | None = None) -> dict:
                               "models": _model_metrics(members), "node_totals_scope": "rolled, once per step revision chain (not repeated per model)"})
     runs = _runs(roots, by_id, siblings)
     empty_reason = "no workflow-tagged tasks in this CORSIA database" if not records else None
-    return {"header": {"required_step_gap": GAP, "attribution": "own-only model/role split reconciled to own rollup across each revision chain; mismatches are visible",
+    return {"header": {"required_step_gap": GAP, "attribution": "own-only model/role token split reconciled to own token rollup across each revision chain; mismatches are visible",
+                        "cost_basis": "API-equivalent price at list rates, step totals only",
                         "conclusion_rule": "fewer than 6 runs: counts only, no conclusions", "units": {"cost": "USD", "time_seconds": "seconds", "tokens": "tokens"},
                         "matched_task_count": len(records), "empty_reason": empty_reason}, "groups": result_groups, "runs": runs}
 
@@ -292,7 +286,7 @@ def _text(result: dict) -> str:
                      f"corrections={metrics['corrections']} revisions={metrics['revisions']} rework_tokens={metrics['rework_tokens']} "
                      f"failed_or_closed={metrics['failed_or_closed_without_completion']}")
         for model in group["models"]:
-            lines.append(f"  {model['model']} own-only: tokens={model['tokens_known']} cost={model['cost_known']} "
+            lines.append(f"  {model['model']} own-only: tokens={model['tokens_known']} "
                          f"correction_share={model['correction_token_share']}")
     for run in result["runs"]:
         lines.append(f"run {run['run_id']}: skipped={run['skipped']} added={run['added_steps']} absent_vs_sibling={run['absent_vs_sibling_runs']}")

@@ -236,7 +236,9 @@ def test_each_note_names_its_source_quotes_the_person_and_asks_for_one_triage(db
     assert '"Please check this point."' in on_comment and "when the comment arrived" in on_comment
     assert on_decision.startswith('Correction recorded on your plan decision "Which date?" (answered ')
     assert f'"{ANSWER}"' in on_decision and "when the answer arrived" in on_decision
-    assert all(note.endswith("\n" + TRIAGE_TOGETHER) for note in (on_comment, on_decision))
+    key_line = "\nSubject key for triage and outcome: "
+    assert all(key_line in note and note.split(key_line)[0].endswith("\n" + TRIAGE_TOGETHER)
+               for note in (on_comment, on_decision))
 
 
 def test_a_chat_note_does_not_ask_to_triage_comments_together():

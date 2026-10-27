@@ -2,17 +2,25 @@
 
 from __future__ import annotations
 
+import asyncio
 import errno
 import json
+import logging
 import os
+import select
 import shutil
 import socket
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import psutil
 
 from llm.managed_omlx_binary import managed_omlx_executable, managed_omlx_install_error
+
+
+log = logging.getLogger("llm.providers.omlx.process")
 
 
 class _PortOwnerUnknown:
@@ -73,6 +81,66 @@ def clear_pid(runtime_dir: Path, server_id: str) -> None:
         pid_path(runtime_dir, server_id).unlink()
     except FileNotFoundError:
         pass
+
+
+def watch_exit(pid: int, on_exit: Callable[[tuple[str, bool] | None], None]) -> Callable[[], None] | None:
+    """Report the OS exit status for a child or an adopted process, without polling.
+
+    macOS supplies NOTE_EXITSTATUS for children and processes we can signal. Reap a child after the
+    exit event before notifying the supervisor, so it cannot mistake a zombie for a running server.
+    """
+    kq: Any = select  # kqueue names exist on macOS/BSD only; Linux type checkers cannot see them
+    if not hasattr(kq, "kqueue"):
+        return None
+    loop = asyncio.get_running_loop()
+    queue = kq.kqueue()
+    exit_status_flag = 0x04000000  # Darwin NOTE_EXITSTATUS; Python's select does not expose it
+    event = kq.kevent(pid, kq.KQ_FILTER_PROC, kq.KQ_EV_ADD | kq.KQ_EV_ONESHOT,
+                      kq.KQ_NOTE_EXIT | exit_status_flag)
+    try:
+        queue.control([event], 0, 0)
+    except ProcessLookupError:
+        queue.close()
+        loop.call_soon(on_exit, reap_status(pid, True))  # it was already gone when we asked
+        return lambda: None
+    except OSError as exc:
+        queue.close()
+        log.warning("oMLX exit watch for pid %s could not start: %s", pid, exc)
+        return None
+
+    def cancel() -> None:
+        if not queue.closed:
+            loop.remove_reader(queue.fileno())
+            queue.close()
+
+    def fired() -> None:
+        events = queue.control(None, 1, 0)
+        if not events:
+            return
+        cancel()
+        raw = events[0].data if events[0].fflags & exit_status_flag else None
+        reaped = reap_status(pid, True)
+        on_exit(_status_from_raw(raw) if raw is not None else reaped)
+
+    loop.add_reader(queue.fileno(), fired)
+    return cancel
+
+
+def reap_status(pid: int, wait: bool = False) -> tuple[str, bool]:
+    """Reap a child and report its status; adopted processes have no waitable status."""
+    try:
+        waited, raw = os.waitpid(pid, 0 if wait else os.WNOHANG)
+    except ChildProcessError:
+        return "unknown (not our child)", False
+    if waited != pid:
+        return "unknown", False
+    return _status_from_raw(raw)
+
+
+def _status_from_raw(raw: int) -> tuple[str, bool]:
+    """Decode the wait status shared by waitpid and Darwin's exit event."""
+    code = os.waitstatus_to_exitcode(raw)
+    return (f"signal {-code}" if code < 0 else f"exit code {code}"), code == 0
 
 
 def process_alive(pid: int) -> bool:

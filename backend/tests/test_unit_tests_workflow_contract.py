@@ -65,7 +65,7 @@ LINUX_WORKFLOW_JOBS = {
     "docs-drift.yml": 1,
     "lint.yml": 3,
     "large-files.yml": 1,
-    "close-on-dev-merge.yml": 1,
+    "fixed-in-dev.yml": 1,
     "e2e.yml": 2,
     "evals.yml": 1,
 }

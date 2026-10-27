@@ -4,6 +4,7 @@ import asyncio
 import json
 from pathlib import Path
 import subprocess
+import sys
 import threading
 from types import SimpleNamespace
 
@@ -310,6 +311,17 @@ async def test_controlled_git_subcommand_uses_the_same_owned_process_group(
             )
 
     monkeypatch.setattr(shell, "PROCESS_OWNER", _Owner())
+    if sys.platform == "linux":
+        from tools import linux_shell
+
+        def linux_argv(command, cwd, **kwargs):
+            assert command == "git -c core.hooksPath=/dev/null rev-parse HEAD"
+            assert cwd == repo
+            assert kwargs["controlled_policy"] == policy
+            assert kwargs["controlled_operation"] == "query"
+            return ["bwrap", "--", "/bin/bash", "-lc", command]
+
+        monkeypatch.setattr(linux_shell, "shell_argv", linux_argv)
     monkeypatch.setattr(
         shell,
         "list_registered_repo_policies",
@@ -355,17 +367,13 @@ async def test_controlled_git_subcommand_uses_the_same_owned_process_group(
     assert result.stderr == ""
     assert calls == [
         {
-            "argv": [
-                "safehouse",
-                "--profile",
-                "profile.sb",
-                "--",
-                "git",
-                "-c",
-                "core.hooksPath=/dev/null",
-                "rev-parse",
-                "HEAD",
-            ],
+            "argv": ([
+                "bwrap", "--", "/bin/bash", "-lc",
+                "git -c core.hooksPath=/dev/null rev-parse HEAD",
+            ] if sys.platform == "linux" else [
+                "safehouse", "--profile", "profile.sb", "--", "git", "-c",
+                "core.hooksPath=/dev/null", "rev-parse", "HEAD",
+            ]),
             "thread_id": "thread-a",
             "turn_id": "turn-a",
             "lease_id": "lease-a",

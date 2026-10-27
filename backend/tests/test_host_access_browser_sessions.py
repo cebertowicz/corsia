@@ -8,7 +8,7 @@ from dataclasses import replace
 
 import pytest
 from host_access import browser_cdp, browser_cli, browser_sessions as sessions
-from tests.browser_process_fixture import synthetic_browser  # noqa: F401
+from tests.browser_process_fixture import EXIT_TIMEOUT, synthetic_browser  # noqa: F401
 
 
 async def test_opaque_sessions_and_canonical_native_argv(synthetic_browser):
@@ -91,8 +91,17 @@ async def test_mode_change_requires_closing_the_existing_session(
 async def test_active_count_includes_running_and_queued(synthetic_browser, monkeypatch):
     fake = synthetic_browser
     await fake.owner.run('thread', ['snapshot'])
-    entered, release = asyncio.Event(), asyncio.Event()
+    entered, release, queued = asyncio.Event(), asyncio.Event(), asyncio.Event()
     original = fake.invoke
+    run_admitted = fake.owner._run_admitted
+    starts = 0
+
+    async def observe_entry(*args, **kwargs):
+        nonlocal starts
+        starts += 1
+        if starts == 2:
+            queued.set()
+        return await run_admitted(*args, **kwargs)
 
     async def paused(argv, *, timeout):
         entered.set()
@@ -100,10 +109,12 @@ async def test_active_count_includes_running_and_queued(synthetic_browser, monke
         return await original(argv, timeout=timeout)
 
     monkeypatch.setattr(fake.owner, '_invoke', paused)
+    monkeypatch.setattr(fake.owner, '_run_admitted', observe_entry)
     first = asyncio.create_task(fake.owner.run('thread', ['snapshot']))
     await entered.wait()
     second = asyncio.create_task(fake.owner.run('thread', ['snapshot']))
-    await asyncio.sleep(0.05)
+    # The second entry increments the active count before yielding on the occupied command lock.
+    await asyncio.wait_for(queued.wait(), EXIT_TIMEOUT)
     assert fake.owner.active_command_count() == 2
     second.cancel()
     with pytest.raises(asyncio.CancelledError):

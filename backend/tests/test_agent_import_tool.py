@@ -28,7 +28,7 @@ def _fields(card=CARD):
 
 def test_the_card_is_appendix_a1_word_for_word():
     card = setup.agent_import(CARD)
-    assert card["title"] == "Bring over what your other tools know"
+    assert card["title"] == "Read what your other tools know?"
     assert card["context"] == (
         "Claude Code and Codex are on this computer. I can read what they remember about you and how "
         "you like to work, the skills you keep in them, and the connected apps that "
@@ -61,7 +61,7 @@ def test_a_model_with_no_known_provider_says_the_read_may_leave_this_mac():
 def test_no_tool_found_means_no_card_and_the_card_goes_first(monkeypatch):
     assert setup.agent_import(None) is None
     decisions = setup.build_decisions(setup.Facts(agent_import=CARD))
-    assert decisions[0]["title"] == "Bring over what your other tools know"
+    assert decisions[0]["title"] == "Read what your other tools know?"
     assert setup.build_decisions(setup.Facts())[0]["title"] != decisions[0]["title"]
 
 
@@ -322,7 +322,7 @@ def test_the_app_wake_builds_the_card_for_the_conductors_model(monkeypatch):
     monkeypatch.setattr(setup, "read_facts", read_facts)
     built = asyncio.run(first_run_wake._app_setup("claude-code/sonnet"))
     assert seen["agent_model"] == "claude-code/sonnet"
-    assert built["setup_decisions"][0]["title"] == "Bring over what your other tools know"
+    assert built["setup_decisions"][0]["title"] == "Read what your other tools know?"
 
 
 def test_first_run_raises_the_card_first_and_the_reference_carries_appendix_a():
@@ -363,3 +363,17 @@ def test_first_run_raises_the_card_first_and_the_reference_carries_appendix_a():
     ):
         assert line in guide
     assert "`references/agent-import.md`" in (skill / "SKILL.md").read_text(encoding="utf-8")
+
+
+def test_raising_the_consent_card_adds_no_second_task_titled_like_the_import_step(db):  # noqa: F811
+    """A decision gets its own review task named for its title, so a card titled like its step doubled the step."""
+    from onboarding.app_first_run import applicable_steps
+    from plans import decisions
+
+    plan = service.ensure_plan("thread", "owner", db=db)
+    step = next(row for row in applicable_steps({"agents_found": ["claude-code"]}) if row["step_number"] == 2)
+    source = _task(plan.id, step["title"], db=db)
+    decisions.draft(plan.id, source_node_id=source.id, mutation_id=_mid(), actor=_actor(),
+                    provenance="tool.plans.decision", db=db, **_fields())
+    titles = [row["title"] for row in db.execute("SELECT title FROM plan_nodes WHERE plan_id=?", (plan.id,))]
+    assert titles.count(step["title"]) == 1

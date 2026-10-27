@@ -25,6 +25,12 @@ log = logging.getLogger(__name__)
 
 #: Event types whose ``created`` delivery names one GitHub comment object.
 _COMMENT_OBJECT_EVENTS = frozenset({"issue_comment", "pull_request_review_comment"})
+#: CORSIA-synthesized receipts are not external webhook health signals.
+POLL_DELIVERY_PREFIX = "gh-poll:"
+NOTIFICATIONS_DELIVERY_PREFIX = "gh-notifications:"
+SYNTHETIC_DELIVERY_PREFIXES = (POLL_DELIVERY_PREFIX, NOTIFICATIONS_DELIVERY_PREFIX)
+#: Newest log rows (all repositories, all sources) one last-delivery lookup reads.
+LAST_DELIVERY_WINDOW_ROWS = 10_000
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,6 +115,27 @@ def last_check_suite_without_id(*, db=None) -> str | None:
     connection = db if db is not None else get_db()
     row = connection.execute(LAST_WITHOUT_ID_SQL).fetchone()
     return row[0] if row else None
+
+
+def repo_last_delivered_at(repo: str, *, db=None) -> str | None:
+    """The latest real GitHub webhook timestamp for a repository, if any.
+
+    The repository matches case-insensitively: callers pass the lowercased tracked
+    name and a payload's ``full_name`` is stored as GitHub spelled it. Only the
+    newest ``LAST_DELIVERY_WINDOW_ROWS`` rows are read (a range on the row id, in
+    insertion order, so no index is needed), so a poll's cost does not grow with
+    the log; a repository whose last real delivery is older than that reads as
+    having none.
+    """
+    connection = db if db is not None else get_db()
+    excluded = " AND ".join("delivery_id NOT LIKE ?" for _ in SYNTHETIC_DELIVERY_PREFIXES)
+    row = connection.execute(
+        "SELECT MAX(created_at) FROM webhook_deliveries "
+        "WHERE rowid > (SELECT COALESCE(MAX(rowid), 0) FROM webhook_deliveries) - ? "
+        f"AND repo=? COLLATE NOCASE AND {excluded}",
+        (LAST_DELIVERY_WINDOW_ROWS, repo, *(f"{prefix}%" for prefix in SYNTHETIC_DELIVERY_PREFIXES)),
+    ).fetchone()
+    return str(row[0]) if row and row[0] is not None else None
 
 
 def object_recorded(object_key: str, *, db=None) -> bool:

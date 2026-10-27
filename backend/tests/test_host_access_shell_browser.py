@@ -76,6 +76,8 @@ async def test_bash_consumes_exact_permit_immediately_before_process_creation(
         "_guard_command",
         lambda *_a, **_k: events.append(("protected-guard", None)),
     )
+    from tests.shell_platform_helpers import use_mac_shell
+    use_mac_shell(monkeypatch)
     monkeypatch.setattr(shell, "is_safehouse_available", lambda: True)
     monkeypatch.setattr(shell, "safehouse_version_error", lambda: None)
     monkeypatch.setattr(shell, "is_path_allowed", lambda *_a, **_k: True)
@@ -182,6 +184,8 @@ async def test_bash_closes_consumed_cwd_fd_when_spawn_raises(
         consume,
     )
     monkeypatch.setattr(shell, "PROCESS_OWNER", _Owner())
+    from tests.shell_platform_helpers import use_mac_shell
+    use_mac_shell(monkeypatch)
     monkeypatch.setattr(shell, "is_safehouse_available", lambda: True)
     monkeypatch.setattr(shell, "safehouse_version_error", lambda: None)
     monkeypatch.setattr(shell, "execution_envelope_profile", lambda *_a, **_k: "")
@@ -242,6 +246,8 @@ async def test_bash_refuses_foreground_effect_without_authoritative_turn_identit
         "controlled_fast_forward_policy",
         lambda *_args, **_kwargs: None,
     )
+    from tests.shell_platform_helpers import use_mac_shell
+    use_mac_shell(monkeypatch)
     monkeypatch.setattr(shell, "is_safehouse_available", lambda: True)
     monkeypatch.setattr(shell, "safehouse_version_error", lambda: None)
     monkeypatch.setattr(shell, "is_path_allowed", lambda *_args, **_kwargs: True)
@@ -314,6 +320,8 @@ async def test_controlled_fast_forward_refuses_missing_turn_identity(
         "controlled_fast_forward_policy",
         lambda *_args, **_kwargs: policy,
     )
+    from tests.shell_platform_helpers import use_mac_shell
+    use_mac_shell(monkeypatch)
     monkeypatch.setattr(shell, "is_safehouse_available", lambda: True)
     monkeypatch.setattr(shell, "safehouse_version_error", lambda: None)
     monkeypatch.setattr(shell, "fast_forward_repo_locked", fast_forward)
@@ -357,6 +365,8 @@ async def test_controlled_fast_forward_reports_safehouse_discovery(
         "controlled_fast_forward_policy",
         lambda *_args, **_kwargs: policy,
     )
+    from tests.shell_platform_helpers import use_mac_shell
+    use_mac_shell(monkeypatch)
     monkeypatch.setattr(shell, "is_safehouse_available", lambda: False)
     monkeypatch.setenv("PATH", "/usr/local/bin:/usr/bin:/bin")
 
@@ -415,6 +425,8 @@ async def test_bash_background_returns_only_an_opaque_managed_handle(
         "controlled_fast_forward_policy",
         lambda *_a, **_k: None,
     )
+    from tests.shell_platform_helpers import use_mac_shell
+    use_mac_shell(monkeypatch)
     monkeypatch.setattr(shell, "is_safehouse_available", lambda: True)
     monkeypatch.setattr(shell, "safehouse_version_error", lambda: None)
     monkeypatch.setattr(shell, "is_path_allowed", lambda *_a, **_k: True)
@@ -550,6 +562,8 @@ async def test_reviewed_bash_skips_protected_policy_after_single_consumption(
             events.append("protected-guard") or "Error: protected guard was consulted"
         ),
     )
+    from tests.shell_platform_helpers import use_mac_shell
+    use_mac_shell(monkeypatch)
     monkeypatch.setattr(shell, "is_safehouse_available", lambda: True)
     monkeypatch.setattr(shell, "safehouse_version_error", lambda: None)
     monkeypatch.setattr(
@@ -1148,6 +1162,11 @@ async def test_browser_http_open_stages_navigation_before_waiting(monkeypatch) -
         ),
         (lambda _tmp: __import__(
             "tools.browser_actions",
+            fromlist=["BrowserPersonStepTool"],
+        ).BrowserPersonStepTool(), ("Sign in to Google",),
+        ),
+        (lambda _tmp: __import__(
+            "tools.browser_actions",
             fromlist=["BrowserWaitTool"],
         ).BrowserWaitTool(), ("10",),
         ),
@@ -1221,6 +1240,82 @@ async def test_browser_commands_forward_exact_backend_identity(
             ),
         )
     ]
+
+
+@pytest.mark.asyncio
+async def test_browser_person_step_runs_the_real_declaration_for_the_authoritative_thread(monkeypatch) -> None:
+    """Only the browser process and the plan write are stand-ins; the tool returns the declaration's success."""
+    from host_access import browser_cdp, browser_step_lifecycle as lifecycle
+    from host_access.browser_cdp import PasswordProbe
+    from host_access.browser_sessions import BrowserSessionOwner
+    from tools import browser_actions, browser_runtime
+
+    owner = BrowserSessionOwner(namespace="corsia-person-step", instance_key="test")
+    admitted: list[str] = []
+    writes: list[tuple[str, object]] = []
+
+    async def pin() -> None:
+        return None
+
+    async def admit(thread_id, **_kwargs):
+        admitted.append(thread_id)
+        return SimpleNamespace(record=SimpleNamespace(session="session-one"))
+
+    async def page_endpoint(_command):
+        return "ws://page.test"
+
+    async def probe(_endpoint, _known):
+        return PasswordProbe("visit", "accounts.google.com", frozenset(), "ws://page.test", present_nodes=frozenset())
+
+    monkeypatch.setattr(owner, "_pin_native", pin)
+    monkeypatch.setattr(owner, "_admit", admit)
+    monkeypatch.setattr(browser_cdp, "page_endpoint", page_endpoint)
+    monkeypatch.setattr(browser_cdp, "page_password_probe", probe)
+
+    def plan_write(operation, *_args, **kwargs):
+        writes.append((operation, kwargs["title"]))
+        return "step"
+
+    monkeypatch.setattr(lifecycle, "_plan_write", plan_write)
+    monkeypatch.setattr(lifecycle, "_step_row_state", lambda _node_id: None)
+    monkeypatch.setattr(lifecycle, "emit_product_event", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(browser_runtime, "_check_installed", lambda: None)
+    monkeypatch.setattr(browser_runtime, "PROCESS_OWNER", SimpleNamespace(browser_sessions=lambda: owner))
+    try:
+        result = await browser_actions.BrowserPersonStepTool().execute(
+            "Sign in to Google", _thread_id="authoritative-thread", _thread_project_id="project-1",
+        )
+    finally:
+        lifecycle._steps.pop("authoritative-thread", None)
+        lifecycle._answers.pop("authoritative-thread", None)
+        lifecycle._sessions.pop("authoritative-thread", None)
+
+    assert result == "Person step opened; end your turn."
+    assert admitted == ["authoritative-thread"]
+    assert writes == [("open_user_step", "Your turn in the shared browser (google.com)")]
+
+
+@pytest.mark.asyncio
+async def test_browser_person_step_failure_logs_its_cause_without_claiming_success(monkeypatch, caplog) -> None:
+    import logging
+    from tools import browser_actions, browser_runtime
+    from plans.public import PlanError
+
+    class FailingOwner:
+        async def declare_person_step(self, _thread_id, _instruction):
+            raise PlanError("fixture receipt write failed")
+
+    monkeypatch.setattr(browser_runtime, "_check_installed", lambda: None)
+    monkeypatch.setattr(browser_runtime, "PROCESS_OWNER", SimpleNamespace(browser_sessions=lambda: FailingOwner()))
+    with caplog.at_level(logging.ERROR, logger=browser_runtime.__name__):
+        result = await browser_actions.BrowserPersonStepTool().execute(
+            "Choose your account", _thread_id="authoritative-thread", _thread_project_id="project-1",
+        )
+    assert result.startswith("Error: browser person step could not be opened.")
+    [record] = caplog.records
+    assert "declaration failed for thread authoritative-thread" in record.message
+    assert isinstance(record.exc_info[1], PlanError)
+    assert "fixture receipt write failed" in caplog.text
 
 
 @pytest.mark.asyncio
@@ -1475,6 +1570,8 @@ async def test_stale_thread_default_cwd_degrades_to_workspace_root(
         shell, "controlled_fast_forward_policy", lambda *_a, **_k: None
     )
     monkeypatch.setattr(shell.BashTool, "_guard_command", lambda *_a, **_k: None)
+    from tests.shell_platform_helpers import use_mac_shell
+    use_mac_shell(monkeypatch)
     monkeypatch.setattr(shell, "is_safehouse_available", lambda: True)
     monkeypatch.setattr(shell, "safehouse_version_error", lambda: None)
     monkeypatch.setattr(shell, "execution_envelope_profile", lambda *_a, **_k: "")
@@ -1534,6 +1631,8 @@ async def test_explicit_out_of_scope_working_dir_denies_with_variant_a(
         shell, "controlled_fast_forward_policy", lambda *_a, **_k: None
     )
     monkeypatch.setattr(shell.BashTool, "_guard_command", lambda *_a, **_k: None)
+    from tests.shell_platform_helpers import use_mac_shell
+    use_mac_shell(monkeypatch)
     monkeypatch.setattr(shell, "is_safehouse_available", lambda: True)
     monkeypatch.setattr(shell, "safehouse_version_error", lambda: None)
     monkeypatch.setattr(shell, "is_path_allowed", lambda *_a, **_k: False)
@@ -1601,6 +1700,8 @@ async def test_registered_repo_cwd_is_never_degraded_when_path_check_lags(
         shell, "controlled_fast_forward_policy", lambda *_a, **_k: None
     )
     monkeypatch.setattr(shell.BashTool, "_guard_command", lambda *_a, **_k: None)
+    from tests.shell_platform_helpers import use_mac_shell
+    use_mac_shell(monkeypatch)
     monkeypatch.setattr(shell, "is_safehouse_available", lambda: True)
     monkeypatch.setattr(shell, "safehouse_version_error", lambda: None)
     monkeypatch.setattr(shell, "execution_envelope_profile", lambda *_a, **_k: "")

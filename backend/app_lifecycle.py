@@ -22,6 +22,7 @@ import infra.startup_progress as startup_progress
 from infra import key_store_values, state
 from infra.db_async import run_in_db
 from infra.database import init_db, shutdown_pool
+from llm.providers.omlx_supervisor import stop_watching as stop_watching_omlx
 
 
 async def _discover_network_servers(logger) -> int:
@@ -43,14 +44,17 @@ async def _discover_network_servers(logger) -> int:
     return len(online)
 
 
-def _reconcile_omlx_servers(servers: list[dict], logger) -> None:
+def _reconcile_omlx_servers(servers: list[dict], logger) -> dict[str, int]:
+    """Adopt or clear each oMLX pid record; return the adopted server ids with their pids."""
     from llm.providers.omlx_supervisor import reconcile
 
+    adopted: dict[str, int] = {}
     for server in servers:
         if server.get("provider") != "omlx":
             continue
         result = reconcile({"server_id": server["id"]})
         if result.get("adopted"):
+            adopted[server["id"]] = result["pid"]
             logger.info(
                 f"oMLX supervisor: adopted pid {result['pid']} for {server['id']}"
             )
@@ -58,6 +62,7 @@ def _reconcile_omlx_servers(servers: list[dict], logger) -> None:
             logger.info(
                 f"oMLX supervisor: cleared stale pid {result['pid']} for {server['id']}"
             )
+    return adopted
 
 async def _startup_network_discovery() -> None:
     from llm.network_discovery import _sweep_all_servers, get_servers
@@ -66,7 +71,11 @@ async def _startup_network_discovery() -> None:
     try:
         servers = await run_in_db(get_servers)
         try:
-            await run_in_db(_reconcile_omlx_servers, servers or [], logger)
+            from llm.providers.omlx_supervisor import watch
+
+            adopted = await run_in_db(_reconcile_omlx_servers, servers or [], logger)
+            for server_id, pid in adopted.items():
+                watch(server_id, pid)
         except Exception as exc:
             logger.warning(f"oMLX pid reconciliation failed: {exc}")
         if not servers:
@@ -87,6 +96,7 @@ def _initialize_startup(logger) -> None:
     from infra.config import LOGS_DIR, RUNTIME_DIR, UPLOADS_DIR, WORKSPACE, WORKSPACE_SELECTION
     from infra import setup_progress
     from infra.ignored_environment import drop_ignored_environment, note_ignored_environment
+    from infra.moved_state_paths import heal_moved_state_paths
     from infra.startup_prerequisites import prepare_startup_prerequisites
     from plans.public import sweep_owed_status
     from registry.durable_writes import recover_write_intents
@@ -99,6 +109,7 @@ def _initialize_startup(logger) -> None:
     phase_started = time.monotonic()
     logger.info("startup phase: database initialization started")
     init_db()
+    heal_moved_state_paths()
     drop_ignored_environment()
     setup_progress.release_marker_at_startup(logger)
     key_store_values.sweep_at_startup()
@@ -309,6 +320,7 @@ async def _shutdown_runtime_services(
     """Quiesce exact runtime owners before product and storage teardown."""
     from loguru import logger as _log_shutdown
 
+    stop_watching_omlx()  # an oMLX exit during shutdown is never a crash
     pending_cancel = await _shutdown_owned_tasks(startup_tasks, _log_shutdown)
     from app_shutdown_runtime import shutdown_devices
 

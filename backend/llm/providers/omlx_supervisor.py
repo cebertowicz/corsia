@@ -1,4 +1,4 @@
-"""Manage CORSIA-owned oMLX server subprocesses."""
+"""Manage CORSIA-owned oMLX server subprocesses: the pid records, and in ``_life`` one ``restart.Life`` each."""
 
 from __future__ import annotations
 
@@ -17,6 +17,7 @@ from infra.config import RUNTIME_DIR
 from infra.db_async import run_in_db
 from llm.network_endpoints import lan_base, models_probe_url
 from llm.providers import omlx_process as process
+from llm.providers import omlx_restart as restart
 from llm.providers.omlx_endpoints import _resolve_endpoint as _resolve_endpoint_via_freshness
 from llm.providers.omlx_supervisor_config import (
     listen_host as _listen_host,
@@ -44,6 +45,7 @@ MANAGED_HEALTH_STARTUP_CAP_S = 600.0
 DEFAULT_HEALTH_TIMEOUT_S = 30.0
 HEALTH_POLL_INTERVAL_S = 0.5
 SIGTERM_GRACE_S = 5.0
+_life: dict[str, restart.Life] = {}
 
 
 def is_corsia_process(pid: int) -> bool:
@@ -224,6 +226,16 @@ def _duration(seconds: float) -> str:
     return f"{whole} seconds"
 
 
+def watch(server_id: str, pid: int) -> None:
+    life = _life.setdefault(server_id, restart.Life())
+    life.watch(pid, lambda status: restart.on_exit(server_id, life, pid, start_server, _tail_log, status))
+
+
+def stop_watching() -> None:  # the backend is shutting down: an oMLX exit from here on is not a crash
+    for life in _life.values():
+        life.shutdown()
+
+
 async def start_server(cfg: dict) -> dict[str, Any]:
     """Spawn ``omlx serve`` for the given network-servers row. Idempotent."""
     sid = cfg.get("server_id")
@@ -240,6 +252,7 @@ async def start_server(cfg: dict) -> dict[str, Any]:
         owner = _port_owner_pid(host, port)
         if owner == existing_pid:
             await run_in_db(_mark_endpoint_alive, sid, host, int(port))
+            watch(sid, existing_pid)
             return {
                 "ok": True,
                 "pid": existing_pid,
@@ -283,6 +296,7 @@ async def start_server(cfg: dict) -> dict[str, Any]:
     )
     if health == "healthy":
         await run_in_db(_mark_endpoint_alive, sid, host, int(port))
+        watch(sid, proc.pid)
     else:
         return _failed_boot_result(sid, host, int(port), proc.pid, reason=health, timeout_s=timeout_s)
 
@@ -297,11 +311,15 @@ async def start_server(cfg: dict) -> dict[str, Any]:
 
 
 async def stop_server(cfg: dict) -> dict[str, Any]:
-    """Stop the oMLX subprocess we spawned for this row."""
+    """Stop the oMLX subprocess we spawned for this row; a stop is never followed by a crash restart."""
     sid = cfg.get("server_id")
     if not sid:
         return {"ok": False, "message": "stop_server: missing server_id in cfg"}
+    return await restart.stop(_life, sid, lambda: _pid_path(sid).exists(), lambda: _stop_server(cfg))
 
+
+async def _stop_server(cfg: dict) -> dict[str, Any]:
+    sid = cfg["server_id"]
     host, port = await run_in_db(_resolve_endpoint, cfg)
     host = _listen_host(host) if host else None
     had_record = _pid_path(sid).exists()
@@ -353,11 +371,11 @@ async def stop_server(cfg: dict) -> dict[str, Any]:
 
 
 async def stop_all_servers() -> list[dict[str, Any]]:
-    """Stop every oMLX this supervisor spawned, found by its own pid records; a foreign oMLX has none."""
-    results = []
-    for path in sorted(RUNTIME_DIR.glob("omlx-*.pid")):
-        results.append(await stop_server({"server_id": path.stem.removeprefix("omlx-")}))
-    return results
+    """Stop every oMLX this supervisor spawned (its pid records, or a restart in flight); a foreign oMLX has none."""
+    ids = sorted({p.stem.removeprefix("omlx-") for p in RUNTIME_DIR.glob("omlx-*.pid")} | restart.restarting(_life))
+    for sid in ids:
+        _life.setdefault(sid, restart.Life()).announce_stop()  # before the first stop yields to the loop
+    return [await stop_server({"server_id": sid}) for sid in ids]
 
 
 def reconcile(cfg: dict) -> dict[str, Any]:

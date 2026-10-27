@@ -1,4 +1,4 @@
-"""Pinned, fail-closed runtimes CORSIA may fetch on demand on macOS."""
+"""Pinned, fail-closed runtimes for CORSIA on macOS and Linux."""
 from __future__ import annotations
 
 import hashlib
@@ -46,10 +46,14 @@ RUNTIME_PINS: dict[str, dict[str, RuntimePin]] = {
     "node": {
         "arm64": RuntimePin(_NODE_VERSION, f"https://nodejs.org/dist/v{_NODE_VERSION}/node-v{_NODE_VERSION}-darwin-arm64.tar.gz", "2a154d4a5458930e0a2d6a1ecf64eddf5a2b3e1c13636b609c2ecb042e8c4553", "tar.gz", f"node-v{_NODE_VERSION}-darwin-arm64/bin/node"),
         "x86_64": RuntimePin(_NODE_VERSION, f"https://nodejs.org/dist/v{_NODE_VERSION}/node-v{_NODE_VERSION}-darwin-x64.tar.gz", "878ecede191c7abc1bff01d3fb81f7ed81aa1161040dba18776b8ff8593614b1", "tar.gz", f"node-v{_NODE_VERSION}-darwin-x64/bin/node"),
+        "linux-x86_64": RuntimePin(_NODE_VERSION, f"https://nodejs.org/dist/v{_NODE_VERSION}/node-v{_NODE_VERSION}-linux-x64.tar.xz", "fd47865ecd6391ebb431fc815e01b9135bf83ded5cf373247e9331e196b7aded", "tar.xz", f"node-v{_NODE_VERSION}-linux-x64/bin/node"),
+        "linux-arm64": RuntimePin(_NODE_VERSION, f"https://nodejs.org/dist/v{_NODE_VERSION}/node-v{_NODE_VERSION}-linux-arm64.tar.xz", "fd6cc729fa4448c2ac27c3fca5606019ced63c65a15c152c8df03e0cbce7f4c5", "tar.xz", f"node-v{_NODE_VERSION}-linux-arm64/bin/node"),
     },
     "uv": {
         "arm64": RuntimePin(_UV_VERSION, f"https://github.com/astral-sh/uv/releases/download/{_UV_VERSION}/uv-aarch64-apple-darwin.tar.gz", "4a5d878cd0db3a57d79eec638c275e71c394e10533ae54c77b33d940866f53b7", "tar.gz", "uv-aarch64-apple-darwin/uv"),
         "x86_64": RuntimePin(_UV_VERSION, f"https://github.com/astral-sh/uv/releases/download/{_UV_VERSION}/uv-x86_64-apple-darwin.tar.gz", "08f0cb0d63a012ffa07659d1872030c1110fccdd665d49bc3683b0ca262b4a62", "tar.gz", "uv-x86_64-apple-darwin/uv"),
+        "linux-x86_64": RuntimePin(_UV_VERSION, f"https://github.com/astral-sh/uv/releases/download/{_UV_VERSION}/uv-x86_64-unknown-linux-gnu.tar.gz", "e14d48c117ec33601d6f860dda47aa5ea490d77a5a9ef770529c448fa6747d9f", "tar.gz", "uv-x86_64-unknown-linux-gnu/uv"),
+        "linux-arm64": RuntimePin(_UV_VERSION, f"https://github.com/astral-sh/uv/releases/download/{_UV_VERSION}/uv-aarch64-unknown-linux-gnu.tar.gz", "3143e25fccac6f81b3b400792caa2ec431a5e8824d855cde9550a25f0fac8ea0", "tar.gz", "uv-aarch64-unknown-linux-gnu/uv"),
     },
     "gh": {
         "arm64": RuntimePin(_GH_VERSION, f"https://github.com/cli/cli/releases/download/v{_GH_VERSION}/gh_{_GH_VERSION}_macOS_arm64.zip", "da922c20d1792e5b2cbf375593d7a658acf034c12c84e007e71c76ef959c337e", "zip", f"gh_{_GH_VERSION}_macOS_arm64/bin/gh"),
@@ -175,8 +179,8 @@ def _safe_tar_member(member: tarfile.TarInfo) -> bool:
 
 
 def _extract(archive: Path, destination: Path, pin: RuntimePin) -> None:
-    if pin.archive == "tar.gz":
-        with tarfile.open(archive, "r:gz") as source:
+    if pin.archive in {"tar.gz", "tar.xz"}:
+        with tarfile.open(archive, "r:gz" if pin.archive == "tar.gz" else "r:xz") as source:
             tar_members = source.getmembers()
             if any(not _safe_tar_member(member) for member in tar_members):
                 raise ManagedRuntimeError("download archive has an unsafe path")

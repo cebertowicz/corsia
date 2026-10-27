@@ -6,7 +6,7 @@ import { emit } from '$lib/ws/events';
 import { token } from '$lib/stores/auth';
 import { projects } from '$lib/stores/projects';
 import { get } from 'svelte/store';
-import { resetSettingsNavigation, settingsNavigation } from '$lib/stores/settingsNavigation';
+import { requestConnectedApp, resetSettingsNavigation, settingsNavigation } from '$lib/stores/settingsNavigation';
 
 const awaiting = { id: 'github', name: 'GitHub', state: 'awaiting_approval', revision: 1, reach: { mode: 'all', project_ids: [], outside_projects: false } };
 const googleAccount = { id: 'google-work', provider: 'google' as const, provider_display_name: 'Google', address: 'sam.work@example.com', capabilities: ['mail', 'calendar', 'files'] as ('mail' | 'calendar' | 'files')[], state: 'connected' as const, tenant_id: null, reach: { mode: 'corsia' as const, project_ids: [], outside_projects: false } };
@@ -853,5 +853,50 @@ describe('ConnectedAppsSettings key actions', () => {
 		expect(button('Reconnect')).toBeUndefined();
 		button('Replace key').click();
 		expect(get(settingsNavigation)).toMatchObject({ section: 'keys', connectedAppKey: null });
+	});
+});
+
+describe('ConnectedAppsSettings chat link to an app row', () => {
+	const place = { mode: 'selected', project_ids: [], outside_projects: false };
+	const github = { id: 'github', name: 'GitHub', state: 'awaiting_approval', revision: 1, reach: { mode: 'all', project_ids: [], outside_projects: false } };
+	// jsdom has no layout and no CSS.escape, so the scroll-into-view and the id selector need stand-ins.
+	beforeEach(() => { HTMLElement.prototype.scrollIntoView = vi.fn(); vi.stubGlobal('CSS', { escape: (value: string) => value }); });
+
+	async function linkTo(id: string, servers: Record<string, unknown>[], accounts: Record<string, unknown>[] = []): Promise<void> {
+		resetSettingsNavigation();
+		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ servers, accounts }) })));
+		component = mount(ConnectedAppsSettings, { target: host });
+		await vi.waitFor(() => expect(host.querySelector('[data-settings-row]')).not.toBeNull());
+		requestConnectedApp(id);
+		flushSync();
+	}
+	const focused = () => (document.activeElement as HTMLElement | null)?.textContent?.trim();
+
+	it('focuses Approve on the linked app row, with a visible mark, and not on another row', async () => {
+		await linkTo('github', [{ ...github, id: 'notes', name: 'Notes' }, github]);
+		await vi.waitFor(() => expect(focused()).toBe('Approve'));
+		expect(document.activeElement?.closest('[data-connected-app-id]')?.getAttribute('data-connected-app-id')).toBe('github');
+		expect(host.querySelectorAll('[data-chat-link-focus]')).toHaveLength(1);
+		expect(host.querySelector('[data-connected-app-id="github"] [data-chat-link-focus] .btn')).toBe(document.activeElement);
+	});
+
+	it('focuses Choose where it works… when the app needs a place first', async () => {
+		await linkTo('github', [{ ...github, reach: place }]);
+		await vi.waitFor(() => expect(focused()).toBe('Choose where it works…'));
+		expect(host.querySelector('[data-chat-link-focus]')).not.toBeNull();
+	});
+
+	it('drops the mark once focus leaves the action', async () => {
+		await linkTo('github', [github]);
+		await vi.waitFor(() => expect(host.querySelector('[data-chat-link-focus]')).not.toBeNull());
+		(document.activeElement as HTMLElement).blur();
+		flushSync();
+		expect(host.querySelector('[data-chat-link-focus]')).toBeNull();
+	});
+
+	it('still opens a linked account and focuses its action', async () => {
+		await linkTo('google-work', [github], [googleAccount]);
+		await vi.waitFor(() => expect(focused()).toBe('Where it works…'));
+		expect(document.activeElement?.closest('[data-connected-account-id]')?.getAttribute('data-connected-account-id')).toBe('google-work');
 	});
 });

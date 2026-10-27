@@ -282,6 +282,8 @@ def resolve_builtin(builtin: BuiltinKey, *, db: sqlite3.Connection | None = None
     value is for the one request that uses it and is never written to the
     environment.
     """
+    if BUILTINS.get(builtin.name) != builtin:
+        return None
     stored = resolve_names([builtin.name], db=db).get(builtin.name)
     return (stored, SOURCE_STORE) if stored else None
 
