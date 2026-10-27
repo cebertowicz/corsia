@@ -5,32 +5,8 @@ export type ReadOutcome<T> =
 	| { status: 'fresh'; payload: T; etag: string }
 	| Exclude<OperatorReadOutcome, { status: 'fresh' }>;
 
-/** A reply this page cannot read (unparseable, or another contract version); the cause is unknown, so name only the next step. */
-export const STALE_PAGE_MESSAGE = 'Couldn’t read this plan. Reload the page.';
-
-export function safeErrorMessage(action: 'load' | 'update'): string {
-	return action === 'load' ? 'Couldn’t load the plan. Try again.' : 'Couldn’t update the plan. Try again.';
-}
-
-/** A failed reply's body, or undefined when it is not JSON. */
-export async function readJson(res: Response): Promise<unknown> {
-	try {
-		return await res.json();
-	} catch {
-		return undefined;
-	}
-}
-
-/** The log reference the server attaches to its own failures; the only body field a failure shows. */
-export function errorReference(body: unknown): string | undefined {
-	const reference = (body as { reference?: unknown } | null)?.reference;
-	return typeof reference === 'string' && reference.trim() ? reference : undefined;
-}
-
-/** A failure as the person reads it: the message, with the reference beside it when there is one. */
-export function errorText(outcome: { message: string; reference?: string }): string {
-	return outcome.reference ? `${outcome.message} Reference: ${outcome.reference}` : outcome.message;
-}
+/** Every failed plan read, whatever the transport or server said; raw detail never reaches the person. */
+export const LOAD_FAILED_MESSAGE = 'Couldn’t load the plan. Try again.';
 
 /** Bearer-auth GET headers, matching the existing api/attention.ts seam. */
 export function authHeaders(bearerValue: string, etag: string | null): RequestInit {
@@ -49,16 +25,21 @@ export async function readPlan<T>(
 	try {
 		res = await fetch(url, authHeaders(bearerValue, etag ?? null));
 	} catch {
-		return { status: 'error', message: safeErrorMessage('load') };
+		return { status: 'error', message: LOAD_FAILED_MESSAGE };
 	}
 	if (res.status === 304) return { status: 'not-modified' };
 	if (res.status === 404) return { status: 'not-found' };
 	if (res.status === 401) return { status: 'unauthorized' };
 	if (res.status === 403) return { status: 'forbidden' };
 	// Never surface a raw server body, which may contain internal detail.
-	if (!res.ok) return { status: 'error', message: safeErrorMessage('load'), reference: errorReference(await readJson(res)) };
-	const body = await readJson(res);
+	if (!res.ok) return { status: 'error', message: LOAD_FAILED_MESSAGE };
+	let body: unknown;
+	try {
+		body = await res.json();
+	} catch {
+		body = undefined;
+	}
 	const payload = body === undefined ? null : decode(body);
-	if (payload === null) return { status: 'error', message: STALE_PAGE_MESSAGE };
+	if (payload === null) return { status: 'error', message: LOAD_FAILED_MESSAGE };
 	return { status: 'fresh', payload, etag: res.headers.get('ETag') ?? '' };
 }

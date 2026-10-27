@@ -485,7 +485,7 @@ test('plan copy: open-agent control, missing-task and closed-decision notices', 
 	}
 });
 
-test('plan copy: oversize count, resolved decision, update failure with its reference', async ({ page, request }, info) => {
+test('plan copy: oversize count, resolved decision, update failure', async ({ page, request }, info) => {
 	test.skip(info.project.name !== 'chromium-desktop', 'Both viewport widths are captured here.');
 	test.setTimeout(150_000);
 	const { by } = await boot(page, request, [{ ...DR, label: 'CI on PR #1193', until: atToday(23, 46) }]);
@@ -496,7 +496,7 @@ test('plan copy: oversize count, resolved decision, update failure with its refe
 	envelope.plans[0].oversize = { open: 41, budget: 40 };
 	await page.route(new RegExp(`/api/plans/operator/threads/${thread.id}(\\?.*)?$`), route => route.fulfill({ json: envelope }));
 	await page.route('**/api/attention/queue*', route => route.fulfill({ json: { current: null, count: 0, items: [] } }));
-	await page.route('**/api/plans/*/mutations', route => route.fulfill({ status: 500, json: { detail: 'internal', reference: 'a1b2c3d4' } }));
+	await page.route('**/api/plans/*/mutations', route => route.fulfill({ status: 500, json: { detail: 'internal' } }));
 	await r2Chat(page, request, thread);
 	for (const width of [1920, 393]) {
 		await view(page, width, width === 393 ? 852 : 1080, 'light');
@@ -508,10 +508,10 @@ test('plan copy: oversize count, resolved decision, update failure with its refe
 			await shot(page, 'copy-4-1920');
 		}
 		await page.getByRole('button', { name: /1 decision/ }).click();
-		await expect(page.getByText('That task doesn’t need you. Refreshing the plan.')).toBeVisible();
+		await expect(page.getByText('That decision is closed. Refreshing the plan.')).toBeVisible();
 		await shot(page, `copy-5-${width}`);
 		await page.getByRole('button', { name: 'Pause', exact: true }).last().click();
-		await expect(page.getByText('Couldn’t update the plan. Try again. Reference: a1b2c3d4').last()).toBeVisible();
+		await expect(page.getByText('Couldn’t update the plan. Try again.').last()).toBeVisible();
 		await shot(page, `copy-12-${width}`);
 	}
 });

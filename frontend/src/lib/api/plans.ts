@@ -17,7 +17,7 @@ export * from './plansTypes';
 export type { OperatorFoldLevel } from './plansFolded';
 
 
-import { authHeaders, errorReference, readJson, readPlan, safeErrorMessage } from './planRead';
+import { authHeaders, readPlan } from './planRead';
 
 async function readOperator(
 	url: string,
@@ -41,7 +41,7 @@ export type PlanLifecycleMutationOutcome =
 	| { status: 'success' }
 	| { status: 'conflict'; detail?: string }
 	| { status: 'forbidden' }
-	| { status: 'error'; message: string; reference?: string };
+	| { status: 'error'; message: string };
 
 /** Post one audited, revision-safe plan mutation as the authenticated user. */
 async function postPlanMutation(
@@ -68,16 +68,20 @@ async function postPlanMutation(
 	if (res.status === 403) return { status: 'forbidden' };
 	// A mutation the server refuses names its own reason (409 moved, 422 refused),
 	// written for the person who sent it; a generic line would only hide it.
-	const reply = await readJson(res);
-	const detail = showRefusal ? refusalDetail(reply) : undefined;
+	const detail = showRefusal ? await refusalDetail(res) : undefined;
 	if (res.status === 409) return { status: 'conflict', detail };
 	if (res.status === 422 && detail) return { status: 'error', message: detail };
-	return { status: 'error', message: safeErrorMessage('update'), reference: errorReference(reply) };
+	return { status: 'error', message: failure };
 }
 
-function refusalDetail(body: unknown): string | undefined {
-	const detail = (body as { detail?: unknown } | null)?.detail;
-	return typeof detail === 'string' && detail.trim() ? detail : undefined;
+async function refusalDetail(res: Response): Promise<string | undefined> {
+	try {
+		const body: unknown = await res.json();
+		const detail = (body as { detail?: unknown } | null)?.detail;
+		return typeof detail === 'string' && detail.trim() ? detail : undefined;
+	} catch {
+		return undefined;
+	}
 }
 
 /** Apply one closed, revision-safe whole-plan lifecycle mutation. */
@@ -92,7 +96,7 @@ export async function mutatePlanLifecycle(
 		operation,
 		mutation_id: mutationId,
 		params: { expected_revision: expectedRevision },
-	}, 'Could not update this plan.');
+	}, 'Couldn’t update the plan. Try again.');
 }
 
 /** Apply the user's control on a task: Mark done, Pause, Resume or Won't do (with its reason). */
@@ -113,7 +117,7 @@ export async function mutateUserTask(
 			expected_revision: expectedRevision,
 			...(reason ? { reason } : {}),
 		},
-	}, 'Could not update this task.', true);
+	}, 'Couldn’t update the task. Try again.', true);
 }
 
 

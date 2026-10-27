@@ -435,7 +435,7 @@ describe("ThreadPlanPane", () => {
     [401, {}, "Sign in to see this plan."],
     [403, {}, "You don’t have access to this chat. Choose another."],
     [404, {}, "This chat isn’t available. Choose another."],
-    [500, { reference: "abc123", detail: "internal" }, "Couldn’t load the plan. Try again. Reference: abc123"],
+    [500, { detail: "internal" }, "Couldn’t load the plan. Try again."],
   ])("shows the store's own message for a %i plan read", async (status, body, message) => {
     mockFetch(status, body);
     component = mount(ThreadPlanPane, {
@@ -543,7 +543,7 @@ describe("ThreadPlanPane", () => {
     row!.click();
     await settle();
 
-    expect(host.textContent).toContain("That task doesn’t need you");
+    expect(host.textContent).toContain("That decision is closed");
     expect(network.calls.filter((url) => url.includes("/api/attention/queue"))).toHaveLength(1);
     __reset();
   });
@@ -620,7 +620,7 @@ describe("ThreadPlanPane", () => {
     indicator.click();
     await settle();
 
-    expect(host.textContent).toContain("That task doesn’t need you");
+    expect(host.textContent).toContain("That decision is closed");
     expect(
       network.calls.filter((url) => url.includes("/api/attention/queue")),
     ).toHaveLength(1);

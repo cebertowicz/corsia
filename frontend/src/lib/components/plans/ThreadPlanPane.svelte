@@ -15,7 +15,6 @@
 	import { visibleQueue } from '$lib/stores/attentionDock.svelte';
 	import type { AttentionQueueItem } from '$lib/api/attentionQueue';
 	import { mutateUserTask } from '$lib/api/plans';
-	import { errorText } from '$lib/api/planRead';
 	import type { OperatorArtifactLink, OperatorNode, OperatorUserAction } from '$lib/api/plans';
 	import type { OperatorKey } from '$lib/stores/planKeys';
 	import { registerNodeFocus } from '$lib/planNodeFocus';
@@ -160,7 +159,7 @@
 	function showDecisionOutcome(outcome: Awaited<ReturnType<typeof requestFocus>>): void {
 		if (outcome === 'requested') return;
 		if (outcome === 'empty') {
-			decisionMessage = 'That task doesn’t need you. Refreshing the plan.';
+			decisionMessage = 'That decision is closed. Refreshing the plan.';
 			query.retry();
 			return;
 		}
@@ -214,7 +213,7 @@
 		} else {
 			refusal = result.status === 'forbidden'
 				? 'You no longer have permission to change this task.'
-				: errorText(result);
+				: result.message;
 		}
 		return refusal;
 	}
