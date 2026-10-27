@@ -36,7 +36,8 @@ log = logging.getLogger(__name__)
 
 ReadinessState = Literal["loaded", "fits_now", "no_room", "no_memory", "unreachable"]
 LoadFailure = Literal["load_failed", "unreachable", "no_room", "no_memory"]
-
+# Readiness states that refuse a person's send before any load starts.
+LOAD_REFUSALS = frozenset({"no_room", "no_memory", "unreachable"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,9 +118,8 @@ def readiness(target: ExecutionTarget, *, db) -> Readiness | None:
     from llm.network_discovery import get_loaded_model_ids
 
     seat = omlx_seat_and_model(target)
-    if seat is None or (not target.available and target.availability_reason not in {
-        "model_not_loaded", "model_unavailable", "fits_now", "no_room", "no_memory", "unreachable",
-    }):
+    # Only a target the resolver admitted has a readiness; catalog unavailability stays a hold.
+    if seat is None or not target.available:
         return None
     server_id, model_id = seat
     status = cached_status(target, db=db, server_id=server_id)

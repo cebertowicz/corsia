@@ -23,9 +23,11 @@ async def load_for_person(request, prepared) -> None:
     try:
         await asyncio.wait((load, stopped), return_when=asyncio.FIRST_COMPLETED)
         if prepared.cancel_event.is_set():
-            load.cancel()
-            await asyncio.gather(load, return_exceptions=True)
             raise asyncio.CancelledError()
         await load
     finally:
+        # Only this waiter stops: the seat's shared load is shielded and logs its own outcome.
+        load.cancel()
+        if load.done() and not load.cancelled():
+            load.exception()
         stopped.cancel()

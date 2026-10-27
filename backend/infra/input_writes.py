@@ -21,7 +21,6 @@ from infra.vendor_login import without_login_sql
 T = TypeVar("T")
 
 
-
 def settle_account_refusal(db, rows, error) -> tuple[str, ...]:
     """Retain queued input/sequence and release only the proved-unwritten claim."""
     for row in rows:

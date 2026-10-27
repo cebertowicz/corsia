@@ -407,7 +407,6 @@ class DispatchContext:
     turn_id: str
     input_message_id: str | None = None
     input_ids: tuple[str, ...] = ()
-
     metadata: dict | None = None
     native_mode: str = "event"
     allow_fresh: bool = False

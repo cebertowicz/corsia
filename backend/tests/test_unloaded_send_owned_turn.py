@@ -172,7 +172,7 @@ async def test_nonhuman_input_does_not_load(isolated_db, monkeypatch, metadata):
     held = AsyncMock(wraps=recovery.hold_unavailable_model_input)
     monkeypatch.setattr(recovery, "hold_unavailable_model_input", held)
     await drive_claimed_batch(batch)
-    assert held.await_args.args[1].availability_reason == "fits_now"
+    assert held.await_args.args[1].availability_reason == "model_not_loaded"
     load.assert_not_awaited()
     provider.assert_not_awaited()
     assert message_row("m") == ("queued", "proved_no_write", "selected_model_unavailable", None)

@@ -22,9 +22,9 @@ def test_unready_local_target_fails_a_person_send(isolated_db, monkeypatch, stat
     assert classify_target_admission(target, person_send=False) == "wait"
 
 
-def test_fits_now_is_runnable_for_a_person_send(isolated_db, monkeypatch):
+def test_not_loaded_loads_for_a_person_send(isolated_db, monkeypatch):
     from infra.send_target import classify_target_admission
-    target = replace(_not_loaded_target(), availability_reason="fits_now")
+    target = _not_loaded_target()
     assert classify_target_admission(target, person_send=True) == "load"
     assert classify_target_admission(target, person_send=False) == "wait"
 
@@ -49,7 +49,7 @@ async def test_resolvers_keep_the_loaded_only_verdict(isolated_db, monkeypatch):
     monkeypatch.setattr("llm.local_model_load.readiness", lambda *_a, **_k: Readiness("fits_now"))
 
     resolved = await send_target.resolve_target("omlx@srv/m")
-    assert (resolved.available, resolved.availability_reason) == (False, "fits_now")
+    assert (resolved.available, resolved.availability_reason) == (False, "model_not_loaded")
     assert send_target.classify_target_admission(resolved, person_send=False) == "wait"
     assert unavailable_model_recovery.model_admission("omlx@srv/m", person_send=False) == "wait"
     assert unavailable_model_recovery.model_admission("omlx@srv/m", person_send=True) == "load"

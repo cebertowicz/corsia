@@ -150,7 +150,7 @@ async def hold_unless_runnable(
     admission asks.
     """
     from dataclasses import replace
-    from llm.local_model_load import ModelLoadFailed
+    from llm.local_model_load import LOAD_REFUSALS, ModelLoadFailed
 
     admission = classify_target_admission(target, person_send=batch.person_send)
     if admission == "run":
@@ -160,7 +160,7 @@ async def hold_unless_runnable(
     if admission == "wait":
         return await hold_unavailable_model_input(batch, target)
     reason = target.availability_reason or "target_unavailable"
-    if reason in {"no_room", "no_memory", "unreachable"}:
+    if reason in LOAD_REFUSALS:
         raise ModelLoadFailed(reason)
     raise TargetUnavailable(
         f"Selected target cannot run: {target.catalog_id} ({reason})",

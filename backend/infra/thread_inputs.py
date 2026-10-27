@@ -223,7 +223,7 @@ def _claimable_prefix(
 
     rows = still_claimable(connection, thread_id, rows)
     model_held, account_held = liftable_hold_sets(rows)
-    candidate = _deliverable_prefix(rows, model_held | account_held)
+    candidate = _deliverable_prefix(rows, model_held | account_held) if model_held else []
     person_send = any(is_human_input(str(row['role']), json.loads(row['metadata'] or '{}')) for row in candidate)
     admission = model_admission(model, person_send=person_send, db=connection, thread_id=thread_id) if model_held else "wait"
     lifted = lifted_hold_ids(model_held, account_held, admission)

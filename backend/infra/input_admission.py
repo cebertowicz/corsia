@@ -327,8 +327,8 @@ def accept_thread_input(
 def _refuse_unready_person_send(db, model: str, thread_id: str, role: str, metadata: dict | None) -> None:
     """Refuse an unready local model before accepting a new human input."""
     from infra.send_types import SendRejected
-    from infra.send_target import _ready_target, classify_target_admission
-    from llm.local_model_load import omlx_seat_and_model
+    from infra.send_target import _ready_target
+    from llm.local_model_load import LOAD_REFUSALS, omlx_seat_and_model
     from llm.network_discovery import get_loaded_model_ids
     from llm.resolution import ModelUnavailableError, resolve_thread_target
 
@@ -339,9 +339,7 @@ def _refuse_unready_person_send(db, model: str, thread_id: str, role: str, metad
     except (ModelUnavailableError, ValueError):
         return
     target = _ready_target(target, db=db)
-    if classify_target_admission(target, person_send=True) == "fail" and target.availability_reason in {
-        "no_room", "no_memory", "unreachable",
-    }:
+    if not target.available and target.availability_reason in LOAD_REFUSALS:
         seat = omlx_seat_and_model(target)
         other_loaded = len(get_loaded_model_ids(seat[0]) - {seat[1]}) if seat else 0
         raise SendRejected(409, "Couldn't load the selected local model.", metadata={

@@ -103,7 +103,6 @@ async def scope_supplied_target(target: ExecutionTarget, *, thread_id: str) -> E
     return await db_async.run_in_db(_scope)
 
 
-
 def _ready_target(target: ExecutionTarget, *, db=None) -> ExecutionTarget:
     """Use the catalog's cached oMLX readiness, without probing or loading a model."""
     if not (target.available and target.harness == "native"
@@ -125,7 +124,8 @@ def _ready_target(target: ExecutionTarget, *, db=None) -> ExecutionTarget:
             connection.close()
     if state is not None and state.state == "loaded":
         return target
-    return replace(target, available=False, availability_reason=state.state if state else "model_unavailable")
+    reason = "model_not_loaded" if state is not None and state.state == "fits_now" else state.state if state else "model_unavailable"
+    return replace(target, available=False, availability_reason=reason)
 
 
 TargetAdmission = Literal["run", "load", "wait", "fail"]
@@ -138,12 +138,14 @@ def classify_target_admission(target: ExecutionTarget, *, person_send: bool) -> 
     waits at the FIFO head. Harness connection state has no live catalog wake,
     so it fails visibly rather than promising recovery that cannot occur.
     """
+    from llm.local_model_load import LOAD_REFUSALS
+
     if target.available:
         return "run"
     reason = target.availability_reason
-    if person_send and reason == "fits_now":
+    if person_send and reason == "model_not_loaded":
         return "load"
-    if reason == "connection_unavailable" or (person_send and reason in {"no_room", "no_memory", "unreachable"}):
+    if reason == "connection_unavailable" or (person_send and reason in LOAD_REFUSALS):
         return "fail"
     return "wait"
 
