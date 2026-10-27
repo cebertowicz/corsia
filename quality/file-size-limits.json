@@ -45,11 +45,10 @@
     "backend/tools/filesystem_effects.py": 659,
     "backend/tools/grep.py": 455,
     "backend/tools/host_access_gate.py": 1047,
-    "backend/tools/shell.py": 533,
+    "backend/tools/shell.py": 532,
     "backend/tools/shell_guard.py": 1174,
     "frontend/src/lib/components/DocumentsView.svelte": 522,
     "frontend/src/lib/components/HostAccessLeaseControl.svelte": 559,
-    "frontend/src/lib/components/InputBar.svelte": 386,
     "frontend/src/lib/ws/handlersTurns.ts": 478,
     "frontend/src/routes/+page.svelte": 478,
     "frontend/src/routes/_design/+page.svelte": 608
@@ -89,7 +88,7 @@
     "backend/tools/host_access_gate.py::_process_action": 85,
     "backend/tools/host_access_gate.py::authorize_host_action": 94,
     "backend/tools/host_access_gate.py::consume_current_action_permit": 99,
-    "backend/tools/shell.py::BashTool.execute": 291,
+    "backend/tools/shell.py::BashTool.execute": 290,
     "backend/tools/shell_guard.py::check_worktree_targets": 110,
     "backend/tools/shell_guard.py::pinned_repo_sandbox_profile": 180,
     "scripts/migrations/migrate_messages.py::migrate": 82
