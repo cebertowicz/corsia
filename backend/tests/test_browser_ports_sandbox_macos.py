@@ -15,7 +15,9 @@ from tools.host_path_policy import ProtectedHostPathPolicy
 _CONNECT = '''
 import errno, socket, sys
 try:
-    with socket.create_connection(('127.0.0.1', int(sys.argv[1])), timeout=2): pass
+    with socket.socket(int(sys.argv[2]), socket.SOCK_STREAM) as client:
+        client.settimeout(2)
+        client.connect((sys.argv[3], int(sys.argv[1])))
 except PermissionError as exc:
     print('denied', exc.errno)
     raise SystemExit(13)
@@ -50,13 +52,19 @@ except PermissionError as exc:
 '''
 
 
-def _run(profile, script, port):
-    return subprocess.run(['/usr/bin/sandbox-exec', '-p', profile, sys.executable, '-c', script, str(port)],
+def _run(profile, script, port, *args):
+    return subprocess.run(['/usr/bin/sandbox-exec', '-p', profile, sys.executable, '-c', script, str(port), *args],
                           capture_output=True, text=True, timeout=10)
 
 
 @pytest.mark.parametrize('leased', [False, True])
-def test_reserved_cdp_and_stream_deny_connect_and_bind_with_control(tmp_path, leased):
+@pytest.mark.parametrize(('family', 'destination'), [
+    (socket.AF_INET, '127.0.0.1'),
+    (socket.AF_INET, '0.0.0.0'),
+    (socket.AF_INET6, '::ffff:127.0.0.1'),
+    (socket.AF_INET6, '::ffff:0.0.0.0'),
+])
+def test_reserved_cdp_and_stream_deny_connect_and_bind_with_control(tmp_path, leased, family, destination):
     policy = ProtectedHostPathPolicy(home=tmp_path / 'home', state_root=tmp_path / 'state')
     rules = policy.hard_floor_sandbox_rules() if leased else policy.sandbox_rules()
     profile = '(version 1)(allow default)' + rules
@@ -67,7 +75,7 @@ def test_reserved_cdp_and_stream_deny_connect_and_bind_with_control(tmp_path, le
         control.listen()
         control_port = control.getsockname()[1]
         assert control_port not in browser_ports.RESERVED_PORTS
-        allowed = _run(profile, _CONNECT, control_port)
+        allowed = _run(profile, _CONNECT, control_port, str(family), destination)
         if allowed.returncode == 71 and 'sandbox_apply: Operation not permitted' in allowed.stderr:
             if os.environ.get('CORSIA_REQUIRE_SAFEHOUSE') == '1':
                 pytest.fail('required sandbox could not be applied')
@@ -80,7 +88,7 @@ def test_reserved_cdp_and_stream_deny_connect_and_bind_with_control(tmp_path, le
             with socket.create_connection(('127.0.0.1', port), timeout=2):
                 pass
             for script in (_CONNECT, _HTTP, _WEBSOCKET):
-                refused = _run(profile, script, port)
+                refused = _run(profile, script, port, str(family), destination)
                 assert refused.returncode == 13 and refused.stdout.strip() in {'denied 1', 'denied 13'}
             listener.close()
             refused_bind = _run(profile, _BIND, port)
