@@ -41,9 +41,6 @@ JITTER_S = 10.0
 HEALTH_REPORT_INTERVAL = timedelta(hours=6)
 REPORT_SETTING = "pr_quiet_ingress_report"
 _ETAG_CACHE_MAX = 512
-#: Status reason while the shared read budget keeps this sweep out of its reserve.
-RESERVE_HELD = "reserve_held"
-
 _status: dict[str, Any] = {
     "state": "starting", "reason": None, "last_run": None, "fired_count": 0, "last_error": None,
 }
@@ -89,28 +86,16 @@ def disabled_reason(runner: feed.GhRunner) -> str | None:
 
 
 def _candidates() -> list[Candidate]:
-    """Owned, not-ended GitHub PRs whose owner thread is live; one owner per PR.
-
-    Only PRs of tracked repositories (the broker's own cached set): an untracked
-    one is never read, so it cannot hold the sweep status at degraded, and its
-    owner was told at registration that CORSIA does not watch it. While the
-    tracked set cannot be read nothing is filtered; the broker then refuses the
-    read by name.
-    """
-    from connections.github_broker import known_tracked_repositories
+    """Owned, not-ended GitHub PRs whose owner thread is live; one owner per PR."""
     from events.connectors.github_pr_notice import OWNED_PR_SQL, parse_pr_external_id
     from infra.database import get_db
 
-    known = known_tracked_repositories()
-    tracked = None if known is None else {name.lower() for name in known}
     rows = get_db().execute(OWNED_PR_SQL.format(thread_filter="")).fetchall()
     seen: set[str] = set()
     candidates: list[Candidate] = []
     for row in rows:
         parsed = parse_pr_external_id(row["external_id"])
         if parsed is None or row["external_id"] in seen:
-            continue
-        if tracked is not None and parsed[0].lower() not in tracked:
             continue
         seen.add(row["external_id"])
         if delivery.thread_exists_and_active(row["parent_thread_id"]):
@@ -333,13 +318,12 @@ async def sweep_once(runner: feed.GhRunner) -> None:
     """Evaluate every candidate once; one PR's failure never stops the others.
 
     While the shared read budget keeps the sweep out of its reserve the sweep
-    is skipped, not failed: the status reason is ``reserve_held`` and the
-    budget's own status says why. A real GitHub refusal still degrades it.
+    is skipped, not failed: the budget's own status says why.
     """
     from events.connectors.github_pr_notice import webhook_configured
 
     if budget.sweep_paused():
-        _status.update({"state": "enabled", "reason": RESERVE_HELD})
+        _status.update({"state": "enabled", "reason": None})
         return
 
     candidates = await run_in_db(_candidates)
@@ -347,24 +331,19 @@ async def sweep_once(runner: feed.GhRunner) -> None:
     answers_from = await run_in_db(_log_answers_from)
     affected: list[str] = []
     error: str | None = None
-    held = False
     for candidate in candidates:
         try:
             faults = await sweep_candidate(
                 runner, candidate, webhook=webhook, log_answers_from=answers_from,
             )
         except Exception as exc:  # noqa: BLE001 — surfaced in status, next PR still swept
-            failure = getattr(exc, "error_class", type(exc).__name__)
-            if failure == RESERVE_HELD:
-                held = True
-                continue
-            error = failure
+            error = getattr(exc, "error_class", type(exc).__name__)
             log.warning("pr-quiet-watch: %s failed: %s", candidate.external_id, error)
             continue
         affected += [f"{candidate.external_id} ({fault})" for fault in faults]
     await run_in_db(_report_ingress, affected, _now())
     _status.update({
-        "state": "degraded" if error else "enabled", "reason": error or (RESERVE_HELD if held else None),
+        "state": "degraded" if error else "enabled", "reason": error,
         "last_run": _now().isoformat(), "last_error": error or _status["last_error"],
     })
 

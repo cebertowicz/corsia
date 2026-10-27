@@ -5,13 +5,11 @@
 passed through: the broker rebuilds the argv from the vetted request, so what
 runs is exactly what was checked. The policy, in one place:
 
-* REST only, methods ``GET`` and ``HEAD``: GraphQL, which would reach
-  repositories outside the tracked set through one door, is refused by name;
+* REST only, methods ``GET`` and ``HEAD``; GraphQL is refused by name;
 * an API path, never a URL: ``gh api`` itself accepts any URL, and would send
   the person's token to its host;
-* ``/repos/{owner}/{repo}/...`` only for repositories the instance tracks, and
-  of the other paths only a short list. ``/repositories/{id}/...``, the form
-  GitHub's next-page links take, only for the id of a tracked repository;
+* repository paths and GitHub's numeric repository pagination paths, plus
+  a short list of non-repository paths;
 * only headers that shape a read (media type, conditional reads, API version);
 * no request body and no flag the broker has not listed.
 """
@@ -20,7 +18,6 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Callable
 from urllib.parse import unquote
 
 #: Paths outside ``/repos/...`` that the pollers read, and nothing more.
@@ -66,9 +63,7 @@ class ReadRequest:
         return [*args, self.path]
 
 
-def _vet_path(
-    path: str, tracked: Callable[[], frozenset[str]], repository_in_scope: Callable[[str], bool],
-) -> str:
+def _vet_path(path: str) -> str:
     """The path without its leading slash, or a refusal."""
     if unquote(path.partition("?")[0]).strip("/").lower() == "graphql":
         raise GithubReadRefused("graphql_not_allowed", "the broker serves REST reads only")
@@ -87,13 +82,9 @@ def _vet_path(
     if parts[0].lower() == "repos":
         if len(parts) < 3 or not all(_REPO_PART.match(part) for part in parts[1:3]):
             raise GithubReadRefused("path_invalid", "a repository path names an owner and a repository")
-        if f"{parts[1]}/{parts[2]}".lower() not in {name.lower() for name in tracked()}:
-            raise GithubReadRefused("repo_out_of_scope", f"{parts[1]}/{parts[2]}")
     elif parts[0].lower() == "repositories":
-        if len(parts) < 3 or not REPOSITORY_ID.match(parts[1]):
-            raise GithubReadRefused("path_invalid", "a repositories path names a numeric id and a resource")
-        if not repository_in_scope(parts[1]):
-            raise GithubReadRefused("repo_out_of_scope", f"repositories/{parts[1]}")
+        if len(parts) < 2 or not REPOSITORY_ID.match(parts[1]):
+            raise GithubReadRefused("path_invalid", "a repositories path names a numeric id")
     elif base not in NON_REPO_PATHS:
         raise GithubReadRefused("path_not_allowed", parts[0])
     return path
@@ -145,22 +136,14 @@ def _scan(args: list[str]) -> tuple[str | None, list[str], list[tuple[str, str]]
     return method, paths, headers, include
 
 
-def parse_gh_args(
-    args: list[str], tracked: Callable[[], frozenset[str]], repository_in_scope: Callable[[str], bool],
-) -> ReadRequest:
-    """Vet ``["api", ...]`` into a ``ReadRequest``.
-
-    ``tracked`` names the repositories in scope and ``repository_in_scope``
-    says whether a numeric id is one of theirs (asked only for a
-    ``repositories/{id}`` path; it may raise ``GithubReadRefused`` when it
-    cannot tell).
-    """
+def parse_gh_args(args: list[str]) -> ReadRequest:
+    """Vet ``["api", ...]`` into a ``ReadRequest``."""
     if not args or args[0] != "api":
         raise GithubReadRefused("command_not_allowed", args[0] if args else "")
     method, paths, headers, include = _scan(args)
     if len(paths) != 1:
         raise GithubReadRefused("malformed_args", "exactly one API path is required")
-    path = _vet_path(paths[0], tracked, repository_in_scope)
+    path = _vet_path(paths[0])
     if (method or "GET") not in READ_METHODS:
         raise GithubReadRefused("method_not_allowed", method or "")
     return ReadRequest(method or "GET", path, tuple(headers), include)

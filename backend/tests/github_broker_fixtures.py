@@ -23,21 +23,16 @@ class Inner:
 
     def __init__(self, stdout: str = OK, stderr: str = "", returncode: int = 0) -> None:
         self.calls: list[list[str]] = []
-        self.id_reads: list[str] = []
         self.result = (stdout, stderr, returncode)
 
     def __call__(self, args: list[str], *, timeout: float = 30.0) -> subprocess.CompletedProcess:
-        if args[-1] == f"repos/{REPO}":  # the broker's own read of a repository's numeric id
-            self.id_reads.append(args[-1])
-            body = f'{{"id": {REPO_ID}, "full_name": "{REPO}"}}'
-            return subprocess.CompletedProcess(args, 0, f"HTTP/2.0 200 OK\r\n\r\n{body}", "")
         self.calls.append(list(args))
         stdout, stderr, returncode = self.result
         return subprocess.CompletedProcess(args, returncode, stdout, stderr)
 
 
 def make_broker(inner: Inner) -> GithubReadBroker:
-    return GithubReadBroker(inner, tracked=lambda: frozenset({REPO}))
+    return GithubReadBroker(inner)
 
 
 def refusal(broker: GithubReadBroker, inner: Inner, args: list[str]) -> str:

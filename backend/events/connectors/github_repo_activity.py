@@ -302,7 +302,8 @@ async def gated_read(runner: feed.GhRunner, repo: str, path: str) -> feed.GhResp
     async with _lock(repo):
         state = await run_in_db(_repo_state, repo)
         try:
-            response, _reason = await repo_read.get(runner, path, state, _now(), send_etag=False, keep_etag=False)
+            response, _reason = await repo_read.get(
+                runner, path, state, _now(), send_etag=False, keep_etag=False, propagate_refusal=True)
             return response
         finally:
             await run_in_db(_save_state, repo, state)

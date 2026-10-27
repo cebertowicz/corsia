@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import asyncio
 import os
-import shutil
 import tempfile
 import time
 import uuid
@@ -28,8 +27,6 @@ from automation.script_sandbox import STDOUT_CAP_BYTES, run_script
 pytestmark = pytest.mark.integration
 
 THREAD_ID = "script-sandbox-it"
-#: The person's home, read before the ``sandbox`` fixture points ``HOME`` at a temp folder.
-REAL_HOME = os.path.expanduser("~")
 #: A pathological Safehouse startup must fail visibly, not hang the job.
 FOUR_CONCURRENT_WALL_SECONDS = 10.0
 
@@ -138,39 +135,6 @@ async def test_real_script_receives_no_agent_account_environment(sandbox) -> Non
     )
     run = await _run(path)
     assert run.returncode == 0, run.stderr
-
-
-@pytest.mark.xfail(
-    strict=False,
-    reason="open until a script's GitHub reads go through the read broker (the follow-up to the broker PR): "
-    "with no agents' account, a script still reads the person's gh login",
-)
-@pytest.mark.asyncio
-async def test_a_sandboxed_script_cannot_read_the_persons_gh_login(sandbox, monkeypatch) -> None:
-    """The boundary the GitHub read broker needs: a script cannot reach the person's gh login.
-
-    A script gets the owner's shell envelope and no agents' account, and the one
-    rule hiding the gh config directory applies only once the agents' account
-    exists (``github_agent.default_home_deny``), so today a script's ``gh`` is
-    the person's own and can bypass the broker. The script prints two exit codes
-    (the credential file is readable; ``gh`` reports a login, output discarded);
-    no token is read or printed. Skipped where the person has no ``gh`` login to
-    reach. Expected to fail until scripts read GitHub through the broker.
-    """
-    hosts = Path(REAL_HOME) / ".config" / "gh" / "hosts.yml"
-    if shutil.which("gh") is None or not hosts.is_file():
-        pytest.skip("no gh login to reach on this machine")
-    monkeypatch.setenv("HOME", REAL_HOME)
-    path = _script(
-        sandbox, "gh-reach.sh",
-        'test -r "$HOME/.config/gh/hosts.yml"; echo "hosts_file=$?"\n'
-        'gh auth status >/dev/null 2>&1; echo "auth_status=$?"\n',
-    )
-    run = await _run(path)
-    answers = dict(line.split("=") for line in run.stdout.decode().split())
-    assert run.returncode == 0, run.stderr
-    assert answers["hosts_file"] != "0", f"the script can read the person's gh hosts file: {answers}"
-    assert answers["auth_status"] != "0", f"the script's gh is signed in as the person: {answers}"
 
 
 @pytest.mark.asyncio

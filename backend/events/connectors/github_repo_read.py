@@ -30,7 +30,8 @@ def counted(response: feed.GhResponse, state: dict[str, Any], now: datetime) -> 
 
 
 async def get(runner: feed.GhRunner, path: str, state: dict[str, Any], now: datetime, *,
-              send_etag: bool = True, keep_etag: bool = True) -> tuple[feed.GhResponse | None, str | None]:
+              send_etag: bool = True, keep_etag: bool = True,
+              propagate_refusal: bool = False) -> tuple[feed.GhResponse | None, str | None]:
     if len(prune_reads(state, now)) >= MAX_HOURLY_READS:
         return None, "budget_exhausted"
     etag = state.get("etags", {}).get(path) if send_etag else None
@@ -38,6 +39,8 @@ async def get(runner: feed.GhRunner, path: str, state: dict[str, Any], now: date
         response = await asyncio.to_thread(functools.partial(
             feed.gh_get, runner, path, {"If-None-Match": etag} if etag else None, low_priority=True))
     except feed.FeedError as exc:
+        if propagate_refusal and exc.error_class == "read_refused":
+            raise
         return None, exc.error_class
     if keep_etag and response.headers.get("etag"):
         state.setdefault("etags", {})[path] = response.headers["etag"]

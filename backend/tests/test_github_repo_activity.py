@@ -101,7 +101,7 @@ async def test_reads_stay_out_of_the_shared_budget_reserve_and_hold_the_cursor(r
     second = await poller._get(runner, "second", state, now)
     assert (second is None) is stopped and calls == (["first"] if stopped else ["first", "second"])
     assert state["issues_cursor"] == "held"
-    assert poller.poller_status()["degraded"] == ("reserve_held" if stopped else None)
+    assert poller.poller_status()["degraded"] == ("rate_limited" if stopped else None)
 
 
 @pytest.mark.asyncio

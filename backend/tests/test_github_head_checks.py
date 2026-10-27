@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import subprocess
 from types import SimpleNamespace
 
 import pytest
@@ -57,6 +59,58 @@ async def test_held_read_retries_then_emits_once(monkeypatch):
     assert delays == [30, 60]
     assert len(sink.events) == 1
     assert not agg._tasks and not agg._facts
+
+
+@pytest.mark.asyncio
+async def test_untracked_webhook_repository_emits_through_broker(monkeypatch):
+    from connections.github_broker import GithubReadBroker
+    from events.connectors.github_read_budget import budget
+
+    budget.clear()
+    calls, sink = [], Sink()
+    monkeypatch.setattr(poller, "_locks", {})
+    monkeypatch.setattr(poller, "_repo_state", lambda _repo: {"reads": []})
+    monkeypatch.setattr(poller, "_save_state", lambda *_args: None)
+    monkeypatch.setattr(poller.feed, "tracked_github_repositories", lambda: frozenset({"other/repo"}))
+
+    def run(args, *, timeout):
+        calls.append(args[-1])
+        return subprocess.CompletedProcess(args, 0, "HTTP/2.0 200 OK\r\n\r\n" + json.dumps(response().body), "")
+
+    agg = checks.HeadCheckAggregator(GithubReadBroker(run), sink, sleep=lambda _: asyncio.sleep(0))
+    agg.observe(payload())
+    await finish(agg)
+    assert calls == ["repos/o/r/commits/abc/check-suites"]
+    assert sink.events[0]["event_type"] == "github.head.checks_completed"
+    budget.clear()
+
+
+@pytest.mark.asyncio
+async def test_refused_read_stops_after_one_attempt_with_reason(monkeypatch, caplog):
+    from connections.github_broker import GithubReadBroker
+    from events.connectors.github_read_budget import budget
+
+    budget.clear()
+    monkeypatch.setattr(poller, "_locks", {})
+    monkeypatch.setattr(poller, "_repo_state", lambda _repo: {"reads": []})
+    monkeypatch.setattr(poller, "_save_state", lambda *_args: None)
+    calls, delays, sink = [], [], Sink()
+
+    def refused(args, *, timeout):
+        from connections.github_read_request import GithubReadRefused
+        calls.append(args)
+        raise GithubReadRefused("blocked_for_test")
+
+    async def sleep(delay):
+        delays.append(delay)
+
+    agg = checks.HeadCheckAggregator(GithubReadBroker(refused), sink, sleep=sleep)
+    with caplog.at_level(logging.WARNING):
+        agg.observe(payload())
+        await finish(agg)
+    assert len(calls) == 1 and len(delays) == 1 and not sink.events
+    assert "read_refused: blocked_for_test" in caplog.text
+    budget.clear()
 
 
 @pytest.mark.asyncio

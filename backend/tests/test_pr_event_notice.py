@@ -237,24 +237,8 @@ def test_wording_follows_the_webhook_endpoints_own_secret(isolated_db, monkeypat
     assert notices.webhook_configured() is False, "reads through the endpoint's helper"
 
 
-def test_an_untracked_repository_is_named_as_unwatched_and_promises_no_wake(isolated_db, monkeypatch):
+def test_untracked_repository_gets_the_same_notice(isolated_db, monkeypatch):
     _webhook(True)
-    pr = notices.OwnedPr("o/r#12", REPO, 12, False)
     track_repositories(monkeypatch, "o/other")
-    untracked = notices._notice(pr)
-    assert "CORSIA does not watch o/r" in untracked
-    assert "will not wake you when this PR's CI or review is overdue" in untracked
-    assert "wakes you when its CI finishes" not in untracked
-    track_repositories(monkeypatch, "O/R")
-    assert "CORSIA wakes you when its CI finishes" in notices._notice(pr), "a tracked repo keeps its wording"
-
-
-def test_an_unreadable_tracked_set_never_calls_a_repository_untracked(isolated_db, monkeypatch):
-    from connections.github_broker import GithubReadRefused
-
-    def refuse():
-        raise GithubReadRefused("repo_scope_unavailable")
-
-    _webhook(True)
-    monkeypatch.setattr("connections.github_broker.shared_tracked_repositories", refuse)
-    assert "does not watch" not in notices._notice(notices.OwnedPr("o/r#12", REPO, 12, False))
+    pr = notices.OwnedPr("o/r#12", REPO, 12, False)
+    assert "CORSIA wakes you when its CI finishes" in notices._notice(pr)

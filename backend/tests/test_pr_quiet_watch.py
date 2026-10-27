@@ -1185,34 +1185,16 @@ def test_signed_out_gh_disables_the_sweep(gh, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_an_owned_pr_of_an_untracked_repository_is_never_read_or_degrading(gh, wakes, parked, monkeypatch):
-    """The broker would refuse the read by name; the sweep skips the PR instead, so
-    one such PR cannot hold the sweep status at degraded."""
+async def test_an_owned_pr_of_an_untracked_repository_is_read(gh, wakes, parked, monkeypatch):
+    from connections.github_broker import GithubReadBroker
+
     _webhook()
     _owner(11)
     gh.pr(11)
+    gh.runs(H, run())
+    gh.reviewer(H, "success")
     set_setting("pr_quiet:o/r#11", {"head": H, "first_seen_at": T0.isoformat(), "fired": []})
     track_repositories(monkeypatch, "o/other")
-
-    await _sweep(gh, T0 + timedelta(days=3), monkeypatch)
-    assert gh.reads == []
-    assert wakes.await_count == 0
+    await _sweep(GithubReadBroker(gh), T0 + timedelta(days=3), monkeypatch)
+    assert any("repos/o/r/pulls/11" in path for path in gh.reads)
     assert watch.quiet_watch_status()["state"] == "enabled"
-
-    track_repositories(monkeypatch, REPO)
-    await _sweep(gh, T0 + timedelta(days=3), monkeypatch)
-    assert gh.reads, "the same PR is read once its repository is tracked"
-
-
-@pytest.mark.asyncio
-async def test_an_unreadable_tracked_set_filters_nothing(gh, wakes, parked, monkeypatch):
-    from connections.github_broker import GithubReadRefused
-
-    def refuse():
-        raise GithubReadRefused("repo_scope_unavailable")
-
-    _webhook()
-    _owner(11)
-    gh.pr(11)
-    monkeypatch.setattr("connections.github_broker.shared_tracked_repositories", refuse)
-    assert [c.number for c in watch._candidates()] == [11]

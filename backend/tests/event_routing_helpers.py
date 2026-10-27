@@ -121,7 +121,6 @@ def read_statements(seen: list[str]) -> list[str]:
 
 
 def track_repositories(monkeypatch, *repos: str) -> None:
-    """Make ``repos`` the tracked GitHub repositories the PR notice and the quiet
-    sweep read (the broker's cached set), without touching a database or a cache."""
+    """Set the feed's tracked repositories without touching a database."""
     names = frozenset(repos)
-    monkeypatch.setattr("connections.github_broker.shared_tracked_repositories", lambda: names)
+    monkeypatch.setattr("events.connectors.github_notifications_feed.tracked_github_repositories", lambda *args: names)
