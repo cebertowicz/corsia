@@ -10,7 +10,7 @@ from typing import Any
 
 import pytest
 
-from connections.github_broker import GithubReadBroker, GithubReadRefused, scrub
+from connections.github_broker import GithubReadBroker, GithubReadRefused
 from events.connectors import github_notifications_feed as feed
 from github_broker_fixtures import OK, REPO, REPO_ID, Inner, make_broker, refusal, secret
 
@@ -103,9 +103,11 @@ def test_a_malformed_or_traversing_path_is_refused(broker, inner, path) -> None:
     "graphql", "/graphql", "graphql/", "/graphql/", "GraphQL", "GRAPHQL", "graphql?x=1", "/GraphQL/?query=x",
     "%67raphql", "graph%71l", "//graphql",
 ])
-def test_graphql_is_refused_by_name_in_every_spelling(broker, inner, path) -> None:
+def test_graphql_is_refused_by_the_path_rules(broker, inner, path) -> None:
+    expected = "full_url" if path.startswith("//") else (
+        "path_invalid" if path.partition("?")[0].endswith("/") else "path_not_allowed")
     for flags in ([], ["--method", "POST"], ["--method", "GET"]):
-        assert refusal(broker, inner, ["api", *flags, path]) == "graphql_not_allowed"
+        assert refusal(broker, inner, ["api", *flags, path]) == expected
 
 
 def test_any_repository_is_readable(broker, inner) -> None:
@@ -187,7 +189,7 @@ def test_the_broker_takes_the_parameters_run_gh_takes_and_no_others(broker, inne
 def test_a_refusal_reaches_a_poller_as_a_named_feed_error(broker, inner) -> None:
     with pytest.raises(feed.FeedError) as caught:
         feed.gh_get(broker, "graphql")
-    assert caught.value.error_class == "read_refused" and "graphql_not_allowed" in str(caught.value)
+    assert caught.value.error_class == "read_refused" and "path_not_allowed" in str(caught.value)
     assert inner.calls == []
 
 
@@ -239,17 +241,26 @@ def test_every_poller_defaults_to_the_broker(monkeypatch) -> None:
 
 # --- the token never leaves ------------------------------------------------
 
-def test_scrub_removes_token_shapes_and_known_environment_tokens(monkeypatch) -> None:
+def test_broker_removes_token_shapes_and_known_environment_tokens(monkeypatch, broker, inner) -> None:
     known = "plain-env-secret-value"
     monkeypatch.setenv("GH_TOKEN", known)
     text = " ".join([
         secret("gho"), secret("ghp"), secret("ghs"), "github_pat_" + "A1b2C3d4E5" * 3,
         known, "Authorization: Bearer abc.def", "authorization: token xyz", "keep me",
     ])
-    cleaned = scrub(text)
+    inner.result = (text, "", 0)
+    cleaned = broker(["api", "user"]).stdout
     for leaked in (secret("gho"), secret("ghp"), secret("ghs"), "github_pat_A1b2", known, "abc.def", "xyz"):
         assert leaked not in cleaned
     assert "keep me" in cleaned
+
+
+def test_live_environment_token_in_escaped_json_remains_valid(monkeypatch, broker, inner) -> None:
+    secret_value = 'long-"quoted\\value'
+    monkeypatch.setenv("GH_TOKEN", secret_value)
+    inner.result = (json.dumps({secret_value: [f"before {secret_value} after"]}), "", 0)
+    result = json.loads(broker(["api", "user"]).stdout)
+    assert result == {"[REDACTED]": ["before [REDACTED] after"]}
 
 
 def test_a_token_in_output_errors_and_logs_never_survives(broker, inner, caplog) -> None:
@@ -273,7 +284,7 @@ def test_secrets_in_json_keys_arguments_and_timeout_are_scrubbed(inner) -> None:
     broker = GithubReadBroker(inner)
     result = broker(["api", f"repos/{token}/repo"])
     assert token not in result.stdout and token not in str(result.args)
-    assert json.loads(result.stdout) == {"[redacted]": "value"}
+    assert json.loads(result.stdout) == {"[REDACTED]": "value"}
 
     def timeout(args, *, timeout):
         raise subprocess.TimeoutExpired(args, timeout, output=token, stderr=token)

@@ -107,7 +107,7 @@ def _record(repo, delivery_id):
                     payload={"action": "opened", "repository": {"full_name": repo}})
 
 
-def test_the_last_delivery_matches_the_repo_whatever_its_case(isolated_db):
+def test_the_last_delivery_matches_the_repo_whatever_its_case():
     # Tracked names are lowercased; a payload's full_name is stored as GitHub spelled it.
     _record("Octo-Org/Mixed-Case", "guid-mixed-case-1")
     assert poller._last_delivery("octo-org/mixed-case") is not None
@@ -115,7 +115,7 @@ def test_the_last_delivery_matches_the_repo_whatever_its_case(isolated_db):
     assert poller._last_delivery("octo-org/other") is None
 
 
-def test_the_last_delivery_lookup_reads_only_the_newest_rows(isolated_db, monkeypatch):
+def test_the_last_delivery_lookup_reads_only_the_newest_rows(monkeypatch):
     from infra import webhook_delivery_log as log
     monkeypatch.setattr(log, "LAST_DELIVERY_WINDOW_ROWS", 3)
     _record("o/windowed", "guid-windowed-old")

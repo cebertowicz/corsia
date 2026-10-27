@@ -65,8 +65,6 @@ class ReadRequest:
 
 def _vet_path(path: str) -> str:
     """The path without its leading slash, or a refusal."""
-    if unquote(path.partition("?")[0]).strip("/").lower() == "graphql":
-        raise GithubReadRefused("graphql_not_allowed", "the broker serves REST reads only")
     if "://" in path or path.startswith("//"):
         raise GithubReadRefused("full_url", "the broker takes an API path, never a URL")
     if not path or _CONTROL.search(path):

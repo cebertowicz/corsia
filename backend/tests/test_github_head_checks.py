@@ -46,7 +46,7 @@ async def test_held_read_retries_then_emits_once(monkeypatch):
     replies, delays, sink = [None, response()], [], Sink()
 
     async def read(*_args):
-        return replies.pop(0)
+        return replies.pop(0), None
 
     async def sleep(delay):
         delays.append(delay)
@@ -118,7 +118,7 @@ async def test_four_held_reads_drop_and_clear_state(monkeypatch, caplog):
 
     async def read(*_args):
         calls.append(True)
-        return None
+        return None, "budget_exhausted"
 
     monkeypatch.setattr(poller, "gated_read", read)
     agg = aggregator(sink)
@@ -134,7 +134,7 @@ async def test_four_held_reads_drop_and_clear_state(monkeypatch, caplog):
 @pytest.mark.asyncio
 async def test_many_settled_and_failed_heads_leave_no_state(monkeypatch):
     async def read(_runner, _repo, path):
-        return response(503 if "/bad" in path else 200)
+        return response(503 if "/bad" in path else 200), None
 
     monkeypatch.setattr(poller, "gated_read", read)
     agg = aggregator(Sink())
@@ -147,7 +147,7 @@ async def test_many_settled_and_failed_heads_leave_no_state(monkeypatch):
 @pytest.mark.asyncio
 async def test_sink_failure_clears_both_maps(monkeypatch):
     async def read(*_args):
-        return response()
+        return response(), None
 
     class FailingSink:
         async def admit_event(self, **_event):
@@ -164,7 +164,7 @@ async def test_sink_failure_clears_both_maps(monkeypatch):
 @pytest.mark.asyncio
 async def test_refusal_logged_without_optional_none_facts(monkeypatch, caplog):
     async def read(*_args):
-        return response()
+        return response(), None
 
     monkeypatch.setattr(poller, "gated_read", read)
     sink = Sink(SimpleNamespace(code="unknown_type", text="private details"))
@@ -180,7 +180,7 @@ async def test_refusal_logged_without_optional_none_facts(monkeypatch, caplog):
 @pytest.mark.asyncio
 async def test_debounce_replaces_task_without_old_cleanup_losing_new_state(monkeypatch):
     async def read(*_args):
-        return response()
+        return response(), None
 
     monkeypatch.setattr(poller, "gated_read", read)
     sink = Sink()
@@ -202,7 +202,7 @@ async def test_pending_suite_waits_and_cancelled_conclusion_is_preserved(monkeyp
     replies = [pending, cancelled]
 
     async def read(*_args):
-        return replies.pop(0)
+        return replies.pop(0), None
 
     monkeypatch.setattr(poller, "gated_read", read)
     sink = Sink()
@@ -227,11 +227,12 @@ async def test_gated_read_uses_and_saves_existing_repo_budget(monkeypatch):
     monkeypatch.setattr(poller, "_repo_state", lambda _repo: state)
     monkeypatch.setattr(poller, "_save_state", lambda repo, value: saved.append((repo, value.copy())))
     monkeypatch.setattr(poller.feed, "gh_get", lambda *a, **kw: calls.append(kw) or response())
-    assert (await poller.gated_read(lambda *_a: None, "o/r", "path")).status == 200
+    result, reason = await poller.gated_read(lambda *_a: None, "o/r", "path")
+    assert result.status == 200 and reason is None
     assert calls == [{"low_priority": True}]
     assert len(saved[0][1]["reads"]) == 1
     state["reads"] *= poller.MAX_HOURLY_READS
-    assert await poller.gated_read(lambda *_a: None, "o/r", "path") is None
+    assert await poller.gated_read(lambda *_a: None, "o/r", "path") == (None, "budget_exhausted")
     assert len(calls) == 1 and len(saved) == 2
     assert status == {"state": "starting", "reason": None, "counted_reads": 0, "degraded": None}
 
@@ -242,7 +243,7 @@ async def test_zero_run_suite_does_not_block(monkeypatch):
     reply.body["check_suites"].append({"id": 2, "status": "queued", "latest_check_runs_count": 0})
 
     async def read(*_args):
-        return reply
+        return reply, None
 
     monkeypatch.setattr(poller, "gated_read", read)
     sink = Sink()

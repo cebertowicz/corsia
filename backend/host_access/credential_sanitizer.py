@@ -41,12 +41,12 @@ _COOKIE_ASSIGNMENT_RE = re.compile(
 )
 _AUTH_SCHEME_RE = re.compile(
     r"(?P<prefix>\b(?:(?:proxy-)?authorization|auth)\s*[:=]\s*"
-    r"(?:bearer|basic)\s+)"
+    r"(?:bearer|basic|token)\s+)"
     r"(?P<value>(?!\[REDACTED\])[^\s\"'`,;}\]]+)",
     re.IGNORECASE,
 )
 _AUTH_SPACE_SCHEME_RE = re.compile(
-    r"(?P<prefix>\bauthorization\s+(?:bearer|basic)\s+)"
+    r"(?P<prefix>\bauthorization\s+(?:bearer|basic|token)\s+)"
     r"(?P<value>(?!\[REDACTED\])[^\s\"'`,;}\]]+)",
     re.IGNORECASE,
 )
@@ -62,7 +62,7 @@ _OAUTH_TOKEN_RE = re.compile(
     re.IGNORECASE,
 )
 _AUTH_VALUE_RE = re.compile(
-    r"(?P<scheme>bearer|basic)\s+(?P<value>.+)",
+    r"(?P<scheme>bearer|basic|token)\s+(?P<value>.+)",
     re.IGNORECASE,
 )
 _COOKIE_HEADER_RE = re.compile(
@@ -178,7 +178,7 @@ def _redact_token_prefix(_match: re.Match[str]) -> str:
 
 
 _TOKEN_PREFIX_RE = re.compile(
-    r"\b(?:sk-(?:ant-)?|ghp_|gho_|github_pat_|glpat-|xox[abpr]-|AIza|ya29\.|dop_v1_)"
+    r"\b(?:sk-(?:ant-)?|gh[pousr]_|github_pat_|glpat-|xox[abpr]-|AIza|ya29\.|dop_v1_)"
     r"[A-Za-z0-9_-]{16,}|\b(?:AKIA|ASIA)[0-9A-Z]{12,}\b"
 )
 

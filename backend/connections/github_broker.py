@@ -12,47 +12,39 @@ import logging
 import os
 import re
 import subprocess
-from typing import Any, Callable
+from typing import Callable
 
+from connections.github_agent_home import TOKEN_NAMES
 from connections.github_read_request import GithubReadRefused, parse_gh_args
+from host_access.credential_sanitizer import REDACTION_MARKER, sanitize_credential_data, sanitize_credential_text
 
-__all__ = ["GithubReadBroker", "GithubReadRefused", "default_broker", "scrub"]
+__all__ = ["GithubReadBroker", "GithubReadRefused", "default_broker"]
 log = logging.getLogger(__name__)
 GH_HOST = "github.com"
-_REDACTED = "[redacted]"
-_TOKEN_ENV = ("GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN")
-_TOKEN_SHAPES = re.compile(
-    r"gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}"
-    r"|(?i:authorization:[ \t]*(?:(?:bearer|token|basic)[ \t]+)?)[^\s\"']+"
-)
 _BLANK_LINE = re.compile(r"\r?\n\r?\n")
 
 
-def scrub(text: str) -> str:
-    """Remove environment secrets, token shapes and authorization values."""
-    for name in _TOKEN_ENV:
+def _scrub(text: str) -> str:
+    """Remove live environment credentials and recognized credential shapes."""
+    for name in TOKEN_NAMES:
         secret = os.environ.get(name, "")
         if len(secret) >= 8:
-            text = text.replace(secret, _REDACTED)
-    return _TOKEN_SHAPES.sub(_REDACTED, text)
-
-
-def _redact_leaves(value: Any) -> Any:
-    if isinstance(value, str):
-        return scrub(value)
-    if isinstance(value, list):
-        return [_redact_leaves(item) for item in value]
-    if isinstance(value, dict):
-        return {scrub(key): _redact_leaves(item) for key, item in value.items()}
-    return value
+            text = text.replace(secret, REDACTION_MARKER)
+    return sanitize_credential_text(text)
 
 
 def _scrub_body(body: str) -> str:
-    """Scrub decoded JSON strings so serialized escapes remain intact."""
+    """Sanitize decoded JSON values while retaining valid serialized escapes."""
     try:
-        return json.dumps(_redact_leaves(json.loads(body)), ensure_ascii=False)
+        for name in TOKEN_NAMES:
+            secret = os.environ.get(name, "")
+            if len(secret) >= 8:
+                for ascii_only in (True, False):
+                    body = body.replace(json.dumps(secret, ensure_ascii=ascii_only)[1:-1], REDACTION_MARKER)
+        value = json.loads(body, object_pairs_hook=lambda pairs: {_scrub(k): v for k, v in pairs})
+        return json.dumps(sanitize_credential_data(value), ensure_ascii=False)
     except ValueError:
-        return scrub(body)
+        return _scrub(body)
 
 
 def _scrub_output(argv: list[str], stdout: str) -> str:
@@ -60,9 +52,9 @@ def _scrub_output(argv: list[str], stdout: str) -> str:
         return _scrub_body(stdout)
     boundary = _BLANK_LINE.search(stdout)
     if boundary is None:
-        return scrub(stdout)
+        return _scrub(stdout)
     body = stdout[boundary.end():]
-    return scrub(stdout[:boundary.end()]) + (_scrub_body(body) if body.strip() else body)
+    return _scrub(stdout[:boundary.end()]) + (_scrub_body(body) if body.strip() else body)
 
 
 def _run_gh(args: list[str], *, timeout: float) -> subprocess.CompletedProcess:
@@ -84,17 +76,17 @@ class GithubReadBroker:
         try:
             argv = self._vet(list(args), input_text)
         except GithubReadRefused as exc:
-            log.warning("github-broker: refused (%s) %s", exc.reason, scrub(exc.detail)[:120])
-            raise GithubReadRefused(exc.reason, scrub(exc.detail)[:120]) from None
+            log.warning("github-broker: refused (%s) %s", exc.reason, _scrub(exc.detail)[:120])
+            raise GithubReadRefused(exc.reason, _scrub(exc.detail)[:120]) from None
         try:
             result = self._inner(argv, timeout=timeout)
         except subprocess.TimeoutExpired as exc:
-            raise subprocess.TimeoutExpired([scrub(part) for part in argv], exc.timeout) from None
+            raise subprocess.TimeoutExpired([_scrub(part) for part in argv], exc.timeout) from None
         except OSError as exc:
-            raise type(exc)(scrub(str(exc))) from None
+            raise type(exc)(_scrub(str(exc))) from None
         return subprocess.CompletedProcess(
-            [scrub(part) for part in argv], result.returncode,
-            _scrub_output(argv, str(result.stdout or "")), scrub(str(result.stderr or "")),
+            [_scrub(part) for part in argv], result.returncode,
+            _scrub_output(argv, str(result.stdout or "")), _scrub(str(result.stderr or "")),
         )
 
     def _vet(self, args: list[str], input_text: str | None) -> list[str]:

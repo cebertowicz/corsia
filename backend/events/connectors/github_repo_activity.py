@@ -297,14 +297,12 @@ async def _pending_heads(runner: feed.GhRunner, repo: str, state: dict[str, Any]
     state["pending"] = sorted(pending)
 
 
-async def gated_read(runner: feed.GhRunner, repo: str, path: str) -> feed.GhResponse | None:
+async def gated_read(runner: feed.GhRunner, repo: str, path: str) -> tuple[feed.GhResponse | None, str | None]:
     """Share the poller's persisted per-repository read budget."""
     async with _lock(repo):
         state = await run_in_db(_repo_state, repo)
         try:
-            response, _reason = await repo_read.get(
-                runner, path, state, _now(), send_etag=False, keep_etag=False, propagate_refusal=True)
-            return response
+            return await repo_read.get(runner, path, state, _now(), send_etag=False, keep_etag=False)
         finally:
             await run_in_db(_save_state, repo, state)
 

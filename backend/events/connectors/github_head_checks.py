@@ -126,10 +126,13 @@ class HeadCheckAggregator:
             for attempt in range(1, MAX_ATTEMPTS + 1):
                 await self.sleep(DEBOUNCE_SECONDS * attempt)
                 try:
-                    response = await poller.gated_read(
+                    response, reason = await poller.gated_read(
                         self.runner, repo, f"repos/{repo}/commits/{head_sha}/check-suites")
                 except Exception:
                     log.warning("github-head-checks: aggregate read failed for %s@%s", *key, exc_info=True)
+                    return
+                if reason == "read_refused":
+                    log.warning("github-head-checks: aggregate read stopped for %s@%s: %s", *key, reason)
                     return
                 if response is not None and response.status == 200:
                     break
