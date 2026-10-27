@@ -39,10 +39,11 @@ async def apply_create(request: Request) -> dict | Response:
         return JSONResponse(status_code=422, content={"detail": str(error)})
     except Exception:
         # No user field is in this message; the traceback names only the failing step.
-        logger.exception("First-account creation failed")
+        ref = new_error_reference()
+        logger.exception("First-account creation failed reference=%s", ref)
         return JSONResponse(
             status_code=500,
-            content={"code": "setup_failed", "detail": "Your account was not created. Try again."},
+            content={"code": "setup_failed", "detail": "Your account was not created. Try again.", "ref": ref},
         )
     token, expires_at = await run_in_db(accounts.issue_token, user_id, kind="session", label="browser")
     user = await run_in_db(accounts.get_user, user_id)
