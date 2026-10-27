@@ -57,8 +57,8 @@ def _delete_one_thread_rows(
     """Delete one already-quiesced thread and its thread-scoped state.
 
     Delete removes at least what purge removes: the checkpoint narrative, the
-    entry index derived from it, and the continuity store, through the same
-    helpers retention uses (#2291).
+    entry index derived from it, the continuity store, and the chat-comment
+    answer index and read stamps, through the same helpers retention uses (#2291).
     """
     from infra.chat_comment_answers import delete_thread_chat_comment_answers
     from infra.checkpoint_entry_index import delete_thread_checkpoints

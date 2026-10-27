@@ -35,11 +35,12 @@ def has_comment_cid(metadata: str | None, cid: str) -> bool:
         return False
 
 
-def place_answers(db: sqlite3.Connection, message_id: str, thread_id: str, role: str, content: str) -> None:
+def place_answers(
+    db: sqlite3.Connection, message_id: str, thread_id: str, role: str, content: str, seq: int, created_at: str,
+) -> None:
     """Index known comments in the same transaction as the assistant message."""
     if role != "assistant" or "[c" not in content:
         return
-    assistant = db.execute("SELECT seq, created_at FROM messages WHERE id=?", (message_id,)).fetchone()
     for cid in parse_answers(content, message_id):
         parsed = parse_cid(cid)
         if parsed is None:
@@ -48,12 +49,12 @@ def place_answers(db: sqlite3.Connection, message_id: str, thread_id: str, role:
             "SELECT id, metadata, seq FROM messages WHERE thread_id=? AND input_order=? AND role='user'",
             (thread_id, parsed[0]),
         ).fetchone()
-        if row is None or row[2] is None or assistant[0] is None or row[2] >= assistant[0]:
+        if row is None or row[2] is None or row[2] >= seq:
             continue
         if has_comment_cid(row[1], cid):
             db.execute(
                 "INSERT OR IGNORE INTO chat_comment_answers VALUES (?,?,?,?,?)",
-                (thread_id, row[0], cid, message_id, assistant[1]),
+                (thread_id, row[0], cid, message_id, created_at),
             )
 
 
