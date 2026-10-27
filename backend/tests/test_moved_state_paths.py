@@ -111,6 +111,7 @@ def test_moved_codex_projection_recovers_without_a_new_login(isolated_db, roots,
     with pytest.raises(AccountAdmissionError, match="codex_auth_source_missing"):
         projection_gate(receipt, db=db)
     heal_moved_state_paths(legacy_root=legacy, state_root=current)
+    assert readiness_reason(get_account("x2", db=db), model="codex/test") is None
     if unexpected_link:
         (new_runtime / "auth.json").unlink()
         (new_runtime / "auth.json").symlink_to(new_source / "unexpected.json")

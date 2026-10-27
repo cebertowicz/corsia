@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import copy
 import json
+from pathlib import Path
 
 from connections.account_home import missing_home_reason
 from connections.account_receipts import ReceiptFence, receipt_is_current
@@ -98,6 +99,12 @@ def mark_discovery(account_id: str, *, receipt: ReceiptFence, status: str,
     return True
 
 
+def projection_failure_moved(account: dict, failure: dict) -> bool:
+    """Whether the failure names an earlier account source home."""
+    source_home, failed_source = account.get('source_home'), failure.get('source')
+    return bool(source_home and failed_source and failed_source != str(Path(source_home).absolute() / 'auth.json'))
+
+
 def readiness_reason(account: dict, *, model: str | None = None) -> str | None:
     """One evaluator for claim, catalog and batched advisory readers.
 
@@ -127,7 +134,8 @@ def readiness_reason(account: dict, *, model: str | None = None) -> str | None:
         return 'account_model_not_discovered'
     projection = record['auth_projection']
     failed = projection['failed']
-    if isinstance(failed, dict) and (failed.get('account_revision'), failed.get('login_seq')) == (
+    if isinstance(failed, dict) and not projection_failure_moved(account, failed) and (
+            failed.get('account_revision'), failed.get('login_seq')) == (
             receipt.account_revision, receipt.login_seq):
         return failed['cause']
     if any(item.get('phase') == 'pending' for item in projection['stale']):
