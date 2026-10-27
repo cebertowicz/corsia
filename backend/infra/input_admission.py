@@ -337,15 +337,12 @@ def _refuse_unready_person_send(db, model: str, thread_id: str, role: str, metad
         target = resolve_thread_target(model, thread_id=thread_id, db=db)
     except (ModelUnavailableError, ValueError):
         return
-    from infra.send_target import LOCAL_LOAD_REFUSALS, _admitted_target, classify_target_admission
+    from infra.send_target import LOCAL_LOAD_REFUSALS
 
     readiness = local_model_load.readiness(target, db=db)
-    if readiness is None:
-        return
-    target = _admitted_target(target, db=db, readiness=readiness)
-    if classify_target_admission(target) == "fail" and target.availability_reason in LOCAL_LOAD_REFUSALS:
+    if readiness is not None and readiness.state in LOCAL_LOAD_REFUSALS:
         raise SendRejected(409, "The selected local model cannot load now.", metadata={
-            "cause": target.availability_reason, "other_loaded": readiness.other_loaded,
+            "cause": readiness.state, "other_loaded": readiness.other_loaded,
         })
 
 

@@ -133,7 +133,8 @@ async def test_cloud_off_thread_resolves_to_an_unavailable_target_admission_hold
 
     assert (target.available, target.availability_reason) == (False, "project_cloud_off")
     assert send_target.classify_target_admission(target) == "wait"
-    assert send_target.model_admission(model, db=world, thread_id="actor") == "wait"
+    assert all(send_target.model_admission(model, db=world, thread_id="actor", person_send=person) == "wait"
+               for person in (True, False))
 
 
 @pytest.mark.asyncio

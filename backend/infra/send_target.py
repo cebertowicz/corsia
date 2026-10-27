@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 from typing import Literal
 
@@ -87,7 +88,7 @@ async def resolve_target(model: str, *, thread_id: str | None = None) -> Executi
 
 def _resolve_target_in_scope(model: str, *, thread_id: str | None) -> ExecutionTarget:
     """Resolve one target, marked unavailable when its thread's policy forbids the model."""
-    return _admitted_target(model_resolution.resolve_thread_target(model, thread_id=thread_id))
+    return _ready_target(model_resolution.resolve_thread_target(model, thread_id=thread_id))
 
 
 async def scope_supplied_target(target: ExecutionTarget, *, thread_id: str) -> ExecutionTarget:
@@ -97,7 +98,7 @@ async def scope_supplied_target(target: ExecutionTarget, *, thread_id: str) -> E
     def _scope() -> ExecutionTarget:
         db = get_db()
         try:
-            return _admitted_target(model_resolution.scope_to_thread(target, thread_id=thread_id, db=db), db=db)
+            return _ready_target(model_resolution.scope_to_thread(target, thread_id=thread_id, db=db), db=db)
         finally:
             db.close()
 
@@ -146,36 +147,28 @@ def _ready_target(target: ExecutionTarget, *, db=None) -> ExecutionTarget:
     ))
 
 
-def _admitted_target(target: ExecutionTarget, *, db=None, readiness=None, person_send: bool = True) -> ExecutionTarget:
-    """A person's send may run on a local model that fits now (the turn loads it); other work waits for it loaded.
+def person_send_target(target: ExecutionTarget, *, db=None) -> ExecutionTarget:
+    """Widen ``_ready_target``'s verdict for a person's send: a local model that fits now runs (the turn loads it).
 
-    Readiness ``None`` (not a local oMLX model, or one this thread can't use) keeps ``_ready_target``'s verdict.
-    Other work re-admitting a target a person's send refused waits on it like any not-loaded model.
+    Every resolver returns the loaded-only verdict; only this seam, for a batch a person wrote, widens it.
+    Readiness ``None`` (not a local oMLX model, or one this thread can't use) keeps the verdict.
     """
     from llm import local_model_load
     from infra.database import get_db
 
-    if not person_send and target.availability_reason in LOCAL_LOAD_REFUSALS:
-        return replace(target, availability_reason=(
-            "model_unavailable" if target.availability_reason == "unreachable" else "model_not_loaded"
-        ))
+    if target.available or omlx_seat_and_model(target) is None:
+        return target
     connection = db if db is not None else get_db()
     try:
-        scoped = _ready_target(target, db=connection)
-        if not person_send or scoped.available:
-            return scoped
-        readiness = readiness or local_model_load.readiness(target, db=connection)
+        readiness = local_model_load.readiness(target, db=connection)
     finally:
         if db is None:
             connection.close()
     if readiness is None:
-        return scoped
-    state = readiness.state
-    if state in ("loaded", "fits_now"):
         return target
-    if not target.available and state != "unreachable":
-        return target
-    return replace(target, available=False, availability_reason=state)
+    if readiness.state in ("loaded", "fits_now"):
+        return replace(target, available=True, availability_reason=None)
+    return replace(target, availability_reason=readiness.state)
 
 
 TargetAdmission = Literal["run", "wait", "fail"]
@@ -195,7 +188,7 @@ def classify_target_admission(target: ExecutionTarget) -> TargetAdmission:
     return "wait"
 
 
-def model_admission(model: str, *, db=None, thread_id: str | None = None, person_send: bool = True) -> TargetAdmission:
+def model_admission(model: str, *, person_send: bool, db=None, thread_id: str | None = None) -> TargetAdmission:
     """Classify the current catalog target from a claim transaction.
 
     Permanent resolution errors release an existing hold for the normal driver
@@ -204,10 +197,8 @@ def model_admission(model: str, *, db=None, thread_id: str | None = None, person
     policy keeps its hold exactly as it created it.
     """
     try:
-        return classify_target_admission(
-            _admitted_target(model_resolution.resolve_thread_target(model, thread_id=thread_id, db=db),
-                             db=db, person_send=person_send),
-        )
+        target = _ready_target(model_resolution.resolve_thread_target(model, thread_id=thread_id, db=db), db=db)
+        return classify_target_admission(person_send_target(target, db=db) if person_send else target)
     except (ModelUnavailableError, ValueError):
         return "fail"
 
@@ -226,10 +217,9 @@ def lifted_hold_ids(rows, model: str, *, db, thread_id: str | None = None) -> fr
     from connections.account_holds import ACCOUNT_HOLD_REASONS
 
     from core.message_history import is_human_input
-    from infra.thread_inputs import _claimed_item
 
-    person_send = any(is_human_input(item.role, item.metadata) for item in
-                      (_claimed_item(row, {}) for row in rows if str(row['id']) in held))
+    person_send = any(is_human_input(str(row['role']), json.loads(row['metadata'] or '{}'))
+                      for row in rows if str(row['id']) in held)
     # Idle callers have already admitted the current durable account choice.
     account_held = frozenset(str(row['id']) for row in rows
                             if row['write_outcome'] == 'proved_no_write'

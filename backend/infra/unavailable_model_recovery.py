@@ -124,12 +124,12 @@ async def hold_unless_runnable(
     admission asks.
     """
     from core.message_history import is_human_input
-    from infra.send_target import _admitted_target, omlx_seat_and_model
+    from infra.send_target import omlx_seat_and_model, person_send_target
 
     # Only a local model's admission depends on who wrote the batch: a person's send may load it.
-    if omlx_seat_and_model(target) is not None and not any(
+    if not target.available and omlx_seat_and_model(target) is not None and any(
             is_human_input(item.role, item.metadata) for item in batch.items):
-        target = await run_in_db(lambda: _admitted_target(target, person_send=False))
+        target = await run_in_db(person_send_target, target)
     admission = classify_target_admission(target)
     if admission == "run":
         return target
