@@ -6,6 +6,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+from core.context_projection import tool_projection
 from host_access.credential_sanitizer import CredentialSafeText, sanitize_credential_text
 from host_access.source_redaction import sanitize_source
 from infra.constants import READ_FILE_OUTPUT_CHAR_CAP
@@ -128,8 +129,13 @@ class ReadFileTool(Tool):
                 size_mb = size / (1024 * 1024)
                 return _ReadOutcome(f"Error: File too large ({size_mb:.0f}MB). Max readable size is {self._MAX_READ_BYTES // (1024*1024)}MB. Use offset/limit for partial reads, or a different tool.")
             data = handle.read()
+        return self._render_bytes(data, file_path.suffix, offset, limit)
+
+    def _render_bytes(
+        self, data: bytes, suffix: str, offset: int | None, limit: int | None,
+    ) -> _ReadOutcome:
         content = data.decode("utf-8")
-        source_safe = sanitize_source(content, file_path.suffix)
+        source_safe = sanitize_source(content, suffix)
         text, whole = self._render_lines(
             source_safe if source_safe is not None else content, offset, limit,
         )
@@ -192,6 +198,15 @@ class ReadFileTool(Tool):
                 thread_id=kwargs.get("_thread_id"),
                 project_id=kwargs.get("_thread_project_id"),
             )
+            projection = await tool_projection(kwargs.get("_thread_id"), self._workspace)
+            if projection is not None and projection.covers(authorized.resolved):
+                # A C1 eval thread reads its target at the tested revision.
+                if projection.data is None:
+                    raise FileNotFoundError(path)
+                outcome = self._render_bytes(
+                    projection.data, authorized.resolved.suffix, offset, limit,
+                )
+                return outcome.text
             outcome = await asyncio.to_thread(
                 self._read_authorized_file,
                 authorized.resolved,

@@ -297,8 +297,12 @@ def save_guidance(
         from core.carry_in_facts import record_committed_save
         from infra.carry_in_drain import request_drain
 
-        record_committed_save(workspace, list(writes), result.sha)
-        request_drain(workspace)
+        try:
+            record_committed_save(workspace, list(writes), result.sha)
+            request_drain(workspace)
+        except Exception as exc:  # the commit landed; a recorder fault must not unsay it
+            logger.opt(exception=True).warning("carry-in save not recorded for {}", result.sha)
+            warnings.append(f"Warning: saved, but its skill re-test was not queued ({type(exc).__name__}).")
     if any(warnings):
         result = SaveResult(
             result.outcome, result.reason, result.sha,

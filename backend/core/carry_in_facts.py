@@ -35,7 +35,7 @@ TERMINAL_EVENTS = (RESULT, RETIRED, COVERAGE)
 RETIRE_REASONS = (
     "lesson_unreadable", "lesson_retired", "version_changed", "case_changed",
     "target_moved", "owner_missing", "manifest_mismatch", "not_mechanically_executable",
-    "target_unavailable",
+    "target_unavailable", "not_offered",
 )
 #: Why a claimed case ended without enough completed samples: the eval route's own
 #: failure kinds (``eval.endpoint.EVAL_FAILURES``), a restart, lost capacity, or
@@ -61,6 +61,14 @@ class CarryInFact:
     lesson_path: str
     target_path: str
     target_commit: str
+    #: The first target commit this lesson was checked against; its parent is the
+    #: pre-lesson baseline every later commit keeps. Empty: ``target_commit``.
+    baseline_from: str = ""
+
+    @property
+    def baseline_commit(self) -> str:
+        """The commit whose first parent holds the pre-lesson target."""
+        return self.baseline_from or self.target_commit
 
     @property
     def identity(self) -> str:
@@ -83,6 +91,7 @@ class CarryInFact:
             "behavioral_sha256": self.behavioral_sha256, "case_sha256": self.case_sha256,
             "owner_thread_id": self.owner_thread_id, "lesson_path": self.lesson_path,
             "target_path": self.target_path, "target_commit": self.target_commit,
+            "baseline_from": self.baseline_commit,
         }
 
     @classmethod
@@ -91,7 +100,7 @@ class CarryInFact:
             fact = cls(**{key: str(attrs[key]) for key in (
                 "lesson_id", "behavioral_sha256", "case_sha256", "owner_thread_id",
                 "lesson_path", "target_path", "target_commit",
-            )})
+            )}, baseline_from=str(attrs.get("baseline_from") or ""))
         except (KeyError, TypeError):
             return None
         return fact if fact.identity == attrs.get("identity") else None
@@ -142,6 +151,43 @@ def committed_bytes(workspace: Path, commit: str, rel: str) -> bytes | None:
 
     oid = history_git(workspace, "rev-parse", "--verify", "-q", f"{commit}:{rel}", ok=(0, 1))
     return history_git(workspace, "cat-file", "blob", oid.decode().strip()) if oid.strip() else None
+
+
+#: A sample's side: ``b`` tests the pre-lesson baseline, ``c`` the saved candidate.
+SIDES = ("b", "c")
+
+
+def side_bytes(workspace: Path, fact: CarryInFact, side: str) -> bytes | None:
+    """The target exactly as one side tests it; None when that revision has no such file.
+
+    The baseline is the parent of the first commit this lesson was checked
+    against, so a later edit is still measured against the pre-lesson file.
+    A Git fault raises ``GitFault``.
+    """
+    if side == "c":
+        return committed_bytes(workspace, fact.target_commit, fact.target_path)
+    if side != "b":
+        raise ValueError(f"unknown carry-in side {side!r}")
+    parent = commit_parent(workspace, fact.baseline_commit)
+    return committed_bytes(workspace, parent, fact.target_path) if parent else None
+
+
+def claimed_fact(db: sqlite3.Connection, identity: str) -> CarryInFact:
+    """The claimed, unsettled fact behind one eval thread; raises ``LookupError`` otherwise."""
+    row = db.execute(
+        "SELECT attributes FROM outcome_events WHERE dedupe_key=?",
+        (f"lesson.carry_in:{identity}:pending",),
+    ).fetchone()
+    fact = CarryInFact.from_attributes(json.loads(row[0])) if row else None
+    if fact is None or fact.identity != identity:
+        raise LookupError("no pending carry-in case has this identity")
+    keys = (fact.dedupe_key("claimed"), fact.dedupe_key("terminal"))
+    found = {r[0] for r in db.execute(
+        "SELECT dedupe_key FROM outcome_events WHERE dedupe_key IN (?,?)", keys,
+    ).fetchall()}
+    if keys[0] not in found or keys[1] in found:
+        raise LookupError("the carry-in case is not claimed and unsettled")
+    return fact
 
 
 def case_sha256(case: dict[str, Any]) -> str:
@@ -234,7 +280,47 @@ def eligible_case(db: sqlite3.Connection, workspace: Path, fact: CarryInFact) ->
         return "case_changed"
     if rel != fact.target_path:
         return "target_moved"
+    from core.lesson_index import trial_refusal
+
+    # Only a trial the skills index would offer can reach a sample's context.
+    if trial_refusal(trial.lesson, trial.behavioral_sha256, db=db) is not None:
+        return "not_offered"
     return EligibleCase(case=case, actions=case.get("actions"))
+
+
+def _scope_roots(db: sqlite3.Connection, workspace: Path) -> list[Path]:
+    """The workspace root and every project root, as the loader resolves them.
+
+    Thread trays live only at ``<scope root>/.threads/<id>``; a repository
+    checked out under a project carries its own ``.threads`` that CORSIA never
+    loads, so the search never recurses below a scope root.
+    """
+    from core.workspace_layout import resolve_project_root, resolve_workspace_root
+
+    roots = [resolve_workspace_root(workspace)]
+    for (project_id,) in db.execute("SELECT id FROM projects ORDER BY id").fetchall():
+        try:
+            root = resolve_project_root(workspace, str(project_id), db=db)
+        except (OSError, RuntimeError, ValueError):
+            continue
+        if root is not None:
+            roots.append(root.resolve(strict=False))
+    return list(dict.fromkeys(roots))
+
+
+def _baseline_from(db: sqlite3.Connection, lesson_id: str, target_path: str) -> str | None:
+    """The first target commit this lesson was checked against, if any."""
+    row = db.execute(
+        """SELECT COALESCE(json_extract(attributes, '$.baseline_from'),
+                           json_extract(attributes, '$.target_commit'))
+           FROM outcome_events
+           WHERE event_name=? AND retracted_at IS NULL
+             AND json_extract(attributes, '$.lesson_id')=?
+             AND json_extract(attributes, '$.target_path')=?
+           ORDER BY ts, observed_ts, id LIMIT 1""",
+        (PENDING, lesson_id, target_path),
+    ).fetchone()
+    return str(row[0]) if row and row[0] else None
 
 
 def committed_cases(db: sqlite3.Connection, workspace: Path, saved: SavedCommit) -> list[CarryInFact]:
@@ -242,20 +328,26 @@ def committed_cases(db: sqlite3.Connection, workspace: Path, saved: SavedCommit)
 
     This is deliberately the one parser path: ``_lesson_case`` uses
     ``lesson_files.read_trial``. Bad lesson files and unresolvable targets are
-    non-matches, never a failure of this saved work item.
+    non-matches, never a failure of this saved work item. A lesson already
+    checked against this target keeps its first commit's pre-lesson baseline.
     """
+    root = workspace.resolve()
     facts = []
-    for path in workspace.glob(".threads/*/skills/*/SKILL.md"):
-        lesson_path = path.relative_to(workspace).as_posix()
-        found = _lesson_case(db, workspace, lesson_path)
-        if isinstance(found, str) or found[1] != saved.target_path:
-            continue
-        trial, rel, case = found
-        facts.append(CarryInFact(
-            lesson_id=trial.lesson.id, behavioral_sha256=trial.behavioral_sha256,
-            case_sha256=case_sha256(case), owner_thread_id=trial.lesson.owner,
-            lesson_path=lesson_path, target_path=rel, target_commit=saved.commit,
-        ))
+    for scope_root in _scope_roots(db, workspace):
+        if not scope_root.is_relative_to(root):
+            continue  # case targets and lesson paths are workspace-relative
+        for path in sorted(scope_root.glob(".threads/*/skills/*/SKILL.md")):
+            lesson_path = path.relative_to(root).as_posix()
+            found = _lesson_case(db, workspace, lesson_path)
+            if isinstance(found, str) or found[1] != saved.target_path:
+                continue
+            trial, rel, case = found
+            facts.append(CarryInFact(
+                lesson_id=trial.lesson.id, behavioral_sha256=trial.behavioral_sha256,
+                case_sha256=case_sha256(case), owner_thread_id=trial.lesson.owner,
+                lesson_path=lesson_path, target_path=rel, target_commit=saved.commit,
+                baseline_from=_baseline_from(db, trial.lesson.id, rel) or saved.commit,
+            ))
     return facts
 
 

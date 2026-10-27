@@ -9,6 +9,7 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
+from core.context_projection import tool_projection
 from infra.constants import GREP_OUTPUT_CHAR_CAP
 from tools.base import Tool
 from tools.filesystem_effects import bound_path_kind, open_bound_text, walk_bound_files
@@ -191,6 +192,21 @@ class GrepTool(Tool):
             except PermissionError as exc:
                 return f"Error: {exc}"
 
+        try:
+            projection = await tool_projection(current_thread_id, self._workspace)
+        except RuntimeError as exc:
+            return f"Error: {exc}"
+        if projection is not None and projection.within(search_dir):
+            # A C1 eval thread searches its target at the tested revision; the
+            # Python walk is the one search path that can substitute its bytes.
+            if search_dir == projection.path and projection.data is None:
+                return f"Error: Path not found: {path or str(self._workspace)}"
+            return await asyncio.to_thread(
+                self._search_python, pattern, search_dir, glob, output_mode,
+                case_insensitive, context, max_results, current_thread_id,
+                all_threads, projection,
+            )
+
         if not search_dir.exists():
             return f"Error: Path not found: {path or str(self._workspace)}"
 
@@ -351,22 +367,43 @@ class GrepTool(Tool):
         max_results: int,
         current_thread_id: str | None,
         all_threads: bool,
+        projection=None,
     ) -> str:
-        """Fallback: pure Python regex search (slower, no .gitignore respect)."""
+        """Fallback: pure Python regex search (slower, no .gitignore respect).
+
+        With a ``projection`` (``core.context_projection``), its target is
+        searched at the projected bytes, or not at all when absent there.
+        """
         flags = re.IGNORECASE if case_insensitive else 0
         try:
             regex = re.compile(pattern, flags)
         except re.error as e:
             return f"Error: Invalid regex pattern: {e}"
 
-        files = list(
-            self._iter_python_files(
+        files = [
+            (fpath, resolved) for fpath, resolved in self._iter_python_files(
                 search_dir,
                 glob_filter,
                 current_thread_id,
                 all_threads,
             )
-        )
+            if projection is None or not projection.covers(resolved)
+        ]
+        if projection is not None and projection.data is not None:
+            # Present at the tested revision even if absent (or filtered) live.
+            target = projection.path
+            if target == search_dir or glob_filter is None or target.match(glob_filter):
+                files.append((target, target))
+
+        def read(resolved_path: Path) -> str | None:
+            if projection is not None and projection.covers(resolved_path):
+                return projection.data.decode("utf-8")
+            try:
+                if resolved_path.stat().st_size > _MAX_SEARCH_FILE_BYTES:
+                    return None
+                return resolved_path.read_text(encoding="utf-8", errors="ignore")
+            except (PermissionError, OSError):
+                return None
 
         results: list[GrepLine] = []
         safe: list[str | None] = []
@@ -377,11 +414,8 @@ class GrepTool(Tool):
             if len(results) >= max_results:
                 break
 
-            try:
-                if resolved_path.stat().st_size > _MAX_SEARCH_FILE_BYTES:
-                    continue
-                content = resolved_path.read_text(encoding="utf-8", errors="ignore")
-            except (PermissionError, OSError):
+            content = read(resolved_path)
+            if content is None:
                 continue
 
             lines = content.split("\n")
@@ -407,16 +441,13 @@ class GrepTool(Tool):
                 return f"No matches for pattern '{pattern}'"
             counts = {}
             for fpath, resolved_path in sorted(files):
-                try:
-                    if resolved_path.stat().st_size > _MAX_SEARCH_FILE_BYTES:
-                        continue
-                    content = resolved_path.read_text(encoding="utf-8", errors="ignore")
-                    c = len(regex.findall(content))
-                    if c > 0:
-                        rel = str(fpath.relative_to(search_dir))
-                        counts[rel] = c
-                except (PermissionError, OSError):
+                content = read(resolved_path)
+                if content is None:
                     continue
+                c = len(regex.findall(content))
+                if c > 0:
+                    rel = str(fpath.relative_to(search_dir))
+                    counts[rel] = c
             return "\n".join(
                 f"{f}:{c}" for f, c in sorted(counts.items())[:max_results]
             )
