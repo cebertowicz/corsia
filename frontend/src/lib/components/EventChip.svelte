@@ -59,6 +59,8 @@
 	const retryControl = $derived(wakeRetryControl(msg));
 
 	function label(type: string): string {
+		if (type === 'person_step.done') return 'Done';
+		if (type === 'person_step.wont_do') return 'Won’t do';
 		if (type === 'model.switched') return 'Model';
 		if (type.startsWith('plan.')) return 'Plan';
 		if (type.startsWith('checkpoint.')) return 'Checkpoint';

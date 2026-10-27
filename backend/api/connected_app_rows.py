@@ -3,7 +3,7 @@ from __future__ import annotations
 
 #: The one notice for an app that runs on this computer: shown when it is connected, approved or brought over (B-R22).
 LOCAL_APP_NOTICE = (
-    "It can do anything you can do on this computer, except open CORSIA's own files and saved keys. "
+    "It can do anything you can do on the computer it runs on, except open CORSIA’s own files and saved keys. "
     "Connect only apps you trust."
 )
 _RUNTIME_NOTICE = {

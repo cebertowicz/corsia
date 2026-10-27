@@ -35,8 +35,8 @@ await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
 const browser = await chromium.launch();
 
 const title = 'CORSIA couldn’t switch over';
-const keys = 'These provider keys aren’t stored in CORSIA yet: OPENAI_API_KEY. Add them in CORSIA › Settings › Keys, then choose Try again.';
-const space = 'The backup needs 4.2 GB free and this disk has 1.1 GB. Free up space, then choose Try again.';
+const keys = 'These provider keys aren’t stored in CORSIA yet: OPENAI_API_KEY. Add them in CORSIA › Settings › Keys, then choose Retry.';
+const space = 'The backup needs 4.2 GB free and this disk has 1.1 GB. Free up space, then choose Retry.';
 const untouched = 'Nothing was changed. Your existing CORSIA is still running.';
 const nothingChanged = 'Nothing was changed.';
 const restored = 'Your existing CORSIA is running again, as it was.';
@@ -52,7 +52,7 @@ const wrongFolderLine = 'Your existing CORSIA is running from ~/old/corsia, but 
 const restartingTitle = 'Your existing CORSIA is restarting. This app will continue when it’s back.';
 const quitPendingNote = 'CORSIA will close once your existing CORSIA is running again as before.';
 const failedStart = '`corsia start` exited 1';
-const failedStartLine = 'Your existing CORSIA may not be running. Choose Try again.';
+const failedStartLine = 'Your existing CORSIA may not be running. Choose Retry.';
 
 // A backend refusal comes after the install was proven loaded, so it carries `running`.
 const refused = (message) => ({ message, outcome: 'untouched', recovery: null, advice: true, running: true });
@@ -65,14 +65,14 @@ const ready = { state: 'ready', url: '/index.html#started' };
 // `line` null means the line is hidden; `note` null means the secondary line is hidden; `details`
 // null means Details is hidden.
 const cases = [
-	{ name: '3b-refused-keys', failure: refused(keys), title, line: `${untouched} ${keys}`, note: null, details: null, button: 'Try again' },
-	{ name: '3c-refused-space', failure: refused(space), title, line: `${untouched} ${space}`, note: null, details: null, button: 'Try again' },
+	{ name: '3b-refused-keys', failure: refused(keys), title, line: `${untouched} ${keys}`, note: null, details: null, button: 'Retry' },
+	{ name: '3c-refused-space', failure: refused(space), title, line: `${untouched} ${space}`, note: null, details: null, button: 'Retry' },
 	// Nothing proved the install loaded: the lead claims only that nothing was changed.
-	{ name: 'untouched-technical', failure: settled('source drain API returned HTTP 500', 'untouched'), title, line: nothingChanged, note: null, details: 'source drain API returned HTTP 500', button: 'Try again' },
-	{ name: 'untouched-running-technical', failure: { ...settled('could not write the journal', 'untouched'), running: true }, title, line: untouched, note: null, details: 'could not write the journal', button: 'Try again' },
-	{ name: 'after-stop', failure: settled('the new service did not become ready; the old install was restored', 'restored'), title, line: restored, note: null, details: 'the new service did not become ready; the old install was restored', button: 'Try again' },
+	{ name: 'untouched-technical', failure: settled('source drain API returned HTTP 500', 'untouched'), title, line: nothingChanged, note: null, details: 'source drain API returned HTTP 500', button: 'Retry' },
+	{ name: 'untouched-running-technical', failure: { ...settled('could not write the journal', 'untouched'), running: true }, title, line: untouched, note: null, details: 'could not write the journal', button: 'Retry' },
+	{ name: 'after-stop', failure: settled('the new service did not become ready; the old install was restored', 'restored'), title, line: restored, note: null, details: 'the new service did not become ready; the old install was restored', button: 'Retry' },
 	// The same reason text with each outcome: only the outcome decides the line.
-	{ name: 'same-text-restored', failure: settled(space, 'restored'), title, line: restored, note: null, details: space, button: 'Try again' },
+	{ name: 'same-text-restored', failure: settled(space, 'restored'), title, line: restored, note: null, details: space, button: 'Retry' },
 	{ name: '3d-start-again', failure: unconfirmed(holdText, 'start_again'), title, line: startAgainLine, note: reboot, details: holdText, button: 'Start it again' },
 	{ name: '3e-reopen', failure: unconfirmed(stalledText, 'reopen'), title, line: reopenLine, note: null, details: stalledText, button: 'Reopen CORSIA' },
 	// A plain error claims nothing about the existing install, so it offers the relaunch that is always safe.
@@ -81,8 +81,8 @@ const cases = [
 	// Whole-line refusals: no lead about the existing install, no Details, one action or none.
 	{ name: '4a-not-running', failure: standalone(notRunningLine, 'start_it'), title, line: notRunningLine, note: null, details: null, button: 'Start it' },
 	{ name: '4b-stuck-restarting', failure: standalone(stuckLine, 'restart_it'), title, line: stuckLine, note: null, details: null, button: 'Restart it' },
-	{ name: '4c-wrong-folder', failure: standalone(wrongFolderLine, null), title, line: wrongFolderLine, note: null, details: null, button: 'Try again' },
-	{ name: '4d-failed-start', failure: unconfirmed(failedStart, 'try_again'), title, line: failedStartLine, note: null, details: failedStart, button: 'Try again' },
+	{ name: '4c-wrong-folder', failure: standalone(wrongFolderLine, null), title, line: wrongFolderLine, note: null, details: null, button: 'Retry' },
+	{ name: '4d-failed-start', failure: unconfirmed(failedStart, 'try_again'), title, line: failedStartLine, note: null, details: failedStart, button: 'Retry' },
 ];
 
 // Each recovery button runs its own command; a script says what each command does.
@@ -92,7 +92,7 @@ const actions = [
 		failure: unconfirmed(holdText, 'start_again'),
 		script: { start_existing_again: 'ok' },
 		calls: ['adopt_existing_install', 'start_existing_again'],
-		after: { title, line: restored, note: null, details: holdText, button: 'Try again' },
+		after: { title, line: restored, note: null, details: holdText, button: 'Retry' },
 	},
 	{
 		name: 'start-again-fails',
@@ -128,7 +128,7 @@ const actions = [
 		failure: standalone(notRunningLine, 'start_it'),
 		script: { start_source_install: unconfirmed(failedStart, 'try_again') },
 		calls: ['adopt_existing_install', 'start_source_install'],
-		after: { title, line: failedStartLine, note: null, details: failedStart, button: 'Try again' },
+		after: { title, line: failedStartLine, note: null, details: failedStart, button: 'Retry' },
 	},
 	{
 		name: 'try-again-after-a-failed-start-asks-to-take-it-over-again',
@@ -149,7 +149,7 @@ const actions = [
 		failure: standalone(stuckLine, 'restart_it'),
 		script: { restart_source_install: unconfirmed('`corsia restart` exited 1', 'try_again') },
 		calls: ['adopt_existing_install', 'restart_source_install'],
-		after: { title, line: failedStartLine, note: null, details: '`corsia restart` exited 1', button: 'Try again' },
+		after: { title, line: failedStartLine, note: null, details: '`corsia restart` exited 1', button: 'Retry' },
 	},
 	{
 		name: 'check-again-succeeds',
@@ -251,7 +251,7 @@ for (const theme of ['light', 'dark']) {
 		await page.close();
 	}
 	// A failed undo found at launch is shown the same way, from the cause the backend chose, and
-	// Try again after a settled one asks the service to start and can find it again.
+	// Retry after a settled one asks the service to start and can find it again.
 	for (const { name, failure, expected } of [
 		{ name: 'launch-undo-start-again', failure: unconfirmed(holdText, 'start_again'), expected: { title, line: startAgainLine, note: reboot, details: holdText, button: 'Start it again' } },
 		{ name: 'launch-undo-reopen', failure: unconfirmed(stalledText, 'reopen'), expected: { title, line: reopenLine, note: null, details: stalledText, button: 'Reopen CORSIA' } },
@@ -271,11 +271,11 @@ for (const theme of ['light', 'dark']) {
 		await page.evaluate((shown) => window.__corsiaShowStartup({ state: 'adoption_failed', failure: shown }), failure);
 		compare(`${theme} ${name} at launch`, await read(page), expected);
 		if (name === 'launch-undo-reopen') {
-			// Try again after a settled failure starts the service, which finds the failed undo again.
+			// Retry after a settled failure starts the service, which finds the failed undo again.
 			await page.evaluate((shown) => window.__corsiaShowStartup({ state: 'adoption_failed', failure: { ...shown, outcome: 'restored', recovery: null } }), failure);
 			await page.click('#retry');
 			await page.waitForFunction((text) => document.getElementById('retry').textContent === text, 'Reopen CORSIA');
-			compare(`${theme} ${name} after Try again`, await read(page), expected);
+			compare(`${theme} ${name} after Retry`, await read(page), expected);
 		}
 		if (failed === before) console.log(`ok   ${theme} ${name}`);
 		await page.close();

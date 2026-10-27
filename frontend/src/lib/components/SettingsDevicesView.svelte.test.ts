@@ -57,19 +57,19 @@ describe('SettingsDevicesView', () => {
 		expect(toggle()?.getAttribute('aria-pressed')).toBe('true');
 		expect(text).not.toContain('New code');
 	});
-	it('every port taken: off with the restart line and Try again', () => {
+	it('every port taken: off with the restart line and Retry', () => {
 		const onRetry = vi.fn();
 		const text = show({ enabled: false, listener: 'all-ports-taken' }, { onRetry });
 		expect(text).toContain('Couldn’t turn this on. Other apps are using the connections CORSIA needs. Restart this computer, then try again.');
-		Array.from(host.querySelectorAll('button')).find((b) => flat(b.textContent) === 'Try again')?.click();
+		Array.from(host.querySelectorAll('button')).find((b) => flat(b.textContent) === 'Retry')?.click();
 		expect(onRetry).toHaveBeenCalledOnce();
 	});
-	it('a listening failure that is not taken ports: off with a line a restart of the computer would not be, and Try again', () => {
+	it('a listening failure that is not taken ports: off with a line a restart of the computer would not be, and Retry', () => {
 		const onRetry = vi.fn();
 		const text = show({ enabled: false, listener: 'unavailable' }, { onRetry });
 		expect(text).toContain('Couldn’t turn this on. CORSIA couldn’t start listening on this computer.');
 		expect(text).not.toContain('Restart this computer');
-		Array.from(host.querySelectorAll('button')).find((b) => flat(b.textContent) === 'Try again')?.click();
+		Array.from(host.querySelectorAll('button')).find((b) => flat(b.textContent) === 'Retry')?.click();
 		expect(onRetry).toHaveBeenCalledOnce();
 	});
 	it('failed read: Couldn’t load and no switch', () => {

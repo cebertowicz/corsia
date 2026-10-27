@@ -10,6 +10,7 @@
 	import { isPaneDrawer, paneOpen } from '$lib/stores/paneOpen';
 	import { submittedAnswers } from '$lib/stores/cardAnswers';
 	import ArtifactGlyph from './ArtifactGlyph.svelte';
+	import NeedsYouTile from './NeedsYouTile.svelte';
 	import OutcomeTime from './OutcomeTime.svelte';
 	import NewMarker from './comments/NewMarker.svelte';
 
@@ -84,7 +85,7 @@
 	}
 </script>
 
-{#snippet face()}
+{#snippet glyph()}
 	{#if thumbSrc}
 		<img
 			class="thumb"
@@ -97,67 +98,83 @@
 	{:else}
 		<ArtifactGlyph icon={card.icon} tile={variant === 'row' ? TILE.row : 0} />
 	{/if}
-	<span class="text">
-		<span class="head">
-			<span class="title">{card.title}</span>
-			{#if variant === 'chip' && newMarker}<NewMarker />{/if}
-			{#if variant === 'row' && time}<span class="when"><OutcomeTime value={time} compact /></span>{/if}
-		</span>
-		{#if variant === 'row' && (stateLabel || detail)}
-			<span class="ctx" class:counted={Boolean(counts)}>
-				{#if stateLabel}
-					{#key cardState}
-						<span class="state {tone}">
-							{#if tone === 'ask'}
-								<span class="dot" aria-hidden="true"></span>
-							{:else if cardState === 'changes_requested'}
-								<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 14 4 9l5-5" /><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11" /></svg>
-							{:else if tone === 'verdict'}
-								<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5" /></svg>
-							{/if}{stateLabel}
-						</span>
-					{/key}
-				{/if}
-				{#if detail}<span class="rest">{#if stateLabel}<span class="sep" aria-hidden="true">·</span>{/if}<span class="name">{detail}</span></span>{/if}
+{/snippet}
+{#snippet clock()}<OutcomeTime value={time ?? ''} compact />{/snippet}
+{#snippet stateLine()}
+	{#if stateLabel}
+		{#key cardState}
+			<span class="state {tone}">
+				{#if tone === 'ask'}
+					<span class="dot" aria-hidden="true"></span>
+				{:else if cardState === 'changes_requested'}
+					<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 14 4 9l5-5" /><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11" /></svg>
+				{:else if tone === 'verdict'}
+					<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5" /></svg>
+				{/if}{stateLabel}
 			</span>
-		{/if}
-	</span>
-	{#if variant === 'row' && interactive}
+		{/key}
+	{/if}
+	{#if detail}<span class="rest">{#if stateLabel}<span class="sep" aria-hidden="true">·</span>{/if}<span class="name">{detail}</span></span>{/if}
+{/snippet}
+{#snippet chevronMark()}
+	{#if interactive}
 		<svg class="chevron" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 5 7 7-7 7" /></svg>
-	{:else if variant === 'row'}
+	{:else}
 		<!-- No chevron, so keep its width: the time stays in the same column on every row. -->
 		<span class="chevron" aria-hidden="true"></span>
 	{/if}
 {/snippet}
+{#snippet chipFace()}
+	{@render glyph()}
+	<span class="text"><span class="head"><span class="title">{card.title}</span>{#if newMarker}<NewMarker />{/if}</span></span>
+{/snippet}
 
-{#if interactive}
+{#if variant === 'row'}
+	<NeedsYouTile
+		as={interactive ? 'button' : 'div'}
+		needsYou={interactive && tone === 'ask'}
+		tone={interactive ? null : !card.available ? 'gone' : tone === 'muted' ? 'muted' : null}
+		counted={Boolean(counts)}
+		title={card.title}
+		lead={glyph}
+		aside={time ? clock : undefined}
+		ctx={stateLabel || detail ? stateLine : undefined}
+		trailing={chevronMark}
+		data-artifact-id={card.artifact_id}
+		data-card-kind={card.kind}
+		data-card-state={cardState ?? ''}
+		aria-label={accessibleName}
+		role={interactive ? undefined : 'group'}
+		onclick={interactive ? open : undefined}
+	/>
+{:else if interactive}
 	<button
 		type="button"
-		class="tile {variant} press-tint"
+		class="tile chip press-tint"
 		class:thumbed={Boolean(thumbSrc)}
 		class:needs-you={tone === 'ask'}
-		class:chip-content-width={variant === 'chip' && chipWidth === 'content'}
+		class:chip-content-width={chipWidth === 'content'}
 		data-artifact-id={card.artifact_id}
 		data-card-kind={card.kind}
 		data-card-state={cardState ?? ''}
 		title={card.title}
 		aria-label={accessibleName}
 		onclick={open}
-	>{@render face()}</button>
+	>{@render chipFace()}</button>
 {:else}
 	<div
-		class="tile {variant} static"
+		class="tile chip static"
 		class:thumbed={Boolean(thumbSrc)}
 		class:gone={!card.available}
 		class:muted={tone === 'muted'}
-		class:chip-content-width={variant === 'chip' && chipWidth === 'content'}
+		class:chip-content-width={chipWidth === 'content'}
 		data-artifact-id={card.artifact_id}
 		data-card-kind={card.kind}
 		data-card-state={cardState ?? ''}
 		title={card.title}
 		role="group"
 		aria-label={accessibleName}
-	>{@render face()}</div>
+	>{@render chipFace()}</div>
 {/if}
 
 <style>
@@ -173,11 +190,6 @@
 		text-align: left;
 		transition: background var(--dur-tight) var(--ease-snap);
 	}
-	/* The tile is flush with the prose; the tint stays inside the row's edge and never bleeds outward. */
-	.tile.row { width: 100%; padding: var(--space-2) var(--space-2) var(--space-2) 2px; border-radius: var(--radius-sm); }
-	/* An open ask is the same frosted card as the pinned question and the composer. It is a
-	   needs-you object, not a worked artifact chip or a canvas review control. */
-	.tile.row.needs-you { border: 1px solid var(--border); border-radius: var(--radius-xl); background: var(--glass-thin); box-shadow: var(--glass-rim), var(--shadow-chip); }
 	/* A chip is the row condensed, in the token chip's geometry without its remove mark: a pill holding the bare coloured
 	   glyph and the title, filled so it reads as a thing and not as prose. 32 px tall; on touch 36 px (DS D31), the
 	   whole chip being the hit area. A thumbnail keeps its own small image as the leading mark. */
@@ -191,18 +203,15 @@
 		background: var(--bg-tertiary);
 	}
 	.tile.chip.thumbed { padding-left: var(--space-1); }
-	/* Reply notices opt in because their document title is the location cue; constrain to the chat stack, not a global pixel cap. */
+	/* Reply notices use the available chat width for the document title. */
 	.tile.chip.chip-content-width { max-width: 100%; }
 	button.tile { cursor: pointer; }
 	@media (hover: hover) {
-		button.tile.row:hover { background: var(--bg-secondary); }
 		button.tile.chip:hover { background: var(--bg-hover); }
 	}
-	/* Inset: the message clips at the prose edge and the phone's chip strip scrolls, so an outward ring would be cut off.
-	   The row's 2 px left padding (always there, so focus moves nothing) is the room the ring takes beside the tile. */
+	/* Inset: the message clips at the prose edge and the phone's chip strip scrolls, so an outward ring would be cut off. */
 	button.tile:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 	@media (pointer: coarse) {
-		.tile.row { min-height: 44px; }
 		.tile.chip { min-height: 36px; }
 	}
 	.thumb {
@@ -230,38 +239,19 @@
 	/* The title and the time share one line, the time on the title's baseline; only the title gives way. */
 	.head { display: flex; align-items: baseline; gap: var(--space-2); min-width: 0; }
 	.head .title { flex: 1 1 auto; min-width: 0; }
-	.ctx {
-		display: flex;
-		align-items: center;
-		gap: var(--space-1);
-		min-width: 0;
-		font-size: var(--text-footnote);
-		line-height: var(--lh-tight);
-		color: var(--text-secondary);
-		white-space: nowrap;
-	}
 	/* The state never truncates; the task (or the feedback counts) gives way first. */
-	.state, .sep { flex: 0 0 auto; }
+	.sep { flex: 0 0 auto; }
 	.rest { display: flex; align-items: center; gap: var(--space-1); flex: 0 1 auto; min-width: 0; }
 	.name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-	/* Feedback counts never truncate mid-list: if the whole list does not fit, the segment wraps out of the one
-	   visible line and is dropped, separator and all. The full counts stay in the accessible name. */
-	.ctx.counted { flex-wrap: wrap; max-height: calc(var(--text-footnote) * var(--lh-tight)); overflow: hidden; }
-	.ctx.counted .rest { flex: 0 0 auto; }
-	.ctx.counted .name { overflow: visible; }
-	.when { flex: 0 0 auto; font-size: var(--text-footnote); line-height: var(--lh-tight); color: var(--text-secondary); font-variant-numeric: tabular-nums; }
-	.state { display: inline-flex; align-items: center; gap: var(--space-1); animation: state-in var(--dur-tight) var(--ease-snap); }
-	/* An open ask is "needs you": amber, as in the sidebar, the plan and the attention dock. */
-	.state.ask { color: var(--amber-text); }
+	/* The rest of the counted-row behaviour (the wrapping, one-line cap) is in NeedsYouTile.svelte. */
+	:global(.ctx.counted) .rest { flex: 0 0 auto; }
+	:global(.ctx.counted) .name { overflow: visible; }
+	.state { animation: state-in var(--dur-tight) var(--ease-snap); }
 	.state.muted { color: var(--text-tertiary); }
-	.dot { flex: 0 0 auto; width: 8px; height: 8px; border-radius: var(--radius-circle); background: var(--amber); }
 	.sep { color: var(--text-tertiary); }
 	.chevron { flex: 0 0 auto; width: 16px; color: var(--text-tertiary); }
-	/* A retired artifact keeps its name but is visibly out of reach: muted glyph, a dashed tile edge in the
-	   stronger border colour so it holds in dark mode too, no chevron. */
-	.tile.gone :global(.ic.filled) { background: transparent; outline: 1px dashed var(--text-tertiary); outline-offset: -1px; }
 	.tile.gone .title, .tile.muted .title { color: var(--text-secondary); }
-	.tile.gone .title, .tile.gone .ctx { color: var(--text-tertiary); }
+	.tile.gone .title { color: var(--text-tertiary); }
 	@keyframes state-in { from { opacity: 0; } to { opacity: 1; } }
 	@media (prefers-reduced-motion: reduce) {
 		.state { animation: none; }

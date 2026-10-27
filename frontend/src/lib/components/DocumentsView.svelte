@@ -264,7 +264,7 @@
 			<button class="chip" class:on={lens === c.id} onclick={() => docLens.set(c.id)}>
 				{c.label}
 				{#if c.id === 'skills'}<span class="chip-n">{$skillDocs.length}</span>{/if}
-				{#if c.id === 'all' && $pendingCount}<span class="chip-dot" title="{$pendingCount} descriptions pending"></span>{/if}
+				{#if c.id === 'all' && $pendingCount}<span class="chip-dot" title="{$pendingCount.toLocaleString()} file{$pendingCount > 1 ? 's' : ''} without a description"></span>{/if}
 			</button>
 		{/each}
 	</div>
@@ -283,7 +283,7 @@
 			{#if searched.length === 0}<p class="empty">No docs match “{search}”.</p>{/if}
 
 		{:else if lens === 'activity'}
-			<p class="lens-note">What the registry knows — housekeeping trail entries arrive with the hygiene job.</p>
+			<p class="lens-note">Recent file activity.</p>
 			<div class="feed">
 				{#each $docActivity as a (a.id)}
 					<div class="act-row">

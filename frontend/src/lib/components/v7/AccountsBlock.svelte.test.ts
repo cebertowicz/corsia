@@ -309,9 +309,9 @@ describe('rendering and actions', () => {
 			vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response({ accounts: [{ ...defaultAccount, allow_overage: true }] })));
 			const single = mount(AccountsBlock, { target: document.body, props: { provider } });
 			await settle();
-			const only = [...document.querySelectorAll('button[aria-label^="Spend past plan limit"]')];
+			const only = [...document.querySelectorAll('button[aria-label^="Spend past usage limit"]')];
 			expect(only.map((element) => [element.getAttribute('aria-label'), element.getAttribute('aria-pressed')]))
-				.toEqual([['Spend past plan limit for Plus account 1', 'true']]);
+				.toEqual([['Spend past usage limit for Plus account 1', 'true']]);
 			unmount(single);
 
 			vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response({ accounts: [
@@ -319,9 +319,9 @@ describe('rendering and actions', () => {
 			] })));
 			const listed = mount(AccountsBlock, { target: document.body, props: { provider } });
 			await settle();
-			const switches = [...document.querySelectorAll('button[aria-label^="Spend past plan limit"]')];
+			const switches = [...document.querySelectorAll('button[aria-label^="Spend past usage limit"]')];
 			expect(switches.map((element) => [element.getAttribute('aria-label'), element.getAttribute('aria-pressed')]))
-				.toEqual([['Spend past plan limit for Plus account 1', 'false'], ['Spend past plan limit for Work · work@example.test', 'true']]);
+				.toEqual([['Spend past usage limit for Plus account 1', 'false'], ['Spend past usage limit for Work · work@example.test', 'true']]);
 			unmount(listed);
 		});
 

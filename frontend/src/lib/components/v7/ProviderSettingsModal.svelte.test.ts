@@ -123,4 +123,20 @@ describe('ProviderSettingsModal remove', () => {
 		flushSync();
 		expect(document.body.textContent).not.toContain('Remove provider…');
 	});
+
+	it('shows the reference beside a failed model list refresh', async () => {
+		vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({
+			ok: false, message: 'Couldn’t refresh the model list. Try again.', ref: 'local-ab12',
+		})));
+		const local = { ...server, id: 'ns-local', provider: 'omlx', kind: 'network' as const, endpoints: [{ host: '127.0.0.1' }] };
+		component = mount(ProviderSettingsModal, {
+			target: document.body,
+			props: { provider: { ...provider, name: 'omlx', type: 'local', server: local } as never, onClose: vi.fn() },
+		});
+		flushSync();
+		button('Reload models').click();
+		await vi.waitFor(() => expect(document.body.textContent).toContain(
+			'Couldn’t refresh the model list. Try again. Reference: local-ab12',
+		));
+	});
 });

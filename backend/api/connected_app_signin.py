@@ -13,7 +13,7 @@ from infra.local_connection import is_direct_loopback
 signin_router = APIRouter()
 _LOOPBACK_NAMES = {"localhost", "127.0.0.1", "[::1]", "::1"}
 _NOT_PERSON = "Only the signed-in person can sign in to an app or sign out of it; open Connected apps."
-_NOT_HERE = "You can only sign in on the computer CORSIA runs on. Open CORSIA there and press Sign in."
+_NOT_HERE = "You can only sign in on your main computer. Open CORSIA there and press Sign in."
 
 
 def _db():

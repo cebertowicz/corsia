@@ -72,6 +72,12 @@ def test_open_makes_one_system_user_step_and_the_selected_task_waits_on_it(db):
     assert (node["assignee"], node["title"], node["description"]) == ("user", TITLE, DESCRIPTION)
     assert node["intent_node_id"] == mine.id
     assert node["intent"] is None
+    from infra.thread_updates import read_newest_cards
+
+    cards, _ = read_newest_cards(db, "owner", min_seq=0)
+    assert [(card["kind"], card["node_id"]) for card in cards if card["kind"] == "person_step"] == [
+        ("person_step", step),
+    ]
     created = db.execute(
         "SELECT actor_id, provenance FROM plan_node_events WHERE node_id=? AND event='node_created'",
         (step,),
@@ -80,6 +86,21 @@ def test_open_makes_one_system_user_step_and_the_selected_task_waits_on_it(db):
     assert _prerequisites(db, mine.id) == [step]
     assert open_attempt(db, mine.id) is None
     assert open_attempt(db, step) is None
+
+
+def test_system_step_card_becomes_done_after_system_settlement(db):
+    from infra.thread_updates import read_newest_cards
+
+    owner_plan(db)
+    step = _open(db)
+    assert _open(db) == step
+    cards, _ = read_newest_cards(db, "owner", min_seq=0)
+    steps = [card for card in cards if card["kind"] == "person_step" and card["node_id"] == step]
+    assert len(steps) == 1 and steps[0]["step_state"] == "open"
+    assert _settle(db, step) is True
+    cards, _ = read_newest_cards(db, "owner", min_seq=0)
+    steps = [card for card in cards if card["kind"] == "person_step" and card["node_id"] == step]
+    assert len(steps) == 1 and steps[0]["step_state"] == "done"
 
 
 def test_the_same_key_returns_the_same_step_and_a_new_key_a_new_one(db):

@@ -171,7 +171,7 @@ describe('ArtifactPane — capability-driven actions', () => {
 
 		expect(host.querySelector('button.row.openable')).toBeNull();
 		expect(host.querySelector('.row.disabled')).toBeTruthy();
-		expect(host.textContent).toContain('Could not determine the linked destination.');
+		expect(host.textContent).toContain('This link has no address to open.');
 	});
 
 	function uploadNode() {
@@ -310,12 +310,12 @@ describe('ArtifactPane — needs_attention cluster', () => {
 describe('ArtifactPane — empty state', () => {
 	it('shows the empty message when nodes and needs_attention are empty', () => {
 		mountPane({ nodes: [], needs_attention: [] });
-		expect(host.textContent).toContain('Files you create, upload, or open in this thread show up here.');
+		expect(host.textContent).toContain('Files you create, upload, or open in this chat show up here.');
 	});
 });
 
 describe('ArtifactPane — fetch failure is not "no artifacts"', () => {
-	const EMPTY_COPY = 'Files you create, upload, or open in this thread show up here.';
+	const EMPTY_COPY = 'Files you create, upload, or open in this chat show up here.';
 
 	function mountLive() {
 		component = mount(ArtifactPane, { target: host, props: { threadId: 'sess-1' } });
@@ -330,7 +330,8 @@ describe('ArtifactPane — fetch failure is not "no artifacts"', () => {
 		await vi.waitFor(() => {
 			expect(host.querySelector('.pane-error')).toBeTruthy();
 		});
-		expect(host.textContent).toContain("Couldn't load this thread's files.");
+		expect(host.textContent).toContain("Couldn’t load this chat’s files.");
+		expect(host.textContent).not.toContain('Try again');
 		expect(host.textContent).not.toContain(EMPTY_COPY);
 		expect([...host.querySelectorAll('button')].some((b) => b.textContent?.trim() === 'Retry')).toBe(true);
 	});

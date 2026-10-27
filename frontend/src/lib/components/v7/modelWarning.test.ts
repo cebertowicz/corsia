@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Model } from '$lib/stores/models';
 import { withAccountTurn } from '$lib/stores/modelFixtures';
-import { chatPickerWarning } from './modelWarning';
+import { canEditCheckpointWindow, chatPickerWarning } from './modelWarning';
 
 function row(id: string, status: Model['status'], status_reason?: string): Model {
 	return { id, name: id, size: '', backend: 'network', speed: '', status, status_reason };
@@ -37,7 +37,7 @@ describe('chatPickerWarning', () => {
 	});
 
 	it('points External rows at the checkpoint window setting', () => {
-		expect(chatPickerWarning(catalog, 'ext-nowin', true)).toContain('checkpoint context window');
+		expect(chatPickerWarning(catalog, 'ext-nowin', true)).toBe('Can’t be used in chats: set its context window in this model’s details.');
 	});
 
 	it('does not point non-External rows at a setting they lack', () => {
@@ -46,13 +46,21 @@ describe('chatPickerWarning', () => {
 		expect(text).not.toContain('details');
 	});
 
+	it.each([
+		['oMLX', false, false, 'omlx', 'Can’t be used in chats: set its context window in this model’s details.'],
+		['Claude Code', false, true, 'claude-code', 'Can’t be used in chats: set its context window in this model’s details.'],
+		['cloud', false, false, 'anthropic', 'Can’t be used in chats: its context window is unknown.'],
+	])('matches the details editor for %s', (_label, external, editable, provider, expected) => {
+		expect(chatPickerWarning(catalog, 'ext-nowin', canEditCheckpointWindow(external, editable, provider))).toBe(expected);
+	});
+
 	it('names a disconnected harness', () => {
-		expect(chatPickerWarning(catalog, 'codex/x', false)).toContain('isn’t connected');
+		expect(chatPickerWarning(catalog, 'codex/x', false)).toBe('Can’t be used in chats: its provider isn’t connected.');
 	});
 
 	it('falls back to a plain line for other reasons, never the raw code', () => {
 		const text = chatPickerWarning(catalog, 'cc/y', false);
-		expect(text).toContain('Not in the chat picker');
+		expect(text).toBe('Can’t be used in chats right now.');
 		expect(text).not.toContain('discovered_model_unavailable');
 	});
 });

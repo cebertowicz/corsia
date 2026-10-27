@@ -6,6 +6,7 @@
 	import { emitProductEvent } from '$lib/product_events';
 	import AttachmentRow from './AttachmentRow.svelte';
 	import OutcomeTime from './OutcomeTime.svelte';
+	import PersonStepRow from './PersonStepRow.svelte';
 
 	const OUTCOMES: Record<UpdateCard['kind'], string> = {
 		done: 'Done',
@@ -13,9 +14,10 @@
 		failed: 'Failed',
 		closed: 'Closed',
 		blocked: 'Blocked',
+		person_step: 'Needs you',
 	};
 
-	let { card, earlier = 0 }: { card: UpdateCard; earlier?: number } = $props();
+	let { card, earlier = 0, group = undefined }: { card: UpdateCard; earlier?: number; group?: UpdateCard[] } = $props();
 
 	const title = $derived(card.title || 'Plan item');
 	const outcome = $derived(OUTCOMES[card.kind] ?? card.kind);
@@ -31,7 +33,9 @@
 	}
 </script>
 
-{#if ask}
+{#if card.kind === 'person_step'}
+	<PersonStepRow {card} {group} />
+{:else if ask}
 	<!-- One fact, one row: an ask's blocked update and its artifact are the same hold (C4a), so the row is the artifact. -->
 	<div class="update-card {card.kind} merged" data-update-id={card.id}>
 		<div class="update-ask"><AttachmentRow card={ask} threadId={card.thread_id} task={title} time={card.created_at} /></div>
