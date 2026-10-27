@@ -270,7 +270,7 @@ async def test_a_person_starting_the_server_again_clears_the_bound_and_an_earlie
     life.stopping = True
     proc = sleeper()
     try:
-        life.watch(proc.pid, lambda: None)
+        life.watch(proc.pid, lambda _status: None)
         assert not life.restarts and not life.stopping
     finally:
         life.drop_watch()
@@ -361,6 +361,23 @@ async def test_a_model_that_fails_to_load_shows_on_its_row_and_emits_the_failure
     assert [(a, p["error"]) for _, a, p in log] == [("load.failed", "out of memory")]
 
 
+async def test_a_pinned_model_that_fails_to_reload_shows_the_pinned_retry(monkeypatch):
+    import infra.host_resources as host_resources
+
+    async def load(*_):
+        return {"ok": False, "message": "out of memory"}
+
+    async def pinned_row(_server_id):
+        return [{"id": "broken", "estimated_size": host_resources.GIB, "pinned": True}]
+
+    reload_fakes(monkeypatch, [], sizes={"broken": host_resources.GIB}, load=load)
+    monkeypatch.setattr(local_keep_loaded, "_model_rows", pinned_row)
+    await local_keep_loaded.reload_after_restart(SID, ["broken"])
+    assert local_keep_loaded.failures(SID) == {
+        "broken": "Not loaded: oMLX couldn’t load it. Turn it off and on again to retry.",
+    }
+
+
 async def test_a_reload_that_cannot_read_oMLX_models_never_says_downloaded_but_not_kept(monkeypatch):
     async def unreadable(_server_id):
         return None
@@ -368,7 +385,7 @@ async def test_a_reload_that_cannot_read_oMLX_models_never_says_downloaded_but_n
     reload_fakes(monkeypatch, [], sizes={})
     monkeypatch.setattr(local_keep_loaded, "_model_rows", unreadable)
     await local_keep_loaded.reload_after_restart(SID, ["gone"])
-    assert local_keep_loaded.failures(SID) == {"gone": local_keep_loaded.NOT_LOADED_UNPINNED}
+    assert local_keep_loaded.failures(SID) == {"gone": "Not loaded: oMLX couldn’t load it. Try again."}
 
     from llm.local_model import LocalModel
 
