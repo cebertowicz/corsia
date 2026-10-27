@@ -117,7 +117,7 @@ EXPECTED_FIND_PROJECTS = {
         {"id": "A", "label": "Find my projects",
          "detail": "I'll propose your projects for you to approve."},
         {"id": "B", "label": "I'll describe it",
-         "detail": "Tell me the folder or a sentence about the work."},
+         "detail": "Tell me the folder or describe the work in a sentence."},
     ],
     "other_enabled": True,
 }

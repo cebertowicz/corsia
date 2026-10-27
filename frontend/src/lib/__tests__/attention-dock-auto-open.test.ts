@@ -672,7 +672,7 @@ describe("reading time before a decision opens", () => {
   const ms = (n: number) => Date.parse(at(n));
   const words = (count: number) => Array.from({ length: count }, () => "word").join(" ");
   const say = (n: number, count: number, role = "assistant") => ({
-    thread_id: VIEWED, role, content: words(count), created_at: at(n),
+    thread_id: VIEWED, role, content: words(count), created_at: at(n), metadata: { for_user: role === "assistant" },
   });
 
   it("waits for the text just before it to be read, then opens", () => {
@@ -682,6 +682,26 @@ describe("reading time before a decision opens", () => {
     const held = judgeAutoOpen(items, { ...idle, viewedThreadId: VIEWED, messages, now: ms(10) });
     expect(held).toEqual({ state: "wait", retryInMs: 14_000 });
     expect(judgeAutoOpen(items, { ...idle, viewedThreadId: VIEWED, messages, now: ms(24) }).state).toBe("open");
+  });
+
+  it("counts visible replies, not hidden narration or an agent message as the turn boundary", () => {
+    noteLoad([], VIEWED);
+    const verdict = judgeAutoOpen([from("d1", 10)], {
+      ...idle, viewedThreadId: VIEWED, now: ms(10),
+      messages: [say(0, 100), { ...say(1, 3, "user"), metadata: { sender_kind: "agent" } },
+        { ...say(2, 150), metadata: { for_user: false } }, say(9, 5)],
+    });
+    // The first visible reply is still being read; hidden rows add no time or boundary.
+    expect(verdict).toEqual({ state: "wait", retryInMs: 15_200 });
+  });
+
+  it("a short visible reply after hidden narration holds only for that reply", () => {
+    noteLoad([], VIEWED);
+    const verdict = judgeAutoOpen([from("d1", 10)], {
+      ...idle, viewedThreadId: VIEWED, now: ms(10),
+      messages: [{ ...say(0, 150), metadata: { for_user: false } }, say(9, 5)],
+    });
+    expect(verdict).toEqual({ state: "wait", retryInMs: 200 });
   });
 
   it("is the same on a device whose clock is an hour off the server's", () => {

@@ -73,7 +73,7 @@ FIND_PROJECTS = {
     ),
     "options": (
         ("Find my projects", "I'll propose your projects for you to approve."),
-        ("I'll describe it", "Tell me the folder or a sentence about the work."),
+        ("I'll describe it", "Tell me the folder or describe the work in a sentence."),
     ),
     "rationale": "It starts from the work you already do, and nothing is created until you approve it.",
 }

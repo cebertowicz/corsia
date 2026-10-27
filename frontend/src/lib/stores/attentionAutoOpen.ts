@@ -7,6 +7,7 @@
  * through its single open path, `expand`.
  */
 import type { AttentionQueueItem, DecisionDetail } from "$lib/api/attentionQueue";
+import { isFocusVisible, isHumanMessage } from "$lib/components/transcriptRowKinds";
 
 /** `anchor` is the newest `raised_at` (ms) already accounted for in `threadId`. */
 let view: { threadId: string; anchor: number | null; seen: Map<number, number> } | null = null;
@@ -66,6 +67,7 @@ export interface ReadableMessage {
   role: string;
   content: string;
   created_at: string;
+  metadata?: Record<string, unknown> | null;
 }
 
 /**
@@ -85,9 +87,9 @@ export function readingHoldAfterRaise(
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     const message = messages[i];
     if (message.thread_id !== threadId) continue;
-    if (message.role === "user") break;
+    if (isHumanMessage(message)) break;
     const at = Date.parse(message.created_at);
-    if (message.role !== "assistant" || Number.isNaN(at) || at > raisedAtMs) continue;
+    if (message.role !== "assistant" || !isFocusVisible(message) || Number.isNaN(at) || at > raisedAtMs) continue;
     unread.unshift({ at, words: message.content.split(/\s+/).filter(Boolean).length });
   }
   let done = 0;

@@ -339,10 +339,10 @@ def test_first_run_raises_the_card_first_and_the_reference_carries_appendix_a():
     assert "Read nothing until a yes; on \"not now\"" in connected
     guide = (skill / "references/agent-import.md").read_text(encoding="utf-8")
     for line in (
-        "Kept [N] things about you and how you work.",
+        "Kept [N] details on you and how you work.",
         "Brought over [installed] skills. They’re in Settings › Skills. Tell me if you want any of them removed.",
         "Nothing new to bring over.",
-        "I looked, and they don’t hold much about you, so I kept nothing.",
+        "I looked, and they don’t hold much to bring over, so I kept nothing.",
         "Ask me any time to bring things over from them.",
         "I couldn’t read them this time, so I kept nothing. Ask me any time to try again.",
         # A skill that can't come over is named once with its reason and a way to ask about it.
