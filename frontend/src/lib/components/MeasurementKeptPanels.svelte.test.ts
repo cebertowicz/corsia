@@ -54,6 +54,10 @@ function render(rows: Record<Series, MeasurementRow[]>, period = daysPeriod(day(
 const card = (id: string) => host.querySelector(`#${id}-title`)!.closest('section')!;
 
 describe('kept charts on Days', () => {
+	it('defines the asks chart n per day', () => {
+		render(allDays());
+		expect(card('asks').querySelector('figcaption')?.textContent).toBe('Decisions raised to you and tasks waiting on you, per accepted outcome; lower is better. n is accepted outcomes per day.');
+	});
 	for (const [id, label] of [['outcomes', 'Outcomes'], ['asks', 'Asks'], ['rejections', 'Rejections'], ['tokens', 'Fresh tokens']] as const) {
 		it(`${label} reads BY DAY with a bar per day and the 7-day moving average`, () => {
 			render(allDays());
@@ -263,6 +267,7 @@ describe('kept charts on Weeks', () => {
 		const make = (series: Series) => [...Array.from({ length: 8 }, (_, i) => row(series, wk(i), VALUES[series], 40, false, i >= 3 ? VALUES[series] : null)), row(series, wk(8), 3, 3, true)];
 		render({ outcomes: make('outcomes'), took_recommendation_pct: make('took_recommendation_pct'), asks_per_outcome: make('asks_per_outcome'), rejections_per_outcome: make('rejections_per_outcome'), fresh_tokens_per_outcome: make('fresh_tokens_per_outcome') }, periodsPeriod(wk(7)));
 		const section = card('outcomes');
+		expect(card('asks').querySelector('figcaption')?.textContent).toBe('Decisions raised to you and tasks waiting on you, per accepted outcome; lower is better. n is accepted outcomes per week.');
 		expect(section.querySelector('h4')?.textContent).toMatch(/, by week$/);
 		expect(section.querySelectorAll('.dsk svg rect.bar')).toHaveLength(8);
 		expect(section.querySelector('.dsk svg polyline.ma')?.getAttribute('points')?.split(' ')).toHaveLength(5);
