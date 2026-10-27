@@ -314,6 +314,7 @@ class ToolRegistry:
             set_attrs(_tool_span, {"tool.error": safe_error[:200]})
             return f"Error executing {name}: {safe_error}" + _HINT
 
+
     @staticmethod
     async def _load_thread_context() -> tuple[dict[str, Any] | None, str | None]:
         """Resolve exact task-local execution identity from the threads table."""

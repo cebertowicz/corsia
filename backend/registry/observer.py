@@ -192,7 +192,7 @@ def _already_registered(db, thread_id, rule, artifact, label, told) -> None:
             "it was already registered to you" if owns else "you already follow it", told)
 
 
-def _extract_observation(rule, args, content, app, upstream, db, thread_id, told):
+def _extract_observation(rule, args, content, app, db, thread_id, told):
     if app is not None:
         if not connectors.app_matches(app, rule.connector):
             return False, None
@@ -239,7 +239,7 @@ def observe_command_result(
     seen: set[tuple[str, str, str]] = set()
     for rule in covering:
         matched, artifact = _extract_observation(
-            rule, args, content, app if connected else None, upstream, db, thread_id, told)
+            rule, args, content, app if connected else None, db, thread_id, told)
         if not matched:
             continue
         item_name = rule.item_type.replace("-", " ")

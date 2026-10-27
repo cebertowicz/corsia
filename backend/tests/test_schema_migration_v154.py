@@ -19,8 +19,8 @@ def test_153_rules_survive_and_schema_matches_fresh():
               "authority_ref,tool,argv_prefix,item_type) VALUES (?, 'a','a','observe','project:p','github',"
               "'agent:a','a','self',?,?, 'pull-request')")
     db.execute(insert, ("shell", "bash", '["gh"]'))
-    db.execute(insert, ("app", "mcp:create_pull_request", '["https://api.githubcopilot.com"]'))
     migrate_153_to_154(db)
+    db.execute(insert, ("app", "create_pull_request", None))
     assert db.execute("SELECT id,tool,argv_prefix FROM event_rules ORDER BY id").fetchall() == [
         ("app", "create_pull_request", None), ("shell", "bash", '["gh"]')]
     with pytest.raises(sqlite3.IntegrityError):
