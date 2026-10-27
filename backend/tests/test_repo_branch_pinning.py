@@ -810,6 +810,8 @@ async def test_shell_routes_literal_base_pull_to_controlled_fast_forward(
 
     monkeypatch.setattr(shell, "list_registered_repo_policies", lambda: [policy])
     monkeypatch.setattr(shell, "fast_forward_repo_locked", _fast_forward)
+    from tests.shell_platform_helpers import use_mac_shell
+    use_mac_shell(monkeypatch)
     monkeypatch.setattr(shell, "is_safehouse_available", lambda: True)
     monkeypatch.setattr(shell, "safehouse_version_error", lambda: None)
     monkeypatch.setattr(
@@ -1010,6 +1012,8 @@ async def test_shell_fails_closed_when_pinned_repo_cannot_be_sandboxed(
     repo = _git_repo(tmp_path / "repo")
     target = repo / "base.txt"
     target.write_text("base\n", encoding="utf-8")
+    from tests.shell_platform_helpers import use_mac_shell
+    use_mac_shell(monkeypatch)
     monkeypatch.setattr(shell, "is_safehouse_available", lambda: False)
     monkeypatch.setenv("PATH", "/usr/bin:/bin")
     monkeypatch.setattr(
@@ -1056,6 +1060,8 @@ async def test_shell_keeps_reads_available_when_pinned_git_metadata_is_unsupport
         "list_registered_repo_policies",
         lambda: [RepoPolicy("p1", "app", repo.resolve(), "main", True)],
     )
+    from tests.shell_platform_helpers import use_mac_shell
+    use_mac_shell(monkeypatch)
     monkeypatch.setattr(shell, "is_safehouse_available", lambda: True)
     monkeypatch.setattr(shell, "safehouse_version_error", lambda: None)
     _stub_shell_process(monkeypatch, shell, stdout="read-ok")
@@ -1281,6 +1287,8 @@ async def test_pinned_base_sandbox_denial_adds_canonical_worktree_guidance(
         "_list_authoritative_repo_policies",
         lambda: [policy],
     )
+    from tests.shell_platform_helpers import use_mac_shell
+    use_mac_shell(monkeypatch)
     monkeypatch.setattr(shell, "is_safehouse_available", lambda: True)
     monkeypatch.setattr(shell, "safehouse_version_error", lambda: None)
     _stub_shell_process(
@@ -1321,6 +1329,8 @@ async def test_success_with_nonfatal_sandbox_stderr_adds_no_denial_guidance(
         "_list_authoritative_repo_policies",
         lambda: [policy],
     )
+    from tests.shell_platform_helpers import use_mac_shell
+    use_mac_shell(monkeypatch)
     monkeypatch.setattr(shell, "is_safehouse_available", lambda: True)
     monkeypatch.setattr(shell, "safehouse_version_error", lambda: None)
     _stub_shell_process(
@@ -1356,6 +1366,8 @@ async def test_sandbox_denial_explains_withheld_bind_root_only_when_relevant(
     from tools import shell_output
 
     monkeypatch.setattr(shell, "list_registered_repo_policies", lambda: [])
+    from tests.shell_platform_helpers import use_mac_shell
+    use_mac_shell(monkeypatch)
     monkeypatch.setattr(shell, "is_safehouse_available", lambda: True)
     monkeypatch.setattr(shell, "safehouse_version_error", lambda: None)
     monkeypatch.setattr(
@@ -1997,6 +2009,8 @@ async def test_shell_runs_real_worktree_lifecycle_without_switching_base(
     monkeypatch.setattr(
         worktrees, "list_registered_repo_policies", lambda **_kwargs: [policy]
     )
+    from tests.shell_platform_helpers import use_mac_shell
+    use_mac_shell(monkeypatch)
     monkeypatch.setattr(shell, "is_safehouse_available", lambda: True)
     monkeypatch.setattr(shell, "safehouse_version_error", lambda: None)
 
@@ -2097,6 +2111,8 @@ async def test_shell_runs_real_fast_forward_pull_on_pinned_base(
     monkeypatch.setattr(shell_guard, "get_sandbox_add_dirs_rw", lambda _thread_id, policies=None: [tmp_path])
     monkeypatch.setattr(shell_guard, "get_allowed_dirs_ro", lambda policies=None: [])
     monkeypatch.setattr(shell, "list_registered_repo_policies", lambda: [policy])
+    from tests.shell_platform_helpers import use_mac_shell
+    use_mac_shell(monkeypatch)
     monkeypatch.setattr(shell, "is_safehouse_available", lambda: True)
     monkeypatch.setattr(shell, "safehouse_version_error", lambda: None)
 

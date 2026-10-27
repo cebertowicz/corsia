@@ -11,6 +11,7 @@ from __future__ import annotations
 import sqlite3
 import subprocess
 from pathlib import Path
+from tests.shell_platform_helpers import use_mac_shell
 
 from tests.project_ref_helpers import project_ref, select_workspace
 
@@ -147,6 +148,8 @@ async def test_shell_prepares_its_envelope_off_the_loop(isolated_db, tmp_path, m
     from host_access import processes
     from tools import shell
 
+    # This case asserts the Safehouse envelope; select it even on Linux hosts.
+    use_mac_shell(monkeypatch)
     repo = _pinned_repository(tmp_path, monkeypatch, isolated_db)
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -162,6 +165,9 @@ async def test_shell_prepares_its_envelope_off_the_loop(isolated_db, tmp_path, m
 
     monkeypatch.setattr(shell.asyncio, "create_subprocess_exec", spawn)
     monkeypatch.setattr(processes, "_process_creation_fingerprint", lambda _pid: "fingerprint")
+    # The stub process has no real group or descendants to inspect on the host.
+    monkeypatch.setattr(processes.ProcessOwner, "_owned_group_exists", lambda _self, _record: False)
+    monkeypatch.setattr(processes.ProcessOwner, "_runtime_marker_processes", lambda _self, _runtime: ())
     monkeypatch.setattr(processes.PROCESS_OWNER, "process_dir", tmp_path / "processes")
 
     with blocking_work_on_event_loop(monkeypatch) as blocking:
