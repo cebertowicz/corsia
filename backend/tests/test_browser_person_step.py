@@ -10,7 +10,7 @@ import asyncio
 import pytest
 import pytest_asyncio
 
-from host_access import browser_control, browser_steps
+from host_access import browser_control, browser_steps, browser_step_lifecycle as lifecycle
 from host_access.browser_cdp import PasswordProbe
 from host_access.browser_session_state import BrowserSessionError
 from infra import state
@@ -64,18 +64,19 @@ async def plan(isolated_db, monkeypatch):
     mine = task(db, owner.id, "Read the page")
     select(db, owner.id, mine.id)
     recorded = {"db": db, "plan": owner, "task": mine, "events": [], "notices": []}
-    monkeypatch.setattr(browser_control, "emit_product_event",
+    monkeypatch.setattr(lifecycle, "emit_product_event",
                         lambda _surface, action, **_kwargs: recorded["events"].append(action))
     monkeypatch.setattr(state, "broadcast_to_thread",
                         lambda _thread, message: recorded["notices"].append(message["visible"]))
-    monkeypatch.setattr(browser_control, "REPROBE_EVERY", 0.01)
+    monkeypatch.setattr(lifecycle, "REPROBE_EVERY", 0.01)
     yield recorded
-    step = browser_control._steps.get(THREAD)
+    step = lifecycle._steps.get(THREAD)
     reprobe = step.reprobe if step is not None else None
     browser_control.pane_disconnected(THREAD, "pane")
     if reprobe is not None:
         await asyncio.gather(reprobe, return_exceptions=True)
-    for registry in (browser_control._steps, browser_control._guarded_visits, browser_control._probe_locks):
+    for registry in (lifecycle._steps, lifecycle._answers, lifecycle._sessions,
+                     browser_control._guarded_visits, lifecycle._probe_locks):
         registry.clear()
 
 
@@ -109,7 +110,7 @@ async def test_a_person_step_stays_open_on_its_visit_settles_on_a_new_one_and_wa
     assert row(db, step["id"])["state"] == "pending"
 
     # Wait for the whole re-probe, including the event and in-memory cleanup after the plan write.
-    reprobe = browser_control._steps[THREAD].reprobe
+    reprobe = lifecycle._steps[THREAD].reprobe
     page.show("visit-two")
     await asyncio.wait_for(reprobe, 1)
     assert row(db, step["id"])["state"] == "accepted"
@@ -143,7 +144,7 @@ async def test_a_reprobe_on_another_target_settles_neither_kind(plan, kind):
 
     # The person finishes in the popup and the step's own tab navigates.
     # Wait for the whole re-probe, including the event and in-memory cleanup after the plan write.
-    reprobe = browser_control._steps[THREAD].reprobe
+    reprobe = lifecycle._steps[THREAD].reprobe
     page.show("visit-two")
     await asyncio.wait_for(reprobe, 1)
     assert row(db, step["id"])["state"] == "accepted"
@@ -219,10 +220,10 @@ async def test_a_second_declare_on_the_same_visit_keeps_the_one_open_step(plan):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("ending", ["accepted", "declined"])
-async def test_a_password_field_shown_again_on_the_same_visit_opens_a_live_step(plan, monkeypatch, ending):
+async def test_a_password_field_shown_again_honors_the_visits_answer(plan, monkeypatch, ending):
     """A wrong password on a single-page app re-shows the field: the agent must not wait on an ended row."""
     page, db = Page(), plan["db"]
-    monkeypatch.setattr(browser_control, "REPROBE_EVERY", 60)
+    monkeypatch.setattr(lifecycle, "REPROBE_EVERY", 60)
     browser_control.pane_connected(THREAD, "pane", None, page.pane_probe)
     page.show("visit-one", frozenset({42}))
     with pytest.raises(BrowserSessionError, match="asks for a password"):
@@ -233,14 +234,20 @@ async def test_a_password_field_shown_again_on_the_same_visit_opens_a_live_step(
                     {**close_params(db, "close_node", first["id"]), "reason": "Not now"}, actor=HUMAN)
     page.show("visit-one")
     await browser_control.require_page_access(THREAD, page.agent_probe, ("snapshot",))
-    assert THREAD not in browser_control._steps
+    assert THREAD not in lifecycle._steps
     assert row(db, first["id"])["state"] == ("accepted" if ending == "accepted" else "closed")
 
     page.show("visit-one", frozenset({42}))
+    if ending == "declined":
+        with pytest.raises(BrowserSessionError, match="The person declined to enter a password"):
+            await browser_control.require_page_access(THREAD, page.agent_probe, ("snapshot",))
+        assert len(_steps(db)) == 1 and THREAD not in lifecycle._steps
+        assert plan["events"].count("password_step_declined") == 1
+        return
     with pytest.raises(BrowserSessionError, match="asks for a password"):
         await browser_control.require_page_access(THREAD, page.agent_probe, ("snapshot",))
     first, second = _steps(db)
-    live = browser_control._steps[THREAD]
+    live = lifecycle._steps[THREAD]
     assert second["id"] != first["id"] and second["state"] == "pending"
     assert live.node_id == second["id"] and live.reprobe is not None and not live.reprobe.done()
     assert browser_control.password_page(THREAD)
@@ -266,10 +273,10 @@ async def test_a_password_field_seen_during_a_person_step_keeps_the_visit_read_g
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("operation", ["close_node", "mark_done"], ids=["declined", "marked-done"])
+@pytest.mark.parametrize("operation", ["close_node"], ids=["declined"])
 @pytest.mark.parametrize("pane", [True, False], ids=["pane", "no-pane"])
 @pytest.mark.parametrize("observed", [True, False], ids=["already-observed", "not-yet-observed"])
-async def test_redeclaring_an_ended_person_step_refuses_without_reopening_or_counting_it_again(
+async def test_redeclaring_a_declined_person_step_refuses_without_reopening_or_counting_it_again(
     plan, monkeypatch, operation, pane, observed,
 ):
     """A reused ended receipt cannot promise a new handoff or wait for a wake that will never arrive."""
@@ -277,7 +284,7 @@ async def test_redeclaring_an_ended_person_step_refuses_without_reopening_or_cou
     if pane:
         browser_control.pane_connected(THREAD, "pane", None, page.pane_probe)
     await browser_control.declare_person_step(THREAD, page.agent_probe, "Choose your account")
-    original = browser_control._steps[THREAD]
+    original = lifecycle._steps[THREAD]
     loop = original.reprobe
     [step] = _steps(db)
     params = close_params(db, operation, step["id"])
@@ -287,21 +294,21 @@ async def test_redeclaring_an_ended_person_step_refuses_without_reopening_or_cou
         await browser_control.require_page_access(THREAD, page.agent_probe, ("snapshot",))
 
     starts = []
-    start_reprobe = browser_control._start_reprobe
+    start_reprobe = lifecycle._start_reprobe
 
     def record_start(*args):
         starts.append(args)
         start_reprobe(*args)
 
-    monkeypatch.setattr(browser_control, "_start_reprobe", record_start)
+    monkeypatch.setattr(lifecycle, "_start_reprobe", record_start)
     for _ in range(2):
         with pytest.raises(BrowserSessionError) as refused:
             await browser_control.declare_person_step(THREAD, page.agent_probe, "Choose your account")
         assert str(refused.value) == (
-            "The person already ended the step for this page, so it can't be given to them again. "
+            "The person declined this step on this page, so it can't be given to them again. "
             "Tell them in chat what you needed the page for and stop."
         )
-        assert THREAD not in browser_control._steps
+        assert THREAD not in lifecycle._steps
         await browser_control.require_page_access(THREAD, page.agent_probe, ("snapshot",))
     if loop is not None:
         await asyncio.gather(loop, return_exceptions=True)
@@ -326,7 +333,7 @@ async def test_an_ended_person_step_then_a_password_on_the_same_visit_opens_its_
     assert person["id"] != password["id"] and password["state"] == "pending"
     assert db.execute("SELECT 1 FROM plan_node_dependencies WHERE node_id=? AND depends_on_node_id=?",
                       (plan["task"].id, password["id"])).fetchone()
-    assert isinstance(browser_control._steps[THREAD], browser_steps.PasswordStep)
+    assert isinstance(lifecycle._steps[THREAD], browser_steps.PasswordStep)
     assert plan["notices"][-1] is True
     assert plan["events"].count("password_step_opened") == 1
 
@@ -345,7 +352,7 @@ async def test_a_settled_password_then_a_person_step_on_the_same_visit_opens_its
     assert password["id"] != person["id"] and password["state"] == "accepted" and person["state"] == "pending"
     assert db.execute("SELECT 1 FROM plan_node_dependencies WHERE node_id=? AND depends_on_node_id=?",
                       (plan["task"].id, person["id"])).fetchone()
-    assert isinstance(browser_control._steps[THREAD], browser_steps.PersonStep)
+    assert isinstance(lifecycle._steps[THREAD], browser_steps.PersonStep)
     assert plan["events"].count("person_step_opened") == 1
 
 
@@ -358,10 +365,10 @@ async def test_a_password_hidden_between_probes_is_guarded_before_the_person_ste
 ):
     """The end-time probe finds the hidden input even when no probe observed it while visible."""
     page, db = Page(), plan["db"]
-    monkeypatch.setattr(browser_control, "REPROBE_EVERY", 60)
+    monkeypatch.setattr(lifecycle, "REPROBE_EVERY", 60)
     browser_control.pane_connected(THREAD, "pane", None, page.pane_probe)
     await browser_control.declare_person_step(THREAD, page.agent_probe, "Sign in to your account")
-    active = browser_control._steps[THREAD]
+    active = lifecycle._steps[THREAD]
     loop = active.reprobe
     # No await between appearing and hiding: neither the pane nor agent sampled the visible field.
     page.show("visit-one", frozenset({42}))
@@ -370,7 +377,7 @@ async def test_a_password_hidden_between_probes_is_guarded_before_the_person_ste
     [person] = _steps(db)
     plan_update(db, plan["plan"].id, "mark_done", close_params(db, "mark_done", person["id"]), actor=HUMAN)
     if ending_probe == "pane":
-        assert not await browser_control._reprobe(THREAD, active)
+        assert not await lifecycle._reprobe(THREAD, active)
 
     async def resolve(_selector):
         return 42
@@ -378,7 +385,7 @@ async def test_a_password_hidden_between_probes_is_guarded_before_the_person_ste
     with pytest.raises(BrowserSessionError, match="asks for a password"):
         await browser_control.require_page_access(THREAD, page.agent_probe, command, resolve=resolve)
     await asyncio.gather(loop, return_exceptions=True)
-    assert THREAD not in browser_control._steps
+    assert THREAD not in lifecycle._steps
     guard = browser_control._guarded_visits[THREAD]["visit-one"]
     assert guard.seen_nodes == frozenset({42})
     assert set(vars(page.now)) == {"visit", "host", "target", "visible_nodes", "present_nodes"}
@@ -390,15 +397,15 @@ async def test_a_password_hidden_between_probes_is_guarded_before_the_person_ste
 async def test_a_person_step_ending_on_a_new_visit_guards_nothing_on_the_new_document(plan, monkeypatch):
     """NB1: no password was shown on the new document, so its inputs are not guarded and reads there work."""
     page, db = Page(), plan["db"]
-    monkeypatch.setattr(browser_control, "REPROBE_EVERY", 60)
+    monkeypatch.setattr(lifecycle, "REPROBE_EVERY", 60)
     browser_control.pane_connected(THREAD, "pane", None, page.pane_probe)
     await browser_control.declare_person_step(THREAD, page.agent_probe, "Sign in to your account")
-    active = browser_control._steps[THREAD]
+    active = lifecycle._steps[THREAD]
     loop = active.reprobe
     page.show("visit-two", present=frozenset({42}))
-    assert not await browser_control._reprobe(THREAD, active)
+    assert not await lifecycle._reprobe(THREAD, active)
     await asyncio.gather(loop, return_exceptions=True)
-    assert THREAD not in browser_control._steps
+    assert THREAD not in lifecycle._steps
     assert THREAD not in browser_control._guarded_visits
 
     async def resolve(_selector):
@@ -456,39 +463,34 @@ def test_the_person_step_tool_row_is_addressed_to_the_person():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("kind", ["person", "password"])
-@pytest.mark.parametrize("stage", ["write", "read"])
-async def test_failed_row_open_never_publishes_an_active_step_and_retry_can_open(plan, monkeypatch, kind, stage):
+async def test_failed_row_open_never_publishes_an_active_step_and_retry_can_open(plan, monkeypatch, kind):
     from plans.public import PlanError
 
     page = Page()
     if kind == "password":
         page.show("visit-one", frozenset({42}))
-    boundary = "_plan_write" if stage == "write" else "_step_row_state"
-    original = getattr(browser_control, boundary)
+    original = lifecycle._plan_write
 
     def fail(*_args, **_kwargs):
         raise PlanError("fixture row failure")
 
-    monkeypatch.setattr(browser_control, boundary, fail)
+    monkeypatch.setattr(lifecycle, "_plan_write", fail)
     with pytest.raises(PlanError, match="fixture row failure"):
         if kind == "person":
             await browser_control.declare_person_step(THREAD, page.agent_probe, "Choose your account")
         else:
             await browser_control.require_page_access(THREAD, page.agent_probe, ("snapshot",))
-    assert THREAD not in browser_control._steps
-    existing = _steps(plan["db"])
-    assert len(existing) == (0 if stage == "write" else 1)
+    assert THREAD not in lifecycle._steps
+    assert _steps(plan["db"]) == []
     assert plan["events"] == []
-    monkeypatch.setattr(browser_control, boundary, original)
+    monkeypatch.setattr(lifecycle, "_plan_write", original)
     if kind == "person":
         await browser_control.declare_person_step(THREAD, page.agent_probe, "Choose your account")
     else:
         with pytest.raises(BrowserSessionError, match="asks for a password"):
             await browser_control.require_page_access(THREAD, page.agent_probe, ("snapshot",))
     [row] = _steps(plan["db"])
-    assert browser_control._steps[THREAD].node_id == row["id"]
-    if existing:
-        assert row["id"] == existing[0]["id"]
+    assert lifecycle._steps[THREAD].node_id == row["id"]
     assert plan["events"] == [f"{kind}_step_opened"]
 
 
@@ -507,7 +509,7 @@ async def test_a_failed_settle_write_keeps_the_step_and_the_next_reprobe_settles
         with pytest.raises(BrowserSessionError, match="asks for a password"):
             await browser_control.require_page_access(THREAD, page.agent_probe, ("snapshot",))
     [step] = _steps(db)
-    original = browser_control._plan_write
+    original = lifecycle._plan_write
     failures = []
 
     def settle_fails(operation, *args, **kwargs):
@@ -516,15 +518,15 @@ async def test_a_failed_settle_write_keeps_the_step_and_the_next_reprobe_settles
             raise PlanError("fixture settle failure")
         return original(operation, *args, **kwargs)
 
-    monkeypatch.setattr(browser_control, "_plan_write", settle_fails)
+    monkeypatch.setattr(lifecycle, "_plan_write", settle_fails)
     page.show("visit-two")
     await _until(lambda: len(failures) >= 2)
     assert row(db, step["id"])["state"] == "pending"
-    assert browser_control._steps[THREAD].node_id == step["id"]
+    assert lifecycle._steps[THREAD].node_id == step["id"]
     assert "person_step_settled" not in plan["events"] and "password_step_settled" not in plan["events"]
 
-    monkeypatch.setattr(browser_control, "_plan_write", original)
-    await _until(lambda: THREAD not in browser_control._steps)
+    monkeypatch.setattr(lifecycle, "_plan_write", original)
+    await _until(lambda: THREAD not in lifecycle._steps)
     assert row(db, step["id"])["state"] == "accepted"
     assert plan["events"] == [f"{kind}_step_opened", f"{kind}_step_settled"]
 

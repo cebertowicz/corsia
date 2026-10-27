@@ -6,7 +6,7 @@ from functools import partial
 from typing import Any, Sequence
 
 from host_access import browser_cdp, browser_cli, browser_control, browser_dom_write, browser_identity as identity
-from host_access import browser_pane_state
+from host_access import browser_pane_state, browser_step_lifecycle
 from host_access.browser_session_state import BrowserSessionError, BrowserSetupError
 from infra.product_events import emit_product_event
 
@@ -36,7 +36,7 @@ async def run(owner: Any, thread_id: str, args: Sequence[str], *, lease_id: str 
     if guarded:
         await browser_control.require_page_access(
             thread_id, partial(browser_cdp.page_password_probe, endpoint), tuple(args),
-            resolve=partial(browser_dom_write.target_node, command, endpoint))
+            resolve=partial(browser_dom_write.target_node, command, endpoint), session=runtime.record.session)
     if not pane:
         # Only a command the guard let through puts the agent in the page.
         browser_pane_state.agent_acted(thread_id)
@@ -75,7 +75,30 @@ async def declare_person_step(owner: Any, thread_id: str, instruction: str) -> N
     command = partial(_command, owner, runtime, None)
     endpoint = await browser_cdp.page_endpoint(command)
     await browser_control.declare_person_step(
-        thread_id, partial(browser_cdp.page_password_probe, endpoint), instruction,
+        thread_id, partial(browser_cdp.page_password_probe, endpoint), instruction, session=runtime.record.session,
+    )
+
+
+async def close_thread(owner: Any, thread_id: str) -> str:
+    """Guard the agent's close command before entering the common session-end path."""
+    if not isinstance(thread_id, str) or not thread_id:
+        raise BrowserSessionError("browser close requires exact thread identity")
+    runtime = owner._sessions.get(thread_id)
+    if runtime is None:
+        return "Browser session is already closed."
+    if browser_step_lifecycle.has_step(thread_id):
+        await guard_close(owner, runtime)
+    await owner._close_runtime(runtime)
+    return "Browser session closed."
+
+
+async def guard_close(owner: Any, runtime: Any) -> None:
+    """An agent cannot close the session out from under an open person/password step."""
+    command = partial(_command, owner, runtime, None)
+    endpoint = await browser_cdp.page_endpoint(command)
+    await browser_control.require_page_access(
+        runtime.record.thread_id, partial(browser_cdp.page_password_probe, endpoint),
+        ("close",), session=runtime.record.session,
     )
 
 

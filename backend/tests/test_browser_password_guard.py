@@ -2,28 +2,32 @@ import asyncio
 
 import pytest
 
-from host_access import browser_cdp, browser_control, browser_pane_state, browser_steps
+from host_access import browser_cdp, browser_control, browser_pane_state, browser_steps, browser_step_lifecycle as lifecycle
 from host_access.browser_cdp import PasswordProbe
 from host_access.browser_session_state import BrowserSessionError
 
 
 @pytest.fixture(autouse=True)
 def clean_password_guard(monkeypatch):
-    monkeypatch.setattr(browser_control, "_step_row_state", lambda _node_id: None)
+    monkeypatch.setattr(lifecycle, "_step_row_state", lambda _node_id: None)
     browser_pane_state._panes.clear()
     browser_pane_state._pane_reports.clear()
     browser_pane_state._pane_probes.clear()
-    browser_control._steps.clear()
+    lifecycle._steps.clear()
+    lifecycle._answers.clear()
+    lifecycle._sessions.clear()
     browser_control._guarded_visits.clear()
-    browser_control._probe_locks.clear()
+    lifecycle._probe_locks.clear()
     browser_pane_state._agent_seen.clear()
     yield
     browser_pane_state._panes.clear()
     browser_pane_state._pane_reports.clear()
     browser_pane_state._pane_probes.clear()
-    browser_control._steps.clear()
+    lifecycle._steps.clear()
+    lifecycle._answers.clear()
+    lifecycle._sessions.clear()
     browser_control._guarded_visits.clear()
-    browser_control._probe_locks.clear()
+    lifecycle._probe_locks.clear()
     browser_pane_state._agent_seen.clear()
 
 
@@ -45,16 +49,16 @@ async def test_password_step_settles_then_keeps_eval_and_hidden_password_reads_r
         return next(responses)
 
     async def open_step(_thread_id, step):
-        browser_control._steps[_thread_id] = step
-        browser_control._start_reprobe(_thread_id, step)
+        lifecycle._steps[_thread_id] = step
+        lifecycle._start_reprobe(_thread_id, step)
         step.node_id = "password-step"
         opened.append(step.visit)
 
     async def settle_step(_thread_id, step):
         settled.append((step.node_id, browser_control._guarded_visits[_thread_id][step.visit].seen_nodes))
 
-    monkeypatch.setattr(browser_control, "_open_step", open_step)
-    monkeypatch.setattr(browser_control, "_settle_step", settle_step)
+    monkeypatch.setattr(lifecycle, "_open_step", open_step)
+    monkeypatch.setattr(lifecycle, "_settle_step", settle_step)
     monkeypatch.setattr(browser_steps, "publish_password_page", lambda _thread_id, visible: events.append(visible))
 
     with pytest.raises(BrowserSessionError, match="asks for a password"):
@@ -91,16 +95,16 @@ async def test_new_password_visit_opens_a_new_step_and_reports_to_the_pane(monke
         return next(responses)
 
     async def open_step(_thread_id, step):
-        browser_control._steps[_thread_id] = step
-        browser_control._start_reprobe(_thread_id, step)
+        lifecycle._steps[_thread_id] = step
+        lifecycle._start_reprobe(_thread_id, step)
         step.node_id = f"step-{step.visit}"
         opened.append(step.visit)
 
     async def settle_step(_thread_id, step):
         settled.append(step.visit)
 
-    monkeypatch.setattr(browser_control, "_open_step", open_step)
-    monkeypatch.setattr(browser_control, "_settle_step", settle_step)
+    monkeypatch.setattr(lifecycle, "_open_step", open_step)
+    monkeypatch.setattr(lifecycle, "_settle_step", settle_step)
     monkeypatch.setattr(browser_control.state, "broadcast_to_thread", lambda *_args, **_kwargs: None)
     browser_control.pane_connected("thread", "pane", pane_events.append)
 
@@ -199,15 +203,15 @@ async def test_a_hidden_password_read_is_refused_by_the_node_its_ref_or_selector
         return next(responses, hidden)
 
     async def open_step(_thread_id, step):
-        browser_control._steps[_thread_id] = step
-        browser_control._start_reprobe(_thread_id, step)
+        lifecycle._steps[_thread_id] = step
+        lifecycle._start_reprobe(_thread_id, step)
         step.node_id = "password-step"
 
     async def settle_step(_thread_id, _step):
         pass
 
-    monkeypatch.setattr(browser_control, "_open_step", open_step)
-    monkeypatch.setattr(browser_control, "_settle_step", settle_step)
+    monkeypatch.setattr(lifecycle, "_open_step", open_step)
+    monkeypatch.setattr(lifecycle, "_settle_step", settle_step)
     monkeypatch.setattr(browser_steps, "publish_password_page", lambda *_args: None)
     with pytest.raises(BrowserSessionError, match="asks for a password"):
         await browser_control.require_page_access("thread", probe, ("snapshot",))
@@ -269,24 +273,24 @@ def steps(monkeypatch):
     recorded = {"opened": [], "settled": [], "ended": False}
 
     async def open_step(_thread_id, step):
-        browser_control._steps[_thread_id] = step
-        browser_control._start_reprobe(_thread_id, step)
+        lifecycle._steps[_thread_id] = step
+        lifecycle._start_reprobe(_thread_id, step)
         step.node_id = "password-step"
         recorded["opened"].append(step.visit)
 
     async def settle_step(_thread_id, step):
         recorded["settled"].append(step.node_id)
 
-    monkeypatch.setattr(browser_control, "_open_step", open_step)
-    monkeypatch.setattr(browser_control, "_settle_step", settle_step)
+    monkeypatch.setattr(lifecycle, "_open_step", open_step)
+    monkeypatch.setattr(lifecycle, "_settle_step", settle_step)
 
     async def emit(action, _thread_id):
         recorded["events"].append(action)
 
     recorded["events"] = []
     # The step's plan row reads as closed by the person once a test sets ``ended``.
-    monkeypatch.setattr(browser_control, "_step_row_state", lambda _node_id: "closed" if recorded["ended"] else None)
-    monkeypatch.setattr(browser_control, "_emit", emit)
+    monkeypatch.setattr(lifecycle, "_step_row_state", lambda _node_id: "closed" if recorded["ended"] else None)
+    monkeypatch.setattr(lifecycle, "_emit", emit)
     monkeypatch.setattr(browser_steps, "publish_password_page", lambda _thread_id, _visible: None)
     return recorded
 
@@ -295,7 +299,7 @@ async def _agent_meets_password_page(page):
     browser_control.pane_connected("thread", "pane", None, page.pane_probe)
     with pytest.raises(BrowserSessionError, match="asks for a password"):
         await browser_control.require_page_access("thread", page.agent_probe, ("snapshot",))
-    step = browser_control._steps["thread"]
+    step = lifecycle._steps["thread"]
     assert step.reprobe is not None
     return step, step.reprobe
 
@@ -318,7 +322,7 @@ async def test_a_single_document_sign_in_settles_after_the_person_types_with_no_
     typed = clock()
     browser_control.person_input("thread")
     await asyncio.wait_for(loop, 2.5)
-    assert clock() - typed >= browser_control.REPROBE_AFTER_INPUT
+    assert clock() - typed >= lifecycle.REPROBE_AFTER_INPUT
     assert steps["settled"] == ["password-step"]
     assert not browser_control.password_page("thread")
     assert page.agent_probes == 1
@@ -328,7 +332,7 @@ async def test_a_single_document_sign_in_settles_after_the_person_types_with_no_
 
 @pytest.mark.asyncio
 async def test_the_reprobe_keeps_the_step_open_while_the_field_shows_and_stops_when_the_pane_leaves(steps, monkeypatch):
-    monkeypatch.setattr(browser_control, "REPROBE_EVERY", 0.01)
+    monkeypatch.setattr(lifecycle, "REPROBE_EVERY", 0.01)
     page = SignInPage()
     step, loop = await _agent_meets_password_page(page)
     await asyncio.wait_for(_probed(page, 3), 1)
@@ -340,28 +344,30 @@ async def test_the_reprobe_keeps_the_step_open_while_the_field_shows_and_stops_w
     assert browser_control.password_page("thread")
     # A pane that comes back resumes the step's re-probe, and a closed browser stops it.
     browser_control.pane_connected("thread", "pane", None, page.pane_probe)
+    await asyncio.sleep(0)
     resumed = step.reprobe
     assert resumed is not None and resumed is not loop
-    browser_control.browser_closed("thread")
+    await lifecycle.step_event("thread", lifecycle.Event("session_ended"))
     await asyncio.gather(resumed, return_exceptions=True)
     assert resumed.cancelled() and step.reprobe is None
 
 
 @pytest.mark.asyncio
-async def test_the_reprobe_stops_without_probing_once_the_person_declines_the_step(steps, monkeypatch):
-    monkeypatch.setattr(browser_control, "REPROBE_EVERY", 0.01)
+async def test_the_shared_reprobe_ends_a_declined_step_and_never_resumes_it(steps, monkeypatch):
+    monkeypatch.setattr(lifecycle, "REPROBE_EVERY", 0.01)
     page = SignInPage()
     _step, loop = await _agent_meets_password_page(page)
     steps["ended"] = True
     await asyncio.wait_for(loop, 1)
-    assert page.pane_probes == 0 and steps["settled"] == []
+    assert page.pane_probes == 1 and steps["settled"] == []
     assert steps["events"] == ["password_step_declined"]
-    # AR7: the page stays guarded while its field shows.
-    assert browser_control.password_page("thread")
+    assert not browser_control.password_page("thread")
+    assert browser_control._guarded_visits["thread"]["visit-one"].seen_nodes == frozenset({42})
     # A pane that reconnects resumes nothing and never counts the decline twice.
     browser_control.pane_disconnected("thread", "pane")
     browser_control.pane_connected("thread", "pane", None, page.pane_probe)
-    await asyncio.wait_for(browser_control._steps["thread"].reprobe, 1)
+    await asyncio.sleep(0)
+    assert "thread" not in lifecycle._steps
     assert steps["events"] == ["password_step_declined"]
 
 
@@ -374,12 +380,12 @@ async def test_a_password_step_names_the_registrable_domain_and_reports_each_tra
         writes.append((operation, args, kwargs))
         return "password-step" if operation == "open_user_step" else None
 
-    monkeypatch.setattr(browser_control, "_plan_write", plan_write)
-    monkeypatch.setattr(browser_control, "emit_product_event",
+    monkeypatch.setattr(lifecycle, "_plan_write", plan_write)
+    monkeypatch.setattr(lifecycle, "emit_product_event",
                         lambda surface, action, **kwargs: events.append((surface, action, kwargs["thread_id"])))
     step = browser_steps.PasswordStep("visit", "paypal.com.evil.com.br")
-    await browser_control._open_step("thread", step)
-    await browser_control._settle_step("thread", step)
+    await lifecycle._open_step("thread", step)
+    await lifecycle._settle_step("thread", step)
     assert writes[0][0] == "open_user_step"
     assert writes[0][2]["title"] == "Enter your password in the browser (evil.com.br)"
     assert writes[1][:2] == ("settle_user_step", ("password-step",))
@@ -400,7 +406,7 @@ async def test_an_agent_command_that_settles_the_step_stops_its_reprobe(steps):
 
 @pytest.mark.asyncio
 async def test_a_failed_reprobe_keeps_the_step_open_until_a_probe_succeeds(steps, monkeypatch):
-    monkeypatch.setattr(browser_control, "REPROBE_EVERY", 0.01)
+    monkeypatch.setattr(lifecycle, "REPROBE_EVERY", 0.01)
     page = SignInPage(failures=2)
     page.submitted = True
     _step, loop = await _agent_meets_password_page(SignInPage())

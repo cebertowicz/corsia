@@ -31,8 +31,8 @@ class BrowserStep:
     # The page target the step's visit is on; a probe of any other target never settles it.
     target: str = ""
     node_id: str | None = None
-    # Set once the person's decline (AR7) has been counted, so a resumed re-probe never counts it again.
-    declined: bool = False
+    session: str | None = field(default=None, kw_only=True)
+    occurrence: int = field(default=1, kw_only=True)
     # The step's one re-probe loop, and the person's latest input that it waits to pause (AR6).
     reprobe: asyncio.Task | None = field(default=None, repr=False)
     last_input: float | None = None

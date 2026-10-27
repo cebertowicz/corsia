@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import time
+from dataclasses import dataclass
 from typing import Awaitable, Callable, Mapping
 
 from host_access.browser_cdp import PasswordProbe, Rect
@@ -11,11 +12,17 @@ from host_access.browser_screencast import PaneScreencast
 KnownNodes = Mapping[str, frozenset[int]]
 Probe = Callable[[KnownNodes], Awaitable[PasswordProbe]]
 
+
+@dataclass(frozen=True)
+class PaneProbe:
+    probe: Probe
+    session: Callable[[], str | None] | None = None
+
 _panes: dict[str, set[str]] = {}
 _capture_sizes: dict[str, tuple[int, int, bool]] = {}
 _pane_reports: dict[str, dict[str, Callable[[dict], None]]] = {}
 # Each connected pane's probe of the shared page, over the page endpoint it already holds.
-_pane_probes: dict[str, dict[str, Probe]] = {}
+_pane_probes: dict[str, dict[str, PaneProbe]] = {}
 _screencasts: dict[str, dict[str, PaneScreencast]] = {}
 # When the agent last acted in each thread's page, so a pane that connects later shows it there.
 _agent_seen: dict[str, float] = {}
@@ -24,7 +31,8 @@ _METRICS_COMMANDS = {("screenshot",), ("set", "viewport"), ("set", "device")}
 
 
 def pane_connected(thread_id: str, connection_token: str, report: Callable[[dict], None] | None,
-                   probe: Probe | None, *, on_probe: Callable[[str], None]) -> None:
+                   probe: Probe | None, *, on_probe: Callable[[str], None],
+                   session: Callable[[], str | None] | None = None) -> None:
     """Record a shared pane, its relay callback and its page probe without granting exclusive page control.
 
     ``on_probe`` runs once the thread's page can be probed from this pane.
@@ -35,7 +43,7 @@ def pane_connected(thread_id: str, connection_token: str, report: Callable[[dict
         if (seen := _agent_seen.get(thread_id)) is not None:
             report(_agent_message(time.monotonic() - seen))
     if probe is not None:
-        _pane_probes.setdefault(thread_id, {})[connection_token] = probe
+        _pane_probes.setdefault(thread_id, {})[connection_token] = PaneProbe(probe, session)
         on_probe(thread_id)
 
 
@@ -69,7 +77,7 @@ def has_pane(thread_id: str) -> bool:
     return bool(_panes.get(thread_id))
 
 
-def pane_probes(thread_id: str) -> list[Probe]:
+def pane_probes(thread_id: str) -> list[PaneProbe]:
     """Every connected pane's probe of this thread's one shared page."""
     return list(_pane_probes.get(thread_id, {}).values())
 

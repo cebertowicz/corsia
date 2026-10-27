@@ -8,7 +8,7 @@ from typing import Awaitable, Callable
 from host_access import browser_cdp, browser_cli, browser_control, browser_pane_state, browser_screencast
 from host_access.processes import PROCESS_OWNER
 
-__all__ = ["HISTORY_ACTIONS", "PaneAppearance", "clear_page_endpoint", "go", "is_open", "key_event", "match_pane", "mouse_event", "open_url", "page_info", "password_probe", "screencast", "watch_page_metadata"]
+__all__ = ["HISTORY_ACTIONS", "PaneAppearance", "clear_page_endpoint", "go", "is_open", "key_event", "match_pane", "mouse_event", "open_url", "page_info", "password_probe", "screencast", "session_identity", "watch_page_metadata"]
 
 HISTORY_ACTIONS = frozenset({"back", "forward", "reload"})
 _page_endpoints: dict[tuple[str, str], str] = {}
@@ -59,6 +59,11 @@ async def screencast(thread_id: str, connection_token: str, deliver: Callable[[s
         await cast.run()
     finally:
         browser_pane_state.screencast_ended(thread_id, connection_token, cast)
+
+
+def session_identity(thread_id: str) -> str | None:
+    """Read the current runtime identity alongside a pane's page observation."""
+    return PROCESS_OWNER.browser_sessions().session_identity(thread_id)
 
 
 async def password_probe(thread_id: str, connection_token: str,

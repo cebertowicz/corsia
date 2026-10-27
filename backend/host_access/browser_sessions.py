@@ -9,7 +9,7 @@ import secrets
 import time
 from typing import Literal, Sequence, TypeAlias
 
-from host_access import browser_cli, browser_control, browser_identity as identity, browser_reporting
+from host_access import browser_cli, browser_step_lifecycle, browser_identity as identity, browser_reporting
 from host_access.browser_session_state import (
     BrowserRuntime, BrowserSessionCleanupError as BrowserSessionCleanupError,
     BrowserSessionError as BrowserSessionError, BrowserSessionRecord,
@@ -244,21 +244,23 @@ class BrowserSessionOwner:
         if not observed.alive:
             raise BrowserSessionCleanupError("browser startup or daemon exit is unresolved")
 
-    async def close_thread(self, thread_id: str) -> str:
-        """Close only this thread's bound session; retry a pending producer close."""
-        if not isinstance(thread_id, str) or not thread_id:
-            raise BrowserSessionError("browser close requires exact thread identity")
+    def session_identity(self, thread_id: str) -> str | None:
+        """The runtime identity for pane probes; no page or process inspection."""
         runtime = self._sessions.get(thread_id)
-        if runtime is None:
-            return "Browser session is already closed."
-        browser_control.browser_closed(thread_id)
-        await self._close_runtime(runtime)
-        return "Browser session closed."
+        return runtime.record.session if runtime is not None and runtime.record.terminal_state == "running" else None
+
+    async def close_thread(self, thread_id: str) -> str:
+        """Guard agent close, then use the shared producer teardown."""
+        from host_access.browser_session_commands import close_thread
+        return await close_thread(self, thread_id)
 
     async def _close_runtime(self, runtime: BrowserRuntime) -> None:
         async with runtime.command_lock:
             if runtime.record.terminal_state == "closed":
                 return
+            await browser_step_lifecycle.step_event(
+                runtime.record.thread_id, browser_step_lifecycle.Event("session_ended", session=runtime.record.session),
+            )
             runtime.record = replace(runtime.record, terminal_state="resetting")
             try:
                 if runtime.attempt is not None:

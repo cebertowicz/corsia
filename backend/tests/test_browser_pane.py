@@ -7,7 +7,7 @@ import pytest
 from fastapi import HTTPException, WebSocketDisconnect
 
 from api import browser
-from host_access import browser_cdp, browser_cli, browser_control, browser_pane, browser_pane_state
+from host_access import browser_cdp, browser_cli, browser_control, browser_pane, browser_pane_state, browser_step_lifecycle as lifecycle
 from host_access.browser_cli import CommandResult
 from host_access.browser_session_state import BrowserRuntime, BrowserSessionError, BrowserSessionRecord
 from host_access.browser_sessions import BrowserSessionOwner
@@ -22,18 +22,22 @@ _SCREENCAST = browser_pane.screencast
 def _no_browser_guard_state():
     browser_pane_state._panes.clear()
     browser_pane_state._pane_probes.clear()
-    browser_control._steps.clear()
+    lifecycle._steps.clear()
+    lifecycle._answers.clear()
+    lifecycle._sessions.clear()
     browser_control._guarded_visits.clear()
-    browser_control._probe_locks.clear()
+    lifecycle._probe_locks.clear()
     browser_pane_state._screencasts.clear()
     browser_pane_state._capture_sizes.clear()
     browser_pane_state._agent_seen.clear()
     yield
     browser_pane_state._panes.clear()
     browser_pane_state._pane_probes.clear()
-    browser_control._steps.clear()
+    lifecycle._steps.clear()
+    lifecycle._answers.clear()
+    lifecycle._sessions.clear()
     browser_control._guarded_visits.clear()
-    browser_control._probe_locks.clear()
+    lifecycle._probe_locks.clear()
     browser_pane_state._screencasts.clear()
     browser_pane_state._capture_sizes.clear()
     browser_pane_state._agent_seen.clear()
@@ -196,7 +200,7 @@ async def test_relay_delivers_click_shortcut_text_then_enter_in_order_on_one_cdp
     monkeypatch.setattr(browser_pane.browser_cdp, "watch_page_metadata", no_metadata)
     connected, inputs = [], []
     pane_connected = browser_control.pane_connected
-    monkeypatch.setattr(browser_control, "pane_connected", lambda *args: connected.append(args) or pane_connected(*args))
+    monkeypatch.setattr(browser_control, "pane_connected", lambda *args, **kwargs: connected.append(args) or pane_connected(*args, **kwargs))
     monkeypatch.setattr(browser_control, "person_input", inputs.append)
     with pytest.raises(WebSocketDisconnect):
         await browser_stream._relay(pane, "thread-1", "user-1")
@@ -674,8 +678,8 @@ def _password_page_owner(monkeypatch, opened):
                                              present_nodes=frozenset({42}))
 
     async def open_step(_thread_id, step):
-        browser_control._steps[_thread_id] = step
-        browser_control._start_reprobe(_thread_id, step)
+        lifecycle._steps[_thread_id] = step
+        lifecycle._start_reprobe(_thread_id, step)
         step.node_id = "password-step"
         opened.append(step.visit)
 
@@ -685,7 +689,7 @@ def _password_page_owner(monkeypatch, opened):
     monkeypatch.setattr(owner, "_run_admitted", run_admitted)
     monkeypatch.setattr(browser_cdp, "page_password_probe", password_field)
     monkeypatch.setattr(browser_cdp, "page_endpoint", lambda _run: asyncio.sleep(0, result="ws://page.test/current"))
-    monkeypatch.setattr(browser_control, "_open_step", open_step)
+    monkeypatch.setattr(lifecycle, "_open_step", open_step)
     monkeypatch.setattr(browser_control.state, "broadcast_to_thread", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(browser_pane.PROCESS_OWNER, "browser_sessions", lambda: owner)
     return owner

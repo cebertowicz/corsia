@@ -1231,7 +1231,7 @@ async def test_browser_commands_forward_exact_backend_identity(
 @pytest.mark.asyncio
 async def test_browser_person_step_runs_the_real_declaration_for_the_authoritative_thread(monkeypatch) -> None:
     """Only the browser process and the plan write are stand-ins; the tool returns the declaration's success."""
-    from host_access import browser_cdp, browser_control
+    from host_access import browser_cdp, browser_step_lifecycle as lifecycle
     from host_access.browser_cdp import PasswordProbe
     from host_access.browser_sessions import BrowserSessionOwner
     from tools import browser_actions, browser_runtime
@@ -1245,7 +1245,7 @@ async def test_browser_person_step_runs_the_real_declaration_for_the_authoritati
 
     async def admit(thread_id, **_kwargs):
         admitted.append(thread_id)
-        return object()
+        return SimpleNamespace(record=SimpleNamespace(session="session-one"))
 
     async def page_endpoint(_command):
         return "ws://page.test"
@@ -1262,9 +1262,9 @@ async def test_browser_person_step_runs_the_real_declaration_for_the_authoritati
         writes.append((operation, kwargs["title"]))
         return "step"
 
-    monkeypatch.setattr(browser_control, "_plan_write", plan_write)
-    monkeypatch.setattr(browser_control, "_step_row_state", lambda _node_id: None)
-    monkeypatch.setattr(browser_control, "emit_product_event", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(lifecycle, "_plan_write", plan_write)
+    monkeypatch.setattr(lifecycle, "_step_row_state", lambda _node_id: None)
+    monkeypatch.setattr(lifecycle, "emit_product_event", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(browser_runtime, "_check_installed", lambda: None)
     monkeypatch.setattr(browser_runtime, "PROCESS_OWNER", SimpleNamespace(browser_sessions=lambda: owner))
     try:
@@ -1272,7 +1272,9 @@ async def test_browser_person_step_runs_the_real_declaration_for_the_authoritati
             "Sign in to Google", _thread_id="authoritative-thread", _thread_project_id="project-1",
         )
     finally:
-        browser_control._steps.pop("authoritative-thread", None)
+        lifecycle._steps.pop("authoritative-thread", None)
+        lifecycle._answers.pop("authoritative-thread", None)
+        lifecycle._sessions.pop("authoritative-thread", None)
 
     assert result == "Person step opened; end your turn."
     assert admitted == ["authoritative-thread"]
