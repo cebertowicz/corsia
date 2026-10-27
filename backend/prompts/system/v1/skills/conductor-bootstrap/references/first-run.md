@@ -88,7 +88,7 @@ Done after that post.
 
 ## Task 4: Connect web search
 
-Objective: agents can look things up online; research and anything current depend on it. If one `web_search` call returns results, post `Web search already works: your agents can search the web. Searches without a key go to public search sites such as DuckDuckGo, Yahoo and Wikipedia.` and mark it done. Otherwise follow `references/web-search.md` exactly, in chat; there is no decision. Not now closes it: `You chose not now. Settings › Keys has it.`
+Objective: agents can look things up online; research and anything current depend on it. If one `web_search` call returns results, post `Web search already works: your agents can search the web.` plus `Searches go to Brave.` if `web_search_key` is true, else `Searches without a key go to free public sources such as DuckDuckGo, Yahoo and Wikipedia.`, and mark it done. Otherwise follow `references/web-search.md` exactly, in chat; there is no decision. Not now closes it: `You chose not now. Settings › Keys has it.`
 
 ## Task 5: Set up GitHub
 

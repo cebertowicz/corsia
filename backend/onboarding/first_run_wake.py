@@ -23,8 +23,8 @@ APP_START_REFERENCE = "skills/conductor-bootstrap/references/first-run-start.md"
 FACTS_TIMEOUT_SECONDS = 5.0
 APP_FACT_KEYS = frozenset({
     "first_run_path", "harness_ready", "sources_missing", "agents_found", "local_download",
-    "tool_attempts", "pays_for", "bound_model", "web_search_ready", "github_ready", "setup",
-    "user_profile",
+    "tool_attempts", "pays_for", "bound_model", "web_search_ready", "web_search_key", "github_ready",
+    "setup", "user_profile",
 })
 APP_PLAN_FACT_KEYS = APP_FACT_KEYS | {"connected_app_count", "email_calendar_ready"}
 UNAVAILABLE_READS = {
@@ -248,6 +248,7 @@ async def _app_setup_facts(model: str) -> dict[str, Any]:
         "agents_found": lambda: asyncio.to_thread(_app_agents_found),
         "local_download": lambda: asyncio.to_thread(_app_local_download),
         "web_search_ready": setup_decisions.web_search_works,
+        "web_search_key": lambda: run_in_db(_web_search_key),
         "setup_handoff": lambda: run_in_db(_app_setup_handoff),
         "setup_picks": lambda: run_in_db(_app_setup_picks),
         "setup": lambda: _app_setup(model),
@@ -288,6 +289,7 @@ async def _app_setup_facts(model: str) -> dict[str, Any]:
         "tool_attempts": tool_attempts,
         "pays_for": pays_for,
         "web_search_ready": reads["web_search_ready"],
+        "web_search_key": reads["web_search_key"],
         "github_ready": github_ready,
         "setup": reads["setup"],
         "user_profile": reads["user_profile"],

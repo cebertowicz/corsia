@@ -101,7 +101,8 @@ def test_first_run_names_only_engines_the_pinned_library_searches():
     from infra.system_package import system_resource_source
     from onboarding.first_run_wake import APP_REFERENCE, FIRST_RUN_REFERENCE
 
-    line = "Searches without a key go to public search sites such as DuckDuckGo, Yahoo and Wikipedia."
+    keyless = "Searches without a key go to free public sources such as DuckDuckGo, Yahoo and Wikipedia."
     for reference in (FIRST_RUN_REFERENCE, APP_REFERENCE):
-        assert line in system_resource_source(reference).read_text()
+        text = system_resource_source(reference).read_text()
+        assert keyless in text and "Searches go to Brave." in text
     assert {"duckduckgo", "yahoo", "wikipedia"} <= set(ENGINES["text"])
