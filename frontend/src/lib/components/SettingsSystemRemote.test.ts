@@ -70,7 +70,7 @@ describe('Settings › System with a shell', () => {
 		button('Disconnect')?.click();
 		await settle();
 		expect(order).toEqual(['logout', 'disconnect_remote']);
-		expect(toast).toHaveBeenCalledWith('CORSIA couldn’t disconnect from this computer. Sign in and try again.', 'error', 8000);
+		expect(toast).toHaveBeenCalledWith('CORSIA couldn’t disconnect from Studio. Try again.', 'error', 8000);
 	});
 	it('Cancel leaves everything as it was', async () => {
 		(window as unknown as Record<string, unknown>).__CORSIA_SHELL__ = { mode: 'remote', name: 'Studio' };
@@ -100,7 +100,10 @@ describe('Settings › System with a shell', () => {
 		host.querySelector<HTMLButtonElement>('button[aria-label="Let other devices connect"]')?.click();
 		await settle();
 		expect(flat(host.querySelector('[data-settings-row="Computer"]')?.textContent)).toContain('This computer');
-		button('Connect to another computer')?.click();
+		button('Connect to another computer')?.click(); flushSync();
+		expect(flat(host.textContent)).toContain("CORSIA on this computer stops while you're connected. Its agents and scheduled work wait until you come back, and nothing here is deleted. To come back, choose Disconnect in Settings › System.");
+		expect(get(connectOpen)).toBe(false);
+		button('Connect')?.click(); flushSync();
 		expect(get(connectOpen)).toBe(true);
 		expect(button('Disconnect')).toBeUndefined();
 	});
@@ -109,8 +112,20 @@ describe('Settings › System with a shell', () => {
 		vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ detail: 'unavailable' }), { status: 500, headers: { 'Content-Type': 'application/json' } })));
 		await show();
 		expect(flat(host.querySelector('[data-settings-row="Computer"]')?.textContent)).toContain('This computer');
-		button('Connect to another computer')?.click();
+		button('Connect to another computer')?.click(); flushSync();
+		expect(flat(host.textContent)).toContain("CORSIA on this computer stops while you're connected. Its agents and scheduled work wait until you come back, and nothing here is deleted. To come back, choose Disconnect in Settings › System.");
+		expect(get(connectOpen)).toBe(false);
+		button('Connect')?.click(); flushSync();
 		expect(get(connectOpen)).toBe(true);
+	});
+	it('cancelling the connect confirmation leaves the connection unchanged', async () => {
+		(window as unknown as Record<string, unknown>).__CORSIA_SHELL__ = { mode: 'local' };
+		vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ...devicesBody, enabled: false }), { status: 200, headers: { 'Content-Type': 'application/json' } })));
+		await show();
+		button('Connect to another computer')?.click(); flushSync();
+		button('Cancel')?.click(); flushSync();
+		expect(get(connectOpen)).toBe(false);
+		expect(order).toEqual([]);
 	});
 	it('in a browser or the phone app there is no shell, so no Computer row', async () => {
 		await show();

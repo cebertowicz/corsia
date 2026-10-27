@@ -156,13 +156,8 @@ describe('LoginScreen', () => {
 			.find((button) => button.textContent?.includes('Use this computer instead'));
 		expect(returnButton).toBeDefined();
 		returnButton!.click();
-		await vi.waitFor(() => expect(host.textContent).toContain('Disconnect from Studio?'));
-		expect(host.textContent).toContain('Your work stays on Studio. This app signs out and returns to setup.');
-
-		const disconnectButton = Array.from(host.querySelectorAll('button'))
-			.find((button) => button.textContent?.includes('Disconnect'));
-		disconnectButton!.click();
 		await vi.waitFor(() => expect(remoteShellMocks.disconnectRemote).toHaveBeenCalledOnce());
+		expect(host.textContent).not.toContain('Disconnect from Studio?');
 	});
 
 	it('labels the remote return action as setup when this computer is not configured', async () => {
@@ -173,6 +168,9 @@ describe('LoginScreen', () => {
 
 		expect(host.textContent).toContain('Set up this computer instead');
 		expect(host.textContent).not.toContain('Use this computer instead');
+		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Set up this computer instead'))!.click();
+		await vi.waitFor(() => expect(remoteShellMocks.disconnectRemote).toHaveBeenCalledOnce());
+		expect(host.textContent).not.toContain('Disconnect from Studio?');
 	});
 
 	it('does not offer the remote return action outside the desktop remote shell', async () => {
