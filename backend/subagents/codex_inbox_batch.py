@@ -17,6 +17,7 @@ from infra.input_writes import (
 from infra.queries import load_thread_row
 from infra.thread_inputs import ClaimedBatch, claim_safe_boundary
 from infra.time import utc_now_iso
+from subagents.codex_app_server import INTERRUPT_RESPONSE_TIMEOUT_SECONDS
 from subagents.codex_runtime_event_delivery import (
     arm_delivery_event_barrier as _begin_event_buffer,
     release_delivery_event_barrier as _release_event_buffer,
@@ -90,15 +91,17 @@ async def _steer_claimed(batch: ClaimedBatch, live, thread_row: dict, target) ->
     )
     _begin_event_buffer(live)
     try:
-        accepted = await live.session.steer(
-            rendered.content,
-            on_write_observed=on_write,
-            on_drain_confirmed=lambda: None,
-            input_context=(
-                batch.anchor_message_id, projected_input_tokens(rendered, target),
-            ),
-            **({"media_projection": media} if media is not None else {}),
-        )
+        # Include transport write/drain, which precedes the JSON-RPC ack timer.
+        async with asyncio.timeout(INTERRUPT_RESPONSE_TIMEOUT_SECONDS):
+            accepted = await live.session.steer(
+                rendered.content,
+                on_write_observed=on_write,
+                on_drain_confirmed=lambda: None,
+                input_context=(
+                    batch.anchor_message_id, projected_input_tokens(rendered, target),
+                ),
+                **({"media_projection": media} if media is not None else {}),
+            )
         if accepted is not True:
             log.warning(
                 "codex live inbox delivery declined thread_id=%s "
@@ -111,6 +114,8 @@ async def _steer_claimed(batch: ClaimedBatch, live, thread_row: dict, target) ->
         await run_in_db(settle_batch_write, attempt_id, outcome="accepted")
         await _broadcast(batch)
     except BaseException as error:
+        if isinstance(error, TimeoutError):
+            log.warning("codex steer timed out thread_id=%s write_observed=%s", batch.thread_id, write_observed)
         proved_no_write = await _settle_failure(
             batch, attempt_id, write_observed, error,
         )

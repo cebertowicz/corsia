@@ -116,11 +116,13 @@ async def _deliver_codex_event(
 def _schedule_safe_boundary(thread_id: str) -> None:
     """Leave the JSON-RPC reader free to receive the steer acknowledgement."""
     from subagents.codex_inbox_batch import deliver_live_inbox_batch
+    from ws.ingress import track_background_task
 
     task = asyncio.create_task(
         deliver_live_inbox_batch(thread_id),
         name=f"codex-safe-boundary:{thread_id}",
     )
+    track_background_task(task)
     task.add_done_callback(
         partial(
             _observe_deferred_event,

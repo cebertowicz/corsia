@@ -44,6 +44,7 @@ OnRawMessage = Callable[[dict[str, Any]], Awaitable[None]]
 STDOUT_LIMIT = 16 * 1024 * 1024
 REQUEST_TIMEOUT = 120.0
 STEER_ACK_TIMEOUT = 10.0
+INTERRUPT_RESPONSE_TIMEOUT_SECONDS = 30.0
 _STEER_NOT_WRITTEN = object()
 _DYNAMIC_TOOL_DRAIN_REJECTION = TURN_STOPPED_REFUSAL
 _DYNAMIC_TOOL_IDENTITY_REJECTION = (
@@ -566,7 +567,7 @@ class CodexAppServerSession:
                 return False
             raise
 
-    async def interrupt(self, timeout: float = 30.0) -> bool:
+    async def interrupt(self, timeout: float = INTERRUPT_RESPONSE_TIMEOUT_SECONDS) -> bool:
         """Interrupt the active turn; True only when its terminal is CONFIRMED.
 
         Returning True on an unconfirmed interrupt let callers start a new
@@ -710,20 +711,9 @@ class CodexAppServerSession:
             await self._handle_notification(method, msg.get("params") or {})
 
     def _handle_response(self, msg: dict) -> None:
-        request_method = self._pending_methods.pop(msg["id"], None)
-        fut = self._pending.pop(msg["id"], None)
-        if fut is None or fut.done():
-            return
-        if "error" in msg:
-            fut.set_exception(CodexAppServerError(str(msg["error"]), msg["error"]))
-            return
-        result = msg.get("result")
-        if request_method == "turn/start" and isinstance(result, dict):
-            turn = result.get("turn")
-            turn_id = turn.get("id") if isinstance(turn, dict) else None
-            if isinstance(turn_id, str) and turn_id:
-                self._track_active_turn(turn_id)
-        fut.set_result(result)
+        from subagents.codex_requests import handle_response
+
+        handle_response(self, msg)
 
     async def _handle_server_request(self, msg: dict) -> None:
         msg_id = msg["id"]
