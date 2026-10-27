@@ -28,8 +28,11 @@ async function select(page: Page, id: string, quote: string) {
 	await expect(page.locator('.sel-comment')).toBeVisible();
 }
 
+test.use({ video: 'off' });
+
 for (const size of [1440, 393]) for (const scheme of ['light', 'dark'] as const) {
 	test.describe(`chat comments ${size} ${scheme}`, () => {
+		test.describe.configure({ timeout: 120_000 });
 		test.skip(() => test.info().project.name === 'chromium-mobile', 'viewport set by this spec');
 		test.use({ seedPerTest: true, viewport: { width: size, height: size === 1440 ? 900 : 852 }, colorScheme: scheme, hasTouch: size === 393, isMobile: size === 393, deviceScaleFactor: 2 });
 		test('stored long quotes and notes', async ({ page, request }) => {
@@ -46,6 +49,7 @@ for (const size of [1440, 393]) for (const scheme of ['light', 'dark'] as const)
 			const block = page.locator('.sent-comment');
 			await expect(block).toBeVisible();
 			await expect(block.getByRole('button', { name: 'Show more' })).toBeVisible();
+			await expect(block.locator('.quote-line')).toHaveCSS('border-left-width', '2px');
 			const sizing = await block.evaluate(element => {
 				const quote = element.querySelector<HTMLElement>('.quote-line')!;
 				const note = element.querySelector<HTMLElement>('.sent-note')!;

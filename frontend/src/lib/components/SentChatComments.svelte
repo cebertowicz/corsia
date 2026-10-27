@@ -34,7 +34,7 @@
 	.sent-comment { display: flex; flex-direction: column; gap: var(--space-1); }
 	.sent-comment-source { all: unset; box-sizing: border-box; display: flex; flex-direction: column; gap: var(--space-1); min-height: var(--list-row-min-height); justify-content: center; cursor: pointer; border-radius: var(--radius-sm); color: var(--accent-on-fill); }
 	.sent-comment-source:focus-visible, .sent-comment-toggle:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
-	.sent-note { color: var(--accent-on-fill); font-size: var(--text-callout); line-height: 1.5; padding-left: calc(var(--space-2) + 2px); overflow-wrap: anywhere; white-space: pre-wrap; }
+	.sent-note { color: var(--accent-on-fill); font-size: var(--text-callout); line-height: 1.5; padding-left: calc(var(--space-2) + var(--comment-rail-width)); overflow-wrap: anywhere; white-space: pre-wrap; }
 	.sent-note.clamped { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 4; line-clamp: 4; }
 	.long-message-toggle.sent-comment-toggle { align-self: flex-start; color: var(--accent-on-fill); opacity: 1; }
 	@media (max-width: 768px) { .sent-comment-source { min-height: var(--touch-target); } }
