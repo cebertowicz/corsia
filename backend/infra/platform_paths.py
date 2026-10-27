@@ -21,8 +21,9 @@ STATE_DIRECTORY = "state"
 # A source install's state on macOS: a child of the app folder that is never
 # the app's own state root.
 SOURCE_STATE_DIRECTORY = "source-state"
-# The folder pre-release source installs kept their state in. Only checked, so
-# a source install still there is told how to move it; never opened or created.
+# The folder the app's state lived in before the move to CORSIA/state. A source
+# install still there is told how to move it; the startup heal repoints account
+# homes stored under it.
 LEGACY_FOLDER = "com.cebertowicz.corsia"
 BOOTSTRAP_VERSION = 2
 _UNSET = object()
@@ -168,7 +169,8 @@ def default_state_root(
 
     root = _resolved(root)
     _refuse_legacy_only(
-        root, _resolved(base / LEGACY_FOLDER / STATE_DIRECTORY), posix=platform_name != "win32",
+        root, legacy_state_root(env=environment, platform=platform_name, home=home_dir),
+        posix=platform_name != "win32",
     )
     return root
 

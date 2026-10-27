@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 
 import pytest
 from loguru import logger
@@ -60,28 +59,26 @@ def test_claude_custom_account_is_repointed(isolated_db, roots):
     assert not (legacy / "runtime").exists()
 
 
-def test_codex_custom_account_is_repointed_with_its_projection_and_link(isolated_db, roots):
+def test_codex_custom_account_homes_are_repointed_and_its_projection_is_left_to_its_owner(isolated_db, roots):
     legacy, current = roots
     new_source, new_runtime = _make_homes(current, "x1")
     (new_source / "auth.json").write_text("{}")
     old_source = legacy / "runtime/vendor-accounts/x1/source"
     old_runtime = legacy / "runtime/vendor-accounts/x1/runtime"
-    # The managed link was made before the move and still names the old source file.
     (new_runtime / "auth.json").symlink_to(old_source / "auth.json")
     entry = {"source": str(old_source / "auth.json"), "destination": str(old_runtime / "auth.json"),
              "home": str(old_runtime), "kind": "live", "phase": "established"}
-    discovery = {"auth_projection": {"failed": None, "stale": [], "homes": {entry["destination"]: entry}}}
+    failed = {"cause": "codex_auth_source_missing", "account_revision": 1, "login_seq": 1}
+    discovery = {"auth_projection": {"failed": failed, "stale": [], "homes": {entry["destination"]: entry}}}
     _insert("x1", "codex", str(old_source), str(old_runtime), discovery)
+    _, _, stored_before = _homes("x1")
 
     heal_moved_state_paths(legacy_root=legacy, state_root=current)
 
     source, runtime, stored = _homes("x1")
     assert (source, runtime) == (str(new_source), str(new_runtime))
-    healed = json.loads(stored)["auth_projection"]["homes"]
-    assert list(healed) == [str(new_runtime / "auth.json")]
-    assert healed[str(new_runtime / "auth.json")]["source"] == str(new_source / "auth.json")
-    assert (new_runtime / "auth.json").is_symlink()
-    assert str((new_runtime / "auth.json").readlink()) == str(new_source / "auth.json")
+    assert stored == stored_before
+    assert str((new_runtime / "auth.json").readlink()) == str(old_source / "auth.json")
 
 
 def test_missing_target_is_left_alone_and_logged(isolated_db, roots):
@@ -157,28 +154,3 @@ def test_an_empty_recreated_tree_is_gone_after_the_heal(isolated_db, roots):
 
     assert not (legacy / "runtime").exists()
     assert legacy.is_dir()
-
-
-def test_failed_link_repoint_leaves_the_row_as_stored_and_the_next_start_heals_it(isolated_db, roots, monkeypatch):
-    legacy, current = roots
-    new_source, new_runtime = _make_homes(current, "x2")
-    (new_source / "auth.json").write_text("{}")
-    old_source = legacy / "runtime/vendor-accounts/x2/source"
-    old_runtime = legacy / "runtime/vendor-accounts/x2/runtime"
-    (new_runtime / "auth.json").symlink_to(old_source / "auth.json")
-    entry = {"source": str(old_source / "auth.json"), "destination": str(old_runtime / "auth.json"),
-             "home": str(old_runtime), "kind": "live", "phase": "established"}
-    discovery = {"auth_projection": {"failed": None, "stale": [], "homes": {entry["destination"]: entry}}}
-    _insert("x2", "codex", str(old_source), str(old_runtime), discovery)
-    stored_before = _homes("x2")
-
-    real_replace = os.replace
-    monkeypatch.setattr(os, "replace", lambda *a, **k: (_ for _ in ()).throw(PermissionError("denied")))
-    assert heal_moved_state_paths(legacy_root=legacy, state_root=current) == 0
-    assert _homes("x2") == stored_before
-    assert not [p for p in new_runtime.iterdir() if p.name.startswith(".corsia-auth-")]
-
-    monkeypatch.setattr(os, "replace", real_replace)
-    assert heal_moved_state_paths(legacy_root=legacy, state_root=current) > 0
-    assert _homes("x2")[:2] == (str(new_source), str(new_runtime))
-    assert os.readlink(new_runtime / "auth.json") == str(new_source / "auth.json")
