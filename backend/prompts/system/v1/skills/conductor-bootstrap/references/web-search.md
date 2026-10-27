@@ -6,9 +6,9 @@ Use this for first-run task `Connect web search` and any time later the person a
 
 ## 1. Explain, then ask
 
-One `post_update`, word for word. Keep the first and last bracketed parts only when step 5 of `references/first-run-app.md` will run the lookup (the app path); on any other path leave both out. Keep the middle bracketed part only when `web_search_ready` is false.
+One `post_update`, word for word. Keep the first and last bracketed parts only when step 5 of `references/first-run-app.md` will run the lookup (the app path); on any other path leave both out. Keep the middle bracketed part only when `## Setup facts` shows `web_search_ready` false; on a path without that fact, leave it out.
 
-> Web search lets me look things up on the web for you[, starting with you, so you don't have to tell me everything yourself]. [I couldn't search without a key just now. ]A Brave Search key makes search steadier. Brave's free plan still asks for a credit card; search costs $5 per 1,000 searches, and every month includes $5 of free credit, about 1,000 searches. That's usually enough for most people, so search usually costs nothing. Searches using that key go to Brave. Do you already have a Brave Search API account? It's the account apps use to search, separate from the Brave browser. [If you'd rather I didn't look you up, just say so.]
+> Web search lets me look things up on the web for you[, starting with you, so you don't have to tell me everything yourself]. [I couldn't search without a key just now. ]A Brave Search key makes search steadier. Brave's free plan still asks for a credit card; search costs $5 per 1,000 searches, and every month includes $5 of free credit, enough for 1,000 searches. That's usually enough for most people, so search usually costs nothing. Searches using that key go to Brave. Do you already have a Brave Search API account? It's the account apps use to search, separate from the Brave browser. [If you'd rather I didn't look you up, just say so.]
 
 End your turn. Not now: `OK. Settings › Keys has it whenever you want it.` Close their task and task `Connect web search` with `You chose not now. Settings › Keys has it.`
 
@@ -34,7 +34,7 @@ If the person says a step doesn't match what they see, answer only from this lis
 - No confirmation email: `Check your spam folder. If it isn't there, sign up again with the same email.`
 - Plans page asks them to log in: `Log in with the email and password you just created, then open Plans again.`
 - Unsure which plan: `Choose Search. It's the one with web results; the other plans aren't needed.`
-- Worried about cost: `Search costs $5 per 1,000 searches, and the $5 of free credit each month covers about 1,000. You only pay past that.`
+- Worried about cost: `Search costs $5 per 1,000 searches, and the $5 of free credit each month covers 1,000. You only pay past that.`
 - Can't find where to paste it: `Settings › Keys, under Web search: [Settings › Keys](/settings/keys).`
 
 Anything else: `Tell me what's on your screen and I'll help.`

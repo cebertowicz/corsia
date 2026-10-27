@@ -385,7 +385,11 @@ def test_web_search_guidance_distinguishes_keyless_readiness_from_key_setup():
     assert "When `web_search_ready` is false, search didn't work on the check; a Brave key is an optional alternative." in web
     assert "There is no fallback search: without a key, web search stays off." not in web
     assert "search stays off until this setup succeeds" not in web
-    assert "Keep the middle bracketed part only when `web_search_ready` is false." in web
+    assert (
+        "Keep the middle bracketed part only when `## Setup facts` shows `web_search_ready` false; "
+        "on a path without that fact, leave it out."
+    ) in web
+    assert "about 1,000" not in web
     assert "[I couldn't search without a key just now. ]A Brave Search key makes search steadier." in web
     after_key = web.split("## 5. After they say it's in", 1)[1]
     assert "`corsia_api` with `GET /api/keys`" in after_key
