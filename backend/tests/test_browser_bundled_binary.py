@@ -91,6 +91,8 @@ def test_a_packaged_app_is_never_told_to_use_npm(tmp_path, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_first_use_without_any_chrome_installs_it_once_and_a_failure_retries(synthetic_browser, monkeypatch, caplog):
+    from host_access import browser_launch
+    monkeypatch.setattr(browser_launch, '_owner_key', lambda _: 'owner')
     fake = synthetic_browser
     installs = []
     outcomes = [sessions.CommandResult(1, "", "offline"), sessions.CommandResult(0, "", "")]
