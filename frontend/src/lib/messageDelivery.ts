@@ -1,4 +1,5 @@
 import {
+	ACCOUNT_HOLD_COPY,
 	blockedReason,
 	NO_MODEL_SELECTED,
 	PROJECT_CLOUD_OFF,
@@ -10,7 +11,9 @@ import {
 	WAITING_FOR_MODEL,
 	WAITING_FOR_THREAD_LOCAL_MODEL,
 	WAITING_FOR_MODEL_CHOICE,
+	WAITING_TO_SEND,
 } from './messageDeliveryCopy';
+import { isMachineCode } from './plainError';
 import type { Message } from './stores/threads';
 
 const MESSAGE_DELIVERY_STATES = [
@@ -32,6 +35,8 @@ export type DeliveryPresentation = {
 		| 'Waiting for model'
 		| 'Switch to a local model to send'
 		| 'Choose a model to send'
+		| 'Waiting for account'
+		| 'Waiting to send'
 		| 'Waiting for checkpoint'
 		| 'Delivery uncertain'
 		| 'Queued'
@@ -58,7 +63,33 @@ const MODEL_HOLD_COPY: Readonly<Record<string, Pick<DeliveryPresentation, 'label
 	[PROJECT_CLOUD_OFF]: WAITING_FOR_LOCAL_MODEL,
 	[THREAD_LOCAL_ONLY]: WAITING_FOR_THREAD_LOCAL_MODEL,
 	[NO_MODEL_SELECTED]: WAITING_FOR_MODEL_CHOICE,
+	...ACCOUNT_HOLD_COPY,
 });
+
+const unmappedHoldsLogged = new Set<string>();
+
+/**
+ * Copy for a held input by its cause.
+ *
+ * A checkpoint hold carries the refusal's sentence; every other hold carries a
+ * code. A code with no copy here is a hold this client predates, so it gets the
+ * generic line rather than another cause's words, and is logged once.
+ */
+function heldCopy(error: unknown): Pick<DeliveryPresentation, 'label' | 'title'> {
+	const code = typeof error === 'string' ? error.trim() : '';
+	if (code in MODEL_HOLD_COPY) return MODEL_HOLD_COPY[code];
+	if (code && !isMachineCode(code)) {
+		return {
+			label: 'Waiting for checkpoint',
+			title: 'The checkpoint needed to continue is unavailable. Your message is saved and has not been sent.',
+		};
+	}
+	if (!unmappedHoldsLogged.has(code)) {
+		unmappedHoldsLogged.add(code);
+		console.warn('[delivery] held input has no copy for its cause', code || '(none)');
+	}
+	return WAITING_TO_SEND;
+}
 
 type DeliveryMessage = Pick<
 	Message,
@@ -199,24 +230,7 @@ export function deliveryPresentation(
 ): DeliveryPresentation | null {
 	const heldForRecovery = message.delivery_state === 'queued'
 		&& message.write_outcome === 'proved_no_write' && !isQueuedInputOwnedByActiveTurn(message);
-	const modelHold = heldForRecovery && typeof message.delivery_error === 'string'
-		? MODEL_HOLD_COPY[message.delivery_error]
-		: undefined;
-	if (modelHold) {
-		return {
-			...modelHold,
-			pending: true,
-			failed: false,
-		};
-	}
-	if (heldForRecovery) {
-		return {
-			label: 'Waiting for checkpoint',
-			title: 'The checkpoint needed to continue is unavailable. Your message is saved and has not been sent.',
-			pending: true,
-			failed: false,
-		};
-	}
+	if (heldForRecovery) return { ...heldCopy(message.delivery_error), pending: true, failed: false };
 	// Ahead of the optimistic guard on purpose. Every other descriptor reports
 	// something only the server knows; this one reports what the user just asked
 	// for, which is true from the moment they ask it.
