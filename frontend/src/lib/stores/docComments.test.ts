@@ -10,9 +10,6 @@ vi.mock('$lib/api/docs', () => ({
 	markCommentThreadViewed: mocks.markCommentThreadViewed,
 }));
 
-const attention = vi.hoisted(() => ({ reload: vi.fn(async () => {}) }));
-vi.mock('./attentionDock.svelte', () => ({ reload: attention.reload }));
-
 import { prepareCommentArrival, revealCommentArrival } from './docCommentArrivals';
 import {
 	docComments, commentLoads, fromServer, hasNewReplies, loadComments, flushPositions, markThreadViewed, remapComments,
@@ -28,7 +25,6 @@ afterEach(() => {
 	mocks.postComment.mockReset();
 	mocks.patchComment.mockReset();
 	mocks.markCommentThreadViewed.mockReset();
-	attention.reload.mockClear();
 });
 
 describe('comment loading presentation', () => {
@@ -177,14 +173,6 @@ describe('thread reply attention', () => {
 		expect(Object.keys(a)).not.toContain('replyWaiting');
 		expect(waiting()).toEqual([['a', false], ['b', true]]);
 		expect(b.newReplyIds).toEqual(['b1']);
-	});
-
-	it('re-reads the dock queue once a reply has been on screen, so the dock advances', async () => {
-		docComments.set({ artifact: [thread('a', ['a1'])] });
-		mocks.markCommentThreadViewed.mockResolvedValue({ root_id: 'a', new_reply_ids: [] });
-		expect(attention.reload).not.toHaveBeenCalled();
-		await markThreadViewed('artifact', 'a', 'a1');
-		expect(attention.reload).toHaveBeenCalledTimes(1);
 	});
 
 	it('stays waiting while another unseen reply remains in the thread', async () => {

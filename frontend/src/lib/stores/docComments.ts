@@ -7,7 +7,6 @@ import { fromServer, type CommentAuthor, type DocComment } from './docCommentPro
 import { withhold } from './docCommentHolds';
 import { newClientId } from './documentWire';
 
-
 export { fromServer, hasNewReplies, regionFromServer } from './docCommentProjection';
 export type { CommentAuthor, CommentReply, DocComment } from './docCommentProjection';
 
@@ -171,7 +170,6 @@ export async function markThreadViewed(artifactId: string, rootId: string, seenR
 			comment.id === result.root_id ? { ...comment, newReplyIds: result.new_reply_ids } : comment
 		)),
 	}));
-
 }
 
 export function resolveComment(artifactId: string, commentId: string, resolved = true) {
