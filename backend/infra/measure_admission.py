@@ -10,8 +10,9 @@ from typing import Any
 from host_access.credential_sanitizer import contains_credential
 from infra.measure_registry import REGISTRY, DeclaredEvent, namespace_refusal
 from infra.measure_validation import STAMPED_ATTRIBUTES
+from infra.outcome_event_attributes import ATTRIBUTE_ALLOWLISTS
 from infra.outcome_event_input import OutcomeInputRefusal
-from infra.outcome_events import RecordResult, count_outcome_event, record_outcome_event
+from infra.outcome_events import RecordResult, _utc, count_outcome_event, record_outcome_event
 
 # Counter labels for names an agent didn't declare: a printed name never becomes a counter row,
 # so an agent's counter rows per day stay within (declared events + these labels) x counters.
@@ -59,13 +60,16 @@ def admit(
     late = _time_problem(event_name, ts, entry)
     if late:
         return refuse("record_refused", late)
+    event_ts = ts or datetime.now(timezone.utc).isoformat()
+    if entry.since is not None and entry.since["as"] not in merged:
+        _stamp_since(db, entry, merged, _utc(event_ts), project_id, owner_thread_id)
     key, problem = _dedupe_key(event_name, entry, merged)
     if problem:
         return refuse("record_refused", problem)
     try:
         result = record_outcome_event(
             db, dedupe_key=key, event_name=event_name, source="agent", provenance="agent_recorded",
-            ts=ts or datetime.now(timezone.utc).isoformat(), project_id=project_id,
+            ts=event_ts, project_id=project_id,
             agent_thread_id=owner_thread_id, attribution="caller", attributes=merged, declared_specs=entry.specs,
         )
     except OutcomeInputRefusal as exc:
@@ -78,6 +82,36 @@ def admit(
     for note in notes:
         REGISTRY.note(owner_thread_id, note)  # in memory: a rolled-back settle leaves harmless notes
     return Admission(result, None, notes)
+
+
+def _stamp_since(
+    db: sqlite3.Connection, entry: DeclaredEvent, attributes: dict[str, Any], ts: str,
+    project_id: str | None, owner: str,
+) -> None:
+    since = entry.since
+    assert since is not None
+    on = since["on"]
+    pairs = {on: on} if isinstance(on, str) else on
+    values: list[Any] = []
+    for end, start in pairs.items():
+        value = attributes.get(end)
+        if value is None or not entry.specs[end].accepts(value):
+            return
+        values.extend((start, value))
+    clauses = ["event_name=?", "ts<=?", "retracted_at IS NULL"]
+    args: list[Any] = [since["event"], ts]
+    if since["event"] not in ATTRIBUTE_ALLOWLISTS:
+        clauses.extend(("project_id IS ?", "agent_thread_id=?"))
+        args.extend((project_id, owner))
+    for _ in pairs:
+        clauses.append("EXISTS (SELECT 1 FROM json_each(outcome_events.attributes) WHERE key=? AND value=?)")
+    args.extend(values)
+    sql = "SELECT ts FROM outcome_events WHERE " + " AND ".join(clauses) + " ORDER BY ts DESC LIMIT 1"
+    row = db.execute(sql, args).fetchone()
+    if row is not None:
+        start = datetime.fromisoformat(row[0])
+        end = datetime.fromisoformat(ts)
+        attributes[since["as"]] = int((end - start).total_seconds() // 60)
 
 
 def count_unversioned(db: sqlite3.Connection, admission: Admission, event_name: str, owner: str) -> None:
