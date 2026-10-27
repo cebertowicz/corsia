@@ -322,16 +322,16 @@
       "sha256": "ddb2e532b6ec82c809e9faba2453f4edb2925740ede0b86cb87d0f6d72d68286"
     },
     {
-      "bytes": 6780,
+      "bytes": 6812,
       "kind": "skill",
       "path": "skills/google-setup/SKILL.md",
-      "sha256": "f8c734db65934c28499e732d2ca8459f0972c4dde047ec7b5e916155b075aa5f"
+      "sha256": "b25e16b92b3293adbdaaf4d47228fad4a6a615f94005d926446034e249dc07ff"
     },
     {
-      "bytes": 544,
+      "bytes": 695,
       "kind": "skill",
       "path": "skills/google-setup/steps/console-apis.json",
-      "sha256": "d84e58fa3ba933b17b69b4f7f7ea675da7d3af023f6a9c10812bcc1385169019"
+      "sha256": "641261fe6797d9ce2825ff4c22b4d3c54d71436fc8f8aea89eff51f650f28ea1"
     },
     {
       "bytes": 1371,

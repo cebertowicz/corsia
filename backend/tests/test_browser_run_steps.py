@@ -141,6 +141,11 @@ async def test_selector_wait_retries_until_success_or_deadline(tool, monkeypatch
     clock = iter(times)
     from types import SimpleNamespace
     monkeypatch.setattr(browser_run_steps, "time", SimpleNamespace(monotonic=lambda: next(clock)))
+    pauses = []
+
+    async def fake_sleep(seconds):
+        pauses.append(seconds)
+    monkeypatch.setattr(browser_run_steps, "asyncio", SimpleNamespace(sleep=fake_sleep))
     async def fake_run(args, **kwargs):
         calls.append((args, kwargs))
         if args[0] == "wait":
@@ -153,6 +158,7 @@ async def test_selector_wait_retries_until_success_or_deadline(tool, monkeypatch
         assert result["saw"]["missing"] == 'text="CORSIA"'
     waits = [(args, kwargs) for args, kwargs in calls if args[0] == "wait"]
     assert len(waits) == 3 and all("timeout" not in kwargs for _, kwargs in waits)
+    assert pauses == [browser_run_steps._RETRY_PAUSE_S] * 2  # a pause between tries, none after the last
 
 
 @pytest.mark.asyncio

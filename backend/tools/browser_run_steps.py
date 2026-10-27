@@ -1,5 +1,6 @@
 """Guarded, server-owned browser setup steps."""
 
+import asyncio
 import json
 import re
 import time
@@ -14,6 +15,7 @@ from tools.browser_runtime import _execution_context, _run
 
 _SAFE_NAME = re.compile(r"[a-z0-9-]+")
 _SKILLS = Path(__file__).resolve().parents[1] / "prompts/system/v1/skills"
+_RETRY_PAUSE_S = 1.0  # between selector waits, so an instant error is not a tight loop of browser launches
 _GUARD_REFUSALS = (browser_control.PASSWORD_PAGE, browser_control.PERSON_STEP,
                    browser_control.PASSWORD_DECLINED, browser_control.PERSON_STEP_DECLINED)
 
@@ -119,6 +121,7 @@ class BrowserRunStepsTool(Tool):
                     not (result.startswith("Error:") or result == browser_cli.WAIT_TIMED_OUT) or
                     time.monotonic() >= deadline):
                     break
+                await asyncio.sleep(_RETRY_PAUSE_S)
             if result == browser_cli.WAIT_TIMED_OUT:
                 result = "Error: wait timed out"
             if result.startswith("Error:"):
