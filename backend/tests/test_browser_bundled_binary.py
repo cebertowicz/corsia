@@ -93,6 +93,7 @@ def test_a_packaged_app_is_never_told_to_use_npm(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_first_use_without_any_chrome_installs_it_once_and_a_failure_retries(synthetic_browser, monkeypatch, caplog):
     monkeypatch.setattr(cli, "sys", SimpleNamespace(platform="darwin"))
+    monkeypatch.setattr(sessions, "sys", SimpleNamespace(platform="darwin"))
     fake = synthetic_browser
     installs = []
     outcomes = [sessions.CommandResult(1, "", "offline"), sessions.CommandResult(0, "", "")]
@@ -120,6 +121,7 @@ async def test_first_use_without_any_chrome_installs_it_once_and_a_failure_retri
 @pytest.mark.asyncio
 async def test_a_mac_with_chrome_or_a_downloaded_copy_installs_nothing(synthetic_browser, monkeypatch):
     monkeypatch.setattr(cli, "sys", SimpleNamespace(platform="darwin"))
+    monkeypatch.setattr(sessions, "sys", SimpleNamespace(platform="darwin"))
     fake = synthetic_browser
     original = fake.owner._invoke
 
