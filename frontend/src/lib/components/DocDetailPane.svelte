@@ -82,11 +82,11 @@
 						</div>
 					</div>
 				{:else if sel.descState === 'pending'}
-					<p class="dd-desc pending">No description. Use the pencil to add one.</p>
+					<p class="dd-desc pending">No description. Select Edit description to add one.</p>
 				{:else if sel.description}
 					<p class="dd-desc">{sel.description}</p>
 				{:else}
-					<p class="dd-desc muted">No description. Use the pencil to add one, or comment on it.</p>
+					<p class="dd-desc muted">No description. Select Edit description to add one, or comment on the file.</p>
 				{/if}
 			</div>
 
@@ -124,7 +124,7 @@
 			{#if $libraryLoading}
 				<p class="dd-hint">Loading files…</p>
 			{:else if $pendingCount}
-				<div class="dd-hygiene">{$pendingCount} file{$pendingCount > 1 ? 's' : ''} without a description. Select one to add it.</div>
+				<div class="dd-hygiene">{$pendingCount.toLocaleString()} file{$pendingCount > 1 ? 's' : ''} without a description. Select a file to add one.</div>
 			{/if}
 			<p class="dd-hint">Select a file to see its description, provenance, and history.</p>
 		</div>

@@ -330,7 +330,8 @@ describe('ArtifactPane — fetch failure is not "no artifacts"', () => {
 		await vi.waitFor(() => {
 			expect(host.querySelector('.pane-error')).toBeTruthy();
 		});
-		expect(host.textContent).toContain("Couldn’t load this chat’s files. Try again.");
+		expect(host.textContent).toContain("Couldn’t load this chat’s files.");
+		expect(host.textContent).not.toContain('Try again');
 		expect(host.textContent).not.toContain(EMPTY_COPY);
 		expect([...host.querySelectorAll('button')].some((b) => b.textContent?.trim() === 'Retry')).toBe(true);
 	});

@@ -264,7 +264,7 @@
 			<button class="chip" class:on={lens === c.id} onclick={() => docLens.set(c.id)}>
 				{c.label}
 				{#if c.id === 'skills'}<span class="chip-n">{$skillDocs.length}</span>{/if}
-				{#if c.id === 'all' && $pendingCount}<span class="chip-dot" title="{$pendingCount} file{$pendingCount > 1 ? 's' : ''} without a description"></span>{/if}
+				{#if c.id === 'all' && $pendingCount}<span class="chip-dot" title="{$pendingCount.toLocaleString()} file{$pendingCount > 1 ? 's' : ''} without a description"></span>{/if}
 			</button>
 		{/each}
 	</div>

@@ -220,7 +220,7 @@
 	<div class="muted">Loading…</div>
 {:else if showFetchError}
 	<div class="pane-error" role="status">
-		<span>Couldn’t load this chat’s files. Try again.</span>
+		<span>Couldn’t load this chat’s files.</span>
 		<Button variant="secondary" size="sm" loading={retryingLoad} disabled={retryingLoad} onclick={retryLoad}>
 			Retry
 		</Button>

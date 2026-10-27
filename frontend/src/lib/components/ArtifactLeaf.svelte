@@ -276,7 +276,7 @@
 				<div class="gone" role="status">
 					<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" /></svg>
 					<p>{activeTab.title} is unavailable.</p>
-					<span>CORSIA can’t find it in this chat’s files.</span>
+					<span>It was deleted or removed from this chat’s files.</span>
 					<button type="button" onclick={() => requestCloseTab(activeTab.instanceId)}>Close tab</button>
 				</div>
 			{:else if imageTarget}
