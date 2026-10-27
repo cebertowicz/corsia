@@ -267,7 +267,7 @@
 			<ProvidersPolicyBlock projectId={project.id} onSignIn={() => requestSettingsSection('providers')} />
 		</div>
 
-		<SettingsGroup label="Agents" hint="Threads that own one area of this project.">
+		<SettingsGroup label="Agents" hint="Agents that own one area of this project.">
 			{#if agentsLoading}
 				<p class="note">Loading project Agents…</p>
 			{:else if agentsError}

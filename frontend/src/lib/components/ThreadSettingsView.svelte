@@ -74,7 +74,7 @@
 		{#if !conductor}
 		<section class="sec">
 			<div class="sec-cap">Agent</div>
-			<p class="sec-hint">Promote this thread to a {agentScope} Agent when it has a clear responsibility.</p>
+			<p class="sec-hint">Promote this chat to a {agentScope} agent when it has a clear responsibility.</p>
 			<ThreadAgentPanel thread={$activeThread ?? null} />
 		</section>
 		{/if}

@@ -22,7 +22,7 @@
 <SettingsGroup label="System bulletins">
 	<SettingsRow
 		name="Check for maintainer bulletins"
-		sub="When on, CORSIA checks a public file once a day for signed notes from its maintainers on System changes. The CORSIA agent reviews each note and is told to ask you before changing anything you decided. Turning this off does not stop the notice the CORSIA agent gets when an update changes System instructions."
+		sub="Once a day, CORSIA checks for signed notes from its maintainers and asks you before changing anything you decided."
 		wrap
 	>
 		{#snippet actions()}

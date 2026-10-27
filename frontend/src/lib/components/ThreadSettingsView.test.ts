@@ -68,7 +68,7 @@ describe('ThreadSettingsView', () => {
 		expect(host.querySelector('[role="dialog"]')).toBeNull();
 		expect(host.textContent).toContain('Context files');
 		expect(host.textContent).toContain('Thread skills');
-		expect(host.textContent).toContain('workspace Agent');
+		expect(host.textContent).toContain('Promote this chat to a workspace agent when it has a clear responsibility.');
 		expect(host.textContent).toContain('Make Agent');
 		expect(host.textContent).not.toContain('Attach this thread to a project');
 	});
@@ -82,7 +82,7 @@ describe('ThreadSettingsView', () => {
 		expect(host.querySelector('[role="dialog"]')).toBeNull();
 		expect(host.textContent).toContain('Context files');
 		expect(host.textContent).toContain('Managing skills for Thread: Thread settings');
-		expect(host.textContent).toContain('project Agent');
+		expect(host.textContent).toContain('Promote this chat to a project agent when it has a clear responsibility.');
 		expect(host.textContent).toContain('Make Agent');
 	});
 
