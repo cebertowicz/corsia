@@ -115,7 +115,7 @@
 	{:else if imageState === 'error'}
 		<div class="load-error" role="alert">
 			<p>Couldn't load this image.</p>
-			<button type="button" class="stale-control" onclick={reload}>Try again</button>
+			<button type="button" class="stale-control" onclick={reload}>Retry</button>
 		</div>
 	{/if}
 	{#if src && imageState !== 'error'}
