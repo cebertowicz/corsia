@@ -18,9 +18,10 @@ def pr_drafts(payload: dict[str, Any], repo: str) -> list[OutcomeDraft]:
     subject = pr_subject(repo, number)
     name = "ready" if action == "ready_for_review" else "drafted"
     attrs: dict[str, Any] = {"repo": repo, "pr": str(number)}
-    minutes = measurements.minutes_between(pr.get("created_at"), at)
-    if name == "ready" and minutes is not None:
-        attrs["minutes_since_pr_created"] = minutes
+    if name == "ready":
+        minutes = measurements.minutes_between(pr.get("created_at"), at)
+        if minutes is not None:
+            attrs["minutes_since_pr_created"] = minutes
     return [OutcomeDraft(f"{subject}:{name}:{at}", f"github.pr.{name}", at, subject, attrs)]
 
 

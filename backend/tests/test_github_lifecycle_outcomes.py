@@ -49,6 +49,13 @@ async def test_lifecycle_facts_and_redelivery(main_db, index, name, facts):
     assert not ({"body", "title", "description", "release_notes"} & facts.keys())
 
 
+async def test_drafted_does_not_read_unneeded_created_at(main_db):
+    fixture = json.loads((FIXTURES / "lifecycle.json").read_text())[1]
+    fixture["payload"]["pull_request"]["created_at"] = "not a timestamp"
+    await admit_github_delivery_async("pull_request", fixture["payload"], "draft")
+    assert rows(main_db)[0][0] == "github.pr.drafted"
+
+
 async def test_status_context_with_spaces_is_retained(main_db):
     fixture = json.loads((FIXTURES / "lifecycle.json").read_text())[3]
     fixture["payload"]["context"] = "continuous-integration / build"
