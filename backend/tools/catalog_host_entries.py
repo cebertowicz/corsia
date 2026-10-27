@@ -9,7 +9,7 @@ _Entry = ToolCatalogEntry
 
 HOST_ACCESS_CATALOG_ENTRIES: dict[str, ToolCatalogEntry] = {
     "host_cpu_top": _Entry(
-        "host_access", authority="host-cpu-read",
+        "processes", authority="host-cpu-read",
         summary="See which host processes use CPU, without a host permit",
         activity="Sampling host CPU usage",
     ),
@@ -37,32 +37,32 @@ HOST_ACCESS_CATALOG_ENTRIES: dict[str, ToolCatalogEntry] = {
         activity="Releasing host access",
     ),
     "managed_process_status": _Entry(
-        "host_access", authority="managed-process-read",
+        "processes", authority="managed-process-read",
         summary="Check a background process started by bash",
         activity="Checking process",
     ),
     "managed_process_logs": _Entry(
-        "host_access", authority="managed-process-read",
+        "processes", authority="managed-process-read",
         summary="Read a background process's logs",
         activity="Reading process logs",
     ),
     "managed_process_list": _Entry(
-        "host_access", authority="managed-process-read",
+        "processes", authority="managed-process-read",
         summary="List this thread's background processes",
         activity="Listing processes",
     ),
     "managed_process_stop": _Entry(
-        "host_access", authority="managed-process-stop",
+        "processes", authority="managed-process-stop",
         summary="Stop a background process",
         activity="Stopping process",
     ),
     "process_discover": _Entry(
-        "host_access", authority="host-process-read",
+        "processes", authority="host-process-read",
         summary="Find host processes by name or PID",
         activity="Finding processes",
     ),
     "process_signal": _Entry(
-        "host_access", authority="host-process-signal",
+        "processes", authority="host-process-signal",
         summary="Signal a host process found by process_discover",
         activity="Signaling process",
     ),
