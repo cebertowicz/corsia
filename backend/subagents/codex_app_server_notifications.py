@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from typing import Any
@@ -52,6 +53,9 @@ async def respond(
     error: dict | None = None,
 ) -> None:
     """Write one response unless intentional teardown already owns the pipe."""
+    from subagents.codex_app_server import REQUEST_TIMEOUT
+    from subagents.codex_requests import drain
+
     if session._proc is None or session._proc.stdin is None:
         return
     payload = {"id": msg_id, "error" if error is not None else "result": (
@@ -62,7 +66,8 @@ async def respond(
             return
         try:
             session._proc.stdin.write((json.dumps(payload) + "\n").encode())
-            await session._proc.stdin.drain()
+            async with asyncio.timeout(REQUEST_TIMEOUT) as deadline:
+                await drain(session, deadline)
         except (BrokenPipeError, ConnectionResetError, RuntimeError):
             if not session._closing:
                 raise

@@ -8,6 +8,30 @@ from subagents.codex_app_server_errors import CodexAppServerError
 from subagents.vendor_write_admission import require_session_write
 
 
+async def drain(session, deadline: asyncio.Timeout) -> None:
+    """Drain under the lock holder's deadline; only its own expiry kills."""
+    try:
+        await session._proc.stdin.drain()
+    except asyncio.CancelledError:
+        if deadline.expired():
+            # Leave on_exit enabled for the existing retirement owner.
+            session._kill_process()
+        raise
+
+
+async def notify(session, method: str, params: dict) -> None:
+    """Serialize a notification and bound its own lock-held drain."""
+    from subagents.codex_app_server import REQUEST_TIMEOUT
+
+    if session._proc is None or session._proc.stdin is None:
+        raise RuntimeError("CodexAppServerSession not started")
+    async with session._write_lock:
+        payload = {"method": method, "params": params}
+        session._proc.stdin.write((json.dumps(payload) + "\n").encode())
+        async with asyncio.timeout(REQUEST_TIMEOUT) as deadline:
+            await drain(session, deadline)
+
+
 async def request(session, method, params=None, *, on_write_observed=None, on_drain_confirmed=None):
     """Bound one request's lock, pipe drain and response with a single deadline."""
     from subagents.codex_app_server import REQUEST_TIMEOUT, STEER_REQUEST_TIMEOUT, _STEER_NOT_WRITTEN
@@ -25,7 +49,6 @@ async def request(session, method, params=None, *, on_write_observed=None, on_dr
     if params is not None:
         payload["params"] = params
     deadline = asyncio.timeout(STEER_REQUEST_TIMEOUT if method == "turn/steer" else REQUEST_TIMEOUT)
-    drained = False
     try:
         async with deadline:
             async with session._write_lock:
@@ -39,18 +62,13 @@ async def request(session, method, params=None, *, on_write_observed=None, on_dr
                 session._proc.stdin.write((json.dumps(payload) + "\n").encode())
                 if on_write_observed is not None:
                     on_write_observed()
-                await session._proc.stdin.drain()
-                drained = True
+                await drain(session, deadline)
                 if on_drain_confirmed is not None:
                     on_drain_confirmed()
             return await fut
     except TimeoutError as error:
         if not deadline.expired():
             raise
-        if not drained:
-            # Keep on_exit enabled: its existing owner retires the failed generation.
-            # Killing a stalled writer also releases other writers stuck in drain.
-            session._kill_process()
         raise CodexAppServerError(
             f"codex app-server request timed out: {method}", {"method": method},
         ) from error

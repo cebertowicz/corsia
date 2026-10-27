@@ -90,27 +90,134 @@ async def test_request_deadline_includes_stopped_reader_drain(monkeypatch, metho
             await asyncio.gather(task, return_exceptions=True)
 
 
-async def test_request_deadline_includes_lock_behind_unread_pipe(monkeypatch):
-    monkeypatch.setattr(codex_app_server, "STEER_REQUEST_TIMEOUT", 0.05)
+@pytest.fixture
+def controlled_deadlines(monkeypatch):
+    """Record real timeout scopes; tests explicitly expire them without clock races."""
+    timeout = asyncio.timeout
+    deadlines = []
+
+    def controlled(budget):
+        deadline = timeout(None)
+        deadlines.append((budget, deadline))
+        return deadline
+
+    monkeypatch.setattr(asyncio, "timeout", controlled)
+    return deadlines
+
+
+async def test_request_deadline_includes_lock_behind_unread_pipe(controlled_deadlines):
     async with _unread_pipe_session() as session:
-        written = asyncio.Event()
-        # _notify and dynamic-tool replies share the request write lock. Their
-        # stalled drain must not prevent a request's own deadline from starting.
+        written = Mock()
+        session._kill_process = Mock(wraps=session._kill_process)
         owner = asyncio.create_task(session._notify("initialized", {"data": "x" * (2 * 1024 * 1024)}))
-        await asyncio.sleep(0)
-        assert session._write_lock.locked()
-        task = asyncio.create_task(session._request("turn/steer", {}, on_write_observed=written.set))
+        task = None
         try:
-            done, _ = await asyncio.wait({task}, timeout=0.5)
-            assert done, "request hung behind the transport write lock"
+            await asyncio.sleep(0)
+            assert session._write_lock.locked()
+            task = asyncio.create_task(session._request("turn/steer", {}, on_write_observed=written))
+            await asyncio.sleep(0)
+            budget, deadline = controlled_deadlines[-1]
+            assert budget == 10
+            deadline.reschedule(asyncio.get_running_loop().time())
             with pytest.raises(CodexAppServerError, match="turn/steer"):
-                task.result()
-            assert not written.is_set()
+                await asyncio.wait_for(asyncio.shield(task), 2)
+            written.assert_not_called()
+            session._kill_process.assert_not_called()
+            assert not owner.done() and session._proc.returncode is None
             assert session._pending == session._pending_methods == {}
-            await asyncio.wait_for(session._proc.wait(), 1)
-            await asyncio.wait_for(session._reader, 1)
+            assert [budget for budget, _ in controlled_deadlines] == [120, 10]
+            controlled_deadlines[0][1].reschedule(asyncio.get_running_loop().time())
+            with pytest.raises(TimeoutError):
+                await asyncio.wait_for(asyncio.shield(owner), 2)
+            session._kill_process.assert_called_once()
+            await asyncio.wait_for(session._reader, 2)
             session._on_exit.assert_awaited_once()
+            assert not session._closing
+        finally:
+            for pending in (task, owner):
+                if pending is not None:
+                    pending.cancel()
+            await asyncio.gather(*(t for t in (task, owner) if t is not None), return_exceptions=True)
+
+
+async def test_steer_waiter_preserves_stalled_start_own_budget(controlled_deadlines):
+    async with _unread_pipe_session() as session:
+        session._kill_process = Mock(wraps=session._kill_process)
+        start = asyncio.create_task(session._request("turn/start", {"input": "x" * (2 * 1024 * 1024)}))
+        steer = None
+        try:
+            await asyncio.sleep(0)
+            assert session._write_lock.locked()
+            steer = asyncio.create_task(session._request("turn/steer", {}))
+            await asyncio.sleep(0)
+            assert [budget for budget, _ in controlled_deadlines] == [120, 10]
+            controlled_deadlines[1][1].reschedule(asyncio.get_running_loop().time())
+            with pytest.raises(CodexAppServerError, match="turn/steer"):
+                await asyncio.wait_for(asyncio.shield(steer), 2)
+            session._kill_process.assert_not_called()
+            assert not start.done() and session._proc.returncode is None
+            assert not controlled_deadlines[0][1].expired()
+            controlled_deadlines[0][1].reschedule(asyncio.get_running_loop().time())
+            with pytest.raises(CodexAppServerError, match="turn/start"):
+                await asyncio.wait_for(asyncio.shield(start), 2)
+            session._kill_process.assert_called_once()
+            await asyncio.wait_for(session._reader, 2)
+            session._on_exit.assert_awaited_once()
+            assert session._pending == session._pending_methods == {}
+            assert not session._closing
+        finally:
+            for task in (start, steer):
+                if task is not None:
+                    task.cancel()
+            await asyncio.gather(*(t for t in (start, steer) if t is not None), return_exceptions=True)
+
+
+@pytest.mark.parametrize("writer", ["notify", "respond"])
+async def test_nonrequest_writer_bounds_own_stalled_drain(controlled_deadlines, writer):
+    async with _unread_pipe_session() as session:
+        session._kill_process = Mock(wraps=session._kill_process)
+        payload = {"data": "x" * (2 * 1024 * 1024)}
+        operation = session._notify("initialized", payload) if writer == "notify" else session._respond(42, result=payload)
+        task = asyncio.create_task(operation)
+        try:
+            await asyncio.sleep(0)
+            assert session._write_lock.locked() and not task.done()
+            assert [budget for budget, _ in controlled_deadlines] == [120]
+            controlled_deadlines[0][1].reschedule(asyncio.get_running_loop().time())
+            with pytest.raises(TimeoutError):
+                await asyncio.wait_for(asyncio.shield(task), 2)
+            session._kill_process.assert_called_once()
+            await asyncio.wait_for(session._reader, 2)
+            session._on_exit.assert_awaited_once()
+            assert session._proc.returncode is not None
+            assert not session._closing and not session._write_lock.locked()
         finally:
             task.cancel()
-            owner.cancel()
-            await asyncio.gather(task, owner, return_exceptions=True)
+            await asyncio.gather(task, return_exceptions=True)
+
+
+@pytest.mark.parametrize("writer", ["request", "notify", "respond"])
+async def test_cancelled_writer_drain_does_not_kill(controlled_deadlines, writer):
+    async with _unread_pipe_session() as session:
+        session._kill_process = Mock(wraps=session._kill_process)
+        payload = {"data": "x" * (2 * 1024 * 1024)}
+        operations = {
+            "request": lambda: session._request("turn/start", payload),
+            "notify": lambda: session._notify("initialized", payload),
+            "respond": lambda: session._respond(42, result=payload),
+        }
+        task = asyncio.create_task(operations[writer]())
+        try:
+            await asyncio.sleep(0)
+            assert session._write_lock.locked() and not task.done()
+            assert [budget for budget, _ in controlled_deadlines] == [120]
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            session._kill_process.assert_not_called()
+            assert session._proc.returncode is None
+            assert not session._write_lock.locked()
+            assert session._pending == session._pending_methods == {}
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)

@@ -666,12 +666,9 @@ class CodexAppServerSession:
                              on_drain_confirmed=on_drain_confirmed)
 
     async def _notify(self, method: str, params: dict) -> None:
-        if self._proc is None or self._proc.stdin is None:
-            raise RuntimeError("CodexAppServerSession not started")
-        async with self._write_lock:
-            payload = {"method": method, "params": params}
-            self._proc.stdin.write((json.dumps(payload) + "\n").encode())
-            await self._proc.stdin.drain()
+        from subagents.codex_requests import notify
+
+        await notify(self, method, params)
 
     async def _respond(
         self, msg_id: int, *, result: Any = None, error: dict | None = None
