@@ -225,7 +225,7 @@ def _claimable_prefix(
     model_held, account_held = liftable_hold_sets(rows)
     candidate = _deliverable_prefix(rows, model_held | account_held)
     load_for = load_authors((row['id'], str(row['role']), json.loads(row['metadata'] or '{}')) for row in candidate)
-    admission = model_admission(model, load_for=load_for, db=connection, thread_id=thread_id) if model_held else Admission("run")
+    admission = model_admission(model, load_for=load_for, db=connection, thread_id=thread_id)[1] if model_held else Admission("run")
     lifted = lifted_hold_ids(model_held, account_held, admission)
     rows = _deliverable_prefix(rows, lifted)
     if not rows or not any(starts_turn(row) for row in rows):

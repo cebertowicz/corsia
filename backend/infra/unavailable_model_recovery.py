@@ -113,16 +113,17 @@ async def hold_unavailable_model_input(
     return receipt
 
 
-def model_admission(model: str, *, load_for: tuple[str, ...] = (), db=None, thread_id: str | None = None):
-    """Classify the target at claim, widening only a person's local send."""
+def model_admission(model, *, load_for: tuple[str, ...] = (), db=None, thread_id: str | None = None, loaded=None):
+    """Resolve and classify the cached or live target for one admission."""
     from infra.send_target import Admission, ready_target
     from llm.resolution import ModelUnavailableError, resolve_thread_target
 
     try:
-        target = ready_target(resolve_thread_target(model, thread_id=thread_id, db=db), db=db)
-        return classify_target_admission(target, load_for=load_for)
+        target = resolve_thread_target(model, thread_id=thread_id, db=db) if isinstance(model, str) else model
+        target = ready_target(target, db=db, loaded=loaded)
+        return target, classify_target_admission(target, load_for=load_for)
     except (ModelUnavailableError, ValueError):
-        return Admission("fail")
+        return None, Admission("fail")
 
 
 def liftable_hold_sets(rows) -> tuple[frozenset[str], frozenset[str]]:

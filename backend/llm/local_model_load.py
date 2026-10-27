@@ -118,8 +118,7 @@ def readiness(target: ExecutionTarget, *, db) -> Readiness | None:
     from llm.network_discovery import get_loaded_model_ids
 
     seat = omlx_seat_and_model(target)
-    # Only a target the resolver admitted has a readiness; catalog unavailability stays a hold.
-    if seat is None or not target.available:
+    if seat is None:
         return None
     server_id, model_id = seat
     status = cached_status(target, db=db, server_id=server_id)
@@ -128,16 +127,6 @@ def readiness(target: ExecutionTarget, *, db) -> Readiness | None:
         return Readiness("loaded", len(loaded - {model_id}))
     fit = fit_readiness(db, server_id, model_id, loaded)
     return fit if fit.state == "unreachable" or status == "available" else None
-
-
-def _readiness_now(target: ExecutionTarget) -> Readiness | None:
-    from infra.database import get_db
-
-    db = get_db()
-    try:
-        return readiness(target, db=db)
-    finally:
-        db.close()
 
 
 def _fit_now(server_id: str, model_id: str, loaded: set[str]) -> Readiness:
@@ -209,19 +198,6 @@ async def _load(target: ExecutionTarget, server_id: str, model_id: str) -> None:
 
 
 async def _ensure(target: ExecutionTarget, server_id: str, model_id: str) -> None:
-    from infra.db_async import run_in_db
-    from llm.providers.omlx_lifecycle import read_loaded
-
-    state = await run_in_db(_readiness_now, target)
-    if state is None:
-        return
-    live = await read_loaded({"server_id": server_id})
-    if live is None:
-        log.info("Cannot read loaded status for %s on %s", model_id, server_id)
-        _emit_load(server_id, model_id, "load.failed", "unreachable")
-        raise ModelLoadFailed("unreachable")
-    if any(row["identifier"] == model_id for row in live):
-        return
     await _load(target, server_id, model_id)
 
 

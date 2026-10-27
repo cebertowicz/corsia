@@ -119,7 +119,7 @@ def ready_target(target: ExecutionTarget, *, db=None, loaded: set[str] | None = 
     try:
         if loaded is not None:
             if seat[1] in loaded:
-                return target
+                return replace(target, available=True, availability_reason=None)
             state = fit_readiness(connection, seat[0], seat[1], loaded)
         else:
             if cached_status(target, db=connection, server_id=seat[0]) == "ready":

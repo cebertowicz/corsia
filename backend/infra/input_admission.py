@@ -324,10 +324,10 @@ def accept_thread_input(
     )
 
 
-def _refuse_unready_person_send(db, model: str, thread_id: str, load_for: tuple[str, ...]) -> None:
+def _person_model_admission(db, model: str, thread_id: str, load_for: tuple[str, ...]) -> None:
     """Refuse an unready local model before accepting a new human input."""
     from infra.send_types import SendRejected
-    from infra.send_target import classify_target_admission, ready_target
+    from infra.unavailable_model_recovery import model_admission
     from llm.local_model_load import ModelLoadFailed, omlx_seat_and_model
     from llm.network_discovery import get_loaded_model_ids
     from llm.resolution import ModelUnavailableError, resolve_thread_target
@@ -341,11 +341,10 @@ def _refuse_unready_person_send(db, model: str, thread_id: str, load_for: tuple[
     seat = omlx_seat_and_model(target)
     if seat is None:
         return
-    admission = classify_target_admission(ready_target(target, db=db), load_for=load_for)
-    if admission.kind == "fail" and isinstance(error := admission.error(target.catalog_id), ModelLoadFailed):
-        other_loaded = len(get_loaded_model_ids(seat[0]) - {seat[1]})
+    target, admission = model_admission(target, db=db, load_for=load_for)
+    if target and admission.kind == "fail" and isinstance(error := admission.error(target.catalog_id), ModelLoadFailed):
         raise SendRejected(409, "Couldn't load the selected local model.", metadata={
-            "cause": error.cause, "other_loaded": other_loaded,
+            "cause": error.cause, "other_loaded": len(get_loaded_model_ids(seat[0]) - {seat[1]}),
         })
 
 
@@ -357,7 +356,7 @@ def _admission_hold(db: sqlite3.Connection, model: str, *, thread_id: str, load_
     kept, never failed or sent to a model nobody chose, and only the user
     choosing a model lifts it (``thread.model_row.select_first_model``).
     """
-    _refuse_unready_person_send(db, model, thread_id, load_for)
+    _person_model_admission(db, model, thread_id, load_for)
     if model:
         from connections.account_holds import model_account_hold
 

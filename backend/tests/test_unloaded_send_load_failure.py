@@ -125,3 +125,27 @@ async def test_live_refusal_of_background_turn_takes_the_unavailable_path(isolat
         await turn._setup_turn("t", "work", [], target=target, turn_id="background", ingress="ws", request=SimpleNamespace(load_for=()))
     bind.assert_not_awaited()
     load.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("unrun", [False, True])
+async def test_load_settlement_error_still_settles_terminal(monkeypatch, unrun):
+    from infra import send_post_admission, thread_execution, unavailable_model_recovery
+    from core import turn_core
+
+    batch = SimpleNamespace(thread_id="t", turn_id="turn", target_model="model")
+    error = ValueError("load settlement failed")
+    terminal = AsyncMock()
+    monkeypatch.setattr(turn_core, "settle_turn_terminal", terminal)
+    if unrun:
+        monkeypatch.setattr("infra.input_sequencing.settle_load_failure", AsyncMock(side_effect=error))
+        admission = SimpleNamespace(batch=batch, accepted=SimpleNamespace(message_id="m"))
+        call = send_post_admission.fail_unrun_claim(admission, RuntimeError("initial"))
+    else:
+        monkeypatch.setattr(thread_execution, "run_in_db", AsyncMock(side_effect=RuntimeError("initial")))
+        monkeypatch.setattr(thread_execution, "settle_load_failure", AsyncMock(side_effect=error))
+        monkeypatch.setattr(unavailable_model_recovery, "resolve_or_hold", AsyncMock())
+        call = thread_execution.drive_claimed_batch(batch)
+    with pytest.raises(ValueError, match="load settlement failed"):
+        await call
+    terminal.assert_awaited_once()

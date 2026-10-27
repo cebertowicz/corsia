@@ -133,7 +133,7 @@ async def test_cloud_off_thread_resolves_to_an_unavailable_target_admission_hold
 
     assert (target.available, target.availability_reason) == (False, "project_cloud_off")
     assert send_target.classify_target_admission(target, load_for=()).kind == "wait"
-    assert all(unavailable_model_recovery.model_admission(model, db=world, thread_id="actor", load_for=("p",) if person else ()).kind == "wait"
+    assert all(unavailable_model_recovery.model_admission(model, db=world, thread_id="actor", load_for=("p",) if person else ())[1].kind == "wait"
                for person in (True, False))
 
 

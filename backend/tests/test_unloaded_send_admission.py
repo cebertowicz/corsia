@@ -51,8 +51,8 @@ async def test_resolvers_keep_the_loaded_only_verdict(isolated_db, monkeypatch):
     resolved = await send_target.resolve_target("omlx@srv/m")
     assert (resolved.available, resolved.availability_reason) == (False, "model_not_loaded")
     assert send_target.classify_target_admission(resolved, load_for=()).kind == "wait"
-    assert unavailable_model_recovery.model_admission("omlx@srv/m", load_for=()).kind == "wait"
-    assert unavailable_model_recovery.model_admission("omlx@srv/m", load_for=("p",)).kind == "load"
+    assert unavailable_model_recovery.model_admission("omlx@srv/m", load_for=())[1].kind == "wait"
+    assert unavailable_model_recovery.model_admission("omlx@srv/m", load_for=("p",))[1].kind == "load"
 
 
 def _row(row_id, *, held=None, role="user", metadata=None):
@@ -81,7 +81,7 @@ def test_lift_loads_for_a_person_send_the_batch_would_deliver(monkeypatch, rows,
     monkeypatch.setattr(thread_inputs, "still_claimable", lambda _db, _thread, value: value)
     monkeypatch.setattr(thread_inputs, "starts_turn", lambda _row: True)
     monkeypatch.setattr(unavailable_model_recovery, "model_admission",
-                        lambda *_a, load_for, **_k: seen.append(bool(load_for)) or Admission("run" if load_for else "wait"))
+                        lambda *_a, load_for, **_k: (None, seen.append(bool(load_for)) or Admission("run" if load_for else "wait")))
     prefix = thread_inputs._claimable_prefix(None, "t")
     assert seen == [person_send]
     assert (prefix is not None) is person_send

@@ -111,11 +111,12 @@ async def test_send_loads_before_chat_using_live_omlx_http(isolated_db, monkeypa
     load_calls = [(m, p) for m, p in calls if p == "/admin/api/models/m/load"]
     assert not any("unload" in p for _, p in calls)
     if already_loaded:
+        assert ("POST", "/v1/chat/completions") in calls
         assert not load_calls
         assert not any(call.args[1].get("type") == "model_loading" for call in broadcasts.call_args_list)
         assert admission.kind == "run"
     else:
         assert load_calls == [("POST", "/admin/api/models/m/load")], calls
-        assert calls.index(load_calls[0]) < calls.index(("POST", "/v1/chat/completions"))
+        assert calls.index(("GET", "/v1/models/status")) < calls.index(load_calls[0]) < calls.index(("POST", "/v1/chat/completions"))
     assert message_row("m")[0] == "delivered"
     print(f"stub status GET: n={len(status_ms)} p50={statistics.median(status_ms):.3f}ms max={max(status_ms):.3f}ms")
