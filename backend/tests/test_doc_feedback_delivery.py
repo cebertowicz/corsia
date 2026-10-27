@@ -69,6 +69,25 @@ def test_idle_owner_is_selected_but_busy_owner_is_not_preempted(isolated_db):
         db.close()
 
 
+def test_insertion_feedback_describes_insertion_to_owner(isolated_db):
+    db = get_db()
+    try:
+        seed_thread(db, "owner")
+        seed_thread(db, "author")
+        artifact_id = seed_document(db, "owner")
+        comment, _ = add_comment(db, artifact_id, replacement=" new fact")
+        db.execute("UPDATE doc_comments SET insert_after=1 WHERE id=?", (comment["id"],))
+        db.commit()
+        batch = batches(db, state="open")[0]
+        feedback_batches.close_batch(db, batch["id"], "quiet")
+        node = service.get_node(batches(db)[0]["delivered_node_id"], db=db)
+        assert "Quote: quoted source" in node.description
+        assert "Suggested insertion after the quote:  new fact" in node.description
+        assert "Suggested replacement:" not in node.description
+    finally:
+        db.close()
+
+
 def test_node_link_provenance_framing_counts_and_idempotency(isolated_db):
     db = get_db()
     try:

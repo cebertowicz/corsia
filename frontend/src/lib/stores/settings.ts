@@ -93,7 +93,7 @@ async function submitSettingsPatch(patch: SettingsPatch): Promise<{ ok: boolean;
 		if (data?.detail !== undefined) console.error('[settings] update rejected', data.detail);
 		return {
 			ok: false,
-			error: plainErrorText(data?.detail, 'Could not save these settings. Try again.'),
+			error: plainErrorText(data?.detail, 'Couldn’t save these settings. Try again.'),
 		};
 	} catch (e) {
 		console.error('Failed to update settings:', e);

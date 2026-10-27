@@ -186,7 +186,7 @@
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ path: absPath }),
 			});
-			if (!res.ok) throw new Error(await plainResponseError(res, 'Could not save these settings. Try again.'));
+			if (!res.ok) throw new Error(await plainResponseError(res, 'Couldn’t save these settings. Try again.'));
 			const body = await res.json();
 			project.path = body.project?.path ?? absPath;
 			toasts.show('Saved', 'success');

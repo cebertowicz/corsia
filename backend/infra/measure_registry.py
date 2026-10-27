@@ -84,6 +84,7 @@ class DeclaredEvent:
     declared: dict[str, Any]
     keep_days: int
     use: str = "record"
+    since: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -170,7 +171,7 @@ def _declared(owner: str, spec: dict[str, Any]) -> DeclaredEvent:
     attributes = spec["attributes"]
     return DeclaredEvent(
         owner, {**_attribute_specs(attributes), **_STAMPED_SPECS},
-        tuple(spec["dedupe"]), attributes, keep_days(spec), spec.get("use", "record"),
+        tuple(spec["dedupe"]), attributes, keep_days(spec), spec.get("use", "record"), spec.get("since"),
     )
 
 
