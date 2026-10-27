@@ -18,6 +18,7 @@ log = logging.getLogger(__name__)
 
 _AGENT_BROWSER_BIN = "agent-browser"
 _DEFAULT_TIMEOUT = 30
+COMMAND_FAILED = "browser command failed. Stop automatic retries and inform the user if browser work remains blocked."
 
 
 def _native_problem() -> str | None:
@@ -59,7 +60,7 @@ async def _run(args: list[str], *, thread_id: str, lease_id: str | None = None,
     except BrowserSessionError as exc:
         return f"Error: {exc}"
     except Exception:
-        return "Error: browser command failed. Stop automatic retries and inform the user if browser work remains blocked."
+        return f"Error: {COMMAND_FAILED}"
 
 
 async def _declare_person_step(thread_id: str, instruction: str) -> str:

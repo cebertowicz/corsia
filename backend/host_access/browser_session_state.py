@@ -9,6 +9,7 @@ from typing import Literal
 from host_access import browser_cli, browser_identity as identity, browser_reporting
 
 BrowserTerminalState = Literal["running", "resetting", "closed", "death_unverified"]
+SETUP_REFUSED = "browser tools are not set up: "
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,7 +53,7 @@ class BrowserSetupError(BrowserSessionError):
     @property
     def tool_message(self) -> str:
         """Name the real cause and its fix; nothing was started, so nothing needs cleanup."""
-        return (f"Error: browser tools are not set up: {self}. No browser session was started, so nothing "
+        return (f"Error: {SETUP_REFUSED}{self}. No browser session was started, so nothing "
                 "needs cleanup. Tell the user this setup step; browser tools work once it is fixed.")
 
 

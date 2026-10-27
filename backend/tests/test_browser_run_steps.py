@@ -5,7 +5,8 @@ import json
 import pytest
 
 from host_access import browser_control
-from tools import browser_run_steps
+from host_access.browser_sessions import BrowserSessionCleanupError, BrowserSetupError
+from tools import browser_run_steps, browser_runtime
 
 
 @pytest.fixture
@@ -75,6 +76,29 @@ async def test_miss_returns_only_safe_shape_without_page_text(tool, monkeypatch)
     assert result == {"ok": False, "step": "project-page", "says": "Open Google Cloud's project page.",
                       "saw": {"title": "Console", "url_path": "/projectcreate", "missing": "action"}}
     assert secret not in json.dumps(result)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("message", [
+    f"Error: {browser_runtime.COMMAND_FAILED}",
+    BrowserSetupError("agent-browser is missing").tool_message,
+    BrowserSessionCleanupError("unverified").tool_message,
+    BrowserSessionCleanupError("pending", recovery="pending").tool_message,
+])
+@pytest.mark.parametrize("before,start_at", [
+    ([], None),
+    (["ok"], None),
+    (["ok", "Console"], None),
+    (["Error: missing"], None),
+    (["Error: missing", "Console"], None),
+    ([], "project-ready"),
+    ([], "project-name"),
+    (["Console"], "project-name"),
+])
+async def test_owner_error_stops_at_each_command_or_read(tool, monkeypatch, message, before, start_at):
+    result, calls = await invoke(tool, monkeypatch, [*before, message], start_at=start_at)
+    assert result == {"ok": False, "error": message.removeprefix("Error: ")}
+    assert len(calls) == len(before) + 1
 
 
 @pytest.mark.asyncio
