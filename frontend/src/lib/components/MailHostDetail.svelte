@@ -122,8 +122,8 @@
 		{:else}
 			{#if problem === 'waiting'}<span class="account-action"><Button variant="primary" size="sm" disabled={offline} onclick={onSetKey}>Set key</Button></span>
 			{:else if problem === 'refused' || problem === 'revoked'}<span class="account-action"><Button variant="primary" size="sm" disabled={offline} onclick={onSetKey}>Replace key</Button></span>
-			{:else if problem === 'imap_off'}<span class="account-action"><Button variant="primary" size="sm" loading={busy} disabled={offline} onclick={() => void tryAgain()}>Try again</Button></span>
-			{:else if problem === 'unreachable'}<span class="account-action"><Button variant="primary" size="sm" disabled={offline || busy} onclick={edit}>Edit server</Button></span><span class="account-action"><Button variant="ghost" size="sm" loading={busy} disabled={offline} onclick={() => void tryAgain()}>Try again</Button></span>{/if}
+			{:else if problem === 'imap_off'}<span class="account-action"><Button variant="primary" size="sm" loading={busy} disabled={offline} onclick={() => void tryAgain()}>Retry</Button></span>
+			{:else if problem === 'unreachable'}<span class="account-action"><Button variant="primary" size="sm" disabled={offline || busy} onclick={edit}>Edit server</Button></span><span class="account-action"><Button variant="ghost" size="sm" loading={busy} disabled={offline} onclick={() => void tryAgain()}>Retry</Button></span>{/if}
 			<span class="account-action"><Button variant="ghost" size="sm" disabled={offline || busy} onclick={onWhere}>Where it works…</Button></span>
 			<span class="danger-text account-action"><Button variant="ghost" size="sm" disabled={offline || busy} onclick={onRemove}>Remove</Button></span>
 		{/if}

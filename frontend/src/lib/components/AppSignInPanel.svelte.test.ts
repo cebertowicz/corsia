@@ -119,7 +119,7 @@ describe('AppSignInPanel', () => {
 		mountPanel(linear({ sign_in: { status: 'failed', signed_in: false, failure_class: failureClass } }));
 		expect(host.textContent).toContain(text);
 		const labels: Record<string, string | null> = { permissions: 'Sign in', not_approved: null, address_mismatch: 'Sign in' };
-		const label = failureClass in labels ? labels[failureClass] : 'Try again';
+		const label = failureClass in labels ? labels[failureClass] : 'Retry';
 		if (label) expect(button(label)!.classList.contains('primary')).toBe(true);
 		else expect(host.querySelectorAll('.actions .btn')).toHaveLength(0);
 	});
@@ -141,7 +141,7 @@ describe('AppSignInPanel', () => {
 		const fetch = vi.fn(async () => reply({ authorization_url: LINK, expires_at: 't', reopened: false }));
 		vi.stubGlobal('fetch', fetch);
 		const { onChange } = mountPanel(linear({ sign_in: { status: 'failed', signed_in: false, failure_class: 'address_mismatch' } }));
-		expect(button('Try again')).toBeUndefined();
+		expect(button('Retry')).toBeUndefined();
 		button('Sign in')!.click();
 		await vi.waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/api/mcp/servers/linear/sign-in'), { method: 'POST' }));
 		await vi.waitFor(() => expect(onChange).toHaveBeenCalledWith({ sign_in: expect.objectContaining({ status: 'pending', failure_class: undefined }) }));

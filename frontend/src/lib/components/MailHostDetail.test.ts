@@ -149,8 +149,8 @@ describe('MailHostDetail', () => {
 		const onChanged = vi.fn();
 		const root = render(account('iCloud', { problem: 'imap_off' }), { onChanged });
 		expect(root.querySelectorAll('input')).toHaveLength(0);
-		expect(button(root, 'Try again')?.className).toContain('primary');
-		button(root, 'Try again')!.click();
+		expect(button(root, 'Retry')?.className).toContain('primary');
+		button(root, 'Retry')!.click();
 		await vi.waitFor(() => expect(onChanged).toHaveBeenCalledOnce());
 		expect(retryMailHost).toHaveBeenCalledOnce();
 		expect(vi.mocked(retryMailHost).mock.calls[0]).toEqual(['iCloud']);
@@ -161,8 +161,8 @@ describe('MailHostDetail', () => {
 		vi.mocked(retryMailHost).mockImplementationOnce(() => new Promise<void>((resolve) => { finish = resolve; }));
 		const onChanged = vi.fn();
 		const root = render(unreachable(), { onChanged });
-		button(root, 'Try again')!.click();
-		button(root, 'Try again')!.click();
+		button(root, 'Retry')!.click();
+		button(root, 'Retry')!.click();
 		flushSync();
 		finish();
 		await vi.waitFor(() => expect(onChanged).toHaveBeenCalledOnce());
@@ -172,10 +172,10 @@ describe('MailHostDetail', () => {
 		vi.mocked(retryMailHost).mockRejectedValueOnce(new KeyWriteError('unknown', 'Couldn’t save that. Nothing was changed.'));
 		const onChanged = vi.fn();
 		const root = render(unreachable(), { onChanged });
-		button(root, 'Try again')!.click();
+		button(root, 'Retry')!.click();
 		await vi.waitFor(() => expect(root.querySelector('[role="alert"]')?.textContent).toBe('Couldn’t save that. Nothing was changed.'));
 		expect(onChanged).not.toHaveBeenCalled();
-		expect(button(root, 'Try again')).toBeDefined();
+		expect(button(root, 'Retry')).toBeDefined();
 	});
 	it('shows only Save and Cancel while editing: no Where it works…, no Remove', () => {
 		const root = render(unreachable());

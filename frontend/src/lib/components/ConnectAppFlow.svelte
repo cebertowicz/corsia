@@ -211,7 +211,7 @@
 			{:else if step === 'setup'}
 				<Button onclick={() => { step = 'what'; error = ''; }}>Back</Button><Button variant="primary" onclick={continueFromSetup}>Continue</Button>
 			{:else if step === 'where'}
-				<Button onclick={backToSetup}>Back</Button><Button variant="primary" onclick={connect} disabled={!hasSelection} loading={submitting}>{error ? 'Try again' : 'Connect'}</Button>
+				<Button onclick={backToSetup}>Back</Button><Button variant="primary" onclick={connect} disabled={!hasSelection} loading={submitting}>{error ? 'Retry' : 'Connect'}</Button>
 			{:else if result?.state === 'needs_token'}
 				<Button onclick={onClose}>Done</Button><Button variant="primary" onclick={openResultKey}>Set key</Button>
 			{:else if result?.state === 'needs_sign_in'}

@@ -186,7 +186,7 @@
 	function capabilityLabels(account: ConnectedAccount): string { return account.capabilities.map((capability) => ({ mail: 'Email', calendar: 'Calendar', files: 'Files' }[capability])).join(', '); }
 
 	function clearLinkedFocus(): void { linkedRowId = null; }
-	/** Try again and Edit server's Save close the row and its pressed button with it: focus goes to that row's header. */
+	/** Retry and Edit server's Save close the row and its pressed button with it: focus goes to that row's header. */
 	const closeRow = (id: string): void => { openId = null; void refresh(); void tick().then(() => [...document.querySelectorAll<HTMLElement>('[data-connected-account-id]')].find((item) => item.dataset.connectedAccountId === id)?.querySelector<HTMLElement>('.face.open')?.focus()); };
 
 	/** The button a chat link lands on: an account's Sign in or Where it works…, an app waiting on approval's Approve or Choose where it works…. */
@@ -234,9 +234,9 @@
 	{#if loading}
 		<p class="state" role="status">Loading connected apps…</p>
 	{:else if error}
-		<div class="state" role="alert"><p>{error}</p><Button onclick={load}>Try again</Button></div>
+		<div class="state" role="alert"><p>{error}</p><Button onclick={load}>Retry</Button></div>
 	{:else}
-		{#if offline}<div class="offline" role="status">Showing last known items. <Button variant="ghost" size="sm" onclick={load}>Try again</Button></div>{/if}
+		{#if offline}<div class="offline" role="status">Showing last known items. <Button variant="ghost" size="sm" onclick={load}>Retry</Button></div>{/if}
 		{#if rows.length === 0}
 			<p class="state">No connected apps. Connect one here, or ask CORSIA in chat to bring over the apps you use in Claude Code, Cursor or another tool.</p>
 		{:else}
@@ -260,7 +260,7 @@
 									{#if manualStep?.id === row.id}<AccountManualNotice account={manualStep} />{/if}
 									{#if offline}<p class="offline-action-note" role="status">Actions are unavailable while offline.</p>{/if}
 									<div class="actions account-actions">
-										{#if microsoftCause(row, 'admin_approval_required')}<span class="row-action"><Button variant="primary" size="sm" disabled={offline || !adminApprovalMessage(row)} onclick={() => void copyAdminMessage(row)}>Copy message for IT</Button></span><span class="row-action" class:deep-link-focus={linkedRowId === row.id && !offline} data-chat-link-focus={linkedRowId === row.id && !offline || undefined} onfocusout={clearLinkedFocus}><Button variant="ghost" size="sm" disabled={offline} loading={actionId === row.id} onclick={() => { clearLinkedFocus(); void startSignIn(row); }}>Sign in</Button></span>{:else if accountNeedsSignIn(row)}<span class="row-action" class:deep-link-focus={linkedRowId === row.id && !offline} data-chat-link-focus={linkedRowId === row.id && !offline || undefined} onfocusout={clearLinkedFocus}><Button variant={microsoftCause(row, 'registration_misconfigured') ? 'ghost' : 'primary'} size="sm" disabled={offline} loading={actionId === row.id} onclick={() => { clearLinkedFocus(); void startSignIn(row); }}>{microsoftCause(row, 'provider_unavailable') ? 'Try again' : 'Sign in'}</Button></span>{/if}
+										{#if microsoftCause(row, 'admin_approval_required')}<span class="row-action"><Button variant="primary" size="sm" disabled={offline || !adminApprovalMessage(row)} onclick={() => void copyAdminMessage(row)}>Copy message for IT</Button></span><span class="row-action" class:deep-link-focus={linkedRowId === row.id && !offline} data-chat-link-focus={linkedRowId === row.id && !offline || undefined} onfocusout={clearLinkedFocus}><Button variant="ghost" size="sm" disabled={offline} loading={actionId === row.id} onclick={() => { clearLinkedFocus(); void startSignIn(row); }}>Sign in</Button></span>{:else if accountNeedsSignIn(row)}<span class="row-action" class:deep-link-focus={linkedRowId === row.id && !offline} data-chat-link-focus={linkedRowId === row.id && !offline || undefined} onfocusout={clearLinkedFocus}><Button variant={microsoftCause(row, 'registration_misconfigured') ? 'ghost' : 'primary'} size="sm" disabled={offline} loading={actionId === row.id} onclick={() => { clearLinkedFocus(); void startSignIn(row); }}>{microsoftCause(row, 'provider_unavailable') ? 'Retry' : 'Sign in'}</Button></span>{/if}
 										<span class="row-action" class:deep-link-focus={linkedRowId === row.id && !accountNeedsSignIn(row) && !offline} data-chat-link-focus={linkedRowId === row.id && !accountNeedsSignIn(row) && !offline || undefined} onfocusout={clearLinkedFocus}><Button variant="ghost" size="sm" disabled={offline} onclick={() => { clearLinkedFocus(); whereApprove = false; whereRow = row; }}>Where it works…</Button></span>
 										{#if row.state === 'connected'}<span class="row-action"><Button variant="ghost" size="sm" disabled={offline} onclick={() => confirmingOut = row}>Sign out</Button></span>{/if}
 										<span class="danger-text row-action"><Button variant="ghost" size="sm" disabled={offline} loading={actionId === row.id} onclick={() => confirmingRemove = row}>Remove</Button></span>

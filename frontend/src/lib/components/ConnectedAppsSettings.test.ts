@@ -400,7 +400,7 @@ describe('ConnectedAppsSettings', () => {
 		open(failed.id);
 		expect(host.textContent).toContain('Sign-in didn’t finish');
 		expect(host.textContent).toContain('Microsoft had a problem with sign-in. Try again.');
-		const retry = [...host.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.trim() === 'Try again');
+		const retry = [...host.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.trim() === 'Retry');
 		expect(retry?.className).toContain('primary');
 		expect(host.textContent).toContain('Where it works…');
 		expect(host.textContent).toContain('Remove');
@@ -500,7 +500,7 @@ describe('ConnectedAppsSettings', () => {
 			await vi.waitFor(() => expect(host.querySelector('[data-connected-account-id="a"]')).not.toBeNull());
 			openRow('a');
 			expect(host.querySelector('[data-connected-account-id="a"] .details')).not.toBeNull();
-			labelled('Try again')!.click();
+			labelled('Retry')!.click();
 			await vi.waitFor(() => expect(host.querySelector('[data-connected-account-id="a"] .sub')?.textContent).toContain('Checking…'));
 			expect(host.querySelector('[data-connected-account-id="a"] .details')).toBeNull();
 			expect(host.querySelector('[data-connected-account-id="a"] button')?.getAttribute('aria-expanded')).toBe('false');

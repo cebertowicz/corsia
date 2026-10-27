@@ -35,14 +35,14 @@ export function appAccount(app: ConnectedApp): string | null {
 
 /** The app only lets in apps it has approved and nobody on this side can change that, so a second press would fail the same way. Remove is the way out. */
 const NOBODY_CAN_FIX = new Set(['not_approved']);
-/** Failures a Try again may not fix until someone else has acted (a client ID, the app's maker); the row says Sign in rather than promise a retry. */
+/** Failures a Retry may not fix until someone else has acted (a client ID, the app's maker); the row says Sign in rather than promise a retry. */
 const WAITS_ON_SOMEONE_ELSE = new Set(['permissions', 'address_mismatch']);
 
 /** The button a failed sign-in's row shows, or null when pressing it again could not help. */
-export function retryLabel(failureClass: string | undefined): 'Try again' | 'Sign in' | null {
+export function retryLabel(failureClass: string | undefined): 'Retry' | 'Sign in' | null {
 	const name = failureClass ?? 'unknown';
 	if (NOBODY_CAN_FIX.has(name)) return null;
-	return WAITS_ON_SOMEONE_ELSE.has(name) ? 'Sign in' : 'Try again';
+	return WAITS_ON_SOMEONE_ELSE.has(name) ? 'Sign in' : 'Retry';
 }
 
 /** The sentence in the open row for a failed sign-in. `words` is the app's own text, shown only for an unknown class. */

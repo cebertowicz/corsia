@@ -148,7 +148,7 @@ describe('ConnectAppFlow', () => {
 		press('Connect');
 		await vi.waitFor(() => expect(document.body.textContent).toContain("Couldn't connect: no response"));
 		expect(document.body.textContent).toContain("The app didn't respond within 10 seconds. Go back and compare What it runs with the app's setup instructions, then try again. It may also need something that isn't installed on your computer; its setup instructions say what.");
-		expect(document.body.textContent).toContain('Try again');
+		expect(document.body.textContent).toContain('Retry');
 		press('Back');
 		await vi.waitFor(() => expect(document.body.querySelector('input[aria-label="What it runs"]')).toBe(document.activeElement));
 	});
