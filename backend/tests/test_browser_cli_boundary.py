@@ -29,6 +29,8 @@ async def test_all_script_wrappers_refused_before_any_invocation(synthetic_brows
 
 
 def _chrome_folders(tmp_path, monkeypatch, *, system: bool, user: bool, executable: bool = True):
+    from types import SimpleNamespace
+    monkeypatch.setattr(cli, 'sys', SimpleNamespace(platform='darwin'))
     folders = (tmp_path / 'Applications', tmp_path / 'home' / 'Applications')
     for folder, present in zip(folders, (system, user)):
         if present:

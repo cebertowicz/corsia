@@ -10,6 +10,7 @@ from pathlib import Path
 import re
 import shutil
 import stat
+import sys
 import tempfile
 from typing import IO, Literal, Sequence
 
@@ -25,6 +26,7 @@ _PRE_DAEMON_ERRORS = frozenset({
     "invalid_value", "invalid_session_name",
 })
 BROWSER_COMMAND = "agent-browser"
+LINUX_CHROME_PATHS = (Path("/opt/google/chrome/chrome"), Path("/opt/corsia/chromium/chrome"))
 _SOURCE_INSTALL_HINT = (
     "install a supported build with `npm install -g agent-browser@0.31`, "
     "run `agent-browser install`, and make sure PATH selects it"
@@ -129,12 +131,13 @@ def _application_dirs() -> tuple[Path, ...]:
 
 
 def chrome_executable() -> tuple[str | None, Literal["env", "system", "default"]]:
-    """Choose the Chrome agent-browser launches; None keeps its own download.
-
-    That download (Chrome for Testing 152) stops sending screencast frames in about
-    half of fresh sessions, so an installed Google Chrome is preferred. Only the
-    binary changes: agent-browser keeps its temporary profile either way.
-    """
+    """Select Chrome; Mac prefers installed Chrome because Chrome for Testing 152
+    can stop streaming frames. None keeps agent-browser's own download."""
+    if sys.platform == "linux":
+        for candidate in LINUX_CHROME_PATHS:
+            if candidate.is_file() and os.access(candidate, os.X_OK):
+                return str(candidate), "system"
+        raise identity.BrowserIdentityError("The browser is missing. Re-run the CORSIA installer.")
     if explicit := os.environ.get("AGENT_BROWSER_EXECUTABLE_PATH"):
         return explicit, "env"
     for folder in _application_dirs():
@@ -275,13 +278,20 @@ def _read_output(stream: IO[bytes]) -> str:
     return stream.read().decode("utf-8", errors="replace").strip()
 
 
-async def invoke(argv: Sequence[str], *, socket_dir: Path, timeout: float) -> CommandResult:
+async def invoke(argv: Sequence[str], *, socket_dir: Path, timeout: float,
+                 linux_chrome: str | None = None) -> CommandResult:
     """Settle the actual subprocess; unknown effects are never a no-launch claim."""
     env = os.environ.copy()
     env.pop("AGENT_BROWSER_DAEMON", None)
     env.pop("AGENT_BROWSER_DASHBOARD", None)
     env.pop("AGENT_BROWSER_SESSION", None)
     env["AGENT_BROWSER_SOCKET_DIR"] = str(socket_dir)
+    if sys.platform == "linux":
+        env.pop("CI", None)  # Native agent-browser otherwise disables Chromium's sandbox.
+        env.pop("AGENT_BROWSER_ARGS", None)
+        env.pop("AGENT_BROWSER_EXECUTABLE_PATH", None)
+        if linux_chrome:
+            env["AGENT_BROWSER_EXECUTABLE_PATH"] = linux_chrome
     # The client starts a browser daemon that outlives it, and a descendant can keep the client's stdout and stderr
     # open after the client exits. Pipes would then never reach end-of-file, so the client writes to files and
     # settles on its own exit; what a descendant writes later goes to a file nobody waits on.
@@ -335,6 +345,10 @@ async def invoke(argv: Sequence[str], *, socket_dir: Path, timeout: float) -> Co
 def check_local_mode(args: Sequence[str]) -> None:
     """Reject unverified producer modes before session effects, including config files."""
     forbidden = {"-p", "--provider", "--engine", "--cdp", "--auto-connect", "--config"}
+    if sys.platform == "linux" and any(
+            arg.split("=", 1)[0] in {"--args", "--executable-path"} for arg in args):
+        raise identity.BrowserIdentityError(
+            "Remove browser launch arguments from the command, then try again.")
     if any(arg.split("=", 1)[0] in forbidden for arg in args):
         raise identity.BrowserIdentityError(_LOCAL_MODE_REQUIRED)
     explicit = os.environ.get("AGENT_BROWSER_CONFIG")
@@ -353,6 +367,9 @@ def check_local_mode(args: Sequence[str]) -> None:
         except (OSError, ValueError) as exc:
             raise identity.BrowserIdentityError(
                 "the agent-browser config file is not a readable JSON object; fix it") from exc
+    if sys.platform == "linux" and (config.get("args") or config.get("executablePath")):
+        raise identity.BrowserIdentityError(
+            "Remove browser launch arguments from the agent-browser configuration, then try again.")
     provider = os.environ.get("AGENT_BROWSER_PROVIDER", config.get("provider"))
     engine = os.environ.get("AGENT_BROWSER_ENGINE", config.get("engine", "chrome"))
     auto_connect = os.environ.get("AGENT_BROWSER_AUTO_CONNECT", "").lower() in {"1", "true", "yes"}

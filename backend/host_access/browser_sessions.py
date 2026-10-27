@@ -27,7 +27,6 @@ _EXECUTABLE_CHANGED = (
     "close the browser session with browser_close, then restart CORSIA to use the new build"
 )
 
-# Session state and errors are defined in browser_session_state.
 
 class BrowserSessionOwner:
     """Serialize admission, observation and producer-mediated close per session."""
@@ -185,7 +184,8 @@ class BrowserSessionOwner:
                 if await asyncio.to_thread(browser_cli.resolve_native, self.binary) != (path, fingerprint):
                     raise identity.BrowserIdentityChanged(_EXECUTABLE_CHANGED)
                 chrome, source = await asyncio.to_thread(browser_cli.chrome_executable)
-                if source == "default" and await asyncio.to_thread(browser_cli.chrome_download_missing):
+                if (browser_cli.sys.platform != "linux" and source == "default"
+                        and await asyncio.to_thread(browser_cli.chrome_download_missing)):
                     # No Chrome on this Mac: agent-browser's own install fetches Chrome for Testing
                     # into the person's home, with no admin step.
                     install = await self._invoke((path, "install"), timeout=browser_cli.CHROME_INSTALL_TIMEOUT)
@@ -394,4 +394,7 @@ class BrowserSessionOwner:
         })
 
     async def _invoke(self, argv: Sequence[str], *, timeout: float) -> CommandResult:
+        if browser_cli.sys.platform == "linux":
+            return await browser_cli.invoke(argv, socket_dir=self.socket_dir, timeout=timeout,
+                                            linux_chrome=self._chrome)
         return await browser_cli.invoke(argv, socket_dir=self.socket_dir, timeout=timeout)

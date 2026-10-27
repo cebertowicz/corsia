@@ -33,8 +33,9 @@ def short_system_temp():
 def test_safehouse_subprocess_env_strips_control_and_provider_secrets(
     monkeypatch,
 ) -> None:
-    from tools import shell_guard
+    from tools import shell_guard, shell_environment
 
+    monkeypatch.setattr(shell_environment, "sys", SimpleNamespace(platform="darwin"))
     monkeypatch.setenv("PATH", "/usr/bin:/bin")
     monkeypatch.setenv("SAFEHOUSE_ADD_DIRS", "/private")
     monkeypatch.setenv("SAFEHOUSE_WORKDIR", "/private")
@@ -73,6 +74,27 @@ def test_safehouse_subprocess_env_strips_control_and_provider_secrets(
     assert "CORSIA_PROCESS_OWNER_MARKER" not in env
     assert env["TOKENIZERS_PARALLELISM"] == "false"
     assert env["AGENT_BROWSER_ARGS"] == "--no-sandbox"
+
+
+@pytest.mark.parametrize("platform,expected", [("darwin", "--no-sandbox"), ("linux", None)])
+def test_browser_sandbox_environment_is_platform_specific(monkeypatch, platform, expected) -> None:
+    from tools import shell_environment
+
+    monkeypatch.setattr(shell_environment, "sys", SimpleNamespace(platform=platform))
+    monkeypatch.setenv("AGENT_BROWSER_ARGS", "--no-sandbox")
+    assert shell_environment.safehouse_subprocess_env("thread-1").get("AGENT_BROWSER_ARGS") == expected
+
+
+def test_script_and_shell_use_same_linux_browser_environment(monkeypatch) -> None:
+    from automation import script_sandbox
+    from tools import shell_environment
+
+    monkeypatch.setattr(shell_environment, "sys", SimpleNamespace(platform="linux"))
+    monkeypatch.setenv("AGENT_BROWSER_ARGS", "--no-sandbox")
+    shell_env = shell_environment.safehouse_subprocess_env("thread-1")
+    script_env = script_sandbox.safehouse_subprocess_env("thread-1")
+    assert "AGENT_BROWSER_ARGS" not in shell_env
+    assert script_env == shell_env
 
 
 def test_external_agent_argv_strips_browser_import_settings(tmp_path, monkeypatch) -> None:
