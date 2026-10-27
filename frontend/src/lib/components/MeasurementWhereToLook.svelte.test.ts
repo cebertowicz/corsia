@@ -184,6 +184,7 @@ describe('where-to-look store helpers', () => {
 		expect(formatWhereToLookRow({ previous: 1_210_000, latest: 1_240_000, overall: 1_220_000, format: 'tokens' })).toEqual(['1.21M', '1.24M', '1.22M']);
 		expect(formatWhereToLookRow({ previous: 1.501, latest: 1.504, overall: 1.5, format: 'dollars' })).toEqual(['$1.501', '$1.504', '$1.500']);
 		expect(formatWhereToLookRow({ previous: 1234.5, latest: 1234.7, overall: 1234.6, format: 'hours' })).toEqual(['1,234.5 h', '1,234.7 h', '1,234.6 h']);
+		expect(formatWhereToLookRow({ previous: 0.14, latest: 0.1, overall: 1, format: 'ratio' })).toEqual(['0.14', '0.10', '1.00']);
 	});
 
 	it('refuses a response with no lists or a bad number', () => {

@@ -106,7 +106,7 @@ export function formatWhereToLookValue(value: number, format: WhereToLookFormat,
 	if (format === 'dollars') return `$${value.toFixed(Math.min(15, 2 + extra))}`;
 	if (format === 'hours') return `${Number(value.toFixed(Math.min(15, (value < 10 ? 1 : 0) + extra))).toLocaleString('en-US', { maximumFractionDigits: 15 })} h`;
 	if (format === 'minutes') return Number(value.toFixed(Math.min(15, 1 + extra))).toLocaleString('en-US', { useGrouping: false, minimumFractionDigits: 1, maximumFractionDigits: Math.min(15, 1 + extra) });
-	return String(Number(value.toFixed(Math.min(15, 2 + extra))));
+	return value.toFixed(Math.min(15, 2 + extra));
 }
 
 /** Keep a reported change visible, applying the same precision to its comparison and overall. */
