@@ -19,6 +19,19 @@ async def drain(session, deadline: asyncio.Timeout) -> None:
         raise
 
 
+async def bounded_drain(session, budget: float, write: str) -> None:
+    """Drain under this write's own budget; its expiry kills and names the write."""
+    try:
+        async with asyncio.timeout(budget) as deadline:
+            await drain(session, deadline)
+    except TimeoutError as error:
+        if not deadline.expired():
+            raise
+        raise CodexAppServerError(
+            f"codex app-server stdin drain timed out: {write}", {"method": write},
+        ) from error
+
+
 async def notify(session, method: str, params: dict) -> None:
     """Serialize a notification and bound its own lock-held drain."""
     from subagents.codex_app_server import REQUEST_TIMEOUT
@@ -28,8 +41,7 @@ async def notify(session, method: str, params: dict) -> None:
     async with session._write_lock:
         payload = {"method": method, "params": params}
         session._proc.stdin.write((json.dumps(payload) + "\n").encode())
-        async with asyncio.timeout(REQUEST_TIMEOUT) as deadline:
-            await drain(session, deadline)
+        await bounded_drain(session, REQUEST_TIMEOUT, method)
 
 
 async def request(session, method, params=None, *, on_write_observed=None, on_drain_confirmed=None):
@@ -49,9 +61,9 @@ async def request(session, method, params=None, *, on_write_observed=None, on_dr
     if params is not None:
         payload["params"] = params
     budget = STEER_REQUEST_TIMEOUT if method == "turn/steer" else REQUEST_TIMEOUT
-    deadline = asyncio.timeout(budget)
+    admission, response = asyncio.timeout(budget), None
     try:
-        async with deadline:
+        async with admission:
             await session._write_lock.acquire()
         try:
             if method == "turn/steer" and not session._dynamic_tool_requests_idle.is_set():
@@ -64,16 +76,17 @@ async def request(session, method, params=None, *, on_write_observed=None, on_dr
             session._proc.stdin.write((json.dumps(payload) + "\n").encode())
             if on_write_observed is not None:
                 on_write_observed()
-            async with asyncio.timeout(budget) as deadline:
-                await drain(session, deadline)
+            await bounded_drain(session, budget, method)
             if on_drain_confirmed is not None:
                 on_drain_confirmed()
         finally:
             session._write_lock.release()
-        async with asyncio.timeout(budget) as deadline:
+        # Created here so the response budget starts after the drain.
+        response = asyncio.timeout(budget)
+        async with response:
             return await fut
     except TimeoutError as error:
-        if not deadline.expired():
+        if not (admission.expired() or (response is not None and response.expired())):
             raise
         raise CodexAppServerError(
             f"codex app-server request timed out: {method}", {"method": method},

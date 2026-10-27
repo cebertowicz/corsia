@@ -192,7 +192,7 @@ async def test_request_deadline_includes_lock_behind_unread_pipe(controlled_dead
             assert session._pending == session._pending_methods == {}
             assert [budget for budget, _ in controlled_deadlines] == [120, 10]
             controlled_deadlines[0][1].reschedule(asyncio.get_running_loop().time())
-            with pytest.raises(TimeoutError):
+            with pytest.raises(CodexAppServerError, match="stdin drain timed out: initialized"):
                 await asyncio.wait_for(asyncio.shield(owner), 2)
             session._kill_process.assert_called_once()
             await asyncio.wait_for(session._reader, 2)
@@ -249,7 +249,9 @@ async def test_nonrequest_writer_bounds_own_stalled_drain(controlled_deadlines, 
             assert session._write_lock.locked() and not task.done()
             assert [budget for budget, _ in controlled_deadlines] == [120]
             controlled_deadlines[0][1].reschedule(asyncio.get_running_loop().time())
-            with pytest.raises(TimeoutError):
+            # The kill names the stalled write instead of surfacing a bare TimeoutError.
+            named = "initialized" if writer == "notify" else "response to request 42"
+            with pytest.raises(CodexAppServerError, match=f"stdin drain timed out: {named}"):
                 await asyncio.wait_for(asyncio.shield(task), 2)
             session._kill_process.assert_called_once()
             await asyncio.wait_for(session._reader, 2)
