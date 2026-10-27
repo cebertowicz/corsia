@@ -3,7 +3,7 @@ import { get } from 'svelte/store';
 import { token } from '$lib/stores/auth';
 import { toasts } from '$lib/stores/toast';
 import { clearStartupProgress, refreshStartupProgress, startupProgress } from './startupProgress';
-import { countUp } from './percentCountUp';
+import { countUp, FLOOR_RATE, GAP_RATE } from './percentCountUp';
 import { CREEP_STALE_MS, REMOTE_ESTIMATE_CEILING } from './screenProgress';
 import { continueHandedOverScreen, dismissUpdateScreen, EXIT_HOLD_MS, handOverScreen, startUpdateScreen, stopUpdateScreen, tickUpdateScreen, updateScreenView } from './screenStore';
 import { loadUpdateStatus, resetUpdateStoreForTests, updateConfirmed, updateStatus, updateUnreachable, type UpdateStatus } from './store';
@@ -209,7 +209,7 @@ describe('update screen store', () => {
 			for (let elapsed = 0; elapsed < 1_000; elapsed += 16) {
 				const next = countUp(shown, target, 16);
 				expect(next).toBeGreaterThanOrEqual(shown);
-				expect(next - shown).toBeLessThanOrEqual(Math.max((target - shown) * 4, 20) * 0.016 + 1e-9);
+				expect(next - shown).toBeLessThanOrEqual(Math.max((target - shown) * GAP_RATE, FLOOR_RATE) * 0.016 + 1e-9);
 				shown = next;
 			}
 			expect(shown).toBe(target);
