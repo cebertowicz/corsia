@@ -401,6 +401,8 @@ def test_safehouse_nested_read_write_deny_overrides_granted_root(
             assert result.returncode != 0, "nested deny did not prevent the read"
             assert content not in result.stdout
 
+    # Check writes independently of read denial, which can stop touch at stat.
+    profile.write_text(f'(deny file-write* (subpath "{denied}"))\n', encoding="utf-8")
     control = root / "allowed"
     result = touch(control)
     assert result.returncode == 0 and control.exists(), result.stderr
