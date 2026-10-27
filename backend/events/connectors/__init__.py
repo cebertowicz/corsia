@@ -56,6 +56,7 @@ class ObservedArtifactDecl:
     title: str | None = None
     path: str | None = None
     metadata: Mapping[str, Any] | None = None
+    created_event_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -97,6 +98,7 @@ class ConnectorManifest:
     connected_app_extractors: Mapping[str, Callable[[str, str, dict[str, Any]], ObservedResult | None]] = field(
         default_factory=dict)
     shipped_observe_rules: tuple[ShippedObserveRuleDecl, ...] = ()
+    app_identities: frozenset[str] = frozenset()
     resolve_relationships: Callable[[str, dict, dict], tuple[dict, ...]] = (
         lambda event_type, facts, raw: ()
     )
@@ -169,6 +171,12 @@ def artifact_extractor(
     """The connector's extractor for one artifact type, or ``None`` when it declares none."""
     manifest = _REGISTRY.get(connector)
     return manifest.artifact_extractors.get(item_type) if manifest else None
+
+
+def app_matches(stamp_app: str | None, connector: str) -> bool:
+    """Whether a stamped app identity belongs to the connector."""
+    manifest = _REGISTRY.get(connector)
+    return bool(stamp_app and manifest and stamp_app in manifest.app_identities)
 
 
 def extractor_connectors(item_type: str) -> tuple[str, ...]:
