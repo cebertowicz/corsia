@@ -5,11 +5,11 @@ export type ReadOutcome<T> =
 	| { status: 'fresh'; payload: T; etag: string }
 	| Exclude<OperatorReadOutcome, { status: 'fresh' }>;
 
-/** A reply this page cannot read: the server is newer than the loaded page. */
-export const STALE_PAGE_MESSAGE = 'This page is out of date. Reload to see this plan.';
+/** A reply this page cannot read (unparseable, or another contract version); the cause is unknown, so name only the next step. */
+export const STALE_PAGE_MESSAGE = 'Couldn’t read this plan. Reload the page.';
 
 export function safeErrorMessage(action: 'load' | 'update'): string {
-	return action === 'load' ? 'Couldn’t load these plans. Try again.' : 'Couldn’t update the plan. Try again.';
+	return action === 'load' ? 'Couldn’t load the plan. Try again.' : 'Couldn’t update the plan. Try again.';
 }
 
 /** A failed reply's body, or undefined when it is not JSON. */

@@ -243,7 +243,7 @@ describe('auth', () => {
 		token.set(null);
 		await refresh(T1);
 		expect(entryFor('thread:t1').status).toBe('unauthorized');
-		expect(entryFor('thread:t1').errorMessage).toBe('Sign-in required.');
+		expect(entryFor('thread:t1').errorMessage).toBe('Sign in to see this plan.');
 	});
 });
 
@@ -293,7 +293,7 @@ describe('errors', () => {
 	it('preserves 401, 403, and 404 as distinct scope conditions', async () => {
 		const net = controllableFetch();
 		for (const [status, expected, message] of [
-			[401, 'unauthorized', 'Sign-in required.'],
+			[401, 'unauthorized', 'Sign in to see this plan.'],
 			[403, 'forbidden', 'You don’t have access to this chat. Choose another.'],
 			[404, 'not-found', 'This chat isn’t available. Choose another.'],
 		] as const) {
@@ -335,7 +335,7 @@ describe('errors', () => {
 		const p = refresh(T1);
 		net.pending[0].fail(500);
 		await p;
-		expect(entryFor('thread:t1').errorMessage).toBe('Couldn’t load these plans. Try again.');
+		expect(entryFor('thread:t1').errorMessage).toBe('Couldn’t load the plan. Try again.');
 	});
 });
 

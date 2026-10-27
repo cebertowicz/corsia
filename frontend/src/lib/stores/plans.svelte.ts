@@ -137,7 +137,7 @@ function ownerThreadIdFor(
 
 /** Sign-in, which a retry cannot change; not-found and forbidden are worded per place in `planClosedMessage`. */
 const CLOSED_MESSAGES = {
-	unauthorized: 'Sign-in required.',
+	unauthorized: 'Sign in to see this plan.',
 } as const;
 
 function applyOutcome(key: PlanKey, keyStr: string, outcome: PlanReadOutcome) {

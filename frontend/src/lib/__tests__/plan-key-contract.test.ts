@@ -52,5 +52,5 @@ it('rejects a representation mismatch before it enters the operator cache', asyn
 	expect(entry.status).toBe('error');
 	expect(entry.payload).toBeNull();
 	expect(entry.etag).toBeNull();
-	expect(entry.errorMessage).toBe('This page is out of date. Reload to see this plan.');
+	expect(entry.errorMessage).toBe('Couldn’t read this plan. Reload the page.');
 });

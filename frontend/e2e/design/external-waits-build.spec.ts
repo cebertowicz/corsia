@@ -558,7 +558,7 @@ test('plan copy: task details, read-only discussion, task menu, empty pane, acti
 				}
 				flushSync();
 			}, row);
-			const text = row === 6 ? 'reassigned to another agent' : row === 7 ? 'Read-only.' : row === 8 ? 'Marking this done or Won’t do also stops the agent working on it.' : row === 15 ? 'Open a chat to see its plan' : row === 17 ? 'Chat' : 'This task waited:';
+			const text = row === 6 ? 'reassigned to another agent' : row === 7 ? 'Read-only.' : row === 8 ? 'Marking this done or Won’t do also stops the agent working on it.' : row === 15 ? 'Open a chat to see its plan' : row === 17 ? 'Chat' : 'Waiting, this task alone:';
 			await expect(page.getByText(text, { exact: row === 17 })).toBeVisible();
 			await shot(page, `copy-${row}-${width}`);
 		}

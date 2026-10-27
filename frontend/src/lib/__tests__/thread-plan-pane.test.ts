@@ -431,15 +431,21 @@ describe("ThreadPlanPane", () => {
     expect(pause.disabled).toBe(true);
   });
 
-  it("unauthorized explains the inaccessible thread without exposing IDs", async () => {
-    mockFetch(403, {});
+  it.each([
+    [401, {}, "Sign in to see this plan."],
+    [403, {}, "You don’t have access to this chat. Choose another."],
+    [404, {}, "This chat isn’t available. Choose another."],
+    [500, { reference: "abc123", detail: "internal" }, "Couldn’t load the plan. Try again. Reference: abc123"],
+  ])("shows the store's own message for a %i plan read", async (status, body, message) => {
+    mockFetch(status, body);
     component = mount(ThreadPlanPane, {
       target: host,
       props: { threadId: "t1" },
     });
     flushSync();
     await settle();
-    expect(host.textContent).toContain("isn’t available");
+    expect(host.querySelector(".plan-state")?.textContent?.trim().startsWith(message)).toBe(true);
+    expect(host.textContent).not.toContain("internal");
     expect(host.textContent).not.toContain("t1");
   });
 

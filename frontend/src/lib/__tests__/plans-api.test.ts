@@ -115,7 +115,7 @@ describe('compact Activity reads', () => {
 	it('rejects the full operator representation on the compact route', async () => {
 		mockFetch(200, ENVELOPE, { ETag: '"operator"' });
 		expect(await readActivityWorkspace(TOKEN)).toEqual({
-			status: 'error', message: 'This page is out of date. Reload to see this plan.',
+			status: 'error', message: 'Couldn’t read this plan. Reload the page.',
 		});
 	});
 });
@@ -152,12 +152,12 @@ describe('contextual operator reads', () => {
 			ok: true, status: 200, json: () => Promise.reject(new SyntaxError('Unexpected token')),
 			headers: { get: () => null },
 		}));
-		expect(await readOperatorThread(TOKEN, 'thread-1')).toEqual({ status: 'error', message: 'This page is out of date. Reload to see this plan.' });
+		expect(await readOperatorThread(TOKEN, 'thread-1')).toEqual({ status: 'error', message: 'Couldn’t read this plan. Reload the page.' });
 	});
 
 	it('a 2xx body that is not the envelope is a failed read, not fresh state', async () => {
 		mockFetch(200, { plans: 'none' }, { ETag: '"x"' });
-		expect(await readOperatorThread(TOKEN, 'thread-1')).toEqual({ status: 'error', message: 'This page is out of date. Reload to see this plan.' });
+		expect(await readOperatorThread(TOKEN, 'thread-1')).toEqual({ status: 'error', message: 'Couldn’t read this plan. Reload the page.' });
 	});
 
 	it('401 is unauthorized, not a retryable error', async () => {
@@ -169,19 +169,19 @@ describe('contextual operator reads', () => {
 		vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')));
 		expect(await readOperatorThread(TOKEN, 'thread-1')).toEqual({
 			status: 'error',
-			message: 'Couldn’t load these plans. Try again.',
+			message: 'Couldn’t load the plan. Try again.',
 		});
 
 		mockFetch(500, { detail: 'internal/secret/path.py:42' });
 		const result = await readOperatorThread(TOKEN, 'thread-1');
 		expect(result).toEqual({
 			status: 'error',
-			message: 'Couldn’t load these plans. Try again.',
+			message: 'Couldn’t load the plan. Try again.',
 		});
 
 		mockFetch(500, { detail: 'internal/secret/path.py:42', reference: 'def456' });
 		expect(await readOperatorThread(TOKEN, 'thread-1')).toEqual({
-			status: 'error', message: 'Couldn’t load these plans. Try again.', reference: 'def456',
+			status: 'error', message: 'Couldn’t load the plan. Try again.', reference: 'def456',
 		});
 	});
 

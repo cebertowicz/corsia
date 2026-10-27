@@ -229,24 +229,14 @@
 			<span class="spinner" aria-hidden="true"></span>
 			<strong>Loading plan…</strong>
 		</div>
-	{:else if query.status === 'unauthorized' && !hasPayload}
+	{:else if (query.status === 'unauthorized' || query.status === 'forbidden' || query.status === 'not-found') && !hasPayload}
+		<!-- The plans store owns this wording, so every surface reading the plan says the same thing. -->
 		<div class="plan-state error" role="alert">
-			<strong>Sign in to see this plan</strong>
-			<p>Your session expired before the plan could load.</p>
-		</div>
-	{:else if query.status === 'forbidden' && !hasPayload}
-		<div class="plan-state error" role="alert">
-			<strong>This plan isn’t available</strong>
-			<p>You don’t have access to this chat. Choose another.</p>
-		</div>
-	{:else if query.status === 'not-found' && !hasPayload}
-		<div class="plan-state error" role="alert">
-			<strong>This plan isn’t available</strong>
-			<p>It may have been removed or is no longer shared with you.</p>
+			<strong>{query.errorMessage}</strong>
 		</div>
 	{:else if query.status === 'error' && !hasPayload}
 		<div class="plan-state error" role="alert">
-			<strong>This plan couldn’t load</strong>
+			<strong>{query.errorMessage}</strong>
 			<Button variant="secondary" size="sm" onclick={() => query.retry()}>Retry</Button>
 		</div>
 	{:else if plan}
