@@ -36,14 +36,14 @@ describe('AddLocalModelSheet', () => {
 		await vi.waitFor(() => expect(document.body.textContent).toContain(detail));
 		flushSync();
 	}
-	const tryAgain = () => [...document.body.querySelectorAll('button')].some((button) => button.textContent?.includes('Try again'));
+	const tryAgain = () => [...document.body.querySelectorAll('button')].some((button) => button.textContent?.includes('Retry'));
 
-	it('shows the backend sentence for a failed check and offers Try again, since asking again can help', async () => {
+	it('shows the backend sentence for a failed check and offers Retry, since asking again can help', async () => {
 		await renderFailure(503, "Couldn’t check which models fit this computer.");
 		expect(tryAgain()).toBe(true);
 	});
 
-	it('shows a cause the person must fix first without a Try again that cannot succeed', async () => {
+	it('shows a cause the person must fix first without a Retry that cannot succeed', async () => {
 		await renderFailure(409, "Local models aren’t set up. Select Set up to continue.");
 		expect(tryAgain()).toBe(false);
 	});
@@ -56,7 +56,7 @@ describe('AddLocalModelSheet', () => {
 		expect(tryAgain()).toBe(false);
 	});
 
-	it('shows the update message from oMLX without Try again', async () => {
+	it('shows the update message from oMLX without Retry', async () => {
 		await render({ state: 'update_required', message: 'Update oMLX to 0.4.2 or later to add a local model.', models: [] });
 		expect(document.body.textContent).toContain('Update oMLX to 0.4.2 or later to add a local model.');
 		expect(tryAgain()).toBe(false);

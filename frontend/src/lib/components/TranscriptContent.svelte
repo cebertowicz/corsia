@@ -29,7 +29,7 @@
 	import type { PauseAnnotation } from './transcriptFocusModel';
 	import EventChip from './EventChip.svelte';
 	import { sourceMembers } from './contextEventModel';
-	import { PAUSED_AT_PLAN_LIMIT } from '$lib/stores/overageSetting';
+	import { PAUSED_AT_USAGE_LIMIT } from '$lib/stores/overageSetting';
 	import type { RunLoad, RunStub } from '$lib/focusRuns';
 	import type { WorkBlockLive } from './workBlockLive';
 
@@ -219,7 +219,7 @@
 		{@render deliveryWarning(annotation.pause.source)}
 		<div class="historical-anchor">{annotation.pause.anchorKind === 'input' ? 'Earlier input' : 'Earlier work'}</div>
 	{/if}
-	<div class="plan-limit-paused">{PAUSED_AT_PLAN_LIMIT}</div>
+	<div class="plan-limit-paused">{PAUSED_AT_USAGE_LIMIT}</div>
 {/snippet}
 
 {#each renderedEntries as entry, index (entry.id)}
@@ -234,7 +234,7 @@
 	{:else if entry.kind === 'pause'}
 		{@render historicalPause(entry, entry.showProxy || !visibleSources.has(entry.pause.source.id))}
 	{:else if entry.kind === 'stub-pause'}
-		<div class="plan-limit-paused">{PAUSED_AT_PLAN_LIMIT}</div>
+		<div class="plan-limit-paused">{PAUSED_AT_USAGE_LIMIT}</div>
 	{:else if entry.kind === 'fold'}
 		{@const tokens = runTokens(renderedEntries, index, historyComplete)}
 		{@const expanded = isRunExpanded(tokens, expandedFolds)}
@@ -266,7 +266,7 @@
 			{/snippet}
 			{#snippet notes()}
 				{#each stubPauses.get(entry.id) ?? [] as turnId (turnId)}
-					<div class="plan-limit-paused">{PAUSED_AT_PLAN_LIMIT}</div>
+					<div class="plan-limit-paused">{PAUSED_AT_USAGE_LIMIT}</div>
 				{/each}
 			{/snippet}
 		</WorkBlock>

@@ -301,7 +301,7 @@ test('renders ownership, picker, recommender-failure, and picker-download eviden
 		await failureCard.getByRole('button', { name: 'Add model', exact: true }).click();
 		const failureSheet = page.locator('.modal').filter({ hasText: 'Add model' });
 		await expect(failureSheet).toContainText("Couldn’t check which models fit this computer.");
-		await expect(failureSheet.getByRole('button', { name: 'Try again', exact: true })).toBeVisible();
+		await expect(failureSheet.getByRole('button', { name: 'Retry', exact: true })).toBeVisible();
 		await capture(page, `e-recommender-failed-${viewport.name}-${theme}`);
 
 		// F picker half: an in-progress Settings download is visible beside the Local group.

@@ -19,7 +19,7 @@ export interface ModelUsage {
 	reason?: string | null;
 	resets_at?: string | null;
 	windows: UsageWindow[];
-	/** The account's 'Spend past plan limit' switch; off by default. */
+	/** The account's 'Spend past usage limit' switch; off by default. */
 	allow_overage?: boolean;
 	/** Provider facts that establish paid capacity after an exhausted plan window. */
 	facts?: Record<string, unknown>;
