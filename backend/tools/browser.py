@@ -73,7 +73,9 @@ class BrowserOpenTool(Tool):
         # callers control whether to wait for the destination.
         from host_access.processes import PROCESS_OWNER
         from host_access import browser_cli
-        existing = await PROCESS_OWNER.browser_sessions().has_session(thread_id)
+        sessions = PROCESS_OWNER.browser_sessions()
+        existing = await sessions.has_session(thread_id)
+        share_existing = existing and show_window and not await sessions.is_shared(thread_id)
         result = await _run(
             ["get", "url"] if existing else ["open", "about:blank"],
             thread_id=thread_id,
@@ -82,8 +84,8 @@ class BrowserOpenTool(Tool):
         )
         if result.startswith("Error"):
             return result
-        if existing and browser_cli.json_object(result).get("url") == effective_url:
-            return result
+        if share_existing and browser_cli.json_object(result).get("url") == effective_url:
+            return f"Shared the current page in the person's CORSIA pane: {effective_url}"
 
         navigation_result = await _run(
             [

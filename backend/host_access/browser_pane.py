@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from dataclasses import dataclass
 from typing import Awaitable, Callable
 
@@ -44,7 +45,6 @@ async def watch_targets(thread_id: str, notify: Callable[[], None]) -> None:
     async with browser_cdp.CdpClient(endpoint) as cdp:
         await cdp.call("Target.setDiscoverTargets", discover=True)
         while True:
-            import json
             event = json.loads(await cdp.socket.recv())
             method = event.get("method")
             info = event.get("params", {}).get("targetInfo", {})

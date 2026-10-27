@@ -4,8 +4,48 @@ import json
 import pytest
 
 from host_access import browser_cdp, browser_pane, browser_pane_state, browser_session_commands
-from tools import browser_actions
+from tools import browser, browser_actions
 from ws import browser_stream
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(('show_window', 'shared', 'navigates'), [
+    (True, False, False),
+    (True, True, True),
+    (False, False, True),
+    (False, True, True),
+])
+async def test_same_url_only_skips_navigation_for_first_share(monkeypatch, show_window, shared, navigates):
+    from host_access import processes
+
+    class Sessions:
+        async def has_session(self, _thread):
+            return True
+
+        async def is_shared(self, _thread):
+            return shared
+
+    class Owner:
+        def browser_sessions(self):
+            return Sessions()
+
+    calls = []
+
+    async def run(args, **kwargs):
+        calls.append((args, kwargs))
+        return '{"url":"https://example.com/"}' if args[0] == 'get' else 'navigating'
+
+    monkeypatch.setattr(processes, 'PROCESS_OWNER', Owner())
+    monkeypatch.setattr(browser, '_run', run)
+    result = await browser.BrowserOpenTool().execute(
+        'https://example.com/', show_window=show_window, wait_for_load=False, _thread_id='thread')
+    assert calls[0][0] == ['get', 'url']
+    assert (len(calls) == 2) is navigates
+    if navigates:
+        assert calls[1][0][0] == 'eval'
+        assert result == 'navigating'
+    else:
+        assert result == "Shared the current page in the person's CORSIA pane: https://example.com/"
 
 
 @pytest.mark.asyncio

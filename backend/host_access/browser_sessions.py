@@ -88,6 +88,12 @@ class BrowserSessionOwner:
         async with self._owner_lock:
             return thread_id in self._sessions
 
+    async def is_shared(self, thread_id: str) -> bool:
+        """Report whether the live session is shared with the person."""
+        async with self._owner_lock:
+            runtime = self._sessions.get(thread_id)
+            return bool(runtime and runtime.record.show_window)
+
     async def _run_admitted(self, runtime: BrowserRuntime, args: Sequence[str], *,
                             lease_id: str | None, timeout: float) -> tuple[CommandResult, bool]:
         """Run one command in an admitted session; report whether it left the session unfinished."""
