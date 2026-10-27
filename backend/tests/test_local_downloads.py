@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from llm import local_downloads, local_setup, local_sources
 from llm.local_model import LocalModel
 
@@ -300,6 +302,7 @@ def _stopped_server_with_flight(monkeypatch, flight_state: str) -> dict:
     return local_sources._omlx_state((set(), set()))
 
 
+@pytest.mark.usefixtures("mac_local_model_host")
 def test_a_finished_setup_whose_server_was_turned_off_reads_stopped(monkeypatch) -> None:
     """Turning the Ready local server off must not read as a setup still finishing."""
     result = _stopped_server_with_flight(monkeypatch, "ready")
@@ -308,5 +311,6 @@ def test_a_finished_setup_whose_server_was_turned_off_reads_stopped(monkeypatch)
     assert result["local_state"] == "stopped"
 
 
+@pytest.mark.usefixtures("mac_local_model_host")
 def test_a_failed_setup_on_a_stopped_server_still_reads_failed(monkeypatch) -> None:
     assert _stopped_server_with_flight(monkeypatch, "start_failed")["local_state"] == "start_failed"
