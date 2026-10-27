@@ -159,7 +159,7 @@ describe('SettingsSkills', () => {
 			expect(host.textContent?.split(NOTE).length).toBe(2);
 		});
 
-		it('a failed lookup says so instead of claiming there is no thread, and Try again asks again', async () => {
+		it('a failed lookup says so instead of claiming there is no thread, and Retry asks again', async () => {
 			const FAILED = "Couldn't find where to open these.";
 			const base = (globalThis.fetch as unknown as (input: RequestInfo | URL) => Promise<unknown>);
 			let conductorOk = false;
@@ -178,7 +178,7 @@ describe('SettingsSkills', () => {
 			expect(host.textContent).not.toContain(NOTE);
 
 			conductorOk = true;
-			Array.from(host.querySelectorAll<HTMLButtonElement>('button')).find((button) => button.textContent?.trim() === 'Try again')!.click();
+			Array.from(host.querySelectorAll<HTMLButtonElement>('button')).find((button) => button.textContent?.trim() === 'Retry')!.click();
 			await vi.waitFor(() => expect(rowButton('deploy')).toBeTruthy());
 			expect(host.textContent).not.toContain(FAILED);
 		});

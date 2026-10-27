@@ -140,7 +140,7 @@
 		</div>
 		{#if home.unavailable}<p class="skills-empty">Open a chat to view this.</p>{/if}
 		{#if home.failed}
-			<p class="skills-error" role="alert">Couldn't find where to open these. <Button size="sm" variant="ghost" onclick={home.retry}>Try again</Button></p>
+			<p class="skills-error" role="alert">Couldn't find where to open these. <Button size="sm" variant="ghost" onclick={home.retry}>Retry</Button></p>
 		{/if}
 	{/if}
 
