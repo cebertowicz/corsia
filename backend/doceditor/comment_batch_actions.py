@@ -98,8 +98,11 @@ def _batch_text(rows: list[dict[str, Any]], document_text: str) -> tuple[str, li
     overlap = "overlaps an earlier suggestion" + (" from the same author" if one_author else "")
     winners: list[tuple[int, int, dict[str, Any], tuple[int, int]]] = []
     for candidate in sorted(candidates, key=lambda item: (item[0], item[1], item[2].get("created_at", ""), item[2]["id"])):
+        # Only a batch sees the final point: accepted siblings can move it at decision time.
         if any(suggestions_overlap(candidate[2], candidate[3], row, span)
-               for _start, _end, row, span in winners):
+               or (candidate[2].get("insert_after") and start < candidate[0] < end)
+               or (row.get("insert_after") and candidate[0] < start < candidate[1])
+               for start, end, row, span in winners):
             skipped.append({"id": candidate[2]["id"], "reason": overlap})
         else:
             winners.append(candidate)
