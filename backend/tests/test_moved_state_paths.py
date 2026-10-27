@@ -119,15 +119,21 @@ def test_moved_codex_projection_recovers_without_a_new_login(isolated_db, roots,
     with pytest.raises(AccountAdmissionError, match="account_home_mismatch"):
         projection_gate(receipt, db=db)
     heal_moved_state_paths(legacy_root=legacy, state_root=current)
-    assert readiness_reason(get_account("x2", db=db), model="codex/test") is None
     if unexpected_link:
         (new_runtime / "auth.json").unlink()
         (new_runtime / "auth.json").symlink_to(new_source / "unexpected.json")
+    from connections.account_projection import repair_moved_projections
+    repair_moved_projections(legacy_root=legacy, state_root=current, db=db)
+    if unexpected_link:
+        assert readiness_reason(get_account("x2", db=db), model="codex/test") == "codex_auth_projection_changed"
         with pytest.raises(AccountAdmissionError, match="codex_auth_projection_changed"):
             prepare_session_launch(session, "codex")
         assert (new_runtime / "auth.json").readlink() == new_source / "unexpected.json"
         return
 
+    assert get_account("x2", db=db)["discovery"]["auth_projection"]["failed"] is None
+    assert not (new_runtime / "auth.json").is_symlink()
+    assert readiness_reason(get_account("x2", db=db), model="codex/test") is None
     prepare_session_launch(session, "codex")
 
     account = get_account("x2", db=db)
@@ -147,7 +153,7 @@ def test_restored_codex_auth_clears_legacy_missing_failure(isolated_db, roots):
     from subagents.vendor_write_admission import prepare_session_launch
     from tests.test_checkpoint_store import _seed_thread
 
-    _, current = roots
+    legacy, current = roots
     source, runtime = _make_homes(current, "x3")
     auth = source / "auth.json"
     failure = {"cause": "codex_auth_source_missing", "source": str(auth),
@@ -161,6 +167,9 @@ def test_restored_codex_auth_clears_legacy_missing_failure(isolated_db, roots):
     _seed_thread(db, "restored-codex", model="codex/test")
     db.commit()
     select_account("restored-codex", "codex", account_id="x3", db=db)
+    from connections.account_projection import repair_moved_projections
+    repair_moved_projections(legacy_root=legacy, state_root=current, db=db)
+    assert get_account("x3", db=db)["discovery"]["auth_projection"]["failed"] is None
     assert readiness_reason(get_account("x3", db=db), model="codex/test") == "codex_auth_source_missing"
     auth.write_text(json.dumps({"auth_mode": "chatgpt", "tokens": {"fixture": "synthetic"}}))
     assert readiness_reason(get_account("x3", db=db), model="codex/test") is None
@@ -169,6 +178,32 @@ def test_restored_codex_auth_clears_legacy_missing_failure(isolated_db, roots):
     prepare_session_launch(session, "codex")
     assert get_account("x3", db=db)["discovery"]["auth_projection"]["failed"] is None
     assert (runtime / "auth.json").readlink() == auth
+
+
+def test_startup_repair_rewrites_failure_and_drops_absent_moved_home(isolated_db, roots):
+    from connections.account_projection import repair_moved_projections
+    from connections.vendor_accounts import get_account
+
+    legacy, current = roots
+    source, runtime = _make_homes(current, "x4")
+    old_source = legacy / "runtime/vendor-accounts/x4/source/auth.json"
+    old_dest = legacy / "runtime/vendor-accounts/x4/runtime/auth.json"
+    failure = {"cause": "codex_auth_projection_changed", "source": str(old_source),
+               "destination": str(old_dest), "account_revision": 0, "login_seq": 1, "at": "t"}
+    entry = {"source": str(old_source), "destination": str(old_dest), "home": str(old_dest.parent),
+             "kind": "live", "phase": "established", "account_revision": 0, "login_seq": 1}
+    record = {"auth_state": "known", "login_seq": 1, "login_revision": 0,
+              "auth_projection": {"failed": failure, "stale": [], "homes": {str(old_dest): entry}}}
+    _insert("x4", "codex", str(source), str(runtime), record)
+
+    repair_moved_projections(legacy_root=legacy, state_root=current)
+    projection = get_account("x4")["discovery"]["auth_projection"]
+    assert projection["homes"] == {}
+    assert projection["failed"] == failure | {"source": str(source / "auth.json"),
+                                                 "destination": str(runtime / "auth.json")}
+    before = get_db().total_changes
+    repair_moved_projections(legacy_root=legacy, state_root=current)
+    assert get_db().total_changes == before
 
 
 def test_missing_target_is_left_alone_and_logged(isolated_db, roots):
