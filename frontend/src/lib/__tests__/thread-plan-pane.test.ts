@@ -579,11 +579,10 @@ describe("ThreadPlanPane", () => {
     __reset();
     activeThreadId.set("t1");
     queue.set({ ...queueBody(null, 0, []), reply_items: [{
-      external_id: "reply-1", renderer: "comment-reply",
       detail: {
-        id: "reply-1", title: "launch-plan.md", unread_count: 1, newest_at: "2026-10-24",
+        title: "launch-plan.md", unread_count: 1, newest_at: "2026-10-24",
         destination: { pane: "document-replies", id: "artifact-1" },
-        source: { thread_id: "t1", thread_label: "Maya Chen" },
+        source: { thread_id: "t1" },
       },
     }] });
     routedFetch({ "/api/plans/operator": () => ok(envelope("t1"), '"r1"') });

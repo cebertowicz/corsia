@@ -174,7 +174,7 @@ describe('HostAccessLeaseControl', () => {
 		expect(dialog.textContent).toContain('Repository policy context');
 		expect(dialog.textContent).toContain('corsia');
 		expect(dialog.textContent).toContain('Pinned to dev');
-		expect(dialog.textContent).toContain('Policy exceptions requested');
+		expect(dialog.textContent).toContain('Beyond the usual rules');
 		expect(dialog.textContent).toContain('Branch pinning');
 		expect(dialog.textContent).toContain('The emergency repair must land on main.');
 		expect(dialog.textContent).toContain('Claude Opus');
@@ -772,7 +772,7 @@ describe('HostAccessLeaseControl', () => {
 		await vi.waitFor(() => expect(host.textContent).toContain('Home Assistant'));
 
 		emit('host_access_changed', { lease_id: 'lease-1' });
-		await vi.waitFor(() => expect(host.textContent).toContain('State stale'));
+		await vi.waitFor(() => expect(host.textContent).toContain('Not current'));
 		const dialog = await openPendingDrawer();
 		const approve = Array.from(dialog.querySelectorAll<HTMLButtonElement>('button'))
 			.find((button) => button.textContent?.trim() === 'Approve');
@@ -795,7 +795,7 @@ describe('HostAccessLeaseControl', () => {
 		await vi.waitFor(() => expect(host.querySelector('.active-chip')).toBeTruthy());
 
 		emit('host_access_changed', { lease_id: 'lease-1' });
-		await vi.waitFor(() => expect(host.textContent).toContain('State stale'));
+		await vi.waitFor(() => expect(host.textContent).toContain('Not current'));
 
 		expect(host.querySelector('.thread-host-access')!.classList).toContain('wide');
 	});
@@ -1059,7 +1059,7 @@ describe('HostAccessLeaseControl', () => {
 		await vi.waitFor(() => expect(host.textContent).toContain('Home Assistant'));
 
 		emit('host_access_changed', { lease_id: 'lease-1' });
-		await vi.waitFor(() => expect(host.textContent).toContain('State stale'));
+		await vi.waitFor(() => expect(host.textContent).toContain('Not current'));
 		const dialog = await openPendingDrawer();
 		const reject = Array.from(dialog.querySelectorAll<HTMLButtonElement>('button'))
 			.find((button) => button.textContent?.trim() === 'Reject');

@@ -104,6 +104,9 @@ def validate(data: dict[str, Any], lines: Lines) -> tuple[str, list[Item]]:
         raise fail(lines, ("workflow",), "workflow must name an owned workflow.")
     items = _event_items(data, namespace, lines)
     events = {name: spec for kind, name, spec in items if kind == "event"}
+    for name, spec in events.items():
+        if "since" in spec:
+            _check_since(name, spec, events, lines)
     _check_version_attr(data, events, lines)
     context = _Context(events, workflow, lines)
     for kind, key in (("kpi", "kpis"), ("view", "views")):
@@ -122,8 +125,8 @@ def _event_items(data: dict[str, Any], namespace: str, lines: Lines) -> list[Ite
         path = ("events", name)
         if not isinstance(name, str) or not name.startswith(namespace + "."):
             raise fail(lines, path, f"event {name} is outside namespace {namespace}; declare only {namespace}.* events.")
-        if not isinstance(spec, dict) or set(spec) - {"attributes", "dedupe", "corroborate", "keep_days", "use"}:
-            raise fail(lines, path, f"event {name} has an unknown field; use attributes, dedupe, corroborate, keep_days or use.")
+        if not isinstance(spec, dict) or set(spec) - {"attributes", "dedupe", "corroborate", "keep_days", "use", "since"}:
+            raise fail(lines, path, f"event {name} has an unknown field; use attributes, dedupe, corroborate, keep_days, use or since.")
         _check_event(name, spec, lines)
         items.append(("event", name, spec))
     return items
@@ -159,6 +162,65 @@ def _check_event(name: str, spec: dict[str, Any], lines: Lines) -> None:
                 raise fail(lines, path + ("attributes", key), f'event {name} is use: {spec["use"]}, so attribute {key} cannot be "login"; use id, or declare use: record.')
 
 
+def _attributes(event: Any, events: dict[str, dict[str, Any]]) -> dict[str, Any] | None:
+    if not isinstance(event, str):
+        return None
+    if event in events:
+        return events[event]["attributes"]
+    if event in ATTRIBUTE_ALLOWLISTS:
+        return ATTRIBUTE_ALLOWLISTS[event]
+    return None
+
+
+def _check_since(name: str, spec: dict[str, Any], events: dict[str, dict[str, Any]], lines: Lines) -> None:
+    path = ("events", name, "since")
+    since = spec["since"]
+    if not isinstance(since, dict) or set(since) - {"event", "on", "as"}:
+        raise fail(lines, path, f"event {name} since must contain event, on and as only.")
+    start = _attributes(since.get("event"), events)
+    if start is None:
+        raise fail(lines, path + ("event",), f"event {name} since.event must name a declared or platform event.")
+    on = since.get("on")
+    pairs = {on: on} if isinstance(on, str) else on
+    if not isinstance(pairs, dict) or not pairs or any(
+        not isinstance(end, str) or not isinstance(begin, str) or end not in spec["attributes"] or begin not in start
+        for end, begin in pairs.items()
+    ):
+        raise fail(lines, path + ("on",), f"event {name} since.on must name attributes declared on both events.")
+    target = since.get("as")
+    if not isinstance(target, str) or spec["attributes"].get(target) not in ("num", "count"):
+        raise fail(lines, path + ("as",), f"event {name} since.as must name a num or count attribute of the end event.")
+
+
+def _check_operand_keys(name: str, spec: dict[str, Any], context: _Context) -> None:
+    coverage = spec.get("coverage")
+    operands: list[tuple[tuple[str, ...], Any]] = [((key,), spec.get(key)) for key in ("num", "den")]
+    if isinstance(coverage, dict):
+        operands += [(("coverage", key), coverage.get(key)) for key in ("of", "labelled")]
+    for position, operand in operands:
+        if not isinstance(operand, dict):
+            continue
+        for field in ("latest", "first"):
+            if field not in operand:
+                continue
+            path = ("kpis", name) + position + (field,)
+            keys = operand[field]
+            if "latest" in operand and "first" in operand:
+                raise fail(context.lines, path, f"kpi {name} operand must use only one of latest or first.")
+            names = _event_names(operand)
+            raw_events = operand.get("event")
+            if (not isinstance(keys, list) or not 1 <= len(keys) <= 2 or not names
+                    or isinstance(raw_events, list) and len(names) != len(raw_events)):
+                raise fail(context.lines, path, f"kpi {name} {field} needs one or two id or enum attributes and an event.")
+            for event in names:
+                attrs = _attributes(event, context.events)
+                for key in keys:
+                    kind = attrs.get(key) if attrs is not None and isinstance(key, str) else None
+                    kind = getattr(kind, "kind", kind)
+                    if kind != "id" and kind != "enum" and not (isinstance(kind, dict) and "enum" in kind):
+                        raise fail(context.lines, path, f"kpi {name} {field} needs id or enum attributes declared on every event.")
+
+
 def _check_version_attr(data: dict[str, Any], events: dict[str, dict[str, Any]], lines: Lines) -> None:
     version_attr = data.get("version_attr")
     if version_attr is None:
@@ -179,6 +241,7 @@ def _declarations(data: dict[str, Any], kind: str, key: str, context: _Context) 
         if not name or not isinstance(spec, dict):
             raise fail(context.lines, (key, name if kind == "kpi" else index), f"{key} contains an invalid declaration.")
         if kind == "kpi":
+            _check_operand_keys(str(name), spec, context)
             _check_kpi(str(name), spec, context)
         items.append((kind, str(name), spec))
     return items

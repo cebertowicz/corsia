@@ -286,7 +286,7 @@
 {/snippet}
 
 {#if entries.length}
-	<SettingsGroup label="Service keys" hint="Agents can use these keys but can never see them. They're stored on this Mac, and a backup of CORSIA's state folder includes them.">
+	<SettingsGroup label="Service keys" hint="Agents can use these keys but can never see them. They’re stored on this computer, and a backup of CORSIA’s state folder includes them.">
 		{#each entries as entry (entry.name)}
 			<div class="entry" data-key-entry={entry.name} data-settings-anchor={`key-${entry.name}`} use:settingsAnchor={`key-${entry.name}`}>
 				<SettingsRow name={cardLabel(entry)} note={entry.ignored_env_var ? ignoredEnvironmentNote(entry.ignored_env_var) : ''} wrap stackActions>

@@ -42,7 +42,7 @@
 		fallbackSaving = true;
 		const result = await updateSettings({ host_access_reviewer_fallback: next });
 		fallbackSaving = false;
-		if (!result.ok) onError(result.error ?? 'Failed to update');
+		if (!result.ok) onError(result.error ?? 'Couldn’t save this setting. Try again.');
 	}
 
 	async function setReviewer(e: Event) {
@@ -51,7 +51,7 @@
 		const result = await updateSettings({ host_access_reviewer_model: target.value || null });
 		if (!result.ok) {
 			target.value = $coreSettings?.host_access_reviewer_model ?? '';
-			onError(result.error ?? 'Failed to update');
+			onError(result.error ?? 'Couldn’t save this setting. Try again.');
 		}
 	}
 
@@ -60,7 +60,7 @@
 		autoApprovalSaving = true;
 		const result = await updateSettings({ host_access_auto_approve: next });
 		autoApprovalSaving = false;
-		if (!result.ok) onError(result.error ?? 'Failed to update');
+		if (!result.ok) onError(result.error ?? 'Couldn’t save this setting. Try again.');
 	}
 </script>
 

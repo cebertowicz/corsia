@@ -22,11 +22,11 @@ export interface ConnectedApp {
 	tool_count?: number;
 	failure_class?: string | null;
 	reach: { mode: 'all' | 'selected'; project_ids: string[]; outside_projects: boolean };
-	/** `stdio` is an app that runs on this Mac; `http` is an app at a web address. */
+	/** `stdio` is an app that runs on this computer; `http` is an app at a web address. */
 	transport?: 'stdio' | 'http' | null;
 	/** Display label only: the last segment of the Claude Code folder the app was set up for. Plain text. */
 	folder?: string;
-	/** The server's notice for an app that runs on this Mac, on a request waiting for approval and on the answer to approving it. */
+	/** The server's notice for an app that runs on this computer, on a request waiting for approval and on the answer to approving it. */
 	notice?: string;
 	/** Only on the answer to Decline when it deleted a new request: the row is gone. */
 	removed?: boolean;

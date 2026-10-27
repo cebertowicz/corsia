@@ -13,7 +13,7 @@
 	 * `suppressed` defers to a higher-precedence control in the same physical
 	 * slot (a host-access lease awaiting the user). Deferred, never hidden.
 	 */
-	import { onMount, tick, type Snippet } from 'svelte';
+	import { onMount, type Snippet } from 'svelte';
 	import CommentReplyChipRow from './CommentReplyChipRow.svelte';
 	import { replyItemsForThread, subscribeReplyAttention } from './replyItems';
 	import { get } from 'svelte/store';
@@ -61,7 +61,6 @@
 	} = $props();
 
 	let openTrigger = $state<HTMLButtonElement | null>(null);
-	let region = $state<HTMLElement | null>(null);
 	let servedFocusRequest = 0;
 	/** How long after the last keydown the person still counts as typing. */
 	const TYPING_IDLE_MS = 2000;
@@ -106,13 +105,9 @@
 
 	const regionLabel = $derived(getRegionLabel(current, dockQueue.count));
 
-	async function open() {
+	function open() {
 		if (!current || suppressed) return;
 		expand(current, suppressed);
-		// Opening replaces the focused bar. Move keyboard focus into the new card
-		// so the next Tab continues from its controls rather than falling to the page.
-		await tick();
-		region?.querySelector<HTMLElement>('[aria-label="Collapse reply"]')?.focus();
 	}
 
 	$effect(() => {
@@ -248,7 +243,7 @@
 	>
 		<CommentReplyChipRow onOpenDocument={onOpenDestination} />
 		{#if current}
-		<section data-attention-dock bind:this={region} role="region" aria-label={regionLabel}>
+		<section data-attention-dock role="region" aria-label={regionLabel}>
 		<p class="sr-only" aria-live="polite">{regionLabel}</p>
 		{#if !showChip}
 			<div class="dock-row">

@@ -114,7 +114,7 @@ describe('AppSignInPanel', () => {
 		['permissions', "Linear can't give CORSIA the access it needs."],
 		['app_error', 'Linear had a problem with the sign-in.'],
 		['app_busy', 'Linear is busy.'],
-		['address_mismatch', "Linear didn't recognize CORSIA. It needs a code called a client ID."],
+		['address_mismatch', "Linear didn't recognize CORSIA, so it needs a client ID."],
 	])('names the %s failure in plain words', (failureClass, text) => {
 		mountPanel(linear({ sign_in: { status: 'failed', signed_in: false, failure_class: failureClass } }));
 		expect(host.textContent).toContain(text);
@@ -154,9 +154,9 @@ describe('AppSignInPanel', () => {
 		expect(host.textContent).toContain('tenant is frozen');
 	});
 
-	it('does not offer Sign in away from the CORSIA Mac', () => {
+	it('does not offer Sign in away from the computer CORSIA runs on', () => {
 		mountPanel(linear(), { signInHere: false });
-		expect(host.textContent).toContain('You can only sign in on the Mac CORSIA runs on. Open CORSIA there and press Sign in.');
+		expect(host.textContent).toContain('You can only sign in on the computer CORSIA runs on. Open CORSIA there and press Sign in.');
 		expect(button('Sign in')).toBeUndefined();
 	});
 
@@ -185,10 +185,10 @@ describe('ConnectedAppsSettings with sign-in', () => {
 		expect(button('Sign in')!.classList.contains('primary')).toBe(true);
 	});
 
-	it('hides Sign in when the backend says the person is not on its Mac', async () => {
+	it('hides Sign in when the backend says the person is not on its computer', async () => {
 		vi.stubGlobal('fetch', vi.fn(async () => reply({ servers: [linear()], sign_in_here: false })));
 		component = mount(ConnectedAppsSettings, { target: host });
-		await vi.waitFor(() => expect(host.textContent).toContain('You can only sign in on the Mac CORSIA runs on.'));
+		await vi.waitFor(() => expect(host.textContent).toContain('You can only sign in on the computer CORSIA runs on.'));
 		expect(button('Sign in')).toBeUndefined();
 	});
 

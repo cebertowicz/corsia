@@ -1,5 +1,6 @@
 """Confinement and private-cache setup for local MCP stdio transports."""
 
+import asyncio
 import hashlib
 import os
 import re
@@ -90,6 +91,23 @@ def _mcp_setup_refusal(detail: str) -> str:
 def mcp_oserror_detail(error: OSError) -> str:
     """Preserve non-private launch errors while clarifying private-state denials."""
     return _mcp_denial_guidance(str(error)) or str(error)
+
+
+async def prepare_managed_runtime(config: dict) -> None:
+    """Fetch a missing approved stdio runtime before the MCP connect deadline starts."""
+    command = config.get("command")
+    if not isinstance(command, str):
+        return
+    configured_env = config.get("env")
+    path = configured_env.get("PATH") if isinstance(configured_env, dict) else None
+    if path is not None and not isinstance(path, str):
+        path = None
+    from tools.managed_runtime import ensure_runtime, runtime_fetch_plan
+
+    plan = runtime_fetch_plan(command, path=path)
+    if plan is not None:
+        kind, _pin = plan
+        await asyncio.to_thread(ensure_runtime, kind)
 
 
 def _uv_runtime_env(command: str, runtime_bin: Path | None) -> dict[str, str]:

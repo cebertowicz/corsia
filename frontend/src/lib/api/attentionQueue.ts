@@ -82,17 +82,14 @@ export interface AttentionDestination {
 }
 
 export interface CommentReplyDetail {
-	id: string;
 	title: string;
 	unread_count: number;
 	newest_at: string;
 	destination: AttentionDestination;
-	source: { thread_id: string; thread_label: string };
+	source: { thread_id: string };
 }
 
 export interface CommentReplyItem {
-	external_id: string;
-	renderer: 'comment-reply';
 	detail: CommentReplyDetail;
 }
 

@@ -1,9 +1,9 @@
 """Safe Connected Apps list-row projections for people and agents."""
 from __future__ import annotations
 
-#: The one notice for an app that runs on this Mac: shown when it is connected, approved or brought over (B-R22).
+#: The one notice for an app that runs on this computer: shown when it is connected, approved or brought over (B-R22).
 LOCAL_APP_NOTICE = (
-    "It can do anything you can do on this Mac, except open CORSIA's own files and saved keys. "
+    "It can do anything you can do on this computer, except open CORSIA's own files and saved keys. "
     "Connect only apps you trust."
 )
 _RUNTIME_NOTICE = {
