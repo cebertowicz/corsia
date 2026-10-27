@@ -26,7 +26,7 @@ export interface AlignmentPeriod {
 
 /** The one issue the chart labels too few under the bar; every other issue is told only in the table. */
 export const TOO_FEW = 'Too few decisions answered to show the shares.';
-export const INCONSISTENT_ANSWERS = 'This period’s answers were recorded inconsistently, so they aren’t shown. This is a CORSIA bug; please report it.';
+export const INCONSISTENT_ANSWERS = 'This period’s answers were saved inconsistently, so its shares aren’t shown. Other periods aren’t affected.';
 
 /** Each drawn period's three shares, checked the way the stack needs them: all three served, measured and summing to one. */
 export function alignmentPeriods(rows: MeasurementRow[], points: BarPoint[]): AlignmentPeriod[] {

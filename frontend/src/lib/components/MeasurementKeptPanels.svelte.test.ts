@@ -375,7 +375,7 @@ describe('Alignment draws its three shares as one stacked bar per period, as bef
 		const rows = all();
 		const shares = withShares(rows.took_recommendation_pct).filter((r) => !(r.period === wk(2) && r.series === 'answered_neither_pct'));
 		render(rows, periodsPeriod(wk(7)), POOLED, shares);
-		expect(card('alignment').querySelectorAll('table.sr-only tbody tr')[2].textContent).toContain('This period’s answers were recorded inconsistently, so they aren’t shown. This is a CORSIA bug; please report it.');
+		expect(card('alignment').querySelectorAll('table.sr-only tbody tr')[2].textContent).toContain(INCONSISTENT_ANSWERS);
 	});
 
 	it('draws no stack for a week whose shares do not add up to the answered decisions, and says why in the table', () => {
