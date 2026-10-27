@@ -26,6 +26,7 @@
 	let busy = $state(false);
 	let agentsLoading = $state(false);
 	let agentsError = $state('');
+	let agentsLoadFailed = $state(false);
 	let agentRows = $state<AgentRow[]>([]);
 	let rootPickerOpen = $state(false);
 
@@ -71,6 +72,7 @@
 	async function loadAgents(t: string, id: string) {
 		agentsLoading = true;
 		agentsError = '';
+		agentsLoadFailed = false;
 		try {
 			const res = await fetch(`/api/agents?token=${encodeURIComponent(t)}&project_id=${encodeURIComponent(id)}`);
 			if (!res.ok) throw new Error(`agent list load failed (${res.status})`);
@@ -79,9 +81,15 @@
 		} catch (e) {
 			console.error(e);
 			agentsError = 'Couldn’t load this project’s agents.';
+			agentsLoadFailed = true;
 		} finally {
 			agentsLoading = false;
 		}
+	}
+
+	function retryAgents() {
+		const t = get(token);
+		if (t && project) void loadAgents(t, project.id);
 	}
 
 	async function demoteAgent(threadId: string) {
@@ -272,7 +280,10 @@
 			{#if agentsLoading}
 				<p class="note">Loading agents…</p>
 			{:else if agentsError}
-				<p class="note failed">{agentsError}</p>
+				<p class="note failed" role="alert">
+					{agentsError}
+					{#if agentsLoadFailed}<Button size="sm" variant="ghost" onclick={retryAgents}>Try again</Button>{/if}
+				</p>
 			{:else}
 				{#each agentRows as agent (agent.thread_id)}
 					<SettingsRow

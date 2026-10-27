@@ -211,7 +211,7 @@
 			<div class="agent-copy">
 				<div class="agent-title muted">Not an agent</div>
 			</div>
-			<Button size="sm" disabled={busy} onclick={beginEdit}>Make it an agent</Button>
+			<Button size="sm" disabled={busy} onclick={beginEdit}>Make agent</Button>
 		</div>
 	{/if}
 </div>

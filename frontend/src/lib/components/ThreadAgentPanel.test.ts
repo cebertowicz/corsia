@@ -53,7 +53,7 @@ describe('ThreadAgentPanel', () => {
 		expect(host.textContent).toContain('Not an agent');
 		expect(host.querySelector('select')).toBeNull();
 		Array.from(host.querySelectorAll<HTMLButtonElement>('button'))
-			.find((button) => button.textContent?.trim() === 'Make it an agent')
+			.find((button) => button.textContent?.trim() === 'Make agent')
 			?.click();
 		flushSync();
 
@@ -143,7 +143,7 @@ describe('ThreadAgentPanel', () => {
 		expect(host.textContent).toContain('Not an agent');
 
 		Array.from(host.querySelectorAll<HTMLButtonElement>('button'))
-			.find((button) => button.textContent?.trim() === 'Make it an agent')
+			.find((button) => button.textContent?.trim() === 'Make agent')
 			?.click();
 		flushSync();
 

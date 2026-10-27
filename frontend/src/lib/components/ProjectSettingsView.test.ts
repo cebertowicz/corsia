@@ -131,6 +131,25 @@ describe('ProjectSettingsView', () => {
 		expect(button('Remove')).toBeUndefined();
 	});
 
+	it('offers Try again when the agent list fails to load, and reloads it', async () => {
+		let agentCalls = 0;
+		stubFetch(project(), [], (url) => {
+			if (!url.startsWith('/api/agents')) return null;
+			agentCalls += 1;
+			if (agentCalls === 1) return { ok: false, status: 500, json: async () => ({}) };
+			return { ok: true, json: async () => ({ agents: [{ thread_id: 't1', display_name: 'Release Coordinator', project_id: 'corsia', active: true }] }) };
+		});
+		vi.spyOn(console, 'error').mockImplementation(() => {});
+
+		component = mount(ProjectSettingsView, { target: host, props: { projectId: 'corsia' } });
+
+		await vi.waitFor(() => expect(host.textContent).toContain('Couldn’t load this project’s agents.'));
+		button('Try again')!.click();
+		await vi.waitFor(() => expect(host.textContent).toContain('Release Coordinator'));
+		expect(host.textContent).not.toContain('Couldn’t load this project’s agents.');
+		expect(agentCalls).toBe(2);
+	});
+
 	it('opens Skills and Context at this project\'s level, remembering the page to come back to', async () => {
 		stubFetch(project());
 		component = mount(ProjectSettingsView, { target: host, props: { projectId: 'corsia' } });
