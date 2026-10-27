@@ -281,7 +281,7 @@
 						onMenuSelect={() => demoteAgent(agent.thread_id)}
 					/>
 				{:else}
-					<p class="note">No project Agents yet.</p>
+					<p class="note">This project has no agents.</p>
 				{/each}
 			{/if}
 		</SettingsGroup>
