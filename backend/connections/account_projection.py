@@ -7,6 +7,7 @@ import stat
 import uuid
 
 from connections.account_evidence import discovery_record, store_record
+from connections.account_home import source_auth_exists, source_auth_path
 from connections.account_policy import AccountAdmissionError
 from connections.account_receipts import ReceiptFence, receipt_is_current
 from connections.vendor_accounts import get_account
@@ -20,7 +21,7 @@ KINDS = frozenset({'live', 'discovery', 'checkpoint', 'detached'})
 
 def _paths(account, home):
     # Resolve neither auth file nor final home: their disappearance/retarget is evidence.
-    source = Path(account['source_home']).absolute() / 'auth.json'
+    source = source_auth_path(account['source_home'])
     destination = Path(home).absolute() / 'auth.json'
     if source == destination:
         raise AccountAdmissionError('account_home_mismatch')
@@ -93,7 +94,7 @@ def ensure_projection(receipt: ReceiptFence, *, home: Path, kind: str,
     cause = None
     stage = None
     # Directory work is outside the account writer; all path writers recheck below.
-    if _safe_parents(destination) and source.is_file():
+    if _safe_parents(destination) and source_auth_exists(source):
         destination.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         stage = destination.parent / ('.corsia-auth-' + uuid.uuid4().hex)
         stage.symlink_to(source)
@@ -105,7 +106,7 @@ def ensure_projection(receipt: ReceiptFence, *, home: Path, kind: str,
             entry = record['auth_projection']['homes'].get(str(destination))
             if cause is None:
                 state = _link_state(source, destination)
-                if not source.is_file():
+                if not source_auth_exists(source):
                     cause = SOURCE_MISSING
                 elif not _safe_parents(destination):
                     cause = CHANGED
@@ -146,7 +147,7 @@ def validate_projection(receipt: ReceiptFence, *, home: Path, db=None) -> None:
         cause = _gate(record, receipt)
         if cause is None:
             entry = record['auth_projection']['homes'].get(str(destination))
-            if not source.is_file():
+            if not source_auth_exists(source):
                 cause = SOURCE_MISSING
             elif entry is None or entry['phase'] != 'established' or (
                     entry['account_revision'], entry['login_seq'], entry['source']) != (
@@ -200,7 +201,7 @@ def cleanup_stale(receipt: ReceiptFence, *, quiesced: bool, db=None) -> bool:
         if not receipt_is_current(receipt, db=connection):
             return False
         account, record = _current(receipt, db=connection)
-        source = str(Path(account['source_home']).absolute() / 'auth.json')
+        source = str(source_auth_path(account['source_home']))
         for item in record['auth_projection']['stale']:
             if item['phase'] != 'pending':
                 continue

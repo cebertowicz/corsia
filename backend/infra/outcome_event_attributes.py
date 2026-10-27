@@ -31,7 +31,19 @@ from core.carry_in_facts import (
     SAVED_PROCESSED as CARRY_IN_SAVED_PROCESSED, VERDICTS as CARRY_IN_VERDICTS,
     WAITING as CARRY_IN_WAITING, WAITING_REASONS as CARRY_IN_WAITING_REASONS,
 )
-from core.corrections_recording import CORRECTION_EVENT, FACT_KEYS as CORRECTION_FACT_KEYS, LABELS as CORRECTION_LABELS
+from core.correction_learning import (
+    CAUSES as LEARNING_CAUSES,
+    NEW_WORK_SIGNALS,
+    OUTCOME_EVENT as LEARNING_OUTCOME_EVENT,
+    TERMINAL_OUTCOMES,
+    TIERS,
+    TRIAGE_EVENT,
+)
+from core.corrections_recording import (
+    CORRECTION_EVENT,
+    FACT_KEYS as CORRECTION_FACT_KEYS,
+    LABELS as CORRECTION_LABELS,
+)
 from core.lesson_gate import EVENT as LESSON_GATE_EVENT
 from core.size_rating import BASES, FACT_KEYS, SIZE_CLASSES, SIZE_EVENT
 from host_access.credential_sanitizer import contains_credential, sanitize_credential_data
@@ -158,7 +170,8 @@ _ASSOCIATION = enum_attr(
 _PR_REPLY_ATTRS = {
     "repo": id_attr(), "pr_number": id_attr(), "head_sha": id_attr(),
     "author_login": login_attr(), "author_association": _ASSOCIATION,
-    "pr_author_login": login_attr(), "has_reviewer_marker": enum_attr("yes", "no"),
+    "pr_author_login": login_attr(), "pr_author_association": _ASSOCIATION,
+    "has_reviewer_marker": enum_attr("yes", "no"),
     "minutes_since_pr_created": count_attr(),
 }
 _REVIEW_ATTRS = {
@@ -177,6 +190,12 @@ ATTRIBUTE_ALLOWLISTS: dict[str, dict[str, AttributeSpec]] = {
         **_PR_ATTRS, **_PR_DECLARATION_ATTRS,
         "head_ref": id_attr(), "draft": enum_attr("yes", "no"),
     },
+    "github.pr.ready": {"repo": id_attr(), "pr": id_attr(), "minutes_since_pr_created": count_attr()},
+    "github.pr.drafted": {"repo": id_attr(), "pr": id_attr()},
+    "github.status": {"repo": id_attr(), "sha": id_attr(), "context": text_attr(255),
+                      "state": enum_attr("error", "failure", "pending", "success")},
+    "github.release.published": {"repo": id_attr(), "tag": text_attr(255),
+                                 "prerelease": enum_attr("yes", "no"), "draft": enum_attr("yes", "no")},
     "github.pr.pushed": {**_PR_ATTRS, "before_sha": id_attr()},
     "github.pr.reopened": {**_PR_ATTRS},
     "github.pr.closed": {**_PR_ATTRS},
@@ -238,7 +257,8 @@ ATTRIBUTE_ALLOWLISTS: dict[str, dict[str, AttributeSpec]] = {
     "github.issue.comment.created": {
         "repo": id_attr(), "issue_number": id_attr(), "comment_id": id_attr(),
         "author_login": login_attr(), "author_association": _ASSOCIATION,
-        "issue_author_login": login_attr(), "minutes_since_issue_created": count_attr(),
+        "issue_author_login": login_attr(), "issue_author_association": _ASSOCIATION,
+        "minutes_since_issue_created": count_attr(),
     },
     # Estimated outcome size; core/size_rating.py owns the fact's keys, enums and
     # meaning. Ids, counts and enums only: no task text or hours.
@@ -288,7 +308,19 @@ ATTRIBUTE_ALLOWLISTS: dict[str, dict[str, AttributeSpec]] = {
         "samples_completed": count_attr(),
     },
     # Saved targets are closed by the same append-only fact sequence, not a retry queue.
+    TRIAGE_EVENT: {
+        "tier": enum_attr(*TIERS), "cause": enum_attr(*LEARNING_CAUSES),
+        "new_work": enum_attr("yes", "no"),
+        "new_work_signal": enum_attr(*NEW_WORK_SIGNALS), "target_file": text_attr(500),
+        "serious_proposed": enum_attr("yes", "no"), "serious_lowered_reason": text_attr(500),
+    },
+    LEARNING_OUTCOME_EVENT: {
+        "outcome": enum_attr(*TERMINAL_OUTCOMES), "reason": text_attr(500),
+        "lesson_id": id_attr(), "workflow_version": id_attr(),
+    },
     "github.issue.opened": {**_ISSUE_ATTRS},
+    "github.issue.assigned": {"repo": id_attr(), "issue": id_attr(), "assignee_login": login_attr(),
+                              "minutes_since_issue_created": count_attr()},
     "github.issue.labeled": {**_ISSUE_ATTRS, **_LABEL_CHANGE_ATTRS, "minutes_since_opened": count_attr()},
     "github.issue.unlabeled": {**_ISSUE_ATTRS, **_LABEL_CHANGE_ATTRS, "minutes_since_opened": count_attr()},
     "github.issue.reopened": {**_ISSUE_ATTRS, "actor": login_attr(), "minutes_since_opened": count_attr()},

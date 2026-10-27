@@ -19,11 +19,12 @@ workspace may hold.
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Collection, Mapping
 from datetime import datetime, timezone
 from typing import Any
 
 from infra.packed_rows import fetch_all
-from plans import hierarchy, node_time, node_waiting, service
+from plans import hierarchy, node_time, node_waiting, service, usage_cost
 from plans.status_time import parse as _parse
 
 #: Every ``active_turns.status`` the schema allows; ``_add`` keeps only these.
@@ -109,28 +110,6 @@ def _add(left: dict, right: dict) -> dict:
     }
 
 
-#: Usage summed in SQL, so a read returns one row per group however many calls
-#: the ledger holds. ``SUM`` is NULL when every value is: "no known amount".
-USAGE_TOTALS = """SUM(total_tokens) AS tokens,SUM(total_tokens IS NULL) AS unknown_tokens,
-                  SUM(cost_usd) AS cost,SUM(cost_usd IS NULL) AS unknown_cost"""
-
-
-def _own_usage(connection, node_ids: list[str]) -> dict[str, dict]:
-    rows = _rows_in(
-        connection,
-        f"""SELECT plan_node_id,{USAGE_TOTALS} FROM llm_usage
-            WHERE plan_node_id IN ({{marks}}) GROUP BY plan_node_id""",
-        node_ids,
-    )
-    return {
-        str(row["plan_node_id"]): {
-            "tokens": {"known": row["tokens"], "unknown_rows": row["unknown_tokens"]},
-            "model_cost_usd": {"known": row["cost"], "unknown_rows": row["unknown_cost"]},
-        }
-        for row in rows
-    }
-
-
 def _own_failures(connection, node_ids: list[str]) -> dict[str, int]:
     rows = _rows_in(
         connection,
@@ -188,15 +167,19 @@ def own_many(node_ids, *, db=None, now: datetime | None = None) -> dict[str, dic
 
 
 def own_many_timed(
-    node_ids, *, db=None, now: datetime | None = None,
+    node_ids, *, db=None, now: datetime | None = None, dollars: Mapping[str, dict] | None = None,
 ) -> tuple[dict[str, dict], dict[str, node_time.Span]]:
-    """``own_many`` plus each node's own time intervals, from the same reads."""
+    """``own_many`` plus each node's own time intervals, from the same reads.
+
+    ``dollars`` is these nodes' ``usage_cost.usage_dollars`` when the caller already priced them;
+    None prices them here.
+    """
     ids = sorted({str(value) for value in node_ids})
     if not ids:
         return {}, {}
     clock = now or datetime.now(timezone.utc)
     with service._connection(db) as connection:
-        usage = _own_usage(connection, ids)
+        usage = usage_cost.own_usage(connection, ids, dollars, _rows_in)
         failures = _own_failures(connection, ids)
         execution, working = _own_execution(connection, ids, clock)
         waiting = node_waiting.own_waiting_intervals(connection, ids, clock, _rows_in)
@@ -279,7 +262,7 @@ def _rollup_one_plan(
     rolled: dict[str, dict] = {}
     carried: dict[str, node_time.Span] = {}
     for node_id in reversed(order):
-        total = dict(own.get(node_id, _empty_own()))
+        total = dict(own[node_id])
         parts = [spans.get(node_id, node_time.empty())]
         for child_id in children[node_id]:
             total = _add(total, rolled[child_id])
@@ -317,30 +300,41 @@ def project_with_initiatives(
     false. The total reads the rows this call already loaded (see
     ``node_cost_initiative``), so a plan with no follow-ups adds no query.
     """
+    by_plan, found, _dollars = project_with_commitments(plan_ids, (), db=db, now=now, initiatives=initiatives)
+    return by_plan, found
+
+
+def project_with_commitments(
+    plan_ids, commitment_ids: Collection[str], *, db=None, now: datetime | None = None, initiatives: bool = True,
+) -> tuple[dict[str, dict[str, dict]], dict[str, dict | None], usage_cost.Ledger | None]:
+    """``project_with_initiatives`` plus the ``usage_cost.Ledger`` of ``commitment_ids``.
+
+    Every node the projection sums (the plans' nodes and the rows their initiative totals
+    read from outside them) and the commitments are priced in one ledger read, for
+    ``commitment_cost.project_many(ledger=...)``; None when no plan was read.
+    """
+    from plans import node_cost_initiative
+
     ids = sorted({str(value) for value in plan_ids})
     if not ids:
-        return {}, {}
+        return {}, {}, None
     clock = now or datetime.now(timezone.utc)
     with service._connection(db) as connection:
         tree = [str(row["id"]) for row in hierarchy.descendants(connection, ids)]
-        loaded = _load_plans(connection, tree, clock)
-        found = _lineage_totals(connection, loaded[:3], clock) if initiatives else {}
-    nodes_by_plan, own, attached, spans = loaded
+        nodes_by_plan = _plan_nodes(connection, tree)
+        attached = _attached_children(connection, tree)
+        lineages = node_cost_initiative.expand(connection, nodes_by_plan, attached) if initiatives else None
+        node_ids = node_cost_initiative.node_ids(lineages) if lineages else [
+            str(row["id"]) for rows in nodes_by_plan.values() for row in rows
+        ]
+        dollars, ledger = usage_cost.priced_with_pending(connection, node_ids, commitment_ids)
+        own, spans = own_many_timed(node_ids, db=connection, now=clock, dollars=dollars)
+    found = node_cost_initiative.totals(lineages, own) if lineages else {}
     by_plan = _roll_plans(tree, nodes_by_plan, own, attached, spans)
     return by_plan, {
         row["id"]: found.get(row["id"])
         for plan_id in tree for row in nodes_by_plan[plan_id]
-    } if initiatives else {}
-
-
-def _load_plans(connection, tree: list[str], clock) -> tuple[dict, dict, dict, dict]:
-    """Nodes, own costs, attachments and own time spans, in batch reads."""
-    nodes_by_plan = _plan_nodes(connection, tree)
-    own, spans = own_many_timed(
-        [row["id"] for rows in nodes_by_plan.values() for row in rows],
-        db=connection, now=clock,
-    )
-    return nodes_by_plan, own, _attached_children(connection, tree), spans
+    } if initiatives else {}, ledger
 
 
 def _roll_plans(
@@ -374,7 +368,7 @@ def _roll_plans_with_totals(
             spans, plan_spans,
         )
         by_plan[plan_id] = {
-            node_id: {"own": _settled(own.get(node_id, _empty_own())),
+            node_id: {"own": _settled(own[node_id]),
                       "rolled": _settled(rolled[node_id])}
             for node_id in rolled
         }
@@ -385,9 +379,3 @@ def _roll_plans_with_totals(
         totals[plan_id] = total
     return by_plan, totals, plan_spans
 
-
-def _lineage_totals(connection, loaded: tuple[dict, dict, dict], clock) -> dict[str, dict]:
-    """Each lineage member's initiative total (``node_cost_initiative`` owns the membership)."""
-    from plans import node_cost_initiative
-
-    return node_cost_initiative.totals(connection, loaded, clock)

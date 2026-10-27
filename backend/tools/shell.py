@@ -6,7 +6,6 @@ from functools import partial
 import logging
 import os
 import subprocess
-import tempfile
 import time
 from pathlib import Path
 from typing import Any
@@ -17,7 +16,6 @@ from host_access.processes import (
     PROCESS_OWNER,
 )
 from connections import github_agent
-from host_access.refusal_messages import safehouse_unavailable_refusal
 from infra.db_async import run_in_db, run_off_db
 from infra.project_repo_policy import (
     RepoPolicy,
@@ -61,6 +59,8 @@ from tools.shell_output import (
     with_shell_warnings,
 )
 from tools.shell_policy import load_shell_repo_policies
+import tools.controlled_git_sandbox as controlled_git_sandbox
+import tools.shell_sandbox as shell_sandbox
 from tools.shell_guard import (
     chained_base_git_denial_guidance,
     check_command_safety,
@@ -96,33 +96,13 @@ async def _run_controlled_git(
     agent_account = await run_in_db(github_agent.view) if agent_account is None else agent_account
     kind = args[0] if args and args[0] in {"fetch", "merge"} else "query"
     live_policies = list_registered_repo_policies()
-    descriptor, raw_path = tempfile.mkstemp(
-        prefix="corsia-controlled-git-",
-        suffix=".sb",
+    profile_path, argv = await asyncio.to_thread(
+        controlled_git_sandbox.envelope, repo, args, policy=policy,
+        operation=kind, policies=live_policies, agent_account=agent_account,
+        env=env, thread_id=thread_id, build_profile=execution_envelope_profile,
+        build_argv=safehouse_argv,
     )
-    profile_path = Path(raw_path).resolve(strict=False)
     try:
-        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-            profile = execution_envelope_profile(
-                "",
-                repo,
-                profile_path,
-                leased=False,
-                controlled_policy=policy,
-                controlled_operation=kind,
-                policies=live_policies,
-                agent_account=agent_account,
-            )
-            handle.write(profile)
-        argv = safehouse_argv("", repo, profile_path, agent_account=agent_account)
-        argv = [
-            *argv[: argv.index("--")],
-            "--",
-            "git",
-            "-c",
-            "core.hooksPath=/dev/null",
-            *args,
-        ]
         owned = await PROCESS_OWNER.spawn(
             argv,
             thread_id=thread_id,
@@ -139,6 +119,8 @@ async def _run_controlled_git(
             raise RuntimeError(
                 f"{operation} process owner returned an invalid result"
             )
+        if owned.returncode != 0 or owned.timed_out:
+            await asyncio.to_thread(shell_sandbox.launch_failed)
         if owned.timed_out:
             raise subprocess.TimeoutExpired(
                 argv,
@@ -152,8 +134,12 @@ async def _run_controlled_git(
             owned.stdout.decode("utf-8", errors="replace"),
             owned.stderr.decode("utf-8", errors="replace"),
         )
+    except BaseException:
+        await asyncio.to_thread(shell_sandbox.launch_failed)
+        raise
     finally:
-        profile_path.unlink(missing_ok=True)
+        if profile_path is not None:
+            profile_path.unlink(missing_ok=True)
 
 
 class BashTool(Tool):
@@ -335,11 +321,8 @@ class BashTool(Tool):
                     policies=policies,
                 )
                 if fast_forward_policy is not None:
-                    if not is_safehouse_available():
-                        refusal = safehouse_unavailable_refusal(os.environ.get("PATH"))
-                        return f"Error: {refusal}"
-                    if version_error := await asyncio.to_thread(safehouse_version_error):
-                        return f"Error: {version_error}"
+                    if error := await shell_sandbox.startup_error(is_safehouse_available, safehouse_version_error):
+                        return error
 
                     try:
                         owner_thread_id = thread_id
@@ -412,12 +395,10 @@ class BashTool(Tool):
                 if guard_error:
                     return guard_error
 
-            sandbox_available = is_safehouse_available()
-            if not sandbox_available:
-                refusal = safehouse_unavailable_refusal(os.environ.get("PATH"))
-                return f"Error: {refusal}"
-            if version_error := await asyncio.to_thread(safehouse_version_error):
-                return f"Error: {version_error}"
+            if error := await shell_sandbox.startup_error(
+                is_safehouse_available, safehouse_version_error, leased=leased,
+            ):
+                return error
 
             canonical_cwd, cwd_denial = await _resolve_execution_cwd(
                 cwd,
@@ -455,7 +436,7 @@ class BashTool(Tool):
                 env=env,
                 timeout_seconds=effective_timeout,
                 background=background,
-                cleanup_paths=(profile_path,) if background else (),
+                cleanup_paths=(profile_path,) if background and profile_path is not None else (),
                 **long_call.spawn_options,
             )
             if isinstance(owned, BackgroundProcessResult):
@@ -464,6 +445,8 @@ class BashTool(Tool):
                 return long_call.started_message(owned.handle)
             if not isinstance(owned, ForegroundProcessResult):
                 raise RuntimeError("process owner returned an invalid result")
+            if owned.returncode != 0 or owned.timed_out:
+                await asyncio.to_thread(shell_sandbox.launch_failed)
             if owned.timed_out:
                 return f"Error: Command timed out after {effective_timeout} seconds"
 
@@ -471,7 +454,7 @@ class BashTool(Tool):
             combined_output = stdout_text + stderr_text
             if owned.returncode != 0 and not leased and is_sandbox_denial(
                 combined_output,
-                is_safehouse_available,
+                lambda: shell_sandbox.available_for_denial(is_safehouse_available),
             ):
                 # A repo-policy denial (pinned/protected base) has a concrete
                 # better non-host path — the exact `.worktrees/` recovery — so
@@ -533,6 +516,7 @@ class BashTool(Tool):
             return result
 
         except Exception as e:
+            await asyncio.to_thread(shell_sandbox.launch_failed)
             return f"Error executing command: {str(e)}"
         finally:
             if cwd_fd is not None:

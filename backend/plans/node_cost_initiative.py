@@ -36,7 +36,9 @@ every commitment sharer, so it is never below that commitment total's nodes.
 ``node_cost`` owns the call; this module
 holds the membership and the sum, and reads only rows ``node_cost`` already
 loaded plus the sharers and re-attached roots outside them, by id and by
-commitment, never the plans they sit in.
+commitment, never the plans they sit in. ``expand`` reads no cost: the caller
+reads every row's own cost, outside rows included, in the one priced read it
+makes for the plans, and ``totals`` sums them.
 """
 
 from __future__ import annotations
@@ -105,15 +107,32 @@ def is_open(node: dict) -> bool:
     return node["archived_at"] is None and node["state"] not in _TERMINAL_STATES
 
 
-def totals(connection, loaded: tuple[dict, dict, dict], clock) -> dict[str, dict]:
-    """Each follow-up lineage member's initiative total, keyed by node id."""
-    nodes_by_plan, own, attached = loaded
+#: ``expand``'s answer: the lineages, and the rows and attachments their totals read.
+Expanded = tuple[list[list[str]], dict[str, list[dict]], dict[str, str]]
+
+
+def expand(connection, nodes_by_plan: dict[str, list[dict]], attached: dict[str, str]) -> Expanded | None:
+    """The follow-up lineages of these loaded plans, with the outside rows their totals sum.
+
+    None when the plans hold no lineage. Every node id in the returned rows needs its own
+    cost for ``totals``.
+    """
     lineages = [
         group for rows in nodes_by_plan.values() for group in components(rows)
     ]
     if not lineages:
-        return {}
-    nodes_by_plan, own, attached = _with_sharers(connection, lineages, loaded, clock)
+        return None
+    return (lineages, *_with_sharers(connection, lineages, nodes_by_plan, attached))
+
+
+def node_ids(expanded: Expanded) -> list[str]:
+    """Every node whose own cost ``totals`` may sum."""
+    return [str(row["id"]) for rows in expanded[1].values() for row in rows]
+
+
+def totals(expanded: Expanded, own: dict[str, dict]) -> dict[str, dict]:
+    """Each follow-up lineage member's initiative total, keyed by node id."""
+    lineages, nodes_by_plan, attached = expanded
     all_nodes = [row for rows in nodes_by_plan.values() for row in rows]
     by_id = {row["id"]: row for row in all_nodes}
     children: dict[str, list[str]] = defaultdict(list)
@@ -131,7 +150,7 @@ def totals(connection, loaded: tuple[dict, dict, dict], clock) -> dict[str, dict
         )
         total = node_cost._empty_own()
         for node_id in summed:
-            total = node_cost._add(total, own.get(node_id, node_cost._empty_own()))
+            total = node_cost._add(total, own[node_id])
         value = {
             "follow_ups": len(members) - 1,
             "cost": node_cost._settled(total),
@@ -141,7 +160,7 @@ def totals(connection, loaded: tuple[dict, dict, dict], clock) -> dict[str, dict
     return found
 
 
-def _with_sharers(connection, lineages, loaded, clock) -> tuple[dict, dict, dict]:
+def _with_sharers(connection, lineages, nodes_by_plan, attached) -> tuple[dict, dict]:
     """Add the nodes ``node_set`` sums from outside the loaded plans.
 
     A sharer can sit above the projected plans (a delegating step in the
@@ -150,11 +169,10 @@ def _with_sharers(connection, lineages, loaded, clock) -> tuple[dict, dict, dict
     never opening its subtree or its attached plan: the nodes sharing the
     commitment of a member that is its own commitment root, and the root a
     member was re-attached under. So only those rows are read, by commitment
-    and by id, with their own costs and the one attachment the re-attached
+    and by id, with the one attachment the re-attached
     root's test needs -- not the plans they sit in, which hold a history that
     grows without bound.
     """
-    nodes_by_plan, own, attached = loaded
     by_id = {row["id"]: row for rows in nodes_by_plan.values() for row in rows}
     members = sorted({member for group in lineages for member in group})
     own_roots = [m for m in members if str(by_id[m]["commitment_id"]) == m]
@@ -175,16 +193,15 @@ def _with_sharers(connection, lineages, loaded, clock) -> tuple[dict, dict, dict
         str(row["id"]): dict(row) for row in [*shared, *roots] if row["id"] not in by_id
     }
     if not outside:
-        return loaded
+        return nodes_by_plan, attached
     # An outside row can sit in a loaded plan (a scoped read loads only the members'
     # subtrees), so it joins that plan's rows rather than replacing them.
     merged: dict[str, list[dict]] = {plan_id: list(rows) for plan_id, rows in nodes_by_plan.items()}
     for row in outside.values():
         merged.setdefault(str(row["plan_id"]), []).append(row)
-    more_own = node_cost.own_many(list(outside), db=connection, now=clock)
     outside_roots = {str(row["id"]): outside[str(row["id"])] for row in roots if str(row["id"]) in outside}
     more_attached = _reattachments(connection, [by_id[m] for m in members], outside_roots)
-    return merged, {**own, **more_own}, {**attached, **more_attached}
+    return merged, {**attached, **more_attached}
 
 
 def _reattachments(connection, members: list[dict], roots: dict[str, dict]) -> dict[str, str]:

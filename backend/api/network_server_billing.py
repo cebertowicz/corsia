@@ -7,6 +7,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, StrictInt
 
 from connections.vendor_accounts import AccountError
+from core.measurement_pricing import endpoint_listings
 from infra.database import get_db
 from infra.db_async import run_in_db
 
@@ -23,7 +24,6 @@ class EndpointBillingWrite(BaseModel):
 
 def billing_views(server_ids: list[str]) -> dict[str, dict]:
     """Each endpoint's ``billing`` and ``billing_revision``, plus whether its host lists prices."""
-    from api.measurement_cost import endpoint_listings
     from connections.subscription_billing import endpoint_billing
 
     db = get_db()

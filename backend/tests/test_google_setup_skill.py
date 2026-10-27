@@ -50,12 +50,15 @@ def test_task_7_offers_only_a_project_and_session_consent_is_the_find_projects_d
     assert "Only answer **E**" not in first_run
 
 
-def test_google_sign_in_is_watched_by_url_and_title_only():
-    """The page holds the user's password while they sign in, so only its URL and title are read."""
+def test_google_sign_in_uses_the_observed_person_step():
+    """The page holds the user's password, and CORSIA resumes only after page navigation."""
     steps = (SKILLS / "conductor-bootstrap/references/browser-person-steps.md").read_text(encoding="utf-8")
 
-    assert "read only the page URL and title" in steps
-    assert "no snapshot, screenshot, text or value read" in steps
+    sign_in = steps.split("## B.", 1)[1].split("## C.", 1)[0]
+    assert "`browser_person_step`" in sign_in
+    assert "end your turn" in sign_in
+    assert "wakes you when the page changes" in sign_in
+    assert "Never type, fill or read a password or a code yourself." in sign_in
 
 
 def test_person_browser_steps_have_one_rule_and_no_url_wait():

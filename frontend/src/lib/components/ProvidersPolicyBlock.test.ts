@@ -118,6 +118,7 @@ describe('ProvidersPolicyBlock', () => {
 			if (init?.method === 'PUT') return { ok: false, status: 409, json: async () => ({ detail: 'changed', code: 'policy_changed' }) };
 			if (path.startsWith('/api/vendor-accounts')) return { ok: false, status: 500, json: async () => ({ detail: 'Accounts unavailable' }) };
 			if (path.startsWith('/api/projects/project/cloud-models-off')) return { ok: true, json: async () => ({ cloud_models_off: false }) };
+			if (path.startsWith('/api/providers/sources')) return { ok: true, json: async () => ({ sources: [] }) };
 			if (policyReads++ > 0) throw new TypeError('Failed to fetch');
 			return { ok: true, json: async () => ({ scope: 'project', use_workspace: false, override_revision: 1, providers: [provider] }) };
 		}));
@@ -139,6 +140,7 @@ describe('ProvidersPolicyBlock', () => {
 			if (init?.method === 'PUT') return { ok: false, status: 409, json: async () => ({ detail: 'provider policy revision changed; refresh before acting', code: 'policy_changed' }) };
 			if (path.startsWith('/api/vendor-accounts')) return { ok: true, json: async () => ({ accounts: [] }) };
 			if (path.startsWith('/api/projects/project/cloud-models-off')) return { ok: true, json: async () => ({ cloud_models_off: false }) };
+			if (path.startsWith('/api/providers/sources')) return { ok: true, json: async () => ({ sources: [] }) };
 			if (policyReads++ > 0 && policyReads < 3) throw new TypeError('Failed to fetch');
 			return { ok: true, json: async () => ({ scope: 'project', use_workspace: false, override_revision: 1, providers: [provider] }) };
 		}));

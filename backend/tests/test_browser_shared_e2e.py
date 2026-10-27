@@ -21,7 +21,10 @@ from uuid import uuid4
 
 import pytest
 
-from host_access import browser_cdp, browser_control, browser_dom_write, browser_screencast, browser_session_commands
+from host_access import (
+    browser_cdp, browser_control, browser_dom_write, browser_pane_state, browser_screencast, browser_session_commands, browser_steps,
+    browser_step_lifecycle as lifecycle,
+)
 from host_access.browser_session_state import BrowserSessionError
 from host_access.browser_sessions import BrowserSessionOwner
 
@@ -257,16 +260,19 @@ async def test_shared_pane_cdp_shortcut_sequence_submits_a_form():
 
 def _quiet_password_steps(monkeypatch, steps: list[str]) -> None:
     """Record the person's password step instead of writing a plan, and report nothing to a pane."""
-    async def open_episode(_thread_id, episode):
-        episode.node_id = "password-step"
+    async def open_step(_thread_id, step):
+        lifecycle._steps[_thread_id] = step
+        lifecycle._start_reprobe(_thread_id, step)
+        step.node_id = "password-step"
         steps.append("opened")
 
-    async def settle_episode(_thread_id, _episode):
+    async def settle_step(_thread_id, _step):
         steps.append("settled")
 
-    monkeypatch.setattr(browser_control, "_open_episode", open_episode)
-    monkeypatch.setattr(browser_control, "_settle_episode", settle_episode)
-    monkeypatch.setattr(browser_control, "_publish_password_page", lambda *_args: None)
+    monkeypatch.setattr(lifecycle, "_step_row_state", lambda _node_id: None)
+    monkeypatch.setattr(lifecycle, "_open_step", open_step)
+    monkeypatch.setattr(lifecycle, "_settle_step", settle_step)
+    monkeypatch.setattr(browser_steps, "publish_password_page", lambda *_args: None)
 
 
 @pytest.mark.integration
@@ -332,7 +338,7 @@ async def test_the_password_probe_finds_frame_and_shadow_fields_on_a_page_over_o
                 size = await cdp.call("Runtime.evaluate", returnByValue=True,
                                       expression="document.documentElement.outerHTML.length")
             assert size["result"]["value"] > 2**20
-            probe = await browser_cdp.page_password_probe(endpoint, None, frozenset())
+            probe = await browser_cdp.page_password_probe(endpoint, {})
             # The frame's, both shadow roots' and the autocomplete-named field; never the hidden one.
             assert len(probe.visible_nodes) == 4, probe
             assert probe.target == endpoint
@@ -341,7 +347,7 @@ async def test_the_password_probe_finds_frame_and_shadow_fields_on_a_page_over_o
                 await owner.run(thread_id, ("snapshot", "-i"), session="existing")
             assert steps == ["opened"]
     finally:
-        await owner.close_thread(thread_id)
+        await owner.shutdown()
 
 
 @pytest.mark.integration
@@ -451,7 +457,7 @@ async def test_pane_screencast_follows_a_viewport_change_and_an_agent_screenshot
             async with pane_screencast(endpoint) as (cast, frames, next_frame):
                 shown = (await next_frame())["deviceWidth"]
                 # Registered as the pane's cast, so the command path restarts it as it does in the app.
-                browser_control.screencast_started(thread_id, "pane", cast)
+                browser_pane_state.screencast_started(thread_id, "pane", cast)
                 try:
                     # 419 is narrower than Chrome's smallest window, so its frames hold the page beside
                     # the window's overflow; the pane must still get the page's own size.
@@ -477,6 +483,6 @@ async def test_pane_screencast_follows_a_viewport_change_and_an_agent_screenshot
                         # temporary capture size never does.
                         assert (await next_frame())["deviceWidth"] == width
                 finally:
-                    browser_control.screencast_ended(thread_id, "pane", cast)
+                    browser_pane_state.screencast_ended(thread_id, "pane", cast)
     finally:
         await owner.close_thread(thread_id)

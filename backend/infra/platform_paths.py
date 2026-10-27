@@ -21,8 +21,9 @@ STATE_DIRECTORY = "state"
 # A source install's state on macOS: a child of the app folder that is never
 # the app's own state root.
 SOURCE_STATE_DIRECTORY = "source-state"
-# The folder pre-release source installs kept their state in. Only checked, so
-# a source install still there is told how to move it; never opened or created.
+# The folder the app's state lived in before the move to CORSIA/state. A source
+# install still there is told how to move it; the startup heal repoints account
+# homes stored under it.
 LEGACY_FOLDER = "com.cebertowicz.corsia"
 BOOTSTRAP_VERSION = 2
 _UNSET = object()
@@ -155,28 +156,47 @@ def default_state_root(
     if override:
         return _resolved(override)
 
+    base = _app_data_base(environment, platform_name, home_dir)
     if platform_name == "darwin":
-        base = home_dir / "Library" / "Application Support"
         bundle = app_bundle_root() if app_bundle is _UNSET else app_bundle
         if bundle is not None:
             return _resolved(base / APP_FOLDER / STATE_DIRECTORY)
         root = base / APP_FOLDER / SOURCE_STATE_DIRECTORY
     elif platform_name.startswith("win"):
-        local_app_data = environment.get("LOCALAPPDATA")
-        base = (
-            Path(local_app_data) if local_app_data else home_dir / "AppData" / "Local"
-        )
         root = base / APP_FOLDER / STATE_DIRECTORY
     else:
-        xdg_state = environment.get("XDG_STATE_HOME")
-        base = Path(xdg_state) if xdg_state else home_dir / ".local" / "state"
         root = base / APP_FOLDER.lower() / STATE_DIRECTORY
 
     root = _resolved(root)
     _refuse_legacy_only(
-        root, _resolved(base / LEGACY_FOLDER / STATE_DIRECTORY), posix=platform_name != "win32",
+        root, legacy_state_root(env=environment, platform=platform_name, home=home_dir),
+        posix=platform_name != "win32",
     )
     return root
+
+
+def _app_data_base(environment: Mapping[str, str], platform_name: str, home_dir: Path) -> Path:
+    """Return the platform folder that holds the app folder and the legacy folder."""
+    if platform_name == "darwin":
+        return home_dir / "Library" / "Application Support"
+    if platform_name.startswith("win"):
+        local_app_data = environment.get("LOCALAPPDATA")
+        return Path(local_app_data) if local_app_data else home_dir / "AppData" / "Local"
+    xdg_state = environment.get("XDG_STATE_HOME")
+    return Path(xdg_state) if xdg_state else home_dir / ".local" / "state"
+
+
+def legacy_state_root(
+    *,
+    env: Mapping[str, str] | None = None,
+    platform: str | None = None,
+    home: Path | None = None,
+) -> Path:
+    """Return the pre-release state root a data move leaves behind."""
+    environment = os.environ if env is None else env
+    platform_name = sys.platform if platform is None else platform
+    home_dir = Path.home() if home is None else Path(home)
+    return _resolved(_app_data_base(environment, platform_name, home_dir) / LEGACY_FOLDER / STATE_DIRECTORY)
 
 
 def _refuse_legacy_only(root: Path, legacy: Path, *, posix: bool) -> None:

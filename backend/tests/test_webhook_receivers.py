@@ -130,6 +130,22 @@ async def test_missing_secret_or_signature_gets_401_and_no_translator_runs(recei
 
 
 @pytest.mark.asyncio
+async def test_unsigned_github_ping_without_secret_is_rejected(_isolated_db, monkeypatch, client):
+    monkeypatch.setattr("api.webhook_receivers.receiver_secret", lambda decl: None)
+    with patch("infra.product_events.emit_product_event") as translated_event:
+        with patch("api.webhook_receivers.emit_product_event") as security_event:
+            async with client:
+                response = await client.post(
+                    "/webhooks/github", content=b"{}", headers={"X-GitHub-Event": "ping"},
+                )
+    assert response.status_code == 401
+    translated_event.assert_not_called()
+    security_event.assert_called_once_with(
+        "webhook", "signature_invalid", properties={"reason": "secret_not_configured", "connector": "github"},
+    )
+
+
+@pytest.mark.asyncio
 async def test_oversized_body_gets_413_before_a_signature_is_checked(_isolated_db, monkeypatch, client):
     async def translate(delivery):
         raise AssertionError("an oversized body must never reach a translator")

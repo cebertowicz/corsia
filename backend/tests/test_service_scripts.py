@@ -971,7 +971,7 @@ service_is_loaded() {
 }
 service_domain() { printf 'gui/501'; }
 service_label() { printf 'com.corsia.prod'; }
-service_plist_path() { printf '%s' "$SERVICE_PLIST"; }
+service_definition_path() { printf '%s' "$SERVICE_PLIST"; }
 drain_and_wait() { return 0; }
 wait_for_backend_health() { printf 'health\\n' >> "$LAUNCHCTL_TRACE"; return "${HEALTH_RC:-0}"; }
 """
@@ -1109,7 +1109,7 @@ backend_pids() { printf '4242\n'; }
 is_backend_running() { return 0; }
 service_domain() { printf 'gui/501'; }
 service_label() { printf 'com.corsia.prod'; }
-service_plist_path() { printf '%s' "$SERVICE_PLIST"; }
+service_definition_path() { printf '%s' "$SERVICE_PLIST"; }
 bootout_service_and_wait() {
     printf 'bootout %s\\n' "$2" >> "$LAUNCHCTL_TRACE"
     return 0
@@ -2025,8 +2025,9 @@ PYTHON=/usr/bin/python3
 FORCE=true
 CORSIA_WORKSPACE="$TEST_WORKSPACE"
 CORSIA_STATE_DIR="$TEST_STATE"
+source scripts/corsia.d/runtime.sh
 source scripts/corsia.d/service.sh
-service_plist_path() { printf '%s' "$SERVICE_PLIST"; }
+service_definition_path() { printf '%s' "$SERVICE_PLIST"; }
 service_installed() { return 0; }
 service_is_loaded() { return 0; }
 service_loaded_definition_matches() { return 1; }
@@ -2095,7 +2096,7 @@ service_is_loaded() { return 1; }
 is_backend_running() { return 1; }
 backend_pids() { :; }
 service_domain() { printf 'gui/501'; }
-service_plist_path() { printf '/tmp/com.corsia.test.plist'; }
+service_definition_path() { printf '/tmp/com.corsia.test.plist'; }
 launchctl() { printf '%s\\n' "$*" >> "$TRACE"; }
 service_start
 """,
@@ -2122,7 +2123,7 @@ FORCE=true
 source scripts/corsia.d/service.sh
 service_label() { printf 'com.corsia.test'; }
 service_domain() { printf 'gui/501'; }
-service_plist_path() { printf '/tmp/com.corsia.test.plist'; }
+service_definition_path() { printf '/tmp/com.corsia.test.plist'; }
 service_is_loaded() { return 0; }
 service_installed() { return 0; }
 require_owned_service_definition() { return 0; }

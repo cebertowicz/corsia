@@ -28,7 +28,7 @@ export interface SettingsNavigation {
 	homeThread: string | null;
 	/** An element in the opened section (its `data-settings-anchor`) to bring into view once, then cleared. */
 	anchor: string | null;
-	/** A connected-account row to disclose and focus after a chat link opens Connected apps. */
+	/** A connected-app or connected-account row (by id) to open and focus after a chat link opens Connected apps. */
 	connectedAppId: string | null;
 	/** A key card opened from Connected apps; it supplies the scoped header return and every referenced key's app-qualified label. */
 	connectedAppKey: { app: string; entry: string; refs: { entry: string; name: string }[]; account?: boolean } | null;
@@ -74,9 +74,14 @@ export function requestSettingsSection(section: SettingsSection, anchor: string 
 	}));
 }
 
-/** A chat link opens one account in its only settings home and puts its scope action next. */
+/** A chat link opens one connected app or account row in its only settings home and focuses its one primary action. */
 export function requestConnectedApp(id: string) {
 	change((s) => ({ section: 'connected-apps', connectedAppId: id, anchor: 'connected-apps', fromProject: null, project: null, openRequest: s.openRequest + 1 }));
+}
+
+/** Consume the pending row once its data is available. */
+export function clearConnectedAppRequest() {
+	change(() => ({ connectedAppId: null }));
 }
 
 /** Routes chat links to one connected-app row while the home route is mounted. */

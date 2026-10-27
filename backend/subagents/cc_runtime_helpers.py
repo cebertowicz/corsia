@@ -3,10 +3,10 @@ from __future__ import annotations
 import json
 import logging
 import os
-import tempfile
 from pathlib import Path
 
 from core.project_context import resolve_project_paths
+from tools.private_runtime_files import SEED_DIR, private_mkstemp
 
 log = logging.getLogger(__name__)
 
@@ -203,7 +203,7 @@ def _build_seed(working_dir: str | None) -> str:
 
 
 def _write_seed_file(child_id: str, seed: str) -> str:
-    fd, path = tempfile.mkstemp(prefix=f"cc-seed-{child_id[:8]}-", suffix=".txt")
+    fd, path = private_mkstemp(SEED_DIR, prefix=f"cc-seed-{child_id[:8]}-", suffix=".txt")
     with os.fdopen(fd, "w") as f:
         f.write(seed)
     return path

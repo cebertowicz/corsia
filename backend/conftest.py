@@ -78,6 +78,23 @@ def pytest_runtest_call(item):
 
 
 @pytest.fixture
+def local_model_host(monkeypatch):
+    """Pin the local-model host gate, including its imported alias."""
+    from llm import local_setup_gates, local_sources
+
+    def set_host(*, is_mac):
+        monkeypatch.setattr(local_setup_gates, "host_never_runs_local", lambda: not is_mac)
+        monkeypatch.setattr(local_sources, "host_never_runs_local", lambda: not is_mac)
+
+    return set_host
+
+
+@pytest.fixture
+def mac_local_model_host(local_model_host):
+    local_model_host(is_mac=True)
+
+
+@pytest.fixture
 def mock_emit(monkeypatch):
     """Replace ``emit_product_event`` with a list-capturing stub."""
     from infra import product_events

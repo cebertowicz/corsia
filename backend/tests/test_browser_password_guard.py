@@ -2,57 +2,64 @@ import asyncio
 
 import pytest
 
-from host_access import browser_cdp, browser_control
+from host_access import browser_cdp, browser_control, browser_pane_state, browser_steps, browser_step_lifecycle as lifecycle
 from host_access.browser_cdp import PasswordProbe
 from host_access.browser_session_state import BrowserSessionError
 
 
 @pytest.fixture(autouse=True)
-def clean_password_guard():
-    browser_control._panes.clear()
-    browser_control._pane_reports.clear()
-    browser_control._pane_probes.clear()
-    browser_control._episodes.clear()
+def clean_password_guard(monkeypatch):
+    monkeypatch.setattr(lifecycle, "_step_row_state", lambda _node_id: None)
+    browser_pane_state._panes.clear()
+    browser_pane_state._pane_reports.clear()
+    browser_pane_state._pane_probes.clear()
+    lifecycle._steps.clear()
+    lifecycle._answers.clear()
+    lifecycle._sessions.clear()
     browser_control._guarded_visits.clear()
-    browser_control._probe_locks.clear()
-    browser_control._agent_seen.clear()
+    lifecycle._probe_locks.clear()
+    browser_pane_state._agent_seen.clear()
     yield
-    browser_control._panes.clear()
-    browser_control._pane_reports.clear()
-    browser_control._pane_probes.clear()
-    browser_control._episodes.clear()
+    browser_pane_state._panes.clear()
+    browser_pane_state._pane_reports.clear()
+    browser_pane_state._pane_probes.clear()
+    lifecycle._steps.clear()
+    lifecycle._answers.clear()
+    lifecycle._sessions.clear()
     browser_control._guarded_visits.clear()
-    browser_control._probe_locks.clear()
-    browser_control._agent_seen.clear()
+    lifecycle._probe_locks.clear()
+    browser_pane_state._agent_seen.clear()
 
 
 @pytest.mark.asyncio
-async def test_password_episode_settles_then_keeps_eval_and_hidden_password_reads_refused(monkeypatch):
+async def test_password_step_settles_then_keeps_eval_and_hidden_password_reads_refused(monkeypatch):
     """A hidden first-step password never becomes readable during the second step."""
     responses = iter((
-        PasswordProbe("visit-one", "example.test", frozenset({42})),
-        PasswordProbe("visit-one", "example.test", frozenset()),
-        PasswordProbe("visit-one", "example.test", frozenset()),
-        PasswordProbe("visit-one", "example.test", frozenset()),
-        PasswordProbe("visit-one", "example.test", frozenset()),
-        PasswordProbe("visit-one", "example.test", frozenset()),
-        PasswordProbe("visit-two", "example.test", frozenset()),
+        PasswordProbe("visit-one", "example.test", frozenset({42}), present_nodes=frozenset({42})),
+        PasswordProbe("visit-one", "example.test", frozenset(), present_nodes=frozenset({42})),
+        PasswordProbe("visit-one", "example.test", frozenset(), present_nodes=frozenset({42})),
+        PasswordProbe("visit-one", "example.test", frozenset(), present_nodes=frozenset({42})),
+        PasswordProbe("visit-one", "example.test", frozenset(), present_nodes=frozenset({42})),
+        PasswordProbe("visit-one", "example.test", frozenset(), present_nodes=frozenset({42})),
+        PasswordProbe("visit-two", "example.test", frozenset(), present_nodes=frozenset()),
     ))
     events, opened, settled = [], [], []
 
-    async def probe(_visit, _known):
+    async def probe(_known):
         return next(responses)
 
-    async def open_episode(_thread_id, episode):
-        episode.node_id = "password-step"
-        opened.append(episode.visit)
+    async def open_step(_thread_id, step):
+        lifecycle._steps[_thread_id] = step
+        lifecycle._start_reprobe(_thread_id, step)
+        step.node_id = "password-step"
+        opened.append(step.visit)
 
-    async def settle_episode(_thread_id, episode):
-        settled.append((episode.node_id, episode.seen_nodes))
+    async def settle_step(_thread_id, step):
+        settled.append((step.node_id, browser_control._guarded_visits[_thread_id][step.visit].seen_nodes))
 
-    monkeypatch.setattr(browser_control, "_open_episode", open_episode)
-    monkeypatch.setattr(browser_control, "_settle_episode", settle_episode)
-    monkeypatch.setattr(browser_control, "_publish_password_page", lambda _thread_id, visible: events.append(visible))
+    monkeypatch.setattr(lifecycle, "_open_step", open_step)
+    monkeypatch.setattr(lifecycle, "_settle_step", settle_step)
+    monkeypatch.setattr(browser_steps, "publish_password_page", lambda _thread_id, visible: events.append(visible))
 
     with pytest.raises(BrowserSessionError, match="asks for a password"):
         await browser_control.require_page_access("thread", probe, ("fill", "@password", "secret"))
@@ -69,7 +76,7 @@ async def test_password_episode_settles_then_keeps_eval_and_hidden_password_read
         with pytest.raises(BrowserSessionError, match="asks for a password"):
             await browser_control.require_page_access("thread", probe, command)
 
-    # Snapshot does not request a password value, and a fresh navigation resets the visit guard.
+    # Snapshot does not request a password value, and a fresh document has no guard of its own.
     await browser_control.require_page_access("thread", probe, ("snapshot",))
     await browser_control.require_page_access("thread", probe, ("eval", "document.title"))
 
@@ -78,24 +85,26 @@ async def test_password_episode_settles_then_keeps_eval_and_hidden_password_read
 async def test_new_password_visit_opens_a_new_step_and_reports_to_the_pane(monkeypatch):
     """A settled visit does not suppress a later password visit's step or pane pill."""
     responses = iter((
-        PasswordProbe("visit-one", "example.test", frozenset({42})),
-        PasswordProbe("visit-two", "example.test", frozenset()),
-        PasswordProbe("visit-three", "example.test", frozenset({43})),
+        PasswordProbe("visit-one", "example.test", frozenset({42}), present_nodes=frozenset({42})),
+        PasswordProbe("visit-two", "example.test", frozenset(), present_nodes=frozenset()),
+        PasswordProbe("visit-three", "example.test", frozenset({43}), present_nodes=frozenset({43})),
     ))
     opened, settled, pane_events = [], [], []
 
-    async def probe(_visit, _known):
+    async def probe(_known):
         return next(responses)
 
-    async def open_episode(_thread_id, episode):
-        episode.node_id = f"step-{episode.visit}"
-        opened.append(episode.visit)
+    async def open_step(_thread_id, step):
+        lifecycle._steps[_thread_id] = step
+        lifecycle._start_reprobe(_thread_id, step)
+        step.node_id = f"step-{step.visit}"
+        opened.append(step.visit)
 
-    async def settle_episode(_thread_id, episode):
-        settled.append(episode.visit)
+    async def settle_step(_thread_id, step):
+        settled.append(step.visit)
 
-    monkeypatch.setattr(browser_control, "_open_episode", open_episode)
-    monkeypatch.setattr(browser_control, "_settle_episode", settle_episode)
+    monkeypatch.setattr(lifecycle, "_open_step", open_step)
+    monkeypatch.setattr(lifecycle, "_settle_step", settle_step)
     monkeypatch.setattr(browser_control.state, "broadcast_to_thread", lambda *_args, **_kwargs: None)
     browser_control.pane_connected("thread", "pane", pane_events.append)
 
@@ -133,18 +142,20 @@ async def test_password_probe_keeps_known_nodes_only_on_their_own_visit(monkeypa
             }[method]
 
     monkeypatch.setattr(browser_cdp, "CdpClient", FakeCdp)
-    assert (await browser_cdp.page_password_probe("ws://page.test", "visit-one", frozenset({42}))).visible_nodes == frozenset()
+    assert (await browser_cdp.page_password_probe("ws://page.test", {"visit-one": frozenset({42})})).visible_nodes == frozenset()
     # Within one visit a known field stays guarded even after a reveal toggle changes its type.
-    probe = await browser_cdp.page_password_probe("ws://page.test", "visit-two", frozenset({42}))
+    probe = await browser_cdp.page_password_probe("ws://page.test", {"visit-two": frozenset({42})})
     assert probe.visible_nodes == frozenset({42}) and probe.target == "ws://page.test"
 
 
 @pytest.mark.asyncio
-async def test_password_probe_reads_only_search_matches_and_keeps_only_password_inputs(monkeypatch):
+@pytest.mark.parametrize("visible", [True, False], ids=["visible", "hidden"])
+async def test_password_probe_reads_only_search_matches_and_keeps_only_password_inputs(monkeypatch, visible):
     """AR3: the probe never transfers the whole DOM and discards its search when done."""
     calls = []
     nodes = {
-        5: {"nodeName": "INPUT", "backendNodeId": 77, "attributes": ["type", "password"]},
+        5: {"nodeName": "INPUT", "backendNodeId": 77,
+            "attributes": ["type", "password", "value", "private-fixture-value"]},
         6: {"nodeName": "LABEL", "backendNodeId": 78, "attributes": ["for", "password"]},
     }
 
@@ -168,12 +179,15 @@ async def test_password_probe_reads_only_search_matches_and_keeps_only_password_
                 "DOM.performSearch": {"searchId": "search", "resultCount": 2},
                 "DOM.getSearchResults": {"nodeIds": [5, 6]},
                 "DOM.discardSearchResults": {},
-                "DOM.getBoxModel": {"model": {"border": [0, 0, 10, 0, 10, 10, 0, 10]}},
+                "DOM.getBoxModel": {"model": {"border": [0, 0, 10, 0, 10, 10, 0, 10] if visible else [0] * 8}},
             }[method]
 
     monkeypatch.setattr(browser_cdp, "CdpClient", FakeCdp)
-    probe = await browser_cdp.page_password_probe("ws://page.test", None, frozenset())
-    assert probe.visible_nodes == frozenset({77}) and probe.host == "accounts.example.co.uk"
+    probe = await browser_cdp.page_password_probe("ws://page.test", {})
+    assert probe.visible_nodes == (frozenset({77}) if visible else frozenset())
+    assert probe.present_nodes == frozenset({77}) and probe.host == "accounts.example.co.uk"
+    assert set(vars(probe)) == {"visit", "host", "target", "visible_nodes", "present_nodes"}
+    assert "private-fixture-value" not in repr(probe)
     assert ("DOM.getDocument", {"depth": 0}) in calls
     assert not any(method == "DOM.getDocument" and params.get("depth") == -1 for method, params in calls)
     assert ("DOM.discardSearchResults", {"searchId": "search"}) in calls
@@ -182,21 +196,23 @@ async def test_password_probe_reads_only_search_matches_and_keeps_only_password_
 @pytest.mark.asyncio
 async def test_a_hidden_password_read_is_refused_by_the_node_its_ref_or_selector_names(monkeypatch):
     """AR2: a read is refused when its @ref or CSS selector locates a seen password node, or can't be located."""
-    responses = iter((PasswordProbe("visit", "example.test", frozenset({42})),))
-    hidden = PasswordProbe("visit", "example.test", frozenset())
+    responses = iter((PasswordProbe("visit", "example.test", frozenset({42}), present_nodes=frozenset({42})),))
+    hidden = PasswordProbe("visit", "example.test", frozenset(), present_nodes=frozenset({42}))
 
-    async def probe(_visit, _known):
+    async def probe(_known):
         return next(responses, hidden)
 
-    async def open_episode(_thread_id, episode):
-        episode.node_id = "password-step"
+    async def open_step(_thread_id, step):
+        lifecycle._steps[_thread_id] = step
+        lifecycle._start_reprobe(_thread_id, step)
+        step.node_id = "password-step"
 
-    async def settle_episode(_thread_id, _episode):
+    async def settle_step(_thread_id, _step):
         pass
 
-    monkeypatch.setattr(browser_control, "_open_episode", open_episode)
-    monkeypatch.setattr(browser_control, "_settle_episode", settle_episode)
-    monkeypatch.setattr(browser_control, "_publish_password_page", lambda *_args: None)
+    monkeypatch.setattr(lifecycle, "_open_step", open_step)
+    monkeypatch.setattr(lifecycle, "_settle_step", settle_step)
+    monkeypatch.setattr(browser_steps, "publish_password_page", lambda *_args: None)
     with pytest.raises(BrowserSessionError, match="asks for a password"):
         await browser_control.require_page_access("thread", probe, ("snapshot",))
     await browser_control.require_page_access("thread", probe, ("snapshot",))
@@ -217,7 +233,7 @@ async def test_a_hidden_password_read_is_refused_by_the_node_its_ref_or_selector
 
 @pytest.mark.asyncio
 async def test_password_probe_failure_fails_closed():
-    async def broken_probe(_visit, _known):
+    async def broken_probe(_known):
         raise RuntimeError("CDP went away")
 
     with pytest.raises(BrowserSessionError, match="couldn't be checked"):
@@ -235,13 +251,14 @@ class SignInPage:
         self.probed = asyncio.Event()
 
     def _probe(self):
-        return PasswordProbe("visit-one", "example.test", frozenset() if self.submitted else frozenset({42}))
+        return PasswordProbe("visit-one", "example.test", frozenset() if self.submitted else frozenset({42}),
+                             present_nodes=frozenset({42}))
 
-    async def agent_probe(self, _visit, _known):
+    async def agent_probe(self, _known):
         self.agent_probes += 1
         return self._probe()
 
-    async def pane_probe(self, _visit, _known):
+    async def pane_probe(self, _known):
         self.pane_probes += 1
         self.probed.set()
         if self.failures:
@@ -255,25 +272,26 @@ def steps(monkeypatch):
     """Record the person's step opening and settling; the step stays open unless a test ends it."""
     recorded = {"opened": [], "settled": [], "ended": False}
 
-    async def open_episode(_thread_id, episode):
-        episode.node_id = "password-step"
-        recorded["opened"].append(episode.visit)
+    async def open_step(_thread_id, step):
+        lifecycle._steps[_thread_id] = step
+        lifecycle._start_reprobe(_thread_id, step)
+        step.node_id = "password-step"
+        recorded["opened"].append(step.visit)
 
-    async def settle_episode(_thread_id, episode):
-        recorded["settled"].append(episode.node_id)
+    async def settle_step(_thread_id, step):
+        recorded["settled"].append(step.node_id)
 
-    monkeypatch.setattr(browser_control, "_open_episode", open_episode)
-    monkeypatch.setattr(browser_control, "_settle_episode", settle_episode)
-    async def step_ended(_episode):
-        return recorded["ended"]
+    monkeypatch.setattr(lifecycle, "_open_step", open_step)
+    monkeypatch.setattr(lifecycle, "_settle_step", settle_step)
 
     async def emit(action, _thread_id):
         recorded["events"].append(action)
 
     recorded["events"] = []
-    monkeypatch.setattr(browser_control, "_step_ended", step_ended)
-    monkeypatch.setattr(browser_control, "_emit", emit)
-    monkeypatch.setattr(browser_control, "_publish_password_page", lambda _thread_id, _visible: None)
+    # The step's plan row reads as closed by the person once a test sets ``ended``.
+    monkeypatch.setattr(lifecycle, "_step_row_state", lambda _node_id: "closed" if recorded["ended"] else None)
+    monkeypatch.setattr(lifecycle, "_emit", emit)
+    monkeypatch.setattr(browser_steps, "publish_password_page", lambda _thread_id, _visible: None)
     return recorded
 
 
@@ -281,9 +299,9 @@ async def _agent_meets_password_page(page):
     browser_control.pane_connected("thread", "pane", None, page.pane_probe)
     with pytest.raises(BrowserSessionError, match="asks for a password"):
         await browser_control.require_page_access("thread", page.agent_probe, ("snapshot",))
-    episode = browser_control._episodes["thread"]
-    assert episode.reprobe is not None
-    return episode, episode.reprobe
+    step = lifecycle._steps["thread"]
+    assert step.reprobe is not None
+    return step, step.reprobe
 
 
 async def _probed(page, count):
@@ -295,7 +313,7 @@ async def _probed(page, count):
 @pytest.mark.asyncio
 async def test_a_single_document_sign_in_settles_after_the_person_types_with_no_agent_command(steps):
     page = SignInPage()
-    episode, loop = await _agent_meets_password_page(page)
+    step, loop = await _agent_meets_password_page(page)
     clock = asyncio.get_running_loop().time
     for _ in range(3):
         browser_control.person_input("thread")
@@ -304,71 +322,53 @@ async def test_a_single_document_sign_in_settles_after_the_person_types_with_no_
     typed = clock()
     browser_control.person_input("thread")
     await asyncio.wait_for(loop, 2.5)
-    assert clock() - typed >= browser_control.REPROBE_AFTER_INPUT
+    assert clock() - typed >= lifecycle.REPROBE_AFTER_INPUT
     assert steps["settled"] == ["password-step"]
     assert not browser_control.password_page("thread")
     assert page.agent_probes == 1
     # The loop ended itself after settling; nothing is left running.
-    assert loop.done() and not loop.cancelled() and episode.reprobe is None
+    assert loop.done() and not loop.cancelled() and step.reprobe is None
 
 
 @pytest.mark.asyncio
-async def test_the_reprobe_keeps_the_episode_open_while_the_field_shows_and_stops_when_the_pane_leaves(steps, monkeypatch):
-    monkeypatch.setattr(browser_control, "REPROBE_EVERY", 0.01)
+async def test_the_reprobe_keeps_the_step_open_while_the_field_shows_and_stops_when_the_pane_leaves(steps, monkeypatch):
+    monkeypatch.setattr(lifecycle, "REPROBE_EVERY", 0.01)
     page = SignInPage()
-    episode, loop = await _agent_meets_password_page(page)
+    step, loop = await _agent_meets_password_page(page)
     await asyncio.wait_for(_probed(page, 3), 1)
     assert browser_control.password_page("thread") and steps["settled"] == []
     browser_control.pane_disconnected("thread", "pane")
     await asyncio.gather(loop, return_exceptions=True)
-    assert loop.cancelled() and episode.reprobe is None
+    assert loop.cancelled() and step.reprobe is None
     # The step stays open; the agent's next command probes again.
     assert browser_control.password_page("thread")
-    # A pane that comes back resumes the episode's re-probe, and a closed browser stops it.
+    # A pane that comes back resumes the step's re-probe, and a closed browser stops it.
     browser_control.pane_connected("thread", "pane", None, page.pane_probe)
-    resumed = episode.reprobe
+    await asyncio.sleep(0)
+    resumed = step.reprobe
     assert resumed is not None and resumed is not loop
-    browser_control.browser_closed("thread")
+    await lifecycle.step_event("thread", lifecycle.Event("session_ended"))
     await asyncio.gather(resumed, return_exceptions=True)
-    assert resumed.cancelled() and episode.reprobe is None
+    assert resumed.cancelled() and step.reprobe is None
 
 
 @pytest.mark.asyncio
-async def test_the_reprobe_stops_without_probing_once_the_person_declines_the_step(steps, monkeypatch):
-    monkeypatch.setattr(browser_control, "REPROBE_EVERY", 0.01)
+async def test_the_shared_reprobe_ends_a_declined_step_and_never_resumes_it(steps, monkeypatch):
+    monkeypatch.setattr(lifecycle, "REPROBE_EVERY", 0.01)
     page = SignInPage()
-    _episode, loop = await _agent_meets_password_page(page)
+    _step, loop = await _agent_meets_password_page(page)
     steps["ended"] = True
     await asyncio.wait_for(loop, 1)
-    assert page.pane_probes == 0 and steps["settled"] == []
+    assert page.pane_probes == 1 and steps["settled"] == []
     assert steps["events"] == ["password_step_declined"]
-    # AR7: the page stays guarded while its field shows.
-    assert browser_control.password_page("thread")
+    assert not browser_control.password_page("thread")
+    assert browser_control._guarded_visits["thread"]["visit-one"].seen_nodes == frozenset({42})
     # A pane that reconnects resumes nothing and never counts the decline twice.
     browser_control.pane_disconnected("thread", "pane")
     browser_control.pane_connected("thread", "pane", None, page.pane_probe)
-    await asyncio.wait_for(browser_control._episodes["thread"].reprobe, 1)
+    await asyncio.sleep(0)
+    assert "thread" not in lifecycle._steps
     assert steps["events"] == ["password_step_declined"]
-
-
-@pytest.mark.asyncio
-async def test_a_pane_on_another_tab_never_settles_the_agents_episode(steps, monkeypatch):
-    monkeypatch.setattr(browser_control, "REPROBE_EVERY", 0.01)
-    page = SignInPage()
-    _episode, loop = await _agent_meets_password_page(page)
-    other_tab = PasswordProbe("visit-other", "example.test", frozenset(), "ws://page.test/devtools/page/other")
-
-    async def pane_probe(_visit, _known):
-        page.pane_probes += 1
-        page.probed.set()
-        return other_tab
-
-    browser_control.pane_connected("thread", "pane", None, pane_probe)
-    await asyncio.wait_for(_probed(page, 3), 1)
-    assert not loop.done() and steps["settled"] == []
-    assert browser_control.password_page("thread")
-    browser_control.pane_disconnected("thread", "pane")
-    await asyncio.gather(loop, return_exceptions=True)
 
 
 @pytest.mark.asyncio
@@ -380,36 +380,36 @@ async def test_a_password_step_names_the_registrable_domain_and_reports_each_tra
         writes.append((operation, args, kwargs))
         return "password-step" if operation == "open_user_step" else None
 
-    monkeypatch.setattr(browser_control, "_plan_write", plan_write)
-    monkeypatch.setattr(browser_control, "emit_product_event",
+    monkeypatch.setattr(lifecycle, "_plan_write", plan_write)
+    monkeypatch.setattr(lifecycle, "emit_product_event",
                         lambda surface, action, **kwargs: events.append((surface, action, kwargs["thread_id"])))
-    episode = browser_control.PasswordEpisode("visit", "paypal.com.evil.com.br", frozenset({42}))
-    await browser_control._open_episode("thread", episode)
-    await browser_control._settle_episode("thread", episode)
+    step = browser_steps.PasswordStep("visit", "paypal.com.evil.com.br")
+    await lifecycle._open_step("thread", step)
+    await lifecycle._settle_step("thread", step)
     assert writes[0][0] == "open_user_step"
-    assert writes[0][2]["title"] == "Enter your password in the browser (evil.com.br)"
+    assert writes[0][2]["title"] == "Enter your password in the shared browser (evil.com.br)"
     assert writes[1][:2] == ("settle_user_step", ("password-step",))
     assert events == [("browser_pane", "password_step_opened", "thread"),
                       ("browser_pane", "password_step_settled", "thread")]
 
 
 @pytest.mark.asyncio
-async def test_an_agent_command_that_settles_the_episode_stops_its_reprobe(steps):
+async def test_an_agent_command_that_settles_the_step_stops_its_reprobe(steps):
     page = SignInPage()
-    episode, loop = await _agent_meets_password_page(page)
+    step, loop = await _agent_meets_password_page(page)
     page.submitted = True
     await browser_control.require_page_access("thread", page.agent_probe, ("snapshot",))
     await asyncio.gather(loop, return_exceptions=True)
-    assert loop.cancelled() and episode.reprobe is None
+    assert loop.cancelled() and step.reprobe is None
     assert steps["settled"] == ["password-step"]
 
 
 @pytest.mark.asyncio
-async def test_a_failed_reprobe_keeps_the_episode_open_until_a_probe_succeeds(steps, monkeypatch):
-    monkeypatch.setattr(browser_control, "REPROBE_EVERY", 0.01)
+async def test_a_failed_reprobe_keeps_the_step_open_until_a_probe_succeeds(steps, monkeypatch):
+    monkeypatch.setattr(lifecycle, "REPROBE_EVERY", 0.01)
     page = SignInPage(failures=2)
     page.submitted = True
-    _episode, loop = await _agent_meets_password_page(SignInPage())
+    _step, loop = await _agent_meets_password_page(SignInPage())
     browser_control.pane_connected("thread", "pane", None, page.pane_probe)
     await asyncio.wait_for(loop, 1)
     assert page.pane_probes == 3

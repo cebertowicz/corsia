@@ -72,7 +72,8 @@ export function setupLocalRow(input: LocalRowInput): AiRow {
 		return { ...row, meta, reference, error: true, reportable: Boolean(startError) || cause === 'other' || cause === undefined || source?.local_state === 'start_failed' || cause === 'start_failed' || source?.local_state === 'setup_failed' || cause === 'setup_failed', action: { label: 'Retry', run: start } };
 	}
 	if (pick?.state === 'failed') {
-		const message = pick.cause === 'memory' ? 'Couldn’t find a local model that fits this computer. Try again.'
+		const message = pick.cause === 'never_local_host' && pick.message ? pick.message
+			: pick.cause === 'memory' ? 'Couldn’t find a local model that fits this computer. Try again.'
 			: pick.cause === 'own_omlx_upgrade_required' ? 'The oMLX app already on this computer is out of date or broken. Update it, then press Retry.'
 			: 'CORSIA couldn’t set up the local model.';
 		return { ...row, meta: message, reference: pick.ref, error: true, reportable: true, action: { label: 'Retry', run: check } };

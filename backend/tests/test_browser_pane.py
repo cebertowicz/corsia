@@ -7,7 +7,7 @@ import pytest
 from fastapi import HTTPException, WebSocketDisconnect
 
 from api import browser
-from host_access import browser_cdp, browser_cli, browser_control, browser_pane
+from host_access import browser_cdp, browser_cli, browser_control, browser_pane, browser_pane_state, browser_step_lifecycle as lifecycle
 from host_access.browser_cli import CommandResult
 from host_access.browser_session_state import BrowserRuntime, BrowserSessionError, BrowserSessionRecord
 from host_access.browser_sessions import BrowserSessionOwner
@@ -20,23 +20,27 @@ _SCREENCAST = browser_pane.screencast
 
 @pytest.fixture(autouse=True)
 def _no_browser_guard_state():
-    browser_control._panes.clear()
-    browser_control._pane_probes.clear()
-    browser_control._episodes.clear()
+    browser_pane_state._panes.clear()
+    browser_pane_state._pane_probes.clear()
+    lifecycle._steps.clear()
+    lifecycle._answers.clear()
+    lifecycle._sessions.clear()
     browser_control._guarded_visits.clear()
-    browser_control._probe_locks.clear()
-    browser_control._screencasts.clear()
-    browser_control._capture_sizes.clear()
-    browser_control._agent_seen.clear()
+    lifecycle._probe_locks.clear()
+    browser_pane_state._screencasts.clear()
+    browser_pane_state._capture_sizes.clear()
+    browser_pane_state._agent_seen.clear()
     yield
-    browser_control._panes.clear()
-    browser_control._pane_probes.clear()
-    browser_control._episodes.clear()
+    browser_pane_state._panes.clear()
+    browser_pane_state._pane_probes.clear()
+    lifecycle._steps.clear()
+    lifecycle._answers.clear()
+    lifecycle._sessions.clear()
     browser_control._guarded_visits.clear()
-    browser_control._probe_locks.clear()
-    browser_control._screencasts.clear()
-    browser_control._capture_sizes.clear()
-    browser_control._agent_seen.clear()
+    lifecycle._probe_locks.clear()
+    browser_pane_state._screencasts.clear()
+    browser_pane_state._capture_sizes.clear()
+    browser_pane_state._agent_seen.clear()
 
 
 class FakePane:
@@ -196,14 +200,14 @@ async def test_relay_delivers_click_shortcut_text_then_enter_in_order_on_one_cdp
     monkeypatch.setattr(browser_pane.browser_cdp, "watch_page_metadata", no_metadata)
     connected, inputs = [], []
     pane_connected = browser_control.pane_connected
-    monkeypatch.setattr(browser_control, "pane_connected", lambda *args: connected.append(args) or pane_connected(*args))
+    monkeypatch.setattr(browser_control, "pane_connected", lambda *args, **kwargs: connected.append(args) or pane_connected(*args, **kwargs))
     monkeypatch.setattr(browser_control, "person_input", inputs.append)
     with pytest.raises(WebSocketDisconnect):
         await browser_stream._relay(pane, "thread-1", "user-1")
     # Every person event reached the page target in the order typed, so nothing could overtake
     # the shortcut, the text or the submit.
     assert len(screencast.started) == 1
-    # Each one is noted for an open password episode's re-probe, which uses this pane's own probe.
+    # Each one is noted for an open password step's re-probe, which uses this pane's own probe.
     assert inputs == ["thread-1"] * len(click + keys)
     [(_thread, token, _report, probe)] = connected
     assert probe.func is browser_pane.password_probe and probe.args == ("thread-1", token)
@@ -212,7 +216,7 @@ async def test_relay_delivers_click_shortcut_text_then_enter_in_order_on_one_cdp
         ("mouse", "ws://page.test/current", "mouseReleased", None),
         *(("key", "ws://page.test/current", event["eventType"], event["key"]) for event in keys),
     ]
-    assert not browser_control.has_pane("thread-1")
+    assert not browser_pane_state.has_pane("thread-1")
 
 
 @pytest.mark.asyncio
@@ -273,17 +277,17 @@ async def test_page_info_reads_url_and_title_from_the_session_owners_rendered_re
 def test_pane_presence_is_not_exclusive_control():
     browser_control.pane_connected("thread-1", "first")
     browser_control.pane_connected("thread-1", "second")
-    assert browser_control.has_pane("thread-1")
+    assert browser_pane_state.has_pane("thread-1")
     browser_control.pane_disconnected("thread-1", "first")
-    assert browser_control.has_pane("thread-1")
+    assert browser_pane_state.has_pane("thread-1")
     browser_control.pane_disconnected("thread-1", "second")
-    assert not browser_control.has_pane("thread-1")
+    assert not browser_pane_state.has_pane("thread-1")
 
 
 @pytest.mark.asyncio
 async def test_shared_pane_does_not_refuse_agent_commands_for_presence(monkeypatch):
     browser_control.pane_connected("thread-1", "pane-1")
-    assert browser_control.has_pane("thread-1")
+    assert browser_pane_state.has_pane("thread-1")
     owner = BrowserSessionOwner(namespace="corsia-pane-test")
 
     def past_the_gate(_args):
@@ -495,7 +499,7 @@ async def test_a_screencast_chrome_refuses_closes_the_pane_with_its_reason(monke
     await asyncio.wait_for(browser_stream.browser_stream_endpoint(pane, "thread-1"), 1)
     assert pane.json == [{"type": "browser_state", "state": "error", "reason": "This page couldn't be shown"}]
     assert pane.closed == [None]
-    assert not browser_control.has_pane("thread-1")
+    assert not browser_pane_state.has_pane("thread-1")
 
 
 @pytest.mark.asyncio
@@ -552,7 +556,7 @@ async def test_match_pane_sizes_every_screencast_on_the_thread_before_the_viewpo
 
     monkeypatch.setattr(browser_pane.PROCESS_OWNER, "browser_sessions", lambda: Owner())
     for thread_id, token in (("thread-1", "pane-1"), ("thread-1", "pane-2"), ("thread-2", "pane-3")):
-        browser_control.screencast_started(thread_id, token, RecordedScreencast(token, log))
+        browser_pane_state.screencast_started(thread_id, token, RecordedScreencast(token, log))
     await browser_pane.match_pane("thread-1", browser_pane.PaneAppearance(680, 1030, 2.0, "dark"))
     # The page is shared, so every pane on its thread captures at the new device size, starting with
     # the restart that the viewport command triggers.
@@ -569,7 +573,7 @@ async def test_match_pane_marks_a_compact_screencast_for_compact_quality(monkeyp
             return "ok"
 
     monkeypatch.setattr(browser_pane.PROCESS_OWNER, "browser_sessions", lambda: Owner())
-    browser_control.screencast_started("thread-1", "pane-1", RecordedScreencast("pane-1", log))
+    browser_pane_state.screencast_started("thread-1", "pane-1", RecordedScreencast("pane-1", log))
     await browser_pane.match_pane("thread-1", browser_pane.PaneAppearance(393, 852, 2.0, "dark"))
     assert log == [("capture_at", "pane-1", 786, 1704, True)]
 
@@ -584,11 +588,11 @@ async def test_a_compact_appearance_that_beats_endpoint_resolution_sizes_the_lat
     await browser_pane.match_pane("thread-1", browser_pane.PaneAppearance(393, 732, 2, "dark"))
     log = []
     cast = RecordedScreencast("later", log)
-    browser_control.screencast_started("thread-1", "pane", cast)
+    browser_pane_state.screencast_started("thread-1", "pane", cast)
     assert log == [("capture_at", "later", 786, 1464, True)]
     browser_control.pane_connected("thread-1", "pane", lambda _message: None)
     browser_control.pane_disconnected("thread-1", "pane")
-    assert browser_control._capture_sizes == {}
+    assert browser_pane_state._capture_sizes == {}
 
 
 @pytest.mark.asyncio
@@ -600,16 +604,16 @@ async def test_each_pane_screencast_is_listed_only_while_it_runs(monkeypatch):
     monkeypatch.setattr(browser_pane.browser_screencast, "PaneScreencast", lambda endpoint, _deliver: RecordedScreencast(endpoint, []))
     first = asyncio.create_task(_SCREENCAST("thread-1", "pane-1", lambda _message: None))
     second = asyncio.create_task(_SCREENCAST("thread-1", "pane-2", lambda _message: None))
-    while len(browser_control.screencasts("thread-1")) < 2:
+    while len(browser_pane_state.screencasts("thread-1")) < 2:
         await asyncio.sleep(0)
     first.cancel()
     await asyncio.gather(first, return_exceptions=True)
-    [remaining] = browser_control.screencasts("thread-1")
+    [remaining] = browser_pane_state.screencasts("thread-1")
     assert remaining.endpoint == "page-pane-2"
     remaining.ended.set()
     await second
-    assert browser_control.screencasts("thread-1") == []
-    assert browser_control._screencasts == {}
+    assert browser_pane_state.screencasts("thread-1") == []
+    assert browser_pane_state._screencasts == {}
 
 
 @pytest.mark.asyncio
@@ -623,10 +627,10 @@ async def test_each_pane_screencast_is_listed_only_while_it_runs(monkeypatch):
 ])
 async def test_a_page_metrics_command_holds_then_restarts_each_pane_screencast_on_its_thread(args, restarted):
     log = []
-    browser_control.screencast_started("thread-1", "pane-1", RecordedScreencast("pane-1", log))
-    browser_control.screencast_started("thread-2", "pane-2", RecordedScreencast("pane-2", log))
-    browser_control.page_command_starting("thread-1", args)
-    await browser_control.page_command_finished("thread-1", args)
+    browser_pane_state.screencast_started("thread-1", "pane-1", RecordedScreencast("pane-1", log))
+    browser_pane_state.screencast_started("thread-2", "pane-2", RecordedScreencast("pane-2", log))
+    browser_pane_state.page_command_starting("thread-1", args)
+    await browser_pane_state.page_command_finished("thread-1", args)
     assert log == ([("hold", "pane-1"), ("restart", "pane-1")] if restarted else [])
 
 
@@ -652,7 +656,7 @@ async def test_the_command_path_holds_pane_screencasts_during_an_agent_screensho
     monkeypatch.setattr(owner, "_run_admitted", run_admitted)
     monkeypatch.setattr(browser_control, "require_page_access", page_access)
     monkeypatch.setattr(browser_cdp, "page_endpoint", lambda _run: asyncio.sleep(0, result="ws://page.test/current"))
-    browser_control.screencast_started("thread-1", "pane-1", RecordedScreencast("pane-1", log))
+    browser_pane_state.screencast_started("thread-1", "pane-1", RecordedScreencast("pane-1", log))
     with pytest.raises(BrowserSessionError) if fails else contextlib.nullcontext():
         await owner.run("thread-1", ("screenshot", "/tmp/shot.jpg"), session="existing")
     # A held pane shows nothing until the restart, so a failed command restarts it too.
@@ -669,12 +673,15 @@ def _password_page_owner(monkeypatch, opened):
     async def run_admitted(_runtime, args, **_kwargs):
         return CommandResult(0, json.dumps({"success": True, "data": answers[tuple(args[:2])]}), ""), False
 
-    async def password_field(endpoint, _visit, _known):
-        return browser_control.PasswordProbe("visit-1", "login.example.test", frozenset({42}), endpoint)
+    async def password_field(endpoint, _known):
+        return browser_control.PasswordProbe("visit-1", "login.example.test", frozenset({42}), endpoint,
+                                             present_nodes=frozenset({42}))
 
-    async def open_episode(_thread_id, episode):
-        episode.node_id = "password-step"
-        opened.append(episode.visit)
+    async def open_step(_thread_id, step):
+        lifecycle._steps[_thread_id] = step
+        lifecycle._start_reprobe(_thread_id, step)
+        step.node_id = "password-step"
+        opened.append(step.visit)
 
     monkeypatch.setattr(browser_runtime.browser_cli, "check_local_mode", lambda _args: None)
     monkeypatch.setattr(owner, "_pin_native", lambda: asyncio.sleep(0))
@@ -682,7 +689,7 @@ def _password_page_owner(monkeypatch, opened):
     monkeypatch.setattr(owner, "_run_admitted", run_admitted)
     monkeypatch.setattr(browser_cdp, "page_password_probe", password_field)
     monkeypatch.setattr(browser_cdp, "page_endpoint", lambda _run: asyncio.sleep(0, result="ws://page.test/current"))
-    monkeypatch.setattr(browser_control, "_open_episode", open_episode)
+    monkeypatch.setattr(lifecycle, "_open_step", open_step)
     monkeypatch.setattr(browser_control.state, "broadcast_to_thread", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(browser_pane.PROCESS_OWNER, "browser_sessions", lambda: owner)
     return owner

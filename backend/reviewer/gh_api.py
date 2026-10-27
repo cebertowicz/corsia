@@ -5,8 +5,6 @@ from __future__ import annotations
 import json
 import logging
 import subprocess
-import tempfile
-from pathlib import Path
 from typing import Any
 
 log = logging.getLogger(__name__)
@@ -23,14 +21,10 @@ def run_gh(
 
 
 def gh_api_patch_json(api_path: str, payload: dict[str, Any]) -> bool:
-    with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".json", delete=False,
-    ) as f:
-        json.dump(payload, f)
-        tmp_path = f.name
     try:
         result = run_gh(
-            ["api", "-X", "PATCH", api_path, "--input", tmp_path], timeout=30,
+            ["api", "-X", "PATCH", api_path, "--input", "-"],
+            input_text=json.dumps(payload), timeout=30,
         )
         if result.returncode != 0:
             log.error(
@@ -45,20 +39,13 @@ def gh_api_patch_json(api_path: str, payload: dict[str, Any]) -> bool:
     except FileNotFoundError:
         log.error("gh CLI not found")
         return False
-    finally:
-        Path(tmp_path).unlink(missing_ok=True)
 
 
 def gh_api_post_json(api_path: str, payload: dict[str, Any]) -> bool:
-    with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".json", delete=False,
-    ) as f:
-        json.dump(payload, f)
-        tmp_path = f.name
-
     try:
         result = run_gh(
-            ["api", "-X", "POST", api_path, "--input", tmp_path], timeout=30,
+            ["api", "-X", "POST", api_path, "--input", "-"],
+            input_text=json.dumps(payload), timeout=30,
         )
         if result.returncode != 0:
             log.error(
@@ -73,5 +60,3 @@ def gh_api_post_json(api_path: str, payload: dict[str, Any]) -> bool:
     except FileNotFoundError:
         log.error("gh CLI not found")
         return False
-    finally:
-        Path(tmp_path).unlink(missing_ok=True)
