@@ -81,6 +81,189 @@ def test_codex_custom_account_homes_are_repointed_and_its_projection_is_left_to_
     assert str((new_runtime / "auth.json").readlink()) == str(old_source / "auth.json")
 
 
+@pytest.mark.parametrize("unexpected_link", [False, True])
+def test_moved_codex_projection_recovers_without_a_new_login(isolated_db, roots, unexpected_link):
+    from connections.account_evidence import readiness_reason
+    from types import SimpleNamespace
+    from connections.account_projection import projection_gate
+    from connections.account_policy import AccountAdmissionError, select_account
+    from subagents.vendor_write_admission import prepare_session_launch
+    from tests.test_checkpoint_store import _seed_thread
+    from connections.account_receipts import ReceiptFence
+    from connections.vendor_accounts import get_account
+
+    legacy, current = roots
+    new_source, new_runtime = _make_homes(current, "x2")
+    (new_source / "auth.json").write_text(json.dumps({"auth_mode": "chatgpt", "tokens": {"fixture": "synthetic"}}))
+    old_source = legacy / "runtime/vendor-accounts/x2/source"
+    old_runtime = legacy / "runtime/vendor-accounts/x2/runtime"
+    old_auth, old_dest = str(old_source / "auth.json"), str(old_runtime / "auth.json")
+    (new_runtime / "auth.json").symlink_to(old_auth)
+    entry = {"source": old_auth, "destination": old_dest, "home": str(old_runtime),
+             "kind": "live", "phase": "established", "account_revision": 0, "login_seq": 1,
+             "owner_turn_id": None, "owner_boot_epoch": None, "at": "t"}
+    failed = {"cause": "codex_auth_source_missing", "source": old_auth, "destination": old_dest,
+              "account_revision": 0, "login_seq": 1, "at": "t"}
+    record = {"auth_state": "known", "login_seq": 1, "login_revision": 0,
+              "discovery": {"status": "ready", "receipt": {"account_revision": 0, "login_seq": 1},
+                            "cache_receipt": None, "models": {"codex/test": {}}},
+              "auth_projection": {"failed": failed, "stale": [], "homes": {old_dest: entry}}}
+    _insert("x2", "codex", str(old_source), str(old_runtime), record)
+    db = get_db()
+    receipt = ReceiptFence("x2", 0, 1)
+    _seed_thread(db, "moved-codex", model="codex/test")
+    db.commit()
+    select_account("moved-codex", "codex", account_id="x2", db=db)
+    session = SimpleNamespace(corsia_thread_id="moved-codex", codex_home=None, source_codex_home=None,
+                              catalog_model_id="codex/test")
+    with pytest.raises(AccountAdmissionError, match="account_home_mismatch"):
+        projection_gate(receipt, db=db)
+    heal_moved_state_paths(legacy_root=legacy, state_root=current)
+    if unexpected_link:
+        (new_runtime / "auth.json").unlink()
+        (new_runtime / "auth.json").symlink_to(new_source / "unexpected.json")
+    from connections.account_projection import repair_moved_projections
+    repair_moved_projections(legacy_root=legacy, state_root=current, db=db)
+    if unexpected_link:
+        assert readiness_reason(get_account("x2", db=db), model="codex/test") == "codex_auth_projection_changed"
+        with pytest.raises(AccountAdmissionError, match="codex_auth_projection_changed"):
+            prepare_session_launch(session, "codex")
+        assert (new_runtime / "auth.json").readlink() == new_source / "unexpected.json"
+        return
+
+    assert get_account("x2", db=db)["discovery"]["auth_projection"]["failed"] is None
+    assert not (new_runtime / "auth.json").is_symlink()
+    assert readiness_reason(get_account("x2", db=db), model="codex/test") is None
+    prepare_session_launch(session, "codex")
+
+    account = get_account("x2", db=db)
+    assert readiness_reason(account, model="codex/test") is None
+    projection = account["discovery"]["auth_projection"]
+    assert projection["failed"] is None
+    assert old_dest not in projection["homes"]
+    assert projection["homes"][str(new_runtime / "auth.json")]["source"] == str(new_source / "auth.json")
+    assert (new_runtime / "auth.json").readlink() == new_source / "auth.json"
+
+
+def test_restored_codex_auth_clears_legacy_missing_failure(isolated_db, roots):
+    from types import SimpleNamespace
+    from connections.account_evidence import readiness_reason
+    from connections.account_policy import select_account
+    from connections.vendor_accounts import get_account
+    from subagents.vendor_write_admission import prepare_session_launch
+    from tests.test_checkpoint_store import _seed_thread
+
+    legacy, current = roots
+    source, runtime = _make_homes(current, "x3")
+    auth = source / "auth.json"
+    failure = {"cause": "codex_auth_source_missing", "source": str(auth),
+               "destination": str(runtime / "auth.json"), "account_revision": 0, "login_seq": 1, "at": "t"}
+    record = {"auth_state": "known", "login_seq": 1, "login_revision": 0,
+              "discovery": {"status": "ready", "receipt": {"account_revision": 0, "login_seq": 1},
+                            "cache_receipt": None, "models": {"codex/test": {}}},
+              "auth_projection": {"failed": failure, "stale": [], "homes": {}}}
+    _insert("x3", "codex", str(source), str(runtime), record)
+    db = get_db()
+    _seed_thread(db, "restored-codex", model="codex/test")
+    db.commit()
+    select_account("restored-codex", "codex", account_id="x3", db=db)
+    from connections.account_projection import repair_moved_projections
+    repair_moved_projections(legacy_root=legacy, state_root=current, db=db)
+    assert get_account("x3", db=db)["discovery"]["auth_projection"]["failed"] is None
+    assert readiness_reason(get_account("x3", db=db), model="codex/test") == "codex_auth_source_missing"
+    auth.write_text(json.dumps({"auth_mode": "chatgpt", "tokens": {"fixture": "synthetic"}}))
+    assert readiness_reason(get_account("x3", db=db), model="codex/test") is None
+    session = SimpleNamespace(corsia_thread_id="restored-codex", codex_home=None, source_codex_home=None,
+                              catalog_model_id="codex/test")
+    prepare_session_launch(session, "codex")
+    assert get_account("x3", db=db)["discovery"]["auth_projection"]["failed"] is None
+    assert (runtime / "auth.json").readlink() == auth
+
+
+def test_startup_repair_rewrites_failure_and_drops_absent_moved_home(isolated_db, roots):
+    from connections.account_projection import repair_moved_projections
+    from connections.vendor_accounts import get_account
+
+    legacy, current = roots
+    source, runtime = _make_homes(current, "x4")
+    old_source = legacy / "runtime/vendor-accounts/x4/source/auth.json"
+    old_dest = legacy / "runtime/vendor-accounts/x4/runtime/auth.json"
+    failure = {"cause": "codex_auth_projection_changed", "source": str(old_source),
+               "destination": str(old_dest), "account_revision": 0, "login_seq": 1, "at": "t"}
+    entry = {"source": str(old_source), "destination": str(old_dest), "home": str(old_dest.parent),
+             "kind": "live", "phase": "established", "account_revision": 0, "login_seq": 1}
+    record = {"auth_state": "known", "login_seq": 1, "login_revision": 0,
+              "auth_projection": {"failed": failure, "stale": [], "homes": {str(old_dest): entry}}}
+    _insert("x4", "codex", str(source), str(runtime), record)
+
+    repair_moved_projections(legacy_root=legacy, state_root=current)
+    projection = get_account("x4")["discovery"]["auth_projection"]
+    assert projection["homes"] == {}
+    assert projection["failed"] == failure | {"source": str(source / "auth.json"),
+                                                 "destination": str(runtime / "auth.json")}
+    before = get_db().total_changes
+    repair_moved_projections(legacy_root=legacy, state_root=current)
+    assert get_db().total_changes == before
+
+
+def test_startup_repair_unlinks_a_moved_temporary_home(isolated_db, roots):
+    # A later retirement compares the link against the new source; left in place it would refuse the account.
+    from connections.account_projection import repair_moved_projections
+    from connections.vendor_accounts import get_account
+
+    legacy, current = roots
+    source, runtime = _make_homes(current, "x5")
+    checkpoint = runtime.parent / "checkpoint-1"
+    checkpoint.mkdir()
+    old_source = legacy / "runtime/vendor-accounts/x5/source/auth.json"
+    old_dest = legacy / "runtime/vendor-accounts/x5/checkpoint-1/auth.json"
+    (checkpoint / "auth.json").symlink_to(old_source)
+    entry = {"source": str(old_source), "destination": str(old_dest), "home": str(old_dest.parent),
+             "kind": "checkpoint", "phase": "established", "account_revision": 0, "login_seq": 1,
+             "owner_turn_id": "turn-1"}
+    record = {"auth_state": "known", "login_seq": 1, "login_revision": 0,
+              "auth_projection": {"failed": None, "stale": [], "homes": {str(old_dest): entry}}}
+    _insert("x5", "codex", str(source), str(runtime), record)
+
+    repair_moved_projections(legacy_root=legacy, state_root=current)
+    projection = get_account("x5")["discovery"]["auth_projection"]
+    assert projection["homes"] == {}
+    assert projection["failed"] is None
+    assert not (checkpoint / "auth.json").is_symlink()
+
+
+def test_startup_repair_keeps_an_account_relinked_after_the_home_repair(isolated_db, roots):
+    # A healthy account launched after heal_moved_state_paths already links its moved home to the new source.
+    from connections.account_evidence import readiness_reason
+    from connections.account_projection import repair_moved_projections
+    from connections.vendor_accounts import get_account
+
+    legacy, current = roots
+    source, runtime = _make_homes(current, "x6")
+    (source / "auth.json").write_text(json.dumps({"auth_mode": "chatgpt", "tokens": {"fixture": "synthetic"}}))
+    (runtime / "auth.json").symlink_to(source / "auth.json")
+    old_source = legacy / "runtime/vendor-accounts/x6/source/auth.json"
+    old_dest = legacy / "runtime/vendor-accounts/x6/runtime/auth.json"
+    stale = {"source": str(old_source), "destination": str(old_dest), "home": str(old_dest.parent),
+             "kind": "live", "phase": "established", "account_revision": 0, "login_seq": 1}
+    relinked = stale | {"source": str(source / "auth.json"), "destination": str(runtime / "auth.json"),
+                        "home": str(runtime), "at": "later"}
+    record = {"auth_state": "known", "login_seq": 1, "login_revision": 0,
+              "discovery": {"status": "ready", "receipt": {"account_revision": 0, "login_seq": 1},
+                            "cache_receipt": None, "models": {"codex/test": {}}},
+              "auth_projection": {"failed": None, "stale": [],
+                                  "homes": {str(old_dest): stale, str(runtime / "auth.json"): relinked}}}
+    _insert("x6", "codex", str(source), str(runtime), record)
+
+    repair_moved_projections(legacy_root=legacy, state_root=current)
+    account = get_account("x6")
+    projection = account["discovery"]["auth_projection"]
+    assert projection["failed"] is None
+    assert projection["homes"] == {str(runtime / "auth.json"): relinked}
+    assert (runtime / "auth.json").readlink() == source / "auth.json"
+    assert readiness_reason(account, model="codex/test") is None
+
+
 def test_missing_target_is_left_alone_and_logged(isolated_db, roots):
     legacy, current = roots
     old = legacy / "runtime/vendor-accounts/m1"

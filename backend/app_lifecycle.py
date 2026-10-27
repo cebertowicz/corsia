@@ -93,6 +93,7 @@ async def _startup_network_discovery() -> None:
 
 def _initialize_startup(logger) -> None:
     from app_startup_workspace import initialize_workspace
+    from connections.account_projection import repair_moved_projections
     from core.project_path_conversion import convert_legacy_project_paths
     from infra.config import LOGS_DIR, RUNTIME_DIR, UPLOADS_DIR, WORKSPACE, WORKSPACE_SELECTION
     from infra import setup_progress
@@ -111,6 +112,7 @@ def _initialize_startup(logger) -> None:
     logger.info("startup phase: database initialization started")
     init_db()
     heal_moved_state_paths()
+    repair_moved_projections()
     drop_ignored_environment()
     setup_progress.release_marker_at_startup(logger)
     key_store_values.sweep_at_startup()
