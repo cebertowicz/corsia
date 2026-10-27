@@ -47,7 +47,7 @@
 </script>
 
 {#if plan}
-	<span class="plan-head-controls">
+	<span class="plan-head-controls" class:pause-only={show === 'pause'}>
 		{#if show === 'both' && open > 0}
 			<!-- One count of unfinished work; the agent-read budget is a hint on it, never a second number. -->
 			<span
@@ -77,9 +77,11 @@
 	@media (hover: hover) { .plan-head-controls :global(.btn.ghost:hover:not(:disabled)) { color: var(--text-primary); } }
 	.progress { color: var(--text-tertiary); font-size: var(--text-caption); font-variant-numeric: tabular-nums; white-space: nowrap; }
 	.progress.oversize { text-decoration: underline dotted; cursor: help; }
-	/* The host cap doesn't shrink its actions, so the failure bounds itself: Pause and the cap's title stay in view; the full text, reference included, is its title. */
+	/* The failure line takes the ellipsis from the space its host leaves; the full text, reference included, is its title. */
 	.lifecycle-error {
-		min-width: 0; max-width: 16em; overflow: hidden; color: var(--red); font-size: var(--text-caption);
+		min-width: 0; overflow: hidden; color: var(--red); font-size: var(--text-caption);
 		text-overflow: ellipsis; white-space: nowrap;
 	}
+	/* The phone drawer centres its title between two equal columns, so the leading one holds at most half the width, less half the title and Pause. */
+	.pause-only .lifecycle-error { max-width: calc(50vw - 6rem); }
 </style>
