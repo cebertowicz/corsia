@@ -50,8 +50,11 @@ async def test_first_open_does_not_probe_a_page_before_one_exists(synthetic_brow
     await fake.owner.shutdown()
 
 
-@pytest.mark.parametrize("chrome", ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", None])
-async def test_chosen_chrome_is_a_launch_option_resolved_once(synthetic_browser, monkeypatch, chrome):
+@pytest.mark.parametrize("has_chrome", [True, False])
+async def test_chosen_chrome_is_a_launch_option_resolved_once(synthetic_browser, monkeypatch, tmp_path, has_chrome):
+    chrome_path = tmp_path / "chrome"
+    chrome_path.touch()
+    chrome = str(chrome_path) if has_chrome else None
     fake = synthetic_browser
     resolved = []
     monkeypatch.setattr(browser_cli, "chrome_executable",

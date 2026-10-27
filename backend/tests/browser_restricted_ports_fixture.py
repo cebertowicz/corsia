@@ -102,6 +102,17 @@ async def _popup(browser, page, url):
     pytest.fail('window.open did not create a page target')
 
 
+async def _close_popup(browser, target):
+    """Wait until Chrome removes the closed target before the next page lookup."""
+    await browser.call('Target.closeTarget', targetId=target)
+    for _ in range(60):
+        targets = (await browser.call('Target.getTargets'))['targetInfos']
+        if all(item['targetId'] != target for item in targets):
+            return
+        await asyncio.sleep(.05)
+    pytest.fail('closed popup remained in Chrome target list')
+
+
 async def _title(cdp):
     for _ in range(60):
         value = await _evaluate(cdp, '({title:document.title,ready:document.readyState,url:document.URL})')
@@ -162,12 +173,12 @@ async def assert_restricted_routes(endpoint, listeners, *, owner=None):
         async with browser_cdp.CdpClient(popup_endpoint) as popup:
             assert await _title(popup) != _SENTINEL
         assert not requests['restricted']
-        await browser.call('Target.closeTarget', targetId=target)
+        await _close_popup(browser, target)
         target, popup_endpoint = await _popup(browser, page, f'http://127.0.0.1:{allowed}/popup-allowed')
         async with browser_cdp.CdpClient(popup_endpoint) as popup:
             assert await _title(popup) == _SENTINEL
             results['popup'] = await _matrix(None, popup, 'popup', allowed, restricted)
-        await browser.call('Target.closeTarget', targetId=target)
+        await _close_popup(browser, target)
     assert not requests['restricted']
     assert sum(ws for _, ws in requests['allowed']) == 2
     results['restricted_listener_requests'] = requests['restricted']

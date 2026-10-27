@@ -25,7 +25,7 @@ async def test_stable_startup_sidecars_survive_delayed_reuse(synthetic_browser):
 async def test_failed_navigation_binds_and_reuses_startup_files(synthetic_browser):
     fake = synthetic_browser
     fake.result = sessions.CommandResult(1, '', 'navigation failed')
-    assert 'failed' in await fake.owner.run('thread', ['open', 'bad-url'])
+    assert 'failed' in await fake.owner.run('thread', ['open', 'https://example.test/'])
     record = fake.owner._sessions['thread'].record
     assert record.pid and fake.owner.live_count() == 1
     fake.result = sessions.CommandResult(0, 'ok', '')

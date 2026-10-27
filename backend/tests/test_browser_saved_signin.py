@@ -8,14 +8,15 @@ from host_access import browser_cli, browser_launch, browser_sessions as session
 from tests.browser_process_fixture import synthetic_browser  # noqa: F401
 from tools.host_path_policy import ProtectedHostPathPolicy
 
-CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 _REAL_OWNER_KEY = browser_launch._owner_key
 
 
 @pytest.fixture
-def chrome154(monkeypatch):
+def chrome154(monkeypatch, tmp_path):
+    chrome = tmp_path / "chrome"
+    chrome.touch()
     monkeypatch.setattr(browser_launch, "chrome_major", lambda chrome: "154")
-    monkeypatch.setattr(browser_cli, "chrome_executable", lambda: (CHROME, "system"))
+    monkeypatch.setattr(browser_cli, "chrome_executable", lambda: (str(chrome), "system"))
     monkeypatch.setattr(browser_launch, "_owner_key", lambda thread_id: "fixture-owner")
 
 

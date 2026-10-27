@@ -33,7 +33,7 @@ async def test_setup_refusal_names_cause_without_cleanup_state(synthetic_browser
         launcher.chmod(0o755)
         fake.owner.binary = str(launcher)
     else:
-        args = ['--provider', 'browserbase', 'snapshot']
+        args = ['snapshot', '--provider', 'browserbase']
     with pytest.raises(sessions.BrowserSetupError) as caught:
         await fake.owner.run('thread', args)
     assert not isinstance(caught.value, sessions.BrowserSessionCleanupError)
