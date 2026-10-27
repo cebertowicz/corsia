@@ -269,7 +269,7 @@
 
 		<SettingsGroup label="Agents" hint="Agents that own one area of this project.">
 			{#if agentsLoading}
-				<p class="note">Loading project Agents…</p>
+				<p class="note">Loading agents…</p>
 			{:else if agentsError}
 				<p class="note failed">{agentsError}</p>
 			{:else}

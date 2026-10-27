@@ -22,7 +22,7 @@
 <SettingsGroup label="System bulletins">
 	<SettingsRow
 		name="Check for maintainer bulletins"
-		sub="Once a day, CORSIA checks for signed notes from its maintainers and asks you before changing anything you decided."
+		sub="Once a day, CORSIA checks for signed notes from its maintainers about how its agents work."
 		wrap
 	>
 		{#snippet actions()}

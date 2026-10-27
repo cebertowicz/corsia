@@ -11,14 +11,14 @@
 </script>
 
 {#if open}
-	<Modal title="Link a folder" size="sm" onClose={onCancel}>
+	<Modal title="Link a repository" size="sm" onClose={onCancel}>
 		<Field variant="nested" layout="stacked" label="Folder path" labelFor="repo-folder-path">
 			<input id="repo-folder-path" value={path} oninput={(event) => onPathChange(event.currentTarget.value)} placeholder="~/repos/corsia" spellcheck="false" />
 		</Field>
 		<p class="sheet-hint">Agents read these files where they are.</p>
 		{#snippet foot()}
 			<Button variant="ghost" onclick={onCancel}>Cancel</Button>
-			<Button variant="primary" onclick={onSubmit}>Link directory</Button>
+			<Button variant="primary" onclick={onSubmit}>Link repository</Button>
 		{/snippet}
 	</Modal>
 {/if}
