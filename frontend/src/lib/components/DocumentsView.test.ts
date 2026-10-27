@@ -170,9 +170,9 @@ describe('DocumentsView context attach mode', () => {
 		flushSync();
 
 		await vi.waitFor(() => expect(host.textContent).toContain('AGENTS.md'));
-		expect(host.textContent).toContain('Add to thread context: CTX thread');
+		expect(host.textContent).toContain('Add to chat context: CTX thread');
 		expect(host.textContent).not.toContain('＋ Add');
-		const addButton = host.querySelector<HTMLButtonElement>('button[aria-label="Add AGENTS.md to thread context"]');
+		const addButton = host.querySelector<HTMLButtonElement>('button[aria-label="Add AGENTS.md to chat context"]');
 		expect(addButton?.tabIndex).toBe(0);
 		expect(addButton?.classList.contains('row-attach')).toBe(true);
 		addButton?.click();
@@ -185,7 +185,7 @@ describe('DocumentsView context attach mode', () => {
 				thread_id: 'thread-ctx',
 				path: existing,
 			});
-			expect(host.textContent).toContain('Add to thread context: CTX thread');
+			expect(host.textContent).toContain('Add to chat context: CTX thread');
 			expect(get(contextAttachTarget)?.returnTo).toBe('thread-settings');
 			expect(get(contextAttachTarget)?.existingFiles).toEqual([existing]);
 		});
@@ -255,8 +255,8 @@ describe('DocumentsView context attach mode', () => {
 
 		await vi.waitFor(() => expect(host.textContent).toContain('DESIGN-SYSTEM.md'));
 		expect(host.querySelector<HTMLButtonElement>('button[aria-label="AGENTS.md is already in context"]')?.disabled).toBe(true);
-		expect(host.querySelector<HTMLButtonElement>('button[aria-label="Add DESIGN-SYSTEM.md to thread context"]')).toBeTruthy();
-		expect(host.querySelector<HTMLButtonElement>('button[aria-label="Add screenshot.png to thread context"]')).toBeNull();
+		expect(host.querySelector<HTMLButtonElement>('button[aria-label="Add DESIGN-SYSTEM.md to chat context"]')).toBeTruthy();
+		expect(host.querySelector<HTMLButtonElement>('button[aria-label="Add screenshot.png to chat context"]')).toBeNull();
 	});
 
 	it('adds the owner to search and renders an Overdue badge only for overdue documents', async () => {

@@ -16,9 +16,11 @@ def prepare(db, plan_id: str, params: dict, *, workflow_version: str | None, ope
     requested_words = created.pop("intent_words", None)
     acting = actor.thread_id if actor.kind == "thread" else None
     resolved_words = intent_words.resolve_words(db, requested_words, actor_id=acting)
+    # Caller person words replace the turn's input (see capture), so one of them must carry the authority.
+    caller_person = any(word["author"] == "person" for word in resolved_words)
     if (
         actor.kind == "thread" and created["kind"] == "task" and inherited is None
-        and not intent_words.has_person_origin(db, actor.turn_id)
+        and (caller_person or not intent_words.has_person_origin(db, actor.turn_id))
         and not any(word["author"] == "person" and word["role"] == "authority" for word in resolved_words)
     ):
         raise service.PlanInputError(
@@ -31,5 +33,6 @@ def prepare(db, plan_id: str, params: dict, *, workflow_version: str | None, ope
 
 def capture(db, node, words: list[dict[str, str]], *, actor) -> None:
     """Record the turn's origin and resolved caller words at node revision one."""
-    intent_words.capture_origin(db, node.id, turn_id=actor.turn_id, revision=node.requirements_revision)
+    if not any(word["author"] == "person" for word in words):
+        intent_words.capture_origin(db, node.id, turn_id=actor.turn_id, revision=node.requirements_revision)
     intent_words.append(db, node.id, words, revision=node.requirements_revision)

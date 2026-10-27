@@ -135,9 +135,8 @@ describe("AttentionDock — reply attention refresh", () => {
   it("refreshes reply counts on resolution and reopening, but ignores unrelated frames", async () => {
     const { emit } = await import("$lib/ws/events");
     const reply = {
-      external_id: "reply", renderer: "comment-reply" as const,
-      detail: { id: "reply", title: "brief.md", unread_count: 1, newest_at: "2026-10-27",
-        destination: { pane: "document-replies", id: "doc" }, source: { thread_id: "thread", thread_label: "Agent" } },
+      detail: { title: "brief.md", unread_count: 1, newest_at: "2026-10-27",
+        destination: { pane: "document-replies", id: "doc" }, source: { thread_id: "thread" } },
     };
     activeThreadId.set("thread");
     body = { ...queueBody(null, 0), reply_items: [reply] };

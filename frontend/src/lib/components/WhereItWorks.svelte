@@ -101,7 +101,7 @@
 			</div>
 		{/if}
 		<div class="effect">
-			<!-- An app that runs on this Mac carries the server's notice while it waits; it shows when you approve it (B-R22). -->
+			<!-- An app that runs on this computer carries the server's notice while it waits; it shows when you approve it (B-R22). -->
 			{#if approve && app.kind !== 'account' && app.notice}<p class="second">{app.notice}</p>{/if}
 			<p class="second" role="status">{effectLine}</p>
 			{#if error}<p class="error" role="alert">{error}</p>{/if}
@@ -121,5 +121,5 @@
 	.second { margin: 0; color: var(--text-tertiary); font-size: var(--text-caption); line-height: var(--lh-normal); }
 	.checklist { display: grid; gap: var(--space-2); padding-left: var(--space-6); }
 	.effect { display: grid; gap: var(--space-2); }
-	.error { margin: 0; color: var(--red); font-size: var(--text-footnote); }
+	.error { margin: 0; color: var(--red-text); font-size: var(--text-footnote); }
 </style>

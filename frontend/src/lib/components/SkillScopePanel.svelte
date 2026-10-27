@@ -128,7 +128,7 @@
 	{#if loading}
 		<div class="skills-empty">Loading skills...</div>
 	{:else if rows.length === 0}
-		<div class="skills-empty">No local skills in this scope.</div>
+		<div class="skills-empty">No skills saved yet.</div>
 	{:else}
 		<div class="skills-list">
 			{#each validRows as row (row.path)}
@@ -138,7 +138,7 @@
 				<SettingsRow name={row.name} sub={`Omitted: ${row.errors.join(', ')}`} subTone="failed" onOpen={home.canOpen ? () => openSkill(row) : undefined} />
 			{/each}
 		</div>
-		{#if home.unavailable}<p class="skills-empty">Open a conversation to view this.</p>{/if}
+		{#if home.unavailable}<p class="skills-empty">Open a chat to view this.</p>{/if}
 		{#if home.failed}
 			<p class="skills-error" role="alert">Couldn't find where to open these. <Button size="sm" variant="ghost" onclick={home.retry}>Try again</Button></p>
 		{/if}

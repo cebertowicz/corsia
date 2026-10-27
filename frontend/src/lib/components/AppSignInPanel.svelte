@@ -6,7 +6,7 @@
 		type ConnectedApp,
 	} from '$lib/api/connectedApps';
 	import {
-		BROWSER_DIDNT_OPEN, failureText, NOT_ON_THIS_MAC, PROVIDER_NOT_TOLD_AFTER, PROVIDER_NOT_TOLD_BEFORE, retryLabel,
+		BROWSER_DIDNT_OPEN, failureText, NOT_ON_THIS_COMPUTER, PROVIDER_NOT_TOLD_AFTER, PROVIDER_NOT_TOLD_BEFORE, retryLabel,
 		SIGN_OUT_BODY, WAITING_TEXT,
 	} from '$lib/appSignIn';
 
@@ -119,7 +119,7 @@
 		{:else if view.signed_in && !view.account}
 			<p>{app.name} didn't say which account</p>
 		{:else if !view.signed_in && app.state === 'needs_sign_in' && !signInHere}
-			<p>{NOT_ON_THIS_MAC}</p>
+			<p>{NOT_ON_THIS_COMPUTER}</p>
 		{/if}
 		{#if providerUrl}
 			<p>{PROVIDER_NOT_TOLD_BEFORE(app.name)}<a href={providerUrl} target="_blank" rel="noopener noreferrer">{app.name}'s settings</a>{PROVIDER_NOT_TOLD_AFTER}</p>

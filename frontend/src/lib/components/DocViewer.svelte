@@ -86,7 +86,6 @@
 	} = $props();
 
 	let docState = $state<DocState>('loading');
-	let loadError = $state('');
 	let openRefusal = $state<DocOpenRefusal | null>(null);
 	let liveUnavailable = $state<ViewerContent['liveUnavailable']>(null);
 	let loadedArtifactId = $state<string | null>(null);
@@ -253,7 +252,6 @@
 			confirming = opened.confirming;
 			if (opened.text !== null) editText = opened.text;
 			freshness = null;
-			loadError = '';
 			openRefusal = null; liveUnavailable = null;
 			docState = opened.text === null ? 'loading' : 'ready';
 			signal(opened.signal);
@@ -266,7 +264,7 @@
 				.catch((e) => {
 					if (seq !== loadSeq) return;
 					handleViewerFailure(e, opened, { signal, reloadAttention: () => { void reloadAttentionQueue(); },
-						fail: (failure) => { openRefusal = failure.refusal; loadError = failure.message; docState = failure.state;
+						fail: (failure) => { openRefusal = failure.refusal; docState = failure.state;
 							if (failure.text !== null) editText = failure.text; readonly = failure.readonly; confirming = false; },
 					});
 				});
@@ -334,7 +332,6 @@
 	<DocViewerEditorSurface
 		bind:this={editorSurface}
 		{docState}
-		{loadError}
 		documentName={target?.name ?? 'this document'}
 		onRetry={() => reloadNonce += 1}
 		bind:value={editText}

@@ -112,14 +112,14 @@ describe('SettingsContext', () => {
 
 		expect(get(threadWorkspaces)['corsia-thread']?.tabs.map((tab) => tab.title)).toEqual(['AGENTS.md']);
 		expect(get(showArtifactThreadRequest)).toEqual({ threadId: 'corsia-thread' });
-		expect(host.textContent).not.toContain('Open a conversation to view this.');
+		expect(host.textContent).not.toContain('Open a chat to view this.');
 	});
 
 	it('with no thread on screen and none for the workspace, the row is text and says what to do', async () => {
 		component = mount(SettingsContext, { target: host, props: {} });
 		flushSync();
 
-		await vi.waitFor(() => expect(host.textContent).toContain('Open a conversation to view this.'));
+		await vi.waitFor(() => expect(host.textContent).toContain('Open a chat to view this.'));
 		expect(row('AGENTS.md')!.querySelector('button')).toBeNull();
 	});
 
@@ -134,7 +134,7 @@ describe('SettingsContext', () => {
 		flushSync();
 
 		await vi.waitFor(() => expect(host.textContent).toContain("Couldn't find where to open these."));
-		expect(host.textContent).not.toContain('Open a conversation to view this.');
+		expect(host.textContent).not.toContain('Open a chat to view this.');
 		expect(row('AGENTS.md')!.querySelector('button')).toBeNull();
 
 		lookupOk = true;

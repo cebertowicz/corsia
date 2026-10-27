@@ -54,7 +54,7 @@ describe('scope grouping', () => {
 	});
 
 	it('shows the Agent group only for threads with roles', () => {
-		expect(sourceScope('thread', {}, false)).toBe('This thread');
+		expect(sourceScope('thread', {}, false)).toBe('This chat');
 		expect(sourceScope('thread', {}, true)).toBe('Agent');
 		expect(sourceScope('dynamic', { provider: 'agent_owner_map' }, false)).toBe('System');
 		expect(sourceScope('dynamic', { provider: 'agent_owner_map' }, true)).toBe('Agent');
