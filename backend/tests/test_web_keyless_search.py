@@ -73,18 +73,39 @@ async def test_keyless_timeout_returns_timeout_reason(monkeypatch):
     assert (result.kind, result.reason) == (outcomes.FAILED, outcomes.REASON_TIMEOUT)
 
 
-def _client_failure() -> keyless.DDGSException:
-    try:
-        raise keyless.DDGSException("ConnectError") from OSError("connection refused")
-    except keyless.DDGSException as exc:
-        return exc
+class _RefusedClient:
+    def __init__(self, **_):
+        pass
+
+    def __getattr__(self, _):  # header and cookie setup the engines do before a request
+        return lambda *_, **__: None
+
+    def request(self, *_, **__):
+        raise ConnectionError("Connection refused (os error 61)")
+
+
+@pytest.mark.asyncio
+async def test_unreachable_network_through_the_real_library_is_a_network_failure(monkeypatch):
+    from ddgs import http_client
+
+    monkeypatch.setattr(http_client.primp, "Client", _RefusedClient)
+    result = await keyless.keyless_search("query")
+    assert (result.kind, result.reason) == (outcomes.FAILED, outcomes.REASON_NETWORK)
+
+
+@pytest.mark.asyncio
+async def test_engines_finding_nothing_through_the_real_library_is_working_and_empty(monkeypatch):
+    from ddgs.base import BaseSearchEngine
+
+    monkeypatch.setattr(BaseSearchEngine, "search", lambda self, query, **_: [])
+    result = await keyless.keyless_search("query")
+    assert (result.kind, result.results) == (outcomes.WORKS, [])
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("error,reason", [
     (lambda: keyless.RatelimitException("202 Ratelimit"), outcomes.REASON_RATE_LIMIT),
     (lambda: keyless.TimeoutException("timed out"), outcomes.REASON_TIMEOUT),
-    (_client_failure, outcomes.REASON_NETWORK),
     (lambda: keyless.DDGSException("unexpected page"), outcomes.REASON_PROVIDER),
 ])
 async def test_ddgs_failures_keep_their_class(monkeypatch, error, reason):
@@ -95,7 +116,7 @@ async def test_ddgs_failures_keep_their_class(monkeypatch, error, reason):
     assert search.call_count == 1
 
 
-def test_first_run_names_only_engines_the_pinned_library_searches():
+def test_first_run_engine_names_are_text_engines_in_the_pinned_library():
     from ddgs.engines import ENGINES
 
     from infra.system_package import system_resource_source

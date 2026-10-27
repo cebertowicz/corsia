@@ -37,5 +37,12 @@ async def keyless_search(query: str, count: int = 5) -> SearchOutcome:
     except RatelimitException:
         return SearchOutcome(FAILED, REASON_RATE_LIMIT)
     except DDGSException as exc:
-        # DDGS wraps a failed request in its base exception, chained from the client error.
-        return SearchOutcome(FAILED, REASON_NETWORK if exc.__cause__ else REASON_PROVIDER)
+        return SearchOutcome(FAILED, REASON_NETWORK if _engine_error(exc).__cause__ else REASON_PROVIDER)
+
+
+def _engine_error(exc: DDGSException) -> BaseException:
+    """The last engine's error: DDGS re-raises it unchained, as its exception's argument.
+
+    A failed request inside an engine is chained from the client error."""
+    inner = exc.args[0] if exc.args else None
+    return inner if isinstance(inner, BaseException) else exc
