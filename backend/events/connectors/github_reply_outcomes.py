@@ -43,6 +43,7 @@ def _author_facts(item: dict[str, Any], parent: dict[str, Any], kind: str, at: s
         ("author_login", _login(item.get("user"))),
         ("author_association", _optional_text(item, "author_association")),
         (f"{kind}_author_login", _login(parent.get("user"))),
+        (f"{kind}_author_association", _optional_text(parent, "author_association")),
         (f"minutes_since_{kind}_created", measurements.minutes_between(parent.get("created_at"), at)),
     ):
         if value is not None:
