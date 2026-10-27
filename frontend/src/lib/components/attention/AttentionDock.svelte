@@ -20,7 +20,7 @@
 	import { token } from '$lib/stores/auth';
 	import { emitProductEvent } from '$lib/product_events';
 	import { forgetAutoOpen, holdsDraft, judgeAutoOpen, noteLoad } from '$lib/stores/attentionAutoOpen';
-	import { activeThreadId } from '$lib/stores/threads';
+	import { activeThreadId, messages } from '$lib/stores/threads';
 	import DecisionChip from './DecisionChip.svelte';
 	import AdaptiveDrawer from '$lib/components/ui/AdaptiveDrawer.svelte';
 	import ExternalReviewRow from './ExternalReviewRow.svelte';
@@ -142,9 +142,8 @@
 	});
 
 	$effect(() => {
-		// A decision raised by the viewed thread after the last one judged opens by
-		// itself once the person is not typing and nothing else holds the slot (see
-		// the store). Busy is read from the document here, never stored.
+		// A decision raised by the viewed thread opens by itself once the person is not typing,
+		// nothing holds the slot and they've had time to read what came before it (see the store).
 		void busyTick;
 		const typingLeft = lastKeydown + TYPING_IDLE_MS - Date.now();
 		const outcome = judgeAutoOpen($visibleQueue.items, {
@@ -152,6 +151,7 @@
 			expandedId: $expandedId,
 			suppressed,
 			busy: typingLeft > 0 || holdsDraft(document.activeElement),
+			messages: get(messages), // untracked: a streaming reveal rewrites rows constantly
 		});
 		if (outcome.state === 'open') {
 			const focused = document.activeElement;
@@ -162,8 +162,9 @@
 			emitProductEvent('attention_dock', 'decision_auto_opened', { thread_id: $activeThreadId });
 			return;
 		}
-		if (outcome.state !== 'wait' || typingLeft <= 0) return;
-		const timer = setTimeout(() => { busyTick += 1; }, typingLeft);
+		const holdLeft = outcome.state === 'wait' ? Math.max(typingLeft, outcome.retryInMs ?? 0) : 0;
+		if (holdLeft <= 0) return;
+		const timer = setTimeout(() => { busyTick += 1; }, holdLeft);
 		return () => clearTimeout(timer);
 	});
 

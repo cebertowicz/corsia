@@ -69,7 +69,6 @@ def test_person_browser_steps_have_one_rule_and_no_url_wait():
     assert "no URL mode" in steps and "about 5 minutes" in steps
     for path in (
         bootstrap / "web-search.md",
-        SKILLS / "github/references/agent-account.md",
         SKILL,
     ):
         text = path.read_text(encoding="utf-8")
@@ -77,7 +76,15 @@ def test_person_browser_steps_have_one_rule_and_no_url_wait():
         assert "`wait` on a URL" not in text
 
 
-def test_person_browser_guidance_keeps_every_first_run_step_in_the_shared_browser():
+def test_github_sign_up_is_the_persons_own_browser_never_the_shared_one():
+    """GitHub flags a sign-up an automated browser types, so the person signs up themselves."""
+    account = (SKILLS / "github/references/agent-account.md").read_text(encoding="utf-8")
+    assert "never open the sign-up in the shared browser and never type into or click its form" in account
+    assert "paste this link into it: https://github.com/signup" in account
+    assert "`browser_open`" not in account.split("## Creating the account", 1)[1].split("## Posting as the person", 1)[0]
+
+
+def test_person_browser_guidance_keeps_the_other_first_run_steps_in_the_shared_browser():
     system = ROOT / "backend/prompts/system/v1"
     expected_guidance = {
         "skills/conductor-bootstrap/references/browser-person-steps.md": (
@@ -87,10 +94,7 @@ def test_person_browser_guidance_keeps_every_first_run_step_in_the_shared_browse
             "the person watches in the shared browser, so do not set `show_window`"
         ),
         "skills/conductor-bootstrap/references/first-run.md": (
-            "follow skill `github` › `references/agent-account.md` in the shared browser"
-        ),
-        "skills/github/references/agent-account.md": (
-            "the person watches in the shared browser, so do not set `show_window`"
+            "the person signs up in their own browser from the link you post"
         ),
         "skills/google-setup/SKILL.md": (
             "Do not set `show_window`: the shared browser is already available."
