@@ -43,10 +43,10 @@ const badge = () => host.querySelector<HTMLButtonElement>('.h-local-only');
 const withLocalOnly = (fields: Record<string, unknown>) => threads.update((rows) => rows.map((row) => ({ ...row, ...fields })));
 
 describe('Header Local only badge', () => {
-	it('shows no badge on an ordinary chat but still reserves its slot', () => {
+	it('shows no badge or slot on an ordinary chat', () => {
 		render();
 		expect(badge()).toBeNull();
-		expect(host.querySelector('.h-local-slot')).not.toBeNull();
+		expect(host.querySelector('.h-local-slot')).toBeNull();
 	});
 
 	it.each([
@@ -56,6 +56,7 @@ describe('Header Local only badge', () => {
 	])('shows the badge when Local only is %s', (_cause, fields) => {
 		withLocalOnly(fields);
 		render();
+		expect(host.querySelector('.h-local-slot')).not.toBeNull();
 		expect(badge()?.getAttribute('aria-label')).toBe('Local only. Change in model settings.');
 		expect(badge()?.textContent).toContain('Local only');
 	});

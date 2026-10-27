@@ -127,15 +127,14 @@
 			<svg class="h-cond-glyph" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Agent"><path d="M12 3l1.8 5 5 1.8-5 1.8L12 17l-1.8-5-5-1.8 5-1.8z"/></svg>
 		{/if}
 		<span class="h-scope">{$activeThread.title}</span>
-		<!-- The badge's slot is reserved so its appearance never moves the title. -->
-		<span class="h-local-slot">
-			{#if showLocalOnly}
+		{#if showLocalOnly}
+			<span class="h-local-slot">
 				<button class="h-local-only" onclick={openLocalOnlySettings} aria-label="Local only. Change in model settings." title="Local only. Change in model settings.">
 					<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="3"/><path d="M9 12h6M12 9v6"/></svg>
 					<span>Local only</span>
 				</button>
-			{/if}
-		</span>
+			</span>
+		{/if}
 	{:else}
 		<span class="h-scope">{scopeTitle}</span>
 	{/if}
