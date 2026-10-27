@@ -52,6 +52,9 @@ async def respond(
     error: dict | None = None,
 ) -> None:
     """Write one response unless intentional teardown already owns the pipe."""
+    from subagents.codex_app_server import REQUEST_TIMEOUT
+    from subagents.codex_requests import bounded_drain
+
     if session._proc is None or session._proc.stdin is None:
         return
     payload = {"id": msg_id, "error" if error is not None else "result": (
@@ -62,7 +65,7 @@ async def respond(
             return
         try:
             session._proc.stdin.write((json.dumps(payload) + "\n").encode())
-            await session._proc.stdin.drain()
+            await bounded_drain(session, REQUEST_TIMEOUT, f"response to request {msg_id}")
         except (BrokenPipeError, ConnectionResetError, RuntimeError):
             if not session._closing:
                 raise
