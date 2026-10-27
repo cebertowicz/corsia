@@ -6,7 +6,7 @@
 	import { updateProject, archiveProject, restoreProject } from '$lib/stores/projects';
 	import { projectColor } from '$lib/utils/projectColors';
 	import { toasts } from '$lib/stores/toast';
-	import { plainResponseError } from '$lib/plainError';
+	import { plainResponseError, SERVER_UNREACHABLE } from '$lib/plainError';
 	import { Button } from '$lib/components/ui';
 	import AccentPicker from './ui/AccentPicker.svelte';
 	import ProjectRootPicker from './ProjectRootPicker.svelte';
@@ -92,14 +92,19 @@
 	async function demoteAgent(threadId: string) {
 		const t = get(token);
 		if (!t || !project) return;
+		let res: Response;
 		try {
-			const res = await fetch(`/api/agents/${threadId}?token=${encodeURIComponent(t)}`, { method: 'DELETE' });
-			if (!res.ok) throw new Error(await plainResponseError(res, 'Couldn’t remove that. Try again.'));
-			await loadAgents(t, project.id);
-			toasts.show('Project Agent removed', 'success');
-		} catch (e) {
-			toasts.show(e instanceof Error ? e.message : 'Couldn’t remove that. Try again.', 'error');
+			res = await fetch(`/api/agents/${threadId}?token=${encodeURIComponent(t)}`, { method: 'DELETE' });
+		} catch {
+			toasts.show(SERVER_UNREACHABLE, 'error');
+			return;
 		}
+		if (!res.ok) {
+			toasts.show(await plainResponseError(res, 'Couldn’t remove that. Try again.'), 'error');
+			return;
+		}
+		await loadAgents(t, project.id);
+		toasts.show('Project Agent removed', 'success');
 	}
 
 	async function saveName() {

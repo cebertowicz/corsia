@@ -5,6 +5,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import ProjectSettingsView from './ProjectSettingsView.svelte';
 import { token } from '$lib/stores/auth';
 import { toasts } from '$lib/stores/toast';
+import { SERVER_UNREACHABLE } from '$lib/plainError';
 import { uiScope } from '$lib/stores/uiScope';
 import { openProjectSettings, resetSettingsNavigation, settingsNavigation } from '$lib/stores/settingsNavigation';
 
@@ -153,9 +154,12 @@ describe('ProjectSettingsView', () => {
 		expect(agentCalls).toBe(2);
 	});
 
-	it('keeps the agent list after a failed remove so the person can try again', async () => {
+	it.each([
+		['the server refuses', () => ({ ok: false, status: 500, json: async () => ({}) }), 'Couldn’t remove that. Try again.'],
+		['the server is unreachable', () => { throw new TypeError('Failed to fetch'); }, SERVER_UNREACHABLE],
+	])('keeps the agent list and says so in plain words when %s on remove', async (_case, reply, message) => {
 		stubFetch(project(), [{ thread_id: 't1', display_name: 'Release Coordinator', project_id: 'corsia', active: true }], (url, init) => {
-			if (url.startsWith('/api/agents/t1') && init?.method === 'DELETE') return { ok: false, status: 500, json: async () => ({}) };
+			if (url.startsWith('/api/agents/t1') && init?.method === 'DELETE') return reply();
 			return null;
 		});
 		const show = vi.spyOn(toasts, 'show');
@@ -173,7 +177,7 @@ describe('ProjectSettingsView', () => {
 		});
 		remove.click();
 
-		await vi.waitFor(() => expect(show).toHaveBeenCalledWith(expect.stringContaining('Try again'), 'error'));
+		await vi.waitFor(() => expect(show).toHaveBeenCalledWith(message, 'error'));
 		expect(host.textContent).toContain('Release Coordinator');
 	});
 
