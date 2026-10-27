@@ -238,7 +238,7 @@
 	{:else}
 		{#if offline}<div class="offline" role="status">Showing last known items. <Button variant="ghost" size="sm" onclick={load}>Try again</Button></div>{/if}
 		{#if rows.length === 0}
-			<p class="state">No connected apps yet. Connect one here, or ask CORSIA in chat to bring over the apps you use in Claude Code, Claude Desktop, Cursor, Codex, OpenClaw or Hermes Agent, for example: “Bring over my apps from Claude.”</p>
+			<p class="state">No connected apps. Connect one here, or ask CORSIA in chat to bring over the apps you use in Claude Code, Cursor or another tool.</p>
 		{:else}
 			<div class="rows">
 				{#each rows as row (row.id)}
@@ -300,8 +300,8 @@
 {#if removedManualStep}<AccountManualNotice account={removedManualStep} removed onDismiss={() => removedManualStep = null} />{/if}
 {#if whereRow}<WhereItWorks app={whereRow} approve={whereApprove} onClose={() => whereRow = null} onSaved={(row) => { if (whereApprove && !isAccount(row)) approved(row); else replace(row); whereRow = null; }} />{/if}
 {#if connectAppOpen}<ConnectAppFlow onClose={() => connectAppOpen = false} onConnected={(app) => { rows = [...rows, { ...app, kind: 'hosted_app' }]; }} onSignIn={(app) => { openId = app.id; signInAfterApprove = app.id; }} />{/if}
-{#if confirmingOut}<ConfirmDialog open title={`Sign out of ${accountName(confirmingOut)}?`} description="Agents will no longer be able to use this account, including in conversations already running. You can sign in again any time." confirmLabel="Sign out" onConfirm={() => signOut(confirmingOut!)} onCancel={() => confirmingOut = null} />{/if}
-{#if confirmingRemove}<ConfirmDialog open title={`Remove ${accountName(confirmingRemove)}?`} description={confirmingRemove.provider === 'mailhost' ? `Agents lose access to it. The app password still works until you delete it in your ${confirmingRemove.provider_display_name} account settings.` : confirmingRemove.provider === 'microsoft' ? 'Agents will no longer be able to use this account. CORSIA deletes its sign-in from this computer. Microsoft may still list CORSIA as allowed; remove it on Microsoft’s page.' : confirmingRemove.provider === 'google' ? 'Agents will no longer be able to use this account, including in conversations already running. This signs CORSIA out and revokes CORSIA’s access to this Google account.' : ''} confirmLabel="Remove" destructive onConfirm={() => remove(confirmingRemove!)} onCancel={() => confirmingRemove = null} />{/if}
+{#if confirmingOut}<ConfirmDialog open title={`Sign out of ${accountName(confirmingOut)}?`} description="Agents will no longer be able to use this account, including in chats already running. You can sign in again any time." confirmLabel="Sign out" onConfirm={() => signOut(confirmingOut!)} onCancel={() => confirmingOut = null} />{/if}
+{#if confirmingRemove}<ConfirmDialog open title={`Remove ${accountName(confirmingRemove)}?`} description={confirmingRemove.provider === 'mailhost' ? `Agents lose access to it. The app password still works until you delete it in your ${confirmingRemove.provider_display_name} account settings.` : confirmingRemove.provider === 'microsoft' ? 'Agents will no longer be able to use this account. CORSIA deletes its sign-in from this computer. Microsoft may still list CORSIA as allowed; remove it on Microsoft’s page.' : confirmingRemove.provider === 'google' ? 'Agents will no longer be able to use this account, including in chats already running. This signs CORSIA out and revokes CORSIA’s access to this Google account.' : ''} confirmLabel="Remove" destructive onConfirm={() => remove(confirmingRemove!)} onCancel={() => confirmingRemove = null} />{/if}
 
 <style>
 	.connected-apps { width: 100%; scroll-margin-top: var(--space-5); }
@@ -322,7 +322,7 @@
 	.row-action :global(.btn:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
 	.danger-text :global(.btn.ghost), .danger-text :global(.btn.ghost:hover:not(:disabled)) { color: var(--red-text); }
 	.key-detail { color: var(--text-secondary); font-size: var(--text-subhead); line-height: 1.5; margin: 0 0 var(--space-2); }
-	.error { color: var(--red); margin: 0 0 var(--space-2); font-size: var(--text-footnote); }
+	.error { color: var(--red-text); margin: 0 0 var(--space-2); font-size: var(--text-footnote); }
 	.copied { margin: 0 0 var(--space-2); color: var(--text-secondary); font-size: var(--text-subhead); line-height: var(--lh-normal); }
 	.impact { margin: 0 0 var(--space-2); color: var(--text-secondary); font-size: var(--text-subhead); line-height: var(--lh-normal); }
 	.capabilities { display: flex; gap: var(--space-2); margin: 0 0 var(--space-2); color: var(--text-secondary); font-size: var(--text-caption); line-height: var(--lh-normal); }
