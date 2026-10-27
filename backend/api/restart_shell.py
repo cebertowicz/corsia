@@ -168,7 +168,7 @@ def spawn_restart_lifecycle(
         process_env = dict(launch_env)
         process_env.pop("CORSIA_RESTART_CALLER_TOKEN", None)
         process = subprocess.Popen(
-            ["systemd-run", "--user", "--pipe", "--quiet", "--collect", "/usr/bin/python3", "-I", str(helper)],
+            ["systemd-run", "--user", "--pipe", "--quiet", "--collect", sys.executable, "-I", str(helper)],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=log_fh,

@@ -190,8 +190,8 @@ async def _spawn_self_restart_after_response(
             operation_id=operation_id,
             allow_hard_cap=True,
         )
-        process = _spawn_self_restart(
-            own_port, redeploy, operation_id, caller_token
+        process = await asyncio.to_thread(
+            _spawn_self_restart, own_port, redeploy, operation_id, caller_token
         )
     except BaseException:
         await abort_restart_control(

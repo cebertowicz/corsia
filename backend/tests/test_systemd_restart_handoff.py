@@ -36,7 +36,9 @@ def test_transient_owner_acknowledges_and_runs_without_token_in_arguments(tmp_pa
                                           caller_credential="private-token")
         assert process.wait(timeout=10) == 0
     assert "restart reached" in log.read_text()
-    assert "private-token" not in (tmp_path / "argv").read_text()
+    argv = (tmp_path / "argv").read_text()
+    assert sys.executable in argv
+    assert "private-token" not in argv
 
 
 def test_macos_ignores_the_systemd_marker(tmp_path, monkeypatch):

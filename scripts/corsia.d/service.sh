@@ -1,9 +1,4 @@
 # Launchd service — the one durable backend for this machine (#242).
-if [ "$(uname -s)" = Linux ]; then
-    source "$SCRIPT_DIR/corsia.d/systemd.sh"
-    return
-fi
-
 LAUNCH_AGENTS_DIR="${LAUNCH_AGENTS_DIR:-$HOME/Library/LaunchAgents}"
 SERVICE_PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 SERVICE_EXIT_TIMEOUT_SECONDS=120

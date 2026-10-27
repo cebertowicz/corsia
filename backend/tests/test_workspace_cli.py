@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import importlib
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -111,11 +112,13 @@ def test_cli_init_empty_prompt_accepts_the_default_workspace(
     runtime = paths.load_bootstrap(bootstrap)
     assert runtime.workspace.root == (fake_home / "corsia").resolve()
     assert prompts == ["     Folder (press Enter for ~/corsia, or type another): "]
-    assert capsys.readouterr().out.splitlines()[:3] == [
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[:2] == [
         "Where should your work live?",
         "     Your agents work freely inside this folder; anywhere else needs your approval.",
-        "     Documents, Desktop and Downloads aren't recommended (macOS TCC permission prompts).",
     ]
+    warning = "     Documents, Desktop and Downloads aren't recommended (macOS TCC permission prompts)."
+    assert (warning in lines) == (not sys.platform.startswith("linux"))
     assert not (fake_home / "Documents" / "corsia").exists()
 
 

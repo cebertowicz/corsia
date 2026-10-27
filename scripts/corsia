@@ -344,7 +344,11 @@ status() {
 }
 
 source "$SCRIPT_DIR/corsia.d/runtime.sh"
-source "$SCRIPT_DIR/corsia.d/service.sh"
+if [ "$(uname -s)" = Linux ]; then
+    source "$SCRIPT_DIR/corsia.d/systemd.sh"
+else
+    source "$SCRIPT_DIR/corsia.d/service.sh"
+fi
 source "$SCRIPT_DIR/corsia.d/delegate.sh"
 if is_app_mode; then
     app_mode_install_overrides
