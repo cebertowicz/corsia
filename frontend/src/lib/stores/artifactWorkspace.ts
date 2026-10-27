@@ -1,6 +1,6 @@
 import { writable, get } from 'svelte/store';
 import {
-	applyLoadSignal, applyOwnSave, applyRevisionCheck, closeTab, emptyWorkspace, newInstanceId, openTab,
+	applyLoadSignal, applyOwnSave, applyRevisionCheck, closeTab, consumeLanding, emptyWorkspace, newInstanceId, openTab,
 	resolveTabArtifact, restoreWorkspace, tabKey, type ArtifactTabStatus,
 	type OpenArtifactInput, openLegacyDiscussionTab, type OpenLegacyDiscussionInput,
 	openSubagentTab, type OpenSubagentInput, type RevisionCheck, type TabLoadSignal,
@@ -252,6 +252,11 @@ export function resolveArtifactTab(threadId: string, instanceId: string, artifac
 export function markTabSaved(threadId: string, instanceId: string, revision: string | null): void {
 	if (!revision) return;
 	mutate(threadId, (ws) => applyOwnSave(ws, instanceId, revision));
+}
+
+/** The viewer has landed (or found nothing to land on) for this tab's open. */
+export function consumeTabLanding(threadId: string, instanceId: string): void {
+	mutate(threadId, (ws) => consumeLanding(ws, instanceId));
 }
 
 export function markTabStatus(threadId: string, instanceId: string, status: ArtifactTabStatus): void {
