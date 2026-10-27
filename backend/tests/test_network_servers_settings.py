@@ -148,7 +148,8 @@ def test_lifecycle_reload_logs_failure_and_shows_retry(client, caplog):
     body = r.json()
     assert body["ok"] is False
     assert body["message"] == "Couldn’t refresh the model list. Try again."
-    assert "Server is offline" in caplog.text
+    assert body["ref"].startswith("local-")
+    assert f"reference={body['ref']}: Server is offline" in caplog.text
 
 
 def test_lifecycle_start_dispatches_to_provider_connector(client, monkeypatch):
@@ -190,14 +191,15 @@ def test_lifecycle_stop_dispatches_to_provider_connector(client, monkeypatch):
 def test_a_failed_stop_carries_a_reference_logged_with_it(client, caplog):
     with patch(
         "llm.providers.omlx.stop_server",
-        new=AsyncMock(return_value={"ok": False, "message": "Still running"}),
+        new=AsyncMock(return_value={"ok": False, "message": "Still running", "error": "SIGTERM failed: denied"}),
     ):
         r = client.post(
             f"/api/settings/network-servers/ns-test/lifecycle/stop?token={_TOKEN}"
         )
     body = r.json()
     assert body["ok"] is False and body["ref"].startswith("local-")
-    assert f"reference={body['ref']}" in caplog.text
+    assert "error" not in body
+    assert f"reference={body['ref']}: SIGTERM failed: denied" in caplog.text
 
 
 def test_lifecycle_unknown_provider_returns_clean_error(client, monkeypatch):

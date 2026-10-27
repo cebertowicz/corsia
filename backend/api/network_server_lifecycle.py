@@ -47,10 +47,12 @@ async def lifecycle_action(server_id: str, action: str):
                 "message": f"Discovered {result.get('discovered', 0)} model(s)",
                 **{k: v for k, v in result.items() if k != "ok"},
             }
-        log.warning("Model list refresh failed: %s", result.get("error"))
+        ref = new_reference("local")
+        log.warning("Model list refresh failed reference=%s: %s", ref, result.get("error"))
         return {
             "ok": False,
             "message": "Couldn’t refresh the model list. Try again.",
+            "ref": ref,
         }
 
     try:
@@ -74,9 +76,10 @@ async def lifecycle_action(server_id: str, action: str):
             await run_in_db(nd.update_server_status, server_id, status="offline")
         await run_in_db(_remember_managed_choice, server, action == "start")
     else:
-        # The reference ties the failure the person sees to this line.
+        # The reference ties the failure the person sees to this line, which carries its cause.
+        error = result.pop("error", None) or result.get("message")
         result = {**result, "ref": new_reference("local")}
-        log.warning("Local server %s failed reference=%s", action, result["ref"])
+        log.warning("Local server %s failed reference=%s: %s", action, result["ref"], error)
 
     return result
 

@@ -213,7 +213,8 @@
 			if (res.ok && data.ok !== false) {
 				actionMessage = data.message ?? success;
 			} else {
-				actionError = data.message ?? data.detail ?? failure;
+				const reference = typeof data.ref === 'string' && data.ref ? ` Reference: ${data.ref}` : '';
+				actionError = `${data.message ?? data.detail ?? failure}${reference}`;
 			}
 		} catch {
 			actionError = failure;

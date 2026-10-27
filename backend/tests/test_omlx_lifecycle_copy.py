@@ -1,4 +1,4 @@
-"""Lifecycle failures keep diagnostic exceptions in logs, not the response."""
+"""Lifecycle failures show plain copy and hand their cause to the route, which logs it with the reference."""
 
 import asyncio
 import signal
@@ -16,7 +16,8 @@ def test_spawn_failure_is_logged_and_has_plain_message(tmp_path, monkeypatch, ca
 
     monkeypatch.setattr(sup.subprocess, "Popen", fail)
     result = sup._spawn_process(["omlx"], tmp_path / "omlx.log")
-    assert result == {"ok": False, "message": "Couldn’t start the model server. Try again."}
+    assert result["message"] == "Couldn’t start the model server. Try again."
+    assert result["ok"] is False and "raw spawn problem" in result["error"]
     assert "raw spawn problem" in caplog.text
 
 
@@ -38,5 +39,6 @@ def test_stop_signal_failure_is_logged_and_has_plain_message(monkeypatch, caplog
     monkeypatch.setattr(sup, "SIGTERM_GRACE_S", 0)
     monkeypatch.setattr(sup.os, "kill", send_signal)
     result = asyncio.run(sup._stop_server({"server_id": "test"}))
-    assert result == {"ok": False, "message": "Couldn’t stop the model server. Try again."}
+    assert result["message"] == "Couldn’t stop the model server. Try again."
+    assert result["ok"] is False and "raw signal problem" in result["error"]
     assert "raw signal problem" in caplog.text

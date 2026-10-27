@@ -175,12 +175,9 @@ def _spawn_process(argv: list[str], log_path) -> subprocess.Popen | dict[str, An
             start_new_session=True,
             close_fds=True,
         )
-    except FileNotFoundError:
+    except Exception as exc:
         log.exception("Failed to spawn oMLX")
-        return {"ok": False, "message": "Couldn’t start the model server. Try again."}
-    except Exception:
-        log.exception("Failed to spawn oMLX")
-        return {"ok": False, "message": "Couldn’t start the model server. Try again."}
+        return {"ok": False, "message": "Couldn’t start the model server. Try again.", "error": str(exc)}
 
 
 def _failed_boot_result(
@@ -338,9 +335,9 @@ async def _stop_server(cfg: dict) -> dict[str, Any]:
     except ProcessLookupError:
         _clear_pid(sid)
         return {"ok": True, "already_stopped": True, "message": "Already stopped"}
-    except Exception:
+    except Exception as exc:
         log.exception("SIGTERM failed")
-        return {"ok": False, "message": "Couldn’t stop the model server. Try again."}
+        return {"ok": False, "message": "Couldn’t stop the model server. Try again.", "error": f"SIGTERM failed: {exc}"}
 
     exited = False
     deadline = time.monotonic() + SIGTERM_GRACE_S
@@ -361,9 +358,9 @@ async def _stop_server(cfg: dict) -> dict[str, Any]:
             await asyncio.sleep(0.2)
         except ProcessLookupError:
             exited = True
-        except Exception:
+        except Exception as exc:
             log.exception("SIGKILL failed")
-            return {"ok": False, "message": "Couldn’t stop the model server. Try again."}
+            return {"ok": False, "message": "Couldn’t stop the model server. Try again.", "error": f"SIGKILL failed: {exc}"}
         else:
             exited = _process_exited(pid)
 
