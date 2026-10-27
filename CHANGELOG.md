@@ -73,6 +73,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - When a plan isn't moving, its note names each wait that is overdue.
 - A replaced image now shows right away in a document that is open, and when it is reopened, even if it has comments.
 - When an agent hands you a page in the shared browser, such as an account choice or a phone prompt, it appears in your attention list and the agent carries on once you finish.
+- Right-clicking CORSIA or Conductor in the left rail now opens Agent settings, and Mark unread when it applies, instead of an empty menu.
 
 ## v0.4.0 — A self-starting Mac app, updates you control, a shared browser, connected apps, and steadier plans
 

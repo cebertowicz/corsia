@@ -123,7 +123,7 @@
 		const id = contextMenuThreadId;
 		closeContextMenu();
 		if (!id) return;
-		await onSelectThread(id);
+		await (id === conductorThreadId && onConductor ? onConductor() : onSelectThread(id));
 		threadSettingsOpen.set(true);
 	}
 
