@@ -40,7 +40,6 @@ def _reasons(stored):
 
 # --- admission: in view and first unread -------------------------------------
 
-
 def test_in_view_ranges_are_sorted_merged_and_keep_their_shown_counts(thread_rows):
     stored = _validate(thread_rows, {"in_view": [
         [20, 22, 3], [3, 5, 3], [6, 8, 2], [21, 25, 4],
@@ -49,22 +48,11 @@ def test_in_view_ranges_are_sorted_merged_and_keep_their_shown_counts(thread_row
     assert stored == {"in_view": [[3, 8, 5], [20, 25, 6]]}
 
 
-def test_a_long_raw_list_is_cut_to_the_newest_before_it_is_parsed(thread_rows):
-    from infra.reply_context import IN_VIEW_INPUT_CAP
-
-    # Ten stale ranges the cut removes, then as many fresh ones as the cap keeps.
-    raw = [[1, 1, 1]] * 10 + [[2, 2, 1]] * IN_VIEW_INPUT_CAP
+def test_ranges_and_drop_reasons_are_not_capped(thread_rows):
+    raw = [[seq, seq, 1] for seq in range(1, 40, 2)] + ["bad"] * 70
     stored = _validate(thread_rows, {"in_view": raw})
-    assert stored["in_view"] == [[2, 2, 1]]
-    assert stored["dropped"] == [{"field": "in_view", "reason": "over_cap", "count": 10}]
-
-
-def test_more_than_eight_ranges_keep_the_newest(thread_rows):
-    raw = [[seq, seq, 1] for seq in range(1, 21, 2)]  # ten separate rows
-    stored = _validate(thread_rows, {"in_view": raw})
-    assert [item[0] for item in stored["in_view"]] == [5, 7, 9, 11, 13, 15, 17, 19]
-    assert _reasons(stored) == [("in_view", "over_cap")]
-    assert stored["dropped"][0]["count"] == 2
+    assert [item[0] for item in stored["in_view"]] == list(range(1, 40, 2))
+    assert len(stored["dropped"]) == 70
 
 
 @pytest.mark.parametrize("bad", [
@@ -102,11 +90,50 @@ def test_one_bad_field_does_not_take_the_others_with_it(thread_rows):
     assert _reasons(stored) == [("in_view", "not_list")]
 
 
-def test_a_comments_key_from_a_client_is_ignored(thread_rows):
-    stored = _validate(thread_rows, {
-        "comments": [{"message_id": "m5", "quote": "q"}], "in_view": [[1, 2, 2]],
-    })
-    assert stored == {"in_view": [[1, 2, 2]]}
+def _comment(**changes):
+    return {"id": "key-1", "seq": 5, "from_off": 0, "to_off": 1,
+            "quote": "q", "anchor_prefix": "", "anchor_suffix": "", "note": "", **changes}
+
+
+@pytest.mark.parametrize("item,reason", [
+    (None, "not_object"),
+    (_comment(seq=0), "invalid_seq"), (_comment(seq=41), "invalid_seq"),
+    (_comment(seq=True), "invalid_seq"), (_comment(seq="5"), "invalid_seq"),
+    (_comment(from_off=-1), "invalid_offsets"), (_comment(to_off=0), "invalid_offsets"),
+    (_comment(from_off=True), "invalid_offsets"), (_comment(to_off="1"), "invalid_offsets"),
+    (_comment(id=""), "invalid_id"), (_comment(id=None), "invalid_id"),
+    ({key: value for key, value in _comment().items() if key != "id"}, "invalid_id"),
+    (_comment(quote=""), "empty_quote"), (_comment(quote=None), "invalid_string"),
+    (_comment(anchor_prefix=None), "invalid_string"),
+    (_comment(anchor_suffix=1), "invalid_string"), (_comment(note=None), "invalid_string"),
+])
+def test_bad_comments_are_individually_dropped(thread_rows, item, reason):
+    stored = _validate(thread_rows, {"comments": [item, _comment()]})
+    assert stored["dropped"] == [{"field": "comments", "reason": reason, "index": 0}]
+    assert {k: v for k, v in stored["comments"][0].items() if k != "cid"} == _comment()
+
+
+def test_comments_must_be_a_list(thread_rows):
+    assert _validate(thread_rows, {"comments": "bad"}) == {
+        "dropped": [{"field": "comments", "reason": "not_list"}],
+    }
+
+
+def test_comments_have_no_count_cap(thread_rows):
+    stored = _validate(thread_rows, {"comments": [_comment(id=str(i)) for i in range(100)]})
+    assert len(stored["comments"]) == 100
+    assert len({comment["cid"] for comment in stored["comments"]}) == 100
+
+
+def test_comments_receive_distinct_ids_on_distinct_admissions(thread_rows):
+    request = {KEY: {"comments": [_comment(), _comment(id="key-2")]}}
+    _admit(thread_rows, "human-a", request)
+    _admit(thread_rows, "human-b", request)
+    comments = _stored(thread_rows, "human-a")[KEY]["comments"]
+    comments += _stored(thread_rows, "human-b")[KEY]["comments"]
+    assert [comment["cid"] for comment in comments] == ["c1.1", "c1.2", "c2.1", "c2.2"]
+    assert _admit(thread_rows, "human-a", request).accepted.duplicate
+    assert _stored(thread_rows, "human-a")[KEY]["comments"] == comments[:2]
 
 
 def test_a_fault_in_one_field_is_recorded_and_the_rest_survives(thread_rows, monkeypatch):
@@ -158,11 +185,11 @@ def test_a_non_object_context_is_dropped_whole(thread_rows):
 # --- admission: stored once, retried, never forged ----------------------------
 
 
-def _admit(db, message_id, metadata=None, role="user"):
+def _admit(db, message_id, metadata=None, role="user", content="Do the second one"):
     from infra.thread_driver import admit_input
 
     return admit_input(
-        THREAD, role=role, content="Do the second one", intent="apply_now",
+        THREAD, role=role, content=content, intent="apply_now",
         message_id=message_id, turn_id=f"turn-{message_id}", boot_epoch="test",
         admitted_at=utc_now_iso(), metadata=metadata, materialize_passive_digest=False, db=db,
     )
@@ -209,6 +236,7 @@ def test_a_non_human_input_cannot_carry_reply_context(thread_rows, extra, role):
 
 def _meta(context):
     return {"reply_via_post_update": True, KEY: context}
+
 
 
 def test_envelope_text_for_in_view_and_first_unread():
@@ -279,6 +307,21 @@ def test_the_context_is_a_replayed_inbound_source_key_and_renders_from_it():
     )
 
 
+def test_stored_comments_reach_client_history_and_replay(thread_rows):
+    from api.thread_paging import page_messages
+    from history.messages import _INBOUND_SOURCE_KEYS
+    from core.message_history import frame_agent_envelope
+
+    _admit(thread_rows, "commented", {KEY: {"comments": [_comment(note="question")]}})
+    stored = _stored(thread_rows, "commented")
+    page, _, _ = page_messages(thread_rows, THREAD, None, None)
+    row = next(row for row in page if row["id"] == "commented")
+    assert row["metadata"][KEY] == stored[KEY]
+    inbound = {key: stored[key] for key in _INBOUND_SOURCE_KEYS if key in stored}
+    cid = stored[KEY]["comments"][0]["cid"]
+    assert f'{cid}. On #5: "q" | note: question' in frame_agent_envelope("hi", inbound)
+
+
 def test_a_stored_row_replays_the_same_envelope_from_its_json(thread_rows):
     from core.message_history import render_agent_envelope
 
@@ -345,6 +388,7 @@ async def _dispatch(monkeypatch, data):
         handle_cc_main_message_fn=ignore, handle_codex_main_message_fn=ignore,
     )
     return sends
+
 
 
 @pytest.mark.asyncio

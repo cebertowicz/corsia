@@ -60,16 +60,23 @@ def admit_input(
         from automation.self_restart import restart_holds_new_work
         from infra.passive_changes import materialize_pending_digest
         passive = materialize_pending_digest(connection, thread_id) if materialize_passive_digest else None
+        stamped = stamped_human_metadata(
+            connection, role, message_id, metadata,
+            viewing_document=viewing_document, thread_id=thread_id,
+        )
+        from infra.reply_context import EmptyCommentInput, has_comment_candidates
+
+        if (not content and not (metadata or {}).get("attachments")
+                and has_comment_candidates((metadata or {}).get("reply_context"))
+                and not (stamped or {}).get("reply_context", {}).get("comments")):
+            raise EmptyCommentInput("No valid comments")
         accepted = accept_thread_input(
             thread_id,
             role=role,
             content=content,
             intent=intent,
             message_id=message_id,
-            metadata=stamped_human_metadata(
-                connection, role, message_id, metadata,
-                viewing_document=viewing_document, thread_id=thread_id,
-            ),
+            metadata=stamped,
             delivery_options=delivery_options,
             continuation=continuation,
             created_at=admitted_at,

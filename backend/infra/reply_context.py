@@ -1,8 +1,8 @@
 """Admission rules for the reply context a human message carries.
 
 The client sends what the person was answering: the message ranges in view
-while they typed and the first message they had not read (comments arrive with
-the comment UI). Admission checks each item against the thread and stores the
+while they typed, the first message they had not read, and their comments.
+Admission checks each item against the thread and stores the
 result once as ``metadata.reply_context``; ``core.reply_context`` renders it. A
 bad item is dropped with a recorded reason and the message still sends:
 delivery never waits on reply context.
@@ -15,10 +15,14 @@ from typing import Any, TypeGuard
 
 logger = logging.getLogger(__name__)
 
-IN_VIEW_RANGE_CAP = 8
-# Raw client ranges parsed before merging; the newest are kept.
-IN_VIEW_INPUT_CAP = 64
-DROPPED_CAP = 20
+
+class EmptyCommentInput(ValueError):
+    """An empty input had no valid comments after admission validation."""
+
+
+def has_comment_candidates(raw: object) -> bool:
+    """Whether an input presents any comments for admission to validate."""
+    return isinstance(raw, dict) and isinstance(raw.get("comments"), list) and bool(raw["comments"])
 
 
 def _is_int(value: object) -> TypeGuard[int]:
@@ -62,11 +66,6 @@ def _in_view(raw: object, newest: int, dropped: list[dict]) -> list[list[int | N
     if not isinstance(raw, list):
         dropped.append(_dropped("in_view", "not_list"))
         return []
-    if len(raw) > IN_VIEW_INPUT_CAP:
-        dropped.append(_dropped(
-            "in_view", "over_cap", count=len(raw) - IN_VIEW_INPUT_CAP,
-        ))
-        raw = raw[-IN_VIEW_INPUT_CAP:]
     ranges = []
     for item in raw:
         parsed = _range(item, newest)
@@ -75,11 +74,6 @@ def _in_view(raw: object, newest: int, dropped: list[dict]) -> list[list[int | N
         else:
             ranges.append(parsed)
     merged = _merge(ranges)
-    if len(merged) > IN_VIEW_RANGE_CAP:
-        dropped.append(_dropped(
-            "in_view", "over_cap", count=len(merged) - IN_VIEW_RANGE_CAP,
-        ))
-        merged = merged[-IN_VIEW_RANGE_CAP:]
     return [list(item) for item in merged]
 
 
@@ -92,6 +86,39 @@ def _first_unread(raw: object, newest: int, dropped: list[dict]) -> dict | None:
         dropped.append(_dropped("first_unread", "invalid_seq"))
         return None
     return {"seq": seq, "truncated": raw.get("truncated") is True}
+
+
+def _comments(raw: object, newest: int, input_order: int, dropped: list[dict]) -> list[dict]:
+    if not isinstance(raw, list):
+        dropped.append(_dropped("comments", "not_list"))
+        return []
+    comments = []
+    for index, item in enumerate(raw):
+        reason = None
+        if not isinstance(item, dict):
+            reason = "not_object"
+        elif not _is_int(item.get("seq")) or not 1 <= item["seq"] <= newest:
+            reason = "invalid_seq"
+        elif (not _is_int(item.get("from_off")) or not _is_int(item.get("to_off"))
+              or not 0 <= item["from_off"] < item["to_off"]):
+            reason = "invalid_offsets"
+        elif not isinstance(item.get("id"), str) or not item["id"]:
+            reason = "invalid_id"
+        elif any(not isinstance(item.get(key), str) for key in (
+            "quote", "anchor_prefix", "anchor_suffix", "note",
+        )):
+            reason = "invalid_string"
+        elif not item["quote"]:
+            reason = "empty_quote"
+        if reason:
+            dropped.append(_dropped("comments", reason, index=index))
+            continue
+        # Admission holds the write transaction until input order is incremented.
+        cid = f"c{input_order}.{index + 1}"
+        comments.append({key: item[key] for key in (
+            "id", "seq", "from_off", "to_off", "quote", "anchor_prefix", "anchor_suffix", "note",
+        )} | {"cid": cid})
+    return comments
 
 
 def validate_reply_context(
@@ -122,6 +149,9 @@ def validate_reply_context(
         builders = (
             ("in_view", lambda value: _in_view(value, newest, dropped)),
             ("first_unread", lambda value: _first_unread(value, newest, dropped)),
+            ("comments", lambda value: _comments(value, newest, int(db.execute(
+                "SELECT next_input_order FROM threads WHERE id=?", (thread_id,),
+            ).fetchone()[0]), dropped)),
         )
         for field, build in builders:
             if raw.get(field) is None:
@@ -138,5 +168,5 @@ def validate_reply_context(
             if result:
                 stored[field] = result
     if dropped:
-        stored["dropped"] = dropped[:DROPPED_CAP]
+        stored["dropped"] = dropped
     return stored or None
