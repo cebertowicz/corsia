@@ -9,6 +9,10 @@ generator, and readers accept it through that module's `REFERENCE`. `next_step` 
   waits (a model, account or locality hold, or nothing) is the hold's own surface.
 * `failed`: anything else, including an error the person already answered with a
   new message (a later Turn exists, so the error is no longer the latest outcome).
+
+A provider-failure row (`llm_error`, `cc_error`) written before rows carried a
+`cause_kind` projects one from its stored `cause` through `llm.error_cause`, the
+one mapping, so a reader keys on `cause_kind` alone. Nothing is written back.
 """
 
 from __future__ import annotations
@@ -19,6 +23,9 @@ from loguru import logger
 
 from infra.failure_reference import new_error_reference
 from infra.focus_rows import ERROR_SYSTEM_TYPES
+from llm.error_cause import cause_kind
+
+_PROVIDER_FAILURE_TYPES = frozenset({"llm_error", "cc_error"})
 
 # The thread's latest Turn: one index seek, so a thread whose latest Turn did
 # not fail never reads its messages.
@@ -98,6 +105,8 @@ def apply_error_next_steps(db, thread_id: str, messages: list[dict]) -> None:
 
     for row in error_rows:
         metadata = row["metadata"]
+        if metadata.get("type") in _PROVIDER_FAILURE_TYPES and "cause_kind" not in metadata:
+            metadata["cause_kind"] = cause_kind(metadata.get("cause"))
         if metadata.get("recovered") is True:
             metadata["next_step"] = "recovered"
         elif str(row.get("id")) == held_id and queued:

@@ -210,6 +210,36 @@ def test_stored_error_has_no_next_step_and_projects_failed_without_a_queue():
         assert history[0]["metadata"]["next_step"] == "failed"
 
 
+def test_older_provider_failure_rows_project_cause_kind_from_their_stored_cause():
+    """Rows written before cause_kind read the shared mapping; nothing is stored."""
+    rows = {
+        "expired": ({"type": "cc_error", "cause": "sign_in_expired"}, "sign_in_expired"),
+        "limit": ({"type": "cc_error", "cause": "usageLimitExceeded"}, "usage_limit"),
+        "native": ({"type": "llm_error"}, "unknown"),
+        "kept": ({"type": "cc_error", "cause": "process_exited", "cause_kind": "sign_in_expired"},
+                 "sign_in_expired"),
+        "boundary": ({"type": "tool_boundary_violation"}, None),
+    }
+    with closing(_db()) as db:
+        for message_id, (metadata, _) in rows.items():
+            insert_message("t", "system", "boom", dict(metadata), msg_id=message_id, db=db)
+        history = [
+            {"id": message_id, "metadata": json.dumps(metadata)}
+            for message_id, (metadata, _) in rows.items()
+        ]
+
+        finish_display(db, "t", history, include_tool_results=True)
+
+        projected = {row["id"]: row["metadata"].get("cause_kind") for row in history}
+        assert projected == {message_id: kind for message_id, (_, kind) in rows.items()}
+        stored = [
+            json.loads(row["metadata"]) for row in db.execute(
+                "SELECT metadata FROM messages WHERE id IN ('expired','limit','native')",
+            )
+        ]
+        assert all("cause_kind" not in metadata for metadata in stored)
+
+
 def test_recovered_next_step_uses_the_real_recovery_stamp():
     from infra.error_recovery import stamp_at_turn_start
 
