@@ -16,7 +16,7 @@
 		scope="workspace"
 		scopeLabel="Workspace"
 		heading={false}
-		inheritanceHint="Every project and chat gets these. A project or chat skill with the same name replaces one."
+		inheritanceHint="Every project and chat gets these. A project or chat skill with the same name takes priority."
 		{onBrowseSkills}
 	/>
 </SettingsGroup>
@@ -27,7 +27,7 @@
 			projectId={project.id}
 			scopeLabel={`Project: ${project.name}`}
 			heading={false}
-			inheritanceHint="Chats in this project get these. A chat skill with the same name replaces one."
+			inheritanceHint="Chats in this project get these. A chat skill with the same name takes priority."
 			{onBrowseSkills}
 		/>
 	</SettingsGroup>

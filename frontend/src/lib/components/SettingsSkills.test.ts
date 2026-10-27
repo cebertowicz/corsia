@@ -69,6 +69,8 @@ describe('SettingsSkills', () => {
 			expect(host.textContent).toContain('deploy');
 		});
 		const text = host.textContent ?? '';
+		expect(text).toContain('Every project and chat gets these. A project or chat skill with the same name takes priority.');
+		expect(text).toContain('Chats in this project get these. A chat skill with the same name takes priority.');
 		expect(text.indexOf('All projects')).toBeLessThan(text.indexOf('Atlas'));
 		expect(host.querySelector('[data-settings-anchor="skills-atlas"]')).toBeTruthy();
 
