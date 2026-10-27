@@ -26,7 +26,6 @@
 	let busy = $state(false);
 	let agentsLoading = $state(false);
 	let agentsError = $state('');
-	let agentsLoadFailed = $state(false);
 	let agentRows = $state<AgentRow[]>([]);
 	let rootPickerOpen = $state(false);
 
@@ -72,7 +71,6 @@
 	async function loadAgents(t: string, id: string) {
 		agentsLoading = true;
 		agentsError = '';
-		agentsLoadFailed = false;
 		try {
 			const res = await fetch(`/api/agents?token=${encodeURIComponent(t)}&project_id=${encodeURIComponent(id)}`);
 			if (!res.ok) throw new Error(`agent list load failed (${res.status})`);
@@ -81,7 +79,6 @@
 		} catch (e) {
 			console.error(e);
 			agentsError = 'Couldn’t load this project’s agents.';
-			agentsLoadFailed = true;
 		} finally {
 			agentsLoading = false;
 		}
@@ -97,11 +94,11 @@
 		if (!t || !project) return;
 		try {
 			const res = await fetch(`/api/agents/${threadId}?token=${encodeURIComponent(t)}`, { method: 'DELETE' });
-			if (!res.ok) throw new Error(await plainResponseError(res, 'Could not remove that. Try again.'));
+			if (!res.ok) throw new Error(await plainResponseError(res, 'Couldn’t remove that. Try again.'));
 			await loadAgents(t, project.id);
 			toasts.show('Project Agent removed', 'success');
 		} catch (e) {
-			agentsError = e instanceof Error ? e.message : 'Could not remove project Agent';
+			toasts.show(e instanceof Error ? e.message : 'Couldn’t remove that. Try again.', 'error');
 		}
 	}
 
@@ -282,7 +279,7 @@
 			{:else if agentsError}
 				<p class="note failed" role="alert">
 					{agentsError}
-					{#if agentsLoadFailed}<Button size="sm" variant="ghost" onclick={retryAgents}>Retry</Button>{/if}
+					<Button size="sm" variant="ghost" onclick={retryAgents}>Retry</Button>
 				</p>
 			{:else}
 				{#each agentRows as agent (agent.thread_id)}

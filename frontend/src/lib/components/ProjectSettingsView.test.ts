@@ -4,6 +4,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 
 import ProjectSettingsView from './ProjectSettingsView.svelte';
 import { token } from '$lib/stores/auth';
+import { toasts } from '$lib/stores/toast';
 import { uiScope } from '$lib/stores/uiScope';
 import { openProjectSettings, resetSettingsNavigation, settingsNavigation } from '$lib/stores/settingsNavigation';
 
@@ -150,6 +151,30 @@ describe('ProjectSettingsView', () => {
 		await vi.waitFor(() => expect(host.textContent).toContain('Release Coordinator'));
 		expect(host.textContent).not.toContain('Couldn’t load this project’s agents.');
 		expect(agentCalls).toBe(2);
+	});
+
+	it('keeps the agent list after a failed remove so the person can try again', async () => {
+		stubFetch(project(), [{ thread_id: 't1', display_name: 'Release Coordinator', project_id: 'corsia', active: true }], (url, init) => {
+			if (url.startsWith('/api/agents/t1') && init?.method === 'DELETE') return { ok: false, status: 500, json: async () => ({}) };
+			return null;
+		});
+		const show = vi.spyOn(toasts, 'show');
+
+		component = mount(ProjectSettingsView, { target: host, props: { projectId: 'corsia' } });
+		await vi.waitFor(() => expect(host.textContent).toContain('Release Coordinator'));
+		host.querySelector('[data-settings-row="Release Coordinator"]')!.dispatchEvent(
+			new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 24, clientY: 24 }),
+		);
+		flushSync();
+		const remove = await vi.waitFor(() => {
+			const item = Array.from(document.body.querySelectorAll<HTMLElement>('[role="menuitem"]')).find((el) => el.textContent?.includes('Remove'));
+			expect(item).toBeTruthy();
+			return item!;
+		});
+		remove.click();
+
+		await vi.waitFor(() => expect(show).toHaveBeenCalledWith(expect.stringContaining('Try again'), 'error'));
+		expect(host.textContent).toContain('Release Coordinator');
 	});
 
 	it('opens Skills and Context at this project\'s level, remembering the page to come back to', async () => {
