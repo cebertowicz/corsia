@@ -39,7 +39,7 @@ from events.rule_outcomes import (  # noqa: F401 - re-exported: callers read the
     WAKE_CAP, WOKE, Delivery, Entry, Outcome, Rule, RuleEvent, RulePlan,
 )
 from events.rule_runs import OWNER_GONE, queue
-from infra.queries import thread_is_temporary
+from infra.queries import thread_gone_for_good, thread_is_temporary, thread_unavailable_reason
 from registry.retirement_predicate import identity_ended
 
 WAKE = "wake"
@@ -60,6 +60,8 @@ OUT_OF_PROJECT = "recipient outside the rule's project"
 LOOKUP_FAILED = "repository lookup failed"
 UNAVAILABLE = "recipient unavailable"
 WRITER_LEFT = "its writer left the rule's project; rule turned off"
+CREATOR_GONE = "creator gone"
+CREATOR_UNAVAILABLE = "creator unavailable"
 OWN_EMIT = "sent by this chat"
 
 WAKES_PER_HOUR = 1
@@ -183,7 +185,12 @@ def _settle_unreachable(
         thread = recipients[rule.id] if rule.action == DELIVER else rule.created_by
         row = threads.get(thread) if thread else None
         writer = threads.get(rule.created_by)
-        if writer is not None and writer["project_id"] != rule.scope.removeprefix(PROJECT_PREFIX):
+        if thread_gone_for_good(writer):
+            turn_off(db, rule.id, rule.scope, _iso(_now()))
+            plan.settled.append(Outcome(rule.id, rule.created_by, DEAD_LETTERED, reason=CREATOR_GONE))
+        elif thread_unavailable_reason(writer):
+            plan.settled.append(Outcome(rule.id, rule.created_by, HELD, reason=CREATOR_UNAVAILABLE))
+        elif writer["project_id"] != rule.scope.removeprefix(PROJECT_PREFIX):
             turn_off(db, rule.id, rule.scope, _iso(_now()))
             plan.settled.append(Outcome(rule.id, rule.created_by, DEAD_LETTERED,
                                         reason=WRITER_LEFT))
