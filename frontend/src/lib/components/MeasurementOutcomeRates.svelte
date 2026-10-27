@@ -19,7 +19,7 @@
 		if (asks.loading && !asks.rows.length) return `${lead} loading.`;
 		if (asks.error && !asks.rows.length) return `${lead} not available right now.`;
 		const value = asksView.current.value;
-		return `${lead} ${value === null ? '–' : value.toFixed(2)} asks per outcome, ${changeOnly(asksView)}.`;
+		return `${lead} ${value === null ? '–' : value.toFixed(2)} decisions and tasks per outcome, ${changeOnly(asksView)}.`;
 	});
 </script>
 

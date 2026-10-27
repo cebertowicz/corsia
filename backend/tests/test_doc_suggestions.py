@@ -92,7 +92,7 @@ async def test_create_validation_is_one_rule_set_across_adapters(integration_cli
     cases = [
         ({"review": True, "replacement": "x"}, shape),
         ({"parent_id": parent_id, "replacement": "x"}, shape),
-        ({"quote": "", "replacement": "x"}, "A suggestion needs quote: the exact current text to replace."),
+        ({"quote": "", "replacement": "x"}, "A suggestion needs quote: the exact current text. To insert after it, set insert_after."),
         ({"quote": QUOTE, "replacement": QUOTE}, "replacement is identical to quote, so there is nothing to suggest."),
     ]
     for fields, message in cases:

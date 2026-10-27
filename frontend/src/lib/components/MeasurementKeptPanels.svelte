@@ -34,14 +34,14 @@
 />
 <MeasurementPeriodSection
 	id="asks"
-	title="Asks per outcome"
+	title="Decisions and tasks for you per outcome"
 	state={asks}
 	onRetry={() => onRetry('asks')}
 	series="asks_per_outcome"
-	unitText="asks per outcome"
+	unitText="decisions and tasks per outcome"
 	headline={(value) => value.toFixed(2)}
-	chartTitle="Asks of you per accepted outcome"
-	axisTitle="Asks of you per accepted outcome"
+	chartTitle="Decisions and tasks for you per accepted outcome"
+	axisTitle="Decisions and tasks for you per accepted outcome"
 	caption="Decisions raised to you and tasks waiting on you, per accepted outcome; lower is better. n is accepted outcomes per week."
 	valueFormat={(value) => value.toFixed(2)}
 />

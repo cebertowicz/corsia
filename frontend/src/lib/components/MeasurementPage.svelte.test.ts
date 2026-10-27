@@ -54,11 +54,11 @@ describe('MeasurementPage headlines', () => {
 			const minutes = host.querySelector('#attention-title')?.closest('section');
 			expect(host.querySelector('#attention-title')?.textContent).toBe('Your minutes per outcome');
 			expect(minutes?.querySelector('.stat')?.textContent).toBe('1.8 minutes per outcome, Aug 31 to Sep 27, n 762, new vs Aug 3 to Aug 30 (n 0)');
-			expect(minutes?.querySelector('.asks')?.textContent).toBe('All agents together: 0.13 asks per outcome, new.');
+			expect(minutes?.querySelector('.asks')?.textContent).toBe('All agents together: 0.13 decisions and tasks per outcome, new.');
 			expect(minutes?.querySelector('svg')).not.toBeNull();
 			expect(host.querySelector('#first-try-title')?.closest('section')?.querySelector('.stat')?.textContent).toBe('78% first try, Aug 31 to Sep 27, n 762, new vs Aug 3 to Aug 30 (n 0)');
 			expect(host.querySelector('#asks-title')?.closest('.kept-panels')).not.toBeNull();
-			expect(host.querySelector('#asks-title')?.closest('section')?.querySelector('.stat')?.textContent).toBe('0.13 asks per outcome, Aug 31 to Sep 27, n 762, new vs Aug 3 to Aug 30 (n 0)');
+			expect(host.querySelector('#asks-title')?.closest('section')?.querySelector('.stat')?.textContent).toBe('0.13 decisions and tasks per outcome, Aug 31 to Sep 27, n 762, new vs Aug 3 to Aug 30 (n 0)');
 			expect(host.querySelector('.source-line')).toBeNull();
 			expect(host.querySelector('.attention-summary')).toBeNull();
 		expect(host.querySelector('#outcomes-title')?.closest('section')?.querySelector('svg .bar')).not.toBeNull();

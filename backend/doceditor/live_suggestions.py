@@ -12,22 +12,23 @@ from doceditor.live_tools import find_live
 
 def suggestion_text(live, operation: Operation):
     """Resolve immutable input at the lane start, refusing changed tracked quotes."""
-    from doceditor.comment_actions import CommentActionError, STALE_MESSAGE
+    from doceditor.comment_actions import CommentActionError, INSERT_STALE_MESSAGE, STALE_MESSAGE
     from doceditor.comment_batch_actions import _batch_text
     rows = [json.loads(value) for value in operation.suggestions]
     valid, skipped = [], []
     for row in rows:
         if row["id"] in live.ranges:
             if live.range_text(row["id"]) != row["anchor_text"]:
+                reason = INSERT_STALE_MESSAGE if row.get("insert_after") else STALE_MESSAGE
                 if operation.single_suggestion:
-                    raise CommentActionError("stale", STALE_MESSAGE)
-                skipped.append({"id": row["id"], "reason": STALE_MESSAGE})
+                    raise CommentActionError("stale", reason)
+                skipped.append({"id": row["id"], "reason": reason})
                 continue
             row["from_off"], row["to_off"] = live.ranges[row["id"]]
         valid.append(row)
     text, accepted, batch_skipped = _batch_text(valid, live.text)
     if operation.single_suggestion and not accepted:
-        raise CommentActionError("stale", STALE_MESSAGE)
+        raise CommentActionError("stale", INSERT_STALE_MESSAGE if rows[0].get("insert_after") else STALE_MESSAGE)
     return text, tuple(accepted), tuple(skipped + batch_skipped)
 
 

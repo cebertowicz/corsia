@@ -25,7 +25,7 @@ const BODY = {
 	],
 	improved: [
 		row('s', 'All work', 'scope', 'hours_per_hour', 'Work per hour of your attention', 'hours', 30, 92, 2.06, 1349, null, 'Keep doing what changed.'),
-		row('s2', 'All work', 'scope', 'asks_per_outcome', 'Asks per outcome', 'ratio', 0.38, 0.12, -0.69, 1377, null, 'Keep doing what changed.'),
+		row('s2', 'All work', 'scope', 'asks_per_outcome', 'Decisions and tasks for you per outcome', 'ratio', 0.38, 0.12, -0.69, 1377, null, 'Keep doing what changed.'),
 	],
 };
 

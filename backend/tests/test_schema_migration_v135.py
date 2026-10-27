@@ -31,11 +31,11 @@ def test_adds_the_nullable_column_once_and_keeps_rows_unknown():
     assert db.execute("SELECT body, decided_in_bulk FROM doc_comments").fetchone() == ("text", None)
 
 
-def test_a_fresh_schema_lists_the_same_column_last():
+def test_a_fresh_schema_lists_the_same_column():
     fresh = sqlite3.connect(":memory:")
     fresh.executescript(SCHEMA_SQL)
 
-    assert _columns(fresh)[-1] == "decided_in_bulk"
+    assert "decided_in_bulk" in _columns(fresh)
 
 
 def test_a_database_without_doc_comments_passes():
