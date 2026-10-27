@@ -16,6 +16,7 @@ from subagents.codex_runtime_state import (
 )
 
 log = logging.getLogger(__name__)
+_SAFE_BOUNDARY_TASKS: set[asyncio.Task] = set()
 
 _DELIVERY_GATED_PROVIDER_EVENTS = frozenset(
     {
@@ -113,14 +114,16 @@ async def _deliver_codex_event(
             finalize_live(thread_id, live)
 
 
-def _schedule_safe_boundary(thread_id: str) -> None:
-    """Leave the JSON-RPC reader free to receive the steer acknowledgement."""
+def schedule_safe_boundary(thread_id: str) -> None:
+    """Schedule delivery without blocking the caller or JSON-RPC reader."""
     from subagents.codex_inbox_batch import deliver_live_inbox_batch
 
     task = asyncio.create_task(
         deliver_live_inbox_batch(thread_id),
         name=f"codex-safe-boundary:{thread_id}",
     )
+    _SAFE_BOUNDARY_TASKS.add(task)
+    task.add_done_callback(_SAFE_BOUNDARY_TASKS.discard)
     task.add_done_callback(
         partial(
             _observe_deferred_event,
@@ -231,7 +234,7 @@ def runtime_event_handler(
         if event.get("kind") == "tool_result":
             if context_usage_frame is not None:
                 bcast(thread_id, context_usage_frame)
-            _schedule_safe_boundary(thread_id)
+            schedule_safe_boundary(thread_id)
 
     async def on_event(event: dict) -> None:
         kind = event.get("kind")

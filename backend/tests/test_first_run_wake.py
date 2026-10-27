@@ -439,7 +439,7 @@ class TestAppPath:
         assert facts["tool_attempts"] is None
         assert facts["bound_model"] is None
         assert facts["user_profile"] == {"name": "Pat " + "n" * 116, "full_name": None}
-        assert "the address you give me in chat" in wake
+        assert "ask you in chat for an email address not already used on GitHub" in wake
         assert not any(
             value in wake
             for value in (profile_email, "person+agents@gmail.com", str(tmp_path), "America/Los_Angeles")
