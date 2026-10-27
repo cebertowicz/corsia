@@ -26,7 +26,7 @@
     "backend/core/step_handler.py": 424,
     "backend/core/thread_lifecycle.py": 498,
     "backend/e2e_mock.py": 410,
-    "backend/host_access/processes.py": 1426,
+    "backend/host_access/processes.py": 1410,
     "backend/host_access/redaction.py": 968,
     "backend/host_access/supervisor.py": 1728,
     "backend/infra/host_access_leases.py": 1177,
