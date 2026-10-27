@@ -72,7 +72,7 @@ class MicrosoftConnectTool(Tool):
         return json.dumps({
             "url": url, "account_id": account_id,
             "next": "Give the person this link to open. CORSIA wakes you once, when they finish or when the "
-                    "link expires after ten minutes; then call microsoft_status.",
+                    f"link expires after {oauth.PENDING_SECONDS // 60} minutes; then call microsoft_status.",
         })
 
 

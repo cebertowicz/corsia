@@ -149,7 +149,7 @@ class GoogleConnectTool(Tool):
             "url": url, "account_id": signing_in,
             "next": (
                 "Give the person this link to open and sign in. CORSIA wakes you once, when they finish "
-                "or when the link expires after ten minutes; then call google_status."
+                f"or when the link expires after {oauth.PENDING_SECONDS // 60} minutes; then call google_status."
             ),
         })
 

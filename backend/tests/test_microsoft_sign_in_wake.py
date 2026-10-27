@@ -13,7 +13,9 @@ from connections.microsoft import account_store, oauth
 from connections.sign_in_notice import EXPIRED_MESSAGE, UNAVAILABLE_MESSAGE, notify_starting_agent, wake_on_connect
 from infra.database import get_db, write_transaction
 from infra.send_types import SendRejected
-from sign_in_wake_helpers import no_account_artifact, registry_rows, wakes
+from sign_in_wake_helpers import (
+    adopt, no_account_artifact, parked_reports, record_drives, refuse_sign_in_wakes, registry_rows, reports_for, wakes,
+)
 from tests.registry_helpers import make_session
 from tests.test_microsoft_sign_in import (  # noqa: F401  (the fixtures)
     CLIENT_ID, EVERYWHERE, PERSON, TENANT_A, _accounts, _connect, _finish, agent_adds, microsoft,
@@ -39,6 +41,11 @@ async def _agent_flow(thread_id: str, *, starting_thread_id: str | None = None, 
 
 def _state(url: str) -> str:
     return parse_qs(urlparse(url).query)["state"][0]
+
+
+@pytest.fixture(autouse=True)
+def drives(monkeypatch):
+    return record_drives(monkeypatch)
 
 
 async def test_an_agent_added_account_wakes_the_starting_thread_with_the_address(microsoft, isolated_db, agent_adds):
@@ -82,7 +89,8 @@ async def test_a_cancelled_sign_in_wakes_the_thread_with_the_cause(microsoft, is
     [wake] = wakes()
     assert (wake["thread_id"], wake["outcome"], wake["cause"]) == (thread_id, "failed", "consent_cancelled")
     assert wake["message"] == "Microsoft sign-in was cancelled. Call microsoft_connect for a new link."
-    assert wake["chip"] == "Microsoft sign-in didn't finish"
+    assert wake["chip"] == "Couldn’t finish Microsoft sign-in"
+    assert "Summary: Couldn’t finish Microsoft sign-in: " in wake["content"]
     assert "address" not in wake and _accounts() == []
 
 
@@ -162,6 +170,79 @@ async def test_a_sign_in_leaves_no_registry_row_behind(microsoft, isolated_db, a
 
     assert len(wakes()) == 2
     assert registry_rows() == before and no_account_artifact()
+
+
+async def test_a_connected_sign_in_drives_the_starting_thread_once_and_only_after_the_commit(
+    microsoft, isolated_db, agent_adds, drives,
+):
+    thread_id = _agent()
+    url, _ = await _agent_flow(thread_id)
+
+    assert (await _finish(url))[0] == 200
+
+    # The account row and the queued wake were both committed when the drive began.
+    assert drives == [{"thread": thread_id, "accounts": 1, "wakes": 1}]
+
+
+async def test_a_failed_sign_in_drives_the_starting_thread_once(microsoft, isolated_db, agent_adds, drives):
+    thread_id = _agent()
+    url, _ = await _agent_flow(thread_id)
+
+    assert (await _finish(url, error="access_denied", error_subcode="cancel"))[0] == 400
+
+    assert drives == [{"thread": thread_id, "accounts": 0, "wakes": 1}]
+
+
+async def test_an_expired_sign_in_drives_the_starting_thread_once(
+    microsoft, isolated_db, agent_adds, drives, monkeypatch,
+):
+    thread_id = _agent()
+    url, _ = await _agent_flow(thread_id)
+    state = _state(url)
+    pending = oauth._pending[state]
+    oauth._pending_expiries[state].cancel()
+    monkeypatch.setattr(oauth, "PENDING_SECONDS", 0)
+
+    await oauth._expire(pending)
+
+    assert drives == [{"thread": thread_id, "accounts": 0, "wakes": 1}]
+
+
+async def test_a_sign_in_with_no_starting_thread_drives_nothing(microsoft, isolated_db, drives):
+    ok, _ = await oauth.start_sign_in(CLIENT_ID, "work", TENANT_A, actor=PERSON, reach=EVERYWHERE)
+    refused, _ = await oauth.start_sign_in(CLIENT_ID, "work", TENANT_A, actor=PERSON, reach=EVERYWHERE)
+
+    assert (await _finish(ok))[0] == 200
+    assert (await _finish(refused, error="access_denied", error_subcode="cancel"))[0] == 400
+
+    assert drives == []
+
+
+async def test_a_wake_the_thread_refuses_is_reported_to_its_owner_and_that_owner_is_driven(
+    microsoft, isolated_db, agent_adds, monkeypatch, drives,
+):
+    owner, child = _agent(), _agent()
+    adopt(child, owner)
+    refuse_sign_in_wakes(monkeypatch)
+    url, _ = await _agent_flow(owner, starting_thread_id=child)
+
+    assert (await _finish(url))[0] == 200
+
+    assert [account["state"] for account in _accounts()] == ["connected"]
+    [report] = reports_for(owner)
+    assert report.startswith("wake-failed:sign-in:") and wakes() == []
+    # The refused thread has nothing queued to drive; its owner holds the report.
+    assert [call["thread"] for call in drives] == [owner]
+
+
+async def test_a_wake_the_thread_refuses_and_no_owner_takes_is_parked(microsoft, isolated_db, agent_adds):
+    url, _ = await _agent_flow(_agent(), starting_thread_id="no-such-thread")
+
+    assert (await _finish(url))[0] == 200
+
+    [parked] = parked_reports()
+    assert parked["thread_id"] == "no-such-thread" and parked["event"] == "account.sign_in_finished"
+    assert [account["state"] for account in _accounts()] == ["connected"]
 
 
 async def test_an_unfinished_sign_in_wakes_the_thread_when_it_expires(microsoft, isolated_db, agent_adds, monkeypatch):

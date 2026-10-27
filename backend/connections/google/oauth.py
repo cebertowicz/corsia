@@ -31,7 +31,7 @@ from connections.google.reach_replies import (  # noqa: F401  (re-exported: the 
     ALREADY_CONNECTED, ALREADY_NEEDS_SIGN_IN, CONNECTED_NOT_FOR_ALL, CONNECTED_NOT_FOR_PROJECT, STILL_CONNECTED,
     not_covered_reply,
 )
-from connections.sign_in_notice import notify_expired, notify_starting_agent, wake_on_connect
+from connections.sign_in_notice import drive_starting_agent, notify_expired, notify_starting_agent, wake_on_connect
 from infra import key_store
 from infra.db_async import run_in_db
 from infra.default_port import DEFAULT_BACKEND_PORT
@@ -346,6 +346,7 @@ async def complete_sign_in(code: object, state: object) -> str:
         if not set(REQUIRED_SCOPES) <= set(scopes):
             raise GoogleSignInError(MISSING_SCOPES, browser_message=BROWSER_MISSING_SCOPES)
         await run_in_db(_store, pending, refresh_token, email, scopes, provider_subject)
+        await drive_starting_agent(pending.starting_thread_id, pending.state)
         from events.connectors.mail_poller import schedule_account
 
         schedule_account(pending.account_id)

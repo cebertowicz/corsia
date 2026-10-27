@@ -31,7 +31,7 @@ from connections.microsoft.errors import (
     DIFFERENT_ACCOUNT, INPUT_REFUSAL, INTERNAL, SIGN_IN_BUSY, MicrosoftError, exchange_error_cause,
     message, redirect_codes_cause,
 )
-from connections.sign_in_notice import notify_expired, notify_starting_agent
+from connections.sign_in_notice import drive_starting_agent, notify_expired, notify_starting_agent
 from infra.database import get_db
 from infra.db_async import run_in_db
 from tools.mcp_oauth_listener import CallbackListener, allowed_hosts
@@ -361,6 +361,7 @@ async def _complete_sign_in(code: object, state: object) -> str:
         raise MicrosoftError(exchange_error_cause(None))
     identity = await client.identity(access, kind=pending.kind, tenant_id=pending.tenant_id)
     await run_in_db(account_store.store, pending, grant, identity)
+    await drive_starting_agent(pending.starting_thread_id, pending.state)
     from events.connectors.mail_poller import schedule_account
 
     schedule_account(pending.account_id)

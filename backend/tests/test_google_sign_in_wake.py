@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from urllib.parse import parse_qs, urlparse
 
@@ -15,7 +16,9 @@ from connections.sign_in_notice import EXPIRED_MESSAGE, UNAVAILABLE_MESSAGE, not
 from infra.database import get_db
 from infra.internal_principal import internal_request
 from infra.send_types import SendRejected
-from sign_in_wake_helpers import no_account_artifact, registry_rows, wakes
+from sign_in_wake_helpers import (
+    adopt, no_account_artifact, parked_reports, record_drives, refuse_sign_in_wakes, registry_rows, reports_for, wakes,
+)
 from tests.test_google_sign_in import (  # noqa: F401  (the fixtures)
     EMAIL, REFRESH, SECRET, _accounts, _connect, _http, _start, client_file, conductor, google,
 )
@@ -38,6 +41,11 @@ async def _start_with_target(google, client_file: str, adding: str, starting: st
     query = parse_qs(urlparse(url).query)
     google.challenge = query["code_challenge"][0]
     return query["state"][0]
+
+
+@pytest.fixture(autouse=True)
+def drives(monkeypatch):
+    return record_drives(monkeypatch)
 
 
 def _stop_timer(state: str) -> None:
@@ -97,7 +105,8 @@ async def test_a_refused_sign_in_wakes_the_thread_with_the_cause(google, conduct
     [wake] = wakes()
     assert (wake["thread_id"], wake["outcome"], wake["cause"]) == (conductor, "failed", "consent_cancelled")
     assert wake["message"] == oauth.DENIED and "address" not in wake
-    assert wake["chip"] == "Google sign-in didn't finish"
+    assert wake["chip"] == "Couldn’t finish Google sign-in"
+    assert "Summary: Couldn’t finish Google sign-in: " in wake["content"]
     assert _accounts() == []
 
 
@@ -221,6 +230,107 @@ async def test_an_unavailable_target_keeps_the_account_and_is_logged(google, con
     assert wakes() == []
 
 
+async def test_a_connected_sign_in_drives_the_starting_thread_once_and_only_after_the_commit(
+    google, conductor, client_file, drives,
+):
+    _, state = await _start(google, conductor, client_file)
+
+    assert (await _callback(state, code="auth-code"))[0] == 200
+
+    # The account row and the queued wake were both committed when the drive began.
+    assert drives == [{"thread": conductor, "accounts": 1, "wakes": 1}]
+
+
+async def test_a_failed_sign_in_drives_the_starting_thread_once(google, conductor, client_file, drives):
+    _, state = await _start(google, conductor, client_file)
+
+    assert (await _callback(state, error="access_denied"))[0] == 400
+
+    assert drives == [{"thread": conductor, "accounts": 0, "wakes": 1}]
+
+
+async def test_an_expired_sign_in_drives_the_starting_thread_once(google, conductor, client_file, drives, monkeypatch):
+    _, state = await _start(google, conductor, client_file)
+    pending = oauth._pending[state]
+    _stop_timer(state)
+    monkeypatch.setattr(oauth, "PENDING_SECONDS", 0)
+
+    await oauth._expire(pending)
+
+    assert drives == [{"thread": conductor, "accounts": 0, "wakes": 1}]
+
+
+async def test_a_sign_in_with_no_starting_thread_drives_nothing(google, conductor, client_file, drives):
+    url, _ = await oauth.start_sign_in(client_file, actor=("person", "person"), reach=EVERYWHERE)
+    query = parse_qs(urlparse(url).query)
+    google.challenge = query["code_challenge"][0]
+
+    assert (await _callback(query["state"][0], code="auth-code"))[0] == 200
+    assert (await _callback("forged", error="access_denied"))[0] == 400
+
+    assert drives == []
+
+
+async def test_a_fenced_thread_is_not_driven(google, conductor, client_file, drives, monkeypatch):
+    from connections.sign_in_notice import drive_starting_agent
+
+    _, state = await _start(google, conductor, client_file)
+    assert (await _callback(state, code="auth-code"))[0] == 200
+    drives.clear()
+    monkeypatch.setattr("infra.admission_fence.is_fenced", lambda thread_id: thread_id == conductor)
+
+    await drive_starting_agent(conductor, state)
+
+    assert drives == []
+
+
+async def test_a_drive_that_fails_changes_nothing_the_person_sees(google, conductor, client_file, monkeypatch, caplog):
+    async def failing(_thread_id):
+        raise RuntimeError("canary-drive")
+
+    monkeypatch.setattr("infra.thread_execution.drive_thread", failing)
+    _, state = await _start(google, conductor, client_file)
+
+    with caplog.at_level(logging.ERROR, logger="connections.sign_in_notice"):
+        status, page = await _callback(state, code="auth-code")
+
+    assert status == 200 and "Google is connected" in page and len(_accounts()) == 1
+    assert len(wakes()) == 1 and "driving thread" in caplog.text
+
+
+async def test_a_wake_the_thread_refuses_is_reported_to_its_owner_and_that_owner_is_driven(
+    google, conductor, client_file, monkeypatch, drives,
+):
+    from tests.registry_helpers import make_session
+
+    db = get_db()
+    try:
+        child = make_session(db, prefix="child")
+    finally:
+        db.close()
+    adopt(child, conductor)
+    refuse_sign_in_wakes(monkeypatch)
+    state = await _start_with_target(google, client_file, conductor, child)
+
+    status, _page = await _callback(state, code="auth-code")
+
+    assert status == 200 and [a["state"] for a in _accounts()] == ["connected"]
+    [report] = reports_for(conductor)
+    assert report.startswith("wake-failed:sign-in:") and wakes() == []
+    # The refused thread has nothing queued to drive; its owner holds the report.
+    assert [call["thread"] for call in drives] == [conductor]
+
+
+async def test_a_wake_the_thread_refuses_and_no_owner_takes_is_parked(google, conductor, client_file):
+    state = await _start_with_target(google, client_file, conductor, "no-such-thread")
+
+    assert (await _callback(state, code="auth-code"))[0] == 200
+
+    [parked] = parked_reports()
+    assert parked["thread_id"] == "no-such-thread" and parked["event"] == "account.sign_in_finished"
+    assert [a["state"] for a in _accounts()] == ["connected"]
+
+
 async def test_a_refused_send_keeps_the_account_and_is_logged(google, conductor, client_file, monkeypatch, caplog):
     def refused(*_args, **_kwargs):
         raise SendRejected(409, "held")
@@ -296,6 +406,16 @@ async def test_a_cancelled_callback_after_the_store_still_leaves_one_wake(google
     [account] = _accounts()
     [wake] = wakes()
     assert (wake["thread_id"], wake["outcome"], wake["account_id"]) == (conductor, "connected", account["id"])
+
+
+async def test_the_expiry_the_agent_is_told_follows_the_constant(google, conductor, client_file, monkeypatch):
+    from tools.google_account import GoogleConnectTool
+
+    monkeypatch.setattr(oauth, "PENDING_SECONDS", 1200)
+
+    out = await GoogleConnectTool().execute(_thread_id=conductor, client_file=client_file)
+
+    assert "expires after 20 minutes" in json.loads(out)["next"]
 
 
 def test_the_provider_unavailable_facts_are_the_same_on_every_provider():
