@@ -492,6 +492,10 @@ def test_the_connect_skill_holds_the_build_later_and_macos_permission_playbooks(
     assert "## A macOS permission only the person can grant" in skill
     assert "System Settings › Privacy & Security › Full Disk Access" in skill
     assert "every connected app CORSIA runs" in skill
+    setup = skill.split("## Setting one up", 1)[1].split("## ", 1)[0]
+    assert "never a list of steps for the person" in setup and "do each step yourself" in setup
+    assert "browser-person-steps.md" in setup and "any page that shows a key, token or code" in setup
+    assert "never into chat, a file or a command" in skill and "**Set key** in Settings › Connected apps" in skill
 
 
 def test_about_you_loads_the_look_up_reference_and_keeps_the_profile_rule():

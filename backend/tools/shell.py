@@ -481,37 +481,36 @@ class BashTool(Tool):
                     )
 
             result = "\n".join(output_parts) if output_parts else "(no output)"
-            registration_warning = None
+            registration_warning: str | None = None
+            told: list[str] = []
+            changed: list[dict] = []
             try:
-                artifact = await run_in_db(
+                await run_in_db(
                     observe_command_result,
                     thread_id,
                     "bash", {"command": command},
                     "\n".join(part for part in (stdout_text, stderr_text) if part),
-                    is_error=owned.returncode != 0, notify=False,
-                    origin=origin_from_tool_context(thread_id, kwargs, "command_trigger"),
+                    is_error=owned.returncode != 0, notify=False, told=told, changed=changed,
+                    origin=origin_from_tool_context(thread_id, kwargs, "observe_rule"),
                 )
-                if artifact is not None:
-                    notify_changed(artifact)
             except CommandArtifactRegistrationError as exc:
                 log.exception(
-                    "connector command artifact registration failed in %s",
-                    thread_id,
+                    "connector command artifact registration failed in %s", thread_id,
                 )
                 registration_warning = build_registration_warning(exc.artifact, exc.error)
             except Exception as exc:
                 log.exception(
-                    "connector command observation failed in %s",
-                    thread_id,
+                    "connector command observation failed in %s", thread_id,
                 )
                 registration_warning = build_registration_warning(None, exc)
+            finally:
+                for artifact in changed:
+                    notify_changed(artifact)
 
             ownership_notices = await collect_shell_shared_write_notices(
                 thread_id, project_id, command, shared_write_started_at_ns, canonical_cwd, runner=run_off_db,
             )
-            result = with_shell_warnings(
-                result, registration_warning, ownership_notices,
-            )
+            result = with_shell_warnings(result, registration_warning, ownership_notices, told)
 
             return result
 

@@ -41,8 +41,8 @@ def registration_warning(
             f"external_id='{artifact.external_id}'."
         )
     return (
-        "Warning: An external artifact was created, but CORSIA could not "
-        f"auto-register it to this thread: {error_summary}. {repair}"
+        "Warning: CORSIA couldn't register the file the command's output names "
+        f"to this chat: {error_summary}. {repair}"
     )
 
 
@@ -60,18 +60,21 @@ def with_shell_warnings(
     result: str,
     registration_warning: str | None,
     ownership_notices: list[str],
+    notes: list[str] | None = None,
 ) -> str:
-    """Append all post-command warnings while preserving their output budget."""
+    """Append all post-command warnings while preserving their output budget, then any notes.
+
+    Notes (observe-rule outcomes) are information, not warnings: they keep the normal budget."""
     warnings = [
         *([registration_warning] if registration_warning else []),
         *ownership_notices,
     ]
     if warnings:
-        return with_registration_warning(result, "\n\n".join(warnings))
-    if len(result) <= 10_000:
-        return result
-    truncated_chars = len(result) - 10_000
-    return result[:10_000] + f"\n... (truncated, {truncated_chars} more chars)"
+        result = with_registration_warning(result, "\n\n".join(warnings))
+    elif len(result) > 10_000:
+        truncated_chars = len(result) - 10_000
+        result = result[:10_000] + f"\n... (truncated, {truncated_chars} more chars)"
+    return "\n\n".join([result, *notes]) if notes else result
 
 
 def foreground_output_parts(

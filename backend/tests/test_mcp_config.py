@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from tools.mcp_config import MCPConfigError, allowed_names, http_options, read_bearer_file
+from tools.mcp_config import MCPConfigError, allowed_names, http_options, public_name, read_bearer_file
 
 
 @pytest.mark.parametrize("value", [None, "read_profile", [None], [""]])
@@ -19,6 +19,22 @@ def test_allowlist_alias_and_disagreement():
     assert allowed_names({"allowed_tools": []}) == set()
     with pytest.raises(MCPConfigError):
         allowed_names({"allowed_tools": [], "tool_allowlist": ["write_record"]})
+
+
+@pytest.mark.parametrize("server, expected", [
+    ("Home Assistant", "mcp_Home_Assistant_get_state"),
+    ("Bob's  Notes (work)", "mcp_Bob_s_Notes_work__get_state"),
+    ("GitHub", "mcp_GitHub_get_state"),
+    ("my-app_2", "mcp_my-app_2_get_state"),
+])
+def test_default_prefix_accepts_friendly_names_and_keeps_valid_ones(server, expected):
+    assert public_name(server, "get_state", {}) == expected
+
+
+def test_explicit_prefix_and_invalid_upstream_name_are_unchanged():
+    assert public_name("Home Assistant", "get_state", {"tool_prefix": "ha_"}) == "ha_get_state"
+    with pytest.raises(MCPConfigError, match="1–64 letters"):
+        public_name("Home Assistant", "get state", {})
 
 
 @pytest.mark.parametrize("value", ["", "token\nsecond", "token\rsecond", "token token", "x" * 8193])

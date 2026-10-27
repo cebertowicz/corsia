@@ -184,7 +184,7 @@ async def test_deleting_a_thread_removes_rules_it_wrote_or_received(stopped):
     assert _lineage() == {"root": None, "recipient": "root"}
     db = get_db()
     try:
-        assert db.execute("SELECT id FROM event_rules").fetchall() == []
+        assert db.execute("SELECT id FROM event_rules WHERE origin LIKE 'agent:%'").fetchall() == []
     finally:
         db.close()
 
