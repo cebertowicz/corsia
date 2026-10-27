@@ -111,6 +111,7 @@ describe('AppSignInPanel', () => {
 		['timed_out', "Sign-in wasn't finished within 5 minutes, or the tab was closed."],
 		['declined', "The sign-in was declined on Linear's page."],
 		['not_allowed', "Linear doesn't allow CORSIA to sign in."],
+		['not_approved', "Linear only lets in apps it has approved, and CORSIA isn't one of them."],
 		['permissions', "Linear can't give CORSIA the access it needs."],
 		['app_error', 'Linear had a problem with the sign-in.'],
 		['app_busy', 'Linear is busy.'],
@@ -118,14 +119,29 @@ describe('AppSignInPanel', () => {
 	])('names the %s failure in plain words', (failureClass, text) => {
 		mountPanel(linear({ sign_in: { status: 'failed', signed_in: false, failure_class: failureClass } }));
 		expect(host.textContent).toContain(text);
-		expect(button(failureClass === 'permissions' ? 'Sign in' : 'Try again')!.classList.contains('primary')).toBe(true);
+		const labels: Record<string, string | null> = { permissions: 'Sign in', not_approved: null, address_mismatch: 'Sign in' };
+		const label = failureClass in labels ? labels[failureClass] : 'Try again';
+		if (label) expect(button(label)!.classList.contains('primary')).toBe(true);
+		else expect(host.querySelectorAll('.actions .btn')).toHaveLength(0);
 	});
 
-	it('still offers Sign in after a failure another try would not fix, and starts a fresh sign-in', async () => {
+	it('tells the truth about each refusal: an admin can lift not_allowed, nobody can lift not_approved', () => {
+		mountPanel(linear({ sign_in: { status: 'failed', signed_in: false, failure_class: 'not_allowed' } }));
+		expect(host.textContent).toContain("allow CORSIA in Linear's settings.");
+		expect(host.textContent).not.toContain('Remove');
+	});
+
+	it('says Remove is the way out when the app only lets in apps it has approved', () => {
+		mountPanel(linear({ sign_in: { status: 'failed', signed_in: false, failure_class: 'not_approved' } }));
+		expect(host.textContent).toContain('Press Remove to take it off this list.');
+		expect(host.textContent).not.toContain('Ask whoever manages');
+	});
+
+	it('offers Sign in, not Try again, while the app has no client ID, and starts a fresh sign-in', async () => {
 		vi.stubGlobal('open', vi.fn(() => null));
 		const fetch = vi.fn(async () => reply({ authorization_url: LINK, expires_at: 't', reopened: false }));
 		vi.stubGlobal('fetch', fetch);
-		const { onChange } = mountPanel(linear({ sign_in: { status: 'failed', signed_in: false, failure_class: 'permissions' } }));
+		const { onChange } = mountPanel(linear({ sign_in: { status: 'failed', signed_in: false, failure_class: 'address_mismatch' } }));
 		expect(button('Try again')).toBeUndefined();
 		button('Sign in')!.click();
 		await vi.waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/api/mcp/servers/linear/sign-in'), { method: 'POST' }));
@@ -181,7 +197,7 @@ describe('ConnectedAppsSettings with sign-in', () => {
 		['open while the app is not signed in', false, 'true'],
 		['collapsed once the app is signed in', true, 'false'],
 	])('keeps a failed row %s', async (_name, signedIn, expanded) => {
-		const app = linear({ state: signedIn ? 'working' : 'needs_sign_in', sign_in: { status: 'failed', signed_in: signedIn, failure_class: 'permissions' } });
+		const app = linear({ state: signedIn ? 'working' : 'needs_sign_in', sign_in: { status: 'failed', signed_in: signedIn, failure_class: 'address_mismatch' } });
 		vi.stubGlobal('fetch', vi.fn(async () => reply({ servers: [app], sign_in_here: true })));
 		component = mount(ConnectedAppsSettings, { target: host });
 		await vi.waitFor(() => expect(host.textContent).toContain("Sign-in didn't finish"));

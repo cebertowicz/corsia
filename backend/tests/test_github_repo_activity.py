@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import subprocess
+import time
 from datetime import UTC, datetime
 
 import pytest
@@ -18,7 +20,7 @@ def _memory_state(monkeypatch):
     monkeypatch.setattr(poller, "_repo_state", lambda repo: stored.setdefault(repo, {}))
     monkeypatch.setattr(poller, "_save_state", lambda repo, state: stored.__setitem__(repo, state))
     monkeypatch.setattr(poller, "_status", {"state": "starting", "reason": None, "counted_reads": 0,
-                                            "backoff": False, "backoff_until": None, "degraded": None})
+                                            "degraded": None})
     monkeypatch.setattr(poller, "_locks", {})
     return stored
 
@@ -70,27 +72,43 @@ def test_304_is_not_counted():
 async def test_rolling_expired_reads_unblock_the_next_request(monkeypatch):
     now = datetime(2026, 1, 2, tzinfo=UTC)
     state, calls = {"reads": ["2025-12-31T00:00:00Z"] * poller.MAX_HOURLY_READS}, []
-    monkeypatch.setattr(poller.feed, "gh_get", lambda *_args: calls.append(True) or GhResponse(304, {}, None))
+    monkeypatch.setattr(poller.feed, "gh_get", lambda *_args, **_kw: calls.append(True) or GhResponse(304, {}, None))
     assert (await poller._get(lambda *_args: None, "x", state, now)).status == 304
     assert calls == [True] and state["reads"] == []
 
 
 @pytest.mark.asyncio
-async def test_low_remaining_stops_later_reads_and_holds_cursor(monkeypatch):
-    now = datetime(2026, 1, 2, tzinfo=UTC)
-    state, calls = {"reads": [], "issues_cursor": "held"}, []
-    monkeypatch.setattr(poller.feed, "gh_get", lambda *_args: calls.append(True) or GhResponse(200, {"x-ratelimit-remaining": "999"}, []))
-    assert (await poller._get(lambda *_args: None, "first", state, now)).status == 200
-    assert await poller._get(lambda *_args: None, "second", state, now) is None
-    assert calls == [True] and state["issues_cursor"] == "held"
-    assert poller.poller_status()["degraded"] == "rate_limited"
+async def test_every_read_is_low_priority(monkeypatch):
+    seen = []
+    monkeypatch.setattr(poller.feed, "gh_get", lambda *_a, **kw: seen.append(kw) or GhResponse(304, {}, None))
+    await poller._get(lambda *_a: None, "x", {"reads": []}, datetime(2026, 1, 2, tzinfo=UTC))
+    assert seen == [{"low_priority": True}]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("remaining,stopped", [(249, True), (250, False), (999, False)])
+async def test_reads_stay_out_of_the_shared_budget_reserve_and_hold_the_cursor(remaining, stopped):
+    """Through the real shared budget: only the 5% reserve (250 of 5,000) stops this low-priority poller."""
+    reset, calls = int(time.time()) + 1800, []
+
+    def runner(args, **_kw):
+        calls.append(args[-1])
+        head = f"HTTP/2.0 200 OK\r\nx-ratelimit-remaining: {remaining}\r\nx-ratelimit-reset: {reset}"
+        return subprocess.CompletedProcess(args, 0, f"{head}\r\n\r\n[]", "")
+
+    now, state = datetime(2026, 1, 2, tzinfo=UTC), {"reads": [], "issues_cursor": "held"}
+    assert (await poller._get(runner, "first", state, now)).status == 200  # the response teaches the budget
+    second = await poller._get(runner, "second", state, now)
+    assert (second is None) is stopped and calls == (["first"] if stopped else ["first", "second"])
+    assert state["issues_cursor"] == "held"
+    assert poller.poller_status()["degraded"] == ("rate_limited" if stopped else None)
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("error", [poller.feed.FeedError("rate_limited"), poller.feed.GhSignedOut()])
 async def test_failed_read_degrades_and_holds_cursor(monkeypatch, error):
     state = {"reads": [], "issues_cursor": "held"}
-    monkeypatch.setattr(poller.feed, "gh_get", lambda *_args: (_ for _ in ()).throw(error))
+    monkeypatch.setattr(poller.feed, "gh_get", lambda *_args, **_kw: (_ for _ in ()).throw(error))
     assert await poller._get(lambda *_args: None, "x", state, datetime(2026, 1, 2, tzinfo=UTC)) is None
     assert state == {"reads": [], "issues_cursor": "held"}
     assert poller.poller_status()["degraded"] == error.error_class
@@ -252,7 +270,7 @@ async def test_budget_stop_keeps_pending_heads(monkeypatch, complete_runs):
 
 def _recording_gh(monkeypatch, answers):
     sent = []
-    monkeypatch.setattr(poller.feed, "gh_get", lambda _runner, path, headers=None: sent.append((path, headers)) or answers.pop(0))
+    monkeypatch.setattr(poller.feed, "gh_get", lambda _runner, path, headers=None, **_kw: sent.append((path, headers)) or answers.pop(0))
     return sent
 
 

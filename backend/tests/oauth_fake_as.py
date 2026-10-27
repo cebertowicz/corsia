@@ -40,6 +40,8 @@ class FakeAS:
         self.refresh_mode = "ok"      # ok | rejected | malformed | down
         self.token_mode = "ok"        # ok | malformed
         self.revoke_mode = "ok"       # ok | fail | hang
+        self.register_status = 201    # the status the registration endpoint answers with
+        self.register_body: object = {"error": "invalid_client_metadata"}  # its error body: a dict is JSON, a str plain text
         self.redirect_resource_metadata = False
         self.account = "person@example.test"  # who the provider says signed in
         self.current_access = ""
@@ -82,6 +84,10 @@ class FakeAS:
     async def _register(self, request: Request):
         body = await request.json()
         self.registrations.append(body)
+        if self.register_status >= 400:
+            if isinstance(self.register_body, str):
+                return PlainTextResponse(self.register_body, self.register_status)
+            return JSONResponse(self.register_body, self.register_status)
         return JSONResponse({"client_id": "dcr-client-1", "client_secret": DCR_SECRET, "registration_access_token": DCR_REG_TOKEN}, 201)
 
     async def _userinfo(self, request: Request):
