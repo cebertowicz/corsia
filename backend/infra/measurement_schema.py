@@ -65,9 +65,9 @@ MEASUREMENT_INDEXES = (
 
 MEASUREMENT_INDEX_SQL = "".join(f"{sql};\n" for sql in MEASUREMENT_INDEXES)
 
-# Totals of admitted install usage summaries: the only thing intake keeps of an upload.
-# ``os`` and ``chip`` are '' when a summary left them out; ``install_weeks`` counts admitted
-# summaries, and no summary's own row is kept.
+# Totals of admitted install usage summaries, and the random delivery ids already counted:
+# the only things intake keeps of an upload. ``os`` and ``chip`` are '' when a summary left
+# them out; ``install_weeks`` counts admitted summaries, and no summary's own row is kept.
 USAGE_TOTALS_SCHEMA_SQL = """
     CREATE TABLE IF NOT EXISTS usage_install_totals (
         week TEXT NOT NULL,
@@ -76,5 +76,10 @@ USAGE_TOTALS_SCHEMA_SQL = """
         chip TEXT NOT NULL DEFAULT '',
         install_weeks INTEGER NOT NULL CHECK (install_weeks > 0),
         PRIMARY KEY (week, release_tag, os, chip)
+    ) WITHOUT ROWID;
+
+    CREATE TABLE IF NOT EXISTS usage_admitted_deliveries (
+        delivery_id TEXT PRIMARY KEY,
+        week TEXT NOT NULL
     ) WITHOUT ROWID;
 """

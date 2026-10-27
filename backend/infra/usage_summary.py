@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import platform
 import re
+import secrets
 import sqlite3
 from datetime import datetime, timezone
 from typing import Any
@@ -19,6 +20,7 @@ from infra.outcome_events import record_outcome_event
 
 _WEEK = re.compile(r"\d{4}-W(0[1-9]|[1-4]\d|5[0-3])\Z")
 _RELEASE = re.compile(r"\d{1,4}\.\d{1,4}\.\d{1,4}\Z")
+_DELIVERY_ID = re.compile(r"[0-9a-f]{32}\Z")
 _OS_BY_SYSTEM = {"Darwin": "macos", "Windows": "windows", "Linux": "linux"}
 _CHIP_BY_MACHINE = {"arm64": "arm64", "aarch64": "arm64", "x86_64": "x86_64", "amd64": "x86_64"}
 _ENUMS = {"os": OS_FAMILIES, "chip": CHIPS}
@@ -65,6 +67,8 @@ def validate_summary(summary: Any) -> dict[str, str]:
         raise SummaryError("week is not an ISO week such as 2026-W44")
     if not (isinstance(release, str) and (release == DEV_RELEASE or _RELEASE.fullmatch(release))):
         raise SummaryError("release is not a release tag or dev")
+    if not (isinstance(summary["delivery_id"], str) and _DELIVERY_ID.fullmatch(summary["delivery_id"])):
+        raise SummaryError("delivery_id is not 32 lowercase hex characters")
     for key in OPTIONAL_FIELDS:
         if key in summary and summary[key] not in _ENUMS[key]:
             raise SummaryError(f"{key} is not one of {', '.join(_ENUMS[key])}")
@@ -82,7 +86,12 @@ def record_install_week(
     """
     moment = now or datetime.now(timezone.utc)
     week = iso_week(moment)
-    summary = validate_summary({"week": week, "release": release_tag(version), **(platform_fields() if fields is None else fields)})
+    # Drawn once, here: the week's record is written once, so every rebuild of this week's summary
+    # carries the same id and a retried upload is recognised. Random, never derived from the install.
+    summary = validate_summary({
+        "week": week, "release": release_tag(version), "delivery_id": secrets.token_hex(16),
+        **(platform_fields() if fields is None else fields),
+    })
     with write_transaction(db, scope="record_install_week") as connection:
         result = record_outcome_event(
             connection, dedupe_key=f"{USAGE_EVENT}:{week}", event_name=USAGE_EVENT, source="corsia",

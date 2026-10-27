@@ -1,7 +1,9 @@
 """The closed field list of an install's weekly usage summary: the one definition.
 
 A summary says only that this install was active in an ISO week, on which release, OS
-family and chip family. Nothing identifies the install or a person. A new field family
+family and chip family, plus a random delivery id so a repeated delivery of the same body
+counts once. The id is drawn at random once per summary and never derived from the install,
+so it links nothing across weeks. Nothing identifies the install or a person. A new field family
 is added here by a reviewed change, never by an emitter; every reader and writer
 (local recording, the summary builder, intake) reads this one list.
 """
@@ -14,6 +16,7 @@ OS_FAMILIES = ("macos", "windows", "linux")
 CHIPS = ("arm64", "x86_64")
 DEV_RELEASE = "dev"
 # Required fields; the OS and chip are left out, not guessed, when this build is on neither list.
-REQUIRED_FIELDS = ("week", "release")
+REQUIRED_FIELDS = ("week", "release", "delivery_id")
 OPTIONAL_FIELDS = ("os", "chip")
+
 FIELDS = (*REQUIRED_FIELDS, *OPTIONAL_FIELDS)

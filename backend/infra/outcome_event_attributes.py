@@ -199,7 +199,7 @@ ATTRIBUTE_ALLOWLISTS: dict[str, dict[str, AttributeSpec]] = {
     },
     # This install's weekly usage summary (core/usage_fields.py): the closed field list, no identity.
     USAGE_EVENT: {
-        "week": id_attr(), "release": id_attr(),
+        "week": id_attr(), "release": id_attr(), "delivery_id": id_attr(),
         "os": enum_attr(*OS_FAMILIES), "chip": enum_attr(*CHIPS),
     },
     # Local correction classifications retain only versioned result metadata,
