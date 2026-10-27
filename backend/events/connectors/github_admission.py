@@ -33,9 +33,10 @@ import uuid
 from dataclasses import dataclass
 from typing import Any
 
+import infra.outcome_events as outcome_events
 from events.connectors import github_outcomes
 from events.connectors.github_outcome_input import PayloadRefusal
-from infra import outcome_events, webhook_delivery_log
+from infra import webhook_delivery_log
 from infra.outcome_event_input import OutcomeInputRefusal
 from infra.product_events import emit_product_event
 
@@ -310,6 +311,9 @@ async def _admission_unit(
         )
         if outcome is not None:
             return outcome
+        if event_type == "check_suite" and payload.get("action") == "completed":
+            from events.connectors.github_head_checks import observe_admitted_check_suite
+            observe_admitted_check_suite(payload)
         internal_event = _schedule(event_type, payload, delivery_id)
         if isinstance(internal_event, AdmissionOutcome):
             return internal_event

@@ -320,6 +320,16 @@ async def _pending_heads(runner: feed.GhRunner, repo: str, state: dict[str, Any]
     state["pending"] = sorted(pending)
 
 
+async def gated_read(runner: feed.GhRunner, repo: str, path: str) -> feed.GhResponse | None:
+    """Share the poller's persisted per-repository read budget."""
+    async with _lock(repo):
+        state = await run_in_db(_repo_state, repo)
+        try:
+            return await _get(runner, path, state, _now(), send_etag=False, keep_etag=False)
+        finally:
+            await run_in_db(_save_state, repo, state)
+
+
 async def _poll_repo(runner: feed.GhRunner, repo: str, now: datetime) -> bool:
     """Poll one fallback repo; a fresh webhook leaves every saved field unchanged."""
     delivered = await run_in_db(_last_delivery, repo)
