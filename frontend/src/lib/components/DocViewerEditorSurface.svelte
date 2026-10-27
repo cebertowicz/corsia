@@ -99,7 +99,7 @@
 	{:else if docState === 'error'}
 		<div class="load-error" role="alert">
 			<p>Couldn't open {documentName}.</p>
-			<Button size="sm" variant="ghost" onclick={onRetry}>Try again</Button>
+			<Button size="sm" variant="ghost" onclick={onRetry}>Retry</Button>
 		</div>
 	{:else}
 		<div class="ed-wrap">

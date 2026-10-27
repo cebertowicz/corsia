@@ -323,9 +323,9 @@ test.describe('@flow:image-viewer-zoom @surface:documents the canvas image viewe
 			// A file that is not a decodable image: a plain failure, with a way to try again, and the leaf still works.
 			await page.getByText(path.basename(broken)).first().click();
 			await expect(page.getByText("Couldn't load this image.")).toBeVisible();
-			await expect(page.getByRole('button', { name: 'Try again' })).toBeVisible();
+			await expect(page.getByRole('button', { name: 'Retry' })).toBeVisible();
 			await saveEvidenceScreenshot(page, testInfo, 'artifact-1440-broken', { fullPage: false });
-			await page.getByRole('button', { name: 'Try again' }).click();
+			await page.getByRole('button', { name: 'Retry' }).click();
 			await expect(page.getByText("Couldn't load this image.")).toBeVisible();
 		} finally {
 			fs.rmSync(good, { force: true });
