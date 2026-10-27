@@ -128,12 +128,10 @@
 		{/if}
 		<span class="h-scope">{$activeThread.title}</span>
 		{#if showLocalOnly}
-			<span class="h-local-slot">
-				<button class="h-local-only" onclick={openLocalOnlySettings} aria-label="Local only. Change in model settings." title="Local only. Change in model settings.">
-					<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="3"/><path d="M9 12h6M12 9v6"/></svg>
-					<span>Local only</span>
-				</button>
-			</span>
+			<button class="h-local-only" onclick={openLocalOnlySettings} aria-label="Local only. Change in model settings." title="Local only. Change in model settings.">
+				<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="3"/><path d="M9 12h6M12 9v6"/></svg>
+				<span>Local only</span>
+			</button>
 		{/if}
 	{:else}
 		<span class="h-scope">{scopeTitle}</span>
@@ -285,8 +283,7 @@
 	/* A long scoped title yields to the fixed header controls instead of pushing them away. */
 	.h-scope { min-width: 0; max-width: 24rem; overflow: hidden; text-overflow: ellipsis; }
 	/* The Local only badge: a status mark, not a pill (DESIGN-SYSTEM §0.1, §0.2): no fill or border at rest, teal icon, secondary label. */
-	.h-local-slot { display: inline-flex; flex: 0 0 auto; min-width: var(--header-badge-slot); }
-	.h-local-only { display: inline-flex; align-items: center; gap: var(--space-1); min-width: 0; padding: var(--space-1) var(--chip-inline-padding); border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-secondary); font: inherit; font-size: var(--text-footnote); font-weight: var(--fw-medium); cursor: pointer; animation: hLocalOnlyIn var(--dur-tight) var(--ease-snap); transition: background var(--dur-tight), color var(--dur-tight), opacity var(--dur-tight), transform var(--dur-tight); }
+	.h-local-only { display: inline-flex; flex: 0 0 auto; align-items: center; gap: var(--space-1); padding: var(--space-1) var(--chip-inline-padding); border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-secondary); font: inherit; font-size: var(--text-footnote); font-weight: var(--fw-medium); cursor: pointer; animation: hLocalOnlyIn var(--dur-tight) var(--ease-snap); transition: background var(--dur-tight), color var(--dur-tight), opacity var(--dur-tight), transform var(--dur-tight); }
 	.h-local-only:hover { background: var(--bg-hover); color: var(--text-primary); }
 	.h-local-only:active { transform: scale(.96); }
 	.h-local-only svg { flex: 0 0 auto; color: var(--teal); }
@@ -372,7 +369,6 @@
 		   the existing overflow:hidden + text-overflow:ellipsis on .h-scope fires. */
 		.h-title { justify-self: center; text-align: center; width: 100%; min-width: 0; }
 		/* At 393 the badge is its icon alone in a 44px hit area; the label stays for screen readers. */
-		.h-local-slot { min-width: var(--touch-target); }
 		.h-local-only { width: var(--touch-target); height: var(--touch-target); padding: 0; justify-content: center; }
 		.h-local-only:hover { background: transparent; color: var(--text-secondary); }
 		.h-local-only span { position: absolute; width: 0; height: 0; padding: 0; overflow: hidden; white-space: nowrap; }
