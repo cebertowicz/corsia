@@ -63,10 +63,10 @@ describe('MailHostDetail', () => {
 	});
 	it('names the product only for a known host: a typed-in host is sent to its host or IT', () => {
 		const known = render(account('Zoho', { problem: 'imap_off', manage_url: 'https://accounts.zoho.com/', product_name: 'Zoho Mail' }));
-		expect(known.querySelector('.impact')!.textContent).toBe('Zoho has email access for other apps turned off. Turn on IMAP in Zoho Mail settings, then press Try again.');
+		expect(known.querySelector('.impact')!.textContent).toBe('Zoho has email access for other apps turned off. Turn on IMAP in Zoho Mail settings, then press Retry.');
 		unmount(component!); component = null; host!.remove(); host = null;
 		const typed = render(account('off.test', { problem: 'imap_off' }));
-		expect(typed.querySelector('.impact')!.textContent).toBe('off.test has email access for other apps turned off. Turn on IMAP with your host or IT, then press Try again.');
+		expect(typed.querySelector('.impact')!.textContent).toBe('off.test has email access for other apps turned off. Turn on IMAP with your host or IT, then press Retry.');
 		expect(typed.textContent).not.toContain('Mail settings');
 	});
 	it('offers Replace key when the host refused the password', () => {

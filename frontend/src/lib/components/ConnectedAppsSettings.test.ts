@@ -399,7 +399,7 @@ describe('ConnectedAppsSettings', () => {
 		expect([...host.querySelector(`[data-connected-account-id="${expired.id}"]`)!.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.trim() === 'Sign in')?.className).toContain('primary');
 		open(failed.id);
 		expect(host.textContent).toContain('Sign-in didn’t finish');
-		expect(host.textContent).toContain('Microsoft had a problem with sign-in. Try again.');
+		expect(host.textContent).toContain('Microsoft had a problem with sign-in. Press Retry.');
 		const retry = [...host.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.trim() === 'Retry');
 		expect(retry?.className).toContain('primary');
 		expect(host.textContent).toContain('Where it works…');

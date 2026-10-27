@@ -48,7 +48,7 @@
 				: { line: "Couldn't connect: no response", recovery: `${app} didn't respond within 10 seconds. Try again; if it keeps happening, ${app} may be down.` };
 			case 'protocol_error': return { line: "Couldn't connect: not compatible", recovery: `${app} answered, but not in a way CORSIA understands. It may not be made for AI agents, or it may need an update. Check with its maker for an update.` };
 			case 'name_collision': return { line: "Couldn't connect: clashes with another app", recovery: `CORSIA can't tell this app apart from another connected app. Go back and choose a different name, then try again.` };
-			default: return { line: "Couldn't connect. Try again.", recovery: '' };
+			default: return { line: 'Couldn’t connect. Press Retry.', recovery: '' };
 		}
 	}
 
@@ -139,7 +139,7 @@
 			onConnected(created);
 			step = 'result';
 		} catch (cause) {
-			const failure = cause instanceof ConnectAppError ? connectFailure(cause.failureClass) : { line: "Couldn't connect. Try again.", recovery: '' };
+			const failure = cause instanceof ConnectAppError ? connectFailure(cause.failureClass) : { line: 'Couldn’t connect. Press Retry.', recovery: '' };
 			error = failure.line;
 			recovery = failure.recovery;
 		} finally {

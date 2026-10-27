@@ -49,15 +49,15 @@ export function retryLabel(failureClass: string | undefined): 'Retry' | 'Sign in
 export function failureText(name: string, failureClass: string): string {
 	switch (failureClass) {
 		case 'timed_out': return "Sign-in wasn't finished within 5 minutes, or the tab was closed.";
-		case 'declined': return `The sign-in was declined on ${name}'s page. If you didn't mean to, try again.`;
+		case 'declined': return `The sign-in was declined on ${name}'s page. If you didn’t mean to, press Retry.`;
 		case 'not_allowed': return `${name} doesn't allow CORSIA to sign in. Ask whoever manages ${name} for your team to allow CORSIA in ${name}'s settings.`;
 		case 'not_approved': return `${name} only lets in apps it has approved, and CORSIA isn't one of them. There's nothing to fix on your side. Press Remove to take it off this list.`;
 		case 'permissions': return `${name} can't give CORSIA the access it needs. There's nothing to fix on your side; ${name}'s maker may need to update it.`;
-		case 'app_error': return `${name} had a problem with the sign-in. Try again.`;
+		case 'app_error': return `${name} had a problem with the sign-in. Press Retry.`;
 		case 'app_busy': return `${name} is busy. Try again in a few minutes.`;
 		case 'address_mismatch':
 			return `${name} didn't recognize CORSIA, so it needs a client ID. Ask whoever looks after ${name} for one, or make one in ${name}'s settings, then give it to CORSIA in chat.`;
-		default: return `Sign-in didn't finish, and CORSIA doesn't know why. Try again. If it keeps happening, show what ${name} said to whoever manages ${name} for your team. If that's you, try again later or contact ${name}.`;
+		default: return `Sign-in didn’t finish, and CORSIA doesn’t know why. Press Retry. If it keeps happening, show what ${name} said to whoever manages ${name} for your team. If that's you, try again later or contact ${name}.`;
 	}
 }
 
