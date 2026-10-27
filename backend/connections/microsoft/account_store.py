@@ -11,6 +11,7 @@ from connections.microsoft.config import SCOPES
 from connections.microsoft.errors import (
     ACCOUNT_NOT_FOUND, ACCOUNT_REMOVED, ALREADY_CONNECTED, ALREADY_NEEDS_SIGN_IN, DIFFERENT_ACCOUNT, MicrosoftError,
 )
+from connections.sign_in_notice import wake_on_connect
 from infra import key_store
 from infra.database import get_db, write_transaction
 
@@ -90,3 +91,6 @@ def store(pending: _Pending, grant: dict[str, object], identity: client.Identity
             )
         store_credentials(pending.account_id, bundle, db=conn)
         record_audit(pending.account_id, "connect" if pending.adding else "sign_in", pending.actor, db=conn)
+        wake_on_connect(
+            conn, pending.adding_thread_id, pending.state, MICROSOFT_PROVIDER, pending.account_id, identity.address,
+        )

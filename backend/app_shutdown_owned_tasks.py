@@ -15,6 +15,7 @@ async def shutdown_owned_tasks(
 ):
     """Cancel and join exact background and finite startup tasks, and stop held vendor and app sign-ins."""
     from connections.account_controls import stop_all_signins
+    from connections.google.oauth import stop_all_signins as stop_google_signins
     from connections.microsoft.oauth import stop_all_signins as stop_microsoft_signins
     from jobs.corrections_realtime import shutdown as stop_corrections_classifier
     from llm.local_setup import flight_task
@@ -54,6 +55,8 @@ async def shutdown_owned_tasks(
     # A held vendor login must not outlive the backend: Codex's would keep its one callback port.
     exact_tasks.append(stop_all_signins())
     exact_labels.append("account sign-in")
+    exact_tasks.append(stop_google_signins())
+    exact_labels.append("Google account sign-in")
     exact_tasks.append(stop_microsoft_signins())
     exact_labels.append("Microsoft account sign-in")
     # Likewise a pending connected-app sign-in's loopback listener and its expiry timer.
