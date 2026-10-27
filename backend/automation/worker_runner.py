@@ -56,7 +56,8 @@ _SPAWN_FAILED = "refused: the start failed (delegation error)"
 _FAILED = "refused: the start failed"
 # "waited": the newest decision id queued while no slot was free. Process memory: it only
 # feeds the settle's product event, and a restart forgets it.
-_state: dict[str, Any] = {"lock": None, "task": None, "again": False, "open": False, "waited": 0}
+_state: dict[str, Any] = {"lock": None, "task": None, "again": False, "open": False, "waited": 0,
+                          "checked_holds": False}
 
 
 class _HeldLocal(Exception):
@@ -100,16 +101,20 @@ def poke_on_catalog_change() -> None:
     import infra.app_loop as app_loop
 
     async def _on_loop() -> None:
-        from infra.local_only import ready_local_selectors
-
-        if await run_in_db(ready_local_selectors):
-            await run_in_db(_release_local_holds)
+        await _release_holds_if_local_ready()
         poke(if_open=True)
 
     try:
         app_loop.submit(_on_loop())
     except app_loop.AppLoopUnavailable:
         pass  # no loop, no runner: the continuation sweep runs a pass after a start
+
+
+async def _release_holds_if_local_ready() -> None:
+    from infra.local_only import ready_local_selectors
+
+    if await run_in_db(ready_local_selectors):
+        await run_in_db(_release_local_holds)
 
 
 def _release_local_holds() -> None:
@@ -134,6 +139,10 @@ async def drive() -> int:
     from subagents.cc_runtime_state import _LIVE
 
     async with _lock():
+        if not _state["checked_holds"]:
+            # Holds outlive a restart, but the catalog change that frees them may not.
+            _state["checked_holds"] = True
+            await _release_holds_if_local_ready()
         for row in await run_in_db(_read, worker_starts.orphans):
             if row["worker_thread_id"] is None or _LIVE.get(row["worker_thread_id"]) is None:
                 await _end(row, json.loads(row["run_input"] or "{}"), NO_RESULT, _RESTARTED)

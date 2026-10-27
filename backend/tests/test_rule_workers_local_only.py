@@ -146,6 +146,24 @@ async def test_a_catalog_change_starts_a_held_start_on_the_ready_local_model(loc
     local_only.sent.assert_awaited_once()
 
 
+# (b2) a restart: the hold outlives the process, the catalog change that freed it does not.
+@pytest.mark.asyncio
+async def test_a_restart_starts_a_held_start_once_a_local_model_is_ready(local_only, monkeypatch):
+    from automation import worker_runner
+
+    rule = await make_rule()
+    await request()
+    await worker_runner.drive()
+    assert starts(rule)[0][:2] == ("queued", HELD)
+
+    local_only.ready["models"] = (LOCAL,)
+    monkeypatch.setitem(worker_runner._state, "checked_holds", False)  # a new process
+    assert await worker_runner.drive() == 1
+    [(outcome, reason, _identity, worker)] = starts(rule)
+    assert (outcome, reason) == ("started", None)
+    assert _workers() == [(worker, LOCAL)]
+
+
 def test_the_catalog_signal_reaches_the_runner(monkeypatch):
     from automation import worker_runner
     from infra.state import ws
