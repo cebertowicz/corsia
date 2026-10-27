@@ -2,7 +2,7 @@
 	import { onMount, tick } from 'svelte';
 	import { Button } from '$lib/components/ui';
 	import { projects, loadProjects } from '$lib/stores/projects';
-	import { requestAppKey, settingsAnchor, settingsNavigation } from '$lib/stores/settingsNavigation';
+	import { clearConnectedAppRequest, requestAppKey, settingsAnchor, settingsNavigation } from '$lib/stores/settingsNavigation';
 	import {
 		approveConnectedApp, connectedAppStateLine, declineConnectedApp, loadConnectedAppsRows, reconnectConnectedApp, removeAccount, removeConnectedApp,
 		runtimeDownloadFailureBody, signOutOfAccount, startAccountSignIn, type AccountSignOutResult, type ConnectedAccount, type ConnectedApp,
@@ -199,6 +199,7 @@
 		const id = $settingsNavigation.connectedAppId;
 		const linked = rows.find((row) => row.id === id);
 		if (loading || !id || !linked) return;
+		clearConnectedAppRequest();
 		openId = id;
 		clearLinkedFocus();
 		requestAnimationFrame(() => {
@@ -259,10 +260,10 @@
 									{#if manualStep?.id === row.id}<AccountManualNotice account={manualStep} />{/if}
 									{#if offline}<p class="offline-action-note" role="status">Actions are unavailable while offline.</p>{/if}
 									<div class="actions account-actions">
-										{#if microsoftCause(row, 'admin_approval_required')}<span class="account-action"><Button variant="primary" size="sm" disabled={offline || !adminApprovalMessage(row)} onclick={() => void copyAdminMessage(row)}>Copy message for IT</Button></span><span class="account-action" class:deep-link-focus={linkedRowId === row.id && !offline} data-chat-link-focus={linkedRowId === row.id && !offline || undefined} onfocusout={clearLinkedFocus}><Button variant="ghost" size="sm" disabled={offline} loading={actionId === row.id} onclick={() => { clearLinkedFocus(); void startSignIn(row); }}>Sign in</Button></span>{:else if accountNeedsSignIn(row)}<span class="account-action" class:deep-link-focus={linkedRowId === row.id && !offline} data-chat-link-focus={linkedRowId === row.id && !offline || undefined} onfocusout={clearLinkedFocus}><Button variant={microsoftCause(row, 'registration_misconfigured') ? 'ghost' : 'primary'} size="sm" disabled={offline} loading={actionId === row.id} onclick={() => { clearLinkedFocus(); void startSignIn(row); }}>{microsoftCause(row, 'provider_unavailable') ? 'Try again' : 'Sign in'}</Button></span>{/if}
-										<span class="account-action" class:deep-link-focus={linkedRowId === row.id && !accountNeedsSignIn(row) && !offline} data-chat-link-focus={linkedRowId === row.id && !accountNeedsSignIn(row) && !offline || undefined} onfocusout={clearLinkedFocus}><Button variant="ghost" size="sm" disabled={offline} onclick={() => { clearLinkedFocus(); whereApprove = false; whereRow = row; }}>Where it works…</Button></span>
-										{#if row.state === 'connected'}<span class="account-action"><Button variant="ghost" size="sm" disabled={offline} onclick={() => confirmingOut = row}>Sign out</Button></span>{/if}
-										<span class="danger-text account-action"><Button variant="ghost" size="sm" disabled={offline} loading={actionId === row.id} onclick={() => confirmingRemove = row}>Remove</Button></span>
+										{#if microsoftCause(row, 'admin_approval_required')}<span class="row-action"><Button variant="primary" size="sm" disabled={offline || !adminApprovalMessage(row)} onclick={() => void copyAdminMessage(row)}>Copy message for IT</Button></span><span class="row-action" class:deep-link-focus={linkedRowId === row.id && !offline} data-chat-link-focus={linkedRowId === row.id && !offline || undefined} onfocusout={clearLinkedFocus}><Button variant="ghost" size="sm" disabled={offline} loading={actionId === row.id} onclick={() => { clearLinkedFocus(); void startSignIn(row); }}>Sign in</Button></span>{:else if accountNeedsSignIn(row)}<span class="row-action" class:deep-link-focus={linkedRowId === row.id && !offline} data-chat-link-focus={linkedRowId === row.id && !offline || undefined} onfocusout={clearLinkedFocus}><Button variant={microsoftCause(row, 'registration_misconfigured') ? 'ghost' : 'primary'} size="sm" disabled={offline} loading={actionId === row.id} onclick={() => { clearLinkedFocus(); void startSignIn(row); }}>{microsoftCause(row, 'provider_unavailable') ? 'Try again' : 'Sign in'}</Button></span>{/if}
+										<span class="row-action" class:deep-link-focus={linkedRowId === row.id && !accountNeedsSignIn(row) && !offline} data-chat-link-focus={linkedRowId === row.id && !accountNeedsSignIn(row) && !offline || undefined} onfocusout={clearLinkedFocus}><Button variant="ghost" size="sm" disabled={offline} onclick={() => { clearLinkedFocus(); whereApprove = false; whereRow = row; }}>Where it works…</Button></span>
+										{#if row.state === 'connected'}<span class="row-action"><Button variant="ghost" size="sm" disabled={offline} onclick={() => confirmingOut = row}>Sign out</Button></span>{/if}
+										<span class="danger-text row-action"><Button variant="ghost" size="sm" disabled={offline} loading={actionId === row.id} onclick={() => confirmingRemove = row}>Remove</Button></span>
 									</div>
 									{#if copiedAdminMessageId === row.id}<p class="copied" role="status">Message copied</p>{/if}
 									{/if}
@@ -273,7 +274,7 @@
 						<div class="item" data-connected-app-id={row.id}>
 							<SettingsRow name={row.name} subTone={tone(row)} stackActions>
 								{#snippet sub()}{@render appSecondLine(row)}{#if row.notice}<span class="line">{row.notice}</span>{/if}{/snippet}
-								{#snippet actions()}<span class="account-action" class:deep-link-focus={linkedRowId === row.id} data-chat-link-focus={linkedRowId === row.id || undefined} onfocusout={clearLinkedFocus}>{#if needsPlace(row)}<Button variant="primary" size="sm" onclick={() => { clearLinkedFocus(); whereApprove = true; whereRow = row; }}>Choose where it works…</Button>{:else}<Button variant="primary" size="sm" loading={isBusy(row.id, 'approve')} disabled={isBusy(row.id, 'decline')} onclick={() => { clearLinkedFocus(); void runApp(row, 'approve'); }}>Approve</Button>{/if}</span><Button variant="ghost" size="sm" loading={isBusy(row.id, 'decline')} disabled={isBusy(row.id, 'approve')} onclick={() => runApp(row, 'decline')}>Decline</Button>{/snippet}
+								{#snippet actions()}<span class="row-action" class:deep-link-focus={linkedRowId === row.id} data-chat-link-focus={linkedRowId === row.id || undefined} onfocusout={clearLinkedFocus}>{#if needsPlace(row)}<Button variant="primary" size="sm" onclick={() => { clearLinkedFocus(); whereApprove = true; whereRow = row; }}>Choose where it works…</Button>{:else}<Button variant="primary" size="sm" loading={isBusy(row.id, 'approve')} disabled={isBusy(row.id, 'decline')} onclick={() => { clearLinkedFocus(); void runApp(row, 'approve'); }}>Approve</Button>{/if}</span><Button variant="ghost" size="sm" loading={isBusy(row.id, 'decline')} disabled={isBusy(row.id, 'approve')} onclick={() => runApp(row, 'decline')}>Decline</Button>{/snippet}
 							</SettingsRow>
 							{#if errorId === row.id && actionError && !rowBusy(row.id)}<p class="error" role="alert">{actionError}</p>{/if}
 							{#if hasSignInToShow(row)}<div class="details"><AppSignInPanel app={row} {signInHere} confirmOut={confirmingAppOut === row.id} onConfirmOut={(on) => confirmingAppOut = on ? row.id : null} onChange={(patch) => replaceApp({ ...row, ...patch })} onRefresh={refresh} onSignedOut={() => signedOut = new Set(signedOut).add(row.id)} /></div>{/if}
@@ -318,7 +319,7 @@
 	.line { display: block; }
 	.details { padding: var(--space-1) var(--space-2) var(--space-3); }
 	.actions { display: flex; flex-wrap: wrap; gap: var(--space-1); margin-left: calc(-1 * var(--button-pad-x-sm)); }
-	.account-action :global(.btn:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+	.row-action :global(.btn:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
 	.danger-text :global(.btn.ghost), .danger-text :global(.btn.ghost:hover:not(:disabled)) { color: var(--red-text); }
 	.key-detail { color: var(--text-secondary); font-size: var(--text-subhead); line-height: 1.5; margin: 0 0 var(--space-2); }
 	.error { color: var(--red); margin: 0 0 var(--space-2); font-size: var(--text-footnote); }
@@ -327,9 +328,9 @@
 	.capabilities { display: flex; gap: var(--space-2); margin: 0 0 var(--space-2); color: var(--text-secondary); font-size: var(--text-caption); line-height: var(--lh-normal); }
 	.capability-label { color: var(--text-tertiary); }
 	.account-open-name { min-width: 0; font-size: var(--text-subhead); color: var(--text-primary); overflow-wrap: anywhere; }
-	.account-action { position: relative; display: inline-flex; }
+	.row-action { position: relative; display: inline-flex; }
 	/* A chat link moves focus here after opening the account, so retain a visible arrival mark even without keyboard modality. */
-	.account-action.deep-link-focus :global(.btn) { outline: medium solid var(--accent); outline-offset: var(--space-1); }
-	.account-action::after { content: ''; position: absolute; inset: calc(-1 * var(--space-2)); }
-	.account-action :global(button) { position: relative; z-index: 1; }
+	.row-action.deep-link-focus :global(.btn) { outline: medium solid var(--accent); outline-offset: var(--space-1); }
+	.row-action::after { content: ''; position: absolute; inset: calc(-1 * var(--space-2)); }
+	.row-action :global(button) { position: relative; z-index: 1; }
 </style>
