@@ -128,6 +128,8 @@ def _pr_draft(
 
 def _pr_drafts(payload: dict[str, Any], repo: str) -> list[OutcomeDraft]:
     action = payload.get("action")
+    if action in ("ready_for_review", "converted_to_draft"):
+        return _sibling("github_lifecycle_outcomes", "pr_drafts")(payload, repo)
     pr = shape.mapping(shape.required(payload, "pull_request"))
     number = shape.number(shape.required(pr, "number"))
     subject = pr_subject(repo, number)
@@ -299,6 +301,7 @@ def label_attributes(labels: list[dict[str, Any]]) -> dict[str, Any]:
         attrs["lane_count"] = len(lanes)
     return attrs
 
+
 def label_drafts(event_type: str, payload: dict[str, Any], repo: str) -> list[OutcomeDraft]:
     """The drafts one ``labeled``, ``unlabeled`` or issue ``reopened`` delivery carries.
 
@@ -331,22 +334,6 @@ def label_drafts(event_type: str, payload: dict[str, Any], repo: str) -> list[Ou
         attrs["actor"] = facts["actor"]
     return [OutcomeDraft(f"{subject}:{change.type}:{label or ''}:{at}", f"github.{change.type}", at, subject, attrs)]
 
-def _issue_drafts(payload: dict[str, Any], repo: str) -> list[OutcomeDraft]:
-    action = payload.get("action")
-    issue = shape.mapping(shape.required(payload, "issue"))
-    number = shape.number(shape.required(issue, "number"))
-    subject = f"github:issue:{repo}#{number}"
-    attrs = {"repo": repo, "issue": str(number)}
-    if "labels" in issue:
-        attrs.update(label_attributes(issue["labels"]))
-    if action == "opened":
-        opened = shape.timestamp(shape.required(issue, "created_at"))
-        return [OutcomeDraft(f"{subject}:opened", "github.issue.opened", opened, subject, attrs)]
-    if issue.get("state_reason") is not None:
-        attrs["state_reason"] = shape.text(issue["state_reason"])
-    closed = shape.timestamp(shape.required(issue, "closed_at"))
-    return [OutcomeDraft(f"{subject}:closed:{closed}", "github.issue.closed", closed, subject, attrs)]
-
 
 def _sibling(module: str, name: str) -> Callable[[dict[str, Any], str], list[OutcomeDraft]]:
     """A mapper in a sibling module, imported on first call: those modules import this one."""
@@ -354,10 +341,11 @@ def _sibling(module: str, name: str) -> Callable[[dict[str, Any], str], list[Out
         return getattr(import_module(f"events.connectors.{module}"), name)(payload, repo)
     return mapper
 
+
 # The public entry owns supported-action selection; private mappers consume it.
 _MAPPERS = {
     "pull_request": (("opened", "synchronize", "reopened", "closed", "edited", "ready_for_review", "converted_to_draft"),
-                     _sibling("github_lifecycle_outcomes", "pr_drafts")),
+                     _pr_drafts),
     "check_suite": (("completed",), _check_suite_drafts),
     "workflow_run": (("completed",), _workflow_run_drafts),
     "workflow_job": (("completed",), _sibling("github_ci_outcomes", "workflow_job_drafts")),
@@ -371,6 +359,7 @@ _MAPPERS = {
 }
 # The one declaration of the label changes and issue reopens that ``label_drafts`` maps.
 _LABEL_ACTIONS = {"pull_request": ("labeled", "unlabeled"), "issues": ("reopened", "labeled", "unlabeled")}
+
 
 def map_github_outcomes(event_type: str, payload: dict[str, Any]) -> list[OutcomeDraft]:
     """Return the outcome drafts one delivery carries; ``[]`` for anything unmapped.

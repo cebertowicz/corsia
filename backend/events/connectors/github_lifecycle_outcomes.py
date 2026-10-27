@@ -5,13 +5,12 @@ from typing import Any
 
 from events.connectors import github_outcome_input as shape
 from events.connectors import github_outcome_measurements as measurements
-from events.connectors.github_outcomes import OutcomeDraft, _issue_drafts, _pr_drafts, pr_subject
+from events.connectors.github_outcomes import OutcomeDraft, label_attributes, pr_subject
 
 
 def pr_drafts(payload: dict[str, Any], repo: str) -> list[OutcomeDraft]:
     action = payload["action"]
-    if action not in ("ready_for_review", "converted_to_draft"):
-        return _pr_drafts(payload, repo)
+    # Dispatch admits only the two lifecycle actions here.
     pr = shape.mapping(shape.required(payload, "pull_request"))
     number = shape.number(shape.required(pr, "number"))
     at = shape.timestamp(shape.required(pr, "updated_at"))
@@ -26,15 +25,26 @@ def pr_drafts(payload: dict[str, Any], repo: str) -> list[OutcomeDraft]:
 
 
 def issue_drafts(payload: dict[str, Any], repo: str) -> list[OutcomeDraft]:
-    if payload["action"] != "assigned":
-        return _issue_drafts(payload, repo)
+    action = payload.get("action")
     issue = shape.mapping(shape.required(payload, "issue"))
     number = shape.number(shape.required(issue, "number"))
+    if action != "assigned":
+        subject = f"github:issue:{repo}#{number}"
+        attrs: dict[str, Any] = {"repo": repo, "issue": str(number)}
+        if "labels" in issue:
+            attrs.update(label_attributes(issue["labels"]))
+        if action == "opened":
+            opened = shape.timestamp(shape.required(issue, "created_at"))
+            return [OutcomeDraft(f"{subject}:opened", "github.issue.opened", opened, subject, attrs)]
+        if issue.get("state_reason") is not None:
+            attrs["state_reason"] = shape.text(issue["state_reason"])
+        closed = shape.timestamp(shape.required(issue, "closed_at"))
+        return [OutcomeDraft(f"{subject}:closed:{closed}", "github.issue.closed", closed, subject, attrs)]
     at = shape.timestamp(shape.required(issue, "updated_at"))
     assignee = shape.mapping(shape.required(payload, "assignee"))
     login = shape.text(shape.required(assignee, "login"))
     subject = f"github:issue:{repo}#{number}"
-    attrs: dict[str, Any] = {"repo": repo, "issue": str(number), "assignee_login": login}
+    attrs = {"repo": repo, "issue": str(number), "assignee_login": login}
     minutes = measurements.minutes_between(issue.get("created_at"), at)
     if minutes is not None:
         attrs["minutes_since_issue_created"] = minutes
