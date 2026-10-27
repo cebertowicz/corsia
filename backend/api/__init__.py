@@ -23,6 +23,7 @@ from api.files import router as files_router
 from api.files_revision import router as files_revision_router
 from api.doc_comments import router as doc_comments_router
 from api.doc_comment_thread_views import router as doc_comment_thread_views_router
+from api.chat_comment_views import router as chat_comment_views_router
 from api.provider_sources import router as provider_sources_router
 from api.provider_local_models import router as provider_local_models_router
 from api.provider_cli_link import router as provider_cli_link_router
@@ -71,6 +72,7 @@ __all__ = [
     "files_revision_router",
     "doc_comments_router",
     "doc_comment_thread_views_router",
+    "chat_comment_views_router",
     "provider_sources_router",
     "provider_local_models_router",
     "provider_cli_link_router",

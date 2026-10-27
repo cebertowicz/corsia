@@ -52,6 +52,7 @@ from api import (
     files_revision_router,
     doc_comments_router,
     doc_comment_thread_views_router,
+    chat_comment_views_router,
     cc_attach_router,
     conductor_router,
     corsia_agent_router,
@@ -138,6 +139,7 @@ app.include_router(files_router)
 app.include_router(files_revision_router)
 app.include_router(doc_comments_router)
 app.include_router(doc_comment_thread_views_router)
+app.include_router(chat_comment_views_router)
 app.include_router(doc_reviews_router)
 app.include_router(providers_router)
 app.include_router(vendor_accounts_router)

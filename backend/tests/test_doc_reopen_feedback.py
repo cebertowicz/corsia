@@ -317,7 +317,7 @@ def test_startup_migrates_existing_feedback_items_to_event_columns(tmp_path):
         db.commit()
     with closing(sqlite3.connect(path)) as db:
         initialize_schema(db)
-        assert SCHEMA_VERSION == 148
+        assert SCHEMA_VERSION == 149
         assert db.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
         columns = {row[1] for row in db.execute("PRAGMA table_info(doc_feedback_batch_items)")}
         assert columns == {"batch_id", "comment_id", "event", "event_at", "event_by"}
