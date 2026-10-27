@@ -450,7 +450,7 @@ async def test_an_unrouted_event_with_no_self_rule_never_looks_up_its_repository
 # -- Burst -----------------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_a_burst_wakes_a_rule_once_and_the_owner_on_every_event(isolated_db, sent):
+async def test_a_burst_wakes_a_rule_and_the_owner_on_every_event(isolated_db, sent):
     _project(P)
     _agent("owner")
     _agent("watcher")
@@ -467,17 +467,15 @@ async def test_a_burst_wakes_a_rule_once_and_the_owner_on_every_event(isolated_d
     # The owner's routing is untouched: every push and the comment wake it.
     assert [thread for thread, _ in sent] == ["owner"] * 51
     assert all("rule_notes" not in content for _, content in sent)
-    [wake] = _wakes("watcher")
-    assert "Re-run the load check." in wake
-    # The 49 capped events reach the next turn as one note that counts them.
-    [note] = _digest("watcher")
-    assert f"; 49 since rule {rule['id']} last woke you" in note["summary"]
-    assert note["summary"].endswith("; rule note: Re-run the load check.")
+    wakes = _wakes("watcher")
+    assert len(wakes) == 50
+    assert all("Re-run the load check." in wake for wake in wakes)
+    assert _digest("watcher") == []
     assert [(d["outcome"], d["via"], d["reason"]) for d in _decisions(rule_id=rule["id"])] == (
-        [("woke", "rule", None)] + [("digested", "rule", "wake cap")] * 49)
+        [("woke", "rule", None)] * 50)
 
     [listed] = (await _tool("watcher", operation="list"))["rules"]
-    assert listed["wakes_24h"] == 1
+    assert listed["wakes_24h"] == 50
     assert listed["last_fired"] is not None
 
 
@@ -879,9 +877,8 @@ def test_a_watch_ends_only_where_a_rule_added_the_delivery(isolated_db, monkeypa
     monkeypatch.setattr("events.platform.resolve_targets", _no_thread)
     made = deliver_platform_event_sync(library.LIBRARY_CONNECTOR, _library_changed("m-3"))
 
-    # Routing chose no thread, so the rule added the delivery (a digest: the table lets
-    # no rule wake this artifact's recipient), and that delivery ends the wait.
-    assert ("owner", DIGESTED) in {(d.thread_id, d.outcome) for d in made}
+    # Routing chose no thread, so the rule added a wake and that delivery ends the wait.
+    assert ("owner", "woke") in {(d.thread_id, d.outcome) for d in made}
     assert _armed(node) == 0
 
 
@@ -897,24 +894,21 @@ def test_event_rule_schema_matches_rules():
     assert f"length(note) <= {rules.NOTE_LIMIT})" in EVENT_RULE_SCHEMA_SQL
 
 
-def test_a_capped_rule_riding_a_routed_digest_counts_like_an_added_one(isolated_db):
+def test_repeated_rule_wakes_override_routed_digest(isolated_db):
     import asyncio
 
     _project(P)
     _agent("owner")
     _library_owner("owner")
-    rule = asyncio.run(_tool("owner", operation="create", connector=library.LIBRARY_CONNECTOR,
-                             event_type=library.ITEM_CHANGED_EVENT, note="Reread the skill."))
+    asyncio.run(_tool("owner", operation="create", connector=library.LIBRARY_CONNECTOR,
+                      event_type=library.ITEM_CHANGED_EVENT, note="Reread the skill."))
 
     [first] = deliver_platform_event_sync(library.LIBRARY_CONNECTOR, _library_changed("m-1"))
     [second] = deliver_platform_event_sync(library.LIBRARY_CONNECTOR, _library_changed("m-2"))
 
-    # The cap turns the second wake back into routing's digest, with the rule's count and path.
-    assert (first.outcome, second.outcome) == ("woke", DIGESTED)
-    [note] = _notes("owner")
-    assert f"; 1 since rule {rule['id']} last woke you" in note["summary"]
-    assert note["summary"].endswith("; rule note: Reread the skill.")
-    assert json.loads(note["details_json"])["path"] == f"rule:{rule['id']}"
+    assert (first.outcome, second.outcome) == ("woke", "woke")
+    assert len(_wakes("owner")) == 2
+    assert _notes("owner") == []
 
 
 def test_a_platform_drop_filters_the_writers_delivery_and_keeps_the_wait(isolated_db):

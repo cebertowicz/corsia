@@ -1,4 +1,4 @@
-"""The reads rule evaluation makes: the rules for an event, then threads, pause and wake budget.
+"""The reads rule evaluation makes: the rules for an event, then threads and pause.
 
 Each is one indexed read. The rules read is the one every event pays; the
 others are made only after ``events.rules`` found a matching rule, so an event
@@ -110,30 +110,6 @@ def paused(db: sqlite3.Connection, thread: str) -> bool:
     from plans.public import thread_paused_since
 
     return thread_paused_since(db, thread) is not None
-
-
-def wake_budgets(
-    db: sqlite3.Connection, rule_ids: list[str], thread: str, *, cap: str, since: str,
-) -> dict[str, tuple[int, int]]:
-    """R9 for each of ``rule_ids`` on one thread, in one read: its wakes of the
-    thread since ``since``, and how many of its events the cap has digested there
-    since its last wake. A rule with neither is absent."""
-    params = {"thread": thread, "cap": cap, "since": since,
-              **{f"r{i}": rule_id for i, rule_id in enumerate(rule_ids)}}
-    ids = ",".join(f":r{i}" for i in range(len(rule_ids)))
-    rows = db.execute(
-        "SELECT d.rule_id, "
-        "       SUM(d.outcome='woke' AND d.via='rule' AND d.at>=:since) AS spent, "
-        "       SUM(d.outcome='digested' AND d.reason=:cap AND d.id>COALESCE(w.last, 0)) AS capped "
-        "FROM event_route_decisions d LEFT JOIN ("
-        "    SELECT rule_id, MAX(id) AS last FROM event_route_decisions "
-        f"   WHERE rule_id IN ({ids}) AND thread_id=:thread AND outcome='woke' AND via='rule' "
-        "    GROUP BY rule_id) w ON w.rule_id=d.rule_id "
-        f"WHERE d.rule_id IN ({ids}) AND d.thread_id=:thread AND d.outcome IN ('woke','digested') "
-        "GROUP BY d.rule_id",
-        params,
-    ).fetchall()
-    return {row["rule_id"]: (int(row["spent"]), int(row["capped"])) for row in rows}
 
 
 def explain_summary(event_id: Any, found: int) -> str:

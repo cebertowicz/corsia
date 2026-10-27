@@ -36,7 +36,7 @@ from events.disposition import WAKE as TABLE_WAKE, disposition
 from events.resolve import Target, lifecycle
 from events.rule_outcomes import (  # noqa: F401 - re-exported: callers read them as rules.*
     DEAD_LETTERED, DELIVER, DIGESTED, DROP, DROPPED, DUPLICATE, ENDED, HELD, RUN_SCRIPT, START_WORKER,
-    WAKE_CAP, WOKE, Delivery, Entry, Outcome, Rule, RuleEvent, RulePlan,
+    WOKE, Delivery, Entry, Outcome, Rule, RuleEvent, RulePlan,
 )
 from events.rule_runs import OWNER_GONE, queue
 from infra.queries import thread_is_temporary
@@ -62,7 +62,6 @@ UNAVAILABLE = "recipient unavailable"
 WRITER_LEFT = "its writer left the rule's project; rule turned off"
 OWN_EMIT = "sent by this chat"
 
-WAKES_PER_HOUR = 1
 RETENTION = timedelta(days=30)
 
 
@@ -217,45 +216,36 @@ def prune_disabled(db: sqlite3.Connection, scope: str, now: str) -> None:
 def _wake_guard(
     rule: Rule, thread: str, row: Mapping[str, Any], routed_here: Target | None,
     artifact_lifecycle: str,
-) -> tuple[bool, str | None, int] | None:
+) -> tuple[bool, str | None] | None:
     """Why this rule can't wake the thread, or ``None`` while it still asks.
 
     The disposition table answers whether this recipient can wake at all; 4.4:
     an agent's ``registered_owner`` rule wakes only itself or its temporary workers.
     """
     if rule.mode != WAKE:
-        return False, None, 0
+        return False, None
     if routed_here is not None and routed_here.disposition == "owner_wake":
-        return False, None, 0  # routing already wakes it; the rule only rides
+        return False, None  # routing already wakes it; the rule only rides
     relationship = routed_here.relationship if routed_here is not None else "rule"
     if routed_here is not None and routed_here.routing_state:
         artifact_lifecycle = lifecycle(routed_here.routing_state)
     if disposition(relationship, "informational", artifact_lifecycle,
                    rule_wake=True) != TABLE_WAKE:
-        return False, NEVER_WAKES, 0
+        return False, NEVER_WAKES
     if (rule.to == REGISTERED_OWNER and thread != rule.created_by
             and (row["spawned_by"] != rule.created_by or not thread_is_temporary(row))):
-        return False, OTHER_OWNER, 0  # 4.4
+        return False, OTHER_OWNER  # 4.4
     return None
 
 
 def _wakes(
     db: sqlite3.Connection, asking: Mapping[str, list[str]],
-) -> dict[str, tuple[bool, str | None, int]]:
-    """R7 and R9 for the rules still asking to wake each thread: whether each wakes,
-    why not, and its capped count. Pause and the hourly budget are read once per
-    thread, however many of its rules ask."""
-    answers: dict[str, tuple[bool, str | None, int]] = {}
-    since = _iso(_now() - timedelta(hours=1))
+) -> dict[str, tuple[bool, str | None]]:
+    """Apply the paused-plan decision once per recipient thread."""
+    answers: dict[str, tuple[bool, str | None]] = {}
     for thread, rule_ids in asking.items():
-        if rule_reads.paused(db, thread):
-            answers.update({rule_id: (False, PAUSED, 0) for rule_id in rule_ids})
-            continue
-        budgets = rule_reads.wake_budgets(db, rule_ids, thread, cap=WAKE_CAP, since=since)
-        for rule_id in rule_ids:
-            spent, capped = budgets.get(rule_id, (0, 0))
-            answers[rule_id] = ((False, WAKE_CAP, capped + 1) if spent >= WAKES_PER_HOUR
-                                else (True, None, 0))
+        answer = (False, PAUSED) if rule_reads.paused(db, thread) else (True, None)
+        answers.update({rule_id: answer for rule_id in rule_ids})
     return answers
 
 
@@ -293,7 +283,7 @@ def evaluate(
     plan.settled += queue(db, event, rules, dropped_by)
     plan.settled += worker_starts.queue(db, event, rules, dropped_by)
     delivering: list[tuple[Rule, str, Target | None]] = []
-    answers: dict[str, tuple[bool, str | None, int]] = {}
+    answers: dict[str, tuple[bool, str | None]] = {}
     asking: dict[str, list[str]] = {}
     for rule in (rule for rule in rules if rule.action == DELIVER):
         thread = recipients[rule.id]
