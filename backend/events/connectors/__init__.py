@@ -2,7 +2,7 @@
 
 A connector contributes CORSIA routability as **data, not code** (PS32): each
 manifest declares its event types, the facts they carry, the identity formula,
-relationships, artifact identity, and artifact-producing command triggers. The
+relationships, artifact identity, artifact extractors and shipped observe rules. The
 generic event and result-observer paths read these manifests; they never branch
 on a connector name. This is the only place connector tokens may
 appear (enforced by ``tests/coordination_mvp/test_guards.py``).

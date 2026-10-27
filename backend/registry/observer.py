@@ -177,6 +177,16 @@ def _extractor(rule, db, thread_id, told):
     return extract
 
 
+def _already_registered(db, thread_id, rule, artifact, label, told) -> None:
+    current = models.resolve(artifact.integration, artifact.type, artifact.external_id, db=db)
+    owns = bool(current) and current["parent_thread_id"] == thread_id
+    if told is not None:
+        told.append(f"{label} is already registered to you." if owns else
+                    f"Not registered to you: {label} belongs to another chat; you already follow it.")
+    _record(db, thread_id, rule, "registered" if owns else "not_registered", artifact,
+            "it was already registered to you" if owns else "you already follow it", told)
+
+
 def observe_command_result(
     thread_id: str,
     raw_tool_name: str | None,
@@ -221,6 +231,8 @@ def observe_command_result(
             continue
         key = (artifact.integration, artifact.type, artifact.external_id)
         if key in seen:
+            _record(db, thread_id, rule, "not_registered", artifact,
+                    f"another rule handled this {item_name} in the same run", told)
             continue
         seen.add(key)
         try:
@@ -236,11 +248,7 @@ def observe_command_result(
             changed.append(registered)
         label = f"{artifact.type.replace('-', ' ')} {artifact.external_id}"
         if registered is None:  # this thread already has a current registration: owner or follower
-            current = models.resolve(artifact.integration, artifact.type, artifact.external_id, db=db)
-            owns = bool(current) and current["parent_thread_id"] == thread_id
-            if told is not None:
-                told.append(f"{label} is already registered to you." if owns else
-                            f"Not registered to you: {label} belongs to another chat; you already follow it.")
+            _already_registered(db, thread_id, rule, artifact, label, told)
         elif registered.get("parent_thread_id") == thread_id:
             if told is not None:
                 told.append(f"Registered {label} to you.")

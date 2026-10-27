@@ -189,89 +189,6 @@ def test_observed_registration_rejects_orphaned_owner_thread(isolated_db):
     assert _pr_rows(db, caller_id) == []
 
 
-@pytest.mark.parametrize(
-    "command",
-    [
-        "gh pr create --title x && echo done",
-        "gh pr create --title x > /tmp/pr-url",
-        'gh pr create --title "$(whoami)"',
-        "gh pr create --title $$",
-        "$(gh pr create --title nested)",
-        "env GH_TOKEN=[REDACTED] gh pr create --title wrapped",
-        "/opt/homebrew/bin/gh pr create --title qualified",
-        "command gh pr create --title aliased",
-        "gh pr view 42",
-        "gh pr create --title x | tee /tmp/pr-url",
-    ],
-)
-def test_command_trigger_requires_one_literal_direct_argv(
-    isolated_db,
-    command,
-):
-    db = get_db()
-    thread_id = make_session(db, prefix="command-shape")
-    tool_call_id = "unsafe-shape"
-    _insert_call(
-        db,
-        thread_id,
-        tool_call_id,
-        name="Bash",
-        command=command,
-    )
-
-    observation = observe_record(
-        thread_id,
-        "tool",
-        _URL + "\n",
-        {"tool_call_id": tool_call_id, "name": "Bash", "is_error": False},
-        db=db,
-    )
-
-    assert observation is None
-    artifact = observation.artifact if observation is not None else None
-    assert artifact is None
-    assert _pr_rows(db, thread_id) == []
-
-
-@pytest.mark.parametrize(
-    ("content", "is_error"),
-    [
-        (_URL + "\n\nExit code: 1", False),
-        (_URL + "\n", True),
-        (_URL + "\n" + _URL + "\n", False),
-        ("Created: " + _URL + "\n", False),
-    ],
-)
-def test_command_trigger_requires_confirmed_success_result(
-    isolated_db,
-    content,
-    is_error,
-):
-    db = get_db()
-    thread_id = make_session(db, prefix="command-result")
-    tool_call_id = "bad-result"
-    _insert_call(
-        db,
-        thread_id,
-        tool_call_id,
-        name="Bash",
-        command="gh pr create --title result",
-    )
-
-    observation = observe_record(
-        thread_id,
-        "tool",
-        content,
-        {"tool_call_id": tool_call_id, "name": "Bash", "is_error": is_error},
-        db=db,
-    )
-
-    assert observation is None
-    artifact = observation.artifact if observation is not None else None
-    assert artifact is None
-    assert _pr_rows(db, thread_id) == []
-
-
 def test_persisted_observation_is_quiet_after_immediate_registration(isolated_db):
     from registry.service import register_observed_artifact
 
@@ -423,7 +340,7 @@ async def _drive_durable_result_seam(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("harness", ["native", "claude", "codex"])
-async def test_each_durable_result_seam_registers_one_routable_pr(
+async def test_each_durable_result_seam_keeps_the_shell_registration_single(
     isolated_db,
     monkeypatch,
     harness,

@@ -264,6 +264,21 @@ async def test_a_second_run_tells_the_owner_and_a_follower_apart(isolated_db):
     assert (again, _owner()) == (None, "owner")
     assert told == ["Not registered to you: pull request owner/repo#42 belongs to another chat; "
                     "you already follow it."]
+    last = "SELECT outcome, reason FROM event_route_decisions WHERE thread_id=? ORDER BY rowid DESC LIMIT 1"
+    assert _rows(last, "owner") == [{"outcome": "registered", "reason": "it was already registered to you"}]
+    assert _rows(last, "rival") == [{"outcome": "not_registered", "reason": "you already follow it"}]
+
+
+@pytest.mark.asyncio
+async def test_a_second_rule_on_the_same_call_records_its_outcome(isolated_db):
+    _agent("a")
+    await _observe_rule("a", argv_prefix=["gh", "pr", "create"])
+    artifact, told = _run("a", "gh pr create")
+    assert artifact is not None and told == ["Registered pull request owner/repo#42 to you."]
+    decisions = _rows("SELECT outcome, reason FROM event_route_decisions WHERE thread_id='a' ORDER BY rowid")
+    assert decisions == [{"outcome": "registered", "reason": None},
+                         {"outcome": "not_registered",
+                          "reason": "another rule handled this pull request in the same run"}]
 
 
 def test_a_follower_gets_the_pane_refresh_through_the_shell_tool(isolated_db, monkeypatch):
