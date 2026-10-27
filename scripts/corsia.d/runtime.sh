@@ -1,5 +1,14 @@
 # Runtime helpers for local services.
 
+# Compare literal paths first, then their physical directories when they exist.
+same_directory() {
+    local left="$1" right="$2" left_real right_real
+    [ "$left" != "$right" ] || return 0
+    left_real="$(cd -P "$left" 2>/dev/null && pwd)" || return 1
+    right_real="$(cd -P "$right" 2>/dev/null && pwd)" || return 1
+    [ "$left_real" = "$right_real" ]
+}
+
 # CORSIA runs one backend, so a lifecycle verb takes no service selector.
 # --force is the only argument these verbs accept. Anything else -- a bare
 # word like `server`, or a mistyped option like `--forse` -- is rejected
@@ -706,7 +715,7 @@ require_port_served_by_this_checkout() {
     [ -n "$pids" ] || return 0
     if service_is_loaded; then
         require_loaded_service_owns_port || return 1
-        fail "$(foreign_loaded_service_guidance "$(service_label)" "$(service_plist_path)")"
+        fail "$(foreign_loaded_service_guidance "$(service_label)" "$(service_definition_path)")"
         return 1
     fi
     for pid in $pids; do

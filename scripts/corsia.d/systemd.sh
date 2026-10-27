@@ -4,26 +4,19 @@ SERVICE_PATH="$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
 case "${CORSIA_SERVICE_LABEL-}" in
     "") ;;
-    *[!A-Za-z0-9._-]*) fail "Invalid service label: $CORSIA_SERVICE_LABEL"; return 1 ;;
+    *[!A-Za-z0-9._-]*) fail "Couldn’t use service label $CORSIA_SERVICE_LABEL; use letters, digits, periods, hyphens or underscores"; return 1 ;;
 esac
 service_label() { echo "${CORSIA_SERVICE_LABEL:-com.corsia.prod}"; }
-service_unit_path() { echo "$HOME/.config/systemd/user/$(service_label).service"; }
-service_plist_path() { service_unit_path; }
+service_definition_path() { echo "$HOME/.config/systemd/user/$(service_label).service"; }
 service_is_loaded() { systemctl --user is-active --quiet "$(service_label).service"; }
 service_loaded_pid() { systemctl --user show "$(service_label).service" -p MainPID --value; }
-same_directory() {
-    local left right
-    left="$(cd -P "$1" 2>/dev/null && pwd)" || return 1
-    right="$(cd -P "$2" 2>/dev/null && pwd)" || return 1
-    [ "$left" = "$right" ]
-}
 service_installed() {
     local unit
-    unit="$(service_unit_path)"
+    unit="$(service_definition_path)"
     [ -f "$unit" ] && grep -Fxq -- "# CORSIA checkout: $BACKEND_DIR" "$unit"
 }
 service_managed() { service_installed && service_is_loaded; }
-foreign_loaded_service_guidance() { echo "The systemd service $1 does not belong to this checkout; inspect $2."; }
+foreign_loaded_service_guidance() { echo "Couldn’t use the systemd service $1 for this checkout; inspect $2 before continuing."; }
 
 render_systemd_unit() {
     local bind
@@ -64,11 +57,11 @@ PY
 
 require_owned_service_definition() {
     local unit expected
-    unit="$(service_unit_path)"
-    service_installed || { fail "The systemd unit is absent or belongs to another checkout: $unit"; return 1; }
+    unit="$(service_definition_path)"
+    service_installed || { fail "$(foreign_loaded_service_guidance "$(service_label)" "$unit")"; return 1; }
     expected="$(render_systemd_unit)" || return 1
     [ "$(cat "$unit")" = "$expected" ] || {
-        fail "The installed systemd unit does not match this checkout's runtime identity: $unit"
+        fail "The installed systemd unit does not match this checkout's runtime identity; inspect $unit before continuing"
         return 1
     }
 }
@@ -76,7 +69,7 @@ require_owned_service_definition() {
 # on a unit by name. A same-named higher-priority unit is not ours.
 require_manager_service_definition() {
     local fragment dropins stale unit
-    unit="$(service_unit_path)"
+    unit="$(service_definition_path)"
     fragment="$(systemctl --user show "$(service_label).service" -p FragmentPath --value)" || return 1
     dropins="$(systemctl --user show "$(service_label).service" -p DropInPaths --value)" || return 1
     stale="$(systemctl --user show "$(service_label).service" -p NeedDaemonReload --value)" || return 1
@@ -88,19 +81,19 @@ require_manager_service_definition() {
 require_loaded_service_owns_port() {
     local pid pids
     pid="$(service_loaded_pid)" || return 1
-    case "$pid" in ''|0|*[!0-9]*) fail "Cannot determine the systemd service PID"; return 1 ;; esac
+    case "$pid" in ''|0|*[!0-9]*) fail "Couldn’t determine the systemd service PID; check the service status and try again"; return 1 ;; esac
     pids="$(backend_pids)"
     printf '%s\n' "$pids" | grep -qx -- "$pid" || {
-        fail "The systemd service does not own the backend port :$BACKEND_PORT"
+        fail "The systemd service does not own the backend port :$BACKEND_PORT; inspect the process using that port before continuing"
         return 1
     }
 }
 
 service_install() {
     local unit temp
-    unit="$(service_unit_path)"
+    unit="$(service_definition_path)"
     if [ -e "$unit" ] && ! service_installed; then
-        fail "A different service already uses $unit"
+        fail "$(foreign_loaded_service_guidance "$(service_label)" "$unit")"
         return 1
     fi
     if service_is_loaded; then
@@ -136,21 +129,24 @@ service_start() {
     systemctl --user enable "$(service_label).service" || return 1
     if service_is_loaded; then return 0; fi
     if is_backend_running || [ -n "$(backend_pids)" ]; then
-        fail "A backend already owns :$BACKEND_PORT; refusing to start another"
+        fail "A backend already owns :$BACKEND_PORT; stop it before starting the service"
         return 1
     fi
     systemctl --user start "$(service_label).service"
 }
 service_stop() {
     local drain_attempted=false
-    service_installed || { fail "The systemd unit is absent or belongs to another checkout: $(service_unit_path)"; return 1; }
-    service_is_loaded || return 0
+    service_installed || { fail "$(foreign_loaded_service_guidance "$(service_label)" "$(service_definition_path)")"; return 1; }
+    if ! service_is_loaded; then
+        [ "${STOP_LOCAL_MODEL:-false}" != true ] || echo "No local model runs on Linux; only the server is stopped."
+        return 0
+    fi
     require_manager_service_definition || return 1
     local pid
     pid="$(service_loaded_pid)" || return 1
-    case "$pid" in ''|0|*[!0-9]*) fail "Cannot determine the systemd service PID"; return 1 ;; esac
+    case "$pid" in ''|0|*[!0-9]*) fail "Couldn’t determine the systemd service PID; check the service status and try again"; return 1 ;; esac
     backend_pid_serves_this_checkout "$pid" || {
-        fail "The running systemd service does not belong to this checkout"
+        fail "$(foreign_loaded_service_guidance "$(service_label)" "$(service_definition_path)")"
         return 1
     }
     if [ "$FORCE" = false ] && is_backend_running; then
@@ -160,10 +156,11 @@ service_stop() {
     fi
     if ! systemctl --user stop "$(service_label).service"; then
         [ "$drain_attempted" = false ] || cancel_failed_drain "$(current_drain_url "$BACKEND_PORT")" "$CORSIA_RESTART_OPERATION_ID" || :
-        fail "Couldn’t stop the systemd service"
+        fail "Couldn’t stop the systemd service; check its status and try again"
         return 1
     fi
     ok "Stopped $(service_label)"
+    [ "${STOP_LOCAL_MODEL:-false}" != true ] || echo "No local model runs on Linux; only the server is stopped."
 }
 service_restart() {
     local after_teardown="${1:-}"
@@ -174,8 +171,8 @@ service_restart() {
 }
 service_uninstall() {
     local unit
-    unit="$(service_unit_path)"
-    service_installed || { fail "The systemd unit is absent or belongs to another checkout: $unit"; return 1; }
+    unit="$(service_definition_path)"
+    service_installed || { fail "$(foreign_loaded_service_guidance "$(service_label)" "$unit")"; return 1; }
     service_stop || return 1
     require_manager_service_definition || return 1
     systemctl --user disable "$(service_label).service" || return 1

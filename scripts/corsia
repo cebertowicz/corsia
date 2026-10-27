@@ -417,6 +417,9 @@ case "${1:-status}" in
         echo "Stopping CORSIA..."
         if service_managed; then
             service_stop   # drains internally
+        elif [ "$STOP_LOCAL_MODEL" = true ] && [ "$(uname -s)" = Linux ]; then
+            stop_direct_backend
+            echo "No local model runs on Linux; only the server is stopped."
         elif [ "$STOP_LOCAL_MODEL" = true ]; then
             fail "--stop-local-model needs the installed service"
             exit 1

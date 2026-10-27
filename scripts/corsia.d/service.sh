@@ -21,27 +21,16 @@ case "${CORSIA_SERVICE_LABEL-}" in
         ;;
 esac
 service_label() { echo "${CORSIA_SERVICE_LABEL:-com.corsia.prod}"; }
-service_plist_path() { echo "$LAUNCH_AGENTS_DIR/$(service_label).plist"; }
+service_definition_path() { echo "$LAUNCH_AGENTS_DIR/$(service_label).plist"; }
 service_domain() { echo "gui/$(id -u)"; }
 service_is_loaded() { launchctl print "$(service_domain)/$(service_label)" > /dev/null 2>&1; }
-
-# Two paths name the same directory. Either side may be a symlinked spelling
-# (a plist rendered through ~/.corsia, a listener's physical cwd), so compare
-# the resolved directories when both exist and the literal strings otherwise.
-same_directory() {
-    local left="$1" right="$2" left_real right_real
-    [ "$left" != "$right" ] || return 0
-    left_real="$(cd -P "$left" 2>/dev/null && pwd)" || return 1
-    right_real="$(cd -P "$right" 2>/dev/null && pwd)" || return 1
-    [ "$left_real" = "$right_real" ]
-}
 
 # The installed definition under this checkout's label describes this checkout.
 # Deeper identity (port, interpreter, roots, generation) is proved separately
 # by require_owned_service_definition before any effect.
 service_definition_describes_this_checkout() {
     local plist workdir
-    plist="$(service_plist_path)" || return 1
+    plist="$(service_definition_path)" || return 1
     [ -f "$plist" ] || return 1
     command -v plutil > /dev/null 2>&1 || return 1
     [ "$(service_definition_value "$plist" Label)" = "$(service_label)" ] || return 1
@@ -130,7 +119,7 @@ new_service_generation() {
 
 service_loaded_definition_matches() {
     local plist expected loaded
-    plist="$(service_plist_path)" || return 1
+    plist="$(service_definition_path)" || return 1
     command -v plutil > /dev/null 2>&1 || return 1
     expected="$(plutil -extract EnvironmentVariables.CORSIA_SERVICE_GENERATION raw "$plist" 2>/dev/null)" \
         || return 1
@@ -268,7 +257,7 @@ service_port_mismatch_guidance() {
 
 require_owned_service_definition() {
     local plist label actual
-    plist="$(service_plist_path)" || return 1
+    plist="$(service_definition_path)" || return 1
     label="$(service_label)"
     [ -f "$plist" ] || { fail "$label not installed. Run: corsia service install"; return 1; }
     command -v plutil > /dev/null 2>&1 || {
@@ -443,7 +432,7 @@ service_install() {
         direct|restart) ;;
         *) fail "Unknown service installation mode: $mode"; return 1 ;;
     esac
-    plist="$(service_plist_path)" || return 1
+    plist="$(service_definition_path)" || return 1
     if service_is_loaded; then
         if ! service_installed; then
             fail "$(foreign_loaded_service_guidance "$(service_label)" "$plist")"
@@ -493,7 +482,7 @@ service_install() {
 
 service_uninstall() {
     local plist loaded=false
-    plist="$(service_plist_path)" || return 1
+    plist="$(service_definition_path)" || return 1
     if service_is_loaded; then
         loaded=true
         [ -f "$plist" ] || {
@@ -526,7 +515,7 @@ require_no_unmanaged_backend() {
 
 service_start() {
     if service_is_loaded && ! service_installed; then
-        fail "$(foreign_loaded_service_guidance "$(service_label)" "$(service_plist_path)")"
+        fail "$(foreign_loaded_service_guidance "$(service_label)" "$(service_definition_path)")"
         return 1
     fi
     service_installed || { fail "$(service_label) not installed. Run: corsia service install"; return 1; }
@@ -536,7 +525,7 @@ service_start() {
         return 0
     fi
     require_no_unmanaged_backend "$BACKEND_PORT" || return 1
-    launchctl bootstrap "$(service_domain)" "$(service_plist_path)" \
+    launchctl bootstrap "$(service_domain)" "$(service_definition_path)" \
         && ok "$(service_label) bootstrapped using the installed definition (RunAtLoad starts it). Source changes are not rendered by start; run corsia service install before start, or corsia service restart."
 }
 
@@ -552,7 +541,7 @@ service_stop() {
         warn "$(service_label) not loaded"
         return 0
     fi
-    plist="$(service_plist_path)" || return 1
+    plist="$(service_definition_path)" || return 1
     label="$(service_label)"
     domain="$(service_domain)"
     if ! service_installed; then
@@ -624,7 +613,7 @@ service_restart() {
     fi
     domain="$(service_domain)"
     label="$(service_label)"
-    plist="$(service_plist_path)"
+    plist="$(service_definition_path)"
     bootstrap_attempts="${CORSIA_LAUNCHD_BOOTSTRAP_ATTEMPTS:-15}"
     case "$bootstrap_attempts" in
         ""|*[!0-9]*|0)
@@ -756,7 +745,7 @@ Manual recovery: $manual_command"
 service_status() {
     local label plist pid port="$BACKEND_PORT"
     label="$(service_label)"
-    plist="$(service_plist_path)"
+    plist="$(service_definition_path)"
     echo "$label"
     if [ -f "$plist" ]; then ok "plist installed"; else warn "plist not installed ($plist)"; fi
     if service_is_loaded; then

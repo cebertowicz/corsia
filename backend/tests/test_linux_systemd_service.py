@@ -7,6 +7,8 @@ from pathlib import Path
 
 import pytest
 
+from service_script_fixtures import fake_checkout
+
 REPO = Path(__file__).resolve().parents[2]
 SERVICE = REPO / "scripts" / "corsia.d" / "systemd.sh"
 
@@ -89,6 +91,61 @@ def test_install_start_stop_and_idempotent_install(service_env):
     assert calls(service_env).count("--user enable com.corsia.prod.service") >= 1
     assert "--user start com.corsia.prod.service" in calls(service_env)
     assert "--user stop com.corsia.prod.service" in calls(service_env)
+
+
+def test_shared_directory_comparison_keeps_literal_and_physical_semantics(tmp_path):
+    actual = tmp_path / "actual"
+    actual.mkdir()
+    alias = tmp_path / "alias"
+    alias.symlink_to(actual, target_is_directory=True)
+    missing = tmp_path / "missing"
+    script = '''source scripts/corsia.d/runtime.sh
+same_directory "$1" "$1" && same_directory "$2" "$3" && ! same_directory "$1" "$2"
+'''
+    result = subprocess.run(
+        ["/bin/bash", "-c", script, "test", str(missing), str(actual), str(alias)],
+        cwd=REPO, capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_stop_local_model_reports_linux_server_only(service_env):
+    result = run_service(service_env, "service_install; service_start; STOP_LOCAL_MODEL=true; service_stop")
+    assert result.returncode == 0, result.stderr
+    assert "No local model runs on Linux; only the server is stopped." in result.stdout
+    assert not Path(service_env["STUB_ACTIVE"]).exists()
+
+
+def test_direct_stop_local_model_reports_linux_server_only(tmp_path):
+    checkout = fake_checkout(tmp_path / "checkout")
+    binary = tmp_path / "bin"
+    binary.mkdir()
+    for name, content in {
+        "uname": "#!/bin/sh\necho Linux\n",
+        "lsof": "#!/bin/sh\nexit 1\n",
+        "curl": "#!/bin/sh\nexit 1\n",
+        "systemctl": "#!/bin/sh\nexit 1\n",
+    }.items():
+        executable = binary / name
+        executable.write_text(content)
+        executable.chmod(0o755)
+    env = {**os.environ, "HOME": str(tmp_path / "home"),
+           "PATH": f"{binary}:{os.environ['PATH']}", "BACKEND_PORT": "45991",
+           "CORSIA_WORKSPACE": str(tmp_path / "workspace"),
+           "CORSIA_STATE_DIR": str(tmp_path / "state"),
+           "CORSIA_ENV_FILE": str(tmp_path / "missing.env")}
+    result = subprocess.run(
+        ["/bin/bash", str(checkout / "scripts/corsia"), "stop", "--stop-local-model"],
+        env=env, capture_output=True, text=True, check=False, timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "No local model runs on Linux; only the server is stopped." in result.stdout
+
+
+def test_neutral_definition_path(service_env):
+    result = run_service(service_env, "service_definition_path")
+    assert result.returncode == 0
+    assert result.stdout.strip().endswith("/com.corsia.prod.service")
 
 
 def test_restart_activates_release_between_stop_and_start(service_env):

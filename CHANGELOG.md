@@ -7,7 +7,7 @@ the later entry describes the current behavior.
 
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here._
 
-- On Linux, CORSIA starts again after the machine restarts.
+- On Linux, CORSIA starts again after the computer restarts.
 - Claude Code accounts you added keep working when CORSIA's data moves.
 - Browser addresses no longer need `https://` typed in; local loopback addresses use `http://` by default.
 - Setup now opens in a normal-sized window in the middle of the screen, and the app grows to fill the screen when setup finishes.
