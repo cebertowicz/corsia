@@ -76,7 +76,9 @@ async def request(session, method, params=None, *, on_write_observed=None, on_dr
             session._proc.stdin.write((json.dumps(payload) + "\n").encode())
             if on_write_observed is not None:
                 on_write_observed()
-            await bounded_drain(session, budget, method)
+            # A drain timeout kills the session, so every write gets the same
+            # threshold; the shorter steer budget only bounds waits that don't kill.
+            await bounded_drain(session, REQUEST_TIMEOUT, method)
             if on_drain_confirmed is not None:
                 on_drain_confirmed()
         finally:

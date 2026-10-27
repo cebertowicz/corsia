@@ -142,13 +142,14 @@ async def test_late_lock_brief_drain_does_not_kill(controlled_deadlines, method,
         async with _late_lock_writer(session, method, controlled_deadlines) as task:
             session._kill_process.assert_not_called()
             assert not task.done() and session._proc.returncode is None
-            assert [value for value, _ in controlled_deadlines] == [budget, budget]
+            # Admission, then the drain, whose kill threshold is the same for every write.
+            assert [value for value, _ in controlled_deadlines] == [budget, 120]
             session._proc.send_signal(signal.SIGUSR1)
             assert await asyncio.wait_for(asyncio.shield(task), 2) == {}
             session._kill_process.assert_not_called()
             assert session._pending == session._pending_methods == {}
             assert not session._write_lock.locked()
-            assert [value for value, _ in controlled_deadlines] == [budget, budget, budget]
+            assert [value for value, _ in controlled_deadlines] == [budget, 120, budget]
 
 
 @pytest.mark.parametrize("method,budget", [("turn/steer", 10), ("thread/inject_items", 120)])
@@ -158,7 +159,7 @@ async def test_late_lock_full_drain_budget_kills_and_retires(controlled_deadline
         async with _late_lock_writer(session, method, controlled_deadlines) as task:
             session._kill_process.assert_not_called()
             assert not task.done() and session._proc.returncode is None
-            assert [value for value, _ in controlled_deadlines] == [budget, budget]
+            assert [value for value, _ in controlled_deadlines] == [budget, 120]
             controlled_deadlines[-1][1].reschedule(asyncio.get_running_loop().time())
             with pytest.raises(CodexAppServerError, match=method):
                 await asyncio.wait_for(asyncio.shield(task), 2)

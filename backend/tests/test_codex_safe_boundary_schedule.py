@@ -40,7 +40,7 @@ async def test_repeated_wakes_join_one_stalled_steer(monkeypatch, expires):
             self.returncode = -9
 
     session._proc = Proc()
-    monkeypatch.setattr(codex_app_server, "STEER_REQUEST_TIMEOUT", 0.1 if expires else 2)
+    monkeypatch.setattr(codex_app_server, "REQUEST_TIMEOUT", 0.1 if expires else 2)
 
     async def deliver(thread_id):
         calls.append(thread_id)
