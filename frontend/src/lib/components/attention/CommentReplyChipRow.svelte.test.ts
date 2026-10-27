@@ -12,12 +12,8 @@ let body: AttentionQueue;
 
 function reply(id: string, title: string, options: { threadId?: string; unreadCount?: number; newestAt?: string } = {}): CommentReplyItem {
 	return {
-		external_id: `reply-${id}`,
-		renderer: 'comment-reply',
 		detail: {
-			id,
 			title,
-
 			unread_count: options.unreadCount ?? 1,
 			newest_at: options.newestAt ?? '2026-10-24T15:00:00Z',
 			destination: { pane: 'document-replies', id: `document-${id}`, path: `/tmp/${id}.md`, title },
@@ -72,6 +68,14 @@ describe('CommentReplyChipRow', () => {
 		expect(chip?.getAttribute('aria-label')).toBe('3 new replies · 2 documents, document');
 		chip!.click();
 		expect(open).toHaveBeenCalledWith(newest.detail.destination, 'thread-1');
+	});
+
+	it('sums separate workers for the same document in the visible chat', async () => {
+		body = { current: null, count: 0, items: [], reply_items: [reply('same', 'launch-plan.md'), reply('same', 'launch-plan.md', { unreadCount: 2 })] };
+		component = mount(CommentReplyChipRow, { target: host });
+		await (await import('$lib/stores/attentionDock.svelte')).reload();
+		await settle();
+		expect(host.querySelector('button.tile.chip')?.textContent).toContain('3 new replies · launch-plan.md');
 	});
 
 	it('keeps the document name in the one-document chip and renders nothing for another chat', async () => {

@@ -126,16 +126,15 @@
 		return { external_id: detail.id, renderer: 'decision', detail };
 	}
 
-	function commentReply(id: string, position: number): CommentReplyItem {
+	function commentReply(position: number): CommentReplyItem {
 		const detail: CommentReplyDetail = {
-			id,
-			title: 'A reply arrived on “Clarify the delivery model”',
+			title: 'delivery-model.md',
 			unread_count: 1,
 			newest_at: `2026-10-24T15:00:0${position}Z`,
-			destination: { pane: 'document', id: 'artifact-comment-delivery' },
+			destination: { pane: 'document-replies', id: 'artifact-comment-delivery', path: '/workspace/delivery-model.md', title: 'delivery-model.md' },
 			source: { thread_id: source.thread_id!, thread_label: source.thread_label },
 		};
-		return { external_id: id, renderer: 'comment-reply', detail };
+		return { detail };
 	}
 
 	function body(): AttentionQueue {
@@ -196,7 +195,7 @@
 			};
 		}
 		if (scenario === 'comment-replies') {
-			const items = [commentReply('reply-1', 1), commentReply('reply-2', 2), commentReply('reply-3', 3)];
+			const items = [commentReply(1), commentReply(2), commentReply(3)];
 			return { current: null, count: 0, items: [], reply_items: items };
 		}
 		if (scenario === 'external-many') {

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from core.thread_identity import root_visible_thread_ids
 from doceditor.feedback_state import new_reply_rows
 from infra.auth import is_owner_sentinel
 
@@ -34,6 +35,11 @@ def unread_reply_items(db, user_id: str) -> list[dict]:
     ).fetchall()
     if not rows:
         return []
+    roots = root_visible_thread_ids([str(row['author_thread_id']) for row in rows], db=db)
+    root_ids = json.dumps(list({root for root in roots.values() if root is not None}))
+    titles = {str(row['id']): row['title'] for row in db.execute(
+        'SELECT id, title FROM threads WHERE id IN (SELECT value FROM json_each(?))', (root_ids,),
+    ).fetchall()}
     ids = json.dumps(list({str(row['artifact_id']) for row in rows}))
     artifacts = db.execute(
         """SELECT i.id, i.title, i.path, r.parent_thread_id, owner.user_id AS owner_user_id,
@@ -57,13 +63,13 @@ def unread_reply_items(db, user_id: str) -> list[dict]:
         if not owner or not (is_owner_sentinel(owner) or artifact['owner_user_id'] == user_id) or not path or _removed(path):
             continue
         title = artifact['title'] or Path(path).name
-        key = f"{row['author_thread_id']}:{row['artifact_id']}"
+        root = roots[str(row['author_thread_id'])]
         result.append({
-            'external_id': key, 'renderer': 'comment-reply',
             'detail': {
-                'id': key, 'title': title, 'unread_count': row['unread_count'], 'newest_at': row['newest_at'],
+                'title': title, 'unread_count': row['unread_count'], 'newest_at': row['newest_at'],
                 'destination': {'pane': 'document-replies', 'id': row['artifact_id'], 'path': path, 'title': title},
-                'source': {'thread_id': row['author_thread_id'], 'thread_label': row['thread_label'] or 'Agent'},
+                'source': {'thread_id': root or row['author_thread_id'],
+                           'thread_label': (titles[root] if root else row['thread_label']) or 'Agent'},
             },
         })
     return result

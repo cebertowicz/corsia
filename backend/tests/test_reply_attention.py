@@ -26,7 +26,7 @@ def test_unread_replies_group_by_thread_and_document_and_clear_on_read(isolated_
         assert len(rows) == 1
         assert rows[0]["detail"]["unread_count"] == 2
         assert rows[0]["detail"]["destination"]["path"] == str(path)
-        assert set(rows[0]['detail']) == {'id', 'title', 'unread_count', 'newest_at', 'destination', 'source'}
+        assert set(rows[0]['detail']) == {'title', 'unread_count', 'newest_at', 'destination', 'source'}
         assert set(rows[0]['detail']['source']) == {'thread_id', 'thread_label'}
         assert unread_reply_items(db, "foreign-user") == []
         from api import attention
@@ -48,6 +48,36 @@ def test_unread_replies_group_by_thread_and_document_and_clear_on_read(isolated_
         assert unread_reply_items(db, "owner-token")[0]["detail"]["unread_count"] == 1
         path.unlink()
         assert unread_reply_items(db, "owner-token") == []
+    finally:
+        db.close()
+
+
+def test_reply_sources_resolve_visible_root_and_preserve_groups(isolated_db, tmp_path):
+    db = get_db()
+    try:
+        seed_thread(db, 'owner', title='Visible chat')
+        seed_thread(db, 'worker-a', title='Worker A')
+        seed_thread(db, 'worker-b', title='Worker B')
+        seed_thread(db, 'orphan', title='Orphan')
+        db.execute("UPDATE threads SET spawned_by='owner' WHERE id IN ('worker-a', 'worker-b')")
+        db.execute("UPDATE threads SET spawned_by='missing' WHERE id='orphan'")
+        artifact_id = seed_document(db, 'owner')
+        path = tmp_path / 'brief.md'
+        path.write_text('A document', encoding='utf-8')
+        db.execute('UPDATE artifact_identities SET path=? WHERE id=?', (str(path), artifact_id))
+        db.commit()
+        root, _ = add_comment(db, artifact_id, author_kind='user', author_id=None)
+        replies = [add_comment(db, artifact_id, author_id=author, parent_id=root['id'])[0]
+                   for author in ('worker-a', 'worker-b', 'owner', 'orphan')]
+        rows = unread_reply_items(db, 'owner-token')
+        assert len(rows) == 4
+        sources = [row['detail']['source'] for row in rows]
+        assert sources.count({'thread_id': 'owner', 'thread_label': 'Visible chat'}) == 3
+        assert sources.count({'thread_id': 'orphan', 'thread_label': 'Orphan'}) == 1
+        with write_transaction(db, scope='test_visible_root_read') as connection:
+            newest = max(replies, key=lambda reply: (reply['created_at'], reply['id']))
+            mark_thread_viewed(connection, 'owner-token', artifact_id, root['id'], newest['id'])
+        assert unread_reply_items(db, 'owner-token') == []
     finally:
         db.close()
 
