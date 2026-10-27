@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from infra.chat_comment_answers import place_answers
 from infra.delivery_states import INPUT_DELIVERY_ENDED, INPUT_DELIVERY_STATE_SET
 from infra.time import utc_now_iso
 from infra.turn_provenance import refuse_reader_only_reason, turn_provenance
@@ -238,6 +239,7 @@ def _insert_delivered_message(
             sequence,
         ),
     )
+    place_answers(db, message_id, thread_id, role, content)
 
 
 def _require_turn_provenance(message_id: str, role: str, metadata: dict | None) -> None:

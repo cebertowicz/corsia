@@ -15,6 +15,8 @@ import sqlite3
 from collections import Counter
 from typing import Any, TypeGuard
 
+from infra.chat_comment_ids import format_cid, parse_cid
+
 logger = logging.getLogger(__name__)
 
 
@@ -47,7 +49,11 @@ def require_every_comment(raw: object, stored: dict | None) -> None:
         return
     if not isinstance(submitted, list):
         raise RejectedComments([])
-    kept = {int(item["cid"].rsplit(".", 1)[1]) for item in (stored or {}).get("comments") or []}
+    kept = {
+        parsed[1]
+        for item in (stored or {}).get("comments") or []
+        if isinstance(item, dict) and (parsed := parse_cid(item.get("cid"))) is not None
+    }
     missing = [position for position in range(1, len(submitted) + 1) if position not in kept]
     if missing:
         raise RejectedComments(missing)
@@ -147,7 +153,7 @@ def _comments(raw: object, newest: int, input_order: int, dropped: list[dict]) -
             dropped.append(_dropped("comments", reason, index=index))
             continue
         # Admission holds the write transaction until input order is incremented.
-        cid = f"c{input_order}.{index + 1}"
+        cid = format_cid(input_order, index + 1)
         comments.append({key: item[key] for key in (
             "id", "seq", "from_off", "to_off", "quote", "anchor_prefix", "anchor_suffix", "note",
         )} | {"cid": cid})

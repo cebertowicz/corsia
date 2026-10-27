@@ -10,6 +10,7 @@ from infra.connection_schema import CONNECTION_SCHEMA_SQL
 from infra.connected_accounts_schema import CONNECTED_ACCOUNTS_SCHEMA_SQL
 from infra.connected_apps_schema import CONNECTED_APPS_SCHEMA_SQL
 from infra.vendor_policy_schema import VENDOR_SUBSCRIPTION_SCHEMA_SQL
+from infra.chat_comment_schema import CHAT_COMMENT_SCHEMA_SQL
 from infra.checkpoint_schema import CHECKPOINT_SCHEMA_SQL
 from infra.context_change_schema import CONTEXT_CHANGE_SCHEMA_SQL
 from infra.doc_comments_schema import DOCUMENT_SCHEMA_SQL
@@ -36,8 +37,9 @@ from infra.thread_updates_schema import THREAD_UPDATES_SCHEMA_SQL
 from infra.usage_schema import USAGE_SCHEMA_SQL
 from infra.webhook_delivery_schema import WEBHOOK_DELIVERY_SCHEMA_SQL
 from infra.write_hold_indexes import WRITE_HOLD_INDEX_SQL
-SCHEMA_VERSION = 148
+SCHEMA_VERSION = 149
 SCHEMA_SQL = f"""
+    {CHAT_COMMENT_SCHEMA_SQL}
     {SETTINGS_SCHEMA_SQL}
     {BULLETIN_SCHEMA_SQL}
     CREATE TABLE IF NOT EXISTS threads (
