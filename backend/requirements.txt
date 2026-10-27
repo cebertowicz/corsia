@@ -22,6 +22,8 @@ anthropic==0.100.0
 openai==2.30.0
 loguru==0.7.3
 httpx==0.28.1
+# Keyless web search (MIT).
+ddgs==9.16.1
 cryptography==48.0.0
 spake2==0.9
 packaging==26.0
