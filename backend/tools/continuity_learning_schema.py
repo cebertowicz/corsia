@@ -10,7 +10,7 @@ LEARNING_OPERATION_FIELDS = {
     "outcome": {"subject_key", "outcome", "reason", "lesson_id", "workflow_version"},
 }
 LEARNING_REQUIRED_FIELDS = {
-    "triage": ("subject_key", "tier", "cause", "new_work", "target_file"),
+    "triage": ("subject_key", "tier"),
     "outcome": ("subject_key", "outcome"),
 }
 LEARNING_OPERATION_DESCRIPTION = (
@@ -27,16 +27,19 @@ LEARNING_FIELD_SCHEMAS: dict[str, dict[str, object]] = {
     },
     "cause": {
         "type": "string", "enum": list(CAUSES),
-        "description": "The first matching System correction cause.",
+        "description": "The first matching System correction cause. Required for a miss or serious; omit for not_correction.",
     },
-    "new_work": {"type": "string", "enum": ["yes", "no"]},
+    "new_work": {
+        "type": "string", "enum": ["yes", "no"],
+        "description": "Required for every tier but not_correction, which records only its tier.",
+    },
     "new_work_signal": {
         "type": "string", "enum": list(NEW_WORK_SIGNALS),
         "description": "Required when new_work is yes; omitted otherwise.",
     },
     "target_file": {
         "type": "string", "minLength": 1,
-        "description": "A file loaded in this turn that the correction changes.",
+        "description": "A file loaded in this turn that the correction changes. Omit when none was loaded or changed.",
     },
     "serious_lowered_reason": {
         "type": "string", "minLength": 1,

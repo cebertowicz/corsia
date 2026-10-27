@@ -228,6 +228,38 @@ async def test_prefixed_serious_effect_from_native_result_writer_is_detected() -
     assert serious_proposed(db, THREAD) is True
 
 
+def test_not_a_correction_records_only_its_tier_even_after_a_serious_effect() -> None:
+    from infra.queries import insert_message
+
+    db = _db()
+    insert_message(
+        THREAD, "tool", "send", {"turn_id": TURN, "name": "email_send"}, msg_id="tool-send", db=db,
+        created_at="2026-10-20T00:00:01+00:00",
+    )
+    with pytest.raises(ValueError, match="records only its tier"):
+        record_triage(db, thread_id=THREAD, subject_key=SUBJECT, tier="not_correction", cause="process_gap")
+
+    result = record_triage(db, thread_id=THREAD, subject_key=SUBJECT, tier="not_correction")
+
+    attributes = json.loads(db.execute(
+        "SELECT attributes FROM outcome_events WHERE event_name='learning_loop.correction_triage'"
+    ).fetchone()[0])
+    assert result["target_file"] is None
+    assert attributes["tier"] == "not_correction" and "cause" not in attributes
+
+
+def test_a_miss_needs_its_cause_but_not_a_loaded_file() -> None:
+    db = _db()
+    with pytest.raises(ValueError, match="cause is required"):
+        record_triage(db, thread_id=THREAD, subject_key=SUBJECT, tier="miss", new_work="no")
+
+    result = record_triage(
+        db, thread_id=THREAD, subject_key=SUBJECT, tier="miss", cause="cant_be_done", new_work="no",
+    )
+
+    assert result["target_file"] is None
+
+
 def test_serious_effect_with_unreadable_turn_provenance_is_refused_not_skipped() -> None:
     from infra.queries import insert_message
 

@@ -225,6 +225,16 @@ def test_reopened_issue_blames_only_the_pr_that_last_closed_it(db):
     assert {thread_id for _subject, thread_id, _attributes in _facts(db)} == {"owner"}
 
 
+def test_a_mixed_case_repo_still_finds_the_pr_owner(db):
+    register_pr("Cebertowicz/Maestro", 3191, "owner")
+    reverts = _fixture("pr_closes_merged")
+    _write_raw_facts(db, reverts["event"], map_github_outcomes(reverts["event"], reverts["payload"]), "close")
+    reopened = _fixture("issue_reopened")
+    _write_raw_facts(db, reopened["event"], map_github_outcomes(reopened["event"], reopened["payload"]), "reopen")
+
+    assert {thread_id for _subject, thread_id, _attributes in _facts(db)} == {"owner"}
+
+
 def test_red_checks_do_not_create_self_caught_corrections(db):
     failure = _fixture("workflow_run_failure")
     _write_raw_facts(db, failure["event"], map_github_outcomes(failure["event"], failure["payload"]), "red-check")

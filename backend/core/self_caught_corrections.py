@@ -1,8 +1,10 @@
 """Direct, text-free correction sources for failures observed without a person's correction.
 
 A failed plan node or a GitHub reopen or revert shows that settled work did not hold; it
-does not show who noticed, so these sources never claim a person did not (agents push under
-the person's login, so a GitHub actor cannot separate the two). These adapters only identify the authoritative target and source identity.  The
+does not show who noticed (agents push under the person's login, so a GitHub actor cannot
+separate the two). The `self_caught` source kind here therefore means only "observed from a
+state change, with no correction message from a person"; it is not a claim about who acted.
+These adapters only identify the authoritative target and source identity. The
 existing correction event writer remains the single store and the existing note,
 triage, and terminal-outcome paths remain the single lifecycle.
 """
@@ -94,9 +96,18 @@ def _artifact_owner(db, repo: str, pr: str) -> str | None:
     from infra.github_pr_identity import GITHUB_INTEGRATION, PR_TYPE
     from registry.identity_bridge import resolve_normalized_owner
 
-    artifact = resolve_normalized_owner(
-        db, GITHUB_INTEGRATION, PR_TYPE, pr_external_id(repo, pr),
-    )
+    external_id = pr_external_id(repo, pr)
+    artifact = resolve_normalized_owner(db, GITHUB_INTEGRATION, PR_TYPE, external_id)
+    if artifact is None:
+        # Outcome drafts lowercase the repo; a PR registered from the payload keeps its case.
+        cased = db.execute(
+            "SELECT external_id FROM artifact_identities WHERE integration=? AND type=? "
+            "AND lower(external_id)=? AND external_id<>? LIMIT 1",
+            (GITHUB_INTEGRATION, PR_TYPE, external_id.lower(), external_id),
+        ).fetchone()
+        artifact = None if cased is None else resolve_normalized_owner(
+            db, GITHUB_INTEGRATION, PR_TYPE, str(cased[0]),
+        )
     owner = None if artifact is None else artifact.get("parent_thread_id")
     return str(owner) if isinstance(owner, str) and owner else None
 

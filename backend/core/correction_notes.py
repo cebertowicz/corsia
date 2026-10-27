@@ -57,6 +57,7 @@ TRIAGE_STEPS = (
     "Proposed tier: none yet; you set it.\n"
     "Fix the work first. Then triage it with skill `memory-placement` section 4: "
     "set the tier, and for a Miss or Serious answer why it was missed, then watch or act. "
+    "Record the triage with `continuity_edit` operation `triage`, and how it ended with operation `outcome`. "
     "The triage is working state, not part of your reply."
 )
 
@@ -81,7 +82,8 @@ def _source_note_text(candidate: CorrectionCandidate) -> str:
         note = _note(where, candidate.quote or "", "comment")
     elif candidate.source_kind == SOURCE_KIND_SELF_CAUGHT:
         return (
-            f"Self-caught failure recorded on work you settled (source {candidate.source_id}, observed {clock}).\n"
+            f"Failure observed on work you settled, with no correction message from a person "
+            f"(source {candidate.source_id}, observed {clock}).\n"
             f"{TRIAGE_STEPS}"
         )
     else:

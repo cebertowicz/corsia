@@ -118,24 +118,12 @@ def _subject_exists(db: sqlite3.Connection, thread_id: str, subject_key: str) ->
         raise ValueError("subject_key is not a recorded correction for this thread")
 
 
-def record_triage(
-    db: sqlite3.Connection, *, thread_id: str, subject_key: str, tier: object, cause: object,
-    new_work: object, new_work_signal: object, target_file: object,
-    serious_lowered_reason: object = None,
-) -> dict[str, Any]:
-    """Write the one immutable, receipt-backed triage fact for a correction."""
-    tier_value = _require(tier, TIERS, "tier")
-    cause_value = _require(cause, CAUSES, "cause")
-    if new_work not in ("yes", "no"):
-        raise ValueError("new_work must be yes or no")
-    if new_work == "yes":
-        signal = _require(new_work_signal, NEW_WORK_SIGNALS, "new_work_signal")
-    elif new_work_signal is not None:
-        raise ValueError("new_work_signal is only allowed when new_work is yes")
-    else:
-        signal = None
+def _loaded_target(db: sqlite3.Connection, thread_id: str, target_file: object) -> str | None:
+    """The canonical path of a changed file, which must be one loaded this turn; None when none applies."""
+    if target_file is None:
+        return None
     if not isinstance(target_file, str) or not target_file.strip():
-        raise ValueError("target_file is required")
+        raise ValueError("target_file must be a non-empty path when supplied")
     from infra.config import WORKSPACE
     from tools.filesystem_gate import canonical_target_path
 
@@ -143,8 +131,41 @@ def record_triage(
     valid_targets = loaded_targets(db, thread_id)
     if target not in valid_targets:
         choices = ", ".join(valid_targets) or "(no manifest or load-receipt files recorded)"
-        raise ValueError(f"target_file is not a file loaded for this turn. Choose one of: {choices}.")
-    proposed_serious = serious_proposed(db, thread_id)
+        raise ValueError(f"target_file is not a file loaded for this turn. Choose one of: {choices}. Omit it when no loaded file was changed.")
+    return target
+
+
+def record_triage(
+    db: sqlite3.Connection, *, thread_id: str, subject_key: str, tier: object, cause: object = None,
+    new_work: object = None, new_work_signal: object = None, target_file: object = None,
+    serious_lowered_reason: object = None,
+) -> dict[str, Any]:
+    """Write the one immutable, receipt-backed triage fact for a correction.
+
+    Follows the triage in skill ``memory-placement``: a not-a-correction gets nothing
+    but its tier, a Miss or Serious answers its cause, and the file it changed is
+    named only when one was loaded.
+    """
+    tier_value = _require(tier, TIERS, "tier")
+    if tier_value == "not_correction":
+        extras = (cause, new_work, new_work_signal, target_file, serious_lowered_reason)
+        if any(value is not None for value in extras):
+            raise ValueError("a not_correction triage records only its tier")
+        cause_value = signal = target = None
+    else:
+        if cause is None and tier_value in ("miss", "serious"):
+            raise ValueError("cause is required for a miss or serious correction")
+        cause_value = None if cause is None else _require(cause, CAUSES, "cause")
+        if new_work not in ("yes", "no"):
+            raise ValueError("new_work must be yes or no")
+        if new_work == "yes":
+            signal = _require(new_work_signal, NEW_WORK_SIGNALS, "new_work_signal")
+        elif new_work_signal is not None:
+            raise ValueError("new_work_signal is only allowed when new_work is yes")
+        else:
+            signal = None
+        target = _loaded_target(db, thread_id, target_file)
+    proposed_serious = tier_value != "not_correction" and serious_proposed(db, thread_id)
     lowered = serious_lowered_reason.strip() if isinstance(serious_lowered_reason, str) else None
     if serious_lowered_reason is not None and not lowered:
         raise ValueError("serious_lowered_reason must state why Serious was lowered")
@@ -165,7 +186,7 @@ def record_triage(
         db, dedupe_key=f"{TRIAGE_EVENT}:{subject_key}", event_name=TRIAGE_EVENT,
         source="agent", provenance="agent_recorded", ts=_now(), subject_key=subject_key,
         agent_thread_id=thread_id, attributes={
-            "tier": tier_value, "cause": cause_value, "new_work": str(new_work),
+            "tier": tier_value, "cause": cause_value, "new_work": None if new_work is None else str(new_work),
             "new_work_signal": signal, "target_file": target,
             "serious_proposed": "yes" if proposed_serious else "no", "serious_lowered_reason": lowered,
         },
