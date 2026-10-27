@@ -151,6 +151,21 @@ _ISSUE_ATTRS = {
 # and the login that changed it; the item's whole label set stays out of the row.
 _LABEL_CHANGE_ATTRS = {"label": text_attr(100), "actor": login_attr()}
 
+_ASSOCIATION = enum_attr(
+    "OWNER", "MEMBER", "COLLABORATOR", "CONTRIBUTOR", "FIRST_TIME_CONTRIBUTOR",
+    "FIRST_TIMER", "MANNEQUIN", "NONE",
+)
+_PR_REPLY_ATTRS = {
+    "repo": id_attr(), "pr_number": id_attr(), "head_sha": id_attr(),
+    "author_login": login_attr(), "author_association": _ASSOCIATION,
+    "pr_author_login": login_attr(), "has_reviewer_marker": enum_attr("yes", "no"),
+    "minutes_since_pr_created": count_attr(),
+}
+_REVIEW_ATTRS = {
+    **_PR_REPLY_ATTRS, "review_id": id_attr(), "commit_id": id_attr(),
+    "state": enum_attr("approved", "changes_requested", "commented", "dismissed", "pending"),
+}
+
 ATTRIBUTE_ALLOWLISTS: dict[str, dict[str, AttributeSpec]] = {
     "test.outcome.recorded": {
         "ref_id": id_attr(),
@@ -209,6 +224,21 @@ ATTRIBUTE_ALLOWLISTS: dict[str, dict[str, AttributeSpec]] = {
         "repo": id_attr(), "check_run_id": id_attr(), "name": text_attr(200),
         "head_sha": id_attr(), "conclusion": enum_attr(*_CONCLUSION_VALUES),
         "started_at": id_attr(), "completed_at": id_attr(),
+    },
+    # Reviews and comments (events/connectors/github_reply_outcomes.py): logins, an author
+    # association, ids, a state, a path, minutes and a yes/no marker flag; never a body.
+    # A path is bounded at Linux's PATH_MAX (4096), so a real repository path is never dropped.
+    "github.pr.review.submitted": {**_REVIEW_ATTRS},
+    "github.pr.review.dismissed": {**_REVIEW_ATTRS},
+    "github.pr.review_comment.created": {
+        **_PR_REPLY_ATTRS, "comment_id": id_attr(), "commit_id": id_attr(),
+        "path": text_attr(4096), "in_reply_to_id": id_attr(),
+    },
+    "github.pr.comment.created": {**_PR_REPLY_ATTRS, "comment_id": id_attr()},
+    "github.issue.comment.created": {
+        "repo": id_attr(), "issue_number": id_attr(), "comment_id": id_attr(),
+        "author_login": login_attr(), "author_association": _ASSOCIATION,
+        "issue_author_login": login_attr(), "minutes_since_issue_created": count_attr(),
     },
     # Estimated outcome size; core/size_rating.py owns the fact's keys, enums and
     # meaning. Ids, counts and enums only: no task text or hours.

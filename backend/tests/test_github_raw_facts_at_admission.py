@@ -93,19 +93,19 @@ def test_a_duplicate_delivery_writes_nothing_and_counts_nothing(main_db):
     assert _counters(main_db) == {}, "a refused delivery is not a duplicate fact write"
 
 
-def test_a_comment_seen_by_webhook_and_poller_writes_no_facts(main_db):
+def test_a_comment_seen_by_webhook_and_poller_writes_one_fact(main_db):
     payload = {
         "action": "created",
         "repository": {"full_name": "o/r"},
         "issue": {"number": 7},
-        "comment": {"id": 9001, "body": "hello"},
+        "comment": {"id": 9001, "body": "hello", "created_at": "2026-10-26T20:00:00Z"},
     }
 
     first, _, _ = admit("issue_comment", payload, "d-comment")
     second, _, _ = admit("issue_comment", payload, "gh-notifications:issue_comment:9001")
 
     assert first.created and not second.created, "one comment object, one delivery row"
-    assert _facts(main_db) == {}
+    assert list(_facts(main_db)) == ["github:issue_comment:o/r:9001:created"]
     assert _counters(main_db) == {}
 
 

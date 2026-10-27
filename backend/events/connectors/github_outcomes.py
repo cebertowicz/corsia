@@ -9,8 +9,9 @@ dedupe promises here, and nothing more.
 The keys then split into two kinds, and a backfill has to know which is which. The
 PR open, push, close and merge keys, the issue keys and the run id plus
 ``run_attempt`` in ``github.workflow_run.completed``, the job id in
-``github.workflow_job.completed`` and the check run id plus ``completed_at`` in
-``github.check_run.completed`` are built from identities the
+``github.workflow_job.completed``, the check run id plus ``completed_at`` in
+``github.check_run.completed``, and the review or comment id (plus the action, for a
+review) in the review and comment events are built from identities the
 repository still reports — a head or merge SHA, a close timestamp, a run's
 ``run_attempt`` — so a later read can reconstruct the same key. ``github.pr.reopened``,
 ``github.pr.retargeted`` and ``github.check_suite.completed`` are keyed on the
@@ -31,7 +32,9 @@ check them.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from importlib import import_module
 from typing import Any
 
 from events.connectors import github_label_events as label_events
@@ -339,26 +342,19 @@ def _issue_drafts(payload: dict[str, Any], repo: str) -> list[OutcomeDraft]:
     if "labels" in issue:
         attrs.update(label_attributes(issue["labels"]))
     if action == "opened":
-        return [OutcomeDraft(
-            f"{subject}:opened", "github.issue.opened",
-            shape.timestamp(shape.required(issue, "created_at")), subject, attrs,
-        )]
+        opened = shape.timestamp(shape.required(issue, "created_at"))
+        return [OutcomeDraft(f"{subject}:opened", "github.issue.opened", opened, subject, attrs)]
     if issue.get("state_reason") is not None:
         attrs["state_reason"] = shape.text(issue["state_reason"])
     closed = shape.timestamp(shape.required(issue, "closed_at"))
-    return [OutcomeDraft(
-        f"{subject}:closed:{closed}", "github.issue.closed", closed, subject, attrs,
-    )]
+    return [OutcomeDraft(f"{subject}:closed:{closed}", "github.issue.closed", closed, subject, attrs)]
 
 
-def _workflow_job_drafts(payload: dict[str, Any], repo: str) -> list[OutcomeDraft]:
-    from events.connectors.github_ci_outcomes import workflow_job_drafts
-    return workflow_job_drafts(payload, repo)
-
-
-def _check_run_drafts(payload: dict[str, Any], repo: str) -> list[OutcomeDraft]:
-    from events.connectors.github_ci_outcomes import check_run_drafts
-    return check_run_drafts(payload, repo)
+def _sibling(module: str, name: str) -> Callable[[dict[str, Any], str], list[OutcomeDraft]]:
+    """A mapper in a sibling module, imported on first call: those modules import this one."""
+    def mapper(payload: dict[str, Any], repo: str) -> list[OutcomeDraft]:
+        return getattr(import_module(f"events.connectors.{module}"), name)(payload, repo)
+    return mapper
 
 
 # The public entry owns supported-action selection; private mappers consume it.
@@ -366,9 +362,12 @@ _MAPPERS = {
     "pull_request": (("opened", "synchronize", "reopened", "closed", "edited"), _pr_drafts),
     "check_suite": (("completed",), _check_suite_drafts),
     "workflow_run": (("completed",), _workflow_run_drafts),
-    "workflow_job": (("completed",), _workflow_job_drafts),
-    "check_run": (("completed",), _check_run_drafts),
+    "workflow_job": (("completed",), _sibling("github_ci_outcomes", "workflow_job_drafts")),
+    "check_run": (("completed",), _sibling("github_ci_outcomes", "check_run_drafts")),
     "issues": (("opened", "closed"), _issue_drafts),
+    "pull_request_review": (("submitted", "dismissed"), _sibling("github_reply_outcomes", "review_drafts")),
+    "pull_request_review_comment": (("created",), _sibling("github_reply_outcomes", "review_comment_drafts")),
+    "issue_comment": (("created",), _sibling("github_reply_outcomes", "issue_comment_drafts")),
 }
 # The one declaration of the label changes and issue reopens that ``label_drafts`` maps.
 _LABEL_ACTIONS = {"pull_request": ("labeled", "unlabeled"), "issues": ("reopened", "labeled", "unlabeled")}
