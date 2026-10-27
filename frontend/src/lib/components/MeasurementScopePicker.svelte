@@ -135,7 +135,7 @@
 		bind:this={trigger}
 		aria-haspopup="listbox"
 		aria-expanded={open}
-		aria-label="Measurement scope: {selectedLabel}"
+		aria-label="Showing: {selectedLabel}"
 		onclick={() => (open ? hide() : show())}
 	>
 		<span class="picker-label">{selectedLabel}</span>
@@ -161,7 +161,7 @@
 						oninput={() => (activeIndex = 0)}
 						onkeydown={onKeydown}
 					/>
-					<div class="picker-list" bind:this={listbox} id={LISTBOX_ID} role="listbox" aria-label="Measurement scopes">
+					<div class="picker-list" bind:this={listbox} id={LISTBOX_ID} role="listbox" aria-label="Projects and agents">
 						{#each groups.all as option (option.id)}
 							{@const active = option.id === activeOption?.id}
 							<button id={option.id} class="picker-option" class:active role="option" aria-selected={active} data-active={active} tabindex="-1" onclick={() => choose(option)}>

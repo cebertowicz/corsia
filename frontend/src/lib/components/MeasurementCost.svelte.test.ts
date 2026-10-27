@@ -31,6 +31,14 @@ function render(overrides: Partial<CostState> = {}) { host = document.createElem
 const text = (element: HTMLElement) => element.textContent?.replace(/\s+/g, ' ') ?? '';
 
 describe('MeasurementCost', () => {
+	it('omits the remainder when all usage records are priced', () => {
+		const card = render({ data: data({ coverage: { priced_records: 200, usage_records: 200 }, excluded: [] }) });
+		expect(text(card.querySelector('.caption') as HTMLElement)).toBe('200 of 200 usage records in Sep 28 to Oct 4 are priced.');
+	});
+	it('explains the remainder when some usage records are unpriced', () => {
+		const card = render();
+		expect(text(card.querySelector('.caption') as HTMLElement)).toBe('160 of 200 usage records in Sep 28 to Oct 4 are priced; the rest are local, unlisted or unproven prices and are not in any dollar figure.');
+	});
 	it('labels every figure as a known subtotal and states retained-record coverage and exclusions', () => {
 		const content = text(render());
 		expect(content).not.toContain('API-equivalent: list price of recorded tokens');

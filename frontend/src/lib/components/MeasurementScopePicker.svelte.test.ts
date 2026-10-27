@@ -61,7 +61,7 @@ describe('MeasurementScopePicker', () => {
 	it('names the current scope on the trigger and opens a searchable listbox', () => {
 		render();
 		const trigger = host.querySelector('.picker-trigger') as HTMLButtonElement;
-		expect(trigger.getAttribute('aria-label')).toBe('Measurement scope: All work');
+		expect(trigger.getAttribute('aria-label')).toBe('Showing: All work');
 		expect(trigger.getAttribute('aria-expanded')).toBe('false');
 		openPicker();
 		expect(panel()?.querySelector('[role="listbox"]')).not.toBeNull();
@@ -92,7 +92,7 @@ describe('MeasurementScopePicker', () => {
 
 	it('reports the chosen project on the trigger and returns the picked agent', () => {
 		const { chosen } = render({ agent: 'ag-b' });
-		expect((host.querySelector('.picker-trigger') as HTMLButtonElement).getAttribute('aria-label')).toBe('Measurement scope: Boreas');
+		expect((host.querySelector('.picker-trigger') as HTMLButtonElement).getAttribute('aria-label')).toBe('Showing: Boreas');
 		openPicker();
 		search('bugs');
 		const second = [...document.querySelectorAll('.picker-option')].find((row) => row.querySelector('.option-detail')?.textContent === 'Boreas') as HTMLButtonElement;

@@ -180,7 +180,7 @@ describe('MeasurementAgentsTable', () => {
 		render(state([], { error: 'Could not load the agents table.' }));
 		expect(host.textContent).toContain('Could not load the agents table.');
 		expect(host.querySelector('[role="alert"]')).not.toBeNull();
-		expect(host.textContent).not.toContain('No active agents in this scope.');
+		expect(host.textContent).not.toContain('No active agents for this selection.');
 		expect(host.querySelector('button')?.textContent).toBe('Retry');
 	});
 
@@ -188,12 +188,12 @@ describe('MeasurementAgentsTable', () => {
 		// Only the state that cannot answer is dropped: a retry keeps what it can still claim.
 		render(state([agentRow()], { error: 'Could not load the agents table.' }));
 		expect(host.querySelector('table')).not.toBeNull();
-		expect(host.textContent).not.toContain('No active agents in this scope.');
+		expect(host.textContent).not.toContain('No active agents for this selection.');
 	});
 
 	it('says there are no agents rather than an empty grid', () => {
 		render(state([]));
-		expect(host.textContent).toContain('No active agents in this scope.');
+		expect(host.textContent).toContain('No active agents for this selection.');
 		expect(host.textContent).not.toContain('Could not load');
 		expect(host.querySelector('table')).toBeNull();
 	});

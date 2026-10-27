@@ -99,7 +99,7 @@
 	{:else if agents.error && !agents.rows.length}
 		<p class="error" role="alert">{agents.error}<button onclick={() => void loadMeasurementAgents()}>Retry</button></p>
 	{:else if !agents.rows.length}
-		<p class="empty">No active agents in this scope.</p>
+		<p class="empty">No active agents for this selection.</p>
 	{:else}
 		<!-- A scrollable table is only reachable by keyboard if the scroll box itself
 		     takes focus, which is what the platform expects of a panable region; the

@@ -91,7 +91,7 @@
 			{state.error}<button onclick={() => void loadMeasurementModels()}>Retry</button>
 		</div>
 	{:else if !rows.length}
-		<p class="empty">No model activity in this scope.</p>
+		<p class="empty">No models were used for this selection.</p>
 	{:else}
 		<div class="body">
 			<div class="table-wrap">
