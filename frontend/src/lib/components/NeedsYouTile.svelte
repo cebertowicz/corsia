@@ -67,7 +67,7 @@
 		gap: var(--space-3);
 		min-width: 0;
 		width: 100%;
-		padding: var(--space-2) var(--space-2) var(--space-2) 2px;
+		padding: var(--space-2) var(--space-2) var(--space-2) calc(var(--space-1) / 2);
 		border: 0;
 		border-radius: var(--radius-sm);
 		background: transparent;
@@ -84,7 +84,7 @@
 	/* Inset: the message clips at the prose edge, so an outward ring would be cut off.
 	   The row's 2 px left padding (always there, so focus moves nothing) is the room the ring takes beside the tile. */
 	button.tile:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-	@media (pointer: coarse) { .tile { min-height: 44px; } }
+	@media (pointer: coarse) { .tile { min-height: var(--touch-target); } }
 	.text { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; }
 	.title {
 		flex: 1 1 auto;
@@ -124,7 +124,7 @@
 	   the sidebar, the plan and the attention dock. */
 	.ctx :global(.state) { display: inline-flex; flex: 0 0 auto; align-items: center; gap: var(--space-1); }
 	.ctx :global(.state.ask) { color: var(--amber-text); }
-	.ctx :global(.dot) { flex: 0 0 auto; width: 8px; height: 8px; border-radius: var(--radius-circle); background: var(--amber); }
+	.ctx :global(.dot) { flex: 0 0 auto; width: var(--space-2); height: var(--space-2); border-radius: var(--radius-circle); background: var(--amber); }
 	/* A retired artifact keeps its name but is visibly out of reach: muted glyph, a dashed tile edge in the
 	   stronger border colour so it holds in dark mode too, no chevron. */
 	.tile.gone :global(.ic.filled) { background: transparent; outline: 1px dashed var(--text-tertiary); outline-offset: -1px; }

@@ -135,7 +135,7 @@
 </div>
 
 <style>
-	.step-row { max-width: 760px; margin: 0 auto var(--space-3); }
+	.step-row { max-width: var(--transcript-max-width); margin: 0 auto var(--space-3); }
 	.stack-item + .stack-item { margin-top: var(--space-2); }
 	.slot { position: relative; max-width: 100%; }
 	.slot.ready { transition: height var(--dur-standard) var(--ease-snap); }
@@ -150,7 +150,7 @@
 	}
 	.slot.ready .slot-layer.active { opacity: 1; pointer-events: auto; }
 	/* The tile's lead slot is 36 px, as an artifact's type tile; the mark sits centred in it. */
-	.lead { display: flex; flex: 0 0 auto; align-items: center; justify-content: center; width: 36px; height: 36px; }
+	.lead { display: flex; flex: 0 0 auto; align-items: center; justify-content: center; width: var(--artifact-tile-size); height: var(--artifact-tile-size); }
 	.more { flex: 0 0 auto; }
 	.sep { flex: 0 0 auto; color: var(--text-tertiary); }
 	/* Where the tile has a chevron: the step's action, in its own word. */

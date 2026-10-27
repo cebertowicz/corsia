@@ -14,7 +14,7 @@
 
 <style>
 	.state-icon {
-		display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px;
+		display: inline-flex; align-items: center; justify-content: center; width: var(--plan-state-icon-size); height: var(--plan-state-icon-size);
 		flex: none; border: 1px solid var(--border); border-radius: var(--radius-circle);
 		color: var(--text-secondary); font-size: var(--text-caption); font-weight: var(--fw-bold);
 		line-height: 1;
