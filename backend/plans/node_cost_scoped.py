@@ -1,49 +1,22 @@
-"""Cost reads scoped to the nodes a read lists (#731 S2-1, S2-2), not the whole plan."""
+"""Cost reads scoped to the nodes a read lists (#731 S2-1, S2-2), not the whole plan.
+
+A scoped read loads the shape of everything it projects first: the listed nodes, the
+subtrees it rolls, the plans attached beneath them, and each follow-up lineage with the
+rows its total reads from outside it. Then it reads every one of those nodes' own facts,
+and prices the ledger for them and the commitments asked, once; then it sums. However
+many plans are in scope, no plan reads or prices its own cost apart from the others.
+"""
 
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Mapping
+from collections.abc import Collection
 from datetime import datetime, timezone
 
 from infra.packed_rows import fetch_all
-from plans import hierarchy, node_cost, node_cost_initiative, node_time, service
+from plans import hierarchy, node_cost, node_cost_initiative, node_time, service, usage_cost
 
 _CHUNK = 400
-
-
-Known = tuple[dict[str, dict], dict[str, node_time.Span]]
-
-
-def own_timed(
-    node_ids, *, db, now: datetime | None = None, dollars: Mapping[str, dict] | None = None,
-) -> Known:
-    """These nodes' own cost facts and time intervals, unsettled: what a later roll reuses.
-
-    ``dollars`` is these nodes' ``usage_cost.usage_dollars`` when the caller already priced them.
-    """
-    ids = sorted({str(value) for value in node_ids})
-    with service._connection(db) as connection:
-        return node_cost.own_many_timed(ids, db=connection, now=now, dollars=dollars)
-
-
-def own_listed(node_ids, *, db, now: datetime | None = None, known: Known | None = None) -> dict[str, dict]:
-    """Each of these nodes' own cost, settled, and nothing rolled: the cost of the ids asked."""
-    own = (known or own_timed(node_ids, db=db, now=now))[0]
-    return {str(node_id): node_cost._settled(own[str(node_id)]) for node_id in node_ids}
-
-
-def _own_with(connection, ids: list[str], clock: datetime, known: Known | None) -> Known:
-    """Own facts for ``ids``: ``known`` ones reused, the rest read in one batch."""
-    wanted = set(ids)
-    own = {k: v for k, v in (known[0] if known else {}).items() if k in wanted}
-    spans = {k: v for k, v in (known[1] if known else {}).items() if k in wanted}
-    missing = [node_id for node_id in ids if node_id not in own]
-    if missing:
-        more_own, more_spans = node_cost.own_many_timed(missing, db=connection, now=clock)
-        own.update(more_own)
-        spans.update(more_spans)
-    return own, spans
 
 
 _SUBTREE_SQL = f"""
@@ -79,48 +52,33 @@ def _by_plan(connection, node_ids) -> dict[str, list[str]]:
     return grouped
 
 
-def rolled_many(
-    node_ids, *, db, now: datetime | None = None, known: Known | None = None,
-) -> dict[str, dict]:
-    """Each node's rolled cost, read from the subtrees of these nodes alone (archived nodes included).
+def _carried_plans(connection, plan_id: str, rows: list[dict]) -> tuple[dict[str, str], list[str], dict, dict]:
+    """The plans these rows' steps carry: which step carries which, and every plan beneath, loaded.
 
-    The cost of a node is its subtree and the plans its steps carry, never the rest of its
-    plan: a leaf costs its own rows, a container its work (the limit S5 lifts). All the
-    nodes of one plan are rolled in one pass over the union of their subtrees. ``known`` is
-    own cost facts already read (``own_timed``), reused rather than read again.
+    Returns the carrying steps, the carried plans' whole tree, its nodes by plan and its own
+    attachments. Nothing here reads a cost.
     """
-    clock = now or datetime.now(timezone.utc)
-    found: dict[str, dict] = {}
-    with service._connection(db) as connection:
-        for plan_id, ids in _by_plan(connection, node_ids).items():
-            rows = _subtree_rows(connection, plan_id, ids)
-            ids_in = [str(row["id"]) for row in rows]
-            in_subtree = set(ids_in)
-            carried = {
-                step: child for step, child in node_cost._attached_children(connection, [plan_id]).items()
-                if step in in_subtree
-            }
-            totals: dict[str, dict] = {}
-            plan_spans: dict[str, node_time.Span] = {}
-            if carried:
-                child_tree = [
-                    str(row["id"])
-                    for row in hierarchy.descendants(connection, sorted(set(carried.values())))
-                ]
-                loaded = node_cost._load_plans(connection, child_tree, clock)
-                _, totals, plan_spans = node_cost._roll_plans_with_totals(child_tree, *loaded)
-            own, spans = _own_with(connection, ids_in, clock, known)
-            rolled, _span = node_cost._rollup_one_plan(
-                rows, own, carried, {child: totals[child] for child in set(carried.values())},
-                spans, plan_spans,
-            )
-            found.update({node_id: node_cost._settled(rolled[node_id]) for node_id in ids})
-    return found
+    in_rows = {str(row["id"]) for row in rows}
+    carried = {
+        step: child for step, child in node_cost._attached_children(connection, [plan_id]).items()
+        if step in in_rows
+    }
+    if not carried:
+        return {}, [], {}, {}
+    tree = [str(row["id"]) for row in hierarchy.descendants(connection, sorted(set(carried.values())))]
+    return carried, tree, node_cost._plan_nodes(connection, tree), node_cost._attached_children(connection, tree)
 
 
-def rolled_of(node_id: str, *, db, now: datetime | None = None) -> dict:
-    """One node's rolled cost (``rolled_many`` of one)."""
-    return rolled_many([node_id], db=db, now=now)[node_id]
+def _roll_shape(connection, plan_id: str, ids: list[str]) -> dict:
+    """What rolling these nodes of one plan reads: their subtrees and the plans those carry.
+
+    ``needs`` is every node whose own cost the roll sums.
+    """
+    rows = _subtree_rows(connection, plan_id, ids)
+    carried, tree, child_nodes, child_attached = _carried_plans(connection, plan_id, rows)
+    needs = [str(row["id"]) for row in [*rows, *(row for found in child_nodes.values() for row in found)]]
+    return {"ids": ids, "rows": rows, "carried": carried, "tree": tree,
+            "child_nodes": child_nodes, "child_attached": child_attached, "needs": needs}
 
 
 def _linked(connection, ids: set[str]) -> set[str]:
@@ -141,46 +99,93 @@ def _linked(connection, ids: set[str]) -> set[str]:
     return found
 
 
-def initiatives_of(
-    node_ids, *, db, now: datetime | None = None, known: Known | None = None,
-) -> dict[str, dict | None]:
-    """The initiative total (``node_cost_initiative``) of each of these nodes, None for one in no lineage.
+def _lineage_shape(connection, plan_id: str, ids: list[str]) -> dict | None:
+    """What the initiative totals of these nodes of one plan read; None when none is in a lineage.
 
     The lineage of a node is its follow-up connected component, which never leaves its plan.
     That component and everything beneath its members is loaded, with the plans attached
     beneath them, and the same totals are computed over it as over the whole plan: a node's
     initiative does not depend on the rest of its plan's history.
     """
+    members = _linked(connection, set(ids))
+    if not members:
+        return None
+    while True:
+        grown = members | _linked(connection, members)
+        if grown == members:
+            break
+        members = grown
+    if len(members) < 2:
+        return None
+    rows = _subtree_rows(connection, plan_id, sorted(members))
+    carried, _tree, child_nodes, child_attached = _carried_plans(connection, plan_id, rows)
+    expanded = node_cost_initiative.expand(
+        connection, {plan_id: rows, **child_nodes}, {**carried, **child_attached},
+    )
+    if expanded is None:
+        return None
+    return {"ids": ids, "members": members, "expanded": expanded, "needs": node_cost_initiative.node_ids(expanded)}
+
+
+def _roll(shape: dict, own: dict, spans: dict) -> dict[str, dict]:
+    """Each asked node's rolled cost, settled, from its loaded shape and the read own facts."""
+    totals: dict[str, dict] = {}
+    plan_spans: dict[str, node_time.Span] = {}
+    if shape["carried"]:
+        _, totals, plan_spans = node_cost._roll_plans_with_totals(
+            shape["tree"], shape["child_nodes"], own, shape["child_attached"], spans,
+        )
+    rolled, _span = node_cost._rollup_one_plan(
+        shape["rows"], own, shape["carried"],
+        {child: totals[child] for child in set(shape["carried"].values())}, spans, plan_spans,
+    )
+    return {node_id: node_cost._settled(rolled[node_id]) for node_id in shape["ids"]}
+
+
+def project(
+    listed, wanted, commitment_ids: Collection[str], *, db, now: datetime | None = None,
+) -> tuple[dict[str, dict], dict[str, dict], dict[str, dict | None], dict[str, dict]]:
+    """The cost figures of one scoped read, with one priced ledger read for all of them.
+
+    Returns each ``listed`` node's own cost (settled, nothing rolled), each ``wanted``
+    node's rolled cost and initiative total (None for one in no lineage), and the
+    ``usage_cost.usage_dollars`` of ``commitment_ids`` for ``commitment_cost.project_many``.
+    The cost of a node is its subtree and the plans its steps carry, never the rest of its
+    plan: a leaf costs its own rows, a container its work (the limit S5 lifts).
+    """
     clock = now or datetime.now(timezone.utc)
-    found: dict[str, dict | None] = {str(value): None for value in node_ids}
+    listed = sorted({str(value) for value in listed})
     with service._connection(db) as connection:
-        for plan_id, ids in _by_plan(connection, node_ids).items():
-            members = _linked(connection, set(ids))
-            if not members:
-                continue
-            while True:
-                grown = members | _linked(connection, members)
-                if grown == members:
-                    break
-                members = grown
-            if len(members) < 2:
-                continue
-            rows = _subtree_rows(connection, plan_id, sorted(members))
-            row_ids = {str(row["id"]) for row in rows}
-            attached = {
-                step: child for step, child in node_cost._attached_children(connection, [plan_id]).items()
-                if step in row_ids
-            }
-            nodes_by_plan: dict[str, list[dict]] = {plan_id: rows}
-            own = _own_with(connection, sorted(row_ids), clock, known)[0]
-            if attached:
-                child_tree = [
-                    str(row["id"]) for row in hierarchy.descendants(connection, sorted(set(attached.values())))
-                ]
-                child_nodes, child_own, child_attached, _spans = node_cost._load_plans(connection, child_tree, clock)
-                nodes_by_plan.update(child_nodes)
-                own.update(child_own)
-                attached = {**attached, **child_attached}
-            totals = node_cost_initiative.totals(connection, (nodes_by_plan, own, attached), clock)
-            found.update({node_id: totals.get(node_id) for node_id in ids if node_id in members})
-    return found
+        grouped = _by_plan(connection, wanted)
+        rolls = [_roll_shape(connection, plan_id, ids) for plan_id, ids in grouped.items()]
+        lineages = [
+            shape for plan_id, ids in grouped.items()
+            if (shape := _lineage_shape(connection, plan_id, ids)) is not None
+        ]
+        needed = sorted({*listed, *(node_id for shape in [*rolls, *lineages] for node_id in shape["needs"])})
+        dollars = usage_cost.usage_dollars(connection, {"plan_node_id": needed, "plan_commitment_id": commitment_ids})
+        own, spans = node_cost.own_many_timed(needed, db=connection, now=clock, dollars=dollars["plan_node_id"])
+    rolled: dict[str, dict] = {}
+    for shape in rolls:
+        rolled.update(_roll(shape, own, spans))
+    initiatives: dict[str, dict | None] = {str(value): None for value in wanted}
+    for shape in lineages:
+        totals = node_cost_initiative.totals(shape["expanded"], own)
+        initiatives.update({node_id: totals.get(node_id) for node_id in shape["ids"] if node_id in shape["members"]})
+    settled = {node_id: node_cost._settled(own[node_id]) for node_id in listed}
+    return settled, rolled, initiatives, dollars["plan_commitment_id"]
+
+
+def rolled_many(node_ids, *, db, now: datetime | None = None) -> dict[str, dict]:
+    """Each node's rolled cost, read from the subtrees of these nodes alone (archived nodes included)."""
+    return project([], node_ids, (), db=db, now=now)[1]
+
+
+def rolled_of(node_id: str, *, db, now: datetime | None = None) -> dict:
+    """One node's rolled cost (``rolled_many`` of one)."""
+    return rolled_many([node_id], db=db, now=now)[node_id]
+
+
+def initiatives_of(node_ids, *, db, now: datetime | None = None) -> dict[str, dict | None]:
+    """The initiative total (``node_cost_initiative``) of each of these nodes, None for one in no lineage."""
+    return project([], node_ids, (), db=db, now=now)[2]

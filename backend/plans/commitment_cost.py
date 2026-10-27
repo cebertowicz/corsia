@@ -209,7 +209,7 @@ def project_many(
     """Aggregate many commitments with a bounded query count.
 
     ``dollars`` is each commitment's ``model_cost_usd`` when the caller already priced the
-    ledger (``node_cost.project_with_commitments``); None prices it here.
+    ledger for every one of ``commitment_ids`` (``usage_cost.amount``); None prices it here.
     """
 
     ids = sorted({str(value) for value in commitment_ids})
@@ -219,14 +219,12 @@ def project_many(
     with service._connection(db) as connection:
         loaded = _load(ids, db=connection)
         if dollars is None:
-            dollars = usage_cost.usage_dollars(
-                connection, {"plan_commitment_id": list(loaded["usage"])},
-            )["plan_commitment_id"]
+            dollars = usage_cost.usage_dollars(connection, {"plan_commitment_id": ids})["plan_commitment_id"]
         result = {}
         for commitment_id in ids:
             nodes = loaded["nodes"].get(commitment_id, [])
             usage = loaded["usage"].get(commitment_id, [])
-            priced = dollars.get(commitment_id, {})
+            priced = usage_cost.amount(dollars, commitment_id)
             turns = loaded["turns"].get(commitment_id, [])
             attempts = loaded["attempts"].get(commitment_id, [])
             unmeasured = _unmeasured_rows(
@@ -243,8 +241,8 @@ def project_many(
                     ),
                 },
                 "model_cost_usd": {
-                    "known": priced.get("known"),
-                    "unknown_rows": priced.get("unknown_rows", 0) + unmeasured,
+                    "known": priced["known"],
+                    "unknown_rows": priced["unknown_rows"] + unmeasured,
                 },
                 # Calls that began but could not be recorded: a defect, so no
                 # total presented here is silently short.

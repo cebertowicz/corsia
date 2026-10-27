@@ -24,15 +24,18 @@ def usage_dollars(connection, ids: Mapping[str, Collection[str]]) -> dict[str, d
     """Each id's ``model_cost_usd``: Measurement's API-equivalent price of its ``llm_usage`` rows.
 
     ``ids`` maps a ledger column (``plan_node_id``, ``plan_commitment_id``) to the ids it names;
-    the result maps each column to ``{id: amount}``. All columns are priced in one grouped
-    read, so a request needing node and commitment figures prices the ledger once. A row with
+    the result maps each column to ``{id: amount}`` for every id named, one with no rows
+    included. All columns are priced in one grouped read, so a request needing node and
+    commitment figures prices the ledger once. A row with
     no API price (a local model: ``not_api_priced``) adds no dollars and is not unknown; a row
     Measurement cannot price (no list price, refused by admission, an unproven context tier,
     an unpublished cache rate) counts in ``unknown_rows``. ``known`` is None when none of the
     id's rows has a price.
     """
-    dollars: dict[str, dict[str, dict]] = {column: {} for column in ids}
     wanted = {column: sorted({str(value) for value in values}) for column, values in ids.items() if values}
+    dollars: dict[str, dict[str, dict]] = {
+        column: {value: {"known": None, "unknown_rows": 0} for value in wanted.get(column, ())} for column in ids
+    }
     if not wanted:
         return dollars
     # Each id list is one JSON parameter, so no list is chunked and no row is read twice.
@@ -52,7 +55,7 @@ def usage_dollars(connection, ids: Mapping[str, Collection[str]]) -> dict[str, d
         for column, listed in members.items():
             if str(row[column]) not in listed:
                 continue
-            amount = dollars[column].setdefault(str(row[column]), {"known": None, "unknown_rows": 0})
+            amount = dollars[column][str(row[column])]
             if row["outcome"] == "priced":
                 amount["known"] = (amount["known"] or 0) + row["dollars"]
             elif row["outcome"] != "not_api_priced":
@@ -60,10 +63,25 @@ def usage_dollars(connection, ids: Mapping[str, Collection[str]]) -> dict[str, d
     return dollars
 
 
+def amount(dollars: Mapping[str, dict], item_id: str) -> dict:
+    """``item_id``'s amount in a ``usage_dollars`` answer, which names every id it priced.
+
+    An id it never priced is a caller's defect, not "no API price": it fails here rather
+    than read as no dollars and nothing unknown.
+    """
+    try:
+        return dollars[item_id]
+    except KeyError:
+        raise LookupError(f"{item_id} is not in the priced read passed in; price every projected id") from None
+
+
 def own_usage(
     connection, node_ids: list[str], dollars: Mapping[str, dict] | None, rows_in: Callable,
 ) -> dict[str, dict]:
-    """Each node's own tokens and ``model_cost_usd``; ``dollars`` None prices them here."""
+    """Each node's own tokens and ``model_cost_usd``; ``dollars`` None prices them here.
+
+    A ``dollars`` map passed in must cover every node with usage (``amount``).
+    """
     rows = rows_in(
         connection,
         f"""SELECT plan_node_id,{USAGE_TOKENS} FROM llm_usage
@@ -71,13 +89,11 @@ def own_usage(
         node_ids,
     )
     if dollars is None:
-        dollars = usage_dollars(
-            connection, {"plan_node_id": [str(row["plan_node_id"]) for row in rows]},
-        )["plan_node_id"]
+        dollars = usage_dollars(connection, {"plan_node_id": node_ids})["plan_node_id"]
     return {
         str(row["plan_node_id"]): {
             "tokens": {"known": row["tokens"], "unknown_rows": row["unknown_tokens"]},
-            "model_cost_usd": dollars.get(str(row["plan_node_id"]), {"known": None, "unknown_rows": 0}),
+            "model_cost_usd": amount(dollars, str(row["plan_node_id"])),
         }
         for row in rows
     }

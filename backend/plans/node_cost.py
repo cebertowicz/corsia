@@ -262,7 +262,7 @@ def _rollup_one_plan(
     rolled: dict[str, dict] = {}
     carried: dict[str, node_time.Span] = {}
     for node_id in reversed(order):
-        total = dict(own.get(node_id, _empty_own()))
+        total = dict(own[node_id])
         parts = [spans.get(node_id, node_time.empty())]
         for child_id in children[node_id]:
             total = _add(total, rolled[child_id])
@@ -309,39 +309,32 @@ def project_with_commitments(
 ) -> tuple[dict[str, dict[str, dict]], dict[str, dict | None], dict[str, dict] | None]:
     """``project_with_initiatives`` plus each of ``commitment_ids``' ``model_cost_usd``.
 
-    The commitments are priced in the same ledger read as the nodes, for
+    Every node the projection sums (the plans' nodes and the rows their initiative totals
+    read from outside them) and the commitments are priced in one ledger read, for
     ``commitment_cost.project_many(dollars=...)``; None when no plan was read.
     """
+    from plans import node_cost_initiative
+
     ids = sorted({str(value) for value in plan_ids})
     if not ids:
         return {}, {}, None
     clock = now or datetime.now(timezone.utc)
     with service._connection(db) as connection:
         tree = [str(row["id"]) for row in hierarchy.descendants(connection, ids)]
-        loaded, dollars = _load_priced(connection, tree, clock, commitment_ids)
-        found = _lineage_totals(connection, loaded[:3], clock) if initiatives else {}
-    nodes_by_plan, own, attached, spans = loaded
+        nodes_by_plan = _plan_nodes(connection, tree)
+        attached = _attached_children(connection, tree)
+        lineages = node_cost_initiative.expand(connection, nodes_by_plan, attached) if initiatives else None
+        node_ids = node_cost_initiative.node_ids(lineages) if lineages else [
+            str(row["id"]) for rows in nodes_by_plan.values() for row in rows
+        ]
+        dollars = usage_cost.usage_dollars(connection, {"plan_node_id": node_ids, "plan_commitment_id": commitment_ids})
+        own, spans = own_many_timed(node_ids, db=connection, now=clock, dollars=dollars["plan_node_id"])
+    found = node_cost_initiative.totals(lineages, own) if lineages else {}
     by_plan = _roll_plans(tree, nodes_by_plan, own, attached, spans)
     return by_plan, {
         row["id"]: found.get(row["id"])
         for plan_id in tree for row in nodes_by_plan[plan_id]
-    } if initiatives else {}, dollars
-
-
-def _load_plans(connection, tree: list[str], clock) -> tuple[dict, dict, dict, dict]:
-    """Nodes, own costs, attachments and own time spans, in batch reads."""
-    return _load_priced(connection, tree, clock, ())[0]
-
-
-def _load_priced(
-    connection, tree: list[str], clock, commitment_ids: Collection[str],
-) -> tuple[tuple[dict, dict, dict, dict], dict[str, dict]]:
-    """``_load_plans`` plus ``commitment_ids``' dollars, priced in one read with the nodes'."""
-    nodes_by_plan = _plan_nodes(connection, tree)
-    node_ids = [str(row["id"]) for rows in nodes_by_plan.values() for row in rows]
-    dollars = usage_cost.usage_dollars(connection, {"plan_node_id": node_ids, "plan_commitment_id": commitment_ids})
-    own, spans = own_many_timed(node_ids, db=connection, now=clock, dollars=dollars["plan_node_id"])
-    return (nodes_by_plan, own, _attached_children(connection, tree), spans), dollars["plan_commitment_id"]
+    } if initiatives else {}, dollars["plan_commitment_id"]
 
 
 def _roll_plans(
@@ -375,7 +368,7 @@ def _roll_plans_with_totals(
             spans, plan_spans,
         )
         by_plan[plan_id] = {
-            node_id: {"own": _settled(own.get(node_id, _empty_own())),
+            node_id: {"own": _settled(own[node_id]),
                       "rolled": _settled(rolled[node_id])}
             for node_id in rolled
         }
@@ -386,9 +379,3 @@ def _roll_plans_with_totals(
         totals[plan_id] = total
     return by_plan, totals, plan_spans
 
-
-def _lineage_totals(connection, loaded: tuple[dict, dict, dict], clock) -> dict[str, dict]:
-    """Each lineage member's initiative total (``node_cost_initiative`` owns the membership)."""
-    from plans import node_cost_initiative
-
-    return node_cost_initiative.totals(connection, loaded, clock)
