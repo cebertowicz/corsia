@@ -9,8 +9,7 @@ from infra import state
 async def ready_for_turn(target, *, load_for):
     """Resolve live local readiness before binding a native Turn."""
     from infra.db_async import run_in_db
-    from infra.send_target import Admission
-    from infra.unavailable_model_recovery import model_admission
+    from infra.send_target import Admission, classify_target_admission, ready_target
     from llm.local_model_load import omlx_seat_and_model
     from llm.providers.omlx_lifecycle import read_loaded
 
@@ -20,10 +19,10 @@ async def ready_for_turn(target, *, load_for):
     loaded = await read_loaded({"server_id": seat[0]})
     if loaded is None:
         target = replace(target, available=False, availability_reason="unreachable")
-    target, admission = await run_in_db(
-        model_admission, target, load_for=load_for,
-        loaded={row["identifier"] for row in loaded} if loaded is not None else None,
+    target = await run_in_db(
+        ready_target, target, loaded={row["identifier"] for row in loaded} if loaded is not None else None,
     )
+    admission = classify_target_admission(target, load_for=load_for)
     if admission.kind not in ("run", "load"):
         raise admission.error(target.catalog_id)
     return target, admission
