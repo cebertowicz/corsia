@@ -63,8 +63,10 @@ async def test_snapshot_lists_and_switches_only_existing_tab_refs(monkeypatch):
     assert await tool.execute(tab='t9', _thread_id='thread') == 'Error: no tab t9'
     assert (await tool.execute(tab='new', _thread_id='thread')).startswith('Error:')
     assert (await tool.execute(tab='close', _thread_id='thread')).startswith('Error:')
+    assert await tool.execute(tab='t3', list_tabs=True, _thread_id='thread') == 'ok'
     assert calls == [
         (['tab'], 'thread'), (['tab', 't2'], 'thread'), (['snapshot'], 'thread'), (['tab', 't9'], 'thread'),
+        (['tab', 't3'], 'thread'), (['tab'], 'thread'),
     ]
     assert browser_session_commands._saved_command(('tab', 't2'), pane=False)
     assert not browser_session_commands._saved_command(('tab', 'new'), pane=False)

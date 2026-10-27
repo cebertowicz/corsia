@@ -35,7 +35,7 @@ class BrowserSnapshotTool(Tool):
                 "type": "boolean",
                 "description": "Return the open tabs instead of the page tree. Default: false."
             },
-            "tab": {"type": "string", "description": "A tab ref from list_tabs to make active before the snapshot."},
+            "tab": {"type": "string", "description": "A tab ref from list_tabs to make active before the snapshot or tab list."},
         },
         "required": [],
     }
@@ -44,14 +44,14 @@ class BrowserSnapshotTool(Tool):
         self, interactive_only: bool = False, list_tabs: bool = False, tab: str | None = None, **kwargs: Any,
     ) -> str:
         thread_id, _project_id = _execution_context(kwargs)
-        if list_tabs:
-            return await _run(["tab"], thread_id=thread_id)
         if tab is not None:
             if not tab or tab in {"new", "close", "list"} or tab.startswith("-") or any(c.isspace() for c in tab):
                 return "Error: use a tab ref from list_tabs."
             switched = await _run(["tab", tab], thread_id=thread_id)
             if switched.startswith("Error"):
                 return switched
+        if list_tabs:
+            return await _run(["tab"], thread_id=thread_id)
         args = ["snapshot"]
         if interactive_only:
             args.append("-i")
