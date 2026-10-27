@@ -1,0 +1,20 @@
+/* Comment marks and the selection action are shared by documents and chat. */
+.cm-comment-anchor {
+	background-color: color-mix(in srgb, var(--amber) 13%, transparent);
+	border-bottom: 2px solid color-mix(in srgb, var(--amber) 42%, transparent);
+	transition: background-color 0.15s;
+}
+.cm-comment-pending {
+	background-color: color-mix(in srgb, var(--amber) 20%, transparent);
+	border-bottom: 2px dashed var(--amber);
+}
+.cm-comment-focused {
+	background-color: color-mix(in srgb, var(--amber) 26%, transparent);
+	border-bottom-color: var(--amber);
+}
+.sel-comment { position: fixed; z-index: 40; translate: 0 -50%; display: flex; align-items: center; gap: 5px; font-size: var(--text-caption); font-weight: var(--fw-semibold); color: var(--accent-on-fill); background: var(--accent-fill); border: none; border-radius: var(--radius-pill); padding: 5px 12px 5px 10px; box-shadow: var(--shadow-chip), var(--glass-rim); cursor: pointer; animation: selpop var(--dur-tight) ease-out; }
+.sel-comment.above { translate: 0 -100%; }
+.sel-comment.below { translate: 0 0; }
+.sel-comment:hover { filter: brightness(1.08); }
+@keyframes selpop { from { opacity: 0; transform: scale(0.9); } to { opacity: 1; transform: scale(1); } }
+@media (max-width: 768px) { .sel-comment { padding: 9px 16px 9px 13px; font-size: var(--text-subhead); gap: 7px; } .sel-comment svg { width: 16px; height: 16px; } }
