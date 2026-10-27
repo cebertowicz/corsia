@@ -9,6 +9,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 
 - Claude Code accounts you added keep working when CORSIA's data moves.
 - Browser addresses no longer need `https://` typed in; local loopback addresses use `http://` by default.
+- A signed-in app in Connected apps now reads "Figma — you@example.com" on its row, with the account shortening first on a narrow screen, and a link in chat can open an app waiting for approval with its Approve button ready.
 - Setup now opens in a normal-sized window in the middle of the screen, and the app grows to fill the screen when setup finishes.
 - A Claude Code you only just signed in to is no longer offered for import: only skills and notes you made there are brought over.
 - The "Bring over what your other tools know" step no longer shows twice in the setup plan.
