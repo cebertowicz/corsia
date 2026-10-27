@@ -32,11 +32,12 @@ def test_no_call_envelope_is_unavailable_and_contains_result(returncode):
     assert str(exc.value).index("specific CLI refusal") < str(exc.value).index("subtype=")
 
 
-def test_envelope_detail_keeps_raw_output_when_stderr_exists():
+def test_envelope_detail_keeps_raw_output_and_stderr():
     with pytest.raises(CCUnavailableError) as exc:
         raise_cli_failure(1, envelope(), "diagnostic")
     assert '"is_error"' in str(exc.value)
     assert str(exc.value).index("specific CLI refusal") < str(exc.value).index('"is_error"')
+    assert "stderr: diagnostic" in str(exc.value)
 
 
 @pytest.mark.parametrize("usage", [None, {}])

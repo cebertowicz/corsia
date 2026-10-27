@@ -146,8 +146,11 @@ def raise_cli_failure(returncode: int, output: str, stderr: str) -> NoReturn:
     prefix = " | ".join(part for part in (result, signals) if part)
     prefix = f"{prefix} | " if prefix else ""
     subtype = envelope.get("subtype") if envelope else None
+    raw = (stderr or output)[:200]
+    if envelope:
+        raw = f"{output[:200]} | stderr: {stderr[:200]}" if stderr else output[:200]
     raise classify_cc_error(
         f"{output} {stderr} subtype={subtype}",
-        f"claude -p failed (rc={returncode}): {prefix}{(output if envelope else stderr or output)[:200]}",
+        f"claude -p failed (rc={returncode}): {prefix}{raw}",
         envelope,
     )
