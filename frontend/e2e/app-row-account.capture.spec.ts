@@ -90,7 +90,7 @@ test.describe('App row account capture', () => {
 			await expect(meta).toHaveText('Connected · Signed in · 5 actions · All projects');
 			expect(await meta.evaluate((node) => Math.round(node.getBoundingClientRect().height / parseFloat(getComputedStyle(node).lineHeight)))).toBe(1);
 			await shot(page, `06-no-account-collapsed-${width}-${theme}`);
-			await linear.getByRole('button', { name: 'Linear', exact: true }).click();
+			await linear.getByRole('button', { name: 'Linear Connected · Signed in · 5 actions · All projects', exact: true }).click();
 			await expect(linear.getByText("Linear didn't say which account")).toBeVisible();
 			await page.mouse.move(0, 0);
 			await shot(page, `07-no-account-open-${width}-${theme}`);
