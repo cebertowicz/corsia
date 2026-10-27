@@ -42,6 +42,7 @@ async def prepare_idle_prefix(batch, *, thread_row, target):
                 and item.metadata.get("event_disposition") == "passive")
     )
     for length in range(len(batch.items), first_active, -1):
+        # The person's send behind a shortened prefix still authorized the load.
         prefix = replace(batch, items=batch.items[:length])
         prepared = await prepare_claimed_batch(prefix, thread_row=thread_row, target=target)
         context = prepared.prepared_context

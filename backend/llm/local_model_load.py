@@ -56,7 +56,7 @@ class ModelLoadFailed(Exception):
         self.cause: LoadFailure = cause
 
 
-def _fit(db, server_id: str, model_id: str, loaded: set[str]) -> Readiness:
+def fit_readiness(db, server_id: str, model_id: str, loaded: set[str]) -> Readiness:
     """Read the seat and reported sizes together, then use the shared fit verdict."""
     from llm.locality import server_on_this_mac
 
@@ -126,7 +126,7 @@ def readiness(target: ExecutionTarget, *, db) -> Readiness | None:
     loaded = get_loaded_model_ids(server_id)
     if status == "ready":
         return Readiness("loaded", len(loaded - {model_id}))
-    fit = _fit(db, server_id, model_id, loaded)
+    fit = fit_readiness(db, server_id, model_id, loaded)
     return fit if fit.state == "unreachable" or status == "available" else None
 
 
@@ -145,7 +145,7 @@ def _fit_now(server_id: str, model_id: str, loaded: set[str]) -> Readiness:
 
     db = get_db()
     try:
-        return _fit(db, server_id, model_id, loaded)
+        return fit_readiness(db, server_id, model_id, loaded)
     finally:
         db.close()
 

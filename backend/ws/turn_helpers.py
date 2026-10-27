@@ -61,6 +61,7 @@ class NativeTurnRequest(NamedTuple):
     )
     media_projection: Any
     input_ids: tuple[str, ...] = ()
+    may_load: bool = False
 
 
 def resolve_future(future: asyncio.Future | None, value: Any) -> None:

@@ -29,7 +29,7 @@ async def test_load_reports_event_and_waits(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_cached_loaded_still_confirms_live_without_loading_event(monkeypatch):
+async def test_live_unloaded_still_reports_loading_when_cache_says_loaded(monkeypatch):
     from ws.local_send_load import load_for_person as _load_for_person
 
     target = SimpleNamespace(catalog_id="omlx@srv/m")
@@ -43,7 +43,10 @@ async def test_cached_loaded_still_confirms_live_without_loading_event(monkeypat
     monkeypatch.setattr("infra.state.broadcast_to_thread", broadcast)
     await _load_for_person(request, prepared)
     load.assert_awaited_once_with(target)
-    broadcast.assert_not_called()
+    broadcast.assert_called_once_with("t", {
+        "type": "model_loading", "thread_id": "t", "turn_id": "turn",
+        "model": "omlx@srv/m", "input_ids": ["a"],
+    })
 
 
 @pytest.mark.asyncio

@@ -10,12 +10,13 @@ from core.installed_context import persist_prepared_installed_context
 from infra.db_async import run_in_db
 from infra.failed_wake_surface import drive_failed_wake_owners
 from infra.input_render import PreparedBatch
+from infra.input_sequencing import release_background_on_load_failure
 from infra.input_writes import ProviderWriteEvidence, dispatch_fenced_batch, settle_batch_write
 from infra.plan_dispatch_events import report_terminal_unknown
 from infra.queries import message_transcript_seq
 from infra.send_broadcast import broadcast_claimed_batch, broadcast_newest_error
 from infra.send_types import InboxQueuedInput, InputReceipt, SendResult
-from infra.thread_input_types import ClaimedBatch, batch_option
+from infra.thread_input_types import ClaimedBatch, _bind_exact_turn, batch_option
 from infra.time import utc_now_iso
 from infra.turn_admission_driver import drive_turn_admission
 
@@ -30,11 +31,6 @@ async def _prepare_batch(batch: ClaimedBatch, *, thread_row: dict, target) -> Pr
 async def _settle_accepted(attempt_id: str, evidence: ProviderWriteEvidence) -> None:
     evidence.mark_accepted()
     await run_in_db(settle_batch_write, attempt_id, outcome="accepted")
-
-
-async def _bind_exact_turn(batch: ClaimedBatch, turn_id: str, _previous) -> None:
-    if turn_id != batch.turn_id:
-        raise RuntimeError("provider tried to replace the admitted Turn identity")
 
 
 def _dispatch_context(
@@ -57,6 +53,7 @@ def _dispatch_context(
         content=prepared.content, is_subagent=prepared.is_subagent,
         target=prepared.target, turn_id=batch.turn_id,
         input_message_id=batch.anchor_message_id, input_ids=tuple(item.message_id for item in batch.items),
+        may_load=batch.may_load,
         metadata=batch.items[-1].metadata,
         native_mode=native_mode,
         allow_fresh=bool(
@@ -120,6 +117,7 @@ async def _dispatch_prepared(
     async def settle_terminal(outcome: str, error: str | BaseException | None) -> None:
         if evidence.accepted or evidence.ambiguous or evidence.proved_no_write:
             return
+        await run_in_db(release_background_on_load_failure, batch, error, attempt_id=attempt_id)
         evidence.mark_proved_no_write()
         detail = error
         if outcome == "completed" and detail is None:
@@ -289,6 +287,7 @@ async def drive_claimed_batch(
     except BaseException as error:
         from core.turn_core import settle_turn_terminal, terminal_error_detail
 
+        await run_in_db(release_background_on_load_failure, batch, error)
         outcome = "cancelled" if isinstance(error, asyncio.CancelledError) else "error"
         await settle_turn_terminal(
             batch.turn_id, outcome,

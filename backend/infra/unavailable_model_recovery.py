@@ -113,16 +113,16 @@ async def hold_unavailable_model_input(
     return receipt
 
 
-def model_admission(model: str, *, person_send: bool, db=None, thread_id: str | None = None):
+def model_admission(model: str, *, may_load: bool, db=None, thread_id: str | None = None):
     """Classify the target at claim, widening only a person's local send."""
-    from infra.send_target import _ready_target
+    from infra.send_target import Admission, ready_target
     from llm.resolution import ModelUnavailableError, resolve_thread_target
 
     try:
-        target = _ready_target(resolve_thread_target(model, thread_id=thread_id, db=db), db=db)
-        return classify_target_admission(target, person_send=person_send)
+        target = ready_target(resolve_thread_target(model, thread_id=thread_id, db=db), db=db)
+        return classify_target_admission(target, may_load=may_load)
     except (ModelUnavailableError, ValueError):
-        return "fail"
+        return Admission("fail")
 
 
 def liftable_hold_sets(rows) -> tuple[frozenset[str], frozenset[str]]:
@@ -149,19 +149,16 @@ async def hold_unless_runnable(
     Only the classifier's model-recoverable state is a wait; nothing outside
     admission asks.
     """
-    from dataclasses import replace
-    from llm.local_model_load import LOAD_REFUSALS, ModelLoadFailed
+    from llm.local_model_load import ModelLoadFailed
 
-    admission = classify_target_admission(target, person_send=batch.person_send)
-    if admission == "run":
+    admission = classify_target_admission(target, may_load=batch.may_load)
+    if admission.kind in ("run", "load"):
         return target
-    if admission == "load":
-        return replace(target, available=True, availability_reason="load_on_send")
-    if admission == "wait":
+    if admission.kind == "wait":
         return await hold_unavailable_model_input(batch, target)
     reason = target.availability_reason or "target_unavailable"
-    if reason in LOAD_REFUSALS:
-        raise ModelLoadFailed(reason)
+    if admission.cause is not None:
+        raise ModelLoadFailed(admission.cause)
     raise TargetUnavailable(
         f"Selected target cannot run: {target.catalog_id} ({reason})",
         side=DeliveryFailureSide.PROVIDER,

@@ -36,10 +36,10 @@ from llm.resolution import (
 )
 from ws.native_inbox_batch import native_safe_boundary_input as _native_safe_boundary_input
 from ws.post_turn import run_post_turn_tasks
-from ws.local_send_load import load_for_person as _load_for_person
+from ws.local_send_load import load_for_person as _load_for_person, ready_for_turn
 from ws.turn_cancellation import handle_cancelled_turn
-from ws.turn_unavailable import report_model_unavailable, report_settled_setup_error
-from ws.turn_types import SettledSetupError as _SettledSetupError, _PreparedTurn, TurnBroadcast, TurnIngress
+from ws.turn_unavailable import report_model_unavailable
+from ws.turn_types import _PreparedTurn, TurnBroadcast, TurnIngress
 from ws.turn_helpers import (
     NativeTurnRequest,
     build_agent_content,
@@ -73,9 +73,9 @@ async def _setup_turn(
     from core.agent import get_agent
 
     agent = await get_agent()
-    loads = request is not None and target.availability_reason == "load_on_send"
-    if not loads:
-        await validate_native_target(target, event=ingress == "event")
+    may_load = bool(request and request.may_load)
+    target, loads = await ready_for_turn(target, may_load=may_load)
+    await validate_native_target(target, event=ingress == "event", may_load=may_load)
     active_model = target.transport_model
     provider = native_provider_params(target, make_provider_params(active_model))
     if ingress == "event" and broadcast is None:
@@ -125,22 +125,9 @@ async def _setup_turn(
         media_projection,
         unbind,
         effective_effort,
+        loads,
     )
-    if request is not None and loads:
-        await _load_person_target(request, prepared)
     return prepared
-
-
-async def _load_person_target(
-    request: NativeTurnRequest, prepared: _PreparedTurn,
-) -> None:
-    """Load a person's local model inside its owned Turn, then check health."""
-    try:
-        await _load_for_person(request, prepared)
-        await validate_native_target(request.target, event=request.ingress == "event")
-    except BaseException as error:
-        await _finish_failed_admission(prepared, request, error)
-        raise _SettledSetupError(error) from error
 
 
 async def _finish_failed_admission(
@@ -290,6 +277,12 @@ async def _execute_turn(request: NativeTurnRequest) -> bool:
             )
         )
         ws_send = await _admit_prepared_turn(request, prepared)
+        if prepared.loads:
+            try:
+                await _load_for_person(request, prepared)
+            except BaseException as error:
+                await _finish_failed_admission(prepared, request, error)
+                raise
         cancelled = bool(await _run_prepared_turn(request, prepared))
         resolve_future(request.provider_acceptance, not cancelled)
         emit_terminal_product_event(
@@ -309,11 +302,6 @@ async def _execute_turn(request: NativeTurnRequest) -> bool:
             ws_send=ws_send,
         )
         return False
-    except _SettledSetupError as settled:
-        return await report_settled_setup_error(
-            request, settled.error, product_terminal, report=report_model_unavailable,
-            handle=handle_turn_error, emit=emit_product_event,
-        )
     except (
         TurnAlreadyActiveError,
         TurnThreadMissingError,
@@ -378,6 +366,7 @@ async def execute_turn(
     ) = None,
     media_projection=None,
     input_ids: tuple[str, ...] = (),
+    may_load: bool = False,
 ) -> bool:
     """Execute one native turn for browser, delegation, or event ingress."""
     request = NativeTurnRequest(
@@ -386,7 +375,7 @@ async def execute_turn(
         reasoning_effort, start_ack, broadcast, step_metadata,
         persist_input_once, settle_delivery, after_persist_before_dispatch,
         prepared_context, preadmitted_turn, provider_acceptance,
-        settle_delivery_terminal, media_projection, input_ids,
+        settle_delivery_terminal, media_projection, input_ids, may_load,
     )
     try:
         return await _execute_turn(request)

@@ -8,7 +8,6 @@ import pytest
 
 def _claimed(monkeypatch, *, metadata=None, native_mode="event"):
     from infra.database import get_db
-    from dataclasses import replace
     from infra.input_render import PreparedBatch
     from infra.thread_driver import admit_input
     from llm.local_model_load import Readiness
@@ -24,7 +23,13 @@ def _claimed(monkeypatch, *, metadata=None, native_mode="event"):
     batch = admit_input("t", role="user", content="hi", intent="apply_now", message_id="m", turn_id="turn", boot_epoch="boot", admitted_at="t1", metadata=metadata, delivery_options={"native_mode": native_mode}, db=db).batch
     thread_row = dict(db.execute("SELECT * FROM threads WHERE id='t'").fetchone())
     db.close()
-    target = replace(target, available=True, availability_reason="load_on_send")
+    from llm.network_discovery import get_loaded_model_ids
+
+    async def live_loaded(_server):
+        return [{"identifier": name} for name in get_loaded_model_ids("srv")]
+
+    monkeypatch.setattr("llm.providers.omlx_lifecycle.read_loaded", live_loaded)
+    monkeypatch.setattr("llm.local_model_load.fit_readiness", lambda *_a, **_k: Readiness("fits_now"))
     async def prepare(batch, *, thread_row, target):
         return PreparedBatch(thread_row, target, "native", False, "hi", None, [], None, None, None, {}, batch)
     monkeypatch.setattr("infra.thread_execution._prepare_batch", prepare)
@@ -33,6 +38,7 @@ def _claimed(monkeypatch, *, metadata=None, native_mode="event"):
     monkeypatch.setattr("core.agent.get_agent", AsyncMock(return_value=object()))
     monkeypatch.setattr("ws.turn.make_provider_params", lambda _model: {})
     monkeypatch.setattr("ws.turn.native_provider_params", lambda *_a: {})
+    monkeypatch.setattr("ws.turn.validate_native_target", AsyncMock())
     provider = AsyncMock()
     monkeypatch.setattr("ws.turn._run_prepared_turn", provider)
     return batch, thread_row, target, provider
@@ -45,7 +51,7 @@ async def test_person_send_to_a_cloud_model_checks_before_binding(monkeypatch):
     import ws.turn as turn
 
     target = SimpleNamespace(harness="native", provider="anthropic", backend="api", transport_model="claude-x", availability_reason=None)
-    request = SimpleNamespace(target=target, ingress="ws")
+    request = SimpleNamespace(target=target, ingress="ws", may_load=True)
     bind = AsyncMock()
     load = AsyncMock()
     monkeypatch.setattr("core.agent.get_agent", AsyncMock(return_value=object()))
@@ -69,8 +75,9 @@ async def test_failed_load_settles_input(isolated_db, monkeypatch, cause, expect
     batch, thread, target, provider = _claimed(monkeypatch, metadata=metadata, native_mode=native_mode)
     load = AsyncMock(side_effect=ModelLoadFailed(cause))
     monkeypatch.setattr("llm.local_model_load.ensure_loaded", load)
-    with pytest.raises(Exception):
-        await execute_claimed_batch(batch, thread_row=thread, target=target, user={"id": "u"})
+    result = await execute_claimed_batch(batch, thread_row=thread, target=target, user={"id": "u"})
+    if result.turn_task is not None:
+        await asyncio.gather(result.turn_task, return_exceptions=True)
     assert message_row("m")[:3] == ("failed", "proved_no_write", expected)
     load.assert_awaited_once_with(target)
     provider.assert_not_awaited()
@@ -87,8 +94,8 @@ async def test_retry_route_reloads_failed_person_input(isolated_db, monkeypatch)
     batch, thread, target, _provider = _claimed(monkeypatch)
     load = AsyncMock(side_effect=[ModelLoadFailed("load_failed"), None])
     monkeypatch.setattr("llm.local_model_load.ensure_loaded", load)
-    with pytest.raises(Exception):
-        await execute_claimed_batch(batch, thread_row=thread, target=target, user={"id": "u"})
+    result = await execute_claimed_batch(batch, thread_row=thread, target=target, user={"id": "u"})
+    await asyncio.gather(result.turn_task, return_exceptions=True)
     assert message_row("m")[:3] == ("failed", "proved_no_write", "model_load_failed")
 
     async def prepare(next_batch, *, thread_row, target):

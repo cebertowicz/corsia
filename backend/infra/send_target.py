@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from typing import Literal
 
 from loguru import logger
@@ -86,7 +86,7 @@ async def resolve_target(model: str, *, thread_id: str | None = None) -> Executi
 
 def _resolve_target_in_scope(model: str, *, thread_id: str | None) -> ExecutionTarget:
     """Resolve one target, marked unavailable when its thread's policy forbids the model."""
-    return _ready_target(model_resolution.resolve_thread_target(model, thread_id=thread_id))
+    return ready_target(model_resolution.resolve_thread_target(model, thread_id=thread_id))
 
 
 async def scope_supplied_target(target: ExecutionTarget, *, thread_id: str) -> ExecutionTarget:
@@ -96,29 +96,35 @@ async def scope_supplied_target(target: ExecutionTarget, *, thread_id: str) -> E
     def _scope() -> ExecutionTarget:
         db = get_db()
         try:
-            return _ready_target(model_resolution.scope_to_thread(target, thread_id=thread_id, db=db), db=db)
+            return ready_target(model_resolution.scope_to_thread(target, thread_id=thread_id, db=db), db=db)
         finally:
             db.close()
 
     return await db_async.run_in_db(_scope)
 
 
-def _ready_target(target: ExecutionTarget, *, db=None) -> ExecutionTarget:
-    """Use the catalog's cached oMLX readiness, without probing or loading a model."""
-    if not (target.available and target.harness == "native"
-            and target.provider == "omlx" and target.backend == "network"):
+def ready_target(target: ExecutionTarget, *, db=None, loaded: set[str] | None = None) -> ExecutionTarget:
+    """Project cached readiness or a supplied live loaded-model list."""
+    if not (target.harness == "native" and target.provider == "omlx" and target.backend == "network"):
+        return target
+    if not target.available and not (loaded is not None and target.availability_reason == "model_not_loaded"):
         return target
     from infra.database import get_db
-    from llm.local_model_load import cached_status, omlx_seat_and_model, readiness
+    from llm.local_model_load import cached_status, fit_readiness, omlx_seat_and_model, readiness
 
     seat = omlx_seat_and_model(target)
     if seat is None:
         return target
     connection = db if db is not None else get_db()
     try:
-        if cached_status(target, db=connection, server_id=seat[0]) == "ready":
-            return target
-        state = readiness(target, db=connection)
+        if loaded is not None:
+            if seat[1] in loaded:
+                return target
+            state = fit_readiness(connection, seat[0], seat[1], loaded)
+        else:
+            if cached_status(target, db=connection, server_id=seat[0]) == "ready":
+                return target
+            state = readiness(target, db=connection)
     finally:
         if db is None:
             connection.close()
@@ -128,10 +134,13 @@ def _ready_target(target: ExecutionTarget, *, db=None) -> ExecutionTarget:
     return replace(target, available=False, availability_reason=reason)
 
 
-TargetAdmission = Literal["run", "load", "wait", "fail"]
+@dataclass(frozen=True, slots=True)
+class Admission:
+    kind: Literal["run", "load", "wait", "fail"]
+    cause: str | None = None
 
 
-def classify_target_admission(target: ExecutionTarget, *, person_send: bool) -> TargetAdmission:
+def classify_target_admission(target: ExecutionTarget, *, may_load: bool) -> Admission:
     """Classify a target at the one admission seam.
 
     Catalog/model unavailability can clear through ``notify_models_changed`` and
@@ -141,19 +150,21 @@ def classify_target_admission(target: ExecutionTarget, *, person_send: bool) -> 
     from llm.local_model_load import LOAD_REFUSALS
 
     if target.available:
-        return "run"
+        return Admission("run")
     reason = target.availability_reason
-    if person_send and reason == "model_not_loaded":
-        return "load"
-    if reason == "connection_unavailable" or (person_send and reason in LOAD_REFUSALS):
-        return "fail"
-    return "wait"
+    if may_load and reason == "model_not_loaded":
+        return Admission("load", reason)
+    if may_load and reason in LOAD_REFUSALS:
+        return Admission("fail", reason)
+    if reason == "connection_unavailable":
+        return Admission("fail")
+    return Admission("wait", reason)
 
 
 def lifted_hold_ids(held: frozenset[str], account_held: frozenset[str],
-                    admission: TargetAdmission) -> frozenset[str]:
+                    admission: Admission) -> frozenset[str]:
     """Release model holds unless admission says to wait, and admitted account holds."""
-    return account_held | (held if admission != "wait" else frozenset())
+    return account_held | (held if admission.kind != "wait" else frozenset())
 
 
 def boundary_account_lifted_ids(db, thread_id: str, turn, rows) -> frozenset[str]:

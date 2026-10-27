@@ -43,7 +43,7 @@ def _batch(
     epoch: int,
     model: str,
     rows: list[sqlite3.Row],
-    stamps: dict | None = None, receipt: ReceiptFence | None = None, recovered: tuple[str, ...] = (),
+    stamps: dict | None = None, receipt: ReceiptFence | None = None, recovered: tuple[str, ...] = (), may_load: bool = False,
 ) -> ClaimedBatch:
     return ClaimedBatch(
         thread_id=thread_id,
@@ -53,7 +53,7 @@ def _batch(
         target_model=model,
         items=tuple(_claimed_item(row, stamps or {}) for row in rows),
         vendor_receipt=receipt,
-        recovered_message_ids=recovered,
+        recovered_message_ids=recovered, may_load=may_load,
     )
 
 
@@ -208,7 +208,7 @@ def invalidate_markers_for_archive(db: sqlite3.Connection, thread_id: str) -> No
 
 def _claimable_prefix(
     connection: sqlite3.Connection, thread_id: str, *, movable: bool = False,
-) -> tuple[int, str, list[sqlite3.Row], frozenset[str], bool] | None:
+) -> tuple[int, str, list[sqlite3.Row], frozenset[str], bool, bool] | None:
     """The FIFO prefix an idle claim would take: epoch, model, rows, lifted holds, movable-held."""
     state = thread_admission_state(connection, thread_id, allow_unavailable=True)
     # A model or account hold keeps inputs queued until the relevant choice changes.
@@ -218,19 +218,19 @@ def _claimable_prefix(
     epoch, model, held = selection
     rows = _queued_epoch_prefix(connection, thread_id, expected_epoch=epoch, expected_model=model)
     from core.message_history import is_human_input
-    from infra.send_target import lifted_hold_ids
+    from infra.send_target import Admission, lifted_hold_ids
     from infra.unavailable_model_recovery import liftable_hold_sets, model_admission
 
     rows = still_claimable(connection, thread_id, rows)
     model_held, account_held = liftable_hold_sets(rows)
-    candidate = _deliverable_prefix(rows, model_held | account_held) if model_held else []
-    person_send = any(is_human_input(str(row['role']), json.loads(row['metadata'] or '{}')) for row in candidate)
-    admission = model_admission(model, person_send=person_send, db=connection, thread_id=thread_id) if model_held else "wait"
+    candidate = _deliverable_prefix(rows, model_held | account_held)
+    may_load = any(is_human_input(str(row['role']), json.loads(row['metadata'] or '{}')) for row in candidate)
+    admission = model_admission(model, may_load=bool(may_load), db=connection, thread_id=thread_id) if model_held else Admission("wait")
     lifted = lifted_hold_ids(model_held, account_held, admission)
     rows = _deliverable_prefix(rows, lifted)
     if not rows or not any(starts_turn(row) for row in rows):
         return None
-    return epoch, model, rows, lifted, held
+    return epoch, model, rows, lifted, held, may_load
 
 
 def fail_claimable_prefix(
@@ -283,7 +283,7 @@ def start_idle_turn(
         prefix = _claimable_prefix(connection, thread_id, movable=True)
         if prefix is None:
             return None
-        epoch, model, rows, lifted, movable_held = prefix
+        epoch, model, rows, lifted, movable_held, may_load = prefix
         from connections.account_holds import model_account_hold
         from connections.account_rollover import commit_rollover, plan_rollover
         from plans.public import schedule_thread_after_commit, set_aside_while_paused
@@ -342,7 +342,7 @@ def start_idle_turn(
                 stamps, receipt, recovered = _assign_turn(connection, thread_id, turn_id, rows, initial=True)
         except _RolloverHeld:
             return connection_limit_gate(thread_id, model, probe=connection_limit_probe, hold_expired_at_startup=hold_expired_limit_at_startup, db=connection)[1]
-    return _batch(thread_id, turn_id, turn_order, epoch, model, rows, stamps, receipt, recovered)
+    return _batch(thread_id, turn_id, turn_order, epoch, model, rows, stamps, receipt, recovered, may_load)
 
 
 def claim_safe_boundary(

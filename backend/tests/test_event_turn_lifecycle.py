@@ -804,7 +804,7 @@ async def test_preadmitted_setup_failure_completes_futures_after_receipt_failure
         provider_acceptance=provider_acceptance,
         start_ack=start_ack,
         settle_delivery_terminal=settle_delivery_terminal,
-        loads_model=False,
+        may_load=False,
     )
 
     with pytest.raises(sqlite3.OperationalError, match="receipt settlement failed") as raised:

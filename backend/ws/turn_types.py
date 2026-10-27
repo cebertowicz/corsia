@@ -12,14 +12,6 @@ TurnIngress = Literal["ws", "delegation", "event"]
 TurnBroadcast = Callable[[dict], Awaitable[None]]
 
 
-class SettledSetupError(Exception):
-    """Setup failed after its bound runtime and input were settled."""
-
-    def __init__(self, error: BaseException) -> None:
-        super().__init__(str(error))
-        self.error = error
-
-
 class _PreparedTurn(NamedTuple):
     """Fully prepared runtime state for an admitted native Turn."""
 
@@ -34,3 +26,4 @@ class _PreparedTurn(NamedTuple):
     media_projection: Any
     unbind: Callable[[TurnIdentity], None]
     reasoning_effort: str | None
+    loads: bool = False

@@ -19,7 +19,10 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from typing import Any
+from typing import Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from llm.resolution import ExecutionTarget
 
 
 def reasoning_shape_from_discovery(
@@ -166,6 +169,15 @@ def effective_reasoning_effort(raw: str | None, model: str) -> str | None:
         return None
     default = config.get("default")
     return str(default) if default in values else (values[0] if values else None)
+
+
+resolve_reasoning_effort = effective_reasoning_effort
+
+
+def _resolve_thread_effort(requested, thread_row: Any, target: ExecutionTarget) -> str | None:
+    if requested is None and "reasoning_effort" in thread_row.keys():
+        requested = thread_row["reasoning_effort"]
+    return resolve_reasoning_effort(requested, target.catalog_id)
 
 
 def _catalog_reasoning_shape(
