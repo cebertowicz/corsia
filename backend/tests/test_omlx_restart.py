@@ -161,6 +161,20 @@ async def test_load_started_before_exit_cannot_restore_stale_readiness(monkeypat
     await settle()
 
 
+async def test_a_sweep_during_a_load_does_not_hide_the_loaded_model(monkeypatch):
+    from infra.state import ws
+    from llm import network_discovery, server_observation
+
+    monkeypatch.setattr(network_discovery, "update_server_status", lambda *_a, **_k: None)
+    monkeypatch.setattr(ws, "notify_models_changed", lambda: None)
+    monkeypatch.setitem(network_discovery._LOADED_BY_SERVER, SID, set())
+    at_load_start = server_observation.loaded_token(SID)
+    sweep_start = server_observation.loaded_token(SID)
+    await server_observation.record_reachable({"id": SID}, loaded=set(), rediscover=False, token=sweep_start)
+    network_discovery.notify_cached_model_loaded(SID, "model", at_load_start)
+    assert network_discovery.get_loaded_model_ids(SID) == {"model"}
+
+
 async def test_a_clean_exit_the_person_did_not_ask_for_is_logged_not_restarted(events, caplog, monkeypatch):
     start, calls = recording_start()
     with caplog.at_level(logging.INFO, logger=restart.log.name):

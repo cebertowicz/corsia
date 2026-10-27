@@ -32,7 +32,7 @@ def notify_cached_model_loaded(server_id: str, model_id: str, token: object) -> 
     from infra.state.ws import notify_models_changed
     if loaded_token(server_id) is not token:
         return
-    _LOADED_BY_SERVER[server_id] = get_loaded_model_ids(server_id) | {model_id}
+    _LOADED_BY_SERVER.setdefault(server_id, set()).add(model_id)
     notify_models_changed()
 
 

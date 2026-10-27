@@ -65,7 +65,11 @@ _NO_TOKEN = object()
 
 
 def loaded_token(server_id: str) -> object:
-    """Capture the observed set before starting an asynchronous probe."""
+    """Capture the observed set before starting an asynchronous probe.
+
+    Sweeps and loads update the set in place, so its identity changes only when an exit
+    or going offline starts a new observation.
+    """
     from llm import network_discovery as nd
 
     return nd._LOADED_BY_SERVER.get(server_id)
@@ -95,8 +99,10 @@ async def record_reachable(
     if token is not _NO_TOKEN and loaded_token(sid) is not token:
         return
     if loaded is not None:
-        changed = nd._LOADED_BY_SERVER.get(sid, set()) != loaded
-        nd._LOADED_BY_SERVER[sid] = set(loaded)
+        current = nd._LOADED_BY_SERVER.setdefault(sid, set())
+        changed = current != loaded
+        current.clear()
+        current.update(loaded)
         if changed:
             nd._notify_models_changed_safe()
     if rediscover and (server.get("status") == "offline" or sid in _UNLISTED):
