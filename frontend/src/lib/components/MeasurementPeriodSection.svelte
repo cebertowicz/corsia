@@ -16,8 +16,8 @@
 		/** The served series this card draws, and what turns its value into the unit the reader sees. */
 		series: string;
 		scale?: number;
-		/** What follows the figure in the headline, e.g. "minutes per outcome". */
-		unitText: string;
+		/** What follows the figure in the headline, e.g. "minutes per outcome"; a count passes a function so 1 reads singular. */
+		unitText: string | ((value: number | null) => string);
 		/** The figure as written in the headline. */
 		headline: (value: number) => string;
 		/** The h4 above the chart, before its date range. */
@@ -62,7 +62,7 @@
 	{:else if !state.rows.length}<p class="empty">Nothing was recorded in this range.</p>
 	{:else if !view.periods.length}<p class="empty">Nothing was measured for this selection.</p>
 	{:else}
-		<p class="stat"><b>{value === null ? '–' : headline(value)}</b> {unitText}, {view.nowText}, n&nbsp;{group(view.current.n)}, {periodChange(view, true, undefined, minN === undefined ? served : undefined)}</p>
+		<p class="stat"><b>{value === null ? '–' : headline(value)}</b> {typeof unitText === 'function' ? unitText(value) : unitText}, {view.nowText}, n&nbsp;{group(view.current.n)}, {periodChange(view, true, undefined, minN === undefined ? served : undefined)}</p>
 		{@render extra?.()}
 		<h4>{chartTitle}, {chart.rangeText}, by {chart.unit}</h4>
 		{#if drawChart}

@@ -89,10 +89,12 @@
 					valueFormat={(value) => value.toFixed(2)}
 				/></div>
 				<div class="spendcard"><span>Total spend, {headline.nowText}</span><strong>{usd0(headline.current.dollars)}</strong><small>API-equivalent, every priced call in the window</small><div class="hrs"><span>Hours of work delivered</span><b>{group(headline.current.hours)}</b></div></div></div>
+			{:else if costState.data.coverage.usage_records === 0}
+				<p class="sentence">No usage was recorded in this range.</p>
 			{:else}
-				<p class="sentence">No usage records could be priced in this range.</p>
+				<p class="sentence">{costState.data.coverage.priced_records === 0 ? 'No usage records could be priced in this range.' : 'No accepted work in this range has a size rating yet.'}</p>
 			{/if}
-			<p class="caption">{coverageText(costState.data.coverage.priced_records, costState.data.coverage.usage_records)} in {periodText} are priced{#if costState.data.coverage.priced_records < costState.data.coverage.usage_records}; the rest are local, unlisted or unproven prices and are not in any dollar figure{/if}.{#each costState.data.excluded as excluded}{#if excluded.models.length}<br />{excludedLine(excluded)}{/if}{/each}</p>
+			{#if costState.data.coverage.usage_records > 0}<p class="caption">{coverageText(costState.data.coverage.priced_records, costState.data.coverage.usage_records)} in {periodText} are priced{#if costState.data.coverage.priced_records < costState.data.coverage.usage_records}; the rest are local, unlisted or unproven prices and are not in any dollar figure{/if}.{#each costState.data.excluded as excluded}{#if excluded.models.length}<br />{excludedLine(excluded)}{/if}{/each}</p>{/if}
 		{/if}
 		{#if costState.error}<p class="error" role="alert">{costState.error}<button onclick={onRetry}>Retry</button></p>{/if}
 	{/if}

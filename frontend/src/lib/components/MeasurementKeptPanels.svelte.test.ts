@@ -211,6 +211,11 @@ describe('kept charts on Days', () => {
 		expect(card('tokens').querySelector('.stat')?.textContent).toContain('120k fresh tokens per outcome');
 	});
 
+	it('reads a single accepted outcome in the singular', () => {
+		render(allDays(), daysPeriod(day(LAST_DONE)), { ...POOLED, outcomes: { latest: { value: 1, n: 1 }, previous: { value: 280, n: 280 } } });
+		expect(card('outcomes').querySelector('.stat')?.textContent).toContain('1 accepted outcome,');
+	});
+
 	it('draws Asks per outcome as one all-agents bar card after Outcomes, its bars, labels and read-out in the same two-decimal figures', () => {
 		const rows = allDays();
 		rows.asks_per_outcome = dayRows('asks_per_outcome').map((r, i) => ({ ...r, value: 0.1 + i / 100 }));
