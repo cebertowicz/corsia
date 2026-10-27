@@ -201,7 +201,7 @@ for (const [label, width, theme] of SURFACES) {
 			await openTranscript(page, unavailable, width, theme);
 			const unavailableCard = card(page, unavailable);
 			await expect(unavailableCard).toHaveClass(/gone/);
-			await expect(unavailableCard).toContainText('No longer available');
+			await expect(unavailableCard.locator('.state')).toHaveText('Unavailable');
 			expect(await unavailableCard.evaluate((element) => element.tagName)).toBe('DIV');
 			await screenshot(page, `chat-card-unavailable-${width}-${theme}`);
 		});

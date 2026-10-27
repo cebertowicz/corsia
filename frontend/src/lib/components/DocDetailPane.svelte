@@ -58,7 +58,7 @@
 				</svg>
 				<span class="dd-name">{sel.name}</span>
 				{#if sel.skill}<span class="dd-skill">skill</span>{/if}
-				{#if sel.tmp}<span class="dd-tmp" title="Lives under working/ — unindexed until promoted">working</span>{/if}
+				{#if sel.tmp}<span class="dd-tmp" title="A draft in the working folder">working</span>{/if}
 			</div>
 			<div class="dd-path">{srcOf?.label} · {sel.path}</div>
 
@@ -66,10 +66,9 @@
 				<div class="dd-cap">
 					Description
 					{#if sel.descState === 'ai'}<span class="dd-badge ai">✦ AI</span>
-					{:else if sel.descState === 'edited'}<span class="dd-badge">edited</span>
-					{:else if sel.descState === 'pending'}<span class="dd-badge pending">pending</span>{/if}
+					{:else if sel.descState === 'edited'}<span class="dd-badge">edited</span>{/if}
 					{#if !editing}
-						<button class="dd-pencil" onclick={startEdit} aria-label="Edit description" title="Edit (registers the file if needed)">
+						<button class="dd-pencil" onclick={startEdit} aria-label="Edit description" title="Edit description">
 							<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" /></svg>
 						</button>
 					{/if}
@@ -83,11 +82,11 @@
 						</div>
 					</div>
 				{:else if sel.descState === 'pending'}
-					<p class="dd-desc pending">Registered — queued for the hygiene sweep.</p>
+					<p class="dd-desc pending">No description. Use the pencil to add one.</p>
 				{:else if sel.description}
 					<p class="dd-desc">{sel.description}</p>
 				{:else}
-					<p class="dd-desc muted">Not registered yet — comment on it or add a description.</p>
+					<p class="dd-desc muted">No description. Use the pencil to add one, or comment on it.</p>
 				{/if}
 			</div>
 
@@ -102,7 +101,7 @@
 			{/if}
 
 			<div class="dd-stats">
-				<div class="dd-stat"><span class="dd-stat-v">{sel.tokens >= 1000 ? `${(sel.tokens / 1000).toFixed(1)}k` : sel.tokens}</span><span class="dd-stat-k">tokens when pulled</span></div>
+				<div class="dd-stat"><span class="dd-stat-v">{sel.tokens >= 1000 ? `${(sel.tokens / 1000).toFixed(1)}k` : sel.tokens}</span><span class="dd-stat-k">tokens to read</span></div>
 				<div class="dd-stat"><span class="dd-stat-v">{sel.updatedLabel || '—'}</span><span class="dd-stat-k">updated</span></div>
 			</div>
 
@@ -110,7 +109,7 @@
 				class="dd-open"
 				onclick={openSel}
 				disabled={!openable}
-				title={openable ? undefined : 'Open a thread first — documents open beside a conversation'}
+				title={openable ? undefined : 'Open a chat first — documents open beside a chat'}
 			>Open document</button>
 		</div>
 	{:else}
@@ -123,9 +122,9 @@
 				</div>
 			{/each}
 			{#if $libraryLoading}
-				<p class="dd-hint">Loading the scope's files…</p>
+				<p class="dd-hint">Loading files…</p>
 			{:else if $pendingCount}
-				<div class="dd-hygiene">{$pendingCount} description{$pendingCount > 1 ? 's' : ''} pending — the hygiene sweep names registered files automatically.</div>
+				<div class="dd-hygiene">{$pendingCount} file{$pendingCount > 1 ? 's' : ''} without a description. Select one to add it.</div>
 			{/if}
 			<p class="dd-hint">Select a file to see its description, provenance, and history.</p>
 		</div>
@@ -146,7 +145,6 @@
 	.dd-cap { display: flex; align-items: center; gap: 6px; font-size: var(--text-caption); font-weight: var(--fw-bold); text-transform: uppercase; letter-spacing: var(--ls-cap); color: var(--text-tertiary); }
 	.dd-badge { font-size: var(--text-caption); font-weight: var(--fw-semibold); text-transform: none; letter-spacing: 0; color: var(--text-tertiary); background: color-mix(in srgb, var(--text-primary) 7%, transparent); border-radius: var(--radius-2xs); padding: 1px 6px; }
 	.dd-badge.ai { color: var(--accent-text); background: var(--accent-wash); }
-	.dd-badge.pending { color: var(--amber); background: var(--amber-bg); }
 	.dd-pencil { display: flex; padding: 3px; margin-left: auto; border-radius: var(--radius-2xs); background: none; border: none; color: var(--text-tertiary); cursor: pointer; }
 	.dd-pencil:hover { background: var(--bg-hover); color: var(--text-primary); }
 	.dd-desc { font-size: var(--text-subhead); line-height: var(--lh-normal); color: var(--text-primary); margin: 0; }

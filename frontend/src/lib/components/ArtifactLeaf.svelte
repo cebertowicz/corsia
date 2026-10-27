@@ -238,7 +238,7 @@
 </script>
 
 {#if mode === 'rail'}
-	<button class="rail" onclick={expand} aria-label="Expand artifact panel ({workspace.tabs.length} open)">
+	<button class="rail" onclick={expand} aria-label="Expand Files ({workspace.tabs.length} open)">
 		{#each workspace.tabs as t (t.instanceId)}
 			<span class="rail-ico" class:active={t.instanceId === workspace.activeTabId} class:err={t.status === 'error' || t.status === 'unavailable'}>
 				{#if imageTabIds.has(t.instanceId)}
@@ -275,8 +275,8 @@
 			{:else if activeTab?.status === 'unavailable'}
 				<div class="gone" role="status">
 					<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" /></svg>
-					<p>{activeTab.title} is no longer available.</p>
-					<span>It was deleted, moved out of this scope, or unregistered.</span>
+					<p>{activeTab.title} is unavailable.</p>
+					<span>CORSIA can’t find it in this chat’s files.</span>
 					<button type="button" onclick={() => requestCloseTab(activeTab.instanceId)}>Close tab</button>
 				</div>
 			{:else if imageTarget}

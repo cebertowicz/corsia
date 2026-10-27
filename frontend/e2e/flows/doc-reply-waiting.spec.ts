@@ -1091,7 +1091,7 @@ for (const theme of ['light', 'dark'] as const) {
 			documentAvailable = false;
 			await chip.click();
 			const removed = page.locator('.gone');
-			await expect(removed.getByText('launch-plan.md is no longer available.', { exact: true })).toBeVisible();
+			await expect(removed.getByText('launch-plan.md is unavailable.', { exact: true })).toBeVisible();
 			await expect(removed.getByRole('button', { name: 'Try again' })).toHaveCount(0);
 			await expect(page.locator('.row.openable', { hasText: 'launch-plan.md' })).toHaveCount(0);
 			await shot(page, `07b-removed-document-${theme}-${width}`);

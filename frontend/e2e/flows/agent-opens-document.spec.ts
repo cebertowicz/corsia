@@ -53,7 +53,7 @@ test(`@surface:agent-opens-document desktop reveals into an empty or hidden leaf
 	await expect(page.getByRole('link', { name: 'Open B', exact: true })).toBeVisible();
 
 	// Hidden leaf: nothing is on screen, so a request for A reveals its tab.
-	await page.getByRole('button', { name: 'Collapse artifact panel' }).click();
+	await page.getByRole('button', { name: 'Collapse Files' }).click();
 	await expect.poll(async () => (await canvasState(page, threadId)).visible).toBe(false);
 	await expectCapability(log, threadId, { canShow: true, visibleArtifactId: null });
 	gate = await queueOpen(page, request, a, 'Requested A again.');
@@ -100,7 +100,7 @@ test(`@surface:agent-opens-document desktop links a background tab while another
 	await expect(editor).toContainText(a.body);
 
 	// With the leaf hidden, the same request selects and reveals the existing B.
-	await page.getByRole('button', { name: 'Collapse artifact panel' }).click();
+	await page.getByRole('button', { name: 'Collapse Files' }).click();
 	await expectCapability(log, threadId, { canShow: true, visibleArtifactId: null });
 	gate = await queueOpen(page, request, b, 'Requested B.');
 	expect(await releaseOpen(request, log, gate)).toMatchObject({ outcome: 'requested', count: 1 });

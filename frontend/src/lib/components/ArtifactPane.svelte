@@ -220,13 +220,13 @@
 	<div class="muted">Loading…</div>
 {:else if showFetchError}
 	<div class="pane-error" role="status">
-		<span>Couldn't load this thread's files.</span>
+		<span>Couldn’t load this chat’s files. Try again.</span>
 		<Button variant="secondary" size="sm" loading={retryingLoad} disabled={retryingLoad} onclick={retryLoad}>
 			Retry
 		</Button>
 	</div>
 {:else if !data || isEmpty}
-	<div class="muted">Files you create, upload, or open in this thread show up here.</div>
+	<div class="muted">Files you create, upload, or open in this chat show up here.</div>
 {:else}
 	{#if fetchError}
 		<div class="stale-notice" role="status">

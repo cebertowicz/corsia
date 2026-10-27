@@ -38,7 +38,7 @@ export function liveUnavailable(value: { live?: boolean; live_unavailable?: stri
 export const LIVE_UNAVAILABLE_NOTICE: Record<LiveUnavailable, { title: string; message: string }> = {
 	store_damaged: {
 		title: UNAVAILABLE_TITLE,
-		message: "Its saved editing history could not be read. You can edit and save this file without live editing. Earlier changes stored only in that history or a browser copy aren't shown here.",
+		message: "Couldn’t read this file’s editing history. You can edit and save it without live editing. Changes kept only in that history or in this browser aren’t shown.",
 	},
 };
 
