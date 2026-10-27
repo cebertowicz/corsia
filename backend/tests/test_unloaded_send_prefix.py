@@ -41,13 +41,19 @@ async def test_oversize_claim_loads_once_and_drains_released_person(isolated_db,
     loaded = AsyncMock(side_effect=lambda _target: mark_model_loaded(monkeypatch, "omlx@srv/m"))
     monkeypatch.setattr("llm.local_model_load.ensure_loaded", loaded)
     monkeypatch.setattr("ws.turn.validate_native_target", AsyncMock())
-    delivered = []
+    delivered, loads = [], []
     done = asyncio.Event()
 
     async def run(request, prepared):
         from core.turn_core import settle_turn_terminal
 
-        delivered.append(tuple(request.input_ids))
+        turn_db = get_db()
+        try:
+            rows = turn_db.execute("SELECT id FROM messages WHERE active_turn_id=? ORDER BY input_order", (prepared.identity.turn_id,))
+            delivered.append(tuple(row[0] for row in rows))
+        finally:
+            turn_db.close()
+        loads.append((request.load_for, prepared.loads))
         await request.settle_delivery()
         prepared.unbind(prepared.identity)
         if len(delivered) == 1:
@@ -65,5 +71,8 @@ async def test_oversize_claim_loads_once_and_drains_released_person(isolated_db,
     await asyncio.wait_for(done.wait(), 5)
     assert delivered[0][-1] == "m" and "person" not in delivered[0]
     assert delivered[1] == ("person",)
+    # The shortened prefix keeps the claim's Admission: its Turn loads for the released person,
+    # whose own Turn then runs on the loaded model without loading again.
+    assert loads == [(("person",), True), (("person",), False)]
     assert message_row("m")[0] == message_row("person")[0] == "delivered"
     loaded.assert_awaited_once()

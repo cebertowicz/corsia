@@ -73,9 +73,8 @@ async def _setup_turn(
     from core.agent import get_agent
 
     agent = await get_agent()
-    may_load = bool(request and request.may_load)
-    target, loads = await ready_for_turn(target, may_load=may_load)
-    await validate_native_target(target, event=ingress == "event", may_load=may_load)
+    target, admission = await ready_for_turn(target, load_for=request.load_for if request else ())
+    await validate_native_target(target, event=ingress == "event", admission=admission)
     active_model = target.transport_model
     provider = native_provider_params(target, make_provider_params(active_model))
     if ingress == "event" and broadcast is None:
@@ -113,7 +112,7 @@ async def _setup_turn(
             turn_id, thread_id, active_model, content, bind, unbind,
             cancel_event.completion,
         )
-    prepared = _PreparedTurn(
+    return _PreparedTurn(
         agent,
         active_model,
         provider,
@@ -125,9 +124,8 @@ async def _setup_turn(
         media_projection,
         unbind,
         effective_effort,
-        loads,
+        admission.kind == "load",
     )
-    return prepared
 
 
 async def _finish_failed_admission(
@@ -365,8 +363,7 @@ async def execute_turn(
         Callable[[str, str | BaseException | None], Awaitable[None]] | None
     ) = None,
     media_projection=None,
-    input_ids: tuple[str, ...] = (),
-    may_load: bool = False,
+    load_for: tuple[str, ...] = (),
 ) -> bool:
     """Execute one native turn for browser, delegation, or event ingress."""
     request = NativeTurnRequest(
@@ -375,7 +372,7 @@ async def execute_turn(
         reasoning_effort, start_ack, broadcast, step_metadata,
         persist_input_once, settle_delivery, after_persist_before_dispatch,
         prepared_context, preadmitted_turn, provider_acceptance,
-        settle_delivery_terminal, media_projection, input_ids, may_load,
+        settle_delivery_terminal, media_projection, load_for,
     )
     try:
         return await _execute_turn(request)

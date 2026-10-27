@@ -37,7 +37,7 @@ async def test_stale_loaded_cache_explicitly_loads_person_and_refuses_background
 
     bind = AsyncMock()
     monkeypatch.setattr(turn, "persist_turn_start_bound", bind)
-    request = SimpleNamespace(may_load=False)
+    request = SimpleNamespace(load_for=())
     with pytest.raises(ModelUnavailableError):
         await turn._setup_turn("t", "work", [], target=target, turn_id="background", ingress="ws", request=request)
     bind.assert_not_awaited()

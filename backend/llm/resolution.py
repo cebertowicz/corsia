@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from llm.context_window import WindowFacts, resolve_window_facts
+
+if TYPE_CHECKING:
+    from infra.thread_input_types import Admission
 
 
 class ModelUnavailableError(Exception):
@@ -326,7 +329,7 @@ async def validate_native_target(
     target: ExecutionTarget,
     *,
     event: bool = False,
-    may_load: bool = False,
+    admission: Admission | None = None,
 ) -> ExecutionTarget:
     """Recheck one resolved Native target immediately before adapter use."""
     if target.harness != "native":
@@ -337,7 +340,7 @@ async def validate_native_target(
                 "model; not substituting a fallback model (fail-loud)."
             )
         raise ModelUnavailableError(target.catalog_id, reason)
-    if not target.available and not (may_load and target.availability_reason == "model_not_loaded"):
+    if not target.available and not (admission is not None and admission.kind == "load"):
         reason = target.availability_reason or "model_unavailable"
         if event:
             raise RuntimeError(

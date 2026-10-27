@@ -12,7 +12,7 @@ async def test_load_reports_event_and_waits(monkeypatch):
     from ws.local_send_load import load_for_person as _load_for_person
 
     target = SimpleNamespace(catalog_id="omlx@srv/m")
-    request = SimpleNamespace(thread_id="t", target=target, input_ids=("a", "b"))
+    request = SimpleNamespace(thread_id="t", target=target, load_for=("a", "b"))
     prepared = SimpleNamespace(identity=SimpleNamespace(turn_id="turn"), cancel_event=asyncio.Event())
     monkeypatch.setattr("llm.local_model_load.omlx_seat_and_model", lambda _target: ("srv", "m"))
     monkeypatch.setattr("llm.network_discovery.get_loaded_model_ids", lambda _server: set())
@@ -33,7 +33,7 @@ async def test_live_unloaded_still_reports_loading_when_cache_says_loaded(monkey
     from ws.local_send_load import load_for_person as _load_for_person
 
     target = SimpleNamespace(catalog_id="omlx@srv/m")
-    request = SimpleNamespace(thread_id="t", target=target, input_ids=("a",))
+    request = SimpleNamespace(thread_id="t", target=target, load_for=("a",))
     prepared = SimpleNamespace(identity=SimpleNamespace(turn_id="turn"), cancel_event=asyncio.Event())
     monkeypatch.setattr("llm.local_model_load.omlx_seat_and_model", lambda _target: ("srv", "m"))
     monkeypatch.setattr("llm.network_discovery.get_loaded_model_ids", lambda _server: {"m"})
@@ -53,7 +53,7 @@ async def test_live_unloaded_still_reports_loading_when_cache_says_loaded(monkey
 async def test_out_of_scope_target_is_passed_to_loader(monkeypatch):
     from ws.local_send_load import load_for_person as _load_for_person
 
-    request = SimpleNamespace(thread_id="t", target=SimpleNamespace(catalog_id="omlx@srv/m"), input_ids=("a",))
+    request = SimpleNamespace(thread_id="t", target=SimpleNamespace(catalog_id="omlx@srv/m"), load_for=("a",))
     prepared = SimpleNamespace(identity=SimpleNamespace(turn_id="turn"), cancel_event=asyncio.Event())
     monkeypatch.setattr("llm.local_model_load.omlx_seat_and_model", lambda _target: None)
     load = AsyncMock()
@@ -69,7 +69,7 @@ async def test_load_failure_is_mapped(monkeypatch, cause, expected):
     from ws.local_send_load import load_for_person as _load_for_person
 
     target = SimpleNamespace(catalog_id="omlx@srv/m")
-    request = SimpleNamespace(thread_id="t", target=target, input_ids=("a",))
+    request = SimpleNamespace(thread_id="t", target=target, load_for=("a",))
     prepared = SimpleNamespace(identity=SimpleNamespace(turn_id="turn"), cancel_event=asyncio.Event())
     monkeypatch.setattr("llm.local_model_load.omlx_seat_and_model", lambda _target: ("srv", "m"))
     monkeypatch.setattr("llm.network_discovery.get_loaded_model_ids", lambda _server: set())
@@ -86,7 +86,7 @@ async def test_stop_abandons_wait_without_cancelling_load(monkeypatch):
     from ws.local_send_load import load_for_person as _load_for_person
 
     target = SimpleNamespace(catalog_id="omlx@srv/m")
-    request = SimpleNamespace(thread_id="t", target=target, input_ids=("a",))
+    request = SimpleNamespace(thread_id="t", target=target, load_for=("a",))
     prepared = SimpleNamespace(identity=SimpleNamespace(turn_id="turn"), cancel_event=asyncio.Event())
     pending = asyncio.get_running_loop().create_future()
     started = asyncio.Event()
@@ -113,7 +113,7 @@ async def test_stop_abandons_wait_without_cancelling_load(monkeypatch):
 async def test_detached_load_failure_after_stop_is_logged(monkeypatch, caplog):
     from ws.local_send_load import load_for_person
 
-    request = SimpleNamespace(thread_id="t", target=SimpleNamespace(catalog_id="omlx@srv/m"), input_ids=("a",))
+    request = SimpleNamespace(thread_id="t", target=SimpleNamespace(catalog_id="omlx@srv/m"), load_for=("a",))
     prepared = SimpleNamespace(identity=SimpleNamespace(turn_id="turn"), cancel_event=asyncio.Event())
     pending = asyncio.get_running_loop().create_future()
     started = asyncio.Event()

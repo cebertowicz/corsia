@@ -113,14 +113,14 @@ async def hold_unavailable_model_input(
     return receipt
 
 
-def model_admission(model: str, *, may_load: bool, db=None, thread_id: str | None = None):
+def model_admission(model: str, *, load_for: tuple[str, ...] = (), db=None, thread_id: str | None = None):
     """Classify the target at claim, widening only a person's local send."""
     from infra.send_target import Admission, ready_target
     from llm.resolution import ModelUnavailableError, resolve_thread_target
 
     try:
         target = ready_target(resolve_thread_target(model, thread_id=thread_id, db=db), db=db)
-        return classify_target_admission(target, may_load=may_load)
+        return classify_target_admission(target, load_for=load_for)
     except (ModelUnavailableError, ValueError):
         return Admission("fail")
 
@@ -151,14 +151,14 @@ async def hold_unless_runnable(
     """
     from llm.local_model_load import ModelLoadFailed
 
-    admission = classify_target_admission(target, may_load=batch.may_load)
+    admission = classify_target_admission(target, load_for=batch.admission.load_for)
     if admission.kind in ("run", "load"):
         return target
     if admission.kind == "wait":
         return await hold_unavailable_model_input(batch, target)
     reason = target.availability_reason or "target_unavailable"
-    if admission.cause is not None:
-        raise ModelLoadFailed(admission.cause)
+    if isinstance(error := admission.error(target.catalog_id), ModelLoadFailed):
+        raise error
     raise TargetUnavailable(
         f"Selected target cannot run: {target.catalog_id} ({reason})",
         side=DeliveryFailureSide.PROVIDER,

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 from datetime import datetime
+from typing import Literal
 
 from connections.account_receipts import ReceiptFence
 
@@ -36,6 +37,24 @@ class TurnIdentity:
 
 
 @dataclass(frozen=True, slots=True)
+class Admission:
+    """One verdict on a target. ``load_for`` names the person inputs that authorize a load."""
+
+    kind: Literal["run", "load", "wait", "fail"]
+    cause: str | None = None
+    load_for: tuple[str, ...] = ()
+
+    def error(self, catalog_id: str) -> Exception:
+        """The one refusal error: a person's load refusal, otherwise the unavailable model."""
+        from llm.local_model_load import LOAD_REFUSALS, ModelLoadFailed
+        from llm.resolution import ModelUnavailableError
+
+        if self.load_for and self.cause in LOAD_REFUSALS:
+            return ModelLoadFailed(self.cause)  # type: ignore[arg-type]
+        return ModelUnavailableError(catalog_id, self.cause or "model_unavailable")
+
+
+@dataclass(frozen=True, slots=True)
 class ClaimedBatch:
     """One contiguous FIFO prefix claimed by a Turn."""
 
@@ -48,7 +67,7 @@ class ClaimedBatch:
     vendor_receipt: ReceiptFence | None = field(default=None, repr=False)
     #: Error rows this claim stamped `recovered`; published with the batch.
     recovered_message_ids: tuple[str, ...] = ()
-    may_load: bool = False
+    admission: Admission = Admission("run")
 
     @property
     def identity(self) -> TurnIdentity:
@@ -63,7 +82,7 @@ class ClaimedBatch:
         return self.items[-1].message_id
 
 
-async def _bind_exact_turn(batch: ClaimedBatch, turn_id: str, _previous) -> None:
+async def bind_exact_turn(batch: ClaimedBatch, turn_id: str, _previous) -> None:
     if turn_id != batch.turn_id:
         raise RuntimeError("provider tried to replace the admitted Turn identity")
 

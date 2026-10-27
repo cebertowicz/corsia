@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
-from typing import Literal
+from dataclasses import replace
 
 from loguru import logger
 
 from infra import db_async
 from infra.send_types import DeliveryFailureSide
+from infra.thread_input_types import Admission
 from llm import resolution as model_resolution
 from llm.locality import LOCALITY_REFUSALS
 from llm.resolution import ExecutionTarget, ModelUnavailableError
@@ -134,13 +134,14 @@ def ready_target(target: ExecutionTarget, *, db=None, loaded: set[str] | None = 
     return replace(target, available=False, availability_reason=reason)
 
 
-@dataclass(frozen=True, slots=True)
-class Admission:
-    kind: Literal["run", "load", "wait", "fail"]
-    cause: str | None = None
+def load_authors(inputs) -> tuple[str, ...]:
+    """The ids among ``(id, role, metadata)`` inputs whose person may load a local model."""
+    from core.message_history import is_human_input
+
+    return tuple(input_id for input_id, role, metadata in inputs if is_human_input(role, metadata))
 
 
-def classify_target_admission(target: ExecutionTarget, *, may_load: bool) -> Admission:
+def classify_target_admission(target: ExecutionTarget, *, load_for: tuple[str, ...] = ()) -> Admission:
     """Classify a target at the one admission seam.
 
     Catalog/model unavailability can clear through ``notify_models_changed`` and
@@ -150,15 +151,15 @@ def classify_target_admission(target: ExecutionTarget, *, may_load: bool) -> Adm
     from llm.local_model_load import LOAD_REFUSALS
 
     if target.available:
-        return Admission("run")
+        return Admission("run", load_for=load_for)
     reason = target.availability_reason
-    if may_load and reason == "model_not_loaded":
-        return Admission("load", reason)
-    if may_load and reason in LOAD_REFUSALS:
-        return Admission("fail", reason)
+    if load_for and reason == "model_not_loaded":
+        return Admission("load", reason, load_for)
+    if load_for and reason in LOAD_REFUSALS:
+        return Admission("fail", reason, load_for)
     if reason == "connection_unavailable":
-        return Admission("fail")
-    return Admission("wait", reason)
+        return Admission("fail", load_for=load_for)
+    return Admission("wait", reason, load_for)
 
 
 def lifted_hold_ids(held: frozenset[str], account_held: frozenset[str],

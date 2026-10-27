@@ -12,7 +12,7 @@ from core.stop_causes import PlanLimitStop
 from infra.checkpoint_refusal_settlement import settle_checkpoint_refusal
 from infra.database import write_transaction
 from infra.db_async import run_in_db
-from infra.input_sequencing import failed_delivery_error, sequence_attempt
+from infra.input_sequencing import sequence_attempt
 from infra.queries import thread_unavailable_reason
 from infra.send_types import SendRejected
 from infra.thread_inputs import ClaimedBatch
@@ -235,7 +235,7 @@ def settle_batch_write(
                 return held
         return sequence_attempt(
             connection, rows, state=no_write_state, outcome=outcome,
-            error=failed_delivery_error(connection, rows, error),
+            error=str(error) if error is not None else None,
         )
 
 
@@ -322,7 +322,7 @@ def settle_unwritten_turn_inputs(
         rows,
         state=state,
         outcome="proved_no_write",
-        error=failed_delivery_error(db, rows, error),
+        error=str(error) if error is not None else None,
     )
 
 

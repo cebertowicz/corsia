@@ -58,7 +58,9 @@ async def test_event_turn_setup_preserves_supported_reasoning_effort(
         return None
 
     async def ready(target, **_kwargs):
-        return target, False
+        from infra.send_target import Admission
+
+        return target, Admission("run")
 
     async def bind(*_args, **_kwargs):
         return None

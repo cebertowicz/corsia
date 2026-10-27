@@ -171,13 +171,11 @@ def effective_reasoning_effort(raw: str | None, model: str) -> str | None:
     return str(default) if default in values else (values[0] if values else None)
 
 
-resolve_reasoning_effort = effective_reasoning_effort
-
-
-def _resolve_thread_effort(requested, thread_row: Any, target: ExecutionTarget) -> str | None:
+def resolve_thread_effort(requested, thread_row: Any, target: ExecutionTarget) -> str | None:
+    """The effort a turn sends: the request's, else the thread's, fitted to the target."""
     if requested is None and "reasoning_effort" in thread_row.keys():
         requested = thread_row["reasoning_effort"]
-    return resolve_reasoning_effort(requested, target.catalog_id)
+    return effective_reasoning_effort(requested, target.catalog_id)
 
 
 def _catalog_reasoning_shape(

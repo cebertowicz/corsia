@@ -106,7 +106,7 @@ def test_the_thread_resolver_refuses_cloud_and_lan_rows_only_in_a_cloud_off_proj
         assert (refused.catalog_id, refused.available, refused.availability_reason) == (
             model, False, "project_cloud_off",
         )
-        assert classify_target_admission(refused, may_load=False).kind == "wait"
+        assert classify_target_admission(refused, load_for=()).kind == "wait"
     assert resolve_thread_target(LOCAL, thread_id="t-off").availability_reason is None
     for thread_id in ("t-on", "t-none", None):
         assert resolve_thread_target(SONNET, thread_id=thread_id).available is True

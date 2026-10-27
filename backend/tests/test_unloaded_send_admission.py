@@ -18,15 +18,15 @@ def test_unready_local_target_fails_a_person_send(isolated_db, monkeypatch, stat
     from infra.send_target import classify_target_admission
 
     target = replace(_not_loaded_target(), availability_reason=state)
-    assert classify_target_admission(target, may_load=True).kind == "fail"
-    assert classify_target_admission(target, may_load=False).kind == "wait"
+    assert classify_target_admission(target, load_for=("p",)).kind == "fail"
+    assert classify_target_admission(target, load_for=()).kind == "wait"
 
 
 def test_not_loaded_loads_for_a_person_send(isolated_db, monkeypatch):
     from infra.send_target import classify_target_admission
     target = _not_loaded_target()
-    assert classify_target_admission(target, may_load=True).kind == "load"
-    assert classify_target_admission(target, may_load=False).kind == "wait"
+    assert classify_target_admission(target, load_for=("p",)).kind == "load"
+    assert classify_target_admission(target, load_for=()).kind == "wait"
 
 
 def test_out_of_scope_readiness_keeps_the_cached_verdict(isolated_db, monkeypatch):
@@ -50,9 +50,9 @@ async def test_resolvers_keep_the_loaded_only_verdict(isolated_db, monkeypatch):
 
     resolved = await send_target.resolve_target("omlx@srv/m")
     assert (resolved.available, resolved.availability_reason) == (False, "model_not_loaded")
-    assert send_target.classify_target_admission(resolved, may_load=False).kind == "wait"
-    assert unavailable_model_recovery.model_admission("omlx@srv/m", may_load=False).kind == "wait"
-    assert unavailable_model_recovery.model_admission("omlx@srv/m", may_load=True).kind == "load"
+    assert send_target.classify_target_admission(resolved, load_for=()).kind == "wait"
+    assert unavailable_model_recovery.model_admission("omlx@srv/m", load_for=()).kind == "wait"
+    assert unavailable_model_recovery.model_admission("omlx@srv/m", load_for=("p",)).kind == "load"
 
 
 def _row(row_id, *, held=None, role="user", metadata=None):
@@ -81,7 +81,7 @@ def test_lift_loads_for_a_person_send_the_batch_would_deliver(monkeypatch, rows,
     monkeypatch.setattr(thread_inputs, "still_claimable", lambda _db, _thread, value: value)
     monkeypatch.setattr(thread_inputs, "starts_turn", lambda _row: True)
     monkeypatch.setattr(unavailable_model_recovery, "model_admission",
-                        lambda *_a, may_load, **_k: seen.append(may_load) or Admission("run" if may_load else "wait"))
+                        lambda *_a, load_for, **_k: seen.append(bool(load_for)) or Admission("run" if load_for else "wait"))
     prefix = thread_inputs._claimable_prefix(None, "t")
     assert seen == [person_send]
     assert (prefix is not None) is person_send
