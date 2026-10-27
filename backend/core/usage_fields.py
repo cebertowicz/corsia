@@ -15,10 +15,10 @@ WEEK_FORMAT = "<ISO year>-W<ISO week>"
 WEEK_PATTERN = r"[0-9]{4}-W(0[1-9]|[1-4][0-9]|5[0-3])"
 DEV_RELEASE = "dev"
 RELEASE_PATTERN = rf"[0-9]{{1,4}}\.[0-9]{{1,4}}\.[0-9]{{1,4}}|{DEV_RELEASE}"
-OS_FAMILIES = ("macos", "windows", "linux")
-CHIPS = ("arm64", "x86_64")
+OS_FAMILIES = ("darwin", "windows", "linux")
+CHIPS = ("arm64", "amd64")
 # Each field's value rule, by field: the one place the field list lives. The OS and chip are left
 # out, not guessed, when this build is on neither list.
-PATTERNS = {"week": WEEK_PATTERN, "release": RELEASE_PATTERN}
-ENUMS = {"os": OS_FAMILIES, "chip": CHIPS}
+PATTERNS = {"corsia.usage.week": WEEK_PATTERN, "service.version": RELEASE_PATTERN}
+ENUMS = {"os.type": OS_FAMILIES, "host.arch": CHIPS}
 FIELDS = (*PATTERNS, *ENUMS)
