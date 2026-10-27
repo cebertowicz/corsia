@@ -17,27 +17,7 @@ from core.corrections_recording import (
 )
 
 
-def _attribution(executor: str | None, db) -> tuple[str | None, str | None]:
-    """The thread a sent-back counts against, and its project.
-
-    The nearest agent at or above the executor; a worker with no agent above it
-    (or a missing thread row) keeps the executor itself, so the fact is never dropped.
-    """
-    from infra.queries import thread_is_temporary
-
-    current, first, seen = executor, None, set()
-    while current is not None and current not in seen:
-        seen.add(current)
-        row = db.execute(
-            "SELECT id,spawned_by,agent_enabled,project_id FROM threads WHERE id=?", (current,),
-        ).fetchone()
-        if row is None:
-            break
-        first = first or row
-        if not thread_is_temporary(row):
-            return str(row["id"]), row["project_id"]
-        current = row["spawned_by"]
-    return executor, None if first is None else first["project_id"]
+from core.correction_owner import attribution
 
 
 def record_rejection_correction(db, rejection_event_id: str) -> bool:
@@ -60,7 +40,7 @@ def record_rejection_correction(db, rejection_event_id: str) -> bool:
     ).fetchone()
     if row is None:
         raise LookupError(f"no review rejection {rejection_event_id}")
-    thread_id, project_id = _attribution(executor_of(row, row), db)
+    thread_id, project_id = attribution(executor_of(row, row), db)
     attributes = {
         "source_kind": SOURCE_KIND_SENT_BACK, "source_id": rejection_event_id,
         "label": LABEL_CORRECTION,
