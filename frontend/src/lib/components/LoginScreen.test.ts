@@ -79,7 +79,7 @@ describe('LoginScreen', () => {
 		const heading = name ? 'Can’t check Studio' : 'Can’t check the other computer';
 		const expectErrorActions = () => {
 			expect(host.querySelector('h1')?.textContent).toBe(heading);
-			expect(host.textContent).toContain('Something went wrong. Try again, or save a report to send.');
+			expect(host.textContent).toContain('Something went wrong. Choose Retry, or save a report to send.');
 			expect(host.textContent).toContain('Retry');
 			expect(host.textContent).toContain('Use this computer instead');
 		};
