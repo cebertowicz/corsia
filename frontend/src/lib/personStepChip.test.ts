@@ -42,6 +42,7 @@ describe('stepState', () => {
 
 	it('falls back to the card for a step the plan read no longer lists, and to open without either', () => {
 		expect(stepState({ step_state: 'closed' }, undefined)).toBe('closed');
+		expect(stepState({ step_state: 'done' }, undefined)).toBe('done');
 		expect(stepState({}, undefined)).toBe('open');
 	});
 });

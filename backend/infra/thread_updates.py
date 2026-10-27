@@ -35,7 +35,7 @@ from infra.visit_divider import divider_from_row
 
 log = logging.getLogger(__name__)
 
-PlanUpdateKind = Literal["done", "done_follow_up", "failed", "closed", "blocked"]
+PlanUpdateKind = Literal["done", "done_follow_up", "failed", "closed", "blocked", "person_step"]
 PLAN_UPDATE_KINDS: frozenset[str] = frozenset(get_args(PlanUpdateKind))
 
 #: The most threads one row read names; matches the chat list's state cap.
@@ -233,7 +233,7 @@ def latest_by_thread_with_attention(
                                  AND (kind != 'failed' OR {asks_user_sql()})
                                 THEN {newest} END) AS attention_key
                   FROM thread_updates INDEXED BY idx_thread_updates_thread_time
-                 WHERE thread_id IN ({','.join('?' * len(ids))})
+                 WHERE thread_id IN ({','.join('?' * len(ids))}) AND kind != 'person_step'
                  GROUP BY thread_id
             )
             SELECT {columns}, messages.content AS message_content,
@@ -314,6 +314,17 @@ def seen_by_thread(
 
 
 
+def _person_step_state(row: sqlite3.Row) -> str:
+    state = row["step_node_state"]
+    if state in ("accepted", "accepted_with_followup"):
+        return "done"
+    if state is None:
+        return "done" if row["step_outcome"] in ("done", "done_follow_up") else "closed"
+    if state == "closed" or row["step_archived_at"] is not None:
+        return "closed"
+    return "open"
+
+
 def read_newest_cards(
     db: sqlite3.Connection, thread_id: str, *, min_seq: int,
 ) -> tuple[list[dict], bool]:
@@ -329,7 +340,12 @@ def read_newest_cards(
                  WHERE n.id = thread_updates.node_id AND n.archived_at IS NULL
              ) AS node_exists, {asks_user_sql()} AS asks_user,
              {asks_user_sql(blocked=True)} AS blocked_asks_user,
-             {ask_sql('id')} AS ask_hold_id, {ask_sql('owner_id')} AS ask_artifact_id
+             {ask_sql('id')} AS ask_hold_id, {ask_sql('owner_id')} AS ask_artifact_id,
+             (SELECT n.state FROM plan_nodes n WHERE n.id=thread_updates.node_id) AS step_node_state,
+             (SELECT n.archived_at FROM plan_nodes n WHERE n.id=thread_updates.node_id) AS step_archived_at,
+             (SELECT u.kind FROM thread_updates u WHERE u.node_id=thread_updates.node_id
+                AND u.kind IN ('done', 'done_follow_up', 'closed', 'failed')
+                ORDER BY u.id DESC LIMIT 1) AS step_outcome
              FROM thread_updates
              WHERE thread_id=? AND after_seq >= ? AND kind != 'marked'
              ORDER BY after_seq DESC, id DESC LIMIT ?""",
@@ -339,7 +355,8 @@ def read_newest_cards(
     retained = rows[:CARD_WINDOW_LIMIT]
     cards = [
         {
-            **_public(tuple(row)[:-5]),
+            **_public(tuple(row)[:-8]),
+            **({"step_state": _person_step_state(row)} if row["kind"] == "person_step" else {}),
             "node_exists": bool(row["node_exists"]),
             "asks_user": bool(row["asks_user"]),
             "blocked_asks_user": bool(row["blocked_asks_user"]),

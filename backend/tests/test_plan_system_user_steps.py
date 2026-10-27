@@ -72,6 +72,12 @@ def test_open_makes_one_system_user_step_and_the_selected_task_waits_on_it(db):
     assert (node["assignee"], node["title"], node["description"]) == ("user", TITLE, DESCRIPTION)
     assert node["intent_node_id"] == mine.id
     assert node["intent"] is None
+    from infra.thread_updates import read_newest_cards
+
+    cards, _ = read_newest_cards(db, "owner", min_seq=0)
+    assert [(card["kind"], card["node_id"]) for card in cards if card["kind"] == "person_step"] == [
+        ("person_step", step),
+    ]
     created = db.execute(
         "SELECT actor_id, provenance FROM plan_node_events WHERE node_id=? AND event='node_created'",
         (step,),

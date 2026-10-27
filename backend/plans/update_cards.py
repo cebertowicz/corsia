@@ -70,6 +70,12 @@ def observe_node_event(
 ) -> None:
     """Write the one card a qualifying outcome permits, in the caller's transaction."""
     kind = _outcome_kind(event, new_state, payload)
+    if event == "node_created":
+        row = connection.execute(
+            "SELECT kind, assignee, state FROM plan_nodes WHERE id=?", (node_id,),
+        ).fetchone()
+        if row is not None and row["kind"] == "task" and row["assignee"] == "user" and row["state"] == "pending":
+            kind = "person_step"
     if kind is None:
         return
     thread_id = _eligible_thread_id(connection, node_id, any_depth=kind == "blocked")
