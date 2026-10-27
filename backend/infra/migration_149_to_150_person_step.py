@@ -12,7 +12,7 @@ import sqlite3
 def migrate_149_to_150(conn: sqlite3.Connection) -> None:
     row = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='thread_updates'").fetchone()
     if row is None:
-        raise RuntimeError("thread_updates table is missing")
+        return
     ddl = row[0]
     if "'person_step'" in ddl:
         return
