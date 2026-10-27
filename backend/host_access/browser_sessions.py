@@ -53,8 +53,7 @@ class BrowserSessionOwner:
         self._sessions: dict[str, BrowserRuntime] = {}
         self._closed_leases: set[str] = set()
         self._shutting_down = False
-        self._active_commands = 0
-        self._queued_actions = 0
+        self._active_commands = self._queued_actions = 0
 
     def live_count(self) -> int:
         """Count current responsibilities, including unresolved startup or close."""
