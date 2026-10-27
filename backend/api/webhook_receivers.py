@@ -1,8 +1,8 @@
 """The one front door behind every ``/webhooks/`` route (event-rules design §5.3, R31).
 
 The platform looks the connector up (404), enforces its declared body limit (413),
-and verifies its signature against its declared built-in key (401). A configured
-open probe may proceed without a secret. The connector's admission owns what follows:
+and verifies its signature against its declared built-in key (401). The connector's
+admission owns what follows:
 redelivery dedupe, recording, and its own failures. A translator never sees the secret.
 
 The route awaits the translator, so a fault answers 500 and GitHub shows the delivery
@@ -87,11 +87,9 @@ async def handle_receiver(connector: str, request: Request) -> JSONResponse | di
         return JSONResponse(content={"error": "body too large"}, status_code=413)
 
     secret = receiver_secret(decl)
-    is_open_probe = not secret and decl.open_probe is not None and decl.open_probe(headers)
-    if not is_open_probe:
-        rejection = _check_signature(decl, connector, headers, body, secret)
-        if rejection is not None:
-            return rejection
+    rejection = _check_signature(decl, connector, headers, body, secret)
+    if rejection is not None:
+        return rejection
 
     headers.pop(decl.signature_header, None)
     delivery = ReceiverDelivery(
