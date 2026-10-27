@@ -826,7 +826,7 @@ fn move_after_update(app: tauri::AppHandle) {
         match (&outcome, on_shell) {
             (_, true) => show_launch_outcome(&app, &outcome),
             // A skip left the person on their page: a Ready answer kept as shell state would be replayed by a later
-            // shell load, so only a failure is shown, on the shell with its Try again.
+            // shell load, so only a failure is shown, on the shell with its Retry.
             (Err(reason), false) => {
                 log::error!("bundled CORSIA service did not start: {reason}");
                 show_shell_failure(&app, reason);
@@ -1277,7 +1277,7 @@ fn restore_local_service<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
 
 /// The shell operations that enter a remote, for pairing and for every launch that connects a saved one. The two
 /// differ only in what rolls back: pairing forgets the remote it just saved and brings the local service back, while a
-/// launch keeps the saved pairing (Try again needs it) and the local service stays stopped as it was.
+/// launch keeps the saved pairing (Retry needs it) and the local service stays stopped as it was.
 struct RemoteEntry<'a, R: tauri::Runtime, U, S> {
     app: &'a tauri::AppHandle<R>,
     app_dir: &'a Path,
@@ -1345,7 +1345,7 @@ fn key_changed_callback<R: tauri::Runtime>(app: &tauri::AppHandle<R>, name: &str
     }
 }
 
-/// Connects the saved remote at launch and on Try again. Whatever goes wrong ends in a failure state with actions,
+/// Connects the saved remote at launch and on Retry. Whatever goes wrong ends in a failure state with actions,
 /// never a silent return, so the shell never stays on "Connecting".
 async fn connect_saved_remote<R: tauri::Runtime>(app: tauri::AppHandle<R>, saved: remote_config::RemoteRecord) {
     let name = saved.name.clone();
@@ -1431,7 +1431,7 @@ async fn check_through_routes<R: tauri::Runtime>(app: &tauri::AppHandle<R>, save
     }
 }
 
-/// Try again on a launch failure: connect the saved remote once more. It answers at once; the shell is told the
+/// Retry on a launch failure: connect the saved remote once more. It answers at once; the shell is told the
 /// outcome through the same state pushes as a launch.
 #[tauri::command]
 fn retry_saved_remote(app: tauri::AppHandle) -> Result<(), String> {
@@ -3480,7 +3480,7 @@ mod tests {
             assert_eq!(
                 shell_state_script(&launch_state(&app)).as_deref(),
                 Some("window.__corsiaShowServiceFailure?.(\"did not start\");"),
-                "a reload after a failed retry must still draw the failure and its Try again"
+                "a reload after a failed retry must still draw the failure and its Retry"
             );
             assert_eq!(local_start_answered(app.handle(), Ok::<_, String>(answer.clone())), Ok(answer.clone()));
             assert_eq!(
