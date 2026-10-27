@@ -83,7 +83,7 @@ describe('SettingsSkills', () => {
 	});
 
 	describe('opening a skill', () => {
-		const NOTE = 'Open a conversation to view this.';
+		const NOTE = 'Open a chat to view this.';
 		const rowButton = (name: string) => host.querySelector<HTMLButtonElement>(`[data-settings-row="${name}"] button`);
 
 		/** The shared stub, plus the two scope-thread lookups answering as given (null: the scope has no thread). */

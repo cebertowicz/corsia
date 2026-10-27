@@ -82,7 +82,7 @@ describe('ThreadContextPanel', () => {
 		});
 		flushSync();
 		expect(host.textContent).toContain('CONTEXT.md');
-		host.querySelector<HTMLButtonElement>('button[aria-label="Remove CONTEXT.md from thread context"]')?.click();
+		host.querySelector<HTMLButtonElement>('button[aria-label="Remove CONTEXT.md from chat context"]')?.click();
 		await vi.waitFor(() => {
 			expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
 				scope: 'thread', thread_id: 'conductor-1', files: [],
@@ -105,7 +105,7 @@ describe('ThreadContextPanel', () => {
 		flushSync();
 
 		expect(host.textContent).toContain('thread-context.md');
-		host.querySelector<HTMLButtonElement>('button[aria-label="Remove thread-context.md from thread context"]')?.click();
+		host.querySelector<HTMLButtonElement>('button[aria-label="Remove thread-context.md from chat context"]')?.click();
 
 		await vi.waitFor(() => {
 			const call = fetchMock.mock.calls.find((c) => String(c[0]) === '/api/context/bootloader');
@@ -138,7 +138,7 @@ describe('ThreadContextPanel', () => {
 			?.click();
 		flushSync();
 
-		const input = host.querySelector<HTMLInputElement>('input[aria-label="New thread context file"]');
+		const input = host.querySelector<HTMLInputElement>('input[aria-label="New chat context file"]');
 		expect(input).toBeTruthy();
 		input!.value = 'notes.md';
 		input!.dispatchEvent(new Event('input', { bubbles: true }));

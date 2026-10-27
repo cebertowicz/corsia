@@ -109,7 +109,7 @@
 			<div
 				class="ctx-headline"
 				title={usageSummary.tokenSource === 'estimated'
-					? 'Reconstructed from CORSIA context or the trusted provider-resume receipt; the provider has not measured this next turn yet'
+					? 'Estimated by CORSIA. The provider has not reported usage for the next turn.'
 					: undefined}
 			>
 				{#if usageSummary.tokenSource === 'estimated'}
@@ -142,7 +142,7 @@
 				<div class="ctx-bar-note" role="note">{mismatchNote}</div>
 			{/if}
 			{#if usageSummary.countsAgainstBudget && usageSummary.modelWindowTokens !== null}
-				<div class="ctx-budget-row" title="CORSIA checkpoints this thread at its budget; the model itself holds more, so occupancy can pass the budget before the checkpoint installs">
+				<div class="ctx-budget-row" title="CORSIA checkpoints this chat at this limit. Usage can briefly go over it while the checkpoint finishes.">
 					<span>{usageSummary.overBudget ? 'Over budget — checkpoint pending' : 'Checkpoints at budget'}</span>
 					<span class="mono">model window {humanTokens(usageSummary.modelWindowTokens)}</span>
 				</div>
@@ -174,7 +174,7 @@
 					class="ctx-checkpoint-now"
 					disabled={checkpointActionBusy || checkpointState.loading}
 					onclick={() => runCheckpointAction(onCheckpointNow)}
-				>{latest?.status === 'failed' ? 'Try checkpoint again' : 'Checkpoint Now'}</button>
+				>{latest?.status === 'failed' ? 'Try checkpoint again' : 'Checkpoint now'}</button>
 			{:else if checkpointState && !active && !checkpointEligible && latest}
 				<span class="ctx-checkpoint-idle">{checkpointFreshnessLabel(latest)}</span>
 			{/if}

@@ -121,14 +121,14 @@
 		const target = attachTarget.targetLabel?.trim();
 		if (attachTarget.scope === 'workspace') return target ? `Add to ${target}` : 'Add to workspace context';
 		if (attachTarget.scope === 'project') return target ? `Add to project context: ${target}` : 'Add to project context';
-		return target ? `Add to thread context: ${target}` : 'Add to thread context';
+		return target ? `Add to chat context: ${target}` : 'Add to chat context';
 	}
 
 	function attachAriaLabel(e: DocEntry): string {
 		if (!attachTarget) return '';
 		if (attachTarget.scope === 'workspace') return `Add ${e.name} to workspace context`;
 		if (attachTarget.scope === 'project') return `Add ${e.name} to project context`;
-		return `Add ${e.name} to thread context`;
+		return `Add ${e.name} to chat context`;
 	}
 
 	function isContextFile(e: DocEntry): boolean {
@@ -163,7 +163,7 @@
 			if (!target.projectId) throw new Error('Project context target is missing');
 			return { scope: 'project', project_id: target.projectId, path: e.abs };
 		}
-		if (!target.threadId) throw new Error('Thread context target is missing');
+		if (!target.threadId) throw new Error('Couldn’t add this to the chat context: the chat isn’t identified. Open chat settings and try again.');
 		return { scope: 'thread', thread_id: target.threadId, path: e.abs };
 	}
 

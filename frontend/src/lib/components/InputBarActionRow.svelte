@@ -307,7 +307,7 @@
 				: contextTokenSource === 'estimated'
 					? 'Estimated next-turn context'
 					: contextCountsAgainstBudget
-						? 'Context used, against this thread\u2019s checkpoint budget'
+						? 'Context used against this chat’s checkpoint budget'
 						: 'Context window'}
 		>
 			{#if contextUtilization !== null}
