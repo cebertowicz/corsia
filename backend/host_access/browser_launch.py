@@ -97,7 +97,7 @@ def stealth_args(ua: str | None, *, headless: bool) -> str:
 
 
 def launch_argv(ua: str | None, *, headless: bool, profile: Path | None, state_copy: Path | None) -> Sequence[str]:
-    """Launch-only flags for a session's first command; a running daemon ignores the browser's launch settings."""
+    """Browser launch settings supplied consistently on every command in a session."""
     argv = ["--args", stealth_args(ua, headless=headless), "--init-script", str(STEALTH_INIT_SCRIPT)]
     if profile is not None:
         argv += ["--profile", str(profile)]

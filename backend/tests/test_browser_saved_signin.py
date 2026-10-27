@@ -65,8 +65,9 @@ async def test_the_first_session_launches_on_the_shared_profile_and_stops_announ
     ua = next(arg for arg in args if arg.startswith("--user-agent=")).removeprefix("--user-agent=")
     assert ua.endswith("Chrome/154.0.0.0 Safari/537.36") and "HeadlessChrome" not in ua
     assert Path(_value(first, "--init-script")).is_file()
-    # A running daemon ignores launch settings, so the later command carries none of them.
-    assert not {"--profile", "--args", "--init-script"} & set(later)
+    # Changing launch settings on a later command makes agent-browser switch browsers and lose the page.
+    for flag in ("--profile", "--args", "--init-script"):
+        assert _value(later, flag) == _value(first, flag)
     await fake.owner.shutdown()
 
 

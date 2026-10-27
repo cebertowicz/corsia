@@ -208,7 +208,7 @@ class BrowserSessionOwner:
         return (self._native.path, "--session", runtime.record.session,
                 *(("--executable-path", self._chrome) if self._chrome else ()),
                 *(("--headed",) if runtime.record.show_window else ()),
-                *(launch.flags(runtime.record, self._user_agent) if runtime.record.binding is None else ()),
+                *launch.flags(runtime.record, self._user_agent),
                 "--json", *args)
 
     async def _observe(self, runtime: BrowserRuntime, peer_socket: socket.socket | None = None) -> identity.Observation:

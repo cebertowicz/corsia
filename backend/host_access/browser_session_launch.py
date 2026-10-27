@@ -46,7 +46,7 @@ def assign(sessions: Mapping[str, Any], profile: str | None, thread_id: str) -> 
 
 
 def flags(record: Any, ua: str | None) -> Sequence[str]:
-    """Launch-only flags for a session's first command."""
+    """Keep launch settings on every command so agent-browser keeps the same browser."""
     copy = browser_launch.copy_path(record.session) if record.copy_of else None
     return browser_launch.launch_argv(
         ua, headless=not record.show_window,
