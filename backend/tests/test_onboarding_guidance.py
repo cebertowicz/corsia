@@ -678,7 +678,9 @@ def test_app_path_defers_only_a_selected_local_scripted_google_safe_miss_until_a
     assert "Only if you cannot finish it yourself" in email
     assert "I'll finish connecting Google after the remaining setup questions." in email
     assert "Keep this existing Email and calendar task open" in email
-    assert "Retain only the script and `step` identifier in its description" in email
+    assert "Retain the script and `step` identifier in its description, plus their answer `both` if they chose both" in email
+    assert "call `microsoft_status` without an `account_id`" in email
+    assert "if the Outlook account they meant is already connected, do not ask them to connect it again" in email
     assert "position immediately before the hand-off task, after the remaining setup steps" in email
     assert "first inspect the current Google connection and the actual page" in email
     assert "reuse anything already there, create the first project or client only when that inspection shows it is absent" in email
