@@ -306,12 +306,12 @@ def project_with_initiatives(
 
 def project_with_commitments(
     plan_ids, commitment_ids: Collection[str], *, db=None, now: datetime | None = None, initiatives: bool = True,
-) -> tuple[dict[str, dict[str, dict]], dict[str, dict | None], dict[str, dict] | None]:
-    """``project_with_initiatives`` plus each of ``commitment_ids``' ``model_cost_usd``.
+) -> tuple[dict[str, dict[str, dict]], dict[str, dict | None], usage_cost.Ledger | None]:
+    """``project_with_initiatives`` plus the ``usage_cost.Ledger`` of ``commitment_ids``.
 
     Every node the projection sums (the plans' nodes and the rows their initiative totals
     read from outside them) and the commitments are priced in one ledger read, for
-    ``commitment_cost.project_many(dollars=...)``; None when no plan was read.
+    ``commitment_cost.project_many(ledger=...)``; None when no plan was read.
     """
     from plans import node_cost_initiative
 
@@ -327,14 +327,14 @@ def project_with_commitments(
         node_ids = node_cost_initiative.node_ids(lineages) if lineages else [
             str(row["id"]) for rows in nodes_by_plan.values() for row in rows
         ]
-        dollars = usage_cost.usage_dollars(connection, {"plan_node_id": node_ids, "plan_commitment_id": commitment_ids})
-        own, spans = own_many_timed(node_ids, db=connection, now=clock, dollars=dollars["plan_node_id"])
+        dollars, ledger = usage_cost.priced_with_pending(connection, node_ids, commitment_ids)
+        own, spans = own_many_timed(node_ids, db=connection, now=clock, dollars=dollars)
     found = node_cost_initiative.totals(lineages, own) if lineages else {}
     by_plan = _roll_plans(tree, nodes_by_plan, own, attached, spans)
     return by_plan, {
         row["id"]: found.get(row["id"])
         for plan_id in tree for row in nodes_by_plan[plan_id]
-    } if initiatives else {}, dollars["plan_commitment_id"]
+    } if initiatives else {}, ledger
 
 
 def _roll_plans(

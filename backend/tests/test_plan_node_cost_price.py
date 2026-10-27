@@ -179,8 +179,8 @@ def test_one_priced_read_gives_the_nodes_and_commitments_their_own_dollars(db, m
     real = usage_cost.usage_dollars
     reads: list[dict] = []
     monkeypatch.setattr(usage_cost, "usage_dollars", lambda *args: reads.append(args[1]) or real(*args))
-    nodes, _initiatives, dollars = node_cost.project_with_commitments([plan.id], [node.commitment_id], db=db)
-    shared = commitment_cost.project_many([node.commitment_id], db=db, dollars=dollars)
+    nodes, _initiatives, ledger = node_cost.project_with_commitments([plan.id], [node.commitment_id], db=db)
+    shared = commitment_cost.project_many([node.commitment_id], db=db, ledger=ledger)
 
     assert len(reads) == 1
     assert nodes == separate_nodes

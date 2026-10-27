@@ -10,10 +10,12 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable, Collection, Mapping
+from typing import NamedTuple
 
 from core.cost_identity import IdentityResolver
 from core.measurement_pricing import classify_usage_rows, endpoint_listings, grouped_usage_sql
 from infra.packed_rows import fetch_all
+from infra.turn_usage_remainder import pending_measurement_counts
 
 #: Tokens summed in SQL, so a read returns one row per group however many calls
 #: the ledger holds. ``SUM`` is NULL when every value is: "no known amount".
@@ -61,6 +63,29 @@ def usage_dollars(connection, ids: Mapping[str, Collection[str]]) -> dict[str, d
             elif row["outcome"] != "not_api_priced":
                 amount["unknown_rows"] += int(row["records"])
     return dollars
+
+
+class Ledger(NamedTuple):
+    """Commitments' ``usage_dollars`` and the receipts still pending for them, read before it."""
+
+    dollars: Mapping[str, dict]
+    pending: Mapping[str, dict[str, int]]
+
+
+def priced_with_pending(
+    connection, node_ids: Collection[str], commitment_ids: Collection[str],
+) -> tuple[dict[str, dict], Ledger]:
+    """The nodes' ``usage_dollars`` and the commitments' ``Ledger``, priced in one read.
+
+    The commitments' pending receipts are read first: the projection writing a call's row
+    deletes its receipt in the same transaction, so a call committing between the two reads
+    is briefly counted unknown by a row that covers it, never missed by both and reported
+    short (``commitment_cost``).
+    """
+    commitments = sorted({str(value) for value in commitment_ids})
+    pending = pending_measurement_counts(connection, commitments) if commitments else {}
+    dollars = usage_dollars(connection, {"plan_node_id": node_ids, "plan_commitment_id": commitments})
+    return dollars["plan_node_id"], Ledger(dollars["plan_commitment_id"], pending)
 
 
 def amount(dollars: Mapping[str, dict], item_id: str) -> dict:

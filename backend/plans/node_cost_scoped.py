@@ -144,12 +144,12 @@ def _roll(shape: dict, own: dict, spans: dict) -> dict[str, dict]:
 
 def project(
     listed, wanted, commitment_ids: Collection[str], *, db, now: datetime | None = None,
-) -> tuple[dict[str, dict], dict[str, dict], dict[str, dict | None], dict[str, dict]]:
+) -> tuple[dict[str, dict], dict[str, dict], dict[str, dict | None], usage_cost.Ledger]:
     """The cost figures of one scoped read, with one priced ledger read for all of them.
 
     Returns each ``listed`` node's own cost (settled, nothing rolled), each ``wanted``
     node's rolled cost and initiative total (None for one in no lineage), and the
-    ``usage_cost.usage_dollars`` of ``commitment_ids`` for ``commitment_cost.project_many``.
+    ``usage_cost.Ledger`` of ``commitment_ids`` for ``commitment_cost.project_many``.
     The cost of a node is its subtree and the plans its steps carry, never the rest of its
     plan: a leaf costs its own rows, a container its work (the limit S5 lifts).
     """
@@ -163,8 +163,8 @@ def project(
             if (shape := _lineage_shape(connection, plan_id, ids)) is not None
         ]
         needed = sorted({*listed, *(node_id for shape in [*rolls, *lineages] for node_id in shape["needs"])})
-        dollars = usage_cost.usage_dollars(connection, {"plan_node_id": needed, "plan_commitment_id": commitment_ids})
-        own, spans = node_cost.own_many_timed(needed, db=connection, now=clock, dollars=dollars["plan_node_id"])
+        dollars, ledger = usage_cost.priced_with_pending(connection, needed, commitment_ids)
+        own, spans = node_cost.own_many_timed(needed, db=connection, now=clock, dollars=dollars)
     rolled: dict[str, dict] = {}
     for shape in rolls:
         rolled.update(_roll(shape, own, spans))
@@ -173,19 +173,4 @@ def project(
         totals = node_cost_initiative.totals(shape["expanded"], own)
         initiatives.update({node_id: totals.get(node_id) for node_id in shape["ids"] if node_id in shape["members"]})
     settled = {node_id: node_cost._settled(own[node_id]) for node_id in listed}
-    return settled, rolled, initiatives, dollars["plan_commitment_id"]
-
-
-def rolled_many(node_ids, *, db, now: datetime | None = None) -> dict[str, dict]:
-    """Each node's rolled cost, read from the subtrees of these nodes alone (archived nodes included)."""
-    return project([], node_ids, (), db=db, now=now)[1]
-
-
-def rolled_of(node_id: str, *, db, now: datetime | None = None) -> dict:
-    """One node's rolled cost (``rolled_many`` of one)."""
-    return rolled_many([node_id], db=db, now=now)[node_id]
-
-
-def initiatives_of(node_ids, *, db, now: datetime | None = None) -> dict[str, dict | None]:
-    """The initiative total (``node_cost_initiative``) of each of these nodes, None for one in no lineage."""
-    return project([], node_ids, (), db=db, now=now)[2]
+    return settled, rolled, initiatives, ledger

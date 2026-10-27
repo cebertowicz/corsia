@@ -58,10 +58,10 @@ def project_costs(
         )
     commitment_ids = {str(node["commitment_id"]) for node, _plan in node_plans}
     # One priced ledger read serves both: the node read passes the commitments' dollars on.
-    node_costs, initiatives, dollars = node_cost.project_with_commitments(
+    node_costs, initiatives, ledger = node_cost.project_with_commitments(
         {str(plan["id"]) for _node, plan in node_plans}, commitment_ids, db=db, now=now,
     )
-    costs = commitment_cost.project_many(commitment_ids, db=db, now=now, dollars=dollars)
+    costs = commitment_cost.project_many(commitment_ids, db=db, now=now, ledger=ledger)
     return costs, node_costs, initiatives
 
 
@@ -73,13 +73,13 @@ def _scoped_costs(node_plans, *, db, now: datetime, detail_ids: frozenset[str]) 
     ]
     wanted = [node_id for node_id in listed if node_id in detail_ids]
     # One priced ledger read serves every node the figures sum and the commitments listed nodes root.
-    own, rolled, scoped, dollars = node_cost_scoped.project(listed, wanted, roots, db=db, now=now)
+    own, rolled, scoped, ledger = node_cost_scoped.project(listed, wanted, roots, db=db, now=now)
     nodes: dict[str, dict] = defaultdict(dict)
     for node, plan in node_plans:
         node_id = str(node["id"])
         nodes[str(plan["id"])][node_id] = {"own": own[node_id], "rolled": rolled.get(node_id)}
     commitments = (
-        commitment_cost.project_many(roots, db=db, now=now, dollars=dollars)
+        commitment_cost.project_many(roots, db=db, now=now, ledger=ledger)
         if roots else {}
     )
     initiatives: dict[str, dict | None] = {str(node["id"]): None for node, _plan in node_plans}

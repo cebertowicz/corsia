@@ -100,7 +100,7 @@ def test_a_dollars_map_missing_a_priced_id_fails_rather_than_reading_no_price(db
     with pytest.raises(LookupError, match=node.id):
         node_cost.own_many_timed([node.id], db=db, dollars={})
     with pytest.raises(LookupError, match=node.commitment_id):
-        commitment_cost.project_many([node.commitment_id], db=db, dollars={})
+        commitment_cost.project_many([node.commitment_id], db=db, ledger=usage_cost.Ledger({}, {}))
     priced = usage_cost.usage_dollars(db, {"plan_node_id": [node.id, "no-rows"]})["plan_node_id"]
     assert priced["no-rows"] == {"known": None, "unknown_rows": 0}
     assert priced[node.id]["known"] > 0

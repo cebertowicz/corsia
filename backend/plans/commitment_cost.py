@@ -102,7 +102,9 @@ def _unmeasured_rows(turns, usage, pending: dict[str, int]) -> int:
     return unknown
 
 
-def _load(commitment_ids: list[str], *, db) -> dict[str, Any]:
+def _load(
+    commitment_ids: list[str], *, db, pending: Mapping[str, dict[str, int]] | None = None,
+) -> dict[str, Any]:
     marks = ",".join("?" for _ in commitment_ids)
     params = tuple(commitment_ids)
     roots = db.execute(
@@ -146,10 +148,13 @@ def _load(commitment_ids: list[str], *, db) -> dict[str, Any]:
     # is the guarantee: the projection writing a call's row deletes its receipt
     # in the same transaction, so one committing between these two reads is
     # briefly counted unknown by a row that covers it -- never missed by both
-    # and reported short. A receipt is owed by its own call's binding, which
-    # names an attempt, so a commitment never selected is owed none and a plan
-    # of idle work costs no read.
-    pending = pending_measurement_counts(db, commitment_ids) if attempts else {}
+    # and reported short. A caller that priced the ledger already passes the
+    # receipts it read before that (``usage_cost.priced_with_pending``). A
+    # receipt is owed by its own call's binding, which names an attempt, so a
+    # commitment never selected is owed none and a plan of idle work costs no
+    # read.
+    if pending is None:
+        pending = pending_measurement_counts(db, commitment_ids) if attempts else {}
     # One row per commitment and Turn, not per call.
     usage = fetch_all(
         db, f"""SELECT plan_commitment_id,turn_id,{usage_cost.USAGE_TOKENS} FROM llm_usage
@@ -157,7 +162,20 @@ def _load(commitment_ids: list[str], *, db) -> dict[str, Any]:
             GROUP BY plan_commitment_id,turn_id""",
         params,
     )
-    effort = {
+    return {
+        "nodes": _rows_by(nodes, "commitment_id"),
+        "usage": _rows_by(usage, "plan_commitment_id"),
+        "turns": _rows_by(turns, "plan_commitment_id"),
+        "attempts": _rows_by(attempts, "commitment_id"),
+        "effort": _user_effort(db, marks, params),
+        "recording_failures": _recording_failures(db, marks, params),
+        "pending": pending,
+    }
+
+
+def _user_effort(db, marks: str, params: tuple) -> dict[str, int]:
+    """The plan actions the user took, per commitment."""
+    return {
         str(row["commitment_id"]): int(row["count"])
         for row in db.execute(
             f"""SELECT COALESCE(
@@ -172,15 +190,6 @@ def _load(commitment_ids: list[str], *, db) -> dict[str, Any]:
                 GROUP BY commitment_id""",
             params,
         ).fetchall()
-    }
-    return {
-        "nodes": _rows_by(nodes, "commitment_id"),
-        "usage": _rows_by(usage, "plan_commitment_id"),
-        "turns": _rows_by(turns, "plan_commitment_id"),
-        "attempts": _rows_by(attempts, "commitment_id"),
-        "effort": effort,
-        "recording_failures": _recording_failures(db, marks, params),
-        "pending": pending,
     }
 
 
@@ -204,12 +213,12 @@ def project_many(
     *,
     db=None,
     now: datetime | None = None,
-    dollars: Mapping[str, dict] | None = None,
+    ledger: usage_cost.Ledger | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Aggregate many commitments with a bounded query count.
 
-    ``dollars`` is each commitment's ``model_cost_usd`` when the caller already priced the
-    ledger for every one of ``commitment_ids`` (``usage_cost.amount``); None prices it here.
+    ``ledger`` is ``usage_cost.priced_with_pending`` of every one of ``commitment_ids`` when
+    the caller already priced the ledger (``usage_cost.amount``); None reads it here.
     """
 
     ids = sorted({str(value) for value in commitment_ids})
@@ -217,9 +226,11 @@ def project_many(
         return {}
     clock = now or datetime.now(timezone.utc)
     with service._connection(db) as connection:
-        loaded = _load(ids, db=connection)
-        if dollars is None:
-            dollars = usage_cost.usage_dollars(connection, {"plan_commitment_id": ids})["plan_commitment_id"]
+        loaded = _load(ids, db=connection, pending=None if ledger is None else ledger.pending)
+        dollars = (
+            usage_cost.usage_dollars(connection, {"plan_commitment_id": ids})["plan_commitment_id"]
+            if ledger is None else ledger.dollars
+        )
         result = {}
         for commitment_id in ids:
             nodes = loaded["nodes"].get(commitment_id, [])
