@@ -159,6 +159,9 @@ async def lifespan(app: FastAPI):
         await start_documents()
         await resume_local_setup()
         schedule_usage_rollup_refresh()
+        from infra.usage_summary import record_current_install_week
+
+        await run_in_db(record_current_install_week)
         startup_tasks[4] = asyncio.create_task(
             restart_startup.run_startup_drive(
                 startup_tasks[3], recovered, wakes, rolled_back_operation, logger,
