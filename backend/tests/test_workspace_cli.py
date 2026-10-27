@@ -145,11 +145,17 @@ def test_cli_init_reasks_after_protected_workspace_is_declined(tmp_path, monkeyp
     assert cli.cmd_init(_init_args(None)) == 0
 
     runtime = paths.load_bootstrap(bootstrap)
+    folder = "     Folder (press Enter for ~/corsia, or type another): "
+    if sys.platform.startswith("linux"):
+        # Linux has no macOS-protected folders, so the first answer stands.
+        assert runtime.workspace.root == (fake_home / "Documents" / "workspace").resolve()
+        assert prompts == [folder]
+        return
     assert runtime.workspace.root == (fake_home / "workspace").resolve()
     assert prompts == [
-        "     Folder (press Enter for ~/corsia, or type another): ",
+        folder,
         "     That folder is protected by macOS, so you'd see permission prompts. Use it anyway? [y/N] ",
-        "     Folder (press Enter for ~/corsia, or type another): ",
+        folder,
     ]
 
 
