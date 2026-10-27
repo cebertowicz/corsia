@@ -68,10 +68,17 @@ async def test_empty_after_three_attempts(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_ddgs_failure_returns_reason_without_exception_text(monkeypatch):
-    monkeypatch.setattr(keyless, "DDGS", Mock(side_effect=RuntimeError("private error")))
+    monkeypatch.setattr(keyless, "DDGS", Mock(side_effect=keyless.DDGSException("private error")))
     result = await keyless.keyless_search("query")
     assert (result.kind, result.reason) == (outcomes.FAILED, outcomes.REASON_PROVIDER)
     assert "private error" not in repr(result)
+
+
+@pytest.mark.asyncio
+async def test_non_ddgs_error_is_not_reported_as_provider_failure(monkeypatch):
+    monkeypatch.setattr(keyless, "DDGS", Mock(side_effect=TypeError("changed signature")))
+    with pytest.raises(TypeError):
+        await keyless.keyless_search("query")
 
 
 @pytest.mark.asyncio
