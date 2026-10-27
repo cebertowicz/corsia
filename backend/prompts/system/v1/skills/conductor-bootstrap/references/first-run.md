@@ -36,7 +36,7 @@ CORSIA already read what setup needs; it is in your first input under `## Setup 
 - `mcp_sources`: MCP servers in other apps, by `source` and `app`, each with `name` and `kind`.
 - `setup`: `setup_decisions` (each with its `task_title`) and `setup_task_settlements` (tasks CORSIA settles because nothing needs deciding).
 - `host_access_reviewer`: who reviews host access now.
-- `web_search_key`: whether a key is saved.
+- `web_search_key`: whether a key is saved, for step 5's post.
 
 A fact marked `unavailable` names its read, made once when needed.
 

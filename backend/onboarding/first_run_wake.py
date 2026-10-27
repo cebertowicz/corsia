@@ -34,7 +34,7 @@ UNAVAILABLE_READS = {
     "mcp_sources": "corsia_api GET /api/mcp/sources",
     "setup": "setup_decisions.read_facts once, without web search",
     "host_access_reviewer": "none; corsia_api hides host-access fields, so treat the reviewer as unknown",
-    "web_search_key": "one web_search call",
+    "web_search_key": "corsia_api GET /api/keys, the web-search entry's is_set",
     "harness_ready": "tool model_sources, once, without recheck",
     "sources_missing": "tool model_sources, once, without recheck",
     "agents_found": "none; skip the import step unless its consent decision is available",
