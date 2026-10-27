@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from automation import schedules
+from infra.queries import get_thread, thread_gone_for_good, thread_unavailable_reason
 from automation.continuation.triggers import (
     TERMINAL_STATES,
     Trigger,
@@ -21,7 +22,25 @@ class ScheduleSource:
 
     def due(self, now: str, *, db) -> list[TriggerRequest]:
         requests = []
-        for schedule in schedules.due(now, db=db):
+        due = schedules.due(now, db=db)
+        owners = sorted({schedule.thread_id for schedule in due})
+        rows = db.execute(
+            f"SELECT id, lifecycle_state, archived_reason FROM threads WHERE id IN ({','.join('?' * len(owners))})",
+            owners,
+        ).fetchall() if owners else []
+        threads = {row["id"]: row for row in rows}
+        for schedule in due:
+            owner = threads.get(schedule.thread_id)
+            if thread_unavailable_reason(owner) and not thread_gone_for_good(owner):
+                continue
+            details = dict(schedule.payload or {})
+            if schedule.kind == "cadence" and schedule.runs + 1 >= schedule.max_runs:
+                summary = details.get("summary") or "A bounded automation schedule is due."
+                details.update({
+                    "summary": f"{summary} This is the last of this schedule's {schedule.max_runs} runs; "
+                               "it stops after this one. To keep it going, arm a new one with automation_schedule.",
+                    "final_run": True, "runs": schedule.runs, "max_runs": schedule.max_runs,
+                })
             requests.append(
                 TriggerRequest(
                     kind=self.kind,
@@ -30,7 +49,7 @@ class ScheduleSource:
                     subject_id=schedule.id,
                     transition=_transition(schedule),
                     reason="schedule_due",
-                    details=schedule.payload,
+                    details=details,
                 )
             )
         return requests
@@ -85,7 +104,13 @@ class ScheduleSource:
         hour cannot end a recurring schedule. Only ``max_runs`` or a one-shot
         clock exhausts it (#1612).
         """
-        if outcome in TERMINAL_STATES:
+        if outcome == "failed" and thread_gone_for_good(get_thread(trigger.thread_id, db=db)):
+            db.execute(
+                "UPDATE automation_schedules SET state='cancelled', last_status='owner_gone', updated_at=? "
+                "WHERE id=? AND state='active'",
+                (trigger.created_at, trigger.subject_id),
+            )
+        elif outcome in TERMINAL_STATES:
             schedules.settle_run(
                 trigger.subject_id,
                 trigger.created_at,
