@@ -105,16 +105,16 @@ async function openMeasurement(page: import('@playwright/test').Page, project: {
 	// The Agents table belongs to a project's scope, reached from the page's Scope select.
 	await expect(page.getByRole('region', { name: /Agents table/ })).toHaveCount(0);
 	await selectProjectScope(page, project.name);
-	await expect(page.getByRole('button', { name: `Measurement scope: ${project.name}`, exact: true })).toBeVisible();
+	await expect(page.getByRole('button', { name: `Showing: ${project.name}`, exact: true })).toBeVisible();
 	const table = page.getByRole('region', { name: /Agents table/ });
 	await expect(table.locator('tbody tr')).toHaveCount(3);
 }
 
 /** Back to All work through the scope picker: the table gives way. */
 async function backToAllWork(page: import('@playwright/test').Page): Promise<void> {
-	await page.getByRole('button', { name: /Measurement scope:/ }).click();
+	await page.getByRole('button', { name: /Showing:/ }).click();
 	await page.getByRole('option', { name: 'All work' }).click();
-	await expect(page.getByRole('button', { name: 'Measurement scope: All work', exact: true })).toBeVisible();
+	await expect(page.getByRole('button', { name: 'Showing: All work', exact: true })).toBeVisible();
 	await expect(page.getByRole('region', { name: /Agents table/ })).toHaveCount(0);
 }
 

@@ -43,7 +43,7 @@ function alignmentIssue(parts: (MeasurementRow | undefined)[], n: number): strin
 	if (parts.some((row) => !row)) return 'A share is missing for this period.';
 	if (parts.some((row) => row!.value === null || row!.thin)) return TOO_FEW;
 	if (parts.some((row) => !row!.comparable)) return 'Not comparable with the other periods.';
-	if (!parts.every((row) => row!.n === n && Number.isFinite(row!.value) && row!.value! >= 0 && row!.value! <= 1)) return 'The shares are invalid for this period.';
+	if (!parts.every((row) => row!.n === n && Number.isFinite(row!.value) && row!.value! >= 0 && row!.value! <= 1)) return "This period's shares can't be shown.";
 	return Math.abs(parts.reduce((sum, row) => sum + row!.value!, 0) - 1) < 1e-9 ? null : 'The shares do not add up to the answered decisions.';
 }
 

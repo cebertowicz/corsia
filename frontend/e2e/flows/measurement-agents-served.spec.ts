@@ -116,7 +116,7 @@ async function openMeasurement(page: import('@playwright/test').Page) {
 /** Pick the seeded project from the page's Scope select, which is how a reader reaches its Agents table. */
 async function openSeededProject(page: import('@playwright/test').Page) {
 	await selectProjectScope(page, SEEDED_PROJECT);
-	await expect(page.getByRole('button', { name: 'Measurement scope: ' + SEEDED_PROJECT, exact: true })).toBeVisible();
+	await expect(page.getByRole('button', { name: 'Showing: ' + SEEDED_PROJECT, exact: true })).toBeVisible();
 }
 
 test.describe('@surface:measurement agents served by the producer', () => {
@@ -158,7 +158,7 @@ test.describe('@surface:measurement agents served by the producer', () => {
 		await expect(panel.getByRole('button', { name: 'Retry' }).first()).toBeVisible();
 		// The two claims a defaulted load would have made: an empty population and an
 		// ordering of rows that are not there.
-		await expect(page.getByText('No active agents in this scope.')).toHaveCount(0);
+		await expect(page.getByText('No active agents for this selection.')).toHaveCount(0);
 		await expect(table).toHaveCount(0);
 		await expect(panel.locator('[aria-sort]')).toHaveCount(0);
 

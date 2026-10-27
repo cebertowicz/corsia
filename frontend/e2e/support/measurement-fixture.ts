@@ -97,7 +97,7 @@ export const kpiBody = {
 
 /** Open a project's Measurement scope from the page's Scope select, the one way to leave All work. */
 export async function selectProjectScope(page: Page, projectName: string): Promise<void> {
-	await page.getByRole('button', { name: /Measurement scope:/ }).click();
+	await page.getByRole('button', { name: /Showing:/ }).click();
 	await page.getByRole('combobox', { name: 'Search projects and agents' }).fill(projectName);
 	await page.getByRole('option', { name: new RegExp(`^${projectName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`) }).first().click();
 }

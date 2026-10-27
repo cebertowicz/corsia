@@ -15,7 +15,7 @@
 	const asksView = $derived(periodView(asks.rows, 'asks_per_outcome', 1, asks.period, asks.windows?.asks_per_outcome));
 	/** One line under the agents table, for all agents together; the kept Asks per outcome chart draws the series. */
 	const asksLine = $derived.by(() => {
-		const lead = 'Asks are not recorded per agent yet. All agents together:';
+		const lead = 'All agents together:';
 		if (asks.loading && !asks.rows.length) return `${lead} loading.`;
 		if (asks.error && !asks.rows.length) return `${lead} not available right now.`;
 		const value = asksView.current.value;

@@ -42,7 +42,7 @@
 	headline={(value) => value.toFixed(2)}
 	chartTitle="Asks of you per accepted outcome"
 	axisTitle="Asks of you per accepted outcome"
-	caption="Decisions raised to you and tasks blocked on you, divided by accepted outcomes; source: plan decisions, blockers and accepted outcomes; lower is better. n is accepted outcomes per week."
+	caption="Decisions raised to you and tasks waiting on you, per accepted outcome. Lower is better."
 	valueFormat={(value) => value.toFixed(2)}
 />
 <MeasurementPeriodSection
