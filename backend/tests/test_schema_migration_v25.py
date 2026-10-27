@@ -221,6 +221,6 @@ def test_the_step_runs_once(schema_twentyfour):
 
     repeated = _migrate(db)
 
-    assert SCHEMA_VERSION == 152
+    assert SCHEMA_VERSION == 153
     assert (repeated.migrated, repeated.from_version, repeated.to_version) == (False, 25, 25)
     assert _row(db, "held-1")["delivery_revision"] == 2
