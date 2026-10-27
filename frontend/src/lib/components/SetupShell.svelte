@@ -290,7 +290,7 @@
 		.primary-action { flex-direction: column; align-items: flex-end; }
 		.error-footer { flex-direction: column; align-items: stretch; gap: var(--space-3); }
 		.error-footer .primary-action { align-items: flex-start; }
-		.error-footer .primary-action :global(.btn.pill) { min-height: 44px; }
+		.error-footer .primary-action :global(.btn.pill) { min-height: var(--touch-target); }
 		.error-footer .secondary-actions { order: 0; flex-direction: column; align-items: flex-start; gap: var(--space-3); }
 	}
 	.job-region { overflow: hidden; }
