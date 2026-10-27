@@ -1,6 +1,7 @@
 """Schema 158: stamp a ``cause_kind`` on provider-failure rows written before rows carried one.
 
-Every ``llm_error`` and ``cc_error`` writer now stores ``cause_kind`` (from
+Every ``llm_error`` and ``cc_error`` writer, and the Claude Code ``result``
+writer for a failure the person did not stop, now stores ``cause_kind`` (from
 ``llm.error_cause``). Older rows have only their ``cause`` and the error text
 they showed, so each is classified once, through the same mapping the writers
 use, and a reader keys on the stored field alone. A row that already has a
@@ -16,7 +17,9 @@ from llm.error_cause import cause_kind, harness_cause_kind
 _UNSTAMPED_SQL = (
     "SELECT id, content, metadata FROM messages WHERE role='system' "
     "AND json_valid(metadata) AND json_type(metadata)='object' "
-    "AND json_extract(metadata, '$.type') IN ('llm_error', 'cc_error') "
+    "AND (json_extract(metadata, '$.type') IN ('llm_error', 'cc_error') "
+    "OR (json_extract(metadata, '$.type')='result' AND json_type(metadata, '$.is_error')='true' "
+    "AND coalesce(json_extract(metadata, '$.stop_reason'), '') != 'interrupted')) "
     "AND json_type(metadata, '$.cause_kind') IS NULL"
 )
 
@@ -32,7 +35,7 @@ def _harness(metadata: dict) -> str | None:
 def stored_cause_kind(content: object, metadata: dict) -> str:
     """The kind a writer would have stored: harness rows also read their error text."""
     cause = metadata.get("cause")
-    harness = _harness(metadata) if metadata.get("type") == "cc_error" else None
+    harness = _harness(metadata) if metadata.get("type") in ("cc_error", "result") else None
     if harness is None:
         return cause_kind(cause)
     return harness_cause_kind(harness, cause if isinstance(cause, str) else None, content)

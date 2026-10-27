@@ -25,6 +25,11 @@ _ROWS: dict[str, tuple[str, object, str | None]] = {
     "codex-limit": ("x", {"type": "cc_error", "harness": "codex", "cause": "usageLimitExceeded"}, "usage_limit"),
     "native": ("boom", {"type": "llm_error"}, "unknown"),
     "kept": ("x", {"type": "cc_error", "cause": "process_exited", "cause_kind": "rate_limited"}, "rate_limited"),
+    "failed-result": ("x", {"type": "result", "cc": True, "is_error": True, "cause": "sign_in_expired"},
+                      "sign_in_expired"),
+    "expired-result": (_EXPIRED, {"type": "result", "cc": True, "is_error": True}, "sign_in_expired"),
+    "stopped-result": ("x", {"type": "result", "cc": True, "is_error": True, "stop_reason": "interrupted"}, None),
+    "done-result": ("x", {"type": "result", "cc": True, "is_error": False}, None),
     "boundary": ("x", {"type": "tool_boundary_violation"}, None),
     "not-object": ("x", [1], None),
 }
@@ -60,6 +65,7 @@ def test_v158_stamps_each_older_provider_failure_row_once_through_the_writers_ma
             if kind is None:
                 assert stored[row_id] == metadata, row_id
             else:
+                assert isinstance(metadata, dict)
                 assert stored[row_id] == {**metadata, "cause_kind": kind}, row_id
         assert not migrate_to_current(db, SCHEMA_VERSION).migrated
     finally:
