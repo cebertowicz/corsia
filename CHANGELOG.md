@@ -11,6 +11,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - On Linux, CORSIA no longer offers to set up a local model; you can connect a provider instead.
 - A local model that fails to reload now gives retry instructions that match whether it is kept loaded.
 - The local model server keeps your server-wide settings when CORSIA starts it again.
+- Chat titles use more of the available header space when Local only is off.
 - Claude Code accounts you added keep working when CORSIA's data moves.
 - Browser addresses no longer need `https://` typed in; local loopback addresses use `http://` by default.
 - When CORSIA can't find a chat's account sign-in on this computer, the message waits until you sign in again instead of repeatedly trying to send.
