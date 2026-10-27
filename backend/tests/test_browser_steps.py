@@ -79,6 +79,10 @@ async def test_off_domain_stop_returns_safe_miss(tool, monkeypatch):
     ([f"Error: {browser_control.PASSWORD_PAGE} Post nothing in chat."], browser_control.PASSWORD_PAGE + " Post nothing in chat."),
     ([f"Error: {browser_control.PERSON_STEP}"], browser_control.PERSON_STEP),
     (["ok", f"Error: {browser_control.PASSWORD_PAGE} Post nothing in chat."], browser_control.PASSWORD_PAGE + " Post nothing in chat."),
+    ([f"Error: {browser_control.PERSON_STEP_DECLINED}"], browser_control.PERSON_STEP_DECLINED),
+    (["ok", f"Error: {browser_control.PERSON_STEP_DECLINED}"], browser_control.PERSON_STEP_DECLINED),
+    (["ok", "Console", f"Error: {browser_control.PERSON_STEP_DECLINED}"], browser_control.PERSON_STEP_DECLINED),
+    ([f"Error: {browser_control.PASSWORD_DECLINED}"], browser_control.PASSWORD_DECLINED),
 ])
 async def test_guard_refusals_keep_message_and_resume_point(tool, monkeypatch, responses, message):
     result, _calls = await invoke(tool, monkeypatch, responses)

@@ -322,10 +322,22 @@
       "sha256": "ddb2e532b6ec82c809e9faba2453f4edb2925740ede0b86cb87d0f6d72d68286"
     },
     {
-      "bytes": 6391,
+      "bytes": 6755,
       "kind": "skill",
       "path": "skills/google-setup/SKILL.md",
-      "sha256": "78f961e96cb55fe4bad7e496709747de5e4293ba3e4de5df4a7e8036bcf49cf8"
+      "sha256": "f764de2e3b7282efe3e4ec57e59daf164815db4d5d49d7cf5cfc4aed280aa966"
+    },
+    {
+      "bytes": 1371,
+      "kind": "skill",
+      "path": "skills/google-setup/steps/console-client.json",
+      "sha256": "f520ce989d6c8096adff12d63119249160542941fd0d340e080d238dda74e0da"
+    },
+    {
+      "bytes": 1093,
+      "kind": "skill",
+      "path": "skills/google-setup/steps/console-project.json",
+      "sha256": "3f813ed838106a68dc9abdda807ea469ce0840e4be8c8b4920235d68f17b33eb"
     },
     {
       "bytes": 3155,

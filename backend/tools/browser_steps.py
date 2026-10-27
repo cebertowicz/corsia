@@ -15,6 +15,8 @@ _ACTIONS = frozenset({"goto", "click", "type", "wait_for"})
 _PLACEHOLDER = re.compile(r"\$\{[^}]+}")
 _SAFE_NAME = re.compile(r"[a-z0-9-]+")
 _SKILLS = Path(__file__).resolve().parents[1] / "prompts/system/v1/skills"
+_GUARD_REFUSALS = (browser_control.PASSWORD_PAGE, browser_control.PERSON_STEP,
+                   browser_control.PASSWORD_DECLINED, browser_control.PERSON_STEP_DECLINED)
 
 
 def _result(**value: object) -> str:
@@ -116,7 +118,7 @@ class BrowserRunStepsTool(Tool):
             result = await _run(_command(step, values), thread_id=thread_id, timeout=_timeout(step))
             if result.startswith("Error:"):
                 message = result.removeprefix("Error: ")
-                if message.startswith(browser_control.PASSWORD_PAGE) or message.startswith(browser_control.PERSON_STEP):
+                if message.startswith(_GUARD_REFUSALS):
                     return _guard_result(identifier, says, message)
                 return await _miss(thread_id, identifier, says, _expected(step))
             saw, url, refusal = await _saw(thread_id, _expected(step))
@@ -158,11 +160,11 @@ def _guard_result(identifier: str, says: str, message: str) -> str:
 async def _saw(thread_id: str, expected: str) -> tuple[dict[str, str], str, str | None]:
     title = await _run(["get", "title"], thread_id=thread_id)
     message = title.removeprefix("Error: ") if title.startswith("Error:") else ""
-    if message.startswith(browser_control.PASSWORD_PAGE) or message.startswith(browser_control.PERSON_STEP):
+    if message.startswith(_GUARD_REFUSALS):
         return {"title": "", "url_path": "", "missing": expected}, "", message
     url = await _run(["get", "url"], thread_id=thread_id)
     message = url.removeprefix("Error: ") if url.startswith("Error:") else ""
-    if message.startswith(browser_control.PASSWORD_PAGE) or message.startswith(browser_control.PERSON_STEP):
+    if message.startswith(_GUARD_REFUSALS):
         return {"title": "", "url_path": "", "missing": expected}, "", message
     safe_title = "" if title.startswith("Error:") else title.strip()
     safe_url = "" if url.startswith("Error:") else url.strip()
