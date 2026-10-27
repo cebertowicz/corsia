@@ -7,6 +7,7 @@ from threading import Event
 from unittest.mock import patch
 
 import pytest
+from fastapi import Request
 from fastapi.testclient import TestClient
 
 from webhook_ingress_fixtures import (  # noqa: F401
@@ -20,31 +21,26 @@ from webhook_ingress_fixtures import (  # noqa: F401
 )
 
 
-class _DirectWebhookRequest:
-    def __init__(self, body: bytes, headers: dict[str, str]) -> None:
-        self._body = body
-        self.headers = headers
-
-    async def body(self) -> bytes:
-        return self._body
-
-
 def _direct_webhook_request(
     payload: dict,
     *,
     event_type: str = "pull_request",
     delivery_id: str | None = None,
-) -> _DirectWebhookRequest:
+) -> Request:
     body = json.dumps(payload).encode()
-    return _DirectWebhookRequest(
-        body,
-        {
-            "X-GitHub-Event": event_type,
-            "X-GitHub-Delivery": delivery_id or str(uuid.uuid4()),
-            "X-Hub-Signature-256": _make_signature(body),
-            "Content-Type": "application/json",
-        },
-    )
+    headers = {
+        "x-github-event": event_type,
+        "x-github-delivery": delivery_id or str(uuid.uuid4()),
+        "x-hub-signature-256": _make_signature(body),
+        "content-type": "application/json",
+    }
+
+    async def receive():
+        return {"type": "http.request", "body": body, "more_body": False}
+
+    scope = {"type": "http", "method": "POST", "path": "/webhooks/github",
+             "headers": [(k.encode(), v.encode()) for k, v in headers.items()]}
+    return Request(scope, receive)
 
 
 class TestWebhookEndpoint:
@@ -52,8 +48,8 @@ class TestWebhookEndpoint:
     @pytest.fixture(autouse=True)
     def _setup(self, _isolated_db, monkeypatch):
         monkeypatch.setattr(
-            "api.webhooks._get_webhook_secret",
-            lambda: WEBHOOK_SECRET,
+            "api.webhook_receivers.receiver_secret",
+            lambda connector: WEBHOOK_SECRET,
         )
 
         from main import app
@@ -256,7 +252,6 @@ class TestWebhookEndpoint:
         try:
             with (
                 patch("automation.self_restart.restart_holds_new_work", return_value=True),
-                patch("api.webhooks._handle_dedup_and_log") as dedup,
                 patch(
                     "infra.webhook_delivery_log.update_delivery_status"
                 ) as status_update,
@@ -273,7 +268,6 @@ class TestWebhookEndpoint:
         response_payload = json.loads(response.body)
         assert response_payload["status"] == "held"
         assert "this delivery was accepted" in response_payload["message"]
-        dedup.assert_not_called()
         status_update.assert_not_called()
         route_leg.assert_not_called()
         review_leg.assert_not_called()
@@ -426,7 +420,7 @@ class TestWebhookEndpoint:
             state._drain = None
 
     def test_secret_not_configured_returns_401(self, monkeypatch):
-        monkeypatch.setattr("api.webhooks._get_webhook_secret", lambda: None)
+        monkeypatch.setattr("api.webhook_receivers.receiver_secret", lambda connector: None)
         payload = _pr_opened_payload()
         body = json.dumps(payload).encode()
         headers = {
@@ -456,7 +450,7 @@ class TestWebhookEndpoint:
 
     def test_unsigned_ping_without_configured_secret_accepted(self, monkeypatch):
         """Unsigned ping (no secret yet configured) must return 200 ok."""
-        monkeypatch.setattr("api.webhooks._get_webhook_secret", lambda: None)
+        monkeypatch.setattr("api.webhook_receivers.receiver_secret", lambda connector: None)
         resp = self._post_ping(include_sig=False)
         assert resp.status_code == 200
         data = resp.json()
