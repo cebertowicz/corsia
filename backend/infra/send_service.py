@@ -331,7 +331,9 @@ async def send_thread_input(
     _require_thread_identity(thread_id, thread_row)
     if native_mode == "ws" and ws is None:
         raise SendRejected(500, "Native WebSocket send missing socket context")
-    text = _accepted_text(content, trim_content, allow_empty_content, attachments)
+    from infra.reply_context import RejectedComments, has_comment_candidates
+    comment_candidates = has_comment_candidates((metadata or {}).get("reply_context"))
+    text = _accepted_text(content, trim_content, allow_empty_content, attachments, comment_candidates)
     message_id = input_id or idempotency_key or str(uuid.uuid4())
     admitted_at = utc_now_iso()
     descriptor_attachments = await _bind_image_identity(
@@ -346,19 +348,15 @@ async def send_thread_input(
         broadcast_input=broadcast_input,
         touch_thread_on_insert=touch_thread_on_insert,
     )
-    admission = await admit_prepared_input(
-        thread_id,
-        role=role,
-        content=text,
-        intent=delivery_intent,
-        message_id=message_id,
-        turn_id=str(uuid.uuid4()),
-        boot_epoch=_boot_epoch(),
-        admitted_at=admitted_at,
-        metadata=metadata,
-        delivery_options=options,
-        continuation=continuation,
-    )
+    try:
+        admission = await admit_prepared_input(
+            thread_id, role=role, content=text, intent=delivery_intent,
+            message_id=message_id, turn_id=str(uuid.uuid4()), boot_epoch=_boot_epoch(),
+            admitted_at=admitted_at, metadata=metadata, delivery_options=options,
+            continuation=continuation,
+        )
+    except RejectedComments as exc:
+        raise SendRejected(400, str(exc)) from exc
     from jobs.corrections_recording import notify_if_owner  # best effort; never fails the send
     notify_if_owner(admission.accepted, role=role, content=text, metadata=metadata)
     return await _deliver_admission(
@@ -379,6 +377,7 @@ def _accepted_text(
     trim_content: bool,
     allow_empty_content: bool,
     attachments: Any | None,
+    comment_candidates: bool = False,
 ) -> str:
     """Normalize the input text and refuse one that carries nothing.
 
@@ -386,7 +385,7 @@ def _accepted_text(
         SendRejected: The input has neither content nor permitted attachments.
     """
     text = content.strip() if trim_content else content
-    if not text and not (allow_empty_content and attachments):
+    if not text and not (allow_empty_content and attachments) and not comment_candidates:
         raise SendRejected(400, "Message content is empty")
     return text
 

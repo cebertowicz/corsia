@@ -11,7 +11,7 @@ from core.reply_context import REPLY_CONTEXT_KEY
 from core.viewing_context import VIEWING_DOCUMENT_KEY, VIEWING_DOCUMENT_TARGET_KEY
 from infra.database import get_db, write_transaction
 from infra.document_viewing import PreparedViewingDocument
-from infra.reply_context import validate_reply_context
+from infra.reply_context import require_every_comment, validate_reply_context
 from infra.thread_inputs import thread_admission_state
 from infra.time import utc_now_iso
 from infra.vendor_login import LOGIN_KEY, public_metadata
@@ -26,7 +26,7 @@ def stamped_human_metadata(
     metadata: dict | None,
     *,
     viewing_document: PreparedViewingDocument | None = None,
-    thread_id: str | None = None,
+    thread_id: str,
 ) -> dict | None:
     """Return the metadata a newly admitted human message is stored with.
 
@@ -59,12 +59,10 @@ def stamped_human_metadata(
     stamped = {**(clean or {}), REPLY_VIA_POST_UPDATE_KEY: True}
     if prior is not None:
         reply_context = prior.get(REPLY_CONTEXT_KEY)
-    elif thread_id is not None:
-        reply_context = validate_reply_context(
-            connection, thread_id, (metadata or {}).get(REPLY_CONTEXT_KEY),
-        )
     else:
-        reply_context = None
+        raw_context = (metadata or {}).get(REPLY_CONTEXT_KEY)
+        reply_context = validate_reply_context(connection, thread_id, raw_context)
+        require_every_comment(raw_context, reply_context)
     if reply_context:
         stamped[REPLY_CONTEXT_KEY] = reply_context
     if viewing_document is not None:

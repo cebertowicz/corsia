@@ -39,7 +39,7 @@ async def _deliver_subagent_input(
     ws: WebSocket, child_thread_id: str, session: object, content: str,
     attachments: list | None, is_edited: bool, input_id: str,
     delivery_intent: str, send_thread_input_fn: Callable,
-    provider_name: str, log, viewing_document: dict | None,
+    provider_name: str, log, viewing_document: dict | None, reply_context: object,
 ) -> str | None:
     metadata: dict = {}
     if attachments:
@@ -48,6 +48,8 @@ async def _deliver_subagent_input(
         metadata["edited"] = True
     if viewing_document is not None:
         metadata["viewing_document"] = viewing_document
+    if reply_context is not None:
+        metadata["reply_context"] = reply_context
     try:
         result = await send_thread_input_fn(
             child_thread_id,
@@ -84,6 +86,7 @@ async def handle_subagent_feed(
     input_id: str | None = None,
     delivery_intent: str = "apply_now",
     viewing_document: dict | None = None,
+    reply_context: object = None,
     *,
     owned_thread_fn: OwnedThread,
     send_thread_input_fn: Callable,
@@ -97,7 +100,9 @@ async def handle_subagent_feed(
     input_id = input_id.strip()
     if delivery_intent not in {"apply_now", "queue_after_turn"}:
         delivery_intent = "apply_now"
-    if not child_thread_id or not content:
+    from infra.reply_context import has_comment_candidates
+
+    if not child_thread_id or (not content and not has_comment_candidates(reply_context)):
         await _send_error(
             ws, child_thread_id or "", "Malformed subagent input",
             input_id=input_id,
@@ -126,7 +131,8 @@ async def handle_subagent_feed(
     if provider_name is not None:
         error_message = await _deliver_subagent_input(
             ws, child_thread_id, session, content, attachments, is_edited,
-            input_id, delivery_intent, send_thread_input_fn, provider_name, log, viewing_document,
+            input_id, delivery_intent, send_thread_input_fn, provider_name, log,
+            viewing_document, reply_context,
         )
         if error_message is None:
             return

@@ -35,6 +35,15 @@ describe('reply context send payload', () => {
 		});
 	});
 
+	it('sends comments in the same context as the view and unread position', () => {
+		const comment = { id: 'c1', seq: 3, from_off: 2, to_off: 5, quote: 'one', anchor_prefix: 'a ', anchor_suffix: ' b', note: 'note' };
+		visitDividers.set({ main: { divider: { since: 's', first_seq: 4 }, failed: false } });
+		setVisibleRows(rows('main', 3, 4));
+		beginComposing('main');
+		sendMessage('main', 'answer', undefined, undefined, undefined, 'apply_now', [comment]);
+		expect(sent.at(-1)?.reply_context).toEqual({ comments: [comment], in_view: [[3, 4, 2]], first_unread: { seq: 4, truncated: false } });
+	});
+
 	it('sends the window once: the next message starts from nothing', () => {
 		setVisibleRows(rows('main', 3));
 		beginComposing('main');
