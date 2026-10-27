@@ -229,19 +229,21 @@ test.describe('@flow:measurement-placement-p2 @surface:navigation place Measurem
 			await page.emulateMedia({ colorScheme: scheme });
 			for (const width of [393, 412] as const) {
 				await page.setViewportSize({ width, height: 915 });
-				if (width === 393) {
-					const trigger = await page.getByRole('button', { name: /Showing:/ }).boundingBox();
-					const controls = await page.locator('.measurement-page .controls').boundingBox();
-					expect(trigger).not.toBeNull();
-					expect(controls).not.toBeNull();
-					expect(trigger!.width, 'the scope trigger fills the narrow controls column').toBeCloseTo(controls!.width, 1);
-				}
-				const box = await page.locator('.picker-panel').boundingBox();
-				expect(box).not.toBeNull();
-				expect(box!.x, `${scheme}: picker starts in the ${width}px viewport`).toBeGreaterThanOrEqual(0);
-				expect(box!.x + box!.width, `${scheme}: picker ends in the ${width}px viewport`).toBeLessThanOrEqual(width);
-				const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
-				expect(overflow, `${scheme}: no sideways page scroll at ${width}px`).toBeLessThanOrEqual(0);
+				await expect(async () => {
+					if (width === 393) {
+						const trigger = await page.getByRole('button', { name: /Showing:/ }).boundingBox();
+						const controls = await page.locator('.measurement-page .controls').boundingBox();
+						expect(trigger).not.toBeNull();
+						expect(controls).not.toBeNull();
+						expect(trigger!.width, 'the scope trigger fills the narrow controls column').toBeCloseTo(controls!.width, 1);
+					}
+					const box = await page.locator('.picker-panel').boundingBox();
+					expect(box).not.toBeNull();
+					expect(box!.x, `${scheme}: picker starts in the ${width}px viewport`).toBeGreaterThanOrEqual(0);
+					expect(box!.x + box!.width, `${scheme}: picker ends in the ${width}px viewport`).toBeLessThanOrEqual(width);
+					const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+					expect(overflow, `${scheme}: no sideways page scroll at ${width}px`).toBeLessThanOrEqual(0);
+				}).toPass();
 				if (process.env.SHOT_DIR) await page.screenshot({ path: capture(`measurement-scope-picker-${scheme}-${width}.png`), animations: 'disabled' });
 			}
 		}
