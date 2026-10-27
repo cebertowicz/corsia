@@ -77,7 +77,7 @@ def insertion_position(comment: dict[str, Any], document_text: str, point: int) 
     """Skip accepted older insertions still contiguous after the same quote."""
     key = (comment.get("created_at", ""), comment["id"])
     anchor_end = point
-    for sibling in sorted(comment.get("_accepted_insertions", []), key=lambda row: (row.get("created_at", ""), row["id"])):
+    for sibling in sorted(comment["_accepted_insertions"], key=lambda row: (row.get("created_at", ""), row["id"])):
         if (sibling.get("created_at", ""), sibling["id"]) >= key:
             break
         if sibling.get("anchor_text") != comment.get("anchor_text"):

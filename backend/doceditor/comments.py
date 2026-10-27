@@ -112,12 +112,21 @@ def _check_existing_identity(row: dict, artifact_id: str, author: str, cid: str)
         )
 
 
+_ACCEPTED_INSERTION = {"insert_after": 1, "decision": "accepted"}
+
+
+def is_accepted_insertion(row: dict) -> bool:
+    """One predicate for accepted insertion siblings in single and batch decisions."""
+    return all(row.get(field) == value for field, value in _ACCEPTED_INSERTION.items())
+
+
 def accepted_insertions(artifact_id: str, anchor_text: str, *, db) -> list[dict]:
     """Accepted insertion siblings for the same artifact and quoted text."""
+    predicate = " AND ".join(f"{field}=?" for field in _ACCEPTED_INSERTION)
     return [dict(row) for row in db.execute(
-        "SELECT * FROM doc_comments WHERE artifact_id=? AND anchor_text=? "
-        "AND insert_after=1 AND decision='accepted' ORDER BY created_at, id",
-        (artifact_id, anchor_text),
+        "SELECT * FROM doc_comments WHERE artifact_id=? AND anchor_text=? AND "
+        + predicate + " ORDER BY created_at, id",
+        (artifact_id, anchor_text, *_ACCEPTED_INSERTION.values()),
     ).fetchall()]
 
 

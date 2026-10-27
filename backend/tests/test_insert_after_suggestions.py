@@ -8,13 +8,14 @@ from doceditor.comment_action_errors import CommentActionError
 from doceditor.comment_actions import applied_text, suggestion_span
 from doceditor.comment_batch_actions import _batch_text
 from doceditor.comment_validation import validate_create
-from infra.migration_148_to_149_doc_insert_after import migrate_148_to_149
+from infra.migration_149_to_150_doc_insert_after import migrate_149_to_150
 
 
 def row(identifier, text, created):
     return {"id": identifier, "anchor_text": "Heading", "from_off": 0, "to_off": 7,
             "anchor_prefix": "", "anchor_suffix": "\n", "replacement": text,
-            "insert_after": True, "created_at": created, "author_thread_id": "agent"}
+            "insert_after": True, "created_at": created, "author_thread_id": "agent",
+            "_accepted_insertions": []}
 
 
 def test_insert_validation_and_staleness():
@@ -56,6 +57,13 @@ def test_single_insert_skips_accepted_older_sibling():
     assert applied_text(first, "Heading\n") == "Heading one\n"
     assert applied_text(second, "Heading one\n") == "Heading one two\n"
     assert applied_text(first, "Heading two\n") == "Heading one two\n"
+
+
+def test_applied_text_requires_the_sibling_list():
+    unloaded = row("a", " one", "1")
+    del unloaded["_accepted_insertions"]
+    with pytest.raises(KeyError):
+        applied_text(unloaded, "Heading\n")
 
 
 def test_overlap_allows_shared_point_but_refuses_insertion_inside_replacement(monkeypatch):
@@ -100,6 +108,6 @@ def test_migration_adds_default_for_existing_rows():
     db = sqlite3.connect(":memory:")
     db.execute("CREATE TABLE doc_comments (id TEXT PRIMARY KEY)")
     db.execute("INSERT INTO doc_comments VALUES ('old')")
-    migrate_148_to_149(db)
-    migrate_148_to_149(db)
+    migrate_149_to_150(db)
+    migrate_149_to_150(db)
     assert db.execute("SELECT insert_after FROM doc_comments").fetchone() == (0,)

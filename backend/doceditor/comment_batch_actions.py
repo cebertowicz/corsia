@@ -43,7 +43,7 @@ def _open_author_suggestions(comment_id: str, user_id: str, actor_thread_id: str
         open_rows = [row for row in rows if is_open_suggestion(row)
                      and row.get("author_thread_id") == comment.get("author_thread_id")]
         if decision == "accept":
-            _attach_accepted_insertions(open_rows, db)
+            _attach_accepted_insertions(open_rows, rows)
         if not open_rows:
             raise CommentActionError(
                 "no_open_suggestions", f"No open suggestions from {comment['author']} on this document."
@@ -64,20 +64,20 @@ def _open_suggestions(artifact_id: str, user_id: str, actor_thread_id: str | Non
         check_decider(user_id=user_id, actor_thread_id=actor_thread_id, artifact=artifact, db=db)
         all_rows = store.list_for_artifact(artifact_id, db=db)
         rows = [row for row in all_rows if is_open_suggestion(row)]
-        _attach_accepted_insertions(rows, db)
+        _attach_accepted_insertions(rows, all_rows)
         return artifact, owner[1] if owner else None, rows
     finally:
         db.close()
 
 
-def _attach_accepted_insertions(rows: list[dict], db) -> None:
-    siblings = {}
+def _attach_accepted_insertions(rows: list[dict], all_rows: list[dict]) -> None:
+    siblings: dict[tuple, list[dict]] = {}
+    for row in all_rows:
+        if store.is_accepted_insertion(row):
+            siblings.setdefault((row["artifact_id"], row["anchor_text"]), []).append(row)
     for row in rows:
         if row.get("insert_after"):
-            key = (row["artifact_id"], row["anchor_text"])
-            if key not in siblings:
-                siblings[key] = store.accepted_insertions(*key, db=db)
-            row["_accepted_insertions"] = siblings[key]
+            row["_accepted_insertions"] = siblings.get((row["artifact_id"], row["anchor_text"]), [])
 
 
 def _batch_text(rows: list[dict[str, Any]], document_text: str) -> tuple[str, list[str], list[dict[str, str]]]:
