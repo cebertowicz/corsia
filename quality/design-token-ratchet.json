@@ -965,7 +965,7 @@
     },
     "frontend/src/lib/components/DocViewer.css": {
       "raw_colors": 0,
-      "raw_px": 39,
+      "raw_px": 25,
       "heavy_borders": 0,
       "raw_shadows": 0,
       "row_menu_buttons": 0
@@ -1523,6 +1523,13 @@
       "raw_shadows": 0,
       "row_menu_buttons": 0
     },
+    "frontend/src/lib/components/SentChatComments.svelte": {
+      "raw_colors": 0,
+      "raw_px": 1,
+      "heavy_borders": 0,
+      "raw_shadows": 0,
+      "row_menu_buttons": 0
+    },
     "frontend/src/lib/components/SettingsDebug.svelte": {
       "raw_colors": 0,
       "raw_px": 1,
@@ -1887,10 +1894,17 @@
       "raw_shadows": 0,
       "row_menu_buttons": 0
     },
+    "frontend/src/lib/components/commentAnchors.css": {
+      "raw_colors": 0,
+      "raw_px": 2,
+      "heavy_borders": 2,
+      "raw_shadows": 0,
+      "row_menu_buttons": 0
+    },
     "frontend/src/lib/components/comments/CommentComposer.svelte": {
       "raw_colors": 0,
-      "raw_px": 13,
-      "heavy_borders": 1,
+      "raw_px": 12,
+      "heavy_borders": 0,
       "raw_shadows": 0,
       "row_menu_buttons": 0
     },

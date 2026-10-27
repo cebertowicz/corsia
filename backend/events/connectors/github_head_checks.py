@@ -126,10 +126,13 @@ class HeadCheckAggregator:
             for attempt in range(1, MAX_ATTEMPTS + 1):
                 await self.sleep(DEBOUNCE_SECONDS * attempt)
                 try:
-                    response = await poller.gated_read(
+                    response, reason = await poller.gated_read(
                         self.runner, repo, f"repos/{repo}/commits/{head_sha}/check-suites")
                 except Exception:
                     log.warning("github-head-checks: aggregate read failed for %s@%s", *key, exc_info=True)
+                    return
+                if reason == "read_refused":
+                    log.warning("github-head-checks: aggregate read stopped for %s@%s: %s", *key, reason)
                     return
                 if response is not None and response.status == 200:
                     break
@@ -181,6 +184,6 @@ def observe_admitted_check_suite(payload: dict[str, Any], selected_pr: dict[str,
         except PrResolutionError:
             log.info("github-head-checks: ambiguous payload PR identity")
     if _default is None:
-        from reviewer.gh_api import run_gh
-        _default = HeadCheckAggregator(run_gh, IntakeSink())
+        from connections.github_broker import default_broker
+        _default = HeadCheckAggregator(default_broker(), IntakeSink())
     _default.observe(payload, selected_pr)

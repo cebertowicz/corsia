@@ -1,24 +1,67 @@
 """Admission rules for the reply context a human message carries.
 
 The client sends what the person was answering: the message ranges in view
-while they typed and the first message they had not read (comments arrive with
-the comment UI). Admission checks each item against the thread and stores the
+while they typed, the first message they had not read, and their comments.
+Admission checks each item against the thread and stores the
 result once as ``metadata.reply_context``; ``core.reply_context`` renders it. A
-bad item is dropped with a recorded reason and the message still sends:
-delivery never waits on reply context.
+bad view item is dropped with a recorded reason and the message still sends:
+delivery never waits on what was in view. Comments are the person's own words,
+so a comment that fails refuses the whole input instead (``RejectedComments``).
 """
 from __future__ import annotations
 
 import logging
 import sqlite3
+from collections import Counter
 from typing import Any, TypeGuard
+
+from infra.chat_comment_ids import format_cid, parse_cid
 
 logger = logging.getLogger(__name__)
 
-IN_VIEW_RANGE_CAP = 8
-# Raw client ranges parsed before merging; the newest are kept.
-IN_VIEW_INPUT_CAP = 64
-DROPPED_CAP = 20
+
+class RejectedComments(ValueError):
+    """Submitted comments failed admission; ``positions`` are 1-based, empty when unknown.
+
+    Its text is shown to the person: which comments, and what to do. The
+    composer keeps the draft when a send is refused.
+    """
+
+    def __init__(self, positions: list[int]):
+        if not positions:
+            which, them = "Your comments", "them"
+        elif len(positions) == 1:
+            which, them = f"Comment {positions[0]}", "that comment"
+        else:
+            listed = ", ".join(str(position) for position in positions[:-1])
+            which, them = f"Comments {listed} and {positions[-1]}", "those comments"
+        super().__init__(
+            f"{which} couldn't be matched to text in this chat, so nothing was sent. "
+            f"Your message and comments are kept: remove {them} and send again."
+        )
+        self.positions = positions
+
+
+def require_every_comment(raw: object, stored: dict | None) -> None:
+    """Raise ``RejectedComments`` unless every submitted comment was stored."""
+    submitted = raw.get("comments") if isinstance(raw, dict) else None
+    if submitted is None:
+        return
+    if not isinstance(submitted, list):
+        raise RejectedComments([])
+    kept = {
+        parsed[1]
+        for item in (stored or {}).get("comments") or []
+        if isinstance(item, dict) and (parsed := parse_cid(item.get("cid"))) is not None
+    }
+    missing = [position for position in range(1, len(submitted) + 1) if position not in kept]
+    if missing:
+        raise RejectedComments(missing)
+
+
+def has_comment_candidates(raw: object) -> bool:
+    """Whether an input presents any comments for admission to validate."""
+    return isinstance(raw, dict) and isinstance(raw.get("comments"), list) and bool(raw["comments"])
 
 
 def _is_int(value: object) -> TypeGuard[int]:
@@ -42,7 +85,7 @@ def _range(raw: object, newest: int) -> tuple[int, int, int | None] | None:
 
 
 def _merge(ranges: list[tuple[int, int, int | None]]) -> list[tuple[int, int, int | None]]:
-    """Sort and join ranges that overlap or touch, summing the rows shown."""
+    """Join overlapping or touching ranges, keeping the larger shown count."""
     merged: list[tuple[int, int, int | None]] = []
     for start, end, shown in sorted(ranges, key=lambda item: (item[0], item[1])):
         if not merged or start > merged[-1][1] + 1:
@@ -52,7 +95,7 @@ def _merge(ranges: list[tuple[int, int, int | None]]) -> list[tuple[int, int, in
         joined_end = max(last_end, end)
         joined_shown = (
             None if last_shown is None or shown is None
-            else min(last_shown + shown, joined_end - first + 1)
+            else min(max(last_shown, shown), joined_end - first + 1)
         )
         merged[-1] = (first, joined_end, joined_shown)
     return merged
@@ -62,11 +105,6 @@ def _in_view(raw: object, newest: int, dropped: list[dict]) -> list[list[int | N
     if not isinstance(raw, list):
         dropped.append(_dropped("in_view", "not_list"))
         return []
-    if len(raw) > IN_VIEW_INPUT_CAP:
-        dropped.append(_dropped(
-            "in_view", "over_cap", count=len(raw) - IN_VIEW_INPUT_CAP,
-        ))
-        raw = raw[-IN_VIEW_INPUT_CAP:]
     ranges = []
     for item in raw:
         parsed = _range(item, newest)
@@ -75,11 +113,6 @@ def _in_view(raw: object, newest: int, dropped: list[dict]) -> list[list[int | N
         else:
             ranges.append(parsed)
     merged = _merge(ranges)
-    if len(merged) > IN_VIEW_RANGE_CAP:
-        dropped.append(_dropped(
-            "in_view", "over_cap", count=len(merged) - IN_VIEW_RANGE_CAP,
-        ))
-        merged = merged[-IN_VIEW_RANGE_CAP:]
     return [list(item) for item in merged]
 
 
@@ -94,13 +127,46 @@ def _first_unread(raw: object, newest: int, dropped: list[dict]) -> dict | None:
     return {"seq": seq, "truncated": raw.get("truncated") is True}
 
 
+def _comments(raw: object, newest: int, input_order: int, dropped: list[dict]) -> list[dict]:
+    if not isinstance(raw, list):
+        dropped.append(_dropped("comments", "not_list"))
+        return []
+    comments = []
+    for index, item in enumerate(raw):
+        reason = None
+        if not isinstance(item, dict):
+            reason = "not_object"
+        elif not _is_int(item.get("seq")) or not 1 <= item["seq"] <= newest:
+            reason = "invalid_seq"
+        elif (not _is_int(item.get("from_off")) or not _is_int(item.get("to_off"))
+              or not 0 <= item["from_off"] < item["to_off"]):
+            reason = "invalid_offsets"
+        elif not isinstance(item.get("id"), str) or not item["id"]:
+            reason = "invalid_id"
+        elif any(not isinstance(item.get(key), str) for key in (
+            "quote", "anchor_prefix", "anchor_suffix", "note",
+        )):
+            reason = "invalid_string"
+        elif not item["quote"]:
+            reason = "empty_quote"
+        if reason:
+            dropped.append(_dropped("comments", reason, index=index))
+            continue
+        # Admission holds the write transaction until input order is incremented.
+        cid = format_cid(input_order, index + 1)
+        comments.append({key: item[key] for key in (
+            "id", "seq", "from_off", "to_off", "quote", "anchor_prefix", "anchor_suffix", "note",
+        )} | {"cid": cid})
+    return comments
+
+
 def validate_reply_context(
     db: sqlite3.Connection, thread_id: str, raw: object,
 ) -> dict | None:
     """Return the reply context to store for one new human message, or None.
 
-    A field that fails is dropped on its own, with its reason under
-    ``dropped``; nothing here raises into admission.
+    A field that fails is dropped on its own; counts by reason are logged.
+    Nothing here raises into admission.
     """
     if raw is None:
         return None
@@ -122,6 +188,9 @@ def validate_reply_context(
         builders = (
             ("in_view", lambda value: _in_view(value, newest, dropped)),
             ("first_unread", lambda value: _first_unread(value, newest, dropped)),
+            ("comments", lambda value: _comments(value, newest, int(db.execute(
+                "SELECT next_input_order FROM threads WHERE id=?", (thread_id,),
+            ).fetchone()[0]), dropped)),
         )
         for field, build in builders:
             if raw.get(field) is None:
@@ -138,5 +207,6 @@ def validate_reply_context(
             if result:
                 stored[field] = result
     if dropped:
-        stored["dropped"] = dropped[:DROPPED_CAP]
+        counts = Counter(f'{item["field"]}:{item["reason"]}' for item in dropped)
+        logger.info("reply context: thread=%s dropped=%s", thread_id, dict(sorted(counts.items())))
     return stored or None

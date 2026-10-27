@@ -282,9 +282,9 @@ def _record_failure(error_class: str, failures: int) -> tuple[int, int]:
 async def notifications_poll_loop(runner: feed.GhRunner | None = None) -> None:
     """Poll until shut down, or until a static reason turns the poller off."""
     if runner is None:
-        from reviewer.gh_api import run_gh
+        from connections.github_broker import default_broker
 
-        runner = run_gh
+        runner = default_broker()
     failures = 0
     while True:
         delay, failures = await run_cycle(runner, failures)

@@ -33,7 +33,7 @@ const NOT_AN_OVERLAY: Record<string, string> = {
 	'lib/components/Lightbox.svelte': 'mounted by HomeOverlays beside the app root, above every pane',
 	'lib/components/CommandPalette.svelte': 'mounted by HomeOverlays beside the app root, above every pane',
 	'lib/components/ReviewBarShell.svelte': 'the review capsule, drawn inside the document it reviews',
-	'lib/components/DocViewer.css': 'the selection chip, drawn inside the document it comments on',
+	'lib/components/commentAnchors.css': 'the selection chip, drawn inside the document or chat it comments on',
 };
 
 function sources(dir: string): string[] {

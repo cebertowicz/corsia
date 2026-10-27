@@ -66,7 +66,10 @@ def render_agent_envelope(
         (metadata or {}).get(key) for key in NON_HUMAN_MARKERS
     ):
         lead += viewing_context_line((metadata or {}).get(VIEWING_DOCUMENT_KEY))
-        lead += reply_context_lines((metadata or {}).get(REPLY_CONTEXT_KEY))
+        context = (metadata or {}).get(REPLY_CONTEXT_KEY)
+        lead += reply_context_lines(context)
+        if not text and isinstance(context, dict) and context.get("comments"):
+            lead = lead.removesuffix("\n")
     if not metadata or metadata.get("sender_kind") != "agent":
         footer = (
             f"\n{HUMAN_REPLY_FOOTER}"

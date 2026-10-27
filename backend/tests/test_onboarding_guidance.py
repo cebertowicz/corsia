@@ -690,6 +690,35 @@ def test_app_path_email_step_records_the_email_app_where_the_microsoft_fact_read
     assert "when your skills list includes `microsoft-setup`, follow it from its step 1" in email
 
 
+def test_app_path_defers_only_a_selected_local_scripted_google_safe_miss_until_after_questions():
+    email = _step(6)
+
+    assert "Only when `bound_model` `source` is `omlx`" in email
+    assert "the current selected first-chat model is local, which is distinct from the chat's separate Local only setting" in email
+    assert "`step`, `says`, and `saw`, but no `message`, `start_at`, or `error`" in email
+    assert "first do that step and the rest of that file yourself, as `google-setup` says" in email
+    assert "Only if you cannot finish it yourself" in email
+    assert "I'll finish connecting Google after the remaining setup questions." in email
+    assert "Keep this existing Email and calendar task open" in email
+    assert "Retain the script and `step` identifier in its description, plus their answer `both` if they chose both" in email
+    assert "call `microsoft_status` without an `account_id`" in email
+    assert "if the Outlook account they meant is already connected, do not ask them to connect it again" in email
+    assert "position immediately before the hand-off task, after the remaining setup steps" in email
+    assert "first inspect the current Google connection and the actual page" in email
+    assert "reuse anything already there, create the first project or client only when that inspection shows it is absent" in email
+    assert "then call `browser_run_steps` again with the same `steps` and `start_at` set to the retained step" in email
+    assert "if that stops again, do that step and the rest of the file yourself" in email
+    assert "Handle a person decline, an `ok` result with a message, or a `start_at` in place as `google-setup` says" in email
+    assert "For other stops, follow its agent-handled path and report the `step` and `saw`" in email
+    assert 'An explicit "not now" stays skipped.' in email
+    assert "correct the tool input or report the unavailable tool" in email
+
+
+def test_deferred_google_stop_is_reported():
+    email = _step(6)
+    assert "and report the stop's `step` and `saw` as `google-setup` says" in email
+
+
 def test_app_path_local_news_covers_exactly_the_outcomes_the_wake_sends():
     from onboarding.local_download_wake import OUTCOMES
 

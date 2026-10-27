@@ -351,6 +351,72 @@ def test_applicable_steps_and_completion_cache_reconcile_conditionals(
     ]
 
 
+def test_scripted_google_safe_miss_retains_and_moves_the_seeded_email_task(
+    fresh_install, app_seed_facts,
+):
+    from infra import accounts
+    from infra.database import write_transaction
+    from plans import public
+
+    accounts.create_first_account("newcomer", PASSWORD, first_run_path="app")
+    conductor_id = _conductor_id()
+    actor = public.PlanActor(conductor_id, "newcomer", None)
+    retained_description = "Scripted setup: google-setup/console-project step enable-gmail-api."
+
+    with write_transaction(None, scope="defer_scripted_google_setup") as db:
+        listing = public.ensure_current_plan(actor=actor, include_folded=True, db=db)
+        seeded = {
+            row["workflow_step"]: dict(row)
+            for row in db.execute(
+                "SELECT id, workflow_step, state, description, revision, order_key "
+                "FROM plan_nodes WHERE plan_id=? AND workflow_ref='first-run-app'",
+                (listing["plan"]["id"],),
+            )
+        }
+        email, community, permissions, handover = (
+            seeded[step] for step in ("6:common", "7:common", "8:common", "9:common")
+        )
+        assert email["state"] == community["state"] == permissions["state"] == handover["state"] == "pending"
+        original_email_id = email["id"]
+        retained = public.mutate(
+            listing["plan"]["id"], "edit",
+            {
+                "node_id": original_email_id,
+                "description": retained_description,
+                "expected_revision": email["revision"],
+            },
+            actor=actor, provenance="test.first_run_google_safe_miss",
+            mutation_id="retain-scripted-google-step", db=db,
+        ).result["node"]
+        handover_position = sorted(seeded.values(), key=lambda node: node["order_key"]).index(handover)
+        moved = public.mutate(
+            listing["plan"]["id"], "reorder",
+            {
+                "node_id": original_email_id,
+                "order_key": handover_position - 1,
+                "expected_revision": retained["revision"],
+            },
+            actor=actor, provenance="test.first_run_google_safe_miss",
+            mutation_id="defer-scripted-google-step", db=db,
+        ).result["node"]
+
+        assert moved["id"] == original_email_id
+        assert moved["state"] == "pending"
+
+    ordered = _rows(
+        "SELECT id, workflow_step, state, description FROM plan_nodes "
+        "WHERE plan_id=? AND workflow_ref='first-run-app' AND archived_at IS NULL ORDER BY order_key",
+        listing["plan"]["id"],
+    )
+    setup_tail = [node for node in ordered if node["workflow_step"] in {"6:common", "7:common", "8:common", "9:common"}]
+
+    assert [node["workflow_step"] for node in setup_tail] == ["7:common", "8:common", "6:common", "9:common"]
+    [email] = [node for node in setup_tail if node["workflow_step"] == "6:common"]
+    assert (email["id"], email["state"], email["description"]) == (
+        original_email_id, "pending", retained_description,
+    )
+
+
 @pytest.mark.asyncio
 async def test_uncached_first_pick_reconciles_current_facts_before_rendering(fresh_install, app_seed_facts, monkeypatch):
     from infra import accounts
