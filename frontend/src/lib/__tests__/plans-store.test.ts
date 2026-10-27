@@ -335,7 +335,7 @@ describe('errors', () => {
 		const p = refresh(T1);
 		net.pending[0].fail(500);
 		await p;
-		expect(entryFor('thread:t1').errorMessage).toBe('Couldn’t load the plan. Try again.');
+		expect(entryFor('thread:t1').errorMessage).toBe('The server had a problem handling this request.');
 	});
 });
 

@@ -435,7 +435,7 @@ describe("ThreadPlanPane", () => {
     [401, {}, "Sign in to see this plan."],
     [403, {}, "You don’t have access to this chat. Choose another."],
     [404, {}, "This chat isn’t available. Choose another."],
-    [500, { detail: "internal" }, "Couldn’t load the plan. Try again."],
+    [500, { detail: "internal" }, "This plan couldn’t load"],
   ])("shows the store's own message for a %i plan read", async (status, body, message) => {
     mockFetch(status, body);
     component = mount(ThreadPlanPane, {

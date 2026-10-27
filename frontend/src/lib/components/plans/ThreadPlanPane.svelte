@@ -235,7 +235,7 @@
 		</div>
 	{:else if query.status === 'error' && !hasPayload}
 		<div class="plan-state error" role="alert">
-			<strong>{query.errorMessage}</strong>
+			<strong>This plan couldn’t load</strong>
 			<Button variant="secondary" size="sm" onclick={() => query.retry()}>Retry</Button>
 		</div>
 	{:else if plan}

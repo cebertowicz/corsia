@@ -52,5 +52,5 @@ it('rejects a representation mismatch before it enters the operator cache', asyn
 	expect(entry.status).toBe('error');
 	expect(entry.payload).toBeNull();
 	expect(entry.etag).toBeNull();
-	expect(entry.errorMessage).toBe('Couldn’t load the plan. Try again.');
+	expect(entry.errorMessage).toContain('wrong representation');
 });

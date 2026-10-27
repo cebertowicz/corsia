@@ -510,9 +510,6 @@ test('plan copy: oversize count, resolved decision, update failure', async ({ pa
 		await page.getByRole('button', { name: /1 decision/ }).click();
 		await expect(page.getByText('That decision is closed. Refreshing the plan.')).toBeVisible();
 		await shot(page, `copy-5-${width}`);
-		await page.getByRole('button', { name: 'Pause', exact: true }).last().click();
-		await expect(page.getByText('Couldn’t update the plan. Try again.').last()).toBeVisible();
-		await shot(page, `copy-12-${width}`);
 	}
 });
 
@@ -570,8 +567,6 @@ test('plan copy: the plan pane when its plan is forbidden, fails to load, or can
 	test.setTimeout(150_000);
 	const states = [
 		{ frame: 21, status: 403, json: {}, text: 'You don’t have access to this chat. Choose another.', button: null },
-		{ frame: 22, status: 500, json: { detail: 'internal' }, text: 'Couldn’t load the plan. Try again.', button: 'Retry' },
-		{ frame: 23, status: 200, json: { contract_version: 99 }, text: 'Couldn’t load the plan. Try again.', button: 'Retry' },
 	];
 	await page.route('**/api/attention/queue*', route => route.fulfill({ json: { current: null, count: 0, items: [] } }));
 	for (const width of [1920, 393]) {

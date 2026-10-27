@@ -30,7 +30,6 @@ import type {
 } from '$lib/api/plans';
 import { deferRefresh, forgetSpacing, noteStarted, spacingWaitMs } from './planRefreshSpacing';
 import { planClosedMessage } from './planClosedMessage';
-import { LOAD_FAILED_MESSAGE } from '$lib/api/planRead';
 import { isActivityKey, planKeyString, type ActivityKey, type ActivityKeyString, type OperatorKey, type OperatorKeyString, type PlanKey, type PlanKeyString } from './planKeys';
 
 /**
@@ -135,16 +134,11 @@ function ownerThreadIdFor(
 	return null;
 }
 
-/** Sign-in, which a retry cannot change; not-found and forbidden are worded per place in `planClosedMessage`. */
-const CLOSED_MESSAGES = {
-	unauthorized: 'Sign in to see this plan.',
-} as const;
-
 function applyOutcome(key: PlanKey, keyStr: string, outcome: PlanReadOutcome) {
 	if (outcome.status === 'fresh') {
 		const expectedVersion = isActivityKey(key) ? 1 : 2;
 		if (outcome.payload.contract_version !== expectedVersion) {
-			applyOutcome(key, keyStr, { status: 'error', message: LOAD_FAILED_MESSAGE });
+			applyOutcome(key, keyStr, { status: 'error', message: 'This plan returned the wrong representation.' });
 			return;
 		}
 		patch(keyStr, {
@@ -161,8 +155,7 @@ function applyOutcome(key: PlanKey, keyStr: string, outcome: PlanReadOutcome) {
 	if (outcome.status !== 'error') {
 		patch(keyStr, {
 			status: outcome.status, refreshing: false, payload: null, etag: null,
-			ownerThreadId: null, errorMessage: outcome.status === 'unauthorized'
-				? CLOSED_MESSAGES.unauthorized : planClosedMessage(key, outcome.status),
+			ownerThreadId: null, errorMessage: planClosedMessage(key, outcome.status),
 		});
 		return;
 	}
@@ -189,8 +182,8 @@ async function issue(key: PlanKey, keyStr: string, myId: number): Promise<void> 
 	const before = peekEntry(keyStr);
 	if (!bearer) {
 		patch(keyStr, before.payload
-			? { status: 'stale', refreshing: false, errorMessage: CLOSED_MESSAGES.unauthorized }
-			: { status: 'unauthorized', refreshing: false, payload: null, errorMessage: CLOSED_MESSAGES.unauthorized });
+			? { status: 'stale', refreshing: false, errorMessage: planClosedMessage(key, 'unauthorized') }
+			: { status: 'unauthorized', refreshing: false, payload: null, errorMessage: planClosedMessage(key, 'unauthorized') });
 		return;
 	}
 	patch(keyStr, { status: before.payload ? before.status : 'loading', refreshing: true });
