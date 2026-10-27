@@ -71,7 +71,7 @@ The server posts `references/first-run-opening.md` as your first message, with `
    > - spend money
    > - open files outside your work folder
    >
-   > **Files outside your work folder:** agents can read and change files inside your work folder. To reach files outside it, an agent asks for access, saying what it needs and why. Access is only in that chat, and the access ends when its time is up. Another model checks the request and every command the agent runs with that access. With auto-approve off, you decide each request. CORSIA's private data, your keys and passwords, and your sign-ins stay closed to agents. Keep sensitive files outside your work folder so agents need these checks to reach them.
+   > **Files outside your work folder:** agents can read and change files inside your work folder. To reach files outside it, an agent asks for access, saying what it needs and why. Access is only in that chat, and the access ends when its time is up. Another model checks the request and every command the agent runs with that access. You approve each request yourself unless you turn on Auto-approve in Settings. CORSIA's private data, your keys and passwords, and your sign-ins stay closed to agents. Keep sensitive files outside your work folder so agents need these checks to reach them.
    >
    > **Auto-approve:** off, so every application waits for your yes. Turn it on in [Settings › System](/settings/system#host-access-review) and an application the reviewer accepts starts without waiting for you, so agents keep working while you're away. Every command is still reviewed, the access still covers one chat and still ends on time, and anything that would change a repository's rules still asks you.
    >
