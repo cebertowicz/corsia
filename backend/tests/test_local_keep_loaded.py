@@ -29,8 +29,8 @@ def calls(monkeypatch):
         monkeypatch.setattr(local_keep_loaded, "_model_rows", model_rows)
         monkeypatch.setattr(local_keep_loaded, "pin_room_bytes", lambda: room_gib * GIB)
 
-    async def check_can_load(_gb, _kind):
-        return seen["can_load"]
+    async def read_loaded(_cfg):
+        return []
 
     async def update_model_settings(_cfg, model, body):
         seen["pins"].append((model, body))
@@ -44,7 +44,8 @@ def calls(monkeypatch):
         seen["events"].append((f"{category}.{action}", properties))
         return True
 
-    monkeypatch.setattr(local_keep_loaded, "check_can_load", check_can_load)
+    monkeypatch.setattr(local_keep_loaded, "model_room_bytes", lambda: (100 if seen["can_load"]["ok"] else 4) * GIB)
+    monkeypatch.setattr("llm.providers.omlx_lifecycle.read_loaded", read_loaded)
     monkeypatch.setattr(local_keep_loaded, "emit_product_event", emit_product_event)
     monkeypatch.setattr("llm.providers.omlx_settings.update_model_settings", update_model_settings)
     monkeypatch.setattr("llm.providers.omlx_lifecycle.load_model", load_model)
@@ -166,23 +167,24 @@ async def test_a_refused_load_on_an_unpinned_row_says_turn_it_on(calls) -> None:
 
 
 @pytest.mark.asyncio
-async def test_setup_pins_without_a_size_but_skips_the_load_memory_check(calls) -> None:
+async def test_setup_pins_and_loads_unsized_model_on_an_empty_seat(calls) -> None:
     calls["set_rows"]([{"id": "new-model"}], room_gib=20)
 
     await local_keep_loaded.keep_loaded("server", MODEL, force_pin=True)
 
     assert calls["pins"] == [("new-model", {"pinned": True})]
-    assert calls["loads"] == [] and local_keep_loaded.failures("server") == {}
+    assert calls["loads"] == ["new-model"] and local_keep_loaded.failures("server") == {}
 
 
 @pytest.mark.asyncio
-async def test_no_usable_size_records_nothing_and_the_row_says_so_live(calls) -> None:
+async def test_unsized_model_loads_on_an_empty_seat_without_pinning(calls) -> None:
     calls["set_rows"]([{"id": "new-model"}], room_gib=20)
 
     await local_keep_loaded.keep_loaded("server", MODEL)
 
-    # annotate_keep_loaded writes the no-size line on every read; nothing is pinned, loaded or emitted.
-    assert calls["pins"] == [] and calls["loads"] == [] and calls["events"] == []
+    # The empty seat cannot lose another model; the no-size line still describes pinning.
+    assert calls["pins"] == [] and calls["loads"] == ["new-model"]
+    assert [event[0] for event in calls["events"]] == ["model.load.completed"]
     assert local_keep_loaded.failures("server") == {}
 
 
@@ -202,10 +204,10 @@ async def test_an_unreadable_model_list_says_it_could_not_keep_it_loaded(calls) 
 async def test_a_failed_memory_check_says_so_on_the_row(calls, monkeypatch) -> None:
     calls["set_rows"]([_row("new-model", 10)], room_gib=20)
 
-    async def broken(_gb, _kind):
+    def broken():
         raise RuntimeError("memory unreadable")
 
-    monkeypatch.setattr(local_keep_loaded, "check_can_load", broken)
+    monkeypatch.setattr(local_keep_loaded, "model_room_bytes", broken)
 
     await local_keep_loaded.keep_loaded("server", MODEL)
 

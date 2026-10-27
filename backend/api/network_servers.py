@@ -211,7 +211,10 @@ async def load_model(server_id: str, body: ModelBody):
     forget_failure(server_id, body.model)
     cfg = {"server_id": server_id}
     pv = for_provider(server["provider"])
-    result = await pv.load_model(cfg, body.model)
+    from llm.local_model_load import seat_lock
+
+    async with seat_lock(server_id):
+        result = await pv.load_model(cfg, body.model)
 
     if not result.get("ok"):
         upstream = result.get("status")

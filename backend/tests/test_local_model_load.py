@@ -113,6 +113,11 @@ def lifecycle(monkeypatch, seat):
     async def check_server(_cfg):
         return {"running": state["up"]}
 
+    async def read_loaded(_cfg):
+        if not state["up"]:
+            return None
+        return [{"identifier": name, "size_bytes": 5 * GIB} for name in seat.loaded]
+
     def never_unload(*_a, **_k):
         raise AssertionError("a send must never unload a model")
 
@@ -120,6 +125,7 @@ def lifecycle(monkeypatch, seat):
         network_discovery._LOADED_BY_SERVER[server_id].add(model_id)
 
     monkeypatch.setattr("llm.providers.omlx_lifecycle.load_model", load_model)
+    monkeypatch.setattr("llm.providers.omlx_lifecycle.read_loaded", read_loaded)
     monkeypatch.setattr("llm.providers.omlx_lifecycle.check_server", check_server)
     monkeypatch.setattr("llm.providers.omlx_lifecycle.unload_model", never_unload)
     monkeypatch.setattr("llm.lifecycle.unload_model", never_unload)
@@ -132,11 +138,11 @@ def lifecycle(monkeypatch, seat):
 # readiness
 
 
-def test_a_target_that_is_not_a_local_omlx_model_is_loaded(seat) -> None:
+def test_a_target_that_is_not_a_local_omlx_model_is_outside_scope(seat) -> None:
     for target in (_target("sonnet", provider="anthropic", harness="claude-code"),
                    _target("remote", provider="external")):
         db = seat.connect()
-        assert readiness(target, db=db) == Readiness("loaded", 0)
+        assert readiness(target, db=db) is None
         db.close()
 
 
@@ -190,12 +196,12 @@ def test_a_loaded_model_with_no_reported_size_cant_be_judged_so_it_reads_no_room
     assert seat.readiness() == Readiness("no_room", 1)
 
 
-def test_a_server_on_another_computer_cant_be_judged_by_this_macs_memory_so_it_fits(seat) -> None:
+def test_a_remote_seat_with_another_model_loaded_has_unknown_fit(seat) -> None:
     seat.model("target", 30)
     seat.model("a", 8, loaded=True)
     seat.room_gib = 1
     seat.on_this_mac = False
-    assert seat.readiness() == Readiness("fits_now", 1)
+    assert seat.readiness() == Readiness("no_room", 1)
 
 
 def test_a_model_omlx_reported_no_size_for_counts_as_fitting(seat) -> None:
@@ -239,7 +245,7 @@ def test_readiness_is_synchronous_and_never_loads_or_touches_the_network(seat, l
     (10, [8], 3, "no_room"),
     (10, [8], 1, "no_memory"),
     (10, [None], 1, "no_room"),
-    (None, [8], 0, "fits_now"),
+    (None, [8], 0, "no_room"),
 ])
 def test_load_verdict_is_judged_in_host_resources(size, others, room, verdict) -> None:
     gib = lambda value: None if value is None else int(value * GIB)  # noqa: E731
@@ -385,9 +391,6 @@ async def test_a_finished_download_and_a_send_load_one_at_a_time_on_one_seat(sea
     async def model_rows(_server_id):
         return [{"id": "second", "estimated_size": 10 * GIB, "pinned": False}]
 
-    async def check_can_load(_gb, _kind):
-        return {"ok": True}
-
     async def pin(_cfg, _model, _body):
         return {"ok": True, "settings": {"pinned": True}}
 
@@ -396,7 +399,7 @@ async def test_a_finished_download_and_a_send_load_one_at_a_time_on_one_seat(sea
 
     monkeypatch.setattr(local_keep_loaded, "_model_rows", model_rows)
     monkeypatch.setattr(local_keep_loaded, "pin_room_bytes", lambda: 100 * GIB)
-    monkeypatch.setattr(local_keep_loaded, "check_can_load", check_can_load)
+    monkeypatch.setattr(local_keep_loaded, "model_room_bytes", lambda: 100 * GIB)
     monkeypatch.setattr(local_keep_loaded, "emit_product_event", lambda *_a, **_k: True)
     monkeypatch.setattr("llm.providers.omlx_settings.update_model_settings", pin)
     monkeypatch.setattr(network_discovery, "discover_and_notify", discover)

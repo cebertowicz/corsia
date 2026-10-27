@@ -251,19 +251,16 @@ def load_verdict(
 ) -> Literal["fits_now", "no_room", "no_memory"]:
     """The one verdict on loading a model now, from the memory a model may take (``room_bytes``).
 
-    ``fits_now``: it fits beside what is loaded; a model oMLX gave no size for can't be judged
-    and counts as fitting, as in ``local_model.fits_now``. ``no_room``: it doesn't, but
-    unloading the other loaded models (``other_loaded_sizes``, None for one with no reported
-    size) would free enough; a loaded model with no size can't be judged either, so there it
-    reads ``no_room`` without a promise. ``no_memory``: nothing else is loaded, or unloading
-    all of them still wouldn't be enough.
+    An unjudgeable fit may load only on an empty seat, where no model can be evicted.
+    ``no_room`` includes an unjudgeable fit beside another model, without a promise that
+    unloading it will help. ``no_memory`` means even unloading all others is insufficient.
     """
-    if size_bytes is None or fits_now(size_bytes / GIB, room_bytes / GIB):
+    if size_bytes is None or None in other_loaded_sizes:
+        return "no_room" if other_loaded_sizes else "fits_now"
+    if fits_now(size_bytes / GIB, room_bytes / GIB):
         return "fits_now"
     if not other_loaded_sizes:
         return "no_memory"
-    if None in other_loaded_sizes:
-        return "no_room"
     freed = room_bytes + sum(s for s in other_loaded_sizes if s)
     return "no_room" if fits_now(size_bytes / GIB, freed / GIB) else "no_memory"
 
@@ -338,7 +335,7 @@ async def check_can_load(estimated_gb: float, target_provider: str) -> dict[str,
     free = res["free_gb"]
     after_load = free - estimated_gb
     safe_free = res["safe_free_gb"]
-    ok = fits_now(estimated_gb, safe_free)
+    ok = fits_now(estimated_gb, model_room_bytes() / GIB)
 
     warning = None
     if not ok:
