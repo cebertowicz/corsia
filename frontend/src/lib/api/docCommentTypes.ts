@@ -15,6 +15,7 @@ export interface ServerComment {
 	resolved: number;
 	acked: number;
 	replacement?: string | null;
+	insert_after?: boolean | number;
 	decision?: 'accepted' | 'rejected' | null;
 	decided_by?: string | null;
 	orphaned?: boolean;
