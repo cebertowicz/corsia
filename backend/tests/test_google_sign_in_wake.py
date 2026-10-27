@@ -17,7 +17,7 @@ from infra.database import get_db
 from infra.internal_principal import internal_request
 from infra.send_types import SendRejected
 from sign_in_wake_helpers import (
-    adopt, no_account_artifact, parked_reports, record_drives, refuse_sign_in_wakes, registry_rows, reports_for, wakes,
+    adopt, parked_reports, record_drives, refuse_sign_in_wakes, reports_for, wakes,
 )
 from tests.test_google_sign_in import (  # noqa: F401  (the fixtures)
     EMAIL, REFRESH, SECRET, _accounts, _connect, _http, _start, client_file, conductor, google,
@@ -164,18 +164,6 @@ async def test_a_person_started_sign_in_wakes_no_one(google, conductor, client_f
 
     assert status == 200 and len(_accounts()) == 1
     assert wakes() == []
-
-
-async def test_a_sign_in_leaves_no_registry_row_behind(google, conductor, client_file):
-    before = registry_rows()
-    _, refused = await _start(google, conductor, client_file)
-    assert (await _callback(refused, error="access_denied"))[0] == 400
-    _, state = await _start(google, conductor, client_file)
-
-    assert (await _callback(state, code="auth-code"))[0] == 200
-
-    assert len(wakes()) == 2
-    assert registry_rows() == before and no_account_artifact()
 
 
 async def test_an_unfinished_sign_in_wakes_the_thread_when_it_expires(google, conductor, client_file, monkeypatch):

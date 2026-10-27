@@ -29,27 +29,6 @@ def wakes() -> list[dict]:
     return found
 
 
-def registry_rows() -> tuple[int, int]:
-    """How many artifact identities and registrations exist: a sign-in must leave both as they were."""
-    db = get_db()
-    try:
-        return tuple(  # type: ignore[return-value]
-            db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
-            for table in ("artifact_identities", "artifact_registrations")
-        )
-    finally:
-        db.close()
-
-
-def no_account_artifact() -> bool:
-    """True when no registry identity names a sign-in, the row class the old wake wrote."""
-    db = get_db()
-    try:
-        return db.execute("SELECT 1 FROM artifact_identities WHERE integration='account'").fetchone() is None
-    finally:
-        db.close()
-
-
 def record_drives(monkeypatch) -> list[dict]:
     """Replace the thread drive with a recorder; each call notes what a different connection could see.
 

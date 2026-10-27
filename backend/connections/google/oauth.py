@@ -27,9 +27,8 @@ from connections.account_state import CONSENT_CANCELLED, PROVIDER_UNAVAILABLE, e
 from connections.connected_accounts import Actor
 from connections.google import client
 from connections.google.client import STATUS_CONNECTED, TIMEOUT_SECONDS, TOKEN_URL, GoogleError, GoogleRequestFailed
-from connections.google.reach_replies import (  # noqa: F401  (re-exported: the tools and tests read them here)
-    ALREADY_CONNECTED, ALREADY_NEEDS_SIGN_IN, CONNECTED_NOT_FOR_ALL, CONNECTED_NOT_FOR_PROJECT, STILL_CONNECTED,
-    not_covered_reply,
+from connections.google.reach_replies import (
+    ALREADY_CONNECTED, ALREADY_NEEDS_SIGN_IN, STILL_CONNECTED, not_covered_reply,
 )
 from connections.sign_in_notice import drive_starting_agent, notify_expired, notify_starting_agent, wake_on_connect
 from infra import key_store

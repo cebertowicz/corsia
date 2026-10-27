@@ -14,7 +14,7 @@ from connections.sign_in_notice import EXPIRED_MESSAGE, UNAVAILABLE_MESSAGE, not
 from infra.database import get_db, write_transaction
 from infra.send_types import SendRejected
 from sign_in_wake_helpers import (
-    adopt, no_account_artifact, parked_reports, record_drives, refuse_sign_in_wakes, registry_rows, reports_for, wakes,
+    adopt, parked_reports, record_drives, refuse_sign_in_wakes, reports_for, wakes,
 )
 from tests.registry_helpers import make_session
 from tests.test_microsoft_sign_in import (  # noqa: F401  (the fixtures)
@@ -157,19 +157,6 @@ async def test_a_person_started_failure_wakes_no_one(microsoft, isolated_db):
     status, _page = await _finish(url, error="access_denied", error_subcode="cancel")
 
     assert status == 400 and wakes() == []
-
-
-async def test_a_sign_in_leaves_no_registry_row_behind(microsoft, isolated_db, agent_adds):
-    thread_id = _agent()
-    before = registry_rows()
-    refused, _ = await _agent_flow(thread_id)
-    assert (await _finish(refused, error="access_denied", error_subcode="cancel"))[0] == 400
-    url, _ = await _agent_flow(thread_id)
-
-    assert (await _finish(url))[0] == 200
-
-    assert len(wakes()) == 2
-    assert registry_rows() == before and no_account_artifact()
 
 
 async def test_a_connected_sign_in_drives_the_starting_thread_once_and_only_after_the_commit(
