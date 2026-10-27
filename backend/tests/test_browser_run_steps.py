@@ -5,7 +5,8 @@ import json
 import pytest
 
 from host_access import browser_control
-from tools import browser_run_steps
+from host_access.browser_sessions import BrowserSessionCleanupError, BrowserSessionError, BrowserSetupError
+from tools import browser_run_steps, browser_runtime
 
 
 @pytest.fixture
@@ -20,7 +21,7 @@ async def invoke(tool, monkeypatch, responses, **kwargs):
         calls.append((args, run_kwargs))
         return responses.pop(0)
 
-    monkeypatch.setattr(browser_run_steps, "_run", fake_run)
+    monkeypatch.setattr(browser_run_steps, "_call", fake_run)
     result = await tool.execute("google-setup/console-project", _thread_id="thread", **kwargs)
     return json.loads(result), calls
 
@@ -36,7 +37,7 @@ def page_at(url, calls):
 @pytest.mark.asyncio
 async def test_runs_a_server_owned_file_successfully(tool, monkeypatch):
     calls = []
-    monkeypatch.setattr(browser_run_steps, "_run", page_at("https://console.cloud.google.com/one", calls))
+    monkeypatch.setattr(browser_run_steps, "_call", page_at("https://console.cloud.google.com/one", calls))
 
     result = json.loads(await tool.execute("google-setup/console-project", _thread_id="thread"))
 
@@ -47,7 +48,7 @@ async def test_runs_a_server_owned_file_successfully(tool, monkeypatch):
 @pytest.mark.asyncio
 async def test_project_resume_stops_before_api_enablement(tool, monkeypatch):
     calls = []
-    monkeypatch.setattr(browser_run_steps, "_run", page_at("https://console.cloud.google.com/home", calls))
+    monkeypatch.setattr(browser_run_steps, "_call", page_at("https://console.cloud.google.com/home", calls))
 
     result = json.loads(await tool.execute("google-setup/console-project", start_at="project-ready", _thread_id="thread"))
 
@@ -58,7 +59,7 @@ async def test_project_resume_stops_before_api_enablement(tool, monkeypatch):
 @pytest.mark.asyncio
 async def test_off_domain_page_never_receives_a_type_or_click(tool, monkeypatch):
     calls = []
-    monkeypatch.setattr(browser_run_steps, "_run", page_at("https://evil.example.test/login", calls))
+    monkeypatch.setattr(browser_run_steps, "_call", page_at("https://evil.example.test/login", calls))
 
     result = json.loads(await tool.execute("google-setup/console-client", start_at="client-name", _thread_id="thread"))
 
@@ -75,6 +76,63 @@ async def test_miss_returns_only_safe_shape_without_page_text(tool, monkeypatch)
     assert result == {"ok": False, "step": "project-page", "says": "Open Google Cloud's project page.",
                       "saw": {"title": "Console", "url_path": "/projectcreate", "missing": "action"}}
     assert secret not in json.dumps(result)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error,message", [
+    (BrowserSetupError("agent-browser is missing"), BrowserSetupError("agent-browser is missing").tool_message),
+    (BrowserSessionCleanupError("unverified"), BrowserSessionCleanupError("unverified").tool_message),
+    (BrowserSessionCleanupError("pending", recovery="pending"), BrowserSessionCleanupError("pending", recovery="pending").tool_message),
+    (BrowserSessionError("the browser is no longer open"), "Error: the browser is no longer open"),
+    (Exception("failure"), f"Error: {browser_runtime.COMMAND_FAILED}"),
+])
+@pytest.mark.parametrize("before,start_at", [
+    ([], None),
+    (["ok"], None),
+    (["ok", "Console"], None),
+    (["Error: missing"], None),
+    (["Error: missing", "Console"], None),
+    ([], "project-ready"),
+    ([], "project-name"),
+    (["Console"], "project-name"),
+])
+async def test_owner_error_stops_at_each_command_or_read(tool, monkeypatch, error, message, before, start_at):
+    responses = list(before)
+    calls = []
+    monkeypatch.setattr(browser_runtime, "_check_installed", lambda: None)
+    async def run_browser(thread_id, args, **kwargs):
+        calls.append(args)
+        if responses:
+            return responses.pop(0)
+        raise error
+    monkeypatch.setattr(browser_runtime.PROCESS_OWNER, "run_browser", run_browser)
+    result = json.loads(await tool.execute("google-setup/console-project", start_at=start_at, _thread_id="thread"))
+    assert result == {"ok": False, "error": message.removeprefix("Error: ")}
+    assert len(calls) == len(before) + 1
+
+
+@pytest.mark.asyncio
+async def test_wait_does_not_retry_browser_session_error(tool, monkeypatch):
+    calls = []
+    monkeypatch.setattr(browser_runtime, "_check_installed", lambda: None)
+    async def run_browser(thread_id, args, **kwargs):
+        calls.append(args)
+        raise BrowserSessionError("the browser is no longer open")
+    monkeypatch.setattr(browser_runtime.PROCESS_OWNER, "run_browser", run_browser)
+    result = json.loads(await tool.execute("google-setup/console-project", start_at="project-ready", _thread_id="thread"))
+    assert result == {"ok": False, "error": "the browser is no longer open"}
+    assert len(calls) == 1 and calls[0][0] == "wait"
+
+
+@pytest.mark.asyncio
+async def test_raised_guard_refusal_keeps_resume_point(tool, monkeypatch):
+    monkeypatch.setattr(browser_runtime, "_check_installed", lambda: None)
+    async def run_browser(*args, **kwargs):
+        raise BrowserSessionError(browser_control.PASSWORD_PAGE)
+    monkeypatch.setattr(browser_runtime.PROCESS_OWNER, "run_browser", run_browser)
+    result = json.loads(await tool.execute("google-setup/console-project", _thread_id="thread"))
+    assert result["message"] == browser_control.PASSWORD_PAGE
+    assert result["start_at"] == "project-page" and not result["ok"]
 
 
 @pytest.mark.asyncio
@@ -122,7 +180,7 @@ async def test_action_timeouts(tool, monkeypatch):
     async def fake_run(args, **kwargs):
         calls.append((args, kwargs))
         return "Console" if args == ["get", "title"] else "https://console.cloud.google.com/home" if args == ["get", "url"] else "ok"
-    monkeypatch.setattr(browser_run_steps, "_run", fake_run)
+    monkeypatch.setattr(browser_run_steps, "_call", fake_run)
     await tool.execute("google-setup/console-project", _thread_id="thread")
     await tool.execute("google-setup/console-client", start_at="download-wait", _thread_id="thread")
     commands = [(args, kwargs) for args, kwargs in calls if args[0] != "get"]
@@ -151,7 +209,7 @@ async def test_selector_wait_retries_until_success_or_deadline(tool, monkeypatch
         if args[0] == "wait":
             return responses.pop(0)
         return "Console" if args[1] == "title" else "https://console.cloud.google.com/home"
-    monkeypatch.setattr(browser_run_steps, "_run", fake_run)
+    monkeypatch.setattr(browser_run_steps, "_call", fake_run)
     result = json.loads(await tool.execute("google-setup/console-project", start_at="project-ready", _thread_id="thread"))
     assert result["ok"] is success
     if not success:
@@ -169,7 +227,7 @@ async def test_start_at_resumes_from_named_step(tool, monkeypatch):
         calls.append(args)
         return "ok" if args[0] not in {"get"} else ("Console" if args[1] == "title" else "https://console.cloud.google.com/auth/clients")
 
-    monkeypatch.setattr(browser_run_steps, "_run", fake_run)
+    monkeypatch.setattr(browser_run_steps, "_call", fake_run)
     result = json.loads(await tool.execute("google-setup/console-client", start_at="client-name", _thread_id="thread"))
 
     assert result["ok"] is True
