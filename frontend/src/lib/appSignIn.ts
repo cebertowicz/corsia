@@ -23,11 +23,14 @@ export function signInStateLine(app: ConnectedApp, signedOutHere: boolean): stri
 	if (view.status === 'pending') return 'Waiting for you in your browser';
 	if (view.status === 'failed') return "Sign-in didn't finish";
 	if (app.state === 'needs_sign_in') return signedOutHere ? 'Signed out' : 'Needs you to sign in';
-	if (app.state === 'working' && view.signed_in) {
-		const actions = app.tool_count ? ` · ${app.tool_count} actions` : '';
-		return `Connected${actions} · ${view.account ? `Signed in as ${view.account}` : 'Signed in'}`;
-	}
+	if (app.state === 'working' && view.signed_in && !view.account) return `Connected · Signed in${app.tool_count ? ` · ${app.tool_count} actions` : ''}`;
 	return null;
+}
+
+/** The account a signed-in app row names in its title ("Figma — you@example.com"); null when the app is not signed in or did not say which. */
+export function appAccount(app: ConnectedApp): string | null {
+	const view = app.sign_in;
+	return view?.signed_in && view.account ? view.account : null;
 }
 
 /** The app only lets in apps it has approved and nobody on this side can change that, so a second press would fail the same way. Remove is the way out. */

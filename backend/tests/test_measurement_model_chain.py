@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from api.cost_identity import IdentityResolver
+from core.cost_identity import IdentityResolver
 from api.measurement_model_cost import query_model_costs, query_recording_gaps
 from api.measurement_scope import resolve_grain
 from model_identity_fixtures import seed_identity_catalog

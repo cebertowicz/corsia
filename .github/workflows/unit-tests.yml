@@ -87,7 +87,8 @@ jobs:
             -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/ubuntu.sources \
             -o Dir::Etc::sourceparts=- \
             -o APT::Get::List-Cleanup=0
-          sudo apt-get install --yes --no-install-recommends ripgrep
+          sudo apt-get install --yes --no-install-recommends ripgrep bubblewrap
+          bash scripts/install-linux-sandbox.sh
           rg --version
           uv venv --python 3.11 --managed-python --seed .venv
           .venv/bin/python -c 'import sqlite3, sys; print(sys.version.split()[0], "SQLite", sqlite3.sqlite_version)'

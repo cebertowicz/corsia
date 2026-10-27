@@ -38,6 +38,8 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from api import presence_rollup
+from api.measurement_token_sql import FRESH_TOKEN_SQL, FRESH_TOKEN_UNKNOWN_SQL
+from core.measurement_pricing import ADMISSION_SQL, IDLE_HOURS_SQL, INPUT_TIER_SQL
 from core.measurement_scope import query_params
 from infra.database import get_db, write_transaction
 from infra.db_async import run_bulk, run_in_db
@@ -72,10 +74,6 @@ def _grouped_select(minutes: bool = False) -> str:
     ``minutes`` keys a raw read by the minute instead of the hour, for a viewer zone whose
     midnight is not on the hour; the rollup itself is always hourly.
     """
-    # Imported here: these modules import this one to read the rollup.
-    from api.measurement_cost import ADMISSION_SQL, IDLE_HOURS_SQL, INPUT_TIER_SQL
-    from api.measurement_token_sql import FRESH_TOKEN_SQL, FRESH_TOKEN_UNKNOWN_SQL
-
     return (
         f"SELECT substr(u.created_at,1,{16 if minutes else 13}) AS hour,u.thread_id AS thread_id,u.model AS model,"
         "u.source AS source,u.context_manifest_id AS context_manifest_id,"

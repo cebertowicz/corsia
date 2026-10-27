@@ -8,8 +8,10 @@ the later entry describes the current behavior.
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here._
 
 - On Linux, CORSIA no longer offers to set up a local model; you can connect a provider instead.
+- The local model server keeps your server-wide settings when CORSIA starts it again.
 - Claude Code accounts you added keep working when CORSIA's data moves.
 - Browser addresses no longer need `https://` typed in; local loopback addresses use `http://` by default.
+- A signed-in app in Connected apps now reads "Figma — you@example.com" on its row, with the account shortening first on a narrow screen, and a link in chat can open an app waiting for approval with its Approve button ready.
 - Setup now opens in a normal-sized window in the middle of the screen, and the app grows to fill the screen when setup finishes.
 - A Claude Code you only just signed in to is no longer offered for import: only skills and notes you made there are brought over.
 - The "Bring over what your other tools know" step no longer shows twice in the setup plan.
@@ -51,6 +53,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - An agent still waits for your yes before a newly connected command-line tool's first change, even when you asked for that change.
 - When a plan isn't moving, its note names each wait that is overdue.
 - A replaced image now shows right away in a document that is open, and when it is reopened, even if it has comments.
+- When an agent hands you a page in the shared browser, such as an account choice or a phone prompt, it appears in your attention list and the agent carries on once you finish.
 
 ## v0.4.0 — A self-starting Mac app, updates you control, a shared browser, connected apps, and steadier plans
 
