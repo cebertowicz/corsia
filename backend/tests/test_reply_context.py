@@ -190,8 +190,9 @@ def test_an_unreadable_thread_range_is_its_own_reason(thread_rows, caplog):
 
 
 @pytest.mark.parametrize("failed_query", ["MAX(seq)", "next_input_order"])
-def test_system_failure_refuses_comments_with_retry_copy(thread_rows, failed_query):
+def test_system_failure_refuses_comments_with_a_logged_reference(thread_rows, failed_query, caplog):
     import sqlite3
+    from infra.failure_reference import REFERENCE
     from infra.input_admission import stamped_human_metadata
     from infra.reply_context import RejectedComments
 
@@ -201,14 +202,17 @@ def test_system_failure_refuses_comments_with_retry_copy(thread_rows, failed_que
                 raise sqlite3.OperationalError("unreadable")
             return thread_rows.execute(sql, *args)
 
-    with pytest.raises(RejectedComments) as refused:
+    with pytest.raises(RejectedComments) as refused, caplog.at_level(logging.WARNING, logger="infra.reply_context"):
         stamped_human_metadata(
             FailingConnection(), "user", "new", {KEY: {"comments": [_comment()]}}, thread_id=THREAD,
         )
-    assert str(refused.value) == (
-        "Something went wrong on CORSIA’s side while checking your comments, so nothing was "
-        "sent. Your message and comments are kept: try sending again."
+    text, reference = str(refused.value).rsplit(" ", 1)
+    assert text == (
+        "Couldn’t check your comments, so nothing was sent. Your message and comments "
+        "are kept: try sending again. Reference:"
     )
+    assert REFERENCE.match(reference)
+    assert any(f"reference={reference}" in record.getMessage() and record.exc_info for record in caplog.records)
 
 
 @pytest.mark.parametrize("raw", [None, {}, {"comments": []}, {"in_view": None}])

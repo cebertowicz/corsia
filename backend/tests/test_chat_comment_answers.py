@@ -80,7 +80,7 @@ def test_write_places_known_answers_and_unread_skips_deleted(isolated_db):
         db.close()
 
 
-def test_route_refreshes_the_stamp_and_checks_ownership(isolated_db):
+def test_route_stamps_the_newest_seen_answer_and_checks_ownership(isolated_db):
     from main import app
     db = get_db()
     try:
@@ -90,20 +90,37 @@ def test_route_refreshes_the_stamp_and_checks_ownership(isolated_db):
     client = TestClient(app)
     url = "/api/threads/thread/messages/question/comments/c1.1/viewed"
     headers = {"Authorization": f"Bearer {OWNER_TOKEN}"}
+
+    def unread_and_stamps():
+        db = get_db()
+        try:
+            unread = [r["cid"] for r in unread_answers(db, OWNER_USER, "thread", 10)]
+            return unread, [r[0] for r in db.execute("SELECT seen_at FROM chat_comment_views")]
+        finally:
+            db.close()
+
     assert client.post(url, headers={"Authorization": f"Bearer {OTHER_TOKEN}"}).status_code == 404
+    # Opened before any answer committed: an answer timed before this view still reads unread.
     assert client.post(url, headers=headers).status_code == 200
     db = get_db()
     try:
-        first = db.execute("SELECT seen_at FROM chat_comment_views").fetchone()[0]
+        _answer(db)
+        db.commit()
     finally:
         db.close()
+    assert unread_and_stamps() == (["c1.1", "c1.2"], [])
     assert client.post(url, headers=headers).status_code == 200
+    assert unread_and_stamps() == (["c1.2"], ["2026-01-02"])
     db = get_db()
     try:
-        rows = [r[0] for r in db.execute("SELECT seen_at FROM chat_comment_views")]
-        assert len(rows) == 1 and rows[0] >= first
+        insert_message("thread", "assistant", "[c1.1] again", {"turn_unbound_reason": "legacy_import"},
+                       msg_id="answer-2", db=db, created_at="2026-01-04")
+        db.commit()
     finally:
         db.close()
+    assert unread_and_stamps() == (["c1.2", "c1.1"], ["2026-01-02"])
+    assert client.post(url, headers=headers).status_code == 200
+    assert unread_and_stamps() == (["c1.2"], ["2026-01-04"])
 
 
 @pytest.mark.parametrize("operation", ["purge", "delete"])
