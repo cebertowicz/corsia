@@ -32,13 +32,23 @@ def test_public_pane_shapes(args):
     ['network', 'route', '*', '--body', 'x'], ['set', 'headers', '{}'],
     ['set', 'credentials', 'u', 'p'], ['open', 'https://example.com', '--headers', '{}'],
     ['cookies'], ['get', 'cdp-url'], ['unknown'], ['plugins', 'add', 'x'],
-    ['fill', '#a', '--headers'], ['eval', 'document.cookie'],
+    ['fill', '#a', '--headers'], ['fill', '#a', '-p'], ['fill', '#a', '-v'],
+    ['fill', '#a', '-q'], ['eval', 'document.cookie'],
 ])
 async def test_saved_public_path_refuses_other_shapes(synthetic_browser, monkeypatch, args):
     monkeypatch.setattr(browser_launch, '_owner_key', lambda _: 'owner')
-    with pytest.raises(Exception, match='unavailable in a browser session|not available to agents'):
+    with pytest.raises(Exception, match='unavailable in a browser session|not available to agents|verified local Chrome/CDP mode'):
         await synthetic_browser.owner.run('a', args)
     assert not synthetic_browser.calls
+    await synthetic_browser.owner.shutdown()
+
+
+@pytest.mark.parametrize('text', ['-1', '-example', 'javascript: documentation'])
+async def test_saved_fill_preserves_ordinary_text(synthetic_browser, monkeypatch, text):
+    monkeypatch.setattr(browser_launch, '_owner_key', lambda _: 'owner')
+    await synthetic_browser.owner.run('a', ['open', 'about:blank'])
+    await synthetic_browser.owner.run('a', ['fill', '#a', text])
+    assert synthetic_browser.calls[-1][-3:] == ('fill', '#a', text)
     await synthetic_browser.owner.shutdown()
 
 

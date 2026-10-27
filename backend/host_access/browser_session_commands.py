@@ -47,9 +47,15 @@ def _script_config(config: dict) -> bool:
 def _saved_command(args: Sequence[str], *, pane: bool) -> bool:
     """Admit only command shapes produced by the public browser callers."""
     command = args[0]
-    if any(_javascript_url(arg) for arg in args[1:]):
+    if command == "open" and len(args) == 2 and _javascript_url(args[1]):
         return False
-    if any(arg.startswith("-") for arg in args[1:]) and tuple(args) not in {
+    # The native CLI scans all argv for global flags before parsing fill text.
+    # Its single-dash global flags are -p, -v and -q; other single-dash fill
+    # values are positional. Keep long options refused even as fill text.
+    checked = args[1:]
+    if command == "fill" and len(args) == 3 and not args[2].startswith("--") and args[2] not in {"-p", "-v", "-q"}:
+        checked = args[1:2]
+    if any(arg.startswith("-") for arg in checked) and tuple(args) not in {
         ("snapshot", "-i"), ("wait", "--load", "networkidle")
     }:
         return False
