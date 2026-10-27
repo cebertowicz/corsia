@@ -61,6 +61,6 @@ export async function readPlan<T>(
 	// A body cut off or garbled in transit reads fine on a retry; one that parses but doesn't decode won't.
 	if (body === undefined) return { status: 'error', message: safeErrorMessage('load') };
 	const payload = decode(body);
-	if (payload === null) return { status: 'error', message: STALE_PAGE_MESSAGE };
+	if (payload === null) return { status: 'error', message: STALE_PAGE_MESSAGE, reload: true };
 	return { status: 'fresh', payload, etag: res.headers.get('ETag') ?? '' };
 }

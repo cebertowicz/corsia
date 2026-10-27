@@ -132,6 +132,7 @@ export interface QueryHandle<P> {
 	readonly refreshing: boolean;
 	readonly payload: P | null;
 	readonly errorMessage: string | null;
+	readonly reloadNeeded: boolean;
 	readonly lastFreshAt: number | null;
 	retry(): void;
 }
@@ -183,6 +184,7 @@ function queryHandle<K extends PlanKey, P>(
 		get refreshing() { return entry.refreshing; },
 		get payload() { return entry.payload; },
 		get errorMessage() { return entry.errorMessage; },
+		get reloadNeeded() { return entry.reloadNeeded; },
 		get lastFreshAt() { return entry.lastFreshAt; },
 		retry() {
 			const key = getKey();

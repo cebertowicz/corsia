@@ -258,4 +258,5 @@ export type OperatorReadOutcome =
 	| { status: 'not-found' }
 	| { status: 'unauthorized' }
 	| { status: 'forbidden' }
-	| { status: 'error'; message: string; reference?: string };
+	/** `reload`: a reply this page can't read, which a retry can't fix. */
+	| { status: 'error'; message: string; reference?: string; reload?: true };
