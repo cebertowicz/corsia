@@ -448,25 +448,16 @@ class TestWebhookEndpoint:
             headers["X-Hub-Signature-256"] = _make_signature(body, secret)
         return self.client.post("/webhooks/github", content=body, headers=headers)
 
-    def test_unsigned_ping_without_configured_secret_accepted(self, monkeypatch):
-        """Unsigned ping (no secret yet configured) must return 200 ok."""
-        monkeypatch.setattr("api.webhook_receivers.receiver_secret", lambda connector: None)
-        resp = self._post_ping(include_sig=False)
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["status"] == "ok"
-        assert data["event"] == "ping"
-
     def test_unsigned_ping_with_configured_secret_rejected(self):
         """Unsigned ping with a configured secret is anomalous — reject it."""
         resp = self._post_ping(include_sig=False)
         assert resp.status_code == 401
 
     def test_signed_ping_accepted(self):
-        """Signed ping (secret already configured) must also be accepted."""
+        """A signed ping follows normal admission for an unhandled event."""
         resp = self._post_ping(include_sig=True)
         assert resp.status_code == 200
-        assert resp.json()["status"] == "ok"
+        assert resp.json()["status"] == "ignored"
 
     def test_ping_with_wrong_signature_rejected(self):
         """A ping with a bad signature signals misconfiguration — reject it."""

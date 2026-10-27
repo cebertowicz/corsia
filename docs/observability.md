@@ -75,6 +75,18 @@ Event names are `<category>.<action>`. Lowercase, dot-separated, no spaces.
 | `model.pin` / `model.unpin` | Per-model pin toggled on the daemon | backend |
 | `model.switched` | Active model for a session changed | backend + frontend |
 
+### Local model server restart
+
+CORSIA restarts a managed oMLX server that exits without being asked to. Properties on each: `provider` (`omlx`) and `server_id`. How often servers crash, and whether restarts work, is read from these.
+
+| Event | When it fires | Surface |
+|---|---|---|
+| `model_server.exit.unexpected` | The server's process ended and CORSIA had not stopped it, and it was not a clean exit 0 that CORSIA could read (a server CORSIA took over, not one it spawned, has no readable status, so any exit counts) (`status`: signal or exit code; `loaded_models`: how many models were loaded) | backend |
+| `model_server.restart.attempted` | CORSIA starts the server again (`attempt`, 1 to 3 within ten minutes; `status`) | backend |
+| `model_server.restart.completed` | The restarted server answered health (`attempt`); its models then load again through `model.load.*` events marked `automatic` | backend |
+| `model_server.restart.gave_up` | Three restarts in ten minutes did not hold, so the server stays stopped (`status`, `restarts`) | backend |
+| `model_server.restart.failed` | The restart raised before it finished, so no further attempt ran (`error`: exception class; `message`: its first 100 characters) | backend |
+
 ### Onboarding
 
 All six onboarding events are backend-only lifecycle observations. They contain no user, project, thread, or model identifiers, decision text, or message content; the backend wrapper keeps them local and non-load-bearing.
