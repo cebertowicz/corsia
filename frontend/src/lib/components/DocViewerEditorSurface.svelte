@@ -16,7 +16,6 @@
 
 	let {
 		docState,
-		loadError,
 		documentName = 'this document',
 		onRetry = () => {},
 		value = $bindable(''),
@@ -44,7 +43,6 @@
 		onDocumentPlace,
 	}: {
 		docState: DocState;
-		loadError: string;
 		documentName?: string;
 		onRetry?: () => void;
 		value?: string;

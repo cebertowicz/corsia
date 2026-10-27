@@ -438,16 +438,12 @@ async function serveReplyQueue(
 		const items = waiting.map(({ document, thread }) => {
 			const reply = thread.replies!.find((candidate) => candidate.id === thread.new_reply_ids!.at(-1))!;
 			return {
-				external_id: `reply-${thread.id}`,
-				renderer: 'comment-reply',
 				detail: {
-					id: `reply-${thread.id}`,
 					title: document.name,
-
 					unread_count: thread.new_reply_ids!.length,
 					newest_at: reply.created_at,
 					destination: { pane: 'document-replies', id: document.artifactId, path: document.docPath, title: document.name },
-					source: { thread_id: threadId, thread_label: reply.author },
+					source: { thread_id: threadId },
 				},
 			};
 		});
@@ -1102,6 +1098,33 @@ for (const theme of ['light', 'dark'] as const) {
 			await expect(page.locator('[data-attention-dock]')).toHaveCount(0);
 		});
 	}
+}
+
+for (const theme of ['light', 'dark'] as const) {
+	test(`${TAG} hidden worker reply reaches visible chat ${theme}`, async ({ page, request }, testInfo) => {
+		test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires isolated synthetic state');
+		skipMismatchedProject(1440, testInfo.project.name);
+		await page.setViewportSize({ width: 1440, height: 900 });
+		await page.emulateMedia({ colorScheme: theme });
+		const threadId = await createSession(request, THREAD_TITLE);
+		await onlyThread(request, threadId);
+		const childId = await createSession(request, 'Reviewer');
+		sqlite([["UPDATE threads SET spawned_by=? WHERE id=?", [threadId, childId]]]);
+		const scenario = await seedScenario(page, request, threadId, `hidden-worker-${theme}`, []);
+		addAgentReply(scenario.artifactId, scenario.roots[0], childId, PASSAGES[0].reply);
+		const response = await request.get('/api/attention/queue', { params: { token: TEST_TOKEN } });
+		expect((await response.json()).reply_items[0].detail.source.thread_id).toBe(threadId);
+		await loginByUrl(page);
+		await openThread(page, THREAD_TITLE);
+		const notice = page.locator('.reply-chip-notice');
+		await expect(notice.getByRole('button')).toContainText('1 new reply · launch-plan.md');
+		await shot(page, `visible-root-chip-${theme}`);
+		await notice.getByRole('button').click();
+		await documentReady(page);
+		await expect(page.getByText(PASSAGES[0].reply, { exact: true })).toBeVisible();
+		await expect(notice).toHaveCount(0, { timeout: 10_000 });
+		await shot(page, `visible-root-cleared-${theme}`);
+	});
 }
 
 test(`${TAG} real queue: open the chip and read its reply`, async ({ page, request }, testInfo) => {
