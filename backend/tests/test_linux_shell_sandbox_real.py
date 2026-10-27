@@ -56,15 +56,72 @@ def linux_box(tmp_path, monkeypatch, isolated_db):
         db.close()
     env = {'HOME': str(home), 'PATH': '/usr/local/bin:/usr/bin:/bin', 'LANG': 'C.UTF-8'}
 
-    def run(command, *, thread='one', home_grant=False, extra_roots=()):
+    def argv_for(command, *, thread='one', home_grant=False, extra_roots=()):
         rw = [home, Path('/run')] if home_grant else [workspace]
-        argv = build_protected_argv(command, workspace, path_policy=policy,
+        return build_protected_argv(command, workspace, path_policy=policy,
             rw_roots=[*rw, *extra_roots],
             ro_roots=[workspace / 'base'], readonly_overlays=overlays,
             env=env, thread_id=thread, executable=shutil.which('bwrap'))
-        return subprocess.run(argv, capture_output=True, text=True, timeout=20)
+
+    def run(command, **kwargs):
+        return subprocess.run(argv_for(command, **kwargs), capture_output=True, text=True, timeout=20)
     return SimpleNamespace(home=home, workspace=workspace, repo=repo, state=state,
-                           policy=policy, run=run, env=env)
+                           policy=policy, run=run, argv_for=argv_for, env=env)
+
+
+def test_session_and_user_keyrings_are_isolated(linux_box):
+    # The driver gets its own session; its uniquely named @u key is unlinked
+    # in a finally block. No keyctl program is required in the VM.
+    import json
+    import uuid
+    marker = 'corsia-test-' + uuid.uuid4().hex
+    child = r'''
+import ctypes, errno, platform, sys
+lib = ctypes.CDLL(None, use_errno=True)
+lib.syscall.restype = ctypes.c_long
+keyctl, add = {'x86_64': (250, 248), 'aarch64': (219, 217)}[platform.machine()]
+def call(n, *args):
+    return lib.syscall(ctypes.c_long(n), *args)
+def search(ring, name):
+    return call(keyctl, ctypes.c_long(10), ctypes.c_long(ring), ctypes.c_char_p(b'user'), ctypes.c_char_p(name), ctypes.c_long(0))
+marker = sys.argv[1].encode()
+def absent(ring, name):
+    assert search(ring, name) == -1 and ctypes.get_errno() == errno.ENOKEY, (ring, ctypes.get_errno())
+absent(-3, marker)
+absent(-4, marker)
+if sys.argv[2] == 'add':
+    assert call(add, ctypes.c_char_p(b'user'), ctypes.c_char_p(marker + b'-child'), ctypes.c_char_p(b'x'), ctypes.c_size_t(1), ctypes.c_long(-4)) >= 0
+else:
+    absent(-4, marker + b'-child')
+'''
+    command = lambda mode: shlex.join(['/usr/bin/python3', '-c', child, marker, mode])
+    argvs = [linux_box.argv_for(command(mode)) for mode in ('add', 'check')]
+    driver = r'''
+import ctypes, json, platform, subprocess, sys
+lib = ctypes.CDLL(None, use_errno=True)
+lib.syscall.restype = ctypes.c_long
+keyctl, add = {'x86_64': (250, 248), 'aarch64': (219, 217)}[platform.machine()]
+def call(n, *args): return lib.syscall(ctypes.c_long(n), *args)
+marker = sys.argv[1].encode()
+assert call(keyctl, ctypes.c_long(1), ctypes.c_void_p(None), ctypes.c_long(0), ctypes.c_long(0), ctypes.c_long(0)) >= 0
+user_key = None
+try:
+    for ring in (-3, -4):
+        key = call(add, ctypes.c_char_p(b'user'), ctypes.c_char_p(marker), ctypes.c_char_p(b'x'), ctypes.c_size_t(1), ctypes.c_long(ring))
+        assert key >= 0, ctypes.get_errno()
+        if ring == -4: user_key = key
+        found = call(keyctl, ctypes.c_long(10), ctypes.c_long(ring), ctypes.c_char_p(b'user'), ctypes.c_char_p(marker), ctypes.c_long(0))
+        assert found == key, (ring, ctypes.get_errno())
+    for argv in json.loads(sys.argv[2]):
+        result = subprocess.run(argv, capture_output=True, text=True, timeout=20)
+        assert result.returncode == 0, result.stdout + result.stderr
+finally:
+    if user_key is not None:
+        assert call(keyctl, ctypes.c_long(9), ctypes.c_long(user_key), ctypes.c_long(-4), ctypes.c_long(0), ctypes.c_long(0)) == 0
+'''
+    result = subprocess.run([sys.executable, '-I', '-c', driver, marker, json.dumps(argvs)],
+                            capture_output=True, text=True, timeout=50)
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 @pytest.mark.parametrize('path', ['repo', 'repo/.git', 'repo/.git/logs',

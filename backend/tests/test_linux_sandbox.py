@@ -15,6 +15,8 @@ def test_protected_overlay_pins_every_ancestor_before_overlay(tmp_path):
     argv = build_protected_argv('true', workspace, path_policy=policy,
         rw_roots=[workspace], ro_roots=[], readonly_overlays=[protected],
         env={}, thread_id='one', executable='/usr/bin/bwrap')
+    from tools.linux_keyring_launcher import launcher_argv
+    assert argv[:4] == launcher_argv(['/usr/bin/bwrap'])
     cursor = 0
     for path in (workspace / 'repo', workspace / 'repo/.git', protected.parent):
         index = argv.index(str(path), cursor)

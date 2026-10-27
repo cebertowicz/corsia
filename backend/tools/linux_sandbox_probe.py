@@ -12,6 +12,8 @@ import shutil
 import subprocess
 import threading
 
+from tools.linux_keyring_launcher import launcher_argv
+
 _MISSING = (
     'Error: the Linux sandbox (bubblewrap) is not installed on this server. '
     'Nothing ran. Install it with "sudo apt install bubblewrap", then restart CORSIA.'
@@ -64,7 +66,7 @@ def sandbox_error() -> str | None:
             if tuple(map(int, match.groups())) < (0, 8, 0):
                 return _failure(f'bubblewrap 0.8.0 or newer is required (found {match.group(0)})')
             result = subprocess.run(
-                [path, '--ro-bind', '/', '/', '--unshare-pid', '--proc', '/proc', '--', '/bin/true'],
+                launcher_argv([path, '--ro-bind', '/', '/', '--unshare-pid', '--proc', '/proc', '--', '/bin/true']),
                 capture_output=True, text=True, timeout=5,
             )
             if result.returncode:

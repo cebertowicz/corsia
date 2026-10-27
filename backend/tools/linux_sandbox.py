@@ -7,6 +7,8 @@ from pathlib import Path
 import shutil
 from typing import Any, Mapping, Sequence
 
+from tools.linux_keyring_launcher import launcher_argv
+
 HOME_RW = (
     '.cache/uv', '.cache/pip', '.cache/npm', '.cache/node', '.cache/go-build',
     '.cache/pnpm', '.cache/yarn', '.npm', '.cargo', '.rustup', 'go',
@@ -214,4 +216,4 @@ def build_protected_argv(
     for key, value in sorted(env.items()):
         mounts.argv.extend(('--setenv', key, value))
     mounts.argv.extend(('--chdir', str(cwd), '--', '/bin/bash', '--noprofile', '--norc', '-c', command))
-    return mounts.argv
+    return launcher_argv(mounts.argv)

@@ -58,7 +58,7 @@ def test_probe_failure_first_stderr_line_and_retry(executable, monkeypatch):
     assert probe.sandbox_error() == failure('denied')
     assert probe.sandbox_error() == failure('denied')
     assert len(calls) == 4
-    assert calls[1][0] == [str(executable), '--ro-bind', '/', '/', '--unshare-pid', '--proc', '/proc', '--', '/bin/true']
+    assert calls[1][0] == probe.launcher_argv([str(executable), '--ro-bind', '/', '/', '--unshare-pid', '--proc', '/proc', '--', '/bin/true'])
     assert calls[1][1] == {'capture_output': True, 'text': True, 'timeout': 5}
 
 
