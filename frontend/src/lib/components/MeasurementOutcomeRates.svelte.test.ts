@@ -98,7 +98,7 @@ describe('MeasurementOutcomeRates', () => {
 		expect(text(minutes.querySelector('.stat'))).toContain('6.0 minutes per outcome');
 		expect(text(minutes.querySelector('.stat'))).toContain('low n');
 		expect(text(minutes.querySelector('.asks'))).toBe('All agents together: – decisions and tasks per outcome, n/a.');
-		expect(text(firstTry)).toContain('Nothing measured for this selection.');
+		expect(text(firstTry)).toContain('Nothing was measured for this selection.');
 		expect(firstTry.querySelector('svg')).toBeNull();
 	});
 

@@ -26,6 +26,7 @@ export interface AlignmentPeriod {
 
 /** The one issue the chart labels too few under the bar; every other issue is told only in the table. */
 export const TOO_FEW = 'Too few decisions answered to show the shares.';
+export const INCONSISTENT_ANSWERS = 'This period’s answers were recorded inconsistently, so they aren’t shown. This is a CORSIA bug; please report it.';
 
 /** Each drawn period's three shares, checked the way the stack needs them: all three served, measured and summing to one. */
 export function alignmentPeriods(rows: MeasurementRow[], points: BarPoint[]): AlignmentPeriod[] {
@@ -40,12 +41,12 @@ export function alignmentPeriods(rows: MeasurementRow[], points: BarPoint[]): Al
 
 function alignmentIssue(parts: (MeasurementRow | undefined)[], n: number): string | null {
 	if (n <= 0) return 'No decisions answered.';
-	if (parts.some((row) => !row)) return 'A share is missing for this period.';
+	if (parts.some((row) => !row)) return INCONSISTENT_ANSWERS;
 	if (parts.some((row) => row!.value === null || row!.thin)) return TOO_FEW;
 	if (parts.some((row) => !row!.comparable)) return 'Not comparable with the other periods.';
-	if (parts.some((row) => row!.n !== n)) return 'Couldn’t show this period’s shares: a share doesn’t match the answered decisions.';
-	if (parts.some((row) => !Number.isFinite(row!.value) || row!.value! < 0 || row!.value! > 1)) return 'Couldn’t show this period’s shares: a share isn’t a number from 0 to 1.';
-	return Math.abs(parts.reduce((sum, row) => sum + row!.value!, 0) - 1) < 1e-9 ? null : 'The shares do not add up to the answered decisions.';
+	if (parts.some((row) => row!.n !== n)) return INCONSISTENT_ANSWERS;
+	if (parts.some((row) => !Number.isFinite(row!.value) || row!.value! < 0 || row!.value! > 1)) return INCONSISTENT_ANSWERS;
+	return Math.abs(parts.reduce((sum, row) => sum + row!.value!, 0) - 1) < 1e-9 ? null : INCONSISTENT_ANSWERS;
 }
 
 const f1 = (v: number) => v.toFixed(1);
