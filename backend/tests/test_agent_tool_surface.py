@@ -4,6 +4,7 @@ import pytest
 
 
 _PROCESS_TOOLS = {
+    "host_cpu_top",
     "managed_process_status",
     "managed_process_logs",
     "managed_process_stop",

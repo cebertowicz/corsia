@@ -223,6 +223,7 @@ def _register_artifact_tools(agent: CORSIAAgent, workspace: Path) -> None:
 
 
 def _register_managed_process_tools(agent: CORSIAAgent) -> None:
+    from tools.host_cpu_top import HostCpuTopTool
     from tools.managed_processes import (
         ManagedProcessListTool,
         ManagedProcessLogsTool,
@@ -234,7 +235,7 @@ def _register_managed_process_tools(agent: CORSIAAgent) -> None:
 
     for tool_type in (
         ManagedProcessStatusTool, ManagedProcessLogsTool, ManagedProcessListTool,
-        ManagedProcessStopTool, ProcessDiscoverTool, ProcessSignalTool,
+        ManagedProcessStopTool, ProcessDiscoverTool, ProcessSignalTool, HostCpuTopTool,
     ):
         agent.tools.register(tool_type())
 

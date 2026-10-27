@@ -8,6 +8,11 @@ _Entry = ToolCatalogEntry
 
 
 HOST_ACCESS_CATALOG_ENTRIES: dict[str, ToolCatalogEntry] = {
+    "host_cpu_top": _Entry(
+        "host_access", authority="host-cpu-read",
+        summary="See which host processes use CPU, without a host permit",
+        activity="Sampling host CPU usage",
+    ),
     "audit_read": _Entry(
         "host_access", authority="scoped-audit-read",
         summary="Read bounded caller-owned audit metrics without a host lease",
