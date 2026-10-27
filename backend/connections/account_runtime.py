@@ -131,8 +131,10 @@ def validate_launch(account: dict | None, *, launch: LaunchHomes, receipt: Recei
     from connections.account_projection import validate_projection
     from subagents.codex_env import _subscription_auth_file
 
-    if missing_home_reason(account) == 'account_home_mismatch':
-        raise AccountAdmissionError('account_home_mismatch')
+    # The home rule decides first, as readiness does; the projection's own source check
+    # remains only as its write-time guard against a file removed after this point.
+    if reason := missing_home_reason(account):
+        raise AccountAdmissionError(reason)
     validate_projection(receipt, home=Path(launch.codex_runtime), db=db)
     try:
         _subscription_auth_file(Path(cast(str, launch.codex_source)))

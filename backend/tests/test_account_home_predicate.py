@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from connections.account_evidence import mark_discovery, readiness_reason
+from connections.account_evidence import discovery_view, mark_discovery, readiness_reason
 from connections.account_holds import refresh_thread_holds
 from connections.account_home import missing_home_reason
 from connections.account_policy import AccountAdmissionError, select_account
@@ -66,6 +66,8 @@ def test_codex_missing_auth_file_is_held_before_launch(vendors):  # noqa: F811
     (Path(account['source_home']) / 'auth.json').unlink()
     assert readiness_reason(account, model='codex/test') == CODEX_MISSING
     assert _launch_reason(db, account, receipt, 'codex/test') == CODEX_MISSING
+    # Launch refuses by the home rule, before the projection: no stored failure outlives the file.
+    assert discovery_view(get_account(account['id'], db=db))['auth_projection']['failed'] is None
 
 
 @pytest.mark.parametrize('provider', ['claude-code', 'codex'])

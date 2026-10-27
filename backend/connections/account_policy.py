@@ -13,7 +13,7 @@ NOT_CONFIGURED = "account_not_configured"
 
 
 def read_account_readiness(thread_ids, *, db):
-    """Stored-only advisory batch using the same fact evaluator as require_claim."""
+    """Advisory batch using the same fact evaluator as require_claim (stored records plus its home check)."""
     from connections.account_readiness import read_account_readiness as read
 
     return read(thread_ids, db=db)
