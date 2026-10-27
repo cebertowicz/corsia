@@ -20,8 +20,16 @@ def is_open_suggestion(row: dict[str, Any]) -> bool:
             and not row.get("decision") and not row.get("resolved"))
 
 
+def suggestions_overlap(first: dict, first_span: tuple[int, int], second: dict, second_span: tuple[int, int]) -> bool:
+    """Insertions occupy their quote; siblings at the same quote can coexist."""
+    if first.get("insert_after") and second.get("insert_after") and first_span == second_span:
+        return False
+    return first_span[0] < second_span[1] and second_span[0] < first_span[1]
+
+
 def check_agent_suggestion_fits(
     db: sqlite3.Connection, artifact_id: str, path: str | None, start: int, end: int,
+    *, insert_after: bool = False,
 ) -> None:
     """Refuse an agent's suggestion over ``[start, end)`` (UTF-16 offsets) that overlaps an open one.
 
@@ -37,12 +45,8 @@ def check_agent_suggestion_fits(
             continue
         if row["from_off"] is None or row["to_off"] is None:
             continue
-        from doceditor.comment_actions import suggestion_edit_span
-        row_start, row_end = suggestion_edit_span(row, (row["from_off"], row["to_off"]))
-        overlaps = (row_start < end and start < row_end)
-        overlaps |= start == end and row_start < start < row_end
-        overlaps |= row_start == row_end and start < row_start < end
-        if overlaps:
+        if suggestions_overlap({"insert_after": insert_after}, (start, end), row,
+                               (row["from_off"], row["to_off"])):
             raise CommentActionError(
                 "suggestion_overlaps",
                 f"This overlaps an open suggestion ({row['id']}) by {row['author']}. "

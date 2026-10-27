@@ -19,14 +19,20 @@ def validate_create(
         raise CommentActionError("suggestion_shape", "insert_after requires a text suggestion with quote and replacement.")
     if replacement is not None:
         if parent_id or review:
-            raise CommentActionError(
-                "suggestion_shape",
-                "A suggestion replaces quoted text. Pass quote and replacement, without parent_id or review.",
+            message = (
+                "An insertion follows quoted text. Pass quote and replacement, without parent_id or review."
+                if insert_after else
+                "A suggestion replaces quoted text. Pass quote and replacement, without parent_id or review."
             )
+            raise CommentActionError("suggestion_shape", message)
         if not (quote or "").strip():
             raise CommentActionError(
                 "suggestion_quote",
                 "A suggestion needs quote: the exact current text. To insert after it, set insert_after.",
+            )
+        if insert_after and not replacement.strip():
+            raise CommentActionError(
+                "suggestion_empty_insertion", "Provide text to insert after the quote.",
             )
         if not insert_after and replacement == quote:
             raise CommentActionError(

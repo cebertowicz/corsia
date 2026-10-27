@@ -112,6 +112,15 @@ def _check_existing_identity(row: dict, artifact_id: str, author: str, cid: str)
         )
 
 
+def accepted_insertions(artifact_id: str, anchor_text: str, *, db) -> list[dict]:
+    """Accepted insertion siblings for the same artifact and quoted text."""
+    return [dict(row) for row in db.execute(
+        "SELECT * FROM doc_comments WHERE artifact_id=? AND anchor_text=? "
+        "AND insert_after=1 AND decision='accepted' ORDER BY created_at, id",
+        (artifact_id, anchor_text),
+    ).fetchall()]
+
+
 def _next_region_number(connection, cid: str, artifact_id: str, image_src: str | None, region) -> int | None:
     if region is None or connection.execute(
         "SELECT 1 FROM doc_comments WHERE id=?", (cid,)

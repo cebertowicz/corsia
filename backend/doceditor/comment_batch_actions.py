@@ -23,13 +23,13 @@ from doceditor.comment_actions import (
 from doceditor.comment_permissions import check_decider, owner_row
 from doceditor.doc_text import read_doc_text
 from doceditor.feedback_edit_discard import discard_new_edit_item
-from doceditor.suggestion_overlap import is_open_suggestion
+from doceditor.suggestion_overlap import is_open_suggestion, suggestions_overlap
 from infra.database import get_db, write_transaction
 from infra.db_async import run_in_db, run_off_db
 from registry import models as registry_models
 
 
-def _open_author_suggestions(comment_id: str, user_id: str, actor_thread_id: str | None):
+def _open_author_suggestions(comment_id: str, user_id: str, actor_thread_id: str | None, decision: str):
     """Load the authorized author's open suggestions on this document once."""
     db = get_db()
     try:
@@ -42,7 +42,8 @@ def _open_author_suggestions(comment_id: str, user_id: str, actor_thread_id: str
         rows = store.list_for_artifact(comment["artifact_id"], db=db)
         open_rows = [row for row in rows if is_open_suggestion(row)
                      and row.get("author_thread_id") == comment.get("author_thread_id")]
-        _attach_accepted_insertions(open_rows, rows)
+        if decision == "accept":
+            _attach_accepted_insertions(open_rows, db)
         if not open_rows:
             raise CommentActionError(
                 "no_open_suggestions", f"No open suggestions from {comment['author']} on this document."
@@ -63,47 +64,49 @@ def _open_suggestions(artifact_id: str, user_id: str, actor_thread_id: str | Non
         check_decider(user_id=user_id, actor_thread_id=actor_thread_id, artifact=artifact, db=db)
         all_rows = store.list_for_artifact(artifact_id, db=db)
         rows = [row for row in all_rows if is_open_suggestion(row)]
-        _attach_accepted_insertions(rows, all_rows)
+        _attach_accepted_insertions(rows, db)
         return artifact, owner[1] if owner else None, rows
     finally:
         db.close()
 
 
-def _attach_accepted_insertions(rows: list[dict], all_rows: list[dict]) -> None:
-    accepted = [row for row in all_rows if row.get("insert_after") and row.get("decision") == "accepted"]
+def _attach_accepted_insertions(rows: list[dict], db) -> None:
+    siblings = {}
     for row in rows:
         if row.get("insert_after"):
-            row["_accepted_insertions"] = accepted
+            key = (row["artifact_id"], row["anchor_text"])
+            if key not in siblings:
+                siblings[key] = store.accepted_insertions(*key, db=db)
+            row["_accepted_insertions"] = siblings[key]
 
 
 def _batch_text(rows: list[dict[str, Any]], document_text: str) -> tuple[str, list[str], list[dict[str, str]]]:
     """Resolve, de-overlap, and splice a batch against one document snapshot."""
-    candidates: list[tuple[int, int, dict[str, Any]]] = []
+    candidates: list[tuple[int, int, dict[str, Any], tuple[int, int]]] = []
     skipped: list[dict[str, str]] = []
     for row in rows:
         try:
-            start, end = suggestion_edit_span(row, suggestion_span(row, document_text))
+            anchor_span = suggestion_span(row, document_text)
+            start, end = suggestion_edit_span(row, anchor_span)
             if row.get("insert_after"):
                 start = end = insertion_position(row, document_text, start)
         except CommentActionError as exc:
             skipped.append({"id": row["id"], "reason": exc.message})
         else:
-            candidates.append((start, end, row))
+            candidates.append((start, end, row, anchor_span))
     one_author = len({row.get("author_thread_id") for row in rows}) <= 1
     overlap = "overlaps an earlier suggestion" + (" from the same author" if one_author else "")
-    winners: list[tuple[int, int, dict[str, Any]]] = []
+    winners: list[tuple[int, int, dict[str, Any], tuple[int, int]]] = []
     for candidate in sorted(candidates, key=lambda item: (item[0], item[1], item[2].get("created_at", ""), item[2]["id"])):
-        if any((candidate[0] < end and start < candidate[1])
-               or (candidate[0] == candidate[1] and start < candidate[0] < end)
-               or (start == end and candidate[0] < start < candidate[1])
-               for start, end, _row in winners):
+        if any(suggestions_overlap(candidate[2], candidate[3], row, span)
+               for _start, _end, row, span in winners):
             skipped.append({"id": candidate[2]["id"], "reason": overlap})
         else:
             winners.append(candidate)
     text = document_text
-    for start, end, row in sorted(winners, key=lambda item: (item[0], item[1], item[2].get("created_at", ""), item[2]["id"]), reverse=True):
+    for start, end, row, _span in sorted(winners, key=lambda item: (item[0], item[1], item[2].get("created_at", ""), item[2]["id"]), reverse=True):
         text = splice_suggestion(text, row, (start, end))
-    return text, [row["id"] for _start, _end, row in winners], skipped
+    return text, [row["id"] for _start, _end, row, _span in winners], skipped
 
 
 def _drop_edit_feedback(artifact_id: str, text: str) -> None:
@@ -230,7 +233,7 @@ async def decide_all_from_author(
     if decision not in DECISIONS:
         raise CommentActionError("decision", "decision must be accept or reject")
     reason = validate_decision_reason(reason)
-    artifact, project_id, rows = await run_in_db(_open_author_suggestions, comment_id, user_id, actor_thread_id)
+    artifact, project_id, rows = await run_in_db(_open_author_suggestions, comment_id, user_id, actor_thread_id, decision)
     return await _decide_batch(
         artifact, project_id, rows, decision, user_id=user_id, decided_by=decided_by,
         actor_thread_id=actor_thread_id, write=write, reason=reason)

@@ -104,9 +104,8 @@ def create_in_db(request: CommentInput, anchor: Anchor | None, identifier: str, 
         if (request.author_kind == "agent" and request.replacement is not None and not request.parent_id
                 and duplicate is None and artifact_id is not None):
             # Creates of one live document are already serialized by its comment mutex.
-            from doceditor.comment_actions import suggestion_edit_span
-            edit_start, edit_end = suggestion_edit_span({"insert_after": request.insert_after}, (start, end))
-            check_agent_suggestion_fits(db, artifact_id, request.path, edit_start, edit_end)
+            check_agent_suggestion_fits(db, artifact_id, request.path, start, end,
+                                        insert_after=request.insert_after)
         with write_transaction(db, scope="create_document_comment") as connection:
             receipt.bind(connection)
             if request.registration is not None:

@@ -37,6 +37,28 @@ async def test_two_insertions_are_independently_accepted(integration_client, doc
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_reject_does_not_read_accepted_siblings(integration_client, doc, _registrable_roots, monkeypatch):
+    from doceditor import comments
+
+    owner = _mk_thread(integration_client, _OWNER, title="Owner")
+    moved = doc.parent / ".threads" / owner / doc.name
+    moved.parent.mkdir(parents=True)
+    doc.rename(moved)
+    moved.write_text("Heading\n", encoding="utf-8")
+    await ArtifactRegisterTool().execute(path=str(moved), _thread_id=owner)
+    result = await DocCommentCreateTool().execute(doc_path=str(moved), quote="Heading", replacement=" fact",
+                                                   insert_after=True, _thread_id=owner)
+    comment = json.loads(result)["comment"]
+    def unexpected_read(*args, **kwargs):
+        raise AssertionError("reject read accepted siblings")
+    monkeypatch.setattr(comments, "accepted_insertions", unexpected_read)
+    result = await DocCommentUpdateTool().execute(comment_id=comment["id"], decision="reject", _thread_id=owner)
+    assert not result.startswith("Error"), result
+    assert moved.read_text(encoding="utf-8") == "Heading\n"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_accept_all_keeps_both_insertions(integration_client, doc, _registrable_roots):
     owner = _mk_thread(integration_client, _OWNER, title="Owner")
     moved = doc.parent / ".threads" / owner / doc.name

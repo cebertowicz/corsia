@@ -25,6 +25,11 @@ def test_insert_validation_and_staleness():
         suggestion_span(row("one", " fact", "1"), "Changed\n")
     with pytest.raises(CommentActionError):
         validate_create(**{**args, "replacement": None})
+    for empty in ("", " \n\t"):
+        with pytest.raises(CommentActionError, match="Provide text to insert"):
+            validate_create(**{**args, "replacement": empty})
+    with pytest.raises(CommentActionError, match="insertion follows"):
+        validate_create(**{**args, "review": True})
 
 
 def test_insert_batch_preserves_order_and_heading():
@@ -33,6 +38,15 @@ def test_insert_batch_preserves_order_and_heading():
     assert text == "Heading one two\n"
     assert accepted == ["a", "b"]
     assert skipped == []
+
+
+def test_batch_skips_insertion_whose_anchor_overlaps_replacement():
+    insertion = row("b", " fact", "2")
+    replacement = {**row("a", "New heading", "1"), "insert_after": False}
+    text, accepted, skipped = _batch_text([replacement, insertion], "Heading\n")
+    assert text == "New heading\n"
+    assert accepted == ["a"]
+    assert [item["id"] for item in skipped] == ["b"]
 
 
 def test_single_insert_skips_accepted_older_sibling():
@@ -50,10 +64,12 @@ def test_overlap_allows_shared_point_but_refuses_insertion_inside_replacement(mo
     existing = row("a", " one", "1")
     existing.update(parent_id=None, decision=None, resolved=False, author="agent")
     monkeypatch.setattr(suggestion_overlap, "anchored_threads", lambda *args, **kwargs: ([existing], True))
-    suggestion_overlap.check_agent_suggestion_fits(None, "doc", "file", 7, 7)
+    suggestion_overlap.check_agent_suggestion_fits(None, "doc", "file", 0, 7, insert_after=True)
+    with pytest.raises(CommentActionError, match="overlaps"):
+        suggestion_overlap.check_agent_suggestion_fits(None, "doc", "file", 0, 10)
     existing.update(insert_after=False, from_off=0, to_off=10)
     with pytest.raises(CommentActionError, match="overlaps"):
-        suggestion_overlap.check_agent_suggestion_fits(None, "doc", "file", 7, 7)
+        suggestion_overlap.check_agent_suggestion_fits(None, "doc", "file", 0, 7, insert_after=True)
 
 
 def test_streamed_preview_moves_from_quote_to_insert_point():

@@ -223,9 +223,9 @@ async def decide_suggestion(
                 raise CommentActionError("not_found", "Comment not found")
             owner = owner_row(db, artifact["parent_thread_id"])
             check_decider(user_id=user_id, actor_thread_id=actor_thread_id, artifact=artifact, db=db)
-            if comment.get("insert_after"):
-                comment["_accepted_insertions"] = [row for row in store.list_for_artifact(comment["artifact_id"], db=db)
-                                                     if row.get("insert_after") and row.get("decision") == "accepted"]
+            if decision == "accept" and comment.get("insert_after"):
+                comment["_accepted_insertions"] = store.accepted_insertions(
+                    comment["artifact_id"], comment["anchor_text"], db=db)
             return comment, artifact, owner[1] if owner else None
         finally:
             db.close()
