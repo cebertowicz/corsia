@@ -71,6 +71,7 @@ is no owner). It is private state on the host-access hard floor and is never the
 person's own Chrome profile. Chrome allows one process per profile, so a
 concurrent second session starts from a `state save` copy of the holder's
 sign-ins, stored `0600` under `browser-profile/copies/` and deleted on close.
+Sign-ins made in a concurrent copy do not persist to the shared profile.
 An untrusted worker's session gets neither the profile nor a copy.
 
 Agents cannot read the saved sign-ins: `cookies`, `state`, `storage`, `auth`,

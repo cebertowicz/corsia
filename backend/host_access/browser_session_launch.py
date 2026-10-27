@@ -11,6 +11,7 @@ import asyncio
 import contextlib
 import logging
 import os
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -27,13 +28,22 @@ async def resolve_profile(thread_id: str, *, untrusted: bool) -> str | None:
     return str(await asyncio.to_thread(browser_launch.profile_dir, thread_id))
 
 
-def assign(sessions: Mapping[str, Any], profile: str | None) -> tuple[str | None, str | None]:
-    """Give a new session (profile, copy_of): the profile when free, else the holder it copies from."""
+def assign(sessions: Mapping[str, Any], profile: str | None, thread_id: str) -> tuple[str | None, str | None]:
+    """Transfer an idle reservation, or copy from a holder that has started launching."""
     if profile is None:
         return None, None
-    holder = next((runtime.record.thread_id for runtime in sessions.values()
-                   if runtime.record.profile == profile), None)
-    return (None, holder) if holder is not None else (profile, None)
+    holder = next((runtime for runtime in sessions.values() if runtime.record.profile == profile), None)
+    if holder is None:
+        return profile, None
+    if holder.record.binding is None and not holder.command_lock.locked() and holder.attempt is None:
+        previous = holder.record.thread_id
+        holder.record = replace(holder.record, profile=None, copy_of=thread_id)
+        for waiting in sessions.values():
+            if (waiting is not holder and waiting.record.copy_of == previous and waiting.attempt is None
+                    and not waiting.command_lock.locked()):
+                waiting.record = replace(waiting.record, copy_of=thread_id)
+        return profile, None
+    return None, holder.record.thread_id
 
 
 def flags(record: Any, ua: str | None) -> Sequence[str]:
@@ -61,11 +71,13 @@ async def seed_copy(owner: Any, runtime: Any) -> None:
     """Save the holder's sign-in for this session's first launch; a miss leaves it signed out."""
     record = runtime.record
     holder = owner._sessions.get(record.copy_of)
-    if holder is None or holder.record.binding is None or holder.record.terminal_state != "running":
+    if holder is None:
         return
     target = browser_launch.copy_path(record.session)
     try:
         async with holder.command_lock:
+            if holder.record.binding is None or holder.record.terminal_state != "running":
+                return
             result = await owner._invoke(
                 owner._session_argv(holder, ("state", "save", str(target))), timeout=_STATE_SAVE_TIMEOUT)
         if result.returncode == 0 and target.is_file():

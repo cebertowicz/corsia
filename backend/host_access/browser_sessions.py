@@ -149,7 +149,7 @@ class BrowserSessionOwner:
             if runtime is None and session == "existing":
                 raise BrowserSessionError("the browser is no longer open")
             if runtime is None:
-                shared, copy_of = launch.assign(self._sessions, profile)
+                shared, copy_of = launch.assign(self._sessions, profile, thread_id)
                 runtime = BrowserRuntime(BrowserSessionRecord(
                     thread_id, secrets.token_urlsafe(12), lease_id, bool(show_window), profile=shared, copy_of=copy_of))
                 self._sessions[thread_id] = runtime

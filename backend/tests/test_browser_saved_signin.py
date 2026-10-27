@@ -107,6 +107,31 @@ async def test_a_missed_copy_starts_the_second_session_signed_out_without_failin
     await fake.owner.shutdown()
 
 
+async def test_unlaunched_holder_yields_the_profile_to_the_next_session(synthetic_browser, chrome154, monkeypatch):
+    fake = synthetic_browser
+    _saving_state(fake, monkeypatch)
+    first = await fake.owner._admit("a", lease_id=None)
+    assert first.record.binding is None
+    await fake.owner.run("b", ["open", "about:blank"])
+    assert _value(_launches(fake)[0], "--profile") == str(browser_launch.profile_dir("b"))
+    assert first.record.profile is None and first.record.copy_of == "b"
+    await fake.owner.run("a", ["open", "about:blank"])
+    assert "--state" in _launches(fake)[1] and "--profile" not in _launches(fake)[1]
+    await fake.owner.shutdown()
+
+
+async def test_repeated_idle_transfers_redirect_waiting_copies(synthetic_browser, chrome154, monkeypatch):
+    fake = synthetic_browser
+    _saving_state(fake, monkeypatch)
+    first = await fake.owner._admit("a", lease_id=None)
+    second = await fake.owner._admit("b", lease_id=None)
+    await fake.owner.run("c", ["open", "about:blank"])
+    assert first.record.copy_of == second.record.copy_of == "c"
+    await fake.owner.run("a", ["open", "about:blank"])
+    assert "--state" in _launches(fake)[1]
+    await fake.owner.shutdown()
+
+
 async def test_the_profile_frees_up_for_the_next_session_once_its_holder_closes(synthetic_browser, chrome154):
     fake = synthetic_browser
     await fake.owner.run("a", ["open", "about:blank"])
