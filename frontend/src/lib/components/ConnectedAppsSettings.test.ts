@@ -204,7 +204,7 @@ describe('ConnectedAppsSettings', () => {
 		await vi.waitFor(() => expect(host.textContent).toContain('Connected'));
 	});
 
-	it("shows the server's Mac notice on a waiting row, so a direct Approve shows it too", async () => {
+	it("shows the server's this-computer notice on a waiting row, so a direct Approve shows it too", async () => {
 		const local = { ...awaiting, transport: 'stdio', notice: 'notice text from the server' };
 		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ servers: [local, { ...awaiting, id: 'web', name: 'Web' }] }) })));
 		component = mount(ConnectedAppsSettings, { target: host });
@@ -760,7 +760,7 @@ describe('WhereItWorks', () => {
 		expect(JSON.parse(String(call?.[1]?.body))).toEqual({ reach: { mode: 'all', project_ids: [], outside_projects: false } });
 	});
 
-	it("shows the server's Mac notice on the approve sheet only", async () => {
+	it("shows the server's this-computer notice on the approve sheet only", async () => {
 		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ projects: [] }) })));
 		const notice = 'notice text from the server';
 		const reach = { mode: 'selected', project_ids: [], outside_projects: false };

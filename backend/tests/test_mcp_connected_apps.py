@@ -335,7 +335,7 @@ def test_workspace_agent_asked_by_provenance_is_server_resolved(connected_apps_c
     assert unknown.status_code == 422
 
 
-def test_local_app_connect_returns_the_approved_mac_notice(connected_apps_client) -> None:
+def test_local_app_connect_returns_the_approved_this_computer_notice(connected_apps_client) -> None:
     client, _db, actor = connected_apps_client
     actor.clear()
     actor.update({"id": "user", "token_kind": "session"})
