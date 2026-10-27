@@ -292,15 +292,10 @@ async def drive_claimed_batch(
             await settle_load_failure(batch, error)
         except BaseException:
             from loguru import logger
-
             logger.exception("Failed to settle model load")
             raise
         finally:
-            outcome = "cancelled" if isinstance(error, asyncio.CancelledError) else "error"
-            await settle_turn_terminal(
-                batch.turn_id, outcome,
-                terminal_error_detail(error) or None,
-            )
+            await settle_turn_terminal(batch.turn_id, "cancelled" if isinstance(error, asyncio.CancelledError) else "error", terminal_error_detail(error) or None)
         raise
     if isinstance(resolved, InboxQueuedInput):
         return resolved
