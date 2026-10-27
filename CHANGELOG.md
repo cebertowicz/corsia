@@ -7,6 +7,7 @@ the later entry describes the current behavior.
 
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here._
 
+- Agents can suggest individual additions to a document without replacing the text they follow.
 - On a local model, if Google setup stops partway, CORSIA asks the rest of the setup questions first and comes back to Google at the end.
 - Agent replies to your document comments now show as one notice above the message box until you read them.
 - Select text in chat to add comments to your next message.

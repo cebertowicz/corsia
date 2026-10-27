@@ -208,36 +208,36 @@ def document_comment_intent(items: Iterable[dict[str, Any]]) -> str:
     ))
 
 
-def has_person_origin(connection: sqlite3.Connection, turn_id: str | None) -> bool:
+def turn_origin(connection: sqlite3.Connection, turn_id: str | None) -> sqlite3.Row | None:
+    """Return the turn's one unambiguous input: its only person message, else its only agent message."""
     if turn_id is None:
-        return False
-    return any(_is_person_message(row) for row in connection.execute(
-        "SELECT role,content,metadata FROM messages WHERE active_turn_id=?", (turn_id,)
-    ))
-
-
-def capture_origin(connection: sqlite3.Connection, node_id: str, *, turn_id: str | None, revision: int) -> bool:
-    """Append every input consumed by this turn and report whether one is human-authored."""
-    if turn_id is None:
-        return False
+        return None
     rows = connection.execute(
         """SELECT id,content,role,metadata FROM messages
            WHERE active_turn_id=? ORDER BY input_order,id""", (turn_id,)
     ).fetchall()
     person = [row for row in rows if _is_person_message(row)]
     if person:
-        append(connection, node_id, (
-            {"quote": bounded_text(row["content"].strip(), MAX_QUOTE_BYTES), "author": "person", "role": "origin",
-             "source_kind": "message", "source_id": row["id"]}
-            for row in person
-        ), revision=revision)
-        return True
-    agent = next((row for row in rows if _is_agent_message(row)), None)
-    if agent is not None:
-        append(connection, node_id, [{"quote": bounded_text(agent["content"].strip(), MAX_QUOTE_BYTES),
-                                      "author": "agent", "role": "origin",
-                                      "source_kind": "message", "source_id": agent["id"]}], revision=revision)
-    return False
+        return person[0] if len(person) == 1 else None
+    agents = [row for row in rows if _is_agent_message(row)]
+    return agents[0] if len(agents) == 1 else None
+
+
+def has_person_origin(connection: sqlite3.Connection, turn_id: str | None) -> bool:
+    row = turn_origin(connection, turn_id)
+    return row is not None and _is_person_message(row)
+
+
+def capture_origin(connection: sqlite3.Connection, node_id: str, *, turn_id: str | None, revision: int) -> bool:
+    """Capture the turn's unambiguous input and report whether it is person-authored."""
+    row = turn_origin(connection, turn_id)
+    if row is None:
+        return False
+    person = _is_person_message(row)
+    append(connection, node_id, [{"quote": bounded_text(row["content"].strip(), MAX_QUOTE_BYTES),
+                                  "author": "person" if person else "agent", "role": "origin",
+                                  "source_kind": "message", "source_id": row["id"]}], revision=revision)
+    return person
 
 
 def canonical(connection: sqlite3.Connection, node_id: str):

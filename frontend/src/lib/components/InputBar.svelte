@@ -199,11 +199,7 @@
 			...(deliveryIntent === 'queue_after_turn' ? { delivery_intent: deliveryIntent } : {}),
 		});
 		const payloadComments = comments.map(({ id, seq, from_off, to_off, quote, anchor_prefix, anchor_suffix, note }) => ({ id, seq, from_off, to_off, quote, anchor_prefix, anchor_suffix, note }));
-		const inputId = payloadComments.length
-			? sendMessage(threadId, content, modelId, attachments, undefined, deliveryIntent, payloadComments)
-			: deliveryIntent === 'queue_after_turn'
-				? sendMessage(threadId, content, modelId, attachments, undefined, deliveryIntent)
-				: sendMessage(threadId, content, modelId, attachments, undefined);
+		const inputId = sendMessage(threadId, content, modelId, attachments, undefined, deliveryIntent, payloadComments);
 		if (!inputId) {
 			toasts.show('Connection lost before CORSIA could accept this message.', 'error');
 			return 'notified';

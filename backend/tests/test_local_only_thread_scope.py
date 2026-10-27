@@ -618,20 +618,23 @@ async def test_delegate_set_model_tool_returns_the_agent_text(monkeypatch) -> No
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("sender_local_only", "recipient_model", "confirmed", "refused"),
+    ("sender_local_only", "cloud_off", "recipient_model", "confirmed", "refused"),
     [
-        (True, "cloud", False, True),
-        (True, "cloud", True, False),
-        (True, None, False, True),
-        (True, None, True, False),
-        (True, "local", False, False),
-        (False, "cloud", False, False),
+        (True, False, "cloud", False, True),
+        (True, False, "cloud", True, False),
+        (True, False, None, False, True),
+        (True, False, None, True, False),
+        (True, False, "local", False, False),
+        (False, False, "cloud", False, False),
+        (False, True, "cloud", False, True),
+        (False, True, "cloud", True, False),
     ],
 )
 async def test_delegate_send_enforces_cloud_confirmation_at_send_time(
     isolated_db,
     monkeypatch,
     sender_local_only,
+    cloud_off,
     recipient_model,
     confirmed,
     refused,
@@ -641,13 +644,16 @@ async def test_delegate_send_enforces_cloud_confirmation_at_send_time(
 
     db = get_db()
     try:
-        _thread(db, "sender", user_id="steve", local_only=int(sender_local_only))
+        db.execute("INSERT INTO projects (id,name,created_at,updated_at) VALUES ('p','P','t','t')")
+        db.execute("INSERT INTO project_inference_policies(project_id,cloud_models_off) VALUES ('p',?)", (int(cloud_off),))
+        _thread(db, "sender", user_id="steve", local_only=int(sender_local_only), project_id="p")
         _thread(
             db,
             "recipient",
             user_id="steve",
             model=recipient_model,
             spawned_by="sender",
+            project_id="p",
         )
         db.commit()
     finally:
@@ -672,7 +678,7 @@ async def test_delegate_send_enforces_cloud_confirmation_at_send_time(
         "recipient",
         "private-key-material",
         _thread_id="sender",
-        no_sensitive_content=confirmed,
+        **({"no_sensitive_content": True} if confirmed else {}),
     )
 
     assert ("no_sensitive_content: true" in result) is refused

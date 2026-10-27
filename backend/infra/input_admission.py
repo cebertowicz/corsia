@@ -61,8 +61,9 @@ def stamped_human_metadata(
         reply_context = prior.get(REPLY_CONTEXT_KEY)
     else:
         raw_context = (metadata or {}).get(REPLY_CONTEXT_KEY)
-        reply_context = validate_reply_context(connection, thread_id, raw_context)
-        require_every_comment(raw_context, reply_context)
+        dropped: list[dict] = []
+        reply_context = validate_reply_context(connection, thread_id, raw_context, dropped=dropped)
+        require_every_comment(raw_context, reply_context, dropped)
     if reply_context:
         stamped[REPLY_CONTEXT_KEY] = reply_context
     if viewing_document is not None:

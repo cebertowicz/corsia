@@ -176,7 +176,9 @@ def send_confirmation_refusal(
     db: sqlite3.Connection,
 ) -> str | None:
     """Require a local-only sender to confirm a cloud-bound recipient is safe."""
-    if not sender.get("local_only"):
+    from llm.locality import project_cloud_models_off
+
+    if not sender.get("local_only") and not project_cloud_models_off(sender.get("project_id"), db=db):
         return None
     # Every recipient thread is read by its own bound model, so only its
     # locality decides; a person's chat on a cloud model is still cloud-bound.
@@ -210,7 +212,7 @@ def send_confirmation_error(
     no_sensitive_content: object,
 ) -> str | None:
     """Read model locality and return the send confirmation refusal, if any."""
-    if not sender.get("local_only"):
+    if not sender.get("local_only") and not sender.get("project_id"):
         return None
     from infra.database import get_db
 
