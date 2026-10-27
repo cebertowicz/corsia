@@ -6,9 +6,8 @@ import { loginByUrl, saveEvidenceScreenshot } from '../support/corsia';
  * The CORSIA / Conductor row's right-click menu is never empty.
  *
  * Mark read/unread is offered only once the thread has been opened and no "Needs you" or Failed word
- * outranks the dot, so on a fresh row the menu used to open with nothing in it. The row takes the Agent
- * items that apply to it; Rename and Deactivate stay with the Agent rows (the row has no rename field and
- * deactivating it would leave the scope without its agent).
+ * outranks the dot, so a fresh row's menu holds Agent settings alone. Rename and Deactivate stay with the
+ * Agent rows (the row has no rename field and deactivating it would leave the scope without its agent).
  */
 test.describe('@flow:conductor-rail-menu right-click on the CORSIA row', () => {
 	test('opens a menu with Agent settings, which opens that agent\'s settings', async ({ page }, testInfo) => {
