@@ -28,7 +28,7 @@ type Step = { id: string; title: string; description: string; criteria: string }
 
 const STEP_DOC: Step = {
   id: "step-signin",
-  title: "Run the sign-in proof (about 5 minutes)",
+  title: "Run the sign-in proof (5 minutes)",
   description: "",
   criteria: "The terminal prints PASS and the browser shows the test account signed in.",
 };
