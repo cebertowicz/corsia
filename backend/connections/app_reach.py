@@ -338,23 +338,33 @@ def runtime_app_id_for_key_entry(entry: str) -> str | None:
         db.close()
 
 
-def _reach_reaches_thread(reach: AppReach, thread_id: str, *, db: sqlite3.Connection) -> bool:
-    """Apply one reach snapshot to a thread and every parent, failing closed."""
+def resolve_thread_scopes(thread_id: str, *, db: sqlite3.Connection) -> list[dict] | None:
+    """Resolve and validate the whole parent chain once; missing or cyclic chains fail closed."""
     seen: set[str] = set()
+    scopes: list[dict] = []
     current_thread_id: str | None = thread_id
     while current_thread_id is not None and current_thread_id not in seen:
         seen.add(current_thread_id)
         try:
             scope = thread_scope(current_thread_id, db=db)
         except AccountAdmissionError:
-            return False
-        if not _reach_scope(reach, scope, db=db):
-            return False
-        parent = db.execute(
-            "SELECT parent_thread_id FROM threads WHERE id=?", (current_thread_id,)
-        ).fetchone()
+            return None
+        if missing_project_reason(scope, db=db):
+            return None
+        scopes.append(scope)
+        parent = db.execute("SELECT parent_thread_id FROM threads WHERE id=?", (current_thread_id,)).fetchone()
         current_thread_id = parent["parent_thread_id"] if parent is not None else None
-    return current_thread_id is None
+    return scopes if current_thread_id is None else None
+
+
+def reach_reaches_scopes(reach: AppReach, scopes: list[dict] | None) -> bool:
+    """Apply a reach snapshot to an already validated chain."""
+    return scopes is not None and all(_reach_scope(reach, scope) for scope in scopes)
+
+
+def _reach_reaches_thread(reach: AppReach, thread_id: str, *, db: sqlite3.Connection) -> bool:
+    """Apply one reach snapshot to a thread and every parent, failing closed."""
+    return reach_reaches_scopes(reach, resolve_thread_scopes(thread_id, db=db))
 
 
 def reach_reaches_thread(reach: AppReach, thread_id: str, *, db: sqlite3.Connection) -> bool:
@@ -380,14 +390,10 @@ def app_reaches_thread(app_id: str, thread_id: str, *, db: sqlite3.Connection) -
     return reach_reaches_thread(reach, thread_id, db=db)
 
 
-def _reach_scope(reach: AppReach, scope: dict, *, db: sqlite3.Connection) -> bool:
-    if missing_project_reason(scope, db=db):
-        return False
+def _reach_scope(reach: AppReach, scope: dict) -> bool:
     project_id = scope["project_id"]
     if project_id is None:
         return reach.mode == "all" or (
             reach.mode == "selected" and reach.outside_projects
         )
-    return reach.mode == "all" or (
-        reach.mode == "selected" and project_id in reach.project_ids
-    )
+    return reach.mode == "all" or (reach.mode == "selected" and project_id in reach.project_ids)

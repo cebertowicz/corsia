@@ -18,6 +18,8 @@ MICROSOFT_CATALOG_ENTRIES: dict[str, ToolCatalogEntry] = {
         "microsoft_calendar" if name.startswith("microsoft_calendar_") else
         "microsoft_files" if name.startswith("microsoft_files_") else "microsoft_mail",
         status="active", authority="conductor-api", summary=summary, activity=activity,
+        account_capability=("calendar" if name.startswith("microsoft_calendar_") else
+                            "files" if name.startswith("microsoft_files_") else "mail"),
     ) for name, summary, activity in (
         ("microsoft_mail_draft", "Save a Microsoft mail draft for review", "Saving Microsoft mail draft"),
         ("microsoft_mail_search", "Search Microsoft mail in one selected account", "Searching Microsoft mail"),

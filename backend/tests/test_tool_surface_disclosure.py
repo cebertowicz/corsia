@@ -106,13 +106,15 @@ def test_no_reader_outside_the_selector_sends_the_raw_registry():
     assert offenders == []
 
 
-def test_every_deferred_tool_has_one_pack_and_one_index_line(tmp_path):
+def test_every_deferred_tool_has_one_pack_and_one_index_line(tmp_path, monkeypatch):
     from tools.catalog import TOOL_CATALOG, TOOL_PACKS, pack_members
 
     registry = _registry(tmp_path)
     members = pack_members()
     packed = [name for names in members.values() for name in names]
+    monkeypatch.setattr("tools.tool_surface.account_capabilities_here", lambda: frozenset())
     index = registry.get("tools_load").description
+    schema_before = json.dumps(registry.get("tools_load").parameters, sort_keys=True)
 
     assert sorted(packed + CORE) == sorted(registry.tool_names)
     assert len(packed) == len(set(packed))
@@ -120,10 +122,14 @@ def test_every_deferred_tool_has_one_pack_and_one_index_line(tmp_path):
     assert list(members) == list(TOOL_PACKS)
     for name in packed:
         assert TOOL_CATALOG[name].summary
-        assert index.count(f"- {name}: ") == 1
+        assert index.count(f"- {name}: ") == (0 if TOOL_CATALOG[name].account_capability else 1)
     assert registry.get("tools_load").parameters["properties"]["pack"]["enum"] == list(
         TOOL_PACKS
     )
+    monkeypatch.setattr("tools.tool_surface.account_capabilities_here", lambda: frozenset({"mail", "calendar", "files"}))
+    full_index = registry.get("tools_load").description
+    assert json.dumps(registry.get("tools_load").parameters, sort_keys=True) == schema_before
+    assert all(full_index.count(f"- {name}: ") == 1 for name in packed)
 
 
 def test_google_connect_surface_requires_status_before_reconnect():

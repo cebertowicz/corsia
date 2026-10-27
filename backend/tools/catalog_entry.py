@@ -50,6 +50,7 @@ class ToolCatalogEntry:
     authority: str = "session"
     core: bool = False
     summary: str = ""
+    account_capability: Literal["mail", "calendar", "files"] | None = None
     #: A durable external or hard-to-undo effect that proposes Serious triage.
     serious_effect: bool = False
     # The row verb a call of this tool reads as, e.g. "Reading" in "Reading a.md".

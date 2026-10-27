@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Any
 
 from tools.base import Tool
 from tools.connected_app_visibility import (
+    account_capabilities_here,
     connected_app_reach_refusal,
     mcp_app_id,
     mcp_tool_reaches_thread,
@@ -166,13 +167,15 @@ def _server_label(name: str) -> str:
 
 def pack_index(registry: ToolRegistry) -> str:
     """Render the always-on index: core packs plus one line per MCP server."""
+    capabilities = account_capabilities_here()
     lines = []
     for pack, names in pack_members().items():
-        if names:
+        visible = [name for name in names if TOOL_CATALOG[name].account_capability is None
+                   or TOOL_CATALOG[name].account_capability in capabilities]
+        if visible:
             lines.append(f"[{pack}] {TOOL_PACKS[pack]}")
-            lines.extend(f"- {name}: {TOOL_CATALOG[name].summary}" for name in names)
-    servers = _server_tools(registry)
-    if servers:
+            lines.extend(f"- {name}: {TOOL_CATALOG[name].summary}" for name in visible)
+    if servers := _server_tools(registry):
         lines.append('[mcp] Tool servers. Load one with tools_load(server="<name>") to see its tools.')
         lines.extend(
             f"- {_server_label(name)}: {len(tools)} tool{'s' if len(tools) != 1 else ''}; "
@@ -184,14 +187,11 @@ def pack_index(registry: ToolRegistry) -> str:
 
 def _user_configured_in_order(registry: ToolRegistry) -> list[Tool]:
     """Configured tools in registration order, which is each server's discovery order."""
-    tools = (registry.get(name) for name in registry.tool_names)
-    return [tool for tool in tools if tool is not None and tool.user_configured]
+    return [tool for name in registry.tool_names if (tool := registry.get(name)) is not None and tool.user_configured]
 
 
 def _user_configured(registry: ToolRegistry) -> list[Tool]:
-    tools = (registry.get(name) for name in sorted(registry.tool_names))
-    return [tool for tool in tools if tool is not None and tool.user_configured]
-
+    return [tool for name in sorted(registry.tool_names) if (tool := registry.get(name)) is not None and tool.user_configured]
 
 
 def _hidden_mcp_tool(registry: ToolRegistry, name: str) -> bool:
