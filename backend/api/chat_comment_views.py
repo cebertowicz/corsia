@@ -24,7 +24,8 @@ def _stamp(user_id: str, thread_id: str, message_id: str, cid: str) -> bool:
             if row is None or not has_comment_cid(row[0], cid):
                 return False
             db.execute(
-                "INSERT OR IGNORE INTO chat_comment_views VALUES (?,?,?,?)",
+                "INSERT INTO chat_comment_views VALUES (?,?,?,?) "
+                "ON CONFLICT(user_message_id, cid, user_id) DO UPDATE SET seen_at=excluded.seen_at",
                 (user_id, message_id, cid, utc_now_iso()),
             )
             return True

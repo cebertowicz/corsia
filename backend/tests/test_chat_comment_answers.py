@@ -64,7 +64,9 @@ def test_write_places_known_answers_and_unread_skips_deleted(isolated_db):
         _seed(db)
         _answer(db)
         assert [r["cid"] for r in unread_answers(db, OWNER_USER, "thread", 10)] == ["c1.1", "c1.2"]
-        db.execute("INSERT INTO chat_comment_views VALUES (?, 'question', 'c1.1', 'first')", (OWNER_USER,))
+        db.execute("INSERT INTO chat_comment_views VALUES (?, 'question', 'c1.1', '2026-01-01T12')", (OWNER_USER,))
+        assert [r["cid"] for r in unread_answers(db, OWNER_USER, "thread", 10)] == ["c1.1", "c1.2"]
+        db.execute("UPDATE chat_comment_views SET seen_at='2026-01-03' WHERE cid='c1.1'")
         assert [r["cid"] for r in unread_answers(db, OWNER_USER, "thread", 1)] == ["c1.2"]
         assert unread_answers(db, "another-user", "thread", 10) == []
         db.execute("SAVEPOINT deletion")
@@ -78,7 +80,7 @@ def test_write_places_known_answers_and_unread_skips_deleted(isolated_db):
         db.close()
 
 
-def test_route_is_idempotent_and_checks_ownership(isolated_db):
+def test_route_refreshes_the_stamp_and_checks_ownership(isolated_db):
     from main import app
     db = get_db()
     try:
@@ -98,7 +100,8 @@ def test_route_is_idempotent_and_checks_ownership(isolated_db):
     assert client.post(url, headers=headers).status_code == 200
     db = get_db()
     try:
-        assert [r[0] for r in db.execute("SELECT seen_at FROM chat_comment_views")] == [first]
+        rows = [r[0] for r in db.execute("SELECT seen_at FROM chat_comment_views")]
+        assert len(rows) == 1 and rows[0] >= first
     finally:
         db.close()
 
