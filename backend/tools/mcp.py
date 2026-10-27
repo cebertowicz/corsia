@@ -17,6 +17,7 @@ from tools.mcp_local_transport import (
     _mcp_denial_guidance,
     _mcp_denied_paths_in,
     mcp_oserror_detail as _mcp_oserror_detail,
+    prepare_managed_runtime,
     safehouse_stdio_parameters as _safehouse_stdio_parameters,
 )
 from tools.mcp_stamp import build_stamp
@@ -373,6 +374,7 @@ async def connect_mcp_servers(mcp_servers: dict, registry: ToolRegistry,
         connection = None
         try:
             deadline = timeout_seconds(config, "connect_timeout", 10)
+            await prepare_managed_runtime(config)
             connection = _ServerConnection(name, config)
             wrappers = await asyncio.wait_for(asyncio.shield(connection.ready), deadline)
             names = [tool.name for tool in wrappers]

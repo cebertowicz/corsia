@@ -22,6 +22,7 @@ from infra import state
 from infra.db_async import run_in_db
 from infra.time import utc_now_iso
 from tools.mcp import connect_mcp_servers, mcp_failure_class
+from tools.mcp_local_transport import prepare_managed_runtime as _prepare_managed_runtime
 from tools.managed_runtime import ManagedRuntimeDownloadError
 from tools.registry import ToolRegistry
 
@@ -60,23 +61,6 @@ async def _publish_app_state(app_id: str, result: dict[str, object]) -> None:
     from connections.app_notices import record_runtime_app_state
 
     await run_in_db(record_runtime_app_state, app_id, result)
-
-
-async def _prepare_managed_runtime(config: dict) -> None:
-    """Fetch a missing approved stdio runtime before the MCP connect deadline starts."""
-    command = config.get("command")
-    if not isinstance(command, str):
-        return
-    configured_env = config.get("env")
-    path = configured_env.get("PATH") if isinstance(configured_env, dict) else None
-    if path is not None and not isinstance(path, str):
-        path = None
-    from tools.managed_runtime import ensure_runtime, runtime_fetch_plan
-
-    plan = runtime_fetch_plan(command, path=path)
-    if plan is not None:
-        kind, _pin = plan
-        await asyncio.to_thread(ensure_runtime, kind)
 
 
 async def _remove_connected_app(app_id: str) -> None:
