@@ -6,9 +6,9 @@ Use this for first-run task `Connect web search` and any time later the person a
 
 ## 1. Explain, then ask
 
-One `post_update`, word for word. Keep the two bracketed parts only when step 5 of `references/first-run-app.md` will run the lookup (the app path); on any other path leave both out.
+One `post_update`, word for word. Keep the first and last bracketed parts only when step 5 of `references/first-run-app.md` will run the lookup (the app path); on any other path leave both out. Keep the middle bracketed part only when `web_search_ready` is false.
 
-> Web search lets me look things up on the web for you[, starting with you, so you don't have to tell me everything yourself]. I couldn't search without a key just now, and a Brave Search key makes search steadier. Brave's free plan still asks for a credit card; search costs $5 per 1,000 searches, and every month includes $5 of free credit, about 1,000 searches. That's usually enough for most people, so search usually costs nothing. Searches using that key go to Brave. Do you already have a Brave Search API account? It's the account apps use to search, separate from the Brave browser. [If you'd rather I didn't look you up, just say so.]
+> Web search lets me look things up on the web for you[, starting with you, so you don't have to tell me everything yourself]. [I couldn't search without a key just now. ]A Brave Search key makes search steadier. Brave's free plan still asks for a credit card; search costs $5 per 1,000 searches, and every month includes $5 of free credit, about 1,000 searches. That's usually enough for most people, so search usually costs nothing. Searches using that key go to Brave. Do you already have a Brave Search API account? It's the account apps use to search, separate from the Brave browser. [If you'd rather I didn't look you up, just say so.]
 
 End your turn. Not now: `OK. Settings › Keys has it whenever you want it.` Close their task and task `Connect web search` with `You chose not now. Settings › Keys has it.`
 
@@ -41,9 +41,11 @@ Anything else: `Tell me what's on your screen and I'll help.`
 
 ## 5. After they say it's in
 
+When they say it's in, or on any later wake, first call `corsia_api` with `GET /api/keys`. In `keys`, find the entry with `name` `web-search` and read `is_set`. If false, use the No key found row without searching. If true, run one `web_search` for `CORSIA` and use the matching result row below. If the read fails, or the entry or `is_set` is missing, report the read failure and keep their task open.
+
 | Then | Say | Record |
 |---|---|---|
-| The person says it's in, or any later wake | Run one `web_search` for `CORSIA`. Results, or none: `Web search works.` | `mark_done` their task with evidence in plain words (what they said, what you checked); task `Connect web search` done |
+| Results, or none | `Web search works.` | `mark_done` their task with evidence in plain words (what they said, what you checked); task `Connect web search` done |
 | `Web search: key refused.` | `Brave didn't accept that key. Copy it again from API Keys and save it in Settings › Keys; Check tells you right away.` | Replace their task with `Add a key Brave accepts`; close the old one (`Key refused`) |
 | `Web search failed: [reason class]` | `Web search didn't work just now: [reason, never the key]. Your key is saved; I'll try again next time I'm working.` Once per reason | Note `I'll try again (told you: [reason class])`; later wakes re-check silently |
 | No key found | `I don't see it in Settings › Keys yet. Paste it under Web search and press Save.` | Their task stays open |

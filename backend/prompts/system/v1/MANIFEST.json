@@ -250,10 +250,10 @@
       "sha256": "586b814c75cde6491212911ba8c4af4c9131e726585fb2e587a639e000c3a566"
     },
     {
-      "bytes": 5892,
+      "bytes": 6296,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/references/web-search.md",
-      "sha256": "ce0ffdeb94b027a038b8e9f3a31645310be6bb7b71b046ade45659d98bc1ea04"
+      "sha256": "0ece4dd43b3bea3494214f5d016d90bd12f8ba081fe88062a0befc9d9a200cf0"
     },
     {
       "bytes": 7248,

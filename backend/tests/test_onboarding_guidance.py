@@ -126,7 +126,7 @@ def test_first_run_describes_brave_only_as_the_key_acquisition_path():
 
     assert "It uses Brave Search." not in web_search
     assert "Your searches go to Brave." not in web_search
-    assert "I couldn't search without a key just now, and a Brave Search key makes search steadier." in web_search
+    assert "[I couldn't search without a key just now. ]A Brave Search key makes search steadier." in web_search
     assert "Searches using that key go to Brave." in web_search
 
 
@@ -376,6 +376,15 @@ def test_web_search_guidance_distinguishes_keyless_readiness_from_key_setup():
     assert "When `web_search_ready` is false, search didn't work on the check; a Brave key is an optional alternative." in web
     assert "There is no fallback search: without a key, web search stays off." not in web
     assert "search stays off until this setup succeeds" not in web
+    assert "Keep the middle bracketed part only when `web_search_ready` is false." in web
+    assert "[I couldn't search without a key just now. ]A Brave Search key makes search steadier." in web
+    after_key = web.split("## 5. After they say it's in", 1)[1]
+    assert "`corsia_api` with `GET /api/keys`" in after_key
+    assert "`name` `web-search` and read `is_set`" in after_key
+    assert "If false, use the No key found row without searching." in after_key
+    assert "If true, run one `web_search` for `CORSIA`" in after_key
+    assert "If the read fails, or the entry or `is_set` is missing, report the read failure and keep their task open." in after_key
+    assert "| Results, or none | `Web search works.` |" in after_key
     assert "`OK. Ask me any time to try search again; Settings › Keys has the optional Brave key whenever you want it.`" in _step(4)
     assert "Until then I can't search the web." not in _step(4)
 
