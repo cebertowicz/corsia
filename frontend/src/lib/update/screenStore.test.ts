@@ -64,6 +64,16 @@ afterEach(() => {
 });
 
 describe('update screen store', () => {
+	it('keeps a replacement visible when the previous operation had finished', () => {
+		updateStatus.set(status(inFlight('a')));
+		updateConfirmed.set({ operationId: 'a', version: '2026.10.13' });
+		expect(get(updateScreenView)?.mode).toBe('done');
+		updateStatus.set(status(inFlight('b')));
+		expect(get(updateScreenView)?.operationId).toBe('b');
+		vi.advanceTimersByTime(EXIT_HOLD_MS);
+		expect(get(updateScreenView)?.operationId).toBe('b');
+	});
+
 	it('shares its existing clock with the shell reader without rereading on store notifications', () => {
 		const read = vi.fn();
 		const stop = startUpdateScreen(undefined, read);

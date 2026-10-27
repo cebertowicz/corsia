@@ -11,7 +11,7 @@ vi.mock('$lib/stores/viewport', async (importOriginal) => ({
 }));
 
 type View = Parameters<typeof updateScreenView.set>[0];
-const base: NonNullable<View> = { mode: 'progress', step: 'starting', label: 'Starting CORSIA', percent: 40, estimated: false, fromVersion: null, toVersion: null, failure: null, serviceDown: false };
+const base: NonNullable<View> = { operationId: 'a', mode: 'progress', step: 'starting', label: 'Starting CORSIA', percent: 40, estimated: false, fromVersion: null, toVersion: null, failure: null, serviceDown: false };
 
 let component: Record<string, unknown> | null = null;
 
@@ -61,6 +61,26 @@ describe('UpdateScreen percentage', () => {
 		for (let i = 1; i < seen.length; i += 1) expect(seen[i]).toBeGreaterThanOrEqual(seen[i - 1]);
 		expect(document.body.querySelector('[role="progressbar"]')?.getAttribute('aria-valuenow')).toBe('96');
 		expect((document.body.querySelector('.bar i') as HTMLElement).style.width).toBe('96%');
+	});
+
+	it('starts a replacement at its own progress and counts up without hiding', () => {
+		show({ ...base, percent: 80 });
+		vi.advanceTimersByTime(1_000);
+		flushSync();
+		expect(percentText()).toBe('80%');
+		const screen = document.querySelector('.update-screen');
+		show({ ...base, operationId: 'b', percent: 10 });
+		expect(document.querySelector('.update-screen')).toBe(screen);
+		expect(percentText()).toBe('10%');
+		show({ ...base, operationId: 'b', percent: 25 });
+		const seen = [10];
+		for (let elapsed = 0; elapsed < 1_000; elapsed += 16) {
+			vi.advanceTimersByTime(16);
+			flushSync();
+			seen.push(Number.parseInt(percentText(), 10));
+		}
+		expect(seen.at(-1)).toBe(25);
+		for (let i = 1; i < seen.length; i += 1) expect(seen[i]).toBeGreaterThanOrEqual(seen[i - 1]);
 	});
 
 	it('counts the finish up to 100 the same way', () => {

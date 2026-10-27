@@ -132,7 +132,8 @@ impl SourceLifecycle {
             .args(["print", &Self::target()])
             .output()
             .map_err(|error| {
-                format!("CORSIA couldn’t check whether the existing install is running ({error}). Quit CORSIA and open it again.")
+                log::warn!("could not check the existing install: {error}");
+                "CORSIA couldn’t check whether the existing install is running".to_string()
             })?;
         Ok(output
             .status
@@ -565,7 +566,7 @@ impl adoption::Lifecycle for SourceLifecycle {
                 "the stop could not be recorded ({why}), so the switch is being undone"
             ));
         }
-        let_go.map_err(|last| format!("the existing install did not stop: {last}"))
+        let_go
     }
 
     fn stop_is_running(&mut self, stop: &StopProcess) -> bool {
@@ -856,13 +857,13 @@ mod tests {
             wait_for_startup(
                 home.lifecycle.source.port,
                 None,
-                || Err("CORSIA couldn’t check whether the existing install is running. Quit CORSIA and open it again.".into()),
+                || Err("CORSIA couldn’t check whether the existing install is running".into()),
                 Duration::from_secs(3),
                 Duration::from_secs(3),
                 None,
             )
             .unwrap_err(),
-            StartupFailure::PidUnreadable("CORSIA couldn’t check whether the existing install is running. Quit CORSIA and open it again.".into())
+            StartupFailure::PidUnreadable("CORSIA couldn’t check whether the existing install is running".into())
         );
     }
 
@@ -919,7 +920,6 @@ mod tests {
             .lifecycle
             .stop_old(&mut quiet, &mut |_| Ok(()))
             .unwrap_err();
-        assert!(error.contains("did not stop"), "{error}");
         assert!(error.contains("launchd still lists"), "{error}");
         // A failing exit status with the job still loaded is a failure, named by its exit.
         let mut home = self::home("echo 'stopped OK'; exit 1", "exit 0", "exit 0");
@@ -943,14 +943,14 @@ mod tests {
             .lifecycle
             .stop_old(&mut quiet, &mut |_| Ok(()))
             .unwrap_err();
-        assert!(error.contains("did not stop") && error.contains("still running"), "{error}");
+        assert!(error.contains("still running"), "{error}");
         // Exit 0 and the process is gone, but something still holds the database.
         let mut home = self::home("rm -f LOADED", "exit 0", "exit 1");
         let error = home
             .lifecycle
             .stop_old(&mut quiet, &mut |_| Ok(()))
             .unwrap_err();
-        assert!(error.contains("did not stop") && error.contains("database"), "{error}");
+        assert!(error.contains("database"), "{error}");
     }
 
     #[test]

@@ -42,18 +42,27 @@
 	let frameId = 0;
 	let frameAt = 0;
 	let counting = false;
+	let shownOperationId: string | null = null;
 	const percentText = $derived(Math.floor(shown + 1e-6));
 	const hasStartAction = $derived(recoveryFailure === 'automatic' || recoveryFailure === 'manual');
 	const autoStartWaiting = $derived(localDesktop && recoveryFailure === null && (deferred || (longer && autoStartAttempted && !starting)));
 
 	$effect(() => {
-		if (target === null) {
+		if (target === null || view === null) {
 			cancelFrame();
 			shown = 0;
 			counting = false;
+			shownOperationId = null;
 			return;
 		}
+		const operationId = view.operationId;
 		untrack(() => {
+			if (operationId !== shownOperationId) {
+				cancelFrame();
+				shown = target;
+				counting = false;
+				shownOperationId = operationId;
+			}
 			// A screen that appears already under way (another page handed it over) starts where it stands.
 			if (!counting || $prefersReducedMotion) shown = Math.max(shown, target);
 			else if (frameId === 0 && shown < target) { frameAt = performance.now(); frameId = requestAnimationFrame(advance); }
