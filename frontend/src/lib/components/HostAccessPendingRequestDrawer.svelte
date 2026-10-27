@@ -49,7 +49,7 @@
 						{:else}
 							<p class="launch-missing">Command missing</p>
 						{/if}
-						<div class="launch-label">Working directory</div>
+						<div class="launch-label">Working folder</div>
 						{#if text(exception.working_directory)}
 							<code>{exception.working_directory}</code>
 						{:else}
@@ -67,7 +67,7 @@
 
 <!-- A first request can arrive before anything else has explained host access. -->
 {#snippet explainer()}
-	<p class="explainer">This agent is asking for temporary access to parts of this computer it can't normally reach. It cannot use that access unless you approve, and you can revoke it at any time.</p>
+	<p class="explainer">This agent is asking for temporary access to parts of this computer it can’t normally reach. It cannot use that access unless you approve, and you can revoke it at any time.</p>
 {/snippet}
 
 <div class="pending-drawer">

@@ -153,7 +153,7 @@ async function assertInitialViewport(
 	]);
 	await expect(warning).toHaveText(WARNING);
 	await expect(dialog.getByText('30 minutes', { exact: true })).toBeVisible();
-	await expect(dialog.getByText('Working directory', { exact: true })).toBeVisible();
+	await expect(dialog.getByText('Working folder', { exact: true })).toBeVisible();
 	await expect(dialog.locator('.policy-exceptions code')).toHaveText([exception.command, exception.working_directory]);
 	expect(await warning.evaluate((element) => {
 		const range = document.createRange();

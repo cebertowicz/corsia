@@ -147,7 +147,7 @@ for (const [width, height, project] of layouts) {
 			const text = '# Overlap\n\nThe quick brown fox jumps.\n';
 			const { accept, drawer, ids: [earlier, later], row } = await openSuggestionDocument(page, request, text, [
 				{ quote: 'quick brown', replacement: 'slow red', body: 'Slow it down.' },
-				{ quote: 'brown fox', replacement: 'grey wolf', body: 'A different animal.' },
+				{ quote: 'brown fox', replacement: 'grey wolf', body: 'A different animal.', author: 'person' },
 			]);
 			await expect(strike(page, earlier)).toHaveText('quick brown');
 			await expect(insert(page, earlier)).toHaveAttribute('data-insert', 'slow red');
