@@ -384,8 +384,8 @@ def test_web_search_guidance_distinguishes_keyless_readiness_from_key_setup():
     assert "Every install tries search without a key first; a Brave key can make search steadier." in web
     assert "When `web_search_ready` is false, search didn't work on the check; a Brave key is an optional alternative." in web
     assert (
-        "Keep the middle bracketed part only when `## Setup facts` shows `web_search_ready` false; "
-        "on a path without that fact, leave it out."
+        "Keep the middle bracketed part only when `## Setup facts` shows both `web_search_ready` and "
+        "`web_search_key` false; on a path without both facts, leave it out."
     ) in web
     assert "every month includes $5 of free credit, enough for 1,000 searches." in web
     assert "the $5 of free credit each month covers 1,000." in web

@@ -6,7 +6,7 @@ Use this for first-run task `Connect web search` and any time later the person a
 
 ## 1. Explain, then ask
 
-One `post_update`, word for word. Keep the first and last bracketed parts only when step 5 of `references/first-run-app.md` will run the lookup (the app path); on any other path leave both out. Keep the middle bracketed part only when `## Setup facts` shows `web_search_ready` false; on a path without that fact, leave it out.
+One `post_update`, word for word. Keep the first and last bracketed parts only when step 5 of `references/first-run-app.md` will run the lookup (the app path); on any other path leave both out. Keep the middle bracketed part only when `## Setup facts` shows both `web_search_ready` and `web_search_key` false; on a path without both facts, leave it out.
 
 > Web search lets me look things up on the web for you[, starting with you, so you don't have to tell me everything yourself]. [I couldn't search without a key just now. ]A Brave Search key makes search steadier. Brave's free plan still asks for a credit card; search costs $5 per 1,000 searches, and every month includes $5 of free credit, enough for 1,000 searches. That's usually enough for most people, so search usually costs nothing. Searches using that key go to Brave. Do you already have a Brave Search API account? It's the account apps use to search, separate from the Brave browser. [If you'd rather I didn't look you up, just say so.]
 
