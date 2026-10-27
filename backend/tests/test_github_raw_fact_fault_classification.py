@@ -267,7 +267,7 @@ def test_the_route_answers_500_and_the_same_delivery_is_admitted_afterwards(
     from fastapi.testclient import TestClient
     from main import app
 
-    monkeypatch.setattr("api.webhooks._get_webhook_secret", lambda: WEBHOOK_SECRET)
+    monkeypatch.setattr("api.webhook_receivers.receiver_secret", lambda connector: WEBHOOK_SECRET)
 
     def schedule(event_type, payload, *, delivery_id=None, on_settled=None):
         if on_settled is not None:

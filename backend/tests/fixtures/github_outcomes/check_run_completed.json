@@ -1,0 +1,18 @@
+{
+ "event": "check_run",
+ "payload": {
+  "action": "completed",
+  "check_run": {
+   "completed_at": "2019-05-15T15:21:12Z",
+   "conclusion": "success",
+   "head_sha": "ec26c3e57ca3a959ca5aad62de7213c562f8c821",
+   "id": 128620228,
+   "name": "Octocoders-linter",
+   "started_at": "2019-05-15T15:21:12Z",
+   "status": "completed"
+  },
+  "repository": {
+   "full_name": "Codertocat/Hello-World"
+  }
+ }
+}

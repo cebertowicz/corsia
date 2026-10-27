@@ -7,12 +7,12 @@ import logging
 import time
 from dataclasses import dataclass, field
 from typing import Awaitable, Callable
-from urllib.parse import urlparse
 
 from host_access.browser_cdp import PasswordProbe, Rect
 from host_access.browser_domain import registrable_domain
 from host_access.browser_screencast import PaneScreencast
 from host_access.browser_session_state import BrowserSessionError
+from host_access.browser_url import is_http_url as is_http_url, normalize_browser_url as normalize_browser_url
 from infra import state
 from infra.database import get_db
 from infra.product_events import emit_product_event
@@ -375,14 +375,6 @@ def _publish_password_page(thread_id: str, visible: bool) -> None:
     state.broadcast_to_thread(thread_id, message)
     for report in _pane_reports.get(thread_id, {}).values():
         report(message)
-
-
-def is_http_url(url: object) -> bool:
-    """Accept only page-navigation URLs the shared browser can safely open."""
-    if not isinstance(url, str):
-        return False
-    parsed = urlparse(url)
-    return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
 
 
 def announce_browser_opened(thread_id: str) -> None:

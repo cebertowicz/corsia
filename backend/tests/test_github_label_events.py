@@ -194,6 +194,18 @@ def test_outcome_drafts_survive_the_allowlist_and_a_poller_copy_has_no_label_der
     assert {"github.pr.unlabeled", "github.issue.unlabeled"} <= set(ATTRIBUTE_ALLOWLISTS)
 
 
+def test_the_label_and_reopen_actions_are_declared_once_and_the_entry_maps_each():
+    from events.connectors import github_outcomes as outcomes
+    declared = outcomes._LABEL_ACTIONS
+    for event_type, (_actions, _mapper) in outcomes._MAPPERS.items():
+        assert not set(_actions) & set(declared.get(event_type, ()))  # no second list of them
+    for action in declared["pull_request"]:
+        assert [d.event_name for d in map_github_outcomes("pull_request", pr_webhook(action=action))] == [f"github.pr.{action}"]
+    for action in declared["issues"]:
+        copy = poller_copy({**fixture("row_issue_labeled"), "event": action})
+        assert [d.event_name for d in map_github_outcomes(*copy[:2])] == [f"github.issue.{action}"]
+
+
 def test_one_event_id_is_admitted_once_and_the_second_is_a_duplicate(isolated_db):
     change = events.change_event("pull_request", pr_webhook())
     event, payload, _ = poller_copy(fixture("row_pr_labeled"))

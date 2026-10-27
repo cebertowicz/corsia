@@ -1,5 +1,7 @@
 #!/bin/bash
-# Post-clone CORSIA installer for macOS on Apple Silicon.
+# Post-clone CORSIA installer for macOS on Apple Silicon, and for the server
+# and web app on Ubuntu and Debian Linux (x86_64 or arm64; see the Linux
+# section below).
 #
 # Run this from the clone the user already placed in ~/.corsia:
 #
@@ -277,7 +279,11 @@ ensure_python_env() {
     if [ -x "$python" ] && "$python" -c 'import fastapi, uvicorn' 2> /dev/null; then
         return 0
     fi
-    say "3/8  Building"
+    if [ "${CORSIA_INSTALL_LINUX:-}" = 1 ]; then
+        say "     Building…"
+    else
+        say "3/8  Building"
+    fi
     "$(service_which python3.11)" -m venv "$CORSIA_HOME/.venv"
     "$python" -m pip install --quiet --disable-pip-version-check \
         -r "$CORSIA_HOME/backend/requirements.lock"
@@ -333,8 +339,203 @@ ensure_model_source() {
     stop "Run the install command again to retry."
 }
 
+# ---------------------------------------------------------------------------
+# Linux: Ubuntu and Debian, the server and web app. main() calls linux_main
+# only when uname reports Linux; nothing above reaches the functions below.
+#
+# apt supplies git, gh, Python and build tools. The managed-runtime module
+# verifies pinned uv and Node archives; uv supplies Python 3.11.
+# uv checks the Python build it installs against hashes built into that uv
+# release. Only apt uses sudo, and the installer says so first. There is no
+# local model and no agent browser or shell sandbox here yet, so the model
+# source is connected in the app.
+# ---------------------------------------------------------------------------
+
+LINUX_APT_BASE=(build-essential curl ca-certificates xz-utils unzip jq sqlite3 python3)
+LINUX_OS_RELEASE="${CORSIA_INSTALL_OS_RELEASE:-/etc/os-release}"
+LINUX_LOCAL_BIN="$HOME/.local/bin"
+UV_BIN=""
+
+linux_arch() {
+    case "$(uname -m)" in
+        x86_64|amd64) echo x86_64 ;;
+        aarch64|arm64) echo arm64 ;;
+        *) return 1 ;;
+    esac
+}
+
+check_platform_linux() {
+    local distro version
+    # shellcheck disable=SC1090
+    distro="$( (. "$LINUX_OS_RELEASE" 2> /dev/null; printf '%s' "${ID:-}") || true)"
+    # shellcheck disable=SC1090
+    version="$( (. "$LINUX_OS_RELEASE" 2> /dev/null; printf '%s' "${VERSION_ID:-}") || true)"
+    case "$distro" in
+        ubuntu) version_at_least "$version" 24 4 0 || stop "CORSIA needs Ubuntu 24.04 or later, or Debian 12 or later." ;;
+        debian) version_at_least "$version" 12 0 0 || stop "CORSIA needs Ubuntu 24.04 or later, or Debian 12 or later." ;;
+        *) stop "CORSIA needs Ubuntu 24.04 or later, or Debian 12 or later." ;;
+    esac
+    linux_arch > /dev/null \
+        || stop "CORSIA installs on Linux x86_64 or arm64 only (found $(uname -m))."
+    [ "$LOCAL_SETUP_FORCED" -eq 0 ] \
+        || stop "CORSIA has no local model on Linux. Run the install without --local, then connect a provider in the app."
+}
+
+apt_package_missing() { [ "$(dpkg-query -W -f='${Status}' "$1" 2> /dev/null)" != "install ok installed" ]; }
+
+as_admin() {
+    if [ "$(id -u)" -eq 0 ]; then "$@"; else "$SUDO_COMMAND" "$@"; fi
+}
+
+install_apt_linux() {
+    say "     Installing with apt: $*"
+    if [ "$(id -u)" -ne 0 ]; then
+        say "     This needs administrator access (sudo); you may be asked for your password."
+        "$SUDO_COMMAND" -v < "$PROMPT_INPUT" \
+            || stop "Installing system packages needs an administrator account. Sign in with one, then run this again."
+    fi
+    as_admin env DEBIAN_FRONTEND=noninteractive apt-get update -qq \
+        || stop "apt couldn’t refresh its package lists. Run: sudo apt-get update"
+    as_admin env DEBIAN_FRONTEND=noninteractive apt-get install -y "$@" \
+        || stop "apt couldn’t install: $*. Run: sudo apt-get install $*"
+}
+
+managed_runtime_linux() {
+    PYTHONPATH="$CORSIA_HOME/backend" python3 -c '
+import sys
+from pathlib import Path
+from tools.managed_runtime import ManagedRuntimeError, ensure_runtime
+try:
+    print(ensure_runtime(sys.argv[1], root=Path.home() / ".cache" / "corsia" / "runtimes", arch="linux-" + sys.argv[2]))
+except ManagedRuntimeError as error:
+    if "checksum" in str(error):
+        print(f"Couldn’t verify the {sys.argv[1]} download. Run this again.", file=sys.stderr)
+    else:
+        print(f"Couldn’t install {sys.argv[1]}. Check your connection, then run this again.", file=sys.stderr)
+    sys.exit(1)
+' "$1" "$(linux_arch)"
+}
+
+install_python_linux() {
+    local python
+    say "     Installing Python 3.11…"
+    UV_BIN="$(managed_runtime_linux uv)" || return 1
+    mkdir -p "$LINUX_LOCAL_BIN"
+    [ -e "$LINUX_LOCAL_BIN/uv" ] || [ -L "$LINUX_LOCAL_BIN/uv" ] || ln -s "$UV_BIN" "$LINUX_LOCAL_BIN/uv"
+    [ -e "$LINUX_LOCAL_BIN/uvx" ] || [ -L "$LINUX_LOCAL_BIN/uvx" ] || ln -s "${UV_BIN%/*}/uvx" "$LINUX_LOCAL_BIN/uvx"
+    "$UV_BIN" python install 3.11 || stop "uv couldn’t install Python 3.11. Run: uv python install 3.11"
+    python="$(UV_PYTHON_PREFERENCE=only-managed "$UV_BIN" python find 3.11)" \
+        || stop "uv installed Python 3.11 but couldn’t find it. Run: uv python find 3.11"
+    mkdir -p "$LINUX_LOCAL_BIN"
+    ln -sfn "$python" "$LINUX_LOCAL_BIN/python3.11"
+}
+
+link_managed_node_linux() {
+    local node tool
+    say "     Installing Node…"
+    node="$(managed_runtime_linux node)" || return 1
+    mkdir -p "$LINUX_LOCAL_BIN"
+    for tool in node npm npx; do ln -sfn "${node%/*}/$tool" "$LINUX_LOCAL_BIN/$tool"; done
+}
+
+linux_install_needed() {
+    # NEEDED holds label|source from check_prereqs: apt:<package>, uv or node.
+    local packages=() package entry via want_python=0 want_node=0
+    for package in "${LINUX_APT_BASE[@]}"; do
+        if apt_package_missing "$package"; then packages+=("$package"); fi
+    done
+    if [ "${#NEEDED[@]}" -gt 0 ]; then
+        for entry in "${NEEDED[@]}"; do
+            via="${entry#*|}"
+            case "$via" in
+                apt:*) packages+=("${via#apt:}") ;;
+                uv) want_python=1 ;;
+                node) want_node=1 ;;
+            esac
+        done
+    fi
+    if [ "${#packages[@]}" -gt 0 ]; then install_apt_linux "${packages[@]}"; fi
+    if [ "$want_python" -eq 1 ]; then install_python_linux; fi
+    if [ "$want_node" -eq 1 ]; then link_managed_node_linux; fi
+}
+
+linux_ensure_prereqs() {
+    say "1/3  Checking prerequisites"
+    PREREQS=(
+        "git|apt:git|git"
+        "Python 3.11|uv|python3.11"
+        "Node|node|node"
+        "GitHub CLI|apt:gh|gh"
+    )
+    check_prereqs
+    [ "${#INVISIBLE[@]}" -eq 0 ] || stop "${INVISIBLE[@]}"
+    linux_install_needed
+    check_prereqs
+    [ "${#INVISIBLE[@]}" -eq 0 ] || stop "${INVISIBLE[@]}"
+    [ "${#NEEDED[@]}" -eq 0 ] || stop "Still not ready: ${NEEDED[*]%%|*}. Install it by hand, then run this again."
+}
+
+link_corsia_command_linux() {
+    local command_path="$LINUX_LOCAL_BIN/corsia"
+    mkdir -p "$LINUX_LOCAL_BIN"
+    if [ -e "$command_path" ] || [ -L "$command_path" ]; then
+        if link_points_into_corsia "$command_path"; then
+            rm "$command_path"
+        else
+            say "     A different corsia command already exists at $command_path; leaving it unchanged."
+            return 1
+        fi
+    fi
+    ln -s "$CORSIA_HOME/scripts/corsia" "$command_path" \
+        || stop "Couldn’t link the corsia command in $LINUX_LOCAL_BIN."
+    CORSIA_COMMAND_READY=1
+}
+
+open_browser_linux() {
+    if command -v xdg-open > /dev/null 2>&1 && [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]; then
+        say "Opening CORSIA at $APP_URL"
+        xdg-open "$APP_URL" > /dev/null 2>&1 || say "     Open that address in your browser."
+    else
+        say "CORSIA is running at $APP_URL"
+        say "     Open that address in a browser."
+    fi
+}
+
+linux_main() {
+    local path_had_local_bin=1
+    export CORSIA_INSTALL_LINUX=1
+    say "CORSIA install"
+    require_checkout
+    check_platform_linux
+    open_prompt_input
+    case ":$PATH:" in *":$LINUX_LOCAL_BIN:"*) ;; *) path_had_local_bin=0 ;; esac
+    export PATH="$LINUX_LOCAL_BIN:$PATH"
+    linux_ensure_prereqs
+    git -C "$CORSIA_HOME" rev-parse --git-dir > /dev/null 2>&1 \
+        || stop "$CORSIA_HOME exists but is not a CORSIA checkout. Move it aside, then run this again."
+    say "2/3  Using CORSIA $(installed_version) in ~/.corsia"
+    ensure_python_env
+    link_corsia_command_linux || true
+    if [ "$CORSIA_COMMAND_READY" -eq 1 ]; then
+        say "     Stop or start CORSIA any time with: corsia stop / corsia start"
+        [ "$path_had_local_bin" -eq 1 ] \
+            || say "     To use the corsia command, log out and back in, or run: export PATH=\"\$HOME/.local/bin:\$PATH\""
+    fi
+    if is_running; then
+        say "3/3  CORSIA is running at $APP_URL"
+        say "     To update, use Settings › Update."
+        exit 0
+    fi
+    # The first run asks its questions inside start, from the terminal.
+    CORSIA_INSTALL_FLOW=1 "$CORSIA_HOME/scripts/corsia" start <&3 3<&-
+    say "     There is no local model on Linux: connect Claude Code, Codex or an API provider in the app."
+    summarize_sources
+    open_browser_linux
+}
+
 main() {
     parse_args "$@"
+    case "$(uname -s)" in Linux) linux_main; return ;; esac
     say "CORSIA install"
     require_checkout
     check_platform

@@ -8,7 +8,10 @@ dedupe promises here, and nothing more.
 
 The keys then split into two kinds, and a backfill has to know which is which. The
 PR open, push, close and merge keys, the issue keys and the run id plus
-``run_attempt`` in ``github.workflow_run.completed`` are built from identities the
+``run_attempt`` in ``github.workflow_run.completed``, the job id in
+``github.workflow_job.completed``, the check run id plus ``completed_at`` in
+``github.check_run.completed``, and the review or comment id (plus the action, for a
+review) in the review and comment events are built from identities the
 repository still reports — a head or merge SHA, a close timestamp, a run's
 ``run_attempt`` — so a later read can reconstruct the same key. ``github.pr.reopened``,
 ``github.pr.retargeted`` and ``github.check_suite.completed`` are keyed on the
@@ -29,9 +32,12 @@ check them.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from importlib import import_module
 from typing import Any
 
+from events.connectors import github_label_events as label_events
 from events.connectors.github_ownership import declared_owner_thread_ids
 from events.connectors import github_outcome_input as shape
 from events.connectors import github_outcome_measurements as measurements
@@ -294,6 +300,39 @@ def label_attributes(labels: list[dict[str, Any]]) -> dict[str, Any]:
     return attrs
 
 
+def label_drafts(event_type: str, payload: dict[str, Any], repo: str) -> list[OutcomeDraft]:
+    """The drafts one ``labeled``, ``unlabeled`` or issue ``reopened`` delivery carries.
+
+    Facts and identity come from ``github_label_events.change_event``; label names, logins and counts
+    only. A change with no ``labels`` (a poller copy) records no label-derived attributes.
+    """
+    change = label_events.change_event(event_type, payload)
+    if change is None:
+        return []
+    facts = change.facts
+    at = shape.timestamp(facts["at"])
+    label = facts.get("label")
+    if event_type == "pull_request":
+        subject = pr_subject(repo, facts["pr_number"])
+        attrs: dict[str, Any] = {"repo": repo, "pr": str(facts["pr_number"])}
+        if "labels" in facts:
+            attrs["label_count"] = len(facts["labels"])
+        if "sha" in facts:
+            attrs["head_sha"] = facts["sha"]
+    else:
+        subject = f"github:issue:{repo}#{facts['issue_number']}"
+        attrs = {"repo": repo, "issue": str(facts["issue_number"])}
+        if "labels" in facts:
+            attrs.update(label_attributes(payload["issue"]["labels"]))
+        if "minutes_since_opened" in facts:
+            attrs["minutes_since_opened"] = facts["minutes_since_opened"]
+    if label is not None:
+        attrs["label"] = label
+    if "actor" in facts:
+        attrs["actor"] = facts["actor"]
+    return [OutcomeDraft(f"{subject}:{change.type}:{label or ''}:{at}", f"github.{change.type}", at, subject, attrs)]
+
+
 def _issue_drafts(payload: dict[str, Any], repo: str) -> list[OutcomeDraft]:
     action = payload.get("action")
     issue = shape.mapping(shape.required(payload, "issue"))
@@ -303,26 +342,34 @@ def _issue_drafts(payload: dict[str, Any], repo: str) -> list[OutcomeDraft]:
     if "labels" in issue:
         attrs.update(label_attributes(issue["labels"]))
     if action == "opened":
-        return [OutcomeDraft(
-            f"{subject}:opened", "github.issue.opened",
-            shape.timestamp(shape.required(issue, "created_at")), subject, attrs,
-        )]
+        opened = shape.timestamp(shape.required(issue, "created_at"))
+        return [OutcomeDraft(f"{subject}:opened", "github.issue.opened", opened, subject, attrs)]
     if issue.get("state_reason") is not None:
         attrs["state_reason"] = shape.text(issue["state_reason"])
     closed = shape.timestamp(shape.required(issue, "closed_at"))
-    return [OutcomeDraft(
-        f"{subject}:closed:{closed}", "github.issue.closed", closed, subject, attrs,
-    )]
+    return [OutcomeDraft(f"{subject}:closed:{closed}", "github.issue.closed", closed, subject, attrs)]
+
+
+def _sibling(module: str, name: str) -> Callable[[dict[str, Any], str], list[OutcomeDraft]]:
+    """A mapper in a sibling module, imported on first call: those modules import this one."""
+    def mapper(payload: dict[str, Any], repo: str) -> list[OutcomeDraft]:
+        return getattr(import_module(f"events.connectors.{module}"), name)(payload, repo)
+    return mapper
 
 
 # The public entry owns supported-action selection; private mappers consume it.
 _MAPPERS = {
-    "pull_request": (("opened", "synchronize", "reopened", "closed", "edited", "labeled", "unlabeled"), _pr_drafts),
+    "pull_request": (("opened", "synchronize", "reopened", "closed", "edited"), _pr_drafts),
     "check_suite": (("completed",), _check_suite_drafts),
     "workflow_run": (("completed",), _workflow_run_drafts),
-    "issues": (("opened", "closed", "reopened", "labeled", "unlabeled"), _issue_drafts),
+    "workflow_job": (("completed",), _sibling("github_ci_outcomes", "workflow_job_drafts")),
+    "check_run": (("completed",), _sibling("github_ci_outcomes", "check_run_drafts")),
+    "issues": (("opened", "closed"), _issue_drafts),
+    "pull_request_review": (("submitted", "dismissed"), _sibling("github_reply_outcomes", "review_drafts")),
+    "pull_request_review_comment": (("created",), _sibling("github_reply_outcomes", "review_comment_drafts")),
+    "issue_comment": (("created",), _sibling("github_reply_outcomes", "issue_comment_drafts")),
 }
-# Label changes and issue reopens map in github_label_outcomes, from the shared normalization.
+# The one declaration of the label changes and issue reopens that ``label_drafts`` maps.
 _LABEL_ACTIONS = {"pull_request": ("labeled", "unlabeled"), "issues": ("reopened", "labeled", "unlabeled")}
 
 
@@ -338,7 +385,7 @@ def map_github_outcomes(event_type: str, payload: dict[str, Any]) -> list[Outcom
     actions, mapper = dispatch
     payload = shape.mapping(payload)
     action = payload.get("action")
-    if action not in actions:
+    if action not in (*actions, *_LABEL_ACTIONS.get(event_type, ())):
         return []
     base_from = _retarget_base_from(payload) if event_type == "pull_request" and action == "edited" else None
     if event_type == "pull_request" and action == "edited" and base_from is None:
@@ -346,7 +393,6 @@ def map_github_outcomes(event_type: str, payload: dict[str, Any]) -> list[Outcom
     repository = shape.mapping(shape.required(payload, "repository"))
     repo = shape.text(shape.required(repository, "full_name")).lower()
     if action in _LABEL_ACTIONS.get(event_type, ()):
-        from events.connectors.github_label_outcomes import label_drafts
         return label_drafts(event_type, payload, repo)
     if base_from is not None:
         return _retarget_drafts(payload, repo, base_from)

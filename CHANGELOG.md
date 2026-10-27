@@ -7,7 +7,12 @@ the later entry describes the current behavior.
 
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here._
 
+- Browser addresses no longer need `https://` typed in; local loopback addresses use `http://` by default.
+- Setup now opens in a normal-sized window in the middle of the screen, and the app grows to fill the screen when setup finishes.
+- A Claude Code you only just signed in to is no longer offered for import: only skills and notes you made there are brought over.
+- The "Bring over what your other tools know" step no longer shows twice in the setup plan.
 - CORSIA now keeps its data in `~/Library/Application Support/CORSIA`. An install that took over an earlier one moves its data there once, as soon as the update that brings this finishes or on the next launch, without copying it; if anything still uses the old folder, CORSIA leaves the data where it is and says why.
+- On a connected app that fails to sign in, a refused sign-in now says so and shows no button that can't help, Reconnect no longer freezes the row, and Remove works while the app is still trying to connect.
 - Settings no longer offers an update after it finishes.
 - During an update restart, CORSIA shows a full-window progress screen and offers recovery if it takes longer than expected.
 - You can choose to send document comments immediately or hold them until you finish reviewing the document or image.
