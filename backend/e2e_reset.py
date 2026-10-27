@@ -73,11 +73,14 @@ def restore_if_requested() -> None:
     shutil.copytree(seed / "workspace", workspace, symlinks=True, dirs_exist_ok=True)
 
 
+def _require_seed() -> None:
+    if not (_roots()[0] / "backups" / _SEED_NAME).is_dir():
+        raise RuntimeError("E2E reset needs a captured seed: POST /api/test/seed first")
+
+
 def restart_from_seed() -> None:
     """Replace this process with a fresh one on the same command line that restores the seed first."""
-    seed = _roots()[0] / "backups" / _SEED_NAME
-    if not seed.is_dir():
-        raise RuntimeError("E2E reset needs a captured seed: POST /api/test/seed first")
+    _require_seed()
 
     def replace_process() -> None:
         time.sleep(_RESPONSE_FLUSH_SECONDS)
@@ -113,10 +116,15 @@ async def reset_to_seed_route() -> dict:
 
     The response comes back first; the caller polls ``GET /api/test/boot-id`` until it names a new process.
     """
+    from host_access.processes import PROCESS_OWNER
+
     try:
-        restart_from_seed()
+        _require_seed()
     except RuntimeError as refused:
         raise HTTPException(409, str(refused)) from refused
+    # exec bypasses application shutdown; stop owned browsers and processes before restoring their state.
+    await PROCESS_OWNER.shutdown()
+    restart_from_seed()
     return {"ok": True, "restarting_boot_id": BOOT_ID}
 
 
