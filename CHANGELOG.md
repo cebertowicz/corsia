@@ -74,6 +74,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - A replaced image now shows right away in a document that is open, and when it is reopened, even if it has comments.
 - When an agent hands you a page in the shared browser, such as an account choice or a phone prompt, it appears in your attention list and the agent carries on once you finish.
 - CORSIA now reconnects within a couple of seconds after every dropped connection instead of waiting up to 30 seconds.
+- Status banners such as Reconnecting no longer cover the tabs in the right pane.
 
 ## v0.4.0 — A self-starting Mac app, updates you control, a shared browser, connected apps, and steadier plans
 
