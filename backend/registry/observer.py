@@ -158,10 +158,12 @@ class CommandArtifactRegistrationError(RuntimeError):
         super().__init__(str(error))
 
 
-def _record(db, thread_id, rule, outcome, artifact, reason) -> None:
-    observe_rules.record(db, thread_id, rule, outcome, artifact and {
+def _record(db, thread_id, rule, outcome, artifact, reason, told) -> None:
+    saved = observe_rules.record(db, thread_id, rule, outcome, artifact and {
         "integration": artifact.integration, "type": artifact.type,
         "external_id": artifact.external_id}, reason)
+    if not saved and told is not None:
+        told.append("Couldn't save this result to the rule's history, so `explain` won't show this run.")
 
 
 def _extractor(rule, db, thread_id, told):
@@ -169,9 +171,9 @@ def _extractor(rule, db, thread_id, told):
     if extract is None:
         reason = f"connector {rule.connector} cannot read {rule.item_type.replace('-', ' ')} from command output"
         logger.error("registry observer: rule {}: {}", rule.id, reason)
-        _record(db, thread_id, rule, "not_registered", None, reason)
         if told is not None:
             told.append(f"Not registered: {reason}.")
+        _record(db, thread_id, rule, "not_registered", None, reason, told)
     return extract
 
 
@@ -213,9 +215,9 @@ def observe_command_result(
         item_name = rule.item_type.replace("-", " ")
         artifact = extract(content)
         if artifact is None:
-            _record(db, thread_id, rule, "not_registered", None, f"the output named no {item_name}")
             if told is not None:
                 told.append(f"Not registered: the command's output named no {item_name}.")
+            _record(db, thread_id, rule, "not_registered", None, f"the output named no {item_name}", told)
             continue
         key = (artifact.integration, artifact.type, artifact.external_id)
         if key in seen:
@@ -228,7 +230,7 @@ def observe_command_result(
                 metadata=artifact.metadata, origin=origin, db=db, notify=notify,
             )
         except Exception as error:
-            _record(db, thread_id, rule, "not_registered", artifact, str(error))
+            _record(db, thread_id, rule, "not_registered", artifact, str(error), None)
             raise CommandArtifactRegistrationError(artifact, error) from error
         if registered is not None and changed is not None:
             changed.append(registered)
@@ -240,16 +242,16 @@ def observe_command_result(
                 told.append(f"{label} is already registered to you." if owns else
                             f"Not registered to you: {label} belongs to another chat; you already follow it.")
         elif registered.get("parent_thread_id") == thread_id:
-            _record(db, thread_id, rule, "registered", artifact, None)
             if told is not None:
                 told.append(f"Registered {label} to you.")
+            _record(db, thread_id, rule, "registered", artifact, None, told)
             owned = owned or registered
             logger.info("registry observer: rule {} registered {} to {}", rule.id, artifact.external_id, thread_id)
         else:
-            _record(db, thread_id, rule, "not_registered", artifact, "it already belongs to another chat")
             if told is not None:
                 told.append(f"Not registered to you: {label} already belongs to another chat, "
                             f"which keeps it; you follow it.")
+            _record(db, thread_id, rule, "not_registered", artifact, "it already belongs to another chat", told)
             followed = followed or registered
     return owned or followed
 

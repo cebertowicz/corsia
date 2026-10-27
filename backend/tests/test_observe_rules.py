@@ -364,7 +364,7 @@ async def test_list_explain_and_types_show_both_kinds(isolated_db):
     _run("a", "ship-pr --fast")
     [why] = (await _tool("a", operation="explain", artifact=PR))["decisions"]
     assert (why["outcome"], why["thread_id"]) == ("registered", "a")
-    assert why["explanation"].startswith("rule rule_") and "registered the artifact" in why["explanation"]
+    assert why["explanation"].startswith("rule rule_") and "registered the file" in why["explanation"]
     outsider = _agent("c", project=Q)
     assert (await _tool(outsider, operation="explain", artifact=PR))["decisions"] == []
 
@@ -390,9 +390,25 @@ def test_explain_distinguishes_a_named_artifact_from_empty_output(isolated_db):
     rows = db.execute("SELECT d.*, r.action FROM event_route_decisions d JOIN event_rules r ON r.id=d.rule_id "
                       "WHERE d.thread_id='rival' ORDER BY d.id").fetchall()
     named, empty = (decision(db, row)["explanation"] for row in rows)
-    assert "artifact the command's output named" in named and "created" not in named
-    assert "artifact" not in empty and "created" not in empty
+    assert "file the command's output named" in named and "created" not in named
+    assert "file" not in empty and "created" not in empty
     db.close()
+
+
+def test_an_unsaved_outcome_is_told_to_the_caller(isolated_db, monkeypatch):
+    from events import rules
+
+    _agent("owner")
+
+    def refuse(*_args, **_kwargs):
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(rules, "record", refuse)
+    artifact, told = _run("owner", "gh pr create")
+
+    assert artifact is not None and _owner() == "owner"
+    assert told[0].startswith("Registered ")
+    assert told[1] == "Couldn't save this result to the rule's history, so `explain` won't show this run."
 
 
 @pytest.mark.asyncio

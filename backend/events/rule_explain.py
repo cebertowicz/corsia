@@ -16,7 +16,7 @@ _TEXT = {
     outcomes.DEAD_LETTERED: "rule {rule} could not deliver it",
     outcomes.ENDED: "rule {rule} did not fire: the file had already ended",
     outcomes.DUPLICATE: "rule {rule}: {thread} already had it",
-    outcomes.REGISTERED: "rule {rule} registered the artifact the command's output named to {thread}",
+    outcomes.REGISTERED: "rule {rule} registered the file the command's output named to {thread}",
     outcomes.NOT_REGISTERED: "rule {rule} did not register to {thread}",
 }
 # A script or worker rule delivers nothing, so what it did is told in its own words. A
@@ -50,7 +50,7 @@ def decision(db: sqlite3.Connection, row: Mapping[str, Any]) -> dict[str, Any]:
     texts = _ACTION_TEXT.get(row["action"], {})
     template = texts.get(outcome) or _TEXT[outcome]
     if outcome == outcomes.NOT_REGISTERED and row["artifact_external_id"]:
-        template = "rule {rule} did not register the artifact the command's output named to {thread}"
+        template = "rule {rule} did not register the file the command's output named to {thread}"
     text = template.format(rule=row["rule_id"], thread=thread)
     if row["via"] == "routed" and outcome in (outcomes.WOKE, outcomes.DIGESTED):
         text += " (with the delivery routing already made)"

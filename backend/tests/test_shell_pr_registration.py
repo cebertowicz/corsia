@@ -375,7 +375,7 @@ async def test_cross_user_preowned_pr_cannot_be_claimed(isolated_db, monkeypatch
     row = models.resolve("github", "pull-request", "owner/repo#42", db=db)
     assert row is not None and row["parent_thread_id"] == owner_id
     assert _pr_rows(db, other_id) == []
-    assert "Warning: CORSIA could not automatically register an artifact from the command output" in other_result
+    assert "Warning: CORSIA couldn't register the file the command's output names" in other_result
     assert "artifact_register" in other_result
 
 
@@ -407,7 +407,7 @@ async def test_registration_exception_is_logged_and_appended_without_failing_com
 
     assert result.startswith(_URL)
     assert not result.startswith("Error")
-    assert "Warning: CORSIA could not automatically register an artifact from the command output" in result
+    assert "Warning: CORSIA couldn't register the file the command's output names" in result
     assert "artifact_register" in result
     assert "registry unavailable" in caplog.text
     assert _pr_rows(db, thread_id) == []
@@ -479,7 +479,7 @@ async def test_bash_registration_warning_budget_preserves_warning(
     )
 
     assert len(result) <= BASH_REGISTRATION_WARNING_RESULT_CAP
-    assert "Warning: CORSIA could not automatically register an artifact from the command output" in result
+    assert "Warning: CORSIA couldn't register the file the command's output names" in result
     assert "artifact_register" in result
 
 

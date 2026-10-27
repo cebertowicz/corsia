@@ -41,8 +41,8 @@ def registration_warning(
             f"external_id='{artifact.external_id}'."
         )
     return (
-        "Warning: CORSIA could not automatically register an artifact from the command output "
-        f"to this thread: {error_summary}. {repair}"
+        "Warning: CORSIA couldn't register the file the command's output names "
+        f"to this chat: {error_summary}. {repair}"
     )
 
 

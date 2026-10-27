@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import uuid
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -50,6 +50,11 @@ class ObserveRule:
     created_by: str
     enabled: bool = True
     command_arg: str = "command"  # the argument of a shell tool that holds the command
+
+
+def encode_prefix(words: Sequence[str]) -> str:
+    """The one stored spelling of ``argv_prefix``: the column is compared as text."""
+    return json.dumps(list(words), separators=(',', ':'))
 
 
 def from_row(row: Mapping[str, Any]) -> ObserveRule:
@@ -106,7 +111,7 @@ def sync_shipped_rules(db: sqlite3.Connection) -> None:
                 "OR authority_ref IS NOT excluded.authority_ref OR tool IS NOT excluded.tool "
                 "OR argv_prefix IS NOT excluded.argv_prefix OR item_type IS NOT excluded.item_type)",
                 (rule.id, now, now, name, origin, origin, authority, rule.tool,
-                 json.dumps(rule.argv_prefix, separators=(',', ':')), rule.item_type),
+                 encode_prefix(rule.argv_prefix), rule.item_type),
             )
         # event_route_decisions.rule_id has no foreign key; historical outcomes remain.
         placeholders = ','.join('?' for _ in ids)
@@ -185,7 +190,7 @@ def create(
     if db.execute(
         "SELECT 1 FROM event_rules WHERE kind='observe' AND enabled=1 AND created_by=? AND scope=? "
         "AND tool=? AND argv_prefix=? AND item_type=?",
-        (writer["id"], scope, name, json.dumps(words), item_type),
+        (writer["id"], scope, name, encode_prefix(words), item_type),
     ).fetchone():
         raise RuleRefused("You already have that observe rule; `list` shows it.")
     rule_id = "rule_" + uuid.uuid4().hex[:12]
@@ -193,7 +198,7 @@ def create(
         "INSERT INTO event_rules (id, created_at, updated_at, enabled, kind, scope, connector, origin, "
         "created_by, authority_ref, tool, argv_prefix, item_type) VALUES (?,?,?,1,'observe',?,?,?,?,'self',?,?,?)",
         (rule_id, now, now, scope, owner, f"agent:{writer['id']}", writer["id"], name,
-         json.dumps(words), item_type),
+         encode_prefix(words), item_type),
     )
     rules.prune_disabled(db, scope, now)
     return shape(from_row(db.execute("SELECT * FROM event_rules WHERE id=?", (rule_id,)).fetchone()))
@@ -210,10 +215,11 @@ def check_disable(rule: ObserveRule, caller: str) -> None:
 def record(
     db: sqlite3.Connection | None, thread_id: str, rule: ObserveRule, outcome: str,
     artifact: Mapping[str, Any] | None, reason: str | None,
-) -> None:
+) -> bool:
     """One observe outcome (``registered`` or ``not_registered``) in the rule outcome record, which
     ``explain`` reads. Written through the caller's ``db`` when it has one (a savepoint inside its
-    transaction), else on the thread's own connection. Never fails the call."""
+    transaction), else on the thread's own connection. Never fails the call: returns False when
+    the write failed, so the caller tells the agent ``explain`` won't show this run."""
     ref = {"integration": artifact["integration"], "type": artifact["type"],
            "external_id": artifact["external_id"]} if artifact else None
     event = RuleEvent(
@@ -224,3 +230,5 @@ def record(
             rules.record(conn, event, [Outcome(rule.id, thread_id, outcome, reason=reason)])
     except Exception:
         logger.exception("observe rule {} outcome was not recorded", rule.id)
+        return False
+    return True
