@@ -6,7 +6,7 @@ import json
 import sqlite3
 from dataclasses import dataclass
 
-from core.message_history import NON_HUMAN_MARKERS, REPLY_VIA_POST_UPDATE_KEY
+from core.message_history import REPLY_VIA_POST_UPDATE_KEY, is_human_input
 from core.reply_context import REPLY_CONTEXT_KEY
 from core.viewing_context import VIEWING_DOCUMENT_KEY, VIEWING_DOCUMENT_TARGET_KEY
 from infra.database import get_db, write_transaction
@@ -48,7 +48,7 @@ def stamped_human_metadata(
         if metadata is not None and any(key in metadata for key in server_keys)
         else metadata
     )
-    if role != "user" or any((clean or {}).get(key) for key in NON_HUMAN_MARKERS):
+    if not is_human_input(role, clean):
         return clean
     stored = connection.execute(
         "SELECT metadata FROM messages WHERE id=?", (message_id,),
@@ -326,7 +326,6 @@ def accept_thread_input(
 
 def _refuse_unready_person_send(db, model: str, thread_id: str, role: str, metadata: dict | None) -> None:
     """Refuse an unready local model before accepting a new human input."""
-    from core.message_history import is_human_input
     from infra.send_types import SendRejected
     from llm import local_model_load
     from llm.resolution import ModelUnavailableError, resolve_thread_target

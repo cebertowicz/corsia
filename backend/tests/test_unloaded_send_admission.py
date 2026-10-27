@@ -58,3 +58,29 @@ async def test_resolvers_keep_the_loaded_only_verdict(isolated_db, monkeypatch):
     assert send_target.classify_target_admission(resolved) == "wait"
     assert send_target.model_admission("omlx@srv/m", person_send=False) == "wait"
     assert send_target.model_admission("omlx@srv/m", person_send=True) == "run"
+
+
+def _row(row_id, *, held=None, role="user", metadata=None):
+    import json
+
+    return {"id": row_id, "role": role, "metadata": json.dumps(metadata or {}),
+            "write_outcome": "proved_no_write" if held else None, "delivery_error": held}
+
+
+@pytest.mark.parametrize("rows, person_send", [
+    # A person's send queued behind a held agent head loads for the batch, so it isn't stranded.
+    ([_row("wake", held="selected_model_unavailable", metadata={"sender_kind": "agent"}), _row("person")], True),
+    # Only rows the lift would deliver count: another hold stops the batch before the person's send.
+    ([_row("wake", held="selected_model_unavailable", metadata={"sender_kind": "agent"}),
+      _row("other", held="unrelated_hold", metadata={"sender_kind": "agent"}), _row("person")], False),
+    ([_row("wake", held="selected_model_unavailable", metadata={"sender_kind": "agent"})], False),
+])
+def test_lift_loads_for_a_person_send_the_batch_would_deliver(monkeypatch, rows, person_send):
+    from infra import send_target
+
+    seen = []
+    monkeypatch.setattr(send_target, "model_admission",
+                        lambda *_a, person_send, **_k: seen.append(person_send) or ("run" if person_send else "wait"))
+    lifted = send_target.lifted_hold_ids(rows, "omlx@srv/m", db=None)
+    assert seen == [person_send]
+    assert ("wake" in lifted) is person_send

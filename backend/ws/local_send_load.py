@@ -24,7 +24,7 @@ def _consume_load_result(task: asyncio.Task) -> None:
 
 async def load_for_person(request, prepared) -> None:
     from infra.db_async import run_in_db
-    from infra.send_target import model_load_error
+    from infra.send_target import LOCAL_LOAD_RUNNABLE, model_load_error
     from llm.local_model_load import ModelLoadFailed, ensure_loaded
 
     readiness = await run_in_db(_local_readiness, request.target)
@@ -32,7 +32,7 @@ async def load_for_person(request, prepared) -> None:
         raise asyncio.CancelledError()
     if readiness is None or readiness.state == "loaded":
         return
-    if readiness.state != "fits_now":
+    if readiness.state not in LOCAL_LOAD_RUNNABLE:
         raise RuntimeError(model_load_error(readiness.state))
     state.broadcast_to_thread(request.thread_id, {
         "type": "model_loading", "thread_id": request.thread_id,
@@ -52,11 +52,3 @@ async def load_for_person(request, prepared) -> None:
             raise RuntimeError(model_load_error(error.cause)) from error
     finally:
         stopped.cancel()
-
-
-class SettledSetupError(Exception):
-    """Setup failed after its bound runtime and input were settled."""
-
-    def __init__(self, error: BaseException) -> None:
-        super().__init__(str(error))
-        self.error = error

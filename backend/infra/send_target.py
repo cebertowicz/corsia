@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import json
 from dataclasses import replace
-from typing import Literal
+from typing import Literal, get_args
 
 from loguru import logger
 
 from infra import db_async
 from infra.send_types import DeliveryFailureSide
 from llm import resolution as model_resolution
+from llm.local_model_load import ReadinessState
 from llm.locality import LOCALITY_REFUSALS
 from llm.resolution import ExecutionTarget, ModelUnavailableError
 
@@ -18,7 +19,9 @@ from llm.resolution import ExecutionTarget, ModelUnavailableError
 SELECTED_MODEL_UNAVAILABLE = "selected_model_unavailable"
 MODEL_LOAD_FAILED = "model_load_failed"
 MODEL_LOAD_UNREACHABLE = "model_load_unreachable"
-LOCAL_LOAD_REFUSALS = frozenset({"no_room", "no_memory", "unreachable"})
+# A local model's readiness either runs a person's send (the turn loads it) or refuses it.
+LOCAL_LOAD_RUNNABLE = frozenset({"loaded", "fits_now"})
+LOCAL_LOAD_REFUSALS = frozenset(get_args(ReadinessState)) - LOCAL_LOAD_RUNNABLE
 # The same FIFO-head hold, for a thread that has no model yet. Only the user
 # choosing one lifts it (``thread.model_row.select_first_model``), so no catalog wake looks for it.
 NO_MODEL_SELECTED = "no_model_selected"
@@ -166,7 +169,7 @@ def person_send_target(target: ExecutionTarget, *, db=None) -> ExecutionTarget:
             connection.close()
     if readiness is None:
         return target
-    if readiness.state in ("loaded", "fits_now"):
+    if readiness.state in LOCAL_LOAD_RUNNABLE:
         return replace(target, available=True, availability_reason=None)
     return replace(target, availability_reason=readiness.state)
 
@@ -218,12 +221,20 @@ def lifted_hold_ids(rows, model: str, *, db, thread_id: str | None = None) -> fr
 
     from core.message_history import is_human_input
 
-    person_send = any(is_human_input(str(row['role']), json.loads(row['metadata'] or '{}'))
-                      for row in rows if str(row['id']) in held)
     # Idle callers have already admitted the current durable account choice.
     account_held = frozenset(str(row['id']) for row in rows
                             if row['write_outcome'] == 'proved_no_write'
                             and row['delivery_error'] in ACCOUNT_HOLD_REASONS)
+    # A person's send anywhere in the rows this lift would deliver loads the model for
+    # the whole batch, so a held agent head can't strand it; the batch's own admission
+    # sees the same rows.
+    person_send = False
+    for row in rows:
+        if row['write_outcome'] == 'proved_no_write' and str(row['id']) not in held | account_held:
+            break
+        if is_human_input(str(row['role']), json.loads(row['metadata'] or '{}')):
+            person_send = True
+            break
     return account_held | (
         held if held and model_admission(model, db=db, thread_id=thread_id, person_send=person_send) != 'wait'
         else frozenset()
