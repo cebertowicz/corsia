@@ -53,5 +53,4 @@ it('rejects a representation mismatch before it enters the operator cache', asyn
 	expect(entry.payload).toBeNull();
 	expect(entry.etag).toBeNull();
 	expect(entry.errorMessage).toBe('Couldn’t read this plan. Reload the page.');
-	expect(entry.reloadNeeded).toBe(true);
 });

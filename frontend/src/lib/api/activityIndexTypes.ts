@@ -33,5 +33,4 @@ export type ActivityIndexReadOutcome =
 	| { status: 'not-found' }
 	| { status: 'unauthorized' }
 	| { status: 'forbidden' }
-	// The same failure shape as OperatorReadOutcome: both come from `readPlan`.
-	| { status: 'error'; message: string; reference?: string; reload?: true };
+	| { status: 'error'; message: string };

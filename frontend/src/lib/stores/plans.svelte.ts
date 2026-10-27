@@ -30,7 +30,7 @@ import type {
 } from '$lib/api/plans';
 import { deferRefresh, forgetSpacing, noteStarted, spacingWaitMs } from './planRefreshSpacing';
 import { planClosedMessage } from './planClosedMessage';
-import { errorText, safeErrorMessage, STALE_PAGE_MESSAGE } from '$lib/api/planRead';
+import { errorText, STALE_PAGE_MESSAGE } from '$lib/api/planRead';
 import { isActivityKey, planKeyString, type ActivityKey, type ActivityKeyString, type OperatorKey, type OperatorKeyString, type PlanKey, type PlanKeyString } from './planKeys';
 
 /**
@@ -49,14 +49,13 @@ export interface PlanEntry<P = OperatorEnvelope | ActivityIndexEnvelope> {
 	payload: P | null;
 	etag: string | null;
 	errorMessage: string | null;
-	reloadNeeded: boolean; // a reply this page can't read: a retry fails the same way, a page reload can fix it
 	lastFreshAt: number | null;
 	ownerThreadId: string | null;
 }
 
 export const EMPTY_ENTRY: PlanEntry<never> = {
 	status: 'idle', refreshing: false, payload: null, etag: null,
-	errorMessage: null, reloadNeeded: false, lastFreshAt: null, ownerThreadId: null,
+	errorMessage: null, lastFreshAt: null, ownerThreadId: null,
 };
 
 let entries = $state.raw<Record<string, PlanEntry>>({});
@@ -137,39 +136,40 @@ function ownerThreadIdFor(
 }
 
 /** Sign-in, which a retry cannot change; not-found and forbidden are worded per place in `planClosedMessage`. */
-const SIGN_IN_MESSAGE = 'Sign in to see this plan.';
+const CLOSED_MESSAGES = {
+	unauthorized: 'Sign in to see this plan.',
+} as const;
 
 function applyOutcome(key: PlanKey, keyStr: string, outcome: PlanReadOutcome) {
 	if (outcome.status === 'fresh') {
 		const expectedVersion = isActivityKey(key) ? 1 : 2;
 		if (outcome.payload.contract_version !== expectedVersion) {
-			applyOutcome(key, keyStr, { status: 'error', message: STALE_PAGE_MESSAGE, reload: true });
+			applyOutcome(key, keyStr, { status: 'error', message: STALE_PAGE_MESSAGE });
 			return;
 		}
 		patch(keyStr, {
 			status: 'ready', refreshing: false, payload: outcome.payload, etag: outcome.etag,
-			errorMessage: null, reloadNeeded: false, lastFreshAt: Date.now(),
+			errorMessage: null, lastFreshAt: Date.now(),
 			ownerThreadId: ownerThreadIdFor(key, outcome.payload),
 		});
 		return;
 	}
 	if (outcome.status === 'not-modified') {
-		patch(keyStr, { status: 'ready', refreshing: false, errorMessage: null, reloadNeeded: false, lastFreshAt: Date.now() });
+		patch(keyStr, { status: 'ready', refreshing: false, errorMessage: null, lastFreshAt: Date.now() });
 		return;
 	}
 	if (outcome.status !== 'error') {
 		patch(keyStr, {
 			status: outcome.status, refreshing: false, payload: null, etag: null,
-			ownerThreadId: null, reloadNeeded: false, errorMessage: outcome.status === 'unauthorized'
-				? SIGN_IN_MESSAGE : planClosedMessage(key, outcome.status),
+			ownerThreadId: null, errorMessage: outcome.status === 'unauthorized'
+				? CLOSED_MESSAGES.unauthorized : planClosedMessage(key, outcome.status),
 		});
 		return;
 	}
 	const current = peekEntry(keyStr);
-	const failure = { refreshing: false, errorMessage: errorText(outcome), reloadNeeded: outcome.reload === true };
 	patch(keyStr, current.payload
-		? { status: 'stale', ...failure }
-		: { status: 'error', payload: null, ...failure });
+		? { status: 'stale', refreshing: false, errorMessage: errorText(outcome) }
+		: { status: 'error', refreshing: false, payload: null, errorMessage: errorText(outcome) });
 }
 
 /**
@@ -189,8 +189,8 @@ async function issue(key: PlanKey, keyStr: string, myId: number): Promise<void> 
 	const before = peekEntry(keyStr);
 	if (!bearer) {
 		patch(keyStr, before.payload
-			? { status: 'stale', refreshing: false, errorMessage: SIGN_IN_MESSAGE, reloadNeeded: false }
-			: { status: 'unauthorized', refreshing: false, payload: null, errorMessage: SIGN_IN_MESSAGE, reloadNeeded: false });
+			? { status: 'stale', refreshing: false, errorMessage: CLOSED_MESSAGES.unauthorized }
+			: { status: 'unauthorized', refreshing: false, payload: null, errorMessage: CLOSED_MESSAGES.unauthorized });
 		return;
 	}
 	patch(keyStr, { status: before.payload ? before.status : 'loading', refreshing: true });
@@ -205,7 +205,7 @@ async function issue(key: PlanKey, keyStr: string, myId: number): Promise<void> 
  */
 function admitReadFailure(key: PlanKey, keyStr: string, myId: number): void {
 	if (!ownedRuntime(keyStr, myId)) return;
-	applyOutcome(key, keyStr, { status: 'error', message: safeErrorMessage('load') });
+	applyOutcome(key, keyStr, { status: 'error', message: 'This plan couldn’t be read.' });
 }
 
 /**
