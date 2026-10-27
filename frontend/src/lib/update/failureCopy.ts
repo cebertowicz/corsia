@@ -161,13 +161,13 @@ export function failureCopy(failure: UpdateFailure): FailureCopy {
 		case 'index_locked':
 			return refusal(
 				"Another program is using CORSIA's files.",
-				`Wait for it to finish, then try again. If it doesn't clear, ask the CORSIA agent to remove the leftover lock. ${RAN_ON}`,
+				`Wait for it to finish, then select Retry. If it doesn’t clear, ask the CORSIA agent to remove the leftover lock. ${RAN_ON}`,
 				'Retry',
 			);
 		case 'checkout_detached':
 			return refusal("This copy of CORSIA can't update itself because it isn't set up to follow updates.", `Ask the CORSIA agent to switch it back. ${RAN_ON}`, null);
 		case 'checkout_dirty':
-			return refusal('This copy of CORSIA has local changes.', `Save or discard them, then try again. ${RAN_ON}`, 'Retry');
+			return refusal('This copy of CORSIA has local changes.', `Save or discard them, then select Retry. ${RAN_ON}`, 'Retry');
 		case 'restart_pending':
 			return { ...refusal('An update is ready and waiting for a restart.', `Restart CORSIA to finish it. ${KEPT_VERSION}`, 'Restart now'), retryAction: 'restart' };
 		default:
