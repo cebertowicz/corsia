@@ -218,7 +218,7 @@ export async function loadUpdateStatus(refresh = false): Promise<void> {
 
 function showScheduleSaveError(patch: Partial<Pick<UpdateSchedule, 'automatic' | 'time'>> & { tonight?: boolean }): void {
 	toasts.showAction("Couldn't save the schedule", {
-		label: 'Try again', run: () => { void saveUpdateSchedule(patch); },
+		label: 'Retry', run: () => { void saveUpdateSchedule(patch); },
 	});
 }
 

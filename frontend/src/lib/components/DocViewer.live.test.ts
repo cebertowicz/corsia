@@ -239,7 +239,7 @@ describe('composed live viewer', () => {
 	// Product Experience approved the new-open non-live row exactly as written; it has no actions.
 	it.each(['http', 'ws'] as const)('opens a damaged store (%s answer) non-live and editable with one header row, saving through the legacy route', async transport => {
 		const title = 'Live editing is unavailable for this document.';
-		const message = "Its saved editing history could not be read. You can edit and save this file without live editing. Earlier changes stored only in that history or a browser copy aren't shown here.";
+		const message = "Couldn’t read this file’s editing history. You can edit and save it without live editing. Changes kept only in that history or in this browser aren’t shown.";
 		const damaged = { live: false, live_unavailable: 'store_damaged' };
 		if (transport === 'http') api.fetchContent.mockResolvedValue({ text: 'disk copy', writable: true, artifact: { id: 'artifact' }, freshness: null, ...damaged });
 		api.writeContent.mockResolvedValue({ saved: true, revision: 'r-typed' });
@@ -269,12 +269,12 @@ describe('composed live viewer', () => {
 		render();
 		await vi.waitFor(() => expect(wire.frames.some(frame => frame.type === 'doc_open')).toBe(true));
 		emit('doc_opened', { type: 'doc_opened', request_id: wire.frames.findLast(frame => frame.type === 'doc_open')!.request_id, live: false });
-		await vi.waitFor(() => expect(host.textContent).toContain('You can edit and save this file without live editing.'));
+		await vi.waitFor(() => expect(host.textContent).toContain('You can edit and save it without live editing.'));
 		const unavailable = "Its saved editing history can't be opened right now. Text in this tab is kept. Retry, or copy it to keep working.";
 		api.fetchContent.mockRejectedValue(Object.assign(new Error(unavailable), { code: 'store_unavailable', title }));
 		(component as unknown as { reload: () => void }).reload();
 		await vi.waitFor(() => expect(host.textContent).toContain("can't be opened right now"));
-		expect(host.textContent).not.toContain('You can edit and save this file without live editing.');
+		expect(host.textContent).not.toContain('You can edit and save it without live editing.');
 	});
 
 	it('retries a typed setup_failed WS refusal through HTTP admission before opening again', async () => {

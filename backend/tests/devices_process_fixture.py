@@ -75,7 +75,6 @@ def main() -> None:
             "fds": psutil.Process().num_fds(),
             "tasks": len([task for task in asyncio.all_tasks() if not task.done()]),
             "threads": psutil.Process().num_threads(),
-            "thread_ids": sorted(thread.id for thread in psutil.Process().threads()),
             "thread_names": sorted(thread.name for thread in threading.enumerate()),
             "startup_cloud_discovery_pending": not cloud_discovery_done.is_set(),
         }

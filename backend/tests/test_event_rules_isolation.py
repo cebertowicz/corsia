@@ -130,5 +130,5 @@ async def test_a_writer_leaving_the_project_turns_its_rules_off_once(isolated_db
     left = ("dead_lettered", "its writer left the rule's project; rule turned off")
     assert _outcomes(own["id"]) == [("woke", None), left]
     assert _outcomes(owners["id"])[1:] == [left]
-    assert {row["id"]: row["enabled"] for row in _rows("SELECT id, enabled FROM event_rules")} == {
+    assert {row["id"]: row["enabled"] for row in _rows("SELECT id, enabled FROM event_rules WHERE origin LIKE 'agent:%'")} == {
         own["id"]: 0, owners["id"]: 0}

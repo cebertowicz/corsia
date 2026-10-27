@@ -5,7 +5,7 @@ import { THREAD, human, said, work } from '$lib/__tests__/fixtures/focusRuns';
 import { reactiveProps } from '$lib/__tests__/fixtures/reactiveProps.svelte';
 import type { RunLoad, RunStub } from '$lib/focusRuns';
 import { _resetTurnStateForTests } from '$lib/ws/turnState';
-import { PAUSED_AT_PLAN_LIMIT, PLAN_LIMIT_REASON } from '$lib/stores/overageSetting';
+import { PAUSED_AT_USAGE_LIMIT, PLAN_LIMIT_REASON } from '$lib/stores/overageSetting';
 import TranscriptContent from './TranscriptContent.svelte';
 import { planLimitPauseDescriptors, type PlanLimitPauseDescriptor } from './planLimitPause';
 import type { TurnSummaries } from './transcriptRunLabel';
@@ -137,7 +137,7 @@ describe('a plan-limit pause whose Turn sits only in an unloaded stub', () => {
 
 		const section = host.querySelector('.transcript-fold')!;
 		const marker = section.querySelector('.plan-limit-paused');
-		expect(marker?.textContent).toBe(PAUSED_AT_PLAN_LIMIT);
+		expect(marker?.textContent).toBe(PAUSED_AT_USAGE_LIMIT);
 		expect(marker!.previousElementSibling).toBe(toggle());
 		expect(host.querySelectorAll('.plan-limit-paused')).toHaveLength(1);
 		expect(onLoadRun).not.toHaveBeenCalled();

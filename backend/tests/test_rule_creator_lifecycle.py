@@ -36,4 +36,4 @@ def test_creator_archive_holds_then_resumes_and_purge_disables_only_its_rule():
     db.execute("UPDATE threads SET lifecycle_state='purged' WHERE id='thread'")
     gone, remaining = decide()
     assert not remaining and [(x.outcome, x.reason) for x in gone.settled] == [("dead_lettered", "creator gone")]
-    assert [tuple(row) for row in db.execute("SELECT id,enabled FROM event_rules ORDER BY id")] == [("r1", 0), ("r2", 1)]
+    assert [tuple(row) for row in db.execute("SELECT id,enabled FROM event_rules WHERE id IN ('r1','r2') ORDER BY id")] == [("r1", 0), ("r2", 1)]

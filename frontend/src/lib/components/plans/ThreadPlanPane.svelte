@@ -76,13 +76,13 @@
 	 * its row while it is rendered, else the step of this plan that nests it.
 	 */
 	const PLAN_UNLOADED = 'The plan couldn’t load, so that item can’t be shown';
-	let pendingFocus = $state<{ nodeId: string; stepId: string | null } | null>(null);
+	let pendingFocus = $state<{ nodeId: string; stepId: string | null; open: boolean } | null>(null);
 	let focusNotice = $state<string | null>(null);
 	let overviewTree = $state<PlanTree | null>(null);
 	let drillView = $state<PlanDrillView | null>(null);
 
-	$effect(() => registerNodeFocus(threadId, (nodeId, stepId) => {
-		pendingFocus = { nodeId, stepId };
+	$effect(() => registerNodeFocus(threadId, (nodeId, stepId, open) => {
+		pendingFocus = { nodeId, stepId, open };
 		focusNotice = null;
 	}));
 
@@ -99,7 +99,7 @@
 		const status = query.status;
 		if (!request || status === 'idle' || status === 'loading' || query.refreshing) return;
 		pendingFocus = null;
-		if (status === 'ready' || status === 'stale') untrack(() => void focusNode(request.nodeId, request.stepId));
+		if (status === 'ready' || status === 'stale') untrack(() => void focusNode(request.nodeId, request.stepId, request.open));
 		else focusNotice = PLAN_UNLOADED;
 	});
 
@@ -108,12 +108,12 @@
 		if (plan) untrack(() => { if (focusNotice === PLAN_UNLOADED) focusNotice = null; });
 	});
 
-	async function focusNode(nodeId: string, stepId: string | null = null): Promise<void> {
+	async function focusNode(nodeId: string, stepId: string | null = null, open = false): Promise<void> {
 		const node = plan?.nodes.find((candidate) => candidate.id === nodeId);
 		if (!node) {
 			// Not this plan's node: a nested subagent plan's row while rendered, else its owning step.
 			if ((drillRootId ? drillView : overviewTree)?.focusRow(nodeId)) return;
-			if (stepId && stepId !== nodeId) return focusNode(stepId);
+			if (stepId && stepId !== nodeId) return focusNode(stepId, null, open);
 			// Older finished work is not in the read: page it in from the server's folded history.
 			const forThread = threadId;
 			const drilled = drillRootId;
@@ -149,6 +149,7 @@
 		await tick();
 		if (threadId !== forThread) return;
 		if (!tree?.focusRow(nodeId)) focusNotice = 'That item couldn’t be shown in this plan';
+		else if (open) tree?.openDetails(nodeId);
 	}
 
 

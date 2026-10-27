@@ -188,11 +188,11 @@ test.describe('@flow:held-comment-delivery @surface:documents held comments have
 		await expectSenders(page, ['header: Send 3 comments']);
 
 		// A collapsed canvas shows no header: the chat is the sender again.
-		await page.getByRole('button', { name: 'Collapse artifact panel' }).click();
+		await page.getByRole('button', { name: 'Collapse Files' }).click();
 		await expect(chatSend(page)).toHaveText('Send 3 comments');
 		await expectSenders(page, ['chat: Send 3 comments']);
 		await captureFrame(page, 'chat-collapsed-canvas', '1440');
-		await page.getByRole('button', { name: /^Expand artifact panel/ }).click();
+		await page.getByRole('button', { name: /^Expand Files/ }).click();
 		await expect(headerSend(page)).toHaveText('Send 3 comments');
 		await expect(chatSendGroup(page)).toHaveCount(0);
 	});
@@ -465,7 +465,7 @@ test.describe('@flow:held-comment-delivery @surface:documents held comments have
 		await openThread(page, threadId, title);
 		await turnOffDocumentComments(page);
 		if (width === 393) await page.getByRole('button', { name: 'Chat', exact: true }).click();
-		else await page.getByRole('button', { name: 'Collapse artifact panel' }).click();
+		else await page.getByRole('button', { name: 'Collapse Files' }).click();
 		const dock = page.locator('.chat-attention-stack .attention-dock');
 		await expect(dock).toBeVisible();
 		await expect(chatSend(page)).toHaveText('Send 3 comments');
@@ -585,7 +585,7 @@ test.describe('@flow:held-comment-delivery @surface:documents held comments have
 		await expectOneLine(headerSend(page), 1440);
 		await expectHeaderToolsShareRow(page, 1440);
 		await captureFrame(page, 'header-101', '1440');
-		await page.getByRole('button', { name: 'Collapse artifact panel' }).click();
+		await page.getByRole('button', { name: 'Collapse Files' }).click();
 		await expectOneLine(chatSend(page), 1440);
 		await captureFrame(page, 'chat-101', '1440');
 	});

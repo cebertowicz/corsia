@@ -161,12 +161,12 @@ async function enter(page: Page, request: APIRequestContext, testInfo: TestInfo,
 	if (mobile) await expect(page.locator('main.main')).not.toHaveClass(/open/);
 	await expect(page.locator('.measurement-page')).toBeVisible({ timeout: 20_000 });
 	if (scope === 'project') {
-		await page.getByRole('button', { name: /Measurement scope:/ }).click();
+		await page.getByRole('button', { name: /Showing:/ }).click();
 		const input = page.getByRole('combobox', { name: 'Search projects and agents' });
 		await expect(input).toBeVisible();
 		await input.fill(project.name);
 		await page.getByRole('option', { name: new RegExp(`^${project.name}`) }).first().click();
-		await expect(page.getByRole('button', { name: `Measurement scope: ${project.name}`, exact: true })).toBeVisible();
+		await expect(page.getByRole('button', { name: `Showing: ${project.name}`, exact: true })).toBeVisible();
 	}
 	const row = page.locator('section.kpis');
 	await expect(row.locator('[data-kpi="tokens"] strong')).toBeVisible({ timeout: 20_000 });

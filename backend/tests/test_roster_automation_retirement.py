@@ -30,14 +30,14 @@ def test_deactivate_stops_all_kinds_and_rules_but_status_and_reenable_do_not(iso
         change_agent("owner", {"active": False}, user_id="user")
     db = get_db()
     assert all(schedules.get(x.id, db=db).state == "active" for x in (clock, cadence, script, other))
-    assert db.execute("SELECT count(*) FROM event_rules WHERE enabled=1").fetchone()[0] == 2
+    assert db.execute("SELECT count(*) FROM event_rules WHERE enabled=1 AND id IN ('r1','r2')").fetchone()[0] == 2
     before = db.execute("SELECT count(*) FROM context_change_journal WHERE object_kind='agent_roster'").fetchone()[0]
     db.close()
     change_agent("owner", {"agent_enabled": False}, user_id="user")
     db = get_db()
     assert all(schedules.get(x.id, db=db).state == "cancelled" for x in (clock, cadence, script))
     assert schedules.get(other.id, db=db).state == "active"
-    assert [tuple(row) for row in db.execute("SELECT id,enabled FROM event_rules ORDER BY id")] == [("r1", 0), ("r2", 1)]
+    assert [tuple(row) for row in db.execute("SELECT id,enabled FROM event_rules WHERE id IN ('r1','r2') ORDER BY id")] == [("r1", 0), ("r2", 1)]
     entries = db.execute("SELECT summary FROM context_change_journal WHERE object_kind='agent_roster' ORDER BY seq").fetchall()
     if inactive_first:
         assert len(entries) == before

@@ -6,7 +6,6 @@ from datetime import datetime, timezone
 
 import pytest
 
-from events.connectors import registered_command_triggers
 from infra.database import get_db
 from registry.observer import observe_record
 from registry.service import register_observed_artifact
@@ -90,18 +89,22 @@ def _insert_result(
     return metadata
 
 
-def test_github_connector_declares_pr_create_trigger():
-    triggers = registered_command_triggers("bash")
+def test_the_shipped_row_is_the_github_pr_create_rule(isolated_db):
+    db = get_db()
+    shipped = db.execute(
+        "SELECT connector, tool, argv_prefix, item_type FROM event_rules WHERE scope='global'"
+    ).fetchall()
 
-    assert [(connector, trigger.name) for connector, trigger in triggers] == [
-        ("github", "github.pr.create")
+    assert [tuple(row) for row in shipped] == [
+        ("github", "bash", '["gh","pr","create"]', "pull-request")
     ]
-    assert triggers[0][1].argv_prefix == ("gh", "pr", "create")
 
 
-@pytest.mark.parametrize("tool_name", ["bash", "mcp__corsia__bash", "Bash"])
-def test_pr_create_observation_is_cross_harness(
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tool_name", ["bash", "mcp__corsia__bash"])
+async def test_pr_create_observation_is_cross_harness(
     isolated_db,
+    monkeypatch,
     tool_name,
 ):
     db = get_db()
@@ -115,6 +118,11 @@ def test_pr_create_observation_is_cross_harness(
         command="gh pr create --title reliable",
     )
 
+    from tests.test_shell_pr_registration import _direct_shell_context, _stub_process
+    from tools.shell import BashTool
+
+    _stub_process(monkeypatch, stdout=_URL + "\n")
+    await BashTool().execute("gh pr create --title reliable", **_direct_shell_context(thread_id))
     observation = observe_record(
         thread_id,
         "tool",
@@ -123,13 +131,13 @@ def test_pr_create_observation_is_cross_harness(
         db=db,
     )
 
-    assert observation is not None
-    artifact = observation.artifact
-    assert artifact is not None
-    assert artifact["external_id"] == "owner/repo#42"
+    assert observation is None
     rows = _pr_rows(db, thread_id)
     assert len(rows) == 1
+    assert rows[0]["external_id"] == "owner/repo#42"
     assert rows[0]["relationship_state"] == "owner-active"
+    decisions = db.execute("SELECT outcome FROM event_route_decisions WHERE thread_id=?", (thread_id,)).fetchall()
+    assert [row["outcome"] for row in decisions] == ["registered"]
 
 
 def test_observed_registration_rejects_invalid_caller_thread(isolated_db):
@@ -179,89 +187,6 @@ def test_observed_registration_rejects_orphaned_owner_thread(isolated_db):
         )
 
     assert _pr_rows(db, caller_id) == []
-
-
-@pytest.mark.parametrize(
-    "command",
-    [
-        "gh pr create --title x && echo done",
-        "gh pr create --title x > /tmp/pr-url",
-        'gh pr create --title "$(whoami)"',
-        "gh pr create --title $$",
-        "$(gh pr create --title nested)",
-        "env GH_TOKEN=[REDACTED] gh pr create --title wrapped",
-        "/opt/homebrew/bin/gh pr create --title qualified",
-        "command gh pr create --title aliased",
-        "gh pr view 42",
-        "gh pr create --title x | tee /tmp/pr-url",
-    ],
-)
-def test_command_trigger_requires_one_literal_direct_argv(
-    isolated_db,
-    command,
-):
-    db = get_db()
-    thread_id = make_session(db, prefix="command-shape")
-    tool_call_id = "unsafe-shape"
-    _insert_call(
-        db,
-        thread_id,
-        tool_call_id,
-        name="bash",
-        command=command,
-    )
-
-    observation = observe_record(
-        thread_id,
-        "tool",
-        _URL + "\n",
-        {"tool_call_id": tool_call_id, "name": "bash", "is_error": False},
-        db=db,
-    )
-
-    assert observation is None
-    artifact = observation.artifact if observation is not None else None
-    assert artifact is None
-    assert _pr_rows(db, thread_id) == []
-
-
-@pytest.mark.parametrize(
-    ("content", "is_error"),
-    [
-        (_URL + "\n\nExit code: 1", False),
-        (_URL + "\n", True),
-        (_URL + "\n" + _URL + "\n", False),
-        ("Created: " + _URL + "\n", False),
-    ],
-)
-def test_command_trigger_requires_confirmed_success_result(
-    isolated_db,
-    content,
-    is_error,
-):
-    db = get_db()
-    thread_id = make_session(db, prefix="command-result")
-    tool_call_id = "bad-result"
-    _insert_call(
-        db,
-        thread_id,
-        tool_call_id,
-        name="bash",
-        command="gh pr create --title result",
-    )
-
-    observation = observe_record(
-        thread_id,
-        "tool",
-        content,
-        {"tool_call_id": tool_call_id, "name": "bash", "is_error": is_error},
-        db=db,
-    )
-
-    assert observation is None
-    artifact = observation.artifact if observation is not None else None
-    assert artifact is None
-    assert _pr_rows(db, thread_id) == []
 
 
 def test_persisted_observation_is_quiet_after_immediate_registration(isolated_db):
@@ -389,7 +314,7 @@ async def _drive_durable_result_seam(
         )
         return
 
-    tool_name = "Bash" if harness == "claude" else "mcp__corsia__bash"
+    tool_name = "mcp__corsia__bash"
     _insert_call(
         db,
         thread_id,
@@ -415,8 +340,9 @@ async def _drive_durable_result_seam(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("harness", ["native", "claude", "codex"])
-async def test_each_durable_result_seam_registers_one_routable_pr(
+async def test_each_durable_result_seam_keeps_the_shell_registration_single(
     isolated_db,
+    monkeypatch,
     harness,
 ):
     from unittest.mock import patch
@@ -427,6 +353,11 @@ async def test_each_durable_result_seam_registers_one_routable_pr(
     db = get_db()
     thread_id = make_session(db, prefix=f"command-{harness}-durable")
 
+    from tests.test_shell_pr_registration import _direct_shell_context, _stub_process
+    from tools.shell import BashTool
+
+    _stub_process(monkeypatch, stdout=_URL + "\n")
+    await BashTool().execute("gh pr create --title durable-seam", **_direct_shell_context(thread_id))
     await _drive_durable_result_seam(harness, thread_id, db)
 
     rows = _pr_rows(db, thread_id)
@@ -450,7 +381,7 @@ async def test_each_durable_result_seam_registers_one_routable_pr(
 
 
 @pytest.mark.asyncio
-async def test_observed_pr_routes_later_webhook_to_creator_thread(isolated_db):
+async def test_observed_pr_routes_later_webhook_to_creator_thread(isolated_db, monkeypatch):
     from unittest.mock import patch
 
     from events.router import RouteOutcome
@@ -466,6 +397,11 @@ async def test_observed_pr_routes_later_webhook_to_creator_thread(isolated_db):
         name="mcp__corsia__bash",
         command="gh pr create --title routed",
     )
+    from tests.test_shell_pr_registration import _direct_shell_context, _stub_process
+    from tools.shell import BashTool
+
+    _stub_process(monkeypatch, stdout=_URL + "\n")
+    await BashTool().execute("gh pr create --title routed", **_direct_shell_context(thread_id))
     observation = observe_record(
         thread_id,
         "tool",
@@ -477,7 +413,8 @@ async def test_observed_pr_routes_later_webhook_to_creator_thread(isolated_db):
         },
         db=db,
     )
-    observed = observation.artifact if observation is not None else None
+    assert observation is None
+    assert len(_pr_rows(db, thread_id)) == 1
     db.close()
 
     with patch(
@@ -489,7 +426,6 @@ async def test_observed_pr_routes_later_webhook_to_creator_thread(isolated_db):
             pr_payload("owner/repo", 42),
         )
 
-    assert observed is not None
     assert routed.outcome == RouteOutcome.ACCEPTED
     assert routed.thread_id == thread_id
     mock_deliver.assert_called_once()

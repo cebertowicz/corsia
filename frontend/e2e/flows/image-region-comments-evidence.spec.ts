@@ -300,7 +300,7 @@ test.describe('@flow:image-region-comments @surface:documents image comment revi
 			await page.reload();
 			await page.getByText(seeded.sessionTitle).first().click();
 			await expect(viewer(page).locator('.load-error')).toBeVisible();
-			await expect(viewer(page).getByRole('button', { name: 'Try again' })).toBeVisible();
+			await expect(viewer(page).getByRole('button', { name: 'Retry' })).toBeVisible();
 			await expect(commentButton(page)).toHaveCount(0);
 			await shoot(page, testInfo, '1440-41-image-failed', true);
 		} finally {

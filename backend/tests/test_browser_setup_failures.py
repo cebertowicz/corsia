@@ -33,7 +33,7 @@ async def test_setup_refusal_names_cause_without_cleanup_state(synthetic_browser
         launcher.chmod(0o755)
         fake.owner.binary = str(launcher)
     else:
-        args = ['--provider', 'browserbase', 'snapshot']
+        args = ['snapshot', '--provider', 'browserbase']
     with pytest.raises(sessions.BrowserSetupError) as caught:
         await fake.owner.run('thread', args)
     assert not isinstance(caught.value, sessions.BrowserSessionCleanupError)
@@ -91,7 +91,9 @@ def test_command_error_detail_is_redacted_and_returned(stdout, stderr, expected)
 
 
 @pytest.mark.asyncio
-async def test_ordinary_command_error_keeps_session(synthetic_browser):
+async def test_ordinary_command_error_keeps_session(synthetic_browser, monkeypatch):
+    from host_access import browser_launch
+    monkeypatch.setattr(browser_launch, '_owner_key', lambda _: 'owner')
     fake = synthetic_browser
     fake.result = sessions.CommandResult(1, json.dumps({'success': False, 'error': 'Invalid selector'}), '')
     assert await fake.owner.run('thread', ['click', '#']) == 'Error: agent-browser command failed: Invalid selector'

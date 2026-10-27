@@ -115,16 +115,16 @@ describe('first-run line', () => {
 		listed = [claude('ready', [account('ready')])];
 		messages.set([{ id: 'm1', role: 'user', content: 'hello' }] as never);
 		await render();
-		expect(text()).toContain("I'll answer once you start me.");
+		expect(text()).toContain("Your message sends once you pick a model.");
 	});
 
-	it('shows an initial read failure until Try again succeeds', async () => {
+	it('shows an initial read failure until Retry succeeds', async () => {
 		readFails = true;
 		component = mount(ConductorSourcesPanel, { target: host, props: { threadId: 'cond-1' } });
 		await vi.waitFor(() => expect(text()).toContain("Couldn't read your model sources."));
 		listed = [claude('ready', [account('ready')])];
 		readFails = false;
-		button('Try again')!.click();
+		button('Retry')!.click();
 		await vi.waitFor(() => expect(text()).toContain('Pick a model from the picker below'));
 		expect(text()).not.toContain("Couldn't read your model sources.");
 	});

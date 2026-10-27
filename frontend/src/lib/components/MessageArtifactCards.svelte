@@ -128,7 +128,7 @@
 	ul { list-style: none; }
 	.chips { position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
 	li { display: flex; min-width: 0; }
-	.asks { max-width: 480px; }
+	.asks { max-width: var(--needs-you-tile-max-width); }
 	.asks li { display: block; }
 	.more {
 		display: inline-flex;

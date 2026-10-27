@@ -52,7 +52,7 @@
 		{#if !hasReadyLocalModel}
 			<p class="status" class:warning={off}>{off ? ($neverLocalHost ? 'No local model is ready. Connect a model on a trusted device, or turn off Local models only.' : 'No local model is ready, so nothing in this project can run.') : 'No local model is ready.'} <button type="button" onclick={() => requestSettingsSection('providers')}>{$neverLocalHost ? 'Connect a provider' : 'Set up a local model'}</button></p>
 		{/if}
-		{#if error}<p class="status error" role="alert">{error} {#if loadFailed}<button type="button" onclick={() => load(projectId)}>Try again</button>{/if}</p>{/if}
+		{#if error}<p class="status error" role="alert">{error} {#if loadFailed}<button type="button" onclick={() => load(projectId)}>Retry</button>{/if}</p>{/if}
 	</div>
 	{#if !loadFailed}<Toggle checked={off} disabled={saving || !loaded} ariaLabel="Local models only" onchange={change} />{/if}
 </div>

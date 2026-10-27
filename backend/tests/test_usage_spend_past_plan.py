@@ -1,4 +1,4 @@
-"""'Spend past plan limit': a plan-exhaustion vendor verdict does not make an account unusable
+"""'Spend past usage limit': a plan-exhaustion vendor verdict does not make an account unusable
 while the switch is on and paid capacity remains; the stored vendor facts stay as reported."""
 from __future__ import annotations
 

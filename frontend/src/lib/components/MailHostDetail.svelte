@@ -5,7 +5,7 @@
 	import { KEYS_NOT_SAVED, KeyWriteError } from '$lib/stores/keys';
 
 	// The open row of a mail-host account (iCloud, Yahoo, a work server): what its last check found, and the one next step.
-	// Try again is one press and re-checks the saved servers. Edit server decides where the app password goes, so Save asks for the CORSIA password (H17).
+	// Retry is one press and re-checks the saved servers. Edit server decides where the app password goes, so Save asks for the CORSIA password (H17).
 	// The row closes once a check starts: the result lands on its status line.
 	let { account, offline = false, onSetKey, onWhere, onRemove, onChanged = () => {} }: {
 		account: ConnectedAccount;
@@ -38,8 +38,8 @@
 			case 'revoked': return { before: `${host} stopped accepting the app password, so agents can’t use this account. ${host === 'iCloud' ? 'iCloud does this when your Apple password changes. ' : ''}Make a new one, then press Replace key.` };
 			// No catalog entry carries a verified IMAP-settings page, so the product's name is text, never a link.
 			case 'imap_off': return product
-				? { before: `${host} has email access for other apps turned off. Turn on IMAP in ${product} settings, then press Try again.` }
-				: { before: `${host} has email access for other apps turned off. Turn on IMAP with your host or IT, then press Try again.` };
+				? { before: `${host} has email access for other apps turned off. Turn on IMAP in ${product} settings, then press Retry.` }
+				: { before: `${host} has email access for other apps turned off. Turn on IMAP with your host or IT, then press Retry.` };
 			case 'unreachable': return { before: `CORSIA couldn’t reach ${server}. Check the server names with your host or IT.` };
 			default: return { before: '' };
 		}
@@ -59,7 +59,7 @@
 		imap = account.mailhost?.imap ?? ''; smtp = account.mailhost?.smtp ?? ''; caldav = account.mailhost?.caldav ?? '';
 		editing = true;
 	}
-	/** Try again: one press, no password. A refusal reads as a line under the status. */
+	/** Retry: one press, no password. A refusal reads as a line under the status. */
 	async function tryAgain(): Promise<void> {
 		if (busy) return;
 		busy = true; formError = '';
@@ -122,8 +122,8 @@
 		{:else}
 			{#if problem === 'waiting'}<span class="account-action"><Button variant="primary" size="sm" disabled={offline} onclick={onSetKey}>Set key</Button></span>
 			{:else if problem === 'refused' || problem === 'revoked'}<span class="account-action"><Button variant="primary" size="sm" disabled={offline} onclick={onSetKey}>Replace key</Button></span>
-			{:else if problem === 'imap_off'}<span class="account-action"><Button variant="primary" size="sm" loading={busy} disabled={offline} onclick={() => void tryAgain()}>Try again</Button></span>
-			{:else if problem === 'unreachable'}<span class="account-action"><Button variant="primary" size="sm" disabled={offline || busy} onclick={edit}>Edit server</Button></span><span class="account-action"><Button variant="ghost" size="sm" loading={busy} disabled={offline} onclick={() => void tryAgain()}>Try again</Button></span>{/if}
+			{:else if problem === 'imap_off'}<span class="account-action"><Button variant="primary" size="sm" loading={busy} disabled={offline} onclick={() => void tryAgain()}>Retry</Button></span>
+			{:else if problem === 'unreachable'}<span class="account-action"><Button variant="primary" size="sm" disabled={offline || busy} onclick={edit}>Edit server</Button></span><span class="account-action"><Button variant="ghost" size="sm" loading={busy} disabled={offline} onclick={() => void tryAgain()}>Retry</Button></span>{/if}
 			<span class="account-action"><Button variant="ghost" size="sm" disabled={offline || busy} onclick={onWhere}>Where it works…</Button></span>
 			<span class="danger-text account-action"><Button variant="ghost" size="sm" disabled={offline || busy} onclick={onRemove}>Remove</Button></span>
 		{/if}

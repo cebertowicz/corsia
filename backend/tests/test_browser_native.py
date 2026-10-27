@@ -11,7 +11,7 @@ import shutil
 import psutil
 import pytest
 from host_access import browser_identity as identity
-from host_access.browser_sessions import BrowserSessionOwner
+from host_access.browser_sessions import BrowserSessionError, BrowserSessionOwner
 
 pytestmark = [pytest.mark.integration, pytest.mark.skipif(
     os.environ.get('CORSIA_NATIVE_BROWSER_TEST') != '1', reason='explicit native-browser job only',
@@ -80,7 +80,9 @@ async def test_native_browser_success_failure_close_and_reopen(native_owner, tmp
     await owner.run('native', ['eval', "document.body.innerHTML='<button>Native proof</button>'; 'ready'"])
     await asyncio.sleep(1.15)  # Stable startup sidecars must survive reuse.
     assert 'Native proof' in await owner.run('native', ['snapshot'])
-    assert (await owner.run('native', ['open', 'http://[invalid'])).startswith('Error:')
+    with pytest.raises(BrowserSessionError, match='HTTP, HTTPS or about:blank'):
+        await owner.run('native', ['open', 'http://[invalid'])
+    assert (await owner.run('native', ['open', 'http://127.0.0.1:1/'])).startswith('Error:')
     assert 'ready' in await owner.run('native', ['eval', "'ready'"])
     screenshot = tmp_path / 'native.png'
     assert not (await owner.run('native', ['screenshot', str(screenshot)])).startswith('Error:')

@@ -15,7 +15,8 @@ import { activeThreadId } from '$lib/stores/threads';
  */
 type ShowPlan = (threadId: string) => boolean;
 /** `stepId`: for a node of a nested subagent plan, the step of this thread's plan that nests it. */
-type FocusNode = (nodeId: string, stepId: string | null) => void;
+/** `open`: also open the row's details, as pressing the row does (a person step's Do →). */
+type FocusNode = (nodeId: string, stepId: string | null, open: boolean) => void;
 
 const planSurfaces = new Set<ShowPlan>();
 const focusHandlers = new Map<string, FocusNode>();
@@ -36,7 +37,7 @@ export function registerNodeFocus(threadId: string, focus: FocusNode): () => voi
 
 /** Show the active thread's plan and hand the node to its pane, or drop the request. */
 export async function focusPlanNode(
-	threadId: string, nodeId: string | null, stepId: string | null = null,
+	threadId: string, nodeId: string | null, stepId: string | null = null, open = false,
 ): Promise<void> {
 	if (!nodeId) return;
 	// Let surfaces render the thread the caller just navigated to before asking them.
@@ -47,5 +48,5 @@ export async function focusPlanNode(
 	if (!shown) return;
 	await tick();
 	if (get(activeThreadId) !== threadId) return;
-	focusHandlers.get(threadId)?.(nodeId, stepId);
+	focusHandlers.get(threadId)?.(nodeId, stepId, open);
 }

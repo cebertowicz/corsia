@@ -29,13 +29,13 @@ describe('returnToPlanNode', () => {
 
 		expect(show).toHaveBeenCalledWith('t1');
 		expect(focus).toHaveBeenCalledOnce();
-		expect(focus).toHaveBeenCalledWith('node-1', null);
+		expect(focus).toHaveBeenCalledWith('node-1', null, false);
 	});
 
 	it('carries the owning step of a nested subagent-plan node from the tab source', async () => {
 		await returnToPlanNode({ sourceNodeId: 'sub', sourceStepId: 'spawn' });
 
-		expect(focus).toHaveBeenCalledWith('sub', 'spawn');
+		expect(focus).toHaveBeenCalledWith('sub', 'spawn', false);
 	});
 
 	it('does nothing without an originating node', async () => {

@@ -48,7 +48,7 @@
 				: { line: "Couldn't connect: no response", recovery: `${app} didn't respond within 10 seconds. Try again; if it keeps happening, ${app} may be down.` };
 			case 'protocol_error': return { line: "Couldn't connect: not compatible", recovery: `${app} answered, but not in a way CORSIA understands. It may not be made for AI agents, or it may need an update. Check with its maker for an update.` };
 			case 'name_collision': return { line: "Couldn't connect: clashes with another app", recovery: `CORSIA can't tell this app apart from another connected app. Go back and choose a different name, then try again.` };
-			default: return { line: "Couldn't connect. Try again.", recovery: '' };
+			default: return { line: 'Couldn’t connect. Press Retry.', recovery: '' };
 		}
 	}
 
@@ -139,7 +139,7 @@
 			onConnected(created);
 			step = 'result';
 		} catch (cause) {
-			const failure = cause instanceof ConnectAppError ? connectFailure(cause.failureClass) : { line: "Couldn't connect. Try again.", recovery: '' };
+			const failure = cause instanceof ConnectAppError ? connectFailure(cause.failureClass) : { line: 'Couldn’t connect. Press Retry.', recovery: '' };
 			error = failure.line;
 			recovery = failure.recovery;
 		} finally {
@@ -172,7 +172,7 @@
 				{#if kind === 'local'}
 					<label class="field"><span>What it runs</span><small>Paste what the app's setup instructions say to run</small><input bind:this={setupInput} aria-label="What it runs" value={command} oninput={(event) => command = event.currentTarget.value} placeholder="npx -y @example/app" /></label>
 					<label class="field"><span>Name</span><small>What you'll see in CORSIA</small><input aria-label="Name" value={name} oninput={(event) => name = event.currentTarget.value} /></label>
-					<p class="notice">It can do anything you can do on this computer, except open CORSIA's own files and saved keys. Connect only apps you trust.</p>
+					<p class="notice">It can do anything you can do on the computer it runs on, except open CORSIA’s own files and saved keys. Connect only apps you trust.</p>
 				{:else}
 					<label class="field"><span>Web address</span><small>Paste the address from the app's setup instructions</small><input bind:this={setupInput} aria-label="Web address" value={address} oninput={(event) => suggestName(event.currentTarget.value)} placeholder="https://mcp.example.com" /></label>
 					<label class="field"><span>Name</span><small>What you'll see in CORSIA</small><input aria-label="Name" value={name} oninput={(event) => name = event.currentTarget.value} /></label>
@@ -211,7 +211,7 @@
 			{:else if step === 'setup'}
 				<Button onclick={() => { step = 'what'; error = ''; }}>Back</Button><Button variant="primary" onclick={continueFromSetup}>Continue</Button>
 			{:else if step === 'where'}
-				<Button onclick={backToSetup}>Back</Button><Button variant="primary" onclick={connect} disabled={!hasSelection} loading={submitting}>{error ? 'Try again' : 'Connect'}</Button>
+				<Button onclick={backToSetup}>Back</Button><Button variant="primary" onclick={connect} disabled={!hasSelection} loading={submitting}>{error ? 'Retry' : 'Connect'}</Button>
 			{:else if result?.state === 'needs_token'}
 				<Button onclick={onClose}>Done</Button><Button variant="primary" onclick={openResultKey}>Set key</Button>
 			{:else if result?.state === 'needs_sign_in'}

@@ -9,7 +9,9 @@ from host_access import browser_sessions as sessions
 from tests.browser_process_fixture import EXIT_TIMEOUT, synthetic_browser  # noqa: F401
 
 
-async def test_stable_startup_sidecars_survive_delayed_reuse(synthetic_browser):
+async def test_stable_startup_sidecars_survive_delayed_reuse(synthetic_browser, monkeypatch):
+    from host_access import browser_launch
+    monkeypatch.setattr(browser_launch, '_owner_key', lambda _: 'owner')
     fake = synthetic_browser
     assert await fake.owner.run('thread', ['open', 'about:blank']) == 'ok'
     record = fake.owner._sessions['thread'].record
@@ -25,7 +27,7 @@ async def test_stable_startup_sidecars_survive_delayed_reuse(synthetic_browser):
 async def test_failed_navigation_binds_and_reuses_startup_files(synthetic_browser):
     fake = synthetic_browser
     fake.result = sessions.CommandResult(1, '', 'navigation failed')
-    assert 'failed' in await fake.owner.run('thread', ['open', 'bad-url'])
+    assert 'failed' in await fake.owner.run('thread', ['open', 'https://example.test/'])
     record = fake.owner._sessions['thread'].record
     assert record.pid and fake.owner.live_count() == 1
     fake.result = sessions.CommandResult(0, 'ok', '')
@@ -114,7 +116,9 @@ async def test_replacement_after_command_never_rebinds(synthetic_browser, monkey
     assert fake.children[record.session].poll() is None
 
 
-async def test_slow_close_retains_producer_then_recovers_and_reopens(synthetic_browser):
+async def test_slow_close_retains_producer_then_recovers_and_reopens(synthetic_browser, monkeypatch):
+    from host_access import browser_launch
+    monkeypatch.setattr(browser_launch, '_owner_key', lambda _: 'owner')
     fake = synthetic_browser
     fake.env_changes = {'TEST_CLOSE_DELAY': '0.3', 'TEST_CHILD': '1'}
     fake.owner.close_timeout = 0.05

@@ -39,8 +39,8 @@
 		unsavedSource === 'default' && unsaved !== null
 			? `Leave empty for the CORSIA default, ${unsaved.toLocaleString()} tokens.${providerWindow ? ` Provider window: ${providerWindow.toLocaleString()}.` : ''}`
 			: providerWindow
-				? `CORSIA checkpoints a conversation before it outgrows this window. Leave empty to use the provider's ${providerWindow.toLocaleString()} tokens.`
-				: 'CORSIA checkpoints a conversation before it outgrows this window. The provider reports none, so the model cannot be used until one is set.'
+				? `CORSIA checkpoints a chat before it outgrows this window. Leave empty to use the provider's ${providerWindow.toLocaleString()} tokens.`
+				: 'The provider reports no context window, so set one to use this model. CORSIA checkpoints a chat before it outgrows it.'
 	);
 
 	async function refresh() {

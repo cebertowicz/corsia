@@ -165,7 +165,7 @@ test.describe('@flow:artifact-leaf @surface:chat @surface:documents artifact lea
 		await lastTab.click();
 		await expect(lastTab).toHaveAttribute('aria-selected', 'true');
 
-		const collapseButton = page.getByRole('button', { name: 'Collapse artifact panel' });
+		const collapseButton = page.getByRole('button', { name: 'Collapse Files' });
 		const [headerBox, tabBox, collapseBox] = await Promise.all([
 			page.locator('.shell-header').boundingBox(),
 			tab.boundingBox(),
@@ -210,7 +210,7 @@ test.describe('@flow:artifact-leaf @surface:chat @surface:documents artifact lea
 		await saveEvidenceScreenshot(page, testInfo, 'artifact-leaf-desktop-split', { fullPage: false });
 
 		await collapseButton.click();
-		const rail = page.getByRole('button', { name: `Expand artifact panel (${tabs.length} open)` });
+		const rail = page.getByRole('button', { name: `Expand Files (${tabs.length} open)` });
 		await expect(rail).toBeVisible();
 		await expect(page.getByRole('textbox', { name: 'Message CORSIA' })).toBeVisible();
 		await saveEvidenceScreenshot(page, testInfo, 'artifact-leaf-desktop-rail', { fullPage: false });

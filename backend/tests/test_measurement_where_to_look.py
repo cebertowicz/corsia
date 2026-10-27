@@ -59,6 +59,11 @@ def _ids(rows: list[dict]) -> list[tuple[str, str]]:
     return [(row["subject"]["name"], row["measure"]) for row in rows]
 
 
+def test_decisions_and_tasks_label_reaches_biggest_changes():
+    result = _build(windows=_windows("asks_per_outcome", 0.1, 0.3))
+    assert result["worse"][0]["label"] == "Decisions and tasks for you per outcome"
+
+
 def test_the_largest_worse_move_leads_and_improvements_are_listed_apart():
     result = _build(
         _agent("a", "Alpha", first_try_acceptance=(0.90, 30, 0.60, 30)),

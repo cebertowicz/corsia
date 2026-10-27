@@ -4,6 +4,8 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 
 import ProjectSettingsView from './ProjectSettingsView.svelte';
 import { token } from '$lib/stores/auth';
+import { toasts } from '$lib/stores/toast';
+import { SERVER_UNREACHABLE } from '$lib/plainError';
 import { uiScope } from '$lib/stores/uiScope';
 import { openProjectSettings, resetSettingsNavigation, settingsNavigation } from '$lib/stores/settingsNavigation';
 
@@ -129,6 +131,54 @@ describe('ProjectSettingsView', () => {
 		expect(host.querySelector('select[aria-label="Thread to promote"]')).toBeNull();
 		expect(host.querySelector('input[aria-label="Responsibility"]')).toBeNull();
 		expect(button('Remove')).toBeUndefined();
+	});
+
+	it('offers Retry when the agent list fails to load, and reloads it', async () => {
+		let agentCalls = 0;
+		stubFetch(project(), [], (url) => {
+			if (!url.startsWith('/api/agents')) return null;
+			agentCalls += 1;
+			if (agentCalls === 1) return { ok: false, status: 500, json: async () => ({}) };
+			return { ok: true, json: async () => ({ agents: [{ thread_id: 't1', display_name: 'Release Coordinator', project_id: 'corsia', active: true }] }) };
+		});
+		vi.spyOn(console, 'error').mockImplementation(() => {});
+
+		component = mount(ProjectSettingsView, { target: host, props: { projectId: 'corsia' } });
+
+		await vi.waitFor(() => expect(host.textContent).toContain('Couldn’t load this project’s agents.'));
+		const retry = host.querySelector<HTMLButtonElement>('.note.failed button');
+		expect(retry?.textContent?.trim()).toBe('Retry');
+		retry!.click();
+		await vi.waitFor(() => expect(host.textContent).toContain('Release Coordinator'));
+		expect(host.textContent).not.toContain('Couldn’t load this project’s agents.');
+		expect(agentCalls).toBe(2);
+	});
+
+	it.each([
+		['the server refuses', () => ({ ok: false, status: 500, json: async () => ({}) }), 'Couldn’t remove that. Try again.'],
+		['the server is unreachable', () => { throw new TypeError('Failed to fetch'); }, SERVER_UNREACHABLE],
+	])('keeps the agent list and says so in plain words when %s on remove', async (_case, reply, message) => {
+		stubFetch(project(), [{ thread_id: 't1', display_name: 'Release Coordinator', project_id: 'corsia', active: true }], (url, init) => {
+			if (url.startsWith('/api/agents/t1') && init?.method === 'DELETE') return reply();
+			return null;
+		});
+		const show = vi.spyOn(toasts, 'show');
+
+		component = mount(ProjectSettingsView, { target: host, props: { projectId: 'corsia' } });
+		await vi.waitFor(() => expect(host.textContent).toContain('Release Coordinator'));
+		host.querySelector('[data-settings-row="Release Coordinator"]')!.dispatchEvent(
+			new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 24, clientY: 24 }),
+		);
+		flushSync();
+		const remove = await vi.waitFor(() => {
+			const item = Array.from(document.body.querySelectorAll<HTMLElement>('[role="menuitem"]')).find((el) => el.textContent?.includes('Remove'));
+			expect(item).toBeTruthy();
+			return item!;
+		});
+		remove.click();
+
+		await vi.waitFor(() => expect(show).toHaveBeenCalledWith(message, 'error'));
+		expect(host.textContent).toContain('Release Coordinator');
 	});
 
 	it('opens Skills and Context at this project\'s level, remembering the page to come back to', async () => {
