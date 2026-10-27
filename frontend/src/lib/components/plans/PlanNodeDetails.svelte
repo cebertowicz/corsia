@@ -107,7 +107,7 @@
 	{#if waiting}<p class="waiting"><span class="prefix">Waiting:</span> {waiting}</p>{/if}
 	{#if tokenUsage}<p class="tokens"><span class="prefix">Tokens:</span> {tokenUsage}</p>{/if}
 	{#if cost}<p class="cost"><span class="prefix">Cost:</span> {cost}</p>{/if}
-	{#if ownWorking}<p class="own-working"><span class="prefix">Working on this task:</span> {ownWorking}</p>{/if}
+	{#if ownWorking}<p class="own-working"><span class="prefix">Time working on this task:</span> {ownWorking}</p>{/if}
 	{#if ownWaiting}<p class="own-waiting"><span class="prefix">This task waited:</span> {ownWaiting}</p>{/if}
 	{#if ownTokens}<p class="own-tokens"><span class="prefix">Tokens for this task:</span> {ownTokens}</p>{/if}
 	{#if ownCost}<p class="own-cost"><span class="prefix">Cost of this task:</span> {ownCost}</p>{/if}
