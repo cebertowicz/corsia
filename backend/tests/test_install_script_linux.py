@@ -42,7 +42,7 @@ REAL_TOOLS = (
     "grep head tail sed awk tr sort chmod touch ls cut sha256sum"
 ).split()
 
-APT_BASE = "build-essential curl ca-certificates xz-utils unzip jq sqlite3 python3"
+APT_BASE = "build-essential curl ca-certificates xz-utils unzip jq sqlite3 python3 lsof"
 APT_ENV = "env DEBIAN_FRONTEND=noninteractive apt-get"
 
 GIT = (
@@ -66,7 +66,12 @@ STUBS = {
     "agent-browser": 'echo "agent-browser 0.31.2"',
     "bwrap": 'if [ "$1" = --version ]; then echo "bubblewrap 0.9.0"; fi',
     "uname": 'case "$1" in -s) echo "${STUB_OS:-Linux}" ;; -m) echo "${STUB_ARCH:-aarch64}" ;; esac',
-    "id": 'echo "${STUB_UID:-1000}"',
+    "id": 'if [ "$1" = -un ]; then echo tester; else echo "${STUB_UID:-1000}"; fi',
+    "loginctl": (
+        'if [ "$1" = show-user ]; then '
+        'if [ -f "$STUB_LINGER_FILE" ]; then echo yes; else echo "${STUB_LINGER:-yes}"; fi; '
+        'else echo "loginctl $*" >> "$STUB_LOG"; touch "$STUB_LINGER_FILE"; fi'
+    ),
     "sw_vers": 'echo "${STUB_MACOS_VERSION:-14.7.1}"',
     "dpkg-query": (
         'for last; do :; done; '
@@ -198,6 +203,7 @@ def _download(url, destination):
         "HOME": str(home),
         "STUB_BIN": str(stub_bin),
         "STUB_LOG": str(log),
+        "STUB_LINGER_FILE": str(tmp_path / "linger-enabled"),
         "STUB_PYTHON": sys.executable,
         "STUB_TEMPLATES": str(templates),
         "STUB_DOWNLOADS": str(downloads),
@@ -364,6 +370,17 @@ def test_sudo_is_used_for_apt_only(env):
     assert all(" apt-get " in call or call == "sudo -v" for call in sudo_calls)
 
 
+def test_linger_is_enabled_once_with_a_notice_and_undo(env):
+    first = _run(_everything_installed(env), STUB_LINGER="no")
+    assert first.returncode == 0, first.stderr
+    assert "sudo loginctl disable-linger tester" in first.stdout
+    assert "loginctl enable-linger tester" in _calls(env)
+    Path(env["STUB_LOG"]).write_text("")
+    second = _run(_everything_installed(env), STUB_LINGER="no")
+    assert second.returncode == 0, second.stderr
+    assert not any("enable-linger" in call for call in _calls(env))
+
+
 def test_a_refused_sudo_has_one_clear_stop(env):
     result = _run(env, STUB_SUDO_FAIL="1")
 
@@ -382,12 +399,12 @@ def test_root_runs_apt_without_sudo(env):
     assert f"apt-get install -y {APT_BASE} git gh" in _calls(env)
 
 
-@pytest.mark.parametrize("release, shown", [
-    ('ID=fedora\nPRETTY_NAME="Fedora Linux 42"\n', "Fedora Linux 42"),
-    ('ID=arch\nPRETTY_NAME="Arch Linux"\n', "Arch Linux"),
-    ("", "an unrecognized Linux"),
+@pytest.mark.parametrize("release", [
+    'ID=fedora\nPRETTY_NAME="Fedora Linux 42"\n',
+    'ID=arch\nPRETTY_NAME="Arch Linux"\n',
+    "",
 ])
-def test_a_distro_without_apt_is_refused_before_anything_installs(env, release, shown):
+def test_a_distro_without_apt_is_refused_before_anything_installs(env, release):
     Path(env["CORSIA_INSTALL_OS_RELEASE"]).write_text(release)
 
     result = _run(env)
@@ -443,7 +460,7 @@ def test_a_foreign_corsia_command_is_left_unchanged_with_a_warning(env):
 
     assert result.returncode == 0, result.stderr
     assert command.readlink() == Path("/usr/local/bin/corsia")
-    assert f"A different corsia command already exists at {command}; leaving it unchanged." in result.stdout
+    assert f"A different corsia command is already at {command}." in result.stdout
 
 
 def test_the_corsia_command_note_says_how_to_reach_it_when_the_bin_dir_is_new(env):

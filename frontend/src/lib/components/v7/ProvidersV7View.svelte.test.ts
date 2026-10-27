@@ -134,6 +134,15 @@ describe('ProvidersV7View card request', () => {
 		if (component) unmount(component);
 		component = null; document.body.innerHTML = '';
 
+		// A server that is not macOS lists no local setup at all, whatever its memory.
+		for (const eligible of [true, false]) {
+			await render({ source: 'omlx', eligible, never_local: true, corsia_omlx_online: false });
+			expect(document.querySelector('[data-provider-card="local-setup"]')).toBeNull();
+			expect(document.body.textContent).not.toContain(LOW_MEMORY_LOCAL_MODEL_SENTENCE);
+			if (component) unmount(component);
+			component = null; document.body.innerHTML = '';
+		}
+
 		// CORSIA's own oMLX registered but offline is still the local model: one row, no Set up beside it.
 		const ownOffline = {
 			id: 'corsia', provider: 'omlx', instance_name: 'Local model', status: 'offline', corsia_omlx: true,

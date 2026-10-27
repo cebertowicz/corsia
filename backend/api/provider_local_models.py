@@ -7,6 +7,7 @@ from typing import Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException
 
+from api.local_model_guard import require_local_model_host
 from infra.auth import require_user_header_only
 from infra.db_async import run_in_db
 from infra.host_resources import model_room_bytes
@@ -92,6 +93,7 @@ async def _recommendations() -> tuple[dict[str, Any], dict[str, list[LocalModel]
 
 @router.get("/recommendations")
 async def recommendations(_user: dict = Depends(require_user_header_only)) -> dict[str, Any]:
+    require_local_model_host()
     result, _sections = await _recommendations()
     return result
 
@@ -110,6 +112,7 @@ def _clear_failed_record(model_id: str) -> None:
 
 @router.post("/downloads")
 async def download_model(body: dict = Body(...), _user: dict = Depends(require_user_header_only)) -> dict[str, Any]:
+    require_local_model_host()
     repository = body.get("repository") if isinstance(body, dict) and set(body) == {"repository"} else None
     if not isinstance(repository, str) or not repository:
         raise HTTPException(400, "A recommended model repository is required.")

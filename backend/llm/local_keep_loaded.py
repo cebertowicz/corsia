@@ -13,7 +13,7 @@ step also emits oMLX's ``model`` product event, marked ``automatic``:
 
 | Event | Transition | Row line | Product event |
 |---|---|---|---|
-| oMLX's model list couldn't be read | set NOT_KEPT (NOT_LOADED_UNPINNED for a reload after a restart) | that line | none |
+| oMLX's model list couldn't be read | set NOT_KEPT (NOT_LOADED_UNKNOWN for a reload after a restart) | that line | none |
 | oMLX gave no usable size | none (derived live) | no-size line | none |
 | pin written | none | live verdicts | ``model.pin`` |
 | pin write refused | set NOT_KEPT | NOT_KEPT | ``model.pin`` with ``error`` |
@@ -40,6 +40,7 @@ log = logging.getLogger(__name__)
 NOT_KEPT = "Downloaded, but couldn’t keep it loaded. Turn it on to try again."
 NOT_LOADED = "Not loaded: oMLX couldn’t load it. Turn it off and on again to retry."
 NOT_LOADED_UNPINNED = "Not loaded: oMLX couldn’t load it. Turn it on to try again."
+NOT_LOADED_UNKNOWN = "Not loaded: oMLX couldn’t load it. Try again."
 
 _FAILED: dict[tuple[str, str], str] = {}
 
@@ -133,7 +134,7 @@ async def keep_loaded(
     row = next((item for item in rows or [] if item.get("id") == model.model), None)
     if row is None:
         log.warning("Not keeping the downloaded local model loaded: oMLX's model list couldn't be read")
-        _FAILED[key] = NOT_KEPT if pin_if_fits or force_pin else NOT_LOADED_UNPINNED  # a reload was not downloaded
+        _FAILED[key] = NOT_KEPT if pin_if_fits or force_pin else NOT_LOADED_UNKNOWN  # a reload was not downloaded
         return
     size = row.get("estimated_size")
     size_bytes: float | None = (
@@ -152,7 +153,7 @@ async def keep_loaded(
             _FAILED[key] = NOT_KEPT
             return
         emit("pin")
-    not_loaded = NOT_LOADED if pinned else NOT_LOADED_UNPINNED
+    not_loaded = NOT_LOADED if pinned or row.get("pinned") else NOT_LOADED_UNPINNED
     step = "memory check"
     try:
         # The seat's lock, so this load and a send's never check the same free memory at once.

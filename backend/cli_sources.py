@@ -146,13 +146,18 @@ def describe_installed(row: dict) -> str:
     return f"{name}: not installed"
 
 
+def _visible_sources(rows: list[dict]) -> list[dict]:
+    return [row for row in rows if not row.get("never_local")]
+
+
 def format_install_summary(rows: list[dict]) -> list[str]:
     """The summary after a completed install, which always has a working source."""
-    return ["     Model sources", *(f"       {describe_installed(row)}" for row in rows)]
+    return ["     Model sources", *(f"       {describe_installed(row)}" for row in _visible_sources(rows))]
 
 
 def format_sources(rows: list[dict]) -> list[str]:
     """Return the app-directed install summary; it never prints a shell fix."""
+    rows = _visible_sources(rows)
     lines = ["     Model sources"]
     for row in rows:
         lines.append(f"       {describe(row)}")
@@ -179,7 +184,8 @@ def cmd_sources(args: argparse.Namespace) -> int:
         return 0
     if recheck_failure:
         print(f"Model sources: recheck failed: {recheck_failure}; showing last stored state.")
-    formatter = format_install_summary if getattr(args, "install_summary", False) else format_sources
+    install_summary = getattr(args, "install_summary", False)
+    formatter = format_install_summary if install_summary else format_sources
     print("\n".join(formatter(rows)))
     return 0
 

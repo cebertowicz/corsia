@@ -351,7 +351,7 @@ ensure_model_source() {
 # The model source is connected in the app.
 # ---------------------------------------------------------------------------
 
-LINUX_APT_BASE=(build-essential curl ca-certificates xz-utils unzip jq sqlite3 python3)
+LINUX_APT_BASE=(build-essential curl ca-certificates xz-utils unzip jq sqlite3 python3 lsof)
 LINUX_OS_RELEASE="${CORSIA_INSTALL_OS_RELEASE:-/etc/os-release}"
 LINUX_LOCAL_BIN="$HOME/.local/bin"
 UV_BIN=""
@@ -525,6 +525,23 @@ linux_ensure_agent_browser() {
     linux_install_chromium
 }
 
+enable_linger_linux() {
+    local user linger
+    user="$(id -un)" || stop "Couldn’t determine this account. Run the installer again."
+    linger="$(loginctl show-user "$user" -p Linger --value)" \
+        || stop "Couldn’t check whether this account starts services at boot. Check systemd, then run this again."
+    [ "$linger" != yes ] || return 0
+    [ "$linger" = no ] || stop "Couldn’t check whether this account starts services at boot. Check systemd, then run this again."
+    if [ "$(id -u)" -ne 0 ]; then
+        say "     Enabling services at boot needs administrator access (sudo); you may be asked for your password."
+        "$SUDO_COMMAND" -v < "$PROMPT_INPUT" \
+            || stop "Enabling services at boot needs an administrator account. Sign in with one, then run this again."
+    fi
+    as_admin loginctl enable-linger "$user" \
+        || stop "Couldn’t enable services at boot. Check systemd, then run this again."
+    say "     Enabled services at boot for $user. To undo: sudo loginctl disable-linger $user"
+}
+
 linux_ensure_prereqs() {
     say "1/3  Checking prerequisites"
     PREREQS=(
@@ -548,7 +565,7 @@ link_corsia_command_linux() {
         if link_points_into_corsia "$command_path"; then
             rm "$command_path"
         else
-            say "     A different corsia command already exists at $command_path; leaving it unchanged."
+            say "     A different corsia command is already at $command_path."
             return 1
         fi
     fi
@@ -578,6 +595,7 @@ linux_main() {
     export PATH="$LINUX_LOCAL_BIN:$PATH"
     linux_ensure_prereqs
     linux_ensure_agent_browser
+    enable_linger_linux
     say "     Checking the protected Linux command sandbox…"
     bash "$CORSIA_HOME/scripts/install-linux-sandbox.sh"
     git -C "$CORSIA_HOME" rev-parse --git-dir > /dev/null 2>&1 \

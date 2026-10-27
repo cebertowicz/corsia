@@ -1120,6 +1120,37 @@ def test_close_out_prior_self_restart_does_not_swallow_failures(isolated_db, mon
         restart_startup.close_out_prior_self_restart()
 
 
+async def test_restart_launch_does_not_block_event_loop():
+    """A slow handoff must leave other requests able to run."""
+    import threading
+    import api.system_admin as sa
+
+    started = threading.Event()
+    release = threading.Event()
+    process = MagicMock()
+    process.poll.return_value = None
+
+    def slow_spawn(*_args):
+        started.set()
+        if not release.wait(timeout=3):
+            raise RuntimeError("event loop did not release launch")
+        return process
+
+    with (
+        patch("automation.restart.begin_restart_drain", new_callable=AsyncMock),
+        patch(_SPAWN, side_effect=slow_spawn),
+    ):
+        task = asyncio.create_task(sa._spawn_self_restart_after_response(
+            3001, False, "a" * 32, "test", _valid_token()
+        ))
+        try:
+            assert await asyncio.to_thread(started.wait, 2)
+            assert not task.done()
+        finally:
+            release.set()
+        await task
+
+
 async def test_after_response_launch_failure_releases_the_operation(isolated_db):
     """A launch that never starts must release the hold, not strand every thread."""
     import api.system_admin as sa

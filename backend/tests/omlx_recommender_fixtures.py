@@ -111,6 +111,7 @@ def mac_with(monkeypatch, gib: float, answers=()) -> SimpleNamespace:
     async def discover(_server_id):
         return {"ok": True}
 
+    monkeypatch.setattr("llm.local_setup_gates.platform.system", lambda: "Darwin")
     monkeypatch.setattr("infra.host_resources.host_total_ram_bytes", lambda: int(gib * GIB))
     # Nothing else is running, so the recorded "best" pick fits whatever host runs the test.
     monkeypatch.setattr("infra.host_resources.host_available_ram_bytes", lambda: int(gib * GIB))

@@ -228,7 +228,7 @@ def _duration(seconds: float) -> str:
 
 def watch(server_id: str, pid: int) -> None:
     life = _life.setdefault(server_id, restart.Life())
-    life.watch(pid, lambda: restart.on_exit(server_id, life, pid, start_server, _tail_log))
+    life.watch(pid, lambda status: restart.on_exit(server_id, life, pid, start_server, _tail_log, status))
 
 
 def stop_watching() -> None:  # the backend is shutting down: an oMLX exit from here on is not a crash

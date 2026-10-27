@@ -43,10 +43,9 @@ const badge = () => host.querySelector<HTMLButtonElement>('.h-local-only');
 const withLocalOnly = (fields: Record<string, unknown>) => threads.update((rows) => rows.map((row) => ({ ...row, ...fields })));
 
 describe('Header Local only badge', () => {
-	it('shows no badge on an ordinary chat but still reserves its slot', () => {
+	it('shows no badge on an ordinary chat', () => {
 		render();
 		expect(badge()).toBeNull();
-		expect(host.querySelector('.h-local-slot')).not.toBeNull();
 	});
 
 	it.each([

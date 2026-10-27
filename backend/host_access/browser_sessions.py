@@ -6,6 +6,7 @@ import logging
 from dataclasses import replace
 import socket
 import secrets
+import sys
 import time
 from typing import Literal, Sequence, TypeAlias
 
@@ -184,7 +185,7 @@ class BrowserSessionOwner:
                 if await asyncio.to_thread(browser_cli.resolve_native, self.binary) != (path, fingerprint):
                     raise identity.BrowserIdentityChanged(_EXECUTABLE_CHANGED)
                 chrome, source = await asyncio.to_thread(browser_cli.chrome_executable)
-                if (browser_cli.sys.platform != "linux" and source == "default"
+                if (sys.platform != "linux" and source == "default"
                         and await asyncio.to_thread(browser_cli.chrome_download_missing)):
                     # No Chrome on this Mac: agent-browser's own install fetches Chrome for Testing
                     # into the person's home, with no admin step.
@@ -394,7 +395,7 @@ class BrowserSessionOwner:
         })
 
     async def _invoke(self, argv: Sequence[str], *, timeout: float) -> CommandResult:
-        if browser_cli.sys.platform == "linux":
+        if sys.platform == "linux":
             return await browser_cli.invoke(argv, socket_dir=self.socket_dir, timeout=timeout,
                                             linux_chrome=self._chrome)
         return await browser_cli.invoke(argv, socket_dir=self.socket_dir, timeout=timeout)
