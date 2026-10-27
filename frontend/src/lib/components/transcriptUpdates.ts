@@ -3,7 +3,7 @@ import type { RunStub } from '$lib/focusRuns';
 import { sourceMembers, sourceRange } from './contextEventModel';
 import { partitionMessageAtCards } from './messageListModel';
 import { partitionAtVisit, fencePlanLimitPauses } from './transcriptFences';
-import { asksYou, gatherReadySteps, isBlockLine, isPassive, placePassive } from './transcriptPassive';
+import { asksYou, gatherReadySteps, isBlockLine, isPassive, passiveWithoutReceipts, placePassive } from './transcriptPassive';
 import type { PlanLimitPauseDescriptor } from './planLimitPause';
 import type { SourcePlacementContext } from './contextEventModel';
 import {
@@ -270,16 +270,7 @@ export function mergeTranscriptUpdates(
 	const structural = split
 		? [...closeRunsAtCards(partitioned.slice(0, at), oldCards), visitEntry(divider!), ...closeRunsAtCards(partitioned.slice(at), freshCards)]
 		: closeRunsAtCards(partitioned, sorted);
-	// Only receipts retained as visible update rows replace their corresponding outcome.
-	// The card window and grouping can omit a receipt, in which case the outcome stays.
-	const receipts = new Map(structural.flatMap((entry) => entry.kind === 'update'
-		&& entry.card.kind === 'person_step' && entry.card.node_id
-		&& (entry.card.step_state === 'done' || entry.card.step_state === 'closed')
-		? [[entry.card.node_id, entry.card.step_state] as const] : []));
-	const passive = (card: UpdateCard) => isPassive(card) && !(card.node_id && (
-		(receipts.get(card.node_id) === 'done' && (card.kind === 'done' || card.kind === 'done_follow_up'))
-		|| (receipts.get(card.node_id) === 'closed' && card.kind === 'closed')
-	));
+	const passive = passiveWithoutReceipts(structural);
 	const fenced = fencePlanLimitPauses(structural, options.pauses ?? [], options.turnSummaries ?? {}, options.sourceContext, sorted.some(passive));
 	const boundary = fenced.findIndex((entry) => entry.kind === 'divider');
 	const placed = boundary < 0 ? placePassive(fenced, sorted.filter(passive)) : [

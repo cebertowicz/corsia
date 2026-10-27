@@ -36,6 +36,18 @@ export function gatherReadySteps(entries: TranscriptUpdateEntry[]): TranscriptUp
 	});
 }
 
+/** A displayed receipt replaces its matching passive outcome, but not an outcome whose receipt is absent. */
+export function passiveWithoutReceipts(entries: TranscriptEntry[]): (card: UpdateCard) => boolean {
+	const receipts = new Map(entries.flatMap((entry) => entry.kind === 'update'
+		&& entry.card.kind === 'person_step' && entry.card.node_id
+		&& (entry.card.step_state === 'done' || entry.card.step_state === 'closed')
+		? [[entry.card.node_id, entry.card.step_state] as const] : []));
+	return (card) => isPassive(card) && !(card.node_id && (
+		(receipts.get(card.node_id) === 'done' && (card.kind === 'done' || card.kind === 'done_follow_up'))
+		|| (receipts.get(card.node_id) === 'closed' && card.kind === 'closed')
+	));
+}
+
 /** B6, B22: the card asks nothing and is not a completion: a line inside its block. */
 export function isBlockLine(card: UpdateCard): boolean {
 	return !isPassive(card) && !asksYou(card);
