@@ -8,7 +8,7 @@ export const SCOPE_GROUPS = [
 	{ id: 'workspace', name: 'Workspace' },
 	{ id: 'project', name: 'Project' },
 	{ id: 'agent', name: 'Agent' },
-	{ id: 'thread', name: 'This thread' },
+	{ id: 'thread', name: 'This chat' },
 	{ id: 'tools', name: 'Tools' },
 	{ id: 'history', name: 'History' },
 	{ id: 'other', name: 'Other' },
@@ -42,7 +42,7 @@ function text(value: unknown): string {
 function scopeName(scope: string, isAgent: boolean): string {
 	if (scope === 'workspace') return 'Workspace';
 	if (scope === 'project') return 'Project';
-	if (scope === 'thread') return isAgent ? 'Agent' : 'This thread';
+	if (scope === 'thread') return isAgent ? 'Agent' : 'This chat';
 	return 'System';
 }
 
@@ -61,7 +61,7 @@ export function sourceScope(
 	if (originSection === 'corsia' || originSection === 'system') return 'System';
 	if (originSection === 'workspace') return 'Workspace';
 	if (originSection === 'project') return 'Project';
-	if (originSection === 'thread') return isAgent ? 'Agent' : 'This thread';
+	if (originSection === 'thread') return isAgent ? 'Agent' : 'This chat';
 	if (originSection === 'role') return 'Agent';
 	if (originSection === 'tool' || originSection === 'tools' || originSection === 'model' || originSection === 'preflight') return 'Tools';
 	if (originSection === 'history' || originSection === 'summary' || originSection === 'provider') return 'History';
