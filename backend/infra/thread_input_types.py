@@ -6,6 +6,7 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime
 
 from connections.account_receipts import ReceiptFence
+from core.message_history import is_human_input
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,6 +49,11 @@ class ClaimedBatch:
     vendor_receipt: ReceiptFence | None = field(default=None, repr=False)
     #: Error rows this claim stamped `recovered`; published with the batch.
     recovered_message_ids: tuple[str, ...] = ()
+
+    @property
+    def person_send(self) -> bool:
+        """Whether this batch contains an input written by the person."""
+        return any(is_human_input(item.role, item.metadata) for item in self.items)
 
     @property
     def identity(self) -> TurnIdentity:

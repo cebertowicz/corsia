@@ -42,7 +42,7 @@ async def test_person_send_to_a_cloud_model_checks_before_binding(monkeypatch):
     import ws.turn as turn
 
     target = SimpleNamespace(harness="native", provider="anthropic", backend="api", transport_model="claude-x")
-    request = SimpleNamespace(person_send=True, target=target, ingress="ws")
+    request = SimpleNamespace(loads_model=False, target=target, ingress="ws")
     bind = AsyncMock()
     load = AsyncMock()
     monkeypatch.setattr("core.agent.get_agent", AsyncMock(return_value=object()))

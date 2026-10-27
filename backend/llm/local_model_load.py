@@ -23,9 +23,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import partial
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, get_args
 
 from infra.host_resources import load_verdict, model_room_bytes
 
@@ -36,6 +36,8 @@ log = logging.getLogger(__name__)
 
 ReadinessState = Literal["loaded", "fits_now", "no_room", "no_memory", "unreachable"]
 LoadFailure = Literal["load_failed", "unreachable", "no_room", "no_memory"]
+LOCAL_LOAD_RUNNABLE = frozenset({"loaded", "fits_now"})
+LOCAL_LOAD_REFUSALS = frozenset(get_args(ReadinessState)) - LOCAL_LOAD_RUNNABLE
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,6 +110,26 @@ def readiness(target: ExecutionTarget, *, db) -> Readiness | None:
     if fit.state == "unreachable" or scoped.availability_reason == "model_not_loaded":
         return fit
     return None
+
+
+def person_send_target(target: ExecutionTarget, *, db=None) -> ExecutionTarget:
+    """Widen local admission for a person's send, or return its delivery failure."""
+    from infra.database import get_db
+    from infra.send_target import model_load_error, omlx_seat_and_model
+
+    if target.available or omlx_seat_and_model(target) is None:
+        return target
+    connection = db if db is not None else get_db()
+    try:
+        state = readiness(target, db=connection)
+    finally:
+        if db is None:
+            connection.close()
+    if state is None:
+        return target
+    if state.state in LOCAL_LOAD_RUNNABLE:
+        return replace(target, available=True, availability_reason=None)
+    return replace(target, availability_reason=model_load_error(state.state))
 
 
 def _readiness_now(target: ExecutionTarget) -> Readiness | None:

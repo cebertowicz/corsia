@@ -184,7 +184,6 @@ def preview_input_batch(
     )
 
 
-
 def invalidate_idle_checkpoint_markers(
     db: sqlite3.Connection, thread_id: str, *, reason: IdleCheckpointReason,
 ) -> None:
@@ -212,19 +211,22 @@ def _claimable_prefix(
 ) -> tuple[int, str, list[sqlite3.Row], frozenset[str], bool] | None:
     """The FIFO prefix an idle claim would take: epoch, model, rows, lifted holds, movable-held."""
     state = thread_admission_state(connection, thread_id, allow_unavailable=True)
-    # A model-less thread, or one whose account policy holds its saved model,
-    # keeps every input queued; ``thread.model_row.select_first_model`` or the
-    # policy/lifecycle change that lifts the hold makes the same prefix claimable.
+    # A model or account hold keeps inputs queued until the relevant choice changes.
     selection = admitted_model_state(thread_id, state, db=connection, movable=movable)
     if selection is None:
         return None
     epoch, model, held = selection
-    rows = _queued_epoch_prefix(
-        connection, thread_id, expected_epoch=epoch, expected_model=model)
+    rows = _queued_epoch_prefix(connection, thread_id, expected_epoch=epoch, expected_model=model)
+    from core.message_history import is_human_input
     from infra.send_target import lifted_hold_ids
+    from infra.unavailable_model_recovery import liftable_hold_sets, model_admission
 
     rows = still_claimable(connection, thread_id, rows)
-    lifted = lifted_hold_ids(rows, model, db=connection, thread_id=thread_id)
+    model_held, account_held = liftable_hold_sets(rows)
+    candidate = _deliverable_prefix(rows, model_held | account_held)
+    person_send = any(is_human_input(str(row['role']), json.loads(row['metadata'] or '{}')) for row in candidate)
+    admission = model_admission(model, person_send=person_send, db=connection, thread_id=thread_id) if model_held else "wait"
+    lifted = lifted_hold_ids(model_held, account_held, admission)
     rows = _deliverable_prefix(rows, lifted)
     if not rows or not any(starts_turn(row) for row in rows):
         return None

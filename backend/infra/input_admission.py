@@ -328,6 +328,7 @@ def _refuse_unready_person_send(db, model: str, thread_id: str, role: str, metad
     """Refuse an unready local model before accepting a new human input."""
     from infra.send_types import SendRejected
     from llm import local_model_load
+    from llm.local_model_load import LOCAL_LOAD_REFUSALS
     from llm.resolution import ModelUnavailableError, resolve_thread_target
 
     if not model or not is_human_input(role, metadata):
@@ -336,11 +337,9 @@ def _refuse_unready_person_send(db, model: str, thread_id: str, role: str, metad
         target = resolve_thread_target(model, thread_id=thread_id, db=db)
     except (ModelUnavailableError, ValueError):
         return
-    from infra.send_target import LOCAL_LOAD_REFUSALS
-
     readiness = local_model_load.readiness(target, db=db)
     if readiness is not None and readiness.state in LOCAL_LOAD_REFUSALS:
-        raise SendRejected(409, "The selected local model cannot load now.", metadata={
+        raise SendRejected(409, "Couldn't load the selected local model.", metadata={
             "cause": readiness.state, "other_loaded": readiness.other_loaded,
         })
 

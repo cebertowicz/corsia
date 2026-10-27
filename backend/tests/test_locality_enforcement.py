@@ -127,13 +127,13 @@ def test_project_accounts_marks_cloud_rows_for_a_local_only_thread_alone(world):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("model", ["codex/test", CLOUD])
 async def test_cloud_off_thread_resolves_to_an_unavailable_target_admission_holds(world, model):
-    from infra import send_target
+    from infra import send_target, unavailable_model_recovery
 
     target = await send_target.resolve_target(model, thread_id="actor")
 
     assert (target.available, target.availability_reason) == (False, "project_cloud_off")
     assert send_target.classify_target_admission(target) == "wait"
-    assert all(send_target.model_admission(model, db=world, thread_id="actor", person_send=person) == "wait"
+    assert all(unavailable_model_recovery.model_admission(model, db=world, thread_id="actor", person_send=person) == "wait"
                for person in (True, False))
 
 

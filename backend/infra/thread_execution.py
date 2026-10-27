@@ -49,7 +49,7 @@ def _dispatch_context(
     settle,
     settle_terminal,
 ):
-    from core.message_history import is_human_input
+    from infra.send_target import omlx_seat_and_model
 
     native_mode = str(batch_option(batch, "native_mode", "event"))
     if native_mode == "ws" and ws is None:
@@ -59,7 +59,7 @@ def _dispatch_context(
         content=prepared.content, is_subagent=prepared.is_subagent,
         target=prepared.target, turn_id=batch.turn_id,
         input_message_id=batch.anchor_message_id, input_ids=tuple(item.message_id for item in batch.items),
-        person_send=any(is_human_input(item.role, item.metadata) for item in batch.items),
+        loads_model=batch.person_send and omlx_seat_and_model(prepared.target) is not None,
         metadata=batch.items[-1].metadata,
         native_mode=native_mode,
         allow_fresh=bool(

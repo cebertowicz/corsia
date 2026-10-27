@@ -27,7 +27,6 @@ from core.turn_core import (
 from core.turn_activity import turn_activity_frame
 from infra.product_events import emit_product_event
 from infra import state
-from infra.send_target import omlx_seat_and_model
 from infra.time import utc_now
 from llm.capabilities import make_provider_params
 from llm.resolution import (
@@ -75,7 +74,7 @@ async def _setup_turn(
 
     agent = await get_agent()
     # Only a person's send to a local oMLX model loads it; every other send keeps its pre-bind check.
-    loads = request is not None and request.person_send and omlx_seat_and_model(target) is not None
+    loads = request is not None and request.loads_model
     if not loads:
         await validate_native_target(target, event=ingress == "event")
     active_model = target.transport_model
@@ -378,7 +377,7 @@ async def execute_turn(
         Callable[[str, str | BaseException | None], Awaitable[None]] | None
     ) = None,
     media_projection=None,
-    person_send: bool = False,
+    loads_model: bool = False,
     input_ids: tuple[str, ...] = (),
 ) -> bool:
     """Execute one native turn for browser, delegation, or event ingress."""
@@ -388,7 +387,7 @@ async def execute_turn(
         reasoning_effort, start_ack, broadcast, step_metadata,
         persist_input_once, settle_delivery, after_persist_before_dispatch,
         prepared_context, preadmitted_turn, provider_acceptance,
-        settle_delivery_terminal, media_projection, person_send, input_ids,
+        settle_delivery_terminal, media_projection, loads_model, input_ids,
     )
     try:
         return await _execute_turn(request)

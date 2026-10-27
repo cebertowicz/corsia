@@ -1266,7 +1266,7 @@ async def test_cold_provider_dispatch_freezes_map_before_provider_io(
     prepared = PreparedBatch(
         thread_row={"id": "thread-1", "user_id": "user-1", "project_id": None},
         target=SimpleNamespace(
-            catalog_id="claude-code/sonnet", harness=provider,
+            catalog_id="claude-code/sonnet", harness=provider, provider="anthropic", backend="cloud",
         ),
         provider=provider,
         is_subagent=False,

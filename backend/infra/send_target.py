@@ -2,16 +2,14 @@
 
 from __future__ import annotations
 
-import json
 from dataclasses import replace
-from typing import Literal, get_args
+from typing import Literal
 
 from loguru import logger
 
 from infra import db_async
 from infra.send_types import DeliveryFailureSide
 from llm import resolution as model_resolution
-from llm.local_model_load import ReadinessState
 from llm.locality import LOCALITY_REFUSALS
 from llm.resolution import ExecutionTarget, ModelUnavailableError
 
@@ -19,9 +17,6 @@ from llm.resolution import ExecutionTarget, ModelUnavailableError
 SELECTED_MODEL_UNAVAILABLE = "selected_model_unavailable"
 MODEL_LOAD_FAILED = "model_load_failed"
 MODEL_LOAD_UNREACHABLE = "model_load_unreachable"
-# A local model's readiness either runs a person's send (the turn loads it) or refuses it.
-LOCAL_LOAD_RUNNABLE = frozenset({"loaded", "fits_now"})
-LOCAL_LOAD_REFUSALS = frozenset(get_args(ReadinessState)) - LOCAL_LOAD_RUNNABLE
 # The same FIFO-head hold, for a thread that has no model yet. Only the user
 # choosing one lifts it (``thread.model_row.select_first_model``), so no catalog wake looks for it.
 NO_MODEL_SELECTED = "no_model_selected"
@@ -150,30 +145,6 @@ def _ready_target(target: ExecutionTarget, *, db=None) -> ExecutionTarget:
     ))
 
 
-def person_send_target(target: ExecutionTarget, *, db=None) -> ExecutionTarget:
-    """Widen ``_ready_target``'s verdict for a person's send: a local model that fits now runs (the turn loads it).
-
-    Every resolver returns the loaded-only verdict; only this seam, for a batch a person wrote, widens it.
-    Readiness ``None`` (not a local oMLX model, or one this thread can't use) keeps the verdict.
-    """
-    from llm import local_model_load
-    from infra.database import get_db
-
-    if target.available or omlx_seat_and_model(target) is None:
-        return target
-    connection = db if db is not None else get_db()
-    try:
-        readiness = local_model_load.readiness(target, db=connection)
-    finally:
-        if db is None:
-            connection.close()
-    if readiness is None:
-        return target
-    if readiness.state in LOCAL_LOAD_RUNNABLE:
-        return replace(target, available=True, availability_reason=None)
-    return replace(target, availability_reason=readiness.state)
-
-
 TargetAdmission = Literal["run", "wait", "fail"]
 
 
@@ -186,59 +157,15 @@ def classify_target_admission(target: ExecutionTarget) -> TargetAdmission:
     """
     if target.available:
         return "run"
-    if target.availability_reason == "connection_unavailable" or target.availability_reason in LOCAL_LOAD_REFUSALS:
+    if target.availability_reason == "connection_unavailable" or target.availability_reason in (MODEL_LOAD_FAILED, MODEL_LOAD_UNREACHABLE):
         return "fail"
     return "wait"
 
 
-def model_admission(model: str, *, person_send: bool, db=None, thread_id: str | None = None) -> TargetAdmission:
-    """Classify the current catalog target from a claim transaction.
-
-    Permanent resolution errors release an existing hold for the normal driver
-    to fail visibly; only the classifier's ``wait`` outcome preserves it. With a
-    ``thread_id`` the target is the one send resolves, so the thread's project
-    policy keeps its hold exactly as it created it.
-    """
-    try:
-        target = _ready_target(model_resolution.resolve_thread_target(model, thread_id=thread_id, db=db), db=db)
-        return classify_target_admission(person_send_target(target, db=db) if person_send else target)
-    except (ModelUnavailableError, ValueError):
-        return "fail"
-
-
-def lifted_hold_ids(rows, model: str, *, db, thread_id: str | None = None) -> frozenset[str]:
-    """Ids among ``rows`` that the idle claim should release and take.
-
-    Hold and release use ``classify_target_admission`` through the same model
-    resolver, so only an explicitly recoverable model state remains held.
-    """
-    held = frozenset(
-        str(row["id"]) for row in rows
-        if row["write_outcome"] == "proved_no_write"
-        and row["delivery_error"] in (SELECTED_MODEL_UNAVAILABLE, *LOCALITY_REFUSALS)
-    )
-    from connections.account_holds import ACCOUNT_HOLD_REASONS
-
-    from core.message_history import is_human_input
-
-    # Idle callers have already admitted the current durable account choice.
-    account_held = frozenset(str(row['id']) for row in rows
-                            if row['write_outcome'] == 'proved_no_write'
-                            and row['delivery_error'] in ACCOUNT_HOLD_REASONS)
-    # A person's send anywhere in the rows this lift would deliver loads the model for
-    # the whole batch, so a held agent head can't strand it; the batch's own admission
-    # sees the same rows.
-    person_send = False
-    for row in rows:
-        if row['write_outcome'] == 'proved_no_write' and str(row['id']) not in held | account_held:
-            break
-        if is_human_input(str(row['role']), json.loads(row['metadata'] or '{}')):
-            person_send = True
-            break
-    return account_held | (
-        held if held and model_admission(model, db=db, thread_id=thread_id, person_send=person_send) != 'wait'
-        else frozenset()
-    )
+def lifted_hold_ids(held: frozenset[str], account_held: frozenset[str],
+                    admission: TargetAdmission) -> frozenset[str]:
+    """Release model holds unless admission says to wait, and admitted account holds."""
+    return account_held | (held if admission != "wait" else frozenset())
 
 
 def boundary_account_lifted_ids(db, thread_id: str, turn, rows) -> frozenset[str]:

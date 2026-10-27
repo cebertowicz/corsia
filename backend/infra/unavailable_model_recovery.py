@@ -113,6 +113,35 @@ async def hold_unavailable_model_input(
     return receipt
 
 
+def model_admission(model: str, *, person_send: bool, db=None, thread_id: str | None = None):
+    """Classify the target at claim, widening only a person's local send."""
+    from infra.send_target import _ready_target
+    from llm.local_model_load import person_send_target
+    from llm.resolution import ModelUnavailableError, resolve_thread_target
+
+    try:
+        target = _ready_target(resolve_thread_target(model, thread_id=thread_id, db=db), db=db)
+        if person_send and not target.available:
+            target = person_send_target(target, db=db)
+        return classify_target_admission(target)
+    except (ModelUnavailableError, ValueError):
+        return "fail"
+
+
+def liftable_hold_sets(rows) -> tuple[frozenset[str], frozenset[str]]:
+    """Collect model and account holds the idle claim may lift."""
+    from connections.account_holds import ACCOUNT_HOLD_REASONS
+
+    held = (row for row in rows if row['write_outcome'] == 'proved_no_write')
+    model, account = set(), set()
+    for row in held:
+        if row['delivery_error'] in (SELECTED_MODEL_UNAVAILABLE, *LOCALITY_REFUSALS):
+            model.add(str(row['id']))
+        if row['delivery_error'] in ACCOUNT_HOLD_REASONS:
+            account.add(str(row['id']))
+    return frozenset(model), frozenset(account)
+
+
 async def hold_unless_runnable(
     target: ExecutionTarget, batch: ClaimedBatch,
 ) -> ExecutionTarget | InboxQueuedInput:
@@ -123,12 +152,11 @@ async def hold_unless_runnable(
     Only the classifier's model-recoverable state is a wait; nothing outside
     admission asks.
     """
-    from core.message_history import is_human_input
-    from infra.send_target import omlx_seat_and_model, person_send_target
+    from infra.send_target import MODEL_LOAD_FAILED, MODEL_LOAD_UNREACHABLE, omlx_seat_and_model
+    from llm.local_model_load import person_send_target
 
     # Only a local model's admission depends on who wrote the batch: a person's send may load it.
-    if not target.available and omlx_seat_and_model(target) is not None and any(
-            is_human_input(item.role, item.metadata) for item in batch.items):
+    if not target.available and omlx_seat_and_model(target) is not None and batch.person_send:
         target = await run_in_db(person_send_target, target)
     admission = classify_target_admission(target)
     if admission == "run":
@@ -136,10 +164,8 @@ async def hold_unless_runnable(
     if admission == "wait":
         return await hold_unavailable_model_input(batch, target)
     reason = target.availability_reason or "target_unavailable"
-    from infra.send_target import LOCAL_LOAD_REFUSALS, model_load_error
-
-    if reason in LOCAL_LOAD_REFUSALS:
-        raise TargetUnavailable(model_load_error(reason), side=DeliveryFailureSide.PROVIDER)
+    if reason in (MODEL_LOAD_FAILED, MODEL_LOAD_UNREACHABLE):
+        raise TargetUnavailable(reason, side=DeliveryFailureSide.PROVIDER)
     raise TargetUnavailable(
         f"Selected target cannot run: {target.catalog_id} ({reason})",
         side=DeliveryFailureSide.PROVIDER,

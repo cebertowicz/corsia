@@ -9,13 +9,13 @@ import pytest
 
 @pytest.mark.asyncio
 async def test_load_reports_event_and_waits(monkeypatch):
-    from llm.local_model_load import Readiness
     from ws.local_send_load import load_for_person as _load_for_person
 
     target = SimpleNamespace(catalog_id="omlx@srv/m")
     request = SimpleNamespace(thread_id="t", target=target, input_ids=("a", "b"))
     prepared = SimpleNamespace(identity=SimpleNamespace(turn_id="turn"), cancel_event=asyncio.Event())
-    monkeypatch.setattr("ws.local_send_load._local_readiness", lambda _target: Readiness("fits_now"))
+    monkeypatch.setattr("infra.send_target.omlx_seat_and_model", lambda _target: ("srv", "m"))
+    monkeypatch.setattr("llm.network_discovery.get_loaded_model_ids", lambda _server: set())
     load = AsyncMock()
     broadcast = Mock()
     monkeypatch.setattr("llm.local_model_load.ensure_loaded", load)
@@ -30,13 +30,13 @@ async def test_load_reports_event_and_waits(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_cached_loaded_still_confirms_live_without_loading_event(monkeypatch):
-    from llm.local_model_load import Readiness
     from ws.local_send_load import load_for_person as _load_for_person
 
     target = SimpleNamespace(catalog_id="omlx@srv/m")
     request = SimpleNamespace(thread_id="t", target=target, input_ids=("a",))
     prepared = SimpleNamespace(identity=SimpleNamespace(turn_id="turn"), cancel_event=asyncio.Event())
-    monkeypatch.setattr("ws.local_send_load._local_readiness", lambda _target: Readiness("loaded"))
+    monkeypatch.setattr("infra.send_target.omlx_seat_and_model", lambda _target: ("srv", "m"))
+    monkeypatch.setattr("llm.network_discovery.get_loaded_model_ids", lambda _server: {"m"})
     load = AsyncMock()
     broadcast = Mock()
     monkeypatch.setattr("llm.local_model_load.ensure_loaded", load)
@@ -47,28 +47,29 @@ async def test_cached_loaded_still_confirms_live_without_loading_event(monkeypat
 
 
 @pytest.mark.asyncio
-async def test_out_of_scope_readiness_runs_without_load(monkeypatch):
+async def test_out_of_scope_target_is_passed_to_loader(monkeypatch):
     from ws.local_send_load import load_for_person as _load_for_person
 
     request = SimpleNamespace(thread_id="t", target=SimpleNamespace(catalog_id="omlx@srv/m"), input_ids=("a",))
     prepared = SimpleNamespace(identity=SimpleNamespace(turn_id="turn"), cancel_event=asyncio.Event())
-    monkeypatch.setattr("ws.local_send_load._local_readiness", lambda _target: None)
+    monkeypatch.setattr("infra.send_target.omlx_seat_and_model", lambda _target: None)
     load = AsyncMock()
     monkeypatch.setattr("llm.local_model_load.ensure_loaded", load)
     await _load_for_person(request, prepared)
-    load.assert_not_awaited()
+    load.assert_awaited_once_with(request.target)
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("cause, expected", [("load_failed", "model_load_failed"), ("unreachable", "model_load_unreachable")])
 async def test_load_failure_is_mapped(monkeypatch, cause, expected):
-    from llm.local_model_load import ModelLoadFailed, Readiness
+    from llm.local_model_load import ModelLoadFailed
     from ws.local_send_load import load_for_person as _load_for_person
 
     target = SimpleNamespace(catalog_id="omlx@srv/m")
     request = SimpleNamespace(thread_id="t", target=target, input_ids=("a",))
     prepared = SimpleNamespace(identity=SimpleNamespace(turn_id="turn"), cancel_event=asyncio.Event())
-    monkeypatch.setattr("ws.local_send_load._local_readiness", lambda _target: Readiness("fits_now"))
+    monkeypatch.setattr("infra.send_target.omlx_seat_and_model", lambda _target: ("srv", "m"))
+    monkeypatch.setattr("llm.network_discovery.get_loaded_model_ids", lambda _server: set())
     monkeypatch.setattr("llm.local_model_load.ensure_loaded", AsyncMock(side_effect=ModelLoadFailed(cause)))
     monkeypatch.setattr("infra.state.broadcast_to_thread", Mock())
     with pytest.raises(RuntimeError, match=expected):
@@ -77,7 +78,6 @@ async def test_load_failure_is_mapped(monkeypatch, cause, expected):
 
 @pytest.mark.asyncio
 async def test_stop_abandons_wait_without_cancelling_load(monkeypatch):
-    from llm.local_model_load import Readiness
     from ws.local_send_load import load_for_person as _load_for_person
 
     target = SimpleNamespace(catalog_id="omlx@srv/m")
@@ -90,7 +90,8 @@ async def test_stop_abandons_wait_without_cancelling_load(monkeypatch):
         started.set()
         await pending
 
-    monkeypatch.setattr("ws.local_send_load._local_readiness", lambda _target: Readiness("fits_now"))
+    monkeypatch.setattr("infra.send_target.omlx_seat_and_model", lambda _target: ("srv", "m"))
+    monkeypatch.setattr("llm.network_discovery.get_loaded_model_ids", lambda _server: set())
     monkeypatch.setattr("llm.local_model_load.ensure_loaded", load)
     monkeypatch.setattr("infra.state.broadcast_to_thread", Mock())
     turn = asyncio.create_task(_load_for_person(request, prepared))
@@ -101,3 +102,32 @@ async def test_stop_abandons_wait_without_cancelling_load(monkeypatch):
     assert not pending.done()
     pending.set_result(None)
     await asyncio.sleep(0)
+
+
+@pytest.mark.asyncio
+async def test_detached_load_failure_after_stop_is_logged(monkeypatch, caplog):
+    from ws.local_send_load import load_for_person
+
+    request = SimpleNamespace(thread_id="t", target=SimpleNamespace(catalog_id="omlx@srv/m"), input_ids=("a",))
+    prepared = SimpleNamespace(identity=SimpleNamespace(turn_id="turn"), cancel_event=asyncio.Event())
+    pending = asyncio.get_running_loop().create_future()
+    started = asyncio.Event()
+
+    async def load(_target):
+        started.set()
+        await pending
+
+    monkeypatch.setattr("infra.send_target.omlx_seat_and_model", lambda _target: ("srv", "m"))
+    monkeypatch.setattr("llm.network_discovery.get_loaded_model_ids", lambda _server: set())
+    monkeypatch.setattr("llm.local_model_load.ensure_loaded", load)
+    monkeypatch.setattr("infra.state.broadcast_to_thread", Mock())
+    turn = asyncio.create_task(load_for_person(request, prepared))
+    await started.wait()
+    prepared.cancel_event.set()
+    with pytest.raises(asyncio.CancelledError):
+        await turn
+    pending.set_exception(ValueError("detached failure"))
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    assert "Local model load failed unexpectedly" in caplog.text
+    assert "detached failure" in caplog.text

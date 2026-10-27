@@ -19,6 +19,7 @@ def test_human_send_refused_before_message_write(isolated_db, monkeypatch, cause
         monkeypatch.setattr("llm.local_model_load.readiness", lambda *_a, **_k: Readiness(cause, 2))
         with pytest.raises(SendRejected) as raised:
             accept_thread_input("t", role="user", content="hi", intent="apply_now", message_id="m", db=db)
+        assert (raised.value.status_code, raised.value.detail) == (409, "Couldn't load the selected local model.")
         assert raised.value.metadata == {"cause": cause, "other_loaded": 2}
         assert db.execute("SELECT count(*) FROM messages WHERE thread_id='t'").fetchone()[0] == 0
     finally:

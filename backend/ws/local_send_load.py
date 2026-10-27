@@ -1,42 +1,31 @@
 """Load a person's local send within its owned native Turn."""
 
 import asyncio
+import logging
 
 from infra import state
-from llm.resolution import ExecutionTarget
+from llm.local_model_load import ModelLoadFailed
 
-
-def _local_readiness(target: ExecutionTarget):
-    from infra.database import get_db
-    from llm.local_model_load import readiness
-
-    db = get_db()
-    try:
-        return readiness(target, db=db)
-    finally:
-        db.close()
+log = logging.getLogger(__name__)
 
 
 def _consume_load_result(task: asyncio.Task) -> None:
-    if not task.cancelled():
-        task.exception()
+    if task.cancelled():
+        return
+    failure = task.exception()
+    if failure is not None and not isinstance(failure, ModelLoadFailed):
+        log.error("Local model load failed unexpectedly", exc_info=failure)
 
 
 async def load_for_person(request, prepared) -> None:
-    from infra.db_async import run_in_db
-    from infra.send_target import LOCAL_LOAD_RUNNABLE, model_load_error
-    from llm.local_model_load import ModelLoadFailed, ensure_loaded
+    from infra.send_target import model_load_error, omlx_seat_and_model
+    from llm.local_model_load import ensure_loaded
+    from llm.network_discovery import get_loaded_model_ids
 
-    readiness = await run_in_db(_local_readiness, request.target)
     if prepared.cancel_event.is_set():
         raise asyncio.CancelledError()
-    if readiness is None:
-        return
-    if readiness.state not in LOCAL_LOAD_RUNNABLE:
-        raise RuntimeError(model_load_error(readiness.state))
-    # A cached 'loaded' still goes through ensure_loaded's live read, so a model unloaded
-    # since the last sweep is loaded with its fit check rather than by oMLX on the chat request.
-    if readiness.state != "loaded":
+    seat = omlx_seat_and_model(request.target)
+    if seat is not None and seat[1] not in get_loaded_model_ids(seat[0]):
         state.broadcast_to_thread(request.thread_id, {
             "type": "model_loading", "thread_id": request.thread_id,
             "turn_id": prepared.identity.turn_id, "model": request.target.catalog_id,
