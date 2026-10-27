@@ -56,9 +56,7 @@ class ObservedArtifactDecl:
     title: str | None = None
     path: str | None = None
     metadata: Mapping[str, Any] | None = None
-    # The repository the artifact lives in, for a connector that declares project_repositories:
-    # an observe rule registers it only when the caller's project tracks that repository.
-    repository: str | None = None
+
 
 
 @dataclass(frozen=True)

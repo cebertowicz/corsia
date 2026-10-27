@@ -1,4 +1,4 @@
-"""Observe rules: the rows that register the artifact a tool call created to its caller.
+"""Observe rules: rows that register an artifact named in a tool result to its caller.
 
 An ``observe`` row in ``event_rules`` names a tool, for a shell ``bash`` plus the command's
 leading arguments, and the artifact type (``item_type``) the connector's extractor reads from
@@ -85,27 +85,8 @@ def project_of(db: sqlite3.Connection, thread_id: str) -> str | None:
     return row["project_id"] if row else None
 
 
-def outside_project(rule: ObserveRule, artifact: Any, project_id: str | None) -> str | None:
-    """Why an agent-written row may not register ``artifact``, or ``None`` when it may.
-
-    An agent's row registers only an artifact in a repository its own project has registered, so
-    it can't claim another project's pull request. A shipped row reads only what the command
-    itself created and is not held to this. Reads the project's registered repositories (runs
-    git): call it before registering, never under the write lock."""
-    if rule.scope == SHIPPED_SCOPE:
-        return None
-    manifest = connectors.get_manifest(rule.connector)
-    label = f"{artifact.type.replace('-', ' ')} {artifact.external_id}"
-    if manifest.project_repositories is None or not artifact.repository or not project_id:
-        return f"{label} isn't in a repository your project has registered."
-    tracked = manifest.project_repositories(project_id)
-    if tracked is None:
-        return "your project's repositories couldn't be read, so its repository wasn't checked."
-    if artifact.repository.lower() not in {name.lower() for name in tracked}:
-        return f"{label} isn't in a repository your project has registered."
-    return None
-
-
+# Agent rows may register any artifact named in output, like the artifact tool;
+# only the shipped gh pr create row names a command that creates its PR.
 def _known_types() -> list[str]:
     return sorted({item_type for connector in connectors.registered_connectors()
                    for item_type in connectors.get_manifest(connector).artifact_extractors})

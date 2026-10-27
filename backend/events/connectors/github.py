@@ -126,7 +126,6 @@ def _created_pr_artifact(result_text: str) -> ObservedArtifactDecl | None:
         external_id=pr_external_id(repo, number),
         title=f"PR #{number}",
         path=f"https://github.com/{repo}/pull/{number}",
-        repository=repo,
     )
 
 

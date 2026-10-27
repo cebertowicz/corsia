@@ -236,12 +236,6 @@ def observe_command_result(
         if key in seen:
             continue
         seen.add(key)
-        outside = observe_rules.outside_project(rule, artifact, project_id)
-        if outside:
-            _record(db, thread_id, rule, "not_registered", artifact, outside)
-            if told is not None:
-                told.append(f"Not registered: {outside}")
-            continue
         try:
             registered = register_observed_artifact(
                 thread_id, integration=artifact.integration, type=artifact.type,

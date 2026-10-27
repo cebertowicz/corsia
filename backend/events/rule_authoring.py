@@ -21,7 +21,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from events import observe_rules, rule_declarations, rule_explain, rule_reads, rules
-from events.rule_listing import list_rules, rule_set_rows, shape as _shape  # noqa: F401 - re-exported
+from events.rule_listing import OUTCOME_JOINS, OUTCOME_SCOPE, list_rules, rule_set_rows, shape as _shape  # noqa: F401
 from events.rule_actions import RuleRefused, check_script, check_worker
 from events.connectors import EventTypeDecl, get_manifest
 from events.rule_match import matches
@@ -324,7 +324,7 @@ def explain(
     if not project_id:
         return {"decisions": [], "summary": "Rules cover a project's events; this chat is in no project."}
     # A shipped rule set's rule is global: its outcomes show here only for this project's chats.
-    where = ["(r.scope=? OR (r.scope=? AND t.project_id=?))"]
+    where = [OUTCOME_SCOPE]
     args: list[Any] = [rules.project_scope(project_id), observe_rules.SHIPPED_SCOPE, project_id]
     if event_id:
         where.append("d.event_id=?")
@@ -336,8 +336,8 @@ def explain(
         where.append("d.thread_id=?")
         args.append(thread)
     rows = db.execute(
-        "SELECT d.*, r.action FROM event_route_decisions d JOIN event_rules r ON r.id=d.rule_id "
-        f"LEFT JOIN threads t ON t.id=d.thread_id WHERE {' AND '.join(where)} ORDER BY d.id DESC LIMIT ?",
+        f"SELECT d.*, r.action FROM event_route_decisions d {OUTCOME_JOINS} "
+        f"WHERE {' AND '.join(where)} ORDER BY d.id DESC LIMIT ?",
         (*args, _EXPLAIN_LIMIT),
     ).fetchall()
     decisions = [rule_explain.decision(db, row) for row in rows]

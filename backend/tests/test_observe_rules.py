@@ -1,4 +1,4 @@
-"""Observe rules: the rows that register the artifact a shell command created to its caller.
+"""Observe rules: rows that register an artifact named in shell output to its caller.
 
 Each test drives the real entrypoints (the ``event_rules`` tool, the shell tool, the observer) on a
 disposable database; only the shell's subprocess is stubbed.
@@ -8,12 +8,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sqlite3
 from datetime import datetime, timezone
 
 import pytest
 
 from events import connectors
-from events.connectors.github_notifications_feed import FeedError
 from infra.database import get_db
 from registry import models
 from registry.observer import CommandArtifactRegistrationError, observe_command_result
@@ -30,20 +30,7 @@ SHIP = ["ship-pr", "--fast"]
 OTHER_URL = "https://github.com/owner/repo/pull/43"
 FOREIGN_URL = "https://github.com/elsewhere/repo/pull/7"
 FOREIGN = "elsewhere/repo#7"
-_tracked: dict[str, set[str]] = {}
 
-
-def _unreadable(project_id=None):
-    raise FeedError("repo_scope_unavailable")
-
-
-@pytest.fixture(autouse=True)
-def _project_repositories(monkeypatch):
-    """Project P has registered owner/repo; Q has registered nothing."""
-    _tracked.clear()
-    _tracked[P] = {"owner/repo"}
-    monkeypatch.setattr("events.connectors.github_notifications_feed.tracked_github_repositories",
-                        lambda project_id=None: frozenset(_tracked.get(project_id, ())))
 
 
 def _write(sql: str, *args) -> None:
@@ -141,6 +128,46 @@ async def test_create_refuses_what_an_observe_row_cannot_do(isolated_db):
     assert len(_rows("SELECT id FROM event_rules WHERE kind='observe' AND origin LIKE 'agent:%'")) == 1
 
 
+@pytest.mark.asyncio
+async def test_shipped_list_stats_are_scoped_to_each_project(isolated_db):
+    _agent("a", P)
+    _agent("b", Q)
+    _run("a", "gh pr create", _URL + "\n")
+    _run("b", "gh pr create", OTHER_URL + "\n")
+    _write("UPDATE event_route_decisions SET at=? WHERE thread_id=?", "2026-01-01T00:00:00+00:00", "a")
+    _write("UPDATE event_route_decisions SET at=? WHERE thread_id=?", "2026-02-01T00:00:00+00:00", "b")
+    now = datetime.now(timezone.utc).isoformat()
+    for thread in ("a", "b", "b"):
+        _write("INSERT INTO event_route_decisions (at,event_id,connector,event_type,watch_event,rule_id,thread_id,outcome,via) "
+               "VALUES (?,?, 'github', 'observe:bash', '', 'ruleset_github_pr_create', ?, 'skipped', 'rule')",
+               now, f"skip-{thread}", thread)
+    for thread, expected, skips in (("a", "2026-01-01T00:00:00+00:00", 1),
+                                    ("b", "2026-02-01T00:00:00+00:00", 2)):
+        [row] = (await _tool(thread, operation="list"))["rule_sets"]
+        assert (row["last_fired"], row["skips_24h"]) == (expected, skips)
+        assert len((await _tool(thread, operation="explain", artifact=PR))["decisions"]) == (thread == "a")
+
+
+@pytest.mark.parametrize("kind,extra", [
+    ("observe", {"event_type": "event"}),
+    ("route", {"tool": "bash"}),
+    ("observe", {"workflow_id": "workflow"}),
+    ("observe", {"request_identity_fact": "fact"}),
+])
+def test_storage_rejects_mixed_rule_fields(isolated_db, kind, extra):
+    db = get_db()
+    values = {"id": "bad", "created_at": "now", "updated_at": "now", "kind": kind,
+              "scope": "project:p", "connector": "github", "origin": "agent:a",
+              "created_by": "a", "authority_ref": "self"}
+    values.update({"tool": "bash", "argv_prefix": '["gh"]', "item_type": "pull-request"} if kind == "observe" else
+                  {"event_type": "event", "action": "drop", "to": "thread:a"})
+    values.update(extra)
+    columns = ', '.join(f'"{name}"' for name in values)
+    with pytest.raises(sqlite3.IntegrityError):
+        db.execute(f"INSERT INTO event_rules ({columns}) VALUES ({','.join('?' for _ in values)})", tuple(values.values()))
+    db.close()
+
+
 def test_the_shipped_rule_registers_gh_pr_create_for_every_caller(isolated_db):
     _agent("a")
     mk_session("loner")  # in no project: the shipped rule still covers it
@@ -183,23 +210,12 @@ def test_missing_extractor_is_reported_and_recorded(isolated_db, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_an_agent_row_registers_only_in_a_repository_its_project_has_registered(isolated_db, monkeypatch):
+async def test_agent_row_can_register_a_pr_named_by_read_only_command(isolated_db):
     _agent("a")
-    await _observe_rule("a")
-    artifact, told = _run("a", "ship-pr --fast", FOREIGN_URL + "\n")
-    assert (artifact, _owner(FOREIGN)) == (None, None)  # it has no owner, and is still not claimed
-    assert told == [f"Not registered: pull request {FOREIGN} isn't in a repository your project has registered."]
-    [why] = (await _tool("a", operation="explain", artifact=FOREIGN))["decisions"]
-    assert why["outcome"] == "not_registered" and "isn't in a repository" in why["reason"]
-    assert _run("a", "ship-pr --fast")[0]["parent_thread_id"] == "a"  # a registered repository still is
-
-    _tracked[P] = {"Elsewhere/Repo"}  # a remote's own capitalisation
-    assert _run("a", "ship-pr --fast", FOREIGN_URL + "\n")[0]["parent_thread_id"] == "a"
-
-    monkeypatch.setattr("events.connectors.github_notifications_feed.tracked_github_repositories", _unreadable)
-    unread, told = _run("a", "ship-pr --fast", OTHER_URL + "\n")
-    assert (unread, _owner("owner/repo#43")) == (None, None)
-    assert told == ["Not registered: your project's repositories couldn't be read, so its repository wasn't checked."]
+    await _observe_rule("a", argv_prefix=["gh", "pr", "view"])
+    artifact, told = _run("a", "gh pr view 7", FOREIGN_URL + "\n")
+    assert artifact["parent_thread_id"] == "a" == _owner(FOREIGN)
+    assert told == [f"Registered pull request {FOREIGN} to you."]
 
 
 def test_a_shipped_row_is_not_held_to_the_projects_repositories(isolated_db):

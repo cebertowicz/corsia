@@ -28,27 +28,35 @@ def _shaped(row: sqlite3.Row) -> dict[str, Any]:
     return shape(rules.from_row(row))
 
 
-def _stats(db: sqlite3.Connection, ids: list[str], now: str) -> dict[str, sqlite3.Row]:
+# Shared with explain: global rule outcomes belong to the project of the calling chat.
+OUTCOME_SCOPE = "(r.scope=? OR (r.scope=? AND t.project_id=?))"
+OUTCOME_JOINS = " JOIN event_rules r ON r.id=d.rule_id LEFT JOIN threads t ON t.id=d.thread_id "
+
+
+def _stats(db: sqlite3.Connection, ids: list[str], now: str, project_id: str | None) -> dict[str, sqlite3.Row]:
     since = (datetime.fromisoformat(now) - timedelta(hours=24)).isoformat()
     marks = ",".join("?" * len(ids))
     # A start is a script run or a worker start, queued or begun.
     started = f"outcome IN ({_STARTS})"
     return {
         row["rule_id"]: row for row in db.execute(
-            f"SELECT rule_id, MAX(CASE WHEN outcome IN ({_ACTED}) OR "
+            f"SELECT d.rule_id, MAX(CASE WHEN outcome IN ({_ACTED}) OR "
             f"{started} THEN at END) AS last_fired, SUM(outcome='woke' AND via='rule' AND at>=?) "
             f"AS wakes, SUM({started} AND at>=?) AS starts, "
             "SUM(outcome='skipped' AND at>=?) AS skips "
-            f"FROM event_route_decisions WHERE rule_id IN ({marks}) GROUP BY rule_id",
-            (since, since, since, *ids),
+            f"FROM event_route_decisions d {OUTCOME_JOINS} WHERE d.rule_id IN ({marks}) "
+            f"AND {OUTCOME_SCOPE} GROUP BY d.rule_id",
+            (since, since, since, *ids, rules.project_scope(project_id) if project_id else '',
+             observe_rules.SHIPPED_SCOPE, project_id),
         ).fetchall()
     }
 
 
-def _with_stats(db: sqlite3.Connection, found: list[sqlite3.Row], now: str) -> list[dict[str, Any]]:
+def _with_stats(db: sqlite3.Connection, found: list[sqlite3.Row], now: str,
+                project_id: str | None) -> list[dict[str, Any]]:
     if not found:
         return []
-    stats = _stats(db, [row["id"] for row in found], now)
+    stats = _stats(db, [row["id"] for row in found], now, project_id)
     return [
         {**_shaped(row),
          "last_fired": stats[row["id"]]["last_fired"] if row["id"] in stats else None,
@@ -70,13 +78,13 @@ def list_rules(db: sqlite3.Connection, *, project_id: str | None, now: str) -> l
         "ORDER BY created_at, id",
         (rules.project_scope(project_id), cutoff),
     ).fetchall()
-    return _with_stats(db, found, now)
+    return _with_stats(db, found, now, project_id)
 
 
-def rule_set_rows(db: sqlite3.Connection, *, now: str) -> list[dict[str, Any]]:
+def rule_set_rows(db: sqlite3.Connection, *, now: str, project_id: str | None) -> list[dict[str, Any]]:
     """The shipped rule sets' rows, which apply to every caller in every project."""
     found = db.execute(
         "SELECT * FROM event_rules WHERE scope=? AND enabled=1 ORDER BY created_at, id",
         (observe_rules.SHIPPED_SCOPE,),
     ).fetchall()
-    return _with_stats(db, found, now)
+    return _with_stats(db, found, now, project_id)

@@ -59,7 +59,7 @@ def _run(operation: str, thread_id: str, project_id: str | None, kwargs: dict[st
             return rule_types.types(db, kwargs.get("connector"))
         if operation == "list":
             return {"rules": rule_authoring.list_rules(db, project_id=project_id, now=now),
-                    "rule_sets": rule_authoring.rule_set_rows(db, now=now)}
+                    "rule_sets": rule_authoring.rule_set_rows(db, now=now, project_id=project_id)}
         if operation == "test":
             return {"matches": rule_authoring.dry_run(
                 db, caller=thread_id, project_id=project_id, connector=kwargs.get("connector"),

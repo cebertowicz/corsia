@@ -60,7 +60,8 @@ def test_storage_ties_each_kind_to_its_own_fields_and_global_scope_to_a_shipped_
         ("global", "agent:w", "bash", '["gh"]', "pull-request"),   # global is a rule set's alone
         ("project:p", "agent:w", None, '["gh"]', "pull-request"),  # an observe rule names its tool
         ("project:p", "agent:w", "bash", '["gh"]', None),          # and its artifact type
-        ("project:p", "agent:w", "bash", "[]", "pull-request"),    # and some leading argument
+        ("project:p", "agent:w", "bash", None, "pull-request"),    # and a prefix
+        ("project:p", "agent:w", "bash", "[]", "pull-request"),    # with a leading argument
     ):
         with pytest.raises(sqlite3.IntegrityError):
             db.execute(observe, ("bad", scope, origin, tool, prefix, item))
