@@ -564,3 +564,39 @@ test('plan copy: task details, read-only discussion, task menu, empty pane, acti
 		}
 	}
 });
+
+test('plan copy: the plan pane when its plan is forbidden, fails to load, or can’t be read', async ({ page }, info) => {
+	test.skip(info.project.name !== 'chromium-desktop', 'Both viewport widths are captured in this project.');
+	test.setTimeout(150_000);
+	const states = [
+		{ frame: 21, status: 403, json: {}, text: 'You don’t have access to this chat. Choose another.', button: null },
+		{ frame: 22, status: 500, json: { detail: 'internal', reference: 'a1b2c3d4' }, text: 'Couldn’t load the plan. Try again. Reference: a1b2c3d4', button: 'Retry' },
+		{ frame: 23, status: 200, json: { contract_version: 99 }, text: 'Couldn’t read this plan. Reload the page.', button: 'Reload' },
+	];
+	await page.route('**/api/attention/queue*', route => route.fulfill({ json: { current: null, count: 0, items: [] } }));
+	for (const width of [1920, 393]) {
+		for (const state of states) {
+			await page.unroute('**/api/plans/operator/threads/**');
+			await page.route('**/api/plans/operator/threads/**', route => route.fulfill({ status: state.status, json: state.json }));
+			await view(page, width, width === 393 ? 852 : 1080, 'light');
+			await page.goto('/_design?frame=attention-dock&scenario=empty');
+			// The pane alone, at the plan drawer's width on desktop and full width on a phone.
+			await page.evaluate(async (paneWidth) => {
+				const load = (path: string) => import(/* @vite-ignore */ path);
+				const { mount, flushSync } = await load('/node_modules/.vite/deps/svelte.js');
+				const auth = await load('/src/lib/stores/auth.ts');
+				auth.token.set('design-frame');
+				const { default: Component } = await load('/src/lib/components/plans/ThreadPlanPane.svelte');
+				document.body.replaceChildren();
+				const host = document.createElement('aside');
+				host.style.cssText = `width:${paneWidth}; border-right:1px solid var(--border); min-height:240px;`;
+				document.body.appendChild(host);
+				mount(Component, { target: host, props: { threadId: 'frame-thread' } });
+				flushSync();
+			}, width === 393 ? '100%' : '312px');
+			await expect(page.getByText(state.text)).toBeVisible();
+			if (state.button) await expect(page.getByRole('button', { name: state.button, exact: true })).toBeVisible();
+			await shot(page, `copy-${state.frame}-${width}`);
+		}
+	}
+});
