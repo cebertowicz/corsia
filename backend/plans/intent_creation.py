@@ -31,5 +31,6 @@ def prepare(db, plan_id: str, params: dict, *, workflow_version: str | None, ope
 
 def capture(db, node, words: list[dict[str, str]], *, actor) -> None:
     """Record the turn's origin and resolved caller words at node revision one."""
-    intent_words.capture_origin(db, node.id, turn_id=actor.turn_id, revision=node.requirements_revision)
+    if not any(word["author"] == "person" for word in words):
+        intent_words.capture_origin(db, node.id, turn_id=actor.turn_id, revision=node.requirements_revision)
     intent_words.append(db, node.id, words, revision=node.requirements_revision)

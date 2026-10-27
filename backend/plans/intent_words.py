@@ -211,13 +211,13 @@ def document_comment_intent(items: Iterable[dict[str, Any]]) -> str:
 def has_person_origin(connection: sqlite3.Connection, turn_id: str | None) -> bool:
     if turn_id is None:
         return False
-    return any(_is_person_message(row) for row in connection.execute(
+    return sum(_is_person_message(row) for row in connection.execute(
         "SELECT role,content,metadata FROM messages WHERE active_turn_id=?", (turn_id,)
-    ))
+    )) == 1
 
 
 def capture_origin(connection: sqlite3.Connection, node_id: str, *, turn_id: str | None, revision: int) -> bool:
-    """Append every input consumed by this turn and report whether one is human-authored."""
+    """Capture an unambiguous turn input and report whether it is person-authored."""
     if turn_id is None:
         return False
     rows = connection.execute(
@@ -225,15 +225,18 @@ def capture_origin(connection: sqlite3.Connection, node_id: str, *, turn_id: str
            WHERE active_turn_id=? ORDER BY input_order,id""", (turn_id,)
     ).fetchall()
     person = [row for row in rows if _is_person_message(row)]
-    if person:
-        append(connection, node_id, (
-            {"quote": bounded_text(row["content"].strip(), MAX_QUOTE_BYTES), "author": "person", "role": "origin",
-             "source_kind": "message", "source_id": row["id"]}
-            for row in person
-        ), revision=revision)
+    if len(person) == 1:
+        row = person[0]
+        append(connection, node_id, [{
+            "quote": bounded_text(row["content"].strip(), MAX_QUOTE_BYTES), "author": "person", "role": "origin",
+            "source_kind": "message", "source_id": row["id"],
+        }], revision=revision)
         return True
-    agent = next((row for row in rows if _is_agent_message(row)), None)
-    if agent is not None:
+    if person:
+        return False
+    agents = [row for row in rows if _is_agent_message(row)]
+    if len(agents) == 1:
+        agent = agents[0]
         append(connection, node_id, [{"quote": bounded_text(agent["content"].strip(), MAX_QUOTE_BYTES),
                                       "author": "agent", "role": "origin",
                                       "source_kind": "message", "source_id": agent["id"]}], revision=revision)
