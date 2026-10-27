@@ -172,7 +172,7 @@
 				{#if kind === 'local'}
 					<label class="field"><span>What it runs</span><small>Paste what the app's setup instructions say to run</small><input bind:this={setupInput} aria-label="What it runs" value={command} oninput={(event) => command = event.currentTarget.value} placeholder="npx -y @example/app" /></label>
 					<label class="field"><span>Name</span><small>What you'll see in CORSIA</small><input aria-label="Name" value={name} oninput={(event) => name = event.currentTarget.value} /></label>
-					<p class="notice">It can do anything you can do on this computer, except open CORSIA's own files and saved keys. Connect only apps you trust.</p>
+					<p class="notice">It can do anything you can do on the computer it runs on, except open CORSIA’s own files and saved keys. Connect only apps you trust.</p>
 				{:else}
 					<label class="field"><span>Web address</span><small>Paste the address from the app's setup instructions</small><input bind:this={setupInput} aria-label="Web address" value={address} oninput={(event) => suggestName(event.currentTarget.value)} placeholder="https://mcp.example.com" /></label>
 					<label class="field"><span>Name</span><small>What you'll see in CORSIA</small><input aria-label="Name" value={name} oninput={(event) => name = event.currentTarget.value} /></label>

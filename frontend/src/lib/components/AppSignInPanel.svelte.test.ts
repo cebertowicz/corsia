@@ -154,9 +154,9 @@ describe('AppSignInPanel', () => {
 		expect(host.textContent).toContain('tenant is frozen');
 	});
 
-	it('does not offer Sign in away from the computer CORSIA runs on', () => {
+	it('does not offer Sign in away from the main computer', () => {
 		mountPanel(linear(), { signInHere: false });
-		expect(host.textContent).toContain('You can only sign in on the computer CORSIA runs on. Open CORSIA there and press Sign in.');
+		expect(host.textContent).toContain('You can only sign in on your main computer. Open CORSIA there and press Sign in.');
 		expect(button('Sign in')).toBeUndefined();
 	});
 
@@ -188,7 +188,7 @@ describe('ConnectedAppsSettings with sign-in', () => {
 	it('hides Sign in when the backend says the person is not on its computer', async () => {
 		vi.stubGlobal('fetch', vi.fn(async () => reply({ servers: [linear()], sign_in_here: false })));
 		component = mount(ConnectedAppsSettings, { target: host });
-		await vi.waitFor(() => expect(host.textContent).toContain('You can only sign in on the computer CORSIA runs on.'));
+		await vi.waitFor(() => expect(host.textContent).toContain('You can only sign in on your main computer.'));
 		expect(button('Sign in')).toBeUndefined();
 	});
 

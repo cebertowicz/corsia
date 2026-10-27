@@ -73,11 +73,11 @@ describe('ConnectAppFlow', () => {
 		render();
 		expect(document.body.textContent).toContain('What');
 		expect(document.body.textContent).toContain('Opens a chat with CORSIA to sign in.');
-		expect(document.body.textContent).not.toContain('It can do anything you can do on this computer');
+		expect(document.body.textContent).not.toContain('It can do anything you can do on the computer it runs on');
 		press('Continue');
 		expect(document.body.textContent).toContain('Set it up');
 		expect(document.body.textContent).not.toContain('They may call it an MCP server.');
-		expect(document.body.textContent).toContain("It can do anything you can do on this computer, except open CORSIA's own files and saved keys. Connect only apps you trust.");
+		expect(document.body.textContent).toContain("It can do anything you can do on the computer it runs on, except open CORSIA’s own files and saved keys. Connect only apps you trust.");
 	});
 
 	it('asks for the connection detail before the name for each app kind', () => {
@@ -112,7 +112,7 @@ describe('ConnectAppFlow', () => {
 		flushSync();
 		expect(document.body.textContent).toContain('Only agents in Outside projects will be able to use it.');
 		expect(document.body.textContent).not.toContain('They may call it an MCP server.');
-		expect(document.body.textContent).not.toContain('It can do anything you can do on this computer');
+		expect(document.body.textContent).not.toContain('It can do anything you can do on the computer it runs on');
 	});
 
 	it('posts the local setup and reach only after the final Connect action', async () => {

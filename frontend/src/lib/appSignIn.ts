@@ -3,7 +3,7 @@ import type { ConnectedApp } from '$lib/api/connectedApps';
 // Every string here comes from the plain-language copy sheet (Sign-in section, row table and lede), with <app> filled in.
 
 export const SIGN_IN_LEDE = "Signing in lets the agents that can use an app act as you in it. You sign in on the app's own page in your browser, so CORSIA never sees your password.";
-export const NOT_ON_THIS_COMPUTER = 'You can only sign in on the computer CORSIA runs on. Open CORSIA there and press Sign in.';
+export const NOT_ON_THIS_COMPUTER = 'You can only sign in on your main computer. Open CORSIA there and press Sign in.';
 
 /** Whether the row is waiting on, or in the middle of, a sign-in the person has to act on. A failed attempt stops needing them once the app is signed in. */
 export function needsSignInAttention(app: ConnectedApp): boolean {
