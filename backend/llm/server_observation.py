@@ -4,7 +4,10 @@ A server's state is its status, its observed model set (``_LOADED_BY_SERVER``,
 which a row needs before it reports ``ready``) and, through discovery's
 reconcile, each model's ``available`` flag. :func:`record_reachable`,
 :func:`record_unreachable` and, for managed oMLX, :func:`forget_loaded_on_exit`
-are the only transitions; the sources differ only in what they observed:
+are the observation transitions; the sources differ only in what they observed.
+Disabling or removing a server, and the freshness guard's offline flip, also
+clear its observed set without a new generation; a late publish there is
+harmless because a row reports ``ready`` only while its server is online.
 
 - the health sweep probes managed oMLX and LAN External servers every 10s;
 - discovery (add, edit, Test connection, startup) observes a cloud External

@@ -444,7 +444,7 @@ async def test_a_reload_that_cannot_read_oMLX_models_never_says_downloaded_but_n
     reload_fakes(monkeypatch, [], sizes={})
     monkeypatch.setattr(local_keep_loaded, "_model_rows", unreadable)
     await local_keep_loaded.reload_after_restart(SID, ["gone"])
-    assert local_keep_loaded.failures(SID) == {"gone": "Not loaded after oMLX restarted. Load it to try again."}
+    assert local_keep_loaded.failures(SID) == {"gone": "Not loaded: oMLX couldn’t load it. Try again."}
 
     from llm.local_model import LocalModel
 

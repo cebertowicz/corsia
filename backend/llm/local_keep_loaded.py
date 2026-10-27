@@ -40,7 +40,7 @@ log = logging.getLogger(__name__)
 NOT_KEPT = "Downloaded, but couldn’t keep it loaded. Turn it on to try again."
 NOT_LOADED = "Not loaded: oMLX couldn’t load it. Turn it off and on again to retry."
 NOT_LOADED_UNPINNED = "Not loaded: oMLX couldn’t load it. Turn it on to try again."
-NOT_LOADED_UNKNOWN = "Not loaded after oMLX restarted. Load it to try again."
+NOT_LOADED_UNKNOWN = "Not loaded: oMLX couldn’t load it. Try again."
 
 _FAILED: dict[tuple[str, str], str] = {}
 
