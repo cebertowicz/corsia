@@ -128,6 +128,23 @@ def _require(value: object, choices: tuple[str, ...], field: str) -> str:
     return str(value)
 
 
+def _present(attributes: dict[str, Any]) -> dict[str, Any]:
+    """Keep only supplied fields, so a field the allowlist drops is one the caller actually sent."""
+    return {key: value for key, value in attributes.items() if value is not None}
+
+
+def _refuse_dropped(result: Any) -> None:
+    """Refuse a fact whose allowlist dropped a field, so the caller's transaction records nothing.
+
+    The facts are immutable, so a stored fact missing a reason this module required would be permanent.
+    """
+    if result.dropped_keys:
+        raise ValueError(
+            f"{', '.join(result.dropped_keys)} was not accepted (over 500 characters, an id with a space, "
+            "or credential-like text); nothing was recorded. Correct it and call again."
+        )
+
+
 def _subject_exists(db: sqlite3.Connection, thread_id: str, subject_key: str) -> None:
     from core.corrections_recording import CORRECTION_EVENT
 
@@ -207,12 +224,13 @@ def record_triage(
     result = record_outcome_event(
         db, dedupe_key=f"{TRIAGE_EVENT}:{subject_key}", event_name=TRIAGE_EVENT,
         source="agent", provenance="agent_recorded", ts=_now(), subject_key=subject_key,
-        agent_thread_id=thread_id, attributes={
+        agent_thread_id=thread_id, attributes=_present({
             "tier": tier_value, "cause": cause_value, "new_work": None if new_work is None else str(new_work),
             "new_work_signal": signal, "target_file": target,
             "serious_proposed": "yes" if proposed_serious else "no", "serious_lowered_reason": lowered,
-        },
+        }),
     )
+    _refuse_dropped(result)
     return {"subject_key": subject_key, "event_id": result.event_id, "target_file": target}
 
 
@@ -242,10 +260,11 @@ def record_terminal_outcome(
     result = record_outcome_event(
         db, dedupe_key=f"{OUTCOME_EVENT}:{subject_key}", event_name=OUTCOME_EVENT,
         source="agent", provenance="agent_recorded", ts=_now(), subject_key=subject_key,
-        agent_thread_id=thread_id, attributes={
+        agent_thread_id=thread_id, attributes=_present({
             "outcome": outcome_value, "reason": clean_reason,
             "lesson_id": lesson_id.strip() if isinstance(lesson_id, str) else None,
             "workflow_version": workflow_version.strip() if isinstance(workflow_version, str) else None,
-        },
+        }),
     )
+    _refuse_dropped(result)
     return {"subject_key": subject_key, "event_id": result.event_id, "outcome": outcome_value}

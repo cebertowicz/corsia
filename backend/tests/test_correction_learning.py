@@ -340,6 +340,20 @@ def test_terminal_outcome_is_immutable_and_dropped_needs_reason(tmp_path: Path) 
         record_terminal_outcome(db, thread_id=THREAD, subject_key="message:other", outcome="dropped")
 
 
+def test_a_field_the_allowlist_drops_refuses_the_fact_instead_of_storing_it_without_the_field() -> None:
+    too_long = "x" * 501
+
+    # Each case gets its own database: the tool's write transaction rolls the refused fact back, a bare connection does not.
+    with pytest.raises(ValueError, match="serious_lowered_reason was not accepted"):
+        record_triage(
+            _db(), thread_id=THREAD, subject_key=SUBJECT, tier="note", new_work="no", serious_lowered_reason=too_long,
+        )
+    with pytest.raises(ValueError, match="reason was not accepted"):
+        record_terminal_outcome(_db(), thread_id=THREAD, subject_key=SUBJECT, outcome="dropped", reason=too_long)
+    with pytest.raises(ValueError, match="lesson_id was not accepted"):
+        record_terminal_outcome(_db(), thread_id=THREAD, subject_key=SUBJECT, outcome="lesson", lesson_id="has space")
+
+
 def test_triage_and_outcome_run_through_the_continuity_tool(tmp_path: Path) -> None:
     from infra.continuity_store import ContinuityError
     from tools.continuity import _execution_error, _live_operation, _result_text
