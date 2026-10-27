@@ -595,6 +595,11 @@ fn grant_local_service_origin<R: tauri::Runtime>(app: &tauri::AppHandle<R>, serv
     Ok(())
 }
 
+fn local_service_ready<R: tauri::Runtime>(app: &tauri::AppHandle<R>, service: &AppServiceState, port: u16) -> Result<ServiceStartup, String> {
+    grant_local_service_origin(app, service, port)?;
+    Ok(ServiceStartup::Ready { url: service_url(port) })
+}
+
 fn bundled_resource_dir<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<PathBuf, String> {
     match app.path().resource_dir() {
         Ok(path) => Ok(path),
@@ -854,8 +859,7 @@ fn attach_healthy_active_service<R: tauri::Runtime>(
         return Ok(None);
     }
     *service.app_dir.lock().map_err(|_| "service state is unavailable")? = Some(app_dir.to_path_buf());
-    grant_local_service_origin(app, service, port)?;
-    Ok(Some(ServiceStartup::Ready { url: service_url(port) }))
+    local_service_ready(app, service, port).map(Some)
 }
 
 fn start_service<R: tauri::Runtime>(
@@ -989,10 +993,7 @@ fn start_service_in<R: tauri::Runtime>(
     match register_or_report_status(port)? {
         service_management::ServiceStatus::Enabled => {
             wait_for_service(port, &app_dir)?;
-            grant_local_service_origin(app, service, port)?;
-            Ok(ServiceStartup::Ready {
-                url: service_url(port),
-            })
+            local_service_ready(app, service, port)
         }
         service_management::ServiceStatus::RequiresApproval => Ok(ServiceStartup::RequiresApproval),
         service_management::ServiceStatus::NotRegistered => {
@@ -1224,7 +1225,8 @@ fn grant_remote_proxy_origin<R: tauri::Runtime>(app: &tauri::AppHandle<R>, proxy
             .remote(format!("http://127.0.0.1:{proxy_port}"))
             .window("main")
             .permission("allow-disconnect-remote")
-            .permission("allow-start-window-drag"),
+            .permission("allow-start-window-drag")
+            .permission_scoped("opener:allow-open-url", local_service_external_url_scopes(), Vec::<serde_json::Value>::new()),
     ).map_err(|error| format!("could not grant remote proxy commands: {error}"))
 }
 
@@ -1873,7 +1875,7 @@ fn adopt_existing_install_blocking(app: &tauri::AppHandle) -> Result<ServiceStar
     let switched = |message: &str| adoption::AdoptionError::switched(message);
     *service.app_dir.lock().map_err(|_| switched("service state is unavailable"))? = Some(app_dir.clone());
     wait_for_service(port, &app_dir).map_err(|error| switched(&error))?;
-    Ok(ServiceStartup::Ready { url: service_url(port) })
+    local_service_ready(app, &service, port).map_err(|error| switched(&error))
 }
 
 /// The earlier install's service, stopped through its own checkout when this app could adopt it.
@@ -2022,7 +2024,7 @@ async fn check_service_started(app: tauri::AppHandle) -> Result<ServiceStartup, 
         let app_dir = default_app_dir(&checking).map_err(adoption::AdoptionError::switched)?;
         let port = lifecycle::service_port(&checking, &service);
         wait_for_service(port, &app_dir).map_err(adoption::AdoptionError::switched)?;
-        Ok(ServiceStartup::Ready { url: service_url(port) })
+        local_service_ready(&checking, &service, port).map_err(adoption::AdoptionError::switched)
     })
     .await;
     local_start_answered(&app, answer)
@@ -2950,6 +2952,10 @@ mod tests {
             }
             assert!(invoke_from(&webview, command, proxy_origin).is_err(), "{command} was allowed from the proxy origin");
         }
+        let command = "plugin:opener|open_url";
+        let error = invoke_from(&webview, command, proxy_origin).unwrap_err();
+        assert!(!error.to_string().contains("not allowed"), "opener was ACL-refused: {error}");
+        assert!(invoke_from(&webview, command, "http://127.0.0.1:47912").unwrap_err().to_string().contains("not allowed"));
     }
 
     #[test]
@@ -3291,6 +3297,28 @@ mod tests {
     }
 
     #[test]
+    fn every_local_ready_path_uses_the_shared_grant_step() {
+        let source = include_str!("lib.rs");
+        for function in ["fn attach_healthy_active_service<", "fn start_service_in<", "fn adopt_existing_install_blocking(", "async fn check_service_started("] {
+            let body = source.split(function).nth(1).unwrap().split("\n}\n").next().unwrap();
+            assert!(body.contains("local_service_ready("), "{function} does not use the shared ready step");
+            assert!(!body.contains("ServiceStartup::Ready {"), "{function} bypasses the shared ready step");
+        }
+    }
+
+    #[test]
+    fn local_service_ready_grants_opener_to_its_exact_origin() {
+        let app = acl_test_app();
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default()).build().unwrap();
+        let port = 47895;
+        assert_eq!(local_service_ready(app.handle(), &AppServiceState::default(), port).unwrap(), ServiceStartup::Ready { url: service_url(port) });
+        let command = "plugin:opener|open_url";
+        let error = invoke_from(&webview, command, &service_url(port)).unwrap_err();
+        assert!(!error.to_string().contains("not allowed"), "opener was ACL-refused: {error}");
+        assert!(invoke_from(&webview, command, &service_url(port + 1)).unwrap_err().to_string().contains("not allowed"));
+    }
+
+    #[test]
     fn the_local_service_origin_can_open_http_links_but_no_other_remote_origin_can() {
         let (_app, webview) = service_origin_app(47895);
         let command = "plugin:opener|open_url";
@@ -3302,6 +3330,51 @@ mod tests {
         for other in ["http://127.0.0.1:47896", "http://localhost:47895", "https://127.0.0.1:47895", "http://studio.example:47895", "http://127.0.0.1"] {
             let refusal = invoke_from(&webview, command, other).unwrap_err();
             assert!(refusal.to_string().contains("not allowed"), "{command} was not ACL-refused from {other}: {refusal}");
+        }
+    }
+
+    #[derive(Debug, serde::Deserialize)]
+    struct TestOpenerScope { url: String }
+
+    #[tauri::command]
+    fn open_url(command_scope: tauri::ipc::CommandScope<TestOpenerScope>, url: String) -> bool {
+        command_scope.allows().iter().any(|scope| scope.url.strip_suffix('*').is_some_and(|prefix| url.starts_with(prefix)))
+    }
+
+    #[test]
+    fn local_and_proxy_opener_receive_http_scopes() {
+        let plugin = tauri::plugin::Builder::<tauri::test::MockRuntime>::new("opener")
+            .invoke_handler(tauri::generate_handler![open_url]).build();
+        let app = tauri::test::mock_builder().plugin(plugin).build(generated_context()).unwrap();
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default()).build().unwrap();
+        local_service_ready(app.handle(), &AppServiceState::default(), 47895).unwrap();
+        grant_remote_proxy_origin(app.handle(), 47911).unwrap();
+        for origin in [service_url(47895), service_url(47911)] {
+            for (target, expected) in [("https://example.com", true), ("file:///etc/hosts", false)] {
+                let response = tauri::test::get_ipc_response(&webview, tauri::webview::InvokeRequest {
+                    cmd: "plugin:opener|open_url".into(), callback: tauri::ipc::CallbackFn(0), error: tauri::ipc::CallbackFn(1),
+                    url: origin.parse().unwrap(), body: tauri::ipc::InvokeBody::Json(serde_json::json!({ "url": target })),
+                    headers: Default::default(), invoke_key: tauri::test::INVOKE_KEY.to_string(),
+                }).unwrap();
+                assert_eq!(response.deserialize::<bool>().unwrap(), expected, "{target} from {origin}");
+            }
+        }
+    }
+
+    #[test]
+    fn local_and_proxy_opener_reject_file_urls() {
+        let app = tauri::test::mock_builder().plugin(tauri_plugin_opener::init()).build(generated_context()).unwrap();
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default()).build().unwrap();
+        local_service_ready(app.handle(), &AppServiceState::default(), 47895).unwrap();
+        grant_remote_proxy_origin(app.handle(), 47911).unwrap();
+        for origin in [service_url(47895), service_url(47911)] {
+            let result = tauri::test::get_ipc_response(&webview, tauri::webview::InvokeRequest {
+                cmd: "plugin:opener|open_url".into(), callback: tauri::ipc::CallbackFn(0), error: tauri::ipc::CallbackFn(1),
+                url: origin.parse().unwrap(), body: tauri::ipc::InvokeBody::Json(serde_json::json!({ "url": "file:///etc/hosts" })),
+                headers: Default::default(), invoke_key: tauri::test::INVOKE_KEY.to_string(),
+            });
+            let error = result.unwrap_err().to_string();
+            assert!(error.contains("Not allowed to open url file:///etc/hosts"), "unexpected refusal from {origin}: {error}");
         }
     }
 
