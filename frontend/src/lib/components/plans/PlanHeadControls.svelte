@@ -4,6 +4,7 @@
 	import { connectionState } from '$lib/stores/connection';
 	import { token } from '$lib/stores/auth';
 	import { mutatePlanLifecycle } from '$lib/api/plans';
+	import { errorText } from '$lib/api/planRead';
 
 	/**
 	 * The plan's count of unfinished work and its Pause/Resume, for whatever
@@ -41,7 +42,7 @@
 			query.retry();
 			return;
 		}
-		error = result.status === 'forbidden' ? 'You no longer have permission to change this plan.' : result.message;
+		error = result.status === 'forbidden' ? 'You no longer have permission to change this plan.' : errorText(result);
 	}
 </script>
 

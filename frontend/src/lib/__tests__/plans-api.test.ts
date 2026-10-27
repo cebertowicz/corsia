@@ -9,6 +9,7 @@ import {
 	mutatePlanLifecycle,
 } from '$lib/api/plans';
 import type { ActivityIndexEnvelope, OperatorEnvelope } from '$lib/api/plans';
+import { errorText } from '$lib/api/planRead';
 
 const TOKEN = '[REDACTED]';
 
@@ -76,7 +77,22 @@ describe('plan lifecycle mutations', () => {
 		expect(await mutatePlanLifecycle(TOKEN, 'p', 'resume', 2, 'resume:p:2')).toEqual({
 			status: 'error',
 			message: 'Couldn’t update the plan. Try again.',
-			httpStatus: 500,
+		});
+	});
+
+	it('keeps a server failure\'s log reference beside the message, never its detail', async () => {
+		mockFetch(500, { detail: '/secret/path.py', reference: 'abc123' });
+		const result = await mutatePlanLifecycle(TOKEN, 'p', 'resume', 2, 'resume:p:2');
+		expect(result).toEqual({ status: 'error', message: 'Couldn’t update the plan. Try again.', reference: 'abc123' });
+		expect(errorText(result as { message: string; reference?: string })).toBe('Couldn’t update the plan. Try again. Reference: abc123');
+		expect(JSON.stringify(result)).not.toContain('secret');
+
+		vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+			ok: false, status: 502, json: () => Promise.reject(new SyntaxError('Unexpected token <')),
+			headers: { get: () => null },
+		}));
+		expect(await mutatePlanLifecycle(TOKEN, 'p', 'resume', 2, 'resume:p:2')).toEqual({
+			status: 'error', message: 'Couldn’t update the plan. Try again.',
 		});
 	});
 });
@@ -158,7 +174,11 @@ describe('contextual operator reads', () => {
 		expect(result).toEqual({
 			status: 'error',
 			message: 'Couldn’t load these plans. Try again.',
-			httpStatus: 500,
+		});
+
+		mockFetch(500, { detail: 'internal/secret/path.py:42', reference: 'def456' });
+		expect(await readOperatorThread(TOKEN, 'thread-1')).toEqual({
+			status: 'error', message: 'Couldn’t load these plans. Try again.', reference: 'def456',
 		});
 	});
 

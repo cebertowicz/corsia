@@ -29,7 +29,8 @@ import type {
 	OperatorReadOutcome,
 } from '$lib/api/plans';
 import { deferRefresh, forgetSpacing, noteStarted, spacingWaitMs } from './planRefreshSpacing';
-import { closedMessage } from './planClosedMessage';
+import { planClosedMessage } from './planClosedMessage';
+import { errorText } from '$lib/api/planRead';
 import { isActivityKey, planKeyString, type ActivityKey, type ActivityKeyString, type OperatorKey, type OperatorKeyString, type PlanKey, type PlanKeyString } from './planKeys';
 
 /**
@@ -134,7 +135,7 @@ function ownerThreadIdFor(
 	return null;
 }
 
-/** Outcomes a retry cannot change; each names what would. */
+/** Sign-in, which a retry cannot change; not-found and forbidden are worded per place in `planClosedMessage`. */
 const CLOSED_MESSAGES = {
 	unauthorized: 'Sign-in required.',
 } as const;
@@ -143,7 +144,7 @@ function applyOutcome(key: PlanKey, keyStr: string, outcome: PlanReadOutcome) {
 	if (outcome.status === 'fresh') {
 		const expectedVersion = isActivityKey(key) ? 1 : 2;
 		if (outcome.payload.contract_version !== expectedVersion) {
-			applyOutcome(key, keyStr, { status: 'error', message: 'Couldn’t load this plan. Try again.' });
+			applyOutcome(key, keyStr, { status: 'error', message: 'This page is out of date. Reload to see this plan.' });
 			return;
 		}
 		patch(keyStr, {
@@ -161,14 +162,14 @@ function applyOutcome(key: PlanKey, keyStr: string, outcome: PlanReadOutcome) {
 		patch(keyStr, {
 			status: outcome.status, refreshing: false, payload: null, etag: null,
 			ownerThreadId: null, errorMessage: outcome.status === 'unauthorized'
-				? CLOSED_MESSAGES.unauthorized : closedMessage(key, outcome.status),
+				? CLOSED_MESSAGES.unauthorized : planClosedMessage(key, outcome.status),
 		});
 		return;
 	}
 	const current = peekEntry(keyStr);
 	patch(keyStr, current.payload
-		? { status: 'stale', refreshing: false, errorMessage: outcome.message }
-		: { status: 'error', refreshing: false, payload: null, errorMessage: outcome.message });
+		? { status: 'stale', refreshing: false, errorMessage: errorText(outcome) }
+		: { status: 'error', refreshing: false, payload: null, errorMessage: errorText(outcome) });
 }
 
 /**

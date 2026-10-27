@@ -1,7 +1,7 @@
 import type { PlanKey } from './planKeys';
 
 /** Explain conditions a retry cannot change in the selected place's terms. */
-export function closedMessage(key: PlanKey, status: 'not-found' | 'forbidden'): string {
+export function planClosedMessage(key: PlanKey, status: 'not-found' | 'forbidden'): string {
 	const place = key.kind === 'project' || key.kind === 'activity-project' ? 'project'
 		: key.kind === 'workspace' || key.kind === 'activity-workspace' ? 'workspace'
 		: 'chat';

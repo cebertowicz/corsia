@@ -258,4 +258,4 @@ export type OperatorReadOutcome =
 	| { status: 'not-found' }
 	| { status: 'unauthorized' }
 	| { status: 'forbidden' }
-	| { status: 'error'; message: string; httpStatus?: number };
+	| { status: 'error'; message: string; reference?: string };

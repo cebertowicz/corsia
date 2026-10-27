@@ -455,7 +455,8 @@ test('frame 7: a parent child chip', async ({ page, request }) => {
 	await shot(page, '7-child-chip');
 });
 
-test('copy sweep: agent open control', async ({ page, request }, info) => {
+// Frame names (`copy-<n>-<width>`) are the evidence index's names; each test title says what its frames show.
+test('plan copy: open-agent control, missing-task and closed-decision notices', async ({ page, request }, info) => {
 	test.skip(info.project.name !== 'chromium-desktop', 'Both viewport widths are captured with a pointer.');
 	test.setTimeout(150_000);
 	const { by } = await boot(page, request, [{ ...DR, label: 'CI on PR #1193', until: atToday(23, 46) }]);
@@ -484,7 +485,7 @@ test('copy sweep: agent open control', async ({ page, request }, info) => {
 	}
 });
 
-test('copy sweep: decision refresh', async ({ page, request }, info) => {
+test('plan copy: oversize count, resolved decision, update failure with its reference', async ({ page, request }, info) => {
 	test.skip(info.project.name !== 'chromium-desktop', 'Both viewport widths are captured here.');
 	test.setTimeout(150_000);
 	const { by } = await boot(page, request, [{ ...DR, label: 'CI on PR #1193', until: atToday(23, 46) }]);
@@ -495,7 +496,7 @@ test('copy sweep: decision refresh', async ({ page, request }, info) => {
 	envelope.plans[0].oversize = { open: 41, budget: 40 };
 	await page.route(new RegExp(`/api/plans/operator/threads/${thread.id}(\\?.*)?$`), route => route.fulfill({ json: envelope }));
 	await page.route('**/api/attention/queue*', route => route.fulfill({ json: { current: null, count: 0, items: [] } }));
-	await page.route('**/api/plans/*/mutations', route => route.fulfill({ status: 500, json: {} }));
+	await page.route('**/api/plans/*/mutations', route => route.fulfill({ status: 500, json: { detail: 'internal', reference: 'a1b2c3d4' } }));
 	await r2Chat(page, request, thread);
 	for (const width of [1920, 393]) {
 		await view(page, width, width === 393 ? 852 : 1080, 'light');
@@ -510,13 +511,13 @@ test('copy sweep: decision refresh', async ({ page, request }, info) => {
 		await expect(page.getByText('That task doesn’t need you. Refreshing the plan.')).toBeVisible();
 		await shot(page, `copy-5-${width}`);
 		await page.getByRole('button', { name: 'Pause', exact: true }).last().click();
-		await expect(page.getByText('Couldn’t update the plan. Try again.').last()).toBeVisible();
+		await expect(page.getByText('Couldn’t update the plan. Try again. Reference: a1b2c3d4').last()).toBeVisible();
 		await shot(page, `copy-12-${width}`);
 	}
 });
 
 
-test('copy sweep: component states', async ({ page }, info) => {
+test('plan copy: task details, read-only discussion, task menu, empty pane, activity row', async ({ page }, info) => {
 	test.skip(info.project.name !== 'chromium-desktop', 'Both viewport widths are captured in this project.');
 	test.setTimeout(150_000);
 	for (const width of [1920, 393]) {
@@ -557,7 +558,7 @@ test('copy sweep: component states', async ({ page }, info) => {
 				}
 				flushSync();
 			}, row);
-			const text = row === 6 ? 'reassigned to another agent' : row === 7 ? 'Read-only.' : row === 8 ? 'Marking this done or Won’t do also stops the agent working on it.' : row === 15 ? 'Open a chat to see its plan' : row === 17 ? 'Chat' : 'This task waiting:';
+			const text = row === 6 ? 'reassigned to another agent' : row === 7 ? 'Read-only.' : row === 8 ? 'Marking this done or Won’t do also stops the agent working on it.' : row === 15 ? 'Open a chat to see its plan' : row === 17 ? 'Chat' : 'This task waited:';
 			await expect(page.getByText(text, { exact: row === 17 })).toBeVisible();
 			await shot(page, `copy-${row}-${width}`);
 		}

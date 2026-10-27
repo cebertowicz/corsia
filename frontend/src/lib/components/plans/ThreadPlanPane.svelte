@@ -15,6 +15,7 @@
 	import { visibleQueue } from '$lib/stores/attentionDock.svelte';
 	import type { AttentionQueueItem } from '$lib/api/attentionQueue';
 	import { mutateUserTask } from '$lib/api/plans';
+	import { errorText } from '$lib/api/planRead';
 	import type { OperatorArtifactLink, OperatorNode, OperatorUserAction } from '$lib/api/plans';
 	import type { OperatorKey } from '$lib/stores/planKeys';
 	import { registerNodeFocus } from '$lib/planNodeFocus';
@@ -212,7 +213,7 @@
 		} else {
 			refusal = result.status === 'forbidden'
 				? 'You no longer have permission to change this task.'
-				: result.message;
+				: errorText(result);
 		}
 		return refusal;
 	}

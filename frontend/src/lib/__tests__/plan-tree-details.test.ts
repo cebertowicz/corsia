@@ -223,8 +223,8 @@ describe('PlanTree row details disclosure', () => {
 		expect(lines()).toEqual(['status', 'working', 'tokens', 'own-working', 'own-tokens']);
 		expect(line('working')).toBe('Working: at least 12m 0s');
 		expect(line('tokens')).toBe('Tokens: at least 1.8M');
-		expect(line('own-working')).toBe('This task working: 2m 0s');
-		expect(line('own-tokens')).toBe('This task tokens: 300K');
+		expect(line('own-working')).toBe('Working on this task: 2m 0s');
+		expect(line('own-tokens')).toBe('Tokens for this task: 300K');
 		expect(host.textContent).not.toMatch(/unknown|unpriced|not reported|not timed|usage missing/i);
 	});
 
@@ -247,7 +247,7 @@ describe('PlanTree row details disclosure', () => {
 		expect(line('waiting')).toBe('Waiting: 5h 3m');
 		expect(line('tokens')).toBe('Tokens: 1K');
 		expect(line('cost')).toBe('Cost: $0.5000 API-equivalent');
-		expect(line('own-waiting')).toBe('This task waiting: 10m 0s');
+		expect(line('own-waiting')).toBe('This task waited: 10m 0s');
 		expect(line('own-working')).toBeNull();
 		expect(line('own-cost')).toBeNull();
 	});
@@ -504,9 +504,9 @@ describe('PlanTree row details disclosure', () => {
 		expect(line('waiting')).toBe('Waiting: 5h 3m');
 		expect(line('tokens')).toBe('Tokens: at least 1.8M');
 		expect(line('cost')).toBeNull();
-		expect(line('own-working')).toBe('This task working: 2m 0s');
-		expect(line('own-waiting')).toBe('This task waiting: 10m 0s');
-		expect(line('own-tokens')).toBe('This task tokens: 300K');
+		expect(line('own-working')).toBe('Working on this task: 2m 0s');
+		expect(line('own-waiting')).toBe('This task waited: 10m 0s');
+		expect(line('own-tokens')).toBe('Tokens for this task: 300K');
 		expect(line('own-cost')).toBeNull();
 		expect(host.querySelector('.node-details details, .node-details button.reveal')).toBeNull();
 		expect(host.textContent).not.toMatch(/unknown|unpriced|not reported|not timed|partly measured/i);

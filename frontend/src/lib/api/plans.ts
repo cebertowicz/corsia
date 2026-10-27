@@ -17,7 +17,7 @@ export * from './plansTypes';
 export type { OperatorFoldLevel } from './plansFolded';
 
 
-import { authHeaders, readPlan, safeErrorMessage } from './planRead';
+import { authHeaders, errorReference, readJson, readPlan, safeErrorMessage } from './planRead';
 
 async function readOperator(
 	url: string,
@@ -41,7 +41,7 @@ export type PlanLifecycleMutationOutcome =
 	| { status: 'success' }
 	| { status: 'conflict'; detail?: string }
 	| { status: 'forbidden' }
-	| { status: 'error'; message: string; httpStatus?: number };
+	| { status: 'error'; message: string; reference?: string };
 
 /** Post one audited, revision-safe plan mutation as the authenticated user. */
 async function postPlanMutation(
@@ -68,20 +68,16 @@ async function postPlanMutation(
 	if (res.status === 403) return { status: 'forbidden' };
 	// A mutation the server refuses names its own reason (409 moved, 422 refused),
 	// written for the person who sent it; a generic line would only hide it.
-	const detail = showRefusal ? await refusalDetail(res) : undefined;
+	const reply = await readJson(res);
+	const detail = showRefusal ? refusalDetail(reply) : undefined;
 	if (res.status === 409) return { status: 'conflict', detail };
 	if (res.status === 422 && detail) return { status: 'error', message: detail };
-	return { status: 'error', message: safeErrorMessage('update'), httpStatus: res.status };
+	return { status: 'error', message: safeErrorMessage('update'), reference: errorReference(reply) };
 }
 
-async function refusalDetail(res: Response): Promise<string | undefined> {
-	try {
-		const body: unknown = await res.json();
-		const detail = (body as { detail?: unknown } | null)?.detail;
-		return typeof detail === 'string' && detail.trim() ? detail : undefined;
-	} catch {
-		return undefined;
-	}
+function refusalDetail(body: unknown): string | undefined {
+	const detail = (body as { detail?: unknown } | null)?.detail;
+	return typeof detail === 'string' && detail.trim() ? detail : undefined;
 }
 
 /** Apply one closed, revision-safe whole-plan lifecycle mutation. */
