@@ -72,6 +72,19 @@ require_owned_service_definition() {
         return 1
     }
 }
+# Check the manager's selected fragment, drop-ins and cached state before acting
+# on a unit by name. A same-named higher-priority unit is not ours.
+require_manager_service_definition() {
+    local fragment dropins stale unit
+    unit="$(service_unit_path)"
+    fragment="$(systemctl --user show "$(service_label).service" -p FragmentPath --value)" || return 1
+    dropins="$(systemctl --user show "$(service_label).service" -p DropInPaths --value)" || return 1
+    stale="$(systemctl --user show "$(service_label).service" -p NeedDaemonReload --value)" || return 1
+    if [ "$fragment" != "$unit" ] || [ -n "$dropins" ] || [ "$stale" != no ]; then
+        fail "The systemd manager's loaded definition does not match $unit; inspect it before continuing"
+        return 1
+    fi
+}
 require_loaded_service_owns_port() {
     local pid pids
     pid="$(service_loaded_pid)" || return 1
@@ -92,6 +105,10 @@ service_install() {
     fi
     if service_is_loaded; then
         require_owned_service_definition || return 1
+        require_manager_service_definition || return 1
+        systemctl --user daemon-reload || return 1
+        require_manager_service_definition || return 1
+        systemctl --user enable "$(service_label).service" || return 1
         return 0
     fi
     if is_backend_running || [ -n "$(backend_pids)" ]; then
@@ -104,11 +121,19 @@ service_install() {
     chmod 600 "$temp"
     mv -f "$temp" "$unit"
     systemctl --user daemon-reload || return 1
+    require_manager_service_definition || return 1
     systemctl --user enable "$(service_label).service" || return 1
     ok "Installed $(service_label) as a systemd user service"
 }
 service_start() {
     require_owned_service_definition || return 1
+    if service_is_loaded; then
+        require_manager_service_definition || return 1
+    fi
+    # Reconcile both operations on every start, including after an interrupted install.
+    systemctl --user daemon-reload || return 1
+    require_manager_service_definition || return 1
+    systemctl --user enable "$(service_label).service" || return 1
     if service_is_loaded; then return 0; fi
     if is_backend_running || [ -n "$(backend_pids)" ]; then
         fail "A backend already owns :$BACKEND_PORT; refusing to start another"
@@ -118,8 +143,9 @@ service_start() {
 }
 service_stop() {
     local drain_attempted=false
-    require_owned_service_definition || return 1
+    service_installed || { fail "The systemd unit is absent or belongs to another checkout: $(service_unit_path)"; return 1; }
     service_is_loaded || return 0
+    require_manager_service_definition || return 1
     if [ "$FORCE" = false ] && is_backend_running; then
         require_loaded_service_owns_port || return 1
         drain_attempted=true
@@ -134,16 +160,17 @@ service_stop() {
 }
 service_restart() {
     local after_teardown="${1:-}"
-    require_owned_service_definition || return 1
     service_stop || return 1
     [ -z "$after_teardown" ] || "$after_teardown" || return 1
+    service_install || return 1
     service_start
 }
 service_uninstall() {
     local unit
     unit="$(service_unit_path)"
-    require_owned_service_definition || return 1
+    service_installed || { fail "The systemd unit is absent or belongs to another checkout: $unit"; return 1; }
     service_stop || return 1
+    require_manager_service_definition || return 1
     systemctl --user disable "$(service_label).service" || return 1
     rm -f "$unit"
     systemctl --user daemon-reload

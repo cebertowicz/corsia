@@ -31,7 +31,18 @@ case "$2" in
   is-active) [ -e "$STUB_ACTIVE" ] ;;
   start) touch "$STUB_ACTIVE" ;;
   stop) rm -f "$STUB_ACTIVE" ;;
-  show) echo 123 ;;
+  show)
+    case "$5" in
+      MainPID) echo 123 ;;
+      FragmentPath) echo "${STUB_FRAGMENT:-$HOME/.config/systemd/user/com.corsia.prod.service}" ;;
+      DropInPaths) echo "${STUB_DROPINS:-}" ;;
+      NeedDaemonReload) echo "${STUB_STALE:-no}" ;;
+    esac ;;
+  daemon-reload|enable)
+    if [ "${STUB_FAIL_ONCE:-}" = "$2" ] && [ ! -e "$STUB_FAILED" ]; then
+      touch "$STUB_FAILED"
+      exit 1
+    fi ;;
 esac
 ''')
     systemctl.chmod(0o755)
@@ -40,7 +51,7 @@ esac
             "ENV_FILE": str(tmp_path / "checkout" / ".env"), "CORSIA_WORKSPACE": str(workspace),
             "CORSIA_STATE_DIR": str(state), "BACKEND_LOG": str(state / "backend.log"),
             "SCRIPT_DIR": str(REPO / "scripts"), "STUB_CALLS": str(tmp_path / "calls"),
-            "STUB_ACTIVE": str(tmp_path / "active")}
+            "STUB_ACTIVE": str(tmp_path / "active"), "STUB_FAILED": str(tmp_path / "failed")}
 
 
 def run_service(env, body):
@@ -74,7 +85,7 @@ def test_install_start_stop_and_idempotent_install(service_env):
     assert f"WorkingDirectory={service_env['BACKEND_DIR']}\n" in content
     assert f"StandardOutput=append:{service_env['BACKEND_LOG']}\n" in content
     assert "NoNewPrivileges" not in content and "ProtectHome" not in content
-    assert calls(service_env).count("--user enable com.corsia.prod.service") == 1
+    assert calls(service_env).count("--user enable com.corsia.prod.service") >= 1
     assert "--user start com.corsia.prod.service" in calls(service_env)
     assert "--user stop com.corsia.prod.service" in calls(service_env)
 
@@ -96,3 +107,39 @@ def test_foreign_unit_is_never_overwritten(service_env):
     assert result.returncode != 0
     assert unit.read_text() == "foreign definition\n"
     assert not calls(service_env)
+
+
+@pytest.mark.parametrize("manager_override", [
+    {"STUB_FRAGMENT": "/foreign/com.corsia.prod.service"},
+    {"STUB_DROPINS": "/foreign/override.conf"},
+    {"STUB_STALE": "yes"},
+])
+@pytest.mark.parametrize("force", ["true", "false"])
+def test_stop_rejects_foreign_or_stale_manager_even_when_unhealthy(service_env, manager_override, force):
+    assert run_service(service_env, "service_install; service_start").returncode == 0
+    before = len(calls(service_env))
+    result = run_service({**service_env, **manager_override}, f"FORCE={force}; service_stop")
+    assert result.returncode != 0
+    assert "--user stop com.corsia.prod.service" not in calls(service_env)[before:]
+    assert Path(service_env["STUB_ACTIVE"]).exists()
+
+
+@pytest.mark.parametrize("failure", ["daemon-reload", "enable"])
+def test_start_recovers_interrupted_install(service_env, failure):
+    env = {**service_env, "STUB_FAIL_ONCE": failure}
+    assert run_service(env, "service_install").returncode != 0
+    result = run_service(env, "service_start")
+    assert result.returncode == 0, result.stderr
+    assert "--user daemon-reload" in calls(env)
+    assert "--user enable com.corsia.prod.service" in calls(env)
+    assert Path(env["STUB_ACTIVE"]).exists()
+
+
+def test_restart_refreshes_old_owned_template_after_stopping(service_env):
+    assert run_service(service_env, "service_install; service_start").returncode == 0
+    unit = Path(service_env["HOME"]) / ".config/systemd/user/com.corsia.prod.service"
+    unit.write_text(unit.read_text().replace("RestartSec=5s", "RestartSec=10s"))
+    result = run_service(service_env, "service_restart")
+    assert result.returncode == 0, result.stderr
+    assert "RestartSec=5s" in unit.read_text()
+    assert Path(service_env["STUB_ACTIVE"]).exists()
