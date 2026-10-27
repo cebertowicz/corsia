@@ -180,6 +180,21 @@ def _uidplus(conn: imaplib.IMAP4) -> bool:
     return status == "OK" and b"UIDPLUS" in b" ".join(part for part in data if isinstance(part, bytes)).upper().split()
 
 
+def has_copy(ep: Endpoints, username: str, password: str, kind: str, message_id: str) -> bool:
+    """Search once for a provider-created copy by its Message-ID."""
+    with session(ep, username, password) as conn:
+        folder = folders.resolve(conn, _folder_key(ep, username), kind)
+        if folder is None:
+            return False
+        status, _ = conn.select(_quoted(folder), readonly=True)
+        if status != "OK":
+            raise _unreachable(ep)
+        status, found = conn.uid("SEARCH", "HEADER", "Message-ID", _quoted(message_id))
+        if status != "OK":
+            raise _unreachable(ep)
+        return bool(found and found[0] and found[0].split())
+
+
 def remove_copy(ep: Endpoints, username: str, password: str, kind: str, message_id: str) -> None:
     """Delete CORSIA's own copy, found by its Message-ID, from the host's Drafts or Sent folder.
 

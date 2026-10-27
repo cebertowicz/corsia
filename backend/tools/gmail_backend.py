@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
 from connections.calendar_document import Invite
-from connections.google import client as google_client, gmail_read
+from connections.google import client as google_client, gmail_read, guard_read
 from connections.google.accounts import thread_key
 from connections.google.calendar_document import event_summaries
 from connections.google.client import GoogleError, GoogleRequestFailed
@@ -54,8 +54,25 @@ def _sent_id(sent: Any) -> str | None:
     return sent.get("id") if isinstance(sent, dict) else None
 
 
+def _email_sent(sent: dict, message_id: str, account_id: str, target: dict) -> str:
+    returned = sent.get("threadId")
+    result: dict[str, Any] = {"sent_message_id": message_id,
+                              "thread_id": thread_key(account_id, returned), "account_id": account_id}
+    if target.get("thread_id") and returned != target["thread_id"]:
+        result["note"] = "The email was sent, but Gmail returned a different thread than the reply target."
+    return json.dumps(result)
+
+
 class GmailBackend:
     read = gmail_read
+    guard_data = staticmethod(guard_read.guard_data)
+    sent_html = staticmethod(guard_read.sent_html)
+
+    async def fetch_body(self, account_id: str, message_id: str) -> str:
+        return (await gmail_read.fetch(account_id, message_id)).body
+
+    async def attachment_limit(self, account_id: str) -> tuple[int | None, bool]:
+        return 25_000_000, False
 
     async def draft_metadata(self, account: dict, existing: dict | None, reply_id: object) -> tuple[dict, str | None, str]:
         """The reply target named now or kept from the draft it replaces, and the account's signature."""
@@ -80,9 +97,11 @@ class GmailBackend:
             draft_id, acquire=lambda: google_client.access_token(account_id), provider_errors=(GoogleError,),
             send=lambda bearer: google_client.request_json("POST", SEND_URL, account_id=account_id, body=body, token=bearer),
             result_id=_sent_id,
-            success=lambda sent, message_id: json.dumps({"sent_message_id": message_id,
-                "thread_id": thread_key(account_id, sent.get("threadId")), "account_id": account_id}),
-            sign_in_error=_sign_in_error, request_error=str, never_sent=_never_sent,
+            success=lambda sent, message_id: _email_sent(sent, message_id, account_id, target),
+            sign_in_error=_sign_in_error,
+            request_error=lambda exc: "The attachments are too large for this account." if (
+                isinstance(exc, GoogleRequestFailed) and exc.status == 413 and target.get("attachments")
+            ) else str(exc), never_sent=_never_sent,
             still_sending=gate.still_sending, claim_error=gate.claim_error, unconfirmed=EMAIL_UNCONFIRMED, label=gate.label,
         )
 

@@ -146,8 +146,17 @@ async def send(account: Sender, message: EmailMessage, *, draft_copy: str | None
                                  from_addr=account.address)
 
     refused = await read._guarded(account.account_id, account.check, deliver)
+
+    def already_copied() -> bool:
+        with imap.account_lock(account.account_id):
+            return imap.has_copy(account.endpoints, account.username, account.password, folders.SENT, str(message["Message-ID"]))
+
     try:
-        sent_copy_missing = not await _keep_copy(account, folders.SENT, message)
+        copied = await read._guarded(account.account_id, account.check, already_copied)
+    except Exception:  # noqa: BLE001 - a failed search falls back to the existing append
+        copied = False
+    try:
+        sent_copy_missing = not copied and not await _keep_copy(account, folders.SENT, message)
     except Exception:  # noqa: BLE001 - SMTP acceptance makes every later copy failure ancillary
         log.warning("mail host delivered a message but its Sent copy was not saved")
         sent_copy_missing = True

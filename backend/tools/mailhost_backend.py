@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any
 from connections.account_errors import AccountError
 from connections.calendar_document import Invite
 from connections.mail.email_document import build_message, parse_document
-from connections.mailhost import agenda, outbound, read as mailhost_read, reply
+from connections.mailhost import agenda, guard_read, outbound, read as mailhost_read, reply, smtp
 from tools.action_delivery import deliver_claimed
 from tools.reviewed_drafts import draft_target
 
@@ -68,6 +68,22 @@ def _invite_sent(sent: outbound.InviteSent, event_id: str) -> str:
 
 class MailHostBackend:
     read = mailhost_read
+    guard_data = staticmethod(guard_read.guard_data)
+    sent_html = staticmethod(guard_read.sent_html)
+    fetch_body = staticmethod(guard_read.fetch_body)
+
+    async def attachment_limit(self, account_id: str) -> tuple[int | None, bool]:
+        sender = await outbound.sender(account_id)
+
+        def read_limit() -> int | None:
+            client = smtp._logged_in_client(sender.endpoints, sender.username, sender.password)
+            try:
+                value = client.esmtp_features.get("size", "").strip()
+                return int(value) if value.isdecimal() and int(value) > 0 else None
+            finally:
+                smtp._close(client)
+
+        return await mailhost_read._guarded(account_id, sender.check, read_limit), True
 
     async def draft_metadata(self, account: dict, existing: dict | None, reply_id: object) -> tuple[dict, str | None, str]:
         """The reply target named now or kept from the draft it replaces, and a new Message-ID for this copy."""

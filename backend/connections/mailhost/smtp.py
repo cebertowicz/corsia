@@ -14,6 +14,7 @@ import ssl
 from email.message import EmailMessage
 from email.utils import getaddresses
 
+from connections.account_errors import AccountError
 from connections.mailhost import tls
 from connections.mailhost.endpoints import Endpoints, Server
 from connections.mailhost.errors import (
@@ -106,6 +107,8 @@ def send_message(
     try:
         refused = client.send_message(message, from_addr=from_addr, to_addrs=_recipients(message))
     except _REFUSALS as exc:
+        if getattr(exc, "smtp_code", None) == 552 and any(message.iter_attachments()):
+            raise AccountError("The attachments are too large for this account.") from None
         cause = next(cause for kind, cause in _SUBMISSION_REFUSED if isinstance(exc, kind))
         raise MailHostError(cause, host=ep.name) from None
     finally:

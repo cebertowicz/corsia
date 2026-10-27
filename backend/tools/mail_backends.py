@@ -16,6 +16,7 @@ from typing import Any, Protocol
 from connections.account_errors import AccountError
 from connections.calendar_document import Invite
 from connections.connected_accounts import GOOGLE_PROVIDER, MAILHOST_PROVIDER
+from tools.mail_guard import Message
 from tools.gmail_backend import GMAIL
 from tools.mailhost_backend import MAIL_HOST
 
@@ -49,6 +50,18 @@ class MailBackend(Protocol):
         self, account: dict, existing: dict | None, reply_id: object,
     ) -> tuple[dict, str | None, str]:
         """``(target, reply label, signature)`` for a draft about to be saved."""
+
+    async def guard_data(self, account_id: str, message_id: str) -> tuple[Message, list[Message], list[Message]]:
+        """Read the reply target, its thread, and the sender's messages."""
+
+    async def fetch_body(self, account_id: str, message_id: str) -> str:
+        """Fetch the body for one guard evidence message or reply quote."""
+
+    async def sent_html(self, account_id: str) -> list[str]:
+        """HTML from at most five recent messages sent by this account."""
+
+    async def attachment_limit(self, account_id: str) -> tuple[int | None, bool]:
+        """Known limit in bytes, and whether it applies to the entire encoded message."""
 
     async def keep_draft_copy(self, account: dict, text: str, target: dict, previous: dict) -> str | None:
         """Mirror the saved draft on the host; a note when the copy fell short, never an error."""

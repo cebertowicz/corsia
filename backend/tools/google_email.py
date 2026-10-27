@@ -10,13 +10,16 @@ gate checked, never from a second read. What differs by host is the account's ba
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 from email.message import EmailMessage
+from email.utils import getaddresses
 from typing import Any
 
 from connections.account_errors import AccountError
 from connections.mail_accounts import MAIL_ACCOUNT_PARAM, resolve_for_thread
+from connections.mail import attachments, mail_compose
 from connections.mail.email_document import (
     NEEDS_BODY,
     NEEDS_RECIPIENT,
@@ -30,11 +33,12 @@ from connections.mail.email_document import (
     text_arg,
 )
 from infra.db_async import run_in_db
-from tools.action_drafts import DraftError
+from tools.action_drafts import DraftError, record_seen_newer
 from tools.reviewed_drafts import DraftStorageRefused, draft_target, open_draft, save_draft
 from tools.action_gate import Approved, check_action
 from tools.base import Tool
 from tools.mail_backends import Gate, MailBackend, backend_for
+from tools.mail_guard_runtime import guarded_reply
 
 log = logging.getLogger(__name__)
 
@@ -66,6 +70,17 @@ NO_ACCOUNT = (
     "account_id, show the person, and wait for their reply."
 )
 GATE = Gate("email_send", STILL_SENDING, "Not sent: couldn't check the draft. Try again.")
+STALE_WAYS = ("Save a new draft replying to the newer message, or after reading the evidence "
+              "pass seen_newer=true to email_send if you still intend the original target.")
+
+
+def _warnings_hash(warnings: list[str]) -> str:
+    return hashlib.sha256(json.dumps(sorted(warnings), ensure_ascii=False).encode()).hexdigest()
+
+
+def _stop(prefix: str, stops: list[str], stale: list[str]) -> str:
+    details = "\n\n".join(stops + stale)
+    return f"{prefix}: {details}" + (f"\n\n{STALE_WAYS}" if stale and not stops else "")
 
 
 # Reviewed-draft storage is shared by provider families in tools.reviewed_drafts.
@@ -87,6 +102,7 @@ class EmailDraftTool(Tool):
             "reply_to_message_id, a message id from the same account, to thread the email under "
             "that message. A replaced draft stays a reply to its earlier message unless you pass "
             "another one; for an email that is not a reply, start a new draft without draft_id. "
+            "Pass workspace file paths in attachments to include them. "
             f"{AFTER_DRAFT}"
         )
 
@@ -102,6 +118,7 @@ class EmailDraftTool(Tool):
                 "subject": {"type": "string", "description": "One line."},
                 "body": {"type": "string", "description": "The message text, without a signature."},
                 "reply_to_message_id": {"type": "string", "description": "The message id (not the thread id), from email_search or email_read on this account, to reply under. On a mail host the recipient defaults to the message's Reply-To, else its sender, and the subject gets Re: when it lacks it."},
+                "attachments": {"type": "array", "items": {"type": "string"}, "description": "Workspace file paths to attach."},
                 "account_id": MAIL_ACCOUNT_PARAM,
             },
             "required": ["subject", "body"],
@@ -124,12 +141,12 @@ class EmailDraftTool(Tool):
             return f"Error: {exc}"
         except Exception:
             log.exception("email_draft failed")
-            return "Error: Couldn't save the draft."
+            return "Error: Not saved: couldn't check the account or save the draft. Try again."
 
     async def _save(self, thread_id: str, account: dict, backend: MailBackend, kwargs: dict[str, Any]) -> str:
         account_id, address = str(account["id"]), str(account["address"])
         to = addresses(kwargs.get("to"))
-        if not to and not kwargs.get("reply_to_message_id"):
+        if not to and not kwargs.get("reply_to_message_id") and not kwargs.get("draft_id"):
             raise DraftRefused(NEEDS_RECIPIENT)
         cc = addresses(kwargs.get("cc"))
         subject = text_arg(kwargs.get("subject"), NEEDS_SUBJECT, one_line=True)
@@ -139,13 +156,36 @@ class EmailDraftTool(Tool):
         if existing is not None and existing["state"] != "open":
             raise DraftRefused(NO_OPEN_DRAFT)
         target, reply_label, signature = await backend.draft_metadata(account, existing, kwargs.get("reply_to_message_id"))
-        to = to or target.get("reply_addresses") or []
+        notes: list[str] = []
+        original = None
+        if target.get("reply_to"):
+            verdict, original = await guarded_reply(backend, account, str(target["reply_to"]), body, to)
+            if verdict.stops or verdict.stale:
+                raise DraftRefused(_stop("Not saved", verdict.stops, verdict.stale))
+            target["guard_warnings"] = _warnings_hash(verdict.warnings)
+            to = to or [verdict.recipient]
+            notes.extend(verdict.warnings + verdict.info)
         if not to:
             raise DraftRefused(NEEDS_RECIPIENT)
         if target.get("prefix_reply_subject"):
             subject = reply_subject(subject)
-        target = {**target, "account_id": account_id, "account": address}
-        text = compose_document(address, to, cc, subject, body, signature, reply_label)
+        face, size = mail_compose.detected_font(await backend.sent_html(account_id))
+        paths = kwargs.get("attachments") or []
+        limit, applies_to_message = await backend.attachment_limit(account_id) if paths else (None, False)
+        attached = attachments.inspect(paths, None if applies_to_message else limit)
+        target = {**target, "account_id": account_id, "account": address, "attachments": attached}
+        notes.extend(f"Attachment: {item['name']} ({item['size']} bytes)" for item in attached)
+        text = compose_document(address, to, cc, subject, body, signature, reply_label, notes)
+        if applies_to_message and limit is not None:
+            parsed = parse_document(text)
+            if parsed is None:
+                raise DraftRefused("The draft could not be prepared.")
+            sample = build_message(parsed, target)
+            quote_body = await backend.fetch_body(account_id, original.message_id) if original else None
+            mail_compose.add_html(sample, parsed["body"], face, size, quote_body)
+            attachments.add(sample, attached)
+            if len(sample.as_bytes()) > limit:
+                raise DraftRefused("The attachments exceed this provider's size limit.")
         try:
             saved = await save_draft(
                 thread_id=thread_id, kind="email", extension=".md", prefix="email-drafts",
@@ -181,7 +221,7 @@ class EmailSendTool(Tool):
             "Send a saved email draft from the email account it was written from. Call it only "
             "when the person's latest message says to send this draft. It goes out only if they "
             "wrote after the draft's last save and revision matches the one email_draft returned; "
-            "otherwise nothing is sent and the error says what to do."
+            "otherwise nothing is sent and the error says what to do. Pass seen_newer=true only after reading a newer-message stop and still intending the original reply."
         )
 
     @property
@@ -191,6 +231,7 @@ class EmailSendTool(Tool):
             "properties": {
                 "draft_id": {"type": "string", "description": "The draft_id email_draft returned."},
                 "revision": {"type": "string", "description": "The revision email_draft returned."},
+                "seen_newer": {"type": "boolean", "description": "The newer-message evidence was read and the original target is still intended."},
             },
             "required": ["draft_id", "revision"],
         }
@@ -207,6 +248,29 @@ class EmailSendTool(Tool):
         if isinstance(prepared, str):
             return prepared
         backend, account, message, target = prepared
+        try:
+            original = None
+            if target.get("reply_to"):
+                to = [addr for _, addr in getaddresses(message.get_all("To", [])) if addr]
+                verdict, original = await guarded_reply(backend, account, str(target["reply_to"]),
+                                                         str(message.get_content()), to)
+                if verdict.stops or (verdict.stale and kwargs.get("seen_newer") is not True):
+                    return f"Error: {_stop('Not sent', verdict.stops, verdict.stale)}"
+                # A different recipient is allowed only when its warning was on the approved draft.
+                if _warnings_hash(verdict.warnings) != target.get("guard_warnings", _warnings_hash([])):
+                    return "Error: Not sent: the thread warnings changed. Save the draft again and show the person."
+                if verdict.stale:
+                    await run_in_db(record_seen_newer, draft_id, revision)
+            quote_body = await backend.fetch_body(str(account["id"]), original.message_id) if original else None
+            body = str(message.get_content())
+            face, size = mail_compose.detected_font(await backend.sent_html(str(account["id"])))
+            mail_compose.add_html(message, body, face, size, quote_body)
+            attachments.add(message, target.get("attachments") or [])
+        except (DraftRefused, AccountError) as exc:
+            return f"Error: Not sent: {exc}"
+        except Exception:
+            log.exception("email_send guard or composition failed")
+            return "Error: Not sent: couldn't check the account or prepare the message. Try again."
         return await backend.send_email(draft_id, account, message, target, GATE)
 
     async def _prepare(

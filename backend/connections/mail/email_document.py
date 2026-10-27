@@ -130,7 +130,7 @@ def reply_target_label(sender: str | None, subject: str | None) -> str:
 
 def compose_document(
     sender: str, to: list[str], cc: list[str], subject: str, body: str, signature: str,
-    reply_label: str | None = None,
+    reply_label: str | None = None, notes: list[str] | None = None,
 ) -> str:
     """The draft document: header lines, a blank line, the body, then the signature.
 
@@ -143,6 +143,8 @@ def compose_document(
     head.append(f"Subject: {subject}")
     if reply_label:
         head.append(f"In reply to: {reply_label}")
+    for note in notes or []:
+        head.extend(f"Note: {line}" for line in note.splitlines() or [""])
     text = "\n".join(head) + "\n\n" + body.strip("\n")
     if signature:
         text += f"\n\n{SIGNATURE_DELIMITER}\n{signature}"
@@ -161,6 +163,8 @@ def parse_document(text: str) -> dict | None:
     for line in head.split("\n"):
         key, colon, value = line.partition(":")
         key = key.strip().lower()
+        if colon and key == "note":
+            continue
         if not colon or key not in _HEADERS or key in found:
             return None
         found[key] = value.strip()

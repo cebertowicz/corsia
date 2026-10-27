@@ -43,7 +43,7 @@ from tools.google_email import EmailDraftTool, EmailSendTool
 GMAIL = "https://gmail.googleapis.com/gmail/v1/users/me"
 SIGNATURE_HTML = "<div>Sam Lee<br>CORSIA &amp; Co</div><div><br></div>"
 THREADED = {
-    "id": "m-100", "threadId": "t-9",
+    "id": "m-100", "threadId": "t-9", "internalDate": "1793059200000", "labelIds": [],
     "snippet": "SECRET BODY SNIPPET",
     "payload": {"headers": [
         {"name": "Message-ID", "value": "<abc@mail.example>"},
@@ -81,6 +81,10 @@ class Gmail:
             return httpx.Response(200, json={"sendAs": [
                 {"sendAsEmail": EMAIL, "isPrimary": True, "signature": SIGNATURE_HTML},
             ]})
+        if url == f"{GMAIL}/messages" and request.method == "GET":
+            return httpx.Response(200, json={"messages": []})
+        if url == f"{GMAIL}/threads/t-9" and request.method == "GET":
+            return httpx.Response(200, json={"messages": [self.messages["m-100"]]})
         if url.startswith(f"{GMAIL}/messages/") and request.method == "GET":
             found = self.messages.get(url.rsplit("/", 1)[1])
             return httpx.Response(200, json=found) if found else httpx.Response(404, json={})
@@ -191,15 +195,23 @@ async def test_update_rewrites_the_same_document_and_re_records_it(mail):
     assert count == 1
 
 
+async def test_reply_without_to_uses_original_sender(mail):
+    out = await EmailDraftTool().execute(_thread_id=mail.thread, account_id=mail.account,
+                                         subject="Lunch", body="Noon?", reply_to_message_id="m-100")
+    saved = json.loads(out)
+    document = (mail.workspace / saved["path"]).read_text()
+    assert "To: pat@mail.example" in document
+
+
 async def test_reply_reads_message_headers_only(mail):
     saved = await _draft(mail, reply_to_message_id="m-100")
     reads = [r for r in mail.requests if r.method == "GET" and "/messages/m-100" in str(r.url)]
-    assert len(reads) == 1
+    assert len(reads) >= 2
     params = reads[0].url.params
     assert params["format"] == "metadata"
     assert sorted(params.get_list("metadataHeaders")) == ["From", "Message-ID", "References", "Subject"]
     target = json.loads(_row(saved["draft_id"])["target_json"])
-    assert target == {
+    assert {key: target[key] for key in ("reply_to", "thread_id", "in_reply_to", "references", "account_id", "account")} == {
         "reply_to": "m-100", "thread_id": "t-9", "in_reply_to": "<abc@mail.example>",
         "references": "<root@mail.example> <abc@mail.example>", "account_id": mail.account,
         "account": EMAIL,
@@ -213,7 +225,9 @@ async def test_a_reply_target_is_shown_in_the_document_and_a_plain_draft_shows_n
 
     saved = await _draft(mail, reply_to_message_id="m-100")
     head = (mail.workspace / saved["path"]).read_text().split("\n\n")[0].split("\n")
-    assert head[-2:] == ["Subject: Lunch", 'In reply to: "Lunch plans" from Pat Kim <pat@mail.example>']
+    assert "Subject: Lunch" in head
+    assert 'In reply to: "Lunch plans" from Pat Kim <pat@mail.example>' in head
+    assert any("thread(s) from" in line for line in head)
     # Display only: the send threads with the stored target, and the line is not a send input.
     assert json.loads(_row(saved["draft_id"])["target_json"])["reply_to"] == "m-100"
     assert email_document.parse_document((mail.workspace / saved["path"]).read_text())["subject"] == "Lunch"
@@ -222,10 +236,13 @@ async def test_a_reply_target_is_shown_in_the_document_and_a_plain_draft_shows_n
     assert "In reply to: " in (mail.workspace / again["path"]).read_text()
 
 
-async def test_a_reply_target_with_no_readable_headers_is_still_shown_and_saved(mail):
+async def test_a_reply_target_with_no_readable_headers_is_refused(mail):
     mail.messages["m-100"] = {"id": "m-100", "threadId": "t-9", "payload": {"headers": []}}
-    saved = await _draft(mail, reply_to_message_id="m-100")
-    assert "\nIn reply to: an earlier message\n" in (mail.workspace / saved["path"]).read_text()
+    out = await EmailDraftTool().execute(_thread_id=mail.thread, account_id=mail.account,
+                                         to=["sam@example.com"], subject="Lunch", body="Noon?",
+                                         reply_to_message_id="m-100")
+    assert "Not saved:" in out
+    assert get_db().execute("SELECT COUNT(*) FROM action_drafts").fetchone()[0] == 0
 
 
 async def test_message_ids_are_url_encoded_into_a_fixed_template(mail):
@@ -356,10 +373,12 @@ async def test_send_builds_the_message_from_the_approved_bytes_and_marks_it_sent
     assert message["Subject"] == "Lunch"
     assert message["In-Reply-To"] == "<abc@mail.example>"
     assert message["References"] == "<root@mail.example> <abc@mail.example>"
-    assert message.get_content_type() == "text/plain"
+    assert message.get_content_type() == "multipart/alternative"
+    assert message.get_body(preferencelist=("html",)).get_content().startswith('<div dir="ltr"><font')
     document = (mail.workspace / saved["path"]).read_text()
+    assert "requested recipient differs" in document
     expected = document.partition("\n\n")[2]
-    assert message.get_content().replace("\r\n", "\n").rstrip("\n") == expected.rstrip("\n")
+    assert message.get_body(preferencelist=("plain",)).get_content().replace("\r\n", "\n").rstrip("\n") == expected.rstrip("\n")
     row = _row(saved["draft_id"])
     assert row["state"] == "sent" and row["external_id"] == "sent-1" and row["sent_at"]
 
@@ -376,7 +395,8 @@ async def test_the_message_carries_the_bytes_the_gate_approved_not_a_second_read
     await _send(mail, saved)
     message = _mime(mail.sends[0])
     assert message["To"] == "sam@example.com" and message["Subject"] == "Lunch"
-    assert "Approved text." in message.get_content() and "Swapped" not in message.get_content()
+    plain = message.get_body(preferencelist=("plain",)).get_content()
+    assert "Approved text." in plain and "Swapped" not in plain
 
 
 async def test_a_send_that_never_left_returns_the_draft_to_open(mail, approve):

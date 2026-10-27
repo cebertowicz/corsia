@@ -276,7 +276,8 @@ class FakeImap(_LineServer):
             headers_only = "HEADER.FIELDS" in items
             data = raw.split(b"\r\n\r\n", 1)[0] + b"\r\n\r\n" if headers_only else raw
             section = "BODY[HEADER.FIELDS (FROM TO CC DATE SUBJECT)]" if headers_only else "BODY[]<0>"
-            conn.send(f"* {uid} FETCH (UID {uid} {section} {{{len(data)}}}".encode() + b"\r\n" + data + b")")
+            flags = " FLAGS (\\Seen)" if "FLAGS" in items.upper() else ""
+            conn.send(f"* {uid} FETCH (UID {uid}{flags} {section} {{{len(data)}}}".encode() + b"\r\n" + data + b")")
         conn.send(f"{tag} OK done")
 
 
