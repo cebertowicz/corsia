@@ -3,10 +3,11 @@ from pathlib import Path
 import pytest
 from tools.host_path_policy import ProtectedHostPathPolicy
 from tools.linux_sandbox import build_protected_argv, protected_mounts, thread_tmp_root
+from tests.linux_sandbox_test_support import linux_sandbox_root
 
 
-def test_protected_overlay_pins_every_ancestor_before_overlay(tmp_path):
-    home = tmp_path / 'home'
+def test_protected_overlay_pins_every_ancestor_before_overlay(linux_sandbox_root):
+    home = linux_sandbox_root / 'home'
     workspace = home / 'work'
     protected = workspace / 'repo/.git/logs/HEAD'
     protected.parent.mkdir(parents=True)

@@ -10,6 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from tests.linux_sandbox_test_support import linux_sandbox_root
 from tools.host_path_policy import ProtectedHostPathPolicy
 from tools.linux_sandbox import build_protected_argv, cleanup_thread_tmp, thread_tmp_root
 
@@ -18,10 +19,10 @@ pytestmark = pytest.mark.skipif(sys.platform != 'linux' or not shutil.which('bwr
 
 
 @pytest.fixture
-def linux_box(tmp_path, monkeypatch, isolated_db):
+def linux_box(linux_sandbox_root, monkeypatch, isolated_db):
     from tools import linux_shell, sandbox_config
     from infra import config
-    home = tmp_path / 'home'
+    home = linux_sandbox_root / 'home'
     workspace = home / 'work'
     repo = workspace / 'repo'
     for directory in (repo / '.git/logs', workspace / '.corsia/context',
