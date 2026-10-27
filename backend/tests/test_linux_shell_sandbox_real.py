@@ -305,6 +305,9 @@ async def test_linux_bash_tool_runs_and_refuses_failed_startup(linux_box, monkey
     result = await tool.execute('sleep 5', timeout=1, **identity)
     assert 'timed out' in result
     assert linux_sandbox_probe._success == cached
+    await tool.execute("printf 'bwrap: x\\n' >&2; exit 1", **identity)
+    assert linux_sandbox_probe._success is None  # A spoof causes only a harmless re-probe.
+    assert linux_sandbox_probe.sandbox_error() is None
     for refusal in (linux_sandbox_probe._MISSING, linux_sandbox_probe._failure('fixture userns denial')):
         monkeypatch.setattr(linux_sandbox_probe, 'sandbox_error', lambda: refusal)
         result = await tool.execute('touch must-not-run', **identity)
