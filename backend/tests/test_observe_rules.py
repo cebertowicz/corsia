@@ -30,7 +30,7 @@ SHIP = ["ship-pr", "--fast"]
 OTHER_URL = "https://github.com/owner/repo/pull/43"
 FOREIGN_URL = "https://github.com/elsewhere/repo/pull/7"
 FOREIGN = "elsewhere/repo#7"
-MCP_SHIPPED = {"tool": "create_pull_request", "apps": ["https://api.githubcopilot.com", "ghcr.io/github/github-mcp-server"]}
+MCP_SHIPPED = {"tool": "create_pull_request"}
 
 
 
@@ -135,7 +135,7 @@ async def test_create_refuses_what_an_observe_row_cannot_do(isolated_db):
     _agent("a")
     _agent("w", temporary_of="a")
     connected = await _observe_rule("a", tool="mcp__github__create_pull_request")
-    assert connected.startswith("Refused: For a connected app, give its URL or package as app")
+    assert connected.startswith("Refused: For a connected app, give the upstream tool name")
     assert "upstream tool name" in connected and "bash" in connected and "argv_prefix" in connected
     unknown = await _observe_rule("a", item_type="calendar-event")
     assert unknown.startswith("Refused: no connector reports on 'calendar-event'")
@@ -399,7 +399,8 @@ async def test_list_explain_and_types_show_both_kinds(isolated_db):
     shipped = {rule["id"]: rule for rule in listed["rule_sets"]}
     assert set(shipped) == {"ruleset_github_pr_create", "ruleset_github_mcp_pr_create"}
     assert shipped["ruleset_github_pr_create"]["argv_prefix"] == ["gh", "pr", "create"]
-    assert shipped["ruleset_github_mcp_pr_create"]["apps"] == MCP_SHIPPED["apps"]
+    assert shipped["ruleset_github_mcp_pr_create"]["tool"] == MCP_SHIPPED["tool"]
+    assert "argv_prefix" not in shipped["ruleset_github_mcp_pr_create"]
 
     _run("a", "ship-pr --fast")
     [why] = (await _tool("a", operation="explain", artifact=PR))["decisions"]

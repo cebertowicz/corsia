@@ -97,7 +97,7 @@ def test_the_shipped_row_is_the_github_pr_create_rule(isolated_db):
 
     assert set(map(tuple, shipped)) == {
         ("github", "bash", '["gh","pr","create"]', "pull-request"),
-        ("github", "mcp:create_pull_request", '["https://api.githubcopilot.com","ghcr.io/github/github-mcp-server"]', "pull-request"),
+        ("github", "create_pull_request", None, "pull-request"),
     }
 
 

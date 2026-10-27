@@ -29,7 +29,6 @@ from events.identity import (
     check_suite_pr_metadata_from_event,
     pr_external_id,
 )
-from events.connectors.github_observe import extract as extract_connected_app_result
 from events.connectors.github_label_events import IDENTITY, change_event
 from events.connectors.github_ownership import declaration_facts
 from events.connectors.github_receiver import GITHUB_RECEIVER
@@ -136,7 +135,7 @@ def _pr_artifact_in_output(result_text: str) -> ObservedArtifactDecl | None:
 def _pr_artifact_in_result(result_text: str) -> ObservedArtifactDecl | None:
     """Read a GitHub MCP created object's URL field, or the shell's PR URL line."""
     try:
-        result = json.loads(result_text)
+        result, _ = json.JSONDecoder().raw_decode(result_text.lstrip())
     except (TypeError, ValueError):
         return _pr_artifact_in_output(result_text)
     if not isinstance(result, dict):
@@ -322,7 +321,6 @@ MANIFEST = register(ConnectorManifest(
     extract_facts=_extract_facts,
     build_artifact_ref=_artifact_ref,
     artifact_extractors={PR_TYPE: _pr_artifact_in_result},
-    connected_app_extractors={PR_TYPE: extract_connected_app_result},
     app_identities=frozenset({"https://api.githubcopilot.com", "ghcr.io/github/github-mcp-server"}),
     shipped_observe_rules=(
         ShippedObserveRuleDecl(
@@ -330,7 +328,6 @@ MANIFEST = register(ConnectorManifest(
         ),
         ShippedObserveRuleDecl(
             id="ruleset_github_mcp_pr_create", tool="create_pull_request", argv_prefix=(), item_type=PR_TYPE,
-            apps=("https://api.githubcopilot.com", "ghcr.io/github/github-mcp-server"),
         ),
     ),
     resolve_relationships=_relationships,

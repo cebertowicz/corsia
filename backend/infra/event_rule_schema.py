@@ -62,8 +62,7 @@ EVENT_RULE_SCHEMA_SQL = f"""
         workflow_id TEXT CHECK (COALESCE(action = 'start_worker', 0) = (workflow_id IS NOT NULL)),
         request_identity_fact TEXT
             CHECK (COALESCE(action = 'start_worker', 0) = (request_identity_fact IS NOT NULL)),
-        -- observe: the tool whose result is read, the shell command's leading arguments or
-        -- connected-app identities, and the artifact type the connector reads from the result.
+        -- observe: the tool, shell command's leading arguments, and artifact type.
         tool TEXT,
         argv_prefix TEXT CHECK (argv_prefix IS NULL OR (json_valid(argv_prefix)
                                 AND json_type(argv_prefix) = 'array'
@@ -74,7 +73,8 @@ EVENT_RULE_SCHEMA_SQL = f"""
         -- text statement by statement.)
         CHECK ((kind = 'route' AND event_type IS NOT NULL AND action IS NOT NULL AND "to" IS NOT NULL
                 AND tool IS NULL AND argv_prefix IS NULL AND item_type IS NULL)
-            OR (kind = 'observe' AND tool IS NOT NULL AND argv_prefix IS NOT NULL AND item_type IS NOT NULL
+            OR (kind = 'observe' AND tool IS NOT NULL AND item_type IS NOT NULL
+                AND ((tool = 'bash' AND argv_prefix IS NOT NULL) OR (tool != 'bash' AND argv_prefix IS NULL))
                 AND event_type IS NULL AND action IS NULL AND "to" IS NULL AND mode IS NULL
                 AND note IS NULL AND script_id IS NULL AND workflow_id IS NULL
                 AND request_identity_fact IS NULL AND "match" = '[]')),
@@ -87,6 +87,15 @@ EVENT_RULE_SCHEMA_SQL = f"""
         ON event_rules(scope, created_at);
     CREATE INDEX IF NOT EXISTS idx_event_rules_observe
         ON event_rules(tool, enabled, scope) WHERE kind = 'observe';
+
+    CREATE TABLE IF NOT EXISTS self_caused_events (
+        connector TEXT NOT NULL,
+        event_key TEXT NOT NULL,
+        thread_id TEXT NOT NULL,
+        at TEXT NOT NULL,
+        PRIMARY KEY (connector, event_key, thread_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_self_caused_events_at ON self_caused_events(at);
 
     CREATE TABLE IF NOT EXISTS event_route_decisions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,

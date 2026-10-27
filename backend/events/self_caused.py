@@ -1,37 +1,57 @@
-"""Self-caused source event identities in the rule outcome retention record."""
+"""Record source event identities created by a connected-app result."""
 from __future__ import annotations
 
-from events import rules
-from events.rule_outcomes import DROPPED, REGISTERED, Outcome, RuleEvent
-from infra.database import write_transaction
+from datetime import datetime, timezone
 
-_MARKER = "observe:self_caused"
-_REASON = "self_caused"
+from infra.database import get_db, write_transaction
+from tools.mcp_stamp import APP_FIELD, result_stamp
 
 
-def identity(connector: str, kind: str, source_id: str) -> str:
-    return f"self_caused:{connector}:{kind}:{source_id}"
+def record_result(thread_id: str | None, result: object) -> None:
+    """Record every claimed event before the result is persisted, independently of rules."""
+    from events import connectors
+    from infra.tool_result_errors import is_error_result
 
-
-def record(db, thread: str, rule, events: tuple[tuple[str, str], ...]) -> None:
-    if not events:
+    stamp = result_stamp(result)
+    if not thread_id or not stamp or is_error_result(result):
         return
-    with write_transaction(db, scope="observe_self_caused") as conn:
-        for kind, source_id in events:
-            event = RuleEvent(identity(rule.connector, kind, source_id), rule.connector, _MARKER, "", {}, None)
-            rules.record(conn, event, [Outcome(rule.id, thread, REGISTERED, reason=_REASON)])
+    keys: list[tuple[str, str, str]] = []
+    for name in connectors.registered_connectors():
+        if not connectors.app_matches(stamp.get(APP_FIELD), name):
+            continue
+        for extract in connectors.get_manifest(name).artifact_extractors.values():
+            artifact = extract(str(result))
+            if artifact:
+                keys.extend((name, key, thread_id) for key in artifact.created_event_ids)
+    if keys:
+        at = datetime.now(timezone.utc).isoformat()
+        with write_transaction(None, scope="observe_self_caused") as db:
+            db.executemany(
+                "INSERT OR REPLACE INTO self_caused_events (connector,event_key,thread_id,at) VALUES (?,?,?,?)",
+                [(connector, key, thread, at) for connector, key, thread in keys],
+            )
 
 
-def suppress(connector: str, kind: str, source_id: str, thread: str, artifact_ref=None) -> bool:
-    event_id = identity(connector, kind, source_id)
-    with write_transaction(None, scope="self_caused_route") as db:
-        row = db.execute(
-            "SELECT rule_id FROM event_route_decisions WHERE event_id=? AND event_type=? "
-            "AND thread_id=? AND at>=? LIMIT 1",
-            (event_id, _MARKER, thread, rules._iso(rules._now() - rules.RETENTION)),
-        ).fetchone()
-        if row is None:
-            return False
-        event = RuleEvent(event_id, connector, kind, "", {}, artifact_ref)
-        rules.record(db, event, [Outcome(row["rule_id"], thread, DROPPED, reason=_REASON)])
-        return True
+def record_current_result(result: object) -> None:
+    """Record without withholding the completed tool result on failure."""
+    from infra import state
+    from loguru import logger
+
+    try:
+        record_result(state._current_thread_id.get(None), result)
+    except Exception:
+        logger.exception("Could not record connected-app event identity")
+
+
+def is_self_caused(connector: str, event_key: str, thread_id: str) -> bool:
+    from events.rules import RETENTION
+
+    cutoff = (datetime.now(timezone.utc) - RETENTION).isoformat()
+    db = get_db()
+    try:
+        return db.execute(
+            "SELECT 1 FROM self_caused_events WHERE connector=? AND event_key=? AND thread_id=? AND at>=?",
+            (connector, event_key, thread_id, cutoff),
+        ).fetchone() is not None
+    finally:
+        db.close()

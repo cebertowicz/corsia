@@ -66,6 +66,7 @@ def _prepare_route(
     identity: Any,
     selected_pr: dict[str, Any] | None,
     scope: RuleScope | None = None,
+    delivery_id: str | None = None,
 ) -> None:
     """Perform each canonical write in the original noninterleaved stage order."""
     from events import router
@@ -99,16 +100,20 @@ def _prepare_route(
                            scope=scope)
         return
     thread_id, wake_reason = selected
-    from events import self_caused
-    from events.connectors.github_observed_event import identity as observed_event_identity
+    if delivery_id and internal_event in ("webhook.github.pr_comment", "webhook.github.issue_comment"):
+        from events import self_caused
+        from infra.database import get_db
 
-    source_event = observed_event_identity(internal_event, payload)
-    ref = ({"integration": identity.integration, "type": identity.type, "external_id": identity.external_id}
-           if identity else None)
-    if source_event and self_caused.suppress("github", *source_event, thread_id, artifact_ref=ref):
-        prepared.result = router.RouteResult(
-            router.RouteOutcome.SUPPRESSED, thread_id=thread_id, external_id=external_id, reason="self_caused")
-        return
+        db = get_db()
+        try:
+            row = db.execute("SELECT object_key FROM webhook_deliveries WHERE delivery_id=?", (delivery_id,)).fetchone()
+        finally:
+            db.close()
+        event_key = row[0] if row else None
+        if event_key and self_caused.is_self_caused("github", event_key, thread_id):
+            prepared.result = router._suppressed_result(
+                internal_event, "self_caused", thread_id=thread_id, external_id=external_id)
+            return
     summary, details = router._summarize(internal_event, payload, external_id)
     if tag_provenance:
         details["tag_provenance"] = tag_provenance
@@ -156,6 +161,7 @@ async def prepare_route_ordered(
     payload: dict[str, Any],
     identity: Any,
     selected_pr: dict[str, Any] | None,
+    *, delivery_id: str | None = None,
 ) -> PreparedRoute:
     """Join the exact DB unit and recover committed effects before leaving its gate."""
     from events import router
@@ -169,7 +175,7 @@ async def prepare_route_ordered(
     async with _preparation_gate():
         unit = _Preparation()
         preparation = asyncio.create_task(run_in_db(
-            _prepare_route, unit, internal_event, payload, identity, selected_pr, scope,
+            _prepare_route, unit, internal_event, payload, identity, selected_pr, scope, delivery_id,
         ))
         cancellation = None
         try:

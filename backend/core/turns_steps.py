@@ -331,7 +331,7 @@ def _with_observe_notice(projected, result, canonical, call, thread_id):
     from tools.tool_surface import resolve_dispatch
 
     _, arguments, _ = resolve_dispatch(call.name, call.arguments)
-    notices = notice_for_result(thread_id, canonical.message_id, canonical.turn_id, arguments)
+    notices = notice_for_result(thread_id, canonical.turn_id, arguments, result)
     return projected + "\n\n" + "\n".join(notices) if notices else projected
 
 

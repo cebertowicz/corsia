@@ -1,0 +1,22 @@
+"""Schema 153 -> 154: separate self-caused events and shell-only prefixes."""
+from __future__ import annotations
+
+import sqlite3
+
+from infra.event_rule_schema import EVENT_RULE_SCHEMA_SQL
+from infra.migration_152_to_153_observe_rules import _create
+
+
+def migrate_153_to_154(conn: sqlite3.Connection) -> None:
+    conn.execute("ALTER TABLE event_rules RENAME TO event_rules_153")
+    _create(conn, EVENT_RULE_SCHEMA_SQL)
+    columns = [row[1] for row in conn.execute("PRAGMA table_info(event_rules)")]
+    names = ",".join(f'"{name}"' for name in columns)
+    values = ",".join(
+        "CASE WHEN tool LIKE 'mcp:%' THEN substr(tool, 5) ELSE tool END" if name == "tool"
+        else "CASE WHEN tool LIKE 'mcp:%' THEN NULL ELSE argv_prefix END" if name == "argv_prefix"
+        else f'"{name}"' for name in columns
+    )
+    conn.execute(f"INSERT INTO event_rules ({names}) SELECT {values} FROM event_rules_153")
+    conn.execute("DROP TABLE event_rules_153")
+    _create(conn, EVENT_RULE_SCHEMA_SQL)

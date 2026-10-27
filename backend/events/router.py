@@ -148,7 +148,6 @@ async def _resolve_event_identity(
         # The ordered DB stage owns error parking as well as normal route writes.
         return exc, None
 
-
 def _self_authored_result(
     internal_event: str, payload: dict[str, Any],
 ) -> RouteResult | None:
@@ -161,12 +160,15 @@ def _self_authored_result(
         "event-routing: suppressing {} — authored by bot/self ({})",
         internal_event, author.get("login", "?"),
     )
-    emit_product_event(
-        "event_route", "suppressed",
-        properties={"internal_event": internal_event, "author": author.get("login")},
-    )
-    return RouteResult(RouteOutcome.SUPPRESSED)
+    return _suppressed_result(internal_event, "self_authored", author=author.get("login"))
 
+def _suppressed_result(internal_event: str, reason: str, *, thread_id: str | None = None,
+                       external_id: str | None = None, author: str | None = None) -> RouteResult:
+    emit_product_event("event_route", "suppressed", properties={
+        "internal_event": internal_event, "reason": reason, "thread_id": thread_id,
+        "external_id": external_id, "author": author,
+    })
+    return RouteResult(RouteOutcome.SUPPRESSED, thread_id=thread_id, external_id=external_id, reason=reason)
 
 def _unowned_check_result(
     internal_event: str,
@@ -249,7 +251,6 @@ def _select_route(
     reason = "no_artifact" if identity is None else (target.reason or "no_owner")
     return _dead_letter_result(internal_event, payload, reason, external_id), routing_state
 
-
 async def route_event(
     internal_event: str,
     payload: dict[str, Any],
@@ -272,6 +273,7 @@ async def route_event(
         payload,
         identity,
         selected_pr,
+        delivery_id=delivery_id,
     )
 
     if prepared.result is not None:

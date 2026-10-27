@@ -8,7 +8,7 @@ from loguru import logger
 
 from doceditor.presence import is_document_activity_tool, observe_document_activity
 
-from events import connectors, observe_rules, self_caused
+from events import connectors, observe_rules
 from events.connectors import ObservedArtifactDecl
 from infra.database import get_db
 from infra.product_events import emit_product_event
@@ -194,19 +194,10 @@ def _already_registered(db, thread_id, rule, artifact, label, told) -> None:
 
 def _extract_observation(rule, args, content, app, upstream, db, thread_id, told):
     if app is not None:
-        if app not in rule.argv_prefix:
+        if not connectors.app_matches(app, rule.connector):
             return False, None
-        extract = connectors.get_manifest(rule.connector).connected_app_extractors.get(rule.item_type)
-        if extract is None:
-            reason = f"connector {rule.connector} cannot read {rule.item_type.replace('-', ' ')} from app results"
-            if told is not None:
-                told.append(f"Not registered: {reason}.")
-            _record(db, thread_id, rule, "not_registered", None, reason, told)
-            return False, None
-        result = extract(content, upstream, args)
-        if result is not None:
-            self_caused.record(db, thread_id, rule, result.events)
-        return True, result.artifact if result else None
+        extract = _extractor(rule, db, thread_id, told)
+        return (True, extract(content)) if extract else (False, None)
     if not command_matches_rule(args.get(rule.command_arg), rule):
         return False, None
     extract = _extractor(rule, db, thread_id, told)
@@ -234,7 +225,7 @@ def observe_command_result(
     metadata = metadata or {}
     app, upstream = metadata.get(APP_FIELD), metadata.get(TOOL_FIELD)
     connected = isinstance(app, str) and bool(app) and isinstance(upstream, str) and bool(upstream)
-    name = observe_rules.MCP_PREFIX + upstream if connected else normalize_tool_name(raw_tool_name)
+    name = upstream if connected else normalize_tool_name(raw_tool_name)
     if not thread_id or is_error or (not connected and name not in observe_rules.SHELL_TOOLS):
         return None
     rule_db = db or get_db()

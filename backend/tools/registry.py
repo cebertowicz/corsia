@@ -1,5 +1,6 @@
 """Tool registry for dynamic tool management."""
 
+import asyncio
 from contextlib import nullcontext
 from dataclasses import replace
 import logging
@@ -88,6 +89,9 @@ class ToolRegistry:
             result = self._sanitize_result(await self._execute_unredacted(
                 name, params, review_request_id=review_request_id,
             ))
+            if isinstance(result, ConnectedAppResult):
+                from events.self_caused import record_current_result
+                await asyncio.to_thread(record_current_result, result)
             # The reminder only touches plain text, so a stamped result earns it as text.
             plain = str(result) if isinstance(result, ConnectedAppResult) else result
             result = restamp(result, await remind_current_turn(plain, name, params))
@@ -309,7 +313,6 @@ class ToolRegistry:
             safe_error = sanitize_credential_text(str(e))
             set_attrs(_tool_span, {"tool.error": safe_error[:200]})
             return f"Error executing {name}: {safe_error}" + _HINT
-
 
     @staticmethod
     async def _load_thread_context() -> tuple[dict[str, Any] | None, str | None]:

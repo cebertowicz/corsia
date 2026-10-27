@@ -43,7 +43,7 @@ def _run(operation: str, thread_id: str, project_id: str | None, kwargs: dict[st
                     script_id=kwargs.get("script_id"), workflow_id=kwargs.get("workflow_id"),
                     request_identity_fact=kwargs.get("request_identity_fact"), workflows=workflows,
                     kind=kwargs.get("kind"), tool=kwargs.get("tool"), argv_prefix=kwargs.get("argv_prefix"),
-                    item_type=kwargs.get("item_type"), app=kwargs.get("app"),
+                    item_type=kwargs.get("item_type"),
                 )
             else:
                 result = rule_authoring.disable(
@@ -189,7 +189,6 @@ class EventRulesTool(Tool):
                 "kind": {"type": "string", "enum": [rules.ROUTE, observe_rules.OBSERVE],
                          "description": "create: route (the default) or observe"},
                 "tool": {"type": "string", "description": "create observe: bash, or the connected app's upstream tool name"},
-                "app": {"type": "string", "description": "create observe: connected app URL or package, as configured"},
                 "argv_prefix": {"type": "array", "items": {"type": "string"}, "maxItems": observe_rules.MAX_PREFIX,
                                 "description": "create observe: the command's leading words, e.g. gh, pr, create"},
                 "item_type": {"type": "string",
