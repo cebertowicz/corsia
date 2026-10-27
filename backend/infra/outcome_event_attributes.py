@@ -227,11 +227,12 @@ ATTRIBUTE_ALLOWLISTS: dict[str, dict[str, AttributeSpec]] = {
     },
     # Reviews and comments (events/connectors/github_reply_outcomes.py): logins, an author
     # association, ids, a state, a path, minutes and a yes/no marker flag; never a body.
+    # A path is bounded at Linux's PATH_MAX (4096), so a real repository path is never dropped.
     "github.pr.review.submitted": {**_REVIEW_ATTRS},
     "github.pr.review.dismissed": {**_REVIEW_ATTRS},
     "github.pr.review_comment.created": {
         **_PR_REPLY_ATTRS, "comment_id": id_attr(), "commit_id": id_attr(),
-        "path": text_attr(300), "in_reply_to_id": id_attr(),
+        "path": text_attr(4096), "in_reply_to_id": id_attr(),
     },
     "github.pr.comment.created": {**_PR_REPLY_ATTRS, "comment_id": id_attr()},
     "github.issue.comment.created": {

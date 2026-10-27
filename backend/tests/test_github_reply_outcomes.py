@@ -128,6 +128,18 @@ async def test_a_review_comment_is_one_event_with_its_path_and_commit(main_db):
     assert map_github_outcomes(event_type, payload)[0].subject_key == f"github:pr:{REPO}#2"
 
 
+async def test_a_long_repository_path_is_kept(main_db):
+    event_type, payload = delivery("pr_review_comment_created")
+    long_path = "/".join(["d" * 60] * 16) + "/file.py"
+    payload["comment"]["path"] = long_path
+
+    await admit(event_type, payload, "d-long-path")
+
+    ((_, _, attrs),) = events(main_db)
+    assert len(long_path) > 900 and attrs["path"] == long_path
+    assert counters(main_db) == {}
+
+
 async def test_a_reply_in_a_thread_names_the_comment_it_answers(main_db):
     event_type, payload = delivery("pr_review_comment_created")
     payload["comment"]["in_reply_to_id"] = 284312000
