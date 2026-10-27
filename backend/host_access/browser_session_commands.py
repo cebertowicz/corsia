@@ -44,7 +44,7 @@ def _script_config(config: dict) -> bool:
     return configured or any(os.environ.get(key) for key in env) or "--load-extension" in launch_args
 
 
-def _saved_command(args: Sequence[str], *, pane: bool) -> bool:
+def _saved_command(args: Sequence[str], *, pane: bool, single_dash_fill: bool = False) -> bool:
     """Admit only command shapes produced by the public browser callers."""
     command = args[0]
     if command == "open" and len(args) == 2 and _javascript_url(args[1]):
@@ -53,7 +53,8 @@ def _saved_command(args: Sequence[str], *, pane: bool) -> bool:
     # Its single-dash global flags are -p, -v and -q; other single-dash fill
     # values are positional. Keep long options refused even as fill text.
     checked = args[1:]
-    if command == "fill" and len(args) == 3 and not args[2].startswith("--") and args[2] not in {"-p", "-v", "-q"}:
+    if (single_dash_fill and command == "fill" and len(args) == 3 and
+            not args[2].startswith("--") and args[2] not in {"-p", "-v", "-q"}):
         checked = args[1:2]
     if any(arg.startswith("-") for arg in checked) and tuple(args) not in {
         ("snapshot", "-i"), ("wait", "--load", "networkidle")
@@ -96,7 +97,8 @@ async def run(owner: Any, thread_id: str, args: Sequence[str], *, lease_id: str 
         trusted_navigation = (navigation_url is not None and
                               tuple(args) == ("eval", f"location.href = {json.dumps(navigation_url)}; 'navigating'") and
                               not _javascript_url(navigation_url))
-        if _script_config(config) or not (trusted_navigation and not pane or _saved_command(args, pane=pane)):
+        if _script_config(config) or not (trusted_navigation and not pane or
+                _saved_command(args, pane=pane, single_dash_fill=owner._native.version == "0.31.2")):
             raise BrowserSessionError(_SCRIPT_REFUSAL)
     # Pane and agent commands share this lock, but direct person interaction and
     # lifecycle cleanup do not. The lifecycle lock remains inside _run_admitted.

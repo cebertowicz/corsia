@@ -46,9 +46,26 @@ async def test_saved_public_path_refuses_other_shapes(synthetic_browser, monkeyp
 @pytest.mark.parametrize('text', ['-1', '-example', 'javascript: documentation'])
 async def test_saved_fill_preserves_ordinary_text(synthetic_browser, monkeypatch, text):
     monkeypatch.setattr(browser_launch, '_owner_key', lambda _: 'owner')
+    synthetic_browser.code = synthetic_browser.code.replace("'0.27.0'", "'0.31.2'")
+    original = synthetic_browser.owner._invoke
+    async def invoke(argv, *, timeout):
+        if argv[-1] == '--version':
+            from host_access.browser_cli import CommandResult
+            return CommandResult(0, 'agent-browser 0.31.2', '')
+        return await original(argv, timeout=timeout)
+    monkeypatch.setattr(synthetic_browser.owner, '_invoke', invoke)
     await synthetic_browser.owner.run('a', ['open', 'about:blank'])
     await synthetic_browser.owner.run('a', ['fill', '#a', text])
     assert synthetic_browser.calls[-1][-3:] == ('fill', '#a', text)
+    await synthetic_browser.owner.shutdown()
+
+
+async def test_older_cli_keeps_conservative_dash_guard(synthetic_browser, monkeypatch):
+    monkeypatch.setattr(browser_launch, '_owner_key', lambda _: 'owner')
+    await synthetic_browser.owner.run('a', ['open', 'about:blank'])
+    await synthetic_browser.owner.run('a', ['fill', '#a', 'javascript: documentation'])
+    with pytest.raises(Exception, match='unavailable in a browser session'):
+        await synthetic_browser.owner.run('a', ['fill', '#a', '-1'])
     await synthetic_browser.owner.shutdown()
 
 
