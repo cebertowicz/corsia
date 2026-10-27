@@ -80,7 +80,8 @@ def test_multiple_person_inputs_need_authority_and_capture_only_that_quote(db, o
     ]
 
 
-def test_caller_person_quote_suppresses_single_turn_input(db):
+@pytest.mark.parametrize("role", ("bears_on", "authority"))
+def test_caller_person_quote_replaces_single_turn_input_and_needs_authority(db, role):
     _init_messages_fts(db)
     plan = service.ensure_plan("thread", "root", db=db)
     accept_thread_input("root", role="user", content="Build the requested outcome.", intent="apply_now",
@@ -88,15 +89,18 @@ def test_caller_person_quote_suppresses_single_turn_input(db):
     accept_thread_input("root", role="user", content="Check the weather.", intent="apply_now",
                         message_id="turn-input", db=db)
     db.execute("UPDATE messages SET active_turn_id='one-turn' WHERE id='turn-input'")
-    result = mutate(
-        plan.id, "add", {"title": "Build", "acceptance_criteria": "Outcome exists", "size": "S",
-                         "intent": "Build the outcome", "intent_words": [
-                             {"quote": "Build the requested outcome.", "role": "bears_on"}]},
-        actor=replace(ACTOR, turn_id="one-turn"), provenance="test", mutation_id="one-caller-quote", db=db,
-    ).result
+    params = {"title": "Build", "acceptance_criteria": "Outcome exists", "size": "S",
+              "intent": "Build the outcome", "intent_words": [{"quote": "Build the requested outcome.", "role": role}]}
+    actor = replace(ACTOR, turn_id="one-turn")
+    if role == "bears_on":
+        # The turn input is not recorded, so it cannot admit the task either.
+        with pytest.raises(service.PlanInputError, match="task creation needs intent_words"):
+            mutate(plan.id, "add", params, actor=actor, provenance="test", mutation_id="one-caller-bears", db=db)
+        return
+    result = mutate(plan.id, "add", params, actor=actor, provenance="test", mutation_id="one-caller-quote", db=db).result
     words = intent_words.newest(db, result["node"]["id"])
     assert [(w["author"], w["role"], w["quote"]) for w in words] == [
-        ("person", "bears_on", "Build the requested outcome."),
+        ("person", "authority", "Build the requested outcome."),
     ]
 
 
