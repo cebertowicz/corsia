@@ -352,10 +352,10 @@
       "sha256": "354b18112635941b14e2dc763f928fb6ac9268f1fd92fb9908cb84cabd1ec36b"
     },
     {
-      "bytes": 3155,
+      "bytes": 3147,
       "kind": "skill",
       "path": "skills/mail-host-setup/SKILL.md",
-      "sha256": "682da7c065201222e29f99a5b151d9114f4c0b9f49a3e6474e6a31b446e9c027"
+      "sha256": "49c2b17770750497674dba469d545769a96d42fd12f9727d12eb2033835b18ee"
     },
     {
       "bytes": 8898,
