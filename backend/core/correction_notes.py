@@ -82,7 +82,7 @@ def _source_note_text(candidate: CorrectionCandidate) -> str:
         note = _note(where, candidate.quote or "", "comment")
     elif candidate.source_kind == SOURCE_KIND_SELF_CAUGHT:
         return (
-            f"Failure observed on work you settled, with no correction message from a person "
+            f"Failure observed on your work, with no correction message from a person "
             f"(source {candidate.source_id}, observed {clock}).\n"
             f"{TRIAGE_STEPS}"
         )
