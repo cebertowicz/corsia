@@ -41,6 +41,7 @@ JITTER_S = 10.0
 HEALTH_REPORT_INTERVAL = timedelta(hours=6)
 REPORT_SETTING = "pr_quiet_ingress_report"
 _ETAG_CACHE_MAX = 512
+
 _status: dict[str, Any] = {
     "state": "starting", "reason": None, "last_run": None, "fired_count": 0, "last_error": None,
 }

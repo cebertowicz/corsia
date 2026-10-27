@@ -24,7 +24,7 @@ from events.connectors import github_pr_quiet_reasons as reasons
 from events.connectors import github_pr_quiet_rows as rows
 from events.connectors import github_pr_quiet_watch as watch
 from infra.settings import get_setting, set_setting
-from tests.event_routing_helpers import mk_session, register_pr, track_repositories
+from tests.event_routing_helpers import mk_session, register_pr
 
 REPO = "o/r"
 H = "a" * 40
@@ -111,7 +111,6 @@ def _received(head: str, at: datetime = T0, repo: str = REPO, *, suite: int = 1)
 
 @pytest.fixture()
 def gh(isolated_db, monkeypatch):
-    track_repositories(monkeypatch, REPO)
     watch._etags.clear()
     watch._status.update({"fired_count": 0})
     _received("0" * 40, T0 - timedelta(days=30), suite=0)  # the log has recorded suites for a month
@@ -1182,19 +1181,3 @@ def test_signed_out_gh_disables_the_sweep(gh, monkeypatch):
     assert watch.disabled_reason(gh) == "gh_signed_out"
     monkeypatch.setenv(watch.DISABLE_ENV, "1")
     assert watch.disabled_reason(gh) == "config_off"
-
-
-@pytest.mark.asyncio
-async def test_an_owned_pr_of_an_untracked_repository_is_read(gh, wakes, parked, monkeypatch):
-    from connections.github_broker import GithubReadBroker
-
-    _webhook()
-    _owner(11)
-    gh.pr(11)
-    gh.runs(H, run())
-    gh.reviewer(H, "success")
-    set_setting("pr_quiet:o/r#11", {"head": H, "first_seen_at": T0.isoformat(), "fired": []})
-    track_repositories(monkeypatch, "o/other")
-    await _sweep(GithubReadBroker(gh), T0 + timedelta(days=3), monkeypatch)
-    assert any("repos/o/r/pulls/11" in path for path in gh.reads)
-    assert watch.quiet_watch_status()["state"] == "enabled"

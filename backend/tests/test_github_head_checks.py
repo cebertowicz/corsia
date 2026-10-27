@@ -62,7 +62,7 @@ async def test_held_read_retries_then_emits_once(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_untracked_webhook_repository_emits_through_broker(monkeypatch):
+async def test_a_webhook_repository_emits_through_the_broker(monkeypatch):
     from connections.github_broker import GithubReadBroker
     from events.connectors.github_read_budget import budget
 
@@ -71,7 +71,6 @@ async def test_untracked_webhook_repository_emits_through_broker(monkeypatch):
     monkeypatch.setattr(poller, "_locks", {})
     monkeypatch.setattr(poller, "_repo_state", lambda _repo: {"reads": []})
     monkeypatch.setattr(poller, "_save_state", lambda *_args: None)
-    monkeypatch.setattr(poller.feed, "tracked_github_repositories", lambda: frozenset({"other/repo"}))
 
     def run(args, *, timeout):
         calls.append(args[-1])

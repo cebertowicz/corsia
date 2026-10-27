@@ -118,9 +118,3 @@ def statements():
 def read_statements(seen: list[str]) -> list[str]:
     """The reads among the statements ``statements`` captured."""
     return [s for s in seen if s.lstrip().upper().startswith(("SELECT", "WITH"))]
-
-
-def track_repositories(monkeypatch, *repos: str) -> None:
-    """Set the feed's tracked repositories without touching a database."""
-    names = frozenset(repos)
-    monkeypatch.setattr("events.connectors.github_notifications_feed.tracked_github_repositories", lambda *args: names)

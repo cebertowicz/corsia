@@ -33,7 +33,7 @@ def broker(inner: Inner) -> GithubReadBroker:
     ["api", "-i", "user"],
     ["api", "-i", "rate_limit"],
 ])
-def test_a_read_of_a_tracked_repository_or_a_listed_path_runs(broker, inner, args) -> None:
+def test_a_read_of_a_repository_or_a_listed_path_runs(broker, inner, args) -> None:
     result = broker(args, timeout=5.0)
     assert result.returncode == 0 and result.stdout == OK
     assert inner.calls[0][:2] == ["api", "--method"] and inner.calls[0][2] in ("GET", "HEAD")
@@ -108,7 +108,7 @@ def test_graphql_is_refused_by_name_in_every_spelling(broker, inner, path) -> No
         assert refusal(broker, inner, ["api", *flags, path]) == "graphql_not_allowed"
 
 
-def test_untracked_repositories_are_readable(broker, inner) -> None:
+def test_any_repository_is_readable(broker, inner) -> None:
     broker(["api", "repos/other/repo/pulls/1"])
     broker(["api", "repos/o/r2/pulls/1"])
     assert [call[-1] for call in inner.calls] == ["repos/other/repo/pulls/1", "repos/o/r2/pulls/1"]
@@ -152,7 +152,7 @@ def test_pagination_through_the_broker_stops_at_the_page_cap(broker, inner) -> N
     assert all(call[-1] != f"repos/{REPO}" for call in inner.calls)
 
 
-def test_page_two_of_a_tracked_repository_is_read_by_its_id(broker, inner) -> None:
+def test_a_page_named_by_repository_id_is_read_as_given(broker, inner) -> None:
     broker(["api", "-i", f"repositories/{REPO_ID}/pulls/3/comments?page=2"], timeout=5.0)
     assert inner.calls[0][-1] == f"repositories/{REPO_ID}/pulls/3/comments?page=2"
 
@@ -172,9 +172,6 @@ def test_a_repositories_path_for_any_numeric_id_is_readable(broker, inner, path)
 ])
 def test_a_malformed_repositories_path_is_refused(broker, inner, path) -> None:
     assert refusal(broker, inner, ["api", path]) == "path_invalid"
-
-
-# Repository IDs require no lookup; pagination goes straight to the requested path.
 
 
 def test_the_broker_takes_the_parameters_run_gh_takes_and_no_others(broker, inner) -> None:
@@ -206,9 +203,6 @@ def test_the_default_runner_pins_the_host_and_forwards_the_vetted_argv(monkeypat
     GithubReadBroker()(["api", "-X", "get", "-i", f"repos/{REPO}/pulls/1"], timeout=7.0)
     assert seen["argv"] == ["gh", "api", "--method", "GET", "-i", f"repos/{REPO}/pulls/1"]
     assert seen["env"]["GH_HOST"] == "github.com" and seen["timeout"] == 7.0 and seen["check"] is False
-
-
-# The broker does not query tracked repositories.
 
 
 def test_every_poller_defaults_to_the_broker(monkeypatch) -> None:

@@ -14,15 +14,14 @@ import pytest
 from events.connectors import github_pr_notice as notices
 from events.identity import GITHUB_INTEGRATION, PR_TYPE, pr_external_id
 from infra.settings import get_setting
-from tests.event_routing_helpers import mk_session, register_pr, track_repositories
+from tests.event_routing_helpers import mk_session, register_pr
 
 REPO = "o/r"
 CREATE = {"command": "gh pr create --draft --base dev --title t --body b"}
 
 
 @pytest.fixture(autouse=True)
-def _fresh_caches(monkeypatch):
-    track_repositories(monkeypatch, REPO)
+def _fresh_caches():
     notices._owned_cache.clear()
     notices._last_poll_notice.clear()
     yield
@@ -235,10 +234,3 @@ def test_wording_follows_the_webhook_endpoints_own_secret(isolated_db, monkeypat
 
     monkeypatch.setattr(webhook_receivers, "receiver_secret", lambda connector: None)
     assert notices.webhook_configured() is False, "reads through the endpoint's helper"
-
-
-def test_untracked_repository_gets_the_same_notice(isolated_db, monkeypatch):
-    _webhook(True)
-    track_repositories(monkeypatch, "o/other")
-    pr = notices.OwnedPr("o/r#12", REPO, 12, False)
-    assert "CORSIA wakes you when its CI finishes" in notices._notice(pr)

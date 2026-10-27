@@ -1,6 +1,6 @@
 """Parse and vet one ``gh api`` call so that it can only read.
 
-``parse_gh_args`` turns the argv a poller or script hands the broker into a
+``parse_gh_args`` turns the argv a poller hands the broker into a
 ``ReadRequest``, or raises ``GithubReadRefused`` naming why not. Nothing is
 passed through: the broker rebuilds the argv from the vetted request, so what
 runs is exactly what was checked. The policy, in one place:

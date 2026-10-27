@@ -80,7 +80,8 @@ def _policies(project_id: str | None = None) -> list[Any]:
 
 
 def tracked_github_repositories(project_id: str | None = None) -> frozenset[str]:
-    """Resolve tracked GitHub repositories from registered sources."""
+    """Resolve tracked GitHub repositories from the registered source repositories,
+    of one project when ``project_id`` is given."""
     from infra.worktree_reaper_probe import ReaperGitError
 
     try:
@@ -90,7 +91,8 @@ def tracked_github_repositories(project_id: str | None = None) -> frozenset[str]
 
 
 def projects_tracking_github_repository(repository: str) -> frozenset[str]:
-    """The projects whose registered source repositories track ``repository``."""
+    """The inverse: the projects whose registered source repositories track
+    ``repository``. Bounded by the registered repositories, never by any rule."""
     from infra.worktree_reaper_probe import ReaperGitError
 
     wanted = repository.lower()
