@@ -58,7 +58,7 @@ describe('MeasurementWhereToLook', () => {
 	it('shows enough precision to distinguish a change in the minutes measure', () => {
 		render(state({ worse: [row({ format: 'minutes', previous: 0.14, latest: 0.1, overall: 0.14 })] }));
 		const cells = host.querySelectorAll('tbody tr:first-child td');
-		expect(cells[2].textContent?.trim()).toBe('0.14 to 0.1');
+		expect(cells[2].textContent?.trim()).toBe('0.14 to 0.10');
 		expect(cells[5].textContent?.trim()).toBe('0.14');
 	});
 
@@ -185,6 +185,12 @@ describe('where-to-look store helpers', () => {
 		expect(formatWhereToLookRow({ previous: 1.501, latest: 1.504, overall: 1.5, format: 'dollars' })).toEqual(['$1.501', '$1.504', '$1.500']);
 		expect(formatWhereToLookRow({ previous: 1234.5, latest: 1234.7, overall: 1234.6, format: 'hours' })).toEqual(['1,234.5 h', '1,234.7 h', '1,234.6 h']);
 		expect(formatWhereToLookRow({ previous: 0.14, latest: 0.1, overall: 1, format: 'ratio' })).toEqual(['0.14', '0.10', '1.00']);
+		// Once extra digits tell a pair apart, every figure in the row keeps them, trailing zeros included.
+		expect(formatWhereToLookRow({ previous: 0.14, latest: 0.1, overall: 0.14, format: 'minutes' })).toEqual(['0.14', '0.10', '0.14']);
+		expect(formatWhereToLookRow({ previous: 1_240_000, latest: 1_200_000, overall: 1_220_000, format: 'tokens' })).toEqual(['1.24M', '1.20M', '1.22M']);
+		expect(formatWhereToLookRow({ previous: 0.814, latest: 0.81, overall: 0.81, format: 'percent' })).toEqual(['81.4%', '81.0%', '81.0%']);
+		expect(formatWhereToLookRow({ previous: 2.04, latest: 2, overall: 2.02, format: 'hours' })).toEqual(['2.04 h', '2.00 h', '2.02 h']);
+		expect(formatWhereToLookRow({ previous: 2.5, latest: 3, overall: 2.5, format: 'hours' })).toEqual(['2.5 h', '3 h', '2.5 h']);
 	});
 
 	it('refuses a response with no lists or a bad number', () => {
