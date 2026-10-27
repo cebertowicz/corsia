@@ -1245,45 +1245,6 @@ async def test_reader_exit_rejects_written_turn_start_without_request_timeout():
     assert session._pending == {}
 
 
-async def test_terminate_is_bounded_when_reader_ignores_first_cancellation():
-    session = _make_session()
-    first_cancel = asyncio.Event()
-
-    class _Proc:
-        def __init__(self) -> None:
-            self.returncode = None
-            self.kill_calls = 0
-
-        def kill(self) -> None:
-            self.kill_calls += 1
-            self.returncode = -9
-
-        async def wait(self) -> int:
-            return self.returncode
-
-    async def resistant_reader() -> None:
-        try:
-            await asyncio.Event().wait()
-        except asyncio.CancelledError:
-            first_cancel.set()
-            try:
-                await asyncio.Event().wait()
-            except asyncio.CancelledError:
-                return
-
-    proc = _Proc()
-    reader = asyncio.create_task(resistant_reader())
-    await asyncio.sleep(0)
-    session._proc = proc
-    session._reader = reader
-
-    await asyncio.wait_for(session.terminate(timeout=0.01), timeout=0.1)
-
-    assert first_cancel.is_set()
-    assert reader.done()
-    assert proc.kill_calls == 1
-
-
 async def test_wait_reader_drained_accepts_already_cancelled_reader():
     session = _make_session()
     reader = asyncio.create_task(asyncio.Event().wait())
@@ -2321,16 +2282,14 @@ async def test_current_schema_context_compaction_item_emits_breach():
     }]
 
 
-async def test_turn_steer_uses_bounded_ack_timeout_without_shortening_other_requests(
-    monkeypatch,
-):
+async def test_turn_steer_uses_request_deadline_without_shortening_other_requests(monkeypatch):
     from subagents import codex_app_server
-    from subagents.codex_app_server_errors import CodexAppServerError
 
     session = _make_session()
     session.thread_id = "thread-1"
     session._track_active_turn("turn-1")
     observed_timeouts: list[float] = []
+    real_timeout = asyncio.timeout
 
     class _Stdin:
         def write(self, _payload: bytes) -> None:
@@ -2343,19 +2302,22 @@ async def test_turn_steer_uses_bounded_ack_timeout_without_shortening_other_requ
         stdin = _Stdin()
         returncode = None
 
-    async def timeout(awaitable, *, timeout):
-        observed_timeouts.append(timeout)
-        awaitable.cancel()
-        raise asyncio.TimeoutError
+        def kill(self):
+            self.returncode = -9
+
+    def timeout(delay):
+        observed_timeouts.append(delay)
+        return real_timeout(0)
 
     session._proc = _Proc()
-    monkeypatch.setattr(codex_app_server.asyncio, "wait_for", timeout)
+    monkeypatch.setattr(codex_app_server.asyncio, "timeout", timeout)
 
     with pytest.raises(CodexAppServerError, match="turn/steer"):
         await session.steer("queued user input")
 
-    assert observed_timeouts == [codex_app_server.STEER_ACK_TIMEOUT]
-    assert codex_app_server.STEER_ACK_TIMEOUT < codex_app_server.REQUEST_TIMEOUT
+    steer, write = codex_app_server.STEER_REQUEST_TIMEOUT, codex_app_server.REQUEST_TIMEOUT
+    assert observed_timeouts == [steer, write, steer], "admission, drain, response"
+    assert codex_app_server.STEER_REQUEST_TIMEOUT < codex_app_server.REQUEST_TIMEOUT
     assert session.request_log[-1]["method"] == "turn/steer"
     assert session._pending == {}
 

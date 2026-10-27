@@ -19,7 +19,7 @@ from infra.usage_summary import iso_week, platform_fields, record_current_instal
 
 NOW = datetime(2026, 10, 26, 12, 0, tzinfo=timezone.utc)
 NEXT_WEEK = datetime(2026, 11, 3, 12, 0, tzinfo=timezone.utc)
-MACHINE = {"os": "macos", "chip": "arm64"}
+MACHINE = {"os.type": "darwin", "host.arch": "arm64"}
 
 
 @pytest.fixture
@@ -46,12 +46,25 @@ def test_iso_week_and_release_tag():
     assert [release_tag(v) for v in ("0.4.1-12-gabc123", "", None, "dev", "v0.4.1")] == ["dev"] * 5
 
 
+@pytest.mark.parametrize("system,machine,expected", [
+    ("Darwin", "arm64", {"os.type": "darwin", "host.arch": "arm64"}),
+    ("Linux", "aarch64", {"os.type": "linux", "host.arch": "arm64"}),
+    ("Windows", "AMD64", {"os.type": "windows", "host.arch": "amd64"}),
+    ("Linux", "x86_64", {"os.type": "linux", "host.arch": "amd64"}),
+    ("Other", "other", {}),
+])
+def test_platform_fields(system, machine, expected, monkeypatch):
+    monkeypatch.setattr("platform.system", lambda: system)
+    monkeypatch.setattr("platform.machine", lambda: machine)
+    assert platform_fields() == expected
+
+
 def test_recording_is_once_per_week_and_holds_only_the_closed_fields(db):
     assert record_install_week(db, now=NOW, version="0.4.1", fields=MACHINE) is True
     assert record_install_week(db, now=NOW, version="0.4.2", fields=MACHINE) is False  # the week's first record wins
     ((key, attributes),) = _rows(db)
     assert key == f"{USAGE_EVENT}:2026-W44"
-    assert json.loads(attributes) == {"week": "2026-W44", "release": "0.4.1", "os": "macos", "chip": "arm64"}
+    assert json.loads(attributes) == {"corsia.usage.week": "2026-W44", "service.version": "0.4.1", "os.type": "darwin", "host.arch": "arm64"}
     row = db.execute("SELECT source,provenance FROM outcome_events WHERE event_name=?", (USAGE_EVENT,)).fetchone()
     assert tuple(row) == ("corsia", "instrumented")
 
@@ -146,14 +159,14 @@ def test_the_presence_sweep_loop_survives_a_raising_recorder(monkeypatch):
 def test_unlisted_machine_leaves_os_and_chip_out(db):
     record_install_week(db, now=NOW, version=None, fields={})
     ((_, attributes),) = _rows(db)
-    assert json.loads(attributes) == {"week": "2026-W44", "release": "dev"}
+    assert json.loads(attributes) == {"corsia.usage.week": "2026-W44", "service.version": "dev"}
 
 
 @pytest.mark.parametrize("extra", [{"user": "x"}, {"host": "h"}, {"locale": "en"}, {"thread_id": "t"}, {"delivery_id": "x"}])
 def test_a_field_outside_the_closed_list_is_dropped_and_counted(db, extra):
     record_install_week(db, now=NOW, version="0.4.1", fields={**MACHINE, **extra})
     ((_, attributes),) = _rows(db)
-    assert json.loads(attributes) == {"week": "2026-W44", "release": "0.4.1", **MACHINE}
+    assert json.loads(attributes) == {"corsia.usage.week": "2026-W44", "service.version": "0.4.1", **MACHINE}
     dropped = db.execute(
         "SELECT n FROM outcome_event_counters WHERE counter='attribute_dropped' AND event_name=?", (USAGE_EVENT,),
     ).fetchone()
@@ -163,10 +176,10 @@ def test_a_field_outside_the_closed_list_is_dropped_and_counted(db, extra):
 # The allowlist is the one enforcer of the value rules in core.usage_fields: each field takes exactly
 # these values and refuses these others, including digits of other scripts and a trailing newline.
 _VALUES = {
-    "week": (["2026-W44", "2026-W01", "2026-W53"], ["2026-W00", "2026-W54", "2026-44", "2026-W4", "٢٠٢٦-W44", "2026-W44\n", "x", 7]),
-    "release": (["0.4.1", "12.0.103", "dev"], ["0.4", "0.4.1.2", "v0.4.1", "0.4.1-rc1", "latest", "٠.٤.١", "0.4.1\n", "", None]),
-    "os": (["macos", "windows", "linux"], ["beos", "MacOS", "", 1]),
-    "chip": (["arm64", "x86_64"], ["m4", "aarch64", "", 1]),
+    "corsia.usage.week": (["2026-W44", "2026-W01", "2026-W53"], ["2026-W00", "2026-W54", "2026-44", "2026-W4", "٢٠٢٦-W44", "2026-W44\n", "x", 7]),
+    "service.version": (["0.4.1", "12.0.103", "dev"], ["0.4", "0.4.1.2", "v0.4.1", "0.4.1-rc1", "latest", "٠.٤.١", "0.4.1\n", "", None]),
+    "os.type": (["darwin", "windows", "linux"], ["macos", "beos", "MacOS", "", 1]),
+    "host.arch": (["arm64", "amd64"], ["x86_64", "m4", "aarch64", "", 1]),
 }
 
 
@@ -180,15 +193,15 @@ def test_the_allowlist_enforces_each_value_rule(key):
 def test_every_value_the_recorder_builds_passes_the_allowlist():
     specs = ATTRIBUTE_ALLOWLISTS[USAGE_EVENT]
     for version in ("0.4.1", "12.0.103", "0.4.1-12-gabc123", "", None, "dev"):
-        assert specs["release"].accepts(release_tag(version)), version
+        assert specs["service.version"].accepts(release_tag(version)), version
     for moment in (NOW, NEXT_WEEK, datetime(2027, 1, 1, tzinfo=timezone.utc), datetime(2024, 12, 30, tzinfo=timezone.utc)):
-        assert specs["week"].accepts(iso_week(moment)), moment
+        assert specs["corsia.usage.week"].accepts(iso_week(moment)), moment
     for key, value in platform_fields().items():
         assert specs[key].accepts(value)
 
 
 def test_the_allowlist_takes_its_field_names_from_the_usage_field_list():
-    assert set(ATTRIBUTE_ALLOWLISTS[USAGE_EVENT]) == set(FIELDS) == {"week", "release", "os", "chip"}
+    assert set(ATTRIBUTE_ALLOWLISTS[USAGE_EVENT]) == set(FIELDS) == {"corsia.usage.week", "service.version", "os.type", "host.arch"}
 
 
 def test_recording_makes_no_network_call(db, monkeypatch):

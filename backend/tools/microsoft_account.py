@@ -68,7 +68,11 @@ class MicrosoftConnectTool(Tool):
         except Exception as exc:
             log.error("microsoft_connect failed inside CORSIA: %s", type(exc).__name__)
             return f"Error: {INTERNAL}: {MicrosoftError(INTERNAL).message}"
-        return json.dumps({"url": url, "account_id": account_id, "next": "Give the person this link to open, then call microsoft_status."})
+        return json.dumps({
+            "url": url, "account_id": account_id,
+            "next": "Give the person this link to open. CORSIA wakes you once, when they finish or when the "
+                    f"link expires after {oauth.PENDING_SECONDS // 60} minutes; then call microsoft_status.",
+        })
 
 
 class MicrosoftStatusTool(Tool):

@@ -39,6 +39,26 @@ async def test_the_tool_refuses_a_second_agent_suggestion_over_an_open_one(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("first_insert", [True, False])
+async def test_insertion_anchor_and_replacement_conflict_at_creation(
+    integration_client, doc, _registrable_roots, first_insert,
+):
+    from tools.documents import DocCommentCreateTool
+
+    doc.write_text(BODY)
+    await _own(integration_client, doc)
+    first = _mk_thread(integration_client, _OWNER, title="First")
+    second = _mk_thread(integration_client, _OWNER, title="Second")
+    tool = DocCommentCreateTool()
+    initial = await tool.execute(doc_path=str(doc), quote=TAIL, replacement=" new",
+                                 insert_after=first_insert, _thread_id=first)
+    assert not initial.startswith("Error:"), initial
+    refused = await tool.execute(doc_path=str(doc), quote="tail sentence", replacement=" change",
+                                 insert_after=not first_insert, _thread_id=second)
+    assert refused.startswith("Error: This overlaps an open suggestion"), refused
+
+
+@pytest.mark.asyncio
 async def test_the_agent_route_refuses_it_with_a_409(integration_client, doc, _registrable_roots):
     doc.write_text(BODY)
     await _own(integration_client, doc)

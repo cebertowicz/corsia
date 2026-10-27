@@ -19,7 +19,7 @@ def _columns(db) -> set[str]:
 
 
 def test_fresh_schema_is_current_version():
-    assert SCHEMA_VERSION == 148
+    assert SCHEMA_VERSION == 150
 
 
 def test_fresh_schema_creates_the_pane_view_table():

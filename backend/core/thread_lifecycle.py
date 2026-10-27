@@ -9,7 +9,6 @@ dormant / dormancy-archived reactivates it to ``active`` (see ``_evaluate_thread
 so a resumed thread is never silently carried toward purge.
 
 Physical effects are idempotent: completed cleanup is a no-op on the next sweep.
-
 - **archive** — preserve working files, artifacts, ``context/`` and ``skills/``.
 - **purge** — commit permanent unavailability, remove raw message history, user presence
   and update records, archive owned temporary artifacts; then delete ``.threads/{id}/``
@@ -21,7 +20,6 @@ Physical effects are idempotent: completed cleanup is a no-op on the next sweep.
 - **working/ tmp trim** — remove stale ``.threads/{id}/working/`` entries whole,
   tombstone owned temp identities. Settled temporary workers use the normal
   TTL; other archived threads retain their files until permanent purge.
-
 The retention *state machine* excludes agent-enabled threads (the roster: conductor,
 design agents, …) — an idle agent must not be archived out of the live roster — and
 never purges pinned threads. The tool-I/O + working/ trims are global, but tool payloads
@@ -40,6 +38,7 @@ from pathlib import Path
 
 from loguru import logger
 
+from infra.chat_comment_answers import delete_thread_chat_comment_answers
 from infra.checkpoint_entry_index import delete_thread_checkpoints
 from infra.continuity_store import delete_thread_continuity
 from infra.presence import delete_thread_presence
@@ -306,6 +305,7 @@ def _apply_purge(db, sid: str, now: datetime) -> None:
     _wake_parent_of_ended_child(db, sid, reason="purged")
     delete_thread_checkpoints(db, sid)
     delete_thread_continuity(db, sid)
+    delete_thread_chat_comment_answers(db, sid)
     # One rule: held input dies exactly when the transcript dies, never
     # otherwise. Held input rides the reactor's tables, so its one teardown
     # door drops all of them; nothing survives a purge a reversible archive keeps.

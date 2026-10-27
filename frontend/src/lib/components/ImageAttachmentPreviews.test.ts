@@ -36,6 +36,9 @@ function renderComposer() {
 		target: host,
 		props: {
 			threadId: 'thread-1',
+			comments: [],
+			onEditComment: vi.fn(),
+			onRemoveComment: vi.fn(),
 			pendingAttachments: [image],
 			isMultiLine: false,
 			sheetView: null,

@@ -11,11 +11,14 @@
 	import { submittedAnswers } from '$lib/stores/cardAnswers';
 	import ArtifactGlyph from './ArtifactGlyph.svelte';
 	import OutcomeTime from './OutcomeTime.svelte';
+	import NewMarker from './comments/NewMarker.svelte';
 
 	let {
 		card,
 		threadId,
 		variant = 'row',
+		chipWidth = 'default',
+		newMarker = false,
 		task,
 		time,
 	}: {
@@ -23,6 +26,10 @@
 		threadId: string | null | undefined;
 		/** `row`: tile, title and a context line. `chip`: tile and title only. */
 		variant?: 'row' | 'chip';
+		/** Opt-in for a chip whose title is its only location cue; ordinary attachment chips retain 220px. */
+		chipWidth?: 'default' | 'content';
+		/** Show the shared unread marker on a chip. */
+		newMarker?: boolean;
 		/** The plan item whose block this ask answers; a context-line segment that truncates before the state. */
 		task?: string;
 		/** When the block happened; read through the transcript's own short time. */
@@ -93,6 +100,7 @@
 	<span class="text">
 		<span class="head">
 			<span class="title">{card.title}</span>
+			{#if variant === 'chip' && newMarker}<NewMarker />{/if}
 			{#if variant === 'row' && time}<span class="when"><OutcomeTime value={time} compact /></span>{/if}
 		</span>
 		{#if variant === 'row' && (stateLabel || detail)}
@@ -128,6 +136,7 @@
 		class="tile {variant} press-tint"
 		class:thumbed={Boolean(thumbSrc)}
 		class:needs-you={tone === 'ask'}
+		class:chip-content-width={variant === 'chip' && chipWidth === 'content'}
 		data-artifact-id={card.artifact_id}
 		data-card-kind={card.kind}
 		data-card-state={cardState ?? ''}
@@ -141,6 +150,7 @@
 		class:thumbed={Boolean(thumbSrc)}
 		class:gone={!card.available}
 		class:muted={tone === 'muted'}
+		class:chip-content-width={variant === 'chip' && chipWidth === 'content'}
 		data-artifact-id={card.artifact_id}
 		data-card-kind={card.kind}
 		data-card-state={cardState ?? ''}
@@ -181,6 +191,8 @@
 		background: var(--bg-tertiary);
 	}
 	.tile.chip.thumbed { padding-left: var(--space-1); }
+	/* Reply notices opt in because their document title is the location cue; constrain to the chat stack, not a global pixel cap. */
+	.tile.chip.chip-content-width { max-width: 100%; }
 	button.tile { cursor: pointer; }
 	@media (hover: hover) {
 		button.tile.row:hover { background: var(--bg-secondary); }

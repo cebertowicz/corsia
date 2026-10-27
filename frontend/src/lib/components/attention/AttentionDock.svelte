@@ -13,7 +13,9 @@
 	 * `suppressed` defers to a higher-precedence control in the same physical
 	 * slot (a host-access lease awaiting the user). Deferred, never hidden.
 	 */
-	import { onMount } from 'svelte';
+	import { onMount, type Snippet } from 'svelte';
+	import CommentReplyChipRow from './CommentReplyChipRow.svelte';
+	import { replyItemsForThread, subscribeReplyAttention } from './replyItems';
 	import { get } from 'svelte/store';
 	import { on } from '$lib/ws';
 	import { connectionState } from '$lib/stores/connection';
@@ -24,6 +26,7 @@
 	import DecisionChip from './DecisionChip.svelte';
 	import AdaptiveDrawer from '$lib/components/ui/AdaptiveDrawer.svelte';
 	import ExternalReviewRow from './ExternalReviewRow.svelte';
+	import { label, decisionMeta, regionLabel as getRegionLabel } from './dockPresentation';
 	import {
 		collapse,
 		EMPTY,
@@ -40,21 +43,24 @@
 		visibleQueue,
 	} from '$lib/stores/attentionDock.svelte';
 	import { answerNotice, answers } from '$lib/stores/attentionAnswerState';
-	import type { DecisionDetail, ExternalReviewDetail } from '$lib/api/attentionQueue';
+	import type { AttentionDestination, DecisionDetail, ExternalReviewDetail } from '$lib/api/attentionQueue';
 
 	let {
 		writesDisabled = false,
 		suppressed = false,
 		onOpenDestination = () => {},
+		showing = $bindable(false),
+		scrollControl,
 	}: {
 		writesDisabled?: boolean;
 		/** A higher-precedence control holds this slot right now. */
 		suppressed?: boolean;
-		onOpenDestination?: (destination: { pane: string; id: string }) => void;
+		onOpenDestination?: (destination: AttentionDestination, threadId?: string | null) => void;
+		showing?: boolean;
+		scrollControl?: Snippet;
 	} = $props();
 
 	let openTrigger = $state<HTMLButtonElement | null>(null);
-	let region = $state<HTMLElement | null>(null);
 	let servedFocusRequest = 0;
 	/** How long after the last keydown the person still counts as typing. */
 	const TYPING_IDLE_MS = 2000;
@@ -64,11 +70,14 @@
 	/** Bumped when focus moves or the typing window ends, so a waiting arrival is re-judged. */
 	let busyTick = $state(0);
 
-	const current = $derived(shownItem($visibleQueue, $activeId));
+	const dockQueue = $derived($visibleQueue);
+	const current = $derived(shownItem(dockQueue, $activeId));
+	const hasReplies = $derived(replyItemsForThread($visibleQueue, $activeThreadId).length > 0);
+	$effect(() => { showing = !!current || hasReplies; });
 	const position = $derived(
-		current ? $visibleQueue.items.findIndex((i) => i.external_id === current.external_id) + 1 : 0,
+		current ? dockQueue.items.findIndex((i) => i.external_id === current.external_id) + 1 : 0,
 	);
-	const canSkip = $derived($visibleQueue.items.length > 1);
+	const canSkip = $derived(dockQueue.items.length > 1);
 	const effectiveWritesDisabled = $derived(
 		writesDisabled || $stale || $connectionState !== 'connected',
 	);
@@ -83,10 +92,6 @@
 		!!current && !suppressed && $expandedId === current.external_id,
 	);
 
-	function decisionMeta(decision: DecisionDetail): string {
-		return `Decision · ${decision.source.thread_label}${decision.source.project_label ? ` · ${decision.source.project_label}` : ''}`;
-	}
-
 	/** Focus returns to the exact control that opened the chip. */
 	async function close() {
 		collapse();
@@ -96,20 +101,9 @@
 		back?.focus();
 	}
 
-
 	const deferredId = 'attention-dock-deferred';
 
-	/**
-	 * The landmark's name carries the state a sighted user reads off the bar, so
-	 * assistive tech gains it on arrival rather than after exploring.
-	 */
-	const regionLabel = $derived(
-		!current
-			? 'Needs you'
-			: $visibleQueue.count > 1
-				? `Needs you — ${label(current)}, ${$visibleQueue.count} waiting`
-				: `Needs you — ${label(current)}`,
-	);
+	const regionLabel = $derived(getRegionLabel(current, dockQueue.count));
 
 	function open() {
 		if (!current || suppressed) return;
@@ -146,7 +140,7 @@
 		// nothing holds the slot and they've had time to read what came before it (see the store).
 		void busyTick;
 		const typingLeft = lastKeydown + TYPING_IDLE_MS - Date.now();
-		const outcome = judgeAutoOpen($visibleQueue.items, {
+		const outcome = judgeAutoOpen(dockQueue.items, {
 			viewedThreadId: $activeThreadId,
 			expandedId: $expandedId,
 			suppressed,
@@ -188,6 +182,7 @@
 		// Reuses the existing invalidation signal rather than inventing one; a
 		// missed nudge is recovered on reconnect.
 		const offNudge = on('plans_changed', () => { void reload(); });
+		const offReplies = subscribeReplyAttention(() => { void reload(); });
 		// Typing, pasting or sending ends in a re-judge once the window has passed,
 		// so a hold on a draft is released when the draft is sent or cleared.
 		let idleTimer: ReturnType<typeof setTimeout> | undefined;
@@ -224,16 +219,13 @@
 			document.removeEventListener('focusout', rejudge);
 			forgetAutoOpen();
 			offNudge?.();
+			offReplies();
 			offConnection();
 			offToken();
 		};
 	});
 
-	function label(item: NonNullable<typeof current>): string {
-		return item.renderer === 'decision'
-			? (item.detail as DecisionDetail).title
-			: (item.detail as ExternalReviewDetail).title;
-	}
+
 </script>
 
 {#if recording}
@@ -244,15 +236,14 @@
 	<!-- The question left the queue before this answer reached it. -->
 	<p class="dock-receipt" role="status">{$answerNotice}</p>
 {/if}
-{#if current}
+{#if current || hasReplies}
 	<div
 		class="attention-dock"
 		class:expanded={showChip}
-		data-attention-dock
-		bind:this={region}
-		role="region"
-		aria-label={regionLabel}
 	>
+		<CommentReplyChipRow onOpenDocument={onOpenDestination} />
+		{#if current}
+		<section data-attention-dock role="region" aria-label={regionLabel}>
 		<p class="sr-only" aria-live="polite">{regionLabel}</p>
 		{#if !showChip}
 			<div class="dock-row">
@@ -269,8 +260,8 @@
 					<b>{label(current)}</b>
 					{#if current.detail.source}<small>{current.detail.source.thread_label}</small>{/if}
 				</span>
-				{#if $visibleQueue.count > 1}
-					<span class="dock-count">{position} of {$visibleQueue.count}</span>
+				{#if dockQueue.count > 1}
+					<span class="dock-count">{position} of {dockQueue.count}</span>
 				{/if}
 				<span class="dock-action">
 					{failed ? 'Not saved — Retry' : current.renderer === 'decision' ? 'Answer' : 'Review'}
@@ -319,6 +310,9 @@
 		{#if $stale}
 			<p class="dock-stale" role="status">Showing last known items.</p>
 		{/if}
+		</section>
+		{/if}
+		{@render scrollControl?.()}
 	</div>
 {/if}
 
@@ -345,6 +339,7 @@
 		overflow-y: auto;
 		overscroll-behavior: contain;
 	}
+	.attention-dock :global(.reply-chip-notice) { margin-bottom: var(--space-2); }
 	.dock-row { display: flex; align-items: center; gap: var(--space-2); }
 	.dock-bar {
 		display: flex; align-items: center; gap: var(--space-3); width: 100%;

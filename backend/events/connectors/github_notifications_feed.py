@@ -19,6 +19,7 @@ from datetime import datetime
 from email.utils import parsedate_to_datetime
 from typing import Any, Callable
 
+from connections.github_read_request import GithubReadRefused
 from events.connectors.github_read_budget import budget
 
 GhRunner = Callable[..., subprocess.CompletedProcess]
@@ -166,6 +167,8 @@ def gh_get(
         raise FeedError("gh_missing") from exc
     except subprocess.TimeoutExpired as exc:
         raise FeedError("timeout") from exc
+    except GithubReadRefused as exc:
+        raise FeedError("read_refused", f"{exc.reason} {exc.detail}".strip()) from exc
     response = _parse(result.stdout or "")
     if response is None:
         raise FeedError("gh_error", (result.stderr or "")[:200])

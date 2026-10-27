@@ -9,6 +9,7 @@ read and changed on its own.
 
 from __future__ import annotations
 
+from infra.chat_comment_schema import CHAT_COMMENT_SCHEMA_SQL
 from infra.delivery_states import INPUT_DELIVERY_STATES, sql_state_literals
 
 MESSAGE_SCHEMA_SQL = f"""
@@ -58,4 +59,5 @@ MESSAGE_SCHEMA_SQL = f"""
         next_attempt_at TEXT,
         seq INTEGER
     );
+    {CHAT_COMMENT_SCHEMA_SQL}
 """

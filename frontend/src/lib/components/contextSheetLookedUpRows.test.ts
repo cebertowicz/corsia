@@ -34,7 +34,7 @@ describe('looked-up rows in the History group', () => {
 		const labels = [...host.querySelectorAll('.ctx-source-label')];
 
 		expect(labels.map((label) => label.textContent)).toEqual([
-			'Conversation history',
+			'Chat history',
 			'GitHub, looked up (estimated)',
 			'Current message',
 		]);

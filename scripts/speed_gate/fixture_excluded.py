@@ -45,7 +45,8 @@ EXCLUDED: dict[str, str] = {
     "outcome_event_counters": _small(1),
     "users": _small(1),
     **{table: NOT_IN_CENSUS for table in (
-        "action_drafts", "artifact_relocation_intents", "connected_account_audit",
+        "action_drafts", "artifact_relocation_intents", "chat_comment_answers", "chat_comment_views",
+        "connected_account_audit",
         "connected_account_reach", "connected_accounts",
         "connected_app_audit", "connected_app_reach", "connected_apps", "connection_rules",
         "doc_feedback_edit_items", "durable_write_intents", "event_intake_records", "event_route_decisions",

@@ -7,11 +7,18 @@ the later entry describes the current behavior.
 
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here._
 
+- Clearer wording for sign-in, saved keys, host access and project errors.
+- Agents can suggest individual additions to a document without replacing the text they follow.
+- Context, skills and settings screens now say “chat” instead of thread or conversation, and their messages are clearer.
+- On a local model, if Google setup stops partway, CORSIA asks the rest of the setup questions first and comes back to Google at the end.
+- Agent replies to your document comments now show as one notice above the message box until you read them.
+- Select text in chat to add comments to your next message.
 - When connecting to another computer, CORSIA explains what happens and lets you return to this computer from sign-in.
 - First-chat setup reads more clearly and at your pace: a decision card waits until you've had time to read what came before it, GitHub profiles are read through GitHub's public data, the import ends in one short line, the GitHub step is one message and one choice, and you sign up for the agents' GitHub account in your own browser.
 - First-chat setup now says your About you answers become your profile, which every agent and chat loads and agents add to, and where to edit it; a skill or app that can't come over says what to ask next, and the permissions and GitHub text uses one name for each thing.
 - On Linux, CORSIA starts again after the computer restarts.
 - A local model is no longer shown as ready after its server exits, until it has loaded again.
+- After updating from an older CORSIA, Codex accounts you added work again without signing in.
 - On Linux, CORSIA no longer offers to set up a local model; you can connect a provider instead.
 - A local model that fails to reload now gives retry instructions that match whether it is kept loaded.
 - The local model server keeps your server-wide settings when CORSIA starts it again.
@@ -24,6 +31,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - A Claude Code you only just signed in to is no longer offered for import: only skills and notes you made there are brought over.
 - The "Bring over what your other tools know" step no longer shows twice in the setup plan.
 - If the local model server CORSIA started stops unexpectedly, CORSIA starts it again and loads the models that were loaded, up to three times in ten minutes. A server you stop in CORSIA, or one that is stopped when you quit CORSIA, stays stopped, and so does a server that exits normally on its own (code 0), including one CORSIA took over after an update or restart. A server you end from outside CORSIA, such as with Force Quit, is started again: CORSIA cannot tell that from a crash.
+- When an agent starts a Google or Microsoft sign-in, it is told once how it ended (you finished it, cancelled it, or it expired) and carries on, instead of waiting for you to tell it you signed in.
 - CORSIA now keeps its data in `~/Library/Application Support/CORSIA`. An install that took over an earlier one moves its data there once, as soon as the update that brings this finishes or on the next launch, without copying it; if anything still uses the old folder, CORSIA leaves the data where it is and says why.
 - On a connected app that fails to sign in, a refused sign-in now says so and shows no button that can't help, Reconnect no longer freezes the row, and Remove works while the app is still trying to connect.
 - Settings no longer offers an update after it finishes.

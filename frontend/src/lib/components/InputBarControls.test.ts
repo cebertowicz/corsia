@@ -308,7 +308,7 @@ describe('InputBarControls context sources', () => {
 			expect(fetchMock).toHaveBeenCalledTimes(1);
 			const headline = host.querySelector<HTMLElement>('.ctx-headline');
 			const historyRow = host.querySelector<HTMLElement>(
-				'.ctx-source-row[title="Conversation history"]',
+				'.ctx-source-row[title="Chat history"]',
 			);
 			expect(headline?.textContent).toContain('Estimated');
 			expect(headline?.textContent).toContain('200');

@@ -35,7 +35,7 @@ def _insert_google(db: sqlite3.Connection) -> None:
 
 
 def test_step_is_registered_at_the_current_version() -> None:
-    assert SCHEMA_VERSION == 148
+    assert SCHEMA_VERSION == 150
     assert MIGRATIONS[144] is migrate_144_to_145
 
 

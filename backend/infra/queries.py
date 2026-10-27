@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from infra.chat_comment_answers import place_answers
 from infra.delivery_states import INPUT_DELIVERY_ENDED, INPUT_DELIVERY_STATE_SET
 from infra.time import utc_now_iso
 from infra.turn_provenance import refuse_reader_only_reason, turn_provenance
@@ -224,6 +225,7 @@ def _insert_delivered_message(
     from thread.transcript_order import draw_transcript_position
 
     sequence = draw_transcript_position(db, thread_id)
+    created_at = created_at or utc_now_iso()
     db.execute(
         "INSERT INTO messages "
         "(id,thread_id,role,content,metadata,created_at,seq) "
@@ -234,10 +236,11 @@ def _insert_delivered_message(
             role,
             content,
             json.dumps(metadata) if metadata else None,
-            created_at or utc_now_iso(),
+            created_at,
             sequence,
         ),
     )
+    place_answers(db, message_id, thread_id, role, content, sequence, created_at)
 
 
 def _require_turn_provenance(message_id: str, role: str, metadata: dict | None) -> None:

@@ -178,7 +178,7 @@ def user_feedback_for_document(db, artifact_id: str) -> dict[str, Any]:
     }
 
 
-def _new_reply_rows(user_id: str, artifact_id: str | None) -> tuple[str, tuple]:
+def new_reply_rows(user_id: str, artifact_id: str | None, *, include_author_thread: bool = False) -> tuple[str, tuple]:
     """The one definition of a new reply: the FROM/JOIN/WHERE every read of it shares.
 
     A reply is new for a user when someone else wrote it, in an open root the
@@ -188,16 +188,18 @@ def _new_reply_rows(user_id: str, artifact_id: str | None) -> tuple[str, tuple]:
     # A document read binds both sides to its artifact so idx_doc_comments_artifact bounds the scan to that document.
     scoped = artifact_id is not None
     sql = f"""FROM doc_comments reply
+           {"JOIN threads thread ON thread.id=reply.author_thread_id" if include_author_thread else ""}
            JOIN doc_comments root ON root.id=reply.parent_id
+           LEFT JOIN (
+               SELECT DISTINCT parent_id FROM doc_comments
+               WHERE author_kind='user' AND parent_id IS NOT NULL
+                 {"AND artifact_id=?" if scoped else ""}
+           ) touched ON touched.parent_id=root.id
            LEFT JOIN doc_comment_thread_views thread_view
              ON thread_view.user_id=? AND thread_view.root_id=root.id
            WHERE reply.author_kind<>'user' AND root.resolved=0
              {"AND reply.artifact_id=? AND root.artifact_id=?" if scoped else ""}
-             AND (root.author_kind='user' OR EXISTS (
-                 SELECT 1 FROM doc_comments touched
-                 WHERE touched.parent_id=root.id AND touched.author_kind='user'
-                   {"AND touched.artifact_id=?" if scoped else ""}
-             ))
+             AND (root.author_kind='user' OR touched.parent_id IS NOT NULL)
              AND (
                  reply.created_at>COALESCE(thread_view.seen_at, '')
                  OR (
@@ -206,12 +208,12 @@ def _new_reply_rows(user_id: str, artifact_id: str | None) -> tuple[str, tuple]:
                      AND reply.id>thread_view.seen_reply_id
                  )
              )"""
-    return sql, ((user_id, artifact_id, artifact_id, artifact_id) if scoped else (user_id,))
+    return sql, ((artifact_id, user_id, artifact_id, artifact_id) if scoped else (user_id,))
 
 
 def _new_replies(db, user_id: str, artifact_id: str) -> list[tuple[str, str]]:
     """One document's new replies as (root id, reply id) in thread order, one row per reply."""
-    sql, params = _new_reply_rows(user_id, artifact_id)
+    sql, params = new_reply_rows(user_id, artifact_id)
     rows = db.execute(
         f"SELECT root.id AS root_id, reply.id AS reply_id {sql} ORDER BY reply.created_at, reply.id",
         params,
@@ -221,7 +223,7 @@ def _new_replies(db, user_id: str, artifact_id: str) -> list[tuple[str, str]]:
 
 def reply_waiting_ids(db, user_id: str) -> set[str]:
     """Return documents containing a thread with a new reply: one row per document, not per reply."""
-    sql, params = _new_reply_rows(user_id, None)
+    sql, params = new_reply_rows(user_id, None)
     rows = db.execute(f"SELECT DISTINCT root.artifact_id AS artifact_id {sql}", params).fetchall()
     return {str(row["artifact_id"]) for row in rows}
 

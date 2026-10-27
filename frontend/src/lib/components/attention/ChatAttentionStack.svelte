@@ -184,8 +184,12 @@
 			   centring keeps them honest if one ever wraps. */
 			align-items: center;
 		}
+		/* The reply chip's row spans the whole band too: left in the auto-placed first track the row is one third of the band
+		   wide, so the document name (the chip's only "where") truncates with the rest of the band free. The chip itself stays
+		   content-width, like every other transcript chip, and only grows to the band's edge. */
 		.chat-attention-stack > :global(.attention-dock),
-		.chat-attention-stack > :global(.sources-panel) {
+		.chat-attention-stack > :global(.sources-panel),
+		.chat-attention-stack > :global(.reply-chip-notice) {
 			grid-column: 1 / -1;
 			order: 1;
 		}

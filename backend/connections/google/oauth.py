@@ -9,6 +9,7 @@ nonce, so several can be pending at once, and a callback writes only its row.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import os
@@ -26,6 +27,12 @@ from connections.account_state import CONSENT_CANCELLED, PROVIDER_UNAVAILABLE, e
 from connections.connected_accounts import Actor
 from connections.google import client
 from connections.google.client import STATUS_CONNECTED, TIMEOUT_SECONDS, TOKEN_URL, GoogleError, GoogleRequestFailed
+from connections.google.reach_replies import (
+    ALREADY_CONNECTED, ALREADY_NEEDS_SIGN_IN, STILL_CONNECTED, not_covered_reply,
+)
+from connections.sign_in_notice import (
+    SHUT_DOWN_MESSAGE, drive_starting_agent, notify_ended, notify_expired, notify_starting_agent, wake_on_connect,
+)
 from infra import key_store
 from infra.db_async import run_in_db
 from infra.default_port import DEFAULT_BACKEND_PORT
@@ -60,23 +67,6 @@ MISSING_SCOPES = (
     "Gmail and Calendar; Drive, Docs and Sheets are optional."
 )
 BROWSER_MISSING_SCOPES = "Gmail and Calendar access weren't allowed. Go back to CORSIA and try again."
-ALREADY_CONNECTED = (
-    "{address} is already connected{reach}. To change where it works, use Where it works… on its row in "
-    "Connected apps."
-)
-ALREADY_NEEDS_SIGN_IN = (
-    "{address} is already connected, but it needs you to sign in again. Use Sign in on its row in "
-    "Connected apps."
-)
-CONNECTED_NOT_FOR_PROJECT = (
-    "{address} is connected, but not for {project}. To add {project}, use Where it works… on its row in "
-    "Connected apps."
-)
-CONNECTED_NOT_FOR_ALL = (
-    "{address} is connected, but not for all your projects. To make it work for all of them, use Where it works… "
-    "on its row in Connected apps."
-)
-STILL_CONNECTED = "{address} is already connected."
 WRONG_ACCOUNT = (
     "You signed in as {signed_in}, but this sign-in is for {address}. Call google_connect again and "
     "sign in as {address}."
@@ -84,7 +74,6 @@ WRONG_ACCOUNT = (
 UNKNOWN_ACCOUNT = "No Google account has that account_id. Call google_status to list them."
 GONE = "That Google account was removed during its sign-in. Call google_connect to add it again."
 TOO_MANY = "Too many Google sign-ins are waiting. Finish one or wait ten minutes, then call google_connect."
-
 
 GoogleSignInError = client.GoogleSignInError
 
@@ -98,6 +87,7 @@ class _Pending:
     adding: bool
     actor: Actor
     adding_thread_id: str | None
+    starting_thread_id: str | None
     reach: AppReach | None
     scopes: tuple[str, ...]
     verifier: str
@@ -112,6 +102,7 @@ class _Pending:
 
 
 _pending: dict[str, _Pending] = {}
+_expiries: dict[str, asyncio.Task[None]] = {}
 _pending_lock = threading.Lock()
 
 
@@ -146,11 +137,10 @@ def _check_reconnect(account_id: str, db) -> None:  # type: ignore[no-untyped-de
         raise GoogleSignInError(STILL_CONNECTED.format(address=account["address"]))
 
 
-
 def _begin(
     client_file: object, account_id: str | None, actor: Actor, adding_thread_id: str | None,
-    reach: AppReach | None,
-) -> tuple[str, str]:
+    reach: AppReach | None, starting_thread_id: str | None = None,
+) -> tuple[str, _Pending]:
     """Sync part of starting a sign-in: read the client and remember this flow under a new nonce."""
     if account_id is None and (adding_thread_id is None) == (reach is None):
         raise ValueError("an added account takes its reach from exactly one adding scope")
@@ -169,12 +159,10 @@ def _begin(
     pending = _Pending(
         state=secrets.token_urlsafe(32), account_id=account_id or str(uuid.uuid4()),
         adding=account_id is None, actor=actor, adding_thread_id=adding_thread_id, reach=reach,
-        scopes=SCOPES, verifier=verifier, client_id=client_id, client_secret=client_secret,
-        redirect_uri=redirect_uri(), created_at=time.monotonic(),
+        starting_thread_id=starting_thread_id, scopes=SCOPES, verifier=verifier, client_id=client_id,
+        client_secret=client_secret, redirect_uri=redirect_uri(), created_at=time.monotonic(),
     )
     with _pending_lock:
-        for stale in [nonce for nonce, flow in _pending.items() if flow.expired]:
-            _pending.pop(stale, None)
         if len(_pending) >= PENDING_MAX:
             raise GoogleSignInError(
                 TOO_MANY,
@@ -185,26 +173,50 @@ def _begin(
         "client_id": pending.client_id, "redirect_uri": pending.redirect_uri, "response_type": "code",
         "scope": " ".join(pending.scopes), "state": pending.state, "code_challenge": challenge,
         "code_challenge_method": "S256", "access_type": "offline", "prompt": "consent",
-    }), pending.account_id
+    }), pending
 
 
 async def start_sign_in(
     client_file: object = None, *, actor: Actor, account_id: str | None = None,
-    adding_thread_id: str | None = None, reach: AppReach | None = None,
+    adding_thread_id: str | None = None, starting_thread_id: str | None = None, reach: AppReach | None = None,
 ) -> tuple[str, str]:
     """``(url, account_id)`` for one sign-in; the client's id and secret never leave the backend.
 
-    With ``account_id`` it signs that row in again. Without it, it adds an
-    account whose reach comes from ``adding_thread_id``'s scope or, for a
-    person's session, the given ``reach``.
+    With ``account_id`` it signs that row in again. Without it, it adds an account whose reach comes from
+    ``adding_thread_id``'s scope or, for a person's session, the given ``reach``. ``starting_thread_id`` is the agent
+    thread that started the sign-in, either kind; it is woken once with how it ended, even if nobody finishes it.
     """
-    url, pending_account_id = await run_in_db(_begin, client_file, account_id, actor, adding_thread_id, reach)
-    emit_lifecycle_event("connect_started", pending_account_id, "google")
-    return url, pending_account_id
+    url, pending = await run_in_db(
+        _begin, client_file, account_id, actor, adding_thread_id, reach, starting_thread_id,
+    )
+    _expiries[pending.state] = asyncio.create_task(_expire(pending))
+    emit_lifecycle_event("connect_started", pending.account_id, "google")
+    return url, pending.account_id
+
+
+async def _expire(pending: _Pending) -> None:
+    """Tell the starting agent its sign-in ran out, unless the callback took the flow first."""
+    await asyncio.sleep(PENDING_SECONDS)
+    with _pending_lock:
+        if _pending.pop(pending.state, None) is None:
+            return
+        _expiries.pop(pending.state, None)
+    await notify_expired(pending.starting_thread_id, pending.state, "google", pending.account_id)
+
+
+async def stop_all_signins() -> None:
+    """Drop every pending sign-in at shutdown; each waiting agent is woken, but no turn starts."""
+    with _pending_lock:
+        flows = list(_pending.values())
+        _pending.clear()
+        for state in list(_expiries):
+            _expiries.pop(state).cancel()
+    for flow in flows:
+        await notify_ended(flow.starting_thread_id, flow.state, "google", flow.account_id, SHUT_DOWN_MESSAGE, drive=False)
 
 
 def _take_pending(state: object) -> _Pending:
-    """Consume the sign-in whose nonce is ``state`` if it hasn't expired.
+    """Consume the unexpired sign-in whose nonce is ``state``; none matching is DENIED.
 
     A wrong state leaves every flow pending: any page can make the browser GET
     the loopback callback, and that must not cancel the person's sign-in.
@@ -215,8 +227,15 @@ def _take_pending(state: object) -> _Pending:
         match = next(
             (nonce for nonce in _pending if secrets.compare_digest(state.encode(), nonce.encode())), None,
         )
-        pending = _pending.pop(match, None) if match is not None else None
-    if pending is None or pending.expired:
+        pending = _pending.get(match) if match is not None else None
+        if pending is not None and pending.expired:
+            raise GoogleSignInError(DENIED, browser_message=BROWSER_DENIED)
+        if match is not None:
+            _pending.pop(match)
+        timer = _expiries.pop(match, None) if match is not None else None
+    if timer is not None:
+        timer.cancel()
+    if pending is None:
         raise GoogleSignInError(DENIED, browser_message=BROWSER_DENIED)
     return pending
 
@@ -226,30 +245,6 @@ def _same_identity(account: dict, email: str, provider_subject: str | None) -> b
     if account["provider_subject"] and provider_subject:
         return account["provider_subject"] == provider_subject
     return str(account["address"]).strip().lower() == email.strip().lower()
-
-
-def not_covered_reply(account: dict, adding_thread_id: str | None, db) -> str | None:  # type: ignore[no-untyped-def]
-    """Explain when an existing account cannot serve the adding conversation's scope."""
-    if adding_thread_id is None:
-        return None
-    from connections.connected_accounts import ConnectedAccountError, reach_for_adding_thread
-
-    try:
-        requested = reach_for_adding_thread(adding_thread_id, db=db)
-    except ConnectedAccountError:
-        return None
-    reach = account["reach"]
-    if not isinstance(reach, dict):
-        return None
-    if requested.mode == "all":
-        return CONNECTED_NOT_FOR_ALL.format(address=account["address"]) if reach.get("mode") != "all" else None
-    project_id = next(iter(requested.project_ids), None)
-    if project_id is None or reach.get("mode") == "all" or project_id in reach.get("project_ids", []):
-        return None
-    project = db.execute("SELECT name FROM projects WHERE id=?", (project_id,)).fetchone()
-    if project is None:
-        return None
-    return CONNECTED_NOT_FOR_PROJECT.format(address=account["address"], project=project["name"])
 
 
 def _add(pending: _Pending, email: str, provider_subject: str | None, conn) -> None:  # type: ignore[no-untyped-def]
@@ -308,10 +303,17 @@ def _store(
                 pending.account_id, address=email, provider_subject=provider_subject, actor=pending.actor, db=conn,
             )
         record_audit(pending.account_id, "connect" if pending.adding else "sign_in", pending.actor, db=conn)
+        wake_on_connect(conn, pending.starting_thread_id, pending.state, "google", pending.account_id, email)
 
 
 def _failure_cause(error: GoogleError) -> str:
     return CONSENT_CANCELLED if isinstance(error, GoogleSignInError) else PROVIDER_UNAVAILABLE
+
+
+async def _tell_agent(pending: _Pending, *, cause: str, message: str | None = None) -> None:
+    await notify_starting_agent(
+        pending.starting_thread_id, pending.state, "google", pending.account_id, cause=cause, message=message,
+    )
 
 
 async def complete_sign_in(code: object, state: object) -> str:
@@ -346,14 +348,18 @@ async def complete_sign_in(code: object, state: object) -> str:
         if not set(REQUIRED_SCOPES) <= set(scopes):
             raise GoogleSignInError(MISSING_SCOPES, browser_message=BROWSER_MISSING_SCOPES)
         await run_in_db(_store, pending, refresh_token, email, scopes, provider_subject)
+        await drive_starting_agent(pending.starting_thread_id, pending.state)
         from events.connectors.mail_poller import schedule_account
 
         schedule_account(pending.account_id)
     except GoogleError as error:
-        emit_lifecycle_event("connect_failed", pending.account_id, "google", cause=_failure_cause(error))
+        cause = _failure_cause(error)
+        emit_lifecycle_event("connect_failed", pending.account_id, "google", cause=cause)
+        await _tell_agent(pending, cause=cause, message=str(error))
         raise
     except Exception:
         emit_lifecycle_event("connect_failed", pending.account_id, "google", cause=PROVIDER_UNAVAILABLE)
+        await _tell_agent(pending, cause=PROVIDER_UNAVAILABLE)
         raise
     emit_lifecycle_event("connect_succeeded", pending.account_id, "google")
     return email
