@@ -179,6 +179,9 @@ async def test_cc_bridge_rejects_substituted_and_replayed_tool_call(
         registry.execute.assert_not_awaited()
         await cc_attach._execute_admitted_tool(live, "thread-1", body)
         registry.execute.assert_awaited_once()
+        # The successful call consumed its step; expire the missing-step wait
+        # immediately while retaining the replay refusal path.
+        monkeypatch.setattr(cc_attach, "_SPAWN_LOCK_TIMEOUT_S", 0)
         with pytest.raises(ToolResultBindingError):
             await cc_attach._execute_admitted_tool(live, "thread-1", body)
         registry.execute.assert_awaited_once()

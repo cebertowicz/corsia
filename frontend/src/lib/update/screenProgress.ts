@@ -148,9 +148,17 @@ export function drainCount(total: number | null | undefined, blocking: number | 
 	return { done: total - Math.min(total, blocking ?? total), total };
 }
 
+/**
+ * A remote client cannot see the restart, so its time-based guess stops where the restart step ends: it
+ * never claims a step it has not seen. Climbing on to 95 on the clock alone left the number far from the
+ * first real step it met when the service answered, and the screen jumped across the gap.
+ */
+export const REMOTE_ESTIMATE_CEILING = BANDS.plain.restarting!.end;
+
 /** A remote client estimates only from its last confirmed screen value and the usual restart time. */
 export function remoteEstimate(lastSeen: number, elapsedMs: number, usualSeconds: number): number {
+	if (lastSeen >= REMOTE_ESTIMATE_CEILING) return lastSeen;
 	const usual = Math.max(1, usualSeconds) * 1000;
 	const share = Math.min(1, Math.max(0, elapsedMs / usual));
-	return Math.min(95, Math.max(lastSeen, lastSeen + (95 - lastSeen) * share));
+	return lastSeen + (REMOTE_ESTIMATE_CEILING - lastSeen) * share;
 }

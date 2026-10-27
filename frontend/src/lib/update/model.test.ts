@@ -36,8 +36,9 @@ describe('update model', () => {
 
 	it('words the cost as one sentence for 0, 1 and several working agents', () => {
 		expect(costLine(60, 0)).toBe('CORSIA restarts to finish.');
-		expect(costLine(60, 1)).toBe('CORSIA restarts for about a minute; 1 working agent pauses and picks up where it left off.');
-		expect(costLine(120, 40)).toBe('CORSIA restarts for about 2 minutes; 40 working agents pause and pick up where they left off.');
+		expect(costLine(1, 1)).toBe('The restart usually takes 1 second; 1 working agent pauses and picks up where it left off.');
+		expect(costLine(60, 1)).toBe('The restart usually takes a minute; 1 working agent pauses and picks up where it left off.');
+		expect(costLine(120, 40)).toBe('The restart usually takes 2 minutes; 40 working agents pause and pick up where they left off.');
 		expect(costLine(null, 3)).toBe('CORSIA restarts to finish; 3 working agents pause and pick up where they left off.');
 	});
 

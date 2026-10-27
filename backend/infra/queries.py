@@ -55,6 +55,11 @@ def thread_unavailable_reason(session: Any | None) -> str | None:
     return None
 
 
+def thread_gone_for_good(session: Any | None) -> bool:
+    """Whether a missing or purged thread cannot return from archive."""
+    return session is None or _row_value(session, "lifecycle_state") == "purged"
+
+
 def thread_is_available(session: Any | None) -> bool:
     return thread_unavailable_reason(session) is None
 

@@ -360,7 +360,8 @@ async def test_a_rule_fires_when_routing_dead_letters_for_an_inactive_owner(isol
     [decision] = _decisions(rule_id=rule["id"])
     assert (decision["thread_id"], decision["outcome"], decision["via"]) == ("a", "woke", "rule")
     [owner_rule] = _decisions(rule_id=to_owner["id"])
-    assert (owner_rule["outcome"], owner_rule["reason"]) == ("dead_lettered", "recipient unavailable")
+    assert (owner_rule["outcome"], owner_rule["reason"]) == ("dead_lettered", "creator gone")
+    assert _rows("SELECT enabled FROM event_rules WHERE id=?", to_owner["id"])[0]["enabled"] == 0
 
 
 @pytest.mark.asyncio

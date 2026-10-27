@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CREEP_STALE_MS, ProgressModel, remoteEstimate } from './screenProgress';
+import { CREEP_STALE_MS, ProgressModel, REMOTE_ESTIMATE_CEILING, remoteEstimate } from './screenProgress';
 
 describe('update screen progress', () => {
 	it('never falls, limits creep to a live band, and reserves 100 for confirmation', () => {
@@ -27,7 +27,9 @@ describe('update screen progress', () => {
 	});
 
 	it('caps a remote estimate below completion', () => {
-		expect(remoteEstimate(40, 60_000, 30)).toBe(95);
-		expect(remoteEstimate(40, 15_000, 30)).toBeGreaterThan(40);
+		expect(remoteEstimate(15, 60_000, 30)).toBe(REMOTE_ESTIMATE_CEILING);
+		expect(remoteEstimate(60, 60_000, 30)).toBe(60);
+		expect(remoteEstimate(15, 15_000, 30)).toBeGreaterThan(15);
+		expect(remoteEstimate(15, 15_000, 30)).toBeLessThan(REMOTE_ESTIMATE_CEILING);
 	});
 });
