@@ -27,6 +27,7 @@ from core.turn_core import (
 from core.turn_activity import turn_activity_frame
 from infra.product_events import emit_product_event
 from infra import state
+from infra.send_target import omlx_seat_and_model
 from infra.time import utc_now
 from llm.capabilities import make_provider_params
 from llm.resolution import (
@@ -73,8 +74,9 @@ async def _setup_turn(
     from core.agent import get_agent
 
     agent = await get_agent()
-    person_send = request is not None and request.person_send
-    if not person_send:
+    # Only a person's send to a local oMLX model loads it; every other send keeps its pre-bind check.
+    loads = request is not None and request.person_send and omlx_seat_and_model(target) is not None
+    if not loads:
         await validate_native_target(target, event=ingress == "event")
     active_model = target.transport_model
     provider = native_provider_params(target, make_provider_params(active_model))
@@ -126,7 +128,7 @@ async def _setup_turn(
         unbind,
         effective_effort,
     )
-    if request is not None and person_send:
+    if request is not None and loads:
         await _load_person_target(request, prepared)
     return prepared
 

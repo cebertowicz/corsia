@@ -36,6 +36,26 @@ def _claimed(monkeypatch, *, metadata=None, native_mode="event"):
 
 
 @pytest.mark.asyncio
+async def test_person_send_to_a_cloud_model_checks_before_binding(monkeypatch):
+    from types import SimpleNamespace
+
+    import ws.turn as turn
+
+    target = SimpleNamespace(harness="native", provider="anthropic", backend="api", transport_model="claude-x")
+    request = SimpleNamespace(person_send=True, target=target, ingress="ws")
+    bind = AsyncMock()
+    load = AsyncMock()
+    monkeypatch.setattr("core.agent.get_agent", AsyncMock(return_value=object()))
+    monkeypatch.setattr(turn, "validate_native_target", AsyncMock(side_effect=RuntimeError("unhealthy")))
+    monkeypatch.setattr(turn, "persist_turn_start_bound", bind)
+    monkeypatch.setattr(turn, "_load_for_person", load)
+    with pytest.raises(RuntimeError, match="unhealthy"):
+        await turn._setup_turn("t", "hi", [], target=target, turn_id="turn", ingress="ws", request=request)
+    bind.assert_not_awaited()
+    load.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("cause, expected", [("load_failed", "model_load_failed"), ("unreachable", "model_load_unreachable")])
 @pytest.mark.parametrize("native_mode, metadata", [("event", {"retried_from_message_id": "old"}), ("ws", None)])
 async def test_failed_load_settles_input(isolated_db, monkeypatch, cause, expected, native_mode, metadata):
@@ -157,6 +177,7 @@ async def test_validation_failure_after_bind_settles_input(isolated_db, monkeypa
 
     batch, thread, target, provider = _claimed(monkeypatch)
     monkeypatch.setattr("llm.local_model_load.readiness", lambda *_a, **_k: Readiness("loaded"))
+    monkeypatch.setattr("llm.local_model_load.ensure_loaded", AsyncMock())
     monkeypatch.setattr("ws.turn.validate_native_target", AsyncMock(side_effect=RuntimeError("unhealthy")))
     with pytest.raises(Exception, match="unhealthy"):
         await execute_claimed_batch(batch, thread_row=thread, target=target, user={"id": "u"})

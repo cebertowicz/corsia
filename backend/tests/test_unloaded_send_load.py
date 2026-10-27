@@ -29,6 +29,24 @@ async def test_load_reports_event_and_waits(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_cached_loaded_still_confirms_live_without_loading_event(monkeypatch):
+    from llm.local_model_load import Readiness
+    from ws.local_send_load import load_for_person as _load_for_person
+
+    target = SimpleNamespace(catalog_id="omlx@srv/m")
+    request = SimpleNamespace(thread_id="t", target=target, input_ids=("a",))
+    prepared = SimpleNamespace(identity=SimpleNamespace(turn_id="turn"), cancel_event=asyncio.Event())
+    monkeypatch.setattr("ws.local_send_load._local_readiness", lambda _target: Readiness("loaded"))
+    load = AsyncMock()
+    broadcast = Mock()
+    monkeypatch.setattr("llm.local_model_load.ensure_loaded", load)
+    monkeypatch.setattr("infra.state.broadcast_to_thread", broadcast)
+    await _load_for_person(request, prepared)
+    load.assert_awaited_once_with(target)
+    broadcast.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_out_of_scope_readiness_runs_without_load(monkeypatch):
     from ws.local_send_load import load_for_person as _load_for_person
 
