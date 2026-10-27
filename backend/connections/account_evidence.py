@@ -98,6 +98,7 @@ def mark_discovery(account_id: str, *, receipt: ReceiptFence, status: str,
     return True
 
 
+# Readiness consumes the projection owner's stored failure without reinterpretation.
 def readiness_reason(account: dict, *, model: str | None = None) -> str | None:
     """One evaluator for claim, catalog and batched advisory readers.
 
@@ -127,7 +128,8 @@ def readiness_reason(account: dict, *, model: str | None = None) -> str | None:
         return 'account_model_not_discovered'
     projection = record['auth_projection']
     failed = projection['failed']
-    if isinstance(failed, dict) and (failed.get('account_revision'), failed.get('login_seq')) == (
+    if isinstance(failed, dict) and (
+            failed.get('account_revision'), failed.get('login_seq')) == (
             receipt.account_revision, receipt.login_seq):
         return failed['cause']
     if any(item.get('phase') == 'pending' for item in projection['stale']):

@@ -323,8 +323,8 @@ def _open_app(backend: Path, db_file: Path):
     from fastapi.testclient import TestClient
     from main import app
 
+    clock.freeze_reuse_window(sys.modules["api.measurement_join"])  # imported by the measurement routes
     return app, TestClient(app, raise_server_exceptions=False), OWNER_TOKEN
-
 
 
 def measure_route(client, counters: Counters, background: Background, headers: dict, url: str) -> dict:

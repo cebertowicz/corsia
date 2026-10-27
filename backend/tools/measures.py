@@ -62,7 +62,8 @@ class MeasureSyncTool(Tool):
         return ("Load a measures.yaml into the KPI registry. A workflow's file sits beside its skill's "
                 "SKILL.md (<skill dir>/measures.yaml) and syncs only for that workflow's owner: the thread "
                 "whose own skill it is, or the `owner:` under `workflow:` in its corsia.yaml. Agent-level "
-                "measures go in .threads/<agent>/measures.yaml. Validates names, "
+                "measures go in your own thread folder. `path` is relative to the CORSIA workspace root, so a "
+                "project agent passes projects/<project>/.threads/<id>/measures.yaml. Validates names, "
                 "attributes, KPIs and views, then returns each item as added, changed, unchanged or removed, "
                 "plus a namespace_takeover list when it retired a departed holder's live events. Run it after "
                 "every change; nothing takes effect until sync succeeds.")
@@ -70,7 +71,8 @@ class MeasureSyncTool(Tool):
     @property
     def parameters(self) -> dict[str, Any]:
         return {"type": "object", "additionalProperties": False,
-                "properties": {"path": {"type": "string", "description": "Workspace path to measures.yaml"}},
+                "properties": {"path": {"type": "string",
+                                        "description": "measures.yaml path relative to the CORSIA workspace root"}},
                 "required": ["path"]}
 
     async def execute(self, **kwargs: Any) -> str:
