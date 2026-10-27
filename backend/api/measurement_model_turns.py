@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from api.cost_identity import IDENTITY_GROUP, identity_columns, identity_join
+from core.cost_identity import IDENTITY_GROUP, identity_columns, identity_join
 from api.measurement_queries import PREPARED_SCOPE, query_params
 
 

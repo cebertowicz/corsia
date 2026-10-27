@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import asyncio
 import json
-from dataclasses import dataclass
-from typing import Awaitable, Callable, Sequence
+from dataclasses import dataclass, field
+from typing import Awaitable, Callable, Mapping, Sequence
 from urllib.parse import urlparse, urlunparse
 from urllib.request import urlopen
 
@@ -24,15 +24,16 @@ _PASSWORD_AUTOCOMPLETE = {"current-password", "new-password"}
 
 @dataclass(frozen=True)
 class PasswordProbe:
-    """The guarded page visit and visible password-node identities, never values.
+    """The guarded page visit and visible/present password-node identities, never values or text.
 
-    ``target`` is the page target probed, so a probe of another tab never settles this one's episode.
+    ``target`` is the page target probed, so a probe of another tab never settles the step open on this one.
     """
 
     visit: str
     host: str
     visible_nodes: frozenset[int]
     target: str = ""
+    present_nodes: frozenset[int] = field(kw_only=True)
 
 
 class CdpClient:
@@ -74,8 +75,10 @@ class CdpClient:
         await self.socket.close()
 
 
-async def page_password_probe(endpoint: str, known_visit: str | None, known_nodes: frozenset[int]) -> PasswordProbe:
+async def page_password_probe(endpoint: str, known: Mapping[str, frozenset[int]]) -> PasswordProbe:
     """Find visible password inputs on the page target, preserving this visit's reveal-toggle nodes (AR3).
+
+    ``known`` maps each guarded visit to its password nodes; only those of the page's own visit apply.
 
     It covers the top document, in-process (same-origin) frames, and open and closed shadow roots,
     and transfers only the matching nodes, never the whole DOM.
@@ -86,10 +89,10 @@ async def page_password_probe(endpoint: str, known_visit: str | None, known_node
         host = _host(frame)
         # A node seen on an earlier visit can still resolve to a box after the page navigates away,
         # which would report a password field the new page does not have.
-        known = known_nodes if known_visit == loader else frozenset()
+        known_here = known.get(loader, frozenset())
         current = await _password_inputs(cdp)
-        visible = {node for node in current | known if await _visible(cdp, node)}
-        return PasswordProbe(loader, host, frozenset(visible), endpoint)
+        visible = {node for node in current | known_here if await _visible(cdp, node)}
+        return PasswordProbe(loader, host, frozenset(visible), endpoint, present_nodes=frozenset(current))
 
 
 async def _password_inputs(cdp: CdpClient) -> set[int]:

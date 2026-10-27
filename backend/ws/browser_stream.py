@@ -144,7 +144,8 @@ async def _relay(pane: WebSocket, thread_id: str, user_id: str) -> None:
             overflow.set()
 
     browser_control.pane_connected(thread_id, connection_token, report,
-                                   partial(browser_pane.password_probe, thread_id, connection_token))
+                                   partial(browser_pane.password_probe, thread_id, connection_token),
+                                   session=partial(browser_pane.session_identity, thread_id))
 
     async def from_pane() -> None:
         while True:

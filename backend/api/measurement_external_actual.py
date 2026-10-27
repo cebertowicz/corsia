@@ -20,6 +20,7 @@ from datetime import date
 from typing import Any
 
 from connections.billing_prices import mode_on, price_facts_by_payer
+from core.measurement_pricing import ADMISSION_SQL, IDLE_HOURS_SQL, INPUT_TIER_SQL, classify_usage_rows, endpoint_listings
 from llm.endpoint_billing import server_id_sql
 
 
@@ -35,8 +36,6 @@ class ExternalActual:
 
 def _groups(db, bounded: dict[str, Any]) -> list[dict[str, Any]]:
     """External ledger rows grouped by endpoint, day and priceable shape."""
-    from api.measurement_cost import ADMISSION_SQL, IDLE_HOURS_SQL, INPUT_TIER_SQL
-
     return [dict(row) for row in db.execute(
         f"""
         SELECT server_id, day, model, admission, input_tier, idle_hours, COUNT(*) AS records,
@@ -61,8 +60,6 @@ def _groups(db, bounded: dict[str, Any]) -> list[dict[str, Any]]:
 
 def external_actual(db, bounded: dict[str, Any]) -> ExternalActual:
     """Classify the scope's External usage in the window; the caller adds it to Actual."""
-    from api.measurement_cost import classify_usage_rows, endpoint_listings
-
     groups = _groups(db, bounded)
     result = ExternalActual()
     if not groups:

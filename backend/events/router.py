@@ -259,10 +259,14 @@ async def route_event(
     """Resolve an event's owning thread and deliver it as a thread input."""
     cancelled = _cancelled_check_result(internal_event, payload)
     if cancelled is not None:
+        if payload.get("action") == "completed" and payload.get("check_suite"):
+            from events.connectors.github_head_checks import observe_admitted_check_suite
+            observe_admitted_check_suite(payload)
         return cancelled
-    resolved = await _resolve_event_identity(internal_event, payload)
-
-    identity, selected_pr = resolved
+    identity, selected_pr = await _resolve_event_identity(internal_event, payload)
+    if internal_event in CHECK_SUITE_COMPLETED_EVENTS:
+        from events.connectors.github_head_checks import observe_admitted_check_suite
+        observe_admitted_check_suite(payload, selected_pr)
     prepared = await prepare_route_ordered(
         internal_event,
         payload,

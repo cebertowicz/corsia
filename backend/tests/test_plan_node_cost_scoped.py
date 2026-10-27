@@ -1,6 +1,6 @@
 """A node's rolled cost read from its subtree alone equals the full-plan figure (#731 S2-1).
 
-``node_cost_scoped.rolled_of`` serves the agent's single-node read without rolling the
+``node_cost_scoped.project`` serves the agent's single-node read without rolling the
 whole plan; Working and Waiting are interval unions (#893), so it must carry the same
 spans the full roll carries, including an attached child plan's.
 """
@@ -41,10 +41,20 @@ def test_a_scoped_rolled_figure_equals_the_full_plan_figure_time_included(db):
     now = T0 + timedelta(minutes=200)
     full = node_cost.project_many([plan.id], db=db, now=now)[plan.id]
     for node in (phase, first, second, delegate):
-        assert node_cost_scoped.rolled_of(node.id, db=db, now=now) == full[node.id]["rolled"], node.id
+        assert _rolled(db, node.id, now) == full[node.id]["rolled"], node.id
     # The overlap is merged, not added: the phase's Working is the union of three Turns.
     assert full[phase.id]["rolled"]["execution"]["seconds"] == (30 + 10) * 60
     assert full[phase.id]["rolled"]["waiting"]["seconds"] > 0
+
+
+def _rolled(db, node_id, now):
+    """One node's rolled cost, read from its subtree alone."""
+    return node_cost_scoped.project([], [node_id], (), db=db, now=now)[1][node_id]
+
+
+def _initiatives(db, node_ids):
+    """Each node's initiative total, read from the nodes' subtrees and lineages alone."""
+    return node_cost_scoped.project([], node_ids, (), db=db)[2]
 
 
 def _usage_tokens(db, node, tokens):
@@ -70,7 +80,7 @@ def test_a_scoped_initiative_under_a_phase_equals_the_full_plan_figure(db):
     db.commit()
 
     _by_plan, full = node_cost.project_with_initiatives([plan.id], db=db)
-    scoped = node_cost_scoped.initiatives_of([member.id, follow_up.id, sibling.id], db=db)
+    scoped = _initiatives(db, [member.id, follow_up.id, sibling.id])
     for node in (member, follow_up, sibling):
         assert scoped[node.id] == full[node.id], node.id
     assert scoped[member.id]["cost"]["tokens"]["known"] == 110
@@ -89,6 +99,6 @@ def test_a_scoped_initiative_with_a_same_plan_split_sibling_equals_the_full_plan
     db.commit()
 
     _by_plan, full = node_cost.project_with_initiatives([plan.id], db=db)
-    scoped = node_cost_scoped.initiatives_of([root.id, follow_up.id, split.id], db=db)
+    scoped = _initiatives(db, [root.id, follow_up.id, split.id])
     for node in (root, follow_up, split):
         assert scoped[node.id] == full[node.id], node.id

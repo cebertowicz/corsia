@@ -347,8 +347,8 @@ ensure_model_source() {
 # verifies pinned uv and Node archives; uv supplies Python 3.11.
 # uv checks the Python build it installs against hashes built into that uv
 # release. Only apt uses sudo, and the installer says so first. There is no
-# local model and no agent browser or shell sandbox here yet, so the model
-# source is connected in the app.
+# local model or agent browser here yet; protected commands use bubblewrap.
+# The model source is connected in the app.
 # ---------------------------------------------------------------------------
 
 LINUX_APT_BASE=(build-essential curl ca-certificates xz-utils unzip jq sqlite3 python3)
@@ -511,6 +511,8 @@ linux_main() {
     case ":$PATH:" in *":$LINUX_LOCAL_BIN:"*) ;; *) path_had_local_bin=0 ;; esac
     export PATH="$LINUX_LOCAL_BIN:$PATH"
     linux_ensure_prereqs
+    say "     Checking the protected Linux command sandbox…"
+    bash "$CORSIA_HOME/scripts/install-linux-sandbox.sh"
     git -C "$CORSIA_HOME" rev-parse --git-dir > /dev/null 2>&1 \
         || stop "$CORSIA_HOME exists but is not a CORSIA checkout. Move it aside, then run this again."
     say "2/3  Using CORSIA $(installed_version) in ~/.corsia"

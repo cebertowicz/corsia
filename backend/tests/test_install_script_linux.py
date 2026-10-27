@@ -63,6 +63,7 @@ UV = (
 )
 
 STUBS = {
+    "bwrap": 'if [ "$1" = --version ]; then echo "bubblewrap 0.9.0"; fi',
     "uname": 'case "$1" in -s) echo "${STUB_OS:-Linux}" ;; -m) echo "${STUB_ARCH:-aarch64}" ;; esac',
     "id": 'echo "${STUB_UID:-1000}"',
     "sw_vers": 'echo "${STUB_MACOS_VERSION:-14.7.1}"',
@@ -171,6 +172,7 @@ def _download(url, destination):
 ''')
     (tools / "python3").symlink_to(sys.executable)
     shutil.copy2(INSTALL, checkout / "scripts" / "install.sh")
+    shutil.copy2(REPO / "scripts" / "install-linux-sandbox.sh", checkout / "scripts" / "install-linux-sandbox.sh")
     (checkout / "backend" / "requirements.lock").write_text("")
     corsia = checkout / "scripts" / "corsia"
     corsia.write_text(
@@ -431,6 +433,15 @@ def test_the_linux_branch_never_touches_the_mac_only_steps(env):
     joined = "\n".join(_calls(env))
     for mac_only in ("brew", "safehouse", "npm", "agent-browser", "local setup", "agent warm"):
         assert mac_only not in joined
+
+
+def test_sandbox_refusal_stops_install_before_server_start(env):
+    helper = _script(env).with_name("install-linux-sandbox.sh")
+    helper.write_text('echo "Linux sandbox refused" >&2\nexit 1\n')
+    result = _run(_everything_installed(env))
+    assert result.returncode == 1
+    assert "Linux sandbox refused" in result.stderr
+    assert not any(call.startswith("corsia") for call in _calls(env))
 
 
 def test_linux_pins_are_only_in_the_managed_runtime():

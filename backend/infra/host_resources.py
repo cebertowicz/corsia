@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import math
 from functools import lru_cache
-from typing import Any
+from typing import Any, Literal
 
 logger = logging.getLogger(__name__)
 
@@ -246,6 +246,25 @@ def fits_now(needed_gb: float, safe_free_gb: float) -> bool:
     return safe_free_gb - needed_gb >= 0
 
 
+def load_verdict(
+    size_bytes: int | None, other_loaded_sizes: list[int | None], room_bytes: int,
+) -> Literal["fits_now", "no_room", "no_memory"]:
+    """The one verdict on loading a model now, from the memory a model may take (``room_bytes``).
+
+    An unjudgeable fit may load only on an empty seat, where no model can be evicted.
+    ``no_room`` includes an unjudgeable fit beside another model, without a promise that
+    unloading it will help. ``no_memory`` means even unloading all others is insufficient.
+    """
+    if size_bytes is None or None in other_loaded_sizes:
+        return "no_room" if other_loaded_sizes else "fits_now"
+    if fits_now(size_bytes / GIB, room_bytes / GIB):
+        return "fits_now"
+    if not other_loaded_sizes:
+        return "no_memory"
+    freed = room_bytes + sum(s for s in other_loaded_sizes if s)
+    return "no_room" if fits_now(size_bytes / GIB, freed / GIB) else "no_memory"
+
+
 def pin_fits(size_bytes: int, other_pinned_bytes: int, room_bytes: int) -> bool:
     """The one "pins fit the room" rule: a model may be pinned when the pins stay within the room for pins."""
     return other_pinned_bytes + size_bytes <= room_bytes
@@ -316,7 +335,7 @@ async def check_can_load(estimated_gb: float, target_provider: str) -> dict[str,
     free = res["free_gb"]
     after_load = free - estimated_gb
     safe_free = res["safe_free_gb"]
-    ok = fits_now(estimated_gb, safe_free)
+    ok = fits_now(estimated_gb, model_room_bytes() / GIB)
 
     warning = None
     if not ok:

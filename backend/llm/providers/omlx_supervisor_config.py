@@ -100,7 +100,13 @@ def managed_launch_settings(settings: dict) -> dict:
         "model_dir": str(paths.model_dir),
         "paged_ssd_cache_dir": str(paths.base_path / "cache") if cache_on else None,
     }
-    # The global values are launch-time settings too: applying them here updates
-    # existing CORSIA-managed installs at their next restart, without writing to
-    # a person's oMLX row or server settings.
-    return {**settings, **OMLX_GLOBAL_SETTINGS, **folders}
+    # oMLX persists these values under scheduler. Its CLI flags override that
+    # file, so use its saved values when present and shipped defaults otherwise.
+    try:
+        raw = json.loads(paths.settings_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        raw = {}
+    scheduler = raw.get("scheduler", {}) if isinstance(raw, dict) else {}
+    scheduler = scheduler if isinstance(scheduler, dict) else {}
+    global_settings = {key: scheduler.get(key, value) for key, value in OMLX_GLOBAL_SETTINGS.items()}
+    return {**settings, **global_settings, **folders}

@@ -14,6 +14,7 @@ import sqlite3
 import pytest
 
 from infra.schema import SCHEMA_SQL
+from llm.api_equivalent import api_equivalent
 from plans import (
     commitment_cost, mutations, node_cost, operator_node_state, rejection, review_evidence,
     rollup, runner_events, service,
@@ -63,6 +64,29 @@ def _usage(db, node, *, tokens, cost, usage_id, thread_id="owner"):
     db.commit()
 
 
+CLAUDE = "claude-code/claude-opus-5-5"
+
+
+def _priced_usage(db, node, *, tokens, usage_id, model=CLAUDE, thread_id="owner"):
+    """A Claude Code row of ``tokens`` input tokens, which Measurement prices (``_price``)."""
+    db.execute(
+        """INSERT INTO llm_usage (
+               id,thread_id,turn_id,model,prompt_tokens,completion_tokens,cache_creation_tokens,
+               cache_read_tokens,total_tokens,plan_id,plan_node_id,plan_attempt_id,plan_commitment_id,
+               plan_usage_role,source,created_at
+           ) VALUES (?,?,NULL,?,?,0,0,0,?,?,?,?,?,'execution','external_harness:claude-code','t')""",
+        (
+            usage_id, thread_id, model, tokens, tokens,
+            node.plan_id, node.id, f"attempt-{usage_id}", node.commitment_id,
+        ),
+    )
+    db.commit()
+
+
+def _price(tokens, model=CLAUDE):
+    return api_equivalent(model, tokens, 0, 0, 0)
+
+
 def _turn(db, node, turn_id, *, started, ended, status_="completed", thread_id="owner"):
     db.execute(
         """INSERT INTO active_turns (
@@ -84,8 +108,8 @@ def test_sibling_tasks_roll_up_distinct_usage_and_their_parent_is_the_sum(db):
     )
     left = _task(db, plan.id, "Left", parent_id=phase.id)
     right = _task(db, plan.id, "Right", parent_id=phase.id)
-    _usage(db, left, tokens=100, cost=0.10, usage_id="u-left")
-    _usage(db, right, tokens=250, cost=0.25, usage_id="u-right")
+    _priced_usage(db, left, tokens=100, usage_id="u-left")
+    _priced_usage(db, right, tokens=250, usage_id="u-right")
 
     costs = node_cost.project_many([plan.id], db=db)[plan.id]
 
@@ -93,29 +117,27 @@ def test_sibling_tasks_roll_up_distinct_usage_and_their_parent_is_the_sum(db):
     assert costs[right.id]["rolled"]["tokens"]["known"] == 250
     assert costs[left.id]["rolled"] != costs[right.id]["rolled"]
     assert costs[phase.id]["rolled"]["tokens"]["known"] == 350
-    assert costs[phase.id]["rolled"]["model_cost_usd"]["known"] == pytest.approx(0.35)
+    assert costs[phase.id]["rolled"]["model_cost_usd"]["known"] == pytest.approx(_price(350))
     # The phase never ran a call itself; its own figure stays at zero known.
     assert costs[phase.id]["own"]["tokens"] == {"known": 0, "unknown_rows": 0}
 
 
-def test_summed_costs_keep_every_digit_of_the_doubles_sql_adds(db):
+#: Two identities price in two groups, so their dollars are added after pricing.
+SONNET = "claude-code/claude-sonnet-5-5"
+
+
+def test_summed_prices_keep_every_digit_of_the_doubles_they_add(db):
     plan = service.ensure_plan("thread", "owner", db=db)
-    tenths = _task(db, plan.id, "Tenths")
-    thirds = _task(db, plan.id, "Thirds")
-    for index in range(10):
-        _usage(db, tenths, tokens=1, cost=0.1, usage_id=f"tenth-{index}")
-    for index, cost in enumerate((1 / 3, 2 / 3, 1e-7, 123456.789)):
-        _usage(db, thirds, tokens=2, cost=cost, usage_id=f"third-{index}")
+    mixed = _task(db, plan.id, "Mixed")
+    _priced_usage(db, mixed, tokens=333_333, usage_id="u-opus")
+    _priced_usage(db, mixed, tokens=7, model=SONNET, usage_id="u-sonnet")
+    exact = {"known": _price(333_333) + _price(7, SONNET), "unknown_rows": 0}
 
     costs = node_cost.project_many([plan.id], db=db)[plan.id]
-    commitment = commitment_cost.project_many([tenths.commitment_id, thirds.commitment_id], db=db)
+    commitment = commitment_cost.project_many([mixed.commitment_id], db=db)
 
-    assert costs[tenths.id]["own"]["model_cost_usd"] == {"known": 1.0, "unknown_rows": 0}
-    assert costs[thirds.id]["own"]["model_cost_usd"] == {"known": 123457.7890001, "unknown_rows": 0}
-    assert commitment[tenths.commitment_id]["model_cost_usd"] == {"known": 1.0, "unknown_rows": 0}
-    assert commitment[thirds.commitment_id]["model_cost_usd"] == {
-        "known": 123457.7890001, "unknown_rows": 0,
-    }
+    assert costs[mixed.id]["own"]["model_cost_usd"] == exact
+    assert commitment[mixed.commitment_id]["model_cost_usd"] == exact
 
 
 def test_the_pane_payload_carries_the_exact_summed_costs(db):
@@ -124,24 +146,25 @@ def test_the_pane_payload_carries_the_exact_summed_costs(db):
 
     plan = service.ensure_plan("thread", "owner", db=db)
     thirds = _task(db, plan.id, "Thirds")
-    for index, cost in enumerate((1 / 3, 2 / 3, 1e-7, 123456.789)):
-        _usage(db, thirds, tokens=2, cost=cost, usage_id=f"third-{index}")
+    _priced_usage(db, thirds, tokens=333_333, usage_id="u-opus")
+    _priced_usage(db, thirds, tokens=7, model=SONNET, usage_id="u-sonnet")
+    exact = {"known": _price(333_333) + _price(7, SONNET), "unknown_rows": 0}
 
     payload = operator_projection.read_thread(
         "owner", actor=PlanActor(None, "user-1", None, kind="user"), db=db,
     )
 
     node = next(item for item in payload["plans"][0]["nodes"] if item["id"] == thirds.id)
-    assert node["node_cost"]["own"]["tokens"] == {"known": 8, "unknown_rows": 0}
-    assert node["node_cost"]["own"]["model_cost_usd"] == {"known": 123457.7890001, "unknown_rows": 0}
-    assert node["commitment_cost"]["model_cost_usd"] == {"known": 123457.7890001, "unknown_rows": 0}
+    assert node["node_cost"]["own"]["tokens"] == {"known": 333_340, "unknown_rows": 0}
+    assert node["node_cost"]["own"]["model_cost_usd"] == exact
+    assert node["commitment_cost"]["model_cost_usd"] == exact
 
 
 def test_the_cost_reads_step_their_rows_in_one_statement_each(db):
     plan = service.ensure_plan("thread", "owner", db=db)
     nodes = [_task(db, plan.id, f"Task {index}") for index in range(30)]
     for index, node in enumerate(nodes):
-        _usage(db, node, tokens=1, cost=0.01 * (index + 1), usage_id=f"u-{index}")
+        _priced_usage(db, node, tokens=index + 1, usage_id=f"u-{index}")
     statements: list[str] = []
     db.set_trace_callback(statements.append)
     try:
@@ -150,11 +173,11 @@ def test_the_cost_reads_step_their_rows_in_one_statement_each(db):
     finally:
         db.set_trace_callback(None)
 
-    # A plain usage read would step one row per node and Turn; both run packed.
+    # A plain usage read would step one row per node and Turn (tokens) or shape (dollars); all run packed.
+    reads = [s for s in statements if "SUM(total_tokens)" in s or "SUM(records)" in s]
+    assert len(reads) == 2 * 2 * 2  # tokens and dollars, for nodes and commitments, each shaped then packed
     assert not [
-        s for s in statements
-        if s.lstrip().startswith("SELECT") and "SUM(cost_usd)" in s
-        and not s.rstrip().endswith("LIMIT 0")
+        s for s in reads if s.lstrip().startswith("SELECT") and not s.rstrip().endswith("LIMIT 0")
     ]
 
 
@@ -263,14 +286,14 @@ def test_a_lost_call_and_its_parent_stay_unknown_not_zero(db):
     assert costs[phase.id]["own"]["tokens"]["known"] == 0
 
 
-@pytest.mark.parametrize("measured_cost", [0.0, 0.01])
-def test_a_lost_call_beside_a_measured_one_keeps_the_measured_total(db, measured_cost):
-    """A measured zero (local models cost $0) rolls up exactly like any other amount."""
+@pytest.mark.parametrize("measured_tokens", [0, 2_000])
+def test_a_lost_call_beside_a_measured_one_keeps_the_measured_total(db, measured_tokens):
+    """A measured zero rolls up exactly like any other amount."""
     plan = service.ensure_plan("thread", "owner", db=db)
     phase = service.add_node(plan.id, kind="phase", title="Phase", acceptance_criteria="d", db=db)
     measured = _task(db, plan.id, "Measured", parent_id=phase.id)
     lost = _task(db, plan.id, "Lost", parent_id=phase.id)
-    _usage(db, measured, tokens=10, cost=measured_cost, usage_id="u-measured")
+    _priced_usage(db, measured, tokens=measured_tokens, usage_id="u-measured")
     runner_events.record(
         lost.id, "usage_recording_failed", provenance="test.node_cost",
         payload={"turn_id": "t-lost", "usage_key": "call-1", "reason": "unreadable"},
@@ -280,7 +303,7 @@ def test_a_lost_call_beside_a_measured_one_keeps_the_measured_total(db, measured
 
     rolled = node_cost.project_many([plan.id], db=db)[plan.id][phase.id]["rolled"]
 
-    assert rolled["model_cost_usd"]["known"] == pytest.approx(measured_cost)
+    assert rolled["model_cost_usd"]["known"] == pytest.approx(_price(measured_tokens))
     assert rolled["usage_recording_failures"] == 1
 
 
@@ -294,13 +317,13 @@ def test_attached_child_plans_usage_rolls_into_the_delegating_task(db):
         "SELECT * FROM plans WHERE owner_kind='thread' AND owner_id='child'"
     ).fetchone()
     child_task = _task(db, child_plan_row["id"], "Child work")
-    _usage(db, child_task, tokens=500, cost=0.50, usage_id="u-child", thread_id="child")
+    _priced_usage(db, child_task, tokens=500, usage_id="u-child", thread_id="child")
 
     costs = node_cost.project_many([parent_plan.id], db=db)[parent_plan.id]
 
     assert costs[delegate.id]["own"]["tokens"]["known"] == 0
     assert costs[delegate.id]["rolled"]["tokens"]["known"] == 500
-    assert costs[delegate.id]["rolled"]["model_cost_usd"]["known"] == pytest.approx(0.50)
+    assert costs[delegate.id]["rolled"]["model_cost_usd"]["known"] == pytest.approx(_price(500))
 
 
 def test_a_child_requested_beside_its_archived_delegating_step_folds_once(db):

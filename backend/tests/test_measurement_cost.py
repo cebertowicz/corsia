@@ -340,7 +340,7 @@ def test_a_record_is_classified_by_its_resolved_model_identity_not_its_raw_selec
 
 
 def test_checkpoint_and_turn_resolve_and_price_the_same_concrete_claude_identity(isolated_db):
-    from api.cost_identity import IdentityResolver
+    from core.cost_identity import IdentityResolver
     from infra.database import get_db
 
     db = get_db()
@@ -392,7 +392,7 @@ def test_codex_is_priced_only_on_a_receipt_shaped_id(usage_id, model, source, ca
 def _admission(model, source, cache_read, usage_id="direct-id", created_at="2026-09-22T12:00:00Z"):
     import sqlite3
 
-    from api.measurement_cost import ADMISSION_SQL
+    from core.measurement_pricing import ADMISSION_SQL
 
     db = sqlite3.connect(":memory:")  # nullable columns: the ledger's NOT NULL must not be the only guard
     db.execute("CREATE TABLE llm_usage (id TEXT, model TEXT, source TEXT, prompt_tokens, completion_tokens, "

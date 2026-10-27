@@ -34,14 +34,14 @@ def test_a_sharer_outside_the_loaded_plans_does_not_load_its_whole_plan(db, monk
     db.commit()
 
     costed: list[str] = []
-    real = node_cost.own_many
+    real = node_cost.own_many_timed
 
     def recording(node_ids, **kwargs):
         ids = [str(value) for value in node_ids]
         costed.extend(ids)
         return real(ids, **kwargs)
 
-    monkeypatch.setattr(node_cost, "own_many", recording)
+    monkeypatch.setattr(node_cost, "own_many_timed", recording)
 
     # The projection asks for the child plan alone: the delegating step is a
     # sharer outside it, in a plan that also holds the unrelated history.

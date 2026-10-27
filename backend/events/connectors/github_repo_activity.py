@@ -13,7 +13,6 @@ moves past a skipped item, so it is never offered again.
 from __future__ import annotations
 
 import asyncio
-import functools
 import logging
 import os
 from datetime import UTC, datetime, timedelta
@@ -21,13 +20,14 @@ from typing import Any
 
 from events.connectors import github_issue_activity as issue_activity
 from events.connectors import github_notifications_feed as feed
+from events.connectors import github_repo_read as repo_read
 from infra.db_async import run_in_db, run_off_db
 
 log = logging.getLogger(__name__)
 DISABLE_ENV = "CORSIA_GITHUB_REPO_ACTIVITY_DISABLE"
 TEST_ENABLE_ENV = "CORSIA_GITHUB_REPO_ACTIVITY_TEST_ENABLE"
 SETTING_PREFIX = "github_repo_activity:"
-MAX_HOURLY_READS = 300
+MAX_HOURLY_READS = repo_read.MAX_HOURLY_READS
 WEBHOOK_QUIET = timedelta(minutes=30)
 ACTIVE_INTERVAL, IDLE_INTERVAL = 60, 300
 _status: dict[str, Any] = {"state": "starting", "reason": None, "counted_reads": 0, "degraded": None}
@@ -101,39 +101,16 @@ def _startup_boundary(delivered: datetime | None, state: dict[str, Any]) -> str 
     return max(filter(None, (saved if _parse_time(saved) else None, webhook_floor)), default=None)
 
 
-def _prune_reads(state: dict[str, Any], now: datetime) -> list[str]:
-    floor = _stamp(now - timedelta(hours=1))
-    reads = [stamp for stamp in state.get("reads", []) if isinstance(stamp, str) and stamp >= floor]
-    state["reads"] = reads
-    _status["counted_reads"] = len(reads)
-    return reads
-
-
-def _counted(response: feed.GhResponse, state: dict[str, Any], now: datetime) -> None:
-    reads = _prune_reads(state, now)
-    if response.status != 304:
-        reads.append(_stamp(now))
-    state["reads"] = reads
-    _status["counted_reads"] = len(reads)
+_counted = repo_read.counted
 
 
 async def _get(runner: feed.GhRunner, path: str, state: dict[str, Any], now: datetime, *,
                send_etag: bool = True, keep_etag: bool = True) -> feed.GhResponse | None:
-    """The one gated read: None when the hourly cap, the shared read budget or a failed read stops it."""
-    if len(_prune_reads(state, now)) >= MAX_HOURLY_READS:
-        _status.update(state="degraded", degraded="budget_exhausted")
-        return None
-    etag = state.get("etags", {}).get(path) if send_etag else None
-    try:
-        response = await asyncio.to_thread(functools.partial(
-            feed.gh_get, runner, path, {"If-None-Match": etag} if etag else None, low_priority=True))
-    except feed.FeedError as exc:
-        # A refused or failed read holds the cursor like a budget stop; the next cycle retries.
-        _status.update(state="degraded", degraded=exc.error_class)
-        return None
-    if keep_etag and response.headers.get("etag"):
-        state.setdefault("etags", {})[path] = response.headers["etag"]
-    _counted(response, state, now)
+    """Read through the shared gate and report only the poller's own status."""
+    response, reason = await repo_read.get(runner, path, state, now, send_etag=send_etag, keep_etag=keep_etag)
+    _status["counted_reads"] = len(state.get("reads", []))
+    if reason:
+        _status.update(state="degraded", degraded=reason)
     return response
 
 
@@ -318,6 +295,17 @@ async def _pending_heads(runner: feed.GhRunner, repo: str, state: dict[str, Any]
                 await _admit("check_suite", {"action": "completed", "repository": {"full_name": repo}, "check_suite": suite},
                              f"check_suite:{repo}:{suite.get('id')}:{suite.get('updated_at')}")
     state["pending"] = sorted(pending)
+
+
+async def gated_read(runner: feed.GhRunner, repo: str, path: str) -> feed.GhResponse | None:
+    """Share the poller's persisted per-repository read budget."""
+    async with _lock(repo):
+        state = await run_in_db(_repo_state, repo)
+        try:
+            response, _reason = await repo_read.get(runner, path, state, _now(), send_etag=False, keep_etag=False)
+            return response
+        finally:
+            await run_in_db(_save_state, repo, state)
 
 
 async def _poll_repo(runner: feed.GhRunner, repo: str, now: datetime) -> bool:

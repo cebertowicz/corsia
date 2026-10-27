@@ -13,7 +13,7 @@ Use this whenever you open a page in the shared browser (`browser_open` without 
 
 ## B. Sign-in, password, 2-Step, passkey, card-entry, phone-verification or verification-code page
 
-The shared browser is the person's. `post_update` once that they sign in (or enter the code) there and that you'll continue when it's done. Then watch exactly as in A, steps 2 to 4: `browser_wait` milliseconds, then read only the page URL and title with that one `browser_eval`. On this page run nothing else: no snapshot, screenshot, text or value read, any other eval, click, fill or reload. Stop when the URL or title shows they got past it, then take over. Never type, fill or read a password or a code yourself.
+The shared browser is the person's. Call `browser_person_step` with the short action they must complete, then end your turn. CORSIA adds it to their attention list and wakes you when the page changes. Never type, fill or read a password or a code yourself.
 
 A link you post in chat opens in the person's own default browser; to show them a page in the shared browser, open it with `browser_open`, never by posting its link. CORSIA's own connect sign-ins (`google_connect`, `microsoft_connect`) return to localhost with an authorization code: post their link in chat, never open it in the agent browser, and don't watch it. Admin-portal sign-ins (Entra, Google Cloud console) are opened in the agent browser as written.
 

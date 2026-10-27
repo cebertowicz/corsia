@@ -17,6 +17,14 @@ _SHELL_TURN = TurnIdentity("shell-envelope-turn", 1)
 
 
 @pytest.fixture
+def mac_shell_platform(monkeypatch):
+    """Select the Safehouse path without changing the host's global platform."""
+    from tests.shell_platform_helpers import use_mac_shell
+
+    use_mac_shell(monkeypatch)
+
+
+@pytest.fixture
 def short_system_temp():
     with tempfile.TemporaryDirectory(dir="/tmp") as directory:
         yield Path(directory)
@@ -1061,6 +1069,7 @@ class _Process:
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("mac_shell_platform")
 @pytest.mark.parametrize("leased", [False, True])
 async def test_bash_uses_direct_safehouse_argv_and_backend_selected_envelope(
     leased,
@@ -1181,6 +1190,7 @@ async def test_bash_uses_direct_safehouse_argv_and_backend_selected_envelope(
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("mac_shell_platform")
 @pytest.mark.parametrize("project_id", ["project-1", None])
 async def test_background_bash_transfers_profile_lifetime_to_process_owner(
     project_id,
@@ -1303,6 +1313,7 @@ async def test_background_bash_transfers_profile_lifetime_to_process_owner(
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("mac_shell_platform")
 async def test_background_spawn_failure_keeps_profile_cleanup_with_bash(
     monkeypatch,
     tmp_path,
@@ -1373,6 +1384,7 @@ async def test_background_spawn_failure_keeps_profile_cleanup_with_bash(
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("mac_shell_platform")
 async def test_bash_fails_closed_without_safehouse(monkeypatch, tmp_path) -> None:
     from tools import shell
 

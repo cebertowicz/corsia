@@ -2,8 +2,7 @@
 
 The platform's one handler (``api.webhook_receivers``) serves
 ``/webhooks/<connector>/`` from these declarations. It enforces the body limit and
-verifies the signature before translation, except for a declared open probe when no
-secret is configured. Translators never receive the secret. What happens next,
+verifies the signature before translation. Translators never receive the secret. What happens next,
 redelivery dedupe included, belongs to the connector's own admission.
 """
 
@@ -51,8 +50,6 @@ class ReceiverDecl:
     signature_prefix: str
     delivery_id_header: str
     max_body_bytes: int = DEFAULT_BODY_LIMIT
-    #: A health check the platform answers without a secret, only while none is configured.
-    open_probe: Callable[[Mapping[str, str]], bool] | None = None
 
     def __post_init__(self) -> None:
         if self.max_body_bytes <= 0:
