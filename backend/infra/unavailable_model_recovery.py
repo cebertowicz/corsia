@@ -152,7 +152,7 @@ async def hold_unless_runnable(
     """
     from llm.local_model_load import ModelLoadFailed
 
-    admission = classify_target_admission(target, load_for=batch.admission.load_for)
+    admission = classify_target_admission(target, load_for=batch.load_for)
     if admission.kind in ("run", "load"):
         return target
     if admission.kind == "wait":

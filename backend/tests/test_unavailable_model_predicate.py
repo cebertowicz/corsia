@@ -110,14 +110,21 @@ async def test_offline_network_server_stays_held(isolated_db, monkeypatch) -> No
     from tests.test_unloaded_send_owned_turn import _claimed
 
     # The fixture's server ``srv`` has no online row.
+    from infra.database import get_db
+    from llm import local_model_load
+
+    real = local_model_load.readiness, local_model_load.fit_readiness
     batch, _thread, _target, provider = _claimed(monkeypatch, metadata={"sender_kind": "agent", "from_thread": "parent"})
-    monkeypatch.setattr("llm.local_model_load.readiness", lambda *_a, **_k: None)
+    # Undo the fixture's fit stubs so the real seat read sees no online server.
+    monkeypatch.setattr(local_model_load, "readiness", real[0])
+    monkeypatch.setattr(local_model_load, "fit_readiness", real[1])
+    assert local_model_load.readiness(_target, db=get_db()).state == "unreachable"
     monkeypatch.setattr("infra.unavailable_model_recovery.schedule_unavailable_model_recovery", lambda: None)
     held = AsyncMock(wraps=recovery.hold_unavailable_model_input)
     monkeypatch.setattr(recovery, "hold_unavailable_model_input", held)
     await drive_claimed_batch(batch)
     assert held.await_args is not None
-    assert held.await_args.args[1].availability_reason == "model_unavailable"
+    assert held.await_args.args[1].availability_reason == "unreachable"
     provider.assert_not_awaited()
     assert message_row("m") == HELD
 

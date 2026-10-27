@@ -53,7 +53,7 @@ def _dispatch_context(
         content=prepared.content, is_subagent=prepared.is_subagent,
         target=prepared.target, turn_id=batch.turn_id,
         input_message_id=batch.anchor_message_id,
-        load_for=batch.admission.load_for,
+        load_for=batch.load_for,
         metadata=batch.items[-1].metadata,
         native_mode=native_mode,
         allow_fresh=bool(

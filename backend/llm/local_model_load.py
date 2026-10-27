@@ -197,10 +197,6 @@ async def _load(target: ExecutionTarget, server_id: str, model_id: str) -> None:
         _emit_load(server_id, model_id, "load.completed")
 
 
-async def _ensure(target: ExecutionTarget, server_id: str, model_id: str) -> None:
-    await _load(target, server_id, model_id)
-
-
 def _settled(key: tuple[str, str], task: asyncio.Task[None]) -> None:
     """Forget a finished load, and log a failure no caller was left to see (a ``ModelLoadFailed`` is logged where it is raised)."""
     if _LOADS.get(key) is task:
@@ -225,7 +221,7 @@ async def ensure_loaded(target: ExecutionTarget) -> None:
         return
     task = _LOADS.get(seat)
     if task is None:
-        task = asyncio.create_task(_ensure(target, *seat))
+        task = asyncio.create_task(_load(target, *seat))
         _LOADS[seat] = task
         task.add_done_callback(partial(_settled, seat))
     await asyncio.shield(task)

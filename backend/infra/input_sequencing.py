@@ -27,7 +27,7 @@ def _settle_load_failure(batch, error, attempt_id: str | None, db=None) -> tuple
     from infra.input_writes import release_batch_after_proved_no_write, release_batch_before_write
     from infra.send_target import model_load_error
 
-    authors = batch.admission.load_for
+    authors = batch.load_for
     rest = replace(batch, items=tuple(item for item in batch.items if item.message_id not in authors))
     with write_transaction(db, scope="settle_load_failure") as connection:
         if rest.items and attempt_id is None:

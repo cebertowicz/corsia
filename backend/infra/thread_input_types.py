@@ -67,7 +67,8 @@ class ClaimedBatch:
     vendor_receipt: ReceiptFence | None = field(default=None, repr=False)
     #: Error rows this claim stamped `recovered`; published with the batch.
     recovered_message_ids: tuple[str, ...] = ()
-    admission: Admission = Admission("run")
+    #: The claimed person inputs that authorize a load; the drive decides admission.
+    load_for: tuple[str, ...] = ()
 
     @property
     def identity(self) -> TurnIdentity:

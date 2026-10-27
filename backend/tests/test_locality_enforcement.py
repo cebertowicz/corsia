@@ -140,15 +140,14 @@ async def test_cloud_off_thread_resolves_to_an_unavailable_target_admission_hold
 @pytest.mark.asyncio
 async def test_local_row_and_unscoped_threads_still_resolve(world):
     from infra import send_target
-    from infra.send_target import Admission
     from infra.unavailable_model_recovery import resolve_or_hold
 
-    batch = SimpleNamespace(thread_id="actor", admission=Admission("run"))
+    batch = SimpleNamespace(thread_id="actor", load_for=())
     assert (await send_target.resolve_target(LOCAL, thread_id="actor")).catalog_id == LOCAL
     assert (await resolve_or_hold(LOCAL, batch)).catalog_id == LOCAL
     for thread in ("noproject", "destination", None):
         assert (await send_target.resolve_target(CLOUD, thread_id=thread)).catalog_id == CLOUD
-    assert (await resolve_or_hold(CLOUD, SimpleNamespace(thread_id="noproject", admission=Admission("run")))).catalog_id == CLOUD
+    assert (await resolve_or_hold(CLOUD, SimpleNamespace(thread_id="noproject", load_for=()))).catalog_id == CLOUD
 
 
 @pytest.mark.parametrize(
