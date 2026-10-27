@@ -10,6 +10,7 @@ from infra.database_migrations import MIGRATIONS
 from infra.migration_111_to_112_image_regions import REGION_COLUMNS, migrate_111_to_112
 from infra.migration_133_to_134_doc_stranded_suggestions import migrate_133_to_134
 from infra.migration_134_to_135_doc_decision_bulk import migrate_134_to_135
+from infra.migration_148_to_149_doc_insert_after import migrate_148_to_149
 from infra.schema import SCHEMA_SQL, SCHEMA_VERSION
 
 _V111_DOC_COMMENTS = """
@@ -73,6 +74,7 @@ def test_fresh_schema_matches_a_migrated_one():
     migrate_111_to_112(migrated)
     migrate_133_to_134(migrated)  # the columns added since, which a fresh schema also lists last
     migrate_134_to_135(migrated)
+    migrate_148_to_149(migrated)
 
     assert _columns(fresh) == _columns(migrated)
     index = "idx_doc_comments_region_number"
@@ -113,7 +115,7 @@ def test_a_v110_database_with_agent_use_terms_upgrades_through_v111_to_v112(isol
     result = migrate_to_current(db, SCHEMA_VERSION)
 
     assert (result.migrated, result.from_version, result.to_version) == (True, 110, 149)
-    assert _columns(db)[-len(REGION_COLUMNS) - 2:-2] == list(REGION_COLUMNS)  # then the step-134 and 135 columns
+    assert _columns(db)[-len(REGION_COLUMNS) - 3:-3] == list(REGION_COLUMNS)  # then the step-134, 135 and 149 columns
     assert tuple(db.execute("SELECT body, region_number FROM doc_comments").fetchone()) == ("text comment", None)
     assert endpoint_agent_use("external@legacy/glm-5.3") == "interactive_only"
     assert endpoint_agent_use("external@ordinary/glm-5.3") == "allowed"
