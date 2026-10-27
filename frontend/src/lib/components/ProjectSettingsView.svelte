@@ -73,11 +73,12 @@
 		agentsError = '';
 		try {
 			const res = await fetch(`/api/agents?token=${encodeURIComponent(t)}&project_id=${encodeURIComponent(id)}`);
-			if (!res.ok) throw new Error(`Couldn't load project Agents (${res.status})`);
+			if (!res.ok) throw new Error(`agent list load failed (${res.status})`);
 			const body = await res.json();
 			agentRows = Array.isArray(body.agents) ? body.agents : [];
 		} catch (e) {
-			agentsError = e instanceof Error ? e.message : 'Could not load project Agents';
+			console.error(e);
+			agentsError = 'Couldn’t load this project’s agents.';
 		} finally {
 			agentsLoading = false;
 		}
@@ -251,7 +252,7 @@
 			</div>
 		</SettingsGroup>
 
-		<SettingsGroup label="Folder" hint="Conversations here share this project's context and Agents.">
+		<SettingsGroup label="Folder" hint="Chats here share this project's context and agents.">
 			<SettingsRow
 				name={project.path ? 'Working folder' : 'Working folder missing'}
 				sub={project.path ? displayName(project.path) : 'No folder selected'}
