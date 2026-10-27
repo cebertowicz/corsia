@@ -764,7 +764,7 @@ describe('ActivityView', () => {
 		});
 		await settle();
 		expect(host.textContent).toContain('No plans');
-		expect(host.textContent).toContain('Plans in this project show up here.');
+		expect(host.textContent).toContain('Plans in this project appear here.');
 		expect(host.textContent).not.toContain('no longer available');
 	});
 
