@@ -84,6 +84,8 @@ FIND_PROJECTS = {
 # {sign_up_with} is the agents' address, or ASK_FOR_ADDRESS when the saved email is not
 # Gmail: on option A the conductor then asks in chat for an address.
 ASK_FOR_ADDRESS = "ask you in chat for an email address not already used on GitHub"
+# When the agents' address is known, {sign_up_with} is that address followed by this.
+AGENTS_ADDRESS = "{address} to use"
 
 # The community card comes first: whether agents use and offer the community's proven improvements.
 # It sits under the GitHub task; GitHub comes up only on a yes to sharing, as whichever GitHub card fits.

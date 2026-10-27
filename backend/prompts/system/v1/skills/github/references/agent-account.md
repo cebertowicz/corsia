@@ -20,7 +20,7 @@ Once an agents' account exists, `gh` and `git push` in agent shells fail on purp
 
 Only when no agents' account exists and the person chose to create one, never on a reconnect. The person signs up in their own browser: GitHub flags sign-ups typed by an automated browser, so never open the sign-up in the shared browser and never type into or click its form.
 
-1. Post `Open a private window in your browser so this stays apart from your own GitHub account, then paste this link into it: https://github.com/signup. Use [address] for the email. The username, password and any code from your email are yours to type. Tell me here when you're done.` with [address] the one the setup decision named, or the one the person gave you in chat; outside setup, ask in chat which address to use first. Offer a username if they ask.
+1. Post `Open a private or incognito window in your browser, so you're not signed in to any GitHub account, then paste this link into it: https://github.com/signup. Use [address] for the email. The username, password and any code from your email are yours to type. Tell me here when you're done.` with [address] the one the setup decision named, or the one the person gave you in chat; outside setup, ask in chat which address to use first. Offer a username if they ask.
 2. Wait for them. Then `connect`.
 
 ## Posting as the person

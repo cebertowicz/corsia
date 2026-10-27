@@ -346,13 +346,14 @@ def test_first_run_raises_the_card_first_and_the_reference_carries_appendix_a():
         "Ask me any time to bring things over from them.",
         "I couldn’t read them this time, so I kept nothing. Ask me any time to try again.",
         # A skill that can't come over is named once with its reason and a way to ask about it.
-        "`I left out [name] ([reason]), [name] ([reason]). Ask me to help with any of them and I'll say what to change and try again, or help you write a CORSIA skill to do what you need.`",
+        "`I left out [name] ([reason]), [name] ([reason]). Ask me to help with any of them and I’ll say what to change and try again, or help you write a CORSIA skill to do what you need.`",
+        "`I couldn’t bring over [name] ([reason]). Ask me to help fix it and try again, or help you write a CORSIA skill.`",
         "`name_reserved`: `CORSIA already has a skill with that name`",
         "`has_secret`: `it has a key or password in it`",
         "`too_large`: `too big to bring over`",
         "`unreadable`, whatever its `reason` or none: `I couldn’t read it`",
         "`it changed since I showed you`",
-        "`I couldn’t add it`",
+        "`something went wrong adding it`",
         "`sha256`",
     ):
         assert line in guide

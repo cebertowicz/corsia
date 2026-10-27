@@ -4,7 +4,7 @@ Here's how help is organized:
 
 - A quick question: start a new chat.
 - Something that keeps coming back and taking your time, like your inbox, a client or a project at work: give it to an agent. An agent is an AI that owns that job for good, remembers how you like it done, and answers for the result.
-- Work that needs its own private context, or several agents working together: it becomes a project.
+- Work that needs its own space and context, or several agents working together: it becomes a project.
 - Everything else: it stays with me, including keeping CORSIA itself set up and running.
 
 Tell me what's taking your time and I'll suggest the right setup.
