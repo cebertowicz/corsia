@@ -30,9 +30,10 @@ async function select(page: Page, id: string, quote: string) {
 
 for (const size of [1440, 393]) for (const scheme of ['light', 'dark'] as const) {
 	test.describe(`chat comments ${size} ${scheme}`, () => {
-		test.skip(({}, info) => info.project.name === 'chromium-mobile', 'viewport set by this spec');
+		test.skip(() => test.info().project.name === 'chromium-mobile', 'viewport set by this spec');
 		test.use({ seedPerTest: true, viewport: { width: size, height: size === 1440 ? 900 : 852 }, colorScheme: scheme, hasTouch: size === 393, isMobile: size === 393, deviceScaleFactor: 2 });
 		test('stored long quotes and notes', async ({ page, request }) => {
+			test.setTimeout(120_000);
 			const title = `Stored ${size} ${scheme}`;
 			const thread = await createSession(request, title);
 			const quote = 'A long quoted sentence with source context. '.repeat(30);

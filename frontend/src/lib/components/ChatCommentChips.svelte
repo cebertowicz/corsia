@@ -17,7 +17,7 @@
 </div>
 
 <style>
-	.comment-chip-row { display: flex; flex: 0 0 100%; gap: 8px; min-width: 0; overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; }
+	.comment-chip-row { display: flex; flex: 0 0 100%; gap: var(--space-2); min-width: 0; overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; }
 	.comment-chip { flex: 0 0 auto; cursor: pointer; }
 	.comment-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 </style>

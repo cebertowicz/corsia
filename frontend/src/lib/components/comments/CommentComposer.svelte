@@ -23,7 +23,7 @@
 		text;
 		onBody?.(text);
 	});
-		async function submit() {
+	async function submit() {
 		const value = text.trim();
 		if (!value || posting || disabledReason) return;
 		posting = true;
@@ -51,7 +51,7 @@
 
 <style>
 	.composer { display: flex; flex-direction: column; gap: 8px; }
-		.actions { display: flex; justify-content: flex-end; gap: 8px; }
+	.actions { display: flex; justify-content: flex-end; gap: 8px; }
 	button { font-size: var(--text-caption); font-weight: var(--fw-semibold); cursor: pointer; }
 	.cancel { padding: 5px 8px; border: none; background: none; color: var(--text-secondary); }
 	.submit { padding: 6px 14px; border: none; border-radius: var(--radius-sm); background: var(--accent-fill); color: var(--accent-on-fill); }
