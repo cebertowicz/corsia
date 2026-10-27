@@ -42,7 +42,7 @@
 			onCreated?.(proj);
 			close();
 		} catch (e) {
-			error = e instanceof Error ? e.message : 'Could not create project';
+			error = e instanceof Error ? e.message : 'Couldn’t create the project. Try again.';
 			busy = false;
 		}
 	}
@@ -68,7 +68,7 @@
 				<textarea
 					rows="2"
 					bind:value={description}
-					placeholder="Short description — shown in the projects list…"
+					placeholder="Short description, shown in the projects list"
 				></textarea>
 			</label>
 

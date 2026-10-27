@@ -483,6 +483,19 @@ async def test_bash_registration_warning_budget_preserves_warning(
     assert "artifact_register" in result
 
 
+@pytest.mark.asyncio
+async def test_a_registration_note_keeps_the_full_output_budget(isolated_db, monkeypatch):
+    db = get_db()
+    thread_id = make_session(db, prefix="bash-note")
+    stdout = ("x" * 6_000) + "\n" + _URL + "\n"
+    _stub_process(monkeypatch, stdout=stdout)
+
+    result = await BashTool().execute("gh pr create --title noted", **_direct_shell_context(thread_id))
+
+    assert result.startswith(stdout.rstrip("\n")) and "truncated" not in result
+    assert result.endswith("\n\nRegistered pull request owner/repo#42 to you.")
+
+
 
 @pytest.mark.asyncio
 async def test_d8_cc_bridge_executes_the_same_bash_registration_seam(

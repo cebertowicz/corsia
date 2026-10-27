@@ -1,4 +1,4 @@
-"""Schema 150 -> 151: existing rules become route rules."""
+"""Schema 151 -> 152: existing rules become route rules."""
 from __future__ import annotations
 
 import sqlite3
@@ -9,7 +9,7 @@ from infra.database import initialize_schema
 from infra.database_migrations import MIGRATIONS, migrate_to_current
 from infra.event_rule_schema import EVENT_RULE_SCHEMA_SQL
 from infra.migration_140_to_141_worker_starts import migrate_140_to_141
-from infra.migration_150_to_151_observe_rules import migrate_150_to_151
+from infra.migration_151_to_152_observe_rules import migrate_151_to_152
 from events.observe_rules import sync_shipped_rules
 from infra.schema import SCHEMA_VERSION
 from tests.test_schema_migration_v141 import _V140
@@ -33,8 +33,8 @@ def _v148() -> sqlite3.Connection:
 def test_existing_rules_become_route_rules():
     db = _v148()
     db.execute("BEGIN")
-    migrate_150_to_151(db)
-    migrate_150_to_151(db)  # repeatable: the rebuild does not repeat
+    migrate_151_to_152(db)
+    migrate_151_to_152(db)  # repeatable: the rebuild does not repeat
     assert db.in_transaction
     db.commit()
     fresh = sqlite3.connect(":memory:")
@@ -71,7 +71,7 @@ def test_storage_ties_each_kind_to_its_own_fields_and_global_scope_to_a_shipped_
 
 
 def test_a_full_v148_install_takes_the_step_and_ends_where_a_fresh_install_starts():
-    assert SCHEMA_VERSION == 151 and MIGRATIONS[150] is migrate_150_to_151
+    assert SCHEMA_VERSION == 152 and MIGRATIONS[151] is migrate_151_to_152
     db = sqlite3.connect(":memory:")
     initialize_schema(db)
     for table in ("event_route_decisions", "event_rules"):
@@ -79,7 +79,7 @@ def test_a_full_v148_install_takes_the_step_and_ends_where_a_fresh_install_start
     db.executescript(_V140.split("CREATE TABLE automation_schedules")[0])
     db.execute("PRAGMA user_version=148")
     db.commit()
-    assert migrate_to_current(db, SCHEMA_VERSION).to_version == 151
+    assert migrate_to_current(db, SCHEMA_VERSION).to_version == 152
     fresh = sqlite3.connect(":memory:")
     initialize_schema(fresh)
     sync_shipped_rules(db)

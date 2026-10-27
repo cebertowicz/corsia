@@ -99,6 +99,27 @@ async def test_an_agent_writes_an_observe_row_that_registers_its_own_command_and
 
 
 @pytest.mark.asyncio
+async def test_writing_and_firing_an_observe_row_emit_product_events(isolated_db, monkeypatch):
+    emitted: list[tuple[str, str, dict]] = []
+
+    def capture(category, action, *, thread_id=None, properties=None, **_):
+        emitted.append((category, action, {"thread_id": thread_id, **(properties or {})}))
+        return True
+
+    monkeypatch.setattr("tools.event_rules.emit_product_event", capture)
+    monkeypatch.setattr("registry.observer.emit_product_event", capture)
+    _agent("a")
+    written = await _observe_rule("a")
+    _run("a", "ship-pr --fast")
+
+    assert emitted == [
+        ("event_rule", "created", {"thread_id": "a", "rule_id": written["id"], "kind": "observe", "scope": P}),
+        ("event_rule", "registered", {"thread_id": "a", "rule_id": written["id"], "kind": "observe",
+                                      "connector": "github", "shipped": False, "reason": None}),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_a_command_the_rule_does_not_name_registers_nothing(isolated_db):
     _agent("a")
     await _observe_rule("a")

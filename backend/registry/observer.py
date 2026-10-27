@@ -11,6 +11,7 @@ from doceditor.presence import is_document_activity_tool, observe_document_activ
 from events import connectors, observe_rules
 from events.connectors import ObservedArtifactDecl
 from infra.database import get_db
+from infra.product_events import emit_product_event
 from registry.observation_result import (
     ObservationResult,
     observation_result,
@@ -164,6 +165,9 @@ def _record(db, thread_id, rule, outcome, artifact, reason, told) -> None:
         "external_id": artifact.external_id}, reason)
     if not saved and told is not None:
         told.append("Couldn't save this result to the rule's history, so `explain` won't show this run.")
+    emit_product_event("event_rule", outcome, thread_id=thread_id, properties={
+        "rule_id": rule.id, "kind": observe_rules.OBSERVE, "connector": rule.connector,
+        "shipped": rule.origin.startswith("rule_set:"), "reason": reason})
 
 
 def _extractor(rule, db, thread_id, told):

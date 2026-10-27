@@ -121,14 +121,14 @@
 		const target = attachTarget.targetLabel?.trim();
 		if (attachTarget.scope === 'workspace') return target ? `Add to ${target}` : 'Add to workspace context';
 		if (attachTarget.scope === 'project') return target ? `Add to project context: ${target}` : 'Add to project context';
-		return target ? `Add to thread context: ${target}` : 'Add to thread context';
+		return target ? `Add to chat context: ${target}` : 'Add to chat context';
 	}
 
 	function attachAriaLabel(e: DocEntry): string {
 		if (!attachTarget) return '';
 		if (attachTarget.scope === 'workspace') return `Add ${e.name} to workspace context`;
 		if (attachTarget.scope === 'project') return `Add ${e.name} to project context`;
-		return `Add ${e.name} to thread context`;
+		return `Add ${e.name} to chat context`;
 	}
 
 	function isContextFile(e: DocEntry): boolean {
@@ -163,7 +163,7 @@
 			if (!target.projectId) throw new Error('Project context target is missing');
 			return { scope: 'project', project_id: target.projectId, path: e.abs };
 		}
-		if (!target.threadId) throw new Error('Thread context target is missing');
+		if (!target.threadId) throw new Error('Couldn’t add this to the chat context: no chat is open. Open a chat and try again.');
 		return { scope: 'thread', thread_id: target.threadId, path: e.abs };
 	}
 
@@ -264,7 +264,7 @@
 			<button class="chip" class:on={lens === c.id} onclick={() => docLens.set(c.id)}>
 				{c.label}
 				{#if c.id === 'skills'}<span class="chip-n">{$skillDocs.length}</span>{/if}
-				{#if c.id === 'all' && $pendingCount}<span class="chip-dot" title="{$pendingCount} descriptions pending"></span>{/if}
+				{#if c.id === 'all' && $pendingCount}<span class="chip-dot" title="{$pendingCount.toLocaleString()} file{$pendingCount > 1 ? 's' : ''} without a description"></span>{/if}
 			</button>
 		{/each}
 	</div>
@@ -283,7 +283,7 @@
 			{#if searched.length === 0}<p class="empty">No docs match “{search}”.</p>{/if}
 
 		{:else if lens === 'activity'}
-			<p class="lens-note">What the registry knows — housekeeping trail entries arrive with the hygiene job.</p>
+			<p class="lens-note">Recent file activity.</p>
 			<div class="feed">
 				{#each $docActivity as a (a.id)}
 					<div class="act-row">

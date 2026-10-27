@@ -74,7 +74,7 @@
 				...(init.headers ?? {}),
 			},
 		});
-		if (!res.ok) throw new Error(await plainResponseError(res, 'Could not load this thread’s context. Try again.'));
+		if (!res.ok) throw new Error(await plainResponseError(res, 'Couldn’t load this chat’s context. Try again.'));
 		return res.json();
 	}
 
@@ -132,7 +132,7 @@
 			scope: 'thread',
 			threadId: id,
 			projectId: currentThread?.project_id ?? null,
-			targetLabel: currentThread?.title ?? 'Current thread',
+			targetLabel: currentThread?.title ?? 'Current chat',
 			existingFiles: threadFiles,
 			returnTo: 'thread-settings',
 		});
@@ -152,10 +152,10 @@
 	{/if}
 
 	{#if !currentThreadId}
-		<div class="ctx-empty">Select a thread to manage context.</div>
+		<div class="ctx-empty">Select a chat to manage context.</div>
 	{:else}
 		{#if threadFiles.length === 0}
-			<div class="ctx-empty">No files pinned to this thread.</div>
+			<div class="ctx-empty">No files pinned to this chat.</div>
 		{:else}
 			<div class="ctx-files">
 				{#each threadFiles as file (file)}
@@ -172,8 +172,8 @@
 						<IconButton
 							size="sm"
 							variant="danger"
-							title="Remove from thread context"
-							ariaLabel={`Remove ${displayName(file)} from thread context`}
+							title="Remove from chat context"
+							ariaLabel={`Remove ${displayName(file)} from chat context`}
 							disabled={busy}
 							onclick={() => patchThreadContextFiles(threadFiles.filter((entry) => entry !== file))}
 						>
@@ -204,7 +204,7 @@
 					<input
 						bind:value={newThreadContextPath}
 						placeholder="context/thread-notes.md"
-						aria-label="New thread context file"
+						aria-label="New chat context file"
 						onkeydown={(event) => { if (event.key === 'Enter') void createThreadContextFile(); }}
 					/>
 					<Button

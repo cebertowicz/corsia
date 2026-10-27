@@ -281,7 +281,7 @@ describe('ImageLightbox', () => {
 		const failed = render();
 		failed.dispatchEvent(new Event('error'));
 		await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
-		button('Try again').click();
+		button('Retry').click();
 		await settle();
 
 		const retried = host.querySelector<HTMLImageElement>('.pad img')!;
@@ -307,7 +307,7 @@ describe('ImageLightbox', () => {
 		expect(button('Back to doc.md')).toBeDefined();
 		expect(host.querySelector('.pad img')).toBeNull();
 
-		button('Try again').click();
+		button('Retry').click();
 		await settle();
 		expect(host.querySelector('.pad img')).not.toBeNull();
 		expect(host.querySelector('.load-error')).toBeNull();
@@ -320,7 +320,7 @@ describe('ImageLightbox', () => {
 		host.querySelector('.pad img')!.dispatchEvent(new Event('error'));
 		await vi.waitFor(() => expect(host.querySelector('.load-error')).not.toBeNull());
 		expect(host.querySelector('.load-error code')).toBeNull();
-		button('Try again').click();
+		button('Retry').click();
 		expect(retry).toHaveBeenCalledTimes(1);
 	});
 

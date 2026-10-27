@@ -50,7 +50,7 @@ def _run(operation: str, thread_id: str, project_id: str | None, kwargs: dict[st
                     db, caller=thread_id, project_id=project_id, rule_id=kwargs.get("rule_id"), now=now)
         emit_product_event(
             "event_rule", "created" if operation == "create" else "disabled", thread_id=thread_id,
-            properties={"rule_id": result["id"], "scope": project_id},
+            properties={"rule_id": result["id"], "kind": result["kind"], "scope": project_id},
         )
         return result
     db = get_db()
