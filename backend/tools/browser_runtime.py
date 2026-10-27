@@ -45,22 +45,39 @@ def _execution_context(kwargs: dict[str, Any]) -> tuple[str, str | None]:
     return thread_id, project_id
 
 
+class BrowserOwnerError(Exception):
+    """A failure from the browser session owner, with its existing tool text."""
+
+    def __init__(self, text: str) -> None:
+        super().__init__(text)
+        self.text = text
+
+
 async def _run(args: list[str], *, thread_id: str, lease_id: str | None = None,
                timeout: int = _DEFAULT_TIMEOUT, show_window: bool | None = None) -> str:
     """Run through the one backend-owned opaque browser session owner."""
+    try:
+        return await _run_owned(args, thread_id=thread_id, lease_id=lease_id, timeout=timeout, show_window=show_window)
+    except BrowserOwnerError as exc:
+        return exc.text
+
+
+async def _run_owned(args: list[str], *, thread_id: str, lease_id: str | None = None,
+                     timeout: int = _DEFAULT_TIMEOUT, show_window: bool | None = None) -> str:
+    """Run a browser command, preserving owner failures as exceptions."""
     err = _check_installed()
     if err:
-        return err
+        raise BrowserOwnerError(err)
     try:
         return await PROCESS_OWNER.run_browser(
             thread_id, args, lease_id=lease_id, timeout=timeout, show_window=show_window,
         )
     except (BrowserSessionCleanupError, BrowserSetupError) as exc:
-        return exc.tool_message
+        raise BrowserOwnerError(exc.tool_message) from exc
     except BrowserSessionError as exc:
-        return f"Error: {exc}"
-    except Exception:
-        return f"Error: {COMMAND_FAILED}"
+        raise BrowserOwnerError(f"Error: {exc}") from exc
+    except Exception as exc:
+        raise BrowserOwnerError(f"Error: {COMMAND_FAILED}") from exc
 
 
 async def _declare_person_step(thread_id: str, instruction: str) -> str:

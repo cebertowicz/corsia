@@ -10,10 +10,8 @@ from urllib.parse import urlparse
 
 from host_access import browser_cli, browser_control
 from host_access.browser_domain import registrable_domain
-from host_access.browser_session_state import SETUP_REFUSED
-from host_access.browser_sessions import BrowserSessionCleanupError
 from tools.base import Tool
-from tools.browser_runtime import COMMAND_FAILED, _execution_context, _run
+from tools.browser_runtime import BrowserOwnerError, _execution_context, _run_owned
 
 _SAFE_NAME = re.compile(r"[a-z0-9-]+")
 _SKILLS = Path(__file__).resolve().parents[1] / "prompts/system/v1/skills"
@@ -26,12 +24,13 @@ def _result(**value: object) -> str:
     return json.dumps(value, separators=(",", ":"))
 
 
-def _owner_error(message: str) -> bool:
-    return message.startswith(SETUP_REFUSED) or message in {
-        COMMAND_FAILED,
-        BrowserSessionCleanupError("").tool_message.removeprefix("Error: "),
-        BrowserSessionCleanupError("", recovery="pending").tool_message.removeprefix("Error: "),
-    }
+async def _call(args: list[str], *, thread_id: str) -> str:
+    try:
+        return await _run_owned(args, thread_id=thread_id)
+    except BrowserOwnerError as exc:
+        if exc.text.removeprefix("Error: ").startswith(_GUARD_REFUSALS):
+            return exc.text
+        raise
 
 
 def _allowed(url: str, domains: set[str]) -> bool:
@@ -102,6 +101,12 @@ class BrowserRunStepsTool(Tool):
     }
 
     async def execute(self, steps: str, start_at: str | None = None, **kwargs: Any) -> str:
+        try:
+            return await self._execute(steps, start_at, **kwargs)
+        except BrowserOwnerError as exc:
+            return _result(ok=False, error=exc.text.removeprefix("Error: "))
+
+    async def _execute(self, steps: str, start_at: str | None = None, **kwargs: Any) -> str:
         data, error = _load(steps) if isinstance(steps, str) else (None, "unknown steps file")
         if error or data is None:
             return _result(ok=False, error=error or "unknown steps file")
@@ -119,15 +124,13 @@ class BrowserRunStepsTool(Tool):
             if step["action"] in {"click", "type"}:
                 saw, url, refusal = await _saw(thread_id, expected)
                 if refusal:
-                    return _result(ok=False, error=refusal) if _owner_error(refusal) else _guard_result(identifier, says, refusal)
+                    return _guard_result(identifier, says, refusal)
                 if not _allowed(url, domains):
                     return _result(ok=False, step=identifier, says=says, saw=saw)
             deadline = time.monotonic() + step.get("timeout", 0)
             while True:
-                result = await _run(_command(step), thread_id=thread_id)
+                result = await _call(_command(step), thread_id=thread_id)
                 message = result.removeprefix("Error: ")
-                if result.startswith("Error: ") and _owner_error(message):
-                    return _result(ok=False, error=message)
                 if (step["action"] != "wait_for" or "selector" not in step or
                     message.startswith(_GUARD_REFUSALS) or
                     not (result.startswith("Error:") or result == browser_cli.WAIT_TIMED_OUT) or
@@ -143,8 +146,6 @@ class BrowserRunStepsTool(Tool):
                 return await _miss(thread_id, identifier, says, expected)
             saw, url, refusal = await _saw(thread_id, expected)
             if refusal:
-                if _owner_error(refusal):
-                    return _result(ok=False, error=refusal)
                 done.append(identifier)
                 if index + 1 == len(sequence):
                     return _result(ok=True, steps=done, message=refusal)
@@ -172,13 +173,13 @@ def _guard_result(identifier: str, says: str, message: str) -> str:
 
 
 async def _saw(thread_id: str, expected: str) -> tuple[dict[str, str], str, str | None]:
-    title = await _run(["get", "title"], thread_id=thread_id)
+    title = await _call(["get", "title"], thread_id=thread_id)
     message = title.removeprefix("Error: ") if title.startswith("Error:") else ""
-    if message.startswith(_GUARD_REFUSALS) or _owner_error(message):
+    if message.startswith(_GUARD_REFUSALS):
         return {"title": "", "url_path": "", "missing": expected}, "", message
-    url = await _run(["get", "url"], thread_id=thread_id)
+    url = await _call(["get", "url"], thread_id=thread_id)
     message = url.removeprefix("Error: ") if url.startswith("Error:") else ""
-    if message.startswith(_GUARD_REFUSALS) or _owner_error(message):
+    if message.startswith(_GUARD_REFUSALS):
         return {"title": "", "url_path": "", "missing": expected}, "", message
     safe_title = "" if title.startswith("Error:") else title.strip()
     safe_url = "" if url.startswith("Error:") else url.strip()
@@ -188,5 +189,5 @@ async def _saw(thread_id: str, expected: str) -> tuple[dict[str, str], str, str 
 async def _miss(thread_id: str, identifier: str, says: str, expected: str) -> str:
     saw, _url, refusal = await _saw(thread_id, expected)
     if refusal:
-        return _result(ok=False, error=refusal) if _owner_error(refusal) else _guard_result(identifier, says, refusal)
+        return _guard_result(identifier, says, refusal)
     return _result(ok=False, step=identifier, says=says, saw=saw)
