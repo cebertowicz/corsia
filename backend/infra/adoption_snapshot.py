@@ -181,11 +181,11 @@ def check_adoption_preflight(state_root: Path, variables: list[str]) -> None:
     if missing:
         raise AdoptionRefused(
             "These provider keys aren’t stored in CORSIA yet: "
-            f"{', '.join(missing)}. Add them in CORSIA › Settings › Keys, then choose Try again."
+            f"{', '.join(missing)}. Add them in CORSIA › Settings › Keys, then choose Retry."
         )
     if restart_in_flight(state_root):
         raise AdoptionRestarting(
-            "Your existing CORSIA is restarting itself. Wait a minute, then choose Try again."
+            "Your existing CORSIA is restarting itself. Wait a minute, then choose Retry."
         )
     needed = _snapshot_size(state_root)
     # The snapshot takes ``needed``; the packaged backend's own pre-migration
@@ -198,12 +198,12 @@ def check_adoption_preflight(state_root: Path, variables: list[str]) -> None:
         # so the snapshot itself must also fit in what is free now.
         raise AdoptionRefused(
             f"The backup needs {needed / 1e9:.1f} GB and this disk has {free / 1e9:.1f} GB free now. "
-            "Free up space, then choose Try again."
+            "Free up space, then choose Retry."
         )
     if available < needed + required:
         raise AdoptionRefused(
             f"The backup needs {(needed + required) / 1e9:.1f} GB free and this disk has "
-            f"{available / 1e9:.1f} GB. Free up space, then choose Try again."
+            f"{available / 1e9:.1f} GB. Free up space, then choose Retry."
         )
 
 

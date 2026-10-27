@@ -86,7 +86,7 @@ describe('update store', () => {
 
 		expect(await saveUpdateSchedule({ automatic: true })).toBe(false);
 		const failure = get(toasts).find((toast) => toast.message === "Couldn't save the schedule");
-		expect(failure?.action?.label).toBe('Try again');
+		expect(failure?.action?.label).toBe('Retry');
 	});
 
 	it('adopts the operation while the start request is still pending', async () => {

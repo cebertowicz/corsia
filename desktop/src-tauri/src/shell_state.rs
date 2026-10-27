@@ -154,7 +154,7 @@ impl ShellState {
 
     /// The window ran a local start itself. The page that awaits it draws its answer, so a launch answer kept here is
     /// no longer what the window shows. A failure stays until the start answers: if it fails too, a later shell load
-    /// still draws the failure with its Try again.
+    /// still draws the failure with its Retry.
     pub fn local_start_began(&mut self) {
         if matches!(self.state, LaunchState::LocalStartup { .. }) {
             self.state = LaunchState::Local;
