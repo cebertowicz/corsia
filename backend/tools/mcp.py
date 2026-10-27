@@ -80,14 +80,14 @@ class MCPConnectionFailure(str):
 
 def mcp_failure_class(error: BaseException, config: dict) -> str:
     """Classify one launch failure before its safe text loses the machine cause."""
-    from tools.managed_runtime import ManagedRuntimeDownloadError
+    from tools.managed_runtime import ManagedRuntimeDownloadError, ManagedRuntimeError
 
     if isinstance(error, BaseExceptionGroup):
         return mcp_failure_class(error.exceptions[0], config)
     if isinstance(error, MCPConnectionError):
         return error.failure_class
-    if isinstance(error, ManagedRuntimeDownloadError):
-        return "runtime_download_failed"
+    if isinstance(error, ManagedRuntimeError):  # runtime preparation failed before any MCP connection
+        return "runtime_download_failed" if isinstance(error, ManagedRuntimeDownloadError) else "cannot_start"
     if getattr(_active_auth.get(), "challenged", False):
         return "needs_sign_in"  # the server asked for an OAuth sign-in this connection did not have
     if isinstance(error, (TimeoutError, httpx.TimeoutException)):

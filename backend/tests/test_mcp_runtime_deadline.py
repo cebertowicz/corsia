@@ -11,8 +11,12 @@ from tools.registry import ToolRegistry
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("download_fails", [False, True])
-async def test_runtime_download_precedes_connect_deadline(monkeypatch, download_fails):
+@pytest.mark.parametrize("failure, expected", [
+    (None, None),
+    (managed_runtime.ManagedRuntimeDownloadError("download failed"), "runtime_download_failed"),
+    (managed_runtime.ManagedRuntimeError("download archive has an unsafe path"), "cannot_start"),
+])
+async def test_runtime_download_precedes_connect_deadline(monkeypatch, failure, expected):
     calls = []
 
     def fetch_plan(command, *, path=None):
@@ -22,8 +26,8 @@ async def test_runtime_download_precedes_connect_deadline(monkeypatch, download_
     def download(kind):
         calls.append(kind)
         time.sleep(0.08)
-        if download_fails:
-            raise managed_runtime.ManagedRuntimeDownloadError("download failed")
+        if failure is not None:
+            raise failure
 
     async def discover(_name, _config, _stack):
         await asyncio.sleep(0)
@@ -38,7 +42,7 @@ async def test_runtime_download_precedes_connect_deadline(monkeypatch, download_
             {"app": {"command": "uvx", "connect_timeout": 0.02}}, registry, stack,
         )
     assert calls == ["uv"]
-    if download_fails:
-        assert errors["app"].failure_class == "runtime_download_failed"
+    if expected is not None:
+        assert errors["app"].failure_class == expected
     else:
         assert errors == {}
