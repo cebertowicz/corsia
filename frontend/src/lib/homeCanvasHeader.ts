@@ -77,8 +77,8 @@ export function syncCanvasHeader(input: CanvasHeaderInput) {
 			onBack,
 			actions: [{
 				id: 'artifact-tabs',
-				label: `Tabs (${tabCount})`,
-				title: anyChanged ? 'Open Files — one has changed' : 'Open Files',
+				label: `Files (${tabCount})`,
+				title: anyChanged ? 'Show open files — one has changed' : 'Show open files',
 				onClick: onTabs,
 				active: anyChanged,
 				primary: true,

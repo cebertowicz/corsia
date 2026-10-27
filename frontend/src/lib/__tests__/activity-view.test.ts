@@ -763,8 +763,8 @@ describe('ActivityView', () => {
 			props: { projectId: 'p1', scopeName: 'CORSIA', onSelectThread: vi.fn() },
 		});
 		await settle();
-		expect(host.textContent).toContain('No plan work yet');
-		expect(host.textContent).toContain('This project has no plans.');
+		expect(host.textContent).toContain('No plans');
+		expect(host.textContent).toContain('Plans in this project show up here.');
 		expect(host.textContent).not.toContain('no longer available');
 	});
 

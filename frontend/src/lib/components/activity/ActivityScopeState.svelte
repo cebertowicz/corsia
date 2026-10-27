@@ -55,8 +55,8 @@
 	</div>
 {:else}
 	<div class="activity-state empty">
-		<strong>No plan work yet</strong>
-		<span>This {scopeNoun} has no plans.</span>
+		<strong>No plans</strong>
+		<span>Plans in this {scopeNoun} show up here.</span>
 	</div>
 {/if}
 

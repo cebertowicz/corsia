@@ -48,7 +48,7 @@ describe('syncCanvasHeader — compact artifact', () => {
 		const h = get(canvasHeader);
 		expect(h?.title).toBe('Design.md');
 		expect(h?.backLabel).toBe('Chat');
-		expect(h?.actions?.[0]).toMatchObject({ id: 'artifact-tabs', label: 'Tabs (2)', active: false });
+		expect(h?.actions?.[0]).toMatchObject({ id: 'artifact-tabs', label: 'Files (2)', title: 'Show open files', active: false });
 		h?.onBack?.();
 		expect(onBack).toHaveBeenCalledOnce();
 		h?.actions?.[0].onClick();

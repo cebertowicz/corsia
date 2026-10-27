@@ -8,7 +8,7 @@ describe('Activity scope messages', () => {
 			['unauthorized', `Your sign-in expired before this ${scopeNoun} loaded.`],
 			['forbidden', `Activity isn’t available in this ${scopeNoun}`],
 			['not-found', `This ${scopeNoun} isn’t available`],
-			['empty', `This ${scopeNoun} has no plans.`],
+			['empty', `Plans in this ${scopeNoun} show up here.`],
 		] as const) {
 			it(`describes ${kind} for a ${scopeNoun}`, () => {
 				const host = document.createElement('div');
