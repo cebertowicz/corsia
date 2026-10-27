@@ -52,23 +52,44 @@ async def start_server(provider: str) -> dict[str, Any]:
     return await get_managed_engine(provider).ensure_live(_cfg_for(provider))
 
 
+def _autostart_targets() -> list[dict]:
+    """CORSIA's own managed servers to start: the person has not turned autoStart off."""
+    from llm.managed_omlx_binary import is_corsia_managed_server
+    from llm.network_discovery import get_servers
+
+    providers = get_providers()
+    return [
+        server for server in get_servers()
+        if is_managed(server.get("provider", "")) and is_corsia_managed_server(server)
+        and server.get("status") != "disabled"
+        and providers.get(server["provider"], {}).get("autoStart") is not False
+    ]
+
+
 async def autostart_local_providers() -> None:
-    """Start each enabled ``autoStart`` managed server not already running."""
+    """Start CORSIA's own managed server at startup unless the person stopped it.
+
+    Settings Stop turns the provider's ``autoStart`` off and Start turns it on, so a
+    move or a restart never leaves the local model off by itself. A person's own server
+    is never started, and a setup in flight starts its own.
+    """
+    from infra.db_async import run_in_db
+    from llm import local_setup_operation
+    from llm.network_discovery import _discover_and_notify
     from loguru import logger
 
-    for provider in get_local_providers():
-        name = provider.get("name", "")
-        if not provider.get("enabled") or not provider.get("autoStart"):
-            continue
+    operation = local_setup_operation.read()
+    if operation is not None and operation.in_flight:
+        return
+    for server in await run_in_db(_autostart_targets):
+        name, server_id = server["provider"], server["id"]
         try:
-            status = await check_server(name)
-            if status.get("running"):
-                continue
-            result = await start_server(name)
-            if result.get("ok"):
-                logger.info(f"{name} server started via autoStart")
-            elif not result.get("requires_model"):
+            result = await get_managed_engine(name).ensure_live({"server_id": server_id})
+            if not result.get("ok"):
                 logger.warning(f"{name} autoStart failed: {result.get('message')}")
+                continue
+            logger.info(f"{name} server started via autoStart")
+            await _discover_and_notify(server_id)
         except Exception as exc:
             logger.warning(f"{name} autoStart error: {exc}")
 

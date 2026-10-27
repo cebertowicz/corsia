@@ -10,6 +10,7 @@ import core._tool_result_delivery_support as delivery_support
 from core.tool_result_projection import tool_result_integrity_metadata
 from infra.delivery_states import TOOL_RESULT_BOUND, TOOL_RESULT_PROVISIONAL
 from infra.queries import insert_message
+from tools.mcp_stamp import result_stamp as mcp_result_stamp
 from tools.tool_display import SettledResult, project_tool_display
 from tools.tool_surface import dispatch_metadata
 
@@ -75,6 +76,7 @@ def _result_metadata(
         "name": name,
         "arguments": arguments,
         **dispatch_metadata(name, arguments),
+        **mcp_result_stamp(content),
         **tool_result_integrity_metadata(content),
     }
     if provider_call_id is not None:

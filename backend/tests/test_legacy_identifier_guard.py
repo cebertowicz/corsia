@@ -18,6 +18,9 @@ LEGACY = "com.cebertowicz.corsia"
 ALLOWED = {
     # Legacy-folder detection: refusals that name the folder to move.
     "backend/infra/platform_paths.py",
+    # The startup repoint of stored paths under the legacy folder, and its tests.
+    "backend/infra/moved_state_paths.py",
+    "backend/tests/test_moved_state_paths.py",
     "desktop/src-tauri/src/first_run.rs",
     # The one-time move and its tests.
     "desktop/src-tauri/src/state_move.rs",

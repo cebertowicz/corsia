@@ -266,8 +266,10 @@ if [ ! -f "$BOOTSTRAP_CONFIG" ] && [ -z "${CORSIA_WORKSPACE:-}" ] \
     && is_canonical_checkout && [ "${1:-}" != "service" ]; then
     # scripts/install.sh numbers its steps; this block is steps 4 and 5.
     if [ "${CORSIA_INSTALL_FLOW:-}" = 1 ]; then
-        INSTALL_STEP_5="5/8  "
-        printf '4/8  '
+        if [ "${CORSIA_INSTALL_LINUX:-}" != 1 ]; then
+            INSTALL_STEP_5="5/8  "
+            printf '4/8  '
+        fi
     else
         echo "CORSIA workspace not configured. Running first-time setup..."
     fi
@@ -382,7 +384,11 @@ case "${1:-status}" in
         require_no_extra_lifecycle_args start "${start_args[@]}" || exit 1
         refuse_if_app_owns_install || exit 1
         if [ "${CORSIA_INSTALL_FLOW:-}" = 1 ]; then
-            echo "7/8  Starting…"
+            if [ "${CORSIA_INSTALL_LINUX:-}" = 1 ]; then
+                echo "3/3  Starting…"
+            else
+                echo "7/8  Starting…"
+            fi
         else
             echo "Starting CORSIA..."
         fi
