@@ -232,6 +232,38 @@ def test_startup_repair_unlinks_a_moved_temporary_home(isolated_db, roots):
     assert not (checkpoint / "auth.json").is_symlink()
 
 
+def test_startup_repair_keeps_an_account_relinked_after_the_home_repair(isolated_db, roots):
+    # A healthy account launched after heal_moved_state_paths already links its moved home to the new source.
+    from connections.account_evidence import readiness_reason
+    from connections.account_projection import repair_moved_projections
+    from connections.vendor_accounts import get_account
+
+    legacy, current = roots
+    source, runtime = _make_homes(current, "x6")
+    (source / "auth.json").write_text(json.dumps({"auth_mode": "chatgpt", "tokens": {"fixture": "synthetic"}}))
+    (runtime / "auth.json").symlink_to(source / "auth.json")
+    old_source = legacy / "runtime/vendor-accounts/x6/source/auth.json"
+    old_dest = legacy / "runtime/vendor-accounts/x6/runtime/auth.json"
+    stale = {"source": str(old_source), "destination": str(old_dest), "home": str(old_dest.parent),
+             "kind": "live", "phase": "established", "account_revision": 0, "login_seq": 1}
+    relinked = stale | {"source": str(source / "auth.json"), "destination": str(runtime / "auth.json"),
+                        "home": str(runtime), "at": "later"}
+    record = {"auth_state": "known", "login_seq": 1, "login_revision": 0,
+              "discovery": {"status": "ready", "receipt": {"account_revision": 0, "login_seq": 1},
+                            "cache_receipt": None, "models": {"codex/test": {}}},
+              "auth_projection": {"failed": None, "stale": [],
+                                  "homes": {str(old_dest): stale, str(runtime / "auth.json"): relinked}}}
+    _insert("x6", "codex", str(source), str(runtime), record)
+
+    repair_moved_projections(legacy_root=legacy, state_root=current)
+    account = get_account("x6")
+    projection = account["discovery"]["auth_projection"]
+    assert projection["failed"] is None
+    assert projection["homes"] == {str(runtime / "auth.json"): relinked}
+    assert (runtime / "auth.json").readlink() == source / "auth.json"
+    assert readiness_reason(account, model="codex/test") is None
+
+
 def test_missing_target_is_left_alone_and_logged(isolated_db, roots):
     legacy, current = roots
     old = legacy / "runtime/vendor-accounts/m1"

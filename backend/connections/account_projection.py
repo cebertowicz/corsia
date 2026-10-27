@@ -135,7 +135,9 @@ def _repair_moved_homes(projection, prefixes, current, revision, login_seq):
             value = entry.get(field)
             if isinstance(value, str):
                 entry[field] = _under_current(value, prefixes, current) or value
-        projection['homes'][moved] = entry
+        projection['homes'].setdefault(moved, entry)  # a launch after the home repair may own it already
+        if _link_state(Path(entry['source']), destination) == 'intact':
+            continue  # already linked to the moved source
         failed = projection.get('failed')
         if state == 'changed' and (not failed or (failed.get('account_revision'), failed.get('login_seq')) != (
                 revision, login_seq)):
