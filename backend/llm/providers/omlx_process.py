@@ -83,11 +83,11 @@ def clear_pid(runtime_dir: Path, server_id: str) -> None:
         pass
 
 
-def watch_exit(pid: int, on_exit: Callable[[tuple[str, bool]], None]) -> Callable[[], None] | None:
+def watch_exit(pid: int, on_exit: Callable[[tuple[str, bool] | None], None]) -> Callable[[], None] | None:
     """Report the OS exit status for a child or an adopted process, without polling.
 
-    macOS supplies NOTE_EXITSTATUS for children and processes we can signal. Reaping happens in
-    a worker thread so process teardown never blocks the event loop.
+    macOS supplies NOTE_EXITSTATUS for children and processes we can signal. Reap a child after the
+    exit event before notifying the supervisor, so it cannot mistake a zombie for a running server.
     """
     kq: Any = select  # kqueue names exist on macOS/BSD only; Linux type checkers cannot see them
     if not hasattr(kq, "kqueue"):
@@ -101,10 +101,7 @@ def watch_exit(pid: int, on_exit: Callable[[tuple[str, bool]], None]) -> Callabl
         queue.control([event], 0, 0)
     except ProcessLookupError:
         queue.close()
-        status = reap_status(pid)
-        if status[0] == "unknown":
-            loop.run_in_executor(None, reap_status, pid, True)
-        loop.call_soon(on_exit, status)
+        loop.call_soon(on_exit, reap_status(pid, True))  # it was already gone when we asked
         return lambda: None
     except OSError as exc:
         queue.close()
@@ -122,14 +119,8 @@ def watch_exit(pid: int, on_exit: Callable[[tuple[str, bool]], None]) -> Callabl
             return
         cancel()
         raw = events[0].data if events[0].fflags & exit_status_flag else None
-        if raw is not None:
-            loop.run_in_executor(None, reap_status, pid, True)
-            on_exit(_status_from_raw(raw))
-        else:
-            status = reap_status(pid)
-            if status[0] == "unknown":
-                loop.run_in_executor(None, reap_status, pid, True)
-            on_exit(status)
+        reaped = reap_status(pid, True)
+        on_exit(_status_from_raw(raw) if raw is not None else reaped)
 
     loop.add_reader(queue.fileno(), fired)
     return cancel

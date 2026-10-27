@@ -58,7 +58,7 @@ class Life:
     restart: asyncio.Task | None = None
     restarts: deque[float] = field(default_factory=deque)  # when each restart in the window began
 
-    def watch(self, pid: int, on_exit: Callable[[tuple[str, bool]], None]) -> None:
+    def watch(self, pid: int, on_exit: Callable[[tuple[str, bool] | None], None]) -> None:
         """The server is up and wanted running: have the OS tell us when ``pid`` exits.
 
         A start by the person resets the restart bound and any earlier stop; a restart's own start
@@ -125,14 +125,14 @@ def emit(server_id: str, action: str, **properties: Any) -> None:
 def on_exit(
     server_id: str, life: Life, pid: int,
     start: Callable[[dict], Awaitable[dict[str, Any]]], tail_log: Callable[[str], str],
-    observed: tuple[str, bool],
+    observed: tuple[str, bool] | None = None,
 ) -> None:
     """Restart the server unless the exit was asked for or was a clean exit 0."""
     from llm.server_observation import forget_loaded_on_exit
 
     life.unwatch = None
     loaded = sorted(forget_loaded_on_exit(server_id))
-    status, clean = observed
+    status, clean = observed if observed is not None else process.reap_status(pid)
     if life.stopping:
         log.info("oMLX %s (pid %s) stopped as asked; not restarting", server_id, pid)
         return
