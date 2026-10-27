@@ -1,5 +1,14 @@
 # Runtime helpers for local services.
 
+# Compare literal paths first, then their physical directories when they exist.
+same_directory() {
+    local left="$1" right="$2" left_real right_real
+    [ "$left" != "$right" ] || return 0
+    left_real="$(cd -P "$left" 2>/dev/null && pwd)" || return 1
+    right_real="$(cd -P "$right" 2>/dev/null && pwd)" || return 1
+    [ "$left_real" = "$right_real" ]
+}
+
 # CORSIA runs one backend, so a lifecycle verb takes no service selector.
 # --force is the only argument these verbs accept. Anything else -- a bare
 # word like `server`, or a mistyped option like `--forse` -- is rejected
@@ -706,7 +715,7 @@ require_port_served_by_this_checkout() {
     [ -n "$pids" ] || return 0
     if service_is_loaded; then
         require_loaded_service_owns_port || return 1
-        fail "$(foreign_loaded_service_guidance "$(service_label)" "$(service_plist_path)")"
+        fail "$(foreign_loaded_service_guidance "$(service_label)" "$(service_definition_path)")"
         return 1
     fi
     for pid in $pids; do
@@ -809,7 +818,11 @@ print(backend_sha)' 2>/dev/null
 
     checkout="$(serving_checkout_root)"
     if service_managed; then
-        topology="launchd $(service_label)"
+        if [ "${CORSIA_SERVICE_MANAGER:-}" = systemd ]; then
+            topology="systemd user service $(service_label)"
+        else
+            topology="launchd $(service_label)"
+        fi
     else
         pid="$(backend_pids | head -1)"
         topology="legacy process PID ${pid:-unknown}"
@@ -822,6 +835,9 @@ print(backend_sha)' 2>/dev/null
 }
 
 start_server() {
+    if [ "${CORSIA_SERVICE_MANAGER:-}" = systemd ] && ! service_installed; then
+        service_install || return 1
+    fi
     if service_installed; then
         service_start || return 1
     else
@@ -1294,7 +1310,11 @@ restart_prepared() {
     # owner bounce_server/service_restart would prove before that first effect.
     # Revalidation inside the bounce remains intentional across the drain gap.
     if service_installed; then
-        require_owned_service_definition || return 1
+        if [ "${CORSIA_SERVICE_MANAGER:-}" = systemd ]; then
+            require_manager_service_definition || return 1
+        else
+            require_owned_service_definition || return 1
+        fi
         if service_is_loaded; then
             if is_backend_running || [ -n "$(backend_pids)" ]; then
                 require_loaded_service_owns_port || return 1

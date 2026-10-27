@@ -11,7 +11,8 @@ export function showLocalOnlyGuidance({ eligible, localModelActive, cloudReady }
 
 export function measuredDownloadTime(seconds: number | null | undefined): string | undefined {
 	if (seconds == null || seconds < 0) return undefined;
-	if (seconds < 90) return 'about 1 min';
-	if (seconds < 90 * 60) return `about ${Math.round(seconds / 60)} min`;
-	return `about ${Math.round(seconds / 3600)} hr`;
+	if (seconds < 60) return 'under 1 min left';
+	if (seconds < 90) return '1 min left';
+	if (seconds < 90 * 60) return `${Math.round(seconds / 60)} min left`;
+	return `${Math.round(seconds / 3600)} hr left`;
 }

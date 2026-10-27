@@ -11,6 +11,7 @@ from pathlib import Path
 
 from infra import config
 from subagents.managed_launch import codex_project_discovery_args
+from tools.private_runtime_files import REVIEWER_OUTPUT_DIR, private_mkstemp
 from reviewer.failures import (
     CCMaxTurnsError,
     CCRateLimitError,
@@ -168,8 +169,8 @@ def invoke_codex_reviewer(
     codex_bin = os.environ.get("CODEX_BIN", "codex")
     output_path: str | None = None
     try:
-        with tempfile.NamedTemporaryFile("w", delete=False) as output_file:
-            output_path = output_file.name
+        descriptor, output_path = private_mkstemp(REVIEWER_OUTPUT_DIR, prefix="codex-last-", suffix=".txt")
+        os.close(descriptor)
 
         cmd = [
             codex_bin, "exec",

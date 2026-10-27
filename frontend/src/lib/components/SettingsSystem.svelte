@@ -13,6 +13,7 @@
 	import SettingsGroup from './SettingsGroup.svelte';
 	import SettingsRow from './SettingsRow.svelte';
 	import SettingsDevices from './SettingsDevices.svelte';
+	import ConfirmDialog from './ConfirmDialog.svelte';
 	import { disconnectRemote, shellInfo } from '$lib/remoteShell';
 	import { connectOpen } from '$lib/stores/remoteConnect';
 
@@ -85,6 +86,7 @@
 
 	let accountConfirm = $state<'logout' | 'disconnect' | null>(null);
 	let accountInProgress = $state(false);
+	let confirmConnect = $state(false);
 	let deviceConnectionsEnabled = $state<boolean | null>(null);
 	// Only the desktop app can connect to, or leave, another computer; a browser and the phone app have no shell.
 	const shell = shellInfo();
@@ -97,7 +99,7 @@
 			await logout();
 			await disconnectRemote();
 		} catch {
-			const message = 'CORSIA couldn’t disconnect from this computer. Sign in and try again.';
+			const message = `CORSIA couldn’t disconnect from ${remoteName}. Try again.`;
 			settingsError = message;
 			// Signing out comes first, so this page may already be replaced by sign-in; a toast outlives it.
 			toasts.show(message, 'error', 8000);
@@ -193,15 +195,17 @@
 		{#if accountConfirm === 'disconnect'}
 			<div class="confirm-block" role="group" aria-label="Disconnect from {remoteName}?">
 				<span class="confirm-text">Disconnect from {remoteName}?</span>
-				<span class="confirm-detail">Your work stays on {remoteName}. This app signs out and returns to setup.</span>
+				<span class="confirm-detail">{shell?.mode === 'remote' && shell.localConfigured ? `Your work stays on ${remoteName}. CORSIA on this computer starts again, with your work here as you left it.` : `Your work stays on ${remoteName}. This app signs out and returns to setup.`}</span>
 			</div>
 		{/if}
 	{:else if shell && deviceConnectionsEnabled === false}
 		<SettingsRow name="Computer" sub="This computer">
-			{#snippet actions()}<Button variant="ghost" size="sm" onclick={() => connectOpen.set(true)}>Connect to another computer</Button>{/snippet}
+			{#snippet actions()}<Button variant="ghost" size="sm" onclick={() => confirmConnect = true}>Connect to another computer</Button>{/snippet}
 		</SettingsRow>
 	{/if}
 </SettingsGroup>
+
+<ConfirmDialog open={confirmConnect} title="Connect to another computer?" description="CORSIA on this computer stops while you're connected. Its agents and scheduled work wait until you come back, and nothing here is deleted. To come back, choose Disconnect in Settings › System." confirmLabel="Connect" cancelLabel="Cancel" onConfirm={() => { confirmConnect = false; connectOpen.set(true); }} onCancel={() => confirmConnect = false} />
 
 <SettingsDevices onConnectionState={(enabled) => deviceConnectionsEnabled = enabled} />
 

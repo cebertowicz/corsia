@@ -143,9 +143,9 @@ async def broadcast_accepted_input(
 async def request_safe_boundary(thread_id: str, target_harness: str) -> None:
     """Tell the active harness that an apply-now FIFO prefix is available."""
     if target_harness == "codex":
-        from subagents.codex_inbox_batch import deliver_live_inbox_batch
+        from subagents.codex_runtime_event_delivery import schedule_safe_boundary
 
-        await deliver_live_inbox_batch(thread_id)
+        schedule_safe_boundary(thread_id)
     # Native checks durable FIFO at every provider-safe boundary already.
     # Claude Code writes only while a tool reply is held (#2204).
 

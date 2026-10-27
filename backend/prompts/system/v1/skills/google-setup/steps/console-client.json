@@ -1,0 +1,15 @@
+{
+  "note": "Selectors are unverified against the real Google Cloud console; any miss returns control to the model.",
+  "domains": ["google.com"],
+  "steps": [
+    {"id":"clients-page","says":"Open the OAuth clients page.","action":"goto","url":"https://console.cloud.google.com/auth/clients"},
+    {"id":"create-client","says":"Create an OAuth client.","action":"click","selector":"role=button[name=\"Create client\"]"},
+    {"id":"application-type","says":"Open the Application type list.","action":"click","selector":"role=combobox[name=\"Application type\"]"},
+    {"id":"desktop-app","says":"Choose Desktop app as the application type.","action":"click","selector":"role=option[name=\"Desktop app\"]"},
+    {"id":"client-name","says":"Name the client CORSIA.","action":"type","selector":"role=textbox[name=\"Name\"]","value":"CORSIA"},
+    {"id":"client-create","says":"Create the CORSIA desktop client.","action":"click","selector":"role=button[name=\"Create\"s]"},
+    {"id":"download-json","says":"Download the client JSON without reading the secret dialog.","action":"click","selector":"role=button[name=\"Download JSON\"]"},
+    {"id":"download-wait","says":"Wait for the client JSON download to finish.","action":"wait_for","ms":3000},
+    {"id":"reload-clients","says":"Reload the page without reading the secret dialog.","action":"goto","reload":true}
+  ]
+}

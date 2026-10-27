@@ -300,7 +300,7 @@ async def test_a_tempfile_error_settles_the_job_failed(monkeypatch):
         raise OSError("no space left")
 
     monkeypatch.setattr(cli_install.urllib.request, "urlopen", lambda *_a, **_k: _Response(b"#!/bin/sh\n"))
-    monkeypatch.setattr(cli_install.tempfile, "NamedTemporaryFile", broken)
+    monkeypatch.setattr(cli_install, "private_mkstemp", broken)
     _nothing_installed(monkeypatch)
     monkeypatch.setattr(cli_install, "recheck_sources_once", lambda: asyncio.sleep(0))
     monkeypatch.setattr(cli_install, "schedule_models_changed", lambda: None)

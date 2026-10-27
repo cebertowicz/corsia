@@ -561,8 +561,12 @@
 				retry.textContent = 'Retry';
 				backgroundApproval.hidden = true;
 				status.textContent = quitting ? 'CORSIA couldn’t quit' : 'CORSIA couldn’t start';
-				line.textContent = quitting ? 'CORSIA couldn’t stop its background service.' : typeof why === 'string' ? why : '';
+				line.textContent = quitting ? 'CORSIA couldn’t stop its background service.' : 'CORSIA couldn’t start on this computer. Choose Retry. If it keeps failing, restart this computer.';
 				line.hidden = !line.textContent;
+				if (!quitting && typeof why === 'string' && why) {
+					detailsText.textContent = why;
+					details.hidden = false;
+				}
 				log.hidden = false;
 				spinner.hidden = true;
 				failureLoginItems.hidden = !quitting;
@@ -859,6 +863,10 @@
 				spinner.hidden = state.kind !== 'connecting';
 				saveReport.hidden = true;
 				retry.hidden = false;
+				const localReturn = window.__CORSIA_SHELL__?.localConfigured === true
+					? { button: 'Use this computer instead', ending: 'then Connect to another computer in Settings › System to pair again.' }
+					: { button: 'Set up this computer instead', ending: 'then Connect to CORSIA on another computer to pair again.' };
+				setUpLocal.textContent = localReturn.button;
 				setUpLocal.hidden = !['unreachable', 'incompatible', 'too_old', 'key_changed'].includes(state.kind);
 				if (state.kind === 'connecting') {
 					status.textContent = `Connecting to ${state.name}…`;
@@ -869,8 +877,8 @@
 				status.textContent = state.kind === 'key_changed' ? `${state.name} has changed` : `Can’t open ${state.name}`;
 				if (state.kind === 'unreachable') {
 					line.textContent = {
-						server: 'CORSIA is not listening there. Open CORSIA › Settings › System on that computer.',
-						local: `This computer couldn’t finish opening ${state.name}. Try again. If it keeps failing, quit and reopen CORSIA, or set up this computer instead.`
+						server: `${state.name} is on the network, but CORSIA there isn’t letting this computer connect. On that computer, open CORSIA and check that Let other devices connect is on in Settings › System, then try again. If it still fails, choose ${localReturn.button}, ${localReturn.ending}`,
+						local: `This computer couldn’t finish opening ${state.name}. Try again. If it keeps failing, quit and reopen CORSIA.`
 					}[state.cause] ?? 'This computer can’t reach it right now. Check your network, then try again.';
 				} else if (state.kind === 'incompatible') {
 					line.textContent = state.host ? `This computer has CORSIA ${state.app} and ${state.name} has ${state.host}. Update the older one, then try again.` : `${state.name} has an older CORSIA. Update it, then try again.`;

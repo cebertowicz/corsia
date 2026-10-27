@@ -108,7 +108,6 @@
   --sidebar-width: 280px;
   --transcript-max-width: 760px;
   --header-height: 60px;
-  --header-badge-slot: 86px;
   --list-row-min-height: 38px;
   --button-pad-x-sm: 10px;
   /* Shared notice geometry preserves the established toast treatment without raw component values. */

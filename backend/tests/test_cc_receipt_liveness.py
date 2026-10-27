@@ -174,7 +174,7 @@ async def test_checkpoint_result_fences_unknown_receipt_before_process_exit():
 
 
 @pytest.mark.asyncio
-async def test_streaming_response_survives_old_deadline_for_both_boundaries():
+async def test_streaming_response_survives_old_deadline_for_both_boundaries(monkeypatch):
     """A delayed valid tail remains admissible after the former 30-second cutoff."""
     from core.fork_cc_io import _ToolBoundary
     from test_checkpoint_external_adapters import WaitingProcess
@@ -188,7 +188,11 @@ async def test_streaming_response_survives_old_deadline_for_both_boundaries():
         boundary.execute(lambda: asyncio.sleep(0, result="result"), "call", "read_file", {})
     )
     try:
-        await asyncio.sleep(30.1)
+        loop = asyncio.get_running_loop()
+        clock = loop.time
+        await asyncio.sleep(0)  # Start both waiters before advancing their clock.
+        monkeypatch.setattr(loop, "time", lambda: clock() + 30.1)
+        await asyncio.sleep(0.001)  # Let any expired deadline callbacks run.
         assert not ordinary.done(), "active foreground response was timed out"
         assert not checkpoint.done(), "active checkpoint response was timed out"
         for owner in (session.tool_context, boundary.context):

@@ -97,7 +97,7 @@ ENV_FILE=/tmp/corsia-no-such-env
 FORCE=false
 source scripts/corsia.d/runtime.sh
 source scripts/corsia.d/service.sh
-service_plist_path() { printf '%s' "$PLIST"; }
+service_definition_path() { printf '%s' "$PLIST"; }
 service_label() { printf 'com.corsia.prod'; }
 service_domain() { printf 'gui/501'; }
 service_installed() { return 0; }
