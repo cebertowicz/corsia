@@ -65,17 +65,6 @@ def test_root_filesystem_grant_is_refused(tmp_path, readonly):
     assert not (tmp_path / 'state').exists()
 
 
-def test_linux_socket_staging_uses_thread_tmp_owner(tmp_path, monkeypatch):
-    from infra import config
-    from tools import unix_socket_policy
-    monkeypatch.setattr(config, 'STATE_ROOT', tmp_path / 'state')
-    monkeypatch.setattr(unix_socket_policy.sys, 'platform', 'linux')
-    root = unix_socket_policy.corsia_temp_root_for_bind('one')
-    assert root == thread_tmp_root(config.STATE_ROOT, 'one')
-    assert unix_socket_policy.thread_bind_roots('one') == []
-    assert root.is_dir()
-
-
 def test_cache_creation_refuses_symlink_ancestor(tmp_path):
     home = tmp_path / 'home'
     home.mkdir()

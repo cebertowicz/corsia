@@ -7,7 +7,6 @@ import logging
 import os
 from pathlib import Path
 import re
-import sys
 import tempfile
 
 from host_access.browser_identity import (
@@ -76,12 +75,6 @@ def corsia_temp_root_for_bind(thread_id: str) -> Path:
         # An identity breach is not a root failure: it stops the shell.
         raise RuntimeError("CORSIA AF_UNIX bind root requires a valid thread identity")
     try:
-        if sys.platform == 'linux':
-            from infra.config import STATE_ROOT
-            from tools.linux_sandbox import thread_tmp_root
-            root = thread_tmp_root(STATE_ROOT, thread_id)
-            root.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-            return ensure_private_dir(root)
         root = ensure_private_dir(corsia_temp_root() / _thread_root_name(thread_id))
     except BrowserIdentityError as exc:
         raise UnixSocketRootError(
@@ -120,10 +113,6 @@ def thread_bind_roots(thread_id: str | None) -> list[Path]:
     """
     if thread_id is None:
         return []
-    if sys.platform == 'linux':
-        if not isinstance(thread_id, str) or not _THREAD_ID_RE.fullmatch(thread_id):
-            raise RuntimeError("CORSIA AF_UNIX bind root requires a valid thread identity")
-        return []  # The same root is mounted at /tmp by the Linux renderer.
     try:
         root = corsia_temp_root_for_bind(thread_id)
     except (UnixSocketPathLimitError, UnixSocketRootError) as exc:

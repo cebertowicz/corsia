@@ -46,7 +46,6 @@ def linux_box(linux_sandbox_root, monkeypatch, isolated_db):
     monkeypatch.setattr(linux_shell, 'current_protected_host_path_policy', lambda: policy)
     monkeypatch.setattr(sandbox_config, '_STATIC_ALLOWED_RW', [workspace])
     monkeypatch.setattr(config, 'WORKSPACE', workspace)
-    monkeypatch.setattr(config, 'STATE_ROOT', state)
     monkeypatch.setenv('HOME', str(home))
     from infra.database import get_db
     db = get_db()
@@ -286,9 +285,9 @@ async def test_linux_script_uses_real_process_owner_and_refuses_missing_sandbox(
     monkeypatch.setattr(script_sandbox, 'PROCESS_OWNER', ProcessOwner(
         runtime_dir=tmp_path / 'runtime', term_grace_seconds=0.2, kill_grace_seconds=2))
     script = box.workspace / 'script.sh'
-    script.write_text('cat\necho output > written\n')
+    script.write_text('echo real-script\necho output > written\n')
     result = await script_sandbox.run_script('one', None, script,
-                                            run_id='test', timeout_seconds=20, stdin=b'real-script\n')
+                                            run_id='test', timeout_seconds=20)
     assert result.returncode == 0, result.stderr
     assert result.stdout == b'real-script\n'
     assert (box.workspace / 'written').read_text() == 'output\n'

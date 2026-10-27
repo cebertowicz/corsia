@@ -12,7 +12,6 @@ from __future__ import annotations
 import asyncio
 import os
 import shlex
-import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -150,9 +149,8 @@ async def _run(
         policies=policies, agent_account=None, env=env,
         build_profile=execution_envelope_profile, build_argv=safehouse_argv,
     )
-    sandbox_stdin = Path('/tmp') / stdin.name if stdin is not None and sys.platform == 'linux' else stdin
     profile_path, argv = await prepare_execution_envelope(
-        script_command(script, sandbox_stdin), cwd, envelope,
+        script_command(script, stdin), cwd, envelope,
     )
     try:
         owned = await PROCESS_OWNER.spawn(
