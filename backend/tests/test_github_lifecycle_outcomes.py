@@ -32,21 +32,25 @@ def rows(db):
     )]
 
 
-@pytest.mark.parametrize("index,name,facts", [
-    (0, "github.pr.ready", {"repo": REPO, "pr": "2", "minutes_since_pr_created": 0}),
-    (1, "github.pr.drafted", {"repo": REPO, "pr": "2"}),
-    (2, "github.issue.assigned", {"repo": REPO, "issue": "1", "assignee_login": "Codertocat",
-                                  "minutes_since_issue_created": 0}),
-    (3, "github.status", {"repo": REPO, "sha": SHA, "context": "default", "state": "success"}),
-    (4, "github.release.published", {"repo": REPO, "tag": "0.0.1", "prerelease": "no", "draft": "no"}),
+@pytest.mark.parametrize("index,name,subject,facts", [
+    (0, "github.pr.ready", f"github:pr:{REPO}#2", {"repo": REPO, "pr": "2", "minutes_since_pr_created": 0}),
+    (1, "github.pr.drafted", f"github:pr:{REPO}#2", {"repo": REPO, "pr": "2"}),
+    (2, "github.issue.assigned", f"github:issue:{REPO}#1",
+     {"repo": REPO, "issue": "1", "assignee_login": "Codertocat", "minutes_since_issue_created": 0}),
+    # Same subject as the CI events for this SHA, so commit facts join.
+    (3, "github.status", f"github:commit:{REPO}@{SHA}",
+     {"repo": REPO, "sha": SHA, "context": "default", "state": "success"}),
+    (4, "github.release.published", f"github:release:{REPO}:17372790",
+     {"repo": REPO, "tag": "0.0.1", "prerelease": "no", "draft": "no"}),
 ])
-async def test_lifecycle_facts_and_redelivery(main_db, index, name, facts):
+async def test_lifecycle_facts_and_redelivery(main_db, index, name, subject, facts):
     fixture = json.loads((FIXTURES / "lifecycle.json").read_text())[index]
     payload = fixture["payload"]
     await admit_github_delivery_async(fixture["event"], payload, "delivery")
     await admit_github_delivery_async(fixture["event"], payload, "delivery")
     assert rows(main_db) == [(name, facts)]
     assert not ({"body", "title", "description", "release_notes"} & facts.keys())
+    assert [s for (s,) in main_db.execute("SELECT subject_key FROM outcome_events")] == [subject]
 
 
 async def test_drafted_does_not_read_unneeded_created_at(main_db):

@@ -28,27 +28,26 @@ def issue_drafts(payload: dict[str, Any], repo: str) -> list[OutcomeDraft]:
     action = payload.get("action")
     issue = shape.mapping(shape.required(payload, "issue"))
     number = shape.number(shape.required(issue, "number"))
-    if action != "assigned":
-        subject = f"github:issue:{repo}#{number}"
-        attrs: dict[str, Any] = {"repo": repo, "issue": str(number)}
-        if "labels" in issue:
-            attrs.update(label_attributes(issue["labels"]))
-        if action == "opened":
-            opened = shape.timestamp(shape.required(issue, "created_at"))
-            return [OutcomeDraft(f"{subject}:opened", "github.issue.opened", opened, subject, attrs)]
-        if issue.get("state_reason") is not None:
-            attrs["state_reason"] = shape.text(issue["state_reason"])
-        closed = shape.timestamp(shape.required(issue, "closed_at"))
-        return [OutcomeDraft(f"{subject}:closed:{closed}", "github.issue.closed", closed, subject, attrs)]
-    at = shape.timestamp(shape.required(issue, "updated_at"))
-    assignee = shape.mapping(shape.required(payload, "assignee"))
-    login = shape.text(shape.required(assignee, "login"))
     subject = f"github:issue:{repo}#{number}"
-    attrs = {"repo": repo, "issue": str(number), "assignee_login": login}
-    minutes = measurements.minutes_between(issue.get("created_at"), at)
-    if minutes is not None:
-        attrs["minutes_since_issue_created"] = minutes
-    return [OutcomeDraft(f"{subject}:assigned:{login}:{at}", "github.issue.assigned", at, subject, attrs)]
+    attrs: dict[str, Any] = {"repo": repo, "issue": str(number)}
+    if action == "assigned":
+        at = shape.timestamp(shape.required(issue, "updated_at"))
+        assignee = shape.mapping(shape.required(payload, "assignee"))
+        login = shape.text(shape.required(assignee, "login"))
+        attrs["assignee_login"] = login
+        minutes = measurements.minutes_between(issue.get("created_at"), at)
+        if minutes is not None:
+            attrs["minutes_since_issue_created"] = minutes
+        return [OutcomeDraft(f"{subject}:assigned:{login}:{at}", "github.issue.assigned", at, subject, attrs)]
+    if "labels" in issue:
+        attrs.update(label_attributes(issue["labels"]))
+    if action == "opened":
+        opened = shape.timestamp(shape.required(issue, "created_at"))
+        return [OutcomeDraft(f"{subject}:opened", "github.issue.opened", opened, subject, attrs)]
+    if issue.get("state_reason") is not None:
+        attrs["state_reason"] = shape.text(issue["state_reason"])
+    closed = shape.timestamp(shape.required(issue, "closed_at"))
+    return [OutcomeDraft(f"{subject}:closed:{closed}", "github.issue.closed", closed, subject, attrs)]
 
 
 def status_drafts(payload: dict[str, Any], repo: str) -> list[OutcomeDraft]:
@@ -57,7 +56,7 @@ def status_drafts(payload: dict[str, Any], repo: str) -> list[OutcomeDraft]:
     context = shape.text(shape.required(payload, "context"))
     state = shape.text(shape.required(payload, "state"))
     at = shape.timestamp(shape.required(payload, "updated_at"))
-    subject = f"github:commit:{repo}:{sha}"
+    subject = f"github:commit:{repo}@{sha}"
     attrs = {"repo": repo, "sha": sha, "context": context, "state": state}
     return [OutcomeDraft(f"github:status:{repo}:{status_id}:{at}", "github.status", at, subject, attrs)]
 

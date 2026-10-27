@@ -10,7 +10,8 @@ The keys then split into two kinds, and a backfill has to know which is which. T
 PR open, push, close and merge keys, issue open and close keys and the run id plus
 ``run_attempt`` in ``github.workflow_run.completed``, the job id in
 ``github.workflow_job.completed``, the check run id plus ``completed_at`` in
-``github.check_run.completed``, and the review or comment id (plus the action, for a
+``github.check_run.completed``, the release id plus ``published_at`` in
+``github.release.published``, and the review or comment id (plus the action, for a
 review) in the review and comment events are built from identities the
 repository still reports — a head or merge SHA, a close timestamp, a run's
 ``run_attempt`` — so a later read can reconstruct the same key. ``github.pr.reopened``,
