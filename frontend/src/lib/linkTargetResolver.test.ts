@@ -256,6 +256,27 @@ describe('delegated rendered-markdown listener', () => {
 		expect(click.defaultPrevented).toBe(true);
 	});
 
+	it('preserves and opens the complete Google approval link in an assistant message', async () => {
+		const d = deps();
+		const url = 'https://accounts.google.com/o/oauth2/v2/auth?client_id=example.apps.googleusercontent.com&redirect_uri=http%3A%2F%2F127.0.0.1%3A1956%2Fapi%2Fgoogle%2Foauth%2Fcallback&response_type=code&scope=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fgmail.modify+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fgmail.send+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fcalendar+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fdrive+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fdocuments+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fspreadsheets+openid&state=example&code_challenge=example&code_challenge_method=S256&access_type=offline&prompt=consent';
+		host = document.createElement('section');
+		document.body.appendChild(host);
+		component = mount(AssistantMessage, {
+			target: host,
+			props: {
+				msg: { id: 'message-1', content: `Ready for your click: [Open this link](${url}). It opens in your usual browser.`, created_at: '2026-10-27T17:11:00Z' },
+				expandedTools: new Set<string>(), expandedReasoning: new Set<string>(),
+				onToggleToolBlock: () => {}, onToggleReasoning: () => {},
+			},
+		});
+		flushSync();
+		cleanup = installLinkTargetResolver(document, () => d);
+		const anchor = host.querySelector<HTMLAnchorElement>('a')!;
+		expect(anchor.getAttribute('href')).toBe(url);
+		anchor.click();
+		await vi.waitFor(() => expect(d.openExternal).toHaveBeenCalledWith(url));
+	});
+
 	it.each([
 		['modifier', 'click', { metaKey: true }],
 		['middle', 'auxclick', { button: 1 }],

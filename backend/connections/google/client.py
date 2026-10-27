@@ -32,6 +32,7 @@ NEEDS_CLIENT_FILE = (
     "and publishes it In production. Never create a second project or client when one already exists."
 )
 BAD_CLIENT_FILE = "That file isn't a Google Desktop app client file. Pass the path of the downloaded client JSON."
+MISSING_CLIENT_FILE = "There's no file at that path. Pass the path of the client JSON you downloaded from Google Cloud."
 
 NOT_CONNECTED = "Google isn't connected. Call google_connect and give the person the link."
 SIGN_IN_RECOVERY = (
@@ -89,9 +90,11 @@ def read_client_file(raw_path: object) -> tuple[str, str]:
         raise GoogleSignInError(NEEDS_CLIENT_FILE)
     try:
         path = Path(raw_path.strip()).expanduser().resolve()
-        if forbidden_path({"path": str(path)}, for_write=False) or path.suffix != ".json":
+        if forbidden_path({"path": str(path)}, for_write=False):
             raise GoogleSignInError(BAD_CLIENT_FILE)
-        if not path.is_file() or path.stat().st_size > CLIENT_FILE_MAX_BYTES:
+        if not path.exists():
+            raise GoogleSignInError(MISSING_CLIENT_FILE)
+        if path.suffix != ".json" or not path.is_file() or path.stat().st_size > CLIENT_FILE_MAX_BYTES:
             raise GoogleSignInError(BAD_CLIENT_FILE)
         installed = json.loads(path.read_text(encoding="utf-8")).get("installed")
         return key_store.validated_value(installed["client_id"]), key_store.validated_value(installed["client_secret"])
