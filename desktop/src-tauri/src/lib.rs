@@ -296,7 +296,14 @@ fn local_corsia_configured<R: tauri::Runtime>(app: &tauri::AppHandle<R>, app_dir
         log::warn!("could not resolve the home folder while checking local CORSIA setup");
         return false;
     };
-    match first_run::plan(&home, app_dir) {
+    local_plan_configured(&home, app_dir)
+}
+
+fn local_plan_configured(home: &Path, app_dir: &Path) -> bool {
+    if matches!(unfinished_setup::at_launch(app_dir), unfinished_setup::Launch::Wipe(_) | unfinished_setup::Launch::Replan(_)) {
+        return false;
+    }
+    match first_run::plan(home, app_dir) {
         Ok(first_run::FirstRun::Configured) => true,
         Ok(_) => false,
         Err(error) => {
@@ -2604,6 +2611,18 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unfinished_local_setup_is_not_configured_for_remote_return() {
+        let home = tempfile::tempdir().unwrap();
+        let app_dir = home.path().join("app");
+        let workspace = home.path().join("workspace");
+        assert!(unfinished_setup::mark(&app_dir, &workspace).unwrap());
+        std::fs::write(app_dir.join(first_run::SERVICE_FILE), "{}").unwrap();
+        assert!(matches!(unfinished_setup::at_launch(&app_dir), unfinished_setup::Launch::Wipe(_)));
+        assert!(matches!(first_run::plan(home.path(), &app_dir), Ok(first_run::FirstRun::Configured)));
+        assert!(!local_plan_configured(home.path(), &app_dir));
+    }
     use base64::Engine;
     use std::fs;
 
