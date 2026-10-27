@@ -9,8 +9,8 @@ root; any other value stays as stored and is logged. Once nothing names the old 
 is one SELECT over the accounts table, which holds a few rows however large the database is.
 
 It touches the two home columns only. A Codex account's sign-in link and its record in
-``discovery_json`` belong to ``connections/account_projection.py`` and ``account_evidence.py``;
-this module never writes them.
+``discovery_json`` belong to ``connections/account_projection.py``; this module never writes
+them. Startup calls its ``repair_moved_projections`` immediately after this repair.
 
 Remove it once every supported install has started a release that contains it.
 """
