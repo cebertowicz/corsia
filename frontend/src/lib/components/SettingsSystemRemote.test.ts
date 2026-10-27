@@ -101,9 +101,9 @@ describe('Settings › System with a shell', () => {
 		await settle();
 		expect(flat(host.querySelector('[data-settings-row="Computer"]')?.textContent)).toContain('This computer');
 		button('Connect to another computer')?.click(); flushSync();
-		expect(flat(host.textContent)).toContain("CORSIA on this computer stops while you're connected. Its agents and scheduled work wait until you come back, and nothing here is deleted. To come back, choose Disconnect in Settings › System.");
+		expect(flat(document.body.textContent)).toContain("CORSIA on this computer stops while you're connected. Its agents and scheduled work wait until you come back, and nothing here is deleted. To come back, choose Disconnect in Settings › System.");
 		expect(get(connectOpen)).toBe(false);
-		button('Connect')?.click(); flushSync();
+		Array.from(document.body.querySelectorAll('button')).find((item) => flat(item.textContent) === 'Connect')?.click(); flushSync();
 		expect(get(connectOpen)).toBe(true);
 		expect(button('Disconnect')).toBeUndefined();
 	});
@@ -113,9 +113,9 @@ describe('Settings › System with a shell', () => {
 		await show();
 		expect(flat(host.querySelector('[data-settings-row="Computer"]')?.textContent)).toContain('This computer');
 		button('Connect to another computer')?.click(); flushSync();
-		expect(flat(host.textContent)).toContain("CORSIA on this computer stops while you're connected. Its agents and scheduled work wait until you come back, and nothing here is deleted. To come back, choose Disconnect in Settings › System.");
+		expect(flat(document.body.textContent)).toContain("CORSIA on this computer stops while you're connected. Its agents and scheduled work wait until you come back, and nothing here is deleted. To come back, choose Disconnect in Settings › System.");
 		expect(get(connectOpen)).toBe(false);
-		button('Connect')?.click(); flushSync();
+		Array.from(document.body.querySelectorAll('button')).find((item) => flat(item.textContent) === 'Connect')?.click(); flushSync();
 		expect(get(connectOpen)).toBe(true);
 	});
 	it('cancelling the connect confirmation leaves the connection unchanged', async () => {
@@ -123,7 +123,7 @@ describe('Settings › System with a shell', () => {
 		vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ...devicesBody, enabled: false }), { status: 200, headers: { 'Content-Type': 'application/json' } })));
 		await show();
 		button('Connect to another computer')?.click(); flushSync();
-		button('Cancel')?.click(); flushSync();
+		Array.from(document.body.querySelectorAll('button')).find((item) => flat(item.textContent) === 'Cancel')?.click(); flushSync();
 		expect(get(connectOpen)).toBe(false);
 		expect(order).toEqual([]);
 	});

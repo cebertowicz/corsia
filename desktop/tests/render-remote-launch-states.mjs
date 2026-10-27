@@ -11,7 +11,7 @@ const { chromium } = require('playwright');
 const states = [
 	[{ kind: 'connecting', name: 'Studio' }, { status: 'Connecting to Studio…', spinner: true, retry: null, setUpLocal: false }],
 	[{ kind: 'unreachable', name: 'Studio', cause: 'network' }, { status: 'Can’t open Studio', line: 'Check your network', retry: 'Try again', setUpLocal: true, localLabel: 'Set up this computer instead' }],
-	[{ kind: 'unreachable', name: 'Studio', cause: 'server' }, { status: 'Can’t open Studio', line: 'Open CORSIA › Settings › System', retry: 'Try again', setUpLocal: true, localLabel: 'Set up this computer instead' }],
+	[{ kind: 'unreachable', name: 'Studio', cause: 'server' }, { status: 'Can’t open Studio', line: 'CORSIA isn’t running on Studio. Open CORSIA there, then try again.', retry: 'Try again', setUpLocal: true, localLabel: 'Set up this computer instead' }],
 	[{ kind: 'unreachable', name: 'Studio', cause: 'local' }, { status: 'Can’t open Studio', line: 'couldn’t finish opening Studio. Try again. If it keeps failing, quit and reopen CORSIA', retry: 'Try again', setUpLocal: true, localLabel: 'Set up this computer instead' }],
 	[{ kind: 'incompatible', name: 'Studio', app: '0.4.1', host: '0.3.0' }, { status: 'Can’t open Studio', line: 'CORSIA 0.4.1 and Studio has 0.3.0', retry: 'Try again', setUpLocal: true, localLabel: 'Set up this computer instead' }],
 	[{ kind: 'too_old', name: 'Studio' }, { status: 'Can’t open Studio', line: 'Studio has an older CORSIA', retry: 'Try again', setUpLocal: true, localLabel: 'Set up this computer instead' }],
@@ -132,9 +132,10 @@ try {
 	const card = await returned.evaluate(() => ({
 		status: document.getElementById('status').textContent,
 		line: document.getElementById('line').textContent,
+		details: document.getElementById('details').hidden ? '' : document.getElementById('details-text').textContent,
 		retry: document.getElementById('actions').hidden ? null : document.getElementById('retry').textContent,
 	}));
-	if (card.status !== 'CORSIA couldn’t start' || !card.line.includes('did not persist') || card.retry !== 'Retry') throw new Error(`returned failure card: ${JSON.stringify(card)}`);
+	if (card.status !== 'CORSIA couldn’t start' || card.line !== 'CORSIA couldn’t start on this computer. Choose Retry. If it keeps failing, restart this computer.' || !card.details.includes('did not persist') || card.retry !== 'Retry') throw new Error(`returned failure card: ${JSON.stringify(card)}`);
 	await returned.click('#retry');
 	await returned.waitForTimeout(50);
 	expectCalls('returned failure card, Try again', { calls: (await returned.evaluate(() => window.__calls)).filter(notLogLookup) }, ['start_local_service']);
