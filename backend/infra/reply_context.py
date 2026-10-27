@@ -4,8 +4,9 @@ The client sends what the person was answering: the message ranges in view
 while they typed, the first message they had not read, and their comments.
 Admission checks each item against the thread and stores the
 result once as ``metadata.reply_context``; ``core.reply_context`` renders it. A
-bad item is dropped with a recorded reason and the message still sends:
-delivery never waits on reply context.
+bad view item is dropped with a recorded reason and the message still sends:
+delivery never waits on what was in view. Comments are the person's own words,
+so a comment that fails refuses the whole input instead (``RejectedComments``).
 """
 from __future__ import annotations
 
@@ -17,8 +18,39 @@ from typing import Any, TypeGuard
 logger = logging.getLogger(__name__)
 
 
-class EmptyCommentInput(ValueError):
-    """An empty input had no valid comments after admission validation."""
+class RejectedComments(ValueError):
+    """Submitted comments failed admission; ``positions`` are 1-based, empty when unknown.
+
+    Its text is shown to the person: which comments, and what to do. The
+    composer keeps the draft when a send is refused.
+    """
+
+    def __init__(self, positions: list[int]):
+        if not positions:
+            which, them = "Your comments", "them"
+        elif len(positions) == 1:
+            which, them = f"Comment {positions[0]}", "that comment"
+        else:
+            listed = ", ".join(str(position) for position in positions[:-1])
+            which, them = f"Comments {listed} and {positions[-1]}", "those comments"
+        super().__init__(
+            f"{which} couldn't be matched to text in this chat, so nothing was sent. "
+            f"Your message and comments are kept: remove {them} and send again."
+        )
+        self.positions = positions
+
+
+def require_every_comment(raw: object, stored: dict | None) -> None:
+    """Raise ``RejectedComments`` unless every submitted comment was stored."""
+    submitted = raw.get("comments") if isinstance(raw, dict) else None
+    if submitted is None:
+        return
+    if not isinstance(submitted, list):
+        raise RejectedComments([])
+    kept = {int(item["cid"].rsplit(".", 1)[1]) for item in (stored or {}).get("comments") or []}
+    missing = [position for position in range(1, len(submitted) + 1) if position not in kept]
+    if missing:
+        raise RejectedComments(missing)
 
 
 def has_comment_candidates(raw: object) -> bool:

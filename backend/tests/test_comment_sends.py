@@ -100,5 +100,21 @@ async def test_comment_only_sends_validate_before_storage(thread_rows, monkeypat
     else:
         assert stored is None
         assert events[0]["message"] == (
-            "Malformed message input" if path == "main" else "Malformed subagent input"
+            "Comment 1 couldn't be matched to text in this chat, so nothing was sent. "
+            "Your message and comments are kept: remove that comment and send again."
         )
+
+
+@pytest.mark.parametrize("positions,which,them", [
+    ([2], "Comment 2", "that comment"),
+    ([1, 3], "Comments 1 and 3", "those comments"),
+    ([1, 2, 4], "Comments 1, 2 and 4", "those comments"),
+    ([], "Your comments", "them"),
+])
+def test_a_refused_comment_send_names_the_comments_and_the_next_step(positions, which, them):
+    from infra.reply_context import RejectedComments
+
+    assert str(RejectedComments(positions)) == (
+        f"{which} couldn't be matched to text in this chat, so nothing was sent. "
+        f"Your message and comments are kept: remove {them} and send again."
+    )

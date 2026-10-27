@@ -233,6 +233,27 @@ def test_admission_stores_the_validated_context_once_and_a_retry_reuses_it(threa
     assert _stored(thread_rows, "human-1") == first
 
 
+@pytest.mark.parametrize("comments,positions", [
+    ([_comment(), _comment(seq=0)], [2]),
+    ([_comment(quote=""), _comment(), _comment(note=None)], [1, 3]),
+    ("bad", []),
+])
+def test_a_human_input_with_any_failed_comment_is_refused_and_stores_nothing(
+    thread_rows, comments, positions,
+):
+    from infra.reply_context import RejectedComments
+
+    with pytest.raises(RejectedComments) as refused:
+        _admit(thread_rows, "partial", {KEY: {"in_view": [[1, 2, 2]], "comments": comments}})
+    assert refused.value.positions == positions
+    assert thread_rows.execute("SELECT 1 FROM messages WHERE id='partial'").fetchone() is None
+
+
+def test_a_non_human_input_with_bad_comments_is_admitted_without_them(thread_rows):
+    _admit(thread_rows, "agent", {"sender_kind": "agent", KEY: {"comments": [_comment(seq=0)]}})
+    assert KEY not in _stored(thread_rows, "agent")
+
+
 def test_a_send_without_reply_context_is_stored_exactly_as_before(thread_rows):
     _admit(thread_rows, "plain", None)
     assert KEY not in _stored(thread_rows, "plain")

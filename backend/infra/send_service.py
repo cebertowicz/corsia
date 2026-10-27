@@ -331,7 +331,7 @@ async def send_thread_input(
     _require_thread_identity(thread_id, thread_row)
     if native_mode == "ws" and ws is None:
         raise SendRejected(500, "Native WebSocket send missing socket context")
-    from infra.reply_context import EmptyCommentInput, has_comment_candidates
+    from infra.reply_context import RejectedComments, has_comment_candidates
     comment_candidates = has_comment_candidates((metadata or {}).get("reply_context"))
     text = _accepted_text(content, trim_content, allow_empty_content, attachments, comment_candidates)
     message_id = input_id or idempotency_key or str(uuid.uuid4())
@@ -355,9 +355,8 @@ async def send_thread_input(
             admitted_at=admitted_at, metadata=metadata, delivery_options=options,
             continuation=continuation,
         )
-    except EmptyCommentInput as exc:
-        detail = "Malformed subagent input" if native_mode == "delegation" else "Malformed message input"
-        raise SendRejected(400, detail) from exc
+    except RejectedComments as exc:
+        raise SendRejected(400, str(exc)) from exc
     from jobs.corrections_recording import notify_if_owner  # best effort; never fails the send
     notify_if_owner(admission.accepted, role=role, content=text, metadata=metadata)
     return await _deliver_admission(
