@@ -876,8 +876,8 @@
 				status.textContent = state.kind === 'key_changed' ? `${state.name} has changed` : `Can’t open ${state.name}`;
 				if (state.kind === 'unreachable') {
 					line.textContent = {
-						server: `CORSIA isn’t running on ${state.name}. Open CORSIA there, then try again.`,
-						local: `This computer couldn’t finish opening ${state.name}. Try again. If it keeps failing, quit and reopen CORSIA, or set up this computer instead.`
+						server: `${state.name} is on the network, but CORSIA there isn’t letting this computer connect. On ${state.name}, open CORSIA, then turn on Let other devices connect in Settings › System. Then try again.`,
+						local: `This computer couldn’t finish opening ${state.name}. Try again. If it keeps failing, quit and reopen CORSIA.`
 					}[state.cause] ?? 'This computer can’t reach it right now. Check your network, then try again.';
 				} else if (state.kind === 'incompatible') {
 					line.textContent = state.host ? `This computer has CORSIA ${state.app} and ${state.name} has ${state.host}. Update the older one, then try again.` : `${state.name} has an older CORSIA. Update it, then try again.`;
