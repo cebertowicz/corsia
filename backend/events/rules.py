@@ -190,7 +190,7 @@ def _settle_unreachable(
             plan.settled.append(Outcome(rule.id, rule.created_by, DEAD_LETTERED, reason=CREATOR_GONE))
         elif thread_unavailable_reason(writer):
             plan.settled.append(Outcome(rule.id, rule.created_by, HELD, reason=CREATOR_UNAVAILABLE))
-        elif writer["project_id"] != rule.scope.removeprefix(PROJECT_PREFIX):
+        elif writer is not None and writer["project_id"] != rule.scope.removeprefix(PROJECT_PREFIX):
             turn_off(db, rule.id, rule.scope, _iso(_now()))
             plan.settled.append(Outcome(rule.id, rule.created_by, DEAD_LETTERED,
                                         reason=WRITER_LEFT))
