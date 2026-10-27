@@ -42,8 +42,6 @@ INVALID = "invalid"
 NO_RESULT = "no_result"
 REFUSED = "refused"
 
-WAKE_CAP = "wake cap"  # the reason R9's hourly cap turned a rule's wake into a digest
-
 
 @dataclass(frozen=True)
 class Rule:
@@ -88,8 +86,7 @@ class Entry:
 
     rule_id: str
     wake: bool
-    reason: str | None = None  # why its wake ask became a digest (R7, R9, 4.4, the table)
-    since_wake: int = 0  # R9: this rule's capped digests to the thread since it last woke it
+    reason: str | None = None  # why its wake ask became a digest
 
 
 @dataclass(frozen=True)
@@ -119,13 +116,8 @@ class Delivery:
     def wake(self) -> bool:
         return self.routed_wake or any(entry.wake for entry in self.entries)
 
-    @property
-    def capped(self) -> list[Entry]:
-        """The rules whose wake the hourly cap turned into this digest."""
-        return [] if self.wake else [entry for entry in self.entries if entry.reason == WAKE_CAP]
-
-    def add(self, rule: Rule, wake: bool, reason: str | None, since_wake: int = 0) -> None:
-        self.entries.append(Entry(rule.id, wake, reason, since_wake))
+    def add(self, rule: Rule, wake: bool, reason: str | None) -> None:
+        self.entries.append(Entry(rule.id, wake, reason))
         if rule.note:
             self.notes.append(rule.note)
 
@@ -133,7 +125,7 @@ class Delivery:
         """Each rule's outcome once the delivery is made (woke, digested or duplicate).
 
         ``via='rule'`` marks the rule that caused the wake or digest; a rule that
-        rode one something else caused is ``via='routed'``. R9 counts only the first.
+        rode one something else caused is ``via='routed'``.
         """
         results = []
         for entry in self.entries:

@@ -182,8 +182,10 @@ async def _load(target: ExecutionTarget, server_id: str, model_id: str) -> None:
     from infra.db_async import run_in_db
     from llm.network_discovery import notify_cached_model_loaded
     from llm.providers.omlx_lifecycle import load_model, read_loaded
+    from llm.server_observation import observation_generation
 
     async with seat_lock(server_id):
+        generation = observation_generation(server_id)
         live = await read_loaded({"server_id": server_id})
         if live is None:
             _emit_load(server_id, model_id, "load.failed", "unreachable")
@@ -204,7 +206,7 @@ async def _load(target: ExecutionTarget, server_id: str, model_id: str) -> None:
             cause: LoadFailure = "load_failed" if up else "unreachable"
             _emit_load(server_id, model_id, "load.failed", cause)
             raise ModelLoadFailed(cause)
-        notify_cached_model_loaded(server_id, model_id)
+        notify_cached_model_loaded(server_id, model_id, generation)
         _emit_load(server_id, model_id, "load.completed")
 
 

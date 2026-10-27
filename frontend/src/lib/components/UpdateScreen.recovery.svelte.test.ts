@@ -24,7 +24,7 @@ vi.mock('$lib/update/shellHandoff', async (original) => ({
 }));
 
 type View = NonNullable<Parameters<typeof updateScreenView.set>[0]>;
-const longer: View = { mode: 'longer', step: 'upgrading', label: 'Upgrading your data', percent: 52.4, estimated: false, fromVersion: '2026.10.12', toVersion: '2026.10.13', failure: null, serviceDown: true };
+const longer: View = { operationId: 'update-1', mode: 'longer', step: 'upgrading', label: 'Upgrading your data', percent: 52.4, estimated: false, fromVersion: '2026.10.12', toVersion: '2026.10.13', failure: null, serviceDown: true };
 const startFailed: View = { ...longer, mode: 'start_failed' };
 
 let component: Record<string, unknown> | null = null;

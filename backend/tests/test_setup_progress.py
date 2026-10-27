@@ -16,6 +16,8 @@ from api import setup as setup_api  # noqa: E402
 from infra import accounts, setup_progress  # noqa: E402
 from infra.default_port import DEFAULT_BACKEND_PORT  # noqa: E402
 
+pytestmark = pytest.mark.usefixtures("mac_local_model_host")
+
 BASE = "http:" + f"//127.0.0.1:{DEFAULT_BACKEND_PORT}"
 HOST = {"Host": f"127.0.0.1:{DEFAULT_BACKEND_PORT}"}
 JSON_HEADERS = {**HOST, "Content-Type": "application/json"}

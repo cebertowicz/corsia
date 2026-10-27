@@ -40,6 +40,7 @@ async def test_nonperson_input_holds_until_catalog_load_notification(isolated_db
     from infra import app_loop, thread_execution, unavailable_model_recovery as recovery
     from infra.database import get_db
     from llm import network_discovery
+    from llm.server_observation import observation_generation
     from tests.test_unloaded_send_owned_turn import _claimed
     from tests.unavailable_model_support import mark_model_loaded, message_row
 
@@ -61,7 +62,7 @@ async def test_nonperson_input_holds_until_catalog_load_notification(isolated_db
     db = get_db()
     revision = db.execute("SELECT delivery_revision FROM messages WHERE id='m'").fetchone()[0]
     db.close()
-    network_discovery.notify_cached_model_loaded('srv', 'other')
+    network_discovery.notify_cached_model_loaded('srv', 'other', observation_generation('srv'))
     await asyncio.sleep(0)
     if recovery._TASK is not None:
         await recovery._TASK
@@ -69,7 +70,7 @@ async def test_nonperson_input_holds_until_catalog_load_notification(isolated_db
     db = get_db()
     assert db.execute("SELECT delivery_revision FROM messages WHERE id='m'").fetchone()[0] == revision
     db.close()
-    network_discovery.notify_cached_model_loaded('srv', 'm')
+    network_discovery.notify_cached_model_loaded('srv', 'm', observation_generation('srv'))
     await asyncio.sleep(0)
     if recovery._TASK is not None:
         await recovery._TASK

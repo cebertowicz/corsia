@@ -24,7 +24,8 @@ TOOL_PACKS: dict[str, str] = {
     "memory": "Knowledge and lessons",
     "projects": "Projects and repositories",
     "coordination": "Coordination setup: CORSIA API and instruction files",
-    "host": "Host access, audit, and processes",
+    "host": "Host access and audit",
+    "processes": "Background and host processes",
     "browser": "Browser",
     "automations": "Automations",
     "web": "Web",
@@ -44,6 +45,7 @@ _CATEGORY_PACKS: dict[str, str] = {
     "projects": "projects",
     "coordination": "coordination",
     "host_access": "host",
+    "processes": "processes",
     "browser": "browser",
     "automations": "automations",
     "web": "web",
@@ -112,6 +114,20 @@ def _reachable(entry: ToolCatalogEntry | None) -> TypeGuard[ToolCatalogEntry]:
 def is_reachable(name: str) -> bool:
     """Return whether a harness may load or dispatch this tool by name."""
     return _reachable(TOOL_CATALOG.get(name))
+
+
+def serious_effect_recorded_names() -> tuple[str, ...]:
+    """Return every harness spelling whose catalog effect proposes Serious."""
+    canonical = {name for name, entry in TOOL_CATALOG.items() if entry.serious_effect}
+    recorded = canonical | {f"{MCP_CORSIA_PREFIX}{name}" for name in canonical}
+    recorded.update(alias for alias, name in CC_BUILTIN_ALIASES.items() if name in canonical)
+    return tuple(sorted(recorded))
+
+
+def has_serious_effect(name: str | None) -> bool:
+    """Return whether a harness-recorded tool effect proposes Serious triage."""
+    entry = TOOL_CATALOG.get(normalize_tool_name(name)) if name else None
+    return bool(entry and entry.serious_effect)
 
 
 def tool_pack(name: str) -> str | None:

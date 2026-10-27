@@ -50,6 +50,16 @@ def _parse(value: str) -> datetime:
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
 
 
+def next_slot(due_at: str, cadence_seconds: int, now: str) -> str:
+    """The first cadence slot after ``now``, anchored on the due time: no replay."""
+    due, current = _parse(due_at), _parse(now)
+    step = timedelta(seconds=cadence_seconds)
+    if due > current:
+        return due.isoformat()
+    missed = int((current - due) / step) + 1
+    return (due + missed * step).isoformat()
+
+
 def _row(row) -> Schedule:
     values = dict(row)
     payload_json = values.pop("payload_json")
@@ -198,10 +208,7 @@ def settle_run(schedule_id: str, fired_at: str, *, db) -> bool:
     exhausted = runs >= schedule.max_runs or schedule.kind == "clock"
     next_run = schedule.next_run_at
     if not exhausted:
-        next_run = (
-            _parse(schedule.next_run_at)
-            + timedelta(seconds=int(schedule.spec))
-        ).isoformat()
+        next_run = next_slot(schedule.next_run_at, int(schedule.spec), fired_at)
     cursor = db.execute(
         """UPDATE automation_schedules
            SET runs=?,last_run_at=?,next_run_at=?,state=?,updated_at=?

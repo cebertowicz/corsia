@@ -40,7 +40,7 @@ from host_access.processes import ProcessOwnerError
 from infra.database import get_db, write_transaction
 from infra.db_async import run_in_db_unless_owned, run_off_db
 from infra.measure_registry import REGISTRY
-from infra.queries import get_thread, thread_is_available
+from infra.queries import get_thread, thread_gone_for_good, thread_unavailable_reason
 
 #: Runs in flight at once. Set from the sandbox-startup probe on the owner's Mac.
 SCRIPT_RUN_CAP = 2
@@ -123,12 +123,13 @@ def _recover_interrupted(connection, live_ids: set[str], now: str) -> None:
 
 
 def _owner_available(connection, schedule: Schedule, now: str) -> bool:
-    """True if the owner can take a run; else cancel the schedule and report once."""
+    """Hold unavailable owners; cancel and report only when they are gone for good."""
     row = get_thread(schedule.thread_id, db=connection)
-    if thread_is_available(row):
+    if thread_unavailable_reason(row) is None:
         return True
-    store.cancel_for_missing_owner(schedule.id, now=now, db=connection)
-    _report_owner_gone(connection, schedule, row)
+    if thread_gone_for_good(row):
+        store.cancel_for_missing_owner(schedule.id, now=now, db=connection)
+        _report_owner_gone(connection, schedule, row)
     return False
 
 

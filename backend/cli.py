@@ -135,10 +135,11 @@ def _prompt_workspace_path() -> str:
     """Explain the workspace sandbox and return a confirmed workspace path."""
     print("Where should your work live?")
     print("     Your agents work freely inside this folder; anywhere else needs your approval.")
-    print("     Documents, Desktop and Downloads aren't recommended (macOS TCC permission prompts).")
+    if not sys.platform.startswith("linux"):
+        print("     Documents, Desktop and Downloads aren't recommended (macOS TCC permission prompts).")
     while True:
         path = input("     Folder (press Enter for ~/corsia, or type another): ").strip() or DEFAULT_WORKSPACE
-        if not _is_protected_workspace_path(Path(path).expanduser().resolve()):
+        if sys.platform.startswith("linux") or not _is_protected_workspace_path(Path(path).expanduser().resolve()):
             return path
         if input(
             "     That folder is protected by macOS, so you'd see permission prompts. "

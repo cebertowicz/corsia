@@ -144,8 +144,8 @@ async def test_a_rule_on_a_repository_matches_its_webhooks_in_any_case(
     await route(MERGED, _merged(88, repo="O/R"))  # routed to its owner
     await route(MERGED, _merged(89, repo="O/R"))  # routing gives it no thread
 
-    # Both match; the hourly cap digests the second wake.
-    assert [row["outcome"] for row in _decisions(rule_id=routed["id"])] == ["woke", "digested"]
+    # Both events match and wake the watcher.
+    assert [row["outcome"] for row in _decisions(rule_id=routed["id"])] == ["woke", "woke"]
     [decision] = _decisions(rule_id=unrouted["id"], via="rule")
     assert (decision["thread_id"], decision["outcome"]) == ("owner", "woke")
 
@@ -185,11 +185,10 @@ async def test_the_repository_lookup_runs_outside_the_preparation_gate(isolated_
     assert len(_wakes("a")) == 1
 
 
-# -- 6. Pause and the wake budget are read once per thread -------------------------------------
+# -- 6. Pause is read once per thread ----------------------------------------------------------
 
 def _reads_per_thread(monkeypatch, rule_count: int, manifest: str) -> tuple[int, int]:
-    """The (paused, wake budget) reads one event makes with ``rule_count`` wake rules
-    of one thread."""
+    """Count pause and decision-history reads for one thread's wake rules."""
     paused: list[str] = []
 
     def _paused(_db, thread):
@@ -201,14 +200,14 @@ def _reads_per_thread(monkeypatch, rule_count: int, manifest: str) -> tuple[int,
                           event_type=library.ITEM_CHANGED_EVENT))
     with statements() as seen:
         deliver_platform_event_sync(library.LIBRARY_CONNECTOR, _library_changed(manifest))
-    budget = [s for s in seen if s.lstrip().upper().startswith("SELECT")
+    history = [s for s in seen if s.lstrip().upper().startswith("SELECT")
               and "FROM event_route_decisions" in s]
     _write("DELETE FROM event_rules")
     _write("DELETE FROM event_route_decisions")
-    return len(paused), len(budget)
+    return len(paused), len(history)
 
 
-def test_two_wake_rules_for_one_thread_read_pause_and_budget_once(isolated_db, monkeypatch):
+def test_two_wake_rules_for_one_thread_read_pause_once(isolated_db, monkeypatch):
     _project(P)
     _agent("owner")
     _library_owner("owner")
@@ -216,4 +215,4 @@ def test_two_wake_rules_for_one_thread_read_pause_and_budget_once(isolated_db, m
     one = _reads_per_thread(monkeypatch, 1, "m-1")
     two = _reads_per_thread(monkeypatch, 2, "m-2")
 
-    assert one == two == (1, 1)
+    assert one == two == (1, 0)

@@ -99,7 +99,7 @@ describe('first-run transcript composition', () => {
 		if (kind === 'reduced motion') { awaitFirstRunOpening(thread); vi.stubGlobal('matchMedia', () => ({ matches: true })); }
 		if (kind !== 'history') receive();
 		await settle();
-		expect(host.textContent).toContain("Here's mine for finishing your setup.");
+		expect(host.textContent).toContain('My plan for finishing your setup is in the Plan section on the right');
 		expect(host.querySelector('.typewriter-text')).toBeNull();
 		expect(host.querySelector('[aria-atomic="true"]')).toBeNull();
 	});

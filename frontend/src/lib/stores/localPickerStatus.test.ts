@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { token } from './auth';
-import { retryLocalSetup, watchLocalStatus } from './localPickerStatus';
+import { get } from 'svelte/store';
+import { canAddLocalModel, canSetUpLocalModel, neverLocalHost, retryLocalSetup, watchLocalStatus } from './localPickerStatus';
 import { fetchSources, setupLocalSource, startLocalModelDownload } from '$lib/conductorSources';
 
 vi.mock('$lib/conductorSources', () => ({
@@ -48,6 +49,34 @@ describe('retryLocalSetup', () => {
 		await vi.waitFor(() => expect(fetchSources).toHaveBeenCalledWith('token'));
 
 		expect(await retryLocalSetup('settings')).toEqual({ ok: false, message: "Couldn't download that model: it isn't in the list for this computer right now. Pick another from the list." });
+		stop();
+	});
+});
+
+describe('what the local row lets the picker offer', () => {
+	beforeEach(() => token.set('token'));
+	afterEach(() => {
+		token.set(null);
+		vi.clearAllMocks();
+	});
+
+	async function read(row: Record<string, unknown>) {
+		vi.mocked(fetchSources).mockResolvedValue([{ source: 'omlx', name: 'Local model', state: 'needs_setup', ...row }] as never);
+		const stop = watchLocalStatus();
+		await vi.waitFor(() => expect(fetchSources).toHaveBeenCalledWith('token'));
+		await new Promise((resolve) => setTimeout(resolve, 0)); // the read resolves into the store
+		return stop;
+	}
+
+	it.each([
+		['an eligible Mac without its own local service', { eligible: true }, { setUp: true, add: false, never: false }],
+		['an eligible Mac with its own local service online', { eligible: true, corsia_omlx: true, corsia_omlx_online: true }, { setUp: false, add: true, never: false }],
+		['a Mac too small for a local model', { eligible: false }, { setUp: false, add: false, never: false }],
+		['a server that is not macOS with enough memory', { eligible: false, never_local: true }, { setUp: false, add: false, never: true }],
+		['a server that is not macOS with its own service listed', { eligible: false, never_local: true, corsia_omlx: true, corsia_omlx_online: true }, { setUp: false, add: false, never: true }],
+	])('%s', async (_name, row, expected) => {
+		const stop = await read(row);
+		expect({ setUp: get(canSetUpLocalModel), add: get(canAddLocalModel), never: get(neverLocalHost) }).toEqual(expected);
 		stop();
 	});
 });

@@ -34,7 +34,7 @@ service_is_loaded() {
 }
 service_domain() { printf 'gui/501'; }
 service_label() { printf 'com.corsia.prod'; }
-service_plist_path() { printf '%s' "$SERVICE_PLIST"; }
+service_definition_path() { printf '%s' "$SERVICE_PLIST"; }
 drain_and_wait() { return 0; }
 wait_for_backend_health() {
     printf 'health\\n' >> "$LAUNCHCTL_TRACE"

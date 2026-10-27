@@ -140,6 +140,13 @@ def _entry(source: ContextSourceEntry, *, model: str | None) -> dict[str, Any]:
         "version_kind": kind,
         "version_reason": reason,
     }
+    path = (source.metadata or {}).get("path")
+    if isinstance(path, str) and path and kind != "generated":
+        # Unlike the reference, the path is the file identity correction targets share.
+        from infra.config import WORKSPACE
+        from tools.filesystem_gate import canonical_target_path
+
+        entry["path"] = canonical_target_path(path, workspace=WORKSPACE)
     lessons = (source.metadata or {}).get("lessons")
     if source.source_id == SKILLS_INDEX_SOURCE_ID and isinstance(lessons, list):
         # Offered trial lessons by version; no key means the install predates them.

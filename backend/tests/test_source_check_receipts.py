@@ -10,6 +10,9 @@ from tests.test_provider_sources import (  # noqa: F401
 )
 
 
+pytestmark = pytest.mark.usefixtures("mac_local_model_host")
+
+
 @pytest.mark.real_harness_cli
 @pytest.mark.parametrize("answer", [None, OSError("database is locked")])
 def test_primary_and_error_path_writes_failing_never_return_prior_row_as_fresh(

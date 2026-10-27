@@ -4,6 +4,7 @@ import pytest
 
 
 _PROCESS_TOOLS = {
+    "host_cpu_top",
     "managed_process_status",
     "managed_process_logs",
     "managed_process_stop",
@@ -230,7 +231,7 @@ def test_process_tools_reach_native_cc_and_codex_surfaces(tmp_path):
     assert {"tools_load", "tool_call"} <= cc_names
     assert {"tools_load", "tool_call"} <= codex_names
     assert _PROCESS_TOOLS <= native_names
-    assert _PROCESS_TOOLS <= set(_loaded_schemas(registry, "host"))
+    assert _PROCESS_TOOLS <= set(_loaded_schemas(registry, "processes"))
     assert "worktree_create" in native_names
     assert "worktree_create" in _loaded_schemas(registry, "projects")
 

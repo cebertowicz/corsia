@@ -181,6 +181,7 @@ def test_polling_setup_status_and_local_download_spawn_no_processes(client, monk
     assert local_download.json()["state"] == "stopped"
 
 
+@pytest.mark.usefixtures("mac_local_model_host")
 def test_local_download_uses_the_single_managed_flight(client, monkeypatch):
     from llm import local_setup_flow as flow
 
@@ -366,6 +367,16 @@ def test_status_off_macos_is_not_blocked_by_the_macos_floor_and_not_local_eligib
     assert status["local_eligible"] is False
 
 
+def test_setup_status_takes_not_macos_from_the_one_host_function(monkeypatch, tmp_path):
+    monkeypatch.setattr("llm.local_setup_gates.host_never_runs_local", lambda: True)
+    monkeypatch.setattr(setup_api.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(setup_api.platform, "machine", lambda: "arm64")
+    monkeypatch.setattr(setup_api.config, "STATE_ROOT", tmp_path)
+    monkeypatch.setattr(setup_api.config, "WORKSPACE", tmp_path / "workspace")
+    status = setup_api._setup_status()
+    assert status["macos_supported"] is None and status["apple_silicon"] is False
+
+
 def test_work_folder_display_hides_the_home_name(monkeypatch, tmp_path):
     home = tmp_path / "person"
     monkeypatch.setattr(setup_api.Path, "home", lambda: home)
@@ -438,7 +449,7 @@ def test_routes_are_registered():
 
 
 @pytest.fixture
-def welcome(no_users, monkeypatch, fresh_local_setup):
+def welcome(no_users, monkeypatch, fresh_local_setup, mac_local_model_host):
     """The setup routes on a non-default bound port, as the app reaches them before any account."""
     from llm import local_setup
 

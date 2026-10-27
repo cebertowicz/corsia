@@ -3,8 +3,8 @@
 Shared by fresh installs and migrations 136, 138 and 141. ``event_rules`` holds only
 rules an agent wrote through the ``event_rules`` tool: no row is seeded, and
 today's routing stays in code. ``event_route_decisions`` is the one outcome
-record for those rules; the tool's list, explain and the hourly wake budget read
-it, a ``run_script`` rule's row is also its run's queue until the script
+record for those rules; the tool's list and explain read it, a ``run_script``
+rule's row is also its run's queue until the script
 runner settles it, and a ``start_worker`` rule's row is its start's queue, its
 request identity and its worker until the worker's result settles it.
 """

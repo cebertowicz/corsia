@@ -58,14 +58,9 @@ def external_agent_sandbox_rules(
     generated_profile: Path, safehouse_paths: list[Path]
 ) -> str:
     """Render canonical hard-floor rules for an external child envelope."""
-    from infra.config import WORKSPACE
-    from tools.host_path_policy import (
-        GENERATED_WORKSPACE_PROJECTIONS,
-        current_protected_host_path_policy,
-    )
+    from tools.host_path_policy import current_protected_host_path_policy
 
     return current_protected_host_path_policy(
         generated_profile=generated_profile,
         safehouse_paths=safehouse_paths,
-        write_roots=tuple(WORKSPACE / path for path in GENERATED_WORKSPACE_PROJECTIONS),
     ).sandbox_rules()

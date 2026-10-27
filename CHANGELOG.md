@@ -7,11 +7,16 @@ the later entry describes the current behavior.
 
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here._
 
+- First-chat setup reads more clearly and at your pace: a decision card waits until you've had time to read what came before it, GitHub profiles are read through GitHub's public data, the import ends in one short line, the GitHub step is one message and one choice, and you sign up for the agents' GitHub account in your own browser.
+- On Linux, CORSIA starts again after the computer restarts.
+- A local model is no longer shown as ready after its server exits, until it has loaded again.
+- On Linux, CORSIA no longer offers to set up a local model; you can connect a provider instead.
 - A local model that fails to reload now gives retry instructions that match whether it is kept loaded.
 - The local model server keeps your server-wide settings when CORSIA starts it again.
-
+- Chat titles use more of the available header space when Local only is off.
 - Claude Code accounts you added keep working when CORSIA's data moves.
 - Browser addresses no longer need `https://` typed in; local loopback addresses use `http://` by default.
+- When CORSIA can't find a chat's account sign-in on this computer, the message waits until you sign in again instead of repeatedly trying to send.
 - A signed-in app in Connected apps now reads "Figma — you@example.com" on its row, with the account shortening first on a narrow screen, and a link in chat can open an app waiting for approval with its Approve button ready.
 - Setup now opens in a normal-sized window in the middle of the screen, and the app grows to fill the screen when setup finishes.
 - A Claude Code you only just signed in to is no longer offered for import: only skills and notes you made there are brought over.
