@@ -65,7 +65,7 @@ export const WAITING_TEXT = (name: string): string => `${name}'s sign-in page is
 export const BROWSER_DIDNT_OPEN = 'Your browser didn\'t open. Copy the sign-in link and open it in a browser on this computer.';
 export const PROVIDER_NOT_TOLD_BEFORE = (name: string): string => `You're signed out here, but CORSIA couldn't reach ${name}, so ${name} may still list CORSIA as allowed. To remove it, open `;
 export const PROVIDER_NOT_TOLD_AFTER = ' and remove CORSIA.';
-export const SIGN_OUT_BODY = (name: string): string => `Agents will no longer be able to use ${name}, including in conversations already running. You can sign in again any time.`;
+export const SIGN_OUT_BODY = (name: string): string => `Agents will no longer be able to use ${name}, including in chats already running. You can sign in again any time.`;
 
 /** Whether a waiting row has anything to show from sign-in; an idle, signed-out app reserves no space for it. */
 export function hasSignInToShow(app: ConnectedApp): boolean {

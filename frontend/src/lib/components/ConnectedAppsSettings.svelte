@@ -322,7 +322,7 @@
 	.row-action :global(.btn:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
 	.danger-text :global(.btn.ghost), .danger-text :global(.btn.ghost:hover:not(:disabled)) { color: var(--red-text); }
 	.key-detail { color: var(--text-secondary); font-size: var(--text-subhead); line-height: 1.5; margin: 0 0 var(--space-2); }
-	.error { color: var(--red); margin: 0 0 var(--space-2); font-size: var(--text-footnote); }
+	.error { color: var(--red-text); margin: 0 0 var(--space-2); font-size: var(--text-footnote); }
 	.copied { margin: 0 0 var(--space-2); color: var(--text-secondary); font-size: var(--text-subhead); line-height: var(--lh-normal); }
 	.impact { margin: 0 0 var(--space-2); color: var(--text-secondary); font-size: var(--text-subhead); line-height: var(--lh-normal); }
 	.capabilities { display: flex; gap: var(--space-2); margin: 0 0 var(--space-2); color: var(--text-secondary); font-size: var(--text-caption); line-height: var(--lh-normal); }
