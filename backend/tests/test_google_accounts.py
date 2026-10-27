@@ -47,10 +47,10 @@ class AccountsGoogle(FakeGoogle):
             return httpx.Response(self.revoke_status, text="google says no, token " + form["token"])
         if url == oauth.PROFILE_URL:
             return httpx.Response(200, json={"emailAddress": self.email})
-        if url == oauth.TOKEN_URL and form.get("grant_type") == "refresh_token" and form["refresh_token"] in self.refused:
+        if url == google_client.TOKEN_URL and form.get("grant_type") == "refresh_token" and form["refresh_token"] in self.refused:
             return httpx.Response(400, json={"error": "invalid_grant"})
         response = super().handler(request)
-        if url == oauth.TOKEN_URL and form.get("grant_type") == "authorization_code" and response.status_code == 200:
+        if url == google_client.TOKEN_URL and form.get("grant_type") == "authorization_code" and response.status_code == 200:
             self.issued += 1
             grant = response.json()
             grant["refresh_token"] = f"sign-in-{self.issued}"

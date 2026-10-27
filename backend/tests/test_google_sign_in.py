@@ -59,7 +59,7 @@ class FakeGoogle:
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         url = str(request.url)
-        if url == oauth.TOKEN_URL:
+        if url == google_client.TOKEN_URL:
             form = {k: v[0] for k, v in parse_qs(request.content.decode()).items()}
             self.token_forms.append(form)
             if form["grant_type"] == "refresh_token":
@@ -937,4 +937,8 @@ def test_google_bundle_requires_secret_except_published():
     own = {"client_id": CLIENT_ID, "client_secret": SECRET, "refresh_token": REFRESH}
     assert GOOGLE.valid_bundle(own)
     assert not GOOGLE.valid_bundle({"client_id": CLIENT_ID, "refresh_token": REFRESH})
-    assert GOOGLE.valid_bundle({"client": "published", "client_id": oauth.PUBLISHED_CLIENT_ID, "refresh_token": REFRESH})
+    published = {"client": "published", "client_id": oauth.PUBLISHED_CLIENT_ID, "refresh_token": REFRESH}
+    assert GOOGLE.valid_bundle(published)
+    assert not GOOGLE.valid_bundle(published, GOOGLE.client_fields)
+    assert not GOOGLE.valid_bundle({"client": "other", "client_id": CLIENT_ID, "refresh_token": REFRESH})
+    assert not GOOGLE.valid_bundle(None)

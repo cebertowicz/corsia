@@ -22,7 +22,6 @@ from connections.account_state import CONSENT_CANCELLED, PROVIDER_UNAVAILABLE, e
 from connections.connected_accounts import Actor
 from connections.google import client
 from connections.google.client import STATUS_CONNECTED, GoogleError
-from connections.google.client import TOKEN_URL as TOKEN_URL
 from connections.google.reach_replies import (
     ALREADY_CONNECTED, ALREADY_NEEDS_SIGN_IN, STILL_CONNECTED, not_covered_reply,
 )
@@ -51,8 +50,8 @@ OPTIONAL_SCOPES = (
 # An ID token's ``sub`` is the account's identity; never a reason to refuse a sign-in.
 IDENTITY_SCOPES = ("openid",)
 SCOPES = REQUIRED_SCOPES + OPTIONAL_SCOPES + IDENTITY_SCOPES
-PUBLISHED_REQUIRED_SCOPES = (REQUIRED_SCOPES[0], REQUIRED_SCOPES[2])
-PUBLISHED_SCOPES = PUBLISHED_REQUIRED_SCOPES + OPTIONAL_SCOPES[:2]
+PUBLISHED_REQUIRED_SCOPES = ("https://www.googleapis.com/auth/gmail.modify", "https://www.googleapis.com/auth/calendar")
+PUBLISHED_SCOPES = PUBLISHED_REQUIRED_SCOPES + ("https://www.googleapis.com/auth/drive", "https://www.googleapis.com/auth/documents")
 PUBLISHED_CLIENT_ID = "338689075775-o75k922vn5fdl18qergr96rp8g63e4d7.apps.googleusercontent.com"
 PUBLISHED_URL = "https://google-workspace-extension.geminicli.com"
 PENDING_SECONDS = 600
@@ -66,6 +65,8 @@ MISSING_SCOPES = (
     "The person didn't allow Gmail and Calendar access. Call google_connect and ask them to allow "
     "Gmail and Calendar; Drive, Docs and Sheets are optional."
 )
+PUBLISHED_MISSING_SCOPES = ("The person didn't allow Gmail and Calendar access. Call google_connect and ask them to allow "
+                            "Gmail and Calendar; Drive and Docs are optional.")
 BROWSER_MISSING_SCOPES = "Gmail and Calendar access weren't allowed. Go back to CORSIA and try again."
 WRONG_ACCOUNT = (
     "You signed in as {signed_in}, but this sign-in is for {address}. Call google_connect again and "
@@ -342,7 +343,7 @@ async def complete_sign_in(code: object, state: object, *, access_token: object 
             provider_subject = client.id_token_subject(grant.get("id_token"))
             required = REQUIRED_SCOPES if pending.client_secret else PUBLISHED_REQUIRED_SCOPES
             if not set(required) <= set(scopes):
-                message = MISSING_SCOPES if pending.client_secret else MISSING_SCOPES.replace(", Docs and Sheets", " and Docs")
+                message = MISSING_SCOPES if pending.client_secret else PUBLISHED_MISSING_SCOPES
                 raise GoogleSignInError(message, browser_message=BROWSER_MISSING_SCOPES)
             profile = await client.request_json("GET", PROFILE_URL, account_id=None, token=access)
             email = str(profile["emailAddress"])

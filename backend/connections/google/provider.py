@@ -38,9 +38,16 @@ async def _release(account_id: str) -> None:
     mail_poller.cancel_account(account_id)
 
 
+GOOGLE_BUNDLE_FIELDS = frozenset(("client_id", "client_secret", "refresh_token"))
+
+
+def _required_for(bundle: dict) -> frozenset[str]:
+    return GOOGLE_BUNDLE_FIELDS - {"client_secret"} if bundle.get("client") == "published" else GOOGLE_BUNDLE_FIELDS
+
+
 GOOGLE = AccountProvider(
     name="google", display_name="Google", capabilities=("mail", "calendar", "files"),
-    bundle_fields=frozenset(("client_id", "client_secret", "refresh_token")), scopes_required=False,
+    bundle_fields=GOOGLE_BUNDLE_FIELDS, scopes_required=False, required_for=_required_for,
     client_fields=frozenset(("client_id", "client_secret")), optional_bundle_fields=frozenset(("client",)),
     revoke=revoke, release=_release,
 )
