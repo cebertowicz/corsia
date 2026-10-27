@@ -557,7 +557,7 @@ test('copy sweep: component states', async ({ page }, info) => {
 				}
 				flushSync();
 			}, row);
-			const text = row === 6 ? 'reassigned to another agent' : row === 7 ? 'Read-only.' : row === 8 ? 'Marking this done or Won’t do also stops the agent working on it.' : row === 15 ? 'Open a chat to see its plan' : row === 17 ? 'Chat' : 'Waiting on:';
+			const text = row === 6 ? 'reassigned to another agent' : row === 7 ? 'Read-only.' : row === 8 ? 'Marking this done or Won’t do also stops the agent working on it.' : row === 15 ? 'Open a chat to see its plan' : row === 17 ? 'Chat' : 'This task waiting:';
 			await expect(page.getByText(text, { exact: row === 17 })).toBeVisible();
 			await shot(page, `copy-${row}-${width}`);
 		}

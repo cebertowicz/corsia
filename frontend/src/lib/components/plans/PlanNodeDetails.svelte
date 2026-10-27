@@ -107,10 +107,10 @@
 	{#if waiting}<p class="waiting"><span class="prefix">Waiting:</span> {waiting}</p>{/if}
 	{#if tokenUsage}<p class="tokens"><span class="prefix">Tokens:</span> {tokenUsage}</p>{/if}
 	{#if cost}<p class="cost"><span class="prefix">Cost:</span> {cost}</p>{/if}
-	{#if ownWorking}<p class="own-working"><span class="prefix">This step working:</span> {ownWorking}</p>{/if}
-	{#if ownWaiting}<p class="own-waiting"><span class="prefix">Waiting on:</span> {ownWaiting}</p>{/if}
-	{#if ownTokens}<p class="own-tokens"><span class="prefix">This step tokens:</span> {ownTokens}</p>{/if}
-	{#if ownCost}<p class="own-cost"><span class="prefix">This step cost:</span> {ownCost}</p>{/if}
+	{#if ownWorking}<p class="own-working"><span class="prefix">This task working:</span> {ownWorking}</p>{/if}
+	{#if ownWaiting}<p class="own-waiting"><span class="prefix">This task waiting:</span> {ownWaiting}</p>{/if}
+	{#if ownTokens}<p class="own-tokens"><span class="prefix">This task tokens:</span> {ownTokens}</p>{/if}
+	{#if ownCost}<p class="own-cost"><span class="prefix">This task cost:</span> {ownCost}</p>{/if}
 	{#if initiative}
 		<p class="initiative">{#each initiative.segments as segment, index}{#if index > 0}{' · '}{/if}<span class="segment">{#if index === 0}<span class="prefix">{initiative.label}</span>{' '}{/if}{segment}</span>{/each}</p>
 	{/if}
