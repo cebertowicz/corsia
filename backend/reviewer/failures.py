@@ -96,7 +96,9 @@ def parse_envelope(output: str) -> dict[str, Any] | None:
 # Re-exported above for existing reviewer imports; the marker set has one owner.
 
 
-def classify_cc_error(error_text: str, detail: str) -> Exception:
+def classify_cc_error(
+    error_text: str, detail: str, envelope: dict[str, Any] | None = None,
+) -> Exception:
     """Map raw CC error text to the right exception type."""
     low = str(error_text).lower()
     if "error_max_turns" in low:
@@ -121,21 +123,31 @@ def classify_cc_error(error_text: str, detail: str) -> Exception:
         or "delisted" in low
     ):
         return CCUnavailableError(detail)
+    if envelope and envelope.get("is_error"):
+        usage = envelope.get("usage")
+        if (
+            envelope.get("duration_api_ms") == 0
+            and envelope.get("total_cost_usd") == 0
+            and (usage is None or isinstance(usage, dict) and usage.get("input_tokens", 0) == 0)
+        ):
+            return CCUnavailableError(detail)
     return RuntimeError(detail)
 
 
 def raise_cli_failure(returncode: int, output: str, stderr: str) -> NoReturn:
     """Classify and raise a non-zero ``claude -p`` exit.
 
-    Envelope signals (subtype/stop_reason/num_turns/total_cost_usd) lead the
-    detail so the cause class survives the 200-char truncation; the raw blob
-    follows for forensics.
+    The result and envelope signals precede the truncated raw output so the
+    CLI's explanation survives truncation.
     """
     envelope = parse_envelope(output)
     signals = envelope_signals(envelope) if envelope else ""
-    prefix = f"{signals} | " if signals else ""
+    result = str(envelope.get("result") or "")[:200] if envelope else ""
+    prefix = " | ".join(part for part in (result, signals) if part)
+    prefix = f"{prefix} | " if prefix else ""
     subtype = envelope.get("subtype") if envelope else None
     raise classify_cc_error(
         f"{output} {stderr} subtype={subtype}",
-        f"claude -p failed (rc={returncode}): {prefix}{(stderr or output)[:200]}",
+        f"claude -p failed (rc={returncode}): {prefix}{(output if envelope else stderr or output)[:200]}",
+        envelope,
     )

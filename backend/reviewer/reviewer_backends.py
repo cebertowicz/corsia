@@ -141,7 +141,8 @@ def invoke_cc_subagent(
         signals = _envelope_signals(envelope) or f"subtype={envelope.get('subtype')}"
         raise _classify_cc_error(
             f"{result_text} {stderr} subtype={envelope.get('subtype')}",
-            f"CC error envelope ({signals}): {str(result_text)[:200]}",
+            f"CC error envelope: {str(result_text)[:200]} | {signals} | {output[:200]}",
+            envelope,
         )
 
     usage = envelope.get("usage") or {}
