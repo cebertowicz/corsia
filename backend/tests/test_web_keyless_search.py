@@ -39,31 +39,12 @@ async def test_no_key_uses_ddgs_and_normalizes_results(store, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_empty_twice_then_results(monkeypatch):
-    search = Mock(side_effect=[[], [], [{"title": "Hit", "href": "https://example.test", "body": "Found"}]])
+@pytest.mark.parametrize("empty", [[], keyless.DDGSException("No results found.")])
+async def test_an_empty_result_answers_once_as_working(monkeypatch, empty):
+    search = Mock(side_effect=[empty])
     monkeypatch.setattr(keyless, "DDGS", Mock(return_value=Mock(text=search)))
     result = await keyless.keyless_search("query")
-    assert result.kind == outcomes.WORKS
-    assert result.results == [{"title": "Hit", "url": "https://example.test", "description": "Found"}]
-    assert search.call_count == 3
-
-
-@pytest.mark.asyncio
-async def test_ddgs_no_results_exception_is_retried(monkeypatch):
-    search = Mock(side_effect=[keyless.DDGSException("No results found."), [], [{"title": "Hit"}]])
-    monkeypatch.setattr(keyless, "DDGS", Mock(return_value=Mock(text=search)))
-    result = await keyless.keyless_search("query")
-    assert result.kind == outcomes.WORKS
-    assert result.results[0]["title"] == "Hit"
-    assert search.call_count == 3
-
-
-@pytest.mark.asyncio
-async def test_empty_after_three_attempts(monkeypatch):
-    search = Mock(return_value=[])
-    monkeypatch.setattr(keyless, "DDGS", Mock(return_value=Mock(text=search)))
-    result = await keyless.keyless_search("query")
-    assert (result.kind, result.results, search.call_count) == (outcomes.WORKS, [], 3)
+    assert (result.kind, result.results, search.call_count) == (outcomes.WORKS, [], 1)
 
 
 @pytest.mark.asyncio

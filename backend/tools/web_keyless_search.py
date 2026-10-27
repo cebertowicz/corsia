@@ -24,17 +24,14 @@ def _search(query: str, count: int) -> list[dict[str, str]]:
 
 
 async def keyless_search(query: str, count: int = 5) -> SearchOutcome:
-    """Try up to three times while results come back empty, without blocking the event loop.
+    """Search once without blocking the event loop; an empty result still works.
 
     The timeout bounds the caller's wait only: a library call already running ends by
     its own timeouts."""
     try:
         async with asyncio.timeout(TIMEOUT_SECONDS):
-            for _ in range(3):
-                items = await asyncio.to_thread(_search, query, count)
-                if items:
-                    return SearchOutcome(WORKS, results=items)
-        return SearchOutcome(WORKS)
+            items = await asyncio.to_thread(_search, query, count)
+        return SearchOutcome(WORKS, results=items)
     except (TimeoutError, TimeoutException):
         return SearchOutcome(FAILED, REASON_TIMEOUT)
     except RatelimitException:
