@@ -352,7 +352,7 @@ def test_local_app_connect_returns_the_approved_mac_notice(connected_apps_client
     assert response.json()["state"] == "disconnected"
     assert response.json()["failure_class"] is None
     assert response.json()["notice"] == (
-        "It can do anything you can do on this Mac, except open CORSIA's own files and saved keys. "
+        "It can do anything you can do on this computer, except open CORSIA's own files and saved keys. "
         "Connect only apps you trust."
     )
 

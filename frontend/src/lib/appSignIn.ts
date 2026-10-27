@@ -3,7 +3,7 @@ import type { ConnectedApp } from '$lib/api/connectedApps';
 // Every string here comes from the plain-language copy sheet (Sign-in section, row table and lede), with <app> filled in.
 
 export const SIGN_IN_LEDE = "Signing in lets the agents that can use an app act as you in it. You sign in on the app's own page in your browser, so CORSIA never sees your password.";
-export const NOT_ON_THIS_MAC = 'You can only sign in on the Mac CORSIA runs on. Open CORSIA there and press Sign in.';
+export const NOT_ON_THIS_COMPUTER = 'You can only sign in on the computer CORSIA runs on. Open CORSIA there and press Sign in.';
 
 /** Whether the row is waiting on, or in the middle of, a sign-in the person has to act on. A failed attempt stops needing them once the app is signed in. */
 export function needsSignInAttention(app: ConnectedApp): boolean {
@@ -56,13 +56,13 @@ export function failureText(name: string, failureClass: string): string {
 		case 'app_error': return `${name} had a problem with the sign-in. Try again.`;
 		case 'app_busy': return `${name} is busy. Try again in a few minutes.`;
 		case 'address_mismatch':
-			return `${name} didn't recognize CORSIA. It needs a code called a client ID. If someone else looks after ${name} for you, ask them for one. If you look after it yourself, you can make one in ${name}'s settings. Then tell CORSIA in chat what it is.`;
+			return `${name} didn't recognize CORSIA, so it needs a client ID. Ask whoever looks after ${name} for one, or make one in ${name}'s settings, then give it to CORSIA in chat.`;
 		default: return `Sign-in didn't finish, and CORSIA doesn't know why. Try again. If it keeps happening, show what ${name} said to whoever manages ${name} for your team. If that's you, try again later or contact ${name}.`;
 	}
 }
 
 export const WAITING_TEXT = (name: string): string => `${name}'s sign-in page is open in your browser. Allow CORSIA there, then come back.`;
-export const BROWSER_DIDNT_OPEN = 'Your browser didn\'t open. Copy the sign-in link and open it in a browser on this Mac.';
+export const BROWSER_DIDNT_OPEN = 'Your browser didn\'t open. Copy the sign-in link and open it in a browser on this computer.';
 export const PROVIDER_NOT_TOLD_BEFORE = (name: string): string => `You're signed out here, but CORSIA couldn't reach ${name}, so ${name} may still list CORSIA as allowed. To remove it, open `;
 export const PROVIDER_NOT_TOLD_AFTER = ' and remove CORSIA.';
 export const SIGN_OUT_BODY = (name: string): string => `Agents will no longer be able to use ${name}, including in conversations already running. You can sign in again any time.`;
