@@ -74,12 +74,20 @@ async def test_snapshot_lists_and_switches_only_existing_tab_refs(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_target_discovery_notifies_on_page_create_and_destroy(monkeypatch):
+async def test_target_discovery_notifies_only_on_page_create_and_destroy(monkeypatch):
     events = asyncio.Queue()
     for event in [
-        {'method': 'Target.targetCreated', 'params': {'targetInfo': {'type': 'worker'}}},
-        {'method': 'Target.targetCreated', 'params': {'targetInfo': {'type': 'page'}}},
-        {'method': 'Target.targetDestroyed', 'params': {'targetId': 'page'}},
+        # Discovery replays the tab already open before it answers; that replay is no change.
+        {'method': 'Target.targetCreated', 'params': {'targetInfo': {'type': 'page', 'targetId': 'first'}}},
+        {'id': 1, 'result': {}},
+        # A captcha's frames and workers come and go without touching the tabs.
+        {'method': 'Target.targetCreated', 'params': {'targetInfo': {'type': 'iframe', 'targetId': 'frame'}}},
+        {'method': 'Target.targetDestroyed', 'params': {'targetId': 'frame'}},
+        {'method': 'Target.targetCreated', 'params': {'targetInfo': {'type': 'worker', 'targetId': 'worker'}}},
+        {'method': 'Target.targetDestroyed', 'params': {'targetId': 'worker'}},
+        {'method': 'Target.targetCreated', 'params': {'targetInfo': {'type': 'page', 'targetId': 'popup'}}},
+        {'method': 'Target.targetDestroyed', 'params': {'targetId': 'popup'}},
+        {'method': 'Target.targetDestroyed', 'params': {'targetId': 'first'}},
     ]:
         events.put_nowait(json.dumps(event))
     notified = []
@@ -98,9 +106,9 @@ async def test_target_discovery_notifies_on_page_create_and_destroy(monkeypatch)
         async def __aexit__(self, *_args):
             pass
 
-        async def call(self, method, **params):
+        async def send(self, method, **params):
             assert method == 'Target.setDiscoverTargets' and params == {'discover': True}
-            return {}
+            return 1
 
     async def endpoint(*_args):
         return 'ws://browser.test'
@@ -108,13 +116,14 @@ async def test_target_discovery_notifies_on_page_create_and_destroy(monkeypatch)
     monkeypatch.setattr(browser_session_commands, 'browser_endpoint', endpoint)
     monkeypatch.setattr(browser_cdp, 'CdpClient', Client)
     task = asyncio.create_task(browser_pane.watch_targets('thread', lambda: notified.append(True)))
-    for _ in range(10):
-        if len(notified) == 2:
+    for _ in range(20):
+        if events.empty():
             break
         await asyncio.sleep(0)
+    await asyncio.sleep(0)
     task.cancel()
     await asyncio.gather(task, return_exceptions=True)
-    assert len(notified) == 2
+    assert len(notified) == 3
 
 
 @pytest.mark.asyncio

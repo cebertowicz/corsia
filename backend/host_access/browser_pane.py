@@ -39,16 +39,33 @@ class PaneAppearance:
 
 
 async def watch_targets(thread_id: str, notify: Callable[[], None]) -> None:
-    """Observe browser target lifecycle while a pane is connected."""
+    """Observe tab lifecycle while a pane is connected.
+
+    Only page targets count: frames and workers (a captcha's, say) come and go constantly, and
+    each notice restarts the pane's streams. Chrome replays existing targets before it answers
+    discovery; those seed the known pages without a notice.
+    """
     from host_access.browser_session_commands import browser_endpoint
     endpoint = await browser_endpoint(PROCESS_OWNER.browser_sessions(), thread_id)
     async with browser_cdp.CdpClient(endpoint) as cdp:
-        await cdp.call("Target.setDiscoverTargets", discover=True)
+        discovery = await cdp.send("Target.setDiscoverTargets", discover=True)
+        discovering = False
+        pages: set[str] = set()
         while True:
             event = json.loads(await cdp.socket.recv())
+            if event.get("id") == discovery:
+                discovering = True
+                continue
             method = event.get("method")
-            info = event.get("params", {}).get("targetInfo", {})
-            if method == "Target.targetDestroyed" or method == "Target.targetCreated" and info.get("type") == "page":
+            params = event.get("params") if isinstance(event.get("params"), dict) else {}
+            info = params.get("targetInfo") if isinstance(params.get("targetInfo"), dict) else {}
+            if method == "Target.targetCreated" and info.get("type") == "page":
+                pages.add(info.get("targetId"))
+            elif method == "Target.targetDestroyed" and params.get("targetId") in pages:
+                pages.discard(params.get("targetId"))
+            else:
+                continue
+            if discovering:
                 notify()
 
 
