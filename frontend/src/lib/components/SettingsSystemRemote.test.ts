@@ -60,6 +60,12 @@ describe('Settings › System with a shell', () => {
 		await settle();
 		expect(order).toEqual(['logout', 'disconnect_remote']);
 	});
+	it('explains the return to this computer when its own CORSIA is configured', async () => {
+		(window as unknown as Record<string, unknown>).__CORSIA_SHELL__ = { mode: 'remote', name: 'Studio', localConfigured: true };
+		await show();
+		button('Disconnect')?.click(); flushSync();
+		expect(flat(host.textContent)).toContain('Your work stays on Studio. CORSIA on this computer starts again, with your work here as you left it.');
+	});
 	it('says so in a toast when the computer could not be forgotten, since sign-out already replaced this page', async () => {
 		(window as unknown as Record<string, unknown>).__CORSIA_SHELL__ = { mode: 'remote', name: 'Studio' };
 		invoke = vi.fn(async (command: string) => { order.push(command); if (command === 'disconnect_remote') throw new Error('not forgotten'); });
