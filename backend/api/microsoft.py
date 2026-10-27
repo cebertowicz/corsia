@@ -50,7 +50,7 @@ async def connect(request: Request, user: dict = Depends(require_user)) -> dict[
         url, signing_in = await oauth.start_sign_in(
             _body_field(body, "client_id"), _body_field(body, "kind"), _body_field(body, "tenant_id"),
             actor=audit_actor(user), account_id=account_id, adding_thread_id=adding_thread_id,
-            starting_thread_id=adding_thread_id, reach=ALL_PROJECTS if person else None,
+            reach=ALL_PROJECTS if person else None,
         )
     except MicrosoftError as exc:
         if exc.cause == ACCOUNT_NOT_FOUND:

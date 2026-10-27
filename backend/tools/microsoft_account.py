@@ -62,7 +62,6 @@ class MicrosoftConnectTool(Tool):
             url, account_id = await oauth.start_sign_in(
                 kwargs.get("client_id"), kwargs.get("kind"), kwargs.get("tenant_id"), actor=("agent", thread_id),
                 account_id=kwargs.get("account_id") or None, adding_thread_id=thread_id,
-                starting_thread_id=thread_id,
             )
         except MicrosoftError as exc:
             return f"Error: {exc.cause}: {exc.message}"

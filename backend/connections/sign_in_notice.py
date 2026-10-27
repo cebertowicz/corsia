@@ -40,6 +40,13 @@ FAILED = "failed"
 #: A sign-in nobody finished ends as the cause both providers already give an expired callback.
 EXPIRED_CAUSE = CONSENT_CANCELLED
 EXPIRED_MESSAGE = "The sign-in link expired before the person finished. Start the sign-in again for a new link."
+#: Other ways CORSIA ends a sign-in nobody finished; each reason reads as itself, never as an expiry.
+CLOSED_BY_CAP_MESSAGE = (
+    "The sign-in link was closed after too many requests that were not the sign-in. "
+    "Start the sign-in again for a new link."
+)
+ACCOUNT_REMOVED_MESSAGE = "The account was removed from CORSIA before the sign-in finished."
+SHUT_DOWN_MESSAGE = "CORSIA stopped before the sign-in finished. Start the sign-in again for a new link."
 #: Both providers report a fault inside CORSIA with this one text, whatever the provider.
 UNAVAILABLE_MESSAGE = "CORSIA had a problem finishing the sign-in. Start the sign-in again for a new link."
 _PROVIDER_NAMES = {"google": "Google", "microsoft": "Microsoft"}
@@ -105,22 +112,26 @@ def _queue(
     from events.delivery import enqueue_event_wake
     from infra.database import write_transaction
 
-    summary, chip, details = _wake(provider, account_id, **ending)
     message_id = _message_id(state)
-    with write_transaction(db, scope="sign_in_wake") as conn:
-        try:
-            enqueue_event_wake(
-                thread_id, SIGN_IN_FINISHED_EVENT, summary, details, chip=chip, message_id=message_id, db=conn,
-            )
-        except (ValueError, SendRejected) as exc:
-            _log_undelivered(provider, account_id, thread_id, type(exc).__name__)
-            _record_refusal(conn, thread_id, message_id)
-        except Exception:
-            log.exception(
-                "%s sign-in result for account %s: a defect queued no wake for thread %s",
-                provider, account_id, thread_id,
-            )
-            _record_refusal(conn, thread_id, message_id)
+    try:
+        summary, chip, details = _wake(provider, account_id, **ending)
+        with write_transaction(db, scope="sign_in_wake") as conn:
+            try:
+                enqueue_event_wake(
+                    thread_id, SIGN_IN_FINISHED_EVENT, summary, details, chip=chip, message_id=message_id, db=conn,
+                )
+            except (ValueError, SendRejected) as exc:
+                _log_undelivered(provider, account_id, thread_id, type(exc).__name__)
+                _record_refusal(conn, thread_id, message_id)
+            except Exception:
+                log.exception(
+                    "%s sign-in result for account %s: a defect queued no wake for thread %s",
+                    provider, account_id, thread_id,
+                )
+                _record_refusal(conn, thread_id, message_id)
+    except Exception:
+        # The write itself failed: the notice is lost, but never the person's page or a background task.
+        log.exception("%s sign-in result for account %s: the notice write for thread %s failed", provider, account_id, thread_id)
 
 
 def _was_queued(message_id: str) -> bool:
@@ -161,14 +172,27 @@ def wake_on_connect(
 
 async def notify_starting_agent(
     thread_id: str | None, state: str, provider: str, account_id: str, *,
-    cause: str, message: str | None = None,
+    cause: str, message: str | None = None, drive: bool = True,
 ) -> None:
-    """Wake ``thread_id`` with a sign-in that ended without an account: ``cause`` and its text."""
+    """Wake ``thread_id`` with a sign-in that ended without an account: ``cause`` and its text.
+
+    ``drive=False`` only queues it, for an ending during shutdown, when no turn may start.
+    """
     if thread_id is not None:
         await run_in_db(_queue, None, thread_id, state, provider, account_id, cause=cause, message=message)
-        await drive_starting_agent(thread_id, state)
+        if drive:
+            await drive_starting_agent(thread_id, state)
+
+
+async def notify_ended(
+    thread_id: str | None, state: str, provider: str, account_id: str, message: str, *, drive: bool = True,
+) -> None:
+    """Wake ``thread_id`` with a sign-in nobody finished: the same facts on every provider, ``message`` the reason."""
+    await notify_starting_agent(
+        thread_id, state, provider, account_id, cause=EXPIRED_CAUSE, message=message, drive=drive,
+    )
 
 
 async def notify_expired(thread_id: str | None, state: str, provider: str, account_id: str) -> None:
-    """Wake ``thread_id`` with a sign-in nobody finished in time: the same facts on every provider."""
-    await notify_starting_agent(thread_id, state, provider, account_id, cause=EXPIRED_CAUSE, message=EXPIRED_MESSAGE)
+    """Wake ``thread_id`` with a sign-in nobody finished in time."""
+    await notify_ended(thread_id, state, provider, account_id, EXPIRED_MESSAGE)

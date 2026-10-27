@@ -100,3 +100,17 @@ def parked_reports() -> list[dict]:
         ]
     finally:
         db.close()
+
+
+def break_notice_write(monkeypatch) -> None:
+    """The database refuses the sign-in notice's own write, and nothing else's."""
+    from infra import database
+
+    real = database.write_transaction
+
+    def broken(db, *, scope):
+        if scope == "sign_in_wake":
+            raise RuntimeError("database is locked")
+        return real(db, scope=scope)
+
+    monkeypatch.setattr("infra.database.write_transaction", broken)

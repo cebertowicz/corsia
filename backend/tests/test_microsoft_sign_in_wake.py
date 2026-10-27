@@ -10,15 +10,19 @@ import pytest
 
 from connections.account_state import CONSENT_CANCELLED, PROVIDER_UNAVAILABLE
 from connections.microsoft import account_store, oauth
+from connections.sign_in_notice import (
+    ACCOUNT_REMOVED_MESSAGE, CLOSED_BY_CAP_MESSAGE, SHUT_DOWN_MESSAGE,
+)
 from connections.sign_in_notice import EXPIRED_MESSAGE, UNAVAILABLE_MESSAGE, notify_starting_agent, wake_on_connect
 from infra.database import get_db, write_transaction
 from infra.send_types import SendRejected
 from sign_in_wake_helpers import (
-    adopt, parked_reports, record_drives, refuse_sign_in_wakes, reports_for, wakes,
+    adopt, break_notice_write, parked_reports, record_drives, refuse_sign_in_wakes, reports_for, wakes,
 )
 from tests.registry_helpers import make_session
+from tools.mcp_oauth_listener import REQUEST_CAP
 from tests.test_microsoft_sign_in import (  # noqa: F401  (the fixtures)
-    CLIENT_ID, EVERYWHERE, PERSON, TENANT_A, _accounts, _connect, _finish, agent_adds, microsoft,
+    CLIENT_ID, EVERYWHERE, PERSON, TENANT_A, _accounts, _callback, _connect, _finish, _query, agent_adds, microsoft,
 )
 
 ADDRESS = "same@example.test"
@@ -32,10 +36,9 @@ def _agent() -> str:
         db.close()
 
 
-async def _agent_flow(thread_id: str, *, starting_thread_id: str | None = None, **kwargs):
+async def _agent_flow(thread_id: str, **kwargs):
     return await oauth.start_sign_in(
-        CLIENT_ID, "work", TENANT_A, actor=("agent", thread_id), adding_thread_id=thread_id,
-        starting_thread_id=starting_thread_id or thread_id, **kwargs,
+        CLIENT_ID, "work", TENANT_A, actor=("agent", thread_id), adding_thread_id=thread_id, **kwargs,
     )
 
 
@@ -69,7 +72,7 @@ async def test_an_agent_signing_an_account_in_again_wakes_that_thread(microsoft,
     account_id = await _connect(microsoft)
     thread_id = _agent()
     url, _ = await _agent_flow(thread_id, account_id=account_id)
-    assert oauth._pending[_state(url)].starting_thread_id == thread_id
+    assert oauth._pending[_state(url)].adding_thread_id == thread_id
 
     status, _page = await _finish(url)
 
@@ -143,7 +146,7 @@ async def test_one_sign_in_is_one_input_whatever_arrives_after_it(microsoft, iso
 
 async def test_a_person_started_sign_in_wakes_no_one(microsoft, isolated_db):
     url, _ = await oauth.start_sign_in(CLIENT_ID, "work", TENANT_A, actor=PERSON, reach=EVERYWHERE)
-    assert oauth._pending[_state(url)].starting_thread_id is None
+    assert oauth._pending[_state(url)].adding_thread_id is None
 
     status, _page = await _finish(url)
 
@@ -211,7 +214,7 @@ async def test_a_wake_the_thread_refuses_is_reported_to_its_owner_and_that_owner
     owner, child = _agent(), _agent()
     adopt(child, owner)
     refuse_sign_in_wakes(monkeypatch)
-    url, _ = await _agent_flow(owner, starting_thread_id=child)
+    url, _ = await _agent_flow(child)
 
     assert (await _finish(url))[0] == 200
 
@@ -222,13 +225,17 @@ async def test_a_wake_the_thread_refuses_is_reported_to_its_owner_and_that_owner
     assert [call["thread"] for call in drives] == [owner]
 
 
-async def test_a_wake_the_thread_refuses_and_no_owner_takes_is_parked(microsoft, isolated_db, agent_adds):
-    url, _ = await _agent_flow(_agent(), starting_thread_id="no-such-thread")
+async def test_a_wake_the_thread_refuses_and_no_owner_takes_is_parked(
+    microsoft, isolated_db, agent_adds, monkeypatch,
+):
+    orphan = _agent()
+    refuse_sign_in_wakes(monkeypatch)
+    url, _ = await _agent_flow(orphan)
 
     assert (await _finish(url))[0] == 200
 
     [parked] = parked_reports()
-    assert parked["thread_id"] == "no-such-thread" and parked["event"] == "account.sign_in_finished"
+    assert parked["thread_id"] == orphan and parked["event"] == "account.sign_in_finished"
     assert [account["state"] for account in _accounts()] == ["connected"]
 
 
@@ -277,7 +284,7 @@ async def test_a_sign_in_the_callback_took_is_not_also_reported_expired(
 
 
 async def test_an_unavailable_target_keeps_the_account_and_is_logged(microsoft, isolated_db, agent_adds, caplog):
-    url, account_id = await _agent_flow(_agent(), starting_thread_id="no-such-thread")
+    url, account_id = await _agent_flow("no-such-thread")
 
     with caplog.at_level(logging.WARNING, logger="connections.sign_in_notice"):
         status, page = await _finish(url)
@@ -356,3 +363,107 @@ async def test_a_cancelled_callback_after_the_store_still_leaves_one_wake(
     [wake] = wakes()
     assert (wake["thread_id"], wake["outcome"], wake["account_id"]) == (thread_id, "connected", account_id)
     assert [account["id"] for account in _accounts()] == [account_id]
+
+
+def _ended(thread_id: str, message: str) -> bool:
+    return [(wake["thread_id"], wake["outcome"], wake["cause"], wake["message"]) for wake in wakes()] == [
+        (thread_id, "failed", CONSENT_CANCELLED, message),
+    ]
+
+
+async def test_a_flow_the_request_cap_closes_wakes_the_thread_once(microsoft, isolated_db, agent_adds, drives):
+    thread_id = _agent()
+    url, _ = await _agent_flow(thread_id)
+    state = _state(url)
+
+    for _ in range(REQUEST_CAP):
+        await _callback(_query(url)["redirect_uri"], path="/not-the-callback")
+    # The listener answers first, then closes the flow, queues the wake and drives the thread.
+    for _ in range(250):
+        if drives:
+            break
+        await asyncio.sleep(0.02)
+
+    assert state not in oauth._pending and _ended(thread_id, CLOSED_BY_CAP_MESSAGE)
+    assert drives == [{"thread": thread_id, "accounts": 0, "wakes": 1}]
+
+
+async def test_removing_the_account_wakes_the_thread_that_was_signing_it_in_again(
+    microsoft, isolated_db, agent_adds, drives,
+):
+    account_id = await _connect(microsoft)
+    thread_id = _agent()
+    url, _ = await _agent_flow(thread_id, account_id=account_id)
+
+    await oauth.clear_pending(account_id)
+
+    assert _state(url) not in oauth._pending and _ended(thread_id, ACCOUNT_REMOVED_MESSAGE)
+    assert drives == [{"thread": thread_id, "accounts": 1, "wakes": 1}]
+
+
+async def test_shutdown_queues_one_wake_for_each_waiting_agent_and_starts_no_turn(
+    microsoft, isolated_db, agent_adds, drives,
+):
+    thread_id = _agent()
+    await _agent_flow(thread_id)
+    await oauth.start_sign_in(CLIENT_ID, "work", TENANT_A, actor=PERSON, reach=EVERYWHERE)
+
+    await oauth.stop_all_signins()
+    await oauth.stop_all_signins()
+
+    assert oauth._pending == {} and _ended(thread_id, SHUT_DOWN_MESSAGE)
+    assert drives == []
+
+
+async def test_a_flow_the_callback_already_took_is_not_woken_again_when_closed(
+    microsoft, isolated_db, agent_adds,
+):
+    account_id = await _connect(microsoft)
+    thread_id = _agent()
+    url, _ = await _agent_flow(thread_id, account_id=account_id)
+    assert (await _finish(url))[0] == 200
+
+    await oauth.clear_pending(account_id)
+    await oauth.stop_all_signins()
+
+    assert [wake["outcome"] for wake in wakes()] == ["connected"]
+
+
+async def test_a_notice_the_database_refuses_leaves_the_failure_page_alone(
+    microsoft, isolated_db, agent_adds, monkeypatch, caplog,
+):
+    break_notice_write(monkeypatch)
+    url, _ = await _agent_flow(_agent())
+
+    with caplog.at_level(logging.ERROR, logger="connections.sign_in_notice"):
+        status, page = await _finish(url, error="access_denied", error_subcode="cancel")
+
+    assert status == 400 and b"cancelled" in page.lower() and wakes() == []
+    assert "the notice write for thread" in caplog.text
+
+
+async def test_a_notice_the_database_refuses_never_escapes_the_expiry_task(
+    microsoft, isolated_db, agent_adds, monkeypatch,
+):
+    break_notice_write(monkeypatch)
+    url, _ = await _agent_flow(_agent())
+    state = _state(url)
+    pending = oauth._pending[state]
+    oauth._pending_expiries[state].cancel()
+    monkeypatch.setattr(oauth, "PENDING_SECONDS", 0)
+
+    await oauth._expire(pending)
+
+    assert state not in oauth._pending and wakes() == []
+
+
+async def test_a_notice_the_database_refuses_keeps_the_stored_account(
+    microsoft, isolated_db, agent_adds, monkeypatch,
+):
+    break_notice_write(monkeypatch)
+    url, _ = await _agent_flow(_agent())
+
+    status, page = await _finish(url)
+
+    assert status == 200 and b"Microsoft is connected" in page
+    assert [account["state"] for account in _accounts()] == ["connected"] and wakes() == []

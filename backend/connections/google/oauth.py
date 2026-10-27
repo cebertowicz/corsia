@@ -30,7 +30,9 @@ from connections.google.client import STATUS_CONNECTED, TIMEOUT_SECONDS, TOKEN_U
 from connections.google.reach_replies import (
     ALREADY_CONNECTED, ALREADY_NEEDS_SIGN_IN, STILL_CONNECTED, not_covered_reply,
 )
-from connections.sign_in_notice import drive_starting_agent, notify_expired, notify_starting_agent, wake_on_connect
+from connections.sign_in_notice import (
+    SHUT_DOWN_MESSAGE, drive_starting_agent, notify_ended, notify_expired, notify_starting_agent, wake_on_connect,
+)
 from infra import key_store
 from infra.db_async import run_in_db
 from infra.default_port import DEFAULT_BACKEND_PORT
@@ -73,7 +75,6 @@ UNKNOWN_ACCOUNT = "No Google account has that account_id. Call google_status to 
 GONE = "That Google account was removed during its sign-in. Call google_connect to add it again."
 TOO_MANY = "Too many Google sign-ins are waiting. Finish one or wait ten minutes, then call google_connect."
 
-
 GoogleSignInError = client.GoogleSignInError
 
 
@@ -86,7 +87,6 @@ class _Pending:
     adding: bool
     actor: Actor
     adding_thread_id: str | None
-    #: The thread that started this sign-in, an add or a sign in again; the one woken with how it ended.
     starting_thread_id: str | None
     reach: AppReach | None
     scopes: tuple[str, ...]
@@ -135,7 +135,6 @@ def _check_reconnect(account_id: str, db) -> None:  # type: ignore[no-untyped-de
         raise GoogleSignInError(UNKNOWN_ACCOUNT) from None
     if account["state"] == STATUS_CONNECTED and resolve_credentials(account_id, db=db) is not None:
         raise GoogleSignInError(STILL_CONNECTED.format(address=account["address"]))
-
 
 
 def _begin(
@@ -188,11 +187,9 @@ async def start_sign_in(
 ) -> tuple[str, str]:
     """``(url, account_id)`` for one sign-in; the client's id and secret never leave the backend.
 
-    With ``account_id`` it signs that row in again. Without it, it adds an
-    account whose reach comes from ``adding_thread_id``'s scope or, for a
-    person's session, the given ``reach``. ``starting_thread_id`` is the agent
-    thread that started the sign-in, either kind; it is woken once with how it
-    ended, including when nobody finishes it in time.
+    With ``account_id`` it signs that row in again. Without it, it adds an account whose reach comes from
+    ``adding_thread_id``'s scope or, for a person's session, the given ``reach``. ``starting_thread_id`` is the agent
+    thread that started the sign-in, either kind; it is woken once with how it ended, even if nobody finishes it.
     """
     url, pending = await run_in_db(
         _begin, client_file, account_id, actor, adding_thread_id, reach, starting_thread_id,
@@ -211,6 +208,17 @@ async def _expire(pending: _Pending) -> None:
             return
         _expiries.pop(pending.state, None)
     await notify_expired(pending.starting_thread_id, pending.state, "google", pending.account_id)
+
+
+async def stop_all_signins() -> None:
+    """Drop every pending sign-in at shutdown; each waiting agent is woken, but no turn starts."""
+    with _pending_lock:
+        flows = list(_pending.values())
+        _pending.clear()
+        for state in list(_expiries):
+            _expiries.pop(state).cancel()
+    for flow in flows:
+        await notify_ended(flow.starting_thread_id, flow.state, "google", flow.account_id, SHUT_DOWN_MESSAGE, drive=False)
 
 
 def _take_pending(state: object) -> _Pending:

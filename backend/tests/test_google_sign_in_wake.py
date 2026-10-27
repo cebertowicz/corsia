@@ -12,12 +12,12 @@ import pytest
 from connections.account_state import CONSENT_CANCELLED, PROVIDER_UNAVAILABLE
 from connections.app_reach import AppReach
 from connections.google import oauth
-from connections.sign_in_notice import EXPIRED_MESSAGE, UNAVAILABLE_MESSAGE, notify_starting_agent
+from connections.sign_in_notice import EXPIRED_MESSAGE, SHUT_DOWN_MESSAGE, UNAVAILABLE_MESSAGE, notify_starting_agent
 from infra.database import get_db
 from infra.internal_principal import internal_request
 from infra.send_types import SendRejected
 from sign_in_wake_helpers import (
-    adopt, parked_reports, record_drives, refuse_sign_in_wakes, reports_for, wakes,
+    adopt, break_notice_write, parked_reports, record_drives, refuse_sign_in_wakes, reports_for, wakes,
 )
 from tests.test_google_sign_in import (  # noqa: F401  (the fixtures)
     EMAIL, REFRESH, SECRET, _accounts, _connect, _http, _start, client_file, conductor, google,
@@ -396,6 +396,40 @@ async def test_a_cancelled_callback_after_the_store_still_leaves_one_wake(google
     assert (wake["thread_id"], wake["outcome"], wake["account_id"]) == (conductor, "connected", account["id"])
 
 
+async def test_shutdown_queues_one_wake_for_the_waiting_agent_and_starts_no_turn(
+    google, conductor, client_file, drives,
+):
+    _, state = await _start(google, conductor, client_file)
+    timer = oauth._expiries[state]
+    await oauth.start_sign_in(client_file, actor=("person", "person"), reach=EVERYWHERE)
+    assert len(oauth._pending) == 2
+
+    await oauth.stop_all_signins()
+    await oauth.stop_all_signins()
+    await asyncio.sleep(0)
+
+    [wake] = wakes()
+    assert (wake["thread_id"], wake["outcome"], wake["cause"], wake["message"]) == (
+        conductor, "failed", CONSENT_CANCELLED, SHUT_DOWN_MESSAGE,
+    )
+    assert oauth._pending == {} and oauth._expiries == {} and timer.cancelled()
+    assert drives == [] and _accounts() == []
+
+
+async def test_backend_shutdown_stops_the_google_sign_ins(google, conductor, client_file, monkeypatch):
+    from app_startup_runtime import RUNTIME_LOOP_TASKS
+    from app_shutdown_owned_tasks import shutdown_owned_tasks
+    from infra import state
+
+    for name in ("_github_ownership_login_task", *(attr for _label, attr in RUNTIME_LOOP_TASKS)):
+        monkeypatch.setattr(state, name, None, raising=False)
+    await _start(google, conductor, client_file)
+
+    await shutdown_owned_tasks([None] * 5, logging.getLogger("test"))
+
+    assert [wake["message"] for wake in wakes()] == [SHUT_DOWN_MESSAGE] and oauth._pending == {}
+
+
 async def test_the_expiry_the_agent_is_told_follows_the_constant(google, conductor, client_file, monkeypatch):
     from tools.google_account import GoogleConnectTool
 
@@ -404,6 +438,43 @@ async def test_the_expiry_the_agent_is_told_follows_the_constant(google, conduct
     out = await GoogleConnectTool().execute(_thread_id=conductor, client_file=client_file)
 
     assert "expires after 20 minutes" in json.loads(out)["next"]
+
+
+async def test_a_notice_the_database_refuses_leaves_the_failure_page_alone(
+    google, conductor, client_file, monkeypatch, caplog,
+):
+    break_notice_write(monkeypatch)
+    _, state = await _start(google, conductor, client_file)
+
+    with caplog.at_level(logging.ERROR, logger="connections.sign_in_notice"):
+        status, page = await _callback(state, error="access_denied")
+
+    assert status == 400 and oauth.BROWSER_DENIED in page and wakes() == []
+    assert "the notice write for thread" in caplog.text
+
+
+async def test_a_notice_the_database_refuses_never_escapes_the_expiry_task(
+    google, conductor, client_file, monkeypatch,
+):
+    break_notice_write(monkeypatch)
+    _, state = await _start(google, conductor, client_file)
+    pending = oauth._pending[state]
+    _stop_timer(state)
+    monkeypatch.setattr(oauth, "PENDING_SECONDS", 0)
+
+    await oauth._expire(pending)
+
+    assert state not in oauth._pending and wakes() == []
+
+
+async def test_a_notice_the_database_refuses_keeps_the_stored_account(google, conductor, client_file, monkeypatch):
+    break_notice_write(monkeypatch)
+    _, state = await _start(google, conductor, client_file)
+
+    status, page = await _callback(state, code="auth-code")
+
+    assert status == 200 and "Google is connected" in page
+    assert [a["state"] for a in _accounts()] == ["connected"] and wakes() == []
 
 
 def test_the_provider_unavailable_facts_are_the_same_on_every_provider():
