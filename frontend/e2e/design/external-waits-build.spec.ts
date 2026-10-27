@@ -570,7 +570,7 @@ test('plan copy: the plan pane when its plan is forbidden, fails to load, or can
 	test.setTimeout(150_000);
 	const states = [
 		{ frame: 21, status: 403, json: {}, text: 'You don’t have access to this chat. Choose another.', button: null },
-		{ frame: 22, status: 500, json: { detail: 'internal', reference: 'a1b2c3d4' }, text: 'Couldn’t load the plan. Try again.', reference: 'Reference: a1b2c3d4', button: 'Retry' },
+		{ frame: 22, status: 500, json: { detail: 'internal', reference: 'a1b2c3d4' }, text: 'Couldn’t load the plan. Try again. Reference: a1b2c3d4', button: 'Retry' },
 		{ frame: 23, status: 200, json: { contract_version: 99 }, text: 'Couldn’t read this plan. Reload the page.', button: 'Reload' },
 	];
 	await page.route('**/api/attention/queue*', route => route.fulfill({ json: { current: null, count: 0, items: [] } }));
@@ -594,8 +594,7 @@ test('plan copy: the plan pane when its plan is forbidden, fails to load, or can
 				mount(Component, { target: host, props: { threadId: 'frame-thread' } });
 				flushSync();
 			}, width === 393 ? '100%' : '312px');
-			await expect(page.getByText(state.text, { exact: true })).toBeVisible();
-			if (state.reference) await expect(page.getByText(state.reference, { exact: true })).toBeVisible();
+			await expect(page.getByText(state.text)).toBeVisible();
 			if (state.button) await expect(page.getByRole('button', { name: state.button, exact: true })).toBeVisible();
 			await shot(page, `copy-${state.frame}-${width}`);
 		}

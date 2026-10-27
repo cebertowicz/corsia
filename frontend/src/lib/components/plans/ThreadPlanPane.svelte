@@ -237,7 +237,6 @@
 	{:else if query.status === 'error' && !hasPayload}
 		<div class="plan-state error" role="alert">
 			<strong>{query.errorMessage}</strong>
-			{#if query.errorReference}<p>Reference:&nbsp;{query.errorReference}</p>{/if}
 			<!-- A reply this page can't read fails the same way on a retry; only a fresh page can read it. -->
 			{#if query.reloadNeeded}
 				<Button variant="secondary" size="sm" onclick={() => location.reload()}>Reload</Button>
@@ -351,7 +350,6 @@
 	.plan-state.error { color: var(--red); }
 	.plan-state strong { color: var(--text-primary); font-size: var(--text-footnote); text-wrap: balance; }
 	.plan-state p { margin: 0; font-size: var(--text-caption); }
-	.plan-state.error p { color: var(--text-secondary); }
 	.status-banner {
 		display: flex; align-items: center; justify-content: space-between; gap: var(--space-2);
 		padding: var(--space-2); border: 1px solid var(--amber-line); border-radius: var(--radius-sm);
