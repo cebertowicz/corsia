@@ -144,8 +144,10 @@ async def setup_local_source(
     _user: dict = Depends(require_user_header_only),
 ) -> dict[str, Any]:
     """Start managed setup; memory, not another oMLX, decides what loads."""
+    from api.local_model_guard import require_local_model_host
     from llm.local_setup_flow import begin_local_setup
 
+    require_local_model_host()
     return await begin_local_setup(no_subscription_only=no_subscription_only, automatic=automatic, onboarding=onboarding)
 
 

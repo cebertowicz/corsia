@@ -21,7 +21,7 @@
 	import AddLocalModelSheet from './v7/AddLocalModelSheet.svelte';
 	import { inlineSlot } from '$lib/slotMotion';
 	import SwitchingIcon from './ui/SwitchingIcon.svelte';
-	import { canAddLocalModel, canSetUpLocalModel, localStatus, retryLocalSetup, watchLocalStatus } from '$lib/stores/localPickerStatus';
+	import { canAddLocalModel, canSetUpLocalModel, localStatus, neverLocalHost, retryLocalSetup, watchLocalStatus } from '$lib/stores/localPickerStatus';
 	import type { LocalPickerRetry } from '$lib/conductorSources';
 	import { toasts } from '$lib/stores/toast';
 	import { emitSwitchEvent } from '$lib/stores/threadModelSwitch';
@@ -74,7 +74,7 @@
 	const hasReadyGroup = $derived(groups.some((group) => group.state === 'ready'));
 	// The Local section is the one place to add a local model; the Local only row and note link only when it is absent.
 	const showsLocalSection = $derived((!hasLocalSetupGroup && (!!$localStatus || $canAddLocalModel)) || $canSetUpLocalModel);
-	const setUpLocalElsewhere = $derived(showsLocalSection ? undefined : () => { showAddLocal = true; });
+	const setUpLocalElsewhere = $derived(showsLocalSection || $neverLocalHost ? undefined : () => { showAddLocal = true; });
 	// The note links only when the Local only row is not already showing that link.
 	let rowOffersSetup = $state(false);
 	const noteSetUpLocal = $derived(sel.isOpen && rowOffersSetup ? undefined : setUpLocalElsewhere);
@@ -82,7 +82,7 @@
 	async function retryLocal(kind: LocalPickerRetry) {
 		const result = await retryLocalSetup(kind);
 		if (!result.ok) {
-			toasts.show(kind === 'settings' ? result.message ?? "Couldn't retry the local model download. Try again." : "Couldn't set up the local model.", 'error');
+			toasts.show(result.neverLocalHost ? result.message ?? "Couldn't set up the local model." : kind === 'settings' ? result.message ?? "Couldn't retry the local model download. Try again." : "Couldn't set up the local model.", 'error');
 		}
 	}
 
