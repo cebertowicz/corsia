@@ -16,10 +16,28 @@ def _not_loaded_target():
 @pytest.mark.parametrize("state", ["no_room", "no_memory", "unreachable"])
 def test_unready_local_target_fails_a_person_send(isolated_db, monkeypatch, state):
     from infra.send_target import classify_target_admission
+    from llm.local_model_load import ModelLoadFailed
+    from llm.resolution import ModelUnavailableError
 
     target = replace(_not_loaded_target(), availability_reason=state)
-    assert classify_target_admission(target, load_for=("p",)).kind == "fail"
-    assert classify_target_admission(target, load_for=()).kind == "wait"
+    person = classify_target_admission(target, load_for=("p",))
+    background = classify_target_admission(target, load_for=())
+    assert person.kind == "fail"
+    assert background.kind == "wait"
+    # The classifier alone decides a refused load; the error only reads its verdict.
+    refused = person.error(target.catalog_id)
+    assert isinstance(refused, ModelLoadFailed) and refused.cause == state
+    assert isinstance(background.error(target.catalog_id), ModelUnavailableError)
+
+
+def test_a_harness_connection_failure_is_not_a_refused_load(isolated_db, monkeypatch):
+    from infra.send_target import classify_target_admission
+    from llm.resolution import ModelUnavailableError
+
+    target = replace(_not_loaded_target(), availability_reason="connection_unavailable")
+    admission = classify_target_admission(target, load_for=("p",))
+    assert admission.kind == "fail"
+    assert isinstance(admission.error(target.catalog_id), ModelUnavailableError)
 
 
 def test_not_loaded_loads_for_a_person_send(isolated_db, monkeypatch):

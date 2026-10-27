@@ -45,11 +45,11 @@ class Admission:
     load_for: tuple[str, ...] = ()
 
     def error(self, catalog_id: str) -> Exception:
-        """The one refusal error: a person's load refusal, otherwise the unavailable model."""
-        from llm.local_model_load import LOAD_REFUSALS, ModelLoadFailed
+        """The one refusal error. Only ``classify_target_admission`` gives a ``fail`` a cause: a person's refused load."""
+        from llm.local_model_load import ModelLoadFailed
         from llm.resolution import ModelUnavailableError
 
-        if self.load_for and self.cause in LOAD_REFUSALS:
+        if self.kind == "fail" and self.cause:
             return ModelLoadFailed(self.cause)  # type: ignore[arg-type]
         return ModelUnavailableError(catalog_id, self.cause or "model_unavailable")
 
