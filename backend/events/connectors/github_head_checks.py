@@ -47,7 +47,7 @@ class EventSink(Protocol):
     async def admit_event(
         self, *, event_type: str, facts: dict[str, Any],
         origin: Literal["connector", "emitter", "agent", "platform"], producer: str,
-        event_id: str, external_id: str | None = None, occurred_at: str | None = None,
+        event_id: str,
     ) -> IntakeResult: ...
 
 
@@ -57,9 +57,8 @@ class IntakeSink:
     async def admit_event(
         self, *, event_type: str, facts: dict[str, Any],
         origin: Literal["connector", "emitter", "agent", "platform"], producer: str,
-        event_id: str, external_id: str | None = None, occurred_at: str | None = None,
+        event_id: str,
     ) -> IntakeResult:
-        # The PR artifact is built from the facts, so intake takes neither external_id nor occurred_at.
         from events.intake import admit_event
         return await admit_event(event_type=event_type, facts=facts, origin=origin,
                                  producer=producer, event_id=event_id)
@@ -69,19 +68,11 @@ def _object(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
-def _pr_number(payload: dict[str, Any]) -> int | None:
-    for candidate in _object(payload.get("check_suite")).get("pull_requests", []):
-        number = _object(candidate).get("number")
-        if isinstance(number, int) and not isinstance(number, bool):
-            return number
-    return None
-
-
 def _current_suites(body: Any) -> list[dict[str, Any]]:
     """REST suites have independent identities, even when they share an app.
 
     The REST shape names no workflow; a re-run reuses the suite and moves its
-    ``updated_at``. Every returned suite must complete before the head settles.
+    ``updated_at``. Only suites with runs must complete before the head settles.
     """
     return [suite for suite in _object(body).get("check_suites", []) if isinstance(suite, dict)]
 
@@ -112,7 +103,7 @@ class HeadCheckAggregator:
         self._tasks: dict[tuple[str, str], asyncio.Task[None]] = {}
         self._facts: dict[tuple[str, str], tuple[str | None, int | None]] = {}
 
-    def observe(self, payload: dict[str, Any]) -> None:
+    def observe(self, payload: dict[str, Any], selected_pr: dict[str, Any] | None = None) -> None:
         suite, repository = _object(payload.get("check_suite")), _object(payload.get("repository"))
         repo, head_sha = repository.get("full_name"), suite.get("head_sha")
         if not isinstance(repo, str) or not isinstance(head_sha, str):
@@ -121,8 +112,11 @@ class HeadCheckAggregator:
         old = self._tasks.pop(key, None)
         if old is not None:
             old.cancel()
-        self._facts[key] = (suite.get("head_branch") if isinstance(suite.get("head_branch"), str) else None,
-                            _pr_number(payload))
+        previous_branch, previous_pr = self._facts.get(key, (None, None))
+        branch = suite.get("head_branch")
+        number = (selected_pr or {}).get("number")
+        self._facts[key] = (branch if isinstance(branch, str) else previous_branch,
+                            number if isinstance(number, int) and not isinstance(number, bool) else previous_pr)
         self._tasks[key] = asyncio.create_task(self._settle(key), name=f"github-head:{repo}:{head_sha}")
 
     async def _settle(self, key: tuple[str, str]) -> None:
@@ -135,16 +129,19 @@ class HeadCheckAggregator:
                     response = await poller.gated_read(
                         self.runner, repo, f"repos/{repo}/commits/{head_sha}/check-suites")
                 except Exception:
-                    log.exception("github-head-checks: aggregate read failed for %s@%s", *key)
+                    log.warning("github-head-checks: aggregate read failed for %s@%s", *key, exc_info=True)
                     return
                 if response is not None and response.status == 200:
                     break
             else:
-                log.info("github-head-checks: aggregate read dropped after retries for %s@%s", *key)
+                log.warning("github-head-checks: aggregate read dropped after retries for %s@%s", *key)
                 return
             assert response is not None
             latest = _current_suites(response.body)
-            if not latest or any(suite.get("status") != "completed" for suite in latest):
+            latest = [suite for suite in latest if (suite.get("latest_check_runs_count") or 0) > 0]
+            incomplete = sum(suite.get("status") != "completed" for suite in latest)
+            if not latest or incomplete:
+                log.info("github-head-checks: head %s@%s incomplete suites=%s", *key, incomplete)
                 return
             branch, pr_number = self._facts.get(key, (None, None))
             facts: dict[str, Any] = {"repo": repo, "head_sha": head_sha, "conclusion": _conclusion(latest)}
@@ -152,10 +149,8 @@ class HeadCheckAggregator:
                 facts["head_branch"] = branch
             if pr_number is not None:
                 facts["pr_number"] = pr_number
-            external_id = f"{repo}#{pr_number}" if pr_number is not None else None
             result = await self.sink.admit_event(event_type="github.head.checks_completed", facts=facts,
-                origin="connector", producer="github", event_id=_event_id(repo, head_sha, latest),
-                external_id=external_id)
+                origin="connector", producer="github", event_id=_event_id(repo, head_sha, latest))
             if result.refusal is not None:
                 log.info("github-head-checks: intake refused %s@%s code=%s", *key, result.refusal.code)
         finally:
@@ -168,19 +163,24 @@ _default: HeadCheckAggregator | None = None
 
 
 def hook_disabled_reason() -> str | None:
-    """Off by default; the poller's switches (config off, test mode) also hold it."""
-    reason = poller.disabled_reason()
-    if reason:
-        return reason
+    """Off by default and in test mode, independently of the poller switch."""
+    if os.environ.get("CORSIA_TEST_MODE") == "1":
+        return "test_mode"
     return None if os.environ.get(ENABLE_ENV) == "1" else "not_enabled"
 
 
-def observe_admitted_check_suite(payload: dict[str, Any]) -> None:
+def observe_admitted_check_suite(payload: dict[str, Any], selected_pr: dict[str, Any] | None = None) -> None:
     """Hook for admitted ``check_suite.completed`` deliveries."""
     global _default
     if hook_disabled_reason():
         return
+    if selected_pr is None:
+        from events.identity import PrResolutionError, check_suite_pr_metadata_from_payload
+        try:
+            selected_pr = check_suite_pr_metadata_from_payload(payload)
+        except PrResolutionError:
+            log.info("github-head-checks: ambiguous payload PR identity")
     if _default is None:
         from reviewer.gh_api import run_gh
         _default = HeadCheckAggregator(run_gh, IntakeSink())
-    _default.observe(payload)
+    _default.observe(payload, selected_pr)

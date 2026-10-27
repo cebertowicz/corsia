@@ -17,7 +17,7 @@ def payload(sha="abc"):
 
 def response(status=200):
     return GhResponse(status, {}, {"check_suites": [
-        {"id": 1, "updated_at": "2026-01-01T00:00:00Z", "status": "completed", "conclusion": "success"}
+        {"id": 1, "updated_at": "2026-01-01T00:00:00Z", "status": "completed", "conclusion": "success", "latest_check_runs_count": 1}
     ]})
 
 
@@ -74,7 +74,8 @@ async def test_four_held_reads_drop_and_clear_state(monkeypatch, caplog):
         await finish(agg)
     assert len(calls) == 4 and not sink.events
     assert not agg._tasks and not agg._facts
-    assert sum("dropped after retries" in r.message for r in caplog.records) == 1
+    drops = [r for r in caplog.records if "dropped after retries" in r.message]
+    assert len(drops) == 1 and drops[0].levelno == logging.WARNING
 
 
 @pytest.mark.asyncio
@@ -140,7 +141,7 @@ async def test_debounce_replaces_task_without_old_cleanup_losing_new_state(monke
 
 
 @pytest.mark.asyncio
-async def test_pending_suite_waits_and_cancelled_conclusion_is_preserved(monkeypatch):
+async def test_pending_suite_waits_and_cancelled_conclusion_is_preserved(monkeypatch, caplog):
     pending = response()
     pending.body["check_suites"][0]["status"] = "queued"
     cancelled = response()
@@ -153,8 +154,10 @@ async def test_pending_suite_waits_and_cancelled_conclusion_is_preserved(monkeyp
     monkeypatch.setattr(poller, "gated_read", read)
     sink = Sink()
     agg = aggregator(sink)
-    agg.observe(payload())
-    await finish(agg)
+    with caplog.at_level(logging.INFO):
+        agg.observe(payload())
+        await finish(agg)
+    assert "incomplete suites=1" in caplog.text
     assert not sink.events and not agg._facts and not agg._tasks
     agg.observe(payload())
     await finish(agg)
@@ -165,6 +168,8 @@ async def test_pending_suite_waits_and_cancelled_conclusion_is_preserved(monkeyp
 async def test_gated_read_uses_and_saves_existing_repo_budget(monkeypatch):
     state = {"reads": []}
     saved, calls = [], []
+    status = {"state": "starting", "reason": None, "counted_reads": 0, "degraded": None}
+    monkeypatch.setattr(poller, "_status", status)
     monkeypatch.setattr(poller, "_locks", {})
     monkeypatch.setattr(poller, "_repo_state", lambda _repo: state)
     monkeypatch.setattr(poller, "_save_state", lambda repo, value: saved.append((repo, value.copy())))
@@ -175,6 +180,40 @@ async def test_gated_read_uses_and_saves_existing_repo_budget(monkeypatch):
     state["reads"] *= poller.MAX_HOURLY_READS
     assert await poller.gated_read(lambda *_a: None, "o/r", "path") is None
     assert len(calls) == 1 and len(saved) == 2
+    assert status == {"state": "starting", "reason": None, "counted_reads": 0, "degraded": None}
+
+
+@pytest.mark.asyncio
+async def test_zero_run_suite_does_not_block(monkeypatch):
+    reply = response()
+    reply.body["check_suites"].append({"id": 2, "status": "queued", "latest_check_runs_count": 0})
+
+    async def read(*_args):
+        return reply
+
+    monkeypatch.setattr(poller, "gated_read", read)
+    sink = Sink()
+    agg = aggregator(sink)
+    agg.observe(payload())
+    await finish(agg)
+    assert len(sink.events) == 1
+
+
+@pytest.mark.asyncio
+async def test_missing_pr_does_not_erase_selected_identity():
+    agg = aggregator(Sink())
+    first = payload()
+    from events.identity import check_suite_pr_metadata_from_event
+
+    prs = [{"number": n, "state": state, "head": {"sha": "abc", "ref": "main"},
+            "base": {"ref": "dev"}} for n, state in ((1, "closed"), (7, "open"))]
+    first["check_suite"].update(head_branch="main", pull_requests=prs)
+    agg.observe(first, check_suite_pr_metadata_from_event(first))
+    agg.observe(payload(), None)
+    assert agg._facts[("o/r", "abc")] == ("main", 7)
+    for task in agg._tasks.values():
+        task.cancel()
+    await asyncio.gather(*agg._tasks.values(), return_exceptions=True)
 
 
 def test_event_identity_depends_on_suites_not_delivery():
@@ -185,9 +224,10 @@ def test_event_identity_depends_on_suites_not_delivery():
 
 def test_hook_requires_both_switches(monkeypatch):
     monkeypatch.setenv(checks.ENABLE_ENV, "1")
-    monkeypatch.setattr(poller, "disabled_reason", lambda: "test_mode")
+    monkeypatch.setenv("CORSIA_TEST_MODE", "1")
     assert checks.hook_disabled_reason() == "test_mode"
-    monkeypatch.setattr(poller, "disabled_reason", lambda: None)
+    monkeypatch.setenv("CORSIA_TEST_MODE", "0")
+    monkeypatch.setenv(poller.DISABLE_ENV, "1")
     assert checks.hook_disabled_reason() is None
     monkeypatch.delenv(checks.ENABLE_ENV)
     assert checks.hook_disabled_reason() == "not_enabled"
