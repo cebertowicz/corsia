@@ -29,10 +29,26 @@ def thread_tmp_root(state_root: Path, thread_id: str) -> Path:
 
 
 def cleanup_thread_tmp(state_root: Path, thread_id: str) -> None:
-    try:
-        shutil.rmtree(thread_tmp_root(state_root, thread_id))
-    except FileNotFoundError:
+    class RetryRemoval(Exception):
         pass
+
+    def restore_access(_function, path, error):
+        if not isinstance(error[1], PermissionError):
+            raise error[1]
+        mode = os.stat(path, follow_symlinks=False).st_mode
+        if mode & 0o700 == 0o700 or not os.path.isdir(path) or os.path.islink(path):
+            raise error[1]
+        os.chmod(path, mode | 0o700, follow_symlinks=False)
+        raise RetryRemoval
+
+    while True:
+        try:
+            shutil.rmtree(thread_tmp_root(state_root, thread_id), onerror=restore_access)
+            return
+        except RetryRemoval:
+            continue
+        except FileNotFoundError:
+            return
 
 
 def _canonical(paths: Sequence[Path]) -> list[Path]:

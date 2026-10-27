@@ -311,7 +311,10 @@ async def finish_thread_close(token: ThreadCloseToken) -> None:
         from infra.config import STATE_ROOT
         from tools.linux_sandbox import cleanup_thread_tmp
         for thread_id in token.thread_ids:
-            await asyncio.to_thread(cleanup_thread_tmp, STATE_ROOT, thread_id)
+            try:
+                await asyncio.to_thread(cleanup_thread_tmp, STATE_ROOT, thread_id)
+            except Exception:
+                logger.exception("Linux sandbox temporary directory cleanup failed for thread {}", thread_id)
     try:
         await run_in_db(drain_retirements)
     except Exception:

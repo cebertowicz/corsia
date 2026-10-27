@@ -6,7 +6,7 @@ import pytest
 from tools import linux_sandbox_probe as probe
 
 
-MISSING = ('Error: the Linux sandbox (bubblewrap) is not installed on this server. '
+MISSING = ('Error: the Linux sandbox (bubblewrap) is not installed on this computer. '
            'Nothing ran. Install it with "sudo apt install bubblewrap", then restart CORSIA.')
 
 

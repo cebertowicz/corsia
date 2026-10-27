@@ -15,7 +15,7 @@ import threading
 from tools.linux_keyring_launcher import launcher_argv
 
 _MISSING = (
-    'Error: the Linux sandbox (bubblewrap) is not installed on this server. '
+    'Error: the Linux sandbox (bubblewrap) is not installed on this computer. '
     'Nothing ran. Install it with "sudo apt install bubblewrap", then restart CORSIA.'
 )
 _FAILURE = (
