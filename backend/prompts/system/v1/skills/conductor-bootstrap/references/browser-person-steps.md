@@ -1,6 +1,6 @@
 # Steps in the browser that belong to the person
 
-Use this whenever you open a page in the shared browser (`browser_open` without `show_window`) and a step on it is theirs: a captcha, a sign-in, a password, a verification code. The person watches and acts there. You fill only what the person has already told you (their saved email); everything else is theirs. Never solve, bypass or work around a captcha.
+Use this whenever you open a page in the shared browser (`browser_open` with `show_window: true`) and a step on it is theirs: a captcha, a sign-in, a password, a verification code. The person watches and acts there. You fill only what the person has already told you (their saved email); everything else is theirs. Never solve, bypass or work around a captcha.
 
 `browser_wait` takes a selector (it waits for it to appear) or milliseconds; it has no URL mode. So you watch with a loop, never with a single wait. "Read the URL and title" always means exactly one call, `browser_eval` with the script `[location.href, document.title]`, character for character; no other script, and no other tool, reads a page that is the person's.
 

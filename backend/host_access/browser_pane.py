@@ -37,6 +37,21 @@ class PaneAppearance:
         return cls(int(width), int(height), round(scale, 2), data["scheme"])
 
 
+async def watch_targets(thread_id: str, notify: Callable[[], None]) -> None:
+    """Observe browser target lifecycle while a pane is connected."""
+    from host_access.browser_session_commands import browser_endpoint
+    endpoint = await browser_endpoint(PROCESS_OWNER.browser_sessions(), thread_id)
+    async with browser_cdp.CdpClient(endpoint) as cdp:
+        await cdp.call("Target.setDiscoverTargets", discover=True)
+        while True:
+            import json
+            event = json.loads(await cdp.socket.recv())
+            method = event.get("method")
+            info = event.get("params", {}).get("targetInfo", {})
+            if method == "Target.targetDestroyed" or method == "Target.targetCreated" and info.get("type") == "page":
+                notify()
+
+
 async def watch_page_metadata(thread_id: str, connection_token: str, report: Callable[[dict], Awaitable[None]]) -> None:
     """Forward CDP main-frame metadata changes for this connected shared pane."""
     await browser_cdp.watch_page_metadata(await _page_endpoint(thread_id, connection_token, "This page couldn't be checked"), report)
@@ -103,6 +118,7 @@ async def open_url(thread_id: str, url: str, connection_token: str | None = None
     """Open a pane URL: a connected pane navigates the open browser; without one, only a new session starts."""
     return await PROCESS_OWNER.browser_sessions().run(
         thread_id, ("open", url), session="new" if connection_token is None else "existing", pane=True,
+        show_window=True,
     )
 
 

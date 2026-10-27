@@ -79,7 +79,7 @@ async def start_chrome(owner: Any, runtime: Any) -> None:
         await asyncio.to_thread(browser_executables.verify_google, owner._chrome)
     runtime.chrome = await ChromeProcess.launch(
         owner._chrome, profile=runtime.record.profile,
-        headless=not runtime.record.show_window, ua=owner._user_agent)
+        headless=True, ua=owner._user_agent)
     runtime.chrome.release_stream()
     runtime.attempt_started_at = time.time()
     runtime.attempt = browser_cli.CommandResult(-1, "", "", completion="unknown")
@@ -152,7 +152,7 @@ def assign(sessions: Mapping[str, Any], profile: str | None, thread_id: str) -> 
 def flags(record: Any, ua: str | None) -> Sequence[str]:
     """Keep launch settings stable across the CDP connection's commands."""
     if sys.platform != "darwin":
-        return ["--args", browser_launch.stealth_args(ua, headless=not record.show_window),
+        return ["--args", browser_launch.stealth_args(ua, headless=True),
                 "--init-script", str(browser_launch.STEALTH_INIT_SCRIPT)]
     return ["--init-script", str(browser_launch.STEALTH_INIT_SCRIPT)]
 

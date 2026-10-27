@@ -150,12 +150,34 @@ class BrowserEvalTool(Tool):
 
 
 
+class BrowserTabTool(Tool):
+    """List or bring forward an existing browser tab."""
+
+    name = "browser_tab"
+    description = (
+        "List browser tabs after a page opens a popup, or when the person needs a page that is not showing. "
+        "With no tab, returns each tab's ref, title, URL and whether it is active. "
+        "Pass a ref from that list to bring that tab forward in the shared pane."
+    )
+    parameters = {
+        "type": "object",
+        "properties": {"tab": {"type": "string", "description": "A tab ref from browser_tab's list."}},
+        "required": [],
+    }
+
+    async def execute(self, tab: str | None = None, **kwargs: Any) -> str:
+        thread_id, _project_id = _execution_context(kwargs)
+        if tab is not None and (not tab or tab in {"new", "close", "list"} or tab.startswith("-") or any(c.isspace() for c in tab)):
+            return "Error: use a tab ref from browser_tab's list."
+        return await _run(["tab"] if tab is None else ["tab", tab], thread_id=thread_id)
+
+
 class BrowserPersonStepTool(Tool):
     """Let the person complete a visible browser page and wake the agent after navigation."""
 
     name = "browser_person_step"
     description = (
-        "Give the current visible browser page to the person to complete, then end your turn. "
+        "Share the current browser page in the person's CORSIA pane and ask them to complete it, then end your turn. "
         "CORSIA puts the step in their attention list and wakes you when the page changes. "
         "Use this for sign-in, account choice, verification, passkeys, or phone prompts; never ask for or "
         "read a password or code."

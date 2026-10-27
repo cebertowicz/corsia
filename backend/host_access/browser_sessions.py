@@ -169,13 +169,6 @@ class BrowserSessionOwner:
             if runtime.record.terminal_state != "running":
                 return runtime  # The serialized command path reports this responsibility.
             self._assert_admitted(runtime, lease_id)
-            if show_window is not None and runtime.record.show_window != show_window:
-                current = "visible" if runtime.record.show_window else "headless"
-                requested = "true" if show_window else "false"
-                raise BrowserSessionError(
-                    f"browser session is already running {current}. Call browser_close, "
-                    f"then browser_open with show_window={requested}."
-                )
             if runtime.record.lease_id is None and lease_id is not None:
                 runtime.record = replace(runtime.record, lease_id=lease_id)
             return runtime
@@ -198,7 +191,6 @@ class BrowserSessionOwner:
         return (self._native.path, "--session", runtime.record.session,
                 *(("--cdp", runtime.chrome.endpoint) if runtime.chrome
                   else ("--executable-path", self._chrome) if self._chrome else ()),
-                *(("--headed",) if runtime.record.show_window else ()),
                 *launch.flags(runtime.record, self._user_agent),
                 "--json", *args)
 

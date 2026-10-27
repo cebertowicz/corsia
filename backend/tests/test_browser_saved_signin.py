@@ -73,11 +73,12 @@ async def test_the_first_session_launches_on_the_shared_profile_and_stops_announ
     await fake.owner.shutdown()
 
 
-async def test_a_visible_browser_keeps_chromes_own_user_agent(synthetic_browser, chrome154):
+async def test_a_shared_browser_uses_headless_stealth_user_agent(synthetic_browser, chrome154):
     fake = synthetic_browser
     await fake.owner.run("a", ["open", "about:blank"], show_window=True)
     args = fake.chrome_calls[0]
-    assert not any(arg.startswith("--user-agent=") for arg in args)
+    ua = next(arg for arg in args if arg.startswith("--user-agent="))
+    assert "HeadlessChrome" not in ua
     assert "--disable-blink-features=AutomationControlled" in args
     await fake.owner.shutdown()
 
