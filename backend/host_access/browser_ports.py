@@ -45,7 +45,7 @@ def sandbox_rules() -> str:
     rules = [";; CORSIA MANAGED BROWSER BOUNDARY"]
     for port in RESERVED_PORTS:
         rules.extend((
-            f'(deny network-outbound (remote tcp "localhost:{port}"))',
+            f'(deny network-outbound (remote tcp "*:{port}"))',
             f'(deny network-bind (local tcp "*:{port}"))',
         ))
     for root in dict.fromkeys((SOCKET_ROOT, SOCKET_ROOT.resolve())):

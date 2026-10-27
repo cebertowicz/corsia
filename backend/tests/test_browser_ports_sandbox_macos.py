@@ -61,6 +61,7 @@ def _run(profile, script, port, *args):
 @pytest.mark.parametrize(('family', 'destination'), [
     (socket.AF_INET, '127.0.0.1'),
     (socket.AF_INET, '0.0.0.0'),
+    (socket.AF_INET6, '::1'),
     (socket.AF_INET6, '::ffff:127.0.0.1'),
     (socket.AF_INET6, '::ffff:0.0.0.0'),
 ])
@@ -68,10 +69,10 @@ def test_reserved_cdp_and_stream_deny_connect_and_bind_with_control(tmp_path, le
     policy = ProtectedHostPathPolicy(home=tmp_path / 'home', state_root=tmp_path / 'state')
     rules = policy.hard_floor_sandbox_rules() if leased else policy.sandbox_rules()
     profile = '(version 1)(allow default)' + rules
-    control = socket.socket()
+    control = socket.socket(socket.AF_INET6 if destination == '::1' else socket.AF_INET)
     cdp, stream = browser_ports.reserve_pair()
     try:
-        control.bind(('127.0.0.1', 0))
+        control.bind(('::1' if destination == '::1' else '127.0.0.1', 0))
         control.listen()
         control_port = control.getsockname()[1]
         assert control_port not in browser_ports.RESERVED_PORTS
@@ -87,7 +88,16 @@ def test_reserved_cdp_and_stream_deny_connect_and_bind_with_control(tmp_path, le
             # Backend/control connectivity remains available outside the agent profile.
             with socket.create_connection(('127.0.0.1', port), timeout=2):
                 pass
-            for script in (_CONNECT, _HTTP, _WEBSOCKET):
+            if destination == '::1':
+                with socket.socket(socket.AF_INET6, socket.SOCK_STREAM) as ipv6_listener:
+                    ipv6_listener.bind(('::1', port))
+                    ipv6_listener.listen()
+                    refused = _run(profile, _CONNECT, port, str(family), destination)
+                    assert refused.returncode == 13 and refused.stdout.strip() in {'denied 1', 'denied 13'}
+            else:
+                refused = _run(profile, _CONNECT, port, str(family), destination)
+                assert refused.returncode == 13 and refused.stdout.strip() in {'denied 1', 'denied 13'}
+            for script in (_HTTP, _WEBSOCKET):
                 refused = _run(profile, script, port, str(family), destination)
                 assert refused.returncode == 13 and refused.stdout.strip() in {'denied 1', 'denied 13'}
             listener.close()

@@ -124,7 +124,7 @@ def test_hard_floor_includes_static_network_and_socket_rules(tmp_path):
     policy = ProtectedHostPathPolicy(home=tmp_path / 'home', state_root=tmp_path / 'state')
     floor = policy.hard_floor_sandbox_rules()
     for port in browser_ports.RESERVED_PORTS:
-        assert f'(deny network-outbound (remote tcp "localhost:{port}"))' in floor
+        assert f'(deny network-outbound (remote tcp "*:{port}"))' in floor
         assert f'(deny network-bind (local tcp "*:{port}"))' in floor
     assert str(browser_ports.SOCKET_ROOT) in floor
     assert 'remote unix-socket' in floor
