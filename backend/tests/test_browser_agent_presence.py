@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from host_access import browser_cdp, browser_control, browser_dom_write, browser_pane
+from host_access import browser_cdp, browser_control, browser_dom_write, browser_pane, browser_pane_state
 from host_access.browser_cli import CommandResult
 from host_access.browser_session_state import BrowserRuntime, BrowserSessionError, BrowserSessionRecord
 from host_access.browser_sessions import BrowserSessionOwner
@@ -13,10 +13,10 @@ from tools import browser_runtime
 
 @pytest.fixture(autouse=True)
 def _no_presence_state():
-    for registry in (browser_control._panes, browser_control._pane_reports, browser_control._agent_seen):
+    for registry in (browser_pane_state._panes, browser_pane_state._pane_reports, browser_pane_state._agent_seen):
         registry.clear()
     yield
-    for registry in (browser_control._panes, browser_control._pane_reports, browser_control._agent_seen):
+    for registry in (browser_pane_state._panes, browser_pane_state._pane_reports, browser_pane_state._agent_seen):
         registry.clear()
 
 
