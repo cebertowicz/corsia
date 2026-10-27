@@ -21,9 +21,7 @@ from loguru import logger
 from infra import state
 from infra.db_async import run_in_db
 from infra.time import utc_now_iso
-from tools.mcp import connect_mcp_servers, mcp_failure_class
-from tools.mcp_local_transport import prepare_managed_runtime as _prepare_managed_runtime
-from tools.managed_runtime import ManagedRuntimeDownloadError
+from tools.mcp import connect_mcp_servers
 from tools.registry import ToolRegistry
 
 _registry = ToolRegistry()
@@ -185,7 +183,6 @@ async def _connect_app(action: str, app_id: str) -> dict[str, object]:
         if result is not None:
             await _publish_app_state(app_id, result)
             return result
-        await _prepare_managed_runtime(config)
         _app_servers[app_id] = name
         stack = AsyncExitStack()
         errors = await connect_mcp_servers({name: config}, _registry, stack)
@@ -223,10 +220,7 @@ async def _connect_app(action: str, app_id: str) -> dict[str, object]:
         await _remove_connected_app(app_id)
         if stack is not None and not registered:
             await stack.aclose()
-        result = {
-            "state": "failed", "state_since": utc_now_iso(), "tool_count": 0,
-            "failure_class": mcp_failure_class(error, config) if isinstance(error, ManagedRuntimeDownloadError) else "cannot_start",
-        }
+        result = {"state": "failed", "state_since": utc_now_iso(), "tool_count": 0, "failure_class": "cannot_start"}
         await _publish_app_state(app_id, result)
         return result
 
