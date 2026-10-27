@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import Any
 
 from infra.packed_rows import fetch_all
 from infra.turn_usage_remainder import pending_measurement_counts
-from plans import service
-from plans.node_cost import USAGE_TOTALS, settle_known, sum_known
+from plans import service, usage_cost
+from plans.node_cost import settle_known, sum_known
 
 #: The release reasons that mean a try ended in failure. The one definition of
 #: friction: the commitment's failed attempts and a plan row's retry count.
@@ -101,7 +102,9 @@ def _unmeasured_rows(turns, usage, pending: dict[str, int]) -> int:
     return unknown
 
 
-def _load(commitment_ids: list[str], *, db) -> dict[str, Any]:
+def _load(
+    commitment_ids: list[str], *, db, pending: Mapping[str, dict[str, int]] | None = None,
+) -> dict[str, Any]:
     marks = ",".join("?" for _ in commitment_ids)
     params = tuple(commitment_ids)
     roots = db.execute(
@@ -145,18 +148,34 @@ def _load(commitment_ids: list[str], *, db) -> dict[str, Any]:
     # is the guarantee: the projection writing a call's row deletes its receipt
     # in the same transaction, so one committing between these two reads is
     # briefly counted unknown by a row that covers it -- never missed by both
-    # and reported short. A receipt is owed by its own call's binding, which
-    # names an attempt, so a commitment never selected is owed none and a plan
-    # of idle work costs no read.
-    pending = pending_measurement_counts(db, commitment_ids) if attempts else {}
-    # One row per commitment and Turn, not per call: this runs inside every plan write.
+    # and reported short. A caller that priced the ledger already passes the
+    # receipts it read before that (``usage_cost.priced_with_pending``). A
+    # receipt is owed by its own call's binding, which names an attempt, so a
+    # commitment never selected is owed none and a plan of idle work costs no
+    # read.
+    if pending is None:
+        pending = pending_measurement_counts(db, commitment_ids) if attempts else {}
+    # One row per commitment and Turn, not per call.
     usage = fetch_all(
-        db, f"""SELECT plan_commitment_id,turn_id,{USAGE_TOTALS} FROM llm_usage
+        db, f"""SELECT plan_commitment_id,turn_id,{usage_cost.USAGE_TOKENS} FROM llm_usage
             WHERE plan_commitment_id IN ({marks})
             GROUP BY plan_commitment_id,turn_id""",
         params,
     )
-    effort = {
+    return {
+        "nodes": _rows_by(nodes, "commitment_id"),
+        "usage": _rows_by(usage, "plan_commitment_id"),
+        "turns": _rows_by(turns, "plan_commitment_id"),
+        "attempts": _rows_by(attempts, "commitment_id"),
+        "effort": _user_effort(db, marks, params),
+        "recording_failures": _recording_failures(db, marks, params),
+        "pending": pending,
+    }
+
+
+def _user_effort(db, marks: str, params: tuple) -> dict[str, int]:
+    """The plan actions the user took, per commitment."""
+    return {
         str(row["commitment_id"]): int(row["count"])
         for row in db.execute(
             f"""SELECT COALESCE(
@@ -171,15 +190,6 @@ def _load(commitment_ids: list[str], *, db) -> dict[str, Any]:
                 GROUP BY commitment_id""",
             params,
         ).fetchall()
-    }
-    return {
-        "nodes": _rows_by(nodes, "commitment_id"),
-        "usage": _rows_by(usage, "plan_commitment_id"),
-        "turns": _rows_by(turns, "plan_commitment_id"),
-        "attempts": _rows_by(attempts, "commitment_id"),
-        "effort": effort,
-        "recording_failures": _recording_failures(db, marks, params),
-        "pending": pending,
     }
 
 
@@ -203,19 +213,29 @@ def project_many(
     *,
     db=None,
     now: datetime | None = None,
+    ledger: usage_cost.Ledger | None = None,
 ) -> dict[str, dict[str, Any]]:
-    """Aggregate many commitments with a bounded query count."""
+    """Aggregate many commitments with a bounded query count.
+
+    ``ledger`` is ``usage_cost.priced_with_pending`` of every one of ``commitment_ids`` when
+    the caller already priced the ledger (``usage_cost.amount``); None reads it here.
+    """
 
     ids = sorted({str(value) for value in commitment_ids})
     if not ids:
         return {}
     clock = now or datetime.now(timezone.utc)
     with service._connection(db) as connection:
-        loaded = _load(ids, db=connection)
+        loaded = _load(ids, db=connection, pending=None if ledger is None else ledger.pending)
+        dollars = (
+            usage_cost.usage_dollars(connection, {"plan_commitment_id": ids})["plan_commitment_id"]
+            if ledger is None else ledger.dollars
+        )
         result = {}
         for commitment_id in ids:
             nodes = loaded["nodes"].get(commitment_id, [])
             usage = loaded["usage"].get(commitment_id, [])
+            priced = usage_cost.amount(dollars, commitment_id)
             turns = loaded["turns"].get(commitment_id, [])
             attempts = loaded["attempts"].get(commitment_id, [])
             unmeasured = _unmeasured_rows(
@@ -232,11 +252,8 @@ def project_many(
                     ),
                 },
                 "model_cost_usd": {
-                    "known": sum_known(row["cost"] for row in usage),
-                    "unknown_rows": (
-                        sum(row["unknown_cost"] for row in usage)
-                        + unmeasured
-                    ),
+                    "known": priced["known"],
+                    "unknown_rows": priced["unknown_rows"] + unmeasured,
                 },
                 # Calls that began but could not be recorded: a defect, so no
                 # total presented here is silently short.

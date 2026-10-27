@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from api.cost_identity import IdentityResolver
+from core.cost_identity import IdentityResolver
 from api.measurement_model_cost import query_model_costs
 from core.workflow_verdict_read import price_snapshot, read_snapshot
 from core.workflow_verdict_rules import compute, freeze_plan

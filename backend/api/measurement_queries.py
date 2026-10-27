@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from api.cost_identity import IDENTITY_GROUP, identity_columns, identity_join
+from core.cost_identity import IDENTITY_GROUP, identity_columns, identity_join
 from api.measurement_prepared import (  # noqa: F401 -- the prepared-table names are re-exported
     DDL as _DDL, PREPARED_OUTCOME_NODES, PREPARED_OUTCOMES, PREPARED_ROOT_DIFFICULTIES,
     PREPARED_ROOT_OUTCOMES, PREPARED_ROOTS, PREPARED_SCOPE, create_tables, shared_prepare,
@@ -267,7 +267,7 @@ def model_family_sql(grain: Grain, scope_threads: str) -> str:
     """Return the latest window's tokens per literal model and its manifest identity.
 
     It is the share numerator: fresh tokens plus cache re-reads, the total the Tokens figure
-    sums (``TOKEN_FIGURE_SQL``). ``api.cost_identity`` turns each shape into one model identity. Accepted-task
+    sums (``TOKEN_FIGURE_SQL``). ``core.cost_identity`` turns each shape into one model identity. Accepted-task
     cost is deliberately not added: it has a different clock and a node-bound join in ``measurement_model_cost``.
     """
     return f"""
