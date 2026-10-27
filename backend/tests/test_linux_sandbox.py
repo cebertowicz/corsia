@@ -1,8 +1,9 @@
 """Mount planning must preserve overlays without creating host mountpoints."""
 from pathlib import Path
+import os
 import pytest
 from tools.host_path_policy import ProtectedHostPathPolicy
-from tools.linux_sandbox import build_protected_argv, protected_mounts, thread_tmp_root
+from tools.linux_sandbox import HOME_RW, build_protected_argv, protected_mounts, thread_tmp_root
 from tests.linux_sandbox_test_support import linux_sandbox_root
 
 
@@ -64,8 +65,32 @@ def test_root_filesystem_grant_is_refused(tmp_path, readonly):
     assert not (tmp_path / 'state').exists()
 
 
-def test_home_grant_does_not_create_missing_persistence_paths(tmp_path):
+def test_linux_socket_staging_uses_thread_tmp_owner(tmp_path, monkeypatch):
+    from infra import config
+    from tools import unix_socket_policy
+    monkeypatch.setattr(config, 'STATE_ROOT', tmp_path / 'state')
+    monkeypatch.setattr(unix_socket_policy.sys, 'platform', 'linux')
+    root = unix_socket_policy.corsia_temp_root_for_bind('one')
+    assert root == thread_tmp_root(config.STATE_ROOT, 'one')
+    assert unix_socket_policy.thread_bind_roots('one') == []
+    assert root.is_dir()
+
+
+def test_cache_creation_refuses_symlink_ancestor(tmp_path):
     home = tmp_path / 'home'
+    home.mkdir()
+    outside = tmp_path / 'outside'
+    outside.mkdir()
+    (home / '.cache').symlink_to(outside, target_is_directory=True)
+    policy = ProtectedHostPathPolicy(home, home / '.local/state/corsia')
+    with pytest.raises(OSError):
+        build_protected_argv('true', home, path_policy=policy, rw_roots=[], ro_roots=[],
+            readonly_overlays=[], env={}, thread_id='one', executable='/usr/bin/bwrap')
+    assert list(outside.iterdir()) == []
+
+
+def test_home_grant_does_not_create_missing_persistence_paths(linux_sandbox_root):
+    home = linux_sandbox_root / 'home'
     home.mkdir()
     state = home / '.local/state/corsia'
     policy = ProtectedHostPathPolicy(home, state)
@@ -78,6 +103,12 @@ def test_home_grant_does_not_create_missing_persistence_paths(tmp_path):
     assert not (home / '.config').exists()
     assert not (home / '.ssh').exists()
     assert str(home / '.bashrc') not in argv
+    for relative in HOME_RW:
+        cache = home / relative
+        assert cache.is_dir()
+        assert cache.stat().st_mode & 0o777 == 0o700
+        assert cache.stat().st_uid == os.getuid()
+        assert ['--bind', str(cache), str(cache)] == argv[argv.index(str(cache)) - 1:argv.index(str(cache)) + 2]
     run_mount = ['--perms', '0111', '--tmpfs', '/run']
     position = next(i for i in range(len(argv)) if argv[i:i + 4] == run_mount)
     assert position > argv.index('--bind')

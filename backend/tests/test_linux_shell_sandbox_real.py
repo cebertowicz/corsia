@@ -12,7 +12,7 @@ import pytest
 
 from tests.linux_sandbox_test_support import linux_sandbox_root
 from tools.host_path_policy import ProtectedHostPathPolicy
-from tools.linux_sandbox import build_protected_argv, cleanup_thread_tmp, thread_tmp_root
+from tools.linux_sandbox import HOME_RW, build_protected_argv, cleanup_thread_tmp, thread_tmp_root
 
 pytestmark = pytest.mark.skipif(sys.platform != 'linux' or not shutil.which('bwrap'),
                                 reason='Linux with bubblewrap required')
@@ -46,6 +46,7 @@ def linux_box(linux_sandbox_root, monkeypatch, isolated_db):
     monkeypatch.setattr(linux_shell, 'current_protected_host_path_policy', lambda: policy)
     monkeypatch.setattr(sandbox_config, '_STATIC_ALLOWED_RW', [workspace])
     monkeypatch.setattr(config, 'WORKSPACE', workspace)
+    monkeypatch.setattr(config, 'STATE_ROOT', state)
     monkeypatch.setenv('HOME', str(home))
     from infra.database import get_db
     db = get_db()
@@ -167,6 +168,8 @@ def test_linux_workspace_writes_private_reads_base_writes_and_namespaces(linux_b
 def test_linux_home_and_run_add_dirs_keep_persistence_and_ipc_hidden(linux_box):
     box = linux_box
     before = sorted(path.relative_to(box.home) for path in box.home.rglob('*'))
+    modes = {path: (box.home / path).stat().st_mode & 0o777 for path in before
+             if (box.home / path).is_dir()}
     for path in (box.state / 'keys/private', box.home / '.bashrc',
                  box.home / '.config/autostart', box.home / '.config/systemd/user'):
         result = box.run(f'cat {shlex.quote(str(path))}', home_grant=True)
@@ -176,13 +179,28 @@ def test_linux_home_and_run_add_dirs_keep_persistence_and_ipc_hidden(linux_box):
                     'cat /var/run/systemd/private', 'echo bad > "$HOME/.zshrc"'):
         result = box.run(command, home_grant=True)
         assert result.returncode != 0, command
-    # Renderer-owned backing paths are the only newly created host entries.
+    # Only backing paths and the declared cache directories may be created.
     after = sorted(path.relative_to(box.home) for path in box.home.rglob('*')
                    if not path.is_relative_to(box.state / 'sandbox-tmp')
                    and not path.is_relative_to(box.state / 'sandbox-masks'))
     before = [path for path in before if not path.is_relative_to(Path('.local/state/corsia/sandbox-tmp'))
               and not path.is_relative_to(Path('.local/state/corsia/sandbox-masks'))]
-    assert after == before
+    caches = {Path(value) for value in HOME_RW}
+    expected = {part for cache in caches for part in (cache, *cache.parents) if part != Path('.')}
+    created = expected - set(before)
+    assert after == sorted(set(before) | created)
+    for path in created:
+        directory = box.home / path
+        assert directory.is_dir()
+        assert directory.stat().st_uid == os.getuid()
+        assert directory.stat().st_mode & 0o777 == 0o700
+        children = {child.relative_to(box.home) for child in directory.iterdir()}
+        assert children == {child for child in created if child.parent == path}
+    for cache in caches:
+        assert not list((box.home / cache).iterdir())
+    for path, mode in modes.items():
+        assert (box.home / path).stat().st_mode & 0o777 == mode
+
 
 
 def test_linux_thread_tmp_is_private_persistent_and_cleaned(linux_box):
@@ -237,8 +255,21 @@ async def test_linux_bash_tool_runs_and_refuses_failed_startup(linux_box, monkey
         runtime_dir=tmp_path / 'bash-runtime', term_grace_seconds=0.2, kill_grace_seconds=2))
     identity = {'_thread_id': 'one', '_host_access_turn_identity': TurnIdentity('linux-real', 1)}
     tool = shell.BashTool(working_dir=str(box.workspace))
+    linux_sandbox_probe.invalidate_sandbox_probe()
     result = await tool.execute('printf real-bash', **identity)
     assert result == 'real-bash', result
+    cached = linux_sandbox_probe._success
+    assert cached is not None
+    for command in ('touch /etc/corsia-denial-probe',
+                    "printf 'Permission denied (publickey)\\n' >&2; exit 1"):
+        result = await tool.execute(command, **identity)
+        assert 'If the sandbox restricted the path' in result
+        assert 'this command was blocked by the protected-mode sandbox' not in result
+        assert 'If blocked by protected scope' in result
+        assert linux_sandbox_probe._success == cached
+    result = await tool.execute('sleep 5', timeout=1, **identity)
+    assert 'timed out' in result
+    assert linux_sandbox_probe._success == cached
     for refusal in (linux_sandbox_probe._MISSING, linux_sandbox_probe._failure('fixture userns denial')):
         monkeypatch.setattr(linux_sandbox_probe, 'sandbox_error', lambda: refusal)
         result = await tool.execute('touch must-not-run', **identity)
@@ -255,9 +286,9 @@ async def test_linux_script_uses_real_process_owner_and_refuses_missing_sandbox(
     monkeypatch.setattr(script_sandbox, 'PROCESS_OWNER', ProcessOwner(
         runtime_dir=tmp_path / 'runtime', term_grace_seconds=0.2, kill_grace_seconds=2))
     script = box.workspace / 'script.sh'
-    script.write_text('echo real-script\necho output > written\n')
+    script.write_text('cat\necho output > written\n')
     result = await script_sandbox.run_script('one', None, script,
-                                            run_id='test', timeout_seconds=20)
+                                            run_id='test', timeout_seconds=20, stdin=b'real-script\n')
     assert result.returncode == 0, result.stderr
     assert result.stdout == b'real-script\n'
     assert (box.workspace / 'written').read_text() == 'output\n'

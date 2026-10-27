@@ -32,23 +32,55 @@ def cleanup_thread_tmp(state_root: Path, thread_id: str) -> None:
     class RetryRemoval(Exception):
         pass
 
+    root = thread_tmp_root(state_root, thread_id)
+
     def restore_access(_function, path, error):
         if not isinstance(error[1], PermissionError):
             raise error[1]
-        mode = os.stat(path, follow_symlinks=False).st_mode
-        if mode & 0o700 == 0o700 or not os.path.isdir(path) or os.path.islink(path):
-            raise error[1]
-        os.chmod(path, mode | 0o700, follow_symlinks=False)
-        raise RetryRemoval
+        # A failed unlink or rmdir can be caused by the parent directory.
+        for target in (Path(path), Path(path).parent):
+            if not target.is_relative_to(root) or target.is_symlink() or not target.is_dir():
+                continue
+            mode = os.stat(target, follow_symlinks=False).st_mode
+            if mode & 0o700 != 0o700:
+                os.chmod(target, mode | 0o700, follow_symlinks=False)
+                raise RetryRemoval
+        raise error[1]
 
     while True:
         try:
-            shutil.rmtree(thread_tmp_root(state_root, thread_id), onerror=restore_access)
+            shutil.rmtree(root, onerror=restore_access)
             return
         except RetryRemoval:
             continue
         except FileNotFoundError:
             return
+
+
+def _prepare_home_caches(home: Path) -> None:
+    """Create only declared cache paths, without traversing symlinks."""
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    home_fd = os.open(home, flags)
+    try:
+        for relative in HOME_RW:
+            current = os.dup(home_fd)
+            try:
+                for part in Path(relative).parts:
+                    created = False
+                    try:
+                        os.mkdir(part, 0o700, dir_fd=current)
+                        created = True
+                    except FileExistsError:
+                        pass
+                    child = os.open(part, flags, dir_fd=current)
+                    os.close(current)
+                    current = child
+                    if created:
+                        os.fchmod(current, 0o700)
+            finally:
+                os.close(current)
+    finally:
+        os.close(home_fd)
 
 
 def _canonical(paths: Sequence[Path]) -> list[Path]:
@@ -191,6 +223,8 @@ def build_protected_argv(
     ro = _canonical([*ro_roots, *(home / path for path in HOME_RO)])
     if Path('/') in [*rw, *ro]:
         raise ValueError('Linux protected shell requires specific directories instead of a root filesystem grant')
+    _prepare_home_caches(home)
+    rw = _canonical([*rw_roots, *(home / path for path in HOME_RW)])
     runtime_roots = (Path('/dev'), Path('/proc'))
     rw = [path for path in rw if path != Path('/tmp') and not any(path.is_relative_to(root) for root in runtime_roots)]
     ro = [path for path in ro if path != Path('/tmp') and not any(path.is_relative_to(root) for root in runtime_roots)]

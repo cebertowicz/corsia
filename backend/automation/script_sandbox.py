@@ -20,7 +20,6 @@ from pathlib import Path
 from events.trace_env import TRACE_ENV
 from events.trace_env import encode as encode_trace
 from host_access.processes import PROCESS_OWNER, ForegroundProcessResult
-from host_access.refusal_messages import safehouse_unavailable_refusal
 from infra.project_repo_policy import (
     RepoPolicyQueryError,
     list_registered_repo_policies,
@@ -85,16 +84,11 @@ def script_command(path: Path, stdin: Path | None = None) -> str:
 
 
 async def _checked_environment() -> None:
-    if sys.platform == 'linux':
-        if error := await shell_sandbox.startup_error(is_safehouse_available, safehouse_version_error):
-            raise ScriptSandboxError(error)
-        return
-    if not is_safehouse_available():
-        raise ScriptSandboxError(
-            f"sandbox unavailable: {safehouse_unavailable_refusal(os.environ.get('PATH'))}"
-        )
-    if error := await asyncio.to_thread(safehouse_version_error):
-        raise ScriptSandboxError(f"sandbox unavailable: {error}")
+    error = await shell_sandbox.startup_error(
+        is_safehouse_available, safehouse_version_error, prefix='sandbox unavailable: ',
+    )
+    if error:
+        raise ScriptSandboxError(error)
 
 
 async def run_script(
@@ -156,24 +150,20 @@ async def _run(
         policies=policies, agent_account=None, env=env,
         build_profile=execution_envelope_profile, build_argv=safehouse_argv,
     )
+    sandbox_stdin = Path('/tmp') / stdin.name if stdin is not None and sys.platform == 'linux' else stdin
     profile_path, argv = await prepare_execution_envelope(
-        script_command(script, stdin), cwd, envelope,
+        script_command(script, sandbox_stdin), cwd, envelope,
     )
     try:
         owned = await PROCESS_OWNER.spawn(
             argv, thread_id=thread_id, turn_id=f"script:{run_id}", cwd=cwd,
             env=env, timeout_seconds=timeout_seconds, background=False,
         )
-    except BaseException:
-        await asyncio.to_thread(shell_sandbox.launch_failed)
-        raise
     finally:
         if profile_path is not None:
             profile_path.unlink(missing_ok=True)
     if not isinstance(owned, ForegroundProcessResult):
         raise ScriptSandboxError("process owner returned an invalid result")
-    if owned.returncode != 0 or owned.timed_out:
-        await asyncio.to_thread(shell_sandbox.launch_failed)
     return ScriptRun(
         owned.returncode, owned.stdout, owned.stderr, bool(owned.timed_out),
     )

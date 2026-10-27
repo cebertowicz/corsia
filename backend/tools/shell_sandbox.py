@@ -5,21 +5,15 @@ import os
 import sys
 
 
-async def startup_error(available, version_error, *, leased=False):
+async def startup_error(available, version_error, *, leased=False, prefix='Error: '):
     if sys.platform == 'linux' and not leased:
         from tools.linux_sandbox_probe import sandbox_error
         return await asyncio.to_thread(sandbox_error)
     from host_access.refusal_messages import safehouse_unavailable_refusal
     if not available():
-        return f"Error: {safehouse_unavailable_refusal(os.environ.get('PATH'))}"
+        return f"{prefix}{safehouse_unavailable_refusal(os.environ.get('PATH'))}"
     error = await asyncio.to_thread(version_error)
-    return f'Error: {error}' if error else None
-
-
-def launch_failed():
-    if sys.platform == 'linux':
-        from tools.linux_sandbox_probe import invalidate_sandbox_probe
-        invalidate_sandbox_probe()
+    return f'{prefix}{error}' if error else None
 
 
 def is_denial(stderr, is_available):

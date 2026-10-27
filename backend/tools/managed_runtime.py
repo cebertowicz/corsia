@@ -85,6 +85,8 @@ def application_cache_root(home: Path | None = None) -> Path:
 
 def runtime_cache_root(home: Path | None = None) -> Path:
     """One executable cache, outside CORSIA state and private roots."""
+    if platform.system() == "Linux":
+        return (Path.home() if home is None else Path(home)) / ".cache" / "corsia" / "runtimes"
     return application_cache_root(home) / "runtimes"
 
 
