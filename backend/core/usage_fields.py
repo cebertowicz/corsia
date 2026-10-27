@@ -3,8 +3,8 @@
 A record says only that this install was active in an ISO week, on which release, and on
 which OS family and chip family. Nothing in it identifies the install or a person. A new
 field is added here by a reviewed change, never by an emitter. This module owns every value
-rule (the patterns and enums below); the recorder's validator and the outcome-event
-allowlist both build from them, so neither can admit a value the other refuses.
+rule (the patterns and enums below); the outcome-event allowlist builds its keys and rules
+from them, and the recorder builds each value from a source that already satisfies them.
 """
 
 from __future__ import annotations
@@ -17,8 +17,8 @@ DEV_RELEASE = "dev"
 RELEASE_PATTERN = rf"[0-9]{{1,4}}\.[0-9]{{1,4}}\.[0-9]{{1,4}}|{DEV_RELEASE}"
 OS_FAMILIES = ("macos", "windows", "linux")
 CHIPS = ("arm64", "x86_64")
-# Required fields; the OS and chip are left out, not guessed, when this build is on neither list.
-REQUIRED_FIELDS = ("week", "release")
-OPTIONAL_FIELDS = ("os", "chip")
-
-FIELDS = (*REQUIRED_FIELDS, *OPTIONAL_FIELDS)
+# Each field's value rule, by field: the one place the field list lives. The OS and chip are left
+# out, not guessed, when this build is on neither list.
+PATTERNS = {"week": WEEK_PATTERN, "release": RELEASE_PATTERN}
+ENUMS = {"os": OS_FAMILIES, "chip": CHIPS}
+FIELDS = (*PATTERNS, *ENUMS)

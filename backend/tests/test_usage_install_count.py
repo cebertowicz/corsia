@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import ast
+import asyncio
 import json
 import socket
 import sqlite3
@@ -14,9 +15,7 @@ import pytest
 from core.usage_fields import FIELDS, USAGE_EVENT
 from infra.database import initialize_schema
 from infra.outcome_event_attributes import ATTRIBUTE_ALLOWLISTS
-from infra.usage_summary import (
-    SummaryError, iso_week, record_current_install_week, record_install_week, release_tag, validate_summary,
-)
+from infra.usage_summary import iso_week, platform_fields, record_current_install_week, record_install_week, release_tag
 
 NOW = datetime(2026, 10, 26, 12, 0, tzinfo=timezone.utc)
 NEXT_WEEK = datetime(2026, 11, 3, 12, 0, tzinfo=timezone.utc)
@@ -32,7 +31,7 @@ def db():
 
 
 def _rows(db):
-    return [(key, json_attrs) for key, json_attrs in db.execute(
+    return [(key, attributes) for key, attributes in db.execute(
         "SELECT dedupe_key, attributes FROM outcome_events WHERE event_name=? ORDER BY 1", (USAGE_EVENT,))]
 
 
@@ -63,6 +62,23 @@ def test_a_restart_in_a_recorded_week_is_not_counted_as_a_duplicate_delivery(db)
         assert record_install_week(db, now=NOW, version="0.4.1", fields=MACHINE) is False
     assert _counters(db) == 0
     assert len(_rows(db)) == 1
+
+
+def test_a_recorded_week_takes_no_write_transaction(db, monkeypatch):
+    import infra.usage_summary as usage
+
+    opened: list[str] = []
+    real = usage.write_transaction
+
+    def spy(*args, **kwargs) -> object:
+        opened.append(kwargs.get("scope", ""))
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(usage, "write_transaction", spy)
+    assert record_install_week(db, now=NOW, version="0.4.1", fields=MACHINE) is True
+    for _ in range(3):
+        assert record_install_week(db, now=NOW, version="0.4.1", fields=MACHINE) is False
+    assert opened == ["record_install_week"]  # only the week's first record took the write lock
 
 
 def test_two_writers_in_one_week_leave_one_row_and_no_duplicate_count(tmp_path):
@@ -103,6 +119,30 @@ def test_an_install_left_open_across_a_week_records_both_weeks(db, monkeypatch):
     assert _counters(db) == 0
 
 
+def test_the_presence_sweep_loop_survives_a_raising_recorder(monkeypatch):
+    import ws.presence_control as control
+
+    recorder_calls = 0
+
+    async def fake_run_in_db(fn, *args, **kwargs):
+        nonlocal recorder_calls
+        if fn is control.usage_summary.record_current_install_week:
+            recorder_calls += 1
+            if recorder_calls == 3:
+                raise asyncio.CancelledError  # ends the loop; an Exception would be swallowed by it
+            raise RuntimeError("the recorder failed")
+
+    async def fake_apply(fn, **kwargs):
+        return None
+
+    monkeypatch.setattr(control, "SWEEP_INTERVAL_SECONDS", 0)
+    monkeypatch.setattr(control, "run_in_db", fake_run_in_db)
+    monkeypatch.setattr(control, "_apply", fake_apply)
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(control.presence_sweep_loop())
+    assert recorder_calls == 3  # two raising ticks did not end the loop
+
+
 def test_unlisted_machine_leaves_os_and_chip_out(db):
     record_install_week(db, now=NOW, version=None, fields={})
     ((_, attributes),) = _rows(db)
@@ -110,36 +150,41 @@ def test_unlisted_machine_leaves_os_and_chip_out(db):
 
 
 @pytest.mark.parametrize("extra", [{"user": "x"}, {"host": "h"}, {"locale": "en"}, {"thread_id": "t"}, {"delivery_id": "x"}])
-def test_a_record_with_any_other_field_fails(extra):
-    with pytest.raises(SummaryError, match="outside the closed list"):
-        validate_summary({"week": "2026-W44", "release": "dev", **extra})
+def test_a_field_outside_the_closed_list_is_dropped_and_counted(db, extra):
+    record_install_week(db, now=NOW, version="0.4.1", fields={**MACHINE, **extra})
+    ((_, attributes),) = _rows(db)
+    assert json.loads(attributes) == {"week": "2026-W44", "release": "0.4.1", **MACHINE}
+    dropped = db.execute(
+        "SELECT n FROM outcome_event_counters WHERE counter='attribute_dropped' AND event_name=?", (USAGE_EVENT,),
+    ).fetchone()
+    assert dropped[0] == 1
 
 
-# Values both rule sets must agree on: the validator and the outcome-event allowlist build from the
-# patterns and enums in core.usage_fields, so neither can admit what the other refuses.
+# The allowlist is the one enforcer of the value rules in core.usage_fields: each field takes exactly
+# these values and refuses these others, including digits of other scripts and a trailing newline.
 _VALUES = {
-    "week": ["2026-W44", "2026-W01", "2026-W53", "2026-W00", "2026-W54", "2026-44", "2026-W4", "٢٠٢٦-W44", "2026-W44\n", "x"],
-    "release": ["0.4.1", "12.0.103", "dev", "0.4", "0.4.1.2", "v0.4.1", "0.4.1-rc1", "latest", "٠.٤.١", "0.4.1\n", ""],
-    "os": ["macos", "windows", "linux", "beos", "MacOS", ""],
-    "chip": ["arm64", "x86_64", "m4", "aarch64", ""],
+    "week": (["2026-W44", "2026-W01", "2026-W53"], ["2026-W00", "2026-W54", "2026-44", "2026-W4", "٢٠٢٦-W44", "2026-W44\n", "x", 7]),
+    "release": (["0.4.1", "12.0.103", "dev"], ["0.4", "0.4.1.2", "v0.4.1", "0.4.1-rc1", "latest", "٠.٤.١", "0.4.1\n", "", None]),
+    "os": (["macos", "windows", "linux"], ["beos", "MacOS", "", 1]),
+    "chip": (["arm64", "x86_64"], ["m4", "aarch64", "", 1]),
 }
 
 
-def _validator_accepts(key, value):
-    record = {"week": "2026-W44", "release": "dev", key: value}
-    try:
-        validate_summary(record)
-    except SummaryError:
-        return False
-    return True
-
-
 @pytest.mark.parametrize("key", sorted(_VALUES))
-def test_the_allowlist_and_the_validator_admit_the_same_values(key):
+def test_the_allowlist_enforces_each_value_rule(key):
     spec = ATTRIBUTE_ALLOWLISTS[USAGE_EVENT][key]
-    for value in _VALUES[key]:
-        assert spec.accepts(value) == _validator_accepts(key, value), (key, value)
-    assert any(spec.accepts(v) for v in _VALUES[key]) and not all(spec.accepts(v) for v in _VALUES[key])
+    valid, invalid = _VALUES[key]
+    assert all(spec.accepts(value) for value in valid) and not any(spec.accepts(value) for value in invalid)
+
+
+def test_every_value_the_recorder_builds_passes_the_allowlist():
+    specs = ATTRIBUTE_ALLOWLISTS[USAGE_EVENT]
+    for version in ("0.4.1", "12.0.103", "0.4.1-12-gabc123", "", None, "dev"):
+        assert specs["release"].accepts(release_tag(version)), version
+    for moment in (NOW, NEXT_WEEK, datetime(2027, 1, 1, tzinfo=timezone.utc), datetime(2024, 12, 30, tzinfo=timezone.utc)):
+        assert specs["week"].accepts(iso_week(moment)), moment
+    for key, value in platform_fields().items():
+        assert specs[key].accepts(value)
 
 
 def test_the_allowlist_takes_its_field_names_from_the_usage_field_list():

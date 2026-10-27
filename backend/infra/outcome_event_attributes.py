@@ -46,7 +46,9 @@ from core.corrections_recording import (
 )
 from core.lesson_gate import EVENT as LESSON_GATE_EVENT
 from core.size_rating import BASES, FACT_KEYS, SIZE_CLASSES, SIZE_EVENT
-from core.usage_fields import CHIPS, OS_FAMILIES, RELEASE_PATTERN, USAGE_EVENT, WEEK_PATTERN
+from core.usage_fields import ENUMS as USAGE_ENUMS
+from core.usage_fields import PATTERNS as USAGE_PATTERNS
+from core.usage_fields import USAGE_EVENT
 from host_access.credential_sanitizer import contains_credential, sanitize_credential_data
 from infra.outcome_event_input import OutcomeInputRefusal
 
@@ -279,8 +281,8 @@ ATTRIBUTE_ALLOWLISTS: dict[str, dict[str, AttributeSpec]] = {
     },
     # This install's weekly usage summary (core/usage_fields.py): the closed field list, no identity.
     USAGE_EVENT: {
-        "week": pattern_attr(WEEK_PATTERN), "release": pattern_attr(RELEASE_PATTERN),
-        "os": enum_attr(*OS_FAMILIES), "chip": enum_attr(*CHIPS),
+        **{key: pattern_attr(pattern) for key, pattern in USAGE_PATTERNS.items()},
+        **{key: enum_attr(*values) for key, values in USAGE_ENUMS.items()},
     },
     # Local correction classifications retain only versioned result metadata,
     # never source-message text or an LLM explanation.

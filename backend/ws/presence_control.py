@@ -156,6 +156,6 @@ async def presence_sweep_loop() -> None:
         await asyncio.sleep(SWEEP_INTERVAL_SECONDS)
         try:
             await _apply(presence.sweep)
+            await run_in_db(usage_summary.record_current_install_week)  # a recorded week is one read; this covers a week boundary
         except Exception as exc:
             logger.warning(f"presence: sweep failed: {exc}")
-        await run_in_db(usage_summary.record_current_install_week)  # a recorded week is a no-op; this covers a week boundary
