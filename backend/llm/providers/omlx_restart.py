@@ -128,7 +128,10 @@ def on_exit(
     observed: tuple[str, bool] | None = None,
 ) -> None:
     """Restart the server unless the exit was asked for or was a clean exit 0."""
+    from llm.server_observation import forget_loaded_on_exit
+
     life.unwatch = None
+    loaded = sorted(forget_loaded_on_exit(server_id))
     status, clean = observed if observed is not None else process.reap_status(pid)
     if life.stopping:
         log.info("oMLX %s (pid %s) stopped as asked; not restarting", server_id, pid)
@@ -136,9 +139,6 @@ def on_exit(
     if clean:
         log.info("oMLX %s (pid %s) exited with code 0 without being asked; not restarting", server_id, pid)
         return
-    from llm.network_discovery import get_loaded_model_ids
-
-    loaded = sorted(get_loaded_model_ids(server_id))  # read now: the next health sweep forgets them
     emit(server_id, "exit.unexpected", status=status, loaded_models=len(loaded))
     if life.restart:  # it exited again while a restart was running
         life.restart.cancel()
