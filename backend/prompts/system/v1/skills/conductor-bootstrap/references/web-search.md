@@ -41,7 +41,7 @@ Anything else: `Tell me what's on your screen and I'll help.`
 
 ## 5. After they say it's in
 
-When they say it's in, or on any later wake, first call `corsia_api` with `GET /api/keys`. In `keys`, find the entry with `name` `web-search` and read `is_set`. If false, use the No key found row without searching. If true, run one `web_search` for `CORSIA` and use the matching result row below. If the read fails, or the entry or `is_set` is missing, report the read failure and keep their task open.
+When they say it's in, or on any later wake, first call `corsia_api` with `GET /api/keys`. In `keys`, find the entry with `name` `web-search` and read `is_set`. If false, use the No key found row without searching. If true, run one `web_search` for `CORSIA` and use the matching result row below. If the read fails, or the entry or `is_set` is missing, use the Key check failed row.
 
 | Then | Say | Record |
 |---|---|---|
@@ -49,5 +49,6 @@ When they say it's in, or on any later wake, first call `corsia_api` with `GET /
 | `Web search: key refused.` | `Brave didn't accept that key. Copy it again from API Keys and save it in Settings › Keys; Check tells you right away.` | Replace their task with `Add a key Brave accepts`; close the old one (`Key refused`) |
 | `Web search failed: [reason class]` | `Web search didn't work just now: [reason, never the key]. Your key is saved; I'll try again next time I'm working.` Once per reason | Note `I'll try again (told you: [reason class])`; later wakes re-check silently |
 | No key found | `I don't see it in Settings › Keys yet. Paste it under Web search and press Save.` | Their task stays open |
+| Key check failed | `I couldn't check Settings › Keys just now. I'll check again next time I'm working.` Once | Their task stays open; later wakes re-check silently |
 
 A tool result starting `Error:` is a failed search; report it without guessing a reason. You may add a key entry and read entries' metadata, nothing more.

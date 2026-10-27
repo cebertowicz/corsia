@@ -77,12 +77,10 @@ class WebSearchTool(Tool):
         n = min(max(count or self.max_results, 1), 10)
         if resolved is not None:
             outcome = await run_search(resolved[0], query, n)
-            if outcome.kind != WORKS:
-                return outcome_line(outcome)
         else:
             outcome = await keyless_search(query, n)
-            if outcome.kind != WORKS:
-                return outcome_line(outcome)
+        if outcome.kind != WORKS:
+            return outcome_line(outcome)
         if not outcome.results:
             return f"No results for: {query}"
 

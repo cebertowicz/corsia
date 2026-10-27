@@ -393,9 +393,10 @@ def test_web_search_guidance_distinguishes_keyless_readiness_from_key_setup():
     after_key = web.split("## 5. After they say it's in", 1)[1]
     assert "`corsia_api` with `GET /api/keys`" in after_key
     assert "`name` `web-search` and read `is_set`" in after_key
+    assert "| Key check failed | `I couldn't check Settings › Keys just now. I'll check again next time I'm working.`" in after_key
     assert "If false, use the No key found row without searching." in after_key
     assert "If true, run one `web_search` for `CORSIA`" in after_key
-    assert "If the read fails, or the entry or `is_set` is missing, report the read failure and keep their task open." in after_key
+    assert "If the read fails, or the entry or `is_set` is missing, use the Key check failed row." in after_key
     assert "| Results, or none | `Web search works.` |" in after_key
     assert "`OK. Ask me any time to try search again; Settings › Keys has the optional Brave key whenever you want it.`" in _step(4)
     assert "Until then I can't search the web." not in _step(4)
