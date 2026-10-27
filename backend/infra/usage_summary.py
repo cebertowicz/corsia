@@ -1,33 +1,33 @@
-"""Local recording and building of this install's weekly usage summary.
+"""Local recording of this install's weekly usage.
 
 Recording is always on and local: it never reads a sharing setting and makes no network
-call or model call. The summary holds only the closed field list in ``core.usage_fields``;
+call or model call. The record holds only the closed field list in ``core.usage_fields``;
 nothing leaves the machine from here.
 """
 from __future__ import annotations
 
-import json
 import platform
 import re
-import secrets
 import sqlite3
 from datetime import datetime, timezone
 from typing import Any
 
-from core.usage_fields import CHIPS, DEV_RELEASE, FIELDS, OPTIONAL_FIELDS, OS_FAMILIES, REQUIRED_FIELDS, USAGE_EVENT
+from core.usage_fields import (
+    CHIPS, DEV_RELEASE, FIELDS, OPTIONAL_FIELDS, OS_FAMILIES, RELEASE_PATTERN, REQUIRED_FIELDS, USAGE_EVENT,
+    WEEK_PATTERN,
+)
 from infra.database import write_transaction
 from infra.outcome_events import record_outcome_event
 
-_WEEK = re.compile(r"\d{4}-W(0[1-9]|[1-4]\d|5[0-3])\Z")
-_RELEASE = re.compile(r"\d{1,4}\.\d{1,4}\.\d{1,4}\Z")
-_DELIVERY_ID = re.compile(r"[0-9a-f]{32}\Z")
+_WEEK = re.compile(WEEK_PATTERN)
+_RELEASE = re.compile(RELEASE_PATTERN)
 _OS_BY_SYSTEM = {"Darwin": "macos", "Windows": "windows", "Linux": "linux"}
 _CHIP_BY_MACHINE = {"arm64": "arm64", "aarch64": "arm64", "x86_64": "x86_64", "amd64": "x86_64"}
 _ENUMS = {"os": OS_FAMILIES, "chip": CHIPS}
 
 
 class SummaryError(ValueError):
-    """A summary holds a field outside the closed list, or a value outside its set."""
+    """A record holds a field outside the closed list, or a value outside its set."""
 
 
 def iso_week(now: datetime) -> str:
@@ -49,9 +49,9 @@ def platform_fields() -> dict[str, str]:
 
 
 def validate_summary(summary: Any) -> dict[str, str]:
-    """Return the summary when it is exactly the closed schema, else raise ``SummaryError``.
+    """Return the record when it is exactly the closed schema, else raise ``SummaryError``.
 
-    Any field outside the list fails the whole summary; a value outside its set is never
+    Any field outside the list fails the whole record; a value outside its set is never
     rewritten into a plausible one.
     """
     if not isinstance(summary, dict):
@@ -65,10 +65,8 @@ def validate_summary(summary: Any) -> dict[str, str]:
     week, release = summary["week"], summary["release"]
     if not (isinstance(week, str) and _WEEK.fullmatch(week)):
         raise SummaryError("week is not an ISO week such as 2026-W44")
-    if not (isinstance(release, str) and (release == DEV_RELEASE or _RELEASE.fullmatch(release))):
+    if not (isinstance(release, str) and _RELEASE.fullmatch(release)):
         raise SummaryError("release is not a release tag or dev")
-    if not (isinstance(summary["delivery_id"], str) and _DELIVERY_ID.fullmatch(summary["delivery_id"])):
-        raise SummaryError("delivery_id is not 32 lowercase hex characters")
     for key in OPTIONAL_FIELDS:
         if key in summary and summary[key] not in _ENUMS[key]:
             raise SummaryError(f"{key} is not one of {', '.join(_ENUMS[key])}")
@@ -82,22 +80,19 @@ def record_install_week(
     """Record, once per ISO week, that this install was active; True when this call wrote it.
 
     Local whatever the sharing choice. The first record of a week wins, so a mid-week
-    update keeps the week's first release.
+    update keeps the week's first release. The existing-week check and the insert share one
+    write transaction, so a restart or a second writer in a recorded week never reaches the
+    event store's conflict branch and never counts as a duplicate delivery.
     """
     moment = now or datetime.now(timezone.utc)
     week = iso_week(moment)
-    dedupe_key = f"{USAGE_EVENT}:{week}"
-    # Look first: a restart after the week's first record is normal, and a conflicting insert would
-    # count it as a duplicate delivery in the intake-health counters.
-    if db.execute("SELECT 1 FROM outcome_events WHERE dedupe_key=?", (dedupe_key,)).fetchone():
-        return False
-    # Drawn once, here: the week's record is written once, so every rebuild of this week's summary
-    # carries the same id and a retried upload is recognised. Random, never derived from the install.
     summary = validate_summary({
-        "week": week, "release": release_tag(version), "delivery_id": secrets.token_hex(16),
-        **(platform_fields() if fields is None else fields),
+        "week": week, "release": release_tag(version), **(platform_fields() if fields is None else fields),
     })
+    dedupe_key = f"{USAGE_EVENT}:{week}"
     with write_transaction(db, scope="record_install_week") as connection:
+        if connection.execute("SELECT 1 FROM outcome_events WHERE dedupe_key=?", (dedupe_key,)).fetchone():
+            return False
         result = record_outcome_event(
             connection, dedupe_key=dedupe_key, event_name=USAGE_EVENT, source="corsia",
             provenance="instrumented", ts=moment.isoformat(), attribution="none", attributes=summary,
@@ -105,44 +100,17 @@ def record_install_week(
     return result.inserted
 
 
-_recorded_week: str | None = None  # this process's last recorded week, so a repeat costs no DB call
-
-
-def install_week_due(now: datetime | None = None) -> bool:
-    """Whether this process has yet to record the current ISO week; a string compare, no DB."""
-    return iso_week(now or datetime.now(timezone.utc)) != _recorded_week
-
-
 def record_current_install_week(now: datetime | None = None) -> None:
-    """Record this week once per process week, at startup and from the periodic sweep.
+    """Record this week, at startup and from the periodic sweep; a recorded week is a no-op.
 
     A failure is logged and never stops the app; the week is retried on the next call.
     """
-    global _recorded_week
     from loguru import logger
 
     from infra.build_info import app_version
     from infra.database import get_db
 
-    moment = now or datetime.now(timezone.utc)
-    if not install_week_due(moment):
-        return
     try:
-        record_install_week(get_db(), now=moment, version=app_version())
-        _recorded_week = iso_week(moment)
+        record_install_week(get_db(), now=now, version=app_version())
     except Exception as exc:  # noqa: BLE001  # local usage recording is non-load-bearing
         logger.warning("usage summary: could not record this install-week: {}", exc)
-
-
-def build_summary(db: sqlite3.Connection, week: str) -> dict[str, str] | None:
-    """The exact summary for ``week`` from the local record, or None when this install recorded none.
-
-    Built from local rows only: no model, no network. A stored row that holds anything
-    beyond the closed list fails the build instead of being trimmed.
-    """
-    row = db.execute(
-        "SELECT attributes FROM outcome_events WHERE dedupe_key=? AND retracted_at IS NULL", (f"{USAGE_EVENT}:{week}",),
-    ).fetchone()
-    if row is None:
-        return None
-    return validate_summary(json.loads(row[0]))

@@ -158,5 +158,4 @@ async def presence_sweep_loop() -> None:
             await _apply(presence.sweep)
         except Exception as exc:
             logger.warning(f"presence: sweep failed: {exc}")
-        if usage_summary.install_week_due():  # an app left open across a week boundary
-            await run_in_db(usage_summary.record_current_install_week)
+        await run_in_db(usage_summary.record_current_install_week)  # a recorded week is a no-op; this covers a week boundary
