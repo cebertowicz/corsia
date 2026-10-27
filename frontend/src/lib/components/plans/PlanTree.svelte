@@ -118,9 +118,7 @@
 		nodes: treeNodes, index, maxDepth, isBranchExpanded, levels: foldView.levels, revealed: reveal.revealed,
 		now: now.getTime(), isScheduledOpen: reveal.isScheduledOpen,
 	}));
-	const visibleNodes = $derived(view.visibleNodes);
-	const items = $derived(view.items);
-	const branchParents = $derived(view.branchParents);
+	const { visibleNodes, items, branchParents } = $derived(view);
 	const boundaryParents = $derived(index.boundaryParents);
 	const scope = $derived(planId ? `${planId}:` : '');
 
@@ -145,8 +143,7 @@
 	}
 
 	// The controller owns person-requested disclosure and page motion; keep this gate local so transition wiring stays explicit.
-	const userDisclosure = $derived(reveal.userDisclosure);
-	const pendingFoldLevel = $derived(reveal.pendingFoldLevel);
+	const { userDisclosure, pendingFoldLevel } = $derived(reveal);
 
 	// The fold wave (`foldMotion`): rows that fold or sink since the last render glide as one wave.
 	let treeElement = $state<HTMLElement | null>(null);

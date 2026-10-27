@@ -31,6 +31,7 @@ from typing import Literal, get_args
 from infra import presence
 from infra.thread_update_asks import ask_sql, asks_user_sql
 from infra.presence_time import iso, parse, seen_boundary
+from infra.person_step_state import person_step_state
 from infra.visit_divider import divider_from_row
 
 log = logging.getLogger(__name__)
@@ -314,16 +315,6 @@ def seen_by_thread(
 
 
 
-def _person_step_state(row: sqlite3.Row) -> str:
-    state = row["step_node_state"]
-    if state in ("accepted", "accepted_with_followup"):
-        return "done"
-    if state is None:
-        return "done" if row["step_outcome"] in ("done", "done_follow_up") else "closed"
-    if state == "closed" or row["step_archived_at"] is not None:
-        return "closed"
-    return "open"
-
 
 def read_newest_cards(
     db: sqlite3.Connection, thread_id: str, *, min_seq: int,
@@ -356,7 +347,7 @@ def read_newest_cards(
     cards = [
         {
             **_public(tuple(row)[:-8]),
-            **({"step_state": _person_step_state(row)} if row["kind"] == "person_step" else {}),
+            **({"step_state": person_step_state(row)} if row["kind"] == "person_step" else {}),
             "node_exists": bool(row["node_exists"]),
             "asks_user": bool(row["asks_user"]),
             "blocked_asks_user": bool(row["blocked_asks_user"]),

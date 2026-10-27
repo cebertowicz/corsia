@@ -24,12 +24,10 @@ def migrate_149_to_150(conn: sqlite3.Connection) -> None:
         "AND type IN ('index', 'trigger') AND sql IS NOT NULL ORDER BY type, name"
     )]
     sequence = conn.execute("SELECT seq FROM sqlite_sequence WHERE name='thread_updates'").fetchone()
-    conn.execute(ddl.replace("CREATE TABLE thread_updates", "CREATE TABLE thread_updates_new", 1).replace(
-        old, old + ", 'person_step'", 1,
-    ))
-    conn.execute("INSERT INTO thread_updates_new SELECT * FROM thread_updates")
-    conn.execute("DROP TABLE thread_updates")
-    conn.execute("ALTER TABLE thread_updates_new RENAME TO thread_updates")
+    conn.execute("ALTER TABLE thread_updates RENAME TO thread_updates_old")
+    conn.execute(ddl.replace(old, old + ", 'person_step'", 1))
+    conn.execute("INSERT INTO thread_updates SELECT * FROM thread_updates_old")
+    conn.execute("DROP TABLE thread_updates_old")
     for statement in objects:
         conn.execute(statement)
     if sequence is not None:
