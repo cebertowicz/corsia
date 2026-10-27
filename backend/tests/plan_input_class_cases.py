@@ -780,7 +780,7 @@ _CASES = {
     # --- plans/boundary_dispatch.py ---
     ("boundary_dispatch.py", 'f"unsupported plan operation: {operation}"'):
         _dispatch_fallthrough,
-    ("boundary_settlement.py", "FINISHED_WORK_NEEDS_EVIDENCE"): _operation(
+    ("boundary_dispatch.py", "FINISHED_WORK_NEEDS_EVIDENCE"): _operation(
         "accept", {"node_id": OWN, "expected_revision": REV,
                    "verification_result": "passed"},
     ),

@@ -130,31 +130,6 @@ def test_a_node_maps_to_its_nearest_run_or_says_why_not() -> None:
     assert workflow_run_of(None, parents, ["run"]) == UNATTRIBUTED
 
 
-def test_a_self_caught_fact_has_no_classifier_counter_and_is_not_a_persons_correction(db) -> None:
-    from core.corrections_recording import ACTIVE_VERSION_SETTING, version_key
-    from core.correction_attribution import person_corrections
-    from infra.settings import set_setting
-
-    turn(db, "before", "t1", "earlier", "2026-10-02T00:00:00Z")
-    message(db, "m1", "t1", "2026-10-03T00:00:00Z")
-    record_current_fact(db, "m1", "t1", "2026-10-03T00:00:00Z")
-    db.execute(
-        "INSERT INTO outcome_events (id,dedupe_key,event_name,source,provenance,ts,observed_ts,subject_key,"
-        "agent_thread_id,attributes) VALUES ('sc','sc','measurement.correction','corsia','instrumented',"
-        "'2026-10-03','2026-10-03','self-caught:plan-failed:n1','t1',?)",
-        (json.dumps({"source_kind": "self_caught", "source_id": "plan-failed:n1", "thread_id": "t1",
-                     "label": "correction", "recorded_at": "2026-10-03T00:00:00Z"}),),
-    )
-    set_setting(ACTIVE_VERSION_SETTING, {"key": version_key(ClassifierVersion("asset", "current", "head", 0.5, "policy"))}, db=db)
-    db.commit()
-
-    counters = {fact.source_kind: fact.counter for fact in attributed_facts(db)}
-
-    assert counters["self_caught"] is None
-    assert counters["message"] is not None
-    assert person_corrections(db, "2000-01-01 00", "2100-01-01 00") == [("2026-10-03T00:00:00Z", "t1")]
-
-
 def test_deciding_refusal_reruns_the_sync_test_when_a_verdict_is_read() -> None:
     events = {"qg.escape": {"attributes": {"pr": "id"}}}
     kpi = {"num": {"event": "qg.escape"}, "den": {"event": "qg.escape"}, "can_decide": True,

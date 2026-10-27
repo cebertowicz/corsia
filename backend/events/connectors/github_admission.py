@@ -93,9 +93,8 @@ def _write_raw_facts(
     later copies of the same delivery id remain duplicates and cannot recover
     the lost facts. Logs carry the delivery id, never payload or exception text.
     An unexpected fault aborts the caller's whole transaction, including the
-    receipt, allowing manual same-id re-entry after recovery, and that includes
-    the correction sources derived from the facts. Raw facts carry no agent,
-    project or attribution.
+    receipt, allowing manual same-id re-entry after recovery. Raw facts carry
+    no agent, project or attribution.
     """
     from infra.database import write_transaction
 
@@ -113,9 +112,6 @@ def _write_raw_facts(
                         subject_key=draft.subject_key,
                         attributes=draft.attributes,
                     )
-                from core.self_caught_corrections import record_github_outcome_drafts
-
-                record_github_outcome_drafts(connection, drafts)
             return
         except OutcomeInputRefusal as exc:
             # Deliberate credential/budget rejection, never an incidental exception

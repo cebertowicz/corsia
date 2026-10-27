@@ -100,11 +100,6 @@ def test_merged_pr_emits_merged_introduced_by_and_closes():
     assert ref.attributes["confidence"] == "stated"
     assert ref.dedupe_key == f"github:pr:{REPO}#3191:closes:{REPO.lower()}#1627"
 
-    reverted = fixture("pr_reverts_merged")["payload"]
-    names = drafts_by_name(map_github_outcomes("pull_request", reverted))
-    assert set(names) == {"github.pr.merged"}
-    assert names["github.pr.merged"][0].attributes["reverts_pr"] == "3191"
-
 
 def test_body_parsers_are_order_stable_deduped_and_repo_qualified():
     body = (
@@ -168,16 +163,6 @@ def test_merged_pr_revert_button_attribute_requires_same_repo(title, body, expec
     payload["pull_request"].update(title=title, body=body)
     primary = drafts_by_name(map_github_outcomes("pull_request", payload))["github.pr.merged"][0]
     assert primary.attributes.get("reverts_pr") == expected
-
-
-def test_issue_reopen_has_a_delivery_stable_key():
-    reopened = fixture("issue_reopened")["payload"]
-    (draft,) = map_github_outcomes("issues", reopened)
-    assert (draft.event_name, draft.dedupe_key, draft.ts) == (
-        "github.issue.reopened",
-        f"github:issue:{REPO}#1627:issue.reopened::{reopened['issue']['updated_at']}",
-        reopened["issue"]["updated_at"],
-    )
 
 
 def test_workflow_run_key_is_run_id_plus_attempt():

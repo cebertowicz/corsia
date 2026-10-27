@@ -175,23 +175,45 @@ def test_target_path_keeps_outside_workspace_files_absolute(tmp_path: Path) -> N
     assert canonical_target_path(str(outside), workspace=workspace) == str(outside.resolve())
 
 
-def test_serious_effect_query_ignores_tool_rows_before_the_active_turn() -> None:
+def test_serious_effect_scope_is_the_corrected_work_not_the_triage_turn() -> None:
     from infra.queries import insert_message
 
     db = _db()
     insert_message(
-        THREAD, "tool", "old send", {"turn_id": TURN, "name": "email_send"},
-        msg_id="tool-before-turn", db=db, created_at="2026-10-19T23:59:59+00:00",
+        THREAD, "user", "earlier task", {}, msg_id="person-earlier", db=db,
+        created_at="2026-10-19T20:00:00+00:00",
+    )
+    insert_message(
+        THREAD, "tool", "old send", {"turn_id": "older-turn", "name": "email_send"},
+        msg_id="tool-before-task", db=db, created_at="2026-10-19T21:00:00+00:00",
+    )
+    insert_message(
+        THREAD, "user", "the task", {}, msg_id="person-task", db=db,
+        created_at="2026-10-19T22:00:00+00:00",
     )
 
-    assert serious_proposed(db, THREAD) is False
+    # The only send ran before the task's person message: not part of the corrected work.
+    assert serious_proposed(db, THREAD, SUBJECT) is False
 
     insert_message(
-        THREAD, "tool", "new send", {"turn_id": TURN, "name": "email_send"},
-        msg_id="tool-current-turn", db=db, created_at="2026-10-20T00:00:01+00:00",
+        THREAD, "tool", "task send", {"turn_id": "task-turn", "name": "email_send"},
+        msg_id="tool-in-task", db=db, created_at="2026-10-19T23:00:00+00:00",
     )
 
-    assert serious_proposed(db, THREAD) is True
+    # A send in the turn before the correction counts, though it is not the running turn.
+    assert serious_proposed(db, THREAD, SUBJECT) is True
+
+
+def test_serious_effect_with_no_earlier_person_message_scans_from_the_thread_start() -> None:
+    from infra.queries import insert_message
+
+    db = _db()
+    insert_message(
+        THREAD, "tool", "send", {"turn_id": "first-turn", "name": "email_send"},
+        msg_id="tool-first", db=db, created_at="2026-10-19T21:00:00+00:00",
+    )
+
+    assert serious_proposed(db, THREAD, SUBJECT) is True
 
 
 @pytest.mark.asyncio
@@ -225,7 +247,7 @@ async def test_prefixed_serious_effect_from_native_result_writer_is_detected() -
 
     metadata = json.loads(db.execute("SELECT metadata FROM messages WHERE id=?", (row.message_id,)).fetchone()[0])
     assert metadata["name"] == "mcp__corsia__email_send"
-    assert serious_proposed(db, THREAD) is True
+    assert serious_proposed(db, THREAD, SUBJECT) is True
 
 
 def test_not_a_correction_records_only_its_tier_even_after_a_serious_effect() -> None:
@@ -271,7 +293,7 @@ def test_serious_effect_with_unreadable_turn_provenance_is_refused_not_skipped()
     db.execute("UPDATE messages SET active_turn_id=NULL, metadata=? WHERE id='tool-no-turn'", ('{"name": "email_send"}',))
 
     with pytest.raises(ValueError, match="whether Serious applies cannot be determined"):
-        serious_proposed(db, THREAD)
+        serious_proposed(db, THREAD, SUBJECT)
 
 
 def test_unreadable_manifest_entries_are_refused_not_listed_as_empty(tmp_path: Path) -> None:

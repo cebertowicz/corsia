@@ -65,37 +65,59 @@ def loaded_targets(db: sqlite3.Connection, thread_id: str) -> tuple[str, ...]:
     return tuple(found)
 
 
-def serious_proposed(db: sqlite3.Connection, thread_id: str) -> bool:
-    """Detect the durable, named tool effects that require Serious by default."""
+def _corrected_work_start(db: sqlite3.Connection, thread_id: str, correction_ts: str) -> str | None:
+    """When the corrected work began: the last person message before the correction, None for the thread's start."""
+    from core.corrections_recording import is_owner_authored_message, owner_message_sql_predicate
+
+    owner_filter, params = owner_message_sql_predicate()
+    rows = db.execute(
+        f"""SELECT m.role,m.content,m.metadata,m.created_at FROM messages m
+            WHERE m.thread_id=:thread AND m.created_at < :ts AND {owner_filter}
+            ORDER BY m.created_at DESC,m.id DESC""",
+        {**params, "thread": thread_id, "ts": correction_ts},
+    )
+    for row in rows:
+        if is_owner_authored_message(role=row[0], content=row[1], metadata=row[2]):
+            return str(row[3])
+    return None
+
+
+def serious_proposed(db: sqlite3.Connection, thread_id: str, subject_key: str) -> bool:
+    """Detect the durable, named tool effects that require Serious by default.
+
+    The scope is the corrected task: tool messages from the last person message
+    before the correction through the current turn, not just the triage turn.
+    """
+    from core.corrections_recording import CORRECTION_EVENT
     from infra.turn_provenance import TurnProvenanceError, turn_provenance
     from tools.catalog import has_serious_effect, serious_effect_recorded_names
 
-    active = db.execute(
-        "SELECT id,started_at FROM active_turns WHERE thread_id=? AND status='running' "
-        "ORDER BY started_at DESC LIMIT 1",
-        (thread_id,),
+    correction = db.execute(
+        "SELECT ts FROM outcome_events WHERE event_name=? AND subject_key=? AND agent_thread_id=? LIMIT 1",
+        (CORRECTION_EVENT, subject_key, thread_id),
     ).fetchone()
     names = serious_effect_recorded_names()
-    if active is None or not names:
+    if correction is None or not names:  # an unrecorded subject is refused by the caller
         return False
+    start = _corrected_work_start(db, thread_id, str(correction["ts"]))
     marks = ",".join("?" for _ in names)
     query = (
         "SELECT id,active_turn_id,metadata FROM messages "
         "WHERE thread_id=? AND role='tool' AND created_at>=? "
         f"AND json_extract(metadata, '$.name') IN ({marks})"
     )
-    for row in db.execute(query, (thread_id, active["started_at"], *names)):
+    for row in db.execute(query, (thread_id, start or "", *names)):
         try:
             metadata = json.loads(row["metadata"] or "{}")
             if not isinstance(metadata, dict):
                 raise ValueError("metadata is not an object")
-            turn_id, _ = turn_provenance({
+            turn_provenance({
                 "id": row["id"], "active_turn_id": row["active_turn_id"], "_meta": metadata,
             })
         except (TypeError, ValueError, TurnProvenanceError) as exc:
-            # A named serious-effect tool ran this turn; unreadable provenance cannot rule Serious out.
+            # A named serious-effect tool ran in the corrected work; unreadable provenance cannot rule Serious out.
             raise ValueError(f"tool message {row['id']} has unreadable turn metadata; whether Serious applies cannot be determined") from exc
-        if turn_id == active["id"] and has_serious_effect(metadata.get("name")):
+        if has_serious_effect(metadata.get("name")):
             return True
     return False
 
@@ -165,7 +187,7 @@ def record_triage(
         else:
             signal = None
         target = _loaded_target(db, thread_id, target_file)
-    proposed_serious = tier_value != "not_correction" and serious_proposed(db, thread_id)
+    proposed_serious = tier_value != "not_correction" and serious_proposed(db, thread_id, subject_key)
     lowered = serious_lowered_reason.strip() if isinstance(serious_lowered_reason, str) else None
     if serious_lowered_reason is not None and not lowered:
         raise ValueError("serious_lowered_reason must state why Serious was lowered")

@@ -35,8 +35,6 @@ from core.corrections_recording import (
     SOURCE_KIND_DECISION_ANSWER,
     SOURCE_KIND_DOC_COMMENT,
     SOURCE_KIND_MESSAGE,
-    SOURCE_KIND_SELF_CAUGHT,
-    SELF_CAUGHT_SUBJECT_PREFIX,
     decision_answer_arrived_at_sql,
     decision_answer_subject_key_sql,
     version_key_sql,
@@ -76,10 +74,6 @@ _SOURCES_SQL = f"""
       FROM facts f LEFT JOIN artifact_identities d ON f.subject_key={decision_answer_subject_key_sql('d')}
         AND d.integration='local' AND d.type='plan-decision'
       WHERE f.subject_key LIKE '{DECISION_SUBJECT_PREFIX}%'
-      UNION ALL
-      SELECT '{SOURCE_KIND_SELF_CAUGHT}',substr(f.subject_key,length('{SELF_CAUGHT_SUBJECT_PREFIX}') + 1),
-        json_extract(f.attributes,'$.recorded_at'),f.agent_thread_id,NULL,f.attributes,f.agent_thread_id
-      FROM facts f WHERE f.subject_key LIKE '{SELF_CAUGHT_SUBJECT_PREFIX}%'
     )
 """
 
@@ -113,7 +107,7 @@ class AttributedFact:
     source_kind: str
     source_id: str
     source_at: str | None
-    counter: str | None
+    counter: str
     is_correction: bool
     node_id: str | None
 
@@ -128,7 +122,7 @@ def attributed_facts(db: sqlite3.Connection) -> list[AttributedFact]:
             str(row["source_kind"]),
             str(row["source_id"]),
             None if row["source_at"] is None else str(row["source_at"]),
-            None if attributes.get("asset_version") is None else str(attributes["asset_version"]),
+            str(attributes.get("asset_version")),
             attributes.get("label") == LABEL_CORRECTION,
             None if row["node_id"] is None else str(row["node_id"]),
         ))

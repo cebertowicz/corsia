@@ -43,7 +43,6 @@ from core.corrections_recording import (
     CORRECTION_EVENT,
     FACT_KEYS as CORRECTION_FACT_KEYS,
     LABELS as CORRECTION_LABELS,
-    SELF_CAUGHT_FACT_KEYS,
 )
 from core.lesson_gate import EVENT as LESSON_GATE_EVENT
 from core.size_rating import BASES, FACT_KEYS, SIZE_CLASSES, SIZE_EVENT
@@ -234,8 +233,7 @@ ATTRIBUTE_ALLOWLISTS: dict[str, dict[str, AttributeSpec]] = {
     # Local correction classifications retain only versioned result metadata,
     # never source-message text or an LLM explanation.
     CORRECTION_EVENT: {
-        **{key: id_attr() for key in (set(CORRECTION_FACT_KEYS) | set(SELF_CAUGHT_FACT_KEYS))
-           if key not in {"label", "threshold", "truncated", "original_tokens"}},
+        **{key: id_attr() for key in CORRECTION_FACT_KEYS if key not in {"label", "threshold", "truncated", "original_tokens"}},
         "label": enum_attr(*CORRECTION_LABELS),
         "threshold": id_attr(),
         "truncated": enum_attr("true", "false"),
