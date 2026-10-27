@@ -3,9 +3,8 @@ from __future__ import annotations
 
 import copy
 import json
-from pathlib import Path
 
-from connections.account_home import missing_home_reason
+from connections.account_home import missing_home_reason, source_auth_path
 from connections.account_receipts import ReceiptFence, receipt_is_current
 from connections.vendor_accounts import get_account
 from infra.time import utc_now_iso
@@ -102,7 +101,7 @@ def mark_discovery(account_id: str, *, receipt: ReceiptFence, status: str,
 def projection_failure_moved(account: dict, failure: dict) -> bool:
     """Whether the failure names an earlier account source home."""
     source_home, failed_source = account.get('source_home'), failure.get('source')
-    return bool(source_home and failed_source and failed_source != str(Path(source_home).absolute() / 'auth.json'))
+    return bool(source_home and failed_source and failed_source != str(source_auth_path(source_home)))
 
 
 def readiness_reason(account: dict, *, model: str | None = None) -> str | None:
@@ -134,7 +133,7 @@ def readiness_reason(account: dict, *, model: str | None = None) -> str | None:
         return 'account_model_not_discovered'
     projection = record['auth_projection']
     failed = projection['failed']
-    if isinstance(failed, dict) and not projection_failure_moved(account, failed) and (
+    if isinstance(failed, dict) and failed.get('cause') != 'codex_auth_source_missing' and not projection_failure_moved(account, failed) and (
             failed.get('account_revision'), failed.get('login_seq')) == (
             receipt.account_revision, receipt.login_seq):
         return failed['cause']

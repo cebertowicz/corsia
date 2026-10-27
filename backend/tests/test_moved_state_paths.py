@@ -116,7 +116,7 @@ def test_moved_codex_projection_recovers_without_a_new_login(isolated_db, roots,
     select_account("moved-codex", "codex", account_id="x2", db=db)
     session = SimpleNamespace(corsia_thread_id="moved-codex", codex_home=None, source_codex_home=None,
                               catalog_model_id="codex/test")
-    with pytest.raises(AccountAdmissionError, match="codex_auth_source_missing"):
+    with pytest.raises(AccountAdmissionError, match="account_home_mismatch"):
         projection_gate(receipt, db=db)
     heal_moved_state_paths(legacy_root=legacy, state_root=current)
     assert readiness_reason(get_account("x2", db=db), model="codex/test") is None
@@ -137,6 +137,38 @@ def test_moved_codex_projection_recovers_without_a_new_login(isolated_db, roots,
     assert old_dest not in projection["homes"]
     assert projection["homes"][str(new_runtime / "auth.json")]["source"] == str(new_source / "auth.json")
     assert (new_runtime / "auth.json").readlink() == new_source / "auth.json"
+
+
+def test_restored_codex_auth_clears_legacy_missing_failure(isolated_db, roots):
+    from types import SimpleNamespace
+    from connections.account_evidence import readiness_reason
+    from connections.account_policy import select_account
+    from connections.vendor_accounts import get_account
+    from subagents.vendor_write_admission import prepare_session_launch
+    from tests.test_checkpoint_store import _seed_thread
+
+    _, current = roots
+    source, runtime = _make_homes(current, "x3")
+    auth = source / "auth.json"
+    failure = {"cause": "codex_auth_source_missing", "source": str(auth),
+               "destination": str(runtime / "auth.json"), "account_revision": 0, "login_seq": 1, "at": "t"}
+    record = {"auth_state": "known", "login_seq": 1, "login_revision": 0,
+              "discovery": {"status": "ready", "receipt": {"account_revision": 0, "login_seq": 1},
+                            "cache_receipt": None, "models": {"codex/test": {}}},
+              "auth_projection": {"failed": failure, "stale": [], "homes": {}}}
+    _insert("x3", "codex", str(source), str(runtime), record)
+    db = get_db()
+    _seed_thread(db, "restored-codex", model="codex/test")
+    db.commit()
+    select_account("restored-codex", "codex", account_id="x3", db=db)
+    assert readiness_reason(get_account("x3", db=db), model="codex/test") == "codex_auth_source_missing"
+    auth.write_text(json.dumps({"auth_mode": "chatgpt", "tokens": {"fixture": "synthetic"}}))
+    assert readiness_reason(get_account("x3", db=db), model="codex/test") is None
+    session = SimpleNamespace(corsia_thread_id="restored-codex", codex_home=None, source_codex_home=None,
+                              catalog_model_id="codex/test")
+    prepare_session_launch(session, "codex")
+    assert get_account("x3", db=db)["discovery"]["auth_projection"]["failed"] is None
+    assert (runtime / "auth.json").readlink() == auth
 
 
 def test_missing_target_is_left_alone_and_logged(isolated_db, roots):

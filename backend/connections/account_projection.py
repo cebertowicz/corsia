@@ -7,7 +7,7 @@ import stat
 import uuid
 
 from connections.account_evidence import discovery_record, store_record
-from connections.account_home import source_auth_exists, source_auth_path
+from connections.account_home import missing_home_reason, source_auth_exists, source_auth_path
 from connections.account_policy import AccountAdmissionError
 from connections.account_receipts import ReceiptFence, receipt_is_current
 from connections.vendor_accounts import get_account
@@ -56,7 +56,7 @@ def _current(receipt, *, db):
 def _gate(record, receipt):
     projection = record['auth_projection']
     failure = projection['failed']
-    if failure and (failure.get('account_revision'), failure.get('login_seq')) == (
+    if failure and failure.get('cause') != SOURCE_MISSING and (failure.get('account_revision'), failure.get('login_seq')) == (
             receipt.account_revision, receipt.login_seq):
         return failure['cause']
     if any(item['phase'] == 'pending' for item in projection['stale']):
@@ -65,10 +65,11 @@ def _gate(record, receipt):
 
 
 def _fail(account, record, receipt, cause, source, destination, *, db):
-    record['auth_projection']['failed'] = {
-        'cause': cause, 'source': str(source), 'destination': str(destination),
-        'account_revision': receipt.account_revision, 'login_seq': receipt.login_seq, 'at': utc_now_iso()}
-    store_record(account['id'], record, db=db)
+    if cause != SOURCE_MISSING:
+        record['auth_projection']['failed'] = {
+            'cause': cause, 'source': str(source), 'destination': str(destination),
+            'account_revision': receipt.account_revision, 'login_seq': receipt.login_seq, 'at': utc_now_iso()}
+        store_record(account['id'], record, db=db)
     from connections.account_holds import refresh_account_holds
 
     refresh_account_holds(account['id'], db=db)
@@ -77,10 +78,15 @@ def _fail(account, record, receipt, cause, source, destination, *, db):
 def _recover_moved_home(account, record, receipt, *, db):
     projection = record['auth_projection']
     failure = projection['failed']
-    current_source = Path(account['source_home']).absolute() / 'auth.json'
+    current_source = source_auth_path(account['source_home'])
     if not isinstance(failure, dict) or not failure.get('source') or (
             failure.get('account_revision'), failure.get('login_seq')) != (
-            receipt.account_revision, receipt.login_seq) or failure['source'] == str(current_source):
+            receipt.account_revision, receipt.login_seq):
+        return
+    if failure['source'] == str(current_source):
+        if failure.get('cause') == SOURCE_MISSING and source_auth_exists(current_source):
+            projection['failed'] = None
+            store_record(account['id'], record, db=db)
         return
     old_source = Path(failure['source'])
     runtime_home = account.get('runtime_home')
@@ -115,7 +121,7 @@ def projection_gate(receipt: ReceiptFence, *, db=None) -> None:
     with write_transaction(db, scope='account_projection_gate') as connection:
         account, record = _current(receipt, db=connection)
         _recover_moved_home(account, record, receipt, db=connection)
-        cause = _gate(record, receipt)
+        cause = missing_home_reason(account) or _gate(record, receipt)
     if cause:
         raise AccountAdmissionError(cause)
 
