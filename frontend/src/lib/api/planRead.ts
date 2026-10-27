@@ -27,7 +27,7 @@ export function errorReference(body: unknown): string | undefined {
 	return typeof reference === 'string' && reference.trim() ? reference : undefined;
 }
 
-/** A failure as the person reads it: the message, with the reference beside it when there is one; a narrow pane never splits the label from the code. */
+/** A failure as one line, for a surface with room for one string only (the task menu, the header's Pause); the plan pane shows the reference as its own element. */
 export function errorText(outcome: { message: string; reference?: string }): string {
 	return outcome.reference ? `${outcome.message} Reference:\u00a0${outcome.reference}` : outcome.message;
 }

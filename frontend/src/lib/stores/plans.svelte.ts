@@ -30,7 +30,7 @@ import type {
 } from '$lib/api/plans';
 import { deferRefresh, forgetSpacing, noteStarted, spacingWaitMs } from './planRefreshSpacing';
 import { planClosedMessage } from './planClosedMessage';
-import { errorText, safeErrorMessage, STALE_PAGE_MESSAGE } from '$lib/api/planRead';
+import { safeErrorMessage, STALE_PAGE_MESSAGE } from '$lib/api/planRead';
 import { isActivityKey, planKeyString, type ActivityKey, type ActivityKeyString, type OperatorKey, type OperatorKeyString, type PlanKey, type PlanKeyString } from './planKeys';
 
 /**
@@ -48,7 +48,7 @@ export interface PlanEntry<P = OperatorEnvelope | ActivityIndexEnvelope> {
 	refreshing: boolean;
 	payload: P | null;
 	etag: string | null;
-	errorMessage: string | null;
+	errorMessage: string | null; errorReference: string | null; // the log reference, shown beside the message (C10)
 	reloadNeeded: boolean; // a reply this page can't read: a retry fails the same way, a page reload can fix it
 	lastFreshAt: number | null;
 	ownerThreadId: string | null;
@@ -56,7 +56,7 @@ export interface PlanEntry<P = OperatorEnvelope | ActivityIndexEnvelope> {
 
 export const EMPTY_ENTRY: PlanEntry<never> = {
 	status: 'idle', refreshing: false, payload: null, etag: null,
-	errorMessage: null, reloadNeeded: false, lastFreshAt: null, ownerThreadId: null,
+	errorMessage: null, errorReference: null, reloadNeeded: false, lastFreshAt: null, ownerThreadId: null,
 };
 
 let entries = $state.raw<Record<string, PlanEntry>>({});
@@ -148,25 +148,25 @@ function applyOutcome(key: PlanKey, keyStr: string, outcome: PlanReadOutcome) {
 		}
 		patch(keyStr, {
 			status: 'ready', refreshing: false, payload: outcome.payload, etag: outcome.etag,
-			errorMessage: null, reloadNeeded: false, lastFreshAt: Date.now(),
+			errorMessage: null, errorReference: null, reloadNeeded: false, lastFreshAt: Date.now(),
 			ownerThreadId: ownerThreadIdFor(key, outcome.payload),
 		});
 		return;
 	}
 	if (outcome.status === 'not-modified') {
-		patch(keyStr, { status: 'ready', refreshing: false, errorMessage: null, reloadNeeded: false, lastFreshAt: Date.now() });
+		patch(keyStr, { status: 'ready', refreshing: false, errorMessage: null, errorReference: null, reloadNeeded: false, lastFreshAt: Date.now() });
 		return;
 	}
 	if (outcome.status !== 'error') {
 		patch(keyStr, {
 			status: outcome.status, refreshing: false, payload: null, etag: null,
-			ownerThreadId: null, reloadNeeded: false, errorMessage: outcome.status === 'unauthorized'
+			ownerThreadId: null, reloadNeeded: false, errorReference: null, errorMessage: outcome.status === 'unauthorized'
 				? SIGN_IN_MESSAGE : planClosedMessage(key, outcome.status),
 		});
 		return;
 	}
 	const current = peekEntry(keyStr);
-	const failure = { refreshing: false, errorMessage: errorText(outcome), reloadNeeded: outcome.reload === true };
+	const failure = { refreshing: false, errorMessage: outcome.message, errorReference: outcome.reference ?? null, reloadNeeded: outcome.reload === true };
 	patch(keyStr, current.payload
 		? { status: 'stale', ...failure }
 		: { status: 'error', payload: null, ...failure });
@@ -189,8 +189,8 @@ async function issue(key: PlanKey, keyStr: string, myId: number): Promise<void> 
 	const before = peekEntry(keyStr);
 	if (!bearer) {
 		patch(keyStr, before.payload
-			? { status: 'stale', refreshing: false, errorMessage: SIGN_IN_MESSAGE, reloadNeeded: false }
-			: { status: 'unauthorized', refreshing: false, payload: null, errorMessage: SIGN_IN_MESSAGE, reloadNeeded: false });
+			? { status: 'stale', refreshing: false, errorMessage: SIGN_IN_MESSAGE, errorReference: null, reloadNeeded: false }
+			: { status: 'unauthorized', refreshing: false, payload: null, errorMessage: SIGN_IN_MESSAGE, errorReference: null, reloadNeeded: false });
 		return;
 	}
 	patch(keyStr, { status: before.payload ? before.status : 'loading', refreshing: true });

@@ -77,8 +77,9 @@
 	@media (hover: hover) { .plan-head-controls :global(.btn.ghost:hover:not(:disabled)) { color: var(--text-primary); } }
 	.progress { color: var(--text-tertiary); font-size: var(--text-caption); font-variant-numeric: tabular-nums; white-space: nowrap; }
 	.progress.oversize { text-decoration: underline dotted; cursor: help; }
+	/* The host cap doesn't shrink its actions, so the failure bounds itself: Pause and the cap's title stay in view; the full text, reference included, is its title. */
 	.lifecycle-error {
-		min-width: 0; overflow: hidden; color: var(--red); font-size: var(--text-caption);
+		min-width: 0; max-width: 16em; overflow: hidden; color: var(--red); font-size: var(--text-caption);
 		text-overflow: ellipsis; white-space: nowrap;
 	}
 </style>
