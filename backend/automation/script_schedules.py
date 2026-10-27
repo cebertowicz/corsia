@@ -18,11 +18,11 @@ import math
 import re
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from automation.schedules import MAX_CADENCE_SECONDS, Schedule, _parse, _row
+from automation.schedules import MAX_CADENCE_SECONDS, Schedule, _parse, _row, next_slot
 from host_access.credential_sanitizer import sanitize_credential_text
 from infra.database import write_transaction
 
@@ -212,16 +212,6 @@ def _require_capacity(connection, thread_id: str) -> None:
         raise ValueError(
             f"this instance already has {MAX_PER_INSTANCE} script schedules"
         )
-
-
-def next_slot(due_at: str, cadence_seconds: int, now: str) -> str:
-    """The first cadence slot after ``now``, anchored on the due time: no replay."""
-    due, current = _parse(due_at), _parse(now)
-    step = timedelta(seconds=cadence_seconds)
-    if due > current:
-        return due.isoformat()
-    missed = int((current - due) / step) + 1
-    return (due + missed * step).isoformat()
 
 
 def claim(schedule: Schedule, now: str, *, db) -> bool:

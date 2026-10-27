@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 import shlex
 import sys
-import tempfile
+from tools.private_runtime_files import SHELL_ENVELOPE_DIR, private_mkstemp
 
 
 def envelope(repo, args, *, policy, operation, policies, agent_account, env,
@@ -15,7 +15,7 @@ def envelope(repo, args, *, policy, operation, policies, agent_account, env,
         return None, shell_argv(command, repo, thread_id=thread_id, policies=policies,
                                 env=env, agent_account=agent_account,
                                 controlled_policy=policy, controlled_operation=operation)
-    descriptor, raw_path = tempfile.mkstemp(prefix='corsia-controlled-git-', suffix='.sb')
+    descriptor, raw_path = private_mkstemp(SHELL_ENVELOPE_DIR, prefix='corsia-controlled-git-', suffix='.sb')
     profile_path = Path(raw_path).resolve(strict=False)
     try:
         with os.fdopen(descriptor, 'w', encoding='utf-8') as handle:

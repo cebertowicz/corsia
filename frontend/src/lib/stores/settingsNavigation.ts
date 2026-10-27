@@ -79,6 +79,11 @@ export function requestConnectedApp(id: string) {
 	change((s) => ({ section: 'connected-apps', connectedAppId: id, anchor: 'connected-apps', fromProject: null, project: null, openRequest: s.openRequest + 1 }));
 }
 
+/** Consume the pending row once its data is available. */
+export function clearConnectedAppRequest() {
+	change(() => ({ connectedAppId: null }));
+}
+
 /** Routes chat links to one connected-app row while the home route is mounted. */
 export function listenForConnectedAppLinks(openSettings: () => void): () => void {
 	const openConnectedAppFromHash = () => {

@@ -98,7 +98,7 @@ def threads(db: sqlite3.Connection, ids: Iterable[str | None]) -> dict[str, Mapp
     if not wanted:
         return {}
     rows = db.execute(
-        f"SELECT id, project_id, spawned_by, agent_enabled, {thread_available_sql()} AS available "
+        f"SELECT id, project_id, spawned_by, agent_enabled, lifecycle_state, archived_reason, {thread_available_sql()} AS available "
         f"FROM threads WHERE id IN ({','.join('?' * len(wanted))})",
         wanted,
     ).fetchall()

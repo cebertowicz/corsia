@@ -9,7 +9,6 @@ import shutil
 import stat
 import subprocess
 import sys
-import tempfile
 from types import SimpleNamespace
 
 import pytest
@@ -121,9 +120,6 @@ def test_mcp_profile_denies_lexical_and_resolved_state_roots(monkeypatch, tmp_pa
     assert f'(subpath "{lexical}")' in profile
     assert f'(subpath "{state}")' in profile
     assert f'(subpath "{state / "keys"}")' in profile
-    for prefix in ("corsia-shell-envelope-", "corsia-controlled-git-", "corsia-mcp-envelope-"):
-        assert f'^/tmp/{prefix}[^/]*\\.sb$' in profile
-        assert f'^/private/tmp/{prefix}[^/]*\\.sb$' in profile
     from tools.managed_runtime import application_cache_root
 
     assert f'(deny file-write* (subpath "{application_cache_root()}"))' in profile
@@ -348,15 +344,15 @@ async def test_local_mcp_safehouse_blocks_private_state_and_allows_child_managem
     key_path.write_text(secret, encoding="utf-8")
     db_path = state / "corsia.db"
     db_path.write_text("database-private", encoding="utf-8")
+    envelope_dir = state / "runtime" / "shell-envelopes"
+    envelope_dir.mkdir(parents=True)
     app = tmp_path / "server.py"
     app.write_text(_PYTHON_SERVER, encoding="utf-8")
     config = {"command": sys.executable, "args": [str(app)], "env": {
         "MCP_KEY_PATH": str(key_path), "MCP_DB_PATH": str(db_path),
         "MCP_KEY_LINK_PATH": str(tmp_path / "state-link" / "keys" / "value"),
         "MCP_DB_LINK_PATH": str(tmp_path / "state-link" / "corsia.db"),
-        "MCP_ENVELOPE_WRITE_TARGET": str(
-            Path(tempfile.gettempdir()) / "corsia-shell-envelope-mcp-test.sb",
-        ),
+        "MCP_ENVELOPE_WRITE_TARGET": str(envelope_dir / "corsia-shell-envelope-mcp-test.sb"),
     }}
 
     registry = ToolRegistry()
@@ -372,7 +368,8 @@ async def test_local_mcp_safehouse_blocks_private_state_and_allows_child_managem
     assert "CORSIA private state is blocked for local MCP apps" in read_result or "Stored secrets are closed" in read_result
     assert "CORSIA private state is blocked for local MCP apps" in link_read_result or "Stored secrets are closed" in link_read_result
     assert json.loads(child_result)["returncode"] == -15
-    assert "Operation not permitted" in rewrite_result
+    assert "CORSIA private state is blocked for local MCP apps" in rewrite_result
+    assert not (envelope_dir / "corsia-shell-envelope-mcp-test.sb").exists()
 
 
 @pytest.mark.integration

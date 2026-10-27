@@ -8,7 +8,6 @@ import os
 import re
 import signal
 import subprocess
-import tempfile
 import threading
 import urllib.error
 import urllib.request
@@ -25,6 +24,7 @@ from connections.vendor_accounts import VENDORS
 from infra.auth import require_user
 from infra.failure_reference import new_reference
 from infra.state.ws import schedule_models_changed
+from tools.private_runtime_files import CLI_INSTALLER_DIR, private_mkstemp
 
 router = APIRouter(prefix="/api/providers/cli", tags=["providers"])
 log = logging.getLogger(__name__)
@@ -133,8 +133,9 @@ def _download_script(vendor: str) -> Path:
         raise InstallerFailure(DOWNLOAD_UNVERIFIED)
     path: Path | None = None
     try:
-        with tempfile.NamedTemporaryFile(prefix="corsia-cli-install-", suffix=".sh", delete=False) as file:
-            path = Path(file.name)
+        descriptor, raw_path = private_mkstemp(CLI_INSTALLER_DIR, prefix="corsia-cli-install-", suffix=".sh")
+        path = Path(raw_path)
+        with os.fdopen(descriptor, "wb") as file:
             file.write(script)
     except OSError as exc:
         log.exception("CLI installer script could not be written to a temp file")
