@@ -176,7 +176,8 @@ def change_agent(
                 "UPDATE event_rules SET enabled=0, updated_at=? WHERE created_by=? AND enabled=1",
                 (updated_at, thread_id),
             ).rowcount
-            summary += f"; stopped {schedule_count} schedules and {rule_count} event rules"
+            if schedule_count or rule_count:
+                summary += f"; stopped {schedule_count} schedules and {rule_count} event rules"
         append_agent_roster_transition(
             db, before=thread, after=updated, summary=summary,
         )
