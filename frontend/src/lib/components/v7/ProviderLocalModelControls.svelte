@@ -19,7 +19,7 @@
 	let source = $state<ModelSource | undefined>(undefined);
 	let showAddLocal = $state(false);
 	let stop: (() => void) | null = null;
-	const lowMemory = $derived(source?.eligible === false);
+	const lowMemory = $derived(source?.eligible === false && source.never_local !== true);
 
 	async function refresh() {
 		const t = get(token);
@@ -40,7 +40,7 @@
 		<p>{LOW_MEMORY_LOCAL_MODEL_MESSAGE}</p>
 		<Button size="sm" variant="ghost" onclick={onAddProvider}>Add provider</Button>
 	</div>
-{:else if corsiaManaged}
+{:else if corsiaManaged && source?.never_local !== true}
 	<div class="add-local">
 		<Button size="sm" variant={empty ? 'primary' : 'ghost'} onclick={() => showAddLocal = true}>Add model</Button>
 	</div>

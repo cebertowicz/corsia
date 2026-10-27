@@ -87,7 +87,9 @@ def _trusted_json_post(request: Request) -> bool:
 
 def _macos_supported() -> bool | None:
     """Whether this Mac meets the approved macOS 15 floor; None off macOS, where it does not apply."""
-    if platform.system() != "Darwin":
+    from llm.local_setup_gates import host_never_runs_local
+
+    if host_never_runs_local():
         return None
     try:
         return int(platform.mac_ver()[0].split(".", 1)[0]) >= _MINIMUM_MACOS_MAJOR
@@ -141,9 +143,9 @@ def _ai_check_pending() -> bool:
 
 def _setup_status() -> dict:
     """Build the bounded pre-auth screen facts without exposing machine identity."""
-    from llm.local_setup_gates import local_memory_ok
+    from llm.local_setup_gates import host_never_runs_local, local_memory_ok
 
-    apple_silicon = platform.system() == "Darwin" and platform.machine().lower() in {"arm64", "aarch64"}
+    apple_silicon = not host_never_runs_local() and platform.machine().lower() in {"arm64", "aarch64"}
     macos_supported = _macos_supported()
     # Only the 24 GiB gate: which model fits is the managed oMLX's pick (GET /local-model).
     memory_ok = local_memory_ok()
@@ -283,8 +285,10 @@ async def local_model_prepare(request: Request) -> dict | Response:
     """
     if refused := await _before_first_account(request, post=True):
         return refused
+    from api.local_model_guard import require_local_model_host
     from llm.local_setup_prepare import begin_prepare, settled_view
 
+    require_local_model_host()
     await begin_prepare()
     return await settled_view()
 
@@ -320,8 +324,10 @@ async def local_download(request: Request) -> dict | Response:
         LocalDownloadRequest.model_validate(await request.json())
     except (ValidationError, ValueError):
         return Response(status_code=422)
+    from api.local_model_guard import require_local_model_host
     from llm.local_setup_flow import begin_local_setup
 
+    require_local_model_host()
     return await begin_local_setup(onboarding=True)
 
 

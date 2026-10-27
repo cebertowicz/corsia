@@ -49,6 +49,7 @@ async def test_the_load_check_applies_the_same_fits_now_rule(monkeypatch) -> Non
         return {"free_gb": 20.0, "safe_free_gb": 8.0, "safe_reserve_gb": 8.0}
 
     monkeypatch.setattr(host_resources, "get_host_resources", resources)
+    monkeypatch.setattr(host_resources, "model_room_bytes", lambda: 8 * host_resources.GIB)
 
     assert (await host_resources.check_can_load(8.0, "omlx"))["ok"] is True
     assert (await host_resources.check_can_load(8.5, "omlx"))["ok"] is False

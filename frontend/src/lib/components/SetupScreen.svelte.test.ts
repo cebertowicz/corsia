@@ -265,6 +265,38 @@ describe('SetupScreen', () => {
 		expect(button('Sign in')).toBeTruthy();
 	});
 
+	describe('the Local model row by host', () => {
+		const providersStep = async (extra: Array<{ source: string; name: string; state: string }> = []) => {
+			sources = [{ source: 'claude-code', name: 'Claude Code', state: 'not_installed' }, { source: 'codex', name: 'Codex', state: 'not_installed' }, ...extra];
+			// The status is read when the screen mounts, so mount it again with this host's facts.
+			await unmount(component!); component = mount(SetupScreen, { target: host, props: { onExistingAccount: vi.fn(), onAccountCreated: vi.fn(), onFinished: vi.fn() } }); flushSync();
+			await passFolder();
+			button('Claude')?.click(); await settle();
+			expect(host.querySelector('h1')?.textContent).toBe('Providers & models');
+		};
+
+		it('keeps the Local model row, and its memory reason, on a Mac with too little memory', async () => {
+			localEligible = false; macosSupported = true;
+			await providersStep();
+			expect(rowNames()).toEqual(['Claude Code', 'Local model', 'API provider']);
+			expect(host.textContent).toContain('Local models need at least 24 GB of memory');
+		});
+
+		it('lists no Local model row, and no memory reason, on a server that is not macOS', async () => {
+			localEligible = false; macosSupported = null;
+			await providersStep();
+			expect(rowNames()).toEqual(['Claude Code', 'API provider']);
+			expect(host.textContent).not.toContain('24 GB');
+			expect(host.textContent).not.toContain('Local model');
+		});
+
+		it('lists no Local model row when the local source row says the host never runs one', async () => {
+			localEligible = false; macosSupported = true;
+			await providersStep([{ source: 'omlx', name: 'Local model', state: 'needs_setup', never_local: true } as never]);
+			expect(rowNames()).not.toContain('Local model');
+		});
+	});
+
 	it('explains the subscriptions screen: a lede, and under neither-signed-in the subscription and the free-model line this computer can honor', async () => {
 		const plans = 'Claude Code and Codex are the apps you’ll sign in to next.';
 		const lede = 'CORSIA’s agents can work through a Claude or ChatGPT subscription you already pay for.';

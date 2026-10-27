@@ -92,14 +92,21 @@ export function tokenLine(amount: OperatorCostAmount): string | null {
 		: null;
 }
 
-/** Dollar cost is omitted when no truthful priced amount exists. */
+/**
+ * Dollars are what the tokens would cost at the provider's public API list
+ * price, so every dollar figure says so. Omitted when no priced amount exists.
+ */
+function apiEquivalent(
+	cost: OperatorCostAmount['model_cost_usd'],
+	recordingFailures: number,
+): string | null {
+	if (cost.known === null || cost.known <= 0) return null;
+	const amount = lowerBound(formatCost(cost.known), cost.unknown_rows > 0 || recordingFailures > 0);
+	return `${amount} API-equivalent`;
+}
+
 export function dollarLine(amount: OperatorCostAmount): string | null {
-	const known = amount.model_cost_usd.known;
-	if (known === null || known <= 0) return null;
-	return lowerBound(
-		formatCost(known),
-		amount.model_cost_usd.unknown_rows > 0 || amount.usage_recording_failures > 0,
-	);
+	return apiEquivalent(amount.model_cost_usd, amount.usage_recording_failures);
 }
 
 /** Compact combined wording retained for revision/follow-up totals. */
@@ -154,12 +161,8 @@ export function withFollowUps(node: OperatorNode): string | null {
 		|| (hasLaterAttempts && incomplete);
 	if (!adds) return null;
 	const parts: string[] = [];
-	if (commitment.model_cost_usd.known !== null && commitment.model_cost_usd.known > 0) {
-		parts.push(lowerBound(
-			formatCost(commitment.model_cost_usd.known),
-			commitment.model_cost_usd.unknown_rows > 0 || commitment.usage_recording_failures > 0,
-		));
-	}
+	const dollars = apiEquivalent(commitment.model_cost_usd, commitment.usage_recording_failures);
+	if (dollars) parts.push(dollars);
 	if (commitment.tokens.known !== null) {
 		parts.push(lowerBound(
 			tokens(commitment.tokens.known),

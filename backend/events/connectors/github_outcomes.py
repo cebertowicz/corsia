@@ -7,17 +7,18 @@ same ``dedupe_key``, so re-admitting that payload is a no-op. That is exactly wh
 dedupe promises here, and nothing more.
 
 The keys then split into two kinds, and a backfill has to know which is which. The
-PR open, push, close and merge keys, the issue keys and the run id plus
+PR open, push, close and merge keys, issue open and close keys and the run id plus
 ``run_attempt`` in ``github.workflow_run.completed``, the job id in
 ``github.workflow_job.completed``, the check run id plus ``completed_at`` in
-``github.check_run.completed``, and the review or comment id (plus the action, for a
+``github.check_run.completed``, the release id plus ``published_at`` in
+``github.release.published``, and the review or comment id (plus the action, for a
 review) in the review and comment events are built from identities the
 repository still reports — a head or merge SHA, a close timestamp, a run's
 ``run_attempt`` — so a later read can reconstruct the same key. ``github.pr.reopened``,
-``github.pr.retargeted`` and ``github.check_suite.completed`` are keyed on the
+``github.pr.retargeted``, PR ready/drafted, issue assigned, status and check suite keys use
 ``updated_at`` the delivering payload reported: a fact about that delivery no later
 read recovers, since the field moves with any subsequent edit or re-run. Re-deriving
-those three from the API yields a different key and adds a row instead of deduping,
+these from the API yields a different key and adds a row instead of deduping,
 so backfilling them needs the original delivery. Reconstructing a key is also not a
 promise that an event's other historical attributes still read the same way. The
 repository name is lowercased once on entry and that one value is used in every key,
@@ -128,6 +129,8 @@ def _pr_draft(
 
 def _pr_drafts(payload: dict[str, Any], repo: str) -> list[OutcomeDraft]:
     action = payload.get("action")
+    if action in ("ready_for_review", "converted_to_draft"):
+        return _sibling("github_lifecycle_outcomes", "pr_drafts")(payload, repo)
     pr = shape.mapping(shape.required(payload, "pull_request"))
     number = shape.number(shape.required(pr, "number"))
     subject = pr_subject(repo, number)
@@ -333,23 +336,6 @@ def label_drafts(event_type: str, payload: dict[str, Any], repo: str) -> list[Ou
     return [OutcomeDraft(f"{subject}:{change.type}:{label or ''}:{at}", f"github.{change.type}", at, subject, attrs)]
 
 
-def _issue_drafts(payload: dict[str, Any], repo: str) -> list[OutcomeDraft]:
-    action = payload.get("action")
-    issue = shape.mapping(shape.required(payload, "issue"))
-    number = shape.number(shape.required(issue, "number"))
-    subject = f"github:issue:{repo}#{number}"
-    attrs = {"repo": repo, "issue": str(number)}
-    if "labels" in issue:
-        attrs.update(label_attributes(issue["labels"]))
-    if action == "opened":
-        opened = shape.timestamp(shape.required(issue, "created_at"))
-        return [OutcomeDraft(f"{subject}:opened", "github.issue.opened", opened, subject, attrs)]
-    if issue.get("state_reason") is not None:
-        attrs["state_reason"] = shape.text(issue["state_reason"])
-    closed = shape.timestamp(shape.required(issue, "closed_at"))
-    return [OutcomeDraft(f"{subject}:closed:{closed}", "github.issue.closed", closed, subject, attrs)]
-
-
 def _sibling(module: str, name: str) -> Callable[[dict[str, Any], str], list[OutcomeDraft]]:
     """A mapper in a sibling module, imported on first call: those modules import this one."""
     def mapper(payload: dict[str, Any], repo: str) -> list[OutcomeDraft]:
@@ -359,12 +345,15 @@ def _sibling(module: str, name: str) -> Callable[[dict[str, Any], str], list[Out
 
 # The public entry owns supported-action selection; private mappers consume it.
 _MAPPERS = {
-    "pull_request": (("opened", "synchronize", "reopened", "closed", "edited"), _pr_drafts),
+    "pull_request": (("opened", "synchronize", "reopened", "closed", "edited", "ready_for_review", "converted_to_draft"),
+                     _pr_drafts),
     "check_suite": (("completed",), _check_suite_drafts),
     "workflow_run": (("completed",), _workflow_run_drafts),
     "workflow_job": (("completed",), _sibling("github_ci_outcomes", "workflow_job_drafts")),
     "check_run": (("completed",), _sibling("github_ci_outcomes", "check_run_drafts")),
-    "issues": (("opened", "closed"), _issue_drafts),
+    "issues": (("opened", "closed", "assigned"), _sibling("github_lifecycle_outcomes", "issue_drafts")),
+    "status": ((None,), _sibling("github_lifecycle_outcomes", "status_drafts")),
+    "release": (("published",), _sibling("github_lifecycle_outcomes", "release_drafts")),
     "pull_request_review": (("submitted", "dismissed"), _sibling("github_reply_outcomes", "review_drafts")),
     "pull_request_review_comment": (("created",), _sibling("github_reply_outcomes", "review_comment_drafts")),
     "issue_comment": (("created",), _sibling("github_reply_outcomes", "issue_comment_drafts")),

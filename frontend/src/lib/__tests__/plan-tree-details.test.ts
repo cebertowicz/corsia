@@ -109,7 +109,7 @@ describe('PlanTree row details disclosure', () => {
 			'Tries: 25 (latest 1 shown) Try 1 · Research agent · requirements changed',
 		);
 		// Nothing ran on the task itself, so its follow-ups' known total is its own line.
-		expect(line('follow-ups')).toBe('With revisions and follow-ups: at least $0.2500 · 1.2K tokens');
+		expect(line('follow-ups')).toBe('With revisions and follow-ups: at least $0.2500 API-equivalent · 1.2K tokens');
 		expect(host.querySelector('.node-details details, .node-details button.reveal')).toBeNull();
 	});
 
@@ -246,7 +246,7 @@ describe('PlanTree row details disclosure', () => {
 		expect(line('working')).toBe('Working: 2h 10m');
 		expect(line('waiting')).toBe('Waiting: 5h 3m');
 		expect(line('tokens')).toBe('Tokens: 1K');
-		expect(line('cost')).toBe('Cost: $0.5000');
+		expect(line('cost')).toBe('Cost: $0.5000 API-equivalent');
 		expect(line('own-waiting')).toBe('This step waiting: 10m 0s');
 		expect(line('own-working')).toBeNull();
 		expect(line('own-cost')).toBeNull();
@@ -443,7 +443,7 @@ describe('PlanTree row details disclosure', () => {
 		};
 		await open(node({ id: 'unknown-child', node_cost: { own: empty, rolled } }));
 		expect(line('tokens')).toBe('Tokens: at least 100');
-		expect(line('cost')).toBe('Cost: at least $0.1000');
+		expect(line('cost')).toBe('Cost: at least $0.1000 API-equivalent');
 		expect(line('own-tokens')).toBeNull();
 		expect(line('own-cost')).toBeNull();
 		expect(host.textContent).not.toMatch(/not reported|unpriced|unknown/i);

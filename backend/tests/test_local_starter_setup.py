@@ -75,6 +75,7 @@ def test_pending_operation_is_recovered_before_a_new_managed_flight(monkeypatch)
     assert recovered == [True]
 
 
+@pytest.mark.usefixtures("mac_local_model_host")
 def test_an_absent_managed_server_stays_not_installed_after_a_terminal_flight_failure(monkeypatch):
     from llm import local_sources
 

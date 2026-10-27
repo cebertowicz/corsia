@@ -92,6 +92,25 @@ async def test_an_exit_of_an_adopted_pid_that_is_not_our_child_restarts_the_serv
     assert calls == [{"server_id": SID}]
 
 
+async def test_an_adopted_server_that_exits_zero_is_not_restarted(starts, monkeypatch):
+    calls, _ = starts
+    observed = asyncio.Event()
+    original = restart.on_exit
+
+    def record_exit(*args):
+        original(*args)
+        observed.set()
+
+    monkeypatch.setattr(restart, "on_exit", record_exit)
+    pid = int(subprocess.check_output(
+        ["/bin/sh", "-c", "sleep 2 >/dev/null 2>&1 & echo $!"], text=True,
+    ).strip())
+    sup.watch(SID, pid)
+    await asyncio.wait_for(observed.wait(), timeout=10)
+    await settle()
+    assert calls == []
+
+
 async def test_a_pid_already_gone_when_watched_counts_as_an_exit(starts):
     calls, fired = starts
     proc = sleeper()
@@ -109,6 +128,33 @@ async def test_a_clean_exit_zero_is_not_restarted(starts):
     await asyncio.sleep(0.8)
     proc.wait(timeout=2)
     assert calls == []
+
+
+async def test_clean_exit_is_reaped_when_nonblocking_wait_would_be_too_early(starts, monkeypatch):
+    calls, _ = starts
+    observed = asyncio.Event()
+    original_exit = restart.on_exit
+    original_waitpid = os.waitpid
+    proc = sleeper("1")
+
+    def record_exit(*args):
+        original_exit(*args)
+        observed.set()
+
+    def early_nonblocking_wait(pid, options):
+        if pid == proc.pid and options == os.WNOHANG:
+            return 0, 0
+        return original_waitpid(pid, options)
+
+    monkeypatch.setattr(restart, "on_exit", record_exit)
+    monkeypatch.setattr(os, "waitpid", early_nonblocking_wait)
+    sup.watch(SID, proc.pid)
+    await asyncio.wait_for(observed.wait(), timeout=10)
+    await settle()
+    assert calls == []
+    with pytest.raises(ChildProcessError):
+        original_waitpid(proc.pid, os.WNOHANG)
+    proc.returncode = 0  # the supervisor reaped it
 
 
 async def test_an_exit_after_an_announced_stop_is_not_a_crash(starts):

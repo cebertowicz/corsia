@@ -1,6 +1,7 @@
 """Execution, cleanup and capability adapters for the browser tool family."""
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from host_access import browser_cli, browser_control
@@ -12,6 +13,8 @@ from host_access.browser_sessions import (
 )
 from host_access.processes import PROCESS_OWNER
 from tools.base import Tool
+
+log = logging.getLogger(__name__)
 
 _AGENT_BROWSER_BIN = "agent-browser"
 _DEFAULT_TIMEOUT = 30
@@ -57,6 +60,23 @@ async def _run(args: list[str], *, thread_id: str, lease_id: str | None = None,
         return f"Error: {exc}"
     except Exception:
         return "Error: browser command failed. Stop automatic retries and inform the user if browser work remains blocked."
+
+
+async def _declare_person_step(thread_id: str, instruction: str) -> str:
+    """Hand the current browser page to the person; a new page visit, or their ending the step, wakes the agent."""
+    err = _check_installed()
+    if err:
+        return err
+    try:
+        await PROCESS_OWNER.browser_sessions().declare_person_step(thread_id, instruction)
+    except (BrowserSessionCleanupError, BrowserSetupError) as exc:
+        return exc.tool_message
+    except BrowserSessionError as exc:
+        return f"Error: {exc}"
+    except Exception:
+        log.exception("browser person-step declaration failed for thread %s", thread_id)
+        return "Error: browser person step could not be opened. Stop automatic retries and inform the user if browser work remains blocked."
+    return "Person step opened; end your turn."
 
 
 class BrowserCloseTool(Tool):

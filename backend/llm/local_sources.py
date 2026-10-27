@@ -13,12 +13,13 @@ from llm.managed_omlx_binary import is_corsia_managed_server, managed_omlx_execu
 from llm.locality import endpoint_on_this_mac
 from llm.network_endpoints import endpoint_base, get_endpoints
 from llm.local_setup_executable import omlx_on_path
-from llm.local_setup_gates import local_memory_ok
+from llm.local_setup_gates import host_never_runs_local, local_memory_ok
 from llm.local_profiles import format_size
 from llm.network_discovery import get_servers, parse_server_metadata
 
 OMLX_FIX = "Settings › Providers › Local model"
 CHECK_AGAIN = "Check again"
+NEVER_LOCAL_REASON = "Local models don’t run on this computer"
 
 
 def catalog_membership() -> tuple[set[str], set[str]]:
@@ -135,7 +136,8 @@ def _omlx_state(membership: tuple[set[str], set[str]] | None = None,
     from llm.local_setup_prepare import known_model
     from onboarding.local_download_state import current as local_download_state
 
-    eligible = local_memory_ok()
+    never_local = host_never_runs_local()
+    eligible = local_memory_ok() and not never_local
     model = known_model() if eligible else None
     settings_flight = setup_kind() == "settings"
     flight = None if settings_flight else local_download_state()
@@ -145,9 +147,15 @@ def _omlx_state(membership: tuple[set[str], set[str]] | None = None,
         result = _source("omlx", "Local model", state, reason, fix, checked_at)
         result.update(
             eligible=eligible,
+            never_local=never_local,
             context_window=model.context_window if model else None,
             download_size=format_size(model.download_size_bytes) if model else None,
         )
+        return result
+
+    if never_local:
+        result = starter_source("unverified", NEVER_LOCAL_REASON)
+        _project_local_flight(result, None)
         return result
 
     name = "Local model"
@@ -211,6 +219,9 @@ def omlx_source(membership: tuple[set[str], set[str]] | None = None) -> dict[str
 
     servers = get_servers(provider="omlx")
     result = _omlx_state(membership, servers)
+    if result.get("never_local") is True:
+        result.update(corsia_omlx=False, corsia_omlx_online=False, setup_kind=None)
+        return result
     own = corsia_omlx_server(servers)
     # Identity apart from status, as on the server rows: Set up shows only without CORSIA's own oMLX.
     result["corsia_omlx"] = own is not None

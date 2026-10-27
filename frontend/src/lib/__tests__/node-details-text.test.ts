@@ -32,8 +32,8 @@ describe('node details wording', () => {
 			waiting: { seconds: 0 },
 		});
 		expect(costLine(amount(null, 3, 10))).toBe('10 tokens');
-		expect(costLine(amount(0.25, 1, 10))).toBe('at least $0.2500 · 10 tokens');
-		expect(costLine(amount(1.5, 0, 10, 4, 2))).toBe('at least $1.500 · at least 10 tokens');
+		expect(costLine(amount(0.25, 1, 10))).toBe('at least $0.2500 API-equivalent · 10 tokens');
+		expect(costLine(amount(1.5, 0, 10, 4, 2))).toBe('at least $1.500 API-equivalent · at least 10 tokens');
 		expect(costLine(amount(0, 5, null))).toBeNull();
 		expect(costLine(amount(null, 5, null))).toBeNull();
 	});
@@ -47,7 +47,7 @@ describe('node details wording', () => {
 			execution: { seconds: 7_800, unknown_turns: 0, turns },
 			waiting: { seconds: waiting },
 		});
-		expect(costLine(amount(18_180))).toBe('$1.500 · 10 tokens');
+		expect(costLine(amount(18_180))).toBe('$1.500 API-equivalent · 10 tokens');
 		expect(workingTime(amount(18_180))).toBe('2h 10m');
 		expect(waitingTime(amount(18_180))).toBe('5h 3m');
 		expect(waitingTime(amount(0))).toBeNull();

@@ -1,3 +1,5 @@
+import { localHostRefusal } from './localHostRefusal';
+
 /** The model CORSIA's oMLX picked for this computer, as `/api/setup/local-model` reports it. */
 export type LocalPickModel = { name: string; repository: string; download_size_bytes: number; download_size_gb: number; context_window: number };
 export type LocalPick = {
@@ -34,7 +36,9 @@ export function createSetupLocalPick() {
 		pick = { state: 'checking', model: null, message: null };
 		try {
 			const response = await fetch(PICK, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
-			const view = response.ok ? await response.json() as LocalPick : null;
+			const body = await response.json().catch(() => null);
+			const refusal = localHostRefusal(body);
+			const view = response.ok ? body as LocalPick : refusal ? { ...FAILED, message: refusal, cause: 'never_local_host' } : null;
 			if (mine === request) pick = view ?? FAILED;
 		} catch {
 			if (mine === request) pick = FAILED;
