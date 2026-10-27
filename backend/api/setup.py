@@ -285,8 +285,10 @@ async def local_model_prepare(request: Request) -> dict | Response:
     """
     if refused := await _before_first_account(request, post=True):
         return refused
+    from api.local_model_guard import require_local_model_host
     from llm.local_setup_prepare import begin_prepare, settled_view
 
+    require_local_model_host()
     await begin_prepare()
     return await settled_view()
 
@@ -322,8 +324,10 @@ async def local_download(request: Request) -> dict | Response:
         LocalDownloadRequest.model_validate(await request.json())
     except (ValidationError, ValueError):
         return Response(status_code=422)
+    from api.local_model_guard import require_local_model_host
     from llm.local_setup_flow import begin_local_setup
 
+    require_local_model_host()
     return await begin_local_setup(onboarding=True)
 
 

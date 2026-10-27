@@ -33,7 +33,7 @@ def host_ram_bytes() -> int:
 
 
 def host_never_runs_local() -> bool:
-    """Whether this server's operating system can never run a local model (anything but macOS)."""
+    """Whether the server's operating system is not macOS."""
     return platform.system() != "Darwin"
 
 

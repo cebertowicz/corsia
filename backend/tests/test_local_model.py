@@ -360,6 +360,12 @@ def test_the_local_row_says_a_host_that_is_not_macos_never_runs_a_local_model(mo
     # not macOS is never eligible, whatever its memory, so a consumer keying on ``eligible`` offers nothing.
     assert source["never_local"] is never_local
     assert source["eligible"] is (gib >= 24 and not never_local)
+    if never_local:
+        assert source["state"] == "unverified"
+        assert source["reason"] == "Local models don’t run on this computer"
+        assert source["fix"] is None
+        assert source["local_state"] == "stopped"
+        assert "settings_download" not in source
 
 
 @pytest.mark.parametrize("gib, allowed", [(23.9, False), (24, True)])

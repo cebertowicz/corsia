@@ -48,6 +48,14 @@ describe('AddLocalModelSheet', () => {
 		expect(tryAgain()).toBe(false);
 	});
 
+	it('shows the server guidance when a stale setup offer is opened on a non-macOS host', async () => {
+		host = document.createElement('div'); document.body.appendChild(host); token.set('test-token');
+		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 409, json: async () => ({ detail: { code: 'never_local_host', message: "Local models don't run on this computer. Connect a provider." } }) })));
+		component = mount(AddLocalModelSheet, { target: host, props: { onClose: vi.fn() } });
+		await vi.waitFor(() => expect(document.body.textContent).toContain("Local models don't run on this computer. Connect a provider."));
+		expect(tryAgain()).toBe(false);
+	});
+
 	it('shows the update message from oMLX without Try again', async () => {
 		await render({ state: 'update_required', message: 'Update oMLX to 0.4.2 or later to add a local model.', models: [] });
 		expect(document.body.textContent).toContain('Update oMLX to 0.4.2 or later to add a local model.');

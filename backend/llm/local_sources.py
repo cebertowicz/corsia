@@ -19,6 +19,7 @@ from llm.network_discovery import get_servers, parse_server_metadata
 
 OMLX_FIX = "Settings › Providers › Local model"
 CHECK_AGAIN = "Check again"
+NEVER_LOCAL_REASON = "Local models don’t run on this computer"
 
 
 def catalog_membership() -> tuple[set[str], set[str]]:
@@ -152,6 +153,11 @@ def _omlx_state(membership: tuple[set[str], set[str]] | None = None,
         )
         return result
 
+    if never_local:
+        result = starter_source("unverified", NEVER_LOCAL_REASON)
+        _project_local_flight(result, None)
+        return result
+
     name = "Local model"
     servers = local_omlx_servers(omlx_rows)
     if not servers:
@@ -213,6 +219,9 @@ def omlx_source(membership: tuple[set[str], set[str]] | None = None) -> dict[str
 
     servers = get_servers(provider="omlx")
     result = _omlx_state(membership, servers)
+    if result.get("never_local") is True:
+        result.update(corsia_omlx=False, corsia_omlx_online=False, setup_kind=None)
+        return result
     own = corsia_omlx_server(servers)
     # Identity apart from status, as on the server rows: Set up shows only without CORSIA's own oMLX.
     result["corsia_omlx"] = own is not None

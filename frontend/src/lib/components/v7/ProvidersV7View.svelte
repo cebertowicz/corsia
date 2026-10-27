@@ -63,7 +63,7 @@
 		toggleError = '';
 		try {
 			const result = await retryLocalSetup('setup');
-			if (!result.ok) toggleError = "Couldn’t set up the local model. Try again.";
+			if (!result.ok) toggleError = result.neverLocalHost ? result.message ?? "Couldn’t set up the local model. Try again." : "Couldn’t set up the local model. Try again.";
 		} finally {
 			await Promise.all([refreshSources(), loadHostGroups()]);
 			loadModels();

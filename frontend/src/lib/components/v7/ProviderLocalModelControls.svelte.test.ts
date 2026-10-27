@@ -41,6 +41,7 @@ describe('ProviderLocalModelControls', () => {
 		await tick(); await tick(); flushSync();
 
 		expect(host.textContent).not.toContain('24 GB');
+		expect(host.textContent).not.toContain('Add model');
 	});
 
 	it('offers no add action for a person-owned oMLX card', async () => {

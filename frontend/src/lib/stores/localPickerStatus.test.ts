@@ -72,8 +72,8 @@ describe('what the local row lets the picker offer', () => {
 		['an eligible Mac without its own local service', { eligible: true }, { setUp: true, add: false, never: false }],
 		['an eligible Mac with its own local service online', { eligible: true, corsia_omlx: true, corsia_omlx_online: true }, { setUp: false, add: true, never: false }],
 		['a Mac too small for a local model', { eligible: false }, { setUp: false, add: false, never: false }],
-		['a server that is not macOS with enough memory', { eligible: true, never_local: true }, { setUp: false, add: false, never: true }],
-		['a server that is not macOS with its own service listed', { eligible: true, never_local: true, corsia_omlx: true, corsia_omlx_online: true }, { setUp: false, add: false, never: true }],
+		['a server that is not macOS with enough memory', { eligible: false, never_local: true }, { setUp: false, add: false, never: true }],
+		['a server that is not macOS with its own service listed', { eligible: false, never_local: true, corsia_omlx: true, corsia_omlx_online: true }, { setUp: false, add: false, never: true }],
 	])('%s', async (_name, row, expected) => {
 		const stop = await read(row);
 		expect({ setUp: get(canSetUpLocalModel), add: get(canAddLocalModel), never: get(neverLocalHost) }).toEqual(expected);

@@ -31,10 +31,10 @@ async function mountSetting() {
 	await vi.waitFor(() => expect((host.querySelector('button[role="switch"], input, button') as HTMLButtonElement | null)?.disabled).toBeFalsy());
 }
 // Serve the project's setting and the local source row, so the Set up link can follow the server's host fact.
-function stubWithLocalRow(row: Record<string, unknown>) {
+function stubWithLocalRow(row: Record<string, unknown>, off = false) {
 	vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => (String(input) === '/api/providers/sources'
 		? { ok: true, json: async () => ({ sources: [{ source: 'omlx', name: 'Local model', state: 'needs_setup', ...row }] }) }
-		: { ok: true, json: async () => ({ cloud_models_off: false }) })));
+		: { ok: true, json: async () => ({ cloud_models_off: off }) })));
 }
 const toggle = () => host.querySelector('[aria-label="Local models only"]') as HTMLElement;
 const text = () => (host.textContent ?? '').replace(/\s+/g, ' ');
@@ -124,8 +124,13 @@ describe('CloudModelsOffSetting', () => {
 	])('no local model ready on %s: the Set up a local model link is %s', async (_name, row, offered) => {
 		models.set([cloud]); stubWithLocalRow(row); await mountSetting();
 		await vi.waitFor(() => expect(text()).toContain(NONE_READY_OFF));
-		// The statement is true everywhere; the link only where a local model can run.
-		await new Promise((resolve) => setTimeout(resolve, 20)); flushSync();
+		await vi.waitFor(() => expect(text().includes('Connect a provider')).toBe(!offered));
 		expect(text().includes('Set up a local model')).toBe(offered);
+	});
+	it('offers a way forward when only local models are allowed on a non-macOS host', async () => {
+		models.set([cloud]); stubWithLocalRow({ eligible: false, never_local: true }, true); await mountSetting();
+		await vi.waitFor(() => expect(text()).toContain('Connect a model on a trusted device, or turn off Local models only.'));
+		expect(text()).toContain('Connect a provider');
+		expect(host.querySelector('.status.warning')).not.toBeNull();
 	});
 });

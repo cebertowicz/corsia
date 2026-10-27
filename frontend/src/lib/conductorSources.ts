@@ -1,3 +1,5 @@
+import { localHostRefusal } from './localHostRefusal';
+
 export type SourceAccountState = 'ready' | 'limited' | 'signed_out' | 'unchecked' | 'no_usable_model';
 
 /** One account of a Claude Code or Codex source, as the picker's account rows list it. */
@@ -24,7 +26,7 @@ export interface ModelSource {
 	limited?: boolean;
 	resets_at?: string | null;
 	eligible?: boolean;
-	/** True on the local row when this server's operating system can never run a local model (not macOS). */
+	/** True on the local row when the server's operating system is not macOS. */
 	never_local?: boolean;
 	/** The picked local model's context window; null before there is a pick. */
 	context_window?: number | null;
@@ -171,7 +173,7 @@ export type LocalModelRecommendations = {
 
 async function localRouteError(response: Response, fallback: string): Promise<Error> {
 	const body = await response.json().catch(() => null);
-	return Object.assign(new Error(typeof body?.detail === 'string' ? body.detail : fallback), { status: response.status });
+	return Object.assign(new Error(localHostRefusal(body) ?? (typeof body?.detail === 'string' ? body.detail : fallback)), { status: response.status });
 }
 
 /** Settings' local-model recommendations, checked by oMLX for this computer. */
@@ -221,7 +223,10 @@ export async function setupLocalSource(t: string): Promise<LocalSetupResult> {
 		body: JSON.stringify({}),
 	});
 	const body = await response.json().catch(() => null);
-	if (!response.ok) throw new Error(`local setup ${response.status}`);
+	if (!response.ok) {
+		const refusal = localHostRefusal(body);
+		throw Object.assign(new Error(refusal ?? `local setup ${response.status}`), { neverLocalHost: refusal !== null });
+	}
 	return body;
 }
 

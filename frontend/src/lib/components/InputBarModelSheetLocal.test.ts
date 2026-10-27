@@ -20,7 +20,7 @@ let omlx: Partial<ModelSource> = {};
 let calls: string[] = [];
 let downloadBodies: unknown[] = [];
 let setupBodies: unknown[] = [];
-let setupResponses: Array<'failure' | 'ok'> = [];
+let setupResponses: Array<'failure' | 'never-local' | 'ok'> = [];
 
 beforeEach(() => {
 	host = document.createElement('div');
@@ -47,6 +47,7 @@ beforeEach(() => {
 			setupBodies.push(JSON.parse(String(init?.body)));
 			const response = setupResponses.shift();
 			if (response === 'failure') return { ok: false, status: 500, json: async () => ({}) };
+			if (response === 'never-local') return { ok: false, status: 409, json: async () => ({ detail: { code: 'never_local_host', message: "Local models don't run on this computer. Connect a provider." } }) };
 		}
 		return { ok: true, json: async () => ({}) };
 	}));
@@ -198,6 +199,14 @@ describe('the picker\'s Local group', () => {
 		button('Try again')!.click();
 		await vi.waitFor(() => expect(setupBodies).toEqual([{}]));
 		await vi.waitFor(() => expect(get(toasts)[0]?.message).toBe("Couldn't set up the local model."));
+	});
+
+	it('shows provider guidance when a stale setup retry reaches a non-macOS server', async () => {
+		omlx = { local_state: 'failed', setup_kind: 'setup' };
+		await render();
+		setupResponses = ['never-local'];
+		button('Try again')!.click();
+		await vi.waitFor(() => expect(get(toasts)[0]?.message).toBe("Local models don't run on this computer. Connect a provider."));
 	});
 
 	it('shows a failure with no setup_kind without Try again', async () => {

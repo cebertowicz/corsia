@@ -82,7 +82,7 @@
 	async function retryLocal(kind: LocalPickerRetry) {
 		const result = await retryLocalSetup(kind);
 		if (!result.ok) {
-			toasts.show(kind === 'settings' ? result.message ?? "Couldn't retry the local model download. Try again." : "Couldn't set up the local model.", 'error');
+			toasts.show(result.neverLocalHost ? result.message ?? "Couldn't set up the local model." : kind === 'settings' ? result.message ?? "Couldn't retry the local model download. Try again." : "Couldn't set up the local model.", 'error');
 		}
 	}
 
