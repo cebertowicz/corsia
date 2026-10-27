@@ -17,6 +17,15 @@ router = APIRouter(tags=["network-servers"])
 log = logging.getLogger(__name__)
 
 
+def _remember_managed_choice(server: dict, running: bool) -> None:
+    """The person's Start or Stop on CORSIA's own local model decides whether startup runs it."""
+    from infra import settings
+    from llm.managed_omlx_binary import is_corsia_managed_server
+
+    if is_corsia_managed_server(server):
+        settings.save_setting_merge("providers", {server["provider"]: {"autoStart": running}})
+
+
 @router.post("/{server_id}/lifecycle/{action}")
 async def lifecycle_action(server_id: str, action: str):
     if action not in ("start", "stop", "reload"):
@@ -62,6 +71,7 @@ async def lifecycle_action(server_id: str, action: str):
             await run_in_db(nd.update_server_status, server_id, status="online")
         elif action == "stop":
             await run_in_db(nd.update_server_status, server_id, status="offline")
+        await run_in_db(_remember_managed_choice, server, action == "start")
     else:
         # The reference ties the failure the person sees to this line.
         result = {**result, "ref": new_reference("local")}
