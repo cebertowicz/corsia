@@ -12,6 +12,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - The local model server keeps your server-wide settings when CORSIA starts it again.
 - Claude Code accounts you added keep working when CORSIA's data moves.
 - Browser addresses no longer need `https://` typed in; local loopback addresses use `http://` by default.
+- When CORSIA can't find a chat's account sign-in on this computer, the message waits until you sign in again instead of repeatedly trying to send.
 - A signed-in app in Connected apps now reads "Figma — you@example.com" on its row, with the account shortening first on a narrow screen, and a link in chat can open an app waiting for approval with its Approve button ready.
 - Setup now opens in a normal-sized window in the middle of the screen, and the app grows to fill the screen when setup finishes.
 - A Claude Code you only just signed in to is no longer offered for import: only skills and notes you made there are brought over.
