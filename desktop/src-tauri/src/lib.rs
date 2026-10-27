@@ -286,6 +286,33 @@ fn default_app_dir<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<PathB
         .map_err(|error| format!("could not resolve the CORSIA app folder: {error}"))
 }
 
+/// Whether this desktop app has already configured its own local CORSIA. The existing first-run plan owns this
+/// distinction; remote surfaces consume it only to choose their return-action label.
+fn local_corsia_configured<R: tauri::Runtime>(app: &tauri::AppHandle<R>, app_dir: &Path) -> bool {
+    if first_run::environment_names_the_roots() {
+        return true;
+    }
+    let Ok(home) = app.path().home_dir() else {
+        log::warn!("could not resolve the home folder while checking local CORSIA setup");
+        return false;
+    };
+    local_plan_configured(&home, app_dir)
+}
+
+fn local_plan_configured(home: &Path, app_dir: &Path) -> bool {
+    if matches!(unfinished_setup::at_launch(app_dir), unfinished_setup::Launch::Wipe(_) | unfinished_setup::Launch::Replan(_)) {
+        return false;
+    }
+    match first_run::plan(home, app_dir) {
+        Ok(first_run::FirstRun::Configured) => true,
+        Ok(_) => false,
+        Err(error) => {
+            log::warn!("could not determine whether local CORSIA is configured: {error}");
+            false
+        }
+    }
+}
+
 fn service_log_path(app_dir: &Path) -> Result<PathBuf, String> {
     Ok(app_paths::state_dir_for(app_dir)?
         .join("logs")
@@ -1072,11 +1099,12 @@ async fn configure_work_folder(app: tauri::AppHandle, path: PathBuf) -> Result<(
     Ok(())
 }
 
-fn local_shell_context(home: Option<&Path>) -> serde_json::Value {
-    let Some(home) = home else { return serde_json::json!({ "mode": "local" }); };
+fn local_shell_context(home: Option<&Path>, local_configured: bool) -> serde_json::Value {
+    let Some(home) = home else { return serde_json::json!({ "mode": "local", "localConfigured": local_configured }); };
     let workspace = first_run::default_workspace(home);
     serde_json::json!({
         "mode": "local",
+        "localConfigured": local_configured,
         "default_workspace": {
             "path": workspace.display().to_string(),
             "display": format!("~/{}", first_run::WORKSPACE_FOLDER),
@@ -1086,8 +1114,8 @@ fn local_shell_context(home: Option<&Path>) -> serde_json::Value {
 
 fn remote_shell_context(connection: &shell_state::ShellState, home: Option<&Path>) -> serde_json::Value {
     match connection.state() {
-        shell_state::LaunchState::Remote { name } => serde_json::json!({ "mode": "remote", "name": name }),
-        _ => local_shell_context(home),
+        shell_state::LaunchState::Remote { name } => serde_json::json!({ "mode": "remote", "name": name, "localConfigured": connection.local_corsia_configured() }),
+        _ => local_shell_context(home, connection.local_corsia_configured()),
     }
 }
 
@@ -1508,8 +1536,12 @@ fn pairing_failed(step: &str, cause: impl std::fmt::Debug, response: RemotePairR
 
 async fn pair_remote<R: tauri::Runtime>(target: RemoteTarget, code: &str, app: &tauri::AppHandle<R>, remote: &RemoteRuntime) -> Result<RemotePairResponse, String> {
     use classify::ConnectFailure;
-    update_shell_state(app, |connection| connection.begin_pairing())?;
     let app_dir = default_app_dir(app)?;
+    let local_configured = local_corsia_configured(app, &app_dir);
+    update_shell_state(app, |connection| {
+        connection.set_local_corsia_configured(local_configured);
+        connection.begin_pairing();
+    })?;
     let locator = match target {
         RemoteTarget::DnsSd { instance } => remote_config::Locator::DnsSd { instance },
         RemoteTarget::Address { host, port } => {
@@ -1646,6 +1678,24 @@ fn return_to_shell<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     }
 }
 
+/// A remote page cannot draw a local-start answer after its proxy is stopped. Keep that answer in the startup shell
+/// and return there unless the local service is already ready to replace the page directly.
+fn show_disconnected_startup<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    called_from_shell: bool,
+    startup: &ServiceStartup,
+) -> Result<(), String> {
+    report_shell_state(app, |connection| connection.local());
+    if let ServiceStartup::Ready { url } = startup {
+        let window = app.get_webview_window("main").ok_or("the CORSIA window is unavailable")?;
+        window.eval(format!("window.location.replace('{url}');")).map_err(|error| error.to_string())?;
+    } else if !called_from_shell {
+        show_launch_outcome(app, &Ok(startup.clone()));
+        return_to_shell(app);
+    }
+    Ok(())
+}
+
 /// Forgets the saved remote and brings the local service back. Called by the remote page's Disconnect and by the
 /// startup shell's launch-failure actions; it answers like `start_local_service`.
 #[tauri::command]
@@ -1696,11 +1746,7 @@ async fn disconnect_remote(
     .await;
     match outcome {
         Ok(startup) => {
-            report_shell_state(&app, |connection| connection.local());
-            if let ServiceStartup::Ready { url } = &startup {
-                let window = app.get_webview_window("main").ok_or("the CORSIA window is unavailable")?;
-                window.eval(format!("window.location.replace('{url}');")).map_err(|error| error.to_string())?;
-            }
+            show_disconnected_startup(&app, is_shell_origin(actual.as_str()), &startup)?;
             Ok(startup)
         }
         Err(remote_lifecycle::DisconnectError::NotForgotten(error)) => Err(error),
@@ -2438,7 +2484,7 @@ pub fn run() {
                 .shell
                 .lock()
                 .map(|mut connection| page_load_state(&mut connection, payload.url().as_str(), finished, home.as_deref()))
-                .unwrap_or_else(|_| (local_shell_context(home.as_deref()), None));
+                .unwrap_or_else(|_| (local_shell_context(home.as_deref(), false), None));
             let show_state = startup_state.unwrap_or_default();
             let _ = webview.eval(format!("window.__CORSIA_SHELL__ = {shell_context};{DRAG_INIT_SCRIPT}{show_state}"));
             // Re-apply traffic-light position after each navigation —
@@ -2506,8 +2552,10 @@ pub fn run() {
             // service, whose login item was intentionally removed on pairing.
             if let Ok(app_dir) = default_app_dir(app.handle()) {
                 if let Ok(Some(saved)) = remote_config::load_remote(&app_dir) {
+                    let local_configured = local_corsia_configured(app.handle(), &app_dir);
                     if let Ok(mut connection) = app.state::<RemoteRuntime>().shell.lock() {
                         *connection = shell_state::ShellState::launch(Some(&saved));
+                        connection.set_local_corsia_configured(local_configured);
                     }
                     let app_handle = app.handle().clone();
                     tauri::async_runtime::spawn(async move { connect_saved_remote(app_handle, saved).await; });
@@ -2563,6 +2611,18 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unfinished_local_setup_is_not_configured_for_remote_return() {
+        let home = tempfile::tempdir().unwrap();
+        let app_dir = home.path().join("app");
+        let workspace = home.path().join("workspace");
+        assert!(unfinished_setup::mark(&app_dir, &workspace).unwrap());
+        std::fs::write(app_dir.join(first_run::SERVICE_FILE), "{}").unwrap();
+        assert!(matches!(unfinished_setup::at_launch(&app_dir), unfinished_setup::Launch::Wipe(_)));
+        assert!(matches!(first_run::plan(home.path(), &app_dir), Ok(first_run::FirstRun::Configured)));
+        assert!(!local_plan_configured(home.path(), &app_dir));
+    }
     use base64::Engine;
     use std::fs;
 
@@ -2922,11 +2982,13 @@ mod tests {
         };
         let mut connection = shell_state::ShellState::launch(Some(&saved));
         let home = Path::new("/fixture");
-        assert_eq!(remote_shell_context(&connection, Some(home)), serde_json::json!({ "mode": "local", "default_workspace": { "path": "/fixture/CORSIA", "display": "~/CORSIA" } }));
+        assert_eq!(remote_shell_context(&connection, Some(home)), serde_json::json!({ "mode": "local", "localConfigured": false, "default_workspace": { "path": "/fixture/CORSIA", "display": "~/CORSIA" } }));
         connection.connected("Studio");
-        assert_eq!(remote_shell_context(&connection, Some(home)), serde_json::json!({ "mode": "remote", "name": "Studio" }));
+        assert_eq!(remote_shell_context(&connection, Some(home)), serde_json::json!({ "mode": "remote", "name": "Studio", "localConfigured": false }));
+        connection.set_local_corsia_configured(true);
+        assert_eq!(remote_shell_context(&connection, Some(home)), serde_json::json!({ "mode": "remote", "name": "Studio", "localConfigured": true }));
         connection.failed("Studio", classify::ConnectFailure::Network);
-        assert_eq!(remote_shell_context(&connection, Some(home)), serde_json::json!({ "mode": "local", "default_workspace": { "path": "/fixture/CORSIA", "display": "~/CORSIA" } }));
+        assert_eq!(remote_shell_context(&connection, Some(home)), serde_json::json!({ "mode": "local", "localConfigured": true, "default_workspace": { "path": "/fixture/CORSIA", "display": "~/CORSIA" } }));
     }
 
     #[test]
@@ -3456,6 +3518,14 @@ mod tests {
             shell_state_script(&connection).as_deref(),
             Some("window.__corsiaShowServiceFailure?.(\"CORSIA service registration did not persist\");")
         );
+        assert!(is_shell_origin(app.get_webview_window("main").unwrap().url().unwrap().as_str()), "the window did not return to the startup shell");
+    }
+
+    #[test]
+    fn a_remote_disconnect_keeps_a_non_ready_startup_answer_for_the_startup_shell() {
+        let app = launch_app();
+        show_disconnected_startup(app.handle(), false, &ServiceStartup::RequiresApproval).unwrap();
+        assert_eq!(launch_state(&app), shell_state::LaunchState::LocalStartup { startup: ServiceStartup::RequiresApproval });
         assert!(is_shell_origin(app.get_webview_window("main").unwrap().url().unwrap().as_str()), "the window did not return to the startup shell");
     }
 
