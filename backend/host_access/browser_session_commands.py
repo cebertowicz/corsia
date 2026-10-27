@@ -50,11 +50,13 @@ def _saved_command(args: Sequence[str], *, pane: bool, single_dash_fill: bool = 
     if command == "open" and len(args) == 2 and _javascript_url(args[1]):
         return False
     # The native CLI scans all argv for global flags before parsing fill text.
-    # Its single-dash global flags are -p, -v and -q; other single-dash fill
-    # values are positional. Keep long options refused even as fill text.
+    # Its single-dash global flags are -p, -v and -q, and an attached or combined
+    # form (-pios, -vq) may parse as one, so refuse any fill text starting with
+    # them; other single-dash fill values are positional. Keep long options
+    # refused even as fill text.
     checked = args[1:]
     if (single_dash_fill and command == "fill" and len(args) == 3 and
-            not args[2].startswith("--") and args[2] not in {"-p", "-v", "-q"}):
+            not args[2].startswith("--") and args[2][:2] not in {"-p", "-v", "-q"}):
         checked = args[1:2]
     if any(arg.startswith("-") for arg in checked) and tuple(args) not in {
         ("snapshot", "-i"), ("wait", "--load", "networkidle")
@@ -68,7 +70,7 @@ def _saved_command(args: Sequence[str], *, pane: bool, single_dash_fill: bool = 
                 tuple(args[:2]) == ("set", "media") and len(args) == 3 and args[2] in {"dark", "light"})
     return (command == "open" and len(args) == 2 or
             tuple(args) in {("snapshot",), ("snapshot", "-i"), ("get", "title"), ("get", "url"),
-                            ("wait", "--load", "networkidle")} or
+                            ("reload",), ("wait", "--load", "networkidle")} or
             command == "click" and len(args) == 2 and not args[1].startswith("-") or
             command == "fill" and len(args) == 3 and not args[1].startswith("-") or
             command == "wait" and len(args) == 2 and not args[1].startswith("-") or

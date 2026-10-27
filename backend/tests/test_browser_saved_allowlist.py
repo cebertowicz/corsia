@@ -13,10 +13,16 @@ from tests.browser_process_fixture import synthetic_browser  # noqa: F401
     ['open', 'about:blank'], ['snapshot'], ['snapshot', '-i'], ['click', '#a'],
     ['fill', '#a', 'value'], ['wait', '#a'], ['wait', '100'],
     ['wait', '--load', 'networkidle'], ['screenshot', '/tmp/a.png'],
-    ['get', 'title'], ['get', 'url'],
+    ['get', 'title'], ['get', 'url'], ['reload'],
 ])
 def test_public_agent_shapes(args):
     assert commands._saved_command(args, pane=False)
+
+
+def test_run_steps_reload_is_a_saved_session_shape():
+    from tools import browser_run_steps
+    command = browser_run_steps._command({'action': 'goto', 'reload': True})
+    assert command == ['reload'] and commands._saved_command(command, pane=False)
 
 
 @pytest.mark.parametrize('args', [
@@ -43,8 +49,7 @@ async def test_saved_public_path_refuses_other_shapes(synthetic_browser, monkeyp
     await synthetic_browser.owner.shutdown()
 
 
-@pytest.mark.parametrize('text', ['-1', '-example', 'javascript: documentation'])
-async def test_saved_fill_preserves_ordinary_text(synthetic_browser, monkeypatch, text):
+def _pin_cli_0_31_2(synthetic_browser, monkeypatch):
     monkeypatch.setattr(browser_launch, '_owner_key', lambda _: 'owner')
     synthetic_browser.code = synthetic_browser.code.replace("'0.27.0'", "'0.31.2'")
     original = synthetic_browser.owner._invoke
@@ -54,9 +59,24 @@ async def test_saved_fill_preserves_ordinary_text(synthetic_browser, monkeypatch
             return CommandResult(0, 'agent-browser 0.31.2', '')
         return await original(argv, timeout=timeout)
     monkeypatch.setattr(synthetic_browser.owner, '_invoke', invoke)
+
+
+@pytest.mark.parametrize('text', ['-1', '-example', 'javascript: documentation'])
+async def test_saved_fill_preserves_ordinary_text(synthetic_browser, monkeypatch, text):
+    _pin_cli_0_31_2(synthetic_browser, monkeypatch)
     await synthetic_browser.owner.run('a', ['open', 'about:blank'])
     await synthetic_browser.owner.run('a', ['fill', '#a', text])
     assert synthetic_browser.calls[-1][-3:] == ('fill', '#a', text)
+    await synthetic_browser.owner.shutdown()
+
+
+@pytest.mark.parametrize('text', ['-p', '-pios', '-vq', '-qv', '-v1', '--headers'])
+async def test_saved_fill_refuses_text_a_global_flag_could_read(synthetic_browser, monkeypatch, text):
+    _pin_cli_0_31_2(synthetic_browser, monkeypatch)
+    await synthetic_browser.owner.run('a', ['open', 'about:blank'])
+    with pytest.raises(Exception, match='unavailable in a browser session|verified local Chrome/CDP mode'):
+        await synthetic_browser.owner.run('a', ['fill', '#a', text])
+    assert synthetic_browser.calls[-1][-2:] == ('open', 'about:blank')
     await synthetic_browser.owner.shutdown()
 
 
