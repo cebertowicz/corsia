@@ -15,6 +15,9 @@ from llm.resolution import ExecutionTarget
 
 log = logging.getLogger("infra.send_service")
 
+# Match the existing Codex interrupt response bound.
+EVENT_BOUNDARY_TIMEOUT_SECONDS = 30
+
 
 async def target_for(
     admission: InputAdmission, supplied: ExecutionTarget | None,
@@ -54,6 +57,41 @@ async def request_boundary_for_admission(
 
     target = await target_for(admission, supplied)
     await send_service.request_safe_boundary(admission.accepted.thread_id, target.harness)
+
+
+async def drive_pending_admission(
+    admission: InputAdmission, target: ExecutionTarget | None, intent: str, native_mode: str,
+) -> None:
+    """Drive a pending switch or nudge the turn that owns the queued FIFO."""
+    from thread.model_pending import drive_pending_model_switch
+
+    if await drive_pending_model_switch(admission.accepted.thread_id) is not None:
+        return
+    if intent == "apply_now":
+        # This is only a timing wake; turn settlement also drains the FIFO.
+        if native_mode == "event":
+            schedule_event_boundary(admission, target)
+        else:
+            await publish_projection(
+                "safe boundary", admission,
+                lambda: request_boundary_for_admission(admission, target),
+            )
+
+
+def schedule_event_boundary(admission: InputAdmission, target: ExecutionTarget | None) -> None:
+    """Nudge a running turn without holding the already accepted event's sender."""
+    from ws.ingress import track_background_task
+
+    async def nudge() -> None:
+        try:
+            async with asyncio.timeout(EVENT_BOUNDARY_TIMEOUT_SECONDS):
+                await request_boundary_for_admission(admission, target)
+        except TimeoutError:
+            log.warning("safe boundary timed out for input %s", admission.accepted.message_id[:8])
+        except Exception:
+            log.exception("safe boundary failed for input %s", admission.accepted.message_id[:8])
+
+    track_background_task(asyncio.create_task(nudge()))
 
 
 async def fail_unrun_claim(admission: InputAdmission, error: BaseException) -> None:

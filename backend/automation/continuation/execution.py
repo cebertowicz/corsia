@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 from loguru import logger
 
 from automation.continuation import settlement, triggers
@@ -9,6 +11,9 @@ from automation.continuation.models import StaleContinuation
 from infra.database import TransactionOwnershipError, write_transaction
 from infra.db_async import run_in_db_unless_owned
 from infra.product_events import emit_product_event
+
+# Half the minute-long sweep cadence leaves time for the remaining wakes.
+DELIVERY_TIMEOUT_SECONDS = 30
 
 
 def event_for(request: triggers.TriggerRequest) -> tuple[str, str, dict]:
@@ -135,7 +140,19 @@ async def deliver_one(
         return
     resolved_deliver = getattr(source, "deliver", None) or deliver
     try:
-        landed = await resolved_deliver(trigger.thread_id, event, summary, details)
+        from ws.ingress import track_background_task
+
+        task = asyncio.create_task(resolved_deliver(trigger.thread_id, event, summary, details))
+        track_background_task(task)
+        try:
+            done, _ = await asyncio.wait({task}, timeout=DELIVERY_TIMEOUT_SECONDS)
+        except BaseException:
+            task.cancel()
+            raise
+        if not done:
+            task.cancel()
+            raise TimeoutError("continuation delivery exceeded its time limit")
+        landed = task.result()
     except StaleContinuation:
         outcome, reason = "cancelled", "stale_source_state"
     except Exception as exc:  # noqa: BLE001 - logged, reported, and settled failed

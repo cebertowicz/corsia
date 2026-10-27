@@ -12,7 +12,7 @@ from infra.send_broadcast import broadcast_input_row, broadcast_newest_error
 from infra.send_post_admission import (
     broadcast_passive,
     publish_projection,
-    request_boundary_for_admission,
+    drive_pending_admission,
     resolve_claimed_target,
     target_for as _target_for,
 )
@@ -214,6 +214,7 @@ async def _deliver_admission(
     thread_row: Any,
     *,
     delivery_intent: str,
+    native_mode: str,
     target: ExecutionTarget | None,
     user: dict | None,
     ws: Any | None,
@@ -262,18 +263,7 @@ async def _deliver_admission(
     if delivery_after_failed_prefix is not None:
         return queued
     if admission.batch is None:
-        from thread.model_pending import drive_pending_model_switch
-
-        thread_id = admission.accepted.thread_id
-        pending_switch = await drive_pending_model_switch(thread_id)
-        if pending_switch is not None:
-            return queued
-        if delivery_intent == "apply_now":
-            # A timing wake only: the active Turn's settlement drains the FIFO.
-            await publish_projection(
-                "safe boundary", admission,
-                lambda: request_boundary_for_admission(admission, target),
-            )
+        await drive_pending_admission(admission, target, delivery_intent, native_mode)
         return queued
     resolved = await resolve_claimed_target(
         admission, lambda: _target_for(admission, target),
@@ -363,7 +353,7 @@ async def send_thread_input(
     notify_if_owner(admission.accepted, role=role, content=text, metadata=metadata)
     return await _deliver_admission(
         admission, thread_row,
-        delivery_intent=delivery_intent,
+        delivery_intent=delivery_intent, native_mode=native_mode,
         target=target, user=user, ws=ws,
         dispatch_content=dispatch_content,
         after_persist_before_dispatch=after_persist_before_dispatch,

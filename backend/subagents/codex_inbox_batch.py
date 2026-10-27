@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 
@@ -113,6 +114,8 @@ async def _steer_claimed(batch: ClaimedBatch, live, thread_row: dict, target) ->
         proved_no_write = await _settle_failure(
             batch, attempt_id, write_observed, error,
         )
+        if isinstance(error, asyncio.CancelledError):
+            raise
         if proved_no_write:
             return False
         raise
