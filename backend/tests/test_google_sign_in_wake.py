@@ -65,7 +65,7 @@ async def test_an_agent_added_account_wakes_the_starting_thread_with_the_address
     assert wake["account_id"] == account["id"] and "cause" not in wake
     for secret in (REFRESH, SECRET, "auth-code", state):
         assert secret not in wake["content"]
-    assert wake["chip"] == "Google sign-in finished" and "about" not in wake["chip"].lower()
+    assert wake["chip"] == "Google sign-in finished"
     assert state not in oauth._expiries
 
 
@@ -158,12 +158,38 @@ async def test_a_person_started_sign_in_wakes_no_one(google, conductor, client_f
     url, _ = await oauth.start_sign_in(client_file, actor=("person", "person"), reach=EVERYWHERE)
     query = parse_qs(urlparse(url).query)
     google.challenge = query["code_challenge"][0]
-    assert query["state"][0] not in oauth._expiries
+    assert query["state"][0] in oauth._expiries
 
     status, _page = await _callback(query["state"][0], code="auth-code")
 
     assert status == 200 and len(_accounts()) == 1
     assert wakes() == []
+
+
+async def test_an_unfinished_person_sign_in_expires_without_a_wake(google, conductor, client_file, monkeypatch):
+    url, _ = await oauth.start_sign_in(client_file, actor=("person", "person"), reach=EVERYWHERE)
+    state = parse_qs(urlparse(url).query)["state"][0]
+    pending = oauth._pending[state]
+    _stop_timer(state)
+    monkeypatch.setattr(oauth, "PENDING_SECONDS", 0)
+
+    await oauth._expire(pending)
+
+    assert state not in oauth._pending and wakes() == []
+
+
+async def test_expired_flow_counts_toward_cap_until_timer_removes_it(google, conductor, client_file, monkeypatch):
+    monkeypatch.setattr(oauth, "PENDING_MAX", 1)
+    _, state = await _start(google, conductor, client_file)
+    pending = oauth._pending[state]
+    _stop_timer(state)
+    monkeypatch.setattr(oauth, "PENDING_SECONDS", 0)
+
+    with pytest.raises(oauth.GoogleSignInError, match=oauth.TOO_MANY):
+        await oauth.start_sign_in(client_file, actor=("person", "person"), reach=EVERYWHERE)
+    await oauth._expire(pending)
+    monkeypatch.setattr(oauth, "PENDING_SECONDS", 600)
+    await oauth.start_sign_in(client_file, actor=("person", "person"), reach=EVERYWHERE)
 
 
 async def test_an_unfinished_sign_in_wakes_the_thread_when_it_expires(google, conductor, client_file, monkeypatch):
@@ -192,14 +218,17 @@ async def test_a_sign_in_the_callback_took_is_not_also_reported_expired(google, 
     assert [wake["outcome"] for wake in wakes()] == ["connected"]
 
 
-async def test_a_callback_that_finds_its_sign_in_expired_wakes_the_thread(google, conductor, client_file, monkeypatch):
+async def test_a_callback_after_deadline_leaves_expiry_to_the_timer(google, conductor, client_file, monkeypatch):
     _, state = await _start(google, conductor, client_file)
+    pending = oauth._pending[state]
     _stop_timer(state)
     monkeypatch.setattr(oauth, "PENDING_SECONDS", 0)
 
     status, page = await _callback(state, code="auth-code")
 
     assert status == 400 and oauth.BROWSER_DENIED in page
+    assert state in oauth._pending and wakes() == []
+    await oauth._expire(pending)
     [wake] = wakes()
     assert (wake["thread_id"], wake["cause"], wake["message"]) == (conductor, CONSENT_CANCELLED, EXPIRED_MESSAGE)
     assert _accounts() == []

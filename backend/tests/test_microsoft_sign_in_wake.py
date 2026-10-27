@@ -64,7 +64,7 @@ async def test_an_agent_added_account_wakes_the_starting_thread_with_the_address
         "microsoft", "connected", ADDRESS, account_id,
     )
     assert "cause" not in wake
-    assert wake["chip"] == "Microsoft sign-in finished" and "about" not in wake["chip"].lower()
+    assert wake["chip"] == "Microsoft sign-in finished"
     assert "authorization-code" not in wake["content"] and oauth._pending == {}
 
 
@@ -127,6 +127,31 @@ async def test_a_fault_inside_corsia_wakes_the_thread_with_the_shared_provider_u
     [wake] = wakes()
     assert (wake["outcome"], wake["cause"], wake["message"]) == ("failed", PROVIDER_UNAVAILABLE, UNAVAILABLE_MESSAGE)
     assert "canary-internal-detail" not in wake["content"]
+
+
+async def test_repeat_callback_during_exchange_does_not_end_the_flow(microsoft, isolated_db, agent_adds):
+    thread_id = _agent()
+    url, account_id = await _agent_flow(thread_id)
+    entered, release = asyncio.Event(), asyncio.Event()
+    handler = microsoft.handler
+
+    async def delayed_exchange(request):
+        if request.method == "POST":
+            entered.set()
+            await release.wait()
+        return handler(request)
+
+    microsoft.handler = delayed_exchange
+    first = asyncio.create_task(_finish(url))
+    try:
+        await asyncio.wait_for(entered.wait(), 2)
+        assert (await _finish(url))[0] == 400
+    finally:
+        release.set()
+    assert (await first)[0] == 200
+    assert [(wake["outcome"], wake["account_id"]) for wake in wakes()] == [("connected", account_id)]
+    assert [(account["id"], account["state"]) for account in _accounts()] == [(account_id, "connected")]
+    assert "latest_failed_add" not in oauth.accounts_status(thread_id)
 
 
 async def test_one_sign_in_is_one_input_whatever_arrives_after_it(microsoft, isolated_db, agent_adds):

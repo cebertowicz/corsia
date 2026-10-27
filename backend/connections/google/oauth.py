@@ -163,11 +163,6 @@ def _begin(
         client_secret=client_secret, redirect_uri=redirect_uri(), created_at=time.monotonic(),
     )
     with _pending_lock:
-        # A flow an agent waits on ends at its own timer, which says so; only an unwatched one is dropped here.
-        for stale in [
-            nonce for nonce, flow in _pending.items() if flow.expired and flow.starting_thread_id is None
-        ]:
-            _pending.pop(stale, None)
         if len(_pending) >= PENDING_MAX:
             raise GoogleSignInError(
                 TOO_MANY,
@@ -194,8 +189,7 @@ async def start_sign_in(
     url, pending = await run_in_db(
         _begin, client_file, account_id, actor, adding_thread_id, reach, starting_thread_id,
     )
-    if starting_thread_id is not None:
-        _expiries[pending.state] = asyncio.create_task(_expire(pending))
+    _expiries[pending.state] = asyncio.create_task(_expire(pending))
     emit_lifecycle_event("connect_started", pending.account_id, "google")
     return url, pending.account_id
 
@@ -222,7 +216,7 @@ async def stop_all_signins() -> None:
 
 
 def _take_pending(state: object) -> _Pending:
-    """Consume the sign-in whose nonce is ``state``, expired or not; none matching is DENIED.
+    """Consume the unexpired sign-in whose nonce is ``state``; none matching is DENIED.
 
     A wrong state leaves every flow pending: any page can make the browser GET
     the loopback callback, and that must not cancel the person's sign-in.
@@ -233,7 +227,11 @@ def _take_pending(state: object) -> _Pending:
         match = next(
             (nonce for nonce in _pending if secrets.compare_digest(state.encode(), nonce.encode())), None,
         )
-        pending = _pending.pop(match, None) if match is not None else None
+        pending = _pending.get(match) if match is not None else None
+        if pending is not None and pending.expired:
+            raise GoogleSignInError(DENIED, browser_message=BROWSER_DENIED)
+        if match is not None:
+            _pending.pop(match)
         timer = _expiries.pop(match, None) if match is not None else None
     if timer is not None:
         timer.cancel()
@@ -321,9 +319,6 @@ async def _tell_agent(pending: _Pending, *, cause: str, message: str | None = No
 async def complete_sign_in(code: object, state: object) -> str:
     """Finish one pending sign-in from Google's redirect; returns the connected address."""
     pending = _take_pending(state)
-    if pending.expired:
-        await notify_expired(pending.starting_thread_id, pending.state, "google", pending.account_id)
-        raise GoogleSignInError(DENIED, browser_message=BROWSER_DENIED)
     try:
         if not isinstance(code, str) or not code:
             raise GoogleSignInError(DENIED, browser_message=BROWSER_DENIED)

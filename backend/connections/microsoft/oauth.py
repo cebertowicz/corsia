@@ -130,8 +130,7 @@ def _new_pending(
     valid_client, valid_kind, valid_tenant, authority = validate_connect_input(client_id, kind, tenant_id)
     return _Pending(
         state=secrets.token_urlsafe(32), account_id=account_id or str(uuid.uuid4()), adding=account_id is None,
-        actor=actor, adding_thread_id=adding_thread_id, reach=reach,
-        kind=valid_kind, authority=authority,
+        actor=actor, adding_thread_id=adding_thread_id, reach=reach, kind=valid_kind, authority=authority,
         verifier=secrets.token_urlsafe(64), client_id=valid_client, tenant_id=valid_tenant,
         redirect_uri=f"http://localhost:{listener.port}", listener=listener, created_at=time.monotonic(),
     )
@@ -199,8 +198,7 @@ def _redirect_error(query: dict[str, str]) -> MicrosoftError:
 
 
 async def _record_failure(pending: _Pending, error: MicrosoftError) -> None:
-    """Keep a failure where the person and agents can read it: on the row being signed in again,
-    or as the adder's latest failed add. Results about the request or CORSIA itself mark nothing."""
+    """Keep failures on the row or as the adder's latest failed add; request or CORSIA errors mark nothing."""
     if pending.adding:
         _record_add_failure(_adder(pending), error.cause)
         return
@@ -224,8 +222,7 @@ async def start_sign_in(
 
     With ``account_id`` it signs that row in again with the registration saved for it;
     ``client_id``, ``kind`` and ``tenant_id`` are then ignored, and ``adding_thread_id``
-    (None for the person) must be able to see the row. Without it, it adds an account
-    whose reach comes from ``adding_thread_id``'s scope or, for the person, ``reach``. An agent's
+    (None for the person) must see the row. An add takes reach from its thread scope or the person's ``reach``. An agent's
     ``adding_thread_id`` is also woken once with how it ended, even when nobody finishes it.
     """
     if account_id is not None:
@@ -245,6 +242,8 @@ async def start_sign_in(
                 _take_pending(given)
                 raise _redirect_error(query)
             await _complete_sign_in(query.get("code"), given)
+        except _AlreadyTaken as exc:
+            return 400, exc.browser_message, False, None
         except MicrosoftError as exc:
             await _record_failure(pending, exc)
             emit_lifecycle_event("connect_failed", pending.account_id, MICROSOFT_PROVIDER, cause=exc.cause)
@@ -272,9 +271,7 @@ async def start_sign_in(
     listener = CallbackListener(path="/", allowed_hosts=allowed_hosts("localhost"), handler=handler, on_cap=on_cap)
     try:
         await listener.start()
-        pending = _new_pending(
-            client_id, kind, tenant_id, account_id, actor, adding_thread_id, reach, listener,
-        )
+        pending = _new_pending(client_id, kind, tenant_id, account_id, actor, adding_thread_id, reach, listener)
         holder["pending"] = pending
         with _pending_lock:
             if len(_pending) >= PENDING_MAX:
@@ -320,6 +317,9 @@ async def stop_all_signins() -> None:
         await _discard_pending(flow, SHUT_DOWN_MESSAGE, drive=False)
 
 
+class _AlreadyTaken(MicrosoftError): ...
+
+
 def _take_pending(state: object) -> _Pending:
     if not isinstance(state, str) or not state:
         raise MicrosoftError(CONSENT_CANCELLED)
@@ -329,7 +329,7 @@ def _take_pending(state: object) -> _Pending:
         if match is not None:
             _cancel_expiry(match)
     if pending is None or pending.expired:
-        raise MicrosoftError(CONSENT_CANCELLED)
+        raise (_AlreadyTaken if pending is None else MicrosoftError)(CONSENT_CANCELLED)
     return pending
 
 
