@@ -120,7 +120,7 @@ test.describe('Microsoft Connected apps capture', () => {
 
 			state = 'failure';
 			await page.reload(); await openConnectedApps(page); await open();
-			await expect(page.getByRole('button', { name: 'Try again' })).toHaveClass(/primary/);
+			await expect(page.getByRole('button', { name: 'Retry' })).toHaveClass(/primary/);
 			await capture(page, testInfo, `ms-provider-failure-${label}-${theme}`);
 
 			state = 'registration';

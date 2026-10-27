@@ -2,6 +2,7 @@ import { test } from '../support/test';
 import { expect } from '@playwright/test';
 import { createServer } from 'node:http';
 import { createSession, loginByUrl } from '../support/corsia';
+import { startProbeServer } from '../support/probeServer';
 
 test.use({ video: 'on' });
 
@@ -16,6 +17,7 @@ test.describe('@flow:browser-pane @stress animated browser control', () => {
    req.on('end', () => { try { reports.push(JSON.parse(body)); } catch { /* Ignore unrelated requests. */ } res.end('ok'); });
   });
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const probeServer = await startProbeServer();
   const port = (server.address() as { port: number }).port;
   let frameCount = 0, frameBytes = 0, remoteWidth = 0, remoteHeight = 0;
   const started = Date.now();
@@ -42,7 +44,7 @@ test.describe('@flow:browser-pane @stress animated browser control', () => {
    await page.getByRole('button', { name: 'Open browser', exact: true }).click();
    if (mobile) await page.getByRole('button', { name: 'Toggle panel', exact: true }).click();
    const address = page.getByRole('textbox', { name: 'Browser address' });
-   const probe = new URL('/browser-pane-probe.html', page.url());
+   const probe = new URL('/browser-pane-probe.html', probeServer.origin);
    probe.searchParams.set('stress', '1'); probe.searchParams.set('report', `http://127.0.0.1:${port}`);
    await address.fill(probe.href);
    await address.press('Enter');
@@ -111,6 +113,6 @@ test.describe('@flow:browser-pane @stress animated browser control', () => {
     await expect.poll(() => reports.filter(report => report.released).length).toBe(releases + 1);
    }
    await page.screenshot({ path: testInfo.outputPath(`pane-proof-${pageStamp}.png`) });
-  } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); }
+  } finally { await probeServer.close(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); }
  });
 });

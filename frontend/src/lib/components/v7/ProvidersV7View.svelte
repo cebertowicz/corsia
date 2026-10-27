@@ -173,7 +173,7 @@
 		return [{ key: 'this-mac', name: 'This computer', subname: '', netKind: 'localhost', providers: [localSetupRow] }, ...base];
 	});
 
-	// The chat held line's "Spend past plan limit" and Settings › Keys land here: open
+	// The chat held line's "Spend past usage limit" and Settings › Keys land here: open
 	// that card (a harness account or a cloud provider), then bring it into view. It never toggles.
 	$effect(() => {
 		const connection = $providerCardRequest;

@@ -63,6 +63,7 @@ test.describe('@surface:providers accounts live in settings modal', () => {
 		const writes: { url: string; body: unknown }[] = [];
 		await serveAccounts(page, writes);
 		for (const [name, width, colorScheme] of [
+			['accounts-overage-1920-light', 1920, 'light'],
 			['accounts-overage-desktop-light', 1440, 'light'], ['accounts-overage-desktop-dark', 1440, 'dark'],
 			['accounts-overage-393-light', 393, 'light'], ['accounts-overage-393-dark', 393, 'dark'],
 		] as const) {
@@ -73,21 +74,28 @@ test.describe('@surface:providers accounts live in settings modal', () => {
 			await expect(page.getByText('Usage limit reached · reset time unknown')).toBeVisible();
 			await expect(page.getByText("Couldn't verify account")).toBeVisible();
 			await expect(page.getByText('Work · work@example.test')).toBeVisible();
-			await expect(page.getByRole('button', { name: 'Spend past plan limit for Plus account 1' })).toHaveAttribute('aria-pressed', 'false');
-			await expect(page.getByRole('button', { name: 'Spend past plan limit for Work · work@example.test' })).toHaveAttribute('aria-pressed', 'true');
+			await expect(page.getByRole('button', { name: 'Spend past usage limit for Plus account 1' })).toHaveAttribute('aria-pressed', 'false');
+			await expect(page.getByRole('button', { name: 'Spend past usage limit for Work · work@example.test' })).toHaveAttribute('aria-pressed', 'true');
 			// Wait out the finite animations; the online status dot pulses forever by design (the screenshot freezes it).
 			await page.waitForFunction(() => document.getAnimations().every((a) => a.playState !== 'running' || a.effect?.getComputedTiming().iterations === Infinity));
 			await page.getByText('Work · work@example.test').scrollIntoViewIfNeeded();
 			await page.screenshot({ path: testInfo.outputPath(`${name}.png`), fullPage: true, animations: 'disabled' });
+			if (name === 'accounts-overage-1920-light' || name === 'accounts-overage-393-light') {
+				await page.getByText('Work · work@example.test').click({ button: 'right' });
+				await page.getByRole('menuitem', { name: 'Remove' }).click();
+				await expect(page.getByText('Chats using it wait until you choose another account.')).toBeVisible();
+				await page.screenshot({ path: testInfo.outputPath(`${name.replace('accounts-overage', 'account-remove')}.png`), fullPage: true, animations: 'disabled' });
+				await page.getByRole('alertdialog').getByRole('button', { name: 'Cancel' }).click();
+			}
 			await page.getByRole('button', { name: 'Overview' }).click();
 			await page.screenshot({ path: testInfo.outputPath(`${name.replace('accounts', 'overview')}.png`), fullPage: true, animations: 'disabled' });
 		}
 
 		await openHarnessAccounts(page, 'codex', 'Plus account 1');
-		await page.getByRole('button', { name: 'Spend past plan limit for Plus account 1' }).click();
-		await expect(page.getByRole('button', { name: 'Spend past plan limit for Plus account 1' })).toHaveAttribute('aria-pressed', 'true');
+		await page.getByRole('button', { name: 'Spend past usage limit for Plus account 1' }).click();
+		await expect(page.getByRole('button', { name: 'Spend past usage limit for Plus account 1' })).toHaveAttribute('aria-pressed', 'true');
 		expect(writes).toEqual([{ url: '/api/vendor-accounts/codex-default/usage', body: { allow_overage: true } }]);
-		await expect(page.getByRole('button', { name: 'Spend past plan limit for Work · work@example.test' })).toHaveAttribute('aria-pressed', 'true');
+		await expect(page.getByRole('button', { name: 'Spend past usage limit for Work · work@example.test' })).toHaveAttribute('aria-pressed', 'true');
 	});
 
 	test('renders Claude Code account limits and verification failures in both tabs', async ({ page }, testInfo) => {

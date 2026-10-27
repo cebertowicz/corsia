@@ -154,7 +154,7 @@ describe('TranscriptContent update-card fold', () => {
 		flushSync();
 
 		const labels = host.querySelectorAll('.plan-limit-paused');
-		expect([...labels].map((label) => label.textContent)).toEqual(['Paused: plan limit reached']);
+		expect([...labels].map((label) => label.textContent)).toEqual(['Paused: usage limit reached']);
 		expect(labels[0].closest('.transcript-fold')).toBeTruthy();
 		expect(labels[0].previousElementSibling?.textContent).toBe('Earlier work');
 		host.querySelector<HTMLButtonElement>('.fold-toggle')!.click(); flushSync();
@@ -184,7 +184,7 @@ describe('TranscriptContent update-card fold', () => {
 		flushSync();
 
 		const labels = [...host.querySelectorAll('.plan-limit-paused')];
-		expect(labels.map((label) => label.textContent)).toEqual(['Paused: plan limit reached']);
+		expect(labels.map((label) => label.textContent)).toEqual(['Paused: usage limit reached']);
 		expect(labels[0].previousElementSibling?.textContent).toContain('ask-1');
 		expect(labels[0].nextElementSibling?.textContent).toContain('ask-2');
 	});

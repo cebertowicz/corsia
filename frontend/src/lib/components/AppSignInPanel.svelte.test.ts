@@ -119,7 +119,7 @@ describe('AppSignInPanel', () => {
 		mountPanel(linear({ sign_in: { status: 'failed', signed_in: false, failure_class: failureClass } }));
 		expect(host.textContent).toContain(text);
 		const labels: Record<string, string | null> = { permissions: 'Sign in', not_approved: null, address_mismatch: 'Sign in' };
-		const label = failureClass in labels ? labels[failureClass] : 'Try again';
+		const label = failureClass in labels ? labels[failureClass] : 'Retry';
 		if (label) expect(button(label)!.classList.contains('primary')).toBe(true);
 		else expect(host.querySelectorAll('.actions .btn')).toHaveLength(0);
 	});
@@ -141,7 +141,7 @@ describe('AppSignInPanel', () => {
 		const fetch = vi.fn(async () => reply({ authorization_url: LINK, expires_at: 't', reopened: false }));
 		vi.stubGlobal('fetch', fetch);
 		const { onChange } = mountPanel(linear({ sign_in: { status: 'failed', signed_in: false, failure_class: 'address_mismatch' } }));
-		expect(button('Try again')).toBeUndefined();
+		expect(button('Retry')).toBeUndefined();
 		button('Sign in')!.click();
 		await vi.waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/api/mcp/servers/linear/sign-in'), { method: 'POST' }));
 		await vi.waitFor(() => expect(onChange).toHaveBeenCalledWith({ sign_in: expect.objectContaining({ status: 'pending', failure_class: undefined }) }));
@@ -154,9 +154,9 @@ describe('AppSignInPanel', () => {
 		expect(host.textContent).toContain('tenant is frozen');
 	});
 
-	it('does not offer Sign in away from the computer CORSIA runs on', () => {
+	it('does not offer Sign in away from the main computer', () => {
 		mountPanel(linear(), { signInHere: false });
-		expect(host.textContent).toContain('You can only sign in on the computer CORSIA runs on. Open CORSIA there and press Sign in.');
+		expect(host.textContent).toContain('You can only sign in on your main computer. Open CORSIA there and press Sign in.');
 		expect(button('Sign in')).toBeUndefined();
 	});
 
@@ -188,7 +188,7 @@ describe('ConnectedAppsSettings with sign-in', () => {
 	it('hides Sign in when the backend says the person is not on its computer', async () => {
 		vi.stubGlobal('fetch', vi.fn(async () => reply({ servers: [linear()], sign_in_here: false })));
 		component = mount(ConnectedAppsSettings, { target: host });
-		await vi.waitFor(() => expect(host.textContent).toContain('You can only sign in on the computer CORSIA runs on.'));
+		await vi.waitFor(() => expect(host.textContent).toContain('You can only sign in on your main computer.'));
 		expect(button('Sign in')).toBeUndefined();
 	});
 

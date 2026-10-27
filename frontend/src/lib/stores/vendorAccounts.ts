@@ -39,7 +39,7 @@ export interface VendorAccount {
 	identity: Record<string, string>;
 	label: VendorAccountLabel;
 	duplicate_of?: string | null;
-	/** This account's 'Spend past plan limit' switch; null where no plan limit applies. */
+	/** This account's 'Spend past usage limit' switch; null where no plan limit applies. */
 	allow_overage?: boolean | null;
 	/** Signed in, but none of the vendor's models can run on this account. */
 	no_usable_model?: boolean;
@@ -185,7 +185,7 @@ export async function recordVendorAccountOverage(account: VendorAccount, input: 
 	return { ok: true };
 }
 
-/** Store one account's 'Spend past plan limit' switch; `error` is user-facing text. */
+/** Store one account's 'Spend past usage limit' switch; `error` is user-facing text. */
 export async function setVendorAccountOverage(account: VendorAccount, allow: boolean): Promise<{ ok: boolean; error?: string }> {
 	const result = await request<VendorAccount>(`/api/vendor-accounts/${encodeURIComponent(account.id)}/usage`, json('PUT', {
 		allow_overage: allow,

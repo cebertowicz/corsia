@@ -14,7 +14,7 @@ THREAD_UPDATES_SCHEMA_SQL = """
         thread_id   TEXT NOT NULL REFERENCES threads(id),
         kind        TEXT NOT NULL CHECK (kind IN (
                       'marked',
-                      'done', 'done_follow_up', 'failed', 'closed', 'blocked')),
+                      'done', 'done_follow_up', 'failed', 'closed', 'blocked', 'person_step')),
         source_kind TEXT NOT NULL CHECK (source_kind IN ('message', 'plan_event')),
         source_id   TEXT NOT NULL,
         -- Navigation only: no foreign key, so the card outlives its node.

@@ -1020,9 +1020,9 @@ for (const width of [1440, 393]) {
 			const failurePanel = page.locator('.load-error');
 			await expect(failurePanel).toBeVisible();
 			await expect(failurePanel).toContainText("Couldn't open launch-plan.md.");
-			await expect(failurePanel.getByRole('button', { name: 'Try again' })).toBeVisible();
+			await expect(failurePanel.getByRole('button', { name: 'Retry' })).toBeVisible();
 			await shot(page, `07-failed-open-${theme}-${width}`);
-			await failurePanel.getByRole('button', { name: 'Try again' }).click();
+			await failurePanel.getByRole('button', { name: 'Retry' }).click();
 			await expect(failurePanel).toContainText("Couldn't open launch-plan.md.");
 		});
 	}
@@ -1087,8 +1087,8 @@ for (const theme of ['light', 'dark'] as const) {
 			documentAvailable = false;
 			await chip.click();
 			const removed = page.locator('.gone');
-			await expect(removed.getByText('launch-plan.md is no longer available.', { exact: true })).toBeVisible();
-			await expect(removed.getByRole('button', { name: 'Try again' })).toHaveCount(0);
+			await expect(removed.getByText('launch-plan.md is unavailable.', { exact: true })).toBeVisible();
+			await expect(removed.getByRole('button', { name: 'Retry' })).toHaveCount(0);
 			await expect(page.locator('.row.openable', { hasText: 'launch-plan.md' })).toHaveCount(0);
 			await shot(page, `07b-removed-document-${theme}-${width}`);
 			await removed.getByRole('button', { name: 'Close tab' }).click();

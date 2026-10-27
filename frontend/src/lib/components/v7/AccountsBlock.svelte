@@ -390,7 +390,7 @@
 <ConfirmDialog
 	open={!!removeTarget}
 	title={`Remove ${removeTarget?.name ?? ''}?`}
-	description="Threads on it hold until you choose another account."
+	description="Chats using it wait until you choose another account."
 	confirmLabel="Remove"
 	destructive
 	onConfirm={removeAccount}

@@ -698,7 +698,7 @@ async def test_browser_screenshot_consumes_before_creating_outside_destination(
 
 
 @pytest.mark.asyncio
-async def test_browser_file_open_consumes_exact_local_path_before_effect(
+async def test_browser_file_open_refuses_before_permit_or_effect(
     tmp_path,
     monkeypatch,
 ) -> None:
@@ -749,15 +749,9 @@ async def test_browser_file_open_consumes_exact_local_path_before_effect(
         _thread_project_id=None,
     )
 
-    assert result == "opened"
-    assert [event[0] for event in events] == ["consume", "run", "run"]
-    open_args = events[1][1][0]
-    assert open_args[0] == "open"
-    assert open_args[1] != reviewed.resolve(strict=False).as_uri()
-    assert events[1][1][1:3] == ("thread-1", "lease-1")
-    assert opened_content == ["reviewed\n"]
-    assert events[2][1][0] == ["wait", "--load", "networkidle"]
-    assert events[2][1][1:3] == ("thread-1", "lease-1")
+    assert "HTTP, HTTPS or about:blank" in result
+    assert events == []
+    assert opened_content == []
 
 
 @pytest.mark.asyncio
@@ -820,8 +814,7 @@ async def test_reviewed_local_browser_effects_run_and_forward_bound_lease(
             _thread_id="thread-1",
             _thread_project_id="project-1",
         )
-        == "ok"
-    )
+    ).startswith("Error: Browser navigation requires HTTP, HTTPS or about:blank")
     assert (
         await browser.BrowserScreenshotTool().execute(
             path=str(screenshot),
@@ -839,14 +832,14 @@ async def test_reviewed_local_browser_effects_run_and_forward_bound_lease(
     )
 
     runs = [event[1] for event in events if event[0] == "run"]
-    # Reviewed local effects (open + wait, screenshot) forward the bound lease.
+    # Screenshots still forward their bound lease; file navigation is refused.
     assert all(run[2] == "lease-1" for run in runs[:-1])
     # An ordinary click runs normally with no lease binding and no freeze gate.
     assert runs[-1] == ("thread-1", ["click", "@e1"], None, 30)
 
 
 @pytest.mark.asyncio
-async def test_browser_file_open_allows_reviewed_private_path_through_bound_copy(
+async def test_browser_file_open_refuses_even_with_reviewed_path(
     tmp_path,
     monkeypatch,
 ) -> None:
@@ -890,8 +883,8 @@ async def test_browser_file_open_allows_reviewed_private_path_through_bound_copy
         _thread_project_id=None,
     )
 
-    assert result == "opened"
-    assert effects == ["copy", "open", "wait"]
+    assert "HTTP, HTTPS or about:blank" in result
+    assert effects == []
 
 
 @pytest.mark.asyncio
@@ -1034,7 +1027,10 @@ async def test_browser_http_open_does_not_enter_host_path_gate(monkeypatch) -> N
         lease_id=None,
         timeout=30,
         show_window=None,
+        navigation_url=None,
+        notice=True,
     ):
+        assert notice == (args != ["open", "about:blank"])
         assert thread_id == "thread-1"
         assert lease_id is None
         calls.append((args, show_window))
@@ -1070,7 +1066,8 @@ async def test_browser_http_open_requests_a_visible_new_session(monkeypatch) -> 
 
     calls: list[tuple[list[str], bool | None]] = []
 
-    async def run(args, *, thread_id, lease_id=None, timeout=30, show_window=None):
+    async def run(args, *, thread_id, lease_id=None, timeout=30, show_window=None, navigation_url=None, notice=True):
+        assert notice == (args != ["open", "about:blank"])
         assert thread_id == "thread-1" and lease_id is None
         calls.append((args, show_window))
         return "opened"
@@ -1100,7 +1097,10 @@ async def test_browser_http_open_stages_navigation_before_waiting(monkeypatch) -
         lease_id=None,
         timeout=30,
         show_window=None,
+        navigation_url=None,
+        notice=True,
     ):
+        assert notice == (args != ["open", "about:blank"])
         assert thread_id == "thread-1"
         assert lease_id is None
         calls.append((args, timeout))

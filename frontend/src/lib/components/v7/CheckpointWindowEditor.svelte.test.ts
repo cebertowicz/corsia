@@ -47,7 +47,7 @@ describe('CheckpointWindowEditor', () => {
 
 		expect(document.body.textContent).toContain('Checkpoint context window (tokens)');
 		expect(document.body.textContent).toContain('never sent to the provider');
-		expect(document.body.textContent).toContain('cannot be used until one is set');
+		expect(document.body.textContent).toContain('The provider reports no context window, so set one to use this model. CORSIA checkpoints a chat before it outgrows it.');
 
 		type('1000000');
 		saveButton()?.click();

@@ -310,7 +310,7 @@
 		<div class="load-error" role="alert">
 			<p>Couldn't load this image.</p>
 			{#if failure !== FAILED_IMAGE}<code>{alt ? `${alt} · ${failure}` : failure}</code>{/if}
-			<button type="button" class="control" onclick={retry}>Try again</button>
+			<button type="button" class="control" onclick={retry}>Retry</button>
 		</div>
 	{:else}
 		{#if natural === null}<div class="loadbar"><span></span></div>{/if}

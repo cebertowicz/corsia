@@ -399,8 +399,8 @@ describe('ConnectedAppsSettings', () => {
 		expect([...host.querySelector(`[data-connected-account-id="${expired.id}"]`)!.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.trim() === 'Sign in')?.className).toContain('primary');
 		open(failed.id);
 		expect(host.textContent).toContain('Sign-in didn’t finish');
-		expect(host.textContent).toContain('Microsoft had a problem with sign-in. Try again.');
-		const retry = [...host.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.trim() === 'Try again');
+		expect(host.textContent).toContain('Microsoft had a problem with sign-in. Press Retry.');
+		const retry = [...host.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.trim() === 'Retry');
 		expect(retry?.className).toContain('primary');
 		expect(host.textContent).toContain('Where it works…');
 		expect(host.textContent).toContain('Remove');
@@ -500,7 +500,7 @@ describe('ConnectedAppsSettings', () => {
 			await vi.waitFor(() => expect(host.querySelector('[data-connected-account-id="a"]')).not.toBeNull());
 			openRow('a');
 			expect(host.querySelector('[data-connected-account-id="a"] .details')).not.toBeNull();
-			labelled('Try again')!.click();
+			labelled('Retry')!.click();
 			await vi.waitFor(() => expect(host.querySelector('[data-connected-account-id="a"] .sub')?.textContent).toContain('Checking…'));
 			expect(host.querySelector('[data-connected-account-id="a"] .details')).toBeNull();
 			expect(host.querySelector('[data-connected-account-id="a"] button')?.getAttribute('aria-expanded')).toBe('false');
@@ -770,7 +770,7 @@ describe('WhereItWorks', () => {
 		unmount(component);
 		component = mount(WhereItWorks, { target: host, props: { app: { ...awaiting, transport: 'http', reach }, approve: true, onClose: vi.fn(), onSaved: vi.fn() } });
 		await settle();
-		expect(host.textContent).not.toContain("It can do anything you can do on this computer");
+		expect(host.textContent).not.toContain("It can do anything you can do on the computer it runs on");
 		unmount(component);
 		component = mount(WhereItWorks, { target: host, props: { app: { ...awaiting, transport: 'stdio', notice, reach }, onClose: vi.fn(), onSaved: vi.fn() } });
 		await settle();

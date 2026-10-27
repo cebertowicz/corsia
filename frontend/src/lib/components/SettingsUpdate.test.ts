@@ -142,7 +142,7 @@ describe('SettingsUpdate', () => {
 		const details = host.querySelector('details')!;
 		expect(details.querySelector('summary')?.textContent?.trim()).toBe('Details');
 		expect(details.querySelector('pre')?.textContent).toBe('network stopped.');
-		const retry = Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Try again');
+		const retry = Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Retry');
 		expect(retry).toBeDefined();
 		expect(host.querySelector('.offer')).toBeNull();
 	});
@@ -266,7 +266,7 @@ describe('SettingsUpdate', () => {
 		component = mount(SettingsUpdate, { target: host });
 		flushSync();
 		expect(host.textContent).not.toContain("Update didn't start");
-		expect(host.textContent).not.toContain('Try again');
+		expect(host.textContent).not.toContain('Retry');
 		expect(host.textContent).not.toContain('Installed');
 	});
 });
