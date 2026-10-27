@@ -17,7 +17,7 @@
 	const asksLine = $derived.by(() => {
 		const lead = 'All agents together:';
 		if (asks.loading && !asks.rows.length) return `${lead} decisions and tasks for you per outcome are loading.`;
-		if (asks.error && !asks.rows.length) return `${lead} decisions and tasks for you per outcome couldn’t load. Use Retry on that chart.`;
+		if (asks.error && !asks.rows.length) return `${lead} decisions and tasks for you per outcome couldn’t load. Use Retry on Decisions and tasks for you per outcome.`;
 		const value = asksView.current.value;
 		return `${lead} ${value === null ? '–' : value.toFixed(2)} decisions and tasks for you per outcome, ${changeOnly(asksView)}.`;
 	});

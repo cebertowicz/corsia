@@ -184,17 +184,15 @@
 	.table-wrap:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 	/* Phone: keep columns in view, giving the dated header room; long agent names may break within their column. */
 	@media (max-width: 430px) {
-		table { width: 100%; min-width: 0; table-layout: fixed; font-size: var(--text-footnote); }
+		table { width: 100%; min-width: 0; table-layout: auto; font-size: var(--text-footnote); }
 		th, td { padding: 6px 3px; }
 		tbody th { white-space: normal; }
 		.filter { max-width: 100%; white-space: normal; overflow-wrap: anywhere; word-break: normal; }
 		thead th { white-space: normal; overflow-wrap: normal; word-break: normal; font-size: var(--text-caption); }
 		.sort { white-space: normal; }
-		thead th:first-child { width: 14%; }
-		thead th:nth-child(2) { width: 18%; }
-		thead th:nth-child(3) { width: 13%; }
-		thead th.cost { width: 20%; }
+		thead th.n { width: 1%; }
 		thead th.change { width: 35%; }
+		tbody td.n { white-space: nowrap; }
 		/* The full cost name runs past three lines in its column; the phone header keeps its first words. */
 		.long { display: none; }
 	}

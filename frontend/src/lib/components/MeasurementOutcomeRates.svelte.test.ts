@@ -104,7 +104,7 @@ describe('MeasurementOutcomeRates', () => {
 
 	it('points the asks error to the chart retry', () => {
 		render(panel({ rows: rows('active_hours_per_outcome', eight(0.1, 0.05)) }), panel({ error: 'boom' }), panel());
-		expect(text(host.querySelector('.asks'))).toBe('All agents together: decisions and tasks for you per outcome couldn’t load. Use Retry on that chart.');
+		expect(text(host.querySelector('.asks'))).toBe('All agents together: decisions and tasks for you per outcome couldn’t load. Use Retry on Decisions and tasks for you per outcome.');
 	});
 
 	it('keeps loading, empty and error states per card and retries the failed panel', () => {
