@@ -193,7 +193,9 @@ class DocCommentCreateTool(Tool):
             "review": {"type": "boolean"},
             "client_id": {"type": ["string", "null"]},
             "replacement": {"type": ["string", "null"]},
-            "insert_after": {"type": "boolean", "description": "Insert replacement after quote rather than replacing it."},
+            "insert_after": {"type": "boolean", "description": (
+                "Insert replacement after quote rather than replacing it. "
+                "Start replacement with a newline to add it as its own line.")},
             "region": REGION_SCHEMA,
             "submit": {
                 "type": "boolean",
