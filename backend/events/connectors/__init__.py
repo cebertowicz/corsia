@@ -58,7 +58,6 @@ class ObservedArtifactDecl:
     metadata: Mapping[str, Any] | None = None
 
 
-
 @dataclass(frozen=True)
 class ConnectorManifest:
     """All declared data + resolvers for one source connector / internal domain."""

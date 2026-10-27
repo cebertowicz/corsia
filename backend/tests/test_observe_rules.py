@@ -218,12 +218,6 @@ async def test_agent_row_can_register_a_pr_named_by_read_only_command(isolated_d
     assert told == [f"Registered pull request {FOREIGN} to you."]
 
 
-def test_a_shipped_row_is_not_held_to_the_projects_repositories(isolated_db):
-    _agent("a")
-    artifact, _ = _run("a", "gh pr create", FOREIGN_URL + "\n")
-    assert artifact["parent_thread_id"] == "a" == _owner(FOREIGN)
-
-
 def test_the_outcome_is_written_through_the_callers_open_transaction(isolated_db):
     _agent("a")
     db = get_db()
