@@ -857,15 +857,11 @@ async def test_normal_shutdown_joins_all_owned_work_before_storage(
         finally:
             stopped.add(name)
 
+    monkeypatch.setattr(llm_lifecycle, "_autostart_targets", lambda: [{"provider": "omlx", "id": "managed"}])
     monkeypatch.setattr(
         llm_lifecycle,
-        "get_local_providers",
-        lambda: [{"name": "local", "enabled": True, "autoStart": True}],
-    )
-    monkeypatch.setattr(
-        llm_lifecycle,
-        "check_server",
-        lambda _name: block("provider auto-start"),
+        "get_managed_engine",
+        lambda _name: SimpleNamespace(ensure_live=lambda _cfg: block("provider auto-start")),
     )
     monkeypatch.setattr("infra.key_store_providers.provider_keys", lambda: {"openai": "key"})
     monkeypatch.setattr(

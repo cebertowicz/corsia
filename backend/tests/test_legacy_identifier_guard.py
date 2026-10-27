@@ -29,7 +29,6 @@ ALLOWED = {
     "backend/tests/test_corsia_app_mode.py",
     "backend/tests/test_desktop_service_launcher.py",
     "backend/tests/test_devices_after_state_move.py",
-    "backend/tests/test_omlx_restart_on_startup.py",
     "backend/tests/test_platform_paths.py",
     "backend/tests/test_stop_recorded_processes.py",
     "backend/tests/test_legacy_identifier_guard.py",
