@@ -57,8 +57,8 @@ def _has_active_shell_syntax(command: str) -> bool:
     return False
 
 
-def command_matches_trigger(command: object, trigger: _HasArgvPrefix) -> bool:
-    """Match one literal top-level command against a rule's or declaration's leading arguments."""
+def command_matches_rule(command: object, rule: _HasArgvPrefix) -> bool:
+    """Match one literal top-level command against an observe rule's leading arguments."""
     if not isinstance(command, str) or "\n" in command or "\r" in command:
         return False
     if _has_active_shell_syntax(command):
@@ -67,5 +67,5 @@ def command_matches_trigger(command: object, trigger: _HasArgvPrefix) -> bool:
         argv = shlex.split(command, comments=False, posix=True)
     except ValueError:
         return False
-    prefix = trigger.argv_prefix
+    prefix = rule.argv_prefix
     return bool(prefix) and tuple(argv[: len(prefix)]) == prefix

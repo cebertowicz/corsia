@@ -101,7 +101,7 @@ def test_the_shipped_row_is_the_github_pr_create_rule(isolated_db):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("tool_name", ["bash", "mcp__corsia__bash", "Bash"])
+@pytest.mark.parametrize("tool_name", ["bash", "mcp__corsia__bash"])
 async def test_pr_create_observation_is_cross_harness(
     isolated_db,
     monkeypatch,
@@ -118,12 +118,11 @@ async def test_pr_create_observation_is_cross_harness(
         command="gh pr create --title reliable",
     )
 
-    if tool_name != "Bash":
-        from tests.test_shell_pr_registration import _direct_shell_context, _stub_process
-        from tools.shell import BashTool
+    from tests.test_shell_pr_registration import _direct_shell_context, _stub_process
+    from tools.shell import BashTool
 
-        _stub_process(monkeypatch, stdout=_URL + "\n")
-        await BashTool().execute("gh pr create --title reliable", **_direct_shell_context(thread_id))
+    _stub_process(monkeypatch, stdout=_URL + "\n")
+    await BashTool().execute("gh pr create --title reliable", **_direct_shell_context(thread_id))
     observation = observe_record(
         thread_id,
         "tool",
@@ -132,7 +131,7 @@ async def test_pr_create_observation_is_cross_harness(
         db=db,
     )
 
-    assert (observation is not None) == (tool_name == "Bash")
+    assert observation is None
     rows = _pr_rows(db, thread_id)
     assert len(rows) == 1
     assert rows[0]["external_id"] == "owner/repo#42"
@@ -398,7 +397,7 @@ async def _drive_durable_result_seam(
         )
         return
 
-    tool_name = "Bash" if harness == "claude" else "mcp__corsia__bash"
+    tool_name = "mcp__corsia__bash"
     _insert_call(
         db,
         thread_id,
@@ -437,12 +436,11 @@ async def test_each_durable_result_seam_registers_one_routable_pr(
     db = get_db()
     thread_id = make_session(db, prefix=f"command-{harness}-durable")
 
-    if harness != "claude":
-        from tests.test_shell_pr_registration import _direct_shell_context, _stub_process
-        from tools.shell import BashTool
+    from tests.test_shell_pr_registration import _direct_shell_context, _stub_process
+    from tools.shell import BashTool
 
-        _stub_process(monkeypatch, stdout=_URL + "\n")
-        await BashTool().execute("gh pr create --title durable-seam", **_direct_shell_context(thread_id))
+    _stub_process(monkeypatch, stdout=_URL + "\n")
+    await BashTool().execute("gh pr create --title durable-seam", **_direct_shell_context(thread_id))
     await _drive_durable_result_seam(harness, thread_id, db)
 
     rows = _pr_rows(db, thread_id)

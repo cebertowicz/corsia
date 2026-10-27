@@ -17,7 +17,7 @@ from registry.observation_result import (
     observe_settled_tool_result,
 )
 from registry import models
-from registry.command_match import command_matches_trigger
+from registry.command_match import command_matches_rule
 from registry.observed_write import register_observed_write
 from registry.registration_writer import RegistrationOrigin
 from registry.service import register_observed_artifact
@@ -59,22 +59,12 @@ def observe_record(
 
 
 def _artifact_from_result(
-    thread_id, raw_name, name, args, text, meta, arg_keys, is_shell,
-    *, is_cc_builtin, origin, db, changed,
+    thread_id, name, args, text, meta, arg_keys,
+    *, is_cc_builtin, origin, db,
 ) -> dict | None:
     """Preserve existing registration behavior beside activity observation."""
     if arg_keys is None:
-        return observe_command_result(
-            thread_id,
-            raw_name,
-            args,
-            text,
-            is_error=bool(meta.get("is_error")),
-            origin=origin,
-            db=db,
-            notify=False,
-            changed=changed,
-        ) if is_shell else None
+        return None
     if meta.get("is_error"):
         return None
     if name in _NATIVE_TOOLS and not is_cc_builtin and text.startswith("{"):
@@ -109,14 +99,7 @@ def _observe(
     name = normalize_tool_name(raw_name)
 
     arg_keys = _WRITERS.get(name)
-    # CORSIA's bash observes its own result; only a legacy built-in Bash
-    # needs observation when its persisted result is delivered.
-    is_shell = name in observe_rules.SHELL_TOOLS and raw_name in CC_BUILTIN_ALIASES
-    if (
-        arg_keys is None
-        and not is_shell
-        and not is_document_activity_tool(name)
-    ):
+    if arg_keys is None and not is_document_activity_tool(name):
         return None
 
     text = content or ""
@@ -156,16 +139,11 @@ def _observe(
             )
             activity = None
 
-        changed: list[dict] = []
-        try:
-            artifact = _artifact_from_result(
-                thread_id, raw_name, name, args, text, meta, arg_keys,
-                is_shell, is_cc_builtin=is_cc_builtin, origin=origin, db=_db, changed=changed,
-            )
-        except CommandArtifactRegistrationError as error:
-            logger.warning(f"registry observer failed for session {thread_id}: {error}")
-            artifact = None
-        return observation_result(artifact, activity, changed if is_shell else None)
+        artifact = _artifact_from_result(
+            thread_id, name, args, text, meta, arg_keys,
+            is_cc_builtin=is_cc_builtin, origin=origin, db=_db,
+        )
+        return observation_result(artifact, activity)
     finally:
         if not db:
             _db.close()
@@ -227,7 +205,7 @@ def observe_command_result(
     owned, followed = None, None  # the owner's registration first, else a follower's
     seen: set[tuple[str, str, str]] = set()
     for rule in covering:
-        if not command_matches_trigger(args.get(rule.command_arg), rule):
+        if not command_matches_rule(args.get(rule.command_arg), rule):
             continue
         extract = _extractor(rule, db, thread_id, told)
         if extract is None:

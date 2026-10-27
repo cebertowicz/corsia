@@ -1,4 +1,4 @@
-"""Schema 148 -> 149: observe rules. Existing rules become route rules, the shipped rule is seeded once."""
+"""Schema 149 -> 150: existing rules become route rules."""
 from __future__ import annotations
 
 import sqlite3
@@ -9,7 +9,8 @@ from infra.database import initialize_schema
 from infra.database_migrations import MIGRATIONS, migrate_to_current
 from infra.event_rule_schema import EVENT_RULE_SCHEMA_SQL
 from infra.migration_140_to_141_worker_starts import migrate_140_to_141
-from infra.migration_148_to_149_observe_rules import migrate_148_to_149
+from infra.migration_149_to_150_observe_rules import migrate_149_to_150
+from events.observe_rules import sync_shipped_rules
 from infra.schema import SCHEMA_VERSION
 from tests.test_schema_migration_v141 import _V140
 
@@ -29,11 +30,11 @@ def _v148() -> sqlite3.Connection:
     return db
 
 
-def test_existing_rules_become_route_rules_and_the_shipped_rule_is_seeded_once():
+def test_existing_rules_become_route_rules():
     db = _v148()
     db.execute("BEGIN")
-    migrate_148_to_149(db)
-    migrate_148_to_149(db)  # repeatable: neither the rebuild nor the seed doubles
+    migrate_149_to_150(db)
+    migrate_149_to_150(db)  # repeatable: the rebuild does not repeat
     assert db.in_transaction
     db.commit()
     fresh = sqlite3.connect(":memory:")
@@ -43,8 +44,7 @@ def test_existing_rules_become_route_rules_and_the_shipped_rule_is_seeded_once()
     assert db.execute("SELECT id, kind, event_type, action, \"to\", tool, item_type FROM event_rules "
                       "ORDER BY id").fetchall() == [
         ("r1", "route", "pr.merged", "deliver", "thread:w", None, None),
-        ("r2", "route", "pr.merged", "run_script", "thread:w", None, None),
-        ("ruleset_github_pr_create", "observe", None, None, None, "bash", "pull-request")]
+        ("r2", "route", "pr.merged", "run_script", "thread:w", None, None)]
     assert db.execute("SELECT COUNT(*) FROM event_route_decisions").fetchone()[0] == 2
 
 
@@ -71,7 +71,7 @@ def test_storage_ties_each_kind_to_its_own_fields_and_global_scope_to_a_shipped_
 
 
 def test_a_full_v148_install_takes_the_step_and_ends_where_a_fresh_install_starts():
-    assert SCHEMA_VERSION == 149 and MIGRATIONS[148] is migrate_148_to_149
+    assert SCHEMA_VERSION == 150 and MIGRATIONS[149] is migrate_149_to_150
     db = sqlite3.connect(":memory:")
     initialize_schema(db)
     for table in ("event_route_decisions", "event_rules"):
@@ -79,9 +79,11 @@ def test_a_full_v148_install_takes_the_step_and_ends_where_a_fresh_install_start
     db.executescript(_V140.split("CREATE TABLE automation_schedules")[0])
     db.execute("PRAGMA user_version=148")
     db.commit()
-    assert migrate_to_current(db, SCHEMA_VERSION).to_version == 149
+    assert migrate_to_current(db, SCHEMA_VERSION).to_version == 150
     fresh = sqlite3.connect(":memory:")
     initialize_schema(fresh)
+    sync_shipped_rules(db)
+    sync_shipped_rules(fresh)
     schema = "SELECT type,name,tbl_name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name"
     assert db.execute(schema).fetchall() == fresh.execute(schema).fetchall()
     assert db.execute("SELECT id FROM event_rules WHERE kind='observe'").fetchall() == [

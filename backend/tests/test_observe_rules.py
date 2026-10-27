@@ -183,9 +183,6 @@ def test_the_shipped_rule_registers_gh_pr_create_for_every_caller(isolated_db):
     assert (shipped["id"], shipped["scope"], shipped["kind"], shipped["connector"], shipped["tool"]) == (
         "ruleset_github_pr_create", "global", "observe", "github", "bash")
     assert (json.loads(shipped["argv_prefix"]), shipped["item_type"]) == (["gh", "pr", "create"], "pull-request")
-    from events.connectors.github import GITHUB_INTEGRATION, PR_TYPE
-
-    assert (shipped["connector"], shipped["item_type"]) == (GITHUB_INTEGRATION, PR_TYPE)
     assert connectors.artifact_extractor(shipped["connector"], shipped["item_type"]) is not None
 
 
@@ -306,34 +303,6 @@ def test_shell_notifies_each_registration_even_if_a_later_one_fails(isolated_db,
     result = asyncio.run(BashTool().execute("gh pr create", **_direct_shell_context(thread)))
     assert [item["external_id"] for item in notified] == ([PR] if fail_second else [PR, "owner/repo#43"])
     assert ("Warning" in result) == fail_second
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("fail_second", [False, True])
-async def test_legacy_bash_notifies_each_registration_after_settlement(isolated_db, monkeypatch, fail_second):
-    from registry import observer
-    from registry.observation_result import observe_settled_tool_result
-    from tests.test_registry_command_observer import _insert_call
-
-    thread = make_session(get_db(), prefix="legacy-multi")
-    _insert_call(get_db(), thread, "call", name="Bash", command="gh pr create")
-    _write("INSERT INTO event_rules (id,created_at,updated_at,enabled,kind,scope,connector,origin,created_by,"
-           "authority_ref,tool,argv_prefix,item_type) VALUES ('second','zz','zz',1,'observe','global',"
-           "'github','rule_set:test','system','self','bash','[\"gh\",\"pr\",\"create\"]','other')")
-    original_extractor = connectors.artifact_extractor
-    monkeypatch.setattr(connectors, "artifact_extractor", lambda connector, item: (
-        (lambda _: connectors.ObservedArtifactDecl("github", "pull-request", "owner/repo#43"))
-        if item == "other" else original_extractor(connector, item)))
-    original_register = observer.register_observed_artifact
-    def register(*args, **kwargs):
-        if fail_second and kwargs["external_id"] == "owner/repo#43":
-            raise ValueError("registration failed")
-        return original_register(*args, **kwargs)
-    monkeypatch.setattr(observer, "register_observed_artifact", register)
-    notified = []
-    monkeypatch.setattr("registry.service.notify_changed", notified.append)
-    await observe_settled_tool_result(thread, _URL, {"tool_call_id": "call", "name": "Bash"})
-    assert [item["external_id"] for item in notified] == ([PR] if fail_second else [PR, "owner/repo#43"])
 
 
 @pytest.mark.asyncio

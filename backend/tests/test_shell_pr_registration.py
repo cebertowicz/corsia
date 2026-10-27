@@ -11,10 +11,10 @@ from core.turn_core import TurnIdentity
 from core.turn_core import persist_turn_start
 from events import observe_rules
 from infra.database import get_db
-from infra.event_rule_schema import EVENT_RULES_WITH_SHIPPED_SQL
+from infra.event_rule_schema import EVENT_RULE_SCHEMA_SQL
 from infra.thread_driver import admit_input
 from registry import models
-from registry.command_match import command_matches_trigger
+from registry.command_match import command_matches_rule
 from subagents.child_thread import persist_tool_use
 from subagents.harness_tool_bridge import execute_tool
 from tests.registry_helpers import artifact_rows_for_thread, make_session
@@ -33,7 +33,8 @@ def _shipped_rule() -> observe_rules.ObserveRule:
     """The shipped gh pr create row, as a fresh install seeds it."""
     db = sqlite3.connect(":memory:")
     db.row_factory = sqlite3.Row
-    db.executescript(EVENT_RULES_WITH_SHIPPED_SQL)
+    db.executescript(EVENT_RULE_SCHEMA_SQL)
+    observe_rules.sync_shipped_rules(db)
     return observe_rules.from_row(db.execute("SELECT * FROM event_rules").fetchone())
 
 
@@ -172,7 +173,7 @@ def _pr_rows(db, thread_id: str) -> list[dict]:
     ],
 )
 def test_direct_classifier_rejects_active_shell_expansion(command):
-    assert not command_matches_trigger(command, _GITHUB_TRIGGER)
+    assert not command_matches_rule(command, _GITHUB_TRIGGER)
 
 
 @pytest.mark.parametrize(
@@ -188,7 +189,7 @@ def test_direct_classifier_rejects_active_shell_expansion(command):
     ],
 )
 def test_direct_classifier_allows_literal_shell_metacharacters(command):
-    assert command_matches_trigger(command, _GITHUB_TRIGGER)
+    assert command_matches_rule(command, _GITHUB_TRIGGER)
 
 
 @pytest.mark.asyncio
@@ -374,7 +375,7 @@ async def test_cross_user_preowned_pr_cannot_be_claimed(isolated_db, monkeypatch
     row = models.resolve("github", "pull-request", "owner/repo#42", db=db)
     assert row is not None and row["parent_thread_id"] == owner_id
     assert _pr_rows(db, other_id) == []
-    assert "Warning: An external artifact was created" in other_result
+    assert "Warning: CORSIA could not automatically register an artifact from the command output" in other_result
     assert "artifact_register" in other_result
 
 
@@ -406,7 +407,7 @@ async def test_registration_exception_is_logged_and_appended_without_failing_com
 
     assert result.startswith(_URL)
     assert not result.startswith("Error")
-    assert "Warning: An external artifact was created" in result
+    assert "Warning: CORSIA could not automatically register an artifact from the command output" in result
     assert "artifact_register" in result
     assert "registry unavailable" in caplog.text
     assert _pr_rows(db, thread_id) == []
@@ -478,7 +479,7 @@ async def test_bash_registration_warning_budget_preserves_warning(
     )
 
     assert len(result) <= BASH_REGISTRATION_WARNING_RESULT_CAP
-    assert "Warning: An external artifact was created" in result
+    assert "Warning: CORSIA could not automatically register an artifact from the command output" in result
     assert "artifact_register" in result
 
 

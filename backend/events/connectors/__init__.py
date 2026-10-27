@@ -59,6 +59,16 @@ class ObservedArtifactDecl:
 
 
 @dataclass(frozen=True)
+class ShippedObserveRuleDecl:
+    """An observe rule shipped with this connector's manifest."""
+
+    id: str
+    tool: str
+    argv_prefix: tuple[str, ...]
+    item_type: str
+
+
+@dataclass(frozen=True)
 class ConnectorManifest:
     """All declared data + resolvers for one source connector / internal domain."""
 
@@ -75,6 +85,7 @@ class ConnectorManifest:
     # one by its artifact type (``item_type``).
     artifact_extractors: Mapping[str, Callable[[str], ObservedArtifactDecl | None]] = field(
         default_factory=dict)
+    shipped_observe_rules: tuple[ShippedObserveRuleDecl, ...] = ()
     resolve_relationships: Callable[[str, dict, dict], tuple[dict, ...]] = (
         lambda event_type, facts, raw: ()
     )

@@ -1,18 +1,17 @@
-"""Schema 148 -> 149, observe rules: ``event_rules.kind``, ``tool``, ``argv_prefix`` and ``item_type``,
-the ``registered`` and ``not_registered`` outcomes of ``event_route_decisions``, and the shipped rule
-sets' observe rows.
+"""Schema 149 -> 150, observe rules: ``event_rules.kind``, ``tool``, ``argv_prefix`` and ``item_type``,
+the ``registered`` and ``not_registered`` outcomes of ``event_route_decisions``, for observe rules.
 
 SQLite can't widen a CHECK or free a NOT NULL in place, so each table that isn't in its new shape is
 rebuilt from the fresh-install DDL and its rows copied over (every existing rule becomes a ``route``
-rule). Guarded: a table already in its new shape is left alone, and the shipped rows are inserted once.
+rule). Guarded: a table already in its new shape is left alone, without changing existing rows.
 """
 from __future__ import annotations
 
 import sqlite3
 
-from infra.event_rule_schema import EVENT_RULE_SCHEMA_SQL, SHIPPED_OBSERVE_RULES_SQL
+from infra.event_rule_schema import EVENT_RULE_SCHEMA_SQL
 
-_OLD = "_148"
+_OLD = "_149"
 
 
 def _columns(conn: sqlite3.Connection, table: str) -> list[str]:
@@ -43,7 +42,7 @@ def _copy_back(conn: sqlite3.Connection, table: str) -> None:
     conn.execute(f"DROP TABLE {table}{_OLD}")
 
 
-def migrate_148_to_149(conn: sqlite3.Connection) -> None:
+def migrate_149_to_150(conn: sqlite3.Connection) -> None:
     stale = {
         "event_rules": "kind" not in _columns(conn, "event_rules"),
         "event_route_decisions": "'not_registered'" not in _definition(conn, "event_route_decisions"),
@@ -55,4 +54,3 @@ def migrate_148_to_149(conn: sqlite3.Connection) -> None:
     for table in rebuilt:
         _copy_back(conn, table)
     _create(conn, EVENT_RULE_SCHEMA_SQL)  # the renamed tables kept the index names until they were dropped
-    _create(conn, SHIPPED_OBSERVE_RULES_SQL)

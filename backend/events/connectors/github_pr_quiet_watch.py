@@ -356,9 +356,9 @@ async def pr_quiet_watch_loop(runner: feed.GhRunner | None = None) -> None:
     the notice and the receipt keep writing them, and it rechecks the reason.
     """
     if runner is None:
-        from reviewer.gh_api import run_gh
+        from connections.github_broker import default_broker
 
-        runner = run_gh
+        runner = default_broker()
     while True:
         reason = await asyncio.to_thread(disabled_reason, runner)
         if reason is not None:

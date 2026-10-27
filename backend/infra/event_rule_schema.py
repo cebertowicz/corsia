@@ -1,10 +1,9 @@
 """Agent-written event rules and the record of what each one did.
 
-Shared by fresh installs and migrations 136, 138, 141 and 149. ``event_rules`` holds
+Shared by fresh installs and migrations 136, 138, 141 and 150. ``event_rules`` holds
 the rules an agent wrote through the ``event_rules`` tool, of two kinds: ``route`` rules
 act on events (today's routing stays in code), and ``observe`` rules register the
-artifact named in a tool result to its caller. The only seeded rows are the shipped rule
-sets' observe rows (``SHIPPED_OBSERVE_RULES_SQL``). ``event_route_decisions`` is the one outcome
+artifact named in a tool result to its caller. ``event_route_decisions`` is the one outcome
 record for those rules; the tool's list and explain read it, a ``run_script`` rule's
 row is also its run's queue until the script
 runner settles it, and a ``start_worker`` rule's row is its start's queue, its
@@ -135,17 +134,3 @@ EVENT_RULE_SCHEMA_SQL = f"""
     CREATE INDEX IF NOT EXISTS idx_event_route_decisions_worker
         ON event_route_decisions(worker_thread_id);
 """
-
-# A shipped rule set's observe rows: data in the release, one row per command, applying to every
-# caller. The row is the only home of a shipped command rule: the observer applies it and ``types``
-# reads it. A new connector's shipped command is a row seeded here and by a migration.
-SHIPPED_OBSERVE_RULES_SQL = """
-    INSERT OR IGNORE INTO event_rules (id, created_at, updated_at, enabled, kind, scope, connector,
-        origin, created_by, authority_ref, tool, argv_prefix, item_type)
-    VALUES ('ruleset_github_pr_create', '2026-10-26T00:00:00+00:00', '2026-10-26T00:00:00+00:00', 1,
-        'observe', 'global', 'github', 'rule_set:github@1', 'rule_set:github@1', 'shipped:github@1',
-        'bash', '["gh","pr","create"]', 'pull-request');
-"""
-
-# What a fresh install runs: the tables, then the shipped rows.
-EVENT_RULES_WITH_SHIPPED_SQL = EVENT_RULE_SCHEMA_SQL + SHIPPED_OBSERVE_RULES_SQL

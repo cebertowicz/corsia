@@ -116,11 +116,10 @@ async def handle_native_tool_complete(
         media_metadata=media_metadata,
     )
     tool_meta = stored["metadata"]
-    if observation:
+    if observation and observation.artifact:
         from registry.service import notify_changed
 
-        for artifact in observation.notifications():
-            notify_changed(artifact)
+        notify_changed(observation.artifact)
     if observation and observation.activity:
         from doceditor.presence import publish_document_activity
 

@@ -18,6 +18,7 @@ import sqlite3
 import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any
 
 from loguru import logger
@@ -77,6 +78,42 @@ def applicable(db: sqlite3.Connection, project_id: str | None, thread_id: str, t
         "AND (scope=? OR created_by=?) ORDER BY created_at, id",
         (tool, *scopes, SHIPPED_SCOPE, thread_id),
     ).fetchall()]
+
+
+def sync_shipped_rules(db: sqlite3.Connection) -> None:
+    """Reconcile global shipped rows with the registered connector declarations."""
+    declarations = []
+    for name in connectors.registered_connectors():
+        manifest = connectors.get_manifest(name)
+        origin = f"rule_set:{name}@{manifest.version}"
+        for rule in manifest.shipped_observe_rules:
+            declarations.append((rule, name, origin, f"shipped:{name}@{manifest.version}"))
+    ids = [rule.id for rule, _, _, _ in declarations]
+    now = datetime.now(timezone.utc).isoformat()
+    with write_transaction(db, scope="sync_shipped_observe_rules") as conn:
+        for rule, name, origin, authority in declarations:
+            conn.execute(
+                "INSERT INTO event_rules (id, created_at, updated_at, enabled, kind, scope, connector, "
+                "origin, created_by, authority_ref, tool, argv_prefix, item_type) "
+                "VALUES (?, ?, ?, 1, 'observe', 'global', ?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(id) DO UPDATE SET updated_at=excluded.updated_at, "
+                "connector=excluded.connector, origin=excluded.origin, "
+                "created_by=excluded.created_by, authority_ref=excluded.authority_ref, tool=excluded.tool, "
+                "argv_prefix=excluded.argv_prefix, item_type=excluded.item_type "
+                "WHERE event_rules.scope='global' AND event_rules.kind='observe' "
+                "AND event_rules.origin LIKE 'rule_set:%' AND (connector IS NOT excluded.connector "
+                "OR origin IS NOT excluded.origin OR created_by IS NOT excluded.created_by "
+                "OR authority_ref IS NOT excluded.authority_ref OR tool IS NOT excluded.tool "
+                "OR argv_prefix IS NOT excluded.argv_prefix OR item_type IS NOT excluded.item_type)",
+                (rule.id, now, now, name, origin, origin, authority, rule.tool,
+                 json.dumps(rule.argv_prefix, separators=(',', ':')), rule.item_type),
+            )
+        # event_route_decisions.rule_id has no foreign key; historical outcomes remain.
+        placeholders = ','.join('?' for _ in ids)
+        conn.execute(
+            "DELETE FROM event_rules WHERE scope='global' AND kind='observe' "
+            "AND origin LIKE 'rule_set:%'" + (f" AND id NOT IN ({placeholders})" if ids else ""), ids,
+        )
 
 
 def project_of(db: sqlite3.Connection, thread_id: str) -> str | None:

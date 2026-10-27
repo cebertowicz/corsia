@@ -26,6 +26,7 @@ from infra.schema import (
     ARTIFACT_IDENTITY_SCHEMA_SQL,
     STRUCTURED_PLAN_SCHEMA_SQL,
 )
+from infra.chat_comment_schema import CHAT_COMMENT_SCHEMA_SQL
 from infra.checkpoint_schema import CHECKPOINT_SCHEMA_SQL
 from infra.continuity_schema import CONTINUITY_SCHEMA_SQL
 from infra.continuity_staging import STAGING_SCHEMA_SQL
@@ -172,6 +173,7 @@ def _db(path: Path | None = None) -> sqlite3.Connection:
     conn.executescript(CHECKPOINT_SCHEMA_SQL)
     conn.executescript(CONTINUITY_SCHEMA_SQL)
     conn.executescript(STAGING_SCHEMA_SQL)
+    conn.executescript(CHAT_COMMENT_SCHEMA_SQL)
     conn.executescript(PRESENCE_SCHEMA_SQL)
     conn.executescript(THREAD_UPDATES_SCHEMA_SQL)
     # Archive/purge now carries a plan-decision consequence too, so the

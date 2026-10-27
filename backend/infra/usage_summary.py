@@ -18,8 +18,8 @@ from infra.database import write_transaction
 from infra.outcome_events import record_outcome_event
 
 _RELEASE = re.compile(RELEASE_PATTERN)
-_OS_BY_SYSTEM = {"Darwin": "macos", "Windows": "windows", "Linux": "linux"}
-_CHIP_BY_MACHINE = {"arm64": "arm64", "aarch64": "arm64", "x86_64": "x86_64", "amd64": "x86_64"}
+_OS_BY_SYSTEM = {"Darwin": "darwin", "Windows": "windows", "Linux": "linux"}
+_CHIP_BY_MACHINE = {"arm64": "arm64", "aarch64": "arm64", "x86_64": "amd64", "amd64": "amd64"}
 
 
 def iso_week(now: datetime) -> str:
@@ -35,8 +35,8 @@ def release_tag(version: str | None) -> str:
 
 
 def platform_fields() -> dict[str, str]:
-    """This machine's OS family and chip family; one that is on neither list is left out."""
-    found = {"os": _OS_BY_SYSTEM.get(platform.system()), "chip": _CHIP_BY_MACHINE.get(platform.machine().lower())}
+    """This machine's ``os.type`` and ``host.arch``; unlisted values are left out."""
+    found = {"os.type": _OS_BY_SYSTEM.get(platform.system()), "host.arch": _CHIP_BY_MACHINE.get(platform.machine().lower())}
     return {key: value for key, value in found.items() if value}
 
 
@@ -59,7 +59,7 @@ def record_install_week(
     recorded = "SELECT 1 FROM outcome_events WHERE dedupe_key=?"
     if db.execute(recorded, (dedupe_key,)).fetchone():
         return False
-    attributes = {"week": week, "release": release_tag(version), **(platform_fields() if fields is None else fields)}
+    attributes = {"corsia.usage.week": week, "service.version": release_tag(version), **(platform_fields() if fields is None else fields)}
     with write_transaction(db, scope="record_install_week") as connection:
         if connection.execute(recorded, (dedupe_key,)).fetchone():
             return False

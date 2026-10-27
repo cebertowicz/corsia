@@ -16,6 +16,7 @@ from events.connectors import (
     ConnectorManifest,
     EventTypeDecl,
     ObservedArtifactDecl,
+    ShippedObserveRuleDecl,
     register,
 )
 if TYPE_CHECKING:
@@ -106,8 +107,8 @@ _PR_URL_RE = re.compile(
 _FAILED_EXIT_RE = re.compile(r"^Exit code: [1-9]\d*$")
 
 
-def _created_pr_artifact(result_text: str) -> ObservedArtifactDecl | None:
-    """Extract one confirmed canonical PR identity from a command result."""
+def _pr_artifact_in_output(result_text: str) -> ObservedArtifactDecl | None:
+    """Return the one canonical PR URL named by a successful command's output."""
     lines = [line.strip() for line in result_text.splitlines() if line.strip()]
     if any(_FAILED_EXIT_RE.fullmatch(line) for line in lines):
         return None
@@ -290,7 +291,10 @@ MANIFEST = register(ConnectorManifest(
     classify=_classify,
     extract_facts=_extract_facts,
     build_artifact_ref=_artifact_ref,
-    artifact_extractors={PR_TYPE: _created_pr_artifact},
+    artifact_extractors={PR_TYPE: _pr_artifact_in_output},
+    shipped_observe_rules=(ShippedObserveRuleDecl(
+        id="ruleset_github_pr_create", tool="bash", argv_prefix=("gh", "pr", "create"), item_type=PR_TYPE,
+    ),),
     resolve_relationships=_relationships,
     repository_fact="repo",
     project_repositories=_project_repositories,
