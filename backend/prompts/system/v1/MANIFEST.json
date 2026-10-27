@@ -184,10 +184,10 @@
       "sha256": "f9073c8237adac1af293e06ab20be276227d567833c310fab1b8aa0e78300c80"
     },
     {
-      "bytes": 3011,
+      "bytes": 3035,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/references/browser-person-steps.md",
-      "sha256": "b1fee3f705f4ca450696ec7792b40eb2bbe9727a8c70d2d97b820e12e6197add"
+      "sha256": "dcbc4a693667206631536fd6ab5da94951dfc542ae2880ddde2777d65c708126"
     },
     {
       "bytes": 25941,

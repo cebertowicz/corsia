@@ -15,7 +15,7 @@ Use this whenever you open a page in the shared browser (`browser_open` with `sh
 
 The shared browser is the person's. Call `browser_person_step` with the short action they must complete, then end your turn. CORSIA adds it to their attention list and wakes you when the page changes. Never type, fill or read a password or a code yourself.
 
-A link you post in chat opens in the person's own default browser; to show them a page in the shared browser, open it with `browser_open`, never by posting its link. CORSIA's own connect sign-ins (`google_connect`, `microsoft_connect`) return to localhost with an authorization code: post their link in chat, never open it in the agent browser, and don't watch it. Admin-portal sign-ins (Entra, Google Cloud console) are opened in the agent browser as written.
+A link you post in chat opens in the person's own default browser; to show them a page in the shared browser, open it with `browser_open` and `show_window: true`, never by posting its link. CORSIA's own connect sign-ins (`google_connect`, `microsoft_connect`) return to localhost with an authorization code: post their link in chat, never open it in the agent browser, and don't watch it. Admin-portal sign-ins (Entra, Google Cloud console) are opened in the agent browser as written.
 
 A page that has both a captcha and a password field is a B page.
 

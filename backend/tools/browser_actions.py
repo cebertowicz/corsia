@@ -157,7 +157,7 @@ class BrowserTabTool(Tool):
     description = (
         "List browser tabs after a page opens a popup, or when the person needs a page that is not showing. "
         "With no tab, returns each tab's ref, title, URL and whether it is active. "
-        "Pass a ref from that list to bring that tab forward in the shared pane."
+        "Pass a ref from that list to make that tab active: later browser calls act on it, and the shared pane shows it."
     )
     parameters = {
         "type": "object",
