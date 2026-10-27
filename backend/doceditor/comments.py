@@ -101,6 +101,17 @@ def list_for_artifact(artifact_id: str, *, db=None) -> list[dict]:
             _db.close()
 
 
+def _check_existing_identity(row: dict, artifact_id: str, author: str, cid: str) -> None:
+    if row["artifact_id"] != artifact_id:
+        raise CrossArtifactIdError(
+            f"client_id '{cid}' belongs to artifact '{row['artifact_id']}', not '{artifact_id}'"
+        )
+    if row["author"] != author:
+        raise CrossArtifactIdError(
+            f"client_id '{cid}' was created by author '{row['author']}', not '{author}'"
+        )
+
+
 def create_with_status(
     artifact_id: str,
     *,
@@ -160,16 +171,7 @@ def create_with_status(
             "SELECT * FROM doc_comments WHERE id=?", (cid,)
         ).fetchone()
         r = dict(row)
-        if r["artifact_id"] != artifact_id:
-            raise CrossArtifactIdError(
-                f"client_id '{cid}' belongs to artifact '{r['artifact_id']}', "
-                f"not '{artifact_id}'"
-            )
-        if r["author"] != author:
-            raise CrossArtifactIdError(
-                f"client_id '{cid}' was created by author '{r['author']}', "
-                f"not '{author}'"
-            )
+        _check_existing_identity(r, artifact_id, author, cid)
         created = inserted.rowcount == 1
         if created:
             # Only a new top-level agent comment names itself; replies, suggestions and user comments do not.
@@ -177,7 +179,8 @@ def create_with_status(
             if announce:  # a person's comment is announced by its delivery instead
                 comment_notifications.announce_after_commit(
                     connection, artifact_id, comment_id=cid if named else None,
-                    author_thread_id=author_thread_id if named else None)
+                    author_thread_id=author_thread_id if named else None,
+                    reply_attention_changed=bool(author_kind == 'agent' and parent_id))
             if region is not None:
                 live_events.region_after_commit(connection, "placed", artifact_id, w, h, author_kind=author_kind)
         return r, created
@@ -216,7 +219,10 @@ def update(comment_id: str, fields: dict[str, Any], *, db=None) -> dict | None:
         row = dict(connection.execute("SELECT * FROM doc_comments WHERE id=?", (comment_id,)).fetchone())
         if "region_x" in fields:
             live_events.region_after_commit(connection, "moved", row["artifact_id"], row["region_w"], row["region_h"])
-        comment_notifications.announce_after_commit(connection, row["artifact_id"])
+        comment_notifications.announce_after_commit(
+            connection, row["artifact_id"],
+            reply_attention_changed="resolved" in fields and row["parent_id"] is None,
+        )
         return row
 
 

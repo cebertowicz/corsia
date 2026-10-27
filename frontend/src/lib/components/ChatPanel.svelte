@@ -31,7 +31,8 @@
 	import { toastAnchorSurface } from '$lib/stores/toastAnchor';
 	import PlanDrawerControl from './plans/PlanDrawerControl.svelte';
 	import { isMobile } from '$lib/stores/viewport';
-	import { openPlanSubagentLeaf, openPlanDiscussionLeaf } from '$lib/planLeafReturn';
+	import { createPlanDestinations } from './chatPlanDestinations';
+	import { openDocumentOnReplies } from './chatReplyDestination';
 	import {
 		createPager,
 		adoptFirstPage,
@@ -60,6 +61,7 @@
 	} = $props();
 	let messagesEl = $state<HTMLDivElement | undefined>(undefined);
 	let userIsNearBottom = $state(true);
+	let attentionDockShowing = $state(false);
 	let ignoreScrollEvents = $state(false);
 	let messageListRef: MessageList;
 	let inputBarRef: InputBar;
@@ -71,6 +73,7 @@
 	 */
 	let leaseAwaitingUser = $state(false);
 	const attentionSuppressed = $derived(!!$activeThreadId && leaseAwaitingUser);
+
 	const MSG_PAGE_SIZE = 50;
 	let pager = $state(createPager());
 	let pagerGeneration = 0;
@@ -94,12 +97,8 @@
 	const loadingOlderMessages = $derived(pager.loading);
 	const olderLoadFailed = $derived(pager.error);
 	export const scrollToBottom = () => messageListRef?.scrollToBottom();
-	function openPlanSubagent(nodeId: string, childThreadId: string, title: string, stepId?: string): void {
-		openPlanSubagentLeaf($activeThreadId, nodeId, childThreadId, title, stepId);
-	}
-	function openPlanDiscussion(artifactId: string, title: string): void {
-		openPlanDiscussionLeaf($activeThreadId, artifactId, title);
-	}
+	const scrollToBottomFromUser = () => messageListRef?.scrollToBottomFromUser();
+	const { openPlanSubagent, openPlanDiscussion } = createPlanDestinations(() => $activeThreadId);
 	export const captureBottomOffset = () => messageListRef?.captureBottomOffset();
 	export const restoreBottomOffset = () => messageListRef?.restoreBottomOffset();
 	/** Warm the active thread's cache. Lives in `$lib/chatWarm`. */
@@ -319,6 +318,7 @@
 			bind:messagesEl
 			bind:userIsNearBottom
 			bind:ignoreScrollEvents
+			hideScrollFab={attentionDockShowing}
 			onOpenLightbox={(url) => onOpenLightbox(url)}
 			{hasMoreMessages}
 			{loadingOlderMessages}
@@ -352,16 +352,20 @@
 				/>
 			{/if}
 			<AttentionDock
+				bind:showing={attentionDockShowing}
 				suppressed={attentionSuppressed}
-				onOpenDestination={(destination) => {
+				onOpenDestination={(destination, threadId) => {
+					if (destination.pane === 'document-replies') return openDocumentOnReplies(destination, $activeThreadId, threadId);
 					if (destination.pane === 'documents') onOpenDocuments(destination.id);
 				}}
-			/>
-			<MobileScrollFab
-				threadId={$activeThreadId}
-				{userIsNearBottom}
-				onScrollToBottom={scrollToBottom}
-			/>
+			>
+				{#snippet scrollControl()}
+					<MobileScrollFab threadId={$activeThreadId} {userIsNearBottom} docked onScrollToBottom={scrollToBottomFromUser} />
+				{/snippet}
+			</AttentionDock>
+			{#if !attentionDockShowing}
+				<MobileScrollFab threadId={$activeThreadId} {userIsNearBottom} onScrollToBottom={scrollToBottomFromUser} />
+			{/if}
 			{#if $isMobile && $activeThreadId}
 				<PlanDrawerControl
 					threadId={$activeThreadId}

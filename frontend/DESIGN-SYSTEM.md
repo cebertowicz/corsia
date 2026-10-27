@@ -1230,6 +1230,8 @@ The action sheet that currently expands above the chip uses `--glass-thin`
 on a `--glass-thin` floater — works but is borderline glass-on-glass.
 Consider solid-elevated for nested layers (§7).
 
+**Pinned unread chip.** One chip above the composer, in the standard chip style, for unread activity the person can't see from where they are (first use: replies to their document comments; next, answers to their chat comments further up the chat). Tapping it lands on the first unread item, marked New, and each tap lands on the next until none are left. It carries the blue New dot (`.ct-new-dot`, `--accent`), the same mark the item carries where it lands; amber stays for needs-you, warnings and loading. It clears by itself once every counted item has been fully on screen for about 1.5 s, has no dismiss, and sits above Needs you, never inside it.
+
 ### 5.7 Overlays
 
 | Surface | Current | Recommended | Notes |
