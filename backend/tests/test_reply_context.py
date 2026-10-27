@@ -189,6 +189,28 @@ def test_an_unreadable_thread_range_is_its_own_reason(thread_rows, caplog):
     _assert_dropped(caplog, {"first_unread:thread_unreadable": 1, "in_view:thread_unreadable": 1})
 
 
+@pytest.mark.parametrize("failed_query", ["MAX(seq)", "next_input_order"])
+def test_system_failure_refuses_comments_with_retry_copy(thread_rows, failed_query):
+    import sqlite3
+    from infra.input_admission import stamped_human_metadata
+    from infra.reply_context import RejectedComments
+
+    class FailingConnection:
+        def execute(self, sql, *args):
+            if failed_query in sql:
+                raise sqlite3.OperationalError("unreadable")
+            return thread_rows.execute(sql, *args)
+
+    with pytest.raises(RejectedComments) as refused:
+        stamped_human_metadata(
+            FailingConnection(), "user", "new", {KEY: {"comments": [_comment()]}}, thread_id=THREAD,
+        )
+    assert str(refused.value) == (
+        "Something went wrong on CORSIA’s side while checking your comments, so nothing was "
+        "sent. Your message and comments are kept: try sending again."
+    )
+
+
 @pytest.mark.parametrize("raw", [None, {}, {"comments": []}, {"in_view": None}])
 def test_nothing_to_store_stores_nothing(thread_rows, raw):
     assert _validate(thread_rows, raw) is None

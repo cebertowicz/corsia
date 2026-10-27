@@ -27,7 +27,14 @@ class RejectedComments(ValueError):
     composer keeps the draft when a send is refused.
     """
 
-    def __init__(self, positions: list[int]):
+    def __init__(self, positions: list[int], *, system_failure: bool = False):
+        if system_failure:
+            super().__init__(
+                "Something went wrong on CORSIA’s side while checking your comments, so nothing was "
+                "sent. Your message and comments are kept: try sending again."
+            )
+            self.positions = positions
+            return
         if not positions:
             which, them = "Your comments", "them"
         elif len(positions) == 1:
@@ -36,17 +43,22 @@ class RejectedComments(ValueError):
             listed = ", ".join(str(position) for position in positions[:-1])
             which, them = f"Comments {listed} and {positions[-1]}", "those comments"
         super().__init__(
-            f"{which} couldn't be matched to text in this chat, so nothing was sent. "
+            f"{which} couldn’t be matched to text in this chat, so nothing was sent. "
             f"Your message and comments are kept: remove {them} and send again."
         )
         self.positions = positions
 
 
-def require_every_comment(raw: object, stored: dict | None) -> None:
+def require_every_comment(raw: object, stored: dict | None, dropped: list[dict] | None = None) -> None:
     """Raise ``RejectedComments`` unless every submitted comment was stored."""
     submitted = raw.get("comments") if isinstance(raw, dict) else None
     if submitted is None:
         return
+    if submitted and any(
+        item["field"] == "comments" and item["reason"] in {"thread_unreadable", "validation_error"}
+        for item in dropped or []
+    ):
+        raise RejectedComments([], system_failure=True)
     if not isinstance(submitted, list):
         raise RejectedComments([])
     kept = {
@@ -161,7 +173,7 @@ def _comments(raw: object, newest: int, input_order: int, dropped: list[dict]) -
 
 
 def validate_reply_context(
-    db: sqlite3.Connection, thread_id: str, raw: object,
+    db: sqlite3.Connection, thread_id: str, raw: object, *, dropped: list[dict] | None = None,
 ) -> dict | None:
     """Return the reply context to store for one new human message, or None.
 
@@ -170,7 +182,8 @@ def validate_reply_context(
     """
     if raw is None:
         return None
-    dropped: list[dict] = []
+    if dropped is None:
+        dropped = []
     stored: dict[str, Any] = {}
     if not isinstance(raw, dict):
         dropped.append(_dropped("reply_context", "not_object"))
