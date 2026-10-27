@@ -45,6 +45,8 @@ async def test_nonperson_input_holds_until_catalog_load_notification(isolated_db
 
     # A person's send would load it (readiness reads fits_now); other work waits for the catalog's loaded fact.
     batch, _thread, _target, _provider = _claimed(monkeypatch, metadata=metadata)
+    monkeypatch.setattr(recovery, '_TASK', None)
+    monkeypatch.setattr(recovery, '_RERUN', False)
     monkeypatch.setattr(app_loop, 'submit', lambda coro: asyncio.create_task(coro))
     monkeypatch.setattr(network_discovery, '_LOADED_BY_SERVER', {})
     mark_model_loaded(monkeypatch, 'omlx@srv/m', loaded=False)
