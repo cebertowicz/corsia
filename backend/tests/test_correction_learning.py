@@ -228,6 +228,31 @@ async def test_prefixed_serious_effect_from_native_result_writer_is_detected() -
     assert serious_proposed(db, THREAD) is True
 
 
+def test_serious_effect_with_unreadable_turn_provenance_is_refused_not_skipped() -> None:
+    from infra.queries import insert_message
+
+    db = _db()
+    insert_message(
+        THREAD, "tool", "send", {"turn_id": TURN, "name": "email_send"}, msg_id="tool-no-turn", db=db,
+        created_at="2026-10-20T00:00:01+00:00",
+    )
+    db.execute("UPDATE messages SET active_turn_id=NULL, metadata=? WHERE id='tool-no-turn'", ('{"name": "email_send"}',))
+
+    with pytest.raises(ValueError, match="whether Serious applies cannot be determined"):
+        serious_proposed(db, THREAD)
+
+
+def test_unreadable_manifest_entries_are_refused_not_listed_as_empty(tmp_path: Path) -> None:
+    guidance = tmp_path / "rule.md"
+    guidance.write_text("rule", encoding="utf-8")
+    db = _db()
+    _record_manifest(db, _file_source(guidance))
+    db.execute("UPDATE context_manifests SET entries_json='{\"not\": \"a list\"}'")
+
+    with pytest.raises(ValueError, match="unreadable entries_json"):
+        loaded_targets(db, THREAD)
+
+
 def test_correction_subject_must_belong_to_the_calling_thread() -> None:
     from infra.outcome_events import record_outcome_event
 

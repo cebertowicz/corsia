@@ -7,8 +7,6 @@ import sqlite3
 from datetime import datetime, timezone
 from typing import Any
 
-from loguru import logger
-
 from core.lesson_case import CORRECTION_CAUSES as CAUSES
 
 TRIAGE_EVENT = "learning_loop.correction_triage"
@@ -28,13 +26,11 @@ def manifest_paths(db: sqlite3.Connection, manifest_id: str | None) -> list[str]
     from tools.filesystem_gate import canonical_target_path
 
     row = db.execute("SELECT entries_json FROM context_manifests WHERE id=?", (manifest_id,)).fetchone()
-    try:
-        entries = json.loads(row[0]) if row else []
-    except (TypeError, ValueError):
-        logger.warning("context manifest {} has unreadable entries_json", manifest_id)
-        entries = []
+    entries = json.loads(row[0]) if row else []  # the column is CHECK json_valid
+    if not isinstance(entries, list):
+        raise ValueError(f"context manifest {manifest_id} has unreadable entries_json; its loaded files cannot be listed")
     found: list[str] = []
-    for entry in entries if isinstance(entries, list) else []:
+    for entry in entries:
         if not isinstance(entry, dict) or entry.get("version_kind") == "generated":
             continue
         path = entry.get("path")
@@ -92,13 +88,13 @@ def serious_proposed(db: sqlite3.Connection, thread_id: str) -> bool:
         try:
             metadata = json.loads(row["metadata"] or "{}")
             if not isinstance(metadata, dict):
-                continue
+                raise ValueError("metadata is not an object")
             turn_id, _ = turn_provenance({
                 "id": row["id"], "active_turn_id": row["active_turn_id"], "_meta": metadata,
             })
-        except (TypeError, ValueError, TurnProvenanceError):
-            logger.warning("tool message {} has unreadable turn metadata; skipped for the serious-effect check", row["id"])
-            continue
+        except (TypeError, ValueError, TurnProvenanceError) as exc:
+            # A named serious-effect tool ran this turn; unreadable provenance cannot rule Serious out.
+            raise ValueError(f"tool message {row['id']} has unreadable turn metadata; whether Serious applies cannot be determined") from exc
         if turn_id == active["id"] and has_serious_effect(metadata.get("name")):
             return True
     return False
