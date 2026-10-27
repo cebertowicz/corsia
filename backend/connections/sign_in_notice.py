@@ -133,18 +133,19 @@ async def drive_starting_agent(thread_id: str | None, state: str) -> None:
     """After the wake's write has committed, start the thread it queued on, or the owner told it was refused.
 
     A drive inside the write could not see its input, and a fenced thread is left alone, as
-    every other owner wake does (``script_runner._drive_owner``). A drive that fails is logged
-    and changes nothing the person sees.
+    the script runner's owner wake does. A drive that fails is logged and changes nothing
+    the person sees.
     """
     if thread_id is None:
         return
-    from automation.script_runner import _drive_owner
+    from infra.admission_fence import is_fenced
     from infra.failed_wake_surface import drive_failed_wake_owners
+    from infra.thread_execution import drive_thread
 
     message_id = _message_id(state)
     try:
-        if await run_in_db(_was_queued, message_id):
-            await _drive_owner(thread_id)
+        if await run_in_db(_was_queued, message_id) and not is_fenced(thread_id):
+            await drive_thread(thread_id)
         await drive_failed_wake_owners([message_id])
     except Exception:
         log.exception("driving thread %s after its sign-in wake failed", thread_id)
