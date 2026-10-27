@@ -73,6 +73,21 @@ async def run(owner: Any, thread_id: str, args: Sequence[str], *, lease_id: str 
         if _script_config(config) or (not pane and not trusted_navigation and (_script_request(args) or
                 navigation_url is not None and _javascript_url(navigation_url))):
             raise BrowserSessionError(_SCRIPT_REFUSAL)
+    # Pane and agent commands share this lock, but direct person interaction and
+    # lifecycle cleanup do not. The lifecycle lock remains inside _run_admitted.
+    owner._queued_actions += 1
+    try:
+        await runtime.action_lock.acquire()
+    finally:
+        owner._queued_actions -= 1
+    try:
+        return await _run_action(owner, runtime, thread_id, args, lease_id, timeout, pane)
+    finally:
+        runtime.action_lock.release()
+
+
+async def _run_action(owner: Any, runtime: Any, thread_id: str, args: Sequence[str],
+                      lease_id: str | None, timeout: float, pane: bool) -> str:
     command = partial(_command, owner, runtime, lease_id)
     opening_unlaunched_session = args[0] == "open" and runtime.record.binding is None
     guarded = not pane and not opening_unlaunched_session

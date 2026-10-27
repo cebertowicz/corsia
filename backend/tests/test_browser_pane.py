@@ -275,6 +275,22 @@ async def test_page_info_reads_url_and_title_from_the_session_owners_rendered_re
     assert await browser_pane.page_info("thread-1") == ("https://www.apple.com/", "Apple")
 
 
+def test_last_pane_probe_disconnect_reports_distinct_reason(monkeypatch):
+    events = []
+    monkeypatch.setattr(browser_control.browser_step_lifecycle, "pane_event",
+                        lambda thread, reason: events.append((thread, reason)))
+
+    async def probe(_known):
+        raise AssertionError("not called")
+
+    browser_control.pane_connected("thread-probe", "first", probe=probe)
+    browser_control.pane_connected("thread-probe", "second", probe=probe)
+    browser_control.pane_disconnected("thread-probe", "first")
+    assert events == [("thread-probe", "pane_probe_available")] * 2
+    browser_control.pane_disconnected("thread-probe", "second")
+    assert events[-1] == ("thread-probe", "pane_probe_gone")
+
+
 def test_pane_presence_is_not_exclusive_control():
     browser_control.pane_connected("thread-1", "first")
     browser_control.pane_connected("thread-1", "second")

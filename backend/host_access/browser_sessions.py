@@ -54,6 +54,7 @@ class BrowserSessionOwner:
         self._closed_leases: set[str] = set()
         self._shutting_down = False
         self._active_commands = 0
+        self._queued_actions = 0
 
     def live_count(self) -> int:
         """Count current responsibilities, including unresolved startup or close."""
@@ -61,7 +62,7 @@ class BrowserSessionOwner:
 
     def active_command_count(self) -> int:
         """Return admitted browser work that is running or queued."""
-        return self._active_commands
+        return self._active_commands + self._queued_actions
 
     async def run(self, thread_id: str, args: Sequence[str], *,
                   lease_id: str | None = None, timeout: float = 30.0,

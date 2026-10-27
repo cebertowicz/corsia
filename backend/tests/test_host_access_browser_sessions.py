@@ -98,15 +98,13 @@ async def test_active_count_includes_running_and_queued(synthetic_browser, monke
     await fake.owner.run('thread', ['snapshot'])
     entered, release, queued = asyncio.Event(), asyncio.Event(), asyncio.Event()
     original = fake.invoke
-    run_admitted = fake.owner._run_admitted
-    starts = 0
+    admit = fake.owner._admit
 
-    async def observe_entry(*args, **kwargs):
-        nonlocal starts
-        starts += 1
-        if starts == 2:
+    async def observe_admission(*args, **kwargs):
+        runtime = await admit(*args, **kwargs)
+        if entered.is_set():
             queued.set()
-        return await run_admitted(*args, **kwargs)
+        return runtime
 
     async def paused(argv, *, timeout):
         entered.set()
@@ -114,11 +112,11 @@ async def test_active_count_includes_running_and_queued(synthetic_browser, monke
         return await original(argv, timeout=timeout)
 
     monkeypatch.setattr(fake.owner, '_invoke', paused)
-    monkeypatch.setattr(fake.owner, '_run_admitted', observe_entry)
+    monkeypatch.setattr(fake.owner, '_admit', observe_admission)
     first = asyncio.create_task(fake.owner.run('thread', ['snapshot']))
     await entered.wait()
     second = asyncio.create_task(fake.owner.run('thread', ['snapshot']))
-    # The second entry increments the active count before yielding on the occupied command lock.
+    # Admission returns and the second action queues behind the first.
     await asyncio.wait_for(queued.wait(), EXIT_TIMEOUT)
     assert fake.owner.active_command_count() == 2
     second.cancel()

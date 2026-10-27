@@ -39,6 +39,8 @@ class BrowserRuntime:
 
     record: BrowserSessionRecord
     command_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    # Serializes a guard and its command without holding the lifecycle lock during cleanup.
+    action_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     attempt_started_at: float | None = None
     attempt: browser_cli.CommandResult | None = None
     close_task: asyncio.Task[None] | None = None
