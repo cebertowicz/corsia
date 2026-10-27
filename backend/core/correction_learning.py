@@ -227,7 +227,8 @@ def record_triage(
         agent_thread_id=thread_id, attributes=_present({
             "tier": tier_value, "cause": cause_value, "new_work": None if new_work is None else str(new_work),
             "new_work_signal": signal, "target_file": target,
-            "serious_proposed": "yes" if proposed_serious else "no", "serious_lowered_reason": lowered,
+            "serious_proposed": None if tier_value == "not_correction" else ("yes" if proposed_serious else "no"),
+            "serious_lowered_reason": lowered,
         }),
     )
     _refuse_dropped(result)

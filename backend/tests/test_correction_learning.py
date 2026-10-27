@@ -268,6 +268,7 @@ def test_not_a_correction_records_only_its_tier_even_after_a_serious_effect() ->
     ).fetchone()[0])
     assert result["target_file"] is None
     assert attributes["tier"] == "not_correction" and "cause" not in attributes
+    assert "serious_proposed" not in attributes
 
 
 def test_a_miss_needs_its_cause_but_not_a_loaded_file() -> None:

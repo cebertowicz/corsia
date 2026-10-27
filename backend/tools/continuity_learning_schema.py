@@ -45,7 +45,16 @@ LEARNING_FIELD_SCHEMAS: dict[str, dict[str, object]] = {
         "type": "string", "minLength": 1,
         "description": "Why an automatically proposed Serious tier was lowered, if applicable.",
     },
-    "outcome": {"type": "string", "enum": list(TERMINAL_OUTCOMES)},
-    "lesson_id": {"type": "string", "minLength": 1},
-    "workflow_version": {"type": "string", "minLength": 1},
+    "outcome": {
+        "type": "string", "enum": list(TERMINAL_OUTCOMES),
+        "description": "How the correction ended: fixed, instruction, watch, lesson, workflow, or dropped (dropped requires reason).",
+    },
+    "lesson_id": {
+        "type": "string", "minLength": 1,
+        "description": "The lesson that carries the correction; use with outcome lesson.",
+    },
+    "workflow_version": {
+        "type": "string", "minLength": 1,
+        "description": "The workflow version that carries the correction; use with outcome workflow.",
+    },
 }
