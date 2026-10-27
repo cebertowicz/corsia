@@ -1,0 +1,25 @@
+{
+ "event": "workflow_job",
+ "payload": {
+  "action": "completed",
+  "repository": {
+   "full_name": "Codertocat/Hello-World"
+  },
+  "workflow_job": {
+   "completed_at": "2021-08-05T10:38:16Z",
+   "conclusion": "success",
+   "created_at": "2021-08-05T10:33:58Z",
+   "head_sha": "3484a3fb816e0859fd6e1cea078d76385ff50625",
+   "id": 289782451,
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "name": "linters",
+   "run_attempt": 1,
+   "run_id": 2202229078,
+   "started_at": "2021-08-05T10:34:58Z",
+   "status": "completed",
+   "workflow_name": "CodeQL"
+  }
+ }
+}

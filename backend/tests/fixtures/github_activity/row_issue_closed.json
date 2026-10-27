@@ -1,0 +1,29 @@
+{
+ "actor": {
+  "id": 41898282,
+  "login": "github-actions[bot]",
+  "type": "Bot"
+ },
+ "created_at": "2026-10-25T02:02:00Z",
+ "event": "closed",
+ "id": 34160161781,
+ "issue": {
+  "closed_at": "2026-10-25T02:02:00Z",
+  "created_at": "2026-10-23T09:46:02Z",
+  "labels": [
+   {
+    "name": "documents"
+   },
+   {
+    "name": "p1"
+   }
+  ],
+  "number": 1388,
+  "state": "closed",
+  "state_reason": "completed",
+  "updated_at": "2026-10-25T02:02:00Z",
+  "user": {
+   "login": "cebertowicz"
+  }
+ }
+}

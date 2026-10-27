@@ -8,6 +8,7 @@ fn main() {
                 "choose_work_folder",
                 "configure_work_folder",
                 "disconnect_remote",
+                "finish_setup_window",
                 "get_service_log_path",
                 "open_login_items",
                 "quit_app",

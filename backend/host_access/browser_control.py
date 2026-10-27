@@ -4,11 +4,11 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from typing import Awaitable, Callable
-from urllib.parse import urlparse
 
 from host_access import browser_pane_state, browser_step_lifecycle
 from host_access.browser_cdp import PasswordProbe
 from host_access.browser_session_state import BrowserSessionError
+from host_access.browser_url import is_http_url as is_http_url, normalize_browser_url as normalize_browser_url
 from infra import state
 
 log = logging.getLogger(__name__)
@@ -152,14 +152,6 @@ async def _refuse_password_read(guarded: PasswordReadGuard, args: tuple[str, ...
 def password_page(thread_id: str) -> bool:
     """Expose only this thread's password-page boolean to internal consumers."""
     return browser_step_lifecycle.password_page(thread_id)
-
-
-def is_http_url(url: object) -> bool:
-    """Accept only page-navigation URLs the shared browser can safely open."""
-    if not isinstance(url, str):
-        return False
-    parsed = urlparse(url)
-    return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
 
 
 def announce_browser_opened(thread_id: str) -> None:

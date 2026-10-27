@@ -409,3 +409,20 @@ def test_another_tools_metadata_blocks_are_dropped_on_install(home):
     assert _install(home, _ids(_offers(home), "standup"))[0]["outcome"] == "installed"
     meta = yaml.safe_load((workspace / "skills" / "standup" / "SKILL.md").read_text().split("---\n")[1])
     assert meta["metadata"] == {"tags": ["team"], "corsia-data": "corsia.yaml", "corsia-format": "1"}
+
+
+def test_claude_codes_account_synced_skills_are_never_offered(tmp_path, monkeypatch):
+    """A fresh Claude Code sign-in fills ``skills/synced`` with its own bundles; none is the person's work."""
+    base = tmp_path / "home"
+    monkeypatch.setenv("HOME", str(base))
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+    synced = base / ".claude" / "skills" / "synced"
+    bundle = synced / "account_bundle" / "xlsx"
+    bundle.mkdir(parents=True)
+    for index in range(skills.MAX_FILES + 1):
+        (bundle / f"f{index}.md").write_text("x")
+    (synced / ".bucket-account_bundle").write_text("")
+    workspace = tmp_path / "workspace"
+    assert skills.skill_offers(Roots.for_user(), ["claude-code"], workspace) == []
+    _skill(base / ".claude" / "skills" / "mine", "mine", "a skill the person made")
+    assert [row["name"] for row in skills.skill_offers(Roots.for_user(), ["claude-code"], workspace)] == ["mine"]

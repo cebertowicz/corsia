@@ -24,7 +24,7 @@ from __future__ import annotations
 # are read from the tools' settings) else AGENT_IMPORT_SETTINGS, {where} one of
 # AGENT_IMPORT_CLOUD, AGENT_IMPORT_LOCAL and AGENT_IMPORT_OTHER.
 AGENT_IMPORT = {
-    "title": "Bring over what your other tools know",
+    "title": "Read what your other tools know?",
     "context": (
         "{tools} {verb} on this computer. I can read what they remember about you and how you like to "
         "work, the skills you keep in them{connections}, so you don't have to set them up again. "

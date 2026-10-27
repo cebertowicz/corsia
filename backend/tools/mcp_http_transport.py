@@ -68,6 +68,9 @@ async def open_streamable_http_session(
 
     async def close() -> None:
         closed.set()
+        if not ready.done():
+            # A server that never answers initialize leaves the task waiting on it, not on ``closed``.
+            task.cancel()
         await asyncio.gather(task, return_exceptions=True)
 
     try:

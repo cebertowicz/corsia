@@ -1,0 +1,230 @@
+[
+ {
+  "rows": [
+   {
+    "actor": {
+     "id": 7285414,
+     "login": "cebertowicz",
+     "type": "User"
+    },
+    "created_at": "2026-10-26T07:26:49Z",
+    "event": "closed",
+    "id": 34234075462,
+    "issue": {
+     "closed_at": "2026-10-26T07:26:49Z",
+     "created_at": "2026-10-26T05:54:43Z",
+     "labels": [],
+     "number": 1458,
+     "pull_request": {
+      "merged_at": "2026-10-26T07:26:49Z"
+     },
+     "state": "closed",
+     "state_reason": null,
+     "updated_at": "2026-10-26T07:26:49Z",
+     "user": {
+      "login": "cebertowicz"
+     }
+    }
+   },
+   {
+    "actor": {
+     "id": 7285414,
+     "login": "cebertowicz",
+     "type": "User"
+    },
+    "created_at": "2026-10-26T07:26:49Z",
+    "event": "merged",
+    "id": 34234075361,
+    "issue": {
+     "closed_at": "2026-10-26T07:26:49Z",
+     "created_at": "2026-10-26T05:54:43Z",
+     "labels": [],
+     "number": 1458,
+     "pull_request": {
+      "merged_at": "2026-10-26T07:26:49Z"
+     },
+     "state": "closed",
+     "state_reason": null,
+     "updated_at": "2026-10-26T07:26:49Z",
+     "user": {
+      "login": "cebertowicz"
+     }
+    }
+   }
+  ],
+  "webhook": {
+   "action": "closed",
+   "pull_request": {
+    "closed_at": "2026-10-26T07:26:49Z",
+    "created_at": "2026-10-26T05:54:43Z",
+    "head": {
+     "sha": "1b6eaa0117a0b952e8d769a8e4350c43273c8c34"
+    },
+    "labels": [],
+    "merged": true,
+    "merged_at": "2026-10-26T07:26:49Z",
+    "number": 1458,
+    "state": "closed",
+    "updated_at": "2026-10-26T07:26:49Z"
+   },
+   "repository": {
+    "full_name": "cebertowicz/corsia"
+   },
+   "sender": {
+    "login": "cebertowicz"
+   }
+  }
+ },
+ {
+  "rows": [
+   {
+    "actor": {
+     "id": 7285414,
+     "login": "cebertowicz",
+     "type": "User"
+    },
+    "created_at": "2026-10-26T15:30:28Z",
+    "event": "closed",
+    "id": 34275351447,
+    "issue": {
+     "closed_at": "2026-10-26T15:30:28Z",
+     "created_at": "2026-10-26T15:14:36Z",
+     "labels": [],
+     "number": 1459,
+     "pull_request": {
+      "merged_at": "2026-10-26T15:30:28Z"
+     },
+     "state": "closed",
+     "state_reason": null,
+     "updated_at": "2026-10-26T15:30:28Z",
+     "user": {
+      "login": "cebertowicz"
+     }
+    }
+   },
+   {
+    "actor": {
+     "id": 7285414,
+     "login": "cebertowicz",
+     "type": "User"
+    },
+    "created_at": "2026-10-26T15:30:28Z",
+    "event": "merged",
+    "id": 34275351231,
+    "issue": {
+     "closed_at": "2026-10-26T15:30:28Z",
+     "created_at": "2026-10-26T15:14:36Z",
+     "labels": [],
+     "number": 1459,
+     "pull_request": {
+      "merged_at": "2026-10-26T15:30:28Z"
+     },
+     "state": "closed",
+     "state_reason": null,
+     "updated_at": "2026-10-26T15:30:28Z",
+     "user": {
+      "login": "cebertowicz"
+     }
+    }
+   }
+  ],
+  "webhook": {
+   "action": "closed",
+   "pull_request": {
+    "closed_at": "2026-10-26T15:30:28Z",
+    "created_at": "2026-10-26T15:14:36Z",
+    "head": {
+     "sha": "d7758b8257a4d3cea0bbe94f9b4c9b90be15c15e"
+    },
+    "labels": [],
+    "merged": true,
+    "merged_at": "2026-10-26T15:30:28Z",
+    "number": 1459,
+    "state": "closed",
+    "updated_at": "2026-10-26T15:30:28Z"
+   },
+   "repository": {
+    "full_name": "cebertowicz/corsia"
+   },
+   "sender": {
+    "login": "cebertowicz"
+   }
+  }
+ },
+ {
+  "rows": [
+   {
+    "actor": {
+     "id": 7285414,
+     "login": "cebertowicz",
+     "type": "User"
+    },
+    "created_at": "2026-10-26T17:56:06Z",
+    "event": "closed",
+    "id": 34289141815,
+    "issue": {
+     "closed_at": "2026-10-26T17:56:06Z",
+     "created_at": "2026-10-26T17:31:21Z",
+     "labels": [],
+     "number": 1461,
+     "pull_request": {
+      "merged_at": "2026-10-26T17:56:06Z"
+     },
+     "state": "closed",
+     "state_reason": null,
+     "updated_at": "2026-10-26T17:56:07Z",
+     "user": {
+      "login": "cebertowicz"
+     }
+    }
+   },
+   {
+    "actor": {
+     "id": 7285414,
+     "login": "cebertowicz",
+     "type": "User"
+    },
+    "created_at": "2026-10-26T17:56:06Z",
+    "event": "merged",
+    "id": 34289141534,
+    "issue": {
+     "closed_at": "2026-10-26T17:56:06Z",
+     "created_at": "2026-10-26T17:31:21Z",
+     "labels": [],
+     "number": 1461,
+     "pull_request": {
+      "merged_at": "2026-10-26T17:56:06Z"
+     },
+     "state": "closed",
+     "state_reason": null,
+     "updated_at": "2026-10-26T17:56:07Z",
+     "user": {
+      "login": "cebertowicz"
+     }
+    }
+   }
+  ],
+  "webhook": {
+   "action": "closed",
+   "pull_request": {
+    "closed_at": "2026-10-26T17:56:06Z",
+    "created_at": "2026-10-26T17:31:21Z",
+    "head": {
+     "sha": "f388fbdb5ca14209ce94b351241b70d92cea89ac"
+    },
+    "labels": [],
+    "merged": true,
+    "merged_at": "2026-10-26T17:56:06Z",
+    "number": 1461,
+    "state": "closed",
+    "updated_at": "2026-10-26T17:56:07Z"
+   },
+   "repository": {
+    "full_name": "cebertowicz/corsia"
+   },
+   "sender": {
+    "login": "cebertowicz"
+   }
+  }
+ }
+]

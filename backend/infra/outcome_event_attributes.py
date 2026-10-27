@@ -147,6 +147,25 @@ _ISSUE_ATTRS = {
     "kind": enum_attr(*ISSUE_KIND_VALUES),
 }
 
+# A label change names the one label changed (a label may hold spaces, so text, not id)
+# and the login that changed it; the item's whole label set stays out of the row.
+_LABEL_CHANGE_ATTRS = {"label": text_attr(100), "actor": login_attr()}
+
+_ASSOCIATION = enum_attr(
+    "OWNER", "MEMBER", "COLLABORATOR", "CONTRIBUTOR", "FIRST_TIME_CONTRIBUTOR",
+    "FIRST_TIMER", "MANNEQUIN", "NONE",
+)
+_PR_REPLY_ATTRS = {
+    "repo": id_attr(), "pr_number": id_attr(), "head_sha": id_attr(),
+    "author_login": login_attr(), "author_association": _ASSOCIATION,
+    "pr_author_login": login_attr(), "has_reviewer_marker": enum_attr("yes", "no"),
+    "minutes_since_pr_created": count_attr(),
+}
+_REVIEW_ATTRS = {
+    **_PR_REPLY_ATTRS, "review_id": id_attr(), "commit_id": id_attr(),
+    "state": enum_attr("approved", "changes_requested", "commented", "dismissed", "pending"),
+}
+
 ATTRIBUTE_ALLOWLISTS: dict[str, dict[str, AttributeSpec]] = {
     "test.outcome.recorded": {
         "ref_id": id_attr(),
@@ -162,6 +181,10 @@ ATTRIBUTE_ALLOWLISTS: dict[str, dict[str, AttributeSpec]] = {
     "github.pr.reopened": {**_PR_ATTRS},
     "github.pr.closed": {**_PR_ATTRS},
     "github.pr.retargeted": {**_PR_ATTRS, "base_from": id_attr()},
+    "github.pr.labeled": {"repo": id_attr(), "pr": id_attr(), "head_sha": id_attr(),
+                          "label_count": count_attr(), **_LABEL_CHANGE_ATTRS},
+    "github.pr.unlabeled": {"repo": id_attr(), "pr": id_attr(), "head_sha": id_attr(),
+                            "label_count": count_attr(), **_LABEL_CHANGE_ATTRS},
     "github.pr.merged": {
         **_PR_ATTRS, **_PR_DECLARATION_ATTRS,
         "head_ref": id_attr(), "merge_sha": id_attr(), "minutes_since_opened": count_attr(),
@@ -187,6 +210,35 @@ ATTRIBUTE_ALLOWLISTS: dict[str, dict[str, AttributeSpec]] = {
         "pr": id_attr(), "head_branch": id_attr(), "app": id_attr(),
         "pr_count": count_attr(),
         "conclusion": enum_attr(*_CONCLUSION_VALUES),
+    },
+    # CI jobs and check runs (events/connectors/github_ci_outcomes.py). Names are text, not ids:
+    # they hold spaces and parentheses. Runner labels are one bounded, sorted, comma-joined
+    # text, and the two check-run times are ids (the id shape admits an ISO timestamp).
+    "github.workflow_job.completed": {
+        "repo": id_attr(), "run_id": id_attr(), "job_id": id_attr(), "run_attempt": count_attr(),
+        "name": text_attr(200), "workflow_name": text_attr(200), "head_sha": id_attr(),
+        "runner_labels": text_attr(200), "conclusion": enum_attr(*_CONCLUSION_VALUES),
+        "queue_seconds": count_attr(),
+    },
+    "github.check_run.completed": {
+        "repo": id_attr(), "check_run_id": id_attr(), "name": text_attr(200),
+        "head_sha": id_attr(), "conclusion": enum_attr(*_CONCLUSION_VALUES),
+        "started_at": id_attr(), "completed_at": id_attr(),
+    },
+    # Reviews and comments (events/connectors/github_reply_outcomes.py): logins, an author
+    # association, ids, a state, a path, minutes and a yes/no marker flag; never a body.
+    # A path is bounded at Linux's PATH_MAX (4096), so a real repository path is never dropped.
+    "github.pr.review.submitted": {**_REVIEW_ATTRS},
+    "github.pr.review.dismissed": {**_REVIEW_ATTRS},
+    "github.pr.review_comment.created": {
+        **_PR_REPLY_ATTRS, "comment_id": id_attr(), "commit_id": id_attr(),
+        "path": text_attr(4096), "in_reply_to_id": id_attr(),
+    },
+    "github.pr.comment.created": {**_PR_REPLY_ATTRS, "comment_id": id_attr()},
+    "github.issue.comment.created": {
+        "repo": id_attr(), "issue_number": id_attr(), "comment_id": id_attr(),
+        "author_login": login_attr(), "author_association": _ASSOCIATION,
+        "issue_author_login": login_attr(), "minutes_since_issue_created": count_attr(),
     },
     # Estimated outcome size; core/size_rating.py owns the fact's keys, enums and
     # meaning. Ids, counts and enums only: no task text or hours.
@@ -237,6 +289,9 @@ ATTRIBUTE_ALLOWLISTS: dict[str, dict[str, AttributeSpec]] = {
     },
     # Saved targets are closed by the same append-only fact sequence, not a retry queue.
     "github.issue.opened": {**_ISSUE_ATTRS},
+    "github.issue.labeled": {**_ISSUE_ATTRS, **_LABEL_CHANGE_ATTRS, "minutes_since_opened": count_attr()},
+    "github.issue.unlabeled": {**_ISSUE_ATTRS, **_LABEL_CHANGE_ATTRS, "minutes_since_opened": count_attr()},
+    "github.issue.reopened": {**_ISSUE_ATTRS, "actor": login_attr(), "minutes_since_opened": count_attr()},
     "github.issue.closed": {
         **_ISSUE_ATTRS, "state_reason": enum_attr("completed", "not_planned", "reopened", "duplicate"),
     },
