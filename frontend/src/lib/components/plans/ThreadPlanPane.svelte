@@ -229,7 +229,7 @@
 			<strong>Loading plan…</strong>
 		</div>
 	{:else if (query.status === 'unauthorized' || query.status === 'forbidden' || query.status === 'not-found') && !hasPayload}
-		<!-- The plans store owns this wording, so every surface reading the plan says the same thing. -->
+		<!-- The plans store words these states; the pane shows its message as is. -->
 		<div class="plan-state error" role="alert">
 			<strong>{query.errorMessage}</strong>
 		</div>

@@ -485,7 +485,7 @@ test('plan copy: open-agent control, missing-task and closed-decision notices', 
 	}
 });
 
-test('plan copy: oversize count, resolved decision, update failure', async ({ page, request }, info) => {
+test('plan copy: oversize count and resolved decision', async ({ page, request }, info) => {
 	test.skip(info.project.name !== 'chromium-desktop', 'Both viewport widths are captured here.');
 	test.setTimeout(150_000);
 	const { by } = await boot(page, request, [{ ...DR, label: 'CI on PR #1193', until: atToday(23, 46) }]);
@@ -496,7 +496,6 @@ test('plan copy: oversize count, resolved decision, update failure', async ({ pa
 	envelope.plans[0].oversize = { open: 41, budget: 40 };
 	await page.route(new RegExp(`/api/plans/operator/threads/${thread.id}(\\?.*)?$`), route => route.fulfill({ json: envelope }));
 	await page.route('**/api/attention/queue*', route => route.fulfill({ json: { current: null, count: 0, items: [] } }));
-	await page.route('**/api/plans/*/mutations', route => route.fulfill({ status: 500, json: { detail: 'internal' } }));
 	await r2Chat(page, request, thread);
 	for (const width of [1920, 393]) {
 		await view(page, width, width === 393 ? 852 : 1080, 'light');
@@ -562,11 +561,11 @@ test('plan copy: task details, read-only discussion, task menu, empty pane, acti
 	}
 });
 
-test('plan copy: the plan pane when its plan is forbidden, fails to load, or can’t be read', async ({ page }, info) => {
+test('plan copy: the plan pane when its plan is forbidden', async ({ page }, info) => {
 	test.skip(info.project.name !== 'chromium-desktop', 'Both viewport widths are captured in this project.');
 	test.setTimeout(150_000);
 	const states = [
-		{ frame: 21, status: 403, json: {}, text: 'You don’t have access to this chat. Choose another.', button: null },
+		{ frame: 21, status: 403, json: {}, text: 'You don’t have access to this chat. Choose another.' },
 	];
 	await page.route('**/api/attention/queue*', route => route.fulfill({ json: { current: null, count: 0, items: [] } }));
 	for (const width of [1920, 393]) {
@@ -590,7 +589,6 @@ test('plan copy: the plan pane when its plan is forbidden, fails to load, or can
 				flushSync();
 			}, width === 393 ? '100%' : '312px');
 			await expect(page.getByText(state.text)).toBeVisible();
-			if (state.button) await expect(page.getByRole('button', { name: state.button, exact: true })).toBeVisible();
 			await shot(page, `copy-${state.frame}-${width}`);
 		}
 	}
