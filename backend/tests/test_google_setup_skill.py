@@ -143,8 +143,7 @@ def test_google_setup_carries_the_approved_offer_and_leaves_secrets_to_the_backe
     assert "go on only when it says In production" in steps
     assert "browser-person-steps.md` B" in steps
     assert "Never make a second project." in steps
-    assert "Never make a second project or client" not in steps
-    assert "shows the client secret, so take no snapshot or screenshot of it" in steps
+    assert "shows the client secret may still be open, so take no snapshot or screenshot of it" in steps
     assert "Read the new client's ID from the Clients list" in steps and "latest creation date" in steps and "never open it" in steps
     assert steps.index("`google_connect` with no `client_file`") < steps.index("If the error says to reinstall or update CORSIA")
     assert steps.count("console.cloud.google.com/projectcreate") == 1
@@ -180,17 +179,21 @@ def test_google_setup_asks_for_accounts_does_the_console_and_checks_scopes():
     assert "gmail.com counts as a domain of its own" in step_3
     # No hand-offs for the console: only a step that still fails after a retry, reported first.
     assert "never send the person to the console or hand them a list" in steps
-    assert "ask the person to press" not in steps and "ask the person to complete" not in steps
     assert "If a console step still fails after one retry, report it" in step_5
     # Google shows a secret only at creation, so an existing client gets a new one beside it.
     assert "Run it even when the Clients list already has a `CORSIA` client" in step_5
     assert "Leave the old client alone" in step_5
-    assert 'call again once with `start_at: "download-json"`' in step_5
+    # The secret dialog stays open through the steps after download-json, until the reload.
+    assert "stops at `download-json` or a later step" in step_5
+    assert "call again once with `start_at` set to the step it stopped at" in step_5
+    # A rerun keeps an earlier run's saved branding instead of skipping it.
+    assert "If it already shows app name `CORSIA`, an earlier run saved it" in step_5
     # One post with every link; every permission box ticked; the granted scopes read back.
     assert "Post all the links in one `post_update`" in steps
     assert "tick every box before you continue" in steps
     for scope in REQUIRED_SCOPES + OPTIONAL_SCOPES:
         assert f"`{scope.rsplit('/', 1)[1].split('.', 1)[0]}`" in steps.split("\n7. ", 1)[1]
+    assert "To add them, ask me for a new link and tick every box." in steps.split("\n7. ", 1)[1]
 
 
 def test_setup_skills_tell_a_packaged_apps_browser_error_from_a_source_install(tmp_path, monkeypatch):
