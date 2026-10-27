@@ -1,6 +1,6 @@
 """A custom account's missing source home reads the same code before a send and at launch.
 
-The stored-only readiness evaluator and ``validate_launch`` share ``missing_home_reason``,
+The readiness evaluator and ``validate_launch`` share ``missing_home_reason``,
 so a home launch would refuse never lifts a hold.
 """
 from __future__ import annotations

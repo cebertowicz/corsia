@@ -7,7 +7,7 @@ import stat
 import uuid
 
 from connections.account_evidence import discovery_record, store_record
-from connections.account_home import source_auth_exists
+from connections.account_home import source_auth_exists, source_auth_path
 from connections.account_policy import AccountAdmissionError
 from connections.account_receipts import ReceiptFence, receipt_is_current
 from connections.vendor_accounts import get_account
@@ -21,7 +21,7 @@ KINDS = frozenset({'live', 'discovery', 'checkpoint', 'detached'})
 
 def _paths(account, home):
     # Resolve neither auth file nor final home: their disappearance/retarget is evidence.
-    source = Path(account['source_home']).absolute() / 'auth.json'
+    source = source_auth_path(account['source_home'])
     destination = Path(home).absolute() / 'auth.json'
     if source == destination:
         raise AccountAdmissionError('account_home_mismatch')
@@ -201,7 +201,7 @@ def cleanup_stale(receipt: ReceiptFence, *, quiesced: bool, db=None) -> bool:
         if not receipt_is_current(receipt, db=connection):
             return False
         account, record = _current(receipt, db=connection)
-        source = str(Path(account['source_home']).absolute() / 'auth.json')
+        source = str(source_auth_path(account['source_home']))
         for item in record['auth_projection']['stale']:
             if item['phase'] != 'pending':
                 continue

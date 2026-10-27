@@ -99,7 +99,11 @@ def mark_discovery(account_id: str, *, receipt: ReceiptFence, status: str,
 
 
 def readiness_reason(account: dict, *, model: str | None = None) -> str | None:
-    """One stored-only evaluator for claim, catalog and batched advisory readers."""
+    """One evaluator for claim, catalog and batched advisory readers.
+
+    Reads stored records, plus at most two stats of a custom account's source home
+    (``missing_home_reason``); never a vendor or network call.
+    """
     from connections.account_receipts import account_receipt
     from connections.vendor_accounts import DEFAULT_COMPARISON
 

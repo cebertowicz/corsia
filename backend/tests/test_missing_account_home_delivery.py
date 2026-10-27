@@ -53,7 +53,8 @@ async def test_missing_home_stays_held_through_drive_and_recovery(vendors, monke
     monkeypatch.setattr(thread_execution, 'drive_claimed_batch', bounded_drive)
     monkeypatch.setattr(thread_execution, '_dispatch_prepared', refuse)
     await thread_execution.drive_thread('destination')
-    assert len(attempts) <= 1
+    # Held by readiness before claim: no claim and no launch, not one claim refused at launch.
+    assert (claims, attempts) == ([], [])
     row = db.execute("SELECT delivery_state,delivery_error,active_turn_id,write_outcome FROM messages WHERE id='input'").fetchone()
     assert tuple(row) == ('queued', 'account_home_mismatch', None, 'proved_no_write')
 
@@ -66,6 +67,6 @@ async def test_missing_home_stays_held_through_drive_and_recovery(vendors, monke
     assert db.execute("SELECT active_turn_id FROM messages WHERE id='input'").fetchone()[0] is None
     assert 'destination' in unavailable_model_recovery._held_thread_ids()
     await unavailable_model_recovery._resume_held_heads()
-    assert len(attempts) <= 1
+    assert (claims, attempts) == ([], [])
     row = db.execute("SELECT delivery_state,delivery_error,active_turn_id,write_outcome FROM messages WHERE id='input'").fetchone()
     assert tuple(row) == ('queued', 'account_home_mismatch', None, 'proved_no_write')
