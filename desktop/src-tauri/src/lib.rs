@@ -1092,11 +1092,12 @@ async fn configure_work_folder(app: tauri::AppHandle, path: PathBuf) -> Result<(
     Ok(())
 }
 
-fn local_shell_context(home: Option<&Path>) -> serde_json::Value {
-    let Some(home) = home else { return serde_json::json!({ "mode": "local" }); };
+fn local_shell_context(home: Option<&Path>, local_configured: bool) -> serde_json::Value {
+    let Some(home) = home else { return serde_json::json!({ "mode": "local", "localConfigured": local_configured }); };
     let workspace = first_run::default_workspace(home);
     serde_json::json!({
         "mode": "local",
+        "localConfigured": local_configured,
         "default_workspace": {
             "path": workspace.display().to_string(),
             "display": format!("~/{}", first_run::WORKSPACE_FOLDER),
@@ -1107,7 +1108,7 @@ fn local_shell_context(home: Option<&Path>) -> serde_json::Value {
 fn remote_shell_context(connection: &shell_state::ShellState, home: Option<&Path>) -> serde_json::Value {
     match connection.state() {
         shell_state::LaunchState::Remote { name } => serde_json::json!({ "mode": "remote", "name": name, "localConfigured": connection.local_corsia_configured() }),
-        _ => local_shell_context(home),
+        _ => local_shell_context(home, connection.local_corsia_configured()),
     }
 }
 
@@ -2476,7 +2477,7 @@ pub fn run() {
                 .shell
                 .lock()
                 .map(|mut connection| page_load_state(&mut connection, payload.url().as_str(), finished, home.as_deref()))
-                .unwrap_or_else(|_| (local_shell_context(home.as_deref()), None));
+                .unwrap_or_else(|_| (local_shell_context(home.as_deref(), false), None));
             let show_state = startup_state.unwrap_or_default();
             let _ = webview.eval(format!("window.__CORSIA_SHELL__ = {shell_context};{DRAG_INIT_SCRIPT}{show_state}"));
             // Re-apply traffic-light position after each navigation —
@@ -2962,13 +2963,13 @@ mod tests {
         };
         let mut connection = shell_state::ShellState::launch(Some(&saved));
         let home = Path::new("/fixture");
-        assert_eq!(remote_shell_context(&connection, Some(home)), serde_json::json!({ "mode": "local", "default_workspace": { "path": "/fixture/CORSIA", "display": "~/CORSIA" } }));
+        assert_eq!(remote_shell_context(&connection, Some(home)), serde_json::json!({ "mode": "local", "localConfigured": false, "default_workspace": { "path": "/fixture/CORSIA", "display": "~/CORSIA" } }));
         connection.connected("Studio");
         assert_eq!(remote_shell_context(&connection, Some(home)), serde_json::json!({ "mode": "remote", "name": "Studio", "localConfigured": false }));
         connection.set_local_corsia_configured(true);
         assert_eq!(remote_shell_context(&connection, Some(home)), serde_json::json!({ "mode": "remote", "name": "Studio", "localConfigured": true }));
         connection.failed("Studio", classify::ConnectFailure::Network);
-        assert_eq!(remote_shell_context(&connection, Some(home)), serde_json::json!({ "mode": "local", "default_workspace": { "path": "/fixture/CORSIA", "display": "~/CORSIA" } }));
+        assert_eq!(remote_shell_context(&connection, Some(home)), serde_json::json!({ "mode": "local", "localConfigured": true, "default_workspace": { "path": "/fixture/CORSIA", "display": "~/CORSIA" } }));
     }
 
     #[test]

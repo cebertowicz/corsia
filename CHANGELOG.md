@@ -7,6 +7,8 @@ the later entry describes the current behavior.
 
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here._
 
+- When connecting to another computer, CORSIA explains what happens and lets you return to this computer from sign-in.
+
 - The local model server keeps your server-wide settings when CORSIA starts it again.
 
 - Claude Code accounts you added keep working when CORSIA's data moves.
