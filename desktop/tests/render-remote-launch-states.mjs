@@ -11,7 +11,7 @@ const { chromium } = require('playwright');
 const states = [
 	[{ kind: 'connecting', name: 'Studio' }, { status: 'Connecting to Studio…', spinner: true, retry: null, setUpLocal: false }],
 	[{ kind: 'unreachable', name: 'Studio', cause: 'network' }, { status: 'Can’t open Studio', line: 'Check your network', retry: 'Try again', setUpLocal: true, localLabel: 'Set up this computer instead' }],
-	[{ kind: 'unreachable', name: 'Studio', cause: 'server' }, { status: 'Can’t open Studio', line: 'Studio is on the network, but CORSIA there isn’t letting this computer connect. On Studio, open CORSIA, then turn on Let other devices connect in Settings › System. Then try again.', retry: 'Try again', setUpLocal: true, localLabel: 'Set up this computer instead' }],
+	[{ kind: 'unreachable', name: 'Studio', cause: 'server' }, { status: 'Can’t open Studio', line: 'Studio is on the network, but CORSIA there isn’t letting this computer connect. On that computer, open CORSIA and check that Let other devices connect is on in Settings › System, then try again. If it still fails, choose Set up this computer instead and pair again from Settings › System.', retry: 'Try again', setUpLocal: true, localLabel: 'Set up this computer instead' }],
 	[{ kind: 'unreachable', name: 'Studio', cause: 'local' }, { status: 'Can’t open Studio', line: 'This computer couldn’t finish opening Studio. Try again. If it keeps failing, quit and reopen CORSIA.', retry: 'Try again', setUpLocal: true, localLabel: 'Set up this computer instead' }],
 	[{ kind: 'incompatible', name: 'Studio', app: '0.4.1', host: '0.3.0' }, { status: 'Can’t open Studio', line: 'CORSIA 0.4.1 and Studio has 0.3.0', retry: 'Try again', setUpLocal: true, localLabel: 'Set up this computer instead' }],
 	[{ kind: 'too_old', name: 'Studio' }, { status: 'Can’t open Studio', line: 'Studio has an older CORSIA', retry: 'Try again', setUpLocal: true, localLabel: 'Set up this computer instead' }],
@@ -56,9 +56,11 @@ try {
 		window.setTimeout = () => 0;
 	});
 	await configuredPage.goto(pathToFileURL(path.join(repo, 'desktop/dist-shell/index.html')).href, { waitUntil: 'load' });
-	await configuredPage.evaluate(() => window.__corsiaShowRemoteState({ kind: 'unreachable', name: 'Studio', cause: 'network' }));
+	await configuredPage.evaluate(() => window.__corsiaShowRemoteState({ kind: 'unreachable', name: 'Studio', cause: 'server' }));
 	const configuredLabel = await configuredPage.locator('#set-up-local').textContent();
 	if (configuredLabel !== 'Use this computer instead') throw new Error(`configured local return label ${JSON.stringify(configuredLabel)}`);
+	const configuredLine = await configuredPage.locator('#line').textContent();
+	if (!configuredLine.includes(`choose ${configuredLabel} and pair again from Settings › System`)) throw new Error(`configured recovery line ${JSON.stringify(configuredLine)}`);
 	console.log(`remote launch states: ${states.length * 2 + 1} renders passed`);
 
 	// Each failure's buttons reach their action. Every command answers with a recorded call; disconnect_remote
