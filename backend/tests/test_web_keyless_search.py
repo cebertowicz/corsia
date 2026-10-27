@@ -3,6 +3,7 @@
 import time
 from unittest.mock import AsyncMock, Mock
 
+import primp
 import pytest
 
 from infra import key_store
@@ -74,6 +75,8 @@ async def test_keyless_timeout_returns_timeout_reason(monkeypatch):
 
 
 class _RefusedClient:
+    error: Exception = ConnectionError("Connection refused (os error 61)")
+
     def __init__(self, **_):
         pass
 
@@ -81,7 +84,11 @@ class _RefusedClient:
         return lambda *_, **__: None
 
     def request(self, *_, **__):
-        raise ConnectionError("Connection refused (os error 61)")
+        raise self.error
+
+
+class _SlowClient(_RefusedClient):
+    error = primp.TimeoutError("request expired")
 
 
 @pytest.mark.asyncio
@@ -91,6 +98,16 @@ async def test_unreachable_network_through_the_real_library_is_a_network_failure
     monkeypatch.setattr(http_client.primp, "Client", _RefusedClient)
     result = await keyless.keyless_search("query")
     assert (result.kind, result.reason) == (outcomes.FAILED, outcomes.REASON_NETWORK)
+
+
+@pytest.mark.asyncio
+async def test_an_engine_timeout_through_the_real_library_is_a_timeout(monkeypatch):
+    """DDGS wraps the engine's timeout in a plain exception unless its text says 'timed out'."""
+    from ddgs import http_client
+
+    monkeypatch.setattr(http_client.primp, "Client", _SlowClient)
+    result = await keyless.keyless_search("query")
+    assert (result.kind, result.reason) == (outcomes.FAILED, outcomes.REASON_TIMEOUT)
 
 
 @pytest.mark.asyncio
@@ -104,7 +121,6 @@ async def test_engines_finding_nothing_through_the_real_library_is_working_and_e
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("error,reason", [
-    (lambda: keyless.RatelimitException("202 Ratelimit"), outcomes.REASON_RATE_LIMIT),
     (lambda: keyless.TimeoutException("timed out"), outcomes.REASON_TIMEOUT),
     (lambda: keyless.DDGSException("unexpected page"), outcomes.REASON_PROVIDER),
 ])

@@ -3,11 +3,9 @@
 import asyncio
 
 from ddgs import DDGS
-from ddgs.exceptions import DDGSException, RatelimitException, TimeoutException
+from ddgs.exceptions import DDGSException, TimeoutException
 
-from tools.web_search_outcome import (
-    FAILED, REASON_NETWORK, REASON_PROVIDER, REASON_RATE_LIMIT, REASON_TIMEOUT, WORKS, SearchOutcome,
-)
+from tools.web_search_outcome import FAILED, REASON_NETWORK, REASON_PROVIDER, REASON_TIMEOUT, WORKS, SearchOutcome
 
 TIMEOUT_SECONDS = 14
 
@@ -32,12 +30,20 @@ async def keyless_search(query: str, count: int = 5) -> SearchOutcome:
         async with asyncio.timeout(TIMEOUT_SECONDS):
             items = await asyncio.to_thread(_search, query, count)
         return SearchOutcome(WORKS, results=items)
-    except (TimeoutError, TimeoutException):
+    except TimeoutError:
         return SearchOutcome(FAILED, REASON_TIMEOUT)
-    except RatelimitException:
-        return SearchOutcome(FAILED, REASON_RATE_LIMIT)
     except DDGSException as exc:
-        return SearchOutcome(FAILED, REASON_NETWORK if _engine_error(exc).__cause__ else REASON_PROVIDER)
+        return SearchOutcome(FAILED, _failure_reason(exc))
+
+
+def _failure_reason(exc: DDGSException) -> str:
+    """Classify by the engine's own error, which DDGS wraps.
+
+    DDGS raises no rate-limit error: an engine answering 429 returns nothing, so it reads as no results."""
+    engine = _engine_error(exc)
+    if isinstance(exc, TimeoutException) or isinstance(engine, TimeoutException):
+        return REASON_TIMEOUT
+    return REASON_NETWORK if engine.__cause__ else REASON_PROVIDER
 
 
 def _engine_error(exc: DDGSException) -> BaseException:
