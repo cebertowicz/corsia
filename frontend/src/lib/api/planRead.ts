@@ -27,9 +27,9 @@ export function errorReference(body: unknown): string | undefined {
 	return typeof reference === 'string' && reference.trim() ? reference : undefined;
 }
 
-/** A failure as the person reads it: the message, with the reference beside it when there is one; a narrow pane never splits the label from the code. */
+/** A failure as the person reads it: the message, with the reference beside it when there is one. */
 export function errorText(outcome: { message: string; reference?: string }): string {
-	return outcome.reference ? `${outcome.message} Reference:\u00a0${outcome.reference}` : outcome.message;
+	return outcome.reference ? `${outcome.message} Reference: ${outcome.reference}` : outcome.message;
 }
 
 /** Bearer-auth GET headers, matching the existing api/attention.ts seam. */
@@ -58,9 +58,7 @@ export async function readPlan<T>(
 	// Never surface a raw server body, which may contain internal detail.
 	if (!res.ok) return { status: 'error', message: safeErrorMessage('load'), reference: errorReference(await readJson(res)) };
 	const body = await readJson(res);
-	// A body cut off or garbled in transit reads fine on a retry; one that parses but doesn't decode won't.
-	if (body === undefined) return { status: 'error', message: safeErrorMessage('load') };
-	const payload = decode(body);
+	const payload = body === undefined ? null : decode(body);
 	if (payload === null) return { status: 'error', message: STALE_PAGE_MESSAGE };
 	return { status: 'fresh', payload, etag: res.headers.get('ETag') ?? '' };
 }

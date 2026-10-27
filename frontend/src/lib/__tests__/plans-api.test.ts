@@ -84,7 +84,7 @@ describe('plan lifecycle mutations', () => {
 		mockFetch(500, { detail: '/secret/path.py', reference: 'abc123' });
 		const result = await mutatePlanLifecycle(TOKEN, 'p', 'resume', 2, 'resume:p:2');
 		expect(result).toEqual({ status: 'error', message: 'Couldn’t update the plan. Try again.', reference: 'abc123' });
-		expect(errorText(result as { message: string; reference?: string })).toBe('Couldn’t update the plan. Try again. Reference:\u00a0abc123');
+		expect(errorText(result as { message: string; reference?: string })).toBe('Couldn’t update the plan. Try again. Reference: abc123');
 		expect(JSON.stringify(result)).not.toContain('secret');
 
 		vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
@@ -147,12 +147,12 @@ describe('contextual operator reads', () => {
 		expect(await readOperatorThread(TOKEN, 'thread-1')).toEqual({ status: 'forbidden' });
 	});
 
-	it('a 2xx reply that is not JSON is a retryable failed read, not a hang', async () => {
+	it('a 2xx reply that is not JSON is a failed read, not a hang', async () => {
 		vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
 			ok: true, status: 200, json: () => Promise.reject(new SyntaxError('Unexpected token')),
 			headers: { get: () => null },
 		}));
-		expect(await readOperatorThread(TOKEN, 'thread-1')).toEqual({ status: 'error', message: 'Couldn’t load the plan. Try again.' });
+		expect(await readOperatorThread(TOKEN, 'thread-1')).toEqual({ status: 'error', message: 'Couldn’t read this plan. Reload the page.' });
 	});
 
 	it('a 2xx body that is not the envelope is a failed read, not fresh state', async () => {

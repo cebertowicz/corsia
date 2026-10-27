@@ -435,7 +435,7 @@ describe("ThreadPlanPane", () => {
     [401, {}, "Sign in to see this plan."],
     [403, {}, "You don’t have access to this chat. Choose another."],
     [404, {}, "This chat isn’t available. Choose another."],
-    [500, { reference: "abc123", detail: "internal" }, "Couldn’t load the plan. Try again. Reference:\u00a0abc123"],
+    [500, { reference: "abc123", detail: "internal" }, "Couldn’t load the plan. Try again. Reference: abc123"],
   ])("shows the store's own message for a %i plan read", async (status, body, message) => {
     mockFetch(status, body);
     component = mount(ThreadPlanPane, {
@@ -447,31 +447,6 @@ describe("ThreadPlanPane", () => {
     expect(host.querySelector(".plan-state")?.textContent?.trim().startsWith(message)).toBe(true);
     expect(host.textContent).not.toContain("internal");
     expect(host.textContent).not.toContain("t1");
-  });
-
-  it("offers Reload, not Retry, for a reply the page can't read", async () => {
-    mockFetch(200, { contract_version: 99 });
-    component = mount(ThreadPlanPane, {
-      target: host,
-      props: { threadId: "t1" },
-    });
-    flushSync();
-    await settle();
-    expect(host.querySelector(".plan-state strong")?.textContent).toBe("Couldn’t read this plan. Reload the page.");
-    expect(buttonNamed("Reload")).toBeTruthy();
-    expect(buttonNamed("Retry")).toBeFalsy();
-  });
-
-  it("offers Retry for a load failure", async () => {
-    mockFetch(500, {});
-    component = mount(ThreadPlanPane, {
-      target: host,
-      props: { threadId: "t1" },
-    });
-    flushSync();
-    await settle();
-    expect(buttonNamed("Retry")).toBeTruthy();
-    expect(buttonNamed("Reload")).toBeFalsy();
   });
 
   it("names genuine human decisions and hands off to the canonical dock", async () => {

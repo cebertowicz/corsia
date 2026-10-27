@@ -15,7 +15,7 @@
 	import { visibleQueue } from '$lib/stores/attentionDock.svelte';
 	import type { AttentionQueueItem } from '$lib/api/attentionQueue';
 	import { mutateUserTask } from '$lib/api/plans';
-	import { errorText, STALE_PAGE_MESSAGE } from '$lib/api/planRead';
+	import { errorText } from '$lib/api/planRead';
 	import type { OperatorArtifactLink, OperatorNode, OperatorUserAction } from '$lib/api/plans';
 	import type { OperatorKey } from '$lib/stores/planKeys';
 	import { registerNodeFocus } from '$lib/planNodeFocus';
@@ -237,12 +237,7 @@
 	{:else if query.status === 'error' && !hasPayload}
 		<div class="plan-state error" role="alert">
 			<strong>{query.errorMessage}</strong>
-			<!-- A reply this page can't read fails the same way on a retry; only a fresh page can read it. -->
-			{#if query.errorMessage === STALE_PAGE_MESSAGE}
-				<Button variant="secondary" size="sm" onclick={() => location.reload()}>Reload</Button>
-			{:else}
-				<Button variant="secondary" size="sm" onclick={() => query.retry()}>Retry</Button>
-			{/if}
+			<Button variant="secondary" size="sm" onclick={() => query.retry()}>Retry</Button>
 		</div>
 	{:else if plan}
 		{#if hasPayload && (query.status === 'stale' || offline)}
@@ -348,7 +343,7 @@
 		color: var(--text-tertiary); text-align: center;
 	}
 	.plan-state.error { color: var(--red); }
-	.plan-state strong { color: var(--text-primary); font-size: var(--text-footnote); text-wrap: balance; }
+	.plan-state strong { color: var(--text-primary); font-size: var(--text-footnote); }
 	.plan-state p { margin: 0; font-size: var(--text-caption); }
 	.status-banner {
 		display: flex; align-items: center; justify-content: space-between; gap: var(--space-2);
