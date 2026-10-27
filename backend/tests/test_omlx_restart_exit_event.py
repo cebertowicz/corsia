@@ -11,6 +11,7 @@ import os
 import signal
 import subprocess
 import sys
+import threading
 
 import pytest
 
@@ -155,6 +156,29 @@ async def test_clean_exit_is_reaped_when_nonblocking_wait_would_be_too_early(sta
     with pytest.raises(ChildProcessError):
         original_waitpid(proc.pid, os.WNOHANG)
     proc.returncode = 0  # the supervisor reaped it
+
+
+async def test_slow_reap_does_not_block_exit_notification(monkeypatch):
+    from llm.providers import omlx_process
+
+    release = threading.Event()
+    notified = asyncio.Event()
+    proc = sleeper()
+
+    def slow_reap(_pid, _wait):
+        release.wait(timeout=5)
+        return ("signal 9", False)
+
+    monkeypatch.setattr(omlx_process, "reap_status", slow_reap)
+    cancel = omlx_process.watch_exit(proc.pid, lambda _status: notified.set())
+    try:
+        proc.kill()
+        await asyncio.wait_for(notified.wait(), timeout=2)
+    finally:
+        release.set()
+        if cancel:
+            cancel()
+        proc.wait(timeout=2)
 
 
 async def test_an_exit_after_an_announced_stop_is_not_a_crash(starts):

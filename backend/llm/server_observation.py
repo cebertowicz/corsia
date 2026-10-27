@@ -61,14 +61,39 @@ _PENDING: set[asyncio.Task] = set()
 _UNLISTED: dict[str, str | None] = {}
 
 
+_NO_TOKEN = object()
+
+
+def loaded_token(server_id: str) -> object:
+    """Capture the observed set before starting an asynchronous probe."""
+    from llm import network_discovery as nd
+
+    return nd._LOADED_BY_SERVER.get(server_id)
+
+
+def forget_loaded_on_exit(server_id: str) -> set[str]:
+    """Invalidate the observed set on process exit and return it for reload."""
+    from llm import network_discovery as nd
+
+    loaded = nd._LOADED_BY_SERVER.get(server_id, set())
+    nd._LOADED_BY_SERVER[server_id] = set()
+    nd._notify_models_changed_safe()
+    return set(loaded)
+
+
 async def record_reachable(
-    server: dict, *, loaded: set[str] | None, rediscover: bool = True, **status: Any,
+    server: dict, *, loaded: set[str] | None, rediscover: bool = True,
+    token: object = _NO_TOKEN, **status: Any,
 ) -> None:
     """A source reached ``server``. ``loaded`` replaces its observed model set."""
     from llm import network_discovery as nd
 
     sid = server["id"]
+    if token is not _NO_TOKEN and loaded_token(sid) is not token:
+        return
     await run_in_db(nd.update_server_status, sid, status="online", **status)
+    if token is not _NO_TOKEN and loaded_token(sid) is not token:
+        return
     if loaded is not None:
         changed = nd._LOADED_BY_SERVER.get(sid, set()) != loaded
         nd._LOADED_BY_SERVER[sid] = set(loaded)

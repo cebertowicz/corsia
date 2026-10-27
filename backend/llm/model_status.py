@@ -372,7 +372,8 @@ def _status_entry(row: dict, cloud_active, server_status, loaded_ids_fn,
         status_reason = None
     elif backend == "network":
         status = _network_status(row, server_status, loaded_ids_fn)
-        status_reason = None
+        status_reason = ({"available": "model_not_loaded", "unavailable": "model_unavailable"}.get(status)
+                         if provider == "omlx" else None)
     else:
         status = "unavailable"
         status_reason = None

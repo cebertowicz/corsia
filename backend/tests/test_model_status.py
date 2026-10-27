@@ -87,6 +87,7 @@ class TestGetModelStatusRows:
         status_env.set_rows([_catalog_row()])  # loaded empty
         row = next(r for r in get_model_status_rows() if r["id"] == "cat-x")
         assert row["status"] == "available"
+        assert row["status_reason"] == "model_not_loaded"
 
     def test_network_unavailable_when_server_offline(self, status_env):
         from llm.model_status import get_model_status_rows
@@ -94,6 +95,7 @@ class TestGetModelStatusRows:
         status_env.set_server("srv-local", "offline")
         row = next(r for r in get_model_status_rows() if r["id"] == "cat-x")
         assert row["status"] == "unavailable"
+        assert row["status_reason"] == "model_unavailable"
 
     def test_missing_context_window_is_unavailable(self, status_env):
         from llm.model_status import get_model_status_rows

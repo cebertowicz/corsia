@@ -8,6 +8,7 @@ the later entry describes the current behavior.
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here._
 
 - On Linux, CORSIA starts again after the computer restarts.
+- A local model is no longer shown as ready after its server exits, until it has loaded again.
 - On Linux, CORSIA no longer offers to set up a local model; you can connect a provider instead.
 - A local model that fails to reload now gives retry instructions that match whether it is kept loaded.
 - The local model server keeps your server-wide settings when CORSIA starts it again.

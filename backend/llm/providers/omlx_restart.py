@@ -58,7 +58,7 @@ class Life:
     restart: asyncio.Task | None = None
     restarts: deque[float] = field(default_factory=deque)  # when each restart in the window began
 
-    def watch(self, pid: int, on_exit: Callable[[tuple[str, bool] | None], None]) -> None:
+    def watch(self, pid: int, on_exit: Callable[[tuple[str, bool]], None]) -> None:
         """The server is up and wanted running: have the OS tell us when ``pid`` exits.
 
         A start by the person resets the restart bound and any earlier stop; a restart's own start
@@ -125,20 +125,20 @@ def emit(server_id: str, action: str, **properties: Any) -> None:
 def on_exit(
     server_id: str, life: Life, pid: int,
     start: Callable[[dict], Awaitable[dict[str, Any]]], tail_log: Callable[[str], str],
-    observed: tuple[str, bool] | None = None,
+    observed: tuple[str, bool],
 ) -> None:
     """Restart the server unless the exit was asked for or was a clean exit 0."""
+    from llm.server_observation import forget_loaded_on_exit
+
     life.unwatch = None
-    status, clean = observed if observed is not None else process.reap_status(pid)
+    loaded = sorted(forget_loaded_on_exit(server_id))
+    status, clean = observed
     if life.stopping:
         log.info("oMLX %s (pid %s) stopped as asked; not restarting", server_id, pid)
         return
     if clean:
         log.info("oMLX %s (pid %s) exited with code 0 without being asked; not restarting", server_id, pid)
         return
-    from llm.network_discovery import get_loaded_model_ids
-
-    loaded = sorted(get_loaded_model_ids(server_id))  # read now: the next health sweep forgets them
     emit(server_id, "exit.unexpected", status=status, loaded_models=len(loaded))
     if life.restart:  # it exited again while a restart was running
         life.restart.cancel()

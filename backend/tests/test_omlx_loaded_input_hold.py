@@ -12,7 +12,9 @@ async def _publish_loaded(source):
             {'id': 'loaded-test-server', 'status': 'online'}, loaded={'model'},
         )
     else:
-        network_discovery.notify_cached_model_loaded('loaded-test-server', 'model')
+        network_discovery.notify_cached_model_loaded(
+            'loaded-test-server', 'model', network_discovery.loaded_token('loaded-test-server')
+        )
 
 
 @pytest.mark.asyncio
