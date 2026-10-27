@@ -206,6 +206,32 @@ def test_startup_repair_rewrites_failure_and_drops_absent_moved_home(isolated_db
     assert get_db().total_changes == before
 
 
+def test_startup_repair_unlinks_a_moved_temporary_home(isolated_db, roots):
+    # A later retirement compares the link against the new source; left in place it would refuse the account.
+    from connections.account_projection import repair_moved_projections
+    from connections.vendor_accounts import get_account
+
+    legacy, current = roots
+    source, runtime = _make_homes(current, "x5")
+    checkpoint = runtime.parent / "checkpoint-1"
+    checkpoint.mkdir()
+    old_source = legacy / "runtime/vendor-accounts/x5/source/auth.json"
+    old_dest = legacy / "runtime/vendor-accounts/x5/checkpoint-1/auth.json"
+    (checkpoint / "auth.json").symlink_to(old_source)
+    entry = {"source": str(old_source), "destination": str(old_dest), "home": str(old_dest.parent),
+             "kind": "checkpoint", "phase": "established", "account_revision": 0, "login_seq": 1,
+             "owner_turn_id": "turn-1"}
+    record = {"auth_state": "known", "login_seq": 1, "login_revision": 0,
+              "auth_projection": {"failed": None, "stale": [], "homes": {str(old_dest): entry}}}
+    _insert("x5", "codex", str(source), str(runtime), record)
+
+    repair_moved_projections(legacy_root=legacy, state_root=current)
+    projection = get_account("x5")["discovery"]["auth_projection"]
+    assert projection["homes"] == {}
+    assert projection["failed"] is None
+    assert not (checkpoint / "auth.json").is_symlink()
+
+
 def test_missing_target_is_left_alone_and_logged(isolated_db, roots):
     legacy, current = roots
     old = legacy / "runtime/vendor-accounts/m1"

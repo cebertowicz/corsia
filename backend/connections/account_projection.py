@@ -128,7 +128,7 @@ def _repair_moved_homes(projection, prefixes, current, revision, login_seq):
         del projection['homes'][old_destination]
         if state == 'absent':
             continue
-        if entry.get('kind') == 'live' and state == 'intact':
+        if state == 'intact':  # no turn survives a restart, so even a temporary home's link is unowned
             destination.unlink()
             continue
         for field in ('source', 'destination', 'home'):
