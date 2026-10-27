@@ -221,7 +221,7 @@
 		try {
 			await linkRepo(pid, repoPath.trim());
 			await loadLibrary();
-			toasts.show('Directory linked into source/', 'success');
+			toasts.show('Repository linked.', 'success');
 		} catch (e) {
 			console.error('link repo failed', e);
 			toasts.show(e instanceof Error ? e.message : 'Link failed', 'error');
@@ -245,7 +245,7 @@
 			<button class="add" class:open={addOpen} onclick={() => (addOpen = !addOpen)}>＋ Add</button>
 			{#if addOpen}
 				<div class="add-menu" transition:slide={{ duration: 120 }}>
-					<button class="add-item press-tint" onclick={() => { sheetOpen = true; addOpen = false; }}>Link repo directory…</button>
+					<button class="add-item press-tint" onclick={() => { sheetOpen = true; addOpen = false; }}>Link a repository…</button>
 				</div>
 			{/if}
 		</div>
