@@ -75,6 +75,11 @@
 		return (await tree?.revealFolded(nodeId)) ?? false;
 	}
 
+	/** Open one row's details in the drilled subtree (`PlanTree.openDetails`). */
+	export function openDetails(nodeId: string): void {
+		tree?.openDetails(nodeId);
+	}
+
 	/** Focus one rendered row of the drilled subtree (`PlanTree.focusRow`). */
 	export function focusRow(nodeId: string): boolean {
 		return tree?.focusRow(nodeId) ?? false;

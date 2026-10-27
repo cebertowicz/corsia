@@ -58,7 +58,7 @@ def test_v146_migrates_a_v145_batch_table_to_the_fresh_lane_shape() -> None:
     from infra.database_migrations import MIGRATIONS, migrate_to_current
     from infra.schema import SCHEMA_VERSION
 
-    assert SCHEMA_VERSION == 151 and MIGRATIONS[145] is migrate_145_to_146
+    assert SCHEMA_VERSION == 152 and MIGRATIONS[145] is migrate_145_to_146
     fresh = sqlite3.connect(":memory:")
     db = sqlite3.connect(":memory:")
     try:
@@ -82,7 +82,7 @@ def test_v146_migrates_a_v145_batch_table_to_the_fresh_lane_shape() -> None:
 
         result = migrate_to_current(db, SCHEMA_VERSION)
 
-        assert (result.migrated, result.from_version, result.to_version) == (True, 145, 151)
+        assert (result.migrated, result.from_version, result.to_version) == (True, 145, 152)
         assert db.execute("SELECT delivery_policy FROM doc_feedback_batches WHERE id='batch-1'").fetchone() == (
             "immediate",
         )
