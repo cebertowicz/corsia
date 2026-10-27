@@ -637,6 +637,8 @@ async def test_bash_spawn_reads_one_view(agent, tmp_path, monkeypatch):
     monkeypatch.setattr(host_access_gate, "consume_current_action_permit", consume)
     monkeypatch.setattr(shell, "list_registered_repo_policies", lambda *a, **k: [])
     monkeypatch.setattr(shell, "controlled_fast_forward_policy", lambda *_a, **_k: None)
+    from tests.shell_platform_helpers import use_mac_shell
+    use_mac_shell(monkeypatch)
     monkeypatch.setattr(shell, "is_safehouse_available", lambda: True)
     monkeypatch.setattr(shell, "safehouse_version_error", lambda: None)
     monkeypatch.setattr(shell, "is_path_allowed", lambda *_a, **_k: True)

@@ -155,6 +155,8 @@ async def test_a_failed_fetch_is_logged_once_per_runtime_and_shells_still_run(ho
 
 @pytest.mark.asyncio
 async def test_bash_waits_for_the_prefetch_before_it_spawns_and_spawns_with_the_tool_path(home, monkeypatch):
+    from tests.shell_platform_helpers import use_mac_shell
+    use_mac_shell(monkeypatch)
     for name, value in {
         "bind_agent_account": AsyncMock(return_value=None),
         "load_shell_repo_policies": lambda *args: ([], []),
