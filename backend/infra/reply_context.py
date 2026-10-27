@@ -16,6 +16,7 @@ from collections import Counter
 from typing import Any, TypeGuard
 
 from infra.chat_comment_ids import format_cid, parse_cid
+from infra.failure_reference import new_error_reference
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +28,14 @@ class RejectedComments(ValueError):
     composer keeps the draft when a send is refused.
     """
 
-    def __init__(self, positions: list[int]):
+    def __init__(self, positions: list[int], *, reference: str | None = None):
+        if reference:
+            super().__init__(
+                "Couldn’t check your comments, so nothing was sent. Your message and comments "
+                f"are kept: try sending again. Reference: {reference}"
+            )
+            self.positions = positions
+            return
         if not positions:
             which, them = "Your comments", "them"
         elif len(positions) == 1:
@@ -36,17 +44,23 @@ class RejectedComments(ValueError):
             listed = ", ".join(str(position) for position in positions[:-1])
             which, them = f"Comments {listed} and {positions[-1]}", "those comments"
         super().__init__(
-            f"{which} couldn't be matched to text in this chat, so nothing was sent. "
+            f"{which} couldn’t be matched to text in this chat, so nothing was sent. "
             f"Your message and comments are kept: remove {them} and send again."
         )
         self.positions = positions
 
 
-def require_every_comment(raw: object, stored: dict | None) -> None:
-    """Raise ``RejectedComments`` unless every submitted comment was stored."""
+def require_every_comment(raw: object, stored: dict | None, dropped: list[dict] | None = None) -> None:
+    """Raise ``RejectedComments`` unless every submitted comment was stored.
+
+    A comments drop that carries a ``reference`` was a system failure, logged under it.
+    """
     submitted = raw.get("comments") if isinstance(raw, dict) else None
     if submitted is None:
         return
+    failed = next((item for item in dropped or [] if item["field"] == "comments" and "reference" in item), None)
+    if submitted and failed:
+        raise RejectedComments([], reference=failed["reference"])
     if not isinstance(submitted, list):
         raise RejectedComments([])
     kept = {
@@ -161,7 +175,7 @@ def _comments(raw: object, newest: int, input_order: int, dropped: list[dict]) -
 
 
 def validate_reply_context(
-    db: sqlite3.Connection, thread_id: str, raw: object,
+    db: sqlite3.Connection, thread_id: str, raw: object, *, dropped: list[dict] | None = None,
 ) -> dict | None:
     """Return the reply context to store for one new human message, or None.
 
@@ -170,21 +184,22 @@ def validate_reply_context(
     """
     if raw is None:
         return None
-    dropped: list[dict] = []
+    if dropped is None:
+        dropped = []
     stored: dict[str, Any] = {}
     if not isinstance(raw, dict):
         dropped.append(_dropped("reply_context", "not_object"))
     else:
         newest = 0
-        unreadable = False
+        unreadable = None
         try:
             newest = int(db.execute(
                 "SELECT COALESCE(MAX(seq),0) FROM messages WHERE thread_id=?",
                 (thread_id,),
             ).fetchone()[0])
         except sqlite3.Error:
-            unreadable = True
-            logger.warning("reply context: thread seq range unreadable", exc_info=True)
+            unreadable = new_error_reference()
+            logger.warning("reply context: thread seq range unreadable reference=%s", unreadable, exc_info=True)
         builders = (
             ("in_view", lambda value: _in_view(value, newest, dropped)),
             ("first_unread", lambda value: _first_unread(value, newest, dropped)),
@@ -196,13 +211,14 @@ def validate_reply_context(
             if raw.get(field) is None:
                 continue
             if unreadable:
-                dropped.append(_dropped(field, "thread_unreadable"))
+                dropped.append(_dropped(field, "thread_unreadable", reference=unreadable))
                 continue
             try:
                 result = build(raw[field])
             except Exception:
-                logger.warning("reply context: %s dropped", field, exc_info=True)
-                dropped.append(_dropped(field, "validation_error"))
+                reference = new_error_reference()
+                logger.warning("reply context: %s dropped reference=%s", field, reference, exc_info=True)
+                dropped.append(_dropped(field, "validation_error", reference=reference))
                 continue
             if result:
                 stored[field] = result
