@@ -69,7 +69,7 @@
 		<div class="actions"><Button loading={retrying} onclick={tryAgain}>Try again</Button></div>
 	{/if}
 	{#if waiting}
-		<p class="note">Start this agent to get a reply.</p>
+		<p class="note">Your message sends once you pick a model.</p>
 	{/if}
 </section>
 {/if}

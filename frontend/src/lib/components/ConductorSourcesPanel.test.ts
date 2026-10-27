@@ -115,7 +115,7 @@ describe('first-run line', () => {
 		listed = [claude('ready', [account('ready')])];
 		messages.set([{ id: 'm1', role: 'user', content: 'hello' }] as never);
 		await render();
-		expect(text()).toContain("Start this agent to get a reply.");
+		expect(text()).toContain("Your message sends once you pick a model.");
 	});
 
 	it('shows an initial read failure until Try again succeeds', async () => {
