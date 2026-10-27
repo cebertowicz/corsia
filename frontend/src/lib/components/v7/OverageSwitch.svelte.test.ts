@@ -80,7 +80,7 @@ describe('OverageSwitch', () => {
 		card.querySelector('button')?.click();
 		await settle();
 
-		expect(card.textContent).toContain('Could not turn Spend past usage limit off: Could not reach the server.');
+		expect(card.textContent).toContain('Could not turn Spend past usage limit off: Couldn’t reach the server.');
 	});
 
 	it('stays disabled while the account has no plan-limit setting', () => {
