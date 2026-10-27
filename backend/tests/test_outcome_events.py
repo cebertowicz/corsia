@@ -300,7 +300,7 @@ def test_only_registered_events_are_the_test_seed_and_the_github_intake():
         "github.issue.comment.created", "github.issue.assigned", "github.status", "github.release.published",
         "github.issue.opened", "github.issue.closed", "github.issue.reopened",
         "github.issue.labeled", "github.issue.unlabeled", "github.pr.labeled", "github.pr.unlabeled",
-        "measurement.size_rating",
+        "measurement.size_rating", "corsia.usage.install_week",
         "measurement.correction", "measurement.lesson_gate",
         "learning_loop.correction_triage", "learning_loop.correction_outcome",
         "measurement.verdict.planned", "measurement.verdict.reached",

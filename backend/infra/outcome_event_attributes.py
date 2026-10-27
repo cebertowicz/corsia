@@ -46,6 +46,9 @@ from core.corrections_recording import (
 )
 from core.lesson_gate import EVENT as LESSON_GATE_EVENT
 from core.size_rating import BASES, FACT_KEYS, SIZE_CLASSES, SIZE_EVENT
+from core.usage_fields import ENUMS as USAGE_ENUMS
+from core.usage_fields import PATTERNS as USAGE_PATTERNS
+from core.usage_fields import USAGE_EVENT
 from host_access.credential_sanitizer import contains_credential, sanitize_credential_data
 from infra.outcome_event_input import OutcomeInputRefusal
 
@@ -58,11 +61,12 @@ _BOT_LOGIN_RE = re.compile(r"[A-Za-z0-9_.:#/@+-]{1,194}\[bot\]")
 
 @dataclass(frozen=True)
 class AttributeSpec:
-    """One allowed attribute: an ``id``, a ``login``, a non-negative ``count`` or an ``enum``."""
+    """One allowed attribute: an ``id``, a ``login``, a non-negative ``count``, an ``enum`` or a ``pattern``."""
 
     kind: str
     values: frozenset[str] = frozenset()
     max_chars: int = 0
+    pattern: str = ""
 
     def accepts(self, value: Any) -> bool:
         """Whether ``value`` is a legal value for this attribute."""
@@ -85,6 +89,8 @@ class AttributeSpec:
                 isinstance(value, str) and _ID_RE.fullmatch(value) is not None
                 and not contains_credential(value)
             )
+        if self.kind == "pattern":
+            return isinstance(value, str) and re.fullmatch(self.pattern, value) is not None
         if self.kind == "text":
             return (
                 isinstance(value, str) and bool(value.strip())
@@ -112,6 +118,11 @@ def count_attr() -> AttributeSpec:
 def enum_attr(*values: str) -> AttributeSpec:
     """One of a fixed set of strings."""
     return AttributeSpec("enum", frozenset(values))
+
+
+def pattern_attr(pattern: str) -> AttributeSpec:
+    """A string that fully matches ``pattern``; the module that defines the field owns the pattern."""
+    return AttributeSpec("pattern", pattern=pattern)
 
 
 def text_attr(max_chars: int) -> AttributeSpec:
@@ -267,6 +278,11 @@ ATTRIBUTE_ALLOWLISTS: dict[str, dict[str, AttributeSpec]] = {
         "node_revision": count_attr(),
         "basis": enum_attr(*BASES),
         "size_class": enum_attr(*SIZE_CLASSES),
+    },
+    # This install's weekly usage summary (core/usage_fields.py): the closed field list, no identity.
+    USAGE_EVENT: {
+        **{key: pattern_attr(pattern) for key, pattern in USAGE_PATTERNS.items()},
+        **{key: enum_attr(*values) for key, values in USAGE_ENUMS.items()},
     },
     # Local correction classifications retain only versioned result metadata,
     # never source-message text or an LLM explanation.

@@ -169,9 +169,10 @@ def _community(strings: dict[str, Any]) -> dict[str, Any]:
 
 
 def _github(email: str, strings: dict[str, Any] = text.GITHUB) -> dict[str, Any]:
+    address = agents_email(email)
     return _decision(tasks.TASK_GITHUB, strings, options=_lettered(strings),
                      recommendation="A",
-                     sign_up_with=agents_email(email) or text.ASK_FOR_ADDRESS)
+                     sign_up_with=text.AGENTS_ADDRESS.format(address=address) if address else text.ASK_FOR_ADDRESS)
 
 
 

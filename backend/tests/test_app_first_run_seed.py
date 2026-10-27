@@ -325,7 +325,7 @@ def test_applicable_steps_and_completion_cache_reconcile_conditionals(
         "you connected your Claude subscription, or chose not now",
         "you chose whether to bring over what your other tools know",
         "web search works, or you chose not now",
-        "CORSIA knows enough about you to help, or you chose not now",
+        "CORSIA knows enough to help, or you chose not now",
         "you chose whether to use or share community improvements, or chose not now",
         "CORSIA explained how file access and approval work",
         "CORSIA asked what you'd like help with next",
