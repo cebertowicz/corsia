@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+from collections import Counter
 from typing import Any, TypeGuard
 
 logger = logging.getLogger(__name__)
@@ -46,7 +47,7 @@ def _range(raw: object, newest: int) -> tuple[int, int, int | None] | None:
 
 
 def _merge(ranges: list[tuple[int, int, int | None]]) -> list[tuple[int, int, int | None]]:
-    """Sort and join ranges that overlap or touch, summing the rows shown."""
+    """Join overlapping or touching ranges, keeping the larger shown count."""
     merged: list[tuple[int, int, int | None]] = []
     for start, end, shown in sorted(ranges, key=lambda item: (item[0], item[1])):
         if not merged or start > merged[-1][1] + 1:
@@ -56,7 +57,7 @@ def _merge(ranges: list[tuple[int, int, int | None]]) -> list[tuple[int, int, in
         joined_end = max(last_end, end)
         joined_shown = (
             None if last_shown is None or shown is None
-            else min(last_shown + shown, joined_end - first + 1)
+            else min(max(last_shown, shown), joined_end - first + 1)
         )
         merged[-1] = (first, joined_end, joined_shown)
     return merged
@@ -126,8 +127,8 @@ def validate_reply_context(
 ) -> dict | None:
     """Return the reply context to store for one new human message, or None.
 
-    A field that fails is dropped on its own, with its reason under
-    ``dropped``; nothing here raises into admission.
+    A field that fails is dropped on its own; counts by reason are logged.
+    Nothing here raises into admission.
     """
     if raw is None:
         return None
@@ -168,5 +169,6 @@ def validate_reply_context(
             if result:
                 stored[field] = result
     if dropped:
-        stored["dropped"] = dropped
+        counts = Counter(f'{item["field"]}:{item["reason"]}' for item in dropped)
+        logger.info("reply context: thread=%s dropped=%s", thread_id, dict(sorted(counts.items())))
     return stored or None

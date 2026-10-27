@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 
 import pytest
 
@@ -34,8 +35,10 @@ def _validate(db, raw):
     return validate_reply_context(db, THREAD, raw)
 
 
-def _reasons(stored):
-    return [(item["field"], item["reason"]) for item in stored["dropped"]]
+def _assert_dropped(caplog, counts):
+    records = [record for record in caplog.records if record.name == "infra.reply_context" and record.levelno == logging.INFO]
+    assert len(records) == 1
+    assert records[0].getMessage() == f"reply context: thread={THREAD} dropped={counts}"
 
 
 # --- admission: in view and first unread -------------------------------------
@@ -45,23 +48,32 @@ def test_in_view_ranges_are_sorted_merged_and_keep_their_shown_counts(thread_row
         [20, 22, 3], [3, 5, 3], [6, 8, 2], [21, 25, 4],
     ]})
     # 3-5 and 6-8 touch and join; 20-22 and 21-25 overlap and join, never past their width.
-    assert stored == {"in_view": [[3, 8, 5], [20, 25, 6]]}
+    assert stored == {"in_view": [[3, 8, 3], [20, 25, 4]]}
 
 
-def test_ranges_and_drop_reasons_are_not_capped(thread_rows):
+def test_overlapping_ranges_keep_the_larger_shown_count(thread_rows):
+    stored = _validate(thread_rows, {"in_view": [[1, 6, 4], [4, 8, 3]]})
+    assert stored == {"in_view": [[1, 8, 4]]}
+
+
+def test_ranges_and_drop_reasons_are_not_capped(thread_rows, caplog):
+    caplog.set_level(logging.INFO, logger="infra.reply_context")
     raw = [[seq, seq, 1] for seq in range(1, 40, 2)] + ["bad"] * 70
     stored = _validate(thread_rows, {"in_view": raw})
     assert [item[0] for item in stored["in_view"]] == list(range(1, 40, 2))
-    assert len(stored["dropped"]) == 70
+    assert "dropped" not in stored
+    _assert_dropped(caplog, {"in_view:invalid_range": 70})
 
 
 @pytest.mark.parametrize("bad", [
     [0, 3, 1], [5, 41, 1], [9, 4, 1], ["1", 3, 1], [True, 3, 1], [4], [1, 2, 3, 4], "x",
 ])
-def test_out_of_range_or_malformed_range_is_dropped(thread_rows, bad):
+def test_out_of_range_or_malformed_range_is_dropped(thread_rows, bad, caplog):
+    caplog.set_level(logging.INFO, logger="infra.reply_context")
     stored = _validate(thread_rows, {"in_view": [bad, [10, 12, 3]]})
     assert stored["in_view"] == [[10, 12, 3]]
-    assert _reasons(stored) == [("in_view", "invalid_range")]
+    assert "dropped" not in stored
+    _assert_dropped(caplog, {"in_view:invalid_range": 1})
 
 
 def test_a_range_without_a_count_is_kept_and_a_count_is_clamped_to_its_width(thread_rows):
@@ -76,18 +88,21 @@ def test_first_unread_passes_truncated_through(thread_rows, truncated, expected)
 
 
 @pytest.mark.parametrize("bad", [{"seq": 41}, {"seq": 0}, {"seq": "3"}, {"seq": True}, 7])
-def test_first_unread_must_be_a_seq_in_the_thread(thread_rows, bad):
-    stored = _validate(thread_rows, {"first_unread": bad})
-    assert stored == {"dropped": [{"field": "first_unread", "reason": "invalid_seq"}]}
+def test_first_unread_must_be_a_seq_in_the_thread(thread_rows, bad, caplog):
+    caplog.set_level(logging.INFO, logger="infra.reply_context")
+    assert _validate(thread_rows, {"first_unread": bad}) is None
+    _assert_dropped(caplog, {"first_unread:invalid_seq": 1})
 
 
-def test_one_bad_field_does_not_take_the_others_with_it(thread_rows):
+def test_one_bad_field_does_not_take_the_others_with_it(thread_rows, caplog):
+    caplog.set_level(logging.INFO, logger="infra.reply_context")
     stored = _validate(thread_rows, {
         "in_view": "nope", "first_unread": {"seq": 2},
     })
     assert stored["first_unread"] == {"seq": 2, "truncated": False}
     assert "in_view" not in stored
-    assert _reasons(stored) == [("in_view", "not_list")]
+    assert "dropped" not in stored
+    _assert_dropped(caplog, {"in_view:not_list": 1})
 
 
 def _comment(**changes):
@@ -107,16 +122,18 @@ def _comment(**changes):
     (_comment(anchor_prefix=None), "invalid_string"),
     (_comment(anchor_suffix=1), "invalid_string"), (_comment(note=None), "invalid_string"),
 ])
-def test_bad_comments_are_individually_dropped(thread_rows, item, reason):
+def test_bad_comments_are_individually_dropped(thread_rows, item, reason, caplog):
+    caplog.set_level(logging.INFO, logger="infra.reply_context")
     stored = _validate(thread_rows, {"comments": [item, _comment()]})
-    assert stored["dropped"] == [{"field": "comments", "reason": reason, "index": 0}]
+    assert "dropped" not in stored
+    _assert_dropped(caplog, {f"comments:{reason}": 1})
     assert {k: v for k, v in stored["comments"][0].items() if k != "cid"} == _comment()
 
 
-def test_comments_must_be_a_list(thread_rows):
-    assert _validate(thread_rows, {"comments": "bad"}) == {
-        "dropped": [{"field": "comments", "reason": "not_list"}],
-    }
+def test_comments_must_be_a_list(thread_rows, caplog):
+    caplog.set_level(logging.INFO, logger="infra.reply_context")
+    assert _validate(thread_rows, {"comments": "bad"}) is None
+    _assert_dropped(caplog, {"comments:not_list": 1})
 
 
 def test_comments_have_no_count_cap(thread_rows):
@@ -136,7 +153,8 @@ def test_comments_receive_distinct_ids_on_distinct_admissions(thread_rows):
     assert _stored(thread_rows, "human-a")[KEY]["comments"] == comments[:2]
 
 
-def test_a_fault_in_one_field_is_recorded_and_the_rest_survives(thread_rows, monkeypatch):
+def test_a_fault_in_one_field_is_recorded_and_the_rest_survives(thread_rows, monkeypatch, caplog):
+    caplog.set_level(logging.INFO, logger="infra.reply_context")
     from infra import reply_context
 
     def boom(*_args):
@@ -145,10 +163,12 @@ def test_a_fault_in_one_field_is_recorded_and_the_rest_survives(thread_rows, mon
     monkeypatch.setattr(reply_context, "_in_view", boom)
     stored = _validate(thread_rows, {"in_view": [[1, 2, 2]], "first_unread": {"seq": 2}})
     assert "in_view" not in stored and stored["first_unread"]["seq"] == 2
-    assert _reasons(stored) == [("in_view", "validation_error")]
+    assert "dropped" not in stored
+    _assert_dropped(caplog, {"in_view:validation_error": 1})
 
 
-def test_an_unreadable_thread_range_is_its_own_reason(thread_rows):
+def test_an_unreadable_thread_range_is_its_own_reason(thread_rows, caplog):
+    caplog.set_level(logging.INFO, logger="infra.reply_context")
     import sqlite3
 
     class FailingRange:
@@ -165,10 +185,8 @@ def test_an_unreadable_thread_range_is_its_own_reason(thread_rows):
     stored = validate_reply_context(FailingRange(thread_rows), THREAD, {
         "in_view": [[1, 2, 2]], "first_unread": {"seq": 2},
     })
-    assert stored == {"dropped": [
-        {"field": "in_view", "reason": "thread_unreadable"},
-        {"field": "first_unread", "reason": "thread_unreadable"},
-    ]}
+    assert stored is None
+    _assert_dropped(caplog, {"first_unread:thread_unreadable": 1, "in_view:thread_unreadable": 1})
 
 
 @pytest.mark.parametrize("raw", [None, {}, {"comments": []}, {"in_view": None}])
@@ -176,10 +194,10 @@ def test_nothing_to_store_stores_nothing(thread_rows, raw):
     assert _validate(thread_rows, raw) is None
 
 
-def test_a_non_object_context_is_dropped_whole(thread_rows):
-    assert _validate(thread_rows, ["x"]) == {
-        "dropped": [{"field": "reply_context", "reason": "not_object"}],
-    }
+def test_a_non_object_context_is_dropped_whole(thread_rows, caplog):
+    caplog.set_level(logging.INFO, logger="infra.reply_context")
+    assert _validate(thread_rows, ["x"]) is None
+    _assert_dropped(caplog, {"reply_context:not_object": 1})
 
 
 # --- admission: stored once, retried, never forged ----------------------------

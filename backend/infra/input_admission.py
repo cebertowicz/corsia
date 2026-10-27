@@ -26,7 +26,7 @@ def stamped_human_metadata(
     metadata: dict | None,
     *,
     viewing_document: PreparedViewingDocument | None = None,
-    thread_id: str | None = None,
+    thread_id: str,
 ) -> dict | None:
     """Return the metadata a newly admitted human message is stored with.
 
@@ -59,12 +59,10 @@ def stamped_human_metadata(
     stamped = {**(clean or {}), REPLY_VIA_POST_UPDATE_KEY: True}
     if prior is not None:
         reply_context = prior.get(REPLY_CONTEXT_KEY)
-    elif thread_id is not None:
+    else:
         reply_context = validate_reply_context(
             connection, thread_id, (metadata or {}).get(REPLY_CONTEXT_KEY),
         )
-    else:
-        reply_context = None
     if reply_context:
         stamped[REPLY_CONTEXT_KEY] = reply_context
     if viewing_document is not None:

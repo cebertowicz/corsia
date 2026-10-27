@@ -1,5 +1,6 @@
 /* Comment marks and the selection action are shared by documents and chat. */
-.quote, .sent-comment-source { --comment-rail-width: 2px; }
+:root { --comment-rail-default: 2px; }
+.quote, .sent-comment-source { --comment-rail-width: var(--comment-rail-default); }
 .cm-comment-anchor {
 	background-color: color-mix(in srgb, var(--amber) 13%, transparent);
 	border-bottom: 2px solid color-mix(in srgb, var(--amber) 42%, transparent);
