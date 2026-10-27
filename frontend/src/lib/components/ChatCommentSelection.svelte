@@ -8,7 +8,10 @@
 	import CommentComposer from './comments/CommentComposer.svelte';
 	import './commentAnchors.css';
 
-	let { threadId, comments, onChange }: { threadId: string | null; comments: ChatComment[]; onChange: (comments: ChatComment[]) => void } = $props();
+	let { threadId, comments, onChange, surface }: { threadId: string | null; comments: ChatComment[]; onChange: (comments: ChatComment[]) => void; surface?: HTMLElement } = $props();
+	function messageRoot(): HTMLElement | null {
+		return surface?.closest('.subagent-conversation')?.querySelector<HTMLElement>('.messages') ?? document.querySelector<HTMLElement>('.messages');
+	}
 	type Pick = { messageId: string; seq: number; anchor: ChatCommentAnchor; rect: DOMRect };
 	let pick = $state<Pick | null>(null);
 	let draft = $state<Pick | null>(null);
@@ -21,7 +24,7 @@
 	const above = $derived(!!pick && !coarse && pick.rect.top > 96);
 	const left = $derived.by(() => {
 		if (!pick) return 0;
-		const bounds = document.querySelector('.messages')?.getBoundingClientRect();
+		const bounds = messageRoot()?.getBoundingClientRect();
 		const wanted = pick.rect.right - buttonWidth;
 		return bounds ? Math.max(bounds.left + 8, Math.min(wanted, bounds.right - 8 - buttonWidth)) : wanted;
 	});
@@ -75,7 +78,7 @@
 	let observer: MutationObserver | undefined;
 	let painting = false;
 	function paint() {
-		const root = document.querySelector('.messages');
+		const root = messageRoot();
 		if (!root) return;
 		painting = true;
 		for (const row of root.querySelectorAll<HTMLElement>('[data-message-id]')) {
@@ -109,7 +112,7 @@
 		update(); window.addEventListener('resize', update);
 		document.addEventListener('selectionchange', readSelection);
 		observer = new MutationObserver(() => { if (!painting) schedule(); });
-		const root = document.querySelector('.messages');
+		const root = messageRoot();
 		if (root) observer.observe(root, { childList: true, subtree: true, characterData: true });
 		return () => { observer?.disconnect(); window.removeEventListener('resize', update); document.removeEventListener('selectionchange', readSelection); };
 	});
@@ -139,7 +142,7 @@
 				<CommentComposer quote={editing?.quote ?? draft?.anchor.quote ?? ''} body={editing?.note ?? ''} submitLabel={editing ? 'Save' : 'Comment'} submittingLabel={editing ? 'Saving…' : 'Posting…'} onSubmit={submit} onCancel={close} />
 			</AdaptiveDrawer>
 		{:else}
-			<Popover {anchor} bounds={document.querySelector<HTMLElement>('.messages')} placement="bottom" open={true} onClose={close}>
+			<Popover {anchor} bounds={messageRoot()} placement="bottom" open={true} onClose={close}>
 				<CommentComposer quote={editing?.quote ?? draft?.anchor.quote ?? ''} body={editing?.note ?? ''} submitLabel={editing ? 'Save' : 'Comment'} submittingLabel={editing ? 'Saving…' : 'Posting…'} onSubmit={submit} onCancel={close} />
 			</Popover>
 		{/if}

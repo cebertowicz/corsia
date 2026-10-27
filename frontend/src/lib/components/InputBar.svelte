@@ -331,7 +331,7 @@
 	}}
 >
 	<InputBarFileInputs bind:this={fileInputsRef} onFiles={handleFileSelect} />
-	<ChatCommentSelection bind:this={commentSelection} threadId={boundThreadId} {comments} onChange={value => comments = value} />
+	<ChatCommentSelection bind:this={commentSelection} threadId={boundThreadId} {comments} surface={inputAreaEl} onChange={value => comments = value} />
 
 	{#if uploadError}
 		<div class="upload-error">{uploadError} <button onclick={() => uploadError = ''}>✕</button></div>
