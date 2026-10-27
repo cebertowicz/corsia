@@ -132,7 +132,7 @@
 			unread_count: 1,
 			newest_at: `2026-10-24T15:00:0${position}Z`,
 			destination: { pane: 'document-replies', id: 'artifact-comment-delivery', path: '/workspace/delivery-model.md', title: 'delivery-model.md' },
-			source: { thread_id: source.thread_id!, thread_label: source.thread_label },
+			source: { thread_id: source.thread_id! },
 		};
 		return { detail };
 	}

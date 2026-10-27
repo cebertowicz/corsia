@@ -443,7 +443,7 @@ async function serveReplyQueue(
 					unread_count: thread.new_reply_ids!.length,
 					newest_at: reply.created_at,
 					destination: { pane: 'document-replies', id: document.artifactId, path: document.docPath, title: document.name },
-					source: { thread_id: threadId, thread_label: reply.author },
+					source: { thread_id: threadId },
 				},
 			};
 		});

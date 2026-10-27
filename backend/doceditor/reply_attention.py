@@ -22,11 +22,14 @@ def _removed(path: str) -> bool:
 
 
 def unread_reply_items(db, user_id: str) -> list[dict]:
-    """Group unread agent replies by the replying thread and document, after authorization."""
+    """Group unread agent replies by replying thread and document, after authorization.
+
+    Each item's ``source.thread_id`` is the replying thread's visible root chat, so one chat
+    and document can carry several items. An unresolved lineage keeps the replying thread.
+    """
     source, params = new_reply_rows(user_id, None, include_author_thread=True)
     rows = db.execute(
-        f"""SELECT root.artifact_id, reply.author_thread_id, thread.title AS thread_label,
-                   COUNT(*) AS unread_count, MAX(reply.created_at) AS newest_at
+        f"""SELECT root.artifact_id, reply.author_thread_id, COUNT(*) AS unread_count, MAX(reply.created_at) AS newest_at
               {source}
                AND reply.author_kind='agent' AND thread.user_id=?
               GROUP BY root.artifact_id, reply.author_thread_id
@@ -36,10 +39,6 @@ def unread_reply_items(db, user_id: str) -> list[dict]:
     if not rows:
         return []
     roots = root_visible_thread_ids([str(row['author_thread_id']) for row in rows], db=db)
-    root_ids = json.dumps(list({root for root in roots.values() if root is not None}))
-    titles = {str(row['id']): row['title'] for row in db.execute(
-        'SELECT id, title FROM threads WHERE id IN (SELECT value FROM json_each(?))', (root_ids,),
-    ).fetchall()}
     ids = json.dumps(list({str(row['artifact_id']) for row in rows}))
     artifacts = db.execute(
         """SELECT i.id, i.title, i.path, r.parent_thread_id, owner.user_id AS owner_user_id,
@@ -63,13 +62,11 @@ def unread_reply_items(db, user_id: str) -> list[dict]:
         if not owner or not (is_owner_sentinel(owner) or artifact['owner_user_id'] == user_id) or not path or _removed(path):
             continue
         title = artifact['title'] or Path(path).name
-        root = roots[str(row['author_thread_id'])]
         result.append({
             'detail': {
                 'title': title, 'unread_count': row['unread_count'], 'newest_at': row['newest_at'],
                 'destination': {'pane': 'document-replies', 'id': row['artifact_id'], 'path': path, 'title': title},
-                'source': {'thread_id': root or row['author_thread_id'],
-                           'thread_label': (titles[root] if root else row['thread_label']) or 'Agent'},
+                'source': {'thread_id': roots[str(row['author_thread_id'])] or row['author_thread_id']},
             },
         })
     return result

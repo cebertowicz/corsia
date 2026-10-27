@@ -27,7 +27,7 @@ def test_unread_replies_group_by_thread_and_document_and_clear_on_read(isolated_
         assert rows[0]["detail"]["unread_count"] == 2
         assert rows[0]["detail"]["destination"]["path"] == str(path)
         assert set(rows[0]['detail']) == {'title', 'unread_count', 'newest_at', 'destination', 'source'}
-        assert set(rows[0]['detail']['source']) == {'thread_id', 'thread_label'}
+        assert set(rows[0]['detail']['source']) == {'thread_id'}
         assert unread_reply_items(db, "foreign-user") == []
         from api import attention
 
@@ -72,8 +72,8 @@ def test_reply_sources_resolve_visible_root_and_preserve_groups(isolated_db, tmp
         rows = unread_reply_items(db, 'owner-token')
         assert len(rows) == 4
         sources = [row['detail']['source'] for row in rows]
-        assert sources.count({'thread_id': 'owner', 'thread_label': 'Visible chat'}) == 3
-        assert sources.count({'thread_id': 'orphan', 'thread_label': 'Orphan'}) == 1
+        assert sources.count({'thread_id': 'owner'}) == 3
+        assert sources.count({'thread_id': 'orphan'}) == 1
         with write_transaction(db, scope='test_visible_root_read') as connection:
             newest = max(replies, key=lambda reply: (reply['created_at'], reply['id']))
             mark_thread_viewed(connection, 'owner-token', artifact_id, root['id'], newest['id'])

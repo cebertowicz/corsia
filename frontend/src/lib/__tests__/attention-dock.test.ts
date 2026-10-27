@@ -136,7 +136,7 @@ describe("AttentionDock — reply attention refresh", () => {
     const { emit } = await import("$lib/ws/events");
     const reply = {
       detail: { title: "brief.md", unread_count: 1, newest_at: "2026-10-27",
-        destination: { pane: "document-replies", id: "doc" }, source: { thread_id: "thread", thread_label: "Agent" } },
+        destination: { pane: "document-replies", id: "doc" }, source: { thread_id: "thread" } },
     };
     activeThreadId.set("thread");
     body = { ...queueBody(null, 0), reply_items: [reply] };

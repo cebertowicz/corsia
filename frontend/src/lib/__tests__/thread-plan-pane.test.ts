@@ -582,7 +582,7 @@ describe("ThreadPlanPane", () => {
       detail: {
         title: "launch-plan.md", unread_count: 1, newest_at: "2026-10-24",
         destination: { pane: "document-replies", id: "artifact-1" },
-        source: { thread_id: "t1", thread_label: "Maya Chen" },
+        source: { thread_id: "t1" },
       },
     }] });
     routedFetch({ "/api/plans/operator": () => ok(envelope("t1"), '"r1"') });

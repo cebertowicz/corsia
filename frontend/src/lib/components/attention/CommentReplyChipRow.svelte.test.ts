@@ -17,7 +17,7 @@ function reply(id: string, title: string, options: { threadId?: string; unreadCo
 			unread_count: options.unreadCount ?? 1,
 			newest_at: options.newestAt ?? '2026-10-24T15:00:00Z',
 			destination: { pane: 'document-replies', id: `document-${id}`, path: `/tmp/${id}.md`, title },
-			source: { thread_id: options.threadId ?? 'thread-1', thread_label: 'Thread' },
+			source: { thread_id: options.threadId ?? 'thread-1' },
 		},
 	};
 }

@@ -86,7 +86,7 @@ export interface CommentReplyDetail {
 	unread_count: number;
 	newest_at: string;
 	destination: AttentionDestination;
-	source: { thread_id: string; thread_label: string };
+	source: { thread_id: string };
 }
 
 export interface CommentReplyItem {
