@@ -245,6 +245,20 @@ async def test_randomness_and_lease_binding(synthetic_browser, monkeypatch):
         await owner._admit('thread', lease_id='other')
 
 
+async def test_busy_person_step_does_not_block_close(synthetic_browser, monkeypatch):
+    from host_access import browser_step_lifecycle
+    fake = synthetic_browser
+    await fake.owner.run('thread', ['snapshot'])
+    monkeypatch.setattr(browser_step_lifecycle, 'has_step', lambda _: True)
+
+    async def busy(_command):
+        raise sessions.BrowserSessionError(browser_cli.BROWSER_BUSY)
+
+    monkeypatch.setattr(browser_cdp, 'page_endpoint', busy)
+    assert await fake.owner.close_thread('thread') == 'Browser session closed.'
+    assert fake.owner.live_count() == 0
+
+
 async def test_timeout_fences_queued_effect_before_cleanup(synthetic_browser, monkeypatch):
     fake = synthetic_browser
     await fake.owner.run('thread', ['snapshot'])
@@ -256,10 +270,13 @@ async def test_timeout_fences_queued_effect_before_cleanup(synthetic_browser, mo
     monkeypatch.setattr(fake.owner, '_invoke', timed_out)
     first = asyncio.create_task(fake.owner.run('thread', ['snapshot']))
     await entered.wait()
+    closing = asyncio.create_task(fake.owner.close_thread('thread'))
+    await asyncio.sleep(0)  # Close has queued for the command lock before the next effect.
     queued = asyncio.create_task(fake.owner.run('thread', ['snapshot']))
     await asyncio.sleep(0)
     release.set()
     assert 'timed out' in await first
+    await closing
     with pytest.raises(sessions.BrowserSessionError):
         await queued
     assert fake.owner.live_count() == 0
@@ -279,17 +296,19 @@ async def test_timed_out_wait_keeps_the_session_running(synthetic_browser, wait_
     await fake.owner.shutdown()
 
 
-async def test_interrupted_wait_resets_the_session(synthetic_browser):
+async def test_interrupted_wait_preserves_the_session(synthetic_browser):
     fake = synthetic_browser
     await fake.owner.run('thread', ['open', 'about:blank'])
     fake.result = sessions.CommandResult(-1, '', '', completion='interrupted')
-    assert await fake.owner.run('thread', ['wait', '--load', 'networkidle']) != browser_cli.WAIT_TIMED_OUT
-    assert fake.owner.live_count() == 0
+    assert 'still running' in await fake.owner.run('thread', ['wait', '--load', 'networkidle'])
+    assert fake.owner.live_count() == 1
+    await fake.owner.shutdown()
 
 
-async def test_timed_out_non_wait_command_still_resets_the_session(synthetic_browser):
+async def test_timed_out_non_wait_command_preserves_the_session(synthetic_browser):
     fake = synthetic_browser
     await fake.owner.run('thread', ['open', 'about:blank'])
     fake.result = sessions.CommandResult(-1, '', '', timed_out=True)
     assert 'timed out' in await fake.owner.run('thread', ['snapshot'])
-    assert fake.owner.live_count() == 0
+    assert fake.owner.live_count() == 1
+    await fake.owner.shutdown()
