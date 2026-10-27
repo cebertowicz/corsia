@@ -19,7 +19,8 @@ def test_native_client_discards_restore_environment_and_uses_private_empty_confi
               'AGENT_BROWSER_RESTORE_SAVE': 'always', 'AGENT_BROWSER_PLUGINS': 'fixture'}
     env = client_environment(source, tmp_path, 39401)
     assert {key for key in env if key.startswith('AGENT_BROWSER_')} == {
-        'AGENT_BROWSER_SOCKET_DIR', 'AGENT_BROWSER_STREAM_PORT'}
+        'AGENT_BROWSER_SOCKET_DIR', 'AGENT_BROWSER_STREAM_PORT', 'AGENT_BROWSER_DEFAULT_TIMEOUT'}
+    assert env['AGENT_BROWSER_DEFAULT_TIMEOUT'] == '8000'
     assert env['HOME'] == source['HOME']
 
 
