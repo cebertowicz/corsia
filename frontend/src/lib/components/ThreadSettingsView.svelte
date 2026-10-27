@@ -64,8 +64,8 @@
 				scope="thread"
 				threadId={settingsThreadId}
 				projectId={projectId}
-				scopeLabel={`Chat: ${conductor ? designatedName : $activeThread?.title ?? 'Current chat'}`}
-				inheritanceHint="Includes skills from the workspace, project and parent chats. A skill with the same name here takes priority."
+				scopeLabel={conductor ? designatedName : $activeThread?.title ?? 'this chat'}
+				inheritanceHint="Includes skills from all projects, this project and parent chats. A skill with the same name here takes priority."
 				onBrowseSkills={onBrowseSkills}
 				onOpenSkill={() => threadSettingsOpen.set(false)}
 			/>

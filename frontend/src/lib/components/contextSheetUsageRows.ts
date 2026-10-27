@@ -17,7 +17,7 @@ export function usageSourceRows(usage: ContextUsage): ContextSheetSourceRow[] {
 			label: 'Tool definitions',
 			stableReference: '',
 			status: 'estimated',
-			reason: 'CORSIA estimated the size of tools because this app does not report it separately.',
+			reason: 'CORSIA estimated the size of tools because this provider doesn’t report it separately.',
 			ownerSurface: 'provider-settings',
 			ownerLabel: 'Provider settings',
 			actionLabel: '',

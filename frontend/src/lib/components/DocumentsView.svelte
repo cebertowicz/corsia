@@ -163,7 +163,7 @@
 			if (!target.projectId) throw new Error('Project context target is missing');
 			return { scope: 'project', project_id: target.projectId, path: e.abs };
 		}
-		if (!target.threadId) throw new Error('Couldn’t add this to the chat context: the chat isn’t identified. Open chat settings and try again.');
+		if (!target.threadId) throw new Error('Couldn’t add this to the chat context: no chat is open. Open a chat and try again.');
 		return { scope: 'thread', thread_id: target.threadId, path: e.abs };
 	}
 

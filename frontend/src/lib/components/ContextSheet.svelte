@@ -142,7 +142,7 @@
 				<div class="ctx-bar-note" role="note">{mismatchNote}</div>
 			{/if}
 			{#if usageSummary.countsAgainstBudget && usageSummary.modelWindowTokens !== null}
-				<div class="ctx-budget-row" title="CORSIA checkpoints this chat at this limit. Usage can briefly go over it while the checkpoint finishes.">
+				<div class="ctx-budget-row" title="CORSIA checkpoints this chat when it reaches this budget. Usage can briefly go over it while the checkpoint finishes.">
 					<span>{usageSummary.overBudget ? 'Over budget — checkpoint pending' : 'Checkpoints at budget'}</span>
 					<span class="mono">model window {humanTokens(usageSummary.modelWindowTokens)}</span>
 				</div>

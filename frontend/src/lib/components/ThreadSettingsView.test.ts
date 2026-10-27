@@ -81,7 +81,7 @@ describe('ThreadSettingsView', () => {
 
 		expect(host.querySelector('[role="dialog"]')).toBeNull();
 		expect(host.textContent).toContain('Context files');
-		expect(host.textContent).toContain('Managing skills for Chat: Thread settings');
+		expect(host.textContent).toContain('Managing skills for Thread settings');
 		expect(host.textContent).toContain('project Agent');
 		expect(host.textContent).toContain('Make Agent');
 	});
@@ -108,7 +108,7 @@ describe('ThreadSettingsView', () => {
 			resolve({ kind: 'target', target });
 			await flush();
 			expect(host.textContent).toContain('Context files');
-			expect(host.textContent).toContain('Chat: Conductor');
+			expect(host.textContent).toContain('Managing skills for Conductor');
 			expect(host.textContent).not.toContain('Make Agent');
 		});
 
@@ -122,7 +122,7 @@ describe('ThreadSettingsView', () => {
 
 			component = mount(ThreadSettingsView, { target: host, props: { conductor: true } });
 			await flush();
-			expect(host.textContent).toContain('Chat: CORSIA');
+			expect(host.textContent).toContain('Managing skills for CORSIA');
 			expect(host.textContent).not.toContain('Conductor');
 		});
 

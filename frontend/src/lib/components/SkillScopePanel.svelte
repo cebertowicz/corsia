@@ -128,7 +128,7 @@
 	{#if loading}
 		<div class="skills-empty">Loading skills...</div>
 	{:else if rows.length === 0}
-		<div class="skills-empty">No skills saved for this {scope === 'thread' ? 'chat' : scope}.</div>
+		<div class="skills-empty">No skills saved yet.</div>
 	{:else}
 		<div class="skills-list">
 			{#each validRows as row (row.path)}
