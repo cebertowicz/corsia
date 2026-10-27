@@ -42,7 +42,7 @@ REAL_TOOLS = (
     "grep head tail sed awk tr sort chmod touch ls cut sha256sum"
 ).split()
 
-APT_BASE = "build-essential curl ca-certificates xz-utils unzip jq sqlite3 python3"
+APT_BASE = "build-essential curl ca-certificates xz-utils unzip jq sqlite3 python3 lsof"
 APT_ENV = "env DEBIAN_FRONTEND=noninteractive apt-get"
 
 GIT = (
@@ -64,7 +64,12 @@ UV = (
 
 STUBS = {
     "uname": 'case "$1" in -s) echo "${STUB_OS:-Linux}" ;; -m) echo "${STUB_ARCH:-aarch64}" ;; esac',
-    "id": 'echo "${STUB_UID:-1000}"',
+    "id": 'if [ "$1" = -un ]; then echo tester; else echo "${STUB_UID:-1000}"; fi',
+    "loginctl": (
+        'if [ "$1" = show-user ]; then '
+        'if [ -f "$STUB_LINGER_FILE" ]; then echo yes; else echo "${STUB_LINGER:-yes}"; fi; '
+        'else echo "loginctl $*" >> "$STUB_LOG"; touch "$STUB_LINGER_FILE"; fi'
+    ),
     "sw_vers": 'echo "${STUB_MACOS_VERSION:-14.7.1}"',
     "dpkg-query": (
         'for last; do :; done; '
@@ -189,6 +194,7 @@ def _download(url, destination):
         "HOME": str(home),
         "STUB_BIN": str(stub_bin),
         "STUB_LOG": str(log),
+        "STUB_LINGER_FILE": str(tmp_path / "linger-enabled"),
         "STUB_PYTHON": sys.executable,
         "STUB_TEMPLATES": str(templates),
         "STUB_DOWNLOADS": str(downloads),
@@ -324,6 +330,17 @@ def test_sudo_is_used_for_apt_only(env):
     sudo_calls = [call for call in _calls(env) if call.startswith("sudo")]
     assert sudo_calls
     assert all(" apt-get " in call or call == "sudo -v" for call in sudo_calls)
+
+
+def test_linger_is_enabled_once_with_a_notice_and_undo(env):
+    first = _run(_everything_installed(env), STUB_LINGER="no")
+    assert first.returncode == 0, first.stderr
+    assert "sudo loginctl disable-linger tester" in first.stdout
+    assert "loginctl enable-linger tester" in _calls(env)
+    Path(env["STUB_LOG"]).write_text("")
+    second = _run(_everything_installed(env), STUB_LINGER="no")
+    assert second.returncode == 0, second.stderr
+    assert not any("enable-linger" in call for call in _calls(env))
 
 
 def test_a_refused_sudo_has_one_clear_stop(env):

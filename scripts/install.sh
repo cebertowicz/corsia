@@ -351,7 +351,7 @@ ensure_model_source() {
 # source is connected in the app.
 # ---------------------------------------------------------------------------
 
-LINUX_APT_BASE=(build-essential curl ca-certificates xz-utils unzip jq sqlite3 python3)
+LINUX_APT_BASE=(build-essential curl ca-certificates xz-utils unzip jq sqlite3 python3 lsof)
 LINUX_OS_RELEASE="${CORSIA_INSTALL_OS_RELEASE:-/etc/os-release}"
 LINUX_LOCAL_BIN="$HOME/.local/bin"
 UV_BIN=""
@@ -459,6 +459,23 @@ linux_install_needed() {
     if [ "$want_node" -eq 1 ]; then link_managed_node_linux; fi
 }
 
+enable_linger_linux() {
+    local user linger
+    user="$(id -un)" || stop "Couldn’t determine this account. Run the installer again."
+    linger="$(loginctl show-user "$user" -p Linger --value)" \
+        || stop "Couldn’t check whether this account starts services at boot. Check systemd, then run this again."
+    [ "$linger" != yes ] || return 0
+    [ "$linger" = no ] || stop "Couldn’t check whether this account starts services at boot. Check systemd, then run this again."
+    if [ "$(id -u)" -ne 0 ]; then
+        say "     Enabling services at boot needs administrator access (sudo); you may be asked for your password."
+        "$SUDO_COMMAND" -v < "$PROMPT_INPUT" \
+            || stop "Enabling services at boot needs an administrator account. Sign in with one, then run this again."
+    fi
+    as_admin loginctl enable-linger "$user" \
+        || stop "Couldn’t enable services at boot. Check systemd, then run this again."
+    say "     Enabled services at boot for $user. To undo: sudo loginctl disable-linger $user"
+}
+
 linux_ensure_prereqs() {
     say "1/3  Checking prerequisites"
     PREREQS=(
@@ -511,6 +528,7 @@ linux_main() {
     case ":$PATH:" in *":$LINUX_LOCAL_BIN:"*) ;; *) path_had_local_bin=0 ;; esac
     export PATH="$LINUX_LOCAL_BIN:$PATH"
     linux_ensure_prereqs
+    enable_linger_linux
     git -C "$CORSIA_HOME" rev-parse --git-dir > /dev/null 2>&1 \
         || stop "$CORSIA_HOME exists but is not a CORSIA checkout. Move it aside, then run this again."
     say "2/3  Using CORSIA $(installed_version) in ~/.corsia"

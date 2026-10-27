@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
@@ -157,6 +158,29 @@ def spawn_restart_lifecycle(
         str(corsia_script),
         *script_args,
     ]
+    if launch_env.get("CORSIA_SYSTEMD_SERVICE") == "1":
+        # A new session stays in the backend's cgroup. Let the user manager
+        # start the restart owner separately, passing its sanitized environment
+        # through stdin rather than exposing credentials in unit properties.
+        helper = Path(__file__).resolve().parent.parent / "scripts" / "systemd_restart.py"
+        process_env = dict(launch_env)
+        process_env.pop("CORSIA_RESTART_CALLER_TOKEN", None)
+        process = subprocess.Popen(
+            ["systemd-run", "--user", "--pipe", "--quiet", "--collect", "/usr/bin/python3", "-I", str(helper)],
+            stdin=subprocess.PIPE,
+            stdout=log_fh,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+            env=process_env,
+        )
+        assert process.stdin is not None
+        try:
+            process.stdin.write(json.dumps({"command": command, "environment": launch_env}).encode())
+            process.stdin.close()
+        except OSError:
+            process.stdin.close()
+            raise
+        return process
     return subprocess.Popen(
         command,
         stdout=log_fh,

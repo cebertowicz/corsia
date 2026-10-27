@@ -809,7 +809,11 @@ print(backend_sha)' 2>/dev/null
 
     checkout="$(serving_checkout_root)"
     if service_managed; then
-        topology="launchd $(service_label)"
+        if [ "${CORSIA_SERVICE_MANAGER:-}" = systemd ]; then
+            topology="systemd user service $(service_label)"
+        else
+            topology="launchd $(service_label)"
+        fi
     else
         pid="$(backend_pids | head -1)"
         topology="legacy process PID ${pid:-unknown}"
@@ -822,6 +826,9 @@ print(backend_sha)' 2>/dev/null
 }
 
 start_server() {
+    if [ "${CORSIA_SERVICE_MANAGER:-}" = systemd ] && ! service_installed; then
+        service_install || return 1
+    fi
     if service_installed; then
         service_start || return 1
     else

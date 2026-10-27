@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
 import urllib.error
 import urllib.request
 from datetime import datetime
@@ -179,7 +180,10 @@ def cmd_sources(args: argparse.Namespace) -> int:
         return 0
     if recheck_failure:
         print(f"Model sources: recheck failed: {recheck_failure}; showing last stored state.")
-    formatter = format_install_summary if getattr(args, "install_summary", False) else format_sources
+    install_summary = getattr(args, "install_summary", False)
+    if install_summary and sys.platform.startswith("linux"):
+        rows = [row for row in rows if row.get("source") != "omlx"]
+    formatter = format_install_summary if install_summary else format_sources
     print("\n".join(formatter(rows)))
     return 0
 
