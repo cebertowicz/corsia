@@ -46,7 +46,12 @@ def test_missing_binary(monkeypatch):
 ])
 def test_bad_version(executable, monkeypatch, output, detail):
     monkeypatch.setattr(probe.subprocess, 'run', lambda *a, **kw: result(stdout=output))
-    assert probe.sandbox_error() == failure(detail)
+    error = probe.sandbox_error()
+    if output == 'bubblewrap 0.7.9':
+        assert 'bubblewrap 0.8.0 or newer is required (found 0.7.9)' in error
+        assert 'Upgrade bubblewrap' in error
+    else:
+        assert error == failure(detail)
 
 
 def test_probe_failure_logs_detail_and_retries(executable, monkeypatch, caplog):
@@ -109,6 +114,31 @@ def test_invalidate_reprobes_and_failure_can_recover(executable, monkeypatch):
     assert probe.sandbox_error() == failure('unavailable')
     assert probe.sandbox_error() is None
     assert len(calls) == 6
+
+
+@pytest.mark.parametrize(('code', 'stderr', 'timeout', 'cleared'), [
+    (1, b'bwrap: setup failed\n', False, True),
+    (2, b'ordinary error\n', False, False),
+    (1, b'bwrap: setup failed\n', True, False),
+])
+def test_possible_setup_error_requests_reprobe(monkeypatch, code, stderr, timeout, cleared):
+    from tools import shell_sandbox
+    from types import SimpleNamespace
+    monkeypatch.setattr(shell_sandbox, 'sys', SimpleNamespace(platform='linux'))
+    calls = []
+    monkeypatch.setattr(probe, 'invalidate_sandbox_probe', lambda: calls.append(True))
+    shell_sandbox.recheck_after_launch_error(code, stderr, timed_out=timeout)
+    assert bool(calls) == cleared
+
+
+def test_child_spoofed_bwrap_message_causes_harmless_reprobe(monkeypatch):
+    from tools import shell_sandbox
+    from types import SimpleNamespace
+    monkeypatch.setattr(shell_sandbox, 'sys', SimpleNamespace(platform='linux'))
+    calls = []
+    monkeypatch.setattr(probe, 'invalidate_sandbox_probe', lambda: calls.append(True))
+    shell_sandbox.recheck_after_launch_error(1, b'bwrap: x\n')
+    assert calls == [True]
 
 
 @pytest.mark.asyncio

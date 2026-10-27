@@ -16,6 +16,13 @@ async def startup_error(available, version_error, *, leased=False, prefix='Error
     return f'{prefix}{error}' if error else None
 
 
+def recheck_after_launch_error(returncode, stderr, *, timed_out=False):
+    """Request a fresh probe for a possible bwrap setup error, not a verdict."""
+    if sys.platform == 'linux' and not timed_out and returncode == 1 and stderr.startswith(b'bwrap: '):
+        from tools.linux_sandbox_probe import invalidate_sandbox_probe
+        invalidate_sandbox_probe()
+
+
 def is_denial(stderr, is_available):
     messages = ('Operation not permitted',)
     if sys.platform == 'linux':

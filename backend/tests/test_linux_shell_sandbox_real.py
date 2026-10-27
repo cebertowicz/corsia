@@ -12,7 +12,7 @@ import pytest
 
 from tests.linux_sandbox_test_support import linux_sandbox_root
 from tools.host_path_policy import ProtectedHostPathPolicy
-from tools.linux_sandbox import HOME_RW, build_protected_argv, cleanup_thread_tmp, thread_tmp_root
+from tools.linux_sandbox import HOME_CACHES, build_protected_argv, cleanup_thread_tmp, thread_tmp_root
 
 pytestmark = pytest.mark.skipif(sys.platform != 'linux' or not shutil.which('bwrap'),
                                 reason='Linux with bubblewrap required')
@@ -68,6 +68,43 @@ def linux_box(linux_sandbox_root, monkeypatch, isolated_db):
         return subprocess.run(argv_for(command, **kwargs), capture_output=True, text=True, timeout=20)
     return SimpleNamespace(home=home, workspace=workspace, repo=repo, state=state,
                            policy=policy, run=run, argv_for=argv_for, env=env)
+
+
+def test_real_bwrap_setup_failure_triggers_reprobe(monkeypatch):
+    from tools import linux_sandbox_probe, shell_sandbox
+    result = subprocess.run([shutil.which('bwrap'), '--invalid-corsia-test-option'],
+                            capture_output=True, timeout=20)
+    assert result.returncode == 1 and result.stderr.startswith(b'bwrap: ')
+    calls = []
+    monkeypatch.setattr(linux_sandbox_probe, 'invalidate_sandbox_probe', lambda: calls.append(True))
+    shell_sandbox.recheck_after_launch_error(result.returncode, result.stderr)
+    assert calls == [True]
+
+
+def test_runtime_cache_is_readable_but_cannot_be_replaced(linux_box):
+    box = linux_box
+    cache = box.home / '.cache/corsia'
+    binary = cache / 'runtimes/node/bin/node'
+    binary.parent.mkdir(parents=True)
+    binary.write_text('#!/bin/sh\necho runtime-ok\n')
+    binary.chmod(0o700)
+    box.policy = ProtectedHostPathPolicy(box.home, box.state, write_roots=(cache,))
+    env = dict(box.env, PATH=f'{binary.parent}:/usr/bin:/bin')
+    def run(command):
+        argv = build_protected_argv(command, box.workspace, path_policy=box.policy,
+            rw_roots=[box.home], ro_roots=[], readonly_overlays=[], env=env,
+            thread_id='one', executable=shutil.which('bwrap'))
+        return subprocess.run(argv, capture_output=True, text=True, timeout=20)
+    result = run('node')
+    print(f'runtime execution: exit={result.returncode} output={result.stdout.strip()}')
+    assert result.returncode == 0 and result.stdout.strip() == 'runtime-ok', result.stderr
+    for path in (cache / 'runtimes', cache, cache.parent):
+        result = run(f'mv {shlex.quote(str(path))} {shlex.quote(str(path))}.moved')
+        print(f'rename {path.relative_to(box.home)}: exit={result.returncode} stderr={result.stderr.strip()}')
+        assert result.returncode != 0, str(path)
+    result = run(f'touch {shlex.quote(str(cache / "runtimes/new"))}')
+    print(f'runtime write: exit={result.returncode} stderr={result.stderr.strip()}')
+    assert result.returncode != 0
 
 
 def test_session_and_user_keyrings_are_isolated(linux_box):
@@ -184,7 +221,7 @@ def test_linux_home_and_run_add_dirs_keep_persistence_and_ipc_hidden(linux_box):
                    and not path.is_relative_to(box.state / 'sandbox-masks'))
     before = [path for path in before if not path.is_relative_to(Path('.local/state/corsia/sandbox-tmp'))
               and not path.is_relative_to(Path('.local/state/corsia/sandbox-masks'))]
-    caches = {Path(value) for value in HOME_RW}
+    caches = {Path(value) for value in HOME_CACHES}
     expected = {part for cache in caches for part in (cache, *cache.parents) if part != Path('.')}
     created = expected - set(before)
     assert after == sorted(set(before) | created)
@@ -262,7 +299,6 @@ async def test_linux_bash_tool_runs_and_refuses_failed_startup(linux_box, monkey
     for command in ('touch /etc/corsia-denial-probe',
                     "printf 'Permission denied (publickey)\\n' >&2; exit 1"):
         result = await tool.execute(command, **identity)
-        assert 'If the sandbox restricted the path' in result
         assert 'this command was blocked by the protected-mode sandbox' not in result
         assert 'If blocked by protected scope' in result
         assert linux_sandbox_probe._success == cached

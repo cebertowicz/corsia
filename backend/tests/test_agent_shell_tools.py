@@ -61,6 +61,14 @@ def test_runtime_cache_root_keeps_mac_location(home):
     assert managed_runtime.runtime_cache_root() == home / 'Library/Caches/CORSIA/runtimes'
 
 
+@pytest.mark.parametrize(('xdg', 'expected'), [('/tmp/custom-cache', '/tmp/custom-cache/corsia'),
+                                             ('relative-cache', None)])
+def test_linux_application_cache_respects_absolute_xdg(home, monkeypatch, xdg, expected):
+    monkeypatch.setattr(managed_runtime.platform, 'system', lambda: 'Linux')
+    monkeypatch.setenv('XDG_CACHE_HOME', xdg)
+    assert managed_runtime.application_cache_root() == (Path(expected) if expected else home / '.cache/corsia')
+
+
 def test_linux_runtime_root_path_and_readable_grant_match_installer(home, monkeypatch):
     monkeypatch.setattr(managed_runtime.platform, 'system', lambda: 'Linux')
     monkeypatch.setattr(agent_shell_tools, 'app_bundle_root', lambda: None)

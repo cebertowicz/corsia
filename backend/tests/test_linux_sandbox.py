@@ -3,7 +3,7 @@ from pathlib import Path
 import os
 import pytest
 from tools.host_path_policy import ProtectedHostPathPolicy
-from tools.linux_sandbox import HOME_RW, build_protected_argv, protected_mounts, thread_tmp_root
+from tools.linux_sandbox import HOME_CACHES, HOME_RW, build_protected_argv, protected_mounts, thread_tmp_root
 from tests.linux_sandbox_test_support import linux_sandbox_root
 
 
@@ -65,16 +65,17 @@ def test_root_filesystem_grant_is_refused(tmp_path, readonly):
     assert not (tmp_path / 'state').exists()
 
 
-def test_cache_creation_refuses_symlink_ancestor(tmp_path):
+def test_cache_creation_skips_symlink_ancestor(tmp_path, caplog):
     home = tmp_path / 'home'
     home.mkdir()
     outside = tmp_path / 'outside'
     outside.mkdir()
     (home / '.cache').symlink_to(outside, target_is_directory=True)
     policy = ProtectedHostPathPolicy(home, home / '.local/state/corsia')
-    with pytest.raises(OSError):
-        build_protected_argv('true', home, path_policy=policy, rw_roots=[], ro_roots=[],
-            readonly_overlays=[], env={}, thread_id='one', executable='/usr/bin/bwrap')
+    argv = build_protected_argv('true', home, path_policy=policy, rw_roots=[], ro_roots=[],
+        readonly_overlays=[], env={}, thread_id='one', executable='/usr/bin/bwrap')
+    assert 'Skipping unavailable cache path' in caplog.text
+    assert str(outside) not in argv
     assert list(outside.iterdir()) == []
 
 
@@ -92,7 +93,9 @@ def test_home_grant_does_not_create_missing_persistence_paths(linux_sandbox_root
     assert not (home / '.config').exists()
     assert not (home / '.ssh').exists()
     assert str(home / '.bashrc') not in argv
-    for relative in HOME_RW:
+    for relative in set(HOME_RW) - set(HOME_CACHES):
+        assert not (home / relative).exists()
+    for relative in HOME_CACHES:
         cache = home / relative
         assert cache.is_dir()
         assert cache.stat().st_mode & 0o777 == 0o700

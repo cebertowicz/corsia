@@ -1,7 +1,9 @@
 """Linux protected mounts, rendered from the existing host-path inventory."""
 from __future__ import annotations
 
+import errno
 import hashlib
+import logging
 import os
 from pathlib import Path
 import shutil
@@ -14,6 +16,8 @@ HOME_RW = (
     '.cache/pnpm', '.cache/yarn', '.npm', '.cargo', '.rustup', 'go',
     '.local/share/uv', '.local/share/pnpm', '.local/share/fnm',
 )
+logger = logging.getLogger(__name__)
+HOME_CACHES = tuple(path for path in HOME_RW if path.startswith('.cache/') or path == '.npm')
 HOME_RO = ('.gitconfig', '.config/git', '.local/bin')
 PERSISTENCE = ('.config/systemd/user', '.config/autostart', '.bashrc',
                '.profile', '.bash_profile', '.zshrc', '.zprofile')
@@ -62,7 +66,7 @@ def _prepare_home_caches(home: Path) -> None:
     flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
     home_fd = os.open(home, flags)
     try:
-        for relative in HOME_RW:
+        for relative in HOME_CACHES:
             current = os.dup(home_fd)
             try:
                 for part in Path(relative).parts:
@@ -77,6 +81,10 @@ def _prepare_home_caches(home: Path) -> None:
                     current = child
                     if created:
                         os.fchmod(current, 0o700)
+            except OSError as exc:
+                if exc.errno not in (errno.ELOOP, errno.ENOTDIR):
+                    raise
+                logger.warning('Skipping unavailable cache path %s: %s', home / relative, exc)
             finally:
                 os.close(current)
     finally:
@@ -219,21 +227,24 @@ def build_protected_argv(
 ) -> list[str]:
     """Render only; the caller owns startup verification and process launch."""
     home, state = path_policy.home, path_policy.state_root
-    rw = _canonical([*rw_roots, *(home / path for path in HOME_RW)])
+    _prepare_home_caches(home)
+    rw = _canonical([*rw_roots, *(home / path for path in HOME_RW
+                                   if (home / path).exists() and not any(
+                                       part.is_symlink() for part in (home / path, *(home / path).parents)
+                                       if part != home and part.is_relative_to(home)))])
     ro = _canonical([*ro_roots, *(home / path for path in HOME_RO)])
     if Path('/') in [*rw, *ro]:
         raise ValueError('Linux protected shell requires specific directories instead of a root filesystem grant')
-    _prepare_home_caches(home)
-    rw = _canonical([*rw_roots, *(home / path for path in HOME_RW)])
     runtime_roots = (Path('/dev'), Path('/proc'))
     rw = [path for path in rw if path != Path('/tmp') and not any(path.is_relative_to(root) for root in runtime_roots)]
     ro = [path for path in ro if path != Path('/tmp') and not any(path.is_relative_to(root) for root in runtime_roots)]
     tmp, file_mask = _backing(state, thread_id)
     hidden = _canonical([state, *path_policy.private_roots, *path_policy.credential_roots,
-                         *path_policy.write_roots, *(home / path for path in PERSISTENCE)])
+                         *(home / path for path in PERSISTENCE)])
+    overlays = _canonical([*readonly_overlays, *path_policy.write_roots])
     omitted = [entry for entry in (home.iterdir() if home.is_dir() else ())
                if not any(path == entry or path.is_relative_to(entry) for path in [*rw, *ro])]
-    protected = [*_canonical(readonly_overlays), *hidden, *omitted,
+    protected = [*overlays, *hidden, *omitted,
                  home / '.ssh', *path_policy.control_files]
     grants = protected_mounts(rw, ro, protected)
     mounts = _Mounts(executable)
@@ -249,7 +260,7 @@ def build_protected_argv(
             mounts.bind(path, ro=grants[path])
     for entry in omitted:
         _mask(mounts, entry, file_mask)
-    for path in sorted(_canonical(readonly_overlays), key=lambda value: len(value.parts)):
+    for path in sorted(overlays, key=lambda value: len(value.parts)):
         if path.exists():
             mounts.bind(path, ro=True)
     _ssh(mounts, home)

@@ -31,7 +31,7 @@ _success: tuple[object, ...] | None = None
 
 
 def invalidate_sandbox_probe() -> None:
-    """Forget successful startup after a runtime failure."""
+    """Force the next command to repeat the startup check."""
     global _success
     with _lock:
         _success = None
@@ -67,7 +67,9 @@ def sandbox_error() -> str | None:
             if match is None:
                 return _failure('could not determine bubblewrap version')
             if tuple(map(int, match.groups())) < (0, 8, 0):
-                return _failure(f'bubblewrap 0.8.0 or newer is required (found {match.group(0)})')
+                logger.warning('Linux sandbox needs a newer bubblewrap; found %s', match.group(0))
+                return (f'Error: bubblewrap 0.8.0 or newer is required (found {match.group(0)}). '
+                        'Nothing ran. Upgrade bubblewrap, then restart CORSIA.')
             result = subprocess.run(
                 launcher_argv([path, *NAMESPACES, '--ro-bind', '/', '/', '--proc', '/proc', '--', '/bin/true']),
                 capture_output=True, text=True, timeout=5,

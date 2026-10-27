@@ -80,13 +80,15 @@ def macos_arch(machine: str | None = None) -> str:
 
 def application_cache_root(home: Path | None = None) -> Path:
     """The CORSIA-owned cache parent whose children must not be agent-replaceable."""
-    return (Path.home() if home is None else Path(home)) / "Library" / "Caches" / APP_FOLDER
+    base = Path.home() if home is None else Path(home)
+    if platform.system() == "Linux":
+        xdg = Path(os.environ.get("XDG_CACHE_HOME", ""))
+        return (xdg if xdg.is_absolute() else base / ".cache") / "corsia"
+    return base / "Library" / "Caches" / APP_FOLDER
 
 
 def runtime_cache_root(home: Path | None = None) -> Path:
     """One executable cache, outside CORSIA state and private roots."""
-    if platform.system() == "Linux":
-        return (Path.home() if home is None else Path(home)) / ".cache" / "corsia" / "runtimes"
     return application_cache_root(home) / "runtimes"
 
 
