@@ -215,7 +215,7 @@ def test_every_settings_link_in_first_run_opens_a_real_section_and_anchor():
 def test_first_run_stays_within_its_body_size():
     # Its size after the fuller conductor-role intro and the MCP import consent step (#690),
     # rounded up; #674 tracks the real cap.
-    assert len(FIRST_RUN.read_bytes()) <= 17700  # +the router to first-run-app.md, +where keyless searches go (#1537)
+    assert len(FIRST_RUN.read_bytes()) <= 17800  # +the router to first-run-app.md, +where keyless searches go (#1537), +the goal-owning welcome line (#1599)
 
 
 LOCAL_MODEL_OFFER = BOOTSTRAP_SKILL.parent / "references/local-model-offer.md"

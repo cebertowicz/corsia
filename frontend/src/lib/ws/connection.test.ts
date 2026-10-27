@@ -190,6 +190,37 @@ describe('connection ownership lifecycle', () => {
 		expect(sockets()).toHaveLength(2);
 	});
 
+	it('starts the backoff over once a reconnect authenticates', () => {
+		let socket = authenticated('session-a', 'user-a');
+		// Ten drops, each recovered, in one long-lived window.
+		for (let drop = 0; drop < 10; drop++) {
+			socket.nativeClose();
+			vi.advanceTimersByTime(30_000);
+			socket = sockets().at(-1)!;
+			socket.open();
+			socket.authOk('user-a');
+		}
+		const last = socket;
+		last.nativeClose();
+		expect(get(connectionError)).toBe('Reconnecting in 2s...');
+		vi.advanceTimersByTime(1_500);
+		expect(sockets().at(-1)).not.toBe(last);
+	});
+
+	it('keeps growing the backoff while the server never authenticates a reconnect', () => {
+		const first = authenticated('session-a', 'user-a');
+		first.nativeClose();
+		const delays: string[] = [get(connectionError)!];
+		for (let attempt = 0; attempt < 3; attempt++) {
+			vi.advanceTimersByTime(30_000);
+			sockets().at(-1)!.nativeClose();
+			delays.push(get(connectionError)!);
+		}
+		expect(delays).toEqual([
+			'Reconnecting in 2s...', 'Reconnecting in 2s...', 'Reconnecting in 3s...', 'Reconnecting in 5s...',
+		]);
+	});
+
 	it.each(['explicit connect', 'new session', 'disconnect'] as const)(
 		'leaves a pending retry inert after %s',
 		(intervention) => {
