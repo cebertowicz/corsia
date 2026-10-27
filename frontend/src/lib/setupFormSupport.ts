@@ -1,3 +1,5 @@
+import { localHostRefusal } from './localHostRefusal';
+
 type LocalStartResponse = { result: 'started' | 'failed'; reference?: string; fix?: string };
 
 export const LOCAL_START_NETWORK_FAILURE = 'CORSIA couldn’t start local setup.';
@@ -10,7 +12,7 @@ export async function requestLocalStart(session: string | null): Promise<LocalSt
 	});
 	const body = await response.json().catch(() => null);
 	const reference = typeof body?.detail?.ref === 'string' ? body.detail.ref : typeof body?.ref === 'string' ? body.ref : undefined;
-	const fix = typeof body?.detail?.fix === 'string' ? body.detail.fix : typeof body?.fix === 'string' ? body.fix : undefined;
+	const fix = localHostRefusal(body) ?? (typeof body?.detail?.fix === 'string' ? body.detail.fix : typeof body?.fix === 'string' ? body.fix : undefined);
 	if (response.ok && body?.ok !== false) return { result: 'started', reference };
 	if (!fix) throw new Error('local start response omitted recovery');
 	return { result: 'failed', reference, fix };

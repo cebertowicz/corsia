@@ -1078,6 +1078,7 @@ def test_restart_installer_upgrades_owned_legacy_plist_without_root_fields(tmp_p
 warn() { :; }
 ok() { :; }
 fail() { printf 'FAIL: %s\\n' "$*" >&2; }
+source scripts/corsia.d/runtime.sh
 source scripts/corsia.d/service.sh
 resolve_bind_host() { echo 0.0.0.0; }
 service_is_loaded() { return 0; }
@@ -1133,6 +1134,7 @@ def test_restart_refuses_a_partially_pinned_legacy_plist(tmp_path):
 warn() { :; }
 ok() { :; }
 fail() { printf 'FAIL: %s\\n' "$*" >&2; }
+source scripts/corsia.d/runtime.sh
 source scripts/corsia.d/service.sh
 service_is_loaded() { return 0; }
 service_loaded_definition_matches() { return 0; }

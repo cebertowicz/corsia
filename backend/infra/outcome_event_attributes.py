@@ -31,7 +31,19 @@ from core.carry_in_facts import (
     SAVED_PROCESSED as CARRY_IN_SAVED_PROCESSED, VERDICTS as CARRY_IN_VERDICTS,
     WAITING as CARRY_IN_WAITING, WAITING_REASONS as CARRY_IN_WAITING_REASONS,
 )
-from core.corrections_recording import CORRECTION_EVENT, FACT_KEYS as CORRECTION_FACT_KEYS, LABELS as CORRECTION_LABELS
+from core.correction_learning import (
+    CAUSES as LEARNING_CAUSES,
+    NEW_WORK_SIGNALS,
+    OUTCOME_EVENT as LEARNING_OUTCOME_EVENT,
+    TERMINAL_OUTCOMES,
+    TIERS,
+    TRIAGE_EVENT,
+)
+from core.corrections_recording import (
+    CORRECTION_EVENT,
+    FACT_KEYS as CORRECTION_FACT_KEYS,
+    LABELS as CORRECTION_LABELS,
+)
 from core.lesson_gate import EVENT as LESSON_GATE_EVENT
 from core.size_rating import BASES, FACT_KEYS, SIZE_CLASSES, SIZE_EVENT
 from host_access.credential_sanitizer import contains_credential, sanitize_credential_data
@@ -296,6 +308,16 @@ ATTRIBUTE_ALLOWLISTS: dict[str, dict[str, AttributeSpec]] = {
         "samples_completed": count_attr(),
     },
     # Saved targets are closed by the same append-only fact sequence, not a retry queue.
+    TRIAGE_EVENT: {
+        "tier": enum_attr(*TIERS), "cause": enum_attr(*LEARNING_CAUSES),
+        "new_work": enum_attr("yes", "no"),
+        "new_work_signal": enum_attr(*NEW_WORK_SIGNALS), "target_file": text_attr(500),
+        "serious_proposed": enum_attr("yes", "no"), "serious_lowered_reason": text_attr(500),
+    },
+    LEARNING_OUTCOME_EVENT: {
+        "outcome": enum_attr(*TERMINAL_OUTCOMES), "reason": text_attr(500),
+        "lesson_id": id_attr(), "workflow_version": id_attr(),
+    },
     "github.issue.opened": {**_ISSUE_ATTRS},
     "github.issue.assigned": {"repo": id_attr(), "issue": id_attr(), "assignee_login": login_attr(),
                               "minutes_since_issue_created": count_attr()},

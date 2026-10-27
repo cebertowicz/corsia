@@ -76,6 +76,8 @@ async def test_bash_consumes_exact_permit_immediately_before_process_creation(
         "_guard_command",
         lambda *_a, **_k: events.append(("protected-guard", None)),
     )
+    from tests.shell_platform_helpers import use_mac_shell
+    use_mac_shell(monkeypatch)
     monkeypatch.setattr(shell, "is_safehouse_available", lambda: True)
     monkeypatch.setattr(shell, "safehouse_version_error", lambda: None)
     monkeypatch.setattr(shell, "is_path_allowed", lambda *_a, **_k: True)
@@ -182,6 +184,8 @@ async def test_bash_closes_consumed_cwd_fd_when_spawn_raises(
         consume,
     )
     monkeypatch.setattr(shell, "PROCESS_OWNER", _Owner())
+    from tests.shell_platform_helpers import use_mac_shell
+    use_mac_shell(monkeypatch)
     monkeypatch.setattr(shell, "is_safehouse_available", lambda: True)
     monkeypatch.setattr(shell, "safehouse_version_error", lambda: None)
     monkeypatch.setattr(shell, "execution_envelope_profile", lambda *_a, **_k: "")
@@ -242,6 +246,8 @@ async def test_bash_refuses_foreground_effect_without_authoritative_turn_identit
         "controlled_fast_forward_policy",
         lambda *_args, **_kwargs: None,
     )
+    from tests.shell_platform_helpers import use_mac_shell
+    use_mac_shell(monkeypatch)
     monkeypatch.setattr(shell, "is_safehouse_available", lambda: True)
     monkeypatch.setattr(shell, "safehouse_version_error", lambda: None)
     monkeypatch.setattr(shell, "is_path_allowed", lambda *_args, **_kwargs: True)
@@ -314,6 +320,8 @@ async def test_controlled_fast_forward_refuses_missing_turn_identity(
         "controlled_fast_forward_policy",
         lambda *_args, **_kwargs: policy,
     )
+    from tests.shell_platform_helpers import use_mac_shell
+    use_mac_shell(monkeypatch)
     monkeypatch.setattr(shell, "is_safehouse_available", lambda: True)
     monkeypatch.setattr(shell, "safehouse_version_error", lambda: None)
     monkeypatch.setattr(shell, "fast_forward_repo_locked", fast_forward)
@@ -357,6 +365,8 @@ async def test_controlled_fast_forward_reports_safehouse_discovery(
         "controlled_fast_forward_policy",
         lambda *_args, **_kwargs: policy,
     )
+    from tests.shell_platform_helpers import use_mac_shell
+    use_mac_shell(monkeypatch)
     monkeypatch.setattr(shell, "is_safehouse_available", lambda: False)
     monkeypatch.setenv("PATH", "/usr/local/bin:/usr/bin:/bin")
 
@@ -415,6 +425,8 @@ async def test_bash_background_returns_only_an_opaque_managed_handle(
         "controlled_fast_forward_policy",
         lambda *_a, **_k: None,
     )
+    from tests.shell_platform_helpers import use_mac_shell
+    use_mac_shell(monkeypatch)
     monkeypatch.setattr(shell, "is_safehouse_available", lambda: True)
     monkeypatch.setattr(shell, "safehouse_version_error", lambda: None)
     monkeypatch.setattr(shell, "is_path_allowed", lambda *_a, **_k: True)
@@ -550,6 +562,8 @@ async def test_reviewed_bash_skips_protected_policy_after_single_consumption(
             events.append("protected-guard") or "Error: protected guard was consulted"
         ),
     )
+    from tests.shell_platform_helpers import use_mac_shell
+    use_mac_shell(monkeypatch)
     monkeypatch.setattr(shell, "is_safehouse_available", lambda: True)
     monkeypatch.setattr(shell, "safehouse_version_error", lambda: None)
     monkeypatch.setattr(
@@ -1556,6 +1570,8 @@ async def test_stale_thread_default_cwd_degrades_to_workspace_root(
         shell, "controlled_fast_forward_policy", lambda *_a, **_k: None
     )
     monkeypatch.setattr(shell.BashTool, "_guard_command", lambda *_a, **_k: None)
+    from tests.shell_platform_helpers import use_mac_shell
+    use_mac_shell(monkeypatch)
     monkeypatch.setattr(shell, "is_safehouse_available", lambda: True)
     monkeypatch.setattr(shell, "safehouse_version_error", lambda: None)
     monkeypatch.setattr(shell, "execution_envelope_profile", lambda *_a, **_k: "")
@@ -1615,6 +1631,8 @@ async def test_explicit_out_of_scope_working_dir_denies_with_variant_a(
         shell, "controlled_fast_forward_policy", lambda *_a, **_k: None
     )
     monkeypatch.setattr(shell.BashTool, "_guard_command", lambda *_a, **_k: None)
+    from tests.shell_platform_helpers import use_mac_shell
+    use_mac_shell(monkeypatch)
     monkeypatch.setattr(shell, "is_safehouse_available", lambda: True)
     monkeypatch.setattr(shell, "safehouse_version_error", lambda: None)
     monkeypatch.setattr(shell, "is_path_allowed", lambda *_a, **_k: False)
@@ -1682,6 +1700,8 @@ async def test_registered_repo_cwd_is_never_degraded_when_path_check_lags(
         shell, "controlled_fast_forward_policy", lambda *_a, **_k: None
     )
     monkeypatch.setattr(shell.BashTool, "_guard_command", lambda *_a, **_k: None)
+    from tests.shell_platform_helpers import use_mac_shell
+    use_mac_shell(monkeypatch)
     monkeypatch.setattr(shell, "is_safehouse_available", lambda: True)
     monkeypatch.setattr(shell, "safehouse_version_error", lambda: None)
     monkeypatch.setattr(shell, "execution_envelope_profile", lambda *_a, **_k: "")

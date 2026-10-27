@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import os
 import shlex
+import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -37,6 +38,7 @@ from tools.shell_guard import (
     safehouse_version_error,
 )
 from tools.shell_policy import load_shell_repo_policies
+import tools.shell_sandbox as shell_sandbox
 from tools.unix_socket_policy import corsia_temp_root_for_bind
 
 #: Stdout the runner will read. One extra byte is kept so a longer stream is seen.
@@ -83,6 +85,10 @@ def script_command(path: Path, stdin: Path | None = None) -> str:
 
 
 async def _checked_environment() -> None:
+    if sys.platform == 'linux':
+        if error := await shell_sandbox.startup_error(is_safehouse_available, safehouse_version_error):
+            raise ScriptSandboxError(error)
+        return
     if not is_safehouse_available():
         raise ScriptSandboxError(
             f"sandbox unavailable: {safehouse_unavailable_refusal(os.environ.get('PATH'))}"
@@ -158,10 +164,16 @@ async def _run(
             argv, thread_id=thread_id, turn_id=f"script:{run_id}", cwd=cwd,
             env=env, timeout_seconds=timeout_seconds, background=False,
         )
+    except BaseException:
+        await asyncio.to_thread(shell_sandbox.launch_failed)
+        raise
     finally:
-        profile_path.unlink(missing_ok=True)
+        if profile_path is not None:
+            profile_path.unlink(missing_ok=True)
     if not isinstance(owned, ForegroundProcessResult):
         raise ScriptSandboxError("process owner returned an invalid result")
+    if owned.returncode != 0 or owned.timed_out:
+        await asyncio.to_thread(shell_sandbox.launch_failed)
     return ScriptRun(
         owned.returncode, owned.stdout, owned.stderr, bool(owned.timed_out),
     )

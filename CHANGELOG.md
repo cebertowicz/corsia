@@ -8,16 +8,19 @@ the later entry describes the current behavior.
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here._
 
 - When connecting to another computer, CORSIA explains what happens and lets you return to this computer from sign-in.
-
+- On Linux, CORSIA starts again after the computer restarts.
+- On Linux, CORSIA no longer offers to set up a local model; you can connect a provider instead.
+- A local model that fails to reload now gives retry instructions that match whether it is kept loaded.
 - The local model server keeps your server-wide settings when CORSIA starts it again.
-
+- Chat titles use more of the available header space when Local only is off.
 - Claude Code accounts you added keep working when CORSIA's data moves.
 - Browser addresses no longer need `https://` typed in; local loopback addresses use `http://` by default.
+- When CORSIA can't find a chat's account sign-in on this computer, the message waits until you sign in again instead of repeatedly trying to send.
 - A signed-in app in Connected apps now reads "Figma — you@example.com" on its row, with the account shortening first on a narrow screen, and a link in chat can open an app waiting for approval with its Approve button ready.
 - Setup now opens in a normal-sized window in the middle of the screen, and the app grows to fill the screen when setup finishes.
 - A Claude Code you only just signed in to is no longer offered for import: only skills and notes you made there are brought over.
 - The "Bring over what your other tools know" step no longer shows twice in the setup plan.
-- If the local model server CORSIA started stops unexpectedly, CORSIA starts it again and loads the models that were loaded, up to three times in ten minutes. A server you stop in CORSIA, or one that is stopped when you quit CORSIA, stays stopped, and so does a server CORSIA started in this session that exits normally on its own (code 0). A server CORSIA took over after an update or restart is started again on any exit, and so is one you end from outside CORSIA, such as with Force Quit: CORSIA cannot tell that from a crash.
+- If the local model server CORSIA started stops unexpectedly, CORSIA starts it again and loads the models that were loaded, up to three times in ten minutes. A server you stop in CORSIA, or one that is stopped when you quit CORSIA, stays stopped, and so does a server that exits normally on its own (code 0), including one CORSIA took over after an update or restart. A server you end from outside CORSIA, such as with Force Quit, is started again: CORSIA cannot tell that from a crash.
 - CORSIA now keeps its data in `~/Library/Application Support/CORSIA`. An install that took over an earlier one moves its data there once, as soon as the update that brings this finishes or on the next launch, without copying it; if anything still uses the old folder, CORSIA leaves the data where it is and says why.
 - On a connected app that fails to sign in, a refused sign-in now says so and shows no button that can't help, Reconnect no longer freezes the row, and Remove works while the app is still trying to connect.
 - Settings no longer offers an update after it finishes.

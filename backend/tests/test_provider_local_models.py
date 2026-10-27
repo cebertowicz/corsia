@@ -8,6 +8,8 @@ from llm import local_downloads, local_setup_operation
 from llm.local_model import LocalModel
 
 
+pytestmark = pytest.mark.usefixtures("mac_local_model_host")
+
 MODEL = LocalModel("Jundot/Qwen3.8-27B-oQ4e", 1_000_000, 32_768, level=4.0, fp16=False, relative_speed=0.85)
 
 

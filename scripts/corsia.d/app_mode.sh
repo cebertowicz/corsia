@@ -619,10 +619,10 @@ app_mode_install_overrides() {
         echo "CORSIA $(app_mode_generation "$_corsia_app_bundle" || echo unknown)"
     }
     service_label() { echo "$APP_SERVICE_LABEL"; }
-    service_plist_path() {
+    service_definition_path() {
         echo "$_corsia_app_bundle/Contents/Library/LaunchAgents/$APP_SERVICE_LABEL.plist"
     }
-    service_installed() { [ -f "$(service_plist_path)" ]; }
+    service_installed() { [ -f "$(service_definition_path)" ]; }
     service_definition_describes_this_checkout() { service_installed; }
     service_managed() { service_is_loaded; }
     require_owned_service_definition() { app_mode_require_owned_service; }
