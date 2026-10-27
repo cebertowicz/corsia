@@ -39,14 +39,17 @@ _COOKIE_ASSIGNMENT_RE = re.compile(
     r"|(?P<bare>[^\s,;&}\]]+))",
     re.IGNORECASE,
 )
+# GitHub's ``token`` scheme is also an everyday word ("authorization token expired"), so in
+# free text it counts only before a credential-shaped value.
+_TOKEN_SCHEME = r"token\s+(?=[A-Za-z0-9_.-]{20,})"
 _AUTH_SCHEME_RE = re.compile(
     r"(?P<prefix>\b(?:(?:proxy-)?authorization|auth)\s*[:=]\s*"
-    r"(?:bearer|basic|token)\s+)"
+    rf"(?:(?:bearer|basic)\s+|{_TOKEN_SCHEME}))"
     r"(?P<value>(?!\[REDACTED\])[^\s\"'`,;}\]]+)",
     re.IGNORECASE,
 )
 _AUTH_SPACE_SCHEME_RE = re.compile(
-    r"(?P<prefix>\bauthorization\s+(?:bearer|basic|token)\s+)"
+    rf"(?P<prefix>\bauthorization\s+(?:(?:bearer|basic)\s+|{_TOKEN_SCHEME}))"
     r"(?P<value>(?!\[REDACTED\])[^\s\"'`,;}\]]+)",
     re.IGNORECASE,
 )
