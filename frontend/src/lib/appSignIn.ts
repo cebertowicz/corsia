@@ -23,6 +23,7 @@ export function signInStateLine(app: ConnectedApp, signedOutHere: boolean): stri
 	if (view.status === 'pending') return 'Waiting for you in your browser';
 	if (view.status === 'failed') return "Sign-in didn't finish";
 	if (app.state === 'needs_sign_in') return signedOutHere ? 'Signed out' : 'Needs you to sign in';
+	if (app.state === 'working' && view.signed_in && !view.account) return `Connected · Signed in${app.tool_count ? ` · ${app.tool_count} actions` : ''}`;
 	return null;
 }
 

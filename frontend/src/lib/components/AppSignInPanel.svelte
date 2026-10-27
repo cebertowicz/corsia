@@ -36,8 +36,8 @@
 	let providerUrl = $state<string | null>(null);
 	let words = $state('');
 	let poll: ReturnType<typeof setInterval> | undefined;
-	/** A signed-in app says nothing here: its title already names the account, and Sign out is on the row. */
-	const quiet = $derived(!!view?.signed_in && !pending && !failed && !confirmOut && !providerUrl && !error);
+	/** A named account is already in the title; an unnamed account needs an explanation. */
+	const quiet = $derived(!!view?.signed_in && !!view.account && !pending && !failed && !confirmOut && !providerUrl && !error);
 
 	function patchView(next: Partial<NonNullable<ConnectedApp['sign_in']>>): void {
 		onChange({ sign_in: { status: 'idle', signed_in: false, ...view, ...next } });
@@ -116,6 +116,8 @@
 		{:else if failed}
 			<p>{failureText(app.name, view.failure_class ?? 'unknown')}</p>
 			{#if words}<p class="said"><span>What {app.name} said</span> {words}</p>{/if}
+		{:else if view.signed_in && !view.account}
+			<p>{app.name} didn't say which account</p>
 		{:else if !view.signed_in && app.state === 'needs_sign_in' && !signInHere}
 			<p>{NOT_ON_THIS_MAC}</p>
 		{/if}

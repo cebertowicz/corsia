@@ -30,7 +30,7 @@ test.describe('App row account capture', () => {
 		test(`captures app rows in ${theme}`, async ({ page }, testInfo) => {
 			const mobile = testInfo.project.name === 'chromium-mobile';
 			test.skip(!mobile && theme === 'dark', 'Desktop needs 1440 light only.');
-			let servers = baseServers;
+			let servers: Record<string, unknown>[] = baseServers;
 			await page.route('**/api/mcp/servers**', async (route) => {
 				if (route.request().method() !== 'GET') return route.continue();
 				await route.fulfill({ json: { accounts: [], servers, sign_in_here: false } });
@@ -80,6 +80,20 @@ test.describe('App row account capture', () => {
 			servers = needsPlace;
 			await linkTo('github', 'Choose where it works…');
 			await shot(page, `04-chat-link-focus-place-${width}-${theme}`);
+			await page.evaluate(() => { history.replaceState(null, '', window.location.pathname); });
+			servers = [{ id: 'linear', name: 'Linear', state: 'working', revision: 1, tool_count: 5, reach: all, sign_in: { status: 'idle', signed_in: true } }];
+			await page.reload();
+			await openSettings(page);
+			await openSettingsSection(page, 'Connected apps');
+			const linear = page.locator('[data-connected-app-id="linear"]');
+			const meta = linear.locator('.sub');
+			await expect(meta).toHaveText('Connected · Signed in · 5 actions · All projects');
+			expect(await meta.evaluate((node) => Math.round(node.getBoundingClientRect().height / parseFloat(getComputedStyle(node).lineHeight)))).toBe(1);
+			await shot(page, `06-no-account-collapsed-${width}-${theme}`);
+			await linear.getByRole('button', { name: 'Linear', exact: true }).click();
+			await expect(linear.getByText("Linear didn't say which account")).toBeVisible();
+			await page.mouse.move(0, 0);
+			await shot(page, `07-no-account-open-${width}-${theme}`);
 		});
 	}
 });

@@ -227,13 +227,26 @@ describe('ConnectedAppsSettings with sign-in', () => {
 		expect(host.textContent).not.toContain('Signed in as');
 	});
 
-	it('keeps the plain title for an app that is not signed in or did not say which account', async () => {
+	it('shows a plain title and explains an unnamed signed-in account', async () => {
 		const app = linear({ state: 'working', tool_count: 3, sign_in: { status: 'idle', signed_in: true } });
 		vi.stubGlobal('fetch', vi.fn(async () => reply({ servers: [app], sign_in_here: true })));
 		component = mount(ConnectedAppsSettings, { target: host });
 		await vi.waitFor(() => expect(host.querySelector('.name')?.textContent).toBe('Linear'));
 		expect(host.querySelector('.app-account-title')).toBeNull();
 		expect(host.querySelector('button.face.open')?.getAttribute('aria-label')).toBeNull();
+		expect(host.querySelector('.sub')?.textContent).toBe('Connected · Signed in · 3 actions · All projects');
+		(host.querySelector('button.face.open') as HTMLButtonElement).click();
+		flushSync();
+		expect(host.textContent).toContain("Linear didn't say which account");
+		expect(host.textContent).not.toContain('Signed in as');
+	});
+
+	it('keeps a plain title when the app is not signed in', async () => {
+		const app = linear({ state: 'working', sign_in: { status: 'idle', signed_in: false } });
+		vi.stubGlobal('fetch', vi.fn(async () => reply({ servers: [app], sign_in_here: true })));
+		component = mount(ConnectedAppsSettings, { target: host });
+		await vi.waitFor(() => expect(host.querySelector('.name')?.textContent).toBe('Linear'));
+		expect(host.querySelector('.app-account-title')).toBeNull();
 	});
 
 	it('puts Sign out after Reconnect and before Remove, and asks before signing out', async () => {
