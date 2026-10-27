@@ -9,6 +9,10 @@ import { injectMessage } from '../support/mock';
 
 const out = process.env.PERSON_STEP_LIVE_OUT;
 
+test.afterEach(async ({ request }) => {
+  await setFocusMode(request, true);
+});
+
 function seed(thread: string, count: number): { plan: string; nodes: string[] } {
   const python = process.env.CORSIA_E2E_BACKEND_PYTHON;
   const workspace = process.env.CORSIA_E2E_WORKSPACE;
