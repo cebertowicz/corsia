@@ -370,11 +370,11 @@ def _register_tools(agent: CORSIAAgent, tool_cfg: dict, workspace: Path):
     agent.tools.register(ListKnowledgeTool())
     from tools.browser import BrowserOpenTool, BrowserScreenshotTool, BrowserCloseTool
     from tools.browser_actions import BrowserSnapshotTool, BrowserClickTool, BrowserFillTool, BrowserEvalTool, BrowserWaitTool
-    from tools.browser_actions import BrowserPersonStepTool, BrowserTabTool
+    from tools.browser_actions import BrowserPersonStepTool
     from tools.browser_run_steps import BrowserRunStepsTool
     agent.tools.register(BrowserOpenTool(workspace=workspace))
     for tool in (BrowserSnapshotTool(), BrowserClickTool(), BrowserFillTool(), BrowserScreenshotTool(workspace=workspace),
-                 BrowserEvalTool(), BrowserPersonStepTool(), BrowserTabTool(), BrowserRunStepsTool(), BrowserWaitTool(), BrowserCloseTool()):
+                 BrowserEvalTool(), BrowserPersonStepTool(), BrowserRunStepsTool(), BrowserWaitTool(), BrowserCloseTool()):
         agent.tools.register(tool)
 
     _register_document_tools(agent, workspace)

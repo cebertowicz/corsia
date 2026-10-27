@@ -100,8 +100,8 @@ test.describe('@flow:browser-pane shared browser pane', () => {
 		await expect(page.getByRole('button', { name: /Do: Your turn in the shared browser/ })).toHaveCount(0, { timeout: 20_000 });
 		await expect.poll(() => colorAt(canvas, 0.1, 0.1, [120, 0, 160]), { timeout: 15_000 }).toEqual([120, 0, 160]);
 		await seedMockResponses(request, [
-			{ tool_calls: [{ id: 'list-tabs', name: 'browser_tab', arguments: '{}' }], finish_reason: 'tool_calls', match_thread: thread },
-			{ tool_calls: [{ id: 'switch-tab', name: 'browser_tab', arguments: JSON.stringify({ tab: 't1' }) }], finish_reason: 'tool_calls', match_thread: thread },
+			{ tool_calls: [{ id: 'list-tabs', name: 'browser_snapshot', arguments: JSON.stringify({ list_tabs: true }) }], finish_reason: 'tool_calls', match_thread: thread },
+			{ tool_calls: [{ id: 'switch-tab', name: 'browser_snapshot', arguments: JSON.stringify({ tab: 't1' }) }], finish_reason: 'tool_calls', match_thread: thread },
 			{ content: 'Switched.', finish_reason: 'stop', match_thread: thread },
 		]);
 		await sendChatMessage(page, 'List the tabs and switch to the first.');

@@ -192,9 +192,6 @@ TOOL_CATALOG: dict[str, ToolCatalogEntry] = {
         "browser", authority="browser-script", summary="Run JavaScript in the page",
         activity="Running script",
     ),
-    "browser_tab": _Entry(
-        "browser", summary="List or switch browser tabs", activity="Switching browser tab",
-    ),
     "browser_person_step": _Entry(
         "browser", summary="Let the person complete the current browser page", activity="Your turn in the shared browser",
     ),

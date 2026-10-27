@@ -49,20 +49,23 @@ async def test_same_url_only_skips_navigation_for_first_share(monkeypatch, show_
 
 
 @pytest.mark.asyncio
-async def test_tab_tool_lists_and_switches_only_existing_refs(monkeypatch):
+async def test_snapshot_lists_and_switches_only_existing_tab_refs(monkeypatch):
     calls = []
 
     async def run(args, **kwargs):
         calls.append((args, kwargs['thread_id']))
-        return 'ok'
+        return 'Error: no tab t9' if args == ['tab', 't9'] else 'ok'
 
     monkeypatch.setattr(browser_actions, '_run', run)
-    tool = browser_actions.BrowserTabTool()
-    assert await tool.execute(_thread_id='thread') == 'ok'
+    tool = browser_actions.BrowserSnapshotTool()
+    assert await tool.execute(list_tabs=True, _thread_id='thread') == 'ok'
     assert await tool.execute(tab='t2', _thread_id='thread') == 'ok'
+    assert await tool.execute(tab='t9', _thread_id='thread') == 'Error: no tab t9'
     assert (await tool.execute(tab='new', _thread_id='thread')).startswith('Error:')
     assert (await tool.execute(tab='close', _thread_id='thread')).startswith('Error:')
-    assert calls == [(['tab'], 'thread'), (['tab', 't2'], 'thread')]
+    assert calls == [
+        (['tab'], 'thread'), (['tab', 't2'], 'thread'), (['snapshot'], 'thread'), (['tab', 't9'], 'thread'),
+    ]
     assert browser_session_commands._saved_command(('tab', 't2'), pane=False)
     assert not browser_session_commands._saved_command(('tab', 'new'), pane=False)
     assert not browser_session_commands._saved_command(('tab', 'close'), pane=False)
