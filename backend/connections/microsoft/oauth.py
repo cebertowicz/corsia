@@ -31,6 +31,10 @@ from connections.microsoft.errors import (
     DIFFERENT_ACCOUNT, INPUT_REFUSAL, INTERNAL, SIGN_IN_BUSY, MicrosoftError, exchange_error_cause,
     message, redirect_codes_cause,
 )
+from connections.sign_in_notice import (
+    ACCOUNT_REMOVED_MESSAGE, CLOSED_BY_CAP_MESSAGE, SHUT_DOWN_MESSAGE, drive_starting_agent, notify_ended,
+    notify_expired, notify_starting_agent,
+)
 from infra.database import get_db
 from infra.db_async import run_in_db
 from tools.mcp_oauth_listener import CallbackListener, allowed_hosts
@@ -146,6 +150,7 @@ async def _expire(pending: _Pending) -> None:
         _pending.pop(pending.state)
         _pending_expiries.pop(pending.state, None)
     await pending.listener.stop()
+    await notify_expired(pending.adding_thread_id, pending.state, MICROSOFT_PROVIDER, pending.account_id)
 
 
 async def _close_expired() -> None:
@@ -157,6 +162,7 @@ async def _close_expired() -> None:
         _clear_expired_add_failures()
     for pending in expired:
         await pending.listener.stop()
+        await notify_expired(pending.adding_thread_id, pending.state, MICROSOFT_PROVIDER, pending.account_id)
 
 
 def _clear_expired_add_failures() -> None:
@@ -192,8 +198,7 @@ def _redirect_error(query: dict[str, str]) -> MicrosoftError:
 
 
 async def _record_failure(pending: _Pending, error: MicrosoftError) -> None:
-    """Keep a failure where the person and agents can read it: on the row being signed in again,
-    or as the adder's latest failed add. Results about the request or CORSIA itself mark nothing."""
+    """Keep failures on the row or as the adder's latest failed add; request or CORSIA errors mark nothing."""
     if pending.adding:
         _record_add_failure(_adder(pending), error.cause)
         return
@@ -201,6 +206,12 @@ async def _record_failure(pending: _Pending, error: MicrosoftError) -> None:
         from connections.account_state import mark_sign_in_failed
 
         await run_in_db(mark_sign_in_failed, pending.account_id, error.state_cause)
+
+
+async def _tell_agent(pending: _Pending, *, cause: str, message: str | None = None) -> None:
+    await notify_starting_agent(
+        pending.adding_thread_id, pending.state, MICROSOFT_PROVIDER, pending.account_id, cause=cause, message=message,
+    )
 
 
 async def start_sign_in(
@@ -211,8 +222,8 @@ async def start_sign_in(
 
     With ``account_id`` it signs that row in again with the registration saved for it;
     ``client_id``, ``kind`` and ``tenant_id`` are then ignored, and ``adding_thread_id``
-    (None for the person) must be able to see the row. Without it, it adds an account
-    whose reach comes from ``adding_thread_id``'s scope or, for the person, ``reach``.
+    (None for the person) must see the row. An add takes reach from its thread scope or the person's ``reach``. An agent's
+    ``adding_thread_id`` is also woken once with how it ended, even when nobody finishes it.
     """
     if account_id is not None:
         client_id, kind, tenant_id = await run_in_db(account_store.saved_registration, account_id, adding_thread_id)
@@ -231,9 +242,12 @@ async def start_sign_in(
                 _take_pending(given)
                 raise _redirect_error(query)
             await _complete_sign_in(query.get("code"), given)
+        except _AlreadyTaken as exc:
+            return 400, exc.browser_message, False, None
         except MicrosoftError as exc:
             await _record_failure(pending, exc)
             emit_lifecycle_event("connect_failed", pending.account_id, MICROSOFT_PROVIDER, cause=exc.cause)
+            await _tell_agent(pending, cause=exc.cause, message=exc.message)
             return 400, exc.browser_message, True, None
         except Exception as exc:
             # A fault in CORSIA, not Microsoft: logged by type only, since its text may carry account data.
@@ -241,6 +255,7 @@ async def start_sign_in(
             internal = MicrosoftError(INTERNAL)
             await _record_failure(pending, internal)
             emit_lifecycle_event("connect_failed", pending.account_id, MICROSOFT_PROVIDER, cause=PROVIDER_UNAVAILABLE)
+            await _tell_agent(pending, cause=PROVIDER_UNAVAILABLE)
             return 500, internal.browser_message, True, None
         if pending.adding:
             _clear_add_failure(_adder(pending))
@@ -251,7 +266,7 @@ async def start_sign_in(
     async def on_cap() -> None:
         pending = holder.get("pending")
         if pending is not None:
-            await _discard_pending(pending)
+            await _discard_pending(pending, CLOSED_BY_CAP_MESSAGE)
 
     listener = CallbackListener(path="/", allowed_hosts=allowed_hosts("localhost"), handler=handler, on_cap=on_cap)
     try:
@@ -275,27 +290,34 @@ async def start_sign_in(
     return url, pending.account_id
 
 
-async def _discard_pending(pending: _Pending) -> None:
+async def _discard_pending(pending: _Pending, why: str, *, drive: bool = True) -> None:
+    """End a waiting flow CORSIA closes; its agent is woken once with ``why``, unless the flow already ended."""
     with _pending_lock:
-        if _pending.get(pending.state) is pending:
+        held = _pending.get(pending.state) is pending
+        if held:
             _pending.pop(pending.state)
             _cancel_expiry(pending.state)
     await pending.listener.stop()
+    if held:
+        await notify_ended(pending.adding_thread_id, pending.state, MICROSOFT_PROVIDER, pending.account_id, why, drive=drive)
 
 
 async def clear_pending(account_id: str) -> None:
     with _pending_lock:
         removed = [pending for pending in _pending.values() if pending.account_id == account_id]
     for pending in removed:
-        await _discard_pending(pending)
+        await _discard_pending(pending, ACCOUNT_REMOVED_MESSAGE)
 
 
 async def stop_all_signins() -> None:
-    """Close all one-flow listeners when the backend shuts down."""
+    """Close all one-flow listeners at shutdown; waiting agents are woken, but no turn starts mid-shutdown."""
     with _pending_lock:
         pending = list(_pending.values())
     for flow in pending:
-        await _discard_pending(flow)
+        await _discard_pending(flow, SHUT_DOWN_MESSAGE, drive=False)
+
+
+class _AlreadyTaken(MicrosoftError): ...
 
 
 def _take_pending(state: object) -> _Pending:
@@ -307,7 +329,7 @@ def _take_pending(state: object) -> _Pending:
         if match is not None:
             _cancel_expiry(match)
     if pending is None or pending.expired:
-        raise MicrosoftError(CONSENT_CANCELLED)
+        raise (_AlreadyTaken if pending is None else MicrosoftError)(CONSENT_CANCELLED)
     return pending
 
 
@@ -339,6 +361,7 @@ async def _complete_sign_in(code: object, state: object) -> str:
         raise MicrosoftError(exchange_error_cause(None))
     identity = await client.identity(access, kind=pending.kind, tenant_id=pending.tenant_id)
     await run_in_db(account_store.store, pending, grant, identity)
+    await drive_starting_agent(pending.adding_thread_id, pending.state)
     from events.connectors.mail_poller import schedule_account
 
     schedule_account(pending.account_id)
