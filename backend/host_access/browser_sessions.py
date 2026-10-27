@@ -120,7 +120,7 @@ class BrowserSessionOwner:
                     runtime.attempt = exc.result
                     raise
                 runtime.attempt = result
-                await self._observe_attempt(runtime, allow_unsettled=not launching)
+                await self._observe_attempt(runtime, allow_unsettled=not launching and result.timed_out)
                 # A client timeout or interruption is not daemon death. The observed
                 # daemon remains responsible for any command still running in its queue.
                 if capped_wait and result.returncode == 0 and result.completion == "exited":

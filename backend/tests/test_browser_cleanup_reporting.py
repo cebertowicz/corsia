@@ -306,7 +306,7 @@ async def test_broadcast_failure_keeps_durable_notice(deleg_db, monkeypatch, cap
 
 
 @pytest.mark.asyncio
-async def test_cancelled_command_preserves_owned_daemon_with_unsettled_client(synthetic_browser, monkeypatch):
+async def test_cancelled_command_reports_unprovable_cleanup(synthetic_browser, monkeypatch):
     from host_access import browser_cli, browser_reporting
     report = AsyncMock(return_value=('thread', 'notice'))
     monkeypatch.setattr(browser_reporting, 'report_cleanup', report)
@@ -316,9 +316,7 @@ async def test_cancelled_command_preserves_owned_daemon_with_unsettled_client(sy
         sessions.CommandResult(-1, '', '', completion='unknown'))))
     with pytest.raises(asyncio.CancelledError):
         await owner.run('thread', ['snapshot'])
-    assert owner.live_count() == 1 and report.await_count == 0
-    with pytest.raises(sessions.BrowserSessionError, match='still running'):
-        await owner.run('thread', ['snapshot'])
+    assert owner.live_count() == 1 and report.await_count == 1
 
 
 @pytest.mark.asyncio

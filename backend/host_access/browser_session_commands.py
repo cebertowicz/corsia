@@ -50,6 +50,12 @@ def cap_wait(args: Sequence[str], timeout: float) -> tuple[Sequence[str], bool]:
 
 async def preserve_cancelled(owner: Any, runtime: Any) -> None:
     """Cancellation of a client does not prove its owned daemon has died."""
+    attempt = runtime.attempt
+    settlement = attempt.settlement if attempt else None
+    failed = settlement is None or settlement.done() and (settlement.cancelled() or not settlement.result())
+    if attempt and attempt.completion == "unknown" and failed:
+        await asyncio.shield(owner._record_failure(runtime, BrowserSessionCleanupError("browser client settlement is unresolved")))
+        return
     try:
         observed = await asyncio.shield(owner._observe(runtime))
         if observed.alive:
@@ -246,7 +252,7 @@ async def guard_close(owner: Any, runtime: Any) -> None:
     except BrowserSessionCleanupError:
         return
     except BrowserSessionError as exc:
-        if str(exc) != browser_control.PAGE_CHECK_FAILED:
+        if str(exc) not in {browser_control.PAGE_CHECK_FAILED, browser_cli.BROWSER_BUSY}:
             raise
 
 
