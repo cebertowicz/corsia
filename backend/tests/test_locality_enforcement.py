@@ -132,7 +132,7 @@ async def test_cloud_off_thread_resolves_to_an_unavailable_target_admission_hold
     target = await send_target.resolve_target(model, thread_id="actor")
 
     assert (target.available, target.availability_reason) == (False, "project_cloud_off")
-    assert send_target.classify_target_admission(target) == "wait"
+    assert send_target.classify_target_admission(target, person_send=False) == "wait"
     assert all(unavailable_model_recovery.model_admission(model, db=world, thread_id="actor", person_send=person) == "wait"
                for person in (True, False))
 
@@ -142,12 +142,12 @@ async def test_local_row_and_unscoped_threads_still_resolve(world):
     from infra import send_target
     from infra.unavailable_model_recovery import resolve_or_hold
 
-    batch = SimpleNamespace(thread_id="actor", items=())
+    batch = SimpleNamespace(thread_id="actor", person_send=False)
     assert (await send_target.resolve_target(LOCAL, thread_id="actor")).catalog_id == LOCAL
     assert (await resolve_or_hold(LOCAL, batch)).catalog_id == LOCAL
     for thread in ("noproject", "destination", None):
         assert (await send_target.resolve_target(CLOUD, thread_id=thread)).catalog_id == CLOUD
-    assert (await resolve_or_hold(CLOUD, SimpleNamespace(thread_id="noproject"))).catalog_id == CLOUD
+    assert (await resolve_or_hold(CLOUD, SimpleNamespace(thread_id="noproject", person_send=False))).catalog_id == CLOUD
 
 
 @pytest.mark.parametrize(

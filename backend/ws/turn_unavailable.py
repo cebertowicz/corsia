@@ -9,6 +9,20 @@ from llm.resolution import ModelUnavailableError
 from ws.turn_helpers import NativeTurnRequest, reject_future, resolve_future
 
 
+async def report_settled_setup_error(request, error, product_terminal, *, report, handle, emit):
+    """Present a setup failure already settled by the Turn owner."""
+    if isinstance(error, ModelUnavailableError):
+        return await report(request, error)
+    if not isinstance(error, Exception):
+        reject_future(request.start_ack, error)
+        resolve_future(request.provider_acceptance, False)
+        raise error
+    handled = await handle(request, None, None, None, product_terminal, error, emit)
+    if handled is None:
+        raise error
+    return handled
+
+
 async def report_model_unavailable(
     request: NativeTurnRequest, error: ModelUnavailableError,
 ) -> bool:

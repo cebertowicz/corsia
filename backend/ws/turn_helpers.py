@@ -60,7 +60,6 @@ class NativeTurnRequest(NamedTuple):
         Callable[[str, str | BaseException | None], Awaitable[None]] | None
     )
     media_projection: Any
-    loads_model: bool = False
     input_ids: tuple[str, ...] = ()
 
 

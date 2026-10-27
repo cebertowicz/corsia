@@ -67,9 +67,7 @@ def render_agent_envelope(
         from prompts.plan_wakes import paused_line
 
         lead = paused_line(str(paused_since))
-    if (metadata or {}).get(REPLY_VIA_POST_UPDATE_KEY) is True and not any(
-        (metadata or {}).get(key) for key in NON_HUMAN_MARKERS
-    ):
+    if (metadata or {}).get(REPLY_VIA_POST_UPDATE_KEY) is True and is_human_input("user", metadata):
         lead += viewing_context_line((metadata or {}).get(VIEWING_DOCUMENT_KEY))
         lead += reply_context_lines((metadata or {}).get(REPLY_CONTEXT_KEY))
     if not metadata or metadata.get("sender_kind") != "agent":

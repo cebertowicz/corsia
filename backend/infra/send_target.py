@@ -103,52 +103,35 @@ async def scope_supplied_target(target: ExecutionTarget, *, thread_id: str) -> E
     return await db_async.run_in_db(_scope)
 
 
-def omlx_seat_and_model(target: ExecutionTarget) -> tuple[str, str] | None:
-    """Identify the oMLX seat and model for a native network target."""
-    from llm.locality import row_server_id
-
-    if not (target.harness == "native" and target.provider == "omlx" and target.backend == "network"
-            and target.transport_model.startswith("omlx@")):
-        return None
-    server_id = row_server_id({"litellm_model": target.transport_model})
-    model_id = target.transport_model.partition("/")[2]
-    return (server_id, model_id) if server_id and model_id else None
-
 
 def _ready_target(target: ExecutionTarget, *, db=None) -> ExecutionTarget:
     """Use the catalog's cached oMLX readiness, without probing or loading a model."""
     if not (target.available and target.harness == "native"
             and target.provider == "omlx" and target.backend == "network"):
         return target
-    from llm.model_status import _network_status
-    from llm.network_discovery import get_loaded_model_ids
     from infra.database import get_db
+    from llm.local_model_load import cached_status, omlx_seat_and_model, readiness
 
     seat = omlx_seat_and_model(target)
     if seat is None:
         return target
-    server_id, _ = seat
     connection = db if db is not None else get_db()
     try:
-        server = connection.execute("SELECT status FROM network_servers WHERE id=?", (server_id,)).fetchone()
+        if cached_status(target, db=connection, server_id=seat[0]) == "ready":
+            return target
+        state = readiness(target, db=connection)
     finally:
         if db is None:
             connection.close()
-    status = _network_status(
-        {"litellm_model": target.transport_model, "available": target.available},
-        {server_id: server["status"]} if server else {}, get_loaded_model_ids,
-    )
-    if status == "ready":
+    if state is not None and state.state == "loaded":
         return target
-    return replace(target, available=False, availability_reason=(
-        "model_not_loaded" if status == "available" else "model_unavailable"
-    ))
+    return replace(target, available=False, availability_reason=state.state if state else "model_unavailable")
 
 
-TargetAdmission = Literal["run", "wait", "fail"]
+TargetAdmission = Literal["run", "load", "wait", "fail"]
 
 
-def classify_target_admission(target: ExecutionTarget) -> TargetAdmission:
+def classify_target_admission(target: ExecutionTarget, *, person_send: bool) -> TargetAdmission:
     """Classify a target at the one admission seam.
 
     Catalog/model unavailability can clear through ``notify_models_changed`` and
@@ -157,7 +140,10 @@ def classify_target_admission(target: ExecutionTarget) -> TargetAdmission:
     """
     if target.available:
         return "run"
-    if target.availability_reason == "connection_unavailable" or target.availability_reason in (MODEL_LOAD_FAILED, MODEL_LOAD_UNREACHABLE):
+    reason = target.availability_reason
+    if person_send and reason == "fits_now":
+        return "load"
+    if reason == "connection_unavailable" or (person_send and reason in {"no_room", "no_memory", "unreachable"}):
         return "fail"
     return "wait"
 

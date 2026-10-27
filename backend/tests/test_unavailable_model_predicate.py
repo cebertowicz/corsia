@@ -111,6 +111,7 @@ async def test_offline_network_server_stays_held(isolated_db, monkeypatch) -> No
 
     # The fixture's server ``srv`` has no online row.
     batch, _thread, _target, provider = _claimed(monkeypatch, metadata={"sender_kind": "agent", "from_thread": "parent"})
+    monkeypatch.setattr("llm.local_model_load.readiness", lambda *_a, **_k: None)
     monkeypatch.setattr("infra.unavailable_model_recovery.schedule_unavailable_model_recovery", lambda: None)
     held = AsyncMock(wraps=recovery.hold_unavailable_model_input)
     monkeypatch.setattr(recovery, "hold_unavailable_model_input", held)

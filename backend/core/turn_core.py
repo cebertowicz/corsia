@@ -41,8 +41,9 @@ def terminal_error_detail(error: BaseException) -> str | BaseException:
     from connections.account_policy import AccountAdmissionError
     from core.checkpoint_types import CheckpointUnavailable
     from tools.recorded_call import CompletedToolFailure
+    from llm.local_model_load import ModelLoadFailed
 
-    return error if isinstance(error, (AccountAdmissionError, CheckpointUnavailable, CompletedToolFailure)) else str(error)
+    return error if isinstance(error, (AccountAdmissionError, CheckpointUnavailable, CompletedToolFailure, ModelLoadFailed)) else str(error)
 
 
 def persist_turn_start(

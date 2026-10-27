@@ -23,9 +23,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from functools import partial
-from typing import TYPE_CHECKING, Literal, get_args
+from typing import TYPE_CHECKING, Literal
 
 from infra.host_resources import load_verdict, model_room_bytes
 
@@ -36,8 +36,7 @@ log = logging.getLogger(__name__)
 
 ReadinessState = Literal["loaded", "fits_now", "no_room", "no_memory", "unreachable"]
 LoadFailure = Literal["load_failed", "unreachable", "no_room", "no_memory"]
-LOCAL_LOAD_RUNNABLE = frozenset({"loaded", "fits_now"})
-LOCAL_LOAD_REFUSALS = frozenset(get_args(ReadinessState)) - LOCAL_LOAD_RUNNABLE
+
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,45 +90,44 @@ def _fit(db, server_id: str, model_id: str, loaded: set[str]) -> Readiness:
     return Readiness(verdict, len(others))
 
 
+def omlx_seat_and_model(target: ExecutionTarget) -> tuple[str, str] | None:
+    """Identify the oMLX seat and model for a native network target."""
+    from llm.locality import row_server_id
+
+    if not (target.harness == "native" and target.provider == "omlx" and target.backend == "network"
+            and target.transport_model.startswith("omlx@")):
+        return None
+    server_id = row_server_id({"litellm_model": target.transport_model})
+    model_id = target.transport_model.partition("/")[2]
+    return (server_id, model_id) if server_id and model_id else None
+
+
+def cached_status(target: ExecutionTarget, *, db, server_id: str) -> str:
+    """Return the network catalog's cached status for this seat."""
+    from llm.model_status import _network_status
+    from llm.network_discovery import get_loaded_model_ids
+
+    server = db.execute("SELECT status FROM network_servers WHERE id=?", (server_id,)).fetchone()
+    return _network_status({"litellm_model": target.transport_model, "available": True},
+                           {server_id: server["status"]} if server else {}, get_loaded_model_ids)
+
+
 def readiness(target: ExecutionTarget, *, db) -> Readiness | None:
     """Project send admission's cached readiness and the shared fit verdict."""
-    from infra.send_target import _ready_target, omlx_seat_and_model
     from llm.network_discovery import get_loaded_model_ids
 
     seat = omlx_seat_and_model(target)
-    if seat is None:
+    if seat is None or (not target.available and target.availability_reason not in {
+        "model_not_loaded", "model_unavailable", "fits_now", "no_room", "no_memory", "unreachable",
+    }):
         return None
     server_id, model_id = seat
-    scoped = _ready_target(target, db=db)
+    status = cached_status(target, db=db, server_id=server_id)
     loaded = get_loaded_model_ids(server_id)
-    if scoped.available:
+    if status == "ready":
         return Readiness("loaded", len(loaded - {model_id}))
-    if scoped.availability_reason not in {"model_not_loaded", "model_unavailable"}:
-        return None
     fit = _fit(db, server_id, model_id, loaded)
-    if fit.state == "unreachable" or scoped.availability_reason == "model_not_loaded":
-        return fit
-    return None
-
-
-def person_send_target(target: ExecutionTarget, *, db=None) -> ExecutionTarget:
-    """Widen local admission for a person's send, or return its delivery failure."""
-    from infra.database import get_db
-    from infra.send_target import model_load_error, omlx_seat_and_model
-
-    if target.available or omlx_seat_and_model(target) is None:
-        return target
-    connection = db if db is not None else get_db()
-    try:
-        state = readiness(target, db=connection)
-    finally:
-        if db is None:
-            connection.close()
-    if state is None:
-        return target
-    if state.state in LOCAL_LOAD_RUNNABLE:
-        return replace(target, available=True, availability_reason=None)
-    return replace(target, availability_reason=model_load_error(state.state))
+    return fit if fit.state == "unreachable" or status == "available" else None
 
 
 def _readiness_now(target: ExecutionTarget) -> Readiness | None:
@@ -210,6 +208,23 @@ async def _load(target: ExecutionTarget, server_id: str, model_id: str) -> None:
         _emit_load(server_id, model_id, "load.completed")
 
 
+async def _ensure(target: ExecutionTarget, server_id: str, model_id: str) -> None:
+    from infra.db_async import run_in_db
+    from llm.providers.omlx_lifecycle import read_loaded
+
+    state = await run_in_db(_readiness_now, target)
+    if state is None:
+        return
+    live = await read_loaded({"server_id": server_id})
+    if live is None:
+        log.info("Cannot read loaded status for %s on %s", model_id, server_id)
+        _emit_load(server_id, model_id, "load.failed", "unreachable")
+        raise ModelLoadFailed("unreachable")
+    if any(row["identifier"] == model_id for row in live):
+        return
+    await _load(target, server_id, model_id)
+
+
 def _settled(key: tuple[str, str], task: asyncio.Task[None]) -> None:
     """Forget a finished load, and log a failure no caller was left to see (a ``ModelLoadFailed`` is logged where it is raised)."""
     if _LOADS.get(key) is task:
@@ -229,26 +244,12 @@ async def ensure_loaded(target: ExecutionTarget) -> None:
     up loaded. Never unloads, and never relies on oMLX's implicit load on a chat request.
     A target that isn't a local oMLX model returns at once.
     """
-    from infra.db_async import run_in_db
-    from infra.send_target import omlx_seat_and_model
-    from llm.providers.omlx_lifecycle import read_loaded
-
     seat = omlx_seat_and_model(target)
     if seat is None:
         return
-    state = await run_in_db(_readiness_now, target)
-    if state is None:
-        return
-    live = await read_loaded({"server_id": seat[0]})
-    if live is None:
-        log.info("Cannot read loaded status for %s on %s", seat[1], seat[0])
-        _emit_load(seat[0], seat[1], "load.failed", "unreachable")
-        raise ModelLoadFailed("unreachable")
-    if any(row["identifier"] == seat[1] for row in live):
-        return
     task = _LOADS.get(seat)
     if task is None:
-        task = asyncio.create_task(_load(target, *seat))
+        task = asyncio.create_task(_ensure(target, *seat))
         _LOADS[seat] = task
         task.add_done_callback(partial(_settled, seat))
     await asyncio.shield(task)

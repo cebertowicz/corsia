@@ -5,6 +5,18 @@ from __future__ import annotations
 import sqlite3
 
 
+def delivery_error(db, rows, error) -> str | None:
+    """Keep a local load cause beside its durable delivery code."""
+    from infra.send_target import model_load_error
+    from llm.local_model_load import ModelLoadFailed
+
+    if isinstance(error, ModelLoadFailed):
+        db.executemany("UPDATE messages SET metadata=json_set(COALESCE(metadata, '{}'), '$.model_load_cause', ?) WHERE id=?",
+                       [(error.cause, row['id']) for row in rows])
+        return model_load_error(error.cause)
+    return str(error) if error is not None else None
+
+
 def sequence_attempt(
     db: sqlite3.Connection,
     rows: list[sqlite3.Row],

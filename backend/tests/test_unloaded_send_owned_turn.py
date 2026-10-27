@@ -8,6 +8,7 @@ import pytest
 
 def _claimed(monkeypatch, *, metadata=None, native_mode="event"):
     from infra.database import get_db
+    from dataclasses import replace
     from infra.input_render import PreparedBatch
     from infra.thread_driver import admit_input
     from llm.local_model_load import Readiness
@@ -23,8 +24,10 @@ def _claimed(monkeypatch, *, metadata=None, native_mode="event"):
     batch = admit_input("t", role="user", content="hi", intent="apply_now", message_id="m", turn_id="turn", boot_epoch="boot", admitted_at="t1", metadata=metadata, delivery_options={"native_mode": native_mode}, db=db).batch
     thread_row = dict(db.execute("SELECT * FROM threads WHERE id='t'").fetchone())
     db.close()
-    prepared = PreparedBatch(thread_row, target, "native", False, "hi", None, [], None, None, None, {}, batch)
-    monkeypatch.setattr("infra.thread_execution._prepare_batch", AsyncMock(return_value=prepared))
+    target = replace(target, available=True, availability_reason="load_on_send")
+    async def prepare(batch, *, thread_row, target):
+        return PreparedBatch(thread_row, target, "native", False, "hi", None, [], None, None, None, {}, batch)
+    monkeypatch.setattr("infra.thread_execution._prepare_batch", prepare)
     monkeypatch.setattr("infra.thread_execution.persist_prepared_installed_context", lambda *_a: None)
     monkeypatch.setattr("infra.thread_execution.record_dispatch_manifest", lambda *_a: None)
     monkeypatch.setattr("core.agent.get_agent", AsyncMock(return_value=object()))
@@ -41,8 +44,8 @@ async def test_person_send_to_a_cloud_model_checks_before_binding(monkeypatch):
 
     import ws.turn as turn
 
-    target = SimpleNamespace(harness="native", provider="anthropic", backend="api", transport_model="claude-x")
-    request = SimpleNamespace(loads_model=False, target=target, ingress="ws")
+    target = SimpleNamespace(harness="native", provider="anthropic", backend="api", transport_model="claude-x", availability_reason=None)
+    request = SimpleNamespace(target=target, ingress="ws")
     bind = AsyncMock()
     load = AsyncMock()
     monkeypatch.setattr("core.agent.get_agent", AsyncMock(return_value=object()))
@@ -116,9 +119,15 @@ async def test_queued_input_that_no_longer_fits_fails_at_claim(isolated_db, monk
 
     batch, _thread, _target, provider = _claimed(monkeypatch)
     monkeypatch.setattr("llm.local_model_load.readiness", lambda *_a, **_k: Readiness("no_room", 1))
-    with pytest.raises(Exception, match="model_load_failed"):
+    with pytest.raises(Exception):
         await drive_claimed_batch(batch)
     assert message_row("m")[:3] == ("failed", "proved_no_write", "model_load_failed")
+    from infra.database import get_db
+    db = get_db()
+    try:
+        assert db.execute("SELECT json_extract(metadata, '$.model_load_cause') FROM messages WHERE id='m'").fetchone()[0] == "no_room"
+    finally:
+        db.close()
     provider.assert_not_awaited()
 
 
@@ -163,7 +172,7 @@ async def test_nonhuman_input_does_not_load(isolated_db, monkeypatch, metadata):
     held = AsyncMock(wraps=recovery.hold_unavailable_model_input)
     monkeypatch.setattr(recovery, "hold_unavailable_model_input", held)
     await drive_claimed_batch(batch)
-    assert held.await_args.args[1].availability_reason == "model_not_loaded"
+    assert held.await_args.args[1].availability_reason == "fits_now"
     load.assert_not_awaited()
     provider.assert_not_awaited()
     assert message_row("m") == ("queued", "proved_no_write", "selected_model_unavailable", None)
@@ -186,6 +195,27 @@ async def test_validation_failure_after_bind_settles_input(isolated_db, monkeypa
 
 
 @pytest.mark.asyncio
+async def test_unavailable_after_load_uses_standard_presentation(isolated_db, monkeypatch):
+    from infra.thread_execution import execute_claimed_batch
+    from llm.resolution import ModelUnavailableError
+    from tests.unavailable_model_support import message_row
+    from ws import turn
+
+    batch, thread, target, provider = _claimed(monkeypatch)
+    error = ModelUnavailableError(target.catalog_id, "offline")
+    monkeypatch.setattr("llm.local_model_load.ensure_loaded", AsyncMock())
+    monkeypatch.setattr(turn, "validate_native_target", AsyncMock(side_effect=error))
+    report = AsyncMock(wraps=turn.report_model_unavailable)
+    monkeypatch.setattr(turn, "report_model_unavailable", report)
+    with pytest.raises(ModelUnavailableError):
+        await execute_claimed_batch(batch, thread_row=thread, target=target, user={"id": "u"})
+    report.assert_awaited_once()
+    assert report.await_args.args[1] is error
+    assert message_row("m")[:2] == ("failed", "proved_no_write")
+    provider.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_stop_during_load_settles_cancelled_input(isolated_db, monkeypatch):
     from core.native_turn_control import cancel_and_join_native_turn
     from infra.thread_execution import execute_claimed_batch
@@ -197,7 +227,7 @@ async def test_stop_during_load_settles_cancelled_input(isolated_db, monkeypatch
 
     async def load(_target):
         started.set()
-        await done
+        await asyncio.shield(done)
 
     monkeypatch.setattr("llm.local_model_load.ensure_loaded", load)
     task = asyncio.create_task(execute_claimed_batch(batch, thread_row=thread, target=target, user={"id": "u"}))

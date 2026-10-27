@@ -38,7 +38,7 @@ from ws.native_inbox_batch import native_safe_boundary_input as _native_safe_bou
 from ws.post_turn import run_post_turn_tasks
 from ws.local_send_load import load_for_person as _load_for_person
 from ws.turn_cancellation import handle_cancelled_turn
-from ws.turn_unavailable import report_model_unavailable
+from ws.turn_unavailable import report_model_unavailable, report_settled_setup_error
 from ws.turn_types import SettledSetupError as _SettledSetupError, _PreparedTurn, TurnBroadcast, TurnIngress
 from ws.turn_helpers import (
     NativeTurnRequest,
@@ -73,8 +73,7 @@ async def _setup_turn(
     from core.agent import get_agent
 
     agent = await get_agent()
-    # Only a person's send to a local oMLX model loads it; every other send keeps its pre-bind check.
-    loads = request is not None and request.loads_model
+    loads = request is not None and target.availability_reason == "load_on_send"
     if not loads:
         await validate_native_target(target, event=ingress == "event")
     active_model = target.transport_model
@@ -311,9 +310,10 @@ async def _execute_turn(request: NativeTurnRequest) -> bool:
         )
         return False
     except _SettledSetupError as settled:
-        reject_future(request.start_ack, settled.error)
-        resolve_future(request.provider_acceptance, False)
-        raise settled.error
+        return await report_settled_setup_error(
+            request, settled.error, product_terminal, report=report_model_unavailable,
+            handle=handle_turn_error, emit=emit_product_event,
+        )
     except (
         TurnAlreadyActiveError,
         TurnThreadMissingError,
@@ -377,7 +377,6 @@ async def execute_turn(
         Callable[[str, str | BaseException | None], Awaitable[None]] | None
     ) = None,
     media_projection=None,
-    loads_model: bool = False,
     input_ids: tuple[str, ...] = (),
 ) -> bool:
     """Execute one native turn for browser, delegation, or event ingress."""
@@ -387,7 +386,7 @@ async def execute_turn(
         reasoning_effort, start_ack, broadcast, step_metadata,
         persist_input_once, settle_delivery, after_persist_before_dispatch,
         prepared_context, preadmitted_turn, provider_acceptance,
-        settle_delivery_terminal, media_projection, loads_model, input_ids,
+        settle_delivery_terminal, media_projection, input_ids,
     )
     try:
         return await _execute_turn(request)

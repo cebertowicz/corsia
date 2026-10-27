@@ -49,8 +49,6 @@ def _dispatch_context(
     settle,
     settle_terminal,
 ):
-    from infra.send_target import omlx_seat_and_model
-
     native_mode = str(batch_option(batch, "native_mode", "event"))
     if native_mode == "ws" and ws is None:
         native_mode = "event"
@@ -59,7 +57,7 @@ def _dispatch_context(
         content=prepared.content, is_subagent=prepared.is_subagent,
         target=prepared.target, turn_id=batch.turn_id,
         input_message_id=batch.anchor_message_id, input_ids=tuple(item.message_id for item in batch.items),
-        loads_model=batch.person_send and omlx_seat_and_model(prepared.target) is not None,
+
         metadata=batch.items[-1].metadata,
         native_mode=native_mode,
         allow_fresh=bool(
@@ -221,6 +219,7 @@ async def _execute_claimed_batch(
 ) -> SendResult | InboxQueuedInput:
     latest = batch.items[-1]
     prepared = await _prepare_batch(batch, thread_row=thread_row, target=target)
+    # The claim's admitted load stays with a shortened prefix; its person's send remains queued behind it.
     batch = prepared.batch or batch
     attempt_id = str(uuid.uuid4())
 

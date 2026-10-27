@@ -14,7 +14,7 @@ async def test_load_reports_event_and_waits(monkeypatch):
     target = SimpleNamespace(catalog_id="omlx@srv/m")
     request = SimpleNamespace(thread_id="t", target=target, input_ids=("a", "b"))
     prepared = SimpleNamespace(identity=SimpleNamespace(turn_id="turn"), cancel_event=asyncio.Event())
-    monkeypatch.setattr("infra.send_target.omlx_seat_and_model", lambda _target: ("srv", "m"))
+    monkeypatch.setattr("llm.local_model_load.omlx_seat_and_model", lambda _target: ("srv", "m"))
     monkeypatch.setattr("llm.network_discovery.get_loaded_model_ids", lambda _server: set())
     load = AsyncMock()
     broadcast = Mock()
@@ -35,7 +35,7 @@ async def test_cached_loaded_still_confirms_live_without_loading_event(monkeypat
     target = SimpleNamespace(catalog_id="omlx@srv/m")
     request = SimpleNamespace(thread_id="t", target=target, input_ids=("a",))
     prepared = SimpleNamespace(identity=SimpleNamespace(turn_id="turn"), cancel_event=asyncio.Event())
-    monkeypatch.setattr("infra.send_target.omlx_seat_and_model", lambda _target: ("srv", "m"))
+    monkeypatch.setattr("llm.local_model_load.omlx_seat_and_model", lambda _target: ("srv", "m"))
     monkeypatch.setattr("llm.network_discovery.get_loaded_model_ids", lambda _server: {"m"})
     load = AsyncMock()
     broadcast = Mock()
@@ -52,7 +52,7 @@ async def test_out_of_scope_target_is_passed_to_loader(monkeypatch):
 
     request = SimpleNamespace(thread_id="t", target=SimpleNamespace(catalog_id="omlx@srv/m"), input_ids=("a",))
     prepared = SimpleNamespace(identity=SimpleNamespace(turn_id="turn"), cancel_event=asyncio.Event())
-    monkeypatch.setattr("infra.send_target.omlx_seat_and_model", lambda _target: None)
+    monkeypatch.setattr("llm.local_model_load.omlx_seat_and_model", lambda _target: None)
     load = AsyncMock()
     monkeypatch.setattr("llm.local_model_load.ensure_loaded", load)
     await _load_for_person(request, prepared)
@@ -68,12 +68,14 @@ async def test_load_failure_is_mapped(monkeypatch, cause, expected):
     target = SimpleNamespace(catalog_id="omlx@srv/m")
     request = SimpleNamespace(thread_id="t", target=target, input_ids=("a",))
     prepared = SimpleNamespace(identity=SimpleNamespace(turn_id="turn"), cancel_event=asyncio.Event())
-    monkeypatch.setattr("infra.send_target.omlx_seat_and_model", lambda _target: ("srv", "m"))
+    monkeypatch.setattr("llm.local_model_load.omlx_seat_and_model", lambda _target: ("srv", "m"))
     monkeypatch.setattr("llm.network_discovery.get_loaded_model_ids", lambda _server: set())
     monkeypatch.setattr("llm.local_model_load.ensure_loaded", AsyncMock(side_effect=ModelLoadFailed(cause)))
     monkeypatch.setattr("infra.state.broadcast_to_thread", Mock())
-    with pytest.raises(RuntimeError, match=expected):
+    from infra.send_target import model_load_error
+    with pytest.raises(ModelLoadFailed) as raised:
         await _load_for_person(request, prepared)
+    assert model_load_error(raised.value.cause) == expected
 
 
 @pytest.mark.asyncio
@@ -88,9 +90,9 @@ async def test_stop_abandons_wait_without_cancelling_load(monkeypatch):
 
     async def load(_target):
         started.set()
-        await pending
+        await asyncio.shield(pending)
 
-    monkeypatch.setattr("infra.send_target.omlx_seat_and_model", lambda _target: ("srv", "m"))
+    monkeypatch.setattr("llm.local_model_load.omlx_seat_and_model", lambda _target: ("srv", "m"))
     monkeypatch.setattr("llm.network_discovery.get_loaded_model_ids", lambda _server: set())
     monkeypatch.setattr("llm.local_model_load.ensure_loaded", load)
     monkeypatch.setattr("infra.state.broadcast_to_thread", Mock())
@@ -113,13 +115,16 @@ async def test_detached_load_failure_after_stop_is_logged(monkeypatch, caplog):
     pending = asyncio.get_running_loop().create_future()
     started = asyncio.Event()
 
-    async def load(_target):
+    async def preliminary(*_args):
         started.set()
-        await pending
+        return await pending
 
-    monkeypatch.setattr("infra.send_target.omlx_seat_and_model", lambda _target: ("srv", "m"))
+    errors = []
+    loop = asyncio.get_running_loop()
+    monkeypatch.setattr(loop, "call_exception_handler", errors.append)
+    monkeypatch.setattr("llm.local_model_load.omlx_seat_and_model", lambda _target: ("srv", "m"))
     monkeypatch.setattr("llm.network_discovery.get_loaded_model_ids", lambda _server: set())
-    monkeypatch.setattr("llm.local_model_load.ensure_loaded", load)
+    monkeypatch.setattr("infra.db_async.run_in_db", preliminary)
     monkeypatch.setattr("infra.state.broadcast_to_thread", Mock())
     turn = asyncio.create_task(load_for_person(request, prepared))
     await started.wait()
@@ -129,5 +134,6 @@ async def test_detached_load_failure_after_stop_is_logged(monkeypatch, caplog):
     pending.set_exception(ValueError("detached failure"))
     await asyncio.sleep(0)
     await asyncio.sleep(0)
-    assert "Local model load failed unexpectedly" in caplog.text
+    assert caplog.text.count("Loading m on srv failed unexpectedly") == 1
     assert "detached failure" in caplog.text
+    assert not errors
