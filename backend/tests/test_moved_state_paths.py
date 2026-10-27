@@ -84,14 +84,17 @@ def test_codex_custom_account_homes_are_repointed_and_its_projection_is_left_to_
 @pytest.mark.parametrize("unexpected_link", [False, True])
 def test_moved_codex_projection_recovers_without_a_new_login(isolated_db, roots, unexpected_link):
     from connections.account_evidence import readiness_reason
-    from connections.account_projection import ensure_projection, projection_gate
-    from connections.account_policy import AccountAdmissionError
+    from types import SimpleNamespace
+    from connections.account_projection import projection_gate
+    from connections.account_policy import AccountAdmissionError, select_account
+    from subagents.vendor_write_admission import prepare_session_launch
+    from tests.test_checkpoint_store import _seed_thread
     from connections.account_receipts import ReceiptFence
     from connections.vendor_accounts import get_account
 
     legacy, current = roots
     new_source, new_runtime = _make_homes(current, "x2")
-    (new_source / "auth.json").write_text("{}")
+    (new_source / "auth.json").write_text(json.dumps({"auth_mode": "chatgpt", "tokens": {"fixture": "synthetic"}}))
     old_source = legacy / "runtime/vendor-accounts/x2/source"
     old_runtime = legacy / "runtime/vendor-accounts/x2/runtime"
     old_auth, old_dest = str(old_source / "auth.json"), str(old_runtime / "auth.json")
@@ -103,11 +106,16 @@ def test_moved_codex_projection_recovers_without_a_new_login(isolated_db, roots,
               "account_revision": 0, "login_seq": 1, "at": "t"}
     record = {"auth_state": "known", "login_seq": 1, "login_revision": 0,
               "discovery": {"status": "ready", "receipt": {"account_revision": 0, "login_seq": 1},
-                            "models": {"codex/test": {}}},
+                            "cache_receipt": None, "models": {"codex/test": {}}},
               "auth_projection": {"failed": failed, "stale": [], "homes": {old_dest: entry}}}
     _insert("x2", "codex", str(old_source), str(old_runtime), record)
     db = get_db()
     receipt = ReceiptFence("x2", 0, 1)
+    _seed_thread(db, "moved-codex", model="codex/test")
+    db.commit()
+    select_account("moved-codex", "codex", account_id="x2", db=db)
+    session = SimpleNamespace(corsia_thread_id="moved-codex", codex_home=None, source_codex_home=None,
+                              catalog_model_id="codex/test")
     with pytest.raises(AccountAdmissionError, match="codex_auth_source_missing"):
         projection_gate(receipt, db=db)
     heal_moved_state_paths(legacy_root=legacy, state_root=current)
@@ -116,11 +124,11 @@ def test_moved_codex_projection_recovers_without_a_new_login(isolated_db, roots,
         (new_runtime / "auth.json").unlink()
         (new_runtime / "auth.json").symlink_to(new_source / "unexpected.json")
         with pytest.raises(AccountAdmissionError, match="codex_auth_projection_changed"):
-            ensure_projection(receipt, home=new_runtime, kind="live", db=db)
+            prepare_session_launch(session, "codex")
         assert (new_runtime / "auth.json").readlink() == new_source / "unexpected.json"
         return
 
-    ensure_projection(receipt, home=new_runtime, kind="live", db=db)
+    prepare_session_launch(session, "codex")
 
     account = get_account("x2", db=db)
     assert readiness_reason(account, model="codex/test") is None
