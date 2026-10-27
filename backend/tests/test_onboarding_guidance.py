@@ -337,7 +337,7 @@ def test_where_your_work_lives_never_ends_at_i_cant_and_hands_the_rest_to_helper
     assert "by the rule and line in skill `connect-tools`" in work and "add no `Connect [app]` task for it" in work
     skill = (BOOTSTRAP_SKILL.parents[1] / "connect-tools/SKILL.md").read_text(encoding="utf-8")
     assert "don't offer or add that connection" in skill
-    assert "`[App] only lets approved apps connect, so I'm leaving it out.`" in skill
+    assert "`[App] only lets approved apps connect, so I'm leaving it out. Ask me again any time and I'll check whether it connects now.`" in skill
     assert "I can't" not in work.replace('Never end on "I can\'t".', "")
     # The helper has no corsia_api, so the CORSIA agent adds the app it returns.
     assert "it has no `corsia_api`" in work
@@ -417,18 +417,20 @@ def test_files_step_carries_the_sandbox_auto_approve_recommendation_and_off_the_
     step = _step(8)
 
     assert "**Agents ask you before they:**" in step and "Asks you first" not in step
-    assert "- send or post as you\n   > - spend money\n   > - open files outside your work folder" in step
+    assert "- send or post as you\n   > - spend money\n   > - open files outside your work folder (unless you turn on Auto-approve, below)" in step
     assert "delet" not in step
     assert "Keep sensitive files outside your work folder so agents need these checks to reach them." in step
     assert "Auto-approve" in step and "Local only" in step and "\"Local models only\" in its project settings" in step
     assert "only in that chat" in step and "every command the agent runs with that access" in step
-    assert "the access ends when its time is up" in step or "the access still covers only that chat and still ends on time" in step
+    assert "and it ends when its time is up" in step and "A reviewer model checks the request" in step
+    assert "application" not in step and "every request waits for your yes" in step
     assert "anything that would change a repository's rules still asks you" in step
-    assert "no safeguard is perfect" in step and "its own macOS user account" in step
+    assert "**Safeguards:** no safeguard is perfect." in step and "several would have to fail" not in step and "its own macOS user account" in step
     assert "unless Local only is on for a chat, the agents it starts can run on cloud models" in step
     assert "the toggle at the top of the model picker, which the model button in the message box opens" in step
     assert "It needs a local model that's ready, and the chat has to be switched to it" in step
     assert "A chat on a cloud model sends what you say to that provider" in step
+    assert "must never reach a cloud model" in step
     assert "helpers" not in step
     assert "Claim no safeguard beyond those stated here" in step
 
@@ -452,7 +454,7 @@ def test_hand_off_names_a_match_for_question_2_and_keeps_the_fallback_line():
     assert "You asked me to check with you before [what they named]" in _step(8)
     assert HANDOFF in hand_off
     assert "name up to three and ask which one" in hand_off
-    assert "goes through an access application" in hand_off
+    assert "goes through an access request" in hand_off
     assert "no summary" in hand_off
     assert "Say nothing about the check" in _step(5)
     assert "## G. Check question 2 against what is connected" in ref and "say nothing about it here" in ref
@@ -589,13 +591,17 @@ def test_the_about_you_doc_opens_after_the_chat_answers_and_is_filled_by_suggest
     assert "When every `About you: <heading>` task is settled and every suggestion is in" in doc
     assert "`bound_model` `source` is `omlx`): start no helper. Write the suggestions yourself, one heading at a time." in doc
     # One review ask, worded for the review bar with or without the accept-all button.
-    ask = "Change anything that's wrong, reject any suggestion that isn't right, or add a note"
-    assert doc.count(f"`I put what I know in your About you doc. Once you approve, I'll use your answers to help your agents work with you, including agents on a cloud model. {ask} on a line, then press Approve. It accepts the rest for you.`") == 1
-    assert doc.count(f"{ask}, then press Approve.") == 1  # the ask's reason
-    assert "`Saved. I'll use your answers to help your agents work with you. You can edit this document any time.`" in doc
+    ask = "Change anything that's wrong, reject any suggestion that isn't right, and add a note if you like, then press Approve."
+    # The first post says what approving does: the answers become the profile every agent and chat loads, and what a cloud model receives.
+    assert doc.count("`I put what I know in your About you doc. When you approve it, your name, time zone and how you like to work go into your profile, which every agent and chat loads. A chat on a cloud model sends it to that provider with what you say. " + ask + " It accepts the rest for you.`") == 1
+    assert doc.count(ask) == 2  # the post and the ask's reason
+    assert "including agents on a cloud model" not in doc
+    # The saved line says agents keep adding to it and where to edit it.
+    assert "`Saved. Agents add to your profile as you tell them how you want things done. Edit it any time in Settings › Context (context/50-USER-PROFILE.md) or open that file in your workspace.`" in doc
+    assert "The replacement starts with that heading line unchanged." in doc
     assert "`block_node` with `owner_kind` `user`" in doc and "`ask_artifact_id` the document's artifact id" in doc  # Approve only shows with an ask
     assert "Whenever you read the document (on Approve in section 4, or on the person's reply), suggest again yourself" in doc
-    assert "any suggestion that can no longer apply to it. Never wait on a helper" in doc
+    assert "any suggestion that can no longer apply to it, and put back any heading a suggestion changed or dropped. Never wait on a helper" in doc
     assert "A comment from the person on a line: answer with a suggested change to that line." in doc
     # On approve CORSIA accepts nothing, removes empty headings, then writes the profile.
     assert "With none open: accept nothing yourself." in doc
@@ -603,7 +609,7 @@ def test_the_about_you_doc_opens_after_the_chat_answers_and_is_filled_by_suggest
     # Failure paths.
     assert "ask `Keep these?`" in doc
     assert "\"Not now\", or they carry on with something else: close that task with the reason that they chose not now, skip to section 5 and write the profile from the chat answers." in doc
-    assert len(doc.split()) < 960
+    assert len(doc.split()) < 1010  # raised from 960 for the profile explanation and where to edit it
 
 
 def test_approve_with_suggestions_still_open_saves_nothing_and_asks_to_be_told():

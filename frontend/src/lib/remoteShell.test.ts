@@ -24,7 +24,9 @@ describe('shellInfo', () => {
 			mode: 'local', default_workspace: { path: '/fixture/default-workspace', display: '~/CORSIA' },
 		});
 		(window as unknown as Record<string, unknown>).__CORSIA_SHELL__ = { mode: 'remote', name: 'Studio' };
-		expect(shellInfo()).toEqual({ mode: 'remote', name: 'Studio' });
+		expect(shellInfo()).toEqual({ mode: 'remote', name: 'Studio', localConfigured: false });
+		(window as unknown as Record<string, unknown>).__CORSIA_SHELL__ = { mode: 'remote', name: 'Studio', localConfigured: true };
+		expect(shellInfo()).toEqual({ mode: 'remote', name: 'Studio', localConfigured: true });
 	});
 	it('does not accept an incomplete default workspace as a path', () => {
 		(window as unknown as Record<string, unknown>).__CORSIA_SHELL__ = {

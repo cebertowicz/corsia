@@ -11,7 +11,7 @@ from urllib.parse import urlparse
 from host_access import browser_cli, browser_control
 from host_access.browser_domain import registrable_domain
 from tools.base import Tool
-from tools.browser_runtime import _execution_context, _run
+from tools.browser_runtime import BrowserOwnerError, _execution_context, _run_owned
 
 _SAFE_NAME = re.compile(r"[a-z0-9-]+")
 _SKILLS = Path(__file__).resolve().parents[1] / "prompts/system/v1/skills"
@@ -22,6 +22,15 @@ _GUARD_REFUSALS = (browser_control.PASSWORD_PAGE, browser_control.PERSON_STEP,
 
 def _result(**value: object) -> str:
     return json.dumps(value, separators=(",", ":"))
+
+
+async def _call(args: list[str], *, thread_id: str) -> str:
+    try:
+        return await _run_owned(args, thread_id=thread_id)
+    except BrowserOwnerError as exc:
+        if exc.text.removeprefix("Error: ").startswith(_GUARD_REFUSALS):
+            return exc.text
+        raise
 
 
 def _allowed(url: str, domains: set[str]) -> bool:
@@ -92,6 +101,12 @@ class BrowserRunStepsTool(Tool):
     }
 
     async def execute(self, steps: str, start_at: str | None = None, **kwargs: Any) -> str:
+        try:
+            return await self._execute(steps, start_at, **kwargs)
+        except BrowserOwnerError as exc:
+            return _result(ok=False, error=exc.text.removeprefix("Error: "))
+
+    async def _execute(self, steps: str, start_at: str | None = None, **kwargs: Any) -> str:
         data, error = _load(steps) if isinstance(steps, str) else (None, "unknown steps file")
         if error or data is None:
             return _result(ok=False, error=error or "unknown steps file")
@@ -114,7 +129,7 @@ class BrowserRunStepsTool(Tool):
                     return _result(ok=False, step=identifier, says=says, saw=saw)
             deadline = time.monotonic() + step.get("timeout", 0)
             while True:
-                result = await _run(_command(step), thread_id=thread_id)
+                result = await _call(_command(step), thread_id=thread_id)
                 message = result.removeprefix("Error: ")
                 if (step["action"] != "wait_for" or "selector" not in step or
                     message.startswith(_GUARD_REFUSALS) or
@@ -158,11 +173,11 @@ def _guard_result(identifier: str, says: str, message: str) -> str:
 
 
 async def _saw(thread_id: str, expected: str) -> tuple[dict[str, str], str, str | None]:
-    title = await _run(["get", "title"], thread_id=thread_id)
+    title = await _call(["get", "title"], thread_id=thread_id)
     message = title.removeprefix("Error: ") if title.startswith("Error:") else ""
     if message.startswith(_GUARD_REFUSALS):
         return {"title": "", "url_path": "", "missing": expected}, "", message
-    url = await _run(["get", "url"], thread_id=thread_id)
+    url = await _call(["get", "url"], thread_id=thread_id)
     message = url.removeprefix("Error: ") if url.startswith("Error:") else ""
     if message.startswith(_GUARD_REFUSALS):
         return {"title": "", "url_path": "", "missing": expected}, "", message
@@ -173,4 +188,6 @@ async def _saw(thread_id: str, expected: str) -> tuple[dict[str, str], str, str 
 
 async def _miss(thread_id: str, identifier: str, says: str, expected: str) -> str:
     saw, _url, refusal = await _saw(thread_id, expected)
-    return _guard_result(identifier, says, refusal) if refusal else _result(ok=False, step=identifier, says=says, saw=saw)
+    if refusal:
+        return _guard_result(identifier, says, refusal)
+    return _result(ok=False, step=identifier, says=says, saw=saw)

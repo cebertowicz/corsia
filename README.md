@@ -294,7 +294,7 @@ Every turn shows what the agent loaded, by source and size. A context file in th
 - [x] Optional account rollover on usage limits, set for the workspace or per project
 
 **Measurement and learning**
-- [x] Outcomes, first-try acceptance, corrections, tokens, decisions and estimated active time by project and agent
+- [x] Outcomes, first-try acceptance, corrections, tokens, decisions and estimated active time by project and agent ([how to read them](docs/measurement.md))
 - [x] Per-model results on your own work, and cost at public list rates beside actual charges
 - [x] Versioned guidance and lesson trials with a boundary and review date
 - [ ] Per-version comparison of guidance and lesson changes, marked on the trends *(being added)*
