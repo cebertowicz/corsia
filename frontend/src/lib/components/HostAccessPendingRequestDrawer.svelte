@@ -32,8 +32,8 @@
 </script>
 
 {#snippet policyExceptions()}
-	<section class="policy-exceptions" aria-label="Policy exceptions requested">
-		<span class="label">Policy exceptions requested</span>
+	<section class="policy-exceptions" aria-label="Beyond the usual rules">
+		<span class="label">Beyond the usual rules</span>
 		{#if external}
 			<p class="external-warning">This agent runs outside CORSIA’s controls, so CORSIA may not see what it does or what it costs. You approve this yourself, even when Auto-approve is on.</p>
 		{/if}
@@ -76,7 +76,7 @@
 			<div class="eyebrow">Temporary host access</div>
 			<h2 title={owner(lease)}>{owner(lease)}</h2>
 		</div>
-		<StatePill state={stale ? 'error' : 'warning'} label={stale ? 'State stale' : duration(lease.requested_duration_seconds)} />
+		<StatePill state={stale ? 'error' : 'warning'} label={stale ? 'Not current' : duration(lease.requested_duration_seconds)} />
 	</header>
 
 	<div class="decision-body">

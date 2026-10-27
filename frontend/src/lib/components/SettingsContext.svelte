@@ -63,7 +63,7 @@
 
 	function remove(file: WorkspaceContextFile) {
 		const kept = files.map((row) => row.path).filter((path) => path !== file.path);
-		void request('/api/context/bootloader', 'PATCH', { scope: 'workspace', files: kept }, 'Could not save these settings. Try again.');
+		void request('/api/context/bootloader', 'PATCH', { scope: 'workspace', files: kept }, 'Couldn’t save these settings. Try again.');
 	}
 
 	function create(path: string): Promise<boolean> {

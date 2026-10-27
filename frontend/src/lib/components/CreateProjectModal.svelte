@@ -68,7 +68,7 @@
 				<textarea
 					rows="2"
 					bind:value={description}
-					placeholder="Short description — shown in the projects list…"
+					placeholder="Short description, shown in the projects list"
 				></textarea>
 			</label>
 

@@ -250,7 +250,7 @@
 		user-select: all;
 	}
 	.login-error {
-		color: var(--red); font-size: var(--text-subhead); margin-bottom: 12px;
+		color: var(--red-text); font-size: var(--text-subhead); margin-bottom: 12px;
 	}
 
 </style>

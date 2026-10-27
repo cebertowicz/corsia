@@ -177,7 +177,7 @@
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ path: absPath }),
 			});
-			if (!res.ok) throw new Error(await plainResponseError(res, 'Could not save these settings. Try again.'));
+			if (!res.ok) throw new Error(await plainResponseError(res, 'Couldn’t save these settings. Try again.'));
 			const body = await res.json();
 			project.path = body.project?.path ?? absPath;
 			toasts.show('Saved', 'success');
@@ -251,7 +251,7 @@
 			</div>
 		</SettingsGroup>
 
-		<SettingsGroup label="Folder" hint="Chats here share this project’s context and Agents.">
+		<SettingsGroup label="Folder" hint="Chats here share this project’s context and agents.">
 			<SettingsRow
 				name={project.path ? 'Working folder' : 'Working folder missing'}
 				sub={project.path ? displayName(project.path) : 'No folder selected'}

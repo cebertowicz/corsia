@@ -362,7 +362,7 @@
 			<section class="host-access-status" aria-label="Host access status">
 				{#if staleNotice}
 					<div class="status-row stale" role="status">
-						<StatePill state="error" label="State stale" size="sm" />
+						<StatePill state="error" label="Not current" size="sm" />
 						<span>{staleNotice}</span>
 						<Button size="sm" onclick={() => { void refresh(); }}>Retry</Button>
 					</div>
@@ -406,7 +406,7 @@
 			>
 				<span class="eyebrow">Temporary host access</span>
 				<span class="pending-owner">{owner(currentPending)}</span>
-				<StatePill state={stale ? 'error' : 'warning'} label={stale ? 'State stale' : duration(currentPending.requested_duration_seconds)} size="sm" />
+				<StatePill state={stale ? 'error' : 'warning'} label={stale ? 'Not current' : duration(currentPending.requested_duration_seconds)} size="sm" />
 				<span class="pending-action">Review →</span>
 			</button>
 			{#key currentPending.id}
