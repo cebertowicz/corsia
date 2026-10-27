@@ -18,7 +18,8 @@ _UNSTAMPED_SQL = (
     "SELECT id, content, metadata FROM messages WHERE role='system' "
     "AND json_valid(metadata) AND json_type(metadata)='object' "
     "AND (json_extract(metadata, '$.type') IN ('llm_error', 'cc_error') "
-    "OR (json_extract(metadata, '$.type')='result' AND json_type(metadata, '$.is_error')='true' "
+    "OR (json_extract(metadata, '$.type')='result' AND json_type(metadata, '$.cc')='true' "
+    "AND json_type(metadata, '$.is_error')='true' "
     "AND coalesce(json_extract(metadata, '$.stop_reason'), '') != 'interrupted')) "
     "AND json_type(metadata, '$.cause_kind') IS NULL"
 )

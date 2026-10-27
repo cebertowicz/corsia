@@ -30,6 +30,7 @@ _ROWS: dict[str, tuple[str, object, str | None]] = {
     "expired-result": (_EXPIRED, {"type": "result", "cc": True, "is_error": True}, "sign_in_expired"),
     "stopped-result": ("x", {"type": "result", "cc": True, "is_error": True, "stop_reason": "interrupted"}, None),
     "done-result": ("x", {"type": "result", "cc": True, "is_error": False}, None),
+    "codex-result": (_EXPIRED, {"type": "result", "codex": True, "is_error": True}, None),
     "boundary": ("x", {"type": "tool_boundary_violation"}, None),
     "not-object": ("x", [1], None),
 }
