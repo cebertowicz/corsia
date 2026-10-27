@@ -5,7 +5,8 @@ from __future__ import annotations
 import asyncio
 import sys
 from contextlib import asynccontextmanager
-from unittest.mock import AsyncMock
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -39,6 +40,24 @@ async def _unread_pipe_session():
         if session._reader is not None:
             await asyncio.wait_for(session._reader, 3)
         proc.stdin.close()
+
+
+@pytest.mark.parametrize("method", ["turn/steer", "turn/interrupt", "model/list", "account/rateLimits/read"])
+async def test_response_deadline_preserves_session_after_drain(monkeypatch, method):
+    monkeypatch.setattr(codex_app_server, "REQUEST_TIMEOUT", 0.01)
+    monkeypatch.setattr(codex_app_server, "STEER_REQUEST_TIMEOUT", 0.01)
+    session = CodexAppServerSession(binary="codex", task=None)
+    session._proc = SimpleNamespace(
+        returncode=None, stdin=SimpleNamespace(write=Mock(), drain=AsyncMock()), kill=Mock(),
+    )
+    drained = Mock()
+    with pytest.raises(CodexAppServerError, match=method):
+        await session._request(method, {}, on_drain_confirmed=drained)
+    drained.assert_called_once()
+    session._proc.kill.assert_not_called()
+    assert session._pending == session._pending_methods == {}
+    assert not session._write_lock.locked()
+    assert not session._closing
 
 
 @pytest.mark.parametrize("method", ["turn/start", "thread/inject_items", "turn/interrupt", "turn/steer"])
@@ -89,6 +108,8 @@ async def test_request_deadline_includes_lock_behind_unread_pipe(monkeypatch):
             assert not written.is_set()
             assert session._pending == session._pending_methods == {}
             await asyncio.wait_for(session._proc.wait(), 1)
+            await asyncio.wait_for(session._reader, 1)
+            session._on_exit.assert_awaited_once()
         finally:
             task.cancel()
             owner.cancel()

@@ -25,6 +25,7 @@ async def request(session, method, params=None, *, on_write_observed=None, on_dr
     if params is not None:
         payload["params"] = params
     deadline = asyncio.timeout(STEER_REQUEST_TIMEOUT if method == "turn/steer" else REQUEST_TIMEOUT)
+    drained = False
     try:
         async with deadline:
             async with session._write_lock:
@@ -39,15 +40,17 @@ async def request(session, method, params=None, *, on_write_observed=None, on_dr
                 if on_write_observed is not None:
                     on_write_observed()
                 await session._proc.stdin.drain()
+                drained = True
                 if on_drain_confirmed is not None:
                     on_drain_confirmed()
             return await fut
     except TimeoutError as error:
         if not deadline.expired():
             raise
-        # Keep on_exit enabled: its existing owner retires the failed generation.
-        # Killing the owned process also releases other writers stuck in drain.
-        session._kill_process()
+        if not drained:
+            # Keep on_exit enabled: its existing owner retires the failed generation.
+            # Killing a stalled writer also releases other writers stuck in drain.
+            session._kill_process()
         raise CodexAppServerError(
             f"codex app-server request timed out: {method}", {"method": method},
         ) from error

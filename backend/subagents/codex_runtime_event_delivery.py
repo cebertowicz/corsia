@@ -17,6 +17,7 @@ from subagents.codex_runtime_state import (
 
 log = logging.getLogger(__name__)
 _SAFE_BOUNDARY_TASKS: dict[str, asyncio.Task] = {}
+_SAFE_BOUNDARY_WAKES: set[str] = set()
 
 _DELIVERY_GATED_PROVIDER_EVENTS = frozenset(
     {
@@ -115,11 +116,13 @@ async def _deliver_codex_event(
 
 
 def schedule_safe_boundary(thread_id: str) -> None:
-    """Join a pending boundary or schedule delivery without blocking the reader."""
+    """Coalesce wakes, retaining one follow-on delivery without blocking the reader."""
     from subagents.codex_inbox_batch import deliver_live_inbox_batch
 
     pending = _SAFE_BOUNDARY_TASKS.get(thread_id)
-    if pending is not None and not pending.done():
+    if pending is not None:
+        # Completion owns removal, including wakes before its callback runs.
+        _SAFE_BOUNDARY_WAKES.add(thread_id)
         return
     task = asyncio.create_task(
         deliver_live_inbox_batch(thread_id),
@@ -130,9 +133,12 @@ def schedule_safe_boundary(thread_id: str) -> None:
 
 
 def _finish_safe_boundary(task: asyncio.Task, *, thread_id: str) -> None:
+    _observe_deferred_event(task, thread_id=thread_id, kind="safe_boundary")
     if _SAFE_BOUNDARY_TASKS.get(thread_id) is task:
         del _SAFE_BOUNDARY_TASKS[thread_id]
-    _observe_deferred_event(task, thread_id=thread_id, kind="safe_boundary")
+        if thread_id in _SAFE_BOUNDARY_WAKES:
+            _SAFE_BOUNDARY_WAKES.remove(thread_id)
+            schedule_safe_boundary(thread_id)
 
 
 def _capture_context_usage_frame(

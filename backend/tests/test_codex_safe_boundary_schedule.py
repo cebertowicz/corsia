@@ -21,6 +21,7 @@ async def test_repeated_wakes_join_one_stalled_steer(monkeypatch, expires):
     session._track_active_turn("provider-turn")
     written = asyncio.Event()
     release = asyncio.Event()
+    followed = asyncio.Event()
     calls = []
 
     class Stdin:
@@ -43,6 +44,9 @@ async def test_repeated_wakes_join_one_stalled_steer(monkeypatch, expires):
 
     async def deliver(thread_id):
         calls.append(thread_id)
+        if len(calls) > 1:
+            followed.set()
+            return False  # No new batch; a dead session also declines here.
         return await session.steer("queued input")
 
     monkeypatch.setattr(codex_inbox_batch, "deliver_live_inbox_batch", deliver)
@@ -67,7 +71,9 @@ async def test_repeated_wakes_join_one_stalled_steer(monkeypatch, expires):
                 tasks[0].result()
         else:
             assert tasks[0].result() is True
+        await asyncio.wait_for(followed.wait(), 1)
         await asyncio.sleep(0)
+        assert calls == [thread_id, thread_id]
         assert not [task for task in asyncio.all_tasks()
                     if task.get_name() == f"codex-safe-boundary:{thread_id}"]
     finally:

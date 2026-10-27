@@ -62,7 +62,7 @@ async def test_codex_rpc_rejection_releases_count_but_lost_ack_preserves_it(monk
         await session.steer("input", input_context=("input", 20))
     assert session.tool_context.pending_inputs == ({} if rejected else {"input": 20})
     assert session._pending == {}
-    assert session._proc.kill.call_count == int(not rejected)
+    session._proc.kill.assert_not_called()
 
 
 @pytest.mark.asyncio
