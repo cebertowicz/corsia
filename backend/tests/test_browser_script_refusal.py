@@ -29,6 +29,8 @@ async def test_saved_sessions_refuse_script_requests(synthetic_browser, monkeypa
     with pytest.raises(BrowserSessionError, match="snapshot or get text"):
         await synthetic_browser.owner.run("a", args)
     assert synthetic_browser.calls == []
+    assert 'your own ephemeral agent-browser session in the protected shell' in commands._SCRIPT_REFUSAL
+    assert 'native browser tools use the saved sign-in' in commands._SCRIPT_REFUSAL
     await synthetic_browser.owner.shutdown()
 
 

@@ -2,7 +2,7 @@
 
 Chrome locks a profile to one running browser. The first session of an owner holds the shared profile; a
 session that starts while it is held launches on a throwaway profile seeded with a copy of the holder's
-sign-in (agent-browser's ``state save`` / ``--state``), kept in private state and removed when it closes.
+sign-in (agent-browser's private ``state save`` / ``state load``), kept in private state and removed on close.
 A session whose owning user cannot be resolved receives neither the profile nor a copy.
 """
 from __future__ import annotations
@@ -11,20 +11,119 @@ import asyncio
 import contextlib
 import logging
 import os
+import subprocess
+import sys
+import time
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-from host_access import browser_cli, browser_identity as identity, browser_launch
+from host_access import browser_cli, browser_executables, browser_identity as identity, browser_launch
 
 logger = logging.getLogger(__name__)
 _STATE_SAVE_TIMEOUT = 30.0
 
 
-async def resolve_profile(thread_id: str) -> str | None:
-    """Return the saved profile for a resolved owner, or use an ephemeral browser."""
+async def pin_native(owner: Any, *, changed_message: str) -> None:
+    """Resolve and pin both native executables before session admission."""
+    from host_access.browser_session_state import BrowserSetupError
+    async with owner._native_lock:
+        try:
+            path, fingerprint = await asyncio.to_thread(browser_cli.resolve_native, owner.binary)
+            if owner._native is not None:
+                if (path, fingerprint) != owner._native_source:
+                    raise identity.BrowserIdentityChanged(changed_message)
+                return
+            source_identity = (path, fingerprint)
+            if sys.platform == "darwin":
+                path = await asyncio.to_thread(browser_executables.private_native, path)
+            path, fingerprint = await asyncio.to_thread(browser_cli.resolve_native, path)
+            owner.socket_dir = await asyncio.to_thread(identity.ensure_private_dir, owner.socket_dir)
+            from host_access.browser_environment import prepare_config
+            await asyncio.to_thread(prepare_config, owner.socket_dir)
+            result = await owner._invoke((path, "--version"), timeout=5.0)
+            if result.completion != "exited" or result.timed_out or result.returncode:
+                raise identity.BrowserIdentityError(
+                    f"`agent-browser --version` did not succeed; {browser_cli.install_hint()}")
+            version = browser_cli.admitted_version(result.stdout)
+            if await asyncio.to_thread(browser_cli.resolve_native, owner.binary) != source_identity:
+                raise identity.BrowserIdentityChanged(changed_message)
+            chrome, source = await select_chrome(owner, path)
+            user_agent = browser_launch.user_agent(await asyncio.to_thread(browser_launch.chrome_major, chrome))
+            await asyncio.to_thread(prepare_directories)
+            owner._native_source = source_identity
+            owner._native = browser_cli.NativeExecutable(path, fingerprint, version)
+            owner._chrome = chrome
+            owner._user_agent = user_agent
+            logger.info("managed Chrome resolved from %s (%s)", chrome, source)
+        except identity.BrowserIdentityError as exc:
+            # Setup refusal precedes admission; it never enters cleanup state.
+            raise BrowserSetupError(str(exc)) from exc
+        except (OSError, ValueError, subprocess.SubprocessError) as exc:
+            raise BrowserSetupError("Shared browser setup could not complete; try browser setup again") from exc
+
+
+async def start_chrome(owner: Any, runtime: Any) -> None:
+    """Start the producer before agent-browser is permitted to attach."""
+    from host_access.browser_chrome import ChromeProcess
+    if sys.platform != "darwin":
+        return  # Preserve native-owned Linux launch; saved profiles are refused at admission.
+    assert owner._chrome is not None
+    from host_access.browser_download import is_private_download
+    if not await asyncio.to_thread(is_private_download, owner._chrome):
+        await asyncio.to_thread(browser_executables.verify_google, owner._chrome)
+    runtime.chrome = await ChromeProcess.launch(
+        owner._chrome, profile=runtime.record.profile,
+        headless=not runtime.record.show_window, ua=owner._user_agent)
+    runtime.chrome.release_stream()
+    runtime.attempt_started_at = time.time()
+    runtime.attempt = browser_cli.CommandResult(-1, "", "", completion="unknown")
+    try:
+        runtime.attempt = await owner._invoke(owner._session_argv(runtime, ("stream", "status")), timeout=5)
+    except browser_cli.CommandCancelled as exc:
+        runtime.attempt = exc.result
+        raise
+    await owner._observe_attempt(runtime)
+    await verify_stream(owner, runtime, runtime.attempt)
+
+
+async def verify_stream(owner: Any, runtime: Any, result: Any = None) -> None:
+    """The native daemon may fall back to another port; refuse that session."""
+    from host_access.browser_chrome import require_listener
+    import json
+    assert runtime.chrome is not None and runtime.record.binding is not None
+    if result is None:
+        result = await owner._invoke(owner._session_argv(runtime, ("stream", "status")), timeout=5)
+    try:
+        data = json.loads(result.stdout)
+        actual = data.get("data", {}).get("port")
+    except (ValueError, AttributeError):
+        actual = None
+    if result.returncode or result.timed_out or result.completion != "exited" or actual != runtime.chrome.stream_port:
+        raise RuntimeError("managed browser stream did not use its reserved listener")
+    await asyncio.to_thread(require_listener, runtime.record.binding.pid, actual)
+
+
+async def close_after_failure(runtime: Any) -> Exception | None:
+    """Retain an unresolved Chrome handle without replacing the original cleanup cause."""
+    from host_access.browser_session_state import BrowserSessionCleanupError
+    if runtime.chrome is None:
+        return None
+    try:
+        await asyncio.shield(runtime.chrome.close())
+        runtime.chrome = None
+        return None
+    except Exception:
+        logger.exception("managed Chrome cleanup also failed during session recovery")
+        return BrowserSessionCleanupError("managed Chrome cleanup could not be verified")
+
+
+async def resolve_profile(thread_id: str) -> tuple[str | None, str | None]:
+    """Resolve the saved profile and any notice about platform availability."""
     profile = await asyncio.to_thread(browser_launch.profile_dir, thread_id)
-    return str(profile) if profile is not None else None
+    if profile is not None and sys.platform == "linux":
+        return None, "Saved browser sign-ins are unavailable on Linux yet; this session is ephemeral."
+    return (str(profile) if profile is not None else None), None
 
 
 def assign(sessions: Mapping[str, Any], profile: str | None, thread_id: str) -> tuple[str | None, str | None]:
@@ -46,12 +145,23 @@ def assign(sessions: Mapping[str, Any], profile: str | None, thread_id: str) -> 
 
 
 def flags(record: Any, ua: str | None) -> Sequence[str]:
-    """Keep launch settings stable; restore a concurrent copy only on its first command."""
-    copy = browser_launch.copy_path(record.session) if record.copy_of and record.binding is None else None
-    return browser_launch.launch_argv(
-        ua, headless=not record.show_window,
-        profile=Path(record.profile) if record.profile else None, state_copy=copy,
-    )
+    """Keep launch settings stable across the CDP connection's commands."""
+    if sys.platform != "darwin":
+        return ["--args", browser_launch.stealth_args(ua, headless=not record.show_window),
+                "--init-script", str(browser_launch.STEALTH_INIT_SCRIPT)]
+    return ["--init-script", str(browser_launch.STEALTH_INIT_SCRIPT)]
+
+
+async def restore_copy(owner: Any, runtime: Any) -> None:
+    """CDP attach ignores launch-time --state; restore privately before the first action."""
+    copy = browser_launch.copy_path(runtime.record.session)
+    if not runtime.record.copy_of or not copy.is_file():
+        return
+    runtime.attempt = await owner._invoke(
+        owner._session_argv(runtime, ("state", "load", str(copy))), timeout=_STATE_SAVE_TIMEOUT)
+    await owner._observe_attempt(runtime)
+    if runtime.attempt.returncode or runtime.attempt.timed_out or runtime.attempt.completion != "exited":
+        raise RuntimeError("browser sign-in copy could not be restored")
 
 
 def prepare_directories() -> None:
@@ -97,6 +207,16 @@ def drop_copy(record: Any) -> None:
 async def select_chrome(owner: Any, agent_browser: str) -> tuple[str | None, str]:
     """The Chrome agent-browser launches; with none installed, fetch agent-browser's own first."""
     chrome, source = await asyncio.to_thread(browser_cli.chrome_executable)
+    if sys.platform == "darwin":
+        from host_access import browser_download
+        if chrome is None:
+            chrome = await asyncio.to_thread(browser_cli.downloaded_chrome_executable)
+        if chrome is not None:
+            try:
+                return await asyncio.to_thread(browser_executables.trusted_chrome, chrome), source
+            except identity.BrowserIdentityError:
+                logger.info("installed Chrome could not be authenticated; using private download")
+        return await browser_download.install(agent_browser, owner.socket_dir), "private-download"
     if source == "default" and await asyncio.to_thread(browser_cli.chrome_download_missing):
         # No Chrome on this Mac: agent-browser's own install fetches Chrome for Testing
         # into the person's home, with no admin step.

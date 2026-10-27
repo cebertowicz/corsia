@@ -104,6 +104,7 @@ export default defineConfig({
 			command: backendCommand,
 			cwd: path.join(repoRoot, 'backend'),
 			url: `${backendUrl}/api/health`,
+			gracefulShutdown: { signal: 'SIGTERM', timeout: 30_000 },
 			timeout: 120_000,
 			reuseExistingServer: process.env.CORSIA_E2E_REUSE === '1',
 			stdout: 'pipe',

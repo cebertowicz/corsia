@@ -3,6 +3,8 @@
 # runs exactly these, so every test file runs once. Paths are relative to the
 # repository root, one per line.
 backend/tests/test_browser_profile_sandbox_macos.py
+backend/tests/test_browser_ports_sandbox_macos.py
+backend/tests/test_browser_restricted_ports_macos.py
 backend/tests/test_corsia_app_mode.py
 backend/tests/test_devices_listener_macos_integration.py
 backend/tests/test_desktop_service_launcher.py

@@ -75,7 +75,7 @@ async def test_actual_unsupported_native_version_is_refused(synthetic_browser, m
     # Use the real client boundary against Python, a native unsupported executable.
     monkeypatch.setenv('AGENT_BROWSER_DAEMON', '1')
     monkeypatch.setattr(owner, '_invoke', sessions.BrowserSessionOwner._invoke.__get__(owner))
-    with pytest.raises(sessions.BrowserSetupError, match='supported native agent-browser'):
+    with pytest.raises(sessions.BrowserSetupError, match='--version.*did not succeed'):
         await owner.run('thread', ['snapshot'])
     assert owner.live_count() == 0
 

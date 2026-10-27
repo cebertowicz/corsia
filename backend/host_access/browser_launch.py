@@ -11,7 +11,6 @@ import re
 import sqlite3
 import subprocess
 from pathlib import Path
-from typing import Sequence
 
 PROFILE_ROOT_NAME = "browser-profile"
 # Copies of the saved sign-in for sessions that cannot share the profile; they live inside the profile root.
@@ -84,23 +83,27 @@ def user_agent(major: str | None) -> str | None:
     return f"Mozilla/5.0 ({token}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{major}.0.0.0 Safari/537.36"
 
 
+def inherited_args() -> list[str]:
+    """Preserve launch settings without overriding owned listeners, profiles or origins."""
+    from host_access.browser_identity import BrowserIdentityError
+    # Match Chrome argv's splitlines() boundaries before checking each switch.
+    inherited = [part.strip() for line in os.environ.get("AGENT_BROWSER_ARGS", "").splitlines()
+                 for part in line.split(",") if part.strip()]
+    for arg in inherited:
+        switch = re.split(r"[=\s]", arg.lstrip("-"), maxsplit=1)[0].lower()
+        if switch in {"explicitly-allowed-ports", "remote-allow-origins", "remote-debugging-port",
+                      "remote-debugging-address", "user-data-dir"}:
+            raise BrowserIdentityError(f"managed browser refuses --{switch}; remove it from AGENT_BROWSER_ARGS")
+    return inherited
+
+
 def stealth_args(ua: str | None, *, headless: bool) -> str:
     """The ``--args`` value: what the environment already set, plus the evasions.
 
     agent-browser splits this value on commas or newlines, and a user agent holds a comma, so newlines it is.
     """
-    inherited = [part.strip() for part in re.split(r"[,\n]", os.environ.get("AGENT_BROWSER_ARGS", "")) if part.strip()]
+    inherited = inherited_args()
     ours = ["--disable-blink-features=AutomationControlled"]
     if headless and ua:
         ours.append(f"--user-agent={ua}")
     return "\n".join([*inherited, *(arg for arg in ours if arg not in inherited)])
-
-
-def launch_argv(ua: str | None, *, headless: bool, profile: Path | None, state_copy: Path | None) -> Sequence[str]:
-    """Browser launch settings supplied consistently on every command in a session."""
-    argv = ["--args", stealth_args(ua, headless=headless), "--init-script", str(STEALTH_INIT_SCRIPT)]
-    if profile is not None:
-        argv += ["--profile", str(profile)]
-    elif state_copy is not None and state_copy.is_file():
-        argv += ["--state", str(state_copy)]
-    return argv

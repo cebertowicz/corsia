@@ -59,30 +59,32 @@ async def test_the_first_session_launches_on_the_shared_profile_and_stops_announ
     await fake.owner.run("a", ["open", "about:blank"])
     await fake.owner.run("a", ["snapshot"])
     first, later = _launches(fake)
-    assert _value(first, "--profile") == str(browser_launch.profile_dir("a"))
-    args = _value(first, "--args").split("\n")
+    args = fake.chrome_calls[0]
+    assert f"--user-data-dir={browser_launch.profile_dir('a')}" in args
     assert "--disable-blink-features=AutomationControlled" in args
     ua = next(arg for arg in args if arg.startswith("--user-agent=")).removeprefix("--user-agent=")
     assert ua.endswith("Chrome/154.0.0.0 Safari/537.36") and "HeadlessChrome" not in ua
     assert Path(_value(first, "--init-script")).is_file()
     # Changing launch settings on a later command makes agent-browser switch browsers and lose the page.
-    for flag in ("--profile", "--args", "--init-script"):
+    for flag in ("--cdp", "--init-script"):
         assert _value(later, flag) == _value(first, flag)
+    assert len(fake.chrome_calls) == 1
     await fake.owner.shutdown()
 
 
 async def test_a_visible_browser_keeps_chromes_own_user_agent(synthetic_browser, chrome154):
     fake = synthetic_browser
     await fake.owner.run("a", ["open", "about:blank"], show_window=True)
-    args = _value(_launches(fake)[0], "--args")
-    assert "--user-agent" not in args and "AutomationControlled" in args
+    args = fake.chrome_calls[0]
+    assert not any(arg.startswith("--user-agent=") for arg in args)
+    assert "--disable-blink-features=AutomationControlled" in args
     await fake.owner.shutdown()
 
 
 async def test_the_environments_own_launch_args_survive(synthetic_browser, chrome154, monkeypatch):
     monkeypatch.setenv("AGENT_BROWSER_ARGS", "--no-sandbox")
     await synthetic_browser.owner.run("a", ["open", "about:blank"])
-    assert _value(_launches(synthetic_browser)[0], "--args").split("\n")[0] == "--no-sandbox"
+    assert "--no-sandbox" in synthetic_browser.chrome_calls[0]
     await synthetic_browser.owner.shutdown()
 
 
@@ -96,15 +98,44 @@ async def test_a_second_concurrent_session_starts_from_a_private_copy_of_the_sig
     assert _value(save, "--session") == fake.owner._sessions["a"].record.session
     assert copy.parent == browser_launch.profile_root() / "copies" and oct(copy.stat().st_mode & 0o777) == "0o600"
     second = _launches(fake)[1]
-    assert "--profile" not in second and _value(second, "--state") == str(copy)
+    restored = next(call for call in fake.calls if "state" in call and "load" in call)
+    assert restored[-3:] == ("state", "load", str(copy))
+    assert _value(restored, "--session") == fake.owner._sessions["b"].record.session
+    assert fake.calls.index(restored) < fake.calls.index(second)
+    assert "--profile" not in second and "--state" not in second
     await fake.owner.run("b", ["snapshot"])
     later = _launches(fake)[-1]
+    assert sum("state" in call and "load" in call for call in fake.calls) == 1
     assert "--state" not in later  # Repeating restore resets the current page.
-    assert _value(later, "--args") == _value(second, "--args")
+    assert _value(later, "--cdp") == _value(second, "--cdp")
+    assert len(fake.chrome_calls) == 2
     assert _value(later, "--init-script") == _value(second, "--init-script")
     assert fake.owner._sessions["b"].record.copy_of == "a"
     await fake.owner.close_thread("b")
     assert not copy.exists()
+    await fake.owner.shutdown()
+
+
+async def test_a_failed_copy_restore_closes_the_copy_before_its_first_navigation(synthetic_browser, chrome154, monkeypatch):
+    fake = synthetic_browser
+    _saving_state(fake, monkeypatch)
+    original = fake.owner._invoke
+    handles = []
+
+    async def invoke(argv, *, timeout):
+        result = await original(argv, timeout=timeout)
+        if argv[-3:-1] == ("state", "load"):
+            handles.append(fake.owner._sessions["b"].chrome)
+            return browser_cli.CommandResult(1, "", "fixture restore failure")
+        return result
+
+    monkeypatch.setattr(fake.owner, "_invoke", invoke)
+    await fake.owner.run("a", ["open", "about:blank"])
+    with pytest.raises(sessions.BrowserSessionError, match="startup failed"):
+        await fake.owner.run("b", ["open", "https://example.com"])
+    assert "b" not in fake.owner._sessions and "a" in fake.owner._sessions
+    assert not any("https://example.com" in call for call in fake.calls)
+    assert len(handles) == 1 and handles[0].close.await_count == 1
     await fake.owner.shutdown()
 
 
@@ -122,10 +153,12 @@ async def test_unlaunched_holder_yields_the_profile_to_the_next_session(syntheti
     first = await fake.owner._admit("a", lease_id=None)
     assert first.record.binding is None
     await fake.owner.run("b", ["open", "about:blank"])
-    assert _value(_launches(fake)[0], "--profile") == str(browser_launch.profile_dir("b"))
+    assert f"--user-data-dir={browser_launch.profile_dir('b')}" in fake.chrome_calls[0]
     assert first.record.profile is None and first.record.copy_of == "b"
     await fake.owner.run("a", ["open", "about:blank"])
-    assert "--state" in _launches(fake)[1] and "--profile" not in _launches(fake)[1]
+    assert any(call[-3:] == ("state", "load", str(browser_launch.copy_path(first.record.session)))
+               for call in fake.calls)
+    assert "--profile" not in _launches(fake)[1]
     await fake.owner.shutdown()
 
 
@@ -137,7 +170,8 @@ async def test_repeated_idle_transfers_redirect_waiting_copies(synthetic_browser
     await fake.owner.run("c", ["open", "about:blank"])
     assert first.record.copy_of == second.record.copy_of == "c"
     await fake.owner.run("a", ["open", "about:blank"])
-    assert "--state" in _launches(fake)[1]
+    assert any(call[-3:] == ("state", "load", str(browser_launch.copy_path(first.record.session)))
+               for call in fake.calls)
     await fake.owner.shutdown()
 
 
@@ -146,7 +180,7 @@ async def test_the_profile_frees_up_for_the_next_session_once_its_holder_closes(
     await fake.owner.run("a", ["open", "about:blank"])
     await fake.owner.close_thread("a")
     await fake.owner.run("b", ["open", "about:blank"])
-    assert "--profile" in _launches(fake)[1]
+    assert f"--user-data-dir={browser_launch.profile_dir('b')}" in fake.chrome_calls[1]
     await fake.owner.shutdown()
 
 
@@ -170,7 +204,7 @@ async def test_production_browser_route_uses_profile_only_for_resolved_owners(sy
     for thread in ("owned", "missing", "bad", "null"):
         assert await browser_runtime._run(["open", "about:blank"], thread_id=thread) == "ok"
     calls = _launches(synthetic_browser)
-    assert _value(calls[0], "--profile") == str(browser_launch.profile_root() / "user-1")
+    assert f"--user-data-dir={browser_launch.profile_root() / 'user-1'}" in synthetic_browser.chrome_calls[0]
     assert all(not {"--profile", "--state"} & set(call) for call in calls[1:])
     def unavailable():
         raise sqlite3.OperationalError("fixture database unavailable")
@@ -185,7 +219,8 @@ async def test_production_browser_route_uses_profile_only_for_resolved_owners(sy
     ["storage", "local"], ["auth", "list"], ["profiles"], ["network", "har", "start"], ["network", "requests"],
     ["open", "https://example.com", "--state", "/tmp/x.json"], ["open", "about:blank", "--profile", "/tmp/p"],
     ["open", "about:blank", "--profile=/tmp/p"], ["open", "about:blank", "--state=/tmp/x.json"],
-    ["open", "about:blank", "--restore"],
+    ["open", "about:blank", "--restore"], ["stream", "enable"], ["stream", "status"],
+    ["dashboard"], ["connect", "39400"], ["get", "cdp-url"],
 ])
 async def test_no_agent_route_can_read_or_redirect_the_saved_sign_in(synthetic_browser, args):
     """C2: the shared command path refuses every command that dumps cookies or saved state."""

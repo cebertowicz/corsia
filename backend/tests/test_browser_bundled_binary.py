@@ -94,20 +94,22 @@ async def test_first_use_without_any_chrome_installs_it_once_and_a_failure_retri
     fake = synthetic_browser
     installs = []
     outcomes = [sessions.CommandResult(1, "", "offline"), sessions.CommandResult(0, "", "")]
-    original = fake.owner._invoke
+    async def invoke(argv, *, timeout, socket_dir, config_path, home):
+        assert argv[-1] == "install"
+        installs.append((tuple(argv), timeout))
+        result = outcomes.pop(0)
+        if result.returncode == 0:
+            binary = home / '.agent-browser/browsers/chrome-156/Chrome.app/Google Chrome for Testing'
+            binary.parent.mkdir(parents=True)
+            binary.write_bytes(b'private fixture download')
+        return result
 
-    async def invoke(argv, *, timeout):
-        if argv[-1] == "install":
-            installs.append((tuple(argv), timeout))
-            return outcomes.pop(0)
-        return await original(argv, timeout=timeout)
-
-    monkeypatch.setattr(fake.owner, "_invoke", invoke)
-    monkeypatch.setattr(cli, "chrome_download_missing", lambda: True)
-    with pytest.raises(sessions.BrowserSetupError, match="could not download its browser") as caught:
+    monkeypatch.setattr(cli, "invoke", invoke)
+    monkeypatch.setattr(cli, "downloaded_chrome_executable", lambda: None)
+    with pytest.raises(sessions.BrowserSetupError, match="Shared browser needs Google Chrome") as caught:
         await fake.owner.run("thread", ["snapshot"])
     assert "npm" not in str(caught.value) and fake.owner.live_count() == 0
-    assert "internet" not in str(caught.value) and "exit=1 stderr=offline" in caplog.text  # the real cause is recorded
+    assert "internet" not in str(caught.value) and "exit=1" in caplog.text
     assert await fake.owner.run("thread", ["snapshot"]) == "ok"
     assert await fake.owner.run("thread", ["snapshot"]) == "ok"
     assert [argv[1:] for argv, _ in installs] == [("install",), ("install",)] and not outcomes

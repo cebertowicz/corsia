@@ -7,6 +7,7 @@ import time
 from typing import Literal
 
 from host_access import browser_cli, browser_identity as identity, browser_reporting
+from host_access.browser_chrome import ChromeProcess
 
 BrowserTerminalState = Literal["running", "resetting", "closed", "death_unverified"]
 
@@ -26,6 +27,7 @@ class BrowserSessionRecord:
     profile: str | None = field(default=None, repr=False)
     # The thread whose open session holds that profile; this session starts from a copy of its sign-in.
     copy_of: str | None = field(default=None, repr=False)
+    profile_notice: str | None = field(default=None, repr=False)
 
     @property
     def pid(self) -> int | None:
@@ -41,6 +43,8 @@ class BrowserRuntime:
     command_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     # Serializes a guard and its command without holding the lifecycle lock during cleanup.
     action_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    chrome: ChromeProcess | None = None
+    profile_notice_sent: bool = False
     attempt_started_at: float | None = None
     attempt: browser_cli.CommandResult | None = None
     close_task: asyncio.Task[None] | None = None

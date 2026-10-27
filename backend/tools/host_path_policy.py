@@ -252,11 +252,9 @@ class ProtectedHostPathPolicy:
         return None
 
     def hard_floor_sandbox_rules(self) -> str:
-        """Render only the credential-root denies; leased profiles keep the rest open."""
-        return "\n".join(
-            f'(deny file-read* file-write* (subpath "{sandbox_literal(path)}"))'
-            for path in self.credential_roots
-        )
+        """Render permanent credential and browser boundaries, including under a lease."""
+        from tools.host_sandbox_floor import hard_floor_rules
+        return hard_floor_rules(self.credential_roots, sandbox_literal)
 
     def sandbox_rules(self) -> str:
         """Render protected Seatbelt rules from the protected path inventory."""

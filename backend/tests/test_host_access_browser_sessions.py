@@ -63,14 +63,19 @@ async def test_chosen_chrome_is_a_launch_option_resolved_once(synthetic_browser,
     for call in fake.calls:
         launch = call[:call.index("--json")]
         assert launch[1] == "--session"
-        assert (launch[3:5] == ("--executable-path", chrome)) if chrome else ("--executable-path" not in call)
+        assert launch[3:5] == ("--cdp", fake.owner._sessions['visible'].chrome.endpoint)
+        assert "--executable-path" not in call
         # Never the person's own Chrome profile, in any form.
         assert "--user-data-dir" not in call
         if "--profile" in call:
             # The one CORSIA-owned profile, under the state root, and only on a session's first command.
             assert call[call.index("--profile") + 1].startswith(str(browser_launch.profile_root()) + "/")
-    first_commands = [call for call in fake.calls if "--profile" in call or "--state" in call]
-    assert len(first_commands) <= 1 and "--headed" in fake.calls[0]
+    assert len(fake.chrome_calls) == 2
+    if chrome:
+        assert all(call[0] == chrome for call in fake.chrome_calls)
+    assert "--headless=new" not in fake.chrome_calls[0]
+    assert "--headless=new" in fake.chrome_calls[1]
+    assert "--headed" in fake.calls[0]
     await fake.owner.shutdown()
 
 

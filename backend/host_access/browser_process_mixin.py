@@ -17,9 +17,12 @@ class BrowserProcessMixin:
         timeout: float = 30.0,
         show_window: bool | None = None,
         navigation_url: str | None = None,
+        notice: bool = True,
     ) -> str:
         """Delegate one browser command to the composed session owner."""
-        options = {"navigation_url": navigation_url} if navigation_url is not None else {}
+        options: dict[str, Any] = {"navigation_url": navigation_url} if navigation_url is not None else {}
+        if not notice:
+            options["notice"] = False
         return await self.browser_sessions().run(
             thread_id, args, lease_id=lease_id, timeout=timeout, show_window=show_window, **options,
         )

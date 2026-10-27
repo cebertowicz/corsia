@@ -21,10 +21,12 @@ _PANE_COMMANDS = {("open",), ("back",), ("forward",), ("reload",), ("get", "cdp-
 # Commands that read, write or save a session's cookies, storage or saved logins, or capture request headers.
 # The saved sign-in is a secret no agent route may return (HttpOnly cookies included), so the shared path
 # refuses them for agents and the pane alike; CORSIA's own state copy goes through the owner's private invoke.
-_COOKIE_COMMANDS = {"cookies", "state", "storage", "auth", "profiles", ("network", "har"), ("network", "requests")}
+_COOKIE_COMMANDS = {"cookies", "state", "storage", "auth", "profiles", "stream", "dashboard", "connect",
+                    ("network", "har"), ("network", "requests"), ("get", "cdp-url")}
 _SECRET_REFUSAL = "browser cookies, saved sign-ins and stored logins are not available to agents"
 _SCRIPT_REFUSAL = ("Scripts are unavailable in a browser session with a saved sign-in; read the page with "
-                   "snapshot or get text, or run scripted extraction in a browser session without the saved sign-in")
+                   "snapshot or get text. For scripted extraction without the saved sign-in, launch your own "
+                   "ephemeral agent-browser session in the protected shell; native browser tools use the saved sign-in")
 _SCRIPT_COMMANDS = {"eval", "addinitscript", "batch", "plugin", "mcp"}
 _SCRIPT_FLAGS = {"--fn", "--restore-check-fn", "--init-script", "--extension", "--enable", "--args"}
 
@@ -57,9 +59,16 @@ def _script_request(args: Sequence[str]) -> bool:
 
 async def run(owner: Any, thread_id: str, args: Sequence[str], *, lease_id: str | None,
               timeout: float, show_window: bool | None, session: str, pane: bool = False,
-              navigation_url: str | None = None) -> str:
+              navigation_url: str | None = None, notice: bool = True) -> str:
     """Guard agent commands; a connected pane's own commands pass, so the person can leave a password page."""
     _validate(thread_id, args, timeout, show_window, pane)
+    from host_access import browser_navigation
+    args = browser_navigation.normalize_command(args)
+    if navigation_url is not None:
+        normalized_url = browser_navigation.normalize_url(navigation_url)
+        if tuple(args) == ("eval", f"location.href = {json.dumps(navigation_url)}; 'navigating'"):
+            args = ("eval", f"location.href = {json.dumps(normalized_url)}; 'navigating'")
+        navigation_url = normalized_url
     try:
         config = await asyncio.to_thread(browser_cli.check_local_mode, args)
     except identity.BrowserIdentityError as exc:
@@ -81,7 +90,11 @@ async def run(owner: Any, thread_id: str, args: Sequence[str], *, lease_id: str 
     finally:
         owner._queued_actions -= 1
     try:
-        return await _run_action(owner, runtime, thread_id, args, lease_id, timeout, pane)
+        rendered = await _run_action(owner, runtime, thread_id, args, lease_id, timeout, pane)
+        if notice and not pane and runtime.record.profile_notice and not runtime.profile_notice_sent:
+            runtime.profile_notice_sent = True
+            rendered += "\n" + runtime.record.profile_notice
+        return rendered
     finally:
         runtime.action_lock.release()
 
