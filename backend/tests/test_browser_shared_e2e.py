@@ -22,10 +22,10 @@ from uuid import uuid4
 import pytest
 
 from host_access import (
-    browser_cdp, browser_control, browser_dom_write, browser_pane_state, browser_screencast, browser_session_commands,
+    browser_cdp, browser_control, browser_dom_write, browser_pane_state, browser_screencast, browser_session_commands, browser_steps,
     browser_step_lifecycle as lifecycle,
 )
-from tools import browser_runtime, browser_steps
+from tools import browser_runtime, browser_run_steps
 from host_access.browser_session_state import BrowserSessionError
 from host_access.browser_sessions import BrowserSessionOwner
 
@@ -160,14 +160,14 @@ async def test_scripted_steps_guard_a_mock_password_page(tmp_path, monkeypatch):
     _quiet_password_steps(monkeypatch, password_steps)
     browser_control.pane_connected(thread_id, "pane")
     monkeypatch.setattr(browser_runtime, "PROCESS_OWNER", ProcessOwner())
-    monkeypatch.setattr(browser_steps, "_run", browser_runtime._run)
-    monkeypatch.setattr(browser_steps, "_SKILLS", tmp_path)
+    monkeypatch.setattr(browser_run_steps, "_run", browser_runtime._run)
+    monkeypatch.setattr(browser_run_steps, "_SKILLS", tmp_path)
     try:
         with fixture_server() as origin:
             (path / "mock.json").write_text(json.dumps({"domains": ["127.0.0.1"], "steps": [{
                 "id": "password-page", "says": "Open the mock password page.", "action": "goto", "url": f"{origin}/probe.html"
             }]}), encoding="utf-8")
-            result = json.loads(await browser_steps.BrowserRunStepsTool().execute("local/mock", _thread_id=thread_id))
+            result = json.loads(await browser_run_steps.BrowserRunStepsTool().execute("local/mock", _thread_id=thread_id))
         assert result["ok"] is False and result["step"] == "password-page"
         assert result.get("start_at") == "password-page", (result, commands)
         assert result["message"].startswith(browser_control.PASSWORD_PAGE)
