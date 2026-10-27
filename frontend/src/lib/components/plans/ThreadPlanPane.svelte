@@ -236,7 +236,7 @@
 	{:else if query.status === 'forbidden' && !hasPayload}
 		<div class="plan-state error" role="alert">
 			<strong>This plan isn’t available</strong>
-			<p>You don’t have access to this plan.</p>
+			<p>You don’t have access to this chat. Choose another.</p>
 		</div>
 	{:else if query.status === 'not-found' && !hasPayload}
 		<div class="plan-state error" role="alert">

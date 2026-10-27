@@ -294,7 +294,7 @@ describe('errors', () => {
 		const net = controllableFetch();
 		for (const [status, expected, message] of [
 			[401, 'unauthorized', 'Sign-in required.'],
-			[403, 'forbidden', 'You don’t have access to this chat.'],
+			[403, 'forbidden', 'You don’t have access to this chat. Choose another.'],
 			[404, 'not-found', 'This chat isn’t available. Choose another.'],
 		] as const) {
 			const p = refresh(T1);
@@ -316,7 +316,7 @@ describe('errors', () => {
 				net.pending.at(-1)!.fail(status);
 				await p;
 				expect(entryFor(entry).errorMessage).toBe(status === 403
-					? `You don’t have access to this ${place}.`
+					? `You don’t have access to this ${place}. Choose another.`
 					: `This ${place} isn’t available. Choose another.`);
 			}
 		}

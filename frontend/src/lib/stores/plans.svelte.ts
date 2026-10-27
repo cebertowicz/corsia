@@ -30,7 +30,7 @@ import type {
 } from '$lib/api/plans';
 import { deferRefresh, forgetSpacing, noteStarted, spacingWaitMs } from './planRefreshSpacing';
 import { planClosedMessage } from './planClosedMessage';
-import { errorText } from '$lib/api/planRead';
+import { errorText, STALE_PAGE_MESSAGE } from '$lib/api/planRead';
 import { isActivityKey, planKeyString, type ActivityKey, type ActivityKeyString, type OperatorKey, type OperatorKeyString, type PlanKey, type PlanKeyString } from './planKeys';
 
 /**
@@ -144,7 +144,7 @@ function applyOutcome(key: PlanKey, keyStr: string, outcome: PlanReadOutcome) {
 	if (outcome.status === 'fresh') {
 		const expectedVersion = isActivityKey(key) ? 1 : 2;
 		if (outcome.payload.contract_version !== expectedVersion) {
-			applyOutcome(key, keyStr, { status: 'error', message: 'This page is out of date. Reload to see this plan.' });
+			applyOutcome(key, keyStr, { status: 'error', message: STALE_PAGE_MESSAGE });
 			return;
 		}
 		patch(keyStr, {

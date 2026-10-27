@@ -5,6 +5,9 @@ export type ReadOutcome<T> =
 	| { status: 'fresh'; payload: T; etag: string }
 	| Exclude<OperatorReadOutcome, { status: 'fresh' }>;
 
+/** A reply this page cannot read: the server is newer than the loaded page. */
+export const STALE_PAGE_MESSAGE = 'This page is out of date. Reload to see this plan.';
+
 export function safeErrorMessage(action: 'load' | 'update'): string {
 	return action === 'load' ? 'Couldn’t load these plans. Try again.' : 'Couldn’t update the plan. Try again.';
 }
@@ -45,8 +48,8 @@ export async function readPlan<T>(
 	let res: Response;
 	try {
 		res = await fetch(url, authHeaders(bearerValue, etag ?? null));
-	} catch (error) {
-		return { status: 'error', message: error instanceof Error ? error.message : String(error) };
+	} catch {
+		return { status: 'error', message: safeErrorMessage('load') };
 	}
 	if (res.status === 304) return { status: 'not-modified' };
 	if (res.status === 404) return { status: 'not-found' };
@@ -56,6 +59,6 @@ export async function readPlan<T>(
 	if (!res.ok) return { status: 'error', message: safeErrorMessage('load'), reference: errorReference(await readJson(res)) };
 	const body = await readJson(res);
 	const payload = body === undefined ? null : decode(body);
-	if (payload === null) return { status: 'error', message: 'The server sent an unreadable reply.' };
+	if (payload === null) return { status: 'error', message: STALE_PAGE_MESSAGE };
 	return { status: 'fresh', payload, etag: res.headers.get('ETag') ?? '' };
 }

@@ -7,5 +7,5 @@ export function planClosedMessage(key: PlanKey, status: 'not-found' | 'forbidden
 		: 'chat';
 	return status === 'not-found'
 		? `This ${place} isn’t available. Choose another.`
-		: `You don’t have access to this ${place}.`;
+		: `You don’t have access to this ${place}. Choose another.`;
 }
