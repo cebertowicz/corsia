@@ -247,7 +247,7 @@ describe('PlanTree row details disclosure', () => {
 		expect(line('waiting')).toBe('Waiting: 5h 3m');
 		expect(line('tokens')).toBe('Tokens: 1K');
 		expect(line('cost')).toBe('Cost: $0.5000 API-equivalent');
-		expect(line('own-waiting')).toBe('This step waiting: 10m 0s');
+		expect(line('own-waiting')).toBe('Waiting on: 10m 0s');
 		expect(line('own-working')).toBeNull();
 		expect(line('own-cost')).toBeNull();
 	});
@@ -505,7 +505,7 @@ describe('PlanTree row details disclosure', () => {
 		expect(line('tokens')).toBe('Tokens: at least 1.8M');
 		expect(line('cost')).toBeNull();
 		expect(line('own-working')).toBe('This step working: 2m 0s');
-		expect(line('own-waiting')).toBe('This step waiting: 10m 0s');
+		expect(line('own-waiting')).toBe('Waiting on: 10m 0s');
 		expect(line('own-tokens')).toBe('This step tokens: 300K');
 		expect(line('own-cost')).toBeNull();
 		expect(host.querySelector('.node-details details, .node-details button.reveal')).toBeNull();

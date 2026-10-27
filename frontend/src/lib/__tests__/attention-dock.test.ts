@@ -1010,6 +1010,6 @@ describe("AttentionDock — a question that left the queue first", () => {
     answerButton().click();
     await settle();
 
-    expect(host.textContent).toContain("This question is no longer open.");
+    expect(host.textContent).toContain("That decision is closed.");
   });
 });

@@ -41,7 +41,7 @@ export type PlanLifecycleMutationOutcome =
 	| { status: 'success' }
 	| { status: 'conflict'; detail?: string }
 	| { status: 'forbidden' }
-	| { status: 'error'; message: string };
+	| { status: 'error'; message: string; httpStatus?: number };
 
 /** Post one audited, revision-safe plan mutation as the authenticated user. */
 async function postPlanMutation(
@@ -71,7 +71,7 @@ async function postPlanMutation(
 	const detail = showRefusal ? await refusalDetail(res) : undefined;
 	if (res.status === 409) return { status: 'conflict', detail };
 	if (res.status === 422 && detail) return { status: 'error', message: detail };
-	return { status: 'error', message: safeErrorMessage(res.status) };
+	return { status: 'error', message: safeErrorMessage('update'), httpStatus: res.status };
 }
 
 async function refusalDetail(res: Response): Promise<string | undefined> {

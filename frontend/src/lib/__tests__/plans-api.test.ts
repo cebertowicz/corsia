@@ -75,7 +75,8 @@ describe('plan lifecycle mutations', () => {
 		mockFetch(500, { detail: '/secret/path.py' });
 		expect(await mutatePlanLifecycle(TOKEN, 'p', 'resume', 2, 'resume:p:2')).toEqual({
 			status: 'error',
-			message: 'The server had a problem handling this request.',
+			message: 'Couldn’t update the plan. Try again.',
+			httpStatus: 500,
 		});
 	});
 });
@@ -156,7 +157,8 @@ describe('contextual operator reads', () => {
 		const result = await readOperatorThread(TOKEN, 'thread-1');
 		expect(result).toEqual({
 			status: 'error',
-			message: 'The server had a problem handling this request.',
+			message: 'Couldn’t load these plans. Try again.',
+			httpStatus: 500,
 		});
 	});
 

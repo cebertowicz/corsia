@@ -286,7 +286,7 @@
 					onClose={close}
 				>
 					<!-- No chrome heading: the decision's own header already carries a
-					     "Decision · thread · project" eyebrow and the decision title. -->
+					     "Decision · chat · project" eyebrow and the decision title. -->
 
 					<DecisionChip
 						decision={current.detail as DecisionDetail}

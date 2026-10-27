@@ -52,7 +52,7 @@
 			<span
 				class="progress"
 				class:oversize={!!plan.oversize}
-				title={plan.oversize ? `More than ${plan.oversize.budget} open steps. Close, accept or archive what no longer needs doing.` : undefined}
+				title={plan.oversize ? `This plan has more than ${plan.oversize.budget} open tasks. Use Mark done or Won’t do on any that don’t need doing.` : undefined}
 			>{open} left</span>
 		{/if}
 		{#if error}<span class="lifecycle-error" role="alert" title={error}>{error}</span>{/if}

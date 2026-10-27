@@ -5,9 +5,8 @@ export type ReadOutcome<T> =
 	| { status: 'fresh'; payload: T; etag: string }
 	| Exclude<OperatorReadOutcome, { status: 'fresh' }>;
 
-export function safeErrorMessage(status: number): string {
-	if (status >= 500) return 'The server had a problem handling this request.';
-	return `Unable to load this scope (HTTP ${status}).`;
+export function safeErrorMessage(action: 'load' | 'update'): string {
+	return action === 'load' ? 'Couldn’t load these plans. Try again.' : 'Couldn’t update the plan. Try again.';
 }
 
 /** Bearer-auth GET headers, matching the existing api/attention.ts seam. */
@@ -34,7 +33,7 @@ export async function readPlan<T>(
 	if (res.status === 401) return { status: 'unauthorized' };
 	if (res.status === 403) return { status: 'forbidden' };
 	// Never surface a raw server body, which may contain internal detail.
-	if (!res.ok) return { status: 'error', message: safeErrorMessage(res.status) };
+	if (!res.ok) return { status: 'error', message: safeErrorMessage('load'), httpStatus: res.status };
 	let body: unknown;
 	try {
 		body = await res.json();

@@ -537,7 +537,7 @@ describe("ThreadPlanPane", () => {
     row!.click();
     await settle();
 
-    expect(host.textContent).toContain("That item no longer needs you");
+    expect(host.textContent).toContain("That task doesn’t need you");
     expect(network.calls.filter((url) => url.includes("/api/attention/queue"))).toHaveLength(1);
     __reset();
   });
@@ -615,7 +615,7 @@ describe("ThreadPlanPane", () => {
     indicator.click();
     await settle();
 
-    expect(host.textContent).toContain("That item no longer needs you");
+    expect(host.textContent).toContain("That task doesn’t need you");
     expect(
       network.calls.filter((url) => url.includes("/api/attention/queue")),
     ).toHaveLength(1);
@@ -666,7 +666,7 @@ describe("ThreadPlanPane", () => {
     expect(counts).toHaveLength(1);
     expect(counts[0].textContent?.trim()).toBe("12 left");
     expect(counts[0].classList.contains("oversize")).toBe(true);
-    expect(counts[0].getAttribute("title")).toContain("40");
+    expect(counts[0].getAttribute("title")).toBe("This plan has more than 40 open tasks. Use Mark done or Won’t do on any that don’t need doing.");
     unmount(component);
     unmount(head!);
     component = null;

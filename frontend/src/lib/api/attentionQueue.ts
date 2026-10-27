@@ -174,7 +174,7 @@ async function rejection(res: Response, fallback = FALLBACK_REJECTION): Promise<
 	}
 }
 
-const FALLBACK_CLOSED = 'This question is no longer open.';
+const FALLBACK_CLOSED = 'That decision is closed.';
 
 function closedMessage(res: Response): Promise<string> {
 	return rejection(res, FALLBACK_CLOSED);

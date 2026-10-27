@@ -294,14 +294,31 @@ describe('errors', () => {
 		const net = controllableFetch();
 		for (const [status, expected, message] of [
 			[401, 'unauthorized', 'Sign-in required.'],
-			[403, 'forbidden', 'You do not have access to this scope.'],
-			[404, 'not-found', 'This selected scope is no longer available.'],
+			[403, 'forbidden', 'You don’t have access to this chat.'],
+			[404, 'not-found', 'This chat isn’t available. Choose another.'],
 		] as const) {
 			const p = refresh(T1);
 			net.pending.at(-1)!.fail(status);
 			await p;
 			expect(entryFor('thread:t1').status).toBe(expected);
 			expect(entryFor('thread:t1').errorMessage).toBe(message);
+		}
+	});
+
+	it('names the selected project or workspace in unavailable and forbidden messages', async () => {
+		const net = controllableFetch();
+		for (const [key, entry, place] of [
+			[{ kind: 'workspace' } as const, 'workspace', 'workspace'],
+			[{ kind: 'project', id: 'p1' } as const, 'project:p1', 'project'],
+		] as const) {
+			for (const status of [403, 404]) {
+				const p = refresh(key);
+				net.pending.at(-1)!.fail(status);
+				await p;
+				expect(entryFor(entry).errorMessage).toBe(status === 403
+					? `You don’t have access to this ${place}.`
+					: `This ${place} isn’t available. Choose another.`);
+			}
 		}
 	});
 
@@ -318,7 +335,7 @@ describe('errors', () => {
 		const p = refresh(T1);
 		net.pending[0].fail(500);
 		await p;
-		expect(entryFor('thread:t1').errorMessage).toBe('The server had a problem handling this request.');
+		expect(entryFor('thread:t1').errorMessage).toBe('Couldn’t load these plans. Try again.');
 	});
 });
 

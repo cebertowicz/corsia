@@ -125,7 +125,7 @@
 				return;
 			}
 			drillRootId = drilled;
-			focusNotice = 'That item is no longer in this plan';
+			focusNotice = 'That task isn’t in this plan.';
 			return;
 		}
 		const instructions = personStepInstructionsDocument(node);
@@ -158,7 +158,7 @@
 	function showDecisionOutcome(outcome: Awaited<ReturnType<typeof requestFocus>>): void {
 		if (outcome === 'requested') return;
 		if (outcome === 'empty') {
-			decisionMessage = 'That item no longer needs you. Refreshing the plan.';
+			decisionMessage = 'That task doesn’t need you. Refreshing the plan.';
 			query.retry();
 			return;
 		}

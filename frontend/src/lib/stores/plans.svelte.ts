@@ -29,6 +29,7 @@ import type {
 	OperatorReadOutcome,
 } from '$lib/api/plans';
 import { deferRefresh, forgetSpacing, noteStarted, spacingWaitMs } from './planRefreshSpacing';
+import { closedMessage } from './planClosedMessage';
 import { isActivityKey, planKeyString, type ActivityKey, type ActivityKeyString, type OperatorKey, type OperatorKeyString, type PlanKey, type PlanKeyString } from './planKeys';
 
 /**
@@ -135,16 +136,14 @@ function ownerThreadIdFor(
 
 /** Outcomes a retry cannot change; each names what would. */
 const CLOSED_MESSAGES = {
-	'not-found': 'This selected scope is no longer available.',
 	unauthorized: 'Sign-in required.',
-	forbidden: 'You do not have access to this scope.',
 } as const;
 
 function applyOutcome(key: PlanKey, keyStr: string, outcome: PlanReadOutcome) {
 	if (outcome.status === 'fresh') {
 		const expectedVersion = isActivityKey(key) ? 1 : 2;
 		if (outcome.payload.contract_version !== expectedVersion) {
-			applyOutcome(key, keyStr, { status: 'error', message: 'This plan returned the wrong representation.' });
+			applyOutcome(key, keyStr, { status: 'error', message: 'Couldn’t load this plan. Try again.' });
 			return;
 		}
 		patch(keyStr, {
@@ -161,7 +160,8 @@ function applyOutcome(key: PlanKey, keyStr: string, outcome: PlanReadOutcome) {
 	if (outcome.status !== 'error') {
 		patch(keyStr, {
 			status: outcome.status, refreshing: false, payload: null, etag: null,
-			ownerThreadId: null, errorMessage: CLOSED_MESSAGES[outcome.status],
+			ownerThreadId: null, errorMessage: outcome.status === 'unauthorized'
+				? CLOSED_MESSAGES.unauthorized : closedMessage(key, outcome.status),
 		});
 		return;
 	}
