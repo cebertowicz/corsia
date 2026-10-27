@@ -23,6 +23,7 @@ from typing import Any, Callable, Literal, Mapping, Sequence
 import psutil
 from host_access.group_probe import live_group_members_after_eperm
 from host_access.browser_sessions import BROWSER_NAMESPACE, BrowserSessionOwner
+from host_access.browser_process_mixin import BrowserProcessMixin
 from host_access.managed_lifecycle import (
     DEFAULT_STALL_AFTER_SECONDS,
     LONG_RUNNING_MAX_LIFETIME_SECONDS,
@@ -414,7 +415,7 @@ def signal_bound_process(
         raise ProcessBindingError("bound process signal was denied") from exc
 
 
-class ProcessOwner(ManagedLifecycleMixin):
+class ProcessOwner(BrowserProcessMixin, ManagedLifecycleMixin):
     """One bounded owner for all CORSIA-agent process groups."""
 
     def __init__(
@@ -535,25 +536,6 @@ class ProcessOwner(ManagedLifecycleMixin):
         if len(payload) > bounded:
             payload = payload[-bounded:]
         return payload.decode("utf-8", errors="replace")
-
-    async def run_browser(
-        self,
-        thread_id: str,
-        args: Sequence[str],
-        *,
-        lease_id: str | None = None,
-        timeout: float = 30.0, show_window: bool | None = None,
-        navigation_url: str | None = None,
-    ) -> str:
-        """Delegate one browser command to the composed session owner."""
-        options = {"navigation_url": navigation_url} if navigation_url is not None else {}
-        return await self.browser_sessions().run(
-            thread_id, args, lease_id=lease_id, timeout=timeout, show_window=show_window, **options,
-        )
-
-    async def close_browser(self, thread_id: str) -> str:
-        """Close only the composed browser session for one exact thread."""
-        return await self.browser_sessions().close_thread(thread_id)
 
     def browser_sessions(self) -> BrowserSessionOwner:
         if self._browser_owner is None:
