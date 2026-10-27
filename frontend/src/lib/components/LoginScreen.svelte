@@ -129,7 +129,7 @@
 </script>
 
 {#if phase === 'error'}
-	<SetupShell steps={[]} page="error" title={remoteName ? `Can’t check ${remoteName}` : 'CORSIA couldn’t start'} lede={reportError || loginError || (remoteName ? 'Something went wrong. Try again, or save a report to send.' : 'Something went wrong while starting. Try again, or save a report to send.')} primary={{ label: 'Retry' }} onPrimary={checkAgain}>
+	<SetupShell steps={[]} page="error" title={shell?.mode === 'remote' ? `Can’t check ${remoteName || 'the other computer'}` : 'CORSIA couldn’t start'} lede={reportError || loginError || (shell?.mode === 'remote' ? 'Something went wrong. Try again, or save a report to send.' : 'Something went wrong while starting. Try again, or save a report to send.')} primary={{ label: 'Retry' }} onPrimary={checkAgain}>
 		{#snippet secondary()}
 			<Button variant="chip" onclick={async () => { reportError = await saveSetupReport(); }}>Save a report</Button>
 			{#if localReturnLabel}<Button variant="chip" onclick={returnToThisComputer} loading={returningToThisComputer} disabled={returningToThisComputer}>{localReturnLabel}</Button>{/if}

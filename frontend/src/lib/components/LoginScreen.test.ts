@@ -76,11 +76,17 @@ describe('LoginScreen', () => {
 		const fetchMock = vi.fn().mockResolvedValueOnce({ ok: false, status: 500 }).mockRejectedValueOnce(new Error('network'));
 		vi.stubGlobal('fetch', fetchMock);
 		mountScreen();
-		const heading = name ? 'Can’t check Studio' : 'CORSIA couldn’t start';
-		await vi.waitFor(() => expect(host.querySelector('h1')?.textContent).toBe(heading));
+		const heading = name ? 'Can’t check Studio' : 'Can’t check the other computer';
+		const expectErrorActions = () => {
+			expect(host.querySelector('h1')?.textContent).toBe(heading);
+			expect(host.textContent).toContain('Something went wrong. Try again, or save a report to send.');
+			expect(host.textContent).toContain('Retry');
+			expect(host.textContent).toContain('Use this computer instead');
+		};
+		await vi.waitFor(expectErrorActions);
 		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Retry'))!.click();
 		await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
-		await vi.waitFor(() => expect(host.querySelector('h1')?.textContent).toBe(heading));
+		await vi.waitFor(expectErrorActions);
 	});
 	it('shows the no-account state with the CLI command instead of a form', async () => {
 		vi.stubGlobal('fetch', vi.fn(async () => statusResponse(false)));
