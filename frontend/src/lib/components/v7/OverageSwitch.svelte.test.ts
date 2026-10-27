@@ -47,14 +47,14 @@ describe('OverageSwitch', () => {
 		const on = render(account('codex-work', true));
 
 		expect(off.textContent).toBe(on.textContent);
-		expect(off.textContent).toContain('Spend past plan limit');
+		expect(off.textContent).toContain('Spend past usage limit');
 		expect(off.querySelector('button')?.getAttribute('aria-pressed')).toBe('false');
 		expect(on.querySelector('button')?.getAttribute('aria-pressed')).toBe('true');
 	});
 
 	it('names its account when it sits inside an account row', () => {
 		expect(render(account('Work', false), true).querySelector('button')?.getAttribute('aria-label'))
-			.toBe('Spend past plan limit for Work');
+			.toBe('Spend past usage limit for Work');
 	});
 
 	it('PUTs the flipped value for its own account, stores the returned row, then reloads the catalog', async () => {
@@ -80,7 +80,7 @@ describe('OverageSwitch', () => {
 		card.querySelector('button')?.click();
 		await settle();
 
-		expect(card.textContent).toContain('Could not turn Spend past plan limit off: Could not reach the server.');
+		expect(card.textContent).toContain('Could not turn Spend past usage limit off: Could not reach the server.');
 	});
 
 	it('stays disabled while the account has no plan-limit setting', () => {

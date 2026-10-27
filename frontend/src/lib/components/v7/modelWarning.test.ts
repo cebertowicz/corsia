@@ -37,7 +37,7 @@ describe('chatPickerWarning', () => {
 	});
 
 	it('points External rows at the checkpoint window setting', () => {
-		expect(chatPickerWarning(catalog, 'ext-nowin', true)).toContain('checkpoint context window');
+		expect(chatPickerWarning(catalog, 'ext-nowin', true)).toBe('Not shown in the model list: set its context window in this model’s details.');
 	});
 
 	it('does not point non-External rows at a setting they lack', () => {
@@ -47,12 +47,12 @@ describe('chatPickerWarning', () => {
 	});
 
 	it('names a disconnected harness', () => {
-		expect(chatPickerWarning(catalog, 'codex/x', false)).toContain('isn’t connected');
+		expect(chatPickerWarning(catalog, 'codex/x', false)).toBe('Not shown in the model list: its app isn’t connected.');
 	});
 
 	it('falls back to a plain line for other reasons, never the raw code', () => {
 		const text = chatPickerWarning(catalog, 'cc/y', false);
-		expect(text).toContain('Not in the chat picker');
+		expect(text).toBe('Not shown in the model list: this model is unavailable right now.');
 		expect(text).not.toContain('discovered_model_unavailable');
 	});
 });

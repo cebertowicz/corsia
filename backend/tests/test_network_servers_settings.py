@@ -133,7 +133,7 @@ def test_lifecycle_reload_dispatches_to_discover(client):
     assert "4" in body["message"]
 
 
-def test_lifecycle_reload_propagates_failure_message(client):
+def test_lifecycle_reload_logs_failure_and_shows_retry(client, caplog):
     with patch(
         "llm.catalog.discover_network_models",
         new=AsyncMock(return_value={
@@ -147,7 +147,8 @@ def test_lifecycle_reload_propagates_failure_message(client):
     assert r.status_code == 200
     body = r.json()
     assert body["ok"] is False
-    assert "offline" in body["message"]
+    assert body["message"] == "Couldn’t refresh the model list. Try again."
+    assert "Server is offline" in caplog.text
 
 
 def test_lifecycle_start_dispatches_to_provider_connector(client, monkeypatch):
@@ -231,6 +232,40 @@ def test_loading_or_pinning_a_model_clears_a_failed_keep_attempt(client, monkeyp
         r = client.put(f"/api/settings/network-servers/ns-test/models/{model}/settings", params=_auth(), json={"pinned": True})
     assert r.status_code == 200, r.text
     assert local_keep_loaded.failures("ns-test") == {}
+
+
+def test_download_progress_failure_hides_exception(client, monkeypatch, caplog):
+    from llm import network_endpoints
+    monkeypatch.setattr(network_endpoints, "build_mgmt_base", lambda _sid: "http://localhost:5100")
+    with patch("api.network_server_jobs.httpx.AsyncClient") as http:
+        http.return_value.__aenter__.return_value.get = AsyncMock(side_effect=RuntimeError("raw failure"))
+        response = client.get("/api/settings/network-servers/ns-test/jobs/j1", params=_auth())
+    assert response.status_code == 500
+    assert response.json()["detail"] == "Couldn’t read this download’s progress from the model server. Try again."
+    assert "raw failure" in caplog.text
+
+
+def test_download_progress_unexpected_response(client, monkeypatch):
+    from llm import network_endpoints
+    monkeypatch.setattr(network_endpoints, "build_mgmt_base", lambda _sid: "http://localhost:5100")
+    with patch("api.network_server_jobs.httpx.AsyncClient") as http:
+        http.return_value.__aenter__.return_value.get.return_value.status_code = 503
+        response = client.get("/api/settings/network-servers/ns-test/jobs/j1", params=_auth())
+    assert response.status_code == 502
+    assert response.json()["detail"] == "The model server gave an unexpected response. Try again."
+
+
+def test_model_settings_failure_hides_upstream_message(client, caplog):
+    with patch("llm.providers.omlx.update_model_settings", new=AsyncMock(return_value={
+        "ok": False, "status": 503, "message": "HTTP 503: upstream detail",
+    })):
+        response = client.put(
+            "/api/settings/network-servers/ns-test/models/m/settings",
+            params=_auth(), json={"pinned": True},
+        )
+    assert response.status_code == 502
+    assert response.json()["detail"] == "Couldn’t save this model’s settings. Try again."
+    assert "HTTP 503: upstream detail" in caplog.text
 
 
 def _auth() -> dict[str, str]:

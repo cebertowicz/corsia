@@ -7,8 +7,8 @@ import { activeThreadId } from './threads';
 import type { VendorAccount } from './vendorAccounts';
 
 /** The approved copy, identical for Claude Code and Codex (#2477 amendment 12). */
-export const OVERAGE_SWITCH_LABEL = 'Spend past plan limit';
-export const PAUSED_AT_PLAN_LIMIT = 'Paused: plan limit reached';
+export const OVERAGE_SWITCH_LABEL = 'Spend past usage limit';
+export const PAUSED_AT_PLAN_LIMIT = 'Paused: usage limit reached';
 /** The held line's picker action (#2477 amendment 17). */
 export const SWITCH_MODEL_LABEL = 'Switch model';
 /** The verdict reason and Stop cause the backend writes while the switch is off. */

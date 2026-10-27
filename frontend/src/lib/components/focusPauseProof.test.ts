@@ -140,7 +140,7 @@ function precedes(a: Element, b: Element): void {
   expect(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 }
 function assertExistingMarkerCount(c: Case): void {
-  expect(markers().map(m => m.textContent?.trim())).toEqual(c.anchors.map(() => 'Paused: plan limit reached'));
+  expect(markers().map(m => m.textContent?.trim())).toEqual(c.anchors.map(() => 'Paused: usage limit reached'));
   expect(host.querySelector('.pending-input-region .plan-limit-paused')).toBeNull();
 }
 function assertExpandedOrder(c: Case, built: ReturnType<typeof chain>): void {

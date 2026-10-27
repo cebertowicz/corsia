@@ -47,9 +47,10 @@ async def lifecycle_action(server_id: str, action: str):
                 "message": f"Discovered {result.get('discovered', 0)} model(s)",
                 **{k: v for k, v in result.items() if k != "ok"},
             }
+        log.warning("Model list refresh failed: %s", result.get("error"))
         return {
             "ok": False,
-            "message": result.get("error", "Reload failed"),
+            "message": "Couldn’t refresh the model list. Try again.",
         }
 
     try:
@@ -126,7 +127,8 @@ async def update_daemon_model_settings(
     result = await provider_module.update_model_settings(cfg, model_id, body)
     if not result.get("ok"):
         status = result.get("status", 502)
-        raise HTTPException(status if status < 500 else 502, detail=result.get("message"))
+        log.warning("Could not save model settings: %s", result.get("message"))
+        raise HTTPException(status if status < 500 else 502, detail="Couldn’t save this model’s settings. Try again.")
     if "pinned" in body:
         from llm.local_keep_loaded import forget_failure
 

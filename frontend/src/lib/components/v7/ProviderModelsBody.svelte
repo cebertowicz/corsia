@@ -291,7 +291,7 @@
 				state={m.state}
 				meta={localDownloadMeta(m.meta, localRows.speeds?.get(m.id))}
 				caps={m.caps}
-				warning={chatPickerWarning($catalogModels, m.dbId, isExternal) ?? keepLine(m)}
+				warning={chatPickerWarning($catalogModels, m.dbId, isExternal, provider.label) ?? keepLine(m)}
 				toggleOn={true}
 				{toggleLabels}
 				onToggle={() => handleToggleModel(m)}
