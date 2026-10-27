@@ -43,7 +43,7 @@ def _redact_leaves(value: Any) -> Any:
     if isinstance(value, list):
         return [_redact_leaves(item) for item in value]
     if isinstance(value, dict):
-        return {key: _redact_leaves(item) for key, item in value.items()}
+        return {scrub(key): _redact_leaves(item) for key, item in value.items()}
     return value
 
 
@@ -86,9 +86,14 @@ class GithubReadBroker:
         except GithubReadRefused as exc:
             log.warning("github-broker: refused (%s) %s", exc.reason, scrub(exc.detail)[:120])
             raise GithubReadRefused(exc.reason, scrub(exc.detail)[:120]) from None
-        result = self._inner(argv, timeout=timeout)
+        try:
+            result = self._inner(argv, timeout=timeout)
+        except subprocess.TimeoutExpired as exc:
+            raise subprocess.TimeoutExpired([scrub(part) for part in argv], exc.timeout) from None
+        except OSError as exc:
+            raise type(exc)(scrub(str(exc))) from None
         return subprocess.CompletedProcess(
-            argv, result.returncode,
+            [scrub(part) for part in argv], result.returncode,
             _scrub_output(argv, str(result.stdout or "")), scrub(str(result.stderr or "")),
         )
 

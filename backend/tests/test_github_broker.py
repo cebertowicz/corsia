@@ -273,6 +273,23 @@ def test_a_token_in_output_errors_and_logs_never_survives(broker, inner, caplog)
     assert token not in " ".join(str(part) for part in result.args)
 
 
+def test_secrets_in_json_keys_arguments_and_timeout_are_scrubbed(inner) -> None:
+    token = secret()
+    inner.result = (json.dumps({token: "value"}), "", 0)
+    broker = GithubReadBroker(inner)
+    result = broker(["api", f"repos/{token}/repo"])
+    assert token not in result.stdout and token not in str(result.args)
+    assert json.loads(result.stdout) == {"[redacted]": "value"}
+
+    def timeout(args, *, timeout):
+        raise subprocess.TimeoutExpired(args, timeout, output=token, stderr=token)
+
+    with pytest.raises(subprocess.TimeoutExpired) as caught:
+        GithubReadBroker(timeout)(["api", f"repos/{token}/repo"])
+    assert token not in str(caught.value) and token not in repr(caught.value.cmd)
+    assert caught.value.output is None and caught.value.stderr is None
+
+
 def test_a_token_shaped_value_inside_a_json_string_is_scrubbed_and_the_document_stays_valid(broker, inner) -> None:
     token = secret()
     comment = f'before {token} after, then curl -H "Authorization: Bearer {token}" -d \'x\' end'
