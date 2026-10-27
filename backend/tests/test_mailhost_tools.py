@@ -330,7 +330,8 @@ async def test_search_and_read_work_on_a_connected_mail_host_account(connected, 
     found = json.loads(await EmailSearchTool().execute(_thread_id=connected.thread, query="from:sam", max=5))
     assert connected.built.imap.searches[-1] == 'FROM "sam"'
     ids = [item["message_id"] for item in found["messages"]]
-    assert ids == [mint(connected, 2), mint(connected, 1)] and found["messages"][0]["from"].endswith("<billing@example.com>")
+    # Not yet screened when searched, so the sender-chosen display name is cut to the address (O2).
+    assert ids == [mint(connected, 2), mint(connected, 1)] and found["messages"][0]["from"] == "billing@example.com"
     assert all("body" not in item for item in found["messages"])
     read = json.loads(await EmailReadTool().execute(_thread_id=connected.thread, message_id=mint(connected, 2)))
     assert read["subject"] == "Invoice 42" and BODY_CANARY in read["body"] and read["body"].startswith("<untrusted-email>")

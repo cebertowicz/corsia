@@ -313,6 +313,7 @@ class TestRouting:
             "o/r", 90, action="closed", author="corsia[bot]", author_type="Bot"
         )
         payload["pull_request"]["merged"] = True
+        payload["pull_request"]["user"] = {"login": "corsia[bot]", "type": "Bot"}  # suppression reads the content author
         nudges: list[dict] = []
 
         with patch(

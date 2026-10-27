@@ -108,19 +108,19 @@ def declaration_facts(payload: dict[str, Any]) -> dict[str, str]:
     declared_ids = declared_owner_thread_ids(body)
     if len(declared_ids) != 1:
         return {}
-    if not isinstance(login, str) or not _is_own(login):
+    if not isinstance(login, str) or not is_own(login):
         return {}
     return {"declared_owner_thread": declared_ids.pop()}
 
 
-def _is_own(login: str) -> bool:
+def is_own(login: str) -> bool:
     """Whether a verified login of CORSIA's own wrote this PR: the host's, else the agents' account.
 
     The agents' account is read only for another author: one indexed read and one
     ``stat``, no subprocess. An unknown or unverified identity matches nothing.
     """
     own_login = cached_own_login() or _ensure_own_login()
-    if own_login and login == own_login:
+    if own_login and login.casefold() == own_login.casefold():
         return True
     from connections import github_agent
 

@@ -395,13 +395,15 @@ async def test_webhook_reads_when_routing_chose_no_thread(isolated_db, sent, res
     matched_rows = list(rows)
     untracked = await run(64, "nobody/tracks")
 
-    # With no self-rule for the type, one read and no repository lookup.
-    assert no_rule == (before + 1, 0)
+    # With no self-rule for the type, one read and no repository lookup, plus the
+    # outside author's one origin check (O1: the agents' account row and its person row).
+    ORIGIN_READS = 2
+    assert no_rule == (before + 1 + ORIGIN_READS, 0)
     assert _decisions(thread_id="a")[-1]["outcome"] == "woke"
     # Only the tracking project's rules are read: Q's rule for another repository is not.
     assert matched_rows == [f"project:{P}"] * 2  # the read-only check, then evaluation
     assert matched[1] == 1
-    assert untracked == (before + 1, 1) and rows == []
+    assert untracked == (before + 1 + ORIGIN_READS, 1) and rows == []
     print(f"unrouted webhook (DB reads, lookups): dev=({before}, 0) "
           f"no_rule=+({no_rule[0] - before}, {no_rule[1]}) "
           f"matched=+({matched[0] - before}, {matched[1]}) "
@@ -728,7 +730,9 @@ async def test_todays_drops_still_come_before_any_rule(isolated_db, sent):
     cancelled = check_suite_payload(REPO, 7, conclusion="cancelled", base_ref="dev")
     cancelled["check_suite"]["head_sha"] = "sha-c"
     await route("webhook.github.check_suite_completed", cancelled)
-    own = await route(SYNC, _sync(7, 3, author="corsia[bot]", author_type="Bot"))
+    own_sync = _sync(7, 3, author="corsia[bot]", author_type="Bot")
+    own_sync["pull_request"]["user"] = {"login": "corsia[bot]", "type": "Bot"}  # suppression reads the content author
+    own = await route(SYNC, own_sync)
 
     assert own.outcome == RouteOutcome.SUPPRESSED
     assert sent == []

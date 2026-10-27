@@ -7,7 +7,7 @@ this guard exists to prevent.
 
 Two signals, both checked:
 
-1. **Structural** — the GitHub sender/comment author is a Bot account
+1. **Structural** — the content author is a Bot account
    (``user.type == "Bot"`` or login ending in ``[bot]``). GitHub Apps (the
    reviewer posts via one) always carry this.
 2. **Configured identity** — a settings-managed allowlist of logins that ARE
@@ -52,17 +52,14 @@ def _configured_self_authors() -> set[str]:
         return set()
 
 
-def _event_author(payload: dict[str, Any]) -> dict[str, Any]:
-    """The user object that authored the triggering event.
-
-    Comment events carry ``comment.user``; the ``sender`` is the actor for
-    PR/check events. Prefer the comment author (it is the thing that would
-    loop), fall back to the sender.
-    """
-    comment = payload.get("comment") or {}
-    if comment.get("user"):
-        return comment["user"]
-    return payload.get("sender") or {}
+def event_author(payload: dict[str, Any]) -> dict[str, Any]:
+    """Return the content author's user object, never the acting sender."""
+    for key in ("comment", "review", "pull_request", "issue"):
+        item = payload.get(key)
+        if isinstance(item, dict):
+            user = item.get("user")
+            return user if isinstance(user, dict) else {}
+    return {}
 
 
 def is_bot_or_self_authored(payload: dict[str, Any]) -> bool:
@@ -71,7 +68,11 @@ def is_bot_or_self_authored(payload: dict[str, Any]) -> bool:
     Used by the router to SUPPRESS the event before it routes — a suppressed
     event never reaches a thread, so the reviewer/bot cannot trigger itself.
     """
-    user = _event_author(payload)
+    user = event_author(payload)
+    # Non-content events such as check suites still suppress their bot sender.
+    if not any(key in payload for key in ("comment", "review", "pull_request", "issue")):
+        sender = payload.get("sender")
+        user = sender if isinstance(sender, dict) else {}
     login = str(user.get("login", "")).lower()
     user_type = str(user.get("type", "")).lower()
 

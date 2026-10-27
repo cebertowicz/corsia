@@ -8,8 +8,8 @@ webhook's name; a check suite's pull request is the one routing selected.
 Recipients a rule adds are delivered through the platform path
 (``events.platform``). For the routed thread a rule can only drop the delivery
 (its writer's own) or ride it with a note. When routing chose no thread, rules
-can only add recipients, and today's result stands. Comments have no declared
-type yet, so no rule matches them.
+can only add recipients, and today's result stands. Existing comment routes
+also have declared types; edited and review types await rule-only admission.
 """
 
 from __future__ import annotations
@@ -69,6 +69,7 @@ class RuleScope:
 
     any_rule: bool = True
     repository_projects: frozenset[str] | None = frozenset()
+    envelope: EventEnvelope | None = None
 
 
 def rule_scope(
@@ -83,20 +84,21 @@ def rule_scope(
     if event_type is None:
         return RuleScope(any_rule=False)
     try:
+        envelope = _envelope(internal_event, payload, selected_pr)
+    except MalformedEventError as exc:
+        logger.warning("event rules: no rule evaluated {}: {}", internal_event, exc)
+        return RuleScope(any_rule=False)
+    try:
         any_rule, self_rule = rule_reads.type_rules(MANIFEST.connector, event_type)
     except Exception:
         # Rules only add: a failed read costs this webhook its rules, never its routing.
         logger.exception("event rules: no rule evaluated {}: rule read failed", internal_event)
         return RuleScope(any_rule=False)
     if not self_rule:
-        return RuleScope(any_rule=any_rule)
-    try:
-        facts = normalize(MANIFEST.connector, payload, event_type,
-                          resolved={CHECK_SUITE_PR: selected_pr}).facts
-    except MalformedEventError:
-        return RuleScope()  # apply_routed_rules logs it
+        return RuleScope(any_rule=any_rule, envelope=envelope)
+    facts = envelope.facts if envelope else {}
     return RuleScope(repository_projects=rule_reads.unrouted_projects(
-        MANIFEST.connector, event_type, facts, self_rule=True))
+        MANIFEST.connector, event_type, facts, self_rule=True), envelope=envelope)
 
 
 def apply_routed_rules(
@@ -127,7 +129,7 @@ def _apply(
     wake_reason: str | None, scope: RuleScope,
 ) -> None:
     try:
-        envelope = _envelope(internal_event, payload, selected_pr)
+        envelope = scope.envelope or _envelope(internal_event, payload, selected_pr)
     except MalformedEventError as exc:
         logger.warning("event rules: no rule evaluated {}: {}", internal_event, exc)
         return
