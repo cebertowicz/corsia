@@ -70,7 +70,7 @@ def observe_node_event(
 ) -> None:
     """Write the one card a qualifying outcome permits, in the caller's transaction."""
     kind = _outcome_kind(event, new_state, payload)
-    if event == "node_created":
+    if event == "node_created" and (payload is None or payload.get("person_step", True)):
         row = connection.execute(
             "SELECT kind, assignee, state FROM plan_nodes WHERE id=?", (node_id,),
         ).fetchone()

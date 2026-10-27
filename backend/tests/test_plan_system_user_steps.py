@@ -88,6 +88,21 @@ def test_open_makes_one_system_user_step_and_the_selected_task_waits_on_it(db):
     assert open_attempt(db, step) is None
 
 
+def test_system_step_card_becomes_done_after_system_settlement(db):
+    from infra.thread_updates import read_newest_cards
+
+    owner_plan(db)
+    step = _open(db)
+    assert _open(db) == step
+    cards, _ = read_newest_cards(db, "owner", min_seq=0)
+    steps = [card for card in cards if card["kind"] == "person_step" and card["node_id"] == step]
+    assert len(steps) == 1 and steps[0]["step_state"] == "open"
+    assert _settle(db, step) is True
+    cards, _ = read_newest_cards(db, "owner", min_seq=0)
+    steps = [card for card in cards if card["kind"] == "person_step" and card["node_id"] == step]
+    assert len(steps) == 1 and steps[0]["step_state"] == "done"
+
+
 def test_the_same_key_returns_the_same_step_and_a_new_key_a_new_one(db):
     plan = owner_plan(db)
     mine = task(db, plan.id, "Read the page")

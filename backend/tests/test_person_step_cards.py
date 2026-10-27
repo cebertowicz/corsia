@@ -32,6 +32,20 @@ def test_creation_and_follow_up_emit_once_and_agent_task_does_not(db):
     assert not [c for c in _cards(db) if c['kind'] == 'person_step' and c['node_id'] == agent.id]
 
 
+def test_split_emits_only_one_new_card(db):
+    plan = _plan(db)
+    source = _task(db, plan.id, title='Original', assignee='user')
+    before = [c for c in _cards(db) if c['kind'] == 'person_step']
+    sibling = mutations.split_node(
+        source.id, title='Sibling', acceptance_criteria='Done', size='S',
+        description='Complete the step. Already tried: the supported route.', db=db,
+    )
+    after = [c for c in _cards(db) if c['kind'] == 'person_step']
+    assert len(after) == len(before) + 1
+    assert sum(c['node_id'] == source.id for c in after) == 1
+    assert sum(c['node_id'] == sibling.id for c in after) == 1
+
+
 def test_reedit_and_event_replay_do_not_duplicate_the_card(db):
     plan = _plan(db)
     node = _task(db, plan.id, title='Person task', assignee='user')

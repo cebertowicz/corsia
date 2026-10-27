@@ -284,6 +284,7 @@ def create_node(
     intent: str | None = None,
     intent_node_id: str | None = None,
     commitment_id: str | None = None,
+    person_step: bool = True,
 ) -> PlanNode:
     """Validate and insert a node without opening another transaction."""
     (
@@ -307,6 +308,7 @@ def create_node(
             "workflow_version": workflow_version, "workflow_step": workflow_step,
             "difficulty": difficulty, "size": size, "follow_up_of": follow_up_of,
             "commitment_id": commitment_id,
+            **({"person_step": False} if not person_step else {}),
         },
     )
     return service._node_from_row(connection, service._node_row(connection, node_id))

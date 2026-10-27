@@ -254,7 +254,8 @@ def add_node(plan_id: str, *, kind: str, title: str, acceptance_criteria: str,
              assignee: str | None = None, spawn_kind: str | None = None,
              watchdog_budget_seconds: int | None = None,
              actor_id: str | None = None,
-             provenance: str = "plan_service", db=None) -> PlanNode:
+             provenance: str = "plan_service", db=None,
+             person_step: bool = True) -> PlanNode:
     """Add one DOD-bearing node at a valid tree position."""
     with plan_write.transaction(db) as connection:
         return _create_node(
@@ -267,6 +268,7 @@ def add_node(plan_id: str, *, kind: str, title: str, acceptance_criteria: str,
             spawn_kind=spawn_kind,
             watchdog_budget_seconds=watchdog_budget_seconds, follow_up_of=None,
             actor_id=actor_id, provenance=provenance, node_id=_id(),
+            person_step=person_step,
         )
 
 def get_node(node_id: str, *, db=None) -> PlanNode:

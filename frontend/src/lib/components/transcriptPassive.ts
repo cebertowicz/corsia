@@ -1,6 +1,6 @@
 import type { UpdateCard } from '$lib/api/threadUpdates';
 import { sourceRange } from './contextEventModel';
-import type { TranscriptEntry } from './transcriptFocusModel';
+import type { TranscriptEntry, TranscriptUpdateEntry } from './transcriptFocusModel';
 
 /** Outcomes that ask nothing of the user: finished, closed, or failed on an item the user does not own. */
 export function isPassive(card: UpdateCard): boolean {
@@ -22,6 +22,18 @@ export function asksYou(card: UpdateCard): boolean {
 /** A person step the server still read as waiting on you. */
 export function isReadyStep(card: UpdateCard): boolean {
 	return card.kind === 'person_step' && (card.step_state ?? 'open') === 'open';
+}
+
+/** Group waiting person steps at the latest one; settled receipts keep their own position. */
+export function gatherReadySteps(entries: TranscriptUpdateEntry[]): TranscriptUpdateEntry[] {
+	const ready = entries.filter((entry) => isReadyStep(entry.card));
+	if (ready.length < 2) return entries;
+	const last = ready[ready.length - 1];
+	const group = ready.map((entry) => entry.card);
+	return entries.flatMap((entry) => {
+		if (!isReadyStep(entry.card)) return [entry];
+		return entry === last ? [{ ...entry, group }] : [];
+	});
 }
 
 /** B6, B22: the card asks nothing and is not a completion: a line inside its block. */
