@@ -8,8 +8,10 @@ hooks; its OAuth, identity parsing and API clients stay in its own package.
 
 from __future__ import annotations
 
+import sqlite3
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from typing import Any
 
 #: The credential-bundle field holding granted or requested scope names.
 SCOPES_FIELD = "scopes"
@@ -44,6 +46,16 @@ class AccountProvider:
     registration: Callable[[dict[str, str]], tuple[str | None, str | None]] | None = None
     #: The stable scope names a row may display; configured by the provider rather than duplicated in a UI.
     display_scopes: tuple[str, ...] = ()
+    #: Set when the credential is the account's key entry value as typed, not a JSON bundle: it is
+    #: exposed as a one-field bundle under this name (an app password).
+    raw_credential_field: str | None = None
+    #: The key-store name prefix of this provider's accounts; None keeps the shared one.
+    credential_prefix: str | None = None
+    #: Extra fields this provider's list row carries, from ``(account_id, db)``: its own label for the
+    #: row and whatever its open row needs. Never a credential, a key value or a host's reply text.
+    row_detail: Callable[[str, sqlite3.Connection], dict[str, Any]] | None = None
+    #: Batched row details keyed by account id. Providers without one use ``row_detail`` per row.
+    row_details: Callable[[list[str], sqlite3.Connection], dict[str, dict[str, Any]]] | None = None
 
     @property
     def required_fields(self) -> frozenset[str]:

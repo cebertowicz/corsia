@@ -102,6 +102,7 @@ def _save(
         workspace=Path(WORKSPACE), target=GuidanceTarget("placement"),
         expected=expected, atomic=True, author=outcomes._author(place),
         message=outcomes._message(entry, decision, relative, trailer, verb=verb),
+        lesson_gate=False,  # the step's own retire and promote path
     )
     if result.outcome in ("written", "unchanged"):
         return True
@@ -218,6 +219,7 @@ def _capture(
         text=decision.text, trial=trial,
         source_refs=lesson_files.merged_refs(kept, entry["body"].get("source_refs") or []),
         originating_subjects=merge_subjects(subjects, decision.originating_subjects),
+        case_metadata=admission.case_metadata,
     )
     if current != text and not _save(
         entry, place, decision, relative, {path: text}, {path: digest(current)},

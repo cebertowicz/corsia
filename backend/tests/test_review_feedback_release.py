@@ -6,9 +6,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from doceditor import feedback_batches, review_requests
+from doceditor import feedback_batch_edits, feedback_batches, review_requests
 from infra.database import write_transaction
-from test_doc_review_requests import request, review_env, fork_comment  # noqa: F401
+from test_doc_review_requests import request, review_env, fork_comment, text_document  # noqa: F401
 
 
 def test_prepare_edit_with_active_fork_uses_one_ordinary_open_batch(review_env):
@@ -19,25 +19,26 @@ def test_prepare_edit_with_active_fork_uses_one_ordinary_open_batch(review_env):
     params = dict(artifact_id=aid, recipient_id="owner", author_kind="agent", author_id="reviewer",
                   actor_display="Reviewer", path=path)
     with write_transaction(db, scope="test_first_ordinary_edit"):
-        batch = feedback_batches.record_edit(db, **params, before=b"old", after=b"first")
+        batch = feedback_batch_edits.record_edit(db, **params, before=b"old", after=b"first")
     row = request(db, aid)
     fork_comment(db, aid, row["id"])
     prepared = prepare_edit(db, **params, before=b"first", after=b"second")
     assert prepared["row"]["batch_id"] == batch
     with write_transaction(db, scope="test_second_ordinary_edit"):
-        assert feedback_batches.record_edit(db, **params, before=b"first", after=b"second", prepared=prepared) == batch
+        assert feedback_batch_edits.record_edit(db, **params, before=b"first", after=b"second", prepared=prepared) == batch
     assert db.execute("SELECT COUNT(*) FROM doc_feedback_batches WHERE state='open'").fetchone()[0] == 1
     assert db.execute("SELECT save_count FROM doc_feedback_edit_items WHERE batch_id=?", (batch,)).fetchone()[0] == 2
     assert db.execute("SELECT item_count FROM doc_feedback_batches WHERE id=?", (batch,)).fetchone()[0] == 2
 
 
 @pytest.mark.asyncio
-async def test_withdrawal_between_state_read_and_handle_registration_launches_no_model_step(review_env, monkeypatch):
+async def test_withdrawal_between_state_read_and_handle_registration_launches_no_model_step(review_env, monkeypatch, tmp_path):
     from core import artifact_review_runtime as runtime, fork_runtime
     from infra.db_async import run_in_db
     from tools.document_reviews import cancel_request
 
     db, aid = review_env
+    text_document(db, aid, tmp_path)
     row = await run_in_db(request, db, aid)
     cold = SimpleNamespace(fork_id=row["fork_id"], thread_id="reviewer")
     monkeypatch.setattr(runtime, "_cold_request", lambda _request_id: (row, cold))

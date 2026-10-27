@@ -3,7 +3,7 @@
 from typing import Any
 
 from tools.base import Tool
-from tools.browser_runtime import _execution_context, _run
+from tools.browser_runtime import _declare_person_step, _execution_context, _run
 
 
 class BrowserSnapshotTool(Tool):
@@ -148,6 +148,32 @@ class BrowserEvalTool(Tool):
             thread_id=thread_id,
         )
 
+
+
+class BrowserPersonStepTool(Tool):
+    """Let the person complete a visible browser page and wake the agent after navigation."""
+
+    name = "browser_person_step"
+    description = (
+        "Give the current visible browser page to the person to complete, then end your turn. "
+        "CORSIA puts the step in their attention list and wakes you when the page changes. "
+        "Use this for sign-in, account choice, verification, passkeys, or phone prompts; never ask for or "
+        "read a password or code."
+    )
+    parameters = {
+        "type": "object",
+        "properties": {
+            "instruction": {
+                "type": "string",
+                "description": "The short action the person should complete, such as 'Sign in to Google'.",
+            },
+        },
+        "required": ["instruction"],
+    }
+
+    async def execute(self, instruction: str, **kwargs: Any) -> str:
+        thread_id, _project_id = _execution_context(kwargs)
+        return await _declare_person_step(thread_id, instruction)
 
 
 class BrowserWaitTool(Tool):

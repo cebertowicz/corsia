@@ -96,6 +96,7 @@ async def _dispatch_prepared(
     user: dict | None,
     ws,
     after_persist_before_dispatch,
+    after_manifest_before_dispatch=None,
 ):
     import infra.send_dispatch as send_dispatch
 
@@ -139,7 +140,9 @@ async def _dispatch_prepared(
         persist_prepared_installed_context,
         batch.thread_id, prepared.prepared_context,
     )
-    await run_in_db(record_dispatch_manifest, batch.thread_id, batch.turn_id, prepared)
+    manifest_id = await run_in_db(record_dispatch_manifest, batch.thread_id, batch.turn_id, prepared)
+    if after_manifest_before_dispatch is not None:  # refusing here leaves no provider write
+        await after_manifest_before_dispatch(manifest_id)
     context = _dispatch_context(
         send_dispatch,
         batch,
@@ -172,6 +175,7 @@ async def execute_claimed_batch(
     ws=None,
     dispatch_content: str | None = None,
     after_persist_before_dispatch=None,
+    after_manifest_before_dispatch=None,
 ) -> SendResult | InboxQueuedInput:
     """Prepare and hand one claimed FIFO batch to its exact provider."""
     del dispatch_content
@@ -186,6 +190,7 @@ async def execute_claimed_batch(
             user=user,
             ws=ws,
             after_persist_before_dispatch=after_persist_before_dispatch,
+            after_manifest_before_dispatch=after_manifest_before_dispatch,
         )
     except BaseException as error:
         if evidence.turn_owned:
@@ -212,13 +217,8 @@ async def _execute_claimed_batch(
     user: dict | None,
     ws,
     after_persist_before_dispatch,
+    after_manifest_before_dispatch=None,
 ) -> SendResult | InboxQueuedInput:
-    if target.harness == "native":
-        from core.thread_warm import join_requested_warm_for_delivery
-
-        await join_requested_warm_for_delivery(
-            batch.thread_id, target.catalog_id,
-        )
     latest = batch.items[-1]
     prepared = await _prepare_batch(batch, thread_row=thread_row, target=target)
     batch = prepared.batch or batch
@@ -233,6 +233,7 @@ async def _execute_claimed_batch(
             user=user,
             ws=ws,
             after_persist_before_dispatch=after_persist_before_dispatch,
+            after_manifest_before_dispatch=after_manifest_before_dispatch,
         )
 
     driver, turn_task, identity = await dispatch_fenced_batch(

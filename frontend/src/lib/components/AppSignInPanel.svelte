@@ -6,7 +6,7 @@
 		type ConnectedApp,
 	} from '$lib/api/connectedApps';
 	import {
-		BROWSER_DIDNT_OPEN, failureText, NOT_ON_THIS_MAC, NO_RETRY, PROVIDER_NOT_TOLD_AFTER, PROVIDER_NOT_TOLD_BEFORE,
+		BROWSER_DIDNT_OPEN, failureText, NOT_ON_THIS_MAC, PROVIDER_NOT_TOLD_AFTER, PROVIDER_NOT_TOLD_BEFORE, retryLabel,
 		SIGN_OUT_BODY, WAITING_TEXT,
 	} from '$lib/appSignIn';
 
@@ -27,7 +27,8 @@
 	const view = $derived(app.sign_in);
 	const pending = $derived(view?.status === 'pending');
 	const failed = $derived(view?.status === 'failed');
-	let busy = $state(false);
+	/** The press in flight: each button spins for its own press only, so one slow call never locks the others. */
+	let busy = $state<'signIn' | 'cancel' | 'signOut' | null>(null);
 	let error = $state('');
 	let link = $state('');
 	let blocked = $state(false);
@@ -35,13 +36,15 @@
 	let providerUrl = $state<string | null>(null);
 	let words = $state('');
 	let poll: ReturnType<typeof setInterval> | undefined;
+	/** A named account is already in the title; an unnamed account needs an explanation. */
+	const quiet = $derived(!!view?.signed_in && !!view.account && !pending && !failed && !confirmOut && !providerUrl && !error);
 
 	function patchView(next: Partial<NonNullable<ConnectedApp['sign_in']>>): void {
 		onChange({ sign_in: { status: 'idle', signed_in: false, ...view, ...next } });
 	}
 
 	async function signIn(): Promise<void> {
-		busy = true; error = ''; copied = false;
+		busy = 'signIn'; error = ''; copied = false;
 		// The page opens inside the click, before the request, so the browser allows it; it is pointed at the link once known.
 		const page = signInHere ? window.open('', '_blank') : null;
 		try {
@@ -54,14 +57,14 @@
 			page?.close();
 			if (cause instanceof SignInStartError) patchView({ status: 'failed', failure_class: cause.failureClass });
 			else error = cause instanceof Error ? cause.message : 'Could not start the sign-in. Try again.';
-		} finally { busy = false; }
+		} finally { busy = null; }
 	}
 
 	async function cancel(): Promise<void> {
-		busy = true; error = '';
+		busy = 'cancel'; error = '';
 		try { await cancelAppSignIn(app.id); link = ''; patchView({ status: 'idle', failure_class: undefined }); }
 		catch (cause) { error = cause instanceof Error ? cause.message : 'Could not cancel. Try again.'; }
-		finally { busy = false; }
+		finally { busy = null; }
 	}
 
 	async function copyLink(): Promise<void> {
@@ -69,7 +72,7 @@
 	}
 
 	async function signOut(): Promise<void> {
-		busy = true; error = '';
+		busy = 'signOut'; error = '';
 		try {
 			const result = await signOutOfApp(app.id);
 			onConfirmOut(false);
@@ -77,7 +80,7 @@
 			onChange({ state: result.state, tool_count: 0, sign_in: { status: 'idle', signed_in: false } });
 			onSignedOut();
 		} catch (cause) { error = cause instanceof Error ? cause.message : 'Could not sign out. Try again.'; }
-		finally { busy = false; }
+		finally { busy = null; }
 	}
 
 	// Approving an app that needs a sign-in goes straight on to it; the blocked-page fallback covers a browser that refuses the tab.
@@ -104,7 +107,7 @@
 	});
 </script>
 
-{#if view}
+{#if view && !quiet}
 	<div class="sign-in">
 		{#if error}<p class="error" role="alert">{error}</p>{/if}
 		{#if pending}
@@ -113,9 +116,9 @@
 		{:else if failed}
 			<p>{failureText(app.name, view.failure_class ?? 'unknown')}</p>
 			{#if words}<p class="said"><span>What {app.name} said</span> {words}</p>{/if}
-		{:else if view.signed_in}
-			<p><span class="label">Signed in as</span> {view.account ?? `${app.name} didn't say which account`}</p>
-		{:else if app.state === 'needs_sign_in' && !signInHere}
+		{:else if view.signed_in && !view.account}
+			<p>{app.name} didn't say which account</p>
+		{:else if !view.signed_in && app.state === 'needs_sign_in' && !signInHere}
 			<p>{NOT_ON_THIS_MAC}</p>
 		{/if}
 		{#if providerUrl}
@@ -126,18 +129,19 @@
 		{/if}
 		<div class="actions">
 			{#if pending}
-				<Button variant="ghost" size="sm" loading={busy} onclick={signIn}>Open the page again</Button>
+				<Button variant="ghost" size="sm" loading={busy === 'signIn'} onclick={signIn}>Open the page again</Button>
 				{#if blocked && link}<Button variant="ghost" size="sm" onclick={copyLink}>{copied ? 'Copied' : 'Copy sign-in link'}</Button>{/if}
-				<Button variant="ghost" size="sm" loading={busy} onclick={cancel}>Cancel</Button>
+				<Button variant="ghost" size="sm" loading={busy === 'cancel'} onclick={cancel}>Cancel</Button>
 			{:else if failed}
-				<Button variant="primary" size="sm" loading={busy} onclick={signIn}>{NO_RETRY.has(view.failure_class ?? '') ? 'Sign in' : 'Try again'}</Button>
+				{@const label = retryLabel(view.failure_class)}
+				{#if label}<Button variant="primary" size="sm" loading={busy === 'signIn'} onclick={signIn}>{label}</Button>{/if}
 			{:else if view.signed_in}
 				{#if confirmOut}
-					<span class="danger-text"><Button variant="ghost" size="sm" loading={busy} onclick={signOut}>Sign out</Button></span>
+					<span class="danger-text"><Button variant="ghost" size="sm" loading={busy === 'signOut'} onclick={signOut}>Sign out</Button></span>
 					<Button variant="ghost" size="sm" onclick={() => onConfirmOut(false)}>Cancel</Button>
 				{/if}
 			{:else if app.state === 'needs_sign_in' && signInHere}
-				<Button variant="primary" size="sm" loading={busy} onclick={signIn}>Sign in</Button>
+				<Button variant="primary" size="sm" loading={busy === 'signIn'} onclick={signIn}>Sign in</Button>
 			{/if}
 		</div>
 	</div>
@@ -146,7 +150,6 @@
 <style>
 	.sign-in { display: grid; gap: var(--space-2); margin-bottom: var(--space-3); }
 	.sign-in p { margin: 0; color: var(--text-secondary); font-size: var(--text-footnote); line-height: 1.5; }
-	.label { color: var(--text-tertiary); }
 	.said span { color: var(--text-tertiary); }
 	.error { color: var(--red); }
 	.actions { display: flex; gap: var(--space-1); flex-wrap: wrap; margin-left: calc(-1 * var(--button-pad-x-sm)); }

@@ -175,7 +175,7 @@ impl Plan {
 
 /// The work the window is showing while adoption runs. Each phase has one
 /// approved line of copy; the shell picks it from this, never from free text.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "phase", rename_all = "snake_case")]
 pub enum Phase {
     /// The source service is draining its running work and stopping. `running`
@@ -193,6 +193,17 @@ pub enum Phase {
     MovingToBackup,
     /// A rollback is putting the existing install back.
     StartingExisting,
+    /// The one-time move of an adopted install's data to `CORSIA/state`, as one
+    /// percentage for the whole move (`state_move`).
+    MovingData {
+        percent: u8,
+    },
+    /// The move stopped after the window showed it; the line says why and what
+    /// the person can do, then CORSIA starts on the old folder.
+    MoveSkipped {
+        #[serde(flatten)]
+        told: crate::state_move::Told,
+    },
 }
 
 /// Production runs the source's lifecycle owner and the app's bundled backend.
@@ -2309,7 +2320,7 @@ mod tests {
         fake.stop_alive_for = 3;
         let mut phases = vec![];
         recover_showing(&plan, &mut fake, &mut |phase| phases.push(phase)).unwrap();
-        assert_eq!(phases, [Phase::Waiting { running: None }; 3]);
+        assert_eq!(phases, vec![Phase::Waiting { running: None }; 3]);
         assert_eq!(
             fake.stop_looks, 4,
             "it looks again until the process is gone"

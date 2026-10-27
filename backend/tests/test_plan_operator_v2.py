@@ -331,18 +331,17 @@ def test_operator_projection_1000_nodes_has_bounded_query_count():
         # chunk of ids, since one IN (...) may not exceed SQLite's
         # host-parameter limit. The rollup's node rows read holds as well as
         # dependencies (`node_waits.project`), since a row names who holds it.
-        # Waiting time (`node_waiting`) adds six more id-list reads per chunk
-        # (node rows, their events, live edges, watches, user holds, PR links)
-        # and one per chunk of prerequisites, of which this plan has none, and
-        # one per chunk of plan ids for whole-plan pauses (one plan: one read).
-        # The pane reads open work (#731 S2-2), so each fact is read for the listed
-        # nodes alone, by id, where it once read the whole plan: nineteen reads
-        # repeat per chunk of ids (measured 60, 98 and 136 statements at 300, 1000
-        # and 2000 nodes: 41 fixed, 19 per chunk).
+        # Waiting time (`node_waiting`) adds seven more id-list reads per chunk
+        # (node rows, their events, live edges, watches, user holds, PR links,
+        # decisions raised on them) and one per chunk of prerequisites, of which
+        # this plan has none, and one per chunk of plan ids for whole-plan pauses
+        # (one plan: one read). The pane reads open work (#731 S2-2), so each fact
+        # is read for the listed nodes alone, by id, where it once read the whole
+        # plan: twenty reads repeat per chunk of ids (41 fixed, 20 per chunk).
         from plans import node_cost
 
         chunks = -(-1000 // node_cost._ID_CHUNK)
-        assert len(statements) <= 41 + 19 * chunks + 1
+        assert len(statements) <= 41 + 20 * chunks + 1
     finally:
         db.set_trace_callback(None)
         db.close()

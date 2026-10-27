@@ -1,9 +1,10 @@
 """Accept runs against live text in the lane, including unsaved browser edits."""
 import asyncio
+from datetime import datetime
 
 import pytest
 
-from doceditor import comments, comment_actions, comment_batch_actions
+from doceditor import comments, comment_actions, comment_batch_actions, delivery_preference
 from doceditor.live_store import BrowserMessage
 from doceditor.live_text import clone
 from tests.test_document_live_file_tools import opened
@@ -123,10 +124,13 @@ def _edit_items(scope):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("bar_accept", [True, False])
+@pytest.mark.parametrize(("immediate", "lane", "seconds"), [(True, "immediate", 5), (False, "document-held", 120)])
 async def test_the_bars_accept_in_the_live_lane_leaves_no_edit_feedback_but_a_plain_accept_does(
-    ownership_scope, tmp_path, monkeypatch, bar_accept,
+    ownership_scope, tmp_path, monkeypatch, bar_accept, immediate, lane, seconds,
 ):
     scope = ownership_scope
+    delivery_preference.write(user_id(scope), immediate, db=scope["db"])
+    scope["db"].commit()
     manager, entry, _ = await opened(scope, tmp_path, monkeypatch)
     row = suggestion(scope, entry)
     try:
@@ -138,6 +142,39 @@ async def test_the_bars_accept_in_the_live_lane_leaves_no_edit_feedback_but_a_pl
         assert result["accepted"] == [row["id"]]
         await manager.close()
         assert _edit_items(scope) == (0 if bar_accept else 1)
+        if not bar_accept:
+            # A plain accept is a person's save: it queues in the lane that person's preference names.
+            batches = scope["db"].execute(
+                "SELECT delivery_policy, last_item_at, closes_at FROM doc_feedback_batches WHERE author_kind='user'"
+            ).fetchall()
+            assert [row["delivery_policy"] for row in batches] == [lane]
+            gap = datetime.fromisoformat(batches[0]["closes_at"]) - datetime.fromisoformat(batches[0]["last_item_at"])
+            assert gap.total_seconds() == seconds
+    finally:
+        await manager.close()
+
+
+@pytest.mark.asyncio
+async def test_live_batch_accept_keeps_the_accepting_actor_as_writer(
+    ownership_scope, tmp_path, monkeypatch,
+):
+    scope = ownership_scope
+    manager, entry, _ = await opened(scope, tmp_path, monkeypatch)
+    row = suggestion(scope, entry)
+    submit = entry.lane.submit
+
+    async def capture_actor(operation):
+        assert operation.actor.thread_id == scope["owner"]
+        assert operation.actor.user_id == user_id(scope)
+        return await submit(operation)
+
+    monkeypatch.setattr(entry.lane, "submit", capture_actor)
+    try:
+        result = await comment_batch_actions.accept_all_open(
+            row["artifact_id"], user_id=user_id(scope), decided_by="user", actor_thread_id=scope["owner"],
+            write=legacy_writer,
+        )
+        assert result["accepted"] == [row["id"]]
     finally:
         await manager.close()
 

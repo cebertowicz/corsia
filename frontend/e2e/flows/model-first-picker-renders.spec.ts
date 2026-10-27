@@ -183,13 +183,13 @@ test('renders approved M1–M8 model-first picker states with live-shaped compon
 	await show('M9', M9);
 	const localFallback = (source: Record<string, unknown>) => ({ rows: [...external()], accounts: [], policy: undefined, sources: [{ source: 'omlx', name: 'Local model', state: 'needs_setup', ...source }] });
 	await show('Local-downloading', localFallback({ local_state: 'downloading', download_percent: 40 }), false, async () => {
-		const localGroup = page.locator('section[aria-label="Local"]');
-		await expect(localGroup.locator('.model-group-head')).toHaveText('Local');
+		const localGroup = page.locator('section[aria-label="CORSIA"]');
+		await expect(localGroup.locator('.model-group-head')).toHaveText('CORSIA');
 		await expect(localGroup).toContainText('Downloading 40%');
 	});
 	await show('Local-setup-failed', localFallback({ local_state: 'failed', setup_kind: 'setup' }), false, async () => {
-		const localGroup = page.locator('section[aria-label="Local"]');
-		await expect(localGroup.locator('.model-group-head')).toHaveText('Local');
+		const localGroup = page.locator('section[aria-label="CORSIA"]');
+		await expect(localGroup.locator('.model-group-head')).toHaveText('CORSIA');
 		await expect(localGroup).toContainText('Setup failed');
 	});
 	const signedOut = base([], [codexA, codexB]);

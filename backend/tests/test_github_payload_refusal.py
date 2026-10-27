@@ -144,11 +144,16 @@ def test_optional_absent_and_null_values_are_not_fabricated():
 
 
 @pytest.mark.parametrize("event_type,action", [
-    ("pull_request", "labeled"), ("issues", "labeled"),
     ("workflow_run", "requested"), ("check_suite", "requested"),
 ])
 def test_non_fact_action_does_not_validate_unconsumed_payload(event_type, action):
     assert outcomes.map_github_outcomes(event_type, {"action": action, "repository": 5}) == []
+
+
+@pytest.mark.parametrize("event_type", ["pull_request", "issues"])
+def test_a_malformed_labeled_payload_is_refused(event_type):
+    with pytest.raises(admission.PayloadRefusal):
+        outcomes.map_github_outcomes(event_type, {"action": "labeled", "repository": 5})
 
 
 def test_edit_without_base_change_does_not_consume_repository_or_pr(main_db):

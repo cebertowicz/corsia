@@ -3,6 +3,7 @@
 	import VisitDivider from './VisitDivider.svelte';
 	import BlockLine from './BlockLine.svelte';
 	import WaitCapsule from './WaitCapsule.svelte';
+	import BrowserChip from './BrowserChip.svelte';
 	import type { WaitFace } from './waitFace';
 	import { createPhraseSwap } from './plans/phraseSwap.svelte';
 	import { FADE_MS, UNKNOWN_STEP } from './plans/planLiveStep';
@@ -33,6 +34,7 @@
 		notes,
 		wait = null,
 		waitThreadId = null,
+		threadId = null,
 	}: {
 		entry: TranscriptFoldEntry;
 		label: string;
@@ -64,6 +66,8 @@
 		/** The plan waits on something outside and nothing runs: the chip says so in place of its settled face (EW8). */
 		wait?: WaitFace | null;
 		waitThreadId?: string | null;
+		/** The thread whose shared browser the block's chip reopens. */
+		threadId?: string | null;
 	} = $props();
 
 	let section: HTMLElement | undefined = $state();
@@ -136,6 +140,10 @@
 			<svg class="fold-chevron" class:expanded width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m9 5 7 7-7 7" /></svg>
 		</button>
 	{/if}
+	<!-- Collapsed, the block stands for the Step that opened the browser; expanded, that Step's row shows the chip itself. -->
+	{#if !expanded && entry.browserChip && threadId}
+		<span class="fold-browser"><BrowserChip chip={entry.browserChip} {threadId} /></span>
+	{/if}
 	{#if expanded}
 		<div class="fold-details" id={bodyId}>
 			{#if entry.stub}
@@ -181,7 +189,7 @@
 <style>
 	.transcript-fold { display: flex; flex-wrap: wrap; max-width: 760px; margin: 0 auto 14px; min-width: 0; align-items: center; scroll-margin-top: var(--sticky-top, 0px); }
 	/* Notes (plan-limit pauses) are rows under the block, never items beside the chip. */
-	.transcript-fold > :global(.plan-limit-paused) { flex: 0 0 100%; }
+	.transcript-fold > :global(.plan-limit-paused) { flex: 0 0 100%; min-width: 0; }
 	/* Collapsed: a glass capsule sized to its label. Expanded: the same capsule pins as the header. */
 	.fold-toggle {
 		position: sticky; top: var(--sticky-top, 0px); z-index: 4;
@@ -198,7 +206,9 @@
 	.fold-new { display: inline-flex; flex: 0 0 auto; align-items: center; gap: var(--space-1); margin-left: calc(-1 * var(--space-1)); white-space: nowrap; }
 	.fold-new i { width: calc(var(--space-1) * 1.5); height: calc(var(--space-1) * 1.5); border-radius: var(--radius-circle); background: var(--accent); }
 	.fold-new-word { color: var(--accent-text); }
-	.fold-details, .fold-history { flex: 0 0 100%; box-sizing: border-box; }
+	/* min-width 0: a flex item's automatic minimum is its content's min-content, so one nowrap tool phrase would widen the pane past the phone. */
+	.fold-details, .fold-history { flex: 0 0 100%; min-width: 0; box-sizing: border-box; }
+	.fold-browser { display: inline-flex; min-width: 0; margin-left: var(--space-2); }
 	.fold-chevron { flex: 0 0 auto; color: var(--text-tertiary); transition: transform var(--dur-tight); }
 	.fold-chevron.expanded { transform: rotate(90deg); }
 	.live-step { transition: opacity var(--fade-ms, 150ms) ease; }

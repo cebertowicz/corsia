@@ -241,7 +241,9 @@ class ConductorInstructionFileReplaceTool(Tool):
         if located.startswith("Error:"):
             return located
         file_path, user_id = Path(json.loads(located)["path"]), json.loads(located)["user_id"]
-        saved = await run_off_db(_save, file_path, replacement, expected_revision, actor_thread_id, kwargs)
+        saved = await run_off_db(
+            _save, file_path, replacement, expected_revision, actor_thread_id, target_thread_id, kwargs,
+        )
         if saved.outcome == "refused":
             return saved.line or "Error: instruction file was refused."
         if saved.outcome == "stale":
@@ -266,7 +268,9 @@ class ConductorInstructionFileReplaceTool(Tool):
         return json.dumps(receipt, sort_keys=True)
 
 
-def _save(path: Path, replacement: bytes, expected_revision: str, actor_thread_id: str, kwargs: dict):
+def _save(
+    path: Path, replacement: bytes, expected_revision: str, actor_thread_id: str, target_thread_id: str, kwargs: dict,
+):
     """Blocking. Save through the one guidance-history owner, which rechecks the read
     revision under its lock, so a concurrent guidance save is never overwritten."""
     from infra.guidance_git import save_guidance
@@ -276,11 +280,13 @@ def _save(path: Path, replacement: bytes, expected_revision: str, actor_thread_i
     target = guidance_target(path) or GuidanceTarget(
         "unknown", "this attached instruction file is not classified as guidance",
     )
-    return save_guidance(
+    saved = save_guidance(
         {path: replacement}, workspace=Path(config.WORKSPACE), target=target,
         author=saver_author(thread_id=actor_thread_id), reason=kwargs.get("reason"),
         evidence=kwargs.get("evidence"), expected={path: expected_revision},
+        lesson_observation_thread_id=target_thread_id,
     )
+    return saved
 
 
 def _audit(user_id: str, actor_thread_id: str, target_thread_id: str, receipt: dict[str, Any]) -> str | None:

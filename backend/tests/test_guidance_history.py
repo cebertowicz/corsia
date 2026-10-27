@@ -11,8 +11,10 @@ from __future__ import annotations
 
 import fcntl
 import os
+import shutil
 import subprocess
 import threading
+import uuid
 from pathlib import Path
 
 import pytest
@@ -765,21 +767,30 @@ def test_editor_save_of_a_guidance_file_commits_as_the_user(integration_client, 
 
 
 @pytest.mark.integration
-def test_a_rejected_editor_save_makes_no_repository_or_commit(integration_client, integration_workspace):
-    """Every editor rejection comes before Git: no commit, no sweep of other dirty guidance."""
+def test_a_rejected_editor_save_never_reaches_guidance_history(integration_client, integration_workspace, monkeypatch):
+    """Every editor rejection occurs before the history/Git path, without depending on shared root state."""
     from auth_fixtures import OWNER_TOKEN
+    import infra.guidance_git as guidance_git
 
-    workspace = integration_workspace  # shared by the session's integration tests
-    if not (workspace / ".git").exists():
-        _git(["init", "--quiet"], cwd=workspace)
-    _git([*_IDENTITY, "commit", "--allow-empty", "-qm", "before"], cwd=workspace)
-    head = _git(["rev-parse", "HEAD"], cwd=workspace)
+    def history_reached(*_args, **_kwargs):
+        pytest.fail("rejected editor save reached guidance history")
+
+    monkeypatch.setattr(guidance_git, "workspace_repository", history_reached)
+    workspace = integration_workspace
+    nonce = uuid.uuid4().hex
+    existing = _skill(workspace, f"rejected-{nonce}")
+    invalid = _skill(workspace, f"invalid-{nonce}")
+    existing.parent.mkdir(parents=True)
+    existing.write_text(SKILL_BODY)
     auth = "?" + "token=" + OWNER_TOKEN
-    for name, text in (("shell", "outside\n"), ("demo", SKILL_BODY)):
-        _skill(workspace, name).parent.mkdir(parents=True)
-        _skill(workspace, name).write_text(text)
-    for path, text, status in ((_skill(workspace), SKILL_BODY, 409), (_skill(workspace, "new"), "no front matter\n", 422)):
-        saved = integration_client.put("/api/files/content" + auth, json={"path": str(path), "text": text, "create": True})
-        assert saved.status_code == status, saved.text
-    assert _git(["rev-parse", "HEAD"], cwd=workspace) == head
+    try:
+        for path, text, status in ((existing, SKILL_BODY, 409), (invalid, "no front matter\n", 422)):
+            saved = integration_client.put(
+                "/api/files/content" + auth,
+                json={"path": str(path), "text": text, "create": True},
+            )
+            assert saved.status_code == status, saved.text
+    finally:
+        shutil.rmtree(existing.parent, ignore_errors=True)
+        shutil.rmtree(invalid.parent, ignore_errors=True)
 

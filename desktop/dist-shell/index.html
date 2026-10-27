@@ -52,6 +52,12 @@
 			font-size: var(--text-footnote);
 			line-height: var(--lh-normal);
 		}
+		/* The data folder move's one percentage, in the update screen's look. */
+		.move-percent { margin-top: var(--space-4); font-size: calc(var(--text-title1) * 2); line-height: 1.1; font-weight: var(--fw-semibold); font-variant-numeric: tabular-nums; color: var(--text-primary); }
+		.move-bar { width: calc(var(--space-8) * 8); max-width: 100%; height: var(--space-2); margin-top: var(--space-3); border-radius: var(--radius-pill); overflow: hidden; background: var(--bg-tertiary); }
+		.move-bar i { display: block; height: 100%; background: var(--accent); border-radius: inherit; transition: width var(--dur-hero-plus) linear; }
+		@media (prefers-reduced-motion: reduce) { .move-bar i { transition: none; } }
+		.move-percent[hidden], .move-bar[hidden] { display: none; }
 		.note {
 			max-width: calc(var(--space-8) * 8);
 			margin: var(--space-3) 0 0;
@@ -187,11 +193,13 @@
 </head>
 <body>
 	<div class="app" data-tauri-drag-region>
-		<img class="mark" src="corsia-mark.svg" alt="" data-tauri-drag-region />
+		<div id="mark" class="mark" aria-hidden="true" data-tauri-drag-region></div>
 		<h1 id="status" role="status" aria-live="polite" data-tauri-drag-region>Starting CORSIA…</h1>
 		<p id="line" class="line" hidden></p>
 		<ul id="fresh-list" class="fresh-list" aria-label="What moves" hidden></ul>
 		<p id="note" class="note" hidden></p>
+		<div id="move-percent" class="move-percent" aria-hidden="true" hidden></div>
+		<div id="move-bar" class="move-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" hidden><i></i></div>
 		<details id="details" class="details" hidden><summary>Details</summary><p id="details-text"></p></details>
 		<p id="log" class="log" hidden>Service log<code id="log-path"></code></p>
 		<div id="spinner" class="spinner"></div>
@@ -211,6 +219,12 @@
 			<button id="set-up-local" class="secondary" type="button" hidden>Set up this computer instead</button>
 		</div>
 	</div>
+
+	<!-- Generated from the app living-mark module by desktop/scripts/gen-shell-logo.mjs. Reduced motion shows it still. -->
+	<script src="living-logo.js"></script>
+	<script>
+		window.livingLogo?.createLivingLogo(document.getElementById('mark'), { entry: 'play' });
+	</script>
 
 	<script>
 		(async () => {
@@ -237,7 +251,7 @@
 			const freshList = document.getElementById('fresh-list');
 			const ADOPTION_COPY = {
 				questionTitle: 'Use the CORSIA already on this computer?',
-				questionLine: (workDir) => `CORSIA found your existing install, with your work in ${workDir}. This app can run it from now on. It gives running work up to a minute to finish, stops whatever is still running, then backs up your data and restarts CORSIA from the app. Your data and work folder stay where they are. Nothing is deleted.`,
+				questionLine: (workDir) => `CORSIA found your existing install, with your work in ${workDir}. This app can run it from now on. It gives running work up to a minute to finish, stops whatever is still running, then backs up your data and restarts CORSIA from the app. Your data and work folder stay where they are.`,
 
 				waitingTitle: 'Giving running work up to a minute to finish…',
 				waitingCount: (count) => `${count} ${count === 1 ? 'task' : 'tasks'} still running`,
@@ -271,21 +285,55 @@
 				},
 				switched: { title: 'CORSIA switched over and is still starting.', button: 'Check again' },
 			};
+			// The one-time move of CORSIA's data folder, and what a skipped move says.
+			const MOVE_COPY = {
+				title: 'Moving CORSIA’s data',
+				line: 'This happens once, and CORSIA starts again by itself when it’s done. Anything an agent left running in the background will stop; ask the agent to run it again if you still need it.',
+				// A move that stopped after it showed: why, what the person can do, then CORSIA starts where it was.
+				skipped: {
+					stays: 'Your data stays where it is.',
+					terminal: 'A terminal window is open in CORSIA’s old data folder. Close it.',
+					namedApp: (app) => `${app} has CORSIA’s old data folder open. Quit ${app}, or restart this computer.`,
+					otherApp: 'Another app has CORSIA’s old data folder open. Quit it, or restart this computer.',
+					jobsStopped: 'Anything an agent left running in the background has stopped; ask the agent to run it again if you still need it.',
+					tryAgain: 'CORSIA tries again the next time it opens.',
+				},
+				skippedLine: (told) => {
+					const copy = MOVE_COPY.skipped;
+					const why = told.reason === 'terminal' ? copy.terminal
+						: told.reason === 'other_app' ? (told.app ? copy.namedApp(told.app) : copy.otherApp)
+						: null;
+					return [copy.stays, why, told.jobs_stopped ? copy.jobsStopped : null, copy.tryAgain].filter(Boolean).join(' ');
+				},
+			};
+			const movePercent = document.getElementById('move-percent');
+			const moveBar = document.getElementById('move-bar');
+			// One percentage for the whole move; `null` hides it.
+			function showMoveProgress(percent) {
+				const showing = Number.isInteger(percent);
+				movePercent.hidden = !showing;
+				moveBar.hidden = !showing;
+				if (!showing) return;
+				const shown = Math.max(0, Math.min(100, percent));
+				movePercent.textContent = `${shown}%`;
+				moveBar.setAttribute('aria-valuenow', String(shown));
+				moveBar.setAttribute('aria-label', MOVE_COPY.title);
+				moveBar.firstElementChild.style.width = `${shown}%`;
+			}
 			// Start fresh: the earlier install is moved by rename into a dated backup folder, never deleted.
 			const FRESH_COPY = {
 				offerTitle: 'Start CORSIA fresh?',
-				offerLine: (reason) => `${reason} Start fresh moves it into a backup folder and sets up CORSIA as new. Nothing is deleted.`,
+				offerLine: (reason, preview) => `${reason} ${FRESH_COPY.previewLine(preview)}`,
 				insteadButton: 'Start fresh instead',
 				offerButton: 'Start fresh',
-				confirmTitle: 'Move your earlier install into a backup?',
-				confirmLine: (preview) => `CORSIA stops it, then moves ${preview.moves.length === 1 ? 'this' : 'these'} into a new folder in ${preview.backups}. Nothing is deleted.`,
+				previewLine: (preview) => `Start fresh stops your earlier install, then moves ${preview.moves.length === 1 ? 'this' : 'these'} into a new folder in ${preview.backups}. Nothing is deleted.`,
+				checkingFolders: 'Checking folders…',
+				checkFoldersAgain: 'Check folders again',
+				previewFailureLine: 'CORSIA couldn’t check what Start fresh will move. Check folders again before starting fresh.',
 				confirmCode: (folders) => `Its code folder stays where it is: ${folders.join(', ')}.`,
 				confirmWork: (folders) => `${folders.length === 1 ? 'Its work folder stays' : 'Its work folders stay'} where ${folders.length === 1 ? 'it is' : 'they are'}: ${folders.join(', ')}.`,
-				confirmButton: 'Move and start fresh',
 				movingTitle: 'Moving your earlier install into a backup…',
 				quitPending: 'CORSIA will close once everything is in one place.',
-				doneTitle: 'Your earlier install is in a backup',
-				doneLine: (backup) => `It’s in ${backup}. Nothing was deleted.`,
 				doneButton: 'Set up CORSIA',
 				failureTitle: 'CORSIA couldn’t start fresh',
 				// The earlier install's pieces went away before Start fresh could move them.
@@ -330,7 +378,15 @@
 				saveReport.hidden = true;
 			}
 
-			function showExistingInstall(workDir) {
+			function freshPreviewExtra(preview) {
+				return [
+					FRESH_COPY.previewLine(preview),
+					preview.code.length ? FRESH_COPY.confirmCode(preview.code) : '',
+					preview.work.length ? FRESH_COPY.confirmWork(preview.work) : '',
+				].filter(Boolean).join(' ');
+			}
+
+			async function showExistingInstall(workDir, previewFailure = null) {
 				clearInterval(approvalPoll);
 				adoptionPrompt = true;
 				adoptionRecovery = null;
@@ -340,8 +396,11 @@
 				status.textContent = ADOPTION_COPY.questionTitle;
 				line.textContent = ADOPTION_COPY.questionLine(workDir);
 				line.hidden = false;
-				note.hidden = true;
-				details.hidden = true;
+				note.textContent = previewFailure ? 'CORSIA couldn’t check what Start fresh will move. Take over is still available.' : '';
+				note.hidden = !note.textContent;
+				detailsText.textContent = previewFailure?.details ?? previewFailure?.message ?? '';
+				details.hidden = !detailsText.textContent;
+				details.open = false;
 				log.hidden = true;
 				spinner.hidden = true;
 				backgroundApproval.hidden = true;
@@ -349,12 +408,28 @@
 				quit.hidden = false;
 				saveReport.hidden = true;
 				retry.hidden = false;
-				retry.textContent = 'Use it';
-				startFreshButton.textContent = FRESH_COPY.insteadButton;
+				retry.textContent = 'Take over';
+				startFreshButton.textContent = previewFailure ? FRESH_COPY.checkFoldersAgain : FRESH_COPY.checkingFolders;
 				startFreshButton.hidden = false;
+				startFreshButton.disabled = !previewFailure;
+				startFreshButton.onclick = previewFailure ? () => showExistingInstall(workDir) : null;
 				actions.hidden = false;
 				retry.disabled = false;
 				retry.focus();
+				if (previewFailure) return;
+				try {
+					const preview = await invoke('start_fresh_preview');
+					if (!adoptionPrompt || freshRunning) return;
+					note.textContent = freshPreviewExtra(preview);
+					note.hidden = false;
+					freshList.replaceChildren(...preview.moves.map((item) => Object.assign(document.createElement('li'), { textContent: item })));
+					freshList.hidden = preview.moves.length === 0;
+					startFreshButton.textContent = FRESH_COPY.insteadButton;
+					startFreshButton.disabled = false;
+					startFreshButton.onclick = () => runFresh(() => showExistingInstall(workDir));
+				} catch (error) {
+					if (adoptionPrompt && !freshRunning) showExistingInstall(workDir, error);
+				}
 			}
 
 			// The backend names the phase and the window picks the approved line for it. The count is
@@ -366,7 +441,18 @@
 				// A Quit that is waiting on the switch says so, for the three phases it waits through.
 				note.textContent = progress.quit_pending === true ? (freshRunning ? FRESH_COPY.quitPending : ADOPTION_COPY.quitPending) : '';
 				note.hidden = !note.textContent;
-				if (progress.phase === 'waiting') {
+				const moving = progress.phase === 'moving_data';
+				showMoveProgress(moving ? progress.percent : null);
+				spinner.hidden = moving;
+				if (moving) {
+					status.textContent = MOVE_COPY.title;
+					line.textContent = MOVE_COPY.line;
+					line.hidden = false;
+				} else if (progress.phase === 'move_skipped') {
+					status.textContent = 'Starting CORSIA…';
+					line.textContent = MOVE_COPY.skippedLine(progress);
+					line.hidden = false;
+				} else if (progress.phase === 'waiting') {
 					status.textContent = ADOPTION_COPY.waitingTitle;
 					if (Number.isInteger(progress.running) && progress.running > 0) {
 						line.textContent = ADOPTION_COPY.waitingCount(progress.running);
@@ -567,11 +653,11 @@
 				if (startup.state === 'ready') {
 					continueToService(startup);
 				} else if (startup.state === 'adoption_offered') {
-					showExistingInstall(startup.workspace);
+					await showExistingInstall(startup.workspace);
 				} else if (startup.state === 'adoption_failed') {
 					await showAdoptionFailure(startup.failure);
 				} else if (startup.state === 'existing_install') {
-					showFreshOffer(startup.reason, startup.details);
+					await showFreshOffer(startup.reason, startup.details);
 				} else if (startup.state === 'start_fresh_failed') {
 					showFreshFailure(startup.failure);
 				} else if (startup.state === 'disk_image') {
@@ -583,8 +669,15 @@
 				}
 			}
 
+			// The app's own start at launch runs before any page awaits it; until its outcome is drawn or the page
+			// starts something itself, the page shows that start's phase too (the data folder move, an undo).
+			let stopLaunchFollowing = () => {};
+
 			// Shows the backend's phase once a second until the returned function is called.
 			function followProgress() {
+				const launchFollowing = stopLaunchFollowing;
+				stopLaunchFollowing = () => {};
+				launchFollowing();
 				let polling = true;
 				const progressPoll = setInterval(async () => {
 					try {
@@ -596,6 +689,7 @@
 				return () => {
 					polling = false;
 					clearInterval(progressPoll);
+					showMoveProgress(null);
 				};
 			}
 
@@ -642,64 +736,69 @@
 			}
 
 			// An earlier install this app can't open: offer to set it aside.
-			function showFreshOffer(reason, details) {
+			async function showFreshOffer(reason, details) {
 				clearInterval(approvalPoll);
 				const said = typeof reason === 'string' ? reason : '';
 				const why = typeof details === 'string' ? details : '';
-				showFreshCard({ title: FRESH_COPY.offerTitle, text: FRESH_COPY.offerLine(said), button: FRESH_COPY.offerButton, action: confirmFresh, why });
-			}
-
-			// The confirmation lists every item that moves and the code folder that stays, read from the computer now.
-			async function confirmFresh() {
 				showStarting();
-				let preview;
 				try {
-					preview = await invoke('start_fresh_preview');
+					const preview = await invoke('start_fresh_preview');
+					showFreshCard({
+						title: FRESH_COPY.offerTitle,
+						text: FRESH_COPY.offerLine(said, preview),
+						extra: [
+							preview.code.length ? FRESH_COPY.confirmCode(preview.code) : '',
+							preview.work.length ? FRESH_COPY.confirmWork(preview.work) : '',
+						].filter(Boolean).join(' '),
+						items: preview.moves,
+						button: FRESH_COPY.offerButton,
+						action: () => runFresh(() => showFreshOffer(reason, details)),
+						why,
+					});
 				} catch (error) {
-					showFreshFailure(error);
-					return;
+					const previewDetails = error && typeof error === 'object'
+						? error.details ?? error.message ?? ''
+						: String(error ?? '');
+					showFreshCard({
+						title: FRESH_COPY.offerTitle,
+						text: said,
+						extra: FRESH_COPY.previewFailureLine,
+						button: FRESH_COPY.checkFoldersAgain,
+						action: () => showFreshOffer(reason, details),
+						why: previewDetails,
+					});
 				}
-				showFreshCard({
-					title: FRESH_COPY.confirmTitle,
-					text: FRESH_COPY.confirmLine(preview),
-					extra: [
-						preview.code.length ? FRESH_COPY.confirmCode(preview.code) : '',
-						preview.work.length ? FRESH_COPY.confirmWork(preview.work) : '',
-					].filter(Boolean).join(' '),
-					items: preview.moves,
-					button: FRESH_COPY.confirmButton,
-					action: runFresh,
-				});
 			}
 
-			async function runFresh() {
+			async function runFresh(retryChoice) {
+				if (freshRunning) return;
+				freshRunning = true;
 				showStarting();
 				status.textContent = FRESH_COPY.movingTitle;
-				freshRunning = true;
 				const stopFollowing = followProgress();
 				try {
-					const backup = await invoke('start_fresh');
-					stopFollowing();
-					showFreshCard({ title: FRESH_COPY.doneTitle, text: FRESH_COPY.doneLine(backup), button: FRESH_COPY.doneButton, action: start });
+					await invoke('start_fresh');
 				} catch (error) {
-					stopFollowing();
-					showFreshFailure(error);
+					showFreshFailure(error, retryChoice);
+					return;
 				} finally {
+					stopFollowing();
 					freshRunning = false;
 				}
+				await start();
 			}
 
 			// A Start fresh failure: the backend's line, its reason under Details, and the one next step. With nothing
-			// left to move, setup goes on; with every file where it was, Retry starts over from the confirmation;
+			// left to move, setup goes on; with every file where it was, Retry returns to the original choice and preview;
 			// otherwise reopening finishes the undo.
-			function showFreshFailure(error) {
+			function showFreshFailure(error, retryChoice = start) {
 				const given = error && typeof error === 'object'
 					? error
 					: { message: FRESH_COPY.unknownFailure, details: String(error ?? ''), restored: false };
 				const gone = given.nothing_to_move === true;
 				const [button, action] = gone
 					? [FRESH_COPY.doneButton, start]
-					: given.restored ? [FRESH_COPY.againButton, confirmFresh] : [FRESH_COPY.reopenButton, () => invoke('reopen_app')];
+					: given.restored ? [FRESH_COPY.againButton, retryChoice] : [FRESH_COPY.reopenButton, () => invoke('reopen_app')];
 				const title = gone ? FRESH_COPY.goneTitle : FRESH_COPY.failureTitle;
 				showFreshCard({ title, text: given.message, why: given.details ?? '', button, action });
 			}
@@ -727,6 +826,7 @@
 			}
 
 			async function retryFailure() {
+				if (freshRunning) return;
 				if (freshAction) return freshAction();
 				if (adoptionRecovery) return runRecovery(adoptionRecovery);
 				if (adoptionPrompt) return runAdoption();
@@ -789,10 +889,17 @@
 				actions.hidden = false;
 			}
 
-			window.__corsiaShowRemoteState = showRemoteState;
-			window.__corsiaShowServiceFailure = showFailure;
-			window.__corsiaShowQuitFailure = () => showFailure(undefined, true);
-			window.__corsiaShowStartup = showStartup;
+			if (invoke) stopLaunchFollowing = followProgress();
+			const drawn = (draw) => (...given) => {
+				const launchFollowing = stopLaunchFollowing;
+				stopLaunchFollowing = () => {};
+				launchFollowing();
+				return draw(...given);
+			};
+			window.__corsiaShowRemoteState = drawn(showRemoteState);
+			window.__corsiaShowServiceFailure = drawn(showFailure);
+			window.__corsiaShowQuitFailure = drawn(() => showFailure(undefined, true));
+			window.__corsiaShowStartup = drawn(showStartup);
 			openLoginItems.addEventListener('click', () => invoke?.('open_login_items'));
 			failureLoginItems.addEventListener('click', () => invoke?.('open_login_items'));
 			quit.addEventListener('click', () => invoke?.('quit_app'));
@@ -806,8 +913,7 @@
 				}
 			});
 			setUpLocal.addEventListener('click', setUpThisComputer);
-			startFreshButton.addEventListener('click', confirmFresh);
-			if (window.location.hash === '#background-approval') showBackgroundApproval();
+			// Start fresh gets its handler only when the current preview is valid.
 			if (window.location.hash === '#quit-failure') showFailure(undefined, true);
 		})();
 	</script>

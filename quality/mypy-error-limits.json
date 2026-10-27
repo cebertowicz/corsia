@@ -73,8 +73,10 @@
     "imported LLMResponse and ToolCallRequest for type checking; the pinned",
     "local mypy 2.3.0 gate reports 217.",
     "2026-10-22: backend lowered 214 -> 213 on the turn-error references",
-    "branch rebased onto dev; the pinned local mypy 2.3.0 gate reports 213."
+    "branch rebased onto dev; the pinned local mypy 2.3.0 gate reports 213.",
+    "2026-10-23: backend lowered 213 -> 212 on the echo-marker branch at dev",
+    "34cf9970; the pinned local mypy 2.3.0 gate reports 212."
   ],
-  "backend": 213,
+  "backend": 212,
   "tools": 4
 }

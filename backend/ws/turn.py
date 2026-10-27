@@ -89,7 +89,7 @@ async def _setup_turn(
         turn_id=turn_id,
         extra_meta=step_metadata,
     )
-    effective_effort = None if ingress == "event" else reasoning_effort
+    effective_effort = reasoning_effort
     if effective_effort and not target.supports_reasoning:
         effective_effort = None
     cancel_event = TurnCancelEvent()
@@ -243,6 +243,7 @@ async def _run_prepared_turn(
             on_provider_response=_provider_accepted,
             on_provider_terminal=request.settle_delivery_terminal,
             on_safe_boundary=_safe_boundary,
+            catalog_id=request.target.catalog_id,
         )
     )
 

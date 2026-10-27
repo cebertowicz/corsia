@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from doc_feedback_helpers import add_comment, batches, seed_document, seed_thread
-from doceditor import feedback_batches
+from doceditor import feedback_batch_edits, feedback_batches
 from doceditor.document_scope import MAX_TEXT_BYTES
 from infra.database import get_db, write_transaction
 from plans import admission, service
@@ -58,7 +58,7 @@ def _edit(
 ) -> str:
     db.commit()
     with write_transaction(db, scope="test_record_edit") as connection:
-        batch_id = feedback_batches.record_edit(
+        batch_id = feedback_batch_edits.record_edit(
             connection,
             artifact_id=artifact_id,
             recipient_id=recipient,

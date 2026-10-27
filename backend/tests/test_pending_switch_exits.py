@@ -80,7 +80,7 @@ async def test_startup_includes_pending_switch_without_a_fifo_claim(isolated_db,
     db.commit()
     request_switch("idle-switch", "native/target", operation_id="idle-operation", requested_at="t1", db=db)
     db.close()
-    recovered, wakes = await restart_startup.reconcile_startup_continuity(logger)
+    recovered, wakes, _rolled_back = await restart_startup.reconcile_startup_continuity(logger)
     assert not recovered.batches
     assert wakes.count("idle-switch") == 1
     drive = AsyncMock()

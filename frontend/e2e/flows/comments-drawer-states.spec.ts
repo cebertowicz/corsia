@@ -18,7 +18,7 @@ const drawerOf = (page: Page) => page.locator('[data-doc-comments-drawer]');
 const pill = (page: Page) => page.locator('.comment-status');
 
 async function reply(request: APIRequestContext, doc: Doc, parentId: string, body: string): Promise<string> {
-	const created = await request.post(`/api/artifacts/${doc.artifactId}/comments`, { params: { token: TEST_TOKEN }, data: { body, parent_id: parentId } });
+	const created = await request.post(`/api/artifacts/${doc.artifactId}/comments`, { params: { token: TEST_TOKEN }, data: { body, parent_id: parentId, delivery_policy: 'immediate' } });
 	expect(created.ok(), await created.text()).toBeTruthy();
 	return (await created.json()).comment.id as string;
 }

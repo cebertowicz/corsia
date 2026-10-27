@@ -329,7 +329,7 @@ async def test_restart_drives_the_pending_switch_of_a_held_thread(isolated_db, m
     monkeypatch.setattr("thread.model_pending.drive_pending_model_switch", drive)
     monkeypatch.setattr("automation.restart_startup._replay_held_webhooks", AsyncMock())
     held = HeldAdmission("claude-code", None, None, "thread", "claude-code/sonnet")
-    recovered = SimpleNamespace(batches=[held], settlements=[])
+    recovered = SimpleNamespace(batches=[held], settlements=[], ended_turns=())
 
     await drive_startup_continuity(recovered, {"thread"}, SimpleNamespace(
         info=lambda *_args: None, exception=lambda *_args: None,

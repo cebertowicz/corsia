@@ -16,6 +16,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from events.connectors.receiver import ReceiverDecl
 from events.identity_formula import RelationshipDecl
 
 
@@ -95,6 +96,8 @@ class ConnectorManifest:
     # A CORSIA-produced (platform) event's fact naming the agent that asked for it: with no
     # artifact owner, the event still reaches that agent's own rules (``events.rules``).
     requester_fact: str | None = None
+    # How the connector receives webhooks under ``/webhooks/<connector>/``; ``None`` mounts none.
+    receiver: ReceiverDecl | None = None
 
     def routed_type(self, routed_event: str) -> str | None:
         """The declared type the router's ``routed_event`` is, if one declares it."""
@@ -164,6 +167,7 @@ def _load_builtin_manifests() -> None:
         github,
         gmail,
         library,
+        mailhost,
         measurement,
         microsoft,
         plan,

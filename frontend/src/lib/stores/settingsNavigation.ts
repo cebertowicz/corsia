@@ -28,10 +28,10 @@ export interface SettingsNavigation {
 	homeThread: string | null;
 	/** An element in the opened section (its `data-settings-anchor`) to bring into view once, then cleared. */
 	anchor: string | null;
-	/** A connected-account row to disclose and focus after a chat link opens Connected apps. */
+	/** A connected-app or connected-account row (by id) to open and focus after a chat link opens Connected apps. */
 	connectedAppId: string | null;
 	/** A key card opened from Connected apps; it supplies the scoped header return and every referenced key's app-qualified label. */
-	connectedAppKey: { app: string; entry: string; refs: { entry: string; name: string }[] } | null;
+	connectedAppKey: { app: string; entry: string; refs: { entry: string; name: string }[]; account?: boolean } | null;
 }
 
 /*
@@ -74,7 +74,7 @@ export function requestSettingsSection(section: SettingsSection, anchor: string 
 	}));
 }
 
-/** A chat link opens one account in its only settings home and puts its scope action next. */
+/** A chat link opens one connected app or account row in its only settings home and focuses its one primary action. */
 export function requestConnectedApp(id: string) {
 	change((s) => ({ section: 'connected-apps', connectedAppId: id, anchor: 'connected-apps', fromProject: null, project: null, openRequest: s.openRequest + 1 }));
 }
@@ -104,18 +104,18 @@ export function openWorkspaceSettings(anchor: string | null = null) {
 }
 
 /** Open the exact existing key card needed by a Connected apps recovery action. */
-export function requestConnectedAppKey(app: string, entry: string, refs: { entry: string; name: string }[]) {
+export function requestConnectedAppKey(app: string, entry: string, refs: { entry: string; name: string }[], account = false) {
 	change((s) => ({
 		section: 'keys', anchor: `key-${entry}`, fromProject: null, project: null,
-		connectedAppKey: { app, entry, refs }, openRequest: s.openRequest + 1,
+		connectedAppKey: { app, entry, refs, ...(account ? { account: true } : {}) }, openRequest: s.openRequest + 1,
 	}));
 }
 
 /** Set or replace an app's key: its first unset (else first) declared key's card, or the Keys section when it declares none. */
-export function requestAppKey(app: { name: string; key_refs?: { entry: string; name: string; set: boolean }[] }) {
+export function requestAppKey(app: { name: string; key_refs?: { entry: string; name: string; set: boolean }[] }, account = false) {
 	const refs = app.key_refs ?? [];
 	const ref = refs.find((candidate) => !candidate.set) ?? refs[0];
-	if (ref) requestConnectedAppKey(app.name, ref.entry, refs);
+	if (ref) requestConnectedAppKey(app.name, ref.entry, refs, account);
 	else requestSettingsSection('keys');
 }
 

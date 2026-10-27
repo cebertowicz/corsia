@@ -183,8 +183,8 @@ beforeEach(() => {
 	mocks.resolveComment.mockReset();
 	mocks.ackComment.mockReset();
 	mocks.rangeFor.mockReset().mockReturnValue(null);
-	mocks.sendDocFeedback.mockReset().mockResolvedValue({ woken: [], undelivered_batches: [] });
-	mocks.retryDocFeedback.mockReset().mockResolvedValue({ woken: [], undelivered_batches: [] });
+	mocks.sendDocFeedback.mockReset().mockResolvedValue({ woken: [], undelivered_batches: [], open_count: 0, document_held_count: 0, image_held_count: 0 });
+	mocks.retryDocFeedback.mockReset().mockResolvedValue({ woken: [], undelivered_batches: [], open_count: 0, document_held_count: 0, image_held_count: 0 });
 	mocks.restoreDocumentPlace.mockReset().mockResolvedValue(undefined);
 	mocks.setComments({});
 	resetDocPresenceForTests();

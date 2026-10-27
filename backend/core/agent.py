@@ -262,12 +262,13 @@ def _register_delegation_tools(agent: CORSIAAgent) -> None:
 
 def _register_google_tools(agent: CORSIAAgent) -> None:
     from tools.google_account import GoogleConnectTool, GoogleStatusTool
-    from tools.google_calendar import CalendarDraftInviteTool, CalendarListTool, CalendarSendInviteTool
+    from tools.calendar_list import CalendarDraftInviteTool, CalendarListTool, CalendarSendInviteTool
     from tools.google_email import EmailDraftTool, EmailSendTool
-    from tools.google_email_read import EmailReadTool, EmailSearchTool
+    from tools.email_read import EmailReadTool, EmailSearchTool
+    from tools.mail_host_connect import MailHostConnectTool
 
-    agent.tools.register(EmailSearchTool())
-    agent.tools.register(EmailReadTool())
+    for tool in (MailHostConnectTool(), EmailSearchTool(), EmailReadTool()):
+        agent.tools.register(tool)
     agent.tools.register(GoogleConnectTool())
     agent.tools.register(GoogleStatusTool())
     agent.tools.register(EmailDraftTool())
@@ -369,14 +370,11 @@ def _register_tools(agent: CORSIAAgent, tool_cfg: dict, workspace: Path):
 
     from tools.browser import BrowserOpenTool, BrowserScreenshotTool, BrowserCloseTool
     from tools.browser_actions import BrowserSnapshotTool, BrowserClickTool, BrowserFillTool, BrowserEvalTool, BrowserWaitTool
+    from tools.browser_actions import BrowserPersonStepTool
     agent.tools.register(BrowserOpenTool(workspace=workspace))
-    agent.tools.register(BrowserSnapshotTool())
-    agent.tools.register(BrowserClickTool())
-    agent.tools.register(BrowserFillTool())
-    agent.tools.register(BrowserScreenshotTool(workspace=workspace))
-    agent.tools.register(BrowserEvalTool())
-    agent.tools.register(BrowserWaitTool())
-    agent.tools.register(BrowserCloseTool())
+    for tool in (BrowserSnapshotTool(), BrowserClickTool(), BrowserFillTool(), BrowserScreenshotTool(workspace=workspace),
+                 BrowserEvalTool(), BrowserPersonStepTool(), BrowserWaitTool(), BrowserCloseTool()):
+        agent.tools.register(tool)
 
     _register_document_tools(agent, workspace)
 

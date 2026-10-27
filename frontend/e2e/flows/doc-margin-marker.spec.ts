@@ -97,7 +97,7 @@ async function openDocument(page: Page, info: TestInfo, { comments = true, orpha
 	const add = async (anchor: string, body: string, quoted = anchor) => {
 		const from = text.indexOf(quoted);
 		const created = await request.post(`/api/artifacts/${artifactId}/comments`, {
-			params, data: { body, anchor_text: quoted, from_off: from < 0 ? 0 : from, to_off: (from < 0 ? 0 : from) + quoted.length },
+			params, data: { body, anchor_text: quoted, from_off: from < 0 ? 0 : from, to_off: (from < 0 ? 0 : from) + quoted.length, delivery_policy: 'immediate' },
 		});
 		expect(created.ok(), await created.text()).toBeTruthy();
 		const id: string = (await created.json()).comment.id;

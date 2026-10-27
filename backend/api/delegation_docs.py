@@ -155,7 +155,7 @@ async def create_agent_comment(token: str, body: AgentCommentCreate):
         quote=body.quote, near=body.near, replacement=body.replacement, registration=register_spec, submit=body.submit,
     )
     try:
-        row, registered, feedback = await create_validated_comment(request, body.client_id)
+        row, registered, feedback, _created = await create_validated_comment(request, body.client_id)
     except CommentAccessDenied as exc:
         raise HTTPException(404, str(exc)) from exc
     except AppLoopUnavailable as exc:
@@ -225,6 +225,7 @@ async def agent_feedback_action(action: str, token: str, body: AgentFeedbackActi
                         author_kind="agent",
                         author_id=body.as_session_id,
                         artifact_id=artifact_id,
+                        delivery_policy=feedback_batches.IMMEDIATE,
                     )
                 undelivered = feedback_batches.undelivered_for_document(
                     connection,

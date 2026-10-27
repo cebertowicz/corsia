@@ -24,7 +24,8 @@
 	import { canAddLocalModel, canSetUpLocalModel, localStatus, retryLocalSetup, watchLocalStatus } from '$lib/stores/localPickerStatus';
 	import type { LocalPickerRetry } from '$lib/conductorSources';
 	import { toasts } from '$lib/stores/toast';
-	import { emitProductEvent } from '$lib/product_events';
+	import { emitSwitchEvent } from '$lib/stores/threadModelSwitch';
+	import { awaitFirstRunOpening, cancelFirstRunOpening } from '$lib/ws/firstRunOpeningReveal';
 
 	let { threadId = undefined, onclose = () => {}, focusLocalOnly = false, onfocusconsumed = () => {} }: { threadId?: string | null; onclose?: () => void; focusLocalOnly?: boolean; onfocusconsumed?: () => void } = $props();
 	const sel = $derived($composerSelectionFor(threadId)); // the thread this composer is bound to: a worker's own in its pane
@@ -122,8 +123,10 @@
 			}
 			const t = $token;
 			if (!t) throw new Error('Not authenticated');
+			if (previousId === null && target === $corsiaAgentId) awaitFirstRunOpening(target);
 			const result = await saveThreadModel(target, dispatchId, t);
 			if (result.kind === 'pending') {
+				cancelFirstRunOpening(target);
 				if (result.checkpointRequired) {
 					void loadCheckpoints(target, t).catch(() => {
 						toasts.show('Checkpoint status will refresh on the next update.', 'info');
@@ -133,9 +136,13 @@
 			}
 			if (result.warning) toasts.show(result.warning, 'info', 6000);
 			if (sel.threadId !== target) return;
-			if (!result.accepted || !modelMatchesId(model, result.model)) return;
+			if (!result.accepted || !modelMatchesId(model, result.model)) {
+				cancelFirstRunOpening(target);
+				return;
+			}
 			emitSwitchEvent(model, dispatchId, target, previousId);
 		} catch (error) {
+			if (target) cancelFirstRunOpening(target);
 			toasts.show(
 				error instanceof Error ? error.message : "Couldn't switch model",
 				'error',
@@ -143,22 +150,6 @@
 		} finally {
 			if (target) finishThreadModelSwitch(target);
 		}
-	}
-
-	function emitSwitchEvent(
-		model: Model,
-		dispatchId: string,
-		threadId: string | null,
-		previousId: string | null,
-	) {
-		emitProductEvent('model', 'switched', {
-			thread_id: threadId,
-			model_id: dispatchId,
-			catalog_model_id: model.id,
-			provider: model.provider ?? model.backend,
-			previous_model_id: previousId,
-			reasoning_shape: model.capabilities?.reasoning_config?.type ?? null,
-		});
 	}
 </script>
 
@@ -294,8 +285,8 @@
 				{/each}
 				{#if cloudModelsOff && hasReadyGroup}<PickerLocalOnlyNote kind="quiet" {projectCloudOff} inherited={inheritedLocalOnly} onprojectsettings={openProjectPolicy} />{/if}
 				{#if showsLocalSection}
-					<section class="model-group" aria-label="Local">
-						<PickerModelGroupHeader name="Local" groupKey="local" count={0} fallback />
+					<section class="model-group" aria-label="CORSIA">
+						<PickerModelGroupHeader name="CORSIA" groupKey="local" count={0} fallback />
 						{#if $localStatus}
 								{#if $localStatus.retry === 'settings'}
 									<div class="local-settings-status"><span class="text" aria-live="polite">{$localStatus.line}</span><button type="button" disabled={settingsRetrying} onclick={retrySettingsDownload}>{settingsRetrying ? 'Trying again…' : 'Try again'}</button></div>

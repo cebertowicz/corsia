@@ -33,7 +33,7 @@ EMPTY_REACH = "Where it works needs at least one place."
 CHANGE_FAILED = "Couldn't change this {provider} account. Try again."
 
 
-def account_row(account: dict[str, object], *, db: sqlite3.Connection) -> dict[str, object]:
+def account_row(account: dict[str, object], *, db: sqlite3.Connection, detail: dict[str, object] | None = None) -> dict[str, object]:
     """One account's value-free list row."""
     from connections.connected_accounts import account_registration, provider_of, resolve_credentials
 
@@ -46,6 +46,7 @@ def account_row(account: dict[str, object], *, db: sqlite3.Connection) -> dict[s
         "capabilities": account["capabilities"], "state": state, "reach": account["reach"],
         "account_kind": account["account_kind"], "cause": account["state_cause"], "scopes": list(provider.display_scopes),
         **account_registration(str(account["id"]), db=db),
+        **(detail if detail is not None else (provider.row_detail(str(account["id"]), db) if provider.row_detail else {})),
     }
 
 
@@ -53,7 +54,23 @@ def list_account_rows(thread_id: str | None, *, db: sqlite3.Connection) -> list[
     """Every connected account for the person (``thread_id`` None); for an agent only those that reach its thread."""
     from connections.connected_accounts import visible_accounts
 
-    return [account_row(account, db=db) for account in visible_accounts(thread_id, db=db)]
+    accounts = visible_accounts(thread_id, db=db)
+    details: dict[str, dict[str, object]] = {}
+    by_provider: dict[str, list[str]] = {}
+    for account in accounts:
+        by_provider.setdefault(str(account["provider"]), []).append(str(account["id"]))
+    from connections.connected_accounts import provider_of
+    for provider_name, account_ids in by_provider.items():
+        provider = provider_of(provider_name)
+        if provider.row_details:
+            details.update(provider.row_details(account_ids, db))
+    return [
+        account_row(
+            account, db=db,
+            detail=details.get(str(account["id"]), {}) if provider_of(str(account["provider"])).row_details else None,
+        )
+        for account in accounts
+    ]
 
 
 def _authorize(account_id: str, user: dict, *, person_only: bool = False) -> str:

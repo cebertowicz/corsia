@@ -7,14 +7,12 @@ import { failureCopy, failureFromOperation } from './failureCopy';
 import { isFailedOperation, isInFlight, isResolvedFailure, type ClientVerdict, type UpdateChanges, type UpdateOperation } from './model';
 import { markOutcomeSeen } from './outcome';
 import { readVersionWithinFiveSeconds, versionHashesAgree } from './versionProbe';
+import { clearStartupProgress, refreshStartupProgress } from './startupProgress';
+import type { UpdateSchedule, UpdateStatus } from './types';
 
 const BASE = '';
 const POLL_MS = 1_000;
-
-import type { UpdateSchedule, UpdateStatus } from './types';
-
 export type { UpdateSchedule, UpdateStatus } from './types';
-
 export const updateStatus = writable<UpdateStatus | null>(null);
 /** The person shrank the progress toast to its pill; it lasts until the operation settles. */
 export const updateProgressMinimized = writable(false);
@@ -24,6 +22,8 @@ export const updateFailureVerdict = writable<ClientVerdict | null>(null);
 export const updateStarting = writable(false);
 /** Offset between this browser clock and the status response's server clock. */
 export const updateServerClockOffsetMs = writable(0);
+export const updateConfirmed = writable<{ operationId: string; version: string | null } | null>(null);
+export const updateToastSuppressed = writable(false);
 export const updateOperation = derived(updateStatus, ($status) => $status?.operation ?? null);
 export const updateInFlight = derived(updateOperation, ($operation) => isInFlight($operation));
 /** The server is down or coming back: the composer cannot send. */
@@ -37,15 +37,14 @@ let versionPollTimer: ReturnType<typeof setInterval> | null = null;
 let terminalCheckRunning = false;
 let versionMismatchStartedAt: number | null = null;
 let noticeToastId: string | null = null;
+let latestNoticeStatus: UpdateStatus | null = null;
 // What this page already showed. The durable record of what any device showed is the operation's `outcome_seen_at`.
 const shownOutcomes = new Set<string>();
 const noticedVersions = new Set<string>();
-
 function stopStatusPolling(): void {
 	if (pollTimer !== null) clearInterval(pollTimer);
 	pollTimer = null;
 }
-
 function stopVersionPolling(): void {
 	if (versionPollTimer !== null) clearInterval(versionPollTimer);
 	versionPollTimer = null;
@@ -61,26 +60,40 @@ async function observeRecovery(): Promise<void> {
 	if (!version) return;
 	updateUnreachable.set(false);
 	stopVersionPolling();
+	clearStartupProgress();
 	await loadUpdateStatus();
 }
 
 function pollVersionWhileUnreachable(): void {
 	if (versionPollTimer !== null) return;
-	versionPollTimer = setInterval(() => { void observeRecovery(); }, POLL_MS);
+	versionPollTimer = setInterval(() => { void observeRecovery(); void refreshStartupProgress(); }, POLL_MS);
 	void observeRecovery();
+	void refreshStartupProgress();
 }
 
-function dismissNotice(): void {
+function dismissNotice(forSuppression = false): void {
+	const visible = noticeToastId && get(toasts).some((toast) => toast.id === noticeToastId);
+	if (forSuppression && visible && latestNoticeStatus?.target_version) noticedVersions.delete(latestNoticeStatus.target_version);
 	if (noticeToastId) toasts.dismiss(noticeToastId);
 	noticeToastId = null;
 }
 
 function showNotice(status: UpdateStatus): void {
+	latestNoticeStatus = status;
 	const version = status.target_version;
+	if (get(updateToastSuppressed)) {
+		dismissNotice();
+		return;
+	}
 	if (!status.available || isInFlight(status.operation) || status.operation?.target_version === version || !version || noticedVersions.has(version)) return;
 	noticedVersions.add(version);
 	noticeToastId = toasts.showButton('Update ready. Open Updates', openUpdates);
 }
+
+updateToastSuppressed.subscribe((suppressed) => {
+	if (suppressed) dismissNotice(true);
+	else if (latestNoticeStatus) showNotice(latestNoticeStatus);
+});
 
 /** Remove the progress toast; a tab that reads a terminal status second must never keep a spinner. */
 function dropProgressToast(): void {
@@ -123,7 +136,9 @@ async function verifyComplete(operation: UpdateOperation): Promise<void> {
 		}
 		if (versionHashesAgree(version)) {
 			versionMismatchStartedAt = null;
+			updateConfirmed.set({ operationId: operation.operation_id, version: operation.target_version ?? get(updateStatus)?.target_version ?? null });
 			showTerminal(operation);
+			void loadUpdateStatus();
 			return;
 		}
 		versionMismatchStartedAt ??= Date.now();
@@ -239,9 +254,9 @@ export async function startUpdate(): Promise<void> {
 	updateFailureVerdict.set(null);
 	const previous = get(updateStatus)?.operation;
 	const previousOperationId = previous?.operation_id;
+	updateStarting.set(true);
 	// Retrying is acting on the failure: it no longer needs to greet any device.
 	if (isFailedOperation(previous)) void markOutcomeSeen(previous.operation_id);
-	updateStarting.set(true);
 	// The request answers only once the update is built; adopt the operation record meanwhile so the surface shows progress.
 	const adopt = setInterval(() => { void loadUpdateStatus(); }, POLL_MS);
 	const result = await restartSystem('update').finally(() => { clearInterval(adopt); updateStarting.set(false); });
@@ -279,4 +294,7 @@ export function resetUpdateStoreForTests(): void {
 	updateFailureVerdict.set(null);
 	updateStarting.set(false);
 	updateServerClockOffsetMs.set(0);
+	updateConfirmed.set(null);
+	updateToastSuppressed.set(false);
+	latestNoticeStatus = null;
 }

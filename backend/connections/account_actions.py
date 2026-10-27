@@ -55,7 +55,7 @@ def _sign_out_locally(
         taken = take_refresh_token(account_id, db=conn)
         set_state(account_id, "signed_out", db=conn)
         audit_id = record_audit(account_id, "sign_out", actor, revocation_cause=_manual_cause(spec), db=conn)
-    return spec, audit_id, str(taken["refresh_token"]) if taken else None
+    return spec, audit_id, str(taken["refresh_token"]) if taken and taken.get("refresh_token") else None
 
 
 def _remove_locally(
@@ -73,7 +73,7 @@ def _remove_locally(
         conn.execute("DELETE FROM connected_account_reach WHERE account_id=?", (account_id,))
         conn.execute("DELETE FROM email_screens WHERE account=?", (account_id,))
         conn.execute("DELETE FROM connected_accounts WHERE id=?", (account_id,))
-    return spec, audit_id, str(held["refresh_token"]) if held else None
+    return spec, audit_id, str(held["refresh_token"]) if held and held.get("refresh_token") else None
 
 
 async def _revoke(spec: AccountProvider, refresh_token: str | None) -> str:

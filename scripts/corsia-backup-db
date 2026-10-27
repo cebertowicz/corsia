@@ -49,14 +49,15 @@ elif bootstrap.is_file():
         raise SystemExit("invalid CORSIA bootstrap")
 elif workspace_override:
     home = pathlib.Path.home()
-    application_id = os.environ.get("CORSIA_APPLICATION_ID") or "com.cebertowicz.corsia"
     if sys.platform == "darwin":
-        base = home / "Library" / "Application Support"
+        state_root = home / "Library" / "Application Support" / "CORSIA" / "source-state"
     elif sys.platform.startswith("win"):
         base = pathlib.Path(os.environ.get("LOCALAPPDATA") or home / "AppData" / "Local")
+        state_root = base / "CORSIA" / "state"
     else:
         base = pathlib.Path(os.environ.get("XDG_STATE_HOME") or home / ".local" / "state")
-    state_root = (base / application_id / "state").expanduser().resolve()
+        state_root = base / "corsia" / "state"
+    state_root = state_root.expanduser().resolve()
 else:
     raise SystemExit("CORSIA runtime is not configured")
 

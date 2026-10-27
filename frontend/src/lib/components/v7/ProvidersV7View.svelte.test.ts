@@ -115,7 +115,7 @@ describe('ProvidersV7View card request', () => {
 		expect(document.querySelector('[data-provider-card="local-setup"]')?.textContent).toContain('Set up');
 		expect(document.querySelector('[data-provider-card="local-setup"] .dot')?.classList.contains('disabled')).toBe(true);
 		expect(document.querySelector('[data-provider-card="local-setup"] [aria-label="Settings"]')).toBeNull();
-		expect(document.querySelector('[data-provider-card="local-setup"] [aria-label="Enable"]')).toBeNull();
+		expect(document.querySelector('[data-provider-card="local-setup"] button.tg')).toBeNull();
 		expect(document.querySelector('[data-provider-card="local-setup"] button.pr-expand')).toBeNull();
 		expect(document.querySelector('[data-provider-card="local-setup"] .chev')).toBeNull();
 		(document.querySelector('[data-provider-card="local-setup"] .setup-action') as HTMLButtonElement).click();
@@ -195,6 +195,37 @@ describe('ProvidersV7View card request', () => {
 			expect(document.querySelector('[data-provider-card="local-setup"]')).toBeNull();
 		});
 		expect(serverReads()).toBeGreaterThan(beforeOnline);
+	});
+
+	it('offers the setup flow\'s own row for a CLI without a card, and starts its install from Sign in', async () => {
+		token.set('test-token');
+		const sources = [
+			{ source: 'claude-code', name: 'Claude Code', state: 'needs_auth' },
+			{ source: 'codex', name: 'Codex', state: 'not_installed' },
+		];
+		const claudeModel = { id: 'claude-1', harness: 'claude-code', provider: 'claude-code', enabled: 0, available: true };
+		const fetchMock = vi.fn(async (url: string) => String(url).includes('/providers/sources')
+			? { ok: true, json: async () => ({ sources }) }
+			: { ok: true, json: async () => ({ providers: [], servers: [], accounts: [], models: [claudeModel] }) });
+		vi.stubGlobal('fetch', fetchMock);
+		// Claude Code already has a card; only Codex needs the row.
+		hostGroupSnapshot.set([{
+			key: 'agent-clis', name: 'Agent CLIs', subname: '', netKind: 'localhost', providers: [harness('claude-code', 'Claude Code')],
+		} as HostGroup]);
+
+		component = mount(ProvidersV7View, { target: document.body });
+		flushSync();
+		// No row until the first host-group read says which tools already have a card.
+		expect(document.querySelector('section[aria-label="Codex"]')).toBeNull();
+		await vi.waitFor(() => expect(document.querySelector('section[aria-label="Codex"]')).not.toBeNull());
+
+		expect(document.querySelector('[data-provider-card="claude-code"]')).not.toBeNull();
+		expect(document.querySelector('section[aria-label="Claude Code"]')).toBeNull();
+		const row = document.querySelector('section[aria-label="Codex"]');
+		expect(row?.textContent).toContain('Uses your ChatGPT subscription.');
+		const signIn = [...(row?.querySelectorAll('button') ?? [])].find((button) => button.textContent?.includes('Sign in')) as HTMLButtonElement;
+		signIn.click();
+		await vi.waitFor(() => expect(fetchMock.mock.calls.some((call) => String(call[0]).endsWith('/providers/cli/codex/install'))).toBe(true));
 	});
 
 	it('renders a keyed cloud provider that is switched off with the off dot, off subline and off switch', async () => {

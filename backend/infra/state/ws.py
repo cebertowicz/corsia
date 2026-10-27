@@ -12,7 +12,7 @@ __all__ = [
     "broadcast_to_thread", "send_to_thread_sessions", "broadcast_event", "broadcast_to_user",
     "broadcast_all", "owner_broadcast",
     "send_to_client",
-    "notify_models_changed", "notify_devices_updated", "schedule_devices_updated",
+    "notify_models_changed", "notify_devices_updated", "schedule_devices_updated", "notify_connected_apps_updated",
     "CROSS_TAB_EVENTS",
 ]
 
@@ -207,6 +207,11 @@ def notify_models_changed() -> None:
 def notify_devices_updated() -> None:
     """Tell every connected client to re-read its Devices state."""
     broadcast_all({"type": "devices_updated"})
+
+
+def notify_connected_apps_updated() -> None:
+    """Tell every connected client to re-read Connected apps (a mail-host check ended)."""
+    broadcast_all({"type": "connected_apps_updated"})
 
 
 def broadcast_from_any_thread(broadcast: Callable[[], None], what: str) -> None:

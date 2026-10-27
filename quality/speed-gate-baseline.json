@@ -157,7 +157,7 @@
       "steps": 5215065
     },
     "/api/measurement/series": {
-      "bytes": 51305,
+      "bytes": 30612,
       "statements": 40,
       "steps": 3558473
     },

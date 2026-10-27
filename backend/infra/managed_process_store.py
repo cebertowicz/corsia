@@ -137,27 +137,28 @@ def unsettled_family_handles(
 def stage_thread_family_retirements(
     db: sqlite3.Connection,
     thread_ids: Sequence[str],
-    *,
-    process_dir: Path,
 ) -> tuple[str, ...]:
-    """Atomically replace exact family handles with immutable cleanup owners."""
+    """Atomically replace exact family handles with immutable cleanup owners.
+
+    A handle's log is ``<handle>.log`` in the current process folder, found
+    from the handle alone, so a moved state folder still retires cleanly.
+    """
     exact = tuple(dict.fromkeys(thread_ids))
     if not exact:
         return ()
     marks = ",".join("?" for _ in exact)
     rows = db.execute(
-        "SELECT handle,thread_id,log_path,long_running "
+        "SELECT handle,thread_id,long_running "
         f"FROM managed_process_handles WHERE thread_id IN ({marks}) "
         "ORDER BY thread_id,handle",
         exact,
     ).fetchall()
-    canonical_dir = Path(process_dir).expanduser().resolve(strict=False)
     staged_at = utc_now_iso()
     handles: list[str] = []
     for row in rows:
         handle = str(row["handle"])
-        head = Path(str(row["log_path"])).expanduser().resolve(strict=False)
-        if head.parent != canonical_dir or head.name != f"{handle}.log":
+        head_name = f"{handle}.log"
+        if Path(head_name).name != head_name:
             raise ValueError(
                 f"managed process {handle} has an unsafe retirement log path"
             )
@@ -166,7 +167,7 @@ def stage_thread_family_retirements(
             "INSERT OR IGNORE INTO managed_process_retirements "
             "(handle,thread_id,head_log_name,tail_log_name,staged_at) "
             "VALUES (?,?,?,?,?)",
-            (handle, str(row["thread_id"]), head.name, tail_name, staged_at),
+            (handle, str(row["thread_id"]), head_name, tail_name, staged_at),
         )
         handles.append(handle)
     db.execute(

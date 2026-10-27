@@ -533,9 +533,11 @@ def _seed_measurement_fixture(wt: sqlite3.Connection, thread_id: str) -> None:
         per_row = tokens // outcomes
         for index in range(outcomes):
             wt.execute(
-                "INSERT INTO llm_usage (id, thread_id, model, total_tokens, cost_usd, "
-                "created_at) VALUES (?, ?, 'measurement-fixture', ?, 0.01, ?)",
-                (f"measurement-fixture-usage-{week}-{index}", thread_id, per_row,
+                "INSERT INTO llm_usage (id, thread_id, model, total_tokens, prompt_tokens, completion_tokens, "
+                "cache_creation_tokens, cache_read_tokens, cost_usd, source, created_at) "
+                "VALUES (?, ?, 'claude-code/measurement-fixture', ?, ?, 0, 0, 0, 0.01, "
+                "'external_harness:claude-code', ?)",
+                (f"measurement-fixture-usage-{week}-{index}", thread_id, per_row, per_row,
                  f"{week}T13:00:00Z"),
             )
         minutes = _MEASUREMENT_ACTIVE_MINUTES.get(week, 0)

@@ -41,7 +41,7 @@ async def measurement_key_figures(
             db.execute(DDL[PREPARED_SCOPE])
             db.execute(f"DELETE FROM {PREPARED_SCOPE}")
             db.execute(scope_cte() + f"INSERT INTO {PREPARED_SCOPE}(id,root_id) SELECT id,root_id FROM scope_threads", params)
-            kpi = build_kpi(db, current, previous)
+            kpi = build_kpi(db, current, previous, page_grain)
             for name, window in windows.items():
                 kpi[name].update({"from": window.first, "to": page_grain.period_end(window.last)})
             return selected_scope.response(), kpi

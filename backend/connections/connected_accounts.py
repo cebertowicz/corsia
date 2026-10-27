@@ -19,14 +19,16 @@ from connections.agent_add_reach import AddingScopeError, reach_for_adding_threa
 from connections.app_lifecycle_support import _assert_selected_projects_exist
 from connections.app_reach import AppReach, AppReachError, normalize_reach, reach_reaches_thread
 from connections.google.provider import GOOGLE
+from connections.mailhost.provider import MAILHOST
 from connections.microsoft.provider import MICROSOFT
 from infra import key_store
 from infra.database import write_transaction
 from infra.time import utc_now_iso
 
-PROVIDERS: dict[str, AccountProvider] = {provider.name: provider for provider in (GOOGLE, MICROSOFT)}
+PROVIDERS: dict[str, AccountProvider] = {provider.name: provider for provider in (GOOGLE, MICROSOFT, MAILHOST)}
 GOOGLE_PROVIDER = GOOGLE.name
 MICROSOFT_PROVIDER = MICROSOFT.name
+MAILHOST_PROVIDER = MAILHOST.name
 ACCOUNT_STATES = frozenset(("connected", "needs_sign_in", "signed_out"))
 #: Account-only reach mode: the designated CORSIA agent alone. Only the legacy migration writes it.
 ONLY_CORSIA = "corsia"
@@ -46,9 +48,10 @@ def provider_of(name: object) -> AccountProvider:
     return provider
 
 
-def credential_key(account_id: str) -> str:
+def credential_key(account_id: str, provider: str | None = None) -> str:
     """The opaque, per-account key-store name for one account's credential bundle."""
-    return f"{key_store.CONNECTED_ACCOUNT_PREFIX}{account_id}"
+    spec = PROVIDERS.get(provider) if provider else None
+    return f"{(spec.credential_prefix if spec else None) or key_store.CONNECTED_ACCOUNT_PREFIX}{account_id}"
 
 
 def _is_corsia_agent_thread(thread_id: str, *, db: sqlite3.Connection) -> bool:
@@ -251,7 +254,7 @@ def create_account(
             ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (identity, spec.name, provider_subject, account_kind, address.strip(),
              json.dumps(spec.capabilities, separators=(",", ":")), state, normalized.mode,
-             int(normalized.outside_projects), credential_key(identity), cursor_json,
+             int(normalized.outside_projects), credential_key(identity, spec.name), cursor_json,
              created_by[0], created_by[1], *(signed_in_by or (None, None)), now, now),
         )
         conn.executemany(
@@ -287,6 +290,8 @@ def _stored_bundle(account_id: str, *, db: sqlite3.Connection) -> tuple[AccountP
         return None
     spec, key = found
     stored = key_store.resolve_names([key], db=db).get(key)
+    if spec.raw_credential_field is not None:
+        return (spec, {spec.raw_credential_field: stored}) if stored else None
     try:
         bundle = json.loads(stored) if stored else None
     except (TypeError, ValueError):
@@ -299,7 +304,13 @@ def _write_bundle(account_id: str, bundle: dict[str, object], *, db: sqlite3.Con
         found = _credential_row(account_id, conn)
         if found is None:
             raise ConnectedAccountError("connected account not found")
-        key_store.set_managed_value(found[1], json.dumps(bundle, separators=(",", ":")), db=conn)
+        raw = found[0].raw_credential_field
+        if raw is None:
+            key_store.set_managed_value(found[1], json.dumps(bundle, separators=(",", ":")), db=conn)
+        elif bundle.get(raw):
+            key_store.set_managed_value(found[1], bundle[raw], db=conn)
+        else:
+            key_store.clear_value(found[1], db=conn)
 
 
 def store_credentials(account_id: str, credentials: dict[str, object], *, db: sqlite3.Connection | None = None) -> None:

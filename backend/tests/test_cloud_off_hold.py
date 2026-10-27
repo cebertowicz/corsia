@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from tests.unavailable_model_support import message_row, seed_model
+from tests.unavailable_model_support import mark_model_loaded, message_row, seed_model
 
 HELD = ("queued", "proved_no_write", "project_cloud_off", None)
 PROJECT = "proj-off"
@@ -50,6 +50,7 @@ def world(isolated_db, monkeypatch):
         set_project_cloud_models_off(PROJECT, cloud_models_off=True, db=db)
     finally:
         db.close()
+    mark_model_loaded(monkeypatch, LOCAL)
     return seen
 
 
@@ -212,7 +213,7 @@ async def test_moving_the_thread_to_a_local_model_releases_the_head_in_fifo_orde
 
 
 @pytest.mark.asyncio
-async def test_a_private_mark_on_a_lan_server_releases_the_head_through_the_models_changed_path(world, turn_ends) -> None:
+async def test_a_private_mark_on_a_lan_server_releases_the_head_through_the_models_changed_path(world, turn_ends, monkeypatch) -> None:
     import infra.unavailable_model_recovery as recovery
     from infra.database import get_db
 
@@ -226,6 +227,7 @@ async def test_a_private_mark_on_a_lan_server_releases_the_head_through_the_mode
     finally:
         db.close()
     seed_model("omlx@lan/n")
+    mark_model_loaded(monkeypatch, "omlx@lan/n")
     await _send_and_hold()
     _set_thread_model("omlx@lan/n")
     await recovery._resume_held_heads()

@@ -421,6 +421,8 @@ def test_migrations_touching_usage_have_a_reviewed_rollup_disposition():
         "migration_97_to_98_effort_and_limit_history.py": False,
         # creates the rollup itself; it starts empty and builds from scratch.
         "migration_99_to_100_usage_rollup.py": False,
+        # adds Measurement-only boundaries and an index; it does not mutate a rollup grain or value.
+        "migration_146_to_147_measure_breaks.py": False,
     }
     pattern = re.compile(r"\bllm_usage\b")
     found = set()

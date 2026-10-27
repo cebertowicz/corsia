@@ -7,7 +7,7 @@ import json
 import uuid
 
 import pytest
-from auth_fixtures import OWNER_TOKEN, OWNER_USER
+from auth_fixtures import OTHER_USER, OWNER_TOKEN, OWNER_USER
 
 from delegation_docs_fixtures import _OTHER, _OWNER, _mk_thread, _registrable_roots, doc
 from test_doc_suggestions import _own, _row, _suggest, _user_decide
@@ -111,6 +111,69 @@ async def test_accepts_every_authors_open_suggestions_in_one_write_and_skips_a_c
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("other_outcome", ["skipped", "rejected"])
+async def test_accept_all_credits_an_api_created_person_suggestion_despite_another_persons_nonaccepted_row(
+    integration_client, doc, _registrable_roots, monkeypatch, other_outcome,
+):
+    """A shared UI artifact lets the creator and accepting person use their real HTTP routes."""
+    from api import doc_comments
+
+    doc.write_text("# Design\n\nA unique tail sentence\n")
+    registered = integration_client.post(
+        f"/api/files/register?token={_OWNER}", json={"path": str(doc)},
+    )
+    assert registered.status_code == 200, registered.text
+    artifact_id = registered.json()["artifact"]["id"]
+    assert registered.json()["artifact"]["parent_thread_id"] == "ui"
+
+    def create(token, quote, replacement):
+        start = doc.read_text().index(quote)
+        response = integration_client.post(
+            f"/api/artifacts/{artifact_id}/comments?token={token}",
+            json={"delivery_policy": "immediate", 
+                "body": "", "anchor_text": quote, "from_off": start, "to_off": start + len(quote),
+                "replacement": replacement,
+            },
+        )
+        assert response.status_code == 200, response.text
+        return response.json()["comment"]
+
+    accepted = create(_OTHER, HEADING, "# Revised design")
+    other = create(_OWNER, TAIL, "A revised tail sentence")
+    assert accepted["author"] == OTHER_USER
+    assert OTHER_USER != OWNER_USER
+
+    if other_outcome == "skipped":
+        doc.write_text(doc.read_text().replace(TAIL, "A changed tail sentence"))
+    else:
+        rejected = _user_decide(integration_client, other["id"], "reject")
+        assert rejected.status_code == 200, rejected.text
+
+    captured = []
+    original_person_writer = doc_comments._person_writer
+
+    def capture_person_writer(user, saved):
+        writer = original_person_writer(user, saved)
+
+        async def write(path, text, project_id, reason, expected_sha256, suggestion_author):
+            captured.append((user["id"], suggestion_author))
+            return await writer(path, text, project_id, reason, expected_sha256, suggestion_author)
+
+        return write
+
+    monkeypatch.setattr(doc_comments, "_person_writer", capture_person_writer)
+    response = _accept_all(integration_client, artifact_id)
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["accepted"] == [accepted["id"]]
+    assert len(body["skipped"]) == (1 if other_outcome == "skipped" else 0)
+    assert captured == [(OWNER_USER, OTHER_USER)]
+    assert _row(accepted["id"])["decision"] == "accepted"
+    assert _row(other["id"])["decision"] == (None if other_outcome == "skipped" else "rejected")
+
+
+@pytest.mark.asyncio
 async def test_with_nothing_open_it_changes_nothing_and_is_not_an_error(
     integration_client, doc, _registrable_roots, monkeypatch,
 ):
@@ -171,7 +234,7 @@ async def test_reopening_a_rejected_suggestion_clears_its_bulk_flag(integration_
     assert _row(suggestion["id"])["decided_in_bulk"] == 1
 
     reopened = integration_client.patch(
-        f"/api/comments/{suggestion['id']}?token={_OWNER}", json={"resolved": False})
+        f"/api/comments/{suggestion['id']}?token={_OWNER}", json={"delivery_policy": "document-held", "resolved": False})
 
     assert reopened.status_code == 200
     assert _row(suggestion["id"])["decided_in_bulk"] is None
@@ -209,7 +272,7 @@ async def test_the_persons_own_comment_still_makes_it_approved_with_changes(
     await asyncio.to_thread(_raise_ask, artifact_id)
     note = integration_client.post(
         f"/api/artifacts/{artifact_id}/comments?token={_OWNER}",
-        json={"body": "Check this", "anchor_text": TAIL, "from_off": 0, "to_off": len(TAIL)})
+        json={"delivery_policy": "immediate", "body": "Check this", "anchor_text": TAIL, "from_off": 0, "to_off": len(TAIL)})
     assert note.status_code == 200, note.text
 
     assert _accept_all(integration_client, artifact_id).status_code == 200

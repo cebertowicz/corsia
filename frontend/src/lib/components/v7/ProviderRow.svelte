@@ -93,7 +93,7 @@
 			</button>
 
 			{#if configurable}
-				<Toggle checked={enabled} ariaLabel={enabled ? 'Disable' : 'Enable'} onchange={() => onToggleEnable?.()} />
+				<Toggle checked={enabled} ariaLabel={`Use ${provider.label}`} onchange={() => onToggleEnable?.()} />
 			{/if}
 		{/if}
 	</div>

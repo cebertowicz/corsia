@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import sqlite3
 from pathlib import Path
 from unittest.mock import AsyncMock
@@ -207,6 +208,53 @@ async def test_failed_update_marks_conductor_only_after_successful_send(isolated
 
 
 @pytest.mark.asyncio
+async def test_rolled_back_update_notice_names_the_target_and_running_versions(
+    isolated_db, monkeypatch
+):
+    from automation import self_restart
+    from automation.update_failure_notice import tell_conductor_about_failed_update
+    from core import agent_roster_queries
+    from events import delivery
+
+    operation_id = self_restart.try_acquire(
+        None, "steve", None, None, "update", kind="update", trigger="manual",
+        previous_version="0.4.1",
+    )
+    assert operation_id is not None
+    for expected, target in (
+        ("holding", "steering"),
+        ("steering", "draining"),
+        ("draining", "ready"),
+        ("ready", "restarting"),
+        ("restarting", "resuming"),
+    ):
+        assert self_restart.transition_operation(
+            operation_id, expected=expected, target=target,
+        )
+    assert self_restart.abort_operation(
+        operation_id,
+        error="Update target version 0.4.2 is not running (running: 0.4.1).",
+        failure_code="rolled_back",
+        failure_detail=json.dumps({
+            "reason": "mismatch",
+            "target_version": "0.4.2",
+            "running_version": "0.4.1",
+        }),
+    )
+    sent = AsyncMock(return_value=True)
+    monkeypatch.setattr(
+        agent_roster_queries, "corsia_agent_contact", lambda _user, _db: ({"id": "conductor"}, None)
+    )
+    monkeypatch.setattr(delivery, "deliver_to_thread", sent)
+
+    await tell_conductor_about_failed_update(operation_id)
+
+    assert "target version 0.4.2" in sent.await_args.args[2]
+    assert "running version 0.4.1" in sent.await_args.args[2]
+    assert "previous version 0.4.1" in sent.await_args.args[2]
+
+
+@pytest.mark.asyncio
 async def test_failed_update_keeps_conductor_marker_null_when_send_fails(isolated_db, monkeypatch):
     """An unreachable conductor can be retried later without claiming notification."""
     from automation import self_restart
@@ -334,7 +382,7 @@ async def test_release_returns_while_the_conductor_notice_is_pending(isolated_db
     monkeypatch.setattr(update_failure_notice, "tell_conductor_about_failed_update", slow_notice)
     monkeypatch.setattr(drain, "cancel_drain_projection", lambda: order.append("clear"))
     monkeypatch.setattr(
-        restart, "resume_threads_detached", lambda threads, *_args: order.append("resume")
+        "automation.restart_settlement.resume_threads_detached", lambda threads, *_args: order.append("resume")
     )
 
     released = await asyncio.wait_for(
@@ -368,7 +416,7 @@ async def test_conductor_notice_failure_never_skips_resume(isolated_db, monkeypa
     resumed = []
     monkeypatch.setattr(drain, "cancel_drain_projection", lambda: cleared.append(True))
     monkeypatch.setattr(
-        restart, "resume_threads_detached", lambda threads, *_args: resumed.append(tuple(threads))
+        "automation.restart_settlement.resume_threads_detached", lambda threads, *_args: resumed.append(tuple(threads))
     )
 
     released = await restart.abort_restart_control(

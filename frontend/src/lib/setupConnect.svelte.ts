@@ -18,6 +18,8 @@ export type RowView = {
 	action?: { label: string; run: () => void; loading?: boolean };
 	confirm?: { label: string; run: () => void }[];
 	more?: { label: string; run: () => void }[];
+	/** This account can't run the tool: the screen offers its own switch to turn the tool off. */
+	canTurnOff?: boolean;
 };
 export interface ConnectDeps { token: () => string | null; sources: () => ModelSource[]; refreshSources: (strict?: boolean) => Promise<void> }
 export const VENDOR_COPY: Record<string, { cli: string; uses: string; maker: string; account: string }> = {
@@ -37,11 +39,10 @@ export function failureAction(action: string, ref?: string | null): string {
 }
 
 /** Keep refusal recovery distinct from retryable installer failures without exposing installer output. */
-export function installFailureCopy(cli: string, cause?: InstallFailureCause | null, ref?: string | null) {
+export function installFailureCopy(cli: string, cause?: InstallFailureCause | null, ref?: string | null, maker?: string) {
 	if (installCause(cause) === 'site_refused') {
-		// Without a reference there is nothing to report, so Retry is the only action left.
-		return ref ? { meta: `Couldn’t download ${cli}. The download site refused the request. Save a report.`, reference: ref, retry: false }
-			: { meta: `Couldn’t download ${cli}. The download site refused the request. Retry.`, reference: undefined, retry: true };
+		// Retry stays beside the report: the line tells the person to try again.
+		return { meta: `${maker ?? 'The maker'}’s site refused the download. Try again, or install it yourself.`, reference: ref ?? undefined, retry: true };
 	}
 	if (installCause(cause) === 'connection') {
 		return { meta: `Couldn’t download ${cli}. Check your internet connection, then Retry.`, reference: ref ?? undefined, retry: true };
@@ -52,25 +53,26 @@ export function installFailureCopy(cli: string, cause?: InstallFailureCause | nu
 /** The sign-in's real cause in words, and whether a report would help diagnose it. */
 export function signinFailureCopy(vendor: string, cause?: string | null, ref?: string | null): { meta: string; reportable: boolean } {
 	const { cli, account } = VENDOR_COPY[vendor] ?? { cli: vendor, account: vendor };
-	const again = failureAction('Sign in again', ref);
-	if (cause === 'unreachable') return { meta: `CORSIA didn’t answer while starting the ${cli} sign-in. Sign in again.`, reportable: true };
-	if (cause === 'agent_unavailable') return { meta: `CORSIA couldn’t reach its agent to start signing in. ${again}`, reportable: true };
+	const retry = ref ? 'Press Sign in to try again, or save a report.' : 'Press Sign in to try again.';
 	if (cause?.endsWith('_executable_missing')) return { meta: `CORSIA couldn’t find ${cli} on this computer. Sign in again to install it.`, reportable: true };
 	if (cause?.endsWith('_signin_in_progress')) return { meta: `Another ${cli} sign-in is already open. Finish it in your browser, or sign in again.`, reportable: false };
-	if (cause === 'signin_timed_out') return { meta: `Your browser never came back to CORSIA to finish signing in to ${cli}. Sign in again.`, reportable: false };
-	if (cause === 'vendor_login_failed') return { meta: `Signing in to ${cli} didn’t finish in the browser. Sign in again.`, reportable: false };
+	if (cause === 'signin_timed_out') return { meta: `Couldn’t finish signing in to ${cli}. If your browser said this account doesn’t include ${cli}, sign in with another account or turn ${cli} off. Otherwise, sign in again.`, reportable: false };
+	if (cause === 'vendor_login_failed') return { meta: 'Sign-in didn’t finish in your browser. Press Sign in to try again.', reportable: false };
 	if (cause === 'vendor_not_signed_in') return { meta: `${cli} didn’t report a signed-in ${account} account. Sign in again.`, reportable: false };
 	if (cause === 'same_account') return { meta: `That ${account} account is already signed in here. To add another, sign in again with a different ${account} account.`, reportable: false };
-	if (cause === 'signin_check_failed' || cause === 'vendor_status_failed') return { meta: `CORSIA couldn’t check the ${cli} sign-in. ${again}`, reportable: true };
-	if (cause === 'vendor_login_unavailable' || cause === 'vendor_logout_unavailable') return { meta: `CORSIA couldn’t start the ${cli} sign-in. ${again}`, reportable: true };
-	if (cause === 'prompt_unrecognized') return { meta: `${cli} asked something CORSIA didn’t expect. ${again}`, reportable: true };
-	// The cause code itself goes to the report, never into the sentence.
-	return { meta: `Couldn’t finish signing in to ${cli}. ${again}`, reportable: true };
+	// Every other cause is CORSIA’s own plumbing: the person gets one line and the report, never the cause code.
+	return { meta: `Sign-in didn’t finish. ${retry}`, reportable: true };
 }
 
 /** The ready account's name for its row: an email, plan, or the vendor's own label. */
 function readyAccount(source: ModelSource): string | undefined {
 	return source.accounts?.find((candidate) => candidate.state === 'ready')?.label;
+}
+
+/** The service records a signed-in account for this tool and none that can run a model. */
+function hasNoUsableModel(source: ModelSource): boolean {
+	const accounts = source.accounts ?? [];
+	return accounts.some((account) => account.state === 'no_usable_model') && accounts.every((account) => account.state === 'no_usable_model' || account.state === 'signed_out');
 }
 
 /** Install once a tool is picked, sign in on request; retain setup-only attempts for the handoff. */
@@ -206,10 +208,10 @@ export function createSetupConnect(deps: ConnectDeps) {
 		if (entry?.phase === 'signing-in') return { meta: 'Finish signing in in your browser.', busy: true, action: { label: 'Open sign-in again', run: () => void openSignInAgain(source) } };
 		if (entry?.phase === 'failed' && entry.failed === 'signin') {
 			const failure = signinFailureCopy(source.source, entry.signinCause, entry.ref);
-			return { meta: failure.meta, reference: entry.ref ?? undefined, error: true, reportable: failure.reportable, action: signInAction };
+			return { meta: failure.meta, reference: entry.ref ?? undefined, error: true, reportable: failure.reportable, action: signInAction, canTurnOff: entry.signinCause === 'signin_timed_out' };
 		}
 		if (entry?.phase === 'failed') {
-			const failure = installFailureCopy(copy.cli, entry.cause, entry.ref);
+			const failure = installFailureCopy(copy.cli, entry.cause, entry.ref, copy.maker);
 			return { meta: failure.meta, reference: failure.reference, error: true, reportable: true, action: failure.retry ? { label: 'Retry', run: () => void startInstall(source, true) } : undefined };
 		}
 		if (entry?.phase === 'path-shadow') return { meta: `An older ${copy.cli} at ${entry.shadowedBinary} runs instead of the one CORSIA installed. Remove it, then come back here.`, error: true, action: { label: 'Check again', run: () => void deps.refreshSources(true) } };
@@ -217,6 +219,9 @@ export function createSetupConnect(deps: ConnectDeps) {
 		if (sourceIsReady(source)) {
 			const account = readyAccount(source);
 			return { meta: account ? `Ready · ${account}` : 'Ready', ready: true };
+		}
+		if (hasNoUsableModel(source)) {
+			return { meta: `This ${copy.account} account has no models for ${copy.cli}. Sign in with another account, or turn ${copy.cli} off.`, error: true, action: signInAction, canTurnOff: true };
 		}
 		if (source.state === 'unverified' && source.cli_package_manager) {
 			const command = source.cli_package_manager === 'homebrew' ? `brew reinstall ${source.source === 'claude-code' ? 'claude-code' : 'codex'}` : `npm install -g ${source.source === 'claude-code' ? '@anthropic-ai/claude-code' : '@openai/codex'}`;

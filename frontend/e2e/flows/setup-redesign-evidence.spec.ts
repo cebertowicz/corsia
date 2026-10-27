@@ -8,18 +8,18 @@ import { openAppByUrl, TEST_TOKEN } from '../support/corsia';
 import { injectMessage } from '../support/mock';
 import { setFocusMode } from '../support/focusMode';
 import { localSetupFix } from '../support/localSetupFix';
-import { WELCOME_ACCOUNT_LINE, WELCOME_LINES, WELCOME_ROWS, WELCOME_TITLE } from '../../src/lib/setupWelcome';
+import { WELCOME_LINES, WELCOME_ROWS, WELCOME_TITLE } from '../../src/lib/setupWelcome';
 
 type LocalFixture = 'downloading' | 'paused' | 'starting' | 'ready' | 'stopped' | 'disk-space' | 'pick-failed' | 'connection' | 'disk-full' | 'memory' | 'other-ref' | 'other-no-ref' | 'setup-failed' | 'start-failed';
-type Fixture = { name: string; element: string; screen?: 'checking' | 'error' | 'old-macos' | 'account' | 'invalid' | 'mismatch' | 'short-password' | 'protected' | 'unwritable' | 'creating' | 'create-failed' | 'account-exists' | 'welcome' | 'account-form'; only?: 'narrow' | 'short'; cli?: string; local?: LocalFixture; finish?: 'progress-save'; api?: 'ready' | 'failed' | 'menu' | 'address'; classifier?: 'downloading' | 'failed'; requiredUsername?: string };
+type Fixture = { name: string; element: string; screen?: 'checking' | 'error' | 'old-macos' | 'account' | 'invalid' | 'mismatch' | 'short-password' | 'protected' | 'unwritable' | 'creating' | 'create-failed' | 'account-exists' | 'welcome' | 'account-form' | 'subscriptions'; only?: 'narrow' | 'short'; cli?: string; local?: LocalFixture; finish?: 'progress-save'; api?: 'ready' | 'failed' | 'menu' | 'address'; classifier?: 'downloading' | 'failed'; requiredUsername?: string };
 const fixtures: Fixture[] = [
 	{ name: 'checking', screen: 'checking', element: 'Checking this computer' },
 	{ name: 'status-error', screen: 'error', element: 'CORSIA couldn’t start; Retry and Save a report' },
 	{ name: 'old-macos', screen: 'old-macos', element: 'Update macOS to open CORSIA' },
-	{ name: 'account-empty', screen: 'account', element: 'Lede under the title, the five account fields and the work folder row, with Welcome and the logo beside them' },
-	{ name: 'account-welcome-short', screen: 'account', only: 'short', element: 'The lede above the form, and all of Welcome to its last row beside it, in a 1280×600 window with no scrolling; the logo hides here only if under its minimum size is free' },
-	{ name: 'welcome', screen: 'welcome', only: 'narrow', element: 'Welcome screen: three rows and Continue' },
-	{ name: 'account-form', screen: 'account-form', only: 'narrow', element: 'Create your account form after Continue, with no Welcome' },
+	{ name: 'account-empty', screen: 'account', element: 'Create your account: the five account fields and the work folder row, with the living mark beside them' },
+	{ name: 'account-short', screen: 'account', only: 'short', element: 'The account form and the work folder row in a 1280×600 window with no scrolling, the living mark beside them' },
+	{ name: 'subscriptions', screen: 'subscriptions', cli: 'ready', element: 'Your subscriptions: Claude Code signed in, the ChatGPT question, Back and Continue' },
+	{ name: 'welcome', screen: 'welcome', element: 'Getting started: the Welcome copy and Continue, with the living mark beside it from 1280 wide' },
 	{ name: 'account-early-download-failed', screen: 'account', local: 'connection', element: 'Local model rail job: Couldn’t download' },
 	{ name: 'account-invalid', screen: 'invalid', element: 'Use up to 32 lowercase letters, numbers, dashes or underscores.' },
 	{ name: 'account-short-password', screen: 'short-password', element: 'Use at least 8 characters.' },
@@ -28,7 +28,7 @@ const fixtures: Fixture[] = [
 	{ name: 'account-classifier-downloading', screen: 'account', classifier: 'downloading', element: 'No classifier download line while it downloads' },
 	{ name: 'account-classifier-failed', screen: 'account', classifier: 'failed', element: 'No classifier download line when it fails' },
 	{ name: 'account-exists', screen: 'account-exists', element: 'This computer already has a CORSIA account. Sign in instead.' },
-	{ name: 'folder-protected', screen: 'protected', element: 'Choose Allow when it does.' },
+	{ name: 'folder-protected', screen: 'protected', element: 'Your Documents folder holds personal files.' },
 	{ name: 'folder-unwritable', screen: 'unwritable', element: 'CORSIA can’t write to this folder. Choose another one.' },
 	{ name: 'creating', screen: 'creating', element: 'Starting CORSIA; Continue spinner' },
 	{ name: 'create-failed', screen: 'create-failed', element: 'Couldn’t create your account. Try again.' },
@@ -106,7 +106,7 @@ async function serve(page: Page, fixture: Fixture) {
 	});
 	await page.addInitScript(({ screen }) => {
 		if (screen === 'protected' || screen === 'unwritable') {
-			(window as unknown as { __TAURI_INTERNALS__: unknown }).__TAURI_INTERNALS__ = { invoke: async () => screen === 'protected' ? { state: 'ready', path: '~/Documents/CORSIA', protected_folder: 'Documents' } : { state: 'unwritable', path: '/Volumes/Archive/CORSIA', reason: 'read-only' } };
+			(window as unknown as { __TAURI_INTERNALS__: unknown }).__TAURI_INTERNALS__ = { invoke: async () => screen === 'protected' ? { state: 'ready', path: '~/Documents', folder_warning: { kind: 'personal_folder', folder: 'Documents' } } : { state: 'unwritable', path: '/Volumes/Archive/CORSIA', reason: 'read-only' } };
 		}
 	}, { screen: fixture.screen });
 	await page.route((url) => url.pathname.startsWith('/api/'), async (route: Route) => {
@@ -172,28 +172,16 @@ async function corsiaAgentThread(request: import('@playwright/test').APIRequestC
 	return body.target.thread_id as string;
 }
 async function fillAccount(page: Page) {
-	await page.getByLabel('Name', { exact: true }).fill('Alex Morgan');
+	await page.getByLabel('Full name', { exact: true }).fill('Alex Morgan');
 	await page.getByLabel('Password', { exact: true }).fill('setup-example-password');
 	await page.getByLabel('Confirm password', { exact: true }).fill('setup-example-password');
 }
-const isNarrow = (page: Page) => (page.viewportSize()?.width ?? 0) < 1280;
 // The words are the shipped strings in setupWelcome.ts; every account and Welcome frame proves them on screen first.
 async function expectWelcomeCopy(page: Page) {
 	await expect(page.locator('.welcome .line')).toHaveText([...WELCOME_LINES]);
 	await expect(page.locator('.welcome li')).toHaveText(WELCOME_ROWS.map((row) => `${row.label} ${row.text}`));
-	// Below 1280 Welcome ends on the account sentence. From 1280 it is the form's lede instead, and the Welcome column leaves it out.
-	if (isNarrow(page)) { await expect(page.locator('.welcome .account')).toHaveText(WELCOME_ACCOUNT_LINE); return; }
+	// Getting started ends at its button; the account sentence lives on the account screen as its lede.
 	await expect(page.locator('.welcome .account')).toHaveCount(0);
-	await expect(page.locator('.pane-scene > .lede')).toHaveText(WELCOME_ACCOUNT_LINE);
-	await expect(page.locator('.brand .lede')).toHaveCount(0);
-	const box = async (selector: string) => (await page.locator(selector).first().boundingBox())!;
-	const [title, lede, name, welcome] = [await box('.pane-scene h1'), await box('.pane-scene > .lede'), await box('#setup-name'), await box('.brand .welcome .line')];
-	expect(title.y + title.height, 'the lede sits directly under the title').toBeLessThanOrEqual(lede.y + 1);
-	expect(lede.y + lede.height, 'the lede sits above Name').toBeLessThanOrEqual(name.y);
-	expect(Math.abs(welcome.y - lede.y), 'the first Welcome line is top-aligned with the lede').toBeLessThanOrEqual(2);
-	// Title, lede, fields, then the Welcome column, in DOM order (which is tab and screen-reader order).
-	const order = await page.locator('.pane-scene').evaluate((scene) => ['h1', '.lede', '#setup-name', '.brand'].map((selector) => scene.querySelector(selector)!).every((node, index, nodes) => index === 0 || Boolean(nodes[index - 1].compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING)));
-	expect(order, 'DOM order is title, lede, fields, Welcome').toBe(true);
 }
 const accountScreens = ['account', 'invalid', 'mismatch', 'short-password', 'account-exists'];
 async function navigate(page: Page, fixture: Fixture) {
@@ -202,15 +190,13 @@ async function navigate(page: Page, fixture: Fixture) {
 	if (['error', 'disk-image', 'old-macos'].includes(fixture.screen ?? '')) return;
 	await expect(page.getByRole('heading', { name: WELCOME_TITLE })).toBeVisible({ timeout: 30_000 });
 	if (fixture.screen === 'welcome') return;
-	// Below 1280 wide Welcome is its own screen: press its Continue to reach the account form.
-	if (isNarrow(page)) {
-		await page.getByRole('button', { name: 'Continue', exact: true }).click();
-		await expect(page.getByRole('heading', { name: 'Create your account' })).toBeVisible();
-	}
-	if (fixture.screen === 'account' || fixture.screen === 'account-form') return;
+	// Getting started is its own screen at every width: press its Continue to reach the account form.
+	await page.getByRole('button', { name: 'Continue', exact: true }).click();
+	await expect(page.getByRole('heading', { name: 'Create your account' })).toBeVisible();
+	if (fixture.screen === 'account') return;
 	if (fixture.screen === 'invalid') { await page.getByLabel('Username', { exact: true }).fill('Bad user!'); return; }
-	if (fixture.screen === 'short-password') { await page.getByLabel('Password', { exact: true }).fill('short'); await page.getByLabel('Name', { exact: true }).focus(); return; }
-	if (fixture.screen === 'mismatch') { await fillAccount(page); await page.getByLabel('Confirm password', { exact: true }).fill('does-not-match'); await page.getByLabel('Name', { exact: true }).focus(); return; }
+	if (fixture.screen === 'short-password') { await page.getByLabel('Password', { exact: true }).fill('short'); await page.getByLabel('Full name', { exact: true }).focus(); return; }
+	if (fixture.screen === 'mismatch') { await fillAccount(page); await page.getByLabel('Confirm password', { exact: true }).fill('does-not-match'); await page.getByLabel('Full name', { exact: true }).focus(); return; }
 	await fillAccount(page);
 	// The work folder is a row under the account form: Change is on the same screen as the fields.
 	if (fixture.screen === 'protected' || fixture.screen === 'unwritable') { await page.getByRole('button', { name: 'Change', exact: true }).click(); return; }
@@ -220,9 +206,13 @@ async function navigate(page: Page, fixture: Fixture) {
 		return;
 	}
 	if (fixture.screen === 'creating' || fixture.screen === 'create-failed') {
-		await expect(page.getByLabel('Name', { exact: true })).toBeVisible();
+		await expect(page.getByLabel('Full name', { exact: true })).toBeVisible();
 		return;
 	}
+	// With a tool signed in or not, the subscriptions question can come first: answer it without picking a plan.
+	await expect(page.getByRole('heading', { name: /^(Your subscriptions|Providers & models)$/ })).toBeVisible();
+	if (fixture.screen === 'subscriptions') return;
+	if (await page.getByRole('heading', { name: 'Your subscriptions', exact: true }).isVisible()) await page.getByRole('button', { name: /^(No|Neither)$/ }).click();
 	await expect(page.getByRole('heading', { name: 'Providers & models', exact: true })).toBeVisible();
 	if (['installing', 'install-connection', 'install-failed', 'shadow'].includes(fixture.cli ?? '')) await page.getByRole('region', { name: 'Claude Code' }).getByRole('button', { name: 'Set up' }).click();
 	if (['signing-in', 'signin-failed'].includes(fixture.cli ?? '')) await page.getByRole('region', { name: 'Claude Code' }).getByRole('button', { name: 'Sign in', exact: true }).click();
@@ -250,27 +240,18 @@ async function assertState(page: Page, fixture: Fixture) {
 		await expect(page.locator('#setup-name')).toHaveCount(0);
 		return;
 	}
-	if (fixture.screen === 'account-form') {
-		await expect(page.getByRole('heading', { name: 'Create your account' })).toBeVisible();
-		await expect(page.getByLabel('Name', { exact: true })).toBeVisible();
-		await expect(page.locator('.welcome')).toHaveCount(0);
-		return;
-	}
-	// Account frames at 1280 and up show Welcome beside the form, so the form and every Welcome string are on screen together.
+	// Account frames show the form with the living mark beside it from 1280 wide.
 	if (accountScreens.includes(fixture.screen ?? '')) {
-		await expect(page.getByRole('heading', { name: WELCOME_TITLE })).toBeVisible();
-		await expect(page.locator('.brand .welcome')).toBeVisible();
-		await expect(page.getByLabel('Name', { exact: true })).toBeVisible();
-		await expectWelcomeCopy(page);
+		await expect(page.getByRole('heading', { name: 'Create your account' })).toBeVisible();
+		await expect(page.getByLabel('Full name', { exact: true })).toBeVisible();
+		await expect(page.locator('.welcome')).toHaveCount(0);
 		if (fixture.only === 'short') {
-			// Nothing is cut or hidden behind a scroll: the first and the last line of Welcome are both fully in the window.
-			const brand = page.locator('.brand');
-			expect(await brand.evaluate((node) => node.scrollHeight <= node.clientHeight), 'Welcome fits without scrolling').toBe(true);
-			await expect(page.locator('.welcome .line').first()).toBeInViewport({ ratio: 1 });
-			await expect(page.locator('.welcome li').last()).toBeInViewport({ ratio: 1 });
-			await expect(page.locator('.pane-scene > .lede')).toBeInViewport({ ratio: 1 });
+			// Nothing is cut or hidden behind a scroll in the shortest window.
+			expect(await page.locator('.pane-scene .body').evaluate((node) => node.scrollHeight <= node.clientHeight), 'the account form fits without scrolling').toBe(true);
+			await expect(page.getByLabel('Email (optional)', { exact: true })).toBeInViewport({ ratio: 1 });
 		}
 	}
+	if (fixture.screen === 'subscriptions') { await expect(page.getByRole('heading', { name: 'Your subscriptions', exact: true })).toBeVisible(); await expect(page.getByRole('button', { name: 'Back', exact: true })).toBeVisible(); return; }
 	if (fixture.screen === 'checking') { await expect(page.getByRole('heading', { name: 'Checking this computer' })).toBeVisible(); return; }
 	if (fixture.screen === 'error') { await expect(page.getByRole('heading', { name: 'CORSIA couldn’t start' })).toBeVisible(); await expect(page.getByRole('button', { name: 'Save a report' })).toBeVisible(); return; }
 	if (fixture.screen === 'old-macos') { await expect(page.getByRole('heading', { name: 'Update macOS to open CORSIA' })).toBeVisible(); return; }
@@ -278,14 +259,20 @@ async function assertState(page: Page, fixture: Fixture) {
 	if (fixture.screen === 'short-password') { await expect(text('Use at least 8 characters.')).toBeVisible(); return; }
 	if (fixture.screen === 'mismatch') { await expect(text('Passwords don’t match.')).toBeVisible(); return; }
 	if (fixture.screen === 'account-exists') { await expect(text('This computer already has a CORSIA account. Sign in instead.')).toBeVisible(); return; }
-	if (fixture.screen === 'protected') { await expect(text('macOS asks you once to let CORSIA use your Documents folder. Choose Allow when it does.')).toBeVisible(); return; }
-	if (fixture.screen === 'unwritable') { await expect(text('CORSIA can’t write to this folder. Choose another one.')).toBeVisible(); await expect(page.getByRole('button', { name: 'Continue', exact: true })).toBeDisabled(); return; }
+	if (fixture.screen === 'protected') {
+		await expect(text('Your Documents folder holds personal files. macOS may ask to let CORSIA use it. Agents open anything in the work folder without asking; outside it, CORSIA asks you first.')).toBeVisible();
+		await expect(page.getByRole('button', { name: 'Use ~/CORSIA', exact: true })).toBeVisible();
+		await expect(page.getByRole('button', { name: 'Keep this folder', exact: true })).toBeVisible();
+		await expect(page.getByRole('button', { name: 'Continue', exact: true })).toBeDisabled();
+		return;
+	}
+	if (fixture.screen === 'unwritable') { await expect(text('CORSIA couldn’t write to this folder. Choose another one.')).toBeVisible(); await expect(page.getByRole('button', { name: 'Continue', exact: true })).toBeDisabled(); return; }
 	if (fixture.screen === 'creating') { await expect(text('Starting CORSIA')).toBeVisible(); return; }
 	if (fixture.screen === 'create-failed') { await expect(text('Couldn’t create your account. Try again.')).toBeVisible(); await expect(page.getByRole('button', { name: 'Save a report', exact: true })).toBeVisible(); return; }
 	if (fixture.requiredUsername) { await expect(page.getByLabel('Username', { exact: true })).toHaveAttribute('readonly'); }
 	// The classifier downloads unseen: setup shows no line for it, whether it runs or fails.
 	if (fixture.classifier) await expect(text('Finishing setup')).toHaveCount(0);
-	if (fixture.screen === 'account') { await expect(page.getByRole('heading', { name: 'Welcome to CORSIA' })).toBeVisible(); if (fixture.local === 'connection') await expect(text(localSetupFix('connection'))).toBeVisible(); return; }
+	if (fixture.screen === 'account') { await expect(page.getByRole('heading', { name: 'Create your account' })).toBeVisible(); if (fixture.local === 'connection') await expect(text(localSetupFix('connection'))).toBeVisible(); return; }
 	if (fixture.api === 'menu') { await expect(page.getByText('Cloud', { exact: true })).toBeVisible(); await expect(page.getByText('Other ways to connect', { exact: true })).toBeVisible(); await expect(page.getByRole('button', { name: /^oMLX on another Mac/ })).toBeVisible(); return; }
 	if (fixture.api === 'address') { await expect(page.getByRole('dialog').getByText('Other provider by address', { exact: true })).toBeVisible(); await expect(page.getByPlaceholder('https://host.example.com/compatible-mode/v1', { exact: true })).toBeVisible(); await expect(page.getByPlaceholder('(leave empty when the web address needs no key)', { exact: true })).toBeVisible(); await expect(page.getByRole('button', { name: 'More options', exact: true })).toBeVisible(); await expect(page.getByText('Connection type', { exact: true })).toHaveCount(0); return; }
 	if (fixture.api === 'ready') { await expect(page.getByRole('region', { name: 'API provider' }).getByText('Anthropic · passed a test call')).toBeVisible(); return; }
@@ -314,6 +301,7 @@ async function assertState(page: Page, fixture: Fixture) {
 			: fixture.local === 'start-failed' ? localSetupFix('connection')
 			: 'Free and private. Runs on this computer, even offline. 30 GB download.';
 		await expect(row).toContainText(expected);
+		if (['downloading', 'paused', 'starting', 'ready'].includes(fixture.local ?? '') && !fixture.cli && !fixture.api) await expect(row).toContainText('Good for private work. To run many agents at once, add a cloud model.');
 		if (fixture.local === 'other-no-ref' || fixture.local === 'start-failed') await expect(row.getByText(/Reference:/)).toHaveCount(0);
 		if (fixture.local === 'setup-failed' || fixture.local === 'start-failed') await expect(row.getByRole('button', { name: 'Save a report', exact: true })).toBeVisible();
 	}
@@ -391,12 +379,12 @@ test('setup redesign complete state frames @setup-redesign', async ({ browser, r
 			const context = await browser.newContext(); const page = await context.newPage();
 			await capture(page, fixture, theme, 1280, 900); await page.close(); await context.close();
 		}
-		// Narrow (below 1280): Welcome is its own screen, so these frames walk through its Continue.
-		for (const fixture of selectedFixtures.filter((row) => row.only === 'narrow' || ['cli-ready'].includes(row.name))) {
+		// Narrow (below 1280): the same screens with no brand column.
+		for (const fixture of selectedFixtures.filter((row) => ['welcome', 'account-empty', 'cli-ready'].includes(row.name))) {
 			const context = await browser.newContext(); const page = await context.newPage();
 			await capture(page, fixture, theme, 800, 600); await page.close(); await context.close();
 		}
-		// The shortest window the pack uses, at the 1280 width where Welcome sits beside the form.
+		// The shortest window the pack uses, at the 1280 width where the mark sits beside the form.
 		for (const fixture of selectedFixtures.filter((row) => row.only === 'short')) {
 			const context = await browser.newContext(); const page = await context.newPage();
 			await capture(page, fixture, theme, 1280, 600); await page.close(); await context.close();
@@ -410,11 +398,13 @@ test('setup redesign complete state frames @setup-redesign', async ({ browser, r
 	await setFocusMode(request, false);
 	const emailQuestion = 'Which email do you use: Gmail (a work Gmail counts), Outlook, or something else?';
 	const emailScenarios = [
-		{ name: 'first-run-email-gmail', answer: 'Gmail', next: 'I can look after your email and calendar. To connect them, I\'ll set up your own private Google project in a browser you can watch, and you sign in and click Allow. Google will also ask for your Drive, Docs and Sheets, so you won\'t have to sign in again later. Two things to expect: Google will warn that the app isn\'t verified. That\'s normal for a private project like yours; choose "Advanced", then "Go to CORSIA (unsafe)". It\'s your own project, so you\'re the only one it can reach. And the project gets published as "In production", because a project left in Testing stops letting me in after 7 days. Go ahead?', element: 'Fresh conversation: the answer “Gmail”, then CORSIA’s offer to set up your own Google project, ending “Go ahead?”' },
+		{ name: 'first-run-email-gmail', answer: 'Gmail', next: 'To connect Gmail and Calendar, CORSIA creates a private Google project you own, in a browser you can watch. Google will ask to:\n- Read, send and change your Gmail, and manage your calendar.\n- See, edit and delete your Drive, Docs and Sheets files, so you won\'t have to sign in again later.\nTwo things to expect:\n- If Google warns the app isn\'t verified, choose "Advanced", then "Go to CORSIA (unsafe)". It\'s your own project, so only you can reach it.\n- CORSIA may set the project to "In production", because a project left in Testing stops letting CORSIA in after 7 days.\nGo ahead?', element: 'Fresh conversation: the answer “Gmail”, then CORSIA’s offer to set up your own Google project, ending “Go ahead?”' },
 		{ name: 'first-run-email-outlook', answer: 'Outlook', next: 'I can\'t connect Outlook, but I\'ve noted which one you use.', element: 'Fresh conversation: the answer “Outlook”, then “I can’t connect Outlook, but I’ve noted which one you use.”' },
-		{ name: 'first-run-email-both', answer: 'Gmail and Outlook', next: 'I can look after your email and calendar. To connect them, I\'ll set up your own private Google project in a browser you can watch, and you sign in and click Allow. Google will also ask for your Drive, Docs and Sheets, so you won\'t have to sign in again later. Two things to expect: Google will warn that the app isn\'t verified. That\'s normal for a private project like yours; choose "Advanced", then "Go to CORSIA (unsafe)". It\'s your own project, so you\'re the only one it can reach. And the project gets published as "In production", because a project left in Testing stops letting me in after 7 days. Go ahead?', element: 'Fresh conversation: the answer “Gmail and Outlook”, then CORSIA’s offer to set up your own Google project, ending “Go ahead?”' },
+		{ name: 'first-run-email-both', answer: 'Gmail and Outlook', next: 'To connect Gmail and Calendar, CORSIA creates a private Google project you own, in a browser you can watch. Google will ask to:\n- Read, send and change your Gmail, and manage your calendar.\n- See, edit and delete your Drive, Docs and Sheets files, so you won\'t have to sign in again later.\nTwo things to expect:\n- If Google warns the app isn\'t verified, choose "Advanced", then "Go to CORSIA (unsafe)". It\'s your own project, so only you can reach it.\n- CORSIA may set the project to "In production", because a project left in Testing stops letting CORSIA in after 7 days.\nGo ahead?', element: 'Fresh conversation: the answer “Gmail and Outlook”, then CORSIA’s offer to set up your own Google project, ending “Go ahead?”' },
 		{ name: 'first-run-email-other', answer: 'Proton Mail', next: 'I can\'t connect that email, but I\'ve noted which one you use.', element: 'Fresh conversation: the answer “Proton Mail”, then “I can’t connect that email, but I’ve noted which one you use.”' },
 	] as const;
+	// A reply with bullets renders as a paragraph and a list, so match its first line, which is one element.
+	const firstLine = (reply: string) => reply.split('\n')[0];
 	const cases = emailScenarios.filter((row) => row.name === `first-run-email-${emailCase}`);
 	expect(cases, 'CORSIA_SETUP_EMAIL_CASE is gmail, outlook, both or other').toHaveLength(1);
 	const threadId = await corsiaAgentThread(request);
@@ -463,12 +453,12 @@ First, a few things to set up here, one at a time. Any of them can wait: say "no
 			await expect(emailPage.getByText(openingLead, { exact: true })).toHaveCount(1);
 			await expect(emailPage.getByText(emailQuestion, { exact: true }), 'the email question appears once').toHaveCount(1);
 			await expect(emailPage.getByText(scenario.answer, { exact: true })).toHaveCount(1);
-			await expect(emailPage.getByText(scenario.next, { exact: true })).toHaveCount(1);
+			await expect(emailPage.getByText(firstLine(scenario.next))).toHaveCount(1);
 			for (const other of emailScenarios.filter((row) => row.name !== scenario.name)) {
 				await expect(emailPage.getByText(other.answer, { exact: true }), `${other.name}'s answer is not in ${scenario.name}`).toHaveCount(0);
-				if (other.next !== scenario.next) await expect(emailPage.getByText(other.next, { exact: true }), `${other.name}'s reply is not in ${scenario.name}`).toHaveCount(0);
+				if (other.next !== scenario.next) await expect(emailPage.getByText(firstLine(other.next)), `${other.name}'s reply is not in ${scenario.name}`).toHaveCount(0);
 			}
-			await emailPage.getByText(scenario.next, { exact: true }).scrollIntoViewIfNeeded();
+			await emailPage.getByText(firstLine(scenario.next)).scrollIntoViewIfNeeded();
 			await expectCleanFirstRun(emailPage);
 			const emailFile = `${scenario.name}-${theme}-1280x900.png`;
 			const emailPath = resolve(assets!, emailFile);

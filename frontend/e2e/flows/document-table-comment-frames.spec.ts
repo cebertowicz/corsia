@@ -42,7 +42,7 @@ async function openDocument(page: Page, size: { width: number; height: number })
 	const add = async (quoted: string, body: string) => {
 		const from = DOC.indexOf(quoted);
 		expect(from, `setup: ${quoted} is in the document`).toBeGreaterThanOrEqual(0);
-		const created = await request.post(`/api/artifacts/${artifactId}/comments`, { params, data: { body, anchor_text: quoted, from_off: from, to_off: from + quoted.length } });
+		const created = await request.post(`/api/artifacts/${artifactId}/comments`, { params, data: { body, anchor_text: quoted, from_off: from, to_off: from + quoted.length, delivery_policy: 'immediate' } });
 		expect(created.ok(), await created.text()).toBeTruthy();
 		return (await created.json()).comment.id as string;
 	};

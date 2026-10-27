@@ -4,7 +4,8 @@
  * neither, so every remote-connect surface checks `shellInfo()` first.
  */
 
-export type ShellInfo = { mode: 'local' } | { mode: 'remote'; name: string; localConfigured: boolean };
+export type DefaultWorkspace = { path: string; display: string };
+export type ShellInfo = { mode: 'local'; default_workspace?: DefaultWorkspace } | { mode: 'remote'; name: string; localConfigured: boolean };
 
 export type PairTarget =
 	| { kind: 'dns_sd'; instance: string }
@@ -21,14 +22,20 @@ export type PairResult =
 export type DiscoveredResult = { names: string[]; denied?: boolean };
 
 type Invoke = (command: string, args?: Record<string, unknown>) => Promise<unknown>;
-type ShellWindow = Window & { __CORSIA_SHELL__?: ShellInfo; __TAURI_INTERNALS__?: { invoke?: Invoke } };
+type ShellWindow = Window & { __CORSIA_SHELL__?: unknown; __TAURI_INTERNALS__?: { invoke?: Invoke } };
 
 export function shellInfo(): ShellInfo | null {
 	if (typeof window === 'undefined') return null;
 	const info = (window as ShellWindow).__CORSIA_SHELL__;
-	if (!info) return null;
-	return info.mode === 'remote' && typeof info.name === 'string'
-		? { mode: 'remote', name: info.name, localConfigured: info.localConfigured === true }
+	if (!info || typeof info !== 'object') return null;
+	const shell = info as Record<string, unknown>;
+	if (shell.mode === 'remote' && typeof shell.name === 'string') return { mode: 'remote', name: shell.name, localConfigured: shell.localConfigured === true };
+	if (shell.mode !== 'local') return { mode: 'local' };
+	const workspace = shell.default_workspace;
+	if (!workspace || typeof workspace !== 'object') return { mode: 'local' };
+	const { path, display } = workspace as Record<string, unknown>;
+	return typeof path === 'string' && path && typeof display === 'string' && display
+		? { mode: 'local', default_workspace: { path, display } }
 		: { mode: 'local' };
 }
 
@@ -36,6 +43,77 @@ function invoke(command: string, args?: Record<string, unknown>): Promise<unknow
 	const call = (window as ShellWindow).__TAURI_INTERNALS__?.invoke;
 	if (!call) return Promise.reject(new Error('shell unavailable'));
 	return args === undefined ? call(command) : call(command, args);
+}
+
+let startupShellPage = false;
+
+/** Set only by the shell's bundled update page (update/shellEntry.ts); the app the service serves never sets it. */
+export function markStartupShellPage(): void {
+	startupShellPage = true;
+}
+
+/**
+ * Whether this is the desktop shell's own update page, the only page the shell lets ask for a recovery start. It picks
+ * which path the screen takes and grants nothing: the shell checks the caller itself.
+ */
+export function onStartupShellPage(): boolean {
+	return startupShellPage;
+}
+
+/** Why the update screen asks: its own wait ran long, or the person pressed Start CORSIA. */
+export type RecoveryIntent = 'automatic' | 'manual';
+
+/**
+ * A recovery start's answer. `ready` carries the proven service URL; `deferred` means an update holds the lock and
+ * nothing was done; `manual_available` means the automatic request did nothing but a current manual request may apply;
+ * `unavailable` means no start applies; `not_started` means the one start ran and the service did not come up.
+ */
+export type RecoveryAnswer = { recovery: 'ready'; url: string } | { recovery: 'deferred' | 'manual_available' | 'unavailable' | 'not_started' };
+
+function isRecoveryUrl(value: unknown): value is string {
+	if (typeof value !== 'string' || !value.trim()) return false;
+	try {
+		const url = new URL(value);
+		return url.protocol === 'http:' && (url.hostname === '127.0.0.1' || url.hostname === 'localhost');
+	} catch {
+		return false;
+	}
+}
+
+let recoveryFailureReported = false;
+function unavailableRecovery(): RecoveryAnswer {
+	if (!recoveryFailureReported) {
+		console.warn('[update] recovery start is unavailable');
+		recoveryFailureReported = true;
+	}
+	return { recovery: 'unavailable' };
+}
+
+/** Ask the shell to bring this computer's service back during an update. Only the shell's own page may ask. */
+export async function recoverLocalService(intent: RecoveryIntent): Promise<RecoveryAnswer> {
+	let result: unknown;
+	try {
+		result = await invoke('start_local_service', { recovery: intent });
+	} catch {
+		// A refused invoke proves no narrow admission, so it must not offer another start.
+		return unavailableRecovery();
+	}
+	const answer = result && typeof result === 'object' ? result as { recovery?: unknown; url?: unknown } : {};
+	if (answer.recovery === 'ready') {
+		if (!isRecoveryUrl(answer.url)) return unavailableRecovery();
+		recoveryFailureReported = false;
+		return { recovery: 'ready', url: answer.url };
+	}
+	if (answer.recovery === 'deferred' || answer.recovery === 'manual_available' || answer.recovery === 'unavailable' || answer.recovery === 'not_started') {
+		recoveryFailureReported = false;
+		return { recovery: answer.recovery };
+	}
+	return unavailableRecovery();
+}
+
+/** The desktop shell's PID-validated, redacted startup-progress record; absent for browsers and remote shells. */
+export async function readStartupProgress(): Promise<unknown> {
+	return invoke('read_startup_progress');
 }
 
 export async function remoteDiscovered(): Promise<DiscoveredResult> {

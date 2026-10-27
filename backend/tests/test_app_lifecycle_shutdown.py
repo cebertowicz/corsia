@@ -290,7 +290,7 @@ async def test_checkpoint_reconciliation_runs_after_orphan_terminalization(monke
 
     async def recover_turns(_logger):
         events.append("turn_recovery")
-        return SimpleNamespace(settlements=(), batches=()), ()
+        return SimpleNamespace(settlements=(), batches=()), (), None
 
     async def reconcile_checkpoints() -> None:
         events.append("checkpoint_reconciliation")
@@ -323,7 +323,7 @@ async def test_readiness_does_not_wait_on_a_stuck_continuity_drive(monkeypatch):
     driving = asyncio.Event()
 
     async def reconcile(_logger):
-        return SimpleNamespace(settlements=(), batches=()), ()
+        return SimpleNamespace(settlements=(), batches=()), (), None
 
     async def never_finishes(_recovered, _wakes, _logger) -> None:
         driving.set()
@@ -857,15 +857,11 @@ async def test_normal_shutdown_joins_all_owned_work_before_storage(
         finally:
             stopped.add(name)
 
+    monkeypatch.setattr(llm_lifecycle, "_autostart_targets", lambda: [{"provider": "omlx", "id": "managed"}])
     monkeypatch.setattr(
         llm_lifecycle,
-        "get_local_providers",
-        lambda: [{"name": "local", "enabled": True, "autoStart": True}],
-    )
-    monkeypatch.setattr(
-        llm_lifecycle,
-        "check_server",
-        lambda _name: block("provider auto-start"),
+        "get_managed_engine",
+        lambda _name: SimpleNamespace(ensure_live=lambda _cfg: block("provider auto-start")),
     )
     monkeypatch.setattr("infra.key_store_providers.provider_keys", lambda: {"openai": "key"})
     monkeypatch.setattr(
@@ -1696,7 +1692,7 @@ def _isolate_rollup_lifespan(monkeypatch) -> None:
     _isolate_lifespan(monkeypatch)
 
     async def startup_reconcile(_logger):
-        return SimpleNamespace(batches=[], settlements=[]), ()
+        return SimpleNamespace(batches=[], settlements=[]), (), None
 
     monkeypatch.setattr(restart_startup, "run_startup_reconcile", startup_reconcile)
     monkeypatch.setattr(restart_startup, "run_startup_drive", _noop)

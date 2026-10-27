@@ -72,6 +72,18 @@ TOOL_RESULT_BOUND: str = "bound"
 #: The owning Turn ended first; no echo can arrive, so the row is excluded.
 TOOL_RESULT_QUARANTINED_UNBOUND: str = "quarantined_unbound"
 
+# ---------------------------------------------------------------------------
+# metadata.synthetic_reason — why CORSIA wrote a tool result itself
+# ---------------------------------------------------------------------------
+#: The call was never dispatched (refused before it ran).
+UNDISPATCHED_TOOL_REASON: str = "undispatched_tool"
+#: The person stopped the Turn while the call was in flight.
+USER_INTERRUPTION_REASON: str = "user_interruption"
+#: The provider reported the call but never its result.
+PROVIDER_MISSING_RESULT_REASON: str = "provider_missing_result"
+#: The Turn ended before the call's result arrived.
+TURN_ENDED_WITHOUT_RESULT_REASON: str = "turn_ended_without_result"
+
 
 def sql_state_literals(states: tuple[str, ...]) -> str:
     """Render a vocabulary as the body of a SQL ``IN`` list.

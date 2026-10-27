@@ -72,6 +72,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+import infra.startup_progress as startup_progress
 from infra.checkpoint_schema import CHECKPOINT_ENTRY_SEARCH_SCHEMA_SQL
 from infra.database import write_transaction
 from infra.checkpoint_entry_index import backfill_checkpoint_entry_search
@@ -197,6 +198,12 @@ from infra.migration_137_to_138_plan_intent import migrate_137_to_138
 from infra.migration_138_to_139_rule_runs import migrate_138_to_139
 from infra.migration_139_to_140_review_requesting_node import migrate_139_to_140
 from infra.migration_140_to_141_worker_starts import migrate_140_to_141
+from infra.migration_141_to_142_doc_comment_reply_roots import migrate_141_to_142
+from infra.migration_142_to_143_decision_source_index import migrate_142_to_143
+from infra.migration_143_to_144_sent_back_corrections import migrate_143_to_144
+from infra.migration_144_to_145_mail_host_endpoints import migrate_144_to_145
+from infra.migration_145_to_146_doc_feedback_delivery_policy import migrate_145_to_146
+from infra.migration_146_to_147_measure_breaks import migrate_146_to_147
 from infra.migration_mcp_secrets import FROM_VERSION as MCP_SECRETS_FROM_VERSION
 from infra.migration_mcp_secrets import migrate_mcp_secrets
 
@@ -206,6 +213,10 @@ log = logging.getLogger(__name__)
 #: reads committed state alongside the migration's own write lock, so this is a
 #: guard against an unrelated writer, not part of the migration's own timing.
 _BACKUP_TIMEOUT_SECONDS = 30.0
+
+#: Pages the pre-migration backup copies per step, 64 MiB at the default page
+#: size: a fraction of a second each, so its progress stays current.
+_BACKUP_STEP_PAGES = 16_384
 
 #: How much free space the pre-migration backup requires, as a multiple of the
 #: database size. The copy is byte-for-byte, so 1.0 is the floor; the margin
@@ -822,6 +833,12 @@ MIGRATIONS[137] = migrate_137_to_138
 MIGRATIONS[138] = migrate_138_to_139
 MIGRATIONS[139] = migrate_139_to_140
 MIGRATIONS[140] = migrate_140_to_141
+MIGRATIONS[141] = migrate_141_to_142
+MIGRATIONS[142] = migrate_142_to_143
+MIGRATIONS[143] = migrate_143_to_144
+MIGRATIONS[144] = migrate_144_to_145
+MIGRATIONS[145] = migrate_145_to_146
+MIGRATIONS[146] = migrate_146_to_147
 
 
 def _connection_database_path(conn: sqlite3.Connection) -> Path | None:
@@ -996,7 +1013,13 @@ def _write_backup(conn: sqlite3.Connection, from_version: int) -> Path | None:
     try:
         backup = sqlite3.connect(target)
         try:
-            reader.backup(backup)
+            # Stepwise so the copy publishes its progress. Each step takes and
+            # drops its own read lock, which would restart the copy if another
+            # connection committed in between; none can, because the caller
+            # holds the write lock, so the result is the same single snapshot.
+            reader.backup(
+                backup, pages=_BACKUP_STEP_PAGES, progress=startup_progress.backup_step,
+            )
         finally:
             backup.close()
     except BaseException:
@@ -1069,16 +1092,17 @@ def _changed_tables(
 def _validate(conn: sqlite3.Connection, changed_tables: list[str]) -> None:
     """Check the migrated database inside the transaction, before commit.
 
-    Foreign keys and page structure are checked across the whole database;
+    Foreign keys are checked across the whole database; page structure and
     row-to-index agreement only for tables the migration created or rebuilt.
     Data-only steps rely on SQLite maintaining their indexes.
+
+    No whole-database ``quick_check``: its b-tree walk is one VM operation, so
+    on a 25 GB database it ran 61 s without a progress callback, past the
+    desktop's 60 s startup stall, while checking pages no step touched.
     """
     broken = conn.execute("PRAGMA foreign_key_check").fetchall()
     if broken:
         raise MigrationError(f"foreign_key_check failed after migration: {broken[:5]}")
-    quick = conn.execute("PRAGMA quick_check").fetchone()[0]
-    if quick != "ok":
-        raise MigrationError(f"quick_check failed after migration: {quick}")
     for table in changed_tables:
         quoted_table = table.replace('"', '""')
         integrity = conn.execute(
@@ -1136,6 +1160,9 @@ def migrate_to_current(conn: sqlite3.Connection, target_version: int) -> Migrati
                 # bound copies across boots: a crash-restart loop is a fresh
                 # uncontested winner every time, which is why `require_backup_room`
                 # reserves space the copy may not consume.
+                startup_progress.mark(
+                    "backing_up", from_version=locked_version, to_version=target_version,
+                )
                 backup_path = _write_backup(conn, locked_version)
                 log.info(
                     "Migrating schema %d -> %d (backup: %s)",
@@ -1143,11 +1170,20 @@ def migrate_to_current(conn: sqlite3.Connection, target_version: int) -> Migrati
                 )
                 from plans.public import sanctioned_plan_write  # lazy: plans imports infra
 
+                steps = _plan(locked_version, target_version)
+                startup_progress.mark("migrating", done=0, total=len(steps))
+                # Long statements and loops of short ones both reach the
+                # handler, so a step that is still working keeps publishing.
+                # Pooled connections already carry it; this covers a connection
+                # opened before startup began publishing.
+                startup_progress.watch(conn)
                 before_schema = _schema_snapshot(conn)
-                for version in _plan(locked_version, target_version):
+                for done, version in enumerate(steps, start=1):
                     with sanctioned_plan_write():
                         MIGRATIONS[version](conn)
+                    startup_progress.mark("migrating", done=done, total=len(steps))
                 conn.execute(f"PRAGMA user_version={target_version}")
+                startup_progress.mark("validating")
                 _validate(conn, _changed_tables(before_schema, _schema_snapshot(conn)))
             except BaseException as error:
                 # Only claim a backup that exists. The failure can now come from

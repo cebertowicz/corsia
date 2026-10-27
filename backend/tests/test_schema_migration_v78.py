@@ -51,7 +51,7 @@ _EXPECTED_INDEXES = {
 
 
 def _measurement_indexes(db: sqlite3.Connection) -> dict[str, str]:
-    """Every measurement index this database carries, name -> flattened SQL.
+    """The v78 Measurement indexes this database carries, name -> flattened SQL.
 
     Filtered in Python: SQL ``LIKE 'idx_measurement_%'`` would treat ``_`` as a
     single-character wildcard and could admit an unrelated index.
@@ -65,11 +65,27 @@ def _measurement_indexes(db: sqlite3.Connection) -> dict[str, str]:
     }
 
 
+def _all_measurement_indexes(db: sqlite3.Connection) -> dict[str, str]:
+    """Every current Measurement boundary and first-row index this database carries."""
+    names = {"idx_llm_usage_priceable_measurement_start", "idx_measure_breaks_identity", "idx_measure_break_starts_group"}
+    return {
+        str(name): " ".join((sql or "").split())
+        for name, sql in db.execute("SELECT name, sql FROM sqlite_master WHERE type='index'")
+        if str(name).startswith("idx_measurement_") or str(name) in names
+    }
+
+
 def _fresh_indexes() -> dict[str, str]:
     """What a database created by the current schema carries."""
     with closing(sqlite3.connect(":memory:")) as db:
         initialize_schema(db)
         return _measurement_indexes(db)
+
+
+def _fresh_all_indexes() -> dict[str, str]:
+    with closing(sqlite3.connect(":memory:")) as db:
+        initialize_schema(db)
+        return _all_measurement_indexes(db)
 
 
 def _build_existing_v77_database(path) -> None:
@@ -84,7 +100,7 @@ def _build_existing_v77_database(path) -> None:
             "INSERT INTO messages (id,thread_id,role,content,created_at,seq) "
             "VALUES ('m-1','t-1','user','body','2026-09-19T03:00:00',1)"
         )
-        for name in _EXPECTED_INDEXES:
+        for name in _all_measurement_indexes(db):
             db.execute(f"DROP INDEX {name}")
         rewind_to_v88_policy(db)
 
@@ -99,12 +115,12 @@ def _build_existing_v77_database(path) -> None:
 
 
 def test_the_step_is_registered_at_77_and_81_is_current() -> None:
-    assert SCHEMA_VERSION == 141
+    assert SCHEMA_VERSION == 147
     assert MIGRATIONS[77] is migrate_77_to_78
 
 
-def test_fresh_install_carries_exactly_the_four_measurement_indexes() -> None:
-    assert _fresh_indexes() == _EXPECTED_INDEXES
+def test_fresh_install_retains_the_v78_measurement_indexes() -> None:
+    assert {name: _fresh_indexes()[name] for name in _EXPECTED_INDEXES} == _EXPECTED_INDEXES
 
 
 def _plan(db: sqlite3.Connection, sql: str, params: dict) -> list[str]:
@@ -170,10 +186,22 @@ def test_scope_walk_keeps_its_child_search_when_analyzed_with_only_root_threads(
         assert any("SEARCH child USING INDEX idx_measurement_thread_children" in step for step in recursive), scope
 
 
-def test_v77_upgrade_lands_the_same_indexes_a_fresh_install_has(tmp_path) -> None:
+def test_v77_to_v78_lands_only_the_frozen_index_set(tmp_path) -> None:
     path = tmp_path / "measurement-indexes-v77.db"
     _build_existing_v77_database(path)
-    fresh = _fresh_indexes()
+
+    with closing(sqlite3.connect(path)) as db:
+        migrate_77_to_78(db)
+        assert _measurement_indexes(db) == _EXPECTED_INDEXES
+        assert db.execute(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_llm_usage_priceable_measurement_start'"
+        ).fetchone()[0] == 0
+
+
+def test_v77_upgrade_through_v147_lands_the_same_indexes_a_fresh_install_has(tmp_path) -> None:
+    path = tmp_path / "measurement-indexes-v77.db"
+    _build_existing_v77_database(path)
+    fresh = _fresh_all_indexes()
 
     with closing(sqlite3.connect(path)) as db:
         result = migrate_to_current(db, SCHEMA_VERSION)
@@ -181,7 +209,7 @@ def test_v77_upgrade_lands_the_same_indexes_a_fresh_install_has(tmp_path) -> Non
         assert (result.migrated, result.from_version, result.to_version) == (
             True, 77, SCHEMA_VERSION,
         )
-        assert _measurement_indexes(db) == fresh
+        assert _all_measurement_indexes(db) == fresh
         assert db.execute(
             "SELECT role, content FROM messages WHERE id = 'm-1'"
         ).fetchone() == ("user", "body")

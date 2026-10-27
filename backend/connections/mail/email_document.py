@@ -103,6 +103,11 @@ def signature_text(html: str) -> str:
     return parser.text()
 
 
+def reply_subject(subject: str) -> str:
+    """The subject of a reply: ``Re: `` in front unless it already begins with one."""
+    return subject if re.match(r"\s*re\s*:", subject, re.IGNORECASE) else f"Re: {subject}"
+
+
 def reply_target_label(sender: str | None, subject: str | None) -> str:
     """The original's sender and subject as one safe line, or a fixed phrase when neither read.
 

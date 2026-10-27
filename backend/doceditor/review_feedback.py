@@ -11,7 +11,9 @@ def send_document_feedback(db, reviewer_id: str, artifact_id: str) -> tuple[bool
     identity = dict(author_kind="agent", author_id=reviewer_id, artifact_id=artifact_id)
     pending = feedback_state.has_pending_for_document(db, **identity)
     woken = feedback_batches.close_for_document(db, **identity, reason="submit")
-    woken.extend(feedback_batches.retry_for_document(db, **identity))
+    woken.extend(feedback_batches.retry_for_document(
+        db, **identity, delivery_policy=feedback_batches.IMMEDIATE,
+    ))
     undelivered = feedback_state.undelivered_for_document(db, **identity)
     if not undelivered:
         woken.extend(submit_without_batch(db, artifact_id, reviewer_id).woken)

@@ -11,7 +11,9 @@
 	import type { View } from '$lib/homePaneConfig';
 	import type { ProjectPick } from '$lib/stores/projects';
 	import { token } from '$lib/stores/auth';
+	import { settingsNavigation } from '$lib/stores/settingsNavigation';
 	import { fetchSetupProgress } from '$lib/setupProgress';
+	import { finishSetupWindow } from '$lib/setupWindow';
 
 	let {
 		isAuthenticated,
@@ -29,6 +31,7 @@
 		onNewChat,
 		onActivity,
 		onConductor,
+		onSetupFinished,
 		onDocuments,
 		onAttachProject,
 		onSelectThread,
@@ -65,6 +68,7 @@
 		onNewChat: () => void;
 		onActivity: () => void;
 		onConductor: () => boolean | void | Promise<boolean | void>;
+		onSetupFinished: () => void;
 		onDocuments: (lens?: 'all' | 'skills', documentId?: string) => void;
 		onAttachProject: (id: string, projectId: string | null, projectName?: string | null) => void | Promise<void>;
 		onSelectThread: (id: string) => void | Promise<void>;
@@ -131,7 +135,14 @@
 			resume={setupResume}
 			onExistingAccount={() => setupMode = 'login'}
 			onAccountCreated={() => setupMode = 'flow'}
-			onFinished={() => { setupMode = 'login'; setupResume = false; }}
+			onFinished={() => {
+				setupMode = 'login';
+				setupResume = false;
+				void finishSetupWindow();
+				// The route owns first-run selection. It waits for its actual ChatPanel
+				// binding before retrying a lookup that completed during setup.
+				onSetupFinished();
+			}}
 		/>
 	</div>
 {:else if $connectOpen}
@@ -187,4 +198,8 @@
 	onProjectCreated={onProjectCreated}
 	onConfirmDeleteThread={onConfirmDeleteThread}
 	onCancelDeleteThread={onCancelDeleteThread}
+	onUpdateFinished={() => {
+		if (activeView !== 'settings') return;
+		return get(settingsNavigation).homeThread ? onCloseSettings() : onNewChat();
+	}}
 />

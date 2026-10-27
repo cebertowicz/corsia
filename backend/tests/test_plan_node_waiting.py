@@ -15,7 +15,8 @@ import uuid
 import pytest
 
 from infra.schema import SCHEMA_SQL
-from plans import mutations, node_cost, public, scheduled_wait, service
+from plans import archival, closure, decisions, mutations, node_cost, public, scheduled_wait, service
+from plans.boundary import PlanActor
 from tests.plan_writer_authorizer import raw_plan_seed
 
 T0 = datetime(2026, 9, 28, 12, 0, tzinfo=timezone.utc)
@@ -322,6 +323,171 @@ def test_a_task_its_agent_set_aside_is_not_waiting_but_a_blocker_watch_is(db):
     )
 
     assert _waited(db, node, 90) == 20 * 60
+
+
+# Waiting on the user is their time, whoever armed the wait (decision 114e0dca follow-up).
+
+
+CHILD = PlanActor("child", "user-1", "project-1")
+
+
+def _decision(db, plan, source, clock, raised):
+    """A real decision on ``source`` in the child's plan, raised by its parent at ``raised``."""
+    parent = PlanActor("owner", "user-1", "project-1")
+    clock(raised)
+    drafted = decisions.draft(
+        plan.id, source_node_id=source.id, mutation_id=uuid.uuid4().hex, actor=CHILD,
+        provenance="test.waiting", db=db, title="Which way?", context="Two ways.",
+        tradeoff="Speed or reach.", recommendation="A", rationale="A is cheaper.",
+        options=[{"id": "A", "label": "A", "detail": "a"}, {"id": "B", "label": "B", "detail": "b"}],
+        other_enabled=True,
+    ).result["decision"]
+    reviewed = decisions.parent_review(
+        drafted["id"], expected_revision=drafted["revision"], mutation_id=uuid.uuid4().hex,
+        actor=parent, provenance="test.waiting", db=db,
+    ).result["decision"]
+    return decisions.raise_to_user(
+        reviewed["id"], expected_revision=reviewed["revision"], mutation_id=uuid.uuid4().hex,
+        actor=parent, provenance="test.waiting", db=db,
+    ).result["decision"]
+
+
+@pytest.fixture
+def clock(monkeypatch):
+    """Set the plan and registry writers' clock to ``minutes`` after T0: events are append-only."""
+    from registry import models
+
+    def set_clock(minutes):
+        monkeypatch.setattr(service, "_now", lambda: _at(minutes))
+        monkeypatch.setattr(models, "_now", lambda: _at(minutes))
+
+    return set_clock
+
+
+def test_a_raised_decision_is_the_users_time_until_it_is_answered(db, clock):
+    plan = service.ensure_plan("thread", "child", db=db)
+    node = _task(db, plan.id)
+    _move(db, node.id, "pending", "active", 0)
+    _watch(db, node, 0, resolved=80)
+    raised = _decision(db, plan, node, clock, 20)
+    clock(50)
+    decisions.answer(
+        raised["id"], option_id="A", expected_revision=raised["revision"],
+        mutation_id=uuid.uuid4().hex, actor=PlanActor(None, "user-1", None, kind="user"),
+        provenance="test.waiting", db=db,
+    )
+
+    # The agent's own watch ran 0..80; the user owed the answer 20..50.
+    assert _waited(db, node, 90) == 20 * 60 + 30 * 60
+
+
+def test_an_unanswered_decision_cuts_to_now_and_an_edit_back_to_draft_ends_it(db, clock):
+    plan = service.ensure_plan("thread", "child", db=db)
+    open_question = _task(db, plan.id, "Open")
+    edited = _task(db, plan.id, "Edited")
+    for node in (open_question, edited):
+        _move(db, node.id, "pending", "active", 0)
+        _watch(db, node, 0)
+    _decision(db, plan, open_question, clock, 30)
+    raised = _decision(db, plan, edited, clock, 30)
+    clock(60)
+    decisions.update(
+        raised["id"], expected_revision=raised["revision"], mutation_id=uuid.uuid4().hex,
+        actor=CHILD, provenance="test.waiting", db=db, title="Which way, again?",
+    )
+
+    assert _waited(db, open_question, 90) == 30 * 60
+    assert _waited(db, edited, 90) == 30 * 60 + 30 * 60
+
+
+def test_withdrawal_ends_a_decision_but_an_attention_clear_does_not_rewrite_its_history(db, clock):
+    from registry import attention
+
+    plan = service.ensure_plan("thread", "child", db=db)
+    withdrawn = _task(db, plan.id, "Withdrawn")
+    cleared = _task(db, plan.id, "Cleared")
+    for node in (withdrawn, cleared):
+        _move(db, node.id, "pending", "active", 0)
+        _watch(db, node, 0)
+    raised = _decision(db, plan, withdrawn, clock, 20)
+    shown = _decision(db, plan, cleared, clock, 20)
+    clock(50)
+    decisions.invalidate(
+        raised["id"], expected_revision=raised["revision"], mutation_id=uuid.uuid4().hex,
+        actor=CHILD, provenance="test.waiting", db=db,
+    )
+    clock(60)
+    # An out-of-band clear leaves the review step in review_requested.
+    attention.clear_attention(shown["artifact_id"], outcome="dismiss", reason="not now", db=db)
+    assert _waited(db, cleared, 80) == 20 * 60
+
+    clock(80)
+    decisions.invalidate(
+        shown["id"], expected_revision=shown["revision"], mutation_id=uuid.uuid4().hex,
+        actor=CHILD, provenance="test.waiting", db=db,
+    )
+
+    assert _waited(db, withdrawn, 90) == 20 * 60 + 40 * 60
+    # The user time was 20..80 both before and after withdrawal.
+    assert _waited(db, cleared, 90) == 20 * 60 + 10 * 60
+
+
+def _source_under_phase(db, plan):
+    """An active task with a watch from minute 0, under a phase, for the exit tests."""
+    phase = service.add_node(
+        plan.id, kind="phase", title="Phase", acceptance_criteria="Phase DOD", db=db,
+    )
+    node = _task(db, plan.id, parent_id=phase.id)
+    _move(db, node.id, "pending", "active", 0)
+    _watch(db, node, 0)
+    return phase, node
+
+
+def test_closing_the_source_withdraws_its_decision_and_ends_the_users_time(db, clock):
+    plan = service.ensure_plan("thread", "child", db=db)
+    _, node = _source_under_phase(db, plan)
+    raised = _decision(db, plan, node, clock, 20)
+    clock(50)
+    closure.close_node(node.id, reason="not needed", db=db)
+
+    review = service._node_row(db, raised["node_id"])
+    assert review["state"] == "closed"
+    # The source's own settling also cuts everything after 50; the review step's
+    # closing is the history that ends the user's 20..50.
+    assert _waited(db, node, 90) == 20 * 60
+
+
+def test_archiving_the_review_step_ends_the_users_time_where_it_was_archived(db, clock):
+    plan = service.ensure_plan("thread", "child", db=db)
+    _, node = _source_under_phase(db, plan)
+    raised = _decision(db, plan, node, clock, 20)
+    clock(40)
+    # Archive is not refused on an open review step; it leaves its state alone.
+    archival.archive_node(raised["node_id"], db=db)
+
+    assert service._node_row(db, raised["node_id"])["state"] == "review_requested"
+    assert _waited(db, node, 90) == 20 * 60 + 50 * 60
+
+
+def test_closing_an_ancestor_is_refused_while_the_source_is_open_so_the_cut_stands(db, clock):
+    plan = service.ensure_plan("thread", "child", db=db)
+    phase, node = _source_under_phase(db, plan)
+    _decision(db, plan, node, clock, 20)
+    clock(50)
+    with pytest.raises(service.PlanError, match="strand open children"):
+        closure.close_node(phase.id, reason="not needed", db=db)
+
+    assert service._node_row(db, phase.id)["state"] != "closed"
+    assert _waited(db, node, 90) == 20 * 60
+
+
+def test_open_waits_leave_out_a_decision_the_user_owes(db, clock):
+    plan = service.ensure_plan("thread", "child", db=db)
+    node = _task(db, plan.id)
+    _watch(db, node, 0, resolved=60)
+    _decision(db, plan, node, clock, 20)
+
+    assert _minutes(_open(db, ["child"], 0, 90)["child"]) == [(0, 20)]
 
 
 # Open time (decision 114e0dca): each thread's outside-wait intervals for a run.

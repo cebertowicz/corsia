@@ -1,0 +1,84 @@
+# Frozen pre-protocol startup reconciliation functions, before #1358.
+# Function bodies copied unchanged from origin/dev; unrelated drive helpers omitted.
+from __future__ import annotations
+import uuid
+from infra.db_async import run_in_db
+from infra.time import utc_now_iso
+
+
+def close_out_prior_self_restart() -> None:
+    """Adopt the durable restart operation being completed by this process."""
+    from automation.self_restart import adopt_for_resume, clear_stale_in_flight
+    from infra.restart_authorization import serving_head_sha
+    from loguru import logger
+
+    cleared = clear_stale_in_flight(serving_head_sha() or None)
+    if cleared:
+        logger.info("self-restart: superseded {} stale request(s)", cleared)
+    operation_id = adopt_for_resume()
+    if operation_id:
+        logger.info("self-restart: adopted operation {}", operation_id)
+
+
+def _complete_restart_operation() -> None:
+    from automation import self_restart
+    from infra.restart_authorization import serving_head_sha
+
+    operation = self_restart.in_flight_request()
+    if operation is None:
+        return
+    if not self_restart.complete_operation(
+        str(operation["id"]), deployed_sha=serving_head_sha() or None,
+    ):
+        raise RuntimeError("restart operation could not release ingress")
+
+
+async def reconcile_startup_continuity(logger) -> tuple[object, tuple[str, ...]]:
+    """Terminalize stale owners durably, before any serving work begins.
+
+    Only database-bound work belongs here. It runs in front of the port bind
+    because checkpoint reconciliation and the rest of startup must observe
+    crash-orphaned Turns already terminal. Anything that can call a provider,
+    reach the network, or fold a large history belongs in
+    ``drive_startup_continuity`` instead, where it cannot gate readiness.
+    """
+    from automation.managed_process_recovery import reconcile_managed_processes
+    from core.turn_core import BOOT_EPOCH
+    from infra.llm_usage import reconcile_pending_turn_usage
+    from infra.thread_recovery import recover_threads
+    from automation.restart_wakes import materialize_pending_registrations
+
+    await run_in_db(close_out_prior_self_restart)
+    projected_usage = await run_in_db(reconcile_pending_turn_usage)
+    if projected_usage:
+        logger.info(
+            "startup continuity: projected {} pending Turn usage receipt(s)",
+            projected_usage,
+        )
+    wake_threads = await run_in_db(materialize_pending_registrations)
+    process_threads = await run_in_db(reconcile_managed_processes)
+    recovered = await run_in_db(
+        recover_threads,
+        boot_epoch=BOOT_EPOCH,
+        recovered_at=utc_now_iso(),
+        successor_id=lambda _thread_id: str(uuid.uuid4()),
+    )
+    pending_switches = await run_in_db(_pending_switch_threads)
+    await run_in_db(_complete_restart_operation)
+    return recovered, tuple(
+        dict.fromkeys((*wake_threads, *process_threads, *pending_switches))
+    )
+
+
+def _pending_switch_threads() -> tuple[str, ...]:
+    """Pending selections without FIFO claims also need the existing startup wake."""
+    from infra.database import get_db
+
+    db = get_db()
+    try:
+        return tuple(str(row[0]) for row in db.execute(
+            "SELECT id FROM threads WHERE switch_status IN ('preparing','ready') "
+            "AND switch_operation_id IS NOT NULL ORDER BY id",
+        ))
+    finally:
+        db.close()

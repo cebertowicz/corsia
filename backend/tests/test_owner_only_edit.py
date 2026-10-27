@@ -409,7 +409,7 @@ async def _suggestion(scope, path, author="other"):
 async def _accept(scope, comment_id, actor, *, writes):
     from doceditor.comment_actions import decide_suggestion
 
-    async def write(path, text, project_id, reason, expected_sha256):
+    async def write(path, text, project_id, reason, expected_sha256, _suggestion_author):
         writes.append(text)
 
     user_id = scope["db"].execute("SELECT user_id FROM threads WHERE id=?", (scope["owner"],)).fetchone()[0]

@@ -32,7 +32,7 @@ def home(tmp_path, monkeypatch):
 
 
 def _runtime_dir(kind: str, home: Path) -> str:
-    return str(managed_runtime.runtime_bin_dir(kind, root=home / "Library" / "Caches" / "com.cebertowicz.corsia" / "runtimes"))
+    return str(managed_runtime.runtime_bin_dir(kind, root=home / "Library" / "Caches" / "CORSIA" / "runtimes"))
 
 
 def _pin_dirs(home: Path) -> list[str]:
@@ -88,9 +88,11 @@ def test_package_caches_are_writable_and_never_the_runtime_folder_or_home(home):
     for cache in caches:
         assert not cache.is_relative_to(home) and not cache.is_relative_to(runtimes)
         assert cache.is_relative_to(tempfile.gettempdir())  # a temp root, which the sandbox lets shells write
-    assert set(agent_shell_tools.ENV_NAMES) <= set(shell_env_pass_names().split(","))
+    assert set(agent_shell_tools.CACHE_ENV_NAMES) <= set(shell_env_pass_names().split(","))
     other = safehouse_subprocess_env("thread-2")
-    assert not {env[name] for name in agent_shell_tools.ENV_NAMES} & {other[name] for name in agent_shell_tools.ENV_NAMES}
+    assert not {env[name] for name in agent_shell_tools.CACHE_ENV_NAMES} & {
+        other[name] for name in agent_shell_tools.CACHE_ENV_NAMES
+    }
 
 
 async def _prefetched(monkeypatch, ensure) -> None:
@@ -208,6 +210,39 @@ def test_a_protected_shell_reads_the_python_and_runtime_folders_it_has_on_path(h
     assert not any(part.startswith("--add-dirs=") and str(runtimes.resolve()) in part for part in argv)  # never writable
 
 
+def _read_only_grants(home, monkeypatch) -> list[str]:
+    argv = _protected_argv(home, monkeypatch)
+    assert not any(part.startswith("--add-dirs=") and "CORSIA.app" in part for part in argv)  # never writable
+    return next(part for part in argv if part.startswith("--add-dirs-ro=")).split("=", 1)[1].split(":")
+
+
+def test_a_protected_shell_reads_the_bundled_git_exec_path_and_templates_so_clone_works(home, monkeypatch):
+    python_dir = _bundle(home, monkeypatch)
+    resources = python_dir.parent.parent
+    exec_path = resources / "libexec" / "git-core"
+    templates = resources / "share" / "git-core"
+    (exec_path / "git-remote-https").parent.mkdir(parents=True)
+    (templates / "templates").mkdir(parents=True)
+    (resources / "bin").mkdir()  # the PATH's bin folder is not part of Git's runtime and is not granted
+    assert _read_only_grants(home, monkeypatch) == [
+        str(python_dir.parent.resolve()), str(exec_path.resolve()), str(templates.resolve()),
+    ]
+
+
+def test_each_bundled_git_folder_is_granted_only_when_it_exists(home, monkeypatch):
+    python_dir = _bundle(home, monkeypatch)
+    exec_path = python_dir.parent.parent / "libexec" / "git-core"
+    exec_path.mkdir(parents=True)
+    assert _read_only_grants(home, monkeypatch) == [str(python_dir.parent.resolve()), str(exec_path.resolve())]
+
+
+def test_the_git_folders_are_granted_without_the_bundled_python(home, monkeypatch):
+    resources = home / "CORSIA.app" / "Contents" / "Resources"
+    (resources / "libexec" / "git-core").mkdir(parents=True)
+    monkeypatch.setattr(agent_shell_tools, "app_bundle_root", lambda: home / "CORSIA.app")
+    assert _read_only_grants(home, monkeypatch) == [str((resources / "libexec" / "git-core").resolve())]
+
+
 def test_a_protected_shell_grants_neither_folder_when_it_is_absent(home, monkeypatch):
     monkeypatch.setattr(agent_shell_tools, "app_bundle_root", lambda: None)
     assert not any(part.startswith("--add-dirs-ro=") for part in _protected_argv(home, monkeypatch))
@@ -234,6 +269,22 @@ def test_the_build_ships_the_pinned_safehouse_the_shell_guard_accepts():
     assert resources["../bundle/bin/safehouse"] == "bin/safehouse"
     smoke = _repo_file("desktop", "scripts", "smoke-macos-bundle.sh").read_text()
     assert '"$RESOURCES/bin/safehouse" --version' in smoke and "-m pip --version" in smoke and "--add-dirs-ro=" in smoke
+
+
+def test_the_build_precompiles_and_immutability_checks_bundled_python():
+    build = _repo_file("desktop", "scripts", "build-macos-bundle.sh").read_text()
+    test = _repo_file("desktop", "scripts", "test-bundled-python-immutability.sh").read_text()
+
+    assert '"$PYTHON" -m compileall -q -f --invalidation-mode unchecked-hash "$BUNDLE_ROOT"' in build
+    assert '"$ROOT/desktop/scripts/test-bundled-python-immutability.sh" "$APP"' in build
+    assert "cache_from_source" in test
+    assert "env -i PATH=" in test
+    for module in ("json", "ssl", "fastapi", "mlx", "core"):
+        assert f"import {module}" in test
+    assert 'find "$RESOURCES" -type f -name \'*.py\' -exec touch {} +' in test
+    assert "stat -f '%m\\t%p\\t%N'" in test
+    assert "shasum -a 256" in test
+    assert "bundled-python-immutability=passed" in test
 
 
 def test_the_build_refuses_a_download_whose_checksum_is_wrong(tmp_path):

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
-	SETTINGS_PATH, codeRefusalLine, disconnectRemote, parseAddress, refusesOnCodeScreen, remoteDiscovered, remotePair, shellInfo,
+	SETTINGS_PATH, codeRefusalLine, disconnectRemote, parseAddress, onStartupShellPage, recoverLocalService, refusesOnCodeScreen, remoteDiscovered, remotePair, shellInfo,
 	unreachableLine, type PairReason,
 } from './remoteShell';
 import pairRequests from '../../../testdata/remote-pair-requests.json';
@@ -16,13 +16,23 @@ describe('shellInfo', () => {
 	it('is null in a browser or the phone app, where nothing injects it', () => {
 		expect(shellInfo()).toBeNull();
 	});
-	it('reads local and remote modes from the injected object', () => {
-		(window as unknown as Record<string, unknown>).__CORSIA_SHELL__ = { mode: 'local' };
-		expect(shellInfo()).toEqual({ mode: 'local' });
+	it('reads local default-workspace and remote modes from the injected object', () => {
+		(window as unknown as Record<string, unknown>).__CORSIA_SHELL__ = {
+			mode: 'local', default_workspace: { path: '/fixture/default-workspace', display: '~/CORSIA' },
+		};
+		expect(shellInfo()).toEqual({
+			mode: 'local', default_workspace: { path: '/fixture/default-workspace', display: '~/CORSIA' },
+		});
 		(window as unknown as Record<string, unknown>).__CORSIA_SHELL__ = { mode: 'remote', name: 'Studio' };
 		expect(shellInfo()).toEqual({ mode: 'remote', name: 'Studio', localConfigured: false });
 		(window as unknown as Record<string, unknown>).__CORSIA_SHELL__ = { mode: 'remote', name: 'Studio', localConfigured: true };
 		expect(shellInfo()).toEqual({ mode: 'remote', name: 'Studio', localConfigured: true });
+	});
+	it('does not accept an incomplete default workspace as a path', () => {
+		(window as unknown as Record<string, unknown>).__CORSIA_SHELL__ = {
+			mode: 'local', default_workspace: { path: '~/CORSIA', display: 42 },
+		};
+		expect(shellInfo()).toEqual({ mode: 'local' });
 	});
 	it('treats a remote object with no name as local, never a blank computer', () => {
 		(window as unknown as Record<string, unknown>).__CORSIA_SHELL__ = { mode: 'remote' };
@@ -31,6 +41,41 @@ describe('shellInfo', () => {
 });
 
 describe('the shell commands', () => {
+	it('asks for a recovery start only, never the full start, and passes the typed answers through', async () => {
+		const invoke = vi.fn(async () => ({ recovery: 'ready', url: 'http://127.0.0.1:1956' }));
+		vi.stubGlobal('__TAURI_INTERNALS__', { invoke });
+		expect(await recoverLocalService('automatic')).toEqual({ recovery: 'ready', url: 'http://127.0.0.1:1956' });
+		expect(await recoverLocalService('manual')).toEqual({ recovery: 'ready', url: 'http://127.0.0.1:1956' });
+		expect(invoke.mock.calls).toEqual([['start_local_service', { recovery: 'automatic' }], ['start_local_service', { recovery: 'manual' }]]);
+		for (const recovery of ['deferred', 'manual_available', 'unavailable', 'not_started'] as const) {
+			vi.stubGlobal('__TAURI_INTERNALS__', { invoke: vi.fn(async () => ({ recovery })) });
+			expect(await recoverLocalService('automatic')).toEqual({ recovery });
+		}
+	});
+	it.each([{ state: 'ready', url: 'http://127.0.0.1:1956' }, { state: 'requires_approval' }, { recovery: 'ready', url: '' }, { recovery: 'ready', url: 'https://evil.example' }, { recovery: 'started' }, null, 'started'])('treats a full-start or malformed answer as unavailable: %j', async (response) => {
+		vi.stubGlobal('__TAURI_INTERNALS__', { invoke: vi.fn(async () => response) });
+		expect(await recoverLocalService('automatic')).toEqual({ recovery: 'unavailable' });
+	});
+	it('treats a refused or missing shell as unavailable because it proves no admission', async () => {
+		vi.stubGlobal('__TAURI_INTERNALS__', { invoke: vi.fn(async () => { throw new Error('Only CORSIA’s startup window can start CORSIA.'); }) });
+		expect(await recoverLocalService('manual')).toEqual({ recovery: 'unavailable' });
+		vi.unstubAllGlobals();
+		expect(await recoverLocalService('manual')).toEqual({ recovery: 'unavailable' });
+	});
+	it('reports one fixed diagnostic for rejected or malformed recovery IPC without exposing its input', async () => {
+		vi.stubGlobal('__TAURI_INTERNALS__', { invoke: vi.fn(async () => ({ recovery: 'deferred' })) });
+		await recoverLocalService('automatic');
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+		vi.stubGlobal('__TAURI_INTERNALS__', { invoke: vi.fn(async () => { throw new Error('private recovery failure: /fixture/secret'); }) });
+		expect(await recoverLocalService('automatic')).toEqual({ recovery: 'unavailable' });
+		vi.stubGlobal('__TAURI_INTERNALS__', { invoke: vi.fn(async () => ({ recovery: 'unexpected', detail: 'private recovery failure: /fixture/secret' })) });
+		expect(await recoverLocalService('manual')).toEqual({ recovery: 'unavailable' });
+		expect(warn).toHaveBeenCalledTimes(1);
+		expect(warn).toHaveBeenCalledWith('[update] recovery start is unavailable');
+	});
+	it('is never the shell update page in the app the service serves', () => {
+		expect(onStartupShellPage()).toBe(false);
+	});
 	it('calls remote_discovered, remote_pair and disconnect_remote with the contract arguments', async () => {
 		const invoke = vi.fn(async (command: string) => command === 'remote_discovered' ? { names: ['Studio'] } : command === 'remote_pair' ? { ok: true, name: 'Studio' } : undefined);
 		vi.stubGlobal('__TAURI_INTERNALS__', { invoke });

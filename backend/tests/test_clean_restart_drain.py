@@ -627,7 +627,7 @@ async def test_startup_wakes_large_pending_switch_only_after_readiness_phase(
     monkeypatch.setattr(model_pending, "drive_pending_model_switch", record_preparation)
 
     logger = SimpleNamespace(info=lambda *_args: None)
-    recovered, wakes = await restart_startup.reconcile_startup_continuity(logger)
+    recovered, wakes, _rolled_back = await restart_startup.reconcile_startup_continuity(logger)
     assert prepared == []
     assert wakes == ("large-thread",)
     await restart_startup.drive_startup_continuity(recovered, wakes, logger)
@@ -651,7 +651,7 @@ async def _completed():
 
 async def _run_startup_recovery(startup, logger):
     """Run both continuity halves in the order startup runs them."""
-    recovered, wakes = await startup.reconcile_startup_continuity(logger)
+    recovered, wakes, _rolled_back = await startup.reconcile_startup_continuity(logger)
     await startup.drive_startup_continuity(recovered, wakes, logger)
 
 
@@ -681,6 +681,7 @@ def _startup_recovery_probe(
         events.append("recover_turns")
         return SimpleNamespace(
             settlements=(SimpleNamespace(thread_id="settled-thread"),),
+            ended_turns=(),
             batches=batches,
         )
 
@@ -812,9 +813,9 @@ async def test_drive_phase_failure_is_not_reported_as_completion(monkeypatch) ->
         exception=lambda *_a: None,
     )
 
-    recovered, wakes = await startup.reconcile_startup_continuity(logger)
+    recovered, wakes, _rolled_back = await startup.reconcile_startup_continuity(logger)
     with pytest.raises(ExceptionGroup) as caught:
-        await startup.run_startup_drive(_completed(), recovered, wakes, logger)
+        await startup.run_startup_drive(_completed(), recovered, wakes, _rolled_back, logger)
 
     assert str(caught.value.exceptions[0]) == "webhook failure"
     assert "release_ingress" in events

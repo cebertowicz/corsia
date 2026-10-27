@@ -24,6 +24,8 @@ from plans import public as plans
 
 # A stale watch is omitted from list reads, never retired or otherwise mutated.
 WATCH_HIDE_AFTER = timedelta(days=30)
+# The lifecycle states a list read can be narrowed to; their rows carry a one-line statement.
+LISTABLE_STATES = ("watch", "trial")
 
 
 @dataclass(frozen=True)
@@ -105,6 +107,9 @@ def _summary(row: dict[str, Any], offers: DeferredOffers, body_reads: int) -> di
     )}
     if "correction_status" in row:
         summary.update({key: row[key] for key in ("correction_status", "recurrence_count")})
+    statement = (row["current_source"] or {}).get("statement")
+    if row.get("state") in LISTABLE_STATES and statement:
+        summary["statement"] = statement
     return summary
 
 
@@ -134,12 +139,15 @@ def _correction_inventory(
     return inventory
 
 
-def _list_inventory(inventory: list[dict[str, Any]], now: str) -> list[dict[str, Any]]:
-    """Hide stale, un-recurred watches only from list and preview pages."""
+def _list_inventory(inventory: list[dict[str, Any]], now: str,
+                    state: str | None = None) -> list[dict[str, Any]]:
+    """Hide stale, un-recurred watches only from list and preview pages; keep only ``state`` if given."""
     instant = parse_instant(now)
     cutoff = instant - WATCH_HIDE_AFTER if instant else None
     visible = []
     for row in inventory:
+        if state is not None and row.get("state") != state:
+            continue
         activated = min(
             (value for review in row.get("reviews", ())
              if (value := parse_instant(review.get("opened_at"))) is not None), default=None,
@@ -180,13 +188,15 @@ def collect_report(db, *, scope: ReportScope, sources: list[dict[str, Any]],
     bodies = read_bodies(db, user_id=scope.user_id, thread_ids=scope.thread_ids,
                          facts=sources + retained)
     from core.lesson_corrections import correction_facts, placement_check_counts, source_subjects
+    from core.lesson_gate import gate_counts
 
     # The adapter passes no sources here and joins corrections after reading lesson files.
     subjects = source_subjects(sources)
     return {"history": history, "missing_owners": missing_owners, "boundaries": boundaries,
             "retained": retained, "period": period, "bodies": bodies,
             "correction_facts": correction_facts(db, subjects),
-            "placement_checks": placement_check_counts(db, scope.thread_ids)}
+            "placement_checks": placement_check_counts(db, scope.thread_ids),
+            "lesson_gate": gate_counts(db, scope.thread_ids, scope.from_ts, scope.to_ts)}
 
 
 def detail_request(lesson_id: str | None, version: str | None, cursor: str | None,
@@ -272,6 +282,7 @@ def read_report(
     blob_reader=None, evidence: str | None = None,
     collected: dict[str, Any] | None = None,
     source_coverage: dict[str, Any] | None = None,
+    state: str | None = None,
 ) -> dict[str, Any]:
     """Read due-first current lifecycle plus period evidence, without writes.
 
@@ -283,6 +294,8 @@ def read_report(
     """
     if evidence not in {None, "unidentified_reads"} or (evidence and lesson_id is not None):
         raise ValueError("choose an exact lesson or evidence=unidentified_reads")
+    if state is not None and state not in LISTABLE_STATES:
+        raise ValueError("state must be watch or trial")
     from core.lesson_report_reads import identify_recorded_reads
 
     data = collected if collected is not None else collect_report(
@@ -291,6 +304,7 @@ def read_report(
     boundaries, retained, period = data["boundaries"], data["retained"], data["period"]
     correction_facts = data["correction_facts"]
     placement_checks = data["placement_checks"]
+    lesson_gate = data.get("lesson_gate")
     bodies = data["bodies"]
     bodies = bodies | {"reads": identify_recorded_reads(bodies["reads"], blob_reader, sources)}
     reads = [read for read in bodies["reads"] if scope.from_ts <= read["created_at"] < scope.to_ts]
@@ -301,11 +315,13 @@ def read_report(
     coverage = _coverage(inventory, period, reads, unidentified, missing_owners, bodies)
     if placement_checks["fires"] or any("originating_subjects" in row for row in inventory):
         coverage["placement_checks"] = placement_checks
+    if lesson_gate and any(lesson_gate.values()):
+        coverage["lesson_gate"] = lesson_gate
     coverage.update(source_coverage or {})
     snapshot = {"rows": inventory, "period": period, "reads": reads, "coverage": coverage}
     fingerprint = snapshot_fingerprint(snapshot, _canonical)
     query = {**scope.__dict__, "lesson_id": lesson_id, "version": version,
-             "preview": preview, "evidence": evidence}
+             "preview": preview, "evidence": evidence} | ({"state": state} if state else {})
     offset = _position(cursor, fingerprint, query)
     result: dict[str, Any] = {
         "scope": scope.identity, "period": {"from": scope.from_ts, "to": scope.to_ts,
@@ -329,7 +345,7 @@ def read_report(
             return result
         return _detail_page(result, row=selected[0], period=period, reads=reads, boundaries=boundaries,
                             offset=offset, fingerprint=fingerprint, query=query)
-    visible_inventory = _list_inventory(inventory, now)
+    visible_inventory = _list_inventory(inventory, now, state)
     limit = 5 if preview else 20
     if offset > len(visible_inventory):
         raise ValueError("invalid report position; refresh the report")

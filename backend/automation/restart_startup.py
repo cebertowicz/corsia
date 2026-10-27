@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 import uuid
 
@@ -35,20 +36,37 @@ async def _replay_held_webhooks() -> None:
         )
 
 
-def _complete_restart_operation() -> None:
-    from automation import self_restart
-    from infra.restart_authorization import serving_head_sha
+def _complete_restart_operation() -> str | None:
+    """Release after recovery claims FIFO heads, retaining confirmation without a hold."""
+    from automation import restart, self_restart
+    from automation.update_verification import version_failure
+    from infra import platform_paths
 
     operation = self_restart.in_flight_request()
     if operation is None:
-        return
-    if not self_restart.complete_operation(
-        str(operation["id"]), deployed_sha=serving_head_sha() or None,
-    ):
+        return None
+    operation_id = str(operation["id"])
+    target, code, detail = "complete", None, None
+    if operation.get("kind") == "update" and platform_paths.app_bundle_root() is not None:
+        if operation.get("phase") == "verifying":
+            # A new process inherited confirmation the prior shell never finished.
+            code, evidence = version_failure(operation)
+            code = code or "version_unverified"
+            evidence.setdefault("reason", "confirmation_interrupted")
+            target, detail = "failed", json.dumps(evidence)
+        else:
+            # Even a broken stamp cannot strand ingress or claim success. The
+            # shell receives the terminal verdict before it attempts rollback.
+            target = "verifying"
+    if restart._release_restart_control(
+        operation_id, "The Update's final check did not finish." if code else "",
+        False, code, detail, target=target if target != "failed" else None,
+    ) is None:
         raise RuntimeError("restart operation could not release ingress")
+    return operation_id if code else None
 
 
-async def run_startup_reconcile(logger) -> tuple[object, tuple[str, ...]]:
+async def run_startup_reconcile(logger) -> tuple[object, tuple[str, ...], str | None]:
     """Time and report the pre-bind reconcile phase."""
     phase_started = time.monotonic()
     logger.info("startup phase: restart continuity reconcile started")
@@ -60,13 +78,30 @@ async def run_startup_reconcile(logger) -> tuple[object, tuple[str, ...]]:
     return reconciled
 
 
-async def run_startup_drive(harness_task, recovered, wakes, logger) -> None:
-    """Time and report the lifecycle-owned post-bind drive phase."""
+async def run_startup_drive(harness_task, recovered, wakes, rolled_back_operation, logger) -> None:
+    """Time and report the lifecycle-owned post-bind drive phase.
+
+    An Update this startup left ``verifying`` is settled here too, when its
+    shell never confirms; the drive failing does not stop that settlement.
+    """
+    from automation.update_verification import settle_unconfirmed_update
+
+    async def drive() -> None:
+        await harness_task
+        if rolled_back_operation is not None:
+            from automation.restart import _RESUME_TASKS
+            from automation.update_failure_notice import tell_conductor_detached
+
+            tell_conductor_detached(rolled_back_operation, _RESUME_TASKS)
+        await drive_startup_continuity(recovered, wakes, logger)
+
     phase_started = time.monotonic()
     logger.info("startup phase: restart continuity drive started")
     try:
-        await harness_task
-        await drive_startup_continuity(recovered, wakes, logger)
+        outcomes = await asyncio.gather(drive(), settle_unconfirmed_update(logger), return_exceptions=True)
+        for outcome in outcomes:
+            if isinstance(outcome, BaseException):
+                raise outcome
     except asyncio.CancelledError:
         logger.warning("startup phase: restart continuity drive cancelled")
         raise
@@ -83,7 +118,7 @@ async def run_startup_drive(harness_task, recovered, wakes, logger) -> None:
     )
 
 
-async def reconcile_startup_continuity(logger) -> tuple[object, tuple[str, ...]]:
+async def reconcile_startup_continuity(logger) -> tuple[object, tuple[str, ...], str | None]:
     """Terminalize stale owners durably, before any serving work begins.
 
     Only database-bound work belongs here. It runs in front of the port bind
@@ -114,10 +149,10 @@ async def reconcile_startup_continuity(logger) -> tuple[object, tuple[str, ...]]
         successor_id=lambda _thread_id: str(uuid.uuid4()),
     )
     pending_switches = await run_in_db(_pending_switch_threads)
-    await run_in_db(_complete_restart_operation)
+    rolled_back_operation = await run_in_db(_complete_restart_operation)
     return recovered, tuple(
         dict.fromkeys((*wake_threads, *process_threads, *pending_switches))
-    )
+    ), rolled_back_operation
 
 
 def _pending_switch_threads() -> tuple[str, ...]:
@@ -147,16 +182,42 @@ async def _drive_recovered_item(label, action, logger):
         raise
 
 
+async def _drive_recovered_settlement(item, ended_turn_id: str | None) -> None:
+    """Record a recovery-ended Turn's end, then drive its settlement.
+
+    Recovery committed the terminal before the bind, so it bypassed the turn-end
+    hook every live terminal runs; this records it exactly once. The hook runs
+    first, as the live error path records before its terminal drives, so the
+    owner's wake never waits on a successor Turn's admission.
+    """
+    from core.plan_turn_end import record_turn_end_logged
+    from infra.thread_execution import drive_terminal_settlement
+    from infra.thread_recovery import RESTART_TURN_ERROR
+
+    if ended_turn_id is not None:
+        await record_turn_end_logged(
+            item.thread_id, "plan-liveness after a restart-ended Turn failed",
+            "parent drive after a restart-ended Turn failed", level="ERROR",
+            outcome="error", error=RESTART_TURN_ERROR, turn_id=ended_turn_id,
+        )
+    await drive_terminal_settlement(item)
+
+
 async def drive_startup_continuity(recovered, wake_threads, logger) -> None:
     """Drive independent conversations; their durable claims preserve FIFO order."""
-    from infra.thread_execution import drive_terminal_settlement, drive_thread
+    from infra.thread_execution import drive_thread
     from infra.thread_input_types import HeldAdmission
+    from infra.carry_in_drain import request_drain
     from infra.turn_admission_driver import drive_turn_admission
 
+    # Recovery has settled prior-boot Turns, so an open C1 claim is now interrupted work.
+    request_drain()
     claimed_threads = {admission.thread_id for admission in recovered.batches}
     claimed_threads.update(item.thread_id for item in recovered.settlements)
+    ended = dict(recovered.ended_turns)  # idx_active_turns_one_active: one per thread
     actions = [
-        *((f"settlement for {item.thread_id}", drive_terminal_settlement(item))
+        *((f"settlement for {item.thread_id}",
+           _drive_recovered_settlement(item, ended.get(item.thread_id)))
           for item in recovered.settlements),
         *((f"Turn admission for {item.thread_id}", drive_turn_admission(item))
           for item in recovered.batches),

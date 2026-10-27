@@ -12,6 +12,16 @@ def digest(text: str | None) -> str | None:
     return None if text is None else hashlib.sha256(text.encode()).hexdigest()
 
 
+def history_git(workspace: Path, *args: str, ok: tuple[int, ...] = (0,)) -> bytes:
+    """Run one read-only Git command in the workspace's own guidance history; a fault raises."""
+    from infra.guidance_git import GitFault, _git_bytes, workspace_repository
+
+    repo, why = workspace_repository(workspace, create=False)
+    if repo is None:
+        raise GitFault(why or "workspace guidance history unavailable")
+    return _git_bytes(repo, *args, ok=ok)
+
+
 def find_commit(repo: Path, trailer: str, path: Path) -> str | None:
     from infra.guidance_git import _git
 

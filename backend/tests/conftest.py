@@ -370,12 +370,15 @@ def _no_held_usage_between_tests():
 
 
 @pytest.fixture(autouse=True, scope="session")
-def _omlx_admin_request_bound_before_any_patch():
-    """Import the modules that bind ``omlx_endpoints.admin_request`` by name up front.
+def _imported_bindings_bound_before_any_patch():
+    """Load modules that bind patched dependencies by name before test fixtures run.
 
-    Tests patch that attribute; a lazy first import inside the patch would bind the
-    fake for the rest of the process and fail later tests in that worker.
+    Tests replace these source-module attributes. A lazy first import inside a
+    replacement would retain that fake for the rest of the worker after the patch
+    restores, so every such consumer is bound here once against the normal getter.
     """
+    import infra.checkpoint_install_preflight  # noqa: F401
+    import infra.checkpoint_queries  # noqa: F401
     import llm.providers.omlx_lifecycle  # noqa: F401
     import llm.providers.omlx_settings  # noqa: F401
     yield
@@ -597,3 +600,12 @@ def _system_projection_readable(monkeypatch):
     monkeypatch.setattr(
         "core.system_projection._agent_readable", lambda _projection: True,
     )
+
+
+@pytest.fixture(autouse=True)
+def _github_read_budget_starts_empty():
+    """The GitHub read budget is process-wide; each test starts with none learned."""
+    budget = sys.modules.get("events.connectors.github_read_budget")
+    if budget is not None:
+        budget.budget.clear()
+    yield

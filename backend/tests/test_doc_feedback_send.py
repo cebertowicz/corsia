@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from doc_feedback_helpers import add_comment, batches, seed_document, seed_thread
-from doceditor import feedback_batches
+from doceditor import feedback_batch_edits, feedback_batches
 from infra.database import get_db, write_transaction
 
 pytestmark = pytest.mark.asyncio
@@ -65,7 +65,7 @@ async def test_send_retries_undelivered_edit_after_owner_is_addressable(isolated
         seed_thread(db, "author")
         artifact_id = seed_document(db, "owner", name="edited.md")
         with write_transaction(db, scope="test_record_edit") as connection:
-            feedback_batches.record_edit(
+            feedback_batch_edits.record_edit(
                 connection,
                 artifact_id=artifact_id,
                 recipient_id="owner",

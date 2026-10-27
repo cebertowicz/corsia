@@ -5,25 +5,32 @@ import { test } from '../support/test';
 import { expect } from '@playwright/test';
 import { showAllThreads } from '../support/commentDrawer';
 import { createSession, loginByUrl, TEST_TOKEN } from '../support/corsia';
-import { leaveUnsent, openUnsentFooter } from '../support/docFeedbackFooter';
+import { deliveredBatches, headerSend, heldIn, leaveUnsent, setDeliveryPreference } from '../support/heldComments';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 
-function makeFeedbackBatchDue(artifactId: string): void {
-	const stateRoot = process.env.CORSIA_E2E_STATE_DIR;
-	if (process.env.CORSIA_E2E_MOCK !== '1' || !stateRoot) {
-		throw new Error('Due-batch fixture requires isolated E2E mock state');
-	}
-	execFileSync(process.env.CORSIA_E2E_BACKEND_PYTHON ?? path.join(repoRoot, '.venv/bin/python'), [
-		'-c', [
-			'import sqlite3, sys',
-			'connection = sqlite3.connect(sys.argv[1])',
-			'changed = connection.execute("UPDATE doc_feedback_batches SET closes_at=? WHERE state=\'open\' AND author_kind=\'user\' AND artifact_id=?", ("2000-01-01T00:00:00+00:00", sys.argv[2])).rowcount',
-			'assert changed == 1, changed',
-			'connection.commit()',
-			'connection.close()',
-		].join('\n'), path.join(stateRoot, 'corsia.db'), artifactId,
-	], { cwd: repoRoot, encoding: 'utf8' });
+async function captureDeliveryFrame(page: import('@playwright/test').Page, name: string): Promise<void> {
+	const directory = process.env.CORSIA_FRAME_DIR;
+	if (!directory) return;
+	const viewport = page.viewportSize();
+	await page.screenshot({ path: path.join(directory, `${name}-${viewport?.width ?? 0}x${viewport?.height ?? 0}.png`), fullPage: true });
+}
+
+async function expectHeaderSendFits(send: import('@playwright/test').Locator): Promise<void> {
+	const probe = () => send.evaluate((button) => {
+		const box = button.getBoundingClientRect();
+		const style = getComputedStyle(button);
+		const slot = button.closest<HTMLElement>('.sending-now');
+		const identity = button.closest<HTMLElement>('.document-identity');
+		return {
+			fits: button.scrollWidth <= button.clientWidth && box.left >= 0 && box.right <= button.ownerDocument.defaultView!.innerWidth,
+			button: { clientWidth: button.clientWidth, scrollWidth: button.scrollWidth, width: box.width, minWidth: style.minWidth, maxWidth: style.maxWidth, flex: style.flex },
+			slot: slot && { width: slot.getBoundingClientRect().width, minWidth: getComputedStyle(slot).minWidth, maxWidth: getComputedStyle(slot).maxWidth, flex: getComputedStyle(slot).flex },
+			identity: identity && { width: identity.getBoundingClientRect().width, display: getComputedStyle(identity).display, flexWrap: getComputedStyle(identity).flexWrap },
+		};
+	});
+	// Wait for the control's entrance motion to settle, then prove the full label fits rather than only being visible.
+	await expect.poll(async () => (await probe()).fits).toBe(true);
 }
 
 function seedAgentComment(artifactId: string, commentId: string, threadId: string): void {
@@ -61,15 +68,11 @@ function deliveredOwnerTask(artifactId: string): { title: string; description: s
 	return JSON.parse(output) as { title: string; description: string } | null;
 }
 
-test('@surface:doc-feedback-delivery closes a due user batch in the open canvas', async ({ page, request }) => {
+test('@surface:doc-feedback-delivery sends a held user batch from the header in the open canvas', async ({ page, request }, testInfo) => {
 	test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires isolated synthetic state');
-	test.setTimeout(100_000);
-	const deliveredFrames: Array<{ type?: string; artifact_id?: string }> = [];
+	if (testInfo.project.name === 'chromium-mobile') await page.setViewportSize({ width: 393, height: 852 });
 	let documentReloads = 0;
 	let navigations = 0;
-	page.on('websocket', (socket) => socket.on('framereceived', (frame) => {
-		try { deliveredFrames.push(JSON.parse(String(frame.payload))); } catch { /* Ignore non-JSON frames. */ }
-	}));
 	page.on('request', (outgoing) => {
 		if (new URL(outgoing.url()).pathname === '/api/files/content') documentReloads += 1;
 	});
@@ -80,6 +83,9 @@ test('@surface:doc-feedback-delivery closes a due user batch in the open canvas'
 	const title = `feedback-delivery-${stamp}`;
 	const threadId = await createSession(request, title);
 	const token = encodeURIComponent(TEST_TOKEN);
+	// The marker sits by the lower viewport edge: body text may sit under the transient notice, but this control may not.
+	const longDocument = [...Array.from({ length: 28 }, (_, index) => `Paragraph ${index + 1} fills the canvas behind the transient delivery notice.`), 'A comment that will become due.'].join('\n\n');
+	const commentOffset = longDocument.lastIndexOf('comment');
 	const rootsResponse = await request.get(`/api/files/tree?token=${token}`);
 	expect(rootsResponse.ok()).toBeTruthy();
 	const roots: Array<{ kind: string; path: string }> = (await rootsResponse.json()).roots;
@@ -88,12 +94,12 @@ test('@surface:doc-feedback-delivery closes a due user batch in the open canvas'
 	const fileName = `${title}.md`;
 	const docPath = path.join(workspace!, fileName);
 	const seeded = await request.put(`/api/files/content?token=${token}`, {
-		data: { path: docPath, text: 'A comment that will become due.\n', thread_id: threadId, create: true },
+		data: { path: docPath, text: longDocument, thread_id: threadId, create: true },
 	});
 	expect(seeded.ok(), await seeded.text()).toBeTruthy();
 	const artifactId = (await seeded.json()).artifact.id as string;
 	const created = await request.post(`/api/artifacts/${artifactId}/comments?token=${token}`, {
-		data: { body: 'This pending comment is delivered by the due-batch seam.', anchor_text: 'comment', from_off: 2, to_off: 9 },
+		data: { body: 'This pending comment is delivered by the due-batch seam.', anchor_text: 'comment', from_off: commentOffset, to_off: commentOffset + 'comment'.length, delivery_policy: 'immediate' },
 	});
 	expect(created.ok(), await created.text()).toBeTruthy();
 	await leaveUnsent(request, (await created.json()).comment.id);
@@ -109,9 +115,12 @@ test('@surface:doc-feedback-delivery closes a due user batch in the open canvas'
 	await loginByUrl(page);
 	if ((page.viewportSize()?.width ?? 0) <= 768) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 	await page.getByText(title, { exact: true }).first().click();
-	// The pending batch shows as the comments drawer's Send now footer, which goes once the batch is delivered.
-	const send = await openUnsentFooter(page);
-	await expect(send.getByRole('button', { name: 'Send now', exact: true })).toBeVisible();
+	await page.locator('.cm-scroller').evaluate((scroller) => { scroller.scrollTop = scroller.scrollHeight; });
+	await expect(page.locator('.cm-comment-marker')).toBeVisible();
+	// The held batch waits for the header's Send, which goes once the batch is delivered.
+	await expect(headerSend(page)).toHaveText('Send 1 comment');
+	await expectHeaderSendFits(headerSend(page));
+	await captureDeliveryFrame(page, 'header-send');
 	await page.evaluate(() => {
 		(window as Window & { feedbackVisibilityChanges?: number }).feedbackVisibilityChanges = 0;
 		document.addEventListener('visibilitychange', () => {
@@ -121,11 +130,45 @@ test('@surface:doc-feedback-delivery closes a due user batch in the open canvas'
 	});
 	documentReloads = 0;
 	navigations = 0;
-	makeFeedbackBatchDue(artifactId);
-	await expect.poll(() => deliveredFrames.some((frame) =>
-		frame.type === 'doc_comment_changed' && frame.artifact_id === artifactId,
-	), { timeout: 75_000 }).toBe(true);
-	await expect(send).toHaveCount(0, { timeout: 75_000 });
+	await headerSend(page).click();
+	const confirmation = page.locator('.document-canvas .delivery-confirmation .toast--success');
+	await expect(confirmation).toContainText('1 comment sent');
+	await captureDeliveryFrame(page, 'canvas-confirmation');
+	// Body text may sit behind this transient notice, but no control, marker, pin, composer, or scrollbar may.
+	const [confirmationBox, canvasBox] = await Promise.all([
+		confirmation.boundingBox(),
+		page.locator('.document-canvas').boundingBox(),
+	]);
+	expect(confirmationBox).not.toBeNull();
+	expect(canvasBox).not.toBeNull();
+	expect(confirmationBox!.y).toBeGreaterThanOrEqual(canvasBox!.y);
+	expect(confirmationBox!.y + confirmationBox!.height).toBeLessThanOrEqual(canvasBox!.y + canvasBox!.height);
+	const overlap = await page.locator('.document-canvas').evaluate((canvas) => {
+		const notice = canvas.querySelector<HTMLElement>('.delivery-confirmation .toast');
+		if (!notice) throw new Error('Expected canvas-local confirmation');
+		const noticeBox = notice.getBoundingClientRect();
+		const intersects = (box: DOMRect) => noticeBox.left < box.right && noticeBox.right > box.left
+			&& noticeBox.top < box.bottom && noticeBox.bottom > box.top;
+		const blocked = Array.from(canvas.querySelectorAll<HTMLElement>('button, [role="button"], .cm-comment-marker, [data-region-thumb]'))
+			.filter((element) => {
+				const style = getComputedStyle(element);
+				return !notice.contains(element) && style.display !== 'none' && style.visibility !== 'hidden' && intersects(element.getBoundingClientRect());
+			})
+			.map((element) => element.className || element.getAttribute('aria-label') || element.tagName);
+		const scroller = canvas.querySelector<HTMLElement>('.cm-scroller');
+		const gutter = scroller ? scroller.offsetWidth - scroller.clientWidth : 0;
+		const scrollerBox = scroller?.getBoundingClientRect();
+		const scrollbar = gutter > 0 && !!scrollerBox && intersects(new DOMRect(scrollerBox.right - gutter, scrollerBox.top, gutter, scrollerBox.height));
+		return { blocked, markerCount: canvas.querySelectorAll('.cm-comment-marker').length, scrollbar };
+	});
+	expect(overlap.markerCount, 'the lower canvas edge includes the comment marker worst case').toBeGreaterThan(0);
+	expect(overlap.blocked, 'canvas confirmation never covers an interactive control or marker').toEqual([]);
+	expect(overlap.scrollbar, 'canvas confirmation never covers the editor scrollbar').toBe(false);
+	expect(await page.evaluate(() => document.querySelector('.toast-container')?.textContent ?? '')).not.toContain('1 comment sent');
+	await expect(headerSend(page)).toHaveCount(0);
+	await expect.poll(() => heldIn(artifactId, 'document-held')).toBe(0);
+	expect(heldIn(artifactId, 'document-held')).toBe(0);
+	expect(deliveredBatches(artifactId, 'document-held')).toBe(1);
 	expect(documentReloads).toBe(0);
 	expect(navigations).toBe(0);
 	expect(await page.evaluate(() =>
@@ -133,7 +176,8 @@ test('@surface:doc-feedback-delivery closes a due user batch in the open canvas'
 	)).toBe(0);
 });
 
-test('@surface:doc-reopen-feedback-delivery sends a re-opened comment to the document owner', async ({ page, request }) => {
+// A re-open follows the person's delivery preference like a new comment: held for the header's Send when it is off, sent at once when it is on.
+for (const deliverImmediately of [false, true]) test(`@surface:doc-reopen-feedback-delivery sends a re-opened comment to the document owner (deliver immediately ${deliverImmediately ? 'on' : 'off'})`, async ({ page, request }) => {
 	test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires isolated synthetic state');
 	const title = `reopen-feedback-${Date.now()}`;
 	const threadId = await createSession(request, title);
@@ -151,12 +195,13 @@ test('@surface:doc-reopen-feedback-delivery sends a re-opened comment to the doc
 	expect(seeded.ok(), await seeded.text()).toBeTruthy();
 	const artifactId = (await seeded.json()).artifact.id as string;
 	const created = await request.post(`/api/artifacts/${artifactId}/comments?token=${token}`, {
-		data: { body: 'Please revisit this comment.', anchor_text: 'comment', from_off: 9, to_off: 16 },
+		data: { body: 'Please revisit this comment.', anchor_text: 'comment', from_off: 9, to_off: 16, delivery_policy: 'immediate' },
 	});
 	expect(created.ok(), await created.text()).toBeTruthy();
 	const commentId = (await created.json()).comment.id as string;
 	seedAgentComment(artifactId, commentId, threadId);
 
+	await setDeliveryPreference(request, deliverImmediately);
 	await page.addInitScript(({ threadId, docPath, fileName }) => {
 		localStorage.setItem('corsia:artifactWorkspace:v1', JSON.stringify({
 			threads: { [threadId]: {
@@ -179,9 +224,13 @@ test('@surface:doc-reopen-feedback-delivery sends a re-opened comment to the doc
 	// The document has an owner, so the card says a re-open reaches it.
 	await expect(resolved).toContainText('Re-open asks the agent to revisit.');
 	await resolved.getByRole('button', { name: 'Re-open', exact: true }).click();
-	const footer = page.getByRole('region', { name: 'Document comments' }).locator('[data-drawer-unsent]');
-	await expect(footer).toContainText('1 message not sent yet');
-	await footer.getByRole('button', { name: 'Send now', exact: true }).click();
+	// The re-opened comment is held for the owner: the header's Send is its one sender, reachable once the drawer is closed.
+	await page.getByRole('region', { name: 'Document comments', exact: true }).getByRole('button', { name: 'Close comments', exact: true }).click();
+	if (deliverImmediately) await expect(headerSend(page)).toHaveCount(0);
+	else {
+		await expect(headerSend(page)).toHaveText('Send 1 comment');
+		await headerSend(page).click();
+	}
 	await expect.poll(() => deliveredOwnerTask(artifactId), { timeout: 20_000 }).toMatchObject({
 		title: expect.stringMatching(/re-opened 1 comment/),
 		description: expect.stringContaining(`Comment ${commentId} (re-opened by`),

@@ -543,11 +543,7 @@ def test_callback_before_and_after_tombstone_cannot_resurrect_handle(
 
     db = get_db()
     try:
-        stage_thread_family_retirements(
-            db,
-            ("thread",),
-            process_dir=process_dir,
-        )
+        stage_thread_family_retirements(db, ("thread",))
         db.commit()
     finally:
         db.close()
@@ -590,11 +586,7 @@ def test_unlink_failure_is_retained_then_startup_drain_retries(
     upsert_transition(_durable_row("handle", "thread", head))
     db = get_db()
     try:
-        stage_thread_family_retirements(
-            db,
-            ("thread",),
-            process_dir=owner.process_dir,
-        )
+        stage_thread_family_retirements(db, ("thread",))
         db.commit()
     finally:
         db.close()

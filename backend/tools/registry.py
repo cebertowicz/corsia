@@ -8,6 +8,7 @@ from typing import Any
 from host_access.credential_sanitizer import CredentialSafeText, sanitize_credential_text
 from infra.tool_result_errors import is_error_result
 from tools.base import Tool
+from tools.mcp_stamp import ConnectedAppResult, restamp, with_connected_app_stamp
 from tools.post_update_reminder import remind_current_turn
 from tools.recorded_call import CompletedToolFailure, execute_recorded_call
 from tools.tool_execution_context import inject_context, mcp_reach_refusal, strip_reserved_context
@@ -22,6 +23,7 @@ from tools.tool_surface import (
 
 
 from eval.otel import get_tracer, set_attrs, SPAN_TOOL_CALL
+from eval.tool_allowlist import record_only_result
 _RESERVED_EXECUTION_PREFIXES = (
     "_thread_",
     "_host_access_",
@@ -86,7 +88,9 @@ class ToolRegistry:
             result = self._sanitize_result(await self._execute_unredacted(
                 name, params, review_request_id=review_request_id,
             ))
-            result = await remind_current_turn(result, name, params)
+            # The reminder only touches plain text, so a stamped result earns it as text.
+            plain = str(result) if isinstance(result, ConnectedAppResult) else result
+            result = restamp(result, await remind_current_turn(plain, name, params))
         except CompletedToolFailure as failure:
             # Retained output answers the provider's own call: a dispatched
             # call is bound and replayed under ``tool_call``, not the tool it ran.
@@ -109,7 +113,7 @@ class ToolRegistry:
             return str(result)
         if not isinstance(result, str):
             return result
-        redacted = sanitize_credential_text(result)
+        redacted = restamp(result, sanitize_credential_text(result))
         media = getattr(result, "media", None)
         if media is None:
             return redacted
@@ -223,14 +227,12 @@ class ToolRegistry:
         return execution_params
 
     async def _execute_unredacted(
-        self,
-        name: str,
-        params: dict[str, Any],
-        *, review_request_id: str | None = None,
+        self, name: str, params: dict[str, Any], *, review_request_id: str | None = None,
     ) -> str:
         """Execute once, a ``tool_call`` as the tool it names; the boundary sanitizes."""
-        _HINT = "\n\n[Analyze the error above and try a different approach.]"
         name, params, dispatcher = resolve_dispatch(name, params)
+        if (recorded := await record_only_result(name, params)) is not None:
+            return recorded  # a carry-in sample's non-read-only call never reaches its tool
 
         _tracer = get_tracer("corsia.tools")
         with _tracer.start_as_current_span(SPAN_TOOL_CALL) as _tool_span:
@@ -246,61 +248,67 @@ class ToolRegistry:
             if dispatcher is not None and name == TOOL_CALL:
                 return await tool.execute(name=TOOL_CALL)
 
-            # A tool that states its own remedy gets no generic hint on the
-            # errors it authors: its schema violations and its refusals name
-            # the exact fix, and "try a different approach" contradicts them.
-            # Errors this registry authors below - identity, drain, an
-            # unhandled exception - are not the tool's, and keep the hint.
-            _hint_suffix = "" if tool.self_describing_errors else _HINT
+            # Stamped from the tool this call ran: every string it returns carries it.
+            result = await self._run_tool(tool, name, params, dispatcher, review_request_id, _tool_span)
+            return with_connected_app_stamp(tool, result)
 
-            try:
-                model_params = tool.decode_string_arguments(
-                    strip_reserved_context(params, _is_reserved_execution_param)
-                )
-                errors = tool.validate_params(model_params)
-                if errors:
-                    detail = invalid_dispatch_hint(tool) if dispatcher else ""
-                    return (
-                        f"Error: Invalid parameters for tool '{name}': "
-                        + "; ".join(errors) + detail + _hint_suffix
-                    )
-
-                thread_context, identity_error = await self._load_thread_context()
-                if identity_error:
-                    return identity_error + _HINT
-                if thread_context is None:
-                    return (
-                        "Error: Tool execution session identity is unavailable."
-                        + _HINT
-                    )
-                reach_refusal = await mcp_reach_refusal(tool, thread_context)
-                if reach_refusal is not None:
-                    return reach_refusal
-                execution_params = self._execution_params(
-                    model_params, thread_context, name, review_request_id,
+    async def _run_tool(self, tool, name, params, dispatcher, review_request_id, _tool_span) -> str:
+        """Validate, authorize and run one resolved tool; errors it does not author keep the hint."""
+        _HINT = "\n\n[Analyze the error above and try a different approach.]"
+        # A tool that states its own remedy gets no generic hint on the
+        # errors it authors: its schema violations and its refusals name
+        # the exact fix, and "try a different approach" contradicts them.
+        # Errors this registry authors below - identity, drain, an
+        # unhandled exception - are not the tool's, and keep the hint.
+        _hint_suffix = "" if tool.self_describing_errors else _HINT
+        try:
+            model_params = tool.decode_string_arguments(
+                strip_reserved_context(params, _is_reserved_execution_param)
+            )
+            errors = tool.validate_params(model_params)
+            if errors:
+                detail = invalid_dispatch_hint(tool) if dispatcher else ""
+                return (
+                    f"Error: Invalid parameters for tool '{name}': "
+                    + "; ".join(errors) + detail + _hint_suffix
                 )
 
-                drain_refusal = await self._restart_drain_refusal(
-                    name, model_params, thread_context["id"],
+            thread_context, identity_error = await self._load_thread_context()
+            if identity_error:
+                return identity_error + _HINT
+            if thread_context is None:
+                return (
+                    "Error: Tool execution session identity is unavailable."
+                    + _HINT
                 )
-                if drain_refusal is not None:
-                    return drain_refusal
+            reach_refusal = await mcp_reach_refusal(tool, thread_context)
+            if reach_refusal is not None:
+                return reach_refusal
+            execution_params = self._execution_params(
+                model_params, thread_context, name, review_request_id,
+            )
 
-                result = await self._authorized_execute(
-                    tool, name, model_params, execution_params, thread_context,
-                )
-                if is_error_result(result):
-                    return result + _hint_suffix
-                set_attrs(_tool_span, {
-                    "tool.result_size_chars": len(result) if isinstance(result, str) else 0,
-                })
-                return result
-            except CompletedToolFailure:
-                raise
-            except Exception as e:
-                safe_error = sanitize_credential_text(str(e))
-                set_attrs(_tool_span, {"tool.error": safe_error[:200]})
-                return f"Error executing {name}: {safe_error}" + _HINT
+            drain_refusal = await self._restart_drain_refusal(
+                name, model_params, thread_context["id"],
+            )
+            if drain_refusal is not None:
+                return drain_refusal
+
+            result = await self._authorized_execute(
+                tool, name, model_params, execution_params, thread_context,
+            )
+            if is_error_result(result):
+                return result + _hint_suffix
+            set_attrs(_tool_span, {
+                "tool.result_size_chars": len(result) if isinstance(result, str) else 0,
+            })
+            return result
+        except CompletedToolFailure:
+            raise
+        except Exception as e:
+            safe_error = sanitize_credential_text(str(e))
+            set_attrs(_tool_span, {"tool.error": safe_error[:200]})
+            return f"Error executing {name}: {safe_error}" + _HINT
 
 
     @staticmethod

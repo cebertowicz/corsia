@@ -9,11 +9,10 @@ handed another's consent link. A flow owns a loopback listener, a single-use
 callback, the five-minute expiry, a cancel, a newer flow, or the listener's
 request cap. Only the app's current flow may store a grant; ``store.grant_lock``
 guards both, so a cancel or another session's press lands wholly before a
-sign-in's write (nothing stored) or after it (nothing left to end). A completed sign-in
-replaces the app's grant and only then revokes the one it replaced; a
-cancelled, expired or failed one leaves the existing grant working. Failures are
-fixed classes (``tools.mcp_oauth_errors``); every outcome is audited with its
-actor and app, never a value.
+sign-in's write (nothing stored) or after it (nothing left to end). A completed sign-in replaces the
+app's grant and only then revokes the one it replaced; a cancelled, expired or failed one leaves the
+existing grant working. Failures, including one at the start, are fixed classes (``tools.mcp_oauth_errors``);
+every outcome is audited with its actor and app, never a value.
 """
 
 from __future__ import annotations
@@ -164,7 +163,12 @@ async def start(
                 await audit(app_id, "sign_in_expired", ("system", "sign_in"))
             else:
                 await audit(app_id, "sign_in_superseded", ("person", user_id))
-        flow = await _open_flow(app_id, app_name, server_url, user_id, session_hash, pasted, host, port, path, metadata_url)
+        try:
+            flow = await _open_flow(app_id, app_name, server_url, user_id, session_hash, pasted, host, port, path, metadata_url)
+        except SignInError as failure:
+            _results[app_id] = Result(failure.failure_class, failure.words, time.time())
+            await audit(app_id, f"sign_in_failed:{failure.failure_class}", ("system", "sign_in"))
+            raise
         _flows[app_id] = flow
         flow.timer = asyncio.create_task(_expire(flow))
     await audit(app_id, "sign_in_started", ("person", user_id))

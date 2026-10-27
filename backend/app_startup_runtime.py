@@ -199,6 +199,9 @@ async def _start_runtime_services() -> None:
     from core.artifact_review_capture import reconcile_startup_reviews
 
     await reconcile_startup_reviews()
+    from connections.mailhost.check import settle_after_restart
+
+    await settle_after_restart()
     from core import placement_worker
 
     placement_worker.poke()
@@ -220,6 +223,7 @@ async def _start_runtime_services() -> None:
     state._presence_sweep_task = asyncio.create_task(presence_sweep_loop())
     state._cc_idle_retirement_task = asyncio.create_task(idle_retirement_loop())
     state._github_notifications_task = asyncio.create_task(notifications_poll_loop())
+    # TODO(99e36462316848ccb9dbe2e8299ed066): wire repo-activity polling after lifecycle approval.
     state._mail_poller_task = asyncio.create_task(mail_poll_loop())
     state._library_refresh_task = asyncio.create_task(library_refresh_loop())
     state._pr_quiet_watch_task = asyncio.create_task(pr_quiet_watch_loop())
@@ -242,3 +246,26 @@ async def _start_runtime_services() -> None:
 
     install_process_events()
     await recover_host_access_supervisors()
+
+
+async def _startup_cloud_discovery() -> None:
+    from infra.db_async import run_in_db
+    from infra.key_store_providers import provider_keys
+    from llm.catalog import discover_cloud_models
+    from loguru import logger
+
+    keys = await run_in_db(provider_keys)
+    for provider, key in (
+        ("openai", keys.get("openai")),
+        ("anthropic", keys.get("anthropic")),
+    ):
+        if not key:
+            continue
+        try:
+            result = await discover_cloud_models(provider, key)
+            if result["ok"]:
+                logger.info(
+                    f"{provider} cloud discovery: {len(result['models'])} models"
+                )
+        except Exception as exc:
+            logger.warning(f"{provider} cloud discovery error: {exc}")

@@ -45,6 +45,7 @@
 	import { toasts } from '$lib/stores/toast';
 	import type { PresenceRange } from '$lib/cm/presence-marks';
 	import DocumentViewport from './DocumentViewport.svelte';
+	import { createDocImageCacheKey } from '$lib/docImageCacheKey.svelte';
 
 	type DocState = 'loading' | 'ready' | 'error';
 
@@ -105,10 +106,9 @@
 	});
 
 	const commentRetryToast = createCommentRetryToast(toasts);
-
 	let presenceRanges = $state<PresenceRange[]>([]);
 	let activity = $state<DocCanvasActivity>();
-
+	const imageKey = createDocImageCacheKey(() => target?.threadId, () => loadedArtifactId);
 	// The comments pane derives orphaning from the text currently on screen (and a refused accept)
 	// so a comment never remains highlighted after an in-editor edit changes it.
 	$effect(() => syncActiveDocumentEditor({ target, draft: save.draft, docState, artifactId: loadedArtifactId, text: editText, readonly: readonly || confirming }));
@@ -138,7 +138,7 @@
 	const images = createDocViewerImages({
 		onOpenImage: () => onOpenImage, root: () => docRoot, comments: () => listedComments, artifactId: () => loadedArtifactId,
 		target: () => target, readOnly: () => readonly || confirming, text: () => editText, session: () => liveSession, accent: () => accent,
-		feedback: () => feedbackStatus?.feedback(), showInText: focusInText });
+		feedback: () => feedbackStatus?.feedback(), imageCacheKey: () => imageKey.current, showInText: focusInText });
 	/** The comments of the image shown over this document, bound to it as it is now: an image's host rebuilds them when it shows one. */
 	export function imageComments() { return images.comments(); }
 	function focusInText(id: string, placement?: 'top') { scroll.toComment(id, commentUI.state?.kind === 'list', placement === 'top' ? 'quote-tap' : 'navigation'); focusedDocComment.set(id); }
@@ -313,6 +313,7 @@
 		viewingThreadId={target?.threadId ?? null}
 		reviewTargetKey={targetKey}
 		targetInstanceId={target?.instanceId ?? null}
+		imageOpen={covered} activityRoot={docRoot}
 		{onReload}
 		onOpenComments={commentUI.openList}
 		{freshness}
@@ -352,7 +353,7 @@
 		onEdit={onDocEdit}
 		onLayout={(mapPos) => activity?.editorChanged(mapPos)}
 		readOnly={readonly || confirming || suggestionBusyId !== null}
-		imageBase={target}
+		imageBase={target && { ...target, imageCacheKey: imageKey.current }}
 		onOpenImage={onOpenImage ? (request) => images.open(request) : undefined}
 		tabInstanceId={target?.instanceId ?? null}
 		{onDocumentPlace}
@@ -378,7 +379,6 @@
 		onFocus={focusFromCard}
 		load={loadedArtifactId ? $commentLoads[loadedArtifactId] : undefined}
 		onRetry={() => reloadDocumentFeedback(loadedArtifactId, undefined, () => loadSeq, feedbackStatus)}
-		feedback={feedbackStatus?.feedback()}
 		placementRecovery={{ onReload: loadedArtifactId && liveSession ? () => reloadPlacements(loadedArtifactId) : undefined, unplacedCount: commentStatus.orphanedCount, replaceableCount: commentStatus.replaceableCount, reloading: commentStatus.placementReloading, reloadError: commentStatus.placementReloadError, unavailable: liveConnection === 'disconnected' || liveConnection === 'reconnecting', connectionDescriptionId: liveConnectionDescriptionId(liveSession?.artifactId) }}
 		onSubmit={submitComment}
 		onReply={threadActions.reply}

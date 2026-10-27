@@ -215,9 +215,12 @@ def _seed_period(db, agent_id: str, period: str, outcomes: int, *, not_first_try
 
 
 def _seed_tokens(db, thread_id: str, period: str, tokens: int, *, count: int = 1) -> None:
+    """Seed rows that meet the same priceable-token contract as a real Claude Code receipt."""
     db.executemany(
-        "INSERT INTO llm_usage (id,thread_id,model,total_tokens,created_at) VALUES (?,?,'test-model',?,?)",
-        [(f"usage-{thread_id}-{period}-{index}", thread_id, tokens // count, f"{period}T13:00:00Z")
+        "INSERT INTO llm_usage (id,thread_id,model,prompt_tokens,completion_tokens,cache_creation_tokens,"
+        "cache_read_tokens,total_tokens,source,created_at) VALUES (?,?,'claude-code/test',?,0,0,0,?,"
+        "'external_harness:claude-code',?)",
+        [(f"usage-{thread_id}-{period}-{index}", thread_id, tokens // count, tokens // count, f"{period}T13:00:00Z")
          for index in range(count)],
     )
 
@@ -278,8 +281,9 @@ def _always_measured(metric: str, period: str) -> bool:
 def _build(db_seed, *, metric="fresh_tokens_per_outcome", sort="ranked", comparable=None, measured=None,
            now=None, kind="weeks", tz="UTC"):
     """Run the same build the served route runs, with the route's registry and its two period predicates."""
-    from api.measurement import REGISTRY, period_comparable, period_measured
-    from api.measurement_agents import build_agents
+    from api.measurement import REGISTRY, period_measured
+    from api.measurement_agents import TABLE_METRICS, build_agents
+    from api.measurement_breaks import derive_breaks, period_comparable
     from api.measurement_chain_costs import chain_costs
     from api.measurement_findings import derive_findings_state
     from api.measurement_presence import first_presence_period
@@ -295,9 +299,11 @@ def _build(db_seed, *, metric="fresh_tokens_per_outcome", sort="ranked", compara
     try:
         prepare_outcome_periods(db, {**params, "grain": grain}, roots=True)
         first_presence = first_presence_period(db, params["user_id"], grain)
+        breaks = derive_breaks(db, TABLE_METRICS, grain)
         rows, findings, summaries, count, _overall = build_agents(
-            db, params, REGISTRY, metric, sort, grain, comparable or period_comparable,
-            measured or (lambda name, period: period_measured(name, period, grain, first_presence)), chain_costs(db, params, grain)["cost_rows"])
+            db, params, REGISTRY, metric, sort, grain,
+            comparable or (lambda name, period: period_comparable(period, breaks[name])),
+            measured or (lambda name, period: period_measured(name, period, first_presence)), chain_costs(db, params, grain)["cost_rows"])
         return {"rows": rows, "findings": findings, "project_summaries": summaries["active"],
                 "agent_count": count, "findings_state": derive_findings_state(rows, findings, count)}
     finally:
@@ -310,7 +316,11 @@ async def test_an_agent_with_no_history_is_present_and_too_few(isolated_db):
 
     def seed(db):
         _seed_agent(db, "idle", project_id="p1")
+        _seed_agent(db, "retired-source", project_id="p1", enabled=False)
         _seed_project(db, "p1")
+        # The installed outcomes instrument already exists; this later-created
+        # scope has observed a measured zero, not an unmeasured pre-instrument gap.
+        _seed_period(db, "retired-source", "2026-09-21", 1)
 
     result = await _agents(seed)
     assert [row["agent"]["name"] for row in result["rows"]] == ["idle"]
@@ -354,6 +364,7 @@ async def test_the_selected_column_and_order_cannot_change_what_the_findings_fou
     def seed(db):
         _seed_project(db, "p1")
         _seed_agent(db, "worker", project_id="p1")
+        db.execute("INSERT INTO measure_breaks(period,kind,metric_group,reason) VALUES ('2026-08-31','world',NULL,'tasks were split about 5 times finer from Aug 31, 2026 on')")
         for index, period in enumerate(frame):
             _seed_period(db, "worker", period, 20)
             _seed_tokens(db, "worker", period, 2000 if index < 8 else 8000)
@@ -420,12 +431,13 @@ async def test_descendant_threads_attribute_to_the_agent_that_owns_them(isolated
         for period in trailing:
             _seed_period(db, "worker", period, 20)
             _seed_tokens(db, "worker-child", period, 1000)
+            _seed_decision(db, "worker", period, 0)
             _seed_hold(db, "worker", period)
 
     result = await _agents(seed)
     row = result["rows"][0]
     assert row["metrics"]["fresh_tokens_per_outcome"]["value"] == pytest.approx(1000 / 20)
-    assert row["metrics"]["asks_per_outcome"]["value"] == pytest.approx(1 / 20)
+    assert row["metrics"]["asks_per_outcome"]["value"] == pytest.approx(2 / 20)
     assert result["project_summaries"][0]["project"]["id"] == "p1"
 
 
@@ -738,6 +750,7 @@ async def test_a_finding_never_compares_across_the_period_the_outcome_unit_chang
 
     def seed(db):
         _seed_project(db, "p1")
+        db.execute("INSERT INTO measure_breaks(period,kind,metric_group,reason) VALUES ('2026-08-31','world',NULL,'tasks were split about 5 times finer from Aug 31, 2026 on')")
         for agent_id, periods in (("straddle", straddle), ("comparable", later)):
             _seed_agent(db, agent_id, project_id="p1")
             for index, period in enumerate(periods):
@@ -776,18 +789,21 @@ async def test_the_agents_table_blanks_the_periods_its_instrument_did_not_observ
     period that was never observed. The calendar is named so the retired periods are these,
     whatever day the test runs.
     """
-    from api.measurement import REGISTRY, measurement_series
+    from api.measurement import measurement_series
 
     _freeze(monkeypatch, PRE_BREAK)
     periods = _frame(now=PRE_BREAK)[-4:]
-    first_try_start = REGISTRY["first_try_acceptance"].start
+    # MR-9/10: the first observed outcome, not a registry date, starts the
+    # first-try instrument for every scope.
+    first_try_start = periods[2]
 
     def seed(db):
         _seed_project(db, "p1")
         _seed_agent(db, "worker", project_id="p1")
         for period in periods:
-            _seed_period(db, "worker", period, 40, not_first_try=0 if period >= first_try_start else 5)
-            _seed_tokens(db, "worker", period, 4000)
+            if period >= first_try_start:
+                _seed_period(db, "worker", period, 40)
+                _seed_tokens(db, "worker", period, 4000)
 
     result = await _agents(seed)
     points = result["rows"][0]["metrics"]["first_try_acceptance"]["periods"]

@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from api.cost_identity import IdentityResolver
+from core.cost_identity import IdentityResolver
 from api.measurement_agent_cost import dollars_metric, query_task_hour_cost
 from api.measurement_chain_costs import chain_costs
 from api.measurement_agents import RANKING_MINIMUM_N

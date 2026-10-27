@@ -167,6 +167,9 @@ const actions = [
 	},
 ];
 
+// The page's own reads, not an action's; the takeover offer reads what Start fresh would back up.
+const pageReads = ['get_service_log_path', 'adoption_progress', 'start_fresh_preview'];
+
 let failed = 0;
 const fail = (message) => {
 	failed += 1;
@@ -181,6 +184,7 @@ async function open(theme, failure, script = {}) {
 			window.__calls.push(command);
 			if (command === 'get_service_log_path') return '/x/service.log';
 			if (command === 'adoption_progress') return null;
+			if (command === 'start_fresh_preview') return { moves: ['~/work'], code: [], work: [], backups: '~/CORSIA backups' };
 			if (command === 'adopt_existing_install') {
 				// A script may give successive results; the last one repeats.
 				const next = Array.isArray(scripted.adopt_existing_install) ? (scripted.adopt_existing_install.length > 1 ? scripted.adopt_existing_install.shift() : scripted.adopt_existing_install[0]) : thrown;
@@ -282,7 +286,7 @@ for (const theme of ['light', 'dark']) {
 		await page.click('#retry');
 		await page.waitForFunction((last) => window.__calls.includes(last), calls[calls.length - 1], { timeout: 3000 }).catch(() => {});
 		await page.waitForTimeout(150);
-		const made = (await page.evaluate(() => window.__calls)).filter((command) => !['get_service_log_path', 'adoption_progress'].includes(command));
+		const made = (await page.evaluate(() => window.__calls)).filter((command) => !pageReads.includes(command));
 		if (JSON.stringify(made) !== JSON.stringify(calls)) fail(`${theme} ${name}: ran ${JSON.stringify(made)}, expected ${JSON.stringify(calls)}`);
 		if (hash && (await page.evaluate(() => window.location.hash)) !== hash) fail(`${theme} ${name}: did not continue to the service`);
 		if (after) compare(`${theme} ${name}`, await read(page), after);
@@ -335,7 +339,7 @@ for (const theme of ['light', 'dark']) {
 		const before = failed;
 		await page.click('#quit');
 		await page.waitForTimeout(150);
-		const made = (await page.evaluate(() => window.__calls)).filter((command) => !['get_service_log_path', 'adoption_progress', 'adopt_existing_install'].includes(command));
+		const made = (await page.evaluate(() => window.__calls)).filter((command) => ![...pageReads, 'adopt_existing_install'].includes(command));
 		if (JSON.stringify(made) !== JSON.stringify(['quit_app'])) fail(`${theme} quit: ran ${JSON.stringify(made)}, expected ["quit_app"]`);
 		if (failed === before) console.log(`ok   ${theme} quit`);
 		await page.close();

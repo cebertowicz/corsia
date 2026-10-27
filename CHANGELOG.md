@@ -3,6 +3,58 @@
 Shipped behavior, newest first. When a later entry changes an earlier design,
 the later entry describes the current behavior.
 
+## Unreleased
+
+_Changes merged since the last release. Each PR that changes what you see or do adds a line here._
+
+- The local model server keeps your server-wide settings when CORSIA starts it again.
+
+- Claude Code accounts you added keep working when CORSIA's data moves.
+- Browser addresses no longer need `https://` typed in; local loopback addresses use `http://` by default.
+- A signed-in app in Connected apps now reads "Figma — you@example.com" on its row, with the account shortening first on a narrow screen, and a link in chat can open an app waiting for approval with its Approve button ready.
+- Setup now opens in a normal-sized window in the middle of the screen, and the app grows to fill the screen when setup finishes.
+- A Claude Code you only just signed in to is no longer offered for import: only skills and notes you made there are brought over.
+- The "Bring over what your other tools know" step no longer shows twice in the setup plan.
+- If the local model server CORSIA started stops unexpectedly, CORSIA starts it again and loads the models that were loaded, up to three times in ten minutes. A server you stop in CORSIA, or one that is stopped when you quit CORSIA, stays stopped, and so does a server CORSIA started in this session that exits normally on its own (code 0). A server CORSIA took over after an update or restart is started again on any exit, and so is one you end from outside CORSIA, such as with Force Quit: CORSIA cannot tell that from a crash.
+- CORSIA now keeps its data in `~/Library/Application Support/CORSIA`. An install that took over an earlier one moves its data there once, as soon as the update that brings this finishes or on the next launch, without copying it; if anything still uses the old folder, CORSIA leaves the data where it is and says why.
+- On a connected app that fails to sign in, a refused sign-in now says so and shows no button that can't help, Reconnect no longer freezes the row, and Remove works while the app is still trying to connect.
+- Settings no longer offers an update after it finishes.
+- During an update restart, CORSIA shows a full-window progress screen and offers recovery if it takes longer than expected.
+- You can choose to send document comments immediately or hold them until you finish reviewing the document or image.
+- On Activity, an agent that is working reads Working even while one of its tasks is set aside, and each row's count says how many tasks are left.
+- In Chrome and other Chromium browsers, page text behind a dialog is now blurred on narrow screens too, instead of showing through the card.
+- An update on a large database now waits while CORSIA upgrades its data instead of giving up after a minute and going back to a version that can no longer open it, and an update nobody confirms no longer leaves a restart pending.
+- On a phone, a long tool step in a chat and a long model name in Settings' Host access review no longer make the screen scroll sideways.
+- Reopening an unchanged document while disconnected now says your changes stay on this device, instead of warning that they aren't saved.
+- Posting a document comment makes it appear right away and clears the box; the agent still gets it.
+- Setup keeps CORSIA’s own work folder as the default offer after you choose another folder.
+- Quitting the Mac app now also stops the local model server CORSIA started, so it no longer holds memory after you quit.
+- If you quit partway through first-run setup, the next launch starts setup fresh; downloaded models are kept.
+- When the app finds an earlier CORSIA install, Start fresh moves it into a dated folder under CORSIA backups in your home folder, then begins a clean setup.
+- After Start fresh backs up an earlier install, setup begins right away, and taking over an earlier install is labeled Take over.
+- Start fresh now shows what it will back up on the first choice and starts in one step.
+- Setup opens with a Getting started page and four steps in the side rail, with Back on every step after the first, and you can edit your account from Back.
+- Pressing Download in setup always starts the download with progress, or says why it didn't and offers Retry.
+- A Claude Code or Codex sign-in that never returns from the browser now stops after five minutes and says what to do, instead of waiting forever.
+- If a signed-in Claude or ChatGPT account has no models for Claude Code or Codex, setup and Settings say so and offer another account or turning that tool off.
+- After you sign in to Claude Code, its models reach the model picker, and the row no longer stays stuck on Sign in.
+- Sign-in pages during setup stay in CORSIA's browser pane, and Google setup no longer creates a second project.
+- The local model chosen in setup stays loaded afterwards.
+- CORSIA's own local model defaults to medium reasoning effort unless you chose another.
+- CORSIA's own local model server handles two requests at once, and its group in the model picker is named CORSIA instead of Local.
+- Sending to a local model that isn't loaded yet waits until it loads, and Stop cancels a message still waiting on its model.
+- A Codex chat no longer stays stuck on running when Codex stops partway through receiving a message; your next message runs.
+- Agents can search the web with no search key while CORSIA's own local model is running.
+- Links in a chat open in your browser from the desktop app.
+- When an agent opens a page in the shared browser, the chat shows a chip with that site; clicking it reopens the browser there.
+- The host-access request card now says what host access is before asking you to approve it.
+- Google and Microsoft setup say what access sign-in grants before asking "Go ahead?", and the approval toggle is called Auto-approve in Settings, as in the chat.
+- Connections from paired devices work again.
+- An agent still waits for your yes before a newly connected command-line tool's first change, even when you asked for that change.
+- When a plan isn't moving, its note names each wait that is overdue.
+- A replaced image now shows right away in a document that is open, and when it is reopened, even if it has comments.
+- When an agent hands you a page in the shared browser, such as an account choice or a phone prompt, it appears in your attention list and the agent carries on once you finish.
+
 ## v0.4.0 — A self-starting Mac app, updates you control, a shared browser, connected apps, and steadier plans
 
 Released 2026-10-16.

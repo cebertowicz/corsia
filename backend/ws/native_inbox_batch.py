@@ -8,7 +8,7 @@ from dataclasses import replace
 from core.turn_iteration import NativeSafeBoundaryInput
 from infra.db_async import run_in_db
 from infra.input_writes import (
-    begin_batch_write,
+    fence_batch_write,
     release_batch_before_write,
     settle_batch_write,
 )
@@ -32,8 +32,7 @@ class _BoundaryWrite:
         self.attempt_id = str(uuid.uuid4())
 
     async def before_write(self) -> None:
-        await run_in_db(
-            begin_batch_write,
+        await fence_batch_write(
             self.batch,
             attempt_id=self.attempt_id,
             started_at=utc_now_iso(),

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from api.cost_identity import IdentityResolver
+from core.cost_identity import IdentityResolver
 from model_identity_fixtures import LOCAL_ID, LOCAL_MODEL, seed_identity_catalog
 
 

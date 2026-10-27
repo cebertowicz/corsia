@@ -10,7 +10,6 @@ the first account); it exists only while no account does.
 from __future__ import annotations
 
 import asyncio
-import logging
 import os
 import platform
 import shutil
@@ -20,17 +19,17 @@ from fastapi import APIRouter, Depends, Header, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
-from api.setup_requests import FirstAccountRequest, LocalDownloadRequest, SetupProgressUpdate, SetupReportRequest
+from api import setup_account
+from api.setup_requests import LocalDownloadRequest, SetupProgressUpdate, SetupReportRequest
 from core.corrections_asset_download import FLIGHT as CLASSIFIER_DOWNLOAD
 from core.corrections_asset_download import public_state as classifier_state
-from infra import account_validation, accounts, config, setup_progress
-from infra.auth import authenticate, require_user, token_from_request
+from infra import accounts, config, setup_progress
+from infra.auth import authenticate, is_person_session, require_user, token_from_request
 from infra.db_async import run_in_db
 from infra.local_connection import is_direct_loopback
-from infra.time import utc_storage_iso_to_api
+from onboarding.app_first_run import SetupOwnerError
 
 router = APIRouter(prefix="/api/setup", tags=["setup"])
-logger = logging.getLogger(__name__)
 
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "[::1]"})
 _TAURI_ORIGINS = frozenset({"tauri:" + "//localhost", "http:" + "//tauri.localhost"})
@@ -86,10 +85,10 @@ def _trusted_json_post(request: Request) -> bool:
     return True
 
 
-def _macos_supported() -> bool:
-    """Whether this Mac meets the approved macOS 15 floor."""
+def _macos_supported() -> bool | None:
+    """Whether this Mac meets the approved macOS 15 floor; None off macOS, where it does not apply."""
     if platform.system() != "Darwin":
-        return False
+        return None
     try:
         return int(platform.mac_ver()[0].split(".", 1)[0]) >= _MINIMUM_MACOS_MAJOR
     except (TypeError, ValueError):
@@ -200,8 +199,10 @@ async def setup_progress_update(request: Request, authorization: str | None = He
     other pre-account routes; after it, any signed-in session may record all of them.
     """
     signed_in = await run_in_db(accounts.has_users)
+    user = None
     if signed_in:
-        if not authenticate(token_from_request(None, authorization)):
+        user = authenticate(token_from_request(None, authorization))
+        if not user:
             return Response(status_code=401)
     elif not _trusted_json_post(request):
         return Response(status_code=403)
@@ -212,12 +213,23 @@ async def setup_progress_update(request: Request, authorization: str | None = He
     if not signed_in and (body.step is not None or body.handoff is not None or body.completed):
         return Response(status_code=422)
     try:
+        if signed_in and body.completed:
+            from onboarding.app_first_run import complete_app_setup
+
+            handled = await complete_app_setup(
+                user["id"], step=body.step, local_ai=body.local_ai, picks=body.picks,
+                handoff=body.handoff.model_dump(exclude_none=True) if body.handoff is not None else None,
+            )
+            if handled:
+                return {"ok": True}
         await run_in_db(lambda: setup_progress.update(
             step=body.step, local_ai=body.local_ai, picks=body.picks,
             handoff=body.handoff.model_dump(exclude_none=True) if body.handoff is not None else None,
             completed=body.completed))
     except setup_progress.SetupProgressError:
         return Response(status_code=422)
+    except SetupOwnerError:
+        return Response(status_code=403)
     return {"ok": True}
 
 
@@ -356,30 +368,16 @@ async def first_account(request: Request) -> dict | Response:
     """Create exactly one first account and issue the normal browser session."""
     if not _trusted_json_post(request):
         return Response(status_code=403)
-    try:
-        body = FirstAccountRequest.model_validate(await request.json())
-    except (ValidationError, ValueError):
-        return Response(status_code=422)
-    try:
-        user_id = await run_in_db(
-            accounts.create_first_account, body.username, body.password,
-            full_name=body.name, email=body.email or "", first_run_path="app",
-        )
-    except account_validation.FirstAccountExists:
-        return Response(content='{"code":"setup_complete"}', status_code=409, media_type="application/json")
-    except account_validation.AccountError as error:
-        return JSONResponse(status_code=422, content={"detail": str(error)})
-    except Exception:
-        # No user field is in this message; the traceback names only the failing step.
-        logger.exception("First-account creation failed")
-        return JSONResponse(
-            status_code=500,
-            content={"code": "setup_failed", "detail": "Your account was not created. Try again."},
-        )
-    token, expires_at = await run_in_db(accounts.issue_token, user_id, kind="session", label="browser")
-    user = await run_in_db(accounts.get_user, user_id)
-    return {
-        "token": token,
-        "user": user,
-        "expires_at": utc_storage_iso_to_api(expires_at),
-    }
+    return await setup_account.apply_create(request)
+
+
+@router.put("/account", response_model=None)
+async def update_account(request: Request, authorization: str | None = Header(None)) -> dict | Response:
+    """Change the name, email or password the account screen collected, until setup is finished."""
+    user = authenticate(token_from_request(None, authorization))
+    if not user:
+        return Response(status_code=401)
+    # A new password is a human decision, and the reply hands out a person session: machine credentials never make it.
+    if not is_person_session(user) or not _trusted_json_post(request):
+        return Response(status_code=403)
+    return await setup_account.apply_update(user["id"], request)

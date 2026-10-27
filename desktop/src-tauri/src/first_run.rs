@@ -46,12 +46,25 @@ pub enum FirstRun {
 #[derive(Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum FolderClassification {
-    Ready { path: String, protected_folder: Option<&'static str> },
+    Ready { path: String, folder_warning: Option<FolderWarning> },
     Unwritable { path: String, reason: String },
+    Unreadable { path: String, reason: String },
 }
 
-fn protected_folder(path: &Path, home: &Path) -> Option<&'static str> {
-    [
+#[derive(Debug, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum FolderWarning {
+    PersonalFolder { folder: &'static str },
+    ContainsPersonalFolder { folder: &'static str },
+    ContainsFiles,
+}
+
+fn folder_warning(path: &Path, home: &Path) -> Result<Option<FolderWarning>, String> {
+    if path == home {
+        return Ok(Some(FolderWarning::PersonalFolder { folder: "Home" }));
+    }
+
+    for (personal, name) in [
         (home.join("Documents"), "Documents"),
         (home.join("Desktop"), "Desktop"),
         (home.join("Downloads"), "Downloads"),
@@ -61,9 +74,16 @@ fn protected_folder(path: &Path, home: &Path) -> Option<&'static str> {
                 .join("com~apple~CloudDocs"),
             "iCloud Drive",
         ),
-    ]
-    .into_iter()
-    .find_map(|(protected, name)| path.starts_with(&protected).then_some(name))
+    ] {
+        if path == personal {
+            return Ok(Some(FolderWarning::PersonalFolder { folder: name }));
+        }
+        if personal.starts_with(path) {
+            return Ok(Some(FolderWarning::ContainsPersonalFolder { folder: name }));
+        }
+    }
+
+    workspace_is_fresh(path).map(|fresh| (!fresh).then_some(FolderWarning::ContainsFiles))
 }
 
 pub fn classify_folder(
@@ -72,10 +92,12 @@ pub fn classify_folder(
     check_writable: impl FnOnce(&Path) -> Result<(), String>,
 ) -> FolderClassification {
     let shown = path.display().to_string();
+    let resolved_path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    let resolved_home = home.canonicalize().unwrap_or_else(|_| home.to_path_buf());
     match check_writable(path) {
-        Ok(()) => FolderClassification::Ready {
-            path: shown,
-            protected_folder: protected_folder(path, home),
+        Ok(()) => match folder_warning(&resolved_path, &resolved_home) {
+            Ok(folder_warning) => FolderClassification::Ready { path: shown, folder_warning },
+            Err(reason) => FolderClassification::Unreadable { path: shown, reason },
         },
         Err(reason) => FolderClassification::Unwritable { path: shown, reason },
     }
@@ -210,6 +232,13 @@ fn existing_install(reason: String) -> Result<FirstRun, String> {
 
 /// Decide what a launch must do about the workspace, reading only.
 pub fn plan(home: &Path, app_dir: &Path) -> Result<FirstRun, String> {
+    plan_trusting(home, app_dir, None)
+}
+
+/// `plan`, for a launch that just started an unfinished setup over: `trusted` is the work folder that setup
+/// made, and a default folder at exactly that path is reused even though the backend left files in it. Nothing
+/// else about the refusal rules changes.
+pub fn plan_trusting(home: &Path, app_dir: &Path, trusted: Option<&Path>) -> Result<FirstRun, String> {
     if present(&app_dir.join(SERVICE_FILE))? {
         return Ok(FirstRun::Configured);
     }
@@ -262,7 +291,7 @@ pub fn plan(home: &Path, app_dir: &Path) -> Result<FirstRun, String> {
                 "A file named {shown} is in the way of CORSIA's default workspace folder."
             ));
         }
-        if !workspace_is_fresh(&path)? {
+        if trusted != Some(path.as_path()) && !workspace_is_fresh(&path)? {
             return existing_install(format!(
                 "The folder {shown} already has files in it, so CORSIA left it alone."
             ));
@@ -775,14 +804,67 @@ mod tests {
     }
 
     #[test]
-    fn protected_and_unwritable_folder_choices_are_classified() {
+    fn folder_warnings_and_unavailable_folder_choices_are_classified() {
         let home = Home::new("folder-classification");
-        let documents = home.0.join("Documents").join("corsia");
+        let documents = home.0.join("Documents");
+        let empty_in_documents = documents.join("corsia");
+        let desktop = home.0.join("Desktop");
+        let downloads = home.0.join("Downloads");
+        let library = home.0.join("Library");
+        let cloud_docs = library
+            .join("Mobile Documents")
+            .join("com~apple~CloudDocs");
+        for path in [&empty_in_documents, &desktop, &downloads, &cloud_docs] {
+            fs::create_dir_all(path).unwrap();
+        }
+        let documents_with_trailing_separator = PathBuf::from(format!("{}/", documents.display()));
+        let home_parent = home.0.parent().unwrap().to_path_buf();
+
+        for (path, folder_warning) in [
+            (&home.0, FolderWarning::PersonalFolder { folder: "Home" }),
+            (&documents, FolderWarning::PersonalFolder { folder: "Documents" }),
+            (&documents_with_trailing_separator, FolderWarning::PersonalFolder { folder: "Documents" }),
+            (&desktop, FolderWarning::PersonalFolder { folder: "Desktop" }),
+            (&downloads, FolderWarning::PersonalFolder { folder: "Downloads" }),
+            (&cloud_docs, FolderWarning::PersonalFolder { folder: "iCloud Drive" }),
+            (&library, FolderWarning::ContainsPersonalFolder { folder: "iCloud Drive" }),
+            (
+                &home_parent,
+                FolderWarning::ContainsPersonalFolder { folder: "Documents" },
+            ),
+        ] {
+            assert_eq!(
+                classify_folder(path, &home.0, |_| Ok(())),
+                FolderClassification::Ready {
+                    path: path.display().to_string(),
+                    folder_warning: Some(folder_warning),
+                }
+            );
+        }
+
         assert_eq!(
-            classify_folder(&documents, &home.0, |_| Ok(())),
+            classify_folder(&empty_in_documents, &home.0, |_| Ok(())),
             FolderClassification::Ready {
-                path: documents.display().to_string(),
-                protected_folder: Some("Documents"),
+                path: empty_in_documents.display().to_string(),
+                folder_warning: None,
+            }
+        );
+        fs::write(empty_in_documents.join(".DS_Store"), "").unwrap();
+        fs::create_dir_all(empty_in_documents.join(".git")).unwrap();
+        assert_eq!(
+            classify_folder(&empty_in_documents, &home.0, |_| Ok(())),
+            FolderClassification::Ready {
+                path: empty_in_documents.display().to_string(),
+                folder_warning: None,
+            }
+        );
+
+        fs::write(empty_in_documents.join("personal-note.txt"), "private").unwrap();
+        assert_eq!(
+            classify_folder(&empty_in_documents, &home.0, |_| Ok(())),
+            FolderClassification::Ready {
+                path: empty_in_documents.display().to_string(),
+                folder_warning: Some(FolderWarning::ContainsFiles),
             }
         );
 
@@ -792,6 +874,32 @@ mod tests {
             FolderClassification::Unwritable {
                 path: unwritable.display().to_string(),
                 reason: "the disk is read-only".into(),
+            }
+        );
+
+        let unreadable = home.0.join("not-a-folder");
+        fs::write(&unreadable, "not a folder").unwrap();
+        let FolderClassification::Unreadable { path, reason } = classify_folder(&unreadable, &home.0, |_| Ok(())) else {
+            panic!("a folder that cannot be inspected must not look ready");
+        };
+        assert_eq!(path, unreadable.display().to_string());
+        assert!(reason.contains("could not read"), "{reason}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn folder_warning_classification_resolves_symlinks() {
+        let home = Home::new("folder-classification-symlink");
+        let documents = home.0.join("Documents");
+        fs::create_dir_all(&documents).unwrap();
+        let alias = home.0.join("documents-alias");
+        std::os::unix::fs::symlink(&documents, &alias).unwrap();
+
+        assert_eq!(
+            classify_folder(&alias, &home.0, |_| Ok(())),
+            FolderClassification::Ready {
+                path: alias.display().to_string(),
+                folder_warning: Some(FolderWarning::PersonalFolder { folder: "Documents" }),
             }
         );
     }

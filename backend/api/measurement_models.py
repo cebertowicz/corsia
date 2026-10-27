@@ -1,6 +1,6 @@
 """Models comparison: one row per model identity, named and priced by Cost's owners.
 
-Identity comes from ``api.cost_identity`` and price from Cost's admission and
+Identity comes from ``core.cost_identity`` and price from Cost's admission and
 classification, so Models, Cost and Spend name and price a model the same way.
 Every figure reads the page grain's windows: tasks, rates, failed turns and the
 token share cover its latest window (7 days or 4 weeks), and the window before it
@@ -17,7 +17,7 @@ from collections.abc import Callable, Collection, Iterable, Mapping
 from datetime import date, timedelta
 from typing import Any
 
-from api.cost_identity import IdentityResolver, ModelIdentity
+from core.cost_identity import IdentityResolver, ModelIdentity
 from api.measurement_cost import ledger_read, ledger_shapes
 from api.measurement_join import joined_read
 from api.measurement_chain_costs import chain_costs, task_chain_costs, two_windows, window_params

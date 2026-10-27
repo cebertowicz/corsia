@@ -2,10 +2,11 @@ import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ConnectedAppsSettings from './ConnectedAppsSettings.svelte';
 import WhereItWorks from './WhereItWorks.svelte';
+import { emit } from '$lib/ws/events';
 import { token } from '$lib/stores/auth';
 import { projects } from '$lib/stores/projects';
 import { get } from 'svelte/store';
-import { resetSettingsNavigation, settingsNavigation } from '$lib/stores/settingsNavigation';
+import { requestConnectedApp, resetSettingsNavigation, settingsNavigation } from '$lib/stores/settingsNavigation';
 
 const awaiting = { id: 'github', name: 'GitHub', state: 'awaiting_approval', revision: 1, reach: { mode: 'all', project_ids: [], outside_projects: false } };
 const googleAccount = { id: 'google-work', provider: 'google' as const, provider_display_name: 'Google', address: 'sam.work@example.com', capabilities: ['mail', 'calendar', 'files'] as ('mail' | 'calendar' | 'files')[], state: 'connected' as const, tenant_id: null, reach: { mode: 'corsia' as const, project_ids: [], outside_projects: false } };
@@ -462,6 +463,137 @@ describe('ConnectedAppsSettings', () => {
 		expect(host.textContent).not.toContain('You’re signed out here');
 	});
 
+	describe('mail-host rows', () => {
+		const mailhost = (id: string, display: string, detail: Record<string, unknown>) => ({
+			...googleAccount, id, provider: 'mailhost' as const, provider_display_name: display, address: `you@${display.toLowerCase()}`,
+			capabilities: ['mail', 'calendar'] as ('mail' | 'calendar')[], state: detail.problem === null ? 'connected' as const : 'needs_sign_in' as const,
+			mailhost: { key_refs: [{ entry: `mailhost-${id}`, name: `${display} key`, set: true }], ...detail },
+		});
+		const openRow = (id: string) => { (host.querySelector(`[data-connected-account-id="${id}"] button`) as HTMLButtonElement).click(); flushSync(); };
+		const labelled = (label: string) => [...host.querySelectorAll<HTMLButtonElement>('button')].find((candidate) => candidate.textContent?.trim() === label);
+
+		it('says what each failed check found on the closed row', async () => {
+			const rows = [
+				mailhost('a', 'iCloud', { problem: 'waiting' }), mailhost('b', 'Yahoo', { problem: 'refused' }),
+				mailhost('c', 'AOL', { problem: 'imap_off' }), mailhost('d', 'example.com', { problem: 'unreachable', server: 'imap.example.com' }),
+				mailhost('e', 'Zoho', { problem: null }),
+			];
+			vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ servers: [], accounts: rows }) })));
+			component = mount(ConnectedAppsSettings, { target: host });
+			await vi.waitFor(() => expect(host.querySelector('[data-connected-account-id="e"]')).not.toBeNull());
+			const line = (id: string) => host.querySelector(`[data-connected-account-id="${id}"] .sub`)?.textContent ?? '';
+			expect(line('a')).toContain('Needs an app password');
+			expect(line('b')).toContain('App password not accepted');
+			expect(line('c')).toContain('Email access is off at AOL');
+			expect(line('d')).toContain('Can’t reach imap.example.com');
+			expect(line('e')).toContain('Connected');
+		});
+
+		it('closes the row once Try again starts a check: chevron right, status line Checking…', async () => {
+			let problem: string = 'imap_off';
+			const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+				if (init?.method === 'POST' && String(input).endsWith('/mailhost/check')) { problem = 'checking'; return { ok: true, json: async () => ({ row: {} }) }; }
+				return { ok: true, json: async () => ({ servers: [], accounts: [mailhost('a', 'AOL', { problem })] }) };
+			});
+			vi.stubGlobal('fetch', fetchMock);
+			component = mount(ConnectedAppsSettings, { target: host });
+			await vi.waitFor(() => expect(host.querySelector('[data-connected-account-id="a"]')).not.toBeNull());
+			openRow('a');
+			expect(host.querySelector('[data-connected-account-id="a"] .details')).not.toBeNull();
+			labelled('Try again')!.click();
+			await vi.waitFor(() => expect(host.querySelector('[data-connected-account-id="a"] .sub')?.textContent).toContain('Checking…'));
+			expect(host.querySelector('[data-connected-account-id="a"] .details')).toBeNull();
+			expect(host.querySelector('[data-connected-account-id="a"] button')?.getAttribute('aria-expanded')).toBe('false');
+			expect(fetchMock.mock.calls.some(([url, init]) => String(url).endsWith('/accounts/a/mailhost/check') && (init as RequestInit).body === '{}')).toBe(true);
+			// The pressed button went with the row: focus is on that row's header, not the page.
+			await vi.waitFor(() => expect(document.activeElement).toBe(host.querySelector('[data-connected-account-id="a"] .face.open')));
+		});
+
+		it('puts focus on the row header when Edit server saves and the row closes', async () => {
+			let problem: string = 'unreachable';
+			const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+				if (init?.method === 'PUT' && String(input).includes('/mailhost/servers')) { problem = 'checking'; return { ok: true, json: async () => ({ row: {} }) }; }
+				return { ok: true, json: async () => ({ servers: [], accounts: [mailhost('a', 'example.com', { problem, server: 'imap.example.com', imap: 'imap.example.com', smtp: 'smtp.example.com', caldav: '' })] }) };
+			});
+			vi.stubGlobal('fetch', fetchMock);
+			component = mount(ConnectedAppsSettings, { target: host });
+			await vi.waitFor(() => expect(host.querySelector('[data-connected-account-id="a"]')).not.toBeNull());
+			openRow('a');
+			labelled('Edit server')!.click();
+			flushSync();
+			const imap = host.querySelector<HTMLInputElement>('#mailhost-imap')!;
+			imap.value = 'mail.example.com'; imap.dispatchEvent(new Event('input', { bubbles: true })); flushSync();
+			const password = host.querySelector<HTMLInputElement>('#mailhost-password')!;
+			password.value = 'typed'; password.dispatchEvent(new Event('input', { bubbles: true })); flushSync();
+			labelled('Save')!.click();
+			await vi.waitFor(() => expect(host.querySelector('[data-connected-account-id="a"] .sub')?.textContent).toContain('Checking…'));
+			expect(host.querySelector('[data-connected-account-id="a"] .details')).toBeNull();
+			await vi.waitFor(() => expect(document.activeElement).toBe(host.querySelector('[data-connected-account-id="a"] .face.open')));
+		});
+
+		it('reads the list again when the host says a check ended, and not on a timer', async () => {
+			vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+			let problem: 'checking' | null = 'checking';
+			const fetchMock = vi.fn(async () => ({ ok: true, json: async () => ({ servers: [], accounts: [mailhost('a', 'iCloud', { problem })] }) }));
+			vi.stubGlobal('fetch', fetchMock);
+			component = mount(ConnectedAppsSettings, { target: host });
+			await vi.waitFor(() => expect(host.querySelector('[data-connected-account-id="a"] .sub')?.textContent).toContain('Checking…'));
+			const calls = fetchMock.mock.calls.length;
+			await vi.advanceTimersByTimeAsync(10000);
+			expect(fetchMock.mock.calls.length).toBe(calls);
+			problem = null;
+			emit('connected_apps_updated', { type: 'connected_apps_updated' });
+			await vi.waitFor(() => expect(host.querySelector('[data-connected-account-id="a"] .sub')?.textContent).toContain('Connected'));
+			vi.useRealTimers();
+		});
+
+		it('keeps the iCloud removal notice with its link, and drops the link for a typed-in server', async () => {
+			const rows = [
+				mailhost('icloud', 'iCloud', { problem: null, manage_url: 'https://account.apple.com/' }),
+				mailhost('typed', 'example.com', { problem: null }),
+			];
+			vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => ({ ok: true, json: async () => init?.method === 'DELETE' ? { id: String(input).includes('/typed') ? 'typed' : 'icloud', removed: true, revocation: 'manual_only' } : { servers: [], accounts: rows } })));
+			component = mount(ConnectedAppsSettings, { target: host });
+			await vi.waitFor(() => expect(host.querySelector('[data-connected-account-id="typed"]')).not.toBeNull());
+			const expected: Record<string, [string, string | null]> = {
+				icloud: ['Removed. To finish, delete the app password in your iCloud account settings.', 'https://account.apple.com/'],
+				typed: ['Removed. To finish, delete the app password in your example.com account settings.', null],
+			};
+			for (const id of ['icloud', 'typed']) {
+				openRow(id);
+				labelled('Remove')!.click();
+				flushSync();
+				expect(document.body.textContent).toContain('Agents lose access to it.');
+				// The notice from the first removal is reused for the second: focus has to move again, not only on mount.
+				(document.activeElement as HTMLElement | null)?.blur();
+				([...document.body.querySelectorAll<HTMLButtonElement>('button')].filter((candidate) => candidate.textContent?.trim() === 'Remove').at(-1) as HTMLButtonElement).click();
+				await vi.waitFor(() => expect(host.querySelector('.manual-removal')?.textContent).toBe(expected[id][0]));
+				expect(host.querySelector('.manual-removal a')?.getAttribute('href') ?? null).toBe(expected[id][1]);
+				// The row and its Remove button are gone: focus moves to the notice, not to the page.
+				await vi.waitFor(() => expect(document.activeElement).toBe(host.querySelector('.manual-removal')));
+				expect(host.querySelector('.manual-removal')?.getAttribute('tabindex')).toBe('-1');
+				expect(host.querySelector('.manual-removal')?.getAttribute('role')).toBe('status');
+			}
+		});
+
+		it('names a typed-in host account by its address alone, and a known host by provider and address', async () => {
+			const rows = [{ ...mailhost('icloud', 'iCloud', { problem: null }), address: 'you@icloud.com' }, mailhost('typed', 'example.com', { problem: null })];
+			vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ servers: [], accounts: rows }) })));
+			component = mount(ConnectedAppsSettings, { target: host });
+			await vi.waitFor(() => expect(host.querySelector('[data-connected-account-id="typed"]')).not.toBeNull());
+			const title = (id: string) => host.querySelector(`[data-connected-account-id="${id}"] .account-closed-name`);
+			expect(title('typed')?.textContent).toBe('you@example.com');
+			expect(title('typed')?.querySelector('.account-provider')).toBeNull();
+			expect(title('icloud')?.textContent).toBe('iCloud —you@icloud.com');
+			expect(host.querySelector('[data-connected-account-id="typed"] button')?.getAttribute('aria-label')).toBe('you@example.com');
+			expect(host.querySelector('[data-connected-account-id="icloud"] button')?.getAttribute('aria-label')).toBe('iCloud — you@icloud.com');
+			openRow('typed');
+			labelled('Remove')!.click();
+			flushSync();
+			expect(document.body.textContent).toContain('Remove you@example.com?');
+		});
+	});
+
 	it('keeps same-prefix Google account titles distinct while preserving their domains', async () => {
 		const accounts = [
 			{ ...googleAccount, id: 'google-work', address: 'shared.prefix.very-long-work-address@example.com' },
@@ -482,6 +614,21 @@ describe('ConnectedAppsSettings', () => {
 		expect(new Set(prefixes).size).toBe(4);
 		expect(prefixes.join(' ')).toMatch(/alpha.*beta/);
 		expect(titles.every((title) => title?.endsWith('@example.com'))).toBe(true);
+	});
+
+	it('fits the local part to what the provider and a long domain want, not to the width the row already squeezed them to', async () => {
+		const account = { ...googleAccount, id: 'long-host', address: 'abcdefghijklmnopqrstuvwxyz@very-long-mail-host-name-for-testing.example.test' };
+		vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function(this: HTMLElement) { return this.classList.contains('account-closed-name') ? 296 : 0; });
+		// The row has shrunk the domain to 40px (it ends in an ellipsis), but its text wants 250px.
+		vi.spyOn(HTMLElement.prototype, 'scrollWidth', 'get').mockImplementation(function(this: HTMLElement) { return this.classList.contains('account-domain') ? 250 : 0; });
+		vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function(this: HTMLElement) {
+			const width = this.classList.contains('account-provider') ? 56 : this.classList.contains('account-domain') ? 40 : this.classList.contains('account-closed-name') ? 296 : 0;
+			return { width, right: width } as DOMRect;
+		});
+		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ servers: [], accounts: [account] }) })));
+		component = mount(ConnectedAppsSettings, { target: host });
+		await vi.waitFor(() => expect(host.querySelector('.account-local-prefix')?.textContent).not.toBe('abcdefghijklmnopqrstuvwxyz'));
+		expect((host.querySelector('.account-local-prefix')?.textContent ?? '').length).toBeLessThanOrEqual(1);
 	});
 
 	it('keeps account rows visible with the approved offline message after a failed refresh', async () => {
@@ -706,5 +853,50 @@ describe('ConnectedAppsSettings key actions', () => {
 		expect(button('Reconnect')).toBeUndefined();
 		button('Replace key').click();
 		expect(get(settingsNavigation)).toMatchObject({ section: 'keys', connectedAppKey: null });
+	});
+});
+
+describe('ConnectedAppsSettings chat link to an app row', () => {
+	const place = { mode: 'selected', project_ids: [], outside_projects: false };
+	const github = { id: 'github', name: 'GitHub', state: 'awaiting_approval', revision: 1, reach: { mode: 'all', project_ids: [], outside_projects: false } };
+	// jsdom has no layout and no CSS.escape, so the scroll-into-view and the id selector need stand-ins.
+	beforeEach(() => { HTMLElement.prototype.scrollIntoView = vi.fn(); vi.stubGlobal('CSS', { escape: (value: string) => value }); });
+
+	async function linkTo(id: string, servers: Record<string, unknown>[], accounts: Record<string, unknown>[] = []): Promise<void> {
+		resetSettingsNavigation();
+		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ servers, accounts }) })));
+		component = mount(ConnectedAppsSettings, { target: host });
+		await vi.waitFor(() => expect(host.querySelector('[data-settings-row]')).not.toBeNull());
+		requestConnectedApp(id);
+		flushSync();
+	}
+	const focused = () => (document.activeElement as HTMLElement | null)?.textContent?.trim();
+
+	it('focuses Approve on the linked app row, with a visible mark, and not on another row', async () => {
+		await linkTo('github', [{ ...github, id: 'notes', name: 'Notes' }, github]);
+		await vi.waitFor(() => expect(focused()).toBe('Approve'));
+		expect(document.activeElement?.closest('[data-connected-app-id]')?.getAttribute('data-connected-app-id')).toBe('github');
+		expect(host.querySelectorAll('[data-chat-link-focus]')).toHaveLength(1);
+		expect(host.querySelector('[data-connected-app-id="github"] [data-chat-link-focus] .btn')).toBe(document.activeElement);
+	});
+
+	it('focuses Choose where it works… when the app needs a place first', async () => {
+		await linkTo('github', [{ ...github, reach: place }]);
+		await vi.waitFor(() => expect(focused()).toBe('Choose where it works…'));
+		expect(host.querySelector('[data-chat-link-focus]')).not.toBeNull();
+	});
+
+	it('drops the mark once focus leaves the action', async () => {
+		await linkTo('github', [github]);
+		await vi.waitFor(() => expect(host.querySelector('[data-chat-link-focus]')).not.toBeNull());
+		(document.activeElement as HTMLElement).blur();
+		flushSync();
+		expect(host.querySelector('[data-chat-link-focus]')).toBeNull();
+	});
+
+	it('still opens a linked account and focuses its action', async () => {
+		await linkTo('google-work', [github], [googleAccount]);
+		await vi.waitFor(() => expect(focused()).toBe('Where it works…'));
+		expect(document.activeElement?.closest('[data-connected-account-id]')?.getAttribute('data-connected-account-id')).toBe('google-work');
 	});
 });

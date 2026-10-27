@@ -19,13 +19,16 @@ CORRECTION_EVENT = "measurement.correction"
 SOURCE_KIND_MESSAGE = "message"
 SOURCE_KIND_DOC_COMMENT = "doc_comment"
 SOURCE_KIND_DECISION_ANSWER = "plan_decision_answer"
+SOURCE_KIND_SENT_BACK = "sent_back"
 MESSAGE_SUBJECT_PREFIX = "message:"
 COMMENT_SUBJECT_PREFIX = "doc-comment:"
 DECISION_SUBJECT_PREFIX = "plan-decision-answer:"
+SENT_BACK_SUBJECT_PREFIX = "plan-review-rejected:"
 SUBJECT_PREFIXES = {
     SOURCE_KIND_MESSAGE: MESSAGE_SUBJECT_PREFIX,
     SOURCE_KIND_DOC_COMMENT: COMMENT_SUBJECT_PREFIX,
     SOURCE_KIND_DECISION_ANSWER: DECISION_SUBJECT_PREFIX,
+    SOURCE_KIND_SENT_BACK: SENT_BACK_SUBJECT_PREFIX,
 }
 LABEL_CORRECTION = "correction"
 LABEL_NOT_CORRECTION = "not_correction"
@@ -104,6 +107,12 @@ def version_key(version: ClassifierVersion) -> str:
     return ":".join(version_attributes(version).values())
 
 
+def version_key_sql(attributes: str) -> str:
+    """SQL for ``version_key`` read from a fact's ``attributes`` expression."""
+    fields = version_attributes(ClassifierVersion("", "", "", 0, ""))
+    return "||':'||".join(f"json_extract({attributes},'$.{name}')" for name in fields)
+
+
 def version_match_sql(alias: str, version: ClassifierVersion) -> tuple[str, dict[str, str]]:
     """SQL matching ``alias.attributes`` to one version, with its named parameters."""
     params = {f"version_{key}": value for key, value in version_attributes(version).items()}
@@ -178,6 +187,11 @@ def subject_key(source_kind: str, source_id: str) -> str:
     if source_kind not in SUBJECT_PREFIXES:
         raise ValueError(f"unknown correction source kind: {source_kind}")
     return SUBJECT_PREFIXES[source_kind] + source_id
+
+
+def sent_back_dedupe_key(rejection_event_id: str) -> str:
+    """The one idempotency key for a sent-back fact: its rejection event, under no classifier."""
+    return f"correction:{SOURCE_KIND_SENT_BACK}:{rejection_event_id}"
 
 
 def decision_answer_source_id(decision_id: str, revision: object) -> str:

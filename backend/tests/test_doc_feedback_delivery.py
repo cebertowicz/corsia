@@ -338,3 +338,36 @@ def test_invalid_target_config_refuses_one_due_batch_without_stopping_the_sweep(
         assert len(_feedback_nodes(db)) == 1
     finally:
         db.close()
+
+
+def test_raising_due_batch_rolls_back_alone_and_siblings_continue(isolated_db, monkeypatch):
+    db = get_db()
+    try:
+        seed_thread(db, "bad-owner")
+        seed_thread(db, "good-owner", model="anthropic/claude-3-5-sonnet")
+        seed_thread(db, "author")
+        bad_document = seed_document(db, "bad-owner", name="bad.md")
+        good_document = seed_document(db, "good-owner", name="good.md")
+        add_comment(db, bad_document)
+        add_comment(db, good_document)
+        by_document = {row["artifact_id"]: row for row in batches(db)}
+        bad_batch_id = by_document[bad_document]["id"]
+        original = feedback_batches._claim_and_deliver
+
+        def raise_for_bad_batch(connection, batch_id, **kwargs):
+            if batch_id == bad_batch_id:
+                raise RuntimeError("injected delivery failure")
+            return original(connection, batch_id, **kwargs)
+
+        monkeypatch.setattr(feedback_batches, "_claim_and_deliver", raise_for_bad_batch)
+        db.execute("UPDATE doc_feedback_batches SET closes_at='2000-01-01T00:00:00+00:00'")
+        db.commit()
+
+        assert feedback_batches.close_due("2000-01-01T00:00:00+00:00", db=db) == ["good-owner"]
+
+        by_document = {row["artifact_id"]: row for row in batches(db)}
+        assert (by_document[bad_document]["state"], by_document[bad_document]["attempts"]) == ("open", 0)
+        assert (by_document[good_document]["state"], by_document[good_document]["attempts"]) == ("delivered", 1)
+        assert len(_feedback_nodes(db)) == 1
+    finally:
+        db.close()

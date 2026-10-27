@@ -23,7 +23,7 @@
 		completedVersion && $updateStatus?.current_version && completedVersion.startsWith($updateStatus.current_version)
 			? completedVersion : ($updateStatus?.current_version ?? 'Unknown'),
 	);
-	const targetVersion = $derived(operation?.target_version ?? $updateStatus?.target_version);
+	const targetVersion = $derived($updateStatus?.target_version ?? operation?.target_version);
 	const offered = $derived(!running && !copy && Boolean($updateStatus?.available));
 	const installedAt = $derived(operation?.status === 'complete' && operation.settled_at ? formatInstalledAt(operation.settled_at, now) : null);
 	const overnight = $derived(operation?.trigger === 'tonight' || operation?.trigger === 'automatic');

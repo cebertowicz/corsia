@@ -139,3 +139,18 @@ def test_omlx_sends_no_level_to_a_toggle_only_model_but_asserts_thinking_on():
     assert captured["reasoning_effort"] is None
     assert "reasoning_effort" not in captured["extra_body"]
     assert captured["extra_body"]["chat_template_kwargs"]["enable_thinking"] is True
+
+
+def test_omlx_sends_the_managed_level_only_for_an_unset_effort():
+    """CORSIA's own oMLX runs at its level unless the thread picks one."""
+    managed = {**_QWEN38, "default": "medium", "send_when_unset": "medium"}
+    with patch("llm.reasoning_config.reasoning_config_for_model", return_value=managed):
+        unset = _dispatch("omlx@srv/qwen38", "omlx", None)
+        picked = _dispatch("omlx@srv/qwen38", "omlx", "low")
+        auto = _dispatch("omlx@srv/qwen38", "omlx", "auto")
+    with patch("llm.reasoning_config.reasoning_config_for_model", return_value=_QWEN38):
+        personal = _dispatch("omlx@srv/qwen38", "omlx", None)
+    assert unset["extra_body"]["reasoning_effort"] == "medium"
+    assert picked["extra_body"]["reasoning_effort"] == "low"
+    assert "reasoning_effort" not in (auto.get("extra_body") or {})
+    assert "reasoning_effort" not in (personal.get("extra_body") or {})

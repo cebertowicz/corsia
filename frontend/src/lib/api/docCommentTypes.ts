@@ -41,6 +41,9 @@ export type ImageRegion = { x: number; y: number; w: number; h: number };
 
 export interface CommentFeedback {
 	open_count: number;
+	/** Of the open comments, those held for the document's header Send and for its image viewer's Send. */
+	document_held_count?: number;
+	image_held_count?: number;
 	owner_label: string | null;
 	undelivered_batches: UndeliveredBatch[];
 }

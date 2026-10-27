@@ -19,7 +19,7 @@ import pytest
 
 from connections.google import client as google_client
 from connections.mail import email_document
-from connections.google.accounts import NONE_AVAILABLE
+from connections.mail_accounts import NONE_AVAILABLE
 from doceditor.document_scope import revision as document_revision
 from google_account_helpers import make_only_corsia
 import infra.config as config
@@ -35,7 +35,7 @@ from tests.test_google_sign_in import (  # noqa: F401  (fixtures)
     conductor,
     google,
 )
-from tools import action_delivery, action_gate, google_email
+from tools import action_delivery, action_gate, gmail_backend, google_email
 from tools.action_drafts import claim_for_send, create_draft, mark_sent, record_draft
 from tools.action_gate import Approved
 from tools.google_email import EmailDraftTool, EmailSendTool
@@ -296,13 +296,12 @@ async def test_a_caller_outside_the_accounts_reach_is_refused_with_the_exact_tex
 
 async def test_send_re_checks_reach_and_uses_the_drafts_own_account(mail, approve, monkeypatch):
     from connections import connected_accounts
-    from connections.google import accounts
 
     saved = await _draft(mail)
     assert json.loads(_row(saved["draft_id"])["target_json"])["account_id"] == mail.account
     monkeypatch.setattr(connected_accounts, "account_reaches_thread", lambda *args, **kwargs: False)
     out = await _send(mail, saved)
-    assert out == f"Error: Not sent: {accounts.NONE_AVAILABLE}"
+    assert out == f"Error: Not sent: {NONE_AVAILABLE}"
     assert mail.sent_requests() == [] and _row(saved["draft_id"])["state"] == "open"
 
 
@@ -406,7 +405,7 @@ async def test_a_send_whose_outcome_is_unknown_stays_claimed_and_is_not_repeated
     mail.send_mode = mode
     saved = await _draft(mail)
     out = await _send(mail, saved)
-    assert out == f"Error: {google_email.UNCONFIRMED}"
+    assert out == f"Error: {gmail_backend.EMAIL_UNCONFIRMED}"
     assert _row(saved["draft_id"])["state"] == "sending"
     mail.send_mode = "ok"
     again = await _send(mail, saved)
@@ -433,7 +432,7 @@ async def test_a_from_line_that_is_not_the_connected_account_sends_nothing(mail,
     path.write_text(path.read_text().replace(f"From: {EMAIL}", "From: someone.else@example.com"))
     out = await _send(mail, saved)
     assert out == (
-        "Error: Not sent: the From line doesn't match the Google account this draft was written "
+        "Error: Not sent: the From line doesn't match the email account this draft was written "
         f"from ({EMAIL}). Save the draft again with email_draft and show the person."
     )
     assert mail.sent_requests() == []

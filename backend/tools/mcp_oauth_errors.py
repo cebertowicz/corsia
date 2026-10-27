@@ -10,7 +10,7 @@ from __future__ import annotations
 from tools.mcp_oauth_secrets import redact
 
 CLASSES = frozenset({
-    "timed_out", "cancelled", "declined", "not_allowed", "permissions", "app_error", "app_busy",
+    "timed_out", "cancelled", "declined", "not_allowed", "not_approved", "permissions", "app_error", "app_busy",
     "address_mismatch", "unknown",
 })
 _BY_PROVIDER_CODE = {
@@ -53,3 +53,14 @@ def from_provider_error(code: object, description: object = None) -> SignInError
         return SignInError(known)
     words = description if isinstance(description, str) and description.strip() else code
     return SignInError("unknown", words if isinstance(words, str) else None)
+
+
+def from_registration_status(status: int, body: dict | None) -> SignInError:
+    """Classify a failed client registration. Only 401/403 is a refusal; a 400 or other 4xx is usually our own request being wrong (RFC 7591)."""
+    if status in (401, 403):
+        return SignInError("not_approved")
+    if status in (429, 503):
+        return SignInError("app_busy")
+    if status >= 500:
+        return SignInError("app_error")
+    return from_provider_error((body or {}).get("error"), (body or {}).get("error_description"))

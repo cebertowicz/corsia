@@ -21,7 +21,7 @@ test('@flow:document-second-canvas a reply and a resolve made in one canvas appe
 	expect(seeded.ok(), await seeded.text()).toBeTruthy();
 	const artifactId = (await seeded.json()).artifact.id;
 	const created = await request.post(`/api/artifacts/${artifactId}/comments`, {
-		params, data: { body: 'Review this sentence.', anchor_text: 'Anchor', from_off: 7, to_off: 13 },
+		params, data: { body: 'Review this sentence.', anchor_text: 'Anchor', from_off: 7, to_off: 13, delivery_policy: 'immediate' },
 	});
 	expect(created.ok(), await created.text()).toBeTruthy();
 

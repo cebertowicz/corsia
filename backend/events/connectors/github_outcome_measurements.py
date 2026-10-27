@@ -12,14 +12,27 @@ _REVERTED_SHA = re.compile(r"This reverts commit ([0-9a-f]{40})\b")
 _REVERTED_PR = re.compile(r"Reverts ([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)#([0-9]+)\b")
 
 
-def minutes_between(start: Any, end: Any) -> int | None:
-    """Whole minutes between optional GitHub timestamps, or no fact."""
+def _span_seconds(start: Any, end: Any) -> float | None:
     if start is None or end is None:
         return None
     start_at = datetime.fromisoformat(shape.timestamp(start).replace("Z", "+00:00"))
     end_at = datetime.fromisoformat(shape.timestamp(end).replace("Z", "+00:00"))
-    minutes = int((end_at - start_at).total_seconds() // 60)
+    return (end_at - start_at).total_seconds()
+
+
+def minutes_between(start: Any, end: Any) -> int | None:
+    """Whole minutes between optional GitHub timestamps, or no fact."""
+    span = _span_seconds(start, end)
+    if span is None:
+        return None
+    minutes = int(span // 60)
     return minutes if minutes >= 0 else None
+
+
+def seconds_between(start: Any, end: Any) -> int | None:
+    """Whole seconds between optional GitHub timestamps; no fact when one is absent or end < start."""
+    span = _span_seconds(start, end)
+    return int(span) if span is not None and span >= 0 else None
 
 
 def reverted_sha(title: Any, body: str) -> str | None:

@@ -77,7 +77,7 @@ async def test_a_persons_overlapping_suggestion_is_created(integration_client, d
 
     person = integration_client.post(
         f"/api/artifacts/{artifact_id}/comments", params={"token": OWNER_TOKEN},
-        json={"body": "", "anchor_text": OVERLAPPING, "replacement": "mine",
+        json={"delivery_policy": "immediate", "body": "", "anchor_text": OVERLAPPING, "replacement": "mine",
               "from_off": BODY.index(OVERLAPPING), "to_off": BODY.index(OVERLAPPING) + len(OVERLAPPING)})
 
     assert person.status_code == 200, person.text

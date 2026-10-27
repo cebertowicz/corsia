@@ -116,7 +116,7 @@ const studioPickerModel = {
 const localPickerModel = {
 	...studioPickerModel,
 	id: 'omlx@omlx-local/local-model', selector: 'omlx@omlx-local/local-model', litellm_model: 'omlx@omlx-local/local-model',
-	name: 'Local model', display_name: 'Local model', server_name: 'Local',
+	name: 'Local model', display_name: 'Local model', server_name: 'CORSIA',
 };
 const studioRows = {
 	loaded: [serverRow('studio-qwen', 'Studio Qwen', 16 * 1024 ** 3)],
@@ -270,7 +270,7 @@ test('renders ownership, picker, recommender-failure, and picker-download eviden
 		await page.locator('button.model-chip').click();
 		const picker = page.locator('.model-sheet');
 		await expect(picker.locator('section[aria-label="Studio"]')).toBeVisible();
-		await expect(picker.locator('section[aria-label="Local"]')).toContainText('Set up');
+		await expect(picker.locator('section[aria-label="CORSIA"]')).toContainText('Set up');
 		await expect(picker).not.toContainText('Add a local model');
 		await capture(page, `b-picker-setup-${viewport.name}-${theme}`);
 
@@ -310,7 +310,7 @@ test('renders ownership, picker, recommender-failure, and picker-download eviden
 		await loginByUrl(page);
 		await page.locator('button.model-chip').click();
 		const downloadPicker = page.locator('.model-sheet');
-		await expect(downloadPicker.locator('section[aria-label="Local"]')).toContainText('Downloading Qwen3.8-27B · 40%');
+		await expect(downloadPicker.locator('section[aria-label="CORSIA"]')).toContainText('Downloading Qwen3.8-27B · 40%');
 		await capture(page, `f-picker-downloading-${viewport.name}-${theme}`);
 	}
 });

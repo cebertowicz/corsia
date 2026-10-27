@@ -49,8 +49,8 @@ def test_duplicate_comment_with_submit_delivers_existing_ordinary_feedback(revie
     db, aid = review_env
     row = request(db, aid)
     fork_comment(db, aid, row["id"])
-    _comment, _registered, result = fork_comment(db, aid, row["id"], submit=True)
-    assert set(result) == {"batch_ids", "undelivered_batches", "woken"}
+    _comment, _registered, result, _created = fork_comment(db, aid, row["id"], submit=True)
+    assert set(result) == {"batch_ids", "delivery_policy", "undelivered_batches", "woken"}
     assert not result["undelivered_batches"]
     assert stored(db, row["id"])["state"] == "submitted"
     with write_transaction(db, scope="test_repeated_duplicate_fork_submit"):
@@ -65,7 +65,7 @@ def test_submit_comment_finishes_a_fork_without_a_continuation_or_reviewer_wake(
     db, aid = review_env
     row = request(db, aid)
 
-    _comment, _registered, feedback = fork_comment(db, aid, row["id"], submit=True)
+    _comment, _registered, feedback, _created = fork_comment(db, aid, row["id"], submit=True)
 
     assert stored(db, row["id"])["state"] == "submitted"
     assert db.execute("SELECT COUNT(*) FROM plan_nodes WHERE owner_thread_id='reviewer'").fetchone()[0] == 0
@@ -86,7 +86,7 @@ def test_fork_reply_reaches_root_author_through_ordinary_routing(review_env, roo
         author_thread_id=root_author, review=True, db=db,
     )
     row = request(db, aid)
-    reply, _registered, feedback = create_in_db(
+    reply, _registered, feedback, _created = create_in_db(
         CommentInput(
             artifact_id=aid, path=None, body="The delivery claim.", author="Reviewer",
             author_kind="agent", user_id="owner-token", author_thread_id="reviewer",

@@ -50,12 +50,15 @@ def test_task_7_offers_only_a_project_and_session_consent_is_the_find_projects_d
     assert "Only answer **E**" not in first_run
 
 
-def test_google_sign_in_is_watched_by_url_and_title_only():
-    """The page holds the user's password while they sign in, so only its URL and title are read."""
+def test_google_sign_in_uses_the_observed_person_step():
+    """The page holds the user's password, and CORSIA resumes only after page navigation."""
     steps = (SKILLS / "conductor-bootstrap/references/browser-person-steps.md").read_text(encoding="utf-8")
 
-    assert "read only the page URL and title" in steps
-    assert "no snapshot, screenshot, text or value read" in steps
+    sign_in = steps.split("## B.", 1)[1].split("## C.", 1)[0]
+    assert "`browser_person_step`" in sign_in
+    assert "end your turn" in sign_in
+    assert "wakes you when the page changes" in sign_in
+    assert "Never type, fill or read a password or a code yourself." in sign_in
 
 
 def test_person_browser_steps_have_one_rule_and_no_url_wait():
@@ -73,11 +76,37 @@ def test_person_browser_steps_have_one_rule_and_no_url_wait():
         assert "`wait` on a URL" not in text
 
 
+def test_person_browser_guidance_keeps_every_first_run_step_in_the_shared_browser():
+    system = ROOT / "backend/prompts/system/v1"
+    expected_guidance = {
+        "skills/conductor-bootstrap/references/browser-person-steps.md": (
+            "Use this whenever you open a page in the shared browser (`browser_open` without `show_window`)"
+        ),
+        "skills/conductor-bootstrap/references/web-search.md": (
+            "the person watches in the shared browser, so do not set `show_window`"
+        ),
+        "skills/conductor-bootstrap/references/first-run.md": (
+            "follow skill `github` › `references/agent-account.md` in the shared browser"
+        ),
+        "skills/github/references/agent-account.md": (
+            "the person watches in the shared browser, so do not set `show_window`"
+        ),
+        "skills/google-setup/SKILL.md": (
+            "Do not set `show_window`: the shared browser is already available."
+        ),
+        "skills/microsoft-setup/SKILL.md": (
+            "the person watches in the shared browser, so do not set `show_window`"
+        ),
+    }
+    for relative_path, instruction in expected_guidance.items():
+        assert instruction in (system / relative_path).read_text(encoding="utf-8")
+
+
 def test_email_and_calendar_route_to_google_setup_and_setup_hands_off_no_agent():
     """Step 5 loads google-setup without creating an agent, and the hand-off offers none."""
     app = FIRST_RUN_APP.read_text(encoding="utf-8")
     assert "follow skill `google-setup` from its step 2" in app and "it creates no agent" in app
-    hand_off = app.split("## The hand-off", 1)[1]
+    hand_off = app.split("## Hand over to your agents", 1)[1]
     assert "Setup offers no agent" in hand_off
     assert "only when they ask you to take that work off them (skill `time-to-agent`)" in hand_off
 
@@ -86,12 +115,15 @@ def test_google_setup_carries_the_approved_offer_and_leaves_secrets_to_the_backe
     skill = SKILL.read_text(encoding="utf-8")
     steps = skill.split("# Connect Google", 1)[1]
 
-    assert "I'll set up your own private Google project in a browser you can watch" in steps
-    assert "Google will also ask for your Drive, Docs and Sheets, so you won't have to sign in again later." in steps
-    for api in ("Gmail API", "Google Calendar API", "Google Drive API", "Google Docs API", "Google Sheets API"):
-        assert api in steps
+    assert "CORSIA creates a private Google project you own, in a browser you can watch" in steps
+    assert "`See, edit and delete your Drive, Docs and Sheets files, so you won't have to sign in again later.`" in steps
+    enable_link = "https://console.cloud.google.com/flows/enableapi?apiid="
+    assert enable_link in steps
+    enabled = steps.split(enable_link, 1)[1].split("`", 1)[0].split(",")
+    assert enabled == ["gmail.googleapis.com", "calendar-json.googleapis.com", "drive.googleapis.com",
+                       "docs.googleapis.com", "sheets.googleapis.com"]
     assert '"Go to CORSIA (unsafe)"' in steps
-    assert "a project left in Testing stops letting me in after 7 days. Go ahead?" in steps
+    assert "a project left in Testing stops letting CORSIA in after 7 days.` then `Go ahead?" in steps
     assert "`Ask me any time to connect your email.`" in steps
     assert "go on only when it says In production" in steps
     assert "browser-person-steps.md` B" in steps
@@ -100,7 +132,11 @@ def test_google_setup_carries_the_approved_offer_and_leaves_secrets_to_the_backe
     assert "Read the client ID from the Clients list" in steps and "never open it" in steps
     assert steps.index("`google_connect` with no `client_file`") < steps.index("If the error says to reinstall or update CORSIA")
     assert steps.count("console.cloud.google.com/projectcreate") == 1
-    assert "5. In the window step 4 opened" in steps
+    assert "Do not set `show_window`: the shared browser is already available." in steps
+    assert "Do not revisit `projectcreate` or submit Create again" in steps
+    assert "wait for the project selector to show `CORSIA` as the current project" in steps
+    assert "first check whether the selector lists `CORSIA`: select it if it does" in steps
+    assert "5. In the shared browser from step 4:" in steps
     assert "report it the way you report any problem with CORSIA, and stop" in steps
     assert "If it names install commands instead (CORSIA run from source)" in steps
     assert "then call `browser_open` again" in steps
@@ -135,3 +171,23 @@ def test_a_missing_gh_on_post_as_me_is_installed_by_the_agent_account_tool():
     assert "- **`gh` missing:** call `github_agent_account` with `action: \"install\"`" in text
     assert "install" in ACTIONS and COMMAND_RUNTIME["gh"] == "gh"
     assert "with `gh` written as the full path `command -v gh` prints in your shell" in text
+
+
+def test_google_connect_reads_the_downloads_client_file_without_host_access(tmp_path, monkeypatch):
+    """The skill passes ~/Downloads/client_secret_<id>.json as is; google_connect reads it itself."""
+    import json
+
+    from connections.google.client import read_client_file
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    downloads = tmp_path / "Downloads"
+    downloads.mkdir()
+    client_id = "123-abc.apps.googleusercontent.com"
+    (downloads / f"client_secret_{client_id}.json").write_text(
+        json.dumps({"installed": {"client_id": client_id, "client_secret": "fixture-value"}}), encoding="utf-8"
+    )
+
+    assert read_client_file(f"~/Downloads/client_secret_{client_id}.json") == (client_id, "fixture-value")
+    steps = SKILL.read_text(encoding="utf-8")
+    assert "`client_file` set to that path as is" in steps
+    assert "never list or check Downloads first and never request host access for it" in steps

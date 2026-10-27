@@ -5,7 +5,7 @@ import type { SyntaxNodeRef } from '@lezer/common';
 import { renderMarkdown } from '$lib/markdown';
 import { mountMermaid, type MermaidMount } from '$lib/mermaid';
 import {
-	imageContext, type ImageContext, markdownImages, openSelectedImageOnEnter, renderableImage, selectImageOnClick
+	imageContext, type ImageContext, markdownImages, openSelectedImageOnEnter, refreshMarkdownImages, renderableImage, selectImageOnClick
 } from './markdown-image';
 import { renderedFragment } from './rendered-images';
 import { linkDecoration, openLinkOnAltEnter, openLinkOnClick } from './markdown-link';
@@ -37,10 +37,15 @@ class HrWidget extends WidgetType {
  * Its cell images resolve and load the way a standalone image does (`markdown-image.ts`).
  */
 class TableWidget extends WidgetType {
-	constructor(readonly src: string, readonly images: ImageContext | null) { super(); }
+	readonly images: ImageContext | null;
+	constructor(readonly src: string, images: ImageContext | null) {
+		super();
+		// The context provider is live; retain this render's values so a refresh can compare them with the next one.
+		this.images = images && { ...images };
+	}
 	eq(o: TableWidget) {
 		const [a, b] = [o.images, this.images];
-		return o.src === this.src && a?.docPath === b?.docPath && a?.projectId === b?.projectId && a?.token === b?.token;
+		return o.src === this.src && a?.docPath === b?.docPath && a?.projectId === b?.projectId && a?.token === b?.token && a?.imageCacheKey === b?.imageCacheKey;
 	}
 	toDOM() {
 		const el = document.createElement('div');
@@ -223,18 +228,19 @@ function buildTableDecorations(state: EditorState): DecorationSet {
  * once against the partial tree and never sees those nodes — leaving real-world
  * docs (a table 40 lines down) stuck on raw markdown until the next edit.
  */
-function syntaxDecorationField(build: (state: EditorState) => DecorationSet): StateField<DecorationSet> {
+function syntaxDecorationField(build: (state: EditorState) => DecorationSet, refreshesImages = false): StateField<DecorationSet> {
 	return StateField.define<DecorationSet>({
 		create: build,
 		update(deco, tr) {
-			if (tr.docChanged || syntaxTree(tr.state) !== syntaxTree(tr.startState)) return build(tr.state);
+			const imageRefresh = refreshesImages && tr.effects.some((effect) => effect.is(refreshMarkdownImages));
+			if (tr.docChanged || imageRefresh || syntaxTree(tr.state) !== syntaxTree(tr.startState)) return build(tr.state);
 			return deco.map(tr.changes);
 		},
 		provide: (f) => EditorView.decorations.from(f)
 	});
 }
 
-const markdownTableDecorations = syntaxDecorationField(buildTableDecorations);
+const markdownTableDecorations = syntaxDecorationField(buildTableDecorations, true);
 
 /**
  * Replaces each ```mermaid fenced block with a rendered diagram block widget.

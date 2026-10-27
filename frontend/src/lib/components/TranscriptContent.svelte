@@ -185,7 +185,7 @@
 {#snippet messageRow(entry: Extract<TranscriptEntry, { kind: 'message' }>)}
 	{@const msg = entry.message}
 	{@const isAgentInbound = msg.role === 'user' && msg.metadata?.sender_kind === 'agent'}
-	<div class="message {msg.role}" data-message-id={msg.id} use:trackVisibleRow={{ seq: msg.seq, threadId: boundThreadId }} class:agent-inbound={isAgentInbound} class:human-user={msg.role === 'user' && !isAgentInbound}>
+	<div class="message {msg.role}" data-message-id={msg.id} data-first-run-opening={msg.metadata?.first_run_opening === true ? '' : undefined} use:trackVisibleRow={{ seq: msg.seq, threadId: boundThreadId }} class:agent-inbound={isAgentInbound} class:human-user={msg.role === 'user' && !isAgentInbound}>
 		{#if msg.role === 'system'}
 			<SystemMessageRow {msg} />
 		{:else if msg.role === 'user'}
@@ -259,6 +259,7 @@
 			warning={deliveryWarning}
 			wait={focusMode && entry.id === waitRunId ? wait : null}
 			waitThreadId={boundThreadId}
+			threadId={boundThreadId}
 		>
 			{#snippet liveActivity()}
 				<LiveToolActivity {threadId} {expandedTools} onToggleToolBlock={onToggleToolBlock} />
@@ -298,6 +299,7 @@
 	}
 	.message.user.agent-inbound { justify-content: flex-start; }
 	.message.assistant { animation: fadeInUp var(--dur-spring) ease; }
+	.message[data-first-run-opening] { scroll-margin-top: var(--sticky-top, 0px); }
 	.message.system { animation: fadeIn var(--dur-tight) ease; }
 	@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 	@keyframes fadeInUp {

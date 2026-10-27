@@ -111,6 +111,10 @@
   --header-badge-slot: 86px;
   --list-row-min-height: 38px;
   --button-pad-x-sm: 10px;
+  /* Shared notice geometry preserves the established toast treatment without raw component values. */
+  --toast-detail-icon-offset: 3px;
+  --toast-close-inline-padding: 2px;
+  --toast-action-underline-offset: 2px;
   --project-mark-size: 9px;
   --project-mark-ring: 0 0 0 1px color-mix(in srgb, var(--text-primary) 8%, transparent);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
@@ -160,7 +164,10 @@
   --amber-bg: rgba(245, 158, 11, 0.10);
   --amber-line: rgba(245, 158, 11, 0.28);
 
-  --glass-blur: blur(40px) saturate(180%);
+  --glass-blur-radius: 40px;
+  /* Three sigma keeps a backdrop blur's sampling edge outside a visible glass card. */
+  --glass-blur-reach: calc(var(--glass-blur-radius) * 3);
+  --glass-blur: blur(var(--glass-blur-radius)) saturate(180%);
   --glass-blur-soft: blur(8px) saturate(120%);
   --glass-thin:          color-mix(in srgb, var(--bg-secondary) 60%, transparent);
   --glass-regular:       color-mix(in srgb, var(--bg-secondary) 68%, transparent);
@@ -249,7 +256,7 @@
   --amber: #d97706;
   --amber-bg: rgba(217, 119, 6, 0.08);
   --amber-line: rgba(217, 119, 6, 0.32);
-  --glass-blur: blur(40px) saturate(118%);
+  --glass-blur: blur(var(--glass-blur-radius)) saturate(118%);
   --glass-thin:          color-mix(in srgb, var(--bg-secondary) 84%, transparent);
   --glass-regular:       color-mix(in srgb, var(--bg-secondary) 89%, transparent);
   --glass-regular-thick: color-mix(in srgb, var(--bg-secondary) 88%, transparent);

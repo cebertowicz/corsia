@@ -10,13 +10,14 @@ import pytest
 from automation.plan_liveness_terminal import on_thread_turn_complete
 from automation.turn_end_effects import record_turn_end
 from doc_feedback_helpers import add_comment, add_person_comment, batches, linked_comment_ids, seed_document, seed_thread
-from doceditor import comment_notifications, feedback_batches
+from doceditor import comment_notifications, feedback_batch_edits, feedback_batches
+import infra.database as database
 from infra.database import get_db, write_transaction
 
 
 def add_user_edit(db, artifact_id: str, recipient_id: str = "owner") -> None:
     with write_transaction(db, scope="test_add_user_feedback_edit") as connection:
-        feedback_batches.record_edit(
+        feedback_batch_edits.record_edit(
             connection,
             artifact_id=artifact_id,
             recipient_id=recipient_id,
@@ -40,6 +41,29 @@ def test_each_person_comment_is_delivered_as_its_own_task(isolated_db):
         assert [(row["state"], row["closed_reason"], row["item_count"]) for row in rows] == [("delivered", "send", 1)] * 3
         assert [linked_comment_ids(db, row["id"]) for row in rows] == [[row["id"]] for row, _feedback in added]
         assert len({row["delivered_node_id"] for row in rows}) == 3
+    finally:
+        db.close()
+
+
+def test_person_delivery_announces_once_after_all_recipient_batches_close(isolated_db, monkeypatch):
+    frames: list[str] = []
+    monkeypatch.setattr(comment_notifications, "broadcast_doc_comment_changed", lambda artifact_id, **_kwargs: frames.append(artifact_id))
+    db = get_db()
+    try:
+        seed_thread(db, "owner")
+        seed_thread(db, "author")
+        artifact_id = seed_document(db, "owner")
+        root, _ = add_comment(db, artifact_id)
+        frames.clear()
+        _reply, feedback = add_comment(
+            db, artifact_id, author_kind="user", author_id=None, author="Steve", parent_id=root["id"],
+        )
+
+        assert len(feedback["batch_ids"]) == 2
+        feedback_batches.deliver_person_comment(db, feedback["batch_ids"], artifact_id)
+
+        assert frames == [artifact_id]
+        assert all(row["state"] == "delivered" for row in batches(db) if row["id"] in feedback["batch_ids"])
     finally:
         db.close()
 
@@ -183,7 +207,34 @@ async def test_record_turn_end_closes_agent_author_batch_through_turn_end_effect
         db.close()
 
 
-def test_user_edit_delivers_at_its_persisted_idle_deadline(isolated_db):
+def test_person_batch_deadlines_keep_immediate_retries_fast_and_held_lanes_open(isolated_db):
+    db = get_db()
+    try:
+        seed_thread(db, "owner")
+        artifact_id = seed_document(db, "owner", name="deadlines.md")
+        add_comment(
+            db, artifact_id, author_kind="user", author_id=None, author="Steve", delivery_policy=feedback_batches.IMMEDIATE,
+        )
+        add_comment(
+            db, artifact_id, author_kind="user", author_id=None, author="Steve", delivery_policy=feedback_batches.DOCUMENT_HELD,
+        )
+
+        deadlines = {
+            row["delivery_policy"]: (
+                datetime.fromisoformat(row["closes_at"]) - datetime.fromisoformat(row["last_item_at"])
+            ).total_seconds()
+            for row in batches(db, state="open")
+        }
+
+        assert deadlines == {
+            feedback_batches.IMMEDIATE: feedback_batches.IMMEDIATE_IDLE,
+            feedback_batches.DOCUMENT_HELD: feedback_batches.USER_IDLE,
+        }
+    finally:
+        db.close()
+
+
+def test_user_edit_delivers_at_its_persisted_immediate_deadline(isolated_db):
     db = get_db()
     try:
         seed_thread(db, "owner")
@@ -194,7 +245,7 @@ def test_user_edit_delivers_at_its_persisted_idle_deadline(isolated_db):
         assert (
             datetime.fromisoformat(open_batch["closes_at"])
             - datetime.fromisoformat(open_batch["last_item_at"])
-        ).total_seconds() == feedback_batches.USER_IDLE
+        ).total_seconds() == feedback_batches.IMMEDIATE_IDLE
 
         feedback_batches.close_due(open_batch["closes_at"], db=db)
         [delivered] = batches(db)
@@ -249,7 +300,7 @@ def test_due_user_feedback_for_sentinel_document_broadcasts_to_all(isolated_db, 
     try:
         artifact_id = seed_document(db, "ui")
         with write_transaction(db, scope="test_sentinel_due") as connection:
-            feedback_batches.record_edit(
+            feedback_batch_edits.record_edit(
                 connection,
                 artifact_id=artifact_id,
                 recipient_id="ui",
@@ -298,9 +349,48 @@ def test_user_feedback_projection_has_no_open_comment_after_immediate_delivery(i
 
         assert feedback_batches.user_feedback_for_document(db, artifact_id) == {
             "open_count": 0,
+            "document_held_count": 0,
+            "image_held_count": 0,
             "owner_label": "Documents & Artifacts",
             "undelivered_batches": [],
         }
         assert [row["state"] for row in batches(db)] == ["delivered", "delivered"]
     finally:
         db.close()
+
+
+def test_due_sweep_without_a_supplied_db_keeps_its_connection_through_publication(monkeypatch):
+    events: list[str] = []
+
+    class Result:
+        def fetchall(self):
+            return [{"id": "batch", "artifact_id": "artifact", "author_kind": "user"}]
+
+    class Connection:
+        in_transaction = False
+
+        def execute(self, _sql, _params):
+            events.append("select")
+            return Result()
+
+        def close(self):
+            events.append("close")
+
+    def close_due_batch(received, _batch_id, now):
+        assert received is connection
+        assert now == "2000-01-01T00:00:00+00:00"
+        events.append("close_batch")
+        return True, ("owner",)
+
+    def collect(_deliveries, received, _row, _closed):
+        assert received is connection
+        events.append("collect")
+
+    connection = Connection()
+    monkeypatch.setattr(database, "get_db", lambda: connection)
+    monkeypatch.setattr(feedback_batches, "_close_due_batch", close_due_batch)
+    monkeypatch.setattr(comment_notifications, "collect_due_user_delivery", collect)
+    monkeypatch.setattr(comment_notifications, "publish_due_user_feedback", lambda _deliveries: events.append("publish"))
+
+    assert feedback_batches.close_due("2000-01-01T00:00:00+00:00") == ["owner"]
+    assert events == ["select", "close_batch", "collect", "publish", "close"]

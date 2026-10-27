@@ -324,16 +324,30 @@ without a wake; a blocker raised again after it cleared wakes the parent anew.
 node's `own` figure holds tokens, model cost, usage-recording failures,
 `execution` (Turn seconds from `active_turns`) and `waiting` (seconds). The
 `rolled` figure adds every descendant and the rolled total of each attached
-child plan, folding each plan exactly once. Waiting is wall clock, never spend:
+child plan, folding each plan exactly once. Model cost is Measurement's
+API-equivalent price for every usage row, never a stored `cost_usd` and never
+what a subscription charged: `plans/usage_cost.py` prices rows through
+`core/measurement_pricing.py`, the admission SQL, grouped read and
+`classify_usage_rows` that Measurement's Cost and Models read, with
+`core/cost_identity.py` resolving each row's model. A local model's rows have no
+API price and add nothing; a row Measurement cannot price counts unknown. An
+operator read prices its nodes and their commitments in one grouped read and
+hands the commitments' dollars to `plans/commitment_cost.py`.
+Waiting is wall clock, never spend:
 it rolls up beside execution and is never added to tokens or cost.
 `plans/node_waiting.py` derives it on read with no stored column. A node waits
 while it is open and has an armed watch (other than a task its agent set
 aside, whose `watch_armed` event carries `scheduled.reason`), an unmet
 dependency (edge events intersected with the prerequisite's not-accepted
 state stretches), or is in `review_requested` with a linked GitHub
-pull-request artifact. Overlaps count once. User-owned holds, whole-plan
-pauses (from `plan_events`) and time after settling are cut out. Every read is a
-chunked `IN (...)` batch, a fixed count per call. The status read shows a
+pull-request artifact. Overlaps count once. The user's time is cut out,
+whoever armed the wait: user-owned holds, whole-plan pauses (from
+`plan_events`), and a decision on the node while its review step is in
+`review_requested`, up to the step's archiving (the step is found by source
+node through `idx_artifact_identities_decision_source`; its state transitions
+are the history, so a withdrawn or answered decision still counts for the time
+it was open); so is time after settling. Every read is a chunked `IN (...)`
+batch, a fixed count per call. The status read shows a
 node's own `waited_seconds` in the ages of running, review and waiting rows.
 `plans.public.open_wait_intervals` returns the same intervals per thread,
 unioned over that thread's own plan nodes and clipped to a window, for a run's

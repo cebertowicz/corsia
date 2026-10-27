@@ -41,6 +41,8 @@ export interface VendorAccount {
 	duplicate_of?: string | null;
 	/** This account's 'Spend past plan limit' switch; null where no plan limit applies. */
 	allow_overage?: boolean | null;
+	/** Signed in, but none of the vendor's models can run on this account. */
+	no_usable_model?: boolean;
 	/** Account-owned plan usage, rendered once in its Settings account row. */
 	usage?: VendorAccountUsage;
 	/** The recorded monthly price and charge day; null when no price is recorded. */
@@ -77,9 +79,10 @@ function url(path: string, query: Record<string, string> = {}): string {
 	return `${BASE}${path}?${params.toString()}`;
 }
 
-async function detail(response: Response, fallback: string): Promise<{ error: string; code?: string }> {
+async function detail(response: Response, fallback: string): Promise<{ error: string; code?: string; ref?: string }> {
 	const body = await response.json().catch(() => null);
-	return { error: plainErrorText(body?.detail, fallback), ...(typeof body?.code === 'string' ? { code: body.code } : {}) };
+	const ref = typeof body?.ref === 'string' ? body.ref : typeof body?.detail?.ref === 'string' ? body.detail.ref : '';
+	return { error: plainErrorText(body?.detail, fallback), ...(typeof body?.code === 'string' ? { code: body.code } : {}), ...(ref ? { ref } : {}) };
 }
 
 function replace(account: VendorAccount): VendorAccount {
@@ -87,7 +90,7 @@ function replace(account: VendorAccount): VendorAccount {
 	return account;
 }
 
-async function request<T>(path: string, init: RequestInit, fallback: string, query?: Record<string, string>): Promise<{ ok: true; data: T } | { ok: false; error: string; status?: number; code?: string }> {
+async function request<T>(path: string, init: RequestInit, fallback: string, query?: Record<string, string>): Promise<{ ok: true; data: T } | { ok: false; error: string; status?: number; code?: string; ref?: string }> {
 	try {
 		const response = await fetch(url(path, query), init);
 		if (!response.ok) return { ok: false, ...await detail(response, fallback), status: response.status };
@@ -103,10 +106,10 @@ function json(method: string, body?: object): RequestInit {
 		: { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
 }
 
-export async function loadVendorAccounts(includeRemoved = false): Promise<{ ok: boolean; error?: string; superseded?: boolean }> {
+export async function loadVendorAccounts(includeRemoved = false): Promise<{ ok: boolean; error?: string; ref?: string; superseded?: boolean }> {
 	const confirmationAtStart = confirmationSequence;
 	const read = ++readSequence;
-	const result = await request<{ accounts: VendorAccount[] }>('/api/vendor-accounts', { method: 'GET' }, 'Could not load accounts.', includeRemoved ? { include_removed: 'true' } : {});
+	const result = await request<{ accounts: VendorAccount[] }>('/api/vendor-accounts', { method: 'GET' }, 'Couldn’t load your accounts.', includeRemoved ? { include_removed: 'true' } : {});
 	if (!result.ok) return result;
 	if (!Array.isArray(result.data?.accounts)) return { ok: false, error: 'Could not read accounts.' };
 	if (confirmationAtStart !== confirmationSequence || read < acceptedRead) {
@@ -119,7 +122,7 @@ export async function loadVendorAccounts(includeRemoved = false): Promise<{ ok: 
 
 /** The removed accounts, read without touching the shared list that every other surface renders. */
 export async function fetchRemovedVendorAccounts(): Promise<{ ok: true; accounts: VendorAccount[] } | { ok: false; error: string }> {
-	const result = await request<{ accounts: VendorAccount[] }>('/api/vendor-accounts', { method: 'GET' }, 'Could not load accounts.', { include_removed: 'true' });
+	const result = await request<{ accounts: VendorAccount[] }>('/api/vendor-accounts', { method: 'GET' }, 'Couldn’t load your accounts.', { include_removed: 'true' });
 	if (!result.ok) return result;
 	if (!Array.isArray(result.data?.accounts)) return { ok: false, error: 'Could not read accounts.' };
 	return { ok: true, accounts: result.data.accounts.filter((account) => account.state === 'removed') };

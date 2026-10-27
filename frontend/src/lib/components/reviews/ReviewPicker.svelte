@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { tick } from 'svelte';
+	import { onDestroy, tick } from 'svelte';
 	import Avatar from '$lib/components/ui/Avatar.svelte';
 	import { Button } from '$lib/components/ui';
 	import { agentColor } from '$lib/docPresence';
@@ -9,6 +9,8 @@
 	let active = $state(0);
 	let focused = $state(false);
 	let pressing = false;
+	let releaseTimer: ReturnType<typeof setTimeout> | undefined;
+	onDestroy(() => clearTimeout(releaseTimer));
 	let searchInput = $state<HTMLInputElement>();
 	const matches = $derived(model.choices().filter((reviewer) => reviewer.name.toLowerCase().includes(search.trim().toLowerCase())));
 	const open = $derived(model.loadState === 'ready' && !model.rosterError && (focused || !!search) && matches.length > 0);
@@ -35,16 +37,20 @@
 		else if (event.key === 'ArrowDown') active = (active + 1) % matches.length;
 		else active = active <= 0 ? matches.length - 1 : active - 1;
 	}
-	// A press that starts on another control (Send) blurs the field first; closing the list then would move that control out from under the press.
-	function blurred() {
-		if (!pressing) { focused = false; return; }
-		window.addEventListener('pointerup', () => setTimeout(() => { focused = document.activeElement === searchInput; }, 0), { once: true });
+	// A press on Send, the drawer's Close, or another nearby control blurs the field first. Keep the list
+	// until the gesture finishes, so resizing the bottom-anchored drawer cannot move that control under the pointer.
+	function blurred() { if (!pressing) focused = false; }
+	function pressed() { clearTimeout(releaseTimer); pressing = true; }
+	function released() {
+		// Each native press owns its click; touch's later compatibility mousedown starts its own guard.
+		clearTimeout(releaseTimer);
+		releaseTimer = setTimeout(() => { pressing = false; focused = document.activeElement === searchInput; }, 0);
 	}
 	async function submit(event: SubmitEvent) { event.preventDefault(); if (await model.submit()) onSent(); }
 </script>
 
-<svelte:window onpointerup={() => pressing = false} />
-<form onsubmit={submit} onpointerdown={() => pressing = true}>
+<svelte:window onpointerdown={pressed} onpointerup={released} onpointercancel={released} onmousedown={pressed} onmouseup={released} />
+<form onsubmit={submit}>
 	<label class="field-label" for={`${id}-search`}>Add reviewers</label>
 	<div class="chip-field" class:focused>
 		{#each model.selected as reviewer (reviewer.id)}

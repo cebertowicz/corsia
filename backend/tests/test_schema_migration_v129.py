@@ -71,7 +71,7 @@ def _seed_legacy(db: sqlite3.Connection) -> None:
 
 
 def test_v128_registers_connected_accounts_step() -> None:
-    assert SCHEMA_VERSION == 141
+    assert SCHEMA_VERSION == 147
     assert MIGRATIONS[128] is migrate_128_to_129
     assert 129 in MIGRATIONS
 
@@ -83,7 +83,7 @@ def test_runner_migrates_legacy_google_once_and_removes_the_singleton_path() -> 
         db.commit()
 
         result = migrate_to_current(db, SCHEMA_VERSION)
-        assert (result.migrated, result.from_version, result.to_version) == (True, 128, 141)
+        assert (result.migrated, result.from_version, result.to_version) == (True, 128, 147)
         account = google_account(db=db)
         assert account is not None
         assert account["address"] == ACCOUNT
@@ -165,7 +165,7 @@ def test_incomplete_legacy_credentials_become_needs_sign_in_without_blocking_sta
         db.commit()
 
         result = migrate_to_current(db, SCHEMA_VERSION)
-        assert (result.migrated, result.to_version) == (True, 141)
+        assert (result.migrated, result.to_version) == (True, 147)
         account = google_account(db=db)
         assert account is not None
         assert account["address"] == ACCOUNT
@@ -185,7 +185,7 @@ def test_addressless_legacy_data_is_retired_without_an_account() -> None:
         db.commit()
 
         result = migrate_to_current(db, SCHEMA_VERSION)
-        assert (result.migrated, result.to_version) == (True, 141)
+        assert (result.migrated, result.to_version) == (True, 147)
         assert google_account(db=db) is None
         assert get_setting("google_account", db=db) is None
         assert get_setting("gmail_poll_cursor", db=db) is None
@@ -232,7 +232,7 @@ def test_failed_multistep_ladder_rolls_back_earlier_schema_changes_and_retries(m
         ).fetchone() is None
 
         monkeypatch.undo()
-        assert migrate_to_current(db, SCHEMA_VERSION).to_version == 141
+        assert migrate_to_current(db, SCHEMA_VERSION).to_version == 147
 
 
 def _screen(db: sqlite3.Connection, account: str, message_id: str) -> None:

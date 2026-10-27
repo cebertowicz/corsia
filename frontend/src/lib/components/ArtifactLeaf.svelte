@@ -7,6 +7,7 @@
 	import LegacyPlanDiscussionLeaf from './LegacyPlanDiscussionLeaf.svelte';
 	import BrowserLeaf from './BrowserLeaf.svelte';
 	import ArtifactTabStrip from './ArtifactTabStrip.svelte';
+	import DeliveryConfirmation from './attention/DeliveryConfirmation.svelte';
 	import type { DocViewerTarget } from '$lib/docViewerTarget';
 	import type { ImageViewportPlace, TabLoadSignal } from '$lib/artifactTabs';
 	import { returnToPlanNode } from '$lib/planLeafReturn';
@@ -324,6 +325,8 @@
 						onPlace={(camera) => recordDocumentImageCamera(target.instanceId, camera)}
 					/>
 				{/if}
+				<!-- This notice belongs to the document canvas, which remains the visible surface on phone. -->
+				<DeliveryConfirmation artifactId={target.artifactId} />
 			{/if}
 		</div>
 	</div>
@@ -362,8 +365,11 @@
 	/* Expanded tabs occupy the canvas segment of the shared header. They are out of
 	   leaf flow, so the document begins directly below the header with no second band. */
 	.canvas-header-strip {
-		position: absolute; inset: 0 0 auto;
+		position: absolute; inset: 0 var(--header-right-controls-inset, 0px) auto 0;
 		height: var(--header-height); z-index: 11;
+		/* An overlaid drawer can leave no canvas beside the controls; the strip's padding and
+		   scroll buttons must not then spill over them. */
+		overflow: hidden;
 	}
 	.canvas-header-strip :global(.strip) { height: 100%; padding-left: var(--space-3); padding-right: var(--space-2); border-bottom: 0; background: transparent; }
 	.leaf-body { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 20px 20px; }

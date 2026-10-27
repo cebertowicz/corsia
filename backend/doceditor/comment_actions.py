@@ -37,7 +37,7 @@ STALE_MESSAGE = (
 # Writes ``text`` to the document at ``path`` in scope ``project_id``, recording ``reason``
 # where the save keeps history; raises when refused.
 DocumentWriter = Callable[
-    [str, str, str | None, str, str | None], Awaitable[dict[str, Any] | None]
+    [str, str, str | None, str, str | None, str | None], Awaitable[dict[str, Any] | None]
 ]
 
 
@@ -210,6 +210,7 @@ async def decide_suggestion(
                 artifact["path"], applied_text(comment, document_text), project_id,
                 f"Accepted suggestion {comment_id} from {comment['author']}",
                 hashlib.sha256(document_text.encode()).hexdigest(),
+                str(comment["author"]) if comment["author_kind"] == "user" else None,
             )
 
     def _record():

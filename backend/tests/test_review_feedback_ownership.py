@@ -198,6 +198,7 @@ def test_active_fork_feedback_uses_ordinary_pending_notices_and_retry(review_env
     row = request(db, aid)
     fork_comment(db, aid, row["id"])
     identity = dict(author_kind="agent", author_id="reviewer", artifact_id=aid)
+    retry_identity = {**identity, "delivery_policy": feedback_batches.IMMEDIATE}
     original = feedback_delivery.recipient_problem
     monkeypatch.setattr(feedback_delivery, "recipient_problem", lambda *args: "owner_unavailable")
     with write_transaction(db, scope="test_ordinary_undelivered"):
@@ -207,7 +208,7 @@ def test_active_fork_feedback_uses_ordinary_pending_notices_and_retry(review_env
         assert len(feedback_state.take_unreported_undelivered(db, "reviewer", "now")) == 1
     monkeypatch.setattr(feedback_delivery, "recipient_problem", original)
     with write_transaction(db, scope="test_ordinary_retry"):
-        feedback_batches.retry_for_document(db, **identity)
+        feedback_batches.retry_for_document(db, **retry_identity)
     assert db.execute("SELECT state FROM doc_feedback_batches").fetchone()[0] == "delivered"
     assert stored(db, row["id"])["state"] == "forked"
     assert len(comments.list_for_artifact(aid, db=db)) == 1
@@ -219,16 +220,16 @@ def test_raising_due_batch_rolls_back_alone(review_env, monkeypatch):
     from doc_feedback_helpers import seed_document
     other = seed_document(db, "owner", name="other.md")
     later = ordinary_comment(db, other)
-    original = feedback_batches.close_batch
+    original = feedback_batches._close_due_batch
 
-    def close(connection, batch_id, reason):
+    def close(connection, batch_id, now):
         if batch_id == ordinary:
             with write_transaction(connection, scope="test_failed_batch"):
                 connection.execute("UPDATE doc_feedback_batches SET item_count=123 WHERE id=?", (batch_id,))
                 raise RuntimeError("one broken batch")
-        return original(connection, batch_id, reason)
+        return original(connection, batch_id, now)
 
-    monkeypatch.setattr(feedback_batches, "close_batch", close)
+    monkeypatch.setattr(feedback_batches, "_close_due_batch", close)
     feedback_batches.close_due("9999-01-01T00:00:00+00:00", db=db)
     assert db.execute("SELECT state,item_count FROM doc_feedback_batches WHERE id=?", (ordinary,)).fetchone()[:] == ("open", 1)
     assert db.execute("SELECT state FROM doc_feedback_batches WHERE id=?", (later,)).fetchone()[0] == "delivered"
@@ -254,7 +255,7 @@ def test_submitted_fork_failure_is_noticed_and_retry_delivers_ordinary_batch(rev
     with write_transaction(db, scope="test_failure_notice_and_retry"):
         assert feedback_state.take_unreported_undelivered(db, "reviewer", "now")[0]["id"] == batch["id"]
         monkeypatch.setattr(feedback_delivery, "recipient_problem", original)
-        feedback_batches.retry_for_document(db, **kwargs)
+        feedback_batches.retry_for_document(db, **kwargs, delivery_policy=feedback_batches.IMMEDIATE)
     assert db.execute("SELECT state,attempts FROM doc_feedback_batches WHERE id=?", (batch["id"],)).fetchone()[:] == ("delivered", attempts + 1)
     assert stored(db, row["id"])["state"] == "submitted"
     assert feedback_state.undelivered_for_document(db, **kwargs) == []

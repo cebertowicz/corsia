@@ -11,6 +11,13 @@ from infra.database import get_db
 from tests.event_routing_helpers import mk_session
 
 
+@pytest.fixture(autouse=True)
+def delivery_on(monkeypatch):
+    from memory import node_start_recall
+
+    monkeypatch.setattr(node_start_recall, "DELIVERY_ON", True)
+
+
 @pytest.fixture
 def db(isolated_db):
     from infra.db_fts import _init_fts

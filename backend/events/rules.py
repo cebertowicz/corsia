@@ -60,6 +60,7 @@ OUT_OF_PROJECT = "recipient outside the rule's project"
 LOOKUP_FAILED = "repository lookup failed"
 UNAVAILABLE = "recipient unavailable"
 WRITER_LEFT = "its writer left the rule's project; rule turned off"
+OWN_EMIT = "sent by this chat"
 
 WAKES_PER_HOUR = 1
 RETENTION = timedelta(days=30)

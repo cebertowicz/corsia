@@ -40,6 +40,29 @@ def _seed(days: dict[str, int]) -> None:
         db.close()
 
 
+def _seed_source_start(day: str) -> None:
+    """Seed install-wide raw starts outside the selected user's measurement scope."""
+    from infra.database import get_db
+
+    db = get_db()
+    try:
+        _seed_thread(db, "foreign", user_id="another-user")
+        db.execute("INSERT INTO plans (id,owner_kind,owner_id,state,revision,created_at,updated_at) VALUES ('foreign-plan','thread','foreign','active',1,'t','t')")
+        with raw_plan_seed(db):
+            db.execute(
+                "INSERT INTO plan_nodes (id,plan_id,parent_id,order_key,kind,title,acceptance_criteria,state,size,commitment_id,requirements_revision,revision,created_at,updated_at) "
+                "VALUES ('foreign-start','foreign-plan',NULL,1,'task','task','done','accepted','M','foreign-start',1,1,'t','t')"
+            )
+            db.execute(
+                "INSERT INTO plan_node_events (id,node_id,provenance,event,prior_state,new_state,created_at) "
+                "VALUES ('foreign-start-event','foreign-start','test','accepted','active','accepted',?)",
+                (f"{day}T12:00:00Z",),
+            )
+        db.commit()
+    finally:
+        db.close()
+
+
 async def _series(ids: str, grain: str = "days", zone: str = "UTC") -> dict:
     from api.measurement import measurement_series
 
@@ -74,6 +97,7 @@ async def test_windows_pool_each_side_from_its_raw_counts_and_apply_the_minimum_
     monkeypatch.setattr("core.measurement_scope._now", lambda: NOW)
     # Each day alone is under the minimum of 20; the latest seven days pool to 25 and the seven before to 12.
     _seed({"2026-10-03": 10, "2026-10-05": 15, "2026-09-28": 12})
+    _seed_source_start("2026-09-14")
 
     served = await _series("outcomes,first_try_acceptance")
     assert served["windows"]["outcomes"] == {"latest": {"value": 25, "n": 25, "from": "2026-10-02", "to": "2026-10-08"},
@@ -89,6 +113,7 @@ async def test_windows_follow_the_grain_four_periods_against_the_four_before(iso
     # Weeks run Monday to Sunday and the week of 10-05 is still in progress: the latest four are
     # 09-07..10-04, the four before are 08-10..09-06, so Sunday 09-06 is the last day of the older side.
     _seed({"2026-10-03": 5, "2026-09-15": 7, "2026-09-07": 3, "2026-09-06": 2, "2026-08-20": 4})
+    _seed_source_start("2026-08-10")
 
     served = await _series("outcomes", grain="weeks")
     assert served["windows"]["outcomes"] == {"latest": {"value": 15, "n": 15, "from": "2026-09-07", "to": "2026-10-04"},
@@ -99,7 +124,8 @@ async def test_windows_follow_the_grain_four_periods_against_the_four_before(iso
 async def test_a_window_reaching_before_the_instrument_pools_only_the_periods_it_measured(isolated_db, monkeypatch):
     # first_try_acceptance is measured from 2026-09-14: the earlier days of a window are not pooled as zeros.
     monkeypatch.setattr("core.measurement_scope._now", lambda: datetime(2026, 9, 20, 12, tzinfo=timezone.utc))
-    _seed({"2026-09-12": 30, "2026-09-16": 20})
+    _seed({"2026-09-16": 20})
+    _seed_source_start("2026-09-14")
 
     served = await _series("first_try_acceptance")
     # It names the dates it pooled, not the window it reached into.

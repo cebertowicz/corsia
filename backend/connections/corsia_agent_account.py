@@ -296,6 +296,16 @@ def _lost_binding(provider: str, bound, labels: list[dict], project, *, db) -> d
     return {"label": account_label(account, rows=labels)["text"], "reason": reason}
 
 
+def _scoped_states(provider: str, project, *, rows: list[dict], db) -> list[tuple[dict, str, str | None]]:
+    """Each account the scope permits (never a removed one) with its first-run state; none when the vendor lists no model."""
+    from connections.account_policy import permitted_accounts
+
+    if not rows:
+        return []
+    return [(account, *account_state(account, project_ids=[project], db=db, rows=rows))
+            for account in permitted_accounts(provider, project_ids=[project], db=db) if account["state"] != "removed"]
+
+
 def source_account_view(provider: str) -> tuple[list[dict], dict | None]:
     """One vendor's first-run account lines and its conductor's lost binding.
 
@@ -307,7 +317,7 @@ def source_account_view(provider: str) -> tuple[list[dict], dict | None]:
     was removed (``removed``) or that this project turned off (``turned_off``), the
     two the lines skip; otherwise ``None``. ``label`` is the account's person-facing label.
     """
-    from connections.account_policy import permitted_accounts, thread_scope
+    from connections.account_policy import thread_scope
     from connections.account_profiles import account_label
     from connections.vendor_accounts import list_accounts
     from infra.corsia_agent import get_corsia_agent
@@ -322,19 +332,35 @@ def source_account_view(provider: str) -> tuple[list[dict], dict | None]:
         labels = list_accounts(provider=provider, include_removed=True, db=db)
         lost = _lost_binding(provider, bound, labels, project, db=db)
         rows = _vendor_rows(provider, db=db)  # read once per vendor, whatever its account count
-        if not rows:
-            return [], lost
         lines = []
-        for account in permitted_accounts(provider, project_ids=[project], db=db):
-            if account["state"] == "removed":
-                continue
+        for account, state, resets_at in _scoped_states(provider, project, rows=rows, db=db):
             label = account_label(account, rows=labels)
-            state, resets_at = account_state(account, project_ids=[project], db=db, rows=rows)
             lines.append({"account_id": account["id"], "label": label["text"],
                           "label_verified": not (label["email"] is None and label["custom"]),
                           "identified": label["identified"],
                           "state": state, "resets_at": resets_at,
                           "corsia_agent_binding": bound is not None and str(bound["account_id"]) == account["id"]})
         return lines, lost
+    finally:
+        db.close()
+
+
+def accounts_without_usable_model(providers) -> set[str]:
+    """The ids of these vendors' accounts whose first-run line reads ``no_usable_model``.
+
+    The states ``source_account_view`` shows, without its labels or binding reads: the account
+    list asks on every Settings load, so it reads the conductor's scope once for all vendors.
+    """
+    from connections.account_policy import thread_scope
+    from infra.corsia_agent import get_corsia_agent
+    from infra.database import get_db
+
+    db = get_db()
+    try:
+        conductor = get_corsia_agent(db=db)
+        project = thread_scope(conductor, db=db)["project_id"] if conductor else None
+        return {account["id"] for provider in sorted(set(providers))
+                for account, state, _ in _scoped_states(provider, project, rows=_vendor_rows(provider, db=db), db=db)
+                if state == NO_USABLE_MODEL}
     finally:
         db.close()
