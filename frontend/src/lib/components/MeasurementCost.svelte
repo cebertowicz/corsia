@@ -58,7 +58,7 @@
 	{#if costState.loading && !costState.data}<div class="skeleton" aria-label="Loading Cost"></div>
 	{:else if costState.error && !costState.data}<p class="error" role="alert">{costState.error}<button onclick={onRetry}>Retry</button></p>
 	{:else if costState.data}
-		{#if headline}<p class="stat"><b>{rate === null ? '–' : money(rate)}</b> per person-hour of work delivered, {headline.nowText}, n {group(headline.current.sized)}, {headline.change}</p>{/if}
+		{#if headline}<p class="stat"><b>{rate === null ? '–' : money(rate)}</b> per person-hour of work delivered, {headline.nowText}, n&nbsp;{group(headline.current.sized)}, {headline.change}</p>{/if}
 		{#if view === 'actual' && (scoped || !costState.data.actual.workspace_subscription)}
 			<div class="actual"><h4>{actualTitle}</h4><p>Actual is recorded for the whole workspace, not this view.</p><p><button type="button" class="billing-link" onclick={onOpenAllWork}>Open All work</button></p><p class="note">The API-equivalent figures stay on the other view.</p></div>
 		{:else if view === 'actual'}

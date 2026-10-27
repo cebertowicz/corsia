@@ -62,7 +62,7 @@
 	{:else if !state.rows.length}<p class="empty">Nothing was recorded in this range.</p>
 	{:else if !view.periods.length}<p class="empty">Nothing was measured for this selection.</p>
 	{:else}
-		<p class="stat"><b>{value === null ? '–' : headline(value)}</b> {unitText}, {view.nowText}, n {group(view.current.n)}, {periodChange(view, true, undefined, minN === undefined ? served : undefined)}</p>
+		<p class="stat"><b>{value === null ? '–' : headline(value)}</b> {unitText}, {view.nowText}, n&nbsp;{group(view.current.n)}, {periodChange(view, true, undefined, minN === undefined ? served : undefined)}</p>
 		{@render extra?.()}
 		<h4>{chartTitle}, {chart.rangeText}, by {chart.unit}</h4>
 		{#if drawChart}

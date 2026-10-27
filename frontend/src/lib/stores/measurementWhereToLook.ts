@@ -91,22 +91,34 @@ export async function loadMeasurementWhereToLook(scope = get(measurementScope), 
 	}
 }
 
-function compact(value: number): string {
-	const scaled = (divisor: number, unit: string) => `${Number((value / divisor).toFixed(value / divisor < 10 ? 1 : 0))}${unit}`;
+function compact(value: number, extra = 0): string {
+	const scaled = (divisor: number, unit: string) => `${Number((value / divisor).toFixed(Math.min(15, (value / divisor < 10 ? 1 : 0) + extra)))}${unit}`;
 	if (value >= 1e9) return scaled(1e9, 'B');
 	if (value >= 1e6) return scaled(1e6, 'M');
 	if (value >= 1e3) return scaled(1e3, 'k');
-	return String(Math.round(value));
+	return String(Number(value.toFixed(Math.min(15, extra))));
 }
 
-/** One figure in the unit its measure is shown in; the same rounding for every row. */
-export function formatWhereToLookValue(value: number, format: WhereToLookFormat): string {
-	if (format === 'percent') return `${Math.round(value * 100)}%`;
-	if (format === 'tokens') return compact(value);
-	if (format === 'dollars') return `$${value.toFixed(2)}`;
-	if (format === 'hours') return `${Number(value.toFixed(value < 10 ? 1 : 0)).toLocaleString('en-US')} h`;
-	if (format === 'minutes') return value.toFixed(1);
-	return String(Number(value.toFixed(2)));
+/** One figure in its measure's unit, optionally showing extra digits to distinguish a comparison. */
+export function formatWhereToLookValue(value: number, format: WhereToLookFormat, extra = 0): string {
+	if (format === 'percent') return `${Number((value * 100).toFixed(Math.min(15, extra)))}%`;
+	if (format === 'tokens') return compact(value, extra);
+	if (format === 'dollars') return `$${value.toFixed(Math.min(15, 2 + extra))}`;
+	if (format === 'hours') return `${Number(value.toFixed(Math.min(15, (value < 10 ? 1 : 0) + extra))).toLocaleString('en-US', { maximumFractionDigits: 15 })} h`;
+	if (format === 'minutes') return Number(value.toFixed(Math.min(15, 1 + extra))).toLocaleString('en-US', { useGrouping: false, minimumFractionDigits: 1, maximumFractionDigits: Math.min(15, 1 + extra) });
+	return String(Number(value.toFixed(Math.min(15, 2 + extra))));
+}
+
+/** Keep a reported change visible, applying the same precision to its comparison and overall. */
+export function formatWhereToLookRow(row: Pick<WhereToLookRow, 'previous' | 'latest' | 'overall' | 'format'>): [string, string, string] {
+	const values = [row.previous, row.latest, row.overall] as const;
+	let extra = 0;
+	let shown = values.map((value) => value === null ? '–' : formatWhereToLookValue(value, row.format, extra)) as [string, string, string];
+	while (row.previous !== row.latest && shown[0] === shown[1] && extra < 15) {
+		extra++;
+		shown = values.map((value) => value === null ? '–' : formatWhereToLookValue(value, row.format, extra)) as [string, string, string];
+	}
+	return shown;
 }
 
 /** A relative change as a signed whole percent. */

@@ -16,10 +16,10 @@
 	/** One line under the agents table, for all agents together; the kept Decisions and tasks for you per outcome chart draws the series. */
 	const asksLine = $derived.by(() => {
 		const lead = 'All agents together:';
-		if (asks.loading && !asks.rows.length) return `${lead} loading.`;
-		if (asks.error && !asks.rows.length) return `${lead} not available right now.`;
+		if (asks.loading && !asks.rows.length) return `${lead} decisions and tasks for you per outcome are loading.`;
+		if (asks.error && !asks.rows.length) return `${lead} decisions and tasks for you per outcome couldn’t load. Use Retry on that chart.`;
 		const value = asksView.current.value;
-		return `${lead} ${value === null ? '–' : value.toFixed(2)} decisions and tasks per outcome, ${changeOnly(asksView)}.`;
+		return `${lead} ${value === null ? '–' : value.toFixed(2)} decisions and tasks for you per outcome, ${changeOnly(asksView)}.`;
 	});
 </script>
 

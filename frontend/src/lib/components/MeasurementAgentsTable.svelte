@@ -182,24 +182,23 @@
 	.skeleton { height: 120px; border-radius: var(--radius-xs); background: var(--bg-hover); animation: pulse 1.2s ease-in-out infinite alternate; }
 	.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 	.table-wrap:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-	/* Phone: every column stays in view. Names and headers wrap between words (never inside one), the figures stay on one line, and the long change header gets a narrow column of its own. */
+	/* Phone: keep columns in view, giving the dated header room; long agent names may break within their column. */
 	@media (max-width: 430px) {
 		table { width: 100%; min-width: 0; table-layout: fixed; font-size: var(--text-footnote); }
 		th, td { padding: 6px 3px; }
 		tbody th { white-space: normal; }
-		.filter { white-space: normal; overflow-wrap: normal; word-break: normal; }
+		.filter { max-width: 100%; white-space: normal; overflow-wrap: anywhere; word-break: normal; }
 		thead th { white-space: normal; overflow-wrap: normal; word-break: normal; font-size: var(--text-caption); }
 		.sort { white-space: normal; }
-		/* Fixed table layout otherwise divides the unconstrained first three columns
-		   evenly, leaving too little room for an unbroken agent-name word. */
-		thead th:first-child { width: 28%; }
-		thead th:nth-child(2), thead th:nth-child(3) { width: 10%; }
-		thead th.cost { width: 17%; }
+		thead th:first-child { width: 14%; }
+		thead th:nth-child(2) { width: 18%; }
+		thead th:nth-child(3) { width: 13%; }
+		thead th.cost { width: 20%; }
 		thead th.change { width: 35%; }
 		/* The full cost name runs past three lines in its column; the phone header keeps its first words. */
 		.long { display: none; }
 	}
-	/* The narrowest phones: tighter padding keeps the longest name ("Infrastructure") from pushing the last column out. */
+	/* The narrowest phones: tighter padding leaves more room for each column. */
 	@media (max-width: 380px) {
 		th, td { padding: 6px 2px; }
 	}

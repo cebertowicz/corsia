@@ -147,7 +147,7 @@ describe('kept charts on Days', () => {
 		// Twelve decisions clear the served 10: only day 3, withheld, draws no stack, and the change reads past low n (new: the series began inside the previous window).
 		expect(alignment.querySelectorAll('.dsk svg rect.stack')).toHaveLength(LAST_DONE * 3);
 		expect([...alignment.querySelectorAll('.dsk svg text.lo')].map((n) => n.textContent)).toEqual(['too few']);
-		expect(alignment.querySelector('.stat')?.textContent).toContain('n 12, new');
+		expect(alignment.querySelector('.stat')?.textContent).toContain('n 12, new');
 		expect(alignment.querySelector('.stat')?.textContent).not.toContain('low n');
 		expect(alignment.textContent).not.toContain('fewer than 20');
 	});
@@ -207,7 +207,7 @@ describe('kept charts on Days', () => {
 		}
 		// The headline pools the seven completed days the period names (7 x 40); today's 7 stay out of it.
 		expect(card('outcomes').querySelector('.stat')?.textContent).toContain('280 accepted outcomes');
-		expect(card('outcomes').querySelector('.stat')?.textContent).toContain('n 280');
+		expect(card('outcomes').querySelector('.stat')?.textContent).toContain('n 280');
 		expect(card('tokens').querySelector('.stat')?.textContent).toContain('120k fresh tokens per outcome');
 	});
 
@@ -252,7 +252,7 @@ describe('kept chart headlines', () => {
 	};
 	// The earlier days make the previous window fully covered, so the change reads as a percentage and not as new.
 	const withheld = (series: Series) => [...[-4, -3, -2, -1].map((i) => row(series, day(i), VALUES[series])), ...dayRows(series)].map((r) => (r.period === day(8) ? { ...r, value: null, n: 8 } : r));
-	const grouped = { outcomes: ['outcomes', '495 accepted outcomes', 'n 495', '-56% vs'], alignment: ['took_recommendation_pct', '55% took', 'n 40', 'n 126'], asks: ['asks_per_outcome', '0.13 decisions and tasks per outcome', 'n 495', '+30% vs'], rejections: ['rejections_per_outcome', '0.18 rejections', 'n 495', '+50% vs'], tokens: ['fresh_tokens_per_outcome', '1,057k fresh tokens', 'n 495', '+44% vs'] } as const;
+	const grouped = { outcomes: ['outcomes', '495 accepted outcomes', 'n 495', '-56% vs'], alignment: ['took_recommendation_pct', '55% took', 'n 40', 'n 126'], asks: ['asks_per_outcome', '0.13 decisions and tasks per outcome', 'n 495', '+30% vs'], rejections: ['rejections_per_outcome', '0.18 rejections', 'n 495', '+50% vs'], tokens: ['fresh_tokens_per_outcome', '1,057k fresh tokens', 'n 495', '+44% vs'] } as const;
 	for (const [id, [series, value, n, change]] of Object.entries(grouped)) {
 		it(`${id} headline is the served window, with a withheld day inside it`, () => {
 			const rows = allDays();
