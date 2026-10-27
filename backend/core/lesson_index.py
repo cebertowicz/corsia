@@ -130,6 +130,14 @@ def _review_state(db, lesson, behavioral_sha256: str) -> tuple[str | None, str]:
         return UNCHECKED, ""
 
 
+def trial_refusal(lesson, behavioral_sha256: str, *, db, now: datetime | None = None) -> str | None:
+    """Why the index would not offer this trial version now, or None: ``_candidate``'s rule."""
+    refusal = offer_refusal(lesson, now or datetime.now(timezone.utc))
+    if refusal is None:
+        refusal, _opened = _review_state(db, lesson, behavioral_sha256)
+    return refusal
+
+
 def _candidate(row: SkillRow, *, thread_id: str, db, now: datetime):
     """One trial row as (refusal, opened_at, record)."""
     try:

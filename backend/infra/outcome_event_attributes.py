@@ -293,7 +293,7 @@ ATTRIBUTE_ALLOWLISTS: dict[str, dict[str, AttributeSpec]] = {
     CARRY_IN_PENDING: {
         "identity": id_attr(), "lesson_id": id_attr(), "behavioral_sha256": id_attr(),
         "case_sha256": id_attr(), "owner_thread_id": id_attr(), "target_commit": id_attr(),
-        "lesson_path": text_attr(500), "target_path": text_attr(500),
+        "lesson_path": text_attr(500), "target_path": text_attr(500), "baseline_from": id_attr(),
     },
     CARRY_IN_CLAIMED: {"identity": id_attr(), "model": text_attr(300), "boot": id_attr()},
     CARRY_IN_WAITING: {"identity": id_attr(), "reason": enum_attr(*CARRY_IN_WAITING_REASONS)},

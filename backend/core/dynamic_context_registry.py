@@ -232,6 +232,10 @@ def _static_sources(
 
     # The one fresh disk read: installed rows keep these through a checkpoint.
     stamp_raw_versions(sources)
+    from core.context_projection import project_sources as apply_projection, thread_projection
+
+    # A C1 eval thread sees its target at the tested revision; others: no-op.
+    apply_projection(sources, thread_projection(thread_id, workspace=workspace, db=db))
     return sources, project_cwd, role_context
 
 

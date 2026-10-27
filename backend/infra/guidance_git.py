@@ -294,11 +294,9 @@ def save_guidance(
         ))
     if result.outcome == "written" and result.sha and writes:
         # Only a landed commit creates C1 work; matching remains off this request path.
-        from core.carry_in_facts import record_committed_save
-        from infra.carry_in_drain import request_drain
+        from core.carry_in_commits import queue_saved_commit
 
-        record_committed_save(workspace, list(writes), result.sha)
-        request_drain(workspace)
+        warnings.append(queue_saved_commit(workspace, list(writes), result.sha))
     if any(warnings):
         result = SaveResult(
             result.outcome, result.reason, result.sha,

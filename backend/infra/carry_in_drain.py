@@ -1,14 +1,17 @@
-"""The C1 carry-in drain: one bounded saved or pending item per app-loop wake.
+"""The C1 carry-in drain: one saved item and one pending case per app-loop wake.
 
 ``core.carry_in_facts`` owns the append-only facts this reads. Each wake
-settles a claim no running wake owns, reaps finished eval threads, then either
-matches the oldest saved target or advances the oldest pending case.
+settles a claim no running wake owns, reaps finished eval threads, matches
+the oldest saved target, then advances the oldest pending case, so a save's
+own case is tried on the wake that save requested.
 It runs only on the one ready local oMLX Native catalog row while ``infra.carry_in_capacity`` proves it idle; otherwise that oldest case
 shows ``no_ready_local_model`` and waits for the next save or restart. The
 same check, on the claimed model only, runs again just before every sample's
 provider call; failing it ends the claimed case in coverage, never a call.
 Samples are ordinary fresh eval Turns (``eval.endpoint.run_eval_turn``) under
-record-only tool isolation, so they cannot change anything they act on.
+record-only tool isolation, so they cannot change anything they act on. Each
+sample's thread (``core.context_projection.c1_thread_id``) sees the target
+only at the revision its side tests, in context and through read-only tools.
 """
 
 from __future__ import annotations
@@ -21,16 +24,17 @@ from typing import Any
 
 from loguru import logger
 
-from core import carry_in_facts as facts
+from core import carry_in_commits as commits, carry_in_facts as facts
 from core.carry_in_facts import CarryInFact, EligibleCase
-from infra import carry_in_capacity as capacity
+from core.context_projection import c1_thread_id
+import infra.carry_in_capacity as capacity
+import infra.carry_in_reaper as reaper
 from infra.db_async import run_in_db, run_off_db
 
 SAMPLES = 3
 NEEDED = 2
 SAMPLE_TIMEOUT_SECONDS = 900.0
 MAX_TARGET_BYTES = 200_000
-EVAL_THREAD_PREFIX = "eval-c1-"
 UNAVAILABLE = "no_ready_local_model"
 
 _running = False
@@ -109,44 +113,6 @@ def _read(fn, *args, **kwargs):
     return fn(get_db(), *args, **kwargs)
 
 
-def _settle_interrupted(db) -> int:
-    """End every claim no wake is running: an earlier boot's was interrupted by its restart;
-    this boot's lost its own terminal write to a fault (one wake runs at a time per process)."""
-    from core.turn_core import BOOT_EPOCH
-
-    stale = facts.open_facts(db, claimed=True)
-    now = _now()
-    for fact in stale:
-        reason = "error" if facts.claim_boot(db, fact) == BOOT_EPOCH else "interrupted"
-        facts.record_terminal(db, fact, now, facts.COVERAGE, reason=reason)
-    return len(stale)
-
-
-def _stranded_threads(db) -> list[tuple[str, str]]:
-    rows = db.execute(
-        "SELECT id, user_id FROM threads WHERE id LIKE ? ESCAPE '\\'",
-        (EVAL_THREAD_PREFIX.replace("_", "\\_") + "%",),
-    ).fetchall()
-    out = []
-    for row in rows:
-        prefix = str(row[0])[len(EVAL_THREAD_PREFIX):].split("-", 1)[0]
-        if prefix and facts.has_terminal_with_prefix(db, prefix):
-            out.append((str(row[0]), str(row[1] or "")))
-    return out
-
-
-async def _delete_threads(threads: list[tuple[str, str]]) -> None:
-    from api.thread_deletion import delete_owned_thread
-
-    for thread_id, user_id in threads:
-        try:
-            status = await delete_owned_thread(thread_id, user_id, [])
-            if status != "ok":
-                logger.warning("carry-in eval thread {} not deleted: {}", thread_id, status)
-        except Exception:
-            logger.opt(exception=True).warning("carry-in eval thread {} not deleted", thread_id)
-
-
 def _owner(db, thread_id: str) -> dict | None:
     row = db.execute("SELECT user_id, project_id FROM threads WHERE id=?", (thread_id,)).fetchone()
     return None if row is None or not row[0] else {"user_id": str(row[0]), "project_id": row[1]}
@@ -167,17 +133,35 @@ def _manifest_carries(db, manifest_id: str | None, lesson_id: str, version: str)
 
 
 def _blobs(workspace: Path, fact: CarryInFact) -> tuple[bytes | None, bytes] | None:
-    """The target before its commit (None when new) and at it; None when its owner must act.
+    """The pre-lesson baseline (None when new) and the saved target; None when its owner must act.
 
+    These are ``facts.side_bytes``, the bytes each sample's thread sees.
     None means the commit holds no such file or a revision over ``MAX_TARGET_BYTES``.
     A Git fault reading the history raises ``GitFault``: that is no fact about the case.
     """
-    parent = facts.commit_parent(workspace, fact.target_commit)
-    before = facts.committed_bytes(workspace, parent, fact.target_path) if parent else None
-    after = facts.committed_bytes(workspace, fact.target_commit, fact.target_path)
+    before = facts.side_bytes(workspace, fact, "b")
+    after = facts.side_bytes(workspace, fact, "c")
     if after is None or any(len(blob) > MAX_TARGET_BYTES for blob in (before or b"", after)):
         return None
     return before, after
+
+
+def _live_oid(workspace: Path, fact: CarryInFact) -> str | None:
+    """The live target's blob id; None when absent or unreadable."""
+    from core.guidance_manifest import git_blob_oid
+
+    try:
+        return git_blob_oid((workspace / fact.target_path).read_bytes())
+    except OSError:
+        return None
+
+
+def _manifest_has_oid(db, manifest_id: str | None, oid: str) -> bool:
+    """Whether any delivered row of this Turn's manifest is exactly that file version."""
+    if not manifest_id:
+        return False
+    row = db.execute("SELECT entries_json FROM context_manifests WHERE id=?", (manifest_id,)).fetchone()
+    return row is not None and any(entry.get("git_blob_oid") == oid for entry in json.loads(row[0]))
 
 
 def sample_prompt(case: dict[str, Any], target_path: str, blob: bytes | None) -> str:
@@ -202,15 +186,19 @@ def _longest_backtick_run(text: str) -> int:
 
 async def _sample(
     fact: CarryInFact, owner: dict, model: str, actions: dict, prompt: str, label: str,
-    created: list[tuple[str, str]],
+    created: list[tuple[str, str]], live_oid: str | None = None,
 ) -> bool:
-    """Run one isolated fresh Turn and score it; raise when it cannot be scored."""
+    """Run one isolated fresh Turn and score it; raise when it cannot be scored.
+
+    ``live_oid`` is the live target's blob id when it differs from this side's
+    revision: a manifest carrying it means the live file leaked into context.
+    """
     from core.carry_in_scoring import sample_passes
     from eval.endpoint import open_eval_thread, run_eval_turn
     from eval.tool_allowlist import carry_in_tool_isolation
     from eval.turn_result import read_turn_result
 
-    thread_id = f"{EVAL_THREAD_PREFIX}{fact.identity[:16]}-{label}"
+    thread_id = c1_thread_id(fact.identity, label)
     try:
         thread_id, row = await open_eval_thread(
             owner["user_id"], model, thread_id=thread_id, title="Skill re-test",
@@ -225,6 +213,8 @@ async def _sample(
         """The last step before this sample's provider call: lesson in context, capacity still exact and idle."""
         if not await run_in_db(_read, _manifest_carries, manifest_id, fact.lesson_id, fact.behavioral_sha256):
             refused.append(_ManifestMismatch("context manifest does not carry the lesson version under test"))
+        elif live_oid and await run_in_db(_read, _manifest_has_oid, manifest_id, live_oid):
+            refused.append(_ManifestMismatch("context manifest carries the live target, not the tested revision"))
         elif await capacity.ready_idle(model, exclude_thread=thread_id) is None:
             refused.append(_Unavailable(f"{model} is not the one ready, idle local model"))
         if refused:
@@ -247,13 +237,17 @@ async def _sample(
     return sample_passes(actions, result.tool_calls)
 
 
-async def _run_side(fact, owner, model, actions, prompt, side, created, completed) -> int:
+async def _run_side(
+    fact, owner, model, actions, prompt, side, created, completed, live_oid=None,
+) -> int:
     """Samples of one side until its outcome is decided; returns the pass count."""
     passes = fails = 0
     for index in range(1, SAMPLES + 1):
         if passes >= NEEDED or fails >= NEEDED:
             break
-        passed = await _sample(fact, owner, model, actions, prompt, f"{side}{index}", created)
+        passed = await _sample(
+            fact, owner, model, actions, prompt, f"{side}{index}", created, live_oid,
+        )
         completed[0] += 1
         passes, fails = passes + passed, fails + (not passed)
     return passes
@@ -261,9 +255,14 @@ async def _run_side(fact, owner, model, actions, prompt, side, created, complete
 
 async def _evaluate(
     fact: CarryInFact, case: EligibleCase, owner: dict, model: str,
-    before: bytes | None, after: bytes,
+    before: bytes | None, after: bytes, live_oid: str | None = None,
 ) -> None:
     """Sample and settle one claimed case; eval threads go once its terminal fact commits."""
+    from core.guidance_manifest import git_blob_oid
+
+    def leak(tested: bytes | None) -> str | None:
+        return live_oid if tested is None or git_blob_oid(tested) != live_oid else None
+
     created: list[tuple[str, str]] = []
     completed = [0]
     terminal: dict[str, Any]
@@ -272,7 +271,7 @@ async def _evaluate(
         assert actions is not None
         baseline_passes = await _run_side(
             fact, owner, model, actions, sample_prompt(case.case, fact.target_path, before),
-            "b", created, completed,
+            "b", created, completed, leak(before),
         )
         baseline_failures = completed[0] - baseline_passes
         if baseline_failures < NEEDED:
@@ -281,7 +280,7 @@ async def _evaluate(
         else:
             candidate_passes = await _run_side(
                 fact, owner, model, actions, sample_prompt(case.case, fact.target_path, after),
-                "c", created, completed,
+                "c", created, completed, leak(after),
             )
             terminal = {
                 "event": facts.RESULT,
@@ -314,24 +313,28 @@ async def _settle(fact: CarryInFact, terminal: dict[str, Any], completed: int, c
         _write, facts.record_terminal, fact, _now(), terminal["event"],
         scope="carry_in_terminal", **attrs,
     ))
-    await _delete_threads(created)
+    await reaper.delete_threads(created)
 
 
 async def wake(workspace: Path) -> bool:
-    """Advance one oldest saved target or pending case; True when later work may run.
+    """Match the oldest saved target, then advance the oldest pending case; True when later work may run.
 
     The result informs callers and tests only: ``drain`` never runs another wake on it.
 
     Without one ready, idle local model, or with an unreadable guidance history, that
     case alone records why it waits and the drain stops: younger cases wait behind it, unread.
     """
+    await run_in_db(partial(_write, reaper.settle_interrupted, scope="carry_in_interrupted"))
+    await reaper.delete_threads(await run_in_db(_read, reaper.stranded_threads))
+    saved = await _run_saved_commit(workspace)
+    return await _advance_pending(workspace) or saved
+
+
+async def _advance_pending(workspace: Path) -> bool:
+    """Retire, wait or sample the oldest pending case; True when it settled or was claimed."""
     from core.turn_core import BOOT_EPOCH
     from infra.guidance_git import GitFault
 
-    await run_in_db(partial(_write, _settle_interrupted, scope="carry_in_interrupted"))
-    await _delete_threads(await run_in_db(_read, _stranded_threads))
-    if await _run_saved_commit(workspace):
-        return True
     oldest = await run_in_db(_read, facts.open_facts, claimed=False, limit=1)
     if not oldest:
         return False
@@ -366,16 +369,18 @@ async def wake(workspace: Path) -> bool:
         _write, facts.record_claim, fact, _now(), model, BOOT_EPOCH, scope="carry_in_claim",
     )):
         return True
-    await _evaluate(fact, case, owner, model, *blobs)
+    live_oid = await run_off_db(_live_oid, workspace, fact)
+    before, after = blobs
+    await _evaluate(fact, case, owner, model, before, after, live_oid=live_oid)
     return True
 
 
 async def _run_saved_commit(workspace: Path) -> bool:
     """Match and close exactly one oldest saved target off the save request path."""
-    saved = await run_in_db(_read, facts.oldest_saved_commit)
+    saved = await run_in_db(_read, commits.oldest_saved_commit)
     if saved is None:
         return False
     await run_in_db(partial(
-        _read, facts.process_saved_commit, workspace, saved, _now(),
+        _read, commits.process_saved_commit, workspace, saved, _now(),
     ))
     return True

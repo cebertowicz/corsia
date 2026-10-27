@@ -9,12 +9,14 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
+from core.context_projection import tool_projection
 from infra.constants import GREP_OUTPUT_CHAR_CAP
 from tools.base import Tool
 from tools.filesystem_effects import bound_path_kind, open_bound_text, walk_bound_files
 from tools.filesystem_gate import _resolve_path, _resolve_path_for_action
 from tools.glob_walk import select_grep_files
 from tools.grep_content import SEPARATOR, GrepLine, SourceLines, context_ranges, render
+from tools.grep_projection import MAX_SEARCH_FILE_BYTES as _MAX_SEARCH_FILE_BYTES, projected_files, read_search_text
 from tools.grep_ripgrep import search_ripgrep
 from tools.search_scope import (
     THREADS_NOTICE, SearchScope, included_filter, keep_path, pattern_components,
@@ -31,7 +33,6 @@ def _has_ripgrep() -> bool:
 
 
 _RG_AVAILABLE = _has_ripgrep()
-_MAX_SEARCH_FILE_BYTES = 10 * 1024 * 1024
 
 
 def _grep_scope(search_dir: Path, current_thread_id: str | None, all_threads: bool) -> SearchScope:
@@ -171,30 +172,32 @@ class GrepTool(Tool):
         if not keep_path(search_dir, current_thread_id, all_threads):
             return f"No matches for pattern '{pattern}'\n{THREADS_NOTICE}"
 
+        walk = (
+            pattern, search_dir, glob, output_mode, case_insensitive, context,
+            max_results, current_thread_id, all_threads,
+        )
         if authorized.reviewed:
             try:
                 # Off the event loop, exactly as ``glob`` already does. Both
                 # search paths below walk the filesystem synchronously, and
                 # `async def` makes the runtime assume they yield. They do not.
-                return await asyncio.to_thread(
-                    self._search_reviewed,
-                    pattern,
-                    search_dir,
-                    glob,
-                    output_mode,
-                    case_insensitive,
-                    context,
-                    max_results,
-                    current_thread_id,
-                    all_threads,
-                )
+                return await asyncio.to_thread(self._search_reviewed, *walk)
             except PermissionError as exc:
                 return f"Error: {exc}"
 
-        if not search_dir.exists():
+        try:
+            projection = await tool_projection(current_thread_id, self._workspace)
+        except RuntimeError as exc:
+            return f"Error: {exc}"
+        if projection is not None and not projection.within(search_dir):
+            projection = None
+        # A C1 eval thread searches its target at the tested revision; the
+        # Python walk is the one search path that can substitute its bytes.
+        absent = projection is not None and search_dir == projection.path and projection.data is None
+        if absent or (projection is None and not search_dir.exists()):
             return f"Error: Path not found: {path or str(self._workspace)}"
 
-        if _RG_AVAILABLE:
+        if _RG_AVAILABLE and projection is None:
             return await search_ripgrep(
                 pattern,
                 search_dir,
@@ -221,18 +224,7 @@ class GrepTool(Tool):
             #
             # Installing ripgrep only makes this path rarer. One agent's search
             # must never be able to stop the platform.
-            return await asyncio.to_thread(
-                self._search_python,
-                pattern,
-                search_dir,
-                glob,
-                output_mode,
-                case_insensitive,
-                context,
-                max_results,
-                current_thread_id,
-                all_threads,
-            )
+            return await asyncio.to_thread(self._search_python, *walk, projection)
 
     def _search_reviewed(
         self,
@@ -351,22 +343,24 @@ class GrepTool(Tool):
         max_results: int,
         current_thread_id: str | None,
         all_threads: bool,
+        projection=None,
     ) -> str:
-        """Fallback: pure Python regex search (slower, no .gitignore respect)."""
+        """Fallback: pure Python regex search (slower, no .gitignore respect).
+
+        With a ``projection`` (``core.context_projection``), its target is
+        searched at the projected bytes, or not at all when absent there.
+        """
         flags = re.IGNORECASE if case_insensitive else 0
         try:
             regex = re.compile(pattern, flags)
         except re.error as e:
             return f"Error: Invalid regex pattern: {e}"
 
-        files = list(
-            self._iter_python_files(
-                search_dir,
-                glob_filter,
-                current_thread_id,
-                all_threads,
-            )
+        files = projected_files(
+            self._iter_python_files(search_dir, glob_filter, current_thread_id, all_threads),
+            search_dir, glob_filter, projection,
         )
+        read = partial(read_search_text, projection=projection)
 
         results: list[GrepLine] = []
         safe: list[str | None] = []
@@ -377,11 +371,8 @@ class GrepTool(Tool):
             if len(results) >= max_results:
                 break
 
-            try:
-                if resolved_path.stat().st_size > _MAX_SEARCH_FILE_BYTES:
-                    continue
-                content = resolved_path.read_text(encoding="utf-8", errors="ignore")
-            except (PermissionError, OSError):
+            content = read(resolved_path)
+            if content is None:
                 continue
 
             lines = content.split("\n")
@@ -407,16 +398,13 @@ class GrepTool(Tool):
                 return f"No matches for pattern '{pattern}'"
             counts = {}
             for fpath, resolved_path in sorted(files):
-                try:
-                    if resolved_path.stat().st_size > _MAX_SEARCH_FILE_BYTES:
-                        continue
-                    content = resolved_path.read_text(encoding="utf-8", errors="ignore")
-                    c = len(regex.findall(content))
-                    if c > 0:
-                        rel = str(fpath.relative_to(search_dir))
-                        counts[rel] = c
-                except (PermissionError, OSError):
+                content = read(resolved_path)
+                if content is None:
                     continue
+                c = len(regex.findall(content))
+                if c > 0:
+                    rel = str(fpath.relative_to(search_dir))
+                    counts[rel] = c
             return "\n".join(
                 f"{f}:{c}" for f, c in sorted(counts.items())[:max_results]
             )
