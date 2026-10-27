@@ -61,34 +61,38 @@ def cleanup_thread_tmp(state_root: Path, thread_id: str) -> None:
             return
 
 
-def _prepare_home_caches(home: Path) -> None:
-    """Create only declared cache paths, without traversing symlinks."""
+def _prepare_home_caches(home: Path, protected_cache: Path | None = None) -> None:
+    """Create cache paths without traversing symlinks; the protected cache is required."""
     flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
-    home_fd = os.open(home, flags)
-    try:
-        for relative in HOME_CACHES:
-            current = os.dup(home_fd)
-            try:
-                for part in Path(relative).parts:
-                    created = False
-                    try:
-                        os.mkdir(part, 0o700, dir_fd=current)
-                        created = True
-                    except FileExistsError:
-                        pass
-                    child = os.open(part, flags, dir_fd=current)
-                    os.close(current)
-                    current = child
-                    if created:
-                        os.fchmod(current, 0o700)
-            except OSError as exc:
-                if exc.errno not in (errno.ELOOP, errno.ENOTDIR):
-                    raise
-                logger.warning('Skipping unavailable cache path %s: %s', home / relative, exc)
-            finally:
+    paths = [(home / relative, False) for relative in HOME_CACHES]
+    if protected_cache is not None:
+        paths.append((protected_cache, True))
+    for path, required in paths:
+        base = home if path.is_relative_to(home) else Path('/')
+        current = None
+        try:
+            current = os.open(base, flags)
+            for part in path.relative_to(base).parts:
+                created = False
+                try:
+                    os.mkdir(part, 0o700, dir_fd=current)
+                    created = True
+                except FileExistsError:
+                    pass
+                child = os.open(part, flags, dir_fd=current)
                 os.close(current)
-    finally:
-        os.close(home_fd)
+                current = child
+                if created:
+                    os.fchmod(current, 0o700)
+        except OSError as exc:
+            if required:
+                raise ValueError('Cannot protect the CORSIA runtime cache: check that its path is accessible and contains no symlinks.') from exc
+            if exc.errno not in (errno.ELOOP, errno.ENOTDIR):
+                raise
+            logger.warning('Skipping unavailable cache path %s: %s', path, exc)
+        finally:
+            if current is not None:
+                os.close(current)
 
 
 def _canonical(paths: Sequence[Path]) -> list[Path]:
@@ -226,8 +230,11 @@ def build_protected_argv(
     thread_id: str, executable: str,
 ) -> list[str]:
     """Render only; the caller owns startup verification and process launch."""
+    from tools.managed_runtime import application_cache_root
+
     home, state = path_policy.home, path_policy.state_root
-    _prepare_home_caches(home)
+    cache = application_cache_root(home)
+    _prepare_home_caches(home, cache)
     rw = _canonical([*rw_roots, *(home / path for path in HOME_RW
                                    if (home / path).exists() and not any(
                                        part.is_symlink() for part in (home / path, *(home / path).parents)
@@ -241,7 +248,7 @@ def build_protected_argv(
     tmp, file_mask = _backing(state, thread_id)
     hidden = _canonical([state, *path_policy.private_roots, *path_policy.credential_roots,
                          *(home / path for path in PERSISTENCE)])
-    overlays = _canonical([*readonly_overlays, *path_policy.write_roots])
+    overlays = _canonical([cache, *readonly_overlays, *path_policy.write_roots])
     omitted = [entry for entry in (home.iterdir() if home.is_dir() else ())
                if not any(path == entry or path.is_relative_to(entry) for path in [*rw, *ro])]
     protected = [*overlays, *hidden, *omitted,

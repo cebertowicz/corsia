@@ -65,12 +65,45 @@ def test_root_filesystem_grant_is_refused(tmp_path, readonly):
     assert not (tmp_path / 'state').exists()
 
 
+def test_protected_runtime_cache_created_and_readonly(tmp_path, monkeypatch):
+    from tools import managed_runtime
+    monkeypatch.setattr(managed_runtime.platform, 'system', lambda: 'Linux')
+    monkeypatch.delenv('XDG_CACHE_HOME', raising=False)
+    home = tmp_path / 'home'
+    home.mkdir()
+    cache = home / '.cache/corsia'
+    policy = ProtectedHostPathPolicy(home, home / '.local/state/corsia', write_roots=(cache,))
+    argv = build_protected_argv('true', home, path_policy=policy, rw_roots=[home], ro_roots=[],
+        readonly_overlays=[], env={}, thread_id='one', executable='/usr/bin/bwrap')
+    assert cache.stat().st_mode & 0o777 == 0o700
+    assert cache.stat().st_uid == os.getuid()
+    assert any(argv[i:i + 3] == ['--ro-bind', str(cache), str(cache)] for i in range(len(argv)))
+
+
+def test_symlinked_protected_runtime_cache_refuses_command(tmp_path, monkeypatch):
+    from tools import managed_runtime
+    monkeypatch.setattr(managed_runtime.platform, 'system', lambda: 'Linux')
+    monkeypatch.delenv('XDG_CACHE_HOME', raising=False)
+    home = tmp_path / 'home'
+    (home / '.cache').mkdir(parents=True)
+    outside = tmp_path / 'outside'
+    outside.mkdir()
+    cache = home / '.cache/corsia'
+    cache.symlink_to(outside, target_is_directory=True)
+    policy = ProtectedHostPathPolicy(home, home / '.local/state/corsia', write_roots=(cache,))
+    with pytest.raises(ValueError, match='Cannot protect the CORSIA runtime cache'):
+        build_protected_argv('true', home, path_policy=policy, rw_roots=[home], ro_roots=[],
+            readonly_overlays=[], env={}, thread_id='one', executable='/usr/bin/bwrap')
+    assert not list(outside.iterdir())
+
+
 def test_cache_creation_skips_symlink_ancestor(tmp_path, caplog):
     home = tmp_path / 'home'
     home.mkdir()
     outside = tmp_path / 'outside'
     outside.mkdir()
-    (home / '.cache').symlink_to(outside, target_is_directory=True)
+    (home / '.cache').mkdir()
+    (home / '.cache/uv').symlink_to(outside, target_is_directory=True)
     policy = ProtectedHostPathPolicy(home, home / '.local/state/corsia')
     argv = build_protected_argv('true', home, path_policy=policy, rw_roots=[], ro_roots=[],
         readonly_overlays=[], env={}, thread_id='one', executable='/usr/bin/bwrap')
