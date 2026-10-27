@@ -103,6 +103,36 @@ def test_route_is_idempotent_and_checks_ownership(isolated_db):
         db.close()
 
 
+@pytest.mark.parametrize("operation", ["purge", "delete"])
+def test_thread_teardown_removes_only_its_chat_comment_rows(isolated_db, operation):
+    from datetime import datetime, timezone
+
+    from core.thread_family import delete_thread_family
+    from core.thread_lifecycle import _apply_purge
+
+    db = get_db()
+    try:
+        _seed(db)
+        _answer(db)
+        seed_thread(db, "other")
+        db.execute("INSERT INTO messages(id,thread_id,role,content,created_at,seq) "
+                   "VALUES ('other-question','other','user','x','t',1)")
+        db.execute("INSERT INTO chat_comment_answers VALUES ('other','other-question','c1.1','other-answer','t')")
+        db.executemany("INSERT INTO chat_comment_views VALUES (?,?,?,?)", [
+            (OWNER_USER, "question", "c1.1", "t"),
+            (OWNER_USER, "other-question", "c1.1", "t"),
+        ])
+        if operation == "purge":
+            _apply_purge(db, "thread", datetime.now(timezone.utc))
+        else:
+            delete_thread_family(db, ["thread"])
+        assert [row[0] for row in db.execute("SELECT thread_id FROM chat_comment_answers")] == ["other"]
+        assert [row[0] for row in db.execute("SELECT user_message_id FROM chat_comment_views")] == ["other-question"]
+    finally:
+        db.rollback()
+        db.close()
+
+
 def test_unread_query_uses_indexes_on_large_thread(isolated_db):
     db = get_db()
     try:

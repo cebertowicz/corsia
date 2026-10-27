@@ -57,6 +57,15 @@ def place_answers(db: sqlite3.Connection, message_id: str, thread_id: str, role:
             )
 
 
+def delete_thread_chat_comment_answers(db: sqlite3.Connection, thread_id: str) -> None:
+    """Remove derived rows before the thread's messages are deleted."""
+    db.execute(
+        "DELETE FROM chat_comment_views WHERE user_message_id IN "
+        "(SELECT id FROM messages WHERE thread_id=?)", (thread_id,),
+    )
+    db.execute("DELETE FROM chat_comment_answers WHERE thread_id=?", (thread_id,))
+
+
 UNREAD_SQL = """SELECT a.thread_id, a.user_message_id, a.cid, a.assistant_message_id, a.answered_at
 FROM chat_comment_answers a
 JOIN threads t ON t.id=a.thread_id AND t.user_id=?
