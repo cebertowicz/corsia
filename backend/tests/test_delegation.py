@@ -264,6 +264,36 @@ class TestCreateThread:
 
 
 class TestDelegationSendConfirmation:
+    @pytest.mark.parametrize("cloud_off", [True, False])
+    def test_project_cloud_off_sender_confirmation(self, client, deleg_db, monkeypatch, cloud_off):
+        import api.delegation as delegation_api
+        import infra.local_only as local_only
+
+        deleg_db.execute("INSERT INTO projects (id,name,created_at,updated_at) VALUES ('p','P','t','t')")
+        deleg_db.execute("INSERT INTO project_inference_policies(project_id,cloud_models_off) VALUES ('p',?)", (int(cloud_off),))
+        deleg_db.execute("UPDATE threads SET project_id='p', local_only=0 WHERE id='sender-self'")
+        deleg_db.execute(
+            "INSERT INTO threads (id,user_id,project_id,model,title,created_at,updated_at) "
+            "VALUES ('cloud-target','u-test','p','cloud','Cloud Target','t','t')"
+        )
+        deleg_db.commit()
+        delivered = []
+
+        async def deliver(*_args, **_kwargs):
+            delivered.append(True)
+            return SimpleNamespace(driver="turn_engine", duplicate=False)
+
+        monkeypatch.setattr(local_only, "_is_cloud", lambda selector, **_kwargs: selector == "cloud")
+        monkeypatch.setattr(delegation_api, "send_thread_input", deliver)
+        response = client.post(
+            "/api/delegation/threads/cloud-target/send", params={"token": _TOKEN},
+            json={"message": "test", "from_thread_id": "sender-self"},
+        )
+        assert response.status_code == (409 if cloud_off else 200)
+        assert delivered == ([] if cloud_off else [True])
+        if cloud_off:
+            assert "local_only_send_needs_confirm" in response.json()["detail"]
+
     def test_local_only_sender_requires_confirmation_before_rest_delivery(
         self,
         client,
