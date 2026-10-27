@@ -252,7 +252,7 @@
 			</div>
 		</SettingsGroup>
 
-		<SettingsGroup label="Folder" hint="Chats here share this project's context and agents.">
+		<SettingsGroup label="Folder" hint="Chats here share this project’s context and agents.">
 			<SettingsRow
 				name={project.path ? 'Working folder' : 'Working folder missing'}
 				sub={project.path ? displayName(project.path) : 'No folder selected'}

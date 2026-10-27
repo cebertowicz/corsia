@@ -254,7 +254,7 @@
 	{#if loading}
 		<p class="hint">Loading…</p>
 	{:else if repos.length === 0}
-		<p class="hint">No repositories. A project doesn't need one.</p>
+		<p class="hint">No repositories. A project doesn’t need one.</p>
 	{:else}
 		{#each repos as r (r.name)}
 			<RepoRow
