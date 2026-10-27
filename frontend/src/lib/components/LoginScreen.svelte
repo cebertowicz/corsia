@@ -128,8 +128,11 @@
 </script>
 
 {#if phase === 'error'}
-	<SetupShell steps={[]} page="error" title="CORSIA couldn’t start" lede={reportError || 'Something went wrong while starting. Try again, or save a report to send.'} primary={{ label: 'Retry' }} onPrimary={checkAgain}>
-		{#snippet secondary()}<Button variant="chip" onclick={async () => { reportError = await saveSetupReport(); }}>Save a report</Button>{/snippet}
+	<SetupShell steps={[]} page="error" title="CORSIA couldn’t start" lede={reportError || loginError || 'Something went wrong while starting. Try again, or save a report to send.'} primary={{ label: 'Retry' }} onPrimary={checkAgain}>
+		{#snippet secondary()}
+			<Button variant="chip" onclick={async () => { reportError = await saveSetupReport(); }}>Save a report</Button>
+			{#if localReturnLabel}<Button variant="chip" onclick={returnToThisComputer} loading={returningToThisComputer} disabled={returningToThisComputer}>{localReturnLabel}</Button>{/if}
+		{/snippet}
 	</SetupShell>
 {:else}
 <div class="login-screen">
@@ -138,11 +141,13 @@
 		<h1>CORSIA</h1>
 		<p>Your personal AI assistant</p>
 		{#if phase === 'no-account'}
+			{#if loginError}<div class="login-error">{loginError}</div>{/if}
 			<p class="no-account-copy">No account exists yet. On the CORSIA computer, run:</p>
 			<code class="cmd">corsia user add</code>
 			<Button variant="primary" onclick={checkAgain} loading={checkingAgain} disabled={checkingAgain}>
 				Check again
 			</Button>
+			{#if localReturnLabel}<Button variant="chip" onclick={returnToThisComputer} loading={returningToThisComputer} disabled={returningToThisComputer}>{localReturnLabel}</Button>{/if}
 		{:else if phase === 'form'}
 			{#if loginError}
 				<div class="login-error">{loginError}</div>
@@ -172,6 +177,9 @@
 					</Button>
 				{/if}
 			</form>
+		{:else if phase === 'checking' && localReturnLabel}
+			{#if loginError}<div class="login-error">{loginError}</div>{/if}
+			<Button variant="chip" onclick={returnToThisComputer} loading={returningToThisComputer} disabled={returningToThisComputer}>{localReturnLabel}</Button>
 		{/if}
 	</div>
 </div>

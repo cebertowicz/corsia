@@ -173,6 +173,44 @@ describe('LoginScreen', () => {
 		expect(host.textContent).not.toContain('Disconnect from Studio?');
 	});
 
+	it.each([true, false])('offers a way back while checking status only when remote: %s', async (remote) => {
+		remoteShellMocks.shellInfo.mockReturnValue(remote ? { mode: 'remote', name: 'Studio', localConfigured: true } : null);
+		vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})));
+		mountScreen();
+		const button = Array.from(host.querySelectorAll('button')).find((item) => item.textContent?.includes('Use this computer instead'));
+		expect(Boolean(button)).toBe(remote);
+		if (button) {
+			button.click();
+			await vi.waitFor(() => expect(remoteShellMocks.disconnectRemote).toHaveBeenCalledOnce());
+		}
+	});
+
+	it.each([true, false])('offers a way back on the no-account screen only when remote: %s', async (remote) => {
+		remoteShellMocks.shellInfo.mockReturnValue(remote ? { mode: 'remote', name: 'Studio', localConfigured: true } : null);
+		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => String(input) === '/api/setup/status' ? { ok: false, status: 403 } : statusResponse(false)));
+		mountScreen();
+		await vi.waitFor(() => expect(host.textContent).toContain('corsia user add'));
+		const button = Array.from(host.querySelectorAll('button')).find((item) => item.textContent?.includes('Use this computer instead'));
+		expect(Boolean(button)).toBe(remote);
+		if (button) {
+			button.click();
+			await vi.waitFor(() => expect(remoteShellMocks.disconnectRemote).toHaveBeenCalledOnce());
+		}
+	});
+
+	it.each([true, false])('offers a way back on the status-error screen only when remote: %s', async (remote) => {
+		remoteShellMocks.shellInfo.mockReturnValue(remote ? { mode: 'remote', name: 'Studio', localConfigured: false } : null);
+		vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('unavailable'); }));
+		mountScreen();
+		await vi.waitFor(() => expect(host.textContent).toContain('CORSIA couldn’t start'));
+		const button = Array.from(host.querySelectorAll('button')).find((item) => item.textContent?.includes('Set up this computer instead'));
+		expect(Boolean(button)).toBe(remote);
+		if (button) {
+			button.click();
+			await vi.waitFor(() => expect(remoteShellMocks.disconnectRemote).toHaveBeenCalledOnce());
+		}
+	});
+
 	it('does not offer the remote return action outside the desktop remote shell', async () => {
 		vi.stubGlobal('fetch', vi.fn(async () => statusResponse(true)));
 		mountScreen();
