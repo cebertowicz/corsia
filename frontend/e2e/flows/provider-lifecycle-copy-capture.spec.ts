@@ -14,12 +14,14 @@ const provider = { name: 'omlx', label: 'oMLX', type: 'network', has_key: false,
 test('shows model server action fallback copy', async ({ page }, testInfo) => {
 	test.skip(testInfo.project.name !== 'chromium-desktop');
 	test.setTimeout(120_000);
+	let succeed = false;
 	await page.route('**/api/settings/providers?**', route => route.fulfill({ json: { providers: [provider] } }));
 	await page.route('**/api/settings/network-servers?**', route => route.fulfill({ json: { servers: [server] } }));
 	await page.route('**/api/settings/network-servers/omlx-copy/models?**', route => route.fulfill({ json: { loaded: [], available: [] } }));
 	await page.route('**/api/settings/providers/omlx/status?**', route => route.fulfill({ status: 500, json: {} }));
-	await page.route('**/api/settings/network-servers/omlx-copy/lifecycle/**', route => route.fulfill({ json: { ok: false } }));
+	await page.route('**/api/settings/network-servers/omlx-copy/lifecycle/**', route => route.fulfill({ json: { ok: succeed } }));
 	for (const width of [1920, 393]) {
+		succeed = false;
 		await page.setViewportSize({ width, height: 900 });
 		await page.emulateMedia({ colorScheme: 'light' });
 		await loginByUrl(page, { waitForComposer: false });
@@ -37,6 +39,13 @@ test('shows model server action fallback copy', async ({ page }, testInfo) => {
 		await dialog.getByRole('button', { name: 'Stop', exact: true }).click();
 		await expect(dialog.getByText('Couldn’t stop the model server. Try again.')).toBeVisible();
 		await page.screenshot({ path: testInfo.outputPath(`server-stop-${width}.png`), fullPage: true, animations: 'disabled' });
+		succeed = true;
+		await dialog.getByRole('button', { name: 'Reload models' }).click();
+		await expect(dialog.getByText('Model list refreshed.')).toBeVisible();
+		await page.screenshot({ path: testInfo.outputPath(`server-refresh-success-${width}.png`), fullPage: true, animations: 'disabled' });
+		await dialog.getByRole('button', { name: 'Stop', exact: true }).click();
+		await expect(dialog.getByText('Model server stopped.')).toBeVisible();
+		await page.screenshot({ path: testInfo.outputPath(`server-stop-success-${width}.png`), fullPage: true, animations: 'disabled' });
 	}
 });
 
