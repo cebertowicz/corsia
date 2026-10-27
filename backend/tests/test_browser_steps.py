@@ -40,8 +40,19 @@ async def test_runs_a_server_owned_file_successfully(tool, monkeypatch):
 
     result = json.loads(await tool.execute("google-setup/console-project", _thread_id="thread"))
 
-    assert result == {"ok": True, "steps": ["project-page", "project-name", "project-create", "project-ready", "apis-page", "apis-enable"]}
+    assert result == {"ok": True, "steps": ["project-page", "project-name", "project-create", "project-ready"]}
     assert calls[0] == ["open", "https://console.cloud.google.com/projectcreate"]
+
+
+@pytest.mark.asyncio
+async def test_project_resume_stops_before_api_enablement(tool, monkeypatch):
+    calls = []
+    monkeypatch.setattr(browser_steps, "_run", page_at("https://console.cloud.google.com/home", calls))
+
+    result = json.loads(await tool.execute("google-setup/console-project", start_at="project-ready", _thread_id="thread"))
+
+    assert result == {"ok": True, "steps": ["project-ready"]}
+    assert not any(args[0] == "open" or args[0] == "click" for args in calls)
 
 
 @pytest.mark.asyncio
@@ -127,7 +138,7 @@ def test_placeholder_outside_type_value_is_refused(tmp_path, monkeypatch):
 
 
 def test_shipped_step_files_load_and_validate():
-    for name in ("google-setup/console-project", "google-setup/console-client"):
+    for name in ("google-setup/console-project", "google-setup/console-apis", "google-setup/console-client"):
         data, error = browser_steps._load(name)
         assert error is None and data is not None
         assert all(step["action"] in {"goto", "click", "type", "wait_for"} for step in data["steps"])

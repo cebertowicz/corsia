@@ -1,0 +1,8 @@
+{
+  "note": "Selectors are unverified against the real Google Cloud console; any miss returns control to the model.",
+  "domains": ["google.com"],
+  "steps": [
+    {"id":"apis-page","says":"Open the five API enablement page.","action":"goto","url":"https://console.cloud.google.com/flows/enableapi?apiid=gmail.googleapis.com,calendar-json.googleapis.com,drive.googleapis.com,docs.googleapis.com,sheets.googleapis.com"},
+    {"id":"apis-enable","says":"Enable the Google APIs.","action":"click","selector":"role=button[name=\"Enable\"s]"}
+  ]
+}

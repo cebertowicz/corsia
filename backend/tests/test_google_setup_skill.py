@@ -120,9 +120,12 @@ def test_google_setup_carries_the_approved_offer_and_leaves_secrets_to_the_backe
     assert "`See, edit and delete your Drive, Docs and Sheets files, so you won't have to sign in again later.`" in steps
     # The console clicks live in the server-owned step file; the skill names that file.
     assert '`steps: "google-setup/console-project"`' in steps
+    assert '`steps: "google-setup/console-apis"`' in steps
     project = json.loads((SKILLS / "google-setup/steps/console-project.json").read_text(encoding="utf-8"))
+    apis = json.loads((SKILLS / "google-setup/steps/console-apis.json").read_text(encoding="utf-8"))
+    assert [step["id"] for step in project["steps"]] == ["project-page", "project-name", "project-create", "project-ready"]
     enable_link = "https://console.cloud.google.com/flows/enableapi?apiid="
-    urls = [step["url"] for step in project["steps"] if step.get("url", "").startswith(enable_link)]
+    urls = [step["url"] for step in apis["steps"] if step.get("url", "").startswith(enable_link)]
     assert len(urls) == 1
     enabled = urls[0].removeprefix(enable_link).split(",")
     assert enabled == ["gmail.googleapis.com", "calendar-json.googleapis.com", "drive.googleapis.com",
