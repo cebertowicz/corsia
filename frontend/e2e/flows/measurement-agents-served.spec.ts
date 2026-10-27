@@ -113,7 +113,7 @@ async function openMeasurement(page: import('@playwright/test').Page) {
 	};
 }
 
-/** Pick the seeded project from the page's Scope select, which is how a reader reaches its Agents table. */
+/** Pick the seeded project from the page's Showing select, which is how a reader reaches its Agents table. */
 async function openSeededProject(page: import('@playwright/test').Page) {
 	await selectProjectScope(page, SEEDED_PROJECT);
 	await expect(page.getByRole('button', { name: 'Showing: ' + SEEDED_PROJECT, exact: true })).toBeVisible();

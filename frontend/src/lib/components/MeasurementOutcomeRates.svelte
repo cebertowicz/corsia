@@ -13,7 +13,7 @@
 	} = $props();
 
 	const asksView = $derived(periodView(asks.rows, 'asks_per_outcome', 1, asks.period, asks.windows?.asks_per_outcome));
-	/** One line under the agents table, for all agents together; the kept Asks per outcome chart draws the series. */
+	/** One line under the agents table, for all agents together; the kept Decisions and tasks for you per outcome chart draws the series. */
 	const asksLine = $derived.by(() => {
 		const lead = 'All agents together:';
 		if (asks.loading && !asks.rows.length) return `${lead} loading.`;

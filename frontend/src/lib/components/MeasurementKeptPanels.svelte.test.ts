@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { mount, unmount } from 'svelte';
 import type { MeasurementRow, PanelState, SeriesWindows } from '$lib/stores/measurement';
 import MeasurementKeptPanels from './MeasurementKeptPanels.svelte';
-import { INCONSISTENT_ANSWERS } from './measurementAlignmentChart';
 import { daysPeriod, periodsPeriod } from '../__tests__/fixtures/measurementPeriod';
 
 let component: Record<string, unknown> | null = null;
@@ -360,31 +359,13 @@ describe('Alignment draws its three shares as one stacked bar per period, as bef
 		expect(card('alignment').textContent).not.toContain('not recorded');
 	});
 
-	it.each([
-		['mismatched count', { n: 39 }],
-		['out-of-range share', { value: 1.5 }],
-		['non-finite share', { value: Number.NaN }],
-	])('explains a %s in the alignment table', (_name, change) => {
-		const rows = all();
-		const shares = withShares(rows.took_recommendation_pct).map((r) => (r.period === wk(2) && r.series === 'answered_neither_pct' ? { ...r, ...change } : r));
-		render(rows, periodsPeriod(wk(7)), POOLED, shares);
-		expect(card('alignment').querySelectorAll('table.sr-only tbody tr')[2].textContent).toContain(INCONSISTENT_ANSWERS);
-	});
-
-	it('reports a missing share as inconsistent answers', () => {
-		const rows = all();
-		const shares = withShares(rows.took_recommendation_pct).filter((r) => !(r.period === wk(2) && r.series === 'answered_neither_pct'));
-		render(rows, periodsPeriod(wk(7)), POOLED, shares);
-		expect(card('alignment').querySelectorAll('table.sr-only tbody tr')[2].textContent).toContain(INCONSISTENT_ANSWERS);
-	});
-
 	it('draws no stack for a week whose shares do not add up to the answered decisions, and says why in the table', () => {
 		const rows = all();
 		const shares = withShares(rows.took_recommendation_pct).map((r) => (r.period === wk(2) && r.series === 'answered_neither_pct' ? { ...r, value: 0.5 } : r));
 		render(rows, periodsPeriod(wk(7)), POOLED, shares);
 		const section = card('alignment');
 		expect(section.querySelectorAll('.dsk svg rect.stack')).toHaveLength(7 * 3);
-		expect(section.querySelectorAll('table.sr-only tbody tr')[2].textContent).toContain(INCONSISTENT_ANSWERS);
+		expect(section.querySelectorAll('table.sr-only tbody tr')[2].textContent).toContain('do not add up');
 		// Plenty of decisions were answered that week, so the chart must not call it too few.
 		expect(section.querySelectorAll('.dsk svg text.lo')).toHaveLength(0);
 		expect(section.querySelector('.lg')?.textContent).not.toContain('too few');

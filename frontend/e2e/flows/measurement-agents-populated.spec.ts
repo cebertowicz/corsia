@@ -102,7 +102,7 @@ async function openMeasurement(page: import('@playwright/test').Page, project: {
 	// Below 768px the rail is a drawer that closed itself when Settings opened.
 	if ((page.viewportSize()?.width ?? 0) <= 768) await page.getByRole('button', { name: 'Toggle sidebar', exact: true }).click();
 	await page.getByRole('link', { name: 'Measurement', exact: true }).click();
-	// The Agents table belongs to a project's scope, reached from the page's Scope select.
+	// The Agents table belongs to a project's scope, reached from the page's Showing select.
 	await expect(page.getByRole('region', { name: /Agents table/ })).toHaveCount(0);
 	await selectProjectScope(page, project.name);
 	await expect(page.getByRole('button', { name: `Showing: ${project.name}`, exact: true })).toBeVisible();
