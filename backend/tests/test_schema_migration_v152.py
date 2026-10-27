@@ -4,7 +4,7 @@ import sqlite3
 
 from infra.database_migrations import migrate_to_current
 from infra.migration_62_to_63_thread_updates import migrate_62_to_63
-from infra.migration_150_to_151_person_step import migrate_150_to_151
+from infra.migration_151_to_152_person_step import migrate_151_to_152
 
 
 def test_update_kinds_migrate_without_losing_rows_or_objects():
@@ -22,12 +22,12 @@ def test_update_kinds_migrate_without_losing_rows_or_objects():
              None if kind == "marked" else str(i), None if kind == "marked" else kind, i, "2026-01-01"),
         )
     before = db.execute("SELECT * FROM thread_updates ORDER BY id").fetchall()
-    db.execute("PRAGMA user_version=150")
+    db.execute("PRAGMA user_version=151")
     db.commit()
-    assert migrate_to_current(db, 151).migrated is True
-    assert db.execute("PRAGMA user_version").fetchone()[0] == 151
-    assert migrate_to_current(db, 151).migrated is False
-    migrate_150_to_151(db)
+    assert migrate_to_current(db, 152).migrated is True
+    assert db.execute("PRAGMA user_version").fetchone()[0] == 152
+    assert migrate_to_current(db, 152).migrated is False
+    migrate_151_to_152(db)
     assert db.execute("SELECT * FROM thread_updates ORDER BY id").fetchall() == before
     indexes = {row[1] for row in db.execute("PRAGMA index_list(thread_updates)")}
     assert {"idx_thread_updates_thread_time", "idx_thread_updates_thread_seq", "idx_thread_updates_node"} <= indexes
@@ -45,7 +45,7 @@ def test_rebuild_rolls_back_with_the_startup_transaction():
     db.commit()
     old_schema = db.execute("SELECT sql FROM sqlite_master WHERE name='thread_updates'").fetchone()[0]
     db.execute("BEGIN IMMEDIATE")
-    migrate_150_to_151(db)
+    migrate_151_to_152(db)
     db.rollback()
     assert db.execute("SELECT sql FROM sqlite_master WHERE name='thread_updates'").fetchone()[0] == old_schema
     assert db.execute("SELECT COUNT(*) FROM sqlite_master WHERE name LIKE 'idx_thread_updates_%'").fetchone()[0] == 3

@@ -17,6 +17,7 @@ from tools.mcp_local_transport import (
     _mcp_denial_guidance,
     _mcp_denied_paths_in,
     mcp_oserror_detail as _mcp_oserror_detail,
+    prepare_managed_runtime,
     safehouse_stdio_parameters as _safehouse_stdio_parameters,
 )
 from tools.mcp_stamp import build_stamp
@@ -79,14 +80,14 @@ class MCPConnectionFailure(str):
 
 def mcp_failure_class(error: BaseException, config: dict) -> str:
     """Classify one launch failure before its safe text loses the machine cause."""
-    from tools.managed_runtime import ManagedRuntimeDownloadError
+    from tools.managed_runtime import ManagedRuntimeDownloadError, ManagedRuntimeError
 
     if isinstance(error, BaseExceptionGroup):
         return mcp_failure_class(error.exceptions[0], config)
     if isinstance(error, MCPConnectionError):
         return error.failure_class
-    if isinstance(error, ManagedRuntimeDownloadError):
-        return "runtime_download_failed"
+    if isinstance(error, ManagedRuntimeError):  # runtime preparation failed before any MCP connection
+        return "runtime_download_failed" if isinstance(error, ManagedRuntimeDownloadError) else "cannot_start"
     if getattr(_active_auth.get(), "challenged", False):
         return "needs_sign_in"  # the server asked for an OAuth sign-in this connection did not have
     if isinstance(error, (TimeoutError, httpx.TimeoutException)):
@@ -373,6 +374,7 @@ async def connect_mcp_servers(mcp_servers: dict, registry: ToolRegistry,
         connection = None
         try:
             deadline = timeout_seconds(config, "connect_timeout", 10)
+            await prepare_managed_runtime(config)
             connection = _ServerConnection(name, config)
             wrappers = await asyncio.wait_for(asyncio.shield(connection.ready), deadline)
             names = [tool.name for tool in wrappers]

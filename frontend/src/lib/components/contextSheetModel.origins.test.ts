@@ -21,7 +21,7 @@ const EXPECTED: Record<string, string | null> = {
 	role: 'Agent',
 	summary: 'History',
 	system: 'System',
-	thread: 'This thread',
+	thread: 'This chat',
 	tools: 'Tools',
 	user: null,
 	workspace: 'Workspace',

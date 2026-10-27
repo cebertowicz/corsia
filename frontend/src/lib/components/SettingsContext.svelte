@@ -63,7 +63,7 @@
 
 	function remove(file: WorkspaceContextFile) {
 		const kept = files.map((row) => row.path).filter((path) => path !== file.path);
-		void request('/api/context/bootloader', 'PATCH', { scope: 'workspace', files: kept }, 'Could not save these settings. Try again.');
+		void request('/api/context/bootloader', 'PATCH', { scope: 'workspace', files: kept }, 'Couldn’t save these settings. Try again.');
 	}
 
 	function create(path: string): Promise<boolean> {
@@ -83,7 +83,7 @@
 	}
 </script>
 
-<SettingsGroup label="All projects" anchor="context-workspace" hint="Every conversation gets these first, before its project's and its own.">
+<SettingsGroup label="All projects" anchor="context-workspace" hint="Every chat gets these first, before its project's and its own.">
 	{#if error}<p class="error" role="alert">{error}</p>{/if}
 	{#each files as file (file.source_id)}
 		<SettingsRow
@@ -97,7 +97,7 @@
 	{:else}
 		<p class="empty">No context files for all projects yet.</p>
 	{/each}
-	{#if files.some((file) => file.exists) && home.unavailable}<p class="empty">Open a conversation to view this.</p>{/if}
+	{#if files.some((file) => file.exists) && home.unavailable}<p class="empty">Open a chat to view this.</p>{/if}
 	{#if files.some((file) => file.exists) && home.failed}
 		<p class="error" role="alert">Couldn't find where to open these. <Button size="sm" variant="ghost" onclick={home.retry}>Try again</Button></p>
 	{/if}
