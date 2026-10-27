@@ -1,6 +1,9 @@
 """Rollover over every permitted account when no order is saved, and for a thread outside the saved order."""
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 
 from connections import account_moves, account_rollover, harness_usage
@@ -217,6 +220,9 @@ def _three_in_order(db, second, third):
     from connections.vendor_accounts import add_account, set_account_state
 
     fourth = set_account_state(add_account('codex', 'Fourth')['id'], 'signed_in', expected_revision=0)
+    (Path(fourth['source_home']) / 'auth.json').write_text(json.dumps({
+        'auth_mode': 'chatgpt', 'tokens': {'access_token': 'synthetic'},
+    }))
     _ready_all(db, second, third, fourth)
     return [second, third, fourth]
 

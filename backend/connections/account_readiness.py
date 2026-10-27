@@ -1,4 +1,4 @@
-"""Stored-only batched account facts for the existing claim evaluator."""
+"""Batched account facts for the existing claim evaluator: stored records plus its live home check."""
 from __future__ import annotations
 
 import json
@@ -86,10 +86,12 @@ def _batch(ids, *, db) -> dict[str, AccountReadiness]:
 
 def read_account_readiness(thread_ids: Sequence[str], *, db: sqlite3.Connection
                            ) -> dict[str, AccountReadiness]:
-    """Stored-only advisory reads through the canonical account selector.
+    """Advisory reads through the canonical account selector and claim evaluator.
 
-    Plans owns the consistent read snapshot and authorization of the selected
-    account-stalled threads. These facts are advisory, never paid admission.
+    Plans owns the consistent read snapshot of the stored records and authorization of
+    the selected account-stalled threads. The evaluator's custom-account home check
+    (``account_home.missing_home_reason``) reads the filesystem at call time, outside
+    that snapshot. These facts are advisory, never paid admission.
     """
     ids = tuple(dict.fromkeys(thread_ids))
     result: dict[str, AccountReadiness] = {}

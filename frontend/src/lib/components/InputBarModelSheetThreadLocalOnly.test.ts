@@ -2,11 +2,12 @@ import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('$lib/product_events', () => ({ emitProductEvent: vi.fn() }));
-const localPicker = vi.hoisted(() => ({ canAdd: false }));
+const localPicker = vi.hoisted(() => ({ canAdd: false, never: false }));
 vi.mock('$lib/stores/localPickerStatus', () => ({
 	localStatus: { subscribe: (run: (value: unknown) => void) => { run(null); return () => {}; } },
 	canAddLocalModel: { subscribe: (run: (value: unknown) => void) => { run(localPicker.canAdd); return () => {}; } },
 	canSetUpLocalModel: { subscribe: (run: (value: unknown) => void) => { run(false); return () => {}; } },
+	neverLocalHost: { subscribe: (run: (value: unknown) => void) => { run(localPicker.never); return () => {}; } },
 	retryLocalSetup: vi.fn(), watchLocalStatus: () => () => {},
 }));
 
@@ -29,7 +30,7 @@ beforeEach(() => {
 	threads.set([{ id: 't1', project_id: 'p1', updated_at: '2026-10-19T10:00:00.000000' } as never]);
 	vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({}) })));
 });
-afterEach(() => { localPicker.canAdd = false; threadCatalogs.set(new Map()); if (component) unmount(component); component = null; host.remove(); token.set(null); vi.unstubAllGlobals(); });
+afterEach(() => { localPicker.canAdd = false; localPicker.never = false; threadCatalogs.set(new Map()); if (component) unmount(component); component = null; host.remove(); token.set(null); vi.unstubAllGlobals(); });
 const addLinks = () => Array.from(host.querySelectorAll('button')).filter((b) => ['Add a local model', 'Set up a local model'].includes(b.textContent?.trim() ?? ''));
 const open = (props: Record<string, unknown> = {}) => { component = mount(InputBarModelSheet, { target: host, props }); flushSync(); };
 
@@ -95,5 +96,19 @@ describe('model sheet for a Local only thread', () => {
 		open({ threadId: 'w1' });
 		expect(text()).not.toContain('Local only'); expect(host.querySelector('[aria-label="CORSIA"]')).toBeNull();
 		expect(addLinks()).toHaveLength(1);
+	});
+	it('a server that can never run a local model keeps the true statement and offers no add link', () => {
+		localPicker.never = true; models.set([cloud('thread_local_only')]); open();
+		expect(text()).toContain('No local model is ready.');
+		expect(addLinks()).toHaveLength(0);
+	});
+	it('a worker composer on a server that can never run a local model offers no add link either', () => {
+		localPicker.never = true;
+		threads.set([{ id: 't1', project_id: 'p1', updated_at: '2026-10-19T10:00:00.000000' } as never, { id: 'w1', project_id: 'p1', updated_at: '2026-10-19T10:00:00.000000' } as never]);
+		const setup = { ...local, id: 'omlx/setup', litellm_model: 'omlx@ns-1/setup', status: 'unavailable' } as Model;
+		threadCatalogs.set(new Map([['w1', [cloud('thread_local_only'), setup]]]));
+		open({ threadId: 'w1' });
+		expect(text()).toContain('No local model is ready.');
+		expect(addLinks()).toHaveLength(0);
 	});
 });

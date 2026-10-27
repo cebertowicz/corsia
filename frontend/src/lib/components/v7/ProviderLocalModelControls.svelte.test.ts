@@ -32,6 +32,18 @@ describe('ProviderLocalModelControls', () => {
 		expect(onAddProvider).toHaveBeenCalledOnce();
 	});
 
+	it('shows no low-memory refusal on a host that can never run a local model', async () => {
+		host = document.createElement('div');
+		document.body.appendChild(host);
+		token.set('tok');
+		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ sources: [{ source: 'omlx', name: 'Local model', state: 'ready', eligible: false, never_local: true }] }) })));
+		component = mount(ProviderLocalModelControls, { target: host, props: { onStarted: vi.fn(), onAddProvider: vi.fn(), corsiaManaged: true } });
+		await tick(); await tick(); flushSync();
+
+		expect(host.textContent).not.toContain('24 GB');
+		expect(host.textContent).not.toContain('Add model');
+	});
+
 	it('offers no add action for a person-owned oMLX card', async () => {
 		host = document.createElement('div');
 		document.body.appendChild(host);
