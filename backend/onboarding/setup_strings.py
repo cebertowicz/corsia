@@ -83,7 +83,7 @@ FIND_PROJECTS = {
 
 # {sign_up_with} is the agents' address, or ASK_FOR_ADDRESS when the saved email is not
 # Gmail: on option A the conductor then asks in chat for an address.
-ASK_FOR_ADDRESS = "ask you in chat for an address to use"
+ASK_FOR_ADDRESS = "ask you in chat for an email address not already used on GitHub"
 
 # The community card comes first: whether agents use and offer the community's proven improvements.
 # It sits under the GitHub task; GitHub comes up only on a yes to sharing, as whichever GitHub card fits.
@@ -111,19 +111,19 @@ GITHUB = {
         "Reports to CORSIA are text only and go only with your OK, from whichever you choose."
     ),
     "tradeoff": (
-        "A separate account takes a few minutes in your own browser: I give you the sign-up link and "
-        "{sign_up_with}, and you type the password and any verification code. Using yours takes "
+        "A separate account takes a few minutes in your own browser: agents give you the sign-up link and "
+        "{sign_up_with}, and you type the password and any verification code. Using yours may need "
         "one sign-in, and everything agents post shows your name."
     ),
     "options": (
         ("Make a separate GitHub account",
-         "I give you the sign-up link and the address to use, or ask you for one. You sign up in your own browser."),
+         "Agents give you the sign-up link and the address to use, or ask you for one. You sign up in your own browser."),
         ("Use my account",
-         "Agents use the GitHub sign-in already on this computer, or I help you sign in once in "
+         "Agents use the GitHub sign-in already on this computer, or agents help you sign in once in "
          "your browser."),
-        ("Not now", "Ask me any time."),
+        ("Not now", "Ask an agent to set this up later."),
     ),
-    "rationale": "You can always tell what you wrote from what an agent wrote.",
+    "rationale": "A separate account keeps agent posts under their own name.",
 }
 
 # The person has no GitHub account: only their agents' own account is offered.
@@ -134,13 +134,13 @@ GITHUB_NO_ACCOUNT = {
         "repositories. GitHub allows each person one extra machine account for this."
     ),
     "tradeoff": (
-        "It takes a few minutes in your own browser: I give you the sign-up link and "
+        "It takes a few minutes in your own browser: agents give you the sign-up link and "
         "{sign_up_with}, and you type the password and any verification code."
     ),
     "options": (
         ("Make a GitHub account",
-         "I give you the sign-up link and the address to use, or ask you for one. You sign up in your own browser."),
-        ("Not now", "Ask me any time."),
+         "Agents give you the sign-up link and the address to use, or ask you for one. You sign up in your own browser."),
+        ("Not now", "Ask an agent to set this up later."),
     ),
     "rationale": "You can always tell what you wrote from what an agent wrote.",
 }

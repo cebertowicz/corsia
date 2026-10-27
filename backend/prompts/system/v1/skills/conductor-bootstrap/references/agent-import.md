@@ -38,7 +38,7 @@ Also gather the connected apps (next section) before you post. When there are no
 
 Leave out an empty group. With more than 15 about-you lines, end with `I found [N] more. Say "show more" to see the next 15.` With one tool, name it in the skills line; with several, group the skills under `From [tool]`, with no tool on the rows. After the message, post the other skill states, none of which asks the person to do anything. `already_here`, all on one line: `Already here, so I left them: [a, b, c].`
 
-A skill that can't come over is left out, and the person has nothing to do unless they want it. Name every such skill once, all together on one line, `I left out [name] ([reason]), [name] ([reason]). Ask me about any of them and I'll say what to change and try again, or write a CORSIA skill that does the same.`, with the reason in plain words by state:
+A skill that can't come over is left out, and the person has nothing to do unless they want it. Name every such skill once, all together on one line, `I left out [name] ([reason]), [name] ([reason]). Ask me to help with any of them and I'll say what to change and try again, or help you write a CORSIA skill to do what you need.`, with the reason in plain words by state:
 
 - `name_reserved`: `CORSIA already has a skill with that name`
 - `name_clash`: `[tool] and [tool] both have one with that name`
@@ -46,7 +46,7 @@ A skill that can't come over is left out, and the person has nothing to do unles
 - `too_large`: `too big to bring over`
 - `unreadable`, whatever its `reason` or none: `I couldn’t read it`
 
-If they ask about a left-out skill, say what to change in plain words and try it again (for `changed`, show the current version first), or write a CORSIA skill that does the same.
+If they ask about a left-out skill, say what to change in plain words and try it again (for `changed`, show the current version first), or help them write a CORSIA skill to do what they need.
 
 ## Their answer
 

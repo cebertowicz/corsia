@@ -24,16 +24,16 @@ WEB = "Connect web search"
 SESSIONS = ("Claude Code", "Codex")
 GITHUB_OPTIONS = [
     {"id": "A", "label": "Make a separate GitHub account",
-     "detail": "I give you the sign-up link and the address to use, or ask you for one. You sign up in your own browser."},
+     "detail": "Agents give you the sign-up link and the address to use, or ask you for one. You sign up in your own browser."},
     {"id": "B", "label": "Use my account",
-     "detail": ("Agents use the GitHub sign-in already on this computer, or I help you sign in once in "
+     "detail": ("Agents use the GitHub sign-in already on this computer, or agents help you sign in once in "
                 "your browser.")},
-    {"id": "C", "label": "Not now", "detail": "Ask me any time."},
+    {"id": "C", "label": "Not now", "detail": "Ask an agent to set this up later."},
 ]
 GITHUB_NO_ACCOUNT_OPTIONS = [
     {"id": "A", "label": "Make a GitHub account",
-     "detail": "I give you the sign-up link and the address to use, or ask you for one. You sign up in your own browser."},
-    {"id": "B", "label": "Not now", "detail": "Ask me any time."},
+     "detail": "Agents give you the sign-up link and the address to use, or ask you for one. You sign up in your own browser."},
+    {"id": "B", "label": "Not now", "detail": "Ask an agent to set this up later."},
 ]
 EXPECTED_COMMUNITY = {
     "task_title": GITHUB_TASK,
@@ -64,12 +64,12 @@ def _github(sign_up_with: str) -> dict:
             "Reports to CORSIA are text only and go only with your OK, from whichever you choose."
         ),
         "tradeoff": (
-            "A separate account takes a few minutes in your own browser: I give you the sign-up link and "
+            "A separate account takes a few minutes in your own browser: agents give you the sign-up link and "
             f"{sign_up_with}, and you type the password and any verification code. "
-            "Using yours takes one sign-in, and everything agents post shows your name."
+            "Using yours may need one sign-in, and everything agents post shows your name."
         ),
         "recommendation": "A",
-        "rationale": "You can always tell what you wrote from what an agent wrote.",
+        "rationale": "A separate account keeps agent posts under their own name.",
         "options": GITHUB_OPTIONS,
         "other_enabled": True,
     }
@@ -84,7 +84,7 @@ def _github_no_account(sign_up_with: str) -> dict:
             "your repositories. GitHub allows each person one extra machine account for this."
         ),
         "tradeoff": (
-            "It takes a few minutes in your own browser: I give you the sign-up link and "
+            "It takes a few minutes in your own browser: agents give you the sign-up link and "
             f"{sign_up_with}, and you type the password and any verification code."
         ),
         "recommendation": "A",
@@ -96,7 +96,7 @@ def _github_no_account(sign_up_with: str) -> dict:
 
 EXPECTED_GITHUB = _github("you+agents@gmail.com to use")
 EXPECTED_GITHUB_NO_ACCOUNT = _github_no_account("you+agents@gmail.com to use")
-EXPECTED_GITHUB_NO_ADDRESS = _github("ask you in chat for an address to use")
+EXPECTED_GITHUB_NO_ADDRESS = _github("ask you in chat for an email address not already used on GitHub")
 EXPECTED_FIND_PROJECTS = {
     "task_title": PROJECT_TASK,
     "title": "Look for the projects you already work on?",
