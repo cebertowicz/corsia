@@ -126,7 +126,7 @@ def test_first_run_describes_brave_only_as_the_key_acquisition_path():
 
     assert "It uses Brave Search." not in web_search
     assert "Your searches go to Brave." not in web_search
-    assert "Search needs no key, but a Brave Search key can make it steadier." in web_search
+    assert "I couldn't search without a key just now, and a Brave Search key makes search steadier." in web_search
     assert "Searches using that key go to Brave." in web_search
 
 
@@ -372,11 +372,11 @@ def test_web_search_guidance_distinguishes_keyless_readiness_from_key_setup():
     web = (FIRST_RUN_APP.parent / "web-search.md").read_text(encoding="utf-8")
 
     assert "When `web_search_ready` is true, search already works; skip this key setup." in web
-    assert "Every install can search without a key; a Brave key can make search steadier." in web
+    assert "Every install tries search without a key first; a Brave key can make search steadier." in web
     assert "When `web_search_ready` is false, search didn't work on the check; a Brave key is an optional alternative." in web
     assert "There is no fallback search: without a key, web search stays off." not in web
     assert "search stays off until this setup succeeds" not in web
-    assert "`Search didn't work just now. Ask me any time to try again; Settings › Keys has the optional Brave key whenever you want it.`" in _step(4)
+    assert "`OK. Ask me any time to try search again; Settings › Keys has the optional Brave key whenever you want it.`" in _step(4)
     assert "Until then I can't search the web." not in _step(4)
 
 

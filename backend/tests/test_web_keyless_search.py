@@ -75,7 +75,7 @@ async def test_ddgs_failure_returns_reason_without_exception_text(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_keyless_timeout_does_not_block_event_loop(monkeypatch):
+async def test_keyless_timeout_returns_timeout_reason(monkeypatch):
     monkeypatch.setattr(keyless, "TIMEOUT_SECONDS", 0.01)
     def slow_search(query, count):
         time.sleep(0.1)

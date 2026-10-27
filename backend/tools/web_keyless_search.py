@@ -1,6 +1,7 @@
 """Keyless web search using the DDGS library in the backend process."""
 
 import asyncio
+import logging
 
 from ddgs import DDGS
 from ddgs.exceptions import DDGSException, RatelimitException, TimeoutException
@@ -10,6 +11,7 @@ from tools.web_search_outcome import (
 )
 
 TIMEOUT_SECONDS = 14
+log = logging.getLogger(__name__)
 
 
 def _search(query: str, count: int) -> list[dict[str, str]]:
@@ -39,6 +41,7 @@ async def keyless_search(query: str, count: int = 5) -> SearchOutcome:
     except DDGSException as exc:
         # DDGS wraps a failed request in its base exception, chained from the client error.
         return SearchOutcome(FAILED, REASON_NETWORK if exc.__cause__ else REASON_PROVIDER)
-    except Exception:
-        # Anything else is not the network's fault; its text is never kept.
+    except Exception as exc:
+        # Anything else is not the network's fault. Only its type is logged: its text can carry the query.
+        log.warning("keyless search failed unexpectedly: %s", type(exc).__name__)
         return SearchOutcome(FAILED, REASON_PROVIDER)
