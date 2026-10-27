@@ -16,6 +16,7 @@ async def dispatch_subagent_feed(
     input_id: str | None = None,
     delivery_intent: str | None = None,
     viewing_document: dict | None = None,
+    reply_context: object = None,
 ) -> None:
     # Endpoint dependencies stay late-bound for the same live/scoped routing
     # contract the other endpoint adapters use.
@@ -23,6 +24,6 @@ async def dispatch_subagent_feed(
 
     await handle_subagent_feed(
         socket, user, child_thread_id, content, attachments, is_edited, input_id,
-        delivery_intent or "apply_now", viewing_document,
+        delivery_intent or "apply_now", viewing_document, reply_context,
         owned_thread_fn=_owned_thread, send_thread_input_fn=send_thread_input, log=logger,
     )

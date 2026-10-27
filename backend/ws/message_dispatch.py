@@ -76,7 +76,10 @@ async def _handle_message(
         await _send_error(ws, thread_id or "", "Missing input_id for message")
         return
     input_id = input_id.strip()
-    if not thread_id or (not content and not attachments):
+    from infra.reply_context import has_comment_candidates
+
+    if not thread_id or (not content and not attachments
+                         and not has_comment_candidates(data.get("reply_context"))):
         await _send_error(
             ws, thread_id or "", "Malformed message input",
             input_id=input_id,
