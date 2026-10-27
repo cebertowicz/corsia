@@ -181,6 +181,7 @@ def test_polling_setup_status_and_local_download_spawn_no_processes(client, monk
     assert local_download.json()["state"] == "stopped"
 
 
+@pytest.mark.usefixtures("mac_local_model_host")
 def test_local_download_uses_the_single_managed_flight(client, monkeypatch):
     from llm import local_setup_flow as flow
 
@@ -448,7 +449,7 @@ def test_routes_are_registered():
 
 
 @pytest.fixture
-def welcome(no_users, monkeypatch, fresh_local_setup):
+def welcome(no_users, monkeypatch, fresh_local_setup, mac_local_model_host):
     """The setup routes on a non-default bound port, as the app reaches them before any account."""
     from llm import local_setup
 

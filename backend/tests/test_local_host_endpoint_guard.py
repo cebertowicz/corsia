@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 from api import provider_local_models, provider_sources, setup
 from infra.auth import require_user_header_only
 from infra.default_port import DEFAULT_BACKEND_PORT
-from llm import local_setup_flow, local_setup_gates, local_setup_prepare
+from llm import local_setup_flow, local_setup_prepare
 from llm.local_model import LocalModel
 
 
@@ -35,8 +35,8 @@ def client(monkeypatch):
 
 @pytest.mark.parametrize("method,path,body", ENDPOINTS)
 @pytest.mark.parametrize("unsupported", [True, False], ids=["unsupported", "mac"])
-def test_local_endpoint_host_gate(client, monkeypatch, method, path, body, unsupported):
-    monkeypatch.setattr(local_setup_gates, "host_never_runs_local", lambda: unsupported)
+def test_local_endpoint_host_gate(client, monkeypatch, local_model_host, method, path, body, unsupported):
+    local_model_host(is_mac=not unsupported)
     calls = []
     async def prepare():
         calls.append("prepare")
