@@ -26,6 +26,47 @@ _SCRIPT_REFUSAL = ("This command is unavailable in a browser session with a save
                    "Use the browser tools to navigate and interact with the page.")
 
 
+def raise_cleanup_failures(failures: Sequence[BaseException | None]) -> None:
+    unresolved = [failure for failure in failures if failure is not None]
+    if unresolved:
+        pending = all(isinstance(failure, BrowserSessionCleanupError) and failure.recovery == "pending" for failure in unresolved)
+        raise BrowserSessionCleanupError("browser owner retained unresolved cleanup", recovery="pending" if pending else "operator_required") from unresolved[0]
+
+
+def require_settled(runtime: Any) -> None:
+    """Keep an unsettled client owned until its completion can be verified."""
+    if runtime.attempt is not None:
+        runtime.attempt = runtime.attempt.settled()
+        if runtime.attempt.completion == "unknown":
+            raise BrowserSessionError(browser_cli.BROWSER_BUSY)
+
+
+def cap_wait(args: Sequence[str], timeout: float) -> tuple[Sequence[str], bool]:
+    """Numeric native waits ignore the daemon timeout and otherwise block later commands."""
+    limit = max(0, int((timeout - 1) * 1000))
+    capped = len(args) == 2 and args[0] == "wait" and args[1].isdigit() and int(args[1]) > limit
+    return (("wait", str(limit)) if capped else args), capped
+
+
+async def preserve_cancelled(owner: Any, runtime: Any) -> None:
+    """Cancellation of a client does not prove its owned daemon has died."""
+    try:
+        observed = await asyncio.shield(owner._observe(runtime))
+        if observed.alive:
+            return
+    except BrowserSessionCleanupError:
+        pass
+    await asyncio.shield(owner._close_one(runtime))
+
+
+def restart_notice(notices: set[str], thread_id: str, notice: str | None) -> str | None:
+    if thread_id not in notices:
+        return notice
+    notices.discard(thread_id)
+    restart = "The browser restarted; you may need to sign in again."
+    return f"{restart} {notice}" if notice else restart
+
+
 def _javascript_url(value: str) -> bool:
     try:
         return urlsplit(value).scheme.lower() == "javascript"
@@ -148,8 +189,10 @@ async def _run_action(owner: Any, runtime: Any, thread_id: str, args: Sequence[s
     finally:
         # A held pane shows nothing until this restart, so it runs however the command ends.
         await browser_pane_state.page_command_finished(thread_id, tuple(args))
-    if result.timed_out and args[0] == "wait":
-        return browser_cli.WAIT_TIMED_OUT
+    if args[0] == "wait":
+        error = browser_cli.json_object(result.stdout).get("error", "")
+        if result.timed_out or isinstance(error, str) and "timed out" in error.lower():
+            return browser_cli.WAIT_TIMED_OUT
     rendered = owner._model_result(result, runtime.record)
     # Only the open that starts a session reveals the pane tab, so a tab the person closed stays shut until
     # the next session instead of coming back on every later open.
@@ -220,6 +263,8 @@ async def end_session(thread_id: str, session: str) -> None:
 
 async def _command(owner: Any, runtime: Any, lease_id: str | None, args: Sequence[str], timeout: float) -> browser_cli.CommandResult:
     result, _unfinished = await owner._run_admitted(runtime, args, lease_id=lease_id, timeout=timeout)
+    if result.timed_out or result.completion == "interrupted":
+        raise BrowserSessionError(browser_cli.BROWSER_BUSY)
     return result
 
 
