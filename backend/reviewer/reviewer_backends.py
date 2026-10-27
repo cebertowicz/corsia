@@ -18,7 +18,7 @@ from reviewer.failures import (
     CCUnavailableError,
     cc_max_turns as _cc_max_turns,
     classify_cc_error as _classify_cc_error,
-    envelope_signals as _envelope_signals,
+    envelope_failure_detail,
     is_usage_or_quota_limit as _is_usage_or_quota_limit,
     parse_envelope,
     raise_cli_failure,
@@ -138,10 +138,10 @@ def invoke_cc_subagent(
 
     result_text = envelope.get("result")
     if envelope.get("is_error") or envelope.get("subtype") != "success":
-        signals = _envelope_signals(envelope) or f"subtype={envelope.get('subtype')}"
         raise _classify_cc_error(
             f"{result_text} {stderr} subtype={envelope.get('subtype')}",
-            f"CC error envelope ({signals}): {str(result_text)[:200]}",
+            f"CC error envelope: {envelope_failure_detail(envelope, output, stderr)}",
+            envelope,
         )
 
     usage = envelope.get("usage") or {}
