@@ -46,8 +46,8 @@ def assign(sessions: Mapping[str, Any], profile: str | None, thread_id: str) -> 
 
 
 def flags(record: Any, ua: str | None) -> Sequence[str]:
-    """Keep launch settings on every command so agent-browser keeps the same browser."""
-    copy = browser_launch.copy_path(record.session) if record.copy_of else None
+    """Keep launch settings stable; restore a concurrent copy only on its first command."""
+    copy = browser_launch.copy_path(record.session) if record.copy_of and record.binding is None else None
     return browser_launch.launch_argv(
         ua, headless=not record.show_window,
         profile=Path(record.profile) if record.profile else None, state_copy=copy,

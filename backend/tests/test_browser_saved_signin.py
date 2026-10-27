@@ -97,6 +97,11 @@ async def test_a_second_concurrent_session_starts_from_a_private_copy_of_the_sig
     assert copy.parent == browser_launch.profile_root() / "copies" and oct(copy.stat().st_mode & 0o777) == "0o600"
     second = _launches(fake)[1]
     assert "--profile" not in second and _value(second, "--state") == str(copy)
+    await fake.owner.run("b", ["snapshot"])
+    later = _launches(fake)[-1]
+    assert "--state" not in later  # Repeating restore resets the current page.
+    assert _value(later, "--args") == _value(second, "--args")
+    assert _value(later, "--init-script") == _value(second, "--init-script")
     assert fake.owner._sessions["b"].record.copy_of == "a"
     await fake.owner.close_thread("b")
     assert not copy.exists()
