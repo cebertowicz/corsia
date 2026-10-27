@@ -135,13 +135,16 @@ def test_google_setup_carries_the_approved_offer_and_leaves_secrets_to_the_backe
     assert enabled == ["gmail.googleapis.com", "calendar-json.googleapis.com", "drive.googleapis.com",
                        "docs.googleapis.com", "sheets.googleapis.com"]
     assert '"Go to CORSIA (unsafe)"' in steps
-    assert "a project left in Testing stops letting CORSIA in after 7 days.` then `Go ahead?" in steps
+    assert (
+        "a project left in Testing stops letting CORSIA in after 7 days.` then "
+        "`Which Google accounts should I connect? List each address and I'll start.`"
+    ) in steps
     assert "`Ask me any time to connect your email.`" in steps
     assert "go on only when it says In production" in steps
     assert "browser-person-steps.md` B" in steps
-    assert "Never make a second project or client." in steps
-    assert "shows the client secret, so take no snapshot or screenshot of it" in steps
-    assert "Read the client ID from the Clients list" in steps and "never open it" in steps
+    assert "Never make a second project." in steps
+    assert "shows the client secret may still be open, so take no snapshot or screenshot of it" in steps
+    assert "Read the new client's ID from the Clients list" in steps and "latest creation date" in steps and "never open it" in steps
     assert steps.index("`google_connect` with no `client_file`") < steps.index("If the error says to reinstall or update CORSIA")
     assert steps.count("console.cloud.google.com/projectcreate") == 1
     assert "Do not set `show_window`: the shared browser is already available." in steps
@@ -153,12 +156,44 @@ def test_google_setup_carries_the_approved_offer_and_leaves_secrets_to_the_backe
     assert "If it names install commands instead (CORSIA run from source)" in steps
     assert "then call `browser_open` again" in steps
     assert "@0." not in steps
-    assert "Connected as <address>. If that's the wrong account, say so and I'll switch it." in steps
+    assert "Post `Connected as <address>.` for each" in steps
+    assert "`If that's the wrong account, say so and I'll switch it.` once" in steps
     assert "If the person means an account listed there, ask which one first when more than one could be meant" in steps
     assert "if that account shows `needs_action`, follow that instead of this skill" in steps
     assert "Otherwise call `google_connect` with that `account_id`" in steps
     assert "post its `reply` verbatim with `post_update` followed by `[Open it in Connected apps](<link>)`" in steps
     assert "To connect a new account, including the first, go on to step 2." in steps
+
+
+def test_google_setup_asks_for_accounts_does_the_console_and_checks_scopes():
+    """Several accounts in one run: the audience fits them all, the agent does the console, links go out together."""
+    from connections.google.oauth import OPTIONAL_SCOPES, REQUIRED_SCOPES
+
+    steps = SKILL.read_text(encoding="utf-8")
+    step_2, step_3 = steps.split("\n2. ", 1)[1].split("\n3. ", 1)
+    step_5 = step_3.split("\n5. ", 1)[1].split("\n6. ", 1)[0]
+    assert "Which Google accounts should I connect?" in step_2
+    assert step_5.index("every address is in the signed-in account's domain; otherwise External") < step_5.index("press Publish app")
+    # A saved client skips the console, but an Internal project would refuse an address from another domain.
+    assert "press Make external and confirm, do step 5c, then go to step 6" in step_3
+    assert "gmail.com counts as a domain of its own" in step_3
+    # No hand-offs for the console: only a step that still fails after a retry, reported first.
+    assert "never send the person to the console or hand them a list" in steps
+    assert "If a console step still fails after one retry, report it" in step_5
+    # Google shows a secret only at creation, so an existing client gets a new one beside it.
+    assert "Run it even when the Clients list already has a `CORSIA` client" in step_5
+    assert "Leave the old client alone" in step_5
+    # The secret dialog stays open through the steps after download-json, until the reload.
+    assert "stops at `download-json` or a later step" in step_5
+    assert "call again once with `start_at` set to the step it stopped at" in step_5
+    # A rerun keeps an earlier run's saved branding instead of skipping it.
+    assert "If it already shows app name `CORSIA`, an earlier run saved it" in step_5
+    # One post with every link; every permission box ticked; the granted scopes read back.
+    assert "Post all the links in one `post_update`" in steps
+    assert "tick every box before you continue" in steps
+    for scope in REQUIRED_SCOPES + OPTIONAL_SCOPES:
+        assert f"`{scope.rsplit('/', 1)[1].split('.', 1)[0]}`" in steps.split("\n7. ", 1)[1]
+    assert "To add them, remove <address> in Connected apps, then ask me to connect it again and tick every box." in steps.split("\n7. ", 1)[1]
 
 
 def test_setup_skills_tell_a_packaged_apps_browser_error_from_a_source_install(tmp_path, monkeypatch):
