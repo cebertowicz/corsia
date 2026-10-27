@@ -21,7 +21,6 @@ from tools.tool_surface import (
     unknown_tool_error,
 )
 
-
 from eval.otel import get_tracer, set_attrs, SPAN_TOOL_CALL
 from eval.tool_allowlist import record_only_result
 _RESERVED_EXECUTION_PREFIXES = (
@@ -143,7 +142,7 @@ class ToolRegistry:
                 plan dispatch could not be settled.
         """
         from infra.repo_policy_transition import admit_repo_effect
-        from tools import confined_reads
+        import tools.confined_reads as confined_reads
         from tools.host_access_gate import (
             authorize_host_action,
             host_action_permit_scope,

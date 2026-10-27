@@ -169,7 +169,7 @@ async def next_turn_context_snapshot(
     if provider == "native":
         from core.agent import get_agent
         from core.native_context_prefix import _freeze_tool_definitions
-        from tools import confined_reads
+        import tools.confined_reads as confined_reads
 
         agent = await get_agent()
         await agent._connect_mcp()

@@ -13,7 +13,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from tools import confined_reads
+import tools.confined_reads as confined_reads
 
 
 def _configure_sandbox(monkeypatch, workspace: Path) -> None:

@@ -269,7 +269,7 @@ async def build_real_send_prefix(
     selected_model: str | None = None,
 ) -> tuple[list[dict], dict]:
     """Build the strict-prefix ``[system, ...history]`` message sequence."""
-    from tools import confined_reads
+    import tools.confined_reads as confined_reads
 
     if fresh_context and replay_selection is not None:
         raise ValueError("fresh Native context cannot consume a replay selection")

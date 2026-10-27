@@ -1,4 +1,4 @@
-"""Schema 147 -> 148: each thread's write-once launch confinement."""
+"""Schema 153 -> 154: each thread's write-once launch confinement."""
 from __future__ import annotations
 
 import sqlite3
@@ -8,7 +8,7 @@ import pytest
 from infra import thread_confinement
 from infra.database import initialize_schema
 from infra.database_migrations import MIGRATIONS, migrate_to_current
-from infra.migration_147_to_148_thread_confinement import migrate_147_to_148
+from infra.migration_153_to_154_thread_confinement import migrate_153_to_154
 from infra.schema import SCHEMA_VERSION
 
 
@@ -17,7 +17,7 @@ def _legacy_db() -> sqlite3.Connection:
     initialize_schema(db)
     db.execute("ALTER TABLE threads DROP COLUMN confinement")
     db.execute("ALTER TABLE threads DROP COLUMN confined_read_dirs")
-    db.execute("PRAGMA user_version=147")
+    db.execute("PRAGMA user_version=153")
     db.execute("INSERT INTO users (id,password_hash,created_at,password_changed_at) VALUES ('u','x','t','t')")
     db.execute("INSERT INTO threads (id,user_id,title,created_at,updated_at) VALUES ('old','u','t','t','t')")
     db.commit()
@@ -28,17 +28,17 @@ def _columns(db: sqlite3.Connection) -> list[tuple[str, str]]:
     return [(row[1], row[2]) for row in db.execute("PRAGMA table_info(threads)")]
 
 
-def test_v148_is_registered() -> None:
-    assert SCHEMA_VERSION == 148
-    assert MIGRATIONS[147] is migrate_147_to_148
+def test_v154_is_registered() -> None:
+    assert SCHEMA_VERSION == 154
+    assert MIGRATIONS[153] is migrate_153_to_154
 
 
-def test_v148_upgrade_leaves_existing_threads_unconfined_and_matches_fresh() -> None:
+def test_v154_upgrade_leaves_existing_threads_unconfined_and_matches_fresh() -> None:
     fresh = sqlite3.connect(":memory:")
     db = _legacy_db()
     try:
         initialize_schema(fresh)
-        assert migrate_to_current(db, SCHEMA_VERSION).to_version == 148
+        assert migrate_to_current(db, SCHEMA_VERSION).to_version == 154
         assert sorted(_columns(db)) == sorted(_columns(fresh))
         assert thread_confinement.read_dirs("old", db) is None
         assert migrate_to_current(db, SCHEMA_VERSION).migrated is False
@@ -57,7 +57,7 @@ def _cc_session(db, thread_id: str, record_id: str, invocation: dict, updated: s
                "VALUES (?,?,?,'t','t')", (f"reg-{record_id}", record_id, thread_id))
 
 
-def test_v148_carries_an_older_claude_code_review_childs_confinement_onto_its_row() -> None:
+def test_v154_carries_an_older_claude_code_review_childs_confinement_onto_its_row() -> None:
     db = _legacy_db()
     try:
         for thread_id in ("review", "plain", "empty"):
@@ -78,14 +78,14 @@ def test_v148_carries_an_older_claude_code_review_childs_confinement_onto_its_ro
         db.close()
 
 
-def test_v148_step_is_idempotent_and_skips_an_absent_table() -> None:
+def test_v154_step_is_idempotent_and_skips_an_absent_table() -> None:
     db = _legacy_db()
     empty = sqlite3.connect(":memory:")
     try:
-        migrate_147_to_148(db)
-        migrate_147_to_148(db)
+        migrate_153_to_154(db)
+        migrate_153_to_154(db)
         assert {"confinement", "confined_read_dirs"} <= {name for name, _ in _columns(db)}
-        migrate_147_to_148(empty)
+        migrate_153_to_154(empty)
         assert empty.execute("SELECT name FROM sqlite_master").fetchall() == []
     finally:
         db.close()

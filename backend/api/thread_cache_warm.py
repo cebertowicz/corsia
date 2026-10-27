@@ -122,7 +122,7 @@ async def _build_warm_prefix(
     from llm.base import sanitize_empty_content, sanitize_messages
     from llm.providers.omlx import make_prompt_extra_body
     from llm.reasoning_config import reasoning_config_for_model
-    from tools import confined_reads
+    import tools.confined_reads as confined_reads
 
     agent = await get_agent()
     await agent._connect_mcp()

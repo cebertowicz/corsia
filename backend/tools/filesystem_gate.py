@@ -71,7 +71,7 @@ def _resolve_path(
     """
     p = _join_relative_to_workspace(path, workspace)
     resolved = p.resolve(strict=False)
-    from tools import confined_reads
+    import tools.confined_reads as confined_reads
     from tools.host_path_policy import ordinary_host_path_denial
 
     confined_reads.check(p, resolved, for_write=for_write)
@@ -128,7 +128,7 @@ async def _resolve_path_for_action(
     use for the effect. Without a permit, the ordinary protected boundary is
     unchanged.
     """
-    from tools import confined_reads
+    import tools.confined_reads as confined_reads
     from tools.host_access_gate import consume_current_action_permit
 
     # A confined worker's reads never take a host permit: its read paths are all it has.

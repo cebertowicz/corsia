@@ -15,7 +15,7 @@ from core import turn_iteration_context as iteration_context
 from core import turn_provider_call, turns_steps
 from core.checkpoint_native_admission import IDLE_RECEIPT_KEY, freeze_idle_receipt
 from core.native_context_prefix import CONTEXT_WINDOW_UNSET, _freeze_tool_definitions
-from tools import confined_reads
+import tools.confined_reads as confined_reads
 from core.tool_result_projection import HARNESS_TOOL_RESULT_BUDGET_TOKENS
 from core.turn_context import prepare_turn_context
 from core.turn_safe_boundary import claim_safe_boundary, resolve_unconsumed_boundary_input
