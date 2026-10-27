@@ -24,10 +24,11 @@ from typing import Any
 
 from loguru import logger
 
-from core import carry_in_facts as facts
+from core import carry_in_commits as commits, carry_in_facts as facts
 from core.carry_in_facts import CarryInFact, EligibleCase
-from core.context_projection import C1_THREAD_PREFIX as EVAL_THREAD_PREFIX, c1_thread_id
-from infra import carry_in_capacity as capacity
+from core.context_projection import c1_thread_id
+import infra.carry_in_capacity as capacity
+import infra.carry_in_reaper as reaper
 from infra.db_async import run_in_db, run_off_db
 
 SAMPLES = 3
@@ -110,44 +111,6 @@ def _read(fn, *args, **kwargs):
     from infra.database import get_db
 
     return fn(get_db(), *args, **kwargs)
-
-
-def _settle_interrupted(db) -> int:
-    """End every claim no wake is running: an earlier boot's was interrupted by its restart;
-    this boot's lost its own terminal write to a fault (one wake runs at a time per process)."""
-    from core.turn_core import BOOT_EPOCH
-
-    stale = facts.open_facts(db, claimed=True)
-    now = _now()
-    for fact in stale:
-        reason = "error" if facts.claim_boot(db, fact) == BOOT_EPOCH else "interrupted"
-        facts.record_terminal(db, fact, now, facts.COVERAGE, reason=reason)
-    return len(stale)
-
-
-def _stranded_threads(db) -> list[tuple[str, str]]:
-    rows = db.execute(
-        "SELECT id, user_id FROM threads WHERE id LIKE ? ESCAPE '\\'",
-        (EVAL_THREAD_PREFIX.replace("_", "\\_") + "%",),
-    ).fetchall()
-    out = []
-    for row in rows:
-        prefix = str(row[0])[len(EVAL_THREAD_PREFIX):].split("-", 1)[0]
-        if prefix and facts.has_terminal_with_prefix(db, prefix):
-            out.append((str(row[0]), str(row[1] or "")))
-    return out
-
-
-async def _delete_threads(threads: list[tuple[str, str]]) -> None:
-    from api.thread_deletion import delete_owned_thread
-
-    for thread_id, user_id in threads:
-        try:
-            status = await delete_owned_thread(thread_id, user_id, [])
-            if status != "ok":
-                logger.warning("carry-in eval thread {} not deleted: {}", thread_id, status)
-        except Exception:
-            logger.opt(exception=True).warning("carry-in eval thread {} not deleted", thread_id)
 
 
 def _owner(db, thread_id: str) -> dict | None:
@@ -350,7 +313,7 @@ async def _settle(fact: CarryInFact, terminal: dict[str, Any], completed: int, c
         _write, facts.record_terminal, fact, _now(), terminal["event"],
         scope="carry_in_terminal", **attrs,
     ))
-    await _delete_threads(created)
+    await reaper.delete_threads(created)
 
 
 async def wake(workspace: Path) -> bool:
@@ -361,8 +324,8 @@ async def wake(workspace: Path) -> bool:
     Without one ready, idle local model, or with an unreadable guidance history, that
     case alone records why it waits and the drain stops: younger cases wait behind it, unread.
     """
-    await run_in_db(partial(_write, _settle_interrupted, scope="carry_in_interrupted"))
-    await _delete_threads(await run_in_db(_read, _stranded_threads))
+    await run_in_db(partial(_write, reaper.settle_interrupted, scope="carry_in_interrupted"))
+    await reaper.delete_threads(await run_in_db(_read, reaper.stranded_threads))
     saved = await _run_saved_commit(workspace)
     return await _advance_pending(workspace) or saved
 
@@ -407,16 +370,17 @@ async def _advance_pending(workspace: Path) -> bool:
     )):
         return True
     live_oid = await run_off_db(_live_oid, workspace, fact)
-    await _evaluate(fact, case, owner, model, *blobs, live_oid=live_oid)
+    before, after = blobs
+    await _evaluate(fact, case, owner, model, before, after, live_oid=live_oid)
     return True
 
 
 async def _run_saved_commit(workspace: Path) -> bool:
     """Match and close exactly one oldest saved target off the save request path."""
-    saved = await run_in_db(_read, facts.oldest_saved_commit)
+    saved = await run_in_db(_read, commits.oldest_saved_commit)
     if saved is None:
         return False
     await run_in_db(partial(
-        _read, facts.process_saved_commit, workspace, saved, _now(),
+        _read, commits.process_saved_commit, workspace, saved, _now(),
     ))
     return True

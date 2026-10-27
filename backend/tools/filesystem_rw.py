@@ -131,9 +131,7 @@ class ReadFileTool(Tool):
             data = handle.read()
         return self._render_bytes(data, file_path.suffix, offset, limit)
 
-    def _render_bytes(
-        self, data: bytes, suffix: str, offset: int | None, limit: int | None,
-    ) -> _ReadOutcome:
+    def _render_bytes(self, data: bytes, suffix: str, offset: int | None, limit: int | None) -> _ReadOutcome:
         content = data.decode("utf-8")
         source_safe = sanitize_source(content, suffix)
         text, whole = self._render_lines(
@@ -203,10 +201,7 @@ class ReadFileTool(Tool):
                 # A C1 eval thread reads its target at the tested revision.
                 if projection.data is None:
                     raise FileNotFoundError(path)
-                outcome = self._render_bytes(
-                    projection.data, authorized.resolved.suffix, offset, limit,
-                )
-                return outcome.text
+                return self._render_bytes(projection.data, authorized.resolved.suffix, offset, limit).text
             outcome = await asyncio.to_thread(
                 self._read_authorized_file,
                 authorized.resolved,

@@ -7,6 +7,7 @@ import json
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -210,7 +211,7 @@ def test_an_unsynced_index_commit_still_records_its_saved_target(c1, monkeypatch
 
 
 def test_a_retried_saved_commit_is_idempotent_and_a_later_commit_is_distinct(c1):
-    from core.carry_in_facts import record_committed_save
+    from core.carry_in_commits import record_committed_save
 
     _write_lesson(c1)
     first = _save(c1, "rule v1\n")
@@ -402,7 +403,7 @@ async def _run_scored(c1, monkeypatch, results):
         return outcome
 
     monkeypatch.setattr(carry_in_drain, "_sample", sample)
-    monkeypatch.setattr(carry_in_drain, "_delete_threads", _record_deleted(calls))
+    monkeypatch.setattr("infra.carry_in_reaper.delete_threads", _record_deleted(calls))
     assert await carry_in_drain.wake(c1.workspace) is True
     return first, calls
 
@@ -1001,7 +1002,7 @@ async def _real_drain(c1, monkeypatch) -> None:
     """One save-time request through the real request route, awaited."""
     from infra import app_loop
 
-    submitted = []
+    submitted: list[Any] = []
     monkeypatch.setattr(app_loop, "submit", submitted.append)
     c1.request_drain(c1.workspace)
     assert len(submitted) == 1
@@ -1218,12 +1219,12 @@ async def test_a_trial_the_index_would_not_offer_retires_before_any_claim(c1, mo
 def test_a_recorder_fault_after_the_commit_keeps_the_save_written_with_a_warning(c1, monkeypatch):
     import sqlite3
 
-    from core import carry_in_facts
+    from core import carry_in_commits
 
     def fault(*_args, **_kwargs):
         raise sqlite3.OperationalError("database is locked")
 
-    monkeypatch.setattr(carry_in_facts, "record_committed_save", fault)
+    monkeypatch.setattr(carry_in_commits, "record_committed_save", fault)
     result = _save(c1, "rule v1\n")
 
     assert result.outcome == "written" and result.sha
@@ -1287,7 +1288,7 @@ async def test_real_eval_turns_see_only_their_sides_revision_and_cannot_write(c1
     monkeypatch.setattr("core.agent.get_agent", AsyncMock(return_value=_NativeAgent(ws, registry)))
     monkeypatch.setattr(router, "_dispatch_openai", dispatch_openai)
     monkeypatch.setattr(turns_steps, "emit_reasoning", AsyncMock())
-    monkeypatch.setattr(carry_in_drain, "_delete_threads", AsyncMock())
+    monkeypatch.setattr("infra.carry_in_reaper.delete_threads", AsyncMock())
     _local(monkeypatch, _NativeAgent.model)
 
     assert await carry_in_drain.wake(c1.workspace) is True

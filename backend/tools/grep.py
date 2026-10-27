@@ -16,6 +16,7 @@ from tools.filesystem_effects import bound_path_kind, open_bound_text, walk_boun
 from tools.filesystem_gate import _resolve_path, _resolve_path_for_action
 from tools.glob_walk import select_grep_files
 from tools.grep_content import SEPARATOR, GrepLine, SourceLines, context_ranges, render
+from tools.grep_projection import MAX_SEARCH_FILE_BYTES as _MAX_SEARCH_FILE_BYTES, projected_files, read_search_text
 from tools.grep_ripgrep import search_ripgrep
 from tools.search_scope import (
     THREADS_NOTICE, SearchScope, included_filter, keep_path, pattern_components,
@@ -32,7 +33,6 @@ def _has_ripgrep() -> bool:
 
 
 _RG_AVAILABLE = _has_ripgrep()
-_MAX_SEARCH_FILE_BYTES = 10 * 1024 * 1024
 
 
 def _grep_scope(search_dir: Path, current_thread_id: str | None, all_threads: bool) -> SearchScope:
@@ -172,23 +172,16 @@ class GrepTool(Tool):
         if not keep_path(search_dir, current_thread_id, all_threads):
             return f"No matches for pattern '{pattern}'\n{THREADS_NOTICE}"
 
+        walk = (
+            pattern, search_dir, glob, output_mode, case_insensitive, context,
+            max_results, current_thread_id, all_threads,
+        )
         if authorized.reviewed:
             try:
                 # Off the event loop, exactly as ``glob`` already does. Both
                 # search paths below walk the filesystem synchronously, and
                 # `async def` makes the runtime assume they yield. They do not.
-                return await asyncio.to_thread(
-                    self._search_reviewed,
-                    pattern,
-                    search_dir,
-                    glob,
-                    output_mode,
-                    case_insensitive,
-                    context,
-                    max_results,
-                    current_thread_id,
-                    all_threads,
-                )
+                return await asyncio.to_thread(self._search_reviewed, *walk)
             except PermissionError as exc:
                 return f"Error: {exc}"
 
@@ -196,21 +189,15 @@ class GrepTool(Tool):
             projection = await tool_projection(current_thread_id, self._workspace)
         except RuntimeError as exc:
             return f"Error: {exc}"
-        if projection is not None and projection.within(search_dir):
-            # A C1 eval thread searches its target at the tested revision; the
-            # Python walk is the one search path that can substitute its bytes.
-            if search_dir == projection.path and projection.data is None:
-                return f"Error: Path not found: {path or str(self._workspace)}"
-            return await asyncio.to_thread(
-                self._search_python, pattern, search_dir, glob, output_mode,
-                case_insensitive, context, max_results, current_thread_id,
-                all_threads, projection,
-            )
-
-        if not search_dir.exists():
+        if projection is not None and not projection.within(search_dir):
+            projection = None
+        # A C1 eval thread searches its target at the tested revision; the
+        # Python walk is the one search path that can substitute its bytes.
+        absent = projection is not None and search_dir == projection.path and projection.data is None
+        if absent or (projection is None and not search_dir.exists()):
             return f"Error: Path not found: {path or str(self._workspace)}"
 
-        if _RG_AVAILABLE:
+        if _RG_AVAILABLE and projection is None:
             return await search_ripgrep(
                 pattern,
                 search_dir,
@@ -237,18 +224,7 @@ class GrepTool(Tool):
             #
             # Installing ripgrep only makes this path rarer. One agent's search
             # must never be able to stop the platform.
-            return await asyncio.to_thread(
-                self._search_python,
-                pattern,
-                search_dir,
-                glob,
-                output_mode,
-                case_insensitive,
-                context,
-                max_results,
-                current_thread_id,
-                all_threads,
-            )
+            return await asyncio.to_thread(self._search_python, *walk, projection)
 
     def _search_reviewed(
         self,
@@ -380,30 +356,11 @@ class GrepTool(Tool):
         except re.error as e:
             return f"Error: Invalid regex pattern: {e}"
 
-        files = [
-            (fpath, resolved) for fpath, resolved in self._iter_python_files(
-                search_dir,
-                glob_filter,
-                current_thread_id,
-                all_threads,
-            )
-            if projection is None or not projection.covers(resolved)
-        ]
-        if projection is not None and projection.data is not None:
-            # Present at the tested revision even if absent (or filtered) live.
-            target = projection.path
-            if target == search_dir or glob_filter is None or target.match(glob_filter):
-                files.append((target, target))
-
-        def read(resolved_path: Path) -> str | None:
-            if projection is not None and projection.covers(resolved_path):
-                return projection.data.decode("utf-8")
-            try:
-                if resolved_path.stat().st_size > _MAX_SEARCH_FILE_BYTES:
-                    return None
-                return resolved_path.read_text(encoding="utf-8", errors="ignore")
-            except (PermissionError, OSError):
-                return None
+        files = projected_files(
+            self._iter_python_files(search_dir, glob_filter, current_thread_id, all_threads),
+            search_dir, glob_filter, projection,
+        )
+        read = partial(read_search_text, projection=projection)
 
         results: list[GrepLine] = []
         safe: list[str | None] = []
