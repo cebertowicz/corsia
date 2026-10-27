@@ -21,9 +21,8 @@ leaves a delivery row whose dedupe answers every later copy of that id
 ``duplicate``, so facts lost to a rolled-back savepoint stay lost; with no
 row, a redelivery or a re-send is admitted. The notifications poller
 does re-read on its own when admission raises, because its cursor only moves
-past a comment whose delivery row exists — but the poller only ever delivers
-comments, and comments write no outcome facts, so that path cannot bring a
-lost fact back.
+past a comment whose delivery row exists — but a comment's facts lost to a
+refused write sit beside a committed row, so that re-read cannot bring them back.
 """
 
 from __future__ import annotations
@@ -33,9 +32,10 @@ import uuid
 from dataclasses import dataclass
 from typing import Any
 
+import infra.outcome_events as outcome_events
 from events.connectors import github_outcomes
 from events.connectors.github_outcome_input import PayloadRefusal
-from infra import outcome_events, webhook_delivery_log
+from infra import webhook_delivery_log
 from infra.outcome_event_input import OutcomeInputRefusal
 from infra.product_events import emit_product_event
 

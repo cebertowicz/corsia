@@ -191,6 +191,9 @@ TOOL_CATALOG: dict[str, ToolCatalogEntry] = {
         "browser", authority="browser-script", summary="Run JavaScript in the page",
         activity="Running script",
     ),
+    "browser_person_step": _Entry(
+        "browser", summary="Let the person complete the current browser page", activity="Your turn in the shared browser",
+    ),
     "browser_wait": _Entry(
         "browser", summary="Wait for an element or a delay", activity="Waiting",
     ),

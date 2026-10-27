@@ -68,6 +68,54 @@ export const WAITING_FOR_MODEL_CHOICE = {
 	title: 'This thread has no model yet. Your message is saved and will send as soon as you choose one.',
 } as const;
 
+export const WAITING_FOR_ACCOUNT = 'Waiting for account';
+
+const SIGN_IN_AGAIN = 'Your message is saved and will send as soon as you sign in again in Settings › Providers.';
+const SWITCH_MODELS = 'Your message is saved and will send as soon as you switch models';
+const SIGN_IN_MISSING = `CORSIA can’t find this chat’s account sign-in on this computer. ${SIGN_IN_AGAIN}`;
+
+/**
+ * Account holds by cause, keyed by `connections.account_holds.ACCOUNT_HOLD_REASONS`.
+ *
+ * A removed account stays removed: adding it again creates a new account that
+ * the held chat is not bound to, so switching models is its only route.
+ */
+export const ACCOUNT_HOLD_COPY: Readonly<Record<string, { label: typeof WAITING_FOR_ACCOUNT; title: string }>> = Object.freeze({
+	account_signed_out: { label: WAITING_FOR_ACCOUNT, title: `This chat’s account is signed out. ${SIGN_IN_AGAIN}` },
+	account_login_unverified: {
+		label: WAITING_FOR_ACCOUNT,
+		title: `CORSIA couldn’t confirm this chat’s account is still signed in. ${SIGN_IN_AGAIN}`,
+	},
+	account_home_mismatch: { label: WAITING_FOR_ACCOUNT, title: SIGN_IN_MISSING },
+	codex_auth_source_missing: { label: WAITING_FOR_ACCOUNT, title: SIGN_IN_MISSING },
+	codex_auth_projection_changed: { label: WAITING_FOR_ACCOUNT, title: SIGN_IN_MISSING },
+	account_model_not_discovered: {
+		label: WAITING_FOR_ACCOUNT,
+		title: `CORSIA couldn’t find this model on this chat’s account. ${SWITCH_MODELS}, or sign in again in Settings › Providers.`,
+	},
+	account_removed: { label: WAITING_FOR_ACCOUNT, title: `This chat’s account isn’t set up in CORSIA. ${SWITCH_MODELS}.` },
+	// The denying policy may be the workspace's or the project's and the hold
+	// does not say which, so no settings pointer: it could name a place with no toggle.
+	account_project_denied: {
+		label: WAITING_FOR_ACCOUNT,
+		title: `Your provider settings don’t allow this chat’s account. ${SWITCH_MODELS}.`,
+	},
+	project_policy_missing: {
+		label: WAITING_FOR_ACCOUNT,
+		title: `This project doesn’t allow this chat’s account. ${SWITCH_MODELS}.`,
+	},
+	account_runtime_pending: {
+		label: WAITING_FOR_ACCOUNT,
+		title: 'This chat’s account isn’t ready to run. Your message is saved and will send when it is.',
+	},
+});
+
+/** Any hold code this client has no copy for yet: true, and never a wrong cause. */
+export const WAITING_TO_SEND = {
+	label: 'Waiting to send',
+	title: 'Your message is saved and will send when CORSIA can deliver it.',
+} as const;
+
 /**
  * Errors that mean "we do not know", not "it failed".
  *

@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Any
 
-from api.cost_identity import IdentityResolver
+from core.cost_identity import IdentityResolver
 from api.measurement_join import joined_read
 from api.measurement_model_cost import materialize_chain, query_model_costs, query_recording_gaps
 from api.measurement_scope import validate_scope

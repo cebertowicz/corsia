@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 import pytest
 
 from api import measurement_chain_costs, measurement_model_cost, measurement_models
-from api.cost_identity import IdentityResolver, ModelIdentity
+from core.cost_identity import IdentityResolver, ModelIdentity
 from api.measurement_model_cost import query_model_costs
 from api.measurement_models import build_models, models_payload
 from api.measurement_scope import resolve_grain

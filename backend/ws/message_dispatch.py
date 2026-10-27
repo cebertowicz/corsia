@@ -179,7 +179,7 @@ async def _send_native_input(
             ws, thread_id, e.detail, metadata=e.metadata, input_id=input_id,
         )
     except Exception as e:
-        logger.error(f"Native WebSocket turn failed for {thread_id}: {e}")
+        logger.exception("Native WebSocket turn failed for {}", thread_id)
         await _send_error(ws, thread_id, f"Turn failed: {e}", input_id=input_id)
 
 
@@ -253,7 +253,7 @@ async def handle_cc_main_message(
         )
         return
     except Exception as e:
-        logger.error(f"CC main-chat turn failed for {thread_id}: {e}")
+        logger.exception("CC main-chat turn failed for {}", thread_id)
         await _send_error(
             ws,
             thread_id,
@@ -316,7 +316,7 @@ async def handle_codex_main_message(
         )
         return
     except Exception as e:
-        logger.error(f"Codex main-chat turn failed for {thread_id}: {e}")
+        logger.exception("Codex main-chat turn failed for {}", thread_id)
         await _send_error(
             ws,
             thread_id,

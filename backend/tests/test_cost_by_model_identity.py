@@ -77,7 +77,7 @@ async def test_local_model_is_named_by_the_catalog_and_classed_local(by_model):
 async def test_spend_groups_past_seven_with_the_models_cost_class(monkeypatch, by_model):
     """Spend's remainder comes from the one grouping owner, classed as Models classes the same models."""
     from api import costs
-    from api.cost_identity import ModelIdentity
+    from core.cost_identity import ModelIdentity
     from api.measurement_models import build_models
 
     shown: dict = {}

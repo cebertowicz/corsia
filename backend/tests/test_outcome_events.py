@@ -290,11 +290,14 @@ def test_oversize_attributes_are_refused(db, monkeypatch):
 def test_only_registered_events_are_the_test_seed_and_the_github_intake():
     assert set(ATTRIBUTE_ALLOWLISTS) == {
         EVENT,
-        "github.pr.opened", "github.pr.pushed", "github.pr.reopened",
+        "github.pr.opened", "github.pr.pushed", "github.pr.reopened", "github.pr.ready", "github.pr.drafted",
         "github.pr.closed", "github.pr.retargeted", "github.pr.merged",
         "github.pr.introduced_by", "github.pr.closes_issue",
         "github.check_suite.completed", "github.workflow_run.completed",
         "github.workflow_job.completed", "github.check_run.completed",
+        "github.pr.review.submitted", "github.pr.review.dismissed",
+        "github.pr.review_comment.created", "github.pr.comment.created",
+        "github.issue.comment.created", "github.issue.assigned", "github.status", "github.release.published",
         "github.issue.opened", "github.issue.closed", "github.issue.reopened",
         "github.issue.labeled", "github.issue.unlabeled", "github.pr.labeled", "github.pr.unlabeled",
         "measurement.size_rating",

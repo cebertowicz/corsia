@@ -614,6 +614,8 @@ async def test_shell_refuses_an_unsupported_safehouse(monkeypatch, tmp_path):
         "consume_current_action_permit",
         no_permit,
     )
+    from tests.shell_platform_helpers import use_mac_shell
+    use_mac_shell(monkeypatch)
     monkeypatch.setattr(shell, "is_safehouse_available", lambda: True)
     monkeypatch.setattr(
         shell,

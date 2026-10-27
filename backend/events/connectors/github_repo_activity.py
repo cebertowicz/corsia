@@ -4,7 +4,8 @@ Every emitted item is a webhook-shaped delivery through GitHub admission.  The
 issue-event reader is shared by normal polling and startup catch-up so both use
 the same bounded cursor traversal and never replay historic labels.  A repo's
 first poll only seeds its cursor, heads and closed markers.  Every read passes
-one budget and backoff gate.  The poller is a fallback, with one rule for every
+the hourly cap and the shared read budget, as a low-priority read.  The poller
+is a fallback, with one rule for every
 read: an item whose own time is at or before the repo's last real webhook
 delivery is assumed delivered by it and is not admitted.  Saved state still
 moves past a skipped item, so it is never offered again.
@@ -19,16 +20,17 @@ from typing import Any
 
 from events.connectors import github_issue_activity as issue_activity
 from events.connectors import github_notifications_feed as feed
+from events.connectors import github_repo_read as repo_read
+from infra.db_async import run_in_db, run_off_db
 
 log = logging.getLogger(__name__)
 DISABLE_ENV = "CORSIA_GITHUB_REPO_ACTIVITY_DISABLE"
 TEST_ENABLE_ENV = "CORSIA_GITHUB_REPO_ACTIVITY_TEST_ENABLE"
 SETTING_PREFIX = "github_repo_activity:"
-MAX_HOURLY_READS = 300
+MAX_HOURLY_READS = repo_read.MAX_HOURLY_READS
 WEBHOOK_QUIET = timedelta(minutes=30)
 ACTIVE_INTERVAL, IDLE_INTERVAL = 60, 300
-_status: dict[str, Any] = {"state": "starting", "reason": None, "counted_reads": 0,
-                           "backoff": False, "backoff_until": None, "degraded": None}
+_status: dict[str, Any] = {"state": "starting", "reason": None, "counted_reads": 0, "degraded": None}
 # One writer per repo state: two polls of one repo never interleave a save.
 _locks: dict[str, asyncio.Lock] = {}
 
@@ -99,47 +101,16 @@ def _startup_boundary(delivered: datetime | None, state: dict[str, Any]) -> str 
     return max(filter(None, (saved if _parse_time(saved) else None, webhook_floor)), default=None)
 
 
-def _prune_reads(state: dict[str, Any], now: datetime) -> list[str]:
-    floor = _stamp(now - timedelta(hours=1))
-    reads = [stamp for stamp in state.get("reads", []) if isinstance(stamp, str) and stamp >= floor]
-    state["reads"] = reads
-    _status["counted_reads"] = len(reads)
-    return reads
-
-
-def _counted(response: feed.GhResponse, state: dict[str, Any], now: datetime) -> None:
-    reads = _prune_reads(state, now)
-    if response.status != 304:
-        reads.append(_stamp(now))
-    state["reads"] = reads
-    _status["counted_reads"] = len(reads)
-    remaining = response.headers.get("x-ratelimit-remaining")
-    if remaining and remaining.isdigit() and int(remaining) < 1000:
-        _status.update(backoff=True, backoff_until=_stamp(now + timedelta(seconds=IDLE_INTERVAL)))
+_counted = repo_read.counted
 
 
 async def _get(runner: feed.GhRunner, path: str, state: dict[str, Any], now: datetime, *,
                send_etag: bool = True, keep_etag: bool = True) -> feed.GhResponse | None:
-    """The one gated read: None when the hourly budget, a rate backoff or a failed read stops it."""
-    if len(_prune_reads(state, now)) >= MAX_HOURLY_READS:
-        _status.update(state="degraded", degraded="budget_exhausted")
-        return None
-    until = _parse_time(_status.get("backoff_until"))
-    if until is not None and now < until:
-        _status.update(state="degraded", degraded="rate_limited", backoff=True)
-        return None
-    if until is not None:
-        _status.update(backoff=False, backoff_until=None)
-    etag = state.get("etags", {}).get(path) if send_etag else None
-    try:
-        response = await asyncio.to_thread(feed.gh_get, runner, path, {"If-None-Match": etag} if etag else None)
-    except feed.FeedError as exc:
-        # A refused or failed read holds the cursor like a budget stop; the next cycle retries.
-        _status.update(state="degraded", degraded=exc.error_class)
-        return None
-    if keep_etag and response.headers.get("etag"):
-        state.setdefault("etags", {})[path] = response.headers["etag"]
-    _counted(response, state, now)
+    """Read through the shared gate and report only the poller's own status."""
+    response, reason = await repo_read.get(runner, path, state, now, send_etag=send_etag, keep_etag=keep_etag)
+    _status["counted_reads"] = len(state.get("reads", []))
+    if reason:
+        _status.update(state="degraded", degraded=reason)
     return response
 
 
@@ -220,7 +191,7 @@ async def _issue_events(runner: feed.GhRunner, repo: str, state: dict[str, Any],
             state.pop("issues_cursor", None)
         _commit_cursor(state, newest, now, first, first_etag)
         state["issues_cursor_at"] = _stamp(now)
-        _save_state(repo, state)
+        await run_in_db(_save_state, repo, state)
         return False
     changed = False
     for row in reversed(candidates):
@@ -326,35 +297,54 @@ async def _pending_heads(runner: feed.GhRunner, repo: str, state: dict[str, Any]
     state["pending"] = sorted(pending)
 
 
+async def gated_read(runner: feed.GhRunner, repo: str, path: str) -> feed.GhResponse | None:
+    """Share the poller's persisted per-repository read budget."""
+    async with _lock(repo):
+        state = await run_in_db(_repo_state, repo)
+        try:
+            response, _reason = await repo_read.get(runner, path, state, _now(), send_etag=False, keep_etag=False)
+            return response
+        finally:
+            await run_in_db(_save_state, repo, state)
+
+
 async def _poll_repo(runner: feed.GhRunner, repo: str, now: datetime) -> bool:
     """Poll one fallback repo; a fresh webhook leaves every saved field unchanged."""
-    delivered = _last_delivery(repo)
+    delivered = await run_in_db(_last_delivery, repo)
     if _recent_webhook(delivered, now):
         return False
     async with _lock(repo):
-        state = _repo_state(repo)
+        state = await run_in_db(_repo_state, repo)
         changed = await _issue_events(runner, repo, state, now, delivered=delivered)
         for read in (_open_pulls, _closed_pulls, _new_issues):
             result = await read(runner, repo, state, now, delivered)
             if result is None:
-                _save_state(repo, state)
+                await run_in_db(_save_state, repo, state)
                 return changed
             changed = changed or result
         await _pending_heads(runner, repo, state, now, delivered)
         if changed:
             state["changed_at"] = _stamp(now)
-        _save_state(repo, state)
+        await run_in_db(_save_state, repo, state)
         return changed or bool(state.get("pending"))
 
 
 async def _startup_catchup(runner: feed.GhRunner, repo: str, now: datetime) -> bool:
     """Process only the startup overlap, without storing the temporary boundary."""
     async with _lock(repo):
-        state = _repo_state(repo)
-        delivered = _last_delivery(repo)
+        state = await run_in_db(_repo_state, repo)
+        delivered = await run_in_db(_last_delivery, repo)
         boundary = _startup_boundary(delivered, state)
         return await _issue_events(runner, repo, state, now, boundary=boundary, persist=False,
                                    delivered=delivered)
+
+
+async def _changed_recently(repos: frozenset[str], now: datetime) -> bool:
+    for repo in repos:
+        stamp = _parse_time((await run_in_db(_repo_state, repo)).get("changed_at"))
+        if stamp and now - stamp <= timedelta(minutes=15):
+            return True
+    return False
 
 
 async def poll_once(runner: feed.GhRunner, repositories: frozenset[str] | None = None,
@@ -363,10 +353,11 @@ async def poll_once(runner: feed.GhRunner, repositories: frozenset[str] | None =
     if reason:
         _status.update(state="disabled", reason=reason)
         return IDLE_INTERVAL
-    now, repos = now or _now(), repositories if repositories is not None else feed.tracked_github_repositories()
+    now = now or _now()
+    repos = repositories if repositories is not None else await run_off_db(feed.tracked_github_repositories)
     _status["degraded"] = None
     active = any([await _poll_repo(runner, repo, now) for repo in sorted(repos)])
-    active = active or any((stamp := _parse_time(_repo_state(repo).get("changed_at"))) and now - stamp <= timedelta(minutes=15) for repo in repos)
+    active = active or await _changed_recently(repos, now)
     if _status["degraded"]:
         _status.update(state="degraded", reason=_status["degraded"])
     else:
@@ -378,7 +369,7 @@ async def repo_activity_poll_loop(runner: feed.GhRunner | None = None) -> None:
     if runner is None:
         from reviewer.gh_api import run_gh
         runner = run_gh
-    repos = feed.tracked_github_repositories()
+    repos = await run_off_db(feed.tracked_github_repositories)
     if disabled_reason() is None:
         for repo in sorted(repos):
             await _startup_catchup(runner, repo, _now())

@@ -19,6 +19,7 @@ from host_access.refusal_messages import (
     normalization_refusal,
 )
 from infra.project_repo_policy import RepoPolicy
+import tools.shell_sandbox as shell_sandbox
 from tools.host_access_external import external_agent_sandbox_rules
 from tools.base_git_paths import base_branch_selector_paths, base_git_control_paths, base_git_identity_paths
 from tools.host_path_policy import current_protected_host_path_policy
@@ -1174,8 +1175,7 @@ def safehouse_version_error() -> str | None:
 
 
 def is_sandbox_denial(
-    stderr: str,
-    is_available: AvailabilityCheck = is_safehouse_available,
+    stderr: str, is_available: AvailabilityCheck = is_safehouse_available,
 ) -> bool:
-    """Return true when stderr looks like a Safehouse filesystem denial."""
-    return bool(stderr) and "Operation not permitted" in stderr and is_available()
+    """Recognize platform filesystem denial text after a sandboxed launch."""
+    return shell_sandbox.is_denial(stderr, is_available)

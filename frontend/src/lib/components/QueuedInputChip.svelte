@@ -22,7 +22,7 @@
 	 */
 	import { requestDeliveryAction } from '$lib/deliveryActions';
 	import { deliveryPresentation } from '$lib/messageDelivery';
-	import { SWITCH_TO_LOCAL_MODEL, WAITING_FOR_MODEL } from '$lib/messageDeliveryCopy';
+	import { SWITCH_TO_LOCAL_MODEL, WAITING_FOR_ACCOUNT, WAITING_FOR_MODEL, WAITING_TO_SEND } from '$lib/messageDeliveryCopy';
 	import { limitHeldThreadId } from '$lib/stores/overageSetting';
 	import { token } from '$lib/stores/auth';
 	import { activeThreadId, isThreadTurnActive, type Message } from '$lib/stores/threads';
@@ -87,7 +87,7 @@
 		stroke-linejoin="round" aria-hidden="true"
 	><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
 	<span class="queued-text" title={summary}>
-		{delivery?.label === 'Waiting for checkpoint' || delivery?.label === WAITING_FOR_MODEL.label || delivery?.label === SWITCH_TO_LOCAL_MODEL ? `${delivery.label}: ${summary}` : summary}
+		{delivery?.label === 'Waiting for checkpoint' || delivery?.label === WAITING_FOR_MODEL.label || delivery?.label === SWITCH_TO_LOCAL_MODEL || delivery?.label === WAITING_FOR_ACCOUNT || delivery?.label === WAITING_TO_SEND.label ? `${delivery.label}: ${summary}` : summary}
 	</span>
 	{#if attachmentCount > 0}
 		<span class="queued-attach" aria-label={`${attachmentCount} attached`}>
