@@ -129,10 +129,10 @@ def requeue(db: sqlite3.Connection, decision_id: int) -> bool:
     ).rowcount == 1
 
 
-def hold(db: sqlite3.Connection, decision_id: int, reason: str) -> None:
-    """Say why a queued start waits (``explain`` shows it); claiming it clears this."""
-    db.execute("UPDATE event_route_decisions SET reason=? WHERE id=? AND outcome=? "
-               "AND reason IS NOT ?", (reason, decision_id, QUEUED, reason))
+def hold(db: sqlite3.Connection, decision_id: int, reason: str) -> bool:
+    """Say why a queued start waits; return whether it entered this hold."""
+    return db.execute("UPDATE event_route_decisions SET reason=? WHERE id=? AND outcome=? "
+                      "AND reason IS NOT ?", (reason, decision_id, QUEUED, reason)).rowcount == 1
 
 
 def made(db: sqlite3.Connection, decision_id: int, worker: str, check: str) -> None:

@@ -2,10 +2,8 @@
 
 A ``review`` child reads only its own empty working directory and the
 add-dirs its parent could already read, and holds no credential. The
-confinement is stored with the child's launch description, so every later
-launch of it, cold or after a restart, reads it back through
-``registry.cc_session.registered_confinement``, which fails closed when a
-record is damaged.
+confinement is stored on the thread row. A cold launch reads that row;
+a live process retains the confinement it was launched with.
 """
 
 from __future__ import annotations
@@ -74,9 +72,8 @@ def launch_confinement(thread_id: str, live, db) -> LaunchConfinement:
     """The one confinement read for a launch, made at its start.
 
     A live process keeps the confinement it was launched with; otherwise the
-    thread's records decide, by ``registry.cc_session``'s sticky rule, and then its
-    own row (``infra.thread_confinement``), which a worker made confined on
-    another harness carries into Claude Code.
+    thread's row (``infra.thread_confinement``) decides, including for a
+    worker made confined on another harness.
     """
     invocation = getattr(getattr(live, "session", None), "invocation", None)
     if callable(invocation):
@@ -85,24 +82,25 @@ def launch_confinement(thread_id: str, live, db) -> LaunchConfinement:
             return UNCONFINED
         return LaunchConfinement(launched.confinement, launched.add_dirs, launched.working_dir)
     from infra.thread_confinement import ConfinementRecordDamaged, read_dirs
-    from registry.cc_session import registered_confinement
     from subagents.cc_invocation import CONFINEMENT_REVIEW
 
-    registered = registered_confinement(thread_id, db)
-    if registered.confined:
-        return registered
-    if db is None:
+    owned = db is None
+    if owned:
         from infra.database import get_db
 
         db = get_db()
     try:
-        dirs = read_dirs(thread_id, db)
-    except ConfinementRecordDamaged as error:
-        raise ConfinementRefused(str(error)) from error
-    if dirs is None:
-        return UNCONFINED
-    project_id = db.execute("SELECT project_id FROM threads WHERE id=?", (thread_id,)).fetchone()[0]
-    return LaunchConfinement(CONFINEMENT_REVIEW, dirs, review_working_dir(thread_id, project_id, db))
+        try:
+            dirs = read_dirs(thread_id, db)
+        except ConfinementRecordDamaged as error:
+            raise ConfinementRefused(str(error)) from error
+        if dirs is None:
+            return UNCONFINED
+        project_id = db.execute("SELECT project_id FROM threads WHERE id=?", (thread_id,)).fetchone()[0]
+        return LaunchConfinement(CONFINEMENT_REVIEW, dirs, review_working_dir(thread_id, project_id, db))
+    finally:
+        if owned:
+            db.close()
 
 
 def launch_tools(working_dir: str | None, confined: bool) -> tuple[object, tuple]:

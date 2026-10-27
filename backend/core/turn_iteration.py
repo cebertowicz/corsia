@@ -68,9 +68,10 @@ class _IterationState:
 async def _prepare_iteration_state(
     agent, thread_id: str, user_content: str, turn_model: str, fresh_context: bool,
     project_id: str | None, channel: str, chat_id: str, media, model_context_window, prepared_context,
+    thread_context=None,
 ) -> _IterationState:
     if prepared_context is None:
-        tool_definitions = _freeze_tool_definitions(await confined_reads.advertised(agent.tools, thread_id))
+        tool_definitions = _freeze_tool_definitions(await confined_reads.advertised(agent.tools, thread_context))
         messages, context_usage = await prepare_turn_context(
             agent, thread_id, user_content, turn_model, fresh_context, project_id,
             channel, chat_id, media, model_context_window=model_context_window,
@@ -344,7 +345,12 @@ async def run_native_iteration(
     on_safe_boundary: Callable[[int], Awaitable[NativeSafeBoundaryInput | None] | None] | None = None,
 ) -> tuple[int, list[str]]:
     """Run the existing Native phases and return span-level loop attributes."""
-    project_id = await turns_steps.lookup_thread_project_id(thread_id)
+    from infra.db_async import run_in_db
+    from infra.queries import get_thread
+
+    row = await run_in_db(get_thread, thread_id)
+    thread_context = dict(row) if row is not None else None
+    project_id = thread_context.get("project_id") if thread_context else None
     thread_token = runtime_state._current_thread_id.set(thread_id)
     turn_identity = iteration_context.bound_native_turn_identity(cancel_event, prepared_context)
     turn_token = runtime_state._current_turn_identity.set(turn_identity)
@@ -352,7 +358,8 @@ async def run_native_iteration(
     try:
         await agent._connect_mcp()
         iteration_state = await _prepare_iteration_state(agent, thread_id, user_content,
-            model, fresh_context, project_id, channel, chat_id, media, model_context_window, prepared_context)
+            model, fresh_context, project_id, channel, chat_id, media, model_context_window, prepared_context,
+            thread_context)
         from core.agent_checkpoint_runtime import bound_native_agent_checkpoint_runtime
 
         with bound_native_agent_checkpoint_runtime(

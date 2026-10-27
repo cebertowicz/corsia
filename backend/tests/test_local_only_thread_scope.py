@@ -59,7 +59,7 @@ def cloud_named_cloud(monkeypatch):
     from infra import local_only
 
     monkeypatch.setattr(local_only, "_is_cloud", lambda selector, **_kwargs: selector == "cloud")
-    monkeypatch.setattr(local_only, "_ready_local_selectors", lambda: ("omlx@local/a",))
+    monkeypatch.setattr(local_only, "ready_local_selectors", lambda: ("omlx@local/a",))
     _skip_account_binding(monkeypatch)
 
 
@@ -143,7 +143,7 @@ def test_refusals_never_carry_a_secret(monkeypatch) -> None:
         "litellm_model": model, "is_local": False, "api_key": secret,
         "api_base": f"https://user:{secret}@cloud.example/v1",
     })
-    monkeypatch.setattr(local_only, "_ready_local_selectors", lambda: ("omlx@local/a",))
+    monkeypatch.setattr(local_only, "ready_local_selectors", lambda: ("omlx@local/a",))
 
     with pytest.raises(local_only.LocalityRefused) as refused:
         local_only.require_local_only_model(
@@ -543,7 +543,7 @@ async def test_local_only_route_uses_person_copy_when_no_local_model_is_ready(
     from auth_fixtures import OWNER_SESSION_TOKEN
 
     _seed({"thread_id": "root", "user_id": "steve", "model": "cloud"})
-    monkeypatch.setattr("infra.local_only._ready_local_selectors", lambda: ())
+    monkeypatch.setattr("infra.local_only.ready_local_selectors", lambda: ())
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=_app(thread_mutations.router)), base_url="http://test",
     ) as client:

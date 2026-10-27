@@ -36,6 +36,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sqlite3
+import uuid
 from collections.abc import Mapping
 from typing import Any
 
@@ -124,7 +125,12 @@ async def drive() -> int:
         for row in await run_in_db(_read, worker_starts.orphans):
             if row["worker_thread_id"] is None or _LIVE.get(row["worker_thread_id"]) is None:
                 await _end(row, json.loads(row["run_input"] or "{}"), NO_RESULT, _RESTARTED)
-        claimed = await run_in_db(_claim)
+        notices: list[str] = []
+        claimed = await run_in_db(_claim, None, notices)
+        if notices:
+            from automation import script_runner
+            for owner in dict.fromkeys(notices):
+                await script_runner._drive_owner(owner)
         claimed_ids = {row["id"] for row, _run_input in claimed}
         made = 0
         for row, run_input in claimed:
@@ -142,14 +148,14 @@ def _read(fn, *args):
     return fn(get_db(), *args)
 
 
-def _skip(conn: sqlite3.Connection, row: Mapping[str, Any]) -> str | None:
+def _skip(conn: sqlite3.Connection, row: Mapping[str, Any], owner: Mapping[str, Any] | None) -> str | None:
     """Why a queued start can't begin now, checked at the time of its effect."""
-    from infra.queries import get_thread, thread_is_available
+    from infra.queries import thread_is_available
     from plans.public import thread_paused_since
 
     if not row["enabled"] or row["workflow_id"] is None:
         return rule_runs.TURNED_OFF
-    if not thread_is_available(get_thread(row["thread_id"], db=conn)):
+    if not thread_is_available(owner):
         return rule_runs.OWNER_GONE
     if thread_paused_since(conn, row["thread_id"]) is not None:
         return rule_runs.OWNER_PAUSED
@@ -164,7 +170,7 @@ def _free(conn: sqlite3.Connection) -> int:
     return get_max_concurrent_live() - len(working_thread_ids(db=conn))
 
 
-def _claim(db: sqlite3.Connection | None = None) -> list[tuple[Mapping[str, Any], dict[str, Any]]]:
+def _claim(db: sqlite3.Connection | None = None, notices: list[str] | None = None) -> list[tuple[Mapping[str, Any], dict[str, Any]]]:
     """Claim up to one queued start per free slot, oldest first. With no slot free nothing
     is written: the starts wait, and the newest of them is remembered as having waited.
     A held start keeps its place and takes no slot, so the read goes on past it."""
@@ -178,17 +184,28 @@ def _claim(db: sqlite3.Connection | None = None) -> list[tuple[Mapping[str, Any]
             _state["waited"] = max(_state["waited"], newest or 0)
             return claimed
         ready: list[tuple[str, ...]] = []
+        locality: dict[str, str | bool | None] = {}
+        owners: dict[str, Any] = {}
         after, limit = 0, min(free, BATCH)
         while len(claimed) < limit and (rows := worker_starts.queued(conn, limit - len(claimed), after)):
             for row in rows:
                 after = row["id"]
-                skipped = _skip(conn, row)
+                owner_id = row["thread_id"]
+                if owner_id not in owners:
+                    owners[owner_id] = get_thread(owner_id, db=conn)
+                skipped = _skip(conn, row, owners[owner_id])
                 if skipped is not None:
                     worker_starts.end(conn, row["id"], SKIPPED, skipped)
-                elif _local_model(conn, get_thread(row["thread_id"], db=conn), ready) is False:
-                    worker_starts.hold(conn, row["id"], HELD_LOCAL)
-                elif (run_input := worker_starts.claim(conn, row["id"])) is not None:
-                    claimed.append((row, run_input))
+                else:
+                    if owner_id not in locality:
+                        locality[owner_id] = _local_model(conn, owners[owner_id], ready)
+                    if locality[owner_id] is False:
+                        if worker_starts.hold(conn, row["id"], HELD_LOCAL):
+                            _notice_hold(conn, row)
+                            if notices is not None:
+                                notices.append(owner_id)
+                    elif (run_input := worker_starts.claim(conn, row["id"])) is not None:
+                        claimed.append((row, run_input))
     return claimed
 
 
@@ -282,7 +299,10 @@ async def _start(row: Mapping[str, Any], run_input: dict[str, Any]) -> int:
         await run_in_db(_requeue, row["thread_id"], row["id"])
         return 0
     except _HeldLocal:
-        await run_in_db(_requeue, row["thread_id"], row["id"], HELD_LOCAL)
+        held = await run_in_db(_requeue, row["thread_id"], row["id"], HELD_LOCAL, row)
+        if held:
+            from automation import script_runner
+            await script_runner._drive_owner(row["thread_id"])
         return 0
     except Exception:  # noqa: BLE001 - a start that fails is told to its owner, not lost
         logger.exception("worker start {} failed", row["id"])  # the exception stays in the log
@@ -301,11 +321,27 @@ def _made(decision_id: int, worker: str, check: str) -> None:
         worker_starts.made(conn, decision_id, worker, check)
 
 
-def _requeue(owner: str, decision_id: int, held: str | None = None) -> None:
+def _notice_hold(conn: sqlite3.Connection, row: Mapping[str, Any]) -> None:
+    """Tell the owner that this start is waiting, without settling it."""
+    from infra.input_admission import accept_thread_input
+
+    accept_thread_input(
+        row["thread_id"], role="system", intent="apply_now", message_id=str(uuid.uuid4()),
+        content=f"A rule's start for {row['workflow_id']} is {HELD_LOCAL}; it will start when a local model is ready.",
+        db=conn,
+    )
+
+
+def _requeue(owner: str, decision_id: int, held: str | None = None,
+             row: Mapping[str, Any] | None = None) -> bool:
+    entered = False
     with write_transaction(None, scope="worker_starts_requeue") as conn:
         if worker_starts.requeue(conn, decision_id) and held:
-            worker_starts.hold(conn, decision_id, held)
+            entered = worker_starts.hold(conn, decision_id, held)
+            if entered and row is not None:
+                _notice_hold(conn, row)
     _remove_inputs(owner, decision_id)
+    return entered
 
 
 async def _refuse(row: Mapping[str, Any], run_input: Mapping[str, Any], reason: str,

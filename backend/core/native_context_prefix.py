@@ -267,6 +267,7 @@ async def build_real_send_prefix(
     current_user_source_content: str | list[dict[str, Any]] | None | object = USER_SOURCE_UNSET,
     agent_envelope=None,
     selected_model: str | None = None,
+    thread_context: dict[str, Any] | None = None,
 ) -> tuple[list[dict], dict]:
     """Build the strict-prefix ``[system, ...history]`` message sequence."""
     import tools.confined_reads as confined_reads
@@ -285,7 +286,7 @@ async def build_real_send_prefix(
     collection, system_prompt, entries, handled = material[:4]
     checkpoint_prompt, checkpoint_component = material[4:]
     frozen_tools = _selected_tool_definitions(
-        await confined_reads.advertised(agent.tools, thread_id)
+        await confined_reads.advertised(agent.tools, thread_context)
         if tool_definitions is None else tool_definitions
     )
     canonical_tools = _canonical_tool_definitions(frozen_tools)

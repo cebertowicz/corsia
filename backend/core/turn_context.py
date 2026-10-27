@@ -143,6 +143,7 @@ async def prepare_turn_context(
     selected_model: str | None = None,
     installed_out: list[Any] | None = None,
     snapshot_out: list[Any] | None = None,
+    thread_context: dict[str, Any] | None = None,
 ) -> tuple[list[dict], dict]:
     """Build LLM messages and context usage stats for a turn.
 
@@ -153,7 +154,7 @@ async def prepare_turn_context(
     import tools.confined_reads as confined_reads
 
     frozen_tools = native_prefix._selected_tool_definitions(
-        await confined_reads.advertised(agent.tools, thread_id)
+        await confined_reads.advertised(agent.tools, thread_context)
         if tool_definitions is None else tool_definitions
     )
     source_content = (
@@ -204,6 +205,7 @@ async def prepare_native_context_payload(
     user_source_content: str | None | object = native_prefix.USER_SOURCE_UNSET,
     agent_envelope=None,
     runtime_context_epoch: int = 0,
+    thread_context: dict[str, Any] | None = None,
 ) -> NativePreparedContext:
     """Render and freeze the exact Native payload used after admission."""
     from core.agent import get_agent
@@ -213,7 +215,7 @@ async def prepare_native_context_payload(
     agent = await get_agent()
     await agent._connect_mcp()
     frozen_tools = native_prefix._freeze_tool_definitions(
-        await confined_reads.advertised(agent.tools, thread_id)
+        await confined_reads.advertised(agent.tools, thread_context)
     )
     installed: list[Any] = []
     snapshot: list[Any] = []

@@ -122,9 +122,40 @@ async def test_a_confined_worker_switched_to_another_harness_stays_confined(
     assert claude.working_dir.endswith(f"{worker}/confined") and Path(claude.working_dir).is_dir()
 
     child_db.execute("UPDATE threads SET model='codex/gpt-5-codex' WHERE id=?", (worker,))
-    with pytest.raises(ConfinementRefused, match="no confined launch for codex/gpt-5-codex"):
+    with pytest.raises(ConfinementRefused) as refusal:
         codex_destination_scope(worker, target_catalog_id="codex/gpt-5-codex", db=child_db)
+    assert str(refusal.value) == (
+        "no confined launch for codex/gpt-5-codex: use a claude-code/* or local model"
+    )
 
     child_db.execute("UPDATE threads SET confined_read_dirs='[]' WHERE id=?", (worker,))
     with pytest.raises(ConfinementRefused, match="damaged"):
         launch_confinement(worker, None, child_db)
+
+
+@pytest.mark.asyncio
+async def test_native_payload_uses_loaded_row_without_an_advertising_read(child_db, monkeypatch):
+    from core import turn_context
+    from infra import destination_payloads
+
+    _seed_parent(child_db, sid="worker")
+    child_db.execute("UPDATE threads SET confinement='review', confined_read_dirs='[\"/row\"]' WHERE id='worker'")
+    row = dict(child_db.execute("SELECT * FROM threads WHERE id='worker'").fetchone())
+    registry = object()
+    monkeypatch.setattr("core.agent.get_agent", AsyncMock(return_value=SimpleNamespace(
+        tools=registry, _connect_mcp=AsyncMock())))
+    monkeypatch.setattr("tools.catalog.advertised_tool_definitions", lambda _registry: (
+        {"function": {"name": "read_file"}}, {"function": {"name": "bash"}},
+    ))
+    async def prepare(*_args, **kwargs):
+        kwargs['installed_out'].append(None)
+        kwargs['snapshot_out'].append(None)
+        return [{"role": "user", "content": "hello"}], {}
+    monkeypatch.setattr(turn_context, "prepare_turn_context", prepare)
+    target = SimpleNamespace(transport_model="local", context_window=1000, catalog_id="local")
+    result = await destination_payloads._render_native_destination(
+        thread_id="worker", thread_row=row, target=target, current_user_content="hello",
+        current_user_source_content="hello", agent_envelope=None, attachments=[],
+        media_projection=None, selection=None,
+    )
+    assert [item['function']['name'] for item in result.payload.tool_definitions] == ['read_file']

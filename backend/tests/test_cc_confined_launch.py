@@ -194,7 +194,7 @@ async def test_review_launches_read_confinement_once_and_install_no_tools(
     """A cold start and a provider resume read confinement once each, before the
     destination is prepared, and build, install and budget no CORSIA tools."""
     import connections.models as cm
-    import registry.cc_session as cc_session
+    import infra.thread_confinement as thread_confinement
     import subagents.cc_runtime as rt
     from subagents import cc_destination, harness_tool_bridge
 
@@ -209,8 +209,8 @@ async def test_review_launches_read_confinement_once_and_install_no_tools(
         confinement="review", add_dirs=(reviewed_dir,),
     )
     reads = []
-    reader = cc_session.registered_confinement
-    monkeypatch.setattr(cc_session, "registered_confinement",
+    reader = thread_confinement.read_dirs
+    monkeypatch.setattr(thread_confinement, "read_dirs",
                         lambda *args, **kwargs: reads.append(args[0]) or reader(*args, **kwargs))
     fits = []
     fit = cc_destination._fit_sections

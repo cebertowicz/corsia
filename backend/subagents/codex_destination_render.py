@@ -50,7 +50,7 @@ def codex_destination_scope(
     if row is None:
         raise CodexPreparedContextStale("Codex destination thread no longer exists")
     if row["confinement"] is not None:
-        raise ConfinementRefused(f"no confined launch for {target_catalog_id}")
+        raise ConfinementRefused(f"no confined launch for {target_catalog_id}: use a claude-code/* or local model")
     selected_model = (
         target_catalog_id
         if expected_selected_model is None

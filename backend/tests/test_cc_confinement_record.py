@@ -1,91 +1,62 @@
-"""A review child's confinement, credentials and permission mode each have one owner.
-
-The rows of ``registry.cc_session``'s failure matrix, the credential rule a
-review child's environment is cleaned by, and the one permission-mode constant.
-"""
-
+"""The thread row owns cold-launch confinement; live launches keep their original scope."""
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 
 import pytest
 
 from cc_runtime_fixtures import _seed_parent, child_db  # noqa: F401
-from subagents.cc_invocation import (
-    UNCONFINED,
-    ClaudeInvocation,
-    build_claude_cmd,
-    permission_mode_for,
-)
+from subagents.cc_invocation import UNCONFINED, ClaudeInvocation, build_claude_cmd, permission_mode_for
 
 _REVIEW = dict(binary="claude", permission_mode=permission_mode_for("review"),
                confinement="review", add_dirs=("/src",), working_dir="/child/confined")
 _PLAIN = dict(binary="claude", permission_mode="bypassPermissions")
 
 
-def _record(db, thread: str, session: str, invocation: ClaudeInvocation | None) -> None:
+def _record(thread: str, session: str, invocation: ClaudeInvocation | None) -> None:
     from registry.cc_session import persist_cc_session
-
     persist_cc_session(thread, session, cwd="/w", invocation=invocation)
 
 
-def _set_metadata(db, session: str, metadata: str) -> None:
-    db.execute("UPDATE artifact_identities SET metadata=? WHERE external_id=?", (metadata, session))
-    db.commit()
-
-
-def _read(db, thread: str):
-    from registry.cc_session import registered_confinement
-
-    return registered_confinement(thread, db)
-
-
-def test_no_record_or_none_without_an_invocation_reads_none(child_db):
-    _seed_parent(child_db, sid="plain")
-    assert _read(child_db, "plain") == UNCONFINED
-    _record(child_db, "plain", "s1", None)
-    _record(child_db, "plain", "s2", ClaudeInvocation(**_PLAIN))
-    assert _read(child_db, "plain") == UNCONFINED
-
-
-def test_review_is_sticky_across_newer_records_retirement_and_release(child_db):
-    _seed_parent(child_db, sid="child")
-    _record(child_db, "child", "first", ClaudeInvocation(**_REVIEW, session_id="first"))
-    # (a) a newer session written without an invocation retires the review one.
-    _record(child_db, "child", "second", None)
-    read = _read(child_db, "child")
-    assert (read.mode, read.add_dirs, read.working_dir) == ("review", ("/src",), "/child/confined")
-    # Its registration leaves the owner states.
-    child_db.execute("UPDATE artifact_registrations SET relationship_state='tombstoned'")
-    child_db.commit()
-    assert _read(child_db, "child").mode == "review"
-
-
-def test_add_dirs_come_from_the_newest_review_record(child_db):
-    _seed_parent(child_db, sid="child")
-    _record(child_db, "child", "first", ClaudeInvocation(**_REVIEW, session_id="first"))
-    newer = {**_REVIEW, "add_dirs": ("/newer",)}
-    _record(child_db, "child", "second", ClaudeInvocation(**newer, session_id="second"))
-    child_db.execute("UPDATE artifact_identities SET updated_at='9999' WHERE external_id='second'")
-    child_db.commit()
-    assert _read(child_db, "child").add_dirs == ("/newer",)
-
-
-@pytest.mark.parametrize("metadata", [
-    json.dumps({"claude_invocation": {"confinement": "review", "add_dirs": []}}),
-    json.dumps({"claude_invocation": {"confinement": "write", "add_dirs": ["/src"]}}),
-    json.dumps({"claude_invocation": {"confinement": "review", "add_dirs": ["/src"]}}),
-    "{not json",
-])
-def test_damaged_or_unreadable_records_refuse_even_when_older(child_db, metadata):
+def test_cold_launch_uses_row_when_session_disagrees(child_db, monkeypatch):
+    from subagents.cc_confinement import launch_confinement
+    from tools.confined_reads import context_roots
+    from subagents.codex_destination_render import codex_destination_scope
     from subagents.cc_confinement import ConfinementRefused
 
     _seed_parent(child_db, sid="child")
-    _record(child_db, "child", "old", ClaudeInvocation(**_PLAIN))
-    _record(child_db, "child", "new", ClaudeInvocation(**_PLAIN))
-    _set_metadata(child_db, "old", metadata)
+    _record("child", "first", ClaudeInvocation(**_REVIEW, session_id="first"))
+    assert launch_confinement("child", None, child_db) == UNCONFINED
+    child_db.execute("UPDATE threads SET confinement='review', confined_read_dirs=? WHERE id='child'",
+                     (json.dumps(["/row"]),))
+    child_db.commit()
+    _record("child", "second", ClaudeInvocation(**_PLAIN))
+    monkeypatch.setattr("subagents.cc_confinement.review_working_dir", lambda *_args: "/child/confined")
+    result = launch_confinement("child", None, child_db)
+    assert (result.mode, result.add_dirs) == ("review", ("/row",))
+    row = dict(child_db.execute("SELECT * FROM threads WHERE id='child'").fetchone())
+    assert tuple(map(str, context_roots(row))) == ("/row",)
+    with pytest.raises(ConfinementRefused, match="no confined launch"):
+        codex_destination_scope("child", target_catalog_id="codex/test", db=child_db)
+
+
+@pytest.mark.parametrize("mode,dirs", [("review", "[]"), ("write", '["/src"]'), ("review", "{bad")])
+def test_damaged_row_refuses_cold_launch(child_db, mode, dirs):
+    from subagents.cc_confinement import ConfinementRefused, launch_confinement
+    _seed_parent(child_db, sid="child")
+    child_db.execute("UPDATE threads SET confinement=?, confined_read_dirs=? WHERE id='child'", (mode, dirs))
+    child_db.commit()
     with pytest.raises(ConfinementRefused, match="damaged"):
-        _read(child_db, "child")
+        launch_confinement("child", None, child_db)
+
+
+def test_live_process_keeps_launch_confinement(child_db):
+    from subagents.cc_confinement import launch_confinement
+    _seed_parent(child_db, sid="child")
+    invocation = ClaudeInvocation(**_REVIEW)
+    live = SimpleNamespace(session=SimpleNamespace(invocation=lambda: invocation))
+    assert launch_confinement("child", live, child_db).add_dirs == ("/src",)
 
 
 def test_review_env_holds_no_credential_and_unconfined_env_is_unchanged(monkeypatch):

@@ -174,7 +174,7 @@ async def test_the_registry_refuses_a_confined_threads_other_tools(isolated_db, 
 
 
 @pytest.mark.asyncio
-async def test_a_confined_thread_is_offered_only_the_read_tools(isolated_db, tree) -> None:
+async def test_a_confined_thread_is_offered_only_the_read_tools(isolated_db, tree, monkeypatch) -> None:
     from tools.filesystem_rw import ReadFileTool, WriteFileTool
     from tools.registry import ToolRegistry
     from tools.shell import BashTool
@@ -189,8 +189,14 @@ async def test_a_confined_thread_is_offered_only_the_read_tools(isolated_db, tre
     def names(definitions) -> set[str]:
         return {d["function"]["name"] for d in definitions}
 
-    assert names(await confined_reads.advertised(registry, "worker")) == {"read_file"}
-    assert {"read_file", "write_file", "bash"} <= names(await confined_reads.advertised(registry, "ordinary"))
     with sqlite3.connect(isolated_db) as db:
-        db.execute("UPDATE threads SET confined_read_dirs='broken' WHERE id='worker'")
-    assert await confined_reads.advertised(registry, "worker") == ()
+        db.row_factory = sqlite3.Row
+        rows = {row['id']: dict(row) for row in db.execute(
+            "SELECT id, confinement, confined_read_dirs FROM threads WHERE id IN ('worker', 'ordinary')")}
+    def no_db():
+        raise AssertionError('advertising must reuse the loaded thread row')
+    monkeypatch.setattr('infra.database.get_db', no_db)
+    assert names(await confined_reads.advertised(registry, rows['worker'])) == {"read_file"}
+    assert {"read_file", "write_file", "bash"} <= names(await confined_reads.advertised(registry, rows['ordinary']))
+    rows['worker']['confined_read_dirs'] = 'broken'
+    assert await confined_reads.advertised(registry, rows['worker']) == ()

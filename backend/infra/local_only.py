@@ -54,7 +54,8 @@ def _is_cloud(selector: str, *, db: sqlite3.Connection) -> bool:
     return locality_refusal(row, thread_local_only=True, project_id=None, db=db) is not None
 
 
-def _ready_local_selectors() -> tuple[str, ...]:
+def ready_local_selectors() -> tuple[str, ...]:
+    """The catalog's ready local models, sorted: what a Local only start may bind."""
     from llm.model_status import catalog_base_rows
 
     return tuple(sorted({
@@ -64,11 +65,6 @@ def _ready_local_selectors() -> tuple[str, ...]:
         and status.get("status") == "ready"
         and status.get("litellm_model")
     }))
-
-
-def ready_local_selectors() -> tuple[str, ...]:
-    """The catalog's ready local models, sorted: what a Local only start may bind."""
-    return _ready_local_selectors()
 
 
 def require_local_only_model(
@@ -85,7 +81,7 @@ def require_local_only_model(
     selector = model.strip()
     if not _is_cloud(selector, db=db):
         return
-    refusal = LocalityRefused("thread_local_only", selector, _ready_local_selectors(), spawn)
+    refusal = LocalityRefused("thread_local_only", selector, ready_local_selectors(), spawn)
     _emit("local_only.refused", thread_id, {"cause": refusal.cause, "spawn": spawn})
     raise refusal
 

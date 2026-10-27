@@ -174,7 +174,7 @@ async def next_turn_context_snapshot(
         agent = await get_agent()
         await agent._connect_mcp()
         tool_definitions = _freeze_tool_definitions(
-            await confined_reads.advertised(agent.tools, thread_id)
+            await confined_reads.advertised(agent.tools, dict(selected_thread_row))
         )
     elif provider in {"cc", "codex"}:
         # Same catalog-filtered ledger Native uses, built from a throwaway

@@ -77,31 +77,18 @@ def check(given: Path, resolved: Path, *, for_write: bool) -> None:
             )
 
 
-async def advertised(registry: Any, thread_id: str | None) -> tuple[dict, ...]:
-    """The provider-facing tool list for ``thread_id``: the read tools alone when confined.
+async def advertised(registry: Any, thread_context: Mapping[str, Any] | None) -> tuple[dict, ...]:
+    """The provider-facing tools for the already loaded thread row.
 
     A damaged record advertises nothing; the boundary refuses every call anyway.
     """
-    from infra.database import get_db
-    from infra.db_async import run_in_db
-    from infra.thread_confinement import read_dirs
     from tools.catalog import advertised_tool_definitions
 
     definitions = advertised_tool_definitions(registry)
-    if not thread_id:
-        return definitions
-
-    def _read() -> tuple[str, ...] | None:
-        db = get_db()
-        try:
-            return read_dirs(thread_id, db)
-        finally:
-            db.close()
-
     try:
-        dirs = await run_in_db(_read)
+        roots = context_roots(thread_context or {})
     except ConfinementRecordDamaged:
         return ()
-    if dirs is None:
+    if roots is None:
         return definitions
     return tuple(d for d in definitions if d["function"]["name"] in REVIEW_READ_TOOLS)

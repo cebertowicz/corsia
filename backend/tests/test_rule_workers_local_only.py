@@ -33,7 +33,7 @@ def local_only(request, world, monkeypatch):
             db.execute("INSERT INTO project_inference_policies (project_id, cloud_models_off) VALUES (?,1)",
                        (world["project"],))
     ready = {"models": ()}
-    monkeypatch.setattr("infra.local_only._ready_local_selectors", lambda: ready["models"])
+    monkeypatch.setattr("infra.local_only.ready_local_selectors", lambda: ready["models"])
     monkeypatch.setattr("llm.locality.row_is_local",
                         lambda row, **_servers: str(row.get("litellm_model") or "").lower().startswith("omlx"))
     bound: list[str] = []
@@ -79,8 +79,9 @@ async def _told(rule: str, event: str) -> list[str]:
 
 # (a) no local model ready: queued and held, no thread, no cloud bind; explain says why.
 @pytest.mark.asyncio
-async def test_no_local_model_ready_holds_the_start_queued(local_only):
+async def test_no_local_model_ready_holds_the_start_queued(local_only, world):
     from automation import worker_runner
+    from infra.database import get_db
 
     rule = await make_rule()
     event = await request()
@@ -90,6 +91,13 @@ async def test_no_local_model_ready_holds_the_start_queued(local_only):
     assert await _told(rule, event) == [f"rule {rule} will start a worker for {OWNER} with it: {HELD}"]
     assert await worker_runner.drive() == 0  # a second pass changes nothing
     assert starts(rule) == [("queued", HELD, "pr-1@a1", None)]
+    db = get_db()
+    try:
+        messages = db.execute("SELECT content FROM messages WHERE thread_id=? AND role='system'", (OWNER,)).fetchall()
+    finally:
+        db.close()
+    assert len([row for row in messages if HELD in row[0]]) == 1
+    assert world["driven"] == [OWNER]
 
 
 # (b) the catalog reports a local model ready: the catalog signal runs a pass that starts it.
@@ -179,10 +187,19 @@ async def test_held_starts_never_block_a_later_unheld_one(world, monkeypatch):
     rule = await make_rule()
     for name in ("held-1", "held-2", "held-3", "free"):
         await request(name)
-    verdicts = iter([False, False, False, None])
-    monkeypatch.setattr(worker_runner, "_local_model", lambda _conn, _owner, _ready: next(verdicts))
+    from infra.database import write_transaction
+    with write_transaction(None, scope="second_owner") as db:
+        db.execute("INSERT INTO threads (id,user_id,title,model,project_id,created_at,updated_at) "
+                   "VALUES ('free-owner','user-1','Free','claude-code/sonnet',?,'t','t')", (world['project'],))
+        db.execute("UPDATE event_route_decisions SET thread_id='free-owner' WHERE request_identity='free'")
+    calls = []
+    def locality(_conn, owner, _ready):
+        calls.append(owner['id'])
+        return False if owner['id'] == OWNER else None
+    monkeypatch.setattr(worker_runner, "_local_model", locality)
     claimed = await run_in_db(worker_runner._claim)
     assert [row["request_identity"] for row, _input in claimed] == ["free"]
+    assert calls == [OWNER, 'free-owner']
     assert [row[:3] for row in starts(rule)] == [
         ("queued", HELD, "held-1"), ("queued", HELD, "held-2"), ("queued", HELD, "held-3"),
         ("started", None, "free")]
