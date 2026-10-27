@@ -50,7 +50,7 @@ export async function warmActiveThread(): Promise<void> {
 
 	const { showWarmToast, completeWarmToast, dismissWarmToast } =
 		await import('$lib/stores/warmToast');
-	showWarmToast('Warming conversation…');
+	showWarmToast('Loading this chat into the model…');
 	const t0 = performance.now();
 	try {
 		const res = await fetch(`/api/threads/${sid}/warm?token=${get(token)}`, {
@@ -71,7 +71,7 @@ export async function warmActiveThread(): Promise<void> {
 		if (data?.progress && data.progress.total_blocks > 0) {
 			const p = data.progress;
 			showWarmToast(
-				`Warming conversation (${p.cold_blocks_at_start}/${p.total_blocks} blocks)`,
+				'Loading this chat into the model…',
 				'warming',
 				undefined,
 				{

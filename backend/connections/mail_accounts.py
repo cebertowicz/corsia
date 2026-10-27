@@ -43,7 +43,7 @@ _BY_STATUS = {
     store.CHECKING: "{address} is still being checked. Try again in a minute.",
     store.REFUSED: "{address}'s host didn't accept its app password. Ask the person to make a new one and Replace key on its row in Connected apps.",
     store.REVOKED: "{address}'s host stopped accepting its app password. Ask the person to make a new one and Replace key on its row in Connected apps.",
-    store.IMAP_OFF: "{address}'s host has email access for other apps turned off. Ask the person to turn on IMAP there and press Try again.",
+    store.IMAP_OFF: "{address}'s host has email access for other apps turned off. Ask the person to turn on IMAP there and press Retry.",
     store.UNREACHABLE: "CORSIA can't reach {address}'s mail server. Ask the person to check the server names in Connected apps.",
 }
 

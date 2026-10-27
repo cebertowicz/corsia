@@ -7,8 +7,10 @@ the later entry describes the current behavior.
 
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here._
 
+- Provider and model settings use clearer wording for connection, account and usage states.
 - Clearer wording for sign-in, saved keys, host access and project errors.
 - Agents can suggest individual additions to a document without replacing the text they follow.
+- In Focus, tasks assigned to you appear in the chat where they were requested and show a receipt when finished.
 - Context, skills and settings screens now say “chat” instead of thread or conversation, and their messages are clearer.
 - On a local model, if Google setup stops partway, CORSIA asks the rest of the setup questions first and comes back to Google at the end.
 - Agent replies to your document comments now show as one notice above the message box until you read them.

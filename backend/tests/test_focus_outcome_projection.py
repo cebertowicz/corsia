@@ -44,6 +44,21 @@ def test_passive_only_history_previews_without_a_dot_through_reload_and_manual_s
     assert state(db)["has_update"] is False
 
 
+@pytest.mark.parametrize(("kind", "node_state", "preview"), [
+    ("done", "accepted", "Completed: Ship the export"),
+    ("closed", "closed", "Closed: Ship the export"),
+])
+def test_sidebar_keeps_outcome_for_a_receipted_person_step(db, kind, node_state, preview):
+    node = _node(db)
+    with raw_plan_seed(db):
+        db.execute("UPDATE plan_nodes SET assignee='user', state=? WHERE id=?", (node_state, node))
+    _plan_update(db, "person-step", node, kind="person_step", at="2026-09-29T10:00:00")
+    _plan_update(db, "outcome", node, kind=kind, at="2026-09-29T11:00:00")
+    cards, _ = thread_updates.read_newest_cards(db, "owner", min_seq=0)
+    assert next(card for card in cards if card["kind"] == "person_step")["step_state"] == ("done" if kind == "done" else "closed")
+    assert state(db)["latest_update"]["summary"] == preview
+
+
 def test_new_passive_preview_preserves_older_unread_marked_until_active_visit_then_exit(db):
     visit(db)
     msg = _message(db, "owner", 1)

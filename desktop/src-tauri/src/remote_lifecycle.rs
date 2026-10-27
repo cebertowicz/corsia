@@ -30,7 +30,7 @@ pub trait EnterRemote {
 /// A failure at any step runs the whole rollback: the proxy stops, the remote this call saved is forgotten, and the
 /// local service comes back if the call had reached the step that stops it. A launch that reconnects an already
 /// saved remote implements `forget_remote` and `restore_service` as no-ops: the saved pairing outlives a transient
-/// failure (Try again needs it) and the local service was stopped when the remote was first entered.
+/// failure (Retry needs it) and the local service was stopped when the remote was first entered.
 pub fn enter_remote<E: EnterRemote>(entry: &mut E, proxy: E::Proxy) -> Result<E::Proxy, E::Error> {
     let mut service_touched = false;
     match run_steps(entry, &proxy, &mut service_touched) {

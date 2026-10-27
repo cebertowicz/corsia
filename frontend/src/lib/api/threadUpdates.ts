@@ -4,7 +4,7 @@ import type { MessageCard } from './messageCards';
 export interface UpdateCard {
 	id: number;
 	thread_id: string;
-	kind: 'done' | 'done_follow_up' | 'failed' | 'closed' | 'blocked';
+	kind: 'done' | 'done_follow_up' | 'failed' | 'closed' | 'blocked' | 'person_step';
 	node_id: string | null;
 	title: string | null;
 	/** The transcript message the card follows; 0 precedes the first message. */
@@ -18,6 +18,8 @@ export interface UpdateCard {
 	blocked_asks_user: boolean;
 	/** The user ask this blocked update recorded, as it reads now; null when it has none or its hold is gone. */
 	ask?: MessageCard | null;
+	/** A person step's card: how the step stood when the thread was read. The plan owns the live state. */
+	step_state?: 'open' | 'done' | 'closed';
 }
 
 /** Where "Since your last visit" goes; `first_seq` is null when only cards are new. */

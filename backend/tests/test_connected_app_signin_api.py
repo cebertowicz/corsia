@@ -108,7 +108,7 @@ def test_sign_in_is_offered_only_on_the_computer_corsia_runs_on(api, host, peer,
     client, _, calls, app_id, _ = api
     headers = {**AUTH, **(dict([forwarded]) if forwarded else {})}
     response = client(host, peer).post(f"/api/mcp/servers/{app_id}/sign-in", headers=headers)
-    assert response.status_code == 409 and "computer CORSIA runs on" in response.text and calls["start"] == []
+    assert response.status_code == 409 and "main computer" in response.text and calls["start"] == []
     assert client(host, peer).get("/api/mcp/servers", headers=headers).json()["sign_in_here"] is False
 
 

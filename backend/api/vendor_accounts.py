@@ -74,7 +74,7 @@ def _safe(account):
 
 
 def _allow_overage(account) -> bool:
-    """The account's own 'Spend past plan limit' switch."""
+    """The account's own 'Spend past usage limit' switch."""
     from connections.harness_usage import allows_overage
 
     return allows_overage(account["provider"], account["id"])
@@ -228,7 +228,7 @@ async def record_vendor_account_overage(account_id: str, body: AccountOverage):
 
 @router.put("/vendor-accounts/{account_id}/usage")
 async def update_vendor_account_usage(account_id: str, body: AccountUsage):
-    """Set this account's 'Spend past plan limit' switch (off by default)."""
+    """Set this account's 'Spend past usage limit' switch (off by default)."""
     from infra.state.ws import notify_models_changed
 
     account = await _call(_set_allow_overage, account_id, body.allow_overage)

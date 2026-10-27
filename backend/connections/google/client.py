@@ -205,6 +205,9 @@ async def request_json(
         raise GoogleSignInRejected()
     if response.status_code >= 400:
         raise GoogleRequestFailed(response.status_code)
+    if response.status_code == 204:
+        # A ``fields`` mask that selects nothing (a search with no matches) comes back as No Content.
+        return {}
     try:
         return response.json()
     except ValueError:
