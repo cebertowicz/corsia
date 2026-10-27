@@ -64,6 +64,8 @@ class AccountProvider:
     def valid_bundle(self, bundle: object, required: frozenset[str] | None = None) -> bool:
         """A stored bundle: ``required`` (default: a usable sign-in) present, nothing unknown."""
         needed = self.required_fields if required is None else required
+        if required is None and self.name == "google" and isinstance(bundle, dict) and bundle.get("client") == "published":
+            needed = needed - {"client_secret"}
         allowed = self.bundle_fields | self.optional_bundle_fields | {SCOPES_FIELD}
         if not isinstance(bundle, dict) or not needed <= set(bundle) or set(bundle) - allowed:
             return False

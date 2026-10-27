@@ -21,6 +21,7 @@ from infra.db_async import run_in_db
 log = logging.getLogger(__name__)
 
 TOKEN_URL = "https://oauth2.googleapis.com/token"
+PUBLISHED_REFRESH_URL = "https://google-workspace-extension.geminicli.com/refreshToken"
 STATUS_CONNECTED = "connected"
 STATUS_NEEDS_SIGN_IN = "needs_sign_in"
 TIMEOUT_SECONDS = 20.0
@@ -41,6 +42,7 @@ SIGN_IN_RECOVERY = (
     'to publish their app "In production", keeping the same project. Then call google_connect with '
     'this account_id and post its reply verbatim followed by its link as [Open it in Connected apps](<link>).'
 )
+PUBLISHED_SIGN_IN_RECOVERY = "Google rejected the saved sign-in. Call google_connect again for this account."
 NEEDS_SIGN_IN = SIGN_IN_RECOVERY
 UNREACHABLE = "Couldn't reach Google. Try again later."
 # Transport errors raised before any request bytes reach Google.
@@ -57,8 +59,8 @@ class GoogleNotConnected(GoogleError):
 
 
 class GoogleSignInRejected(GoogleError):
-    def __init__(self) -> None:
-        super().__init__(NEEDS_SIGN_IN)
+    def __init__(self, *, published: bool = False) -> None:
+        super().__init__(PUBLISHED_SIGN_IN_RECOVERY if published else NEEDS_SIGN_IN)
 
 
 class GoogleSignInError(GoogleError):
@@ -138,6 +140,14 @@ def _usable_credentials(account_id: str, *, db) -> dict[str, str] | None:  # typ
     return resolve_credentials(account_id, db=db) if is_connected(account_id, db=db) else None
 
 
+def sign_in_recovery(account_id: str, *, db) -> str:  # type: ignore[no-untyped-def]
+    """Choose recovery instructions for the account's saved client."""
+    from connections.connected_accounts import resolve_credentials
+
+    stored = resolve_credentials(account_id, db=db)
+    return PUBLISHED_SIGN_IN_RECOVERY if stored and stored.get("client") == "published" else SIGN_IN_RECOVERY
+
+
 async def access_token(account_id: str) -> str:
     """A fresh access token for this one account, for the one request that uses it.
 
@@ -151,18 +161,21 @@ async def access_token(account_id: str) -> str:
         raise GoogleNotConnected()
     try:
         async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as http:
-            response = await http.post(TOKEN_URL, data={
-                "grant_type": "refresh_token",
-                "client_id": stored["client_id"],
-                "client_secret": stored["client_secret"],
-                "refresh_token": stored["refresh_token"],
-            })
+            if stored.get("client") == "published":
+                response = await http.post(PUBLISHED_REFRESH_URL, json={"refresh_token": stored["refresh_token"]})
+            else:
+                response = await http.post(TOKEN_URL, data={
+                    "grant_type": "refresh_token",
+                    "client_id": stored["client_id"],
+                    "client_secret": stored["client_secret"],
+                    "refresh_token": stored["refresh_token"],
+                })
     except httpx.HTTPError:
         raise GoogleRequestFailed() from None
     if response.status_code in (400, 401):
         # invalid_grant or an unauthorized client: this account's saved sign-in no longer works.
         await run_in_db(_on_account, mark_needs_sign_in, account_id, stored["refresh_token"])
-        raise GoogleSignInRejected()
+        raise GoogleSignInRejected(published=stored.get("client") == "published")
     if response.status_code != 200:
         raise GoogleRequestFailed(response.status_code)
     try:
@@ -202,6 +215,8 @@ async def request_json(
     if response.status_code == 401:
         if account_id is not None:
             await run_in_db(_on_account, mark_needs_sign_in, account_id)
+            recovery = await run_in_db(_on_account, sign_in_recovery, account_id)
+            raise GoogleSignInRejected(published=recovery == PUBLISHED_SIGN_IN_RECOVERY)
         raise GoogleSignInRejected()
     if response.status_code >= 400:
         raise GoogleRequestFailed(response.status_code)

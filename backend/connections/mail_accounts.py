@@ -28,7 +28,7 @@ UNKNOWN = "No account matches that name. Pass account_id as one of: {choices}."
 UNAVAILABLE = "{address} isn't available right now. Try again later."
 NO_EMAIL_ACCOUNT = (
     "No Gmail or other mail-host account is connected. For Microsoft mail, use microsoft_status, then "
-    "microsoft_mail_search or microsoft_mail_read. To connect Gmail or Google Workspace, follow google-setup; "
+    "microsoft_mail_search or microsoft_mail_read. To connect Gmail or Google Workspace, call google_connect; "
     "any other host follows mail-host-setup."
 )
 MAIL_ACCOUNT_PARAM = {
@@ -56,7 +56,7 @@ def _mail_host_usable(account: dict, db: sqlite3.Connection) -> dict:
 
 
 def _usable(account: dict, db: sqlite3.Connection) -> dict:
-    return _mail_host_usable(account, db) if account["provider"] == MAILHOST_PROVIDER else google_accounts.usable(account)
+    return _mail_host_usable(account, db) if account["provider"] == MAILHOST_PROVIDER else google_accounts._google_usable(account, db)
 
 
 REFUSALS = Refusals(NO_EMAIL_ACCOUNT, NONE_AVAILABLE, CHOOSE, UNKNOWN)

@@ -500,7 +500,7 @@ async def test_with_no_email_account_the_resolver_names_every_connection_path(en
         mail_accounts.resolve_for_thread(None, conductor)
     assert str(refusal.value) == mail_accounts.NO_EMAIL_ACCOUNT
     output = await EmailSearchTool().execute(_thread_id=conductor, query="x")
-    assert "google-setup" in output and "microsoft_status" in output and "microsoft_mail_search" in output and "microsoft_mail_read" in output and "mail-host-setup" in output
+    assert "google_connect" in output and "microsoft_status" in output and "microsoft_mail_search" in output and "microsoft_mail_read" in output and "mail-host-setup" in output
 
 
 async def test_with_no_mail_host_account_the_resolver_is_the_google_one_unchanged(env, conductor) -> None:

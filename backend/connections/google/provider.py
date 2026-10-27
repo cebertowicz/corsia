@@ -41,5 +41,6 @@ async def _release(account_id: str) -> None:
 GOOGLE = AccountProvider(
     name="google", display_name="Google", capabilities=("mail", "calendar", "files"),
     bundle_fields=frozenset(("client_id", "client_secret", "refresh_token")), scopes_required=False,
-    client_fields=frozenset(("client_id", "client_secret")), revoke=revoke, release=_release,
+    client_fields=frozenset(("client_id", "client_secret")), optional_bundle_fields=frozenset(("client",)),
+    revoke=revoke, release=_release,
 )

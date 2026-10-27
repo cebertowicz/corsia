@@ -1,10 +1,6 @@
-"""Google sign-in: authorization-code flow with PKCE and a loopback redirect, one account per flow.
+"""Google sign-in using the published Workspace client or a person's Desktop client.
 
-The person's own Desktop OAuth client file is read here, by the backend; the
-agent passes only its path. The refresh token goes straight from Google's
-answer into that one account's bundle and is never returned, logged or put in
-a result. Each sign-in waits in memory for ten minutes under its own state
-nonce, so several can be pending at once, and a callback writes only its row.
+Each flow has its own nonce and stores its refresh token in the account's key-store bundle.
 """
 
 from __future__ import annotations
@@ -12,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import hashlib
+import json
 import os
 import secrets
 import threading
@@ -20,13 +17,12 @@ import uuid
 from dataclasses import dataclass
 from urllib.parse import urlencode
 
-import httpx
-
 from connections.app_reach import AppReach
 from connections.account_state import CONSENT_CANCELLED, PROVIDER_UNAVAILABLE, emit_lifecycle_event
 from connections.connected_accounts import Actor
 from connections.google import client
-from connections.google.client import STATUS_CONNECTED, TIMEOUT_SECONDS, TOKEN_URL, GoogleError, GoogleRequestFailed
+from connections.google.client import STATUS_CONNECTED, GoogleError
+from connections.google.client import TOKEN_URL as TOKEN_URL
 from connections.google.reach_replies import (
     ALREADY_CONNECTED, ALREADY_NEEDS_SIGN_IN, STILL_CONNECTED, not_covered_reply,
 )
@@ -55,6 +51,10 @@ OPTIONAL_SCOPES = (
 # An ID token's ``sub`` is the account's identity; never a reason to refuse a sign-in.
 IDENTITY_SCOPES = ("openid",)
 SCOPES = REQUIRED_SCOPES + OPTIONAL_SCOPES + IDENTITY_SCOPES
+PUBLISHED_REQUIRED_SCOPES = (REQUIRED_SCOPES[0], REQUIRED_SCOPES[2])
+PUBLISHED_SCOPES = PUBLISHED_REQUIRED_SCOPES + OPTIONAL_SCOPES[:2]
+PUBLISHED_CLIENT_ID = "338689075775-o75k922vn5fdl18qergr96rp8g63e4d7.apps.googleusercontent.com"
+PUBLISHED_URL = "https://google-workspace-extension.geminicli.com"
 PENDING_SECONDS = 600
 PENDING_MAX = 8
 CALLBACK_PATH = "/api/google/oauth/callback"
@@ -90,9 +90,9 @@ class _Pending:
     starting_thread_id: str | None
     reach: AppReach | None
     scopes: tuple[str, ...]
-    verifier: str
+    verifier: str | None
     client_id: str
-    client_secret: str
+    client_secret: str | None
     redirect_uri: str
     created_at: float
 
@@ -114,15 +114,13 @@ read_client_file = client.read_client_file
 
 
 def _client_for(account_id: str | None, client_file: object, db) -> tuple[str, str] | None:  # type: ignore[no-untyped-def]
-    """The client to sign in with: the file, else this row's saved client, else another row's."""
-    from connections.connected_accounts import GOOGLE_PROVIDER, account_client, list_accounts
+    """Use an explicit client file or this row's saved client, never another row's."""
+    from connections.connected_accounts import account_client
 
     if client_file:
         return client.read_client_file(client_file)
-    saved = [account_id] if account_id is not None else []
-    for candidate in saved + [str(account["id"]) for account in list_accounts(GOOGLE_PROVIDER, db=db)]:
-        if material := account_client(candidate, db=db):
-            return material["client_id"], material["client_secret"]
+    if account_id is not None and (material := account_client(account_id, db=db)):
+        return material["client_id"], material["client_secret"]
     return None
 
 
@@ -151,15 +149,13 @@ def _begin(
         credentials = _client_for(account_id, client_file, db)
     finally:
         db.close()
-    if credentials is None:
-        raise GoogleSignInError(NEEDS_CLIENT_FILE)
-    client_id, client_secret = credentials
-    verifier = secrets.token_urlsafe(64)
-    challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
+    client_id, client_secret = credentials or (PUBLISHED_CLIENT_ID, None)
+    verifier = secrets.token_urlsafe(64) if credentials else None
     pending = _Pending(
         state=secrets.token_urlsafe(32), account_id=account_id or str(uuid.uuid4()),
         adding=account_id is None, actor=actor, adding_thread_id=adding_thread_id, reach=reach,
-        starting_thread_id=starting_thread_id, scopes=SCOPES, verifier=verifier, client_id=client_id,
+        starting_thread_id=starting_thread_id, scopes=SCOPES if credentials else PUBLISHED_SCOPES,
+        verifier=verifier, client_id=client_id,
         client_secret=client_secret, redirect_uri=redirect_uri(), created_at=time.monotonic(),
     )
     with _pending_lock:
@@ -169,18 +165,26 @@ def _begin(
                 browser_message="Too many Google sign-ins are waiting. Go back to CORSIA and try again later.",
             )
         _pending[pending.state] = pending
-    return AUTH_URL + "?" + urlencode({
+    params = {
         "client_id": pending.client_id, "redirect_uri": pending.redirect_uri, "response_type": "code",
-        "scope": " ".join(pending.scopes), "state": pending.state, "code_challenge": challenge,
-        "code_challenge_method": "S256", "access_type": "offline", "prompt": "consent",
-    }), pending
+        "scope": " ".join(pending.scopes), "state": pending.state, "access_type": "offline", "prompt": "consent",
+    }
+    if verifier is None:
+        params["redirect_uri"] = PUBLISHED_URL
+        params["state"] = base64.b64encode(json.dumps({
+            "uri": pending.redirect_uri, "manual": False, "csrf": pending.state,
+        }).encode()).decode()
+    else:
+        params["code_challenge"] = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
+        params["code_challenge_method"] = "S256"
+    return AUTH_URL + "?" + urlencode(params), pending
 
 
 async def start_sign_in(
     client_file: object = None, *, actor: Actor, account_id: str | None = None,
     adding_thread_id: str | None = None, starting_thread_id: str | None = None, reach: AppReach | None = None,
 ) -> tuple[str, str]:
-    """``(url, account_id)`` for one sign-in; the client's id and secret never leave the backend.
+    """``(url, account_id)`` for one sign-in; a client's secret never leaves the backend.
 
     With ``account_id`` it signs that row in again. Without it, it adds an account whose reach comes from
     ``adding_thread_id``'s scope or, for a person's session, the given ``reach``. ``starting_thread_id`` is the agent
@@ -277,10 +281,11 @@ def _store(
     from connections.connected_accounts import ConnectedAccountError, get_account, store_credentials
     from connections.account_state import mark_signed_in, record_audit
 
-    bundle = {
-        "client_id": pending.client_id, "client_secret": pending.client_secret,
-        "refresh_token": refresh_token, "scopes": scopes,
-    }
+    bundle = {"client_id": pending.client_id, "refresh_token": refresh_token, "scopes": scopes}
+    if pending.client_secret is None:
+        bundle["client"] = "published"
+    else:
+        bundle["client_secret"] = pending.client_secret
     with write_transaction(None, scope="google_sign_in_store") as conn:
         if pending.adding:
             _add(pending, email, provider_subject, conn)
@@ -316,37 +321,35 @@ async def _tell_agent(pending: _Pending, *, cause: str, message: str | None = No
     )
 
 
-async def complete_sign_in(code: object, state: object) -> str:
+async def complete_sign_in(code: object, state: object, *, access_token: object = None,
+                           refresh_token: object = None, scope: object = None) -> str:
     """Finish one pending sign-in from Google's redirect; returns the connected address."""
     pending = _take_pending(state)
     try:
-        if not isinstance(code, str) or not code:
-            raise GoogleSignInError(DENIED, browser_message=BROWSER_DENIED)
+        if pending.client_secret:
+            from connections.google.oauth_exchange import exchange
+
+            grant = await exchange(
+                code, verifier=pending.verifier, client_id=pending.client_id, client_secret=pending.client_secret,
+                redirect_uri=pending.redirect_uri, denied=DENIED, browser_denied=BROWSER_DENIED,
+            )
+        else:
+            grant = {"access_token": access_token, "refresh_token": refresh_token, "scope": scope}
         try:
-            async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as http:
-                response = await http.post(TOKEN_URL, data={
-                    "grant_type": "authorization_code", "code": code, "code_verifier": pending.verifier,
-                    "client_id": pending.client_id, "client_secret": pending.client_secret,
-                    "redirect_uri": pending.redirect_uri,
-                })
-        except httpx.HTTPError:
-            raise GoogleRequestFailed() from None
-        if response.status_code != 200:
-            raise GoogleSignInError(DENIED, browser_message=BROWSER_DENIED)
-        try:
-            grant = response.json()
-            refresh_token, access = grant["refresh_token"], grant["access_token"]
-            scopes = sorted(str(grant.get("scope", "")).split())
+            refresh_token = key_store.validated_value(grant["refresh_token"])
+            access = key_store.validated_value(grant["access_token"])
+            scopes = sorted(str(grant.get("scope") or "").split())
             provider_subject = client.id_token_subject(grant.get("id_token"))
+            required = REQUIRED_SCOPES if pending.client_secret else PUBLISHED_REQUIRED_SCOPES
+            if not set(required) <= set(scopes):
+                message = MISSING_SCOPES if pending.client_secret else MISSING_SCOPES.replace(", Docs and Sheets", " and Docs")
+                raise GoogleSignInError(message, browser_message=BROWSER_MISSING_SCOPES)
             profile = await client.request_json("GET", PROFILE_URL, account_id=None, token=access)
             email = str(profile["emailAddress"])
-            refresh_token = key_store.validated_value(refresh_token)
         except GoogleError:
             raise
         except Exception:
             raise GoogleSignInError(DENIED, browser_message=BROWSER_DENIED) from None
-        if not set(REQUIRED_SCOPES) <= set(scopes):
-            raise GoogleSignInError(MISSING_SCOPES, browser_message=BROWSER_MISSING_SCOPES)
         await run_in_db(_store, pending, refresh_token, email, scopes, provider_subject)
         await drive_starting_agent(pending.starting_thread_id, pending.state)
         from events.connectors.mail_poller import schedule_account
@@ -388,7 +391,7 @@ def accounts_status(thread_id: str | None = None) -> dict:
                 "poller_state": poller["state"], "last_success_at": poller["last_success_at"],
             }
             if status == client.STATUS_NEEDS_SIGN_IN:
-                row["needs_action"] = client.SIGN_IN_RECOVERY
+                row["needs_action"] = client.sign_in_recovery(account_id, db=db)
             rows.append(row)
     finally:
         db.close()

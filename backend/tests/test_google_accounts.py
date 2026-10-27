@@ -147,13 +147,13 @@ async def test_two_sign_ins_in_flight_each_add_their_own_account(google, conduct
 async def test_the_same_google_identity_under_another_address_is_not_added_twice(google, conductor, client_file):
     google.id_token = _id_token("subject-one")
     first = await _add(google, conductor, client_file, "person@example.com")
-    _, state = await _start(google, conductor, None)
+    _, state = await _start(google, conductor, client_file)
     again = await _finish(google, state, google.challenge, "alias@example.com")
     assert again.status_code == 400 and "person@example.com is already connected." in again.text
     assert [str(account["id"]) for account in _accounts()] == [first]
 
     google.id_token = _id_token("subject-two")
-    _, state = await _start(google, conductor, None)
+    _, state = await _start(google, conductor, client_file)
     # A different Google identity is a new account, even one reusing nothing else.
     assert (await _finish(google, state, google.challenge, "other@example.com")).status_code == 200
     assert len(_accounts()) == 2
@@ -161,7 +161,7 @@ async def test_the_same_google_identity_under_another_address_is_not_added_twice
 
 async def test_a_refused_refresh_signs_out_only_that_account(google, conductor, client_file):
     first = await _add(google, conductor, client_file, "person@example.com")
-    second = await _add(google, conductor, None, "work@example.com")
+    second = await _add(google, conductor, client_file, "work@example.com")
     google.refused.add(_bundle(first)["refresh_token"])
 
     with pytest.raises(google_client.GoogleSignInRejected):
@@ -224,7 +224,7 @@ async def test_a_remove_whose_revoke_fails_still_removes_with_a_fixed_cause(
     google, conductor, client_file, status, cause,
 ):
     account_id = await _add(google, conductor, client_file, "person@example.com")
-    kept = await _add(google, conductor, None, "work@example.com")
+    kept = await _add(google, conductor, client_file, "work@example.com")
     google.revoke_status = status
 
     result = await account_actions.remove_account(account_id, actor=PERSON)
