@@ -58,7 +58,10 @@ def test_dev_service_cannot_be_installed_or_managed(tmp_path: Path) -> None:
     assert not (tmp_path / "agents" / "com.corsia.dev.plist").exists()
 
 
-def test_service_status_reports_only_the_canonical_instance(tmp_path: Path) -> None:
+def test_service_status_reports_only_the_canonical_instance(tmp_path: Path, monkeypatch) -> None:
+    # This case exercises launchd, even when the suite runs on Linux. An
+    # exported Bash function also works when pytest's temp directory is noexec.
+    monkeypatch.setenv("BASH_FUNC_uname%%", "() { printf 'Darwin\\n'; }")
     result = _run_cli(tmp_path, "service", "status")
     output = result.stdout + result.stderr
 
