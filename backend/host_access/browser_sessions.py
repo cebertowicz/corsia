@@ -18,7 +18,6 @@ from host_access.browser_session_state import (
 )
 
 logger = logging.getLogger(__name__)
-
 BROWSER_NAMESPACE = "corsia-prod"
 CommandResult: TypeAlias = browser_cli.CommandResult
 # Which session a command may use: any (start one if needed), only a new one, or only the open one.
