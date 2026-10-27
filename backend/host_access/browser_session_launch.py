@@ -3,7 +3,7 @@
 Chrome locks a profile to one running browser. The first session of an owner holds the shared profile; a
 session that starts while it is held launches on a throwaway profile seeded with a copy of the holder's
 sign-in (agent-browser's ``state save`` / ``--state``), kept in private state and removed when it closes.
-An untrusted session never touches the shared profile or a copy of it.
+A session whose owning user cannot be resolved receives neither the profile nor a copy.
 """
 from __future__ import annotations
 
@@ -21,11 +21,10 @@ logger = logging.getLogger(__name__)
 _STATE_SAVE_TIMEOUT = 30.0
 
 
-async def resolve_profile(thread_id: str, *, untrusted: bool) -> str | None:
-    """The shared profile a thread's new session may use; None for an untrusted one (the C3 gate)."""
-    if untrusted:
-        return None
-    return str(await asyncio.to_thread(browser_launch.profile_dir, thread_id))
+async def resolve_profile(thread_id: str) -> str | None:
+    """Return the saved profile for a resolved owner, or use an ephemeral browser."""
+    profile = await asyncio.to_thread(browser_launch.profile_dir, thread_id)
+    return str(profile) if profile is not None else None
 
 
 def assign(sessions: Mapping[str, Any], profile: str | None, thread_id: str) -> tuple[str | None, str | None]:

@@ -31,14 +31,13 @@ def profile_root() -> Path:
     return STATE_ROOT / PROFILE_ROOT_NAME
 
 
-def profile_dir(thread_id: str) -> Path:
-    """The one place that decides which saved sign-in a thread's browser uses.
-
-    One profile per owning user, shared by every project and agent that user owns (the owner's call:
-    a sign-in must carry over to the next agent). A thread whose owner cannot be read falls back to the
-    instance-wide profile, so a lookup failure never splits the sign-in or reaches a person's own Chrome.
-    """
-    return profile_root() / _owner_key(thread_id)
+def profile_dir(thread_id: str) -> Path | None:
+    """Resolve the instance's saved profile only for a thread with a valid owner."""
+    # Contributor workspaces run in separate instances with separate state roots; see
+    # docs/contributing/bootstrap/CROSS-WORKSPACE-PROTOCOL.md:19,92,120-126.
+    # Unknown owners fail closed to an ephemeral session.
+    owner = _owner_key(thread_id)
+    return profile_root() / owner if owner is not None else None
 
 
 def copy_path(session: str) -> Path:
@@ -46,7 +45,7 @@ def copy_path(session: str) -> Path:
     return profile_root() / COPIES_DIR_NAME / f"{session}.json"
 
 
-def _owner_key(thread_id: str) -> str:
+def _owner_key(thread_id: str) -> str | None:
     from infra.database import get_db
     try:
         db = get_db()
@@ -55,9 +54,9 @@ def _owner_key(thread_id: str) -> str:
         finally:
             db.close()
     except sqlite3.Error:
-        return "instance"
+        return None
     owner = row[0] if row is not None else None
-    return owner if isinstance(owner, str) and _OWNER_KEY.fullmatch(owner) else "instance"
+    return owner if isinstance(owner, str) and _OWNER_KEY.fullmatch(owner) else None
 
 
 def chrome_major(chrome: str | None) -> str | None:

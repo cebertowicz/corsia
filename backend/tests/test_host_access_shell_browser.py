@@ -1034,6 +1034,7 @@ async def test_browser_http_open_does_not_enter_host_path_gate(monkeypatch) -> N
         lease_id=None,
         timeout=30,
         show_window=None,
+        navigation_url=None,
     ):
         assert thread_id == "thread-1"
         assert lease_id is None
@@ -1070,7 +1071,7 @@ async def test_browser_http_open_requests_a_visible_new_session(monkeypatch) -> 
 
     calls: list[tuple[list[str], bool | None]] = []
 
-    async def run(args, *, thread_id, lease_id=None, timeout=30, show_window=None):
+    async def run(args, *, thread_id, lease_id=None, timeout=30, show_window=None, navigation_url=None):
         assert thread_id == "thread-1" and lease_id is None
         calls.append((args, show_window))
         return "opened"
@@ -1100,6 +1101,7 @@ async def test_browser_http_open_stages_navigation_before_waiting(monkeypatch) -
         lease_id=None,
         timeout=30,
         show_window=None,
+        navigation_url=None,
     ):
         assert thread_id == "thread-1"
         assert lease_id is None

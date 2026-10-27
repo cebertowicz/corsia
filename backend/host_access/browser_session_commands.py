@@ -2,9 +2,12 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import os
 from functools import partial
 from typing import Any, Sequence
+from urllib.parse import urlsplit
 
 from host_access import browser_cdp, browser_cli, browser_control, browser_dom_write, browser_identity as identity
 from host_access import browser_pane_state, browser_step_lifecycle
@@ -20,20 +23,56 @@ _PANE_COMMANDS = {("open",), ("back",), ("forward",), ("reload",), ("get", "cdp-
 # refuses them for agents and the pane alike; CORSIA's own state copy goes through the owner's private invoke.
 _COOKIE_COMMANDS = {"cookies", "state", "storage", "auth", "profiles", ("network", "har"), ("network", "requests")}
 _SECRET_REFUSAL = "browser cookies, saved sign-ins and stored logins are not available to agents"
+_SCRIPT_REFUSAL = ("Scripts are unavailable in a browser session with a saved sign-in; read the page with "
+                   "snapshot or get text, or run scripted extraction in a browser session without the saved sign-in")
+_SCRIPT_COMMANDS = {"eval", "addinitscript", "batch", "plugin", "mcp"}
+_SCRIPT_FLAGS = {"--fn", "--restore-check-fn", "--init-script", "--extension", "--enable", "--args"}
+
+
+def _javascript_url(value: str) -> bool:
+    try:
+        return urlsplit(value).scheme.lower() == "javascript"
+    except ValueError:
+        return False
+
+
+def _script_config(config: dict) -> bool:
+    """Refuse launch hooks and extensions from native config or the backend environment."""
+    names = {"initscripts", "initscript", "extensions", "extension", "plugins", "enable", "restorecheckfn", "args"}
+    configured = any(str(key).replace("_", "").replace("-", "").lower() in names and value
+                     for key, value in config.items())
+    env = ("AGENT_BROWSER_INIT_SCRIPTS", "AGENT_BROWSER_EXTENSIONS", "AGENT_BROWSER_PLUGINS",
+           "AGENT_BROWSER_ENABLE", "AGENT_BROWSER_RESTORE_CHECK_FN")
+    launch_args = os.environ.get("AGENT_BROWSER_ARGS", "").lower()
+    return configured or any(os.environ.get(key) for key in env) or "--load-extension" in launch_args
+
+
+def _script_request(args: Sequence[str]) -> bool:
+    """Identify agent-supplied code and wrappers capable of running it."""
+    return (args[0].startswith("-") or args[0].lower() in _SCRIPT_COMMANDS
+            or args[0].lower() == "wait" and any(arg.split("=", 1)[0] == "-f" for arg in args[1:])
+            or any(arg.split("=", 1)[0] in _SCRIPT_FLAGS for arg in args)
+            or any(_javascript_url(arg) for arg in args))
 
 
 async def run(owner: Any, thread_id: str, args: Sequence[str], *, lease_id: str | None,
               timeout: float, show_window: bool | None, session: str, pane: bool = False,
-              untrusted: bool = False) -> str:
+              navigation_url: str | None = None) -> str:
     """Guard agent commands; a connected pane's own commands pass, so the person can leave a password page."""
     _validate(thread_id, args, timeout, show_window, pane)
     try:
-        await asyncio.to_thread(browser_cli.check_local_mode, args)
+        config = await asyncio.to_thread(browser_cli.check_local_mode, args)
     except identity.BrowserIdentityError as exc:
         raise BrowserSetupError(str(exc)) from exc
     await owner._pin_native()
-    runtime = await owner._admit(thread_id, lease_id=lease_id, show_window=show_window, session=session,
-                                 untrusted=untrusted)
+    runtime = await owner._admit(thread_id, lease_id=lease_id, show_window=show_window, session=session)
+    if runtime.record.profile or runtime.record.copy_of:
+        trusted_navigation = (navigation_url is not None and
+                              tuple(args) == ("eval", f"location.href = {json.dumps(navigation_url)}; 'navigating'") and
+                              not _javascript_url(navigation_url))
+        if _script_config(config) or (not pane and not trusted_navigation and (_script_request(args) or
+                navigation_url is not None and _javascript_url(navigation_url))):
+            raise BrowserSessionError(_SCRIPT_REFUSAL)
     command = partial(_command, owner, runtime, lease_id)
     opening_unlaunched_session = args[0] == "open" and runtime.record.binding is None
     guarded = not pane and not opening_unlaunched_session
@@ -145,7 +184,8 @@ def _validate(thread_id: str, args: Sequence[str], timeout: float, show_window: 
         raise BrowserSessionError("browser command is invalid")
     if args[0] in {"close", "quit", "exit"}:
         raise BrowserSessionError("browser close requires owned session teardown")
-    if args[0] in _COOKIE_COMMANDS or tuple(args[:2]) in _COOKIE_COMMANDS or "--state" in args or "--profile" in args:
+    if (args[0] in _COOKIE_COMMANDS or tuple(args[:2]) in _COOKIE_COMMANDS or
+            any(arg.split("=", 1)[0] in {"--state", "--profile", "--restore", "--restore-save"} for arg in args)):
         raise BrowserSessionError(_SECRET_REFUSAL)
     if pane and tuple(args[:1]) not in _PANE_COMMANDS and tuple(args[:2]) not in _PANE_COMMANDS:
         raise BrowserSessionError("a browser pane only navigates, reads its page's address and title, and sizes the page")

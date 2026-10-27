@@ -66,13 +66,11 @@ class BrowserSessionOwner:
     async def run(self, thread_id: str, args: Sequence[str], *,
                   lease_id: str | None = None, timeout: float = 30.0,
                   show_window: bool | None = None, session: SessionAdmission = "any",
-                  pane: bool = False, untrusted: bool = False) -> str:
-        """Run one command through the shared-browser command path; `pane` marks the person's own
-        command from the browser pane, which the password guard never refuses. An `untrusted` session
-        (one that reads outside content for a worker nobody vouches for) never gets the saved sign-in."""
+                  pane: bool = False, navigation_url: str | None = None) -> str:
+        """Run one command through the shared-browser path; `pane` marks the person's own command."""
         from host_access.browser_session_commands import run
         return await run(self, thread_id, args, lease_id=lease_id, timeout=timeout, show_window=show_window,
-                         session=session, pane=pane, untrusted=untrusted)
+                         session=session, pane=pane, navigation_url=navigation_url)
 
     async def page_endpoint(self, thread_id: str) -> str:
         """The thread's shared page target, resolved exactly as for its agent's commands."""
@@ -139,9 +137,9 @@ class BrowserSessionOwner:
             self._active_commands -= 1
 
     async def _admit(self, thread_id: str, *, lease_id: str | None, show_window: bool | None = None,
-                     session: SessionAdmission = "any", untrusted: bool = False) -> BrowserRuntime:
+                     session: SessionAdmission = "any") -> BrowserRuntime:
         # Resolved before the lock, and only for a session that does not exist yet.
-        profile = None if thread_id in self._sessions else await launch.resolve_profile(thread_id, untrusted=untrusted)
+        profile = None if thread_id in self._sessions else await launch.resolve_profile(thread_id)
         async with self._owner_lock:
             if self._shutting_down or lease_id in self._closed_leases:
                 raise BrowserSessionError("browser session admission is closed")

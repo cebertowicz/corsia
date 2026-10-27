@@ -332,7 +332,7 @@ async def invoke(argv: Sequence[str], *, socket_dir: Path, timeout: float) -> Co
     return CommandResult(int(process.returncode or 0), stdout, stderr)
 
 
-def check_local_mode(args: Sequence[str]) -> None:
+def check_local_mode(args: Sequence[str]) -> dict:
     """Reject unverified producer modes before session effects, including config files."""
     forbidden = {"-p", "--provider", "--engine", "--cdp", "--auto-connect", "--config"}
     if any(arg.split("=", 1)[0] in forbidden for arg in args):
@@ -359,6 +359,7 @@ def check_local_mode(args: Sequence[str]) -> None:
     if (provider is not None or engine not in {None, "chrome"} or config.get("cdp")
             or os.environ.get("AGENT_BROWSER_CDP") or auto_connect or config.get("autoConnect")):
         raise identity.BrowserIdentityError(_LOCAL_MODE_REQUIRED)
+    return config
 
 
 _LOCAL_MODE_REQUIRED = (

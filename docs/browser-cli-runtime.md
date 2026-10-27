@@ -66,17 +66,19 @@ thread IDs. There is no unsupported `--namespace` or `session info` command.
 ## Saved sign-ins and stealth
 
 The first session of an owning user launches with a persistent Chrome profile
-under the CORSIA state root (`browser-profile/<user>`, or `instance` when there
-is no owner). It is private state on the host-access hard floor and is never the
+under the CORSIA state root (`browser-profile/<user>`). An unresolved owner gets
+an ephemeral session. The profile is private state on the host-access hard floor and is never the
 person's own Chrome profile. Chrome allows one process per profile, so a
 concurrent second session starts from a `state save` copy of the holder's
 sign-ins, stored `0600` under `browser-profile/copies/` and deleted on close.
 Sign-ins made in a concurrent copy do not persist to the shared profile.
-An untrusted worker's session gets neither the profile nor a copy.
+Separate CORSIA instances use their own private state and profiles.
 
-Agents cannot read the saved sign-ins: `cookies`, `state`, `storage`, `auth`,
-`profiles`, `network har|requests` and the `--state` / `--profile` flags are
-refused. Headless launches drop the `AutomationControlled` blink feature, use a
+The command path refuses `cookies`, `state`, `storage`, `auth`, `profiles`,
+`network har|requests` and the `--state` / `--profile` flags. Saved-profile
+sessions also refuse agent-authored scripts, script-taking flags and extensions;
+ephemeral sessions retain scripted extraction. Headless launches drop the
+`AutomationControlled` blink feature, use a
 user agent derived from the installed Chrome without the `Headless` token, and
 run `browser_stealth_init.js` on every document. Launch flags apply only to a
 session's first command.

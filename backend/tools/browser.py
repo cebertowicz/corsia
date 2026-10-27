@@ -121,6 +121,7 @@ class BrowserOpenTool(Tool):
                 f"location.href = {json.dumps(effective_url)}; 'navigating'",
             ],
             thread_id=thread_id,
+            navigation_url=effective_url,
         )
         if navigation_result.startswith("Error"):
             return navigation_result
