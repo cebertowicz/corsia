@@ -181,6 +181,6 @@ def observe_admitted_check_suite(payload: dict[str, Any], selected_pr: dict[str,
         except PrResolutionError:
             log.info("github-head-checks: ambiguous payload PR identity")
     if _default is None:
-        from reviewer.gh_api import run_gh
-        _default = HeadCheckAggregator(run_gh, IntakeSink())
+        from connections.github_broker import default_broker
+        _default = HeadCheckAggregator(default_broker(), IntakeSink())
     _default.observe(payload, selected_pr)
