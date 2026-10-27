@@ -111,10 +111,9 @@
 	.group { margin-bottom: 18px; }
 	.group:last-child { margin-bottom: 4px; }
 	.cap-row { display: flex; align-items: center; gap: 6px; }
-	/* The actions give way first: a long failure line takes the ellipsis, and the cap's title stays whole (its min-content). */
-	.cap-actions { display: flex; flex: 0 1 auto; min-width: 0; padding: 0 8px 8px 0; }
+	.cap-actions { flex: none; padding: 0 8px 8px 0; }
 	.cap {
-		display: flex; flex: 1; align-items: center; gap: 6px; width: 100%; text-align: left;
+		display: flex; flex: 1; min-width: 0; align-items: center; gap: 6px; width: 100%; text-align: left;
 		background: none; border: none; cursor: pointer; padding: 2px 8px 8px;
 		font-size: var(--text-footnote); font-weight: var(--fw-semibold); color: var(--text-tertiary);
 	}
