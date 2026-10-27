@@ -77,10 +77,21 @@ def test_account_refusal_claims_only_behind_a_switch_it_commits(isolated_db, swi
         )
 
         if switch_ready:
-            # The committed switch changed the account, so its destination claims normally.
+            # The committed switch may change the account, so its destination claims once.
             assert settlement.switch_transition is not None
             assert isinstance(settlement.successor, ClaimedBatch)
             assert settlement.successor.target_model == "claude-code/opus"
+            # If the destination keeps the refused account, its own refusal holds:
+            # the switch was consumed, so a second refusal never re-claims.
+            again = finish_turn(
+                "next", outcome="error", ended_at="latest", successor_turn_id="third",
+                boot_epoch="boot", error=AccountAdmissionError("account_home_mismatch"), db=db,
+            )
+            assert again.switch_transition is None
+            assert again.successor is None
+            assert db.execute(
+                "SELECT delivery_state,active_turn_id FROM messages WHERE id='queued'",
+            ).fetchone()[:] == ("queued", None)
         else:
             assert settlement.switch_transition is None
             assert settlement.successor is None
