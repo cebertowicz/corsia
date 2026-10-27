@@ -205,7 +205,7 @@
 	{/if}
 </SettingsGroup>
 
-<ConfirmDialog open={confirmConnect} title="Connect to another computer?" description="CORSIA on this computer stops while you're connected. Its agents and scheduled work wait until you come back, and nothing here is deleted. To come back, choose Disconnect in Settings › System." confirmLabel="Connect" cancelLabel="Cancel" onConfirm={() => { confirmConnect = false; connectOpen.set(true); }} onCancel={() => confirmConnect = false} />
+<ConfirmDialog open={confirmConnect} title="Connect to another computer?" description="CORSIA on this computer stops while you're connected. Its agents and scheduled work wait until you come back, and nothing here is deleted. To come back, choose Disconnect in Settings › System." confirmLabel="Connect" cancelLabel="Cancel" onConfirm={() => { confirmConnect = false; connectOpen.set(true); }} onCancel={() => confirmConnect = false} />
 
 <SettingsDevices onConnectionState={(enabled) => deviceConnectionsEnabled = enabled} />
 

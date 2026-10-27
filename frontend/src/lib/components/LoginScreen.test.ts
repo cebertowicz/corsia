@@ -63,6 +63,25 @@ afterEach(() => {
 });
 
 describe('LoginScreen', () => {
+	it.each(['Studio', ''])('names the remote on sign-in when known (%s)', async (name) => {
+		remoteShellMocks.shellInfo.mockReturnValue({ mode: 'remote', name, localConfigured: true });
+		vi.stubGlobal('fetch', vi.fn(async () => statusResponse(true)));
+		mountScreen();
+		await vi.waitFor(() => expect(submitButton()).not.toBeNull());
+		expect(host.textContent).toContain(name ? 'Sign in to Studio' : 'Your personal AI assistant');
+	});
+
+	it.each(['Studio', ''])('uses a truthful status heading for response and network failures (%s)', async (name) => {
+		remoteShellMocks.shellInfo.mockReturnValue({ mode: 'remote', name, localConfigured: true });
+		const fetchMock = vi.fn().mockResolvedValueOnce({ ok: false, status: 500 }).mockRejectedValueOnce(new Error('network'));
+		vi.stubGlobal('fetch', fetchMock);
+		mountScreen();
+		const heading = name ? 'Can’t check Studio' : 'CORSIA couldn’t start';
+		await vi.waitFor(() => expect(host.querySelector('h1')?.textContent).toBe(heading));
+		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Retry'))!.click();
+		await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+		await vi.waitFor(() => expect(host.querySelector('h1')?.textContent).toBe(heading));
+	});
 	it('shows the no-account state with the CLI command instead of a form', async () => {
 		vi.stubGlobal('fetch', vi.fn(async () => statusResponse(false)));
 		mountScreen();
@@ -202,7 +221,7 @@ describe('LoginScreen', () => {
 		remoteShellMocks.shellInfo.mockReturnValue(remote ? { mode: 'remote', name: 'Studio', localConfigured: false } : null);
 		vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('unavailable'); }));
 		mountScreen();
-		await vi.waitFor(() => expect(host.textContent).toContain('CORSIA couldn’t start'));
+		await vi.waitFor(() => expect(host.textContent).toContain(remote ? 'Can’t check Studio' : 'CORSIA couldn’t start'));
 		const button = Array.from(host.querySelectorAll('button')).find((item) => item.textContent?.includes('Set up this computer instead'));
 		expect(Boolean(button)).toBe(remote);
 		if (button) {

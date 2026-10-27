@@ -23,6 +23,7 @@
 	let checkingAgain = $state(false);
 	let returningToThisComputer = $state(false);
 	const shell = shellInfo();
+	const remoteName = shell?.mode === 'remote' ? shell.name.trim() : '';
 	const localReturnLabel = shell?.mode === 'remote'
 		? shell.localConfigured ? 'Use this computer instead' : 'Set up this computer instead'
 		: null;
@@ -128,7 +129,7 @@
 </script>
 
 {#if phase === 'error'}
-	<SetupShell steps={[]} page="error" title="CORSIA couldn’t start" lede={reportError || loginError || 'Something went wrong while starting. Try again, or save a report to send.'} primary={{ label: 'Retry' }} onPrimary={checkAgain}>
+	<SetupShell steps={[]} page="error" title={remoteName ? `Can’t check ${remoteName}` : 'CORSIA couldn’t start'} lede={reportError || loginError || (remoteName ? 'Something went wrong. Try again, or save a report to send.' : 'Something went wrong while starting. Try again, or save a report to send.')} primary={{ label: 'Retry' }} onPrimary={checkAgain}>
 		{#snippet secondary()}
 			<Button variant="chip" onclick={async () => { reportError = await saveSetupReport(); }}>Save a report</Button>
 			{#if localReturnLabel}<Button variant="chip" onclick={returnToThisComputer} loading={returningToThisComputer} disabled={returningToThisComputer}>{localReturnLabel}</Button>{/if}
@@ -139,7 +140,7 @@
 	<div class="login-card">
 		<div class="login-logo"><LivingMark entry="none" label="CORSIA" /></div>
 		<h1>CORSIA</h1>
-		<p>Your personal AI assistant</p>
+		<p>{phase === 'form' && remoteName ? `Sign in to ${remoteName}` : 'Your personal AI assistant'}</p>
 		{#if phase === 'no-account'}
 			{#if loginError}<div class="login-error">{loginError}</div>{/if}
 			<p class="no-account-copy">No account exists yet. On the CORSIA computer, run:</p>
@@ -172,9 +173,11 @@
 					Sign in
 				</Button>
 				{#if localReturnLabel}
-					<Button variant="chip" onclick={returnToThisComputer} loading={returningToThisComputer} disabled={submitting || returningToThisComputer}>
-						{localReturnLabel}
-					</Button>
+					<div class="form-return">
+						<Button variant="chip" onclick={returnToThisComputer} loading={returningToThisComputer} disabled={submitting || returningToThisComputer}>
+							{localReturnLabel}
+						</Button>
+					</div>
 				{/if}
 			</form>
 		{:else if phase === 'checking' && localReturnLabel}
@@ -221,7 +224,10 @@
 	}
 	.login-card p { color: var(--text-secondary); margin-bottom: 28px; font-size: var(--text-body); }
 	.no-account-copy { margin-bottom: 14px; }
-	.login-form { display: contents; }
+	.login-form, .form-return { display: contents; }
+	@media (max-width: 40em) {
+		.form-return { display: block; margin-top: var(--space-3); }
+	}
 	.login-card input {
 		width: 280px; padding: 12px 16px; background: var(--bg-tertiary);
 		border: 1px solid var(--border); border-radius: var(--radius-sm);

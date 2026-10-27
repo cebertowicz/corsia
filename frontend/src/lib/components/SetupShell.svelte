@@ -225,8 +225,8 @@
 				</section>
 			{/key}
 		</div>
-		<footer>
-			<div>{@render secondary?.()}</div>
+		<footer class:error-footer={page === 'error'}>
+			{#if page !== 'error'}<div class="secondary-actions">{@render secondary?.()}</div>{/if}
 			{#if primary}
 				<div class="primary-action">
 					{#if primary.note && (primary.disabled || primary.noteAlways)}<span class="footer-note">{primary.note}</span>{/if}
@@ -239,6 +239,7 @@
 					</Button>
 				</div>
 			{/if}
+			{#if page === 'error'}<div class="secondary-actions">{@render secondary?.()}</div>{/if}
 		</footer>
 	</main>
 </div>
@@ -269,6 +270,7 @@
 	footer { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--space-4); min-height: calc(var(--space-7) + var(--space-2)); }
 	footer > div { display: flex; align-items: center; gap: var(--space-1); min-height: calc(var(--space-7) + var(--space-2)); }
 	.primary-action { display: flex; align-items: center; gap: var(--space-3); }
+	.error-footer .secondary-actions { order: -1; }
 	.primary-label-stack { display: grid; grid-template-areas: 'label'; }
 	.primary-label { grid-area: label; }
 	:global(.primary-label-exiting) { position: absolute; inset: 0; display: grid; place-items: center; }
@@ -286,6 +288,9 @@
 	@media (max-width: 40em) {
 		.rail { display: none; }
 		.primary-action { flex-direction: column; align-items: flex-end; }
+		.error-footer { flex-direction: column; align-items: stretch; gap: var(--space-3); }
+		.error-footer .primary-action { align-items: flex-start; }
+		.error-footer .secondary-actions { order: 0; flex-wrap: wrap; gap: var(--space-3); }
 	}
 	.job-region { overflow: hidden; }
 	.job-region-inner { min-height: 0; overflow: hidden; }
