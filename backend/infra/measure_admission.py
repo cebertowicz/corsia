@@ -12,7 +12,7 @@ from infra.measure_registry import REGISTRY, DeclaredEvent, namespace_refusal
 from infra.measure_validation import STAMPED_ATTRIBUTES
 from infra.outcome_event_attributes import ATTRIBUTE_ALLOWLISTS
 from infra.outcome_event_input import OutcomeInputRefusal
-from infra.outcome_events import RecordResult, _utc, count_outcome_event, record_outcome_event
+from infra.outcome_events import RecordResult, count_outcome_event, record_outcome_event
 
 # Counter labels for names an agent didn't declare: a printed name never becomes a counter row,
 # so an agent's counter rows per day stay within (declared events + these labels) x counters.
@@ -62,7 +62,7 @@ def admit(
         return refuse("record_refused", late)
     event_ts = ts or datetime.now(timezone.utc).isoformat()
     if entry.since is not None and entry.since["as"] not in merged:
-        _stamp_since(db, entry, merged, _utc(event_ts), project_id, owner_thread_id)
+        _stamp_since(db, entry, merged, event_ts, project_id, owner_thread_id)
     key, problem = _dedupe_key(event_name, entry, merged)
     if problem:
         return refuse("record_refused", problem)
@@ -98,11 +98,13 @@ def _stamp_since(
         if value is None or not entry.specs[end].accepts(value):
             return
         values.extend((start, value))
-    clauses = ["event_name=?", "ts<=?", "retracted_at IS NULL"]
-    args: list[Any] = [since["event"], ts]
+    end = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    end = (end if end.tzinfo else end.replace(tzinfo=timezone.utc)).astimezone(timezone.utc)
+    clauses = ["event_name=?", "ts<=?", "project_id IS ?", "retracted_at IS NULL"]
+    args: list[Any] = [since["event"], end.isoformat(), project_id]
     if since["event"] not in ATTRIBUTE_ALLOWLISTS:
-        clauses.extend(("project_id IS ?", "agent_thread_id=?"))
-        args.extend((project_id, owner))
+        clauses.append("agent_thread_id=?")
+        args.append(owner)
     for _ in pairs:
         clauses.append("EXISTS (SELECT 1 FROM json_each(outcome_events.attributes) WHERE key=? AND value=?)")
     args.extend(values)
@@ -110,7 +112,6 @@ def _stamp_since(
     row = db.execute(sql, args).fetchone()
     if row is not None:
         start = datetime.fromisoformat(row[0])
-        end = datetime.fromisoformat(ts)
         attributes[since["as"]] = int((end - start).total_seconds() // 60)
 
 

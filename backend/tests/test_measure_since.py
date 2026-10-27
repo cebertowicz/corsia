@@ -12,7 +12,7 @@ import yaml
 from infra.measure_admission import admit
 from infra.measure_registry import REGISTRY, sync
 from infra.measure_validation import Lines, validate
-from infra.outcome_events import record_outcome_event
+from infra.outcome_events import record_outcome_event, retract_outcome_event
 from infra.schema import SCHEMA_SQL
 
 
@@ -97,7 +97,7 @@ def world(tmp_path: Path, data: dict | None = None) -> sqlite3.Connection:
     return db
 
 
-def emit(db: sqlite3.Connection, event: str, attrs: dict, when: datetime, project: str = "project") -> dict:
+def emit(db: sqlite3.Connection, event: str, attrs: dict, when: datetime, project: str | None = "project") -> dict:
     result = admit(db, owner_thread_id="owner", event_name=event, attributes=attrs, project_id=project, ts=when.isoformat())
     assert result.refusal is None and result.result and result.result.inserted
     row = db.execute("SELECT attributes FROM outcome_events WHERE id=?", (result.result.event_id,)).fetchone()
@@ -139,16 +139,24 @@ def test_future_start_not_used(tmp_path: Path) -> None:
     assert "minutes" not in emit(db, "demo.end", {"key": "end", "introduced_by": "a"}, now)
 
 
-def test_github_start_without_project_matches(tmp_path: Path) -> None:
+@pytest.mark.parametrize("start_project,end_project,expected", [
+    ("other", "project", False), ("project", "project", True),
+    ("project", None, False), (None, None, True), (None, "project", False),
+])
+def test_platform_start_respects_project_scope(tmp_path: Path, start_project: str | None, end_project: str | None, expected: bool) -> None:
     data = declaration()
     data["events"]["demo.end"]["attributes"]["repo"] = "id"
     data["events"]["demo.end"]["since"] = {"event": "github.pr.opened", "on": {"repo": "repo", "introduced_by": "pr"}, "as": "minutes"}
     db = world(tmp_path, data)
     now = datetime.now(timezone.utc)
     record_outcome_event(db, dedupe_key="github-open", event_name="github.pr.opened", source="github", provenance="observed",
-                         ts=(now - timedelta(minutes=7)).isoformat(), attributes={"repo": "acme/repo", "pr": "42"})
-    end = emit(db, "demo.end", {"key": "end", "repo": "acme/repo", "introduced_by": "42"}, now)
-    assert end["minutes"] == 7
+                         ts=(now - timedelta(minutes=7)).isoformat(), project_id=start_project,
+                         attributes={"repo": "acme/repo", "pr": "42"})
+    end = emit(db, "demo.end", {"key": "end", "repo": "acme/repo", "introduced_by": "42"}, now, end_project)
+    if expected:
+        assert end["minutes"] == 7
+    else:
+        assert "minutes" not in end
 
 
 def test_start_from_another_project_does_not_match(tmp_path: Path) -> None:
@@ -156,6 +164,25 @@ def test_start_from_another_project_does_not_match(tmp_path: Path) -> None:
     now = datetime.now(timezone.utc)
     emit(db, "demo.start", {"key": "start", "pr": "a"}, now - timedelta(minutes=5), "other")
     assert "minutes" not in emit(db, "demo.end", {"key": "end", "introduced_by": "a"}, now)
+
+
+def test_offset_timestamp_matches_utc_start(tmp_path: Path) -> None:
+    db = world(tmp_path)
+    now = datetime.now(timezone.utc)
+    emit(db, "demo.start", {"key": "start", "pr": "a"}, now - timedelta(minutes=5))
+    local = now.astimezone(timezone(timedelta(hours=-7)))
+    assert emit(db, "demo.end", {"key": "end", "introduced_by": "a"}, local)["minutes"] == 5
+
+
+def test_retracted_starts_are_not_used(tmp_path: Path) -> None:
+    db = world(tmp_path)
+    now = datetime.now(timezone.utc)
+    emit(db, "demo.start", {"key": "old", "pr": "a"}, now - timedelta(minutes=20))
+    emit(db, "demo.start", {"key": "new", "pr": "a"}, now - timedelta(minutes=5))
+    assert retract_outcome_event(db, "demo.start:new")
+    assert emit(db, "demo.end", {"key": "first", "introduced_by": "a"}, now)["minutes"] == 20
+    assert retract_outcome_event(db, "demo.start:old")
+    assert "minutes" not in emit(db, "demo.end", {"key": "second", "introduced_by": "a"}, now)
 
 
 def test_supplied_duration_preserved(tmp_path: Path) -> None:
