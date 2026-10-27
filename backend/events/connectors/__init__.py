@@ -70,9 +70,9 @@ class ConnectorManifest:
     # raw payload + what routing already resolved for it (or None) -> flat facts
     extract_facts: Callable[[dict, Mapping[str, Any] | None], dict]
     build_artifact_ref: Callable[[str, dict, dict], dict | None]
-    # One extractor per artifact type a tool result can create: it takes the artifact's identity
-    # from the result's own created-artifact output, never from text the artifact carries. An
-    # ``observe`` rule names one by its artifact type (``item_type``).
+    # One extractor per artifact type a tool result can name: it takes the artifact's identity
+    # from the command output, never from text the artifact carries. An ``observe`` rule names
+    # one by its artifact type (``item_type``).
     artifact_extractors: Mapping[str, Callable[[str], ObservedArtifactDecl | None]] = field(
         default_factory=dict)
     resolve_relationships: Callable[[str, dict, dict], tuple[dict, ...]] = (

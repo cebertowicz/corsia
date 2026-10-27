@@ -42,7 +42,7 @@ INVALID = "invalid"
 NO_RESULT = "no_result"
 REFUSED = "refused"
 
-# An observe rule's outcome: the caller was registered to what its tool call created, or not.
+# An observe rule's outcome: the caller was registered to what its command output named, or not.
 REGISTERED = "registered"
 NOT_REGISTERED = "not_registered"
 

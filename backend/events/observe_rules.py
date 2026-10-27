@@ -97,12 +97,15 @@ def _connector(item_type: Any, connector: Any) -> str:
     if not isinstance(item_type, str) or not item_type:
         raise RuleRefused(f"an observe rule needs an item_type; the types with an extractor are {_known_types()}")
     declared = connectors.extractor_connectors(item_type)
-    if connector is not None and connector not in declared:
-        declared = ()
     if not declared:
         raise RuleRefused(
             f"no connector reports on {item_type!r}, so registering it would achieve nothing; "
             f"the types with an extractor are {_known_types()} (`types` lists them)")
+    if connector is not None and connector not in declared:
+        raise RuleRefused(f"connector {connector} does not report on {item_type!r}; "
+                          f"the types with an extractor are {_known_types()} (`types` lists them)")
+    if connector is not None:
+        return connector
     if len(declared) > 1:
         raise RuleRefused(f"{item_type!r} is read by {list(declared)}; name one as connector")
     return declared[0]

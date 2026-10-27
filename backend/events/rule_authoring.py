@@ -21,7 +21,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from events import observe_rules, rule_declarations, rule_explain, rule_reads, rules
-from events.rule_listing import OUTCOME_JOINS, OUTCOME_SCOPE, list_rules, rule_set_rows, shape as _shape  # noqa: F401
+from events.rule_listing import OUTCOME_JOINS, OUTCOME_SCOPE, shape as _shape
 from events.rule_actions import RuleRefused, check_script, check_worker
 from events.connectors import EventTypeDecl, get_manifest
 from events.rule_match import matches

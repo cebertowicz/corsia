@@ -60,7 +60,7 @@ def observe_record(
 
 def _artifact_from_result(
     thread_id, raw_name, name, args, text, meta, arg_keys, is_shell,
-    *, is_cc_builtin, origin, db,
+    *, is_cc_builtin, origin, db, changed,
 ) -> dict | None:
     """Preserve existing registration behavior beside activity observation."""
     if arg_keys is None:
@@ -73,6 +73,7 @@ def _artifact_from_result(
             origin=origin,
             db=db,
             notify=False,
+            changed=changed,
         ) if is_shell else None
     if meta.get("is_error"):
         return None
@@ -155,11 +156,16 @@ def _observe(
             )
             activity = None
 
-        artifact = _artifact_from_result(
-            thread_id, raw_name, name, args, text, meta, arg_keys,
-            is_shell, is_cc_builtin=is_cc_builtin, origin=origin, db=_db,
-        )
-        return observation_result(artifact, activity)
+        changed: list[dict] = []
+        try:
+            artifact = _artifact_from_result(
+                thread_id, raw_name, name, args, text, meta, arg_keys,
+                is_shell, is_cc_builtin=is_cc_builtin, origin=origin, db=_db, changed=changed,
+            )
+        except CommandArtifactRegistrationError as error:
+            logger.warning(f"registry observer failed for session {thread_id}: {error}")
+            artifact = None
+        return observation_result(artifact, activity, changed if is_shell else None)
     finally:
         if not db:
             _db.close()
@@ -202,6 +208,7 @@ def observe_command_result(
     db=None,
     notify: bool = False,
     told: list[str] | None = None,
+    changed: list[dict] | None = None,
 ) -> dict | None:
     """Run the observe rules that cover this thread against one confirmed shell result.
 
@@ -245,6 +252,8 @@ def observe_command_result(
         except Exception as error:
             _record(db, thread_id, rule, "not_registered", artifact, str(error))
             raise CommandArtifactRegistrationError(artifact, error) from error
+        if registered is not None and changed is not None:
+            changed.append(registered)
         label = f"{artifact.type.replace('-', ' ')} {artifact.external_id}"
         if registered is None:  # this thread already has a current registration: owner or follower
             current = models.resolve(artifact.integration, artifact.type, artifact.external_id, db=db)

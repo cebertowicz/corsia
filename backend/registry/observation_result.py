@@ -15,13 +15,19 @@ class ObservationResult:
 
     artifact: dict[str, Any] | None = None
     activity: DocumentActivity | None = None
+    changed: tuple[dict[str, Any], ...] | None = None
+
+    def notifications(self) -> tuple[dict[str, Any], ...]:
+        return self.changed if self.changed is not None else (self.artifact,) if self.artifact else ()
 
 
 def observation_result(
     artifact: dict[str, Any] | None = None,
     activity: DocumentActivity | None = None,
+    changed: list[dict[str, Any]] | None = None,
 ) -> ObservationResult | None:
-    return ObservationResult(artifact, activity) if artifact or activity else None
+    return ObservationResult(artifact, activity, tuple(changed) if changed is not None else None) if (
+        artifact or activity or changed) else None
 
 
 async def observe_settled_tool_result(
@@ -43,8 +49,9 @@ async def observe_settled_tool_result(
                 thread_id, "tool", content, metadata, db=db, origin=origin
             )
         )
-        if observation and observation.artifact:
-            notify_changed(observation.artifact)
+        if observation:
+            for artifact in observation.notifications():
+                notify_changed(artifact)
         if observation and observation.activity:
             publish_document_activity(observation.activity)
     except Exception as error:

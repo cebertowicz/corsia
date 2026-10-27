@@ -422,15 +422,17 @@ async def test_slow_registration_does_not_block_event_loop_timer(
     _stub_process(monkeypatch, stdout=_URL + "\n")
     events = []
 
-    def slow_registration(*_args, **_kwargs):
+    def slow_registration(*_args, **kwargs):
         events.append("db-start")
         time.sleep(0.05)
         events.append("db-done")
-        return {
+        artifact = {
             "integration": "github",
             "type": "pull-request",
             "external_id": "owner/repo#42",
         }
+        kwargs["changed"].append(artifact)
+        return artifact
 
     monkeypatch.setattr(shell_module, "observe_command_result", slow_registration)
     monkeypatch.setattr(

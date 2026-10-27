@@ -118,6 +118,10 @@ async def test_create_refuses_what_an_observe_row_cannot_do(isolated_db):
     unknown = await _observe_rule("a", item_type="calendar-event")
     assert unknown.startswith("Refused: no connector reports on 'calendar-event'")
     assert "pull-request" in unknown
+    assert (await _observe_rule("a", connector="github", item_type="calendar-event")).startswith(
+        "Refused: no connector reports on 'calendar-event'")
+    wrong = await _observe_rule("a", connector="missing", item_type="pull-request")
+    assert wrong.startswith("Refused: connector missing does not report on 'pull-request'")
     for stray in ("to", "mode", "note", "action", "match"):
         refused = await _observe_rule("a", **{stray: "thread:a" if stray == "to" else "deliver"})
         assert refused.startswith("Refused:") and stray in refused
@@ -179,7 +183,10 @@ def test_the_shipped_rule_registers_gh_pr_create_for_every_caller(isolated_db):
     assert (shipped["id"], shipped["scope"], shipped["kind"], shipped["connector"], shipped["tool"]) == (
         "ruleset_github_pr_create", "global", "observe", "github", "bash")
     assert (json.loads(shipped["argv_prefix"]), shipped["item_type"]) == (["gh", "pr", "create"], "pull-request")
-    assert connectors.artifact_extractor("github", "pull-request") is not None
+    from events.connectors.github import GITHUB_INTEGRATION, PR_TYPE
+
+    assert (shipped["connector"], shipped["item_type"]) == (GITHUB_INTEGRATION, PR_TYPE)
+    assert connectors.artifact_extractor(shipped["connector"], shipped["item_type"]) is not None
 
 
 @pytest.mark.asyncio
@@ -275,6 +282,60 @@ def test_a_follower_gets_the_pane_refresh_through_the_shell_tool(isolated_db, mo
     assert [item["external_id"] for item in notified] == [PR]
 
 
+@pytest.mark.parametrize("fail_second", [False, True])
+def test_shell_notifies_each_registration_even_if_a_later_one_fails(isolated_db, monkeypatch, fail_second):
+    from registry import observer
+
+    thread = make_session(get_db(), prefix="multi")
+    _write("INSERT INTO event_rules (id,created_at,updated_at,enabled,kind,scope,connector,origin,created_by,"
+           "authority_ref,tool,argv_prefix,item_type) VALUES ('second','zz','zz',1,'observe','global',"
+           "'github','rule_set:test','system','self','bash','[\"gh\",\"pr\",\"create\"]','other')")
+    original_extractor = connectors.artifact_extractor
+    monkeypatch.setattr(connectors, "artifact_extractor", lambda connector, item: (
+        (lambda _: connectors.ObservedArtifactDecl("github", "pull-request", "owner/repo#43"))
+        if item == "other" else original_extractor(connector, item)))
+    original_register = observer.register_observed_artifact
+    def register(*args, **kwargs):
+        if fail_second and kwargs["external_id"] == "owner/repo#43":
+            raise ValueError("registration failed")
+        return original_register(*args, **kwargs)
+    monkeypatch.setattr(observer, "register_observed_artifact", register)
+    notified = []
+    monkeypatch.setattr("tools.shell.notify_changed", notified.append)
+    _stub_process(monkeypatch, stdout=_URL + "\n")
+    result = asyncio.run(BashTool().execute("gh pr create", **_direct_shell_context(thread)))
+    assert [item["external_id"] for item in notified] == ([PR] if fail_second else [PR, "owner/repo#43"])
+    assert ("Warning" in result) == fail_second
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fail_second", [False, True])
+async def test_legacy_bash_notifies_each_registration_after_settlement(isolated_db, monkeypatch, fail_second):
+    from registry import observer
+    from registry.observation_result import observe_settled_tool_result
+    from tests.test_registry_command_observer import _insert_call
+
+    thread = make_session(get_db(), prefix="legacy-multi")
+    _insert_call(get_db(), thread, "call", name="Bash", command="gh pr create")
+    _write("INSERT INTO event_rules (id,created_at,updated_at,enabled,kind,scope,connector,origin,created_by,"
+           "authority_ref,tool,argv_prefix,item_type) VALUES ('second','zz','zz',1,'observe','global',"
+           "'github','rule_set:test','system','self','bash','[\"gh\",\"pr\",\"create\"]','other')")
+    original_extractor = connectors.artifact_extractor
+    monkeypatch.setattr(connectors, "artifact_extractor", lambda connector, item: (
+        (lambda _: connectors.ObservedArtifactDecl("github", "pull-request", "owner/repo#43"))
+        if item == "other" else original_extractor(connector, item)))
+    original_register = observer.register_observed_artifact
+    def register(*args, **kwargs):
+        if fail_second and kwargs["external_id"] == "owner/repo#43":
+            raise ValueError("registration failed")
+        return original_register(*args, **kwargs)
+    monkeypatch.setattr(observer, "register_observed_artifact", register)
+    notified = []
+    monkeypatch.setattr("registry.service.notify_changed", notified.append)
+    await observe_settled_tool_result(thread, _URL, {"tool_call_id": "call", "name": "Bash"})
+    assert [item["external_id"] for item in notified] == ([PR] if fail_second else [PR, "owner/repo#43"])
+
+
 @pytest.mark.asyncio
 async def test_only_a_rules_writer_turns_off_an_observe_row_and_a_shipped_one_stays_on(isolated_db):
     _agent("a")
@@ -346,6 +407,23 @@ async def test_list_explain_and_types_show_both_kinds(isolated_db):
                for item in github["event_types"])
     assert (await _tool("a", operation="types", connector="nope")).startswith("Refused: no connector")
     assert {item["connector"] for item in (await _tool("a", operation="types"))["connectors"]} >= {"github"}
+
+
+def test_explain_distinguishes_a_named_artifact_from_empty_output(isolated_db):
+    from events.rule_explain import decision
+
+    _agent("owner")
+    _agent("rival")
+    _run("owner", "gh pr create")
+    _run("rival", "gh pr create")
+    _run("rival", "gh pr create", "no URL")
+    db = get_db()
+    rows = db.execute("SELECT d.*, r.action FROM event_route_decisions d JOIN event_rules r ON r.id=d.rule_id "
+                      "WHERE d.thread_id='rival' ORDER BY d.id").fetchall()
+    named, empty = (decision(db, row)["explanation"] for row in rows)
+    assert "artifact the command's output named" in named and "created" not in named
+    assert "artifact" not in empty and "created" not in empty
+    db.close()
 
 
 @pytest.mark.asyncio

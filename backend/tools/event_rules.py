@@ -7,7 +7,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
-from events import rule_actions, rule_authoring, rule_runs, rule_types, rules
+from events import rule_actions, rule_authoring, rule_listing, rule_runs, rule_types, rules
 from infra import config
 from infra.database import get_db, write_transaction
 from infra.db_async import run_in_db
@@ -58,8 +58,8 @@ def _run(operation: str, thread_id: str, project_id: str | None, kwargs: dict[st
         if operation == "types":
             return rule_types.types(db, kwargs.get("connector"))
         if operation == "list":
-            return {"rules": rule_authoring.list_rules(db, project_id=project_id, now=now),
-                    "rule_sets": rule_authoring.rule_set_rows(db, now=now, project_id=project_id)}
+            return {"rules": rule_listing.list_rules(db, project_id=project_id, now=now),
+                    "rule_sets": rule_listing.rule_set_rows(db, now=now, project_id=project_id)}
         if operation == "test":
             return {"matches": rule_authoring.dry_run(
                 db, caller=thread_id, project_id=project_id, connector=kwargs.get("connector"),
@@ -138,7 +138,7 @@ class EventRulesTool(Tool):
             "to the event's file's registered owner (`to: registered_owner`); that owner is woken "
             "only when it is you or one of your temporary workers, otherwise the event goes to "
             "its digest. A paused chat gets a digest instead. "
-            "`kind: observe` (create) registers you to the file a shell command of yours creates: "
+            "`kind: observe` (create) registers you to the file your shell command's output names: "
             "give `tool: bash`, the command's leading words as `argv_prefix` (such as gh pr create) "
             "and the `item_type` a connector reads from the command's output (`types` lists them), "
             "and no `to`, `mode`, `note`, `match` or `action`. The result tells you what happened; "
