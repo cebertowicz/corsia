@@ -308,6 +308,7 @@ def _append_tool_results_sync(
             ))
             projected = with_notice(projected, pr_event_notice(
                 thread_id=thread_id, tool_name=dispatched_name, arguments=dispatched_arguments))
+        projected = _with_observe_notice(projected, result, canonical, tc, thread_id)
         if media is not None and media.image is not None:
             media_images.append(media.image)
         messages = agent.context.add_tool_result(
@@ -319,6 +320,19 @@ def _append_tool_results_sync(
     if media_images:
         messages = agent.context.add_tool_media(messages, media_images)
     return enforce_native_image_request_limits(messages, model)
+
+
+def _with_observe_notice(projected, result, canonical, call, thread_id):
+    from tools.mcp_stamp import result_stamp
+
+    if canonical is None or not result_stamp(result):
+        return projected
+    from registry.connected_app_observation import notice_for_result
+    from tools.tool_surface import resolve_dispatch
+
+    _, arguments, _ = resolve_dispatch(call.name, call.arguments)
+    notices = notice_for_result(thread_id, canonical.message_id, canonical.turn_id, arguments)
+    return projected + "\n\n" + "\n".join(notices) if notices else projected
 
 
 def _native_tool_media(canonical, model, *, image_count: int = 1):

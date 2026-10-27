@@ -1,7 +1,7 @@
 """Agent-written event rules and the record of what each one did.
 
 Shared by fresh installs and migrations 136, 138, 141 and 152. ``event_rules`` holds
-the rules an agent wrote through the ``event_rules`` tool, of two kinds: ``route`` rules
+agent-written rules and release-written shipped rows (scope ``global``), of two kinds: ``route`` rules
 act on events (today's routing stays in code), and ``observe`` rules register the
 artifact named in a tool result to its caller. ``event_route_decisions`` is the one outcome
 record for those rules; the tool's list and explain read it, a ``run_script`` rule's
@@ -62,8 +62,8 @@ EVENT_RULE_SCHEMA_SQL = f"""
         workflow_id TEXT CHECK (COALESCE(action = 'start_worker', 0) = (workflow_id IS NOT NULL)),
         request_identity_fact TEXT
             CHECK (COALESCE(action = 'start_worker', 0) = (request_identity_fact IS NOT NULL)),
-        -- observe: the tool whose result is read, the command's leading arguments (a shell only)
-        -- and the connector's artifact type its extractor reads from the result.
+        -- observe: the tool whose result is read, the shell command's leading arguments or
+        -- connected-app identities, and the artifact type the connector reads from the result.
         tool TEXT,
         argv_prefix TEXT CHECK (argv_prefix IS NULL OR (json_valid(argv_prefix)
                                 AND json_type(argv_prefix) = 'array'

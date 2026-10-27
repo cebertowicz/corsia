@@ -11,7 +11,8 @@ def test_sync_reconciles_manifest_declarations_and_preserves_agent_rows(monkeypa
     db.row_factory = sqlite3.Row
     db.executescript(EVENT_RULE_SCHEMA_SQL)
     observe_rules.sync_shipped_rules(db)
-    declared = {r.id: (m.connector, r.tool, list(r.argv_prefix), r.item_type)
+    declared = {r.id: (m.connector, observe_rules.MCP_PREFIX + r.tool if r.apps else r.tool,
+                       list(r.apps if r.apps else r.argv_prefix), r.item_type)
                 for name in connectors.registered_connectors()
                 for m in [connectors.get_manifest(name)] for r in m.shipped_observe_rules}
     rows = db.execute("SELECT * FROM event_rules").fetchall()

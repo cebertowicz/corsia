@@ -8,7 +8,7 @@ from loguru import logger
 
 from doceditor.presence import is_document_activity_tool, observe_document_activity
 
-from events import connectors, observe_rules
+from events import connectors, observe_rules, self_caused
 from events.connectors import ObservedArtifactDecl
 from infra.database import get_db
 from infra.product_events import emit_product_event
@@ -23,6 +23,7 @@ from registry.observed_write import register_observed_write
 from registry.registration_writer import RegistrationOrigin
 from registry.service import register_observed_artifact
 from tools.catalog import CC_BUILTIN_ALIASES, normalize_tool_name
+from tools.mcp_stamp import APP_FIELD, TOOL_FIELD
 from tools.tool_surface import resolve_dispatch
 
 # Canonical-name-keyed: harness-name variance is resolved once by
@@ -167,7 +168,7 @@ def _record(db, thread_id, rule, outcome, artifact, reason, told) -> None:
         told.append("Couldn't save this result to the rule's history, so `explain` won't show this run.")
     emit_product_event("event_rule", outcome, thread_id=thread_id, properties={
         "rule_id": rule.id, "kind": observe_rules.OBSERVE, "connector": rule.connector,
-        "shipped": rule.origin.startswith("rule_set:"), "reason": reason})
+        "shipped": rule.origin.startswith(observe_rules.RULE_SET_ORIGIN), "reason": reason})
 
 
 def _extractor(rule, db, thread_id, told):
@@ -191,6 +192,27 @@ def _already_registered(db, thread_id, rule, artifact, label, told) -> None:
             "it was already registered to you" if owns else "you already follow it", told)
 
 
+def _extract_observation(rule, args, content, app, upstream, db, thread_id, told):
+    if app is not None:
+        if app not in rule.argv_prefix:
+            return False, None
+        extract = connectors.get_manifest(rule.connector).connected_app_extractors.get(rule.item_type)
+        if extract is None:
+            reason = f"connector {rule.connector} cannot read {rule.item_type.replace('-', ' ')} from app results"
+            if told is not None:
+                told.append(f"Not registered: {reason}.")
+            _record(db, thread_id, rule, "not_registered", None, reason, told)
+            return False, None
+        result = extract(content, upstream, args)
+        if result is not None:
+            self_caused.record(db, thread_id, rule, result.events)
+        return True, result.artifact if result else None
+    if not command_matches_rule(args.get(rule.command_arg), rule):
+        return False, None
+    extract = _extractor(rule, db, thread_id, told)
+    return (True, extract(content)) if extract else (False, None)
+
+
 def observe_command_result(
     thread_id: str,
     raw_tool_name: str | None,
@@ -203,13 +225,17 @@ def observe_command_result(
     notify: bool = False,
     told: list[str] | None = None,
     changed: list[dict] | None = None,
+    metadata: dict | None = None,
 ) -> dict | None:
-    """Run the observe rules that cover this thread against one confirmed shell result.
+    """Apply observe rules to a confirmed shell or stamped connected-app result.
 
     Returns the artifact or ``None``; appends what happened to ``told`` and records it for ``explain``.
     """
-    name = normalize_tool_name(raw_tool_name)
-    if not thread_id or is_error or name not in observe_rules.SHELL_TOOLS:
+    metadata = metadata or {}
+    app, upstream = metadata.get(APP_FIELD), metadata.get(TOOL_FIELD)
+    connected = isinstance(app, str) and bool(app) and isinstance(upstream, str) and bool(upstream)
+    name = observe_rules.MCP_PREFIX + upstream if connected else normalize_tool_name(raw_tool_name)
+    if not thread_id or is_error or (not connected and name not in observe_rules.SHELL_TOOLS):
         return None
     rule_db = db or get_db()
     try:
@@ -221,16 +247,15 @@ def observe_command_result(
     owned, followed = None, None  # the owner's registration first, else a follower's
     seen: set[tuple[str, str, str]] = set()
     for rule in covering:
-        if not command_matches_rule(args.get(rule.command_arg), rule):
-            continue
-        extract = _extractor(rule, db, thread_id, told)
-        if extract is None:
+        matched, artifact = _extract_observation(
+            rule, args, content, app if connected else None, upstream, db, thread_id, told)
+        if not matched:
             continue
         item_name = rule.item_type.replace("-", " ")
-        artifact = extract(content)
         if artifact is None:
             if told is not None:
-                told.append(f"Not registered: the command's output named no {item_name}.")
+                source = "app result" if connected else "command's output"
+                told.append(f"Not registered: the {source} named no {item_name}.")
             _record(db, thread_id, rule, "not_registered", None, f"the output named no {item_name}", told)
             continue
         key = (artifact.integration, artifact.type, artifact.external_id)

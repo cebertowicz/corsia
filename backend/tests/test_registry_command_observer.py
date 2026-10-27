@@ -95,9 +95,10 @@ def test_the_shipped_row_is_the_github_pr_create_rule(isolated_db):
         "SELECT connector, tool, argv_prefix, item_type FROM event_rules WHERE scope='global'"
     ).fetchall()
 
-    assert [tuple(row) for row in shipped] == [
-        ("github", "bash", '["gh","pr","create"]', "pull-request")
-    ]
+    assert set(map(tuple, shipped)) == {
+        ("github", "bash", '["gh","pr","create"]', "pull-request"),
+        ("github", "mcp:create_pull_request", '["https://api.githubcopilot.com","ghcr.io/github/github-mcp-server"]', "pull-request"),
+    }
 
 
 @pytest.mark.asyncio

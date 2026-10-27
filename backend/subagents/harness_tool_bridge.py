@@ -272,6 +272,7 @@ async def _with_notice_and_marker(
     name: str,
     arguments: dict[str, Any] | None,
     workspace: Path | None = None,
+    connected_app: bool = False,
 ) -> str:
     """Return a result's model text: the projection, plan/repo notices, then the echo marker."""
     from core.plan_notice import plan_notice, with_notice
@@ -290,6 +291,15 @@ async def _with_notice_and_marker(
         tool_call_id=provider_tool_call_id,
         tool_name=dispatched_name,
     )
+    # Observe only the persisted result's connected-app stamp, before returning its notice.
+    if connected_app:
+        from registry.connected_app_observation import notice_for_result
+
+        observed = await asyncio.to_thread(
+            notice_for_result, thread_id, delivery.message_id, turn_identity.turn_id, arguments or {},
+        )
+        if observed:
+            projected = projected + "\n\n" + "\n".join(observed)
     # The notices sit beside the result, and the echo marker still lands last.
     projected = with_notice(projected, notice)
     repo_notice = await asyncio.to_thread(
@@ -342,9 +352,12 @@ async def execute_tool(
 
         dispatched_name, _dispatched_args, _dispatcher = resolve_dispatch(name, arguments)
         dispatched_tool = registry.get(dispatched_name)
+        from tools.mcp_stamp import result_stamp
+
         decorate_result = functools.partial(
             _with_notice_and_marker,
             workspace=dispatched_tool.workspace if dispatched_tool else None,
+            connected_app=bool(result_stamp(content)),
         )
         return await publish_completed_tool_result(
             completion,

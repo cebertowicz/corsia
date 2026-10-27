@@ -169,7 +169,7 @@ def create(
     mode: Any = None, note: Any = None, scope: Any = None, now: str,
     tracked: frozenset[str] | None = None, script_id: Any = None, workflow_id: Any = None,
     request_identity_fact: Any = None, workflows: Mapping[str, Any] | None = None,
-    kind: Any = None, tool: Any = None, argv_prefix: Any = None, item_type: Any = None,
+    kind: Any = None, tool: Any = None, argv_prefix: Any = None, item_type: Any = None, app: Any = None,
 ) -> dict[str, Any]:
     """Write one rule within the writer limits, or raise :class:`RuleRefused`.
 
@@ -198,7 +198,7 @@ def create(
         strays = dict(event_type=event_type, match=match, action=action, to=to, mode=mode, note=note,
                       script_id=script_id, workflow_id=workflow_id, request_identity_fact=request_identity_fact)
         return observe_rules.create(db, writer=row, scope=own_scope, now=now, tool=tool, argv_prefix=argv_prefix,
-                                    item_type=item_type, connector=connector, strays=strays)
+                                    item_type=item_type, connector=connector, strays=strays, app=app)
     action = rules.DELIVER if action is None else action
     decl = _decl(db, connector, event_type)
     tests = _match(match, decl)
@@ -324,7 +324,7 @@ def explain(
     if not project_id:
         return {"decisions": [], "summary": "Rules cover a project's events; this chat is in no project."}
     # A shipped rule set's rule is global: its outcomes show here only for this project's chats.
-    where = [OUTCOME_SCOPE]
+    where = [OUTCOME_SCOPE, "d.event_type != 'observe:self_caused'"]
     args: list[Any] = [rules.project_scope(project_id), observe_rules.SHIPPED_SCOPE, project_id]
     if event_id:
         where.append("d.event_id=?")

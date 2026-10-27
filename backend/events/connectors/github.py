@@ -28,6 +28,7 @@ from events.identity import (
     check_suite_pr_metadata_from_event,
     pr_external_id,
 )
+from events.connectors.github_observe import extract as extract_connected_app_result
 from events.connectors.github_label_events import IDENTITY, change_event
 from events.connectors.github_ownership import declaration_facts
 from events.connectors.github_receiver import GITHUB_RECEIVER
@@ -292,9 +293,16 @@ MANIFEST = register(ConnectorManifest(
     extract_facts=_extract_facts,
     build_artifact_ref=_artifact_ref,
     artifact_extractors={PR_TYPE: _pr_artifact_in_output},
-    shipped_observe_rules=(ShippedObserveRuleDecl(
-        id="ruleset_github_pr_create", tool="bash", argv_prefix=("gh", "pr", "create"), item_type=PR_TYPE,
-    ),),
+    connected_app_extractors={PR_TYPE: extract_connected_app_result},
+    shipped_observe_rules=(
+        ShippedObserveRuleDecl(
+            id="ruleset_github_pr_create", tool="bash", argv_prefix=("gh", "pr", "create"), item_type=PR_TYPE,
+        ),
+        ShippedObserveRuleDecl(
+            id="ruleset_github_mcp_pr_create", tool="create_pull_request", argv_prefix=(), item_type=PR_TYPE,
+            apps=("https://api.githubcopilot.com", "ghcr.io/github/github-mcp-server"),
+        ),
+    ),
     resolve_relationships=_relationships,
     repository_fact="repo",
     project_repositories=_project_repositories,

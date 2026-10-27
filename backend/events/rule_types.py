@@ -27,7 +27,9 @@ def _artifact_types(
     return [
         {"item_type": name, "extractor": name in manifest.artifact_extractors,
          "shipped_commands": [
-             {"tool": rule.tool, "argv_prefix": list(rule.argv_prefix)}
+             ({"tool": rule.tool.removeprefix(observe_rules.MCP_PREFIX), "apps": list(rule.argv_prefix)}
+              if rule.tool.startswith(observe_rules.MCP_PREFIX)
+              else {"tool": rule.tool, "argv_prefix": list(rule.argv_prefix)})
              for rule in shipped if rule.connector == manifest.connector and rule.item_type == name]}
         for name in names
     ]
@@ -38,11 +40,15 @@ def types(db: sqlite3.Connection, connector: Any = None) -> dict[str, Any]:
     if connector is not None and connector not in connectors.registered_connectors():
         raise RuleRefused(f"no connector {connector!r}; the connectors are {list(connectors.registered_connectors())}")
     shipped = _shipped_commands(db)
-    return {"connectors": [
-        {"connector": name,
-         "event_types": [{"event_type": decl.event_type, "filterable_fields": list(decl.filterable_fields)}
-                         for decl in manifest.event_types.values()],
-         "artifact_types": _artifact_types(manifest, shipped)}
-        for name in connectors.registered_connectors()
-        if connector in (None, name) for manifest in (connectors.get_manifest(name),)
-    ]}
+    result = []
+    for name in connectors.registered_connectors():
+        if connector not in (None, name):
+            continue
+        manifest = connectors.get_manifest(name)
+        result.append({
+            "connector": name,
+            "event_types": [{"event_type": decl.event_type, "filterable_fields": list(decl.filterable_fields)}
+                            for decl in manifest.event_types.values()],
+            "artifact_types": _artifact_types(manifest, shipped),
+        })
+    return {"connectors": result}

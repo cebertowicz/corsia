@@ -34,6 +34,7 @@ SHELL_TOOLS = frozenset({"bash"})
 MAX_PREFIX = 8
 MAX_ARGUMENT = 100
 RULE_SET_ORIGIN = "rule_set:"
+MCP_PREFIX = "mcp:"
 _ROUTE_ONLY = ("event_type", "match", "action", "to", "mode", "note", "script_id", "workflow_id",
                "request_identity_fact")
 
@@ -66,9 +67,11 @@ def from_row(row: Mapping[str, Any]) -> ObserveRule:
 
 
 def shape(rule: ObserveRule) -> dict[str, Any]:
+    connected = rule.tool.startswith(MCP_PREFIX)
     return {
         "id": rule.id, "kind": OBSERVE, "enabled": rule.enabled, "scope": rule.scope,
-        "connector": rule.connector, "tool": rule.tool, "argv_prefix": list(rule.argv_prefix),
+        "connector": rule.connector, "tool": rule.tool.removeprefix(MCP_PREFIX) if connected else rule.tool,
+        **({"apps": list(rule.argv_prefix)} if connected else {"argv_prefix": list(rule.argv_prefix)}),
         "item_type": rule.item_type, "origin": rule.origin, "written_by": rule.created_by,
     }
 
@@ -90,7 +93,7 @@ def sync_shipped_rules(db: sqlite3.Connection) -> None:
     declarations = []
     for name in connectors.registered_connectors():
         manifest = connectors.get_manifest(name)
-        origin = f"rule_set:{name}@{manifest.version}"
+        origin = f"{RULE_SET_ORIGIN}{name}@{manifest.version}"
         for rule in manifest.shipped_observe_rules:
             declarations.append((rule, name, origin, f"shipped:{name}@{manifest.version}"))
     ids = [rule.id for rule, _, _, _ in declarations]
@@ -110,8 +113,9 @@ def sync_shipped_rules(db: sqlite3.Connection) -> None:
                 "OR origin IS NOT excluded.origin OR created_by IS NOT excluded.created_by "
                 "OR authority_ref IS NOT excluded.authority_ref OR tool IS NOT excluded.tool "
                 "OR argv_prefix IS NOT excluded.argv_prefix OR item_type IS NOT excluded.item_type)",
-                (rule.id, now, now, name, origin, origin, authority, rule.tool,
-                 encode_prefix(rule.argv_prefix), rule.item_type),
+                (rule.id, now, now, name, origin, origin, authority,
+                 MCP_PREFIX + rule.tool if rule.apps else rule.tool,
+                 encode_prefix(rule.apps if rule.apps else rule.argv_prefix), rule.item_type),
             )
         # event_route_decisions.rule_id has no foreign key; historical outcomes remain.
         placeholders = ','.join('?' for _ in ids)
@@ -159,8 +163,8 @@ def _tool(tool: Any) -> str:
     name = normalize_tool_name(tool if isinstance(tool, str) else None)
     if name not in SHELL_TOOLS:
         raise RuleRefused(
-            f"Observe rules can't watch a connected app's actions. An observe rule covers shell "
-            f"commands: tool {sorted(SHELL_TOOLS)[0]!r} with an argv_prefix such as ['gh', 'pr', 'create'].")
+            f"For a connected app, give its URL or package as app and its upstream tool name as tool. "
+            f"For a shell command use tool {sorted(SHELL_TOOLS)[0]!r} with argv_prefix such as ['gh', 'pr', 'create'].")
     return name
 
 
@@ -176,6 +180,7 @@ def _prefix(raw: Any) -> list[str]:
 def create(
     db: sqlite3.Connection, *, writer: Mapping[str, Any], scope: str, now: str,
     tool: Any, argv_prefix: Any, item_type: Any, connector: Any, strays: Mapping[str, Any],
+    app: Any = None,
 ) -> dict[str, Any]:
     """Write one agent observe row within the writer limits, or raise :class:`RuleRefused`.
 
@@ -186,7 +191,15 @@ def create(
     if named:
         raise RuleRefused(f"An observe rule takes tool, argv_prefix and item_type and always registers "
                           f"to you; it takes no {', '.join(named)}.")
-    name, words, owner = _tool(tool), _prefix(argv_prefix), _connector(item_type, connector)
+    if app is None:
+        name, words = _tool(tool), _prefix(argv_prefix)
+    else:
+        if not isinstance(app, str) or not app or not isinstance(tool, str) or not tool or tool.startswith("mcp__"):
+            raise RuleRefused("For a connected app, give its URL or package as app and its upstream tool name as tool.")
+        if argv_prefix is not None:
+            raise RuleRefused("A connected app observe rule takes app, not argv_prefix.")
+        name, words = MCP_PREFIX + tool, [app]
+    owner = _connector(item_type, connector)
     if db.execute(
         "SELECT 1 FROM event_rules WHERE kind='observe' AND enabled=1 AND created_by=? AND scope=? "
         "AND tool=? AND argv_prefix=? AND item_type=?",

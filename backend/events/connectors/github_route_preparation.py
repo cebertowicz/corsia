@@ -99,6 +99,16 @@ def _prepare_route(
                            scope=scope)
         return
     thread_id, wake_reason = selected
+    from events import self_caused
+    from events.connectors.github_observed_event import identity as observed_event_identity
+
+    source_event = observed_event_identity(internal_event, payload)
+    ref = ({"integration": identity.integration, "type": identity.type, "external_id": identity.external_id}
+           if identity else None)
+    if source_event and self_caused.suppress("github", *source_event, thread_id, artifact_ref=ref):
+        prepared.result = router.RouteResult(
+            router.RouteOutcome.SUPPRESSED, thread_id=thread_id, external_id=external_id, reason="self_caused")
+        return
     summary, details = router._summarize(internal_event, payload, external_id)
     if tag_provenance:
         details["tag_provenance"] = tag_provenance

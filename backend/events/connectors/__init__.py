@@ -59,6 +59,14 @@ class ObservedArtifactDecl:
 
 
 @dataclass(frozen=True)
+class ObservedResult:
+    """An artifact and source event identities extracted from a tool result."""
+
+    artifact: ObservedArtifactDecl | None
+    events: tuple[tuple[str, str], ...] = ()
+
+
+@dataclass(frozen=True)
 class ShippedObserveRuleDecl:
     """An observe rule shipped with this connector's manifest."""
 
@@ -66,6 +74,7 @@ class ShippedObserveRuleDecl:
     tool: str
     argv_prefix: tuple[str, ...]
     item_type: str
+    apps: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -84,6 +93,8 @@ class ConnectorManifest:
     # from the command output, never from text the artifact carries. An ``observe`` rule names
     # one by its artifact type (``item_type``).
     artifact_extractors: Mapping[str, Callable[[str], ObservedArtifactDecl | None]] = field(
+        default_factory=dict)
+    connected_app_extractors: Mapping[str, Callable[[str, str, dict[str, Any]], ObservedResult | None]] = field(
         default_factory=dict)
     shipped_observe_rules: tuple[ShippedObserveRuleDecl, ...] = ()
     resolve_relationships: Callable[[str, dict, dict], tuple[dict, ...]] = (

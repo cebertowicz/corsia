@@ -45,7 +45,7 @@ def _stats(db: sqlite3.Connection, ids: list[str], now: str, project_id: str | N
             f"AS wakes, SUM({started} AND at>=?) AS starts, "
             "SUM(outcome='skipped' AND at>=?) AS skips "
             f"FROM event_route_decisions d {OUTCOME_JOINS} WHERE d.rule_id IN ({marks}) "
-            f"AND {OUTCOME_SCOPE} GROUP BY d.rule_id",
+            f"AND {OUTCOME_SCOPE} AND d.event_type != 'observe:self_caused' GROUP BY d.rule_id",
             (since, since, since, *ids, rules.project_scope(project_id) if project_id else '',
              observe_rules.SHIPPED_SCOPE, project_id),
         ).fetchall()
