@@ -70,11 +70,12 @@ def _resolve_doc_target(
 
 
 def _validate_comment_request(body, parent_id, review, quote, replacement, doc_path, artifact_id, client_id,
-                              region=None):
+                              region=None, insert_after=False):
     """Map shared creation validation to the native-tool error surface."""
     try:
         text = validate_create(body=body, parent_id=parent_id, review=review, quote=quote,
-                               replacement=replacement, doc_path=doc_path, artifact_id=artifact_id, region=region)
+                               replacement=replacement, doc_path=doc_path, artifact_id=artifact_id, region=region,
+                               insert_after=insert_after)
         return None, text, validate_client_id(client_id)
     except (CommentActionError, ValueError) as exc:
         return f"Error: {exc}", "", None
@@ -177,7 +178,8 @@ class DocCommentCreateTool(Tool):
     def description(self) -> str:
         return ("Create a document comment as the current agent thread. To suggest an edit, "
                 "pass quote (the exact current text) and replacement (the new text); body is "
-                "an optional note. To retry undelivered feedback, use doc_feedback_send.")
+                "an optional note. To add text without replacing it, quote the preceding text and set insert_after. "
+                "To retry undelivered feedback, use doc_feedback_send.")
 
     @property
     def parameters(self) -> dict[str, Any]:
@@ -191,6 +193,7 @@ class DocCommentCreateTool(Tool):
             "review": {"type": "boolean"},
             "client_id": {"type": ["string", "null"]},
             "replacement": {"type": ["string", "null"]},
+            "insert_after": {"type": "boolean", "description": "Insert replacement after quote rather than replacing it."},
             "region": REGION_SCHEMA,
             "submit": {
                 "type": "boolean",
@@ -215,6 +218,7 @@ class DocCommentCreateTool(Tool):
             kwargs.get("artifact_id"),
             kwargs.get("client_id"),
             kwargs.get("region"),
+            bool(kwargs.get("insert_after")),
         )
         if error is not None:
             return error
@@ -238,7 +242,8 @@ class DocCommentCreateTool(Tool):
             request = CommentInput(
                 artifact_id=target[0], path=target[1], body=text, author=author, author_kind="agent", user_id=actor["user_id"],
                 author_thread_id=actor_thread_id, parent_id=parent_id, review=review,
-                replacement=kwargs.get("replacement"), quote=kwargs.get("quote"), near=kwargs.get("near"),
+                replacement=kwargs.get("replacement"), insert_after=bool(kwargs.get("insert_after")),
+                quote=kwargs.get("quote"), near=kwargs.get("near"),
                 registration=target[2], submit=bool(kwargs.get("submit")), region=region,
                 review_request_id=kwargs.get("_review_request_id"),
             )

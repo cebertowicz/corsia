@@ -17,7 +17,7 @@ from typing import Any
 from doceditor import comments as store, feedback_suggestion_decisions
 from doceditor.comment_action_errors import CommentActionError
 from doceditor.comment_actions import (
-    DECISIONS, DocumentWriter, _record_decision_row, splice_suggestion, suggestion_span,
+    DECISIONS, DocumentWriter, _record_decision_row, insertion_position, splice_suggestion, suggestion_span, suggestion_edit_span,
     validate_decision_reason,
 )
 from doceditor.comment_permissions import check_decider, owner_row
@@ -42,6 +42,7 @@ def _open_author_suggestions(comment_id: str, user_id: str, actor_thread_id: str
         rows = store.list_for_artifact(comment["artifact_id"], db=db)
         open_rows = [row for row in rows if is_open_suggestion(row)
                      and row.get("author_thread_id") == comment.get("author_thread_id")]
+        _attach_accepted_insertions(open_rows, rows)
         if not open_rows:
             raise CommentActionError(
                 "no_open_suggestions", f"No open suggestions from {comment['author']} on this document."
@@ -60,10 +61,19 @@ def _open_suggestions(artifact_id: str, user_id: str, actor_thread_id: str | Non
             raise CommentActionError("not_found", "Document not found")
         owner = owner_row(db, artifact["parent_thread_id"])
         check_decider(user_id=user_id, actor_thread_id=actor_thread_id, artifact=artifact, db=db)
-        rows = [row for row in store.list_for_artifact(artifact_id, db=db) if is_open_suggestion(row)]
+        all_rows = store.list_for_artifact(artifact_id, db=db)
+        rows = [row for row in all_rows if is_open_suggestion(row)]
+        _attach_accepted_insertions(rows, all_rows)
         return artifact, owner[1] if owner else None, rows
     finally:
         db.close()
+
+
+def _attach_accepted_insertions(rows: list[dict], all_rows: list[dict]) -> None:
+    accepted = [row for row in all_rows if row.get("insert_after") and row.get("decision") == "accepted"]
+    for row in rows:
+        if row.get("insert_after"):
+            row["_accepted_insertions"] = accepted
 
 
 def _batch_text(rows: list[dict[str, Any]], document_text: str) -> tuple[str, list[str], list[dict[str, str]]]:
@@ -72,7 +82,9 @@ def _batch_text(rows: list[dict[str, Any]], document_text: str) -> tuple[str, li
     skipped: list[dict[str, str]] = []
     for row in rows:
         try:
-            start, end = suggestion_span(row, document_text)
+            start, end = suggestion_edit_span(row, suggestion_span(row, document_text))
+            if row.get("insert_after"):
+                start = end = insertion_position(row, document_text, start)
         except CommentActionError as exc:
             skipped.append({"id": row["id"], "reason": exc.message})
         else:
@@ -80,13 +92,16 @@ def _batch_text(rows: list[dict[str, Any]], document_text: str) -> tuple[str, li
     one_author = len({row.get("author_thread_id") for row in rows}) <= 1
     overlap = "overlaps an earlier suggestion" + (" from the same author" if one_author else "")
     winners: list[tuple[int, int, dict[str, Any]]] = []
-    for candidate in sorted(candidates, key=lambda item: item[:2]):
-        if any(candidate[0] < end and start < candidate[1] for start, end, _row in winners):
+    for candidate in sorted(candidates, key=lambda item: (item[0], item[1], item[2].get("created_at", ""), item[2]["id"])):
+        if any((candidate[0] < end and start < candidate[1])
+               or (candidate[0] == candidate[1] and start < candidate[0] < end)
+               or (start == end and candidate[0] < start < candidate[1])
+               for start, end, _row in winners):
             skipped.append({"id": candidate[2]["id"], "reason": overlap})
         else:
             winners.append(candidate)
     text = document_text
-    for start, end, row in sorted(winners, reverse=True):
+    for start, end, row in sorted(winners, key=lambda item: (item[0], item[1], item[2].get("created_at", ""), item[2]["id"]), reverse=True):
         text = splice_suggestion(text, row, (start, end))
     return text, [row["id"] for _start, _end, row in winners], skipped
 

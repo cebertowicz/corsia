@@ -31,6 +31,10 @@ _PENDING_AGENT_SUGGESTION = (
 
 def _applied(row: dict, text: str) -> bool:
     """Whether the text already holds the suggestion's replacement, as when this very write accepted it."""
+    if row.get("insert_after"):
+        # Accepting an insertion leaves its quoted anchor in place. A missing anchor
+        # therefore cannot be explained by applying this suggestion.
+        return False
     if row["replacement"]:
         return reanchor(
             text, row["replacement"], from16=row["from_off"], to16=row["to_off"],

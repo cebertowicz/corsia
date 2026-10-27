@@ -10,10 +10,13 @@ from doceditor.image_regions import check_region_shape
 def validate_create(
     *, body: str | None, parent_id: str | None, review: bool, quote: str | None,
     replacement: str | None, doc_path: str | None, artifact_id: str | None, region: Any = None,
+    insert_after: bool = False,
 ) -> str:
     """Validate the common create shape and return normalized body text."""
     text = (body or "").strip()
     check_region_shape(region=region, parent_id=parent_id, review=review, replacement=replacement)
+    if insert_after and (replacement is None or region is not None):
+        raise CommentActionError("suggestion_shape", "insert_after requires a text suggestion with quote and replacement.")
     if replacement is not None:
         if parent_id or review:
             raise CommentActionError(
@@ -23,9 +26,9 @@ def validate_create(
         if not (quote or "").strip():
             raise CommentActionError(
                 "suggestion_quote",
-                "A suggestion needs quote: the exact current text to replace.",
+                "A suggestion needs quote: the exact current text. To insert after it, set insert_after.",
             )
-        if replacement == quote:
+        if not insert_after and replacement == quote:
             raise CommentActionError(
                 "suggestion_identical",
                 "replacement is identical to quote, so there is nothing to suggest.",

@@ -34,6 +34,11 @@ STALE_MESSAGE = (
     "Reject it, or ask its author to suggest again against the current text."
 )
 
+INSERT_STALE_MESSAGE = (
+    "The text this suggestion follows is no longer in the document, so it cannot be applied. "
+    "Reject it, or ask its author to suggest again against the current text."
+)
+
 # Writes ``text`` to the document at ``path`` in scope ``project_id``, recording ``reason``
 # where the save keeps history; raises when refused.
 DocumentWriter = Callable[
@@ -54,12 +59,40 @@ def suggestion_span(comment: dict[str, Any], document_text: str) -> tuple[int, i
         to16=comment.get("to_off"), prefix=comment.get("anchor_prefix"),
         suffix=comment.get("anchor_suffix"),
     )
+    stale_message = INSERT_STALE_MESSAGE if comment.get("insert_after") else STALE_MESSAGE
     if span is None:
-        raise CommentActionError("stale", STALE_MESSAGE)
+        raise CommentActionError("stale", stale_message)
     start, end = _cp_at_u16(document_text, span[0]), _cp_at_u16(document_text, span[1])
     if start is None or end is None or document_text[start:end] != comment["anchor_text"]:
-        raise CommentActionError("stale", STALE_MESSAGE)
+        raise CommentActionError("stale", stale_message)
     return start, end
+
+
+def suggestion_edit_span(comment: dict[str, Any], span: tuple[int, int]) -> tuple[int, int]:
+    """Map a resolved quoted span to the text the suggestion changes."""
+    return (span[1], span[1]) if comment.get("insert_after") else span
+
+
+def insertion_position(comment: dict[str, Any], document_text: str, point: int) -> int:
+    """Skip accepted older insertions still contiguous after the same quote."""
+    key = (comment.get("created_at", ""), comment["id"])
+    anchor_end = point
+    for sibling in sorted(comment.get("_accepted_insertions", []), key=lambda row: (row.get("created_at", ""), row["id"])):
+        if (sibling.get("created_at", ""), sibling["id"]) >= key:
+            break
+        if sibling.get("anchor_text") != comment.get("anchor_text"):
+            continue
+        try:
+            sibling_span = suggestion_span(sibling, document_text)
+        except CommentActionError:
+            continue
+        if sibling_span[1] != anchor_end:
+            continue
+        replacement = sibling["replacement"]
+        if not document_text.startswith(replacement, point):
+            break
+        point += len(replacement)
+    return point
 
 
 def splice_suggestion(document_text: str, comment: dict[str, Any], span: tuple[int, int]) -> str:
@@ -70,7 +103,10 @@ def splice_suggestion(document_text: str, comment: dict[str, Any], span: tuple[i
 
 def applied_text(comment: dict[str, Any], document_text: str) -> str:
     """Return ``document_text`` with one re-anchored suggestion applied."""
-    return splice_suggestion(document_text, comment, suggestion_span(comment, document_text))
+    start, end = suggestion_edit_span(comment, suggestion_span(comment, document_text))
+    if comment.get("insert_after"):
+        start = end = insertion_position(comment, document_text, start)
+    return splice_suggestion(document_text, comment, (start, end))
 
 
 def _record_decision_row(
@@ -187,6 +223,9 @@ async def decide_suggestion(
                 raise CommentActionError("not_found", "Comment not found")
             owner = owner_row(db, artifact["parent_thread_id"])
             check_decider(user_id=user_id, actor_thread_id=actor_thread_id, artifact=artifact, db=db)
+            if comment.get("insert_after"):
+                comment["_accepted_insertions"] = [row for row in store.list_for_artifact(comment["artifact_id"], db=db)
+                                                     if row.get("insert_after") and row.get("decision") == "accepted"]
             return comment, artifact, owner[1] if owner else None
         finally:
             db.close()

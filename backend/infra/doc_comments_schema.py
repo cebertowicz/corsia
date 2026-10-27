@@ -30,6 +30,7 @@ DOC_COMMENTS_SCHEMA_SQL = """
         resolved INTEGER NOT NULL DEFAULT 0,
         acked INTEGER NOT NULL DEFAULT 0,
         replacement TEXT,
+        insert_after INTEGER NOT NULL DEFAULT 0,
         decision TEXT,
         decided_by TEXT,
         decided_by_thread_id TEXT,

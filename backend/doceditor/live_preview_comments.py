@@ -86,6 +86,9 @@ def project_comment(scanner: ArgScanner, live, text: str, slots: dict[int, Slot]
         return None, []
     slot = slots.setdefault(0, Slot())
     span = _anchor(scanner, live, text)
+    if span is not None and scanner.flags.get("insert_after"):
+        from doceditor.comment_actions import suggestion_edit_span
+        span = suggestion_edit_span({"insert_after": True}, span)
     if span is None and slot.span is None:
         return kind, []
     replacement = scanner.string("replacement")

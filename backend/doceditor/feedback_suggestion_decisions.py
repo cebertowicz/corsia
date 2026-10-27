@@ -13,8 +13,9 @@ QUOTE_CHARS = 60
 
 
 def _named(suggestion: dict[str, Any]) -> str:
-    """A suggestion as its author can find it again: the text it replaced, clipped, and its id."""
-    quote = " ".join(str(suggestion.get("anchor_text") or "").split())
+    """A suggestion as its author can find it again: its text, clipped, and its id."""
+    text = suggestion.get("replacement") if suggestion.get("insert_after") else suggestion.get("anchor_text")
+    quote = " ".join(str(text or "").split())
     if len(quote) > QUOTE_CHARS:
         quote = quote[:QUOTE_CHARS - 1].rstrip() + "…"
     return f"“{quote}” ({suggestion['id']})" if quote else str(suggestion["id"])
@@ -53,11 +54,12 @@ def stranded_note(db, suggestion: dict[str, Any], *, editor: str) -> None:
     """Tell a suggestion's agent author that an edit it did not make left the suggestion nothing to apply to."""
     artifact_id = str(suggestion["artifact_id"])
     document = document_name(registry_models.get_artifact(artifact_id, db=db))
+    anchor_kind = "follows" if suggestion.get("insert_after") else "replaces"
     append_thread_context_note(
         db,
         thread_id=str(suggestion["author_thread_id"]),
         summary=(
-            f"{editor} changed the text your suggestion replaces on {document}, so it can no longer "
+            f"{editor} changed the text your suggestion {anchor_kind} on {document}, so it can no longer "
             f"be applied: {_named(suggestion)}. If it still applies, suggest again on the current text."
         ),
         details={

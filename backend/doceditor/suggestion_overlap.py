@@ -35,7 +35,14 @@ def check_agent_suggestion_fits(
     for row in threads:
         if not is_open_suggestion(row) or row.get("orphaned"):
             continue
-        if row["from_off"] is not None and row["from_off"] < end and start < row["to_off"]:
+        if row["from_off"] is None or row["to_off"] is None:
+            continue
+        from doceditor.comment_actions import suggestion_edit_span
+        row_start, row_end = suggestion_edit_span(row, (row["from_off"], row["to_off"]))
+        overlaps = (row_start < end and start < row_end)
+        overlaps |= start == end and row_start < start < row_end
+        overlaps |= row_start == row_end and start < row_start < end
+        if overlaps:
             raise CommentActionError(
                 "suggestion_overlaps",
                 f"This overlaps an open suggestion ({row['id']}) by {row['author']}. "

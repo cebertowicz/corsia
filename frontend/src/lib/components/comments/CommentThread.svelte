@@ -17,6 +17,7 @@
 		orphaned?: boolean;
 		acked?: boolean;
 		replacement?: string | null;
+		insertAfter?: boolean;
 		decision?: 'accepted' | 'rejected' | null;
 		decidedBy?: string | null;
 		replies: CommentReplyData[];
@@ -90,7 +91,7 @@
 	const avatarColor = $derived(author.kind === 'agent' && comment.authorThreadId ? agentColor(comment.authorThreadId) : author.color);
 
 	const isSuggestion = $derived(comment.replacement !== undefined && comment.replacement !== null);
-	const suggestionDiff = $derived(isSuggestion ? lineDiff(comment.anchor, comment.replacement!) : null);
+	const suggestionDiff = $derived(isSuggestion ? lineDiff(comment.insertAfter ? '' : comment.anchor, comment.replacement!) : null);
 	let replyPosting = $state(false);
 	let decisionBusy = $state<'accept' | 'reject' | null>(null);
 	// A placement normally completes in the same render turn as a new card. Do not flash a line that cannot be read,
