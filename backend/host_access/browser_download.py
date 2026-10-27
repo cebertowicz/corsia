@@ -18,15 +18,8 @@ def _discard_cached(root: Path) -> None:
     # The fixed completed-install directory is distinct from in-flight attempts.
     # Marker contents never select a deletion target.
     marker = root / "chrome-download.json"
-    homes = [root / "chrome-installed"]
-    try:
-        relative = Path(json.loads(marker.read_text())["executable"])
-        if not relative.is_absolute() and relative.parts[0].startswith("chrome-home-") and ".." not in relative.parts:
-            homes.append(root / relative.parts[0])  # Pre-marker-version installer layout.
-    except (OSError, ValueError, KeyError, TypeError, IndexError):
-        pass  # An unreadable marker cannot select any legacy directory.
     marker.unlink(missing_ok=True)
-    for home in homes:
+    for home in (root / "chrome-installed",):
         if home.is_symlink():
             home.unlink()
         elif home.is_dir():

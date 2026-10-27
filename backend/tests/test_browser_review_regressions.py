@@ -63,8 +63,8 @@ async def test_linux_notice_is_once_for_agents_and_never_changes_pane_json(synth
     fake.result = browser_cli.CommandResult(0, json.dumps({'success': True, 'data': {'url': 'about:blank'}}), '')
     pane = await fake.owner.run('linux-notice-owner', ('get', 'url'), pane=True)
     assert json.loads(pane) == {'url': 'about:blank'}
-    assert 'this session is ephemeral' in await fake.owner.run('linux-notice-owner', ('snapshot',))
-    assert 'this session is ephemeral' not in await fake.owner.run('linux-notice-owner', ('snapshot',))
+    assert "Saved sign-in isn't available on Linux" in await fake.owner.run('linux-notice-owner', ('snapshot',))
+    assert "Saved sign-in isn't available on Linux" not in await fake.owner.run('linux-notice-owner', ('snapshot',))
     await fake.owner.shutdown()
 
 

@@ -22,6 +22,11 @@ from host_access import browser_cli, browser_executables, browser_identity as id
 
 logger = logging.getLogger(__name__)
 _STATE_SAVE_TIMEOUT = 30.0
+_SIGNIN_MISSED = "Saved sign-in wasn't used this time. This browser starts signed out."
+
+
+class CopyRestoreError(RuntimeError):
+    """The copied sign-in could not be restored before the first action."""
 
 
 async def pin_native(owner: Any, *, changed_message: str) -> None:
@@ -122,8 +127,8 @@ async def resolve_profile(thread_id: str) -> tuple[str | None, str | None]:
     """Resolve the saved profile and any notice about platform availability."""
     profile = await asyncio.to_thread(browser_launch.profile_dir, thread_id)
     if profile is not None and sys.platform == "linux":
-        return None, "Saved browser sign-ins are unavailable on Linux yet; this session is ephemeral."
-    return (str(profile) if profile is not None else None), None
+        return None, "Saved sign-in isn't available on Linux. This browser starts signed out and forgets sign-ins when it closes."
+    return (str(profile), None) if profile is not None else (None, _SIGNIN_MISSED)
 
 
 def assign(sessions: Mapping[str, Any], profile: str | None, thread_id: str) -> tuple[str | None, str | None]:
@@ -155,13 +160,19 @@ def flags(record: Any, ua: str | None) -> Sequence[str]:
 async def restore_copy(owner: Any, runtime: Any) -> None:
     """CDP attach ignores launch-time --state; restore privately before the first action."""
     copy = browser_launch.copy_path(runtime.record.session)
-    if not runtime.record.copy_of or not copy.is_file():
+    if not runtime.record.copy_of:
+        return
+    if not copy.is_file():
+        logger.warning("browser sign-in copy unavailable at restore")
+        runtime.record = replace(runtime.record, profile_notice=_SIGNIN_MISSED)
         return
     runtime.attempt = await owner._invoke(
         owner._session_argv(runtime, ("state", "load", str(copy))), timeout=_STATE_SAVE_TIMEOUT)
     await owner._observe_attempt(runtime)
     if runtime.attempt.returncode or runtime.attempt.timed_out or runtime.attempt.completion != "exited":
-        raise RuntimeError("browser sign-in copy could not be restored")
+        logger.warning("browser sign-in copy could not be restored: completion=%s timed_out=%s exit=%s",
+                       runtime.attempt.completion, runtime.attempt.timed_out, runtime.attempt.returncode)
+        raise CopyRestoreError("saved sign-in could not be restored")
 
 
 def prepare_directories() -> None:
@@ -181,20 +192,29 @@ async def seed_copy(owner: Any, runtime: Any) -> None:
     record = runtime.record
     holder = owner._sessions.get(record.copy_of)
     if holder is None:
+        logger.warning("browser sign-in copy unavailable: holder missing")
+        runtime.record = replace(runtime.record, profile_notice=_SIGNIN_MISSED)
         return
     target = browser_launch.copy_path(record.session)
     try:
         async with holder.command_lock:
             if holder.record.binding is None or holder.record.terminal_state != "running":
+                logger.warning("browser sign-in copy unavailable: holder not running")
+                runtime.record = replace(runtime.record, profile_notice=_SIGNIN_MISSED)
                 return
             result = await owner._invoke(
                 owner._session_argv(holder, ("state", "save", str(target))), timeout=_STATE_SAVE_TIMEOUT)
-        if result.returncode == 0 and target.is_file():
+        if result.returncode == 0 and not result.timed_out and result.completion == "exited" and target.is_file():
             os.chmod(target, 0o600)
         else:
             logger.warning("browser sign-in copy was not saved: exit=%s", result.returncode)
+            target.unlink(missing_ok=True)
+            runtime.record = replace(runtime.record, profile_notice=_SIGNIN_MISSED)
     except Exception:
         logger.warning("browser sign-in copy failed", exc_info=True)
+        with contextlib.suppress(OSError):
+            target.unlink(missing_ok=True)
+        runtime.record = replace(runtime.record, profile_notice=_SIGNIN_MISSED)
 
 
 def drop_copy(record: Any) -> None:

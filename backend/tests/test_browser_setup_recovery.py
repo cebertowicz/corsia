@@ -85,7 +85,7 @@ async def test_download_repairs_marker_and_pin_mismatch(tmp_path, monkeypatch, m
     homes = []
 
     async def install(argv, *, home, **kwargs):
-        assert not old.exists()
+        assert old.exists() is (marker == 'legacy')
         homes.append(home)
         executable = home/'.agent-browser/browsers/chrome-156/Chrome.app/Contents/MacOS/Google Chrome for Testing'
         executable.parent.mkdir(parents=True)

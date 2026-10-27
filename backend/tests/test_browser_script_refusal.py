@@ -26,11 +26,10 @@ SCRIPT_REQUESTS = [
 @pytest.mark.parametrize("args", SCRIPT_REQUESTS)
 async def test_saved_sessions_refuse_script_requests(synthetic_browser, monkeypatch, args):
     monkeypatch.setattr(browser_launch, "_owner_key", lambda _: "owner")
-    with pytest.raises(BrowserSessionError, match="snapshot or get text"):
+    with pytest.raises(BrowserSessionError, match="unavailable in a browser session|Browser navigation requires"):
         await synthetic_browser.owner.run("a", args)
     assert synthetic_browser.calls == []
-    assert 'your own ephemeral agent-browser session in the protected shell' in commands._SCRIPT_REFUSAL
-    assert 'native browser tools use the saved sign-in' in commands._SCRIPT_REFUSAL
+    assert 'saved sign-in' in commands._SCRIPT_REFUSAL
     await synthetic_browser.owner.shutdown()
 
 
@@ -55,9 +54,9 @@ async def test_production_open_allows_navigation_but_eval_and_javascript_url_are
     monkeypatch.setattr(browser_runtime, "PROCESS_OWNER", process_owner)
     opened = await BrowserOpenTool().execute("https://example.com", wait_for_load=False, _thread_id="a")
     assert opened == "ok"
-    assert "snapshot or get text" in await BrowserEvalTool().execute("document.cookie", _thread_id="a")
+    assert "unavailable in a browser session" in await BrowserEvalTool().execute("document.cookie", _thread_id="a")
     refused = await BrowserOpenTool().execute("javascript:alert(1)", wait_for_load=False, _thread_id="a")
-    assert "snapshot or get text" in refused
+    assert "Browser navigation requires" in refused
     await synthetic_browser.owner.shutdown()
 
 
@@ -83,4 +82,4 @@ def test_installed_cli_script_surface_is_enumerated():
     assert js_entries == {"eval", "--restore-check-fn", "--init-script", "--extension", "--enable"}
     assert "agent-browser wait --fn" in reference and "(or -f)" in reference
     assert "agent-browser addinitscript <js>" in reference
-    assert all(commands._script_request(request) for request in SCRIPT_REQUESTS)
+    assert all(not commands._saved_command(request, pane=False) for request in SCRIPT_REQUESTS)

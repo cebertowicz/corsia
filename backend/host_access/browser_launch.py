@@ -5,6 +5,7 @@ and ``tools.host_path_policy`` closes that root to every agent route, leases inc
 """
 from __future__ import annotations
 
+import logging
 import os
 import platform
 import re
@@ -53,6 +54,7 @@ def _owner_key(thread_id: str) -> str | None:
         finally:
             db.close()
     except sqlite3.Error:
+        logging.getLogger(__name__).warning("browser sign-in owner lookup failed", exc_info=True)
         return None
     owner = row[0] if row is not None else None
     return owner if isinstance(owner, str) and _OWNER_KEY.fullmatch(owner) else None

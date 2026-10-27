@@ -132,7 +132,7 @@ async def test_a_failed_copy_restore_closes_the_copy_before_its_first_navigation
 
     monkeypatch.setattr(fake.owner, "_invoke", invoke)
     await fake.owner.run("a", ["open", "about:blank"])
-    with pytest.raises(sessions.BrowserSessionError, match="startup failed"):
+    with pytest.raises(sessions.BrowserSessionError, match="startup failed.*saved sign-in could not be restored"):
         await fake.owner.run("b", ["open", "https://example.com"])
     assert "b" not in fake.owner._sessions and "a" in fake.owner._sessions
     assert not any("https://example.com" in call for call in fake.calls)
@@ -143,7 +143,8 @@ async def test_a_failed_copy_restore_closes_the_copy_before_its_first_navigation
 async def test_a_missed_copy_starts_the_second_session_signed_out_without_failing_it(synthetic_browser, chrome154):
     fake = synthetic_browser
     await fake.owner.run("a", ["open", "about:blank"])
-    assert await fake.owner.run("b", ["open", "about:blank"]) == "ok"
+    rendered = await fake.owner.run("b", ["open", "about:blank"])
+    assert "Saved sign-in wasn't used this time" in rendered
     assert not {"--state", "--profile"} & set(_launches(fake)[1])
     await fake.owner.shutdown()
 
@@ -203,14 +204,15 @@ async def test_production_browser_route_uses_profile_only_for_resolved_owners(sy
     process_owner._browser_owner = synthetic_browser.owner
     monkeypatch.setattr(browser_runtime, "PROCESS_OWNER", process_owner)
     for thread in ("owned", "missing", "bad", "null"):
-        assert await browser_runtime._run(["open", "about:blank"], thread_id=thread) == "ok"
+        result = await browser_runtime._run(["open", "about:blank"], thread_id=thread)
+        assert result == "ok" if thread == "owned" else "Saved sign-in wasn't used this time" in result
     calls = _launches(synthetic_browser)
     assert f"--user-data-dir={browser_launch.profile_root() / 'user-1'}" in synthetic_browser.chrome_calls[0]
     assert all(not {"--profile", "--state"} & set(call) for call in calls[1:])
     def unavailable():
         raise sqlite3.OperationalError("fixture database unavailable")
     monkeypatch.setattr(database, "get_db", unavailable)
-    assert await browser_runtime._run(["open", "about:blank"], thread_id="db-error") == "ok"
+    assert "Saved sign-in wasn't used this time" in await browser_runtime._run(["open", "about:blank"], thread_id="db-error")
     assert not {"--profile", "--state"} & set(_launches(synthetic_browser)[-1])
     await synthetic_browser.owner.shutdown()
 

@@ -16,19 +16,14 @@ from infra.product_events import emit_product_event
 
 # A pane's own commands: the person's navigation, the page metadata their pane shows, and their pane's size
 # and theme. They are not agent commands, so the password guard (AR3, AR4) does not refuse them.
-_PANE_COMMANDS = {("open",), ("back",), ("forward",), ("reload",), ("get", "cdp-url"), ("get", "url"),
+_PANE_COMMANDS = {("open",), ("back",), ("forward",), ("reload",), ("get", "url"),
                   ("get", "title"), ("set", "viewport"), ("set", "media")}
-# Commands that read, write or save a session's cookies, storage or saved logins, or capture request headers.
-# The saved sign-in is a secret no agent route may return (HttpOnly cookies included), so the shared path
-# refuses them for agents and the pane alike; CORSIA's own state copy goes through the owner's private invoke.
+# The secret boundary also applies to sessions without a resolved owner.
 _COOKIE_COMMANDS = {"cookies", "state", "storage", "auth", "profiles", "stream", "dashboard", "connect",
                     ("network", "har"), ("network", "requests"), ("get", "cdp-url")}
 _SECRET_REFUSAL = "browser cookies, saved sign-ins and stored logins are not available to agents"
-_SCRIPT_REFUSAL = ("Scripts are unavailable in a browser session with a saved sign-in; read the page with "
-                   "snapshot or get text. For scripted extraction without the saved sign-in, launch your own "
-                   "ephemeral agent-browser session in the protected shell; native browser tools use the saved sign-in")
-_SCRIPT_COMMANDS = {"eval", "addinitscript", "batch", "plugin", "mcp"}
-_SCRIPT_FLAGS = {"--fn", "--restore-check-fn", "--init-script", "--extension", "--enable", "--args"}
+_SCRIPT_REFUSAL = ("This command is unavailable in a browser session with a saved sign-in. "
+                   "Use the browser tools to navigate and interact with the page.")
 
 
 def _javascript_url(value: str) -> bool:
@@ -49,12 +44,28 @@ def _script_config(config: dict) -> bool:
     return configured or any(os.environ.get(key) for key in env) or "--load-extension" in launch_args
 
 
-def _script_request(args: Sequence[str]) -> bool:
-    """Identify agent-supplied code and wrappers capable of running it."""
-    return (args[0].startswith("-") or args[0].lower() in _SCRIPT_COMMANDS
-            or args[0].lower() == "wait" and any(arg.split("=", 1)[0] == "-f" for arg in args[1:])
-            or any(arg.split("=", 1)[0] in _SCRIPT_FLAGS for arg in args)
-            or any(_javascript_url(arg) for arg in args))
+def _saved_command(args: Sequence[str], *, pane: bool) -> bool:
+    """Admit only command shapes produced by the public browser callers."""
+    command = args[0]
+    if any(_javascript_url(arg) for arg in args[1:]):
+        return False
+    if any(arg.startswith("-") for arg in args[1:]) and tuple(args) not in {
+        ("snapshot", "-i"), ("wait", "--load", "networkidle")
+    }:
+        return False
+    if pane:
+        return (command == "open" and len(args) == 2 or
+                command in {"back", "forward", "reload"} and len(args) == 1 or
+                tuple(args) in {("get", "url"), ("get", "title")} or
+                tuple(args[:2]) == ("set", "viewport") and len(args) == 5 or
+                tuple(args[:2]) == ("set", "media") and len(args) == 3 and args[2] in {"dark", "light"})
+    return (command == "open" and len(args) == 2 or
+            tuple(args) in {("snapshot",), ("snapshot", "-i"), ("get", "title"), ("get", "url"),
+                            ("wait", "--load", "networkidle")} or
+            command == "click" and len(args) == 2 and not args[1].startswith("-") or
+            command == "fill" and len(args) == 3 and not args[1].startswith("-") or
+            command == "wait" and len(args) == 2 and not args[1].startswith("-") or
+            command == "screenshot" and len(args) == 2 and not args[1].startswith("-"))
 
 
 async def run(owner: Any, thread_id: str, args: Sequence[str], *, lease_id: str | None,
@@ -79,8 +90,7 @@ async def run(owner: Any, thread_id: str, args: Sequence[str], *, lease_id: str 
         trusted_navigation = (navigation_url is not None and
                               tuple(args) == ("eval", f"location.href = {json.dumps(navigation_url)}; 'navigating'") and
                               not _javascript_url(navigation_url))
-        if _script_config(config) or (not pane and not trusted_navigation and (_script_request(args) or
-                navigation_url is not None and _javascript_url(navigation_url))):
+        if _script_config(config) or not (trusted_navigation and not pane or _saved_command(args, pane=pane)):
             raise BrowserSessionError(_SCRIPT_REFUSAL)
     # Pane and agent commands share this lock, but direct person interaction and
     # lifecycle cleanup do not. The lifecycle lock remains inside _run_admitted.

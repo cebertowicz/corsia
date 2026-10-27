@@ -136,7 +136,8 @@ class BrowserSessionOwner:
                                 isinstance(exc, BrowserSessionCleanupError) and runtime.record.terminal_state != "running"):
                 raise  # Admission rejection has no new session effects.
             if launching and await self._close_one(runtime) is None:
-                raise BrowserSessionError("managed browser startup failed; its processes were closed") from exc
+                detail = "; saved sign-in could not be restored" if isinstance(exc, launch.CopyRestoreError) else ""
+                raise BrowserSessionError(f"managed browser startup failed; its processes were closed{detail}") from exc
             async with runtime.command_lock:
                 if self._sessions.get(runtime.record.thread_id) is runtime:
                     raise await self._record_failure(runtime, exc) from exc

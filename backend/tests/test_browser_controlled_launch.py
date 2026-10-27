@@ -168,10 +168,10 @@ async def test_linux_saved_profile_falls_back_with_agent_notice(synthetic_browse
     rendered = await fake.owner.run('linux', ['open', 'about:blank'])
     record = fake.owner._sessions['linux'].record
     assert record.profile is None and record.copy_of is None
-    assert 'Saved browser sign-ins are unavailable on Linux yet; this session is ephemeral.' in rendered
+    assert "Saved sign-in isn't available on Linux. This browser starts signed out and forgets sign-ins when it closes." in rendered
     assert not fake.chrome_calls  # Linux keeps dev's native-owned ephemeral launch.
     assert all('--cdp' not in call and '--profile' not in call for call in fake.calls)
-    assert 'this session is ephemeral' not in await fake.owner.run('linux', ['snapshot'])
+    assert "Saved sign-in isn't available on Linux" not in await fake.owner.run('linux', ['snapshot'])
     from host_access.processes import ProcessOwner
     from tools import browser_runtime
     from tools.browser import BrowserOpenTool
@@ -180,7 +180,7 @@ async def test_linux_saved_profile_falls_back_with_agent_notice(synthetic_browse
     monkeypatch.setattr(browser_runtime, 'PROCESS_OWNER', process_owner)
     monkeypatch.setattr(browser_runtime, '_check_installed', lambda: None)
     opened = await BrowserOpenTool().execute('https://example.com', wait_for_load=False, _thread_id='native-linux')
-    assert 'this session is ephemeral' in opened
+    assert "Saved sign-in isn't available on Linux" in opened
     await fake.owner.shutdown()
 
 

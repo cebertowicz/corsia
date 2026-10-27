@@ -44,7 +44,7 @@ async def test_first_open_does_not_probe_a_page_before_one_exists(synthetic_brow
         raise sessions.BrowserSessionError("no page exists before open")
 
     monkeypatch.setattr(browser_cdp, "page_endpoint", no_page_yet)
-    assert await fake.owner.run("thread", ["open", "about:blank"]) == "ok"
+    assert (await fake.owner.run("thread", ["open", "about:blank"])).startswith("ok")
     with pytest.raises(sessions.BrowserSessionError, match="no page exists"):
         await fake.owner.run("thread", ["open", "about:blank"])
     await fake.owner.shutdown()
