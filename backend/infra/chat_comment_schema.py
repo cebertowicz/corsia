@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS chat_comment_views (
     user_message_id TEXT NOT NULL,
     cid TEXT NOT NULL,
     seen_at TEXT NOT NULL,
-    PRIMARY KEY (user_id, user_message_id, cid)
+    PRIMARY KEY (user_message_id, cid, user_id)
 );
 CREATE TABLE IF NOT EXISTS chat_comment_answers (
     thread_id TEXT NOT NULL,

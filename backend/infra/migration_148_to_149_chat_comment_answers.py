@@ -8,7 +8,7 @@ import sqlite3
 def migrate_148_to_149(conn: sqlite3.Connection) -> None:
     conn.execute("""CREATE TABLE IF NOT EXISTS chat_comment_views (
         user_id TEXT NOT NULL, user_message_id TEXT NOT NULL, cid TEXT NOT NULL,
-        seen_at TEXT NOT NULL, PRIMARY KEY (user_id, user_message_id, cid)
+        seen_at TEXT NOT NULL, PRIMARY KEY (user_message_id, cid, user_id)
     )""")
     conn.execute("""CREATE TABLE IF NOT EXISTS chat_comment_answers (
         thread_id TEXT NOT NULL, user_message_id TEXT NOT NULL, cid TEXT NOT NULL,
