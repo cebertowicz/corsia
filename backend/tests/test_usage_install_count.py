@@ -73,7 +73,7 @@ def test_two_writers_in_one_week_leave_one_row_and_no_duplicate_count(tmp_path):
     start = threading.Barrier(2)
     results: list[bool] = []
 
-    def writer():
+    def writer() -> None:
         connection = sqlite3.connect(path, timeout=30)
         try:
             start.wait()
