@@ -356,7 +356,7 @@ def test_protected_profile_scopes_unix_sockets_to_corsia_roots(
 
 @pytest.mark.integration
 @pytest.mark.parametrize("grant", ["add-dirs", "workdir"])
-def test_safehouse_nested_write_deny_overrides_granted_root(
+def test_safehouse_nested_read_write_deny_overrides_granted_root(
     short_system_temp, grant,
 ) -> None:
     from tools import shell_guard
