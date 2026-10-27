@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from infra.host_resources import GIB
 from llm import local_keep_loaded
 from llm.local_model import LocalModel
+from llm.local_model_load import seat_lock
 
 MODEL = LocalModel("Jundot/new-model", 1_000_000, 32_768)
 
@@ -223,3 +226,14 @@ async def test_a_new_attempt_replaces_the_last_failure_and_servers_stay_apart(ca
     assert local_keep_loaded.failures("other-server") == {"new-model": local_keep_loaded.NOT_LOADED}
     local_keep_loaded.forget_failure("other-server", "new-model")
     assert local_keep_loaded.failures("other-server") == {}
+
+
+@pytest.mark.asyncio
+async def test_a_download_load_waits_for_a_send_load_on_the_same_seat(calls) -> None:
+    calls["set_rows"]([_row("new-model", 10)], room_gib=20)
+    async with seat_lock("server"):  # a send's load holds the seat
+        keep = asyncio.create_task(local_keep_loaded.keep_loaded("server", MODEL))
+        await asyncio.sleep(0.05)
+        assert calls["loads"] == []  # the memory check and the load wait for the seat
+    await keep
+    assert calls["loads"] == ["new-model"]

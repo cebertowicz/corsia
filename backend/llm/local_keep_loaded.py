@@ -30,6 +30,7 @@ from __future__ import annotations
 import logging
 
 from infra.host_resources import GIB, check_can_load, pin_fits, pin_room_bytes
+from llm.local_model_load import seat_lock
 from infra.product_events import emit_product_event
 from llm.local_model import LocalModel
 
@@ -160,19 +161,21 @@ async def keep_loaded(
         return
     step = "memory check"
     try:
-        decision = await check_can_load(size_bytes / GIB, "omlx")
-        if not decision.get("ok"):
-            log.warning("Not loading the downloaded local model now: not enough free memory")
-            return
-        step = "model load"
-        result = await load_model({"server_id": server_id}, model.model)
-        if not result.get("ok"):
-            log.warning("Couldn't load the downloaded local model")
-            emit("load.failed", result.get("message") or "Load failed")
-            _FAILED[key] = not_loaded
-            return
-        emit("load.completed")
-        notify_cached_model_loaded(server_id, model.model)
+        # The seat's lock, so this load and a send's never check the same free memory at once.
+        async with seat_lock(server_id):
+            decision = await check_can_load(size_bytes / GIB, "omlx")
+            if not decision.get("ok"):
+                log.warning("Not loading the downloaded local model now: not enough free memory")
+                return
+            step = "model load"
+            result = await load_model({"server_id": server_id}, model.model)
+            if not result.get("ok"):
+                log.warning("Couldn't load the downloaded local model")
+                emit("load.failed", result.get("message") or "Load failed")
+                _FAILED[key] = not_loaded
+                return
+            emit("load.completed")
+            notify_cached_model_loaded(server_id, model.model)
         step = "catalog refresh"
         await discover_and_notify(server_id)
     except Exception as exc:

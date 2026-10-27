@@ -76,6 +76,7 @@ def _reported_sizes(db, server_id: str, model_ids: list[str]) -> dict[str, int |
         try:
             size = int((json.loads(row["metadata_json"] or "{}")).get("size_bytes") or 0)
         except (TypeError, ValueError, AttributeError):
+            log.warning("Unreadable catalog metadata for %s: treating its size as unreported", row["litellm_model"])
             size = 0
         sizes[selectors[row["litellm_model"]]] = size or None
     return sizes
@@ -96,8 +97,9 @@ def readiness(target: ExecutionTarget, *, db) -> Readiness:
 
     Synchronous, makes no network call and never loads, so a claim transaction may call it.
     A target that isn't a local oMLX model is ``loaded``. ``unreachable``: the server isn't
-    online (or isn't known). ``no_room``: it doesn't fit now, but the free room plus the
-    loaded models' sizes would cover it. ``no_memory``: it wouldn't.
+    online (or isn't known). ``no_room``: it doesn't fit now, and either the free room plus
+    the loaded models' sizes would cover it (unloading would help) or a loaded model's size is
+    unknown, so it can't be judged. ``no_memory``: it wouldn't fit even with every other model unloaded.
     """
     from llm.network_discovery import get_loaded_model_ids
 
@@ -172,11 +174,14 @@ async def _load(target: ExecutionTarget, server_id: str, model_id: str) -> None:
 
 
 def _settled(key: tuple[str, str], task: asyncio.Task[None]) -> None:
-    """Forget a finished load; a failure its callers all stopped waiting for is already logged."""
+    """Forget a finished load, and log a failure no caller was left to see (a ``ModelLoadFailed`` is logged where it is raised)."""
     if _LOADS.get(key) is task:
         del _LOADS[key]
-    if not task.cancelled():
-        task.exception()
+    if task.cancelled():
+        return
+    failure = task.exception()
+    if failure is not None and not isinstance(failure, ModelLoadFailed):
+        log.error("Loading %s on %s failed unexpectedly", key[1], key[0], exc_info=failure)
 
 
 async def ensure_loaded(target: ExecutionTarget) -> None:

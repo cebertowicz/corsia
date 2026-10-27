@@ -378,6 +378,62 @@ async def test_a_failed_shared_load_fails_every_waiting_send(seat, lifecycle) ->
 
 
 @pytest.mark.asyncio
+async def test_a_finished_download_and_a_send_load_one_at_a_time_on_one_seat(seat, lifecycle, monkeypatch) -> None:
+    from llm import local_keep_loaded
+    from llm.local_model import LocalModel
+
+    async def model_rows(_server_id):
+        return [{"id": "second", "estimated_size": 10 * GIB, "pinned": False}]
+
+    async def check_can_load(_gb, _kind):
+        return {"ok": True}
+
+    async def pin(_cfg, _model, _body):
+        return {"ok": True, "settings": {"pinned": True}}
+
+    async def discover(*_a):
+        return None
+
+    monkeypatch.setattr(local_keep_loaded, "_model_rows", model_rows)
+    monkeypatch.setattr(local_keep_loaded, "pin_room_bytes", lambda: 100 * GIB)
+    monkeypatch.setattr(local_keep_loaded, "check_can_load", check_can_load)
+    monkeypatch.setattr(local_keep_loaded, "emit_product_event", lambda *_a, **_k: True)
+    monkeypatch.setattr("llm.providers.omlx_settings.update_model_settings", pin)
+    monkeypatch.setattr(network_discovery, "discover_and_notify", discover)
+    seat.model("target", 10)
+    lifecycle["gate"] = asyncio.Event()
+    send = asyncio.create_task(ensure_loaded(_target()))
+    await lifecycle["entered"].wait()
+    download = asyncio.create_task(local_keep_loaded.keep_loaded(SERVER, LocalModel("Jundot/second", 1_000_000, 32_768)))
+    await asyncio.sleep(0.05)
+    assert seat.loads == ["target"]  # the download's check and load wait for the send's load
+    lifecycle["gate"].set()
+    await asyncio.gather(send, download)
+    assert seat.loads == ["target", "second"]  # each loaded once, one after the other
+
+
+@pytest.mark.asyncio
+async def test_an_unexpected_failure_nobody_was_left_waiting_for_is_logged(seat, lifecycle, monkeypatch, caplog) -> None:
+    seat.model("target", 10)
+    lifecycle["gate"] = asyncio.Event()
+
+    def broken_notify(*_a):
+        raise RuntimeError("cache write failed")
+
+    monkeypatch.setattr(network_discovery, "notify_cached_model_loaded", broken_notify)
+    send = asyncio.create_task(ensure_loaded(_target()))
+    await lifecycle["entered"].wait()
+    load = local_model_load._LOADS[SERVER_KEY]
+    send.cancel()  # Stop: every waiter is gone before the load fails
+    with pytest.raises(asyncio.CancelledError):
+        await send
+    lifecycle["gate"].set()
+    await asyncio.wait([load])
+    await asyncio.sleep(0)
+    assert any("failed unexpectedly" in r.message and r.exc_info for r in caplog.records)
+
+
+@pytest.mark.asyncio
 async def test_omlx_refusing_the_load_is_load_failed_and_a_dead_server_is_unreachable(seat, lifecycle) -> None:
     seat.model("target", 10)
     lifecycle["result"] = {"ok": False, "message": "boom"}
