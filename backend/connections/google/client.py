@@ -29,7 +29,7 @@ NEEDS_CLIENT_FILE = (
     "No Google client is saved. If this setup already created the person's Desktop OAuth client, "
     "pass client_file: the path of its downloaded JSON. If none exists yet, follow skill "
     "`google-setup`: it creates one in the person's own Google project, in a browser they watch, "
-    "and publishes it In production. Never create a second project or client when one already exists."
+    "and publishes it In production."
 )
 BAD_CLIENT_FILE = "That file isn't a Google Desktop app client file. Pass the path of the downloaded client JSON."
 

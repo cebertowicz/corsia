@@ -304,7 +304,7 @@ async def test_connect_when_connected_and_without_a_client_file(google, conducto
     out = await GoogleConnectTool().execute(_thread_id=conductor)
     assert out == f"Error: {oauth.NEEDS_CLIENT_FILE}"
     assert "If none exists yet, follow skill `google-setup`" in out
-    assert "Never create a second project or client when one already exists." in out
+    assert "second" not in out  # when to make a project or client is the skill's rule alone
     account_id = await _connect(google, conductor, client_file)
     out = json.loads(await GoogleConnectTool().execute(_thread_id=conductor, account_id=account_id))
     assert out == {

@@ -193,7 +193,7 @@ def test_google_setup_asks_for_accounts_does_the_console_and_checks_scopes():
     assert "tick every box before you continue" in steps
     for scope in REQUIRED_SCOPES + OPTIONAL_SCOPES:
         assert f"`{scope.rsplit('/', 1)[1].split('.', 1)[0]}`" in steps.split("\n7. ", 1)[1]
-    assert "To add them, ask me for a new link and tick every box." in steps.split("\n7. ", 1)[1]
+    assert "To add them, remove <address> in Connected apps, then ask me to connect it again and tick every box." in steps.split("\n7. ", 1)[1]
 
 
 def test_setup_skills_tell_a_packaged_apps_browser_error_from_a_source_install(tmp_path, monkeypatch):
