@@ -27,9 +27,10 @@ def _owned_thread(thread_id: str, authorization: str = "") -> dict:
 
 
 def _http_url(url: str) -> str:
-    if not browser_control.is_http_url(url):
+    normalized = browser_control.normalize_browser_url(url)
+    if normalized is None:
         raise HTTPException(422, "Browser URL must be http or https")
-    return url
+    return normalized
 
 
 @router.post("/{thread_id}/open")

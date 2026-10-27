@@ -8,6 +8,7 @@ the later entry describes the current behavior.
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here._
 
 - First-chat setup reads more clearly and at your pace: a decision card waits until you've had time to read what came before it, GitHub profiles are read through GitHub's public data, the import ends in one short line, the GitHub step is one message and one choice, and you sign up for the agents' GitHub account in your own browser.
+- Browser addresses no longer need `https://` typed in; local loopback addresses use `http://` by default.
 - Setup now opens in a normal-sized window in the middle of the screen, and the app grows to fill the screen when setup finishes.
 - A Claude Code you only just signed in to is no longer offered for import: only skills and notes you made there are brought over.
 - The "Bring over what your other tools know" step no longer shows twice in the setup plan.
