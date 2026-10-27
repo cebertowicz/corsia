@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -42,6 +43,11 @@ def _vendor(db, provider):
     db.commit()
     first, second = (set_account_state(add_account(provider, name)["id"], "signed_in", expected_revision=0)
                      for name in ("First", "Second"))
+    if provider == 'codex':
+        for account in (first, second):
+            (Path(account['source_home']) / 'auth.json').write_text(json.dumps({
+                'auth_mode': 'chatgpt', 'tokens': {'access_token': 'synthetic'},
+            }))
     return SimpleNamespace(provider=provider, model=model, thread=thread, first=first, second=second)
 
 

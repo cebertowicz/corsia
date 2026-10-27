@@ -17,7 +17,7 @@ vi.mock('$lib/product_events', () => ({ emitProductEvent: vi.fn() }));
 // The picker's Local group status reads model sources; these tests count only thread requests.
 vi.mock('$lib/stores/localPickerStatus', async () => {
 	const { readable } = await import('svelte/store');
-	return { localStatus: readable(null), canAddLocalModel: readable(false), canSetUpLocalModel: readable(false), retryLocalSetup: vi.fn(), watchLocalStatus: () => () => {} };
+	return { localStatus: readable(null), canAddLocalModel: readable(false), canSetUpLocalModel: readable(false), neverLocalHost: readable(false), retryLocalSetup: vi.fn(), watchLocalStatus: () => () => {} };
 });
 
 // A worker's composer beside the open thread's: the worker's model and effort controls

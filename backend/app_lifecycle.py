@@ -23,6 +23,7 @@ from infra import key_store_values, state
 from infra.db_async import run_in_db
 from infra.database import init_db, shutdown_pool
 from llm.providers.omlx_supervisor import stop_watching as stop_watching_omlx
+from tools.private_runtime_files import sweep_at_startup as sweep_private_launch_files
 
 
 async def _discover_network_servers(logger) -> int:
@@ -113,6 +114,7 @@ def _initialize_startup(logger) -> None:
     drop_ignored_environment()
     setup_progress.release_marker_at_startup(logger)
     key_store_values.sweep_at_startup()
+    sweep_private_launch_files()
     convert_legacy_project_paths(WORKSPACE_SELECTION)
     elapsed = time.monotonic() - phase_started
     logger.info("startup phase: database initialization complete in {:.1f}s", elapsed)

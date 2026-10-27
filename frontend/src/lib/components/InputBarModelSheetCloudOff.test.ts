@@ -8,6 +8,7 @@ vi.mock('$lib/stores/localPickerStatus', async () => {
 		localStatus: { subscribe: (run: (value: unknown) => void) => { run(setup.status.value); return () => {}; } },
 		canAddLocalModel: { subscribe: (run: (value: unknown) => void) => { run(setup.canAdd.value); return () => {}; } },
 		canSetUpLocalModel: { subscribe: (run: (value: unknown) => void) => { run(setup.canSetUp.value); return () => {}; } },
+		neverLocalHost: { subscribe: (run: (value: unknown) => void) => { run(false); return () => {}; } },
 		retryLocalSetup: vi.fn(), watchLocalStatus: () => () => {},
 	};
 });

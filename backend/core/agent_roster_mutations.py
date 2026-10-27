@@ -165,13 +165,21 @@ def change_agent(
             (*desired, updated_at, updated_at, thread_id),
         )
         updated = db.execute("SELECT * FROM threads WHERE id=?", (thread_id,)).fetchone()
-        if bool(thread["agent_enabled"]) and not bool(desired[0]):
+        summary = f"Agent responsibility map updated: {updated['title'] or 'Untitled'}"
+        if bool(thread["agent_enabled"]) and not bool(updated["agent_enabled"]):
+            from automation.schedules import retire_for_thread
             from registry.ownership import rehome_on_thread_end
 
             rehome_on_thread_end(db, thread_id, "agent_disabled")
+            schedule_count = retire_for_thread(thread_id, updated_at, db=db)
+            rule_count = db.execute(
+                "UPDATE event_rules SET enabled=0, updated_at=? WHERE created_by=? AND enabled=1",
+                (updated_at, thread_id),
+            ).rowcount
+            if schedule_count or rule_count:
+                summary += f"; stopped {schedule_count} schedules and {rule_count} event rules"
         append_agent_roster_transition(
-            db, before=thread, after=updated,
-            summary=f"Agent responsibility map updated: {updated['title'] or 'Untitled'}",
+            db, before=thread, after=updated, summary=summary,
         )
         row = dict(updated)
     _publish_roster_row(row)

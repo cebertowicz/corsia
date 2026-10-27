@@ -365,6 +365,7 @@ def client(monkeypatch):
     return TestClient(app)
 
 
+@pytest.mark.usefixtures("mac_local_model_host")
 def test_route_starts_the_flight_with_no_model_choice(client, monkeypatch):
     calls = []
 
@@ -378,6 +379,7 @@ def test_route_starts_the_flight_with_no_model_choice(client, monkeypatch):
     assert calls[-1] == {"no_subscription_only": False, "automatic": False, "onboarding": False}
 
 
+@pytest.mark.usefixtures("mac_local_model_host")
 def test_route_returns_backend_recovery_when_starting_fails(client, monkeypatch):
     from llm.local_setup_results import local_setup_error
 

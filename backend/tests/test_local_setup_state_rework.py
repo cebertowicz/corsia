@@ -160,6 +160,7 @@ async def test_setup_download_registers_then_forces_a_pin_and_read_back(flight, 
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("mac_local_model_host")
 async def test_corsias_own_registered_local_model_is_visible_and_setup_and_prepare_do_not_modify_it(isolated_db, flight, monkeypatch):
     from llm import local_setup_flow as flow, local_setup_prepare as prepare, local_sources
     from llm import network_discovery as discovery
