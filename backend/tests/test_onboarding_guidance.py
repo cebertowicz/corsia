@@ -315,6 +315,13 @@ def test_where_your_work_lives_rechecks_connected_apps_after_import():
     assert "count before they approve them" in work
 
 
+def test_first_run_app_approval_links_to_the_created_app():
+    work = _step(3)
+    assert "[App] is ready. [Approve it](#connected-apps/<id>) in Settings › Connected apps." in work
+    assert "`<id>` the URL-encoded `id` returned by that call" in work
+    assert "URL-encoded `id` from the added or existing server row" in work
+
+
 def test_where_your_work_lives_never_ends_at_i_cant_and_hands_the_rest_to_helpers():
     work = _step(3)
 
