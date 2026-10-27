@@ -282,7 +282,7 @@
 			{:else if agentsError}
 				<p class="note failed" role="alert">
 					{agentsError}
-					{#if agentsLoadFailed}<Button size="sm" variant="ghost" onclick={retryAgents}>Try again</Button>{/if}
+					{#if agentsLoadFailed}<Button size="sm" variant="ghost" onclick={retryAgents}>Retry</Button>{/if}
 				</p>
 			{:else}
 				{#each agentRows as agent (agent.thread_id)}

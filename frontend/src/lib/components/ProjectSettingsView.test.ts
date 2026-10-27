@@ -131,7 +131,7 @@ describe('ProjectSettingsView', () => {
 		expect(button('Remove')).toBeUndefined();
 	});
 
-	it('offers Try again when the agent list fails to load, and reloads it', async () => {
+	it('offers Retry when the agent list fails to load, and reloads it', async () => {
 		let agentCalls = 0;
 		stubFetch(project(), [], (url) => {
 			if (!url.startsWith('/api/agents')) return null;
@@ -144,7 +144,9 @@ describe('ProjectSettingsView', () => {
 		component = mount(ProjectSettingsView, { target: host, props: { projectId: 'corsia' } });
 
 		await vi.waitFor(() => expect(host.textContent).toContain('Couldn’t load this project’s agents.'));
-		button('Try again')!.click();
+		const retry = host.querySelector<HTMLButtonElement>('.note.failed button');
+		expect(retry?.textContent?.trim()).toBe('Retry');
+		retry!.click();
 		await vi.waitFor(() => expect(host.textContent).toContain('Release Coordinator'));
 		expect(host.textContent).not.toContain('Couldn’t load this project’s agents.');
 		expect(agentCalls).toBe(2);

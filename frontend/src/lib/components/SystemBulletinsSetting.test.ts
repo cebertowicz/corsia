@@ -63,9 +63,9 @@ describe('SystemBulletinsSetting', () => {
 		expect(toggle().disabled).toBe(true);
 		expect(toggle().getAttribute('aria-pressed')).toBe('false');
 		expect(host.textContent).toContain('System bulletins');
-		expect(host.textContent).toContain('Once a day, CORSIA checks for signed notes from its maintainers about how its agents work.');
-		expect(host.textContent).toContain('may change your setup to match');
-		expect(host.textContent).toContain('Turning this off doesn’t stop the notice');
+		expect(host.textContent).toContain('Once a day, CORSIA checks for signed notes from its maintainers about how its agents work, and');
+		expect(host.textContent).toContain('and the CORSIA agent may change your setup to match.');
+		expect(host.textContent).toContain('When this is off, the CORSIA agent still hears about updates that change how agents work.');
 
 		coreSettings.set({ live_bulletins: { enabled: true } });
 		flushSync();
