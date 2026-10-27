@@ -85,6 +85,8 @@ async def install(native: str, socket_dir: Path) -> str:
                                          timeout=browser_cli.CHROME_INSTALL_TIMEOUT)
         candidates = sorted((home / ".agent-browser" / "browsers").glob("chrome-*/**/Google Chrome for Testing"))
         if result.returncode or result.timed_out or result.completion != "exited" or not candidates:
+            logger.warning("private Chrome install failed: completion=%s timed_out=%s exit=%s",
+                           result.completion, result.timed_out, result.returncode)
             raise identity.BrowserIdentityError(NEEDS_CHROME)
         executable = candidates[-1].resolve(strict=True)
         if not executable.is_file() or not executable.is_relative_to(home):

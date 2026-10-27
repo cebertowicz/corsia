@@ -58,13 +58,17 @@ async def _run(args: list[str], *, thread_id: str, lease_id: str | None = None,
                navigation_url: str | None = None, notice: bool = True) -> str:
     """Run through the one backend-owned opaque browser session owner."""
     try:
-        return await _run_owned(args, thread_id=thread_id, lease_id=lease_id, timeout=timeout, show_window=show_window)
+        return await _run_owned(
+            args, thread_id=thread_id, lease_id=lease_id, timeout=timeout,
+            show_window=show_window, navigation_url=navigation_url, notice=notice,
+        )
     except BrowserOwnerError as exc:
         return exc.text
 
 
 async def _run_owned(args: list[str], *, thread_id: str, lease_id: str | None = None,
-                     timeout: int = _DEFAULT_TIMEOUT, show_window: bool | None = None) -> str:
+                     timeout: int = _DEFAULT_TIMEOUT, show_window: bool | None = None,
+                     navigation_url: str | None = None, notice: bool = True) -> str:
     """Run a browser command, preserving owner failures as exceptions."""
     err = _check_installed()
     if err:
