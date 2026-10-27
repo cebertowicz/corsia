@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import signal
 import sys
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
@@ -21,7 +22,10 @@ async def _unread_pipe_session():
     # asyncio subprocess transport so write backpressure is not mocked away.
     proc = await asyncio.create_subprocess_exec(
         sys.executable, "-c",
-        "import signal; print('ready', flush=True); signal.pause()",
+        "import json, signal, sys; "
+        "signal.signal(signal.SIGUSR1, lambda *_: print(json.dumps({"
+        "'id': json.loads(sys.stdin.readline())['id'], 'result': {}}), flush=True)); "
+        "print('ready', flush=True); signal.pause()",
         stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
     )
     session = CodexAppServerSession(binary="codex", task=None)
@@ -105,6 +109,67 @@ def controlled_deadlines(monkeypatch):
     return deadlines
 
 
+@asynccontextmanager
+async def _late_lock_writer(session, method, deadlines):
+    """Hand off the lock just before its real timeout callback can fire."""
+    await session._write_lock.acquire()
+    written = asyncio.Event()
+    task = asyncio.create_task(session._request(
+        method, {"input": "x" * (2 * 1024 * 1024)}, on_write_observed=written.set,
+    ))
+    try:
+        await asyncio.sleep(0)
+        assert len(deadlines) == 1 and not task.done()
+        # release() queues the writer before reschedule() queues expiry. The
+        # writer acquires the lock, writes, then stalls in a real pipe drain.
+        session._write_lock.release()
+        deadlines[0][1].reschedule(asyncio.get_running_loop().time())
+        await asyncio.wait_for(written.wait(), 2)
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        yield task
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        if session._write_lock.locked():
+            session._write_lock.release()
+
+
+@pytest.mark.parametrize("method,budget", [("turn/steer", 10), ("thread/inject_items", 120)])
+async def test_late_lock_brief_drain_does_not_kill(controlled_deadlines, method, budget):
+    async with _unread_pipe_session() as session:
+        session._kill_process = Mock(wraps=session._kill_process)
+        async with _late_lock_writer(session, method, controlled_deadlines) as task:
+            session._kill_process.assert_not_called()
+            assert not task.done() and session._proc.returncode is None
+            assert [value for value, _ in controlled_deadlines] == [budget, budget]
+            session._proc.send_signal(signal.SIGUSR1)
+            assert await asyncio.wait_for(asyncio.shield(task), 2) == {}
+            session._kill_process.assert_not_called()
+            assert session._pending == session._pending_methods == {}
+            assert not session._write_lock.locked()
+            assert [value for value, _ in controlled_deadlines] == [budget, budget, budget]
+
+
+@pytest.mark.parametrize("method,budget", [("turn/steer", 10), ("thread/inject_items", 120)])
+async def test_late_lock_full_drain_budget_kills_and_retires(controlled_deadlines, method, budget):
+    async with _unread_pipe_session() as session:
+        session._kill_process = Mock(wraps=session._kill_process)
+        async with _late_lock_writer(session, method, controlled_deadlines) as task:
+            session._kill_process.assert_not_called()
+            assert not task.done() and session._proc.returncode is None
+            assert [value for value, _ in controlled_deadlines] == [budget, budget]
+            controlled_deadlines[-1][1].reschedule(asyncio.get_running_loop().time())
+            with pytest.raises(CodexAppServerError, match=method):
+                await asyncio.wait_for(asyncio.shield(task), 2)
+            session._kill_process.assert_called_once()
+            await asyncio.wait_for(session._reader, 2)
+            session._on_exit.assert_awaited_once()
+            assert session._proc.returncode is not None
+            assert session._pending == session._pending_methods == {}
+            assert not session._closing and not session._write_lock.locked()
+
+
 async def test_request_deadline_includes_lock_behind_unread_pipe(controlled_deadlines):
     async with _unread_pipe_session() as session:
         written = Mock()
@@ -150,14 +215,14 @@ async def test_steer_waiter_preserves_stalled_start_own_budget(controlled_deadli
             assert session._write_lock.locked()
             steer = asyncio.create_task(session._request("turn/steer", {}))
             await asyncio.sleep(0)
-            assert [budget for budget, _ in controlled_deadlines] == [120, 10]
-            controlled_deadlines[1][1].reschedule(asyncio.get_running_loop().time())
+            assert [budget for budget, _ in controlled_deadlines] == [120, 120, 10]
+            controlled_deadlines[2][1].reschedule(asyncio.get_running_loop().time())
             with pytest.raises(CodexAppServerError, match="turn/steer"):
                 await asyncio.wait_for(asyncio.shield(steer), 2)
             session._kill_process.assert_not_called()
             assert not start.done() and session._proc.returncode is None
-            assert not controlled_deadlines[0][1].expired()
-            controlled_deadlines[0][1].reschedule(asyncio.get_running_loop().time())
+            assert not controlled_deadlines[1][1].expired()
+            controlled_deadlines[1][1].reschedule(asyncio.get_running_loop().time())
             with pytest.raises(CodexAppServerError, match="turn/start"):
                 await asyncio.wait_for(asyncio.shield(start), 2)
             session._kill_process.assert_called_once()
@@ -210,7 +275,7 @@ async def test_cancelled_writer_drain_does_not_kill(controlled_deadlines, writer
         try:
             await asyncio.sleep(0)
             assert session._write_lock.locked() and not task.done()
-            assert [budget for budget, _ in controlled_deadlines] == [120]
+            assert [budget for budget, _ in controlled_deadlines] == ([120, 120] if writer == "request" else [120])
             task.cancel()
             with pytest.raises(asyncio.CancelledError):
                 await task

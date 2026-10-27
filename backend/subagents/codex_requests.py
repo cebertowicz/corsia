@@ -33,7 +33,7 @@ async def notify(session, method: str, params: dict) -> None:
 
 
 async def request(session, method, params=None, *, on_write_observed=None, on_drain_confirmed=None):
-    """Bound one request's lock, pipe drain and response with a single deadline."""
+    """Give lock admission, own drain and response separate method budgets."""
     from subagents.codex_app_server import REQUEST_TIMEOUT, STEER_REQUEST_TIMEOUT, _STEER_NOT_WRITTEN
 
     if session._proc is None or session._proc.stdin is None:
@@ -48,23 +48,29 @@ async def request(session, method, params=None, *, on_write_observed=None, on_dr
     payload = {"id": msg_id, "method": method}
     if params is not None:
         payload["params"] = params
-    deadline = asyncio.timeout(STEER_REQUEST_TIMEOUT if method == "turn/steer" else REQUEST_TIMEOUT)
+    budget = STEER_REQUEST_TIMEOUT if method == "turn/steer" else REQUEST_TIMEOUT
+    deadline = asyncio.timeout(budget)
     try:
         async with deadline:
-            async with session._write_lock:
-                if method == "turn/steer" and not session._dynamic_tool_requests_idle.is_set():
-                    return _STEER_NOT_WRITTEN
-                if session._closing and method in {"thread/inject_items", "turn/start", "turn/steer"}:
-                    raise RuntimeError("Codex app-server terminated before provider write")
-                if method in {"turn/start", "turn/steer"}:
-                    require_session_write(session, "codex")
-                session.request_log.append({"id": msg_id, "method": method, "params": params or {}})
-                session._proc.stdin.write((json.dumps(payload) + "\n").encode())
-                if on_write_observed is not None:
-                    on_write_observed()
+            await session._write_lock.acquire()
+        try:
+            if method == "turn/steer" and not session._dynamic_tool_requests_idle.is_set():
+                return _STEER_NOT_WRITTEN
+            if session._closing and method in {"thread/inject_items", "turn/start", "turn/steer"}:
+                raise RuntimeError("Codex app-server terminated before provider write")
+            if method in {"turn/start", "turn/steer"}:
+                require_session_write(session, "codex")
+            session.request_log.append({"id": msg_id, "method": method, "params": params or {}})
+            session._proc.stdin.write((json.dumps(payload) + "\n").encode())
+            if on_write_observed is not None:
+                on_write_observed()
+            async with asyncio.timeout(budget) as deadline:
                 await drain(session, deadline)
-                if on_drain_confirmed is not None:
-                    on_drain_confirmed()
+            if on_drain_confirmed is not None:
+                on_drain_confirmed()
+        finally:
+            session._write_lock.release()
+        async with asyncio.timeout(budget) as deadline:
             return await fut
     except TimeoutError as error:
         if not deadline.expired():

@@ -2315,7 +2315,7 @@ async def test_turn_steer_uses_request_deadline_without_shortening_other_request
     with pytest.raises(CodexAppServerError, match="turn/steer"):
         await session.steer("queued user input")
 
-    assert observed_timeouts == [codex_app_server.STEER_REQUEST_TIMEOUT]
+    assert observed_timeouts == [codex_app_server.STEER_REQUEST_TIMEOUT] * 3
     assert codex_app_server.STEER_REQUEST_TIMEOUT < codex_app_server.REQUEST_TIMEOUT
     assert session.request_log[-1]["method"] == "turn/steer"
     assert session._pending == {}
