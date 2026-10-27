@@ -5,9 +5,9 @@
  */
 
 /** Points per second at the slowest, so the last points of a gap still arrive promptly. */
-const FLOOR_RATE = 20;
+export const FLOOR_RATE = 20;
 /** A gap closes at this many times its own size per second, which is what makes a large gap fast. */
-const GAP_RATE = 4;
+export const GAP_RATE = 4;
 
 /** The shown value one frame later, `dtMs` after the last frame. */
 export function countUp(shown: number, target: number, dtMs: number): number {

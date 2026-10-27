@@ -43,7 +43,7 @@
 	let frameAt = 0;
 	let counting = false;
 	let shownOperationId: string | null = null;
-	const percentText = $derived(Math.floor(shown + 1e-6));
+	const wholePercent = $derived(Math.floor(shown + 1e-6));
 	const hasStartAction = $derived(recoveryFailure === 'automatic' || recoveryFailure === 'manual');
 	const autoStartWaiting = $derived(localDesktop && recoveryFailure === null && (deferred || (longer && autoStartAttempted && !starting)));
 
@@ -201,8 +201,8 @@
 					<p class="step-label">{view.label}</p>
 				{/if}
 			</div>
-			<div class="percent" data-state={view.mode} aria-hidden="true">{percentText}%</div>
-			<div class="bar" role="progressbar" aria-label={view.mode === 'failed' && view.failure ? view.failure.title : view.label} aria-valuemin="0" aria-valuemax="100" aria-valuenow={percentText}>
+			<div class="percent" data-state={view.mode} aria-hidden="true">{wholePercent}%</div>
+			<div class="bar" role="progressbar" aria-label={view.mode === 'failed' && view.failure ? view.failure.title : view.label} aria-valuemin="0" aria-valuemax="100" aria-valuenow={wholePercent}>
 				<i style:width={`${shown}%`}></i>
 			</div>
 			{#if view.fromVersion && view.toVersion && view.mode !== 'done'}
