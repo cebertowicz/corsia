@@ -11,7 +11,7 @@ import {
 } from './support/corsia';
 import type { HostAccessExternalAgentException, HostAccessLease } from '../src/lib/api/hostAccess';
 
-const WARNING = 'External agents run outside CORSIA’s managed context and controls. Their instructions, skills and tools may differ, and CORSIA may not fully observe their actions, costs or results. Human approval is required for this exception, even when automatic approval is enabled.';
+const WARNING = 'This agent runs outside CORSIA’s controls, so CORSIA may not see what it does or what it costs. You approve this yourself, even when Auto-approve is on.';
 const UPDATED_COMMAND = "claude -p 'Analyze the refreshed disposable sample report' --add-dir /tmp/refreshed-independent-sample";
 const UPDATED_DIRECTORY = '/tmp/corsia-external-sample/' + 'refreshed-disposable-analysis-inputs-'.repeat(8);
 const viewports = [

@@ -39,7 +39,7 @@ it('shows the external warning and exact launch before Plan on a projectless req
 	expect(host.querySelector('.purpose')!.nextElementSibling).toBe(section);
 	expect(section.nextElementSibling).toBe(host.querySelector('.explainer'));
 	expect(section.nextElementSibling!.nextElementSibling).toBe(host.querySelector('.plan'));
-	expect(host.querySelector('.external-warning')!.textContent).toBe('External agents run outside CORSIA’s managed context and controls. Their instructions, skills and tools may differ, and CORSIA may not fully observe their actions, costs or results. Human approval is required for this exception, even when automatic approval is enabled.');
+	expect(host.querySelector('.external-warning')!.textContent).toBe('This agent runs outside CORSIA’s controls, so CORSIA may not see what it does or what it costs. You approve this yourself, even when Auto-approve is on.');
 	const external = lease.requested_policy_exceptions[0];
 	if (external.policy !== 'external_agent') throw new Error('Invalid fixture');
 	expect(Array.from(section.querySelectorAll('code'), (node) => node.textContent))

@@ -70,7 +70,7 @@
 				body: JSON.stringify({ username: username.trim(), password }),
 			});
 			if (res.status === 401) {
-				loginError = 'Wrong username or password.';
+				loginError = 'That username and password don’t match.';
 				password = '';
 				return;
 			}
@@ -143,7 +143,7 @@
 		<p>{phase === 'form' && remoteName ? `Sign in to ${remoteName}` : 'Your personal AI assistant'}</p>
 		{#if phase === 'no-account'}
 			{#if loginError}<div class="login-error">{loginError}</div>{/if}
-			<p class="no-account-copy">No account exists yet. On the CORSIA computer, run:</p>
+			<p class="no-account-copy">No account exists. On the computer running CORSIA, run this command:</p>
 			<code class="cmd">corsia user add</code>
 			<Button variant="primary" onclick={checkAgain} loading={checkingAgain} disabled={checkingAgain}>
 				Check again

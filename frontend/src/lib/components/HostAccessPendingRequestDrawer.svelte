@@ -35,7 +35,7 @@
 	<section class="policy-exceptions" aria-label="Policy exceptions requested">
 		<span class="label">Policy exceptions requested</span>
 		{#if external}
-			<p class="external-warning">External agents run outside CORSIA’s managed context and controls. Their instructions, skills and tools may differ, and CORSIA may not fully observe their actions, costs or results. Human approval is required for this exception, even when automatic approval is enabled.</p>
+			<p class="external-warning">This agent runs outside CORSIA’s controls, so CORSIA may not see what it does or what it costs. You approve this yourself, even when Auto-approve is on.</p>
 		{/if}
 		<ul>
 			{#each exceptions as exception}

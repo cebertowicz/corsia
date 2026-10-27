@@ -128,7 +128,7 @@
 	 * track is unreadable: at 393px it wraps into a ~94px column.
 	 */
 	const staleNotice = $derived(
-		stale ? error || 'Host-access truth is temporarily unavailable.' : null,
+		stale ? error || 'Couldn’t check host access. Try again.' : null,
 	);
 	const transitionalStatus = $derived(stale ? null : (transitional[0] ?? null));
 	const wide = $derived(!!staleNotice || !!transitionalStatus || !!currentPending);

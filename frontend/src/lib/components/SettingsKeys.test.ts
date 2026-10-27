@@ -111,7 +111,7 @@ describe('Settings › Keys', () => {
 	it('shows the help text and each row with its use or who added it', async () => {
 		await mountKeys();
 		expect(host.textContent).toContain(
-			"Agents can use these keys but can never see them. They're stored on this Mac, and a backup of CORSIA's state folder includes them.",
+			"Agents can use these keys but can never see them. They’re stored on this computer, and a backup of CORSIA’s state folder includes them.",
 		);
 		const web = host.querySelector('[data-key-entry="web-search"]')!.textContent!;
 		expect(web).toContain('Used by: web search');
