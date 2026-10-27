@@ -116,6 +116,17 @@ it('blocks an incomplete launch and shows plain missing-command copy outside cod
 	expect(host.querySelector('.approval-blocked')).not.toBeNull();
 });
 
+it('names a missing working folder and prevents approval', () => {
+	const lease = externalLease();
+	const external = lease.requested_policy_exceptions[0];
+	if (external.policy !== 'external_agent') throw new Error('Invalid fixture');
+	external.working_directory = '';
+	expect(approvalReady(lease)).toBe(false);
+	show(lease);
+	expect(host.querySelector('.launch-missing')?.textContent).toBe('Working folder missing');
+	expect(button('Approve')).toBeUndefined();
+});
+
 it('rejects malformed directory, duplicate launch, extra repo field and excessive duration', () => {
 	const invalidDirectory = externalLease();
 	const external = invalidDirectory.requested_policy_exceptions[0];

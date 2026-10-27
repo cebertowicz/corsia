@@ -53,7 +53,7 @@
 						{#if text(exception.working_directory)}
 							<code>{exception.working_directory}</code>
 						{:else}
-							<p class="launch-missing">Working directory missing</p>
+							<p class="launch-missing">Working folder missing</p>
 						{/if}
 					{:else}
 						<strong>{exception.repo_name}: {policyLabel(exception.policy)}</strong>
