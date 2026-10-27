@@ -688,7 +688,10 @@ impl Launchd for SystemLaunchd {
             .args(["print", &Self::target()])
             .output()
             .map(|output| output.status.success())
-            .map_err(|error| format!("could not ask launchd about the earlier install: {error}"))
+            .map_err(|error| {
+                log::warn!("could not check the earlier install: {error}");
+                "CORSIA couldn’t check whether the earlier install is running".to_string()
+            })
     }
 
     fn port_answers(&mut self) -> bool {
@@ -777,7 +780,7 @@ impl<L: adoption::Lifecycle, D: Launchd> LaunchdService<L, D> {
             match check(self) {
                 Ok(()) => return Ok(()),
                 Err(error) if Instant::now() >= deadline => {
-                    return Err(format!("the earlier install did not stop: {error}"))
+                    return Err(error)
                 }
                 Err(_) => thread::sleep(STOP_POLL),
             }
@@ -1518,6 +1521,14 @@ mod tests {
     }
 
     #[test]
+    fn an_unreadable_install_status_is_not_reported_as_a_confirmed_stop_failure() {
+        let mut service = launchd_service(None, FakeLaunchd::default());
+        service.timeout = Duration::ZERO;
+        let cause = "CORSIA couldn’t check whether the earlier install is running";
+        assert_eq!(service.wait_for(|_| Err(cause.into())).unwrap_err(), cause);
+    }
+
+    #[test]
     fn an_adoptable_install_is_stopped_only_by_its_own_stop() {
         let mut service = launchd_service(Some(FakeSource::default()), FakeLaunchd { loaded: true, ..Default::default() });
         stop(&mut service).unwrap();
@@ -1548,7 +1559,7 @@ mod tests {
             let adoptable = source.is_some();
             let mut service = launchd_service(source, FakeLaunchd { databases_held: true, ..Default::default() });
             let error = stop(&mut service).unwrap_err();
-            assert!(error.contains("did not stop") && error.contains("locked"), "{error}");
+            assert!(error.contains("locked"), "{error}");
             assert_eq!(service.launchd.bootouts, 0);
             assert_eq!(service.source.as_ref().map_or(0, |source| source.stops), 0, "adoptable {adoptable}");
         }

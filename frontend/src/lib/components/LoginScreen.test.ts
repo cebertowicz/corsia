@@ -3,7 +3,12 @@ import { get } from 'svelte/store';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const wsMocks = vi.hoisted(() => ({ connect: vi.fn() }));
+const remoteShellMocks = vi.hoisted(() => ({
+	shellInfo: vi.fn(),
+	disconnectRemote: vi.fn(),
+}));
 vi.mock('$lib/ws', () => ({ connect: wsMocks.connect }));
+vi.mock('$lib/remoteShell', () => remoteShellMocks);
 
 import LoginScreen from './LoginScreen.svelte';
 import { token, user } from '$lib/stores/auth';
@@ -37,6 +42,8 @@ function mountScreen(props: { onNoAccount?: () => void } = {}) {
 
 beforeEach(() => {
 	wsMocks.connect.mockClear();
+	remoteShellMocks.shellInfo.mockReturnValue(null);
+	remoteShellMocks.disconnectRemote.mockReset();
 	token.set(null);
 	user.set(null);
 	connectionError.set(null);
@@ -56,6 +63,31 @@ afterEach(() => {
 });
 
 describe('LoginScreen', () => {
+	it.each(['Studio', ''])('names the remote on sign-in when known (%s)', async (name) => {
+		remoteShellMocks.shellInfo.mockReturnValue({ mode: 'remote', name, localConfigured: true });
+		vi.stubGlobal('fetch', vi.fn(async () => statusResponse(true)));
+		mountScreen();
+		await vi.waitFor(() => expect(submitButton()).not.toBeNull());
+		expect(host.textContent).toContain(name ? 'Sign in to Studio' : 'Your personal AI assistant');
+	});
+
+	it.each(['Studio', ''])('uses a truthful status heading for response and network failures (%s)', async (name) => {
+		remoteShellMocks.shellInfo.mockReturnValue({ mode: 'remote', name, localConfigured: true });
+		const fetchMock = vi.fn().mockResolvedValueOnce({ ok: false, status: 500 }).mockRejectedValueOnce(new Error('network'));
+		vi.stubGlobal('fetch', fetchMock);
+		mountScreen();
+		const heading = name ? 'Can’t check Studio' : 'Can’t check the other computer';
+		const expectErrorActions = () => {
+			expect(host.querySelector('h1')?.textContent).toBe(heading);
+			expect(host.textContent).toContain('Something went wrong. Choose Retry, or save a report to send.');
+			expect(host.textContent).toContain('Retry');
+			expect(host.textContent).toContain('Use this computer instead');
+		};
+		await vi.waitFor(expectErrorActions);
+		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Retry'))!.click();
+		await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+		await vi.waitFor(expectErrorActions);
+	});
 	it('shows the no-account state with the CLI command instead of a form', async () => {
 		vi.stubGlobal('fetch', vi.fn(async () => statusResponse(false)));
 		mountScreen();
@@ -136,6 +168,90 @@ describe('LoginScreen', () => {
 
 		await vi.waitFor(() => expect(get(token)).toBe('new-session-token'));
 		expect(wsMocks.connect).toHaveBeenCalled();
+	});
+
+	it('offers the configured computer return action only while connected remotely', async () => {
+		remoteShellMocks.shellInfo.mockReturnValue({ mode: 'remote', name: 'Studio', localConfigured: true });
+		remoteShellMocks.disconnectRemote.mockResolvedValue(undefined);
+		vi.stubGlobal('fetch', vi.fn(async () => statusResponse(true)));
+		mountScreen();
+		await vi.waitFor(() => expect(usernameField()).not.toBeNull());
+
+		const returnButton = Array.from(host.querySelectorAll('button'))
+			.find((button) => button.textContent?.includes('Use this computer instead'));
+		expect(returnButton).toBeDefined();
+		returnButton!.click();
+		await vi.waitFor(() => expect(remoteShellMocks.disconnectRemote).toHaveBeenCalledOnce());
+		expect(host.textContent).not.toContain('Disconnect from Studio?');
+	});
+
+	it('uses a truthful fallback when disconnecting an unnamed computer fails', async () => {
+		remoteShellMocks.shellInfo.mockReturnValue({ mode: 'remote', name: '  ', localConfigured: true });
+		remoteShellMocks.disconnectRemote.mockRejectedValue(new Error('disconnect failed'));
+		vi.stubGlobal('fetch', vi.fn(async () => statusResponse(true)));
+		mountScreen();
+		await vi.waitFor(() => expect(usernameField()).not.toBeNull());
+		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Use this computer instead'))!.click();
+		await vi.waitFor(() => expect(host.textContent).toContain('CORSIA couldn’t disconnect from the other computer. Try again.'));
+	});
+
+	it('labels the remote return action as setup when this computer is not configured', async () => {
+		remoteShellMocks.shellInfo.mockReturnValue({ mode: 'remote', name: 'Studio', localConfigured: false });
+		vi.stubGlobal('fetch', vi.fn(async () => statusResponse(true)));
+		mountScreen();
+		await vi.waitFor(() => expect(usernameField()).not.toBeNull());
+
+		expect(host.textContent).toContain('Set up this computer instead');
+		expect(host.textContent).not.toContain('Use this computer instead');
+		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Set up this computer instead'))!.click();
+		await vi.waitFor(() => expect(remoteShellMocks.disconnectRemote).toHaveBeenCalledOnce());
+		expect(host.textContent).not.toContain('Disconnect from Studio?');
+	});
+
+	it.each([true, false])('offers a way back while checking status only when remote: %s', async (remote) => {
+		remoteShellMocks.shellInfo.mockReturnValue(remote ? { mode: 'remote', name: 'Studio', localConfigured: true } : null);
+		vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})));
+		mountScreen();
+		const button = Array.from(host.querySelectorAll('button')).find((item) => item.textContent?.includes('Use this computer instead'));
+		expect(Boolean(button)).toBe(remote);
+		if (button) {
+			button.click();
+			await vi.waitFor(() => expect(remoteShellMocks.disconnectRemote).toHaveBeenCalledOnce());
+		}
+	});
+
+	it.each([true, false])('offers a way back on the no-account screen only when remote: %s', async (remote) => {
+		remoteShellMocks.shellInfo.mockReturnValue(remote ? { mode: 'remote', name: 'Studio', localConfigured: true } : null);
+		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => String(input) === '/api/setup/status' ? { ok: false, status: 403 } : statusResponse(false)));
+		mountScreen();
+		await vi.waitFor(() => expect(host.textContent).toContain('corsia user add'));
+		const button = Array.from(host.querySelectorAll('button')).find((item) => item.textContent?.includes('Use this computer instead'));
+		expect(Boolean(button)).toBe(remote);
+		if (button) {
+			button.click();
+			await vi.waitFor(() => expect(remoteShellMocks.disconnectRemote).toHaveBeenCalledOnce());
+		}
+	});
+
+	it.each([true, false])('offers a way back on the status-error screen only when remote: %s', async (remote) => {
+		remoteShellMocks.shellInfo.mockReturnValue(remote ? { mode: 'remote', name: 'Studio', localConfigured: false } : null);
+		vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('unavailable'); }));
+		mountScreen();
+		await vi.waitFor(() => expect(host.textContent).toContain(remote ? 'Can’t check Studio' : 'CORSIA couldn’t start'));
+		const button = Array.from(host.querySelectorAll('button')).find((item) => item.textContent?.includes('Set up this computer instead'));
+		expect(Boolean(button)).toBe(remote);
+		if (button) {
+			button.click();
+			await vi.waitFor(() => expect(remoteShellMocks.disconnectRemote).toHaveBeenCalledOnce());
+		}
+	});
+
+	it('does not offer the remote return action outside the desktop remote shell', async () => {
+		vi.stubGlobal('fetch', vi.fn(async () => statusResponse(true)));
+		mountScreen();
+		await vi.waitFor(() => expect(usernameField()).not.toBeNull());
+
+		expect(host.textContent).not.toContain('this computer instead');
 	});
 
 	it('shows a plain message and clears only the password on 401, keeping the username', async () => {

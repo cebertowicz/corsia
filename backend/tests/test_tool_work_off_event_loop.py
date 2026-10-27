@@ -256,12 +256,13 @@ async def test_cancelled_envelope_preparation_removes_the_profile_it_wrote(
     tmp_path, monkeypatch, caplog, worker_fails,
 ):
     import asyncio
-    import tempfile
     import threading
 
+    from infra import config
     from tools.shell_envelope import Envelope, prepare_execution_envelope
 
-    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    monkeypatch.setattr(config, "STATE_ROOT", tmp_path)
+    profiles = tmp_path / "runtime" / "shell-envelopes"
     building = threading.Event()
     release = threading.Event()
 
@@ -278,14 +279,14 @@ async def test_cancelled_envelope_preparation_removes_the_profile_it_wrote(
     preparing.cancel()
     with pytest.raises(asyncio.CancelledError):
         await preparing
-    assert list(tmp_path.glob("corsia-shell-envelope-*.sb"))
+    assert list(profiles.glob("corsia-shell-envelope-*.sb"))
     release.set()
 
     for _ in range(200):
-        if not list(tmp_path.glob("corsia-shell-envelope-*.sb")):
+        if not list(profiles.glob("corsia-shell-envelope-*.sb")):
             break
         await asyncio.sleep(0.01)
-    assert list(tmp_path.glob("corsia-shell-envelope-*.sb")) == []
+    assert list(profiles.glob("corsia-shell-envelope-*.sb")) == []
     for _ in range(200):
         if not worker_fails or "after its caller was cancelled" in caplog.text:
             break

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
@@ -68,7 +69,6 @@ def test_person_browser_steps_have_one_rule_and_no_url_wait():
     assert "no URL mode" in steps and "about 5 minutes" in steps
     for path in (
         bootstrap / "web-search.md",
-        SKILLS / "github/references/agent-account.md",
         SKILL,
     ):
         text = path.read_text(encoding="utf-8")
@@ -76,7 +76,15 @@ def test_person_browser_steps_have_one_rule_and_no_url_wait():
         assert "`wait` on a URL" not in text
 
 
-def test_person_browser_guidance_keeps_every_first_run_step_in_the_shared_browser():
+def test_github_sign_up_is_the_persons_own_browser_never_the_shared_one():
+    """GitHub flags a sign-up an automated browser types, so the person signs up themselves."""
+    account = (SKILLS / "github/references/agent-account.md").read_text(encoding="utf-8")
+    assert "never open the sign-up in the shared browser and never type into or click its form" in account
+    assert "paste this link into it: https://github.com/signup" in account
+    assert "`browser_open`" not in account.split("## Creating the account", 1)[1].split("## Posting as the person", 1)[0]
+
+
+def test_person_browser_guidance_keeps_the_other_first_run_steps_in_the_shared_browser():
     system = ROOT / "backend/prompts/system/v1"
     expected_guidance = {
         "skills/conductor-bootstrap/references/browser-person-steps.md": (
@@ -86,10 +94,7 @@ def test_person_browser_guidance_keeps_every_first_run_step_in_the_shared_browse
             "the person watches in the shared browser, so do not set `show_window`"
         ),
         "skills/conductor-bootstrap/references/first-run.md": (
-            "follow skill `github` › `references/agent-account.md` in the shared browser"
-        ),
-        "skills/github/references/agent-account.md": (
-            "the person watches in the shared browser, so do not set `show_window`"
+            "the person signs up in their own browser from the link you post"
         ),
         "skills/google-setup/SKILL.md": (
             "Do not set `show_window`: the shared browser is already available."
@@ -117,9 +122,16 @@ def test_google_setup_carries_the_approved_offer_and_leaves_secrets_to_the_backe
 
     assert "CORSIA creates a private Google project you own, in a browser you can watch" in steps
     assert "`See, edit and delete your Drive, Docs and Sheets files, so you won't have to sign in again later.`" in steps
+    # The console clicks live in the server-owned step file; the skill names that file.
+    assert '`steps: "google-setup/console-project"`' in steps
+    assert '`steps: "google-setup/console-apis"`' in steps
+    project = json.loads((SKILLS / "google-setup/steps/console-project.json").read_text(encoding="utf-8"))
+    apis = json.loads((SKILLS / "google-setup/steps/console-apis.json").read_text(encoding="utf-8"))
+    assert [step["id"] for step in project["steps"]] == ["project-page", "project-name", "project-create", "project-ready"]
     enable_link = "https://console.cloud.google.com/flows/enableapi?apiid="
-    assert enable_link in steps
-    enabled = steps.split(enable_link, 1)[1].split("`", 1)[0].split(",")
+    urls = [step["url"] for step in apis["steps"] if step.get("url", "").startswith(enable_link)]
+    assert len(urls) == 1
+    enabled = urls[0].removeprefix(enable_link).split(",")
     assert enabled == ["gmail.googleapis.com", "calendar-json.googleapis.com", "drive.googleapis.com",
                        "docs.googleapis.com", "sheets.googleapis.com"]
     assert '"Go to CORSIA (unsafe)"' in steps
