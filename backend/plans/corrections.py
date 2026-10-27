@@ -91,7 +91,7 @@ def add(
         inherit_commitment=True,
         db=db,
     )
-    service._event(
+    event_id = service._event(
         db,
         correction.id,
         "correction_created",
@@ -103,6 +103,9 @@ def add(
             "commitment_id": source["commitment_id"],
         },
     )
+    from core.self_caught_corrections import record_self_caught_correction
+
+    record_self_caught_correction(db, event_id)
     for row in affected:
         dependencies.add_dependency(
             row["id"],
