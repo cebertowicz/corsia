@@ -108,11 +108,11 @@ class ScheduleSource:
             db.execute(
                 "UPDATE automation_schedules SET state='cancelled', last_status='owner_gone', updated_at=? "
                 "WHERE id=? AND state='active'",
-                (trigger.created_at, trigger.subject_id),
+                (trigger.updated_at, trigger.subject_id),
             )
         elif outcome in TERMINAL_STATES:
             schedules.settle_run(
                 trigger.subject_id,
-                trigger.created_at,
+                trigger.updated_at,
                 db=db,
             )

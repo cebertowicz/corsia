@@ -1,7 +1,8 @@
 """Automation waits for archived owners and reports its final cadence run."""
 
 from automation import schedules, script_runner
-from automation.continuation import execution, runner
+from automation.continuation import execution, runner, settlement, triggers
+from infra.database import write_transaction
 from automation.continuation.sources.schedules import ScheduleSource
 from tests.test_continuation_schedules import _db, _delivered
 from tests.test_script_schedules import _register
@@ -46,6 +47,27 @@ async def test_archived_cadence_waits_and_resumes_without_burst():
     row = schedules.get(schedule.id, db=db)
     assert (row.runs, row.next_run_at) == (1, "2026-01-01T00:12:00+00:00")
     assert ScheduleSource().due(now, db=db) == []
+
+
+@pytest.mark.asyncio
+async def test_delayed_settlement_keeps_grid_and_next_sweep_fires_once():
+    db = _db()
+    schedule = schedules.create("thread", "__workspace__", "thread", kind="cadence", spec="60",
+                                max_runs=10, now=T0, db=db)
+    due = "2026-01-01T00:01:00+00:00"
+    late = "2026-01-01T00:04:15+00:00"
+    (request,) = ScheduleSource().due(due, db=db)
+    with write_transaction(db, scope="test_delayed_schedule") as connection:
+        trigger, _ = triggers.enqueue(request, db=connection, now=due)
+        assert triggers.claim(trigger.id, idempotency_key="delayed", db=connection, now=due)
+    settlement.settle_claimed(trigger.id, "delivered", "schedule_due", ScheduleSource(), db=db, now=late)
+    row = schedules.get(schedule.id, db=db)
+    assert (row.runs, row.next_run_at) == (1, "2026-01-01T00:05:00+00:00")
+    assert (await runner.sweep(late, db=db, deliver=_delivered))["woken"] == []
+    future = "2026-01-01T00:05:00+00:00"
+    assert (await runner.sweep(future, db=db, deliver=_delivered))["woken"] == ["thread"]
+    assert (await runner.sweep(future, db=db, deliver=_delivered))["woken"] == []
+    assert schedules.get(schedule.id, db=db).runs == 2
 
 
 def test_archived_script_is_held_without_report(tmp_path):
