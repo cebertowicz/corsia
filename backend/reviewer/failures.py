@@ -84,6 +84,21 @@ def envelope_signals(envelope: dict[str, Any]) -> str:
     return " ".join(pairs)
 
 
+def envelope_failure_detail(envelope: dict[str, Any], output: str, stderr: str) -> str:
+    """Failure detail for a CLI error envelope, whatever the exit code.
+
+    The CLI's result text and the signals precede the truncated raw output so
+    the explanation survives truncation; stderr follows when there is any.
+    """
+    parts = (
+        str(envelope.get("result") or "")[:200],
+        envelope_signals(envelope),
+        output[:200],
+        f"stderr: {stderr[:200]}" if stderr else "",
+    )
+    return " | ".join(part for part in parts if part)
+
+
 def parse_envelope(output: str) -> dict[str, Any] | None:
     """Parse a CLI stdout envelope, or None when it is not JSON."""
     try:
@@ -128,29 +143,22 @@ def classify_cc_error(
         if (
             envelope.get("duration_api_ms") == 0
             and envelope.get("total_cost_usd") == 0
-            and (usage is None or isinstance(usage, dict) and usage.get("input_tokens", 0) == 0)
+            and (usage is None or (isinstance(usage, dict) and not usage.get("input_tokens")))
         ):
             return CCUnavailableError(detail)
     return RuntimeError(detail)
 
 
 def raise_cli_failure(returncode: int, output: str, stderr: str) -> NoReturn:
-    """Classify and raise a non-zero ``claude -p`` exit.
-
-    The result and envelope signals precede the truncated raw output so the
-    CLI's explanation survives truncation.
-    """
+    """Classify and raise a non-zero ``claude -p`` exit."""
     envelope = parse_envelope(output)
-    signals = envelope_signals(envelope) if envelope else ""
-    result = str(envelope.get("result") or "")[:200] if envelope else ""
-    prefix = " | ".join(part for part in (result, signals) if part)
-    prefix = f"{prefix} | " if prefix else ""
     subtype = envelope.get("subtype") if envelope else None
-    raw = (stderr or output)[:200]
-    if envelope:
-        raw = f"{output[:200]} | stderr: {stderr[:200]}" if stderr else output[:200]
+    detail = (
+        envelope_failure_detail(envelope, output, stderr) if envelope
+        else (stderr or output)[:200]
+    )
     raise classify_cc_error(
         f"{output} {stderr} subtype={subtype}",
-        f"claude -p failed (rc={returncode}): {prefix}{raw}",
+        f"claude -p failed (rc={returncode}): {detail}",
         envelope,
     )

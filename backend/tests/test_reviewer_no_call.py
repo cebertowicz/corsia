@@ -32,15 +32,21 @@ def test_no_call_envelope_is_unavailable_and_contains_result(returncode):
     assert str(exc.value).index("specific CLI refusal") < str(exc.value).index("subtype=")
 
 
-def test_envelope_detail_keeps_raw_output_and_stderr():
-    with pytest.raises(CCUnavailableError) as exc:
-        raise_cli_failure(1, envelope(), "diagnostic")
+@pytest.mark.parametrize("returncode", [0, 1])
+def test_envelope_detail_keeps_raw_output_and_stderr(returncode):
+    from reviewer.reviewer_backends import invoke_cc_subagent
+
+    proc = MagicMock(returncode=returncode, stdout=envelope(), stderr="diagnostic")
+    with patch("reviewer.reviewer_backends._run_write_confined", return_value=proc):
+        with pytest.raises(CCUnavailableError) as exc:
+            invoke_cc_subagent("p", "/tmp", model="opus", source_git_dir="/tmp/repo.git",
+                               base_sha="b" * 40, head_sha="a" * 40, env={})
     assert '"is_error"' in str(exc.value)
     assert str(exc.value).index("specific CLI refusal") < str(exc.value).index('"is_error"')
     assert "stderr: diagnostic" in str(exc.value)
 
 
-@pytest.mark.parametrize("usage", [None, {}])
+@pytest.mark.parametrize("usage", [None, {}, {"input_tokens": None}])
 def test_no_call_with_absent_input_tokens_is_unavailable(usage):
     with pytest.raises(CCUnavailableError):
         raise_cli_failure(1, envelope(usage=usage), "")
