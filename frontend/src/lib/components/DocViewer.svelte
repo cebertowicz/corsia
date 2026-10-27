@@ -12,17 +12,22 @@
 	import { commentDraft, commentDraftScope, discardCommentDraft, setCommentBody } from '$lib/stores/commentDraft';
 	import { createViewerCommentDraft } from '$lib/docViewerCommentDraft.svelte';
 	import { createCommentScrollTarget } from '$lib/docViewerScrollTarget.svelte';
+	import { createReplyLanding } from '$lib/docReplyLanding.svelte';
 	import { createDocViewerImages, type DocumentImageRequest } from '$lib/docViewerImages';
 	import { projects } from '$lib/stores/projects';
 	import { paneOpen, isPaneDrawer } from '$lib/stores/paneOpen';
-	import { docOpenRefusal, ImageFileError, type DocOpenRefusal } from '$lib/docOpenRefusal';
+	import type { DocOpenRefusal } from '$lib/docOpenRefusal';
+	import { handleViewerFailure } from '$lib/docViewerFailure';
+	import { applyDocumentContent } from '$lib/docViewerApplyContent';
+	import { bindViewerSession, reopenOnReconnect } from '$lib/docViewerLiveBinding.svelte';
+	import { bindViewerDraft } from '$lib/docViewerDraftBinding.svelte';
 	import type { DocumentFreshness } from '$lib/docFreshness';
 	import { createCommentRetryToast, createThreadActions, prepareDocumentReload, reloadDocumentFeedback, teardownDocumentViewer, verifyAndApplyDocumentFreshness } from '$lib/docViewerOperations';
 	import { handleDocumentKey } from '$lib/docViewerKeyboard';
 	import { acceptAllOpen, openSuggestionCount } from '$lib/docAcceptAll';
 	import { createCommentSurfaceState, focusDocumentEditor } from '$lib/docCommentSurfaceState.svelte';
 	import { railWidth } from '$lib/cm/comment-clusters';
-	import { awaitsFirstMark, canvasCommentHighlights, commentSurfaceStatus, commentsInDocumentOrder } from '$lib/docCanvasComments';
+	import { awaitsFirstMark, canvasCommentHighlights, canvasCommentScrollTarget, commentSurfaceStatus, commentsInDocumentOrder } from '$lib/docCanvasComments';
 	import { loadViewerContent, openFromDraft, type ViewerContent } from '$lib/docViewerLoading';
 	import { liveDocumentBindings } from '$lib/stores/liveDocuments';
 	import { connectionState } from '$lib/stores/connection';
@@ -31,11 +36,12 @@
 	import type { DocViewerTarget } from '$lib/docViewerTarget';
 	import type { TabLoadSignal } from '$lib/artifactTabs';
 	import {
-		withDraftArtifactId, existingDraft, seedDraft,
-		enrichDraftTarget, setDraftText, flushDraft,
+		withDraftArtifactId, existingDraft,
+		flushDraft,
 	} from '$lib/stores/docSaveQueue';
 	import { createDocSaveState } from '$lib/docViewerSaveState.svelte';
 	import { liveConnectionDescriptionId } from '$lib/liveConnectionDescription';
+	import { reload as reloadAttentionQueue } from '$lib/stores/attentionDock.svelte';
 	import DocCommentSurface from './DocCommentSurface.svelte';
 	import DocViewerEditorSurface from './DocViewerEditorSurface.svelte';
 	import DocPresenceStatus from './DocPresenceStatus.svelte';
@@ -49,6 +55,7 @@
 
 	type DocState = 'loading' | 'ready' | 'error';
 
+
 	let {
 		target,
 		onClose = () => {},
@@ -59,6 +66,7 @@
 		onOpenImage,
 		onDocumentPlace,
 		covered = false,
+		onLanded,
 	}: {
 		target: DocViewerTarget | null;
 		onClose?: () => void;
@@ -73,6 +81,8 @@
 		onDocumentPlace?: (instanceId: string, place: { from: number; top: number; scrollTop: number }) => void;
 		/** The canvas shows an image viewer over this document; it keeps its state but answers no keys. */
 		covered?: boolean;
+		/** The tab's reply landing was acted on, or had no readable replies; the tab drops it. */
+		onLanded?: () => void;
 	} = $props();
 
 	let docState = $state<DocState>('loading');
@@ -94,15 +104,12 @@
 	let liveConnection = $state<LiveDocumentSession['connection'] | null>(null);
 	let liveGeneration = $state(0);
 	let legacyAwaitingSave = $state(false);
-	$effect(() => {
-		const session = liveSession;
-		if (!session) { liveConnection = null; return; }
-		return session.subscribe(state => {
-			editText = state.text.toString();
-			readonly = !state.writable;
-			liveConnection = state.connection;
-			liveGeneration = state.textGeneration;
-		});
+	bindViewerSession(() => liveSession, (state) => {
+		if (!state) { liveConnection = null; return; }
+		editText = state.text.toString();
+		readonly = !state.writable;
+		liveConnection = state.connection;
+		liveGeneration = state.textGeneration;
 	});
 
 	const commentRetryToast = createCommentRetryToast(toasts);
@@ -115,11 +122,15 @@
 
 	const listedComments = $derived(commentsInDocumentOrder(loadedArtifactId ? ($docComments[loadedArtifactId] ?? []) : [], editText, loadedArtifactId ? $suggestionRefusals[loadedArtifactId] : undefined));
 	const commentStatus = $derived(commentSurfaceStatus(listedComments));
+	const unreadThreads = $derived(listedComments.filter((comment) => (comment.newReplyIds?.length ?? 0) > 0));
+	const firstUnreadThread = $derived(unreadThreads[0] ?? null);
+	const firstUnreadTarget = $derived(firstUnreadThread ? canvasCommentScrollTarget(listedComments, editText, firstUnreadThread.id, false, 'quote-tap') : null);
 	const scroll = createCommentScrollTarget({
 		focused: () => focusedComment, comments: () => listedComments, text: () => editText, listOpen: () => commentUI.state?.kind === 'list',
 	});
 	let docRoot = $state<HTMLElement>();
 	let editorSurface = $state<ReturnType<typeof DocViewerEditorSurface>>();
+
 	const commentUI = createCommentSurfaceState(() => focusDocumentEditor(docRoot), () => targetKey);
 	const shownFocus = $derived(commentUI.hovered ?? focusedComment);
 	const highlights = $derived(canvasCommentHighlights(listedComments, editText, shownFocus, focusMarker, suggestionBusyId));
@@ -142,6 +153,16 @@
 	/** The comments of the image shown over this document, bound to it as it is now: an image's host rebuilds them when it shows one. */
 	export function imageComments() { return images.comments(); }
 	function focusInText(id: string, placement?: 'top') { scroll.toComment(id, commentUI.state?.kind === 'list', placement === 'top' ? 'quote-tap' : 'navigation'); focusedDocComment.set(id); }
+	createReplyLanding({
+		target: () => target,
+		ready: () => !!loadedArtifactId && $commentLoads[loadedArtifactId]?.state === 'ready' && docState === 'ready',
+		first: () => firstUnreadThread, landing: () => firstUnreadTarget,
+		open: (first, landing) => {
+			if (first && landing) { scroll.value = landing; focusedDocComment.set(first.id); }
+			commentUI.state = { kind: 'list' };
+			onLanded?.();
+		},
+	});
 	// A card for a comment on part of an image opens the image at its tag; any other card goes to its text.
 	function focusFromCard(id: string, placement?: 'top') { images.openOr([id], { id }, () => focusInText(id, placement)); }
 
@@ -173,41 +194,27 @@
 
 	let prevTarget: DocViewerTarget | null = null;
 	let reloadNonce = $state(0);
-	let wasConnected = false;
+
 	export function reload() {
 		if (liveSession) reloadDocumentFeedback(loadedArtifactId, undefined, () => loadSeq, feedbackStatus);
 		else reloadNonce += 1;
 	}
 
 	let loadSeq = 0;
-	// Feedback loads share the comment store; each call only decides whether this tab may apply its result.
-	// The freshness state remains here; the verifier performs only the API transition.
 	function applyViewerContent(d: DocViewerTarget, content: ViewerContent, seq: number): void {
-		if (seq !== loadSeq) return;
-		seedDraft(d, content.text, content.revision);
-		if (content.artifactId && !d.artifactId) enrichDraftTarget(d, content.artifactId);
-		editText = content.text;
-		loadedArtifactId = content.artifactId;
-		readonly = !content.writable;
-		confirming = false;
-		freshness = content.freshness;
-		const shown = docState === 'ready';
-		docState = 'ready';
-		legacyAwaitingSave = !content.live && Boolean(existingDraft(d)?.editText !== existingDraft(d)?.savedText);
-		onSignal?.({ status: 'ready', artifactId: content.artifactId, revision: content.revision, writable: content.writable, shown, instanceId: d.instanceId });
-		reloadDocumentFeedback(content.artifactId, seq, () => loadSeq, feedbackStatus);
+		applyDocumentContent(d, content, seq, { loadSeq: () => loadSeq, shown: () => docState === 'ready', signal: onSignal,
+			feedback: () => feedbackStatus, apply: (value, awaiting) => {
+				editText = value.text; loadedArtifactId = value.artifactId; readonly = !value.writable; confirming = false;
+				freshness = value.freshness; docState = 'ready'; legacyAwaitingSave = awaiting;
+			},
+		});
 	}
 	$effect(() => {
 		if (!legacyAwaitingSave || !save.draft || save.draft.status !== 'saved') return;
 		legacyAwaitingSave = false;
 		reloadNonce += 1;
 	});
-	$effect(() => {
-		const connected = $connectionState === 'connected';
-		const shouldReopen = connected && !wasConnected && openRefusal?.code === 'not_connected';
-		wasConnected = connected;
-		if (shouldReopen) reloadNonce += 1;
-	});
+	reopenOnReconnect(() => $connectionState === 'connected', () => openRefusal?.code === 'not_connected', () => { reloadNonce += 1; });
 	function onPrepareCleanReload(): Promise<(() => void) | null> {
 		const d = target;
 		if (!d || liveSession) return Promise.resolve(null);
@@ -258,30 +265,17 @@
 			})
 				.catch((e) => {
 					if (seq !== loadSeq) return;
-					// A tab opened before the backend's type was known: the leaf swaps it to the image viewer.
-					if (e instanceof ImageFileError) { signal({ status: 'loading', renderer: 'image' }); return; }
-					openRefusal = docOpenRefusal(e);
-					loadError = e instanceof Error ? e.message : String(e);
-					docState = openRefusal || opened.unsaved ? 'ready' : 'error';
-					if (opened.text !== null) editText = opened.text;
-					readonly = Boolean(openRefusal);
-					confirming = false;
-					// A 404 means the document is gone, which the tab shows as its
-					// explicit unavailable state rather than a raw load error.
-					signal({ status: /(^|\s)404(\s|$)/.test(loadError) ? 'unavailable' : 'error' });
+					handleViewerFailure(e, opened, { signal, reloadAttention: () => { void reloadAttentionQueue(); },
+						fail: (failure) => { openRefusal = failure.refusal; loadError = failure.message; docState = failure.state;
+							if (failure.text !== null) editText = failure.text; readonly = failure.readonly; confirming = false; },
+					});
 				});
 		});
 	});
 
-	$effect(() => {
-		const text = editText;
-		if (docState !== 'ready' || !target || readonly || confirming || openRefusal) return;
-		setDraftText(target, text);
-	});
-
-	function flushNow() {
-		if (target && !readonly && !confirming) void flushDraft(target);
-	}
+	const flushNow = bindViewerDraft({ target: () => target, text: () => editText,
+		canEdit: () => docState === 'ready' && !readonly && !confirming && !openRefusal,
+		canFlush: () => !readonly && !confirming });
 
 	onDestroy(() => teardownDocumentViewer(target, flushNow, releaseDocEditor));
 
@@ -308,6 +302,7 @@
 		stale={stale && !liveSession}
 		readonly={readonly && !confirming && !openRefusal}
 		commentCount={commentStatus.commentCount}
+		unreadCount={unreadThreads.length}
 		orphanedCount={commentStatus.orphanedCount}
 		artifactId={loadedArtifactId}
 		viewingThreadId={target?.threadId ?? null}
@@ -340,6 +335,8 @@
 		bind:this={editorSurface}
 		{docState}
 		{loadError}
+		documentName={target?.name ?? 'this document'}
+		onRetry={() => reloadNonce += 1}
 		bind:value={editText}
 		liveText={liveSession?.text ?? null} typingAllowed={liveConnection === 'connected'} previews={liveSession ?? null}
 		{highlights}

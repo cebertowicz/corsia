@@ -51,6 +51,7 @@ export const visibleQueue = derived([queue, answers], ([$queue, $answers]) => {
     current: items[0] ?? null,
     count: Math.max(0, $queue.count - hidden),
     items,
+    reply_items: $queue.reply_items,
   } satisfies AttentionQueue;
 });
 

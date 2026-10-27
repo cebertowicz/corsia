@@ -5,7 +5,7 @@ from __future__ import annotations
 from core.correction_owner import attribution
 from core.corrections_recording import (
     CORRECTION_EVENT, LABEL_CORRECTION, SENT_BACK_SUBJECT_PREFIX,
-    SOURCE_KIND_SELF_CAUGHT, subject_key,
+    SOURCE_KIND_SELF_CAUGHT, SOURCE_KIND_SENT_BACK, self_caught_dedupe_key, subject_key,
 )
 
 
@@ -26,9 +26,10 @@ def record_self_caught_correction(db, event_id: str) -> bool:
              JOIN plan_nodes n ON n.id=r.node_id
              JOIN outcome_events f ON f.subject_key=? || r.id
             WHERE r.event='review_rejected' AND f.event_name=? AND f.retracted_at IS NULL
-              AND json_extract(f.attributes,'$.source_kind')='sent_back'
+              AND json_extract(f.attributes,'$.source_kind')=? AND r.created_at<=?
               AND (n.id=? OR (? IS NOT NULL AND n.commitment_id=?)) LIMIT 1""",
-        (SENT_BACK_SUBJECT_PREFIX, CORRECTION_EVENT, row["follow_up_of"],
+        (SENT_BACK_SUBJECT_PREFIX, CORRECTION_EVENT, SOURCE_KIND_SENT_BACK, row["created_at"],
+         row["follow_up_of"],
          row["commitment_id"], row["commitment_id"]),
     ).fetchone()
     if duplicate:
@@ -39,7 +40,7 @@ def record_self_caught_correction(db, event_id: str) -> bool:
     if thread_id is not None:
         attributes["thread_id"] = thread_id
     result = record_outcome_event(
-        db, dedupe_key=f"correction:{SOURCE_KIND_SELF_CAUGHT}:{event_id}",
+        db, dedupe_key=self_caught_dedupe_key(event_id),
         event_name=CORRECTION_EVENT, source="corsia", provenance="observed",
         ts=str(row["created_at"]), subject_key=subject_key(SOURCE_KIND_SELF_CAUGHT, event_id),
         project_id=None if project_id is None else str(project_id),

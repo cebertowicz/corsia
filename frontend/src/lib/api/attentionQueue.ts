@@ -72,6 +72,30 @@ export interface ExternalReviewDetail {
 	source: AttentionSource | null;
 }
 
+/** A dock hand-off. Comment replies also name the file needed by the artifact tab. */
+export interface AttentionDestination {
+	version?: number;
+	pane: string;
+	id: string;
+	path?: string;
+	title?: string;
+}
+
+export interface CommentReplyDetail {
+	id: string;
+	title: string;
+	unread_count: number;
+	newest_at: string;
+	destination: AttentionDestination;
+	source: { thread_id: string; thread_label: string };
+}
+
+export interface CommentReplyItem {
+	external_id: string;
+	renderer: 'comment-reply';
+	detail: CommentReplyDetail;
+}
+
 export interface AttentionQueueItem {
 	external_id: string;
 	renderer: AttentionRenderer;
@@ -85,6 +109,8 @@ export interface AttentionQueue {
 	count: number;
 	/** The same order, capped; `items[0]` is `current`. */
 	items: AttentionQueueItem[];
+	/** Passive replies are separate from the capped Needs-you queue. */
+	reply_items?: CommentReplyItem[];
 }
 
 /** The backend supplies the item list; it is not reconstructed client-side. */
@@ -92,6 +118,7 @@ interface AttentionQueueResponse {
 	current?: AttentionQueueItem | null;
 	count?: number;
 	items: AttentionQueueItem[];
+	reply_items?: CommentReplyItem[];
 }
 
 /** The reserved answer id for free-form text (PRD-PLANS E4: never strand). */
@@ -131,6 +158,7 @@ export async function fetchAttentionQueue(bearer: string): Promise<AttentionQueu
 		current,
 		count: data.count ?? 0,
 		items: data.items,
+		reply_items: data.reply_items,
 	};
 }
 

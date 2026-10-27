@@ -100,7 +100,7 @@ async def test_comment_only_sends_validate_before_storage(thread_rows, monkeypat
     else:
         assert stored is None
         assert events[0]["message"] == (
-            "Comment 1 couldn't be matched to text in this chat, so nothing was sent. "
+            "Comment 1 couldn’t be matched to text in this chat, so nothing was sent. "
             "Your message and comments are kept: remove that comment and send again."
         )
 
@@ -115,6 +115,6 @@ def test_a_refused_comment_send_names_the_comments_and_the_next_step(positions, 
     from infra.reply_context import RejectedComments
 
     assert str(RejectedComments(positions)) == (
-        f"{which} couldn't be matched to text in this chat, so nothing was sent. "
+        f"{which} couldn’t be matched to text in this chat, so nothing was sent. "
         f"Your message and comments are kept: remove {them} and send again."
     )

@@ -197,6 +197,11 @@ def sent_back_dedupe_key(rejection_event_id: str) -> str:
     return f"correction:{SOURCE_KIND_SENT_BACK}:{rejection_event_id}"
 
 
+def self_caught_dedupe_key(correction_event_id: str) -> str:
+    """The idempotency key for a self-caught correction event."""
+    return f"correction:{SOURCE_KIND_SELF_CAUGHT}:{correction_event_id}"
+
+
 def decision_answer_source_id(decision_id: str, revision: object) -> str:
     """The stable source id for one answered revision of a plan decision."""
     return f"{decision_id}:{revision}"

@@ -101,6 +101,47 @@ def list_for_artifact(artifact_id: str, *, db=None) -> list[dict]:
             _db.close()
 
 
+def _check_existing_identity(row: dict, artifact_id: str, author: str, cid: str) -> None:
+    if row["artifact_id"] != artifact_id:
+        raise CrossArtifactIdError(
+            f"client_id '{cid}' belongs to artifact '{row['artifact_id']}', not '{artifact_id}'"
+        )
+    if row["author"] != author:
+        raise CrossArtifactIdError(
+            f"client_id '{cid}' was created by author '{row['author']}', not '{author}'"
+        )
+
+
+_ACCEPTED_INSERTION = {"insert_after": 1, "decision": "accepted"}
+
+
+def is_accepted_insertion(row: dict) -> bool:
+    """One predicate for accepted insertion siblings in single and batch decisions."""
+    return all(row.get(field) == value for field, value in _ACCEPTED_INSERTION.items())
+
+
+def accepted_insertions(artifact_id: str, anchor_text: str, *, db) -> list[dict]:
+    """Accepted insertion siblings for the same artifact and quoted text."""
+    predicate = " AND ".join(f"{field}=?" for field in _ACCEPTED_INSERTION)
+    return [dict(row) for row in db.execute(
+        "SELECT * FROM doc_comments WHERE artifact_id=? AND anchor_text=? AND "
+        + predicate + " ORDER BY created_at, id",
+        (artifact_id, anchor_text, *_ACCEPTED_INSERTION.values()),
+    ).fetchall()]
+
+
+def _next_region_number(connection, cid: str, artifact_id: str, image_src: str | None, region) -> int | None:
+    if region is None or connection.execute(
+        "SELECT 1 FROM doc_comments WHERE id=?", (cid,)
+    ).fetchone() is not None:
+        return None
+    return connection.execute(
+        """SELECT COALESCE(MAX(region_number), 0) + 1 FROM doc_comments
+           WHERE artifact_id=? AND COALESCE(image_src, '')=COALESCE(?, '')""",
+        (artifact_id, image_src),
+    ).fetchone()[0]
+
+
 def create_with_status(
     artifact_id: str,
     *,
@@ -116,6 +157,7 @@ def create_with_status(
     anchor_suffix: str | None = None,
     review: bool = False,
     replacement: str | None = None,
+    insert_after: bool = False,
     client_id: str | None = None,
     region: tuple[float, float, float, float] | None = None,
     image_rev: str | None = None,
@@ -132,27 +174,19 @@ def create_with_status(
     now = _now()
     x, y, w, h = region if region is not None else (None, None, None, None)
     with write_transaction(db, scope="create_doc_comment") as connection:
-        number = None
-        if region is not None and connection.execute(
-            "SELECT 1 FROM doc_comments WHERE id=?", (cid,)
-        ).fetchone() is None:
-            number = connection.execute(
-                """SELECT COALESCE(MAX(region_number), 0) + 1 FROM doc_comments
-                   WHERE artifact_id=? AND COALESCE(image_src, '')=COALESCE(?, '')""",
-                (artifact_id, image_src),
-            ).fetchone()[0]
+        number = _next_region_number(connection, cid, artifact_id, image_src, region)
         inserted = connection.execute(
             """INSERT INTO doc_comments
                (id, artifact_id, parent_id, author, author_kind, author_thread_id,
                 body, anchor_text, from_off, to_off, anchor_prefix, anchor_suffix,
-                review, resolved, acked, replacement, created_at, updated_at,
+                review, resolved, acked, replacement, insert_after, created_at, updated_at,
                 region_x, region_y, region_w, region_h, region_number, image_rev, image_src)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,0,0,?,?,?,?,?,?,?,?,?,?)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,0,0,?,?,?,?,?,?,?,?,?,?,?)
                ON CONFLICT(id) DO NOTHING""",
             (
                 cid, artifact_id, _thread_root_id(connection, parent_id), author, author_kind, author_thread_id,
                 body, anchor_text, from_off, to_off, anchor_prefix, anchor_suffix,
-                1 if review else 0, replacement, now, now,
+                1 if review else 0, replacement, int(insert_after), now, now,
                 x, y, w, h, number, image_rev, image_src,
             ),
         )
@@ -160,16 +194,7 @@ def create_with_status(
             "SELECT * FROM doc_comments WHERE id=?", (cid,)
         ).fetchone()
         r = dict(row)
-        if r["artifact_id"] != artifact_id:
-            raise CrossArtifactIdError(
-                f"client_id '{cid}' belongs to artifact '{r['artifact_id']}', "
-                f"not '{artifact_id}'"
-            )
-        if r["author"] != author:
-            raise CrossArtifactIdError(
-                f"client_id '{cid}' was created by author '{r['author']}', "
-                f"not '{author}'"
-            )
+        _check_existing_identity(r, artifact_id, author, cid)
         created = inserted.rowcount == 1
         if created:
             # Only a new top-level agent comment names itself; replies, suggestions and user comments do not.
@@ -177,7 +202,8 @@ def create_with_status(
             if announce:  # a person's comment is announced by its delivery instead
                 comment_notifications.announce_after_commit(
                     connection, artifact_id, comment_id=cid if named else None,
-                    author_thread_id=author_thread_id if named else None)
+                    author_thread_id=author_thread_id if named else None,
+                    reply_attention_changed=bool(author_kind == 'agent' and parent_id))
             if region is not None:
                 live_events.region_after_commit(connection, "placed", artifact_id, w, h, author_kind=author_kind)
         return r, created
@@ -216,7 +242,10 @@ def update(comment_id: str, fields: dict[str, Any], *, db=None) -> dict | None:
         row = dict(connection.execute("SELECT * FROM doc_comments WHERE id=?", (comment_id,)).fetchone())
         if "region_x" in fields:
             live_events.region_after_commit(connection, "moved", row["artifact_id"], row["region_w"], row["region_h"])
-        comment_notifications.announce_after_commit(connection, row["artifact_id"])
+        comment_notifications.announce_after_commit(
+            connection, row["artifact_id"],
+            reply_attention_changed="resolved" in fields and row["parent_id"] is None,
+        )
         return row
 
 

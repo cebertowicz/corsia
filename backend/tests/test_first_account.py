@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import io
 import os
+import re
 import sqlite3
 import sys
 from contextlib import contextmanager
@@ -78,7 +79,10 @@ def _own_data(owner: str) -> None:
 
 def _assert_nothing_left(response, workspace: Path, before: tuple[int, int, int], caplog) -> None:
     assert response.status_code == 500
-    assert response.json() == {"code": "setup_failed", "detail": "Your account was not created. Try again."}
+    body = response.json()
+    assert body == {"code": "setup_failed", "detail": "Your account was not created. Try again.", "ref": body["ref"]}
+    assert re.fullmatch(r"[0-9ABCDEFGHJKMNPQRSTVWXYZ]{6}", body["ref"])
+    assert caplog.text.count(body["ref"]) == 1
     assert _state() == before
     folder = _profile(workspace).parent
     assert not folder.exists() or list(folder.iterdir()) == []

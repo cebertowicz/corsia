@@ -73,7 +73,7 @@ JOIN threads t ON t.id=a.thread_id AND t.user_id=?
 JOIN messages u ON u.id=a.user_message_id AND u.thread_id=a.thread_id
 JOIN messages m ON m.id=a.assistant_message_id AND m.thread_id=a.thread_id
 LEFT JOIN chat_comment_views v ON v.user_id=? AND v.user_message_id=a.user_message_id AND v.cid=a.cid
-WHERE a.thread_id=? AND v.user_id IS NULL
+WHERE a.thread_id=? AND (v.user_id IS NULL OR v.seen_at < a.answered_at)
 ORDER BY a.answered_at
 LIMIT ?"""
 

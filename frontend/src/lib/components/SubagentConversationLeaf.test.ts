@@ -228,7 +228,7 @@ describe('SubagentConversationLeaf', () => {
 		await vi.waitFor(() => expect(wsMocks.sendMessage).toHaveBeenCalledOnce());
 		// The send carries the worker's own model (none loaded here), never the open thread's.
 		expect(wsMocks.sendMessage).toHaveBeenCalledWith(
-			'child-3', 'hello from the leaf', undefined, [], undefined,
+			'child-3', 'hello from the leaf', undefined, [], undefined, 'apply_now', [],
 		);
 	});
 

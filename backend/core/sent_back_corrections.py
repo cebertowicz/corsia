@@ -8,6 +8,7 @@ rejection's own transaction, so a rejection and its fact stand or fall together.
 
 from __future__ import annotations
 
+from core.correction_owner import attribution
 from core.corrections_recording import (
     CORRECTION_EVENT,
     LABEL_CORRECTION,
@@ -15,9 +16,6 @@ from core.corrections_recording import (
     sent_back_dedupe_key,
     subject_key,
 )
-
-
-from core.correction_owner import attribution
 
 
 def record_rejection_correction(db, rejection_event_id: str) -> bool:

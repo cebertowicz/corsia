@@ -1,10 +1,10 @@
-"""Schema 149 -> 150: backfill thread-authored plan correction facts."""
+"""Schema 150 -> 151: backfill thread-authored plan correction facts."""
 from __future__ import annotations
 
 import sqlite3
 
 
-def migrate_149_to_150(conn: sqlite3.Connection) -> None:
+def migrate_150_to_151(conn: sqlite3.Connection) -> None:
     """Replay historical correction events through the transactional writer."""
     from core.self_caught_corrections import record_self_caught_correction
 

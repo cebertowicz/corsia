@@ -67,23 +67,24 @@ def _seed_event(db, *, actor="owner"):
 
 
 def test_migration_replays_once_and_ignores_non_thread_actor(db):
-    from infra.migration_149_to_150_self_caught_corrections import migrate_149_to_150
+    from infra.migration_150_to_151_self_caught_corrections import migrate_150_to_151
 
     _, event = _seed_event(db, actor="worker")
     _seed_event(db, actor="person")
-    migrate_149_to_150(db)
-    migrate_149_to_150(db)
+    migrate_150_to_151(db)
+    migrate_150_to_151(db)
     facts = db.execute("SELECT subject_key, agent_thread_id FROM outcome_events").fetchall()
     assert len(facts) == 1
     assert facts[0][0] == f"plan-correction-created:{event}"
     assert facts[0][1] == "owner"
 
 
-def test_sent_back_on_same_node_or_commitment_suppresses_self_caught(db):
+def test_sent_back_on_same_node_or_commitment_suppresses_self_caught(db, monkeypatch):
     from core.self_caught_corrections import record_self_caught_correction
     from core.sent_back_corrections import record_rejection_correction
 
     source, event = _seed_event(db)
+    monkeypatch.setattr(service, "_now", lambda: "2000-01-01T00:00:00+00:00")
     rejection = service._event(db, source.id, "review_rejected", actor_id="owner", provenance="test")
     assert record_rejection_correction(db, rejection)
     assert not record_self_caught_correction(db, event)
@@ -103,16 +104,41 @@ def test_non_sent_back_fact_on_rejection_subject_does_not_suppress(db):
     assert record_self_caught_correction(db, event)
 
 
-def test_sent_back_on_another_node_of_the_commitment_suppresses(db):
+def test_sent_back_on_another_node_of_the_commitment_suppresses(db, monkeypatch):
     from core.self_caught_corrections import record_self_caught_correction
     from core.sent_back_corrections import record_rejection_correction
 
     source, event = _seed_event(db)
     other = _task(db, source.plan_id, "Another node")
     db.execute("UPDATE plan_nodes SET commitment_id=? WHERE id=?", (source.commitment_id, other.id))
+    monkeypatch.setattr(service, "_now", lambda: "2000-01-01T00:00:00+00:00")
     rejection = service._event(db, other.id, "review_rejected", actor_id="owner", provenance="test")
     assert record_rejection_correction(db, rejection)
     assert not record_self_caught_correction(db, event)
+
+
+@pytest.mark.parametrize("rejection_first", [True, False])
+def test_backfill_matches_live_event_order(db, rejection_first, monkeypatch):
+    from core.self_caught_corrections import record_self_caught_correction
+    from core.sent_back_corrections import record_rejection_correction
+    from infra.migration_150_to_151_self_caught_corrections import migrate_150_to_151
+
+    early, late = "2000-01-01T00:00:00+00:00", "2000-01-02T00:00:00+00:00"
+    monkeypatch.setattr(service, "_now", lambda: late if rejection_first else early)
+    source, correction = _seed_event(db)
+    monkeypatch.setattr(service, "_now", lambda: early if rejection_first else late)
+    rejection = service._event(db, source.id, "review_rejected", actor_id="owner", provenance="test")
+    if rejection_first:
+        record_rejection_correction(db, rejection)
+        record_self_caught_correction(db, correction)
+    else:
+        record_self_caught_correction(db, correction)
+        record_rejection_correction(db, rejection)
+    live = {row[0] for row in db.execute("SELECT subject_key FROM outcome_events")}
+    assert len(live) == (1 if rejection_first else 2)
+    db.execute("DELETE FROM outcome_events WHERE subject_key LIKE 'plan-correction-created:%'")
+    migrate_150_to_151(db)
+    assert {row[0] for row in db.execute("SELECT subject_key FROM outcome_events")} == live
 
 
 def test_self_caught_is_not_a_person_correction(db):
@@ -131,7 +157,7 @@ def test_startup_migration_backfills_and_runs_only_once(db):
     from infra.schema import SCHEMA_VERSION
 
     _, event = _seed_event(db)
-    db.execute("PRAGMA user_version=149")
+    db.execute("PRAGMA user_version=150")
     db.commit()
     assert migrate_to_current(db, SCHEMA_VERSION).migrated
     assert db.execute("SELECT subject_key FROM outcome_events").fetchone()[0] == (
@@ -146,7 +172,7 @@ def test_migration_failure_rolls_back_through_real_runner(db, monkeypatch):
     from infra.schema import SCHEMA_VERSION
 
     _seed_event(db)
-    db.execute("PRAGMA user_version=149")
+    db.execute("PRAGMA user_version=150")
     db.commit()
     before = list(db.iterdump())
     from core import self_caught_corrections
@@ -160,4 +186,4 @@ def test_migration_failure_rolls_back_through_real_runner(db, monkeypatch):
     with pytest.raises(MigrationError, match="injected failure"):
         migrate_to_current(db, SCHEMA_VERSION)
     assert list(db.iterdump()) == before
-    assert db.execute("PRAGMA user_version").fetchone()[0] == 149
+    assert db.execute("PRAGMA user_version").fetchone()[0] == 150

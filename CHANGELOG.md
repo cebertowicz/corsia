@@ -7,7 +7,9 @@ the later entry describes the current behavior.
 
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here._
 
+- Agents can suggest individual additions to a document without replacing the text they follow.
 - On a local model, if Google setup stops partway, CORSIA asks the rest of the setup questions first and comes back to Google at the end.
+- Agent replies to your document comments now show as one notice above the message box until you read them.
 - Select text in chat to add comments to your next message.
 - When connecting to another computer, CORSIA explains what happens and lets you return to this computer from sign-in.
 - First-chat setup reads more clearly and at your pace: a decision card waits until you've had time to read what came before it, GitHub profiles are read through GitHub's public data, the import ends in one short line, the GitHub step is one message and one choice, and you sign up for the agents' GitHub account in your own browser.
