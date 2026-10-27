@@ -93,11 +93,12 @@ def test_sent_back_on_same_node_or_commitment_suppresses_self_caught(db, monkeyp
     assert record_self_caught_correction(db, event)
 
 
-def test_non_sent_back_fact_on_rejection_subject_does_not_suppress(db):
+def test_non_sent_back_fact_on_rejection_subject_does_not_suppress(db, monkeypatch):
     from core.self_caught_corrections import record_self_caught_correction
     from core.sent_back_corrections import record_rejection_correction
 
     source, event = _seed_event(db)
+    monkeypatch.setattr(service, "_now", lambda: "2000-01-01T00:00:00+00:00")
     rejection = service._event(db, source.id, "review_rejected", actor_id="owner", provenance="test")
     assert record_rejection_correction(db, rejection)
     db.execute("UPDATE outcome_events SET attributes=json_set(attributes,'$.source_kind','message')")
@@ -139,6 +140,17 @@ def test_backfill_matches_live_event_order(db, rejection_first, monkeypatch):
     db.execute("DELETE FROM outcome_events WHERE subject_key LIKE 'plan-correction-created:%'")
     migrate_150_to_151(db)
     assert {row[0] for row in db.execute("SELECT subject_key FROM outcome_events")} == live
+
+
+def test_sent_back_at_same_timestamp_suppresses(db, monkeypatch):
+    from core.self_caught_corrections import record_self_caught_correction
+    from core.sent_back_corrections import record_rejection_correction
+
+    monkeypatch.setattr(service, "_now", lambda: "2000-01-01T00:00:00+00:00")
+    source, correction = _seed_event(db)
+    rejection = service._event(db, source.id, "review_rejected", actor_id="owner", provenance="test")
+    assert record_rejection_correction(db, rejection)
+    assert not record_self_caught_correction(db, correction)
 
 
 def test_self_caught_is_not_a_person_correction(db):
