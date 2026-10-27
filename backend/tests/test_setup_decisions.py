@@ -246,7 +246,7 @@ def test_the_saved_email_is_read_from_the_workspace_profile(tmp_path, monkeypatc
 
 
 def test_web_search_works_runs_a_real_keyless_search_before_settling_setup(monkeypatch):
-    from tools.web_omlx_search import NO_SERVER, SERVER_STOPPED
+    from tools import web_keyless_search
     from tools.web_search_outcome import CHECK_QUERY, FAILED, KEY_REFUSED, WORKS, SearchOutcome
 
     seen: list[str] = []
@@ -260,10 +260,9 @@ def test_web_search_works_runs_a_real_keyless_search_before_settling_setup(monke
     monkeypatch.setattr("infra.key_store.resolve_builtin", lambda builtin: None)
     hit = SearchOutcome(WORKS, results=[{"title": "CORSIA", "url": "https://corsia.test"}])
     for keyless_result, works in ((hit, True), (SearchOutcome(WORKS), False),
-                                  (SearchOutcome(FAILED, "provider"), False),
-                                  (NO_SERVER, False), (SERVER_STOPPED, False)):
+                                  (SearchOutcome(FAILED, "provider"), False)):
         keyless = AsyncMock(return_value=keyless_result)
-        monkeypatch.setattr("tools.web_omlx_search.keyless_search", keyless)
+        monkeypatch.setattr(web_keyless_search, "keyless_search", keyless)
         assert asyncio.run(setup.web_search_works()) is works
         keyless.assert_awaited_once_with(CHECK_QUERY)
     assert setup.build_settlements(setup.Facts(web_search_works=True)) == [{
@@ -299,8 +298,12 @@ def test_one_key_resolver_serves_the_probe_and_web_search(isolated_db, tmp_path,
     asyncio.run(web.WebSearchTool().execute("q"))
     monkeypatch.setenv("BRAVE_API_KEY", "from-env")
     key_store.clear_value("web-search")
-    assert asyncio.run(setup.web_search_works()) is False
+    keyless = AsyncMock(return_value=SearchOutcome(WORKS, results=[{"title": "hit"}]))
+    monkeypatch.setattr("tools.web_keyless_search.keyless_search", keyless)
+    monkeypatch.setattr(web, "keyless_search", keyless)
+    assert asyncio.run(setup.web_search_works()) is True
     asyncio.run(web.WebSearchTool().execute("q"))
+    assert keyless.await_count == 2
 
     assert seen == ["from-store", "from-store"]
     assert not hasattr(web, "resolve_search_key")

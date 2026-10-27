@@ -57,7 +57,7 @@ def _completed_app_facts() -> dict:
     return {
         "first_run_path": "app", "harness_ready": [], "sources_missing": {},
         "agents_found": ["openclaw"], "local_download": {}, "tool_attempts": None,
-        "pays_for": [], "web_search_ready": False, "github_ready": False,
+        "pays_for": [], "web_search_ready": False, "web_search_key": False, "github_ready": False,
         "setup": {"setup_decisions": []}, "user_profile": {"name": None, "full_name": None},
         "connected_app_count": 0, "email_calendar_ready": False,
     }
@@ -459,7 +459,7 @@ async def test_app_facts_omit_bound_model_before_the_person_picks_one(monkeypatc
             "github_agent": {"state": "unavailable"},
         },
         "agents_found": ["openclaw"], "local_download": {}, "web_search_ready": False,
-        "setup_handoff": None, "setup_picks": None, "setup": {"setup_decisions": []},
+        "web_search_key": False, "setup_handoff": None, "setup_picks": None, "setup": {"setup_decisions": []},
         "user_profile": {"name": None, "full_name": None},
     }))
 

@@ -36,7 +36,7 @@ CORSIA already read what setup needs; it is in your first input under `## Setup 
 - `mcp_sources`: MCP servers in other apps, by `source` and `app`, each with `name` and `kind`.
 - `setup`: `setup_decisions` (each with its `task_title`) and `setup_task_settlements` (tasks CORSIA settles because nothing needs deciding).
 - `host_access_reviewer`: who reviews host access now.
-- `web_search_key`: whether a key is saved; test it in task 4.
+- `web_search_key`: whether a key is saved, for task 4's post.
 
 A fact marked `unavailable` names its read, made once when needed.
 
@@ -88,7 +88,7 @@ Done after that post.
 
 ## Task 4: Connect web search
 
-Objective: agents can look things up online; research and anything current depend on it. If `web_search_key` is true and one `web_search` call returns results, post `Web search already works: your agents can search the web.` and mark it done. Otherwise follow `references/web-search.md` exactly, in chat; there is no decision. Not now closes it: `You chose not now. Settings › Keys has it.`
+Objective: agents can look things up online; research and anything current depend on it. If one `web_search` call returns results, post `Web search already works: your agents can search the web.` plus `Searches go to Brave.` if `web_search_key` is true, else `Searches without a key go to free public sources such as DuckDuckGo, Yahoo and Wikipedia.`, and mark it done. Otherwise follow `references/web-search.md` exactly, in chat; there is no decision. Not now closes it: `You chose not now. Settings › Keys has it.`
 
 ## Task 5: Set up GitHub
 
