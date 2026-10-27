@@ -81,6 +81,55 @@ def test_codex_custom_account_homes_are_repointed_and_its_projection_is_left_to_
     assert str((new_runtime / "auth.json").readlink()) == str(old_source / "auth.json")
 
 
+@pytest.mark.parametrize("unexpected_link", [False, True])
+def test_moved_codex_projection_recovers_without_a_new_login(isolated_db, roots, unexpected_link):
+    from connections.account_evidence import readiness_reason
+    from connections.account_projection import ensure_projection, projection_gate
+    from connections.account_policy import AccountAdmissionError
+    from connections.account_receipts import ReceiptFence
+    from connections.vendor_accounts import get_account
+
+    legacy, current = roots
+    new_source, new_runtime = _make_homes(current, "x2")
+    (new_source / "auth.json").write_text("{}")
+    old_source = legacy / "runtime/vendor-accounts/x2/source"
+    old_runtime = legacy / "runtime/vendor-accounts/x2/runtime"
+    old_auth, old_dest = str(old_source / "auth.json"), str(old_runtime / "auth.json")
+    (new_runtime / "auth.json").symlink_to(old_auth)
+    entry = {"source": old_auth, "destination": old_dest, "home": str(old_runtime),
+             "kind": "live", "phase": "established", "account_revision": 0, "login_seq": 1,
+             "owner_turn_id": None, "owner_boot_epoch": None, "at": "t"}
+    failed = {"cause": "codex_auth_source_missing", "source": old_auth, "destination": old_dest,
+              "account_revision": 0, "login_seq": 1, "at": "t"}
+    record = {"auth_state": "known", "login_seq": 1, "login_revision": 0,
+              "discovery": {"status": "ready", "receipt": {"account_revision": 0, "login_seq": 1},
+                            "models": {"codex/test": {}}},
+              "auth_projection": {"failed": failed, "stale": [], "homes": {old_dest: entry}}}
+    _insert("x2", "codex", str(old_source), str(old_runtime), record)
+    db = get_db()
+    receipt = ReceiptFence("x2", 0, 1)
+    with pytest.raises(AccountAdmissionError, match="codex_auth_source_missing"):
+        projection_gate(receipt, db=db)
+    heal_moved_state_paths(legacy_root=legacy, state_root=current)
+    if unexpected_link:
+        (new_runtime / "auth.json").unlink()
+        (new_runtime / "auth.json").symlink_to(new_source / "unexpected.json")
+        with pytest.raises(AccountAdmissionError, match="codex_auth_projection_changed"):
+            ensure_projection(receipt, home=new_runtime, kind="live", db=db)
+        assert (new_runtime / "auth.json").readlink() == new_source / "unexpected.json"
+        return
+
+    ensure_projection(receipt, home=new_runtime, kind="live", db=db)
+
+    account = get_account("x2", db=db)
+    assert readiness_reason(account, model="codex/test") is None
+    projection = account["discovery"]["auth_projection"]
+    assert projection["failed"] is None
+    assert old_dest not in projection["homes"]
+    assert projection["homes"][str(new_runtime / "auth.json")]["source"] == str(new_source / "auth.json")
+    assert (new_runtime / "auth.json").readlink() == new_source / "auth.json"
+
+
 def test_missing_target_is_left_alone_and_logged(isolated_db, roots):
     legacy, current = roots
     old = legacy / "runtime/vendor-accounts/m1"

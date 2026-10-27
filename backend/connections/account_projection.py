@@ -74,10 +74,47 @@ def _fail(account, record, receipt, cause, source, destination, *, db):
     refresh_account_holds(account['id'], db=db)
 
 
+def _recover_moved_home(account, record, receipt, *, db):
+    projection = record['auth_projection']
+    failure = projection['failed']
+    current_source = Path(account['source_home']).absolute() / 'auth.json'
+    if not isinstance(failure, dict) or not failure.get('source') or (
+            failure.get('account_revision'), failure.get('login_seq')) != (
+            receipt.account_revision, receipt.login_seq) or failure['source'] == str(current_source):
+        return
+    old_source = Path(failure['source'])
+    runtime_home = account.get('runtime_home')
+    runtime = Path(runtime_home).absolute() if runtime_home else None
+    # Only translate the known sibling runtime, not arbitrary retained temporary homes.
+    if (runtime is not None and runtime.parent == current_source.parent.parent
+            and old_source.is_absolute() and old_source.name == 'auth.json'
+            and old_source.parent.name == current_source.parent.name):
+        old_runtime = old_source.parent.parent / runtime.name
+        old_destination = old_runtime / 'auth.json'
+        entry = projection['homes'].get(str(old_destination))
+        if entry and entry.get('source') == str(old_source) and entry.get('kind') == 'live' and (
+                entry.get('account_revision'), entry.get('login_seq')) == (
+                receipt.account_revision, receipt.login_seq):
+            moved_destination = runtime / 'auth.json'
+            state = _link_state(old_source, moved_destination)
+            if state == 'changed':
+                _fail(account, record, receipt, CHANGED, current_source, moved_destination, db=db)
+                return
+            if state == 'intact':
+                moved_destination.unlink()
+            del projection['homes'][str(old_destination)]
+    projection['failed'] = None
+    store_record(account['id'], record, db=db)
+    from connections.account_holds import refresh_account_holds
+
+    refresh_account_holds(account['id'], db=db)
+
+
 def projection_gate(receipt: ReceiptFence, *, db=None) -> None:
     """Account-wide gate before a caller even allocates a fresh temporary home."""
     with write_transaction(db, scope='account_projection_gate') as connection:
-        _, record = _current(receipt, db=connection)
+        account, record = _current(receipt, db=connection)
+        _recover_moved_home(account, record, receipt, db=connection)
         cause = _gate(record, receipt)
     if cause:
         raise AccountAdmissionError(cause)
