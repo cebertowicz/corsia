@@ -48,7 +48,8 @@ def turn(db, thread, identifier, paused=False):
 
 
 def node(db, plan, title, assignee="coordinator", state="accepted"):
-    row = service.add_node(plan, kind="task", title=title, acceptance_criteria="Synthetic proof", assignee=assignee, db=db)
+    # Outcome cards only: a person-step card would carry the seed's wall-clock time.
+    row = service.add_node(plan, kind="task", title=title, acceptance_criteria="Synthetic proof", assignee=assignee, db=db, person_step=False)
     if state != "pending":  # a new node already is pending; leave its revision alone
         service.touch_node(db, row.id, state=state)
     if state == "failed":
