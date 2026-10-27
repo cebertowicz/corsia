@@ -53,6 +53,7 @@ class BrowserSessionOwner:
         self._owner_lock = asyncio.Lock()
         self._sessions: dict[str, BrowserRuntime] = {}
         self._closed_leases: set[str] = set()
+        self._restart_notices: set[str] = set()
         self._shutting_down = False
         self._active_commands = self._queued_actions = 0
 
@@ -101,12 +102,14 @@ class BrowserSessionOwner:
                     raise BrowserSessionCleanupError("browser daemon exited without close acknowledgement")
                 if runtime.record.binding is None and not before.artifacts_absent:
                     raise BrowserSessionCleanupError("browser startup ownership is unresolved")
+                browser_session_commands.require_settled(runtime)
                 if runtime.record.binding is None and runtime.record.copy_of:
                     await launch.seed_copy(self, runtime)
                 started = True
                 launching = runtime.record.binding is None
                 if launching:
                     await launch.start_chrome(self, runtime)
+                args, capped_wait = browser_session_commands.cap_wait(args, timeout)
                 runtime.attempt_started_at = time.time()
                 runtime.attempt = CommandResult(-1, "", "", completion="unknown")
                 try:
@@ -117,19 +120,15 @@ class BrowserSessionOwner:
                     runtime.attempt = exc.result
                     raise
                 runtime.attempt = result
-                await self._observe_attempt(runtime)
-                # A wait only polls the page, so its timeout says nothing about the session:
-                # _observe_attempt proved the daemon alive and the client settled.
-                wait_timed_out = result.timed_out and args[0] == "wait"
-                unfinished = (result.timed_out or result.completion == "interrupted") and not wait_timed_out
-                if unfinished:
-                    runtime.record = replace(runtime.record, terminal_state="resetting")
-            if unfinished:
-                await self._close_runtime(runtime)
-            return result, unfinished
+                await self._observe_attempt(runtime, allow_unsettled=not launching and result.timed_out)
+                # A client timeout or interruption is not daemon death. The observed
+                # daemon remains responsible for any command still running in its queue.
+                if capped_wait and result.returncode == 0 and result.completion == "exited":
+                    result = replace(result, timed_out=True)
+            return result, False
         except asyncio.CancelledError:
             if started:
-                await asyncio.shield(self._close_one(runtime))
+                await browser_session_commands.preserve_cancelled(self, runtime)
             raise
         except BaseException as exc:
             if not started and (type(exc) is BrowserSessionError or
@@ -160,6 +159,7 @@ class BrowserSessionOwner:
                 if not resolved:
                     profile, notice = await launch.resolve_profile(thread_id)
                 shared, copy_of = launch.assign(self._sessions, profile, thread_id)
+                notice = browser_session_commands.restart_notice(self._restart_notices, thread_id, notice)
                 runtime = BrowserRuntime(BrowserSessionRecord(
                     thread_id, secrets.token_urlsafe(12), lease_id, bool(show_window),
                     profile=shared, copy_of=copy_of, profile_notice=notice))
@@ -224,7 +224,7 @@ class BrowserSessionOwner:
             runtime.record = replace(record, binding=observed.binding)
         return observed
 
-    async def _observe_attempt(self, runtime: BrowserRuntime) -> None:
+    async def _observe_attempt(self, runtime: BrowserRuntime, *, allow_unsettled: bool = False) -> None:
         assert runtime.attempt is not None
         runtime.attempt = runtime.attempt.settled()
         observed = await self._observe(runtime)
@@ -232,7 +232,7 @@ class BrowserSessionOwner:
                 and runtime.attempt.rejected_before_daemon()):
             await self._remove_runtime(runtime)
             return
-        if runtime.attempt.completion == "unknown":
+        if runtime.attempt.completion == "unknown" and not (allow_unsettled and observed.alive):
             raise BrowserSessionCleanupError("browser client settlement is unresolved")
         if not observed.alive:
             raise BrowserSessionCleanupError("browser startup or daemon exit is unresolved")
@@ -292,6 +292,8 @@ class BrowserSessionOwner:
                                     isinstance(exc, BrowserSessionCleanupError) and exc.recovery == "pending")
         pending = draining or any(task is not None and not task.done() for task in (settlement, close))
         runtime.record = replace(runtime.record, terminal_state="resetting" if pending else "death_unverified")
+        if not pending:
+            self._restart_notices.add(runtime.record.thread_id)
         if not pending and runtime.report is None:
             try:
                 if runtime.report_task is None or runtime.report_task.done() and (runtime.report_task.cancelled() or runtime.report_task.exception() is not None):
@@ -368,7 +370,7 @@ class BrowserSessionOwner:
             self._closed_leases.add(lease_id)
             runtimes = tuple(runtime for runtime in self._sessions.values() if runtime.record.lease_id == lease_id)
         failures = await asyncio.gather(*(self._close_one(runtime) for runtime in runtimes))
-        self._raise_cleanup_failures(failures)
+        browser_session_commands.raise_cleanup_failures(failures)
 
     async def shutdown(self) -> None:
         """Report current unresolved responsibility, never historical failures."""
@@ -376,14 +378,7 @@ class BrowserSessionOwner:
             self._shutting_down = True
             runtimes = tuple(self._sessions.values())
         failures = await asyncio.gather(*(self._close_one(runtime) for runtime in runtimes))
-        self._raise_cleanup_failures(failures)
-
-    @staticmethod
-    def _raise_cleanup_failures(failures: Sequence[BaseException | None]) -> None:
-        unresolved = [failure for failure in failures if failure is not None]
-        if unresolved:
-            pending = all(isinstance(failure, BrowserSessionCleanupError) and failure.recovery == "pending" for failure in unresolved)
-            raise BrowserSessionCleanupError("browser owner retained unresolved cleanup", recovery="pending" if pending else "operator_required") from unresolved[0]
+        browser_session_commands.raise_cleanup_failures(failures)
 
     def _model_result(self, result: CommandResult, record: BrowserSessionRecord) -> str:
         return browser_cli.render_model_result(result, redactions={
