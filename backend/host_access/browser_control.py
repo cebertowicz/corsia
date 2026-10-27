@@ -1,8 +1,9 @@
-"""Shared-browser page access and the read guard on a password visit."""
+"""Own page access and password read guards; browser_step_lifecycle owns step transitions."""
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from functools import partial
 from typing import Awaitable, Callable
 
 from host_access import browser_pane_state, browser_step_lifecycle
@@ -53,9 +54,14 @@ def pane_connected(thread_id: str, connection_token: str, report: Callable[[dict
                    probe: browser_pane_state.Probe | None = None, *,
                    session: Callable[[], str | None] | None = None) -> None:
     """Record a shared pane and notify the step owner when it can probe."""
+    async def guarded_probe(_known: browser_pane_state.KnownNodes) -> PasswordProbe:
+        assert probe is not None
+        return await probe(_known_nodes(thread_id))
+
     browser_pane_state.pane_connected(
-        thread_id, connection_token, report, probe,
+        thread_id, connection_token, report, guarded_probe if probe is not None else None,
         on_probe=lambda thread: browser_step_lifecycle.pane_event(thread, "pane_probe_available"), session=session,
+        observer=partial(_observe_read_guard, thread_id),
     )
 
 
@@ -97,12 +103,20 @@ async def _guarded_probe(thread_id: str, probe: browser_pane_state.Probe, *, ses
         "declare" if instruction is not None else "probe", result,
         session=session, instruction=instruction or "",
     )
-    decision = await browser_step_lifecycle.step_event(thread_id, event)
+    decision = await browser_step_lifecycle.step_event(thread_id, event, observer=partial(_observe_read_guard, thread_id))
     messages = {"password": PASSWORD_PAGE + _ending(thread_id), "person": PERSON_STEP,
                 "password_declined": PASSWORD_DECLINED, "person_declined": PERSON_STEP_DECLINED}
     if decision.refusal is not None:
         raise BrowserSessionError(messages[decision.refusal])
     return result
+
+
+def _observe_read_guard(thread_id: str, result: PasswordProbe | None, clear_session: bool, guard_present: bool) -> None:
+    """Apply the decided observation before plan effects, keeping all read-guard state local."""
+    if clear_session:
+        browser_closed(thread_id)
+    if result is not None and (result.visible_nodes or guard_present and result.present_nodes):
+        _guard(thread_id, result, nodes=result.present_nodes | result.visible_nodes)
 
 
 def _ending(thread_id: str) -> str:

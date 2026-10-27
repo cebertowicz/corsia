@@ -1,4 +1,4 @@
-"""The two kinds of page the person completes; browser_control owns their lifecycle.
+"""The two kinds of page the person completes; browser_step_lifecycle owns their lifecycle.
 
 A password step opens when the agent's own probe finds a visible password field, and stays open while
 one shows on its visit. A person step opens when the agent hands the person a page with no password
@@ -65,7 +65,7 @@ class PasswordStep(BrowserStep):
     settlement_evidence = "Password field no longer on the page"
 
     def title(self) -> str:
-        return f"Enter your password in the browser ({self.domain()})"
+        return f"Enter your password in the shared browser ({self.domain()})"
 
     def description(self) -> str:
         return PASSWORD_STEP_DESCRIPTION
@@ -85,10 +85,10 @@ class PersonStep(BrowserStep):
 
     provenance = "browser.person_step"
     event_prefix = "person_step"
-    settlement_evidence = "The page on this tab changed to a new document, which ends the person's part"
+    settlement_evidence = "The shared browser moved on to a new page."
 
     def title(self) -> str:
-        return f"Finish this in the browser ({self.domain()})"
+        return f"Your turn in the shared browser ({self.domain()})"
 
     def description(self) -> str:
         return (

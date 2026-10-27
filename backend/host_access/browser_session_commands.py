@@ -2,12 +2,13 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from functools import partial
 from typing import Any, Sequence
 
 from host_access import browser_cdp, browser_cli, browser_control, browser_dom_write, browser_identity as identity
 from host_access import browser_pane_state, browser_step_lifecycle
-from host_access.browser_session_state import BrowserSessionError, BrowserSetupError
+from host_access.browser_session_state import BrowserSessionCleanupError, BrowserSessionError, BrowserSetupError
 from infra.product_events import emit_product_event
 
 # A pane's own commands: the person's navigation, the page metadata their pane shows, and their pane's size
@@ -93,13 +94,32 @@ async def close_thread(owner: Any, thread_id: str) -> str:
 
 
 async def guard_close(owner: Any, runtime: Any) -> None:
-    """An agent cannot close the session out from under an open person/password step."""
+    """Refuse a healthy page still owned by a step; unreachable pages cannot block cleanup."""
+    if runtime.record.terminal_state != "running":
+        return
     command = partial(_command, owner, runtime, None)
-    endpoint = await browser_cdp.page_endpoint(command)
-    await browser_control.require_page_access(
-        runtime.record.thread_id, partial(browser_cdp.page_password_probe, endpoint),
-        ("close",), session=runtime.record.session,
-    )
+    try:
+        endpoint = await browser_cdp.page_endpoint(command)
+        await browser_control.require_page_access(
+            runtime.record.thread_id, partial(browser_cdp.page_password_probe, endpoint),
+            ("close",), session=runtime.record.session,
+        )
+    except BrowserSessionCleanupError:
+        return
+    except BrowserSessionError as exc:
+        if str(exc) != browser_control.PAGE_CHECK_FAILED:
+            raise
+
+
+async def end_session(thread_id: str, session: str) -> None:
+    """Keep a failed step hook observable without preventing producer teardown."""
+    try:
+        await browser_step_lifecycle.step_event(thread_id, browser_step_lifecycle.Event("session_ended", session=session))
+    except Exception:
+        logging.getLogger(__name__).exception("browser session-end step hook failed for %s", thread_id)
+        browser_step_lifecycle.discard_session(thread_id)
+    finally:
+        browser_control.browser_closed(thread_id)
 
 
 async def _command(owner: Any, runtime: Any, lease_id: str | None, args: Sequence[str], timeout: float) -> browser_cli.CommandResult:

@@ -101,7 +101,7 @@ async def test_a_person_step_stays_open_on_its_visit_settles_on_a_new_one_and_wa
 
     await page.reprobed()
     [step] = _steps(db)
-    assert (step["title"], step["state"]) == ("Finish this in the browser (example.test)", "pending")
+    assert (step["title"], step["state"]) == ("Your turn in the shared browser (example.test)", "pending")
     assert not browser_control.password_page(THREAD)
 
     # A password field on the step's own visit (an email-first page's second screen) keeps it the person's.
@@ -168,7 +168,7 @@ async def test_a_declare_on_an_open_password_step_leaves_it_a_password_step(plan
     with pytest.raises(BrowserSessionError, match="asks for a password"):
         await browser_control.declare_person_step(THREAD, page.agent_probe, "Choose your account")
     [step] = _steps(db)
-    assert step["title"] == "Enter your password in the browser (example.test)"
+    assert step["title"] == "Enter your password in the shared browser (example.test)"
     assert browser_control.password_page(THREAD)
 
     page.show("visit-two")
@@ -448,7 +448,7 @@ async def test_a_password_guard_outlives_leaving_its_tab_and_clears_when_the_bro
 @pytest.mark.parametrize("instruction", ["Choose your account.", "Your phone needs approval", "Sign in"])
 def test_person_step_keeps_free_form_instruction_out_of_product_chrome(instruction):
     step = browser_steps.PersonStep("visit", "accounts.example.test", instruction=instruction)
-    assert step.title() == "Finish this in the browser (example.test)"
+    assert step.title() == "Your turn in the shared browser (example.test)"
     assert step.description() == (
         "The agent can't see this page and carries on once you're past it."
         f"\n\n{instruction}"
@@ -458,7 +458,7 @@ def test_person_step_keeps_free_form_instruction_out_of_product_chrome(instructi
 def test_the_person_step_tool_row_is_addressed_to_the_person():
     from tools.tool_activity import tool_activity
 
-    assert tool_activity("browser_person_step", {"instruction": "Sign in to Google"}).phrase == "Your turn in the browser"
+    assert tool_activity("browser_person_step", {"instruction": "Sign in to Google"}).phrase == "Your turn in the shared browser"
 
 
 @pytest.mark.asyncio

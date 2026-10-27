@@ -387,7 +387,7 @@ async def test_a_password_step_names_the_registrable_domain_and_reports_each_tra
     await lifecycle._open_step("thread", step)
     await lifecycle._settle_step("thread", step)
     assert writes[0][0] == "open_user_step"
-    assert writes[0][2]["title"] == "Enter your password in the browser (evil.com.br)"
+    assert writes[0][2]["title"] == "Enter your password in the shared browser (evil.com.br)"
     assert writes[1][:2] == ("settle_user_step", ("password-step",))
     assert events == [("browser_pane", "password_step_opened", "thread"),
                       ("browser_pane", "password_step_settled", "thread")]

@@ -1,4 +1,4 @@
-"""Single owner of shared-browser person/password steps; read guards stay in browser_control."""
+"""Own step decisions, plan effects and monitoring; browser_control alone owns read guards."""
 from __future__ import annotations
 
 import asyncio
@@ -59,6 +59,13 @@ def _kind(step: BrowserStep) -> Kind:
     return "password" if isinstance(step, PasswordStep) else "person"
 
 
+def _session_changed(state: StepState, event: Event) -> bool:
+    return event.session is not None and (
+        state.session is not None and event.session != state.session
+        or state.open is not None and event.session != state.open.session
+    )
+
+
 def decide(state: StepState, event: Event) -> Decision:
     """R1–R13 in precedence order. No writes, clock, task scheduling or plan reads."""
     step, result = state.open, event.result
@@ -66,10 +73,7 @@ def decide(state: StepState, event: Event) -> Decision:
         return Decision(("R1",), end="unsettled" if step else None, clear_answers=True)
     if event.name in {"pane_probe_available", "pane_probe_gone"}:
         return Decision(monitor=event.name == "pane_probe_available")
-    changed = event.session is not None and state.session is not None and event.session != state.session
-    if step is not None and event.session is not None and event.session != step.session:
-        changed = True
-    if changed:  # R2 also clears answers when the prior session had no open step.
+    if _session_changed(state, event):  # R2 also clears answers when the prior session had no open step.
         following = decide(StepState(session=event.session), event)
         return replace(following, rules=("R2",) + following.rules,
                        end="unsettled" if step else None, clear_answers=True)
@@ -116,24 +120,24 @@ _sessions: dict[str, str | None] = {}
 _probe_locks: dict[str, asyncio.Lock] = {}
 
 
-async def step_event(thread_id: str, event: Event) -> Decision:
-    """Read once, decide once, apply every lifecycle effect under the thread's transition lock."""
-    from host_access import browser_control
-
+async def step_event(thread_id: str, event: Event, *,
+                     observer: browser_pane_state.Observer | None = None) -> Decision:
+    """Decide under the transition lock; notify the caller once before applying lifecycle effects."""
     async with _probe_locks.setdefault(thread_id, asyncio.Lock()):
         step = _steps.get(thread_id)
-        # Pane availability only controls monitoring; it does not observe or answer the person's row.
-        row_state = (await asyncio.to_thread(_step_row_state, step.node_id)
-                     if step is not None and event.name not in {"pane_probe_available", "pane_probe_gone"} else None)
-        decision = decide(StepState(step, _answers.get(thread_id, {}), row_state, _sessions.get(thread_id)), event)
+        current_state = StepState(step, _answers.get(thread_id, {}), session=_sessions.get(thread_id))
+        # R1/R2 never use a row answer; teardown and replacement must not depend on plans.
+        if (step is not None and event.name not in {"session_ended", "pane_probe_available", "pane_probe_gone"}
+                and not _session_changed(current_state, event)):
+            current_state = replace(current_state, row_state=await asyncio.to_thread(_step_row_state, step.node_id))
+        decision = decide(current_state, event)
+        result = event.result
+        if observer is not None:
+            observer(result, decision.clear_answers, decision.guard_present)
         if decision.clear_answers:
             _answers.pop(thread_id, None)
-            browser_control.browser_closed(thread_id)
         if event.session is not None:
             _sessions[thread_id] = event.session
-        result = event.result
-        if result is not None and (result.visible_nodes or decision.guard_present and result.present_nodes):
-            browser_control._guard(thread_id, result, nodes=result.present_nodes | result.visible_nodes)
         if decision.end is not None and step is not None:
             if decision.end == "settle":
                 await _settle_step(thread_id, step)
@@ -163,6 +167,14 @@ async def step_event(thread_id: str, event: Event) -> Decision:
         if event.name == "session_ended":
             _sessions.pop(thread_id, None)
         return decision
+
+
+def discard_session(thread_id: str) -> None:
+    """Forget in-memory ownership after a failed end hook, without any plan access."""
+    if (step := _steps.pop(thread_id, None)) is not None:
+        _stop_reprobe(step)
+    _answers.pop(thread_id, None)
+    _sessions.pop(thread_id, None)
 
 
 def pane_event(thread_id: str, name: str) -> None:
@@ -216,21 +228,19 @@ async def _reprobe_loop(thread_id: str, step: BrowserStep) -> None:
 
 async def _reprobe(thread_id: str, step: BrowserStep) -> bool:
     """Deliver only this step's own target observations through the same transition."""
-    from host_access import browser_control
-
     probes = browser_pane_state.pane_probes(thread_id)
     current = _steps.get(thread_id)
     if current is None or current is not step or not probes:
         return False
     source = probes[0]
     try:
-        result = await source.probe(browser_control._known_nodes(thread_id))
+        result = await source.probe({})
     except Exception as exc:
         log.info("browser-step re-probe for %s failed: %s", thread_id, exc)
         result = None
     session = source.session() if source.session is not None else step.session
     if source.session is not None and session is None:
-        await step_event(thread_id, Event("session_ended", session=step.session))
+        await step_event(thread_id, Event("session_ended", session=step.session), observer=source.observer)
         return False
     if result is None or result.target != step.target:
         # Only this step's own page can supply an observation, including its end-time read guard.
@@ -238,7 +248,7 @@ async def _reprobe(thread_id: str, step: BrowserStep) -> bool:
         if session == step.session:
             return True
         result = None
-    await step_event(thread_id, Event("probe", result, session=session, source="pane"))
+    await step_event(thread_id, Event("probe", result, session=session, source="pane"), observer=source.observer)
     return _steps.get(thread_id) is step and current.reprobe is not None
 
 

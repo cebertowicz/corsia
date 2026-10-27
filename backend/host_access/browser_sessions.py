@@ -9,7 +9,7 @@ import secrets
 import time
 from typing import Literal, Sequence, TypeAlias
 
-from host_access import browser_cli, browser_step_lifecycle, browser_identity as identity, browser_reporting
+from host_access import browser_cli, browser_session_commands, browser_identity as identity, browser_reporting
 from host_access.browser_session_state import (
     BrowserRuntime, BrowserSessionCleanupError as BrowserSessionCleanupError,
     BrowserSessionError as BrowserSessionError, BrowserSessionRecord,
@@ -258,11 +258,9 @@ class BrowserSessionOwner:
         async with runtime.command_lock:
             if runtime.record.terminal_state == "closed":
                 return
-            await browser_step_lifecycle.step_event(
-                runtime.record.thread_id, browser_step_lifecycle.Event("session_ended", session=runtime.record.session),
-            )
             runtime.record = replace(runtime.record, terminal_state="resetting")
             try:
+                await browser_session_commands.end_session(runtime.record.thread_id, runtime.record.session)
                 if runtime.attempt is not None:
                     runtime.attempt = runtime.attempt.settled()
                     if runtime.attempt.completion == "unknown":

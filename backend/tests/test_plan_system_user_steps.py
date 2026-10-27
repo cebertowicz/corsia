@@ -28,7 +28,7 @@ from tests.plan_close_next_helpers import (
 from tests.test_plan_reconcile_release import db, seed_threads  # noqa: F401 - fixture
 
 PROVENANCE = "browser.password_guard"
-TITLE = "Enter your password in the browser (example.com)"
+TITLE = "Enter your password in the shared browser (example.com)"
 DESCRIPTION = "Enter your password in the shared browser. The agent can't see this page and carries on once you're past it."
 
 
