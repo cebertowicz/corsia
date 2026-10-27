@@ -141,10 +141,10 @@ async def test_probe_started_before_exit_cannot_restore_stale_readiness(monkeypa
     from llm import network_discovery, server_observation
 
     monkeypatch.setitem(network_discovery._LOADED_BY_SERVER, SID, {"model"})
-    token = server_observation.loaded_token(SID)
+    generation = server_observation.observation_generation(SID)
     start, _ = recording_start()
     crash(start)
-    await server_observation.record_reachable({"id": SID}, loaded={"model"}, token=token)
+    await server_observation.record_reachable({"id": SID}, loaded={"model"}, generation=generation)
     assert network_discovery.get_loaded_model_ids(SID) == set()
     await settle()
 
@@ -153,24 +153,30 @@ async def test_load_started_before_exit_cannot_restore_stale_readiness(monkeypat
     from llm import network_discovery, server_observation
 
     monkeypatch.setitem(network_discovery._LOADED_BY_SERVER, SID, {"model"})
-    token = server_observation.loaded_token(SID)
+    generation = server_observation.observation_generation(SID)
     start, _ = recording_start()
     crash(start)
-    network_discovery.notify_cached_model_loaded(SID, "model", token)
+    network_discovery.notify_cached_model_loaded(SID, "model", generation)
     assert network_discovery.get_loaded_model_ids(SID) == set()
     await settle()
 
 
-async def test_a_sweep_during_a_load_does_not_hide_the_loaded_model(monkeypatch):
+@pytest.mark.parametrize("before_load", ["empty set", "no set yet"])
+async def test_a_sweep_during_a_load_does_not_hide_the_loaded_model(monkeypatch, before_load):
     from infra.state import ws
     from llm import network_discovery, server_observation
 
     monkeypatch.setattr(network_discovery, "update_server_status", lambda *_a, **_k: None)
     monkeypatch.setattr(ws, "notify_models_changed", lambda: None)
-    monkeypatch.setitem(network_discovery._LOADED_BY_SERVER, SID, set())
-    at_load_start = server_observation.loaded_token(SID)
-    sweep_start = server_observation.loaded_token(SID)
-    await server_observation.record_reachable({"id": SID}, loaded=set(), rediscover=False, token=sweep_start)
+    if before_load == "empty set":
+        monkeypatch.setitem(network_discovery._LOADED_BY_SERVER, SID, set())
+    else:
+        monkeypatch.delitem(network_discovery._LOADED_BY_SERVER, SID, raising=False)
+    at_load_start = server_observation.observation_generation(SID)
+    sweep_start = server_observation.observation_generation(SID)
+    await server_observation.record_reachable(
+        {"id": SID}, loaded=set(), rediscover=False, generation=sweep_start,
+    )
     network_discovery.notify_cached_model_loaded(SID, "model", at_load_start)
     assert network_discovery.get_loaded_model_ids(SID) == {"model"}
 

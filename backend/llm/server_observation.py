@@ -2,9 +2,9 @@
 
 A server's state is its status, its observed model set (``_LOADED_BY_SERVER``,
 which a row needs before it reports ``ready``) and, through discovery's
-reconcile, each model's ``available`` flag. :func:`record_reachable` and
-:func:`record_unreachable` are the only transitions; the sources differ only in
-what they observed:
+reconcile, each model's ``available`` flag. :func:`record_reachable`,
+:func:`record_unreachable` and, for managed oMLX, :func:`forget_loaded_on_exit`
+are the only transitions; the sources differ only in what they observed:
 
 - the health sweep probes managed oMLX and LAN External servers every 10s;
 - discovery (add, edit, Test connection, startup) observes a cloud External
@@ -61,24 +61,26 @@ _PENDING: set[asyncio.Task] = set()
 _UNLISTED: dict[str, str | None] = {}
 
 
-_NO_TOKEN = object()
+# Observation generation per server: an exit or going offline starts a new one. A
+# probe or load captures it before awaiting and publishes only if it is unchanged,
+# so a result begun before the server died never revives what it held.
+_GENERATION: dict[str, int] = {}
 
 
-def loaded_token(server_id: str) -> object:
-    """Capture the observed set before starting an asynchronous probe.
+def observation_generation(server_id: str) -> int:
+    """The current generation, captured before an asynchronous probe or load."""
+    return _GENERATION.get(server_id, 0)
 
-    Sweeps and loads update the set in place, so its identity changes only when an exit
-    or going offline starts a new observation.
-    """
-    from llm import network_discovery as nd
 
-    return nd._LOADED_BY_SERVER.get(server_id)
+def _new_generation(server_id: str) -> None:
+    _GENERATION[server_id] = observation_generation(server_id) + 1
 
 
 def forget_loaded_on_exit(server_id: str) -> set[str]:
-    """Invalidate the observed set on process exit and return it for reload."""
+    """Clear the observed set on process exit and return it for reload."""
     from llm import network_discovery as nd
 
+    _new_generation(server_id)
     loaded = nd._LOADED_BY_SERVER.get(server_id, set())
     nd._LOADED_BY_SERVER[server_id] = set()
     nd._notify_models_changed_safe()
@@ -87,22 +89,24 @@ def forget_loaded_on_exit(server_id: str) -> set[str]:
 
 async def record_reachable(
     server: dict, *, loaded: set[str] | None, rediscover: bool = True,
-    token: object = _NO_TOKEN, **status: Any,
+    generation: int | None = None, **status: Any,
 ) -> None:
-    """A source reached ``server``. ``loaded`` replaces its observed model set."""
+    """A source reached ``server``. ``loaded`` replaces its observed model set.
+
+    ``generation``, when given, is the one captured before probing; a newer one
+    means the server exited or went offline meanwhile, so the result is dropped.
+    """
     from llm import network_discovery as nd
 
     sid = server["id"]
-    if token is not _NO_TOKEN and loaded_token(sid) is not token:
+    if generation is not None and observation_generation(sid) != generation:
         return
     await run_in_db(nd.update_server_status, sid, status="online", **status)
-    if token is not _NO_TOKEN and loaded_token(sid) is not token:
+    if generation is not None and observation_generation(sid) != generation:
         return
     if loaded is not None:
-        current = nd._LOADED_BY_SERVER.setdefault(sid, set())
-        changed = current != loaded
-        current.clear()
-        current.update(loaded)
+        changed = nd._LOADED_BY_SERVER.get(sid, set()) != loaded
+        nd._LOADED_BY_SERVER[sid] = set(loaded)
         if changed:
             nd._notify_models_changed_safe()
     if rediscover and (server.get("status") == "offline" or sid in _UNLISTED):
@@ -115,6 +119,7 @@ async def record_unreachable(server: dict) -> None:
 
     provider = server.get("provider") or ("external" if server.get("kind") == "external" else "omlx")
     await run_in_db(nd._record_server_offline, server, provider)
+    _new_generation(server["id"])
     nd._LOADED_BY_SERVER.pop(server["id"], None)
     if server.get("kind") != "external":
         _UNLISTED.setdefault(server["id"], None)

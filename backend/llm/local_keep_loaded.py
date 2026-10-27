@@ -119,7 +119,8 @@ async def keep_loaded(
     completed download is never undone here. ``pin_if_fits=False`` loads without
     pinning, for a model that is already the person's.
     """
-    from llm.network_discovery import discover_and_notify, loaded_token, notify_cached_model_loaded
+    from llm.network_discovery import discover_and_notify, notify_cached_model_loaded
+    from llm.server_observation import observation_generation
     from llm.providers.omlx_lifecycle import load_model, read_loaded
     from llm.providers.omlx_settings import update_model_settings
 
@@ -158,7 +159,7 @@ async def keep_loaded(
     try:
         # The seat's lock, so this load and a send's never check the same free memory at once.
         async with seat_lock(server_id):
-            token = loaded_token(server_id)
+            generation = observation_generation(server_id)
             loaded = await read_loaded({"server_id": server_id})
             if loaded is None:
                 raise RuntimeError("oMLX loaded status unavailable")
@@ -176,7 +177,7 @@ async def keep_loaded(
                 _FAILED[key] = not_loaded
                 return
             emit("load.completed")
-            notify_cached_model_loaded(server_id, model.model, token)
+            notify_cached_model_loaded(server_id, model.model, generation)
         step = "catalog refresh"
         await discover_and_notify(server_id)
     except Exception as exc:

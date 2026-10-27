@@ -19,7 +19,7 @@ from llm.network_endpoints import (
     is_cloud_external,
     upsert_endpoint,
 )
-from llm.server_observation import loaded_token, record_discovery, record_reachable, record_unreachable
+from llm.server_observation import observation_generation, record_discovery, record_reachable, record_unreachable
 
 log = logging.getLogger(__name__)
 
@@ -27,10 +27,10 @@ HEALTH_SWEEP_INTERVAL = 10
 
 _LOADED_BY_SERVER: dict[str, set[str]] = {}
 
-def notify_cached_model_loaded(server_id: str, model_id: str, token: object) -> None:
-    """Publish a load only if the observation it started under is still current."""
+def notify_cached_model_loaded(server_id: str, model_id: str, generation: int) -> None:
+    """Publish a load only if the server has not exited or gone offline since it began."""
     from infra.state.ws import notify_models_changed
-    if loaded_token(server_id) is not token:
+    if observation_generation(server_id) != generation:
         return
     _LOADED_BY_SERVER.setdefault(server_id, set()).add(model_id)
     notify_models_changed()
@@ -283,7 +283,7 @@ async def _sweep_managed(client: httpx.AsyncClient, server: dict) -> None:
     from llm.providers.omlx_public_probe import probe_registered_status
 
     sid = server["id"]
-    token = loaded_token(sid)
+    generation = observation_generation(sid)
     port = server["port"]
     endpoints = await run_in_db(get_endpoints, sid)
 
@@ -308,7 +308,7 @@ async def _sweep_managed(client: httpx.AsyncClient, server: dict) -> None:
         await record_reachable(
             server,
             loaded={m for m in loaded if isinstance(m, str) and m},
-            token=token,
+            generation=generation,
             latency_ms=fastest_latency,
             memory_total_mb=int(latest_data.get("memory_total_gb", 0) * 1e9 / (1024 ** 2)),
             memory_used_mb=int(latest_data.get("memory_used_gb", 0) * 1e9 / (1024 ** 2)),

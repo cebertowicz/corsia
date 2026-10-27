@@ -13,7 +13,8 @@ async def _publish_loaded(source):
         )
     else:
         network_discovery.notify_cached_model_loaded(
-            'loaded-test-server', 'model', network_discovery.loaded_token('loaded-test-server')
+            'loaded-test-server', 'model',
+            server_observation.observation_generation('loaded-test-server'),
         )
 
 

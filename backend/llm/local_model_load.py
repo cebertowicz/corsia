@@ -158,11 +158,12 @@ async def _server_is_up(server_id: str) -> bool:
 async def _load(target: ExecutionTarget, server_id: str, model_id: str) -> None:
     """One load, under the seat's lock, rechecking the fit the lock was waited for."""
     from infra.db_async import run_in_db
-    from llm.network_discovery import loaded_token, notify_cached_model_loaded
+    from llm.network_discovery import notify_cached_model_loaded
     from llm.providers.omlx_lifecycle import load_model, read_loaded
+    from llm.server_observation import observation_generation
 
     async with seat_lock(server_id):
-        token = loaded_token(server_id)
+        generation = observation_generation(server_id)
         live = await read_loaded({"server_id": server_id})
         if live is None:
             _emit_load(server_id, model_id, "load.failed", "unreachable")
@@ -183,7 +184,7 @@ async def _load(target: ExecutionTarget, server_id: str, model_id: str) -> None:
             cause: LoadFailure = "load_failed" if up else "unreachable"
             _emit_load(server_id, model_id, "load.failed", cause)
             raise ModelLoadFailed(cause)
-        notify_cached_model_loaded(server_id, model_id, token)
+        notify_cached_model_loaded(server_id, model_id, generation)
         _emit_load(server_id, model_id, "load.completed")
 
 
