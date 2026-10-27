@@ -320,6 +320,8 @@ def test_first_run_app_approval_links_to_the_created_app():
     assert "[App] is ready. [Approve it](#connected-apps/<id>) in Settings › Connected apps." in work
     assert "`<id>` the URL-encoded `id` returned by that call" in work
     assert "URL-encoded `id` from the added or existing server row" in work
+    assert "If the row has no `id` because it is outside your reach, don't build a link;" in work
+    assert "Settings › Connected apps, the [app name] row" in work
 
 
 def test_where_your_work_lives_never_ends_at_i_cant_and_hands_the_rest_to_helpers():
