@@ -200,11 +200,11 @@ def _reads_per_thread(monkeypatch, rule_count: int, manifest: str) -> tuple[int,
                           event_type=library.ITEM_CHANGED_EVENT))
     with statements() as seen:
         deliver_platform_event_sync(library.LIBRARY_CONNECTOR, _library_changed(manifest))
-    budget = [s for s in seen if s.lstrip().upper().startswith("SELECT")
+    history = [s for s in seen if s.lstrip().upper().startswith("SELECT")
               and "FROM event_route_decisions" in s]
     _write("DELETE FROM event_rules")
     _write("DELETE FROM event_route_decisions")
-    return len(paused), len(budget)
+    return len(paused), len(history)
 
 
 def test_two_wake_rules_for_one_thread_read_pause_once(isolated_db, monkeypatch):
