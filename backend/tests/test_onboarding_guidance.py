@@ -376,7 +376,7 @@ def test_web_search_guidance_distinguishes_keyless_readiness_from_key_setup():
     assert "When `web_search_ready` is false, search didn't work on the check; a Brave key is an optional alternative." in web
     assert "There is no fallback search: without a key, web search stays off." not in web
     assert "search stays off until this setup succeeds" not in web
-    assert "`Search didn't work just now. I can try again later; Settings › Keys has the optional Brave key whenever you want it.`" in _step(4)
+    assert "`Search didn't work just now. Ask me any time to try again; Settings › Keys has the optional Brave key whenever you want it.`" in _step(4)
     assert "Until then I can't search the web." not in _step(4)
 
 

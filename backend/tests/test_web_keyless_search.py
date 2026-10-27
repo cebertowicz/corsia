@@ -83,3 +83,25 @@ async def test_keyless_timeout_does_not_block_event_loop(monkeypatch):
     monkeypatch.setattr(keyless, "_search", slow_search)
     result = await keyless.keyless_search("query")
     assert (result.kind, result.reason) == (outcomes.FAILED, outcomes.REASON_TIMEOUT)
+
+
+def _client_failure() -> keyless.DDGSException:
+    try:
+        raise keyless.DDGSException("ConnectError") from OSError("connection refused")
+    except keyless.DDGSException as exc:
+        return exc
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error,reason", [
+    (lambda: keyless.RatelimitException("202 Ratelimit"), outcomes.REASON_RATE_LIMIT),
+    (lambda: keyless.TimeoutException("timed out"), outcomes.REASON_TIMEOUT),
+    (_client_failure, outcomes.REASON_NETWORK),
+    (lambda: keyless.DDGSException("unexpected page"), outcomes.REASON_PROVIDER),
+])
+async def test_ddgs_failures_keep_their_class(monkeypatch, error, reason):
+    search = Mock(side_effect=error())
+    monkeypatch.setattr(keyless, "DDGS", Mock(return_value=Mock(text=search)))
+    result = await keyless.keyless_search("query")
+    assert (result.kind, result.reason) == (outcomes.FAILED, reason)
+    assert search.call_count == 1

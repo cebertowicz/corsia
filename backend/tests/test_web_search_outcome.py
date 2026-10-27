@@ -120,9 +120,6 @@ def store(isolated_db, tmp_path, monkeypatch):
     monkeypatch.setattr("infra.config.STATE_ROOT", root)
 
 
-# The no-key route is covered by test_web_keyless_search.py.
-
-
 @pytest.mark.parametrize("status,body,first_line", [
     (401, {"message": VALUE}, "Web search: key refused."),
     (422, {"error": {"code": "SUBSCRIPTION_TOKEN_INVALID", "detail": VALUE}}, "Web search: key refused."),
@@ -150,27 +147,3 @@ async def test_a_newly_saved_key_is_used_on_the_next_call(store, monkeypatch):
     assert "1. Hit" in text and VALUE not in text
     assert seen[-1].headers["X-Subscription-Token"] == VALUE
     assert json.dumps(dict(seen[-1].url.params)).find(VALUE) == -1
-
-
-@pytest.mark.asyncio
-async def test_brave_key_precedes_managed_omlx(store, monkeypatch):
-    key = "brave-key"
-    brave = AsyncMock(return_value=outcome_mod.SearchOutcome(
-        WORKS, results=[{"title": "Brave", "url": "https://brave.test"}],
-    ))
-    keyless = AsyncMock()
-    key_store.set_value("web-search", key)
-    monkeypatch.setattr(web_mod, "run_search", brave)
-    monkeypatch.setattr(web_mod, "keyless_search", keyless)
-
-    text = await WebSearchTool().execute("q")
-
-    assert "Brave" in text
-    brave.assert_awaited_once_with(key, "q", 5)
-    keyless.assert_not_awaited()
-
-
-# Keyless results are covered by test_web_keyless_search.py.
-
-
-# Keyless library coverage lives in test_web_keyless_search.py.

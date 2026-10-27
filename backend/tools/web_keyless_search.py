@@ -3,9 +3,11 @@
 import asyncio
 
 from ddgs import DDGS
-from ddgs.exceptions import DDGSException, TimeoutException
+from ddgs.exceptions import DDGSException, RatelimitException, TimeoutException
 
-from tools.web_search_outcome import FAILED, REASON_PROVIDER, REASON_TIMEOUT, WORKS, SearchOutcome
+from tools.web_search_outcome import (
+    FAILED, REASON_NETWORK, REASON_PROVIDER, REASON_RATE_LIMIT, REASON_TIMEOUT, WORKS, SearchOutcome,
+)
 
 TIMEOUT_SECONDS = 14
 
@@ -32,5 +34,11 @@ async def keyless_search(query: str, count: int = 5) -> SearchOutcome:
         return SearchOutcome(WORKS)
     except (TimeoutError, TimeoutException):
         return SearchOutcome(FAILED, REASON_TIMEOUT)
+    except RatelimitException:
+        return SearchOutcome(FAILED, REASON_RATE_LIMIT)
+    except DDGSException as exc:
+        # DDGS wraps a failed request in its base exception, chained from the client error.
+        return SearchOutcome(FAILED, REASON_NETWORK if exc.__cause__ else REASON_PROVIDER)
     except Exception:
+        # Anything else is not the network's fault; its text is never kept.
         return SearchOutcome(FAILED, REASON_PROVIDER)
