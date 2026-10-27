@@ -55,7 +55,14 @@ def heal_moved_state_paths(
                 tuple(prefix for _ in (*columns, *json_columns) for prefix in prefixes),
             ).fetchall()
             for row in rows:
-                changes = rewriter.row_changes(table, row, columns, json_columns)
+                counted = rewriter.moved
+                try:
+                    changes = rewriter.row_changes(table, row, columns, json_columns)
+                except OSError as error:
+                    # The link still names the old home: keep the row as stored so the next start retries it whole.
+                    rewriter.moved = counted
+                    logger.error("left {} {} as stored: could not repoint its auth link: {}", table, row["id"], error)
+                    continue
                 if changes:
                     rewriter.vacated.extend(row[c] for c in columns if c in changes)
                 if changes:
@@ -151,11 +158,12 @@ class _Rewriter:
         new_source, new_destination = self.under_legacy(source), self.under_legacy(destination)
         if new_source is None or new_destination is None or not os.path.lexists(new_source):
             return
+        if not os.path.islink(new_destination) or os.readlink(new_destination) != source:
+            return
+        stage = Path(new_destination).with_name(".corsia-auth-" + uuid.uuid4().hex)
         try:
-            if not os.path.islink(new_destination) or os.readlink(new_destination) != source:
-                return
-            stage = Path(new_destination).with_name(".corsia-auth-" + uuid.uuid4().hex)
             stage.symlink_to(new_source)
             os.replace(stage, new_destination)
-        except OSError as error:
-            logger.warning("could not point {} at the moved account home: {}", destination, error)
+        except OSError:
+            stage.unlink(missing_ok=True)
+            raise
