@@ -133,7 +133,7 @@ async function openChat(page: Page, state: FrameState) {
 	}, state);
 	const sheet = page.locator('.model-sheet');
 	await expect(sheet).toBeVisible();
-	await expect(page.getByText('Loading this thread…')).toHaveCount(0);
+	await expect(page.getByText('Loading this chat…')).toHaveCount(0);
 	await expect(page.locator('.empty-chat')).toBeVisible();
 	const emptyArtifactPane = page.getByText('Files you create, upload, or open in this thread show up here.');
 	await expect(emptyArtifactPane).toHaveCount(1);

@@ -175,9 +175,9 @@
 		onpointerup={clearHold}
 		onpointercancel={clearHold}
 		title={conductorThreadId
-			? `${entryLabel} — this scope's main thread`
+			? `${entryLabel} — main chat for this ${entryLabel === 'CORSIA' ? 'workspace' : 'project'}`
 			: conductorKnownAbsent
-				? `No ${entryLabel === 'CORSIA' ? 'CORSIA agent' : 'conductor'} for this scope`
+				? `No ${entryLabel === 'CORSIA' ? 'CORSIA agent' : 'conductor'} for this ${entryLabel === 'CORSIA' ? 'workspace' : 'project'}`
 				: `Open ${entryLabel === 'CORSIA' ? 'CORSIA' : 'conductor'} chat`}
 	>
 		<button

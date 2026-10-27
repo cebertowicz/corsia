@@ -1,0 +1,26 @@
+import { mount, unmount } from 'svelte';
+import { describe, expect, it } from 'vitest';
+import ActivityScopeState from './ActivityScopeState.svelte';
+
+describe('Activity scope messages', () => {
+	for (const scopeNoun of ['project', 'workspace'] as const) {
+		for (const [kind, expected] of [
+			['unauthorized', `Your sign-in expired before this ${scopeNoun} loaded.`],
+			['forbidden', `Activity isn’t available in this ${scopeNoun}`],
+			['not-found', `This ${scopeNoun} isn’t available`],
+			['empty', `This ${scopeNoun} has no plans.`],
+		] as const) {
+			it(`describes ${kind} for a ${scopeNoun}`, () => {
+				const host = document.createElement('div');
+				const component = mount(ActivityScopeState, {
+					target: host,
+					props: { kind, scopeNoun, onRetry: () => {}, onGoWorkspace: () => {} },
+				});
+				expect(host.textContent).toContain(expected);
+				if (kind === 'forbidden') expect(host.textContent).toContain(`You don’t have access to this ${scopeNoun}.`);
+				if (kind === 'not-found') expect(host.textContent).toContain(`Choose another ${scopeNoun}.`);
+				unmount(component);
+			});
+		}
+	}
+});

@@ -38,7 +38,7 @@ export function syncCanvasHeader(input: CanvasHeaderInput) {
 		// The workspace scope's designated thread is the CORSIA agent; a project's is a conductor.
 		const designatedName = input.uiScopeName === null ? 'CORSIA' : 'Conductor';
 		canvasHeader.set({
-			title: conductor ? `${designatedName} settings` : 'Thread settings',
+			title: conductor ? `${designatedName} settings` : 'Chat settings',
 			backLabel: threadTitle ?? (conductor ? designatedName : 'Thread'),
 			onBack: input.closeThreadSettings,
 		});
@@ -58,7 +58,7 @@ export function syncCanvasHeader(input: CanvasHeaderInput) {
 	if (input.activeView === 'documents') {
 		const returnTo = input.contextAttachTarget?.returnTo;
 		const backLabel =
-			returnTo === 'thread-settings' ? 'Thread settings'
+			returnTo === 'thread-settings' ? 'Chat settings'
 			: returnTo === 'settings' ? 'Settings'
 			: undefined;
 		canvasHeader.set({ title: 'Documents', backLabel, onBack: input.closeDocuments });
@@ -78,7 +78,7 @@ export function syncCanvasHeader(input: CanvasHeaderInput) {
 			actions: [{
 				id: 'artifact-tabs',
 				label: `Tabs (${tabCount})`,
-				title: anyChanged ? 'Open artifacts — one has changed' : 'Open artifacts',
+				title: anyChanged ? 'Open Files — one has changed' : 'Open Files',
 				onClick: onTabs,
 				active: anyChanged,
 				primary: true,

@@ -287,7 +287,7 @@
 	onkeydown={onUserScrollIntent}
 >
 	<!--
-		Three-way, because "this thread is empty" is a CLAIM about the thread and
+		Three-way, because "this chat is empty" is a CLAIM about the thread and
 		only one of these three states can support it. A first page still in
 		flight, or one that failed, means the transcript is unknown — and after a
 		failure the user needs the same way out the older-pages branch already
@@ -295,13 +295,13 @@
 	-->
 	{#if firstLoadFailed}
 		<div class="first-load-state first-load-error" class:full-canvas={messageRows.length === 0}>
-			<span>Couldn't load this thread.</span>
-			<Button size="sm" variant="secondary" ariaLabel="Retry loading this thread" onclick={() => onRetryFirstLoad?.()}>Retry</Button>
+			<span>Couldn’t load this chat. Try again.</span>
+			<Button size="sm" variant="secondary" ariaLabel="Retry loading this chat" onclick={() => onRetryFirstLoad?.()}>Retry</Button>
 		</div>
 	{:else if firstLoadPending && messageRows.length === 0}
 		<div class="first-load-state full-canvas">
 			<svg class="spin" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
-			<span>Loading this thread…</span>
+			<span>Loading this chat…</span>
 		</div>
 	{:else if messageRows.length === 0 && !focusLive.current.active && !waitsOutside($threadPlanStates, renderedThreadId)}
 		<EmptyChatState />

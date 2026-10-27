@@ -68,7 +68,7 @@ describe('CommandPalette query results', () => {
 		expect(host.textContent).not.toContain('Go to workspace');
 		expect(host.textContent).not.toContain('New project');
 		expect(host.textContent).toContain('No matching projects.');
-		expect(host.textContent).toContain('No matching conversations.');
+		expect(host.textContent).toContain('No matching chats.');
 	});
 
 	it('hides archived projects in empty and matching-query results', () => {

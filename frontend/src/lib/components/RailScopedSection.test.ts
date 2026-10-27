@@ -192,7 +192,7 @@ describe('RailScopedSection agent zone', () => {
 		const conductor = host.querySelector<HTMLElement>('.scoped-item.conductor');
 		expect(conductor).not.toBeNull();
 		expect(conductor?.querySelector<HTMLButtonElement>('.scoped-item-trigger')?.disabled).toBe(true);
-		expect(conductor?.getAttribute('title')).toBe('No CORSIA agent for this scope');
+		expect(conductor?.getAttribute('title')).toBe('No CORSIA agent for this workspace');
 		conductor?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 		expect(onConductor).not.toHaveBeenCalled();
 	});

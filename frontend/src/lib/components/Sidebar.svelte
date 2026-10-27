@@ -137,15 +137,15 @@
 			const response = await fetch(`/api/agents/${id}?${query}`, { method: 'DELETE' });
 			if (!response.ok) {
 				const body = await response.json().catch(() => ({})) as { detail?: string };
-				throw new Error(body.detail ?? `Deactivate failed (${response.status})`);
+				throw new Error(`Deactivate failed (${response.status}): ${body.detail ?? ''}`);
 			}
 			demoteAgentLocally(id);
 			toasts.show('Agent deactivated', 'success');
 		} catch (error) {
-			toasts.show(error instanceof Error ? error.message : "Couldn't deactivate Agent", 'error');
+			console.error('Could not deactivate agent', error);
+			toasts.show("Couldn't deactivate this agent. Try again.", 'error');
 		}
 	}
-
 	function contextMenuArchive() {
 		const id = contextMenuThreadId;
 		closeContextMenu();
@@ -209,7 +209,7 @@
 			<span>Activity</span>
 		</button>
 		<a class="rail-link press-tint" class:active={activeView === 'measurement'} href={measurementRailHref($uiScope?.id ?? null)} onclick={(event) => { if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return; event.preventDefault(); openMeasurementFromRail($uiScope?.id ?? null); onMeasurement?.(); }} title="Measurement" aria-current={activeView === 'measurement' ? 'page' : undefined}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18M7 16l4-5 3 3 4-7"/></svg><span>Measurement</span></a>
-		<button class="rail-link press-tint" onclick={() => paletteOpen.set(true)} title="Jump to a project, conversation, or doc">
+		<button class="rail-link press-tint" onclick={() => paletteOpen.set(true)} title="Jump to a project, chat, or document">
 			<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
 			<span>Jump to…</span>
 			<kbd class="rail-kbd">⌘K</kbd>

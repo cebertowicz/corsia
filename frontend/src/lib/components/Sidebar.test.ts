@@ -7,6 +7,8 @@ import { activeThreadId, threads } from '$lib/stores/threads';
 import { uiScope } from '$lib/stores/uiScope';
 import { measurementScope } from '$lib/stores/measurement';
 import { measurementOrigin } from '$lib/stores/measurementNavigation';
+import { token } from '$lib/stores/auth';
+import { toasts } from '$lib/stores/toast';
 
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
@@ -39,6 +41,28 @@ afterEach(() => {
 	activeThreadId.set(null);
 	threads.set([]);
 	measurementScope.set({ project: 'all', agent: null });
+	token.set(null);
+	vi.unstubAllGlobals();
+	vi.restoreAllMocks();
+});
+
+describe('Sidebar deactivation error', () => {
+	it('shows the same actionable message without exposing server detail', async () => {
+		token.set('test');
+		threads.set([{
+			id: 'agent-b', user_id: 'u', profile: 'personal', title: 'Bugs', model: null, created_at: 'now', updated_at: 'now',
+			project_id: null, agent_enabled: 1, agent_status: 'active', agent_responsibility: 'Defects',
+		}]);
+		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 403, json: async () => ({ detail: 'private detail' }) })));
+		vi.spyOn(console, 'error').mockImplementation(() => {});
+		render();
+		const row = [...host.querySelectorAll('.scoped-item')].find((item) => item.textContent?.includes('Bugs'))!;
+		row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 20, clientY: 20 }));
+		flushSync();
+		const deactivate = [...host.querySelectorAll('button')].find((button) => button.textContent?.trim() === 'Deactivate Agent')!;
+		deactivate.click();
+		await vi.waitFor(() => expect(get(toasts)[0]?.message).toBe("Couldn't deactivate this agent. Try again."));
+	});
 });
 
 describe('Sidebar Measurement link', () => {

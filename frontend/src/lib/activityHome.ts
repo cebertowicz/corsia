@@ -90,7 +90,7 @@ export function buildResumeThreads(
 		))
 		.map((thread) => ({
 			id: thread.id,
-			title: thread.title || 'Untitled thread',
+			title: thread.title || 'Untitled chat',
 			projectId: thread.project_id ?? null,
 			ownerType: isNavAgent(thread) ? 'agent' as const : 'thread' as const,
 			activity: activity[thread.id] ?? null,

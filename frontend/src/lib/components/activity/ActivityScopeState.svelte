@@ -16,8 +16,9 @@
 <script lang="ts">
 	import Button from '$lib/components/ui/Button.svelte';
 
-	let { kind, canGoWorkspace = false, onRetry, onGoWorkspace }: {
+	let { kind, scopeNoun, canGoWorkspace = false, onRetry, onGoWorkspace }: {
 		kind: ActivityScopeStateKind;
+		scopeNoun: 'project' | 'workspace';
 		/** A project scope can hand back to Workspace; Workspace has nowhere to go. */
 		canGoWorkspace?: boolean;
 		onRetry: () => void;
@@ -32,17 +33,17 @@
 {:else if kind === 'unauthorized'}
 	<div class="activity-state" role="alert">
 		<strong>Sign in to see Activity</strong>
-		<span>Your session expired before this scope could load.</span>
+		<span>Your sign-in expired before this {scopeNoun} loaded.</span>
 	</div>
 {:else if kind === 'forbidden'}
 	<div class="activity-state" role="alert">
-		<strong>Activity isn’t available in this scope</strong>
-		<span>You don’t have access to this scope.</span>
+		<strong>Activity isn’t available in this {scopeNoun}</strong>
+		<span>You don’t have access to this {scopeNoun}.</span>
 	</div>
 {:else if kind === 'not-found'}
 	<div class="activity-state" role="alert">
-		<strong>This selected scope is no longer available</strong>
-		<span>Choose a current scope to continue.</span>
+		<strong>This {scopeNoun} isn’t available</strong>
+		<span>Choose another {scopeNoun}.</span>
 		{#if canGoWorkspace}
 			<Button variant="secondary" size="sm" onclick={onGoWorkspace}>Back to Workspace</Button>
 		{/if}
@@ -55,7 +56,7 @@
 {:else}
 	<div class="activity-state empty">
 		<strong>No plan work yet</strong>
-		<span>This scope has no plans to show yet.</span>
+		<span>This {scopeNoun} has no plans.</span>
 	</div>
 {/if}
 
