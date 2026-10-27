@@ -113,7 +113,7 @@ class AttributedFact:
     source_kind: str
     source_id: str
     source_at: str | None
-    counter: str
+    counter: str | None
     is_correction: bool
     node_id: str | None
 
@@ -128,7 +128,7 @@ def attributed_facts(db: sqlite3.Connection) -> list[AttributedFact]:
             str(row["source_kind"]),
             str(row["source_id"]),
             None if row["source_at"] is None else str(row["source_at"]),
-            str(attributes.get("asset_version")),
+            None if attributes.get("asset_version") is None else str(attributes["asset_version"]),
             attributes.get("label") == LABEL_CORRECTION,
             None if row["node_id"] is None else str(row["node_id"]),
         ))

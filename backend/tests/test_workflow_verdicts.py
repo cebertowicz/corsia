@@ -101,6 +101,28 @@ def test_not_comparable_counter_changed() -> None:
     assert (call.call, call.reason) == ("not_comparable", "counter_changed")
 
 
+def _with_state_change_fact(side: list[Run]) -> list[Run]:
+    """Each run also holds one correction seen from a state change, which no classifier counted."""
+    return [
+        replace(run, corrections=(*run.corrections, CorrectionFact("self_caught", f"{run.run_id}-failed", _at(9), None, True)))
+        for run in side
+    ]
+
+
+def test_a_state_change_correction_never_changes_which_classifier_counted() -> None:
+    call = corrections_call(_with_state_change_fact(runs("v2", 1)), _with_state_change_fact(runs("v1", 1)))
+
+    assert call.call != "not_comparable"
+    assert call.values == (2.0, 2.0)  # one classifier correction plus one state change in each run
+
+
+def test_a_window_with_only_state_change_corrections_counts_them() -> None:
+    call = corrections_call(_with_state_change_fact(runs("v2", 0)), _with_state_change_fact(runs("v1", 0)))
+
+    assert call.call != "not_comparable"
+    assert call.values == (1.0, 1.0)
+
+
 def test_equal_ids_in_distinct_correction_source_namespaces_do_not_share_a_counter() -> None:
     run = replace(
         runs("v2", 0, count=1)[0],

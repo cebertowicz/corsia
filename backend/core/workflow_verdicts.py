@@ -41,7 +41,7 @@ class CorrectionFact:
     source_kind: str
     source_id: str
     source_at: str
-    counter: str
+    counter: str | None
     is_correction: bool
 
 
@@ -128,11 +128,15 @@ class _Sample:
 
 
 def _counter(measure: PlannedMeasure, runs: Sequence[Run]) -> str | None | bool:
-    """The one classifier version that counted every source on both sides, None for none, False if none did."""
+    """The one classifier version that counted every classifier source on both sides, None for none, False if none did.
+
+    A fact with no counter (self-caught) came from a state change, not a classifier, so it says nothing
+    about which classifier version counted.
+    """
     by_source: dict[tuple[str, str], set[str]] = defaultdict(set)
     for run in runs:
         for fact in run.corrections:
-            if run.in_window(fact.source_at, measure.window_days):
+            if fact.counter is not None and run.in_window(fact.source_at, measure.window_days):
                 by_source[(fact.source_kind, fact.source_id)].add(fact.counter)
     if not by_source:
         return None
@@ -143,7 +147,8 @@ def _counter(measure: PlannedMeasure, runs: Sequence[Run]) -> str | None | bool:
 def _sample(measure: PlannedMeasure, run: Run, counter: str | None) -> _Sample | None:
     den = 1.0 if run.outcome else 0.0
     if measure.name == CORRECTIONS:
-        count = sum(1 for fact in run.corrections if fact.is_correction and fact.counter == counter
+        count = sum(1 for fact in run.corrections
+                    if fact.is_correction and (fact.counter is None or fact.counter == counter)
                     and run.in_window(fact.source_at, measure.window_days))
         return _Sample(float(count), den, 1)
     if measure.name == COST:  # an unknown cost was already called unknown, never 0
