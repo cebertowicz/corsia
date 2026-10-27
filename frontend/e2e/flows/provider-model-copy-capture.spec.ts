@@ -38,10 +38,10 @@ test('shows model warning and checkpoint copy', async ({ page }, testInfo) => {
 		await expect(page.getByText('Run by the CLI on this computer')).toBeVisible();
 		await card.locator('.pr-expand').click();
 		const row = card.locator('.mr').filter({ hasText: 'Test model' });
-		await expect(row.getByText('Not shown in the model list: Codex isn’t connected.')).toBeVisible();
+		await expect(row.getByText('Can’t be used in chats: Codex isn’t connected.')).toBeVisible();
 		await page.screenshot({ path: testInfo.outputPath(`model-warning-${width}.png`), fullPage: true, animations: 'disabled' });
-		await expect(card.getByText('Not shown in the model list: its context window is unknown.')).toBeVisible();
-		await expect(card.getByText('Not shown in the model list: this model is unavailable right now.')).toBeVisible();
+		await expect(card.getByText('Can’t be used in chats: set its context window in this model’s details.')).toBeVisible();
+		await expect(card.getByText('Can’t be used in chats right now.')).toBeVisible();
 		await page.screenshot({ path: testInfo.outputPath(`model-other-warnings-${width}.png`), fullPage: true, animations: 'disabled' });
 		await row.getByRole('button', { name: 'Info' }).click();
 		const dialog = page.getByRole('dialog').last();
@@ -71,7 +71,7 @@ test('shows the external model missing-window warning', async ({ page }, testInf
 		await openSettingsSection(page, 'Providers');
 		const card = page.locator('[data-server-card="copy-external"]');
 		await card.locator('.pr-expand').click();
-		await expect(card.getByText('Not shown in the model list: set its context window in this model’s details.')).toBeVisible();
+		await expect(card.getByText('Can’t be used in chats: set its context window in this model’s details.')).toBeVisible();
 		await page.screenshot({ path: testInfo.outputPath(`external-window-${width}.png`), fullPage: true, animations: 'disabled' });
 	}
 });

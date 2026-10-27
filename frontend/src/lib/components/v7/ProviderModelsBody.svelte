@@ -13,7 +13,7 @@
 	} from '$lib/stores/providerModels';
 	import { loadModel, unloadModel, cancelJob } from '$lib/stores/providerModelCommands';
 	import { loadModels, workspaceModels as catalogModels } from '$lib/stores/models';
-	import { chatPickerWarning } from './modelWarning';
+	import { canEditCheckpointWindow, chatPickerWarning } from './modelWarning';
 	import { omlxAdminUrl } from '$lib/stores/providerModelUtils';
 	import {
 		canLoadAnyway as canLoadAnywayFor, checkLoad, createModelsPoller, keepLine as keepLineFor, putPinned, type PreloadInfo,
@@ -291,7 +291,7 @@
 				state={m.state}
 				meta={localDownloadMeta(m.meta, localRows.speeds?.get(m.id))}
 				caps={m.caps}
-				warning={chatPickerWarning($catalogModels, m.dbId, isExternal, provider.label) ?? keepLine(m)}
+				warning={chatPickerWarning($catalogModels, m.dbId, canEditCheckpointWindow(isExternal, isHarness, provider.name), provider.label) ?? keepLine(m)}
 				toggleOn={true}
 				{toggleLabels}
 				onToggle={() => handleToggleModel(m)}

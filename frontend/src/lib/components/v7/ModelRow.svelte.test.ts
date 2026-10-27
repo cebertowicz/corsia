@@ -14,11 +14,11 @@ describe('ModelRow warning line', () => {
 	it('shows the warning under the row', () => {
 		component = mount(ModelRow, {
 			target: document.body,
-			props: { name: 'glm-5.3', toggleOn: true, warning: 'Not shown in the model list: set its context window in this model’s details.' },
+			props: { name: 'glm-5.3', toggleOn: true, warning: 'Can’t be used in chats: set its context window in this model’s details.' },
 		});
 		flushSync();
 		const warn = document.querySelector('[role="status"]');
-		expect(warn?.textContent).toBe('Not shown in the model list: set its context window in this model’s details.');
+		expect(warn?.textContent).toBe('Can’t be used in chats: set its context window in this model’s details.');
 		expect(document.querySelector('.mr')?.classList.contains('has-warn')).toBe(true);
 	});
 

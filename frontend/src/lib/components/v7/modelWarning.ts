@@ -1,5 +1,9 @@
 import { modelAvailability, type Model } from '$lib/stores/models';
 
+export function canEditCheckpointWindow(external: boolean, labelEditable: boolean, providerName: string): boolean {
+	return external || labelEditable || providerName === 'omlx';
+}
+
 /**
  * Why an enabled provider model is missing from the chat model picker.
  *
@@ -13,7 +17,7 @@ import { modelAvailability, type Model } from '$lib/stores/models';
 export function chatPickerWarning(
 	catalog: Model[],
 	dbId: string | undefined,
-	external: boolean,
+	canEditWindow: boolean,
 	providerLabel?: string,
 ): string | null {
 	if (!dbId) return null;
@@ -22,14 +26,14 @@ export function chatPickerWarning(
 	if (!row || turn?.status !== 'unavailable') return null;
 	switch (turn.status_reason) {
 		case 'missing_context_window':
-			return external
-				? 'Not shown in the model list: set its context window in this model’s details.'
-				: 'Not shown in the model list: its context window is unknown.';
+			return canEditWindow
+				? 'Can’t be used in chats: set its context window in this model’s details.'
+				: 'Can’t be used in chats: its context window is unknown.';
 		case 'connection_unavailable':
-			return `Not shown in the model list: ${providerLabel || 'its app'} isn’t connected.`;
+			return `Can’t be used in chats: ${providerLabel || 'its provider'} isn’t connected.`;
 		case 'usage_limited':
 			return null;
 		default:
-			return 'Not shown in the model list: this model is unavailable right now.';
+			return 'Can’t be used in chats right now.';
 	}
 }

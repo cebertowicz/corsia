@@ -20,7 +20,7 @@ test('shows the remote provider connection fallback', async ({ page }, testInfo)
 		const dialog = page.getByRole('dialog').last();
 		await dialog.getByPlaceholder('100.64.1.5  ·  macbook-m4.local').fill('studio.local');
 		await dialog.getByRole('button', { name: 'Test & add', exact: true }).click();
-		await expect(dialog.getByText('Couldn’t connect to studio.local. Check the address and that the server is running.')).toBeVisible();
+		await expect(dialog.getByText('Couldn’t reach studio.local. Check the address and that the server is running.')).toBeVisible();
 		await page.screenshot({ path: testInfo.outputPath(`provider-connect-${width}.png`), fullPage: true, animations: 'disabled' });
 	}
 });

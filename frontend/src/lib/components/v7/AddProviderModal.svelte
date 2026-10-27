@@ -45,7 +45,7 @@
 		const r = await addNetworkServer(name, host, port);
 		busy = false;
 		if (!r.ok) {
-			actionError = r.message ?? `Couldn’t connect to ${host}. Check the address and that the server is running.`;
+			actionError = r.message ?? `Couldn’t reach ${host}. Check the address and that the server is running.`;
 			return;
 		}
 		await loadHostGroups();
