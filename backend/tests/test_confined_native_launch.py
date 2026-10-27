@@ -98,8 +98,8 @@ async def test_codex_review_is_still_refused_before_any_thread(child_db, native_
         "parent", {"user_id": "steve"}, "review",
         {"model": "codex/gpt-5-codex", "confinement": "review", "read_paths": [reviewed_dir]},
     )
-    assert refused == ("Error: refused: no confined launch for codex/gpt-5-codex; "
-                       "use a claude-code/* or local model.")
+    assert refused == ("Error: refused: Couldn't start this worker on codex/gpt-5-codex: "
+                       "a worker that only reads files runs on a Claude Code or local model. Switch it to one of those.")
     assert child_db.execute("SELECT COUNT(*) FROM threads").fetchone()[0] == 1
 
 
@@ -125,7 +125,8 @@ async def test_a_confined_worker_switched_to_another_harness_stays_confined(
     with pytest.raises(ConfinementRefused) as refusal:
         codex_destination_scope(worker, target_catalog_id="codex/gpt-5-codex", db=child_db)
     assert str(refusal.value) == (
-        "no confined launch for codex/gpt-5-codex: use a claude-code/* or local model"
+        "Couldn't start this worker on codex/gpt-5-codex: a worker that only reads files "
+        "runs on a Claude Code or local model. Switch it to one of those."
     )
 
     child_db.execute("UPDATE threads SET confined_read_dirs='[]' WHERE id=?", (worker,))

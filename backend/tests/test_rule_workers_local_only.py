@@ -96,8 +96,30 @@ async def test_no_local_model_ready_holds_the_start_queued(local_only, world):
         messages = db.execute("SELECT content FROM messages WHERE thread_id=? AND role='system'", (OWNER,)).fetchall()
     finally:
         db.close()
-    assert len([row for row in messages if HELD in row[0]]) == 1
+    assert [row[0] for row in messages if row[0].startswith("Held the start of ")] == [
+        "Held the start of worker-flow: this chat runs only on local models, and none is ready. "
+        "It starts as soon as one is."]
     assert world["driven"] == [OWNER]
+
+
+@pytest.mark.asyncio
+async def test_hold_notice_uses_workflow_title_when_present(local_only, monkeypatch):
+    from automation import worker_runner
+    from infra.database import get_db
+
+    rule = await make_rule()
+    await request()
+    monkeypatch.setattr("events.rule_actions.reachable_workflows",
+                        lambda *_args: {"worker-flow": SimpleNamespace(corsia={"workflow": {"title": "Review change"}})})
+    await worker_runner.drive()
+    db = get_db()
+    try:
+        messages = [row[0] for row in db.execute(
+            "SELECT content FROM messages WHERE thread_id=? AND role='system'", (OWNER,))]
+    finally:
+        db.close()
+    assert "Held the start of Review change: this chat runs only on local models, and none is ready. It starts as soon as one is." in messages
+    assert starts(rule)[0][:2] == ("queued", HELD)
 
 
 # (b) the catalog reports a local model ready: the catalog signal runs a pass that starts it.
@@ -132,9 +154,22 @@ def test_the_catalog_signal_reaches_the_runner(monkeypatch):
     monkeypatch.setattr(ws, "broadcast_all", lambda _message: None)
     monkeypatch.setattr("infra.unavailable_model_recovery.schedule_unavailable_model_recovery",
                         lambda: calls.append("recovery"))
+    monkeypatch.setattr(ws, "_model_change_callbacks", [])
     monkeypatch.setattr(worker_runner, "poke_on_catalog_change", lambda: calls.append("runner"))
+    worker_runner.poke()
     ws.notify_models_changed()
     assert calls == ["recovery", "runner"]
+
+
+def test_catalog_notification_module_does_not_import_automation():
+    import ast
+    from pathlib import Path
+    from infra.state import ws
+
+    tree = ast.parse(Path(ws.__file__).read_text())
+    imports = [node.module or "" for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)]
+    imports += [alias.name for node in ast.walk(tree) if isinstance(node, ast.Import) for alias in node.names]
+    assert not any(name == "automation" or name.startswith("automation.") for name in imports)
 
 
 # (c) an explicit local owner model is honored; a cloud one still binds a ready local model.
@@ -155,6 +190,26 @@ async def test_the_start_binds_local_honoring_a_local_owner_model(local_only, ow
     assert starts(rule)[0][:2] == ("started", None)
 
 
+@pytest.mark.asyncio
+async def test_owner_notice_names_the_local_model_used(local_only):
+    from automation import worker_runner
+    from infra.database import get_db, write_transaction
+
+    local_only.ready["models"] = (LOCAL, "omlx@local/second")
+    with write_transaction(None, scope="local_model_name") as db:
+        db.execute("UPDATE models SET display_name='Local Qwen', alias=NULL WHERE id=?", (LOCAL,))
+    await make_rule()
+    await request()
+    assert await worker_runner.drive() == 1
+    db = get_db()
+    try:
+        messages = [row[0] for row in db.execute(
+            "SELECT content FROM messages WHERE thread_id=? AND role='system'", (OWNER,))]
+    finally:
+        db.close()
+    assert "The workflow worker started on Local Qwen." in messages
+
+
 # (d) held starts keep their places and take no slot, and start oldest first once a local
 # model is ready; the batch per pass is unchanged.
 @pytest.mark.asyncio
@@ -166,20 +221,23 @@ async def test_held_starts_keep_their_order(local_only, monkeypatch):
     for name in ("first", "second", "third"):
         await request(name)
     await worker_runner.drive()
+    await worker_runner.drive()
     assert [row[:3] for row in starts(rule)] == [
         ("queued", HELD, "first"), ("queued", HELD, "second"), ("queued", HELD, "third")]
 
     local_only.ready["models"] = (LOCAL,)
+    from infra.db_async import run_in_db
+    await run_in_db(worker_runner._release_local_holds)
     assert await worker_runner.drive() == 2  # the batch: the two oldest
     assert [row[:3] for row in starts(rule)] == [
-        ("started", None, "first"), ("started", None, "second"), ("queued", HELD, "third")]
+        ("started", None, "first"), ("started", None, "second"), ("queued", None, "third")]
     assert await worker_runner.drive() == 1
     assert [row[0] for row in starts(rule)] == ["started"] * 3
 
 
 @pytest.mark.asyncio
 async def test_held_starts_never_block_a_later_unheld_one(world, monkeypatch):
-    """A pass reads on past the held starts, so a full batch of them starves no one."""
+    """A pass reads no held start, even when more than a batch precedes one runnable start."""
     from automation import worker_runner
     from infra.db_async import run_in_db
 
@@ -192,6 +250,7 @@ async def test_held_starts_never_block_a_later_unheld_one(world, monkeypatch):
         db.execute("INSERT INTO threads (id,user_id,title,model,project_id,created_at,updated_at) "
                    "VALUES ('free-owner','user-1','Free','claude-code/sonnet',?,'t','t')", (world['project'],))
         db.execute("UPDATE event_route_decisions SET thread_id='free-owner' WHERE request_identity='free'")
+        db.execute("UPDATE event_route_decisions SET reason=? WHERE request_identity LIKE 'held-%'", (HELD,))
     calls = []
     def locality(_conn, owner, _ready):
         calls.append(owner['id'])
@@ -199,7 +258,7 @@ async def test_held_starts_never_block_a_later_unheld_one(world, monkeypatch):
     monkeypatch.setattr(worker_runner, "_local_model", locality)
     claimed = await run_in_db(worker_runner._claim)
     assert [row["request_identity"] for row, _input in claimed] == ["free"]
-    assert calls == [OWNER, 'free-owner']
+    assert calls == ['free-owner']
     assert [row[:3] for row in starts(rule)] == [
         ("queued", HELD, "held-1"), ("queued", HELD, "held-2"), ("queued", HELD, "held-3"),
         ("started", None, "free")]

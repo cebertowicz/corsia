@@ -36,14 +36,13 @@ from __future__ import annotations
 import asyncio
 import json
 import sqlite3
-import uuid
 from collections.abc import Mapping
 from typing import Any
 
 from loguru import logger
 
 from automation import worker_inputs as inputs
-from automation import worker_settle
+from automation import worker_notices, worker_settle
 from events import rule_runs, worker_starts
 from events.rule_outcomes import NO_RESULT, REFUSED, SKIPPED
 from infra.database import write_transaction
@@ -76,6 +75,9 @@ def poke(*, if_open: bool = False) -> None:
     """Run a pass soon (with ``if_open``, only while the last pass left a start open); one
     already running runs once more instead of a second starting. Best-effort: it never
     raises and never waits for the pass."""
+    from infra.state.ws import on_models_changed
+
+    on_models_changed(poke_on_catalog_change)
     if if_open and not _state["open"]:
         return
     try:
@@ -98,12 +100,22 @@ def poke_on_catalog_change() -> None:
     import infra.app_loop as app_loop
 
     async def _on_loop() -> None:
+        from infra.local_only import ready_local_selectors
+
+        if await run_in_db(ready_local_selectors):
+            await run_in_db(_release_local_holds)
         poke(if_open=True)
 
     try:
         app_loop.submit(_on_loop())
     except app_loop.AppLoopUnavailable:
         pass  # no loop, no runner: the continuation sweep runs a pass after a start
+
+
+def _release_local_holds() -> None:
+    with write_transaction(None, scope="worker_starts_release_local") as conn:
+        conn.execute("UPDATE event_route_decisions SET reason=NULL "
+                     "WHERE outcome='queued' AND request_identity IS NOT NULL AND reason=?", (HELD_LOCAL,))
 
 
 async def _passes() -> None:
@@ -125,11 +137,13 @@ async def drive() -> int:
         for row in await run_in_db(_read, worker_starts.orphans):
             if row["worker_thread_id"] is None or _LIVE.get(row["worker_thread_id"]) is None:
                 await _end(row, json.loads(row["run_input"] or "{}"), NO_RESULT, _RESTARTED)
-        notices: list[str] = []
+        notices: list[Mapping[str, Any]] = []
         claimed = await run_in_db(_claim, None, notices)
         if notices:
             from automation import script_runner
-            for owner in dict.fromkeys(notices):
+            for row in notices:
+                await run_in_db(worker_notices.notice_hold, row)
+            for owner in dict.fromkeys(row["thread_id"] for row in notices):
                 await script_runner._drive_owner(owner)
         claimed_ids = {row["id"] for row, _run_input in claimed}
         made = 0
@@ -170,10 +184,10 @@ def _free(conn: sqlite3.Connection) -> int:
     return get_max_concurrent_live() - len(working_thread_ids(db=conn))
 
 
-def _claim(db: sqlite3.Connection | None = None, notices: list[str] | None = None) -> list[tuple[Mapping[str, Any], dict[str, Any]]]:
+def _claim(db: sqlite3.Connection | None = None, notices: list[Mapping[str, Any]] | None = None) -> list[tuple[Mapping[str, Any], dict[str, Any]]]:
     """Claim up to one queued start per free slot, oldest first. With no slot free nothing
     is written: the starts wait, and the newest of them is remembered as having waited.
-    A held start keeps its place and takes no slot, so the read goes on past it."""
+    Held starts are excluded until a catalog change makes a local model ready."""
     from infra.queries import get_thread
 
     claimed: list[tuple[Mapping[str, Any], dict[str, Any]]] = []
@@ -186,26 +200,21 @@ def _claim(db: sqlite3.Connection | None = None, notices: list[str] | None = Non
         ready: list[tuple[str, ...]] = []
         locality: dict[str, str | bool | None] = {}
         owners: dict[str, Any] = {}
-        after, limit = 0, min(free, BATCH)
-        while len(claimed) < limit and (rows := worker_starts.queued(conn, limit - len(claimed), after)):
-            for row in rows:
-                after = row["id"]
-                owner_id = row["thread_id"]
-                if owner_id not in owners:
-                    owners[owner_id] = get_thread(owner_id, db=conn)
-                skipped = _skip(conn, row, owners[owner_id])
-                if skipped is not None:
-                    worker_starts.end(conn, row["id"], SKIPPED, skipped)
-                else:
-                    if owner_id not in locality:
-                        locality[owner_id] = _local_model(conn, owners[owner_id], ready)
-                    if locality[owner_id] is False:
-                        if worker_starts.hold(conn, row["id"], HELD_LOCAL):
-                            _notice_hold(conn, row)
-                            if notices is not None:
-                                notices.append(owner_id)
-                    elif (run_input := worker_starts.claim(conn, row["id"])) is not None:
-                        claimed.append((row, run_input))
+        for row in worker_starts.queued(conn, min(free, BATCH)):
+            owner_id = row["thread_id"]
+            if owner_id not in owners:
+                owners[owner_id] = get_thread(owner_id, db=conn)
+            skipped = _skip(conn, row, owners[owner_id])
+            if skipped is not None:
+                worker_starts.end(conn, row["id"], SKIPPED, skipped)
+            else:
+                if owner_id not in locality:
+                    locality[owner_id] = _local_model(conn, owners[owner_id], ready)
+                if locality[owner_id] is False:
+                    if worker_starts.hold(conn, row["id"], HELD_LOCAL) and notices is not None:
+                        notices.append(dict(row))
+                elif (run_input := worker_starts.claim(conn, row["id"])) is not None:
+                    claimed.append((row, run_input))
     return claimed
 
 
@@ -299,8 +308,9 @@ async def _start(row: Mapping[str, Any], run_input: dict[str, Any]) -> int:
         await run_in_db(_requeue, row["thread_id"], row["id"])
         return 0
     except _HeldLocal:
-        held = await run_in_db(_requeue, row["thread_id"], row["id"], HELD_LOCAL, row)
+        held = await run_in_db(_requeue, row["thread_id"], row["id"], HELD_LOCAL)
         if held:
+            await run_in_db(worker_notices.notice_hold, row)
             from automation import script_runner
             await script_runner._drive_owner(row["thread_id"])
         return 0
@@ -313,6 +323,10 @@ async def _start(row: Mapping[str, Any], run_input: dict[str, Any]) -> int:
             logger.warning("worker start {} was refused: {}", row["id"], started)
             cause = _SPAWN_FAILED
         return await _refuse(row, run_input, cause, waited)
+    if found["model"] != found["owner"].get("model"):
+        await run_in_db(worker_notices.notice_model, row, found["model"])
+        from automation import script_runner
+        await script_runner._drive_owner(row["thread_id"])
     return 1
 
 
@@ -321,25 +335,12 @@ def _made(decision_id: int, worker: str, check: str) -> None:
         worker_starts.made(conn, decision_id, worker, check)
 
 
-def _notice_hold(conn: sqlite3.Connection, row: Mapping[str, Any]) -> None:
-    """Tell the owner that this start is waiting, without settling it."""
-    from infra.input_admission import accept_thread_input
-
-    accept_thread_input(
-        row["thread_id"], role="system", intent="apply_now", message_id=str(uuid.uuid4()),
-        content=f"A rule's start for {row['workflow_id']} is {HELD_LOCAL}; it will start when a local model is ready.",
-        db=conn,
-    )
-
-
-def _requeue(owner: str, decision_id: int, held: str | None = None,
-             row: Mapping[str, Any] | None = None) -> bool:
+# The queue's write transaction never reads workflow files; notices run afterward.
+def _requeue(owner: str, decision_id: int, held: str | None = None) -> bool:
     entered = False
     with write_transaction(None, scope="worker_starts_requeue") as conn:
         if worker_starts.requeue(conn, decision_id) and held:
             entered = worker_starts.hold(conn, decision_id, held)
-            if entered and row is not None:
-                _notice_hold(conn, row)
     _remove_inputs(owner, decision_id)
     return entered
 

@@ -261,7 +261,11 @@ async def _native_read_dirs(
     if confinement == CONFINEMENT_NONE:
         return ()
     if is_codex_backed({"model": model}):
-        return f"Error: refused: no confined launch for {model}; use a claude-code/* or local model."
+        from llm.catalog import get_display_name
+        from subagents.cc_confinement import unsupported_model_message
+
+        name = await run_in_db(get_display_name, model)
+        return f"Error: refused: {unsupported_model_message(name)}"
     working_dir, _project = await run_in_db(resolve_spawn_working_dir, parent_thread_id)
     try:
         return await asyncio.to_thread(require_readable_dirs, read_paths, working_dir)

@@ -17,6 +17,7 @@ def _legacy_db() -> sqlite3.Connection:
     initialize_schema(db)
     db.execute("ALTER TABLE threads DROP COLUMN confinement")
     db.execute("ALTER TABLE threads DROP COLUMN confined_read_dirs")
+    db.execute("DROP INDEX IF EXISTS idx_event_route_decisions_unheld_starts")
     db.execute("PRAGMA user_version=153")
     db.execute("INSERT INTO users (id,password_hash,created_at,password_changed_at) VALUES ('u','x','t','t')")
     db.execute("INSERT INTO threads (id,user_id,title,created_at,updated_at) VALUES ('old','u','t','t','t')")
@@ -41,6 +42,10 @@ def test_v154_upgrade_leaves_existing_threads_unconfined_and_matches_fresh() -> 
         assert migrate_to_current(db, SCHEMA_VERSION).to_version == 154
         assert sorted(_columns(db)) == sorted(_columns(fresh))
         assert thread_confinement.read_dirs("old", db) is None
+        plan = db.execute("EXPLAIN QUERY PLAN SELECT id FROM event_route_decisions "
+                          "WHERE outcome=? AND request_identity IS NOT NULL AND reason IS NULL "
+                          "ORDER BY id LIMIT ?", ("queued", 8)).fetchall()
+        assert any("idx_event_route_decisions_unheld_starts" in row[3] for row in plan)
         assert migrate_to_current(db, SCHEMA_VERSION).migrated is False
     finally:
         db.close()
@@ -74,6 +79,22 @@ def test_v154_carries_an_older_claude_code_review_childs_confinement_onto_its_ro
         assert thread_confinement.read_dirs("old", db) is None
         with pytest.raises(thread_confinement.ConfinementRecordDamaged):
             thread_confinement.read_dirs("empty", db)  # fails closed, never unconfined
+    finally:
+        db.close()
+
+
+def test_damaged_legacy_session_refuses_launch() -> None:
+    from subagents.cc_confinement import ConfinementRefused, launch_confinement
+
+    db = _legacy_db()
+    try:
+        _cc_session(db, "old", "broken", {}, "1")
+        db.execute("UPDATE artifact_identities SET metadata='not json' WHERE id='broken'")
+        db.commit()
+        migrate_to_current(db, SCHEMA_VERSION)
+        db.row_factory = sqlite3.Row
+        with pytest.raises(ConfinementRefused):
+            launch_confinement("old", None, db)
     finally:
         db.close()
 

@@ -327,7 +327,7 @@ async def test_delegate_task_review_needs_paths_and_a_claude_code_model(child_db
         "parent", {}, "task",
         {"model": "codex/gpt-5-codex", "confinement": "review", "read_paths": ["/w"]},
     )
-    assert codex.startswith("Error: refused: no confined launch for ")
+    assert codex.startswith("Error: refused: Couldn't start this worker on ")
 
 
 def test_unconfined_launch_is_unchanged():

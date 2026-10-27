@@ -62,6 +62,17 @@ def confined() -> bool:
     return _roots.get() is not None
 
 
+def confined_thread_owner(path: Path) -> str | None:
+    """The owner of an explicitly granted thread directory containing this search."""
+    from core.workspace_layout import thread_tray_owners
+
+    for root in _roots.get() or ():
+        owners = thread_tray_owners(root)
+        if owners and len(set(owners)) == 1 and path.is_relative_to(root):
+            return owners[0]
+    return None
+
+
 def check(given: Path, resolved: Path, *, for_write: bool) -> None:
     """Refuse a confined call's write, or a path outside its read roots (as given and resolved)."""
     roots = _roots.get()

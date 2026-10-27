@@ -196,15 +196,23 @@ def broadcast_all(message: dict):
                 _schedule_send(ws_ref, message)
 
 
+_model_change_callbacks: list[Callable[[], None]] = []
+
+
+def on_models_changed(callback: Callable[[], None]) -> None:
+    """Register an idempotent catalog-change listener."""
+    if callback not in _model_change_callbacks:
+        _model_change_callbacks.append(callback)
+
+
 def notify_models_changed() -> None:
-    """Broadcast catalog changes, resume any now-runnable held FIFO heads, and let the
-    worker runner start a Local only start a newly ready local model can take."""
+    """Broadcast catalog changes and notify subscribers."""
     broadcast_all({"type": "models_updated"})
-    from automation.worker_runner import poke_on_catalog_change
     from infra.unavailable_model_recovery import schedule_unavailable_model_recovery
 
     schedule_unavailable_model_recovery()
-    poke_on_catalog_change()
+    for callback in tuple(_model_change_callbacks):
+        callback()
 
 
 def notify_devices_updated() -> None:

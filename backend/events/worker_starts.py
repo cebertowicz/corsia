@@ -92,8 +92,8 @@ def any_open(db: sqlite3.Connection | None = None) -> bool:
     ).fetchone() is not None
 
 
-def queued(db: sqlite3.Connection, limit: int, after: int = 0) -> list[Mapping[str, Any]]:
-    """Up to ``limit`` queued starts newer than ``after``, oldest first, with their rule's
+def queued(db: sqlite3.Connection, limit: int) -> list[Mapping[str, Any]]:
+    """Up to ``limit`` unheld queued starts, oldest first, with their rule's
     workflow and whether it is still on. No start's input is read here."""
     if limit <= 0:
         return []
@@ -102,8 +102,8 @@ def queued(db: sqlite3.Connection, limit: int, after: int = 0) -> list[Mapping[s
         "d.event_type, d.artifact_integration, d.artifact_type, d.artifact_external_id, "
         "r.workflow_id, r.enabled "
         "FROM event_route_decisions d LEFT JOIN event_rules r ON r.id=d.rule_id "
-        "WHERE d.outcome=? AND d.request_identity IS NOT NULL AND d.id>? ORDER BY d.id LIMIT ?",
-        (QUEUED, after, limit),
+        "WHERE d.outcome=? AND d.request_identity IS NOT NULL AND d.reason IS NULL ORDER BY d.id LIMIT ?",
+        (QUEUED, limit),
     ).fetchall()
 
 

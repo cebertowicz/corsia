@@ -122,6 +122,32 @@ async def test_confined_grep_and_glob_stay_in_the_grant(tree) -> None:
     assert "id_ed25519" not in str(linked)
 
 
+@pytest.mark.asyncio
+async def test_default_search_finds_worker_inputs_but_not_another_thread(tree) -> None:
+    from tools.glob import GlobTool
+    from tools.grep import GrepTool
+
+    inputs = tree.workspace / ".threads" / "owner" / "workers" / "1"
+    other = tree.workspace / ".threads" / "other"
+    inputs.mkdir(parents=True)
+    other.mkdir(parents=True)
+    (inputs / "brief.md").write_text("worker input needle", encoding="utf-8")
+    (other / "secret.md").write_text("other needle", encoding="utf-8")
+    with confined_reads.scope(_review(inputs)):
+        grep = GrepTool(workspace=tree.workspace)
+        glob = GlobTool(workspace=tree.workspace)
+        found = await grep.execute(pattern="needle", path=str(inputs), _thread_id="worker")
+        listed = await glob.execute(pattern="**/*.md", path=str(inputs), _thread_id="worker")
+        refused = await grep.execute(pattern="needle", path=str(other), _thread_id="worker")
+    assert "brief.md" in found and "secret.md" not in found
+    assert "brief.md" in listed and "secret.md" not in listed
+    assert "outside this confined worker's read paths" in refused
+    with confined_reads.scope(_review(tree.workspace)):
+        broad = await glob.execute(pattern="**/*.md", path=str(tree.workspace),
+                                   all_threads=True, _thread_id="worker")
+    assert "secret.md" not in broad and "brief.md" not in broad
+
+
 def test_only_the_read_tools_pass_the_boundary() -> None:
     review = _review(Path("/tmp/grant"))
     for name in confined_reads.REVIEW_READ_TOOLS:

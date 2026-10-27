@@ -17,6 +17,12 @@ class ConfinementRefused(ValueError):
     """A confined launch cannot be given the reads or record it needs."""
 
 
+def unsupported_model_message(model_name: str) -> str:
+    """The shared refusal for a model unable to launch a read-only worker."""
+    return (f"Couldn't start this worker on {model_name}: a worker that only reads files "
+            "runs on a Claude Code or local model. Switch it to one of those.")
+
+
 def review_working_dir(thread_id: str, project_id: str | None, db) -> str:
     """Create and return the child's own empty ``confined`` directory.
 

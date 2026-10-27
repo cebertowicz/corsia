@@ -346,9 +346,9 @@ async def run_native_iteration(
 ) -> tuple[int, list[str]]:
     """Run the existing Native phases and return span-level loop attributes."""
     from infra.db_async import run_in_db
-    from infra.queries import get_thread
+    from infra.queries import get_native_turn_thread_context
 
-    row = await run_in_db(get_thread, thread_id)
+    row = await run_in_db(get_native_turn_thread_context, thread_id)
     thread_context = dict(row) if row is not None else None
     project_id = thread_context.get("project_id") if thread_context else None
     thread_token = runtime_state._current_thread_id.set(thread_id)

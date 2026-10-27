@@ -15,7 +15,8 @@ from subagents.codex_destination import (
     build_prepared_codex_destination,
     validate_live_compaction,
 )
-from subagents.cc_confinement import ConfinementRefused
+from subagents.cc_confinement import ConfinementRefused, unsupported_model_message
+from thread.model_row import _display_model
 from subagents.codex_runtime_errors import CodexPreparedContextStale
 from subagents.codex_runtime_state import (
     _APP_SESSIONS,
@@ -50,12 +51,8 @@ def codex_destination_scope(
     if row is None:
         raise CodexPreparedContextStale("Codex destination thread no longer exists")
     if row["confinement"] is not None:
-        raise ConfinementRefused(f"no confined launch for {target_catalog_id}: use a claude-code/* or local model")
-    selected_model = (
-        target_catalog_id
-        if expected_selected_model is None
-        else expected_selected_model
-    )
+        raise ConfinementRefused(unsupported_model_message(_display_model(db, target_catalog_id)))
+    selected_model = target_catalog_id if expected_selected_model is None else expected_selected_model
     if str(row["model"] or "") != selected_model:
         raise CodexPreparedContextStale(
             "Codex destination model changed before context rendering"
