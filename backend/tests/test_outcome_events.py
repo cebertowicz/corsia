@@ -302,6 +302,7 @@ def test_only_registered_events_are_the_test_seed_and_the_github_intake():
         "github.issue.labeled", "github.issue.unlabeled", "github.pr.labeled", "github.pr.unlabeled",
         "measurement.size_rating",
         "measurement.correction", "measurement.lesson_gate",
+        "learning_loop.correction_triage", "learning_loop.correction_outcome",
         "measurement.verdict.planned", "measurement.verdict.reached",
         "lesson.carry_in.saved", "lesson.carry_in.saved_processed",
         "lesson.carry_in.pending", "lesson.carry_in.claimed", "lesson.carry_in.waiting",
