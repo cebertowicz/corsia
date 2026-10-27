@@ -74,8 +74,11 @@ def test_installed_cli_script_surface_is_enumerated():
     help_text = subprocess.run([executable, "--help"], capture_output=True, text=True, check=True).stdout
     reference = subprocess.run([executable, "skills", "get", "core", "--full"],
                                capture_output=True, text=True, check=True).stdout
-    js_entries = set(re.findall(r"(?m)^\s*(eval|--[\w-]+)\s+<js>", help_text))
-    assert js_entries == {"eval", "--restore-check-fn"}
+    js_entries = set(re.findall(
+        r"(?im)^\s*(eval|--[\w-]+)\b[^\n]*(?:<js>|javascript|js expression|init scripts?|extensions?)",
+        help_text,
+    ))
+    assert js_entries == {"eval", "--restore-check-fn", "--init-script", "--extension", "--enable"}
     assert "agent-browser wait --fn" in reference and "(or -f)" in reference
     assert "agent-browser addinitscript <js>" in reference
     assert all(commands._script_request(request) for request in SCRIPT_REQUESTS)
