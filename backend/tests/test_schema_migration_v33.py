@@ -24,7 +24,7 @@ def _columns(db) -> set[str]:
 def test_fresh_schema_has_provider_reset_columns():
     with closing(sqlite3.connect(":memory:")) as db:
         initialize_schema(db)
-        assert SCHEMA_VERSION == 150
+        assert SCHEMA_VERSION == 151
         assert _RESET_COLUMNS <= _columns(db)
 
 

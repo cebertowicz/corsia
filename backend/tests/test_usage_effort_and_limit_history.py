@@ -202,7 +202,7 @@ def test_the_history_index_serves_an_account_window_between_two_times(isolated_d
 
 
 def test_the_step_is_registered_at_97() -> None:
-    assert SCHEMA_VERSION == 150
+    assert SCHEMA_VERSION == 151
     assert MIGRATIONS[97] is migrate_97_to_98
 
 

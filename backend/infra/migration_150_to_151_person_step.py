@@ -1,4 +1,4 @@
-"""Schema 149 -> 150: allow person-step thread update cards.
+"""Schema 150 -> 151: allow person-step thread update cards.
 
 Runs inside the startup migration transaction. Preserve the existing table's
 rows, indexes, triggers, and AUTOINCREMENT high-water mark.
@@ -9,7 +9,7 @@ from __future__ import annotations
 import sqlite3
 
 
-def migrate_149_to_150(conn: sqlite3.Connection) -> None:
+def migrate_150_to_151(conn: sqlite3.Connection) -> None:
     row = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='thread_updates'").fetchone()
     if row is None:
         return
