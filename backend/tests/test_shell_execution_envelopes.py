@@ -369,8 +369,12 @@ def test_safehouse_nested_write_deny_overrides_granted_root(
     root = (short_system_temp / "workspace").resolve()
     denied = root / "denied"
     denied.mkdir(parents=True)
+    secret = denied / "existing"
+    secret.write_text("denied content", encoding="utf-8")
+    readable = root / "readable"
+    readable.write_text("allowed content", encoding="utf-8")
     profile = short_system_temp / "deny.sb"
-    profile.write_text(f'(deny file-write* (subpath "{denied}"))\n', encoding="utf-8")
+    profile.write_text(f'(deny file-read* file-write* (subpath "{denied}"))\n', encoding="utf-8")
     options = [f"--workdir={root}" if grant == "workdir" else "--workdir="]
     if grant == "add-dirs":
         options.append(f"--add-dirs={root}")
@@ -381,6 +385,21 @@ def test_safehouse_nested_write_deny_overrides_granted_root(
              f"--append-profile={profile}", "--", "/usr/bin/touch", str(path)],
             cwd=root, capture_output=True, text=True, timeout=20,
         )
+
+    for path, content, allowed in (
+        (readable, "allowed content", True),
+        (secret, "denied content", False),
+    ):
+        result = subprocess.run(
+            [safehouse, *options, "--trust-workdir-config=false",
+             f"--append-profile={profile}", "--", "/bin/cat", str(path)],
+            cwd=root, capture_output=True, text=True, timeout=20,
+        )
+        if allowed:
+            assert result.returncode == 0 and content in result.stdout, result.stderr
+        else:
+            assert result.returncode != 0, "nested deny did not prevent the read"
+            assert content not in result.stdout
 
     control = root / "allowed"
     result = touch(control)
