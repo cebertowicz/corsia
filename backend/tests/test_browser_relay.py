@@ -1,5 +1,6 @@
 """Exercise input and reliable results while navigation is still running."""
 import asyncio
+import contextlib
 import json
 
 import pytest
@@ -166,6 +167,41 @@ async def test_relay_exit_keeps_running_navigation_alive(monkeypatch):
         assert not cancelled.is_set()
     finally:
         browser_stream._runners.clear()
+
+
+@pytest.mark.asyncio
+async def test_a_slow_pointer_move_lets_later_moves_collapse_but_never_a_click(monkeypatch):
+    def mouse(kind, x):
+        return {"type": "input_mouse", "eventType": kind, "x": x, "y": 1, "button": "none" if kind == "mouseMoved" else "left"}
+
+    sent = [mouse("mouseMoved", 1), mouse("mouseMoved", 2), mouse("mouseMoved", 3), mouse("mousePressed", 3),
+            mouse("mouseReleased", 3), mouse("mouseMoved", 4), mouse("mouseMoved", 5)]
+    moving, read_all = asyncio.Event(), asyncio.Event()
+
+    class Pane(FakePane):
+        async def receive_text(self):
+            if len(self.messages) < len(sent):
+                await moving.wait()
+            if self.messages:
+                return self.messages.pop(0)
+            read_all.set()
+            raise WebSocketDisconnect()
+
+    delivered = []
+
+    async def mouse_event(_thread_id, event, _connection_token):
+        # Chrome takes a move only after its next frame; the pane keeps sending meanwhile.
+        moving.set()
+        if not delivered:
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(read_all.wait(), 0.5)
+        delivered.append((event["eventType"], event["x"]))
+
+    monkeypatch.setattr(browser_stream.browser_pane, "mouse_event", mouse_event)
+    with pytest.raises(WebSocketDisconnect):
+        await asyncio.wait_for(browser_stream._relay(Pane([json.dumps(event) for event in sent]), "thread", "user"), 2)
+    # Only moves another move replaced are dropped; the click and the final position all arrive, in order.
+    assert delivered == [("mouseMoved", 1), ("mouseMoved", 3), ("mousePressed", 3), ("mouseReleased", 3), ("mouseMoved", 5)]
 
 
 @pytest.mark.asyncio

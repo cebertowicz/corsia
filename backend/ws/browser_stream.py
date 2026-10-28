@@ -2,12 +2,13 @@
 from __future__ import annotations
 
 import asyncio
+import collections
 import contextlib
 import json
 import logging
 import secrets
 from functools import partial
-from typing import Awaitable, Callable
+from typing import AsyncIterator, Awaitable, Callable
 
 from fastapi import WebSocket, WebSocketDisconnect
 from websockets.exceptions import WebSocketException
@@ -189,25 +190,21 @@ async def _relay(pane: WebSocket, thread_id: str, user_id: str) -> None:
                                    session=partial(browser_pane.session_identity, thread_id))
 
     async def from_pane() -> None:
-        while True:
-            message = await pane.receive_text()
-            try:
-                data = json.loads(message)
-            except (TypeError, ValueError):
-                continue
-            kind = data.get("type") if isinstance(data, dict) else None
-            if kind == "navigate":
-                _request_navigate(thread_id, connection_token, data, report)
-            elif kind == "appearance":
-                _request_match(thread_id, connection_token, data)
-            elif kind == "input_mouse":
-                # CDP serializes pointer and key delivery on the page target, so typing cannot
-                # overtake the click that focuses its field.
-                await browser_pane.mouse_event(thread_id, data, connection_token)
-                browser_control.person_input(thread_id)
-            elif kind == "input_keyboard":
-                await browser_pane.key_event(thread_id, data, connection_token)
-                browser_control.person_input(thread_id)
+        async with contextlib.aclosing(_pane_messages(pane)) as messages:
+            async for data in messages:
+                kind = data.get("type")
+                if kind == "navigate":
+                    _request_navigate(thread_id, connection_token, data, report)
+                elif kind == "appearance":
+                    _request_match(thread_id, connection_token, data)
+                elif kind == "input_mouse":
+                    # CDP serializes pointer and key delivery on the page target, so typing cannot
+                    # overtake the click that focuses its field.
+                    await browser_pane.mouse_event(thread_id, data, connection_token)
+                    browser_control.person_input(thread_id)
+                elif kind == "input_keyboard":
+                    await browser_pane.key_event(thread_id, data, connection_token)
+                    browser_control.person_input(thread_id)
 
     tasks: set[asyncio.Task] = set()
     try:
@@ -234,6 +231,55 @@ async def _relay(pane: WebSocket, thread_id: str, user_id: str) -> None:
             del _latest_appearance[thread_id]
         browser_pane.clear_page_endpoint(thread_id, connection_token)
         browser_control.pane_disconnected(thread_id, connection_token)
+
+
+async def _pane_messages(pane: WebSocket) -> AsyncIterator[dict]:
+    """The pane's messages in the order sent, less each pointer move a later queued move replaces.
+
+    Chrome answers a pointer move only after its next frame, tens of milliseconds, while the pane
+    sends one per animation frame; delivered one at a time, moves pile up and a click behind them
+    lands seconds late. So the pane is read while earlier messages are delivered, and a move with
+    another move queued right behind it is dropped. Nothing else is dropped or reordered, and the
+    pane's disconnect is raised only after everything it sent first.
+    """
+    received: collections.deque[dict | Exception] = collections.deque()
+    arrived = asyncio.Event()
+
+    reader = asyncio.create_task(_receive_pane_messages(pane, received, arrived))
+    try:
+        while True:
+            await arrived.wait()
+            arrived.clear()
+            while received:
+                data = received.popleft()
+                if isinstance(data, Exception):
+                    raise data
+                if _is_move(data) and received and _is_move(received[0]):
+                    continue
+                yield data
+    finally:
+        reader.cancel()
+        await asyncio.gather(reader, return_exceptions=True)
+
+
+async def _receive_pane_messages(pane: WebSocket, received: collections.deque[dict | Exception],
+                                 arrived: asyncio.Event) -> None:
+    try:
+        while True:
+            try:
+                data = json.loads(await pane.receive_text())
+            except (TypeError, ValueError):
+                continue
+            if isinstance(data, dict):
+                received.append(data)
+                arrived.set()
+    except Exception as exc:
+        received.append(exc)
+        arrived.set()
+
+
+def _is_move(data: dict | Exception) -> bool:
+    return isinstance(data, dict) and data.get("type") == "input_mouse" and data.get("eventType") == "mouseMoved"
 
 
 async def _close_on_overflow(pane: WebSocket, overflow: asyncio.Event) -> None:
