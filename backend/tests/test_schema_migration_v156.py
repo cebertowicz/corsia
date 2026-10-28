@@ -105,6 +105,36 @@ def test_repaired_session_matches_forward_release(integration, kind):
         forward.close()
 
 
+def test_persistent_parent_recovers_own_session_after_review_worker_rehome():
+    from subagents.cc_runtime_helpers import _artifact_cc_session_id
+
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    db.executescript(SCHEMA_SQL)
+    db.execute("INSERT INTO threads (id,user_id,agent_enabled,created_at,updated_at) "
+               "VALUES ('parent','u',1,'t','t')")
+    db.execute("INSERT INTO threads (id,user_id,spawned_by,lifecycle_state,created_at,updated_at) "
+               "VALUES ('worker','u','parent','archived','t','t')")
+    db.commit()
+    models.register_artifact(integration="claude-code", type="session", external_id="parent-session",
+                             parent_thread_id="parent", db=db)
+    child = dict(integration="claude-code", type="session", external_id="worker-session")
+    models.register_artifact(**child, parent_thread_id="worker", db=db, metadata={
+        "claude_invocation": {"confinement": "review", "add_dirs": ["/src"]}})
+    rehome_artifact(**child, new_owner_thread_id="parent", actor_thread_id=None,
+                    authority="thread_lifecycle", reason="thread_ended:archived",
+                    source_path="registry.ownership.rehome_on_thread_end", db=db)
+    db.execute("UPDATE artifact_identities SET updated_at='9999' WHERE external_id='worker-session'")
+    assert _artifact_cc_session_id("parent", db) == "worker-session"
+    migrate_154_to_155(db)
+    assert thread_confinement.read_dirs("parent", db) == ("/src",)
+    migrate_155_to_156(db)
+    assert thread_confinement.read_dirs("parent", db) is None
+    assert thread_confinement.read_dirs("worker", db) == ("/src",)
+    assert _artifact_cc_session_id("parent", db) == "parent-session"
+    db.close()
+
+
 @pytest.mark.parametrize("own_review", [False, True])
 def test_backfilled_spawned_parent_is_repaired_even_with_own_record(own_review):
     db = sqlite3.connect(":memory:")
