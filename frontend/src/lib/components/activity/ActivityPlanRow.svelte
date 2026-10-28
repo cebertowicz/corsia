@@ -171,7 +171,7 @@
 					{:else if setAside}
 						<span class="set-aside">{setAside}</span>
 					{:else}
-						<span>{row.ownerType === 'agent' ? 'Agent' : 'Thread'}</span>
+						<span>{row.ownerType === 'agent' ? 'Agent' : 'Chat'}</span>
 					{/if}
 				</span>
 				<!-- One group, so a narrow row can set the state under the name instead of

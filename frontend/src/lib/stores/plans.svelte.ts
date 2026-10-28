@@ -29,6 +29,7 @@ import type {
 	OperatorReadOutcome,
 } from '$lib/api/plans';
 import { deferRefresh, forgetSpacing, noteStarted, spacingWaitMs } from './planRefreshSpacing';
+import { planClosedMessage } from './planClosedMessage';
 import { isActivityKey, planKeyString, type ActivityKey, type ActivityKeyString, type OperatorKey, type OperatorKeyString, type PlanKey, type PlanKeyString } from './planKeys';
 
 /**
@@ -133,13 +134,6 @@ function ownerThreadIdFor(
 	return null;
 }
 
-/** Outcomes a retry cannot change; each names what would. */
-const CLOSED_MESSAGES = {
-	'not-found': 'This selected scope is no longer available.',
-	unauthorized: 'Sign-in required.',
-	forbidden: 'You do not have access to this scope.',
-} as const;
-
 function applyOutcome(key: PlanKey, keyStr: string, outcome: PlanReadOutcome) {
 	if (outcome.status === 'fresh') {
 		const expectedVersion = isActivityKey(key) ? 1 : 2;
@@ -161,7 +155,7 @@ function applyOutcome(key: PlanKey, keyStr: string, outcome: PlanReadOutcome) {
 	if (outcome.status !== 'error') {
 		patch(keyStr, {
 			status: outcome.status, refreshing: false, payload: null, etag: null,
-			ownerThreadId: null, errorMessage: CLOSED_MESSAGES[outcome.status],
+			ownerThreadId: null, errorMessage: planClosedMessage(key, outcome.status),
 		});
 		return;
 	}
@@ -188,8 +182,8 @@ async function issue(key: PlanKey, keyStr: string, myId: number): Promise<void> 
 	const before = peekEntry(keyStr);
 	if (!bearer) {
 		patch(keyStr, before.payload
-			? { status: 'stale', refreshing: false, errorMessage: CLOSED_MESSAGES.unauthorized }
-			: { status: 'unauthorized', refreshing: false, payload: null, errorMessage: CLOSED_MESSAGES.unauthorized });
+			? { status: 'stale', refreshing: false, errorMessage: planClosedMessage(key, 'unauthorized') }
+			: { status: 'unauthorized', refreshing: false, payload: null, errorMessage: planClosedMessage(key, 'unauthorized') });
 		return;
 	}
 	patch(keyStr, { status: before.payload ? before.status : 'loading', refreshing: true });
