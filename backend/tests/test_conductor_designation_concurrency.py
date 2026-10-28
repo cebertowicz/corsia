@@ -13,6 +13,11 @@ import threading
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _no_shipped_rule_sync_on_minimal_database(monkeypatch):
+    monkeypatch.setattr("events.observe_rules.sync_shipped_rules", lambda *_args: None)
+
+
 class _BarrierCursor:
     def __init__(self, cursor: sqlite3.Cursor, barrier: threading.Barrier) -> None:
         self._cursor = cursor
