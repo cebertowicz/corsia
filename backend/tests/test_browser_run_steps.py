@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 
 import pytest
@@ -203,7 +204,7 @@ async def test_selector_wait_retries_until_success_or_deadline(tool, monkeypatch
 
     async def fake_sleep(seconds):
         pauses.append(seconds)
-    monkeypatch.setattr(browser_run_steps, "asyncio", SimpleNamespace(sleep=fake_sleep))
+    monkeypatch.setattr(browser_run_steps, "asyncio", SimpleNamespace(sleep=fake_sleep, to_thread=asyncio.to_thread))
     async def fake_run(args, **kwargs):
         calls.append((args, kwargs))
         if args[0] == "wait":

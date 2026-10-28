@@ -110,7 +110,7 @@ class BrowserRunStepsTool(Tool):
     """Run checked foreground setup steps through the guarded browser session."""
 
     name = "browser_run_steps"
-    description = "Run a named System or installed project or thread skill browser setup file in the visible browser. Returns a safe miss or guard result so you can resume at that step."
+    description = "Run a browser setup file from a System or installed skill in the visible browser. Returns a safe miss or guard result so you can resume at that step."
     parameters = {
         "type": "object",
         "properties": {
@@ -128,7 +128,7 @@ class BrowserRunStepsTool(Tool):
 
     async def _execute(self, steps: str, start_at: str | None = None, **kwargs: Any) -> str:
         thread_id, project_id = _execution_context(kwargs)
-        data, error = _load(steps, thread_id, project_id) if isinstance(steps, str) else (None, "unknown steps file")
+        data, error = await asyncio.to_thread(_load, steps, thread_id, project_id) if isinstance(steps, str) else (None, "unknown steps file")
         if error or data is None:
             return _result(ok=False, error=error or "unknown steps file")
         sequence = data["steps"]
