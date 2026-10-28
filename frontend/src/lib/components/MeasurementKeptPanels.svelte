@@ -23,7 +23,7 @@
 	state={outcomes}
 	onRetry={() => onRetry('outcomes')}
 	series="outcomes"
-	unitText="accepted outcomes"
+	unitText={(value) => value === 1 ? 'accepted outcome' : 'accepted outcomes'}
 	headline={group}
 	chartTitle="Accepted outcomes"
 	axisTitle="Accepted outcomes per week"

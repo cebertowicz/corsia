@@ -341,13 +341,13 @@
 		flex: 1; min-height: 0; overflow-y: auto;
 		padding: calc(var(--header-bottom) + 8px) 20px 0;
 	}
+	/* The translucent header overlays scrollers; start Measurement below it so content cannot blur through. */
 	.measurement-scroller {
 		flex: 1; min-height: 0; overflow-y: auto;
-		padding: calc(var(--header-bottom) + 20px) 20px 32px;
+		margin-top: var(--header-bottom); padding: 20px 20px 32px;
 	}
 	@media (max-width: 768px) {
-		/* The phone header is a translucent overlay, so a scroller that starts under it shows section titles through it. Start the scroller below the header instead. */
-		.measurement-scroller { margin-top: var(--header-bottom); padding: 14px 14px 24px; }
+		.measurement-scroller { padding: 14px 14px 24px; }
 	}
 	:global(.spin) { animation: spin 1s linear infinite; }
 	@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
