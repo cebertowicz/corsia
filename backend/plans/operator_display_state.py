@@ -134,18 +134,18 @@ def display_from_facts(
     condition: str,
     review_kind: str | None = None,
     *,
-    needs_user: bool = False,
+    asks_user: bool = False,
     child_working: bool = False,
     executor_stopped: bool = False,
     worker_needs_input: bool = False,
 ) -> dict[str, str]:
     """Reduce compact lifecycle facts into the canonical four-state display.
 
-    ``needs_user`` is ``asks_user_from_facts``: a pause defers an ask's attention, never its look.
+    ``asks_user`` is ``asks_user_from_facts``: a pause defers an ask's attention, never its look.
     """
     if state in TERMINAL_DISPLAY:
         return dict(TERMINAL_DISPLAY[state])
-    if needs_user:
+    if asks_user:
         return {"label_key": "needs_you", "tone_key": "human-review"}
     if worker_needs_input:
         return {"label_key": "needs_agent_input", "tone_key": "waiting"}

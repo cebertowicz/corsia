@@ -146,7 +146,7 @@ def _status_reason(
         # A paused ask keeps its look in the plan, so it names the user's pause, item or plan.
         return user_steering.USER_PAUSE_REASON
     if execution["condition"] == "review" and node_paused(execution):
-        # Pausing a raised review defers its ask, so the row names the pause.
+        # A paused review the person is not asked for (an agent's) names its own pause.
         return user_steering.placed_pause(execution["causes"]).get("reason")
     if execution["condition"] not in _REASONED_CONDITIONS or _child_plan_working(execution):
         return None
@@ -168,7 +168,7 @@ def _display(
         str(node["state"]),
         str(execution["condition"]),
         None if review is None else str(review["kind"]),
-        needs_user=asks_user,
+        asks_user=asks_user,
         child_working=_child_plan_working(execution),
         # A stopped selected executor makes an otherwise-running row wait.
         executor_stopped=stopped is not None,

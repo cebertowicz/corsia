@@ -255,12 +255,12 @@ _BRANCH_FINISHED = {
 
 
 def branch_display(
-    counts: dict[str, int], *, needs_user: bool, working: bool,
+    counts: dict[str, int], *, asks_user: bool, working: bool,
 ) -> dict[str, str]:
     """Read a container through the same four states as each leaf."""
     if working:
         return {"label_key": "working", "tone_key": "active"}
-    if needs_user:
+    if asks_user:
         return {"label_key": "needs_you", "tone_key": "human-review"}
     lead = node_state.leading(counts)
     if lead in _BRANCH_FINISHED:
@@ -299,7 +299,7 @@ def _apply_branches(
         if node["container"]:
             node["requires_user_action"] = needs_user[node["id"]]
             node["display"] = branch_display(
-                own, needs_user=asks_user[node["id"]], working=working[node["id"]],
+                own, asks_user=asks_user[node["id"]], working=working[node["id"]],
             )
             if node["display"]["label_key"] == "needs_you" and display_state.plan_paused(node["execution"]):
                 # Under the user's plan pause a branch keeps its asks' look and names the pause.

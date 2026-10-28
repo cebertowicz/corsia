@@ -117,7 +117,7 @@ def reduce_node(
         str(row["state"]),
         condition,
         review_kind,
-        needs_user=asks_user,
+        asks_user=asks_user,
         child_working=child_working,
         executor_stopped=stopped_reason is not None,
     )
