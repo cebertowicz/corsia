@@ -31,8 +31,7 @@ def settle_terminal(
 
     An accepted task also retires the taskless registrations its executor
     made before starting it. A failed, closed or never-selected task is not a
-    completion and retires none of those. Registrations the registry cannot
-    classify now never fail the transition: it leaves them for the next start.
+    completion and retires none of those.
 
     A rejection fails the submission but hands the same worker its revision
     in the same write, so it passes ``settles_worker=False`` and the worker
@@ -43,21 +42,19 @@ def settle_terminal(
     from registry.node_retirement import (
         retire_registrations_for_node, retire_taskless_rows,
     )
-    from registry.startup_backfill import settlement_retirement
 
-    with settlement_retirement(connection):
-        retire_registrations_for_node(
-            connection, node_id=node_id, trigger=new_state, causal_event_id=event_id,
+    retire_registrations_for_node(
+        connection, node_id=node_id, trigger=new_state, causal_event_id=event_id,
+    )
+    start = (
+        admission_attempts.executor_start(connection, node_id)
+        if new_state in service._ACCEPTED_STATES else None
+    )
+    if start is not None:
+        retire_taskless_rows(
+            connection, thread_id=start[0], started_at=start[1],
+            trigger=TASKLESS_TRIGGER, causal_event_id=event_id,
         )
-        start = (
-            admission_attempts.executor_start(connection, node_id)
-            if new_state in service._ACCEPTED_STATES else None
-        )
-        if start is not None:
-            retire_taskless_rows(
-                connection, thread_id=start[0], started_at=start[1],
-                trigger=TASKLESS_TRIGGER, causal_event_id=event_id,
-            )
     user_ask.withdraw_node_asks(
         connection, node_id, actor_id=actor_id, provenance=provenance,
     )

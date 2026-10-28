@@ -190,8 +190,8 @@ def test_unpin_hides_a_task_scoped_row_an_ownership_change_retired(owned):
     assert _pane(db, threads)["target"] == []
 
 
-def test_unpin_keeps_a_shared_document_an_ownership_change_retired(owned):
-    """Once pinned it is there by the user's choice, like any shared document."""
+def test_unpin_keeps_an_exempt_document_an_ownership_change_retired(owned):
+    """Once pinned it is there by the user's choice, like any exempt document."""
     from registry.pinning import update_pinned
 
     db, threads = owned
@@ -203,6 +203,12 @@ def test_unpin_keeps_a_shared_document_an_ownership_change_retired(owned):
         "UPDATE artifact_identities SET retention='durable', metadata=?, path=?, "
         "external_id='workspace:' || '//ws/shared/notes/doc.md' WHERE id='doc'",
         ('{"zone": "workspace"}', str(config.WORKSPACE / "shared/notes/doc.md")),
+    )
+    # The user's comment is what exempts it; being shared does not.
+    db.execute(
+        "INSERT INTO doc_comments "
+        "(id,artifact_id,author,author_kind,body,created_at,updated_at) "
+        "VALUES ('c-doc','doc','user','user','Check this.','t0','t0')"
     )
     db.commit()
     update_pinned("doc", pinned=True, parent_thread_id=threads["target"], db=db)

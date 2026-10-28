@@ -5,7 +5,7 @@ import asyncio
 import json
 import logging
 from dataclasses import dataclass, field
-from typing import Awaitable, Callable, Mapping, Sequence
+from typing import Awaitable, Callable, Mapping, Sequence, cast
 from urllib.parse import urlparse, urlunparse
 from urllib.request import urlopen
 
@@ -45,6 +45,7 @@ class CdpClient:
         self.endpoint = endpoint
         self._max_size = max_size
         self._next_id = 0
+        self.parents: dict[int, int] = {}
 
     def next_request(self) -> int:
         """The id of the next send, for a reader that must know its answer before send returns."""
@@ -61,6 +62,14 @@ class CdpClient:
         while True:
             response = json.loads(await self.socket.recv())
             if response.get("id") != request_id:
+                if response.get("method") == "DOM.setChildNodes":
+                    event_params = response.get("params", {})
+                    parent = event_params.get("parentId")
+                    if isinstance(parent, int):
+                        for child in event_params.get("nodes", []):
+                            node_id = child.get("nodeId")
+                            if isinstance(node_id, int):
+                                self.parents[node_id] = parent
                 continue
             if "error" in response:
                 error = response["error"]
@@ -115,9 +124,64 @@ async def _password_inputs(cdp: CdpClient) -> set[int]:
     inputs = set()
     for node_id in found.get("nodeIds", []):
         node = (await cdp.call("DOM.describeNode", nodeId=protocol_int(node_id), depth=0)).get("node", {})
-        if _is_password_input(node):
+        if _is_password_input(node) and not await _display_secret(cdp, node):
             inputs.add(protocol_int(node.get("backendNodeId")))
     return inputs
+
+
+def _sign_in_action(button: dict) -> bool:
+    label = button.get("name", {}).get("value", "")
+    disabled = any(prop.get("name") == "disabled" and prop.get("value", {}).get("value") is True
+                   for prop in button.get("properties", []))
+    return (not disabled and isinstance(label, str)
+            and label.strip().casefold() in {"sign in", "log in", "next", "continue", "verify", "submit", "confirm"})
+
+
+async def _display_secret(cdp: CdpClient, node: dict) -> bool:
+    """Recognize display secrets without reading field values; uncertain context stays guarded."""
+    flat = node.get("attributes") or []
+    names = {str(name).lower() for name in flat[::2]}
+    display_signal = bool(names & {"readonly", "disabled"})
+    parent = cdp.parents.get(cast(int, node.get("nodeId")))
+    if not isinstance(parent, int):
+        return False
+    try:
+        reveal_levels = 0
+        while isinstance(parent, int):
+            ancestor = (await cdp.call("DOM.describeNode", nodeId=parent, depth=0)).get("node", {})
+            name = str(ancestor.get("nodeName", "")).upper()
+            if name == "#DOCUMENT":
+                return display_signal
+            if reveal_levels < 3 and name not in {"FORM", "BODY"}:
+                buttons = (await cdp.call("Accessibility.queryAXTree", nodeId=parent, role="button")).get("nodes", [])
+                if any(_sign_in_action(button) for button in buttons):
+                    return False
+                for button in buttons:
+                    label = button.get("name", {}).get("value", "")
+                    if isinstance(label, str):
+                        label = label.strip().casefold()
+                        if label.startswith(("show", "reveal")) and "password" not in label:
+                            display_signal = True
+                reveal_levels += 1
+            if name in {"FORM", "BODY"}:
+                reveal_levels = 3
+            if reveal_levels == 3 and not display_signal:
+                return False
+            nearby = await cdp.call(
+                "DOM.querySelectorAll", nodeId=parent,
+                selector="input:is([type=email i], [autocomplete~=username i], [autocomplete~=email i], [autocomplete~=one-time-code i], [name*=username i], [name*=email i])",
+            )
+            if nearby.get("nodeIds"):
+                return False
+            if name == "FORM":
+                submit = await cdp.call("DOM.querySelectorAll", nodeId=parent,
+                                        selector="button:not([type]), button[type=submit i], input[type=submit i], input[type=image i]")
+                if submit.get("nodeIds"):
+                    return False
+            parent = cdp.parents.get(parent)
+    except BrowserSessionError:
+        return False
+    return False
 
 
 def _is_password_input(node: dict) -> bool:

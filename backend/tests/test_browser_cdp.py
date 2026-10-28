@@ -25,6 +25,28 @@ async def test_cdp_error_logs_diagnostics_and_keeps_person_facing_error(caplog):
 
 
 @pytest.mark.asyncio
+async def test_cdp_records_parent_links_from_pushed_search_paths():
+    class Socket:
+        def __init__(self):
+            self.responses = iter([
+                {"method": "DOM.setChildNodes", "params": {"parentId": 1, "nodes": [{"nodeId": 2}]}},
+                {"method": "DOM.setChildNodes", "params": {"parentId": 2, "nodes": [{"nodeId": 3}]}},
+                {"id": 1, "result": {"nodeIds": [3]}},
+            ])
+
+        async def send(self, _data):
+            pass
+
+        async def recv(self):
+            return json.dumps(next(self.responses))
+
+    client = browser_cdp.CdpClient("ws://fixture")
+    client.socket = Socket()
+    assert await client.call("DOM.getSearchResults") == {"nodeIds": [3]}
+    assert client.parents == {2: 1, 3: 2}
+
+
+@pytest.mark.asyncio
 async def test_page_endpoint_resolves_the_browser_url_to_the_page_the_session_shows(monkeypatch):
     resolved = []
     monkeypatch.setattr(browser_cdp, "_page_endpoint",

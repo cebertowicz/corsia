@@ -16,7 +16,8 @@ from urllib.parse import parse_qs, urlsplit
 
 import psutil
 import pytest
-from host_access import browser_cdp, browser_identity as identity, browser_pane
+from host_access import browser_cdp, browser_pane
+from host_access import browser_identity as identity
 from host_access.browser_sessions import BrowserSessionError, BrowserSessionOwner
 from ws import browser_stream
 from ws.browser_frames import PaneFrames
@@ -51,6 +52,34 @@ async def native_owner(monkeypatch, tmp_path):
         assert owner.live_count() == 0
         if owner.socket_dir.exists():
             shutil.rmtree(owner.socket_dir)
+
+
+async def test_display_secret_and_sign_in_are_distinguished_in_chrome(native_owner):
+    thread_id = 'native-display-secret'
+    assert not (await native_owner.run(thread_id, ['open', 'about:blank'])).startswith('Error:')
+    endpoint = await native_owner.page_endpoint(thread_id)
+    async with browser_cdp.CdpClient(endpoint) as cdp:
+        await cdp.call('Runtime.evaluate', expression="""document.body.innerHTML = `
+          <div><input type="password" value="fixture" readonly></div>
+          <div><div><input type="password" value="fixture"></div><div><button>Show</button><button>Regenerate</button></div></div>`""")
+    assert not (await browser_cdp.page_password_probe(endpoint, {})).visible_nodes
+    async with browser_cdp.CdpClient(endpoint) as cdp:
+        await cdp.call('Runtime.evaluate', expression="""document.body.innerHTML = `
+          <form><input type="email"><div><input type="password" value="fixture" readonly>
+          <button type="button" aria-label="Show password">Show</button></div><button>Sign in</button></form>`""")
+    assert len((await browser_cdp.page_password_probe(endpoint, {})).visible_nodes) == 1
+    async with browser_cdp.CdpClient(endpoint) as cdp:
+        await cdp.call('Runtime.evaluate', expression="""document.body.innerHTML = `
+          <div><input type="password" value="fixture"><button>Show</button></div>`""")
+    assert not (await browser_cdp.page_password_probe(endpoint, {})).visible_nodes
+    async with browser_cdp.CdpClient(endpoint) as cdp:
+        await cdp.call('Runtime.evaluate', expression="""document.body.innerHTML = `
+          <div><input type="password"><button>Show password</button><div role="button">Next</div></div>`""")
+    assert len((await browser_cdp.page_password_probe(endpoint, {})).visible_nodes) == 1
+    async with browser_cdp.CdpClient(endpoint) as cdp:
+        await cdp.call('Runtime.evaluate', expression="""document.body.innerHTML = `
+          <div><input type="password" readonly onfocus="this.readOnly=false"><button>Sign in</button></div>`""")
+    assert len((await browser_cdp.page_password_probe(endpoint, {})).visible_nodes) == 1
 
 
 async def test_native_open_outcome_remains_cleanable(native_owner):
@@ -145,10 +174,30 @@ async def _wait_for_pane_endpoint(thread, token, expected):
     await asyncio.wait_for(wait(), 5)
 
 
+def _capture_target_watch(monkeypatch):
+    """Expose each target watch's known pages, which it fills once Chrome has replayed the existing targets."""
+    watched = []
+    real = browser_pane.watch_targets
+
+    def watch(thread_id, notify, known):
+        watched.append(known)
+        return real(thread_id, notify, known)
+    monkeypatch.setattr(browser_pane, 'watch_targets', watch)
+    return watched
+
+
+async def _wait_for_target_discovery(watched):
+    async def wait():
+        while not watched or watched[-1][0] is None:
+            await asyncio.sleep(0.05)
+    await asyncio.wait_for(wait(), 5)
+
+
 async def test_native_pane_follows_popup_and_returns_to_opener(native_owner, monkeypatch):
     thread, token = 'native-popup', 'native-pane'
     monkeypatch.setattr(browser_pane, 'PROCESS_OWNER', SimpleNamespace(browser_sessions=lambda: native_owner))
     monkeypatch.setattr(browser_stream, 'emit_product_event', lambda *_args, **_kwargs: None)
+    watched = _capture_target_watch(monkeypatch)
     pane = None
     with popup_fixture() as origin:
         try:
@@ -156,7 +205,7 @@ async def test_native_pane_follows_popup_and_returns_to_opener(native_owner, mon
             opener = await native_owner.page_endpoint(thread)
             pane = asyncio.create_task(browser_stream._follow_page(thread, token, PaneFrames(), lambda _msg: None))
             await _wait_for_pane_endpoint(thread, token, opener)
-            await asyncio.sleep(0.2)  # Allow the CDP target discovery replay to finish.
+            await _wait_for_target_discovery(watched)
             assert not (await native_owner.run(thread, ['click', '#open'])).startswith('Error:')
             assert 'Account' in await native_owner.run(thread, ['snapshot'])
             popup = await native_owner.page_endpoint(thread)
@@ -273,6 +322,7 @@ async def test_native_pane_signin_popup_variants(native_owner, monkeypatch, vari
     thread, token = 'popup-variants', 'variant-pane'
     monkeypatch.setattr(browser_pane, 'PROCESS_OWNER', SimpleNamespace(browser_sessions=lambda: native_owner))
     monkeypatch.setattr(browser_stream, 'emit_product_event', lambda *_args, **_kwargs: None)
+    watched = _capture_target_watch(monkeypatch)
     pane = None
     with signin_popup_fixture(variant) as origin:
         try:
@@ -280,7 +330,7 @@ async def test_native_pane_signin_popup_variants(native_owner, monkeypatch, vari
             opener = await native_owner.page_endpoint(thread)
             pane = asyncio.create_task(browser_stream._follow_page(thread, token, PaneFrames(), lambda _msg: None))
             await _wait_for_pane_endpoint(thread, token, opener)
-            await asyncio.sleep(0.2)  # Allow target discovery replay to finish.
+            await _wait_for_target_discovery(watched)
             await _pane_click(thread, token, '#control')
             await _pane_type_a(thread, token)
             async with browser_cdp.CdpClient(opener) as cdp:
