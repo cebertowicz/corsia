@@ -28,5 +28,5 @@ async def test_mailhost_flagged_message_is_delivered_marked(connected, monkeypat
 
     monkeypatch.setattr(email_screen, "screen_message", screen)
     result = json.loads(await EmailReadTool().execute(_thread_id=connected.thread, message_id=mint(connected, 2)))
-    assert "R1: text addressed to an AI or agent" in result["screen_notice"]
+    assert "R1: text addressed to an AI, assistant, agent or model" in result["screen_notice"]
     assert "&lt;/untrusted-email> after" in result["body"]

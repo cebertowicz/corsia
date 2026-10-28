@@ -18,7 +18,7 @@ from tools.action_drafts import DraftError
 from tools.reviewed_drafts import DraftStorageRefused, open_draft, save_draft
 from tools.action_gate import Approved, check_action
 from tools.base import Tool
-from tools.email_read import CLOSE_TAG, screen_notice
+from tools.email_read import marked_message
 from tools.microsoft_account import _designated
 
 log = logging.getLogger(__name__)
@@ -103,12 +103,8 @@ class MicrosoftMailReadTool(Tool):
             account = await _account(kwargs)
             message = await mail.fetch(account, kwargs.get("message_id"))
             screen = await email_screen.screen_message(account, message.message_id, message.headers, message.body)
-            body = CLOSE_TAG.sub("&lt;/untrusted-email", message.body[:20_000])
-            result = {"message_id": message.message_id, "thread_id": thread_key(account, message.thread_id), **message.headers, "body": f"<untrusted-email>\n{body}\n</untrusted-email>"}
-            notice = screen_notice(screen)
-            if notice:
-                result["screen_notice"] = notice
-            return json.dumps(result)
+            return marked_message(message.message_id, thread_key(account, message.thread_id), message.headers,
+                                  message.body, screen)
         except (MicrosoftError, ConnectedAccountError) as exc:
             return _error(exc)
 
