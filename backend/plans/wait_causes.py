@@ -1,29 +1,12 @@
 """Batched readers for the waits a task is in: an open decision, a working child.
 
-A wait is not a second kind of state. It is one more admission cause, composed
-by ``admission_projection._node_causes`` beside holds, dependencies and armed
-watches, so everything that already reads causes -- eligibility, the operator
-display, liveness and the watchdog -- sees a waiting task with no new store and
-no second owner.
-
-Each reader answers for a whole batch with one query per kind, so a projection's
-query count stays bounded by the kinds of wait, not by the size of the batch.
-
-Three waits live here:
-
-- **A decision on the task.** A raised decision waits for the user's answer; a
-  draft or parent-reviewed one waits for the parent tier's review. Root work has
-  no higher tier, so its author must act on its own draft and that is no wait.
-- **A delegated child still working.** A parent does not run the step its child
-  is doing, and a child thread that is gone blocks that step instead. "Still
-  working" is the child's own plan moving (``PlanState.moving``, the fact the
-  operator display reads), a Turn it is running, an input queued for its next
-  Turn (a rejected step's revision handed back to it, #2052), or a step it can
-  still move (``projections.movable_leaf_sql``, the one definition), so a child
-  sent back by message waits for its return (matrix row D4). A paused child is
-  not working: its step reads paused (pause contract, #1970). Nor is a stalled
-  child (``stalled_sql``): its step waits, naming why (#3317).
-- **A delegated child needing parent input** (``plans.delegation_needs``).
+Admission composes waits beside holds, dependencies and watches. Readers batch
+by kind so projections keep a bounded query count. A raised decision waits for
+its user's answer; a reviewable draft waits for its parent tier. Root drafts do
+not wait. A delegated child works when its Turn runs, input is queued (#2052),
+or a descendant is working. Open steps wait for the child to take them up;
+paused (#1970) or stalled (#3317) work names its own cause. A child can also
+need parent input (``plans.delegation_needs``).
 """
 
 from __future__ import annotations
@@ -99,7 +82,7 @@ _CHILD_SQL = """
            c.id AS child_plan_id, c.state AS child_plan_state,
            (open_needs.plan_id IS NOT NULL) AS parent_need, open_needs.reason AS parent_need_reason,
            EXISTS (SELECT 1 FROM active_turns a
-              WHERE a.thread_id=n.spawned_thread_id AND a.status='running') AS turn_running,
+              WHERE a.thread_id=n.spawned_thread_id AND a.status IN ('running','waiting_retry')) AS turn_running,
            EXISTS (
              SELECT 1 FROM active_turns a
               WHERE a.thread_id=n.spawned_thread_id AND a.status='running'
@@ -301,7 +284,8 @@ def delegation_facts(node_plans, *, db) -> dict[str, dict]:
 
 def delegation_causes(node_plans, *, db, memo=None) -> dict[str, list[dict]]:
     """Return the delegated-child wait of each node whose child is still on it."""
-    from plans import projections
+    from dataclasses import replace
+    from plans import admission, aggregates, node_states, open_tree, projections, service
 
     pairs = list(node_plans)
     plans_by_node = {str(node["id"]): plan for node, plan in pairs}
@@ -314,6 +298,19 @@ def delegation_causes(node_plans, *, db, memo=None) -> dict[str, list[dict]]:
         if child_plan_id is None:
             continue
         child = projections.plan_state(str(child_plan_id), db=db, memo=memo)
+        if child.moving and not (row["turn_running"] or row["input_queued"]):
+            # A selected step alone is not a running Turn. Preserve movement
+            # delegated further down, whose projected causes already tell us
+            # whether that work is actually active.
+            child_plan = service._plan_row(db, str(child_plan_id))
+            leaves = (open_tree.leaves(open_tree.load(db, str(child_plan_id)))
+                      if aggregates.ready(db) else
+                      node_states.leaves(service._plan_tree_rows(db, str(child_plan_id))))
+            open_leaves = [leaf for leaf in leaves if leaf["state"] not in service._TERMINAL_STATES]
+            executions = admission.project_many(
+                [(leaf, child_plan) for leaf in open_leaves], db=db, memo=memo,
+            )
+            child = replace(child, moving=any(child_is_working(execution) for execution in executions.values()))
         cause = delegation_cause(row, plan=plans_by_node[node_id], child=child)
         if cause is not None:
             causes[node_id] = [cause]

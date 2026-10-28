@@ -3,9 +3,9 @@
 The parent's verdict on a delegated step -- accepted, failed as a
 cancellation, or closed as no longer wanted -- leaves the worker with nothing
 to do for it. Its task-specific
-watches and schedules are retired, the artifacts it owned pass to the thread
-that delegated to it, and the worker is archived through the one owner of a
-thread's lifecycle. Archiving is not evidence deletion: the worker's plan, its
+watches and schedules are retired and the worker is archived through the one
+owner of a thread's lifecycle, which rehomes its continuing artifacts to a live
+ancestor. Archiving is not evidence deletion: the worker's plan, its
 events and its review evidence stay where they are.
 """
 
@@ -108,7 +108,6 @@ def retire_settled_worker(
             return False
     _retire_watches(connection, worker)
     _retire_schedules(connection, worker)
-    _hand_over_artifacts(connection, worker, thread["spawned_by"], causal_event_id)
     from core.thread_lifecycle import archive_settled_worker
 
     return archive_settled_worker(connection, worker)
@@ -181,30 +180,3 @@ def _retire_schedules(connection, worker: str) -> None:
     from automation import schedules
 
     schedules.retire_for_thread(worker, service._now(), db=connection)
-
-
-def _hand_over_artifacts(connection, worker: str, parent: str, causal_event_id) -> None:
-    """Continuing obligations pass to the delegating thread as their triage owner.
-
-    A parent-chain subscriber cannot own the artifact outright -- the registry
-    keeps that invariant -- so the worker's ownership is released and the
-    parent named as triage: its events route to the parent, accountably, until
-    someone claims them.
-    """
-    from registry import ownership
-
-    rows = connection.execute(
-        """SELECT a.integration, a.type, a.external_id
-           FROM artifact_registrations r JOIN artifact_identities a ON a.id=r.artifact_id
-           WHERE r.parent_thread_id=? AND a.state='active'
-             AND r.relationship_state IN ('owner-active','owner-pinned')
-           ORDER BY a.id""",
-        (worker,),
-    ).fetchall()
-    for row in rows:
-        ownership.release_artifact(
-            **dict(row), actor_thread_id=worker, authority="plan",
-            reason="assignment settled; obligations pass to the delegating thread",
-            source_path="plans.worker_retirement", triage_thread_id=parent,
-            causal_event_id=causal_event_id, db=connection,
-        )

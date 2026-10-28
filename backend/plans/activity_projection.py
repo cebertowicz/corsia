@@ -6,6 +6,7 @@ presentation remains exclusively owned by ``operator_projection.read_thread``.
 from __future__ import annotations
 
 from collections import defaultdict
+from dataclasses import replace
 import hashlib
 import json
 
@@ -59,11 +60,22 @@ def _reachable_plan_ids(plans: dict[str, dict], roots: list[str]) -> set[str]:
         pending.extend(children.get(plan_id, []))
     return found
 
+def _child_state_for_wait(child_state, child_fact, nodes_by_plan, reduced_by_plan):
+    if child_state.moving and not (child_fact["turn_running"] or child_fact["input_queued"]):
+        child_id = str(child_fact["child_plan_id"])
+        return replace(child_state, moving=any(
+            reduced_by_plan[child_id][str(leaf["id"])].child_working
+            for leaf in node_states.leaves(nodes_by_plan.get(child_id, []))
+        ))
+    return child_state
+
+
 def _reduce_plan(
     plan: dict,
     rows: list[dict],
     *,
     states: dict[str, PlanState],
+    nodes_by_plan: dict[str, list[dict]], reduced_by_plan: dict[str, dict[str, activity_reducer.ReducedNode]],
     child_facts: dict[str, dict],
     human_decisions: set[str],
     decision_waits: set[str],
@@ -78,6 +90,7 @@ def _reduce_plan(
         if child_fact is not None and child_fact["child_plan_id"] is not None:
             child_state = states.get(str(child_fact["child_plan_id"]))
             if child_state is not None:
+                child_state = _child_state_for_wait(child_state, child_fact, nodes_by_plan, reduced_by_plan)
                 child_cause = wait_causes.delegation_cause(
                     child_fact, plan=plan, child=child_state,
                 )
@@ -309,6 +322,8 @@ def _project_rows(
             plans[plan_id],
             nodes_by_plan.get(plan_id, []),
             states=states,
+            nodes_by_plan=nodes_by_plan,
+            reduced_by_plan=reduced_by_plan,
             child_facts=child_facts,
             human_decisions=human_decisions,
             decision_waits=decision_waits,
