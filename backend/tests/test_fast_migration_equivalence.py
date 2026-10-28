@@ -200,7 +200,6 @@ def _copy(db):
 
 def test_154_equivalent():
     old = _fixture()
-    old.execute('CREATE INDEX MIGRATION_155_REGISTRATIONS_THREAD ON artifact_registrations(artifact_id)')
     old.execute('ALTER TABLE threads DROP COLUMN confinement')
     old.execute('ALTER TABLE threads DROP COLUMN confined_read_dirs')
     old.commit()
@@ -212,7 +211,6 @@ def test_154_equivalent():
 
 def test_157_equivalent():
     old = _fixture()
-    old.execute('CREATE INDEX MIGRATION_157_REGISTRATIONS_THREAD ON artifact_registrations(artifact_id)')
     old.execute("UPDATE threads SET confinement='review', confined_read_dirs='[]' WHERE id IN ('root','parent','child','broken')")
     old.execute("INSERT INTO artifact_registration_events (id,artifact_id,event_type,actor_thread_id,created_at) VALUES ('registered-a','a','registered','child','1')")
     old.execute("INSERT INTO artifact_registration_events (id,artifact_id,event_type,reason,source_path,old_owner_thread_id,new_owner_thread_id,created_at) VALUES ('moved-a','a','ownership_rehomed','thread_ended:archived','registry.ownership.rehome_on_thread_end','child','parent','2')")
@@ -230,3 +228,16 @@ def test_157_equivalent():
             fn(db)
     for table in ('threads', 'artifact_identities', 'artifact_registrations', 'artifact_registration_events'):
         assert old.execute(f'SELECT * FROM {table} ORDER BY id').fetchall() == new.execute(f'SELECT * FROM {table} ORDER BY id').fetchall()
+
+
+def test_lookups_start_at_the_thread_registrations():
+    # The speedup: each thread's lookup is an index search on its own registrations,
+    # never a scan that starts at artifact_identities.
+    from infra import migration_154_to_155_thread_confinement as m155
+    from infra import migration_156_to_157_rehome_repair as m157
+    db = _fixture()
+    for sql in (f'SELECT id FROM threads WHERE EXISTS (SELECT 1 {m155._REVIEW_RECORD})',
+                f'SELECT id FROM threads WHERE EXISTS ({m157._OWN_CLOSED_RECORD})'):
+        plan = ' '.join(row[-1] for row in db.execute('EXPLAIN QUERY PLAN ' + sql))
+        assert 'SEARCH r USING INDEX idx_artifact_registrations_thread' in plan, plan
+        assert 'SCAN i' not in plan, plan

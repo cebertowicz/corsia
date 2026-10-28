@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 # A review or damaged Claude Code record the thread holds that no thread-end rehome
 # moved to it: its own launch record, which keeps 154 -> 155's fail-closed copy.
 _OWN_CLOSED_RECORD = """
-    SELECT 1 FROM artifact_registrations r INDEXED BY {index_name} CROSS JOIN artifact_identities i ON r.artifact_id=i.id
+    SELECT 1 FROM artifact_registrations r CROSS JOIN artifact_identities i ON r.artifact_id=i.id
     WHERE r.parent_thread_id=threads.id AND i.integration='claude-code' AND i.type='session'
       AND (NOT json_valid(i.metadata)
            OR (json_extract(i.metadata, '$.claude_invocation.confinement') IS NOT NULL
@@ -38,18 +38,8 @@ def migrate_156_to_157(conn: sqlite3.Connection) -> None:
         "('artifact_registrations','artifact_identities','artifact_registration_events')"
     ).fetchone()[0] != 3:
         return
-    index_name = "migration_157_registrations_thread"
-    while conn.execute("SELECT 1 FROM sqlite_master WHERE name=? COLLATE NOCASE", (index_name,)).fetchone():
-        index_name += "_"
-    conn.execute(f"CREATE INDEX {index_name} ON artifact_registrations(parent_thread_id, artifact_id)")
-    try:
-        _clear_copied_confinement(conn, index_name)
-    finally:
-        conn.execute(f"DROP INDEX {index_name}")
-    _repair_registrations(conn)
-
-
-def _clear_copied_confinement(conn: sqlite3.Connection, index_name: str) -> None:
+    # The CROSS JOIN starts each lookup at the thread's own registrations, served by
+    # idx_artifact_registrations_thread (as in 154 -> 155).
     # A review thread has no CORSIA tools, so a root, a thread that spawned workers, or
     # one a thread-end rehome handed a session (its worker may since be deleted) got its
     # confinement from a moved record, unless it holds a closed one of its own.
@@ -61,11 +51,8 @@ def _clear_copied_confinement(conn: sqlite3.Connection, index_name: str) -> None
         "(SELECT new_owner_thread_id FROM artifact_registration_events "
         "WHERE event_type='ownership_rehomed' "
         "AND source_path='registry.ownership.rehome_on_thread_end')) "
-        f"AND NOT EXISTS ({_OWN_CLOSED_RECORD.format(index_name=index_name)})"
+        f"AND NOT EXISTS ({_OWN_CLOSED_RECORD})"
     )
-
-
-def _repair_registrations(conn: sqlite3.Connection) -> None:
     # Provider types are frozen here: migrations are snapshots of their release.
     rows = conn.execute(
         """SELECT DISTINCT r.id, i.id, COALESCE((
