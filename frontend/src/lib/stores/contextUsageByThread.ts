@@ -15,8 +15,8 @@ import { fetchNextTurnPreview } from './nextTurnPreview';
  * - `measured` is the last receipt: a live frame, or on entry the newest
  *   receipt stored on the thread's first message page.
  * - `preview` is the next-turn estimate, kept per thread with the identity it
- *   was read for. A newer measured turn or model change hides it without a write;
- *   a refresh of an open sheet can carry it into the new owner's read.
+ *   was read for. A turn retires it; an open sheet carries the previous
+ *   reading while its replacement loads.
  */
 export const contextUsageByThread = writable<ReadonlyMap<string, ContextUsage>>(new Map());
 
@@ -55,6 +55,7 @@ type PreviewReadResult = { result: boolean; discardedByGeneration: boolean; entr
 // One in-flight request owns each thread. New identities replace `pending`, so
 // a burst of measured frames yields exactly one read after the current one.
 const activePreviewReads = new Map<string, ActivePreviewRead>();
+const openContextSheets = new Set<string>();
 
 function setMapEntry<T>(
 	store: { update(fn: (value: ReadonlyMap<string, T>) => ReadonlyMap<string, T>): void },
@@ -174,12 +175,24 @@ export function hasMeasuredNumbers(usage: ContextUsage | null): boolean {
 	return !!usage && usage.token_usage_available !== false && typeof usage.total_used === 'number';
 }
 
+export function setContextSheetOpen(threadId: string, open: boolean): void {
+	if (open) openContextSheets.add(threadId);
+	else {
+		openContextSheets.delete(threadId);
+		contextPreviewByThread.update(entries => {
+			const current = entries.get(threadId);
+			if (!current?.previous) return entries;
+			current.previous = null;
+			return new Map(entries);
+		});
+	}
+}
 /** Retire `threadId`'s preview. A read in flight settles before its replacement starts. */
 export function invalidateContextPreview(threadId: string): void {
 	previewGenerations.set(threadId, (previewGenerations.get(threadId) ?? 0) + 1);
 	const current = get(contextPreviewByThread).get(threadId);
 	if (current) setMapEntry(contextPreviewByThread, threadId, {
-		owner: null, key: null, usage: null, previous: current.usage ?? current.previous, loading: false, error: '',
+		owner: null, key: null, usage: null, previous: openContextSheets.has(threadId) ? current.usage ?? current.previous : null, loading: false, error: '',
 	});
 }
 
@@ -278,6 +291,7 @@ export async function ensureContextPreview(request: PreviewRequest): Promise<boo
 /** Forget every thread's reading, as when the connection identity resets. */
 export function clearAllContextUsage(): void {
 	contextUsageByThread.set(new Map());
+	openContextSheets.clear();
 	measuredHydratedThreads.set(new Set());
 	for (const active of activePreviewReads.values()) active.pending = null;
 	activePreviewReads.clear();

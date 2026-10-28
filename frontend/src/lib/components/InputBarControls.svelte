@@ -17,6 +17,7 @@
 		measuredFor,
 		measuredHydratedThreads,
 		previewIdentity,
+		setContextSheetOpen,
 	} from '$lib/stores/contextUsageByThread';
 	import { acceptsSend, activeModelId, findModelById } from '$lib/stores/models';
 	import { loadComposerModels } from '$lib/stores/modelsLoad';
@@ -189,12 +190,18 @@
 	// preview, else the last measured usage, so opening never waits on the
 	// fetch (#1953) and closing the sheet changes nothing.
 	const sheetUsage = $derived(
-		previewIds ? contextReading(ownedPreview, previewIds.owner, measuredReading) : null,
+		previewIds ? contextReading(boundPreview, previewIds.owner, measuredReading, sheetView === 'context') : null,
 	);
 	const contextChipSummary = $derived(chipSummaryFor(sheetUsage));
-	const contextPreviewLoading = $derived(ownedPreview?.loading ?? false);
+	const contextPreviewLoading = $derived(
+		!!(ownedPreview?.loading || (sheetView === 'context' && boundPreview?.owner === null && boundPreview.previous)),
+	);
 	const contextPreviewError = $derived(ownedPreview?.error ?? '');
 	let sheetWasOpen = false;
+	$effect(() => {
+		const threadId = boundThreadId;
+		if (surface === 'sheets' && threadId) return () => setContextSheetOpen(threadId, false);
+	});
 	$effect(() => {
 		const t = $token;
 		const ids = previewIds;
@@ -202,6 +209,7 @@
 		const sheetOpen = surface === 'sheets' && sheetView === 'context';
 		const opening = sheetOpen && !sheetWasOpen;
 		sheetWasOpen = sheetOpen;
+		if (surface === 'sheets' && boundThreadId) setContextSheetOpen(boundThreadId, sheetOpen);
 		// The always-mounted sheets instance is the one reader per composer.
 		if (surface !== 'sheets' || !boundThreadId || !canInspectContext || !t || !ids) return;
 		if (opening) contextSourceDetail = null;
