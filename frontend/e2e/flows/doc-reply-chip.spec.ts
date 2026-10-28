@@ -13,6 +13,8 @@ import { hitBox } from '../support/hitBox';
 // Evidence frames for the document reply chip (R5): the chat's own "N new replies" chip, floated over the document it counts.
 // Mock-mode only: every state is seeded straight into the disposable database, and the clock is frozen so a frame is repeatable.
 
+test.use({ video: process.env.REPLY_CHIP_VIDEO === '1' ? 'on' : 'retain-on-failure' });
+
 const TAG = '@surface:doc-reply-chip';
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const screenshotDir = process.env.REPLY_CHIP_SCREENSHOT_DIR ?? process.env.CORSIA_E2E_WORKSPACE;
@@ -630,6 +632,37 @@ for (const theme of ['light', 'dark'] as const) {
 		});
 	}
 }
+
+test.describe('reply chip motion evidence', () => {
+	for (const width of [1440, 393]) {
+		for (const reduced of [false, true]) {
+			test(`${TAG} motion ${width}px ${reduced ? 'reduced' : 'standard'}`, async ({ page, request }, testInfo) => {
+				test.setTimeout(90_000);
+				test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires isolated synthetic state');
+				skipMismatchedProject(width, testInfo.project.name);
+				await page.setViewportSize({ width, height: width === 393 ? 852 : 900 });
+				await page.emulateMedia({ reducedMotion: reduced ? 'reduce' : 'no-preference' });
+				const threadId = await createSession(request, THREAD_TITLE);
+				await onlyThread(request, threadId);
+				const doc = await seedTextDocument(page, request, threadId, `motion-${width}-${reduced}`, 'launch-plan.md', []);
+				await stageWorkspace(page, threadId, doc.docPath, 'launch-plan.md', 'artifact');
+				await openThread(page, THREAD_TITLE);
+				await expect(chipBox(page)).toHaveCount(0);
+				await page.waitForTimeout(600);
+				addAgentReply(doc.artifactId, doc.roots[8], threadId, 'The owner is confirmed.');
+				await reloadComments(page, doc.artifactId);
+				await expectChip(page, '1 new reply');
+				await page.waitForTimeout(700);
+				await chipButton(page).click();
+				await expect(page.locator(`[data-comment-id="${doc.roots[8]}"]`)).toHaveClass(/focused/);
+				await page.waitForTimeout(2000);
+				await page.getByRole('button', { name: 'Close comments' }).click();
+				await expect(chipBox(page)).toHaveCount(0);
+				await page.waitForTimeout(700);
+			});
+		}
+	}
+});
 
 // Before frames (light): the same two documents on the base commit, where no chip exists. Run only on the base checkout
 // (`--grep baseline`); the assertion that no chip is drawn is what proves the checkout is the base.
