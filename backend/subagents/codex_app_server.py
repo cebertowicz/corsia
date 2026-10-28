@@ -43,7 +43,7 @@ OnExit = Callable[[int | None, str | BaseException], Awaitable[None]]
 OnRawMessage = Callable[[dict[str, Any]], Awaitable[None]]
 STDOUT_LIMIT = 16 * 1024 * 1024
 REQUEST_TIMEOUT = 120.0
-STEER_ACK_TIMEOUT = 10.0
+STEER_REQUEST_TIMEOUT = 10.0
 _STEER_NOT_WRITTEN = object()
 _DYNAMIC_TOOL_DRAIN_REJECTION = TURN_STOPPED_REFUSAL
 _DYNAMIC_TOOL_IDENTITY_REJECTION = (
@@ -666,12 +666,9 @@ class CodexAppServerSession:
                              on_drain_confirmed=on_drain_confirmed)
 
     async def _notify(self, method: str, params: dict) -> None:
-        if self._proc is None or self._proc.stdin is None:
-            raise RuntimeError("CodexAppServerSession not started")
-        async with self._write_lock:
-            payload = {"method": method, "params": params}
-            self._proc.stdin.write((json.dumps(payload) + "\n").encode())
-            await self._proc.stdin.drain()
+        from subagents.codex_requests import notify
+
+        await notify(self, method, params)
 
     async def _respond(
         self, msg_id: int, *, result: Any = None, error: dict | None = None

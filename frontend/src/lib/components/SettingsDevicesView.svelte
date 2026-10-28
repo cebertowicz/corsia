@@ -68,19 +68,19 @@
 	{#if view.load === 'failed'}
 		<div class="more reveal">
 			<p class="problem">Couldn’t load device settings.</p>
-			<div class="action"><Button variant="chip" size="sm" onclick={onRetry}>Try again</Button></div>
+			<div class="action"><Button variant="chip" size="sm" onclick={onRetry}>Retry</Button></div>
 		</div>
 	{:else if view.listener === 'all-ports-taken' && !view.readOnly}
 		<!-- All ten ports CORSIA may use are held: the switch is back off, and the line names what to do. -->
 		<div class="more reveal">
 			<p class="problem">Couldn’t turn this on. Other apps are using the connections CORSIA needs. Restart this computer, then try again.</p>
-			<div class="action"><Button variant="chip" size="sm" onclick={onRetry}>Try again</Button></div>
+			<div class="action"><Button variant="chip" size="sm" onclick={onRetry}>Retry</Button></div>
 		</div>
 	{:else if view.listener === 'unavailable' && !view.readOnly}
 		<!-- Listening failed for a reason other than taken ports (credentials, permission): a restart would not help. -->
 		<div class="more reveal">
 			<p class="problem">Couldn’t turn this on. CORSIA couldn’t start listening on this computer. Try again, and if it keeps failing, restart CORSIA.</p>
-			<div class="action"><Button variant="chip" size="sm" onclick={onRetry}>Try again</Button></div>
+			<div class="action"><Button variant="chip" size="sm" onclick={onRetry}>Retry</Button></div>
 		</div>
 	{:else if showMore}
 		<div class="more reveal">

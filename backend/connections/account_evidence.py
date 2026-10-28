@@ -4,6 +4,7 @@ from __future__ import annotations
 import copy
 import json
 
+from connections.account_home import missing_home_reason
 from connections.account_receipts import ReceiptFence, receipt_is_current
 from connections.vendor_accounts import get_account
 from infra.time import utc_now_iso
@@ -97,8 +98,13 @@ def mark_discovery(account_id: str, *, receipt: ReceiptFence, status: str,
     return True
 
 
+# Readiness consumes the projection owner's stored failure without reinterpretation.
 def readiness_reason(account: dict, *, model: str | None = None) -> str | None:
-    """One stored-only evaluator for claim, catalog and batched advisory readers."""
+    """One evaluator for claim, catalog and batched advisory readers.
+
+    Reads stored records, plus at most two stats of a custom account's source home
+    (``missing_home_reason``); never a vendor or network call.
+    """
     from connections.account_receipts import account_receipt
     from connections.vendor_accounts import DEFAULT_COMPARISON
 
@@ -113,12 +119,17 @@ def readiness_reason(account: dict, *, model: str | None = None) -> str | None:
             return None  # Existing unobserved legacy Default compatibility.
         if comparison['auth_state'] != 'known':
             return 'account_login_unverified'
+    # A custom account whose homes cannot launch is held before its receipt is read: the
+    # same rule launch validation applies, so a hold never lifts on a home launch refuses.
+    if reason := missing_home_reason(account):
+        return reason
     receipt = account_receipt(account)
     if receipt is None:
         return 'account_model_not_discovered'
     projection = record['auth_projection']
     failed = projection['failed']
-    if isinstance(failed, dict) and (failed.get('account_revision'), failed.get('login_seq')) == (
+    if isinstance(failed, dict) and (
+            failed.get('account_revision'), failed.get('login_seq')) == (
             receipt.account_revision, receipt.login_seq):
         return failed['cause']
     if any(item.get('phase') == 'pending' for item in projection['stale']):

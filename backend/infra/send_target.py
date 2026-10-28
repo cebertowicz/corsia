@@ -96,6 +96,18 @@ async def scope_supplied_target(target: ExecutionTarget, *, thread_id: str) -> E
     return await db_async.run_in_db(_scope)
 
 
+def omlx_seat_and_model(target: ExecutionTarget) -> tuple[str, str] | None:
+    """Identify the oMLX seat and model for a native network target."""
+    from llm.locality import row_server_id
+
+    if not (target.harness == "native" and target.provider == "omlx" and target.backend == "network"
+            and target.transport_model.startswith("omlx@")):
+        return None
+    server_id = row_server_id({"litellm_model": target.transport_model})
+    model_id = target.transport_model.partition("/")[2]
+    return (server_id, model_id) if server_id and model_id else None
+
+
 def _ready_target(target: ExecutionTarget, *, db=None) -> ExecutionTarget:
     """Use the catalog's cached oMLX readiness, without probing or loading a model."""
     if not (target.available and target.harness == "native"
@@ -105,7 +117,10 @@ def _ready_target(target: ExecutionTarget, *, db=None) -> ExecutionTarget:
     from llm.network_discovery import get_loaded_model_ids
     from infra.database import get_db
 
-    server_id = target.transport_model.partition("@")[2].partition("/")[0]
+    seat = omlx_seat_and_model(target)
+    if seat is None:
+        return target
+    server_id, _ = seat
     connection = db if db is not None else get_db()
     try:
         server = connection.execute("SELECT status FROM network_servers WHERE id=?", (server_id,)).fetchone()

@@ -234,6 +234,8 @@ def isolated_db(tmp_path, monkeypatch):
         # thread's write would fail instantly with "database is locked".
         conn.execute("PRAGMA journal_mode=WAL")
         conn.executescript(SCHEMA_SQL)
+        from events.observe_rules import sync_shipped_rules
+        sync_shipped_rules(conn)
         _seed_model_profiles(conn)
         _seed_test_model_catalog(conn)
         seed_test_accounts(conn)

@@ -20,15 +20,18 @@ SOURCE_KIND_MESSAGE = "message"
 SOURCE_KIND_DOC_COMMENT = "doc_comment"
 SOURCE_KIND_DECISION_ANSWER = "plan_decision_answer"
 SOURCE_KIND_SENT_BACK = "sent_back"
+SOURCE_KIND_SELF_CAUGHT = "self_caught"
 MESSAGE_SUBJECT_PREFIX = "message:"
 COMMENT_SUBJECT_PREFIX = "doc-comment:"
 DECISION_SUBJECT_PREFIX = "plan-decision-answer:"
 SENT_BACK_SUBJECT_PREFIX = "plan-review-rejected:"
+SELF_CAUGHT_SUBJECT_PREFIX = "plan-correction-created:"
 SUBJECT_PREFIXES = {
     SOURCE_KIND_MESSAGE: MESSAGE_SUBJECT_PREFIX,
     SOURCE_KIND_DOC_COMMENT: COMMENT_SUBJECT_PREFIX,
     SOURCE_KIND_DECISION_ANSWER: DECISION_SUBJECT_PREFIX,
     SOURCE_KIND_SENT_BACK: SENT_BACK_SUBJECT_PREFIX,
+    SOURCE_KIND_SELF_CAUGHT: SELF_CAUGHT_SUBJECT_PREFIX,
 }
 LABEL_CORRECTION = "correction"
 LABEL_NOT_CORRECTION = "not_correction"
@@ -192,6 +195,11 @@ def subject_key(source_kind: str, source_id: str) -> str:
 def sent_back_dedupe_key(rejection_event_id: str) -> str:
     """The one idempotency key for a sent-back fact: its rejection event, under no classifier."""
     return f"correction:{SOURCE_KIND_SENT_BACK}:{rejection_event_id}"
+
+
+def self_caught_dedupe_key(correction_event_id: str) -> str:
+    """The idempotency key for a self-caught correction event."""
+    return f"correction:{SOURCE_KIND_SELF_CAUGHT}:{correction_event_id}"
 
 
 def decision_answer_source_id(decision_id: str, revision: object) -> str:

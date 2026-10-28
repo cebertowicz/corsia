@@ -175,10 +175,9 @@ def _spawn_process(argv: list[str], log_path) -> subprocess.Popen | dict[str, An
             start_new_session=True,
             close_fds=True,
         )
-    except FileNotFoundError as exc:
-        return {"ok": False, "message": f"Failed to spawn omlx: {exc}"}
     except Exception as exc:
-        return {"ok": False, "message": f"Failed to spawn omlx: {exc}"}
+        log.exception("Failed to spawn oMLX")
+        return {"ok": False, "message": "Couldn’t start the model server. Try again.", "error": str(exc)}
 
 
 def _failed_boot_result(
@@ -228,7 +227,7 @@ def _duration(seconds: float) -> str:
 
 def watch(server_id: str, pid: int) -> None:
     life = _life.setdefault(server_id, restart.Life())
-    life.watch(pid, lambda: restart.on_exit(server_id, life, pid, start_server, _tail_log))
+    life.watch(pid, lambda status: restart.on_exit(server_id, life, pid, start_server, _tail_log, status))
 
 
 def stop_watching() -> None:  # the backend is shutting down: an oMLX exit from here on is not a crash
@@ -336,8 +335,9 @@ async def _stop_server(cfg: dict) -> dict[str, Any]:
     except ProcessLookupError:
         _clear_pid(sid)
         return {"ok": True, "already_stopped": True, "message": "Already stopped"}
-    except Exception as e:
-        return {"ok": False, "message": f"SIGTERM failed: {e}"}
+    except Exception as exc:
+        log.exception("SIGTERM failed")
+        return {"ok": False, "message": "Couldn’t stop the model server. Try again.", "error": f"SIGTERM failed: {exc}"}
 
     exited = False
     deadline = time.monotonic() + SIGTERM_GRACE_S
@@ -358,8 +358,9 @@ async def _stop_server(cfg: dict) -> dict[str, Any]:
             await asyncio.sleep(0.2)
         except ProcessLookupError:
             exited = True
-        except Exception as e:
-            return {"ok": False, "message": f"SIGKILL failed: {e}"}
+        except Exception as exc:
+            log.exception("SIGKILL failed")
+            return {"ok": False, "message": "Couldn’t stop the model server. Try again.", "error": f"SIGKILL failed: {exc}"}
         else:
             exited = _process_exited(pid)
 

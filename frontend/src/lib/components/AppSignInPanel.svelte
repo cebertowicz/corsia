@@ -6,7 +6,7 @@
 		type ConnectedApp,
 	} from '$lib/api/connectedApps';
 	import {
-		BROWSER_DIDNT_OPEN, failureText, NOT_ON_THIS_MAC, PROVIDER_NOT_TOLD_AFTER, PROVIDER_NOT_TOLD_BEFORE, retryLabel,
+		BROWSER_DIDNT_OPEN, failureText, NOT_ON_THIS_COMPUTER, PROVIDER_NOT_TOLD_AFTER, PROVIDER_NOT_TOLD_BEFORE, retryLabel,
 		SIGN_OUT_BODY, WAITING_TEXT,
 	} from '$lib/appSignIn';
 
@@ -36,6 +36,8 @@
 	let providerUrl = $state<string | null>(null);
 	let words = $state('');
 	let poll: ReturnType<typeof setInterval> | undefined;
+	/** A named account is already in the title; an unnamed account needs an explanation. */
+	const quiet = $derived(!!view?.signed_in && !!view.account && !pending && !failed && !confirmOut && !providerUrl && !error);
 
 	function patchView(next: Partial<NonNullable<ConnectedApp['sign_in']>>): void {
 		onChange({ sign_in: { status: 'idle', signed_in: false, ...view, ...next } });
@@ -105,7 +107,7 @@
 	});
 </script>
 
-{#if view}
+{#if view && !quiet}
 	<div class="sign-in">
 		{#if error}<p class="error" role="alert">{error}</p>{/if}
 		{#if pending}
@@ -114,10 +116,10 @@
 		{:else if failed}
 			<p>{failureText(app.name, view.failure_class ?? 'unknown')}</p>
 			{#if words}<p class="said"><span>What {app.name} said</span> {words}</p>{/if}
-		{:else if view.signed_in}
-			<p><span class="label">Signed in as</span> {view.account ?? `${app.name} didn't say which account`}</p>
-		{:else if app.state === 'needs_sign_in' && !signInHere}
-			<p>{NOT_ON_THIS_MAC}</p>
+		{:else if view.signed_in && !view.account}
+			<p>{app.name} didn't say which account</p>
+		{:else if !view.signed_in && app.state === 'needs_sign_in' && !signInHere}
+			<p>{NOT_ON_THIS_COMPUTER}</p>
 		{/if}
 		{#if providerUrl}
 			<p>{PROVIDER_NOT_TOLD_BEFORE(app.name)}<a href={providerUrl} target="_blank" rel="noopener noreferrer">{app.name}'s settings</a>{PROVIDER_NOT_TOLD_AFTER}</p>
@@ -148,7 +150,6 @@
 <style>
 	.sign-in { display: grid; gap: var(--space-2); margin-bottom: var(--space-3); }
 	.sign-in p { margin: 0; color: var(--text-secondary); font-size: var(--text-footnote); line-height: 1.5; }
-	.label { color: var(--text-tertiary); }
 	.said span { color: var(--text-tertiary); }
 	.error { color: var(--red); }
 	.actions { display: flex; gap: var(--space-1); flex-wrap: wrap; margin-left: calc(-1 * var(--button-pad-x-sm)); }

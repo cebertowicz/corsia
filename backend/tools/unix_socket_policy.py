@@ -16,6 +16,7 @@ from host_access.browser_identity import (
 )
 from infra.config import WORKSPACE
 from tools.host_path_policy import GENERATED_WORKSPACE_PROJECTIONS
+from tools.sandbox_git import sandbox_literal
 
 
 _TEMP_ROOT_NAME = "corsia-af-unix"
@@ -137,7 +138,7 @@ def get_unix_socket_denied_roots() -> list[Path]:
 
 
 def _sandbox_path(path: Path) -> str:
-    return str(_resolved(path)).replace("\\", "\\\\").replace('"', '\\"')
+    return sandbox_literal(_resolved(path))
 
 
 def _unix_socket_rules(action: str, root: Path) -> list[str]:

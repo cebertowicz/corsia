@@ -73,8 +73,8 @@ function marker() { expect(host.querySelectorAll('.plan-limit-paused')).toHaveLe
 function expandedOrder() {
  marker();
  const text = host.textContent!;
- expect(text.indexOf('Work old1')).toBeLessThan(text.indexOf('Paused: plan limit reached'));
- expect(text.indexOf('Paused: plan limit reached')).toBeLessThan(text.indexOf('Work n3'));
+ expect(text.indexOf('Work old1')).toBeLessThan(text.indexOf('Paused: usage limit reached'));
+ expect(text.indexOf('Paused: usage limit reached')).toBeLessThan(text.indexOf('Work n3'));
  expect(text).not.toContain('Routine private context');
  expect(mainToggles()).toHaveLength(1);
 }

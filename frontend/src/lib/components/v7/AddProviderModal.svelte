@@ -3,6 +3,7 @@
 	import { providers, type ProviderEntry } from '$lib/stores/providers';
 	import { addNetworkServer, parseModelIds } from '$lib/stores/networkServers';
 	import { loadHostGroups } from '$lib/stores/providersV7';
+	import { neverLocalHost, watchLocalStatus } from '$lib/stores/localPickerStatus';
 
 	interface Props {
 		onClose: () => void;
@@ -13,6 +14,10 @@
 
 	type Mode = 'menu' | 'remote' | 'endpoint';
 	let mode = $state<Mode>('menu');
+
+	// On a server that is not macOS, any Mac running oMLX is "a Mac", never "another" one.
+	$effect(() => watchLocalStatus());
+	const otherMac = $derived($neverLocalHost ? 'a Mac' : 'another Mac');
 
 	const cloudUnconfigured = $derived(($providers).filter(p => p.type === 'cloud' && !p.has_key));
 
@@ -40,7 +45,7 @@
 		const r = await addNetworkServer(name, host, port);
 		busy = false;
 		if (!r.ok) {
-			actionError = r.message ?? 'Failed to reach host';
+			actionError = r.message ?? `Couldn’t reach ${host}. Check the address and that the server is running.`;
 			return;
 		}
 		await loadHostGroups();
@@ -93,7 +98,7 @@
 						<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
 					</IconButton>
 				{/if}
-				<span>{mode === 'menu' ? 'Add provider' : mode === 'remote' ? 'oMLX on another Mac' : 'Other provider by address'}</span>
+				<span>{mode === 'menu' ? 'Add provider' : mode === 'remote' ? `oMLX on ${otherMac}` : 'Other provider by address'}</span>
 			</div>
 			<IconButton ariaLabel="Close" onclick={onClose}>
 				<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6 18 18M18 6 6 18"/></svg>
@@ -125,8 +130,8 @@
 				<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>
 			</span>
 			<span class="ai-text">
-				<span class="ai-name">oMLX on another Mac</span>
-				<span class="ai-desc">Use the local models oMLX runs on another Mac</span>
+				<span class="ai-name">oMLX on {otherMac}</span>
+				<span class="ai-desc">Use the local models oMLX runs on {otherMac}</span>
 			</span>
 			<svg class="arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14m-6-6 6 6-6 6"/></svg>
 		</button>
@@ -143,7 +148,7 @@
 		</button>
 
 		{#if cloudUnconfigured.length === 0}
-			<div class="empty">All known providers are configured. You can still add oMLX on another Mac, or another provider by address.</div>
+			<div class="empty">All known providers are configured. You can still add oMLX on {otherMac}, or another provider by address.</div>
 		{/if}
 	{:else if mode === 'endpoint'}
 		<p class="hint">Add a provider using the full web address it gives you.</p>
@@ -185,7 +190,7 @@
 			</Button>
 		</div>
 	{:else}
-		<p class="hint">Add the local models oMLX already runs on another Mac.</p>
+		<p class="hint">Add the local models oMLX already runs on {otherMac}.</p>
 
 		<Field label="Computer address">
 			<input placeholder="100.64.1.5  ·  macbook-m4.local" bind:value={remoteHost} />

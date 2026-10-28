@@ -91,9 +91,9 @@ Asking for less of your attention is only safe with proof that the work is getti
 
 ## What it asks of you
 
-Decisions and results, not transcripts. Every agent you add is another stream to watch, unless it only interrupts you when something needs you.
+A problem for each agent, and the authority to work on it. The agent sets its KPIs and measures itself on your work; you steer as much or as little as you like.
 
-- **Decisions arrive prepared.** Agents act within the authority you give them. A choice outside it arrives with options, the trade-off and a recommendation, and you can answer from your phone. Widen the authority as results earn your trust, and fewer decisions reach you.
+- **You set the authority.** Agents act within it. A choice outside it comes with options, the trade-off and a recommendation, and you can answer from your phone. Widen it as the measurements show the work holding up.
 - **Focus mode**, on by default, shows your messages, each agent's marked updates and its decisions. Working steps collapse.
 - **Work doesn't stop when the chat does.** With GitHub connected, a pull-request comment, review or CI result wakes the agent that owns that work. Every wait has a deadline, a worker that stops with open work wakes the agent that sent it, and a step closes only with evidence against its acceptance criteria.
 - **Work in the same document.** You and your agents edit a document at the same time, and every change merges live. A comment or suggested edit goes to the agent that owns it.
@@ -294,7 +294,7 @@ Every turn shows what the agent loaded, by source and size. A context file in th
 - [x] Optional account rollover on usage limits, set for the workspace or per project
 
 **Measurement and learning**
-- [x] Outcomes, first-try acceptance, corrections, tokens, decisions and estimated active time by project and agent
+- [x] Outcomes, first-try acceptance, corrections, tokens, decisions and estimated active time by project and agent ([how to read them](docs/measurement.md))
 - [x] Per-model results on your own work, and cost at public list rates beside actual charges
 - [x] Versioned guidance and lesson trials with a boundary and review date
 - [ ] Per-version comparison of guidance and lesson changes, marked on the trends *(being added)*

@@ -126,9 +126,9 @@
 				return;
 			}
 			const data = await res.json().catch(() => ({}));
-			actionError = data.detail ?? `Test failed (${res.status})`;
-		} catch (e) {
-			actionError = String(e);
+			actionError = data.detail ?? 'Couldn’t test the connection. Try again.';
+		} catch {
+			actionError = 'Couldn’t test the connection. Try again.';
 		} finally {
 			busy = false;
 		}
@@ -174,7 +174,7 @@
 			editApiKey = '';
 			await loadHostGroups();
 		} else {
-			actionError = r.error ?? 'Failed to save key';
+			actionError = r.error ?? 'Couldn’t save the key. Try again.';
 		}
 	}
 
@@ -199,6 +199,10 @@
 	async function handleDaemonAction(action: 'start' | 'stop' | 'reload') {
 		if (!provider.server) return;
 		clearMessages(); busy = true;
+		const failure = action === 'reload' ? 'Couldn’t refresh the model list. Try again.'
+			: `Couldn’t ${action} the model server. Try again.`;
+		const success = action === 'reload' ? 'Model list refreshed.'
+			: `Model server ${action === 'start' ? 'started' : 'stopped'}.`;
 		try {
 			const t = get(token) || '';
 			const res = await fetch(
@@ -207,12 +211,13 @@
 			);
 			const data = await res.json().catch(() => ({}));
 			if (res.ok && data.ok !== false) {
-				actionMessage = data.message ?? `${action} OK`;
+				actionMessage = data.message ?? success;
 			} else {
-				actionError = data.message ?? data.detail ?? `${action} failed`;
+				const reference = typeof data.ref === 'string' && data.ref ? ` Reference: ${data.ref}` : '';
+				actionError = `${data.message ?? data.detail ?? failure}${reference}`;
 			}
-		} catch (e) {
-			actionError = String(e);
+		} catch {
+			actionError = failure;
 		} finally {
 			busy = false;
 			await loadHostGroups();

@@ -125,10 +125,9 @@ def _note_line(envelope: EventEnvelope, line_facts: tuple[str, ...]) -> str:
 
 def _deliver_target(
     db: sqlite3.Connection, envelope: EventEnvelope, target: Target,
-    decl: EventTypeDecl, notes: tuple[str, ...] = (), capped: tuple[rules.Entry, ...] = (),
+    decl: EventTypeDecl, notes: tuple[str, ...] = (),
 ) -> PlatformDelivery:
-    """Deliver one target. ``notes`` are the writers' own rule notes, never event text;
-    ``capped`` are the rules whose wake the hourly cap turned into this digest."""
+    """Deliver one target. ``notes`` are the writers' own rule notes, never event text."""
     event_id = envelope.event_id
     disposition = target.disposition
     thread = target.thread
@@ -160,11 +159,6 @@ def _deliver_target(
     # The person's chip keeps the plain event line; the facts are the agent's.
     details = {**_digest_details(envelope, decl.collapse_fact), "chip": _summary(envelope)}
     line = _note_line(envelope, decl.digest_line_facts)
-    if capped:
-        # R9: one note per capped rule and thread; the latest carries the count.
-        details["path"] = "rule:" + ",".join(sorted(entry.rule_id for entry in capped))
-        line += "".join(f"; {entry.since_wake} since rule {entry.rule_id} last woke you"
-                        for entry in capped)
     if notes:
         details["rule_notes"] = list(notes)
         line += "".join(f"; rule note: {note}" for note in notes)
@@ -261,7 +255,7 @@ def deliver_rule_adds(
         try:
             with write_transaction(db, scope="deliver_rule_add"):
                 made = _deliver_target(db, envelope, target, decl,
-                                       tuple(delivery.notes), tuple(delivery.capped))
+                                       tuple(delivery.notes))
         except SendRejected as exc:
             logger.warning("event rules: {} refused {}: {}", thread, envelope.type, exc)
             deliveries.append(PlatformDelivery(envelope.event_id, thread, DEAD_LETTERED,
@@ -376,7 +370,7 @@ def _deliver_routed(
         return _deliver_target(db, envelope, target, decl)
     return _deliver_target(
         db, envelope, _rule_target(thread, ride, target, plan, envelope.event_class), decl,
-        tuple(ride.notes), tuple(ride.capped))
+        tuple(ride.notes))
 
 
 async def deliver_platform_event(

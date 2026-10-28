@@ -31,6 +31,14 @@ function render(overrides: Partial<CostState> = {}) { host = document.createElem
 const text = (element: HTMLElement) => element.textContent?.replace(/\s+/g, ' ') ?? '';
 
 describe('MeasurementCost', () => {
+	it('omits the remainder when all usage records are priced', () => {
+		const card = render({ data: data({ coverage: { priced_records: 200, usage_records: 200 }, excluded: [] }) });
+		expect(text(card.querySelector('.caption') as HTMLElement)).toBe('200 of 200 usage records in Sep 28 to Oct 4 are priced.');
+	});
+	it('explains the remainder when some usage records are unpriced', () => {
+		const card = render();
+		expect(text(card.querySelector('.caption') as HTMLElement)).toBe('160 of 200 usage records in Sep 28 to Oct 4 are priced; the rest are local, unlisted or unproven prices and are not in any dollar figure.');
+	});
 	it('labels every figure as a known subtotal and states retained-record coverage and exclusions', () => {
 		const content = text(render());
 		expect(content).not.toContain('API-equivalent: list price of recorded tokens');
@@ -221,7 +229,13 @@ describe('MeasurementCost', () => {
 		expect(markup.querySelector('.billing-link')).toBeNull();
 	});
 	it('says so when no usage record could be priced, and withholds a rate under the minimum n', () => {
-		expect(text(render({ data: data({ series: [], latest: null, previous: null }) }))).toContain('No usage records could be priced in this range.');
+		expect(text(render({ data: data({ series: [], latest: null, previous: null }) }))).toContain('No accepted work in this range has a size rating.');
+		unmount(component!); host?.remove();
+		expect(text(render({ data: data({ series: [], latest: null, previous: null, coverage: { priced_records: 0, usage_records: 3 } }) }))).toContain('No usage records could be priced in this range.');
+		unmount(component!); host?.remove();
+		const fresh = render({ data: data({ series: [], latest: null, previous: null, coverage: { priced_records: 0, usage_records: 0 }, excluded: [] }) });
+		expect(text(fresh)).toContain('No usage was recorded in this range.');
+		expect(fresh.querySelector('.caption')).toBeNull();
 		unmount(component!); host?.remove();
 		const thinPeriod = period('2026-09-28', 5_300, 100, 80, 100, 2120, 19);
 		const thin = text(render({ data: data({ series: [thinPeriod], latest: pooled(thinPeriod), previous: null }) }));

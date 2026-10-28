@@ -105,7 +105,7 @@ describe('setup provider rows', () => {
 		expect(setupStartNote(false, false, false))
 			.toBe('Set up a subscription or add an API provider to continue.');
 		expect(setupStartNote(false, true, true, 720))
-			.toBe('Ready when the local model finishes downloading, in about 12 min.');
+			.toBe('Ready when the local model finishes downloading (12 min left).');
 		expect(setupStartNote(true, true, true))
 			.toBe('The local model keeps downloading. Follow it in Settings › Providers.');
 	});

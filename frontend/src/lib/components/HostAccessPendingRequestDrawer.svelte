@@ -32,10 +32,10 @@
 </script>
 
 {#snippet policyExceptions()}
-	<section class="policy-exceptions" aria-label="Policy exceptions requested">
-		<span class="label">Policy exceptions requested</span>
+	<section class="policy-exceptions" aria-label="Beyond the usual rules">
+		<span class="label">Beyond the usual rules</span>
 		{#if external}
-			<p class="external-warning">External agents run outside CORSIA’s managed context and controls. Their instructions, skills and tools may differ, and CORSIA may not fully observe their actions, costs or results. Human approval is required for this exception, even when automatic approval is enabled.</p>
+			<p class="external-warning">This agent runs outside CORSIA’s controls, so CORSIA may not see what it does or what it costs. You approve this yourself, even when Auto-approve is on.</p>
 		{/if}
 		<ul>
 			{#each exceptions as exception}
@@ -49,11 +49,11 @@
 						{:else}
 							<p class="launch-missing">Command missing</p>
 						{/if}
-						<div class="launch-label">Working directory</div>
+						<div class="launch-label">Working folder</div>
 						{#if text(exception.working_directory)}
 							<code>{exception.working_directory}</code>
 						{:else}
-							<p class="launch-missing">Working directory missing</p>
+							<p class="launch-missing">Working folder missing</p>
 						{/if}
 					{:else}
 						<strong>{exception.repo_name}: {policyLabel(exception.policy)}</strong>
@@ -67,7 +67,7 @@
 
 <!-- A first request can arrive before anything else has explained host access. -->
 {#snippet explainer()}
-	<p class="explainer">This agent is asking for temporary access to parts of this computer it can't normally reach. It cannot use that access unless you approve, and you can revoke it at any time.</p>
+	<p class="explainer">This agent is asking for temporary access to parts of this computer it can’t normally reach. It cannot use that access unless you approve, and you can revoke it at any time.</p>
 {/snippet}
 
 <div class="pending-drawer">
@@ -76,7 +76,7 @@
 			<div class="eyebrow">Temporary host access</div>
 			<h2 title={owner(lease)}>{owner(lease)}</h2>
 		</div>
-		<StatePill state={stale ? 'error' : 'warning'} label={stale ? 'State stale' : duration(lease.requested_duration_seconds)} />
+		<StatePill state={stale ? 'error' : 'warning'} label={stale ? 'Not current' : duration(lease.requested_duration_seconds)} />
 	</header>
 
 	<div class="decision-body">

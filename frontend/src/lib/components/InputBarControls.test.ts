@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import InputBarControls from './InputBarControls.svelte';
 import { token } from '$lib/stores/auth';
 import { connectionState } from '$lib/stores/connection';
+import { applyLifecycle, applyTerminal } from '$lib/ws/turnState';
 import { checkpointsByThread } from '$lib/stores/checkpoints';
 import { threadWorkspaces } from '$lib/stores/artifactWorkspace';
 import { activeThreadId, threads, type ContextUsage } from '$lib/stores/threads';
@@ -98,6 +99,31 @@ function mountContextRow(canSendToModel = true, queueUntilSwitch = false) {
 	});
 	flushSync();
 }
+
+it('shows Send for a comment-only draft during an active turn', () => {
+	const identity = { turnId: 'turn-comment', turnOrder: 1 };
+	applyLifecycle('session-ctx', identity);
+	const onSendClick = vi.fn();
+	component = mount(InputBarControls, {
+		target: host,
+		props: {
+			surface: 'row', threadId: 'session-ctx', sheetView: null, toggleSheet: vi.fn(),
+			isMobile: false, hasImageAttachments: false, inputText: '',
+			pendingAttachmentCount: 0, hasMessageToSend: true,
+			canSendToModel: true, queueUntilSwitch: false,
+			onAttachFile: () => {}, onAttachCamera: () => {}, onAttachPhotos: () => {},
+			onSendClick, onQueueAfterTurn: () => {},
+		},
+	});
+	flushSync();
+	const button = host.querySelector<HTMLButtonElement>('.send-btn')!;
+	expect(button.disabled).toBe(false);
+	expect(button.getAttribute('aria-label')).toBe('Send message');
+	expect(button.classList.contains('stop-btn')).toBe(false);
+	button.click();
+	expect(onSendClick).toHaveBeenCalledOnce();
+	applyTerminal('session-ctx', identity);
+});
 
 it('warns when an image attachment is paired with a non-vision model', () => {
 	mountContextControls(true);
@@ -308,7 +334,7 @@ describe('InputBarControls context sources', () => {
 			expect(fetchMock).toHaveBeenCalledTimes(1);
 			const headline = host.querySelector<HTMLElement>('.ctx-headline');
 			const historyRow = host.querySelector<HTMLElement>(
-				'.ctx-source-row[title="Conversation history"]',
+				'.ctx-source-row[title="Chat history"]',
 			);
 			expect(headline?.textContent).toContain('Estimated');
 			expect(headline?.textContent).toContain('200');

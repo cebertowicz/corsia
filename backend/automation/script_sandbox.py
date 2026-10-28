@@ -19,7 +19,6 @@ from pathlib import Path
 from events.trace_env import TRACE_ENV
 from events.trace_env import encode as encode_trace
 from host_access.processes import PROCESS_OWNER, ForegroundProcessResult
-from host_access.refusal_messages import safehouse_unavailable_refusal
 from infra.project_repo_policy import (
     RepoPolicyQueryError,
     list_registered_repo_policies,
@@ -37,6 +36,7 @@ from tools.shell_guard import (
     safehouse_version_error,
 )
 from tools.shell_policy import load_shell_repo_policies
+import tools.shell_sandbox as shell_sandbox
 from tools.unix_socket_policy import corsia_temp_root_for_bind
 
 #: Stdout the runner will read. One extra byte is kept so a longer stream is seen.
@@ -83,12 +83,11 @@ def script_command(path: Path, stdin: Path | None = None) -> str:
 
 
 async def _checked_environment() -> None:
-    if not is_safehouse_available():
-        raise ScriptSandboxError(
-            f"sandbox unavailable: {safehouse_unavailable_refusal(os.environ.get('PATH'))}"
-        )
-    if error := await asyncio.to_thread(safehouse_version_error):
-        raise ScriptSandboxError(f"sandbox unavailable: {error}")
+    error = await shell_sandbox.startup_error(
+        is_safehouse_available, safehouse_version_error, prefix='sandbox unavailable: ',
+    )
+    if error:
+        raise ScriptSandboxError(error)
 
 
 async def run_script(
@@ -159,9 +158,11 @@ async def _run(
             env=env, timeout_seconds=timeout_seconds, background=False,
         )
     finally:
-        profile_path.unlink(missing_ok=True)
+        if profile_path is not None:
+            profile_path.unlink(missing_ok=True)
     if not isinstance(owned, ForegroundProcessResult):
         raise ScriptSandboxError("process owner returned an invalid result")
+    await shell_sandbox.recheck_after(owned)
     return ScriptRun(
         owned.returncode, owned.stdout, owned.stderr, bool(owned.timed_out),
     )

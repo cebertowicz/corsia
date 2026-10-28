@@ -126,8 +126,10 @@ def test_existing_database_startup_does_not_scan_every_btree(monkeypatch) -> Non
     import infra.database as database
     import infra.subagent_caps as subagent_caps
     from infra.schema import SCHEMA_VERSION
+    from infra.event_rule_schema import EVENT_RULE_SCHEMA_SQL
 
     raw = _db()
+    raw.executescript(EVENT_RULE_SCHEMA_SQL)
     raw.execute("CREATE TABLE existing_data (value TEXT)")
     raw.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
 

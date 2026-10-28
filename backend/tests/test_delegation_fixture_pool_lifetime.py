@@ -30,6 +30,14 @@ def test_deleg_db_opens_a_pooled_connection_to_its_own_database(deleg_db):  # no
     assert "deleg.db" in _backing_file(deleg_db)
 
 
+def test_deleg_db_keeps_the_shared_db_bridge_unpatched(deleg_db):  # noqa: F811
+    """Modules imported during the fixture must not retain a temporary bridge."""
+    from infra import db_async, thread_execution
+
+    assert db_async.run_in_db.__module__ == "infra.db_async"
+    assert thread_execution.run_in_db is db_async.run_in_db
+
+
 def test_the_next_test_does_not_inherit_that_connection():
     """The leak: this test never asked for the delegation database.
 

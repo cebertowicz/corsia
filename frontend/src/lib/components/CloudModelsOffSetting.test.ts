@@ -30,6 +30,12 @@ async function mountSetting() {
 	flushSync();
 	await vi.waitFor(() => expect((host.querySelector('button[role="switch"], input, button') as HTMLButtonElement | null)?.disabled).toBeFalsy());
 }
+// Serve the project's setting and the local source row, so the Set up link can follow the server's host fact.
+function stubWithLocalRow(row: Record<string, unknown>, off = false) {
+	vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => (String(input) === '/api/providers/sources'
+		? { ok: true, json: async () => ({ sources: [{ source: 'omlx', name: 'Local model', state: 'needs_setup', ...row }] }) }
+		: { ok: true, json: async () => ({ cloud_models_off: off }) })));
+}
 const toggle = () => host.querySelector('[aria-label="Local models only"]') as HTMLElement;
 const text = () => (host.textContent ?? '').replace(/\s+/g, ' ');
 
@@ -83,7 +89,7 @@ describe('CloudModelsOffSetting', () => {
 		expect(host.querySelector('.status.error')).not.toBeNull();
 		expect((toggle() as HTMLButtonElement).getAttribute('aria-pressed')).toBe('false');
 	});
-	it('load failed: says the setting did not load, hides the switch, and Try again reloads it', async () => {
+	it('load failed: says the setting did not load, hides the switch, and Retry reloads it', async () => {
 		let reads = 0;
 		vi.stubGlobal('fetch', vi.fn(async () => (++reads === 1
 			? { ok: false, status: 500, json: async () => ({}) }
@@ -93,7 +99,7 @@ describe('CloudModelsOffSetting', () => {
 		await vi.waitFor(() => expect(host.querySelector('[role="alert"]')?.textContent).toContain('Couldn’t load this setting.'));
 		expect(text()).not.toContain('subscriptions');
 		expect(toggle()).toBeNull();
-		(Array.from(host.querySelectorAll('button')).find((b) => b.textContent === 'Try again') as HTMLButtonElement).click();
+		(Array.from(host.querySelectorAll('button')).find((b) => b.textContent === 'Retry') as HTMLButtonElement).click();
 		await vi.waitFor(() => expect(toggle()?.getAttribute('aria-pressed')).toBe('true'));
 		expect(host.querySelector('[role="alert"]')).toBeNull();
 	});
@@ -109,5 +115,22 @@ describe('CloudModelsOffSetting', () => {
 		toggle().click(); flushSync();
 		await vi.waitFor(() => expect(text()).toContain('Couldn’t save this change. Your permission changed.'));
 		expect(toggle().getAttribute('aria-pressed')).toBe('true');
+	});
+	it.each([
+		['an eligible Mac', { eligible: true }, true],
+		['a Mac too small for a local model', { eligible: false }, true],
+		['a server that is not macOS', { eligible: true, never_local: true }, false],
+		['a server that is not macOS with little memory', { eligible: false, never_local: true }, false],
+	])('no local model ready on %s: the Set up a local model link is %s', async (_name, row, offered) => {
+		models.set([cloud]); stubWithLocalRow(row); await mountSetting();
+		await vi.waitFor(() => expect(text()).toContain(NONE_READY_OFF));
+		await vi.waitFor(() => expect(text().includes('Connect a provider')).toBe(!offered));
+		expect(text().includes('Set up a local model')).toBe(offered);
+	});
+	it('offers a way forward when only local models are allowed on a non-macOS host', async () => {
+		models.set([cloud]); stubWithLocalRow({ eligible: false, never_local: true }, true); await mountSetting();
+		await vi.waitFor(() => expect(text()).toContain('Connect a model on a trusted device, or turn off Local models only.'));
+		expect(text()).toContain('Connect a provider');
+		expect(host.querySelector('.status.warning')).not.toBeNull();
 	});
 });

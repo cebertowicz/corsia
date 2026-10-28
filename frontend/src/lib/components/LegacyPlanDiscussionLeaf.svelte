@@ -28,7 +28,7 @@
 	<header>
 		<p class="eyebrow">Legacy discussion archive</p>
 		<h2>{title}</h2>
-		<p class="explanation">Preserved read-only until these existing comments are separately archived or migrated.</p>
+		<p class="explanation">Read-only.</p>
 	</header>
 
 	{#if status === 'loading'}

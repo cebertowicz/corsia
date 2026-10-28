@@ -7,8 +7,8 @@ import asyncio
 from dataclasses import replace
 
 import pytest
-from host_access import browser_cdp, browser_cli, browser_sessions as sessions
-from tests.browser_process_fixture import synthetic_browser  # noqa: F401
+from host_access import browser_cdp, browser_cli, browser_launch, browser_sessions as sessions
+from tests.browser_process_fixture import EXIT_TIMEOUT, synthetic_browser  # noqa: F401
 
 
 async def test_opaque_sessions_and_canonical_native_argv(synthetic_browser):
@@ -16,8 +16,9 @@ async def test_opaque_sessions_and_canonical_native_argv(synthetic_browser):
     await fake.owner.run('raw-a', ['snapshot'])
     await fake.owner.run('raw-a', ['snapshot'])
     await fake.owner.run('raw-b', ['snapshot'])
-    assert fake.calls[0][2] == fake.calls[1][2] != fake.calls[2][2]
-    for call in fake.calls:
+    calls = [call for call in fake.calls if 'state' not in call]  # raw-b's start saves raw-a's sign-in first
+    assert calls[0][2] == calls[1][2] != calls[2][2]
+    for call in calls:
         assert call[0] == fake.owner._native.path
         assert call[1] == '--session'
         assert 'raw-a' not in call and 'raw-b' not in call
@@ -26,13 +27,35 @@ async def test_opaque_sessions_and_canonical_native_argv(synthetic_browser):
     await fake.owner.shutdown()
 
 
-async def test_visible_browser_mode_is_pinned_when_the_session_starts(synthetic_browser):
+async def test_new_visible_session_is_headed_and_shared(synthetic_browser):
     fake = synthetic_browser
     await fake.owner.run("visible", ["open", "about:blank"], show_window=True)
     await fake.owner.run("headless", ["open", "about:blank"], show_window=False)
-    visible, headless = fake.calls
+    visible, headless = (call for call in fake.calls if "state" not in call)
     assert "--headed" in visible
     assert "--headed" not in headless
+    assert await fake.owner.is_shared("visible")
+    assert not await fake.owner.is_shared("headless")
+    await fake.owner.shutdown()
+
+
+@pytest.mark.parametrize('existing', [False, True])
+async def test_pane_open_shares_headless_without_host_window(synthetic_browser, monkeypatch, existing):
+    from types import SimpleNamespace
+    from host_access import browser_control, browser_pane, browser_session_commands
+    fake = synthetic_browser
+    notices, events = [], []
+    monkeypatch.setattr(browser_pane, 'PROCESS_OWNER', SimpleNamespace(browser_sessions=lambda: fake.owner))
+    monkeypatch.setattr(browser_control, 'announce_browser_opened', notices.append)
+    monkeypatch.setattr(browser_session_commands, 'emit_product_event', lambda *args, **kwargs: events.append(args))
+    if existing:
+        await fake.owner.run('thread', ['open', 'about:blank'])
+    await browser_pane.open_url('thread', 'https://example.test', 'token' if existing else None)
+    record = fake.owner._sessions['thread'].record
+    assert not record.show_window and record.shared
+    assert '--headless=new' in fake.chrome_calls[0]
+    assert all('--headed' not in call for call in fake.calls)
+    assert notices == [] and events == []
     await fake.owner.shutdown()
 
 
@@ -43,14 +66,17 @@ async def test_first_open_does_not_probe_a_page_before_one_exists(synthetic_brow
         raise sessions.BrowserSessionError("no page exists before open")
 
     monkeypatch.setattr(browser_cdp, "page_endpoint", no_page_yet)
-    assert await fake.owner.run("thread", ["open", "about:blank"]) == "ok"
+    assert (await fake.owner.run("thread", ["open", "about:blank"])).startswith("ok")
     with pytest.raises(sessions.BrowserSessionError, match="no page exists"):
         await fake.owner.run("thread", ["open", "about:blank"])
     await fake.owner.shutdown()
 
 
-@pytest.mark.parametrize("chrome", ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", None])
-async def test_chosen_chrome_is_a_launch_option_resolved_once(synthetic_browser, monkeypatch, chrome):
+@pytest.mark.parametrize("has_chrome", [True, False])
+async def test_chosen_chrome_is_a_launch_option_resolved_once(synthetic_browser, monkeypatch, tmp_path, has_chrome):
+    chrome_path = tmp_path / "chrome"
+    chrome_path.touch()
+    chrome = str(chrome_path) if has_chrome else None
     fake = synthetic_browser
     resolved = []
     monkeypatch.setattr(browser_cli, "chrome_executable",
@@ -62,37 +88,90 @@ async def test_chosen_chrome_is_a_launch_option_resolved_once(synthetic_browser,
     for call in fake.calls:
         launch = call[:call.index("--json")]
         assert launch[1] == "--session"
-        assert (launch[3:5] == ("--executable-path", chrome)) if chrome else ("--executable-path" not in call)
-        # Only the binary changes: agent-browser keeps its temporary profile, never the person's.
-        assert not {"--profile", "--user-data-dir", "--args"} & set(call)
+        assert launch[3:5] == ("--cdp", fake.owner._sessions['visible'].chrome.endpoint)
+        assert "--executable-path" not in call
+        # Never the person's own Chrome profile, in any form.
+        assert "--user-data-dir" not in call
+        if "--profile" in call:
+            # The one CORSIA-owned profile, under the state root, and only on a session's first command.
+            assert call[call.index("--profile") + 1].startswith(str(browser_launch.profile_root()) + "/")
+    assert len(fake.chrome_calls) == 2
+    if chrome:
+        assert all(call[0] == chrome for call in fake.chrome_calls)
+    assert "--headless=new" not in fake.chrome_calls[0]
+    assert "--headless=new" in fake.chrome_calls[1]
     assert "--headed" in fake.calls[0]
     await fake.owner.shutdown()
 
 
-@pytest.mark.parametrize(
-    ("initial", "requested", "current"),
-    [(False, True, "headless"), (True, False, "visible")],
-)
-async def test_mode_change_requires_closing_the_existing_session(
-    synthetic_browser, initial, requested, current,
-):
+@pytest.mark.parametrize(("initial", "requested"), [(False, True), (True, False)])
+async def test_sharing_does_not_relaunch_or_unshare(synthetic_browser, monkeypatch, initial, requested):
+    from host_access import browser_session_commands
+    events = []
+    monkeypatch.setattr(browser_session_commands, 'emit_product_event', lambda *args, **kwargs: events.append((args, kwargs)))
     fake = synthetic_browser
-    await fake.owner.run("thread", ["snapshot"], show_window=initial)
-    requested_value = "true" if requested else "false"
-    with pytest.raises(
-        sessions.BrowserSessionError,
-        match=f"running {current}.*browser_close.*show_window={requested_value}",
-    ):
-        await fake.owner.run("thread", ["open", "about:blank"], show_window=requested)
-    assert len(fake.calls) == 1
+    await fake.owner.run("thread", ["open", "about:blank"], show_window=initial)
+    runtime = fake.owner._sessions["thread"]
+    chrome = runtime.chrome
+    await fake.owner.run("thread", ["open", "about:blank"], show_window=requested)
+    assert runtime.chrome is chrome
+    assert runtime.record.show_window is initial
+    assert runtime.record.shared
+    assert await fake.owner.is_shared("thread")
+    assert len(fake.chrome_calls) == 1
+    assert ("--headed" in fake.calls[-1]) is initial
+    assert events == ([(('browser_pane', 'shared_on_demand'), {'thread_id': 'thread'})] if requested else [])
+    # A later launch reads the original mode even after sharing changed.
+    from host_access import browser_session_launch
+    await runtime.chrome.close()
+    await browser_session_launch.start_chrome(fake.owner, runtime)
+    assert ("--headless=new" not in fake.chrome_calls[-1]) is initial
+    await fake.owner.shutdown()
+
+
+@pytest.mark.parametrize("declared", [True, False])
+async def test_person_step_shares_only_once_declared(synthetic_browser, monkeypatch, declared):
+    from host_access import browser_control, browser_session_commands
+    from host_access.browser_session_state import BrowserSessionError
+    events, opened = [], []
+    monkeypatch.setattr(browser_session_commands, 'emit_product_event', lambda *args, **kwargs: events.append(args))
+    monkeypatch.setattr(browser_control, 'announce_browser_opened', opened.append)
+
+    async def endpoint(_run):
+        return 'ws://page.test'
+
+    async def declare(*_args, **_kwargs):
+        if not declared:
+            raise BrowserSessionError("declined")
+
+    monkeypatch.setattr(browser_cdp, 'page_endpoint', endpoint)
+    monkeypatch.setattr(browser_control, 'declare_person_step', declare)
+    fake = synthetic_browser
+    await fake.owner.run("thread", ["open", "about:blank"], show_window=False)
+    if declared:
+        await fake.owner.declare_person_step("thread", "Solve the check")
+    else:
+        with pytest.raises(BrowserSessionError):
+            await fake.owner.declare_person_step("thread", "Solve the check")
+    # A refused declaration leaves the session headless and unannounced.
+    assert fake.owner._sessions["thread"].record.shared is declared
+    assert opened == (["thread"] if declared else [])
+    assert events == ([('browser_pane', 'shared_on_demand')] if declared else [])
     await fake.owner.shutdown()
 
 
 async def test_active_count_includes_running_and_queued(synthetic_browser, monkeypatch):
     fake = synthetic_browser
     await fake.owner.run('thread', ['snapshot'])
-    entered, release = asyncio.Event(), asyncio.Event()
+    entered, release, queued = asyncio.Event(), asyncio.Event(), asyncio.Event()
     original = fake.invoke
+    admit = fake.owner._admit
+
+    async def observe_admission(*args, **kwargs):
+        runtime = await admit(*args, **kwargs)
+        if entered.is_set():
+            queued.set()
+        return runtime
 
     async def paused(argv, *, timeout):
         entered.set()
@@ -100,10 +179,12 @@ async def test_active_count_includes_running_and_queued(synthetic_browser, monke
         return await original(argv, timeout=timeout)
 
     monkeypatch.setattr(fake.owner, '_invoke', paused)
+    monkeypatch.setattr(fake.owner, '_admit', observe_admission)
     first = asyncio.create_task(fake.owner.run('thread', ['snapshot']))
     await entered.wait()
     second = asyncio.create_task(fake.owner.run('thread', ['snapshot']))
-    await asyncio.sleep(0.05)
+    # Admission returns and the second action queues behind the first.
+    await asyncio.wait_for(queued.wait(), EXIT_TIMEOUT)
     assert fake.owner.active_command_count() == 2
     second.cancel()
     with pytest.raises(asyncio.CancelledError):
@@ -229,6 +310,20 @@ async def test_randomness_and_lease_binding(synthetic_browser, monkeypatch):
         await owner._admit('thread', lease_id='other')
 
 
+async def test_busy_person_step_does_not_block_close(synthetic_browser, monkeypatch):
+    from host_access import browser_step_lifecycle
+    fake = synthetic_browser
+    await fake.owner.run('thread', ['snapshot'])
+    monkeypatch.setattr(browser_step_lifecycle, 'has_step', lambda _: True)
+
+    async def busy(_command):
+        raise sessions.BrowserSessionError(browser_cli.BROWSER_BUSY)
+
+    monkeypatch.setattr(browser_cdp, 'page_endpoint', busy)
+    assert await fake.owner.close_thread('thread') == 'Browser session closed.'
+    assert fake.owner.live_count() == 0
+
+
 async def test_timeout_fences_queued_effect_before_cleanup(synthetic_browser, monkeypatch):
     fake = synthetic_browser
     await fake.owner.run('thread', ['snapshot'])
@@ -240,10 +335,13 @@ async def test_timeout_fences_queued_effect_before_cleanup(synthetic_browser, mo
     monkeypatch.setattr(fake.owner, '_invoke', timed_out)
     first = asyncio.create_task(fake.owner.run('thread', ['snapshot']))
     await entered.wait()
+    closing = asyncio.create_task(fake.owner.close_thread('thread'))
+    await asyncio.sleep(0)  # Close has queued for the command lock before the next effect.
     queued = asyncio.create_task(fake.owner.run('thread', ['snapshot']))
     await asyncio.sleep(0)
     release.set()
     assert 'timed out' in await first
+    await closing
     with pytest.raises(sessions.BrowserSessionError):
         await queued
     assert fake.owner.live_count() == 0
@@ -263,17 +361,19 @@ async def test_timed_out_wait_keeps_the_session_running(synthetic_browser, wait_
     await fake.owner.shutdown()
 
 
-async def test_interrupted_wait_resets_the_session(synthetic_browser):
+async def test_interrupted_wait_preserves_the_session(synthetic_browser):
     fake = synthetic_browser
     await fake.owner.run('thread', ['open', 'about:blank'])
     fake.result = sessions.CommandResult(-1, '', '', completion='interrupted')
-    assert await fake.owner.run('thread', ['wait', '--load', 'networkidle']) != browser_cli.WAIT_TIMED_OUT
-    assert fake.owner.live_count() == 0
+    assert 'still running' in await fake.owner.run('thread', ['wait', '--load', 'networkidle'])
+    assert fake.owner.live_count() == 1
+    await fake.owner.shutdown()
 
 
-async def test_timed_out_non_wait_command_still_resets_the_session(synthetic_browser):
+async def test_timed_out_non_wait_command_preserves_the_session(synthetic_browser):
     fake = synthetic_browser
     await fake.owner.run('thread', ['open', 'about:blank'])
     fake.result = sessions.CommandResult(-1, '', '', timed_out=True)
     assert 'timed out' in await fake.owner.run('thread', ['snapshot'])
-    assert fake.owner.live_count() == 0
+    assert fake.owner.live_count() == 1
+    await fake.owner.shutdown()

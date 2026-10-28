@@ -13,7 +13,7 @@ step also emits oMLX's ``model`` product event, marked ``automatic``:
 
 | Event | Transition | Row line | Product event |
 |---|---|---|---|
-| oMLX's model list couldn't be read | set NOT_KEPT (NOT_LOADED_UNPINNED for a reload after a restart) | that line | none |
+| oMLX's model list couldn't be read | set NOT_KEPT (NOT_LOADED_UNKNOWN for a reload after a restart) | that line | none |
 | oMLX gave no usable size | none (derived live) | no-size line | none |
 | pin written | none | live verdicts | ``model.pin`` |
 | pin write refused | set NOT_KEPT | NOT_KEPT | ``model.pin`` with ``error`` |
@@ -29,7 +29,8 @@ from __future__ import annotations
 
 import logging
 
-from infra.host_resources import GIB, check_can_load, pin_fits, pin_room_bytes
+from infra.host_resources import load_verdict, model_room_bytes, pin_fits, pin_room_bytes
+from llm.local_model_load import seat_lock
 from infra.product_events import emit_product_event
 from llm.local_model import LocalModel
 
@@ -39,6 +40,7 @@ log = logging.getLogger(__name__)
 NOT_KEPT = "Downloaded, but couldn’t keep it loaded. Turn it on to try again."
 NOT_LOADED = "Not loaded: oMLX couldn’t load it. Turn it off and on again to retry."
 NOT_LOADED_UNPINNED = "Not loaded: oMLX couldn’t load it. Turn it on to try again."
+NOT_LOADED_UNKNOWN = "Not loaded: oMLX couldn’t load it. Try again."
 
 _FAILED: dict[tuple[str, str], str] = {}
 
@@ -118,7 +120,8 @@ async def keep_loaded(
     pinning, for a model that is already the person's.
     """
     from llm.network_discovery import discover_and_notify, notify_cached_model_loaded
-    from llm.providers.omlx_lifecycle import load_model
+    from llm.server_observation import observation_generation
+    from llm.providers.omlx_lifecycle import load_model, read_loaded
     from llm.providers.omlx_settings import update_model_settings
 
     key = (server_id, model.model)
@@ -132,15 +135,12 @@ async def keep_loaded(
     row = next((item for item in rows or [] if item.get("id") == model.model), None)
     if row is None:
         log.warning("Not keeping the downloaded local model loaded: oMLX's model list couldn't be read")
-        _FAILED[key] = NOT_KEPT if pin_if_fits or force_pin else NOT_LOADED_UNPINNED  # a reload was not downloaded
+        _FAILED[key] = NOT_KEPT if pin_if_fits or force_pin else NOT_LOADED_UNKNOWN  # a reload was not downloaded
         return
     size = row.get("estimated_size")
     size_bytes: float | None = (
         float(size) if isinstance(size, (int, float)) and size > 0 else None
     )
-    if size_bytes is None and not force_pin:
-        log.warning("Not keeping the downloaded local model loaded: oMLX gave no usable size")
-        return
     pinned = force_pin or (
         pin_if_fits
         and size_bytes is not None
@@ -154,25 +154,30 @@ async def keep_loaded(
             _FAILED[key] = NOT_KEPT
             return
         emit("pin")
-    not_loaded = NOT_LOADED if pinned else NOT_LOADED_UNPINNED
-    if size_bytes is None:
-        log.warning("Not loading the downloaded local model now: oMLX gave no usable size")
-        return
+    not_loaded = NOT_LOADED if pinned or row.get("pinned") else NOT_LOADED_UNPINNED
     step = "memory check"
     try:
-        decision = await check_can_load(size_bytes / GIB, "omlx")
-        if not decision.get("ok"):
-            log.warning("Not loading the downloaded local model now: not enough free memory")
-            return
-        step = "model load"
-        result = await load_model({"server_id": server_id}, model.model)
-        if not result.get("ok"):
-            log.warning("Couldn't load the downloaded local model")
-            emit("load.failed", result.get("message") or "Load failed")
-            _FAILED[key] = not_loaded
-            return
-        emit("load.completed")
-        notify_cached_model_loaded(server_id, model.model)
+        # The seat's lock, so this load and a send's never check the same free memory at once.
+        async with seat_lock(server_id):
+            generation = observation_generation(server_id)
+            loaded = await read_loaded({"server_id": server_id})
+            if loaded is None:
+                raise RuntimeError("oMLX loaded status unavailable")
+            if any(item["identifier"] == model.model for item in loaded):
+                return
+            others = [int(item.get("size_bytes") or 0) or None for item in loaded]
+            if load_verdict(int(size_bytes) if size_bytes else None, others, model_room_bytes()) != "fits_now":
+                log.warning("Not loading the downloaded local model now: not enough free memory")
+                return
+            step = "model load"
+            result = await load_model({"server_id": server_id}, model.model)
+            if not result.get("ok"):
+                log.warning("Couldn't load the downloaded local model")
+                emit("load.failed", result.get("message") or "Load failed")
+                _FAILED[key] = not_loaded
+                return
+            emit("load.completed")
+            notify_cached_model_loaded(server_id, model.model, generation)
         step = "catalog refresh"
         await discover_and_notify(server_id)
     except Exception as exc:

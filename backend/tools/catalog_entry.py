@@ -23,6 +23,7 @@ ToolCategory = Literal[
     "artifacts",
     "connection_admin",
     "host_access",
+    "processes",
     "discovery",
     "email",
     "microsoft",
@@ -49,5 +50,7 @@ class ToolCatalogEntry:
     authority: str = "session"
     core: bool = False
     summary: str = ""
+    #: A durable external or hard-to-undo effect that proposes Serious triage.
+    serious_effect: bool = False
     # The row verb a call of this tool reads as, e.g. "Reading" in "Reading a.md".
     activity: str = field(kw_only=True)

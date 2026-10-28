@@ -21,6 +21,7 @@ _MANAGED_COMMANDS = managed_runtime.COMMAND_RUNTIME
 
 @pytest.fixture
 def home(tmp_path, monkeypatch):
+    monkeypatch.setattr(managed_runtime.platform, "system", lambda: "Darwin")
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("PATH", "/usr/bin:/bin")
     # A fresh Mac has none of these; a runner or developer machine may, which must not change what is fetched.
@@ -54,6 +55,27 @@ def _executable(directory: Path, name: str) -> Path:
     path.write_text("#!/bin/sh\n")
     path.chmod(0o755)
     return path
+
+
+def test_runtime_cache_root_keeps_mac_location(home):
+    assert managed_runtime.runtime_cache_root() == home / 'Library/Caches/CORSIA/runtimes'
+
+
+def test_linux_runtime_root_path_and_readable_grant_match_installer(home, monkeypatch, tmp_path):
+    monkeypatch.setattr(managed_runtime.platform, 'system', lambda: 'Linux')
+    monkeypatch.setattr(agent_shell_tools, 'app_bundle_root', lambda: None)
+    # The installer's shell and the systemd service can see different XDG_CACHE_HOME values.
+    monkeypatch.setenv('XDG_CACHE_HOME', str(tmp_path / 'elsewhere'))
+    installer = (Path(__file__).resolve().parents[2] / 'scripts/install.sh').read_text()
+    assert 'root=runtime_cache_root()' in installer
+    root = home / '.cache/corsia/runtimes'
+    root.mkdir(parents=True)
+    assert managed_runtime.runtime_cache_root() == root
+    expected = [str(managed_runtime.runtime_bin_dir(kind, root=root)) for kind in ('node', 'uv', 'gh')]
+    assert agent_shell_tools.shell_environment('/usr/bin:/bin', 'one')['PATH'].split(':') == [
+        '/usr/bin', '/bin', *expected,
+    ]
+    assert agent_shell_tools.readable_dirs() == [root]
 
 
 def test_the_persons_path_keeps_its_order_and_the_pinned_runtimes_come_last(home, monkeypatch):
@@ -155,6 +177,8 @@ async def test_a_failed_fetch_is_logged_once_per_runtime_and_shells_still_run(ho
 
 @pytest.mark.asyncio
 async def test_bash_waits_for_the_prefetch_before_it_spawns_and_spawns_with_the_tool_path(home, monkeypatch):
+    from tests.shell_platform_helpers import use_mac_shell
+    use_mac_shell(monkeypatch)
     for name, value in {
         "bind_agent_account": AsyncMock(return_value=None),
         "load_shell_repo_policies": lambda *args: ([], []),

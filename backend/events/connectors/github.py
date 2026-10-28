@@ -8,15 +8,16 @@ the legacy router and the new envelope path resolve a PR to the *same*
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, Literal
 
 from events.connectors import (
-    CommandTriggerDecl,
     ConnectorManifest,
     EventTypeDecl,
     ObservedArtifactDecl,
+    ShippedObserveRuleDecl,
     register,
 )
 if TYPE_CHECKING:
@@ -33,6 +34,7 @@ from events.connectors.github_ownership import declaration_facts
 from events.connectors.github_content_facts import content_facts, repository_name
 from events.connectors.github_receiver import GITHUB_RECEIVER
 from events.identity_formula import MalformedEventError, RelationshipDecl
+from infra.webhook_delivery_log import comment_object_key
 
 _CHECK_TO_PR = RelationshipDecl("check_suite", "check_to_pull_request", "pull-request")
 
@@ -110,8 +112,8 @@ _PR_URL_RE = re.compile(
 _FAILED_EXIT_RE = re.compile(r"^Exit code: [1-9]\d*$")
 
 
-def _created_pr_artifact(result_text: str) -> ObservedArtifactDecl | None:
-    """Extract one confirmed canonical PR identity from a command result."""
+def _pr_artifact_in_output(result_text: str) -> ObservedArtifactDecl | None:
+    """Return the one canonical PR URL named by a successful command's output."""
     lines = [line.strip() for line in result_text.splitlines() if line.strip()]
     if any(_FAILED_EXIT_RE.fullmatch(line) for line in lines):
         return None
@@ -130,6 +132,33 @@ def _created_pr_artifact(result_text: str) -> ObservedArtifactDecl | None:
         external_id=pr_external_id(repo, number),
         title=f"PR #{number}",
         path=f"https://github.com/{repo}/pull/{number}",
+    )
+
+
+def _pr_artifact_in_result(result_text: str) -> ObservedArtifactDecl | None:
+    """Read a GitHub MCP created object's URL field, or the shell's PR URL line."""
+    try:
+        result = json.loads(result_text)
+    except (TypeError, ValueError):
+        return _pr_artifact_in_output(result_text)
+    if not isinstance(result, dict):
+        return None
+    item = result.get("comment", result)
+    if not isinstance(item, dict):
+        return None
+    url, object_id = item.get("url"), item.get("id")
+    if not isinstance(url, str) or not isinstance(object_id, str) or not object_id.isdigit():
+        return None
+    match = re.fullmatch(_PR_URL_RE.pattern + r"(?:#issuecomment-([1-9]\d*))?", url)
+    if match is None:
+        return None
+    repo, number, comment_id = match.groups()
+    if ("comment" in result and comment_id is None) or (comment_id is not None and comment_id != object_id):
+        return None
+    return ObservedArtifactDecl(
+        integration=GITHUB_INTEGRATION, type=PR_TYPE,
+        external_id=pr_external_id(repo, number), title=f"PR #{number}",
+        created_event_ids=(comment_object_key("issue_comment", comment_id),) if comment_id else (),
     )
 
 
@@ -312,14 +341,11 @@ MANIFEST = register(ConnectorManifest(
     classify=_classify,
     extract_facts=_extract_facts,
     build_artifact_ref=_artifact_ref,
-    command_triggers=(
-        CommandTriggerDecl(
-            name="github.pr.create",
-            tool_name="bash",
-            argv_prefix=("gh", "pr", "create"),
-            extract_artifact=_created_pr_artifact,
-        ),
-    ),
+    artifact_extractors={PR_TYPE: _pr_artifact_in_result},
+    app_identities=frozenset({"https://api.githubcopilot.com", "ghcr.io/github/github-mcp-server"}),
+    shipped_observe_rules=(ShippedObserveRuleDecl(
+        id="ruleset_github_pr_create", tool="bash", argv_prefix=("gh", "pr", "create"), item_type=PR_TYPE,
+    ),),
     resolve_relationships=_relationships,
     repository_fact="repo",
     project_repositories=_project_repositories,

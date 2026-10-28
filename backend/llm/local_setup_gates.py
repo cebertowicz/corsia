@@ -8,6 +8,7 @@ downloading a model nobody needs.
 from __future__ import annotations
 
 import logging
+import platform
 from functools import cache
 from dataclasses import dataclass
 from datetime import datetime
@@ -29,6 +30,11 @@ def host_ram_bytes() -> int:
     from infra.host_resources import host_total_ram_bytes
 
     return int(host_total_ram_bytes())
+
+
+def host_never_runs_local() -> bool:
+    """Whether the server's operating system is not macOS."""
+    return platform.system() != "Darwin"
 
 
 def local_memory_ok(ram_bytes: int | None = None) -> bool:

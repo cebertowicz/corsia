@@ -56,10 +56,10 @@ async def settle() -> None:
         await asyncio.sleep(0.02)
 
 
-def crash(start, *, tail=lambda _sid: "") -> restart.Life:
+def crash(start, *, tail=lambda _sid: "", observed=("unknown (not our child)", False)) -> restart.Life:
     """Hand the supervisor an unexpected exit of this server."""
     life = sup._life.setdefault(SID, restart.Life())
-    restart.on_exit(SID, life, GONE_PID, start, tail)
+    restart.on_exit(SID, life, GONE_PID, start, tail, observed)
     return life
 
 
@@ -121,11 +121,70 @@ async def test_the_models_observed_loaded_at_the_exit_are_reloaded_in_sorted_ord
     assert no_reload == [(SID, ["alpha", "mid", "zeta"])]
 
 
+async def test_exit_forgets_loaded_models_before_restart_starts(monkeypatch, no_reload):
+    from llm import network_discovery
+    from llm.model_status import _network_status
+
+    monkeypatch.setitem(network_discovery._LOADED_BY_SERVER, SID, {"model"})
+    row = {"litellm_model": f"omlx@{SID}/model", "available": True}
+    status = lambda: _network_status(row, {SID: "online"}, network_discovery.get_loaded_model_ids)
+    assert status() == "ready"
+    start, calls = recording_start()
+    crash(start)
+    assert status() != "ready"
+    assert calls == []
+    await settle()
+    assert no_reload == [(SID, ["model"])]
+
+
+async def test_probe_started_before_exit_cannot_restore_stale_readiness(monkeypatch, no_reload):
+    from llm import network_discovery, server_observation
+
+    monkeypatch.setitem(network_discovery._LOADED_BY_SERVER, SID, {"model"})
+    generation = server_observation.observation_generation(SID)
+    start, _ = recording_start()
+    crash(start)
+    await server_observation.record_reachable({"id": SID}, loaded={"model"}, generation=generation)
+    assert network_discovery.get_loaded_model_ids(SID) == set()
+    await settle()
+
+
+async def test_load_started_before_exit_cannot_restore_stale_readiness(monkeypatch, no_reload):
+    from llm import network_discovery, server_observation
+
+    monkeypatch.setitem(network_discovery._LOADED_BY_SERVER, SID, {"model"})
+    generation = server_observation.observation_generation(SID)
+    start, _ = recording_start()
+    crash(start)
+    network_discovery.notify_cached_model_loaded(SID, "model", generation)
+    assert network_discovery.get_loaded_model_ids(SID) == set()
+    await settle()
+
+
+@pytest.mark.parametrize("before_load", ["empty set", "no set yet"])
+async def test_a_sweep_during_a_load_does_not_hide_the_loaded_model(monkeypatch, before_load):
+    from infra.state import ws
+    from llm import network_discovery, server_observation
+
+    monkeypatch.setattr(network_discovery, "update_server_status", lambda *_a, **_k: None)
+    monkeypatch.setattr(ws, "notify_models_changed", lambda: None)
+    if before_load == "empty set":
+        monkeypatch.setitem(network_discovery._LOADED_BY_SERVER, SID, set())
+    else:
+        monkeypatch.delitem(network_discovery._LOADED_BY_SERVER, SID, raising=False)
+    at_load_start = server_observation.observation_generation(SID)
+    sweep_start = server_observation.observation_generation(SID)
+    await server_observation.record_reachable(
+        {"id": SID}, loaded=set(), rediscover=False, generation=sweep_start,
+    )
+    network_discovery.notify_cached_model_loaded(SID, "model", at_load_start)
+    assert network_discovery.get_loaded_model_ids(SID) == {"model"}
+
+
 async def test_a_clean_exit_the_person_did_not_ask_for_is_logged_not_restarted(events, caplog, monkeypatch):
-    monkeypatch.setattr(omlx_process, "reap_status", lambda _pid: ("exit code 0", True))
     start, calls = recording_start()
     with caplog.at_level(logging.INFO, logger=restart.log.name):
-        crash(start)
+        crash(start, observed=("exit code 0", True))
         await settle()
     assert calls == [] and events == []
     assert "exited with code 0 without being asked; not restarting" in caplog.text
@@ -164,7 +223,7 @@ async def test_backend_shutdown_never_restarts_a_server():
     start, calls = recording_start()
     life = sup._life.setdefault(SID, restart.Life())
     sup.stop_watching()  # what the backend's shutdown path does before it tears anything down
-    restart.on_exit(SID, life, GONE_PID, start, lambda _sid: "")
+    restart.on_exit(SID, life, GONE_PID, start, lambda _sid: "", ("unknown", False))
     await settle()
     assert calls == []
 
@@ -270,7 +329,7 @@ async def test_a_person_starting_the_server_again_clears_the_bound_and_an_earlie
     life.stopping = True
     proc = sleeper()
     try:
-        life.watch(proc.pid, lambda: None)
+        life.watch(proc.pid, lambda _status: None)
         assert not life.restarts and not life.stopping
     finally:
         life.drop_watch()
@@ -287,16 +346,18 @@ async def test_watching_does_nothing_where_the_os_has_no_exit_event(monkeypatch)
     assert sup._life[SID].unwatch is None
 
 
-def reload_fakes(monkeypatch, events_log, *, sizes, loaded_now=(), check=None, load=None):
+def reload_fakes(monkeypatch, events_log, *, sizes, loaded_now=(), load=None):
     """Stand in for oMLX and the host: the model rows, what is loaded, whether it fits, the load."""
     import llm.network_discovery as discovery
     from llm.providers import omlx_lifecycle, omlx_settings
 
     checked, loaded = [], []
 
-    async def default_check(needed_gb, provider):
-        checked.append(needed_gb)
-        return {"ok": needed_gb < 10, "warning": "Loading would need more memory than is free."}
+    from infra.host_resources import GIB, load_verdict
+
+    def verdict(size, others, room):
+        checked.append(size / GIB if size is not None else None)
+        return load_verdict(size, others, room)
 
     async def default_load(cfg, model):
         loaded.append(model)
@@ -306,7 +367,7 @@ def reload_fakes(monkeypatch, events_log, *, sizes, loaded_now=(), check=None, l
         return [{"id": name, "estimated_size": size} for name, size in sizes.items()]
 
     async def now_loaded(_cfg):
-        return [{"identifier": name} for name in loaded_now]
+        return [{"identifier": name, "size_bytes": sizes[name]} for name in [*loaded_now, *loaded]]
 
     async def refreshed(_sid):
         return {}
@@ -315,10 +376,12 @@ def reload_fakes(monkeypatch, events_log, *, sizes, loaded_now=(), check=None, l
         pytest.fail("a reload must not change a pin")
 
     monkeypatch.setattr(local_keep_loaded, "_model_rows", rows)
-    monkeypatch.setattr(local_keep_loaded, "check_can_load", check or default_check)
+    monkeypatch.setattr(local_keep_loaded, "load_verdict", verdict)
+    monkeypatch.setattr(local_keep_loaded, "model_room_bytes", lambda: 9 * GIB)
     monkeypatch.setattr(local_keep_loaded, "emit_product_event", lambda cat, action, properties=None: events_log.append((cat, action, properties)))
     monkeypatch.setattr(omlx_lifecycle, "load_model", load or default_load)
     monkeypatch.setattr(omlx_lifecycle, "list_loaded", now_loaded)
+    monkeypatch.setattr(omlx_lifecycle, "read_loaded", now_loaded)
     monkeypatch.setattr(omlx_settings, "update_model_settings", never_pin)
     monkeypatch.setattr(discovery, "discover_and_notify", refreshed)
     monkeypatch.setattr(discovery, "notify_cached_model_loaded", lambda *_: None)
@@ -357,6 +420,23 @@ async def test_a_model_that_fails_to_load_shows_on_its_row_and_emits_the_failure
     assert [(a, p["error"]) for _, a, p in log] == [("load.failed", "out of memory")]
 
 
+async def test_a_pinned_model_that_fails_to_reload_shows_the_pinned_retry(monkeypatch):
+    import infra.host_resources as host_resources
+
+    async def load(*_):
+        return {"ok": False, "message": "out of memory"}
+
+    async def pinned_row(_server_id):
+        return [{"id": "broken", "estimated_size": host_resources.GIB, "pinned": True}]
+
+    reload_fakes(monkeypatch, [], sizes={"broken": host_resources.GIB}, load=load)
+    monkeypatch.setattr(local_keep_loaded, "_model_rows", pinned_row)
+    await local_keep_loaded.reload_after_restart(SID, ["broken"])
+    assert local_keep_loaded.failures(SID) == {
+        "broken": "Not loaded: oMLX couldn’t load it. Turn it off and on again to retry.",
+    }
+
+
 async def test_a_reload_that_cannot_read_oMLX_models_never_says_downloaded_but_not_kept(monkeypatch):
     async def unreadable(_server_id):
         return None
@@ -364,7 +444,7 @@ async def test_a_reload_that_cannot_read_oMLX_models_never_says_downloaded_but_n
     reload_fakes(monkeypatch, [], sizes={})
     monkeypatch.setattr(local_keep_loaded, "_model_rows", unreadable)
     await local_keep_loaded.reload_after_restart(SID, ["gone"])
-    assert local_keep_loaded.failures(SID) == {"gone": local_keep_loaded.NOT_LOADED_UNPINNED}
+    assert local_keep_loaded.failures(SID) == {"gone": "Not loaded: oMLX couldn’t load it. Try again."}
 
     from llm.local_model import LocalModel
 

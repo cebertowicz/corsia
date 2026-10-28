@@ -9,10 +9,13 @@ import stat
 import subprocess
 import sys
 import tempfile
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import psutil
 import pytest
-from host_access import browser_cdp, browser_cli, browser_identity as identity, browser_sessions as sessions
+from host_access import browser_cdp, browser_chrome, browser_cli, browser_executables, browser_session_launch
+from host_access import browser_identity as identity, browser_sessions as sessions
 
 # Bounds only a child that never starts; a healthy one returns at once. Loaded CI runners took >3 s (#2679).
 CHILD_READY_TIMEOUT = 30
@@ -96,6 +99,7 @@ class SyntheticBrowser:
         self.env_changes = {}
         self.code = DAEMON
         self.calls = []
+        self.chrome_calls = []
         self.result = sessions.CommandResult(0, 'ok', '')
         self.real_socket = False
         self.socket_connect = asyncio.open_unix_connection
@@ -115,7 +119,9 @@ class SyntheticBrowser:
         if argv[-1] == '--version':
             return sessions.CommandResult(0, 'agent-browser 0.27.0', '')
         assert 'close' not in argv and '--namespace' not in argv
-        self.calls.append(tuple(argv))
+        # Internal bootstrap is independently checked in the launch regression tests.
+        if tuple(argv[-2:]) != ('stream', 'status'):
+            self.calls.append(tuple(argv))
         session = argv[argv.index('--session') + 1]
         if session not in self.children:
             child = self.spawn(session, env_changes=self.env_changes, code=self.code)
@@ -160,6 +166,21 @@ def synthetic_browser(monkeypatch):
     owner = sessions.BrowserSessionOwner(namespace='corsia-test', binary=psutil.Process().exe())
     fake = SyntheticBrowser(owner)
     monkeypatch.setattr(owner, '_invoke', fake.invoke)
+    # Authenticity is covered separately; this fixture deliberately runs a synthetic native producer.
+    monkeypatch.setattr(browser_executables, 'private_native', lambda path: path)
+    monkeypatch.setattr(browser_executables, 'trusted_chrome', lambda path: path)
+    monkeypatch.setattr(browser_executables, 'verify_google', lambda path: None)
+
+    async def chrome_launch(executable, *, profile, headless, ua):
+        target = Path(profile) if profile else root / f'ephemeral-{len(fake.chrome_calls)}'
+        argv = browser_chrome.chrome_argv(executable, 39400, target, headless=headless, ua=ua)
+        fake.chrome_calls.append(argv)
+        return SimpleNamespace(cdp_port=39400, endpoint='ws://127.0.0.1:39400/devtools/browser/fixture',
+                               stream_port=39401, release_stream=lambda: None, close=AsyncMock())
+
+    monkeypatch.setattr(browser_chrome.ChromeProcess, 'launch', chrome_launch)
+    monkeypatch.setattr(browser_session_launch, 'sys', SimpleNamespace(platform='darwin'))
+    monkeypatch.setattr(browser_session_launch, 'verify_stream', AsyncMock())
     monkeypatch.setattr(asyncio, 'open_unix_connection', fake.connect)
     monkeypatch.setattr(identity, 'connected_peer_pid', fake.peer_pid)
     # The synthetic daemon has no page: lifecycle tests see a page without a password field
@@ -167,12 +188,14 @@ def synthetic_browser(monkeypatch):
     async def synthetic_page(_run):
         return 'ws://synthetic.test/devtools/page/1'
 
-    async def no_password_field(endpoint, _visit, _known):
-        return browser_cdp.PasswordProbe('synthetic-visit', 'synthetic.test', frozenset(), endpoint)
+    async def no_password_field(endpoint, _known):
+        return browser_cdp.PasswordProbe('synthetic-visit', 'synthetic.test', frozenset(), endpoint,
+                                         present_nodes=frozenset())
     monkeypatch.setattr(browser_cdp, 'page_endpoint', synthetic_page)
     monkeypatch.setattr(browser_cdp, 'page_password_probe', no_password_field)
     monkeypatch.setattr(browser_cli, 'chrome_executable', lambda: (None, 'default'))
     monkeypatch.setattr(browser_cli, 'chrome_download_missing', lambda: False)
+    monkeypatch.setattr(browser_cli, 'downloaded_chrome_executable', lambda: psutil.Process().exe())
     yield fake
     fake.finish()
     shutil.rmtree(root)

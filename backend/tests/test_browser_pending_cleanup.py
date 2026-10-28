@@ -63,8 +63,7 @@ async def test_bound_pending_spawn_recovers_after_late_reap(
             with pytest.raises(cli.CommandCancelled):
                 await asyncio.wait_for(attempt, 7)
         else:
-            with pytest.raises(sessions.BrowserSessionCleanupError, match='client settlement'):
-                await attempt
+            assert 'still running' in await attempt
         assert runtime.attempt.completion == 'unknown' and not pending[0].done()
         assert owner.live_count() == 1
 

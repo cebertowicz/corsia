@@ -344,14 +344,14 @@ describe('BrowserLeaf toolbar', () => {
 		expect(toolbar().querySelector('button[type=button]:not([aria-label])')).toBeNull();
 	});
 
-	it('shows opening, errors and an unavailable stream in the page area with Try again', () => {
+	it('shows opening, errors and an unavailable stream in the page area with Retry', () => {
 		const { socket } = render();
 		socket.receive({ type: 'navigate_result', error: 'blocked' });
 		flushSync();
 		expect(page().textContent).toContain('Browser could not open this URL: blocked');
 		expect(toolbar().textContent).not.toContain('Browser could not open');
 		expect(page().textContent).not.toContain('Reconnect');
-		expect(page().textContent).toContain('Try again');
+		expect(page().textContent).toContain('Retry');
 		socket.receive({ type: 'browser_state', state: 'error', reason: 'gone' });
 		flushSync();
 		expect(page().textContent).toContain('Browser stream unavailable: gone');

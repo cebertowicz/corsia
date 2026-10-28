@@ -62,7 +62,7 @@ def _v100(*, rows: bool) -> sqlite3.Connection:
 
 
 def test_step_is_registered_at_100() -> None:
-    assert SCHEMA_VERSION == 147
+    assert SCHEMA_VERSION == 154
     assert MIGRATIONS[100] is migrate_100_to_101
 
 
@@ -214,7 +214,7 @@ def test_the_whole_chain_from_97_ends_current_with_the_bill_facts_intact(start: 
 
         migrate_to_current(db, SCHEMA_VERSION)
 
-        assert db.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION == 147
+        assert db.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION == 154
         assert db.execute("SELECT kind,amount_cents,charge_day FROM vendor_account_billing_facts WHERE id='c1'").fetchone() == (
             "subscription_rate", 2000, 17)
         assert db.execute("SELECT COUNT(*) FROM plan_status_dirty").fetchone() == (0,)

@@ -7,6 +7,8 @@
 	import { composerSelectionFor } from '$lib/stores/composerSelection';
 	import { turnStates } from '$lib/ws/turnState';
 	import InputBarComposer from './InputBarComposer.svelte';
+	import ChatCommentSelection from './ChatCommentSelection.svelte';
+	import type { ChatComment } from '$lib/chatCommentAnchors';
 	import InputBarControls from './InputBarControls.svelte';
 	import InputBarFileInputs from './InputBarFileInputs.svelte';
 	import {
@@ -16,12 +18,12 @@
 		placeCaretAtEnd,
 		resizeInputBar,
 		uploadThreadAttachment,
-		watchInputBarHeight,
 	} from './inputBarHelpers';
 	import { createComposerDrafts, sendAndRestoreDraft, type ComposerDraft } from './composerDrafts';
 	import { composerCanSend, hasReadySwitchDestination as readySwitchDestination, type SendOutcome } from './composerSendReadiness';
 	import { findModelById, loadModels, loadThreadCatalog } from '$lib/stores/models';
-	import { on, sendMessage, stopTurn } from '$lib/ws';
+	import { sendMessage, stopTurn } from '$lib/ws';
+	import { watchComposer } from './inputBarLifecycle';
 	import { toasts } from '$lib/stores/toast';
 	import { emitProductEvent } from '$lib/product_events';
 	import { onModelSheetRequest } from '$lib/stores/modelSheetRequest';
@@ -48,6 +50,8 @@
 		let isComposing = false;
 	let fileInputsRef: InputBarFileInputs;
 	let pendingAttachments = $state<Attachment[]>([]);
+	let comments = $state<ChatComment[]>([]);
+	let commentSelection: ChatCommentSelection;
 	let uploadError = $state('');
 	let inputAreaEl = $state<HTMLDivElement | undefined>(undefined);
 	let isMultiLine = $state(false);
@@ -91,7 +95,7 @@
 		restore: restoreComposerDraft,
 		reset: resetComposer,
 		boundThreadId: () => boundThreadId,
-		hasText: () => inputText.length > 0,
+		hasText: () => inputText.length > 0 || comments.length > 0,
 	});
 
 	$effect(() => drafts.switchThread(boundThreadId));
@@ -131,7 +135,7 @@
 	}
 
 	function prepareMessage() {
-		if (!inputText.trim() && pendingAttachments.length === 0) return null;
+		if (!inputText.trim() && pendingAttachments.length === 0 && comments.length === 0) return null;
 		if (!boundThreadId && !onAutoCreateThread) return null;
 		const snapshot = () => boundThreadId ? ({
 			threadId: boundThreadId,
@@ -143,16 +147,18 @@
 	}
 
 	function currentComposerDraft(): ComposerDraft | null {
-		if (!inputText.trim() && pendingAttachments.length === 0) return null;
+		if (!inputText.trim() && pendingAttachments.length === 0 && comments.length === 0) return null;
 		return {
 			content: inputText,
 			attachments: [...pendingAttachments],
+			comments: [...comments],
 		};
 	}
 
 	function restoreComposerDraft(draft: ComposerDraft | undefined): void {
 		inputText = draft?.content ?? '';
 		pendingAttachments = draft ? [...draft.attachments] : [];
+		comments = draft?.comments ? [...draft.comments] : [];
 		isMultiLine = false;
 		if (inputEl) {
 			inputEl.textContent = inputText;
@@ -168,6 +174,7 @@
 		inputText = '';
 		if (inputEl) inputEl.textContent = '';
 		pendingAttachments = [];
+		comments = [];
 		uploadError = '';
 		if (inputEl) inputEl.style.height = 'auto';
 		isMultiLine = false;
@@ -191,9 +198,8 @@
 			attachment_count: attachments.length,
 			...(deliveryIntent === 'queue_after_turn' ? { delivery_intent: deliveryIntent } : {}),
 		});
-		const inputId = deliveryIntent === 'queue_after_turn'
-			? sendMessage(threadId, content, modelId, attachments, undefined, deliveryIntent)
-			: sendMessage(threadId, content, modelId, attachments, undefined);
+		const payloadComments = comments.map(({ id, seq, from_off, to_off, quote, anchor_prefix, anchor_suffix, note }) => ({ id, seq, from_off, to_off, quote, anchor_prefix, anchor_suffix, note }));
+		const inputId = sendMessage(threadId, content, modelId, attachments, undefined, deliveryIntent, payloadComments);
 		if (!inputId) {
 			toasts.show('Connection lost before CORSIA could accept this message.', 'error');
 			return 'notified';
@@ -211,10 +217,10 @@
 	// A thread outside the list (a worker, the Corsia agent) may have no model to gate on: the server holds or routes it.
 	const allowUnlistedNoModelThread = $derived(boundThreadId !== null && (boundThreadId === $corsiaAgentId || !selection.isOpen));
 	const canSendToModel = $derived(!$updateRestarting && composerCanSend(activeThread, activeModel, selection.models, allowUnlistedNoModelThread));
-	const hasMessageToSend = $derived(inputText.trim().length > 0 || pendingAttachments.length > 0);
+	const hasMessageToSend = $derived(inputText.trim().length > 0 || pendingAttachments.length > 0 || comments.length > 0);
 
 	function handleSendButtonClick() {
-		if (inputText.trim() || pendingAttachments.length > 0) {
+		if (inputText.trim() || pendingAttachments.length > 0 || comments.length > 0) {
 			handleSend();
 		} else if (isStreamingBoundThread && boundThreadId) {
 			stopTurn(boundThreadId);
@@ -280,46 +286,15 @@
 		resizeInputBar(el, inputAreaEl, (value) => { isMultiLine = value; });
 	}
 
-	onMount(() => {
-		const stopWatchingHeight = watchInputBarHeight(
-			() => inputAreaEl,
-			(fn) => { void tick().then(fn); },
-		);
-		const unsubscribeMessage = on('message_added', data => drafts.settlePendingSubmit(data));
-		const unsubscribeQueued = on('input_queued', data => drafts.settlePendingSubmit(data, 'queued'));
-		const unsubscribeAccepted = on('input_accepted', data => drafts.settlePendingSubmit(data, 'delivered'));
-		const unsubscribeError = on('error', data => drafts.settlePendingSubmit(data, 'failed'));
-		// Every Stop gets an answer the user can read. "Stop worked" and "Stop is
-		// broken" looked identical because the only signal was a control that
-		// kept being offered (USER-REPORTS #6b) — and the outcome names are ours,
-		// not theirs, so none of them reaches the screen.
-		const unsubscribeStopReceipt = on('stop_receipt', data => {
-			if (data?.thread_id !== boundThreadId) return;
-			const receiptText: string | undefined = {
-				stopped: 'Turn stopped',
-				already_terminal: 'That turn had already finished',
-				stale_active: 'That turn had already ended — a newer one is running',
-				no_active_turn: 'Nothing was running to stop',
-			}[data?.outcome as string];
-			if (receiptText) toasts.show(receiptText, data.outcome === 'stopped' ? 'success' : 'info');
-		});
-		return () => {
-			stopWatchingHeight();
-			unsubscribeMessage();
-			unsubscribeQueued();
-			unsubscribeAccepted();
-			unsubscribeError();
-			unsubscribeStopReceipt();
-		};
-	});
+	onMount(() => watchComposer(() => inputAreaEl, () => boundThreadId, drafts));
 
 	export function getInputText() { return inputText; }
 	export function getDrafts() { return drafts.threadDrafts; }
 	export function setAndSend(text: string, preserveDraft = false): Promise<SendOutcome> {
-		const draft = preserveDraft ? { content: inputText, attachments: [...pendingAttachments] } : null;
+		const draft = preserveDraft ? { content: inputText, attachments: [...pendingAttachments], comments: [...comments] } : null;
 		const draftThreadId = boundThreadId;
 		inputText = text;
-		if (preserveDraft) pendingAttachments = [];
+		if (preserveDraft) { pendingAttachments = []; comments = []; }
 		if (inputEl) inputEl.textContent = text;
 		return sendAndRestoreDraft(draft, draftThreadId, tick, handleSend, restoreComposerDraft, drafts.saveCurrentDraft);
 	}
@@ -327,6 +302,7 @@
 	export async function setText(text: string) {
 		inputText = text;
 		pendingAttachments = [];
+		comments = [];
 		await setContentEditableText(inputEl, text, autoResize, placeCaretAtEnd);
 	}
 </script>
@@ -351,6 +327,7 @@
 	}}
 >
 	<InputBarFileInputs bind:this={fileInputsRef} onFiles={handleFileSelect} />
+	<ChatCommentSelection bind:this={commentSelection} threadId={boundThreadId} {comments} surface={inputAreaEl} onChange={value => comments = value} />
 
 	{#if uploadError}
 		<div class="upload-error">{uploadError} <button onclick={() => uploadError = ''}>✕</button></div>
@@ -381,6 +358,9 @@
 		bind:inputEl
 		threadId={boundThreadId}
 		{pendingAttachments}
+		{comments}
+		onEditComment={id => void commentSelection?.edit(id)}
+		onRemoveComment={id => comments = comments.filter(comment => comment.id !== id)}
 		{isMultiLine}
 		{sheetView}
 		{toggleSheet}

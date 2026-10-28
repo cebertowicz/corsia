@@ -36,9 +36,11 @@ jobs:
     if: ${{ !cancelled() && (needs.relevance.result != 'success' || needs.relevance.outputs.relevant == 'true') }}
     name: Backend unit tests
     runs-on: ubuntu-24.04
-    # The Mac Studios finished the three shards in about 6 minutes; a hosted
-    # runner has four slower cores, so the cap leaves room for that hardware.
-    timeout-minutes: 25
+    # Hosted runners split into a fast and a slow kind on the same image: the
+    # slowest shard takes about 14 minutes on one and 22 on the other
+    # (2026-10-27), and the slow kind finished every test and was still
+    # cancelled at 25. The cap is a hang guard with room for the slow kind.
+    timeout-minutes: 35
     env:
       # A GitHub-hosted runner is a throwaway VM with no CORSIA install, so
       # the HOME-prefix guard (it protects a shared host's live workspace)
@@ -87,7 +89,8 @@ jobs:
             -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/ubuntu.sources \
             -o Dir::Etc::sourceparts=- \
             -o APT::Get::List-Cleanup=0
-          sudo apt-get install --yes --no-install-recommends ripgrep
+          sudo apt-get install --yes --no-install-recommends ripgrep bubblewrap
+          bash scripts/install-linux-sandbox.sh
           rg --version
           uv venv --python 3.11 --managed-python --seed .venv
           .venv/bin/python -c 'import sqlite3, sys; print(sys.version.split()[0], "SQLite", sqlite3.sqlite_version)'

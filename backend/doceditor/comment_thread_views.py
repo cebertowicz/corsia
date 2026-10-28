@@ -21,7 +21,7 @@ def mark_viewed(user_id: str, artifact_id: str, root_id: str, seen_reply_id: str
                 )
             except ValueError:
                 return None
-            comment_notifications.announce_after_commit(connection, artifact_id)
+            comment_notifications.announce_after_commit(connection, artifact_id, reply_attention_changed=True)
         return remaining
     finally:
         db.close()

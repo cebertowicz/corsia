@@ -141,7 +141,7 @@
 	{#if loading}
 		<div class="notice"><Spinner /> Checking which models fit this computer…</div>
 	{:else if error}
-		<div class="notice error">{error}{#if retryable}<Button size="sm" variant="secondary" onclick={load}>Try again</Button>{/if}</div>
+		<div class="notice error">{error}{#if retryable}<Button size="sm" variant="secondary" onclick={load}>Retry</Button>{/if}</div>
 	{:else if models.length === 0}
 		<div class="notice">No recommended models fit this computer.</div>
 	{:else}

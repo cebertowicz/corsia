@@ -99,9 +99,7 @@
 		if (state?.phase !== 'active' || state.turnId === null) return false;
 		return $stopRequestedTurns.get(threadId) === state.turnId;
 	});
-	const showStop = $derived(
-		isStreamingThisThread && !inputText.trim() && pendingAttachmentCount === 0,
-	);
+	const showStop = $derived(isStreamingThisThread && !hasMessageToSend);
 	const sendDisabled = $derived(
 		(!hasMessageToSend && !isStreamingThisThread)
 		|| $connectionState !== 'connected'
@@ -307,7 +305,7 @@
 				: contextTokenSource === 'estimated'
 					? 'Estimated next-turn context'
 					: contextCountsAgainstBudget
-						? 'Context used, against this thread\u2019s checkpoint budget'
+						? 'Context used against this chat’s checkpoint budget'
 						: 'Context window'}
 		>
 			{#if contextUtilization !== null}

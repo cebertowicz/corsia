@@ -26,6 +26,24 @@ _PRIMARY_ENV = "CORSIA_REVIEWER_MODEL"
 _PRIMARY_SETTING = "reviewer_model"
 _FALLBACK_ENV = "CORSIA_REVIEWER_FALLBACK_MODEL"
 _FALLBACK_SETTING = "reviewer_fallback_model"
+REVIEWER_HARNESSES = ("codex", "claude-code")
+
+
+def reviewer_model_error(model_id: object) -> str | None:
+    """Validate an exact catalog ID against the reviewer's supported harnesses."""
+    from llm.resolution import ModelUnavailableError, resolve_execution_target
+
+    if not isinstance(model_id, str):
+        return "That model isn't in the catalog. Choose another model."
+    try:
+        target = resolve_execution_target(model_id)
+    except (ModelUnavailableError, ValueError):
+        return "That model isn't in the catalog. Choose another model."
+    if target.catalog_id != model_id:
+        return "That model isn't in the catalog. Choose another model."
+    if target.harness not in REVIEWER_HARNESSES:
+        return "The reviewer needs a Codex or Claude Code model. Choose another model."
+    return None
 
 
 def _resolve_model(env_var: str, setting_key: str) -> str | None:
@@ -313,7 +331,7 @@ def _invoke_reviewer(
             f"Reviewer model {target.catalog_id} is unavailable: "
             f"{target.availability_reason or 'unknown'}"
         )
-    if target.harness not in ("codex", "claude-code"):
+    if target.harness not in REVIEWER_HARNESSES:
         raise CCUnavailableError(
             f"Reviewer model {target.catalog_id} is not an external harness model"
         )

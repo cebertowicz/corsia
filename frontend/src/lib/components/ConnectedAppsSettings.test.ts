@@ -6,7 +6,7 @@ import { emit } from '$lib/ws/events';
 import { token } from '$lib/stores/auth';
 import { projects } from '$lib/stores/projects';
 import { get } from 'svelte/store';
-import { resetSettingsNavigation, settingsNavigation } from '$lib/stores/settingsNavigation';
+import { requestConnectedApp, resetSettingsNavigation, settingsNavigation } from '$lib/stores/settingsNavigation';
 
 const awaiting = { id: 'github', name: 'GitHub', state: 'awaiting_approval', revision: 1, reach: { mode: 'all', project_ids: [], outside_projects: false } };
 const googleAccount = { id: 'google-work', provider: 'google' as const, provider_display_name: 'Google', address: 'sam.work@example.com', capabilities: ['mail', 'calendar', 'files'] as ('mail' | 'calendar' | 'files')[], state: 'connected' as const, tenant_id: null, reach: { mode: 'corsia' as const, project_ids: [], outside_projects: false } };
@@ -204,7 +204,7 @@ describe('ConnectedAppsSettings', () => {
 		await vi.waitFor(() => expect(host.textContent).toContain('Connected'));
 	});
 
-	it("shows the server's Mac notice on a waiting row, so a direct Approve shows it too", async () => {
+	it("shows the server's this-computer notice on a waiting row, so a direct Approve shows it too", async () => {
 		const local = { ...awaiting, transport: 'stdio', notice: 'notice text from the server' };
 		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ servers: [local, { ...awaiting, id: 'web', name: 'Web' }] }) })));
 		component = mount(ConnectedAppsSettings, { target: host });
@@ -272,7 +272,7 @@ describe('ConnectedAppsSettings', () => {
 	it('renders the empty-state copy when there are no apps', async () => {
 		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ servers: [] }) })));
 		component = mount(ConnectedAppsSettings, { target: host });
-		await vi.waitFor(() => expect(host.textContent).toContain('No connected apps yet. Connect one here, or ask CORSIA in chat to bring over the apps you use in Claude Code, Claude Desktop, Cursor, Codex, OpenClaw or Hermes Agent'));
+		await vi.waitFor(() => expect(host.textContent).toContain('No connected apps. Connect one here, or ask CORSIA in chat to bring over the apps you use in Claude Code, Cursor or another tool.'));
 		expect(host.textContent).not.toContain('No apps shared with every project yet.');
 	});
 
@@ -316,7 +316,7 @@ describe('ConnectedAppsSettings', () => {
 	it('keeps the Connect an app action with its introductory copy', async () => {
 		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ servers: [] }) })));
 		component = mount(ConnectedAppsSettings, { target: host });
-		await vi.waitFor(() => expect(host.textContent).toContain('No connected apps yet.'));
+		await vi.waitFor(() => expect(host.textContent).toContain('No connected apps.'));
 		expect(host.querySelector('h2')).toBeNull();
 		expect(host.querySelector('.heading .btn')?.textContent?.trim()).toBe('Connect an app');
 		expect(host.querySelector('p')?.textContent).toContain('Connect the apps you already use');
@@ -399,8 +399,8 @@ describe('ConnectedAppsSettings', () => {
 		expect([...host.querySelector(`[data-connected-account-id="${expired.id}"]`)!.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.trim() === 'Sign in')?.className).toContain('primary');
 		open(failed.id);
 		expect(host.textContent).toContain('Sign-in didn’t finish');
-		expect(host.textContent).toContain('Microsoft had a problem with sign-in. Try again.');
-		const retry = [...host.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.trim() === 'Try again');
+		expect(host.textContent).toContain('Microsoft had a problem with sign-in. Press Retry.');
+		const retry = [...host.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.trim() === 'Retry');
 		expect(retry?.className).toContain('primary');
 		expect(host.textContent).toContain('Where it works…');
 		expect(host.textContent).toContain('Remove');
@@ -500,7 +500,7 @@ describe('ConnectedAppsSettings', () => {
 			await vi.waitFor(() => expect(host.querySelector('[data-connected-account-id="a"]')).not.toBeNull());
 			openRow('a');
 			expect(host.querySelector('[data-connected-account-id="a"] .details')).not.toBeNull();
-			labelled('Try again')!.click();
+			labelled('Retry')!.click();
 			await vi.waitFor(() => expect(host.querySelector('[data-connected-account-id="a"] .sub')?.textContent).toContain('Checking…'));
 			expect(host.querySelector('[data-connected-account-id="a"] .details')).toBeNull();
 			expect(host.querySelector('[data-connected-account-id="a"] button')?.getAttribute('aria-expanded')).toBe('false');
@@ -760,7 +760,7 @@ describe('WhereItWorks', () => {
 		expect(JSON.parse(String(call?.[1]?.body))).toEqual({ reach: { mode: 'all', project_ids: [], outside_projects: false } });
 	});
 
-	it("shows the server's Mac notice on the approve sheet only", async () => {
+	it("shows the server's this-computer notice on the approve sheet only", async () => {
 		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ projects: [] }) })));
 		const notice = 'notice text from the server';
 		const reach = { mode: 'selected', project_ids: [], outside_projects: false };
@@ -770,7 +770,7 @@ describe('WhereItWorks', () => {
 		unmount(component);
 		component = mount(WhereItWorks, { target: host, props: { app: { ...awaiting, transport: 'http', reach }, approve: true, onClose: vi.fn(), onSaved: vi.fn() } });
 		await settle();
-		expect(host.textContent).not.toContain("It can do anything you can do on this Mac");
+		expect(host.textContent).not.toContain("It can do anything you can do on the computer it runs on");
 		unmount(component);
 		component = mount(WhereItWorks, { target: host, props: { app: { ...awaiting, transport: 'stdio', notice, reach }, onClose: vi.fn(), onSaved: vi.fn() } });
 		await settle();
@@ -853,5 +853,50 @@ describe('ConnectedAppsSettings key actions', () => {
 		expect(button('Reconnect')).toBeUndefined();
 		button('Replace key').click();
 		expect(get(settingsNavigation)).toMatchObject({ section: 'keys', connectedAppKey: null });
+	});
+});
+
+describe('ConnectedAppsSettings chat link to an app row', () => {
+	const place = { mode: 'selected', project_ids: [], outside_projects: false };
+	const github = { id: 'github', name: 'GitHub', state: 'awaiting_approval', revision: 1, reach: { mode: 'all', project_ids: [], outside_projects: false } };
+	// jsdom has no layout and no CSS.escape, so the scroll-into-view and the id selector need stand-ins.
+	beforeEach(() => { HTMLElement.prototype.scrollIntoView = vi.fn(); vi.stubGlobal('CSS', { escape: (value: string) => value }); });
+
+	async function linkTo(id: string, servers: Record<string, unknown>[], accounts: Record<string, unknown>[] = []): Promise<void> {
+		resetSettingsNavigation();
+		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ servers, accounts }) })));
+		component = mount(ConnectedAppsSettings, { target: host });
+		await vi.waitFor(() => expect(host.querySelector('[data-settings-row]')).not.toBeNull());
+		requestConnectedApp(id);
+		flushSync();
+	}
+	const focused = () => (document.activeElement as HTMLElement | null)?.textContent?.trim();
+
+	it('focuses Approve on the linked app row, with a visible mark, and not on another row', async () => {
+		await linkTo('github', [{ ...github, id: 'notes', name: 'Notes' }, github]);
+		await vi.waitFor(() => expect(focused()).toBe('Approve'));
+		expect(document.activeElement?.closest('[data-connected-app-id]')?.getAttribute('data-connected-app-id')).toBe('github');
+		expect(host.querySelectorAll('[data-chat-link-focus]')).toHaveLength(1);
+		expect(host.querySelector('[data-connected-app-id="github"] [data-chat-link-focus] .btn')).toBe(document.activeElement);
+	});
+
+	it('focuses Choose where it works… when the app needs a place first', async () => {
+		await linkTo('github', [{ ...github, reach: place }]);
+		await vi.waitFor(() => expect(focused()).toBe('Choose where it works…'));
+		expect(host.querySelector('[data-chat-link-focus]')).not.toBeNull();
+	});
+
+	it('drops the mark once focus leaves the action', async () => {
+		await linkTo('github', [github]);
+		await vi.waitFor(() => expect(host.querySelector('[data-chat-link-focus]')).not.toBeNull());
+		(document.activeElement as HTMLElement).blur();
+		flushSync();
+		expect(host.querySelector('[data-chat-link-focus]')).toBeNull();
+	});
+
+	it('still opens a linked account and focuses its action', async () => {
+		await linkTo('google-work', [github], [googleAccount]);
+		await vi.waitFor(() => expect(focused()).toBe('Where it works…'));
+		expect(document.activeElement?.closest('[data-connected-account-id]')?.getAttribute('data-connected-account-id')).toBe('google-work');
 	});
 });

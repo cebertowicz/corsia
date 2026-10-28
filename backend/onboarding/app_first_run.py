@@ -108,7 +108,7 @@ def applicable_steps(
     steps.extend((
         _step(
             5, "About you",
-            "CORSIA knows enough about you to help, or you chose not now",
+            "CORSIA knows enough to help, or you chose not now",
         ),
         *(() if email_calendar_ready else (_step(
             6, "Email and calendar",

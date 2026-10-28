@@ -30,6 +30,10 @@ from auth_fixtures import OWNER_TOKEN
 _AUTH_KEY = "to" + "ken"
 _SPAWN = "api.system_admin._spawn_self_restart"
 _FLAG = "CORSIA_AGENT_RESTART_ALLOWED"
+# Ordering waits, not latency bounds: each event is set by work the test has
+# already started and nothing else holds, so the bound only stops a hung test.
+# A loaded CI runner can take well over 0.2 s to run one request's database work.
+_SYNC_TIMEOUT = 5
 
 
 @pytest.fixture(autouse=True)
@@ -214,8 +218,8 @@ class TestSelfRestartEndpoint:
                 app, operation_id, "cli restart",
             )
             try:
-                await asyncio.wait_for(response_sent.wait(), timeout=0.2)
-                await asyncio.wait_for(entered.wait(), timeout=0.2)
+                await asyncio.wait_for(response_sent.wait(), timeout=_SYNC_TIMEOUT)
+                await asyncio.wait_for(entered.wait(), timeout=_SYNC_TIMEOUT)
                 assert request.done() is False
                 status, payload = _asgi_response(messages)
                 assert status == 200
@@ -264,12 +268,12 @@ class TestSelfRestartEndpoint:
                 app, operation_id, "cli restart",
             )
             try:
-                await asyncio.wait_for(first_sent.wait(), timeout=0.2)
-                await asyncio.wait_for(entered.wait(), timeout=0.2)
+                await asyncio.wait_for(first_sent.wait(), timeout=_SYNC_TIMEOUT)
+                await asyncio.wait_for(entered.wait(), timeout=_SYNC_TIMEOUT)
                 duplicate, duplicate_sent, messages = _drain_request(
                     app, operation_id, "cli restart",
                 )
-                await asyncio.wait_for(duplicate_sent.wait(), timeout=0.2)
+                await asyncio.wait_for(duplicate_sent.wait(), timeout=_SYNC_TIMEOUT)
                 await duplicate
                 assert _asgi_response(messages) == (
                     409,
@@ -1118,6 +1122,37 @@ def test_close_out_prior_self_restart_does_not_swallow_failures(isolated_db, mon
     monkeypatch.setattr("automation.self_restart.clear_stale_in_flight", _boom)
     with pytest.raises(RuntimeError, match="db down"):
         restart_startup.close_out_prior_self_restart()
+
+
+async def test_restart_launch_does_not_block_event_loop():
+    """A slow handoff must leave other requests able to run."""
+    import threading
+    import api.system_admin as sa
+
+    started = threading.Event()
+    release = threading.Event()
+    process = MagicMock()
+    process.poll.return_value = None
+
+    def slow_spawn(*_args):
+        started.set()
+        if not release.wait(timeout=3):
+            raise RuntimeError("event loop did not release launch")
+        return process
+
+    with (
+        patch("automation.restart.begin_restart_drain", new_callable=AsyncMock),
+        patch(_SPAWN, side_effect=slow_spawn),
+    ):
+        task = asyncio.create_task(sa._spawn_self_restart_after_response(
+            3001, False, "a" * 32, "test", _valid_token()
+        ))
+        try:
+            assert await asyncio.to_thread(started.wait, 2)
+            assert not task.done()
+        finally:
+            release.set()
+        await task
 
 
 async def test_after_response_launch_failure_releases_the_operation(isolated_db):

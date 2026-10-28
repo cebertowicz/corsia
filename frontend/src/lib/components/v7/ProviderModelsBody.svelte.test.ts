@@ -62,7 +62,7 @@ describe('Settings model rows and account usage', () => {
 
 		const text = await render();
 
-		expect(text).toContain('this harness isn’t connected');
+		expect(text).toContain('Can’t be used in chats: Claude Code isn’t connected.');
 	});
 
 	it('adds a recorded local download speed and note only to its matching server row', async () => {

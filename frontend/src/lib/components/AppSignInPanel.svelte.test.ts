@@ -45,9 +45,8 @@ describe('sign-in row lines', () => {
 		expect(signInStateLine(linear(), true)).toBe('Signed out');
 		expect(signInStateLine(linear({ sign_in: { status: 'pending', signed_in: false } }), false)).toBe('Waiting for you in your browser');
 		expect(signInStateLine(linear({ sign_in: { status: 'failed', signed_in: false, failure_class: 'declined' } }), false)).toBe("Sign-in didn't finish");
-		expect(signInStateLine(linear({ state: 'working', tool_count: 12, sign_in: { status: 'idle', signed_in: true, account: 'steve@acme.example' } }), false))
-			.toBe('Connected · 12 actions · Signed in as steve@acme.example');
-		expect(signInStateLine(linear({ state: 'working', tool_count: 12, sign_in: { status: 'idle', signed_in: true } }), false)).toBe('Connected · 12 actions · Signed in');
+		// A signed-in app's account is in its title, so its state line is the app's own.
+		expect(signInStateLine(linear({ state: 'working', tool_count: 12, sign_in: { status: 'idle', signed_in: true, account: 'steve@acme.example' } }), false)).toBeNull();
 		expect(signInStateLine({ ...linear(), state: 'working', sign_in: undefined }, false)).toBeNull();
 	});
 });
@@ -115,12 +114,12 @@ describe('AppSignInPanel', () => {
 		['permissions', "Linear can't give CORSIA the access it needs."],
 		['app_error', 'Linear had a problem with the sign-in.'],
 		['app_busy', 'Linear is busy.'],
-		['address_mismatch', "Linear didn't recognize CORSIA. It needs a code called a client ID."],
+		['address_mismatch', "Linear didn't recognize CORSIA, so it needs a client ID."],
 	])('names the %s failure in plain words', (failureClass, text) => {
 		mountPanel(linear({ sign_in: { status: 'failed', signed_in: false, failure_class: failureClass } }));
 		expect(host.textContent).toContain(text);
 		const labels: Record<string, string | null> = { permissions: 'Sign in', not_approved: null, address_mismatch: 'Sign in' };
-		const label = failureClass in labels ? labels[failureClass] : 'Try again';
+		const label = failureClass in labels ? labels[failureClass] : 'Retry';
 		if (label) expect(button(label)!.classList.contains('primary')).toBe(true);
 		else expect(host.querySelectorAll('.actions .btn')).toHaveLength(0);
 	});
@@ -142,7 +141,7 @@ describe('AppSignInPanel', () => {
 		const fetch = vi.fn(async () => reply({ authorization_url: LINK, expires_at: 't', reopened: false }));
 		vi.stubGlobal('fetch', fetch);
 		const { onChange } = mountPanel(linear({ sign_in: { status: 'failed', signed_in: false, failure_class: 'address_mismatch' } }));
-		expect(button('Try again')).toBeUndefined();
+		expect(button('Retry')).toBeUndefined();
 		button('Sign in')!.click();
 		await vi.waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/api/mcp/servers/linear/sign-in'), { method: 'POST' }));
 		await vi.waitFor(() => expect(onChange).toHaveBeenCalledWith({ sign_in: expect.objectContaining({ status: 'pending', failure_class: undefined }) }));
@@ -155,9 +154,9 @@ describe('AppSignInPanel', () => {
 		expect(host.textContent).toContain('tenant is frozen');
 	});
 
-	it('does not offer Sign in away from the CORSIA Mac', () => {
+	it('does not offer Sign in away from the main computer', () => {
 		mountPanel(linear(), { signInHere: false });
-		expect(host.textContent).toContain('You can only sign in on the Mac CORSIA runs on. Open CORSIA there and press Sign in.');
+		expect(host.textContent).toContain('You can only sign in on your main computer. Open CORSIA there and press Sign in.');
 		expect(button('Sign in')).toBeUndefined();
 	});
 
@@ -186,10 +185,10 @@ describe('ConnectedAppsSettings with sign-in', () => {
 		expect(button('Sign in')!.classList.contains('primary')).toBe(true);
 	});
 
-	it('hides Sign in when the backend says the person is not on its Mac', async () => {
+	it('hides Sign in when the backend says the person is not on its computer', async () => {
 		vi.stubGlobal('fetch', vi.fn(async () => reply({ servers: [linear()], sign_in_here: false })));
 		component = mount(ConnectedAppsSettings, { target: host });
-		await vi.waitFor(() => expect(host.textContent).toContain('You can only sign in on the Mac CORSIA runs on.'));
+		await vi.waitFor(() => expect(host.textContent).toContain('You can only sign in on your main computer.'));
 		expect(button('Sign in')).toBeUndefined();
 	});
 
@@ -213,18 +212,48 @@ describe('ConnectedAppsSettings with sign-in', () => {
 		}
 	});
 
-	it('shows a signed-in account on the row', async () => {
+	it('names a signed-in account in the title, not in the meta line or the opened row', async () => {
 		const app = linear({ state: 'working', tool_count: 3, sign_in: { status: 'idle', signed_in: true, account: 'steve@acme.example' } });
 		vi.stubGlobal('fetch', vi.fn(async () => reply({ servers: [app], sign_in_here: true })));
 		component = mount(ConnectedAppsSettings, { target: host });
-		await vi.waitFor(() => expect(host.textContent).toContain('Connected · 3 actions · Signed in as steve@acme.example'));
+		await vi.waitFor(() => expect(host.querySelector('.name')?.textContent).toBe('Linear —steve@acme.example'));
+		expect(host.querySelector('.app-name')?.textContent).toBe('Linear —');
+		expect(host.querySelector('.app-account')?.textContent).toBe('steve@acme.example');
+		expect(host.querySelector('.sub')?.textContent).toBe('Connected · 3 actions · All projects');
+		expect(host.querySelector('button.face.open')?.getAttribute('aria-label')).toBe('Linear — steve@acme.example');
+		expect(host.querySelector('.app-account-title')?.getAttribute('title')).toBe('Linear — steve@acme.example');
+		(host.querySelector('button.face.open') as HTMLButtonElement).click();
+		flushSync();
+		expect(host.textContent).not.toContain('Signed in as');
+	});
+
+	it('shows a plain title and explains an unnamed signed-in account', async () => {
+		const app = linear({ state: 'working', tool_count: 3, sign_in: { status: 'idle', signed_in: true } });
+		vi.stubGlobal('fetch', vi.fn(async () => reply({ servers: [app], sign_in_here: true })));
+		component = mount(ConnectedAppsSettings, { target: host });
+		await vi.waitFor(() => expect(host.querySelector('.name')?.textContent).toBe('Linear'));
+		expect(host.querySelector('.app-account-title')).toBeNull();
+		expect(host.querySelector('button.face.open')?.getAttribute('aria-label')).toBeNull();
+		expect(host.querySelector('.sub')?.textContent).toBe('Connected · Signed in · 3 actions · All projects');
+		(host.querySelector('button.face.open') as HTMLButtonElement).click();
+		flushSync();
+		expect(host.textContent).toContain("Linear didn't say which account");
+		expect(host.textContent).not.toContain('Signed in as');
+	});
+
+	it('keeps a plain title when the app is not signed in', async () => {
+		const app = linear({ state: 'working', sign_in: { status: 'idle', signed_in: false } });
+		vi.stubGlobal('fetch', vi.fn(async () => reply({ servers: [app], sign_in_here: true })));
+		component = mount(ConnectedAppsSettings, { target: host });
+		await vi.waitFor(() => expect(host.querySelector('.name')?.textContent).toBe('Linear'));
+		expect(host.querySelector('.app-account-title')).toBeNull();
 	});
 
 	it('puts Sign out after Reconnect and before Remove, and asks before signing out', async () => {
 		const app = linear({ state: 'working', tool_count: 3, sign_in: { status: 'idle', signed_in: true, account: 'steve@acme.example' } });
 		vi.stubGlobal('fetch', vi.fn(async () => reply({ servers: [app], sign_in_here: true })));
 		component = mount(ConnectedAppsSettings, { target: host });
-		await vi.waitFor(() => expect(host.textContent).toContain('Signed in as steve@acme.example'));
+		await vi.waitFor(() => expect(host.textContent).toContain('steve@acme.example'));
 		(host.querySelector('button.face.open') as HTMLButtonElement).click();
 		flushSync();
 		const labels = [...host.querySelectorAll('.actions button')].map((b) => b.textContent?.trim());

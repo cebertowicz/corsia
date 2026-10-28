@@ -2,22 +2,24 @@
 from __future__ import annotations
 
 import asyncio
+import collections
 import contextlib
 import json
 import logging
 import secrets
 from functools import partial
-from typing import Awaitable, Callable
+from typing import AsyncIterator, Awaitable, Callable
 
 from fastapi import WebSocket, WebSocketDisconnect
 from websockets.exceptions import WebSocketException
 
-from host_access import browser_control, browser_pane
+from host_access import browser_control, browser_pane, browser_pane_state
 from host_access.browser_domain import url_domain
 from host_access.browser_session_state import BrowserSessionError
 from host_access.processes import ProcessOwnerError
 from infra.auth import authenticate, narrow_to_listener
 from infra.database import get_db
+from infra.product_events import emit_product_event
 from infra.queries import get_thread_for_user
 from ws.browser_frames import PaneFrames
 
@@ -131,6 +133,62 @@ async def _metadata_events(thread_id: str, connection_token: str, report: Callab
     )
 
 
+async def _watch_targets(thread_id: str, connection_token: str, changed: asyncio.Event,
+                         pages: list[set[str] | None]) -> None:
+    """Report tab changes; once retries run out the pane keeps showing its current tab."""
+    try:
+        await _retry_pane_connection(
+            thread_id, connection_token, "target watch", "target watch ended",
+            lambda: browser_pane.watch_targets(thread_id, changed.set, pages),
+        )
+    except BrowserSessionError as exc:
+        # Agent tab switches still reach the pane through target_changed; only browser-opened tabs go unfollowed.
+        log.warning("browser pane %s stopped watching tabs and keeps its current tab: %s", thread_id, exc)
+    except Exception:
+        log.exception("browser pane %s tab watch failed; it keeps its current tab", thread_id)
+
+
+async def _follow_page(thread_id: str, connection_token: str, frames: PaneFrames,
+                       report: Callable[[dict], None]) -> None:
+    """Restart both page streams on a target change without reconnecting the pane."""
+    changed = asyncio.Event()
+    browser_pane_state.watch_target_changes(thread_id, connection_token, changed.set)
+    pages: list[set[str] | None] = [None]
+    watcher = asyncio.create_task(_watch_targets(thread_id, connection_token, changed, pages))
+    streams: set[asyncio.Task] = set()
+    try:
+        while True:
+            change_wait = asyncio.create_task(changed.wait())
+            streams = {
+                asyncio.create_task(_screencast_events(thread_id, connection_token, frames)),
+                asyncio.create_task(_metadata_events(thread_id, connection_token, report)),
+                change_wait,
+            }
+            while True:
+                waiting = streams if watcher.done() else streams | {watcher}
+                done, _ = await asyncio.wait(waiting, return_when=asyncio.FIRST_COMPLETED)
+                if done != {watcher}:
+                    break
+            for task in done:
+                if task is change_wait or task is watcher:
+                    continue
+                task.result()
+            changed.clear()
+            await asyncio.to_thread(emit_product_event, "browser_pane", "target_changed", thread_id=thread_id)
+            for task in streams:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*streams, return_exceptions=True)
+            browser_pane.clear_page_endpoint(thread_id, connection_token)
+    finally:
+        browser_pane_state.unwatch_target_changes(thread_id, connection_token)
+        watcher.cancel()
+        for task in streams:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(watcher, *streams, return_exceptions=True)
+
+
 async def _relay(pane: WebSocket, thread_id: str, user_id: str) -> None:
     """Relay shared page frames and pane input for one authenticated connection."""
     connection_token = secrets.token_urlsafe(18)
@@ -144,36 +202,32 @@ async def _relay(pane: WebSocket, thread_id: str, user_id: str) -> None:
             overflow.set()
 
     browser_control.pane_connected(thread_id, connection_token, report,
-                                   partial(browser_pane.password_probe, thread_id, connection_token))
+                                   partial(browser_pane.password_probe, thread_id, connection_token),
+                                   session=partial(browser_pane.session_identity, thread_id))
 
     async def from_pane() -> None:
-        while True:
-            message = await pane.receive_text()
-            try:
-                data = json.loads(message)
-            except (TypeError, ValueError):
-                continue
-            kind = data.get("type") if isinstance(data, dict) else None
-            if kind == "navigate":
-                _request_navigate(thread_id, connection_token, data, report)
-            elif kind == "appearance":
-                _request_match(thread_id, connection_token, data)
-            elif kind == "input_mouse":
-                # CDP serializes pointer and key delivery on the page target, so typing cannot
-                # overtake the click that focuses its field.
-                await browser_pane.mouse_event(thread_id, data, connection_token)
-                browser_control.person_input(thread_id)
-            elif kind == "input_keyboard":
-                await browser_pane.key_event(thread_id, data, connection_token)
-                browser_control.person_input(thread_id)
+        async with contextlib.aclosing(_pane_messages(pane)) as messages:
+            async for data in messages:
+                kind = data.get("type")
+                if kind == "navigate":
+                    _request_navigate(thread_id, connection_token, data, report)
+                elif kind == "appearance":
+                    _request_match(thread_id, connection_token, data)
+                elif kind == "input_mouse":
+                    # CDP serializes pointer and key delivery on the page target, so typing cannot
+                    # overtake the click that focuses its field.
+                    await browser_pane.mouse_event(thread_id, data, connection_token)
+                    browser_control.person_input(thread_id)
+                elif kind == "input_keyboard":
+                    await browser_pane.key_event(thread_id, data, connection_token)
+                    browser_control.person_input(thread_id)
 
     tasks: set[asyncio.Task] = set()
     try:
         # Shared panes have no control-holder state.
         tasks = {
-            asyncio.create_task(_screencast_events(thread_id, connection_token, frames)),
+            asyncio.create_task(_follow_page(thread_id, connection_token, frames, report)),
             asyncio.create_task(from_pane()),
-            asyncio.create_task(_metadata_events(thread_id, connection_token, report)),
             asyncio.create_task(frames.send(pane.send_text)),
             asyncio.create_task(_close_on_overflow(pane, overflow)),
         }
@@ -193,6 +247,68 @@ async def _relay(pane: WebSocket, thread_id: str, user_id: str) -> None:
             del _latest_appearance[thread_id]
         browser_pane.clear_page_endpoint(thread_id, connection_token)
         browser_control.pane_disconnected(thread_id, connection_token)
+
+
+async def _pane_messages(pane: WebSocket) -> AsyncIterator[dict]:
+    """The pane's messages in the order sent, less each pointer move a later queued move replaces.
+
+    Chrome answers a pointer move only after its next frame, tens of milliseconds, while the pane
+    sends one per animation frame; delivered one at a time, moves pile up and a click behind them
+    lands seconds late. So the pane is read while earlier messages are delivered, and a move that
+    arrives right behind a queued move replaces it, so a stalled page never holds more than one
+    waiting move. Nothing else is dropped or reordered, and the pane's disconnect is raised only
+    after everything it sent first. A page that answers no input while the backlog reaches
+    `_MAX_QUEUED_INPUT` is stalled: the pane is closed, as an overflowing output path closes it.
+    """
+    received: collections.deque[dict | Exception] = collections.deque()
+    arrived = asyncio.Event()
+
+    reader = asyncio.create_task(_receive_pane_messages(pane, received, arrived))
+    try:
+        while True:
+            await arrived.wait()
+            arrived.clear()
+            while received:
+                data = received.popleft()
+                if isinstance(data, Exception):
+                    raise data
+                yield data
+    finally:
+        reader.cancel()
+        await asyncio.gather(reader, return_exceptions=True)
+
+
+async def _receive_pane_messages(pane: WebSocket, received: collections.deque[dict | Exception],
+                                 arrived: asyncio.Event) -> None:
+    try:
+        while True:
+            try:
+                data = json.loads(await pane.receive_text())
+            except (TypeError, ValueError):
+                continue
+            if isinstance(data, dict):
+                if _is_move(data) and received and _is_move(received[-1]):
+                    received[-1] = data
+                elif len(received) >= _MAX_QUEUED_INPUT:
+                    received.clear()
+                    with contextlib.suppress(Exception):
+                        await pane.close(code=1013)
+                    raise WebSocketDisconnect(code=1013)
+                else:
+                    received.append(data)
+                arrived.set()
+    except Exception as exc:
+        received.append(exc)
+        arrived.set()
+
+
+# The pane sends at most one wheel event per animation frame, so this is about 17 s of input
+# against a page that has answered none of it.
+_MAX_QUEUED_INPUT = 1024
+
+
+def _is_move(data: dict | Exception) -> bool:
+    return isinstance(data, dict) and data.get("type") == "input_mouse" and data.get("eventType") == "mouseMoved"
 
 
 async def _close_on_overflow(pane: WebSocket, overflow: asyncio.Event) -> None:

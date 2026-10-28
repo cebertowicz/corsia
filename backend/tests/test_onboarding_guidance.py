@@ -126,7 +126,7 @@ def test_first_run_describes_brave_only_as_the_key_acquisition_path():
 
     assert "It uses Brave Search." not in web_search
     assert "Your searches go to Brave." not in web_search
-    assert "A Brave Search key is one way to turn it on." in web_search
+    assert "[I couldn't search without a key just now. ]A Brave Search key makes search steadier." in web_search
     assert "Searches using that key go to Brave." in web_search
 
 
@@ -215,7 +215,7 @@ def test_every_settings_link_in_first_run_opens_a_real_section_and_anchor():
 def test_first_run_stays_within_its_body_size():
     # Its size after the fuller conductor-role intro and the MCP import consent step (#690),
     # rounded up; #674 tracks the real cap.
-    assert len(FIRST_RUN.read_bytes()) <= 17600  # +the router to first-run-app.md
+    assert len(FIRST_RUN.read_bytes()) <= 17800  # +the router to first-run-app.md, +where keyless searches go (#1537), +the goal-owning welcome line (#1599)
 
 
 LOCAL_MODEL_OFFER = BOOTSTRAP_SKILL.parent / "references/local-model-offer.md"
@@ -282,7 +282,7 @@ def test_app_path_uses_server_opening_and_plan_then_steps_and_handoff():
     assert app.index("first-run-opening.md") < app.index("## The steps")
     opening = (FIRST_RUN_APP.parent / "first-run-opening.md").read_text()
     assert "My job is to give you back your time, and I measure it" in opening
-    assert "Here's mine for finishing your setup" in opening
+    assert "My plan for finishing your setup is in the Plan section on the right" in opening and 'shows how many tasks are left' in opening
     assert "Never post or repeat it" in app
     # The doc's order: the other subscription, the one import, Where your work lives, search, About you.
     assert [title.rstrip(".,") for title in titles] == [
@@ -315,6 +315,15 @@ def test_where_your_work_lives_rechecks_connected_apps_after_import():
     assert "count before they approve them" in work
 
 
+def test_first_run_app_approval_links_to_the_created_app():
+    work = _step(3)
+    assert "[App] is ready. [Approve it](#connected-apps/<id>) in Settings › Connected apps." in work
+    assert "`<id>` the URL-encoded `id` returned by that call" in work
+    assert "URL-encoded `id` from the added or existing server row" in work
+    assert "If the row has no `id` because it is outside your reach, don't build a link;" in work
+    assert "Settings › Connected apps, the [app name] row" in work
+
+
 def test_where_your_work_lives_never_ends_at_i_cant_and_hands_the_rest_to_helpers():
     work = _step(3)
 
@@ -332,6 +341,12 @@ def test_where_your_work_lives_never_ends_at_i_cant_and_hands_the_rest_to_helper
     assert "Another agent looks into the rest in the background while we keep going. I'll tell you here what it finds." in work
     assert "Nothing connects to [app]. I'll build a connection after setup." in work and "community" not in work
     assert "two questions are never open at once" in work
+    # An app its maker admits only approved clients to is named up front, never added to be refused.
+    assert "**Never add an app you expect to be refused,**" in work
+    assert "by the rule and line in skill `connect-tools`" in work and "add no `Connect [app]` task for it" in work
+    skill = (BOOTSTRAP_SKILL.parents[1] / "connect-tools/SKILL.md").read_text(encoding="utf-8")
+    assert "don't offer or add that connection" in skill
+    assert "`[App] only lets approved apps connect, so I'm leaving it out. Ask me again any time and I'll check whether it connects now.`" in skill
     assert "I can't" not in work.replace('Never end on "I can\'t".', "")
     # The helper has no corsia_api, so the CORSIA agent adds the app it returns.
     assert "it has no `corsia_api`" in work
@@ -366,11 +381,24 @@ def test_web_search_guidance_distinguishes_keyless_readiness_from_key_setup():
     web = (FIRST_RUN_APP.parent / "web-search.md").read_text(encoding="utf-8")
 
     assert "When `web_search_ready` is true, search already works; skip this key setup." in web
-    assert "Without a saved key, the managed local server can provide search." in web
-    assert "When `web_search_ready` is false, search doesn't work right now; this setup turns it on, and so can the managed local server once it's running." in web
-    assert "There is no fallback search: without a key, web search stays off." not in web
-    assert "search stays off until this setup succeeds" not in web
-    assert "`Until search is set up, I can't search the web. Settings › Keys has it whenever you want it.`" in _step(4)
+    assert "Every install tries search without a key first; a Brave key can make search steadier." in web
+    assert "When `web_search_ready` is false, search didn't work on the check; a Brave key is an optional alternative." in web
+    assert (
+        "Keep the middle bracketed part only when `## Setup facts` shows both `web_search_ready` and "
+        "`web_search_key` false; on a path without both facts, leave it out."
+    ) in web
+    assert "every month includes $5 of free credit, enough for 1,000 searches." in web
+    assert "the $5 of free credit each month covers 1,000." in web
+    assert "[I couldn't search without a key just now. ]A Brave Search key makes search steadier." in web
+    after_key = web.split("## 5. After they say it's in", 1)[1]
+    assert "`corsia_api` with `GET /api/keys`" in after_key
+    assert "`name` `web-search` and read `is_set`" in after_key
+    assert "| Key check failed | `I couldn't check Settings › Keys just now. I'll check again next time I'm working.`" in after_key
+    assert "If false, use the No key found row without searching." in after_key
+    assert "If true, run one `web_search` for `CORSIA`" in after_key
+    assert "If the read fails, or the entry or `is_set` is missing, use the Key check failed row." in after_key
+    assert "| Results, or none | `Web search works.` |" in after_key
+    assert "`OK. Ask me any time to try search again; Settings › Keys has the optional Brave key whenever you want it.`" in _step(4)
     assert "Until then I can't search the web." not in _step(4)
 
 
@@ -382,7 +410,7 @@ def test_the_community_step_explains_asks_one_decision_and_writes_the_profile_li
     assert "Measurement" not in step
     assert "chart button" not in step
     assert "You can see it in Measurement: daily numbers start with your first day here, and trends take a few weeks." in (FIRST_RUN_APP.parent / "first-run-opening.md").read_text()
-    assert "Use and share community improvements?" in step
+    assert "Use and share improvements with the CORSIA community?" in step
     assert "**Use and share** writes Yes and Yes; **Only use** writes Yes and No; **Neither** writes No and No" in step
     assert "would only share, write No and Yes" in step
     for line in ("`- **Use community improvements:** Yes`", "`- **Use community improvements:** No`",
@@ -400,23 +428,33 @@ def test_github_comes_only_on_a_yes_to_sharing_and_answers_the_bot_account_quest
     github = step.split("**Use and share, or only share, and not `github_ready`:**", 1)[1]
 
     assert "When `github_ready`, skip the rest of this step" in github
-    assert github.index("Do you have a GitHub account?") < github.index("Should your agents use your account, or have their own?")
-    assert "Their own is allowed. You accept GitHub's terms for it" in github
-    assert "Your agents can have their own account. You'd accept GitHub's terms, type its password and enter a code from your email. I never see them." in github
+    # One message, then one decision: the chat never asks whether they have an account.
+    assert "Never ask in chat whether they have an account" in github
+    assert "A separate account keeps your agents' posts apart from yours. You'd accept GitHub's terms for it and answer for what it does." in github
+    assert github.index("`How should your agents post on GitHub?`") < github.index("`Make an account for your agents on GitHub?`")
+    assert "Do you have a GitHub account?" not in step
 
 
 def test_files_step_carries_the_sandbox_auto_approve_recommendation_and_off_the_cloud_parts():
     step = _step(8)
 
-    assert "Asks you first: sending or posting as you, spending money, and opening files outside your work folder." in step
+    assert "**Agents ask you before they:**" in step and "Asks you first" not in step
+    assert "- send or post as you\n   > - spend money\n   > - open files outside your work folder (unless you turn on Auto-approve, below)" in step
     assert "delet" not in step
-    assert "Auto-approve" in step and "Local only" in step and "local models only" in step
-    assert "for that one chat" in step and "checks every command the agent runs with it" in step
-    assert "the access ends when its time is up" in step or "the access still covers only that chat and still ends on time" in step
+    assert "Keep sensitive files outside your work folder so agents need these checks to reach them." in step
+    assert "Auto-approve" in step and "Local only" in step and "\"Local models only\" in its project settings" in step
+    assert "only in that chat" in step and "every command the agent runs with that access" in step
+    assert "and it ends when its time is up" in step and "A reviewer model checks the request" in step
+    assert "application" not in step and "every request waits for your yes" in step
     assert "anything that would change a repository's rules still asks you" in step
-    assert "no safeguard is perfect" in step and "its own macOS user account" in step
-    assert "Its helpers follow it, and it checks with you before passing anything to an agent on a cloud model." in step
-    assert "Claim no safeguard beyond these four parts" in step
+    assert "**Safeguards:** no safeguard is perfect." in step and "several would have to fail" not in step and "its own macOS user account" in step
+    assert "unless Local only is on for a chat, the agents it starts can run on cloud models" in step
+    assert "the toggle at the top of the model picker, which the model button in the message box opens" in step
+    assert "It needs a local model that's ready, and the chat has to be switched to it" in step
+    assert "A chat on a cloud model sends what you say to that provider" in step
+    assert "must never reach a cloud model" in step
+    assert "helpers" not in step
+    assert "Claim no safeguard beyond those stated here" in step
 
 
 def test_hand_off_names_a_match_for_question_2_and_keeps_the_fallback_line():
@@ -430,7 +468,7 @@ def test_hand_off_names_a_match_for_question_2_and_keeps_the_fallback_line():
             "That's usually the quickest way to see what I can do.`") in hand_off
     assert "Work on the free-afternoon answer first" in hand_off
     assert "Here's how I'll work unless you tell me otherwise." in ref
-    assert "pre-approve something, like 'you can accept meeting invites without asking.'" in ref
+    assert 'want to pre-approve, like "you can accept meeting invites without asking"?' in ref
     assert "- **Check first by default:** sending or posting as them, spending money, opening files outside their work folder" in ref
     assert "- **Pre-approved:** [their words]" in ref and "overrides the default for exactly what they named" in ref
     assert "I\'ll check first on changes to your files and projects, and show you the rest as I go. Tell me when you\'d rather I just do it." in ref
@@ -438,7 +476,7 @@ def test_hand_off_names_a_match_for_question_2_and_keeps_the_fallback_line():
     assert "You asked me to check with you before [what they named]" in _step(8)
     assert HANDOFF in hand_off
     assert "name up to three and ask which one" in hand_off
-    assert "goes through an access application" in hand_off
+    assert "goes through an access request" in hand_off
     assert "no summary" in hand_off
     assert "Say nothing about the check" in _step(5)
     assert "## G. Check question 2 against what is connected" in ref and "say nothing about it here" in ref
@@ -454,6 +492,10 @@ def test_the_connect_skill_holds_the_build_later_and_macos_permission_playbooks(
     assert "## A macOS permission only the person can grant" in skill
     assert "System Settings › Privacy & Security › Full Disk Access" in skill
     assert "every connected app CORSIA runs" in skill
+    setup = skill.split("## Setting one up", 1)[1].split("## ", 1)[0]
+    assert "never a list of steps for the person" in setup and "do each step yourself" in setup
+    assert "browser-person-steps.md" in setup and "any page that shows a key, token or code" in setup
+    assert "never into chat, a file or a command" in skill and "**Set key** in Settings › Connected apps" in skill
 
 
 def test_about_you_loads_the_look_up_reference_and_keeps_the_profile_rule():
@@ -477,20 +519,20 @@ def test_the_look_up_reference_carries_the_rules_outcomes_questions_and_examples
         "`None of these`",
         "What should I call you, what do you do, and where are you based?",
         "What are you working toward right now, at work or outside it?",
-        "Here's how I'll work unless you tell me otherwise. I'll check with you first about sending or posting as you, spending money, and opening files outside your work folder. Everything else, like research, drafts, organizing files in your projects, or setting up a tool you asked for, I'll just do and show you. You can change either side any time. Tell me what you'd like me to check first, or pre-approve something, like 'you can accept meeting invites without asking.' Anything you'd change now? And do you like answers short, or with the reasoning?",
+        "Here's how I'll work unless you tell me otherwise. I'll check with you before sending or posting as you, spending money, or opening files outside your work folder. Everything else, like research, drafts, organizing files in your projects, or setting up a tool you asked for, I'll just do and show you. You can change what I ask first and what I do on my own any time. Anything you'd change now, or want to pre-approve, like \"you can accept meeting invites without asking\"?",
         "Which city are you in?",
     ):
         assert line in ref, line
     for rule in ("**Group by person.**", "**A group is the person**", "**Narrow before asking.**", "**Never mix.**",
                  "**Newest wins.**", "Stop at 6 `web_search` calls and 6 `web_fetch` calls", "Read each result's page with `web_fetch`",
                  "copied from the search result", "people-search or data-broker", "never `Portland or Denver?`",
-                 "Always ask questions 2 and 3, even when the search found plenty", "Never put the full address in a query"):
+                 "Always ask it, even when the search found plenty", "Never put the full address in a query"):
         assert rule in ref, rule
     assert '**"That\'s not me."**' in ref
     examples = ref.split("## Worked examples", 1)[1]
     assert re.findall(r"^\*\*(\d)\. ([^.]+)\.\*\*", examples, flags=re.MULTILINE) == [
         ("1", "One clear match"), ("2", "Two people with the same name"), ("3", "A famous namesake"), ("4", "Nothing found")]
-    assert len(ref.split()) < 2144  # The provider-neutral consent disclosure adds four words.
+    assert len(ref.split()) < 2290  # Adds the GitHub public-data fetch and the second question message.
     assert not re.search(r"\bAI\b", ref)
 
 
@@ -502,11 +544,18 @@ def test_the_look_up_leaves_out_a_personal_email_domain_and_checks_any_other_wit
     for provider in ("gmail.com", "googlemail.com", "outlook.com", "hotmail.com", "yahoo.com", "icloud.com", "protonmail.com"):
         assert provider in ref, provider
     # Nothing found is said out loud before the questions.
-    assert "**Nothing.** Post `I couldn't find anything about you online. That's fine.` and then the questions." in ref
+    assert "**Nothing.** Post `I couldn't find you online. That's fine.` and then the questions." in ref
     # The time zone comes from the place they name, with no question.
     assert "Tucson is America/Phoenix) and write it at once, with no question" in ref
-    # Question 1 stays whole: ask only the missing parts, in one message.
-    assert "ask only the remaining parts, in the same message as questions 2 and 3, never over two turns" in ref
+    # Ask only what is still unknown; the check-first defaults are their own follow-up message.
+    assert "Never ask what you already know" in ref
+    assert "Only the parts still unknown of `What should I call you, what do you do, and where are you based?`" in ref
+    assert "`Do you like answers short, or with the reasoning?`" in ref
+    assert "**Second message**, once they answer, always, as its own message and never joined to the first" in ref
+    assert "all in this one message" not in ref
+    # A GitHub profile is read through GitHub's public data, never its browser-built page.
+    assert "https://api.github.com/users/[handle]" in ref and "never the bio or repositories" in ref
+    assert "Never say a site \"showed nothing\"" in ref
     # 'That's not me' about one line drops the line and asks nothing.
     assert "About one line: drop that line and ask nothing." in ref
     assert "About the person as a whole: drop every line from that group." in ref
@@ -553,7 +602,7 @@ def test_the_about_you_doc_opens_after_the_chat_answers_and_is_filled_by_suggest
     # Each heading gets only its own material.
     assert "**Who you are:** the lookup's kept lines and their answer to question 1." in doc
     assert "**What you're working toward:** their answer to question 2 and the matches" in doc
-    assert "**How you like to work:** their answer to question 3 and the working-style notes the import kept." in doc
+    assert "**How you like to work:** their answer to the answer-style question and the working-style notes the import kept." in doc
     assert "A heading with nothing to put under it gets no suggestion." in doc
     # Cloud: one helper per heading, in parallel, no web search. Local: CORSIA writes it.
     assert "start one helper per heading that has material, all at once" in doc
@@ -568,11 +617,17 @@ def test_the_about_you_doc_opens_after_the_chat_answers_and_is_filled_by_suggest
     assert "When every `About you: <heading>` task is settled and every suggestion is in" in doc
     assert "`bound_model` `source` is `omlx`): start no helper. Write the suggestions yourself, one heading at a time." in doc
     # One review ask, worded for the review bar with or without the accept-all button.
-    assert doc.count("`I put what I know in your About you doc. Change anything that's wrong and reject any suggestion that isn't right, then press Approve. It accepts the rest for you.`") == 1
-    assert doc.count("Change anything that's wrong and reject any suggestion that isn't right, then press Approve. It accepts the rest for you.") == 2  # the ask's reason, then the one chat line
+    ask = "Change anything that's wrong, reject any suggestion that isn't right, and add a note if you like, then press Approve."
+    # The first post says what approving does: the answers become the profile every agent and chat loads, and what a cloud model receives.
+    assert doc.count("`I put what I know in your About you doc. When you approve it, your name, time zone and how you like to work go into your profile, which every agent and chat loads. A chat on a cloud model sends it to that provider with what you say. " + ask + " It accepts the rest for you.`") == 1
+    assert doc.count(ask) == 2  # the post and the ask's reason
+    assert "including agents on a cloud model" not in doc
+    # The saved line says agents keep adding to it and where to edit it.
+    assert "`Saved. Agents add to your profile as you tell them how you want things done. Edit it any time in Settings › Context (context/50-USER-PROFILE.md) or open that file in your workspace.`" in doc
+    assert "The replacement starts with that heading line unchanged." in doc
     assert "`block_node` with `owner_kind` `user`" in doc and "`ask_artifact_id` the document's artifact id" in doc  # Approve only shows with an ask
     assert "Whenever you read the document (on Approve in section 4, or on the person's reply), suggest again yourself" in doc
-    assert "any suggestion that can no longer apply to it. Never wait on a helper" in doc
+    assert "any suggestion that can no longer apply to it, and put back any heading a suggestion changed or dropped. Never wait on a helper" in doc
     assert "A comment from the person on a line: answer with a suggested change to that line." in doc
     # On approve CORSIA accepts nothing, removes empty headings, then writes the profile.
     assert "With none open: accept nothing yourself." in doc
@@ -580,7 +635,7 @@ def test_the_about_you_doc_opens_after_the_chat_answers_and_is_filled_by_suggest
     # Failure paths.
     assert "ask `Keep these?`" in doc
     assert "\"Not now\", or they carry on with something else: close that task with the reason that they chose not now, skip to section 5 and write the profile from the chat answers." in doc
-    assert len(doc.split()) < 930
+    assert len(doc.split()) < 1010  # raised from 960 for the profile explanation and where to edit it
 
 
 def test_approve_with_suggestions_still_open_saves_nothing_and_asks_to_be_told():
@@ -637,6 +692,35 @@ def test_app_path_email_step_records_the_email_app_where_the_microsoft_fact_read
     assert "Never write it in `USER.md`, and never change the `- **Email:**` line" in email
     # Conditional on delivery: phrased so check_system_closure does not require the skill before it ships.
     assert "when your skills list includes `microsoft-setup`, follow it from its step 1" in email
+
+
+def test_app_path_defers_only_a_selected_local_scripted_google_safe_miss_until_after_questions():
+    email = _step(6)
+
+    assert "Only when `bound_model` `source` is `omlx`" in email
+    assert "the current selected first-chat model is local, which is distinct from the chat's separate Local only setting" in email
+    assert "`step`, `says`, and `saw`, but no `message`, `start_at`, or `error`" in email
+    assert "first do that step and the rest of that file yourself, as `google-setup` says" in email
+    assert "Only if you cannot finish it yourself" in email
+    assert "I'll finish connecting Google after the remaining setup questions." in email
+    assert "Keep this existing Email and calendar task open" in email
+    assert "Retain the script and `step` identifier in its description, plus their answer `both` if they chose both" in email
+    assert "call `microsoft_status` without an `account_id`" in email
+    assert "if the Outlook account they meant is already connected, do not ask them to connect it again" in email
+    assert "position immediately before the hand-off task, after the remaining setup steps" in email
+    assert "first inspect the current Google connection and the actual page" in email
+    assert "reuse anything already there, create the first project or client only when that inspection shows it is absent" in email
+    assert "then call `browser_run_steps` again with the same `steps` and `start_at` set to the retained step" in email
+    assert "if that stops again, do that step and the rest of the file yourself" in email
+    assert "Handle a person decline, an `ok` result with a message, or a `start_at` in place as `google-setup` says" in email
+    assert "For other stops, follow its agent-handled path and report the `step` and `saw`" in email
+    assert 'An explicit "not now" stays skipped.' in email
+    assert "correct the tool input or report the unavailable tool" in email
+
+
+def test_deferred_google_stop_is_reported():
+    email = _step(6)
+    assert "and report the stop's `step` and `saw` as `google-setup` says" in email
 
 
 def test_app_path_local_news_covers_exactly_the_outcomes_the_wake_sends():

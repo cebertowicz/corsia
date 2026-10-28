@@ -12,7 +12,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from speed_gate import cli, fixture_build, fixture_excluded, fixture_rows, harness, ratchet, report, routes, runner  # noqa: E402
+from speed_gate import cli, clock, fixture_build, fixture_excluded, fixture_rows, harness, ratchet, report, routes, runner  # noqa: E402
 from speed_gate.sqlite_pin import PINNED_SQLITE, PinError, sqlite3  # noqa: E402  (the pinned build, not the stdlib one)
 from speed_gate import sqlite_pin  # noqa: E402
 
@@ -656,3 +656,46 @@ def test_the_report_lists_fixture_tables_below_their_target_with_the_reason():
     text = report.render(current, ratchet.compare(current, baseline_for({"/a": cost()})), baseline_for({"/a": cost()}),
                          report_only=True, base_label="the baseline")
     assert "`wakes` | 966 | 553 | thread_id is UNIQUE" in text
+
+
+@pytest.fixture
+def join(monkeypatch):
+    """The application's join module, loaded by path: it needs only the standard library."""
+    import importlib.util
+
+    path = Path(__file__).resolve().parents[2] / "backend" / "api" / "measurement_join.py"
+    spec = importlib.util.spec_from_file_location("speed_gate_test_measurement_join", path)
+    module = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, module)  # its dataclass looks itself up there
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.mark.parametrize("frozen, reads", [(True, 1), (False, 2)])
+def test_a_reused_measurement_read_stays_reused_however_slowly_the_run_goes(monkeypatch, join, frozen, reads):
+    """A loaded host once stretched the gap past the window, so one run of a tree measured the recompute."""
+    import time
+
+    if frozen:
+        clock.freeze_reuse_window(join)
+    real, late = time.monotonic, [0.0]
+    monkeypatch.setattr(time, "monotonic", lambda: real() + late[0])
+    calls = []
+
+    async def read():
+        calls.append(1)
+        return {}
+
+    async def page_then_slow_where_to_look():
+        await join.joined("payload", read, reuse_finished=True)
+        late[0] += join.RETENTION_SECONDS + 1
+        await join.joined("payload", read, reuse_finished=True)
+
+    asyncio.run(page_then_slow_where_to_look())
+    assert len(calls) == reads
+
+
+def test_the_reuse_clock_freeze_refuses_a_module_that_reads_another_clock(join):
+    join.time = SimpleNamespace(monotonic=lambda: 0.0)
+    with pytest.raises(RuntimeError, match="no longer reads the clock"):
+        clock.freeze_reuse_window(join)

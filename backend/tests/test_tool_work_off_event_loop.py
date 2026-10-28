@@ -11,6 +11,7 @@ from __future__ import annotations
 import sqlite3
 import subprocess
 from pathlib import Path
+from tests.shell_platform_helpers import use_mac_shell
 
 from tests.project_ref_helpers import project_ref, select_workspace
 
@@ -147,6 +148,8 @@ async def test_shell_prepares_its_envelope_off_the_loop(isolated_db, tmp_path, m
     from host_access import processes
     from tools import shell
 
+    # This case asserts the Safehouse envelope; select it even on Linux hosts.
+    use_mac_shell(monkeypatch)
     repo = _pinned_repository(tmp_path, monkeypatch, isolated_db)
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -162,6 +165,9 @@ async def test_shell_prepares_its_envelope_off_the_loop(isolated_db, tmp_path, m
 
     monkeypatch.setattr(shell.asyncio, "create_subprocess_exec", spawn)
     monkeypatch.setattr(processes, "_process_creation_fingerprint", lambda _pid: "fingerprint")
+    # The stub process has no real group or descendants to inspect on the host.
+    monkeypatch.setattr(processes.ProcessOwner, "_owned_group_exists", lambda _self, _record: False)
+    monkeypatch.setattr(processes.ProcessOwner, "_runtime_marker_processes", lambda _self, _runtime: ())
     monkeypatch.setattr(processes.PROCESS_OWNER, "process_dir", tmp_path / "processes")
 
     with blocking_work_on_event_loop(monkeypatch) as blocking:
@@ -250,12 +256,13 @@ async def test_cancelled_envelope_preparation_removes_the_profile_it_wrote(
     tmp_path, monkeypatch, caplog, worker_fails,
 ):
     import asyncio
-    import tempfile
     import threading
 
+    from infra import config
     from tools.shell_envelope import Envelope, prepare_execution_envelope
 
-    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    monkeypatch.setattr(config, "STATE_ROOT", tmp_path)
+    profiles = tmp_path / "runtime" / "shell-envelopes"
     building = threading.Event()
     release = threading.Event()
 
@@ -272,14 +279,14 @@ async def test_cancelled_envelope_preparation_removes_the_profile_it_wrote(
     preparing.cancel()
     with pytest.raises(asyncio.CancelledError):
         await preparing
-    assert list(tmp_path.glob("corsia-shell-envelope-*.sb"))
+    assert list(profiles.glob("corsia-shell-envelope-*.sb"))
     release.set()
 
     for _ in range(200):
-        if not list(tmp_path.glob("corsia-shell-envelope-*.sb")):
+        if not list(profiles.glob("corsia-shell-envelope-*.sb")):
             break
         await asyncio.sleep(0.01)
-    assert list(tmp_path.glob("corsia-shell-envelope-*.sb")) == []
+    assert list(profiles.glob("corsia-shell-envelope-*.sb")) == []
     for _ in range(200):
         if not worker_fails or "after its caller was cancelled" in caplog.text:
             break

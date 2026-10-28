@@ -142,7 +142,7 @@ describe('SettingsUpdate', () => {
 		const details = host.querySelector('details')!;
 		expect(details.querySelector('summary')?.textContent?.trim()).toBe('Details');
 		expect(details.querySelector('pre')?.textContent).toBe('network stopped.');
-		const retry = Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Try again');
+		const retry = Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Retry');
 		expect(retry).toBeDefined();
 		expect(host.querySelector('.offer')).toBeNull();
 	});
@@ -169,7 +169,7 @@ describe('SettingsUpdate', () => {
 		const offer = host.querySelector('.offer')!;
 		expect(offer.querySelector('h4')?.textContent).toBe("What's new");
 		expect(offer.querySelectorAll('li')).toHaveLength(3);
-		expect(offer.textContent).toContain('CORSIA restarts for about a minute; 2 working agents pause and pick up where they left off.');
+		expect(offer.textContent).toContain('The restart usually takes a minute; 2 working agents pause and pick up where they left off.');
 		const labels = Array.from(offer.querySelectorAll('button')).map((button) => button.textContent?.trim());
 		expect(labels).toContain('Update now');
 		expect(labels).toContain('Tonight at 3:00 AM');
@@ -266,7 +266,7 @@ describe('SettingsUpdate', () => {
 		component = mount(SettingsUpdate, { target: host });
 		flushSync();
 		expect(host.textContent).not.toContain("Update didn't start");
-		expect(host.textContent).not.toContain('Try again');
+		expect(host.textContent).not.toContain('Retry');
 		expect(host.textContent).not.toContain('Installed');
 	});
 });

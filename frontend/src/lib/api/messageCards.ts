@@ -36,7 +36,7 @@ export const CARD_STATE_LABELS: Record<MessageCardState, string> = {
 	replaced: 'Replaced',
 	revision_requested: 'Revision requested',
 	withdrawn: 'Withdrawn',
-	unavailable: 'No longer available',
+	unavailable: 'Unavailable',
 };
 
 /** "2 comments, 1 suggestion": the round named by kind, leaving out kinds with no items. */

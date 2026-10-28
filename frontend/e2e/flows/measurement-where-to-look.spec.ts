@@ -25,7 +25,7 @@ const BODY = {
 	],
 	improved: [
 		row('s', 'All work', 'scope', 'hours_per_hour', 'Work per hour of your attention', 'hours', 30, 92, 2.06, 1349, null, 'Keep doing what changed.'),
-		row('s2', 'All work', 'scope', 'asks_per_outcome', 'Asks per outcome', 'ratio', 0.38, 0.12, -0.69, 1377, null, 'Keep doing what changed.'),
+		row('s2', 'All work', 'scope', 'asks_per_outcome', 'Decisions and tasks for you per outcome', 'ratio', 0.38, 0.12, -0.69, 1377, null, 'Keep doing what changed.'),
 	],
 };
 
@@ -193,6 +193,11 @@ test.describe('@flow:measurement-where-to-look @surface:measurement the Biggest 
 						.filter((cell) => cell.scrollWidth > cell.clientWidth)
 						.map((cell) => cell.textContent?.replace(/\s+/g, ' ').trim()));
 					expect(overflowingCells, `${scheme}: no Agents body cell overflows its own column at ${width}`).toEqual([]);
+					const headerOverlap = await region.locator('thead th').evaluateAll((cells) => {
+						const buttons = cells.map((cell) => cell.querySelector('button')!.getBoundingClientRect());
+						return buttons.slice(0, -1).some((box, i) => box.right > buttons[i + 1].left + 0.5);
+					});
+					expect(headerOverlap, `${scheme}: Agents headers do not overlap`).toBe(false);
 					const lines = await region.locator('thead th').evaluateAll((cells) => cells.map((cell) => {
 						const tops = new Set<number>();
 						const walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT);

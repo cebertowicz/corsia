@@ -1,8 +1,8 @@
 """Lab tray for native tool-result tests. Not runtime code.
 
 Drives the real ``BashTool``, process owner, native step handler and canonical
-result writer with a real child process. Only the Safehouse jail prefix is
-removed, because Safehouse cannot nest inside the protected shell; jailed
+result writer with a real child process. Only the platform jail prefix is
+removed, because the sandbox cannot nest inside the protected shell; jailed
 forwarding of the invocation export is covered by
 ``test_real_safehouse_forwards_only_bound_invocation``.
 """
@@ -119,6 +119,11 @@ def install(tmp_path, monkeypatch) -> Lab:
     monkeypatch.setattr(shell_guard, "get_sandbox_add_dirs_rw", lambda _thread_id, policies=None: [tmp_path])
     monkeypatch.setattr(shell_guard, "get_allowed_dirs_ro", lambda policies=None: [])
     monkeypatch.setattr(shell_guard.shutil, "which", lambda _name: "/opt/homebrew/bin/safehouse")
+    if sys.platform == "linux":
+        from tools import linux_sandbox_probe, linux_shell
+        monkeypatch.setattr(linux_sandbox_probe, "sandbox_error", lambda: None)
+        monkeypatch.setattr(linux_shell, "shell_argv", lambda command, *_args, **_kwargs:
+                            ["bwrap", "--", "/bin/bash", "-lc", command])
     monkeypatch.setattr(shell.asyncio, "create_subprocess_exec", unjailed)
     db = get_db()
     identity = _seed_thread(db)

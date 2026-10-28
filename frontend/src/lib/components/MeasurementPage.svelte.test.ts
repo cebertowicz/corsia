@@ -53,12 +53,12 @@ describe('MeasurementPage headlines', () => {
 			// Minutes per outcome and First try are week bar charts; Asks is one line under the minutes' agents table and a kept chart of its own.
 			const minutes = host.querySelector('#attention-title')?.closest('section');
 			expect(host.querySelector('#attention-title')?.textContent).toBe('Your minutes per outcome');
-			expect(minutes?.querySelector('.stat')?.textContent).toBe('1.8 minutes per outcome, Aug 31 to Sep 27, n 762, new vs Aug 3 to Aug 30 (n 0)');
-			expect(minutes?.querySelector('.asks')?.textContent).toBe('Asks are not recorded per agent yet. All agents together: 0.13 asks per outcome, new.');
+			expect(minutes?.querySelector('.stat')?.textContent).toBe('1.8 minutes per outcome, Aug 31 to Sep 27, n 762, new vs Aug 3 to Aug 30 (n 0)');
+			expect(minutes?.querySelector('.asks')?.textContent).toBe('All agents together: 0.13 decisions and tasks for you per outcome, new.');
 			expect(minutes?.querySelector('svg')).not.toBeNull();
-			expect(host.querySelector('#first-try-title')?.closest('section')?.querySelector('.stat')?.textContent).toBe('78% first try, Aug 31 to Sep 27, n 762, new vs Aug 3 to Aug 30 (n 0)');
+			expect(host.querySelector('#first-try-title')?.closest('section')?.querySelector('.stat')?.textContent).toBe('78% first try, Aug 31 to Sep 27, n 762, new vs Aug 3 to Aug 30 (n 0)');
 			expect(host.querySelector('#asks-title')?.closest('.kept-panels')).not.toBeNull();
-			expect(host.querySelector('#asks-title')?.closest('section')?.querySelector('.stat')?.textContent).toBe('0.13 asks per outcome, Aug 31 to Sep 27, n 762, new vs Aug 3 to Aug 30 (n 0)');
+			expect(host.querySelector('#asks-title')?.closest('section')?.querySelector('.stat')?.textContent).toBe('0.13 decisions and tasks per outcome, Aug 31 to Sep 27, n 762, new vs Aug 3 to Aug 30 (n 0)');
 			expect(host.querySelector('.source-line')).toBeNull();
 			expect(host.querySelector('.attention-summary')).toBeNull();
 		expect(host.querySelector('#outcomes-title')?.closest('section')?.querySelector('svg .bar')).not.toBeNull();
@@ -134,9 +134,9 @@ describe('MeasurementPage headlines', () => {
 		await vi.waitFor(() => expect(host.querySelector('.sizing-headline .stat')).not.toBeNull());
 		const sizing = host.querySelector('.sizing-headline') as HTMLElement;
 		// The answer covers the four-week window ending at the latest week; the unrated latest week adds its sized subtotal, not a zero.
-		expect(sizing.querySelector('.stat')?.textContent).toBe('135 h of work per hour you spend, Sep 7 to Oct 4, n 27, new vs Aug 10 to Sep 6 (n 0)');
+		expect(sizing.querySelector('.stat')?.textContent).toBe('135 h of work per hour you spend, Sep 7 to Oct 4, n 27, new vs Aug 10 to Sep 6 (n 0)');
 		expect(sizing.querySelector('.coverage')).toBeNull();
-		expect(sizing.querySelector('.nf')?.textContent).toContain('33 of 60 accepted outcomes in Sep 7 to Oct 4 have no usable size rating');
+		expect(sizing.querySelector('.nf')?.textContent).toContain('33 of 60 accepted outcomes in Sep 7 to Oct 4 have no usable size rating');
 		// The server served these weeks as comparable, so the headline says nothing about comparability.
 		expect(sizing.querySelector('.comparability')).toBeNull();
 		expect(sizing.querySelector('.definition')).toBeNull();
@@ -200,7 +200,7 @@ describe('MeasurementPage headlines', () => {
 		expect(host.querySelector('.controls')?.textContent).not.toContain('Trend range');
 		expect(host.querySelector('.tm')).toBeNull();
 		const trigger = host.querySelector('.picker-trigger') as HTMLButtonElement;
-		expect(trigger.getAttribute('aria-label')).toBe('Measurement scope: All work');
+		expect(trigger.getAttribute('aria-label')).toBe('Showing: All work');
 		const buttons = [...host.querySelectorAll('.controls [role="group"][aria-label="Grain"] button')] as HTMLButtonElement[];
 		expect(buttons.map((button) => [button.textContent, button.getAttribute('aria-pressed')])).toEqual([['Days', 'true'], ['Weeks', 'false']]);
 		buttons[1].click();
@@ -352,7 +352,7 @@ describe('MeasurementPage scope selection', () => {
 			rows: [servedRow(request, { agent: BUGS })], project_summaries: [], inactive_projects: [],
 		}));
 		renderPage();
-		await vi.waitFor(() => expect(host.querySelector('.picker-trigger')?.getAttribute('aria-label')).toBe('Measurement scope: All work'));
+		await vi.waitFor(() => expect(host.querySelector('.picker-trigger')?.getAttribute('aria-label')).toBe('Showing: All work'));
 
 		await openScopePicker();
 		await typeSearch('bugs');
@@ -362,10 +362,10 @@ describe('MeasurementPage scope selection', () => {
 		await vi.waitFor(() => expect(get(measurementScope)).toEqual({ project: 'prj-boreas', agent: 'ag-bugs' }));
 		flushSync();
 		// The trigger names where the reader is looking; the chip names what removing it changes.
-		expect(host.querySelector('.picker-trigger')?.getAttribute('aria-label')).toBe('Measurement scope: Boreas');
+		expect(host.querySelector('.picker-trigger')?.getAttribute('aria-label')).toBe('Showing: Boreas');
 		// The scope's name is the app header's; the page does not title itself a second time.
 		expect(host.querySelector('.header h2')).toBeNull();
-		expect(host.querySelector('.header .scope-label')?.textContent).toBe('Scope');
+		expect(host.querySelector('.header .scope-label')?.textContent).toBe('Showing');
 		expect(host.querySelector('.header p')).toBeNull();
 		expect(host.querySelector('.agent-chip')?.textContent).toContain('Bugs');
 		const asked = new URL(requests.at(-1)!, 'http://x').searchParams;
@@ -378,7 +378,7 @@ describe('MeasurementPage scope selection', () => {
 			rows: [servedRow(request, { agent: BUGS })], project_summaries: [], inactive_projects: [],
 		}));
 		renderPage();
-		await vi.waitFor(() => expect(host.querySelector('.picker-trigger')?.getAttribute('aria-label')).toBe('Measurement scope: All work'));
+		await vi.waitFor(() => expect(host.querySelector('.picker-trigger')?.getAttribute('aria-label')).toBe('Showing: All work'));
 
 		await openScopePicker();
 		await typeSearch('bugs');

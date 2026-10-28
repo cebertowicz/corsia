@@ -164,7 +164,7 @@ test.describe('@flow:measurement-placement-p2 @surface:navigation place Measurem
 
 		await expect(page.locator('.shell-header .h-title')).toHaveText('All work');
 		// PL-1: a first visit is All work, and it carries every chart; the scope select is the route to a project.
-		await expect(page.getByRole('button', { name: 'Measurement scope: All work', exact: true })).toBeVisible();
+		await expect(page.getByRole('button', { name: 'Showing: All work', exact: true })).toBeVisible();
 		await expect(page.locator('.project-list')).toHaveCount(0);
 		// Cost carries the workspace bill and what was paid, which belong to All work.
 		await expect(page.locator('section.cost')).toBeVisible();
@@ -212,7 +212,7 @@ test.describe('@flow:measurement-placement-p2 @surface:navigation place Measurem
 		expect(smallestMainX, 'the closing rail never overshoots left of the phone viewport').toBeGreaterThanOrEqual(0);
 		// The rail closed itself when its destination was chosen.
 		railDismissed(page);
-		await page.getByRole('button', { name: /Measurement scope:/ }).click();
+		await page.getByRole('button', { name: /Showing:/ }).click();
 
 		const input = page.getByRole('combobox', { name: 'Search projects and agents' });
 		await expect(input).toBeVisible();
@@ -229,19 +229,21 @@ test.describe('@flow:measurement-placement-p2 @surface:navigation place Measurem
 			await page.emulateMedia({ colorScheme: scheme });
 			for (const width of [393, 412] as const) {
 				await page.setViewportSize({ width, height: 915 });
-				if (width === 393) {
-					const trigger = await page.getByRole('button', { name: /Measurement scope:/ }).boundingBox();
-					const controls = await page.locator('.measurement-page .controls').boundingBox();
-					expect(trigger).not.toBeNull();
-					expect(controls).not.toBeNull();
-					expect(trigger!.width, 'the scope trigger fills the narrow controls column').toBeCloseTo(controls!.width, 1);
-				}
-				const box = await page.locator('.picker-panel').boundingBox();
-				expect(box).not.toBeNull();
-				expect(box!.x, `${scheme}: picker starts in the ${width}px viewport`).toBeGreaterThanOrEqual(0);
-				expect(box!.x + box!.width, `${scheme}: picker ends in the ${width}px viewport`).toBeLessThanOrEqual(width);
-				const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
-				expect(overflow, `${scheme}: no sideways page scroll at ${width}px`).toBeLessThanOrEqual(0);
+				await expect(async () => {
+					if (width === 393) {
+						const trigger = await page.getByRole('button', { name: /Showing:/ }).boundingBox();
+						const controls = await page.locator('.measurement-page .controls').boundingBox();
+						expect(trigger).not.toBeNull();
+						expect(controls).not.toBeNull();
+						expect(trigger!.width, 'the scope trigger fills the narrow controls column').toBeCloseTo(controls!.width, 1);
+					}
+					const box = await page.locator('.picker-panel').boundingBox();
+					expect(box).not.toBeNull();
+					expect(box!.x, `${scheme}: picker starts in the ${width}px viewport`).toBeGreaterThanOrEqual(0);
+					expect(box!.x + box!.width, `${scheme}: picker ends in the ${width}px viewport`).toBeLessThanOrEqual(width);
+					const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+					expect(overflow, `${scheme}: no sideways page scroll at ${width}px`).toBeLessThanOrEqual(0);
+				}).toPass();
 				if (process.env.SHOT_DIR) await page.screenshot({ path: capture(`measurement-scope-picker-${scheme}-${width}.png`), animations: 'disabled' });
 			}
 		}
@@ -282,7 +284,7 @@ test.describe('@flow:measurement-placement-p2 @surface:navigation place Measurem
 		}
 		if (original) await page.setViewportSize(original);
 		await icon.click();
-		await expect(page.getByRole('button', { name: `Measurement scope: ${project.name}`, exact: true })).toBeVisible();
+		await expect(page.getByRole('button', { name: `Showing: ${project.name}`, exact: true })).toBeVisible();
 		await expect(page.locator('.agent-chip')).toContainText(agentTitle);
 
 		await page.getByRole('button', { name: 'Close Measurement', exact: true }).click();
@@ -296,7 +298,7 @@ test.describe('@flow:measurement-placement-p2 @surface:navigation place Measurem
 		await page.getByRole('link', { name: 'Measurement', exact: true }).click();
 		// The rail closed itself when its destination was chosen.
 		railDismissed(page);
-		await expect(page.getByRole('button', { name: `Measurement scope: ${project.name}`, exact: true })).toBeVisible();
+		await expect(page.getByRole('button', { name: `Showing: ${project.name}`, exact: true })).toBeVisible();
 		await expect(page.locator('.shell-header .h-title')).toHaveText(project.name);
 		await expect(page.locator('.agent-chip')).toHaveCount(0);
 		await page.screenshot({ path: testInfo.outputPath(`sidebar-click.png`) });
@@ -323,7 +325,7 @@ test.describe('@flow:measurement-placement-p2 @surface:navigation place Measurem
 		// The rail closed itself when its destination was chosen.
 		railDismissed(page);
 		await page.getByRole('button', { name: 'Measures', exact: true }).click();
-		await expect(page.getByRole('button', { name: `Measurement scope: ${project.name}`, exact: true })).toBeVisible();
+		await expect(page.getByRole('button', { name: `Showing: ${project.name}`, exact: true })).toBeVisible();
 		await expect(page.locator('.agent-chip')).toHaveCount(0);
 		await page.getByRole('button', { name: 'Close Measurement', exact: true }).click();
 		await expect(page.getByRole('heading', { name: 'Activity', exact: true })).toBeVisible();
@@ -334,9 +336,9 @@ test.describe('@flow:measurement-placement-p2 @surface:navigation place Measurem
 		await page.getByRole('link', { name: 'Measurement', exact: true }).click();
 		// The rail closed itself when its destination was chosen.
 		railDismissed(page);
-		await page.getByRole('button', { name: /Measurement scope:/ }).click();
+		await page.getByRole('button', { name: /Showing:/ }).click();
 		await page.getByRole('option', { name: `All work` }).click();
-		await expect(page.getByRole('button', { name: 'Measurement scope: All work', exact: true })).toBeVisible();
+		await expect(page.getByRole('button', { name: 'Showing: All work', exact: true })).toBeVisible();
 
 		await openRail(page);
 		await page.getByRole('button', { name: 'Activity', exact: true }).click();
@@ -344,7 +346,7 @@ test.describe('@flow:measurement-placement-p2 @surface:navigation place Measurem
 		railDismissed(page);
 		await page.getByRole('button', { name: new RegExp(agentTitle) }).first().click();
 		await page.getByRole('button', { name: /^Measurement for/ }).click();
-		await expect(page.getByRole('button', { name: `Measurement scope: ${project.name}`, exact: true })).toBeVisible();
+		await expect(page.getByRole('button', { name: `Showing: ${project.name}`, exact: true })).toBeVisible();
 	});
 
 	test('the page writes only the parameters it owns, and a rail visit has no doorway to return to', async ({ page, request }, testInfo) => {
@@ -360,13 +362,13 @@ test.describe('@flow:measurement-placement-p2 @surface:navigation place Measurem
 		await page.getByRole('link', { name: 'Measurement', exact: true }).click();
 		// The rail closed itself when its destination was chosen.
 		railDismissed(page);
-		await expect(page.getByRole('button', { name: 'Measurement scope: All work', exact: true })).toBeVisible();
+		await expect(page.getByRole('button', { name: 'Showing: All work', exact: true })).toBeVisible();
 
 		// Choosing the project in the scope select is the entry to the same state.
-		await page.getByRole('button', { name: /Measurement scope:/ }).click();
+		await page.getByRole('button', { name: /Showing:/ }).click();
 		await page.getByRole('combobox', { name: 'Search projects and agents' }).fill(project.name);
 		await page.getByRole('option', { name: new RegExp(project.name) }).first().click();
-		await expect(page.getByRole('button', { name: `Measurement scope: ${project.name}`, exact: true })).toBeVisible();
+		await expect(page.getByRole('button', { name: `Showing: ${project.name}`, exact: true })).toBeVisible();
 		await expect.poll(() => new URL(page.url()).searchParams.get('project')).toBe(project.id);
 
 		await page.getByRole('group', { name: 'Grain' }).getByRole('button', { name: 'Weeks' }).click();
@@ -391,7 +393,7 @@ test.describe('@flow:measurement-placement-p2 @surface:navigation place Measurem
 		// case, not the disposable sign-in link.
 		await loginByUrl(page, { waitForComposer: false });
 		await page.goto(`/?view=measurement&project=${project.id}&agent=${agentId}&grain=weeks`);
-		await expect(page.getByRole('button', { name: `Measurement scope: ${project.name}`, exact: true })).toBeVisible({ timeout: 20_000 });
+		await expect(page.getByRole('button', { name: `Showing: ${project.name}`, exact: true })).toBeVisible({ timeout: 20_000 });
 		await expect(page.locator('.agent-chip')).toContainText(agentTitle);
 		await expect(page.getByRole('group', { name: 'Grain' }).getByRole('button', { name: 'Weeks' })).toHaveAttribute('aria-pressed', 'true');
 	});

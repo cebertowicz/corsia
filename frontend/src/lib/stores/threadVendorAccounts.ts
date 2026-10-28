@@ -31,10 +31,10 @@ export function loadThreadVendorAccounts(threadId: string, key: string): Promise
 		try {
 			const response = await fetch(`/api/threads/${encodeURIComponent(threadId)}/vendor-account?token=${encodeURIComponent(auth)}`);
 			const body = await response.json().catch(() => null);
-			if (!response.ok) error = plainErrorText(body?.detail, 'Could not load this thread’s account.');
+			if (!response.ok) error = plainErrorText(body?.detail, 'Couldn’t load this chat’s account. Try again.');
 			else if (!Array.isArray(body?.accounts) || body.accounts.some((row: ThreadVendorAccount) =>
 				!row || typeof row.id !== 'string' || typeof row.provider !== 'string' || typeof row.name !== 'string'))
-				error = 'Could not read this thread’s account.';
+				error = 'Couldn’t read this chat’s account. Try again.';
 			else accounts = body.accounts;
 		} catch { error = SERVER_UNREACHABLE; }
 		if (latestReads.get(threadId) !== read) return;

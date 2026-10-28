@@ -31,9 +31,24 @@ from core.carry_in_facts import (
     SAVED_PROCESSED as CARRY_IN_SAVED_PROCESSED, VERDICTS as CARRY_IN_VERDICTS,
     WAITING as CARRY_IN_WAITING, WAITING_REASONS as CARRY_IN_WAITING_REASONS,
 )
-from core.corrections_recording import CORRECTION_EVENT, FACT_KEYS as CORRECTION_FACT_KEYS, LABELS as CORRECTION_LABELS
+from core.correction_learning import (
+    CAUSES as LEARNING_CAUSES,
+    NEW_WORK_SIGNALS,
+    OUTCOME_EVENT as LEARNING_OUTCOME_EVENT,
+    TERMINAL_OUTCOMES,
+    TIERS,
+    TRIAGE_EVENT,
+)
+from core.corrections_recording import (
+    CORRECTION_EVENT,
+    FACT_KEYS as CORRECTION_FACT_KEYS,
+    LABELS as CORRECTION_LABELS,
+)
 from core.lesson_gate import EVENT as LESSON_GATE_EVENT
 from core.size_rating import BASES, FACT_KEYS, SIZE_CLASSES, SIZE_EVENT
+from core.usage_fields import ENUMS as USAGE_ENUMS
+from core.usage_fields import PATTERNS as USAGE_PATTERNS
+from core.usage_fields import USAGE_EVENT
 from host_access.credential_sanitizer import contains_credential, sanitize_credential_data
 from infra.outcome_event_input import OutcomeInputRefusal
 
@@ -46,11 +61,12 @@ _BOT_LOGIN_RE = re.compile(r"[A-Za-z0-9_.:#/@+-]{1,194}\[bot\]")
 
 @dataclass(frozen=True)
 class AttributeSpec:
-    """One allowed attribute: an ``id``, a ``login``, a non-negative ``count`` or an ``enum``."""
+    """One allowed attribute: an ``id``, a ``login``, a non-negative ``count``, an ``enum`` or a ``pattern``."""
 
     kind: str
     values: frozenset[str] = frozenset()
     max_chars: int = 0
+    pattern: str = ""
 
     def accepts(self, value: Any) -> bool:
         """Whether ``value`` is a legal value for this attribute."""
@@ -73,6 +89,8 @@ class AttributeSpec:
                 isinstance(value, str) and _ID_RE.fullmatch(value) is not None
                 and not contains_credential(value)
             )
+        if self.kind == "pattern":
+            return isinstance(value, str) and re.fullmatch(self.pattern, value) is not None
         if self.kind == "text":
             return (
                 isinstance(value, str) and bool(value.strip())
@@ -100,6 +118,11 @@ def count_attr() -> AttributeSpec:
 def enum_attr(*values: str) -> AttributeSpec:
     """One of a fixed set of strings."""
     return AttributeSpec("enum", frozenset(values))
+
+
+def pattern_attr(pattern: str) -> AttributeSpec:
+    """A string that fully matches ``pattern``; the module that defines the field owns the pattern."""
+    return AttributeSpec("pattern", pattern=pattern)
 
 
 def text_attr(max_chars: int) -> AttributeSpec:
@@ -256,6 +279,11 @@ ATTRIBUTE_ALLOWLISTS: dict[str, dict[str, AttributeSpec]] = {
         "basis": enum_attr(*BASES),
         "size_class": enum_attr(*SIZE_CLASSES),
     },
+    # This install's weekly usage summary (core/usage_fields.py): the closed field list, no identity.
+    USAGE_EVENT: {
+        **{key: pattern_attr(pattern) for key, pattern in USAGE_PATTERNS.items()},
+        **{key: enum_attr(*values) for key, values in USAGE_ENUMS.items()},
+    },
     # Local correction classifications retain only versioned result metadata,
     # never source-message text or an LLM explanation.
     CORRECTION_EVENT: {
@@ -296,6 +324,16 @@ ATTRIBUTE_ALLOWLISTS: dict[str, dict[str, AttributeSpec]] = {
         "samples_completed": count_attr(),
     },
     # Saved targets are closed by the same append-only fact sequence, not a retry queue.
+    TRIAGE_EVENT: {
+        "tier": enum_attr(*TIERS), "cause": enum_attr(*LEARNING_CAUSES),
+        "new_work": enum_attr("yes", "no"),
+        "new_work_signal": enum_attr(*NEW_WORK_SIGNALS), "target_file": text_attr(500),
+        "serious_proposed": enum_attr("yes", "no"), "serious_lowered_reason": text_attr(500),
+    },
+    LEARNING_OUTCOME_EVENT: {
+        "outcome": enum_attr(*TERMINAL_OUTCOMES), "reason": text_attr(500),
+        "lesson_id": id_attr(), "workflow_version": id_attr(),
+    },
     "github.issue.opened": {**_ISSUE_ATTRS},
     "github.issue.assigned": {"repo": id_attr(), "issue": id_attr(), "assignee_login": login_attr(),
                               "minutes_since_issue_created": count_attr()},

@@ -71,3 +71,55 @@ def test_restore_without_a_captured_seed_fails_loudly(roots, monkeypatch):
 def test_restart_without_a_captured_seed_is_refused(roots):
     with pytest.raises(RuntimeError, match="captured seed"):
         e2e_reset.restart_from_seed()
+
+
+@pytest.mark.asyncio
+async def test_reset_closes_owned_processes_before_restarting(roots, monkeypatch):
+    from host_access.processes import PROCESS_OWNER
+
+    state, _ = roots
+    (state / "backups" / "e2e-seed").mkdir(parents=True)
+    events = []
+
+    async def shutdown():
+        events.append("shutdown")
+
+    monkeypatch.setattr(PROCESS_OWNER, "shutdown", shutdown)
+    monkeypatch.setattr(e2e_reset, "restart_from_seed", lambda: events.append("restart"))
+    await e2e_reset.reset_to_seed_route()
+    assert events == ["shutdown", "restart"]
+
+
+@pytest.mark.asyncio
+async def test_reset_does_not_restart_if_owned_processes_cannot_close(roots, monkeypatch):
+    from host_access.processes import PROCESS_OWNER
+
+    state, _ = roots
+    (state / "backups" / "e2e-seed").mkdir(parents=True)
+    events = []
+
+    async def shutdown():
+        raise RuntimeError("cleanup unresolved")
+
+    monkeypatch.setattr(PROCESS_OWNER, "shutdown", shutdown)
+    monkeypatch.setattr(e2e_reset, "restart_from_seed", lambda: events.append("restart"))
+    with pytest.raises(RuntimeError, match="cleanup unresolved"):
+        await e2e_reset.reset_to_seed_route()
+    assert not events
+
+
+@pytest.mark.asyncio
+async def test_reset_without_seed_does_not_close_owned_processes(roots, monkeypatch):
+    from fastapi import HTTPException
+    from host_access.processes import PROCESS_OWNER
+
+    events = []
+
+    async def shutdown():
+        events.append("shutdown")
+
+    monkeypatch.setattr(PROCESS_OWNER, "shutdown", shutdown)
+    with pytest.raises(HTTPException) as refused:
+        await e2e_reset.reset_to_seed_route()
+    assert refused.value.status_code == 409
+    assert not events

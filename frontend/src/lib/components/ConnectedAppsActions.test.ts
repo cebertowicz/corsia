@@ -58,9 +58,9 @@ describe('a hosted app row: state to actions', () => {
 		['working', figma({ state: 'working', sign_in: { status: 'idle', signed_in: false } }), ['Where it works…', 'Reconnect', 'Remove']],
 		['failed to start', figma({ state: 'failed', failure_class: 'cannot_start', sign_in: undefined }), ['Where it works…', 'Reconnect', 'Remove']],
 		['needs sign-in', figma(), ['Sign in', 'Where it works…', 'Remove']],
-		['sign-in failed, retryable', failedSignIn('app_busy'), ['Try again', 'Where it works…', 'Remove']],
+		['sign-in failed, retryable', failedSignIn('app_busy'), ['Retry', 'Where it works…', 'Remove']],
 		['sign-in failed, no client ID', failedSignIn('address_mismatch'), ['Sign in', 'Where it works…', 'Remove']],
-		['sign-in blocked by an admin, who can lift it', failedSignIn('not_allowed'), ['Try again', 'Where it works…', 'Remove']],
+		['sign-in blocked by an admin, who can lift it', failedSignIn('not_allowed'), ['Retry', 'Where it works…', 'Remove']],
 		['sign-in refused, app only lets in approved apps', failedSignIn('not_approved'), ['Where it works…', 'Remove']],
 		['sign-in cannot get the access it needs', failedSignIn('permissions'), ['Sign in', 'Where it works…', 'Remove']],
 	])('%s', async (_name, app, buttons) => {

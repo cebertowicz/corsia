@@ -85,7 +85,7 @@
 		if (it.action.disabled_reason) return it.action.disabled_reason;
 		if (!effectiveDisabled(it)) return null;
 		if (it.action.capability === 'leaf-package') return 'No local file to open.';
-		if (it.action.capability === 'external-link') return 'Could not determine the linked destination.';
+		if (it.action.capability === 'external-link') return 'This link has no address to open.';
 		if (it.action.capability === 'download') return 'Sign in again to download this file.';
 		return null;
 	}

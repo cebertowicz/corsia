@@ -2,13 +2,14 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from dataclasses import dataclass
 from typing import Awaitable, Callable
 
-from host_access import browser_cdp, browser_cli, browser_control, browser_screencast
+from host_access import browser_cdp, browser_cli, browser_control, browser_pane_state, browser_screencast
 from host_access.processes import PROCESS_OWNER
 
-__all__ = ["HISTORY_ACTIONS", "PaneAppearance", "clear_page_endpoint", "go", "is_open", "key_event", "match_pane", "mouse_event", "open_url", "page_info", "password_probe", "screencast", "watch_page_metadata"]
+__all__ = ["HISTORY_ACTIONS", "PaneAppearance", "clear_page_endpoint", "go", "is_open", "key_event", "match_pane", "mouse_event", "open_url", "page_info", "password_probe", "screencast", "session_identity", "watch_page_metadata"]
 
 HISTORY_ACTIONS = frozenset({"back", "forward", "reload"})
 _page_endpoints: dict[tuple[str, str], str] = {}
@@ -37,6 +38,44 @@ class PaneAppearance:
         return cls(int(width), int(height), round(scale, 2), data["scheme"])
 
 
+async def watch_targets(thread_id: str, notify: Callable[[], None], known: list[set[str] | None]) -> None:
+    """Observe tab lifecycle while a pane is connected.
+
+    Only page targets count: frames and workers (a captcha's, say) come and go constantly, and
+    each notice restarts the pane's streams. Chrome replays existing targets before it answers
+    discovery; those seed the known pages without a notice. `known` outlives one connection, so
+    a reconnect whose replay differs from the pages last seen notifies once: a tab opened or
+    closed while the watch was down.
+    """
+    from host_access.browser_session_commands import browser_endpoint
+    # A pane that leaves cancels this watch mid-read; cancelling a running command resets the shared session.
+    endpoint = await asyncio.shield(browser_endpoint(PROCESS_OWNER.browser_sessions(), thread_id))
+    async with browser_cdp.CdpClient(endpoint) as cdp:
+        discovery = await cdp.send("Target.setDiscoverTargets", discover=True)
+        discovering = False
+        seen = known[0]
+        pages: set[str] = set()
+        while True:
+            event = json.loads(await cdp.socket.recv())
+            if event.get("id") == discovery:
+                discovering = True
+                if seen is not None and pages != seen:
+                    notify()
+                known[0] = pages
+                continue
+            method = event.get("method")
+            params = event.get("params") if isinstance(event.get("params"), dict) else {}
+            info = params.get("targetInfo") if isinstance(params.get("targetInfo"), dict) else {}
+            if method == "Target.targetCreated" and info.get("type") == "page":
+                pages.add(info.get("targetId"))
+            elif method == "Target.targetDestroyed" and params.get("targetId") in pages:
+                pages.discard(params.get("targetId"))
+            else:
+                continue
+            if discovering:
+                notify()
+
+
 async def watch_page_metadata(thread_id: str, connection_token: str, report: Callable[[dict], Awaitable[None]]) -> None:
     """Forward CDP main-frame metadata changes for this connected shared pane."""
     await browser_cdp.watch_page_metadata(await _page_endpoint(thread_id, connection_token, "This page couldn't be checked"), report)
@@ -54,18 +93,23 @@ async def screencast(thread_id: str, connection_token: str, deliver: Callable[[s
     """Show the shared page in this pane until it leaves, restarting after each page-metrics change."""
     endpoint = await _page_endpoint(thread_id, connection_token, "This page couldn't be shown")
     cast = browser_screencast.PaneScreencast(endpoint, deliver)
-    browser_control.screencast_started(thread_id, connection_token, cast)
+    browser_pane_state.screencast_started(thread_id, connection_token, cast)
     try:
         await cast.run()
     finally:
-        browser_control.screencast_ended(thread_id, connection_token, cast)
+        browser_pane_state.screencast_ended(thread_id, connection_token, cast)
 
 
-async def password_probe(thread_id: str, connection_token: str, known_visit: str | None,
-                         known_nodes: frozenset[int]) -> browser_cdp.PasswordProbe:
+def session_identity(thread_id: str) -> str | None:
+    """Read the current runtime identity alongside a pane's page observation."""
+    return PROCESS_OWNER.browser_sessions().session_identity(thread_id)
+
+
+async def password_probe(thread_id: str, connection_token: str,
+                         known: browser_pane_state.KnownNodes) -> browser_cdp.PasswordProbe:
     """Probe the shared page for a password field over this pane's page endpoint."""
-    endpoint = await _page_endpoint(thread_id, connection_token, browser_control.PASSWORD_CHECK_FAILED)
-    return await browser_cdp.page_password_probe(endpoint, known_visit, known_nodes)
+    endpoint = await _page_endpoint(thread_id, connection_token, browser_control.PAGE_CHECK_FAILED)
+    return await browser_cdp.page_password_probe(endpoint, known)
 
 
 async def _page_endpoint(thread_id: str, connection_token: str, error: str) -> str:
@@ -129,7 +173,7 @@ async def match_pane(thread_id: str, appearance: PaneAppearance) -> None:
     # Every pane on this thread shows the one shared page, so each captures at the new size from the
     # restart that follows the viewport command and sends the resized picture at once.
     # Size the JPEG to the pane's physical pixels; compact layouts use smaller JPEGs.
-    browser_control.capture_at(thread_id, round(appearance.width * appearance.scale),
+    browser_pane_state.capture_at(thread_id, round(appearance.width * appearance.scale),
                                round(appearance.height * appearance.scale), compact=appearance.width <= 480)
     owner = PROCESS_OWNER.browser_sessions()
     for args in (("set", "viewport", str(appearance.width), str(appearance.height), f"{appearance.scale:g}"),

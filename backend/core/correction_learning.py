@@ -1,0 +1,271 @@
+"""Immutable correction triage and terminal-outcome facts for the learning loop."""
+
+from __future__ import annotations
+
+import json
+import sqlite3
+from datetime import datetime, timezone
+from typing import Any
+
+from core.lesson_case import CORRECTION_CAUSES as CAUSES
+
+TRIAGE_EVENT = "learning_loop.correction_triage"
+OUTCOME_EVENT = "learning_loop.correction_outcome"
+TIERS = ("not_correction", "instruction", "note", "miss", "serious")
+NEW_WORK_SIGNALS = ("task_kind", "agent", "workflow_version")
+TERMINAL_OUTCOMES = ("fixed", "instruction", "watch", "lesson", "workflow", "dropped")
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def manifest_paths(db: sqlite3.Connection, manifest_id: str | None) -> list[str]:
+    """Canonical file paths one context manifest delivered; generated rows have none."""
+    from infra.config import WORKSPACE
+    from tools.filesystem_gate import canonical_target_path
+
+    row = db.execute("SELECT entries_json FROM context_manifests WHERE id=?", (manifest_id,)).fetchone()
+    entries = json.loads(row[0]) if row else []  # the column is CHECK json_valid
+    if not isinstance(entries, list):
+        raise ValueError(f"context manifest {manifest_id} has unreadable entries_json; its loaded files cannot be listed")
+    found: list[str] = []
+    for entry in entries:
+        if not isinstance(entry, dict) or entry.get("version_kind") == "generated":
+            continue
+        path = entry.get("path")
+        if isinstance(path, str) and path:
+            resolved = canonical_target_path(path, workspace=WORKSPACE)
+            if resolved not in found:
+                found.append(resolved)
+    return found
+
+
+def loaded_targets(db: sqlite3.Connection, thread_id: str) -> tuple[str, ...]:
+    """Return distinct file paths delivered or read in the active turn.
+
+    Manifest entries retain stable references rather than prompt text; the read
+    ledger adds on-demand files. Both are evidence that the agent saw a file.
+    """
+    from infra.config import WORKSPACE
+    from tools.filesystem_gate import canonical_target_path
+
+    turn = db.execute(
+        """SELECT id,context_manifest_id FROM active_turns
+           WHERE thread_id=? AND status='running' ORDER BY started_at DESC LIMIT 1""",
+        (thread_id,),
+    ).fetchone()
+    if turn is None:
+        return ()
+    found = manifest_paths(db, turn["context_manifest_id"])
+    for row in db.execute("SELECT path FROM guidance_loads WHERE turn_id=? ORDER BY created_at,id", (turn["id"],)):
+        path = canonical_target_path(str(row["path"]), workspace=WORKSPACE)
+        if path not in found:
+            found.append(path)
+    return tuple(found)
+
+
+def _corrected_work_start(db: sqlite3.Connection, thread_id: str, correction_ts: str) -> str | None:
+    """When the corrected work began: the last person message before the correction, None for the thread's start."""
+    from core.corrections_recording import is_owner_authored_message, owner_message_sql_predicate
+
+    owner_filter, params = owner_message_sql_predicate()
+    rows = db.execute(
+        f"""SELECT m.role,m.content,m.metadata,m.created_at FROM messages m
+            WHERE m.thread_id=:thread AND m.created_at < :ts AND {owner_filter}
+            ORDER BY m.created_at DESC,m.id DESC""",
+        {**params, "thread": thread_id, "ts": correction_ts},
+    )
+    for row in rows:
+        if is_owner_authored_message(role=row[0], content=row[1], metadata=row[2]):
+            return str(row[3])
+    return None
+
+
+def serious_proposed(db: sqlite3.Connection, thread_id: str, subject_key: str) -> bool:
+    """Detect the durable, named tool effects that require Serious by default.
+
+    The scope is the corrected task: tool messages from the last person message
+    before the correction through the current turn, not just the triage turn.
+    """
+    from core.corrections_recording import CORRECTION_EVENT
+    from infra.turn_provenance import TurnProvenanceError, turn_provenance
+    from tools.catalog import has_serious_effect, serious_effect_recorded_names
+
+    correction = db.execute(
+        "SELECT ts FROM outcome_events WHERE event_name=? AND subject_key=? AND agent_thread_id=? LIMIT 1",
+        (CORRECTION_EVENT, subject_key, thread_id),
+    ).fetchone()
+    names = serious_effect_recorded_names()
+    if correction is None or not names:  # an unrecorded subject is refused by the caller
+        return False
+    start = _corrected_work_start(db, thread_id, str(correction["ts"]))
+    marks = ",".join("?" for _ in names)
+    query = (
+        "SELECT id,active_turn_id,metadata FROM messages "
+        "WHERE thread_id=? AND role='tool' AND created_at>=? "
+        f"AND json_extract(metadata, '$.name') IN ({marks})"
+    )
+    for row in db.execute(query, (thread_id, start or "", *names)):
+        try:
+            metadata = json.loads(row["metadata"] or "{}")
+            if not isinstance(metadata, dict):
+                raise ValueError("metadata is not an object")
+            turn_provenance({
+                "id": row["id"], "active_turn_id": row["active_turn_id"], "_meta": metadata,
+            })
+        except (TypeError, ValueError, TurnProvenanceError) as exc:
+            # A named serious-effect tool ran in the corrected work; unreadable provenance cannot rule Serious out.
+            raise ValueError(f"tool message {row['id']} has unreadable turn metadata; whether Serious applies cannot be determined") from exc
+        if has_serious_effect(metadata.get("name")):
+            return True
+    return False
+
+
+def _require(value: object, choices: tuple[str, ...], field: str) -> str:
+    if value not in choices:
+        raise ValueError(f"{field} must be one of: {', '.join(choices)}")
+    return str(value)
+
+
+def _present(attributes: dict[str, Any]) -> dict[str, Any]:
+    """Keep only supplied fields, so a field the allowlist drops is one the caller actually sent."""
+    return {key: value for key, value in attributes.items() if value is not None}
+
+
+def _refuse_dropped(result: Any) -> None:
+    """Refuse a fact whose allowlist dropped a field, so the caller's transaction records nothing.
+
+    The facts are immutable, so a stored fact missing a reason this module required would be permanent.
+    """
+    if result.dropped_keys:
+        raise ValueError(
+            f"{', '.join(result.dropped_keys)} was not accepted (over 500 characters, an id with a space, "
+            "or credential-like text); nothing was recorded. Correct it and call again."
+        )
+
+
+def _subject_exists(db: sqlite3.Connection, thread_id: str, subject_key: str) -> None:
+    from core.corrections_recording import CORRECTION_EVENT
+
+    row = db.execute(
+        "SELECT 1 FROM outcome_events WHERE event_name=? AND subject_key=? "
+        "AND agent_thread_id=? LIMIT 1",
+        (CORRECTION_EVENT, subject_key, thread_id),
+    ).fetchone()
+    if row is None:
+        raise ValueError("subject_key is not a recorded correction for this thread")
+
+
+def _loaded_target(db: sqlite3.Connection, thread_id: str, target_file: object) -> str | None:
+    """The canonical path of a changed file, which must be one loaded this turn; None when none applies."""
+    if target_file is None:
+        return None
+    if not isinstance(target_file, str) or not target_file.strip():
+        raise ValueError("target_file must be a non-empty path when supplied")
+    from infra.config import WORKSPACE
+    from tools.filesystem_gate import canonical_target_path
+
+    target = canonical_target_path(target_file.strip(), workspace=WORKSPACE)
+    valid_targets = loaded_targets(db, thread_id)
+    if target not in valid_targets:
+        choices = ", ".join(valid_targets) or "(no manifest or load-receipt files recorded)"
+        raise ValueError(f"target_file is not a file loaded for this turn. Choose one of: {choices}. Omit it when no loaded file was changed.")
+    return target
+
+
+def record_triage(
+    db: sqlite3.Connection, *, thread_id: str, subject_key: str, tier: object, cause: object = None,
+    new_work: object = None, new_work_signal: object = None, target_file: object = None,
+    serious_lowered_reason: object = None,
+) -> dict[str, Any]:
+    """Write the one immutable, receipt-backed triage fact for a correction.
+
+    Follows the triage in skill ``memory-placement``: a not-a-correction gets nothing
+    but its tier, a Miss or Serious answers its cause, and the file it changed is
+    named only when one was loaded.
+    """
+    tier_value = _require(tier, TIERS, "tier")
+    if tier_value == "not_correction":
+        extras = (cause, new_work, new_work_signal, target_file, serious_lowered_reason)
+        if any(value is not None for value in extras):
+            raise ValueError("a not_correction triage records only its tier")
+        cause_value = signal = target = None
+    else:
+        if cause is None and tier_value in ("miss", "serious"):
+            raise ValueError("cause is required for a miss or serious correction")
+        cause_value = None if cause is None else _require(cause, CAUSES, "cause")
+        if new_work not in ("yes", "no"):
+            raise ValueError("new_work must be yes or no")
+        if new_work == "yes":
+            signal = _require(new_work_signal, NEW_WORK_SIGNALS, "new_work_signal")
+        elif new_work_signal is not None:
+            raise ValueError("new_work_signal is only allowed when new_work is yes")
+        else:
+            signal = None
+        target = _loaded_target(db, thread_id, target_file)
+    proposed_serious = tier_value != "not_correction" and serious_proposed(db, thread_id, subject_key)
+    lowered = serious_lowered_reason.strip() if isinstance(serious_lowered_reason, str) else None
+    if serious_lowered_reason is not None and not lowered:
+        raise ValueError("serious_lowered_reason must state why Serious was lowered")
+    if tier_value == "serious" and lowered:
+        raise ValueError("serious_lowered_reason is only allowed when tier is not serious")
+    if proposed_serious and tier_value != "serious" and not lowered:
+        raise ValueError("Serious is proposed because this task took an outside or hard-to-undo tool effect; serious_lowered_reason is required to lower it")
+    _subject_exists(db, thread_id, subject_key)
+    existing = db.execute(
+        "SELECT 1 FROM outcome_events WHERE event_name=? AND subject_key=? LIMIT 1",
+        (TRIAGE_EVENT, subject_key),
+    ).fetchone()
+    if existing:
+        raise ValueError("a triage fact already exists for this correction subject")
+    from infra.outcome_events import record_outcome_event
+
+    result = record_outcome_event(
+        db, dedupe_key=f"{TRIAGE_EVENT}:{subject_key}", event_name=TRIAGE_EVENT,
+        source="agent", provenance="agent_recorded", ts=_now(), subject_key=subject_key,
+        agent_thread_id=thread_id, attributes=_present({
+            "tier": tier_value, "cause": cause_value, "new_work": None if new_work is None else str(new_work),
+            "new_work_signal": signal, "target_file": target,
+            "serious_proposed": None if tier_value == "not_correction" else ("yes" if proposed_serious else "no"),
+            "serious_lowered_reason": lowered,
+        }),
+    )
+    _refuse_dropped(result)
+    return {"subject_key": subject_key, "event_id": result.event_id, "target_file": target}
+
+
+def record_terminal_outcome(
+    db: sqlite3.Connection, *, thread_id: str, subject_key: str, outcome: object,
+    reason: object = None, lesson_id: object = None, workflow_version: object = None,
+) -> dict[str, Any]:
+    """Write exactly one terminal correction outcome; dropped needs a reason."""
+    outcome_value = _require(outcome, TERMINAL_OUTCOMES, "outcome")
+    clean_reason = reason.strip() if isinstance(reason, str) else None
+    if outcome_value == "dropped" and not clean_reason:
+        raise ValueError("dropped outcome requires reason")
+    if reason is not None and not clean_reason:
+        raise ValueError("reason must be non-empty when supplied")
+    for field, value in (("lesson_id", lesson_id), ("workflow_version", workflow_version)):
+        if value is not None and (not isinstance(value, str) or not value.strip()):
+            raise ValueError(f"{field} must be a non-empty string when supplied")
+    _subject_exists(db, thread_id, subject_key)
+    existing = db.execute(
+        "SELECT 1 FROM outcome_events WHERE event_name=? AND subject_key=? LIMIT 1",
+        (OUTCOME_EVENT, subject_key),
+    ).fetchone()
+    if existing:
+        raise ValueError("a terminal outcome already exists for this correction subject")
+    from infra.outcome_events import record_outcome_event
+
+    result = record_outcome_event(
+        db, dedupe_key=f"{OUTCOME_EVENT}:{subject_key}", event_name=OUTCOME_EVENT,
+        source="agent", provenance="agent_recorded", ts=_now(), subject_key=subject_key,
+        agent_thread_id=thread_id, attributes=_present({
+            "outcome": outcome_value, "reason": clean_reason,
+            "lesson_id": lesson_id.strip() if isinstance(lesson_id, str) else None,
+            "workflow_version": workflow_version.strip() if isinstance(workflow_version, str) else None,
+        }),
+    )
+    _refuse_dropped(result)
+    return {"subject_key": subject_key, "event_id": result.event_id, "outcome": outcome_value}

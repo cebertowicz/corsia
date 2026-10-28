@@ -272,7 +272,7 @@ def record_allowed(
 
 
 def set_allow_overage(provider: str, account_id: str, allow: bool, *, db=None) -> None:
-    """Store one account's 'Spend past plan limit' switch.
+    """Store one account's 'Spend past usage limit' switch.
 
     On releases each scope this policy holds there through the ordinary ``allowed``
     verdict; off takes effect at the next usage observation, never retroactively.
@@ -306,7 +306,7 @@ def record_rate_limits_read(result: object, *, provider: str, receipt: ReceiptFe
 
 
 def allows_overage(provider: str, account_id: str, *, db=None) -> bool:
-    """One account's 'Spend past plan limit' switch (off by default)."""
+    """One account's 'Spend past usage limit' switch (off by default)."""
     from connections.overage_policy import allows_overage as switch_on
 
     return switch_on(stored_usage(provider=provider, account_id=account_id, db=db))

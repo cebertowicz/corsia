@@ -11,10 +11,12 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import tempfile
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
+
+from tools.private_runtime_files import SHELL_ENVELOPE_DIR, private_mkstemp
 
 
 @dataclass(frozen=True)
@@ -25,13 +27,18 @@ class Envelope:
     build_argv: Callable[..., list[str]]
     profile_options: dict[str, Any] = field(default_factory=dict)
     argv_options: dict[str, Any] = field(default_factory=dict)
+    profile_required: bool = True
 
 
 log = logging.getLogger(__name__)
 
 
-def _write_envelope(command: str, cwd: Path, envelope: Envelope) -> tuple[Path, list[str]]:
-    descriptor, raw_path = tempfile.mkstemp(prefix="corsia-shell-envelope-", suffix=".sb")
+def _write_envelope(command: str, cwd: Path, envelope: Envelope) -> tuple[Path | None, list[str]]:
+    if not envelope.profile_required:
+        return None, envelope.build_argv(command, cwd, None, **envelope.argv_options)
+    descriptor, raw_path = private_mkstemp(
+        SHELL_ENVELOPE_DIR, prefix="corsia-shell-envelope-", suffix=".sb",
+    )
     profile_path = Path(raw_path).resolve(strict=False)
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
@@ -57,7 +64,8 @@ def _discard_unclaimed_envelope(work: asyncio.Future) -> None:
         )
         return
     profile_path, _argv = work.result()
-    profile_path.unlink(missing_ok=True)
+    if profile_path is not None:
+        profile_path.unlink(missing_ok=True)
 
 
 def execution_envelope_for_consumed_action(
@@ -78,6 +86,13 @@ def execution_envelope_for_consumed_action(
     external_agent = bool(getattr(consumed, "external_agent", False))
     if external_agent:
         strip_external_browser_environment(env)
+    if sys.platform == 'linux' and not leased:
+        from tools.linux_shell import shell_argv
+        return Envelope(
+            build_profile, shell_argv, profile_required=False,
+            argv_options={'thread_id': thread_id, 'policies': policies,
+                          'env': env, 'agent_account': agent_account},
+        )
     return Envelope(
         build_profile,
         build_argv,
@@ -103,7 +118,7 @@ async def prepare_execution_envelope(
     command: str,
     cwd: Path,
     envelope: Envelope,
-) -> tuple[Path, list[str]]:
+) -> tuple[Path | None, list[str]]:
     """Write a private sandbox profile and return it with the Safehouse argv.
 
     The caller owns the returned profile path. If the caller is cancelled before

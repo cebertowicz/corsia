@@ -48,13 +48,14 @@ const suggestionColor = (comment: DocComment) => agentColor(comment.authorThread
 export function canvasCommentHighlights(comments: DocComment[], text: string, focusedId: string | null, onMarkerFocus: CommentRange['onMarkerFocus'], accepting: string | null = null): CommentRange[] {
 	let inlineEnd = -1;
 	return comments.filter((comment) => (!comment.resolved || comment.id === focusedId) && !(comment.replacement != null && comment.decision)).flatMap((comment) => {
-		const range = canvasCommentRange(comment, text);
-		if (!range) return [];
+		const anchorRange = canvasCommentRange(comment, text);
+		if (!anchorRange) return [];
+		const range = comment.insertAfter && openSuggestion(comment) ? { from: anchorRange.to, to: anchorRange.to } : anchorRange;
 		let suggestion: InlineSuggestion | undefined;
 		if (openSuggestion(comment)) {
 			const inline = range.from >= inlineEnd;
 			if (inline) inlineEnd = range.to;
-			suggestion = { quote: comment.anchor, insert: comment.replacement!, color: suggestionColor(comment), inline, busy: comment.id === accepting };
+			suggestion = { quote: comment.insertAfter ? '' : comment.anchor, insert: comment.replacement!, color: suggestionColor(comment), inline, busy: comment.id === accepting };
 		}
 		return [{ ...range, id: comment.id, focused: comment.id === focusedId, replyWaiting: hasNewReplies(comment), onMarkerFocus, suggestion }];
 	});

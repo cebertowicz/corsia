@@ -39,6 +39,22 @@ def join_and_resolve(path: str, workspace: Path | None = None) -> Path:
     return _join_relative_to_workspace(path, workspace).resolve(strict=False)
 
 
+def canonical_target_path(path: str, workspace: Path | None = None) -> str:
+    """Return a canonical, portable target identity relative to its workspace.
+
+    Files inside a workspace retain a POSIX workspace-relative identity in
+    durable lessons and outcome facts. Files outside it keep their resolved
+    absolute identity, because there is no portable local spelling for them.
+    """
+    resolved = join_and_resolve(path, workspace=workspace)
+    if workspace is not None:
+        try:
+            return resolved.relative_to(workspace.expanduser().resolve(strict=False)).as_posix()
+        except ValueError:
+            pass
+    return str(resolved)
+
+
 def _resolve_path(
     path: str,
     workspace: Path | None = None,

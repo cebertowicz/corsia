@@ -177,19 +177,23 @@ TOOL_CATALOG: dict[str, ToolCatalogEntry] = {
         "browser", summary="Open a URL in the browser", activity="Opening",
     ),
     "browser_snapshot": _Entry(
-        "browser", summary="Read the page's accessibility tree and element refs",
+        "browser", summary="Read the page's tree and element refs; list or switch tabs",
         activity="Reading page",
     ),
     "browser_click": _Entry(
         "browser", summary="Click a page element", activity="Clicking",
     ),
     "browser_fill": _Entry("browser", summary="Fill a text input", activity="Filling"),
+    "browser_run_steps": _Entry("browser", summary="Run named server-owned browser setup steps", activity="Running setup"),
     "browser_screenshot": _Entry(
         "browser", summary="Save a page screenshot", activity="Taking screenshot",
     ),
     "browser_eval": _Entry(
         "browser", authority="browser-script", summary="Run JavaScript in the page",
         activity="Running script",
+    ),
+    "browser_person_step": _Entry(
+        "browser", summary="Let the person complete the current browser page", activity="Your turn in the shared browser",
     ),
     "browser_wait": _Entry(
         "browser", summary="Wait for an element or a delay", activity="Waiting",
@@ -263,7 +267,7 @@ TOOL_CATALOG: dict[str, ToolCatalogEntry] = {
         activity="Drafting email",
     ),
     "email_send": _Entry(
-        "email", status="active", authority="conductor-api",
+        "email", status="active", authority="conductor-api", serious_effect=True,
         summary="Send a saved email draft after the person says to send it",
         activity="Sending email",
     ),
@@ -278,7 +282,7 @@ TOOL_CATALOG: dict[str, ToolCatalogEntry] = {
         activity="Drafting invite",
     ),
     "calendar_send_invite": _Entry(
-        "email", status="active", authority="conductor-api",
+        "email", status="active", authority="conductor-api", serious_effect=True,
         summary="Send a saved invite draft after the person says to send it; attendees get emails",
         activity="Sending invite",
     ),

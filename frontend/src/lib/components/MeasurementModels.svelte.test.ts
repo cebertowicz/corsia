@@ -54,7 +54,7 @@ describe('MeasurementModels', () => {
 		const page = render({ period: { grain: 'days', timezone: 'UTC', current: '2026-10-05', range: span, latest: span, previous: { from: '2026-09-21', to: '2026-09-27' } } });
 		const share = page.querySelector('.share');
 		const caption = share?.firstElementChild;
-		expect(caption?.textContent).toBe('Share of tokens by model, Sep 28 to Oct 4');
+		expect(caption?.textContent).toBe('Share of tokens by model, Sep 28 to Oct 4');
 		expect(caption?.compareDocumentPosition(share!.querySelector('.pie')!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
 		expect(share?.getAttribute('aria-label')).toBe('Token share by model');
 	});
@@ -84,7 +84,7 @@ describe('MeasurementModels', () => {
 	it('names the latest window in the Models heading too', () => {
 		const span = { from: '2026-09-28', to: '2026-10-04' };
 		const page = render({ period: { grain: 'days', timezone: 'UTC', current: '2026-10-05', range: span, latest: span, previous: { from: '2026-09-21', to: '2026-09-27' } } });
-		expect(page.querySelector('#models-title')?.textContent).toBe('Models, Sep 28 to Oct 4');
+		expect(page.querySelector('#models-title')?.textContent).toBe('Models, Sep 28 to Oct 4');
 	});
 	it('shows each row its share of the window\'s whole spend, a dash where nothing was priced', () => {
 		// $4,581.6 is on the rows; the other $418.4 of the window\'s ledger belongs to models with no row of their own.
@@ -144,7 +144,7 @@ describe('MeasurementModels', () => {
 	it('keeps load, empty, and recoverable error states', () => {
 		expect(render({ rows: [], tokenShares: [], loading: true }).querySelector('.skeleton')).not.toBeNull();
 		host?.remove(); component && unmount(component); component = null;
-		expect(render({ rows: [], tokenShares: [] }).textContent).toContain('No model activity in this scope.');
+		expect(render({ rows: [], tokenShares: [] }).textContent).toContain('No models were used for this selection.');
 		host?.remove(); component && unmount(component); component = null;
 		expect(render({ rows: [], tokenShares: [], error: 'Could not load models.' }).querySelector('button')?.textContent).toBe('Retry');
 	});

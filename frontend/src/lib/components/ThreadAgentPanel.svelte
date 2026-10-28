@@ -209,9 +209,9 @@
 	{:else}
 		<div class="agent-summary">
 			<div class="agent-copy">
-				<div class="agent-title muted">Not an Agent</div>
+				<div class="agent-title muted">Not an agent</div>
 			</div>
-			<Button size="sm" disabled={busy} onclick={beginEdit}>Make Agent</Button>
+			<Button size="sm" disabled={busy} onclick={beginEdit}>Make agent</Button>
 		</div>
 	{/if}
 </div>

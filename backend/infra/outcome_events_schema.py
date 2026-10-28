@@ -45,6 +45,12 @@ OUTCOME_EVENTS_SCHEMA_SQL = """
     CREATE INDEX IF NOT EXISTS idx_outcome_events_agent_observed
         ON outcome_events(agent_thread_id, observed_ts, event_name)
         WHERE agent_thread_id IS NOT NULL;
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_learning_loop_triage_subject
+        ON outcome_events(subject_key)
+        WHERE event_name='learning_loop.correction_triage';
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_learning_loop_outcome_subject
+        ON outcome_events(subject_key)
+        WHERE event_name='learning_loop.correction_outcome';
     CREATE TABLE IF NOT EXISTS outcome_event_counters (
         counter TEXT NOT NULL CHECK (counter IN (
             'duplicate_ignored', 'attribute_dropped', 'mapping_failed',

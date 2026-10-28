@@ -542,6 +542,26 @@ def test_root_work_with_no_parent_tier_may_self_review(db):
     assert reviewed["state"] == "parent_reviewed"
 
 
+def test_raising_a_decision_does_not_emit_a_person_step_card(db):
+    plan = service.ensure_plan("thread", "owner", db=db)
+    source = _task(plan.id, "Root work", db=db)
+    db.commit()
+    draft = _draft(db, plan, source, actor=_thread_actor("owner"))
+    reviewed = decisions.parent_review(
+        draft["id"], expected_revision=draft["revision"], mutation_id=_mid(),
+        actor=_thread_actor("owner"), provenance="p", db=db,
+    ).result["decision"]
+    raised = decisions.raise_to_user(
+        reviewed["id"], expected_revision=reviewed["revision"], mutation_id=_mid(),
+        actor=_thread_actor("owner"), provenance="p", db=db,
+    ).result["decision"]
+    assert raised["state"] == "raised"
+    assert db.execute(
+        "SELECT COUNT(*) FROM thread_updates WHERE kind='person_step' AND node_id=?",
+        (raised["node_id"],),
+    ).fetchone()[0] == 0
+
+
 def test_a_non_root_owner_thread_still_needs_its_spawning_parent(db):
     import plans.decisions as decisions
 

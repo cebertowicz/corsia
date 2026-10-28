@@ -33,7 +33,7 @@
 				<p>{status}</p>
 			{/if}
 			{#if streamEnded}<Button onclick={onreconnect}>Reconnect</Button>{/if}
-			{#if retryable}<Button onclick={unavailable ? onreconnect : onretry}>Try again</Button>{/if}
+			{#if retryable}<Button onclick={unavailable ? onreconnect : onretry}>Retry</Button>{/if}
 		</div>
 	</div>
 {/if}

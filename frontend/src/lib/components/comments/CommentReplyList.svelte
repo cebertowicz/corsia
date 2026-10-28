@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { resolveParticipant, userParticipant } from '$lib/stores/participants';
 	import CommentMarkdownBody from './CommentMarkdownBody.svelte';
+	import NewMarker from './NewMarker.svelte';
 
 	export type CommentReplyData = {
 		id?: string;
@@ -11,9 +12,10 @@
 		createdAt?: string;
 	};
 
-	let { replies, newReplyIds = new Set<string>(), onNewestReplyRendered }: {
+	let { replies, newReplyIds = new Set<string>(), collapseReplyIds = newReplyIds, onNewestReplyRendered }: {
 		replies: CommentReplyData[];
 		newReplyIds?: ReadonlySet<string>;
+		collapseReplyIds?: ReadonlySet<string>;
 		onNewestReplyRendered?: (element: HTMLElement | undefined) => void;
 	} = $props();
 
@@ -24,7 +26,7 @@
 
 	const visibleFrom = $derived.by(() => {
 		if (expanded || replies.length <= 3) return 0;
-		const firstNew = replies.findIndex((reply) => !!reply.id && newReplyIds.has(reply.id));
+		const firstNew = replies.findIndex((reply) => !!reply.id && collapseReplyIds.has(reply.id));
 		return firstNew >= 0 ? firstNew : replies.length - 1;
 	});
 	const hiddenCount = $derived(visibleFrom);
@@ -59,7 +61,7 @@
 				<!-- The reply rail supplies grouping; an author dot would repeat it. -->
 				<span class="ct-msg-author">{author.name}</span>
 				<span class="ct-at">{reply.at}</span>
-				{#if isNew}<span class="ct-new"><span aria-hidden="true" class="ct-new-dot"></span>New</span>{/if}
+				{#if isNew}<NewMarker />{/if}
 			</div>
 			<CommentMarkdownBody text={reply.text} />
 		</div>
@@ -74,6 +76,5 @@
 	.ct-msg-meta { display: flex; align-items: center; gap: var(--space-1); }
 	.ct-msg-author { font-size: var(--text-caption); font-weight: var(--fw-semibold); color: var(--text-secondary); }
 	.ct-at { font-size: var(--text-caption); color: var(--text-tertiary); }
-	.ct-new { display: inline-flex; align-items: center; gap: var(--space-1); font-size: var(--text-caption); font-weight: var(--fw-semibold); color: var(--accent-text); }
-	.ct-new-dot { width: var(--space-1); height: var(--space-1); border-radius: var(--radius-circle); flex-shrink: 0; background: var(--accent); }
+
 </style>

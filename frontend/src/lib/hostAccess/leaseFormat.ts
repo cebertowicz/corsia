@@ -134,7 +134,7 @@ export function approvalReady(lease: HostAccessLease | null): boolean {
 export function owner(lease: HostAccessLease): string {
 	return text(lease.root_thread_title)
 		? lease.root_thread_title.trim()
-		: (text(lease.root_thread_id) ? lease.root_thread_id : 'Unknown thread');
+		: (text(lease.root_thread_id) ? lease.root_thread_id : 'Unknown chat');
 }
 
 export function duration(seconds: unknown): string {

@@ -75,7 +75,7 @@ MEASURES: dict[str, Measure] = {
         "Review its recent send-backs and how it asks you.", scale=60.0,
         scope_label="Your minutes per outcome"),
     "asks_per_outcome": Measure(
-        "asks_per_outcome", "Asks per outcome", False, "ratio",
+        "asks_per_outcome", "Decisions and tasks for you per outcome", False, "ratio",
         "Review what keeps being asked, and whether guidance answers it.", per_agent=False),
     "first_try_acceptance": Measure(
         "first_try_acceptance", "First try", True, "percent",

@@ -59,4 +59,5 @@ jobs:
         run: |
           .venv/bin/python -m pytest -c backend/pytest.ini \
             backend/tests/test_browser_native.py backend/tests/test_browser_real_socket.py \
+            backend/tests/test_browser_restricted_ports.py \
             -m integration -vv --tb=short -o faulthandler_timeout=60

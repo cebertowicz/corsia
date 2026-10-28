@@ -91,6 +91,8 @@ function openOwner(session: string) {
 	socket.onmessage = (event) => {
 		if (!owns()) return;
 		const data = JSON.parse(event.data);
+		// A socket the server authenticated got through: the next drop starts the backoff over, not from where the last outage left it.
+		if (data.type === 'auth_ok') reconnectAttempts = 0;
 		handleMessage(data, resetHeartbeat, owns);
 	};
 

@@ -23,6 +23,7 @@ pub enum LaunchState {
 /// shell pages themselves.
 pub struct ShellState {
     state: LaunchState,
+    local_corsia_configured: bool,
     /// An update this process's own observer saw replace the app under the open window; it allows one automatic
     /// recovery start. Only `observe_install` arms it: nothing a page sends can.
     replacement: Option<Replacement>,
@@ -47,7 +48,7 @@ impl ShellState {
         let state = saved.map_or(LaunchState::Local, |remote| LaunchState::Connecting {
             name: remote.name.clone(),
         });
-        Self { state, replacement: None, spent: BTreeSet::new() }
+        Self { state, local_corsia_configured: false, replacement: None, spent: BTreeSet::new() }
     }
 
     /// One reading of the installed app by the replacement observer. A generation other than the launched one, seen
@@ -107,6 +108,14 @@ impl ShellState {
         &self.state
     }
 
+    pub fn local_corsia_configured(&self) -> bool {
+        self.local_corsia_configured
+    }
+
+    pub fn set_local_corsia_configured(&mut self, configured: bool) {
+        self.local_corsia_configured = configured;
+    }
+
     pub fn begin_pairing(&mut self) {
         self.forget_replacement();
         self.state = LaunchState::Pairing;
@@ -145,7 +154,7 @@ impl ShellState {
 
     /// The window ran a local start itself. The page that awaits it draws its answer, so a launch answer kept here is
     /// no longer what the window shows. A failure stays until the start answers: if it fails too, a later shell load
-    /// still draws the failure with its Try again.
+    /// still draws the failure with its Retry.
     pub fn local_start_began(&mut self) {
         if matches!(self.state, LaunchState::LocalStartup { .. }) {
             self.state = LaunchState::Local;

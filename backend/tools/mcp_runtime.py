@@ -21,8 +21,7 @@ from loguru import logger
 from infra import state
 from infra.db_async import run_in_db
 from infra.time import utc_now_iso
-from tools.mcp import connect_mcp_servers, mcp_failure_class
-from tools.managed_runtime import ManagedRuntimeDownloadError
+from tools.mcp import connect_mcp_servers
 from tools.registry import ToolRegistry
 
 _registry = ToolRegistry()
@@ -60,23 +59,6 @@ async def _publish_app_state(app_id: str, result: dict[str, object]) -> None:
     from connections.app_notices import record_runtime_app_state
 
     await run_in_db(record_runtime_app_state, app_id, result)
-
-
-async def _prepare_managed_runtime(config: dict) -> None:
-    """Fetch a missing approved stdio runtime before the MCP connect deadline starts."""
-    command = config.get("command")
-    if not isinstance(command, str):
-        return
-    configured_env = config.get("env")
-    path = configured_env.get("PATH") if isinstance(configured_env, dict) else None
-    if path is not None and not isinstance(path, str):
-        path = None
-    from tools.managed_runtime import ensure_runtime, runtime_fetch_plan
-
-    plan = runtime_fetch_plan(command, path=path)
-    if plan is not None:
-        kind, _pin = plan
-        await asyncio.to_thread(ensure_runtime, kind)
 
 
 async def _remove_connected_app(app_id: str) -> None:
@@ -201,7 +183,6 @@ async def _connect_app(action: str, app_id: str) -> dict[str, object]:
         if result is not None:
             await _publish_app_state(app_id, result)
             return result
-        await _prepare_managed_runtime(config)
         _app_servers[app_id] = name
         stack = AsyncExitStack()
         errors = await connect_mcp_servers({name: config}, _registry, stack)
@@ -239,10 +220,7 @@ async def _connect_app(action: str, app_id: str) -> dict[str, object]:
         await _remove_connected_app(app_id)
         if stack is not None and not registered:
             await stack.aclose()
-        result = {
-            "state": "failed", "state_since": utc_now_iso(), "tool_count": 0,
-            "failure_class": mcp_failure_class(error, config) if isinstance(error, ManagedRuntimeDownloadError) else "cannot_start",
-        }
+        result = {"state": "failed", "state_since": utc_now_iso(), "tool_count": 0, "failure_class": "cannot_start"}
         await _publish_app_state(app_id, result)
         return result
 

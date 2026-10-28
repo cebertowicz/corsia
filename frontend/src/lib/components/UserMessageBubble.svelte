@@ -17,6 +17,7 @@
 	import { holdsNewWork } from '$lib/update/model';
 	import AgentMessageAttribution from './AgentMessageAttribution.svelte';
 	import UserBubbleAttachments from './UserBubbleAttachments.svelte';
+	import SentChatComments from './SentChatComments.svelte';
 
 	let {
 		msg,
@@ -115,6 +116,9 @@
 					attachments={msg.metadata.attachments}
 					{onOpenLightbox}
 				/>
+			{/if}
+			{#if msg.metadata?.reply_context?.comments?.length}
+				<SentChatComments comments={msg.metadata.reply_context.comments} threadId={messageThreadId} />
 			{/if}
 			{#if msg.content}
 				<div class="bubble-content long-message-body" class:collapsed={contentCollapsed} class:md-content={isAgentSent}>
@@ -272,7 +276,7 @@
 		mask-image: linear-gradient(to bottom, black 72%, transparent 100%);
 		-webkit-mask-image: linear-gradient(to bottom, black 72%, transparent 100%);
 	}
-	.long-message-toggle {
+	.long-message-toggle, .user-bubble-wrapper :global(.sent-comment-toggle) {
 		margin-top: 8px;
 		border: 1px solid rgba(255,255,255,0.2);
 		border-radius: var(--radius-pill);
@@ -285,10 +289,11 @@
 		opacity: 0.85;
 		transition: background var(--dur-tight), opacity var(--dur-tight);
 	}
-	.long-message-toggle:hover {
+	.long-message-toggle:hover, .user-bubble-wrapper :global(.sent-comment-toggle:hover) {
 		background: rgba(0,0,0,0.24);
 		opacity: 1;
 	}
+	.user-bubble-wrapper :global(.sent-comment-toggle) { color: var(--accent-on-fill); opacity: 1; }
 	.user-bubble-wrapper.agent-sent .long-message-toggle {
 		border-color: var(--border-subtle);
 		background: var(--bg-tertiary);

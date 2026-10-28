@@ -19,7 +19,7 @@ The read returns `result`, `excerpts`, `skills`, `skipped_files` and `unread_fil
 - `read_failed`: post `I couldn’t read them this time, so I kept nothing. Ask me any time to try again.` and carry on.
 - `read`: on a re-run, first drop each excerpt whose `sha256` you already kept: it appears in `search_knowledge`, in a `sha256` comment in `USER.md`, or in a task description.
 
-Also gather the connected apps (next section) before you post. When there are no excerpts, no `new` skills and no apps to bring over, and `result` is `nothing_found` or the re-run left nothing: post `I looked, and they don’t hold much about you, so I kept nothing.` (`Nothing new to bring over.` on a re-run) and carry on. Otherwise post one message, plain lines and no checkboxes, each ending with *(tool, age since `changed`)* where it has a source:
+Also gather the connected apps (next section) before you post. When there are no excerpts, no `new` skills and no apps to bring over, and `result` is `nothing_found` or the re-run left nothing: post `I looked, and they don’t hold much to bring over, so I kept nothing.` (`Nothing new to bring over.` on a re-run) and carry on. Otherwise post one message, plain lines and no checkboxes, each ending with *(tool, age since `changed`)* where it has a source:
 
 > Here’s what they know. Say "keep them", or tell me what to leave out or fix.
 >
@@ -36,28 +36,24 @@ Also gather the connected apps (next section) before you post. When there are no
 >
 > **Kept only if you say so** — dated items, each with `Want me to keep track of it?` before the parenthesis, and personal things (health, money, employment, family or legal), apart from the rest
 
-Leave out an empty group. With more than 15 about-you lines, end with `I found [N] more. Say "show more" to see the next 15.` With one tool, name it in the skills line; with several, group the skills under `From [tool]`, with no tool on the rows. After the message, one line per other skill state:
+Leave out an empty group. With more than 15 about-you lines, end with `I found [N] more. Say "show more" to see the next 15.` With one tool, name it in the skills line; with several, group the skills under `From [tool]`, with no tool on the rows. After the message, post the other skill states, none of which asks the person to do anything. `already_here`, all on one line: `Already here, so I left them: [a, b, c].`
 
-- `already_here`, all on one line: `Already here, so I left them: [a, b, c].`
-- `name_reserved`: `**[name]**: a CORSIA skill already has that name. Rename it in [tool] and ask me again.`
-- `name_clash`: `**[name]**: [tool] and [tool] both have a skill with that name. Rename one and ask me again.`
-- `has_secret`: `**[name]**: it has a key or password in it, so I left it. Remove that and ask me again.`
-- `too_large`: `**[name]**: it’s over 512 KB or 100 files, too big to bring over. Make it smaller in [tool] and ask me again.`
-- `unreadable`, by `reason`: `**[name]**: I couldn’t read it because ` and then
-  - `link`: `it has a symbolic link in it. Replace the link with the file itself in [tool] and ask me again.`
-  - `not_text`: `it has a file that isn’t text. Remove that file in [tool] and ask me again.`
-  - `no_skill_md`: `it has no SKILL.md. Add one in [tool] and ask me again.`
-  - `bad_header`: `the header at the top of its SKILL.md has a formatting error. Fix it in [tool] and ask me again.`
-  - `bad_name`: `its name can’t be used as a skill name. Start it with a letter or number, use only letters, numbers, dots, dashes or underscores, keep it to 80 characters, and ask me again.`
-  - `no_description`: `its SKILL.md has no description. Add one in [tool] and ask me again.`
-  - empty: `**[name]**: I couldn’t read it this time. Ask me again to try once more.`
+A skill that can't come over is left out, and the person has nothing to do unless they want it. Name every such skill once, all together on one line, `I left out [name] ([reason]), [name] ([reason]). Ask me to help with any of them and I’ll say what to change and try again, or help you write a CORSIA skill to do what you need.`, with the reason in plain words by state:
+
+- `name_reserved`: `CORSIA already has a skill with that name`
+- `name_clash`: `[tool] and [tool] both have one with that name`
+- `has_secret`: `it has a key or password in it`
+- `too_large`: `too big to bring over`
+- `unreadable`, whatever its `reason` or none: `I couldn’t read it`
+
+If they ask about a left-out skill, say what to change in plain words and try it again (for `changed`, show the current version first), or help them write a CORSIA skill to do what they need.
 
 ## Their answer
 
 "Keep them" keeps everything listed except the **Kept only if you say so** group; those items are kept only when the person names them. Anything they tell you to leave out is left out; anything to fix, fix first.
 
-- **About you and how you like to work:** About you fields into the workspace `USER.md` (place sets the time zone) each field followed by `<!-- imported sha256 [sha256] -->`; each preference with `write_knowledge` at workspace scope, type preference, its source as `[tool] [file], imported [date], sha256 [sha256]`; a dated item they named as a task whose description ends `Imported from [tool] [file], sha256 [sha256].` Nothing else, and never a key or password. Then post `Kept [N] things about you and how you work.`
-- **Skills:** call `agent_import` mode `install` with the same `consent_decision_id` and the kept `item_ids`, before `install_by`. Post `Brought over [installed] skills. They’re in Settings › Skills. Tell me if you want any of them removed.`, then one line per other result: its state’s line above, or for `changed` (its result has no name; use the one from your list) `**[name]** is different from the version I showed you. Ask me again to see the current version.`, for `failed` `**[name]**: I couldn’t add it to CORSIA, so I left it out. Ask me to try again, or to write a CORSIA skill that does the same.` A result's `guidance_history` is that skill's save line: act on it as after any guidance save, and where it says to report, tell the person in plain words, naming the skill.
+- **About you and how you like to work:** About you fields into the workspace `USER.md` (place sets the time zone) each field followed by `<!-- imported sha256 [sha256] -->`; each preference with `write_knowledge` at workspace scope, type preference, its source as `[tool] [file], imported [date], sha256 [sha256]`; a dated item they named as a task whose description ends `Imported from [tool] [file], sha256 [sha256].` Nothing else, and never a key or password. Then post `Kept [N] details on you and how you work.`
+- **Skills:** call `agent_import` mode `install` with the same `consent_decision_id` and the kept `item_ids`, before `install_by`. Post `Brought over [installed] skills. They’re in Settings › Skills. Tell me if you want any of them removed.`, then, for every other result, post a separate short line: `I couldn’t bring over [name] ([reason]). Ask me to help fix it and try again, or help you write a CORSIA skill.` Use its state’s reason above, or for `changed` (its result has no name; use the one from your list) `it changed since I showed you`, for `failed` `something went wrong adding it`. A result's `guidance_history` is that skill's save line: act on it as after any guidance save, and where it says to report, tell the person in plain words, naming the skill.
 - **Connected apps:** `POST /api/mcp/import` with `{"servers": [{"source": "...", "name": "..."}]}` for the kept ones only (load skill `coordination-api`), and post the result as `references/import-result-lines.md` says. No secrets in chat.
 
 ## Their connected apps
