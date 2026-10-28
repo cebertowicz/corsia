@@ -132,6 +132,19 @@ def append_add_notice(result: dict, db, workflows: dict[str, Workflow]) -> None:
     workflow = workflows.get(reference) if isinstance(reference, str) else None
     if workflow is not None and workflow.version is None:
         _append_notice(result, "Workflow version unavailable; recorded null.")
+    if node.get("kind") == "phase" and isinstance(reference, str):
+        parent_id, seen = node.get("parent_id"), {node["id"]}
+        while parent_id is not None and parent_id not in seen:
+            seen.add(parent_id)
+            parent = db.execute(
+                "SELECT id,kind,parent_id,workflow_ref FROM plan_nodes WHERE id=?", (parent_id,),
+            ).fetchone()
+            if parent is None:
+                break
+            if parent["kind"] == "phase" and parent["workflow_ref"] == reference:
+                _append_notice(result, f"Workflow {reference} already runs above this one; a workflow inside itself repeats.")
+                break
+            parent_id = parent["parent_id"]
     phase = _phase_for_node(db, str(node["id"]))
     missing = _missing_required_steps(db, phase, workflows)
     if missing is None:
@@ -151,7 +164,12 @@ def append_close_notice(
 ) -> None:
     """Prompt when a run's final task closes before a required step exists."""
 
-    phase = _phase_for_node(db, node_id)
+    node = db.execute("SELECT kind,parent_id FROM plan_nodes WHERE id=?", (node_id,)).fetchone()
+    phase = (
+        _phase_for_node(db, str(node["parent_id"]))
+        if node is not None and node["kind"] == "phase" and node["parent_id"] is not None
+        else _phase_for_node(db, node_id)
+    )
     if phase is None or not _run_tasks_are_terminal(db, str(phase["id"])):
         return
     missing = _missing_required_steps(db, phase, workflows)
@@ -198,7 +216,7 @@ def _missing_required_steps(
         row["workflow_step"]
         for row in db.execute(
             "SELECT workflow_step FROM plan_nodes WHERE parent_id=? "
-            "AND archived_at IS NULL AND kind='task' AND workflow_ref=?",
+            "AND archived_at IS NULL AND ((kind='task' AND workflow_ref=?) OR kind='phase')",
             (phase["id"], phase["workflow_ref"]),
         ).fetchall()
         if isinstance(row["workflow_step"], str)
@@ -215,7 +233,7 @@ def _unavailable_workflow_notice(phase) -> str:
 
 def _run_tasks_are_terminal(db, phase_id: str) -> bool:
     rows = db.execute(
-        "SELECT state,archived_at FROM plan_nodes WHERE parent_id=? AND kind='task'",
+        "SELECT state,archived_at FROM plan_nodes WHERE parent_id=? AND kind IN ('task','phase')",
         (phase_id,),
     ).fetchall()
     return bool(rows) and all(
