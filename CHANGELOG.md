@@ -8,7 +8,7 @@ the later entry describes the current behavior.
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here._
 
 - Sign an added Claude Code or Codex account in again from its row in Provider settings.
-
+- In phone chat, the scroll-to-bottom arrow lines up with the plan control, with notices above and the conversation visible around them.
 - On a new chat you can pick which account it runs on before the first message.
 - A paused task, review or decision you owe, including a document review, still reads Needs you in the plan, and so does the task above it; while it is paused it is not flagged or counted anywhere else.
 - Email replies check for newer messages and support attachments and your usual font.
