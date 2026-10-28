@@ -162,8 +162,7 @@
 		recordPicks(next);
 		for (const vendor of CLI_VENDORS) {
 			if (cliSignedIn(vendor)) continue;
-			const source = sources.find((row) => row.source === vendor);
-			if (cliPicked(vendor)) { if (source) void connectFlow.install(source); }
+			if (cliPicked(vendor)) connectFlow.pick(vendor);
 			else void connectFlow.stop(vendor);
 		}
 		page = 'models';
@@ -310,6 +309,7 @@
 		const current = get(token); if (!current) return;
 		try {
 			sources = await (strict ? recheckSources(current) : fetchSources(current));
+			connectFlow.sourcesChanged();
 			catalog = await setupCatalog(current);
 			sourceError = '';
 		} catch { catalog = []; sourceError = 'CORSIA couldn’t check your model sources. Try again.'; }

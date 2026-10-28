@@ -41,7 +41,7 @@
 		<section class="item" aria-label={row.name}>
 			<ListRow name={row.name} meta={[row.meta]} centered>
 				{#snippet actions()}
-					{#if row.action}{#if row.spinning}<Spinner size={14} />{/if}<Button variant="chip" size="sm" loading={row.action.loading} disabled={row.action.loading} onclick={row.action.run}>{row.action.label}</Button>
+					{#if row.action}{#if row.spinning}<Spinner size={14} />{/if}<Button variant="chip" size="sm" loading={row.action.loading && !row.spinning} disabled={row.action.loading} onclick={row.action.run}>{row.action.label}</Button>
 					{:else if row.pill}<StatePill look="dot" state={row.pill.state} label={row.pill.label} />
 					{:else if row.busy}<Spinner size={14} />{/if}
 					{#if row.toggle}<Toggle size="sm" checked={row.toggle.on} held={row.toggle.held} ariaLabel={row.name} describedBy={row.detail ? `setup-row-detail-${row.key}` : undefined} onchange={row.toggle.run} />{/if}

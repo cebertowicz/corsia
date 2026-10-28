@@ -265,6 +265,18 @@ describe('SetupScreen', () => {
 		expect(button('Sign in')).toBeTruthy();
 	});
 
+	it('installs only the chosen CLI after its delayed detection', async () => {
+		await passFolder();
+		button('Claude')?.click(); await settle();
+		expect(calls.filter((call) => call.method === 'POST' && call.url.includes('/install'))).toEqual([]);
+		sources = [{ source: 'claude-code', name: 'Claude Code', state: 'unverified' }, { source: 'codex', name: 'Codex', state: 'not_installed' }];
+		window.dispatchEvent(new Event('focus')); await settle();
+		expect(calls.some((call) => call.url.includes('/install') && call.method === 'POST')).toBe(false);
+		sources = [{ source: 'claude-code', name: 'Claude Code', state: 'not_installed' }, { source: 'codex', name: 'Codex', state: 'not_installed' }];
+		window.dispatchEvent(new Event('focus')); await settle();
+		expect(calls.filter((call) => call.method === 'POST' && call.url.includes('/install'))).toEqual([{ url: '/api/providers/cli/claude-code/install', method: 'POST' }]);
+	});
+
 	describe('the Local model row by host', () => {
 		const providersStep = async (extra: Array<{ source: string; name: string; state: string }> = []) => {
 			sources = [{ source: 'claude-code', name: 'Claude Code', state: 'not_installed' }, { source: 'codex', name: 'Codex', state: 'not_installed' }, ...extra];

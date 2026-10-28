@@ -5,7 +5,7 @@ import { formatMoment } from '$lib/time';
 
 type InstallFailureCause = 'connection' | 'site_refused' | 'download_unverified' | 'installer_failed';
 type ConnectPhase = {
-	phase: 'installing' | 'signing-in' | 'path-shadow' | 'failed'; installed?: boolean; accountId?: string; failed?: 'install' | 'signin';
+	phase: 'awaiting-source' | 'installing' | 'signing-in' | 'path-shadow' | 'failed'; installed?: boolean; accountId?: string; failed?: 'install' | 'signin';
 	reason?: string | null; cause?: InstallFailureCause; ref?: string | null; shadowedBinary?: string;
 	/** Sign in was pressed while installing: the sign-in starts the moment the install is done. */
 	signInQueued?: boolean;
@@ -141,6 +141,21 @@ export function createSetupConnect(deps: ConnectDeps) {
 			await tickConnect();
 		} catch { setConnect(source.source, { phase: 'failed', failed: 'install' }); }
 	}
+	/** Resolve a subscription choice once source detection can say whether an install is needed. */
+	function sourcesChanged() {
+		for (const [vendor, entry] of Object.entries(flow)) {
+			if (entry?.phase !== 'awaiting-source') continue;
+			const source = deps.sources().find((candidate) => candidate.source === vendor);
+			if (!source || (source.state === 'unverified' && !source.checked_at)) continue;
+			setConnect(vendor, undefined);
+			if (source.state === 'not_installed') void install(source);
+		}
+	}
+	function pick(vendor: string) {
+		if (flow[vendor]) return;
+		setConnect(vendor, { phase: 'awaiting-source' });
+		sourcesChanged();
+	}
 	/** A tool picked on the subscriptions screen: install it now unless it is already there. */
 	async function install(source: ModelSource) {
 		const entry = flow[source.source];
@@ -167,7 +182,8 @@ export function createSetupConnect(deps: ConnectDeps) {
 	/** An answer changed on the subscriptions screen: stop the install or sign-in it started. */
 	async function stop(vendor: string) {
 		const entry = flow[vendor], current = deps.token();
-		if (entry?.phase === 'installing') {
+		if (entry?.phase === 'awaiting-source') setConnect(vendor, undefined);
+		else if (entry?.phase === 'installing') {
 			// A sign-in queued behind this install must not start if the install finishes anyway.
 			setConnect(vendor, { ...entry, signInQueued: false });
 			const source = deps.sources().find((candidate) => candidate.source === vendor);
@@ -205,7 +221,7 @@ export function createSetupConnect(deps: ConnectDeps) {
 		const copy = VENDOR_COPY[source.source], entry = flow[source.source];
 		const signInAction = { label: 'Sign in', run: () => void signIn(source) };
 		if (entry?.phase === 'installing') {
-			return { meta: `Installing ${copy.cli}…`, busy: true, spinning: true, action: entry.signInQueued ? { label: 'Installing…', run: () => undefined, loading: true } : signInAction };
+			return { meta: `Installing ${copy.cli}…`, busy: true, spinning: true, action: entry.signInQueued ? undefined : signInAction };
 		}
 		if (entry?.phase === 'signing-in' && entry.checkingModels) return { meta: `Checking your ${copy.account} models…`, busy: true, spinning: true };
 		if (entry?.phase === 'signing-in') return { meta: 'Finish signing in in your browser.', busy: true, action: { label: 'Open sign-in again', run: () => void openSignInAgain(source) } };
@@ -233,5 +249,5 @@ export function createSetupConnect(deps: ConnectDeps) {
 		if (source.state === 'unverified') return { meta: source.reason ?? '', busy: !source.checked_at, action: source.checked_at ? { label: 'Check again', run: () => void deps.refreshSources(true) } : undefined };
 		return { meta: copy.uses, action: signInAction };
 	}
-	return { get active() { return active; }, get attempts() { return attempts; }, tick: tickConnect, row: connectRow, install, signIn, stop };
+	return { get active() { return active; }, get attempts() { return attempts; }, tick: tickConnect, row: connectRow, install, pick, sourcesChanged, signIn, stop };
 }

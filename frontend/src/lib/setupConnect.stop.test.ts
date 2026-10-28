@@ -7,6 +7,18 @@ const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200
 afterEach(() => { vi.unstubAllGlobals(); });
 
 describe('setup connect stop', () => {
+	it('drops a pending choice when unpicked and never installs an already detected CLI', async () => {
+		let sources: Array<{ source: string; name: string; state: 'not_installed' | 'ready' }> = [];
+		const fetchSpy = vi.fn(); vi.stubGlobal('fetch', fetchSpy);
+		const flow = createSetupConnect({ token: () => 'session', sources: () => sources, refreshSources: async () => undefined });
+		flow.pick('claude-code'); await flow.stop('claude-code');
+		sources = [{ source: 'claude-code', name: 'Claude Code', state: 'not_installed' }];
+		flow.sourcesChanged();
+		sources = [{ source: 'codex', name: 'Codex', state: 'ready' }];
+		flow.pick('codex'); flow.sourcesChanged();
+		expect(fetchSpy).not.toHaveBeenCalled();
+	});
+
 	it('cancels a sign-in that was still starting when its tool was unpicked', async () => {
 		const calls: string[] = [];
 		let answerStart: (response: Response) => void = () => undefined;
