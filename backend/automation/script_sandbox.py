@@ -13,9 +13,11 @@ import asyncio
 import os
 import shlex
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
+from automation.script_github_channel import SOCKET_ENV, github_channel
+from connections.github_agent_home import default_home
 from events.trace_env import TRACE_ENV
 from events.trace_env import encode as encode_trace
 from host_access.processes import PROCESS_OWNER, ForegroundProcessResult
@@ -36,6 +38,7 @@ from tools.shell_guard import (
     safehouse_version_error,
 )
 from tools.shell_policy import load_shell_repo_policies
+from tools.sandbox_git import sandbox_literal
 import tools.shell_sandbox as shell_sandbox
 from tools.unix_socket_policy import corsia_temp_root_for_bind
 
@@ -99,6 +102,7 @@ async def run_script(
     timeout_seconds: int,
     stdin: bytes | None = None,
     trace: tuple[str, ...] = (),
+    rule_id: str | None = None,
 ) -> ScriptRun:
     """Run ``script`` in the owner's protected envelope and return its capped output.
 
@@ -108,7 +112,7 @@ async def run_script(
     """
     await _checked_environment()
     if stdin is None:
-        return await _run(thread_id, project_id, script, run_id, timeout_seconds, None, trace)
+        return await _run(thread_id, project_id, script, run_id, timeout_seconds, None, trace, rule_id)
     try:
         fd, name = tempfile.mkstemp(prefix="rule-input-", suffix=".json",
                                     dir=corsia_temp_root_for_bind(thread_id))
@@ -117,16 +121,43 @@ async def run_script(
     try:
         with os.fdopen(fd, "wb") as handle:
             handle.write(stdin)
-        return await _run(thread_id, project_id, script, run_id, timeout_seconds, Path(name), trace)
+        return await _run(thread_id, project_id, script, run_id, timeout_seconds, Path(name), trace, rule_id)
     finally:
         Path(name).unlink(missing_ok=True)
 
 
 async def _run(
     thread_id: str, project_id: str | None, script: Path, run_id: str, timeout_seconds: int,
-    stdin: Path | None, trace: tuple[str, ...],
+    stdin: Path | None, trace: tuple[str, ...], rule_id: str | None,
+) -> ScriptRun:
+    try:
+        async with github_channel(thread_id, run_id, rule_id) as socket_path:
+            return await _run_with_channel(thread_id, project_id, script, run_id, timeout_seconds,
+                                           stdin, trace, socket_path)
+    except OSError as exc:
+        raise ScriptSandboxError(f"script GitHub channel unavailable: {type(exc).__name__}") from exc
+
+
+def _script_gh_homes() -> set[Path]:
+    paths = {default_home(), Path.home() / ".config" / "gh"}
+    if os.environ.get("XDG_CONFIG_HOME"):
+        paths.add(Path(os.environ["XDG_CONFIG_HOME"]) / "gh")
+    return {path.resolve(strict=False) for path in paths}
+
+
+def _script_profile(*args, **kwargs) -> str:
+    profile = execution_envelope_profile(*args, **kwargs)
+    for path in _script_gh_homes():
+        profile += f'(deny file-read* file-write* (subpath "{sandbox_literal(path)}"))\n'
+    return profile
+
+
+async def _run_with_channel(
+    thread_id: str, project_id: str | None, script: Path, run_id: str, timeout_seconds: int,
+    stdin: Path | None, trace: tuple[str, ...], socket_path: Path,
 ) -> ScriptRun:
     env = safehouse_subprocess_env(thread_id)
+    env[SOCKET_ENV] = str(socket_path)
     if trace:
         env[TRACE_ENV] = encode_trace(trace)
     try:
@@ -147,8 +178,11 @@ async def _run(
     envelope = execution_envelope_for_consumed_action(
         None, leased=False, thread_id=thread_id, grant_policies=grant_policies,
         policies=policies, agent_account=None, env=env,
-        build_profile=execution_envelope_profile, build_argv=safehouse_argv,
+        build_profile=_script_profile, build_argv=safehouse_argv,
     )
+    if envelope is not None and not envelope.profile_required:
+        envelope = replace(envelope, argv_options={**envelope.argv_options,
+                                                  "extra_hidden_roots": _script_gh_homes()})
     profile_path, argv = await prepare_execution_envelope(
         script_command(script, stdin), cwd, envelope,
     )

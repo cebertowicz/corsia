@@ -317,7 +317,8 @@ async def _execute(schedule: Schedule, rule_run: script_rule_runs.RuleRun | None
         run = await run_script(
             schedule.thread_id, project, path,
             run_id=run_id, timeout_seconds=int(schedule.timeout_seconds or 0),
-            **({"stdin": rule_run.stdin, "trace": rule_run.trace} if rule_run is not None else {}),
+            **({"stdin": rule_run.stdin, "trace": rule_run.trace, "rule_id": rule_run.rule_id}
+               if rule_run is not None else {}),
         )
     except (ScriptSandboxError, ProcessOwnerError) as exc:
         return _error_report(schedule, f"could not start: {exc}")

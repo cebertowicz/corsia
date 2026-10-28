@@ -64,7 +64,7 @@ def world(isolated_db, tmp_path: Path, monkeypatch):
 def runs(world, monkeypatch):
     """The sandboxed process: each script's stdout by file name, and every call's stdin."""
 
-    async def fake(thread_id, project_id, path, *, run_id, timeout_seconds, stdin=None, trace=()):
+    async def fake(thread_id, project_id, path, *, run_id, timeout_seconds, stdin=None, trace=(), rule_id=None):
         world["calls"].append((path.name, json.loads(stdin) if stdin is not None else None))
         world["traces"].append(trace)
         return world["outputs"].get(path.name, ScriptRun(0, b"", b"", False))
@@ -352,6 +352,13 @@ def test_the_sandbox_sets_the_chain_only_for_a_rule_run_and_never_inherits_one(m
     monkeypatch.setattr(script_sandbox, "execution_envelope_for_consumed_action", lambda *_a, **_k: None)
     monkeypatch.setattr(script_sandbox, "prepare_execution_envelope", prepare)
     monkeypatch.setattr(script_sandbox, "corsia_temp_root_for_bind", lambda _thread: tmp_path)
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def channel(*_args):
+        yield tmp_path / "socket"
+
+    monkeypatch.setattr(script_sandbox, "github_channel", channel)
     monkeypatch.setattr(script_sandbox.PROCESS_OWNER, "spawn", spawn)
     script = tmp_path / "s.sh"
     for kwargs in ({}, {"stdin": b"{}", "trace": ("rule_a", "rule_b")}):

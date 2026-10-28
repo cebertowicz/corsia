@@ -1,0 +1,40 @@
+"""Read GitHub through a script run's broker channel."""
+
+from __future__ import annotations
+
+import json
+import os
+import socket
+import sys
+
+SOCKET_ENV = "CORSIA_SCRIPT_GITHUB_SOCKET"
+
+
+def _read_exact(sock: socket.socket, size: int) -> bytes:
+    chunks = bytearray()
+    while len(chunks) < size:
+        part = sock.recv(size - len(chunks))
+        if not part:
+            raise OSError("broker closed the connection")
+        chunks.extend(part)
+    return bytes(chunks)
+
+
+def read(args: list[str]) -> int:
+    path = os.environ.get(SOCKET_ENV)
+    if not path:
+        print("GitHub reads are available only inside a script run", file=sys.stderr)
+        return 1
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+            client.settimeout(60)
+            client.connect(path)
+            client.sendall(json.dumps(args).encode() + b"\n")
+            size = int.from_bytes(_read_exact(client, 8), "big")
+            response = json.loads(_read_exact(client, size))
+    except (OSError, ValueError):
+        print("GitHub read channel is unavailable", file=sys.stderr)
+        return 1
+    sys.stdout.write(response["stdout"])
+    sys.stderr.write(response["stderr"])
+    return response["code"]

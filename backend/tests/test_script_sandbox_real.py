@@ -15,6 +15,9 @@ from __future__ import annotations
 
 import asyncio
 import os
+import shlex
+import subprocess
+import sys
 import tempfile
 import time
 import uuid
@@ -177,3 +180,77 @@ async def test_real_script_startup_cost_by_concurrency(
     assert all(run.returncode == 0 for run in runs), line
     if count == 4:
         assert wall < FOUR_CONCURRENT_WALL_SECONDS, line
+
+
+@pytest.mark.asyncio
+async def test_script_cli_reads_broker(sandbox, monkeypatch):
+    from automation import script_github_channel as channel
+    from connections.github_broker import GithubReadBroker
+    from tools import shell_guard
+
+    monkeypatch.setattr(channel, "default_broker", lambda: GithubReadBroker(
+        lambda args, *, timeout: subprocess.CompletedProcess(args, 0, "from broker", "")))
+    backend = Path(__file__).resolve().parents[1]
+    original = shell_guard.agent_tool_ro_dirs
+    monkeypatch.setattr(shell_guard, "agent_tool_ro_dirs", lambda: [*original(), backend])
+    cli = shlex.quote(str(backend / "cli.py"))
+    python = shlex.quote(sys.executable)
+    endpoints = ("pulls/1", "issues/1/comments", "pulls/1/reviews", "pulls/1/comments")
+    commands = [f'{python} {cli} github read "repos/o/r/{endpoint}?page={page}" || exit $?'
+                for endpoint in endpoints for page in (1, 2)]
+    path = _script(sandbox, "broker.sh", "\n".join(commands) + "\n")
+    run = await run_script(THREAD_ID, None, path, run_id="broker-real", timeout_seconds=60)
+    assert run.returncode == 0, run.stderr
+    assert run.stdout == b"from broker" * 8
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("account_present", [False, True])
+async def test_script_cannot_read_person_gh_or_token_variables(sandbox, monkeypatch, account_present):
+    from connections import github_agent
+    from connections.github_agent import AgentAccountView
+    from tools import sandbox_config
+
+    home = Path(os.environ["HOME"])
+    monkeypatch.setattr(sandbox_config, "_STATIC_ALLOWED_RW", [sandbox.parent, home])
+    (home / "readable-control").write_text("control")
+    gh = home / ".config" / "gh"
+    gh.mkdir(parents=True)
+    (gh / "hosts.yml").write_text("synthetic-canary")
+    for name in ("GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"):
+        monkeypatch.setenv(name, "synthetic-canary")
+    agent_home = home / "agent-gh"
+    agent_home.mkdir()
+    monkeypatch.setattr(github_agent, "view", lambda: AgentAccountView(
+        "ready" if account_present else "not_installed", absent=not account_present,
+        home=str(agent_home) if account_present else None))
+    probe = (f'cat {shlex.quote(str(home / "readable-control"))} >/dev/null || exit 3\n'
+             'for name in GH_TOKEN GITHUB_TOKEN GH_ENTERPRISE_TOKEN GITHUB_ENTERPRISE_TOKEN; do '
+             'test -z "${!name}" || exit 1; done\n'
+             f'if cat {shlex.quote(str(gh / "hosts.yml"))} >/dev/null 2>&1; then exit 2; fi\n')
+    path = _script(sandbox, "canaries.sh", probe)
+    run = await run_script(THREAD_ID, None, path, run_id="canaries", timeout_seconds=20)
+    assert run.returncode == 0, run.stderr
+
+
+@pytest.mark.asyncio
+async def test_other_thread_cannot_connect_to_channel(sandbox):
+    from automation import script_github_channel as channel
+    from infra.database import get_db
+
+    other = "script-sandbox-other"
+    db = get_db()
+    try:
+        db.execute("INSERT INTO threads (id,user_id,created_at,updated_at) VALUES (?, 'user', 't', 't')", (other,))
+        db.commit()
+    finally:
+        db.close()
+    async with channel.github_channel(THREAD_ID, "first-run") as socket_path:
+        probe = ("import socket,sys\n"
+                 "s=socket.socket(socket.AF_UNIX)\n"
+                 f"try: s.connect({str(socket_path)!r})\n"
+                 "except OSError: sys.exit(0)\n"
+                 "sys.exit(1)\n")
+        path = _script(sandbox, "other.py", probe)
+        run = await run_script(other, None, path, run_id="other-run", timeout_seconds=20)
+        assert run.returncode == 0, run.stderr
