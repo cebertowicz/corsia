@@ -79,6 +79,9 @@ export interface AttentionDestination {
 	id: string;
 	path?: string;
 	title?: string;
+	user_message_id?: string;
+	cid?: string;
+	seq?: number;
 }
 
 export interface CommentReplyDetail {
