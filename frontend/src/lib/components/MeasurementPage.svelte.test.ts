@@ -53,12 +53,12 @@ describe('MeasurementPage headlines', () => {
 			// Minutes per outcome and First try are week bar charts; Asks is one line under the minutes' agents table and a kept chart of its own.
 			const minutes = host.querySelector('#attention-title')?.closest('section');
 			expect(host.querySelector('#attention-title')?.textContent).toBe('Your minutes per outcome');
-			expect(minutes?.querySelector('.stat')?.textContent).toBe('1.8 minutes per outcome, Aug 31 to Sep 27, n 762, new vs Aug 3 to Aug 30 (n 0)');
-			expect(minutes?.querySelector('.asks')?.textContent).toBe('All agents together: 0.13 decisions and tasks per outcome, new.');
+			expect(minutes?.querySelector('.stat')?.textContent).toBe('1.8 minutes per outcome, Aug 31 to Sep 27, n 762, new vs Aug 3 to Aug 30 (n 0)');
+			expect(minutes?.querySelector('.asks')?.textContent).toBe('All agents together: 0.13 decisions and tasks for you per outcome, new.');
 			expect(minutes?.querySelector('svg')).not.toBeNull();
-			expect(host.querySelector('#first-try-title')?.closest('section')?.querySelector('.stat')?.textContent).toBe('78% first try, Aug 31 to Sep 27, n 762, new vs Aug 3 to Aug 30 (n 0)');
+			expect(host.querySelector('#first-try-title')?.closest('section')?.querySelector('.stat')?.textContent).toBe('78% first try, Aug 31 to Sep 27, n 762, new vs Aug 3 to Aug 30 (n 0)');
 			expect(host.querySelector('#asks-title')?.closest('.kept-panels')).not.toBeNull();
-			expect(host.querySelector('#asks-title')?.closest('section')?.querySelector('.stat')?.textContent).toBe('0.13 decisions and tasks per outcome, Aug 31 to Sep 27, n 762, new vs Aug 3 to Aug 30 (n 0)');
+			expect(host.querySelector('#asks-title')?.closest('section')?.querySelector('.stat')?.textContent).toBe('0.13 decisions and tasks per outcome, Aug 31 to Sep 27, n 762, new vs Aug 3 to Aug 30 (n 0)');
 			expect(host.querySelector('.source-line')).toBeNull();
 			expect(host.querySelector('.attention-summary')).toBeNull();
 		expect(host.querySelector('#outcomes-title')?.closest('section')?.querySelector('svg .bar')).not.toBeNull();
@@ -134,9 +134,9 @@ describe('MeasurementPage headlines', () => {
 		await vi.waitFor(() => expect(host.querySelector('.sizing-headline .stat')).not.toBeNull());
 		const sizing = host.querySelector('.sizing-headline') as HTMLElement;
 		// The answer covers the four-week window ending at the latest week; the unrated latest week adds its sized subtotal, not a zero.
-		expect(sizing.querySelector('.stat')?.textContent).toBe('135 h of work per hour you spend, Sep 7 to Oct 4, n 27, new vs Aug 10 to Sep 6 (n 0)');
+		expect(sizing.querySelector('.stat')?.textContent).toBe('135 h of work per hour you spend, Sep 7 to Oct 4, n 27, new vs Aug 10 to Sep 6 (n 0)');
 		expect(sizing.querySelector('.coverage')).toBeNull();
-		expect(sizing.querySelector('.nf')?.textContent).toContain('33 of 60 accepted outcomes in Sep 7 to Oct 4 have no usable size rating');
+		expect(sizing.querySelector('.nf')?.textContent).toContain('33 of 60 accepted outcomes in Sep 7 to Oct 4 have no usable size rating');
 		// The server served these weeks as comparable, so the headline says nothing about comparability.
 		expect(sizing.querySelector('.comparability')).toBeNull();
 		expect(sizing.querySelector('.definition')).toBeNull();

@@ -51,9 +51,8 @@ class DelegateTaskTool(Tool):
             "message workflow; use the smaller delegate_* tools when you need "
             "separate steps. The worker takes over your current plan task unless "
             "plan_node_id names another task or 'none'; the result's plan_task says "
-            "which. confinement 'review' starts a Claude Code worker that can only "
-            "read the read_paths directories, with no CORSIA tools, shell, web or "
-            "credentials; its result is its final message."
+            "which. 'review' confines Claude Code, Codex, native and local models to file "
+            "reads in read_paths. The result is its final message."
         )
 
     @property
@@ -90,8 +89,8 @@ class DelegateTaskTool(Tool):
                 "confinement": {
                     "type": ["string", "null"], "enum": [*CONFINEMENTS, None],
                     "description": (
-                        "Default 'none': the worker has its usual tools. 'review': "
-                        "read-only over read_paths; Claude Code models only."
+                        "Default 'none': usual tools. 'review': file reads in read_paths "
+                        "on Claude Code, Codex, native and local models."
                     ),
                 },
                 "read_paths": {
@@ -192,13 +191,34 @@ async def _spawn(
             model_id=model, account_id=kwargs.get("account_id"),
             confinement=confinement, read_paths=read_paths, rule_start=rule_start,
         )
-    if confinement != CONFINEMENT_NONE:
-        return f"Error: refused: no confined launch for {model}; use a claude-code/* model."
-    # Eligibility above is the sole catalog gate for all delegation paths.
+    if confinement == CONFINEMENT_REVIEW and rule_start is None:
+        from llm.resolution import resolve_execution_target
+        from subagents.cc_confinement import ConfinementRefused
+        from subagents.codex_confinement import verify_version
 
+        target = await run_in_db(resolve_execution_target, model)
+        if target.harness == "codex":
+            try:
+                await verify_version()
+            except ConfinementRefused as exc:
+                return f"Error: {exc}"
+    # Eligibility above is the sole catalog gate for all delegation paths.
+    return await _spawn_native_child(parent_thread_id, parent, task, kwargs, model,
+                                     confinement, read_paths, rule_start)
+
+
+async def _spawn_native_child(
+    parent_thread_id: str, parent: dict[str, Any], task: str, kwargs: dict[str, Any],
+    model: str, confinement: str, read_paths: list[str], rule_start: RuleStart | None,
+) -> dict[str, Any] | str:
+    """Start a native or local worker (``review`` confined to its read paths when asked)."""
+    confined_dirs = await _native_read_dirs(parent_thread_id, confinement, read_paths)
+    if isinstance(confined_dirs, str):
+        return confined_dirs
     child_title = kwargs.get("title") or task[:60] or "Subagent"
     try:
         thread_row = await create_visible_fresh_thread(
+            confined_read_dirs=confined_dirs,
             user_id=parent["user_id"] or "",
             profile=parent.get("profile") or "personal",
             title=child_title,
@@ -209,6 +229,8 @@ async def _spawn(
             emit_spawn_chip=True,
             account_id=kwargs.get("account_id"), actor_thread_id=parent_thread_id,
         )
+        if rule_start is not None:
+            await rule_start(thread_row["id"])
         result = await send_thread_input(
             thread_row["id"],
             thread_row,
@@ -232,6 +254,25 @@ async def _spawn(
         "driver": result.driver,
         "duplicate": result.duplicate,
     }
+
+
+async def _native_read_dirs(
+    parent_thread_id: str, confinement: str, read_paths: list[str],
+) -> tuple[str, ...] | str:
+    """A confined worker's read dirs, checked as the parent's own reads.
+
+    ``()`` when unconfined; every harness preserves the stored read boundary.
+    """
+    from infra.fresh_threads import resolve_spawn_working_dir
+    from subagents.cc_confinement import ConfinementRefused, require_readable_dirs
+
+    if confinement == CONFINEMENT_NONE:
+        return ()
+    working_dir, _project = await run_in_db(resolve_spawn_working_dir, parent_thread_id)
+    try:
+        return await asyncio.to_thread(require_readable_dirs, read_paths, working_dir)
+    except ConfinementRefused as e:
+        return f"Error: {e}"
 
 
 def _confinement_args(kwargs: dict[str, Any]) -> tuple[str, list[str]] | str:

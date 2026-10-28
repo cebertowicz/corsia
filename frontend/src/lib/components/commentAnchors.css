@@ -6,6 +6,10 @@
 	border-bottom: 2px solid color-mix(in srgb, var(--amber) 42%, transparent);
 	transition: background-color 0.15s;
 }
+.cm-comment-anchor.chat-reply-mark-landed {
+	background-color: color-mix(in srgb, var(--accent) 40%, transparent);
+	outline: 2px solid var(--accent);
+}
 .cm-comment-pending {
 	background-color: color-mix(in srgb, var(--amber) 20%, transparent);
 	border-bottom: 2px dashed var(--amber);

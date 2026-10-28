@@ -239,7 +239,7 @@ describe('PlanTree — same renderer contract', () => {
 		flushSync();
 
 		const open = host.querySelector('.child-open') as HTMLButtonElement;
-		expect(open.getAttribute('aria-label')).toContain('Open Delegated step subagent beside this thread');
+		expect(open.getAttribute('aria-label')).toContain('Open the agent working on Delegated step beside this chat');
 		expect(open.textContent?.trim()).toBe('');
 		expect(open.querySelector('svg')).toBeTruthy();
 		open.click();
@@ -564,6 +564,7 @@ describe('PlanTree — same renderer contract', () => {
 			under(node({ id: 'w', state: 'failed' })),
 			under(node({ id: 'w', held_by: 'user', requires_user_action: true })),
 			under(node({ id: 'w', requires_user_action: true })),
+			under(node({ id: 'w', requires_user_action: false, display: { label_key: 'needs_you', tone_key: 'human-review' } })),
 		];
 		for (const nodes of kept) expect(withoutSoleWrapper(nodes).nodes).toBe(nodes);
 		const current = under(node({ id: 'w' }));

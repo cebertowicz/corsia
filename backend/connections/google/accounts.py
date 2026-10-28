@@ -17,7 +17,7 @@ import sqlite3
 from connections.account_resolver import Refusals, resolve
 from connections.connected_accounts import GOOGLE_PROVIDER
 from connections.google.client import (
-    NOT_CONNECTED, SIGN_IN_RECOVERY, STATUS_CONNECTED, STATUS_NEEDS_SIGN_IN, GoogleError,
+    NOT_CONNECTED, STATUS_CONNECTED, STATUS_NEEDS_SIGN_IN, GoogleError, sign_in_recovery,
 )
 
 NONE_AVAILABLE = (
@@ -56,25 +56,21 @@ def thread_key(account_id: str, gmail_thread_id: object) -> str | None:
     return f"google:{account_id}:thread:{gmail_thread_id}"
 
 
-def usable(account: dict) -> dict:
+def usable(account: dict, db: sqlite3.Connection) -> dict:
     state = account["state"]
     if state == STATUS_CONNECTED:
         return account
     if state == STATUS_NEEDS_SIGN_IN:
-        raise GoogleError(f"{account['address']}: {SIGN_IN_RECOVERY}")
+        raise GoogleError(f"{account['address']}: {sign_in_recovery(str(account['id']), db=db)}")
     if state == "signed_out":
         raise GoogleError(SIGNED_OUT.format(address=account["address"]))
     raise GoogleError(UNAVAILABLE.format(address=account["address"]))
-
-
-def _google_usable(account: dict, db: sqlite3.Connection) -> dict:
-    return usable(account)
 
 
 
 def resolve_for_thread(selector: object, thread_id: object, *, db: sqlite3.Connection | None = None) -> dict:
     """The one reachable connected Google account ``selector`` names; else a fixed refusal."""
     return resolve(
-        selector, thread_id, providers=(GOOGLE_PROVIDER,), usable_for=_google_usable,
+        selector, thread_id, providers=(GOOGLE_PROVIDER,), usable_for=usable,
         refusals=GOOGLE_REFUSALS, error_type=GoogleError, db=db,
     )

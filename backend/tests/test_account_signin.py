@@ -386,6 +386,26 @@ async def test_completion_record_precedes_discovery_and_failure_preserves_it(acc
 
 
 @pytest.mark.asyncio
+async def test_finished_login_reports_failure_when_outcome_cannot_be_recorded(accounts, monkeypatch):
+    db, _, row, _ = accounts
+    row = set_account_state(row['id'], 'signed_out', expected_revision=row['revision'], db=db)
+    operation = account_controls.SignIn(row['id'], 'codex', row['revision'], process=ExitedLogin(),
+                                        bind=account_controls.FirstRunBind('thread', 'user'))
+    async def status(*args):
+        return True, {'account_fp': 'synthetic-completed-login'}, None
+    async def finish(*args):
+        assert operation.status == 'completed' and operation.bind.outcome is None
+        raise RuntimeError('outcome unavailable')
+    monkeypatch.setattr(account_controls, '_vendor_status', status)
+    monkeypatch.setattr(account_controls, 'refresh_default_identity', _no_default_effect)
+    monkeypatch.setattr(account_controls, 'finish_signin', finish)
+    await account_controls._hold(operation, row['source_home'], '/synthetic/codex')
+    assert operation.status == 'failed' and operation.cause == 'signin_check_failed'
+    assert operation.ref is not None
+    assert get_account(row['id'], db=db)['state'] == 'signed_in'
+
+
+@pytest.mark.asyncio
 async def test_verify_started_on_old_login_cannot_discover_the_replacement(accounts, monkeypatch):
     db, _, row, _ = accounts
     entered, release = asyncio.Event(), asyncio.Event()
@@ -1381,6 +1401,20 @@ def test_an_unmarked_test_starts_no_vendor_process(sign_in_api_client, provider,
     assert (body["auth_cleanup_status"], body["auth_cleanup_cause"]) == ("failed", missing)
     assert body["state"] == ("signed_out" if leave == "signout" else "removed")
     assert body["identity"] == {} and "auth_cleanup" not in body
+
+
+def test_missing_signin_check_route_matches_setup_recovery(monkeypatch):
+    from api.vendor_accounts import router
+    from infra.auth import require_user
+
+    monkeypatch.setattr(account_controls, '_SIGNINS', {})
+    app = FastAPI()
+    app.include_router(router)
+    app.dependency_overrides[require_user] = lambda: {'id': 'user'}
+    with TestClient(app) as api:
+        response = api.post('/api/vendor-accounts/missing/signin/check')
+    assert response.status_code == 409
+    assert response.json() == {'detail': 'no sign-in is in progress for this account'}
 
 
 @pytest.mark.real_harness_cli

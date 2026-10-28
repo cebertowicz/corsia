@@ -25,10 +25,10 @@
       "sha256": "8ac7fd79f3ed006fd5d32f247a03ea02d9f504405a16c8142d97f06b1ec9e2ae"
     },
     {
-      "bytes": 862,
+      "bytes": 830,
       "kind": "context",
       "path": "context/CORSIA-API-ACCESS.md",
-      "sha256": "9c44008c704c1f9650eb0dd2bcba7a560693c3d9ef50bd59b428c9d47b2eac5a"
+      "sha256": "f83906d5bab528a5e261c96323231eb3328f68d47c865954415828327c9ee1db"
     },
     {
       "bytes": 1357,
@@ -190,10 +190,10 @@
       "sha256": "f2fc271a1ac1a601674dd8e7710c0644bc2b3a8b31929918fc84d4d3e8cccf9c"
     },
     {
-      "bytes": 25941,
+      "bytes": 26865,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/references/first-run-app.md",
-      "sha256": "5bc15b989a20d52dc0ff54c17f5701c094c69b4970ede4cdd7ce0b127de4cd7d"
+      "sha256": "4ac4f13060e7c035e0a482bf611d7193d11cc42bd6520ea44f5f16beb9e484ab"
     },
     {
       "bytes": 1259,
@@ -208,10 +208,10 @@
       "sha256": "5390c727704a7c73f755e813fd583eb7473da73918e242cfc10d9cd9ab08bf24"
     },
     {
-      "bytes": 17647,
+      "bytes": 17746,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/references/first-run.md",
-      "sha256": "a2c69473518eb7ae6268e87034dfaa71cff7fab4be24940a8620dbe88e329398"
+      "sha256": "63434d597c3b9bab967d08d5e885be1bab7cbfe29e9e636a911e4c96c33afa8d"
     },
     {
       "bytes": 991,
@@ -256,10 +256,10 @@
       "sha256": "e38d08303a38eb082ecaaa5258eb637782eb2edd5d90406b4a377c7923cb0a7e"
     },
     {
-      "bytes": 7842,
+      "bytes": 8287,
       "kind": "skill",
       "path": "skills/connect-tools/SKILL.md",
-      "sha256": "624691aa6272d3ad88ead8af4ec1fb71537e249d22678e08feb61fa9470b959e"
+      "sha256": "fae58854bddeb4591b32e51183983ec907186cb22f8477b3d42f9737ff56a638"
     },
     {
       "bytes": 6035,
@@ -328,10 +328,10 @@
       "sha256": "0b379ab5de70691e11fc5dcf013b0bdc13ef1f12e73e835bc485ef520c02e781"
     },
     {
-      "bytes": 8731,
+      "bytes": 9442,
       "kind": "skill",
       "path": "skills/google-setup/SKILL.md",
-      "sha256": "74c0684b35ff2e8a8ff9c9ae9c0d2c70633799a5cb9569e8a2f2fe8cf858eecd"
+      "sha256": "bd1badf2e6e9a62130619451daedf9db628e6463931f4eff3a2a9612dedfd710"
     },
     {
       "bytes": 695,
@@ -352,10 +352,10 @@
       "sha256": "354b18112635941b14e2dc763f928fb6ac9268f1fd92fb9908cb84cabd1ec36b"
     },
     {
-      "bytes": 3147,
+      "bytes": 3634,
       "kind": "skill",
       "path": "skills/mail-host-setup/SKILL.md",
-      "sha256": "49c2b17770750497674dba469d545769a96d42fd12f9727d12eb2033835b18ee"
+      "sha256": "555c420af73ca25223f147bcd40a2e471fc96fa97216c04861881bea2bc2377e"
     },
     {
       "bytes": 8898,

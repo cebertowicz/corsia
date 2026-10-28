@@ -7,6 +7,26 @@ the later entry describes the current behavior.
 
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here._
 
+- A paused task, review or decision you owe, including a document review, still reads Needs you in the plan, and so does the task above it; while it is paused it is not flagged or counted anywhere else.
+- Email replies check for newer messages and support attachments and your usual font.
+- Mail that is flagged or not yet screened shows only the sender's address in search results.
+- The reasoning level you pick for a local model is now the level it runs at.
+- Setup now offers to bring over skills you made on claude.ai, even if you only use the Claude app.
+- When every account for a vendor is at its limit, the model picker's "first back" time is now the soonest of them, matching the line above the composer.
+- Answers to your chat comments appear on the commented messages, and a reply notice takes you to unread answers.
+- Agents see your mail, calendar and file actions as a short count until they need one, which keeps each agent's context smaller.
+- Connecting Google takes one Allow with no Google Cloud project. Sign-in and token renewal go through Google's Workspace extension sign-in service.
+- Your comment draft stays open when the document reconnects, and closing the comment box clears the text selection, so typing can't replace your text.
+- The context sheet no longer flickers between readings while it refreshes, and its bar and the context ring grow smoothly to each new reading.
+- The shared browser no longer asks you for a password on pages that only display a hidden secret.
+- Shared documents leave Files when the work that touched them finishes; pin one to keep it there. The document itself is never deleted.
+- The shared browser follows new tabs, can show you a page an agent is already working on, and passes your pointer to captchas without lag.
+- You stay signed in to a site after the shared browser closes, even when you signed in while another agent was also using the shared browser.
+- Chat comments can be sent on their own while an agent is replying, and the New mark on reply chips lines up with its text.
+- In the shared browser, an agent's click on a button's own text or icon reaches the button.
+- When an added Claude Code account loses its sign-in, CORSIA signs out that account so you can sign it in again, and no longer marks the provider's other accounts as signed out.
+- After you sign in to Claude Code, setup now shows it's checking your Claude models instead of asking you to sign in again.
+- Plan and decision messages use clearer, consistent wording.
 - Measurement labels and messages are clearer about what is shown.
 - Provider and model settings use clearer wording for connection, account and usage states.
 - Clearer wording for sign-in, saved keys, host access and project errors.
@@ -71,8 +91,11 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - Connections from paired devices work again.
 - An agent still waits for your yes before a newly connected command-line tool's first change, even when you asked for that change.
 - When a plan isn't moving, its note names each wait that is overdue.
+- Right-clicking CORSIA or Conductor in the left rail now opens a menu with Agent settings, plus Mark read or Mark unread when it applies, instead of an empty one.
 - A replaced image now shows right away in a document that is open, and when it is reopened, even if it has comments.
 - When an agent hands you a page in the shared browser, such as an account choice or a phone prompt, it appears in your attention list and the agent carries on once you finish.
+- CORSIA now reconnects within a couple of seconds after every dropped connection instead of waiting up to 30 seconds.
+- Status banners such as Reconnecting no longer cover the tabs in the right pane.
 
 ## v0.4.0 — A self-starting Mac app, updates you control, a shared browser, connected apps, and steadier plans
 

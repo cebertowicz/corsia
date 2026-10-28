@@ -180,24 +180,38 @@
 			: null,
 	);
 	const measuredReading = $derived(measuredFor(boundUsage, boundThreadId, previewModelId, selection.models));
-	// The preview read for this thread, model and measured turn, if any; a
-	// newer measured turn or another model leaves it unowned and unshown.
+	// The current owner's preview, including its loading or error state.
 	const ownedPreview = $derived(
 		previewIds && boundPreview?.owner === previewIds.owner ? boundPreview : undefined,
 	);
-	// One reading for the donut and the sheet headline (#1952): the owned
-	// preview, else the last measured usage, so opening never waits on the
-	// fetch (#1953) and closing the sheet changes nothing.
-	const sheetUsage = $derived(
-		previewIds ? contextReading(ownedPreview, previewIds.owner, measuredReading) : null,
-	);
+	let held = $state<{ threadId: string; modelId: string | null; usage: ContextUsage } | null>(null);
+	$effect.pre(() => {
+		if (sheetView !== 'context' || !boundThreadId || ownedPreview?.error) {
+			held = null;
+		} else if (ownedPreview?.usage) {
+			held = { threadId: boundThreadId, modelId: previewModelId, usage: ownedPreview.usage };
+		} else if (held && (held.threadId !== boundThreadId || held.modelId !== previewModelId)) {
+			held = null;
+		}
+	});
+	// Both surfaces choose the same reading; an open sheet keeps its last preview during refresh.
+	const reading = $derived.by(() => {
+		const holding = sheetView === 'context' && !ownedPreview?.usage && !ownedPreview?.error
+			&& held?.threadId === boundThreadId && held.modelId === previewModelId;
+		return {
+			usage: holding ? held!.usage : previewIds ? contextReading(boundPreview, previewIds.owner, measuredReading) : null,
+			updating: !!holding || !!ownedPreview?.loading,
+		};
+	});
+	const sheetUsage = $derived(reading.usage);
 	const contextChipSummary = $derived(chipSummaryFor(sheetUsage));
-	const contextPreviewLoading = $derived(ownedPreview?.loading ?? false);
+	const contextPreviewLoading = $derived(reading.updating);
 	const contextPreviewError = $derived(ownedPreview?.error ?? '');
 	let sheetWasOpen = false;
 	$effect(() => {
 		const t = $token;
 		const ids = previewIds;
+		const preview = ownedPreview;
 		const sheetOpen = surface === 'sheets' && sheetView === 'context';
 		const opening = sheetOpen && !sheetWasOpen;
 		sheetWasOpen = sheetOpen;
@@ -211,7 +225,7 @@
 			// per owner, so a failed read is not repeated.
 			const hydrated = $measuredHydratedThreads.has(boundThreadId);
 			const usable = hasMeasuredNumbers(measuredReading) && !measuredReading?.stale;
-			if (!hydrated || usable || ownedPreview) return;
+			if (!hydrated || usable || preview) return;
 		}
 		void ensureContextPreview({
 			threadId: boundThreadId,

@@ -19,7 +19,7 @@ def _join_relative_to_workspace(path: str, workspace: Path | None) -> Path:
 
     The one join rule every tool's target-path computation shares: relative
     paths resolve against the caller's own workspace, not any other notion
-    of "current directory". Both ``join_and_resolve`` and ``_resolve_path``
+    of "current directory". Both ``join_and_resolve`` and ``resolve_path``
     call this same function for the join step, so there is exactly one
     place that decision is made — neither can silently diverge from it.
     """
@@ -33,7 +33,7 @@ def join_and_resolve(path: str, workspace: Path | None = None) -> Path:
     """Join a possibly-relative path onto ``workspace`` and canonicalize it.
 
     Carries no authorization decision — callers needing the sandbox
-    boundary use ``_resolve_path``, which joins the same way (through
+    boundary use ``resolve_path``, which joins the same way (through
     ``_join_relative_to_workspace``) and then applies it.
     """
     return _join_relative_to_workspace(path, workspace).resolve(strict=False)
@@ -55,7 +55,7 @@ def canonical_target_path(path: str, workspace: Path | None = None) -> str:
     return str(resolved)
 
 
-def _resolve_path(
+def resolve_path(
     path: str,
     workspace: Path | None = None,
     allowed_dir: Path | None = None,
@@ -71,7 +71,10 @@ def _resolve_path(
     """
     p = _join_relative_to_workspace(path, workspace)
     resolved = p.resolve(strict=False)
+    import tools.confined_reads as confined_reads
     from tools.host_path_policy import ordinary_host_path_denial
+
+    confined_reads.check(p, resolved, for_write=for_write)
 
     for candidate in dict.fromkeys((p.absolute(), resolved)):
         if denial := ordinary_host_path_denial(
@@ -125,9 +128,11 @@ async def _resolve_path_for_action(
     use for the effect. Without a permit, the ordinary protected boundary is
     unchanged.
     """
+    import tools.confined_reads as confined_reads
     from tools.host_access_gate import consume_current_action_permit
 
-    consumed = await consume_current_action_permit(
+    # A confined worker's reads never take a host permit: its read paths are all it has.
+    consumed = None if confined_reads.confined() else await consume_current_action_permit(
         thread_id=thread_id,
         project_id=project_id,
         tool=tool,
@@ -138,7 +143,7 @@ async def _resolve_path_for_action(
         # Repository policy behind the boundary reads SQLite and runs Git.
         return AuthorizedPath(
             resolved=await asyncio.to_thread(
-                _resolve_path,
+                resolve_path,
                 path,
                 workspace,
                 allowed_dir,

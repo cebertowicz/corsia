@@ -86,11 +86,6 @@ def shell_argv(command: str, cwd: Path, _profile=None, *, thread_id: str, polici
         overlays.extend(unsupported.metadata_roots)
     hidden_account = github_agent.default_home_deny(
         github_agent.view() if agent_account is None else agent_account)
-    if hidden_account is not None:
-        # Add account privacy to the existing policy's private roots via a
-        # local immutable view; never reopen the inventory's hard floor.
-        from dataclasses import replace
-        path_policy = replace(path_policy, write_roots=(*path_policy.write_roots, hidden_account))
     names = set(shell_env_pass_names().split(',')) | {
         'HOME', 'PATH', 'USER', 'LOGNAME', 'LANG', 'LC_ALL', 'LC_CTYPE', 'TERM',
         'COLORTERM', 'SSH_AUTH_SOCK', 'TMPDIR', 'XDG_CACHE_HOME', 'XDG_DATA_HOME',
@@ -106,4 +101,5 @@ def shell_argv(command: str, cwd: Path, _profile=None, *, thread_id: str, polici
         raise RuntimeError(sandbox_error())
     return build_protected_argv(command, Path(cwd), path_policy=path_policy,
                                 rw_roots=rw, ro_roots=ro, readonly_overlays=overlays,
+                                hidden_roots=[hidden_account] if hidden_account is not None else (),
                                 env=passed, thread_id=thread_id, executable=executable)

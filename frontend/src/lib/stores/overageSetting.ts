@@ -1,7 +1,7 @@
 import { derived } from 'svelte/store';
 import { pickerAccounts, type PickerPolicy } from './accountPicker';
 import { HARNESSES } from './harnessMembership';
-import { resetLabel } from './modelGroups';
+import { earliestReset, resetLabel } from './resetTime';
 import { accountTurn, activeModelId, findModelById, models, modelAvailability, type Model, type RunsOn } from './models';
 import { activeThreadId } from './threads';
 import type { VendorAccount } from './vendorAccounts';
@@ -61,8 +61,7 @@ function accountLine(model: Model, now: Date, context: HeldLineAccounts | undefi
 	if (entries.every(limitedEntry)) {
 		const vendor = HARNESSES.find((entry) => entry.name === model.connection)?.vendor;
 		if (!vendor) return null;
-		const earliest = entries.map(resetOf).filter((iso): iso is string => !!iso && resetLabel(iso) !== '')
-			.sort((a, b) => new Date(a).getTime() - new Date(b).getTime())[0];
+		const earliest = earliestReset(entries.map(resetOf));
 		return {
 			text: `All ${vendor} accounts are at their limit · ${backTail(earliest, 'first back', now)}`,
 			planLimit: false,

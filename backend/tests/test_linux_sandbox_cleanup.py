@@ -21,6 +21,20 @@ def test_cleanup_removes_mode_zero_directory(tmp_path):
             locked.chmod(0o700)
 
 
+def test_cleanup_removes_file_inside_read_only_directory(tmp_path):
+    root = thread_tmp_root(tmp_path, 'one')
+    locked = root / 'locked'
+    locked.mkdir(parents=True)
+    (locked / 'file').write_text('temporary')
+    locked.chmod(0o500)
+    try:
+        cleanup_thread_tmp(tmp_path, 'one')
+        assert not root.exists()
+    finally:
+        if locked.exists():
+            locked.chmod(0o700)
+
+
 @pytest.mark.asyncio
 async def test_thread_close_continues_after_one_cleanup_failure(monkeypatch):
     from automation import managed_process_events as events

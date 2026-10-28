@@ -31,7 +31,7 @@ async def floor(account_id: str) -> str:
         with imap.account_lock(account_id):
             return imap.inbox_cursor(endpoints, username, password)
 
-    validity, uid = await read._guarded(account_id, check, call)
+    validity, uid = await read.guarded(account_id, check, call)
     return _cursor(validity, uid)
 
 
@@ -44,7 +44,7 @@ async def added(account_id: str, position: str) -> tuple[str, list[read.Message]
         with imap.account_lock(account_id):
             return imap.added_after(endpoints, username, password, validity, last_uid, MAX_POLL_BYTES)
 
-    current_validity, current_last, found = await read._guarded(account_id, check, call)
+    current_validity, current_last, found = await read.guarded(account_id, check, call)
     return (
         _cursor(current_validity, current_last),
         [read.Message(read.mint_message_id(account_id, current_validity, uid), "", *read.parse(raw, with_body=True)) for uid, raw in found],

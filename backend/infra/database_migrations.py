@@ -210,7 +210,11 @@ from infra.migration_149_to_150_doc_insert_after import migrate_149_to_150
 from infra.migration_150_to_151_self_caught_corrections import migrate_150_to_151
 from infra.migration_151_to_152_person_step import migrate_151_to_152
 from infra.migration_152_to_153_observe_rules import migrate_152_to_153
-from infra.migration_153_to_154_self_caused import migrate_153_to_154
+from infra.migration_153_to_154_retired_worker_artifacts import migrate_153_to_154
+from infra.migration_154_to_155_thread_confinement import migrate_154_to_155
+from infra.migration_155_to_156_chat_comments import migrate_155_to_156
+from infra.migration_156_to_157_rehome_repair import migrate_156_to_157
+from infra.migration_157_to_158_self_caused import migrate_157_to_158
 from infra.migration_mcp_secrets import FROM_VERSION as MCP_SECRETS_FROM_VERSION
 from infra.migration_mcp_secrets import migrate_mcp_secrets
 
@@ -853,6 +857,10 @@ MIGRATIONS[150] = migrate_150_to_151
 MIGRATIONS[151] = migrate_151_to_152
 MIGRATIONS[152] = migrate_152_to_153
 MIGRATIONS[153] = migrate_153_to_154
+MIGRATIONS[154] = migrate_154_to_155
+MIGRATIONS[155] = migrate_155_to_156
+MIGRATIONS[156] = migrate_156_to_157
+MIGRATIONS[157] = migrate_157_to_158
 
 
 def _connection_database_path(conn: sqlite3.Connection) -> Path | None:

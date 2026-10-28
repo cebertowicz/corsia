@@ -22,7 +22,6 @@ from tools.tool_surface import (
     unknown_tool_error,
 )
 
-
 from eval.otel import get_tracer, set_attrs, SPAN_TOOL_CALL
 from eval.tool_allowlist import record_only_result
 _RESERVED_EXECUTION_PREFIXES = (
@@ -147,11 +146,14 @@ class ToolRegistry:
                 plan dispatch could not be settled.
         """
         from infra.repo_policy_transition import admit_repo_effect
+        import tools.confined_reads as confined_reads
         from tools.host_access_gate import (
             authorize_host_action,
             host_action_permit_scope,
         )
 
+        if refusal := confined_reads.call_refusal(name, thread_context):
+            return refusal
         authorization = await authorize_host_action(
             thread_id=thread_context["id"],
             project_id=thread_context.get("project_id"),
@@ -176,7 +178,7 @@ class ToolRegistry:
             if name in _REPO_TRANSITION_OWNERS
             else admit_repo_effect()
         )
-        with repo_effect:
+        with repo_effect, confined_reads.scope(thread_context):
             with host_action_permit_scope(authorization):
                 return await execute_recorded_call(
                     tool, name, execution_params, thread_context,
@@ -343,7 +345,8 @@ class ToolRegistry:
             db = get_db()
             try:
                 row = db.execute(
-                    "SELECT id,user_id,project_id FROM threads WHERE id=?",
+                    "SELECT id,user_id,project_id,confinement,confined_read_dirs "
+                    "FROM threads WHERE id=?",
                     (thread_id,),
                 ).fetchone()
                 context = dict(row) if row is not None else None
@@ -353,11 +356,7 @@ class ToolRegistry:
                     "SELECT 1 FROM active_turns "
                     "WHERE id=? AND thread_id=? AND turn_order=? "
                     "AND status='running'",
-                    (
-                        turn_identity.turn_id,
-                        thread_id,
-                        turn_identity.turn_order,
-                    ),
+                    (turn_identity.turn_id, thread_id, turn_identity.turn_order),
                 ).fetchone()
                 return context, active is not None
             finally:

@@ -132,6 +132,16 @@ afterEach(() => {
 });
 
 describe("AttentionDock — reply attention refresh", () => {
+  it("shows the chat reply chip from the displayed thread's scoped read", async () => {
+    const { chatReplyAttention } = await import('$lib/stores/chatReplyAttention');
+    activeThreadId.set('thread');
+    chatReplyAttention.set({ threadId: 'thread', items: [{ detail: { title: '', unread_count: 1, newest_at: 't', destination: { pane: 'chat-replies', id: 'target', user_message_id: 'sender', cid: 'c1.1', seq: 1 }, source: { thread_id: 'thread' } } }] });
+    body = queueBody(null, 0);
+    component = mount(AttentionDock, { target: host });
+    await settle();
+    expect(host.querySelector('.reply-chip-notice')?.textContent).toContain('1 new reply');
+    chatReplyAttention.set(null);
+  });
   it("refreshes reply counts on resolution and reopening, but ignores unrelated frames", async () => {
     const { emit } = await import("$lib/ws/events");
     const reply = {
@@ -1009,6 +1019,6 @@ describe("AttentionDock — a question that left the queue first", () => {
     answerButton().click();
     await settle();
 
-    expect(host.textContent).toContain("This question is no longer open.");
+    expect(host.textContent).toContain("That decision is closed.");
   });
 });

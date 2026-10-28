@@ -174,6 +174,7 @@ def read_external_checkpoint_context(
     from llm.reasoning_config import effective_reasoning_effort
     from llm.resolution import resolve_thread_target
     from registry.models import find_for_thread
+    from registry.provider_continuity import HARNESS_CONTINUITY_TYPES
     from subagents.codex_runtime_support import resolve_working_dir
 
     db = get_db()
@@ -201,11 +202,7 @@ def read_external_checkpoint_context(
             current_turn_id=current_turn_id,
             step_precedes_start=precedes,
         )
-        integration, artifact_type = (
-            ("claude-code", "session")
-            if harness == "claude-code"
-            else ("codex", "thread")
-        )
+        integration, artifact_type = HARNESS_CONTINUITY_TYPES[harness]
         registration = find_for_thread(
             thread_id, integration, artifact_type, db=db,
         )

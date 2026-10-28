@@ -8,7 +8,7 @@ import { checkpointsByThread } from '$lib/stores/checkpoints';
 import { threadWorkspaces } from '$lib/stores/artifactWorkspace';
 import { activeThreadId, threads } from '$lib/stores/threads';
 import { activeModelId, models } from '$lib/stores/models';
-import { clearAllContextUsage, setContextUsage, contextPreviewByThread } from '$lib/stores/contextUsageByThread';
+import { clearAllContextUsage, recordMeasuredUsage, setContextUsage, contextPreviewByThread } from '$lib/stores/contextUsageByThread';
 
 // The sheet component keeps state across close and reopen, so this needs a
 // reactive `sheetView` that a plain mount cannot change (#1953).
@@ -170,6 +170,40 @@ describe('context sheet reopen (#1953)', () => {
 
 		// The older preview must not shadow the newer measured usage, in the
 		// sheet or in the chip that reads the shared next-turn value.
+		expect(host.querySelector('.ctx-headline')?.textContent).toContain('72%');
+		expect(host.querySelector('.ctx-headline')?.textContent).not.toContain('60%');
+		await vi.waitFor(() => expect(previewCalls).toBe(2));
+	});
+
+	it('keeps a receipt from a closed turn when the sheet reopens', async () => {
+		let previewCalls = 0;
+		vi.stubGlobal('fetch', vi.fn(async () => {
+			previewCalls += 1;
+			if (previewCalls === 1) return previewResponse;
+			return new Promise<never>(() => {});
+		}));
+		const props = $state<Record<string, unknown>>({
+			surface: 'sheets', sheetView: 'context', toggleSheet: () => {},
+			isMobile: false, hasImageAttachments: false, inputText: '',
+			pendingAttachmentCount: 0, hasMessageToSend: false, canSendToModel: true,
+			queueUntilSwitch: false, onAttachFile: () => {}, onAttachCamera: () => {},
+			onAttachPhotos: () => {}, onSendClick: () => {}, onQueueAfterTurn: () => {},
+		});
+		component = mount(InputBarControls, { target: host, props: props as never });
+		flushSync();
+		await vi.waitFor(() => expect(host.querySelector('.ctx-headline')?.textContent).toContain('60%'));
+		props.sheetView = null;
+		flushSync();
+		recordMeasuredUsage('session-ctx', {
+			model_context_window: 1000, system_tokens: 40, tool_def_tokens: 0,
+			history_tokens: 700, user_tokens: 0, total_used: 720,
+			utilization: 0.72, token_source: 'measured', token_usage_available: true,
+			snapshot_id: 'boundary-720', continuity_mode: 'full', was_trimmed: false,
+			history_messages: 4, thread_id: 'session-ctx',
+		});
+		flushSync();
+		props.sheetView = 'context';
+		flushSync();
 		expect(host.querySelector('.ctx-headline')?.textContent).toContain('72%');
 		expect(host.querySelector('.ctx-headline')?.textContent).not.toContain('60%');
 		await vi.waitFor(() => expect(previewCalls).toBe(2));

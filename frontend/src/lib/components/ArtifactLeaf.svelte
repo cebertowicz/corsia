@@ -252,7 +252,7 @@
 	</button>
 {:else}
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
-	<div class="leaf" class:compact={mode === 'compact'} bind:this={leafEl} onclick={onLeafClick} onkeydown={onLeafKeydown} oninput={onLeafInput}>
+	<div class="leaf" class:compact={mode === 'compact'} class:expanded={mode === 'expanded'} bind:this={leafEl} onclick={onLeafClick} onkeydown={onLeafKeydown} oninput={onLeafInput}>
 		{#if mode === 'expanded'}
 			<div class="canvas-header-strip">
 				<ArtifactTabStrip
@@ -354,6 +354,13 @@
 		background: var(--bg-primary);
 	}
 	.leaf.compact { flex: 1; border-left: none; }
+	/* The tab strip belongs to the header band, which a status banner does not move: the leaf reaches back up
+	   under the banner (the banner paints over it) and its content starts below the banner as before. */
+	.leaf.expanded {
+		margin-top: calc(-1 * var(--status-banners-height, 0px));
+		height: calc(100% + var(--status-banners-height, 0px));
+		padding-top: calc(var(--header-bottom) + var(--status-banners-height, 0px));
+	}
 	/* Expanded tabs occupy the canvas segment of the shared header. They are out of
 	   leaf flow, so the document begins directly below the header with no second band. */
 	.canvas-header-strip {

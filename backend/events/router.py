@@ -355,9 +355,7 @@ def _record_source_facts(
         schedule_merged_pr_reap(payload)
 
 
-def _summarize(
-    internal_event: str, payload: dict[str, Any], external_id: str | None
-) -> tuple[str, dict[str, Any]]:
+def _summarize(internal_event: str, payload: dict[str, Any], external_id: str | None) -> tuple[str, dict[str, Any]]:
     """Build a one-line summary and structured details for the thread input."""
     repo = (payload.get("repository") or {}).get("full_name", "")
     pr = payload.get("pull_request") or {}
@@ -382,13 +380,11 @@ def _summarize(
     check_suite = payload.get("check_suite") or {}
     if check_suite:
         conclusion = check_suite.get("conclusion") or "completed"
-        details.update(
-            {
-                "check_suite_id": check_suite.get("id"),
-                "head_sha": check_suite.get("head_sha"),
-                "check_suite_updated_at": check_suite.get("updated_at"),
-            }
-        )
+        details.update({
+            "check_suite_id": check_suite.get("id"),
+            "head_sha": check_suite.get("head_sha"),
+            "check_suite_updated_at": check_suite.get("updated_at"),
+        })
         return f"{internal_event} on {external_id or repo} ({conclusion})", details
 
     return f"{internal_event} on {external_id or repo}", details

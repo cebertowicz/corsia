@@ -396,13 +396,16 @@ async def test_webhook_reads_when_routing_chose_no_thread(isolated_db, sent, res
     matched_rows = list(rows)
     untracked = await run(64, "nobody/tracks")
 
-    # With no self-rule for the type, one read and no repository lookup.
+    # With no rule for the type, one read, no repository lookup and no origin check.
     assert no_rule == (before + 1, 0)
     assert _decisions(thread_id="a")[-1]["outcome"] == "woke"
     # Only the tracking project's rules are read: Q's rule for another repository is not.
     assert matched_rows == [f"project:{P}"] * 2  # the read-only check, then evaluation
     assert matched[1] == 1
-    assert untracked == (before + 1, 1) and rows == []
+    # A rule exists, so the outside author's one origin check runs (O1: the agents'
+    # account row and its person row).
+    ORIGIN_READS = 2
+    assert untracked == (before + 1 + ORIGIN_READS, 1) and rows == []
     print(f"unrouted webhook (DB reads, lookups): dev=({before}, 0) "
           f"no_rule=+({no_rule[0] - before}, {no_rule[1]}) "
           f"matched=+({matched[0] - before}, {matched[1]}) "

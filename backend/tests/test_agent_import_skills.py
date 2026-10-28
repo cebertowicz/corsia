@@ -5,6 +5,7 @@ from __future__ import annotations
 import builtins
 import datetime
 import hashlib
+import json
 import os
 import stat
 import subprocess
@@ -411,8 +412,8 @@ def test_another_tools_metadata_blocks_are_dropped_on_install(home):
     assert meta["metadata"] == {"tags": ["team"], "corsia-data": "corsia.yaml", "corsia-format": "1"}
 
 
-def test_claude_codes_account_synced_skills_are_never_offered(tmp_path, monkeypatch):
-    """A fresh Claude Code sign-in fills ``skills/synced`` with its own bundles; none is the person's work."""
+def test_synced_bucket_without_manifest_is_not_offered(tmp_path, monkeypatch):
+    """A bucket without a readable manifest cannot identify personal skills."""
     base = tmp_path / "home"
     monkeypatch.setenv("HOME", str(base))
     monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
@@ -426,3 +427,94 @@ def test_claude_codes_account_synced_skills_are_never_offered(tmp_path, monkeypa
     assert skills.skill_offers(Roots.for_user(), ["claude-code"], workspace) == []
     _skill(base / ".claude" / "skills" / "mine", "mine", "a skill the person made")
     assert [row["name"] for row in skills.skill_offers(Roots.for_user(), ["claude-code"], workspace)] == ["mine"]
+
+
+def _synced_bucket(root, bucket_name, entries):
+    synced = root / "skills" / "synced"
+    bucket = synced / bucket_name
+    bucket.mkdir(parents=True)
+    (synced / f".bucket-{bucket_name}").write_text("")
+    (bucket / "manifest.json").write_text(json.dumps({"lastUpdated": "2026-10-20T12:00:00Z", "skills": entries}))
+    for entry in entries:
+        _skill(bucket / entry["name"], entry["name"], entry.get("description", "a synced skill"))
+    return bucket
+
+
+def test_synced_manifest_excludes_builtins_and_offers_personal_skills(home):
+    roots, workspace = home
+    entries = [
+        {"name": "pdf", "source": "anthropic", "updatedAt": "2026-10-20T12:00:00Z"},
+        {"name": "morning", "source": "anthropic-example", "updatedAt": "2026-10-20T12:00:00Z"},
+        {"name": "my-recipe", "source": "custom", "updatedAt": "2026-10-20T12:00:00Z"},
+    ]
+    bucket = _synced_bucket(roots.claude, "org_account", entries)
+    for index in range(skills.MAX_FILES + 1):
+        (bucket / "pdf" / f"f{index}.md").write_text("x")
+    offers = skills.skill_offers(roots, ["claude-code"], workspace)
+    names = {row["name"] for row in offers}
+    assert "my-recipe" in names
+    assert "pdf" not in names and "morning" not in names
+    assert next(row for row in offers if row["name"] == "my-recipe")["state"] == "new"
+
+
+def test_synced_builtins_only_produce_no_offers(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+    roots = Roots.for_user()
+    bucket = _synced_bucket(roots.claude, "org_account", [
+        {"name": "xlsx", "source": "anthropic", "updatedAt": "2026-10-20T12:00:00Z"},
+    ])
+    for index in range(skills.MAX_FILES + 1):
+        (bucket / "xlsx" / f"f{index}.md").write_text("x")
+    assert skills.skill_offers(roots, ["claude-code"], tmp_path / "workspace") == []
+
+
+def test_synced_newest_account_wins_and_unreadable_manifest_is_skipped(home):
+    roots, workspace = home
+    _synced_bucket(roots.claude, "old_account", [
+        {"name": "my-recipe", "source": "custom", "updatedAt": "2026-10-19T12:00:00Z", "description": "old"},
+    ])
+    _synced_bucket(roots.claude, "new_account", [
+        {"name": "my-recipe", "source": "custom", "updatedAt": "2026-10-20T12:00:00Z", "description": "new"},
+    ])
+    broken = _synced_bucket(roots.claude, "broken_account", [
+        {"name": "hidden", "source": "custom", "updatedAt": "2026-10-20T12:00:00Z"},
+    ])
+    (broken / "manifest.json").write_text("invalid")
+    offers = skills.skill_offers(roots, ["claude-code"], workspace)
+    matching = [row for row in offers if row["name"] == "my-recipe"]
+    assert len(matching) == 1 and matching[0]["description"] == "new"
+    assert "hidden" not in {row["name"] for row in offers}
+
+
+def test_synced_default_source_installs_and_invalid_paths_are_not_offered(home, tmp_path):
+    roots, workspace = home
+    bucket = _synced_bucket(roots.claude, "org_account", [{"name": "my-recipe"}])
+    outside = _skill(tmp_path / "outside", "outside", "linked outside")
+    (bucket / "linked").symlink_to(outside)
+    (bucket / "manifest.json").write_text(json.dumps({"skills": [
+        {"name": "my-recipe"}, {"name": "linked", "source": "custom"},
+        {"name": "..", "source": "custom"}, {"name": "a/b", "source": "custom"},
+        {"name": "../outside", "source": "custom"}, {"name": ".hidden", "source": "custom"},
+    ]}))
+    offers = skills.skill_offers(roots, ["claude-code"], workspace)
+    rows = {row["name"]: row for row in offers}
+    assert rows["my-recipe"]["state"] == "new"
+    assert rows["linked"]["state"] == "unreadable"
+    assert not {"..", "a/b", "../outside", ".hidden"} & rows.keys()
+    assert "/synced/org_account/my-recipe:" in rows["my-recipe"]["item_id"]
+    result = skills.install_skills(roots, ["claude-code"], workspace, [rows["my-recipe"]["item_id"]])
+    assert result[0]["outcome"] == "installed"
+    assert (workspace / "skills" / "my-recipe" / "SKILL.md").is_file()
+
+
+def test_synced_equal_and_missing_timestamps_use_first_bucket(home):
+    roots, workspace = home
+    for bucket, description in (("z_account", "second"), ("a_account", "first")):
+        _synced_bucket(roots.claude, bucket, [
+            {"name": "equal-time", "updatedAt": "2026-10-20T12:00:00Z", "description": description},
+            {"name": "missing-time", "description": description},
+        ])
+    offers = {row["name"]: row for row in skills.skill_offers(roots, ["claude-code"], workspace)}
+    assert offers["equal-time"]["description"] == "first"
+    assert offers["missing-time"]["description"] == "first"

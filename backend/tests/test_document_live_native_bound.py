@@ -15,10 +15,10 @@ from tests.test_document_live_lane import cut_at
 _TIMINGS: list[float] = []
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 @pytest.mark.parametrize("outcome", ["lands", "fails"])
-@pytest.mark.parametrize("sample", [0, 1])
-async def test_native_stalled_write_persists_pending_receipt_then_resolves(ownership_scope, tmp_path, monkeypatch, outcome, sample):
+async def test_native_stalled_write_persists_pending_receipt_then_resolves(ownership_scope, tmp_path, monkeypatch, outcome):
     from doceditor import live_lane
     from host_access.processes import PROCESS_OWNER
     from infra import state

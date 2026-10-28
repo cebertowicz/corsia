@@ -9,7 +9,6 @@ import os
 import uuid
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from automation.restart_messages import TURN_STOPPED_REFUSAL
@@ -23,10 +22,7 @@ from subagents.codex_tool_requests import ToolRequests
 from subagents.codex_process import CodexProcessGroup, cancel_reader_bounded, signal_process
 from subagents.codex_dynamic_tools import dynamic_tool_values as _dynamic_tool_values
 from subagents.codex_dynamic_tools import dynamic_tool_response as _dynamic_tool_rejection
-from subagents.codex_env import governed_codex_model_catalog_path
 from subagents.managed_launch import (
-    codex_app_server_config_override_args,
-    codex_app_server_governance_args,
     codex_developer_instructions_with_write_path,
     codex_sandbox_reads_read_only,
     codex_tools_are_write_capable,
@@ -54,6 +50,8 @@ _NON_ACTION_SERVER_REQUESTS = {"account/chatgptAuthTokens/refresh"}
 
 
 class CodexAppServerSession:
+    confined = False  # Resolved from the canonical thread row before spawn.
+
     def __init__(
         self,
         *,
@@ -145,19 +143,9 @@ class CodexAppServerSession:
         return self._active_turn_id
 
     def build_cmd(self) -> list[str]:
-        cmd = [self.binary, "app-server", "--stdio", *codex_app_server_governance_args()]
-        if not self.control_only:
-            catalog_path = governed_codex_model_catalog_path(
-                Path(self.codex_home) if self.codex_home else None,
-            )
-            cmd += [
-                "-c",
-                f"model_catalog_json={json.dumps(str(catalog_path))}",
-            ]
-        if self.effort:
-            cmd += ["-c", f"model_reasoning_effort={self.effort}"]
-        cmd += codex_app_server_config_override_args(self.config_overrides)
-        return cmd
+        from subagents.codex_launch_policy import build_cmd
+
+        return build_cmd(self)
 
     def build_env(self) -> dict[str, str]:
         """Return a clean launch environment with an optional isolated home."""
@@ -232,6 +220,11 @@ class CodexAppServerSession:
         if self._closing:
             raise RuntimeError("Codex app-server terminated before process spawn")
         from infra.db_async import run_in_db
+        from subagents.codex_confinement import prepare_launch, verify_version
+
+        await run_in_db(prepare_launch, self)
+        if self.confined:
+            await verify_version(self.binary)
         if not self.control_only:
             from subagents.vendor_write_admission import prepare_session_launch
 

@@ -215,7 +215,7 @@ def test_every_settings_link_in_first_run_opens_a_real_section_and_anchor():
 def test_first_run_stays_within_its_body_size():
     # Its size after the fuller conductor-role intro and the MCP import consent step (#690),
     # rounded up; #674 tracks the real cap.
-    assert len(FIRST_RUN.read_bytes()) <= 17700  # +the router to first-run-app.md, +where keyless searches go (#1537)
+    assert len(FIRST_RUN.read_bytes()) <= 17800  # +the router to first-run-app.md, +where keyless searches go (#1537), +the goal-owning welcome line (#1599)
 
 
 LOCAL_MODEL_OFFER = BOOTSTRAP_SKILL.parent / "references/local-model-offer.md"
@@ -295,7 +295,8 @@ def test_app_path_uses_server_opening_and_plan_then_steps_and_handoff():
     assert not re.search(r"\bsteps? \d", work_step)
     assert app.split("## Hand over to your agents", 1)[1].strip().startswith("After the last step that applies, post one line")
     assert "post exactly `" + HANDOFF + "`" in app
-    assert "follow skill `google-setup`" in steps
+    assert "then `google_connect`" in steps
+    assert "Use skill `google-setup` only when the person says Google blocked the sign-in" in steps
     assert "Never write the opening or create the setup plan" in app
     assert "mark each done when complete" in app
     assert "agent-import.md" in steps
