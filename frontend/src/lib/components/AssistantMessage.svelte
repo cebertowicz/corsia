@@ -7,6 +7,7 @@
 	import { parseBrowserChip } from '$lib/browserChip';
 	import MessageArtifactCards from './MessageArtifactCards.svelte';
 	import ToolActivityBlock from './ToolActivityBlock.svelte';
+	import ChatCommentThreads from './ChatCommentThreads.svelte';
 
 	let {
 		msg,
@@ -167,6 +168,8 @@
 		</div>
 	</div>
 	{/if}
+
+	<ChatCommentThreads messageId={msg.id} threadId={msg.thread_id} comments={msg.chat_comments ?? []} />
 
 	{#if msg.cards?.length || msg.cards_more || browserChip}
 		<MessageArtifactCards cards={msg.cards ?? []} more={msg.cards_more ?? 0} browser={browserChip} threadId={msg.thread_id} {hiddenHolds} {renderedAsks} />

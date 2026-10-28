@@ -1,18 +1,10 @@
-"""The person's own skills in their other tools: offers and installs.
-
-Only the person's own skill folders are scanned (plugin, bundled and ``.system``
-skills never are). Each skill is bounded by lstat before anything is hashed, and
-any link, binary file or unreadable part keeps it from being offered. The agent
-receives name, description, tools, script count and offer state, never a body.
-An install re-reads the folder, writes only an offer still ``new`` with the same
-content hash, and writes CORSIA's skill data form: the whitelisted frontmatter,
-a ``corsia.yaml`` holding only a home-relative ``origin``, and no overwrite.
-"""
+"""Offer personal skill metadata; install only checked, unchanged bundles without overwriting."""
 
 from __future__ import annotations
 
 import datetime
 import hashlib
+
 import os
 import re
 import stat
@@ -20,9 +12,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from onboarding.agent_import import (
-    CLAUDE_CODE, CODEX, HERMES, LABELS, OPENCLAW, TOOL_MADE_SKILL_FOLDERS, inside, checked_root, display_path,
+    CLAUDE_CODE, CODEX, HERMES, LABELS, OPENCLAW, TOOL_MADE_SKILL_FOLDERS, checked_root, display_path,
     tool_roots,
 )
+from onboarding.agent_import_synced import dirs as _dirs, real_folder as _real_folder, synced_skills
+from onboarding.agent_import_synced import synced_personal_count as synced_personal_count
 from onboarding.project_discovery import Roots
 
 MAX_FILES = 100
@@ -75,24 +69,6 @@ class Candidate:
         return self.files["SKILL.md"]
 
 
-def _real_folder(folder: Path, root: Path) -> bool:
-    """``folder`` is itself no link and resolves inside ``root``, so no linked parent leads out."""
-    try:
-        return stat.S_ISDIR(os.lstat(folder).st_mode) and inside(Path(os.path.realpath(folder)), root)
-    except OSError:
-        return False
-
-
-def _dirs(folder: Path, root: Path) -> list[Path]:
-    """Visible entries of a real folder that may be skills; links are kept to be refused."""
-    try:
-        if not _real_folder(folder, root):
-            return []
-        return sorted(Path(entry.path) for entry in os.scandir(folder)
-                      if not entry.name.startswith(".") and not entry.is_file(follow_symlinks=False))
-    except OSError:
-        return []
-
 
 def _commands(folder: Path, root: Path) -> list[tuple[Path, str]]:
     """Claude Code command files under ``commands/``, each with its flattened name."""
@@ -119,14 +95,16 @@ def _hermes(folder: Path, root: Path, depth: int = 0) -> list[Path]:
     return found
 
 
+
 def candidates(roots: Roots, tools: list[str]) -> list[Candidate]:
-    """Every skill in the person's own folders of ``tools``, unread."""
+    """Every skill in the person's own folders of ``tools`` after consent."""
     checked = {tool: real for tool, root in tool_roots(roots).items()
                if tool in tools and (real := checked_root(root)) is not None}
     found: list[Candidate] = []
     if claude := checked.get(CLAUDE_CODE):
         found += [Candidate(CLAUDE_CODE, path) for path in _dirs(claude / "skills", claude)
                   if path.name not in TOOL_MADE_SKILL_FOLDERS[CLAUDE_CODE]]
+        found += [Candidate(CLAUDE_CODE, path) for path in synced_skills(claude)]
         found += [Candidate(CLAUDE_CODE, path, command)
                   for path, command in _commands(claude / "commands", claude)]
     if codex := checked.get(CODEX):

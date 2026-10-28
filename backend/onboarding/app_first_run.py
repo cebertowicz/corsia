@@ -35,7 +35,7 @@ def _paid_missing_sources(facts: Mapping[str, Any]) -> tuple[str, ...]:
 def _has_import_step(facts: Mapping[str, Any]) -> bool:
     """Whether import applies at this setup phase.
 
-    Before a model is bound, stat-only discovery makes the provisional plan visible.
+    Before a model is bound, local discovery makes the provisional plan visible.
     Once a model is bound, only its provider-specific import decision card can keep
     the step applicable; an unavailable setup read keeps the provisional answer, so
     a failed read never removes the step before the agent's live read settles it.
@@ -288,7 +288,7 @@ def _seed_descriptors(
 
 
 def _pre_pick_facts(*, db: sqlite3.Connection) -> dict[str, Any]:
-    """The stat-only facts safe to use before a model can receive any import."""
+    """Local discovery facts available before a model can receive any import."""
     from onboarding import agent_import
     from onboarding.project_discovery import Roots
 
