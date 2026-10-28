@@ -21,7 +21,9 @@ from core import lesson_case, lesson_files
 from core.lesson_trials import PERMANENT_KINDS, lesson_id, parse_instant
 from core.thread_identity import thread_agent_identity
 from core.placement_decide import Decision, Destination, ThreadPlace
-from core.lesson_trial_targeting import TrialRefused, additive_only, same_case, target_trials
+from core.lesson_trial_targeting import (
+    TrialRefused, active_target_trials, additive_only, same_case, target_trials,
+)
 
 #: A source a person wrote: citing one does not make the agent's rule theirs.
 HUMAN_KINDS = frozenset({"user", "message"})
@@ -41,6 +43,7 @@ FIXES = {
         "give skill_description (when it applies) and trial.boundary (when it does not)"
     ),
     "over-budget": "shorten the trial guidance so it fits at task start",
+    "target-full": "wait for a trial on this file to finish, then call place again",
 }
 
 
@@ -122,16 +125,22 @@ def admit(
     pending = lesson_case.revised(
         capture.case_metadata if capture is not None else {}, decision.case_metadata,
     )
+    merge = next(((path, item) for path, item in opened if same_case(item, decision)), None)
+    previous = merge[1] if merge else None
+    if previous is None and revising and destination.path is not None:
+        previous = lesson_files.read_trial(destination.path.read_text(encoding="utf-8", errors="replace"))
+    _refuse_serious(db, decision, capture, previous)
     hold = _incomplete(db, thread_id, epoch, entry, decision)
     if hold is not None:
         return Admission(capture_id, capture_id, hold, case_metadata=pending)
+    if trial.state == "trial" and _target_full(db, place, decision, pending, previous, merge, destination, revising):
+        return Admission(capture_id, capture_id, "target-full", case_metadata=pending)
     if destination.path is None:
         raise TrialRefused("invalid-output", (
             "skill_name must be a new lowercase-hyphenated name for the trial skill"
         ))
     if retired_match and not decision.case_metadata.get("new_evidence"):
         raise TrialRefused("retired-match", "A retired trial has the same target, section, and cause; name new evidence.")
-    merge = next(((path, item) for path, item in opened if same_case(item, decision)), None)
     write_path = merge[0] if merge else destination.path
     identity, text = _render(thread_id, capture_id, entry, decision, write_path, capture, pending)
     _ensure_name_available(db, place, str(decision.skill_name), write_path)
@@ -145,6 +154,44 @@ def admit(
     if _text_tokens(payload, None) > START_TOKEN_CAP:
         return Admission(identity, capture_id, "over-budget", case_metadata=pending)
     return Admission(identity, capture_id, None, text, destination_path=write_path)
+
+
+def _target_full(
+    db: sqlite3.Connection, place: ThreadPlace, decision: Decision, pending: dict[str, Any],
+    previous: Any, merge: Any, destination: Destination, revising: bool,
+) -> bool:
+    """Count the effective target, including the metadata a revision keeps."""
+    from dataclasses import replace
+
+    metadata = lesson_case.revised(previous.lesson.case_metadata if previous is not None else {}, pending)
+    if not (metadata.get("target_file") or metadata.get("new_target_path")):
+        return False
+    active = active_target_trials(db, place, replace(decision, case_metadata=metadata))
+    existing_path = merge[0] if merge else destination.path if revising else None
+    return sum(path != existing_path for path in active) >= 2
+
+
+def _refuse_serious(db: sqlite3.Connection, decision: Decision, capture: Any, previous: Any) -> None:
+    """Keep correction subjects across capture and revision, and refuse serious trials."""
+    from core.correction_learning import TRIAGE_EVENT
+
+    subjects = (*decision.originating_subjects,
+                *(capture.originating_subjects if capture is not None else ()),
+                *(previous.lesson.originating_subjects if previous is not None else ()))
+    if not subjects:
+        return
+    serious = db.execute(
+        """SELECT 1 FROM outcome_events
+           WHERE event_name=? AND retracted_at IS NULL
+             AND subject_key IN (SELECT value FROM json_each(?))
+             AND json_extract(attributes, '$.tier')='serious' LIMIT 1""",
+        (TRIAGE_EVENT, json.dumps(subjects)),
+    ).fetchone()
+    if serious is not None:
+        raise TrialRefused("serious-miss", (
+            "A lesson fixing a serious miss cannot be a trial; place it permanently "
+            "so it is delivered to every task. Call again without trial."
+        ))
 
 
 def _incomplete(

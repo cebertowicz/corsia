@@ -82,6 +82,38 @@ def target_trials(
     return open_trials, retired
 
 
+def active_target_trials(db: Any, place: ThreadPlace, decision: Decision) -> list[Path]:
+    """Read the project's and workspace's owner trays for active trials on this file."""
+    from types import SimpleNamespace
+    from core.lesson_report_sources import source_inputs
+    from core.skill_scanning import skill_files
+    from infra.config import WORKSPACE
+
+    owner = db.execute("SELECT user_id, project_id FROM threads WHERE id=?", (place.thread_id,)).fetchone()
+    if owner is None:
+        raise TrialRefused("invalid-output", "The trial owner is unavailable.")
+    ids = tuple(row["id"] for row in db.execute(
+        "SELECT id FROM threads WHERE user_id=? AND (project_id IS NULL OR project_id=?)",
+        (owner["user_id"], owner["project_id"]),
+    ))
+    roots, _roles, unavailable = source_inputs(
+        db, Path(WORKSPACE), SimpleNamespace(thread_ids=ids, user_id=owner["user_id"]),
+    )
+    if unavailable:
+        raise TrialRefused("invalid-output", "Trial owner trays could not be resolved; try again when available.")
+    normalized = target(decision)
+    matches = []
+    for root, scope in roots.items():
+        if scope.get("scope") != "thread":
+            continue
+        for path in skill_files(root):
+            current = lesson_files.read_trial(path.read_text(encoding="utf-8"))
+            if (current is not None and current.lesson.owner == scope["scope_id"]
+                    and current.lesson.state == "trial" and target_from_lesson(current) == normalized):
+                matches.append(path)
+    return matches
+
+
 def same_case(current: Any, decision: Decision) -> bool:
     """Whether an existing trial has the same section and correction cause."""
     current_meta, requested = current.lesson.case_metadata, decision.case_metadata

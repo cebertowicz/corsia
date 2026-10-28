@@ -1047,6 +1047,135 @@ async def test_appended_evidence_finds_the_same_captured_review(env: Env) -> Non
     assert _artifacts(env, capture) == 1
 
 
+@pytest.mark.parametrize(("target", "held"), [("context/shared.md", True), ("context/other.md", False)])
+async def test_two_trials_per_file_hold_the_third(env: Env, target, held) -> None:
+    from core.lesson_trials import Trial
+
+    _seed_thread(env.db, "other-owner")
+    env.db.commit()
+    for number, owner in ((1, THREAD), (2, "other-owner")):
+        path = env.workspace / ".threads" / owner / "skills" / f"existing-{number}" / "SKILL.md"
+        path.parent.mkdir(parents=True)
+        path.write_text(lesson_files.render_trial(
+            lesson_id=f"00000000-0000-0000-0000-{number:012d}", owner=owner,
+            name=f"existing-{number}", description="Use for existing checks.", text="Check it.",
+            trial=Trial(kind="hypothesis", review_after="2030-01-01T00:00:00+00:00"),
+            source_refs=TURN, case_metadata={"new_target_path": "context/shared.md", "target_section": f"Part {number}"},
+        ))
+    reply = _place(env, _entry(env), _answer(new_target_path=target, target_section="Part 3"))
+    await _drain(env.worker)
+    if held:
+        assert "two trials" in reply
+        assert not _skill(env).exists()
+        assert len(list((env.tray / "context" / "captures").glob("*.md"))) == 1
+    else:
+        assert _skill(env).exists()
+
+
+async def test_watch_promotion_counts_its_retained_target(env: Env) -> None:
+    from core.lesson_trials import Trial
+
+    for number, state, name in ((1, "trial", "first"), (2, "trial", "second"), (3, "watch", "cite-the-head")):
+        path = env.tray / "skills" / name / "SKILL.md"
+        path.parent.mkdir(parents=True)
+        path.write_text(lesson_files.render_trial(
+            lesson_id=f"00000000-0000-0000-0000-{number:012d}", owner=THREAD, name=name,
+            description="Use for checks.", text="Check it.",
+            trial=Trial(kind="hypothesis", state=state, review_after="2030-01-01T00:00:00+00:00"),
+            source_refs=TURN, case_metadata={"new_target_path": "context/shared.md"},
+        ))
+    reply = _place(env, _entry(env))
+    await _drain(env.worker)
+    assert "two trials" in reply
+    assert lesson_files.read_trial(_skill(env).read_text()).lesson.state == "watch"
+
+
+@pytest.mark.parametrize(("tiers", "refused"), [(('miss',), False), (('miss', 'serious'), True)])
+def test_serious_correction_subject_requires_permanent_placement(env: Env, tiers, refused) -> None:
+    from core.correction_learning import record_triage
+    from infra.outcome_events import record_outcome_event
+
+    env.db.execute(
+        """INSERT INTO active_turns(id,thread_id,execution_epoch,model,status,started_at,boot_epoch,usage_receipts_json)
+           VALUES ('turn-serious',?,0,'test/model','running','now','boot','{}')""", (THREAD,),
+    )
+    for number, tier in enumerate(tiers):
+        subject = f"message:correction-{number}"
+        env.db.execute(
+            """INSERT INTO messages(id,thread_id,role,content,created_at,input_order,active_turn_id)
+               VALUES (?,?,'user','Please correct this.','now',?,'turn-serious')""",
+            (f"correction-{number}", THREAD, number + 1),
+        )
+        record_outcome_event(
+            env.db, dedupe_key=f"correction:{number}", event_name="measurement.correction", source="agent",
+            provenance="agent_recorded", ts="2026-10-20T00:00:00+00:00", subject_key=subject,
+            agent_thread_id=THREAD, attributes={"label": "correction"},
+        )
+        record_triage(env.db, thread_id=THREAD, subject_key=subject, tier=tier, cause="process_gap", new_work="no")
+    env.db.commit()
+    reply = _place(env, _entry(env))
+    if refused:
+        assert "serious" in reply and "permanent" in reply
+        assert not _skill(env).exists()
+    else:
+        assert reply.startswith("Entry ") and "queued" in reply
+
+
+async def test_serious_triage_added_after_capture_is_not_lost_on_retry(env: Env) -> None:
+    from core.correction_learning import record_triage
+    from infra.outcome_events import record_outcome_event
+
+    env.db.execute(
+        """INSERT INTO active_turns(id,thread_id,execution_epoch,model,status,started_at,boot_epoch,usage_receipts_json)
+           VALUES ('turn-capture',?,0,'test/model','running','now','boot','{}')""", (THREAD,),
+    )
+    env.db.execute(
+        """INSERT INTO messages(id,thread_id,role,content,created_at,input_order,active_turn_id)
+           VALUES ('captured-correction',?,'user','Please correct this.','now',1,'turn-capture')""", (THREAD,),
+    )
+    env.db.commit()
+    entry = _entry(env)
+    assert "captured hypothesis" in _place(env, entry, _answer(trial={"boundary": None}))
+    await _drain(env.worker)
+    subject = "message:captured-correction"
+    record_outcome_event(
+        env.db, dedupe_key="captured-correction", event_name="measurement.correction", source="agent",
+        provenance="agent_recorded", ts="2026-10-20T00:00:00+00:00", subject_key=subject,
+        agent_thread_id=THREAD, attributes={"label": "correction"},
+    )
+    record_triage(env.db, thread_id=THREAD, subject_key=subject, tier="serious", cause="process_gap", new_work="no")
+    env.db.execute("UPDATE active_turns SET status='completed' WHERE id='turn-capture'")
+    env.db.commit()
+    reply = _place(env, entry)
+    assert "serious" in reply and "permanent" in reply
+    assert not _skill(env).exists()
+
+
+def test_revision_keeps_the_original_serious_correction(env: Env) -> None:
+    from core.correction_learning import record_triage
+    from core.lesson_trials import Trial
+    from infra.outcome_events import record_outcome_event
+
+    path = _skill(env)
+    path.parent.mkdir(parents=True)
+    subject = "message:original-correction"
+    path.write_text(lesson_files.render_trial(
+        lesson_id="00000000-0000-0000-0000-000000000001", owner=THREAD, name="cite-the-head",
+        description="Use when reporting a check result on a pull request.", text="Name the commit.",
+        trial=Trial(kind="hypothesis", review_after="2030-01-01T00:00:00+00:00"),
+        source_refs=TURN, originating_subjects=(subject,),
+    ))
+    record_outcome_event(
+        env.db, dedupe_key="original-correction", event_name="measurement.correction", source="agent",
+        provenance="agent_recorded", ts="2026-10-20T00:00:00+00:00", subject_key=subject,
+        agent_thread_id=THREAD, attributes={"label": "correction"},
+    )
+    record_triage(env.db, thread_id=THREAD, subject_key=subject, tier="serious", cause="process_gap", new_work="no")
+    env.db.commit()
+    reply = _place(env, _entry(env))
+    assert "serious" in reply and "permanent" in reply
+
+
 async def test_a_full_lesson_budget_captures_the_next_trial(env: Env) -> None:
     from plans import public as plans
 
