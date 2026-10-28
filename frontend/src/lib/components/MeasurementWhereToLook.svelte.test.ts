@@ -6,6 +6,7 @@ import {
 	decodeWhereToLook,
 	formatChange,
 	formatWhereToLookValue,
+	formatWhereToLookRow,
 	type WhereToLookRow,
 	type WhereToLookState,
 } from '$lib/stores/measurementWhereToLook';
@@ -54,6 +55,13 @@ function render(value: WhereToLookState, onRetry = () => {}): void {
 }
 
 describe('MeasurementWhereToLook', () => {
+	it('shows enough precision to distinguish a change in the minutes measure', () => {
+		render(state({ worse: [row({ format: 'minutes', previous: 0.14, latest: 0.1, overall: 0.14 })] }));
+		const cells = host.querySelectorAll('tbody tr:first-child td');
+		expect(cells[2].textContent?.trim()).toBe('0.14 to 0.10');
+		expect(cells[5].textContent?.trim()).toBe('0.14');
+	});
+
 	it('shows both lists with the fixed action line under each measure', () => {
 		render(state({ worse: [row()], improved: [row({ subject: { id: 'ag-2', name: 'Docs', kind: 'agent' }, previous: 0.5, latest: 0.7, change: 0.4 })] }));
 		const text = host.textContent ?? '';
@@ -70,8 +78,8 @@ describe('MeasurementWhereToLook', () => {
 	it('says what the threshold is rather than showing an empty table', () => {
 		render(state());
 		expect(host.querySelectorAll('table')).toHaveLength(0);
-		expect(host.textContent).toContain('Nothing got worse by 10% or more with at least 20 outcomes (or turns, or tasks) in both Sep 28 to Oct 4 and Sep 21 to Sep 27.');
-		expect(host.querySelector('.stat')?.textContent?.trim()).toBe('Sep 28 to Oct 4 against Sep 21 to Sep 27, worst change first');
+		expect(host.textContent).toContain('Nothing got worse by 10% or more with at least 20 outcomes (or turns, or tasks) in both Sep 28 to Oct 4 and Sep 21 to Sep 27.');
+		expect(host.querySelector('.stat')?.textContent?.trim()).toBe('Sep 28 to Oct 4 against Sep 21 to Sep 27, worst change first');
 	});
 
 	it('leaves out an Improved list with no rows, as the render does, and shows it once it has some', () => {
@@ -170,6 +178,19 @@ describe('where-to-look store helpers', () => {
 		expect(formatWhereToLookValue(1.964, 'dollars')).toBe('$1.96');
 		expect(formatChange(0.1)).toBe('+10%');
 		expect(formatChange(-0.256)).toBe('-26%');
+	});
+
+	it('preserves unit formatting while distinguishing close values', () => {
+		expect(formatWhereToLookRow({ previous: 1_210_000, latest: 1_240_000, overall: 1_220_000, format: 'tokens' })).toEqual(['1.21M', '1.24M', '1.22M']);
+		expect(formatWhereToLookRow({ previous: 1.501, latest: 1.504, overall: 1.5, format: 'dollars' })).toEqual(['$1.501', '$1.504', '$1.500']);
+		expect(formatWhereToLookRow({ previous: 1234.5, latest: 1234.7, overall: 1234.6, format: 'hours' })).toEqual(['1,234.5 h', '1,234.7 h', '1,234.6 h']);
+		expect(formatWhereToLookRow({ previous: 0.14, latest: 0.1, overall: 1, format: 'ratio' })).toEqual(['0.14', '0.10', '1.00']);
+		// Once extra digits tell a pair apart, every figure in the row keeps them, trailing zeros included.
+		expect(formatWhereToLookRow({ previous: 0.14, latest: 0.1, overall: 0.14, format: 'minutes' })).toEqual(['0.14', '0.10', '0.14']);
+		expect(formatWhereToLookRow({ previous: 1_240_000, latest: 1_200_000, overall: 1_220_000, format: 'tokens' })).toEqual(['1.24M', '1.20M', '1.22M']);
+		expect(formatWhereToLookRow({ previous: 0.814, latest: 0.81, overall: 0.81, format: 'percent' })).toEqual(['81.4%', '81.0%', '81.0%']);
+		expect(formatWhereToLookRow({ previous: 2.04, latest: 2, overall: 2.02, format: 'hours' })).toEqual(['2.04 h', '2.00 h', '2.02 h']);
+		expect(formatWhereToLookRow({ previous: 2.5, latest: 3, overall: 2.5, format: 'hours' })).toEqual(['2.5 h', '3 h', '2.5 h']);
 	});
 
 	it('refuses a response with no lists or a bad number', () => {

@@ -3,7 +3,7 @@
 	import type { Snippet } from 'svelte';
 	import {
 		formatChange,
-		formatWhereToLookValue,
+		formatWhereToLookRow,
 		type WhereToLookRow,
 		type WhereToLookState,
 	} from '$lib/stores/measurementWhereToLook';
@@ -42,14 +42,15 @@
 					<thead><tr><th scope="col">Subject <span class="stacked">and measure</span></th><th class="measure" scope="col">Measure</th><th class="n" scope="col">Previous to latest</th><th class="n" scope="col">Change</th><th class="n" scope="col">n</th><th class="n" scope="col">Overall</th></tr></thead>
 					<tbody>
 						{#each rows(list.id) as row (`${row.subject.id}:${row.measure}`)}
+							{@const figures = formatWhereToLookRow(row)}
 							<tr>
 								<!-- On a phone the measure column is hidden and the measure sits under the subject, in this cell. Only the worse list carries a hint, as r2.7 does. -->
 								<td class="subj"><b>{row.subject.kind === 'agent' ? agentLabel(row.subject.name) : row.subject.name}</b><div class="stacked">{row.label}{#if list.id === 'worse'}<div class="act">{row.action}</div>{/if}</div></td>
 								<td class="measure">{row.label}{#if list.id === 'worse'}<div class="act">{row.action}</div>{/if}</td>
-								<td class="n"><span class="v">{formatWhereToLookValue(row.previous, row.format)}</span> to <span class="v">{formatWhereToLookValue(row.latest, row.format)}</span></td>
+								<td class="n"><span class="v">{figures[0]}</span> to <span class="v">{figures[1]}</span></td>
 								<td class="n">{formatChange(row.change)}</td>
 								<td class="n">{row.n.toLocaleString('en-US')}</td>
-								<td class="n">{row.overall === null ? '–' : formatWhereToLookValue(row.overall, row.format)}</td>
+								<td class="n">{figures[2]}</td>
 							</tr>
 						{/each}
 					</tbody>
