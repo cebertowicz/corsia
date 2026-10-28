@@ -9,6 +9,9 @@ from typing import Any
 
 from events.connectors.library import (
     INSTALLED_SKILL_TYPE,
+    INSTALLED_PACK_TYPE,
+    PACK_CHANGED_EVENT,
+    PACK_WITHDRAWN_EVENT,
     ITEM_CHANGED_EVENT,
     ITEM_WITHDRAWN_EVENT,
     LIBRARY_CONNECTOR,
@@ -22,14 +25,14 @@ from library.items import item_manifest, source_ref
 log = logging.getLogger(__name__)
 REFRESH_SECONDS = 24 * 60 * 60
 
-INSTALLED_ROWS_SQL = """SELECT identities.external_id, identities.path, registrations.parent_thread_id
+INSTALLED_ROWS_SQL = """SELECT identities.external_id, identities.path, registrations.parent_thread_id, registrations.created_at, registrations.surfacing
     FROM artifact_identities AS identities
     JOIN artifact_registrations AS registrations ON registrations.artifact_id=identities.id
     WHERE identities.integration=? AND identities.type=? AND identities.state='active'
       AND registrations.relationship_state IN ('owner-active', 'owner-pinned')"""
 
 
-def _installed_rows(db=None) -> list[dict[str, Any]]:
+def _installed_rows(db=None, *, artifact_type: str = INSTALLED_SKILL_TYPE) -> list[dict[str, Any]]:
     """Read only active installed-library artifacts, never scan the full registry."""
     from infra.database import get_db
 
@@ -37,7 +40,7 @@ def _installed_rows(db=None) -> list[dict[str, Any]]:
     connection = db or get_db()
     try:
         rows = connection.execute(
-            INSTALLED_ROWS_SQL, (LIBRARY_INTEGRATION, INSTALLED_SKILL_TYPE),
+            INSTALLED_ROWS_SQL, (LIBRARY_INTEGRATION, artifact_type),
         ).fetchall()
         return [dict(row) for row in rows]
     finally:
@@ -54,7 +57,7 @@ def produce_once() -> int:
 
     use_community_improvements = uses_community_improvements(Path(WORKSPACE))
     index = load_index()  # Exactly one cache-backed raw-main read per producer refresh.
-    items = {item["name"]: item for item in index.skills}
+    items = {item["name"]: item for item in index.items}
     delivered = 0
     for row in _installed_rows():
         payload = _notice_payload(row, items, index.generations)
@@ -64,7 +67,62 @@ def produce_once() -> int:
             continue
         deliveries = deliver_platform_event_sync(LIBRARY_CONNECTOR, payload)
         delivered += sum(delivery.outcome != DUPLICATE for delivery in deliveries)
+    for row in _newest_pack_rows(_installed_rows(artifact_type=INSTALLED_PACK_TYPE)):
+        payload = _pack_notice_payload(row, items, index.generations)
+        if payload is None or (payload["event_type"] == PACK_CHANGED_EVENT and not use_community_improvements):
+            continue
+        deliveries = deliver_platform_event_sync(LIBRARY_CONNECTOR, payload)
+        delivered += sum(delivery.outcome != DUPLICATE for delivery in deliveries)
     return delivered
+
+
+def _newest_pack_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Compare only the highest installed version for each owner and pack."""
+    import semver
+
+    newest: dict[tuple[str, str], tuple[Any, dict[str, Any]]] = {}
+    for row in rows:
+        external_id = row.get("external_id")
+        if not isinstance(external_id, str):
+            continue
+        parts = external_id.rsplit("/", 2)
+        if len(parts) != 3 or parts[0] != row.get("parent_thread_id"):
+            continue
+        try:
+            version = semver.Version.parse(parts[2])
+        except ValueError:
+            continue
+        key = (parts[0], parts[1])
+        if key not in newest or version > newest[key][0]:
+            newest[key] = (version, row)
+    return [entry[1] for entry in newest.values()]
+
+
+def _pack_notice_payload(row: dict[str, Any], items: dict[str, dict[str, Any]], generations: dict[str, int]) -> dict[str, Any] | None:
+    import semver
+
+    external_id = row.get("external_id")
+    if not isinstance(external_id, str):
+        return None
+    parts = external_id.rsplit("/", 2)
+    if len(parts) != 3:
+        return None
+    _owner, name, version = parts
+    item = items.get(name)
+    if not item or item.get("kind") != "pack" or item.get("pack_kind") != "blueprint":
+        return None
+    if not item["withdrawn"]:
+        try:
+            if semver.Version.parse(item["version"]) <= semver.Version.parse(version):
+                return None
+        except ValueError:
+            return None
+    return {"event_type": PACK_WITHDRAWN_EVENT if item["withdrawn"] else PACK_CHANGED_EVENT,
+            "external_id": external_id, "name": name,
+            "installed_version": version, "library_version": item["version"],
+            "item_manifest": item["digest"], "library_index_generation": generations.get(name, 0),
+            "installed_at": row["created_at"], "edited": False, "changed_files": [],
+            "withdrawn_reason": item.get("withdrawn_reason")}
 
 
 def _notice_payload(
@@ -77,7 +135,7 @@ def _notice_payload(
     name = external_id.rpartition("/")[2]
     item = items.get(name)
     origin = read_origin(Path(path).parent)
-    if item is None or origin is None or not isinstance(origin.get("source"), str):
+    if item is None or item.get("kind", "skill") != "skill" or origin is None or not isinstance(origin.get("source"), str):
         return None
     edited, changed_files = local_edits(Path(path).parent, origin)
     base = {

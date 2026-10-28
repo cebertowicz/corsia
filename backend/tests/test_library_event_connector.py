@@ -112,6 +112,18 @@ def test_digest_lines_show_the_declared_facts_and_never_the_reason():
     )
 
 
+def test_pack_withdrawal_declaration_and_artifact_reference():
+    event = normalize(
+        library.LIBRARY_CONNECTOR,
+        _payload(library.PACK_WITHDRAWN_EVENT, artifact_type=library.INSTALLED_SKILL_TYPE),
+    )
+    declaration = library.MANIFEST.event_types[library.PACK_WITHDRAWN_EVENT]
+    assert declaration.artifact_type == library.INSTALLED_PACK_TYPE
+    assert declaration.event_class == "actionable"
+    assert library._artifact_ref(library.PACK_WITHDRAWN_EVENT, event.facts, {"artifact_type": library.INSTALLED_SKILL_TYPE})["type"] == library.INSTALLED_PACK_TYPE
+    assert library._artifact_ref(library.ITEM_WITHDRAWN_EVENT, event.facts, {"artifact_type": library.INSTALLED_PACK_TYPE})["type"] == library.INSTALLED_SKILL_TYPE
+
+
 def test_withdrawal_wakes_again_after_reinstatement(isolated_db):
     owner = _owner()
     raw = _payload(

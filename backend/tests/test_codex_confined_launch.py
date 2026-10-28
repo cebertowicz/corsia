@@ -54,7 +54,7 @@ async def test_start_and_resume_use_only_confined_definitions(monkeypatch):
     await session._start_or_resume_thread()
     method, params = request.call_args.args
     assert method == "thread/start" and params["environments"] == []
-    assert {tool["name"] for tool in params["dynamicTools"]} == confinement.REVIEW_READ_TOOLS
+    assert {tool["name"] for tool in params["dynamicTools"]} == confinement.UNTRUSTED_READ_TOOLS
     assert params["sandbox"] == "read-only" and params["approvalPolicy"] == "never"
     await session._start_or_resume_thread()
     method, params = request.call_args.args
@@ -152,7 +152,7 @@ async def test_codex_bridge_refuses_commands_web_auth_home_and_symlink(isolated_
     try:
         for name, params in (("bash", {"command": "id"}), ("web_search", {})):
             result = await registry.execute(name, params)
-            assert "not available to a confined review worker" in result
+            assert "not available to a confined untrusted worker" in result
         for path in (auth, grant / "auth-link"):
             result = await registry.execute("read_file", {"path": str(path)})
             assert "outside this confined worker's read paths" in result

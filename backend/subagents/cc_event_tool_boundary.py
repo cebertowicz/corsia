@@ -69,17 +69,17 @@ def _is_served_corsia_tool(tool: object, definitions: tuple[dict, ...] | None) -
 def admitted_native_tools(live: object) -> tuple[str, ...]:
     """Claude Code's own tools this launch may run; none unless it is confined.
 
-    A ``review`` launch reads with Read, Grep and Glob and has no CORSIA tool
+    A ``untrusted`` launch reads with Read, Grep and Glob and has no CORSIA tool
     bridge (event-rules design §8.1). Its admitted calls and their results
     stay in the provider's own transcript: CORSIA declares no tool call for
     them and binds no result. Any other tool on that launch crosses the
     boundary, since nothing could serve it.
     """
-    from subagents.cc_invocation import CONFINEMENT_REVIEW, REVIEW_NATIVE_TOOLS
+    from subagents.cc_invocation import CONFINEMENT_UNTRUSTED, UNTRUSTED_NATIVE_TOOLS
 
     session = getattr(live, "session", None)
-    if getattr(session, "confinement", None) == CONFINEMENT_REVIEW:
-        return REVIEW_NATIVE_TOOLS
+    if getattr(session, "confinement", None) == CONFINEMENT_UNTRUSTED:
+        return UNTRUSTED_NATIVE_TOOLS
     return ()
 
 

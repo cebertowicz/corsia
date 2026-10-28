@@ -175,7 +175,7 @@ async def create_visible_fresh_thread(
 ) -> dict:
     """Create a fresh visible thread and publish its visibility side effects.
 
-    Non-empty ``confined_read_dirs`` makes it a ``review`` worker in the same
+    Non-empty ``confined_read_dirs`` makes it an ``untrusted`` worker in the same
     write (``infra.thread_confinement``), outside any host-access lineage.
 
     This is the shared fresh-create/spawn primitive. It preserves the selected
@@ -210,9 +210,9 @@ async def create_visible_fresh_thread(
             )
             if confined_read_dirs:
                 from infra import thread_confinement
-                from subagents.cc_invocation import CONFINEMENT_REVIEW
+                from subagents.cc_invocation import CONFINEMENT_UNTRUSTED
 
-                thread_confinement.record(db, created["id"], CONFINEMENT_REVIEW, confined_read_dirs)
+                thread_confinement.record(db, created["id"], CONFINEMENT_UNTRUSTED, confined_read_dirs)
             return created
 
     session = await run_in_db(_create)
