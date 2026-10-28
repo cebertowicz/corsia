@@ -121,6 +121,50 @@ describe('Sign in again on an account row', () => {
 	});
 });
 
+describe('Sign in on a signed-out account row', () => {
+	afterEach(() => {
+		token.set(null);
+		vendorAccounts.set([]);
+		vi.unstubAllGlobals();
+		document.body.innerHTML = '';
+	});
+
+	const signInButtons = () => [...document.querySelectorAll<HTMLButtonElement>('#vendor-account-fomrrt2 button')].filter((button) => /^Sign in( again)?$/.test(button.textContent?.trim() ?? ''));
+
+	it('sits in the account row beside the name, in the row’s controls slot', async () => {
+		serve([personal, signedOut]);
+		const component = mount(AccountsBlock, { target: document.body, props: { provider } });
+		await settle();
+		const button = signInButtons()[0];
+		expect(button.textContent?.trim()).toBe('Sign in');
+		expect(button.closest('.account-usage-row .controls')).not.toBeNull();
+		// "Signed out" stays under the name.
+		expect(document.querySelector('#vendor-account-fomrrt2 .account-meta')?.textContent?.trim()).toBe('Signed out');
+		unmount(component);
+	});
+
+	const results: [string, Record<string, unknown>, number, string | null][] = [
+		['failed', { status: 'failed', cause: 'vendor_login_failed' }, 1, 'Sign in again'],
+		['refused', { status: 'refused', cause: null, held_by: null }, 1, 'Sign in'],
+		['waiting', { status: 'waiting', cause: null }, 0, null],
+		['completed', { status: 'completed', cause: null }, 0, null],
+	];
+	it.each(results)('never shows two sign-in buttons on one row once sign-in is %s', async (_name, result, count, label) => {
+		serve([personal, signedOut], { account_id: 'fomrrt2', route: 'browser', ...result });
+		const component = mount(AccountsBlock, { target: document.body, props: { provider } });
+		await settle();
+		expect(signInButtons().map((button) => button.textContent?.trim())).toEqual(['Sign in']);
+		signInButtons()[0].click();
+		await vi.waitFor(() => expect(document.querySelector('#vendor-account-fomrrt2 .signin-state')).not.toBeNull());
+		await settle();
+		expect(signInButtons().map((button) => button.textContent?.trim())).toEqual(label ? [label] : []);
+		expect(signInButtons()).toHaveLength(count);
+		// After a failure the slot beside the name is empty: the button is with the cause on the status line.
+		if (_name === 'failed') expect(document.querySelector('#vendor-account-fomrrt2 .account-usage-row .link-target')).toBeNull();
+		unmount(component);
+	});
+});
+
 describe('a settings link to one account', () => {
 	const originalScroll = Element.prototype.scrollIntoView;
 	beforeEach(() => { Element.prototype.scrollIntoView = vi.fn(); });

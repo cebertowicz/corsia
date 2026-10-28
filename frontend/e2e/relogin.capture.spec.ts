@@ -121,6 +121,24 @@ async function openErrorThread(page: Page, request: Request, text: string, accou
 	await expect(page.getByRole('link', { name: 'Settings › Providers' })).toBeVisible();
 }
 
+/** The Accounts/Overview tab row must keep its natural height, however tall the dialog body is. */
+async function expectTabRowIntact(page: Page) {
+	const probe = await page.locator('nav.tabs').evaluate((nav) => {
+		const height = () => nav.getBoundingClientRect().height;
+		const style = getComputedStyle(nav);
+		const parent = getComputedStyle(nav.parentElement!);
+		const shown = { nav: height(), tab: nav.querySelector('.tab')!.getBoundingClientRect().height, flexShrink: style.flexShrink, parentDisplay: parent.display, parentDirection: parent.flexDirection, parentOverflow: parent.overflowY, body: nav.nextElementSibling ? nav.nextElementSibling.getBoundingClientRect().height : null };
+		// Natural height: what the row measures when it is not allowed to shrink.
+		const inline = nav.style.flexShrink;
+		nav.style.flexShrink = '0';
+		const natural = height();
+		nav.style.flexShrink = inline;
+		return { ...shown, natural };
+	});
+	console.log(`TABROW ${JSON.stringify(probe)}`);
+	expect(probe.nav).toBeGreaterThanOrEqual(probe.natural - 0.5);
+}
+
 async function longPress(page: Page, target: Locator) {
 	const box = (await target.boundingBox())!;
 	const cdp = await page.context().newCDPSession(page);
@@ -179,6 +197,7 @@ test.describe('Sign in again review frames', () => {
 				await openProviderDialog(page, 'claude-code');
 				await page.locator('#vendor-account-cc-1').getByRole('button', { name: 'Sign in', exact: true }).click();
 				await expect(page.locator('#vendor-account-cc-1 .signin-state')).toContainText('Waiting for sign-in in your browser');
+				await expectTabRowIntact(page);
 				await shot(page, 'c1-sign-in-running', tag, 'cc-1');
 				await page.locator('#vendor-account-cc-1').getByRole('button', { name: 'Check', exact: true }).click();
 				await expect(page.locator('#vendor-account-cc-1 .signin-state')).toHaveCount(0);
@@ -248,14 +267,19 @@ test.describe('Sign in again review frames', () => {
 			});
 
 			test('f: five added accounts in mixed states', async ({ page }) => {
+				const accounts = claudeAccounts({ 'cc-3': 'signed_out', 'cc-4': 'signed_out', 'cc-5': 'signed_out' });
+				// One signed-out row has a long name: it truncates and its Sign in keeps its width.
+				accounts.find((a) => a.id === 'cc-4')!.name = 'Montclair Rail Trail operations and maintenance';
 				await start(page, {
-					accounts: claudeAccounts({ 'cc-3': 'signed_out', 'cc-4': 'signed_out', 'cc-5': 'signed_out' }),
+					accounts,
 					check: (account) => account.id === 'cc-5' ? waiting(account) : null,
 				});
 				await openProviderDialog(page, 'claude-code');
 				await expect(page.locator('#vendor-account-cc-5 .signin-state')).toContainText('Waiting for sign-in in your browser');
 				await shot(page, 'f-five-accounts', tag);
 				// The same list scrolled to its end: the waiting row with Check and Cancel, then the footer.
+				// A phone frame 25px shorter ends the scroll where the first visible row starts, so no row is cut at the top edge.
+				if (mobile) await page.setViewportSize({ width: 393, height: 827 });
 				await page.getByRole('button', { name: 'Add account' }).evaluate((footer) => footer.scrollIntoView({ block: 'end' }));
 				await shot(page, 'f2-five-accounts-scrolled', tag);
 			});

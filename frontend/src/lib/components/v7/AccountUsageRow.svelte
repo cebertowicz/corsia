@@ -113,6 +113,9 @@
 	.compact .controls, .compact :global(.provider-account-policy-control) { display: contents; }
 	.compact :global(.provider-account-policy-controls) { grid-column: -2 / -1; grid-row: 1; justify-self: end; }
 	.compact :global(.policy-status) { grid-column: 1 / -1; justify-self: end; text-align: right; }
+	/* A row action (Sign in) takes the usage column on the name line, ahead of the policy controls; a long name truncates beside it. */
+	.compact :global(.link-target .btn) { grid-row: 1; grid-column: -3 / -2; justify-self: end; }
+	.compact:has(:global(.link-target)) strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 	/* Picker: one compact line under the vendor's group header, set in with the model rows. */
 	.account-usage-row.picker {
@@ -162,5 +165,13 @@
 		.compact strong .email { flex-basis: 100%; }
 		.compact strong .separator { display: none; }
 		.compact strong .marker { flex: 0 0 auto; }
+		/* The action takes the controls column; with policy controls too, a column of its own beside them. */
+		.compact :global(.link-target .btn) { grid-column: -2 / -1; }
+		.compact:has(:global(.link-target)):has(:global(.provider-account-policy-controls)) { grid-template-columns: minmax(0, 1fr) auto auto; }
+		.compact.ordered:has(:global(.link-target)):has(:global(.provider-account-policy-controls)) { grid-template-columns: var(--space-3) minmax(0, 1fr) auto auto; }
+		.compact:has(:global(.link-target)):has(:global(.provider-account-policy-controls)) > strong,
+		.compact:has(:global(.link-target)):has(:global(.provider-account-policy-controls)) > .usage { grid-column: -4 / -3; }
+		.compact:has(:global(.link-target)):has(:global(.provider-account-policy-controls)) :global(.link-target .btn) { grid-column: -3 / -2; }
+		.compact:has(:global(.link-target)) strong .name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 	}
 </style>
