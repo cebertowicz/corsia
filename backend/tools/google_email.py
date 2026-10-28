@@ -291,11 +291,11 @@ class EmailSendTool(Tool):
             return "Error: Not sent: couldn't check the draft. Try again."
         if isinstance(prepared, str):
             return prepared
-        backend, account, message, target, saved_at = prepared
+        backend, account, message, target, guard_read_at = prepared
         try:
             original = None
-            if saved_at is not None:
-                original, newer = await new_arrival(backend, str(account["id"]), str(target["reply_to"]), saved_at)
+            if guard_read_at is not None:
+                original, newer = await new_arrival(backend, str(account["id"]), str(target["reply_to"]), guard_read_at)
                 if newer:
                     return f"Error: Not sent: a newer message arrived:\n{newer}\n\nSave a new draft and wait for the person's reply."
             quote_body = await backend.fetch_body(str(account["id"]), original.message_id) if original else None
@@ -342,7 +342,7 @@ class EmailSendTool(Tool):
             return backend, account, message, target, None
         if not target.get("guard_read_at"):
             return f"Error: {UNGUARDED_REPLY}"
-        saved_at = datetime.fromisoformat(target["guard_read_at"])
-        if saved_at.tzinfo is None:
-            saved_at = saved_at.replace(tzinfo=timezone.utc)
-        return backend, account, message, target, saved_at
+        guard_read_at = datetime.fromisoformat(target["guard_read_at"])
+        if guard_read_at.tzinfo is None:
+            guard_read_at = guard_read_at.replace(tzinfo=timezone.utc)
+        return backend, account, message, target, guard_read_at

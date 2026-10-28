@@ -17,7 +17,7 @@ _NO_REPLY = re.compile(r"(^|[.@_-])(no[-_]?reply|do[-_]?not[-_]?reply|donotreply
 _PREFIX = re.compile(r"^\s*(re|fwd|fw|message replied|aw|sv|antw|wg)\s*:\s*", re.I)
 NOT_SHOWN = "The text isn’t shown here; read it in your mail app."
 FLAGGED = "The text isn’t shown here because it may contain instructions aimed at agents; read it in your mail app."
-UNCHECKED = "The text isn’t shown here because your local model hasn’t checked it yet; read it in your mail app."
+UNCHECKED = "The text isn’t shown here because your local model hadn’t checked it when this draft was saved; read it in your mail app."
 
 
 @dataclass(frozen=True)

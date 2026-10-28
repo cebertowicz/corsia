@@ -50,10 +50,10 @@ async def guarded_reply(backend: Any, account: dict, target_id: str, body: str,
 
 
 async def new_arrival(backend: Any, account_id: str, target_id: str,
-                      saved_at: datetime) -> tuple[Message, str | None]:
+                      guard_read_at: datetime) -> tuple[Message, str | None]:
     """Find a thread or sender message at or after the guard-read second, excluding the target."""
-    target, thread, sender, _ = await backend.guard_data(account_id, target_id, saved_at)
-    cutoff = saved_at.replace(microsecond=0)
+    target, thread, sender, _ = await backend.guard_data(account_id, target_id, guard_read_at)
+    cutoff = guard_read_at.replace(microsecond=0)
     candidates = {m.message_id: m for m in thread if m.message_id != target.message_id and m.date >= cutoff}
     candidates.update({m.message_id: m for m in sender if m.message_id != target.message_id
                        and m.date >= cutoff and same_sender(m.sender, target.sender)})
