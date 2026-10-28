@@ -308,8 +308,12 @@ async def list_cc_tools(
     """List the exact tool definitions frozen onto one authenticated live handle."""
     if request.headers.get("X-CORSIA-Fork-Id"):
         from core.fork_cc_bridge import authenticate, definitions
+        from infra.db_async import run_in_db
+        from tools.connected_app_visibility import account_capabilities_for_thread
 
-        return {"tools": list(definitions(authenticate(request, thread_id, token)))}
+        handle = authenticate(request, thread_id, token)
+        capabilities = await run_in_db(account_capabilities_for_thread, thread_id)
+        return {"tools": list(definitions(handle, capabilities))}
     live = _tool_live(request, thread_id, token)
     definitions = getattr(live, "tool_definitions", None)
     if definitions is None:

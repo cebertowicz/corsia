@@ -9,22 +9,18 @@ from tools.base import Tool
 log = logging.getLogger(__name__)
 
 
-def account_capabilities_here() -> frozenset[str]:
-    """Resolve account reach once for an index render; discovery fails closed."""
+def account_capabilities_for_thread(thread_id: str) -> frozenset[str]:
+    """Resolve account reach off-loop for one index render; discovery fails closed."""
     from connections.connected_accounts import capabilities_reaching_thread
-    from infra import state
     from infra.database import get_db
 
-    thread_id = state._current_thread_id.get(None)
-    if not isinstance(thread_id, str) or not thread_id:
-        return frozenset()
     try:
         db = get_db()
         try:
             return capabilities_reaching_thread(thread_id, db=db)
         finally:
             db.close()
-    except (OSError, sqlite3.Error, ValueError, TypeError):
+    except (OSError, sqlite3.Error):
         log.warning("Account capability discovery failed; account tools are not listed")
         return frozenset()
 

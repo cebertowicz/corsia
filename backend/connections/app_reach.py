@@ -352,7 +352,9 @@ def resolve_thread_scopes(thread_id: str, *, db: sqlite3.Connection) -> list[dic
         if missing_project_reason(scope, db=db):
             return None
         scopes.append(scope)
-        parent = db.execute("SELECT parent_thread_id FROM threads WHERE id=?", (current_thread_id,)).fetchone()
+        parent = db.execute(
+            "SELECT parent_thread_id FROM threads WHERE id=?", (current_thread_id,)
+        ).fetchone()
         current_thread_id = parent["parent_thread_id"] if parent is not None else None
     return scopes if current_thread_id is None else None
 
@@ -362,18 +364,13 @@ def reach_reaches_scopes(reach: AppReach, scopes: list[dict] | None) -> bool:
     return scopes is not None and all(_reach_scope(reach, scope) for scope in scopes)
 
 
-def _reach_reaches_thread(reach: AppReach, thread_id: str, *, db: sqlite3.Connection) -> bool:
-    """Apply one reach snapshot to a thread and every parent, failing closed."""
-    return reach_reaches_scopes(reach, resolve_thread_scopes(thread_id, db=db))
-
-
 def reach_reaches_thread(reach: AppReach, thread_id: str, *, db: sqlite3.Connection) -> bool:
     """Apply one persisted reach shape to a durable thread, failing closed.
 
     Connected accounts and hosted apps deliberately share this resolver so a
     scope rule has the same parent-chain semantics for both row kinds.
     """
-    return _reach_reaches_thread(reach, thread_id, db=db)
+    return reach_reaches_scopes(reach, resolve_thread_scopes(thread_id, db=db))
 
 
 def app_reaches_thread(app_id: str, thread_id: str, *, db: sqlite3.Connection) -> bool:
@@ -396,4 +393,6 @@ def _reach_scope(reach: AppReach, scope: dict) -> bool:
         return reach.mode == "all" or (
             reach.mode == "selected" and reach.outside_projects
         )
-    return reach.mode == "all" or (reach.mode == "selected" and project_id in reach.project_ids)
+    return reach.mode == "all" or (
+        reach.mode == "selected" and project_id in reach.project_ids
+    )

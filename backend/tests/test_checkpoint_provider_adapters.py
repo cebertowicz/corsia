@@ -669,7 +669,7 @@ async def test_codex_usable_body_retains_process_exit_diagnostic(
         cwd=str(tmp_path),
         cancel_event=asyncio.Event(),
         cold_input=ColdFoldInput((), 10, None, 0),
-        kind=CHECKPOINT_KIND,
+        kind=CHECKPOINT_KIND, capabilities=frozenset(),
     )
 
     assert result.raw_body == "paid body"

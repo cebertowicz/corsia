@@ -205,6 +205,9 @@ async def test_preview_route_returns_an_estimate(monkeypatch):
         original = getattr(function, "__wrapped__", function)
         if original is thread_runtime._load_next_turn_context_snapshot_provider:
             return "codex", {"model": "codex/model"}, SimpleNamespace()
+        from tools.connected_app_visibility import account_capabilities_for_thread
+        if original is account_capabilities_for_thread:
+            return frozenset()
         assert original is thread_runtime._load_next_turn_context_snapshot_preview
         return preview
 
@@ -220,7 +223,7 @@ async def test_preview_route_returns_an_estimate(monkeypatch):
         lambda: SimpleNamespace(),
     )
     monkeypatch.setattr(
-        "tools.catalog.advertised_tool_definitions", lambda _registry: [],
+        "tools.catalog.advertised_tool_definitions", lambda _registry, _capabilities: [],
     )
 
     result = await thread_runtime.next_turn_context_snapshot(

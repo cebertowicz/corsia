@@ -162,7 +162,7 @@ async def test_codex_context_limit_preserves_streamed_partial_output(
         source_home=tmp_path, isolated_home=tmp_path, cwd=str(tmp_path),
         cancel_event=asyncio.Event(),
         cold_input=SimpleNamespace(input_tokens=10),
-        kind=CHECKPOINT_KIND,
+        kind=CHECKPOINT_KIND, capabilities=frozenset(),
     )
     if not (prior or body):  # No narrative is a named failure.
         from core.fork_types import ProviderForkRejected

@@ -14,6 +14,7 @@ import sqlite3
 import uuid
 from typing import Literal
 
+from connections.account_capabilities import decode_capabilities
 from connections.account_provider import AccountProvider
 from connections.agent_add_reach import AddingScopeError, reach_for_adding_thread as _agent_add_reach
 from connections.app_lifecycle_support import _assert_selected_projects_exist
@@ -106,9 +107,9 @@ def capabilities_reaching_thread(thread_id: str, *, db: sqlite3.Connection) -> f
     corsia = any(row["reach_mode"] == ONLY_CORSIA for row in rows) and _is_corsia_agent_thread(thread_id, db=db)
     result: set[str] = set()
     for row in rows:
-        capabilities = json.loads(row["capabilities_json"])
-        if not isinstance(capabilities, list) or not all(isinstance(item, str) for item in capabilities):
-            raise ConnectedAccountError("invalid connected account")
+        capabilities = decode_capabilities(row["capabilities_json"])
+        if capabilities is None:
+            continue
         if row["reach_mode"] == ONLY_CORSIA:
             reached = corsia
         else:

@@ -103,7 +103,7 @@ async def _codex_initial(monkeypatch, tmp_path, *, warm: bool, tokens: int):
     cold_input = None if warm else Mock(input_tokens=tokens)
     await codex._run_app_server_fork(
         request, source, source_home=tmp_path, isolated_home=tmp_path, cwd=str(tmp_path),
-        cancel_event=asyncio.Event(), cold_input=cold_input, kind=CHECKPOINT_KIND,
+        cancel_event=asyncio.Event(), cold_input=cold_input, kind=CHECKPOINT_KIND, capabilities=frozenset(),
     )
 
 

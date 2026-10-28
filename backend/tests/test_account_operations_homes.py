@@ -844,7 +844,7 @@ async def test_actual_codex_operation_turn_writer_uses_temporary_own_home_and_lo
             model=target.catalog_id) as (frozen, home):
         if operation == 'checkpoint':
             session = _fork_session(frozen, None, source_home=Path(row['source_home']),
-                isolated_home=home, cwd=str(tmp_path), on_event=noop, on_exit=noop, kind=CHECKPOINT_KIND)
+                isolated_home=home, cwd=str(tmp_path), on_event=noop, on_exit=noop, kind=CHECKPOINT_KIND, capabilities=frozenset())
         else:
             session = _new_codex_invocation_session(target, frozen,
                 SimpleNamespace(on_event=noop, on_exit=noop, on_raw_message=noop),

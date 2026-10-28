@@ -201,14 +201,14 @@ class TestSpawn:
                 assert child_count == 1
             return original_build(working_dir)
 
-        def definitions(registry):
+        def definitions(registry, capabilities):
             if events == ["registry_built", "registered"]:
                 events.append("bridge_configured")
             else:
                 assert events == [
                     "registry_built", "registered", "bridge_configured",
                 ]
-            return original_definitions(registry)
+            return original_definitions(registry, capabilities)
 
         monkeypatch.setattr(
             supervisor,

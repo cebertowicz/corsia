@@ -52,6 +52,30 @@ class ForkToolBoundary:
         )
 
 
+def codex_fork_tools(request, cwd: str, kind, capabilities: frozenset[str]):
+    """Use the exact cold surface frozen at fit, or rebuild warm callbacks."""
+    from subagents.harness_tool_bridge import build_tool_registry, dynamic_tool_definitions
+    from tools.catalog import fork_tool_definitions
+
+    if request.warm_source is not None:
+        # Preserve the source's cached prefix; execution still enforces the allowlist.
+        registry = request.tool_registry or build_tool_registry(cwd)
+        return registry, dynamic_tool_definitions(registry, capabilities)
+    if request.tool_registry is not None:
+        definitions = (
+            fork_tool_definitions(request.tool_registry, kind.tool_allowlist)
+            if hasattr(request.tool_registry, "get_definitions") else request.dynamic_tool_specs
+        )
+        return request.tool_registry, allowed_definitions(definitions, kind)
+    registry = build_tool_registry(cwd)
+    definitions = allowed_definitions(
+        fork_tool_definitions(registry, kind.tool_allowlist)
+        if hasattr(registry, "get_definitions") else dynamic_tool_definitions(registry, capabilities),
+        kind,
+    )
+    return registry, definitions
+
+
 def allowed_definitions(definitions, kind):
     """Handle both OpenAI function definitions and Codex dynamic definitions."""
     selected = tuple(

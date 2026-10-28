@@ -13,6 +13,19 @@ if TYPE_CHECKING:
     from tools.registry import ToolRegistry
 
 
+# A person reads an app by its maker's name; unknown apps keep their configured name.
+_APP_DISPLAY_NAMES = {
+    "github": "GitHub", "filesystem": "Files", "playwright": "Playwright",
+    "linear": "Linear", "notion": "Notion", "atlassian": "Atlassian",
+    "stripe": "Stripe", "sentry": "Sentry", "postgres": "Postgres", "slack": "Slack",
+}
+
+
+def app_display_name(server: str) -> str:
+    """The name the context sheet shows for a connected app."""
+    return _APP_DISPLAY_NAMES.get(server.lower(), server)
+
+
 # Pack id -> index heading, in index order. A non-core tool's pack is its
 # category's pack, with ``host_access`` named ``host`` on the tool surface.
 TOOL_PACKS: dict[str, str] = {
@@ -148,15 +161,15 @@ def pack_members() -> dict[str, tuple[str, ...]]:
     return {pack: tuple(names) for pack, names in members.items()}
 
 
-def advertised_tool_definitions(registry: ToolRegistry) -> tuple[dict, ...]:
+def advertised_tool_definitions(registry: ToolRegistry, capabilities: frozenset[str]) -> tuple[dict, ...]:
     """Return the one provider-facing tool list for every harness.
 
     Native, Claude Code (MCP bridge) and Codex (dynamic tools) all send
     exactly this: registered core tools and explicitly always-loaded configured
     MCP tools, sorted by name, each a detached copy. Other tools stay reachable
-    through ``tools_load`` and ``tool_call``, so the list changes only when the
-    registry does: an MCP approved connected-app runtime changes are the only
-    source of such updates.
+    through ``tools_load`` and ``tool_call``. The list changes when the registry
+    changes, account capabilities reaching the thread change, or MCP visibility
+    changes. Account changes include connect, removal and reach edits.
     """
     definitions = []
     for definition in registry.get_definitions():
@@ -169,7 +182,12 @@ def advertised_tool_definitions(registry: ToolRegistry) -> tuple[dict, ...]:
             tool = registry.get(name)
             if not (tool is not None and tool.user_configured and tool.always_advertised):
                 continue
-        definitions.append(deepcopy(definition))
+        definition = deepcopy(definition)
+        if name == "tools_load":
+            from tools.tool_surface import pack_index
+
+            definition["function"]["description"] += pack_index(registry, capabilities)
+        definitions.append(definition)
     definitions.sort(key=lambda definition: definition["function"]["name"])
     return tuple(definitions)
 

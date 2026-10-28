@@ -6,6 +6,7 @@ from llm.context_window import WindowFacts
 import asyncio
 from types import SimpleNamespace
 from typing import Literal
+from unittest.mock import AsyncMock
 
 import pytest
 from core.continuity_accounting import ContinuityAccounting
@@ -2046,8 +2047,8 @@ async def test_codex_stop_owns_same_turn_checkpoint_replacement_before_write(
     )
     monkeypatch.setattr(
         codex_runtime,
-        "_resolve_app_server_tools",
-        lambda *_args, **_kwargs: (object(), ()),
+        "_prepare_app_server_tools",
+        AsyncMock(return_value=(object(), ())),
     )
     monkeypatch.setattr(
         codex_runtime, "_configure_spec_app_server_input", configure_replacement,
@@ -2189,8 +2190,8 @@ async def test_codex_stop_latches_replacement_before_session_configuration(
 
     monkeypatch.setattr(
         codex_runtime,
-        "_resolve_app_server_tools",
-        lambda *_args, **_kwargs: (object(), ()),
+        "_prepare_app_server_tools",
+        AsyncMock(return_value=(object(), ())),
     )
     monkeypatch.setattr(
         codex_runtime, "_validate_codex_transport_model", lambda model: model,
@@ -2346,8 +2347,8 @@ async def test_codex_stop_owns_replacement_session_start_prewrite(
 
     monkeypatch.setattr(
         codex_runtime,
-        "_resolve_app_server_tools",
-        lambda *_args, **_kwargs: (object(), ()),
+        "_prepare_app_server_tools",
+        AsyncMock(return_value=(object(), ())),
     )
     monkeypatch.setattr(
         codex_runtime, "_validate_codex_transport_model", lambda model: model,
@@ -2588,8 +2589,8 @@ async def test_codex_stale_stop_does_not_latch_unbound_successor(
     monkeypatch.setattr(codex_runtime, "_start_live_turn", pause_before_bind)
     monkeypatch.setattr(
         codex_runtime,
-        "_resolve_app_server_tools",
-        lambda *_args, **_kwargs: (object(), ()),
+        "_prepare_app_server_tools",
+        AsyncMock(return_value=(object(), ())),
     )
     monkeypatch.setattr(
         codex_runtime, "_validate_codex_transport_model", lambda model: model,

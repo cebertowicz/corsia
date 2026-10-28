@@ -284,10 +284,13 @@ async def build_real_send_prefix(
     )
     collection, system_prompt, entries, handled = material[:4]
     checkpoint_prompt, checkpoint_component = material[4:]
-    frozen_tools = _selected_tool_definitions(
-        advertised_tool_definitions(agent.tools)
-        if tool_definitions is None else tool_definitions
-    )
+    if tool_definitions is None:
+        from infra.db_async import run_in_db
+        from tools.connected_app_visibility import account_capabilities_for_thread
+
+        capabilities = await run_in_db(account_capabilities_for_thread, thread_id)
+        tool_definitions = advertised_tool_definitions(agent.tools, capabilities)
+    frozen_tools = _selected_tool_definitions(tool_definitions)
     canonical_tools = _canonical_tool_definitions(frozen_tools)
     prefix, system_tokens, tool_tokens, _raw_history_tokens = _budgeted_prefix(
         history=history, system_prompt=system_prompt,

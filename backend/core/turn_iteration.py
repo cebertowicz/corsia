@@ -70,7 +70,10 @@ async def _prepare_iteration_state(
     project_id: str | None, channel: str, chat_id: str, media, model_context_window, prepared_context,
 ) -> _IterationState:
     if prepared_context is None:
-        tool_definitions = _freeze_tool_definitions(advertised_tool_definitions(agent.tools))
+        from tools.connected_app_visibility import account_capabilities_for_thread
+
+        capabilities = await run_in_db(account_capabilities_for_thread, thread_id)
+        tool_definitions = _freeze_tool_definitions(advertised_tool_definitions(agent.tools, capabilities))
         messages, context_usage = await prepare_turn_context(
             agent, thread_id, user_content, turn_model, fresh_context, project_id,
             channel, chat_id, media, model_context_window=model_context_window,

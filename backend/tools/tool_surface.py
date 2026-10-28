@@ -1,8 +1,9 @@
 """Progressive tool disclosure: the pack index, ``tools_load`` and ``tool_call``.
 
-Every harness advertises the same small, byte-stable tool list
-(``tools.catalog.advertised_tool_definitions``). Every other registered tool
-stays reachable through two always-advertised tools: ``tools_load``, whose
+Every harness advertises tool definitions through the same renderer
+(``tools.catalog.advertised_tool_definitions``). The index depends on account
+capabilities and MCP visibility; it can change when accounts or reach change.
+Other registered tools stay reachable through two always-advertised tools: ``tools_load``, whose
 description carries a one-line index of each such tool by pack and whose
 result is the full schemas, and ``tool_call``, which calls any tool by name.
 ``ToolRegistry`` unwraps a ``tool_call`` before its normal execution path, so
@@ -25,7 +26,6 @@ from typing import TYPE_CHECKING, Any
 
 from tools.base import Tool
 from tools.connected_app_visibility import (
-    account_capabilities_here,
     connected_app_reach_refusal,
     mcp_app_id,
     mcp_tool_reaches_thread,
@@ -34,6 +34,7 @@ from tools.connected_app_visibility import (
 from tools.catalog import (
     TOOL_CATALOG,
     TOOL_PACKS,
+    app_display_name as app_display_name,
     is_reachable,
     normalize_tool_name,
     pack_members,
@@ -83,19 +84,6 @@ def dispatch_metadata(name: str, arguments: Any) -> dict[str, str]:
 
 
 _MCP_SUMMARY_CHARS = 120
-
-# A person reads an app by its maker's name; unknown apps keep their configured name.
-_APP_DISPLAY_NAMES = {
-    "github": "GitHub", "filesystem": "Files", "playwright": "Playwright",
-    "linear": "Linear", "notion": "Notion", "atlassian": "Atlassian",
-    "stripe": "Stripe", "sentry": "Sentry", "postgres": "Postgres", "slack": "Slack",
-}
-
-
-def app_display_name(server: str) -> str:
-    """The name the context sheet shows for a connected app."""
-    return _APP_DISPLAY_NAMES.get(server.lower(), server)
-
 
 _CONTROL = re.compile(r"[\x00-\x1f\x7f]")
 _CAMEL = re.compile(r"([a-z])([A-Z])")
@@ -165,9 +153,8 @@ def _server_label(name: str) -> str:
     return _CONTROL.sub("", name)
 
 
-def pack_index(registry: ToolRegistry) -> str:
-    """Render the always-on index: core packs plus one line per MCP server."""
-    capabilities = account_capabilities_here()
+def pack_index(registry: ToolRegistry, capabilities: frozenset[str]) -> str:
+    """Render the index for the explicitly supplied account capabilities."""
     lines = []
     for pack, names in pack_members().items():
         visible = [name for name in names if TOOL_CATALOG[name].account_capability is None
@@ -175,7 +162,8 @@ def pack_index(registry: ToolRegistry) -> str:
         if visible:
             lines.append(f"[{pack}] {TOOL_PACKS[pack]}")
             lines.extend(f"- {name}: {TOOL_CATALOG[name].summary}" for name in visible)
-    if servers := _server_tools(registry):
+    servers = _server_tools(registry)
+    if servers:
         lines.append('[mcp] Tool servers. Load one with tools_load(server="<name>") to see its tools.')
         lines.extend(
             f"- {_server_label(name)}: {len(tools)} tool{'s' if len(tools) != 1 else ''}; "
@@ -187,11 +175,13 @@ def pack_index(registry: ToolRegistry) -> str:
 
 def _user_configured_in_order(registry: ToolRegistry) -> list[Tool]:
     """Configured tools in registration order, which is each server's discovery order."""
-    return [tool for name in registry.tool_names if (tool := registry.get(name)) is not None and tool.user_configured]
+    tools = (registry.get(name) for name in registry.tool_names)
+    return [tool for tool in tools if tool is not None and tool.user_configured]
 
 
 def _user_configured(registry: ToolRegistry) -> list[Tool]:
-    return [tool for name in sorted(registry.tool_names) if (tool := registry.get(name)) is not None and tool.user_configured]
+    tools = (registry.get(name) for name in sorted(registry.tool_names))
+    return [tool for tool in tools if tool is not None and tool.user_configured]
 
 
 def _hidden_mcp_tool(registry: ToolRegistry, name: str) -> bool:
@@ -263,7 +253,7 @@ class ToolsLoadTool(Tool):
 
     @property
     def description(self) -> str:
-        return _LOAD_HEADER + pack_index(self._registry)
+        return _LOAD_HEADER
 
     @property
     def parameters(self) -> dict[str, Any]:

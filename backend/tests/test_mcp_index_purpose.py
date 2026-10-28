@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import pytest
 
+from tools.tool_surface import pack_index
+
 from tests.test_tool_surface_disclosure import (
     _CaptureTool,
     _execute_as,
@@ -48,7 +50,7 @@ def _line(tmp_path, server: str, raws: list[str], description: str = "", **kwarg
     registry = _registry(tmp_path, server)
     for raw in raws:
         registry.register(_Tool(server, raw, description, **kwargs))
-    index = registry.get("tools_load").description
+    index = pack_index(registry, frozenset())
     return next(line for line in index.splitlines() if line.startswith(f"- {server.strip()}"))
 
 
@@ -117,7 +119,7 @@ def test_a_server_name_loses_its_control_characters_in_the_line(tmp_path):
     registry = _registry(tmp_path)
     registry.register(_Tool("wi\nki\x00", "search_pages"))
 
-    index = registry.get("tools_load").description
+    index = pack_index(registry, frozenset())
 
     assert "- wiki: 1 tool; " in index
     assert "\x00" not in index
@@ -130,7 +132,7 @@ async def test_unbound_mcp_tool_is_absent_from_the_index_and_refused(isolated_db
     registry = _registry(tmp_path)
     registry.register(unbound)
 
-    index = registry.get("tools_load").description
+    index = pack_index(registry, frozenset())
     refused = await _execute_as("unbound-purpose-thread", registry, "tool_call", {
         "name": unbound.name, "arguments": {},
     })

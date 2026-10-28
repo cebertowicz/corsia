@@ -5,6 +5,7 @@ from __future__ import annotations
 from llm.context_window import WindowFacts
 import asyncio
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -302,7 +303,7 @@ async def test_codex_stop_owned_boundary_failure_preserves_cancel_owner(
 
     monkeypatch.setattr(codex_runtime, "_new_app_server_live", lambda *_a, **_k: live)
     monkeypatch.setattr(codex_runtime, "_reusable_app_session", lambda _id: session)
-    monkeypatch.setattr(codex_runtime, "_resolve_app_server_tools", lambda *_a, **_k: (object(), ()))
+    monkeypatch.setattr(codex_runtime, "_prepare_app_server_tools", AsyncMock(return_value=(object(), ())))
     monkeypatch.setattr(codex_runtime, "_start_live_turn", start)
     monkeypatch.setattr(codex_runtime, "_configure_spec_app_server_input", configure)
     monkeypatch.setattr(codex_runtime, "_maintain_codex_initial_boundary", boundary)

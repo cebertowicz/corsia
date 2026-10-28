@@ -137,7 +137,7 @@ async def test_codex_idle_resume_selects_current_input(main_db, monkeypatch, inv
         catalog_model_id=model, model=target.transport_model,
         expected_reported_model=target.expected_reported_model,
         runtime_context_epoch=0, returncode=None, tool_registry=registry,
-        dynamic_tools=dynamic_tool_definitions(registry),
+        dynamic_tools=dynamic_tool_definitions(registry, frozenset()),
         config_overrides=_compaction_overrides(
             target.context_window,
             discovered_context_window=target.discovered_context_window,

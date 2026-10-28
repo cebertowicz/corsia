@@ -155,12 +155,12 @@ def test_codex_cold_surface_counts_and_freezes_nested_schemas(
     )
     monkeypatch.setattr(
         "subagents.harness_tool_bridge.dynamic_tool_definitions",
-        lambda _registry: definitions,
+        lambda _registry, _capabilities: definitions,
     )
 
     writer = _target("codex")
     count, frozen_registry, specs, developer = codex_cold_surface(
-        "/work/project", writer=writer,
+        "/work/project", writer=writer, capabilities=frozenset(),
     )
     payload = {
         "developerInstructions": CODEX_WRITE_PATH_DEVELOPER_INSTRUCTIONS,
@@ -186,7 +186,7 @@ def test_luna_131k_fits_the_actual_default_tool_surface(monkeypatch, tmp_path):
     from core.fork_codex import _fit_cold_request
 
     request = _admission(monkeypatch, "codex", window=131_072).provider_request
-    frozen, fitted = _fit_cold_request(request, str(tmp_path), kind=CHECKPOINT_KIND)
+    frozen, fitted = _fit_cold_request(request, str(tmp_path), kind=CHECKPOINT_KIND, capabilities=frozenset())
 
     assert any(tool["name"] == "continuity_edit" for tool in frozen.dynamic_tool_specs)
     assert fitted.input_tokens <= 108_135

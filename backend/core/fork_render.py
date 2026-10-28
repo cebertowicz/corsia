@@ -100,7 +100,7 @@ def _durable_warm_boundary(thread_id: str, boundary, harness: str):
 
 
 def codex_cold_surface(
-    working_dir: str, *, writer: object, registry=None, definitions=None, developer=None,
+    working_dir: str, *, writer: object, capabilities: frozenset[str], registry=None, definitions=None, developer=None,
 ):
     """Freeze and count the known Codex tool surface for one cold fork."""
     from subagents.codex_app_server_events import to_dynamic_tool_specs
@@ -112,7 +112,7 @@ def codex_cold_surface(
 
     registry = registry if registry is not None else build_tool_registry(working_dir)
     if definitions is None:
-        definitions = dynamic_tool_definitions(registry)
+        definitions = dynamic_tool_definitions(registry, capabilities)
     dynamic_tool_specs = tuple(deepcopy(to_dynamic_tool_specs(definitions)))
     names = {str(definition.get("name") or "") for definition in dynamic_tool_specs}
     developer = codex_developer_instructions_with_write_path(

@@ -224,6 +224,7 @@ def resolve_app_server_tools(
     working_dir: str | None,
     tool_registry,
     dynamic_tools: tuple[dict[str, object], ...] | None,
+    capabilities: frozenset[str],
 ):
     if tool_registry is None:
         if dynamic_tools is not None:
@@ -234,12 +235,16 @@ def resolve_app_server_tools(
         )
 
         tool_registry = build_tool_registry(working_dir)
-        dynamic_tools = dynamic_tool_definitions(tool_registry)
-    elif dynamic_tools is None:
-        raise ValueError(
-            "Codex prepared registry requires exact dynamic tool definitions"
-        )
-    elif session is not None and (
+        dynamic_tools = dynamic_tool_definitions(tool_registry, capabilities)
+        return tool_registry, dynamic_tools
+    return validate_prepared_app_server_tools(session, tool_registry, dynamic_tools)
+
+
+def validate_prepared_app_server_tools(session, tool_registry, dynamic_tools):
+    """Reuse the exact surface already frozen during preflight."""
+    if dynamic_tools is None:
+        raise ValueError("Codex prepared registry requires exact dynamic tool definitions")
+    if session is not None and (
         getattr(session, "tool_registry", None) is not tool_registry
         or tuple(getattr(session, "dynamic_tools", ()) or ()) != dynamic_tools
     ):
