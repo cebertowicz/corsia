@@ -47,6 +47,7 @@ interface Latch {
 	seqChangedAt: number | null;
 	lastSeq: number | null;
 	lastPid: number | null;
+	lateReading: { pid: number; seq: number } | null;
 	estimateFrom: number | null;
 	failure: { code: UpdateFailureCode | null; detail: string | null; verdict: boolean } | null;
 	doneAt: number | null;
@@ -93,6 +94,7 @@ function readSources(now: number, l: Latch, operation: UpdateOperation | null, u
 		l.downAt = null;
 		l.lastSeq = null;
 		l.seqChangedAt = null;
+		l.lateReading = null;
 		l.estimateFrom = null;
 		const step = httpStep(operation);
 		const drain = step === 'waiting' ? drainCount(operation?.drain_total, operation?.blocking) : null;
@@ -106,6 +108,20 @@ function readSources(now: number, l: Latch, operation: UpdateOperation | null, u
 		const elapsed = now - l.downAt;
 		l.model.lift(remoteEstimate(l.estimateFrom, elapsed, l.usualSeconds));
 		return { input: { step: 'restarting', count: null, alive: false }, longer: elapsed >= l.usualSeconds * 2_000, estimated: true };
+	}
+	// A still-running old service can report serving as HTTP goes away. Its PID is valid, but it says nothing about
+	// the replacement. Only accept its late startup phases after an earlier phase from that same PID was observed.
+	const latePhase = file?.phase === 'recovering' || file?.phase === 'serving';
+	if (file && latePhase && file.pid !== l.lastPid) {
+		if (l.lastPid === null && file.seq !== l.lastSeq) {
+			l.lastSeq = file.seq;
+			l.seqChangedAt = now;
+		} else if (l.lastPid !== null) {
+			if (l.lateReading?.pid === file.pid && l.lateReading.seq !== file.seq) l.seqChangedAt = now;
+			l.lateReading = { pid: file.pid, seq: file.seq };
+		}
+		const frozen = now - (l.seqChangedAt ?? now);
+		return { input: { step: 'restarting', count: null, alive: frozen < CREEP_STALE_MS }, longer: frozen >= TAKING_LONGER_MS, estimated: false };
 	}
 	if (file && file.phase !== 'failed') {
 		if (file.seq !== l.lastSeq || file.pid !== l.lastPid) {
@@ -153,7 +169,7 @@ export function tickUpdateScreen(now = Date.now()): void {
 		latch = {
 			operationId: operation.operation_id, model: new ProgressModel(),
 			fromVersion: status?.current_version ?? null, toVersion: operation.target_version ?? status?.target_version ?? null,
-			downAt: null, seqChangedAt: null, lastSeq: null, lastPid: null, estimateFrom: null, failure: null, doneAt: null,
+			downAt: null, seqChangedAt: null, lastSeq: null, lastPid: null, lateReading: null, estimateFrom: null, failure: null, doneAt: null,
 				usualSeconds: typeof status?.usual_seconds === 'number' && Number.isFinite(status.usual_seconds) && status.usual_seconds > 0 ? status.usual_seconds : null,
 		};
 	}
@@ -224,7 +240,7 @@ function adoptHandoff(operation: UpdateOperation | null): void {
 		operationId: screen.operationId, model: ProgressModel.restore(screen.model),
 		fromVersion: screen.fromVersion, toVersion: screen.toVersion,
 		downAt: screen.downAt, seqChangedAt: screen.seqChangedAt, lastSeq: screen.lastSeq, lastPid: screen.lastPid,
-		estimateFrom: null, failure: screen.failure && { code: screen.failure.code, detail: null, verdict: screen.failure.verdict },
+		lateReading: null, estimateFrom: null, failure: screen.failure && { code: screen.failure.code, detail: null, verdict: screen.failure.verdict },
 		doneAt: null, usualSeconds: screen.usualSeconds,
 	};
 }

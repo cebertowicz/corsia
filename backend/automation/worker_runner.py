@@ -11,7 +11,7 @@ spawn it makes runs inside, so no start is claimed twice:
    gone or paused, skips it (no replay; the identity is released) and takes no slot. At
    no free slot nothing is claimed or written, and the starts wait in the queue. A
    claimed start's inputs and brief are made (``automation.worker_inputs``) and it starts
-   through ``delegate_task`` with the ``review`` confinement on the
+   through ``delegate_task`` with the ``untrusted`` confinement on the
    owner's model. Local only owners run on their own local model. A model that cannot
    run now is refused and reported through ``worker.no_result``. Spawn records the worker
    on the start (``rule_start``) before its first turn can run. If another spawn took the
@@ -256,7 +256,7 @@ def _write(found: Mapping[str, Any], decision_id: int, run_input: Mapping[str, A
 async def _start(row: Mapping[str, Any], run_input: dict[str, Any]) -> int:
     """Start one claimed request's worker; 1 if it was made."""
     from infra.subagent_caps import LiveSpawnCapExceeded
-    from subagents.cc_invocation import CONFINEMENT_REVIEW
+    from subagents.cc_invocation import CONFINEMENT_UNTRUSTED
     from tools.delegate_task import _spawn
 
     waited = row["id"] <= _state["waited"]
@@ -297,7 +297,7 @@ async def _start(row: Mapping[str, Any], run_input: dict[str, Any]) -> int:
             await run_in_db(_made, row["id"], worker, check)
 
         started = await _spawn(row["thread_id"], found["owner"], task, {
-            "model": found["model"], "confinement": CONFINEMENT_REVIEW,
+            "model": found["model"], "confinement": CONFINEMENT_UNTRUSTED,
             "read_paths": read_paths, "title": found["skill"].name,
         }, rule_start=record)
     except inputs.StartRefused as exc:

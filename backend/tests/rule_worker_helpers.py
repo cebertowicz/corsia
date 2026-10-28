@@ -4,7 +4,7 @@ whose every answer is what the test writes to its reply file.
 
 Everything between the event and the worker's result runs for real: the ``event_rules``
 tool, intake and rule evaluation, the worker runner, ``delegate_task``'s spawn with the
-``review`` confinement, the Claude Code runtime and the settle. Only the owner's own
+``untrusted`` confinement, the Claude Code runtime and the settle. Only the owner's own
 turn after a wake is recorded instead of run.
 """
 

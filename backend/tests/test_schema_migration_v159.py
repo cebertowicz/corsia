@@ -29,13 +29,13 @@ def test_upgrade_repairs_roots_and_parents_but_preserves_review_leaf():
                 "VALUES (?,'u',?,?,?,'t','t')", (thread, parent, mode, dirs)
             )
         db.commit()
-        assert SCHEMA_VERSION == 159
+        assert SCHEMA_VERSION == 160
         assert MIGRATIONS[158] is migrate_158_to_159
-        assert migrate_to_current(db, SCHEMA_VERSION).to_version == 159
+        assert migrate_to_current(db, SCHEMA_VERSION).to_version == 160
         rows = {row[0]: tuple(row[1:]) for row in db.execute(
             "SELECT id,confinement,confined_read_dirs FROM threads")}
         assert rows == {"root": (None, None), "parent": (None, None),
-                        "leaf": ("review", '[ "/leaf" ]'), "damaged": (None, None)}
+                        "leaf": ("untrusted", '[ "/leaf" ]'), "damaged": (None, None)}
         initialize_schema(fresh)
         assert sorted(tuple(row[1:]) for row in db.execute("PRAGMA table_info(threads)")) == sorted(
             tuple(row[1:]) for row in fresh.execute("PRAGMA table_info(threads)"))

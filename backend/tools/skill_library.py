@@ -27,14 +27,7 @@ from tools.skill_library_common import (
 )
 
 
-_DESCRIPTION = (
-    "Find and install reviewed skills from the public CORSIA library, and keep your installed copies current. "
-    "Check your own skills index first, including its names-only line; search here only when nothing there fits. "
-    "`search` takes `query`. `install`, `update` and `remove` take the `name` from a search result. "
-    "Installing puts a copy in your own thread (a temporary worker's goes to its persistent parent), and you can "
-    "load it right away with `read_file`. If the library's version changes or the item is withdrawn, you get a notice. "
-    "Nothing changes your copy unless you call `update` or `remove`."
-)
+from tools.skill_library_schema import DESCRIPTION as _DESCRIPTION, parameters as _parameters
 
 
 def _workspace() -> Path:
@@ -54,35 +47,7 @@ class SkillLibraryTool(Tool):
 
     @property
     def parameters(self) -> dict[str, Any]:
-        return {
-            "type": "object",
-            "additionalProperties": False,
-            "properties": {
-                "action": {
-                    "type": "string",
-                    "enum": ["search", "install", "update", "remove"],
-                    "description": "search reviewed skills, install one, update your copy, or remove your copy",
-                },
-                "query": {
-                    "type": "string",
-                    "description": "search only: words describing the job to do",
-                },
-                "name": {
-                    "type": "string",
-                    "description": "install, update, or remove only: exact name from a search result or your skill index",
-                },
-                "discard_local_edits": {
-                    "type": "boolean",
-                    "default": False,
-                    "description": "update/remove only: set true only with the local_edits_token returned after reviewing affected files",
-                },
-                "local_edits_token": {
-                    "type": "string",
-                    "description": "update/remove only: exact token returned by local_edits; it confirms the listed edits may be discarded",
-                },
-            },
-            "required": ["action"],
-        }
+        return _parameters()
 
     async def execute(self, action: str, **kwargs: Any) -> str:
         from tools.delegation import _require_context
@@ -113,9 +78,9 @@ def _execute(
     db = get_db()
     try:
         try:
-            if action not in {"search", "install", "update", "remove"}:
-                result = _error("invalid_action", "action must be search, install, update, or remove")
-            elif action in {"search", "install", "update"} and not uses_community_improvements(_workspace()):
+            if action not in {"search", "install", "update", "remove", "fetch_pack"}:
+                result = _error("invalid_action", "action must be search, install, update, remove, or fetch_pack")
+            elif action in {"search", "install", "update", "fetch_pack"} and not uses_community_improvements(_workspace()):
                 result = _error(
                     "community_off",
                     "The person hasn't agreed to use the community's improvements (the 'Use community improvements' line in their profile), so the library is off and nothing was searched, installed or updated. Continue without it, and write your own skill with skill skill-creator if you need one. Only the person changes this answer; don't ask them for it just for this task. remove still works on a copy you already hold.",
@@ -126,9 +91,11 @@ def _execute(
                 if action == "search":
                     result = (_error("query_required", "search requires query; pass a few words describing the job")
                               if not isinstance(query, str) or not query.strip()
-                              else _search(query, owner_id, project_id, db))
+                              else _search(query, owner_id, project_id, db, thread_id=thread_id))
                 elif not isinstance(name, str) or not name.strip():
                     result = _error("name_required", f"{action} requires name from a search result or your skills index")
+                elif action == "fetch_pack":
+                    result = _fetch_pack(name, thread_id, project_id, db)
                 elif action == "install":
                     result = _install(name, owner_id, project_id, db)
                 elif action == "update":
@@ -182,18 +149,25 @@ def _source(item: dict[str, Any]) -> str:
     return source_ref(item)
 
 
-def _search(query: str, owner_id: str, project_id: str | None, db) -> dict[str, Any]:
+def _search(query: str, owner_id: str, project_id: str | None, db, *, thread_id: str | None = None) -> dict[str, Any]:
     from library.items import search_items, source_ref
+    from library.pack_fetch import fetched_pack_versions, pack_state
 
     index = _index()
     origins = _installed_library_origins(owner_id, db)
+    items = search_items(index.items, query)
+    pack_versions = fetched_pack_versions(thread_id or owner_id, db) if any(item.get("kind") == "pack" for item in items) else {}
     results = []
-    for item in search_items(index.skills, query):
-        results.append({
+    for item in items:
+        kind = item.get("kind", "skill")
+        result = {
             "name": item["name"], "description": item["description"], "version": item["version"],
-            "license": item["license"], "source": source_ref(item), "files": len(item["files"]),
-            "state": _state(item, origins),
-        })
+            "license": item.get("license"), "source": source_ref(item), "files": len(item["files"]),
+            "state": _state(item, origins) if kind == "skill" else pack_state(item, pack_versions),
+        }
+        if kind == "pack":
+            result["kind"] = "pack"
+        results.append(result)
     if not results:
         return {
             "index_age": index.index_age,
@@ -207,7 +181,17 @@ def _item(name: str):
     from library.items import find_item
 
     index = _index()
-    return index, find_item(index.skills, name)
+    return index, find_item(index.items, name)
+
+
+def _fetch_pack(name: str, thread_id: str, project_id: str | None, db) -> dict[str, Any]:
+    from library.pack_fetch import fetch_pack
+    index, item = _item(name)
+    if item is None:
+        return _error("not_in_library", "search first; names are exact")
+    result = fetch_pack(item, thread_id, project_id, _workspace(), db)
+    result["index_age"] = index.index_age
+    return result
 
 
 def _find_local(name: str, owner_id: str, project_id: str | None, db):
@@ -224,6 +208,8 @@ def _install(name: str, owner_id: str, project_id: str | None, db) -> dict[str, 
         return _error("not_in_library", "search first; names are exact")
     if item["withdrawn"]:
         return _error("withdrawn", f"{item['withdrawn_reason']}; remove takes out a copy you already hold")
+    if item.get("kind", "skill") == "pack":
+        return _error("pack_requires_fetch", "use fetch_pack to fetch a blueprint pack")
     effective, local_rows = _effective(owner_id, project_id, _workspace(), db)
     conflict = next((row for row in effective if row.name.casefold() == name.casefold()), None)
     if conflict is not None:

@@ -1,4 +1,4 @@
-"""A ``review`` worker on a native or local model is confined from its creating write,
+"""A ``untrusted`` worker on a native or local model is confined from its creating write,
 and no later model switch launches it unconfined: every harness reads the row's
 confinement before preparing its tool surface."""
 
@@ -60,7 +60,7 @@ async def test_a_local_review_worker_is_confined_from_its_creating_write(
 
     receipt = await native_spawn.spawn(
         "parent", {"user_id": "steve"}, "review this",
-        {"model": _LOCAL, "confinement": "review", "read_paths": [reviewed_dir]},
+        {"model": _LOCAL, "confinement": "untrusted", "read_paths": [reviewed_dir]},
         rule_start=rule_start,
     )
     assert isinstance(receipt, dict) and receipt["model"] == _LOCAL
@@ -84,7 +84,7 @@ async def test_a_local_review_refuses_a_read_its_parent_lacks(child_db, native_s
     outside.mkdir()
     refused = await native_spawn.spawn(
         "parent", {"user_id": "steve"}, "review",
-        {"model": _LOCAL, "confinement": "review", "read_paths": [str(outside)]},
+        {"model": _LOCAL, "confinement": "untrusted", "read_paths": [str(outside)]},
     )
     assert refused.startswith(f"Error: read path {outside} refused: ")
     native_spawn.sent.assert_not_awaited()
@@ -98,7 +98,7 @@ async def test_codex_review_records_confinement_before_first_input(child_db, nat
     _seed_parent(child_db)
     receipt = await native_spawn.spawn(
         "parent", {"user_id": "steve"}, "review",
-        {"model": "codex/gpt-5-codex", "confinement": "review", "read_paths": [reviewed_dir]},
+        {"model": "codex/gpt-5-codex", "confinement": "untrusted", "read_paths": [reviewed_dir]},
     )
     assert thread_confinement.read_dirs(receipt["thread_id"], child_db) == (reviewed_dir,)
     assert thread_confinement.read_dirs("parent", child_db) is None
@@ -114,7 +114,7 @@ async def test_unverified_codex_refuses_before_creating_a_child(child_db, native
     monkeypatch.setattr(codex_confinement, "verify_version", AsyncMock(side_effect=ConfinementRefused("version refused")))
     result = await native_spawn.spawn(
         "parent", {"user_id": "steve"}, "review",
-        {"model": "codex/gpt-5-codex", "confinement": "review", "read_paths": [reviewed_dir]},
+        {"model": "codex/gpt-5-codex", "confinement": "untrusted", "read_paths": [reviewed_dir]},
     )
     assert "version refused" in result
     assert child_db.execute("SELECT COUNT(*) FROM threads").fetchone()[0] == 1
@@ -131,7 +131,7 @@ async def test_a_confined_worker_switched_to_another_harness_stays_confined(
     _seed_parent(child_db)
     receipt = await native_spawn.spawn(
         "parent", {"user_id": "steve"}, "review",
-        {"model": _LOCAL, "confinement": "review", "read_paths": [reviewed_dir]},
+        {"model": _LOCAL, "confinement": "untrusted", "read_paths": [reviewed_dir]},
     )
     worker = receipt["thread_id"]
     child_db.execute("UPDATE threads SET model='claude-code/sonnet' WHERE id=?", (worker,))
@@ -159,7 +159,7 @@ async def test_native_payload_uses_loaded_row_without_an_advertising_read(child_
     from infra import destination_payloads
 
     _seed_parent(child_db, sid="worker")
-    child_db.execute("UPDATE threads SET confinement='review', confined_read_dirs='[\"/row\"]' WHERE id='worker'")
+    child_db.execute("UPDATE threads SET confinement='untrusted', confined_read_dirs='[\"/row\"]' WHERE id='worker'")
     row = dict(child_db.execute("SELECT * FROM threads WHERE id='worker'").fetchone())
     registry = object()
     monkeypatch.setattr("core.agent.get_agent", AsyncMock(return_value=SimpleNamespace(
