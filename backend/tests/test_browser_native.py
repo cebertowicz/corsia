@@ -83,7 +83,9 @@ async def test_display_secret_and_sign_in_are_distinguished_in_chrome(native_own
 
 
 async def test_pane_open_is_the_stock_clients_current_page(native_owner, monkeypatch):
-    async def serve(_reader, writer):
+    async def serve(reader, writer):
+        # Read the whole request first: closing with unread bytes resets the connection instead.
+        await reader.readuntil(b'\r\n\r\n')
         writer.write(b'HTTP/1.1 200 OK\r\nContent-Length: 12\r\nConnection: close\r\n\r\nBrowser test')
         await writer.drain()
         writer.close()
@@ -99,7 +101,8 @@ async def test_pane_open_is_the_stock_clients_current_page(native_owner, monkeyp
         runtime = native_owner._sessions['native-pane-open']
         binding = runtime.record.binding
         assert binding is not None, f'pane open={opened!r}'
-        # BrowserOpenTool suppresses the one-time notice before parsing get url.
+        # Read through the owner on the existing session only, so a relaunch fails instead of hiding a lost
+        # binding. Like BrowserOpenTool, suppress the one-time notice before parsing get url.
         owner_url = await native_owner.run('native-pane-open', ['get', 'url'], session='existing', notice=False)
         binding_after_owner = (await native_owner._observe(runtime)).binding
         result = await native_owner._invoke(native_owner._session_argv(runtime, ['get', 'url']), timeout=30)
