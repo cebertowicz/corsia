@@ -1,6 +1,6 @@
 import { untrack } from 'svelte';
 import { commentDraft, cancelCommentCapture, discardCommentDraft, type CommentDraft } from '$lib/stores/commentDraft';
-import { captureComment, selectComment, selectionRange, SELECTION_LOST, type CommentSelection } from '$lib/stores/commentSelection';
+import { captureComment, selectComment, selectionRange, SELECTION_LOST, SELECTION_RECONNECTED, type CommentSelection } from '$lib/stores/commentSelection';
 import type { LiveDocumentSession } from '$lib/stores/liveDocumentSession';
 import { addComment } from '$lib/stores/docComments';
 import type { SelectionLabel } from '$lib/stores/commentDraft';
@@ -72,17 +72,25 @@ export function createViewerCommentDraft(context: Context) {
 	// The hold clears on every way out: the comment is drawn, or ends not_placed, orphaned or absent (the effect below);
 	// cancel(); another document is shown (this effect's cleanup).
 	$effect(() => {
+		const scope = context.scope();
+		return () => { posted = null; discardCommentDraft(scope); };
+	});
+	$effect(() => {
 		const session = context.session(), scope = context.scope();
 		untrack(() => {
 			const draft = context.draft();
-			if (draft?.scope === scope && draft.selection && draft.selection.session !== session) discardCommentDraft(scope);
+			if (draft?.scope === scope && draft.selection && draft.selection.session !== session) {
+				posted = null;
+				cancelCommentCapture(scope);
+			}
 		});
-		return () => { posted = null; discardCommentDraft(scope); };
 	});
 	const reason = $derived.by(() => {
 		context.text(); context.generation();
 		const draft = context.draft(), selection = draft?.scope === context.scope() ? draft.selection : undefined;
-		return selection && !selectionRange(selection) ? SELECTION_LOST : '';
+		if (!selection) return '';
+		if (selection.session !== context.session()) return SELECTION_RECONNECTED;
+		return selectionRange(selection) ? '' : SELECTION_LOST;
 	});
 	function select(value: ViewerSelection): void {
 		pending = value;
@@ -95,7 +103,10 @@ export function createViewerCommentDraft(context: Context) {
 	// While the composer is open the scoped draft owns the mark: a new selection does not take it.
 	// A held mark is never resolved against another session's Y doc.
 	const held = $derived(posted && posted.selection.session === context.session() ? posted.selection : null);
-	const pendingComment = $derived((context.isOpen() ? scoped?.selection : pending?.inWidget ? selected : held) ?? null);
+	const pendingComment = $derived.by(() => {
+		const selection = context.isOpen() ? scoped?.selection : pending?.inWidget ? selected : held;
+		return selection?.session === context.session() ? selection : null;
+	});
 	$effect(() => { if (posted && !context.awaitsMark(posted.id)) posted = null; });
 	function cancel(): void { posted = null; discardCommentDraft(context.scope()); context.onClose(); }
 	function start(): void {
