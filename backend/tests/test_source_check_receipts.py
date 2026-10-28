@@ -59,7 +59,7 @@ def test_all_check_writes_failing_returns_safe_error(isolated_db, client, monkey
             raise answer
         return None
 
-    monkeypatch.setattr(connections, "resolve_builtin_binary", lambda p: ({}, None))
+    monkeypatch.setattr(connections, "resolve_builtin_binary", lambda provider, *, db=None: ({}, None))
     monkeypatch.setattr("api.provider_sources.check_harness_source", source_state.check_harness_source)
     monkeypatch.setattr(source_state, "record_source_check", failed)
     response = client.post("/api/providers/sources/recheck")

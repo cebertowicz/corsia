@@ -54,7 +54,7 @@ def test_missing_binary_and_undiscovered_account_remain_unavailable(accounts, mo
     receipt = capture_receipt('codex', account_id=account['id'], db=db)
     assert mark_discovery(account['id'], receipt=receipt, status='ready', models={'codex/test': {}}, db=db)
     db.commit()
-    monkeypatch.setattr('connections.resolve_builtin_binary', lambda *args, **kwargs: ({}, None))
+    monkeypatch.setattr('connections.resolve_builtin_binary', lambda provider, *, db=None: ({}, None))
     assert not connection_available('codex', db=db)
     db.execute("UPDATE connections SET status='not_installed' WHERE provider='codex'")
     db.commit()
