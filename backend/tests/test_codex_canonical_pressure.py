@@ -39,7 +39,7 @@ async def test_recovery_pressure_at_tool_boundary(
     async def contexts(*_args):
         return context, context
 
-    async def current(*_args):
+    async def current(*_args, **_kwargs):
         return 100, None, 262_144
 
     calls = []

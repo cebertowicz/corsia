@@ -118,7 +118,6 @@ async def _prepare_external_checkpoint(
     )
 
 
-# Current input measurement lives beside recovery pressure measurement.
 def _minimum_external_input(prepared, context: ExternalCheckpointContext) -> int:
     fixed = _initial_minimum(prepared) if prepared is not None else 0
     return fixed + context.minimum_tail_tokens
@@ -213,7 +212,7 @@ async def maintain_external_tool_boundary(
     )
     measurement = external_measurement(live, harness, checkpoint_context.target.context_window)
     correlated, current, measured_window = await _current_external_input(
-        context, identity, measurement, complete_input_tokens,
+        context, identity, measurement, complete_input_tokens, render=render_external_selection,
     )
     installed = _installed_at_external_boundary(checkpoint_context, correlated, must_adopt=must_adopt)
 

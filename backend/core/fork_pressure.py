@@ -2,7 +2,10 @@
 
 from core.fork_types import FORK_OUTPUT_TOKENS, FORK_TOOL_ROUND_TRIP_TOKENS
 
-# A warm fork needs its output reserve, checkpoint instruction and tool round trip.
+# R08: a warm fork started at soft-zone entry must fit its output reserve, the
+# checkpoint instruction with its bounded review block, and a tool round trip
+# (#2514). The raise stops at a quarter of the window so a small model cannot
+# fold at low occupancy and loop.
 CHECKPOINT_INSTRUCTION_BUDGET_TOKENS = 8_192
 WARM_FORK_RESERVE_TOKENS = (
     FORK_OUTPUT_TOKENS + CHECKPOINT_INSTRUCTION_BUDGET_TOKENS + FORK_TOOL_ROUND_TRIP_TOKENS

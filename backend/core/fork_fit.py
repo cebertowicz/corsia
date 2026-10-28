@@ -80,7 +80,6 @@ class ColdFoldInputTooLarge(RuntimeError):
     """Even the protected minimum cannot fit one fork call."""
 
 
-# Pressure thresholds are shared with external recovery measurement.
 def foldable_tail_tokens(
     projection: PortableHistoryProjection,
     boundary: HistoryBoundary | None,

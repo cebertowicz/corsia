@@ -10,10 +10,11 @@ async def current_external_input(
     identity: Any,
     measurement: tuple[int | None, int | None],
     complete_input_tokens: int | None = None,
+    *,
+    render,
 ) -> tuple[int | None, Any | None, int | None]:
     """Measure the live call or render the exact context that seeded its handle."""
     from core.context_replay import exact_replay
-    from subagents.harness_checkpoint_resume import render_external_selection
 
     measured, measured_window = measurement
     if complete_input_tokens is not None:
@@ -33,7 +34,7 @@ async def current_external_input(
         selection = await run_in_db(installed_replay, installed)
     else:
         selection = exact_replay(context.history)
-    rendered = await render_external_selection(
+    rendered = await render(
         context,
         identity,
         selection,
@@ -42,10 +43,13 @@ async def current_external_input(
     return None, rendered, measured_window
 
 
-async def recovery_input_tokens(context, identity, window, render):
-    """Measure the installed recovery payload for a Codex tool boundary."""
+async def recovery_input_tokens(
+    context: ExternalCheckpointContext, identity: Any, window: int, render,
+) -> int | None:
+    """Skip the render only when the estimate alone reaches the launch point."""
     from core.checkpoint_resume import installed_replay
-    from core.fork_fit import at_checkpoint_launch_point, foldable_tail_tokens
+    from core.fork_fit import foldable_tail_tokens
+    from core.fork_pressure import at_checkpoint_launch_point
     from history.types import HistoryBoundary
     from infra.db_async import run_in_db
 
