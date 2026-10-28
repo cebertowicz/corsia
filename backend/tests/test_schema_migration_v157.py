@@ -235,6 +235,30 @@ def test_root_with_moved_review_record_is_cleared():
     db.close()
 
 
+def test_parent_whose_deleted_worker_left_its_review_record_is_cleared():
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    db.executescript(SCHEMA_SQL)
+    for thread, parent in (("root", None), ("parent", "root"), ("worker", "parent")):
+        db.execute("INSERT INTO threads (id,user_id,spawned_by,created_at,updated_at) "
+                   "VALUES (?,'u',?,'t','t')", (thread, parent))
+    db.commit()
+    child = dict(integration="claude-code", type="session", external_id="child")
+    models.register_artifact(**child, parent_thread_id="worker", db=db, metadata={
+        "claude_invocation": {"confinement": "review", "add_dirs": ["/src"]}})
+    rehome_artifact(**child, new_owner_thread_id="parent", actor_thread_id=None,
+                    authority="thread_lifecycle", reason="thread_ended:deleted",
+                    source_path="registry.ownership.rehome_on_thread_end", db=db)
+    db.execute("DELETE FROM threads WHERE id='worker'")
+    db.commit()
+    migrate_154_to_155(db)
+    assert thread_confinement.read_dirs("parent", db) == ("/src",)
+    migrate_156_to_157(db)
+    # No longer anyone's spawned_by, but the rehome event shows the record was moved.
+    assert thread_confinement.read_dirs("parent", db) is None
+    db.close()
+
+
 @pytest.mark.parametrize("damaged_moved", [True, False])
 def test_v155_damaged_parent_backfill_clears_only_a_moved_record(damaged_moved):
     db = sqlite3.connect(":memory:")

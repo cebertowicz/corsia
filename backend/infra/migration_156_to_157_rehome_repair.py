@@ -38,13 +38,17 @@ def migrate_156_to_157(conn: sqlite3.Connection) -> None:
         "('artifact_registrations','artifact_identities','artifact_registration_events')"
     ).fetchone()[0] != 3:
         return
-    # A review thread has no CORSIA tools, so a root or a thread that spawned workers
-    # got its confinement from a moved record, unless it holds a closed one of its own.
+    # A review thread has no CORSIA tools, so a root, a thread that spawned workers, or
+    # one a thread-end rehome handed a session (its worker may since be deleted) got its
+    # confinement from a moved record, unless it holds a closed one of its own.
     conn.execute(
         "UPDATE threads SET confinement=NULL, confined_read_dirs=NULL "
         "WHERE (confinement IS NOT NULL OR confined_read_dirs IS NOT NULL) "
         "AND (spawned_by IS NULL OR id IN "
-        "(SELECT spawned_by FROM threads WHERE spawned_by IS NOT NULL)) "
+        "(SELECT spawned_by FROM threads WHERE spawned_by IS NOT NULL) OR id IN "
+        "(SELECT new_owner_thread_id FROM artifact_registration_events "
+        "WHERE event_type='ownership_rehomed' "
+        "AND source_path='registry.ownership.rehome_on_thread_end')) "
         f"AND NOT EXISTS ({_OWN_CLOSED_RECORD})"
     )
     # Provider types are frozen here: migrations are snapshots of their release.
