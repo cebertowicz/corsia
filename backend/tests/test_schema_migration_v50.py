@@ -113,7 +113,7 @@ def _plan_revision(db, plan_id: str) -> int:
 
 
 def test_fresh_schema_is_current_version():
-    assert SCHEMA_VERSION == 156
+    assert SCHEMA_VERSION == 157
 
 
 def test_only_withdrawal_failures_close(tmp_path):

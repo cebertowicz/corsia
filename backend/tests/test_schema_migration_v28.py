@@ -40,7 +40,7 @@ def _legacy_database(tmp_path):
 
 
 def test_fresh_schema_is_current_version():
-    assert SCHEMA_VERSION == 156
+    assert SCHEMA_VERSION == 157
 
 
 def test_migration_retires_lingering_waiting_retry_turns(tmp_path):
