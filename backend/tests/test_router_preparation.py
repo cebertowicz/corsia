@@ -51,8 +51,13 @@ async def test_preparation_order_and_delivery_not_serialized(owned, monkeypatch,
         original(unit, event, payload, *args)
         order.append(("end", label))
 
+    deliveries = []
+
     async def delivery(*args, **kwargs):
-        if args[4]["pr_title"] == "first":
+        # Preparation is serialized, so the first delivery is the first event's;
+        # an outside author's PR title is withheld from the details.
+        deliveries.append(args)
+        if len(deliveries) == 1:
             delivered_first.set()
             await delivery_wait.wait()
         return True
@@ -69,7 +74,7 @@ async def test_preparation_order_and_delivery_not_serialized(owned, monkeypatch,
     await asyncio.sleep(0)
     assert order == [("start", "first")]
     release.set()
-    await delivered_first.wait()
+    await asyncio.wait_for(delivered_first.wait(), 3)
     assert (await two).outcome is router.RouteOutcome.ACCEPTED
     assert not one.done(), "preparation gate serialized awaited delivery"
     delivery_wait.set()

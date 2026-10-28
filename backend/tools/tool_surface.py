@@ -3,7 +3,7 @@
 Every harness advertises the same small, byte-stable tool list
 (``tools.catalog.advertised_tool_definitions``). Every other registered tool
 stays reachable through two always-advertised tools: ``tools_load``, whose
-description carries a one-line index of each such tool by pack and whose
+description indexes them by pack (account-bound ones as a count) and whose
 result is the full schemas, and ``tool_call``, which calls any tool by name.
 ``ToolRegistry`` unwraps a ``tool_call`` before its normal execution path, so
 validation, permissions, plan dispatch records and telemetry all see the real
@@ -31,7 +31,6 @@ from tools.connected_app_visibility import (
     mcp_tool_visible_here,
 )
 from tools.catalog import (
-    TOOL_CATALOG,
     TOOL_PACKS,
     is_reachable,
     normalize_tool_name,
@@ -50,8 +49,9 @@ _LOAD_HEADER = (
     "Load the full schemas of CORSIA tools that are not in your tool list, "
     "then call them with tool_call. Pass pack to load a whole pack, or names "
     "for specific tools. A loaded schema stays valid for the whole thread, so "
-    "load each tool once. Every tool not in your tool list is listed below, "
-    "grouped by pack.\n"
+    "load each tool once. The tools not in your tool list are listed below by "
+    "pack; a pack's connected-account tools are counted, not named, so load "
+    "that pack to see them.\n"
 )
 
 
@@ -229,9 +229,10 @@ def unknown_tool_error(names: list[str], registered: list[str]) -> str:
                 "Close matches: " + ", ".join(_labelled(m) for m in matches) + "."
             )
     parts.append(
-        "Every tool is listed by pack in the tools_load description. Load its "
-        "schema with tools_load(pack=...) or tools_load(names=[...]), then call "
-        "it with tool_call(name, arguments). Packs: " + ", ".join(TOOL_PACKS) + "."
+        "The tools_load description lists tools by pack and counts each pack's "
+        "connected-account tools without naming them. Load a schema with "
+        "tools_load(pack=...) or tools_load(names=[...]), then call it with "
+        "tool_call(name, arguments). Packs: " + ", ".join(TOOL_PACKS) + "."
     )
     return " ".join(parts)
 
@@ -390,8 +391,8 @@ class ToolCallTool(Tool):
         if not isinstance(name, str) or not name.strip():
             return (
                 "Error: tool_call needs the target tool's exact name, e.g. "
-                'tool_call(name="artifact_register", arguments={...}). Every '
-                "tool is listed in the tools_load description."
+                'tool_call(name="artifact_register", arguments={...}). See the '
+                "tools_load index; load a pack to see its counted tools."
             )
         return (
             "Error: tool_call cannot call tool_call. Pass the target tool's "

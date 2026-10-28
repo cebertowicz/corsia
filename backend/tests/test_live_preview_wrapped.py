@@ -99,7 +99,7 @@ async def test_a_wrapper_around_a_wrapper_is_not_previewed(doc):
 async def test_a_wrapped_file_edit_resolves_its_workspace_from_the_real_tool(doc, monkeypatch):
     seen = []
     monkeypatch.setattr("doceditor.live_tools.find_live", lambda path: SimpleNamespace(live=doc.live, policy=None))
-    monkeypatch.setattr("tools.filesystem_gate._resolve_path",
+    monkeypatch.setattr("tools.filesystem_gate.resolve_path",
                         lambda path, workspace, **_: seen.append(workspace) or workspace / path)
     route = PreviewRoute()
     route.start("call-1", thread_id="thread-a", turn_id="turn-1", tool=live_preview.preview_tool("tool_call"),

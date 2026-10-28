@@ -95,7 +95,7 @@ async def test_a_reply_with_no_recipient_anywhere_is_refused(make_host) -> None:
     out = await EmailDraftTool().execute(
         _thread_id=host.thread, account_id=host.account_id, subject="Re: x", body="Yes", reply_to_message_id=_id(host),
     )
-    assert out == "Error: A draft needs at least one recipient."
+    assert "Not saved:" in out and "no usable reply address" in out
 
 
 @pytest.mark.asyncio

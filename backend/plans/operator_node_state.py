@@ -10,8 +10,8 @@ from plans.admission_projection import executor_of
 from plans import operator_node_facts as facts
 from plans.operator_display_state import (
     NODE_LABEL_KEYS, PLAN_LABEL_KEYS, TERMINAL_DISPLAY, TONE_KEYS, _HUMAN_REVIEWS,
-    display_from_facts, needs_user_from_facts, node_paused, plan_paused, retired_display,
-    review_deferred,
+    ask_deferred, display_from_facts, node_paused, plan_paused, retired_display,
+    review_deferred, row_asks_user,
 )
 #: Leaves whose primary condition opens their path by default. Paused work
 #: (a whole-plan pause or a node pause hold) is "Collapsed by default" in the
@@ -135,19 +135,22 @@ _REASONED_CONDITIONS = frozenset({"waiting", "blocked", "paused"})
 
 
 def _status_reason(
-    execution: dict, sequenced_after: str | None, stopped: str | None,
+    execution: dict, sequenced_after: str | None, stopped: str | None, *, deferred_ask: bool = False,
 ) -> str | None:
     """The one specific cause a row names under its title, if it has one."""
     if stopped is not None:
         return stopped
     if sequenced_after is not None:
         return sequenced_after
+    if deferred_ask:
+        # A paused ask keeps its look in the plan, so it names the user's pause, item or plan.
+        return user_steering.USER_PAUSE_REASON
     if execution["condition"] == "review" and node_paused(execution):
-        # Pausing a raised review defers its ask, so the row names the pause.
+        # A paused review the person is not asked for (an agent's) names its own pause.
         return user_steering.placed_pause(execution["causes"]).get("reason")
     if execution["condition"] not in _REASONED_CONDITIONS or _child_plan_working(execution):
         return None
-    # A whole-plan pause is named once in the plan header, not on every row.
+    # A whole-plan pause over work that asks nothing is named once, in the plan header.
     return next(
         (
             cause.get("reason")
@@ -158,28 +161,14 @@ def _status_reason(
     )
 
 
-def _needs_user(node: dict, review: dict | None, execution: dict) -> bool:
-    """Whether this open row has a concrete action the user can take now."""
-    return needs_user_from_facts(
-        str(node["state"]),
-        str(execution["condition"]),
-        None if node.get("assignee") is None else str(node["assignee"]),
-        None if review is None else str(review["kind"]),
-        has_attention=any(
-            link["role"] == "attention" and link.get("attention_state") == "raised"
-            for link in node.get("artifact_links", [])
-        ),
-        plan_paused=plan_paused(execution),
-        node_paused=node_paused(execution),
-    )
-
-
-def _display(node: dict, execution: dict, review: dict | None, *, stopped: str | None = None) -> dict[str, str]:
+def _display(
+    node: dict, execution: dict, review: dict | None, *, asks_user: bool, stopped: str | None = None,
+) -> dict[str, str]:
     return display_from_facts(
         str(node["state"]),
         str(execution["condition"]),
         None if review is None else str(review["kind"]),
-        needs_user=_needs_user(node, review, execution),
+        asks_user=asks_user,
         child_working=_child_plan_working(execution),
         # A stopped selected executor makes an otherwise-running row wait.
         executor_stopped=stopped is not None,
@@ -187,8 +176,6 @@ def _display(node: dict, execution: dict, review: dict | None, *, stopped: str |
             cause.get("reason_key") == "worker_needs_input"
             for cause in execution["causes"]
         ),
-        plan_paused=plan_paused(execution),
-        node_paused=node_paused(execution),
     )
 
 
@@ -273,12 +260,14 @@ def project(
             stopped = operator_stopped.at(
                 stops.get(executor_id), node, item.plan, execution,
             )
+            asks_user = row_asks_user(node, review, execution)
+            deferred_ask = asks_user and ask_deferred(plan_paused=plan_paused(execution), node_paused=node_paused(execution))
             states[node["id"]] = {
                 "executor": _executor(executor_id, node, labels),
                 "execution": execution,
-                "display": _display(node, execution, review, stopped=stopped),
+                "display": _display(node, execution, review, asks_user=asks_user, stopped=stopped),
                 "status_reason": settled_because.get(node["id"]) or _status_reason(
-                    execution, sequenced_after, stopped) or _sent_back(node),
+                    execution, sequenced_after, stopped, deferred_ask=deferred_ask) or _sent_back(node),
                 "evidence": evidence.get(node["id"]),
                 # The commitment total is true only at its one root; every
                 # other node in the tree would otherwise repeat the whole
@@ -287,7 +276,7 @@ def project(
                 "node_cost": node_costs[str(item.plan["id"])][node["id"]],
                 "initiative": initiatives.get(node["id"]),
                 "last_transition_at": None if lean else changed[node["id"]],
-                "requires_user_action": _needs_user(node, review, execution),
+                "requires_user_action": asks_user and not deferred_ask,
             }
     return states
 

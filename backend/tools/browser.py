@@ -18,7 +18,7 @@ from tools.browser_runtime import (
     _run,
 )
 from tools.filesystem_effects import copy_bound_file
-from tools.filesystem_gate import _resolve_path
+from tools.filesystem_gate import resolve_path
 from tools.private_runtime_files import BROWSER_STAGING_DIR, private_mkdtemp
 
 
@@ -179,7 +179,7 @@ class BrowserScreenshotTool(Tool):
         else:
             try:
                 save_path = await asyncio.to_thread(
-                    _resolve_path, path, self._workspace, for_write=True,
+                    resolve_path, path, self._workspace, for_write=True,
                 )
             except PermissionError as exc:
                 return f"Error: {exc}"

@@ -155,7 +155,7 @@ def _resolve_target(raw: str, workspace: Path) -> Path | None:
     re-deriving the join/resolve computation here, so a future change to how
     tools resolve their own targets cannot silently desync this module's
     notion of "what did this read touch" from theirs. Deliberately not the
-    gate's full ``_resolve_path``: that also makes an allow/deny decision,
+    gate's full ``resolve_path``: that also makes an allow/deny decision,
     which is a different question from "where does this path point", and
     this module must never raise or duplicate a permission judgment it does
     not own.

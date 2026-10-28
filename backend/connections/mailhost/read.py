@@ -125,7 +125,7 @@ def _demote(account_id: str, check: dict[str, object]) -> bool:
     return store.demote_revoked(account_id, check)
 
 
-async def _guarded(account_id: str, check: dict[str, object], call):  # type: ignore[no-untyped-def]
+async def guarded(account_id: str, check: dict[str, object], call):  # type: ignore[no-untyped-def]
     try:
         return await asyncio.to_thread(call)
     except MailHostError as exc:
@@ -148,7 +148,7 @@ async def search(account_id: str, query: str, max_results: int) -> list[Message]
         with imap.account_lock(account_id):
             return imap.search(endpoints, username, password, wanted, limit)
 
-    validity, found = await _guarded(account_id, check, call)
+    validity, found = await guarded(account_id, check, call)
     return [Message(mint_message_id(account_id, validity, uid), "", parse(raw, with_body=False)[0]) for uid, raw in found]
 
 
@@ -161,7 +161,7 @@ async def fetch(account_id: str, message_id: str) -> Message:
         with imap.account_lock(account_id):
             return imap.fetch(endpoints, username, password, validity, uid, MAX_FETCH_BYTES)
 
-    raw = await _guarded(account_id, check, call)
+    raw = await guarded(account_id, check, call)
     if raw is None:
         raise MessageNotFound(NOT_FOUND)
     headers, body = parse(raw, with_body=True)

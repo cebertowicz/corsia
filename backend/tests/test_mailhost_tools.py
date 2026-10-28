@@ -318,7 +318,7 @@ async def test_login_abort_is_unreachable_and_does_not_demote_the_row(connected,
         raise MailHostError(SERVER_UNREACHABLE, host=endpoints.imap.host)
 
     with pytest.raises(MailHostError):
-        await mailhost_read._guarded(connected.account_id, before, unreachable)
+        await mailhost_read.guarded(connected.account_id, before, unreachable)
     assert store.read(connected.account_id, db=get_db())[1] == before
 
 
@@ -330,7 +330,8 @@ async def test_search_and_read_work_on_a_connected_mail_host_account(connected, 
     found = json.loads(await EmailSearchTool().execute(_thread_id=connected.thread, query="from:sam", max=5))
     assert connected.built.imap.searches[-1] == 'FROM "sam"'
     ids = [item["message_id"] for item in found["messages"]]
-    assert ids == [mint(connected, 2), mint(connected, 1)] and found["messages"][0]["from"].endswith("<billing@example.com>")
+    # Not yet screened when searched, so the sender-chosen display name is cut to the address (O2).
+    assert ids == [mint(connected, 2), mint(connected, 1)] and found["messages"][0]["from"] == "billing@example.com"
     assert all("body" not in item for item in found["messages"])
     read = json.loads(await EmailReadTool().execute(_thread_id=connected.thread, message_id=mint(connected, 2)))
     assert read["subject"] == "Invoice 42" and BODY_CANARY in read["body"] and read["body"].startswith("<untrusted-email>")
@@ -405,7 +406,7 @@ async def test_refusal_does_not_revoke_a_key_replaced_after_credentials_were_rea
         raise MailHostError(PASSWORD_REFUSED, name="mail.test")
 
     with pytest.raises(MailHostError):
-        await mailhost_read._guarded(connected.account_id, snapshot, refused)
+        await mailhost_read.guarded(connected.account_id, snapshot, refused)
     await check.wait_for_checks()
     _saved, current = store.read(connected.account_id, db=get_db())
     assert current != snapshot and current["status"] == store.OK
@@ -425,7 +426,7 @@ async def test_refusal_does_not_restore_servers_saved_after_credentials_were_rea
         raise MailHostError(PASSWORD_REFUSED, name="mail.test")
 
     with pytest.raises(MailHostError):
-        await mailhost_read._guarded(connected.account_id, snapshot, refused)
+        await mailhost_read.guarded(connected.account_id, snapshot, refused)
     await check.wait_for_checks()
     endpoints, current = store.read(connected.account_id, db=get_db())
     assert endpoints is not None and endpoints.imap.host == "127.0.0.1" and endpoints.imap.port == replacement.imap.port

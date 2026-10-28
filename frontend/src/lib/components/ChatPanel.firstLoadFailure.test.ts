@@ -83,6 +83,25 @@ afterEach(() => {
 });
 
 describe('ChatPanel first-page failure', () => {
+	it('shows the answer after reloading a page when comment refresh fails', async () => {
+		const comment = { id: 'comment', cid: 'c1.1', user_message_id: 'sender', quote: 'target', note: 'why', from_off: 0, to_off: 6, created_at: 't', answers: [] as object[] };
+		let answered = false;
+		globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+			const url = String(input);
+			if (url.includes('/chat-comment-threads')) return { ok: false, status: 503 };
+			if (url.includes('/messages?')) return { ok: true, status: 200, json: async () => ({ messages: [{ id: 'target', thread_id: 'thread-b', role: 'assistant', content: 'target', created_at: 't', seq: 1, metadata: { for_user: true }, chat_comments: [{ ...comment, answers: answered ? [{ assistant_message_id: 'answer', text: 'recovered answer', created_at: 't', unread: true }] : [] }] }], has_more: false, oldest_id: 'target' }) };
+			return { ok: true, status: 200, json: async () => ({}) };
+		}) as unknown as typeof fetch;
+		mountChatPanel();
+		flushSync();
+		await (component as Record<string, any>).selectThread('thread-b');
+		answered = true;
+		emit('message_added', { thread_id: 'thread-b', message: { metadata: { reply_context: { comments: [{ seq: 1, cid: 'c1.1' }] } } } });
+		await vi.waitFor(() => expect(console.error).toHaveBeenCalledWith('Could not refresh chat comment threads', expect.any(Error)));
+		expect(host.textContent).not.toContain('recovered answer');
+		await (component as Record<string, any>).fetchThreadMessages('thread-b');
+		await vi.waitFor(() => expect(host.textContent).toContain('recovered answer'));
+	});
 	it('drops the previous thread rows instead of passing them off as this one', async () => {
 		messages.set([
 			{

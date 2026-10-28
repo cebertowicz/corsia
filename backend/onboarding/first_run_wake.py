@@ -134,7 +134,7 @@ def _app_sources_missing(snapshot: dict[str, Any]) -> dict[str, str]:
 
 
 def _app_agents_found() -> list[str]:
-    """Tools with importable context, found by stat only and independent of provider readiness."""
+    """Tools with importable context, found locally independent of provider readiness."""
     from onboarding import agent_import
     from onboarding.project_discovery import Roots
 

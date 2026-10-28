@@ -103,7 +103,7 @@ def _searches(db: sqlite3.Connection, statements: list[str], alias: str) -> list
 
 
 def test_the_step_is_registered_at_83_and_84_is_current() -> None:
-    assert SCHEMA_VERSION == 155
+    assert SCHEMA_VERSION == 158
     assert MIGRATIONS[83] is migrate_83_to_84
 
 

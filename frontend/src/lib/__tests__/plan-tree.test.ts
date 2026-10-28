@@ -564,6 +564,7 @@ describe('PlanTree — same renderer contract', () => {
 			under(node({ id: 'w', state: 'failed' })),
 			under(node({ id: 'w', held_by: 'user', requires_user_action: true })),
 			under(node({ id: 'w', requires_user_action: true })),
+			under(node({ id: 'w', requires_user_action: false, display: { label_key: 'needs_you', tone_key: 'human-review' } })),
 		];
 		for (const nodes of kept) expect(withoutSoleWrapper(nodes).nodes).toBe(nodes);
 		const current = under(node({ id: 'w' }));

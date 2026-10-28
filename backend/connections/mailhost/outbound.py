@@ -19,6 +19,7 @@ from connections.calendar_document import Invite
 from connections.connected_accounts import get_account
 from connections.mailhost import caldav, folders, imap, invites, read, smtp
 from connections.mailhost.endpoints import Endpoints
+from connections.mailhost.errors import MailHostError
 from infra.database import get_db
 from infra.db_async import run_in_db
 
@@ -101,7 +102,7 @@ async def _keep_copy(account: Sender, kind: str, message: EmailMessage) -> bool:
         with imap.account_lock(account.account_id):
             return imap.append(account.endpoints, account.username, account.password, kind, message.as_bytes())
 
-    saved = await read._guarded(account.account_id, account.check, call)
+    saved = await read.guarded(account.account_id, account.check, call)
     if not saved:
         log.warning("mail host shows no %s folder; the copy was not saved", kind)
     return bool(saved)
@@ -115,7 +116,7 @@ async def _drop_copy(account: Sender, kind: str, message_id: str) -> bool:
             imap.remove_copy(account.endpoints, account.username, account.password, kind, message_id)
 
     try:
-        await read._guarded(account.account_id, account.check, call)
+        await read.guarded(account.account_id, account.check, call)
     except Exception:  # noqa: BLE001 - removing a convenience copy never fails a save or a send
         log.warning("mail host kept a %s copy CORSIA meant to remove", kind)
         return False
@@ -145,10 +146,20 @@ async def send(account: Sender, message: EmailMessage, *, draft_copy: str | None
         return smtp.send_message(account.endpoints, account.endpoints.username, account.password, message,
                                  from_addr=account.address)
 
-    refused = await read._guarded(account.account_id, account.check, deliver)
+    refused = await read.guarded(account.account_id, account.check, deliver)
+
+    def already_copied() -> bool:
+        with imap.account_lock(account.account_id):
+            return imap.has_copy(account.endpoints, account.username, account.password, folders.SENT, str(message["Message-ID"]))
+
     try:
-        sent_copy_missing = not await _keep_copy(account, folders.SENT, message)
-    except Exception:  # noqa: BLE001 - SMTP acceptance makes every later copy failure ancillary
+        copied = await read.guarded(account.account_id, account.check, already_copied)
+    except MailHostError:
+        log.warning("mail host Sent-copy check failed; attempting to save a copy")
+        copied = False
+    try:
+        sent_copy_missing = not copied and not await _keep_copy(account, folders.SENT, message)
+    except MailHostError:
         log.warning("mail host delivered a message but its Sent copy was not saved")
         sent_copy_missing = True
     draft_copy_left = bool(draft_copy) and not await _drop_copy(account, folders.DRAFTS, str(draft_copy))
