@@ -1,4 +1,4 @@
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { expect } from '@playwright/test';
 import { test } from '../support/test';
@@ -74,9 +74,19 @@ for (const width of [393, 1440]) {
 				await writer.close();
 				return;
 			}
+			async function capturePlacement(stage: string) {
+				const dir = process.env.REPLY_CHIP_PLACEMENT_DIR;
+				if (!dir || theme !== 'light') return;
+				mkdirSync(dir, { recursive: true });
+				const button = overlay(page).locator('[data-doc-reply-chip] button');
+				const box = await button.isVisible() ? await button.boundingBox() : null;
+				writeFileSync(path.join(dir, `${stage}-${width}.json`), JSON.stringify(box));
+				await page.screenshot({ path: path.join(dir, `${stage}-${width}.png`), scale: 'css', animations: 'disabled' });
+			}
 			const initialChip = overlay(page).locator('[data-doc-reply-chip] button');
 			await expect(initialChip).toBeVisible();
 			const initialBox = (await initialChip.boundingBox())!;
+			await capturePlacement('waiting');
 			// Inspect the other pin first, then close its comments: the unread reply belongs to pin two.
 			await overlay(page).locator(`[data-region-tag][data-comment-id="${roots[0]}"]:not([inert])`).click();
 			await expect(page.locator(`[data-comment-id="${roots[0]}"]`).last()).toBeVisible();
@@ -124,6 +134,15 @@ for (const width of [393, 1440]) {
 			}
 			await reply(roots[0], 'The header is ready.');
 			await expect(chip).toContainText('2 new replies');
+			await capturePlacement('arrival');
+			if (theme === 'light' && process.env.REPLY_CHIP_PLACEMENT_DIR) {
+				await overlay(page).locator('[data-image-comments-pill]').click();
+				await expect(page.locator('[data-adaptive-drawer]').first()).toBeVisible();
+				await capturePlacement('drawer');
+				if (width === 393) await page.getByRole('button', { name: 'Done', exact: true }).click();
+				else await page.keyboard.press('Escape');
+				await expect(chip).toBeVisible();
+			}
 			if (frameDir) await page.screenshot({ path: path.join(frameDir, `Q1-image-arrival-${theme}-${width}.png`), scale: 'css', animations: 'disabled' });
 			await page.evaluate(() => {
 				const samples: unknown[] = [];
@@ -142,13 +161,16 @@ for (const width of [393, 1440]) {
 			if (width === 1440) {
 				await page.waitForTimeout(300);
 				const samples = await page.evaluate(() => (window as unknown as { __chipSamples: Array<{ same: boolean; chips: Array<{ text: string; animations: number }> }> }).__chipSamples);
-				expect(samples.some(sample => sample.chips[0]?.text.includes('1 new reply'))).toBe(true);
-				expect(samples.every(sample => sample.same && sample.chips.length === 1 && sample.chips[0].animations === 0)).toBe(true);
+				if (process.env.REPLY_CHIP_PLACEMENT_BASELINE !== '1') {
+					expect(samples.some(sample => sample.chips[0]?.text.includes('1 new reply'))).toBe(true);
+					expect(samples.every(sample => sample.same && sample.chips.length === 1 && sample.chips[0].animations === 0)).toBe(true);
+				}
 				// The visible pin is excluded even when its popover closes on pointerdown.
 				await expect(chip).toHaveAttribute('title', '1 new reply');
+				await capturePlacement('other-pin');
 				await chip.click();
 				await expect(page.getByText('The save button stays in place.', { exact: true })).toBeVisible();
-			}
+			} else await capturePlacement('other-pin');
 			await writer.close();
 		});
 	}
