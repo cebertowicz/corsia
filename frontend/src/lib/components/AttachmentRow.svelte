@@ -20,6 +20,7 @@
 		variant = 'row',
 		chipWidth = 'default',
 		newMarker = false,
+		onActivate,
 		task,
 		time,
 	}: {
@@ -31,6 +32,8 @@
 		chipWidth?: 'default' | 'content';
 		/** Show the shared unread marker on a chip. */
 		newMarker?: boolean;
+		/** An alternate destination for a reply chip. */
+		onActivate?: () => void;
 		/** The plan item whose block this ask answers; a context-line segment that truncates before the state. */
 		task?: string;
 		/** When the block happened; read through the transcript's own short time. */
@@ -72,12 +75,13 @@
 	);
 	const typeWord = $derived((card.type ?? 'file').replace(/-/g, ' '));
 	const accessibleName = $derived([card.title, typeWord, stateLabel, counts].filter(Boolean).join(', '));
-	const interactive = $derived(Boolean(card.opens && card.available && threadId && card.path));
+	const interactive = $derived(Boolean(onActivate || (card.opens && card.available && threadId && card.path)));
 
 	function open(event: MouseEvent): void {
 		// The chat column marks chat the active surface on any click inside it; bubbling there would
 		// flip the artifact just opened back to chat, which on a narrow canvas hides it.
 		event.stopPropagation();
+		if (onActivate) { onActivate(); return; }
 		if (!threadId || !card.path) return;
 		openArtifactTab(threadId, { artifactId: card.artifact_id, path: card.path, title: card.name ?? card.title });
 		// The pane is a drawer on narrow canvases; leaving it open would cover the document.

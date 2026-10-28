@@ -6,11 +6,13 @@
 	import { activeModelId } from '$lib/stores/models';
 	import { corsiaAgentId } from '$lib/utils/conductor';
 	import ConductorSourcesPanel from './ConductorSourcesPanel.svelte';
-	import { loadCheckpoints } from '$lib/stores/checkpoints';
 	import { beginThreadEntry } from '$lib/stores/contextUsageByThread';
 	import { hydrateSubagentThread } from '$lib/stores/subagents';
 	import { clearWarmKeysForThread, warmActiveThread } from '$lib/chatWarm';
-	import { subscribeChatPanelEvents } from './chatPanelEvents';
+	import { refreshVisibleThread, subscribeChatPanelEvents } from './chatPanelEvents';
+	import { watchChatCommentThreads } from '$lib/chatCommentRefresh';
+	import { beginChatReplyAttentionRead, setChatReplyAttention } from '$lib/stores/chatReplyAttention';
+	import { createChatReplyJumper } from './chatReplyJump';
 	import { hydrateFetchedMessages, mergeFetchedHistoryRows } from '$lib/messageHistory';
 	import { adoptThreadSnapshot, retainDisplayedRows } from '$lib/stores/displayedThreads';
 	import { beginThreadOpen, failThreadOpen, markFirstPageRendered, type ThreadOpenSource } from '$lib/openTimingRuntime';
@@ -197,8 +199,11 @@
 		await loadOlder(pager, {
 			...guardedPort,
 			async fetchPage(cursor) {
+				const threadId = get(activeThreadId) ?? '';
+				const sequence = beginChatReplyAttentionRead();
 				const page = await guardedPort.fetchPage(cursor);
 				if (page !== PAGER_ABORT && page) {
+					setChatReplyAttention(threadId, page.chat_reply_items ?? [], sequence);
 					mergeTurnSummaries((page as MessagePage).turn_summaries);
 					focusRuns = adoptOlderPageRuns(focusRuns, page);
 				}
@@ -206,9 +211,14 @@
 			},
 		}, focusOn() ? 1 : undefined, needsMore); // a Focus page is one request, never a chain
 	}
-	const loadRun = (stub: RunStub) => void loadRunRange(stub, {
+	const runLoader = {
 		pageSize: MSG_PAGE_SIZE, loads: () => runLoads, onSummaries: mergeTurnSummaries,
-		setLoad: (key, load) => { runLoads = { ...runLoads, [key]: load }; },
+		setLoad: (key: string, load: RunLoad) => { runLoads = { ...runLoads, [key]: load }; },
+	};
+	const loadRun = (stub: RunStub) => void loadRunRange(stub, runLoader);
+	const jumpToChatReply = createChatReplyJumper({
+		pager: () => pager, runs: () => focusRuns, loads: () => runLoads,
+		loadOlder: loadOlderMessages, loadRun: run => loadRunRange(run, runLoader), element: () => messagesEl,
 	});
 	let focusSeen: boolean | undefined; // a changed Focus setting changes what a page holds: start over
 	$effect(() => {
@@ -226,6 +236,7 @@
 	// A newer first-page read makes the older one stale: abort it, never download both.
 	const firstPageRead = supersedingRead();
 	onDestroy(firstPageRead.abort);
+	$effect(() => watchChatCommentThreads(MSG_PAGE_SIZE));
 	/** Drop stale rows when the selected transcript's first page fails. */
 	function failFirstPage(threadId: string): void {
 		firstLoadFailed = true;
@@ -240,6 +251,7 @@
 		firstLoadFailed = false;
 		firstLoadPending = true;
 		const signal = firstPageRead.start();
+		const sequence = beginChatReplyAttentionRead();
 		try {
 			const res = await fetch(`/api/threads/${threadId}/messages?token=${t}&limit=${MSG_PAGE_SIZE}${focusParam()}`, { signal });
 			if (!res.ok) {
@@ -250,6 +262,7 @@
 			const data = await res.json() as MessagePage;
 			if (!isCurrentFirstPageRequest(threadId, gen)) return;
 			firstLoadFailed = false;
+			setChatReplyAttention(threadId, data.chat_reply_items ?? [], sequence);
 			const hydrated = hydrateFetchedMessages(data.messages ?? []);
 			mergeTurnSummaries(data.turn_summaries);
 			adoptThreadSnapshot(threadId, hydrated);
@@ -290,18 +303,7 @@
 			pagerGeneration++;
 			pager = createPager();
 			const myGen = pagerGeneration;
-			const authToken = get(token);
-			try {
-				await Promise.all([
-					loadFirstPage(sid, myGen),
-					authToken
-						? loadCheckpoints(sid, authToken).catch(() => null)
-						: Promise.resolve(null),
-					authToken
-						? hydrateSubagentThread(sid, authToken).catch(() => null)
-						: Promise.resolve(null),
-				]);
-			} catch { /* ignore */ }
+			await refreshVisibleThread(sid, get(token), loadFirstPage(sid, myGen));
 		};
 		document.addEventListener('visibilitychange', handleVisibilityChange);
 		return () => {
@@ -355,6 +357,7 @@
 				bind:showing={attentionDockShowing}
 				suppressed={attentionSuppressed}
 				onOpenDestination={(destination, threadId) => {
+					if (destination.pane === 'chat-replies') return void jumpToChatReply(destination);
 					if (destination.pane === 'document-replies') return openDocumentOnReplies(destination, $activeThreadId, threadId);
 					if (destination.pane === 'documents') onOpenDocuments(destination.id);
 				}}
