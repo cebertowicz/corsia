@@ -247,6 +247,7 @@ def _network_model_payload(
         "description": description,
         "context_window": model.get("context_length"),
         "supports_vision": supports_vision,
+        "supports_reasoning": int(reasoning_shape is not None),
         "metadata_json": json.dumps(metadata),
     }
 
@@ -261,10 +262,10 @@ def _upsert_network_model(db, provider: str, payload: dict, now: str) -> str:
             """UPDATE models SET available = 1, litellm_model = ?,
                display_name = ?, description = ?,
                context_window = COALESCE(?, context_window), supports_vision = ?,
-               metadata_json = ?, last_seen_at = ?, updated_at = ? WHERE id = ?""",
+               supports_reasoning = ?, metadata_json = ?, last_seen_at = ?, updated_at = ? WHERE id = ?""",
             (payload["litellm_model"], payload["display_name"],
              payload["description"], payload["context_window"],
-             payload["supports_vision"], payload["metadata_json"], now, now,
+             payload["supports_vision"], payload["supports_reasoning"], payload["metadata_json"], now, now,
              existing["id"]),
         )
         return "updated"
@@ -275,13 +276,13 @@ def _upsert_network_model(db, provider: str, payload: dict, now: str) -> str:
         """INSERT INTO models
            (id, provider, provider_model_id, litellm_model, display_name,
             description, backend, source, enabled, available, context_window,
-            supports_vision, supports_tools, default_temperature, default_max_tokens,
+            supports_vision, supports_reasoning, supports_tools, default_temperature, default_max_tokens,
             metadata_json, discovered_at, last_seen_at, created_at, updated_at)
-           VALUES (?,?,?,?,?,?,?,?,1,1,?,?,1,NULL,NULL,?,?,?,?,?)""",
+           VALUES (?,?,?,?,?,?,?,?,1,1,?,?,?,1,NULL,NULL,?,?,?,?,?)""",
         ("vmlx-" + str(uuid.uuid4())[:8], provider,
          payload["provider_model_id"], payload["litellm_model"],
          payload["display_name"], payload["description"], "network", "discovered",
-         payload["context_window"], payload["supports_vision"],
+         payload["context_window"], payload["supports_vision"], payload["supports_reasoning"],
          payload["metadata_json"], now, now, now, now),
     )
     return "discovered"
