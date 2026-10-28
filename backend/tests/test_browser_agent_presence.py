@@ -68,6 +68,26 @@ async def test_only_an_agent_command_the_guard_lets_through_puts_the_agent_in_th
 
 
 @pytest.mark.asyncio
+async def test_native_ref_click_is_refused_before_input_when_person_has_control(monkeypatch):
+    owner = _owner(monkeypatch, {"shown": False})
+    browser_control.pane_connected("thread-1", "pane-1")
+    native_calls = []
+
+    async def refuse_person_step(_thread_id, _probe, _args, **_kwargs):
+        raise BrowserSessionError(browser_control.PERSON_STEP)
+
+    async def native_input(_runtime, args, **_kwargs):
+        native_calls.append(args)
+        return CommandResult(0, "{}", ""), False
+
+    monkeypatch.setattr(browser_control, "require_page_access", refuse_person_step)
+    monkeypatch.setattr(owner, "_run_admitted", native_input)
+    with pytest.raises(BrowserSessionError, match=browser_control.PERSON_STEP):
+        await owner.run("thread-1", ("click", "@e1"), session="existing")
+    assert native_calls == []
+
+
+@pytest.mark.asyncio
 async def test_a_pane_that_connects_later_shows_how_long_ago_the_agent_acted_until_the_browser_closes(monkeypatch):
     owner = _owner(monkeypatch, {"shown": False})
     await owner.run("thread-1", ("get", "url"), session="existing")
@@ -188,6 +208,31 @@ async def test_a_read_target_outside_the_viewport_is_not_located_and_the_page_is
     assert ("scrollintoview", "@e2") not in commands
     cdp.viewport = (800, 600)
     assert await browser_dom_write.target_node(_run, "ws://page.test", "@e2") == 7
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("uncovered", "expected"), [(True, 7), (False, None)])
+async def test_css_target_uses_hit_identity(uncovered, expected):
+    class Target(FakeCdp):
+        async def call(self, method, **params):
+            if method == "Runtime.evaluate":
+                return {"result": {"objectId": "target"}}
+            if method == "Runtime.callFunctionOn" and params.get("objectId") == "target":
+                return {"result": {"value": uncovered}}
+            if method == "DOM.describeNode" and params.get("objectId") == "target":
+                return {"node": {"backendNodeId": 7}}
+            return await super().call(method, **params)
+
+    cdp = Target(labelled=False)
+    found, node = await browser_dom_write._css_target(cdp, "#button", {"x": 20, "y": 60, "width": 200, "height": 30})
+    assert found and node == expected
+
+
+@pytest.mark.parametrize("selector", ["@e1", "e1", "ref=e1"])
+def test_ref_click_uses_native_actionability(selector):
+    assert browser_dom_write.native_ref_click(("click", selector))
+    assert not browser_dom_write.native_ref_click(("fill", selector, "value"))
+    assert not browser_dom_write.native_ref_click(("click", "#button"))
 
 
 @pytest.mark.asyncio

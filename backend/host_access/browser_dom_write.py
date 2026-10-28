@@ -1,6 +1,8 @@
 """Agent targets located in the shared page and page-context DOM writes while a person has the pane open (AR1)."""
 from __future__ import annotations
 
+import json
+import re
 from typing import Callable, Sequence
 
 from host_access import browser_cli
@@ -36,6 +38,11 @@ class DomWriteRefused(BrowserSessionError):
 def is_dom_write(args: Sequence[str]) -> bool:
     """Whether an agent command is one the shared page runs as a page-context DOM write."""
     return len(args) >= 2 and args[0] in DOM_WRITES
+
+
+def native_ref_click(args: Sequence[str]) -> bool:
+    """The native daemon owns ref identities and checks their click point itself."""
+    return len(args) == 2 and args[0] == "click" and bool(re.fullmatch(r"(?:@|ref=)?e\d+", args[1].strip()))
 
 
 async def shared_action(run: RunCommand, endpoint: str, args: Sequence[str],
@@ -93,8 +100,45 @@ async def _locate(run: RunCommand, cdp: CdpClient, selector: str, *, scroll: boo
         box = await _box(run, selector)
     if box is None:
         return None, "no_box"
+    if not re.fullmatch(r"(?:@|ref=)?e\d+", selector):
+        found, node = await _css_target(cdp, selector, box)
+        if found:
+            return node, "covered"
     node = await _node_for_box(cdp, box)
     return node, "covered"
+
+
+async def _css_target(cdp: CdpClient, selector: str, box: dict) -> tuple[bool, int | None]:
+    """Resolve the actual CSS target; a hit on it or its descendants is unobstructed."""
+    context = await _isolated_context(cdp)
+    result = await cdp.call("Runtime.evaluate", contextId=context, returnByValue=False, silent=True,
+                            expression=f"document.querySelector({json.dumps(selector)})")
+    target = result.get("result", {}).get("objectId")
+    if not isinstance(target, str):
+        # Native selectors in frames or its extended selector syntax keep the existing resolver.
+        return False, None
+    description = await cdp.call("DOM.describeNode", objectId=target)
+    node = protocol_int(description.get("node", {}).get("backendNodeId"))
+    if not await _box_matches(cdp, node, box):
+        # A same-named target in another selected frame is not this node.
+        return False, None
+    hit = await cdp.call(
+        "Runtime.callFunctionOn", objectId=target, returnByValue=True, silent=True,
+        functionDeclaration="""function(x, y) {
+          const root = this.getRootNode();
+          let hit = root.elementFromPoint(x, y);
+          while (hit) {
+            if (hit === this || this.contains(hit)) return true;
+            const tree = hit.getRootNode();
+            hit = tree instanceof ShadowRoot ? tree.host : null;
+          }
+          return false;
+        }""", arguments=[{"value": box["x"] + box["width"] / 2},
+                         {"value": box["y"] + box["height"] / 2}],
+    )
+    if hit.get("result", {}).get("value") is not True:
+        return True, None
+    return True, node
 
 
 async def _viewport(cdp: CdpClient) -> dict:
