@@ -35,9 +35,7 @@ from registry.pr_lifecycle import record_pull_request_ended
 
 _CHECK_EVENTS = CHECK_SUITE_COMPLETED_EVENTS
 
-_TERMINAL_FAILURE_CONCLUSIONS = frozenset({
-    "failure", "timed_out", "action_required",
-})
+_TERMINAL_FAILURE_CONCLUSIONS = frozenset({"failure", "timed_out", "action_required"})
 
 
 class RouteOutcome(str, Enum):
@@ -245,6 +243,8 @@ def _select_route(
             and routing_state.get("triage") is None):
         return _unowned_check_result(
             internal_event, payload, external_id, selected_pr), routing_state
+    if identity is None and internal_event == "webhook.github.issue_opened":  # only rules route it
+        return RouteResult(RouteOutcome.PARKED, reason="issue_opened_unruled"), routing_state
     reason = "no_artifact" if identity is None else (target.reason or "no_owner")
     return _dead_letter_result(internal_event, payload, reason, external_id), routing_state
 

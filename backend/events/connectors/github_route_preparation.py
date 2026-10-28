@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 
 
 def _chip_line(payload: dict[str, Any], external_id: str | None, summary: str) -> str:
-    """Use a machine-readable line for check suites; otherwise use the summary."""
+    """A readable `CI <conclusion> on <target>` line for check suites; otherwise the summary."""
     suite = payload.get("check_suite") or {}
     if suite and not (payload.get("comment") or payload.get("pull_request")):
         target = external_id or (payload.get("repository") or {}).get("full_name", "")

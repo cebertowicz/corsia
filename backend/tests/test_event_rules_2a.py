@@ -1238,3 +1238,14 @@ async def test_authored_rule_matches_github_content_facts(isolated_db, sent, mon
     await dispatch_github_webhook_for_replay(
         "issues" if kind == "issue.opened" else "issue_comment", raw, delivery_id=f"{kind}-{source}")
     assert _decisions(rule_id=rule["id"])[0]["outcome"] == "woke"
+
+
+@pytest.mark.asyncio
+async def test_opened_issue_without_a_rule_is_not_dead_lettered(isolated_db, sent):
+    from events.connectors.github_webhook import dispatch_github_webhook_for_replay
+
+    _project(P)
+    raw = {"action": "opened", "repository": {"full_name": REPO}, "sender": {"login": "outside"},
+           "issue": {"number": 9, "user": {"login": "outside"}, "title": "outside text"}}
+    await dispatch_github_webhook_for_replay("issues", raw, delivery_id="issue-no-rule")
+    assert _rows("SELECT id FROM dead_letter_events") == []
