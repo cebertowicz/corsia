@@ -271,6 +271,7 @@ async def route_event(
         payload,
         identity,
         selected_pr,
+        delivery_id=delivery_id,
     )
 
     if prepared.result is not None:

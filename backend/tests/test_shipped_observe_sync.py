@@ -12,11 +12,12 @@ def test_sync_reconciles_manifest_declarations_and_preserves_agent_rows(monkeypa
     db.executescript(EVENT_RULE_SCHEMA_SQL)
 
     observe_rules.sync_shipped_rules(db)
-    declared = {r.id: (m.connector, r.tool, list(r.argv_prefix), r.item_type)
+    declared = {r.id: (m.connector, r.tool,
+                       list(r.argv_prefix) if r.tool == "bash" else None, r.item_type)
                 for name in connectors.registered_connectors()
                 for m in [connectors.get_manifest(name)] for r in m.shipped_observe_rules}
     rows = db.execute("SELECT * FROM event_rules").fetchall()
-    assert {r['id']: (r['connector'], r['tool'], json.loads(r['argv_prefix']), r['item_type'])
+    assert {r['id']: (r['connector'], r['tool'], json.loads(r['argv_prefix']) if r['argv_prefix'] else None, r['item_type'])
             for r in rows} == declared
 
     original = connectors.get_manifest('github')

@@ -15,7 +15,6 @@ from events.connector_workflows import ShippedResultContract, ShippedWorkflowDec
 from events.connectors import (
     ConnectorManifest,
     EventTypeDecl,
-    ShippedObserveRuleDecl,
     register,
 )
 if TYPE_CHECKING:
@@ -30,6 +29,7 @@ from events.identity import (
 from events.connectors.github_artifacts import pr_artifact_in_result
 from events.connectors.github_label_events import IDENTITY, change_event
 from events.connectors.github_ownership import declaration_facts
+from events.connectors.github_observe_rules import GITHUB_OBSERVE_RULES
 from events.connectors.github_content_facts import content_facts, content_kind, repository_name
 from events.connectors.github_receiver import GITHUB_RECEIVER
 from events.identity_formula import MalformedEventError, RelationshipDecl
@@ -311,9 +311,7 @@ MANIFEST = register(ConnectorManifest(
     build_artifact_ref=_artifact_ref,
     artifact_extractors={PR_TYPE: pr_artifact_in_result},
     app_identities=frozenset({"https://api.githubcopilot.com", "ghcr.io/github/github-mcp-server"}),
-    shipped_observe_rules=(ShippedObserveRuleDecl(
-        id="ruleset_github_pr_create", tool="bash", argv_prefix=("gh", "pr", "create"), item_type=PR_TYPE,
-    ),),
+    shipped_observe_rules=GITHUB_OBSERVE_RULES,
     shipped_workflows={"github-pr-screen": ShippedWorkflowDecl(
         load=_screen_workflow,
         result=ShippedResultContract(
