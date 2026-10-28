@@ -91,22 +91,40 @@ export async function loadMeasurementWhereToLook(scope = get(measurementScope), 
 	}
 }
 
-function compact(value: number): string {
-	const scaled = (divisor: number, unit: string) => `${Number((value / divisor).toFixed(value / divisor < 10 ? 1 : 0))}${unit}`;
+/** A figure at a set number of decimals: a trailing zero drops at base precision, but stays once extra digits tell a comparison apart. */
+function fixed(value: number, decimals: number, extra: number, grouping = false): string {
+	const digits = Math.min(15, decimals);
+	return Number(value.toFixed(digits)).toLocaleString('en-US', { useGrouping: grouping, minimumFractionDigits: extra > 0 ? digits : 0, maximumFractionDigits: digits });
+}
+
+function compact(value: number, extra = 0): string {
+	const scaled = (divisor: number, unit: string) => `${fixed(value / divisor, (value / divisor < 10 ? 1 : 0) + extra, extra)}${unit}`;
 	if (value >= 1e9) return scaled(1e9, 'B');
 	if (value >= 1e6) return scaled(1e6, 'M');
 	if (value >= 1e3) return scaled(1e3, 'k');
-	return String(Math.round(value));
+	return fixed(value, extra, extra);
 }
 
-/** One figure in the unit its measure is shown in; the same rounding for every row. */
-export function formatWhereToLookValue(value: number, format: WhereToLookFormat): string {
-	if (format === 'percent') return `${Math.round(value * 100)}%`;
-	if (format === 'tokens') return compact(value);
-	if (format === 'dollars') return `$${value.toFixed(2)}`;
-	if (format === 'hours') return `${Number(value.toFixed(value < 10 ? 1 : 0)).toLocaleString('en-US')} h`;
-	if (format === 'minutes') return value.toFixed(1);
-	return String(Number(value.toFixed(2)));
+/** One figure in its measure's unit, optionally showing extra digits to distinguish a comparison. */
+export function formatWhereToLookValue(value: number, format: WhereToLookFormat, extra = 0): string {
+	if (format === 'percent') return `${fixed(value * 100, extra, extra)}%`;
+	if (format === 'tokens') return compact(value, extra);
+	if (format === 'dollars') return `$${value.toFixed(Math.min(15, 2 + extra))}`;
+	if (format === 'hours') return `${fixed(value, (value < 10 ? 1 : 0) + extra, extra, true)} h`;
+	if (format === 'minutes') return value.toFixed(Math.min(15, 1 + extra));
+	return value.toFixed(Math.min(15, 2 + extra));
+}
+
+/** Keep a reported change visible, applying the same precision to its comparison and overall. */
+export function formatWhereToLookRow(row: Pick<WhereToLookRow, 'previous' | 'latest' | 'overall' | 'format'>): [string, string, string] {
+	const values = [row.previous, row.latest, row.overall] as const;
+	let extra = 0;
+	let shown = values.map((value) => value === null ? '–' : formatWhereToLookValue(value, row.format, extra)) as [string, string, string];
+	while (row.previous !== row.latest && shown[0] === shown[1] && extra < 15) {
+		extra++;
+		shown = values.map((value) => value === null ? '–' : formatWhereToLookValue(value, row.format, extra)) as [string, string, string];
+	}
+	return shown;
 }
 
 /** A relative change as a signed whole percent. */

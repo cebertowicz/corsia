@@ -40,7 +40,7 @@ describe('MeasurementOutcomeRates', () => {
 		const [minutes, firstTry] = [...host.querySelectorAll('section.card')];
 		expect(text(minutes.querySelector('h3'))).toBe('Your minutes per outcome');
 		expect(text(minutes.querySelector('.stat'))).toBe('3.0 minutes per outcome, Oct 5 to Nov 1, n 160, -50% vs Sep 7 to Oct 4 (n 160)');
-		expect(text(minutes.querySelector('.asks'))).toBe('All agents together: 0.10 decisions and tasks per outcome, -50%.');
+		expect(text(minutes.querySelector('.asks'))).toBe('All agents together: 0.10 decisions and tasks for you per outcome, -50%.');
 		expect(text(minutes.querySelector('h4'))).toBe('Minutes of your engagement per outcome, Sep 7 to Nov 1, by week');
 		expect(text(minutes.querySelector('figcaption'))).toContain('Your engaged minutes divided by accepted outcomes; source: your time active in CORSIA and accepted outcomes; lower is better. n is accepted outcomes per week.');
 		expect(minutes.querySelectorAll('svg .bar').length).toBeGreaterThan(0);
@@ -48,7 +48,7 @@ describe('MeasurementOutcomeRates', () => {
 		expect(text(firstTry.querySelector('.stat'))).toBe('90% first try, Oct 5 to Nov 1, n 160, +13% vs Sep 7 to Oct 4 (n 160)');
 		expect(text(firstTry.querySelector('figcaption'))).toContain('graded by the agents; source: agent grades; higher is better.');
 		expect(host.querySelectorAll('#asks-title')).toHaveLength(0);
-		expect(host.textContent).not.toMatch(/Decisions and tasks for you per outcome/);
+		expect(text(minutes.querySelector('.asks'))).toMatch(/^All agents together:/);
 	});
 
 	it('puts the asks line under the agents table, not under the headline', () => {
@@ -97,9 +97,14 @@ describe('MeasurementOutcomeRates', () => {
 		const [minutes, firstTry] = [...host.querySelectorAll('section.card')];
 		expect(text(minutes.querySelector('.stat'))).toContain('6.0 minutes per outcome');
 		expect(text(minutes.querySelector('.stat'))).toContain('low n');
-		expect(text(minutes.querySelector('.asks'))).toBe('All agents together: – decisions and tasks per outcome, n/a.');
+		expect(text(minutes.querySelector('.asks'))).toBe('All agents together: – decisions and tasks for you per outcome, n/a.');
 		expect(text(firstTry)).toContain('Nothing was measured for this selection.');
 		expect(firstTry.querySelector('svg')).toBeNull();
+	});
+
+	it('points the asks error to the chart retry', () => {
+		render(panel({ rows: rows('active_hours_per_outcome', eight(0.1, 0.05)) }), panel({ error: 'boom' }), panel());
+		expect(text(host.querySelector('.asks'))).toBe('All agents together: decisions and tasks for you per outcome couldn’t load. Use Retry on Decisions and tasks for you per outcome.');
 	});
 
 	it('keeps loading, empty and error states per card and retries the failed panel', () => {
