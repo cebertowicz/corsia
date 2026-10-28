@@ -21,14 +21,10 @@ export function clipboardKey<T>(event: KeyboardEvent, keys: Set<string>, get: ()
  return true;
 }
 
-export function clipboardReply<T>(message: Record<string, unknown>, clipboard: BrowserPaneClipboard<T> | null, fail: (error: string) => void): boolean {
+export function clipboardReply<T>(message: Record<string, unknown>, clipboard: BrowserPaneClipboard<T> | null): boolean {
  if (message.type === 'clipboard_selection' && typeof message.id === 'number') {
   if (typeof message.text === 'string') clipboard?.selection(message.id, message.text);
   else clipboard?.fail(message.id, typeof message.error === 'string' ? message.error : "CORSIA couldn’t copy from the page. Select the text again and copy.");
-  return true;
- }
- if (message.type === 'pane_error' && typeof message.error === 'string') {
-  fail(message.error);
   return true;
  }
  return false;

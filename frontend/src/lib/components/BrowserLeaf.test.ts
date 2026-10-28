@@ -123,20 +123,23 @@ describe('BrowserLeaf drawing', () => {
 });
 
 describe('BrowserLeaf clipboard shortcuts', () => {
- it('clears a pane failure after a successful operation without clearing navigation errors', () => {
+ it('keeps each pane failure until its own source clears, showing the newest', () => {
   const { socket } = render();
-  socket.receive({ type: 'navigate_result', error: 'blocked' });
-  socket.receive({ type: 'pane_error', error: 'Fit failed' });
-  flushSync();
-  expect(page().textContent).toContain('Fit failed');
-  socket.receive({ type: 'pane_error', error: null });
-  flushSync();
-  expect(page().textContent).not.toContain('Fit failed');
-  expect(page().textContent).toContain('blocked');
-  socket.receive({ type: 'pane_error', error: 'Copy failed' });
+  socket.receive({ type: 'pane_error', source: 'fit', error: 'Fit failed' });
+  socket.receive({ type: 'pane_error', source: 'clipboard', error: 'Copy failed' });
   socket.receive({ type: 'navigate_result', error: null });
   flushSync();
-  expect(page().textContent).not.toContain('Copy failed');
+  expect(page().textContent).toContain('Copy failed');
+  socket.receive({ type: 'pane_error', source: 'clipboard', error: null });
+  flushSync();
+  expect(page().textContent).toContain('Fit failed');
+  socket.receive({ type: 'pane_error', source: 'clipboard', error: 'Copy failed again' });
+  socket.receive({ type: 'pane_error', source: 'fit', error: null });
+  flushSync();
+  expect(page().textContent).toContain('Copy failed again');
+  socket.receive({ type: 'pane_error', source: 'clipboard', error: null });
+  flushSync();
+  expect(page().textContent).not.toContain('Copy failed again');
  });
  it('copies the selected page text to the host clipboard', async () => {
   let written: Promise<Blob> | undefined;

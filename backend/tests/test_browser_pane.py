@@ -389,7 +389,7 @@ async def test_refused_pane_fit_reaches_the_pane(monkeypatch):
     browser_stream._request_match('fit-refused', 'pane',
         {'width': 700, 'height': 1400, 'scale': 2, 'scheme': 'dark'}, messages.append)
     await browser_stream._runners['fit-refused']
-    assert messages == [{'type': 'pane_error',
+    assert messages == [{'type': 'pane_error', 'source': 'fit',
                          'error': "CORSIA couldn’t fit the page to the pane. Try resizing the pane again."}]
 
 
@@ -402,7 +402,7 @@ async def test_successful_fit_clears_a_previous_pane_error(monkeypatch):
     browser_stream._request_match('fit-success', 'pane',
         {'width': 700, 'height': 1400, 'scale': 2, 'scheme': 'dark'}, messages.append)
     await browser_stream._runners['fit-success']
-    assert messages == [{'type': 'pane_error', 'error': None}]
+    assert messages == [{'type': 'pane_error', 'source': 'fit', 'error': None}]
 
 
 @pytest.mark.asyncio

@@ -84,6 +84,33 @@ async def test_refused_pane_fit_is_sent_to_the_connected_pane(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_mouse_and_keyboard_clear_only_clipboard_error(monkeypatch):
+    delivered = asyncio.Event()
+    async def input_event(*_args):
+        pass
+    monkeypatch.setattr(browser_stream.browser_pane, 'mouse_event', input_event)
+    monkeypatch.setattr(browser_stream.browser_pane, 'key_event', input_event)
+    class Pane(FakePane):
+        async def receive_text(self):
+            if self.messages:
+                return self.messages.pop(0)
+            await delivered.wait()
+            raise WebSocketDisconnect()
+        async def send_text(self, payload):
+            await super().send_text(payload)
+            if len([item for item in self.text if json.loads(item).get('type') == 'pane_error']) == 2:
+                delivered.set()
+    pane = Pane([json.dumps({'type': 'input_mouse', 'eventType': 'mousePressed'}),
+                 json.dumps({'type': 'input_keyboard', 'eventType': 'keyDown'})])
+    with pytest.raises(WebSocketDisconnect):
+        await asyncio.wait_for(browser_stream._relay(pane, 'thread', 'user'), 1)
+    assert [json.loads(item) for item in pane.text if json.loads(item).get('type') == 'pane_error'] == [
+        {'type': 'pane_error', 'source': 'clipboard', 'error': None},
+        {'type': 'pane_error', 'source': 'clipboard', 'error': None},
+    ]
+
+
+@pytest.mark.asyncio
 async def test_clipboard_actions_stay_on_the_connected_page(monkeypatch):
     actions = []
     delivered = asyncio.Event()
@@ -148,19 +175,23 @@ async def test_copy_inside_an_embedded_frame_says_the_clipboard_was_kept(monkeyp
         async def __aexit__(self, *_args):
             return False
         call = staticmethod(evaluate)
-    monkeypatch.setattr(page_clipboard, 'CdpClient', lambda _endpoint: Cdp())
+    monkeypatch.setattr(page_clipboard, 'CdpClient', lambda _endpoint, **_kwargs: Cdp())
     async def selection(_thread, _connection, request_id):
         return await page_clipboard.clipboard_selection('endpoint', f'pane:{request_id}')
     monkeypatch.setattr(browser_clipboard.browser_pane, 'clipboard_selection', selection)
     messages = []
     await browser_clipboard.handle('thread', 'pane', {'type': 'clipboard_selection', 'id': 1}, messages.append)
     assert messages == [{'type': 'clipboard_selection', 'id': 1,
-                         'error': "CORSIA can’t copy from inside this embedded area. Your clipboard wasn’t changed."}]
+                         'error': "Couldn’t copy from this embedded area because it comes from another site. Your clipboard wasn’t changed."}]
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('failure', [OSError('CDP disconnected'), WebSocketException('message too big')])
-async def test_clipboard_transport_failure_reports_error_and_allows_retry(monkeypatch, failure):
+@pytest.mark.parametrize(('failure', 'message'), [
+    (OSError('CDP disconnected'), 'CORSIA couldn’t copy from the page. Select the text again and copy.'),
+    (WebSocketException('disconnected'), 'CORSIA couldn’t copy from the page. Select the text again and copy.'),
+    (browser_stream.browser_clipboard.SelectionTooLargeError('too large'), 'CORSIA couldn’t copy because too much text is selected. Select less text and copy.'),
+])
+async def test_clipboard_transport_failure_reports_error_and_allows_retry(monkeypatch, failure, message):
     from ws import browser_clipboard
     calls = 0
     async def selection(*_args):
@@ -174,7 +205,7 @@ async def test_clipboard_transport_failure_reports_error_and_allows_retry(monkey
     await browser_clipboard.handle('thread', 'pane', {'type': 'clipboard_selection', 'id': 1}, messages.append)
     await browser_clipboard.handle('thread', 'pane', {'type': 'clipboard_selection', 'id': 2}, messages.append)
     assert messages == [
-        {'type': 'clipboard_selection', 'id': 1, 'error': 'CORSIA couldn’t copy from the page. Select the text again and copy.'},
+        {'type': 'clipboard_selection', 'id': 1, 'error': message},
         {'type': 'clipboard_selection', 'id': 2, 'text': 'recovered'},
     ]
 

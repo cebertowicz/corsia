@@ -229,18 +229,31 @@ async def test_native_pane_clipboard_copy_cut_and_paste(native_owner, monkeypatc
             result = await cdp.call('Runtime.evaluate', expression="document.querySelector('#destination').value", returnByValue=True)
         assert result['result']['value'] == 'Pasted text'
         # A successful paste reports no error: it clears any the pane is showing.
-        assert replies[1:] == [{'type': 'pane_error', 'error': None}]
-        # Focus inside an embedded frame hides its selection from the top document, so copy says so.
+        assert replies[1:] == [{'type': 'pane_error', 'source': 'clipboard', 'error': None}]
+        # Same-origin frame selection and cut operate in that frame's own document.
         async with browser_cdp.CdpClient(endpoint) as cdp:
             await cdp.call('Runtime.evaluate', expression=(
-                "document.body.innerHTML = '<iframe srcdoc=\"<p>Framed text</p>\"></iframe>';"
-                "new Promise(done => document.querySelector('iframe').onload = () => {"
-                " const frame = document.querySelector('iframe'); frame.focus();"
-                " const range = frame.contentDocument.createRange(); range.selectNodeContents(frame.contentDocument.body);"
-                " frame.contentWindow.getSelection().addRange(range); done(); })"), awaitPromise=True)
+                "document.body.innerHTML = '<iframe></iframe>';"
+                "const frame = document.querySelector('iframe');"
+                "frame.contentDocument.body.innerHTML = '<input value=\"Cut me here\">';"
+                "const input = frame.contentDocument.querySelector('input'); input.focus(); input.setSelectionRange(0, 7);"))
         await browser_clipboard.handle(thread, connection, {'type': 'clipboard_selection', 'id': 2}, replies.append)
-        assert replies[2:] == [{'type': 'clipboard_selection', 'id': 2,
-                                'error': "CORSIA can’t copy from inside this embedded area. Your clipboard wasn’t changed."}]
+        await browser_clipboard.handle(thread, connection, {'type': 'clipboard_cut', 'id': 2, 'text': 'Cut me '}, replies.append)
+        async with browser_cdp.CdpClient(endpoint) as cdp:
+            result = await cdp.call('Runtime.evaluate', expression="document.querySelector('iframe').contentDocument.querySelector('input').value", returnByValue=True)
+        assert result['result']['value'] == 'here'
+        assert replies[2:] == [{'type': 'clipboard_selection', 'id': 2, 'text': 'Cut me '},
+                               {'type': 'pane_error', 'source': 'clipboard', 'error': None}]
+        # A sandboxed frame has a different origin even when its content is local.
+        async with browser_cdp.CdpClient(endpoint) as cdp:
+            await cdp.call('Runtime.evaluate', expression=(
+                "document.body.innerHTML = '<iframe sandbox srcdoc=\"<p>Cross origin</p>\"></iframe>';"
+                "new Promise(done => document.querySelector('iframe').onload = () => {"
+                " document.querySelector('iframe').focus(); done(); })"), awaitPromise=True)
+        replies.clear()
+        await browser_clipboard.handle(thread, connection, {'type': 'clipboard_selection', 'id': 5}, replies.append)
+        assert replies == [{'type': 'clipboard_selection', 'id': 5,
+                            'error': 'Couldn’t copy from this embedded area because it comes from another site. Your clipboard wasn’t changed.'}]
         # Cut deletes only the copied selection, in a text field and in an editable region.
         for request, setup, read in (
                 # Each setup is a block: top-level const persists across evaluates and would redeclare.
@@ -260,7 +273,7 @@ async def test_native_pane_clipboard_copy_cut_and_paste(native_owner, monkeypatc
             async with browser_cdp.CdpClient(endpoint) as cdp:
                 result = await cdp.call('Runtime.evaluate', expression=read, returnByValue=True)
             assert replies == [{'type': 'clipboard_selection', 'id': request, 'text': 'Cut me '},
-                               {'type': 'pane_error', 'error': None}]
+                               {'type': 'pane_error', 'source': 'clipboard', 'error': None}]
             assert result['result']['value'] == 'here'
     finally:
         browser_pane.clear_page_endpoint(thread, connection)

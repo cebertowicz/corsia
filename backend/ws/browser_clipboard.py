@@ -4,7 +4,7 @@ from typing import Callable
 from websockets.exceptions import WebSocketException
 
 from host_access import browser_control, browser_pane
-from host_access.browser_clipboard import FrameSelectionError
+from host_access.browser_clipboard import FrameSelectionError, SelectionTooLargeError
 from host_access.browser_session_state import BrowserSessionError
 
 
@@ -15,7 +15,9 @@ async def handle(thread_id: str, connection: str, data: dict, report: Callable[[
             text = await browser_pane.clipboard_selection(thread_id, connection, data["id"])
             report({"type": kind, "id": data["id"], "text": text})
         except FrameSelectionError:
-            report({"type": kind, "id": data["id"], "error": "CORSIA can’t copy from inside this embedded area. Your clipboard wasn’t changed."})
+            report({"type": kind, "id": data["id"], "error": "Couldn’t copy from this embedded area because it comes from another site. Your clipboard wasn’t changed."})
+        except SelectionTooLargeError:
+            report({"type": kind, "id": data["id"], "error": "CORSIA couldn’t copy because too much text is selected. Select less text and copy."})
         except (BrowserSessionError, OSError, WebSocketException, TimeoutError):
             report({"type": kind, "id": data["id"], "error": "CORSIA couldn’t copy from the page. Select the text again and copy."})
     elif (kind == "clipboard_paste" or (kind == "clipboard_cut" and isinstance(data.get("id"), int))) and isinstance(data.get("text"), str):
@@ -25,8 +27,8 @@ async def handle(thread_id: str, connection: str, data: dict, report: Callable[[
             else:
                 await browser_pane.clipboard_cut(thread_id, connection, data["text"], data["id"])
             browser_control.person_input(thread_id)
-            report({"type": "pane_error", "error": None})
+            report({"type": "pane_error", "source": "clipboard", "error": None})
         except (BrowserSessionError, OSError, WebSocketException, TimeoutError):
             message = ("CORSIA couldn’t cut the text. Select it again and cut."
                        if kind == "clipboard_cut" else "CORSIA couldn’t paste into the page. Try pasting again.")
-            report({"type": "pane_error", "error": message})
+            report({"type": "pane_error", "source": "clipboard", "error": message})

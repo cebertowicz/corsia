@@ -219,12 +219,12 @@ async def _relay(pane: WebSocket, thread_id: str, user_id: str) -> None:
                     await browser_pane.mouse_event(thread_id, data, connection_token)
                     browser_control.person_input(thread_id)
                     if data.get("eventType") == "mousePressed":
-                        report({"type": "pane_error", "error": None})
+                        report({"type": "pane_error", "source": "clipboard", "error": None})
                 elif kind == "input_keyboard":
                     await browser_pane.key_event(thread_id, data, connection_token)
                     browser_control.person_input(thread_id)
                     if data.get("eventType") in {"keyDown", "rawKeyDown"}:
-                        report({"type": "pane_error", "error": None})
+                        report({"type": "pane_error", "source": "clipboard", "error": None})
                 elif kind in {"clipboard_selection", "clipboard_paste", "clipboard_cut"}:
                     await browser_clipboard.handle(thread_id, connection_token, data, report)
 
@@ -299,10 +299,10 @@ async def _run_pending(thread_id: str) -> None:
             connection_token, appearance, report = queued
             try:
                 await browser_pane.match_pane(thread_id, appearance)
-                report({"type": "pane_error", "error": None})
+                report({"type": "pane_error", "source": "fit", "error": None})
             except (BrowserSessionError, ProcessOwnerError) as exc:
                 log.warning("browser pane %s kept its old appearance: %s", thread_id, exc)
-                report({"type": "pane_error", "error": "CORSIA couldn’t fit the page to the pane. Try resizing the pane again."})
+                report({"type": "pane_error", "source": "fit", "error": "CORSIA couldn’t fit the page to the pane. Try resizing the pane again."})
         else:
             return
 

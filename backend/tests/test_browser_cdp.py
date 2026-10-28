@@ -215,7 +215,7 @@ async def test_clipboard_selection_and_paste_use_the_page_target(monkeypatch):
         async def call(self, method, **params):
             calls.append((method, params))
             return {'result': {'value': 'selected'}} if method == 'Runtime.evaluate' else {}
-    monkeypatch.setattr(browser_clipboard, 'CdpClient', lambda _endpoint: Client())
+    monkeypatch.setattr(browser_clipboard, 'CdpClient', lambda _endpoint, **_kwargs: Client())
     assert await browser_clipboard.clipboard_selection('endpoint', 'pane:1') == 'selected'
     await browser_clipboard.clipboard_paste('endpoint', 'paste text')
     assert calls[0][0] == 'Runtime.evaluate'
@@ -231,15 +231,15 @@ async def test_cut_refuses_a_different_occurrence_of_the_same_text(monkeypatch):
         async def call(self, _method, **params):
             expressions.append(params['expression'])
             return {'result': {'value': 'same' if len(expressions) == 1 else True}}
-    monkeypatch.setattr(browser_clipboard, 'CdpClient', lambda _endpoint: Client())
+    monkeypatch.setattr(browser_clipboard, 'CdpClient', lambda _endpoint, **_kwargs: Client())
     await browser_clipboard.clipboard_selection('endpoint', 'pane:1')
     await browser_clipboard.clipboard_cut('endpoint', 'same', 'pane:1')
     script = """
       class Input { constructor() { this.value = 'same same'; this.selectionStart = 0; this.selectionEnd = 4; } }
       global.HTMLInputElement = Input; global.HTMLTextAreaElement = class {};
       const node = new Input(); let deleted = false;
-      global.window = {getSelection: () => null};
-      global.document = {activeElement: node, execCommand: () => { deleted = true; return true; }};
+      global.window = {getSelection: () => null, HTMLInputElement: Input, HTMLTextAreaElement: global.HTMLTextAreaElement};
+      global.document = {activeElement: node, defaultView: window, execCommand: () => { deleted = true; return true; }};
       const [copy, cut] = JSON.parse(process.argv[1]);
       if (eval(copy) !== 'same') process.exit(1);
       node.selectionStart = 5; node.selectionEnd = 9;
@@ -254,6 +254,58 @@ async def test_cut_refuses_a_different_occurrence_of_the_same_text(monkeypatch):
       document.execCommand = () => false;
       eval(copy);
       if (eval(cut) !== false) process.exit(5);
+    """
+    subprocess.run(['node', '-e', script, json.dumps(expressions)], check=True)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('by_close_code', [False, True])
+async def test_clipboard_selection_budget_and_oversize_cause(monkeypatch, by_close_code):
+    from websockets.exceptions import ConnectionClosedError, PayloadTooBig
+    from websockets.frames import Close
+    sizes = []
+    class Client:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *_args): pass
+        async def call(self, _method, **_params):
+            if by_close_code:
+                raise ConnectionClosedError(None, Close(1009, 'frame too big'))
+            raise ConnectionClosedError(None, None) from PayloadTooBig(30_100_000, 30_004_096)
+    def connect(_endpoint, **kwargs):
+        sizes.append(kwargs['max_size'])
+        return Client()
+    monkeypatch.setattr(browser_clipboard, 'CdpClient', connect)
+    with pytest.raises(browser_clipboard.SelectionTooLargeError):
+        await browser_clipboard.clipboard_selection('endpoint', 'pane:1')
+    assert sizes == [6 * 5_000_000 + 4096]
+
+
+@pytest.mark.asyncio
+async def test_clipboard_descends_nested_frames_and_refuses_cross_origin(monkeypatch):
+    expressions = []
+    class Client:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *_args): pass
+        async def call(self, _method, **params):
+            expressions.append(params['expression'])
+            return {'result': {'value': 'frame text' if len(expressions) == 1 else True}}
+    monkeypatch.setattr(browser_clipboard, 'CdpClient', lambda _endpoint, **_kwargs: Client())
+    await browser_clipboard.clipboard_selection('endpoint', 'pane:1')
+    await browser_clipboard.clipboard_cut('endpoint', 'frame text', 'pane:1')
+    script = """
+      class Input { constructor() { this.value = 'frame text'; this.selectionStart = 0; this.selectionEnd = 10; } }
+      const input = new Input(), view = {HTMLInputElement: Input, HTMLTextAreaElement: class {}, getSelection: () => null};
+      let deleted = false;
+      const inner = {activeElement: input, defaultView: view, execCommand: () => { deleted = true; return true; }};
+      const middle = {activeElement: {tagName: 'IFRAME', contentDocument: inner}};
+      global.document = {activeElement: {tagName: 'IFRAME', contentDocument: middle}};
+      global.window = {};
+      const [copy, cut] = JSON.parse(process.argv[1]);
+      if (eval(copy) !== 'frame text' || eval(cut) !== true || !deleted) process.exit(1);
+      middle.activeElement = {tagName: 'IFRAME', contentDocument: null};
+      if (eval(copy) !== null) process.exit(2);
+      middle.activeElement = {tagName: 'IFRAME', get contentDocument() { throw Error('denied'); }};
+      if (eval(copy) !== null) process.exit(3);
     """
     subprocess.run(['node', '-e', script, json.dumps(expressions)], check=True)
 

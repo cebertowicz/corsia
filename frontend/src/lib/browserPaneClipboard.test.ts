@@ -6,7 +6,7 @@ describe('browser pane clipboard', () => {
   const clipboard = new BrowserPaneClipboard(vi.fn(), { write: vi.fn(async (items: Record<string, Promise<Blob>>[]) => { await items[0]['text/plain']; }), readText: vi.fn() }, data => data);
   const fail = vi.fn();
   clipboardKey({ type: 'keydown', key: 'c', code: 'KeyC', ctrlKey: true, metaKey: false, altKey: false } as KeyboardEvent, new Set(), () => clipboard, fail);
-  clipboardReply({ type: 'clipboard_selection', id: 1 }, clipboard, fail);
+  clipboardReply({ type: 'clipboard_selection', id: 1 }, clipboard);
   await vi.waitFor(() => expect(fail).toHaveBeenCalledWith("CORSIA couldn’t copy from the page. Select the text again and copy."));
  });
  it('names clipboard permission only when the browser refused it', async () => {

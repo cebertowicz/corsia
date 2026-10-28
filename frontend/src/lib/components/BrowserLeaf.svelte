@@ -8,6 +8,7 @@
 	import { agentColor } from '$lib/docPresence';
 	import { BrowserPaneInput, keyModifiers, keyText, wheelPixels } from '$lib/browserPaneInput';
 	import { BrowserPaneClipboard, clipboardKey, clipboardReply } from '$lib/browserPaneClipboard';
+	import { BrowserPaneErrors } from '$lib/browserPaneErrors.svelte';
 	import { browserTabLabel } from '$lib/browserAddress';
 	import { BrowserAgentPresence, markerPlace, type MarkerPlace } from '$lib/browserAgentPresence.svelte';
 	import { setBrowserPaneLabel } from '$lib/stores/artifactWorkspace';
@@ -27,7 +28,7 @@
 	let passwordPage = $state(false);
 	let keyboardOpen = $state(false);
 	let status = $state('');
-	let paneError = $state('');
+	const paneErrors = new BrowserPaneErrors();
 	let ended = $state(false);
 	let announcement = $state('');
 	const agent = new BrowserAgentPresence();
@@ -124,8 +125,8 @@
 		} catch {
 			return;
 		}
-		if (message.type === 'pane_error' && message.error === null) { paneError = ''; return; }
-		if (clipboardReply(message, clipboard, error => { paneError = error; })) return;
+		if (paneErrors.handle(message)) return;
+		if (clipboardReply(message, clipboard)) return;
 		if (message.type === 'browser_target_changed') {
 			lastAppearance = '';
 			sendAppearance();
@@ -154,7 +155,6 @@
 			else {
 				applyPageMetadata(message.url, message.title, message.domain);
 				status = '';
-				paneError = '';
 			}
 			return;
 		}
@@ -282,7 +282,7 @@
 		if (clipboardKey(event, clipboardKeys, () => clipboard ??= new BrowserPaneClipboard(
 			message => { if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message)); },
 			navigator.clipboard, data => new ClipboardItem(data)
-		), error => { paneError = error; }, () => { paneError = ''; })) return;
+		), error => paneErrors.set('clipboard', error), () => paneErrors.set('clipboard', null))) return;
 		socket.send(JSON.stringify({
 			type: 'input_keyboard', eventType: event.type === 'keydown' ? 'keyDown' : 'keyUp',
 			key: event.key, code: event.code, keyCode: event.keyCode, text: keyText(event), modifiers: keyModifiers(event)
@@ -375,7 +375,7 @@
 		{/if}
 		<!-- The host's own menu would swallow the right button's release and leave it held on the page. -->
 		<canvas bind:this={canvas} tabindex="0" aria-label="Shared browser" onpointerdown={sendMouse} onpointerup={sendMouse} onpointercancel={sendMouse} onpointermove={sendMouse} oncontextmenu={event => event.preventDefault()} onwheel={sendWheel} onkeydown={sendKey} onkeyup={sendKey}></canvas>
-		<BrowserPageStatus status={streaming ? paneError || status : status} {streaming} {ended} onreconnect={connect} onretry={() => void go()} />
+		<BrowserPageStatus status={streaming ? paneErrors.current || status : status} {streaming} {ended} onreconnect={connect} onretry={() => void go()} />
 		{#if passwordPage}<div class="password-notice" class:top={keyboardOpen} role="status" transition:fade={{ duration: $prefersReducedMotion ? 0 : 160 }}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 11V8a5 5 0 0 1 10 0v3M6 11h12v10H6z" /></svg>Enter your password to continue</div>{/if}
 	</div>
 </div>
