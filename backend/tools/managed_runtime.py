@@ -82,8 +82,8 @@ def application_cache_root(home: Path | None = None) -> Path:
     """The CORSIA-owned cache parent whose children must not be agent-replaceable."""
     base = Path.home() if home is None else Path(home)
     if platform.system() == "Linux":
-        xdg = Path(os.environ.get("XDG_CACHE_HOME", ""))
-        return (xdg if xdg.is_absolute() else base / ".cache") / "corsia"
+        # Not XDG_CACHE_HOME: the installer's shell and the systemd service can disagree on it.
+        return base / ".cache" / "corsia"
     return base / "Library" / "Caches" / APP_FOLDER
 
 

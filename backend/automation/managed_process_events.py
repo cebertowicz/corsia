@@ -235,6 +235,10 @@ async def durable_long_running_reservations(
 
 async def on_background_transition(record: ProcessRecord, kind: Transition) -> None:
     from infra.db_async import run_in_db
+    if kind == 'failed':
+        import asyncio
+        from tools.shell_sandbox import recheck_after_background_failure
+        await asyncio.to_thread(recheck_after_background_failure, record)
 
     from infra.admission_fence import is_fenced
 

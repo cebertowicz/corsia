@@ -159,7 +159,12 @@ async def test_script_uses_shared_startup_gate(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_background_command_failure_keeps_cached_probe(executable, monkeypatch):
+@pytest.mark.parametrize(('log', 'lease_id', 'probes'), [
+    (b'make: *** [all] Error 1\n', None, 2),
+    (b'bwrap: setup failed\n', None, 4),
+    (b'bwrap: setup failed\n', 'lease-1', 2),
+])
+async def test_background_failure_reprobes_only_on_bwrap_error(executable, monkeypatch, tmp_path, log, lease_id, probes):
     from types import SimpleNamespace
     from automation import managed_process_events
     from infra import db_async
@@ -174,8 +179,11 @@ async def test_background_command_failure_keeps_cached_probe(executable, monkeyp
     monkeypatch.setattr(shell_sandbox, 'sys', SimpleNamespace(platform='linux'))
     monkeypatch.setattr(managed_process_events, 'row_for', lambda record: {})
     monkeypatch.setattr(db_async, 'run_in_db', no_persistence)
+    log_path = tmp_path / 'process.log'
+    log_path.write_bytes(log)
+    record = SimpleNamespace(lease_id=lease_id, exit_code=1, log_path=log_path)
     assert probe.sandbox_error() is None
     assert len(calls) == 2
-    await managed_process_events.on_background_transition(SimpleNamespace(), 'failed')
+    await managed_process_events.on_background_transition(record, 'failed')
     assert probe.sandbox_error() is None
-    assert len(calls) == 2
+    assert len(calls) == probes

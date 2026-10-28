@@ -120,6 +120,7 @@ async def _run_controlled_git(
             raise RuntimeError(
                 f"{operation} process owner returned an invalid result"
             )
+        await shell_sandbox.recheck_after(owned, leased=lease_id is not None)
         if owned.timed_out:
             raise subprocess.TimeoutExpired(
                 argv,
@@ -441,9 +442,7 @@ class BashTool(Tool):
                 return long_call.started_message(owned.handle)
             if not isinstance(owned, ForegroundProcessResult):
                 raise RuntimeError("process owner returned an invalid result")
-            if not leased:
-                await asyncio.to_thread(shell_sandbox.recheck_after_launch_error,
-                                        owned.returncode, owned.stderr, timed_out=owned.timed_out)
+            await shell_sandbox.recheck_after(owned, leased=leased)
             if owned.timed_out:
                 return f"Error: Command timed out after {effective_timeout} seconds"
 

@@ -162,6 +162,7 @@ async def _run(
             profile_path.unlink(missing_ok=True)
     if not isinstance(owned, ForegroundProcessResult):
         raise ScriptSandboxError("process owner returned an invalid result")
+    await shell_sandbox.recheck_after(owned)
     return ScriptRun(
         owned.returncode, owned.stdout, owned.stderr, bool(owned.timed_out),
     )

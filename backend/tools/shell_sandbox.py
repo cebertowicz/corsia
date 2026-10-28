@@ -23,6 +23,25 @@ def recheck_after_launch_error(returncode, stderr, *, timed_out=False):
         invalidate_sandbox_probe()
 
 
+async def recheck_after(owned, *, leased=False):
+    """Recheck after a foreground result; leased commands don't run under bwrap."""
+    if not leased:
+        await asyncio.to_thread(recheck_after_launch_error, owned.returncode, owned.stderr,
+                                timed_out=bool(owned.timed_out))
+
+
+def recheck_after_background_failure(record):
+    """A background launch's own bwrap error is the first line of its log."""
+    if sys.platform != 'linux' or record.lease_id is not None or record.exit_code != 1:
+        return
+    try:
+        with open(record.log_path, 'rb') as log:
+            head = log.read(256)
+    except OSError:
+        return
+    recheck_after_launch_error(1, head)
+
+
 def is_denial(stderr, is_available):
     messages = ('Operation not permitted',)
     if sys.platform == 'linux':
