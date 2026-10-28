@@ -24,8 +24,10 @@ from events.connectors.github import CHECK_SUITE_PR, MANIFEST
 from events.envelope import EventEnvelope, normalize
 from events.github_mapper import ends_artifact
 from events.identity_formula import MalformedEventError
+from events.platform import Filter
 from events.resolve import Target
 from events.webhook_rules import apply_webhook_rules_sync, record_rule_ride_sync
+from infra.database import get_db
 from infra.product_events import emit_product_event
 
 if TYPE_CHECKING:
@@ -106,7 +108,7 @@ def rule_scope(
 def apply_routed_rules(
     prepared: PreparedRoute, internal_event: str, payload: dict[str, Any],
     selected_pr: dict[str, Any] | None, routing_state: dict[str, Any],
-    wake_reason: str | None = None, scope: RuleScope | None = None,
+    wake_reason: str | None = None, scope: RuleScope | None = None, target_filter: Filter | None = None,
 ) -> None:
     """Deliver what rules add, then drop or annotate the routed delivery in ``prepared``.
 
@@ -117,18 +119,30 @@ def apply_routed_rules(
     notice go ahead as routing prepared them, and the failure is logged.
     """
     scope = scope or RuleScope()
-    if not scope.any_rule:
-        return
-    try:
-        _apply(prepared, internal_event, payload, selected_pr, routing_state, wake_reason, scope)
-    except Exception:
-        logger.exception("event rules: evaluation failed on {}; routing unchanged", internal_event)
+    # _self_authored_result filters the agent's own account for everyone; a
+    # person-account marker filters only the thread that made the tool call.
+    reason = None
+    if prepared.result is None and prepared.thread_id is not None and target_filter:
+        target = routed_targets(prepared.thread_id, wake_reason, routing_state)[0]
+        db = get_db()
+        try:
+            reason = target_filter(target, db)
+        finally:
+            db.close()
+    skipped = (prepared.thread_id,) if reason is not None and prepared.thread_id is not None else ()
+    if scope.any_rule:
+        try:
+            _apply(prepared, internal_event, payload, selected_pr, routing_state, wake_reason, scope, target_filter, skipped)
+        except Exception:
+            logger.exception("event rules: evaluation failed on {}; routing unchanged", internal_event)
+    if reason is not None:
+        drop_delivery(prepared, internal_event, reason)
 
 
 def _apply(
     prepared: PreparedRoute, internal_event: str, payload: dict[str, Any],
     selected_pr: dict[str, Any] | None, routing_state: dict[str, Any],
-    wake_reason: str | None, scope: RuleScope,
+    wake_reason: str | None, scope: RuleScope, target_filter: Filter | None, skipped: tuple[str, ...],
 ) -> None:
     try:
         envelope = scope.envelope or _envelope(internal_event, payload, selected_pr)
@@ -141,11 +155,11 @@ def _apply(
     plan = apply_webhook_rules_sync(
         envelope, internal_event, routed_targets(thread, wake_reason, routing_state),
         ends_artifact=ends_artifact(internal_event),
-        repository_projects=scope.repository_projects)
+        repository_projects=scope.repository_projects, target_filter=target_filter, skipped=skipped)
     if plan is None or thread is None:
         return
     if thread in plan.drops:
-        _drop(prepared, internal_event, f"dropped by rule {plan.drops[thread]}")
+        drop_delivery(prepared, internal_event, f"dropped by rule {plan.drops[thread]}")
         return
     ride = plan.rides.get(thread)
     if ride is None:
@@ -156,8 +170,8 @@ def _apply(
         prepared.details = {**(prepared.details or {}), "rule_notes": list(ride.notes)}
 
 
-def _drop(prepared: PreparedRoute, internal_event: str, reason: str) -> None:
-    """The routed thread wrote a rule dropping this event for itself."""
+def drop_delivery(prepared: PreparedRoute, internal_event: str, reason: str) -> None:
+    """Suppress an event dropped by a rule or caused by the routed thread."""
     from events.connectors import github_pr_notice
     from events.router import RouteOutcome, RouteResult
 

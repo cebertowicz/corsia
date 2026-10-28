@@ -25,12 +25,8 @@ from infra.project_repo_policy import (
 )
 from infra.repo_flock import fast_forward_repo_locked
 from tools.shared_write_detection import collect_shell_shared_write_notices
-from registry.observer import (
-    CommandArtifactRegistrationError,
-    observe_command_result,
-)
+from registry.tool_result_observation import observe_with_warning
 from registry.registration_writer import origin_from_tool_context
-from registry.service import notify_changed
 import tools.agent_shell_tools as agent_shell_tools, tools.shell_long_running as shell_long_running
 from tools.shell_fast_forward import settle_cancelled_fast_forward
 from tools.base import Tool
@@ -56,7 +52,6 @@ from tools.shell_output import (
     REGISTRATION_WARNING_RESULT_CAP as BASH_REGISTRATION_WARNING_RESULT_CAP,
     append_denial_guidance,
     foreground_output_parts,
-    registration_warning as build_registration_warning,
     with_shell_warnings,
 )
 from tools.shell_policy import load_shell_repo_policies
@@ -472,31 +467,14 @@ class BashTool(Tool):
                     )
 
             result = "\n".join(output_parts) if output_parts else "(no output)"
-            registration_warning: str | None = None
-            told: list[str] = []
-            changed: list[dict] = []
-            try:
-                await run_in_db(
-                    observe_command_result,
-                    thread_id,
-                    "bash", {"command": command},
-                    "\n".join(part for part in (stdout_text, stderr_text) if part),
-                    is_error=owned.returncode != 0, notify=False, told=told, changed=changed,
-                    origin=origin_from_tool_context(thread_id, kwargs, "observe_rule"),
-                )
-            except CommandArtifactRegistrationError as exc:
-                log.exception(
-                    "connector command artifact registration failed in %s", thread_id,
-                )
-                registration_warning = build_registration_warning(exc.artifact, exc.error)
-            except Exception as exc:
-                log.exception(
-                    "connector command observation failed in %s", thread_id,
-                )
-                registration_warning = build_registration_warning(None, exc)
-            finally:
-                for artifact in changed:
-                    notify_changed(artifact)
+            told, registration_warning = await run_in_db(
+                observe_with_warning,
+                thread_id,
+                "bash", {"command": command},
+                "\n".join(part for part in (stdout_text, stderr_text) if part),
+                is_error=owned.returncode != 0, notify=False,
+                origin=origin_from_tool_context(thread_id, kwargs, "observe_rule"),
+            )
 
             ownership_notices = await collect_shell_shared_write_notices(
                 thread_id, project_id, command, shared_write_started_at_ns, canonical_cwd, runner=run_off_db,

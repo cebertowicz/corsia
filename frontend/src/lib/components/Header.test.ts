@@ -69,7 +69,7 @@ describe('Header', () => {
 	it('keeps exactly one gear in a thread header', () => {
 		render();
 		expect(host.querySelectorAll('[aria-label$="settings"]')).toHaveLength(1);
-		expect(host.querySelector('[aria-label="Thread settings"]')).not.toBeNull();
+		expect(host.querySelector('[aria-label="Chat settings"]')).not.toBeNull();
 	});
 
 	it('keeps the canvas-open desktop controls in the header', () => {
@@ -81,7 +81,7 @@ describe('Header', () => {
 		const right = host.querySelector('.h-right');
 		expect(right).not.toBeNull();
 		const measurement = right?.querySelector('[aria-label^="Measurement for"]') as HTMLButtonElement;
-		const settings = right?.querySelector('[aria-label="Thread settings"]') as HTMLButtonElement;
+		const settings = right?.querySelector('[aria-label="Chat settings"]') as HTMLButtonElement;
 		const panel = right?.querySelector('[aria-label="Toggle panel"]') as HTMLButtonElement;
 		expect(measurement).toBeTruthy();
 		expect(settings).toBeTruthy();
@@ -115,7 +115,7 @@ describe('Header', () => {
 		uiScope.set({ id: 'project-1', name: 'CORSIA', color: '#d65a87' });
 		canvasHeader.set({ title: 'CORSIA' });
 		render('activity');
-		expect(host.querySelector('[aria-label="Thread settings"]')).toBeNull();
+		expect(host.querySelector('[aria-label="Chat settings"]')).toBeNull();
 		const before = get(settingsNavigation).openRequest;
 		(host.querySelector('[aria-label="Project settings"]') as HTMLButtonElement).click();
 		expect(get(settingsNavigation).openRequest).toBe(before + 1);

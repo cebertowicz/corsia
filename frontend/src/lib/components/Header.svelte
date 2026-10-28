@@ -177,7 +177,7 @@
 				</button>
 			{/if}
 			{#if activeView === 'chat' && !isTakeover && ($activeThread || isConductorThread)}
-				<button class="h-icon" class:active={$threadSettingsOpen} onclick={openThreadSettings} title={isConductorThread ? `${designatedName} settings` : 'Thread settings'} aria-label={isConductorThread ? `${designatedName} settings` : 'Thread settings'}>
+				<button class="h-icon" class:active={$threadSettingsOpen} onclick={openThreadSettings} title={isConductorThread ? `${designatedName} settings` : 'Chat settings'} aria-label={isConductorThread ? `${designatedName} settings` : 'Chat settings'}>
 					{@render gearIcon()}
 				</button>
 			{:else if activeView === 'activity' && $uiScope}

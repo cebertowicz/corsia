@@ -1,9 +1,9 @@
-"""Schema 161: retain the root of a sent chat comment reply."""
+"""Schema 162: retain the root of a sent chat comment reply."""
 
 import sqlite3
 
 
-def migrate_160_to_161(conn: sqlite3.Connection) -> None:
+def migrate_161_to_162(conn: sqlite3.Connection) -> None:
     columns = {row[1] for row in conn.execute('PRAGMA table_info(chat_comments)')}
     if not columns:
         return

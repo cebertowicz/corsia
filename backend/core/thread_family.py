@@ -84,6 +84,7 @@ def _delete_one_thread_rows(
         (thread_id, thread_id, thread_id),
     )
     db.execute(f"DELETE FROM event_rules WHERE id IN ({thread_rules})", (thread_id, thread_id))
+    db.execute("DELETE FROM self_caused_events WHERE thread_id = ?", (thread_id,))
     delete_thread_checkpoints(db, thread_id)
     delete_thread_continuity(db, thread_id)
     delete_thread_chat_comment_index_rows(db, thread_id)

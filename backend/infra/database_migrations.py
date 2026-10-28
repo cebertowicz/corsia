@@ -217,7 +217,8 @@ from infra.migration_156_to_157_rehome_repair import migrate_156_to_157
 from infra.migration_157_to_158_error_cause_kinds import migrate_157_to_158
 from infra.migration_158_to_159_unconfine_main_agents import migrate_158_to_159
 from infra.migration_159_to_160_untrusted_confinement import migrate_159_to_160
-from infra.migration_160_to_161_chat_comment_roots import migrate_160_to_161
+from infra.migration_160_to_161_self_caused import migrate_160_to_161
+from infra.migration_161_to_162_chat_comment_roots import migrate_161_to_162
 from infra.migration_mcp_secrets import FROM_VERSION as MCP_SECRETS_FROM_VERSION
 from infra.migration_mcp_secrets import migrate_mcp_secrets
 
@@ -867,6 +868,7 @@ MIGRATIONS[157] = migrate_157_to_158
 MIGRATIONS[158] = migrate_158_to_159
 MIGRATIONS[159] = migrate_159_to_160
 MIGRATIONS[160] = migrate_160_to_161
+MIGRATIONS[161] = migrate_161_to_162
 
 
 def _connection_database_path(conn: sqlite3.Connection) -> Path | None:
