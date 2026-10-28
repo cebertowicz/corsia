@@ -3,7 +3,8 @@
 	import { openBrowserUrl } from '$lib/api/browser';
 	import { token } from '$lib/stores/auth';
 	import { theme } from '$lib/stores/theme';
-	import { clampPoint, drawShifted, FrameScrollShift } from '$lib/browserPane';
+	import { drawShifted, FrameScrollShift } from '$lib/browserPane';
+	import { paneCoordinates, panePlacement } from '$lib/browserPaneGeometry';
 	import { agentColor } from '$lib/docPresence';
 	import { BrowserPaneInput, keyModifiers, keyText, wheelPixels } from '$lib/browserPaneInput';
 	import { BrowserPaneClipboard, clipboardKey, clipboardReply } from '$lib/browserPaneClipboard';
@@ -196,25 +197,23 @@
 		marker = markerPlace(agent.mark, { left: canvas.offsetLeft + left, top: canvas.offsetTop + top, scale, right: canvas.offsetLeft + bounds.width });
 	}
 
-	// Where the page sits in the canvas: drawing and input share it, so a click lands where it is drawn.
-	function placement() {
-		const bounds = canvas.getBoundingClientRect();
-		const scale = Math.min(bounds.width / width, bounds.height / height);
-		return { bounds, scale, left: (bounds.width - width * scale) / 2, top: (bounds.height - height * scale) / 2 };
-	}
+	function placement() { return panePlacement(canvas, width, height); }
 
 	function redraw() {
 		if (!canvas || !image || !width || !height) return;
 		const { bounds, scale, left, top } = placement();
 		const backingWidth = Math.round(bounds.width * devicePixelRatio);
 		const backingHeight = Math.round(bounds.height * devicePixelRatio);
-		// Resizing clears the backing store, so leave it intact for ordinary frames.
+		// Changing a canvas backing store clears it; leave the current picture intact for ordinary frames.
 		if (canvas.width !== backingWidth || canvas.height !== backingHeight) {
-			canvas.width = backingWidth; canvas.height = backingHeight;
+			canvas.width = backingWidth;
+			canvas.height = backingHeight;
 		}
 		const context = canvas.getContext('2d');
 		if (!context) return;
-		// Page size or predicted scroll moves the visible rectangle; clear the previous picture.
+		// A new page size moves the letterbox even when the pane keeps its size: clear the whole backing
+		// store so no strip of the earlier picture survives beside the new one.
+		// Predicted scroll also moves the visible rectangle, so it needs the same clear.
 		context.setTransform(1, 0, 0, 1, 0, 0);
 		context.clearRect(0, 0, canvas.width, canvas.height);
 		context.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
@@ -239,9 +238,7 @@
 	}
 
 	function coordinates(event: PointerEvent | WheelEvent, clamp = false) {
-		const { bounds, scale, left, top } = placement();
-		const point = { x: (event.clientX - bounds.left - left) / scale, y: (event.clientY - bounds.top - top) / scale };
-		return clamp ? clampPoint(point, width, height) : point.x >= 0 && point.y >= 0 && point.x <= width && point.y <= height ? point : null;
+		return paneCoordinates(event, canvas, width, height, clamp);
 	}
 
 	function sendMouse(event: PointerEvent) {

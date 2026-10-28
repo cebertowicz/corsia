@@ -2,13 +2,11 @@
 from __future__ import annotations
 
 import asyncio
-import collections
 import contextlib
-import json
 import logging
 import secrets
 from functools import partial
-from typing import AsyncIterator, Awaitable, Callable
+from typing import Awaitable, Callable
 
 from fastapi import WebSocket, WebSocketDisconnect
 from websockets.exceptions import WebSocketException
@@ -21,13 +19,14 @@ from infra.auth import authenticate, narrow_to_listener
 from infra.database import get_db
 from infra.product_events import emit_product_event
 from infra.queries import get_thread_for_user
-from ws import browser_clipboard
+from ws import browser_clipboard, browser_pane_input
 from ws.browser_frames import PaneFrames
 
 log = logging.getLogger(__name__)
 # Seconds before each re-establishment of either CDP connection; a stable run resets the budget.
 PANE_RETRY_DELAYS = (0.5, 1.0, 2.0)
 PANE_RETRY_RESET_SECONDS = 30.0
+
 
 async def browser_stream_endpoint(ws: WebSocket, thread_id: str) -> None:
     """Relay one owned thread's private stream without joining chat socket state."""
@@ -207,7 +206,7 @@ async def _relay(pane: WebSocket, thread_id: str, user_id: str) -> None:
                                    session=partial(browser_pane.session_identity, thread_id))
 
     async def from_pane() -> None:
-        async with contextlib.aclosing(_pane_messages(pane)) as messages:
+        async with contextlib.aclosing(browser_pane_input._pane_messages(pane)) as messages:
             async for data in messages:
                 kind = data.get("type")
                 if kind == "navigate":
@@ -236,7 +235,7 @@ async def _relay(pane: WebSocket, thread_id: str, user_id: str) -> None:
             asyncio.create_task(_follow_page(thread_id, connection_token, frames, report)),
             asyncio.create_task(from_pane()),
             asyncio.create_task(frames.send(pane.send_text)),
-            asyncio.create_task(_close_on_overflow(pane, overflow)),
+            asyncio.create_task(browser_pane_input._close_on_overflow(pane, overflow)),
         }
         done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
         for task in pending:
@@ -256,73 +255,10 @@ async def _relay(pane: WebSocket, thread_id: str, user_id: str) -> None:
         browser_control.pane_disconnected(thread_id, connection_token)
 
 
-async def _pane_messages(pane: WebSocket) -> AsyncIterator[dict]:
-    """Keep input ordered while replacing queued pointer moves that otherwise delay clicks.
-
-    Chrome answers moves after its next frame, slower than the pane sends them. Read ahead so
-    adjacent queued moves replace each other; nothing else is dropped or reordered. A stalled
-    page closes on input overflow; disconnect is raised only after its queued input.
-    """
-    received: collections.deque[dict | Exception] = collections.deque()
-    arrived = asyncio.Event()
-
-    reader = asyncio.create_task(_receive_pane_messages(pane, received, arrived))
-    try:
-        while True:
-            await arrived.wait()
-            arrived.clear()
-            while received:
-                data = received.popleft()
-                if isinstance(data, Exception):
-                    raise data
-                yield data
-    finally:
-        reader.cancel()
-        await asyncio.gather(reader, return_exceptions=True)
-
-
-async def _receive_pane_messages(pane: WebSocket, received: collections.deque[dict | Exception],
-                                 arrived: asyncio.Event) -> None:
-    try:
-        while True:
-            try:
-                data = json.loads(await pane.receive_text())
-            except (TypeError, ValueError):
-                continue
-            if isinstance(data, dict):
-                if _is_move(data) and received and _is_move(received[-1]):
-                    received[-1] = data
-                elif len(received) >= _MAX_QUEUED_INPUT:
-                    received.clear()
-                    with contextlib.suppress(Exception):
-                        await pane.close(code=1013)
-                    raise WebSocketDisconnect(code=1013)
-                else:
-                    received.append(data)
-                arrived.set()
-    except Exception as exc:
-        received.append(exc)
-        arrived.set()
-
-
-# The pane sends at most one wheel event per animation frame, so this is about 17 s of input
-# against a page that has answered none of it.
-_MAX_QUEUED_INPUT = 1024
-
-
-def _is_move(data: dict | Exception) -> bool:
-    return isinstance(data, dict) and data.get("type") == "input_mouse" and data.get("eventType") == "mouseMoved"
-
-
-async def _close_on_overflow(pane: WebSocket, overflow: asyncio.Event) -> None:
-    """Close the pane once any reliable output path exhausts its bounded queue."""
-    await overflow.wait()
-    with contextlib.suppress(Exception):
-        await pane.close(code=1013)
-
-
-# One runner per thread serializes page commands; only the latest appearance and navigation wait.
-# Never cancel a running command: that resets the session. Navigation carries its pane's report.
+# Page commands wait behind any running browser command, so one runner per thread runs them beside
+# every input loop. Only the newest appearance from any pane connection is applied, and at most one
+# navigation waits: a newer one replaces it. A running command is never cancelled: cancelling it
+# resets the shared session. A navigation carries its own pane's report, so no relay owns the runner.
 _latest_appearance: dict[str, tuple[str, browser_pane.PaneAppearance, Callable[[dict], None]]] = {}
 _pending_navigation: dict[str, tuple[str, dict, Callable[[dict], None]]] = {}
 _runners: dict[str, asyncio.Task] = {}
