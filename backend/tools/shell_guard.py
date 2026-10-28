@@ -23,6 +23,7 @@ import tools.shell_sandbox as shell_sandbox
 from tools.host_access_external import external_agent_sandbox_rules
 from tools.base_git_paths import base_branch_selector_paths, base_git_control_paths, base_git_identity_paths
 from tools.host_path_policy import current_protected_host_path_policy
+from tools.protected_path_rules import DENIED_EXECUTABLES
 from tools.repo_worktree_guidance import branch_pinned_worktree_guidance
 from tools.shell_argv import command_tokens, direct_argv
 from tools.sandbox_config import (
@@ -1035,6 +1036,7 @@ def _terminal_boundary_profile(
     external_agent: bool = False,
     agent_account: AgentAccountView | None = None,
     thread_id: str | None = None,
+    granted_roots: tuple[Path, ...] = (),
 ) -> str:
     """Render the protected or reviewed lease boundary."""
     generated_profile = profile_path.expanduser().resolve(strict=False)
@@ -1045,21 +1047,11 @@ def _terminal_boundary_profile(
         # the Claude Code and Codex launch seams, not by mutable path matching.
         direct_denied_executables: list[Path] = []
     else:
-        direct_denied_executables = _canonical_paths(
-            [
-                Path("/usr/bin/sudo"),
-                Path("/usr/bin/su"),
-                Path("/usr/local/bin/doas"),
-                Path("/opt/homebrew/bin/doas"),
-                Path("/sbin/shutdown"),
-                Path("/sbin/reboot"),
-                Path("/sbin/halt"),
-                Path("/sbin/poweroff"),
-                Path("/usr/bin/pmset"),
-            ]
-        )
+        direct_denied_executables = _canonical_paths(list(DENIED_EXECUTABLES))
     path_policy = current_protected_host_path_policy(
-        generated_profile=generated_profile, safehouse_paths=safehouse_paths
+        generated_profile=generated_profile,
+        safehouse_paths=safehouse_paths,
+        granted_roots=granted_roots,
     )
     lines = [
         ";; CORSIA LEASE INVARIANTS" if leased
@@ -1132,6 +1124,7 @@ def execution_envelope_profile(
         external_agent=external_agent,
         agent_account=agent_account,
         thread_id=thread_id,
+        granted_roots=tuple(get_sandbox_add_dirs_rw(thread_id, policies=policies)) if policies is not None and not leased else (),
     )
     if leased:
         return "(allow default)\n" + terminal_rules

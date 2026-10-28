@@ -5,7 +5,7 @@
  */
 
 export type DefaultWorkspace = { path: string; display: string };
-export type ShellInfo = { mode: 'local'; default_workspace?: DefaultWorkspace } | { mode: 'remote'; name: string };
+export type ShellInfo = { mode: 'local'; default_workspace?: DefaultWorkspace } | { mode: 'remote'; name: string; localConfigured: boolean };
 
 export type PairTarget =
 	| { kind: 'dns_sd'; instance: string }
@@ -29,7 +29,7 @@ export function shellInfo(): ShellInfo | null {
 	const info = (window as ShellWindow).__CORSIA_SHELL__;
 	if (!info || typeof info !== 'object') return null;
 	const shell = info as Record<string, unknown>;
-	if (shell.mode === 'remote' && typeof shell.name === 'string') return { mode: 'remote', name: shell.name };
+	if (shell.mode === 'remote' && typeof shell.name === 'string') return { mode: 'remote', name: shell.name, localConfigured: shell.localConfigured === true };
 	if (shell.mode !== 'local') return { mode: 'local' };
 	const workspace = shell.default_workspace;
 	if (!workspace || typeof workspace !== 'object') return { mode: 'local' };

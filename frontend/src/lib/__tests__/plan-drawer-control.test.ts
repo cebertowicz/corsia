@@ -235,6 +235,6 @@ describe('PlanDrawerControl attention-item click', () => {
 		await settle();
 		await settle();
 
-		expect(document.querySelector('[data-adaptive-drawer]')?.textContent).toContain('That item is no longer in this plan');
+		expect(document.querySelector('[data-adaptive-drawer]')?.textContent).toContain('That task isn’t in this plan.');
 	});
 });

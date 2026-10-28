@@ -2,7 +2,7 @@
 
 A connector contributes CORSIA routability as **data, not code** (PS32): each
 manifest declares its event types, the facts they carry, the identity formula,
-relationships, artifact identity, and artifact-producing command triggers. The
+relationships, artifact identity, artifact extractors and shipped observe rules. The
 generic event and result-observer paths read these manifests; they never branch
 on a connector name. This is the only place connector tokens may
 appear (enforced by ``tests/coordination_mvp/test_guards.py``).
@@ -13,7 +13,7 @@ Adding a new integration = register a new manifest here. No release.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from events.connectors.receiver import ReceiverDecl
@@ -56,17 +56,17 @@ class ObservedArtifactDecl:
     title: str | None = None
     path: str | None = None
     metadata: Mapping[str, Any] | None = None
+    created_event_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
-class CommandTriggerDecl:
-    """One direct command a connector can observe for artifact ownership."""
+class ShippedObserveRuleDecl:
+    """An observe rule shipped with this connector's manifest."""
 
-    name: str
-    tool_name: str
+    id: str
+    tool: str
     argv_prefix: tuple[str, ...]
-    extract_artifact: Callable[[str], ObservedArtifactDecl | None]
-    command_arg: str = "command"
+    item_type: str
 
 
 @dataclass(frozen=True)
@@ -81,7 +81,13 @@ class ConnectorManifest:
     # raw payload + what routing already resolved for it (or None) -> flat facts
     extract_facts: Callable[[dict, Mapping[str, Any] | None], dict]
     build_artifact_ref: Callable[[str, dict, dict], dict | None]
-    command_triggers: tuple[CommandTriggerDecl, ...] = ()
+    # One extractor per artifact type a tool result can name: it takes the artifact's identity
+    # from the command output, never from text the artifact carries. An ``observe`` rule names
+    # one by its artifact type (``item_type``).
+    artifact_extractors: Mapping[str, Callable[[str], ObservedArtifactDecl | None]] = field(
+        default_factory=dict)
+    shipped_observe_rules: tuple[ShippedObserveRuleDecl, ...] = ()
+    app_identities: frozenset[str] = frozenset()
     resolve_relationships: Callable[[str, dict, dict], tuple[dict, ...]] = (
         lambda event_type, facts, raw: ()
     )
@@ -148,16 +154,24 @@ def registered_connectors() -> tuple[str, ...]:
     return tuple(sorted(_REGISTRY))
 
 
-def registered_command_triggers(
-    tool_name: str,
-) -> tuple[tuple[str, CommandTriggerDecl], ...]:
-    """Return connector-declared command triggers for one canonical tool."""
-    return tuple(
-        (connector, trigger)
-        for connector in sorted(_REGISTRY)
-        for trigger in _REGISTRY[connector].command_triggers
-        if trigger.tool_name == tool_name
-    )
+def artifact_extractor(
+    connector: str, item_type: str,
+) -> Callable[[str], ObservedArtifactDecl | None] | None:
+    """The connector's extractor for one artifact type, or ``None`` when it declares none."""
+    manifest = _REGISTRY.get(connector)
+    return manifest.artifact_extractors.get(item_type) if manifest else None
+
+
+def app_matches(stamp_app: str | None, connector: str) -> bool:
+    """Whether a stamped app identity belongs to the connector."""
+    manifest = _REGISTRY.get(connector)
+    return bool(stamp_app and manifest and stamp_app in manifest.app_identities)
+
+
+def extractor_connectors(item_type: str) -> tuple[str, ...]:
+    """The connectors that declare an extractor for ``item_type``."""
+    return tuple(connector for connector in sorted(_REGISTRY)
+                 if item_type in _REGISTRY[connector].artifact_extractors)
 
 
 def _load_builtin_manifests() -> None:

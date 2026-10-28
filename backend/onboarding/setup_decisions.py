@@ -169,9 +169,10 @@ def _community(strings: dict[str, Any]) -> dict[str, Any]:
 
 
 def _github(email: str, strings: dict[str, Any] = text.GITHUB) -> dict[str, Any]:
+    address = agents_email(email)
     return _decision(tasks.TASK_GITHUB, strings, options=_lettered(strings),
                      recommendation="A",
-                     sign_up_with=agents_email(email) or text.ASK_FOR_ADDRESS)
+                     sign_up_with=text.AGENTS_ADDRESS.format(address=address) if address else text.ASK_FOR_ADDRESS)
 
 
 
@@ -208,16 +209,16 @@ def build_plan(facts: Facts) -> dict[str, Any]:
 
 async def web_search_works() -> bool:
     """Whether one real check search works: Brave with the saved key, else keyless
-    through managed oMLX, which counts only when it returns a result."""
+    through DDGS, which counts only when it returns a result."""
     from infra.db_async import run_in_db
     from infra.key_store import WEB_SEARCH, resolve_builtin
-    from tools.web_omlx_search import keyless_search
-    from tools.web_search_outcome import CHECK_QUERY, WORKS, SearchOutcome, run_search
+    from tools.web_keyless_search import keyless_search
+    from tools.web_search_outcome import CHECK_QUERY, WORKS, run_search
 
     resolved = await run_in_db(resolve_builtin, WEB_SEARCH)
     if resolved is None:
         keyless = await keyless_search(CHECK_QUERY)
-        return isinstance(keyless, SearchOutcome) and keyless.kind == WORKS and bool(keyless.results)
+        return keyless.kind == WORKS and bool(keyless.results)
     return (await run_search(resolved[0], CHECK_QUERY, 1)).kind == WORKS
 
 

@@ -704,6 +704,7 @@ def _model(litellm_model, *, enabled=1, available=1):
         )
 
 
+@pytest.mark.usefixtures("mac_local_model_host")
 class TestOmlx:
     @pytest.fixture(autouse=True)
     def reset_local_flight(self, monkeypatch):
@@ -825,6 +826,7 @@ class TestLimited:
         assert "limited" not in _sources(client)["codex"]
 
 
+@pytest.mark.usefixtures("mac_local_model_host")
 class TestRecheck:
     def test_requires_a_signed_in_caller(self, isolated_db):
         from api.provider_sources import router

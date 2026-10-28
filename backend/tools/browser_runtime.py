@@ -18,6 +18,7 @@ log = logging.getLogger(__name__)
 
 _AGENT_BROWSER_BIN = "agent-browser"
 _DEFAULT_TIMEOUT = 30
+COMMAND_FAILED = "browser command failed. Stop automatic retries and inform the user if browser work remains blocked."
 
 
 def _native_problem() -> str | None:
@@ -44,22 +45,47 @@ def _execution_context(kwargs: dict[str, Any]) -> tuple[str, str | None]:
     return thread_id, project_id
 
 
+class BrowserOwnerError(Exception):
+    """A failure from the browser session owner, with its existing tool text."""
+
+    def __init__(self, text: str) -> None:
+        super().__init__(text)
+        self.text = text
+
+
 async def _run(args: list[str], *, thread_id: str, lease_id: str | None = None,
-               timeout: int = _DEFAULT_TIMEOUT, show_window: bool | None = None) -> str:
+               timeout: int = _DEFAULT_TIMEOUT, show_window: bool | None = None,
+               navigation_url: str | None = None, notice: bool = True) -> str:
     """Run through the one backend-owned opaque browser session owner."""
+    try:
+        return await _run_owned(
+            args, thread_id=thread_id, lease_id=lease_id, timeout=timeout,
+            show_window=show_window, navigation_url=navigation_url, notice=notice,
+        )
+    except BrowserOwnerError as exc:
+        return exc.text
+
+
+async def _run_owned(args: list[str], *, thread_id: str, lease_id: str | None = None,
+                     timeout: int = _DEFAULT_TIMEOUT, show_window: bool | None = None,
+                     navigation_url: str | None = None, notice: bool = True) -> str:
+    """Run a browser command, preserving owner failures as exceptions."""
     err = _check_installed()
     if err:
-        return err
+        raise BrowserOwnerError(err)
     try:
+        options: dict[str, Any] = {"navigation_url": navigation_url} if navigation_url is not None else {}
+        if not notice:
+            options["notice"] = False
         return await PROCESS_OWNER.run_browser(
-            thread_id, args, lease_id=lease_id, timeout=timeout, show_window=show_window,
+            thread_id, args, lease_id=lease_id, timeout=timeout, show_window=show_window, **options,
         )
     except (BrowserSessionCleanupError, BrowserSetupError) as exc:
-        return exc.tool_message
+        raise BrowserOwnerError(exc.tool_message) from exc
     except BrowserSessionError as exc:
-        return f"Error: {exc}"
-    except Exception:
-        return "Error: browser command failed. Stop automatic retries and inform the user if browser work remains blocked."
+        raise BrowserOwnerError(f"Error: {exc}") from exc
+    except Exception as exc:
+        raise BrowserOwnerError(f"Error: {COMMAND_FAILED}") from exc
 
 
 async def _declare_person_step(thread_id: str, instruction: str) -> str:

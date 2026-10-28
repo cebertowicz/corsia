@@ -204,7 +204,7 @@ describe('ConnectedAppsSettings', () => {
 		await vi.waitFor(() => expect(host.textContent).toContain('Connected'));
 	});
 
-	it("shows the server's Mac notice on a waiting row, so a direct Approve shows it too", async () => {
+	it("shows the server's this-computer notice on a waiting row, so a direct Approve shows it too", async () => {
 		const local = { ...awaiting, transport: 'stdio', notice: 'notice text from the server' };
 		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ servers: [local, { ...awaiting, id: 'web', name: 'Web' }] }) })));
 		component = mount(ConnectedAppsSettings, { target: host });
@@ -272,7 +272,7 @@ describe('ConnectedAppsSettings', () => {
 	it('renders the empty-state copy when there are no apps', async () => {
 		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ servers: [] }) })));
 		component = mount(ConnectedAppsSettings, { target: host });
-		await vi.waitFor(() => expect(host.textContent).toContain('No connected apps yet. Connect one here, or ask CORSIA in chat to bring over the apps you use in Claude Code, Claude Desktop, Cursor, Codex, OpenClaw or Hermes Agent'));
+		await vi.waitFor(() => expect(host.textContent).toContain('No connected apps. Connect one here, or ask CORSIA in chat to bring over the apps you use in Claude Code, Cursor or another tool.'));
 		expect(host.textContent).not.toContain('No apps shared with every project yet.');
 	});
 
@@ -316,7 +316,7 @@ describe('ConnectedAppsSettings', () => {
 	it('keeps the Connect an app action with its introductory copy', async () => {
 		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ servers: [] }) })));
 		component = mount(ConnectedAppsSettings, { target: host });
-		await vi.waitFor(() => expect(host.textContent).toContain('No connected apps yet.'));
+		await vi.waitFor(() => expect(host.textContent).toContain('No connected apps.'));
 		expect(host.querySelector('h2')).toBeNull();
 		expect(host.querySelector('.heading .btn')?.textContent?.trim()).toBe('Connect an app');
 		expect(host.querySelector('p')?.textContent).toContain('Connect the apps you already use');
@@ -399,8 +399,8 @@ describe('ConnectedAppsSettings', () => {
 		expect([...host.querySelector(`[data-connected-account-id="${expired.id}"]`)!.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.trim() === 'Sign in')?.className).toContain('primary');
 		open(failed.id);
 		expect(host.textContent).toContain('Sign-in didn’t finish');
-		expect(host.textContent).toContain('Microsoft had a problem with sign-in. Try again.');
-		const retry = [...host.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.trim() === 'Try again');
+		expect(host.textContent).toContain('Microsoft had a problem with sign-in. Press Retry.');
+		const retry = [...host.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.trim() === 'Retry');
 		expect(retry?.className).toContain('primary');
 		expect(host.textContent).toContain('Where it works…');
 		expect(host.textContent).toContain('Remove');
@@ -500,7 +500,7 @@ describe('ConnectedAppsSettings', () => {
 			await vi.waitFor(() => expect(host.querySelector('[data-connected-account-id="a"]')).not.toBeNull());
 			openRow('a');
 			expect(host.querySelector('[data-connected-account-id="a"] .details')).not.toBeNull();
-			labelled('Try again')!.click();
+			labelled('Retry')!.click();
 			await vi.waitFor(() => expect(host.querySelector('[data-connected-account-id="a"] .sub')?.textContent).toContain('Checking…'));
 			expect(host.querySelector('[data-connected-account-id="a"] .details')).toBeNull();
 			expect(host.querySelector('[data-connected-account-id="a"] button')?.getAttribute('aria-expanded')).toBe('false');
@@ -760,7 +760,7 @@ describe('WhereItWorks', () => {
 		expect(JSON.parse(String(call?.[1]?.body))).toEqual({ reach: { mode: 'all', project_ids: [], outside_projects: false } });
 	});
 
-	it("shows the server's Mac notice on the approve sheet only", async () => {
+	it("shows the server's this-computer notice on the approve sheet only", async () => {
 		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ projects: [] }) })));
 		const notice = 'notice text from the server';
 		const reach = { mode: 'selected', project_ids: [], outside_projects: false };
@@ -770,7 +770,7 @@ describe('WhereItWorks', () => {
 		unmount(component);
 		component = mount(WhereItWorks, { target: host, props: { app: { ...awaiting, transport: 'http', reach }, approve: true, onClose: vi.fn(), onSaved: vi.fn() } });
 		await settle();
-		expect(host.textContent).not.toContain("It can do anything you can do on this Mac");
+		expect(host.textContent).not.toContain("It can do anything you can do on the computer it runs on");
 		unmount(component);
 		component = mount(WhereItWorks, { target: host, props: { app: { ...awaiting, transport: 'stdio', notice, reach }, onClose: vi.fn(), onSaved: vi.fn() } });
 		await settle();

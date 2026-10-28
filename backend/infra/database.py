@@ -335,6 +335,9 @@ def init_db():
     from connections import seed_builtin_connections
     seed_builtin_connections()
 
+    from events.observe_rules import sync_shipped_rules
+    sync_shipped_rules(get_db())
+
     from infra.subagent_caps import seed_subagent_caps
     seed_subagent_caps()
 

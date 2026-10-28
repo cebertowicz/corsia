@@ -50,7 +50,7 @@ test('@flow:document-viewing-context @surface:chat @surface:documents sends the 
 	await expect.poll(() => inputs.length).toBe(1);
 	expect(inputs[0]).toMatchObject({ thread_id: threadId,
 		viewing_document: { artifact_id: artifactId, heading_anchor: secondLine, heading_line: '## Second' } });
-	await page.getByRole('button', { name: 'Collapse artifact panel' }).click();
+	await page.getByRole('button', { name: 'Collapse Files' }).click();
 	await composer.fill('Now without a document.');
 	await composer.press('Enter');
 	await expect.poll(() => inputs.length).toBe(2);

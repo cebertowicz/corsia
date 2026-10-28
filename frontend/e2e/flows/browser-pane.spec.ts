@@ -2,6 +2,7 @@ import { test } from '../support/test';
 import { expect } from '@playwright/test';
 import { createSession, loginByUrl, saveEvidenceScreenshot, sidebarThread } from '../support/corsia';
 import type { Locator } from '@playwright/test';
+import { startProbeServer } from '../support/probeServer';
 
 // Frames are JPEG, so a drawn color is matched within a small tolerance.
 async function colorAt(canvas: Locator, fx: number, fy: number, rgb: number[]) {
@@ -13,6 +14,10 @@ async function colorAt(canvas: Locator, fx: number, fy: number, rgb: number[]) {
 }
 
 test.describe('@flow:browser-pane shared browser pane', () => {
+	let probe: Awaited<ReturnType<typeof startProbeServer>>;
+	test.beforeAll(async () => { probe = await startProbeServer(); });
+	test.afterAll(async () => { await probe.close(); });
+
 	test('opens a shared browser tab and relays person input', async ({ page, request }, testInfo) => {
 		test.skip((page.viewportSize()?.width ?? 0) <= 1024, 'desktop-only first cut');
 		const title = `browser-pane-${Date.now()}`;
@@ -28,7 +33,7 @@ test.describe('@flow:browser-pane shared browser pane', () => {
 		await page.getByRole('button', { name: 'Open browser', exact: true }).click();
 		const address = page.getByRole('textbox', { name: 'Browser address' });
 		await expect(address).toBeVisible();
-		await address.fill(`${new URL(page.url()).origin}/browser-pane-probe.html`);
+		await address.fill(`${probe.origin}/browser-pane-probe.html`);
 		const opened = page.waitForResponse(response => response.url().includes(`/api/browser/${threadId}/open`));
 		await address.press('Enter');
 		const openResponse = await opened;
@@ -62,7 +67,7 @@ test.describe('@flow:browser-pane shared browser pane', () => {
 		await expect.poll(() => colorAt(canvas, 0.9, 0.9, [0, 0, 200])).toEqual([0, 0, 200]);
 
 		// Enter in the address bar navigates through the open stream while the page stays shared.
-		await address.fill(`${new URL(page.url()).origin}/browser-pane-probe.html?navigated`);
+		await address.fill(`${probe.origin}/browser-pane-probe.html?navigated`);
 		await address.press('Enter');
 		await expect.poll(() => browserFrames.some(entry => entry.includes('"type":"navigate_result","error":null'))).toBe(true);
 		await expect(page.getByText('Opening', { exact: true })).toHaveCount(0);
@@ -71,7 +76,7 @@ test.describe('@flow:browser-pane shared browser pane', () => {
 		// The person's Meta+A reaches Chrome with its modifier bit, so this replaces the existing value and submits.
 		const navigationCount = browserFrames.filter(entry => entry.includes('"type":"navigate_result"')).length;
 		const frameCount = browserFrames.filter(entry => entry.includes('"type":"frame"')).length;
-		await address.fill(`${new URL(page.url()).origin}/browser-pane-probe.html?password`);
+		await address.fill(`${probe.origin}/browser-pane-probe.html?password`);
 		await address.press('Enter');
 		await expect.poll(() => browserFrames.filter(entry => entry.includes('"type":"navigate_result"')).length).toBeGreaterThan(navigationCount);
 		await expect.poll(() => browserFrames.filter(entry => entry.includes('"type":"frame"')).length).toBeGreaterThan(frameCount);

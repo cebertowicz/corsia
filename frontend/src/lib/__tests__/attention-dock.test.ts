@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import AttentionDock from "$lib/components/attention/AttentionDock.svelte";
 import { __reset } from "$lib/stores/attentionDock.svelte";
 import { token } from "$lib/stores/auth";
+import { activeThreadId } from "$lib/stores/threads";
 import { connectionState } from "$lib/stores/connection";
 import type { AttentionQueue } from "$lib/api/attentionQueue";
 import {
@@ -126,7 +127,37 @@ afterEach(() => {
   host.replaceChildren();
   __reset();
   connectionState.set("disconnected");
+  activeThreadId.set(null);
   vi.restoreAllMocks();
+});
+
+describe("AttentionDock — reply attention refresh", () => {
+  it("refreshes reply counts on resolution and reopening, but ignores unrelated frames", async () => {
+    const { emit } = await import("$lib/ws/events");
+    const reply = {
+      detail: { title: "brief.md", unread_count: 1, newest_at: "2026-10-27",
+        destination: { pane: "document-replies", id: "doc" }, source: { thread_id: "thread" } },
+    };
+    activeThreadId.set("thread");
+    body = { ...queueBody(null, 0), reply_items: [reply] };
+    component = mount(AttentionDock, { target: host });
+    await settle();
+    expect(host.querySelector('.reply-chip-notice')?.textContent).toContain('1 new reply');
+    calls.length = 0;
+    body = { ...queueBody(null, 0), reply_items: [] };
+    emit("doc_comment_changed", { type: "doc_comment_changed", artifact_id: "doc" });
+    await settle();
+    expect(calls.filter((call) => call.url.includes("/api/attention/queue"))).toHaveLength(0);
+    expect(host.querySelector('.reply-chip-notice')).not.toBeNull();
+    emit("doc_comment_changed", { type: "doc_comment_changed", artifact_id: "doc", reply_attention_changed: true });
+    await settle();
+    expect(host.querySelector('.reply-chip-notice')).toBeNull();
+    body = { ...queueBody(null, 0), reply_items: [reply] };
+    emit("doc_comment_changed", { type: "doc_comment_changed", artifact_id: "doc", reply_attention_changed: true });
+    await settle();
+    expect(host.querySelector('.reply-chip-notice')?.textContent).toContain('1 new reply');
+    activeThreadId.set(null);
+  });
 });
 
 describe("AttentionDock — one item at a time", () => {
@@ -978,6 +1009,6 @@ describe("AttentionDock — a question that left the queue first", () => {
     answerButton().click();
     await settle();
 
-    expect(host.textContent).toContain("This question is no longer open.");
+    expect(host.textContent).toContain("That decision is closed.");
   });
 });

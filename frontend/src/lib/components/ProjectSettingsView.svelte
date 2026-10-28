@@ -6,7 +6,7 @@
 	import { updateProject, archiveProject, restoreProject } from '$lib/stores/projects';
 	import { projectColor } from '$lib/utils/projectColors';
 	import { toasts } from '$lib/stores/toast';
-	import { plainResponseError } from '$lib/plainError';
+	import { plainResponseError, SERVER_UNREACHABLE } from '$lib/plainError';
 	import { Button } from '$lib/components/ui';
 	import AccentPicker from './ui/AccentPicker.svelte';
 	import ProjectRootPicker from './ProjectRootPicker.svelte';
@@ -73,27 +73,38 @@
 		agentsError = '';
 		try {
 			const res = await fetch(`/api/agents?token=${encodeURIComponent(t)}&project_id=${encodeURIComponent(id)}`);
-			if (!res.ok) throw new Error(`Couldn't load project Agents (${res.status})`);
+			if (!res.ok) throw new Error(`agent list load failed (${res.status})`);
 			const body = await res.json();
 			agentRows = Array.isArray(body.agents) ? body.agents : [];
 		} catch (e) {
-			agentsError = e instanceof Error ? e.message : 'Could not load project Agents';
+			console.error(e);
+			agentsError = 'Couldn’t load this project’s agents.';
 		} finally {
 			agentsLoading = false;
 		}
 	}
 
+	function retryAgents() {
+		const t = get(token);
+		if (t && project) void loadAgents(t, project.id);
+	}
+
 	async function demoteAgent(threadId: string) {
 		const t = get(token);
 		if (!t || !project) return;
+		let res: Response;
 		try {
-			const res = await fetch(`/api/agents/${threadId}?token=${encodeURIComponent(t)}`, { method: 'DELETE' });
-			if (!res.ok) throw new Error(await plainResponseError(res, 'Could not remove that. Try again.'));
-			await loadAgents(t, project.id);
-			toasts.show('Project Agent removed', 'success');
-		} catch (e) {
-			agentsError = e instanceof Error ? e.message : 'Could not remove project Agent';
+			res = await fetch(`/api/agents/${threadId}?token=${encodeURIComponent(t)}`, { method: 'DELETE' });
+		} catch {
+			toasts.show(SERVER_UNREACHABLE, 'error');
+			return;
 		}
+		if (!res.ok) {
+			toasts.show(await plainResponseError(res, 'Couldn’t remove that. Try again.'), 'error');
+			return;
+		}
+		await loadAgents(t, project.id);
+		toasts.show('Project Agent removed', 'success');
 	}
 
 	async function saveName() {
@@ -177,7 +188,7 @@
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ path: absPath }),
 			});
-			if (!res.ok) throw new Error(await plainResponseError(res, 'Could not save these settings. Try again.'));
+			if (!res.ok) throw new Error(await plainResponseError(res, 'Couldn’t save these settings. Try again.'));
 			const body = await res.json();
 			project.path = body.project?.path ?? absPath;
 			toasts.show('Saved', 'success');
@@ -251,7 +262,7 @@
 			</div>
 		</SettingsGroup>
 
-		<SettingsGroup label="Folder" hint="Conversations here share this project's context and Agents.">
+		<SettingsGroup label="Folder" hint="Chats here share this project’s context and agents.">
 			<SettingsRow
 				name={project.path ? 'Working folder' : 'Working folder missing'}
 				sub={project.path ? displayName(project.path) : 'No folder selected'}
@@ -267,11 +278,14 @@
 			<ProvidersPolicyBlock projectId={project.id} onSignIn={() => requestSettingsSection('providers')} />
 		</div>
 
-		<SettingsGroup label="Agents" hint="Threads that own one area of this project.">
+		<SettingsGroup label="Agents" hint="Agents that own one area of this project.">
 			{#if agentsLoading}
-				<p class="note">Loading project Agents…</p>
+				<p class="note">Loading agents…</p>
 			{:else if agentsError}
-				<p class="note failed">{agentsError}</p>
+				<p class="note failed" role="alert">
+					{agentsError}
+					<Button size="sm" variant="ghost" onclick={retryAgents}>Retry</Button>
+				</p>
 			{:else}
 				{#each agentRows as agent (agent.thread_id)}
 					<SettingsRow
@@ -281,7 +295,7 @@
 						onMenuSelect={() => demoteAgent(agent.thread_id)}
 					/>
 				{:else}
-					<p class="note">No project Agents yet.</p>
+					<p class="note">This project has no agents.</p>
 				{/each}
 			{/if}
 		</SettingsGroup>

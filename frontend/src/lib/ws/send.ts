@@ -13,7 +13,7 @@ import {
 	requestInput,
 } from './turnState';
 import { beginPendingSnapshot } from './streamState';
-import { takeReplyContext } from '../stores/replyContextCapture';
+import { takeReplyContext, type ReplyComment } from '../stores/replyContextCapture';
 
 export function hasActiveTurn(threadId: string): boolean {
 	return reducerHasActiveTurn(threadId);
@@ -86,6 +86,7 @@ export function sendMessage(
 	attachments?: any[],
 	extraMeta?: Record<string, any>,
 	deliveryIntent: 'apply_now' | 'queue_after_turn' = 'apply_now',
+	comments: ReplyComment[] = [],
 ): string | null {
 	if (!ws || ws.readyState !== WebSocket.OPEN) return null;
 	const inputId = crypto.randomUUID();
@@ -123,6 +124,7 @@ export function sendMessage(
 		ws.send(JSON.stringify({
 			type: 'subagent_feed', thread_id: threadId, content, input_id: inputId,
 			...viewingPayload,
+			...(comments.length ? { reply_context: { comments } } : {}),
 			...(attachments && attachments.length > 0 ? { attachments } : {}),
 			...(deliveryIntent === 'queue_after_turn' ? { delivery_intent: deliveryIntent } : {}),
 		}));
@@ -145,12 +147,14 @@ export function sendMessage(
 	});
 
 	const effort = get(reasoningEffort);
-	// What the person was answering, taken at send so the window it accumulated in ends with it.
-	const replyContext = takeReplyContext(threadId);
+	// The captured context belongs to this send.
+	const replyContext = takeReplyContext(threadId) ?? {};
+	if (comments.length) replyContext.comments = comments;
+	const hasReplyContext = Object.keys(replyContext).length > 0;
 	ws.send(JSON.stringify({
 		type: 'message',
 		...viewingPayload,
-		...(replyContext ? { reply_context: replyContext } : {}),
+		...(hasReplyContext ? { reply_context: replyContext } : {}),
 		thread_id: threadId,
 		content,
 		input_id: inputId,

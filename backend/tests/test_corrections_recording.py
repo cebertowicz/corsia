@@ -274,12 +274,18 @@ async def test_same_message_and_version_is_recorded_once_when_scan_and_notify_ra
 def test_only_send_thread_input_calls_the_corrections_admission_hook():
     """Plan wakes, event delivery, digests and spawn paths cannot enqueue classification."""
     import ast
+    import unicodedata
     from pathlib import Path
 
     backend = Path(__file__).parents[1]
     callers = []
     for path in backend.rglob("*.py"):
-        tree = ast.parse(path.read_text(encoding="utf-8"))
+        source = path.read_text(encoding="utf-8")
+        if "notify_if_owner" not in source:
+            # Python normalizes identifiers to NFKC during parsing.
+            if source.isascii() or "notify_if_owner" not in unicodedata.normalize("NFKC", source):
+                continue
+        tree = ast.parse(source)
         for function in ast.walk(tree):
             if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue

@@ -29,7 +29,7 @@
 	import type { PauseAnnotation } from './transcriptFocusModel';
 	import EventChip from './EventChip.svelte';
 	import { sourceMembers } from './contextEventModel';
-	import { PAUSED_AT_PLAN_LIMIT } from '$lib/stores/overageSetting';
+	import { PAUSED_AT_USAGE_LIMIT } from '$lib/stores/overageSetting';
 	import type { RunLoad, RunStub } from '$lib/focusRuns';
 	import type { WorkBlockLive } from './workBlockLive';
 
@@ -185,7 +185,7 @@
 {#snippet messageRow(entry: Extract<TranscriptEntry, { kind: 'message' }>)}
 	{@const msg = entry.message}
 	{@const isAgentInbound = msg.role === 'user' && msg.metadata?.sender_kind === 'agent'}
-	<div class="message {msg.role}" data-message-id={msg.id} data-first-run-opening={msg.metadata?.first_run_opening === true ? '' : undefined} use:trackVisibleRow={{ seq: msg.seq, threadId: boundThreadId }} class:agent-inbound={isAgentInbound} class:human-user={msg.role === 'user' && !isAgentInbound}>
+	<div class="message {msg.role}" data-message-id={msg.id} data-message-seq={msg.seq} data-message-thread-id={boundThreadId} data-first-run-opening={msg.metadata?.first_run_opening === true ? '' : undefined} use:trackVisibleRow={{ seq: msg.seq, threadId: boundThreadId }} class:agent-inbound={isAgentInbound} class:human-user={msg.role === 'user' && !isAgentInbound}>
 		{#if msg.role === 'system'}
 			<SystemMessageRow {msg} />
 		{:else if msg.role === 'user'}
@@ -219,14 +219,14 @@
 		{@render deliveryWarning(annotation.pause.source)}
 		<div class="historical-anchor">{annotation.pause.anchorKind === 'input' ? 'Earlier input' : 'Earlier work'}</div>
 	{/if}
-	<div class="plan-limit-paused">{PAUSED_AT_PLAN_LIMIT}</div>
+	<div class="plan-limit-paused">{PAUSED_AT_USAGE_LIMIT}</div>
 {/snippet}
 
 {#each renderedEntries as entry, index (entry.id)}
 	{#if entry.kind === 'message'}
 		{@render messageRow(entry)}
 	{:else if entry.kind === 'update'}
-		<UpdateCard card={entry.card} earlier={entry.earlier} />
+		<UpdateCard card={entry.card} earlier={entry.earlier} group={entry.group} />
 	{:else if entry.kind === 'passive'}
 		{#key boundThreadId}<PassiveOutcomeList cards={entry.cards} id={`${uid}-${entry.id}`} />{/key}
 	{:else if entry.kind === 'divider'}
@@ -234,7 +234,7 @@
 	{:else if entry.kind === 'pause'}
 		{@render historicalPause(entry, entry.showProxy || !visibleSources.has(entry.pause.source.id))}
 	{:else if entry.kind === 'stub-pause'}
-		<div class="plan-limit-paused">{PAUSED_AT_PLAN_LIMIT}</div>
+		<div class="plan-limit-paused">{PAUSED_AT_USAGE_LIMIT}</div>
 	{:else if entry.kind === 'fold'}
 		{@const tokens = runTokens(renderedEntries, index, historyComplete)}
 		{@const expanded = isRunExpanded(tokens, expandedFolds)}
@@ -266,7 +266,7 @@
 			{/snippet}
 			{#snippet notes()}
 				{#each stubPauses.get(entry.id) ?? [] as turnId (turnId)}
-					<div class="plan-limit-paused">{PAUSED_AT_PLAN_LIMIT}</div>
+					<div class="plan-limit-paused">{PAUSED_AT_USAGE_LIMIT}</div>
 				{/each}
 			{/snippet}
 		</WorkBlock>

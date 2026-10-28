@@ -81,7 +81,7 @@ describe('ContextSheet source owner actions', () => {
 
 		expect(host.querySelector('[data-checkpoint-cancel="checkpoint-1"]')).not.toBeNull();
 		expect([...host.querySelectorAll('button')].map(button => button.textContent?.trim()))
-			.not.toContain('Checkpoint Now');
+			.not.toContain('Checkpoint now');
 	});
 
 	it('offers Manual Checkpoint Now when no cutover owns admission', () => {
@@ -110,7 +110,7 @@ describe('ContextSheet source owner actions', () => {
 		flushSync();
 
 		const action = [...host.querySelectorAll<HTMLButtonElement>('button')]
-			.find(button => button.textContent?.trim() === 'Checkpoint Now');
+			.find(button => button.textContent?.trim() === 'Checkpoint now');
 		expect(action).toBeTruthy();
 		action?.click();
 		expect(onCheckpointNow).toHaveBeenCalledOnce();
@@ -143,7 +143,7 @@ describe('ContextSheet source owner actions', () => {
 		});
 		flushSync();
 
-		expect(host.textContent).not.toContain('Checkpoint Now');
+		expect(host.textContent).not.toContain('Checkpoint now');
 		expect([...host.querySelectorAll('button')].map(button => button.textContent?.trim()))
 			.not.toContain('Nothing new to checkpoint');
 		expect(host.textContent).toMatch(/Checkpointed .* ago/);
@@ -190,7 +190,7 @@ describe('ContextSheet source owner actions', () => {
 				checkpointState: checkpointState('installed'),
 			});
 
-			expect(host.textContent).not.toContain('Checkpoint Now');
+			expect(host.textContent).not.toContain('Checkpoint now');
 			expect(host.textContent).not.toMatch(/Checkpointed .* ago/);
 			expect(host.querySelector('.ctx-checkpoint-now')).toBeNull();
 		});
@@ -398,7 +398,7 @@ describe('ContextSheet source owner actions', () => {
 			'System 1',
 			'Workspace 1',
 			'Project 1',
-			'This thread 1',
+			'This chat 1',
 			'History 2',
 		]);
 		expect([...host.querySelectorAll('.ctx-source-group-token')].map((el) => el.textContent?.trim())).toEqual([
@@ -427,7 +427,7 @@ describe('ContextSheet source owner actions', () => {
 			'AGENTS.md',
 			'project-context.md',
 			'thread-context.md',
-			'Conversation history',
+			'Chat history',
 			'Current message',
 		]);
 		expect([...host.querySelectorAll('.ctx-source-status')].map((el) => el.textContent?.trim())).toEqual([]);

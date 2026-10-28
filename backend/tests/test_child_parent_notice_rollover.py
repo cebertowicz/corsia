@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 
 from automation import plan_liveness_terminal
@@ -40,6 +43,9 @@ def _rollover_accounts(db, *, enabled=True, destination_ready=True):
     second = set_account_state(
         add_account("codex", "Second", db=db)["id"], "signed_in", expected_revision=0, db=db,
     )
+    (Path(second['source_home']) / 'auth.json').write_text(json.dumps({
+        'auth_mode': 'chatgpt', 'tokens': {'access_token': 'synthetic'},
+    }))
     db.execute(
         """INSERT INTO models
            (id,display_name,litellm_model,provider,provider_model_id,harness,created_at,updated_at)

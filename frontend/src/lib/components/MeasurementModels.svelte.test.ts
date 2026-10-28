@@ -144,7 +144,7 @@ describe('MeasurementModels', () => {
 	it('keeps load, empty, and recoverable error states', () => {
 		expect(render({ rows: [], tokenShares: [], loading: true }).querySelector('.skeleton')).not.toBeNull();
 		host?.remove(); component && unmount(component); component = null;
-		expect(render({ rows: [], tokenShares: [] }).textContent).toContain('No model activity in this scope.');
+		expect(render({ rows: [], tokenShares: [] }).textContent).toContain('No models were used for this selection.');
 		host?.remove(); component && unmount(component); component = null;
 		expect(render({ rows: [], tokenShares: [], error: 'Could not load models.' }).querySelector('button')?.textContent).toBe('Retry');
 	});

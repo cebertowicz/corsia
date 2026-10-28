@@ -184,6 +184,7 @@ TOOL_CATALOG: dict[str, ToolCatalogEntry] = {
         "browser", summary="Click a page element", activity="Clicking",
     ),
     "browser_fill": _Entry("browser", summary="Fill a text input", activity="Filling"),
+    "browser_run_steps": _Entry("browser", summary="Run named server-owned browser setup steps", activity="Running setup"),
     "browser_screenshot": _Entry(
         "browser", summary="Save a page screenshot", activity="Taking screenshot",
     ),
@@ -266,7 +267,7 @@ TOOL_CATALOG: dict[str, ToolCatalogEntry] = {
         activity="Drafting email",
     ),
     "email_send": _Entry(
-        "email", status="active", authority="conductor-api",
+        "email", status="active", authority="conductor-api", serious_effect=True,
         summary="Send a saved email draft after the person says to send it",
         activity="Sending email",
     ),
@@ -281,7 +282,7 @@ TOOL_CATALOG: dict[str, ToolCatalogEntry] = {
         activity="Drafting invite",
     ),
     "calendar_send_invite": _Entry(
-        "email", status="active", authority="conductor-api",
+        "email", status="active", authority="conductor-api", serious_effect=True,
         summary="Send a saved invite draft after the person says to send it; attendees get emails",
         activity="Sending invite",
     ),

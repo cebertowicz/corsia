@@ -8,6 +8,7 @@
 	import { openDocumentLink } from '$lib/linkTargetResolver';
 	import { menuPop } from '$lib/popoverMotion';
 	import type { SelectionLabel } from '$lib/stores/commentDraft';
+	import Button from '$lib/components/ui/Button.svelte';
 	import MarkdownEditor from './MarkdownEditor.svelte';
 
 	type DocState = 'loading' | 'ready' | 'error';
@@ -15,7 +16,8 @@
 
 	let {
 		docState,
-		loadError,
+		documentName = 'this document',
+		onRetry = () => {},
 		value = $bindable(''),
 		liveText = null,
 		typingAllowed = false,
@@ -41,7 +43,8 @@
 		onDocumentPlace,
 	}: {
 		docState: DocState;
-		loadError: string;
+		documentName?: string;
+		onRetry?: () => void;
 		value?: string;
 		liveText?: Y.Text | null;
 		typingAllowed?: boolean;
@@ -92,9 +95,9 @@
 		<div class="loadbar"><span></span></div>
 		<div class="md-skel">{#each Array(6) as _, i (i)}<span class="ms-line" style="width:{[90, 70, 80, 55, 75, 45][i]}%"></span>{/each}</div>
 	{:else if docState === 'error'}
-		<div class="load-error">
-			<p>Couldn't open this document.</p>
-			<code>{loadError}</code>
+		<div class="load-error" role="alert">
+			<p>Couldn't open {documentName}.</p>
+			<Button size="sm" variant="ghost" onclick={onRetry}>Retry</Button>
 		</div>
 	{:else}
 		<div class="ed-wrap">

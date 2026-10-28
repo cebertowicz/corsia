@@ -272,7 +272,7 @@ def test_agent_test_and_emit_share_declared_type_resolution(emit_world):
 
     assert json.loads(preview) == {"matches": []}
     assert missing.startswith("Refused:") and "'qa'" in missing
-    assert invalid == "Error: operation is one of create, disable, list, test, explain, emit"
+    assert invalid == "Error: operation is one of create, disable, list, test, explain, types, emit"
 
 
 def test_agent_emit_does_not_accept_a_caller_origin_or_relabel_refusal(emit_world, monkeypatch):

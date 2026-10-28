@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
+import select
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 from typing import TextIO
 
@@ -157,6 +160,36 @@ def spawn_restart_lifecycle(
         str(corsia_script),
         *script_args,
     ]
+    if sys.platform.startswith("linux") and launch_env.get("CORSIA_SYSTEMD_SERVICE") == "1":
+        # A new session stays in the backend's cgroup. Let the user manager
+        # start the restart owner separately, passing its sanitized environment
+        # through stdin rather than exposing credentials in unit properties.
+        helper = Path(__file__).resolve().parent.parent / "scripts" / "systemd_restart.py"
+        process_env = dict(launch_env)
+        process_env.pop("CORSIA_RESTART_CALLER_TOKEN", None)
+        process = subprocess.Popen(
+            ["systemd-run", "--user", "--pipe", "--quiet", "--collect", sys.executable, "-I", str(helper)],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=log_fh,
+            start_new_session=True,
+            env=process_env,
+        )
+        assert process.stdin is not None and process.stdout is not None
+        try:
+            payload = json.dumps({"command": command, "environment": launch_env}).encode()
+            process.stdin.write(payload + b"\n")
+            process.stdin.flush()
+            ready, _, _ = select.select([process.stdout], [], [], 10)
+            if not ready or process.stdout.readline() != b"ready\n":
+                raise OSError("systemd restart owner did not start")
+            process.stdin.write(b"go\n")
+            process.stdin.flush()
+        finally:
+            # Without go the helper exits on EOF and cannot stop the service.
+            process.stdin.close()
+            process.stdout.close()
+        return process
     return subprocess.Popen(
         command,
         stdout=log_fh,

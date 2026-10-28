@@ -116,7 +116,7 @@
 					{#if t.status === 'error'}
 						<span class="tab-err" title="Couldn't load this document">!</span>
 					{:else if t.status === 'unavailable'}
-						<span class="tab-err" title="This document is no longer available">!</span>
+						<span class="tab-err" title="This document is unavailable">!</span>
 					{:else if t.status === 'readonly'}
 						<span class="tab-ro" title="Read-only" aria-label="Read-only">
 							<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="11" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3" /></svg>
@@ -131,7 +131,7 @@
 			</div>
 		{/each}
 	</div>
-	<button class="collapse-btn" onclick={onCollapse} aria-label="Collapse artifact panel" title="Collapse">
+	<button class="collapse-btn" onclick={onCollapse} aria-label="Collapse Files" title="Collapse">
 		<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6" /></svg>
 	</button>
 </div>

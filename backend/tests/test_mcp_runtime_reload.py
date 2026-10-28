@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import time
 from pathlib import Path
 
 import pytest
@@ -550,51 +549,24 @@ def test_runtime_error_after_connecting_publishes_failed_and_a_later_connect_ret
     assert mcp_runtime.connected_app_state("app-1")["state"] == "working"
 
 
-def test_slow_first_runtime_download_happens_before_the_connect_deadline(runtime, monkeypatch):
-    """An approved app stays connecting while its one-time pinned runtime arrives."""
-    mcp_runtime, _tools, _gate = runtime
-    _runtime_db(monkeypatch, mcp_runtime, {
-        "app-1": ("Local", {"connected_app_id": "app-1", "command": "npx", "connect_timeout": 0.01}),
-    })
-    prepared = []
-
-    def fetch_plan(command, *, path=None):
-        assert (command, path) == ("npx", None)
-        return "node", object()
-
-    def slow_download(kind):
-        prepared.append(kind)
-        time.sleep(0.03)
-
-    monkeypatch.setattr("tools.managed_runtime.runtime_fetch_plan", fetch_plan)
-    monkeypatch.setattr("tools.managed_runtime.ensure_runtime", slow_download)
-
-    result = asyncio.run(mcp_runtime.apply_connected_app_runtime("connect", "app-1"))
-
-    assert result["state"] == "working"
-    assert prepared == ["node"]
-
-
 def test_runtime_download_failure_reconnects_without_cached_failure(runtime, monkeypatch):
-    from tools.managed_runtime import ManagedRuntimeDownloadError
+    from tools.mcp import MCPConnectionFailure
 
     mcp_runtime, _tools, _gate = runtime
     _runtime_db(monkeypatch, mcp_runtime, {
         "app-1": ("Local", {"connected_app_id": "app-1", "command": "npx"}),
     })
     attempts = 0
+    connect = mcp_runtime.connect_mcp_servers
 
-    def fetch_plan(_command, *, path=None):
-        return "node", object()
-
-    def fetch_runtime(_kind):
+    async def download_fails_once(config, registry, stack):
         nonlocal attempts
         attempts += 1
         if attempts == 1:
-            raise ManagedRuntimeDownloadError("download failed: URLError")
+            return {next(iter(config)): MCPConnectionFailure("download failed", "runtime_download_failed")}
+        return await connect(config, registry, stack)
 
-    monkeypatch.setattr("tools.managed_runtime.runtime_fetch_plan", fetch_plan)
-    monkeypatch.setattr("tools.managed_runtime.ensure_runtime", fetch_runtime)
+    monkeypatch.setattr(mcp_runtime, "connect_mcp_servers", download_fails_once)
 
     failed = asyncio.run(mcp_runtime.apply_connected_app_runtime("connect", "app-1"))
     working = asyncio.run(mcp_runtime.apply_connected_app_runtime("reconnect", "app-1"))

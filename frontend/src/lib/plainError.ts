@@ -17,7 +17,7 @@ const MACHINE_CODE = /^[a-z0-9]+(?:_[a-z0-9]+)+$/;
  * screen. One sentence, one place, so the whole app says it the same way.
  */
 export const SERVER_UNREACHABLE =
-	'Could not reach the server. Check your connection and try again.';
+	'Couldn’t reach the server. Check your connection and try again.';
 
 export function isMachineCode(value: string): boolean {
 	return MACHINE_CODE.test(value.trim());

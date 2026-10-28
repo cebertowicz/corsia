@@ -111,7 +111,7 @@ test.describe('@flow:held-send-all-failure @surface:chat Send all names what did
 				await page.getByRole('button', { name: 'Toggle panel' }).click();
 				await page.getByRole('button', { name: new RegExp(doc.fileName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')) }).click();
 			} else {
-				await page.getByRole('button', { name: /^Expand artifact panel/ }).click();
+				await page.getByRole('button', { name: /^Expand Files/ }).click();
 				await turnOffDocumentComments(page);
 			}
 			const retry = page.locator('.undelivered').getByRole('button', { name: /^Retry/ });

@@ -1,10 +1,11 @@
 """Agent-written event rules and the record of what each one did.
 
-Shared by fresh installs and migrations 136, 138 and 141. ``event_rules`` holds only
-rules an agent wrote through the ``event_rules`` tool: no row is seeded, and
-today's routing stays in code. ``event_route_decisions`` is the one outcome
-record for those rules; the tool's list, explain and the hourly wake budget read
-it, a ``run_script`` rule's row is also its run's queue until the script
+Shared by fresh installs and migrations 136, 138, 141 and 152. ``event_rules`` holds
+the rules an agent wrote through the ``event_rules`` tool, of two kinds: ``route`` rules
+act on events (today's routing stays in code), and ``observe`` rules register the
+artifact named in a tool result to its caller. ``event_route_decisions`` is the one outcome
+record for those rules; the tool's list and explain read it, a ``run_script`` rule's
+row is also its run's queue until the script
 runner settles it, and a ``start_worker`` rule's row is its start's queue, its
 request identity and its worker until the worker's result settles it.
 """
@@ -35,35 +36,57 @@ EVENT_RULE_SCHEMA_SQL = f"""
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
-        scope TEXT NOT NULL CHECK (scope LIKE 'project:_%'),
+        -- route: act on events. observe: register what a tool result names to its caller.
+        kind TEXT NOT NULL DEFAULT 'route' CHECK (kind IN ('route', 'observe')),
+        -- Only a shipped rule set's observe row applies to every project, as global.
+        scope TEXT NOT NULL CHECK (scope LIKE 'project:_%'
+                                   OR (scope = 'global' AND kind = 'observe' AND origin LIKE 'rule_set:_%')),
         connector TEXT NOT NULL,
-        event_type TEXT NOT NULL,
+        event_type TEXT,
         "match" TEXT NOT NULL DEFAULT '[]'
             CHECK (json_valid("match") AND json_type("match") = 'array'
                    AND json_array_length("match") <= 4)
             CHECK ({_MATCH_CHECKS}),
-        action TEXT NOT NULL CHECK (action IN ('deliver', 'drop', 'run_script', 'start_worker')),
-        "to" TEXT NOT NULL CHECK ("to" = 'registered_owner' OR "to" LIKE 'thread:_%'),
+        action TEXT CHECK (action IN ('deliver', 'drop', 'run_script', 'start_worker')),
+        "to" TEXT CHECK ("to" = 'registered_owner' OR "to" LIKE 'thread:_%'),
         mode TEXT CHECK (COALESCE((action = 'deliver' AND mode IN ('wake', 'digest'))
-                                  OR (action != 'deliver' AND mode IS NULL), 0)),
+                                  OR (action != 'deliver' AND mode IS NULL)
+                                  OR (kind = 'observe' AND mode IS NULL), 0)),
         note TEXT CHECK (note IS NULL OR (action = 'deliver' AND length(note) <= 500)),
         origin TEXT NOT NULL,
         created_by TEXT NOT NULL,
         authority_ref TEXT NOT NULL,
         -- run_script: the writer's own script schedule, which it runs with the event's facts.
-        script_id TEXT CHECK ((action = 'run_script') = (script_id IS NOT NULL)),
+        script_id TEXT CHECK (COALESCE(action = 'run_script', 0) = (script_id IS NOT NULL)),
         -- start_worker: the workflow its worker runs, and the event fact naming one request.
-        workflow_id TEXT CHECK ((action = 'start_worker') = (workflow_id IS NOT NULL)),
+        workflow_id TEXT CHECK (COALESCE(action = 'start_worker', 0) = (workflow_id IS NOT NULL)),
         request_identity_fact TEXT
-            CHECK ((action = 'start_worker') = (request_identity_fact IS NOT NULL)),
+            CHECK (COALESCE(action = 'start_worker', 0) = (request_identity_fact IS NOT NULL)),
+        -- observe: the tool whose result is read, the command's leading arguments (a shell only)
+        -- and the connector's artifact type its extractor reads from the result.
+        tool TEXT,
+        argv_prefix TEXT CHECK (argv_prefix IS NULL OR (json_valid(argv_prefix)
+                                AND json_type(argv_prefix) = 'array'
+                                AND json_array_length(argv_prefix) > 0)),
+        item_type TEXT,
+        -- A route rule names its event type, action and recipient and an observe rule names its tool
+        -- and artifact type, never both. (No semicolon in these comments: migration 139 runs this
+        -- text statement by statement.)
+        CHECK ((kind = 'route' AND event_type IS NOT NULL AND action IS NOT NULL AND "to" IS NOT NULL
+                AND tool IS NULL AND argv_prefix IS NULL AND item_type IS NULL)
+            OR (kind = 'observe' AND tool IS NOT NULL AND argv_prefix IS NOT NULL AND item_type IS NOT NULL
+                AND event_type IS NULL AND action IS NULL AND "to" IS NULL AND mode IS NULL
+                AND note IS NULL AND script_id IS NULL AND workflow_id IS NULL
+                AND request_identity_fact IS NULL AND "match" = '[]')),
         -- A drop removes only its writer's own deliveries, and a script run or worker is the writer's own.
-        -- (No semicolon in these comments: migration 139 runs this text statement by statement.)
-        CHECK (action = 'deliver' OR "to" = 'thread:' || created_by)
+        CHECK (kind = 'observe' OR action = 'deliver' OR "to" = 'thread:' || created_by)
     );
     CREATE INDEX IF NOT EXISTS idx_event_rules_type
         ON event_rules(connector, event_type, enabled, scope, created_at);
     CREATE INDEX IF NOT EXISTS idx_event_rules_scope
         ON event_rules(scope, created_at);
+    CREATE INDEX IF NOT EXISTS idx_event_rules_observe
+        ON event_rules(tool, enabled, scope) WHERE kind = 'observe';
 
     CREATE TABLE IF NOT EXISTS event_route_decisions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -80,7 +103,8 @@ EVENT_RULE_SCHEMA_SQL = f"""
         outcome TEXT NOT NULL CHECK (outcome IN (
             'woke', 'digested', 'dropped', 'held', 'dead_lettered', 'ended', 'duplicate',
             'queued', 'running', 'ran', 'failed', 'skipped',
-            'started', 'returned', 'invalid', 'no_result', 'refused')),
+            'started', 'returned', 'invalid', 'no_result', 'refused',
+            'registered', 'not_registered')),
         -- 'routed': the rule rode a delivery today's routing already made.
         via TEXT NOT NULL CHECK (via IN ('rule', 'routed')),
         reason TEXT,

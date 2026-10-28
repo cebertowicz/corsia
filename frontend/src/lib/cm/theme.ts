@@ -1,3 +1,4 @@
+import '../components/commentAnchors.css';
 import { EditorView } from '@codemirror/view';
 import { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
 import { tags as t } from '@lezer/highlight';
@@ -89,21 +90,7 @@ export const docTheme = EditorView.theme({
 	'.cm-md-image-selected img, .cm-md-image-selected .cm-md-image-note': { outline: '2px solid var(--accent)', outlineOffset: '-2px' },
 	'.cm-md-image-note': { color: 'var(--text-tertiary)' },
 
-	'.cm-comment-anchor': {
-		backgroundColor: 'color-mix(in srgb, var(--amber) 13%, transparent)',
-		borderBottom: '2px solid color-mix(in srgb, var(--amber) 42%, transparent)',
-		transition: 'background-color 0.15s'
-	},
-	// The captured range while its comment is being written: the anchor's amber with a dashed
-	// underline, so an unposted draft never reads as a placed or focused comment.
-	'.cm-comment-pending': {
-		backgroundColor: 'color-mix(in srgb, var(--amber) 20%, transparent)',
-		borderBottom: '2px dashed var(--amber)'
-	},
-	'.cm-comment-focused': {
-		backgroundColor: 'color-mix(in srgb, var(--amber) 26%, transparent)',
-		borderBottomColor: 'var(--amber)'
-	},
+	// Text anchor rules live in commentAnchors.css for documents and chat.
 	// A whole table or diagram: the same amber as an outline on the block, since a block has no text to underline.
 	'.cm-comment-block': { outline: 'medium solid color-mix(in srgb, var(--amber) 42%, transparent)', outlineOffset: 'calc(var(--space-1) * -1)', transition: 'outline-color var(--dur-tight)' },
 	'.cm-comment-block-pending': { outline: 'medium dashed var(--amber)', outlineOffset: 'calc(var(--space-1) * -1)' },

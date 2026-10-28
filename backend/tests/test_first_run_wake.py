@@ -269,7 +269,8 @@ class TestAppPath:
             "tool_attempts": {"claude_code": {"attempt": "none"}, "codex": {"attempt": "none"}},
             "pays_for": [],
             "bound_model": None,
-            "web_search_ready": False, "github_ready": False, "setup": {"setup_decisions": []},
+            "web_search_ready": False, "web_search_key": False, "github_ready": False,
+            "setup": {"setup_decisions": []},
             "user_profile": {"name": "Pat"},
         }
         monkeypatch.setattr(first_run_wake, "app_reference_served", lambda: True)
@@ -439,7 +440,7 @@ class TestAppPath:
         assert facts["tool_attempts"] is None
         assert facts["bound_model"] is None
         assert facts["user_profile"] == {"name": "Pat " + "n" * 116, "full_name": None}
-        assert "the address you give me in chat" in wake
+        assert "ask you in chat for an email address not already used on GitHub" in wake
         assert not any(
             value in wake
             for value in (profile_email, "person+agents@gmail.com", str(tmp_path), "America/Los_Angeles")

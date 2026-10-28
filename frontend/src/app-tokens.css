@@ -107,8 +107,10 @@
   --radius-circle: 50%;
   --sidebar-width: 280px;
   --transcript-max-width: 760px;
+  --needs-you-tile-max-width: 480px;
+  --artifact-tile-size: 36px;
+  --plan-state-icon-size: 18px;
   --header-height: 60px;
-  --header-badge-slot: 86px;
   --list-row-min-height: 38px;
   --button-pad-x-sm: 10px;
   /* Shared notice geometry preserves the established toast treatment without raw component values. */

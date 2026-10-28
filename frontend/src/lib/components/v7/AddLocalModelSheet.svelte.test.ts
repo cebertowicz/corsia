@@ -36,19 +36,27 @@ describe('AddLocalModelSheet', () => {
 		await vi.waitFor(() => expect(document.body.textContent).toContain(detail));
 		flushSync();
 	}
-	const tryAgain = () => [...document.body.querySelectorAll('button')].some((button) => button.textContent?.includes('Try again'));
+	const tryAgain = () => [...document.body.querySelectorAll('button')].some((button) => button.textContent?.includes('Retry'));
 
-	it('shows the backend sentence for a failed check and offers Try again, since asking again can help', async () => {
+	it('shows the backend sentence for a failed check and offers Retry, since asking again can help', async () => {
 		await renderFailure(503, "Couldn’t check which models fit this computer.");
 		expect(tryAgain()).toBe(true);
 	});
 
-	it('shows a cause the person must fix first without a Try again that cannot succeed', async () => {
+	it('shows a cause the person must fix first without a Retry that cannot succeed', async () => {
 		await renderFailure(409, "Local models aren’t set up. Select Set up to continue.");
 		expect(tryAgain()).toBe(false);
 	});
 
-	it('shows the update message from oMLX without Try again', async () => {
+	it('shows the server guidance when a stale setup offer is opened on a non-macOS host', async () => {
+		host = document.createElement('div'); document.body.appendChild(host); token.set('test-token');
+		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 409, json: async () => ({ detail: { code: 'never_local_host', message: "Local models don't run on this computer. Connect a provider." } }) })));
+		component = mount(AddLocalModelSheet, { target: host, props: { onClose: vi.fn() } });
+		await vi.waitFor(() => expect(document.body.textContent).toContain("Local models don't run on this computer. Connect a provider."));
+		expect(tryAgain()).toBe(false);
+	});
+
+	it('shows the update message from oMLX without Retry', async () => {
 		await render({ state: 'update_required', message: 'Update oMLX to 0.4.2 or later to add a local model.', models: [] });
 		expect(document.body.textContent).toContain('Update oMLX to 0.4.2 or later to add a local model.');
 		expect(tryAgain()).toBe(false);

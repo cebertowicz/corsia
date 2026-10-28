@@ -143,7 +143,7 @@ def test_document_read_and_parse_run_before_admission_write_transaction(deleg_db
 def test_nonhuman_metadata_without_viewing_keys_is_returned_unchanged(deleg_db, role, metadata):
     from infra.input_admission import stamped_human_metadata
 
-    assert stamped_human_metadata(deleg_db, role, "plain", metadata) is metadata
+    assert stamped_human_metadata(deleg_db, role, "plain", metadata, thread_id="sender-self") is metadata
 
 
 def test_legacy_metadata_without_viewing_keys_preserves_empty_dict(deleg_db):
@@ -153,4 +153,4 @@ def test_legacy_metadata_without_viewing_keys_preserves_empty_dict(deleg_db):
     deleg_db.execute("UPDATE messages SET metadata=NULL WHERE id='legacy'")
     deleg_db.commit()
     metadata = {}
-    assert stamped_human_metadata(deleg_db, "user", "legacy", metadata) is metadata
+    assert stamped_human_metadata(deleg_db, "user", "legacy", metadata, thread_id="sender-self") is metadata

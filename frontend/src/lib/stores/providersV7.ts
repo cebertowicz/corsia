@@ -219,7 +219,7 @@ export function groupByHost(
 		groups.push({
 			key: 'agent-clis',
 			name: 'Agent CLIs',
-			subname: 'Run by the CLI on this Mac',
+			subname: 'Run by the CLI on this computer',
 			netKind: 'localhost',
 			providers: harnesses.map(h => ({
 				name: h.name,

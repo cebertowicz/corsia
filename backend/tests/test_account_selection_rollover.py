@@ -199,7 +199,7 @@ RESET = '2100-01-01T00:00:00+00:00'
 
 
 def _limit(db, account):
-    """Hold ``account`` at its plan limit, the verdict 'Spend past plan limit' releases."""
+    """Hold ``account`` at its plan limit, the verdict 'Spend past usage limit' releases."""
     from connections import harness_usage as usage
     from core.stop_causes import PLAN_LIMIT_REASON
 

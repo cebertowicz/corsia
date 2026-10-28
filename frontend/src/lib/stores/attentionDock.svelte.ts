@@ -51,6 +51,7 @@ export const visibleQueue = derived([queue, answers], ([$queue, $answers]) => {
     current: items[0] ?? null,
     count: Math.max(0, $queue.count - hidden),
     items,
+    reply_items: $queue.reply_items,
   } satisfies AttentionQueue;
 });
 
@@ -126,7 +127,7 @@ export async function openDecisionFromActivity(
 }
 
 const OPEN_NOTICE: Record<Exclude<OpenFromActivityResult, "opened">, string> = {
-  empty: "That decision no longer needs you.",
+  empty: "That decision is closed.",
   unavailable: "Couldn't load your decisions. Try again.",
   "no-thread": "Couldn't find the thread for that decision.",
   failed: "Couldn't open the thread for that decision.",

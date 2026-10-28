@@ -12,10 +12,11 @@ import asyncio
 import logging
 import os
 import sys
-import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
+
+from tools.private_runtime_files import SHELL_ENVELOPE_DIR, private_mkstemp
 
 
 @dataclass(frozen=True)
@@ -35,7 +36,9 @@ log = logging.getLogger(__name__)
 def _write_envelope(command: str, cwd: Path, envelope: Envelope) -> tuple[Path | None, list[str]]:
     if not envelope.profile_required:
         return None, envelope.build_argv(command, cwd, None, **envelope.argv_options)
-    descriptor, raw_path = tempfile.mkstemp(prefix="corsia-shell-envelope-", suffix=".sb")
+    descriptor, raw_path = private_mkstemp(
+        SHELL_ENVELOPE_DIR, prefix="corsia-shell-envelope-", suffix=".sb",
+    )
     profile_path = Path(raw_path).resolve(strict=False)
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8") as handle:

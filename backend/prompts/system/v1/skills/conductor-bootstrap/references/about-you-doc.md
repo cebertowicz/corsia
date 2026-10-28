@@ -20,13 +20,13 @@ Open it in the doc pane with `document_open`. When it cannot open, post the line
 
 ## 2. Fill it in with suggestions
 
-Every line goes in as a suggestion the person can accept, never as text you wrote into the doc. A suggestion is `doc_comment_create` with `quote` the heading line exactly and `replacement` that heading line followed by its lines. A suggestion never touches another heading's section, so no two overlap. Write only what the person said or didn't correct, what the lookup kept and what the import showed. Never run a web search for it.
+Every line goes in as a suggestion the person can accept, never as text you wrote into the doc. A suggestion is `doc_comment_create` with `quote` the heading line exactly and `replacement` that heading line followed by its lines. The replacement starts with that heading line unchanged. A suggestion never touches another heading's section, so no two overlap. Write only what the person said or didn't correct, what the lookup kept and what the import showed. Never run a web search for it.
 
 What each heading gets:
 
 - **Who you are:** the lookup's kept lines and their answer to question 1.
 - **What you're working toward:** their answer to question 2 and the matches step G of the lookup held (what they connected, imported or have on this computer).
-- **How you like to work:** their answer to question 3 and the working-style notes the import kept.
+- **How you like to work:** their answer to the answer-style question and the working-style notes the import kept.
 
 A heading with nothing to put under it gets no suggestion.
 
@@ -36,15 +36,15 @@ A heading with nothing to put under it gets no suggestion.
 
 ## 3. Ask for the review, once
 
-When every `About you: <heading>` task is settled and every suggestion is in, add the task `Review your About you doc` to your plan and hold it on the person: `plan_update` `block_node` with `owner_kind` `user`, `reason_key` `review_about_you`, `ask_artifact_id` the document's artifact id (`artifact_resolve` on `shared/about-you.md`) and `reason` `Change anything that's wrong and reject any suggestion that isn't right, then press Approve. It accepts the rest for you.` That ask is what puts Approve in the document; without it the person sees no button. Then post once `I put what I know in your About you doc. Change anything that's wrong and reject any suggestion that isn't right, then press Approve. It accepts the rest for you.`
+When every `About you: <heading>` task is settled and every suggestion is in, add the task `Review your About you doc` to your plan and hold it on the person: `plan_update` `block_node` with `owner_kind` `user`, `reason_key` `review_about_you`, `ask_artifact_id` the document's artifact id (`artifact_resolve` on `shared/about-you.md`) and `reason` `Change anything that's wrong, reject any suggestion that isn't right, and add a note if you like, then press Approve.` That ask is what puts Approve in the document; without it the person sees no button. Then post once `I put what I know in your About you doc. When you approve it, your name, time zone and how you like to work go into your profile, which every agent and chat loads. A chat on a cloud model sends it to that provider with what you say. Change anything that's wrong, reject any suggestion that isn't right, and add a note if you like, then press Approve. It accepts the rest for you.`
 
-- Whenever you read the document (on Approve in section 4, or on the person's reply), suggest again yourself, on the text now in the doc, any suggestion that can no longer apply to it. Never wait on a helper that is still running.
+- Whenever you read the document (on Approve in section 4, or on the person's reply), suggest again yourself, on the text now in the doc, any suggestion that can no longer apply to it, and put back any heading a suggestion changed or dropped. Never wait on a helper that is still running.
 - A comment from the person on a line: answer with a suggested change to that line.
 - "Not now", or they carry on with something else: close that task with the reason that they chose not now, skip to section 5 and write the profile from the chat answers.
 
 ## 4. When they approve
 
-First, when any suggestion is still open: accept nothing, remove nothing and write no profile. Post `[N] of my suggestions are still open, so nothing's saved yet. Accept the ones that are right, reject the rest, then tell me here when you're done.` with N the number open. When they reply, read the document again: while any is still open, post the same line with the new count; when none is open, go on. With none open: accept nothing yourself. Read the document's final text. Remove any heading left with nothing under it, so no placeholder ever stays in their document. Then post `Saved. I'll work from this. Tell me any time something changes.` and go on to step 6 of `references/first-run-app.md`, after writing the profile (section 5).
+First, when any suggestion is still open: accept nothing, remove nothing and write no profile. Post `[N] of my suggestions are still open, so nothing's saved yet. Accept the ones that are right, reject the rest, then tell me here when you're done.` with N the number open. When they reply, read the document again: while any is still open, post the same line with the new count; when none is open, go on. With none open: accept nothing yourself. Read the document's final text. Remove any heading left with nothing under it, so no placeholder ever stays in their document. Then post `Saved. Agents add to your profile as you tell them how you want things done. Edit it any time in Settings › Context (context/50-USER-PROFILE.md) or open that file in your workspace.` and go on to step 6 of `references/first-run-app.md`, after writing the profile (section 5).
 
 ## 5. Write the profile
 

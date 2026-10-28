@@ -37,7 +37,7 @@ describe('LimitHeldLine', () => {
 	it.each(VENDORS)('on %s, the plan reason offers the picker and the account card', (connection, id) => {
 		const onSwitchModel = render(row(connection, id, 'plan_limit_overage_off'));
 		expect(document.querySelector('.limit-held-text')?.textContent).toBe('Plan limit reached · reset time unknown');
-		expect(buttons()).toEqual(['Switch model', 'Spend past plan limit']);
+		expect(buttons()).toEqual(['Switch model', 'Spend past usage limit']);
 
 		document.querySelectorAll('button')[0].click();
 		expect(onSwitchModel).toHaveBeenCalledOnce();

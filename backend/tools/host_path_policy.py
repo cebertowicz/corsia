@@ -12,7 +12,6 @@ import os
 from pathlib import Path
 import re
 import shutil
-import tempfile
 from collections.abc import Callable
 from typing import Iterable
 
@@ -22,6 +21,9 @@ from tools.host_path_resolution import (
     denied_paths_in,
     resolution_touches,
 )
+from tools.launch_agent_plists import corsia_plist_deny_rule, is_corsia_plist
+from tools.protected_path_rules import ancestor_pins
+from tools.sandbox_git import sandbox_literal
 
 
 _CONTROL_FILES = (
@@ -30,28 +32,11 @@ _CONTROL_FILES = (
     Path("/tmp/corsia-restart.log"),
 )
 _RAW_DEVICE_RE = re.compile(r"^/dev/(?:r?disk)[^/]*$")
-_CORSIA_PLIST_RE = re.compile(r"corsia.*\.plist$", re.IGNORECASE)
 GENERATED_WORKSPACE_PROJECTIONS = (Path(".corsia/context"), Path(".corsia/skills"))
-GENERATED_PROFILE_PREFIXES = ("corsia-shell-envelope-", "corsia-controlled-git-", "corsia-mcp-envelope-")
 # Hard-floor denials cannot be opened by a host-access lease.
 _NO_LEASE = " No host-access lease can open it."
 _PRIVATE_STATE_DENIAL = "CORSIA and Safehouse private state is blocked in protected mode." + _NO_LEASE
 _CREDENTIAL_DENIAL = "Stored secrets are closed to every agent route." + _NO_LEASE
-
-def _sandbox_text(value: Path | str) -> str:
-    return str(value).replace("\\", "\\\\").replace('"', '\\"')
-
-def _sandbox_regex(value: str) -> str:
-    return value.replace("\\", "\\\\").replace('"', '\\"')
-
-def generated_profile_temp_roots() -> tuple[Path, ...]:
-    """Return every lexical and /private temporary root for generated profiles."""
-    roots = {Path(tempfile.gettempdir()), Path("/tmp")}
-    for root in tuple(roots):
-        raw = str(root)
-        roots.add(Path(raw.removeprefix("/private") if raw.startswith("/private/") else "/private" + raw))
-    return tuple(sorted(roots))
-
 
 @dataclass(frozen=True, slots=True)
 class ProtectedHostPathPolicy:
@@ -62,10 +47,14 @@ class ProtectedHostPathPolicy:
     generated_profile: Path | None = None
     safehouse_paths: tuple[Path, ...] = ()
     write_roots: tuple[Path, ...] = ()
+    workspace: Path | None = None
+    granted_roots: tuple[Path, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "home", canonical(self.home))
         object.__setattr__(self, "state_root", canonical(self.state_root))
+        if self.workspace is not None:
+            object.__setattr__(self, "workspace", canonical(self.workspace))
         if self.generated_profile is not None:
             object.__setattr__(
                 self,
@@ -95,13 +84,29 @@ class ProtectedHostPathPolicy:
         )
 
     @property
+    def generated_roots(self) -> tuple[Path, ...]:
+        """Workspace projections the backend regenerates; agents never write them."""
+        if self.workspace is None:
+            return ()
+        return tuple(canonical(self.workspace / path) for path in GENERATED_WORKSPACE_PROJECTIONS)
+
+    @property
+    def ancestor_pins(self) -> tuple[Path, ...]:
+        """Ancestors of every protected path inside a granted write root."""
+        return ancestor_pins(
+            (*self.generated_roots, *self.write_roots, *self.control_files),
+            (root for root in (self.workspace, *self.granted_roots) if root is not None),
+            (Path("/"), self.home),
+        )
+
+    @property
     def credential_roots(self) -> tuple[Path, ...]:
         """Folders of stored secrets, closed to every agent route, leases included.
 
         The System hard floor covers protected credentials and a lease never
         opens it. Add a root here only with the project owner's approval.
         """
-        return (self.state_root / "keys",)
+        return (self.state_root / "keys", self.state_root / "browser-profile")
 
     @property
     def control_files(self) -> tuple[Path, ...]:
@@ -165,19 +170,11 @@ class ProtectedHostPathPolicy:
         if _RAW_DEVICE_RE.fullmatch(str(candidate)):
             return "Raw device access is blocked in protected mode." + _NO_LEASE
 
-        temporary_roots = {canonical(root) for root in generated_profile_temp_roots()}
-        if (
-            candidate.parent in temporary_roots
-            and candidate.suffix == ".sb"
-            and candidate.name.startswith(GENERATED_PROFILE_PREFIXES)
-        ):
-            return (
-                "Generated Safehouse profiles are blocked in protected mode."
-                + _NO_LEASE
-            )
-
         if not for_write:
             return None
+
+        if any(contains(root, candidate) for root in self.generated_roots):
+            return "CORSIA manages the context and skills files under .corsia, so they cannot be changed in protected mode."
 
         if candidate in self.control_files:
             return (
@@ -195,9 +192,7 @@ class ProtectedHostPathPolicy:
                 + _NO_LEASE
             )
         launch_agents = self.home / "Library" / "LaunchAgents"
-        if candidate.parent == launch_agents and _CORSIA_PLIST_RE.search(
-            candidate.name
-        ):
+        if candidate.parent == launch_agents and is_corsia_plist(candidate.name):
             return (
                 "CORSIA launch-agent files are blocked in protected mode."
                 + _NO_LEASE
@@ -257,11 +252,9 @@ class ProtectedHostPathPolicy:
         return None
 
     def hard_floor_sandbox_rules(self) -> str:
-        """Render only the credential-root denies; leased profiles keep the rest open."""
-        return "\n".join(
-            f'(deny file-read* file-write* (subpath "{_sandbox_text(path)}"))'
-            for path in self.credential_roots
-        )
+        """Render permanent credential and browser boundaries, including under a lease."""
+        from tools.host_sandbox_floor import hard_floor_rules
+        return hard_floor_rules(self.credential_roots, sandbox_literal)
 
     def sandbox_rules(self) -> str:
         """Render protected Seatbelt rules from the protected path inventory."""
@@ -269,53 +262,53 @@ class ProtectedHostPathPolicy:
         launch_agents = self.home / "Library" / "LaunchAgents"
         denied_roots = (self.state_root, *self.private_roots)
         lines = [
-            f'(deny file-read* file-write* (subpath "{_sandbox_text(path)}"))'
+            f'(deny file-read* file-write* (subpath "{sandbox_literal(path)}"))'
             for path in denied_roots
         ]
         lines.append(self.hard_floor_sandbox_rules())
         if self.generated_profile is not None:
             lines.append(
                 f"(deny file-read* file-write* "
-                f'(literal "{_sandbox_text(self.generated_profile)}"))'
+                f'(literal "{sandbox_literal(self.generated_profile)}"))'
             )
         lines.extend(
             [
                 *(
-                    f'(deny file-write* (literal "{_sandbox_text(path)}"))'
+                    f'(deny file-write* (literal "{sandbox_literal(path)}"))'
                     for path in self.control_files
                 ),
                 *(
-                    f'(deny file-write* process-exec (literal "{_sandbox_text(path)}"))'
+                    f'(deny file-write* process-exec (literal "{sandbox_literal(path)}"))'
                     for path in self.safehouse_paths
                 ),
                 *(
-                    f'(deny file-write* (subpath "{_sandbox_text(path)}"))'
-                    for path in self.write_roots
+                    f'(deny file-write* (subpath "{sandbox_literal(path)}"))'
+                    for path in dict.fromkeys((*self.write_roots, *self.generated_roots))
                 ),
-                (
-                    f"(deny file-write* "
-                    f'(regex #"^{_sandbox_regex(str(launch_agents))}/'
-                    r'[^/]*[Mm][Aa][Ee][Ss][Tt][Rr][Oo][^/]*\.plist$"))'
+                *(
+                    f'(deny file-write* (literal "{sandbox_literal(path)}"))'
+                    for path in self.ancestor_pins
                 ),
+                corsia_plist_deny_rule(sandbox_literal(launch_agents)),
                 '(deny file-read* file-write* (regex #"^/dev/(r?disk|rdisk)[0-9].*"))',
                 (
                     f'(deny file-write* (literal "/") '
-                    f'(literal "{_sandbox_text(self.home)}"))'
+                    f'(literal "{sandbox_literal(self.home)}"))'
                 ),
-                f'(deny file-read* file-write* (subpath "{_sandbox_text(ssh)}"))',
-                f'(allow file-read-metadata (literal "{_sandbox_text(ssh)}"))',
+                f'(deny file-read* file-write* (subpath "{sandbox_literal(ssh)}"))',
+                f'(allow file-read-metadata (literal "{sandbox_literal(ssh)}"))',
                 (
                     f"(allow file-read* "
-                    f'(literal "{_sandbox_text(ssh / "config")}") '
-                    f'(literal "{_sandbox_text(ssh / "known_hosts")}") '
-                    f'(literal "{_sandbox_text(ssh / "known_hosts.old")}") '
-                    f'(literal "{_sandbox_text(ssh / "allowed_signers")}") '
-                    f'(subpath "{_sandbox_text(ssh / "config.d")}"))'
+                    f'(literal "{sandbox_literal(ssh / "config")}") '
+                    f'(literal "{sandbox_literal(ssh / "known_hosts")}") '
+                    f'(literal "{sandbox_literal(ssh / "known_hosts.old")}") '
+                    f'(literal "{sandbox_literal(ssh / "allowed_signers")}") '
+                    f'(subpath "{sandbox_literal(ssh / "config.d")}"))'
                 ),
                 (
                     f"(allow file-write* "
-                    f'(literal "{_sandbox_text(ssh / "known_hosts")}") '
-                    f'(literal "{_sandbox_text(ssh / "known_hosts.old")}"))'
+                    f'(literal "{sandbox_literal(ssh / "known_hosts")}") '
+                    f'(literal "{sandbox_literal(ssh / "known_hosts.old")}"))'
                 ),
             ]
         )
@@ -327,9 +320,10 @@ def current_protected_host_path_policy(
     generated_profile: Path | None = None,
     safehouse_paths: Iterable[Path] = (),
     write_roots: Iterable[Path] = (),
+    granted_roots: Iterable[Path] = (),
 ) -> ProtectedHostPathPolicy:
     """Build the live policy without caching mutable environment paths."""
-    from infra.config import STATE_ROOT
+    from infra.config import STATE_ROOT, WORKSPACE
 
     from tools.managed_runtime import application_cache_root
 
@@ -343,6 +337,8 @@ def current_protected_host_path_policy(
         generated_profile=generated_profile,
         safehouse_paths=paths,
         write_roots=(application_cache_root(), *write_roots),
+        workspace=WORKSPACE,
+        granted_roots=tuple(granted_roots),
     )
 
 

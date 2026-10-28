@@ -31,6 +31,7 @@ _SOURCE_INSTALL_HINT = (
 )
 _PACKAGED_INSTALL_HINT = "reinstall or update CORSIA to restore its bundled copy"
 WAIT_TIMED_OUT = "Wait timed out; the browser session is still running. Take a snapshot to see the page."
+BROWSER_BUSY = "Browser timed out or is busy with an earlier command; the session is still running. Take a snapshot when it finishes."
 CHROME_INSTALL_TIMEOUT = 600.0
 # Each family's producer contract was verified against the real native build.
 _VERIFIED_FAMILIES = (">=0.27.0,<0.28.0", ">=0.31.0,<0.32.0")
@@ -144,6 +145,15 @@ def chrome_executable() -> tuple[str | None, Literal["env", "system", "default"]
     return None, "default"
 
 
+def downloaded_chrome_executable() -> str | None:
+    """Resolve agent-browser's installed Chrome after its installer completes."""
+    root = Path.home() / ".agent-browser" / "browsers"
+    candidates = sorted(root.glob("chrome-*/**/Google Chrome for Testing"))
+    if not candidates:
+        candidates = sorted(root.glob("chrome-*/**/chrome"))
+    return next((str(path) for path in reversed(candidates) if path.is_file() and os.access(path, os.X_OK)), None)
+
+
 def chrome_download_missing() -> bool:
     """Whether agent-browser has no Chrome for Testing in the person's home yet."""
     # Tied to the layout of the bundled agent-browser 0.31.2; recheck it when that pin moves.
@@ -195,8 +205,8 @@ def json_object(raw: str) -> dict:
 
 def render_model_result(result: CommandResult, *, redactions: dict[str, str]) -> str:
     """Preserve readable tool strings while redacting private ownership facts."""
-    if result.timed_out:
-        return "Error: agent-browser command timed out."
+    if result.timed_out or result.completion == "interrupted":
+        return f"Error: {BROWSER_BUSY}"
     payload = json_object(result.stdout)
     if result.returncode != 0:
         # The native --json error (or stderr) is what the agent can act on.
@@ -275,13 +285,16 @@ def _read_output(stream: IO[bytes]) -> str:
     return stream.read().decode("utf-8", errors="replace").strip()
 
 
-async def invoke(argv: Sequence[str], *, socket_dir: Path, timeout: float) -> CommandResult:
+async def invoke(argv: Sequence[str], *, socket_dir: Path, timeout: float,
+                 stream_port: int | None = None, config_path: Path | None = None,
+                 home: Path | None = None) -> CommandResult:
     """Settle the actual subprocess; unknown effects are never a no-launch claim."""
-    env = os.environ.copy()
-    env.pop("AGENT_BROWSER_DAEMON", None)
-    env.pop("AGENT_BROWSER_DASHBOARD", None)
-    env.pop("AGENT_BROWSER_SESSION", None)
-    env["AGENT_BROWSER_SOCKET_DIR"] = str(socket_dir)
+    from host_access.browser_environment import client_environment
+    env = client_environment(os.environ, socket_dir, stream_port)
+    if config_path is not None:
+        argv = (argv[0], "--config", str(config_path), *argv[1:])
+    if home is not None:
+        env["HOME"] = str(home)
     # The client starts a browser daemon that outlives it, and a descendant can keep the client's stdout and stderr
     # open after the client exits. Pipes would then never reach end-of-file, so the client writes to files and
     # settles on its own exit; what a descendant writes later goes to a file nobody waits on.
@@ -332,8 +345,10 @@ async def invoke(argv: Sequence[str], *, socket_dir: Path, timeout: float) -> Co
     return CommandResult(int(process.returncode or 0), stdout, stderr)
 
 
-def check_local_mode(args: Sequence[str]) -> None:
+def check_local_mode(args: Sequence[str]) -> dict:
     """Reject unverified producer modes before session effects, including config files."""
+    from host_access import browser_launch
+    browser_launch.inherited_args()
     forbidden = {"-p", "--provider", "--engine", "--cdp", "--auto-connect", "--config"}
     if any(arg.split("=", 1)[0] in forbidden for arg in args):
         raise identity.BrowserIdentityError(_LOCAL_MODE_REQUIRED)
@@ -359,6 +374,7 @@ def check_local_mode(args: Sequence[str]) -> None:
     if (provider is not None or engine not in {None, "chrome"} or config.get("cdp")
             or os.environ.get("AGENT_BROWSER_CDP") or auto_connect or config.get("autoConnect")):
         raise identity.BrowserIdentityError(_LOCAL_MODE_REQUIRED)
+    return config
 
 
 _LOCAL_MODE_REQUIRED = (

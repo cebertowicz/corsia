@@ -8,6 +8,7 @@
 	import SetupShell from './SetupShell.svelte';
 	import LivingMark from './LivingMark.svelte';
 	import { saveSetupReport } from '$lib/setupReport';
+	import { disconnectRemote, shellInfo } from '$lib/remoteShell';
 
 	interface Props { onNoAccount?: () => void; }
 	const { onNoAccount }: Props = $props();
@@ -20,6 +21,12 @@
 	let loginError = $state('');
 	let submitting = $state(false);
 	let checkingAgain = $state(false);
+	let returningToThisComputer = $state(false);
+	const shell = shellInfo();
+	const remoteName = shell?.mode === 'remote' ? shell.name.trim() : '';
+	const localReturnLabel = shell?.mode === 'remote'
+		? shell.localConfigured ? 'Use this computer instead' : 'Set up this computer instead'
+		: null;
 
 	// Setup is reachable only from the computer CORSIA runs on; the setup routes
 	// answer 403 to anyone else, who keeps the `corsia user add` guidance.
@@ -63,7 +70,7 @@
 				body: JSON.stringify({ username: username.trim(), password }),
 			});
 			if (res.status === 401) {
-				loginError = 'Wrong username or password.';
+				loginError = 'That username and password don’t match.';
 				password = '';
 				return;
 			}
@@ -93,6 +100,17 @@
 		connect();
 	}
 
+	async function returnToThisComputer() {
+		if (returningToThisComputer) return;
+		returningToThisComputer = true;
+		try {
+			await disconnectRemote();
+		} catch {
+			loginError = `CORSIA couldn’t disconnect from ${remoteName || 'the other computer'}. Try again.`;
+			returningToThisComputer = false;
+		}
+	}
+
 	$effect(() => {
 		if ($connectionError === 'Invalid or expired session') {
 			loginError = 'Your session ended. Sign in again.';
@@ -111,21 +129,26 @@
 </script>
 
 {#if phase === 'error'}
-	<SetupShell steps={[]} page="error" title="CORSIA couldn’t start" lede={reportError || 'Something went wrong while starting. Try again, or save a report to send.'} primary={{ label: 'Retry' }} onPrimary={checkAgain}>
-		{#snippet secondary()}<Button variant="chip" onclick={async () => { reportError = await saveSetupReport(); }}>Save a report</Button>{/snippet}
+	<SetupShell steps={[]} page="error" title={shell?.mode === 'remote' ? `Can’t check ${remoteName || 'the other computer'}` : 'CORSIA couldn’t start'} lede={reportError || loginError || (shell?.mode === 'remote' ? 'Something went wrong. Choose Retry, or save a report to send.' : 'Something went wrong while starting. Try again, or save a report to send.')} primary={{ label: 'Retry' }} onPrimary={checkAgain}>
+		{#snippet secondary()}
+			<Button variant="chip" onclick={async () => { reportError = await saveSetupReport(); }}>Save a report</Button>
+			{#if localReturnLabel}<Button variant="chip" onclick={returnToThisComputer} loading={returningToThisComputer} disabled={returningToThisComputer}>{localReturnLabel}</Button>{/if}
+		{/snippet}
 	</SetupShell>
 {:else}
 <div class="login-screen">
 	<div class="login-card">
 		<div class="login-logo"><LivingMark entry="none" label="CORSIA" /></div>
 		<h1>CORSIA</h1>
-		<p>Your personal AI assistant</p>
+		<p>{phase === 'form' && remoteName ? `Sign in to ${remoteName}` : 'Your personal AI assistant'}</p>
 		{#if phase === 'no-account'}
-			<p class="no-account-copy">No account exists yet. On the CORSIA computer, run:</p>
+			{#if loginError}<div class="login-error">{loginError}</div>{/if}
+			<p class="no-account-copy">No account exists. On the computer running CORSIA, run this command:</p>
 			<code class="cmd">corsia user add</code>
 			<Button variant="primary" onclick={checkAgain} loading={checkingAgain} disabled={checkingAgain}>
 				Check again
 			</Button>
+			{#if localReturnLabel}<Button variant="chip" onclick={returnToThisComputer} loading={returningToThisComputer} disabled={returningToThisComputer}>{localReturnLabel}</Button>{/if}
 		{:else if phase === 'form'}
 			{#if loginError}
 				<div class="login-error">{loginError}</div>
@@ -149,7 +172,17 @@
 				<Button type="submit" variant="primary" loading={submitting} disabled={submitting}>
 					Sign in
 				</Button>
+				{#if localReturnLabel}
+					<div class="form-return">
+						<Button variant="chip" onclick={returnToThisComputer} loading={returningToThisComputer} disabled={submitting || returningToThisComputer}>
+							{localReturnLabel}
+						</Button>
+					</div>
+				{/if}
 			</form>
+		{:else if phase === 'checking' && localReturnLabel}
+			{#if loginError}<div class="login-error">{loginError}</div>{/if}
+			<Button variant="chip" onclick={returnToThisComputer} loading={returningToThisComputer} disabled={returningToThisComputer}>{localReturnLabel}</Button>
 		{/if}
 	</div>
 </div>
@@ -191,7 +224,10 @@
 	}
 	.login-card p { color: var(--text-secondary); margin-bottom: 28px; font-size: var(--text-body); }
 	.no-account-copy { margin-bottom: 14px; }
-	.login-form { display: contents; }
+	.login-form, .form-return { display: contents; }
+	@media (max-width: 40em) {
+		.form-return { display: block; margin-top: var(--space-3); }
+	}
 	.login-card input {
 		width: 280px; padding: 12px 16px; background: var(--bg-tertiary);
 		border: 1px solid var(--border); border-radius: var(--radius-sm);
@@ -214,6 +250,7 @@
 		user-select: all;
 	}
 	.login-error {
-		color: var(--red); font-size: var(--text-subhead); margin-bottom: 12px;
+		color: var(--red-text); font-size: var(--text-subhead); margin-bottom: 12px;
 	}
+
 </style>

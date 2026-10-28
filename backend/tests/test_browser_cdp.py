@@ -64,6 +64,27 @@ def test_page_endpoint_prefers_the_sessions_current_page(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_restricted_port_fixture_waits_for_closed_popup_to_disappear(monkeypatch):
+    from tests.browser_restricted_ports_fixture import _close_popup
+
+    calls = []
+
+    class Browser:
+        async def call(self, method, **params):
+            calls.append((method, params))
+            if method == 'Target.getTargets':
+                return {'targetInfos': ([{'targetId': 'popup'}] if len(calls) == 2 else [])}
+            return {'success': True}
+
+    async def no_delay(_seconds):
+        pass
+
+    monkeypatch.setattr('tests.browser_restricted_ports_fixture.asyncio.sleep', no_delay)
+    await _close_popup(Browser(), 'popup')
+    assert [method for method, _ in calls] == ['Target.closeTarget', 'Target.getTargets', 'Target.getTargets']
+
+
+@pytest.mark.asyncio
 async def test_box_accepts_agent_browser_031s_direct_data_shape():
     async def run(_args, _timeout):
         return CommandResult(0, '{"data":{"x":1,"y":2,"width":3,"height":4}}', "")

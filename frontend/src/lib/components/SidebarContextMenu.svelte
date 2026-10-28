@@ -51,7 +51,7 @@
 	const MENU_W = 188;
 	const SUB_W = 184;
 	const MOBILE_BREAKPOINT = 768;
-	const estimatedHeight = $derived(kind === 'conversation' ? 304 : kind === 'agent' ? 196 : 52);
+	const estimatedHeight = $derived(kind === 'conversation' ? 304 : kind === 'agent' ? 196 : 100);
 	const clampedLeft = $derived(Math.max(8, Math.min(x, window.innerWidth - MENU_W - 8)));
 	const clampedTop = $derived(Math.max(8, Math.min(y, window.innerHeight - estimatedHeight - 8)));
 
@@ -137,16 +137,18 @@
 			<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
 			Delete
 		</button>
-	{:else if kind === 'agent'}
+	{:else}
 		<button class="press-tint context-menu-item" onclick={onAgentSettings} onmouseenter={closeSubNow}>
 			<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.12 2.12-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1 1.55V20h-3v-.09a1.7 1.7 0 0 0-1-1.55 1.7 1.7 0 0 0-1.88.34l-.06.06-2.12-2.12.06-.06A1.7 1.7 0 0 0 7.1 15a1.7 1.7 0 0 0-1.55-1H5v-3h.55A1.7 1.7 0 0 0 7.1 10a1.7 1.7 0 0 0-.34-1.88l-.06-.06L8.82 5.94l.06.06a1.7 1.7 0 0 0 1.88.34 1.7 1.7 0 0 0 1-1.55V4h3v.79a1.7 1.7 0 0 0 1 1.55 1.7 1.7 0 0 0 1.88-.34l.06-.06 2.12 2.12-.06.06A1.7 1.7 0 0 0 19.4 10a1.7 1.7 0 0 0 1.55 1h.05v3h-.05a1.7 1.7 0 0 0-1.55 1Z"/></svg>
 			Agent settings
 		</button>
-		<div class="context-menu-divider"></div>
-		<button class="press-tint context-menu-item deactivate" onclick={onDeactivateAgent} onmouseenter={closeSubNow}>
-			<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14" transform="rotate(45 12 12)"/></svg>
-			Deactivate Agent
-		</button>
+		{#if kind === 'agent'}
+			<div class="context-menu-divider"></div>
+			<button class="press-tint context-menu-item deactivate" onclick={onDeactivateAgent} onmouseenter={closeSubNow}>
+				<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14" transform="rotate(45 12 12)"/></svg>
+				Deactivate Agent
+			</button>
+		{/if}
 	{/if}
 </div>
 

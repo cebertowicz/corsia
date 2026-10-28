@@ -154,7 +154,7 @@ def _create(db, plan, source, author, content, actor, provenance) -> dict:
         acceptance_criteria=REVIEW_DOD, description=content["context"],
         parent_id=source["parent_id"], assignee="user",
         intent_node_id=str(intent_words.canonical(db, source["id"])["id"]),
-        actor_id=actor.audit_id, provenance=provenance, db=db,
+        actor_id=actor.audit_id, provenance=provenance, db=db, person_step=False,
     )
     body = {
         "version": 1, "plan_id": plan["id"], "node_id": node.id,

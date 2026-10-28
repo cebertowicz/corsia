@@ -212,8 +212,10 @@ async def load_model(server_id: str, body: ModelBody):
     cfg = {"server_id": server_id}
     pv = for_provider(server["provider"])
     from llm.local_model_load import seat_lock
+    from llm.server_observation import observation_generation
 
     async with seat_lock(server_id):
+        generation = observation_generation(server_id)
         result = await pv.load_model(cfg, body.model)
 
     if not result.get("ok"):
@@ -229,7 +231,7 @@ async def load_model(server_id: str, body: ModelBody):
         )
         raise HTTPException(status, detail=result.get("message", "Load failed"))
 
-    notify_cached_model_loaded(server_id, body.model)
+    notify_cached_model_loaded(server_id, body.model, generation)
     import asyncio
     asyncio.create_task(nd.discover_and_notify(server_id))
 
