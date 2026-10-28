@@ -389,7 +389,7 @@ async def test_refused_pane_fit_reaches_the_pane(monkeypatch):
     browser_stream._request_match('fit-refused', 'pane',
         {'width': 700, 'height': 1400, 'scale': 2, 'scheme': 'dark'}, messages.append)
     await browser_stream._runners['fit-refused']
-    assert messages == [{'type': 'clipboard_error',
+    assert messages == [{'type': 'pane_error',
                          'error': "CORSIA couldn't fit the page to the pane. Try resizing the pane again."}]
 
 

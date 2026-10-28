@@ -23,4 +23,4 @@ async def handle(thread_id: str, connection: str, data: dict, report: Callable[[
         except BrowserSessionError:
             message = ("CORSIA couldn't cut the text. Select it again and cut."
                        if kind == "clipboard_cut" else "CORSIA couldn't paste into the page. Try pasting again.")
-            report({"type": "clipboard_error", "error": message})
+            report({"type": "pane_error", "error": message})

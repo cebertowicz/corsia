@@ -18,7 +18,7 @@ export function clipboardReply<T>(message: Record<string, unknown>, clipboard: B
   else clipboard?.fail(message.id, typeof message.error === 'string' ? message.error : "CORSIA couldn't copy from the page. Select the text again and copy.");
   return true;
  }
- if (message.type === 'clipboard_error' && typeof message.error === 'string') {
+ if (message.type === 'pane_error' && typeof message.error === 'string') {
   fail(message.error);
   return true;
  }

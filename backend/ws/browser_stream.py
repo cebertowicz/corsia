@@ -368,7 +368,7 @@ async def _run_pending(thread_id: str) -> None:
                 await browser_pane.match_pane(thread_id, appearance)
             except (BrowserSessionError, ProcessOwnerError) as exc:
                 log.warning("browser pane %s kept its old appearance: %s", thread_id, exc)
-                report({"type": "clipboard_error", "error": "CORSIA couldn't fit the page to the pane. Try resizing the pane again."})
+                report({"type": "pane_error", "error": "CORSIA couldn't fit the page to the pane. Try resizing the pane again."})
         else:
             return
 

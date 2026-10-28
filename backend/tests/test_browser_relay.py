@@ -73,7 +73,7 @@ async def test_refused_pane_fit_is_sent_to_the_connected_pane(monkeypatch):
             raise WebSocketDisconnect()
         async def send_text(self, payload):
             await super().send_text(payload)
-            if json.loads(payload).get('type') == 'clipboard_error':
+            if json.loads(payload).get('type') == 'pane_error':
                 delivered.set()
     pane = Pane([json.dumps({'type': 'appearance', 'width': 700, 'height': 900, 'scale': 1, 'scheme': 'dark'})])
     with pytest.raises(WebSocketDisconnect):
