@@ -36,8 +36,8 @@ DAILY_NOTE_DAYS = 30
 AUTO_MEMORY_TYPES = frozenset({"user", "feedback"})
 OPENCLAW_WORKSPACES = ("workspace", "workspace-main", "workspace.default")
 
-#: Folders a tool fills in itself under ``skills``: Claude Code's sign-in fills ``synced`` with the
-#: account's own bundles, so neither a found tool nor a skill the person made.
+#: Folders a tool fills in itself under ``skills`` do not establish a found tool before consent.
+#: Claude Code's ``synced`` can also contain personal skills, read only after consent.
 TOOL_MADE_SKILL_FOLDERS = {CLAUDE_CODE: frozenset({"synced"})}
 
 #: What a stat may find, per tool, before consent: nothing is opened, and a folder that a tool fills in

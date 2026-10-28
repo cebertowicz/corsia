@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import datetime
 import hashlib
+import json
 import os
 import re
 import stat
@@ -119,14 +120,53 @@ def _hermes(folder: Path, root: Path, depth: int = 0) -> list[Path]:
     return found
 
 
+def _synced_skills(root: Path) -> list[Path]:
+    """Personal synced skills, choosing the newest copy across account buckets."""
+    latest: dict[str, tuple[datetime.datetime, Path]] = {}
+    synced = root / "skills" / "synced"
+    for bucket in _dirs(synced, root):
+        if not _real_folder(bucket, root):
+            continue
+        try:
+            manifest = bucket / "manifest.json"
+            if not stat.S_ISREG(os.lstat(manifest).st_mode):
+                continue
+            entries = json.loads(manifest.read_text(encoding="utf-8"))["skills"]
+            if not isinstance(entries, list):
+                continue
+        except (OSError, UnicodeError, ValueError, KeyError, TypeError):
+            continue
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            name, source = entry.get("name"), entry.get("source") or "custom"
+            if (not isinstance(name, str) or not name or name.startswith(".") or Path(name).name != name
+                    or not isinstance(source, str) or source.startswith("anthropic")):
+                continue
+            path = bucket / name
+            if not os.path.lexists(path):
+                continue
+            try:
+                updated = datetime.datetime.fromisoformat(entry.get("updatedAt", "").replace("Z", "+00:00"))
+                if updated.tzinfo is None:
+                    updated = updated.replace(tzinfo=datetime.timezone.utc)
+                updated = updated.astimezone(datetime.timezone.utc)
+            except (ValueError, TypeError, AttributeError, OverflowError):
+                updated = datetime.datetime.min.replace(tzinfo=datetime.timezone.utc)
+            if name not in latest or updated > latest[name][0]:
+                latest[name] = (updated, path)
+    return [latest[name][1] for name in sorted(latest)]
+
+
 def candidates(roots: Roots, tools: list[str]) -> list[Candidate]:
-    """Every skill in the person's own folders of ``tools``, unread."""
+    """Every skill in the person's own folders of ``tools`` after consent."""
     checked = {tool: real for tool, root in tool_roots(roots).items()
                if tool in tools and (real := checked_root(root)) is not None}
     found: list[Candidate] = []
     if claude := checked.get(CLAUDE_CODE):
         found += [Candidate(CLAUDE_CODE, path) for path in _dirs(claude / "skills", claude)
                   if path.name not in TOOL_MADE_SKILL_FOLDERS[CLAUDE_CODE]]
+        found += [Candidate(CLAUDE_CODE, path) for path in _synced_skills(claude)]
         found += [Candidate(CLAUDE_CODE, path, command)
                   for path, command in _commands(claude / "commands", claude)]
     if codex := checked.get(CODEX):
