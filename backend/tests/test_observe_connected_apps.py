@@ -143,7 +143,7 @@ async def test_registry_marks_before_return_for_native_and_harness_paths(isolate
 def test_registration_failure_notifies_partial_changes_once(isolated_db, monkeypatch):
     from events.connectors import ObservedArtifactDecl
     from registry import tool_result_observation as observation
-    from registry.observer import CommandArtifactRegistrationError
+    from registry.observer import ToolResultArtifactRegistrationError
 
     artifact = ObservedArtifactDecl(integration="github", type="pull-request", external_id="owner/repo#7")
     changed = {"id": "partial"}
@@ -151,9 +151,9 @@ def test_registration_failure_notifies_partial_changes_once(isolated_db, monkeyp
 
     def fail(*args, **kwargs):
         kwargs["changed"].append(changed)
-        raise CommandArtifactRegistrationError(artifact, ValueError("registration failed"))
+        raise ToolResultArtifactRegistrationError(artifact, ValueError("registration failed"))
 
-    monkeypatch.setattr(observation, "observe_command_result", fail)
+    monkeypatch.setattr(observation, "observe_tool_result", fail)
     monkeypatch.setattr(observation, "notify_changed", notified.append)
     notices = notice_for_result("a", "turn", {}, result("create_pull_request", "output"))
     assert len(notices) == 1

@@ -151,8 +151,8 @@ def _observe(
             _db.close()
 
 
-class CommandArtifactRegistrationError(RuntimeError):
-    """A confirmed command artifact could not be bound to its thread."""
+class ToolResultArtifactRegistrationError(RuntimeError):
+    """An artifact from a confirmed tool result could not be bound to its thread."""
 
     def __init__(self, artifact: ObservedArtifactDecl, error: Exception) -> None:
         self.artifact = artifact
@@ -203,7 +203,7 @@ def _extract_observation(rule, args, content, app, db, thread_id, told):
     return (True, extract(content)) if extract else (False, None)
 
 
-def observe_command_result(
+def observe_tool_result(
     thread_id: str,
     raw_tool_name: str | None,
     args: dict,
@@ -262,7 +262,7 @@ def observe_command_result(
             )
         except Exception as error:
             _record(db, thread_id, rule, "not_registered", artifact, str(error), None)
-            raise CommandArtifactRegistrationError(artifact, error) from error
+            raise ToolResultArtifactRegistrationError(artifact, error) from error
         if registered is not None and changed is not None:
             changed.append(registered)
         label = f"{artifact.type.replace('-', ' ')} {artifact.external_id}"

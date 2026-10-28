@@ -4,7 +4,7 @@ from __future__ import annotations
 from loguru import logger
 
 from infra.tool_result_errors import is_error_result
-from registry.observer import CommandArtifactRegistrationError, observe_command_result
+from registry.observer import ToolResultArtifactRegistrationError, observe_tool_result
 from registry.registration_writer import RegistrationOrigin
 from registry.service import notify_changed
 from tools.mcp_stamp import result_stamp
@@ -43,12 +43,12 @@ def observe_with_warning(thread_id: str, tool: str | None, args: dict, content: 
     changed: list[dict] = []
     warning = None
     try:
-        observe_command_result(thread_id, tool, args, content, told=told, changed=changed, **kwargs)
-    except CommandArtifactRegistrationError as exc:
-        logger.exception("connector command artifact registration failed in {}", thread_id)
+        observe_tool_result(thread_id, tool, args, content, told=told, changed=changed, **kwargs)
+    except ToolResultArtifactRegistrationError as exc:
+        logger.exception("tool result artifact registration failed in {}", thread_id)
         warning = build_registration_warning(exc.artifact, exc.error)
     except Exception as exc:
-        logger.exception("connector command observation failed in {}", thread_id)
+        logger.exception("tool result observation failed in {}", thread_id)
         warning = build_registration_warning(None, exc)
     finally:
         for artifact in changed:

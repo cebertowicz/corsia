@@ -16,7 +16,7 @@ import pytest
 from events import connectors
 from infra.database import get_db
 from registry import models
-from registry.observer import CommandArtifactRegistrationError, observe_command_result
+from registry.observer import ToolResultArtifactRegistrationError, observe_tool_result
 from tests.event_routing_helpers import mk_session
 from tests.registry_helpers import make_session
 from tests.test_shell_pr_registration import _URL, _direct_shell_context, _stub_process
@@ -74,7 +74,7 @@ async def _observe_rule(thread_id: str, **kwargs):
 
 def _run(thread_id: str, command: str, output: str = _URL + "\n", **kwargs):
     told: list[str] = []
-    artifact = observe_command_result(thread_id, "bash", {"command": command}, output, told=told, **kwargs)
+    artifact = observe_tool_result(thread_id, "bash", {"command": command}, output, told=told, **kwargs)
     return artifact, told
 
 
@@ -252,7 +252,7 @@ def test_the_outcome_is_written_through_the_callers_open_transaction(isolated_db
     db.execute("UPDATE threads SET title='mid-transaction' WHERE id='a'")
     assert db.in_transaction
     told: list[str] = []
-    artifact = observe_command_result("a", "bash", {"command": "gh pr create"}, _URL + "\n", db=db, told=told)
+    artifact = observe_tool_result("a", "bash", {"command": "gh pr create"}, _URL + "\n", db=db, told=told)
     assert artifact["parent_thread_id"] == "a" and told == ["Registered pull request owner/repo#42 to you."]
     rows = db.execute("SELECT outcome, thread_id FROM event_route_decisions WHERE artifact_external_id=?",
                       (PR,)).fetchall()
@@ -477,7 +477,7 @@ def test_a_registration_the_registry_refuses_is_recorded_and_raised(isolated_db)
     mk_session("owner")
     _write("UPDATE threads SET user_id='steve' WHERE id='owner'")
     assert _run("owner", "gh pr create")[0] is not None
-    with pytest.raises(CommandArtifactRegistrationError):
+    with pytest.raises(ToolResultArtifactRegistrationError):
         _run("a", "gh pr create")
     [why] = _rows("SELECT outcome, reason FROM event_route_decisions WHERE thread_id='a'")
     assert why["outcome"] == "not_registered" and why["reason"]

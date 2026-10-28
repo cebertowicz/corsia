@@ -119,13 +119,9 @@ def apply_routed_rules(
     notice go ahead as routing prepared them, and the failure is logged.
     """
     scope = scope or RuleScope()
-    if scope.any_rule:
-        try:
-            _apply(prepared, internal_event, payload, selected_pr, routing_state, wake_reason, scope, target_filter)
-        except Exception:
-            logger.exception("event rules: evaluation failed on {}; routing unchanged", internal_event)
     # _self_authored_result filters the agent's own account for everyone; a
     # person-account marker filters only the thread that made the tool call.
+    reason = None
     if prepared.result is None and prepared.thread_id is not None and target_filter:
         target = routed_targets(prepared.thread_id, wake_reason, routing_state)[0]
         db = get_db()
@@ -133,14 +129,20 @@ def apply_routed_rules(
             reason = target_filter(target, db)
         finally:
             db.close()
-        if reason:
-            drop_delivery(prepared, internal_event, reason)
+    skipped = (prepared.thread_id,) if reason is not None and prepared.thread_id is not None else ()
+    if scope.any_rule:
+        try:
+            _apply(prepared, internal_event, payload, selected_pr, routing_state, wake_reason, scope, target_filter, skipped)
+        except Exception:
+            logger.exception("event rules: evaluation failed on {}; routing unchanged", internal_event)
+    if reason is not None:
+        drop_delivery(prepared, internal_event, reason)
 
 
 def _apply(
     prepared: PreparedRoute, internal_event: str, payload: dict[str, Any],
     selected_pr: dict[str, Any] | None, routing_state: dict[str, Any],
-    wake_reason: str | None, scope: RuleScope, target_filter: Filter | None,
+    wake_reason: str | None, scope: RuleScope, target_filter: Filter | None, skipped: tuple[str, ...],
 ) -> None:
     try:
         envelope = scope.envelope or _envelope(internal_event, payload, selected_pr)
@@ -153,7 +155,7 @@ def _apply(
     plan = apply_webhook_rules_sync(
         envelope, internal_event, routed_targets(thread, wake_reason, routing_state),
         ends_artifact=ends_artifact(internal_event),
-        repository_projects=scope.repository_projects, target_filter=target_filter)
+        repository_projects=scope.repository_projects, target_filter=target_filter, skipped=skipped)
     if plan is None or thread is None:
         return
     if thread in plan.drops:

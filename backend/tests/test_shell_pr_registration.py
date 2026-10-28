@@ -393,7 +393,7 @@ async def test_registration_exception_is_logged_and_appended_without_failing_com
     def fail_registration(*_args, **_kwargs):
         raise RuntimeError("registry unavailable")
 
-    monkeypatch.setattr(observation_module, "observe_command_result", fail_registration)
+    monkeypatch.setattr(observation_module, "observe_tool_result", fail_registration)
 
     sink = logger.add(caplog.handler, level="ERROR", format="{message}")
     try:
@@ -434,7 +434,7 @@ async def test_slow_registration_does_not_block_event_loop_timer(
         kwargs["changed"].append(artifact)
         return artifact
 
-    monkeypatch.setattr(observation_module, "observe_command_result", slow_registration)
+    monkeypatch.setattr(observation_module, "observe_tool_result", slow_registration)
     monkeypatch.setattr(
         observation_module, "notify_changed", lambda _artifact: events.append("notified"),
     )
@@ -467,7 +467,7 @@ async def test_bash_registration_warning_budget_preserves_warning(
     def fail_registration(*_args, **_kwargs):
         raise RuntimeError("registry unavailable")
 
-    monkeypatch.setattr(observation_module, "observe_command_result", fail_registration)
+    monkeypatch.setattr(observation_module, "observe_tool_result", fail_registration)
 
     result = await BashTool().execute(
         "gh pr create --title capped",
