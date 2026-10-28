@@ -3,8 +3,8 @@
 Private mail stays on the machine, so a screen runs only on a model whose
 endpoint is a loopback address, decided from the catalog row's backend and the
 endpoint the call would use, never from a model's name. Whatever goes wrong
-is recorded as ``unavailable`` or ``failed`` and the body stays withheld: there
-are no retries here, and the result table has no column that can hold mail.
+is recorded as ``unavailable`` or ``failed``: there are no retries here,
+and the result table has no column that can hold mail.
 """
 
 from __future__ import annotations
@@ -27,6 +27,7 @@ from infra.time import utc_now, utc_now_iso
 from llm.isolated_structured import (
     IsolatedStructuredIdentityError,
     IsolatedStructuredRateLimitError,
+    IsolatedStructuredOutputTruncatedError,
     IsolatedStructuredTimeoutError,
     IsolatedStructuredUnavailableError,
     invoke_isolated_structured,
@@ -44,7 +45,7 @@ BODY_BUDGET_CHARS = 24_000
 HEADER_BUDGET_CHARS = 300
 RETENTION_DAYS = 90
 CALL_TIMEOUT_SECONDS = 60.0
-#: Fortissimo reasons by default, so leave room for thinking plus the verdict.
+#: Allow room for the model's low-effort reasoning and the verdict.
 MAX_OUTPUT_TOKENS = 4096
 
 SYSTEM_PROMPT = """You classify one email for a personal assistant. Output only the JSON object the schema describes.
@@ -95,6 +96,7 @@ class Screen:
     injection: bool = False
     rule: str = "none"
     model_id: str | None = None
+    reason: str | None = None
 
     @property
     def clean(self) -> bool:
@@ -273,6 +275,7 @@ async def classify(
         validator=validate_screen,
         max_output_tokens=MAX_OUTPUT_TOKENS,
         timeout_seconds=CALL_TIMEOUT_SECONDS,
+        reasoning_effort="low",
         binary=None,
     )
 
@@ -293,16 +296,21 @@ async def screen_message(
             STATUS_SCREENED, answer["kind"], answer["needs_person"],
             bool(answer["injection"]) or rule != "none", rule, model_id,
         )
-    except (
-        ScreenUnavailable, IsolatedStructuredUnavailableError, IsolatedStructuredRateLimitError,
-        IsolatedStructuredIdentityError, IsolatedStructuredTimeoutError,
-    ) as exc:
-        log.info("email screen unavailable for %s: %s", message_id, type(exc).__name__)
-        screen = Screen(STATUS_UNAVAILABLE, model_id=model_id)
+    except (ScreenUnavailable, IsolatedStructuredUnavailableError, IsolatedStructuredRateLimitError,
+            IsolatedStructuredIdentityError, IsolatedStructuredTimeoutError) as exc:
+        log.warning("email screen unavailable for %s: %s", message_id, type(exc).__name__)
+        if isinstance(exc, ScreenUnavailable):
+            reason = "no local model is ready"
+        elif isinstance(exc, (IsolatedStructuredRateLimitError, IsolatedStructuredTimeoutError)):
+            reason = "the local model was busy, rate-limited, or timed out"
+        else:
+            reason = "the local screen was unavailable"
+        screen = Screen(STATUS_UNAVAILABLE, model_id=model_id, reason=reason)
     except Exception as exc:
-        # A schema failure, a truncated or oversized call, or anything unexpected: never a pass.
         log.warning("email screen failed for %s: %s", message_id, type(exc).__name__)
-        screen = Screen(STATUS_FAILED, model_id=model_id)
+        reason = ("the local model's answer was cut off" if isinstance(exc, IsolatedStructuredOutputTruncatedError)
+                  else "the local screen's answer was unreadable or the screen failed")
+        screen = Screen(STATUS_FAILED, model_id=model_id, reason=reason)
     try:
         await run_in_db(_record, account_id, message_id, screen)
     except Exception:
