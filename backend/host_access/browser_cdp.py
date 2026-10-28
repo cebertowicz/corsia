@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 from dataclasses import dataclass, field
-from typing import Awaitable, Callable, Mapping, Sequence
+from typing import Awaitable, Callable, Mapping, Sequence, cast
 from urllib.parse import urlparse, urlunparse
 from urllib.request import urlopen
 
@@ -61,10 +61,10 @@ class CdpClient:
             response = json.loads(await self.socket.recv())
             if response.get("id") != request_id:
                 if response.get("method") == "DOM.setChildNodes":
-                    params = response.get("params", {})
-                    parent = params.get("parentId")
+                    event_params = response.get("params", {})
+                    parent = event_params.get("parentId")
                     if isinstance(parent, int):
-                        for child in params.get("nodes", []):
+                        for child in event_params.get("nodes", []):
                             node_id = child.get("nodeId")
                             if isinstance(node_id, int):
                                 self.parents[node_id] = parent
@@ -122,12 +122,20 @@ async def _password_inputs(cdp: CdpClient) -> set[int]:
     return inputs
 
 
+def _sign_in_action(button: dict) -> bool:
+    label = button.get("name", {}).get("value", "")
+    disabled = any(prop.get("name") == "disabled" and prop.get("value", {}).get("value") is True
+                   for prop in button.get("properties", []))
+    return (not disabled and isinstance(label, str)
+            and label.strip().casefold() in {"sign in", "log in", "next", "continue", "verify", "submit", "confirm"})
+
+
 async def _display_secret(cdp: CdpClient, node: dict) -> bool:
     """Recognize display secrets without reading field values; uncertain context stays guarded."""
     flat = node.get("attributes") or []
     names = {str(name).lower() for name in flat[::2]}
     display_signal = bool(names & {"readonly", "disabled"})
-    parent = getattr(cdp, "parents", {}).get(node.get("nodeId"))
+    parent = cdp.parents.get(cast(int, node.get("nodeId")))
     if not isinstance(parent, int):
         return False
     try:
@@ -137,16 +145,21 @@ async def _display_secret(cdp: CdpClient, node: dict) -> bool:
             name = str(ancestor.get("nodeName", "")).upper()
             if name == "#DOCUMENT":
                 return display_signal
-            if not display_signal and reveal_levels < 3 and name not in {"FORM", "BODY"}:
-                buttons = await cdp.call("Accessibility.queryAXTree", nodeId=parent, role="button")
-                for button in buttons.get("nodes", []):
+            if reveal_levels < 3 and name not in {"FORM", "BODY"}:
+                buttons = (await cdp.call("Accessibility.queryAXTree", nodeId=parent, role="button")).get("nodes", [])
+                if any(_sign_in_action(button) for button in buttons):
+                    return False
+                for button in buttons:
                     label = button.get("name", {}).get("value", "")
-                    if isinstance(label, str) and label.strip().casefold().startswith(("show", "reveal")):
-                        display_signal = True
-                        break
+                    if isinstance(label, str):
+                        label = label.strip().casefold()
+                        if label.startswith(("show", "reveal")) and "password" not in label:
+                            display_signal = True
                 reveal_levels += 1
             if name in {"FORM", "BODY"}:
                 reveal_levels = 3
+            if reveal_levels == 3 and not display_signal:
+                return False
             nearby = await cdp.call(
                 "DOM.querySelectorAll", nodeId=parent,
                 selector="input:is([type=email i], [autocomplete~=username i], [autocomplete~=email i], [autocomplete~=one-time-code i], [name*=username i], [name*=email i])",

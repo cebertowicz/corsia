@@ -60,6 +60,18 @@ async def test_display_secret_and_sign_in_are_distinguished_in_chrome(native_own
           <form><input type="email"><div><input type="password" value="fixture" readonly>
           <button type="button" aria-label="Show password">Show</button></div><button>Sign in</button></form>`""")
     assert len((await browser_cdp.page_password_probe(endpoint, {})).visible_nodes) == 1
+    async with browser_cdp.CdpClient(endpoint) as cdp:
+        await cdp.call('Runtime.evaluate', expression="""document.body.innerHTML = `
+          <div><input type="password" value="fixture"><button>Show</button></div>`""")
+    assert not (await browser_cdp.page_password_probe(endpoint, {})).visible_nodes
+    async with browser_cdp.CdpClient(endpoint) as cdp:
+        await cdp.call('Runtime.evaluate', expression="""document.body.innerHTML = `
+          <div><input type="password"><button>Show password</button><div role="button">Next</div></div>`""")
+    assert len((await browser_cdp.page_password_probe(endpoint, {})).visible_nodes) == 1
+    async with browser_cdp.CdpClient(endpoint) as cdp:
+        await cdp.call('Runtime.evaluate', expression="""document.body.innerHTML = `
+          <div><input type="password" readonly onfocus="this.readOnly=false"><button>Sign in</button></div>`""")
+    assert len((await browser_cdp.page_password_probe(endpoint, {})).visible_nodes) == 1
 
 
 async def test_native_open_outcome_remains_cleanable(native_owner):

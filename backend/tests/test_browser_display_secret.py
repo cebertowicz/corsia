@@ -4,7 +4,8 @@ from host_access import browser_cdp
 
 
 class Cdp:
-    def __init__(self, *, readonly=False, disabled=False, reveal=False, form=False, credentials=False):
+    def __init__(self, *, readonly=False, disabled=False, reveal=False, form=False, credentials=False,
+                 buttons=()):
         self.nodes = {
             5: {"nodeName": "INPUT", "nodeId": 5, "backendNodeId": 77, "parentId": 6,
                 "attributes": ["type", "password"] + (["value", "fixture"] if form else [])
@@ -14,13 +15,14 @@ class Cdp:
             8: {"nodeName": "#document", "nodeId": 8},
         }
         self.parents = {5: 6, 6: 7, 7: 8}
-        self.reveal, self.form, self.credentials = reveal, form, credentials
+        self.reveal, self.form, self.credentials, self.buttons = reveal, form, credentials, buttons
 
     async def call(self, method, **params):
         if method == "DOM.describeNode":
             return {"node": {k: v for k, v in self.nodes[params["nodeId"]].items() if k != "parentId"}}
         if method == "Accessibility.queryAXTree":
-            return {"nodes": [{"role": {"value": "button"}, "name": {"value": "Show secret"}}] if self.reveal else []}
+            labels = (["Show secret"] if self.reveal else []) + list(self.buttons)
+            return {"nodes": [{"role": {"value": "button"}, "name": {"value": label}} for label in labels]}
         if method == "DOM.querySelectorAll":
             selector = params["selector"]
             if "one-time-code" in selector:
@@ -66,6 +68,26 @@ async def test_slack_box_reveal_text_in_wrapper_is_not_a_prompt():
             return await super().call(method, **params)
 
     assert await browser_cdp._password_inputs(SlackBox()) == set()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("options", [
+    {"buttons": ("Show password",)},
+    {"buttons": ("Show password", "Next")},
+    {"readonly": True, "buttons": ("Sign in",)},
+    {"reveal": True, "buttons": ("Continue",)},
+    {"disabled": True, "buttons": ("Verify",)},
+])
+async def test_formless_sign_in_remains_guarded(options):
+    assert await browser_cdp._password_inputs(Cdp(**options)) == {77}
+
+
+@pytest.mark.parametrize("label", ["sign in", "LOG IN", "Next", "continue", "verify", "submit", "confirm"])
+def test_enabled_sign_in_action_is_a_veto(label):
+    assert browser_cdp._sign_in_action({"name": {"value": label}})
+    assert not browser_cdp._sign_in_action({"name": {"value": label}, "properties": [
+        {"name": "disabled", "value": {"value": True}},
+    ]})
 
 
 @pytest.mark.asyncio
