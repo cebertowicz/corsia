@@ -9,7 +9,9 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from email.utils import getaddresses, parseaddr
+from email.utils import parseaddr
+
+from connections.mail.email_document import reply_addresses
 
 _NO_REPLY = re.compile(r"(^|[.@_-])(no[-_]?reply|do[-_]?not[-_]?reply|donotreply|noreply)([.@_-]|$)", re.I)
 _PREFIX = re.compile(r"^\s*(re|fwd|fw|message replied|aw|sv|antw|wg)\s*:\s*", re.I)
@@ -30,7 +32,7 @@ class Message:
 
 @dataclass
 class Verdict:
-    recipient: str = ""
+    recipients: list[str] = field(default_factory=list)
     stops: list[str] = field(default_factory=list)
     stale: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
@@ -75,18 +77,18 @@ def check_reply(
     if not body.strip():
         result.stops.append("The message body is empty.")
     if target is None:
-        result.stops.append("The message being replied to could not be read.")
+        result.stops.append("Couldn't read the message being replied to.")
         return result
     _, sender_address = _identity(target.sender)
-    recipients = [address for _, address in getaddresses([target.reply_to or target.sender]) if address]
+    recipients = reply_addresses(target.reply_to, target.sender)
     if not recipients:
         result.stops.append("The original message has no usable reply address.")
     elif not target.reply_to and _NO_REPLY.search(sender_address.split("@", 1)[0]):
         result.stops.append(f"The sender {sender_address} is a no-reply address with no Reply-To.")
     else:
-        result.recipient = recipients[0]
-        if requested_to and [x.casefold() for x in requested_to] != [result.recipient.casefold()]:
-            result.warnings.append(f"The requested recipient differs from the original reply address {result.recipient}; the reply will go to {', '.join(requested_to)}.")
+        result.recipients = recipients
+        if requested_to and [x.casefold() for x in requested_to] != [x.casefold() for x in recipients]:
+            result.warnings.append(f"The requested recipient differs from the original reply address {', '.join(recipients)}; the reply will go to {', '.join(requested_to)}.")
     for message in thread:
         if message.date <= target.date or message.message_id == target.message_id:
             continue

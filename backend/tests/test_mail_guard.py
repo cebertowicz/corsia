@@ -19,8 +19,10 @@ def test_missing_target_and_empty_body_stop():
 def test_reply_to_wins_and_different_requested_address_warns():
     target = replace(TARGET, reply_to="Reply <reply@example.test>")
     result = check(target=target, to=["other@example.test"])
-    assert result.recipient == "reply@example.test"
+    assert result.recipients == ["reply@example.test"]
     assert result.warnings
+    multiple = check(target=replace(TARGET, reply_to="One <one@example.test>, Two <two@example.test>"))
+    assert multiple.recipients == ["one@example.test", "two@example.test"]
 
 
 def test_no_reply_stops_without_reply_to():

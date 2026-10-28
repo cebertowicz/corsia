@@ -47,8 +47,8 @@ def _email_sent(sent: outbound.SentMessage, message_id: str, account_id: str) ->
     if sent.not_delivered_to:
         result["not_delivered_to"] = list(sent.not_delivered_to)
         result["note"] = "Tell the person that these addresses did not get the email."
-    if sent.sent_copy_missing:
-        result["sent_copy_note"] = "The email was sent, but a copy was not saved in the account's Sent folder."
+    result["sent_copy_note"] = ("The email was sent, but a copy was not saved in the account's Sent folder."
+                                if sent.sent_copy_missing else "Sent copy saved.")
     if sent.draft_copy_left:
         result["draft_copy_note"] = "The email was sent, but its draft is still in the account's Drafts folder."
     return json.dumps(result)
@@ -61,8 +61,8 @@ def _invite_sent(sent: outbound.InviteSent, event_id: str) -> str:
     if sent.not_delivered_to:
         result["not_delivered_to"] = list(sent.not_delivered_to)
         result["delivery_note"] = "Tell the person that these addresses did not get the invitation email."
-    if sent.sent_copy_missing:
-        result["sent_copy_note"] = "The invitation was emailed, but a copy was not saved in the account's Sent folder."
+    result["sent_copy_note"] = ("The invitation was emailed, but a copy was not saved in the account's Sent folder."
+                                if sent.sent_copy_missing else "Sent copy saved.")
     return json.dumps(result)
 
 

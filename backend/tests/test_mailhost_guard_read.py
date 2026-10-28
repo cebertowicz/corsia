@@ -1,5 +1,5 @@
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from email import policy
 from email.message import EmailMessage
 from email.parser import BytesParser
@@ -102,9 +102,13 @@ async def test_batched_search_thread_seen_sender_and_lazy_body(provider):
     assert all(not m.body for m in thread + sender)
     assert target.date == datetime(2026, 10, 26, 10, tzinfo=timezone.utc)
     searches = [c for c in provider.commands if c[0] == 'SEARCH']
-    assert len(searches) == 6
+    assert len(searches) == 8
     assert not any('ALL' in c[2:] for c in searches)
-    assert sum(c[2] == 'FROM' and c[4] == 'SINCE' for c in searches) == 2
+    sender_searches = [c for c in searches if c[2] == 'FROM' and c[4] == 'SINCE']
+    assert len(sender_searches) == 4
+    assert {c[5] for c in sender_searches} == {
+        '26-Oct-2026', (datetime.now(timezone.utc) - timedelta(days=30)).strftime('%d-%b-%Y')
+    }
     assert all('References' in c[2] and 'In-Reply-To' in c[2] and 'Message-ID' in c[2]
                for c in searches if c[2] != 'FROM')
     fetches = [c for c in provider.commands if c[0] == 'FETCH']

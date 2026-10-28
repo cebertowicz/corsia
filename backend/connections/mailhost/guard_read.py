@@ -105,7 +105,7 @@ def _sent_folder(conn, ep, username: str) -> str:
             return status, data
     folder = folders.resolve(CheckedList(), imap._folder_key(ep, username), folders.SENT)
     if folder is None:
-        raise _SentFolderMissing("The Sent folder could not be found for the reply guard.")
+        raise _SentFolderMissing("Couldn't find the Sent folder.")
     return folder
 
 
@@ -160,7 +160,7 @@ def _guard_data(ep, username: str, password: str, account_id: str, validity: int
         if target.own_id.startswith("local:"):
             raise ValueError("The target has no Message-ID for thread reconstruction.")
         address = parseaddr(str(target.parsed.get("From", "")))[1]
-        earliest = min(_date(target.parsed), datetime.now(timezone.utc) - timedelta(days=30))
+        cutoffs = {_date(target.parsed), datetime.now(timezone.utc) - timedelta(days=30)}
         sent_folder = _sent_folder(conn, ep, username)
         folder_names = (imap.MAILBOX, sent_folder)
         validities = {imap.MAILBOX: validity}
@@ -173,8 +173,11 @@ def _guard_data(ep, username: str, password: str, account_id: str, validity: int
                 raise imap._unreachable(ep)
             validities[folder] = current
             thread_uids = _search(conn, ep, _thread_search(initial_ids))
-            sender_uids = (_search(conn, ep, "FROM", imap._quoted(address), "SINCE", earliest.strftime("%d-%b-%Y"))
-                           if address else set())
+            sender_uids: set[int] = set()
+            if address:
+                for cutoff in cutoffs:
+                    sender_uids.update(_search(conn, ep, "FROM", imap._quoted(address),
+                                               "SINCE", cutoff.strftime("%d-%b-%Y")))
             sender_keys.update((folder, item) for item in sender_uids)
             wanted = (thread_uids | sender_uids) - {item_uid for item_folder, item_uid in found if item_folder == folder}
             for item in _metadata(conn, ep, folder, current, wanted):

@@ -12,7 +12,13 @@ from tests.test_google_email import (  # fixtures and existing provider fake
     GMAIL, THREADED, _draft, _mime, _row, approve, client_file, conductor, google, mail,
 )
 from tools import mail_guard_runtime
-from tools.google_email import EmailDraftTool, EmailSendTool
+from tools.google_email import EmailDraftTool, EmailSendTool, _warnings_hash
+from tools.reviewed_drafts import _working_root
+
+
+def test_warning_approval_does_not_change_when_message_is_read():
+    unread = 'Another person wrote:\nPat | 2026-10-27 | unread | thread t | message m\nText'
+    assert _warnings_hash([unread]) == _warnings_hash([unread.replace('| unread |', '| read |')])
 
 
 def newer():
@@ -54,18 +60,25 @@ async def send(mail, draft, **kwargs):
     return await EmailSendTool().execute(_thread_id=mail.thread, draft_id=draft['draft_id'], revision=draft['revision'], **kwargs)
 
 
-async def test_stale_at_draft_refused_then_retarget_succeeds(mail, approve, clean_screen):
+async def test_stale_at_draft_can_be_acknowledged_or_retargeted(mail, approve, clean_screen):
     fresh = newer()
     provider_state(mail, [THREADED, fresh])
-    stopped = await EmailDraftTool().execute(_thread_id=mail.thread, account_id=mail.account, subject='Lunch', body='Yes', reply_to_message_id='m-100')
-    assert stopped.startswith('Error:') and 'New details from Pat' in stopped
-    assert '<untrusted-email>' in stopped and not mail.sends
-    saved = await EmailDraftTool().execute(_thread_id=mail.thread, account_id=mail.account, subject='Lunch', body='Yes', reply_to_message_id='m-101')
+    saved = await EmailDraftTool().execute(_thread_id=mail.thread, account_id=mail.account, subject='Lunch', body='Yes', reply_to_message_id='m-100')
     draft = json.loads(saved)
-    assert json.loads(_row(draft['draft_id'])['target_json'])['reply_to'] == 'm-101'
-    result = await send(mail, draft)
+    document = (mail.workspace / draft['path']).read_text()
+    assert 'New details from Pat' in document and '<untrusted-email>' in document
+    assert 'quoted below the reply' in document
+    stopped = await send(mail, draft)
+    assert 'Not sent' in stopped and not mail.sends
+    result = await send(mail, draft, seen_newer=True)
     assert not result.startswith('Error'), result
-    assert _mime(mail.sends[0])['In-Reply-To'] == '<new@mail.example>'
+    assert json.loads(_row(draft['draft_id'])['target_json'])['seen_newer'] is True
+    saved = await EmailDraftTool().execute(_thread_id=mail.thread, account_id=mail.account, subject='Lunch', body='Yes', reply_to_message_id='m-101')
+    retargeted = json.loads(saved)
+    assert json.loads(_row(retargeted['draft_id'])['target_json'])['reply_to'] == 'm-101'
+    result = await send(mail, retargeted)
+    assert not result.startswith('Error'), result
+    assert _mime(mail.sends[-1])['In-Reply-To'] == '<new@mail.example>'
 
 
 async def test_new_mail_after_draft_stops_send_until_seen_newer(mail, approve, clean_screen):
@@ -85,7 +98,8 @@ async def test_new_mail_after_draft_stops_send_until_seen_newer(mail, approve, c
 
 async def test_font_and_attachment_in_sent_mime_and_missing_file_refused(mail, approve):
     provider_state(mail, [THREADED], sent_html='<span style="font-family: Garamond; font-size: small">sent</span>')
-    (mail.workspace / 'report.txt').write_text('attachment contents')
+    _working_root(mail.thread).mkdir(parents=True, exist_ok=True)
+    (_working_root(mail.thread) / 'report.txt').write_text('attachment contents')
     bad = await EmailDraftTool().execute(_thread_id=mail.thread, account_id=mail.account, to=['pat@mail.example'], subject='Report', body='Here', attachments=['missing.txt'])
     assert 'missing' in bad.lower() and not mail.sends
     saved = await _draft(mail, to=['pat@mail.example'], attachments=['report.txt'])

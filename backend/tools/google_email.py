@@ -10,9 +10,11 @@ gate checked, never from a second read. What differs by host is the account's ba
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
+import re
 from email.message import EmailMessage
 from email.utils import getaddresses
 from typing import Any
@@ -70,12 +72,13 @@ NO_ACCOUNT = (
     "account_id, show the person, and wait for their reply."
 )
 GATE = Gate("email_send", STILL_SENDING, "Not sent: couldn't check the draft. Try again.")
-STALE_WAYS = ("Save a new draft replying to the newer message, or after reading the evidence "
+STALE_WAYS = ("Save a new draft replying to the newer message, or read the evidence and "
               "pass seen_newer=true to email_send if you still intend the original target.")
 
 
 def _warnings_hash(warnings: list[str]) -> str:
-    return hashlib.sha256(json.dumps(sorted(warnings), ensure_ascii=False).encode()).hexdigest()
+    stable = [re.sub(r" \| (?:unread|read) \| thread ", " | thread ", warning) for warning in warnings]
+    return hashlib.sha256(json.dumps(sorted(stable), ensure_ascii=False).encode()).hexdigest()
 
 
 def _stop(prefix: str, stops: list[str], stale: list[str]) -> str:
@@ -160,11 +163,14 @@ class EmailDraftTool(Tool):
         original = None
         if target.get("reply_to"):
             verdict, original = await guarded_reply(backend, account, str(target["reply_to"]), body, to)
-            if verdict.stops or verdict.stale:
-                raise DraftRefused(_stop("Not saved", verdict.stops, verdict.stale))
+            if verdict.stops:
+                raise DraftRefused(_stop("Not saved", verdict.stops, []))
             target["guard_warnings"] = _warnings_hash(verdict.warnings)
-            to = to or [verdict.recipient]
+            to = to or verdict.recipients
             notes.extend(verdict.warnings + verdict.info)
+            if verdict.stale:
+                notes.extend(verdict.stale + [STALE_WAYS])
+            notes.append(f"The earlier message from {original.sender} will be quoted below the reply.")
         if not to:
             raise DraftRefused(NEEDS_RECIPIENT)
         if target.get("prefix_reply_subject"):
@@ -172,20 +178,20 @@ class EmailDraftTool(Tool):
         face, size = mail_compose.detected_font(await backend.sent_html(account_id))
         paths = kwargs.get("attachments") or []
         limit, applies_to_message = await backend.attachment_limit(account_id) if paths else (None, False)
-        attached = attachments.inspect(paths, None if applies_to_message else limit)
+        attached = await asyncio.to_thread(attachments.inspect, thread_id, paths, limit)
         target = {**target, "account_id": account_id, "account": address, "attachments": attached}
         notes.extend(f"Attachment: {item['name']} ({item['size']} bytes)" for item in attached)
         text = compose_document(address, to, cc, subject, body, signature, reply_label, notes)
         if applies_to_message and limit is not None:
             parsed = parse_document(text)
             if parsed is None:
-                raise DraftRefused("The draft could not be prepared.")
+                raise DraftRefused("Couldn't prepare the draft.")
             sample = build_message(parsed, target)
             quote_body = await backend.fetch_body(account_id, original.message_id) if original else None
             mail_compose.add_html(sample, parsed["body"], face, size, quote_body)
-            attachments.add(sample, attached)
+            await asyncio.to_thread(attachments.add, thread_id, sample, attached)
             if len(sample.as_bytes()) > limit:
-                raise DraftRefused("The attachments exceed this provider's size limit.")
+                raise DraftRefused(f"Not sent: {attachments.OVERSIZE}")
         try:
             saved = await save_draft(
                 thread_id=thread_id, kind="email", extension=".md", prefix="email-drafts",
@@ -265,7 +271,7 @@ class EmailSendTool(Tool):
             body = str(message.get_content())
             face, size = mail_compose.detected_font(await backend.sent_html(str(account["id"])))
             mail_compose.add_html(message, body, face, size, quote_body)
-            attachments.add(message, target.get("attachments") or [])
+            await asyncio.to_thread(attachments.add, str(kwargs.get("_thread_id")), message, target.get("attachments") or [])
         except (DraftRefused, AccountError) as exc:
             return f"Error: Not sent: {exc}"
         except Exception:

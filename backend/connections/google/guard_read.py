@@ -1,7 +1,6 @@
 """Gmail reads needed by the shared reply guard."""
 from __future__ import annotations
 
-import asyncio
 from datetime import datetime, timedelta, timezone
 from email.utils import parseaddr
 from typing import Any
@@ -23,7 +22,7 @@ def _message(raw: dict[str, Any]) -> Message:
     return Message(message_id=str(raw["id"]), thread_id=str(raw.get("threadId") or ""),
                    sender=headers.get("from", ""), subject=headers.get("subject", ""),
                    date=datetime.fromtimestamp(int(raw["internalDate"]) / 1000, timezone.utc),
-                   body=gmail_read.body_text(payload), reply_to=headers.get("reply-to", ""),
+                   body="", reply_to=headers.get("reply-to", ""),
                    unread="UNREAD" in (raw.get("labelIds") or []))
 
 
@@ -31,6 +30,12 @@ async def _full(account_id: str, message_id: str) -> dict[str, Any]:
     mid = gmail_read.check_message_id(message_id)
     return await client.request_json("GET", f"{GMAIL}/messages/{quote(mid, safe='')}",
                                      account_id=account_id, params={"format": "full"})
+
+
+async def _metadata(account_id: str, message_id: str) -> dict[str, Any]:
+    mid = gmail_read.check_message_id(message_id)
+    return await client.request_json("GET", f"{GMAIL}/messages/{quote(mid, safe='')}",
+                                     account_id=account_id, params={"format": "metadata"})
 
 
 async def _search(account_id: str, query: str, limit: int | None = None) -> list[str]:
@@ -48,31 +53,35 @@ async def _search(account_id: str, query: str, limit: int | None = None) -> list
 
 
 async def guard_data(account_id: str, message_id: str) -> tuple[Message, list[Message], list[Message]]:
-    target = _message(await _full(account_id, message_id))
+    target = _message(await _metadata(account_id, message_id))
     if not target.thread_id:
         raise ValueError("The target has no Gmail thread.")
     raw_thread = await client.request_json("GET", f"{GMAIL}/threads/{quote(target.thread_id, safe='')}",
-                                           account_id=account_id, params={"format": "full"})
+                                           account_id=account_id, params={"format": "metadata"})
     thread = [_message(item) for item in raw_thread.get("messages", []) if "DRAFT" not in item.get("labelIds", [])]
     name, address = parseaddr(target.sender)
-    earliest = min(target.date, datetime.now(timezone.utc) - timedelta(days=30))
-    after = earliest.strftime("%Y/%m/%d")
-    queries = []
+    # The guard applies exact timestamps after these inclusive provider searches.
+    cutoffs = {target.date, datetime.now(timezone.utc) - timedelta(days=30)}
+    senders = []
     if name:
-        queries.append(f'from:"{name.replace(chr(34), "").replace(chr(92), "")}" after:{after}')
+        senders.append(f'from:"{name.replace(chr(34), "").replace(chr(92), "")}"')
     if address:
-        queries.append(f"from:{address} after:{after}")
+        senders.append(f"from:{address}")
     ids: set[str] = set()
-    for query in queries:
-        ids.update(await _search(account_id, query))
+    for cutoff in cutoffs:
+        after = int(cutoff.timestamp()) - 1
+        for sender in senders:
+            ids.update(await _search(account_id, f"{sender} after:{after}"))
     by_id = {item.message_id: item for item in thread}
     missing = ids.difference(by_id)
-    fetched = await asyncio.gather(*(_full(account_id, mid) for mid in missing))
-    by_id.update((str(raw["id"]), _message(raw)) for raw in fetched if "DRAFT" not in raw.get("labelIds", []))
+    for mid in sorted(missing):
+        raw = await _metadata(account_id, mid)
+        if "DRAFT" not in raw.get("labelIds", []):
+            by_id[str(raw["id"])] = _message(raw)
     return target, thread, [by_id[mid] for mid in ids if mid in by_id]
 
 
 async def sent_html(account_id: str) -> list[str]:
     ids = await _search(account_id, "in:sent", limit=5)
-    messages = await asyncio.gather(*(_full(account_id, mid) for mid in ids))
+    messages = [await _full(account_id, mid) for mid in ids]
     return ["\n".join(gmail_read._parts(raw.get("payload") or {}, "text/html")) for raw in messages]

@@ -11,6 +11,7 @@ import re
 import unicodedata
 from email import policy
 from email.message import EmailMessage
+from email.utils import getaddresses
 from html.parser import HTMLParser
 from typing import Any
 
@@ -38,6 +39,11 @@ def is_plain_address(value: str) -> bool:
     return bool(_ADDRESS.fullmatch(value)) and not any(
         unicodedata.category(character) in {"Cc", "Cf"} for character in value
     )
+
+
+def reply_addresses(reply_to: str, sender: str) -> list[str]:
+    """Resolve reply recipients from Reply-To or From using the shared address rules."""
+    return [address for _, address in getaddresses([reply_to or sender]) if is_plain_address(address)]
 
 
 def addresses(value: Any) -> list[str]:

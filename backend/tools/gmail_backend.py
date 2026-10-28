@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
 from connections.calendar_document import Invite
+from connections.mail.attachments import OVERSIZE
 from connections.google import client as google_client, gmail_read, guard_read
 from connections.google.accounts import thread_key
 from connections.google.calendar_document import event_summaries
@@ -99,7 +100,7 @@ class GmailBackend:
             result_id=_sent_id,
             success=lambda sent, message_id: _email_sent(sent, message_id, account_id, target),
             sign_in_error=_sign_in_error,
-            request_error=lambda exc: "The attachments are too large for this account." if (
+            request_error=lambda exc: OVERSIZE if (
                 isinstance(exc, GoogleRequestFailed) and exc.status == 413 and target.get("attachments")
             ) else str(exc), never_sent=_never_sent,
             still_sending=gate.still_sending, claim_error=gate.claim_error, unconfirmed=EMAIL_UNCONFIRMED, label=gate.label,
