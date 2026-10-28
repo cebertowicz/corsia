@@ -85,7 +85,7 @@ def test_browser_screenshot_stages_in_a_private_state_directory(state_root, tmp_
     workspace.mkdir()
     with patch.object(browser, "_run", fake_run), patch.object(
         browser, "_execution_context", lambda _kwargs: ("thread", "project"),
-    ), patch.object(browser, "_resolve_path", lambda raw, root, **_kw: root / raw):
+    ), patch.object(browser, "resolve_path", lambda raw, root, **_kw: root / raw):
         result = asyncio.run(browser.BrowserScreenshotTool(workspace).execute(path="shot.png"))
 
     assert "Screenshot saved" in result

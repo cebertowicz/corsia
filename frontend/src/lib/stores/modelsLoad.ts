@@ -2,7 +2,7 @@ import { get } from 'svelte/store';
 import { token } from './auth';
 import { modelAvailability, type Model } from './models';
 import { activeModelId, getModelDispatchId, models, threadCatalogs, workspaceModels } from './modelsState';
-import { activeThreadId } from './threads';
+import { activeThreadId, draftAccountId } from './threads';
 
 // The thread the catalog was last read for: its harness rows read that
 // thread's account, so another account's limit does not grey them out.
@@ -13,10 +13,11 @@ function catalogScope(): string | null {
 	return get(token) ? get(activeThreadId) : null;
 }
 
-async function readCatalog(scope: string | null, refreshUsage: boolean): Promise<Model[]> {
+async function readCatalog(scope: string | null, refreshUsage: boolean, accountId: string | null = null): Promise<Model[]> {
 	const params = new URLSearchParams();
 	if (refreshUsage) params.set('refresh_usage', 'true');
 	if (scope) params.set('thread_id', scope);
+	else if (accountId) params.set('account_id', accountId);
 	const query = params.toString();
 	const path = query ? `/api/models?${query}` : '/api/models';
 	// The network listener refuses any API read without the person's session, unscoped ones included.
@@ -37,10 +38,11 @@ export function unknownStatus(rows: Model[]): Model[] {
 async function loadScoped(scope: string | null, refreshUsage: boolean) {
 	const seq = ++loadSeq;
 	let rows: Model[];
+	const accountId = scope ? null : get(draftAccountId);
 	try {
-		rows = await readCatalog(scope, refreshUsage);
+		rows = await readCatalog(scope, refreshUsage, accountId);
 	} catch (err) {
-		if (!scope || seq !== loadSeq) return;
+		if ((!scope && !accountId) || seq !== loadSeq) return;
 		console.warn('[models] thread catalog read failed; its statuses are unknown', err);
 		loadedScope = scope;
 		models.update(unknownStatus);
@@ -49,8 +51,8 @@ async function loadScoped(scope: string | null, refreshUsage: boolean) {
 	if (seq !== loadSeq) return;
 	loadedScope = scope;
 	models.set(rows);
-	if (!scope) workspaceModels.set(rows);
-	if (!get(activeThreadId) && !get(activeModelId)) {
+	if (!scope && !get(draftAccountId)) workspaceModels.set(rows);
+	if (!get(activeThreadId) && !get(activeModelId) && !get(draftAccountId)) {
 		const runnable = (backend: string) => rows.find((m) => modelAvailability(m).status === 'ready' && m.backend === backend);
 		const ready = runnable('local') || runnable('network') || runnable('api');
 		if (ready) activeModelId.set(getModelDispatchId(ready));
@@ -75,7 +77,7 @@ async function loadWorkspace() {
 /** Reads the open thread's catalog into `models` and the unscoped one into `workspaceModels`. */
 export async function loadModels({ refreshUsage = false }: { refreshUsage?: boolean } = {}) {
 	const scope = catalogScope();
-	await Promise.all([loadScoped(scope, refreshUsage), scope ? loadWorkspace() : null]);
+	await Promise.all([loadScoped(scope, refreshUsage), scope || get(draftAccountId) ? loadWorkspace() : null]);
 }
 
 const threadLoadSeq = new Map<string, number>();
@@ -106,6 +108,16 @@ export function loadComposerModels(threadId: string | null | undefined, opts: { 
 		? loadThreadCatalog(threadId, opts.refreshUsage)
 		: loadModels(opts);
 }
+
+// A draft choice changes the catalog's selected account, including when a draft is reset.
+let draftChoiceInitialized = false;
+draftAccountId.subscribe(() => {
+	if (!draftChoiceInitialized) { draftChoiceInitialized = true; return; }
+	if (!get(activeThreadId)) {
+		models.update(unknownStatus);
+		void loadScoped(null, false);
+	}
+});
 
 // Opening another thread re-reads the catalog on that thread's account.
 activeThreadId.subscribe(() => {

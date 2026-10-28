@@ -29,7 +29,7 @@ def _columns(db: sqlite3.Connection) -> list[tuple[str, str]]:
 
 
 def test_v155_is_registered() -> None:
-    assert SCHEMA_VERSION == 155
+    assert SCHEMA_VERSION == 159
     assert MIGRATIONS[154] is migrate_154_to_155
 
 
@@ -38,7 +38,7 @@ def test_v155_upgrade_leaves_existing_threads_unconfined_and_matches_fresh() -> 
     db = _legacy_db()
     try:
         initialize_schema(fresh)
-        assert migrate_to_current(db, SCHEMA_VERSION).to_version == 155
+        assert migrate_to_current(db, SCHEMA_VERSION).to_version == 159
         assert sorted(_columns(db)) == sorted(_columns(fresh))
         assert thread_confinement.read_dirs("old", db) is None
         assert {r[1] for r in db.execute("PRAGMA index_list(event_route_decisions)")} == {
@@ -65,6 +65,7 @@ def test_v155_carries_an_older_claude_code_review_childs_confinement_onto_its_ro
         for thread_id in ("review", "plain", "empty"):
             db.execute("INSERT INTO threads (id,user_id,title,created_at,updated_at) VALUES (?,'u','t','t','t')",
                        (thread_id,))
+        db.execute("UPDATE threads SET spawned_by='old' WHERE id IN ('review','plain','empty')")
         _cc_session(db, "review", "old", {"confinement": "review", "add_dirs": ["/old"]}, "1")
         _cc_session(db, "review", "new", {"confinement": "review", "add_dirs": ["/src", "/head"]}, "2")
         _cc_session(db, "plain", "p", {"confinement": "none", "add_dirs": []}, "1")

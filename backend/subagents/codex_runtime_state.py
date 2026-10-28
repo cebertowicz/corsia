@@ -66,6 +66,7 @@ class _LiveCodex(LiveBase):
     continuity_accounting: ContinuityAccounting | None = None
     thinking_provenance: dict | None = None
     provider_context_untrusted: bool = False
+    open_tool_step_id: str | None = None
     # Exit owned by compaction retirement: it terminated this process on purpose
     # and is adopting a checkpoint, so the dead-generation owner must not settle
     # the Turn. Set before terminate and cleared on every exit of that retirement.

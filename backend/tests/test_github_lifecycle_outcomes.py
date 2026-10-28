@@ -47,7 +47,7 @@ async def test_lifecycle_facts_and_redelivery(main_db, index, name, subject, fac
     fixture = json.loads((FIXTURES / "lifecycle.json").read_text())[index]
     payload = fixture["payload"]
     await admit_github_delivery_async(fixture["event"], payload, "delivery")
-    await admit_github_delivery_async(fixture["event"], payload, "delivery")
+    await admit_github_delivery_async(fixture["event"], payload, "d-redelivered")
     assert rows(main_db) == [(name, facts)]
     assert not ({"body", "title", "description", "release_notes"} & facts.keys())
     assert [s for (s,) in main_db.execute("SELECT subject_key FROM outcome_events")] == [subject]

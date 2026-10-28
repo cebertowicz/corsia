@@ -875,7 +875,7 @@ def test_the_ladder_keeps_stored_names_at_78_and_the_account_steps_after_it() ->
     from infra.migration_81_to_82_vendor_policy import migrate_81_to_82
     from infra.migration_82_to_83_account_rollover import migrate_82_to_83
 
-    assert SCHEMA_VERSION == 155
+    assert SCHEMA_VERSION == 159
     assert (MIGRATIONS[78], MIGRATIONS[79], MIGRATIONS[80], MIGRATIONS[81]) == (migrate_78_to_79, migrate_79_to_80, migrate_80_to_81, migrate_81_to_82)
     assert MIGRATIONS[82] is migrate_82_to_83
     assert max(MIGRATIONS) == SCHEMA_VERSION - 1

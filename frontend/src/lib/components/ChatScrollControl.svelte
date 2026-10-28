@@ -1,31 +1,25 @@
 <script lang="ts">
 	/**
-	 * One peer of the mobile action rail. Height, material, elevation and radius
-	 * are the rail contract (see `ChatAttentionStack`): this live-edge control is
-	 * distinguished by being present only while the user is scrolled up, never by
-	 * being smaller or flatter than its neighbours.
+	 * The chat attention stack's live-edge control. On mobile it shares the
+	 * action rail's height, material, elevation and radius; on desktop it keeps
+	 * the compact size used below the attention dock.
 	 */
-	import { isMobile } from '$lib/stores/viewport';
-
 	let {
 		threadId,
 		userIsNearBottom,
 		onScrollToBottom,
-		docked = false,
 	}: {
 		threadId: string | null;
 		userIsNearBottom: boolean;
 		onScrollToBottom: () => void;
-		docked?: boolean;
 	} = $props();
 
-	const visible = $derived(($isMobile || docked) && !userIsNearBottom && !!threadId);
+	const visible = $derived(!userIsNearBottom && !!threadId);
 </script>
 
 {#if visible}
 	<button
-		class="rail-control mobile-scroll-fab press-tint"
-		class:docked
+		class="rail-control chat-scroll-control press-tint"
 		type="button"
 		onclick={onScrollToBottom}
 		aria-label="Scroll to bottom"
@@ -36,7 +30,7 @@
 {/if}
 
 <style>
-	.mobile-scroll-fab {
+	.chat-scroll-control {
 		display: inline-flex; width: var(--touch-target); height: var(--touch-target); padding: 0;
 		align-items: center; justify-content: center;
 		border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
@@ -48,14 +42,13 @@
 		color: var(--text-secondary);
 		cursor: pointer;
 	}
-	.mobile-scroll-fab.docked { display: flex; margin: var(--space-2) auto 0; }
 	@media (min-width: 769px) {
-		.mobile-scroll-fab.docked { width: calc(var(--space-7) + var(--space-1)); height: calc(var(--space-7) + var(--space-1)); }
+		.chat-scroll-control { width: calc(var(--space-7) + var(--space-1)); height: calc(var(--space-7) + var(--space-1)); }
 	}
-	.mobile-scroll-fab svg {
+	.chat-scroll-control svg {
 		width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2;
 		stroke-linecap: round; stroke-linejoin: round;
 	}
-	.mobile-scroll-fab:hover { color: var(--text-primary); }
-	.mobile-scroll-fab:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+	.chat-scroll-control:hover { color: var(--text-primary); }
+	.chat-scroll-control:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 </style>

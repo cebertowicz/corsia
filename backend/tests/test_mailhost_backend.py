@@ -15,7 +15,6 @@ from test_mailhost_send import _draft, _send, make_host  # noqa: F401  (fixtures
 from test_mailhost_threads_folders_invites import ORIGINAL, _id
 
 from connections.account_errors import AccountError
-from connections.mail.email_document import reply_target_label
 from connections.mailhost import account, dns, imap, store
 from connections.mailhost.endpoints import Endpoints, Server
 from connections.mailhost.errors import (
@@ -126,7 +125,7 @@ async def test_each_smtp_refusal_has_its_own_cause_and_reopens_the_draft(make_ho
 
 
 @pytest.mark.parametrize("failure", ["unreachable", "password"])
-async def test_an_update_keeps_a_generic_reply_line_when_the_host_cant_be_read(make_host, failure) -> None:
+async def test_an_update_stops_when_the_reply_target_cant_be_read(make_host, failure) -> None:
     host = await make_host()
     host.built.imap.messages[5] = ORIGINAL
     saved = await _draft(host, to=[], cc=[], subject="Lunch plans", reply_to_message_id=_id(host))
@@ -134,8 +133,11 @@ async def test_an_update_keeps_a_generic_reply_line_when_the_host_cant_be_read(m
         host.built.imap.close()
     else:
         host.built.imap.password = "not-the-app-password"
-    updated = await _update(host, saved, to=["team@example.com"], cc=[], subject="Re: Lunch plans")
-    assert reply_target_label(None, None) in (host.workspace / updated["path"]).read_text()
+    updated = await EmailDraftTool().execute(_thread_id=host.thread, account_id=host.account_id,
+                                             draft_id=saved["draft_id"], to=["team@example.com"], cc=[],
+                                             subject="Re: Lunch plans", body="Changed")
+    assert updated.startswith("Error:")
+    assert "Changed" not in (host.workspace / saved["path"]).read_text()
 
 
 async def test_a_new_reply_the_host_refuses_returns_the_named_cause(make_host) -> None:

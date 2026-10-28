@@ -178,6 +178,26 @@ def test_persistent_agent_shared_documents_go_to_conductor(lifecycle_scope):
     assert _rehome_events(scope["db"], artifact["id"]) == 1
 
 
+@pytest.mark.parametrize("who", ["agent", "worker"])
+@pytest.mark.parametrize("integration,kind", [("claude-code", "session"), ("codex", "thread")])
+def test_disabled_agent_keeps_its_provider_session(lifecycle_scope, who, integration, kind):
+    from registry import models
+    from registry.listing import find_for_thread
+    from registry.ownership import rehome_on_thread_end
+
+    scope = lifecycle_scope
+    thread = scope[who]
+    models.register_artifact(integration=integration, type=kind, external_id=f"{who}-own",
+                             parent_thread_id=thread, db=scope["db"])
+
+    rehome_on_thread_end(scope["db"], thread, "agent_disabled")
+
+    # The thread stays live as a chat, so it still resumes its own session.
+    record = find_for_thread(thread, integration, kind, db=scope["db"])
+    assert record is not None and record["external_id"] == f"{who}-own"
+    assert find_for_thread(scope["parent"], integration, kind, db=scope["db"]) is None
+
+
 @pytest.mark.parametrize("reason", ["archived", "purged", "deleted"])
 def test_family_ending_set_skips_intermediate_parent(lifecycle_scope, reason):
     from registry.ownership import rehome_on_thread_end

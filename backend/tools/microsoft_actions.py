@@ -83,7 +83,8 @@ class MicrosoftMailSearchTool(Tool):
                 screen = screens.get(item.message_id)
                 entry: dict[str, Any] = {
                     "message_id": item.message_id, "thread_id": thread_key(account, item.thread_id),
-                    "from": item.headers.get("from", ""), "date": item.headers.get("date", ""),
+                    "from": email_screen.sender_for_screen(item.headers.get("from", ""), screen),
+                    "date": item.headers.get("date", ""),
                 }
                 if screen is not None and screen.clean:
                     entry["subject"] = item.headers.get("subject", "")

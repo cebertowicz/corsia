@@ -31,6 +31,7 @@ from events.identity import (
 )
 from events.connectors.github_label_events import IDENTITY, change_event
 from events.connectors.github_ownership import declaration_facts
+from events.connectors.github_content_facts import content_facts, content_kind, repository_name
 from events.connectors.github_receiver import GITHUB_RECEIVER
 from events.identity_formula import MalformedEventError, RelationshipDecl
 from infra.webhook_delivery_log import comment_object_key
@@ -55,6 +56,9 @@ GITHUB_ROUTED_EVENTS = {
     "pr.merged": "webhook.github.pr_merged",
     "pr.closed": "webhook.github.pr_closed",
     "check.completed": "webhook.github.check_suite_completed",
+    "issue.opened": "webhook.github.issue_opened",
+    "issue_comment.created": "webhook.github.issue_comment",
+    "pr_comment.created": "webhook.github.pr_comment",
 }
 
 # Each consumer maps PrEnd into its own vocabulary; the rule itself is never
@@ -163,6 +167,8 @@ def _classify(raw: dict[str, Any]) -> str:
     if raw.get("check_suite"):
         return "check.completed"
     action = raw.get("action", "")
+    if kind := content_kind(raw):
+        return kind
     if raw.get("issue") and not raw.get("pull_request") and f"issue.{action}" in IDENTITY:
         return f"issue.{action}"
     if action == "closed":
@@ -190,19 +196,24 @@ def _classify(raw: dict[str, Any]) -> str:
 def _extract_facts(raw: dict[str, Any], resolved: Mapping[str, Any] | None = None) -> dict[str, Any]:
     """A webhook's facts. A check suite's pull request is the one routing selected
     (``resolved[CHECK_SUITE_PR]``), looked up here only when none was passed."""
-    facts: dict[str, Any] = {"repo": (raw.get("repository") or {}).get("full_name")}
+    facts: dict[str, Any] = {"repo": repository_name(raw)}
     pr = raw.get("pull_request") or {}
+    content = content_facts(raw) if any(raw.get(k) for k in ("pull_request", "issue", "comment", "review")) else {}
     if pr:
         user = _json_object(pr, "user")
         facts.update({
             "pr_number": pr.get("number"), "action": raw.get("action"),
-            "merged": pr.get("merged"), "title": pr.get("title"),
+            "merged": pr.get("merged"),
             "branch": (pr.get("base") or {}).get("ref"),
             "sha": (pr.get("head") or {}).get("sha"), "author": user.get("login"),
         })
     kind = "pull_request" if pr else "issues" if raw.get("issue") else None
     change = change_event(kind, raw) if kind else None
     facts.update(change.facts if change else {})
+    facts.update(content)
+    if (pr and not raw.get("comment") and not raw.get("review")
+            and content.get("author_origin") == "inside" and pr.get("title") is not None):
+        facts["title"] = pr["title"]
     cs = raw.get("check_suite") or {}
     if cs:
         selected = (resolved[CHECK_SUITE_PR] if resolved is not None and CHECK_SUITE_PR in resolved
@@ -262,11 +273,12 @@ def _repository_projects(repository: str) -> frozenset[str] | None:
         return None
 
 
-_PR_FILTERABLE = ("repo", "branch", "sha", "pr_number", "author")
+_PR_FILTERABLE = ("repo", "branch", "sha", "pr_number", "author", "author_origin", "item_version")
 # A label change adds the one name changed, the item's names after it, who did it and when.
 _PR_LABEL_FILTERABLE = (*_PR_FILTERABLE, "label", "labels", "actor", "at")
 _ISSUE_FILTERABLE = ("repo", "issue_number", "label", "labels", "actor", "at",
-                     "minutes_since_opened", "state_reason")
+                     "minutes_since_opened", "state_reason", "author", "author_origin", "item_version")
+_CONTENT_FILTERABLE = ("repo", "author", "author_origin", "item_version")
 _HEAD_CHECKS_FILTERABLE = ("repo", "head_sha", "head_branch", "pr_number", "conclusion")
 _CHECK_FILTERABLE = ("repo", "branch", "head_sha", "check_suite_id", "conclusion")
 
@@ -296,8 +308,13 @@ MANIFEST = register(ConnectorManifest(
         "pr.unlabeled": EventTypeDecl(
             "pr.unlabeled", IDENTITY["pr.unlabeled"], _PR_LABEL_FILTERABLE,
             artifact_type=PR_TYPE, artifact_integration=GITHUB_INTEGRATION),
-        **{suffix: EventTypeDecl(suffix, facts, _ISSUE_FILTERABLE)
+        **{suffix: EventTypeDecl(suffix, facts, _ISSUE_FILTERABLE,
+                                 routed_event=GITHUB_ROUTED_EVENTS.get(suffix))
            for suffix, facts in IDENTITY.items() if suffix.startswith("issue.")},
+        **{name: EventTypeDecl(name, ("repo", "item_version"), _CONTENT_FILTERABLE,
+                                routed_event=GITHUB_ROUTED_EVENTS.get(name))
+           for name in ("issue.edited", "issue_comment.created", "issue_comment.edited",
+                        "pr_comment.created", "pr_comment.edited", "review.submitted", "review.edited")},
         "head.checks_completed": EventTypeDecl(
             "head.checks_completed", ("repo", "head_sha"), _HEAD_CHECKS_FILTERABLE,
             artifact_type=PR_TYPE, artifact_integration=GITHUB_INTEGRATION),
@@ -353,6 +370,7 @@ def github_routing_envelope(
             "type": identity.type,
             "external_id": identity.external_id,
         }
+    routed_type = MANIFEST.routed_type(internal_event)
     return EventEnvelope(
         event_id="",
         type=internal_event,
@@ -361,7 +379,7 @@ def github_routing_envelope(
         relationships=(),
         artifact_ref=artifact_ref,
         provenance={},
-        event_class=github_event_class(payload),
+        event_class=MANIFEST.decl(routed_type).event_class if routed_type else github_event_class(payload),
         ownerless_ok=False,
         origin="connector",
     )

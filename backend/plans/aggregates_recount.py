@@ -212,7 +212,7 @@ class _Tree:
                         str(self.by_id[leaf]["state"]), "ready", display_label="ready",
                     )
                     counts[bucket] += 1
-            display = branch_display(counts, needs_user=False, working=False)
+            display = branch_display(counts, asks_user=False, working=False)
         else:
             display = display_from_facts(str(row["state"]), "ready")
         return {"complete": "done", "failed": "failed"}.get(display["tone_key"], "closed")

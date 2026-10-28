@@ -14,6 +14,8 @@ import ssl
 from email.message import EmailMessage
 from email.utils import getaddresses
 
+from connections.account_errors import AccountError
+from connections.mail.attachments import OVERSIZE
 from connections.mailhost import tls
 from connections.mailhost.endpoints import Endpoints, Server
 from connections.mailhost.errors import (
@@ -32,7 +34,7 @@ _REFUSALS = tuple(kind for kind, _cause in _SUBMISSION_REFUSED)
 log = logging.getLogger(__name__)
 
 
-def _close(client: smtplib.SMTP) -> None:
+def close(client: smtplib.SMTP) -> None:
     try:
         client.close()
     except (OSError, smtplib.SMTPException):
@@ -61,17 +63,17 @@ def _login_on_port(ep: Endpoints, port: int, username: str, password: str) -> sm
         client.login(username, password)
         return client
     except smtplib.SMTPAuthenticationError:
-        _close(client)
+        close(client)
         raise MailHostError(PASSWORD_REFUSED, name=ep.name) from None
     except MailHostError:
-        _close(client)
+        close(client)
         raise
     except _LOGIN_TRANSPORT:
-        _close(client)
+        close(client)
         raise unreachable from None
 
 
-def _logged_in_client(ep: Endpoints, username: str, password: str) -> smtplib.SMTP:
+def logged_in_client(ep: Endpoints, username: str, password: str) -> smtplib.SMTP:
     """Return one authenticated client; only connection/authentication failures fall to another port."""
     unreachable: MailHostError | None = None
     for port in ep.smtp_ports():
@@ -86,8 +88,8 @@ def _logged_in_client(ep: Endpoints, username: str, password: str) -> smtplib.SM
 
 def check_login(ep: Endpoints, password: str) -> None:
     """Prove SMTP credentials work; a refused password stops at once."""
-    client = _logged_in_client(ep, ep.username, password)
-    _close(client)
+    client = logged_in_client(ep, ep.username, password)
+    close(client)
 
 
 def _recipients(message: EmailMessage) -> list[str]:
@@ -102,12 +104,14 @@ def send_message(
     SMTP transport errors during or after submission deliberately propagate: delivery may
     have happened, so callers keep the reviewed draft claimed and never retry it.
     """
-    client = _logged_in_client(ep, username, password)
+    client = logged_in_client(ep, username, password)
     try:
         refused = client.send_message(message, from_addr=from_addr, to_addrs=_recipients(message))
     except _REFUSALS as exc:
+        if getattr(exc, "smtp_code", None) == 552 and any(message.iter_attachments()):
+            raise AccountError(OVERSIZE) from None
         cause = next(cause for kind, cause in _SUBMISSION_REFUSED if isinstance(exc, kind))
         raise MailHostError(cause, host=ep.name) from None
     finally:
-        _close(client)
+        close(client)
     return list(refused)

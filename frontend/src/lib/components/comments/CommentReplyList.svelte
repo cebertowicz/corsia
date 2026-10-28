@@ -7,6 +7,7 @@
 		id?: string;
 		author: string;
 		authorKind?: 'user' | 'agent';
+		authorThreadId?: string | null;
 		text: string;
 		at: string;
 		createdAt?: string;
