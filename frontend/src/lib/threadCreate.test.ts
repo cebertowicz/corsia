@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { buildNewThreadBody, createAccountRefusal, draftAccountForModel } from './threadCreate';
+import { buildNewThreadBody, createFailedMessage, draftAccountForModel, reloadOnAccountRefusal } from './threadCreate';
 import { CREATE_ACCOUNT_REFUSED } from './messageDeliveryCopy';
 import type { Model } from './stores/models';
 
@@ -15,15 +15,20 @@ describe('session creation helpers', () => {
 		expect(draftAccountForModel('claude-account', 'codex/model', models)).toBeNull();
 	});
 
-	it('refreshes known account refusals without clearing the choice', async () => {
+	it('refreshes every coded account refusal without clearing the choice', async () => {
 		const reload = vi.fn(async () => {});
-		expect(await createAccountRefusal(400, 'account_signed_out; retry', reload)).toBe(true);
-		expect(await createAccountRefusal(400, 'account_removed; choose a permitted account or restore this account\'s eligibility', reload)).toBe(true);
-		expect(reload).toHaveBeenCalledTimes(2);
-		expect(await createAccountRefusal(400, 'account_unknown; retry', reload)).toBe(false);
-		expect(await createAccountRefusal(400, 'account does not exist for this provider', reload)).toBe(false);
-		expect(await createAccountRefusal(500, 'account_removed; retry', reload)).toBe(false);
-		expect(CREATE_ACCOUNT_REFUSED).toBe('Couldn’t start the chat on that account. The model menu shows why; pick another account or fix it in Settings › Providers.');
+		expect(await reloadOnAccountRefusal(400, 'account_signed_out; retry', reload)).toBe(true);
+		expect(await reloadOnAccountRefusal(400, 'account_removed; choose a permitted account or restore this account\'s eligibility', reload)).toBe(true);
+		expect(await reloadOnAccountRefusal(400, 'account_actor_unauthorized', reload)).toBe(true);
+		expect(reload).toHaveBeenCalledTimes(3);
+		expect(await reloadOnAccountRefusal(400, 'account does not exist for this provider', reload)).toBe(false);
+		expect(await reloadOnAccountRefusal(500, 'account_removed; retry', reload)).toBe(false);
+		expect(CREATE_ACCOUNT_REFUSED).toBe('Couldn’t start the chat on that account. Its row in the model picker says why; pick another account there.');
+	});
+
+	it('shows the server reference beside the generic create failure', () => {
+		expect(createFailedMessage('err-0123abcd')).toBe('Couldn’t create the chat. Try again. Reference: err-0123abcd');
+		expect(createFailedMessage(undefined)).toBe('Couldn’t create the chat. Try again.');
 	});
 
 	it('builds the create-session payload from selected project and model state', () => {

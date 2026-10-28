@@ -1,18 +1,23 @@
 import type { Thread } from '$lib/stores/threads';
 import { modelMatchesId, type Model } from '$lib/stores/models';
 import { reasonOf } from '$lib/stores/threadAccountPin';
-import { ACCOUNT_HOLD_COPY } from '$lib/messageDeliveryCopy';
+import { CREATE_FAILED } from '$lib/messageDeliveryCopy';
 
 export function draftAccountForModel(accountId: string | null, modelId: string | null, models: Model[]): string | null {
 	const model = models.find((row) => modelMatchesId(row, modelId));
 	return accountId && model?.runs_on?.some((entry) => entry.account_id === accountId) ? accountId : null;
 }
 
-export async function createAccountRefusal(status: number, detail: unknown, reload: () => Promise<void>): Promise<boolean> {
-	const reason = reasonOf(detail);
-	if (status !== 400 || !reason || !Object.hasOwn(ACCOUNT_HOLD_COPY, reason)) return false;
+/** A coded 400 to a create that named an account refuses that account: reload so its picker row shows why, and say so. */
+export async function reloadOnAccountRefusal(status: number, detail: unknown, reload: () => Promise<void>): Promise<boolean> {
+	if (status !== 400 || !reasonOf(detail)) return false;
 	await reload();
 	return true;
+}
+
+/** Any other failed create: the generic sentence, plus the server's reference when it logged one. */
+export function createFailedMessage(reference: unknown): string {
+	return typeof reference === 'string' && reference ? `${CREATE_FAILED} Reference: ${reference}` : CREATE_FAILED;
 }
 
 export function buildNewThreadBody({

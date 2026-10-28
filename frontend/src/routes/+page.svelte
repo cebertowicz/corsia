@@ -34,7 +34,7 @@
 	import FirstRunHandoff from '$lib/components/FirstRunHandoff.svelte';
 	import { buildPaneConfig, type View } from '$lib/homePaneConfig';
 	import { syncCanvasHeader } from '$lib/homeCanvasHeader';
-	import { buildNewThreadBody, createdThreadRow, createAccountRefusal, draftAccountForModel } from '$lib/threadCreate';
+	import { buildNewThreadBody, createdThreadRow, createFailedMessage, draftAccountForModel, reloadOnAccountRefusal } from '$lib/threadCreate';
 	import { pinThreadAccount } from '$lib/stores/threadAccountPin';
 	import { CREATE_ACCOUNT_REFUSED } from '$lib/messageDeliveryCopy';
 	import { clearDocPickerTarget, docPickerTarget } from '$lib/stores/docPickerTarget';
@@ -316,8 +316,8 @@
 		});
 		if (!res.ok) {
 			const detail = await res.json().catch(() => null);
-			const refusal = accountId && await createAccountRefusal(res.status, detail?.detail, loadModels);
-			toasts.show(refusal ? CREATE_ACCOUNT_REFUSED : 'Couldn’t create the chat. Try again.', 'error');
+			const refusal = accountId && await reloadOnAccountRefusal(res.status, detail?.detail, loadModels);
+			toasts.show(refusal ? CREATE_ACCOUNT_REFUSED : createFailedMessage(detail?.reference), 'error');
 			throw new Error('Thread creation failed');
 		}
 		const data = await res.json();
