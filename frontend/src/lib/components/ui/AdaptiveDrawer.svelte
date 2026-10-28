@@ -86,6 +86,9 @@
 	} = $props();
 
 	let box = $state<ColumnBox | null>(null);
+	let closing = $state(false);
+	let wasOpen = false;
+	$effect.pre(() => { if (!open && wasOpen) closing = true; if (open) closing = false; wasOpen = open; });
 	$effect(() => {
 		if (!within) { box = null; return; }
 		return trackColumnBox(within, (next) => { box = next; });
@@ -164,7 +167,7 @@
 		out:fade={fadeParams}
 		use:portal
 	>
-		<div class="drawer-motion" in:fly|global={flyParams} out:fly={flyParams} onoutroend={onClosed}>
+		<div class="drawer-motion" in:fly|global={flyParams} out:fly={flyParams} onoutroend={() => { closing = false; onClosed(); }}>
 		<div
 			bind:this={panel}
 			class="drawer-panel"
@@ -203,8 +206,13 @@
 	</div>
 	</div>
 {/if}
+{#if closing && !open && modal && detent !== 'half' && !covered}
+	<!-- Svelte makes the fading backdrop inert during its outro; keep its modal region intercepting input until it finishes. -->
+	<div class="drawer-backdrop outro-shield" class:within={!!box} style:--drawer-top="{box?.top ?? 0}px" style:--drawer-right="{box?.right ?? 0}px" style:--drawer-bottom="{box?.bottom ?? 0}px" style:--drawer-left="{box?.left ?? 0}px" data-adaptive-drawer aria-hidden="true" use:portal></div>
+{/if}
 
 <style>
+	.drawer-backdrop.outro-shield, .drawer-backdrop.outro-shield.within { background: transparent; }
 	.drawer-backdrop {
 		position: fixed;
 		inset: 0;

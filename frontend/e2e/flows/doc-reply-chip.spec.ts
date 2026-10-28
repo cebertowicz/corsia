@@ -385,6 +385,36 @@ for (const width of [1440, 393]) {
 	}
 }
 
+for (const width of [1440, 393]) {
+	test(`${TAG} modal ${width}px: reply notice stays unavailable through sheet outro`, async ({ page, request }, testInfo) => {
+		test.setTimeout(90_000);
+		test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires isolated synthetic state');
+		skipMismatchedProject(width, testInfo.project.name);
+		await page.setViewportSize({ width, height: width === 393 ? 852 : 900 });
+		const threadId = await createSession(request, THREAD_TITLE);
+		await onlyThread(request, threadId);
+		const doc = await seedTextDocument(page, request, threadId, `modal-${width}`, 'launch-plan.md', [8, 10]);
+		await stageWorkspace(page, threadId, doc.docPath, 'launch-plan.md', 'artifact');
+		await openThread(page, THREAD_TITLE);
+		await expectChip(page, '2 new replies');
+		const box = (await chipButton(page).boundingBox())!;
+		await holdDwell(page, true);
+		await chipButton(page).click();
+		const sheet = page.locator('[data-adaptive-drawer].drawer-backdrop');
+		await expect(sheet).toBeVisible();
+		await expect(chipBox(page)).toHaveCount(0);
+		const x = box.x + box.width / 2, y = box.y + box.height / 2;
+		expect(await page.evaluate(({ x, y }) => !!document.elementFromPoint(x, y)?.closest('[data-adaptive-drawer]'), { x, y }), 'the sheet intercepts the former chip location').toBe(true);
+		await page.getByRole('button', { name: 'Close comments' }).click();
+		await expect(sheet.first()).toBeVisible();
+		await expect(chipBox(page)).toHaveCount(0);
+		expect(await page.evaluate(({ x, y }) => !!document.elementFromPoint(x, y)?.closest('[data-adaptive-drawer]'), { x, y }), 'the sheet intercepts the former chip location').toBe(true);
+		await expect(sheet).toHaveCount(0);
+		await expectChip(page, '2 new replies');
+		await holdDwell(page, false);
+	});
+}
+
 for (const theme of ['light', 'dark'] as const) {
 	for (const width of [1440, 393]) {
 		const size = { width, height: width === 393 ? 852 : 900 };

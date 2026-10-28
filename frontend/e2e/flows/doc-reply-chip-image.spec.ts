@@ -4,7 +4,7 @@ import { expect } from '@playwright/test';
 import { test } from '../support/test';
 import { chatComposer, createSession, loginByUrl, sendButton, TEST_TOKEN, waitForWsConnected } from '../support/corsia';
 import { seedMockResponses } from '../support/mock';
-import { DOC, seedImageDocument, overlay, putSheetAway } from '../support/docImageComments';
+import { DOC, seedImageDocument, overlay } from '../support/docImageComments';
 import { isolatedDb } from '../support/heldComments';
 
 for (const width of [393, 1440]) {
@@ -58,11 +58,27 @@ for (const width of [393, 1440]) {
 			await page.getByText(sessionTitle, { exact: true }).first().click();
 			await page.locator('.cm-md-image img').first().click();
 			await expect(overlay(page)).toBeVisible();
+			const initialChip = overlay(page).locator('[data-doc-reply-chip] button');
+			await expect(initialChip).toBeVisible();
+			const initialBox = (await initialChip.boundingBox())!;
 			// Inspect the other pin first, then close its comments: the unread reply belongs to pin two.
 			await overlay(page).locator(`[data-region-tag][data-comment-id="${roots[0]}"]:not([inert])`).click();
 			await expect(page.locator(`[data-comment-id="${roots[0]}"]`).last()).toBeVisible();
-			if (width === 393) await putSheetAway(page);
-			else await page.keyboard.press('Escape');
+			if (width === 393) {
+				const backdrop = page.locator('[data-adaptive-drawer].drawer-backdrop');
+				await expect(backdrop).toBeVisible();
+				await expect(overlay(page).locator('[data-doc-reply-chip]')).toHaveCount(0);
+				const point = { x: initialBox.x + initialBox.width / 2, y: initialBox.y + initialBox.height / 2 };
+				const sheetIntercepts = () => page.evaluate(({ x, y }) => !!document.elementFromPoint(x, y)?.closest('[data-adaptive-drawer]'), point);
+				expect(await sheetIntercepts()).toBe(true);
+				const layer = await page.evaluate(() => (history.state as { backLayer?: number } | null)?.backLayer ?? null);
+				await page.getByRole('button', { name: 'Done', exact: true }).click();
+				await expect(backdrop.first()).toBeVisible();
+				await expect(overlay(page).locator('[data-doc-reply-chip]')).toHaveCount(0);
+				expect(await sheetIntercepts()).toBe(true);
+				await expect(backdrop).toHaveCount(0);
+				if (layer !== null) await expect.poll(() => page.evaluate(() => (history.state as { backLayer?: number } | null)?.backLayer ?? null)).not.toBe(layer);
+			} else await page.keyboard.press('Escape');
 			const chip = overlay(page).locator('[data-doc-reply-chip] button');
 			await expect(chip).toContainText('1 new reply');
 			const frameDir = process.env.REPLY_CHIP_SCREENSHOT_DIR;
