@@ -1,4 +1,4 @@
-"""A ``review`` launch reads with Claude Code's own tools, and only those.
+"""A ``untrusted`` launch reads with Claude Code's own tools, and only those.
 
 A stand-in ``claude`` declares the init tools and makes the one native call its
 environment names, so each case runs the real spawn, stream and event pump. It
@@ -19,7 +19,7 @@ from pathlib import Path
 import pytest
 
 from cc_runtime_fixtures import _seed_parent, _wait, cc_target, child_db  # noqa: F401
-from subagents.cc_invocation import REVIEW_NATIVE_TOOLS, claude_review_profile_args
+from subagents.cc_invocation import UNTRUSTED_NATIVE_TOOLS, claude_untrusted_profile_args
 
 _STANDIN = textwrap.dedent(
     '''\
@@ -79,7 +79,7 @@ async def _run(child_db, standin, monkeypatch, tmp_path, *, tools, call, confine
         cm, "get_connection", lambda provider, db=None: {"config": {"binary": standin}},
     )
     _seed_parent(child_db)
-    confinement = {"confinement": "review", "add_dirs": (confined,)} if confined else {}
+    confinement = {"confinement": "untrusted", "add_dirs": (confined,)} if confined else {}
     child_id = await rt.spawn(
         "parent", "review this", binary=standin, target=cc_target("sonnet"),
         broadcast=lambda _sid, _message: None, **confinement,
@@ -114,9 +114,9 @@ def _ended(db, child_id: str) -> bool:
 
 def test_review_admits_exactly_the_tools_its_launch_allows():
     """One list builds ``--tools`` and the boundary's admission."""
-    profile = claude_review_profile_args()
-    assert profile[profile.index("--tools") + 1] == ",".join(REVIEW_NATIVE_TOOLS)
-    assert REVIEW_NATIVE_TOOLS == ("Read", "Grep", "Glob")
+    profile = claude_untrusted_profile_args()
+    assert profile[profile.index("--tools") + 1] == ",".join(UNTRUSTED_NATIVE_TOOLS)
+    assert UNTRUSTED_NATIVE_TOOLS == ("Read", "Grep", "Glob")
 
 
 @pytest.mark.asyncio
@@ -125,7 +125,7 @@ async def test_review_launch_runs_a_native_read_inside_the_provider(
 ):
     child_id = await _run(
         child_db, standin, monkeypatch, tmp_path,
-        tools=REVIEW_NATIVE_TOOLS, call="Read", confined=reviewed_dir,
+        tools=UNTRUSTED_NATIVE_TOOLS, call="Read", confined=reviewed_dir,
     )
     rows = _rows(child_db, child_id)
     assert _violations(child_db, child_id) == []
@@ -163,7 +163,7 @@ async def test_confined_launch_is_never_forked_warm(monkeypatch, tmp_path):
     monkeypatch.setattr(fork_cc, "_transcript_path", lambda _sid, _root: str(transcript))
     invocation = ClaudeInvocation(
         binary="claude", permission_mode="dontAsk", session_id="sid",
-        working_dir=str(tmp_path), confinement="review", add_dirs=(str(tmp_path),),
+        working_dir=str(tmp_path), confinement="untrusted", add_dirs=(str(tmp_path),),
     )
     live = SimpleNamespace(
         session=SimpleNamespace(invocation=lambda: invocation), claude_dir=str(tmp_path),
@@ -186,9 +186,9 @@ async def test_confined_launch_is_never_forked_warm(monkeypatch, tmp_path):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(("tools", "call", "capability", "named"), [
-    ((*REVIEW_NATIVE_TOOLS, "Write"), "", "init", ["Write"]),
-    (REVIEW_NATIVE_TOOLS, "Bash", "native_tool", ["Bash"]),
-    (REVIEW_NATIVE_TOOLS, "mcp__corsia__read_file", "native_tool", ["mcp__corsia__read_file"]),
+    ((*UNTRUSTED_NATIVE_TOOLS, "Write"), "", "init", ["Write"]),
+    (UNTRUSTED_NATIVE_TOOLS, "Bash", "native_tool", ["Bash"]),
+    (UNTRUSTED_NATIVE_TOOLS, "mcp__corsia__read_file", "native_tool", ["mcp__corsia__read_file"]),
 ])
 async def test_review_launch_refuses_every_other_tool(
     child_db, standin, reviewed_dir, monkeypatch, tmp_path, tools, call, capability, named,

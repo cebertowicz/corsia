@@ -8,13 +8,16 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from email.utils import parseaddr
 
 from connections.mail.email_document import reply_addresses
 
 _NO_REPLY = re.compile(r"(^|[.@_-])(no[-_]?reply|do[-_]?not[-_]?reply|donotreply|noreply)([.@_-]|$)", re.I)
 _PREFIX = re.compile(r"^\s*(re|fwd|fw|message replied|aw|sv|antw|wg)\s*:\s*", re.I)
+NOT_SHOWN = "The text isn’t shown here; read it in your mail app."
+FLAGGED = "The text isn’t shown here because it may contain instructions aimed at agents; read it in your mail app."
+UNCHECKED = "The text isn’t shown here because your local model hadn’t checked it when this draft was saved; read it in your mail app."
 
 
 @dataclass(frozen=True)
@@ -28,6 +31,7 @@ class Message:
     reply_to: str = ""
     unread: bool = False
     visible_evidence: str = ""
+    withheld: str = ""
 
 
 @dataclass
@@ -62,8 +66,11 @@ def same_sender(left: str, right: str) -> bool:
 
 def evidence(message: Message) -> str:
     state = "unread" if message.unread else "read"
-    return (f"{message.sender} | {message.date.isoformat()} | {state}\n"
-            + (message.visible_evidence or "Message text withheld."))
+    when = message.date if message.date.tzinfo else message.date.replace(tzinfo=timezone.utc)
+    when = when.astimezone(timezone.utc)
+    date = f"{when:%b} {when.day}, {when.year}, {when.hour % 12 or 12}:{when:%M %p} UTC"
+    return (f"{message.sender} wrote on {date} ({state}).\n"
+            + (message.visible_evidence or message.withheld or NOT_SHOWN))
 
 
 def check_reply(

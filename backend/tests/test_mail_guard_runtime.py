@@ -4,7 +4,8 @@ from types import SimpleNamespace
 import pytest
 
 from tools import mail_guard_runtime
-from tools.mail_guard import Message
+from tools.email_read import UNSCREENED, flagged_text
+from tools.mail_guard import FLAGGED, UNCHECKED, Message
 
 
 @pytest.mark.asyncio
@@ -17,7 +18,7 @@ async def test_flagged_newer_message_is_withheld(monkeypatch):
         return target, [target, newer], [], 0
 
     async def screened(*args):
-        return "Error: This message was flagged as a possible prompt injection."
+        return f"Error: {flagged_text('R1')}"
 
     async def fetch_body(*args):
         return newer.body
@@ -27,8 +28,27 @@ async def test_flagged_newer_message_is_withheld(monkeypatch):
                                                                       {"id": "account", "address": "me@example.test"},
                                                                       "old", "reply", [])
     target_evidence = mail_guard_runtime.evidence(screened_target)
-    assert "withheld" in target_evidence and "malicious instructions" not in target_evidence
+    assert FLAGGED in target_evidence
+    assert "R1" not in target_evidence and "prompt injection" not in target_evidence
+    assert "malicious instructions" not in target_evidence
     assert verdict.stale
-    assert "withheld" in verdict.stale[0]
+    assert FLAGGED in verdict.stale[0]
     assert "malicious instructions" not in verdict.stale[0]
     assert "secret subject" not in verdict.stale[0]
+
+
+@pytest.mark.asyncio
+async def test_unscreened_message_says_it_was_not_screened(monkeypatch):
+    now = datetime.now(timezone.utc)
+    target = Message("old", "thread", "Taylor <taylor@example.test>", "Budget", now, "old")
+
+    async def screened(*args):
+        return f"Error: {UNSCREENED}"
+
+    async def fetch_body(*args):
+        return target.body
+
+    monkeypatch.setattr(mail_guard_runtime, "screened_message", screened)
+    visible = await mail_guard_runtime._visible(SimpleNamespace(fetch_body=fetch_body), "account", target)
+    text = mail_guard_runtime.evidence(visible)
+    assert UNCHECKED in text and FLAGGED not in text and "Try again later" not in text

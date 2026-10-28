@@ -1,15 +1,15 @@
-"""A ``review`` launch of the stock Claude CLI loads nothing it was not given.
+"""A ``untrusted`` launch of the stock Claude CLI loads nothing it was not given.
 
-A review child reads repository paths through ``--add-dir`` and runs inside the
+An untrusted child reads repository paths through ``--add-dir`` and runs inside the
 workspace, under the workspace's and project's own CLAUDE.md files and
 ``.claude/`` settings. This plants an instruction file, import, rule, memory
 index and hook at every level, including the reviewed directory, sets the
 switch that makes add-dir CLAUDE.md files load in the ambient environment, and
 launches the installed CLI with the command and environment ``CCStreamSession``
-builds for a review child. An ungoverned arm proves the planted sources load.
+builds for an untrusted child. An ungoverned arm proves the planted sources load.
 
 The read arms script the model's first reply as one tool call and check what
-the CLI sends back: a review child reads its add-dirs, and nothing outside
+the CLI sends back: an untrusted child reads its add-dirs, and nothing outside
 its working directory and add-dirs reaches the model (event-rules design
 §8.1). That rests on the CLI's ``--restricted`` flag, which confines its file
 tools to the working directories; no sandbox wraps the child.
@@ -28,7 +28,7 @@ import pytest
 
 from cc_user_context_fixtures import InferencePeer, seed_user_context, serve
 from contract.matrix_environment import guarded_command
-from subagents.cc_invocation import CONFINEMENT_REVIEW, build_claude_cmd
+from subagents.cc_invocation import CONFINEMENT_UNTRUSTED, build_claude_cmd
 from subagents.cc_stream import CCStreamSession
 
 _ADD_DIR_SWITCH = "CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD"
@@ -67,7 +67,7 @@ def _launch(binary: str, cwd: Path, reviewed: Path, root: Path, arm: str):
     session = CCStreamSession(
         binary=binary, session_id="00000000-0000-4000-8000-000000000001",
         model="claude-sonnet-4-6", working_dir=str(cwd), claude_dir=str(root),
-        confinement=CONFINEMENT_REVIEW, add_dirs=(str(reviewed),),
+        confinement=CONFINEMENT_UNTRUSTED, add_dirs=(str(reviewed),),
     )
     # The prompt goes over stdin: ``--add-dir`` is variadic and would take it.
     return build_claude_cmd(session.invocation(), stream_input=False), session._build_env()

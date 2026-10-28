@@ -65,7 +65,7 @@ def definitions():
     return tuple({"type": "function", "function": {
         "name": name, "description": "Read reviewed inputs",
         "parameters": {"type": "object", "properties": {"path": {"type": "string"}}},
-    }} for name in sorted(confinement.REVIEW_READ_TOOLS))
+    }} for name in sorted(confinement.UNTRUSTED_READ_TOOLS))
 
 
 @pytest.mark.integration

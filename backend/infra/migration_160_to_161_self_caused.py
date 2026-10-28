@@ -1,4 +1,4 @@
-"""Schema 157 -> 158: separate self-caused events and shell-only prefixes."""
+"""Schema 160 -> 161: separate self-caused events and shell-only prefixes."""
 from __future__ import annotations
 
 import sqlite3
@@ -70,13 +70,13 @@ _RULES = f"""CREATE TABLE IF NOT EXISTS event_rules (
     )"""
 
 
-def migrate_157_to_158(conn: sqlite3.Connection) -> None:
-    conn.execute("ALTER TABLE event_rules RENAME TO event_rules_157")
+def migrate_160_to_161(conn: sqlite3.Connection) -> None:
+    conn.execute("ALTER TABLE event_rules RENAME TO event_rules_160")
     conn.execute(_RULES)
     columns = [row[1] for row in conn.execute("PRAGMA table_info(event_rules)")]
     names = ",".join(f'"{name}"' for name in columns)
-    conn.execute(f"INSERT INTO event_rules ({names}) SELECT {names} FROM event_rules_157")
-    conn.execute("DROP TABLE event_rules_157")
+    conn.execute(f"INSERT INTO event_rules ({names}) SELECT {names} FROM event_rules_160")
+    conn.execute("DROP TABLE event_rules_160")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_event_rules_type\n        ON event_rules(connector, event_type, enabled, scope, created_at)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_event_rules_scope\n        ON event_rules(scope, created_at)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_event_rules_observe\n        ON event_rules(tool, enabled, scope) WHERE kind = 'observe'")

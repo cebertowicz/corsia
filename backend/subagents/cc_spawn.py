@@ -217,7 +217,7 @@ async def spawn(
 ) -> str:
     """Spawn one Claude Code subagent child thread.
 
-    A ``review`` confinement runs it read-only over ``add_dirs`` from its own
+    An ``untrusted`` confinement runs it read-only over ``add_dirs`` from its own
     empty working directory; the caller has already checked those reads.
     ``rule_start(child_id)`` records a rule-started worker before its first turn can run.
     """
