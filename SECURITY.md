@@ -6,9 +6,9 @@ Last reviewed: 2026-10-28
 
 ### Agent Sandbox
 
-- **Protected tools** — Safehouse wraps shell calls, and filesystem tools gate paths using the shared sandbox configuration.
+- **Protected tools** — filesystem tools gate paths using the shared sandbox configuration. Safehouse (macOS) or bubblewrap (Linux) wraps shell calls. On Linux the protected shell runs in separate user, PID, IPC and UTS namespaces, with bind mounts and masked paths built from the same path inventory, and refuses to run without bubblewrap.
 - **Workspace and repositories** — the configured workspace and registered repositories form the ordinary access scope. Protected base checkouts are read-only; their verified `.worktrees` are read/write.
-- **Private state and commands** — protected mode denies access to the CORSIA state root and private roots and blocks direct execution of privileged commands including `sudo`, `su`, `shutdown` and `pmset`.
+- **Private state and commands** — protected mode denies access to the CORSIA state root and private roots. A reviewed, time-bounded host-access lease can open the state root for a specific action. The key store (`<state root>/keys`, a 0700 folder of 0600 files) and the saved browser profile are never opened, by a lease or otherwise. On macOS, protected mode also blocks direct execution of privileged commands including `sudo`, `su`, `shutdown` and `pmset`.
 - **SSH** — protected mode blocks SSH private material while allowing reads of SSH configuration and reads and writes of `known_hosts`.
 
 ### Dependency Pinning
@@ -31,9 +31,13 @@ Last reviewed: 2026-10-28
 ### Network Exposure
 
 - **Bind address** — setup selects local (`127.0.0.1`) or server (`0.0.0.0`) access. A mismatch between the recorded choice and bind address fails closed. Existing installations without a recorded choice retain the legacy server bind.
+- **Devices** — an opt-in TLS listener (default port 47901) for pairing other devices. It accepts signed-in person sessions only, refuses peers outside private networks unless an outside address is configured, and can be managed only from the host itself.
 - **Remote access** — CORSIA includes guidance for setting up a Tailscale Serve mapping to the local service.
 
 ## Gaps / Future Work
 
-- **No container isolation** — agents run as the person's own user. Safehouse is a macOS sandbox profile that restricts files and commands; it is not a container boundary.
-- **API token expiry** — API tokens do not expire automatically; they can be revoked.
+- **No container isolation** — Safehouse (macOS) and bubblewrap (Linux) restrict files and commands; neither is a container boundary.
+- **No general network egress control** — agents can make outbound network requests; the sandbox does not restrict general network egress.
+- **No lock integrity check** — `backend/requirements.lock` is installed without `--require-hashes`.
+- **No sign-in lockout or second factor** — repeated failed sign-ins are slowed, not locked out, and there is no multi-factor authentication.
+- **API token expiry** — API tokens do not expire automatically; they can be revoked by token or label.
