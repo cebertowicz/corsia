@@ -50,6 +50,27 @@ def test_fresh_added_account_lists_models_and_sources_ready(accounts, client, pr
     assert next(line for line in source['accounts'] if line['account_id'] == account['id'])['state'] == 'ready'
 
 
+def test_added_rows_read_once_per_fact_scope(accounts, monkeypatch):
+    from connections import fact_memo, vendor_accounts
+    from llm.harness_catalog import added_rows
+
+    db = accounts[0]
+    original = vendor_accounts.list_accounts
+    calls = []
+
+    def counted(*args, **kwargs):
+        calls.append(kwargs['provider'])
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(vendor_accounts, 'list_accounts', counted)
+    with fact_memo.fact_reads():
+        first = added_rows(db=db)
+        assert added_rows(db=db) is first
+    assert calls == ['claude-code', 'codex']
+    added_rows(db=db)
+    assert calls == ['claude-code', 'codex', 'claude-code', 'codex']
+
+
 def test_provider_gate_refuses_missing_binary_and_no_added_signin(accounts):
     from connections.models import provider_may_run
     from connections.vendor_accounts import get_account, set_account_state

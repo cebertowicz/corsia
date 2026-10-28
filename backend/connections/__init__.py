@@ -25,9 +25,9 @@ def register_if_available(
     registry, provider: str, tool_factory: Callable[[], Any], *, db=None
 ) -> bool:
     """Register ``tool_factory()`` iff the connector is available."""
-    from connections.models import provider_may_run
+    from connections.models import connection_available
 
-    if provider_may_run(provider, db=db):
+    if connection_available(provider, db=db):
         registry.register(tool_factory())
         return True
     return False

@@ -3,7 +3,10 @@ from __future__ import annotations
 
 import json
 
+from connections import fact_memo
 
+
+@fact_memo.memoized_reader
 def added_rows(*, db) -> dict[str, dict]:
     """Project each added-only model once from current signed-in account evidence."""
     from connections.account_evidence import current_ready_discovery
@@ -56,7 +59,11 @@ def catalog_rows(stored: list[dict]) -> list[dict]:
 def harness_row(model: str, *, db) -> dict | None:
     """Return Default's stored row, or an added-account-only projected row."""
     row = db.execute(
-        "SELECT * FROM models WHERE harness IN ('claude-code','codex') AND (id=? OR litellm_model=?) "
+        "SELECT id,harness,provider,provider_model_id,litellm_model,display_name,alias,description,backend,source,"
+        "enabled,available,context_window,supports_vision,supports_tools,supports_reasoning,default_temperature,"
+        "default_max_tokens,metadata_json,last_used_at,runtime_state,last_error,load_started_at,load_completed_at,"
+        "inference_overrides,load_overrides,estimated_memory_gb,discovered_at,last_seen_at,created_at,updated_at "
+        "FROM models WHERE harness IN ('claude-code','codex') AND (id=? OR litellm_model=?) "
         "ORDER BY id=? DESC, enabled DESC, id LIMIT 1", (model, model, model)
     ).fetchone()
     if row is not None:

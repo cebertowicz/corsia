@@ -117,18 +117,13 @@ def account_reason(account: dict, *, provider: str, project_ids: list, execution
     reason = account_fact_reason(account, provider=provider, execution=execution, model=model,
                                  policies=_policies(provider, project_ids, db=db))
     if reason is None and execution and model and account and account['source_home'] is None:
-        stored = db.execute(
-            "SELECT available FROM models WHERE harness=? AND (id=? OR litellm_model=?) "
-            "ORDER BY id=? DESC, enabled DESC, id LIMIT 1", (provider, model, model, model),
-        ).fetchone()
-        if stored is None or not stored['available']:
-            from llm.harness_catalog import added_rows
+        from llm.harness_catalog import harness_row
 
-            added = added_rows(db=db).get(model)
-            if stored is None and added is not None:
-                return 'account_model_not_discovered'
-            if stored is not None and added and added['available']:
-                return 'account_runtime_pending'
+        row = harness_row(model, db=db)
+        if row is not None and row.get('default_listed') is False:
+            return 'account_model_not_discovered'
+        if row is not None and row.get('added_available') and not row.get('available'):
+            return 'account_runtime_pending'
     return reason
 
 
