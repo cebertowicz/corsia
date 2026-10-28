@@ -38,7 +38,10 @@ def plan_state(
 
 #: Marks a plan whose walk is still running, so a plan reached again through a
 #: delegated step below it is a cycle rather than a second walk. Never returned.
-_WALKING = PlanState(progress=Progress(done=0, total=0, liveness="idle", open=0), moving=False)
+_WALKING = PlanState(
+    progress=Progress(done=0, total=0, liveness="idle", open=0),
+    moving=False, delegated_moving=False,
+)
 
 
 def _plan_state(connection, plan_id: str, memo: dict[str, PlanState], *, plan=None, nodes=None, tree=None):
@@ -73,9 +76,10 @@ def _plan_state(connection, plan_id: str, memo: dict[str, PlanState], *, plan=No
     running = "running" in conditions and not (
         plan["owner_kind"] == "thread" and wait_causes.stalled_why(connection, plan["owner_id"])
     )
-    moving = running or any(
+    delegated_moving = any(
         wait_causes.child_is_working(execution) for execution in executions
     )
+    moving = running or delegated_moving
     state = PlanState(
         progress=Progress(
             done=done, total=len(counted) + settled_done + settled_failed,
@@ -86,6 +90,7 @@ def _plan_state(connection, plan_id: str, memo: dict[str, PlanState], *, plan=No
             ),
         ),
         moving=moving,
+        delegated_moving=delegated_moving,
     )
     memo[plan_id] = state
     return state

@@ -15,12 +15,12 @@ Three waits live here:
   draft or parent-reviewed one waits for the parent tier's review. Root work has
   no higher tier, so its author must act on its own draft and that is no wait.
 - **A delegated child still working.** A parent does not run the step its child
-  is doing, and a child thread that is gone blocks that step instead. "Still
-  working" is the child's own plan moving (``PlanState.moving``, the fact the
-  operator display reads), a Turn it is running, an input queued for its next
-  Turn (a rejected step's revision handed back to it, #2052), or a step it can
-  still move (``projections.movable_leaf_sql``, the one definition), so a child
-  sent back by message waits for its return (matrix row D4). A paused child is
+  is doing, and a child thread that is gone blocks that step instead. "Working"
+  is a Turn it is running, an input queued for its next Turn (a rejected step's
+  revision handed back to it, #2052), or work delegated below it moving
+  (``PlanState.delegated_moving``); its own selected step alone is not. A step
+  it can still move (``projections.movable_leaf_sql``) waits for it to take it
+  up, so a child sent back waits for its return (matrix row D4). A paused child is
   not working: its step reads paused (pause contract, #1970). Nor is a stalled
   child (``stalled_sql``): its step waits, naming why (#3317).
 - **A delegated child needing parent input** (``plans.delegation_needs``).
@@ -99,10 +99,10 @@ _CHILD_SQL = """
            c.id AS child_plan_id, c.state AS child_plan_state,
            (open_needs.plan_id IS NOT NULL) AS parent_need, open_needs.reason AS parent_need_reason,
            EXISTS (SELECT 1 FROM active_turns a
-              WHERE a.thread_id=n.spawned_thread_id AND a.status='running') AS turn_running,
+              WHERE a.thread_id=n.spawned_thread_id AND a.status IN ('running','waiting_retry')) AS turn_running,
            EXISTS (
              SELECT 1 FROM active_turns a
-              WHERE a.thread_id=n.spawned_thread_id AND a.status='running'
+              WHERE a.thread_id=n.spawned_thread_id AND a.status IN ('running','waiting_retry')
                 AND julianday(a.started_at) > julianday((
                   SELECT MAX(e.created_at) FROM plan_node_events e
                   JOIN plan_nodes reviewed ON reviewed.id=e.node_id
@@ -366,7 +366,7 @@ def delegation_cause(row, *, plan, child) -> dict | None:
     # a Turn already open at review does not hide the needed intervention.
     # A stalled child counts only work actually moving below it.
     stalled = row["stalled"]
-    active = bool(child.moving or (not stalled and (
+    active = bool(child.delegated_moving or (not stalled and (
         row["input_queued"]
         or (
             row["turn_running"]
