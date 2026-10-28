@@ -1072,6 +1072,52 @@ async def test_two_trials_per_file_hold_the_third(env: Env, target, held) -> Non
         assert _skill(env).exists()
 
 
+@pytest.mark.parametrize(("existing_section", "requested_section", "target", "held"), [
+    ("Part A", "Part A", "context/shared.md", True),
+    ("Part A", "Part B", "context/shared.md", False),
+    (None, "Part B", "context/shared.md", True),
+    ("Part A", None, "context/shared.md", True),
+    (None, None, "context/other.md", False),
+])
+async def test_trial_section_conflicts_across_owners(env: Env, existing_section, requested_section, target, held) -> None:
+    from core.lesson_trials import Trial
+
+    _seed_thread(env.db, "other-owner")
+    env.db.commit()
+    path = env.workspace / ".threads" / "other-owner" / "skills" / "existing" / "SKILL.md"
+    path.parent.mkdir(parents=True)
+    metadata = {"new_target_path": "context/shared.md"}
+    if existing_section is not None:
+        metadata["target_section"] = existing_section
+    path.write_text(lesson_files.render_trial(
+        lesson_id="00000000-0000-0000-0000-000000000001", owner="other-owner",
+        name="existing", description="Use for existing checks.", text="Check it.",
+        trial=Trial(kind="hypothesis", review_after="2030-01-01T00:00:00+00:00"),
+        source_refs=TURN, case_metadata=metadata,
+    ))
+    answer = _answer(new_target_path=target, target_section=requested_section)
+    reply = _place(env, _entry(env), answer)
+    await _drain(env.worker)
+    if held:
+        assert "name target_section to run beside other trials on this file" in reply
+        assert not _skill(env).exists()
+        assert len(list((env.tray / "context" / "captures").glob("*.md"))) == 1
+    else:
+        assert _skill(env).exists()
+
+
+async def test_revising_a_trial_does_not_conflict_with_itself(env: Env) -> None:
+    first = _entry(env)
+    answer = _answer(new_target_path="context/shared.md", target_section="Part A")
+    _place(env, first, answer)
+    await _drain(env.worker)
+    assert _skill(env).exists()
+    reply = _place(env, _entry(env), answer)
+    await _drain(env.worker)
+    assert "captured hypothesis" not in reply
+    assert lesson_files.read_trial(_skill(env).read_text()).lesson.state == "trial"
+
+
 async def test_watch_promotion_counts_its_retained_target(env: Env) -> None:
     from core.lesson_trials import Trial
 

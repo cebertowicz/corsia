@@ -82,7 +82,7 @@ def target_trials(
     return open_trials, retired
 
 
-def active_target_trials(db: Any, place: ThreadPlace, decision: Decision) -> list[Path]:
+def active_target_trials(db: Any, place: ThreadPlace, decision: Decision) -> list[tuple[Path, Any]]:
     """Read the project's and workspace's owner trays for active trials on this file."""
     from types import SimpleNamespace
     from core.lesson_report_sources import source_inputs
@@ -110,7 +110,7 @@ def active_target_trials(db: Any, place: ThreadPlace, decision: Decision) -> lis
             current = lesson_files.read_trial(path.read_text(encoding="utf-8"))
             if (current is not None and current.lesson.owner == scope["scope_id"]
                     and current.lesson.state == "trial" and target_from_lesson(current) == normalized):
-                matches.append(path)
+                matches.append((path, current))
     return matches
 
 

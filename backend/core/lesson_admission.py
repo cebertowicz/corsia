@@ -43,7 +43,8 @@ FIXES = {
         "give skill_description (when it applies) and trial.boundary (when it does not)"
     ),
     "over-budget": "shorten the trial guidance so it fits at task start",
-    "target-full": "wait for a trial on this file to finish, then call place again",
+    "target-full": ("wait for a conflicting trial on this file to finish, then call place again; "
+                    "name target_section to run beside other trials on this file"),
 }
 
 
@@ -168,7 +169,13 @@ def _target_full(
         return False
     active = active_target_trials(db, place, replace(decision, case_metadata=metadata))
     existing_path = merge[0] if merge else destination.path if revising else None
-    return sum(path != existing_path for path in active) >= 2
+    others = [item for path, item in active if path != existing_path]
+    section = metadata.get("target_section")
+    return len(others) >= 2 or any(
+        not section or not item.lesson.case_metadata.get("target_section")
+        or section == item.lesson.case_metadata.get("target_section")
+        for item in others
+    )
 
 
 def _refuse_serious(db: sqlite3.Connection, decision: Decision, capture: Any, previous: Any) -> None:

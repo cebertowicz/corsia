@@ -51,7 +51,7 @@ HOLD_REASONS = {
         "it has no trigger and boundary that say when it applies and when it does not"
     ),
     "over-budget": "the trial exceeds the task-start guidance budget",
-    "target-full": "the file already has two trials running",
+    "target-full": "the file already has two trials running or a conflicting trial on its section",
 }
 
 
