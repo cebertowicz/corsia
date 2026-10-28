@@ -35,7 +35,8 @@
 	import { buildPaneConfig, type View } from '$lib/homePaneConfig';
 	import { syncCanvasHeader } from '$lib/homeCanvasHeader';
 	import { buildNewThreadBody, createdThreadRow, createAccountRefusal, draftAccountForModel } from '$lib/threadCreate';
-	import { pinThreadAccount } from '$lib/stores/threadAccountPin'; import { CREATE_ACCOUNT_REFUSED } from '$lib/messageDeliveryCopy';
+	import { pinThreadAccount } from '$lib/stores/threadAccountPin';
+	import { CREATE_ACCOUNT_REFUSED } from '$lib/messageDeliveryCopy';
 	import { clearDocPickerTarget, docPickerTarget } from '$lib/stores/docPickerTarget';
 	import { showArtifactThreadRequest } from '$lib/openArtifactInThread';
 	import { canvasCompact, artifactTabSheetOpen } from '$lib/stores/artifactCanvas';
@@ -297,9 +298,7 @@
 	// triggers a read-only re-check; focus covers changes made while away.
 	$effect(() => startDocumentRealtime());
 	$effect(() => { checkThreadRevisions($activeThreadId); });
-
 	$effect(() => watchSubagentOpenRequests({ selectThread: (id) => selectThread(id, 'link') }));
-
 	async function newThread(projectId?: string | null) {
 		selectionIntent++;
 		const t = $token;
@@ -307,7 +306,8 @@
 		activeView = 'chat';
 		const pendingEffort = get(reasoningEffort);
 		const inheritModel = $activeModelId ?? getLastChosenModelId();
-		const choice = get(draftAccountId), accountId = draftAccountForModel(choice, inheritModel, get(models));
+		const choice = get(draftAccountId);
+		const accountId = draftAccountForModel(choice, inheritModel, get(models));
 		const body = buildNewThreadBody({ projectId, reasoningEffort: pendingEffort, modelId: inheritModel, accountId });
 		const res = await fetch(`/api/threads?token=${t}`, {
 			method: 'POST',
@@ -320,20 +320,20 @@
 			toasts.show(refusal ? CREATE_ACCOUNT_REFUSED : "Couldn't create the chat. Try again.", 'error');
 			throw new Error('Thread creation failed');
 		}
-		const data = await res.json(), thread = createdThreadRow(data.thread_id, $user?.id ?? '', projectId, inheritModel, pendingEffort);
+		const data = await res.json();
+		const thread = createdThreadRow(data.thread_id, $user?.id ?? '', projectId, inheritModel, pendingEffort);
 		adoptCreatedThread(thread);
 		activeThreadId.set(data.thread_id);
 		if (choice && !accountId) {
-			const result = await pinThreadAccount(data.thread_id, choice); if (!result.ok) toasts.show(result.message, 'error');
+			const result = await pinThreadAccount(data.thread_id, choice);
+			if (!result.ok) toasts.show(result.message, 'error');
 		}
 		messages.set([]);
 		clearThreadBuffers(data.thread_id);
 		sidebarOpen = false;
-		
 		subscribeThread(data.thread_id);
 		await chatPanelRef?.fetchThreadMessages(data.thread_id);
 	}
-
 	const selectThread = createHomeThreadSelector({
 		advanceIntent: () => selectionIntent++,
 		prepareChatSurface: (firstRun) => { activeView = 'chat'; if (!firstRun) sidebarOpen = false; }, // a late first-run landing keeps the user's drawer
