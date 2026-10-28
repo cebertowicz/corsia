@@ -1,8 +1,11 @@
 """Inherited dependencies keep nested work ordered without moving edges."""
 
+import uuid
+
 import pytest
 
 from plans import node_waits, service
+from plans.boundary import PlanActor, mutate
 from tests.plan_close_next_helpers import owner_plan
 from tests.test_plan_reconcile_release import db, seed_threads  # noqa: F401
 from tests.test_plan_user_task_mark_done import _mark_done
@@ -87,3 +90,25 @@ def test_inherited_rows_deduplicate_prefer_nearest_and_allow_direct_removal(db):
     assert [(r["id"], r["via"]) for r in rows] == [(before.id, inner.id), (other.id, inner.id)]
     # The inherited edge is the ancestor's; removing it from the child changes nothing.
     assert service.remove_dependency(child.id, before.id, db=db) is False
+
+
+def test_removing_an_inherited_edge_from_a_step_names_the_ancestor_that_owns_it(db):
+    plan = owner_plan(db)
+    before = _node(db, plan, "Before")
+    phase = _node(db, plan, "Phase", "phase")
+    step = _node(db, plan, "Step", parent=phase.id)
+    service.add_dependency(phase.id, before.id, db=db)
+    db.commit()
+
+    result = mutate(
+        plan.id, "remove_dependency",
+        {"node_id": step.id, "depends_on_node_id": before.id,
+         "expected_revision": int(service._node_row(db, step.id)["revision"])},
+        actor=PlanActor("owner", "user", None), provenance="test.inheritance",
+        mutation_id=uuid.uuid4().hex, db=db,
+    ).result
+
+    assert result["removed"] is False
+    assert result["held_via"] == phase.id
+    assert phase.id in result["guidance"]
+    assert result["node"]["unmet_dependencies"] == [before.id]
