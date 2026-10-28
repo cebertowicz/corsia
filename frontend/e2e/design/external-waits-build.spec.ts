@@ -454,3 +454,142 @@ test('frame 7: a parent child chip', async ({ page, request }) => {
 	await expect(childChip.locator('.child-wait')).toHaveText('CI on PR #1193 · back 11:46 PM');
 	await shot(page, '7-child-chip');
 });
+
+// Frame names (`copy-<n>-<width>`) are the evidence index's names; each test title says what its frames show.
+test('plan copy: open-agent control, missing-task and closed-decision notices', async ({ page, request }, info) => {
+	test.skip(info.project.name !== 'chromium-desktop', 'Both viewport widths are captured with a pointer.');
+	test.setTimeout(150_000);
+	const { by } = await boot(page, request, [{ ...DR, label: 'CI on PR #1193', until: atToday(23, 46) }]);
+	await r2Chat(page, request, by('Docs refresh'));
+	const open = page.getByRole('button', { name: 'Open the agent working on Draft release notes beside this chat' });
+	await expect(open).toHaveAttribute('title', 'Open the agent beside this chat');
+	for (const width of [1920, 393]) {
+		await view(page, width, width === 393 ? 852 : 1080, 'light');
+		if (width === 393) await page.getByRole('button', { name: /^Open plan —/ }).click();
+		await open.hover();
+		await shot(page, `copy-20-${width}`);
+		await page.evaluate(async (threadId) => {
+			const path = '/src/lib/planNodeFocus.ts';
+			const { focusPlanNode } = await import(/* @vite-ignore */ path);
+			await focusPlanNode(threadId, 'missing-task');
+		}, by('Docs refresh').id);
+		await expect(page.getByText('That task isn’t in this plan.')).toBeVisible();
+		await shot(page, `copy-2-${width}`);
+		await page.evaluate(async () => {
+			const path = '/src/lib/stores/attentionDock.svelte.ts';
+			const { reportOpenDecision } = await import(/* @vite-ignore */ path);
+			reportOpenDecision('empty');
+		});
+		await expect(page.getByText('That decision is closed.').last()).toBeVisible();
+		await shot(page, `copy-3-${width}`);
+	}
+});
+
+test('plan copy: oversize count and resolved decision', async ({ page, request }, info) => {
+	test.skip(info.project.name !== 'chromium-desktop', 'Both viewport widths are captured here.');
+	test.setTimeout(150_000);
+	const { by } = await boot(page, request, [{ ...DR, label: 'CI on PR #1193', until: atToday(23, 46) }]);
+	const thread = by('Docs refresh');
+	const tpl = await templatePlan(request);
+	const envelope = planEnvelope(tpl, thread, planNodesFor(tpl.plans[0].nodes[0], thread, thread.until)!);
+	envelope.attention = { awaiting_count: 1 };
+	envelope.plans[0].oversize = { open: 41, budget: 40 };
+	await page.route(new RegExp(`/api/plans/operator/threads/${thread.id}(\\?.*)?$`), route => route.fulfill({ json: envelope }));
+	await page.route('**/api/attention/queue*', route => route.fulfill({ json: { current: null, count: 0, items: [] } }));
+	await r2Chat(page, request, thread);
+	for (const width of [1920, 393]) {
+		await view(page, width, width === 393 ? 852 : 1080, 'light');
+		if (width === 393) await page.getByRole('button', { name: /^Open plan —/ }).click();
+		if (width === 1920) {
+			const count = page.locator('.plan-head-controls .progress.oversize');
+			await expect(count).toHaveAttribute('title', 'This plan has more than 40 open tasks. Use Mark done or Won’t do on any that don’t need doing.');
+			await count.hover();
+			await shot(page, 'copy-4-1920');
+		}
+		await page.getByRole('button', { name: /1 decision/ }).click();
+		await expect(page.getByText('That decision is closed. Refreshing the plan.')).toBeVisible();
+		await shot(page, `copy-5-${width}`);
+	}
+});
+
+
+test('plan copy: task details, read-only discussion, task menu, empty pane, activity row', async ({ page }, info) => {
+	test.skip(info.project.name !== 'chromium-desktop', 'Both viewport widths are captured in this project.');
+	test.setTimeout(150_000);
+	for (const width of [1920, 393]) {
+		for (const row of [6, 7, 8, 10, 15, 17]) {
+			if ((row === 15 || row === 17) && width === 393) continue; // These labels are hidden on phones.
+			await view(page, width, width === 393 ? 852 : 1080, 'light');
+			await page.goto('/_design?frame=attention-dock&scenario=empty');
+			await page.evaluate(async (selected) => {
+				const load = (path: string) => import(/* @vite-ignore */ path);
+				const { mount, flushSync } = await load('/node_modules/.vite/deps/svelte.js');
+				const { node } = await load('/src/lib/__tests__/fixtures/planTreeNode.ts');
+				document.body.replaceChildren();
+				const host = document.createElement('main');
+				host.style.cssText = 'padding:24px; max-width:800px;';
+				document.body.appendChild(host);
+				if (selected === 7) {
+					const { default: Component } = await load('/src/lib/components/LegacyPlanDiscussionLeaf.svelte');
+					mount(Component, { target: host, props: { artifactId: 'example', title: 'Discussion' } });
+				} else if (selected === 8) {
+					const { default: Component } = await load('/src/lib/components/plans/PlanTaskMenu.svelte');
+					const item = node({ user_actions: ['mark_done', 'close_node'], child: { available: true, plan_id: 'p', thread_id: 't', progress: { done: 0, total: 1 } } });
+					mount(Component, { target: host, props: { node: item, x: 24, y: 24, onAction: () => {}, onClose: () => {} } });
+				} else if (selected === 15) {
+					const { default: Component } = await load('/src/lib/components/Pane.svelte');
+					const { activeThreadId } = await load('/src/lib/stores/threads.ts');
+					activeThreadId.set(null);
+					mount(Component, { target: host, props: { sections: [{ title: 'Plan', kind: 'plan' }] } });
+				} else if (selected === 17) {
+					const { default: Component } = await load('/src/lib/components/activity/ActivityPlanRow.svelte');
+					const row = { entry: { plan: { id: 'p', revision: 1 }, owner: { thread_id: 't', label: 'Example chat', type: 'thread' }, progress: { open: 1, liveness: 'waiting' }, has_nodes: false, display: { label_key: 'waiting', tone_key: 'waiting' }, priority_at: new Date().toISOString() }, thread: null, ownerType: 'thread', state: 'waiting' };
+					mount(Component, { target: host, props: { row, onSelectThread: () => {} } });
+				} else {
+					const { default: Component } = await load('/src/lib/components/plans/PlanNodeDetails.svelte');
+					const item = node({ title: 'Review task' });
+					if (selected === 6) item.execution = { ...item.execution, attempt_count: 1, attempts: [{ id: 'a', ordinal: 1, executor: { thread_id: 'agent', label: 'Agent' }, requirements_revision: 1, selected_at: 'earlier', released_at: 'later', release_reason: 'executor_changed' }] };
+					item.node_cost = { own: { ...item.node_cost.own, waiting: { seconds: 600 } }, rolled: { ...item.node_cost.rolled, waiting: { seconds: 18180 } } };
+					mount(Component, { target: host, props: { node: item, id: 'details' } });
+				}
+				flushSync();
+			}, row);
+			const text = row === 6 ? 'reassigned to another agent' : row === 7 ? 'Read-only.' : row === 8 ? 'Marking this done or Won’t do also stops the agent working on it.' : row === 15 ? 'Open a chat to see its plan' : row === 17 ? 'Chat' : 'Waiting, this task alone:';
+			await expect(page.getByText(text, { exact: row === 17 })).toBeVisible();
+			await shot(page, `copy-${row}-${width}`);
+		}
+	}
+});
+
+test('plan copy: the plan pane when its plan is forbidden', async ({ page }, info) => {
+	test.skip(info.project.name !== 'chromium-desktop', 'Both viewport widths are captured in this project.');
+	test.setTimeout(150_000);
+	const states = [
+		{ frame: 21, status: 403, json: {}, text: 'You don’t have access to this chat. Choose another.' },
+	];
+	await page.route('**/api/attention/queue*', route => route.fulfill({ json: { current: null, count: 0, items: [] } }));
+	for (const width of [1920, 393]) {
+		for (const state of states) {
+			await page.unroute('**/api/plans/operator/threads/**');
+			await page.route('**/api/plans/operator/threads/**', route => route.fulfill({ status: state.status, json: state.json }));
+			await view(page, width, width === 393 ? 852 : 1080, 'light');
+			await page.goto('/_design?frame=attention-dock&scenario=empty');
+			// The pane alone, at the plan drawer's width on desktop and full width on a phone.
+			await page.evaluate(async (paneWidth) => {
+				const load = (path: string) => import(/* @vite-ignore */ path);
+				const { mount, flushSync } = await load('/node_modules/.vite/deps/svelte.js');
+				const auth = await load('/src/lib/stores/auth.ts');
+				auth.token.set('design-frame');
+				const { default: Component } = await load('/src/lib/components/plans/ThreadPlanPane.svelte');
+				document.body.replaceChildren();
+				const host = document.createElement('aside');
+				host.style.cssText = `width:${paneWidth}; border-right:1px solid var(--border); min-height:240px;`;
+				document.body.appendChild(host);
+				mount(Component, { target: host, props: { threadId: 'frame-thread' } });
+				flushSync();
+			}, width === 393 ? '100%' : '312px');
+			await expect(page.getByText(state.text)).toBeVisible();
+			await shot(page, `copy-${state.frame}-${width}`);
+		}
+	}
+});

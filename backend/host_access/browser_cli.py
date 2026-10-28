@@ -31,6 +31,7 @@ _SOURCE_INSTALL_HINT = (
 )
 _PACKAGED_INSTALL_HINT = "reinstall or update CORSIA to restore its bundled copy"
 WAIT_TIMED_OUT = "Wait timed out; the browser session is still running. Take a snapshot to see the page."
+BROWSER_BUSY = "Browser timed out or is busy with an earlier command; the session is still running. Take a snapshot when it finishes."
 CHROME_INSTALL_TIMEOUT = 600.0
 # Each family's producer contract was verified against the real native build.
 _VERIFIED_FAMILIES = (">=0.27.0,<0.28.0", ">=0.31.0,<0.32.0")
@@ -204,8 +205,8 @@ def json_object(raw: str) -> dict:
 
 def render_model_result(result: CommandResult, *, redactions: dict[str, str]) -> str:
     """Preserve readable tool strings while redacting private ownership facts."""
-    if result.timed_out:
-        return "Error: agent-browser command timed out."
+    if result.timed_out or result.completion == "interrupted":
+        return f"Error: {BROWSER_BUSY}"
     payload = json_object(result.stdout)
     if result.returncode != 0:
         # The native --json error (or stderr) is what the agent can act on.

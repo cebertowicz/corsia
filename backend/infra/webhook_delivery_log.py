@@ -50,6 +50,11 @@ def _hash_payload(payload: dict[str, Any]) -> str:
     return hashlib.sha256(raw.encode()).hexdigest()[:16]
 
 
+def comment_object_key(event_type: str, comment_id: int | str) -> str:
+    """The shared webhook and poller identity for a comment object."""
+    return f"{event_type}:{comment_id}"
+
+
 def object_key_for(event_type: str, payload: dict[str, Any]) -> str | None:
     """Return the cross-source dedupe key for a new comment, else None."""
     if event_type not in _COMMENT_OBJECT_EVENTS or payload.get("action") != "created":
@@ -58,7 +63,7 @@ def object_key_for(event_type: str, payload: dict[str, Any]) -> str | None:
     comment_id = comment.get("id") if isinstance(comment, dict) else None
     if comment_id is None or isinstance(comment_id, bool):
         return None
-    return f"{event_type}:{comment_id}"
+    return comment_object_key(event_type, comment_id)
 
 
 def check_suite_id_for(event_type: str, payload: dict[str, Any]) -> int | None:

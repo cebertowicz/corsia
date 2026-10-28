@@ -45,6 +45,7 @@ beforeEach(() => {
 	api.fetchComments.mockResolvedValue({ comments: [], feedback: { open_count: 0, owner_label: null, undelivered_batches: [] } });
 });
 afterEach(async () => {
+	vi.useRealTimers();
 	if (component) await unmount(component);
 	component = undefined;
 	host?.remove();
@@ -79,11 +80,13 @@ describe('a return to a document tab with no edit', () => {
 		component = mount(DocViewer, { target: host, props });
 		flushSync();
 		await serverOpen('notes');
+		// From here a save's debounce timer is fake, so the waits past it below cost no wall-clock time.
+		vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
 		props.target = other;
 		flushSync();
 		await serverOpen('other');
 		// Leaving a tab with nothing typed sends it no save: no live flush, no whole-text write.
-		await new Promise(resolve => setTimeout(resolve, 800));
+		await vi.advanceTimersByTimeAsync(800);
 		expect(flushes()).toEqual([]);
 		expect(api.writeContent).not.toHaveBeenCalled();
 		expect(existingDraft(notes)?.status).toBe('idle');
@@ -95,7 +98,7 @@ describe('a return to a document tab with no edit', () => {
 		expect(ghost()).toBe('');
 		await vi.waitFor(() => expect(EditorView.findFromDOM(host.querySelector<HTMLElement>('.cm-editor')!)!.state.readOnly).toBe(false));
 		expect(ghost()).toBe('');
-		await new Promise(resolve => setTimeout(resolve, 800));
+		await vi.advanceTimersByTimeAsync(800);
 		expect(flushes()).toEqual([]);
 		expect(api.writeContent).not.toHaveBeenCalled();
 	});

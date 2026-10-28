@@ -86,8 +86,8 @@
 		class="child-open"
 		type="button"
 		data-plan-child-open={node.id}
-		aria-label="Open {node.title} subagent beside this thread"
-		title="Open subagent beside this thread"
+		aria-label="Open the agent working on {node.title} beside this chat"
+		title="Open the agent beside this chat"
 		onclick={(event) => {
 			// A sibling of the disclosure button, not a descendant — but
 			// stop here anyway so navigation can never also toggle.

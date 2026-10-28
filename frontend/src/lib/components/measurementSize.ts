@@ -103,5 +103,5 @@ export function changeText(cur: number | null, prev: number | null, nCur: number
 /** "-4% vs Sep 21 to Sep 27 (n 451)": a comparison against the previous window, and "new vs Aug 10 to Sep 6 (n 450)" when the measure does not cover all of it; with no previous window it prints the change alone. */
 export function versusPrevious(change: string, previousText: string | null, previousN?: number): string {
 	if (!previousText) return change;
-	return `${change} vs ${previousText}${previousN === undefined ? '' : ` (n ${previousN.toLocaleString('en-US')})`}`;
+	return `${change} vs ${previousText}${previousN === undefined ? '' : ` (n\u00a0${previousN.toLocaleString('en-US')})`}`;
 }

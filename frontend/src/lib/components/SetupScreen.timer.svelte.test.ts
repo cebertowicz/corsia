@@ -45,7 +45,7 @@ function mountResume() {
 		if (url === '/api/settings/network-servers') return new Response('{}', { status: 500 });
 		if (url.startsWith('/api/vendor-accounts?')) return json({ accounts: [] });
 		if (url === '/api/vendor-accounts' && method === 'POST') return json({ id: 'account-1' });
-		if (url === '/api/vendor-accounts/account-1/signin/check' && method === 'POST') return json(signinState === 'failed' ? { status: 'failed', cause: 'vendor_status_failed', ref: 'signin-0123456789abcdef' } : { status: signinState });
+		if (url === '/api/vendor-accounts/account-1/signin/check' && method === 'POST') return json(signinState === 'failed' ? { status: 'failed', cause: 'vendor_status_failed', ref: 'signin-0123456789abcdef' } : { status: signinState, ...(signinState === 'completed' ? { outcome: 'ready' } : {}) });
 		if (url === '/api/vendor-accounts/account-1/signin' && method === 'POST') return json({ status: 'waiting' });
 		if (url === '/api/providers/cli/codex/install' && method === 'POST') return json({ state: 'running', reason: null, ref: null, path_shadowed_by: null });
 		if (url === '/api/providers/cli/codex/install' && method === 'DELETE') return json({ state: 'cancelled', reason: null, ref: null, path_shadowed_by: null });
