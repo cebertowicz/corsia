@@ -142,6 +142,30 @@ async def test_declaration_after_guard_stays_in_tail(debt_db, monkeypatch, defer
 
 @pytest.mark.parametrize("deferred", [False, True], ids=["direct", "warm-correction"])
 @pytest.mark.asyncio
+async def test_open_text_step_is_after_cold_cut(debt_db, monkeypatch, deferred):
+    from subagents.harness_checkpoint_context import read_external_checkpoint_context
+
+    context = _context(debt_db, monkeypatch, "codex", outstanding=False)
+    live, on_event = _codex_events(debt_db)
+    text_event = _event("assistant_text", "text")
+    text_event["text"] = "open text"
+    await on_event(text_event)
+    step = live.open_tool_step_id
+    context = read_external_checkpoint_context(
+        "debt", context.target.catalog_id, "codex", current_turn_id="current",
+    )
+    step_seq = debt_db.execute("SELECT seq FROM messages WHERE id=?", (step,)).fetchone()[0]
+    assert context.boundary.seq < step_seq
+    admission = await _prepare_racing(
+        context, live, on_event, monkeypatch, deferred=deferred, required=True,
+    )
+    assert live.tool_step_ids["late"] == step
+    assert admission.request.through_seq == context.boundary.seq
+    assert (await _install(admission, previous=not deferred)).status == "installed"
+
+
+@pytest.mark.parametrize("deferred", [False, True], ids=["direct", "warm-correction"])
+@pytest.mark.asyncio
 async def test_late_settlement_stays_in_tail_after_frozen_cut(debt_db, monkeypatch, deferred):
     from core.tool_result_debt import thread_tool_debt_through
     from history.projection import render_portable_history
