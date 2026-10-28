@@ -104,7 +104,7 @@ def resolve_account_id(provider: str, account_id: str | None = None, *, db) -> s
     params = (provider, account_id) if account_id is not None else (provider,)
     row = db.execute("SELECT a.id" + JOIN + " WHERE c.provider=? AND " + clause, params).fetchone()
     if row is None and account_id is not None:
-        raise AccountError("account does not exist for this provider")
+        raise AccountError("account_removed; account does not exist for this provider")
     return str(row["id"]) if row else None
 
 

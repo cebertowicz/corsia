@@ -110,5 +110,35 @@ print(row['account_id'] if row else '')
 db.close()
 `, threadId).trim();
 	expect(actual).toBe(chosen);
+	fixture(`
+import sys
+from connections.harness_usage import clear_account_usage
+from infra.database import get_db
+db = get_db()
+clear_account_usage('codex', sys.argv[1], db=db)
+db.close()
+`, seeded.default);
+	await openAppByUrl(page);
+	await page.getByRole('button', { name: 'New chat' }).first().click();
+	await page.locator('button.model-chip').click();
+	await page.getByText('E2E Draft Account', { exact: false }).first().click();
+	await page.locator('.model-sheet button.picker-account-title').filter({ hasText: 'Claude Code' }).click();
+	await page.locator('button.account-usage-row.picker', { hasText: 'Other Vendor Account' }).click();
+	await page.locator('button.model-chip').click();
+	const nextResponse = page.waitForResponse((r) => r.request().method() === 'POST' && new URL(r.url()).pathname === '/api/threads');
+	await page.getByRole('textbox', { name: 'Message CORSIA' }).fill('Hello again');
+	await page.getByRole('textbox', { name: 'Message CORSIA' }).press('Enter');
+	const next = await nextResponse;
+	expect(next.ok(), await next.text()).toBe(true);
+	expect(next.request().postDataJSON().account_id).toBeUndefined();
+	const nextId = (await next.json()).thread_id;
+	await expect.poll(() => fixture(`
+import sys
+from infra.database import get_db
+db = get_db()
+row = db.execute('SELECT pending_account_id FROM thread_vendor_accounts WHERE thread_id=? AND provider=?', (sys.argv[1], 'claude-code')).fetchone()
+print(row['pending_account_id'] if row and row['pending_account_id'] else '')
+db.close()
+`, nextId).trim()).toBe(other);
 	console.log('draft account evidence:', JSON.stringify({ chosen, actual, other }));
 });

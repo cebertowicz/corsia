@@ -35,6 +35,7 @@
 	import { buildPaneConfig, type View } from '$lib/homePaneConfig';
 	import { syncCanvasHeader } from '$lib/homeCanvasHeader';
 	import { buildNewThreadBody, createdThreadRow, createAccountRefusal, draftAccountForModel } from '$lib/threadCreate';
+	import { pinThreadAccount } from '$lib/stores/threadAccountPin'; import { CREATE_ACCOUNT_REFUSED } from '$lib/messageDeliveryCopy';
 	import { clearDocPickerTarget, docPickerTarget } from '$lib/stores/docPickerTarget';
 	import { showArtifactThreadRequest } from '$lib/openArtifactInThread';
 	import { canvasCompact, artifactTabSheetOpen } from '$lib/stores/artifactCanvas';
@@ -104,9 +105,7 @@
 		}
 		threadSettingsOpen.set(false);
 		recordSettingsHomeThread(view, get(activeThreadId)); // Settings keeps the thread it opened over, so a file opened there has a tab to land in.
-		if (!options.preserveActiveThread) {
-			activeThreadId.set(null);
-		}
+		if (!options.preserveActiveThread) activeThreadId.set(null);
 		activeView = view;
 		if (!options.preserveActiveThread) messages.set([]);
 		sidebarOpen = false;
@@ -179,7 +178,6 @@
 
 	async function attachThreadToProject(id: string, projectId: string | null, projectName?: string | null) {
 		try {
-			if (!$token) throw new Error('Not signed in');
 			await saveThreadProject(id, projectId, $token);
 			toasts.show(projectId ? `Moved to ${projectName ?? 'project'}` : 'Removed from project', 'success');
 			// The active conversation's scope follows its project assignment.
@@ -309,7 +307,7 @@
 		activeView = 'chat';
 		const pendingEffort = get(reasoningEffort);
 		const inheritModel = $activeModelId ?? getLastChosenModelId();
-		const accountId = draftAccountForModel(get(draftAccountId), inheritModel, get(models));
+		const choice = get(draftAccountId), accountId = draftAccountForModel(choice, inheritModel, get(models));
 		const body = buildNewThreadBody({ projectId, reasoningEffort: pendingEffort, modelId: inheritModel, accountId });
 		const res = await fetch(`/api/threads?token=${t}`, {
 			method: 'POST',
@@ -318,14 +316,16 @@
 		});
 		if (!res.ok) {
 			const detail = await res.json().catch(() => null);
-			const refusal = accountId ? createAccountRefusal(res.status, detail?.detail, () => draftAccountId.set(null)) : null;
-			toasts.show(refusal ?? "Couldn't create the chat. Try again.", 'error');
+			const refusal = accountId && await createAccountRefusal(res.status, detail?.detail, () => draftAccountId.set(null), loadModels);
+			toasts.show(refusal ? CREATE_ACCOUNT_REFUSED : "Couldn't create the chat. Try again.", 'error');
 			throw new Error('Thread creation failed');
 		}
-		const data = await res.json();
-		const thread = createdThreadRow(data.thread_id, $user?.id ?? '', projectId, inheritModel, pendingEffort);
+		const data = await res.json(), thread = createdThreadRow(data.thread_id, $user?.id ?? '', projectId, inheritModel, pendingEffort);
 		adoptCreatedThread(thread);
 		activeThreadId.set(data.thread_id);
+		if (choice && !accountId) {
+			const result = await pinThreadAccount(data.thread_id, choice); if (!result.ok) toasts.show(result.message, 'error');
+		}
 		messages.set([]);
 		clearThreadBuffers(data.thread_id);
 		sidebarOpen = false;

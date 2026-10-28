@@ -68,6 +68,7 @@ export const WAITING_FOR_MODEL_CHOICE = {
 	title: 'This thread has no model yet. Your message is saved and will send as soon as you choose one.',
 } as const;
 
+export const CREATE_ACCOUNT_REFUSED = "Couldn't start the chat on the account you picked. Pick another account in the model menu and send again.";
 export const WAITING_FOR_ACCOUNT = 'Waiting for account';
 export const ACCOUNT_PROJECT_DENIED = 'Your provider settings don’t allow this chat’s account.';
 

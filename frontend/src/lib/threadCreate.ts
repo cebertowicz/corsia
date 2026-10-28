@@ -1,23 +1,18 @@
 import type { Thread } from '$lib/stores/threads';
 import { modelMatchesId, type Model } from '$lib/stores/models';
-import { ACCOUNT_LIMITED, ACCOUNT_SIGNED_OUT } from '$lib/stores/modelGroups';
-import { accountRefusalMessage, reasonOf } from '$lib/stores/threadAccountPin';
-import { ACCOUNT_PROJECT_DENIED } from '$lib/messageDeliveryCopy';
+import { reasonOf } from '$lib/stores/threadAccountPin';
 
 export function draftAccountForModel(accountId: string | null, modelId: string | null, models: Model[]): string | null {
 	const model = models.find((row) => modelMatchesId(row, modelId));
 	return accountId && model?.runs_on?.some((entry) => entry.selected && entry.account_id === accountId) ? accountId : null;
 }
 
-export function createAccountRefusal(status: number, detail: unknown, clearChoice: () => void): string | null {
+export async function createAccountRefusal(status: number, detail: unknown, clear: () => void, reload: () => Promise<void>): Promise<boolean> {
 	const reason = reasonOf(detail);
-	const missingAccount = detail === 'account does not exist for this provider';
-	if (status !== 400 || (!missingAccount && (!reason || !(reason.startsWith('account_') || reason === 'usage_limited' || reason === 'project_policy_missing')))) return null;
-	clearChoice();
-	if (reason === 'account_signed_out') return ACCOUNT_SIGNED_OUT;
-	if (reason === 'usage_limited') return ACCOUNT_LIMITED;
-	if (reason === 'account_project_denied') return ACCOUNT_PROJECT_DENIED;
-	return accountRefusalMessage(detail);
+	if (status !== 400 || !reason || !(reason.startsWith('account_') || reason === 'usage_limited' || reason === 'project_policy_missing')) return false;
+	if (reason === 'account_removed') clear();
+	await reload();
+	return true;
 }
 
 export function buildNewThreadBody({
