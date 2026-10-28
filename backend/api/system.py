@@ -38,9 +38,7 @@ _HUMAN_ONLY_HOST_ACCESS_SETTINGS = frozenset({
     "host_access_auto_approve",
     "host_access_reviewer_fallback",
 })
-_EXACT_REVIEWER_MODELS = frozenset({
-    "host_access_reviewer_model", "reviewer_model", "reviewer_fallback_model",
-})
+_EXACT_REVIEWER_MODELS = ("host_access_reviewer_model", "reviewer_model", "reviewer_fallback_model")
 
 def _debug_version_overlay_default() -> bool:
     """Hide the checkout build stamp in an immutable packaged app by default.
@@ -194,11 +192,14 @@ async def get_settings(user: dict = Depends(require_user)):
 
 def _save_exact_model_defaults(body: dict) -> dict:
     """Save the no-fallback model settings in ``body``: exact runnable IDs only."""
+    from reviewer.reviewer_runner import reviewer_model_error
+
     updated = {key: body[key] for key in _EXACT_REVIEWER_MODELS if key in body}
     for key, value in updated.items():
         if value is None and key != "reviewer_model":
             continue
-        error = reviewer_save_error(value)
+        error = (reviewer_save_error(value) if key == "host_access_reviewer_model"
+                 else reviewer_model_error(value))
         if error is not None:
             raise HTTPException(400, error)
     for key, value in updated.items():
@@ -241,7 +242,7 @@ def _conductor_sets_reviewer(user: dict, body: dict) -> bool:
     check; every other machine credential still needs the signed-in person.
     """
     return user.get("token_kind") == "internal" and all(
-        isinstance(body[key], str) for key in _EXACT_REVIEWER_MODELS.intersection(body)
+        isinstance(body[key], str) for key in _EXACT_REVIEWER_MODELS if key in body
     )
 
 
@@ -258,11 +259,11 @@ async def update_settings(body: dict, user: dict = Depends(require_user)):
 
     if _HUMAN_ONLY_HOST_ACCESS_SETTINGS.intersection(body) or "live_bulletins" in body:
         require_human_user(user)
-    if _EXACT_REVIEWER_MODELS.intersection(body) and not _conductor_sets_reviewer(user, body):
+    if any(key in body for key in _EXACT_REVIEWER_MODELS) and not _conductor_sets_reviewer(user, body):
         require_human_user(user)
 
     updated = {}
-    if _EXACT_REVIEWER_MODELS.intersection(body):
+    if any(key in body for key in _EXACT_REVIEWER_MODELS):
         updated.update(await run_in_db(_save_exact_model_defaults, body))
 
     if "host_access_auto_approve" in body:

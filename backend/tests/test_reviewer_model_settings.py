@@ -69,6 +69,59 @@ def test_unknown_model_rejects_all_changes(isolated_db):
     assert get_agent_defaults() == defaults
 
 
+def test_native_model_is_rejected_without_changing_defaults(isolated_db):
+    from infra.database import get_db
+    from infra.settings import get_agent_defaults, set_setting
+
+    defaults = {'reviewer_model': 'codex/gpt-5-codex', 'reviewer_fallback_model': 'claude-code/opus'}
+    set_setting('agents', {'defaults': defaults})
+    db = get_db()
+    db.execute(
+        "INSERT INTO models (id,harness,provider,provider_model_id,litellm_model,"
+        "display_name,backend,source,enabled,available,metadata_json,created_at,updated_at) "
+        "VALUES ('omlx@test/local','native','omlx','local','omlx@test/local',"
+        "'Local','network','test',1,1,'{}','t','t')"
+    )
+    db.commit()
+    db.close()
+    with _client() as client:
+        response = _patch(client, OWNER_SESSION_TOKEN, {
+            'reviewer_model': 'claude-code/opus', 'reviewer_fallback_model': 'omlx@test/local',
+        })
+    assert response.status_code == 400
+    assert 'Codex or Claude Code' in response.json()['detail']
+    assert get_agent_defaults() == defaults
+
+
+def test_unavailable_harness_model_is_saveable_but_transport_alias_is_not(isolated_db):
+    from infra.database import get_db
+    from infra.settings import get_agent_defaults
+
+    db = get_db()
+    db.execute("UPDATE models SET available=0, litellm_model='transport-alias' "
+               "WHERE id='codex/gpt-5-codex'")
+    db.commit()
+    db.close()
+    with _client() as client:
+        accepted = _patch(client, OWNER_SESSION_TOKEN, {'reviewer_model': 'codex/gpt-5-codex'})
+        refused = _patch(client, OWNER_SESSION_TOKEN, {'reviewer_model': 'transport-alias'})
+    assert accepted.status_code == 200
+    assert refused.status_code == 400
+    assert get_agent_defaults()['reviewer_model'] == 'codex/gpt-5-codex'
+
+
+def test_reviewer_model_saving_skips_host_access_scope_checks(isolated_db, monkeypatch):
+    def unexpected_scan(*args, **kwargs):
+        raise AssertionError('host-access scope scan must not run')
+
+    monkeypatch.setattr('api.system_reviewer.reviewer_scope_blocks', unexpected_scan)
+    with _client() as client:
+        response = _patch(client, OWNER_SESSION_TOKEN, {
+            'reviewer_model': 'codex/gpt-5-codex', 'reviewer_fallback_model': 'claude-code/opus',
+        })
+    assert response.status_code == 200
+
+
 def test_machine_token_cannot_set_reviewer_models(isolated_db):
     from infra.settings import get_agent_defaults, set_setting
 
