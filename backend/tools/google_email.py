@@ -89,7 +89,7 @@ async def _font(backend: MailBackend, account_id: str) -> tuple[str | None, str 
         log.warning("Couldn't read sent mail for font; using the provider default", exc_info=True)
     except (ValueError, UnicodeError, OSError):
         log.warning("Couldn't read sent mail for font; using the provider default", exc_info=True)
-    return None, None, "Your usual font couldn't be read; your mail's default font will be used if it still can't be read when sending."
+    return None, None, "Couldn't read your usual font, so this email may go out in your mail's default font."
 
 
 # Reviewed-draft storage is shared by provider families in tools.reviewed_drafts.
@@ -197,7 +197,7 @@ class EmailDraftTool(Tool):
                 raise DraftRefused("Draft not saved: " + str(exc).removeprefix("Not sent: ")) from None
             raise
         target = {**target, "account_id": account_id, "account": address, "attachments": attached}
-        notes.extend(f"Attachment: {item['name']} ({item['size'] / 1024:.3f} KB)" if item['size'] < 1024 * 1024
+        notes.extend(f"Attachment: {item['name']} ({max(1, round(item['size'] / 1024))} KB)" if item['size'] < 1024 * 1024
                      else f"Attachment: {item['name']} ({item['size'] / (1024 * 1024):.1f} MB)" for item in attached)
         text = compose_document(address, to, cc, subject, body, signature, reply_label, notes)
         if applies_to_message and limit is not None:

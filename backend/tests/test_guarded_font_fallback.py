@@ -25,7 +25,7 @@ async def test_sign_in_rejection_is_not_a_font_fallback(error):
 async def test_read_and_decode_failures_have_a_visible_fallback(error):
     face, size, note = await _raises(error)
     assert face is None and size is None
-    assert note == "Your usual font couldn't be read; your mail's default font will be used if it still can't be read when sending."
+    assert note == "Couldn't read your usual font, so this email may go out in your mail's default font."
 
 
 @pytest.mark.asyncio

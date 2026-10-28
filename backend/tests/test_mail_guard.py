@@ -14,7 +14,7 @@ def check(target=TARGET, thread=None, sender=None, body="hello", to=None):
 def test_evidence_reads_as_a_sentence():
     message = replace(TARGET, date=datetime(2026, 10, 28, 7, 3, tzinfo=timezone.utc), unread=True)
     assert evidence(message) == (
-        "Taylor <taylor@example.test> wrote on Oct 28, 2026, 7:03 AM UTC; this message is unread.\n"
+        "Taylor <taylor@example.test> wrote on Oct 28, 2026, 7:03 AM UTC (unread).\n"
         "The text wasn't screened as safe to show; read it in your mail app."
     )
 

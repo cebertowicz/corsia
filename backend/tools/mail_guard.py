@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from email.utils import parseaddr
 
 from connections.mail.email_document import reply_addresses
@@ -62,8 +62,10 @@ def same_sender(left: str, right: str) -> bool:
 
 def evidence(message: Message) -> str:
     state = "unread" if message.unread else "read"
-    date = message.date.strftime("%b %d, %Y, %I:%M %p %Z").replace(", 0", ", ")
-    return (f"{message.sender} wrote on {date.strip()}; this message is {state}.\n"
+    when = message.date if message.date.tzinfo else message.date.replace(tzinfo=timezone.utc)
+    when = when.astimezone(timezone.utc)
+    date = f"{when:%b} {when.day}, {when.year}, {when.hour % 12 or 12}:{when:%M %p} UTC"
+    return (f"{message.sender} wrote on {date} ({state}).\n"
             + (message.visible_evidence or "The text wasn't screened as safe to show; read it in your mail app."))
 
 

@@ -107,7 +107,7 @@ async def test_font_and_attachment_in_sent_mime_and_missing_file_refused(mail, a
     assert 'missing' in bad.lower() and not mail.sends
     saved = await _draft(mail, to=['pat@mail.example'], attachments=['report.txt'])
     document = (mail.workspace / saved['path']).read_text()
-    assert 'Attachment: report.txt (0.019 KB)' in document
+    assert 'Attachment: report.txt (1 KB)' in document
     result = await send(mail, saved)
     assert not result.startswith('Error'), result
     message = _mime(mail.sends[0])
@@ -222,7 +222,7 @@ async def test_font_read_failure_still_saves_and_sends_with_default(mail, approv
         return inner(request)
     mail.fake.handler = handler
     saved = await _draft(mail, to=['pat@mail.example'])
-    note = "Your usual font couldn't be read; your mail's default font will be used if it still can't be read when sending."
+    note = "Couldn't read your usual font, so this email may go out in your mail's default font."
     assert note in (mail.workspace / saved['path']).read_text()
     assert saved['font_note'] == note
     result = await send(mail, saved)
