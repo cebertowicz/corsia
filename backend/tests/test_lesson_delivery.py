@@ -98,7 +98,7 @@ def test_read_file_description_does_not_duplicate_trial_marker_protocol():
 
 
 def test_trial_delivery_migration_adds_per_lesson_receipt_columns():
-    from infra.migration_160_to_161_trial_receipts import migrate_160_to_161
+    from infra.migration_161_to_162_trial_receipts import migrate_161_to_162
 
     connection = sqlite3.connect(":memory:")
     connection.execute("CREATE TABLE outcome_events (subject_key TEXT, event_name TEXT)")
@@ -108,7 +108,7 @@ def test_trial_delivery_migration_adds_per_lesson_receipt_columns():
             delivered_sha256 TEXT, byte_count INTEGER, partial INTEGER, created_at TEXT
         )"""
     )
-    migrate_160_to_161(connection)
+    migrate_161_to_162(connection)
 
     columns = {row[1] for row in connection.execute("PRAGMA table_info(guidance_loads)")}
     assert {"node_id", "variant", "checkpoint_generation_id", "lesson_id", "lesson_behavioral_sha256"} <= columns
@@ -117,11 +117,11 @@ def test_trial_delivery_migration_adds_per_lesson_receipt_columns():
 @pytest.mark.parametrize("build", ["schema", "migration"])
 def test_receipt_reads_use_the_lesson_index(db, build):
     from core.lesson_delivery import RECEIPTS_SQL
-    from infra.migration_160_to_161_trial_receipts import migrate_160_to_161
+    from infra.migration_161_to_162_trial_receipts import migrate_161_to_162
 
     if build == "migration":
         db.execute("DROP INDEX idx_guidance_loads_lesson_node")
-        migrate_160_to_161(db)
+        migrate_161_to_162(db)
 
     plan = " ".join(
         row["detail"] for row in db.execute(f"EXPLAIN QUERY PLAN {RECEIPTS_SQL}", ('[["l","s"]]', "n", "t"))
@@ -132,11 +132,11 @@ def test_receipt_reads_use_the_lesson_index(db, build):
 @pytest.mark.parametrize("build", ["schema", "migration"])
 def test_offer_reads_seek_the_thread_time_index(db, build):
     from core.lesson_trial_receipts import PERIOD_SQL
-    from infra.migration_160_to_161_trial_receipts import migrate_160_to_161
+    from infra.migration_161_to_162_trial_receipts import migrate_161_to_162
 
     if build == "migration":
         db.execute("DROP INDEX idx_guidance_loads_trial_thread_time")
-        migrate_160_to_161(db)
+        migrate_161_to_162(db)
     plan = " ".join(row["detail"] for row in db.execute(
         "EXPLAIN QUERY PLAN " + PERIOD_SQL, ('["thread"]', "user", "2026-01-01", "2027-01-01"),
     ))
