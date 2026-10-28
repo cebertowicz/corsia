@@ -166,8 +166,6 @@ def deleg_db(tmp_path, monkeypatch):
     from infra import db_async
     for pool in ("_pool", "_read_pool", "_bulk_pool"):
         monkeypatch.setattr(db_async, pool, _InlineExecutor())
-    monkeypatch.setattr(db_async, "run_in_db",
-                        AsyncMock(side_effect=lambda fn, *a, **k: fn(*a, **k)))
     monkeypatch.setattr(deleg, "run_in_db",
                         AsyncMock(side_effect=lambda fn, *a, **k: fn(*a, **k)))
     monkeypatch.setattr(delegation_markers, "run_in_db",

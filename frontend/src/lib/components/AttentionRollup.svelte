@@ -53,7 +53,7 @@
 </script>
 
 {#if raised > 0}
-	<div class="rollup" aria-label="Child threads requiring attention">
+	<div class="rollup" aria-label="Agent chats that need you">
 		<button
 			class="rollup-header press-tint"
 			onclick={() => (expanded = !expanded)}

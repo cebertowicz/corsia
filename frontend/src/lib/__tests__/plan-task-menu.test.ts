@@ -204,7 +204,7 @@ describe('PlanTree task context menu', () => {
 		rightClick(row);
 		await settle();
 
-		expect(menu()!.textContent).toContain('Mark done or Won’t do stops its worker too.');
+		expect(menu()!.textContent).toContain('Marking this done or Won’t do also stops the agent working on it.');
 	});
 
 	it('opens on a 500 ms touch long-press and swallows the tap that follows', async () => {

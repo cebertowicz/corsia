@@ -31,7 +31,7 @@ const TRY_ENDINGS: Record<string, string> = {
 	closed: 'closed',
 	archived: 'archived',
 	requirements_changed: 'requirements changed',
-	executor_changed: 'moved to another worker',
+	executor_changed: 'reassigned to another agent',
 	dependency_blocked: 'stopped for a prerequisite',
 	watch_armed: 'set aside to wait',
 	paused: 'paused',
