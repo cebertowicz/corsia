@@ -112,6 +112,36 @@ def _check_existing_identity(row: dict, artifact_id: str, author: str, cid: str)
         )
 
 
+_ACCEPTED_INSERTION = {"insert_after": 1, "decision": "accepted"}
+
+
+def is_accepted_insertion(row: dict) -> bool:
+    """One predicate for accepted insertion siblings in single and batch decisions."""
+    return all(row.get(field) == value for field, value in _ACCEPTED_INSERTION.items())
+
+
+def accepted_insertions(artifact_id: str, anchor_text: str, *, db) -> list[dict]:
+    """Accepted insertion siblings for the same artifact and quoted text."""
+    predicate = " AND ".join(f"{field}=?" for field in _ACCEPTED_INSERTION)
+    return [dict(row) for row in db.execute(
+        "SELECT * FROM doc_comments WHERE artifact_id=? AND anchor_text=? AND "
+        + predicate + " ORDER BY created_at, id",
+        (artifact_id, anchor_text, *_ACCEPTED_INSERTION.values()),
+    ).fetchall()]
+
+
+def _next_region_number(connection, cid: str, artifact_id: str, image_src: str | None, region) -> int | None:
+    if region is None or connection.execute(
+        "SELECT 1 FROM doc_comments WHERE id=?", (cid,)
+    ).fetchone() is not None:
+        return None
+    return connection.execute(
+        """SELECT COALESCE(MAX(region_number), 0) + 1 FROM doc_comments
+           WHERE artifact_id=? AND COALESCE(image_src, '')=COALESCE(?, '')""",
+        (artifact_id, image_src),
+    ).fetchone()[0]
+
+
 def create_with_status(
     artifact_id: str,
     *,
@@ -127,6 +157,7 @@ def create_with_status(
     anchor_suffix: str | None = None,
     review: bool = False,
     replacement: str | None = None,
+    insert_after: bool = False,
     client_id: str | None = None,
     region: tuple[float, float, float, float] | None = None,
     image_rev: str | None = None,
@@ -143,27 +174,19 @@ def create_with_status(
     now = _now()
     x, y, w, h = region if region is not None else (None, None, None, None)
     with write_transaction(db, scope="create_doc_comment") as connection:
-        number = None
-        if region is not None and connection.execute(
-            "SELECT 1 FROM doc_comments WHERE id=?", (cid,)
-        ).fetchone() is None:
-            number = connection.execute(
-                """SELECT COALESCE(MAX(region_number), 0) + 1 FROM doc_comments
-                   WHERE artifact_id=? AND COALESCE(image_src, '')=COALESCE(?, '')""",
-                (artifact_id, image_src),
-            ).fetchone()[0]
+        number = _next_region_number(connection, cid, artifact_id, image_src, region)
         inserted = connection.execute(
             """INSERT INTO doc_comments
                (id, artifact_id, parent_id, author, author_kind, author_thread_id,
                 body, anchor_text, from_off, to_off, anchor_prefix, anchor_suffix,
-                review, resolved, acked, replacement, created_at, updated_at,
+                review, resolved, acked, replacement, insert_after, created_at, updated_at,
                 region_x, region_y, region_w, region_h, region_number, image_rev, image_src)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,0,0,?,?,?,?,?,?,?,?,?,?)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,0,0,?,?,?,?,?,?,?,?,?,?,?)
                ON CONFLICT(id) DO NOTHING""",
             (
                 cid, artifact_id, _thread_root_id(connection, parent_id), author, author_kind, author_thread_id,
                 body, anchor_text, from_off, to_off, anchor_prefix, anchor_suffix,
-                1 if review else 0, replacement, now, now,
+                1 if review else 0, replacement, int(insert_after), now, now,
                 x, y, w, h, number, image_rev, image_src,
             ),
         )

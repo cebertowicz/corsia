@@ -19,7 +19,7 @@ import os
 from pathlib import Path
 import stat
 from typing import Any, Iterator, Mapping
-from urllib.parse import unquote, urlsplit
+# Browser navigation validates its own web-only URLs.
 from uuid import uuid4
 
 from loguru import logger
@@ -573,38 +573,6 @@ def _process_action(
     )
 
 
-def _browser_open_action(
-    params: Mapping[str, Any],
-    *,
-    tool: Any,
-) -> _PreparedAction | None:
-    url = _text(params.get("url"), "url")
-    split = urlsplit(url)
-    if split.scheme.lower() != "file":
-        return None
-    if split.netloc not in {"", "localhost"}:
-        raise HostAccessBlocked("Remote file URLs are not supported.")
-    lexical, resolved = _absolute_path(
-        unquote(split.path),
-        base=_tool_workspace(tool),
-    )
-    requires_elevation = _path_requires_elevation(
-        lexical=lexical,
-        resolved=resolved,
-        for_write=False,
-    )
-    return _make_prepared(
-        "browser_open",
-        {
-            "url": url,
-            "path": _path_payload(lexical, resolved),
-            "wait_for_load": _boolean(params.get("wait_for_load"), True),
-        },
-        requires_elevation=requires_elevation,
-        lexical_path=lexical,
-        resolved_path=resolved,
-    )
-
 
 def _prepare_action(
     tool_name: str,
@@ -619,7 +587,7 @@ def _prepare_action(
     if canonical == "bash":
         return _bash_action(safe, tool=tool)
     if canonical == "browser_open":
-        return _browser_open_action(safe, tool=tool)
+        return None
     if canonical in {"process_discover", "process_signal"}:
         return _process_action(canonical, safe)
     return _path_action(canonical, safe, tool=tool)

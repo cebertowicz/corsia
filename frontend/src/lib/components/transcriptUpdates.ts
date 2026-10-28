@@ -3,7 +3,7 @@ import type { RunStub } from '$lib/focusRuns';
 import { sourceMembers, sourceRange } from './contextEventModel';
 import { partitionMessageAtCards } from './messageListModel';
 import { partitionAtVisit, fencePlanLimitPauses } from './transcriptFences';
-import { asksYou, isBlockLine, isPassive, placePassive } from './transcriptPassive';
+import { asksYou, gatherReadySteps, isBlockLine, isPassive, passiveWithoutReceipts, placePassive } from './transcriptPassive';
 import type { PlanLimitPauseDescriptor } from './planLimitPause';
 import type { SourcePlacementContext } from './contextEventModel';
 import {
@@ -82,7 +82,7 @@ function groupRun(run: TranscriptUpdateEntry[]): TranscriptUpdateEntry[] {
 		if (nodeId && latest.get(nodeId) !== index) return;
 		kept.push(earlier ? { ...entry, earlier } : entry);
 	});
-	return kept;
+	return gatherReadySteps(kept);
 }
 
 function partitionItem(item: TranscriptMessageEntry, cuts: readonly number[]): TranscriptMessageEntry[] {
@@ -270,11 +270,12 @@ export function mergeTranscriptUpdates(
 	const structural = split
 		? [...closeRunsAtCards(partitioned.slice(0, at), oldCards), visitEntry(divider!), ...closeRunsAtCards(partitioned.slice(at), freshCards)]
 		: closeRunsAtCards(partitioned, sorted);
-	const fenced = fencePlanLimitPauses(structural, options.pauses ?? [], options.turnSummaries ?? {}, options.sourceContext, sorted.some(isPassive));
+	const passive = passiveWithoutReceipts(structural);
+	const fenced = fencePlanLimitPauses(structural, options.pauses ?? [], options.turnSummaries ?? {}, options.sourceContext, sorted.some(passive));
 	const boundary = fenced.findIndex((entry) => entry.kind === 'divider');
-	const placed = boundary < 0 ? placePassive(fenced, sorted.filter(isPassive)) : [
-		...placePassive(fenced.slice(0, boundary), oldCards.filter(isPassive)), fenced[boundary],
-		...placePassive(fenced.slice(boundary + 1), freshCards.filter(isPassive)),
+	const placed = boundary < 0 ? placePassive(fenced, sorted.filter(passive)) : [
+		...placePassive(fenced.slice(0, boundary), oldCards.filter(passive)), fenced[boundary],
+		...placePassive(fenced.slice(boundary + 1), freshCards.filter(passive)),
 	];
 	const lined = lines.length ? attachCardLines(placed, lines) : { entries: placed, host: new Map<number, TranscriptFoldEntry>() };
 	if (!divider || !together) return lined.entries;

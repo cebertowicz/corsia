@@ -79,20 +79,20 @@ export interface AttentionDestination {
 	id: string;
 	path?: string;
 	title?: string;
+	user_message_id?: string;
+	cid?: string;
+	seq?: number;
 }
 
 export interface CommentReplyDetail {
-	id: string;
 	title: string;
 	unread_count: number;
 	newest_at: string;
 	destination: AttentionDestination;
-	source: { thread_id: string; thread_label: string };
+	source: { thread_id: string };
 }
 
 export interface CommentReplyItem {
-	external_id: string;
-	renderer: 'comment-reply';
 	detail: CommentReplyDetail;
 }
 
@@ -174,7 +174,7 @@ async function rejection(res: Response, fallback = FALLBACK_REJECTION): Promise<
 	}
 }
 
-const FALLBACK_CLOSED = 'This question is no longer open.';
+const FALLBACK_CLOSED = 'That decision is closed.';
 
 function closedMessage(res: Response): Promise<string> {
 	return rejection(res, FALLBACK_CLOSED);

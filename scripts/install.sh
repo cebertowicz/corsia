@@ -347,12 +347,13 @@ ensure_model_source() {
 # verifies pinned uv and Node archives; uv supplies Python 3.11.
 # uv checks the Python build it installs against hashes built into that uv
 # release. Only apt uses sudo, and the installer says so first. There is no
-# local model or agent browser here yet; protected commands use bubblewrap.
+# No local model on Linux; protected commands use bubblewrap.
 # The model source is connected in the app.
 # ---------------------------------------------------------------------------
 
 LINUX_APT_BASE=(build-essential curl ca-certificates xz-utils unzip jq sqlite3 python3 lsof)
 LINUX_OS_RELEASE="${CORSIA_INSTALL_OS_RELEASE:-/etc/os-release}"
+LINUX_USERNS_RESTRICT="${CORSIA_INSTALL_USERNS_RESTRICT:-/proc/sys/kernel/apparmor_restrict_unprivileged_userns}"
 LINUX_LOCAL_BIN="$HOME/.local/bin"
 UV_BIN=""
 
@@ -404,9 +405,9 @@ managed_runtime_linux() {
     PYTHONPATH="$CORSIA_HOME/backend" python3 -c '
 import sys
 from pathlib import Path
-from tools.managed_runtime import ManagedRuntimeError, ensure_runtime
+from tools.managed_runtime import ManagedRuntimeError, ensure_runtime, runtime_cache_root
 try:
-    print(ensure_runtime(sys.argv[1], root=Path.home() / ".cache" / "corsia" / "runtimes", arch="linux-" + sys.argv[2]))
+    print(ensure_runtime(sys.argv[1], root=runtime_cache_root(), arch="linux-" + sys.argv[2]))
 except ManagedRuntimeError as error:
     if "checksum" in str(error):
         print(f"Couldn’t verify the {sys.argv[1]} download. Run this again.", file=sys.stderr)
@@ -457,6 +458,84 @@ linux_install_needed() {
     if [ "${#packages[@]}" -gt 0 ]; then install_apt_linux "${packages[@]}"; fi
     if [ "$want_python" -eq 1 ]; then install_python_linux; fi
     if [ "$want_node" -eq 1 ]; then link_managed_node_linux; fi
+}
+
+linux_browser_deps() {
+    local distro packages=(libnss3 libxkbcommon0 libcairo2 libgbm1 libpango-1.0-0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 fonts-liberation)
+    distro="$( (. "$LINUX_OS_RELEASE"; printf '%s' "${ID:-}") )"
+    if [ "$distro" = ubuntu ]; then
+        packages+=(libasound2t64 libatk1.0-0t64 libatk-bridge2.0-0t64 libatspi2.0-0t64 libcups2t64)
+    else
+        packages+=(libasound2 libatk1.0-0 libatk-bridge2.0-0 libatspi2.0-0 libcups2)
+    fi
+    if linux_userns_restricted; then packages+=(apparmor); fi
+    install_apt_linux "${packages[@]}"
+}
+
+# Ubuntu's AppArmor blocks unprivileged user namespaces, which Chromium's sandbox needs;
+# Debian's kernel allows them and its AppArmor 3 can't parse a userns rule.
+linux_userns_restricted() {
+    [ "$(cat "$LINUX_USERNS_RESTRICT" 2> /dev/null)" = 1 ]
+}
+
+linux_install_chromium() {
+    local arch url digest archive_dir staging parent owner mode
+    arch="$(linux_arch)"
+    if [ "$arch" = arm64 ]; then
+        url='https://cdn.playwright.dev/builds/cft/156.0.8078.4/linux-arm64/chrome-linux-arm64.zip'
+        digest='910a12fff6170202195f72ef3d353801c7063d301ab80b1f51b77d791fda60ce'
+        archive_dir=chrome-linux-arm64
+    else
+        url='https://storage.googleapis.com/chrome-for-testing-public/156.0.8078.4/linux64/chrome-linux64.zip'
+        digest='43fd31766c7533a02dda2ded5ad50c2f861cd5400be7509c0abad71129f79d79'
+        archive_dir=chrome-linux64
+    fi
+    for parent in / /opt; do
+        [ ! -L "$parent" ] || stop "The browser install path is not safe. Check $parent, then run this again."
+        owner="$(stat -c %u "$parent")"; mode="$(stat -c %a "$parent")"
+        [ "$owner" = 0 ] && (( (8#$mode & 0022) == 0 )) || stop "The browser install path is not safe. Check $parent, then run this again."
+    done
+    [ ! -L /opt/corsia ] && [ ! -L /opt/corsia/chromium ] || stop "The browser install path is not safe. Check /opt/corsia, then run this again."
+    if [ -e /opt/corsia ]; then
+        owner="$(stat -c %u /opt/corsia)"; mode="$(stat -c %a /opt/corsia)"
+        [ "$owner" = 0 ] && (( (8#$mode & 0022) == 0 )) || stop "The browser install path is not safe. Check /opt/corsia, then run this again."
+    fi
+    as_admin install -d -m 0755 /opt/corsia
+    staging="$(as_admin mktemp -d /opt/corsia/.browser-XXXXXXXX)"
+    as_admin curl -fsSL "$url" -o "$staging/chrome.zip" || stop "Couldn’t download the browser. Check your connection, then run this again."
+    as_admin sh -c 'printf "%s  %s\n" "$1" "$2" | sha256sum -c -' _ "$digest" "$staging/chrome.zip" \
+        || stop "Couldn’t verify the browser download. Run the installer again."
+    as_admin unzip -q "$staging/chrome.zip" -d "$staging"
+    as_admin chmod -R go-w "$staging/$archive_dir"
+    if [ -e /opt/corsia/chromium ]; then as_admin mv /opt/corsia/chromium "$staging/previous"; fi
+    as_admin mv "$staging/$archive_dir" /opt/corsia/chromium
+    if ! linux_userns_restricted; then
+        as_admin rm -rf "$staging"
+        say '     The browser is ready.'
+        return
+    fi
+    [ ! -L /etc/apparmor.d/corsia-chromium ] || stop "The browser rule path is not safe. Check /etc/apparmor.d/corsia-chromium, then run this again."
+    printf '%s\n' '#include <tunables/global>' 'profile corsia-chromium /opt/corsia/chromium/chrome flags=(unconfined) {' '  userns,' '}' \
+        | as_admin tee "$staging/corsia-chromium" > /dev/null
+    as_admin install -m 0644 "$staging/corsia-chromium" /etc/apparmor.d/corsia-chromium
+    as_admin apparmor_parser -r /etc/apparmor.d/corsia-chromium \
+        || stop "Couldn’t enable the browser sandbox. Check AppArmor, then run the installer again."
+    as_admin rm -rf "$staging"
+    say '     The browser is ready. Remove its AppArmor rule with sudo apparmor_parser -R /etc/apparmor.d/corsia-chromium && sudo rm /etc/apparmor.d/corsia-chromium.'
+}
+
+linux_ensure_agent_browser() {
+    local npm found
+    if ! found="$(service_which agent-browser)" || ! agent_browser_ok "$found"; then
+        npm="$(service_which npm)" || stop "npm is not visible to the service. Re-run the CORSIA installer."
+        "$npm" install -g --prefix "$HOME/.local" "$AGENT_BROWSER_PACKAGE" \
+            || stop "Couldn’t install agent-browser. Re-run the CORSIA installer."
+        found="$(service_which agent-browser)" && agent_browser_ok "$found" \
+            || stop "agent-browser is not visible to the service. Re-run the CORSIA installer."
+    fi
+    if [ -x /opt/google/chrome/chrome ]; then return; fi
+    linux_browser_deps
+    linux_install_chromium
 }
 
 enable_linger_linux() {
@@ -528,6 +607,7 @@ linux_main() {
     case ":$PATH:" in *":$LINUX_LOCAL_BIN:"*) ;; *) path_had_local_bin=0 ;; esac
     export PATH="$LINUX_LOCAL_BIN:$PATH"
     linux_ensure_prereqs
+    linux_ensure_agent_browser
     enable_linger_linux
     say "     Checking the protected Linux command sandbox…"
     bash "$CORSIA_HOME/scripts/install-linux-sandbox.sh"

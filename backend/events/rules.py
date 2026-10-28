@@ -42,6 +42,7 @@ from events.rule_runs import OWNER_GONE, queue
 from infra.queries import thread_gone_for_good, thread_is_temporary, thread_unavailable_reason
 from registry.retirement_predicate import identity_ended
 
+ROUTE = "route"  # a rule's kind; the other is observe (``events.observe_rules``)
 WAKE = "wake"
 DIGEST = "digest"
 REGISTERED_OWNER = "registered_owner"

@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from core.message_history import NON_HUMAN_MARKERS, REPLY_VIA_POST_UPDATE_KEY
 from core.reply_context import REPLY_CONTEXT_KEY
 from core.viewing_context import VIEWING_DOCUMENT_KEY, VIEWING_DOCUMENT_TARGET_KEY
+from infra.chat_comment_index import place_comments
 from infra.database import get_db, write_transaction
 from infra.document_viewing import PreparedViewingDocument
 from infra.reply_context import require_every_comment, validate_reply_context
@@ -61,8 +62,9 @@ def stamped_human_metadata(
         reply_context = prior.get(REPLY_CONTEXT_KEY)
     else:
         raw_context = (metadata or {}).get(REPLY_CONTEXT_KEY)
-        reply_context = validate_reply_context(connection, thread_id, raw_context)
-        require_every_comment(raw_context, reply_context)
+        dropped: list[dict] = []
+        reply_context = validate_reply_context(connection, thread_id, raw_context, dropped=dropped)
+        require_every_comment(raw_context, reply_context, dropped)
     if reply_context:
         stamped[REPLY_CONTEXT_KEY] = reply_context
     if viewing_document is not None:
@@ -240,6 +242,13 @@ def _validate_input_shape(metadata, intent, role) -> None:
         raise ValueError(f"invalid model-bound input role: {role}")
 
 
+def _require_current_continuation(thread_id, continuation, connection):
+    if continuation is not None:
+        from automation.continuation.validity import require_current
+
+        require_current(thread_id, continuation, db=connection)
+
+
 def accept_thread_input(
     thread_id: str,
     *,
@@ -272,10 +281,7 @@ def accept_thread_input(
         )
         if duplicate is not None:
             return duplicate
-        if continuation is not None:
-            from automation.continuation.validity import require_current
-
-            require_current(thread_id, continuation, db=connection)
+        _require_current_continuation(thread_id, continuation, connection)
         input_order = int(state["next_input_order"])
         epoch, model = _input_destination(state, input_order)
         hold = _admission_hold(connection, model, thread_id=thread_id)
@@ -302,6 +308,8 @@ def accept_thread_input(
                 hold,
             ),
         )
+        if role == 'user':
+            place_comments(connection, thread_id, message_id, metadata, accepted_at)
         connection.execute(
             "UPDATE threads SET next_input_order=next_input_order+1 WHERE id=?",
             (thread_id,),

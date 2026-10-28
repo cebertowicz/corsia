@@ -225,7 +225,7 @@ def test_a_plan_the_user_paused_counts_every_paused_leaf_as_theirs():
 def test_a_container_row_keeps_its_own_precedence():
     counts = {**dict.fromkeys(operator_node_state.DISTRIBUTION_KEYS, 0), "waiting": 2}
     assert operator_nodes.branch_display(
-        counts, needs_user=False, working=False,
+        counts, asks_user=False, working=False,
     )["label_key"] == "waiting"
 
 

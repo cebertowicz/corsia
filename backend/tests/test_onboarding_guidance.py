@@ -126,7 +126,7 @@ def test_first_run_describes_brave_only_as_the_key_acquisition_path():
 
     assert "It uses Brave Search." not in web_search
     assert "Your searches go to Brave." not in web_search
-    assert "A Brave Search key is one way to turn it on." in web_search
+    assert "[I couldn't search without a key just now. ]A Brave Search key makes search steadier." in web_search
     assert "Searches using that key go to Brave." in web_search
 
 
@@ -215,7 +215,7 @@ def test_every_settings_link_in_first_run_opens_a_real_section_and_anchor():
 def test_first_run_stays_within_its_body_size():
     # Its size after the fuller conductor-role intro and the MCP import consent step (#690),
     # rounded up; #674 tracks the real cap.
-    assert len(FIRST_RUN.read_bytes()) <= 17600  # +the router to first-run-app.md
+    assert len(FIRST_RUN.read_bytes()) <= 17800  # +the router to first-run-app.md, +where keyless searches go (#1537), +the goal-owning welcome line (#1599)
 
 
 LOCAL_MODEL_OFFER = BOOTSTRAP_SKILL.parent / "references/local-model-offer.md"
@@ -295,7 +295,8 @@ def test_app_path_uses_server_opening_and_plan_then_steps_and_handoff():
     assert not re.search(r"\bsteps? \d", work_step)
     assert app.split("## Hand over to your agents", 1)[1].strip().startswith("After the last step that applies, post one line")
     assert "post exactly `" + HANDOFF + "`" in app
-    assert "follow skill `google-setup`" in steps
+    assert "then `google_connect`" in steps
+    assert "Use skill `google-setup` only when the person says Google blocked the sign-in" in steps
     assert "Never write the opening or create the setup plan" in app
     assert "mark each done when complete" in app
     assert "agent-import.md" in steps
@@ -381,11 +382,24 @@ def test_web_search_guidance_distinguishes_keyless_readiness_from_key_setup():
     web = (FIRST_RUN_APP.parent / "web-search.md").read_text(encoding="utf-8")
 
     assert "When `web_search_ready` is true, search already works; skip this key setup." in web
-    assert "Without a saved key, the managed local server can provide search." in web
-    assert "When `web_search_ready` is false, search doesn't work right now; this setup turns it on, and so can the managed local server once it's running." in web
-    assert "There is no fallback search: without a key, web search stays off." not in web
-    assert "search stays off until this setup succeeds" not in web
-    assert "`Until search is set up, I can't search the web. Settings › Keys has it whenever you want it.`" in _step(4)
+    assert "Every install tries search without a key first; a Brave key can make search steadier." in web
+    assert "When `web_search_ready` is false, search didn't work on the check; a Brave key is an optional alternative." in web
+    assert (
+        "Keep the middle bracketed part only when `## Setup facts` shows both `web_search_ready` and "
+        "`web_search_key` false; on a path without both facts, leave it out."
+    ) in web
+    assert "every month includes $5 of free credit, enough for 1,000 searches." in web
+    assert "the $5 of free credit each month covers 1,000." in web
+    assert "[I couldn't search without a key just now. ]A Brave Search key makes search steadier." in web
+    after_key = web.split("## 5. After they say it's in", 1)[1]
+    assert "`corsia_api` with `GET /api/keys`" in after_key
+    assert "`name` `web-search` and read `is_set`" in after_key
+    assert "| Key check failed | `I couldn't check Settings › Keys just now. I'll check again next time I'm working.`" in after_key
+    assert "If false, use the No key found row without searching." in after_key
+    assert "If true, run one `web_search` for `CORSIA`" in after_key
+    assert "If the read fails, or the entry or `is_set` is missing, use the Key check failed row." in after_key
+    assert "| Results, or none | `Web search works.` |" in after_key
+    assert "`OK. Ask me any time to try search again; Settings › Keys has the optional Brave key whenever you want it.`" in _step(4)
     assert "Until then I can't search the web." not in _step(4)
 
 
@@ -479,6 +493,10 @@ def test_the_connect_skill_holds_the_build_later_and_macos_permission_playbooks(
     assert "## A macOS permission only the person can grant" in skill
     assert "System Settings › Privacy & Security › Full Disk Access" in skill
     assert "every connected app CORSIA runs" in skill
+    setup = skill.split("## Setting one up", 1)[1].split("## ", 1)[0]
+    assert "never a list of steps for the person" in setup and "do each step yourself" in setup
+    assert "browser-person-steps.md" in setup and "any page that shows a key, token or code" in setup
+    assert "never into chat, a file or a command" in skill and "**Set key** in Settings › Connected apps" in skill
 
 
 def test_about_you_loads_the_look_up_reference_and_keeps_the_profile_rule():

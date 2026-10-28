@@ -119,7 +119,9 @@ def allowed_names(config: dict) -> set[str] | None:
 def public_name(server_name: str, original: str, config: dict) -> str:
     """Map one upstream tool to a stable, provider-compatible public name."""
     mapping = config.get("public_names", {})
-    prefix = config.get("tool_prefix", f"mcp_{server_name}_")
+    # A friendly name like "Home Assistant" gets "_" for each run of other characters;
+    # names that were already valid keep their exact tool names.
+    prefix = config.get("tool_prefix", f"mcp_{re.sub(r'[^A-Za-z0-9_-]+', '_', server_name)}_")
     if not isinstance(mapping, dict) or not isinstance(prefix, str):
         raise MCPConfigError("public_names must be an object and tool_prefix must be a string")
     name = mapping.get(original, prefix + original)

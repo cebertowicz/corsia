@@ -72,10 +72,10 @@ describe('MeasurementAgentsTable', () => {
 		const headers = [...host.querySelectorAll('thead th')].map((cell) => (cell.textContent ?? '').trim());
 		expect(headers).toEqual([
 			'Agent', 'Outcomes', 'First try', '$ per person-hour of work delivered',
-			'Change in minutes per outcome, vs Sep 21 to Sep 27',
+			'Change in minutes per outcome, vs Sep 21 to Sep 27',
 		]);
 		for (const gone of ['Rank', 'Asks', 'Tokens', 'Outcomes / week', '8 weeks before']) expect(host.textContent).not.toContain(gone);
-		expect(host.querySelector('h3')?.textContent).toBe('Agents, Sep 28 to Oct 4');
+		expect(host.querySelector('h3')?.textContent).toBe('Agents, Sep 28 to Oct 4');
 	});
 
 	it('shows each figure in its own unit and the change against the previous weeks', () => {
@@ -180,7 +180,7 @@ describe('MeasurementAgentsTable', () => {
 		render(state([], { error: 'Could not load the agents table.' }));
 		expect(host.textContent).toContain('Could not load the agents table.');
 		expect(host.querySelector('[role="alert"]')).not.toBeNull();
-		expect(host.textContent).not.toContain('No active agents in this scope.');
+		expect(host.textContent).not.toContain('No active agents for this selection.');
 		expect(host.querySelector('button')?.textContent).toBe('Retry');
 	});
 
@@ -188,12 +188,12 @@ describe('MeasurementAgentsTable', () => {
 		// Only the state that cannot answer is dropped: a retry keeps what it can still claim.
 		render(state([agentRow()], { error: 'Could not load the agents table.' }));
 		expect(host.querySelector('table')).not.toBeNull();
-		expect(host.textContent).not.toContain('No active agents in this scope.');
+		expect(host.textContent).not.toContain('No active agents for this selection.');
 	});
 
 	it('says there are no agents rather than an empty grid', () => {
 		render(state([]));
-		expect(host.textContent).toContain('No active agents in this scope.');
+		expect(host.textContent).toContain('No active agents for this selection.');
 		expect(host.textContent).not.toContain('Could not load');
 		expect(host.querySelector('table')).toBeNull();
 	});
@@ -279,30 +279,27 @@ describe('MeasurementAgentsTable', () => {
 		expect(wrap?.getAttribute('aria-label')).toContain('Agents table');
 	});
 
-	it('keeps every column in view at 430px and under: names and headers wrap between words, the long headers get narrow columns', () => {
+	it('keeps every column in view at 430px and under, with room for the dated header', () => {
 		render(state([agentRow()]));
 		const headers = [...host.querySelectorAll('thead th')];
 		expect(headers[3].classList.contains('cost') && headers[3].textContent).toBe('$ per person-hour of work delivered');
 		expect(headers[3].querySelector('button')?.getAttribute('aria-label'), 'a phone reader still hears the full name').toBe('$ per person-hour of work delivered');
 		expect(headers[3].querySelector('.long')?.textContent, 'only the tail of the name drops on a phone').toBe('of work delivered');
-		expect(headers[4].classList.contains('change') && headers[4].textContent).toBe('Change in minutes per outcome, vs Sep 21 to Sep 27');
+		expect(headers[4].classList.contains('change') && headers[4].textContent).toBe('Change in minutes per outcome, vs Sep 21 to Sep 27');
 		const css = source.slice(source.indexOf('<style>'));
 		const at = css.indexOf('@media (max-width: 430px)');
 		expect(at, 'a phone block exists').toBeGreaterThan(-1);
 		const phone = css.slice(at, css.indexOf('\n\t}', at));
 		// No floor on the table or the headers, so the columns share the width instead of scrolling past the edge.
-		expect(phone).toContain('table { width: 100%; min-width: 0; table-layout: fixed; font-size: var(--text-footnote); }');
+		expect(phone).toContain('table { width: 100%; min-width: 0; table-layout: auto; font-size: var(--text-footnote); }');
 		expect(phone).not.toContain('min-width: 11ch');
 		expect(phone).not.toContain('min-width: 20ch');
-		// A name wraps between its words and a header wraps too; neither may break inside a word.
+		// Long names can break to fit; headers wrap between words.
 		expect(phone).toContain('tbody th { white-space: normal; }');
-		expect(phone).toMatch(/\.filter \{[^}]*white-space: normal;[^}]*word-break: normal;/);
+		expect(phone).toMatch(/\.filter \{[^}]*max-width: 100%;[^}]*overflow-wrap: anywhere;[^}]*word-break: normal;/);
 		expect(phone).toMatch(/thead th \{[^}]*white-space: normal;[^}]*word-break: normal;/);
-		// Every fixed-layout column is allocated explicitly so the Agent column
-		// retains room for a complete unbroken name at phone widths.
-		expect(phone).toContain('thead th:first-child { width: 28%; }');
-		expect(phone).toContain('thead th:nth-child(2), thead th:nth-child(3) { width: 10%; }');
-		expect(phone).toContain('thead th.cost { width: 17%; }');
-		expect(phone).toContain('thead th.change { width: 35%; }');
+		// Numeric cells take their content width, leaving the remaining space for agent names.
+		expect(phone).toContain('thead th.n { width: 1%; }');
+		expect(phone).toContain('tbody td.n { white-space: nowrap; }');
 	});
 });

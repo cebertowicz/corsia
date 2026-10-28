@@ -76,7 +76,7 @@ def _load_warm_target(thread_id: str, user_id: str, model: str | None = None):
         )
         if effort and not target.supports_reasoning:
             effort = None
-        return target, sess["project_id"], effort
+        return target, sess["project_id"], effort, dict(sess)
     finally:
         db.close()
 
@@ -114,19 +114,19 @@ async def _prove_warm_target(target: ExecutionTarget, thread_id: str):
 async def _build_warm_prefix(
     thread_id: str,
     project_id: str | None,
-    target: ExecutionTarget,
-    reasoning_effort: str | None,
+    target: ExecutionTarget, reasoning_effort: str | None,
+    thread_context: dict | None = None,
 ):
     from core.agent import get_agent
     from core.native_context_prefix import _freeze_tool_definitions
     from llm.base import sanitize_empty_content, sanitize_messages
     from llm.providers.omlx import make_prompt_extra_body
     from llm.reasoning_config import reasoning_config_for_model
-    from tools.catalog import advertised_tool_definitions
+    import tools.confined_reads as confined_reads
 
     agent = await get_agent()
     await agent._connect_mcp()
-    tool_defs = _freeze_tool_definitions(advertised_tool_definitions(agent.tools))
+    tool_defs = _freeze_tool_definitions(await confined_reads.advertised(agent.tools, thread_context))
     wire_tool_defs = list(tool_defs)
     candidates, eager_checkpoint_id, pending_opening = await run_in_db(
         _warm_replay_candidates, thread_id, target.catalog_id,
@@ -377,7 +377,7 @@ async def warm_session_cache(
     loaded = _load_warm_target(thread_id, user["id"], model)
     if isinstance(loaded, dict):
         return loaded
-    target, project_id, reasoning_effort = loaded
+    target, project_id, reasoning_effort, thread_context = loaded
     proved = await _prove_warm_target(target, thread_id)
     if isinstance(proved, dict):
         return proved
@@ -386,6 +386,7 @@ async def warm_session_cache(
         project_id,
         proved,
         reasoning_effort,
+        thread_context,
     )
     return await _submit_warm(
         thread_id,

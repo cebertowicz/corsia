@@ -597,9 +597,9 @@ const VIEW_TARGETS: Record<string, Target> = {
 		open: async (page, data) => {
 			await clickRail(page, 'Measurement');
 			await expect(page.locator('.shell-header .h-title')).toHaveText(new RegExp(`^(All work|${data.projectName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})$`), { timeout: 20_000 });
-			await expect(page.getByRole('button', { name: /Measurement scope:/ }), 'the scope picker is showing').toBeVisible({ timeout: 20_000 });
+			await expect(page.getByRole('button', { name: /Showing:/ }), 'the scope picker is showing').toBeVisible({ timeout: 20_000 });
 			// The seeded project's scope serves the comparable run the ready check reads.
-			if (await page.getByRole('button', { name: `Measurement scope: ${data.projectName}`, exact: true }).isVisible()) return;
+			if (await page.getByRole('button', { name: `Showing: ${data.projectName}`, exact: true }).isVisible()) return;
 			// Earlier runs leave projects whose names share the first 20 characters, so the whole name picks this run's.
 			await selectProjectScope(page, data.projectName);
 		},

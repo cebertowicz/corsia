@@ -13,6 +13,7 @@
 	import { waitFace } from './waitFace';
 	import { threadPlanStates } from '$lib/stores/threadPlanStates';
 	import { coreSettings } from '$lib/stores/settings';
+	import { chatReplyJump } from '$lib/stores/chatReplyJump';
 	import { activeToolsByThread, messages } from '$lib/stores/threads';
 	import { INITIAL_TURN_STATE, turnStates } from '$lib/ws/turnState';
 	import { threadLiveStep, UNKNOWN_STEP } from './plans/planLiveStep';
@@ -29,7 +30,7 @@
 	import type { PauseAnnotation } from './transcriptFocusModel';
 	import EventChip from './EventChip.svelte';
 	import { sourceMembers } from './contextEventModel';
-	import { PAUSED_AT_PLAN_LIMIT } from '$lib/stores/overageSetting';
+	import { PAUSED_AT_USAGE_LIMIT } from '$lib/stores/overageSetting';
 	import type { RunLoad, RunStub } from '$lib/focusRuns';
 	import type { WorkBlockLive } from './workBlockLive';
 
@@ -173,6 +174,17 @@
 		void openTimeEvents;
 		requestOpenTime(untrack(() => openQueries));
 	});
+	// A reply on a hidden row opens the Focus run containing it.
+	$effect(() => {
+		const target = $chatReplyJump;
+		if (!target || target.threadId !== boundThreadId) return;
+		const index = renderedEntries.findIndex(entry => entry.kind === 'fold' &&
+			(entry.items.some(item => item.message.id === target.messageId) ||
+				(entry.stub && entry.stub.firstSeq <= target.seq && target.seq <= entry.stub.lastSeq)));
+		if (index < 0) return;
+		const tokens = runTokens(renderedEntries, index, historyComplete);
+		if (!isRunExpanded(tokens, expandedFolds)) expandedFolds = new Set([...expandedFolds, ...tokens]);
+	});
 	// An open run whose rows were never read starts reading them, however it was opened.
 	$effect(() => {
 		renderedEntries.forEach((entry, index) => {
@@ -219,14 +231,14 @@
 		{@render deliveryWarning(annotation.pause.source)}
 		<div class="historical-anchor">{annotation.pause.anchorKind === 'input' ? 'Earlier input' : 'Earlier work'}</div>
 	{/if}
-	<div class="plan-limit-paused">{PAUSED_AT_PLAN_LIMIT}</div>
+	<div class="plan-limit-paused">{PAUSED_AT_USAGE_LIMIT}</div>
 {/snippet}
 
 {#each renderedEntries as entry, index (entry.id)}
 	{#if entry.kind === 'message'}
 		{@render messageRow(entry)}
 	{:else if entry.kind === 'update'}
-		<UpdateCard card={entry.card} earlier={entry.earlier} />
+		<UpdateCard card={entry.card} earlier={entry.earlier} group={entry.group} />
 	{:else if entry.kind === 'passive'}
 		{#key boundThreadId}<PassiveOutcomeList cards={entry.cards} id={`${uid}-${entry.id}`} />{/key}
 	{:else if entry.kind === 'divider'}
@@ -234,7 +246,7 @@
 	{:else if entry.kind === 'pause'}
 		{@render historicalPause(entry, entry.showProxy || !visibleSources.has(entry.pause.source.id))}
 	{:else if entry.kind === 'stub-pause'}
-		<div class="plan-limit-paused">{PAUSED_AT_PLAN_LIMIT}</div>
+		<div class="plan-limit-paused">{PAUSED_AT_USAGE_LIMIT}</div>
 	{:else if entry.kind === 'fold'}
 		{@const tokens = runTokens(renderedEntries, index, historyComplete)}
 		{@const expanded = isRunExpanded(tokens, expandedFolds)}
@@ -266,7 +278,7 @@
 			{/snippet}
 			{#snippet notes()}
 				{#each stubPauses.get(entry.id) ?? [] as turnId (turnId)}
-					<div class="plan-limit-paused">{PAUSED_AT_PLAN_LIMIT}</div>
+					<div class="plan-limit-paused">{PAUSED_AT_USAGE_LIMIT}</div>
 				{/each}
 			{/snippet}
 		</WorkBlock>

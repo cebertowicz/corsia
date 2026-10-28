@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import httpx
 from fastapi import HTTPException
 
@@ -20,6 +21,8 @@ from llm.external_declared_models import (
 )
 from llm.providers.omlx_endpoints import health_url as omlx_health_url
 from llm.providers.omlx_public_auth import public_headers
+
+log = logging.getLogger(__name__)
 
 
 def _entered_key(raw: str | None) -> str:
@@ -53,8 +56,9 @@ async def _add_omlx_server(body) -> dict:
                     400, detail=f"{catalog_url} returned HTTP {models_resp.status_code}")
     except HTTPException:
         raise
-    except Exception as e:
-        raise HTTPException(400, detail=f"Could not reach {body.hostname}:{body.port} — {e}")
+    except Exception:
+        log.exception("Could not reach model server")
+        raise HTTPException(400, detail=f"Couldn’t reach {body.hostname}:{body.port}. Check the address and that the server is running.")
 
     def _persist_registration():
         with write_transaction(None, scope="register_network_server") as db:

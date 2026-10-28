@@ -36,7 +36,7 @@ CORSIA already read what setup needs; it is in your first input under `## Setup 
 - `mcp_sources`: MCP servers in other apps, by `source` and `app`, each with `name` and `kind`.
 - `setup`: `setup_decisions` (each with its `task_title`) and `setup_task_settlements` (tasks CORSIA settles because nothing needs deciding).
 - `host_access_reviewer`: who reviews host access now.
-- `web_search_key`: whether a key is saved; test it in task 4.
+- `web_search_key`: whether a key is saved, for task 4's post.
 
 A fact marked `unavailable` names its read, made once when needed.
 
@@ -50,7 +50,7 @@ Objective: the person knows who you are, what CORSIA is for, and what setup will
 
 > I'm your conductor[, running on <model display name>[ with <label>]].
 >
-> CORSIA gives you a standing team of AI agents on your own machine. Each one owns a piece of your work end to end, like a codebase or your inbox, and brings you finished results and the few decisions that are yours.
+> CORSIA gives you a standing team of AI agents on your own machine. Each one owns a goal, like more of your time back, fewer bugs reaching your users, or fewer people giving up on your signup. It measures how it's actually doing on your work, and a change to how it works only sticks if the numbers show it helped.
 >
 > I run the workspace: I keep models, tools and keys working, keep cost down, and make every agent better over time. Each project gets its own conductor. I can change CORSIA's settings, but I can't see your keys or passwords, and anything outside CORSIA needs your approval.
 >
@@ -88,7 +88,7 @@ Done after that post.
 
 ## Task 4: Connect web search
 
-Objective: agents can look things up online; research and anything current depend on it. If `web_search_key` is true and one `web_search` call returns results, post `Web search already works: your agents can search the web.` and mark it done. Otherwise follow `references/web-search.md` exactly, in chat; there is no decision. Not now closes it: `You chose not now. Settings › Keys has it.`
+Objective: agents can look things up online; research and anything current depend on it. If one `web_search` call returns results, post `Web search already works: your agents can search the web.` plus `Searches go to Brave.` if `web_search_key` is true, else `Searches without a key go to free public sources such as DuckDuckGo, Yahoo and Wikipedia.`, and mark it done. Otherwise follow `references/web-search.md` exactly, in chat; there is no decision. Not now closes it: `You chose not now. Settings › Keys has it.`
 
 ## Task 5: Set up GitHub
 

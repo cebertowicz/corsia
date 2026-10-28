@@ -28,7 +28,7 @@ UNKNOWN = "No account matches that name. Pass account_id as one of: {choices}."
 UNAVAILABLE = "{address} isn't available right now. Try again later."
 NO_EMAIL_ACCOUNT = (
     "No Gmail or other mail-host account is connected. For Microsoft mail, use microsoft_status, then "
-    "microsoft_mail_search or microsoft_mail_read. To connect Gmail or Google Workspace, follow google-setup; "
+    "microsoft_mail_search or microsoft_mail_read. To connect Gmail or Google Workspace, call google_connect; "
     "any other host follows mail-host-setup."
 )
 MAIL_ACCOUNT_PARAM = {
@@ -43,7 +43,7 @@ _BY_STATUS = {
     store.CHECKING: "{address} is still being checked. Try again in a minute.",
     store.REFUSED: "{address}'s host didn't accept its app password. Ask the person to make a new one and Replace key on its row in Connected apps.",
     store.REVOKED: "{address}'s host stopped accepting its app password. Ask the person to make a new one and Replace key on its row in Connected apps.",
-    store.IMAP_OFF: "{address}'s host has email access for other apps turned off. Ask the person to turn on IMAP there and press Try again.",
+    store.IMAP_OFF: "{address}'s host has email access for other apps turned off. Ask the person to turn on IMAP there and press Retry.",
     store.UNREACHABLE: "CORSIA can't reach {address}'s mail server. Ask the person to check the server names in Connected apps.",
 }
 
@@ -56,7 +56,7 @@ def _mail_host_usable(account: dict, db: sqlite3.Connection) -> dict:
 
 
 def _usable(account: dict, db: sqlite3.Connection) -> dict:
-    return _mail_host_usable(account, db) if account["provider"] == MAILHOST_PROVIDER else google_accounts.usable(account)
+    return _mail_host_usable(account, db) if account["provider"] == MAILHOST_PROVIDER else google_accounts.usable(account, db)
 
 
 REFUSALS = Refusals(NO_EMAIL_ACCOUNT, NONE_AVAILABLE, CHOOSE, UNKNOWN)

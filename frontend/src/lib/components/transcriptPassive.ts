@@ -1,6 +1,6 @@
 import type { UpdateCard } from '$lib/api/threadUpdates';
 import { sourceRange } from './contextEventModel';
-import type { TranscriptEntry } from './transcriptFocusModel';
+import type { TranscriptEntry, TranscriptUpdateEntry } from './transcriptFocusModel';
 
 /** Outcomes that ask nothing of the user: finished, closed, or failed on an item the user does not own. */
 export function isPassive(card: UpdateCard): boolean {
@@ -14,7 +14,38 @@ export function isPassive(card: UpdateCard): boolean {
  */
 export function asksYou(card: UpdateCard): boolean {
 	return (card.kind === 'failed' && card.asks_user)
-		|| (card.kind === 'blocked' && card.blocked_asks_user);
+		|| (card.kind === 'blocked' && card.blocked_asks_user)
+		// A person step stands on its own in any state: open it is an ask, settled it is the receipt of one.
+		|| card.kind === 'person_step';
+}
+
+/** A person step the server still read as waiting on you. */
+export function isReadyStep(card: UpdateCard): boolean {
+	return card.kind === 'person_step' && (card.step_state ?? 'open') === 'open';
+}
+
+/** Group waiting person steps at the latest one; settled receipts keep their own position. */
+export function gatherReadySteps(entries: TranscriptUpdateEntry[]): TranscriptUpdateEntry[] {
+	const ready = entries.filter((entry) => isReadyStep(entry.card));
+	if (ready.length < 2) return entries;
+	const last = ready[ready.length - 1];
+	const group = ready.map((entry) => entry.card);
+	return entries.flatMap((entry) => {
+		if (!isReadyStep(entry.card)) return [entry];
+		return entry === last ? [{ ...entry, group }] : [];
+	});
+}
+
+/** A displayed receipt replaces its matching passive outcome, but not an outcome whose receipt is absent. */
+export function passiveWithoutReceipts(entries: TranscriptEntry[]): (card: UpdateCard) => boolean {
+	const receipts = new Map(entries.flatMap((entry) => entry.kind === 'update'
+		&& entry.card.kind === 'person_step' && entry.card.node_id
+		&& (entry.card.step_state === 'done' || entry.card.step_state === 'closed')
+		? [[entry.card.node_id, entry.card.step_state] as const] : []));
+	return (card) => isPassive(card) && !(card.node_id && (
+		(receipts.get(card.node_id) === 'done' && (card.kind === 'done' || card.kind === 'done_follow_up'))
+		|| (receipts.get(card.node_id) === 'closed' && card.kind === 'closed')
+	));
 }
 
 /** B6, B22: the card asks nothing and is not a completion: a line inside its block. */

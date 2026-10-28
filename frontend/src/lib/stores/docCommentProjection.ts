@@ -31,6 +31,7 @@ export interface DocComment {
 	acked?: boolean;
 	review?: boolean;
 	replacement?: string | null;
+	insertAfter?: boolean;
 	decision?: 'accepted' | 'rejected' | null;
 	decidedBy?: string | null;
 	/** Replies by others newer than this viewer's seen stamp. The only copy of reply attention; read it through `hasNewReplies`. */
@@ -75,6 +76,7 @@ export function fromServer(r: ServerComment): DocComment {
 		acked: !!r.acked,
 		review: !!r.review,
 		replacement: r.replacement,
+		insertAfter: !!r.insert_after,
 		decision: r.decision,
 		decidedBy: r.decided_by,
 		newReplyIds: r.new_reply_ids ?? [],

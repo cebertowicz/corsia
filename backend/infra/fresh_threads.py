@@ -171,8 +171,12 @@ async def create_visible_fresh_thread(
     emit_spawn_chip: bool = False,
     account_id: str | None = None,
     actor_thread_id: str | None = None,
+    confined_read_dirs: tuple[str, ...] = (),
 ) -> dict:
     """Create a fresh visible thread and publish its visibility side effects.
+
+    Non-empty ``confined_read_dirs`` makes it a ``review`` worker in the same
+    write (``infra.thread_confinement``), outside any host-access lineage.
 
     This is the shared fresh-create/spawn primitive. It preserves the selected
     ``model`` as dispatch truth and only writes the existing ``spawned_by`` +
@@ -189,7 +193,7 @@ async def create_visible_fresh_thread(
                 raise SpawnVisibilityRejected(
                     "spawned_by: thread not found or not owned by the authenticated user"
                 )
-            return create_fresh_thread(
+            created = create_fresh_thread(
                 user_id=user_id,
                 thread_id=thread_id,
                 profile=profile,
@@ -204,9 +208,15 @@ async def create_visible_fresh_thread(
                 actor_thread_id=actor_thread_id,
                 db=db,
             )
+            if confined_read_dirs:
+                from infra import thread_confinement
+                from subagents.cc_invocation import CONFINEMENT_REVIEW
+
+                thread_confinement.record(db, created["id"], CONFINEMENT_REVIEW, confined_read_dirs)
+            return created
 
     session = await run_in_db(_create)
-    if spawned_by:
+    if spawned_by and not confined_read_dirs:
         from host_access.supervisor import register_host_access_descendant
 
         register_host_access_descendant(

@@ -135,7 +135,7 @@ async function openChat(page: Page, state: FrameState) {
 	await expect(sheet).toBeVisible();
 	await expect(page.getByText('Loading this chat…')).toHaveCount(0);
 	await expect(page.locator('.empty-chat')).toBeVisible();
-	const emptyArtifactPane = page.getByText('Files you create, upload, or open in this thread show up here.');
+	const emptyArtifactPane = page.getByText('Files you create, upload, or open in this chat show up here.');
 	await expect(emptyArtifactPane).toHaveCount(1);
 	if ((page.viewportSize()?.width ?? 0) > 768) await expect(emptyArtifactPane).toBeVisible();
 	if (BEFORE) await page.addStyleTag({ content: '.local-only-setting { display: none !important; }' });

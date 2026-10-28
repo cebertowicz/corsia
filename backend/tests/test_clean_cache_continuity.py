@@ -506,7 +506,7 @@ async def test_codex_restart_restores_before_preparing_current_turn(
     registry = object()
     monkeypatch.setattr(
         "subagents.codex_destination_render.codex_destination_scope",
-        lambda *_args, **_kwargs: (None, str(tmp_path)),
+        lambda *_args, **_kwargs: (None, str(tmp_path), False),
     )
     monkeypatch.setattr(
         "subagents.codex_context_reconstruction.build_codex_context_reconstruction",
@@ -518,7 +518,7 @@ async def test_codex_restart_restores_before_preparing_current_turn(
     )
     monkeypatch.setattr(
         "subagents.harness_tool_bridge.dynamic_tool_definitions",
-        lambda _registry: (),
+        lambda _registry, _thread_context=None: (),
     )
 
     destination = prepare_codex_destination_payload(

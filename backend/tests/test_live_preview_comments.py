@@ -176,7 +176,7 @@ async def test_a_target_the_tool_would_refuse_is_never_previewed(doc):
 
 async def test_an_edit_frame_names_its_kind(doc, monkeypatch):
     monkeypatch.setattr("doceditor.live_tools.find_live", lambda path: SimpleNamespace(live=doc.live, policy=None))
-    monkeypatch.setattr("tools.filesystem_gate._resolve_path", lambda path, workspace, **_: workspace / path)
+    monkeypatch.setattr("tools.filesystem_gate.resolve_path", lambda path, workspace, **_: workspace / path)
     route = PreviewRoute()
     route.start("call-1", thread_id="thread-a", turn_id="turn-1", tool="edit_file", workspace=doc.workspace)
     route.update("call-1", json.dumps({"path": "doc.md", "old_string": "naps", "new_string": "sleeps"}))

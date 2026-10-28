@@ -1369,7 +1369,7 @@
       "raw_shadows": 0,
       "row_menu_buttons": 0
     },
-    "frontend/src/lib/components/MobileScrollFab.svelte": {
+    "frontend/src/lib/components/ChatScrollControl.svelte": {
       "raw_colors": 0,
       "raw_px": 4,
       "heavy_borders": 0,

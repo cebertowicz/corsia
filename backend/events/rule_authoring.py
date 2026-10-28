@@ -18,17 +18,16 @@ import json
 import sqlite3
 import uuid
 from collections.abc import Mapping
-from datetime import datetime, timedelta
 from typing import Any
 
-from events import rule_declarations, rule_explain, rule_reads, rules
+from events import observe_rules, rule_declarations, rule_explain, rule_reads, rules
+from events.rule_listing import OUTCOME_JOINS, OUTCOME_SCOPE, shape as _shape
 from events.rule_actions import RuleRefused, check_script, check_worker
 from events.connectors import EventTypeDecl, get_manifest
 from events.rule_match import matches
 from infra.queries import thread_available_sql, thread_is_temporary
 
 _EXPLAIN_LIMIT = 50
-_STARTS = "'queued','running','ran','failed','started','returned','invalid','no_result'"
 
 
 def _thread(db: sqlite3.Connection, thread_id: str) -> Mapping[str, Any] | None:
@@ -166,12 +165,16 @@ def _recipient(
 
 def create(
     db: sqlite3.Connection, *, writer: str, project_id: str | None, connector: Any,
-    event_type: Any, match: Any = None, action: Any = rules.DELIVER, to: Any = None,
+    event_type: Any, match: Any = None, action: Any = None, to: Any = None,
     mode: Any = None, note: Any = None, scope: Any = None, now: str,
     tracked: frozenset[str] | None = None, script_id: Any = None, workflow_id: Any = None,
     request_identity_fact: Any = None, workflows: Mapping[str, Any] | None = None,
+    kind: Any = None, tool: Any = None, argv_prefix: Any = None, item_type: Any = None,
 ) -> dict[str, Any]:
     """Write one rule within the writer limits, or raise :class:`RuleRefused`.
+
+    ``kind: observe`` writes an observe row from ``tool``, ``argv_prefix`` and ``item_type``
+    (``events.observe_rules``); every other argument is a route rule's.
 
     ``tracked`` is :func:`tracked_repositories` and ``workflows`` is
     :func:`events.rule_actions.reachable_workflows`, both read before the transaction.
@@ -189,6 +192,14 @@ def create(
         raise RuleRefused(
             f"You can only write rules about events you can already read: those in your own "
             f"project ({own_scope}). {_who_sets_it_up(db, project_id)}")
+    if kind not in (None, rules.ROUTE, observe_rules.OBSERVE):
+        raise RuleRefused("kind is route or observe")
+    if kind == observe_rules.OBSERVE:
+        strays = dict(event_type=event_type, match=match, action=action, to=to, mode=mode, note=note,
+                      script_id=script_id, workflow_id=workflow_id, request_identity_fact=request_identity_fact)
+        return observe_rules.create(db, writer=row, scope=own_scope, now=now, tool=tool, argv_prefix=argv_prefix,
+                                    item_type=item_type, connector=connector, strays=strays)
+    action = rules.DELIVER if action is None else action
     decl = _decl(db, connector, event_type)
     tests = _match(match, decl)
     declared = rule_declarations.declared_event(db, connector, event_type)
@@ -238,8 +249,14 @@ def disable(
 ) -> dict[str, Any]:
     """Turn one rule off: its writer, its recipient or the project's conductor may."""
     row = db.execute("SELECT * FROM event_rules WHERE id=?", (rule_id,)).fetchone()
-    if row is None or not project_id or row["scope"] != rules.project_scope(project_id):
+    if row is None or not project_id or row["scope"] not in (
+            rules.project_scope(project_id), observe_rules.SHIPPED_SCOPE):
         raise RuleRefused(f"no rule {rule_id!r} in this project")
+    if row["kind"] == observe_rules.OBSERVE:
+        observe_rule = observe_rules.from_row(row)
+        observe_rules.check_disable(observe_rule, caller)
+        rules.turn_off(db, observe_rule.id, row["scope"], now)
+        return {**observe_rules.shape(observe_rule), "enabled": False}
     rule = rules.from_row(row)
     delivered_to_caller = db.execute(
         "SELECT 1 FROM event_route_decisions WHERE rule_id=? AND thread_id=? "
@@ -253,53 +270,6 @@ def disable(
             "the project's conductor can turn it off.")
     rules.turn_off(db, rule.id, row["scope"], now)
     return {**_shape(rule), "enabled": False}
-
-
-def _shape(rule: rules.Rule) -> dict[str, Any]:
-    return {
-        "id": rule.id, "enabled": rule.enabled, "connector": rule.connector,
-        "event_type": rule.event_type, "match": list(rule.match), "action": rule.action,
-        "to": rule.to, "mode": rule.mode, "note": rule.note, "written_by": rule.created_by,
-        "script_id": rule.script_id, "workflow_id": rule.workflow_id,
-        "request_identity_fact": rule.request_identity_fact,
-    }
-
-
-def list_rules(db: sqlite3.Connection, *, project_id: str | None, now: str) -> list[dict[str, Any]]:
-    """The project's rules (disabled ones only within retention), last action, and 24h wakes,
-    script starts and skipped runs."""
-    if not project_id:
-        return []
-    cutoff = (datetime.fromisoformat(now) - rules.RETENTION).isoformat()
-    found = [rules.from_row(row) for row in db.execute(
-        "SELECT * FROM event_rules WHERE scope=? AND (enabled=1 OR updated_at>=?) "
-        "ORDER BY created_at, id",
-        (rules.project_scope(project_id), cutoff),
-    ).fetchall()]
-    if not found:
-        return []
-    since = (datetime.fromisoformat(now) - timedelta(hours=24)).isoformat()
-    marks = ",".join("?" * len(found))
-    # A start is a script run or a worker start, queued or begun.
-    started = f"outcome IN ({_STARTS})"
-    stats = {
-        row["rule_id"]: row for row in db.execute(
-            "SELECT rule_id, MAX(CASE WHEN outcome IN ('woke','digested','dropped') OR "
-            f"{started} THEN at END) AS last_fired, SUM(outcome='woke' AND via='rule' AND at>=?) "
-            f"AS wakes, SUM({started} AND at>=?) AS starts, "
-            "SUM(outcome='skipped' AND at>=?) AS skips "
-            f"FROM event_route_decisions WHERE rule_id IN ({marks}) GROUP BY rule_id",
-            (since, since, since, *(rule.id for rule in found)),
-        ).fetchall()
-    }
-    return [
-        {**_shape(rule),
-         "last_fired": stats[rule.id]["last_fired"] if rule.id in stats else None,
-         "wakes_24h": int(stats[rule.id]["wakes"] or 0) if rule.id in stats else 0,
-         "starts_24h": int(stats[rule.id]["starts"] or 0) if rule.id in stats else 0,
-         "skips_24h": int(stats[rule.id]["skips"] or 0) if rule.id in stats else 0}
-        for rule in found
-    ]
 
 
 def dry_run(
@@ -353,8 +323,9 @@ def explain(
         raise RuleRefused("give event_id, event_type, or artifact (the file's external id)")
     if not project_id:
         return {"decisions": [], "summary": "Rules cover a project's events; this chat is in no project."}
-    where = ["r.scope=?"]
-    args: list[Any] = [rules.project_scope(project_id)]
+    # A shipped rule set's rule is global: its outcomes show here only for this project's chats.
+    where = [OUTCOME_SCOPE]
+    args: list[Any] = [rules.project_scope(project_id), observe_rules.SHIPPED_SCOPE, project_id]
     if event_id:
         where.append("d.event_id=?")
         args.append(event_id)
@@ -365,7 +336,7 @@ def explain(
         where.append("d.thread_id=?")
         args.append(thread)
     rows = db.execute(
-        "SELECT d.*, r.action FROM event_route_decisions d JOIN event_rules r ON r.id=d.rule_id "
+        f"SELECT d.*, r.action FROM event_route_decisions d {OUTCOME_JOINS} "
         f"WHERE {' AND '.join(where)} ORDER BY d.id DESC LIMIT ?",
         (*args, _EXPLAIN_LIMIT),
     ).fetchall()

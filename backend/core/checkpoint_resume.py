@@ -52,6 +52,7 @@ class ProviderBoundary:
     render_installed: RenderInstalled
     wait_scope: CheckpointWaitScope
     eager_checkpoint_id: str | None = None
+    recovery_input_tokens: int | None = None
 
     def unavailable(
         self, detail: str, *, limited_target: str | None = None,
@@ -168,6 +169,7 @@ def _payload(
         checkpoint_status=active.status if active is not None else None,
         installed_input_tokens=(installed.input_tokens if installed else None),
         checkpoint_admissible=boundary.prepare_checkpoint is not None,
+        recovery_input_tokens=boundary.recovery_input_tokens,
     )
 
 

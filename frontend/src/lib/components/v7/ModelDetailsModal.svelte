@@ -5,6 +5,7 @@
 	import type { ProviderModel } from '$lib/stores/providerModels';
 	import { IconButton, Modal, Section, StatePill } from '$lib/components/ui';
 	import CheckpointWindowEditor from './CheckpointWindowEditor.svelte';
+	import { canEditCheckpointWindow } from './modelWarning';
 	import ImageInputEditor from './ImageInputEditor.svelte';
 	import ModelLabelEditor from './ModelLabelEditor.svelte';
 
@@ -23,7 +24,7 @@
 
 	const { model, providerLabel, providerName, serverId, external = false, labelEditable = false, omlxAdminUrl, onChanged, onClose }: Props = $props();
 
-	const showsCheckpointing = $derived(!!model.dbId && (external || labelEditable || providerName === 'omlx'));
+	const showsCheckpointing = $derived(!!model.dbId && canEditCheckpointWindow(external, labelEditable, providerName));
 
 	const capLabels: Record<string, string> = {
 		vision: 'Vision · accepts image inputs',

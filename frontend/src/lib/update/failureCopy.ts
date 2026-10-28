@@ -58,18 +58,18 @@ function refusal(headline: string, body: string, retryLabel: string | null): Fai
 }
 
 function stopped(headline: string, body: string): FailureCopy {
-	return refusal(headline, body, 'Try again');
+	return refusal(headline, body, 'Retry');
 }
 
 function diskCopy(detail: string | null): FailureCopy {
 	const disk = diskNumbers(detail);
-	const body = disk ? `Needs ${disk.neededGb} GB free; this computer has ${disk.freeGb} GB. ${RAN_ON}` : RAN_ON;
+	const body = disk ? `Needs ${disk.neededGb} GB free; this computer has ${disk.freeGb} GB. Free up space, then select Retry. ${RAN_ON}` : `Free up space, then select Retry. ${RAN_ON}`;
 	return {
 		title: "Update didn't start",
 		headline: 'Not enough disk space for a safety backup.',
 		body,
 		toastLine: disk ? `Needs ${Math.max(1, disk.neededGb - disk.freeGb)} GB more free space` : null,
-		retryLabel: 'Try again after freeing space',
+		retryLabel: 'Retry',
 	};
 }
 
@@ -90,7 +90,7 @@ export function failureCopy(failure: UpdateFailure): FailureCopy {
 			headline: failure.client.message,
 			body: '',
 			toastLine: null,
-			retryLabel: 'Try again',
+			retryLabel: 'Retry',
 		};
 	}
 	switch (failure.code) {
@@ -102,7 +102,7 @@ export function failureCopy(failure: UpdateFailure): FailureCopy {
 				headline: "Couldn't download the update.",
 				body: RAN_ON,
 				toastLine: null,
-				retryLabel: 'Try again',
+				retryLabel: 'Retry',
 			};
 		case 'build_failed':
 			return {
@@ -110,7 +110,7 @@ export function failureCopy(failure: UpdateFailure): FailureCopy {
 				headline: "Couldn't build the update.",
 				body: KEPT_VERSION,
 				toastLine: null,
-				retryLabel: 'Try again',
+				retryLabel: 'Retry',
 			};
 		case 'launch_failed':
 			return {
@@ -118,7 +118,7 @@ export function failureCopy(failure: UpdateFailure): FailureCopy {
 				headline: "Couldn't start the restart.",
 				body: 'CORSIA is still running.',
 				toastLine: null,
-				retryLabel: 'Try again',
+				retryLabel: 'Retry',
 			};
 		case 'version_unverified':
 			return {
@@ -126,7 +126,7 @@ export function failureCopy(failure: UpdateFailure): FailureCopy {
 				headline: "Couldn't confirm the new version.",
 				body: "The update's last check didn't pass, so CORSIA can't tell which version is running.",
 				toastLine: null,
-				retryLabel: 'Try again',
+				retryLabel: 'Retry',
 			};
 		case 'wrong_version_running':
 			return {
@@ -134,7 +134,7 @@ export function failureCopy(failure: UpdateFailure): FailureCopy {
 				headline: 'CORSIA started a different version.',
 				body: "It isn't the version this update was for.",
 				toastLine: null,
-				retryLabel: 'Try again',
+				retryLabel: 'Retry',
 			};
 		case 'rolled_back':
 			return {
@@ -142,7 +142,7 @@ export function failureCopy(failure: UpdateFailure): FailureCopy {
 				headline: "Couldn't start the new version.",
 				body: KEPT_VERSION,
 				toastLine: null,
-				retryLabel: 'Try again',
+				retryLabel: 'Retry',
 			};
 		case 'drain_cancelled':
 			return {
@@ -150,7 +150,7 @@ export function failureCopy(failure: UpdateFailure): FailureCopy {
 				headline: 'The update was cancelled before CORSIA restarted.',
 				body: KEPT_VERSION,
 				toastLine: null,
-				retryLabel: 'Try again',
+				retryLabel: 'Retry',
 			};
 		case 'drain_failed':
 			return stopped("Your agents didn't reach a safe stopping point in time.", KEPT_VERSION);
@@ -161,13 +161,13 @@ export function failureCopy(failure: UpdateFailure): FailureCopy {
 		case 'index_locked':
 			return refusal(
 				"Another program is using CORSIA's files.",
-				`Wait for it to finish, then try again. If it doesn't clear, ask the CORSIA agent to remove the leftover lock. ${RAN_ON}`,
-				'Try again',
+				`Wait for it to finish, then select Retry. If it doesn’t clear, ask the CORSIA agent to remove the leftover lock. ${RAN_ON}`,
+				'Retry',
 			);
 		case 'checkout_detached':
 			return refusal("This copy of CORSIA can't update itself because it isn't set up to follow updates.", `Ask the CORSIA agent to switch it back. ${RAN_ON}`, null);
 		case 'checkout_dirty':
-			return refusal('This copy of CORSIA has local changes.', `Save or discard them, then try again. ${RAN_ON}`, 'Try again');
+			return refusal('This copy of CORSIA has local changes.', `Save or discard them, then select Retry. ${RAN_ON}`, 'Retry');
 		case 'restart_pending':
 			return { ...refusal('An update is ready and waiting for a restart.', `Restart CORSIA to finish it. ${KEPT_VERSION}`, 'Restart now'), retryAction: 'restart' };
 		default:
@@ -177,7 +177,7 @@ export function failureCopy(failure: UpdateFailure): FailureCopy {
 				headline: 'The update stopped before it finished.',
 				body: '',
 				toastLine: null,
-				retryLabel: 'Try again',
+				retryLabel: 'Retry',
 			};
 	}
 }

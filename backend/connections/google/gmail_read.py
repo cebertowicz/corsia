@@ -84,21 +84,21 @@ def _decode(data: str) -> str:
     return base64.urlsafe_b64decode(padded).decode("utf-8", "replace")
 
 
-def _parts(payload: dict[str, Any], mime: str) -> list[str]:
+def parts(payload: dict[str, Any], mime: str) -> list[str]:
     out: list[str] = []
     if payload.get("mimeType") == mime and (payload.get("body") or {}).get("data"):
         out.append(_decode(payload["body"]["data"]))
     for part in payload.get("parts") or []:
-        out.extend(_parts(part, mime))
+        out.extend(parts(part, mime))
     return out
 
 
 def body_text(payload: dict[str, Any]) -> str:
     """The message's plain text, or its HTML with tags removed when there is no plain part."""
-    plain = _parts(payload, "text/plain")
+    plain = parts(payload, "text/plain")
     if plain:
         return "\n".join(plain).strip()
-    rendered = [html.unescape(_TAGS.sub(" ", chunk)) for chunk in _parts(payload, "text/html")]
+    rendered = [html.unescape(_TAGS.sub(" ", chunk)) for chunk in parts(payload, "text/html")]
     return _BLANKS.sub("\n\n", "\n".join(rendered)).strip()
 
 

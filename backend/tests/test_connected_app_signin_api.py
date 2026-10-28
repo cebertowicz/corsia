@@ -1,4 +1,4 @@
-"""The sign-in routes: person only (C-R7, C-R9), this-Mac only (C-R8), and what a row shows (C-R1)."""
+"""The sign-in routes: person only (C-R7, C-R9), this-computer only (C-R8), and what a row shows (C-R1)."""
 
 from __future__ import annotations
 
@@ -80,7 +80,7 @@ def test_an_agent_is_refused_and_recorded_on_every_route(api, method, path):  # 
     assert len(audit(app_id)) == 1 and audit(app_id)[0].startswith("refused_")
 
 
-def test_a_person_on_this_mac_starts_a_sign_in_with_their_own_session(api):  # C-R2, C-R8
+def test_a_person_on_this_computer_starts_a_sign_in_with_their_own_session(api):  # C-R2, C-R8
     client, _, calls, app_id, _ = api
     response = client().post(f"/api/mcp/servers/{app_id}/sign-in", headers=AUTH)
     assert response.status_code == 200 and response.json()["authorization_url"].startswith("http://127.0.0.1")
@@ -104,11 +104,11 @@ def test_the_metadata_setting_reaches_the_flow_only_when_set(api, monkeypatch): 
     ("127.0.0.1", "127.0.0.1", ("X-Real-IP", "203.0.113.9")),
     ("localhost", "127.0.0.1", ("Tailscale-User-Login", "someone@example.test")),
 ])
-def test_sign_in_is_offered_only_on_the_mac_corsia_runs_on(api, host, peer, forwarded):  # C-R8
+def test_sign_in_is_offered_only_on_the_computer_corsia_runs_on(api, host, peer, forwarded):  # C-R8
     client, _, calls, app_id, _ = api
     headers = {**AUTH, **(dict([forwarded]) if forwarded else {})}
     response = client(host, peer).post(f"/api/mcp/servers/{app_id}/sign-in", headers=headers)
-    assert response.status_code == 409 and "Mac CORSIA runs on" in response.text and calls["start"] == []
+    assert response.status_code == 409 and "main computer" in response.text and calls["start"] == []
     assert client(host, peer).get("/api/mcp/servers", headers=headers).json()["sign_in_here"] is False
 
 
@@ -251,7 +251,7 @@ def test_agents_are_told_to_ask_the_person_to_sign_in():  # C-R7
     assert "Ask the person to press Sign in" in text and "try to sign in yourself" in text
 
 
-def test_same_mac_check_unit():  # C-R8
+def test_same_computer_check_unit():  # C-R8
     class Req:
         def __init__(self, host, peer, headers=(), scope=None):
             self.headers = {"host": host, **{name.lower(): value for name, value in headers}}

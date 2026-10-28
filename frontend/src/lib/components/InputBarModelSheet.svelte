@@ -229,7 +229,7 @@
 							{/if}
 						{#if $localStatus && hostsLocalSetup(group)}
 								{#if $localStatus.retry === 'settings'}
-									<div class="local-settings-status"><span class="text" aria-live="polite">{$localStatus.line}</span><button type="button" disabled={settingsRetrying} onclick={retrySettingsDownload}>{settingsRetrying ? 'Trying again…' : 'Try again'}</button></div>
+									<div class="local-settings-status"><span class="text" aria-live="polite">{$localStatus.line}</span><button type="button" disabled={settingsRetrying} onclick={retrySettingsDownload}>{settingsRetrying ? 'Retrying…' : 'Retry'}</button></div>
 								{:else}
 									<PickerLocalStatus line={$localStatus.line} retry={$localStatus.retry} onretry={retryLocal} />
 								{/if}
@@ -289,7 +289,7 @@
 						<PickerModelGroupHeader name="CORSIA" groupKey="local" count={0} fallback />
 						{#if $localStatus}
 								{#if $localStatus.retry === 'settings'}
-									<div class="local-settings-status"><span class="text" aria-live="polite">{$localStatus.line}</span><button type="button" disabled={settingsRetrying} onclick={retrySettingsDownload}>{settingsRetrying ? 'Trying again…' : 'Try again'}</button></div>
+									<div class="local-settings-status"><span class="text" aria-live="polite">{$localStatus.line}</span><button type="button" disabled={settingsRetrying} onclick={retrySettingsDownload}>{settingsRetrying ? 'Retrying…' : 'Retry'}</button></div>
 								{:else}
 									<PickerLocalStatus line={$localStatus.line} retry={$localStatus.retry} onretry={retryLocal} />
 								{/if}

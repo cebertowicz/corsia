@@ -17,6 +17,7 @@
 		orphaned?: boolean;
 		acked?: boolean;
 		replacement?: string | null;
+		insertAfter?: boolean;
 		decision?: 'accepted' | 'rejected' | null;
 		decidedBy?: string | null;
 		replies: CommentReplyData[];
@@ -90,7 +91,7 @@
 	const avatarColor = $derived(author.kind === 'agent' && comment.authorThreadId ? agentColor(comment.authorThreadId) : author.color);
 
 	const isSuggestion = $derived(comment.replacement !== undefined && comment.replacement !== null);
-	const suggestionDiff = $derived(isSuggestion ? lineDiff(comment.anchor, comment.replacement!) : null);
+	const suggestionDiff = $derived(isSuggestion ? lineDiff(comment.insertAfter ? '' : comment.anchor, comment.replacement!) : null);
 	let replyPosting = $state(false);
 	let decisionBusy = $state<'accept' | 'reject' | null>(null);
 	// A placement normally completes in the same render turn as a new card. Do not flash a line that cannot be read,
@@ -130,15 +131,6 @@
 
 	$effect(() => { if ((focusReply || (focused && selectable)) && !readOnly) replyField?.focus({ preventScroll: true }); });
 	$effect(() => { if (focused && el && scrollOnFocus) el.scrollIntoView({ block: 'nearest' }); });
-	function scrollContainer(element: HTMLElement) {
-		let parent = element.parentElement;
-		while (parent) {
-			const { overflowY } = getComputedStyle(parent);
-			if (overflowY === 'auto' || overflowY === 'scroll') return parent;
-			parent = parent.parentElement;
-		}
-		return null;
-	}
 	// One reply's own observer calls this with that reply's id, so nothing carries over from another element.
 	function stamp(replyId: string) {
 		if (document.visibilityState !== 'visible' || !comment.newReplyIds?.length) return;
@@ -167,12 +159,13 @@
 		const element = newestReply;
 		if (!element || typeof IntersectionObserver === 'undefined') return;
 		const replyId = element.dataset.replyId;
+		// The viewport root clips against every scroll ancestor, including one that is itself offscreen.
 		const observer = new IntersectionObserver((entries) => {
 			const entry = entries.at(-1);
 			if (!replyId) return;
 			if (entry?.isIntersecting && entry.intersectionRatio === 1) dwellThenStamp(replyId);
 			else cancelDwell(replyId);
-		}, { root: scrollContainer(element), threshold: 1 });
+		}, { root: null, threshold: 1 });
 		observer.observe(element);
 		return () => { observer.disconnect(); cancelDwell(replyId); };
 	});

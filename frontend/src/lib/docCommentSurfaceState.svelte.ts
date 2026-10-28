@@ -1,4 +1,5 @@
 import { EditorView } from '@codemirror/view';
+import { Transaction } from '@codemirror/state';
 import { get } from 'svelte/store';
 import type { Anchor as PopoverAnchor } from '$lib/components/ui/Popover.svelte';
 import { cancelCommentCapture } from '$lib/stores/commentDraft';
@@ -16,7 +17,11 @@ export type CommentSurfaceState = { kind: 'draft' } | { kind: 'thread'; id: stri
  */
 export function focusDocumentEditor(root: HTMLElement | undefined) {
 	const content = root?.querySelector<HTMLElement>('.cm-content');
-	(content && EditorView.findFromDOM(content))?.focus();
+	const view = content && EditorView.findFromDOM(content);
+	if (!view) return;
+	const selection = view.state.selection.main;
+	if (!selection.empty) view.dispatch({ selection: { anchor: selection.head }, annotations: Transaction.userEvent.of('select.doc-comment') });
+	view.focus();
 }
 
 /** One owner for the canvas's anchored thread/draft and whole-document list. */

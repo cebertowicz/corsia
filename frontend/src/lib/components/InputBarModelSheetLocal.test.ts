@@ -139,7 +139,7 @@ describe('the picker\'s Local group', () => {
 		expect(fallback.querySelector('.model-group-bar')?.textContent?.trim()).toBe('CORSIA');
 		expect(fallback.textContent).toContain('Downloading 40%');
 		expect(fallback.textContent).not.toContain('ready');
-		expect(button('Try again')).toBeUndefined();
+		expect(button('Retry')).toBeUndefined();
 	});
 
 	it('says only Downloading before a percent is known', async () => {
@@ -161,7 +161,7 @@ describe('the picker\'s Local group', () => {
 	it('retries a failed setup through the setup route', async () => {
 		omlx = { local_state: 'failed', setup_kind: 'setup' };
 		await render();
-		button('Try again')!.click();
+		button('Retry')!.click();
 		await vi.waitFor(() => expect(calls).toContain('POST /api/providers/local/setup'));
 		expect(calls).not.toContain('POST /api/providers/local/starter');
 	});
@@ -169,7 +169,7 @@ describe('the picker\'s Local group', () => {
 	it('retries a failed starter download through the starter route, never the setup route', async () => {
 		omlx = { local_state: 'failed', setup_kind: 'starter' };
 		await render();
-		button('Try again')!.click();
+		button('Retry')!.click();
 		await vi.waitFor(() => expect(calls).toContain('POST /api/providers/local/starter'));
 		expect(calls).not.toContain('POST /api/providers/local/setup');
 	});
@@ -178,25 +178,25 @@ describe('the picker\'s Local group', () => {
 		omlx = { settings_download: { name: 'Qwen 3.8 27B', repository: 'Jundot/Qwen3.8-27B-oQ4e', percent: 42, failed: false } };
 		await render();
 		expect(host.textContent).toContain('Downloading Qwen 3.8 27B · 42%');
-		expect(button('Try again')).toBeUndefined();
+		expect(button('Retry')).toBeUndefined();
 	});
 
 	it('retries a durable Settings download failure with its stored repository', async () => {
 		omlx = { settings_download: { name: 'Qwen 3.8 27B', repository: 'Jundot/Qwen3.8-27B-oQ4e', percent: 42, failed: true } };
 		await render();
 		expect(host.textContent).toContain('Couldn’t download Qwen 3.8 27B.');
-		button('Try again')!.click();
+		button('Retry')!.click();
 		await vi.waitFor(() => expect(calls).toContain('POST /api/providers/local/downloads'));
 		expect(downloadBodies).toEqual([{ repository: 'Jundot/Qwen3.8-27B-oQ4e' }]);
 		expect(calls).not.toContain('POST /api/providers/local/setup');
 		expect(calls).not.toContain('POST /api/providers/local/starter');
 	});
 
-	it('retries setup from Try again and says so when it fails', async () => {
+	it('retries setup from Retry and says so when it fails', async () => {
 		omlx = { local_state: 'failed', setup_kind: 'setup' };
 		await render();
 		setupResponses = ['failure'];
-		button('Try again')!.click();
+		button('Retry')!.click();
 		await vi.waitFor(() => expect(setupBodies).toEqual([{}]));
 		await vi.waitFor(() => expect(get(toasts)[0]?.message).toBe("Couldn't set up the local model."));
 	});
@@ -205,15 +205,15 @@ describe('the picker\'s Local group', () => {
 		omlx = { local_state: 'failed', setup_kind: 'setup' };
 		await render();
 		setupResponses = ['never-local'];
-		button('Try again')!.click();
+		button('Retry')!.click();
 		await vi.waitFor(() => expect(get(toasts)[0]?.message).toBe("Local models don't run on this computer. Connect a provider."));
 	});
 
-	it('shows a failure with no setup_kind without Try again', async () => {
+	it('shows a failure with no setup_kind without Retry', async () => {
 		omlx = { local_state: 'failed' };
 		await render();
 		expect(host.textContent).toContain('Setup failed');
-		expect(button('Try again')).toBeUndefined();
+		expect(button('Retry')).toBeUndefined();
 	});
 
 	it('puts the line inside the existing Local group when it already lists models', async () => {

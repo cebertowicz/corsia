@@ -19,7 +19,7 @@
     "/api/threads/{thread_id}/messages?limit=50&view=focus"
   ],
   "progress_every": 1,
-  "reason": "Machine tokens without a thread are now refused on /api/google/status, matching /api/connected-apps; agents are reach-filtered and the person path is unchanged",
+  "reason": "The thread artifact pane no longer reads shared roots to classify shared documents, which are now task-scoped",
   "route_ceilings": {
     "/api/threads/{thread_id}/messages?limit=50&view=focus": {
       "bytes": 131072
@@ -323,7 +323,7 @@
     },
     "/api/threads/{thread_id}/artifacts": {
       "bytes": 5725,
-      "statements": 30,
+      "statements": 8,
       "steps": 2289
     },
     "/api/threads/{thread_id}/artifacts/reconcile": {

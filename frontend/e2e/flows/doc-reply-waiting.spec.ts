@@ -24,6 +24,23 @@ function makeAgentReply(replyId: string, threadId: string): void {
 		].join('\n'), path.join(stateRoot, 'corsia.db'), replyId, threadId,
 	], { cwd: repoRoot, encoding: 'utf8' });
 }
+function seedPlan(threadId: string): void {
+	const python = process.env.CORSIA_E2E_BACKEND_PYTHON;
+	const workspace = process.env.CORSIA_E2E_WORKSPACE;
+	const state = process.env.CORSIA_E2E_STATE_DIR;
+	if (!python || !workspace || !state || process.env.CORSIA_E2E_MOCK !== '1') throw new Error('Requires isolated synthetic state');
+	execFileSync(python, ['-c', [
+		'import runpy',
+		'runpy.run_path("frontend/e2e/support/focus-outcomes.py")["assert_disposable_roots"]()',
+		'from infra.database import get_db',
+		'from plans import service',
+		'import sys',
+		'db = get_db()',
+		'plan = service.ensure_plan("thread", sys.argv[1], db=db)',
+		'service.add_node(plan.id, kind="task", title="Review launch", acceptance_criteria="Review the plan", db=db)',
+		'db.commit()',
+	].join('\n'), threadId], { cwd: repoRoot, env: { ...process.env, PYTHONPATH: 'backend', CORSIA_TEST_MODE: '1', CORSIA_WORKSPACE: workspace, CORSIA_STATE_DIR: state } });
+}
 function seedDecision(threadId: string): void {
 	const python = process.env.CORSIA_E2E_BACKEND_PYTHON;
 	const workspace = process.env.CORSIA_E2E_WORKSPACE;
@@ -438,16 +455,12 @@ async function serveReplyQueue(
 		const items = waiting.map(({ document, thread }) => {
 			const reply = thread.replies!.find((candidate) => candidate.id === thread.new_reply_ids!.at(-1))!;
 			return {
-				external_id: `reply-${thread.id}`,
-				renderer: 'comment-reply',
 				detail: {
-					id: `reply-${thread.id}`,
 					title: document.name,
-
 					unread_count: thread.new_reply_ids!.length,
 					newest_at: reply.created_at,
 					destination: { pane: 'document-replies', id: document.artifactId, path: document.docPath, title: document.name },
-					source: { thread_id: threadId, thread_label: reply.author },
+					source: { thread_id: threadId },
 				},
 			};
 		});
@@ -1024,9 +1037,9 @@ for (const width of [1440, 393]) {
 			const failurePanel = page.locator('.load-error');
 			await expect(failurePanel).toBeVisible();
 			await expect(failurePanel).toContainText("Couldn't open launch-plan.md.");
-			await expect(failurePanel.getByRole('button', { name: 'Try again' })).toBeVisible();
+			await expect(failurePanel.getByRole('button', { name: 'Retry' })).toBeVisible();
 			await shot(page, `07-failed-open-${theme}-${width}`);
-			await failurePanel.getByRole('button', { name: 'Try again' }).click();
+			await failurePanel.getByRole('button', { name: 'Retry' }).click();
 			await expect(failurePanel).toContainText("Couldn't open launch-plan.md.");
 		});
 	}
@@ -1091,8 +1104,8 @@ for (const theme of ['light', 'dark'] as const) {
 			documentAvailable = false;
 			await chip.click();
 			const removed = page.locator('.gone');
-			await expect(removed.getByText('launch-plan.md is no longer available.', { exact: true })).toBeVisible();
-			await expect(removed.getByRole('button', { name: 'Try again' })).toHaveCount(0);
+			await expect(removed.getByText('launch-plan.md is unavailable.', { exact: true })).toBeVisible();
+			await expect(removed.getByRole('button', { name: 'Retry' })).toHaveCount(0);
 			await expect(page.locator('.row.openable', { hasText: 'launch-plan.md' })).toHaveCount(0);
 			await shot(page, `07b-removed-document-${theme}-${width}`);
 			await removed.getByRole('button', { name: 'Close tab' }).click();
@@ -1102,6 +1115,33 @@ for (const theme of ['light', 'dark'] as const) {
 			await expect(page.locator('[data-attention-dock]')).toHaveCount(0);
 		});
 	}
+}
+
+for (const theme of ['light', 'dark'] as const) {
+	test(`${TAG} hidden worker reply reaches visible chat ${theme}`, async ({ page, request }, testInfo) => {
+		test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires isolated synthetic state');
+		skipMismatchedProject(1440, testInfo.project.name);
+		await page.setViewportSize({ width: 1440, height: 900 });
+		await page.emulateMedia({ colorScheme: theme });
+		const threadId = await createSession(request, THREAD_TITLE);
+		await onlyThread(request, threadId);
+		const childId = await createSession(request, 'Reviewer');
+		sqlite([["UPDATE threads SET spawned_by=? WHERE id=?", [threadId, childId]]]);
+		const scenario = await seedScenario(page, request, threadId, `hidden-worker-${theme}`, []);
+		addAgentReply(scenario.artifactId, scenario.roots[0], childId, PASSAGES[0].reply);
+		const response = await request.get('/api/attention/queue', { params: { token: TEST_TOKEN } });
+		expect((await response.json()).reply_items[0].detail.source.thread_id).toBe(threadId);
+		await loginByUrl(page);
+		await openThread(page, THREAD_TITLE);
+		const notice = page.locator('.reply-chip-notice');
+		await expect(notice.getByRole('button')).toContainText('1 new reply · launch-plan.md');
+		await shot(page, `visible-root-chip-${theme}`);
+		await notice.getByRole('button').click();
+		await documentReady(page);
+		await expect(page.getByText(PASSAGES[0].reply, { exact: true })).toBeVisible();
+		await expect(notice).toHaveCount(0, { timeout: 10_000 });
+		await shot(page, `visible-root-cleared-${theme}`);
+	});
 }
 
 test(`${TAG} real queue: open the chip and read its reply`, async ({ page, request }, testInfo) => {
@@ -1185,9 +1225,9 @@ for (const theme of ['light', 'dark'] as const) {
 }
 
 for (const theme of ['light', 'dark'] as const) {
-	for (const width of [1440, 393]) {
+	for (const width of [1440, 1920, 393]) {
 		for (const withDecision of [false, true]) {
-			test(`${TAG} ${theme} ${width}px: backdrop covers transcript with ${withDecision ? 'a decision' : 'only a reply'}`, async ({ page, request }, testInfo) => {
+			test(`${TAG} ${theme} ${width}px: transparent controls above the transcript with ${withDecision ? 'a decision' : 'only a reply'}`, async ({ page, request }, testInfo) => {
 				test.setTimeout(60_000);
 				test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires isolated synthetic state');
 				skipMismatchedProject(width, testInfo.project.name);
@@ -1195,13 +1235,15 @@ for (const theme of ['light', 'dark'] as const) {
 				await page.emulateMedia({ colorScheme: theme });
 				const threadId = await createSession(request, THREAD_TITLE);
 				await onlyThread(request, threadId);
-				const scenario = await seedScenario(page, request, threadId, `backdrop-${theme}-${width}-${withDecision}`, []);
+				const scenario = await seedScenario(page, request, threadId, `backdrop-${theme}-${width}-${withDecision}`, [],
+					width === 393 && !withDecision ? { name: LONG_DOCUMENT_NAME } : {});
 				const longBubble = Array(80).fill('Please check the launch owners, the release schedule, and the support coverage before the announcement.').join(' ');
 				await injectMessage(request, threadId, { role: 'user', content: longBubble }, TEST_TOKEN);
 				await injectMessage(request, threadId, { role: 'assistant', content: 'I will review those details.' }, TEST_TOKEN);
 				sqlite([['UPDATE messages SET created_at=? WHERE thread_id=?', [FROZEN_UTC, threadId]]]);
 				// An existing decision starts collapsed; a newly arriving decision auto-opens.
 				if (withDecision) seedDecision(threadId);
+				else seedPlan(threadId);
 				await loginByUrl(page);
 				await openThread(page, THREAD_TITLE);
 				const messages = page.locator('.messages');
@@ -1211,22 +1253,57 @@ for (const theme of ['light', 'dark'] as const) {
 				await messages.evaluate((el) => { el.scrollTop = (el.scrollHeight - el.clientHeight) / 2; el.dispatchEvent(new WheelEvent('wheel', { deltaY: -1, bubbles: true })); el.dispatchEvent(new Event('scroll')); });
 				if (!withDecision) {
 					await expect(page.locator('.attention-dock')).toHaveCount(0);
-					const oldArrow = width === 393 ? page.locator('.mobile-scroll-fab') : page.locator('.scroll-fab');
-					await expect(oldArrow).toBeVisible();
-					await expect(oldArrow.locator('xpath=ancestor::*[contains(@class,"attention-dock")]')).toHaveCount(0);
+					const arrowBeforeReply = page.locator('.chat-attention-stack > .chat-scroll-control');
+					await expect(arrowBeforeReply).toBeVisible();
+					await expect(arrowBeforeReply.locator('xpath=ancestor::*[contains(@class,"attention-dock")]')).toHaveCount(0);
 				}
 				addAgentReply(scenario.artifactId, scenario.roots[0], threadId, PASSAGES[0].reply);
 				await page.evaluate(async () => (await import('/src/lib/stores/attentionDock.svelte.ts')).reload());
 				const dock = page.locator('.attention-dock');
 				await expect(dock).toBeVisible();
 				await expect(dock.locator('.reply-chip-notice')).toBeVisible();
-				await expect(dock.locator('.mobile-scroll-fab')).toBeVisible();
-				await expect(page.locator('.scroll-fab')).toHaveCount(0);
+				const arrow = page.locator('.chat-attention-stack > .chat-scroll-control');
+				await expect(arrow).toBeVisible();
+				await expect(page.locator('.chat-scroll-control:visible, .scroll-fab:visible')).toHaveCount(1);
+				await expect(dock.locator('.chat-scroll-control')).toHaveCount(0);
+				for (const surface of [dock, page.locator('.chat-attention-stack')]) {
+					const background = await surface.evaluate(el => ({ color: getComputedStyle(el).backgroundColor, image: getComputedStyle(el).backgroundImage }));
+					expect(background).toEqual({ color: 'rgba(0, 0, 0, 0)', image: 'none' });
+				}
+				if (width === 393) {
+					const plan = page.locator('.plan-progress-chip');
+					await expect(plan).toBeVisible();
+					const arrowBox = (await arrow.boundingBox())!;
+					const planBox = (await plan.boundingBox())!;
+					const noticeBox = (await dock.locator('.reply-chip-notice').boundingBox())!;
+					expect(Math.abs((arrowBox.y + arrowBox.height / 2) - (planBox.y + planBox.height / 2))).toBeLessThanOrEqual(1);
+					expect(noticeBox.y + noticeBox.height).toBeLessThanOrEqual(arrowBox.y);
+					expect(arrowBox.width).toBeGreaterThanOrEqual(44);
+					expect(planBox.height).toBeGreaterThanOrEqual(44);
+				}
+				if (!withDecision) {
+					const blankHit = await dock.evaluate(el => {
+						const box = el.getBoundingClientRect();
+						const hit = document.elementFromPoint(box.right - 8, box.top + 4);
+						return !!hit && !el.contains(hit);
+					});
+					expect(blankHit, 'Blank dock space passes pointer input to the transcript').toBe(true);
+				}
 				if (withDecision) {
 					await expect.poll(async () => {
 						await page.evaluate(async () => (await import('/src/lib/stores/attentionDock.svelte.ts')).reload());
 						return dock.locator('.dock-bar').count();
 					}).toBe(1);
+					const bar = dock.locator('.dock-bar');
+					await expect(bar).not.toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+					await bar.focus();
+					await expect(bar).not.toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+					await bar.evaluate(el => el.blur());
+					if (width !== 393) {
+						await bar.hover();
+						await expect(bar).not.toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+						await page.mouse.move(0, 0);
+					}
 				} else await expect(dock.locator('.dock-bar')).toHaveCount(0);
 				const bubble = messages.locator('.user-bubble-wrapper', { hasText: longBubble });
 				const overlap = await bubble.evaluate((element) => {
@@ -1236,6 +1313,26 @@ for (const theme of ['light', 'dark'] as const) {
 				});
 				expect(overlap, 'The long user bubble is directly behind the reply chip').toBe(true);
 				await shot(page, `12-backdrop-${withDecision ? 'needs-you' : 'reply-only'}-${theme}-${width}`, 5);
+				if (width === 393 && withDecision) {
+					await dock.locator('.dock-bar').click();
+					const decisionDrawer = page.getByRole('dialog', { name: /^Decision —/ });
+					await expect(decisionDrawer).toBeVisible();
+					await shot(page, `13-decision-expanded-${theme}-${width}`, 5);
+					await page.keyboard.press('Escape');
+					await expect(decisionDrawer).toBeHidden();
+				}
+				if (width === 393) {
+					await page.locator('.plan-progress-chip').click();
+					const drawer = page.getByRole('dialog', { name: /^Plan —/ });
+					await expect(drawer).toBeVisible();
+					await drawer.getByRole('button', { name: 'Done' }).click();
+					await expect(drawer).toBeHidden();
+				}
+				await arrow.click();
+				await expect.poll(() => messages.evaluate(el => el.scrollHeight - el.clientHeight - el.scrollTop)).toBeLessThan(3);
+				await dock.locator('.reply-chip-notice button').click();
+				await documentReady(page);
+				await expect(page.getByText(PASSAGES[0].reply, { exact: true })).toBeVisible();
 				if (withDecision) {
 					const queue = await request.get('/api/attention/queue', { params: { token: TEST_TOKEN } });
 					const decision = (await queue.json()).current.detail;

@@ -177,7 +177,7 @@ TOOL_CATALOG: dict[str, ToolCatalogEntry] = {
         "browser", summary="Open a URL in the browser", activity="Opening",
     ),
     "browser_snapshot": _Entry(
-        "browser", summary="Read the page's accessibility tree and element refs",
+        "browser", summary="Read the page's tree and element refs; list or switch tabs",
         activity="Reading page",
     ),
     "browser_click": _Entry(
@@ -242,12 +242,12 @@ TOOL_CATALOG: dict[str, ToolCatalogEntry] = {
         activity="Checking the agents' GitHub account",
     ),
     "email_search": _Entry(
-        "email", status="active", authority="conductor-api",
+        "email", status="active", authority="conductor-api", account_bound=True,
         summary="Search the person's Gmail or other-host email: headers only, no body text",
         activity="Searching mail",
     ),
     "email_read": _Entry(
-        "email", status="active", authority="conductor-api",
+        "email", status="active", authority="conductor-api", account_bound=True,
         summary="Read one email after the local screen; a flagged message returns no body",
         activity="Reading mail",
     ),
@@ -262,27 +262,27 @@ TOOL_CATALOG: dict[str, ToolCatalogEntry] = {
         activity="Checking Google sign-in",
     ),
     "email_draft": _Entry(
-        "email", status="active", authority="conductor-api",
+        "email", status="active", authority="conductor-api", account_bound=True,
         summary="Save an email as a draft document for the person to review; nothing is sent",
         activity="Drafting email",
     ),
     "email_send": _Entry(
-        "email", status="active", authority="conductor-api", serious_effect=True,
+        "email", status="active", authority="conductor-api", serious_effect=True, account_bound=True,
         summary="Send a saved email draft after the person says to send it",
         activity="Sending email",
     ),
     "calendar_list": _Entry(
-        "email", status="active", authority="conductor-api",
+        "email", status="active", authority="conductor-api", account_bound=True,
         summary="List the person's Google or other-host calendar events, up to 31 days at a time",
         activity="Reading calendar",
     ),
     "calendar_draft_invite": _Entry(
-        "email", status="active", authority="conductor-api",
+        "email", status="active", authority="conductor-api", account_bound=True,
         summary="Save a calendar invite as a draft document for the person to review; nothing is sent",
         activity="Drafting invite",
     ),
     "calendar_send_invite": _Entry(
-        "email", status="active", authority="conductor-api", serious_effect=True,
+        "email", status="active", authority="conductor-api", serious_effect=True, account_bound=True,
         summary="Send a saved invite draft after the person says to send it; attendees get emails",
         activity="Sending invite",
     ),

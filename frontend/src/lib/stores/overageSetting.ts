@@ -1,14 +1,14 @@
 import { derived } from 'svelte/store';
 import { pickerAccounts, type PickerPolicy } from './accountPicker';
 import { HARNESSES } from './harnessMembership';
-import { resetLabel } from './modelGroups';
+import { earliestReset, resetLabel } from './resetTime';
 import { accountTurn, activeModelId, findModelById, models, modelAvailability, type Model, type RunsOn } from './models';
 import { activeThreadId } from './threads';
 import type { VendorAccount } from './vendorAccounts';
 
-/** The approved copy, identical for Claude Code and Codex (#2477 amendment 12). */
-export const OVERAGE_SWITCH_LABEL = 'Spend past plan limit';
-export const PAUSED_AT_PLAN_LIMIT = 'Paused: plan limit reached';
+/** Identical for Claude Code and Codex. */
+export const OVERAGE_SWITCH_LABEL = 'Spend past usage limit';
+export const PAUSED_AT_USAGE_LIMIT = 'Paused: usage limit reached';
 /** The held line's picker action (#2477 amendment 17). */
 export const SWITCH_MODEL_LABEL = 'Switch model';
 /** The verdict reason and Stop cause the backend writes while the switch is off. */
@@ -61,8 +61,7 @@ function accountLine(model: Model, now: Date, context: HeldLineAccounts | undefi
 	if (entries.every(limitedEntry)) {
 		const vendor = HARNESSES.find((entry) => entry.name === model.connection)?.vendor;
 		if (!vendor) return null;
-		const earliest = entries.map(resetOf).filter((iso): iso is string => !!iso && resetLabel(iso) !== '')
-			.sort((a, b) => new Date(a).getTime() - new Date(b).getTime())[0];
+		const earliest = earliestReset(entries.map(resetOf));
 		return {
 			text: `All ${vendor} accounts are at their limit · ${backTail(earliest, 'first back', now)}`,
 			planLimit: false,

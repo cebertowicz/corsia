@@ -1,0 +1,71 @@
+import { get } from 'svelte/store';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import {
+	clearAllContextUsage, contextPreviewByThread, contextReading, ensureContextPreview,
+	previewIdentity, recordMeasuredUsage,
+} from './contextUsageByThread';
+import { fetchNextTurnPreview } from './nextTurnPreview';
+
+vi.mock('./nextTurnPreview', () => ({ fetchNextTurnPreview: vi.fn() }));
+const fetchPreview = vi.mocked(fetchNextTurnPreview);
+
+function usage(total: number) {
+	return { total_used: total, model_context_window: 1000, token_usage_available: true } as never;
+}
+
+function request(threadId: string, modelId: string, measured: ReturnType<typeof usage>) {
+	return { threadId, modelId, authToken: 'test', ...previewIdentity(threadId, modelId, measured, null) };
+}
+
+afterEach(() => { clearAllContextUsage(); vi.resetAllMocks(); });
+
+describe('preview refresh', () => {
+	it('retires the previous preview on a turn and replaces it on success', async () => {
+		fetchPreview.mockResolvedValueOnce(usage(300));
+		await ensureContextPreview(request('a', 'model-a', usage(400)));
+		let finish!: (value: ReturnType<typeof usage>) => void;
+		fetchPreview.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+		recordMeasuredUsage('a', usage(500));
+		const next = request('a', 'model-a', usage(500));
+		const pending = ensureContextPreview(next);
+		const loading = get(contextPreviewByThread).get('a');
+		expect(loading?.loading).toBe(true);
+		expect(contextReading(loading, next.owner, usage(500))?.total_used).toBe(500);
+		finish(usage(600));
+		await pending;
+		expect(contextReading(get(contextPreviewByThread).get('a'), next.owner, usage(500))?.total_used).toBe(600);
+	});
+
+	it('rejects a late read and falls back to the receipt if the coalesced refresh fails', async () => {
+		fetchPreview.mockResolvedValueOnce(usage(300));
+		await ensureContextPreview(request('a', 'model-a', usage(400)));
+		let finish!: (value: ReturnType<typeof usage>) => void;
+		let fail!: (error: Error) => void;
+		fetchPreview.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+		fetchPreview.mockImplementationOnce(() => new Promise((_resolve, reject) => { fail = reject; }));
+		recordMeasuredUsage('a', usage(500));
+		const pending = ensureContextPreview(request('a', 'model-a', usage(500)));
+		recordMeasuredUsage('a', usage(600));
+		const latest = request('a', 'model-a', usage(600));
+		void ensureContextPreview(latest);
+		finish(usage(700));
+		await vi.waitFor(() => expect(fetchPreview).toHaveBeenCalledTimes(3));
+		expect(get(contextPreviewByThread).get('a')?.usage).toBeNull();
+		fail(new Error('failed'));
+		await pending;
+		expect(contextReading(get(contextPreviewByThread).get('a'), latest.owner, usage(600))?.total_used).toBe(600);
+	});
+
+	it('does not show a preview from another model or thread', async () => {
+		fetchPreview.mockResolvedValueOnce(usage(300));
+		await ensureContextPreview(request('a', 'model-a', usage(400)));
+		recordMeasuredUsage('a', usage(500));
+		fetchPreview.mockImplementation(() => new Promise(() => {}));
+		const switched = request('a', 'model-b', usage(500));
+		void ensureContextPreview(switched);
+		expect(contextReading(get(contextPreviewByThread).get('a'), switched.owner, usage(500))?.total_used).toBe(500);
+		const other = request('b', 'model-a', usage(200));
+		void ensureContextPreview(other);
+		expect(contextReading(get(contextPreviewByThread).get('b'), other.owner, usage(200))?.total_used).toBe(200);
+	});
+});

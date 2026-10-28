@@ -248,7 +248,7 @@ async def test_a_self_rule_on_a_pr_merging_wakes_its_owner_with_the_note(isolate
     refused = await _tool("other", operation="create", connector="github",
                           event_type="pr.merged", to="thread:owner", note="wake them")
     assert refused.startswith("Refused: Your rules deliver only to you")
-    assert len(_rows("SELECT id FROM event_rules")) == 1
+    assert len(_rows("SELECT id FROM event_rules WHERE origin LIKE 'agent:%'")) == 1
 
     result = await route(MERGED, _merged(88))
 
@@ -396,13 +396,16 @@ async def test_webhook_reads_when_routing_chose_no_thread(isolated_db, sent, res
     matched_rows = list(rows)
     untracked = await run(64, "nobody/tracks")
 
-    # With no self-rule for the type, one read and no repository lookup.
+    # With no rule for the type, one read, no repository lookup and no origin check.
     assert no_rule == (before + 1, 0)
     assert _decisions(thread_id="a")[-1]["outcome"] == "woke"
     # Only the tracking project's rules are read: Q's rule for another repository is not.
     assert matched_rows == [f"project:{P}"] * 2  # the read-only check, then evaluation
     assert matched[1] == 1
-    assert untracked == (before + 1, 1) and rows == []
+    # A rule exists, so the outside author's one origin check runs (O1: the agents'
+    # account row and its person row).
+    ORIGIN_READS = 2
+    assert untracked == (before + 1 + ORIGIN_READS, 1) and rows == []
     print(f"unrouted webhook (DB reads, lookups): dev=({before}, 0) "
           f"no_rule=+({no_rule[0] - before}, {no_rule[1]}) "
           f"matched=+({matched[0] - before}, {matched[1]}) "
@@ -547,7 +550,7 @@ async def test_writer_limits(isolated_db, sent, resolved, monkeypatch):
     [hit] = _decisions(rule_id=by_author["id"])
     assert (hit["thread_id"], hit["outcome"]) == ("a", "woke")
     assert hit["artifact_external_id"] == pr_external_id(REPO, 5)
-    assert len(_rows("SELECT id FROM event_rules")) == 4
+    assert len(_rows("SELECT id FROM event_rules WHERE origin LIKE 'agent:%'")) == 4
 
 
 @pytest.mark.asyncio
@@ -1186,3 +1189,63 @@ def test_a_drop_with_nothing_routed_records_nothing(isolated_db):
     assert _decisions(rule_id=drop["id"]) == []
     [listed] = asyncio.run(_tool("watcher", operation="list"))["rules"]
     assert listed["last_fired"] is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind,source", [("issue.opened", "webhook"), ("issue.opened", "poller"),
+                                      ("issue_comment.created", "webhook"), ("pr_comment.created", "webhook")])
+async def test_authored_rule_matches_github_content_facts(isolated_db, sent, monkeypatch, kind, source):
+    from events.github_mapper import map_github_event
+    from events.connectors.github_rules import _envelope
+
+    _project(P)
+    _agent("watcher")
+    monkeypatch.setattr("events.connectors.github_content_facts.is_own", lambda login: False)
+    rule = await _tool("watcher", operation="create", connector="github", event_type=kind,
+                       match=[{"field": "repo", "op": "eq", "value": REPO},
+                              {"field": "author_origin", "op": "eq", "value": "outside"}],
+                       note="Handle the item")
+    issue = {"number": 9, "created_at": "2026-10-25T00:00:00Z",
+             "user": {"login": "outside"}, "html_url": "https://example.test/9"}
+    raw = {"action": "opened" if kind == "issue.opened" else "created",
+           "repository": {"full_name": REPO}, "issue": issue,
+           "sender": {"login": "outside"}}
+    if kind != "issue.opened":
+        raw["comment"] = {"id": 42, "body": "outside text", "user": {"login": "outside"}}
+        if kind == "pr_comment.created":
+            issue["pull_request"] = {"url": "https://example.test/pr"}
+    if source == "poller":
+        from types import SimpleNamespace
+        from events.connectors.github_issue_activity import new_issues
+
+        async def get(*args):
+            return SimpleNamespace(status=200, body=[issue])
+
+        deliveries = []
+
+        async def admit(*args):
+            deliveries.append(args)
+
+        await new_issues(get, admit, REPO, {"issues_opened_at": "2026-10-24T00:00:00Z"}, None)
+        _, raw, _ = deliveries[0]
+    event = map_github_event("issues" if kind == "issue.opened" else "issue_comment", raw)
+    assert event is not None
+    envelope = _envelope(event, raw, None)
+    assert envelope.facts["item_version"] == (9 if kind == "issue.opened" else 42)
+    assert envelope.facts["author_origin"] == "outside"
+    from events.connectors.github_webhook import dispatch_github_webhook_for_replay
+
+    await dispatch_github_webhook_for_replay(
+        "issues" if kind == "issue.opened" else "issue_comment", raw, delivery_id=f"{kind}-{source}")
+    assert _decisions(rule_id=rule["id"])[0]["outcome"] == "woke"
+
+
+@pytest.mark.asyncio
+async def test_opened_issue_without_a_rule_is_not_dead_lettered(isolated_db, sent):
+    from events.connectors.github_webhook import dispatch_github_webhook_for_replay
+
+    _project(P)
+    raw = {"action": "opened", "repository": {"full_name": REPO}, "sender": {"login": "outside"},
+           "issue": {"number": 9, "user": {"login": "outside"}, "title": "outside text"}}
+    await dispatch_github_webhook_for_replay("issues", raw, delivery_id="issue-no-rule")
+    assert _rows("SELECT id FROM dead_letter_events") == []

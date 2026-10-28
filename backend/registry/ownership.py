@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from infra.database import get_db, write_transaction
-from registry import node_retirement
+from registry import node_retirement, provider_continuity
 from registry.identity_bridge import (
     OWNER_REGISTRATION_STATES,
     PARENT_CHAIN_REGISTRATION_STATE,
@@ -320,7 +320,8 @@ def _live_conductor_or_user(db, project_id: str | None, ending: set[str]) -> str
 
 def _thread_end_target(db, identity, thread, ending: set[str], *, reason: str) -> str | None:
     from registry.shared_principals import acting_owner
-
+    if provider_continuity.is_continuity(identity):
+        return None
     if _is_shared_document(identity["path"], _shared_root(db, thread)):
         persistent = bool(_thread_value(thread, "agent_enabled")) or reason == "agent_disabled"
         project_id = _thread_value(thread, "project_id")
@@ -372,9 +373,9 @@ def rehome_on_thread_end(
     ).fetchall()
     results: list[dict[str, Any]] = []
     for identity in rows:
-        if identity["retention"] == "ephemeral":
-            continue
-        if _inside_thread_folder(identity["path"], thread_id):
+        # A disabled agent stays live as a chat and keeps resuming its own sessions.
+        if (identity["retention"] == "ephemeral" or _inside_thread_folder(identity["path"], thread_id)
+                or (reason == "agent_disabled" and provider_continuity.is_continuity(identity))):
             continue
         target = _thread_end_target(db, identity, thread, ending, reason=reason)
         common = {

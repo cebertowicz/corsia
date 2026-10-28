@@ -1,4 +1,4 @@
-"""Place tagged answers when a message is written and read unread answers."""
+"""Place tagged answers when a message is written."""
 
 from __future__ import annotations
 
@@ -22,6 +22,20 @@ def parse_answers(text: str, message_id: str) -> dict[str, list[dict[str, str]]]
         for cid in dict.fromkeys(_TAG.findall(match.group(1))):
             answers.setdefault(cid, []).append({"text": answer, "assistant_message_id": message_id})
     return answers
+
+
+def visible_answer_content(text: str, placed_cids: list[str]) -> str:
+    """Keep the introduction and sections whose tags were not placed."""
+    if not placed_cids:
+        return text
+    matches = list(_TAGGED.finditer(text))
+    result = text[:matches[0].start()] if matches else text
+    known = set(placed_cids)
+    for index, match in enumerate(matches):
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+        if not known.intersection(_TAG.findall(match.group(1))):
+            result += text[match.start():end]
+    return result.strip()
 
 
 def has_comment_cid(metadata: str | None, cid: str) -> bool:
@@ -65,23 +79,16 @@ def delete_thread_chat_comment_answers(db: sqlite3.Connection, thread_id: str) -
         "(SELECT id FROM messages WHERE thread_id=?)", (thread_id,),
     )
     db.execute("DELETE FROM chat_comment_answers WHERE thread_id=?", (thread_id,))
+    db.execute("DELETE FROM chat_comments WHERE thread_id=?", (thread_id,))
 
 
-UNREAD_SQL = """SELECT a.thread_id, a.user_message_id, a.cid, a.assistant_message_id, a.answered_at
-FROM chat_comment_answers a
+# All projections compose this source and predicate so that missing comments,
+# messages, and viewed answers have the same meaning everywhere.
+UNREAD_FROM = """FROM chat_comment_answers a
 JOIN threads t ON t.id=a.thread_id AND t.user_id=?
+JOIN chat_comments c ON c.thread_id=a.thread_id AND c.user_message_id=a.user_message_id AND c.cid=a.cid
+JOIN messages target ON target.id=c.target_message_id AND target.thread_id=a.thread_id
 JOIN messages u ON u.id=a.user_message_id AND u.thread_id=a.thread_id
 JOIN messages m ON m.id=a.assistant_message_id AND m.thread_id=a.thread_id
-LEFT JOIN chat_comment_views v ON v.user_id=? AND v.user_message_id=a.user_message_id AND v.cid=a.cid
-WHERE a.thread_id=? AND v.user_id IS NULL
-ORDER BY a.answered_at
-LIMIT ?"""
-
-
-def unread_answers(db: sqlite3.Connection, user_id: str, thread_id: str, limit: int) -> list[dict]:
-    """List unread indexed answers in a thread owned by the person."""
-    if limit <= 0:
-        raise ValueError("limit must be positive")
-    rows = db.execute(UNREAD_SQL, (user_id, user_id, thread_id, limit)).fetchall()
-    keys = ("thread_id", "user_message_id", "cid", "assistant_message_id", "answered_at")
-    return [dict(zip(keys, row)) for row in rows]
+LEFT JOIN chat_comment_views v ON v.user_id=? AND v.user_message_id=a.user_message_id AND v.cid=a.cid"""
+UNREAD_WHERE = "(v.user_id IS NULL OR v.seen_at < a.answered_at)"

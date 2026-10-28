@@ -192,7 +192,7 @@ async def _hold(operation: SignIn, home: str, binary: str) -> None:
         operation.status, operation.cause = "failed", "signin_timed_out"
     except Exception as exc:  # noqa: BLE001 - nobody may be left waiting on a sign-in nothing is waiting on
         log.warning("account %s sign-in check failed: %s", operation.account_id, type(exc).__name__)
-        if operation.status == "waiting":
+        if operation.status == "waiting" or (operation.status == "completed" and operation.bind and operation.bind.outcome is None):
             operation.status, operation.cause = "failed", "signin_check_failed"
     finally:
         if operation.status == "failed":

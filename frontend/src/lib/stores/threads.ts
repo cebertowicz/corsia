@@ -1,4 +1,5 @@
 import { writable, derived } from 'svelte/store';
+import { activeThreadId } from './activeThreadId';
 import { turnStates, type ThreadTurnState, type TurnIdentity } from '../ws/turnState';
 import type { ThreadModelSwitchState } from './threadModelSwitch';
 export interface Thread extends ThreadModelSwitchState {
@@ -46,6 +47,9 @@ export function isNavAgent(s: Thread): boolean {
 	return enabled && active && hasResponsibility && s.spawned_by == null && !s.archived;
 }
 
+export type { ChatComment } from '../chatCommentTypes';
+import type { ChatComment } from '../chatCommentTypes';
+
 export interface Message {
 	id: string;
 	thread_id: string;
@@ -71,6 +75,10 @@ export interface Message {
 	/** Artifact cards the server computed for this message when it was read (display rows only). */
 	cards?: import('../api/messageCards').MessageCard[];
 	cards_more?: number;
+	/** Server-computed transcript content after placed chat answers are removed. */
+	chat_visible_content?: string;
+	chat_comments?: ChatComment[];
+	chat_answer_cids?: string[];
 }
 
 function validDeliveryRevision(value: unknown): number | null {
@@ -115,7 +123,7 @@ export function demoteAgentLocally(threadId: string): void {
 	threads.update((rows) => rows.map((r) => (r.id === threadId ? { ...r, ...off } : r)));
 }
 
-export const activeThreadId = writable<string | null>(null);
+export { activeThreadId, draftAccountId } from './activeThreadId';
 export const messages = writable<Message[]>([]);
 /** Whether `threadId` has a live turn, read from the per-thread turn states. */
 export function isThreadTurnActive(

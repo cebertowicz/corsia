@@ -105,6 +105,7 @@ function hasOwnState(node: OperatorNode, currentNodeIds: string[]): boolean {
 		node.child !== null
 		|| currentNodeIds.includes(node.id)
 		|| node.requires_user_action
+		|| node.display.label_key === 'needs_you'
 		|| OWN_STATE_TONES.has(nodeStateTone(node))
 	);
 }

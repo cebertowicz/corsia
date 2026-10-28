@@ -102,6 +102,9 @@ def map_github_event(event_type: str, payload: dict[str, Any]) -> str | None:
             return _PR_END_EVENTS[end]
         return None
 
+    if event_type == "issues" and action == "opened":
+        return GITHUB_ROUTED_EVENTS["issue.opened"]
+
     if event_type == "issue_comment":
         if action == "created":
             issue = payload.get("issue", {})

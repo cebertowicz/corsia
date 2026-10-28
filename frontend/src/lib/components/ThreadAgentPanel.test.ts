@@ -50,10 +50,10 @@ describe('ThreadAgentPanel', () => {
 		component = mount(ThreadAgentPanel, { target: host, props: { thread: agentThread } });
 		flushSync();
 
-		expect(host.textContent).toContain('Not an Agent');
+		expect(host.textContent).toContain('Not an agent');
 		expect(host.querySelector('select')).toBeNull();
 		Array.from(host.querySelectorAll<HTMLButtonElement>('button'))
-			.find((button) => button.textContent?.trim() === 'Make Agent')
+			.find((button) => button.textContent?.trim() === 'Make agent')
 			?.click();
 		flushSync();
 
@@ -140,10 +140,10 @@ describe('ThreadAgentPanel', () => {
 		unmount(component);
 		component = mount(ThreadAgentPanel, { target: host, props: { thread: get(threads)[0] } });
 		flushSync();
-		expect(host.textContent).toContain('Not an Agent');
+		expect(host.textContent).toContain('Not an agent');
 
 		Array.from(host.querySelectorAll<HTMLButtonElement>('button'))
-			.find((button) => button.textContent?.trim() === 'Make Agent')
+			.find((button) => button.textContent?.trim() === 'Make agent')
 			?.click();
 		flushSync();
 

@@ -29,6 +29,7 @@ class CommentInput:
     parent_id: str | None = None
     review: bool = False
     replacement: str | None = None
+    insert_after: bool = False
     quote: str | None = None
     near: str | None = None
     start: int | None = None
@@ -103,7 +104,8 @@ def create_in_db(request: CommentInput, anchor: Anchor | None, identifier: str, 
         if (request.author_kind == "agent" and request.replacement is not None and not request.parent_id
                 and duplicate is None and artifact_id is not None):
             # Creates of one live document are already serialized by its comment mutex.
-            check_agent_suggestion_fits(db, artifact_id, request.path, start, end)
+            check_agent_suggestion_fits(db, artifact_id, request.path, start, end,
+                                        insert_after=request.insert_after)
         with write_transaction(db, scope="create_document_comment") as connection:
             receipt.bind(connection)
             if request.registration is not None:
@@ -114,7 +116,7 @@ def create_in_db(request: CommentInput, anchor: Anchor | None, identifier: str, 
                 artifact_id, body=request.body, author=request.author, author_kind=request.author_kind,
                 author_thread_id=request.author_thread_id, parent_id=request.parent_id,
                 anchor_text=quote, from_off=start, to_off=end, anchor_prefix=prefix, anchor_suffix=suffix,
-                review=request.review, replacement=request.replacement, client_id=identifier,
+                review=request.review, replacement=request.replacement, insert_after=request.insert_after, client_id=identifier,
                 region=request.region, image_rev=image_rev, image_src=image_src, announce=request.author_kind != "user", db=connection,
             )
             if request.review_request_id is not None:

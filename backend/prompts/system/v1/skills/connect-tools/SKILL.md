@@ -26,7 +26,11 @@ Pick the method yourself, cheapest and most dependable first:
 3. **A connected app** (also called an MCP server): its actions' descriptions take up room in every turn that uses it, and quality varies.
 4. **The browser:** slowest, breaks when pages change, and the person must sign in again whenever the session expires.
 
-When a method can't do what the work needs, use the next one. Setting up or reconnecting a connected app is in skill `coordination-api`, for agents that have the API tool. Email, calendar and files ship for Google (skill `google-setup`), Microsoft (skill `microsoft-setup`) and other hosts (skill `mail-host-setup`, also the start when you don't know the host yet); only the CORSIA thread runs those, so anywhere else ask the person to connect the account there.
+When a method can't do what the work needs, use the next one. Setting up or reconnecting a connected app is in skill `coordination-api`, for agents that have the API tool. Email, calendar and files ship for Google (load pack `email`, call `google_status`, then `google_connect`: one Allow, no Google Cloud project; use skill `google-setup` only when the person says Google blocked the sign-in, for example "Access blocked" or "your admin hasn't allowed this app", when the same address comes back refused after they said they clicked Allow, or when they ask for their own Google Cloud project; an expired link gets a new link, and a Cancel or "not now" is a decline, not a refusal), Microsoft (skill `microsoft-setup`) and other hosts (skill `mail-host-setup`, also the start when you don't know the host yet); only the CORSIA thread runs those, so anywhere else ask the person to connect the account there.
+
+## Setting one up
+
+Setting up a connection is your work, never a list of steps for the person. Open the tool's own pages in the shared browser and do each step yourself: create the app or key entry, change its settings, find what CORSIA needs. Hand the person only what agents must not do, through `.corsia/skills/conductor-bootstrap/references/browser-person-steps.md`: sign-in, consent, terms, payment, a human check, and any page that shows a key, token or code.
 
 ## Asking to approve one
 
@@ -44,7 +48,7 @@ For both lists, find out what is available from CORSIA's own tools at the time, 
 - Reading access never permits sending. Ask the person before any send, post, change or purchase they have not asked for; a yes covers only the action it named.
 - A CLI acts as the person's whole account there, so its first write waits for their yes even when they asked for that write. Their request doesn't lift this hold: it is one of the constraints the request is carried out within, because they haven't yet seen which account will act. Read which account it is signed in as (its status or whoami command), name it to them and ask; send nothing, not even a test, until they say yes. Learn its other commands from its help, never by trying them. Never read its stored sign-in.
 - A new connection reaches only where it is added: the whole workspace, or one project. One that would help every project goes through CORSIA, as skill `coordination-api` says; otherwise add it where it is needed.
-- The person types a key only into the field CORSIA names, never into chat. You never read it.
+- A key goes into CORSIA's key store, never into chat, a file or a command: ask the person to paste it at the app's **Set key** in Settings › Connected apps, or into the key field a CORSIA tool names. You never read it.
 
 ## When it can't be done yet
 

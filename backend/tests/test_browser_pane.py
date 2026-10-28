@@ -1,6 +1,7 @@
 import asyncio
 import contextlib
 import json
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
@@ -94,6 +95,9 @@ class IdleScreencast:
 def screencast(monkeypatch):
     cast = IdleScreencast()
     monkeypatch.setattr(browser_pane, "screencast", cast)
+    async def idle_targets(*_args):
+        await asyncio.Future()
+    monkeypatch.setattr(browser_pane, "watch_targets", idle_targets)
     return cast
 
 
@@ -163,6 +167,8 @@ class RenderedOwner:
             self.commands.append(tuple(args))
             if tuple(args) == ("get", "cdp-url"):
                 return _raw({"cdpUrl": "ws://browser.test/devtools/browser/1"})
+            if tuple(args) == ("get", "title"):
+                return _raw({"title": "Current"})
             assert tuple(args) == ("get", "url")
             return _raw({"url": "https://example.test/current"})
 
@@ -194,7 +200,7 @@ async def test_relay_delivers_click_shortcut_text_then_enter_in_order_on_one_cdp
 
     owner = RenderedOwner()
     monkeypatch.setattr(browser_pane.PROCESS_OWNER, "browser_sessions", lambda: owner)
-    monkeypatch.setattr(browser_pane.browser_cdp, "_page_endpoint", lambda _endpoint, _expected_url: "ws://page.test/current")
+    monkeypatch.setattr(browser_pane.browser_cdp, "_page_endpoint", lambda _endpoint, _expected_url, _title: "ws://page.test/current")
     monkeypatch.setattr(browser_pane.browser_cdp, "dispatch_mouse_event", recorder("mouse"))
     monkeypatch.setattr(browser_pane.browser_cdp, "dispatch_key_event", recorder("key"))
     monkeypatch.setattr(browser_pane.browser_cdp, "watch_page_metadata", no_metadata)
@@ -224,13 +230,13 @@ async def test_a_pane_resolves_its_page_target_once_through_the_agent_commands_r
     calls = []
     owner = RenderedOwner()
     monkeypatch.setattr(browser_pane.PROCESS_OWNER, "browser_sessions", lambda: owner)
-    monkeypatch.setattr(browser_pane.browser_cdp, "_page_endpoint", lambda endpoint, expected_url: calls.append((endpoint, expected_url)) or "ws://page.test/current")
+    monkeypatch.setattr(browser_pane.browser_cdp, "_page_endpoint", lambda endpoint, expected_url, title: calls.append((endpoint, expected_url, title)) or "ws://page.test/current")
     browser_pane.clear_page_endpoint("thread-1", "pane-1")
     try:
         assert await browser_pane._page_endpoint("thread-1", "pane-1", "failed") == "ws://page.test/current"
         assert await browser_pane._page_endpoint("thread-1", "pane-1", "failed") == "ws://page.test/current"
-        assert owner.commands == [("get", "cdp-url"), ("get", "url")]
-        assert calls == [("ws://browser.test/devtools/browser/1", "https://example.test/current")]
+        assert owner.commands == [("get", "cdp-url"), ("get", "url"), ("get", "title")]
+        assert calls == [("ws://browser.test/devtools/browser/1", "https://example.test/current", "Current")]
     finally:
         browser_pane.clear_page_endpoint("thread-1", "pane-1")
 
@@ -272,6 +278,22 @@ async def test_page_info_reads_url_and_title_from_the_session_owners_rendered_re
     monkeypatch.setattr(browser_pane.PROCESS_OWNER, "browser_sessions", lambda: InfoOwner())
     # The pane's address and tab label show these values, never the rendered JSON around them.
     assert await browser_pane.page_info("thread-1") == ("https://www.apple.com/", "Apple")
+
+
+def test_last_pane_probe_disconnect_reports_distinct_reason(monkeypatch):
+    events = []
+    monkeypatch.setattr(browser_control.browser_step_lifecycle, "pane_event",
+                        lambda thread, reason: events.append((thread, reason)))
+
+    async def probe(_known):
+        raise AssertionError("not called")
+
+    browser_control.pane_connected("thread-probe", "first", probe=probe)
+    browser_control.pane_connected("thread-probe", "second", probe=probe)
+    browser_control.pane_disconnected("thread-probe", "first")
+    assert events == [("thread-probe", "pane_probe_available")] * 2
+    browser_control.pane_disconnected("thread-probe", "second")
+    assert events[-1] == ("thread-probe", "pane_probe_gone")
 
 
 def test_pane_presence_is_not_exclusive_control():
@@ -412,23 +434,27 @@ async def test_agent_close_remains_available_while_a_pane_is_connected(monkeypat
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(("returncode", "show_window", "announced"), [
-    (0, False, ["thread-1", "thread-1"]),
-    (0, True, ["thread-1", "thread-1"]),
-    (1, True, []),
-])
-async def test_browser_opened_is_announced_after_every_successful_shared_open(monkeypatch, returncode, show_window, announced):
+@pytest.mark.parametrize(("returncode", "shared", "announced"), [(0, True, ["thread-1"]), (0, False, []), (1, True, [])])
+async def test_browser_opened_is_announced_only_when_an_open_starts_the_session(monkeypatch, returncode, shared, announced):
+    """A later open leaves a pane tab the person closed shut; only a new session reveals it again."""
     owner = BrowserSessionOwner(namespace="corsia-pane-test")
-    runtime = BrowserRuntime(BrowserSessionRecord("thread-1", "test-session", show_window=show_window))
+    runtime = BrowserRuntime(BrowserSessionRecord("thread-1", "test-session", shared=shared))
     seen = []
+
+    async def run_admitted(*_args, **_kwargs):
+        # The daemon is bound once the first command has run it.
+        runtime.record = replace(runtime.record, binding=object())
+        return CommandResult(returncode, "", "failed"), False
+
     monkeypatch.setattr(browser_runtime.browser_cli, "check_local_mode", lambda _args: None)
     monkeypatch.setattr(owner, "_pin_native", lambda: asyncio.sleep(0))
     monkeypatch.setattr(owner, "_admit", lambda *_args, **_kwargs: asyncio.sleep(0, result=runtime))
-    monkeypatch.setattr(owner, "_run_admitted", lambda *_args, **_kwargs: asyncio.sleep(
-        0, result=(CommandResult(returncode, "", "failed"), False)))
+    monkeypatch.setattr(owner, "_run_admitted", run_admitted)
     monkeypatch.setattr(browser_control, "announce_browser_opened", seen.append)
+    monkeypatch.setattr(browser_control, "require_page_access", lambda *_args, **_kwargs: asyncio.sleep(0))
+    monkeypatch.setattr(browser_cdp, "page_endpoint", lambda _command: asyncio.sleep(0, result="ws://page"))
     await owner.run("thread-1", ("open", "https://example.test"), session="new")
-    await owner.run("thread-1", ("open", "https://example.test"), session="new")
+    await owner.run("thread-1", ("open", "https://example.test"), session="existing")
     assert seen == announced
 
 

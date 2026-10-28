@@ -5,6 +5,7 @@ import { get } from 'svelte/store';
 import Sidebar from './Sidebar.svelte';
 import { activeThreadId, threads } from '$lib/stores/threads';
 import { uiScope } from '$lib/stores/uiScope';
+import { threadSettingsOpen } from '$lib/stores/threadSettings';
 import { measurementScope } from '$lib/stores/measurement';
 import { measurementOrigin } from '$lib/stores/measurementNavigation';
 import { token } from '$lib/stores/auth';
@@ -107,5 +108,38 @@ describe('Sidebar Measurement link', () => {
 		}
 		expect(opened).not.toHaveBeenCalled();
 		expect(get(measurementScope)).toEqual({ project: 'prj-z', agent: 'agent-z' });
+	});
+});
+
+describe('Sidebar Conductor row menu', () => {
+	async function openAgentSettings(onConductor: () => Promise<boolean>) {
+		threads.set([{
+			id: 'cond', user_id: 'u', profile: 'personal', title: 'Conductor', model: null, created_at: 'now', updated_at: 'now',
+			project_id: null, agent_enabled: 1, agent_status: 'active', agent_responsibility: 'Conducts',
+		}]);
+		component = mount(Sidebar, {
+			target: host,
+			props: { open: true, onSelectThread: () => {}, onDeleteThread: () => {}, onOpenSettings: () => {}, conductorThreadId: 'cond', onConductor },
+		});
+		flushSync();
+		host.querySelector('.scoped-item.conductor')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+		flushSync();
+		const item = [...document.querySelectorAll('.context-menu button')].find((b) => b.textContent?.trim() === 'Agent settings');
+		(item as HTMLButtonElement).click();
+		await vi.waitFor(() => expect(onConductor).toHaveBeenCalled());
+		await Promise.resolve();
+		flushSync();
+	}
+
+	it('opens Agent settings once the conductor is open', async () => {
+		threadSettingsOpen.set(false);
+		await openAgentSettings(vi.fn().mockResolvedValue(true));
+		expect(get(threadSettingsOpen)).toBe(true);
+	});
+
+	it('leaves Agent settings closed when the conductor could not be opened, so it never lands on another agent', async () => {
+		threadSettingsOpen.set(false);
+		await openAgentSettings(vi.fn().mockResolvedValue(false));
+		expect(get(threadSettingsOpen)).toBe(false);
 	});
 });

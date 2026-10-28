@@ -110,8 +110,8 @@ describe('MessageArtifactCards', () => {
 		expect(tile.tagName).toBe('DIV');
 		expect(tile.classList.contains('gone')).toBe(true);
 		expect(tile.querySelector('.title')?.textContent).toBe('Launch plan');
-		expect(tile.querySelector('.ctx')?.textContent).toContain('No longer available');
-		expect(tile.querySelector('.state')?.textContent).toBe('No longer available');
+		expect(tile.querySelector('.ctx')?.textContent).toContain('Unavailable');
+		expect(tile.querySelector('.state')?.textContent).toBe('Unavailable');
 		tile.click();
 		expect(get(threadWorkspaces).t1?.tabs ?? []).toEqual([]);
 	});

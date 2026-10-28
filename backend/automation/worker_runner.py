@@ -1,19 +1,21 @@
 """Start and settle the workers ``start_worker`` rules queue (R19, R23, R24; §7.4).
 
-The runner's claim alone decides who gets the next Claude Code slot: no worker exists
+The runner's claim alone decides who gets the next worker slot: no worker exists
 until a start is claimed with a slot free. Each pass runs under one lock, which every
 spawn it makes runs inside, so no start is claimed twice:
 
 1. a started start a restart cut short (no worker, or a worker with no turn, no queued
    input and no process) settles ``no_result`` and releases its identity;
-2. with ``n`` slots free under the Claude Code limit, the ``n`` oldest queued starts are
-   claimed, each checked when it would start: its rule turned off or gone, or its owner
+2. with ``n`` slots free under the worker limit (Claude Code workers and rule workers),
+   the ``n`` oldest queued starts are claimed, each checked when it would start: its rule turned off or gone, or its owner
    gone or paused, skips it (no replay; the identity is released) and takes no slot. At
    no free slot nothing is claimed or written, and the starts wait in the queue. A
    claimed start's inputs and brief are made (``automation.worker_inputs``) and it starts
-   through ``delegate_task``'s own capped spawn with the ``review`` confinement on the
-   owner's model; spawn records the worker on the start (``rule_start``) before its first
-   turn can run. If another spawn took the slot first, the start goes back to the queue
+   through ``delegate_task`` with the ``review`` confinement on the
+   owner's model. Local only owners run on their own local model. A model that cannot
+   run now is refused and reported through ``worker.no_result``. Spawn records the worker
+   on the start (``rule_start``) before its first turn can run. If another spawn took the
+   slot first, the start goes back to the queue
    at its place, never refused for it. Any other refusal ends it ``refused`` and tells
    the owner through ``worker.no_result``;
 3. each worker that was already started when the pass began and whose last turn ended settles
@@ -48,14 +50,6 @@ from infra.db_async import run_in_db
 #: Queued starts read per pass; the rest wait for the next.
 BATCH = 8
 _RESTARTED = "a restart cut the start short"
-_LOCAL_ONLY = {
-    "project_cloud_off": "refused: this project uses local models only, and a rule can start a "
-                         "workflow only on a cloud model. Run the workflow yourself, or allow "
-                         "cloud models for this project.",
-    "thread_local_only": "refused: this chat is set to Local only, and a rule can start a "
-                         "workflow only on a cloud model. Run the workflow yourself, or turn off "
-                         "Local only for this chat.",
-}
 _SPAWN_FAILED = "refused: the start failed (delegation error)"
 _FAILED = "refused: the start failed"
 # "waited": the newest decision id queued while no slot was free. Process memory: it only
@@ -143,11 +137,11 @@ def _skip(conn: sqlite3.Connection, row: Mapping[str, Any]) -> str | None:
 
 
 def _free(conn: sqlite3.Connection) -> int:
-    """Claude Code slots free now, by the count spawn's own limit check uses."""
+    """Slots free under the shared worker limit."""
     from infra.subagent_caps import get_max_concurrent_live
     from subagents.cc_idle_retirement import working_thread_ids
 
-    return get_max_concurrent_live() - len(working_thread_ids(db=conn))
+    return get_max_concurrent_live() - len(set(working_thread_ids(db=conn)) | worker_starts.started_workers(conn))
 
 
 def _claim(db: sqlite3.Connection | None = None) -> list[tuple[Mapping[str, Any], dict[str, Any]]]:
@@ -174,24 +168,45 @@ def _claim(db: sqlite3.Connection | None = None) -> list[tuple[Mapping[str, Any]
 
 
 def _prepare(row: Mapping[str, Any], run_input: Mapping[str, Any]) -> dict[str, Any]:
-    """Everything the start reads from the database, or :class:`worker_inputs.StartRefused`.
-    Local only refuses here, by the existing locality policy: a confined start runs only on
-    Claude Code."""
+    """Everything the start reads from the database, or :class:`worker_inputs.StartRefused`."""
     from infra.config import WORKSPACE
     from infra.database import get_db
     from infra.local_only import inherited_local_only
     from infra.queries import get_thread
-    from llm.locality import locality_cause, project_cloud_models_off
     from events.rule_actions import reachable_workflows
+    from llm.account_catalog import effective_status
+    from llm.delegation_model import dispatch_scope
+    from llm.locality import locality_refusal
+    from llm.model_status import scoped_status_rows
+    from llm.resolution import catalog_row
     from tools.workflow_task_fields import _workflow_version
 
     db = get_db()
     owner = dict(get_thread(row["thread_id"], db=db))
     project = owner.get("project_id")
-    cause = locality_cause(thread_local_only=inherited_local_only((owner["id"],), db=db),
-                           cloud_off=project_cloud_models_off(project, db=db))
-    if cause is not None:
-        raise inputs.StartRefused(_LOCAL_ONLY[cause])
+    model = owner.get("model")
+    if not model:
+        raise inputs.StartRefused("refused: this chat has no model. Choose a model for this chat.")
+    model_row = catalog_row(model, db=db)
+    rows = scoped_status_rows(**dispatch_scope({}, project))
+    status_row = next((item for item in rows if model in (item.get("id"), item.get("litellm_model"))), None)
+    name = (status_row or {}).get("display_name") or (model_row or {}).get("display_name") or model
+    cause = locality_refusal(model_row, thread_local_only=inherited_local_only((owner["id"],), db=db),
+                             project_id=project, db=db) if model_row else None
+    if cause == "thread_local_only":
+        raise inputs.StartRefused(f"refused: this chat is set to Local only and your model {name} is a "
+                                  "cloud model. Choose a local model for this chat, or turn off Local only.")
+    if cause == "project_cloud_off":
+        raise inputs.StartRefused(f"refused: this project has cloud models off and your model {name} is a "
+                                  "cloud model. Choose a local model, or allow cloud models for this project.")
+    if status_row is None:
+        raise inputs.StartRefused("refused: this model can't be found. Choose another model for this chat.")
+    if effective_status(status_row)[0] != "ready":
+        if status_row.get("is_local"):
+            raise inputs.StartRefused(f"refused: your model {name} is not loaded. "
+                                      "Load it, or choose a local model that is loaded.")
+        raise inputs.StartRefused(f"refused: your model {name} can't run now. "
+                                  "Choose a model that is ready for this chat.")
     # A skill whose declared result fails validation is not included, so one found here is valid.
     skill = reachable_workflows(db, owner["id"], project, WORKSPACE).get(row["workflow_id"])
     schema = ((skill.corsia or {}).get("workflow") or {}).get("result") if skill else None
@@ -200,7 +215,11 @@ def _prepare(row: Mapping[str, Any], run_input: Mapping[str, Any]) -> dict[str, 
                                   "read that declares a valid result")
     facts = (run_input.get("event") or {}).get("facts") or {}
     root = inputs.owner_root(owner["id"], project, db)
-    return {"owner": owner, "skill": skill, "schema": schema, "root": root, "facts": facts,
+    from llm.resolution import resolve_execution_target
+
+    return {"owner": owner, "model": owner.get("model"),
+            "harness": resolve_execution_target(model, db=db).harness,
+            "skill": skill, "schema": schema, "root": root, "facts": facts,
             "workflow": f"{skill.name}@{_workflow_version(skill) or 'unversioned'}",
             "staging": inputs.staging_dir(root, facts.get(inputs.STAGING_FACT)),
             "head": inputs.head_source(project, facts, db)}
@@ -227,6 +246,14 @@ async def _start(row: Mapping[str, Any], run_input: dict[str, Any]) -> int:
     waited = row["id"] <= _state["waited"]
     try:
         found = await run_in_db(_prepare, row, run_input)
+        if found["harness"] == "codex":
+            from subagents.cc_confinement import ConfinementRefused
+            from subagents.codex_confinement import verify_version
+
+            try:
+                await verify_version()
+            except ConfinementRefused as exc:
+                raise inputs.StartRefused(str(exc)) from exc
         read_paths, task = await asyncio.to_thread(_write, found, row["id"], run_input)
         check = json.dumps({"workflow": found["workflow"], "schema": found["schema"],
                             "trace": run_input.get("trace") or [], "waited": waited,
@@ -236,7 +263,7 @@ async def _start(row: Mapping[str, Any], run_input: dict[str, Any]) -> int:
             await run_in_db(_made, row["id"], worker, check)
 
         started = await _spawn(row["thread_id"], found["owner"], task, {
-            "model": found["owner"].get("model"), "confinement": CONFINEMENT_REVIEW,
+            "model": found["model"], "confinement": CONFINEMENT_REVIEW,
             "read_paths": read_paths, "title": found["skill"].name,
         }, rule_start=record)
     except inputs.StartRefused as exc:
@@ -250,11 +277,8 @@ async def _start(row: Mapping[str, Any], run_input: dict[str, Any]) -> int:
         logger.exception("worker start {} failed", row["id"])  # the exception stays in the log
         return await _refuse(row, run_input, _FAILED, waited)
     if isinstance(started, str):
-        cause = started.removeprefix("Error: ")
-        if not cause.startswith(worker_settle.REFUSAL_PREFIX):
-            logger.warning("worker start {} was refused: {}", row["id"], started)
-            cause = _SPAWN_FAILED
-        return await _refuse(row, run_input, cause, waited)
+        logger.warning("worker start {} was refused: {}", row["id"], started)
+        return await _refuse(row, run_input, _SPAWN_FAILED, waited)
     return 1
 
 

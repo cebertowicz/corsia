@@ -11,6 +11,7 @@ type ConnectPhase = {
 	signInQueued?: boolean;
 	/** A failed sign-in's stable cause, from the service or `unreachable` when no answer came; absent when unknown. */
 	signinCause?: string;
+	checkingModels?: boolean;
 };
 export type SetupAttempt = { attempt: 'none' | 'installed' | 'install_failed' | 'signin_failed'; cause?: string; ref?: string };
 export type RowView = {
@@ -192,8 +193,9 @@ export function createSetupConnect(deps: ConnectDeps) {
 					const source = deps.sources().find((candidate) => candidate.source === vendor);
 					if (source && sourceIsReady(source)) setConnect(vendor, undefined);
 				} else if (entry?.phase === 'signing-in' && entry.accountId) {
-					const signin = await checkSignin(current, entry.accountId).catch(() => null);
-					if (signin?.status === 'completed') { await deps.refreshSources(); setConnect(vendor, undefined); }
+					const signin = await checkSignin(current, entry.accountId).catch(() => undefined);
+					if (signin?.status === 'completed' && signin.outcome == null) setConnect(vendor, { ...entry, checkingModels: true });
+					else if (signin === null || signin?.status === 'completed') { await deps.refreshSources(); setConnect(vendor, undefined); }
 					else if (signin && signin.status !== 'waiting') signinFailed(vendor, signin, entry.installed);
 				}
 			}
@@ -205,6 +207,7 @@ export function createSetupConnect(deps: ConnectDeps) {
 		if (entry?.phase === 'installing') {
 			return { meta: `Installing ${copy.cli}…`, busy: true, spinning: true, action: entry.signInQueued ? { label: 'Installing…', run: () => undefined, loading: true } : signInAction };
 		}
+		if (entry?.phase === 'signing-in' && entry.checkingModels) return { meta: `Checking your ${copy.account} models…`, busy: true, spinning: true };
 		if (entry?.phase === 'signing-in') return { meta: 'Finish signing in in your browser.', busy: true, action: { label: 'Open sign-in again', run: () => void openSignInAgain(source) } };
 		if (entry?.phase === 'failed' && entry.failed === 'signin') {
 			const failure = signinFailureCopy(source.source, entry.signinCause, entry.ref);

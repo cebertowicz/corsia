@@ -65,8 +65,14 @@ class MeasureSyncTool(Tool):
                 "measures go in your own thread folder. `path` is relative to the CORSIA workspace root, so a "
                 "project agent passes projects/<project>/.threads/<id>/measures.yaml. Validates names, "
                 "attributes, KPIs and views, then returns each item as added, changed, unchanged or removed, "
-                "plus a namespace_takeover list when it retired a departed holder's live events. Run it after "
-                "every change; nothing takes effect until sync succeeds.")
+                "plus a namespace_takeover list when it retired a departed holder's live events. For a duration, "
+                "an event may declare since: {event: <start event>, on: <shared attribute or map>, "
+                "as: <declared num or count attribute>}. Both join attributes must be declared; a map uses "
+                "end-to-start names, for example on: {introduced_by: pr}. Intake stamps whole minutes from "
+                "the newest matching earlier start, or leaves it absent if none has arrived; later starts do not "
+                "backfill it. KPI operands may declare latest or first "
+                "with one or two id/enum attributes; these are validated but do not filter results yet. "
+                "Run it after every change; nothing takes effect until sync succeeds.")
 
     @property
     def parameters(self) -> dict[str, Any]:

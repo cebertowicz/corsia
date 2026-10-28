@@ -187,7 +187,7 @@ export async function createProject(input: {
 			accent_color: input.accent_color ?? null,
 		}),
 	});
-	if (!res.ok) throw new Error(await plainResponseError(res, 'Could not create project. Try again.'));
+	if (!res.ok) throw new Error(await plainResponseError(res, 'Couldn’t create the project. Try again.'));
 	const info = toProjectInfo((await res.json()).project);
 	projects.update((list) => [...list, info]);
 	return info;

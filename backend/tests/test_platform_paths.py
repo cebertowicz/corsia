@@ -204,7 +204,7 @@ def test_adoption_preflight_names_the_stored_keys_it_misses_in_the_single_values
     message = str(refused.value)
     assert message == (
         "These provider keys aren’t stored in CORSIA yet: ANTHROPIC_API_KEY. "
-        "Add them in CORSIA › Settings › Keys, then choose Try again."
+        "Add them in CORSIA › Settings › Keys, then choose Retry."
     )
     assert "ANTHROPIC_API_KEY" in message
     assert "OPENAI_API_KEY" not in message
@@ -270,7 +270,7 @@ def test_adoption_preflight_refuses_while_the_source_is_restarting_itself(tmp_pa
 
     assert snapshots.preflight_main([str(state)]) == snapshots.RESTARTING == 4
     assert capsys.readouterr().err.strip() == (
-        "Your existing CORSIA is restarting itself. Wait a minute, then choose Try again."
+        "Your existing CORSIA is restarting itself. Wait a minute, then choose Retry."
     )
     assert snapshots.restart_in_flight(state) is True
     # The look is read-only: the request is still there for the source to settle.
@@ -405,7 +405,7 @@ def test_adoption_preflight_refuses_when_the_backup_and_reserve_do_not_fit(tmp_p
     message = capsys.readouterr().err.strip()
     # The measured numbers and the next step, in the person's terms.
     assert re.fullmatch(
-        r"The backup needs [\d.]+ GB free and this disk has [\d.]+ GB\. Free up space, then choose Try again\.",
+        r"The backup needs [\d.]+ GB free and this disk has [\d.]+ GB\. Free up space, then choose Retry\.",
         message,
     )
     assert not (state / "backups").exists()
@@ -422,7 +422,7 @@ def test_adoption_preflight_refuses_when_only_prunable_backups_make_room(tmp_pat
     # The figure printed is the one that failed: what is free now, not the larger prunable total.
     message = capsys.readouterr().err.strip()
     assert re.fullmatch(
-        r"The backup needs [\d.]+ GB and this disk has 0\.0 GB free now\. Free up space, then choose Try again\.",
+        r"The backup needs [\d.]+ GB and this disk has 0\.0 GB free now\. Free up space, then choose Retry\.",
         message,
     )
 
@@ -724,8 +724,9 @@ def test_default_roots_live_in_the_corsia_folder(tmp_path, platform, in_app, exp
     assert root == tmp_path / expected
 
 
-def test_the_cache_root_lives_in_the_corsia_folder(tmp_path):
+def test_the_cache_root_lives_in_the_corsia_folder(tmp_path, monkeypatch):
     managed_runtime = importlib.import_module("tools.managed_runtime")
+    monkeypatch.setattr(managed_runtime.platform, "system", lambda: "Darwin")
 
     assert managed_runtime.application_cache_root(home=tmp_path) == tmp_path / "Library" / "Caches" / "CORSIA"
 

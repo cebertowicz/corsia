@@ -16,7 +16,6 @@
 
 	let {
 		docState,
-		loadError,
 		documentName = 'this document',
 		onRetry = () => {},
 		value = $bindable(''),
@@ -44,7 +43,6 @@
 		onDocumentPlace,
 	}: {
 		docState: DocState;
-		loadError: string;
 		documentName?: string;
 		onRetry?: () => void;
 		value?: string;
@@ -99,7 +97,7 @@
 	{:else if docState === 'error'}
 		<div class="load-error" role="alert">
 			<p>Couldn't open {documentName}.</p>
-			<Button size="sm" variant="ghost" onclick={onRetry}>Try again</Button>
+			<Button size="sm" variant="ghost" onclick={onRetry}>Retry</Button>
 		</div>
 	{:else}
 		<div class="ed-wrap">

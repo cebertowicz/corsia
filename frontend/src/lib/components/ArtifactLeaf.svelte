@@ -238,7 +238,7 @@
 </script>
 
 {#if mode === 'rail'}
-	<button class="rail" onclick={expand} aria-label="Expand artifact panel ({workspace.tabs.length} open)">
+	<button class="rail" onclick={expand} aria-label="Expand Files ({workspace.tabs.length} open)">
 		{#each workspace.tabs as t (t.instanceId)}
 			<span class="rail-ico" class:active={t.instanceId === workspace.activeTabId} class:err={t.status === 'error' || t.status === 'unavailable'}>
 				{#if imageTabIds.has(t.instanceId)}
@@ -252,7 +252,7 @@
 	</button>
 {:else}
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
-	<div class="leaf" class:compact={mode === 'compact'} bind:this={leafEl} onclick={onLeafClick} onkeydown={onLeafKeydown} oninput={onLeafInput}>
+	<div class="leaf" class:compact={mode === 'compact'} class:expanded={mode === 'expanded'} bind:this={leafEl} onclick={onLeafClick} onkeydown={onLeafKeydown} oninput={onLeafInput}>
 		{#if mode === 'expanded'}
 			<div class="canvas-header-strip">
 				<ArtifactTabStrip
@@ -275,8 +275,8 @@
 			{:else if activeTab?.status === 'unavailable'}
 				<div class="gone" role="status">
 					<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" /></svg>
-					<p>{activeTab.title} is no longer available.</p>
-					<span>It was deleted, moved out of this scope, or unregistered.</span>
+					<p>{activeTab.title} is unavailable.</p>
+					<span>It isn’t in this chat’s files.</span>
 					<button type="button" onclick={() => requestCloseTab(activeTab.instanceId)}>Close tab</button>
 				</div>
 			{:else if imageTarget}
@@ -354,6 +354,13 @@
 		background: var(--bg-primary);
 	}
 	.leaf.compact { flex: 1; border-left: none; }
+	/* The tab strip belongs to the header band, which a status banner does not move: the leaf reaches back up
+	   under the banner (the banner paints over it) and its content starts below the banner as before. */
+	.leaf.expanded {
+		margin-top: calc(-1 * var(--status-banners-height, 0px));
+		height: calc(100% + var(--status-banners-height, 0px));
+		padding-top: calc(var(--header-bottom) + var(--status-banners-height, 0px));
+	}
 	/* Expanded tabs occupy the canvas segment of the shared header. They are out of
 	   leaf flow, so the document begins directly below the header with no second band. */
 	.canvas-header-strip {

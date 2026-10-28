@@ -26,7 +26,7 @@ def test_malformed_marker_with_bound_sibling_refuses_fallback(isolated_db, refer
         )
         assert persist_tool_use(
             "thread-1", turn_id="turn-1", provider_turn_id="provider-turn-1",
-            tool_id="second", name="write_file", arguments={}, db=db,
+            tool_id="second", name="write_file", arguments={}, assistant_step_id=step, db=db,
         ) == step
         before = db.execute("SELECT count(*) FROM messages WHERE role='tool'").fetchone()[0]
         with pytest.raises(ToolResultBindingError, match="does not identify one canonical result"):

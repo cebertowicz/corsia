@@ -8,7 +8,9 @@ is open and at least one of these holds:
   deadline-owned: a blocker only the user clears stays a hold, never a watch,
   ``plans.blocked_wait``), except a task its agent set aside
   (``plans.scheduled_wait``): that is the agent's own choice, not a wait;
-- an unmet dependency: an edge present while its prerequisite is not accepted;
+- an unmet dependency: an edge of its own present while its prerequisite is
+  not accepted. An edge an open ancestor hands down (``plans.node_waits``)
+  is that ancestor's wait, counted on it once; its roll-up spans the steps;
 - ``review_requested`` while the node links a registered GitHub pull request.
 
 The user's time is cut out, whoever armed the wait: user-owned holds (the

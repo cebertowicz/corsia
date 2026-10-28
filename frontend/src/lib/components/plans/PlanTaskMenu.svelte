@@ -52,7 +52,7 @@
 	{x}
 	{y}
 	{busy}
-	note={stopsWorker ? 'Mark done or Won’t do stops its worker too.' : null}
+	note={stopsWorker ? 'Marking this done or Won’t do also stops the agent working on it.' : null}
 	{error}
 	onSelect={(id) => run(id as OperatorUserAction)}
 	{onClose}

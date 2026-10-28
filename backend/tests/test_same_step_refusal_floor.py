@@ -15,6 +15,7 @@ async def test_codex_refused_sibling_blocks_cold_install_until_missing_result_se
 ) -> None:
     """The refused Codex sibling itself blocks cold work until it is settled."""
     from core._tool_result_delivery_support import ToolResultBindingError
+    from core.tool_result_delivery import persist_tool_execution_result
     from subagents.codex_runtime_events import settle_missing_tool_results
     from subagents.harness_checkpoint_cold_admission import build_external_cold_admission
 
@@ -24,11 +25,21 @@ async def test_codex_refused_sibling_blocks_cold_install_until_missing_result_se
         "SELECT content, metadata FROM messages WHERE id='older-result'"
     ).fetchone()
 
+    await on_event(_event("tool_use", "sibling"))
+    step = live.tool_step_ids["sibling"]
     await on_event(_event("tool_use", "refused"))
-    assert live.tool_step_ids == {"refused": "older-step"}
+    assert live.tool_step_ids == {"sibling": step, "refused": step}
+    persist_tool_execution_result(
+        thread_id="debt", turn_id="current", invocation_id="sibling",
+        assistant_step_id=step, provider_tool_call_id="sibling", name="bash",
+        arguments={}, content="bridge rejected", is_error=False, db=debt_db,
+    )
+    debt_db.commit()
+    await on_event(_event("tool_result", "sibling"))
+    assert live.tool_step_ids == {"refused": step}
     with pytest.raises(ToolResultBindingError, match="does not identify one canonical result"):
         await on_event(_event("tool_result", "refused"))
-    assert live.tool_step_ids == {"refused": "older-step"}
+    assert live.tool_step_ids == {"refused": step}
     assert debt_db.execute(
         "SELECT count(*) FROM messages WHERE thread_id='debt' AND role='tool' "
         "AND json_extract(metadata, '$.tool_call_id')='refused'"

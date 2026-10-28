@@ -57,6 +57,75 @@ def test_add_captures_the_person_input_consumed_by_its_turn(db):
     ]
 
 
+@pytest.mark.parametrize("operation", ("add", "insert"))
+def test_multiple_person_inputs_need_authority_and_capture_only_that_quote(db, operation):
+    _init_messages_fts(db)
+    plan = service.ensure_plan("thread", "root", db=db)
+    for message_id, content in (("requested", "Build the requested outcome."), ("unrelated", "Check the weather.")):
+        accept_thread_input("root", role="user", content=content, intent="apply_now", message_id=message_id, db=db)
+    db.execute("UPDATE messages SET active_turn_id='multi-turn' WHERE id IN ('requested', 'unrelated')")
+    actor = replace(ACTOR, turn_id="multi-turn")
+    params = {"title": "Build", "acceptance_criteria": "Outcome exists", "size": "S", "intent": "Build the outcome"}
+
+    with pytest.raises(service.PlanInputError, match="task creation needs intent_words"):
+        mutate(plan.id, operation, params, actor=actor, provenance="test", mutation_id=f"multi-refuse-{operation}", db=db)
+
+    result = mutate(
+        plan.id, operation, {**params, "intent_words": [{"quote": "Build the requested outcome.", "role": "authority"}]},
+        actor=actor, provenance="test", mutation_id=f"multi-authorized-{operation}", db=db,
+    ).result
+    words = intent_words.newest(db, result["node"]["id"])
+    assert [(w["author"], w["role"], w["quote"]) for w in words] == [
+        ("person", "authority", "Build the requested outcome."),
+    ]
+
+
+@pytest.mark.parametrize("role", ("bears_on", "authority"))
+def test_caller_person_quote_replaces_single_turn_input_and_needs_authority(db, role):
+    _init_messages_fts(db)
+    plan = service.ensure_plan("thread", "root", db=db)
+    accept_thread_input("root", role="user", content="Build the requested outcome.", intent="apply_now",
+                        message_id="authority", db=db)
+    accept_thread_input("root", role="user", content="Check the weather.", intent="apply_now",
+                        message_id="turn-input", db=db)
+    db.execute("UPDATE messages SET active_turn_id='one-turn' WHERE id='turn-input'")
+    params = {"title": "Build", "acceptance_criteria": "Outcome exists", "size": "S",
+              "intent": "Build the outcome", "intent_words": [{"quote": "Build the requested outcome.", "role": role}]}
+    actor = replace(ACTOR, turn_id="one-turn")
+    if role == "bears_on":
+        # The turn input is not recorded, so it cannot admit the task either.
+        with pytest.raises(service.PlanInputError, match="task creation needs intent_words"):
+            mutate(plan.id, "add", params, actor=actor, provenance="test", mutation_id="one-caller-bears", db=db)
+        return
+    result = mutate(plan.id, "add", params, actor=actor, provenance="test", mutation_id="one-caller-quote", db=db).result
+    words = intent_words.newest(db, result["node"]["id"])
+    assert [(w["author"], w["role"], w["quote"]) for w in words] == [
+        ("person", "authority", "Build the requested outcome."),
+    ]
+
+
+def test_single_agent_input_is_captured_without_person_words(db):
+    plan = service.ensure_plan("thread", "root", db=db)
+    accept_thread_input("root", role="user", content="Implement this.", intent="apply_now", message_id="agent-one",
+                        metadata={"sender_kind": "agent"}, db=db)
+    db.execute("UPDATE messages SET active_turn_id='agent-turn' WHERE id='agent-one'")
+    node = service.add_node(plan.id, kind="task", title="Test", acceptance_criteria="Checked", intent="Check", db=db)
+    assert not intent_words.capture_origin(db, node.id, turn_id="agent-turn", revision=1)
+    words = intent_words.newest(db, node.id)
+    assert [(w["author"], w["role"], w["quote"]) for w in words] == [("agent", "origin", "Implement this.")]
+
+
+def test_multiple_agent_inputs_have_no_automatic_origin(db):
+    plan = service.ensure_plan("thread", "root", db=db)
+    for message_id in ("agent-one", "agent-two"):
+        accept_thread_input("root", role="user", content=message_id, intent="apply_now", message_id=message_id,
+                            metadata={"sender_kind": "agent"}, db=db)
+    db.execute("UPDATE messages SET active_turn_id='agent-turn' WHERE id IN ('agent-one', 'agent-two')")
+    node = service.add_node(plan.id, kind="task", title="Test", acceptance_criteria="Checked", intent="Check", db=db)
+    assert not intent_words.capture_origin(db, node.id, turn_id="agent-turn", revision=1)
+    assert intent_words.newest(db, node.id) == []
+
+
 def test_add_resolves_a_person_authority_quote_through_the_message_producer(db):
     # This compact plan fixture omits the normal startup FTS hook.
     _init_messages_fts(db)
@@ -231,7 +300,7 @@ def test_doc_comment_quote_resolves_and_agent_words_skip_lookup(db):
     ]
 
 
-def test_agent_only_turn_records_agent_origin_and_still_needs_person_authority(db):
+def test_agent_only_turn_needs_person_authority_and_uses_it_as_anchor(db):
     _init_messages_fts(db)
     plan = service.ensure_plan("thread", "root", db=db)
     accept_thread_input(
@@ -265,9 +334,9 @@ def test_agent_only_turn_records_agent_origin_and_still_needs_person_authority(d
         mutation_id="agent-turn-authorized", db=db,
     ).result
     words = intent_words.newest(db, result["node"]["id"])
-    assert ("agent", "origin", "Delegate this implementation.") in {
-        (word["author"], word["role"], word["quote"]) for word in words
-    }
+    assert [(word["author"], word["role"], word["quote"]) for word in words] == [
+        ("person", "authority", "Proceed with the approved work."),
+    ]
 
 
 def test_wrapped_delivered_and_blank_user_rows_are_not_the_persons_words(db):

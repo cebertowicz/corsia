@@ -31,7 +31,7 @@ def doc(tmp_path, monkeypatch):
     monkeypatch.setattr("doceditor.live_tools.find_live", lambda path: entry if path.name == "doc.md" else None)
     monkeypatch.setattr("infra.db_async.run_in_db", run_in_db)
     monkeypatch.setattr("infra.queries.get_thread", lambda thread_id: {"title": "Agent Alpha", "project_id": None})
-    monkeypatch.setattr("tools.filesystem_gate._resolve_path", lambda path, workspace, **_: workspace / path)
+    monkeypatch.setattr("tools.filesystem_gate.resolve_path", lambda path, workspace, **_: workspace / path)
     monkeypatch.setattr(live_preview, "FLUSH_SECONDS", 0)
     return SimpleNamespace(live=live, workspace=tmp_path)
 

@@ -25,6 +25,12 @@ def _disable_analytics(monkeypatch):
     monkeypatch.setenv("CORSIA_ANALYTICS_DISABLE", "1")
 
 
+@pytest.fixture(autouse=True)
+def _alice_is_inside(monkeypatch):
+    # Only an inside author's comment text reaches a summary.
+    monkeypatch.setattr("events.connectors.github_content_facts.is_own", lambda login: login == "alice")
+
+
 def _comment_payload(
     repo: str, pr_number: int, *, body: str = "please review"
 ) -> dict:

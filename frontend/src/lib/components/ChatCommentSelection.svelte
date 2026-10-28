@@ -81,12 +81,24 @@
 		const root = messageRoot();
 		if (!root) return;
 		painting = true;
+		const byId = new Map<string, (typeof $messages)[number]>();
+		const sentBySeq = new Map<number | null | undefined, any[]>();
+		for (const message of $messages) {
+			if (message.thread_id !== threadId) continue;
+			if (!byId.has(message.id)) byId.set(message.id, message);
+			for (const comment of message.metadata?.reply_context?.comments ?? []) {
+				const sent = sentBySeq.get(comment.seq) ?? [];
+				sent.push(comment);
+				sentBySeq.set(comment.seq, sent);
+			}
+		}
 		for (const row of root.querySelectorAll<HTMLElement>('[data-message-id]')) {
 			const body = bodyOf(row);
 			if (!body) continue;
 			if (body.querySelector('.cm-comment-wrap')) keepingSelection(body, () => unpaint(body));
-			const target = $messages.find(message => message.id === row.dataset.messageId && message.thread_id === threadId);
-			const sent = $messages.filter(message => message.thread_id === threadId).flatMap(message => message.metadata?.reply_context?.comments ?? []).filter(comment => comment.seq === target?.seq);
+			const target = byId.get(row.dataset.messageId ?? '');
+			const indexed = target?.chat_comments ?? [];
+			const sent = [...new Map([...indexed, ...(sentBySeq.get(target?.seq) ?? [])].map(comment => [comment.id, comment])).values()];
 			const pending = comments.filter(comment => comment.messageId === row.dataset.messageId);
 			const marks = [...sent.map(comment => ({ ...comment, kind: 'placed' as const })), ...pending.map(comment => ({ ...comment, kind: editingId === comment.id ? 'focused' as const : 'pending' as const }))];
 			if (draft && draft.messageId === row.dataset.messageId) marks.push({ ...draft.anchor, id: 'draft', kind: 'pending' } as typeof marks[number]);

@@ -28,6 +28,7 @@
 	import { isHumanMessage } from './transcriptRowKinds';
 	import { MessageListScrollControl } from './messageListScrollControl';
 	import { createFocusWorkBlock } from './focusWorkBlock.svelte';
+	import { visibleChatAnswerRows } from '$lib/chatAnswerText';
 
 	let { messagesEl = $bindable(), userIsNearBottom = $bindable(true), ignoreScrollEvents = $bindable(false), hideScrollFab = false, onOpenLightbox, hasMoreMessages = false, loadingOlderMessages = false, olderLoadFailed = false, onLoadOlder, firstLoadPending = false, firstLoadFailed = false, onRetryFirstLoad, threadId = undefined, turnSummaries = {}, historyComplete = undefined, focusRuns = [], runLoads = {}, onLoadRun }: {
 		messagesEl: HTMLDivElement | undefined;
@@ -85,7 +86,7 @@
 		void loadDeferredToolResult(renderedThreadId, messageId, toolCallId, $token);
 	}
 	const pauseDescriptors = $derived(planLimitPauseDescriptors(messageRows, turnSummaries));
-	const presentation = $derived(buildMessageListPresentation(messageRows, pauseDescriptors.map((pause) => pause.source)));
+	const presentation = $derived(buildMessageListPresentation(visibleChatAnswerRows(messageRows), pauseDescriptors.map((pause) => pause.source)));
 	const focusMode = $derived($coreSettings?.features?.focus_mode === true);
 	// G2: in Focus a wake that needs a Retry lives in the pending area, never inside a block.
 	const transcriptMessages = $derived(presentation.visibleMessages.filter(

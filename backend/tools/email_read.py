@@ -36,6 +36,26 @@ def flagged_text(rule: str) -> str:
     )
 
 
+async def screened_message(account: str, message: Any, screen: email_screen.Screen | None = None) -> str:
+    """Screen and render a fetched message using the same disclosure rules as email_read."""
+    if screen is None:
+        screen = (await run_in_db(email_screen.stored_screens, account, [message.message_id])).get(message.message_id)
+    if screen is None or screen.status != email_screen.STATUS_SCREENED:
+        screen = await email_screen.screen_message(account, message.message_id, message.headers, message.body)
+    if screen.flagged:
+        return f"Error: {flagged_text(screen.rule)}"
+    if not screen.clean:
+        return f"Error: {UNSCREENED}"
+    body = CLOSE_TAG.sub("&lt;/untrusted-email", message.body[:OUTPUT_BODY_CHARS])
+    return json.dumps({
+        "message_id": message.message_id, "thread_id": thread_key(account, message.thread_id),
+        "from": message.headers.get("from", ""), "to": message.headers.get("to", ""),
+        "cc": message.headers.get("cc", ""), "date": message.headers.get("date", ""),
+        "subject": message.headers.get("subject", ""), "screen": email_screen.search_screen(screen),
+        "body": f"<untrusted-email>\n{body}\n</untrusted-email>",
+    })
+
+
 async def _reader(kwargs: dict[str, Any]) -> tuple[str, MailReader]:
     """The account the call names and this thread may use, and its reader; or :class:`AccountError`."""
     account = await run_in_db(resolve_for_thread, kwargs.get("account_id"), kwargs.get("_thread_id"))
@@ -96,7 +116,8 @@ class EmailSearchTool(Tool):
             screen = screens.get(message.message_id)
             entry: dict[str, Any] = {
                 "message_id": message.message_id, "thread_id": thread_key(account, message.thread_id),
-                "from": message.headers.get("from", ""), "date": message.headers.get("date", ""),
+                "from": email_screen.sender_for_screen(message.headers.get("from", ""), screen),
+                "date": message.headers.get("date", ""),
             }
             if screen is not None and screen.clean:
                 entry["subject"] = message.headers.get("subject", "")
@@ -139,25 +160,9 @@ class EmailReadTool(Tool):
             if screen is not None and screen.flagged:
                 return f"Error: {flagged_text(screen.rule)}"
             message = await reader.fetch(account, message_id)
-            if screen is None or screen.status != email_screen.STATUS_SCREENED:
-                screen = await email_screen.screen_message(
-                    account, message_id, message.headers, message.body,
-                )
+            return await screened_message(account, message, screen)
         except AccountError as exc:
             return f"Error: {exc}"
         except Exception:
             log.exception("email_read failed")
             return "Error: Couldn't read that message."
-        if screen.flagged:
-            return f"Error: {flagged_text(screen.rule)}"
-        if not screen.clean:
-            return f"Error: {UNSCREENED}"
-        body = CLOSE_TAG.sub("&lt;/untrusted-email", message.body[:OUTPUT_BODY_CHARS])
-        return json.dumps({
-            "message_id": message.message_id, "thread_id": thread_key(account, message.thread_id),
-            "from": message.headers.get("from", ""), "to": message.headers.get("to", ""),
-            "cc": message.headers.get("cc", ""), "date": message.headers.get("date", ""),
-            "subject": message.headers.get("subject", ""),
-            "screen": email_screen.search_screen(screen),
-            "body": f"<untrusted-email>\n{body}\n</untrusted-email>",
-        })

@@ -269,7 +269,7 @@ describe('LoginScreen', () => {
 		flushSync();
 		submitButton()!.click();
 
-		await vi.waitFor(() => expect(host.textContent).toContain('Wrong username or password.'));
+		await vi.waitFor(() => expect(host.textContent).toContain('That username and password don’t match.'));
 		expect(usernameField()!.value).toBe('demo');
 		expect(passwordField()!.value).toBe('');
 		expect(get(token)).toBeNull();

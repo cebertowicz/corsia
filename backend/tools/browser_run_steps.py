@@ -160,7 +160,7 @@ class BrowserRunStepsTool(Tool):
 def _command(step: dict[str, Any]) -> list[str]:
     action = step["action"]
     if action == "goto":
-        return ["eval", "location.reload()"] if step.get("reload") else ["open", step["url"]]
+        return ["reload"] if step.get("reload") else ["open", step["url"]]
     if action == "click":
         return ["click", step["selector"]]
     if action == "type":

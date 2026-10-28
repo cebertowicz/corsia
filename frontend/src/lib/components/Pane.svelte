@@ -93,7 +93,7 @@
 									onOpenLegacyDiscussion={openLegacyDiscussion}
 								/>
 							{:else}
-								<div class="stub-row">Open a conversation to see its plan</div>
+								<div class="stub-row">Open a chat to see its plan</div>
 							{/if}
 						{:else if s.kind === 'artifacts'}
 							<ArtifactPane threadId={$activeThreadId} {onBrowseDocuments} />

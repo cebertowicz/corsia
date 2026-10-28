@@ -44,7 +44,7 @@ afterEach(() => {
 });
 
 describe('a 200 that cannot support the surface is a failed load', () => {
-	it('does not answer "No active agents in this scope." for a body with no rows list', async () => {
+	it('does not answer "No active agents for this selection." for a body with no rows list', async () => {
 		const body = servedBody(REQUEST);
 		delete body.rows;
 		vi.stubGlobal('fetch', serve(body));

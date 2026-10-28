@@ -80,7 +80,11 @@ def macos_arch(machine: str | None = None) -> str:
 
 def application_cache_root(home: Path | None = None) -> Path:
     """The CORSIA-owned cache parent whose children must not be agent-replaceable."""
-    return (Path.home() if home is None else Path(home)) / "Library" / "Caches" / APP_FOLDER
+    base = Path.home() if home is None else Path(home)
+    if platform.system() == "Linux":
+        # Not XDG_CACHE_HOME: the installer's shell and the systemd service can disagree on it.
+        return base / ".cache" / "corsia"
+    return base / "Library" / "Caches" / APP_FOLDER
 
 
 def runtime_cache_root(home: Path | None = None) -> Path:

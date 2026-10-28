@@ -10,12 +10,14 @@ from pathlib import Path
 import re
 import shutil
 import stat
+import sys
 import tempfile
 from typing import IO, Literal, Sequence
 
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
 from packaging.version import Version
 from host_access import browser_identity as identity
+from host_access.browser_protocol import close_request as close_request, json_object as json_object
 from infra.platform_paths import app_bundle_root
 
 logger = logging.getLogger(__name__)
@@ -25,12 +27,14 @@ _PRE_DAEMON_ERRORS = frozenset({
     "invalid_value", "invalid_session_name",
 })
 BROWSER_COMMAND = "agent-browser"
+LINUX_CHROME_PATHS = (Path("/opt/google/chrome/chrome"), Path("/opt/corsia/chromium/chrome"))
 _SOURCE_INSTALL_HINT = (
     "install a supported build with `npm install -g agent-browser@0.31`, "
     "run `agent-browser install`, and make sure PATH selects it"
 )
 _PACKAGED_INSTALL_HINT = "reinstall or update CORSIA to restore its bundled copy"
 WAIT_TIMED_OUT = "Wait timed out; the browser session is still running. Take a snapshot to see the page."
+BROWSER_BUSY = "Browser timed out or is busy with an earlier command; the session is still running. Take a snapshot when it finishes."
 CHROME_INSTALL_TIMEOUT = 600.0
 # Each family's producer contract was verified against the real native build.
 _VERIFIED_FAMILIES = (">=0.27.0,<0.28.0", ">=0.31.0,<0.32.0")
@@ -129,12 +133,13 @@ def _application_dirs() -> tuple[Path, ...]:
 
 
 def chrome_executable() -> tuple[str | None, Literal["env", "system", "default"]]:
-    """Choose the Chrome agent-browser launches; None keeps its own download.
-
-    That download (Chrome for Testing 152) stops sending screencast frames in about
-    half of fresh sessions, so an installed Google Chrome is preferred. Only the
-    binary changes: agent-browser keeps its temporary profile either way.
-    """
+    """Select Chrome; Mac prefers installed Chrome because Chrome for Testing 152
+    can stop streaming frames. None keeps agent-browser's own download."""
+    if sys.platform == "linux":
+        for candidate in LINUX_CHROME_PATHS:
+            if candidate.is_file() and os.access(candidate, os.X_OK):
+                return str(candidate), "system"
+        raise identity.BrowserIdentityError("The browser is missing. Re-run the CORSIA installer.")
     if explicit := os.environ.get("AGENT_BROWSER_EXECUTABLE_PATH"):
         return explicit, "env"
     for folder in _application_dirs():
@@ -142,6 +147,15 @@ def chrome_executable() -> tuple[str | None, Literal["env", "system", "default"]
         if candidate.is_file() and os.access(candidate, os.X_OK):
             return str(candidate), "system"
     return None, "default"
+
+
+def downloaded_chrome_executable() -> str | None:
+    """Resolve agent-browser's installed Chrome after its installer completes."""
+    root = Path.home() / ".agent-browser" / "browsers"
+    candidates = sorted(root.glob("chrome-*/**/Google Chrome for Testing"))
+    if not candidates:
+        candidates = sorted(root.glob("chrome-*/**/chrome"))
+    return next((str(path) for path in reversed(candidates) if path.is_file() and os.access(path, os.X_OK)), None)
 
 
 def chrome_download_missing() -> bool:
@@ -184,19 +198,12 @@ def resolve_native(binary: str) -> tuple[str, str]:
         ) from exc
 
 
-def json_object(raw: str) -> dict:
-    """Decode exactly one object; partial/noisy output is never protocol evidence."""
-    try:
-        value = json.loads(raw)
-    except (ValueError, TypeError):
-        return {}
-    return value if isinstance(value, dict) else {}
-
+# JSON decoding and the close acknowledgement are owned by browser_protocol.
 
 def render_model_result(result: CommandResult, *, redactions: dict[str, str]) -> str:
     """Preserve readable tool strings while redacting private ownership facts."""
-    if result.timed_out:
-        return "Error: agent-browser command timed out."
+    if result.timed_out or result.completion == "interrupted":
+        return f"Error: {BROWSER_BUSY}"
     payload = json_object(result.stdout)
     if result.returncode != 0:
         # The native --json error (or stderr) is what the agent can act on.
@@ -275,13 +282,20 @@ def _read_output(stream: IO[bytes]) -> str:
     return stream.read().decode("utf-8", errors="replace").strip()
 
 
-async def invoke(argv: Sequence[str], *, socket_dir: Path, timeout: float) -> CommandResult:
+async def invoke(argv: Sequence[str], *, socket_dir: Path, timeout: float,
+                 stream_port: int | None = None, config_path: Path | None = None,
+                 home: Path | None = None, linux_chrome: str | None = None) -> CommandResult:
     """Settle the actual subprocess; unknown effects are never a no-launch claim."""
-    env = os.environ.copy()
-    env.pop("AGENT_BROWSER_DAEMON", None)
-    env.pop("AGENT_BROWSER_DASHBOARD", None)
-    env.pop("AGENT_BROWSER_SESSION", None)
-    env["AGENT_BROWSER_SOCKET_DIR"] = str(socket_dir)
+    from host_access.browser_environment import client_environment
+    env = client_environment(os.environ, socket_dir, stream_port)
+    if sys.platform == "linux":
+        env.pop("CI", None)  # Native agent-browser otherwise disables Chromium's sandbox.
+        if linux_chrome:
+            env["AGENT_BROWSER_EXECUTABLE_PATH"] = linux_chrome
+    if config_path is not None:
+        argv = (argv[0], "--config", str(config_path), *argv[1:])
+    if home is not None:
+        env["HOME"] = str(home)
     # The client starts a browser daemon that outlives it, and a descendant can keep the client's stdout and stderr
     # open after the client exits. Pipes would then never reach end-of-file, so the client writes to files and
     # settles on its own exit; what a descendant writes later goes to a file nobody waits on.
@@ -332,9 +346,15 @@ async def invoke(argv: Sequence[str], *, socket_dir: Path, timeout: float) -> Co
     return CommandResult(int(process.returncode or 0), stdout, stderr)
 
 
-def check_local_mode(args: Sequence[str]) -> None:
+def check_local_mode(args: Sequence[str]) -> dict:
     """Reject unverified producer modes before session effects, including config files."""
+    from host_access import browser_launch
+    browser_launch.inherited_args()
     forbidden = {"-p", "--provider", "--engine", "--cdp", "--auto-connect", "--config"}
+    if sys.platform == "linux" and any(
+            arg.split("=", 1)[0] in {"--args", "--executable-path"} for arg in args):
+        raise identity.BrowserIdentityError(
+            "Remove browser launch arguments from the command, then try again.")
     if any(arg.split("=", 1)[0] in forbidden for arg in args):
         raise identity.BrowserIdentityError(_LOCAL_MODE_REQUIRED)
     explicit = os.environ.get("AGENT_BROWSER_CONFIG")
@@ -353,30 +373,19 @@ def check_local_mode(args: Sequence[str]) -> None:
         except (OSError, ValueError) as exc:
             raise identity.BrowserIdentityError(
                 "the agent-browser config file is not a readable JSON object; fix it") from exc
+    if sys.platform == "linux" and (config.get("args") or config.get("executablePath")):
+        raise identity.BrowserIdentityError(
+            "Remove browser launch arguments from the agent-browser configuration, then try again.")
     provider = os.environ.get("AGENT_BROWSER_PROVIDER", config.get("provider"))
     engine = os.environ.get("AGENT_BROWSER_ENGINE", config.get("engine", "chrome"))
     auto_connect = os.environ.get("AGENT_BROWSER_AUTO_CONNECT", "").lower() in {"1", "true", "yes"}
     if (provider is not None or engine not in {None, "chrome"} or config.get("cdp")
             or os.environ.get("AGENT_BROWSER_CDP") or auto_connect or config.get("autoConnect")):
         raise identity.BrowserIdentityError(_LOCAL_MODE_REQUIRED)
+    return config
 
 
 _LOCAL_MODE_REQUIRED = (
     "managed browser requires the verified local Chrome/CDP mode; remove provider, engine, "
     "CDP, auto-connect and --config settings from the command, environment and agent-browser config"
 )
-
-
-async def close_request(reader: asyncio.StreamReader, writer: asyncio.StreamWriter, request_id: str) -> None:
-    """Consume the local-CDP producer acknowledgement; transport EOF is not success."""
-    try:
-        writer.write((json.dumps({"id": request_id, "action": "close"}) + "\n").encode())
-        await writer.drain()
-        response = json_object((await reader.readline()).decode("utf-8"))
-        data = response.get("data")
-        if (response.get("id") != request_id or response.get("success") is not True
-                or not isinstance(data, dict) or data.get("closed") is not True):
-            raise identity.BrowserIdentityError("browser producer did not acknowledge close")
-    finally:
-        writer.close()
-        await writer.wait_closed()

@@ -242,7 +242,7 @@ async def test_cache_warm_refuses_a_lan_model_in_a_cloud_off_project_before_any_
 
     _thread("t-off", OFF, LAN_MODEL)
 
-    target, _project, _effort = _load_warm_target("t-off", "user-1")
+    target, _project, _effort, _thread_row = _load_warm_target("t-off", "user-1")
     proved = await _prove_warm_target(target, "t-off")
 
     assert (target.available, target.availability_reason) == (False, "project_cloud_off")

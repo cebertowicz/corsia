@@ -10,6 +10,7 @@
 	import { togglePin } from '$lib/artifactPanePin';
 	import { toasts } from '$lib/stores/toast';
 	import { openBrowserPane } from '$lib/stores/artifactWorkspace';
+	import { paneOpen, isPaneDrawer } from '$lib/stores/paneOpen';
 	import ArtifactRow from './ArtifactRow.svelte';
 	import ArtifactWorktreeGroup from './ArtifactWorktreeGroup.svelte';
 	import { failThreadOpen, markArtifactsLoaded, registerArtifactsPane } from '$lib/openTimingRuntime';
@@ -214,19 +215,26 @@
 			retryingLoad = false;
 		}
 	}
+
+	function openBrowser(threadId: string) {
+		openBrowserPane(threadId);
+		// On narrow canvases this list is the right drawer; leaving it open would
+		// cover the browser the tap just opened.
+		if (isPaneDrawer()) paneOpen.set(false);
+	}
 </script>
 
 {#if !loaded}
 	<div class="muted">Loading…</div>
 {:else if showFetchError}
 	<div class="pane-error" role="status">
-		<span>Couldn't load this thread's files.</span>
+		<span>Couldn’t load this chat’s files.</span>
 		<Button variant="secondary" size="sm" loading={retryingLoad} disabled={retryingLoad} onclick={retryLoad}>
 			Retry
 		</Button>
 	</div>
 {:else if !data || isEmpty}
-	<div class="muted">Files you create, upload, or open in this thread show up here.</div>
+	<div class="muted">Files you create, upload, or open in this chat show up here.</div>
 {:else}
 	{#if fetchError}
 		<div class="stale-notice" role="status">
@@ -278,7 +286,7 @@
 		Browse documents…
 	</button>
 {/if}
-	<button class="browse" type="button" onclick={() => openBrowserPane(threadId)}>
+	<button class="browse" type="button" onclick={() => openBrowser(threadId)}>
 		<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg>
 		Open browser
 	</button>

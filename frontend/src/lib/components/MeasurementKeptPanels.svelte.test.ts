@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { mount, unmount } from 'svelte';
 import type { MeasurementRow, PanelState, SeriesWindows } from '$lib/stores/measurement';
 import MeasurementKeptPanels from './MeasurementKeptPanels.svelte';
+import { INCONSISTENT_ANSWERS } from './measurementAlignmentChart';
 import { daysPeriod, periodsPeriod } from '../__tests__/fixtures/measurementPeriod';
 
 let component: Record<string, unknown> | null = null;
@@ -54,6 +55,16 @@ function render(rows: Record<Series, MeasurementRow[]>, period = daysPeriod(day(
 const card = (id: string) => host.querySelector(`#${id}-title`)!.closest('section')!;
 
 describe('kept charts on Days', () => {
+	it('explains when nothing was recorded in the range', () => {
+		const rows = allDays();
+		rows.asks_per_outcome = [];
+		render(rows);
+		expect(card('asks').querySelector('.empty')?.textContent).toBe('Nothing was recorded in this range.');
+	});
+	it('defines the asks chart n per day', () => {
+		render(allDays());
+		expect(card('asks').querySelector('figcaption')?.textContent).toBe('Decisions raised to you and tasks waiting on you, per accepted outcome; lower is better. n is accepted outcomes per day.');
+	});
 	for (const [id, label] of [['outcomes', 'Outcomes'], ['asks', 'Asks'], ['rejections', 'Rejections'], ['tokens', 'Fresh tokens']] as const) {
 		it(`${label} reads BY DAY with a bar per day and the 7-day moving average`, () => {
 			render(allDays());
@@ -136,7 +147,7 @@ describe('kept charts on Days', () => {
 		// Twelve decisions clear the served 10: only day 3, withheld, draws no stack, and the change reads past low n (new: the series began inside the previous window).
 		expect(alignment.querySelectorAll('.dsk svg rect.stack')).toHaveLength(LAST_DONE * 3);
 		expect([...alignment.querySelectorAll('.dsk svg text.lo')].map((n) => n.textContent)).toEqual(['too few']);
-		expect(alignment.querySelector('.stat')?.textContent).toContain('n 12, new');
+		expect(alignment.querySelector('.stat')?.textContent).toContain('n 12, new');
 		expect(alignment.querySelector('.stat')?.textContent).not.toContain('low n');
 		expect(alignment.textContent).not.toContain('fewer than 20');
 	});
@@ -196,8 +207,13 @@ describe('kept charts on Days', () => {
 		}
 		// The headline pools the seven completed days the period names (7 x 40); today's 7 stay out of it.
 		expect(card('outcomes').querySelector('.stat')?.textContent).toContain('280 accepted outcomes');
-		expect(card('outcomes').querySelector('.stat')?.textContent).toContain('n 280');
+		expect(card('outcomes').querySelector('.stat')?.textContent).toContain('n 280');
 		expect(card('tokens').querySelector('.stat')?.textContent).toContain('120k fresh tokens per outcome');
+	});
+
+	it('reads a single accepted outcome in the singular', () => {
+		render(allDays(), daysPeriod(day(LAST_DONE)), { ...POOLED, outcomes: { latest: { value: 1, n: 1 }, previous: { value: 280, n: 280 } } });
+		expect(card('outcomes').querySelector('.stat')?.textContent).toContain('1 accepted outcome,');
 	});
 
 	it('draws Asks per outcome as one all-agents bar card after Outcomes, its bars, labels and read-out in the same two-decimal figures', () => {
@@ -205,11 +221,11 @@ describe('kept charts on Days', () => {
 		rows.asks_per_outcome = dayRows('asks_per_outcome').map((r, i) => ({ ...r, value: 0.1 + i / 100 }));
 		render(rows);
 		const order = [...host.querySelectorAll('section.card h3')].map((h) => h.textContent);
-		expect(order).toEqual(['Outcomes', 'Asks per outcome', 'Alignment', 'Rejections per outcome', 'Fresh tokens per outcome']);
+		expect(order).toEqual(['Outcomes', 'Decisions and tasks for you per outcome', 'Alignment', 'Rejections per outcome', 'Fresh tokens per outcome']);
 		const section = card('asks');
 		expect(section.classList.contains('card')).toBe(true);
-		expect(section.querySelector('.stat')?.textContent).toContain('0.13 asks per outcome');
-		expect(section.querySelector('h4')?.textContent).toMatch(/^Asks of you per accepted outcome, .+, by day$/);
+		expect(section.querySelector('.stat')?.textContent).toContain('0.13 decisions and tasks per outcome');
+		expect(section.querySelector('h4')?.textContent).toMatch(/^Decisions and tasks for you per accepted outcome, .+, by day$/);
 		const svg = section.querySelector('.dsk svg')!;
 		// One series: one bar per day, none split by agent.
 		expect(svg.querySelectorAll('rect.bar')).toHaveLength(LAST_DONE + 1);
@@ -241,7 +257,7 @@ describe('kept chart headlines', () => {
 	};
 	// The earlier days make the previous window fully covered, so the change reads as a percentage and not as new.
 	const withheld = (series: Series) => [...[-4, -3, -2, -1].map((i) => row(series, day(i), VALUES[series])), ...dayRows(series)].map((r) => (r.period === day(8) ? { ...r, value: null, n: 8 } : r));
-	const grouped = { outcomes: ['outcomes', '495 accepted outcomes', 'n 495', '-56% vs'], alignment: ['took_recommendation_pct', '55% took', 'n 40', 'n 126'], asks: ['asks_per_outcome', '0.13 asks per outcome', 'n 495', '+30% vs'], rejections: ['rejections_per_outcome', '0.18 rejections', 'n 495', '+50% vs'], tokens: ['fresh_tokens_per_outcome', '1,057k fresh tokens', 'n 495', '+44% vs'] } as const;
+	const grouped = { outcomes: ['outcomes', '495 accepted outcomes', 'n 495', '-56% vs'], alignment: ['took_recommendation_pct', '55% took', 'n 40', 'n 126'], asks: ['asks_per_outcome', '0.13 decisions and tasks per outcome', 'n 495', '+30% vs'], rejections: ['rejections_per_outcome', '0.18 rejections', 'n 495', '+50% vs'], tokens: ['fresh_tokens_per_outcome', '1,057k fresh tokens', 'n 495', '+44% vs'] } as const;
 	for (const [id, [series, value, n, change]] of Object.entries(grouped)) {
 		it(`${id} headline is the served window, with a withheld day inside it`, () => {
 			const rows = allDays();
@@ -263,6 +279,7 @@ describe('kept charts on Weeks', () => {
 		const make = (series: Series) => [...Array.from({ length: 8 }, (_, i) => row(series, wk(i), VALUES[series], 40, false, i >= 3 ? VALUES[series] : null)), row(series, wk(8), 3, 3, true)];
 		render({ outcomes: make('outcomes'), took_recommendation_pct: make('took_recommendation_pct'), asks_per_outcome: make('asks_per_outcome'), rejections_per_outcome: make('rejections_per_outcome'), fresh_tokens_per_outcome: make('fresh_tokens_per_outcome') }, periodsPeriod(wk(7)));
 		const section = card('outcomes');
+		expect(card('asks').querySelector('figcaption')?.textContent).toBe('Decisions raised to you and tasks waiting on you, per accepted outcome; lower is better. n is accepted outcomes per week.');
 		expect(section.querySelector('h4')?.textContent).toMatch(/, by week$/);
 		expect(section.querySelectorAll('.dsk svg rect.bar')).toHaveLength(8);
 		expect(section.querySelector('.dsk svg polyline.ma')?.getAttribute('points')?.split(' ')).toHaveLength(5);
@@ -348,13 +365,31 @@ describe('Alignment draws its three shares as one stacked bar per period, as bef
 		expect(card('alignment').textContent).not.toContain('not recorded');
 	});
 
+	it.each([
+		['mismatched count', { n: 39 }],
+		['out-of-range share', { value: 1.5 }],
+		['non-finite share', { value: Number.NaN }],
+	])('explains a %s in the alignment table', (_name, change) => {
+		const rows = all();
+		const shares = withShares(rows.took_recommendation_pct).map((r) => (r.period === wk(2) && r.series === 'answered_neither_pct' ? { ...r, ...change } : r));
+		render(rows, periodsPeriod(wk(7)), POOLED, shares);
+		expect(card('alignment').querySelectorAll('table.sr-only tbody tr')[2].textContent).toContain(INCONSISTENT_ANSWERS);
+	});
+
+	it('reports a missing share as inconsistent answers', () => {
+		const rows = all();
+		const shares = withShares(rows.took_recommendation_pct).filter((r) => !(r.period === wk(2) && r.series === 'answered_neither_pct'));
+		render(rows, periodsPeriod(wk(7)), POOLED, shares);
+		expect(card('alignment').querySelectorAll('table.sr-only tbody tr')[2].textContent).toContain(INCONSISTENT_ANSWERS);
+	});
+
 	it('draws no stack for a week whose shares do not add up to the answered decisions, and says why in the table', () => {
 		const rows = all();
 		const shares = withShares(rows.took_recommendation_pct).map((r) => (r.period === wk(2) && r.series === 'answered_neither_pct' ? { ...r, value: 0.5 } : r));
 		render(rows, periodsPeriod(wk(7)), POOLED, shares);
 		const section = card('alignment');
 		expect(section.querySelectorAll('.dsk svg rect.stack')).toHaveLength(7 * 3);
-		expect(section.querySelectorAll('table.sr-only tbody tr')[2].textContent).toContain('do not add up');
+		expect(section.querySelectorAll('table.sr-only tbody tr')[2].textContent).toContain(INCONSISTENT_ANSWERS);
 		// Plenty of decisions were answered that week, so the chart must not call it too few.
 		expect(section.querySelectorAll('.dsk svg text.lo')).toHaveLength(0);
 		expect(section.querySelector('.lg')?.textContent).not.toContain('too few');
