@@ -694,7 +694,7 @@ def test_compact_pure_review_reducers_cover_every_review_kind(
     from plans import operator_node_state
 
     display = operator_node_state.display_from_facts(
-        "review_requested", "review", kind, needs_user=needs_user,
+        "review_requested", "review", kind, asks_user=needs_user,
     )
     assert display["label_key"] == label
     assert operator_node_state.leaf_bucket_from_facts(

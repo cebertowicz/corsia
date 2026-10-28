@@ -262,6 +262,7 @@ def integration_client(integration_workspace):
     import app_startup_runtime
     import api.usage_rollup as usage_rollup
     import automation.plan_liveness as plan_liveness
+    import automation.restart_startup as restart_startup
     import connections
     import llm.network_discovery as network_discovery
     import ws.presence_control as presence_control
@@ -273,17 +274,19 @@ def integration_client(integration_workspace):
     async def _skip_external_harness_discovery() -> list[dict]:
         return []
 
-    async def _suspend_forever() -> None:
+    async def _suspend_forever(*_args) -> None:
         await asyncio.Event().wait()
 
     # Every long-running loop production starts at app startup. Each one
     # outlives this session-scoped app and keeps polling whichever isolated
     # per-test database happens to be active later, which has segfaulted the
     # suite from multiple loops (plan liveness, nightly, delivery recovery,
-    # idle retirement). Suspend the whole class here; dedicated lifecycle tests
+    # idle retirement). Startup recovery can also outlive startup and reach a
+    # later test's database. Suspend these here; dedicated lifecycle tests
     # exercise the real owners.
     _BACKGROUND_LOOPS = (
         (plan_liveness, "plan_liveness_sweep_loop"),
+        (restart_startup, "run_startup_drive"),
         (network_discovery, "health_sweep_loop"),
         (app_startup_runtime, "nightly_job_loop"),
         (app_startup_runtime, "idle_retirement_loop"),

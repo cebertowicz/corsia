@@ -72,6 +72,30 @@ and context rows advertise those workspace-readable paths while delivery still
 reads package bytes. The projection is generated, read-only in effect, and
 restores drift rather than accepting edits as System content.
 
+### Confined workers
+
+`infra/thread_confinement.py` persists a review worker's approved read directories
+on its thread. `tools/confined_reads.py` projects only `read_file`, `grep`, `glob`
+and `list_dir`; the registry and filesystem gate recheck every call and resolved
+path, including symlink targets. The parent's tool surface is unchanged.
+
+Codex uses this same model-reachable tool boundary as native workers. Its
+app-server process is **not OS-sandboxed** by CORSIA, and this boundary does not
+restrict the process's network access. `subagents/codex_confinement.py` reads
+confinement through the canonical thread owner and admits only the captured
+Codex version before spawning and again at app-server start. It disables native
+and hosted tool producers, uses a neutral empty working directory, and refuses
+forks at launch. Project instructions
+are disabled. The isolated Codex home projects subscription auth for the
+app-server, without importing the person's config, profiles or MCP servers;
+confined reads cannot reach that home. No model-invoked native tool can reach a
+TCC-granted capability.
+
+The pinned app-server has no full model-tool readback. The credential-free
+integration capture checks the entire outgoing model request's tools array,
+including hosted entries, on cold start and process resume. A new Codex version
+refuses confined launches until CORSIA updates and repeats that proof.
+
 ### Foreground shell invocation identity
 
 `infra/state/context.py` owns a task-local invocation scope. Bridge, native

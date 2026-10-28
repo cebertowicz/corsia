@@ -142,9 +142,16 @@ async def test_a_sent_copy_is_always_appended_and_the_retired_host_flag_is_not_w
     assert [folder for folder, _ in host.built.imap.appended] == ["Drafts", "Sent"]
 
 
-async def test_a_missing_sent_copy_does_not_turn_a_delivered_send_into_a_failure(host, caplog) -> None:
+async def test_a_missing_sent_copy_does_not_turn_a_delivered_send_into_a_failure(host, caplog, monkeypatch) -> None:
     saved = await _draft(host)
     host.built.imap.password = "changed-after-the-draft"
+    # Isolate the post-send copy failure from the earlier required font read.
+    from tools.mailhost_backend import MailHostBackend
+
+    async def sent_html(_account_id):
+        return []
+
+    monkeypatch.setattr(MailHostBackend, "sent_html", staticmethod(sent_html))
     with caplog.at_level(logging.WARNING):
         out = await _send(host, saved)
     assert not out.startswith("Error") and len(host.built.smtp.sent) == 1

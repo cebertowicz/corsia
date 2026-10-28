@@ -22,7 +22,7 @@ def _index_names(db) -> set[str]:
 
 
 def test_fresh_schema_is_current_version():
-    assert SCHEMA_VERSION == 155
+    assert SCHEMA_VERSION == 158
 
 
 def test_fresh_schema_creates_the_plan_node_indexes():

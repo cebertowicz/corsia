@@ -211,7 +211,7 @@ def _sidecar_corsia(
     data, errors = parse_sidecar(sidecar)
     if data is None:
         return lesson, errors
-    return data, _validate_corsia_data(data) + validate_workflow(data)
+    return data, _validate_corsia_data(data) + validate_workflow(data, skill_name=text_value(meta.get("name")))
 
 
 def _validate(
@@ -240,7 +240,7 @@ def _validate(
     errors.extend(_misfiled_block_errors(meta))
     data = _lesson_block(meta)
     if data is not None:
-        errors.extend(validate_workflow(data))
+        errors.extend(validate_workflow(data, skill_name=name))
         if LESSON_KEY in data:
             errors.extend(lesson_errors(data[LESSON_KEY], description, body))
     if bundle:

@@ -144,6 +144,10 @@ def _worker_is_working(connection, node) -> bool:
 
 
 def _require_dependencies_settled(connection, node) -> None:
+    # The node's own edges only, like its own holds and watches below. An
+    # edge an open ancestor hands down (``node_waits``) orders when its steps
+    # start; it stays the ancestor's to settle, so the person's Mark done on
+    # one step still accepts it while its siblings keep waiting.
     unmet = connection.execute(
         """SELECT 1 FROM plan_node_dependencies d
            JOIN plan_nodes required ON required.id=d.depends_on_node_id

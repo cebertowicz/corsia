@@ -500,5 +500,5 @@ class TestCodexAppServerSessionEnvGate:
                 with pytest.raises(FileNotFoundError, match="env capture"):
                     asyncio.run(session.start())
 
-        build_env.assert_called_once_with(govern_model_catalog=True)
+        build_env.assert_called_once_with(govern_model_catalog=True, confined=False)
         assert captured_env == isolated_env

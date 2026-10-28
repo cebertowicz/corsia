@@ -10,10 +10,9 @@ from __future__ import annotations
 import email
 import email.policy
 import json
-from email.utils import getaddresses
 
 from connections.account_errors import AccountError
-from connections.mail.email_document import DraftRefused, is_plain_address, reply_target_label
+from connections.mail.email_document import DraftRefused, reply_addresses, reply_target_label
 from connections.mailhost import imap, read
 from infra.db_async import run_in_db
 
@@ -34,7 +33,7 @@ async def reply_target(account_id: str, message_id: str) -> tuple[dict, str]:
         with imap.account_lock(account_id):
             return imap.reply_headers(endpoints, username, password, validity, uid)
 
-    raw = await read._guarded(account_id, check, call)
+    raw = await read.guarded(account_id, check, call)
     if raw is None:
         raise DraftRefused(read.NOT_FOUND)
     headers = email.message_from_bytes(raw, policy=email.policy.default)
@@ -46,7 +45,7 @@ async def reply_target(account_id: str, message_id: str) -> tuple[dict, str]:
         "reply_to": read.mint_message_id(account_id, validity, uid),
         "in_reply_to": message_header or None,
         "references": references or None,
-        "reply_addresses": [address for _, address in getaddresses([reply_to]) if is_plain_address(address)],
+        "reply_addresses": reply_addresses(reply_to, sender),
         "prefix_reply_subject": True,
     }
     return target, reply_target_label(sender, _one_line(headers.get("Subject")))

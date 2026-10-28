@@ -68,6 +68,8 @@ export const WAITING_FOR_MODEL_CHOICE = {
 	title: 'This thread has no model yet. Your message is saved and will send as soon as you choose one.',
 } as const;
 
+export const CREATE_ACCOUNT_REFUSED = 'Couldn’t start the chat on that account. Its row in the model picker says why; pick another account there.';
+export const CREATE_FAILED = 'Couldn’t create the chat. Try again.';
 export const WAITING_FOR_ACCOUNT = 'Waiting for account';
 
 const SIGN_IN_AGAIN = 'Your message is saved and will send as soon as you sign in again in Settings › Providers.';
