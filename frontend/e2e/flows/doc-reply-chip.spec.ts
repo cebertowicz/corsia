@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from '../support/test';
@@ -7,7 +7,7 @@ import { expect, type APIRequestContext, type Page } from '@playwright/test';
 import { chatComposer, createSession, loginByUrl, sendButton, sidebarThread, TEST_TOKEN, waitForWsConnected } from '../support/corsia';
 import { injectMessage, seedMockResponses } from '../support/mock';
 import { DOC, DOC_IMAGE_NATURAL, overlay, putSheetAway, seedImageDocument } from '../support/docImageComments';
-import { headerSend, seedHeldComments } from '../support/heldComments';
+import { headerSend, holdDocumentComments, seedHeldComments } from '../support/heldComments';
 import { hitBox } from '../support/hitBox';
 
 // Evidence frames for the document reply chip (R5): the chat's own "N new replies" chip, floated over the document it counts.
@@ -117,39 +117,48 @@ async function shot(page: Page, name: string): Promise<void> {
 
 async function startMotionProbe(page: Page): Promise<void> {
 	await page.evaluate(() => {
-		const w = window as unknown as { __replyMotion: { active: boolean; samples: unknown[] } };
-		const probe = w.__replyMotion = { active: true, samples: [] };
-		const start = performance.now();
-		const sample = () => {
-			if (!probe.active) return;
-			const selectors = ['[data-doc-reply-chip]', '.drawer-motion', '.drawer-backdrop:not(.outro-shield)', '.cm-content'];
-			const elements = selectors.map((selector) => {
-				const node = document.querySelector<HTMLElement>(selector);
-				if (!node) return { selector, present: false };
-				const style = getComputedStyle(node), box = node.getBoundingClientRect();
-				const animations = node.getAnimations().map((animation) => {
-					const effect = animation.effect as KeyframeEffect | null;
-					return { playState: animation.playState, timing: effect?.getTiming(), keyframes: effect?.getKeyframes() };
-				});
-				return { selector, present: true, opacity: style.opacity, transform: style.transform, transition: style.transition, animation: style.animation, box: { x: box.x, y: box.y, width: box.width, height: box.height }, animations };
-			});
-			probe.samples.push({ ms: performance.now() - start, elements });
-			requestAnimationFrame(sample);
+		type Probe = { events: unknown[]; cleanup: () => void };
+		const w = window as unknown as { __replyMotion?: Probe };
+		w.__replyMotion?.cleanup();
+		const events: unknown[] = [];
+		const selector = '[data-doc-reply-chip], .drawer-motion, .drawer-backdrop:not(.outro-shield), [data-comment-id]';
+		const relevant = (node: Element) => node.matches(selector) || !!node.closest('[data-doc-reply-chip], .drawer-motion');
+		const details = (animation: Animation) => {
+			const effect = animation.effect as KeyframeEffect | null;
+			return { timing: effect?.getTiming(), keyframes: effect?.getKeyframes() };
 		};
-		requestAnimationFrame(sample);
+		const listener = (event: Event) => {
+			const node = event.target;
+			if (!(node instanceof Element) || !relevant(node)) return;
+			events.push({ type: event.type, property: event instanceof TransitionEvent ? event.propertyName : event instanceof AnimationEvent ? event.animationName : null, target: node.className, animations: node.getAnimations().map(details) });
+		};
+		document.addEventListener('transitionrun', listener, true);
+		document.addEventListener('animationstart', listener, true);
+		// Svelte also starts transitions via Web Animations, which emits neither DOM event.
+		const original = Element.prototype.animate;
+		Element.prototype.animate = function (...args: Parameters<typeof original>) {
+			const animation = original.apply(this, args);
+			if (relevant(this)) events.push({ type: 'web-animation-created', property: null, target: this.className, animations: [details(animation)] });
+			return animation;
+		};
+		w.__replyMotion = { events, cleanup: () => {
+			document.removeEventListener('transitionrun', listener, true);
+			document.removeEventListener('animationstart', listener, true);
+			Element.prototype.animate = original;
+		} };
 	});
 }
 
 async function saveMotionProbe(page: Page, name: string): Promise<void> {
 	await page.waitForTimeout(600);
-	const samples = await page.evaluate(() => {
-		const probe = (window as unknown as { __replyMotion: { active: boolean; samples: unknown[] } }).__replyMotion;
-		probe.active = false;
-		return probe.samples;
+	const events = await page.evaluate(() => {
+		const probe = (window as unknown as { __replyMotion: { events: unknown[]; cleanup: () => void } }).__replyMotion;
+		probe.cleanup();
+		return probe.events;
 	});
 	if (screenshotDir) {
 		mkdirSync(screenshotDir, { recursive: true });
-		writeFileSync(path.join(screenshotDir, `${name}.json`), JSON.stringify(samples));
+		writeFileSync(path.join(screenshotDir, `${name}-events.json`), JSON.stringify(events));
 	}
 }
 
@@ -301,6 +310,7 @@ for (const theme of ['light', 'dark'] as const) {
 			await onlyThread(request, threadId);
 			const doc = await seedTextDocument(page, request, threadId, `j1-${theme}-${width}`, 'launch-plan.md', [8, 10]);
 			const heldFrom = TEXT.indexOf(SECTIONS[0].anchor);
+			await holdDocumentComments(request);
 			await seedHeldComments(request, doc.artifactId, 1, 'Review', { text: SECTIONS[0].anchor, from: heldFrom, to: heldFrom + SECTIONS[0].anchor.length });
 			tidy(doc.artifactId);
 			await stageWorkspace(page, threadId, doc.docPath, 'launch-plan.md', 'artifact');
@@ -314,7 +324,8 @@ for (const theme of ['light', 'dark'] as const) {
 			expect(replyBox.height, 'reply target is at least 44px high').toBeGreaterThanOrEqual(44);
 			expect(replyBox.width, 'reply target is at least 44px wide').toBeGreaterThanOrEqual(44);
 			expect(replyBox.x < sendBox.x + sendBox.width && sendBox.x < replyBox.x + replyBox.width && replyBox.y < sendBox.y + sendBox.height && sendBox.y < replyBox.y + replyBox.height, 'held-comment Send stays clear of the reply target').toBe(false);
-			await shot(page, `01d-held-send-with-chip-${theme}-${width}`);
+			await shot(page, `01-text-document-chip-${theme}-${width}`);
+			// Capture the held Send after the caret evidence, so a missing press treatment cannot suppress it.
 			await expect(chipBox(page).locator('.ct-new')).toBeVisible();
 			// Probe the actual hit target at both vertical edges, outside the visual chip face.
 			const edgeHits = await chipButton(page).evaluate((button) => {
@@ -324,7 +335,6 @@ for (const theme of ['light', 'dark'] as const) {
 				return [-21, 21].map((offset) => button.contains(document.elementFromPoint(x, center + offset)));
 			});
 			expect(edgeHits).toEqual([true, true]);
-			await shot(page, `01-text-document-chip-${theme}-${width}`);
 			const anchor = page.locator('.cm-comment-anchor').first();
 			await anchor.scrollIntoViewIfNeeded();
 			const anchorBox = (await anchor.boundingBox())!;
@@ -342,14 +352,53 @@ for (const theme of ['light', 'dark'] as const) {
 				const selection = window.getSelection();
 				if (!selection?.isCollapsed || !selection.anchorNode || !editor.contains(selection.anchorNode)) throw new Error('Editor caret is not focused');
 				const rect = selection.getRangeAt(0).getBoundingClientRect();
-				return { y: rect.y, height: rect.height };
+				return { x: rect.x, y: rect.y, height: rect.height };
 			});
 			expect(caretBox.height, 'caret has visible geometry').toBeGreaterThan(0);
 			const editorAfter = (await page.locator('.doc-main').boundingBox())!;
 			const chipAfter = (await chipBox(page).boundingBox())!;
 			expect(caretBox.y + caretBox.height, 'caret stays inside the editor').toBeLessThanOrEqual(editorAfter.y + editorAfter.height + 0.5);
 			expect(caretBox.y + caretBox.height, 'caret stays above the reply chip').toBeLessThanOrEqual(chipAfter.y);
-			await shot(page, `01c-visible-caret-with-chip-${theme}-${width}`);
+			if (screenshotDir) {
+				await expect(page.locator('.doc .cm-content')).toBeFocused();
+				// This editor uses the native caret (no CodeMirror drawSelection layer). Preserve two blink phases for pixel inspection.
+				const first = await page.screenshot({ scale: 'css', animations: 'disabled', caret: 'initial' });
+				await page.waitForTimeout(600);
+				const second = await page.screenshot({ scale: 'css', animations: 'disabled', caret: 'initial' });
+				const neighbour = readFileSync(path.join(screenshotDir, `01b-visible-anchor-with-chip-${theme}-${width}.png`));
+				writeFileSync(path.join(screenshotDir, `01c-caret-diagnostic-${theme}-${width}.json`), JSON.stringify({ caretBox, framesDiffer: !first.equals(second) }));
+				if (!first.equals(second)) {
+					expect(first.equals(neighbour) && second.equals(neighbour), 'at least one caret candidate differs from the anchor frame').toBe(false);
+					writeFileSync(path.join(screenshotDir, `01c-caret-a-${theme}-${width}.png`), first);
+					writeFileSync(path.join(screenshotDir, `01c-caret-b-${theme}-${width}.png`), second);
+				}
+				await page.locator('.cm-scroller').evaluate((el) => { el.scrollTop = 0; });
+				const send = headerSend(page);
+				await send.scrollIntoViewIfNeeded();
+				const box = (await send.boundingBox())!;
+				await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+				const before = await page.screenshot({ scale: 'css', animations: 'disabled' });
+				const beforeStyle = await send.evaluate((node) => { const style = getComputedStyle(node); return Object.fromEntries(Array.from(style).map((name) => [name, style.getPropertyValue(name)])); });
+				const touch = width === 393 ? await page.context().newCDPSession(page) : null;
+				if (touch) await touch.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: box.x + box.width / 2, y: box.y + box.height / 2 }] });
+				else await page.mouse.down();
+				const active = await send.evaluate((node) => node.matches(':active'));
+				const pressedStyle = await send.evaluate((node) => { const style = getComputedStyle(node); return Object.fromEntries(Array.from(style).map((name) => [name, style.getPropertyValue(name)])); });
+				const pressed = await page.screenshot({ scale: 'css', animations: 'disabled' });
+				const changed = Object.keys(beforeStyle).filter((name) => beforeStyle[name] !== pressedStyle[name]).map((name) => ({ name, before: beforeStyle[name], pressed: pressedStyle[name] }));
+				writeFileSync(path.join(screenshotDir, `01d-press-style-${theme}-${width}.json`), JSON.stringify({ active, changed, pixelsDiffer: !before.equals(pressed) }));
+				if (touch) {
+					await touch.send('Input.dispatchTouchEvent', { type: 'touchCancel', touchPoints: [] });
+					await touch.detach();
+				} else {
+					await page.mouse.move(2, 2);
+					await page.mouse.up();
+				}
+				if (active && changed.length) {
+					expect(pressed.equals(before), 'pressed frame differs from unpressed neighbour').toBe(false);
+					writeFileSync(path.join(screenshotDir, `01d-held-send-with-chip-${theme}-${width}.png`), pressed);
+				}
+			}
 			await page.locator('.cm-scroller').evaluate((el) => { el.scrollTop = 0; });
 			const before = await page.locator('.cm-scroller').evaluate((el) => el.scrollTop);
 			await holdDwell(page, true);
@@ -358,6 +407,21 @@ for (const theme of ['light', 'dark'] as const) {
 			await expect(page.locator(`[data-comment-id="${doc.roots[8]}"]`)).toHaveClass(/focused/);
 			await expect.poll(() => page.locator('.cm-scroller').evaluate((el) => el.scrollTop)).toBeGreaterThan(before);
 			await shot(page, `02-text-document-landed-${theme}-${width}`);
+			if (screenshotDir) {
+				const input = page.locator(`[data-comment-id="${doc.roots[8]}"] textarea[placeholder="Reply…"]`);
+				await input.fill('Thanks, I will add the handover notes.');
+				await input.focus();
+				await expect(input).toBeFocused();
+				await expect(chipBox(page)).toHaveCount(0);
+				const first = await page.screenshot({ scale: 'css', animations: 'disabled', caret: 'initial' });
+				await page.waitForTimeout(600);
+				const second = await page.screenshot({ scale: 'css', animations: 'disabled', caret: 'initial' });
+				writeFileSync(path.join(screenshotDir, `reply-caret-blink-${theme}-${width}.json`), JSON.stringify({ framesDiffer: !first.equals(second) }));
+				if (!first.equals(second)) {
+					writeFileSync(path.join(screenshotDir, `reply-caret-a-${theme}-${width}.png`), first);
+					writeFileSync(path.join(screenshotDir, `reply-caret-b-${theme}-${width}.png`), second);
+				}
+			}
 			await holdDwell(page, false);
 		});
 	}
@@ -464,7 +528,20 @@ for (const width of [1440, 393]) {
 			expect(replyBox.height, 'reply target is at least 44px high').toBeGreaterThanOrEqual(44);
 			expect(replyBox.x < activityBox.x + activityBox.width && activityBox.x < replyBox.x + replyBox.width && replyBox.y < activityBox.y + activityBox.height && activityBox.y < replyBox.y + replyBox.height, 'activity stays clear of the reply target').toBe(false);
 		}
+		if (!baseline && width === 393) {
+			await expect.poll(async () => {
+				const editor = await page.locator('.doc .ed-wrap').boundingBox();
+				const pill = await activity.boundingBox();
+				return !!editor && !!pill && editor.y + editor.height <= pill.y + 0.5;
+			}, { message: 'mobile editor text clears the below activity notice' }).toBe(true);
+		}
 		await shot(page, `${baseline ? 'baseline-activity' : '01e-activity-with-chip'}-light-${width}`);
+		if (!baseline) {
+			const scroller = page.locator('.doc .cm-scroller');
+			const before = await scroller.evaluate((node) => node.scrollTop);
+			await activity.getByRole('button').click();
+			await expect.poll(() => scroller.evaluate((node) => node.scrollTop)).toBeGreaterThan(before);
+		}
 		await reviewer.close();
 	});
 }
@@ -797,8 +874,10 @@ test.describe('reply chip motion evidence', () => {
 				await reloadComments(page, doc.artifactId);
 				await expectChip(page, '1 new reply');
 				await saveMotionProbe(page, `chip-entry-${width}-${reduced ? 'reduced' : 'standard'}`);
+				await startMotionProbe(page);
 				await chipButton(page).click();
 				await expect(page.locator(`[data-comment-id="${doc.roots[8]}"]`)).toHaveClass(/focused/);
+				await saveMotionProbe(page, `thread-open-${width}-${reduced ? 'reduced' : 'standard'}`);
 				await page.waitForTimeout(2000);
 				await startMotionProbe(page);
 				await page.getByRole('button', { name: 'Close comments' }).click();

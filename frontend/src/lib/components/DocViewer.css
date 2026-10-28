@@ -13,6 +13,8 @@
 @container doc-canvas (min-width: 900px) { .doc:has(.canvas-comment-drawer):has(.doc-bottom-band) { grid-template-areas: 'header header' 'editor drawer' 'bottom drawer'; grid-template-columns: minmax(0, 1fr) 320px; grid-template-rows: auto minmax(0, 1fr) auto; } }
 /* CodeMirror owns scrolling; this grid cell clips without a second scroll container. */
 .doc-main { grid-area: editor; flex: 1; min-width: 0; min-height: 0; overflow: clip; overscroll-behavior: contain; }
+/* With a reply band on a narrow screen, leave the activity pill its own space. */
+@media (max-width: 600px) { .doc:has(.doc-bottom-band):has(.activity-pill) .doc-main { box-sizing: border-box; padding-bottom: calc(var(--touch-target) + var(--space-1)); } }
 .ed-wrap { position: relative; height: 100%; min-height: 0; }
 .ed-wrap .cm-scroller { overscroll-behavior: contain; }
 .readonly-note { padding: 6px 10px; border-radius: var(--radius-sm); background: color-mix(in srgb, var(--text-primary) 5%, transparent); color: var(--text-tertiary); font-size: var(--text-footnote); }

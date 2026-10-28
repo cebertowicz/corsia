@@ -3,8 +3,8 @@ import path from 'node:path';
 import { expect } from '@playwright/test';
 import { test } from '../support/test';
 import { chatComposer, createSession, loginByUrl, sendButton, TEST_TOKEN, waitForWsConnected } from '../support/corsia';
-import { seedMockResponses } from '../support/mock';
-import { DOC, seedImageDocument, overlay } from '../support/docImageComments';
+import { injectMessage, seedMockResponses } from '../support/mock';
+import { DOC, seedImageDocument, overlay, expectBarFits } from '../support/docImageComments';
 import { isolatedDb } from '../support/heldComments';
 import { hitBox } from '../support/hitBox';
 
@@ -33,7 +33,9 @@ for (const width of [393, 1440]) {
 				expect(response.ok(), await response.text()).toBeTruthy();
 				roots.push((await response.json()).comment.id as string);
 			}
-			isolatedDb(['connection.execute("UPDATE doc_comments SET author=? WHERE artifact_id=? AND author_kind=?", (sys.argv[2], sys.argv[3], "user"))'], 'Jordan Lee', seeded.artifactId);
+			isolatedDb(['connection.execute("UPDATE doc_comments SET author=? WHERE artifact_id=? AND author_kind=?", (sys.argv[2], sys.argv[3], "user"))', 'connection.execute("UPDATE models SET display_name=? WHERE id=?", ("Claude Sonnet 5.5", "mock-test-model"))'], 'Jordan Lee', seeded.artifactId);
+			await injectMessage(request, seeded.sessionId, { role: 'user', content: 'Can you check the header and save button on the walkthrough screen?' }, TEST_TOKEN);
+			await injectMessage(request, seeded.sessionId, { role: 'assistant', content: 'I reviewed both and left comments on the image.', metadata: { for_user: true } }, TEST_TOKEN);
 			const writer = await page.context().newPage();
 			await writer.setViewportSize({ width: 1440, height: 900 });
 			await loginByUrl(writer);
@@ -59,6 +61,19 @@ for (const width of [393, 1440]) {
 			await page.getByText(sessionTitle, { exact: true }).first().click();
 			await page.locator('.cm-md-image img').first().click();
 			await expect(overlay(page)).toBeVisible();
+			if (process.env.REPLY_IMAGE_BASELINE === '1') {
+				await expect(overlay(page).locator('[data-doc-reply-chip]')).toHaveCount(0);
+				await expect(overlay(page).locator('.sending-now')).toContainText('Sent');
+				await overlay(page).locator('.bar').evaluate(async (element) => { await Promise.all(element.getAnimations({ subtree: true }).map((animation) => animation.finished.catch(() => undefined))); });
+				const frameDir = process.env.REPLY_CHIP_SCREENSHOT_DIR;
+				if (frameDir) {
+					await page.evaluate(async () => { const { coreSettings } = await import('/src/lib/stores/settings.ts'); coreSettings.update((current) => ({ ...current, features: { ...current?.features, debug_version_overlay: false } })); });
+					await expect(page.locator('.version-overlay')).toHaveCount(0);
+					await page.screenshot({ path: path.join(frameDir, `baseline-image-toolbar-${theme}-${width}.png`), scale: 'css', animations: 'disabled' });
+				}
+				await writer.close();
+				return;
+			}
 			const initialChip = overlay(page).locator('[data-doc-reply-chip] button');
 			await expect(initialChip).toBeVisible();
 			const initialBox = (await initialChip.boundingBox())!;
@@ -93,6 +108,9 @@ for (const width of [393, 1440]) {
 				const box = await hitBox(control);
 				expect(target.x < box.x + box.width && box.x < target.x + target.width && target.y < box.y + box.height && box.y < target.y + target.height, 'reply target clears image controls').toBe(false);
 			}
+			await overlay(page).locator('.bar').evaluate(async (element) => { await Promise.all(element.getAnimations({ subtree: true }).map((animation) => animation.finished.catch(() => undefined))); });
+			// At the narrow desktop canvas, Fit already clips in the base lightbox; preserve that finding separately.
+			if (width === 393) await expectBarFits(page);
 			const frameDir = process.env.REPLY_CHIP_SCREENSHOT_DIR;
 			if (frameDir) {
 				await page.evaluate(async () => {
@@ -100,6 +118,7 @@ for (const width of [393, 1440]) {
 					coreSettings.update((current) => ({ ...current, features: { ...current?.features, debug_version_overlay: false } }));
 				});
 				await expect(page.locator('.version-overlay')).toHaveCount(0);
+				expect(await page.locator('body').innerText()).not.toMatch(/\be2e\b|fixture|Mock Test Model/i);
 				mkdirSync(frameDir, { recursive: true });
 				await page.screenshot({ path: path.join(frameDir, `Q1-image-waiting-${theme}-${width}.png`), scale: 'css', animations: 'disabled' });
 			}
