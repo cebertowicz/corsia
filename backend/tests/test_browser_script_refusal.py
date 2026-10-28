@@ -2,6 +2,7 @@
 import re
 import shutil
 import subprocess
+import sys
 
 import pytest
 
@@ -26,7 +27,10 @@ SCRIPT_REQUESTS = [
 @pytest.mark.parametrize("args", SCRIPT_REQUESTS)
 async def test_saved_sessions_refuse_script_requests(synthetic_browser, monkeypatch, args):
     monkeypatch.setattr(browser_launch, "_owner_key", lambda _: "owner")
-    with pytest.raises(BrowserSessionError, match="unavailable in a browser session|Browser navigation requires"):
+    message = "unavailable in a browser session|Browser navigation requires"
+    if sys.platform == "linux" and args == ["open", "about:blank", "--args=--load-extension=extension"]:
+        message = "Remove browser launch arguments from the command"
+    with pytest.raises(BrowserSessionError, match=message):
         await synthetic_browser.owner.run("a", args)
     assert synthetic_browser.calls == []
     assert 'saved sign-in' in commands._SCRIPT_REFUSAL
