@@ -146,6 +146,13 @@ def _marker_content(
         and not is_error
         and not ctx.live.dropped_line_this_turn
     )
+    if is_error and auth_failure_kind("claude-code", ev.get("result")):
+        from subagents.turn_account_error import claude_login_message, turn_account
+
+        account = turn_account(metadata.get("turn_id"), "claude-code", db=ctx.db)
+        if account:
+            metadata["account_id"] = account["id"]
+        return claude_login_message(account)
     return "" if suppress else (ev.get("result") or "")
 
 
@@ -267,7 +274,11 @@ async def _handle_result_error(
 ) -> None:
     if not is_error:
         return
-    reconcile_expired_login(ev.get("result"), log)
+    if auth_failure_kind("claude-code", ev.get("result")):
+        from subagents.turn_account_error import turn_account
+
+        account = turn_account(metadata.get("turn_id"), "claude-code", db=ctx.db)
+        reconcile_expired_login(ev.get("result"), log, account)
     if is_empty_text_block_rejection(ev.get("result")):
         await _retire_poisoned_session(ctx, metadata)
 

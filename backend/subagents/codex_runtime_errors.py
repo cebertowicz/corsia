@@ -25,6 +25,39 @@ class CodexPreparedContextStale(RuntimeError):
     """Raised before provider write when Codex admission is no longer exact."""
 
 
+class CodexModelCacheChanged(RuntimeError):
+    def __init__(self, account_id: str | None, message: str):
+        super().__init__(message)
+        self.account_id = account_id
+
+
+def explain_model_cache_change(turn_identity, logger, *, db=None) -> CodexModelCacheChanged:
+    from infra.failure_reference import new_reference
+    from subagents.turn_account_error import turn_account
+
+    account = turn_account(getattr(turn_identity, "turn_id", None), "codex", db=db)
+    name = account["name"] if account else "this account"
+    ref = new_reference("local")
+    logger.warning("Codex launch failed reference=%s cause=account_model_cache_changed", ref)
+    return CodexModelCacheChanged(
+        account["id"] if account else None,
+        f"Couldn’t start Codex on {name}: its model list is out of date. Reference: {ref}",
+    )
+
+
+def cache_error_marker(exc, thread_id, live, bcast, db, insert_message_fn, logger):
+    if not isinstance(exc, CodexModelCacheChanged):
+        return None
+
+    async def marker():
+        return surface_exit_error(
+            thread_id, 1, str(exc), bcast, db, live.corsia_turn,
+            terminal_applied=True, emit_terminal=False, insert_message_fn=insert_message_fn,
+            logger=logger, account_id=exc.account_id, formatted=True,
+        )
+    return marker
+
+
 def surface_exit_error(
     thread_id: str,
     code: int | None,
@@ -37,6 +70,8 @@ def surface_exit_error(
     emit_terminal: bool = True,
     insert_message_fn: Callable,
     logger,
+    account_id: str | None = None,
+    formatted: bool = False,
 ) -> str | None:
     if code == 0 and not terminal_applied:
         return None
@@ -46,7 +81,7 @@ def surface_exit_error(
         (line for line in reversed((stderr or "").splitlines()) if line.strip()),
         f"Codex exited with code {code}.",
     )
-    text = f"⚠️ Codex stopped: {last.strip()[:300]}"
+    text = stderr if formatted else f"⚠️ Codex stopped: {last.strip()[:300]}"
     try:
         meta = {
             "codex": True,
@@ -55,6 +90,8 @@ def surface_exit_error(
             "harness": "codex",
             **cause_fields("codex", "process_exited", stderr),
         }
+        if account_id:
+            meta["account_id"] = account_id
         mid = insert_turn_error(
             insert_message_fn, thread_id, text, meta,
             turn_id=getattr(turn_identity, "turn_id", None),

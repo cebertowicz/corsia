@@ -39,18 +39,19 @@ def is_empty_text_block_rejection(detail: str | None) -> bool:
     return "400" in text and "text content blocks must be non-empty" in text
 
 
-def reconcile_expired_login(detail: str | None, logger) -> None:
+def reconcile_expired_login(detail: str | None, logger, account: dict | None = None) -> None:
     """Schedule the canonical bounded check for Claude's exact expired-login error."""
     from connections.auth_failure import auth_failure_kind
 
     if auth_failure_kind("claude-code", detail) is None:
         return
     from connections.claude_discovery import reconcile_turn_auth_failure
+    from connections.account_controls import verify
 
     try:
-        task = asyncio.get_running_loop().create_task(
-            reconcile_turn_auth_failure(detail),
-        )
+        loop = asyncio.get_running_loop()
+        check = verify(account["id"], refresh_default=False) if account and account["custom"] else reconcile_turn_auth_failure(detail)
+        task = loop.create_task(check)
     except RuntimeError:
         logger.warning(
             "Claude Code expired-login reconciliation skipped without a running loop",
@@ -83,8 +84,13 @@ def surface_exit_error(
         (line for line in reversed((stderr or "").splitlines()) if line.strip()),
         f"Claude Code exited with code {code}.",
     )
-    reconcile_expired_login(stderr, logger)
-    text = f"⚠️ Claude Code stopped: {last.strip()[:300]}"
+    from connections.auth_failure import auth_failure_kind
+    from subagents.turn_account_error import claude_login_message, turn_account
+
+    account = turn_account(getattr(turn_identity, "turn_id", None), "claude-code", db=db) if auth_failure_kind("claude-code", stderr) else None
+    reconcile_expired_login(stderr, logger, account)
+    text = (claude_login_message(account) if auth_failure_kind("claude-code", stderr)
+            else f"⚠️ Claude Code stopped: {last.strip()[:300]}")
     try:
         meta = {
             "cc": True,
@@ -93,6 +99,8 @@ def surface_exit_error(
             "harness": "claude-code",
             **cause_fields("claude-code", "process_exited", stderr),
         }
+        if account:
+            meta["account_id"] = account["id"]
         mid = insert_turn_error(
             insert_message_fn, thread_id, text, meta,
             turn_id=getattr(turn_identity, "turn_id", None),

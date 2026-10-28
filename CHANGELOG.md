@@ -8,6 +8,7 @@ the later entry describes the current behavior.
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here._
 
 - In the shared browser, an agent's click on a button's own text or icon reaches the button.
+- When an account loses its sign-in, CORSIA explains how to restore it without interrupting other accounts.
 - After you sign in to Claude Code, setup now shows it's checking your Claude models instead of asking you to sign in again.
 - Plan and decision messages use clearer, consistent wording.
 - Measurement labels and messages are clearer about what is shown.

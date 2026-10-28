@@ -315,7 +315,7 @@ async def test_cc_error_result_carries_the_error_text_to_plan_liveness(isolated_
         db.close()
 
     assert completion.call_args.kwargs["outcome"] == "error"
-    assert "not logged in" in completion.call_args.kwargs["error"].lower()
+    assert "signed out" in completion.call_args.kwargs["error"].lower()
     assert completion.call_args.kwargs["turn_id"]
 
 

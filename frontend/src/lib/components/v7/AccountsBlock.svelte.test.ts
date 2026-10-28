@@ -266,6 +266,22 @@ describe('rendering and actions', () => {
 			unmount(component);
 		});
 
+		it('refreshes an already signed-in account without showing an error', async () => {
+			vi.stubGlobal('fetch', vi.fn()
+				.mockResolvedValueOnce(response({ accounts: [defaultAccount, workAccount] }))
+				.mockResolvedValueOnce(response({ detail: 'no sign-in is in progress for this account' }, 409))
+				.mockResolvedValueOnce(response({ account_id: 'work', route: null, status: 'already_signed_in', cause: null }))
+				.mockResolvedValueOnce(response({ accounts: [defaultAccount, { ...workAccount, state: 'signed_in' }] })));
+			const component = mount(AccountsBlock, { target: document.body, props: { provider } });
+			await settle();
+			button('Sign in').click();
+			await settle();
+			expect(document.body.textContent).not.toContain('Sign-in didn’t complete');
+			expect(document.querySelector('#vendor-account-work')?.textContent).toContain('Work');
+			expect(get(vendorAccounts).find((account) => account.id === 'work')?.state).toBe('signed_in');
+			unmount(component);
+		});
+
 		it('says what the browser may have shown after a timed-out sign-in and what to do next', async () => {
 			vi.stubGlobal('fetch', vi.fn()
 				.mockResolvedValueOnce(response({ accounts: [defaultAccount, workAccount] }))
