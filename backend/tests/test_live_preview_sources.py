@@ -190,7 +190,7 @@ async def test_a_preview_never_changes_the_document(tmp_path, monkeypatch):
     monkeypatch.setattr("doceditor.live_tools.find_live", lambda path: entry)
     monkeypatch.setattr("infra.db_async.run_in_db", run_in_db)
     monkeypatch.setattr("infra.queries.get_thread", lambda thread_id: None)
-    monkeypatch.setattr("tools.filesystem_gate._resolve_path", lambda path, workspace, **_: workspace / path)
+    monkeypatch.setattr("tools.filesystem_gate.resolve_path", lambda path, workspace, **_: workspace / path)
     monkeypatch.setattr(live_preview, "FLUSH_SECONDS", 0)
     before = (live.text, live.doc.get_state())
     route = PreviewRoute()

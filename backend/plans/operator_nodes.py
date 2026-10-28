@@ -9,6 +9,7 @@ from __future__ import annotations
 from collections import deque
 from datetime import datetime
 
+import plans.operator_display_state as display_state
 import plans.operator_node_state as node_state
 import plans.operator_plan_display as plan_header
 import plans.operator_scheduled as scheduled_work
@@ -173,7 +174,7 @@ def distribution_from_buckets(
 
 def _branch_summary(
     nodes: list[dict], tree: open_tree.OpenTree | None = None,
-) -> tuple[dict[str, dict[str, int]], dict[str, bool], dict[str, bool], dict[str, str | None]]:
+) -> tuple[dict[str, dict[str, int]], dict[str, bool], dict[str, bool], dict[str, bool], dict[str, str | None]]:
     """Count every presented node's leaves once, bottom-up in canonical order.
 
     Given the open ``tree`` (a read that loaded only the open work), a node is a leaf
@@ -195,6 +196,7 @@ def _branch_summary(
             children.setdefault(node["parent_id"], []).append(node["id"])
     counts: dict[str, dict[str, int]] = {}
     needs_user: dict[str, bool] = {}
+    asks_user: dict[str, bool] = {}
     working: dict[str, bool] = {}
     # Per node: some open work beneath is not scheduled, and the soonest scheduled end.
     unscheduled: dict[str, bool] = {}
@@ -232,6 +234,9 @@ def _branch_summary(
         needs_user[node["id"]] = node["requires_user_action"] or any(
             needs_user[child_id] for child_id in child_ids
         )
+        asks_user[node["id"]] = node["display"]["label_key"] == "needs_you" or any(
+            asks_user[child_id] for child_id in child_ids
+        )
         working[node["id"]] = (
             not child_ids and node["display"]["label_key"] == "working"
         ) or any(working[child_id] for child_id in child_ids)
@@ -239,7 +244,7 @@ def _branch_summary(
         node_id: None if unscheduled[node_id] or end is None else end.isoformat()
         for node_id, end in soonest.items()
     }
-    return counts, needs_user, working, scheduled
+    return counts, needs_user, asks_user, working, scheduled
 
 
 _BRANCH_FINISHED = {
@@ -250,26 +255,17 @@ _BRANCH_FINISHED = {
 
 
 def branch_display(
-    counts: dict[str, int], *, needs_user: bool, working: bool,
+    counts: dict[str, int], *, asks_user: bool, working: bool,
 ) -> dict[str, str]:
     """Read a container through the same four states as each leaf."""
     if working:
         return {"label_key": "working", "tone_key": "active"}
-    if needs_user:
+    if asks_user:
         return {"label_key": "needs_you", "tone_key": "human-review"}
     lead = node_state.leading(counts)
     if lead in _BRANCH_FINISHED:
         return dict(_BRANCH_FINISHED[lead])
     return {"label_key": "waiting", "tone_key": "waiting"}
-
-
-def _queued_reason(node: dict) -> str | None:
-    """Why a presented leaf that nothing blocks is not moving, or ``None``."""
-    if node["display"]["label_key"] != "waiting" or node["execution"]["condition"] != "ready":
-        return None
-    if node["child"] is not None:
-        return "Worker idle"
-    return "Not started" if node["state"] == "pending" else "Set aside"
 
 
 def _apply_branches(
@@ -282,7 +278,7 @@ def _apply_branches(
     Given the open ``tree``, the fold and the parents are the stored aggregates' and the
     plan's counts add the settled leaves no listed row stands for.
     """
-    counts, needs_user, working, scheduled = _branch_summary(nodes, tree)
+    counts, needs_user, asks_user, working, scheduled = _branch_summary(nodes, tree)
     fold = tree.shape.folded if tree is not None else folded_ids(raw)
     parents = tree.shape.parents if tree is not None else parent_ids(nodes)
     ids = {node["id"] for node in nodes}
@@ -293,18 +289,21 @@ def _apply_branches(
         # reads as itself and its ask is counted once, here; its leaves count theirs.
         node["container"] = (
             node["id"] in parents and is_container(row, True)
-            and not node["requires_user_action"]
+            and node["display"]["label_key"] != "needs_you"
         )
         if node["id"] not in parents:
-            node["status_reason"] = node["status_reason"] or _queued_reason(node)
+            node["status_reason"] = node["status_reason"] or display_state.queued_reason(node)
             continue
         own = counts[node["id"]]
         node["branch_progress"] = {"done": own["done"], "total": sum(own.values())}
         if node["container"]:
             node["requires_user_action"] = needs_user[node["id"]]
             node["display"] = branch_display(
-                own, needs_user=needs_user[node["id"]], working=working[node["id"]],
+                own, asks_user=asks_user[node["id"]], working=working[node["id"]],
             )
+            if node["display"]["label_key"] == "needs_you" and display_state.plan_paused(node["execution"]):
+                # Under the user's plan pause a branch keeps its asks' look and names the pause.
+                node["status_reason"] = node["status_reason"] or user_steering.USER_PAUSE_REASON
     plan = dict.fromkeys(node_state.DISTRIBUTION_KEYS, 0)
     roots = [node for node in nodes if node["parent_id"] not in ids]
     for node in roots:

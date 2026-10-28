@@ -8,6 +8,8 @@ the later entry describes the current behavior.
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here._
 
 - On a new chat you can pick which account it runs on before the first message.
+- A paused task, review or decision you owe, including a document review, still reads Needs you in the plan, and so does the task above it; while it is paused it is not flagged or counted anywhere else.
+- Email replies check for newer messages and support attachments and your usual font.
 - Mail that is flagged or not yet screened shows only the sender's address in search results.
 - The reasoning level you pick for a local model is now the level it runs at.
 - Setup now offers to bring over skills you made on claude.ai, even if you only use the Claude app.

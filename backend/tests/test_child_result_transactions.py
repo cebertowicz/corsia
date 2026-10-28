@@ -64,7 +64,7 @@ def _act(case, *, db=None):
     return child_thread.persist_tool_use(
         "child-thread", turn_id="child-turn", tool_id="next-call",
         name="read_file", arguments={"path": "next.txt"},
-        provider_turn_id="provider-turn", db=db,
+        provider_turn_id="provider-turn", assistant_step_id=step_id, db=db,
     )
 
 

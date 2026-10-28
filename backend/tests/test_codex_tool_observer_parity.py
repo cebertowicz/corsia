@@ -13,7 +13,7 @@ _BACKEND_DIR = os.path.dirname(os.path.dirname(__file__))
 if _BACKEND_DIR not in sys.path:
     sys.path.insert(0, _BACKEND_DIR)
 
-from infra import config  # noqa: E402
+import infra.config as config  # noqa: E402
 from infra.database import get_db  # noqa: E402
 from subagents import codex_runtime  # noqa: E402
 from subagents.codex_app_server_events import (  # noqa: E402
@@ -58,6 +58,66 @@ async def _codex_on_event(thread_id: str, bcast=noop_bcast):
         corsia_turn=identity,
     )
     return codex_runtime._make_on_event(live, thread_id, bcast)
+
+
+@pytest.mark.asyncio
+async def test_codex_settled_batches_create_cuttable_steps(isolated_db):
+    from core.tool_result_delivery import persist_tool_execution_result
+    from history.boundaries import boundary_before_latest_assistant_step
+    from history.projection import render_portable_history
+
+    db = get_db()
+    sid = make_session(db, prefix="codex-cut")
+    on_event = await _codex_on_event(sid)
+    turn_id = db.execute(
+        "SELECT id FROM active_turns WHERE thread_id=?", (sid,),
+    ).fetchone()["id"]
+
+    async def start(call_id):
+        event = item_started_event(
+            {"type": "dynamicToolCall", "id": call_id, "tool": "read_file", "arguments": {}},
+            provider_thread_id="codex-thread-test", provider_turn_id="provider-turn-test",
+        )
+        await on_event(event)
+
+    async def finish(call_id, step_id):
+        persist_tool_execution_result(
+            thread_id=sid, turn_id=turn_id, invocation_id=call_id,
+            assistant_step_id=step_id, provider_tool_call_id=call_id,
+            name="read_file", arguments={}, content=f"result {call_id}",
+            is_error=False, db=db,
+        )
+        db.commit()
+        await on_event(item_completed_event(
+            {"type": "dynamicToolCall", "id": call_id,
+             "result": f"result {call_id}", "success": True},
+            provider_thread_id="codex-thread-test", provider_turn_id="provider-turn-test",
+        ))
+
+    await start("first-a")
+    await start("first-b")
+    steps = db.execute(
+        "SELECT id FROM messages WHERE thread_id=? AND role='assistant' ORDER BY seq", (sid,),
+    ).fetchall()
+    assert len(steps) == 1
+    first = steps[0]["id"]
+    await finish("first-a", first)
+    await finish("first-b", first)
+    await start("second")
+    steps = db.execute(
+        "SELECT id FROM messages WHERE thread_id=? AND role='assistant' ORDER BY seq", (sid,),
+    ).fetchall()
+    assert len(steps) == 2
+    await finish("second", steps[1]["id"])
+    projection = render_portable_history(sid, db=db, include_unfinished_turn=True)
+    cut = boundary_before_latest_assistant_step(projection)
+    last_first = db.execute(
+        "SELECT id,seq FROM messages WHERE thread_id=? AND role='tool' ORDER BY seq LIMIT 1 OFFSET 1",
+        (sid,),
+    ).fetchone()
+    assert cut is not None
+    assert (cut.message_id, cut.seq) == (last_first["id"], last_first["seq"])
+    db.close()
 
 
 class TestCodexToolObserverParity:
