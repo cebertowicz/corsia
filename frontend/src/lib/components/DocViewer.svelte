@@ -46,7 +46,7 @@
 	import DocViewerEditorSurface from './DocViewerEditorSurface.svelte';
 	import DocPresenceStatus from './DocPresenceStatus.svelte';
 	import DocCanvasActivity from './DocCanvasActivity.svelte';
-	import DocReplyChip from './DocReplyChip.svelte';
+	import DocBottomBand from './DocBottomBand.svelte';
 	import DocViewerStatus from './DocViewerStatus.svelte';
 	import ReviewBar from './ReviewBar.svelte';
 	import { toasts } from '$lib/stores/toast';
@@ -327,10 +327,7 @@
 			{/if}
 		{/snippet}
 	</DocViewerStatus>
-	<!-- Not while the comments sheet's scrim is up: the sheet already lists every reply marked New, and the chip would show through it, unreachable. -->
-	{#if target && loadedArtifactId && docState === 'ready' && !covered && !commentUI.sheetModalOpen}
-		<DocReplyChip artifactId={loadedArtifactId} path={target.path} threadId={target.threadId} threads={unreadThreads} onStep={replyNavigation.step} />
-	{/if}
+	{#if target}<DocBottomBand artifactId={loadedArtifactId} path={target.path} threadId={target.threadId} threads={unreadThreads} ready={docState === 'ready'} {covered} sheetModalOpen={commentUI.sheetModalOpen} onStep={replyNavigation.step} />{/if}
 	<DocCanvasActivity bind:this={activity} root={docRoot} artifactId={loadedArtifactId} threadId={target?.threadId ?? null} onJump={(span) => scroll.value = { ...span, origin: 'navigation' }} />
 	<DocViewerEditorSurface
 		bind:this={editorSurface}

@@ -263,6 +263,15 @@ for (const theme of ['light', 'dark'] as const) {
 			});
 			expect(edgeHits).toEqual([true, true]);
 			await shot(page, `01-text-document-chip-${theme}-${width}`);
+			const anchor = page.locator('.cm-comment-anchor').first();
+			await anchor.scrollIntoViewIfNeeded();
+			const anchorBox = (await anchor.boundingBox())!;
+			const editorBox = (await page.locator('.doc-main').boundingBox())!;
+			const chipBounds = (await chipBox(page).boundingBox())!;
+			expect(anchorBox.y).toBeGreaterThanOrEqual(editorBox.y - 0.5);
+			expect(anchorBox.y + anchorBox.height).toBeLessThanOrEqual(editorBox.y + editorBox.height + 0.5);
+			expect(anchorBox.y + anchorBox.height).toBeLessThanOrEqual(chipBounds.y);
+			await shot(page, `01b-visible-anchor-with-chip-${theme}-${width}`);
 			const before = await page.locator('.cm-scroller').evaluate((el) => el.scrollTop);
 			await holdDwell(page, true);
 			await chipButton(page).click();
@@ -313,6 +322,9 @@ for (const theme of ['light', 'dark'] as const) {
 			// Opening the document delivers the two pin comments, and the delivery toast sits at the bottom of the same cell.
 			const delivered = page.locator('.toast').filter({ hasText: /comments? sent/ });
 			await expect(delivered).toBeVisible();
+			const toastBox = (await delivered.boundingBox())!;
+			const noticeBox = (await chipBox(page).boundingBox())!;
+			expect(toastBox.y + toastBox.height).toBeLessThanOrEqual(noticeBox.y);
 			await shot(page, `03a-image-document-chip-with-delivery-toast-${theme}-${width}`);
 			await expect(delivered).toHaveCount(0, { timeout: 15_000 });
 			await shot(page, `03-image-document-chip-${theme}-${width}`);

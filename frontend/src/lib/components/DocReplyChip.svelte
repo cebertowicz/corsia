@@ -8,8 +8,7 @@
 	import { unreadReplyCount } from '$lib/docReplyChip';
 	import type { DocComment } from '$lib/stores/docComments';
 
-	// Floats over the document where its "N new above / below" pill does (DocCanvasActivity), in the editor's grid cell so it
-	// follows the comments drawer. The chip is the chat's own (UnreadReplyChip); only where it sits and where a tap goes are the document's.
+	// The document's notice uses the chat's attachment chip and New marker; its caller supplies the destination.
 	let { artifactId, path, threadId, threads, onStep }: {
 		artifactId: string;
 		path: string;
@@ -36,17 +35,6 @@
 {/if}
 
 <style>
-	/* The editor's cell, bottom-left: the activity pill takes the right edge, the delivery confirmation the middle. */
-	.doc-reply-chip {
-		grid-area: editor;
-		align-self: end;
-		justify-self: start;
-		z-index: 8;
-		min-width: 0;
-		max-width: calc(100% - 2 * var(--space-3));
-		margin: 0 var(--space-3) var(--space-3);
-		border-radius: var(--radius-pill);
-		background: var(--bg-primary);
-		box-shadow: var(--shadow-chip);
-	}
+	.doc-reply-chip { display: flex; align-items: center; min-width: 0; min-height: var(--touch-target); max-width: 100%; }
+	.doc-reply-chip :global(button.tile.chip) { box-shadow: var(--shadow-chip); }
 </style>

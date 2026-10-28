@@ -318,8 +318,8 @@
 						onPlace={(camera) => recordDocumentImageCamera(target.instanceId, camera)}
 					/>
 				{/if}
-				<!-- This notice belongs to the document canvas, which remains the visible surface on phone. -->
-				<DeliveryConfirmation artifactId={target.artifactId} />
+				<!-- The document owns its bottom band; the image overlay owns its own confirmation. -->
+				{#if imageOpen}<DeliveryConfirmation artifactId={target.artifactId} />{/if}
 			{/if}
 		</div>
 	</div>

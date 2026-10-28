@@ -7,6 +7,10 @@
 .doc:has(.canvas-comment-drawer) { --doc-drawer-height: min(36%, 260px); grid-template-areas: 'header' 'editor' 'drawer'; grid-template-rows: auto minmax(0, 1fr) minmax(0, var(--doc-drawer-height)); }
 .doc:has(.canvas-comment-drawer .drawer-unsent) { --doc-drawer-height: calc(min(36%, 260px) + var(--doc-drawer-footer-height, 0px)); }
 @container doc-canvas (min-width: 900px) { .doc:has(.canvas-comment-drawer) { grid-template-areas: 'header header' 'editor drawer'; grid-template-columns: minmax(0, 1fr) 320px; grid-template-rows: auto minmax(0, 1fr); } }
+/* The bottom band has its own track, so notices do not cover the editor, its activity control or a drawer. */
+.doc:has(.doc-bottom-band) { grid-template-areas: 'header' 'editor' 'bottom'; grid-template-rows: auto minmax(0, 1fr) auto; }
+.doc:has(.canvas-comment-drawer):has(.doc-bottom-band) { grid-template-areas: 'header' 'editor' 'bottom' 'drawer'; grid-template-rows: auto minmax(0, 1fr) auto minmax(0, var(--doc-drawer-height)); }
+@container doc-canvas (min-width: 900px) { .doc:has(.canvas-comment-drawer):has(.doc-bottom-band) { grid-template-areas: 'header header' 'editor drawer' 'bottom drawer'; grid-template-columns: minmax(0, 1fr) 320px; grid-template-rows: auto minmax(0, 1fr) auto; } }
 /* CodeMirror owns scrolling; this grid cell clips without a second scroll container. */
 .doc-main { grid-area: editor; flex: 1; min-width: 0; min-height: 0; overflow: clip; overscroll-behavior: contain; }
 .ed-wrap { position: relative; height: 100%; min-height: 0; }
