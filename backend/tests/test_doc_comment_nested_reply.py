@@ -59,7 +59,7 @@ def test_migration_reroots_legacy_chains_and_leaves_roots_and_missing_parents_un
         "unrelated-root": None,
         "missing-parent": "absent",
     }
-    assert SCHEMA_VERSION == 159
+    assert SCHEMA_VERSION == 160
     assert MIGRATIONS[141] is migrate_141_to_142
 
 

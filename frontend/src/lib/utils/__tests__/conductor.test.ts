@@ -18,7 +18,9 @@ import {
 } from '$lib/stores/models';
 import { activeThreadId } from '$lib/stores/threads';
 import { composerSelectionFor } from '$lib/stores/composerSelection';
-import { unlistedThreadRows } from '$lib/stores/threadRow';
+import { _resetUnlistedThreadRowsForTests } from '$lib/stores/threadRow';
+import { applyPendingThreadModelSwitch } from '$lib/stores/threadModelSwitch';
+import { handleSessionUpdated } from '$lib/ws/handlersSession';
 
 const originalFetch = globalThis.fetch;
 
@@ -28,7 +30,7 @@ afterEach(() => {
 	activeThreadId.set(null);
 	activeModelId.set(null);
 	corsiaAgentId.set(null);
-	unlistedThreadRows.set(new Map());
+	_resetUnlistedThreadRowsForTests();
 	_resetThreadModelTruthForTests();
 });
 
@@ -168,6 +170,58 @@ describe('fetchConductor', () => {
 		await read({ pending_model: null, switch_status: null });
 		expect(switching()?.pending_model).toBeNull();
 		expect(switching()?.switch_status).toBeNull();
+	});
+
+	describe('a read that straddles a newer write', () => {
+		const switching = () => get(composerSelectionFor)('cond-1').switching;
+		// A read whose response is held until the test releases it.
+		function heldRead(fields: Record<string, unknown>) {
+			let release: () => void = () => {};
+			const gate = new Promise<void>((resolve) => { release = resolve; });
+			globalThis.fetch = vi.fn(async () => {
+				await gate;
+				return {
+					ok: true,
+					json: async () => ({ thread_id: 'cond-1', target: { thread_id: 'cond-1', ...fields } }),
+				};
+			}) as unknown as typeof fetch;
+			return { done: fetchCorsiaAgent('tok'), release };
+		}
+
+		it('does not clear a pending switch that a 202 began after the read started', async () => {
+			const stale = heldRead({ pending_model: null, switch_status: null });
+			applyPendingThreadModelSwitch('cond-1', {
+				operation_id: 'op-1', status: 'preparing', pending_model: 'm/b', checkpoint_required: false,
+			});
+			stale.release();
+			await stale.done;
+			expect(switching()).toMatchObject({ pending_model: 'm/b', switch_status: 'preparing' });
+		});
+
+		it('does not bring back a switch that a commit frame finished after the read started', async () => {
+			applyPendingThreadModelSwitch('cond-1', {
+				operation_id: 'op-1', status: 'preparing', pending_model: 'm/b', checkpoint_required: false,
+			});
+			const stale = heldRead({ pending_model: 'm/b', switch_status: 'preparing', switch_operation_id: 'op-1' });
+			handleSessionUpdated({
+				thread_id: 'cond-1', model: 'm/b', updated_at: '2026-10-28T12:00:00Z',
+				pending_model: null, switch_status: null, switch_error: null, switch_operation_id: null,
+			});
+			stale.release();
+			await stale.done;
+			expect(switching()?.pending_model).toBeNull();
+			expect(switching()?.switch_status).toBeNull();
+		});
+
+		it('keeps the newer of two reads that finish out of order', async () => {
+			const older = heldRead({ pending_model: 'm/b', switch_status: 'preparing' });
+			const newer = heldRead({ pending_model: null, switch_status: null });
+			newer.release();
+			await newer.done;
+			older.release();
+			await older.done;
+			expect(switching()?.pending_model).toBeNull();
+		});
 	});
 
 	it('reports absent when the API answers with no conductor', async () => {

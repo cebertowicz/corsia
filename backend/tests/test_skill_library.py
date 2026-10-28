@@ -46,7 +46,7 @@ def test_library_tool_is_deferred_memory_and_registered(tmp_path):
     assert tool.name == "skill_library"
     assert TOOL_CATALOG["skill_library"].category == "memory"
     assert tool_pack("skill_library") == "memory"
-    assert tool.parameters["properties"]["action"]["enum"] == ["search", "install", "update", "remove"]
+    assert tool.parameters["properties"]["action"]["enum"] == ["search", "install", "update", "remove", "fetch_pack"]
     assert "local_edits_token" in tool.parameters["properties"]
     assert "local_edits_token" in tool.parameters["properties"]["discard_local_edits"]["description"]
 
@@ -54,7 +54,7 @@ def test_library_tool_is_deferred_memory_and_registered(tmp_path):
 def test_search_reports_age_state_and_the_no_match_recovery(monkeypatch):
     from tools import skill_library
 
-    monkeypatch.setattr(skill_library, "_index", lambda: SimpleNamespace(skills=(_item(),), index_age="2 hours ago", refreshed=False))
+    monkeypatch.setattr(skill_library, "_index", lambda: SimpleNamespace(items=(_item(),), index_age="2 hours ago", refreshed=False))
     monkeypatch.setattr(skill_library, "_installed_library_origins", lambda *_args: {})
     from library import producer
 
@@ -82,11 +82,11 @@ def test_index_refreshes_notices_only_after_a_raw_index_refresh(monkeypatch):
     refreshes = []
     monkeypatch.setattr(producer, "request_refresh", lambda: refreshes.append(True))
     monkeypatch.setattr(
-        "library.load_index", lambda: SimpleNamespace(skills=(_item(),), index_age="just now", refreshed=False),
+        "library.load_index", lambda: SimpleNamespace(items=(_item(),), index_age="just now", refreshed=False),
     )
     skill_library_common.index()
     monkeypatch.setattr(
-        "library.load_index", lambda: SimpleNamespace(skills=(_item(),), index_age="just now", refreshed=True),
+        "library.load_index", lambda: SimpleNamespace(items=(_item(),), index_age="just now", refreshed=True),
     )
     skill_library_common.index()
 
@@ -117,7 +117,7 @@ def test_search_stays_under_200ms_with_one_owner_query_for_1000_items_and_30_cop
             parent_thread_id=owner, path=str(folder / "SKILL.md"),
         )
     index = tuple({**_item(), "name": f"copy-{number}"} for number in range(1000))
-    monkeypatch.setattr(skill_library, "_index", lambda: SimpleNamespace(skills=index, index_age="just now", refreshed=False))
+    monkeypatch.setattr(skill_library, "_index", lambda: SimpleNamespace(items=index, index_age="just now", refreshed=False))
     db = get_db()
     statements: list[str] = []
     db.set_trace_callback(statements.append)
@@ -149,7 +149,7 @@ def test_install_repairs_registration_for_an_existing_local_library_copy(monkeyp
     )
     repaired = []
     db = object()
-    monkeypatch.setattr(skill_library, "_index", lambda: SimpleNamespace(skills=(item,)))
+    monkeypatch.setattr(skill_library, "_index", lambda: SimpleNamespace(items=(item,)))
     monkeypatch.setattr(skill_library, "_effective", lambda *_args: ([copy], [copy]))
     monkeypatch.setattr(skill_library, "_register", lambda *args: repaired.append(args))
 
@@ -165,7 +165,7 @@ def test_install_refuses_a_name_another_skill_holds_and_writes_nothing(monkeypat
     from tools import skill_library
 
     holder = SimpleNamespace(name=held_as, path=f"/tmp/{held_as}/SKILL.md", scope="project", corsia={})
-    monkeypatch.setattr(skill_library, "_index", lambda: SimpleNamespace(skills=(_item(),)))
+    monkeypatch.setattr(skill_library, "_index", lambda: SimpleNamespace(items=(_item(),)))
     monkeypatch.setattr(skill_library, "_effective", lambda *_args: ([holder], []))
     monkeypatch.setattr(items, "fetch_bundle", lambda _item: pytest.fail("a held name must not fetch or write"))
 
@@ -181,7 +181,7 @@ def test_completed_skill_library_action_emits_a_privacy_safe_outcome(isolated_db
 
     emitted = []
     monkeypatch.setattr(skill_library, "_persistent_owner", lambda *_args: "owner")
-    monkeypatch.setattr(skill_library, "_search", lambda *_args: {"results": []})
+    monkeypatch.setattr(skill_library, "_search", lambda *_args, **_kwargs: {"results": []})
     monkeypatch.setattr(product_events, "emit_product_event", lambda *args, **kwargs: emitted.append((args, kwargs)))
 
     assert skill_library._execute("search", "thread", {}, "pdf", None, False) == {"results": []}
@@ -223,7 +223,7 @@ def test_invalid_library_action_precedes_community_consent(isolated_db, monkeypa
     monkeypatch.setattr(skill_library, "_emit_action", lambda *_args: None)
 
     assert skill_library._execute("replace", "thread", {}, None, None, False) == {
-        "error": "invalid_action", "message": "action must be search, install, update, or remove",
+        "error": "invalid_action", "message": "action must be search, install, update, remove, or fetch_pack",
     }
 
 

@@ -5,7 +5,7 @@ no launch of that thread on any harness, by any later model switch, can find it
 unconfined. The readers are the tool boundary (``tools.confined_reads``), the
 Claude Code launch (``subagents.cc_confinement.launch_confinement``) and the
 Codex launch (``subagents.codex_confinement``). A damaged record fails closed:
-it could be the one that said ``review``.
+it could be the one that said ``untrusted``.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 import sqlite3
 
-from subagents.cc_invocation import CONFINEMENT_REVIEW
+from subagents.cc_invocation import CONFINEMENT_UNTRUSTED
 
 
 class ConfinementRecordDamaged(ValueError):
@@ -22,8 +22,8 @@ class ConfinementRecordDamaged(ValueError):
 
 def record(db: sqlite3.Connection, thread_id: str, mode: str, read_dirs: tuple[str, ...]) -> None:
     """Store a new thread's confinement once; a second write is refused."""
-    if mode != CONFINEMENT_REVIEW or not read_dirs:
-        raise ValueError("only a review confinement with read dirs is stored")
+    if mode != CONFINEMENT_UNTRUSTED or not read_dirs:
+        raise ValueError("only an untrusted confinement with read dirs is stored")
     if db.execute(
         "UPDATE threads SET confinement=?, confined_read_dirs=? WHERE id=? AND confinement IS NULL",
         (mode, json.dumps(list(read_dirs)), thread_id),
@@ -39,7 +39,7 @@ def parse(mode: object, raw_dirs: object) -> tuple[str, ...] | None:
         dirs = json.loads(raw_dirs) if isinstance(raw_dirs, str) else None
     except ValueError:
         dirs = None
-    if mode != CONFINEMENT_REVIEW or not isinstance(dirs, list) or not dirs or any(
+    if mode != CONFINEMENT_UNTRUSTED or not isinstance(dirs, list) or not dirs or any(
         not isinstance(path, str) or not path for path in dirs
     ):
         raise ConfinementRecordDamaged("this thread's confinement record is damaged")

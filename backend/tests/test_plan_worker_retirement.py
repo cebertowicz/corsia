@@ -119,12 +119,12 @@ def test_settlement_keeps_provider_identity_with_its_launcher(monkeypatch, integ
     db = _db(monkeypatch)
     try:
         parent_plan, delegated, *_ = _returned(db, "Work")
-        thread_confinement.record(db, "worker", "review", ("/src",))
+        thread_confinement.record(db, "worker", "untrusted", ("/src",))
         db.commit()
         for thread in ("parent", "worker"):
             metadata = None
             if integration == "claude-code" and thread == "worker":
-                metadata = {"claude_invocation": {"confinement": "review", "add_dirs": ["/src"],
+                metadata = {"claude_invocation": {"confinement": "untrusted", "add_dirs": ["/src"],
                                                    "working_dir": "/worker/confined"}}
             models.register_artifact(integration=integration, type=kind, external_id=thread,
                                      parent_thread_id=thread, metadata=metadata, db=db)
