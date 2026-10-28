@@ -141,7 +141,7 @@ class TestSessionList:
         listed = integration_client.get(f"/api/threads?token={_TOKEN}&archived=1").json()["threads"]
 
         # The coordination rows are a second, separate read; the sidebar list itself steps once.
-        reads = [read for read in reads if "AS coordination" not in read[0]]
+        reads = [read for read in reads if "s.id IN (" not in read[0]]
         assert len(reads) == 1
         db = get_db()
         try:
