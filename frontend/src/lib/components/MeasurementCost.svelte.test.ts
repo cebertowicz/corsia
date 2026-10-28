@@ -229,7 +229,13 @@ describe('MeasurementCost', () => {
 		expect(markup.querySelector('.billing-link')).toBeNull();
 	});
 	it('says so when no usage record could be priced, and withholds a rate under the minimum n', () => {
-		expect(text(render({ data: data({ series: [], latest: null, previous: null }) }))).toContain('No usage records could be priced in this range.');
+		expect(text(render({ data: data({ series: [], latest: null, previous: null }) }))).toContain('No accepted work in this range has a size rating.');
+		unmount(component!); host?.remove();
+		expect(text(render({ data: data({ series: [], latest: null, previous: null, coverage: { priced_records: 0, usage_records: 3 } }) }))).toContain('No usage records could be priced in this range.');
+		unmount(component!); host?.remove();
+		const fresh = render({ data: data({ series: [], latest: null, previous: null, coverage: { priced_records: 0, usage_records: 0 }, excluded: [] }) });
+		expect(text(fresh)).toContain('No usage was recorded in this range.');
+		expect(fresh.querySelector('.caption')).toBeNull();
 		unmount(component!); host?.remove();
 		const thinPeriod = period('2026-09-28', 5_300, 100, 80, 100, 2120, 19);
 		const thin = text(render({ data: data({ series: [thinPeriod], latest: pooled(thinPeriod), previous: null }) }));

@@ -225,7 +225,7 @@ describe('ThreadPlanPane attention-node focus', () => {
 		await focusPlanNode('t1', 'gone');
 		await settle();
 
-		expect(host.textContent).toContain('That item is no longer in this plan');
+		expect(host.textContent).toContain('That task isn’t in this plan.');
 		expect(focusedRowId()).toBeNull();
 	});
 
@@ -254,7 +254,7 @@ describe('ThreadPlanPane attention-node focus', () => {
 		expect(host.textContent).toContain('Now for t2');
 		expect(row('leaf')).toBeUndefined();
 		expect(focusedRowId()).toBeNull();
-		expect(host.textContent).not.toContain('no longer in this plan');
+		expect(host.textContent).not.toContain('isn’t in this plan');
 	});
 
 	/** Expand the subagent step, then open the nested step's own subagent leaf; returns the tab source it opened with. */
@@ -277,7 +277,7 @@ describe('ThreadPlanPane attention-node focus', () => {
 		await settle();
 
 		expect(focusedRowId()).toBe('plan-row-plan-child-thread:sub');
-		expect(host.textContent).not.toContain('no longer in this plan');
+		expect(host.textContent).not.toContain('isn’t in this plan');
 	});
 
 	it('returns to the owning step when the pane remounted between opening and return, without a false notice', async () => {
@@ -292,7 +292,7 @@ describe('ThreadPlanPane attention-node focus', () => {
 		await settle();
 
 		expect(focusedRowId()).toBe('plan-row-spawn');
-		expect(host.textContent).not.toContain('no longer in this plan');
+		expect(host.textContent).not.toContain('isn’t in this plan');
 	});
 
 	it('says so when the nested node’s owning step is gone too', async () => {
@@ -302,7 +302,7 @@ describe('ThreadPlanPane attention-node focus', () => {
 		await returnToPlanNode({ sourceNodeId: 'sub', sourceStepId: 'gone' });
 		await settle();
 
-		expect(host.textContent).toContain('That item is no longer in this plan');
+		expect(host.textContent).toContain('That task isn’t in this plan.');
 		expect(focusedRowId()).toBeNull();
 	});
 

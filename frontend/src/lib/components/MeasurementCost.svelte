@@ -58,7 +58,7 @@
 	{#if costState.loading && !costState.data}<div class="skeleton" aria-label="Loading Cost"></div>
 	{:else if costState.error && !costState.data}<p class="error" role="alert">{costState.error}<button onclick={onRetry}>Retry</button></p>
 	{:else if costState.data}
-		{#if headline}<p class="stat"><b>{rate === null ? '–' : money(rate)}</b> per person-hour of work delivered, {headline.nowText}, n {group(headline.current.sized)}, {headline.change}</p>{/if}
+		{#if headline}<p class="stat"><b>{rate === null ? '–' : money(rate)}</b> per person-hour of work delivered, {headline.nowText}, n&nbsp;{group(headline.current.sized)}, {headline.change}</p>{/if}
 		{#if view === 'actual' && (scoped || !costState.data.actual.workspace_subscription)}
 			<div class="actual"><h4>{actualTitle}</h4><p>Actual is recorded for the whole workspace, not this view.</p><p><button type="button" class="billing-link" onclick={onOpenAllWork}>Open All work</button></p><p class="note">The API-equivalent figures stay on the other view.</p></div>
 		{:else if view === 'actual'}
@@ -89,10 +89,12 @@
 					valueFormat={(value) => value.toFixed(2)}
 				/></div>
 				<div class="spendcard"><span>Total spend, {headline.nowText}</span><strong>{usd0(headline.current.dollars)}</strong><small>API-equivalent, every priced call in the window</small><div class="hrs"><span>Hours of work delivered</span><b>{group(headline.current.hours)}</b></div></div></div>
+			{:else if costState.data.coverage.usage_records === 0}
+				<p class="sentence">No usage was recorded in this range.</p>
 			{:else}
-				<p class="sentence">No usage records could be priced in this range.</p>
+				<p class="sentence">{costState.data.coverage.priced_records === 0 ? 'No usage records could be priced in this range.' : 'No accepted work in this range has a size rating.'}</p>
 			{/if}
-			<p class="caption">{coverageText(costState.data.coverage.priced_records, costState.data.coverage.usage_records)} in {periodText} are priced{#if costState.data.coverage.priced_records < costState.data.coverage.usage_records}; the rest are local, unlisted or unproven prices and are not in any dollar figure{/if}.{#each costState.data.excluded as excluded}{#if excluded.models.length}<br />{excludedLine(excluded)}{/if}{/each}</p>
+			{#if costState.data.coverage.usage_records > 0}<p class="caption">{coverageText(costState.data.coverage.priced_records, costState.data.coverage.usage_records)} in {periodText} are priced{#if costState.data.coverage.priced_records < costState.data.coverage.usage_records}; the rest are local, unlisted or unproven prices and are not in any dollar figure{/if}.{#each costState.data.excluded as excluded}{#if excluded.models.length}<br />{excludedLine(excluded)}{/if}{/each}</p>{/if}
 		{/if}
 		{#if costState.error}<p class="error" role="alert">{costState.error}<button onclick={onRetry}>Retry</button></p>{/if}
 	{/if}
