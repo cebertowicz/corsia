@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 
 from auth_fixtures import OTHER_TOKEN, OWNER_TOKEN, OWNER_USER
 from doc_feedback_helpers import seed_thread
-from infra.chat_comment_answers import UNREAD_SQL, parse_answers, unread_answers
+from infra.chat_comment_answers import UNREAD_SQL, parse_answers, unread_answers, visible_answer_content
 from infra.database import get_db, initialize_schema
 from infra.database_migrations import migrate_to_current
 from infra.queries import insert_message
@@ -38,6 +38,16 @@ def test_parser_places_multitag_sections_and_leaves_uncited_text():
     trailing = parse_answers("leading post\n\n[c1.1] answer\n\ntrailing paragraph", "answer")
     assert trailing["c1.1"][0]["text"] == "answer\n\ntrailing paragraph"
     assert "leading post" not in str(trailing)
+
+
+@pytest.mark.parametrize(('text', 'cids', 'expected'), [
+    ('Introduction\n\n[c1.1][c1.2] shared answer', ['c1.1', 'c1.2'], 'Introduction'),
+    ('[c1.9] unknown\n\n[c1.1] placed', ['c1.1'], '[c1.9] unknown'),
+    ('Leading post\n\n[c1.1] answer\n\nTrailing paragraph', ['c1.1'], 'Leading post'),
+    ('[c1.1] answer', ['c1.1'], ''),
+])
+def test_visible_content_keeps_only_unplaced_sections(text, cids, expected):
+    assert visible_answer_content(text, cids) == expected
 
 
 def test_malformed_cid_is_rejected():

@@ -73,6 +73,10 @@ def test_attaches_answer_and_unread_state_to_loaded_target(isolated_db):
         assert thread['note'] == 'why?'
         assert thread['answers'][0]['text'] == 'because'
         assert thread['answers'][0]['unread'] is True
+        answer_page = [{'id': 'answer', 'role': 'assistant'}]
+        attach_comments(db, 'thread', 'person', answer_page)
+        assert answer_page[0]['chat_visible_content'] == ''
+        assert answer_page[0]['chat_answer_cids'] == ['c1.1']
         from doceditor.reply_attention import unread_reply_items
         db.execute("UPDATE threads SET user_id='person' WHERE id='thread'")
         reply = unread_reply_items(db, 'person')[0]['detail']

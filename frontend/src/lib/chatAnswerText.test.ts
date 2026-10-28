@@ -1,17 +1,20 @@
 import { describe, expect, it } from 'vitest';
-import { visibleChatAnswerText } from './chatAnswerText';
+import type { Message } from './stores/threads';
+import { visibleChatAnswerRows } from './chatAnswerText';
 
-describe('placed chat answer text', () => {
-	it('hides one answer shared by two comments while keeping an ordinary introduction', () => {
-		expect(visibleChatAnswerText('Introduction\n\n[c1.1][c1.2] shared answer', ['c1.1', 'c1.2'])).toBe('Introduction');
+const message = (values: Partial<Message>): Message => ({
+	id: 'a', thread_id: 'thread', role: 'assistant', content: '[c1.1] answer', created_at: 't', ...values,
+});
+
+describe('placed chat answer rows', () => {
+	it('uses server-provided visible content and hides an answer-only row', () => {
+		expect(visibleChatAnswerRows([message({ chat_visible_content: '' })])).toEqual([]);
+		expect(visibleChatAnswerRows([message({ chat_visible_content: 'Introduction' })])[0].content).toBe('Introduction');
 	});
-	it('leaves an unplaced citation visible and removes only placed sections', () => {
-		expect(visibleChatAnswerText('[c1.9] unknown\n\n[c1.1] placed', ['c1.1'])).toBe('[c1.9] unknown');
-	});
-	it('keeps the leading post and places a trailing paragraph with the final answer', () => {
-		expect(visibleChatAnswerText('Leading post\n\n[c1.1] answer\n\nTrailing paragraph', ['c1.1'])).toBe('Leading post');
-	});
-	it('removes a whole answer-only post', () => {
-		expect(visibleChatAnswerText('[c1.1] answer', ['c1.1'])).toBe('');
+	it('retains a row with other content and leaves unprojected messages alone', () => {
+		const row = message({ chat_visible_content: '', reasoning: 'work' });
+		expect(visibleChatAnswerRows([row])[0]).toMatchObject({ content: '', reasoning: 'work' });
+		const unprojected = message({});
+		expect(visibleChatAnswerRows([unprojected])[0]).toBe(unprojected);
 	});
 });

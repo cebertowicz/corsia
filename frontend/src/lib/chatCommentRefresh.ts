@@ -26,7 +26,7 @@ export function watchChatCommentThreads(pageSize: number): () => void {
 				for (const message of data.messages) byId.set(message.id, message);
 			}
 			messages.update(rows => rows.map(row => byId.has(row.id) && row.thread_id === threadId
-				? { ...row, chat_comments: byId.get(row.id).chat_comments ?? [], chat_answer_cids: byId.get(row.id).chat_answer_cids ?? [] } : row));
+				? { ...row, chat_comments: byId.get(row.id).chat_comments ?? [], chat_visible_content: byId.get(row.id).chat_visible_content } : row));
 			await reload();
 		} catch (error) { console.error('Could not refresh chat comment threads', error); }
 	}

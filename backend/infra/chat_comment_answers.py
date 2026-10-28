@@ -24,6 +24,20 @@ def parse_answers(text: str, message_id: str) -> dict[str, list[dict[str, str]]]
     return answers
 
 
+def visible_answer_content(text: str, placed_cids: list[str]) -> str:
+    """Keep the introduction and sections whose tags were not placed."""
+    if not placed_cids:
+        return text
+    matches = list(_TAGGED.finditer(text))
+    result = text[:matches[0].start()] if matches else text
+    known = set(placed_cids)
+    for index, match in enumerate(matches):
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+        if not known.intersection(_TAG.findall(match.group(1))):
+            result += text[match.start():end]
+    return result.strip()
+
+
 def has_comment_cid(metadata: str | None, cid: str) -> bool:
     try:
         value = json.loads(metadata or "{}")

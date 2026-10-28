@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { token } from '$lib/stores/auth';
-	import { messages } from '$lib/stores/threads';
+	import { isNavAgent, messages, threads } from '$lib/stores/threads';
 	import { reload } from '$lib/stores/attentionDock.svelte';
 	import { formatTime } from '$lib/time';
 	import CommentQuote from './comments/CommentQuote.svelte';
@@ -9,13 +9,17 @@
 	type Answer = { assistant_message_id: string; text: string; created_at: string; unread: boolean };
 	type ChatComment = { id: string; cid: string; user_message_id: string; quote: string; note: string; created_at: string; answers: Answer[] };
 	let { messageId, threadId, comments }: { messageId: string; threadId: string; comments: ChatComment[] } = $props();
+	const agentName = $derived.by(() => {
+		const current = $threads.find(item => item.id === threadId);
+		return current && isNavAgent(current) ? current.title : 'CORSIA';
+	});
 
 	function thread(comment: ChatComment): CommentThreadData {
 		return {
 			id: comment.cid, anchor: comment.quote, author: 'user', authorKind: 'user', text: comment.note,
 			at: formatTime(comment.created_at), createdAt: comment.created_at, resolved: false,
-			replies: comment.answers.map(answer => ({ id: answer.assistant_message_id, author: threadId,
-				authorKind: 'agent', text: answer.text, at: formatTime(answer.created_at), createdAt: answer.created_at })),
+			replies: comment.answers.map(answer => ({ id: answer.assistant_message_id, author: agentName,
+				authorThreadId: threadId, authorKind: 'agent', text: answer.text, at: formatTime(answer.created_at), createdAt: answer.created_at })),
 			newReplyIds: comment.answers.filter(answer => answer.unread).map(answer => answer.assistant_message_id),
 		};
 	}

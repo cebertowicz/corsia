@@ -63,11 +63,27 @@ for (const mode of ['normal', 'focus', 'focus-collapsed'] as const) test(`chat a
   }
   const chip = page.getByText('1 new reply', { exact: false });
   await expect(chip).toBeVisible({ timeout: 30_000 });
+  if (mode === 'focus') {
+    const spacing = await page.evaluate((answer) => {
+      const scroller = document.querySelector<HTMLElement>('.messages')!;
+      const toggle = [...scroller.querySelectorAll<HTMLElement>('.fold-toggle')].at(-1);
+      return {
+        paddingBottom: getComputedStyle(scroller).paddingBottom,
+        scrollerBottom: scroller.getBoundingClientRect().bottom,
+        lastWorkBottom: toggle?.getBoundingClientRect().bottom,
+        pendingRegions: scroller.querySelectorAll('.pending-input-region').length,
+        answerRows: scroller.querySelectorAll(`[data-message-id="${CSS.escape(answer)}"]`).length,
+      };
+    }, answerId);
+    console.log('focus-spacing', JSON.stringify(spacing));
+  }
   const frames = process.env.CHAT_COMMENT_FRAMES!;
   await page.screenshot({ path: path.join(frames, `chip-${mode}.png`), animations: 'disabled' });
   await chip.click();
   const card = row.locator('[data-chat-comment="c2.1"]');
   await expect(card).toContainText('This is the answer.');
+  await expect(card.locator('.ct-msg-author')).toHaveText('CORSIA');
+  await expect(card.locator('.ct-msg-author')).not.toHaveText(thread);
   await page.screenshot({ path: path.join(frames, `landed-${mode}.png`), animations: 'disabled' });
   await expect(chip).toHaveCount(0, { timeout: 10_000 });
   await page.screenshot({ path: path.join(frames, `read-${mode}.png`), animations: 'disabled' });
