@@ -155,7 +155,7 @@ def _search(query: str, owner_id: str, project_id: str | None, db) -> dict[str, 
     index = _index()
     origins = _installed_library_origins(owner_id, db)
     results = []
-    for item in search_items(index.skills, query):
+    for item in search_items(index.items, query):
         kind = item.get("kind", "skill")
         result = {
             "name": item["name"], "description": item["description"], "version": item["version"],
@@ -178,14 +178,11 @@ def _item(name: str):
     from library.items import find_item
 
     index = _index()
-    return index, find_item(index.skills, name)
+    return index, find_item(index.items, name)
 
 
 def _fetch_pack(name: str, thread_id: str, project_id: str | None, db) -> dict[str, Any]:
-    from library.pack_fetch import can_fetch, fetch_pack
-
-    if not can_fetch(thread_id, project_id, db):
-        return _error("not_conductor", "Only the designated project conductor or workspace CORSIA agent can fetch a blueprint. Ask the conductor; if none exists, continue without the pack.")
+    from library.pack_fetch import fetch_pack
     index, item = _item(name)
     if item is None:
         return _error("not_in_library", "search first; names are exact")

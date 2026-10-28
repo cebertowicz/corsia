@@ -48,12 +48,13 @@ def test_registration_completeness_uses_real_owner_and_surfacing(isolated_db, tm
         db.close()
 
 
-def test_tool_refuses_unauthorized_before_loading_index(monkeypatch):
+def test_tool_returns_fetch_owner_authorization(monkeypatch):
+    from types import SimpleNamespace
     from library import pack_fetch
     from tools import skill_library
 
     monkeypatch.setattr(pack_fetch, "can_fetch", lambda *args: False)
-    monkeypatch.setattr(skill_library, "_item", lambda *args: (_ for _ in ()).throw(AssertionError("index read")))
+    monkeypatch.setattr(skill_library, "_item", lambda *args: (SimpleNamespace(index_age="just now"), fixture_pack()[0]))
     assert skill_library._fetch_pack("demo", "worker", "project", object())["error"] == "not_conductor"
 
 

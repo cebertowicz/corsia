@@ -62,7 +62,7 @@ def _artifact_ref(event_type: str, facts: dict, raw: dict) -> dict | None:
         return None
     return {
         "integration": LIBRARY_INTEGRATION,
-        "type": INSTALLED_PACK_TYPE if event_type == PACK_CHANGED_EVENT else INSTALLED_SKILL_TYPE,
+        "type": INSTALLED_PACK_TYPE if event_type == PACK_CHANGED_EVENT or raw.get("artifact_type") == INSTALLED_PACK_TYPE else INSTALLED_SKILL_TYPE,
         "external_id": external_id,
     }
 

@@ -24,7 +24,7 @@ from library.items import item_manifest, source_ref
 log = logging.getLogger(__name__)
 REFRESH_SECONDS = 24 * 60 * 60
 
-INSTALLED_ROWS_SQL = """SELECT identities.external_id, identities.path, registrations.parent_thread_id
+INSTALLED_ROWS_SQL = """SELECT identities.external_id, identities.path, registrations.parent_thread_id, registrations.created_at
     FROM artifact_identities AS identities
     JOIN artifact_registrations AS registrations ON registrations.artifact_id=identities.id
     WHERE identities.integration=? AND identities.type=? AND identities.state='active'
@@ -56,7 +56,7 @@ def produce_once() -> int:
 
     use_community_improvements = uses_community_improvements(Path(WORKSPACE))
     index = load_index()  # Exactly one cache-backed raw-main read per producer refresh.
-    items = {item["name"]: item for item in index.skills}
+    items = {item["name"]: item for item in index.items}
     delivered = 0
     for row in _installed_rows():
         payload = _notice_payload(row, items, index.generations)
@@ -66,13 +66,35 @@ def produce_once() -> int:
             continue
         deliveries = deliver_platform_event_sync(LIBRARY_CONNECTOR, payload)
         delivered += sum(delivery.outcome != DUPLICATE for delivery in deliveries)
-    if use_community_improvements:
-        for row in _installed_rows(artifact_type=INSTALLED_PACK_TYPE):
-            payload = _pack_notice_payload(row, items, index.generations)
-            if payload is not None:
-                deliveries = deliver_platform_event_sync(LIBRARY_CONNECTOR, payload)
-                delivered += sum(delivery.outcome != DUPLICATE for delivery in deliveries)
+    for row in _newest_pack_rows(_installed_rows(artifact_type=INSTALLED_PACK_TYPE)):
+        payload = _pack_notice_payload(row, items, index.generations)
+        if payload is None or (payload["event_type"] == PACK_CHANGED_EVENT and not use_community_improvements):
+            continue
+        deliveries = deliver_platform_event_sync(LIBRARY_CONNECTOR, payload)
+        delivered += sum(delivery.outcome != DUPLICATE for delivery in deliveries)
     return delivered
+
+
+def _newest_pack_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Compare only the highest installed version for each owner and pack."""
+    import semver
+
+    newest: dict[tuple[str, str], tuple[Any, dict[str, Any]]] = {}
+    for row in rows:
+        external_id = row.get("external_id")
+        if not isinstance(external_id, str):
+            continue
+        parts = external_id.rsplit("/", 2)
+        if len(parts) != 3 or parts[0] != row.get("parent_thread_id"):
+            continue
+        try:
+            version = semver.Version.parse(parts[2])
+        except ValueError:
+            continue
+        key = (parts[0], parts[1])
+        if key not in newest or version > newest[key][0]:
+            newest[key] = (version, row)
+    return [entry[1] for entry in newest.values()]
 
 
 def _pack_notice_payload(row: dict[str, Any], items: dict[str, dict[str, Any]], generations: dict[str, int]) -> dict[str, Any] | None:
@@ -86,17 +108,20 @@ def _pack_notice_payload(row: dict[str, Any], items: dict[str, dict[str, Any]], 
         return None
     _owner, name, version = parts
     item = items.get(name)
-    if not item or item.get("kind") != "pack" or item.get("pack_kind") != "blueprint" or item["withdrawn"]:
+    if not item or item.get("kind") != "pack" or item.get("pack_kind") != "blueprint":
         return None
-    try:
-        if semver.Version.parse(item["version"]) <= semver.Version.parse(version):
+    if not item["withdrawn"]:
+        try:
+            if semver.Version.parse(item["version"]) <= semver.Version.parse(version):
+                return None
+        except ValueError:
             return None
-    except ValueError:
-        return None
-    return {"event_type": PACK_CHANGED_EVENT, "external_id": external_id, "name": name,
+    return {"event_type": ITEM_WITHDRAWN_EVENT if item["withdrawn"] else PACK_CHANGED_EVENT,
+            "artifact_type": INSTALLED_PACK_TYPE, "external_id": external_id, "name": name,
             "installed_version": version, "library_version": item["version"],
             "item_manifest": item["digest"], "library_index_generation": generations.get(name, 0),
-            "installed_at": version, "edited": False, "changed_files": []}
+            "installed_at": row["created_at"], "edited": False, "changed_files": [],
+            "withdrawn_reason": item.get("withdrawn_reason")}
 
 
 def _notice_payload(

@@ -43,13 +43,22 @@ def test_blueprint_search_fetch_and_update_journey(isolated_db, monkeypatch):
            "source": {"repository": "example/library", "path": "packs/demo", "commit": "a" * 40},
            "files": [{"path": path, "sha256": hashlib.sha256(data).hexdigest()} for path, data in files.items()],
            "digest": pack_digest(files), "withdrawn": False, "withdrawn_reason": None}
-    catalog = {"skills": [row]}
+    skill_content = b"---\nname: helper\ndescription: Project helper\n---\nUse it.\n"
+    skill = {"name": "helper", "description": "Project helper", "version": "1.0.0", "license": "MIT",
+             "source": {"repository": "example/library", "path": "skills/helper", "commit": "a" * 40},
+             "files": [{"path": "SKILL.md", "sha256": hashlib.sha256(skill_content).hexdigest()}],
+             "withdrawn": False, "withdrawn_reason": None}
+    connector = {"kind": "pack", "pack_kind": "connector", "name": "connector"}
+    catalog = {"skills": [row, skill, connector, {"kind": "future"}]}
     monkeypatch.setattr(index, "_fetch_index", lambda: catalog)
-    monkeypatch.setattr(items, "_fetch_raw", lambda url: files[url.split("/packs/demo/", 1)[1]])
+    monkeypatch.setattr(items, "_fetch_raw", lambda url: skill_content if "/skills/helper/" in url else files[url.split("/packs/demo/", 1)[1]])
 
     thread = {"project_id": "blueprint-project"}
     search = skill_library._execute("search", owner, thread, "project blueprint", None, False)
-    assert [result["name"] for result in search["results"]] == ["demo"]
+    assert {result["name"] for result in search["results"]} == {"demo", "helper"}
+    assert skill_library._execute("search", owner, thread, "helper", None, False)["results"][0]["name"] == "helper"
+    assert skill_library._execute("install", owner, thread, None, "helper", False)["outcome"] == "installed"
+    assert skill_library._execute("fetch_pack", owner, thread, None, "connector", False)["error"] == "not_in_library"
     denied = skill_library._execute("fetch_pack", worker, thread, None, "demo", False)
     assert denied["error"] == "not_conductor"
     result = skill_library._execute("fetch_pack", owner, thread, None, "demo", False)
@@ -68,7 +77,7 @@ def test_blueprint_search_fetch_and_update_journey(isolated_db, monkeypatch):
     finally:
         db.close()
 
-    catalog["skills"] = [{**row, "version": "2.0.0", "digest": "a" * 64}]
+    catalog["skills"] = [{**row, "version": "2.0.0", "digest": "a" * 64}, skill, connector]
     assert producer.produce_once() == 1
     db = get_db()
     try:
@@ -80,10 +89,16 @@ def test_blueprint_search_fetch_and_update_journey(isolated_db, monkeypatch):
         db.close()
     assert {path.relative_to(folder).as_posix(): path.read_bytes() for path in folder.rglob("*") if path.is_file()} == files
 
-    catalog["skills"] = [{**row, "pack_kind": "connector"}]
-    refusal = skill_library._execute("search", owner, thread, "demo", None, False)
-    assert refusal["error"] == "library_invalid"
-    assert "connector" in refusal["message"]
-    fetch_refusal = skill_library._execute("fetch_pack", owner, thread, None, "demo", False)
-    assert fetch_refusal["error"] == "library_invalid"
-    assert "connector" in fetch_refusal["message"]
+    skill.update(withdrawn=True, withdrawn_reason="unsafe")
+    assert producer.produce_once() == 1
+    db = get_db()
+    try:
+        messages = db.execute("SELECT content FROM messages WHERE thread_id=? AND id LIKE 'platform-event:%'", (owner,)).fetchall()
+        assert len(messages) == 1 and "library.item_withdrawn" in messages[0]["content"]
+        assert "helper" in messages[0]["content"]
+    finally:
+        db.close()
+
+    monkeypatch.setattr(index, "_fetch_index", lambda: (_ for _ in ()).throw(OSError("offline")))
+    assert skill_library._execute("search", owner, thread, "demo", None, False)["results"][0]["name"] == "demo"
+    assert skill_library._execute("fetch_pack", owner, thread, None, "connector", False)["error"] == "not_in_library"

@@ -48,8 +48,8 @@ def test_blueprint_requires_semver(version):
         _validate_index({"skills": [row]})
 
 
-def test_connector_pack_is_refused_by_name():
+@pytest.mark.parametrize("pack_kind", ["connector", "workflow"])
+def test_unsupported_packs_are_skipped(pack_kind):
     row = deepcopy(pack_row())
-    row["pack_kind"] = "connector"
-    with pytest.raises(LibraryIndexValidationError, match="connector"):
-        _validate_index({"skills": [row]})
+    row["pack_kind"] = pack_kind
+    assert _validate_index({"skills": [row, pack_row()]}) == (pack_row(),)
