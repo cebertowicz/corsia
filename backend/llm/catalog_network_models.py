@@ -49,6 +49,8 @@ def _parse_omlx_status(response) -> dict[str, dict]:
             "size_bytes": int(model.get("estimated_size") or 0) or None,
             "pinned": bool(model.get("pinned")),
         }
+        if isinstance(model.get("config_model_type"), str):
+            canonical[provider_model_id]["config_model_type"] = model["config_model_type"]
         status_alias = (model.get("model_alias") or "").strip()
         if status_alias:
             canonical[provider_model_id]["model_alias"] = status_alias
@@ -109,6 +111,8 @@ def _apply_admin_model(canonical: dict[str, dict], model: dict) -> None:
         canonical[provider_model_id]["model_alias"] = alias
     capture_configured(settings, canonical[provider_model_id])
     capture_reported(model, canonical[provider_model_id])
+    if isinstance(model.get("config_model_type"), str):
+        canonical[provider_model_id]["config_model_type"] = model["config_model_type"]
     if canonical[provider_model_id].get("context_length") is not None:
         return
     window = extract_context_length(model)
@@ -234,6 +238,8 @@ def _network_model_payload(
         metadata["size_bytes"] = model["size_bytes"]
     if model_alias:
         metadata["model_alias"] = model_alias
+    if model.get("config_model_type"):
+        metadata["config_model_type"] = model["config_model_type"]
     apply_metadata(model, reasoning_shape, metadata)
     engine = model.get("engine_type") or ""
     supports_vision = (

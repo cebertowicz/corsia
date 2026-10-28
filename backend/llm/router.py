@@ -317,6 +317,9 @@ async def chat_completion(
     )
 
     from llm.base import base_completion
+    if is_omlx:
+        from llm.providers.omlx_messages import shape_messages
+        messages = shape_messages(messages, model, omlx_server_id)
     response = await _observed(api_base, base_completion(
         messages, tools,
         model=model, **output_budget,
