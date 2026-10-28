@@ -177,7 +177,7 @@ TOOL_CATALOG: dict[str, ToolCatalogEntry] = {
         "browser", summary="Open a URL in the browser", activity="Opening",
     ),
     "browser_snapshot": _Entry(
-        "browser", summary="Read the page's accessibility tree and element refs",
+        "browser", summary="Read the page's tree and element refs; list or switch tabs",
         activity="Reading page",
     ),
     "browser_click": _Entry(

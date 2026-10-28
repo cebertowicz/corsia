@@ -27,6 +27,7 @@ _pane_reports: dict[str, dict[str, Callable[[dict], None]]] = {}
 # Each connected pane's probe of the shared page, over the page endpoint it already holds.
 _pane_probes: dict[str, dict[str, PaneProbe]] = {}
 _screencasts: dict[str, dict[str, PaneScreencast]] = {}
+_target_changes: dict[str, dict[str, Callable[[], None]]] = {}
 # When the agent last acted in each thread's page, so a pane that connects later shows it there.
 _agent_seen: dict[str, float] = {}
 # agent-browser commands that change the page's device metrics; a screenshot changes them while it captures.
@@ -73,6 +74,22 @@ def pane_disconnected(thread_id: str, connection_token: str, *, on_last_probe: C
     if not connections:
         del _panes[thread_id]
         _capture_sizes.pop(thread_id, None)
+
+
+def watch_target_changes(thread_id: str, connection_token: str, notify: Callable[[], None]) -> None:
+    _target_changes.setdefault(thread_id, {})[connection_token] = notify
+
+
+def unwatch_target_changes(thread_id: str, connection_token: str) -> None:
+    watchers = _target_changes.get(thread_id, {})
+    watchers.pop(connection_token, None)
+    if not watchers:
+        _target_changes.pop(thread_id, None)
+
+
+def target_changed(thread_id: str) -> None:
+    for notify in tuple(_target_changes.get(thread_id, {}).values()):
+        notify()
 
 
 def has_pane(thread_id: str) -> bool:
