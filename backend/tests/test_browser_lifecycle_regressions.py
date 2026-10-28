@@ -101,16 +101,21 @@ async def test_exited_client_with_delayed_detached_daemon_remains_owned(
     owner = fake.owner
     await owner._pin_native()
     spawned_pid = tmp_path / 'spawned-pid'
+    release_daemon = tmp_path / 'release-daemon'
     daemon = '''
 import os, pathlib, signal, sys, time
-root, session = pathlib.Path(sys.argv[1]), sys.argv[2]
+root, session, release = pathlib.Path(sys.argv[1]), sys.argv[2], pathlib.Path(sys.argv[3])
 paths = [root / (session + suffix) for suffix in ('.pid', '.version', '.sock')]
 def stop(*args):
     for path in paths:
         path.unlink(missing_ok=True)
     sys.exit(0)
 signal.signal(signal.SIGTERM, stop)
-time.sleep(0.4)
+deadline = time.monotonic() + 30
+while not release.exists() and time.monotonic() < deadline:
+    time.sleep(0.01)
+if not release.exists():
+    stop()
 paths[0].write_text(str(os.getpid()))
 paths[1].write_text('0.27.0')
 paths[2].touch()
@@ -119,9 +124,9 @@ stop()
 '''
     client = '''
 import os, pathlib, subprocess, sys
-code, root, session, marker = sys.argv[1:]
+code, root, session, marker, release = sys.argv[1:]
 env = dict(os.environ, AGENT_BROWSER_DAEMON='1', AGENT_BROWSER_SESSION=session)
-child = subprocess.Popen([sys.executable, '-c', code, root, session], env=env,
+child = subprocess.Popen([sys.executable, '-c', code, root, session, release], env=env,
                          stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                          stderr=subprocess.DEVNULL, start_new_session=True)
 pathlib.Path(marker).write_text(str(child.pid))
@@ -132,7 +137,7 @@ sys.exit(1)
     async def delayed(argv, *, timeout):
         session = argv[argv.index('--session') + 1]
         return await cli.invoke((sys.executable, '-c', client, daemon, str(owner.socket_dir),
-                                 session, str(spawned_pid)), socket_dir=owner.socket_dir, timeout=EXIT_TIMEOUT)
+                                 session, str(spawned_pid), str(release_daemon)), socket_dir=owner.socket_dir, timeout=EXIT_TIMEOUT)
 
     monkeypatch.setattr(owner, '_invoke', delayed)
     pid = None
@@ -143,6 +148,8 @@ sys.exit(1)
         runtime = owner._sessions['thread']
         assert runtime.attempt.completion == 'exited' and runtime.record.binding is None
         assert owner.live_count() == 1
+        # Release the daemon only after the owner has retained the unresolved startup.
+        release_daemon.touch()
         # The daemon writes .sock last; wait for it rather than for a fixed time (#2852).
         last_artifact = owner.socket_dir / f'{runtime.record.session}.sock'
         deadline = asyncio.get_running_loop().time() + 10

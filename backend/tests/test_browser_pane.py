@@ -95,6 +95,9 @@ class IdleScreencast:
 def screencast(monkeypatch):
     cast = IdleScreencast()
     monkeypatch.setattr(browser_pane, "screencast", cast)
+    async def idle_targets(*_args):
+        await asyncio.Future()
+    monkeypatch.setattr(browser_pane, "watch_targets", idle_targets)
     return cast
 
 
@@ -164,6 +167,8 @@ class RenderedOwner:
             self.commands.append(tuple(args))
             if tuple(args) == ("get", "cdp-url"):
                 return _raw({"cdpUrl": "ws://browser.test/devtools/browser/1"})
+            if tuple(args) == ("get", "title"):
+                return _raw({"title": "Current"})
             assert tuple(args) == ("get", "url")
             return _raw({"url": "https://example.test/current"})
 
@@ -195,7 +200,7 @@ async def test_relay_delivers_click_shortcut_text_then_enter_in_order_on_one_cdp
 
     owner = RenderedOwner()
     monkeypatch.setattr(browser_pane.PROCESS_OWNER, "browser_sessions", lambda: owner)
-    monkeypatch.setattr(browser_pane.browser_cdp, "_page_endpoint", lambda _endpoint, _expected_url: "ws://page.test/current")
+    monkeypatch.setattr(browser_pane.browser_cdp, "_page_endpoint", lambda _endpoint, _expected_url, _title: "ws://page.test/current")
     monkeypatch.setattr(browser_pane.browser_cdp, "dispatch_mouse_event", recorder("mouse"))
     monkeypatch.setattr(browser_pane.browser_cdp, "dispatch_key_event", recorder("key"))
     monkeypatch.setattr(browser_pane.browser_cdp, "watch_page_metadata", no_metadata)
@@ -225,13 +230,13 @@ async def test_a_pane_resolves_its_page_target_once_through_the_agent_commands_r
     calls = []
     owner = RenderedOwner()
     monkeypatch.setattr(browser_pane.PROCESS_OWNER, "browser_sessions", lambda: owner)
-    monkeypatch.setattr(browser_pane.browser_cdp, "_page_endpoint", lambda endpoint, expected_url: calls.append((endpoint, expected_url)) or "ws://page.test/current")
+    monkeypatch.setattr(browser_pane.browser_cdp, "_page_endpoint", lambda endpoint, expected_url, title: calls.append((endpoint, expected_url, title)) or "ws://page.test/current")
     browser_pane.clear_page_endpoint("thread-1", "pane-1")
     try:
         assert await browser_pane._page_endpoint("thread-1", "pane-1", "failed") == "ws://page.test/current"
         assert await browser_pane._page_endpoint("thread-1", "pane-1", "failed") == "ws://page.test/current"
-        assert owner.commands == [("get", "cdp-url"), ("get", "url")]
-        assert calls == [("ws://browser.test/devtools/browser/1", "https://example.test/current")]
+        assert owner.commands == [("get", "cdp-url"), ("get", "url"), ("get", "title")]
+        assert calls == [("ws://browser.test/devtools/browser/1", "https://example.test/current", "Current")]
     finally:
         browser_pane.clear_page_endpoint("thread-1", "pane-1")
 
@@ -429,11 +434,11 @@ async def test_agent_close_remains_available_while_a_pane_is_connected(monkeypat
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(("returncode", "announced"), [(0, ["thread-1"]), (1, [])])
-async def test_browser_opened_is_announced_only_when_an_open_starts_the_session(monkeypatch, returncode, announced):
+@pytest.mark.parametrize(("returncode", "shared", "announced"), [(0, True, ["thread-1"]), (0, False, []), (1, True, [])])
+async def test_browser_opened_is_announced_only_when_an_open_starts_the_session(monkeypatch, returncode, shared, announced):
     """A later open leaves a pane tab the person closed shut; only a new session reveals it again."""
     owner = BrowserSessionOwner(namespace="corsia-pane-test")
-    runtime = BrowserRuntime(BrowserSessionRecord("thread-1", "test-session", show_window=True))
+    runtime = BrowserRuntime(BrowserSessionRecord("thread-1", "test-session", shared=shared))
     seen = []
 
     async def run_admitted(*_args, **_kwargs):

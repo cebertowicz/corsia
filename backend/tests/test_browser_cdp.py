@@ -33,17 +33,18 @@ async def test_cdp_records_parent_links_from_pushed_search_paths():
 async def test_page_endpoint_resolves_the_browser_url_to_the_page_the_session_shows(monkeypatch):
     resolved = []
     monkeypatch.setattr(browser_cdp, "_page_endpoint",
-                        lambda browser, url: resolved.append((browser, url)) or "ws://page.test/devtools/page/1")
+                        lambda browser, url, title: resolved.append((browser, url, title)) or "ws://page.test/devtools/page/1")
     outputs = {
         ("get", "cdp-url"): '{"data":{"cdpUrl":"ws://browser.test/devtools/browser/1"}}',
         ("get", "url"): '{"data":{"url":"https://example.test/current"}}',
+        ("get", "title"): '{"data":{"title":"Current"}}',
     }
 
     async def run(args, _timeout):
         return CommandResult(0, outputs[tuple(args)], "")
 
     assert await browser_cdp.page_endpoint(run) == "ws://page.test/devtools/page/1"
-    assert resolved == [("ws://browser.test/devtools/browser/1", "https://example.test/current")]
+    assert resolved == [("ws://browser.test/devtools/browser/1", "https://example.test/current", "Current")]
 
 
 @pytest.mark.asyncio
@@ -71,7 +72,8 @@ def test_only_a_password_input_counts_as_a_password_field(node, password):
 def test_page_endpoint_prefers_the_sessions_current_page(monkeypatch):
     targets = [
         {"type": "page", "url": "about:blank", "webSocketDebuggerUrl": "ws://page.test/devtools/page/blank"},
-        {"type": "page", "url": "https://example.test/current", "webSocketDebuggerUrl": "ws://page.test/devtools/page/current"},
+        {"type": "page", "url": "https://example.test/current", "title": "Other", "webSocketDebuggerUrl": "ws://page.test/devtools/page/other"},
+        {"type": "page", "url": "https://example.test/current", "title": "Current", "webSocketDebuggerUrl": "ws://page.test/devtools/page/current"},
     ]
 
     class Response:
@@ -82,7 +84,7 @@ def test_page_endpoint_prefers_the_sessions_current_page(monkeypatch):
             pass
 
     monkeypatch.setattr(browser_cdp, "urlopen", lambda *_args, **_kwargs: Response())
-    assert browser_cdp._page_endpoint("ws://browser.test/devtools/browser/1", "https://example.test/current") == "ws://page.test/devtools/page/current"
+    assert browser_cdp._page_endpoint("ws://browser.test/devtools/browser/1", "https://example.test/current", "Current") == "ws://page.test/devtools/page/current"
 
 
 @pytest.mark.asyncio
