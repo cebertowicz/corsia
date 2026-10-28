@@ -156,7 +156,7 @@
 		min-width: 0;
 	}
 	.chat-attention-stack > :global(.attention-dock) { pointer-events: none; }
-	.chat-attention-stack > :global(.mobile-scroll-fab) { justify-self: center; }
+	.chat-attention-stack > :global(.chat-scroll-control) { justify-self: center; }
 	@media (max-width: 768px) {
 		.chat-attention-stack {
 			/* The mobile composer moves up by this canonical inset while an editor
@@ -195,7 +195,7 @@
 			justify-self: stretch;
 			order: 0;
 		}
-		.chat-attention-stack > :global(.mobile-scroll-fab) {
+		.chat-attention-stack > :global(.chat-scroll-control) {
 			grid-column: 2;
 			justify-self: center;
 			order: 2;

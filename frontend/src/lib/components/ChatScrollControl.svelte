@@ -19,7 +19,7 @@
 
 {#if visible}
 	<button
-		class="rail-control mobile-scroll-fab press-tint"
+		class="rail-control chat-scroll-control press-tint"
 		type="button"
 		onclick={onScrollToBottom}
 		aria-label="Scroll to bottom"
@@ -30,7 +30,7 @@
 {/if}
 
 <style>
-	.mobile-scroll-fab {
+	.chat-scroll-control {
 		display: inline-flex; width: var(--touch-target); height: var(--touch-target); padding: 0;
 		align-items: center; justify-content: center;
 		border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
@@ -43,12 +43,12 @@
 		cursor: pointer;
 	}
 	@media (min-width: 769px) {
-		.mobile-scroll-fab { width: calc(var(--space-7) + var(--space-1)); height: calc(var(--space-7) + var(--space-1)); }
+		.chat-scroll-control { width: calc(var(--space-7) + var(--space-1)); height: calc(var(--space-7) + var(--space-1)); }
 	}
-	.mobile-scroll-fab svg {
+	.chat-scroll-control svg {
 		width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2;
 		stroke-linecap: round; stroke-linejoin: round;
 	}
-	.mobile-scroll-fab:hover { color: var(--text-primary); }
-	.mobile-scroll-fab:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+	.chat-scroll-control:hover { color: var(--text-primary); }
+	.chat-scroll-control:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 </style>

@@ -25,7 +25,7 @@
 	import ChatDropOverlay from './ChatDropOverlay.svelte';
 	import ChatWarmToast from './ChatWarmToast.svelte';
 	import HostAccessLeaseControl from './HostAccessLeaseControl.svelte';
-	import MobileScrollFab from './MobileScrollFab.svelte';
+	import ChatScrollControl from './ChatScrollControl.svelte';
 	import AttentionDock from './attention/AttentionDock.svelte';
 	import ChatAttentionStack from './attention/ChatAttentionStack.svelte';
 	import HeldDocFeedbackControl from './attention/HeldDocFeedbackControl.svelte';
@@ -360,7 +360,7 @@
 					if (destination.pane === 'documents') onOpenDocuments(destination.id);
 				}}
 			/>
-			<MobileScrollFab threadId={$activeThreadId} {userIsNearBottom} onScrollToBottom={scrollToBottomFromUser} />
+			<ChatScrollControl threadId={$activeThreadId} {userIsNearBottom} onScrollToBottom={scrollToBottomFromUser} />
 			{#if $isMobile && $activeThreadId}
 				<PlanDrawerControl
 					threadId={$activeThreadId}

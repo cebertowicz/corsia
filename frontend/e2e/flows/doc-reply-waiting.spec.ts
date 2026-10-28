@@ -1253,7 +1253,7 @@ for (const theme of ['light', 'dark'] as const) {
 				await messages.evaluate((el) => { el.scrollTop = (el.scrollHeight - el.clientHeight) / 2; el.dispatchEvent(new WheelEvent('wheel', { deltaY: -1, bubbles: true })); el.dispatchEvent(new Event('scroll')); });
 				if (!withDecision) {
 					await expect(page.locator('.attention-dock')).toHaveCount(0);
-					const arrowBeforeReply = page.locator('.chat-attention-stack > .mobile-scroll-fab');
+					const arrowBeforeReply = page.locator('.chat-attention-stack > .chat-scroll-control');
 					await expect(arrowBeforeReply).toBeVisible();
 					await expect(arrowBeforeReply.locator('xpath=ancestor::*[contains(@class,"attention-dock")]')).toHaveCount(0);
 				}
@@ -1262,10 +1262,10 @@ for (const theme of ['light', 'dark'] as const) {
 				const dock = page.locator('.attention-dock');
 				await expect(dock).toBeVisible();
 				await expect(dock.locator('.reply-chip-notice')).toBeVisible();
-				const arrow = page.locator('.chat-attention-stack > .mobile-scroll-fab');
+				const arrow = page.locator('.chat-attention-stack > .chat-scroll-control');
 				await expect(arrow).toBeVisible();
-				await expect(page.locator('.mobile-scroll-fab:visible, .scroll-fab:visible')).toHaveCount(1);
-				await expect(dock.locator('.mobile-scroll-fab')).toHaveCount(0);
+				await expect(page.locator('.chat-scroll-control:visible, .scroll-fab:visible')).toHaveCount(1);
+				await expect(dock.locator('.chat-scroll-control')).toHaveCount(0);
 				for (const surface of [dock, page.locator('.chat-attention-stack')]) {
 					const background = await surface.evaluate(el => ({ color: getComputedStyle(el).backgroundColor, image: getComputedStyle(el).backgroundImage }));
 					expect(background).toEqual({ color: 'rgba(0, 0, 0, 0)', image: 'none' });
