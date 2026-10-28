@@ -30,7 +30,7 @@ def _artifacts(db, sid: str) -> list[dict]:
     return artifact_rows_for_thread(db, sid)
 
 
-async def _codex_on_event(thread_id: str, bcast=noop_bcast):
+async def _codex_on_event(thread_id: str, bcast=noop_bcast, *, return_live=False):
     from tests.codex_runtime_fixtures import _admit_active_turn
 
     db = get_db()
@@ -57,7 +57,8 @@ async def _codex_on_event(thread_id: str, bcast=noop_bcast):
         name="Codex test",
         corsia_turn=identity,
     )
-    return codex_runtime._make_on_event(live, thread_id, bcast)
+    on_event = codex_runtime._make_on_event(live, thread_id, bcast)
+    return (live, on_event) if return_live else on_event
 
 
 @pytest.mark.asyncio
@@ -117,6 +118,104 @@ async def test_codex_settled_batches_create_cuttable_steps(isolated_db):
     ).fetchone()
     assert cut is not None
     assert (cut.message_id, cut.seq) == (last_first["id"], last_first["seq"])
+    db.close()
+
+
+@pytest.mark.parametrize("missing", [False, True], ids=["committed", "missing"])
+@pytest.mark.asyncio
+async def test_settling_older_call_preserves_newer_text_step(isolated_db, missing):
+    from core.tool_result_delivery import persist_tool_execution_result
+    from subagents.codex_runtime_events import settle_missing_tool_results
+
+    db = get_db()
+    sid = make_session(db, prefix="codex-interleave")
+    live, on_event = await _codex_on_event(sid, return_live=True)
+    provider = {"provider_thread_id": "codex-thread-test", "provider_turn_id": "provider-turn-test"}
+    await on_event(item_started_event(
+        {"type": "dynamicToolCall", "id": "a", "tool": "read_file", "arguments": {}},
+        **provider,
+    ))
+    older = live.tool_step_ids["a"]
+    await on_event({"kind": "assistant_text", "text": "new text", **provider})
+    text_step = live.open_tool_step_id
+    assert text_step != older
+    if missing:
+        await settle_missing_tool_results(
+            live=live, thread_id=sid, identity=live.corsia_turn, bcast=noop_bcast,
+        )
+    else:
+        persist_tool_execution_result(
+            thread_id=sid, turn_id=live.corsia_turn.turn_id, invocation_id="a",
+            assistant_step_id=older, provider_tool_call_id="a", name="read_file",
+            arguments={}, content="done", is_error=False, db=db,
+        )
+        db.commit()
+        await on_event(item_completed_event(
+            {"type": "dynamicToolCall", "id": "a", "result": "done", "success": True},
+            **provider,
+        ))
+    await on_event(item_started_event(
+        {"type": "dynamicToolCall", "id": "b", "tool": "read_file", "arguments": {}},
+        **provider,
+    ))
+    assert live.tool_step_ids == {"b": text_step}
+    db.close()
+
+
+@pytest.mark.parametrize("first", ["a", "b"])
+@pytest.mark.asyncio
+async def test_interleaved_steps_settle_independently(isolated_db, first):
+    from core.tool_result_delivery import persist_tool_execution_result
+    from subagents.harness_checkpoint_cold_admission import build_external_cold_admission
+    from core.fork_types import ForkNotAdmitted
+
+    db = get_db()
+    sid = make_session(db, prefix="codex-two-steps")
+    live, on_event = await _codex_on_event(sid, return_live=True)
+    provider = {"provider_thread_id": "codex-thread-test", "provider_turn_id": "provider-turn-test"}
+
+    async def start(call_id):
+        await on_event(item_started_event(
+            {"type": "dynamicToolCall", "id": call_id, "tool": "read_file", "arguments": {}},
+            **provider,
+        ))
+        return live.tool_step_ids[call_id]
+
+    async def finish(call_id, step_id):
+        persist_tool_execution_result(
+            thread_id=sid, turn_id=live.corsia_turn.turn_id, invocation_id=call_id,
+            assistant_step_id=step_id, provider_tool_call_id=call_id, name="read_file",
+            arguments={}, content=f"done {call_id}", is_error=False, db=db,
+        )
+        db.commit()
+        event = item_completed_event(
+            {"type": "dynamicToolCall", "id": call_id, "result": f"done {call_id}", "success": True},
+            **provider,
+        )
+        await on_event(event)
+        await on_event(event)
+
+    older = await start("a")
+    await on_event({"kind": "assistant_text", "text": "new text", **provider})
+    text_step = live.open_tool_step_id
+    assert await start("b") == text_step != older
+    for _ in range(2):
+        with pytest.raises(ForkNotAdmitted, match="tool calls are outstanding"):
+            build_external_cold_admission("cut", context=None, live=live, identity=live.corsia_turn)
+        if len(live.tool_step_ids) == 2:
+            await finish(first, older if first == "a" else text_step)
+    new_step = await start("c")
+    assert (new_step == text_step) is (first == "a")
+    remaining = "b" if first == "a" else "a"
+    await finish(remaining, text_step if remaining == "b" else older)
+    await finish("c", new_step)
+    assert not live.tool_step_ids
+    rows = db.execute(
+        "SELECT metadata FROM messages WHERE thread_id=? AND role='tool'", (sid,),
+    ).fetchall()
+    bindings = [(json.loads(row["metadata"])["tool_call_id"],
+                 json.loads(row["metadata"])["assistant_step_id"]) for row in rows]
+    assert sorted(bindings) == sorted([("a", older), ("b", text_step), ("c", new_step)])
     db.close()
 
 
