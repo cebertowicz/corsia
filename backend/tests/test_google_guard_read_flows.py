@@ -8,7 +8,7 @@ from tools import mail_guard_runtime
 
 
 @pytest.mark.asyncio
-async def test_guard_reads_are_repeated_per_draft_and_send(monkeypatch):
+async def test_guard_reads_are_repeated_for_each_draft(monkeypatch):
     now = datetime.now(timezone.utc)
     calls = []
     def raw(mid):
@@ -36,7 +36,7 @@ async def test_guard_reads_are_repeated_per_draft_and_send(monkeypatch):
     monkeypatch.setattr(guard_read.client, 'request_json', request)
     monkeypatch.setattr(mail_guard_runtime, 'screened_message', screen)
     backend = SimpleNamespace(guard_data=guard_read.guard_data, fetch_body=fetch_body)
-    for _ in range(2):  # draft and send each run a fresh guard
+    for _ in range(2):  # each draft reads fresh provider state
         verdict, _ = await mail_guard_runtime.guarded_reply(
             backend, {'id': 'account', 'address': 'me@example.org'}, 'target', 'reply', [])
         assert verdict.stale
