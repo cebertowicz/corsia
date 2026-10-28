@@ -175,6 +175,7 @@ def agent_result(db: sqlite3.Connection, thread_id: str, *, turn_id: str | None 
     if row is None:
         return None
     if not confined and turn_id is None and turn is not None:
+        # A reply older than the latest turn's start may be a question already answered.
         def instant(value):
             parsed = datetime.fromisoformat(str(value))
             return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
