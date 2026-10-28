@@ -27,13 +27,15 @@ async def test_opaque_sessions_and_canonical_native_argv(synthetic_browser):
     await fake.owner.shutdown()
 
 
-async def test_visible_browser_mode_is_pinned_when_the_session_starts(synthetic_browser):
+async def test_new_visible_session_is_headed_and_shared(synthetic_browser):
     fake = synthetic_browser
     await fake.owner.run("visible", ["open", "about:blank"], show_window=True)
     await fake.owner.run("headless", ["open", "about:blank"], show_window=False)
     visible, headless = (call for call in fake.calls if "state" not in call)
     assert "--headed" in visible
     assert "--headed" not in headless
+    assert await fake.owner.is_shared("visible")
+    assert not await fake.owner.is_shared("headless")
     await fake.owner.shutdown()
 
 
@@ -82,22 +84,28 @@ async def test_chosen_chrome_is_a_launch_option_resolved_once(synthetic_browser,
     await fake.owner.shutdown()
 
 
-@pytest.mark.parametrize(
-    ("initial", "requested", "current"),
-    [(False, True, "headless"), (True, False, "visible")],
-)
-async def test_mode_change_requires_closing_the_existing_session(
-    synthetic_browser, initial, requested, current,
-):
+@pytest.mark.parametrize(("initial", "requested"), [(False, True), (True, False)])
+async def test_sharing_does_not_relaunch_or_unshare(synthetic_browser, monkeypatch, initial, requested):
+    from host_access import browser_session_commands
+    events = []
+    monkeypatch.setattr(browser_session_commands, 'emit_product_event', lambda *args, **kwargs: events.append((args, kwargs)))
     fake = synthetic_browser
-    await fake.owner.run("thread", ["snapshot"], show_window=initial)
-    requested_value = "true" if requested else "false"
-    with pytest.raises(
-        sessions.BrowserSessionError,
-        match=f"running {current}.*browser_close.*show_window={requested_value}",
-    ):
-        await fake.owner.run("thread", ["open", "about:blank"], show_window=requested)
-    assert len(fake.calls) == 1
+    await fake.owner.run("thread", ["open", "about:blank"], show_window=initial)
+    runtime = fake.owner._sessions["thread"]
+    chrome = runtime.chrome
+    await fake.owner.run("thread", ["open", "about:blank"], show_window=requested)
+    assert runtime.chrome is chrome
+    assert runtime.record.show_window is initial
+    assert runtime.record.shared
+    assert await fake.owner.is_shared("thread")
+    assert len(fake.chrome_calls) == 1
+    assert ("--headed" in fake.calls[-1]) is initial
+    assert events == ([(('browser_pane', 'shared_on_demand'), {'thread_id': 'thread'})] if requested else [])
+    # A later launch reads the original mode even after sharing changed.
+    from host_access import browser_session_launch
+    await runtime.chrome.close()
+    await browser_session_launch.start_chrome(fake.owner, runtime)
+    assert ("--headless=new" not in fake.chrome_calls[-1]) is initial
     await fake.owner.shutdown()
 
 

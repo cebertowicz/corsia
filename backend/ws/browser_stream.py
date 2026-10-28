@@ -12,12 +12,13 @@ from typing import Awaitable, Callable
 from fastapi import WebSocket, WebSocketDisconnect
 from websockets.exceptions import WebSocketException
 
-from host_access import browser_control, browser_pane
+from host_access import browser_control, browser_pane, browser_pane_state
 from host_access.browser_domain import url_domain
 from host_access.browser_session_state import BrowserSessionError
 from host_access.processes import ProcessOwnerError
 from infra.auth import authenticate, narrow_to_listener
 from infra.database import get_db
+from infra.product_events import emit_product_event
 from infra.queries import get_thread_for_user
 from ws.browser_frames import PaneFrames
 
@@ -131,6 +132,46 @@ async def _metadata_events(thread_id: str, connection_token: str, report: Callab
     )
 
 
+async def _follow_page(thread_id: str, connection_token: str, frames: PaneFrames,
+                       report: Callable[[dict], None]) -> None:
+    """Restart both page streams on a target change without reconnecting the pane."""
+    changed = asyncio.Event()
+    browser_pane_state.watch_target_changes(thread_id, connection_token, changed.set)
+    pages: set[str] = set()
+    watcher = asyncio.create_task(_retry_pane_connection(
+        thread_id, connection_token, "target watch", "The shared browser stopped following tabs",
+        lambda: browser_pane.watch_targets(thread_id, changed.set, pages),
+    ))
+    streams: set[asyncio.Task] = set()
+    try:
+        while True:
+            change_wait = asyncio.create_task(changed.wait())
+            streams = {
+                asyncio.create_task(_screencast_events(thread_id, connection_token, frames)),
+                asyncio.create_task(_metadata_events(thread_id, connection_token, report)),
+                change_wait,
+            }
+            done, _ = await asyncio.wait(streams | {watcher}, return_when=asyncio.FIRST_COMPLETED)
+            for task in done:
+                if task is change_wait:
+                    continue
+                task.result()
+            changed.clear()
+            await asyncio.to_thread(emit_product_event, "browser_pane", "tab_followed", thread_id=thread_id)
+            for task in streams:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*streams, return_exceptions=True)
+            browser_pane.clear_page_endpoint(thread_id, connection_token)
+    finally:
+        browser_pane_state.unwatch_target_changes(thread_id, connection_token)
+        watcher.cancel()
+        for task in streams:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(watcher, *streams, return_exceptions=True)
+
+
 async def _relay(pane: WebSocket, thread_id: str, user_id: str) -> None:
     """Relay shared page frames and pane input for one authenticated connection."""
     connection_token = secrets.token_urlsafe(18)
@@ -172,9 +213,8 @@ async def _relay(pane: WebSocket, thread_id: str, user_id: str) -> None:
     try:
         # Shared panes have no control-holder state.
         tasks = {
-            asyncio.create_task(_screencast_events(thread_id, connection_token, frames)),
+            asyncio.create_task(_follow_page(thread_id, connection_token, frames, report)),
             asyncio.create_task(from_pane()),
-            asyncio.create_task(_metadata_events(thread_id, connection_token, report)),
             asyncio.create_task(frames.send(pane.send_text)),
             asyncio.create_task(_close_on_overflow(pane, overflow)),
         }

@@ -19,6 +19,9 @@ async def test_navigation_does_not_block_input_and_its_result_is_delivered(monke
         return 'ok'
 
     monkeypatch.setattr(browser_stream.browser_pane, 'open_url', open_url)
+    async def page_info(_thread_id):
+        return 'https://example.test', 'Example'
+    monkeypatch.setattr(browser_stream.browser_pane, 'page_info', page_info)
 
     class Pane(FakePane):
         async def receive_text(self):
@@ -137,6 +140,9 @@ async def test_relay_exit_keeps_running_navigation_alive(monkeypatch):
         return "ok"
 
     monkeypatch.setattr(browser_stream.browser_pane, "open_url", open_url)
+    async def page_info(_thread_id):
+        return "https://example.test", "Example"
+    monkeypatch.setattr(browser_stream.browser_pane, "page_info", page_info)
 
     class Pane(FakePane):
         async def receive_text(self):
