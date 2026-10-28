@@ -1,5 +1,5 @@
-/** The height of the screen a reply can show in: the viewport narrowed by every scroll container around it, so a drawer or sheet shorter than the viewport counts as the whole visible area. */
-function visibleAreaHeight(element: HTMLElement, viewport: DOMRectReadOnly): number {
+/** The viewport narrowed by every scroll container around the reply. */
+function visibleArea(element: HTMLElement, viewport: DOMRectReadOnly) {
 	let top = viewport.top;
 	let bottom = viewport.top + viewport.height;
 	for (let parent = element.parentElement; parent; parent = parent.parentElement) {
@@ -8,14 +8,18 @@ function visibleAreaHeight(element: HTMLElement, viewport: DOMRectReadOnly): num
 		top = Math.max(top, rect.top);
 		bottom = Math.min(bottom, rect.bottom);
 	}
-	return bottom - top;
+	return { top, bottom, height: bottom - top };
+}
+
+function fillsArea(visibleHeight: number, areaHeight: number) {
+	return areaHeight > 0 && visibleHeight >= areaHeight - 1;
 }
 
 /** Keeps one viewport observer per rendered unread reply across comment projections. */
 export function createReplyVisibility(onVisible: (id: string) => void, onHidden: (id: string) => void, onClear: () => void) {
-	const observers = new Map<string, { element: HTMLElement; observer: IntersectionObserver }>();
+	const observers = new Map<string, { element: HTMLElement; observer: IntersectionObserver; stop: () => void }>();
 	function clear() {
-		for (const { observer } of observers.values()) observer.disconnect();
+		for (const { observer, stop } of observers.values()) { observer.disconnect(); stop(); }
 		observers.clear();
 		onClear();
 	}
@@ -27,19 +31,44 @@ export function createReplyVisibility(onVisible: (id: string) => void, onHidden:
 			.map((element) => [element.dataset.replyId!, element]));
 		for (const [id, existing] of observers) {
 			if (elements.get(id) !== existing.element) {
-				existing.observer.disconnect(); observers.delete(id); onHidden(id);
+				existing.observer.disconnect(); existing.stop(); observers.delete(id); onHidden(id);
 			}
 		}
 		for (const [id, element] of elements) {
 			if (observers.has(id)) continue;
+			let visible: boolean | undefined;
+			let viewport: DOMRectReadOnly | null = null;
+			let listening = false;
+			function report(next: boolean) {
+				if (visible === next) return;
+				visible = next;
+				if (next) onVisible(id); else onHidden(id);
+			}
+			function checkScroll() {
+				if (!viewport) return;
+				const area = visibleArea(element, viewport);
+				const rect = element.getBoundingClientRect();
+				const shown = Math.max(0, Math.min(rect.bottom, area.bottom) - Math.max(rect.top, area.top));
+				report(fillsArea(shown, area.height));
+			}
+			function stop() {
+				if (listening) document.removeEventListener('scroll', checkScroll, true);
+				listening = false;
+			}
 			const observer = new IntersectionObserver((entries) => {
 				const entry = entries.at(-1);
-				const area = entry?.rootBounds ? visibleAreaHeight(element, entry.rootBounds) : 0;
-				const fillsRoot = !!entry && area > 0 && entry.intersectionRect.height >= area - 1;
-				if (entry?.isIntersecting && (entry.intersectionRatio === 1 || fillsRoot)) onVisible(id);
-				else onHidden(id);
+				if (!entry?.isIntersecting) { stop(); report(false); return; }
+				viewport = entry.rootBounds;
+				const area = viewport ? visibleArea(element, viewport) : null;
+				if (area && entry.boundingClientRect?.height > area.height) {
+					if (!listening) { document.addEventListener('scroll', checkScroll, { capture: true, passive: true }); listening = true; }
+					checkScroll();
+				} else {
+					stop();
+					report(entry.intersectionRatio === 1 || !!area && fillsArea(entry.intersectionRect.height, area.height));
+				}
 			}, { threshold: Array.from({ length: 21 }, (_, index) => index / 20) });
-			observers.set(id, { element, observer });
+			observers.set(id, { element, observer, stop });
 			observer.observe(element);
 		}
 	}
