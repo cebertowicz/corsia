@@ -5,9 +5,9 @@ from __future__ import annotations
 import functools
 import logging
 import uuid
-from dataclasses import dataclass
+
 from datetime import datetime, timezone
-from typing import Any
+
 
 from automation.turn_end_effects import (
     deliver_turn_end_after,
@@ -28,6 +28,10 @@ from registry.observer import observe_settled_tool_result
 from registry.registration_writer import RegistrationOrigin
 from registry.service import notify_changed, register_codex_thread
 from subagents.assistant_step_display import assistant_step_payload
+from subagents.codex_runtime_support import (
+    CodexOnEventContext as _CodexOnEventContext,
+    reasoning_representation_kind as _reasoning_representation_kind,
+)
 from tools.tool_display import SettledResult, tool_done_frame, tool_start_frame
 from subagents.codex_runtime_terminal import (
     provider_reported_model_id as _provider_reported_model_id,
@@ -47,21 +51,7 @@ _PROVIDER_MISSING_TOOL_RESULT = (
 )
 
 
-def _reasoning_representation_kind(
-    current: dict | None,
-    incoming: dict,
-) -> str:
-    """Preserve summary evidence when a later Codex item is opaque."""
-    existing = current if isinstance(current, dict) else {}
-    kinds = {
-        provenance.get("representation_kind")
-        for provenance in (existing, incoming)
-    }
-    if "codex_reasoning_summary" in kinds:
-        return "codex_reasoning_summary"
-    if "opaque" in kinds:
-        return "opaque"
-    return incoming.get("representation_kind", "unknown")
+# Reasoning representation preserves the strongest observed evidence.
 
 
 async def _observe_tool_result(
@@ -250,19 +240,7 @@ def make_on_event(
     return functools.partial(_dispatch_on_event, ctx)
 
 
-@dataclass(frozen=True)
-class _CodexOnEventContext:
-    """Values the lifted Codex event handlers close over."""
-    live: Any
-    thread_id: Any
-    bcast: Any
-    dead_set: Any
-    thread_registry: Any
-    bind_tool_result_echo: Any
-    read_bound_tool_result: Any
-    load_assistant_step_display: Any
-    persist_assistant_text: Any
-    persist_tool_use: Any
+# The event context is defined with the runtime support types.
 
 
 def _event_identity(ctx, ev: dict) -> TurnIdentity:
