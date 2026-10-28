@@ -8,9 +8,12 @@ dependency or a decision still does.
 
 from __future__ import annotations
 
+import pytest
+import uuid
+
 from infra.input_admission import accept_thread_input
 from plans import admission, holds, selection_validity, service, status, watch_operations
-from plans.boundary import PlanActor
+from plans.boundary import PlanActor, mutate
 from tests.child_parent_notice_helpers import DEADLINE, begin_worker_turn, db, delegated
 from tests.plan_review_helpers import submit_review_evidence
 
@@ -148,6 +151,21 @@ def test_a_review_only_child_does_not_read_working_because_its_turn_is_still_ope
     assert read["severity"] == "not_moving"
 
 
+@pytest.mark.parametrize("status_value", ["running", "waiting_retry"])
+def test_a_turn_begun_after_review_makes_a_review_only_child_active(db, status_value):
+    """A Turn waiting to retry is as live as a running one, before or after review."""
+    step = _review_only_child(db)
+    begin_worker_turn(db, started_at="2999-01-01T00:00:00")
+    db.execute("UPDATE active_turns SET status=?, retry_at=? WHERE thread_id='worker'",
+               (status_value, "2030-01-01" if status_value == "waiting_retry" else None))
+
+    row = _row(_read(db), step.id)
+
+    assert row["reason"] == "A delegated child is working on this step"
+    with pytest.raises(service.PlanError, match="still working"):
+        _mark_done(db, step)
+
+
 def test_a_queued_handback_still_makes_a_review_only_child_active(db):
     step = _review_only_child(db)
     accept_thread_input(
@@ -180,6 +198,49 @@ def test_a_hold_on_the_step_still_wins_over_a_busy_child(db):
 
     assert row["label"] == "waiting"
     assert row["condition"] == "paused"
+
+
+def _active_child(db):
+    step, plan, child = delegated(db)
+    service.transition_node(child.id, "active", actor_id="worker", db=db)
+    selected, conflict = admission.select(child.id, actor_id="worker", provenance="test", db=db)
+    assert selected is not None and conflict is None
+    return step, plan, child
+
+
+def _mark_done(db, step):
+    plan = service.ensure_plan("thread", "parent", db=db)
+    return mutate(plan.id, "mark_done", {
+        "node_id": step.id, "verification_result": "passed",
+        "evidence": "Parent verified the work",
+        "expected_revision": service.get_node(step.id, db=db).revision,
+    }, actor=PARENT, provenance="test", mutation_id=uuid.uuid4().hex, db=db)
+
+
+def test_stopped_selected_child_does_not_block_parent_verdict(db):
+    step, _plan, child = _active_child(db)
+    begin_worker_turn(db)
+    db.execute("UPDATE active_turns SET status='cancelled' WHERE thread_id='worker'")
+    row = _row(_read(db), step.id)
+    assert row["reason"] != "A delegated child is working on this step"
+    _mark_done(db, step)
+    assert service.get_node(step.id, db=db).state == "accepted"
+    assert service.get_node(child.id, db=db).state == "closed"
+
+
+@pytest.mark.parametrize("activity", ["running", "waiting_retry", "queued"])
+def test_selected_child_with_live_activity_blocks_parent_verdict(db, activity):
+    step, _plan, _child = _active_child(db)
+    if activity in ("running", "waiting_retry"):
+        begin_worker_turn(db)
+        if activity == "waiting_retry":
+            db.execute("UPDATE active_turns SET status='waiting_retry', retry_at='2030-01-01' "
+                       "WHERE thread_id='worker'")
+    else:
+        accept_thread_input("worker", role="user", content="Continue", intent="apply_now",
+                            message_id="queued-work", db=db)
+    with pytest.raises(service.PlanError, match="still working"):
+        _mark_done(db, step)
 
 
 def test_a_child_between_turns_waits_rather_than_reads_in_progress(db):
