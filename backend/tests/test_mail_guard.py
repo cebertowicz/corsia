@@ -1,7 +1,7 @@
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
-from tools.mail_guard import Message, check_reply
+from tools.mail_guard import Message, check_reply, evidence
 
 NOW = datetime(2026, 10, 27, tzinfo=timezone.utc)
 TARGET = Message("a", "thread-a", "Taylor <taylor@example.test>", "Budget", NOW - timedelta(days=2), "old")
@@ -9,6 +9,14 @@ TARGET = Message("a", "thread-a", "Taylor <taylor@example.test>", "Budget", NOW 
 
 def check(target=TARGET, thread=None, sender=None, body="hello", to=None):
     return check_reply(target, thread or [], sender or [], "me@example.test", body, to or [], NOW, len(sender or []))
+
+
+def test_evidence_reads_as_a_sentence():
+    message = replace(TARGET, date=datetime(2026, 10, 28, 7, 3, tzinfo=timezone.utc), unread=True)
+    assert evidence(message) == (
+        "Taylor <taylor@example.test> wrote on Oct 28, 2026, 7:03 AM UTC; this message is unread.\n"
+        "The text wasn't screened as safe to show; read it in your mail app."
+    )
 
 
 def test_empty_body_stops():

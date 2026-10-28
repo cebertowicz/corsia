@@ -3,8 +3,8 @@
 The draft is a workspace document the person reads and answers in chat. ``email_draft``
 writes it, records its revision and binds it to the account it was written from;
 ``email_send`` sends it from that account, re-checking this thread's reach, only when
-``tools.action_gate.check_action`` approves, and builds the message from the bytes the
-gate checked, never from a second read. What differs by host is the account's backend
+``tools.action_gate.check_action`` approves. It builds the reply from the checked draft,
+and re-reads the conversation, quote and sent-mail font at send time. What differs by host is the account's backend
 (``tools.mail_backends``).
 """
 
@@ -19,6 +19,7 @@ from typing import Any
 
 from connections.account_errors import AccountError
 from connections.google.client import GoogleSignInRejected
+from connections.mailhost.errors import MailHostError, PASSWORD_REFUSED
 from connections.mail_accounts import MAIL_ACCOUNT_PARAM, resolve_for_thread
 from connections.mail import attachments, mail_compose
 from connections.mail.email_document import (
@@ -78,14 +79,17 @@ def _stop(prefix: str, stops: list[str]) -> str:
     return f"{prefix}: " + "\n\n".join(stops)
 
 
-async def _font(backend: MailBackend, account_id: str) -> tuple[str | None, str | None]:
+async def _font(backend: MailBackend, account_id: str) -> tuple[str | None, str | None, str | None]:
     try:
-        return mail_compose.detected_font(await backend.sent_html(account_id))
-    except GoogleSignInRejected:
-        raise
-    except Exception:
+        face, size = mail_compose.detected_font(await backend.sent_html(account_id))
+        return face, size, None
+    except AccountError as exc:
+        if isinstance(exc, GoogleSignInRejected) or (isinstance(exc, MailHostError) and exc.cause == PASSWORD_REFUSED):
+            raise
         log.warning("Couldn't read sent mail for font; using the provider default", exc_info=True)
-        return None, None
+    except (ValueError, UnicodeError, OSError):
+        log.warning("Couldn't read sent mail for font; using the provider default", exc_info=True)
+    return None, None, "Your usual font couldn't be read; your mail's default font will be used if it still can't be read when sending."
 
 
 # Reviewed-draft storage is shared by provider families in tools.reviewed_drafts.
@@ -166,6 +170,7 @@ class EmailDraftTool(Tool):
         if target.get("reply_to"):
             if not target.get("in_reply_to"):
                 raise DraftRefused("Draft not saved: the original message has no Message-ID, so a threaded reply isn't possible. Send a new email instead.")
+            target["guard_read_at"] = datetime.now(timezone.utc).isoformat()
             try:
                 verdict, original = await guarded_reply(backend, account, str(target["reply_to"]), body, to)
             except DraftRefused as exc:
@@ -180,7 +185,9 @@ class EmailDraftTool(Tool):
             raise DraftRefused(NEEDS_RECIPIENT)
         if target.get("prefix_reply_subject"):
             subject = reply_subject(subject)
-        face, size = await _font(backend, account_id)
+        face, size, font_note = await _font(backend, account_id)
+        if font_note:
+            notes.append(font_note)
         paths = kwargs.get("attachments") or []
         limit, applies_to_message = await backend.attachment_limit(account_id) if paths else (None, False)
         try:
@@ -190,7 +197,8 @@ class EmailDraftTool(Tool):
                 raise DraftRefused("Draft not saved: " + str(exc).removeprefix("Not sent: ")) from None
             raise
         target = {**target, "account_id": account_id, "account": address, "attachments": attached}
-        notes.extend(f"Attachment: {item['name']} ({item['size']} bytes)" for item in attached)
+        notes.extend(f"Attachment: {item['name']} ({item['size'] / 1024:.3f} KB)" if item['size'] < 1024 * 1024
+                     else f"Attachment: {item['name']} ({item['size'] / (1024 * 1024):.1f} MB)" for item in attached)
         text = compose_document(address, to, cc, subject, body, signature, reply_label, notes)
         if applies_to_message and limit is not None:
             parsed = parse_document(text)
@@ -224,6 +232,8 @@ class EmailDraftTool(Tool):
                 "For new mail, save a new draft and wait for the person's reply. "
                 f"Reply target: {original.message_id}; thread: {original.thread_id}."
             )
+        if font_note:
+            result["font_note"] = font_note
         if copy_note is not None:
             result["note"] = copy_note
         return json.dumps(result)
@@ -278,7 +288,7 @@ class EmailSendTool(Tool):
                     return f"Error: Not sent: a newer message arrived:\n{newer}\n\nSave a new draft and wait for the person's reply."
             quote_body = await backend.fetch_body(str(account["id"]), original.message_id) if original else None
             body = str(message.get_content())
-            face, size = await _font(backend, str(account["id"]))
+            face, size, _ = await _font(backend, str(account["id"]))
             mail_compose.add_html(message, body, face, size, quote_body)
             await asyncio.to_thread(attachments.add, str(kwargs.get("_thread_id")), message, target.get("attachments") or [])
         except (DraftRefused, AccountError) as exc:
@@ -316,7 +326,7 @@ class EmailSendTool(Tool):
             message = build_message(parsed, target)
         except (UnicodeDecodeError, ValueError):
             return f"Error: {BAD_DOCUMENT}"
-        saved_at = datetime.fromisoformat(verdict.draft["recorded_at"])
+        saved_at = datetime.fromisoformat(target.get("guard_read_at") or verdict.draft["recorded_at"])
         if saved_at.tzinfo is None:
             saved_at = saved_at.replace(tzinfo=timezone.utc)
         return backend, account, message, target, saved_at

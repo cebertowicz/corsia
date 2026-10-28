@@ -16,7 +16,7 @@ import pytest
 from tests.test_google_email import (  # fixtures and existing provider fake
     GMAIL, THREADED, _draft, _mime, _row, approve, client_file, conductor, google, mail,
 )
-from tools import mail_guard_runtime
+from tools import google_email, mail_guard_runtime
 from tools.google_email import EmailDraftTool, EmailSendTool
 from tools.reviewed_drafts import working_root
 
@@ -83,9 +83,7 @@ async def test_new_mail_after_draft_stops_send_until_new_draft(mail, approve, cl
     saved = await _draft(mail, to=[], reply_to_message_id='m-100')
     now = datetime.now(timezone.utc)
     db = get_db()
-    db.execute('UPDATE action_drafts SET recorded_at=? WHERE id=?',
-               ((now - timedelta(seconds=10)).isoformat(), saved['draft_id']))
-    db.commit()
+    _backdate(saved, now - timedelta(seconds=10))
     provider_state(mail, [THREADED, _arrival(newer(), now - timedelta(seconds=5))])
     stopped = await send(mail, saved)
     assert 'Not sent' in stopped and 'New details from Pat' in stopped
@@ -109,7 +107,7 @@ async def test_font_and_attachment_in_sent_mime_and_missing_file_refused(mail, a
     assert 'missing' in bad.lower() and not mail.sends
     saved = await _draft(mail, to=['pat@mail.example'], attachments=['report.txt'])
     document = (mail.workspace / saved['path']).read_text()
-    assert 'report.txt' in document and '19 bytes' in document
+    assert 'Attachment: report.txt (0.019 KB)' in document
     result = await send(mail, saved)
     assert not result.startswith('Error'), result
     message = _mime(mail.sends[0])
@@ -127,6 +125,15 @@ def _arrival(message, when):
     return item
 
 
+def _backdate(saved, when):
+    target = json.loads(_row(saved['draft_id'])['target_json'])
+    target['guard_read_at'] = when.isoformat()
+    db = get_db()
+    db.execute('UPDATE action_drafts SET recorded_at=?, target_json=? WHERE id=?',
+               (when.isoformat(), json.dumps(target), saved['draft_id']))
+    db.commit()
+
+
 def _person_reply(thread, turn):
     db = get_db()
     _admit(db, turn, thread_id=thread)
@@ -138,8 +145,7 @@ async def test_arrival_after_approval_requires_new_draft_and_new_person_reply(ma
     # Make the recorded save earlier than the arrival, without sleeping.
     db = get_db()
     prior = datetime.now(timezone.utc) - timedelta(seconds=10)
-    db.execute('UPDATE action_drafts SET recorded_at=? WHERE id=?', (prior.isoformat(), saved['draft_id']))
-    db.commit()
+    _backdate(saved, prior)
     _person_reply(mail.thread, 'reply-before-arrival')
     arrived = _arrival(newer(), datetime.now(timezone.utc) - timedelta(seconds=2))
     provider_state(mail, [THREADED, arrived])
@@ -216,6 +222,9 @@ async def test_font_read_failure_still_saves_and_sends_with_default(mail, approv
         return inner(request)
     mail.fake.handler = handler
     saved = await _draft(mail, to=['pat@mail.example'])
+    note = "Your usual font couldn't be read; your mail's default font will be used if it still can't be read when sending."
+    assert note in (mail.workspace / saved['path']).read_text()
+    assert saved['font_note'] == note
     result = await send(mail, saved)
     assert not result.startswith('Error'), result
     assert len(mail.sends) == 1
@@ -238,6 +247,42 @@ async def test_draft_has_no_tool_names_or_provider_ids(mail, clean_screen):
     document = (mail.workspace / saved['path']).read_text()
     for internal in ('email_send', 'email_draft', 'email_read', 'seen_newer', 'm-100', 'm-101', 't-9'):
         assert internal not in document
+
+
+async def test_arrival_during_draft_save_stops_send(mail, approve, clean_screen, monkeypatch):
+    save = google_email.save_draft
+
+    async def save_after_arrival(**kwargs):
+        cutoff = datetime.fromisoformat(kwargs['target']['guard_read_at'])
+        arrived = _arrival(newer(), cutoff + timedelta(seconds=2))
+        provider_state(mail, [THREADED, arrived])
+        saved = await save(**kwargs)
+        db = get_db()
+        db.execute('UPDATE action_drafts SET recorded_at=? WHERE id=?',
+                   ((cutoff + timedelta(seconds=4)).isoformat(), saved['draft_id']))
+        db.commit()
+        return saved
+
+    monkeypatch.setattr(google_email, 'save_draft', save_after_arrival)
+    saved = await _draft(mail, to=[], reply_to_message_id='m-100')
+    result = await send(mail, saved)
+    assert 'Not sent' in result and 'New details from Pat' in result
+    assert not mail.sends
+
+
+async def test_older_draft_uses_saved_time_for_arrival_check(mail, approve, clean_screen):
+    saved = await _draft(mail, to=[], reply_to_message_id='m-100')
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=10)
+    target = json.loads(_row(saved['draft_id'])['target_json'])
+    target.pop('guard_read_at')
+    db = get_db()
+    db.execute('UPDATE action_drafts SET recorded_at=?, target_json=? WHERE id=?',
+               (cutoff.isoformat(), json.dumps(target), saved['draft_id']))
+    db.commit()
+    provider_state(mail, [THREADED, _arrival(newer(), cutoff + timedelta(seconds=5))])
+    result = await send(mail, saved)
+    assert 'Not sent' in result and 'New details from Pat' in result
+    assert not mail.sends
 
 
 async def test_same_second_arrival_stops_but_target_itself_does_not(mail, approve, clean_screen):

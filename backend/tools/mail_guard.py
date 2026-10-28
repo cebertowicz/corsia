@@ -62,8 +62,9 @@ def same_sender(left: str, right: str) -> bool:
 
 def evidence(message: Message) -> str:
     state = "unread" if message.unread else "read"
-    return (f"{message.sender} | {message.date.isoformat()} | {state}\n"
-            + (message.visible_evidence or "Message text withheld."))
+    date = message.date.strftime("%b %d, %Y, %I:%M %p %Z").replace(", 0", ", ")
+    return (f"{message.sender} wrote on {date.strip()}; this message is {state}.\n"
+            + (message.visible_evidence or "The text wasn't screened as safe to show; read it in your mail app."))
 
 
 def check_reply(

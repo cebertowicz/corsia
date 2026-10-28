@@ -22,8 +22,10 @@ async def test_newer_host_message_stops_then_new_draft_sends(make_host, monkeypa
     _with_internal_dates(host.built.imap, monkeypatch, dates)
     saved = await _draft(host, to=[], cc=[], subject="Lunch", reply_to_message_id=_id(host))
     db = get_db()
-    db.execute('UPDATE action_drafts SET recorded_at=? WHERE id=?',
-               ((now - timedelta(seconds=10)).isoformat(), saved['draft_id']))
+    target = json.loads(_row(saved['draft_id'])['target_json'])
+    target['guard_read_at'] = (now - timedelta(seconds=10)).isoformat()
+    db.execute('UPDATE action_drafts SET target_json=? WHERE id=?',
+               (json.dumps(target), saved['draft_id']))
     db.commit()
     host.built.imap.messages[6] = (ORIGINAL.replace(b"<orig@example.com>", b"<new@example.com>")
                                    .replace(b"09:00:00", b"10:00:00")

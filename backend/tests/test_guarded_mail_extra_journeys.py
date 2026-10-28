@@ -102,7 +102,7 @@ async def test_host_detected_font_plain_alternative_and_attachment_send(make_hos
     (working_root(host.thread) / 'report.txt').write_text('attached report')
     saved = await host_draft(host, attachments=['report.txt'])
     document = (host.workspace / saved['path']).read_text()
-    assert 'report.txt' in document and '15 bytes' in document
+    assert 'Attachment: report.txt (0.015 KB)' in document
     result = await _send(host, saved)
     assert not result.startswith('Error'), result
     assert len(host.built.smtp.sent) == 1

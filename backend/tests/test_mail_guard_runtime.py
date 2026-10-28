@@ -27,8 +27,9 @@ async def test_flagged_newer_message_is_withheld(monkeypatch):
                                                                       {"id": "account", "address": "me@example.test"},
                                                                       "old", "reply", [])
     target_evidence = mail_guard_runtime.evidence(screened_target)
-    assert "withheld" in target_evidence and "malicious instructions" not in target_evidence
+    assert "The text wasn't screened as safe to show; read it in your mail app." in target_evidence
+    assert "malicious instructions" not in target_evidence
     assert verdict.stale
-    assert "withheld" in verdict.stale[0]
+    assert "The text wasn't screened as safe to show; read it in your mail app." in verdict.stale[0]
     assert "malicious instructions" not in verdict.stale[0]
     assert "secret subject" not in verdict.stale[0]
