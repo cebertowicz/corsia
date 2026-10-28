@@ -4,8 +4,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from '../support/test';
 import { expect, type APIRequestContext, type Page } from '@playwright/test';
-import { chatComposer, createSession, loginByUrl, sidebarThread, TEST_TOKEN } from '../support/corsia';
-import { injectMessage } from '../support/mock';
+import { chatComposer, createSession, loginByUrl, sendButton, sidebarThread, TEST_TOKEN, waitForWsConnected } from '../support/corsia';
+import { injectMessage, seedMockResponses } from '../support/mock';
 import { DOC, DOC_IMAGE_NATURAL, overlay, putSheetAway, seedImageDocument } from '../support/docImageComments';
 import { headerSend, seedHeldComments } from '../support/heldComments';
 
@@ -308,6 +308,42 @@ for (const theme of ['light', 'dark'] as const) {
 			await holdDwell(page, false);
 		});
 	}
+}
+
+for (const width of [1440, 393]) {
+	test(`${TAG} light ${width}px: activity and reply notices stay clear`, async ({ page, request }, testInfo) => {
+		test.setTimeout(90_000);
+		test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires isolated synthetic state');
+		skipMismatchedProject(width, testInfo.project.name);
+		await page.setViewportSize({ width, height: width === 393 ? 852 : 900 });
+		await page.emulateMedia({ colorScheme: 'light' });
+		const threadId = await createSession(request, THREAD_TITLE);
+		await onlyThread(request, threadId);
+		const doc = await seedTextDocument(page, request, threadId, `activity-${width}`, 'launch-plan.md', [8, 10]);
+		const reviewerId = await createSession(request, 'Review colleague');
+		await stageWorkspace(page, threadId, doc.docPath, 'launch-plan.md', 'artifact');
+		await openThread(page, THREAD_TITLE);
+		await expectChip(page, '2 new replies');
+		// Activity is emitted by the settled tool call, not by the direct comment API.
+		const reviewer = await page.context().newPage();
+		await loginByUrl(reviewer);
+		if (width === 393) await reviewer.getByRole('button', { name: 'Toggle sidebar' }).click();
+		await sidebarThread(reviewer, 'Review colleague').click();
+		await waitForWsConnected(reviewer);
+		await seedMockResponses(request, [
+			{ tool_calls: [{ id: `activity-${width}`, name: 'doc_comment_create', arguments: JSON.stringify({ artifact_id: doc.artifactId, quote: SECTIONS[11].anchor, body: 'Please review this final workstream.' }) }], finish_reason: 'tool_calls', match_thread: reviewerId },
+			{ content: 'Review recorded.', finish_reason: 'stop', match_thread: reviewerId },
+		]);
+		await chatComposer(reviewer).fill('Review the final workstream.');
+		await sendButton(reviewer).click();
+		const activity = page.locator('[data-doc-activity-pill]');
+		await expect(activity).toBeVisible();
+		const activityBox = (await activity.boundingBox())!;
+		const replyBox = (await chipButton(page).boundingBox())!;
+		expect(replyBox.x < activityBox.x + activityBox.width && activityBox.x < replyBox.x + replyBox.width && replyBox.y < activityBox.y + activityBox.height && activityBox.y < replyBox.y + replyBox.height, 'activity stays clear of the reply target').toBe(false);
+		await shot(page, `01e-activity-with-chip-light-${width}`);
+		await reviewer.close();
+	});
 }
 
 for (const theme of ['light', 'dark'] as const) {
