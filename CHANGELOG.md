@@ -7,7 +7,7 @@ the later entry describes the current behavior.
 
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here._
 
-- A sign-in made in the shared browser stays signed in after the browser closes, including one made while another agent's browser was open.
+- You stay signed in to a site after the shared browser closes, even when you signed in while another agent was also using the shared browser.
 - Chat comments can be sent on their own while an agent is replying, and the New mark on reply chips lines up with its text.
 - In the shared browser, an agent's click on a button's own text or icon reaches the button.
 - After you sign in to Claude Code, setup now shows it's checking your Claude models instead of asking you to sign in again.

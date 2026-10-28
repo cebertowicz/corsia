@@ -291,6 +291,30 @@ async def test_a_copys_sign_in_waits_for_the_profiles_next_launch_once_its_holde
     await fake.owner.shutdown()
 
 
+async def test_a_launch_still_starts_when_its_applied_sign_ins_cannot_be_cleared(
+        synthetic_browser, chrome154, monkeypatch):
+    fake = synthetic_browser
+    cookies = {}
+    writes = _cdp_browsers(monkeypatch, cookies)
+    _seeding(fake, monkeypatch, [_HOLDER_SIGNIN])
+    await fake.owner.run("a", ["open", "about:blank"])
+    await fake.owner.run("b", ["open", "about:blank"])
+    profile = fake.owner._sessions["a"].record.profile
+    cookies[fake.owner._sessions["b"].chrome.endpoint] = [_HOLDER_SIGNIN, _COPY_SIGNIN]
+    await fake.owner.close_thread("a")
+    await fake.owner.close_thread("b")
+
+    def unwritable(path, cookies):
+        raise OSError("read-only")
+
+    monkeypatch.setattr(browser_session_launch, "_write_cookies", unwritable)
+    await fake.owner.run("c", ["open", "about:blank"])
+    assert fake.owner._sessions["c"].record.terminal_state == "running"
+    assert [cookie["name"] for _endpoint, written in writes for cookie in written] == ["auth"]
+    assert browser_session_launch.kept_signins_path(profile).is_file()
+    await fake.owner.shutdown()
+
+
 async def test_production_browser_route_uses_profile_only_for_resolved_owners(synthetic_browser, chrome154, monkeypatch, tmp_path):
     from host_access.processes import ProcessOwner
     from infra import database

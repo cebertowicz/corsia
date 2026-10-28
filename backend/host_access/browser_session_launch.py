@@ -312,8 +312,12 @@ async def apply_kept_signins(runtime: Any) -> None:
         logger.warning("kept browser sign-ins could not be written yet; they wait for the next launch", exc_info=True)
         return
     applied = {json.dumps(cookie, sort_keys=True) for cookie in cookies}
-    _write_cookies(kept, [cookie for cookie in _read_cookies(kept)
-                          if json.dumps(cookie, sort_keys=True) not in applied])
+    try:
+        _write_cookies(kept, [cookie for cookie in _read_cookies(kept)
+                              if json.dumps(cookie, sort_keys=True) not in applied])
+    except OSError:
+        # The cookies are in the browser; a file left behind is applied again, harmlessly, next launch.
+        logger.warning("applied browser sign-ins could not be cleared from the kept file", exc_info=True)
 
 
 async def select_chrome(owner: Any, agent_browser: str) -> tuple[str | None, str]:
