@@ -18,9 +18,8 @@ def append_tool_use_locked(
     db,
 ) -> str:
     """Append under the caller's transaction, preserving turn admission and CAS."""
-    # The other declaration shape: this appends a call to an existing Step by
-    # UPDATE, so it never reaches insert_message's admission check, and it
-    # creates exactly the same debt an INSERT would.
+    # Appending by UPDATE bypasses insert_message's admission check but
+    # creates the same tool debt as a new Step, so check admission here.
     if turn_id is not None:
         assert_turn_accepts_tool_calls(db, turn_id)
     row = db.execute(

@@ -1,4 +1,5 @@
 import { writable, derived } from 'svelte/store';
+import { activeThreadId } from './activeThreadId';
 import { turnStates, type ThreadTurnState, type TurnIdentity } from '../ws/turnState';
 import type { ThreadModelSwitchState } from './threadModelSwitch';
 export interface Thread extends ThreadModelSwitchState {
@@ -122,7 +123,7 @@ export function demoteAgentLocally(threadId: string): void {
 	threads.update((rows) => rows.map((r) => (r.id === threadId ? { ...r, ...off } : r)));
 }
 
-export const activeThreadId = writable<string | null>(null);
+export { activeThreadId, draftAccountId } from './activeThreadId';
 export const messages = writable<Message[]>([]);
 /** Whether `threadId` has a live turn, read from the per-thread turn states. */
 export function isThreadTurnActive(
