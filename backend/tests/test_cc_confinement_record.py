@@ -23,7 +23,6 @@ def test_cold_launch_uses_row_when_session_disagrees(child_db, monkeypatch):
     from subagents.cc_confinement import launch_confinement
     from tools.confined_reads import context_roots
     from subagents.codex_destination_render import codex_destination_scope
-    from subagents.cc_confinement import ConfinementRefused
 
     _seed_parent(child_db, sid="child")
     _record("child", "first", ClaudeInvocation(**_REVIEW, session_id="first"))
@@ -37,8 +36,10 @@ def test_cold_launch_uses_row_when_session_disagrees(child_db, monkeypatch):
     assert (result.mode, result.add_dirs) == ("review", ("/row",))
     row = dict(child_db.execute("SELECT * FROM threads WHERE id='child'").fetchone())
     assert tuple(map(str, context_roots(row))) == ("/row",)
-    with pytest.raises(ConfinementRefused, match="Couldn’t start this read-only agent"):
-        codex_destination_scope("child", target_catalog_id="codex/test", db=child_db)
+    _, cwd, _ = codex_destination_scope(
+        "child", target_catalog_id="codex/test", expected_selected_model=row["model"], db=child_db,
+    )
+    assert cwd.endswith("codex-confined-cwd/child")
 
 
 @pytest.mark.parametrize("mode,dirs", [("review", "[]"), ("write", '["/src"]'), ("review", "{bad")])
@@ -49,6 +50,10 @@ def test_damaged_row_refuses_cold_launch(child_db, mode, dirs):
     child_db.commit()
     with pytest.raises(ConfinementRefused, match="damaged"):
         launch_confinement("child", None, child_db)
+    from subagents.codex_destination_render import codex_destination_scope
+    model = child_db.execute("SELECT model FROM threads WHERE id='child'").fetchone()[0]
+    with pytest.raises(ConfinementRefused, match="damaged"):
+        codex_destination_scope("child", target_catalog_id=model, db=child_db)
 
 
 def test_live_process_keeps_launch_confinement(child_db):
