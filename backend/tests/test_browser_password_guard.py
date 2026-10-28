@@ -161,7 +161,7 @@ async def test_password_probe_reads_only_search_matches_and_keeps_only_password_
 
     class FakeCdp:
         def __init__(self, _endpoint):
-            pass
+            self.parents: dict[int, int] = {}
 
         async def __aenter__(self):
             return self
