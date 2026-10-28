@@ -8,7 +8,7 @@ from pathlib import PurePosixPath
 
 ENCODED_BOUND = 256
 ENCODED = re.compile(r"[A-Za-z0-9+/=_-]+")
-HIDDEN = re.compile(r"[\u200b-\u200f\u202a-\u202e\u2060\u2066-\u2069\ufeff]")
+HIDDEN = re.compile(r"[\u061c\u200b-\u200f\u202a-\u202e\u2060\u2066-\u2069\ufeff]")
 LOCKFILES = frozenset({"package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "pnpm-lock.yaml",
                        "Cargo.lock", "Pipfile.lock", "poetry.lock", "uv.lock", "Gemfile.lock",
                        "composer.lock", "go.sum"})
@@ -24,15 +24,22 @@ def _path_rules(path: str, ci_paths: set[str]) -> set[str]:
     if (path in ci_paths or name in LOCKFILES or name in BUILD_FILES
             or (name.startswith("requirements") and name.endswith(".txt"))):
         hits.add("floor.ci_file")
-    if (parts and parts[0] in {"skills", "context"}) or name in {"AGENTS.md", "CLAUDE.md"} or path.startswith("backend/prompts/"):
+    if (name in {"SKILL.md", "AGENTS.md", "CLAUDE.md"}
+            or (name.endswith(".md") and any(part in {"skills", "context"} for part in parts[:-1]))
+            or path.startswith("backend/prompts/")):
         hits.add("floor.agent_instructions")
     return hits
 
 
 def _encoded_hit(lines: list[str]) -> bool:
     run = 0
+    in_file_header = False
     for line in lines:
-        if not line.startswith("+") or line.startswith("+++"):
+        if line.startswith("diff --git "):
+            in_file_header = True
+        elif line.startswith("@@"):
+            in_file_header = False
+        if not line.startswith("+") or (in_file_header and line.startswith("+++ ")):
             run = 0
             continue
         text = line[1:].strip()

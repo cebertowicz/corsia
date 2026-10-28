@@ -1,4 +1,4 @@
-"""A source repository added after startup installs the screen and detach removes it."""
+"""Explicit screen reconciliation follows repository changes."""
 import asyncio
 import json
 import subprocess
@@ -14,7 +14,7 @@ from infra.measure_registry import REGISTRY
 from tests.event_routing_helpers import mk_session
 
 
-def test_real_repository_api_reconciles_without_restart(isolated_db, tmp_path, monkeypatch):
+def test_real_repository_api_changes_reconcile_explicitly(isolated_db, tmp_path, monkeypatch):
     workspace = tmp_path / "workspace"
     project = workspace / "projects" / "screen"
     project.mkdir(parents=True)
@@ -44,6 +44,10 @@ def test_real_repository_api_reconciles_without_restart(isolated_db, tmp_path, m
     added = asyncio.run(project_repos.add_repo("token", "api-project", project_repos.RepoAdd(
         mode="link", path=str(repo), pinned_branch=None, protect_base_checkout=False)))
     assert added["repo"]["registered"]
+    assert not db.execute("SELECT id FROM event_rules WHERE scope=? AND origin=?",
+                          ("project:api-project", install.origin())).fetchall()
+    assert db.execute("SELECT id FROM automation_schedules WHERE id=?", (key + "_script",)).fetchone() is None
+    install.sync(db, "api-project")
     rows = db.execute("SELECT action, \"match\" FROM event_rules WHERE scope=? AND origin=?",
                       ("project:api-project", install.origin())).fetchall()
     assert len(rows) == 3
@@ -51,6 +55,7 @@ def test_real_repository_api_reconciles_without_restart(isolated_db, tmp_path, m
                for row in rows)
     assert db.execute("SELECT id FROM automation_schedules WHERE id=?", (key + "_script",)).fetchone()
     asyncio.run(project_repos.detach_repo("token", "api-project", "source-repo"))
+    install.sync(db, "api-project")
     assert not db.execute("SELECT id FROM event_rules WHERE scope=? AND origin=?",
                           ("project:api-project", install.origin())).fetchall()
     assert db.execute("SELECT id FROM automation_schedules WHERE id=?", (key + "_script",)).fetchone() is None

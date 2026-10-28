@@ -29,6 +29,41 @@ def test_workflow_literal_tokens_match_changed_paths():
     assert workflow_paths(patch, ['run: "$SCRIPT"\n']) == set()
 
 
+@pytest.mark.parametrize("added", [
+    "+++" + "A" * 1000,
+    "\n".join(["+" + "A" * 76, "+++" + "A" * 74, "+" + "A" * 76, "+" + "A" * 76]),
+])
+def test_encoded_blob_with_added_plus_prefix(added):
+    assert "floor.encoded_blob" in floor_hits(diff("blob.txt", added))
+
+
+@pytest.mark.parametrize("path", [
+    "docs/coordination-models/corsia-default/context/guide.md",
+    "deep/github-pr-screen/SKILL.md",
+    "deep/skills/review/guide.md",
+])
+def test_nested_agent_instruction_paths(path):
+    assert "floor.agent_instructions" in floor_hits(diff(path))
+
+
+@pytest.mark.parametrize("path", ["src/context/Auth.tsx", "skills/review/config.json"])
+def test_non_markdown_context_and_skills_are_not_agent_instructions(path):
+    assert "floor.agent_instructions" not in floor_hits(diff(path))
+
+
+def test_file_header_is_not_encoded_content_even_after_an_earlier_hunk():
+    patch = diff("first.txt") + diff("A" * 300)
+    assert "floor.encoded_blob" not in floor_hits(patch)
+
+
+def test_header_like_added_line_is_encoded_content_inside_hunk():
+    assert "floor.encoded_blob" in floor_hits(diff("blob.txt", "+++ " + "A" * 256))
+
+
+def test_arabic_letter_mark_is_hidden():
+    assert "floor.hidden_chars" in floor_hits(diff("file.txt", "+a\u061cb"))
+
+
 def test_wrapped_encoded_blob_and_short_integrity():
     wrapped = "\n".join("+" + "A" * size for size in (76, 76, 76, 72))
     assert "floor.encoded_blob" in floor_hits(diff("blob.txt", wrapped))
