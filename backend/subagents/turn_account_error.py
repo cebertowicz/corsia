@@ -27,6 +27,15 @@ def turn_account(turn_id: str | None, provider: str, *, db=None) -> dict | None:
             connection.close()
 
 
+async def claude_exit_account(turn_id: str, detail: str, *, db=None) -> dict | None:
+    from connections.auth_failure import auth_failure_kind
+    from infra.db_async import run_in_db_unless_owned
+
+    if not auth_failure_kind("claude-code", detail):
+        return None
+    return await run_in_db_unless_owned(db, turn_account, turn_id, "claude-code", db=db)
+
+
 def claude_login_message(account: dict | None) -> str:
     if account and account["custom"]:
         return f"{account['name']} is signed out of Claude Code. Sign it in again under Settings › Providers."

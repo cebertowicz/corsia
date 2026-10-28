@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { get } from 'svelte/store';
-import { addVendorAccount, checkVendorSignin, fetchRemovedVendorAccounts, loadVendorAccounts, recordVendorAccountOverage, removeVendorAccount, renameVendorAccount, setVendorAccountBilling, signOutVendorAccount, startVendorSignin, type VendorAccount, vendorAccounts } from './vendorAccounts';
+import { addVendorAccount, checkVendorSignin, fetchRemovedVendorAccounts, loadVendorAccounts, recordVendorAccountOverage, removeVendorAccount, renameVendorAccount, setVendorAccountBilling, signOutVendorAccount, type VendorAccount, vendorAccounts } from './vendorAccounts';
 
 describe('request ordering', () => {
 	const response = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
@@ -17,17 +17,6 @@ describe('request ordering', () => {
 	afterEach(() => { vendorAccounts.set([]); vi.unstubAllGlobals(); });
 
 	for (const provider of ['codex', 'claude-code']) {
-		it(`reloads a stale signed-out row when ${provider} is already signed in`, async () => {
-			vendorAccounts.set([{ ...account(provider), state: 'signed_out' }]);
-			const fetch = vi.fn()
-				.mockResolvedValueOnce(response({ account_id: 'work', status: 'already_signed_in', route: null, cause: null }))
-				.mockResolvedValueOnce(list([account(provider)]));
-			vi.stubGlobal('fetch', fetch);
-			const result = await startVendorSignin('work');
-			expect(result).toMatchObject({ ok: true, signin: { status: 'already_signed_in' } });
-			expect(get(vendorAccounts)[0].state).toBe('signed_in');
-			expect(fetch).toHaveBeenCalledTimes(2);
-		});
 		it(`accepts ordinary current inventory for ${provider}`, async () => {
 			const original = account(provider), fresh = { ...original, name: 'Current', revision: 2 };
 			vendorAccounts.set([original]);

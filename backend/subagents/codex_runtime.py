@@ -30,7 +30,6 @@ from subagents.codex_runtime_errors import (
     CodexPreparedContextStale,
     surface_exit_error,
 )
-from subagents.codex_runtime_support import default_broadcast as _default_broadcast, require_owned_accept_db as _require_owned_accept_db
 from subagents.codex_runtime_events import record_terminal_marker
 from subagents.codex_shutdown_error import record_backend_shutdown_marker as _record_backend_shutdown_marker
 from subagents.codex_retirement import retire_if_current
@@ -191,6 +190,12 @@ async def retarget_if_current(
         return True
 
 
+def _default_broadcast(thread_id: str, message: dict) -> None:
+    from infra import state
+
+    state.broadcast_to_thread(thread_id, message)
+
+
 def _surface_exit_error(
     thread_id: str,
     code: int | None,
@@ -214,6 +219,11 @@ def _surface_exit_error(
         insert_message_fn=insert_message,
         logger=log,
     )
+
+
+def _require_owned_accept_db(db) -> None:
+    if db is not None:
+        raise RuntimeError("Codex async acceptance requires an owned DB connection")
 
 
 async def _start_live_turn(
@@ -736,15 +746,11 @@ async def _finish_failed_app_server_spawn(
     _discard_delivery_event_barrier(live)
     terminal = None
     if terminalize:
-        from subagents.codex_runtime_errors import cache_error_marker
-
         detail = _UNVERIFIED_INPUT_DELIVERY_DETAIL if live.input_delivery_unproven else str(exc)
-        marker = cache_error_marker(exc, thread_id, live, bcast, db, insert_message, log)
         try:
             terminal = await _end_owned_turn(
                 thread_id, live, live.corsia_turn, outcome,
                 error=detail, bcast=bcast, source="codex-app-server:input-rejected",
-                marker=marker,
                 defer_drive=True,
             )
         except CommittedTerminalFailure:

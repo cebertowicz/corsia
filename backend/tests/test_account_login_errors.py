@@ -1,7 +1,6 @@
 """Lost-login outcomes follow the account captured by the failed Turn."""
 import asyncio
 import logging
-from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -54,36 +53,7 @@ async def test_default_failure_keeps_provider_recheck(claude, monkeypatch):
     check.assert_awaited_once_with('Not logged in · Please run /login')
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize('status,refresh,expected', [
-    (True, True, 'already_signed_in'),
-    (True, False, 'model_refresh_failed'),
-    (None, None, 'unavailable'),
-])
-async def test_signin_rechecks_before_touching_login(accounts, monkeypatch, status, refresh, expected):
-    from connections import account_controls, harness_models
-
-    _, _, row, _ = accounts
-    monkeypatch.setattr(account_controls, '_binary', AsyncMock(return_value='/synthetic'))
-    monkeypatch.setattr(account_controls, '_vendor_status', AsyncMock(return_value=(status, {}, 'unreadable' if status is None else None)))
-    monkeypatch.setattr(account_controls, 'refresh_default_identity', AsyncMock())
-    monkeypatch.setattr(harness_models, 'refresh_provider', AsyncMock(return_value=SimpleNamespace(status='ready' if refresh else 'failed', cause='failed')))
-    spawn = AsyncMock()
-    run = AsyncMock()
-    monkeypatch.setattr(account_controls, '_spawn', spawn)
-    monkeypatch.setattr(account_controls, '_run', run)
-    result = await account_controls.start_signin(row['id'])
-    assert result['status'] == expected
-    if refresh is False:
-        assert result['ref'] and result['cause'] == 'account_refresh_failed'
-    if status is None:
-        assert result['cause'] == 'unreadable'
-    spawn.assert_not_awaited()
-    run.assert_not_awaited()
-
-
-def test_error_messages_use_turn_account_and_reference(claude, accounts, caplog):
-    from subagents.codex_runtime_errors import CodexModelCacheChanged
+def test_error_messages_use_turn_account(claude):
     from subagents.turn_account_error import claude_login_message, turn_account
 
     db = claude.db
@@ -92,8 +62,3 @@ def test_error_messages_use_turn_account_and_reference(claude, accounts, caplog)
     account = turn_account('claude-turn', 'claude-code', db=db)
     assert claude_login_message(account) == 'Other is signed out of Claude Code. Sign it in again under Settings › Providers.'
     assert claude_login_message({'custom': False}) == 'Claude Code is signed out on this computer. Sign in again under Settings › Providers.'
-    codex = accounts[2]
-    db.execute("INSERT INTO active_turns(id,thread_id,execution_epoch,model,status,started_at,boot_epoch,vendor_account_id) "
-               "VALUES ('codex-turn','destination',0,'codex/test','running','t','test',?)", (codex['id'],))
-    db.commit()
-    assert str(CodexModelCacheChanged()) == 'account_model_cache_changed'

@@ -15,14 +15,10 @@ function readableCause(cause: string | null, cli: string | null): string {
 /** The one line an account row shows for a sign-in attempt; `nameOf` names another account by id, `cli` is the tool the account signs in to. */
 export function signinMessage(result: SigninResult, nameOf: (id: string | null | undefined) => string | null, signin: Record<string, SigninResult>, cli: string | null = null): string {
 	if (result.status === 'waiting') return 'Waiting for sign-in in your browser';
-	if (result.status === 'completed' || result.status === 'already_signed_in') return 'Signed in';
+	if (result.status === 'completed') return 'Signed in';
 	if (result.status === 'cancelled') return 'Sign-in cancelled';
 	if (result.status === 'superseded') return 'Account changed before sign-in finished';
 	if (result.status === 'unavailable') return 'Sign-in is unavailable';
-	if (result.status === 'model_refresh_failed') {
-		const name = nameOf(result.account_id) ?? 'This account';
-		return `${name} is still signed in, but its model list couldn’t be reloaded. Reference: ${result.ref}`;
-	}
 	if (result.cause === 'same_account') {
 		const name = nameOf(result.duplicate_of);
 		return name ? `Already signed in as ${name}` : 'This account is already signed in';

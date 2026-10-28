@@ -77,7 +77,7 @@ def surface_exit_error(
     *,
     insert_message_fn: Callable,
     logger,
-    emit_terminal: bool = True,
+    account: dict | None = None,
 ) -> str | None:
     if code in (0, None) and not (stderr or "").strip():
         return None
@@ -86,9 +86,8 @@ def surface_exit_error(
         f"Claude Code exited with code {code}.",
     )
     from connections.auth_failure import auth_failure_kind
-    from subagents.turn_account_error import claude_login_message, turn_account
+    from subagents.turn_account_error import claude_login_message
 
-    account = turn_account(getattr(turn_identity, "turn_id", None), "claude-code", db=db) if auth_failure_kind("claude-code", stderr) else None
     reconcile_expired_login(stderr, logger, account)
     text = (claude_login_message(account) if auth_failure_kind("claude-code", stderr)
             else f"⚠️ Claude Code stopped: {last.strip()[:300]}")
@@ -108,7 +107,7 @@ def surface_exit_error(
             msg_id=str(uuid.uuid4()), db=db,
         )
         broadcast_stored_message(thread_id, mid, db=db, broadcast=bcast)
-        if emit_terminal and turn_identity is not None:
+        if turn_identity is not None:
             bcast(thread_id, {
                 "type": "turn_complete",
                 "thread_id": thread_id,

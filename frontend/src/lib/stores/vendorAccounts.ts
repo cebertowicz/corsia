@@ -7,7 +7,7 @@ const BASE = '';
 const auth = () => get(token) || '';
 
 export type VendorAccountState = 'legacy' | 'signed_in' | 'signed_out' | 'removed';
-export type SigninStatus = 'waiting' | 'completed' | 'already_signed_in' | 'model_refresh_failed' | 'failed' | 'refused' | 'cancelled' | 'superseded' | 'unavailable';
+export type SigninStatus = 'waiting' | 'completed' | 'failed' | 'refused' | 'cancelled' | 'superseded' | 'unavailable';
 
 export interface VendorAccountLabel {
 	name: string;
@@ -58,7 +58,6 @@ export interface SigninResult {
 	route: 'browser' | null;
 	status: SigninStatus;
 	cause: string | null;
-	ref?: string | null;
 	duplicate_of?: string | null;
 	held_by?: string | null;
 }
@@ -203,7 +202,7 @@ export async function startVendorSignin(accountId: string): Promise<{ ok: boolea
 }
 
 async function reconcileSignin(signin: SigninResult): Promise<{ ok: boolean; signin: SigninResult; error?: string }> {
-	if (signin.status !== 'completed' && signin.status !== 'already_signed_in') return { ok: true, signin };
+	if (signin.status !== 'completed') return { ok: true, signin };
 	confirmAccounts((accounts) => accounts.map((account) => account.id === signin.account_id
 		? { ...account, state: 'signed_in', details_stale: true } : account));
 	const refreshed = await loadVendorAccounts();

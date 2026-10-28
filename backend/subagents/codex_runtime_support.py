@@ -18,17 +18,6 @@ from subagents.codex_runtime_state import (
 log = logging.getLogger(__name__)
 
 
-def default_broadcast(thread_id: str, message: dict) -> None:
-    from infra import state
-
-    state.broadcast_to_thread(thread_id, message)
-
-
-def require_owned_accept_db(db) -> None:
-    if db is not None:
-        raise RuntimeError("Codex async acceptance requires an owned DB connection")
-
-
 def request_stop_checkpoint_wait(live) -> None:
     """Release only the hard waiter carried by this exact Turn handle."""
     if live is None:

@@ -15,6 +15,7 @@ from core.turn_core import (
 from infra.queries import insert_message
 from subagents.cc_event_context import commit_cc_terminal
 from subagents.cc_runtime_errors import surface_exit_error
+from subagents.turn_account_error import claude_exit_account
 from subagents.cc_event_context_usage import (
     consume_and_attach_terminal_context_usage,
 )
@@ -106,11 +107,11 @@ def _surface_process_exit(
     detail: str,
     broadcast: Broadcast,
     db,
-    identity: TurnIdentity | None,
+    account: dict | None,
 ) -> str | None:
     return surface_exit_error(
-        child_thread_id, code, detail, broadcast, db, identity,
-        insert_message_fn=insert_message, logger=log, emit_terminal=False,
+        child_thread_id, code, detail, broadcast, db, None,
+        insert_message_fn=insert_message, logger=log, account=account,
     )
 
 
@@ -167,8 +168,9 @@ async def _publish_process_exit(
     broadcast: Broadcast,
     db,
 ) -> None:
+    account = await claude_exit_account(identity.turn_id, detail, db=db) if not live.tool_boundary_marker_id else None
     marker_id = live.tool_boundary_marker_id or _surface_process_exit(
-        child_thread_id, code, detail, broadcast, db, identity
+        child_thread_id, code, detail, broadcast, db, account
     )
     payload = {
         "type": "turn_complete", "thread_id": child_thread_id,

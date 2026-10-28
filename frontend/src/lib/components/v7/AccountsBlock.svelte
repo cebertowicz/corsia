@@ -339,7 +339,7 @@
 				{#if account.state !== 'removed' && account.details_stale && editingId !== account.id}
 					<div class="signin-state"><span>Account details need to be reloaded.</span><Button size="sm" disabled={!!pending[account.id]} onclick={() => reloadAccount(account.id)}>Reload</Button></div>
 				{/if}
-				{#if account.state !== 'removed' && signIn && !(['completed', 'already_signed_in'].includes(signIn.status) && account.state === 'signed_in')}
+				{#if account.state !== 'removed' && signIn && !(signIn.status === 'completed' && account.state === 'signed_in')}
 					<div class="signin-state" role="status">
 						<span>{signinMessage(signIn, accountName, signin, VENDORS[account.provider]?.cli ?? null)}</span>
 						{#if signIn.status === 'waiting'}
