@@ -7,6 +7,7 @@ the later entry describes the current behavior.
 
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here._
 
+- Your comment draft stays open if a live document reconnects with a new session, and closing comments no longer leaves text selected for accidental replacement.
 - You stay signed in to a site after the shared browser closes, even when you signed in while another agent was also using the shared browser.
 - Chat comments can be sent on their own while an agent is replying, and the New mark on reply chips lines up with its text.
 - In the shared browser, an agent's click on a button's own text or icon reaches the button.

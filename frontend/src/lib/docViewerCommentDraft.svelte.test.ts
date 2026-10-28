@@ -54,8 +54,9 @@ function setup(inWidget: boolean, label?: string) {
 			// The viewer closes the sheet and drops the draft once the comment is posted.
 			open = false; commentDraft.set(null); flushSync();
 		},
-		set(next: { scope?: string; drawn?: boolean; row?: Row }) {
+		set(next: { scope?: string; drawn?: boolean; row?: Row; replaceSession?: boolean }) {
 			if (next.scope !== undefined) { scope = next.scope; live = session(); }
+			if (next.replaceSession) live = session();
 			if (next.drawn !== undefined) drawn = next.drawn;
 			if ('row' in next) row = next.row;
 			flushSync();
@@ -121,6 +122,16 @@ describe('a posted widget comment keeps its pending mark', () => {
 		await current.post();
 		expect(current.controller.pendingComment).toBeNull();
 	});
+});
+
+it('keeps the draft and reports the selection lost when the live session is replaced', () => {
+	current = setup(false);
+	current.controller.select({ from: 0, to: 5, text: 'alpha', top: 0, left: 0 });
+	current.controller.start(); flushSync();
+	commentDraft.update(draft => draft && { ...draft, body: 'Unfinished' }); flushSync();
+	current.set({ replaceSession: true });
+	expect(current.controller.draft?.body).toBe('Unfinished');
+	expect(current.controller.reason).toContain('text you selected changed');
 });
 
 describe('the pending mark before and while the composer is open', () => {
