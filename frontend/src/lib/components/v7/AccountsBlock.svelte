@@ -11,12 +11,12 @@
 	import AccountBillingRow from './AccountBillingRow.svelte';
 	import ProviderAccountPolicyControls from './ProviderAccountPolicyControls.svelte';
 	import PolicySaveStatus from './PolicySaveStatus.svelte';
-	import { signinMessage } from './accountSigninMessage';
+	import { isStillSignedIn, signinMessage } from './accountSigninMessage';
 	import { VENDORS } from '$lib/conductorSources';
 	import { on } from '$lib/ws/events';
 	import type { HostProvider } from '$lib/stores/providersV7';
 	import { createProviderPolicyState } from '$lib/stores/providerPolicyState.svelte';
-	import { openProjectSettings } from '$lib/stores/settingsNavigation';
+	import { clearSettingsAnchor, openProjectSettings, settingsNavigation } from '$lib/stores/settingsNavigation';
 	import {
 		addVendorAccount,
 		cancelVendorSignin,
@@ -52,6 +52,7 @@
 		const disabled = account.details_stale || !!pending[account.id];
 		return [
 			{ id: 'rename', label: 'Rename', disabled },
+			...(account.state === 'legacy' || account.is_default ? [] : [{ id: 'sign-in-again', label: 'Sign in again', disabled }]),
 			...(account.state === 'legacy' ? [] : [
 				{ id: 'sign-out', label: 'Sign out', disabled },
 				{ id: 'remove', label: 'Remove', danger: true, disabled },
@@ -182,6 +183,8 @@
 		}
 		rememberSignin(result.signin);
 		if (result.error) actionError = result.error;
+		// A login that was lost reads signed in until the vendor says otherwise: the row follows the answer.
+		if (result.signin.status === 'waiting' && accounts.find((account) => account.id === accountId)?.state === 'signed_in') void refreshAccounts();
 	}
 
 	async function checkSignin(accountId: string) {
@@ -262,10 +265,45 @@
 		if (showHistorical) await openHistoricalAccounts();
 	}
 
+	// A settings link to one account (`#account-<id>`) lands on what the person does next: a signed-out row's
+	// Sign in, else a signed-in row's menu with Sign in again focused. The marker clears when focus leaves it.
+	let linkedRowId = $state<string | null>(null);
+	let linkedMenuId = $state<string | null>(null);
+	function clearLinkedFocus(): void { linkedRowId = null; }
+	async function landOnAccount(account: VendorAccount) {
+		await tick();
+		const row = document.getElementById(`vendor-account-${account.id}`);
+		if (!row) return;
+		row.scrollIntoView({ block: 'center' });
+		if (account.state === 'signed_out') {
+			const button = row.querySelector<HTMLButtonElement>('[data-link-target] button');
+			if (button && !button.disabled) {
+				button.focus();
+				if (document.activeElement === button) linkedRowId = account.id;
+				return;
+			}
+		} else if (account.state === 'signed_in' && !account.is_default) {
+			linkedMenuId = account.id;
+			accountMenu.openFor(account, row);
+			return;
+		}
+		row.focus();
+	}
+	$effect(() => {
+		const anchor = $settingsNavigation.anchor;
+		const id = anchor?.startsWith('account-') ? anchor.slice('account-'.length) : null;
+		const account = id ? rows.find((entry) => entry.account.id === id)?.account : undefined;
+		if (!anchor || !account) return;
+		clearSettingsAnchor(anchor);
+		clearLinkedFocus();
+		requestAnimationFrame(() => void landOnAccount(account));
+	});
+
 	function selectAccountMenu(id: string) {
 		const account = accountMenu.open?.item;
 		if (!account) return;
 		if (id === 'rename') beginRename(account);
+		else if (id === 'sign-in-again') { accountMenu.close(); void startSignin(account.id); }
 		else if (id === 'sign-out') void signOut(account);
 		else if (id === 'remove') { accountMenu.close(); removeTarget = account; }
 	}
@@ -330,7 +368,7 @@
 						<!-- Row actions open with right-click, long-press, or the context-menu key. -->
 					</div>
 					{#if account.state === 'signed_out' && (!signIn || signIn.status === 'refused')}
-						<Button size="sm" variant="ghost" loading={!!pending[account.id]} onclick={() => startSignin(account.id)}>Sign in</Button>
+						<span class="link-target" class:deep-link-focus={linkedRowId === account.id} data-link-target data-chat-link-focus={linkedRowId === account.id || undefined} onfocusout={clearLinkedFocus}><Button size="sm" variant="ghost" loading={!!pending[account.id]} onclick={() => { clearLinkedFocus(); void startSignin(account.id); }}>Sign in</Button></span>
 					{/if}
 					{#if account.state !== 'removed'}<OverageSwitch {account} inline />{/if}
 					<AccountBillingRow {account} />
@@ -339,7 +377,7 @@
 				{#if account.state !== 'removed' && account.details_stale && editingId !== account.id}
 					<div class="signin-state"><span>Account details need to be reloaded.</span><Button size="sm" disabled={!!pending[account.id]} onclick={() => reloadAccount(account.id)}>Reload</Button></div>
 				{/if}
-				{#if account.state !== 'removed' && signIn && !(signIn.status === 'completed' && account.state === 'signed_in')}
+				{#if account.state !== 'removed' && signIn && !(signIn.status === 'completed' && account.state === 'signed_in' && !isStillSignedIn(signIn))}
 					<div class="signin-state" role="status">
 						<span>{signinMessage(signIn, accountName, signin, VENDORS[account.provider]?.cli ?? null)}</span>
 						{#if signIn.status === 'waiting'}
@@ -348,7 +386,7 @@
 								<Button size="sm" variant="secondary" disabled={!!pending[account.id]} onclick={() => cancelSignin(account.id)}>Cancel</Button>
 							</div>
 						{:else if signIn.status === 'failed' || signIn.status === 'cancelled' || signIn.status === 'unavailable' || signIn.status === 'superseded'}
-							<Button size="sm" variant="secondary" disabled={!!pending[account.id]} onclick={() => startSignin(account.id)}>Sign in again</Button>
+							<span class="link-target" class:deep-link-focus={linkedRowId === account.id} data-link-target data-chat-link-focus={linkedRowId === account.id || undefined} onfocusout={clearLinkedFocus}><Button size="sm" variant="secondary" disabled={!!pending[account.id]} onclick={() => { clearLinkedFocus(); void startSignin(account.id); }}>Sign in again</Button></span>
 						{/if}
 					</div>
 				{/if}
@@ -384,7 +422,7 @@
 </div>
 
 {#if accountMenu.open}
-	<Menu ariaLabel={`Actions for ${displayName(accountMenu.open.item)}`} items={menuItems} x={accountMenu.open.x} y={accountMenu.open.y} onSelect={selectAccountMenu} onClose={accountMenu.close} />
+	<Menu ariaLabel={`Actions for ${displayName(accountMenu.open.item)}`} items={menuItems} x={accountMenu.open.x} y={accountMenu.open.y} focusId={linkedMenuId === accountMenu.open.item.id ? 'sign-in-again' : null} onSelect={selectAccountMenu} onClose={() => { linkedMenuId = null; accountMenu.close(); }} />
 {/if}
 
 <ConfirmDialog

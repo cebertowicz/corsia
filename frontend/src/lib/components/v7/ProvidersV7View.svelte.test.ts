@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import ProvidersV7View from './ProvidersV7View.svelte';
 import { groupByHost, hostGroupSnapshot, type HostGroup, type HostProvider } from '$lib/stores/providersV7';
-import { providerCardRequest } from '$lib/stores/settingsNavigation';
+import { providerCardRequest, requestSettingsSection, resetSettingsNavigation } from '$lib/stores/settingsNavigation';
 import { vendorAccounts } from '$lib/stores/vendorAccounts';
 import { token } from '$lib/stores/auth';
 import { toasts } from '$lib/stores/toast';
@@ -61,6 +61,31 @@ describe('ProvidersV7View card request', () => {
 		expect(get(providerCardRequest)).toBeNull();
 		const methods = fetchMock.mock.calls.map((call) => (call as unknown[])[1] as RequestInit | undefined);
 		expect(methods.every((init) => (init?.method ?? 'GET') === 'GET')).toBe(true);
+	});
+
+	it('opens the settings of the provider that holds the account a link names, and the account row takes the landing', async () => {
+		const row = (id: string, provider: string, name: string, state: 'signed_in' | 'signed_out') => ({
+			id, provider, name, is_default: false, state, revision: 1, identity: {}, label: { name, email: null, text: name, custom: name },
+		});
+		const accounts = [row('claude-1', 'claude-code', 'FOMRRT1', 'signed_out'), row('codex-1', 'codex', 'FOMRRT1', 'signed_in')];
+		vi.stubGlobal('fetch', vi.fn(async (url: string) => ({
+			ok: true, status: 200, json: async () => String(url).includes('/api/vendor-accounts') ? { accounts } : { providers: [], servers: [], models: [], sources: [] },
+		})));
+		Element.prototype.scrollIntoView = vi.fn();
+		hostGroupSnapshot.set([{
+			key: 'cloud', name: 'Cloud', subname: '', netKind: 'cloud',
+			providers: [harness('claude-code', 'Claude Code'), harness('codex', 'Codex')],
+		} as HostGroup]);
+		vendorAccounts.set(accounts);
+		requestSettingsSection('providers', 'account-claude-1');
+
+		component = mount(ProvidersV7View, { target: document.body });
+		flushSync();
+		await vi.waitFor(() => expect(document.querySelector('#vendor-account-claude-1')).not.toBeNull());
+		expect(document.querySelector('#vendor-account-codex-1')).toBeNull();
+		await vi.waitFor(() => expect(document.activeElement?.closest('#vendor-account-claude-1')).not.toBeNull());
+		expect(document.activeElement?.textContent?.trim()).toBe('Sign in');
+		resetSettingsNavigation();
 	});
 
 	it('opens the requested server card when the request names a server id', async () => {

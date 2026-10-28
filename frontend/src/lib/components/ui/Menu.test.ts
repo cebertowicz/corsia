@@ -9,10 +9,10 @@ const ITEMS: MenuItem[] = [
 	{ id: 'rename', label: 'Rename', disabled: true },
 	{ id: 'remove', label: 'Remove', danger: true },
 ];
-function render(props: { items?: MenuItem[]; x?: number; y?: number; busy?: boolean; note?: string } = {}) {
+function render(props: { items?: MenuItem[]; x?: number; y?: number; busy?: boolean; note?: string; focusId?: string } = {}) {
 	host = document.createElement('div'); document.body.appendChild(host);
 	const onSelect = vi.fn(); const onClose = vi.fn();
-	component = mount(Menu, { target: host, props: { ariaLabel: 'Actions', items: props.items ?? ITEMS, x: props.x ?? 20, y: props.y ?? 20, busy: props.busy, note: props.note, onSelect, onClose } });
+	component = mount(Menu, { target: host, props: { ariaLabel: 'Actions', items: props.items ?? ITEMS, x: props.x ?? 20, y: props.y ?? 20, busy: props.busy, note: props.note, focusId: props.focusId, onSelect, onClose } });
 	flushSync(); return { onSelect, onClose };
 }
 const menu = () => document.body.querySelector<HTMLElement>('[role="menu"]')!;
@@ -24,6 +24,14 @@ describe('Menu', () => {
 	it('portals to the body and focuses the first item', () => {
 		render();
 		expect(menu().parentElement).toBe(document.body);
+		expect(document.activeElement).toBe(entries()[0]);
+	});
+
+	it('focuses the item named by focusId, and the first item when it names none', () => {
+		render({ focusId: 'remove' });
+		expect(document.activeElement).toBe(entries()[2]);
+		unmount(component!); component = null; host.remove();
+		render({ focusId: 'missing' });
 		expect(document.activeElement).toBe(entries()[0]);
 	});
 
