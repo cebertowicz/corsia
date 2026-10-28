@@ -194,7 +194,7 @@ def clear_stops(db, node_id: str, common: dict) -> None:
             node_id, hold["id"], expected_kind=hold["kind"],
             expected_revision=service._node_row(db, node_id)["revision"], **common,
         )
-    for prerequisite in node_waits.unmet_prerequisites(db, [node_id]).get(node_id, []):
+    for prerequisite in node_waits.unmet_prerequisites(db, [node_id], inherit=False).get(node_id, []):
         dependencies.remove_dependency(node_id, prerequisite["id"], **common)
     archival.settle_watches(db, node_id)
 
