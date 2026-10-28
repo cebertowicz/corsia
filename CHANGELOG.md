@@ -8,6 +8,7 @@ the later entry describes the current behavior.
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here._
 
 - Email replies check for newer messages and support attachments and your usual font.
+- After you sign in to Claude Code, setup now shows it's checking your Claude models instead of asking you to sign in again.
 - Plan and decision messages use clearer, consistent wording.
 - Measurement labels and messages are clearer about what is shown.
 - Provider and model settings use clearer wording for connection, account and usage states.
