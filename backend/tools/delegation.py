@@ -6,7 +6,7 @@ import json
 from typing import Any
 
 from infra.db_async import run_in_db
-from infra.delegation_status import held_admission_status, model_switch_status
+from infra.delegation_status import model_switch_status
 from infra.fresh_threads import create_visible_fresh_thread
 from infra.queries import get_thread_for_user
 from infra.send_service import SendRejected, send_thread_input
@@ -15,6 +15,7 @@ from infra.thread_input_types import held_admission_line
 from llm.delegation_model import dispatch_scope, eligible_delegation_model
 from tools.base import Tool
 from tools.delegation_completion import resolve_child_turn_for_parent
+from tools.delegation_status_read import read_delegate_status
 
 
 def _clean(value: Any) -> str | None:
@@ -101,15 +102,6 @@ def _require_context(kwargs: dict[str, Any]) -> tuple[str, dict[str, Any]] | str
 
 def _json(data: dict[str, Any]) -> str:
     return json.dumps(data, sort_keys=True)
-
-
-def _recent_message(row: Any) -> dict:
-    """One recent row, with a tool-calling Step's words instead of a blank."""
-    from core.message_display import durable_row_text
-
-    message = dict(row)
-    message["content"] = durable_row_text(message["content"], message.pop("metadata"))
-    return message
 
 
 def _queued_result(thread_id: str, result: InboxQueuedInput) -> dict:
@@ -301,50 +293,6 @@ class DelegateCreateThreadTool(Tool):
         })
 
 
-def _checkpoint_status(checkpoint) -> dict[str, Any]:
-    return {
-        "id": checkpoint.id, "trigger": checkpoint.trigger, "mode": checkpoint.mode,
-        "status": checkpoint.status, "writer_model": checkpoint.writer_model,
-        "error": checkpoint.error, "started_at": checkpoint.started_at,
-    }
-
-
-def _read_delegate_status(thread_id: str, user_id: str, message_count: int):
-    from infra.conductor import get_coordination_scopes
-    from infra.checkpoint_queries import latest_for_thread
-    from infra.database import get_db
-
-    db = get_db()
-    try:
-        thread_row = get_thread_for_user(thread_id, user_id, db=db)
-        if not thread_row:
-            return None
-        active = db.execute(
-            "SELECT id, status, started_at FROM active_turns "
-            "WHERE thread_id = ? AND status='running' "
-            "ORDER BY started_at DESC LIMIT 1",
-            (thread_id,),
-        ).fetchone()
-        recent = db.execute(
-            "SELECT id, role, content, metadata, created_at FROM messages "
-            "WHERE thread_id = ? AND delivery_state = 'delivered' "
-            "ORDER BY created_at DESC LIMIT ?",
-            (thread_id, message_count),
-        ).fetchall() if message_count else []
-        checkpoint = latest_for_thread(thread_id, db=db)
-        thread = dict(thread_row)
-        thread["held_admission"] = held_admission_status(db, thread, dict(active) if active else None)
-        return (
-            thread,
-            dict(active) if active else None,
-            get_coordination_scopes(thread_id, db=db),
-            [_recent_message(row) for row in reversed(recent)],
-            None if checkpoint is None else _checkpoint_status(checkpoint),
-        )
-    finally:
-        db.close()
-
-
 class DelegateStatusTool(Tool):
     """Read runtime truth and recent output for a delegated thread."""
 
@@ -401,7 +349,7 @@ class DelegateStatusTool(Tool):
 
         n = max(0, min(int(messages or 0), 50))
         result = await run_in_db(
-            _read_delegate_status, thread_id, current["user_id"], n
+            read_delegate_status, thread_id, current["user_id"], n, _current_id
         )
         if result is None:
             return f"Error: Thread not found: {thread_id}"

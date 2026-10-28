@@ -22,19 +22,31 @@ class _Result:
         return self.all or []
 
 
+def _create_threads(db):
+    from infra.schema import SCHEMA_SQL
+
+    definition = SCHEMA_SQL.split("CREATE TABLE IF NOT EXISTS threads (", 1)[1].split(");", 1)[0]
+    db.execute("CREATE TABLE threads (" + definition + ")")
+
+
 class _HistoryDb:
     def __init__(self, title: str | None, rows: list[dict]) -> None:
-        self.title = title
-        self.rows = rows
+        self.db = sqlite3.connect(":memory:")
+        self.db.row_factory = sqlite3.Row
+        _create_threads(self.db)
+        self.db.execute("CREATE TABLE messages (seq INTEGER, thread_id TEXT, role TEXT, content TEXT, metadata TEXT, created_at TEXT, delivery_state TEXT)")
+        if title is not None:
+            self.db.execute("INSERT INTO threads (id,user_id,title,created_at,updated_at) VALUES ('thread-1','u',?,'t','t')", (title,))
+        self.db.executemany(
+            "INSERT INTO messages VALUES (?, 'thread-1', ?, ?, ?, ?, 'delivered')",
+            [(r['seq'], r['role'], r['content'], r['metadata'], r['created_at']) for r in rows],
+        )
 
-    def execute(self, sql: str, _params):
-        if "SELECT title FROM threads" in sql:
-            row = None if self.title is None else {"title": self.title}
-            return _Result(one=row)
-        return _Result(all=self.rows)
+    def execute(self, sql: str, params):
+        return self.db.execute(sql, params)
 
     def close(self) -> None:
-        pass
+        self.db.close()
 
 
 async def _run_inline(fn):
@@ -118,14 +130,8 @@ async def test_get_thread_history_omits_tool_rows(monkeypatch):
         _history_row(role="tool", content="hidden", seq=2),
     ]
 
-    class _OmitHistoryDb(_HistoryDb):
-        def execute(self, sql: str, params):
-            if "role <> 'tool'" in sql:
-                return _Result(all=[row for row in self.rows if row["role"] != "tool"])
-            return super().execute(sql, params)
-
     monkeypatch.setattr(query_projects, "run_in_db", _run_inline)
-    monkeypatch.setattr(infra.database, "get_db", lambda: _OmitHistoryDb("Planning", rows))
+    monkeypatch.setattr(infra.database, "get_db", lambda: _HistoryDb("Planning", rows))
 
     result = await GetThreadHistoryTool().execute("thread-1", tool_output="omit")
 
@@ -197,12 +203,12 @@ def test_history_results_label_thread_identity_and_title():
 def test_message_search_returns_thread_identity_and_title(with_fts):
     db = sqlite3.connect(":memory:")
     db.row_factory = sqlite3.Row
-    db.execute("CREATE TABLE threads (id TEXT PRIMARY KEY, title TEXT)")
+    _create_threads(db)
     db.execute(
         "CREATE TABLE messages (id TEXT, thread_id TEXT, role TEXT, content TEXT, "
         "metadata TEXT, created_at TEXT, delivery_state TEXT)"
     )
-    db.execute("INSERT INTO threads VALUES ('thread-1', 'Planning')")
+    db.execute("INSERT INTO threads (id,user_id,title,created_at,updated_at) VALUES ('thread-1','u','Planning','t','t')")
     db.execute(
         "INSERT INTO messages VALUES "
         "('message-1', 'thread-1', 'user', 'alpha', NULL, '2026-09-06T04:00:00Z', 'delivered')"
@@ -224,12 +230,12 @@ def test_message_search_returns_thread_identity_and_title(with_fts):
 def test_message_search_filters_and_labels_durable_sender_class(with_fts):
     db = sqlite3.connect(":memory:")
     db.row_factory = sqlite3.Row
-    db.execute("CREATE TABLE threads (id TEXT PRIMARY KEY, title TEXT)")
+    _create_threads(db)
     db.execute(
         "CREATE TABLE messages (id TEXT, thread_id TEXT, role TEXT, content TEXT, "
         "metadata TEXT, created_at TEXT, delivery_state TEXT)"
     )
-    db.execute("INSERT INTO threads VALUES ('thread-1', 'Planning')")
+    db.execute("INSERT INTO threads (id,user_id,title,created_at,updated_at) VALUES ('thread-1','u','Planning','t','t')")
     messages = [
         ("human", "user", {}),
         ("agent", "user", {"sender_kind": "agent"}),

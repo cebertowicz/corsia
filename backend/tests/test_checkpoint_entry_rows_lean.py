@@ -84,8 +84,8 @@ def _entry(entry_id: int, statement: str, revision: int = 1) -> dict:
 @pytest.fixture
 def corpus(fresh_db):
     """Several threads and epochs; entry 1 of t1 is revised so first != latest."""
-    fresh_db.execute("INSERT INTO threads VALUES ('t2', ?, 'T2', 1)", (OWNER_USER,))
-    fresh_db.execute("INSERT INTO threads VALUES ('t3', ?, 'T3', 0)", (OWNER_USER,))
+    fresh_db.execute("INSERT INTO threads (id,user_id,title,history_epoch) VALUES ('t2', ?, 'T2', 1)", (OWNER_USER,))
+    fresh_db.execute("INSERT INTO threads (id,user_id,title,history_epoch) VALUES ('t3', ?, 'T3', 0)", (OWNER_USER,))
     for revision, tail in enumerate(("alpha", "beta beta", "gamma gamma gamma"), 1):
         _install_checkpoint(
             fresh_db, thread_id="t1", narrative=f"Cache work {revision}.",
@@ -138,7 +138,7 @@ def test_search_tool_returns_the_reference_hits(corpus, monkeypatch):
     import memory.checkpoint_search as search
 
     new = search.search_checkpoints(corpus, "cache", caller_thread_id="t1", limit=10)
-    monkeypatch.setattr(search, "entry_rows_matching", _reference_rows)
+    monkeypatch.setattr(search, "entry_rows_matching", lambda db, match, user, thread, limit, per_thread, caller: _reference_rows(db, match, user, thread, limit, per_thread))
     old = search.search_checkpoints(corpus, "cache", caller_thread_id="t1", limit=10)
 
     assert new == old and new

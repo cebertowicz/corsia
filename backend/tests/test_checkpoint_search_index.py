@@ -172,8 +172,8 @@ def test_json_key_names_are_not_searchable_terms(fresh_db):
         )
 
     for structural in ("statement", "source_refs", "kind"):
-        assert _entry_rows(fresh_db, structural, "u", None, 50, 25) == []
-    assert len(_entry_rows(fresh_db, "indexed", "u", None, 50, 25)) == 3
+        assert _entry_rows(fresh_db, structural, "u", None, 50, 25, "t1") == []
+    assert len(_entry_rows(fresh_db, "indexed", "u", None, 50, 25, "t1")) == 3
 
 
 def test_index_stays_in_sync_when_a_narrative_is_written(fresh_db):

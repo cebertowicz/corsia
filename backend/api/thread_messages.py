@@ -111,6 +111,12 @@ async def get_messages(
     def _query():
         db = get_db()
         try:
+            from infra.thread_confinement import restrict_agent_read
+
+            caller = user.get("thread_id") if user.get("token_kind") == "internal" else None
+            thread = get_thread_for_user(thread_id, user["id"], db=db)
+            if thread is not None and restrict_agent_read(thread["confinement"], thread_id, caller):
+                return ({"messages": [], "has_more": False, "oldest_id": None, "turn_summaries": {}}, [])
             if from_id is not None and to_id is not None:
                 result = read_authorized_run_range(
                     db, thread_id, limit, from_id, to_id, before, user_id=user["id"],
@@ -171,7 +177,11 @@ async def get_tool_result(
     def _query():
         db = get_db()
         try:
-            if not get_thread_for_user(thread_id, user["id"], db=db):
+            from infra.thread_confinement import restrict_agent_read
+
+            thread = get_thread_for_user(thread_id, user["id"], db=db)
+            caller = user.get("thread_id") if user.get("token_kind") == "internal" else None
+            if not thread or restrict_agent_read(thread["confinement"], thread_id, caller):
                 return None
             return load_tool_result(db, thread_id, message_id, tool_call_id)
         finally:

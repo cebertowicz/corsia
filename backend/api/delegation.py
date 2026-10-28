@@ -344,30 +344,9 @@ async def thread_status(thread_id: str, token: str, messages: int = 5):
 
     n = max(0, min(messages, 50))
 
-    def _query():
-        db = get_db()
-        thread_row = get_thread_for_user(thread_id, user["id"], db=db)
-        if not thread_row:
-            db.close()
-            return None
-        active = db.execute(
-            "SELECT id, status, started_at FROM active_turns "
-            "WHERE thread_id = ? AND status='running' "
-            "ORDER BY started_at DESC LIMIT 1",
-            (thread_id,),
-        ).fetchone()
-        recent = db.execute(
-            "SELECT id, role, content, created_at FROM messages "
-            "WHERE thread_id = ? ORDER BY created_at DESC LIMIT ?",
-            (thread_id, n),
-        ).fetchall() if n else []
-        conductor_scopes = get_coordination_scopes(thread_id, db=db)
-        db.close()
-        return dict(thread_row), (dict(active) if active else None), \
-            conductor_scopes, \
-            [dict(r) for r in reversed(recent)]
+    from api.thread_status_read import read_status
 
-    result = await run_in_db(_query)
+    result = await run_in_db(read_status, thread_id, user, n)
     if result is None:
         raise HTTPException(404, "Thread not found")
     thread_row, active, conductor_scopes, recent = result

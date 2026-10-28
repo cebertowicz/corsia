@@ -67,11 +67,12 @@ def _entry_rows(
     thread_id: str | None,
     candidate_limit: int,
     per_thread: int,
+    caller_thread_id: str,
 ) -> list[dict]:
     """Return bounded entry-FTS matches with lifecycle and checkpoint pointers."""
     return entry_rows_matching(
         db, fts5_escape(query, prefix=True), user_id, thread_id,
-        candidate_limit, per_thread,
+        candidate_limit, per_thread, caller_thread_id,
     )
 
 
@@ -82,14 +83,18 @@ def _narrative_rows(
     thread_id: str | None,
     candidate_limit: int,
     per_thread: int,
+    caller_thread_id: str,
 ) -> list[dict]:
     """Return bounded narrative-only FTS matches without rebuilding entries."""
+    from infra.thread_confinement import restrict_agent_read
+
+    db.create_function("restricted_agent_read", 3, restrict_agent_read)
     params: list[object] = [f"raw_result : ({fts5_escape(query, prefix=True)})"]
     scope = ""
     if thread_id is not None:
         scope = "AND checkpoint.thread_id = ? "
         params.append(thread_id)
-    params.extend((user_id, max(1, per_thread) * 20, candidate_limit))
+    params.extend((user_id, caller_thread_id, max(1, per_thread) * 20, candidate_limit))
     rows = db.execute(
         "WITH scored AS ("
         "  SELECT checkpoint.id, checkpoint.thread_id, checkpoint.through_seq, "
@@ -105,6 +110,7 @@ def _narrative_rows(
         "  WHERE checkpoints_fts MATCH ? "
         f"    {scope}"
         "    AND checkpoint.status = 'installed' AND thread.user_id = ?"
+        "    AND NOT restricted_agent_read(thread.confinement, thread.id, ?)"
         "), ranked AS ("
         "  SELECT *, ROW_NUMBER() OVER (PARTITION BY thread_id "
         "      ORDER BY relevance ASC, generation_order DESC) AS thread_rank "
@@ -167,10 +173,10 @@ def search_checkpoints(
         MAX_CANDIDATE_ENTRIES, max(50, bounded * keep * 20)
     )
     entry_hits = _entry_hits(
-        _entry_rows(db, query, user_id, thread_id, candidate_limit, keep)
+        _entry_rows(db, query, user_id, thread_id, candidate_limit, keep, caller_thread_id)
     )
     narrative_hits = _narrative_hits(
-        _narrative_rows(db, query, user_id, thread_id, candidate_limit, keep)
+        _narrative_rows(db, query, user_id, thread_id, candidate_limit, keep, caller_thread_id)
     )
     hits: list[dict] = []
     per_thread_count: dict[str, int] = {}
@@ -208,6 +214,11 @@ def recent_checkpoints(
     user_id = caller_user_id(db, caller_thread_id)
     if user_id is None:
         return []
+    from infra.thread_confinement import restrict_agent_read
+
+    target = db.execute("SELECT confinement FROM threads WHERE id=?", (thread_id,)).fetchone()
+    if target and restrict_agent_read(target[0], thread_id, caller_thread_id):
+        return []
     bounded = max(1, min(int(limit or 3), 10))
     rows = db.execute(
         "SELECT c.id, c.thread_id, c.through_seq, c.installed_at, c.captured_at, "
@@ -244,6 +255,12 @@ def get_checkpoint(
         "WHERE c.id = ? AND c.status = 'installed' AND t.user_id = ?",
         (checkpoint_id, user_id),
     ).fetchone()
+    from infra.thread_confinement import restrict_agent_read
+
+    if row is not None:
+        target = db.execute("SELECT confinement FROM threads WHERE id=?", (row["thread_id"],)).fetchone()
+        if target and restrict_agent_read(target[0], row["thread_id"], caller_thread_id):
+            row = None
     if row is None:
         return {
             "error_code": "not_found",

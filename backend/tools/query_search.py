@@ -144,7 +144,8 @@ class SearchHistoryTool(Tool):
         def _query():
             db = get_db()
             rows = search_messages_fts(
-                db, query, thread_id=thread_id, sender=sender, limit=limit
+                db, query, thread_id=thread_id, sender=sender, limit=limit,
+                caller_thread_id=str(caller) if caller_resolved else "",
             )
             cp_rows = (
                 search_checkpoints(

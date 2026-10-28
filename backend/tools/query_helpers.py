@@ -53,12 +53,16 @@ def search_messages_fts(
     thread_id: str | None = None,
     sender: str | None = None,
     limit: int = 20,
+    caller_thread_id: str = "",
 ) -> list:
     """Search delivered messages by text and durable sender class."""
+    from infra.thread_confinement import restrict_agent_read
+
+    db.create_function("restricted_agent_read", 3, restrict_agent_read)
     sender_expression = _sender_expression()
     fts_query = fts5_escape(query)
-    filters = " AND m.delivery_state = 'delivered'"
-    params: list = [fts_query]
+    filters = " AND m.delivery_state = 'delivered' AND NOT restricted_agent_read(t.confinement, t.id, ?)"
+    params: list = [fts_query, caller_thread_id]
 
     if thread_id:
         filters += " AND m.thread_id = ?"
@@ -80,8 +84,8 @@ def search_messages_fts(
         )
         return db.execute(sql, params).fetchall()
     except Exception:
-        like_params: list = [f"%{query}%"]
-        like_filters = " AND m.delivery_state = 'delivered'"
+        like_params: list = [f"%{query}%", caller_thread_id]
+        like_filters = " AND m.delivery_state = 'delivered' AND NOT restricted_agent_read(t.confinement, t.id, ?)"
         if thread_id:
             like_filters += " AND m.thread_id = ?"
             like_params.append(thread_id)

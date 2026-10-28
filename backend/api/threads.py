@@ -64,6 +64,12 @@ async def list_threads(token: str, archived: int = 0):
         projected = []
         for row in rows:
             item = dict(row)
+            from infra.thread_confinement import restrict_agent_read
+
+            caller = user.get("thread_id") if user.get("token_kind") == "internal" else None
+            if restrict_agent_read(item["confinement"], item["id"], caller):
+                item["last_message"] = None
+                item["title"] = None
             item["archived"] = 1 if thread_is_explicitly_archived(row) else 0
             projected.append(item)
         try:

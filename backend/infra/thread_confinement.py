@@ -16,6 +16,49 @@ import sqlite3
 from subagents.cc_invocation import CONFINEMENT_UNTRUSTED
 
 
+ISOLATED_RESULT_LABEL = "from an isolated worker; contains outside content"
+
+
+def restrict_agent_read(mode: object, thread_id: str, caller_thread_id: str | None) -> bool:
+    """Whether an agent must not read this thread's intermediate content.
+
+    A None caller denotes the person's own API view; tool callers must pass their
+    backend-injected thread id (or an empty string if it cannot be resolved).
+    Any non-null confinement is treated as restricted if its record is damaged.
+    """
+    return caller_thread_id is not None and caller_thread_id != thread_id and mode is not None
+
+
+def worker_error_for_agent(db: sqlite3.Connection, thread_id: str, error: str) -> str:
+    """Keep an isolated worker's unclassified failure text out of a wake."""
+    row = db.execute("SELECT confinement FROM threads WHERE id=?", (thread_id,)).fetchone()
+    if row and restrict_agent_read(row[0], thread_id, ""):
+        return "isolated worker turn failed"
+    return error
+
+
+def finished_agent_result(db: sqlite3.Connection, thread_id: str) -> dict | None:
+    """Return a completed turn's final text only when its last step is an answer."""
+    turn = db.execute(
+        "SELECT id, status FROM active_turns WHERE thread_id=? ORDER BY turn_order DESC LIMIT 1",
+        (thread_id,),
+    ).fetchone()
+    if turn is None or turn[1] != "completed":
+        return None
+    row = db.execute(
+        "SELECT id, role, content, metadata, created_at FROM messages "
+        "WHERE thread_id=? AND json_valid(metadata) "
+        "AND json_extract(metadata, '$.turn_id')=? AND seq IS NOT NULL "
+        "ORDER BY seq DESC, rowid DESC LIMIT 1", (thread_id, turn[0]),
+    ).fetchone()
+    if row is None or row[1] != "assistant" or not str(row[2] or "").strip():
+        return None
+    metadata = json.loads(row[3])
+    if metadata.get("llm_tool_calls") or metadata.get("tool_calls") or metadata.get("step_type") == "tool_calls":
+        return None
+    return {"id": row[0], "role": "assistant", "content": str(row[2]), "created_at": row[4]}
+
+
 class ConfinementRecordDamaged(ValueError):
     """A thread's stored confinement cannot be read, so no launch may run it."""
 

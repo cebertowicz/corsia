@@ -137,10 +137,15 @@ class GetThreadHistoryTool(Tool):
 
         def _query():
             db = get_db()
-            thread_row = db.execute("SELECT title FROM threads WHERE id = ?", (thread_id,)).fetchone()
+            thread_row = db.execute("SELECT title, confinement FROM threads WHERE id = ?", (thread_id,)).fetchone()
             if not thread_row:
                 db.close()
                 return None, None
+            from infra.thread_confinement import restrict_agent_read
+
+            if restrict_agent_read(thread_row["confinement"], thread_id, kwargs.get("_thread_id") or ""):
+                db.close()
+                return thread_row, []
             where = ["thread_id = ?", "delivery_state = 'delivered'", "seq IS NOT NULL"]
             params: list[Any] = [thread_id]
             if role:
