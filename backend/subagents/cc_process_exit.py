@@ -16,9 +16,7 @@ from infra.queries import insert_message
 from subagents.cc_event_context import commit_cc_terminal
 from subagents.cc_runtime_errors import surface_exit_error
 from subagents.turn_account_error import claude_turn_signed_out
-from subagents.cc_event_context_usage import (
-    consume_and_attach_terminal_context_usage,
-)
+from subagents.cc_event_context_usage import consume_and_attach_terminal_context_usage
 from subagents.cc_event_tool_settlement import settle_missing_tool_results
 from subagents.cc_runtime_helpers import _default_broadcast
 from subagents.cc_runtime_quiescence import quiesce_live_tools
