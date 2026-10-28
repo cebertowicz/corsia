@@ -67,7 +67,7 @@ async def test_ready_local_owner_starts_confined_on_own_model(local_model, world
     outcome, _, _, worker = starts(rule)[0]
     assert outcome == "started"
     child = get_db().execute("SELECT model, confinement FROM threads WHERE id=?", (worker,)).fetchone()
-    assert tuple(child) == (LOCAL, "review")
+    assert tuple(child) == (LOCAL, "untrusted")
     assert local_model["bound"] == [LOCAL]
 
 

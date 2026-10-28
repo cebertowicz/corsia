@@ -54,14 +54,14 @@ def test_switch_warm_source_reads_the_added_account_root(isolated_db, added_root
 
     db = get_db()
     try:
-        db.execute("UPDATE threads SET confinement='review', confined_read_dirs='[\"/row\"]' WHERE id='switched'")
+        db.execute("UPDATE threads SET confinement='untrusted', confined_read_dirs='[\"/row\"]' WHERE id='switched'")
         db.commit()
     finally:
         db.close()
-    monkeypatch.setattr("subagents.cc_confinement.review_working_dir", lambda *_args: str(tmp_path))
+    monkeypatch.setattr("subagents.cc_confinement.untrusted_working_dir", lambda *_args: str(tmp_path))
     identity = _registered_identity("switched")
     assert identity[1].confinement == "none"  # the prior process description
-    assert identity[6] == "review"  # the row controls a cold capture
+    assert identity[6] == "untrusted"  # the row controls a cold capture
 
 
 @pytest.mark.asyncio

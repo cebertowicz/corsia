@@ -16,7 +16,7 @@ from urllib.parse import parse_qs, urlsplit
 
 import psutil
 import pytest
-from host_access import browser_cdp, browser_pane
+from host_access import browser_cdp, browser_cli, browser_pane
 from host_access import browser_identity as identity
 from host_access.browser_sessions import BrowserSessionError, BrowserSessionOwner
 from ws import browser_stream
@@ -25,6 +25,12 @@ from ws.browser_frames import PaneFrames
 pytestmark = [pytest.mark.integration, pytest.mark.skipif(
     os.environ.get('CORSIA_NATIVE_BROWSER_TEST') != '1', reason='explicit native-browser job only',
 )]
+
+# The run's first Chrome launch on a cold hosted runner once took 32.7 s, past run()'s 30 s
+# default; later launches take seconds. Warm it once so no test's own budget pays for it.
+# Best effort, tried once: a Chrome that cannot launch fails in the tests that cover it.
+COLD_START_SECONDS = 90.0
+_warmed: list[bool] = []
 
 
 @pytest.fixture
@@ -46,6 +52,10 @@ async def native_owner(monkeypatch, tmp_path):
     owner = BrowserSessionOwner(namespace='corsia-test', binary=str(binary))
     assert owner.socket_dir.parent == identity.default_socket_root()
     try:
+        if not _warmed:
+            _warmed.append(True)
+            await owner.run('native-warm-up', ['open', 'about:blank'], timeout=COLD_START_SECONDS)
+            await owner.close_thread('native-warm-up')
         yield owner
     finally:
         await owner.shutdown()
@@ -80,6 +90,46 @@ async def test_display_secret_and_sign_in_are_distinguished_in_chrome(native_own
         await cdp.call('Runtime.evaluate', expression="""document.body.innerHTML = `
           <div><input type="password" readonly onfocus="this.readOnly=false"><button>Sign in</button></div>`""")
     assert len((await browser_cdp.page_password_probe(endpoint, {})).visible_nodes) == 1
+
+
+async def test_pane_open_is_the_stock_clients_current_page(native_owner, monkeypatch):
+    async def serve(reader, writer):
+        # Read the whole request first: closing with unread bytes resets the connection instead.
+        await reader.readuntil(b'\r\n\r\n')
+        writer.write(b'HTTP/1.1 200 OK\r\nContent-Length: 12\r\nConnection: close\r\n\r\nBrowser test')
+        await writer.drain()
+        writer.close()
+        await writer.wait_closed()
+
+    server = await asyncio.start_server(serve, '127.0.0.1', 0)
+    port = server.sockets[0].getsockname()[1]
+    url = f'http://127.0.0.1:{port}/'
+    monkeypatch.setattr(browser_pane.PROCESS_OWNER, 'browser_sessions', lambda: native_owner)
+    try:
+        opened = await browser_pane.open_url('native-pane-open', url)
+        assert not opened.startswith('Error:'), f'pane open={opened!r}'
+        runtime = native_owner._sessions['native-pane-open']
+        binding = runtime.record.binding
+        assert binding is not None, f'pane open={opened!r}'
+        # Read through the owner on the existing session only, so a relaunch fails instead of hiding a lost
+        # binding. Like BrowserOpenTool, suppress the one-time notice before parsing get url.
+        owner_url = await native_owner.run('native-pane-open', ['get', 'url'], session='existing', notice=False)
+        binding_after_owner = (await native_owner._observe(runtime)).binding
+        result = await native_owner._invoke(native_owner._session_argv(runtime, ['get', 'url']), timeout=30)
+        binding_after_raw = (await native_owner._observe(runtime)).binding
+        diagnostic = (f'pane open={opened!r}; agent get url={owner_url!r}; '
+                      f'raw returncode={result.returncode}, stdout={result.stdout!r}, stderr={result.stderr!r}')
+        assert browser_cli.json_object(owner_url).get('url') == url, diagnostic
+        assert binding_after_owner == binding, diagnostic
+        assert result.returncode == 0, diagnostic
+        data = browser_cli.json_object(result.stdout).get('data', {})
+        assert data.get('lifecycle', {}).get('reused') is True, diagnostic
+        assert data.get('lifecycle', {}).get('launched') is False, diagnostic
+        assert binding_after_raw == binding, diagnostic
+        assert data.get('url') == url, diagnostic
+    finally:
+        server.close()
+        await server.wait_closed()
 
 
 async def test_native_open_outcome_remains_cleanable(native_owner):

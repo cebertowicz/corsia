@@ -92,7 +92,7 @@ def test_producer_handles_1000_copies_under_five_seconds_on_an_indexed_query(iso
             parent_thread_id=owner, path=str(folder / "SKILL.md"),
         )
         items.append({**_item(), "name": name})
-    monkeypatch.setattr("library.load_index", lambda: SimpleNamespace(skills=tuple(items), index_age="just now", generations={}))
+    monkeypatch.setattr("library.load_index", lambda: SimpleNamespace(items=tuple(items), index_age="just now", generations={}))
     monkeypatch.setattr("events.platform.deliver_platform_event_sync", lambda *_args: [])
 
     started = time.perf_counter()
@@ -123,7 +123,7 @@ def test_producer_reads_installed_artifacts_and_delivers_each_change_once(isolat
         integration="library", type="installed-skill", external_id=f"{owner}/pdf",
         parent_thread_id=owner, path=str(skill / "SKILL.md"),
     )
-    monkeypatch.setattr("library.load_index", lambda: SimpleNamespace(skills=(_item(),), index_age="just now", generations={}))
+    monkeypatch.setattr("library.load_index", lambda: SimpleNamespace(items=(_item(),), index_age="just now", generations={}))
 
     first = producer.produce_once()
     repeat = producer.produce_once()
@@ -148,7 +148,7 @@ def test_producer_skips_change_notices_without_consent_but_sends_withdrawals(
     profile = community_workspace / PROFILE_RELATIVE_PATH
     profile.write_text(f"{USE_COMMUNITY_LABEL} No\n", encoding="utf-8")
     monkeypatch.setattr(
-        "library.load_index", lambda: SimpleNamespace(skills=(_item(),), index_age="just now", generations={}),
+        "library.load_index", lambda: SimpleNamespace(items=(_item(),), index_age="just now", generations={}),
     )
 
     assert producer.produce_once() == 0
@@ -156,7 +156,7 @@ def test_producer_skips_change_notices_without_consent_but_sends_withdrawals(
 
     monkeypatch.setattr(
         "library.load_index", lambda: SimpleNamespace(
-            skills=(_item(withdrawn=True),), index_age="just now", generations={},
+            items=(_item(withdrawn=True),), index_age="just now", generations={},
         ),
     )
 
@@ -218,7 +218,7 @@ def test_producer_delivers_withdrawal_again_after_a_reinstatement(isolated_db, t
     generations = iter((1, 2, 3))
     monkeypatch.setattr(
         "library.load_index",
-        lambda: SimpleNamespace(skills=(next(states),), index_age="just now", generations={"pdf": next(generations)}),
+        lambda: SimpleNamespace(items=(next(states),), index_age="just now", generations={"pdf": next(generations)}),
     )
 
     assert producer.produce_once() == 1
@@ -237,7 +237,7 @@ def test_producer_withdrawal_wakes_the_registered_owner_once(isolated_db, tmp_pa
         integration="library", type="installed-skill", external_id=f"{owner}/pdf",
         parent_thread_id=owner, path=str(skill / "SKILL.md"),
     )
-    monkeypatch.setattr("library.load_index", lambda: SimpleNamespace(skills=(_item(withdrawn=True),), index_age="just now", generations={}))
+    monkeypatch.setattr("library.load_index", lambda: SimpleNamespace(items=(_item(withdrawn=True),), index_age="just now", generations={}))
 
     producer.produce_once()
     producer.produce_once()
@@ -342,7 +342,7 @@ async def test_producer_pool_lifetime_child(isolated_db, monkeypatch):
 
     monkeypatch.setattr(database.sqlite3, "connect", connect)
     monkeypatch.setattr(producer, "produce_once", produce_once)
-    monkeypatch.setattr("library.load_index", lambda: SimpleNamespace(skills=(), index_age="just now", generations={}))
+    monkeypatch.setattr("library.load_index", lambda: SimpleNamespace(items=(), index_age="just now", generations={}))
     task, clear_loop = await _producer_task(entrypoint)
     shutdown = threading.Thread(target=database.shutdown_pool, args=(reconfigure,), name="producer-pool-shutdown")
     try:

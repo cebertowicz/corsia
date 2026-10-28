@@ -1,4 +1,4 @@
-"""A confined (``review``) native or local worker reads only its read paths.
+"""A confined (``untrusted``) native or local worker reads only its read paths.
 
 Every secret stand-in sits where the ordinary boundary would let an unconfined
 thread read it, so each refusal here is the confinement's, not the sandbox's.
@@ -56,7 +56,7 @@ def tree(tmp_path, monkeypatch):
 
 
 def _review(grant: Path) -> dict:
-    return {"confinement": "review", "confined_read_dirs": json.dumps([str(grant)])}
+    return {"confinement": "untrusted", "confined_read_dirs": json.dumps([str(grant)])}
 
 
 async def _read(tree, path: str) -> str:
@@ -150,13 +150,13 @@ async def test_default_search_finds_worker_inputs_but_not_another_thread(tree) -
 
 def test_only_the_read_tools_pass_the_boundary() -> None:
     review = _review(Path("/tmp/grant"))
-    for name in confined_reads.REVIEW_READ_TOOLS:
+    for name in confined_reads.UNTRUSTED_READ_TOOLS:
         assert confined_reads.call_refusal(name, review) is None
     for name in ("bash", "write_file", "edit_file", "web_fetch", "delegate_task", "tool_call",
                  "tools_load", "plan_update", "read_tool_result"):
-        assert "not available to a confined review worker" in confined_reads.call_refusal(name, review)
+        assert "not available to a confined untrusted worker" in confined_reads.call_refusal(name, review)
     assert confined_reads.call_refusal("bash", {"confinement": None}) is None
-    damaged = {"confinement": "review", "confined_read_dirs": "[]"}
+    damaged = {"confinement": "untrusted", "confined_read_dirs": "[]"}
     assert "no tool may run" in confined_reads.call_refusal("read_file", damaged)
 
 
@@ -169,7 +169,7 @@ def _seed_thread(db_path: Path, thread_id: str, grant: Path | None) -> None:
         db.execute("INSERT INTO threads (id,user_id,title,created_at,updated_at) "
                    "VALUES (?,'u','t','t','t')", (thread_id,))
         if grant is not None:
-            thread_confinement.record(db, thread_id, "review", (str(grant),))
+            thread_confinement.record(db, thread_id, "untrusted", (str(grant),))
 
 
 @pytest.mark.asyncio
@@ -194,7 +194,7 @@ async def test_the_registry_refuses_a_confined_threads_other_tools(isolated_db, 
     finally:
         state._current_thread_id.reset(marker)
     for refused in (shell, dispatched):
-        assert "not available to a confined review worker" in refused and "SECRET" not in refused
+        assert "not available to a confined untrusted worker" in refused and "SECRET" not in refused
     assert "outside this confined worker's read paths" in secret and "SECRET" not in secret
     assert "granted body" in granted
 
