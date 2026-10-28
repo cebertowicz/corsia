@@ -48,8 +48,12 @@ async def test_launch_exit_before_first_event_ends_turn(child_db, monkeypatch):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("failure", [None, "retirement", "publication", "cancelled"])
-async def test_failed_process_retires_before_driving_queued_successor(child_db, monkeypatch, failure):
+@pytest.mark.parametrize(
+    "failure", [None, "retirement", "unretired", "publication", "cancelled"],
+)
+async def test_failed_process_retires_before_driving_queued_successor(
+    child_db, monkeypatch, caplog, failure,
+):
     from core.turn_core import BOOT_EPOCH
     from infra import thread_execution
     from infra.thread_driver import admit_input
@@ -82,6 +86,8 @@ async def test_failed_process_retires_before_driving_queued_successor(child_db, 
     monkeypatch.setattr(thread_execution, "drive_turn_admission", drive)
 
     def retire(*args, **kwargs):
+        if failure == "unretired":
+            raise RuntimeError("unretired failed")
         result = finalize(*args, **kwargs)
         if failure == "retirement":
             raise RuntimeError("retirement failed")
@@ -110,6 +116,12 @@ async def test_failed_process_retires_before_driving_queued_successor(child_db, 
         if failure == "cancelled":
             with pytest.raises(asyncio.CancelledError):
                 await asyncio.wait_for(session._reader, 5)
+        elif failure == "unretired":
+            # The exited process still owns the runtime: never drive a successor past it.
+            with pytest.raises(AssertionError, match="retained runtime"):
+                await asyncio.wait_for(session._reader, 5)
+            assert drives == []
+            return
         elif failure:
             with pytest.raises(RuntimeError, match=f"{failure} failed"):
                 await asyncio.wait_for(session._reader, 5)
@@ -119,6 +131,8 @@ async def test_failed_process_retires_before_driving_queued_successor(child_db, 
         assert row["status"] == "error"
         assert "stub launch failed" in row["error"]
         assert len(drives) == 1
+        if failure:
+            assert f"turn {batch.turn_id} failed after settling" in caplog.text
         if failure not in {"publication", "cancelled"}:
             assert any(frame.get("type") == "turn_complete" for frame in frames)
     finally:

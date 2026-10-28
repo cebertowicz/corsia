@@ -321,9 +321,7 @@ async def handle_process_exit(
             child_thread_id, live, identity, code, stderr, broadcast, db, finish_callback,
         )
     except _CommittedTerminalFailure as failure:
-        settlement = failure.settlement
-        publication_error = failure.publication_error
-        retired = False
+        settlement, publication_error, retired = failure.settlement, failure.publication_error, False
     except Exception:  # nothing awaits the exit observer: this is the only trace
         log.exception("cc_runtime: %s natural exit of turn %s failed to settle", child_thread_id, identity.turn_id)
         raise
@@ -339,8 +337,10 @@ async def handle_process_exit(
                 except BaseException as error:
                     if settlement is None:
                         raise
-                    if publication_error is None:
-                        publication_error = error
+                    assert _LIVE.get(child_thread_id) is not live, "CC terminal retained runtime"
+                    publication_error = publication_error or error
+    if publication_error is not None:  # nothing awaits the exit observer: this is the only trace
+        log.error("cc_runtime: %s natural exit of turn %s failed after settling", child_thread_id, identity.turn_id, exc_info=publication_error)
     if settlement is not None:
         await drive_turn_settlement(settlement)
     if publication_error is not None:
