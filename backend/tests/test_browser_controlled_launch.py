@@ -72,7 +72,9 @@ def test_reservation_skips_busy_ports(monkeypatch):
         occupied.close()
 
 
-def test_normal_launch_flags_and_stealth_have_one_owner(tmp_path, monkeypatch):
+@pytest.mark.parametrize('platform', ['linux', 'darwin'])
+def test_normal_launch_flags_and_stealth_have_one_owner(tmp_path, monkeypatch, platform):
+    monkeypatch.setattr(sys, 'platform', platform)
     monkeypatch.setenv('AGENT_BROWSER_ARGS', '--no-sandbox')
     argv = browser_chrome.chrome_argv('chrome', 39400, tmp_path, headless=True, ua='Fixture UA')
     assert argv[0] == 'chrome'
@@ -83,7 +85,9 @@ def test_normal_launch_flags_and_stealth_have_one_owner(tmp_path, monkeypatch):
     assert '--use-mock-keychain' in argv and '--password-store=basic' in argv
     assert '--disable-background-networking' in argv and '--no-first-run' in argv
     assert f'--user-data-dir={tmp_path}' in argv
-    assert '--headless=new' in argv and '--no-sandbox' in argv
+    assert '--headless=new' in argv
+    assert ('--no-sandbox' in argv) is (platform == 'darwin')
+    assert '--disable-setuid-sandbox' not in argv
     assert '--user-agent=Fixture UA' in argv
     assert '--disable-blink-features=AutomationControlled' in argv
 

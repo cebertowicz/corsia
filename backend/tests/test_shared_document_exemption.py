@@ -1,11 +1,8 @@
-"""Only shared-tree documents outlive the task that touched them.
+"""A shared document's pane row is task-scoped like every other workspace file.
 
-A durable file anywhere else in the workspace, a thread's own folder
-included, is task-scoped: it leaves the pane when its task settles, and pin
-keeps it. "Shared" is the one definition ownership and the pane use
-(``registry.shared_principals.shared_roots``), so a project row or an identity
-stored in an older form is shared exactly when they say it is, and the host
-folder the workspace happens to live under can never widen it.
+A durable file anywhere in the workspace, a ``shared/`` tree included, leaves
+the pane when its task settles; the document, its owner and its freshness
+stay. Pin keeps a row, and so does the user's comment on the document.
 """
 
 from __future__ import annotations
@@ -19,13 +16,10 @@ from infra import config
 from infra.database import get_db
 from infra.platform_paths import WorkspaceSelection
 from plans import service as plans
-from registry import models, pinning, shared_principals, view
+from registry import models, pinning, view
 from registry.node_retirement import retire_registrations_for_node
 from registry.registration_writer import RegistrationOrigin
-from registry.retirement_predicate import (
-    RETIREMENT_NOT_EXEMPT_CLAUSE,
-    bind_shared_documents,
-)
+from registry.retirement_predicate import RETIREMENT_NOT_EXEMPT_CLAUSE
 from tests.registry_helpers import make_session
 from tests.plan_writer_authorizer import raw_plan_seed
 
@@ -72,7 +66,6 @@ def _location(external_id: str) -> Path:
 
 
 def _is_exempt(db, artifact_id: str) -> bool:
-    bind_shared_documents(db)
     row = db.execute(
         f"""SELECT 1 FROM artifact_registrations AS r
              WHERE r.artifact_id=? AND {RETIREMENT_NOT_EXEMPT_CLAUSE}""",
@@ -93,17 +86,6 @@ def _exempt(db, relative: str, *, zone: str = "workspace", retention: str = "dur
     return _is_exempt(db, artifact["id"])
 
 
-def _exempt_legacy_identity(db, external_id: str) -> bool:
-    """An identity from before logical references: an absolute path, no stored path."""
-    thread_id = make_session(db, prefix="legacy-exempt")
-    artifact = models.register_artifact(
-        integration="workspace", type="document", external_id=external_id,
-        parent_thread_id=thread_id, title="doc.md", retention="durable",
-        metadata={"zone": "workspace"}, db=db,
-    )
-    return _is_exempt(db, artifact["id"])
-
-
 @pytest.mark.parametrize(
     "relative",
     [
@@ -112,15 +94,6 @@ def _exempt_legacy_identity(db, external_id: str) -> bool:
         "projects/my proj/shared/a.md",
         # The project row stores an absolute path, not a logical reference.
         "projects/legacy/shared/a.md",
-    ],
-)
-def test_documents_in_a_shared_tree_are_exempt(db, relative):
-    assert _exempt(db, relative) is True
-
-
-@pytest.mark.parametrize(
-    "relative",
-    [
         "projects/alpha/.threads/t1/notes.md",
         "projects/alpha/.threads/t1/scratch/query.sql",
         "projects/alpha/.threads/t1/shared/notes.md",
@@ -131,31 +104,15 @@ def test_documents_in_a_shared_tree_are_exempt(db, relative):
         "projects/beta/shared/a.md",
     ],
 )
-def test_every_other_workspace_file_is_task_scoped(db, relative):
+def test_every_workspace_file_is_task_scoped(db, relative):
     assert _exempt(db, relative) is False
 
 
-def test_a_legacy_absolute_identity_is_shared_only_under_a_shared_root(db):
-    workspace = config.WORKSPACE
-    assert _exempt_legacy_identity(db, str(workspace / "shared/planning/roadmap.md")) is True
-    assert _exempt_legacy_identity(db, str(workspace / "projects/alpha/shared/a.md")) is True
-    assert _exempt_legacy_identity(
-        db, str(workspace / "projects/alpha/.threads/t1/notes.md"),
-    ) is False
-    # A host folder named Shared above some other workspace is not a shared root.
-    assert _exempt_legacy_identity(db, "/srv/Shared/ws/shared/planning/roadmap.md") is False
-    assert _exempt_legacy_identity(
-        db, "/srv/Shared/ws/projects/alpha/.threads/t1/notes.md",
-    ) is False
-
-
-def test_a_shared_path_outside_the_durable_workspace_kind_is_task_scoped(db):
-    assert _exempt(db, "shared/a.md", zone="repo") is False
-    assert _exempt(db, "shared/b.md", retention="ephemeral") is False
-
-
-def test_a_document_the_user_commented_on_stays_exempt_wherever_it_lives(db):
-    relative = "projects/alpha/.threads/t1/draft.md"
+@pytest.mark.parametrize(
+    "relative",
+    ["projects/alpha/.threads/t1/draft.md", "projects/alpha/shared/documents/SPEC.md"],
+)
+def test_a_document_the_user_commented_on_stays_exempt_wherever_it_lives(db, relative):
     assert _exempt(db, relative) is False
     artifact_id = db.execute(
         "SELECT id FROM artifact_identities WHERE external_id=?", (_reference(relative),),
@@ -202,7 +159,7 @@ def _rows(db, thread_id: str) -> dict[str, tuple[str, bool]]:
     }
 
 
-def test_settling_a_task_clears_thread_folder_files_and_keeps_shared_documents(db):
+def test_settling_a_task_retires_its_shared_documents_like_any_other_file(db):
     thread_id = make_session(db, prefix="rule2")
     plan = plans.ensure_plan("thread", thread_id, db=db)
     node = plans.add_node(
@@ -222,52 +179,53 @@ def test_settling_a_task_clears_thread_folder_files_and_keeps_shared_documents(d
     assert rows[note["id"]] == ("settled", True)
     assert rows[scratch["id"]] == ("settled", True)
     assert rows[kept["id"]] == ("visible", True)
-    assert rows[shared["id"]] == ("visible", False)
+    assert rows[shared["id"]] == ("settled", True)
     shown = {n["id"] for n in view.pane_for_thread(thread_id)["nodes"] if n["kind"] == "artifact"}
-    assert shown == {kept["id"], shared["id"]}
+    assert shown == {kept["id"]}
+    # Only the row leaves: the document's identity is untouched.
+    identity = db.execute(
+        "SELECT state, retention FROM artifact_identities WHERE id=?", (shared["id"],),
+    ).fetchone()
+    assert tuple(identity) == ("active", "durable")
 
     # Unpin returns the thread-folder file to the retirement its task left.
     pinning.update_pinned(kept["id"], pinned=False, parent_thread_id=thread_id, db=db)
     assert _rows(db, thread_id)[kept["id"]] == ("settled", True)
 
 
-def test_the_predicate_agrees_with_the_shared_roots_definition(db, monkeypatch):
-    from registry import service
+def _comment(db, artifact_id: str) -> None:
+    db.execute(
+        "INSERT INTO doc_comments "
+        "(id,artifact_id,author,author_kind,body,created_at,updated_at) "
+        "VALUES (?,?,'user','user','Check this.','t0','t0')",
+        (f"c-{artifact_id}", artifact_id),
+    )
 
-    workspace = config.WORKSPACE
-    monkeypatch.setattr(service, "get_allowed_dirs_rw", lambda **_kwargs: [workspace])
-    thread_id = make_session(db, prefix="parity")
-    relative = [
-        "shared/planning/roadmap.md",
-        "projects/alpha/shared/documents/DECISIONS.md",
-        "projects/alpha/.threads/t1/notes.md",
-        "projects/alpha/.threads/t1/shared/notes.md",
-        "projects/alpha/context/PROJECT.md",
-        # A project row that stores an absolute path.
-        "projects/legacy/shared/a.md",
-        "projects/legacy/.threads/t1/notes.md",
-        "USER.md",
-    ]
-    shared = set()
 
-    for name in relative:
-        path = workspace / name
-        artifact = service.register_write_strict(thread_id, str(path), None, db=db)
-        expected = shared_principals.is_shared_document_path(path, workspace=workspace, db=db)
-        assert _is_exempt(db, artifact["id"]) is expected, name
-        if expected:
-            shared.add(name)
+def test_a_pinned_commented_or_open_pull_request_row_stays_when_its_task_settles(db):
+    thread_id = make_session(db, prefix="rule2-kept")
+    node = _node(db, thread_id, "Write")
+    plain = _bound(db, thread_id, node, f"{_PROJECT}/shared/documents/PLAIN.md")
+    pinned = _bound(db, thread_id, node, f"{_PROJECT}/shared/documents/PINNED.md")
+    commented = _bound(db, thread_id, node, f"{_PROJECT}/shared/documents/COMMENTED.md")
+    pull_request = models.register_artifact(
+        integration="github", type="pull-request", external_id="o/r#1",
+        parent_thread_id=thread_id, title="PR 1", metadata={"pr_state": "open"},
+        origin=RegistrationOrigin(thread_id, f"turn-{node.id}", "artifact_tool"), db=db,
+    )
+    pinning.update_pinned(pinned["id"], pinned=True, parent_thread_id=thread_id, db=db)
+    _comment(db, commented["id"])
+    db.commit()
 
-    assert shared == {
-        "shared/planning/roadmap.md",
-        "projects/alpha/shared/documents/DECISIONS.md",
-        "projects/legacy/shared/a.md",
-    }
-    # An identity stored as an absolute path, with no stored path beside it.
-    for name in ("shared/legacy-identity.md", "projects/alpha/.threads/t1/legacy-identity.md"):
-        path = workspace / name
-        expected = shared_principals.is_shared_document_path(path, workspace=workspace, db=db)
-        assert _exempt_legacy_identity(db, str(path)) is expected, name
+    retire_registrations_for_node(db, node_id=node.id, trigger="test", causal_event_id=None)
+    db.commit()
+
+    rows = _rows(db, thread_id)
+    assert rows[plain["id"]] == ("settled", True)
+    # Pin keeps the row in the pane; the stamp records that it would have left.
+    assert rows[pinned["id"]] == ("visible", True)
+    assert rows[commented["id"]] == ("visible", False)
+    assert rows[pull_request["id"]] == ("visible", False)
 
 
 def test_a_user_comment_brings_back_the_row_its_task_already_retired(db, monkeypatch):
@@ -399,23 +357,28 @@ def _node(db, thread_id: str, title: str):
 
 
 def test_the_one_time_pass_settles_rows_finished_tasks_left_behind(db):
-    from infra.settings import get_setting
+    from infra.settings import get_setting, set_setting
     from registry import finished_task_row_backfill as backfill
 
+    # The pass already ran once on this instance, under the earlier rule.
+    set_setting("artifact_pane:finished_task_rows_retired", {"completed_at": "t0"}, db=db)
     thread_id = make_session(db, prefix="rule2-pass")
     finished = _node(db, thread_id, "Finished")
     note = _bound(db, thread_id, finished, f"{_PROJECT}/.threads/t1/notes.md")
     kept = _bound(db, thread_id, finished, f"{_PROJECT}/.threads/t1/pinned.md")
     shared = _bound(db, thread_id, finished, f"{_PROJECT}/shared/documents/REFERENCE.md")
+    commented = _bound(db, thread_id, finished, f"{_PROJECT}/shared/documents/COMMENTED.md")
     pinning.update_pinned(kept["id"], pinned=True, parent_thread_id=thread_id, db=db)
-    # The task finished while its thread-folder rows were still exempt, so
-    # settlement skipped them: the node is terminal and nothing was stamped.
+    _comment(db, commented["id"])
+    # The task finished while its rows were still exempt, so settlement
+    # skipped them: the node is terminal and nothing was stamped.
     with raw_plan_seed(db):
         db.execute("UPDATE plan_nodes SET state='accepted' WHERE id=?", (finished.id,))
     db.execute("DELETE FROM active_turns WHERE thread_id=?", (thread_id,))
     db.commit()
     open_node = _node(db, thread_id, "Open")
     in_work = _bound(db, thread_id, open_node, f"{_PROJECT}/.threads/t1/current.md")
+    shared_in_work = _bound(db, thread_id, open_node, f"{_PROJECT}/shared/documents/OPEN.md")
     taskless = models.register_artifact(
         integration="workspace", type="document",
         external_id=f"{_PROJECT}/.threads/t1/taskless.md",
@@ -429,12 +392,13 @@ def test_the_one_time_pass_settles_rows_finished_tasks_left_behind(db):
 
     rows = _rows(get_db(), thread_id)
     assert rows[note["id"]] == ("settled", True)
+    assert rows[shared["id"]] == ("settled", True)
     assert rows[kept["id"]] == ("visible", True)
-    for untouched in (shared, in_work, taskless):
+    for untouched in (commented, in_work, shared_in_work, taskless):
         assert rows[untouched["id"]] == ("visible", False)
     marker = get_setting(backfill._MARKER, db=get_db())
-    assert marker["retired_rows"] == 2
-    assert marker["retired_by_thread"] == {thread_id: 2}
+    assert marker["retired_rows"] == 3
+    assert marker["retired_by_thread"] == {thread_id: 3}
     event = get_db().execute(
         "SELECT event_type, metadata FROM artifact_registration_events "
         "WHERE artifact_id=? ORDER BY rowid DESC LIMIT 1",
