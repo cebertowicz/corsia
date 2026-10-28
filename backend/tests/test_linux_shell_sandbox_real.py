@@ -85,9 +85,7 @@ def test_runtime_cache_is_readable_but_cannot_be_replaced(linux_box):
     box = linux_box
     cache = box.home / '.cache/corsia'
     binary = cache / 'runtimes/node/bin/node'
-    binary.parent.mkdir(parents=True)
-    binary.write_text('#!/bin/sh\necho runtime-ok\n')
-    binary.chmod(0o700)
+    assert not cache.exists()
     box.policy = ProtectedHostPathPolicy(box.home, box.state, write_roots=(cache,))
     env = dict(box.env, PATH=f'{binary.parent}:/usr/bin:/bin')
     def run(command):
@@ -95,6 +93,13 @@ def test_runtime_cache_is_readable_but_cannot_be_replaced(linux_box):
             rw_roots=[box.home, box.workspace], ro_roots=[], readonly_overlays=[], env=env,
             thread_id='one', executable=shutil.which('bwrap'))
         return subprocess.run(argv, capture_output=True, text=True, timeout=20)
+    result = run(f'touch {shlex.quote(str(cache / "forged"))}')
+    print(f'first-run cache write: exit={result.returncode} stderr={result.stderr.strip()}')
+    assert cache.is_dir() and result.returncode != 0
+    assert not (cache / 'forged').exists()
+    binary.parent.mkdir(parents=True)
+    binary.write_text('#!/bin/sh\necho runtime-ok\n')
+    binary.chmod(0o700)
     result = run('node')
     print(f'runtime execution: exit={result.returncode} output={result.stdout.strip()}')
     assert result.returncode == 0 and result.stdout.strip() == 'runtime-ok', result.stderr
