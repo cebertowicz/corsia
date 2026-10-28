@@ -167,7 +167,7 @@ async def dispatch_mouse_event(endpoint: str, event: dict) -> None:
         # CDP does not infer the held-button mask from `button`; a pointer press
         # must carry it or a background shared page can ignore the click sequence.
         params["buttons"] = ({"left": 1, "right": 2, "middle": 4, "back": 8, "forward": 16}.get(button, 0)
-                             if event_type != "mouseReleased" else 0)
+                             if event_type != "mouseReleased" and button is not None else 0)
         if click_count is not None:
             if not isinstance(click_count, int) or isinstance(click_count, bool) or click_count < 0:
                 raise BrowserSessionError("This page couldn't receive pointer input")

@@ -4,14 +4,17 @@ Select with CORSIA_NATIVE_BROWSER_TEST=1 and absolute binary/Chrome paths.
 Generic integration suites do not install or launch this optional native dependency.
 """
 import asyncio
+import json
 import os
 from pathlib import Path
 import shutil
 
 import psutil
 import pytest
+from host_access import browser_cdp, browser_pane, browser_screencast
 from host_access import browser_identity as identity
 from host_access.browser_sessions import BrowserSessionError, BrowserSessionOwner
+from ws import browser_clipboard
 
 pytestmark = [pytest.mark.integration, pytest.mark.skipif(
     os.environ.get('CORSIA_NATIVE_BROWSER_TEST') != '1', reason='explicit native-browser job only',
@@ -94,3 +97,63 @@ async def test_native_browser_success_failure_close_and_reopen(native_owner, tmp
     await owner.close_thread('native')
     await owner.shutdown()
     await owner.shutdown()
+
+
+async def test_native_pane_fits_both_shapes_on_each_tab(native_owner, monkeypatch):
+    thread, connection = 'native-fit', 'pane'
+    monkeypatch.setattr(browser_pane.PROCESS_OWNER, 'browser_sessions', lambda: native_owner)
+    assert not (await native_owner.run(thread, ('open', 'about:blank'))).startswith('Error:')
+    previous_endpoint = None
+    try:
+        for tab in range(2):
+            if tab:
+                assert not (await native_owner.run(thread, ('tab', 'new'))).startswith('Error:')
+                browser_pane.clear_page_endpoint(thread, connection)
+            endpoint = await native_owner.page_endpoint(thread)
+            if previous_endpoint is not None:
+                assert endpoint != previous_endpoint
+            previous_endpoint = endpoint
+            for width, height in ((700, 1400), (1400, 500)):
+                await browser_pane.match_pane(thread, browser_pane.PaneAppearance(width, height, 1, 'dark'))
+                async with browser_cdp.CdpClient(endpoint) as cdp:
+                    metrics = await cdp.call('Page.getLayoutMetrics')
+                viewport = metrics['cssLayoutViewport']
+                assert (viewport['clientWidth'], viewport['clientHeight']) == (width, height)
+                frames = asyncio.Queue()
+                cast = browser_screencast.PaneScreencast(endpoint, lambda message: frames.put_nowait(json.loads(message)))
+                cast.capture_at(width, height)
+                running = asyncio.create_task(cast.run())
+                try:
+                    frame = await asyncio.wait_for(frames.get(), 10)
+                    assert frame['data']
+                    assert (frame['metadata']['deviceWidth'], frame['metadata']['deviceHeight']) == (width, height)
+                finally:
+                    running.cancel()
+                    await asyncio.gather(running, return_exceptions=True)
+    finally:
+        browser_pane.clear_page_endpoint(thread, connection)
+
+
+async def test_native_pane_clipboard_selection_and_paste(native_owner, monkeypatch):
+    thread, connection = 'native-clipboard', 'pane'
+    monkeypatch.setattr(browser_pane.PROCESS_OWNER, 'browser_sessions', lambda: native_owner)
+    assert not (await native_owner.run(thread, ('open', 'about:blank'))).startswith('Error:')
+    endpoint = await native_owner.page_endpoint(thread)
+    try:
+        async with browser_cdp.CdpClient(endpoint) as cdp:
+            await cdp.call('Runtime.evaluate', expression=(
+                "document.body.innerHTML = '<p id=source>Copied text</p><input id=destination>';"
+                "const range = document.createRange(); range.selectNodeContents(document.querySelector('#source'));"
+                "getSelection().removeAllRanges(); getSelection().addRange(range);"))
+        replies = []
+        await browser_clipboard.handle(thread, connection, {'type': 'clipboard_selection', 'id': 1}, replies.append)
+        assert replies == [{'type': 'clipboard_selection', 'id': 1, 'text': 'Copied text'}]
+        async with browser_cdp.CdpClient(endpoint) as cdp:
+            await cdp.call('Runtime.evaluate', expression="document.querySelector('#destination').focus()")
+        await browser_clipboard.handle(thread, connection, {'type': 'clipboard_paste', 'text': 'Pasted text'}, replies.append)
+        async with browser_cdp.CdpClient(endpoint) as cdp:
+            result = await cdp.call('Runtime.evaluate', expression="document.querySelector('#destination').value", returnByValue=True)
+        assert result['result']['value'] == 'Pasted text'
+        assert len(replies) == 1
+    finally:
+        browser_pane.clear_page_endpoint(thread, connection)
