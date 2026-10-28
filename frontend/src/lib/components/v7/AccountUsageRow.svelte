@@ -172,6 +172,8 @@
 		.compact:has(:global(.link-target)):has(:global(.provider-account-policy-controls)) > strong,
 		.compact:has(:global(.link-target)):has(:global(.provider-account-policy-controls)) > .usage { grid-column: -4 / -3; }
 		.compact:has(:global(.link-target)):has(:global(.provider-account-policy-controls)) :global(.link-target .btn) { grid-column: -3 / -2; }
+		/* The 44px action makes the name line taller; the rank centres on that line, as the name does, instead of staying at the top. */
+		.compact:has(:global(.link-target)) > .order { grid-row: 1; align-self: center; }
 		.compact:has(:global(.link-target)) strong .name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 	}
 </style>

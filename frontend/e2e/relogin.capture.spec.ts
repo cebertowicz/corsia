@@ -308,12 +308,22 @@ test.describe('Sign in again review frames', () => {
 						const sign = box([...el.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Sign in') ?? null)!;
 						const toggle = box(el.querySelector('.provider-account-policy-controls'))!;
 						const name = box(el.querySelector('strong'))!;
-						return { signHeight: sign.height, signWidth: sign.width, signLeft: sign.left, signRight: sign.right, toggleLeft: toggle.left, toggleRight: toggle.right, nameRight: name.right, nameTop: name.top, signTop: sign.top, signBottom: sign.bottom, toggleTop: toggle.top, toggleBottom: toggle.bottom };
+						const rank = box(el.querySelector('.order'))!;
+						return { rankCentre: rank.top + rank.height / 2, nameCentre: name.top + name.height / 2, signCentre: sign.top + sign.height / 2, signHeight: sign.height, signWidth: sign.width, signLeft: sign.left, signRight: sign.right, toggleLeft: toggle.left, toggleRight: toggle.right, nameRight: name.right, nameTop: name.top, signTop: sign.top, signBottom: sign.bottom, toggleTop: toggle.top, toggleBottom: toggle.bottom };
 					});
 					console.log(`G ${id} ${JSON.stringify(geometry)}`);
 					expect(geometry.signRight).toBeLessThanOrEqual(geometry.toggleLeft + 0.5);
 					expect(geometry.nameRight).toBeLessThanOrEqual(geometry.signLeft + 0.5);
+					// The rank number sits on the name line's centre, whatever that line's height.
+					expect(Math.abs(geometry.rankCentre - geometry.nameCentre)).toBeLessThanOrEqual(2);
 				}
+				// A row with no Sign in keeps its rank on the name line too.
+				const plain = await page.locator('#vendor-account-cc-3').evaluate((el) => {
+					const centre = (node: Element | null) => { const r = node!.getBoundingClientRect(); return r.top + r.height / 2; };
+					return { rank: centre(el.querySelector('.order')), name: centre(el.querySelector('strong')) };
+				});
+				console.log(`G plain ${JSON.stringify(plain)}`);
+				expect(Math.abs(plain.rank - plain.name)).toBeLessThanOrEqual(2);
 				await shot(page, 'g-signed-out-with-rollover', tag, 'cc-2');
 				// The long name on the same kind of row.
 				await shot(page, 'g2-signed-out-with-rollover-long-name', tag, 'cc-4');
