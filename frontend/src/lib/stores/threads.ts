@@ -1,4 +1,5 @@
-import { writable, derived, get } from 'svelte/store';
+import { writable, derived } from 'svelte/store';
+import { activeThreadId } from './activeThreadId';
 import { turnStates, type ThreadTurnState, type TurnIdentity } from '../ws/turnState';
 import type { ThreadModelSwitchState } from './threadModelSwitch';
 export interface Thread extends ThreadModelSwitchState {
@@ -122,17 +123,7 @@ export function demoteAgentLocally(threadId: string): void {
 	threads.update((rows) => rows.map((r) => (r.id === threadId ? { ...r, ...off } : r)));
 }
 
-// A draft choice belongs to the current chat surface and is discarded when it changes.
-export const draftAccountId = writable<string | null>(null);
-const activeThreadIdStore = writable<string | null>(null);
-export const activeThreadId = {
-	subscribe: activeThreadIdStore.subscribe,
-	set(id: string | null) {
-		activeThreadIdStore.set(id);
-		draftAccountId.set(null);
-	},
-	update(fn: (id: string | null) => string | null) { this.set(fn(get(activeThreadIdStore))); },
-};
+export { activeThreadId, draftAccountId } from './activeThreadId';
 export const messages = writable<Message[]>([]);
 /** Whether `threadId` has a live turn, read from the per-thread turn states. */
 export function isThreadTurnActive(
