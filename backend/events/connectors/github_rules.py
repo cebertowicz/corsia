@@ -24,8 +24,10 @@ from events.connectors.github import CHECK_SUITE_PR, MANIFEST
 from events.envelope import EventEnvelope, normalize
 from events.github_mapper import ends_artifact
 from events.identity_formula import MalformedEventError
+from events.platform import Filter
 from events.resolve import Target
 from events.webhook_rules import apply_webhook_rules_sync, record_rule_ride_sync
+from infra.database import get_db
 from infra.product_events import emit_product_event
 
 if TYPE_CHECKING:
@@ -106,7 +108,7 @@ def rule_scope(
 def apply_routed_rules(
     prepared: PreparedRoute, internal_event: str, payload: dict[str, Any],
     selected_pr: dict[str, Any] | None, routing_state: dict[str, Any],
-    wake_reason: str | None = None, scope: RuleScope | None = None, target_filter=None,
+    wake_reason: str | None = None, scope: RuleScope | None = None, target_filter: Filter | None = None,
 ) -> None:
     """Deliver what rules add, then drop or annotate the routed delivery in ``prepared``.
 
@@ -126,14 +128,19 @@ def apply_routed_rules(
     # person-account marker filters only the thread that made the tool call.
     if prepared.result is None and prepared.thread_id is not None and target_filter:
         target = routed_targets(prepared.thread_id, wake_reason, routing_state)[0]
-        if target_filter(target, None):
-            drop_delivery(prepared, internal_event, "self_caused")
+        db = get_db()
+        try:
+            reason = target_filter(target, db)
+        finally:
+            db.close()
+        if reason:
+            drop_delivery(prepared, internal_event, reason)
 
 
 def _apply(
     prepared: PreparedRoute, internal_event: str, payload: dict[str, Any],
     selected_pr: dict[str, Any] | None, routing_state: dict[str, Any],
-    wake_reason: str | None, scope: RuleScope, target_filter,
+    wake_reason: str | None, scope: RuleScope, target_filter: Filter | None,
 ) -> None:
     try:
         envelope = scope.envelope or _envelope(internal_event, payload, selected_pr)

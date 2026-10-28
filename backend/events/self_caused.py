@@ -56,17 +56,3 @@ def delivery_is_self_caused(connector: str, delivery_id: str | None, thread_id: 
     finally:
         if own_connection:
             db.close()
-
-
-def is_self_caused(connector: str, event_key: str, thread_id: str) -> bool:
-    from events.rules import RETENTION
-
-    cutoff = (datetime.now(timezone.utc) - RETENTION).isoformat()
-    db = get_db()
-    try:
-        return db.execute(
-            "SELECT 1 FROM self_caused_events WHERE connector=? AND event_key=? AND thread_id=? AND at>=?",
-            (connector, event_key, thread_id, cutoff),
-        ).fetchone() is not None
-    finally:
-        db.close()

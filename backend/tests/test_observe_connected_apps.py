@@ -7,8 +7,9 @@ from unittest.mock import patch
 
 import pytest
 
-from events.self_caused import is_self_caused, record_result
+from events.self_caused import record_result
 from infra import state
+from infra.database import get_db
 from registry.tool_result_observation import notice_for_result
 from tests.test_observe_rules import _agent, _owner, _tool, _write
 from tools.mcp_stamp import ConnectedAppResult
@@ -18,6 +19,17 @@ APP = "https://api.githubcopilot.com"
 
 def result(tool: str, text: str, app: str = APP) -> ConnectedAppResult:
     return ConnectedAppResult(text, {"mcp_app": app, "mcp_tool": tool})
+
+
+def marker_exists(thread: str) -> bool:
+    db = get_db()
+    try:
+        return db.execute(
+            "SELECT 1 FROM self_caused_events WHERE connector=? AND event_key=? AND thread_id=?",
+            ("github", "issue_comment:123", thread),
+        ).fetchone() is not None
+    finally:
+        db.close()
 
 
 @pytest.mark.asyncio
@@ -49,7 +61,7 @@ async def test_comment_marked_without_observe_rule_and_routing_suppresses_only_c
     notice_for_result("a", "turn", {}, pr)
     comment = result("add_issue_comment", '{"id":"123","url":"https://github.com/owner/repo/pull/7#issuecomment-123"}')
     record_result("a", comment)
-    assert is_self_caused("github", "issue_comment:123", "a")
+    assert marker_exists("a")
     assert notice_for_result("a", "turn", {}, comment) == []
     payload = {"action": "created", "repository": {"full_name": "owner/repo"},
                "issue": {"number": 7, "pull_request": {"url": "pr"}},
@@ -125,7 +137,7 @@ async def test_registry_marks_before_return_for_native_and_harness_paths(isolate
     assert "Registered pull request owner/repo#7 to you." in pr
     assert "reminder" in pr and "reminder" in comment
     assert _owner("owner/repo#7") == "a"
-    assert is_self_caused("github", "issue_comment:123", "a")
+    assert marker_exists("a")
 
 
 def test_registration_failure_notifies_partial_changes_once(isolated_db, monkeypatch):
@@ -161,4 +173,4 @@ def test_wrong_app_never_marks(isolated_db):
     _agent("a")
     output = '{"id":"123","url":"https://github.com/owner/repo/pull/7#issuecomment-123"}'
     record_result("a", result("add_issue_comment", output, "https://wrong.example"))
-    assert not is_self_caused("github", "issue_comment:123", "a")
+    assert not marker_exists("a")
