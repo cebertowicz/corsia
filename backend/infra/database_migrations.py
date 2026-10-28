@@ -59,6 +59,7 @@ grows long enough that squashing it before release becomes its own project,
 this mechanism is not paying for itself and should be reconsidered rather than
 extended.
 """
+
 from __future__ import annotations
 
 import logging
@@ -70,6 +71,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+
 import infra.startup_progress as startup_progress
 from infra.checkpoint_schema import CHECKPOINT_ENTRY_SEARCH_SCHEMA_SQL
 from infra.database import write_transaction
