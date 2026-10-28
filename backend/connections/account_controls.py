@@ -322,7 +322,7 @@ async def stop_all_signins() -> None:
             raise result
 
 
-async def verify(account_id: str, *, refresh_default: bool = True) -> dict[str, Any]:
+async def verify(account_id: str) -> dict[str, Any]:
     """Re-read vendor sign-in; only a definite signed-out answer flips a signed-in account.
 
     Verify never lifts a signed-out account or its hold; only sign-in does.
@@ -334,7 +334,7 @@ async def verify(account_id: str, *, refresh_default: bool = True) -> dict[str, 
     binary = await _binary(provider)
     signed_in, _, cause = ((None, {}, profile_for(provider).missing_cause) if binary is None
                            else await _vendor_status(provider, account["source_home"], binary))
-    if refresh_default and provider in VENDORS:
+    if provider in VENDORS:
         await refresh_default_identity(provider)
     if account["state"] == "signed_in" and signed_in is False:
         account = await run_in_db(change_state, account_id, "signed_out", expected_revision=account["revision"])
@@ -346,6 +346,18 @@ async def verify(account_id: str, *, refresh_default: bool = True) -> dict[str, 
         except Exception as exc:
             log.warning("account %s discovery failed: %s", account_id, type(exc).__name__)
     return {"account_id": account_id, "vendor_signed_in": signed_in, "cause": cause, "state": account["state"]}
+
+
+async def sign_out_expired(account_id: str) -> dict[str, Any]:
+    """Sign out an added account whose own Turn ended on the vendor's exact expired-login error.
+
+    That error is the definite answer, as it is for the Default source, so a stale
+    successful status read cannot leave the account selectable with no way to sign in.
+    """
+    account = await _custom(account_id)
+    if account["state"] != "signed_in":
+        return account
+    return await run_in_db(change_state, account_id, "signed_out", expected_revision=account["revision"])
 
 
 async def vendor_logout(account: dict) -> dict[str, Any]:
