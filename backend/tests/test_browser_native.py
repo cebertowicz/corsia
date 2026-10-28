@@ -16,7 +16,7 @@ from urllib.parse import parse_qs, urlsplit
 
 import psutil
 import pytest
-from host_access import browser_cdp, browser_pane, browser_screencast
+from host_access import browser_cdp, browser_cli, browser_pane, browser_screencast
 from host_access import browser_identity as identity
 from host_access.browser_sessions import BrowserSessionError, BrowserSessionOwner
 from ws import browser_clipboard, browser_stream
@@ -80,6 +80,46 @@ async def test_display_secret_and_sign_in_are_distinguished_in_chrome(native_own
         await cdp.call('Runtime.evaluate', expression="""document.body.innerHTML = `
           <div><input type="password" readonly onfocus="this.readOnly=false"><button>Sign in</button></div>`""")
     assert len((await browser_cdp.page_password_probe(endpoint, {})).visible_nodes) == 1
+
+
+async def test_pane_open_is_the_stock_clients_current_page(native_owner, monkeypatch):
+    async def serve(reader, writer):
+        # Read the whole request first: closing with unread bytes resets the connection instead.
+        await reader.readuntil(b'\r\n\r\n')
+        writer.write(b'HTTP/1.1 200 OK\r\nContent-Length: 12\r\nConnection: close\r\n\r\nBrowser test')
+        await writer.drain()
+        writer.close()
+        await writer.wait_closed()
+
+    server = await asyncio.start_server(serve, '127.0.0.1', 0)
+    port = server.sockets[0].getsockname()[1]
+    url = f'http://127.0.0.1:{port}/'
+    monkeypatch.setattr(browser_pane.PROCESS_OWNER, 'browser_sessions', lambda: native_owner)
+    try:
+        opened = await browser_pane.open_url('native-pane-open', url)
+        assert not opened.startswith('Error:'), f'pane open={opened!r}'
+        runtime = native_owner._sessions['native-pane-open']
+        binding = runtime.record.binding
+        assert binding is not None, f'pane open={opened!r}'
+        # Read through the owner on the existing session only, so a relaunch fails instead of hiding a lost
+        # binding. Like BrowserOpenTool, suppress the one-time notice before parsing get url.
+        owner_url = await native_owner.run('native-pane-open', ['get', 'url'], session='existing', notice=False)
+        binding_after_owner = (await native_owner._observe(runtime)).binding
+        result = await native_owner._invoke(native_owner._session_argv(runtime, ['get', 'url']), timeout=30)
+        binding_after_raw = (await native_owner._observe(runtime)).binding
+        diagnostic = (f'pane open={opened!r}; agent get url={owner_url!r}; '
+                      f'raw returncode={result.returncode}, stdout={result.stdout!r}, stderr={result.stderr!r}')
+        assert browser_cli.json_object(owner_url).get('url') == url, diagnostic
+        assert binding_after_owner == binding, diagnostic
+        assert result.returncode == 0, diagnostic
+        data = browser_cli.json_object(result.stdout).get('data', {})
+        assert data.get('lifecycle', {}).get('reused') is True, diagnostic
+        assert data.get('lifecycle', {}).get('launched') is False, diagnostic
+        assert binding_after_raw == binding, diagnostic
+        assert data.get('url') == url, diagnostic
+    finally:
+        server.close()
+        await server.wait_closed()
 
 
 async def test_native_open_outcome_remains_cleanable(native_owner):
@@ -168,7 +208,7 @@ async def test_native_pane_fits_both_shapes_on_each_tab(native_owner, monkeypatc
         browser_pane.clear_page_endpoint(thread, connection)
 
 
-async def test_native_pane_clipboard_selection_and_paste(native_owner, monkeypatch):
+async def test_native_pane_clipboard_copy_cut_and_paste(native_owner, monkeypatch):
     thread, connection = 'native-clipboard', 'pane'
     monkeypatch.setattr(browser_pane.PROCESS_OWNER, 'browser_sessions', lambda: native_owner)
     assert not (await native_owner.run(thread, ('open', 'about:blank'))).startswith('Error:')
@@ -200,7 +240,27 @@ async def test_native_pane_clipboard_selection_and_paste(native_owner, monkeypat
                 " frame.contentWindow.getSelection().addRange(range); done(); })"), awaitPromise=True)
         await browser_clipboard.handle(thread, connection, {'type': 'clipboard_selection', 'id': 2}, replies.append)
         assert replies[2:] == [{'type': 'clipboard_selection', 'id': 2,
-                                'error': "CORSIA can’t copy from inside this embedded area yet. Your clipboard wasn’t changed."}]
+                                'error': "CORSIA can’t copy from inside this embedded area. Your clipboard wasn’t changed."}]
+        # Cut deletes only the copied selection, in a text field and in an editable region.
+        for request, setup, read in (
+                (3, "document.body.innerHTML = '<input id=field value=\"Cut me here\">';"
+                    "const field = document.querySelector('#field'); field.focus(); field.setSelectionRange(0, 7);",
+                 "document.querySelector('#field').value"),
+                (4, "document.body.innerHTML = '<div id=editor contenteditable>Cut me here</div>';"
+                    "const editor = document.querySelector('#editor'); editor.focus();"
+                    "const range = document.createRange(); range.setStart(editor.firstChild, 0); range.setEnd(editor.firstChild, 7);"
+                    "getSelection().removeAllRanges(); getSelection().addRange(range);",
+                 "document.querySelector('#editor').textContent")):
+            async with browser_cdp.CdpClient(endpoint) as cdp:
+                await cdp.call('Runtime.evaluate', expression=setup)
+            replies.clear()
+            await browser_clipboard.handle(thread, connection, {'type': 'clipboard_selection', 'id': request}, replies.append)
+            await browser_clipboard.handle(thread, connection, {'type': 'clipboard_cut', 'id': request, 'text': 'Cut me '}, replies.append)
+            async with browser_cdp.CdpClient(endpoint) as cdp:
+                result = await cdp.call('Runtime.evaluate', expression=read, returnByValue=True)
+            assert replies == [{'type': 'clipboard_selection', 'id': request, 'text': 'Cut me '},
+                               {'type': 'pane_error', 'error': None}]
+            assert result['result']['value'] == 'here'
     finally:
         browser_pane.clear_page_endpoint(thread, connection)
 

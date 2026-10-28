@@ -155,7 +155,7 @@ async def test_copy_inside_an_embedded_frame_says_the_clipboard_was_kept(monkeyp
     messages = []
     await browser_clipboard.handle('thread', 'pane', {'type': 'clipboard_selection', 'id': 1}, messages.append)
     assert messages == [{'type': 'clipboard_selection', 'id': 1,
-                         'error': "CORSIA can’t copy from inside this embedded area yet. Your clipboard wasn’t changed."}]
+                         'error': "CORSIA can’t copy from inside this embedded area. Your clipboard wasn’t changed."}]
 
 
 @pytest.mark.asyncio
