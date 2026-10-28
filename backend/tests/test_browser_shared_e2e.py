@@ -103,12 +103,18 @@ document.querySelector('#closed-host').attachShadow({mode: 'closed'}).innerHTML 
 # A one-document sign-in: submitting hides the password field and shows a code field.
 SIGN_IN = """<!doctype html><title>Sign in</title>
 <input id=user value=person><input type=password id=pw value=hunter2><input id=code value=123456 hidden>"""
+# A sign-in held only in a session cookie (no expiry), as many sites keep one.
+SESSION_SIGN_IN = """<!doctype html><title>Signed in</title><script>
+document.cookie = location.pathname.slice(1, -5) + '=1; path=/'; document.title = document.cookie;
+</script>"""
+COOKIES = """<!doctype html><title>Cookies</title><script>document.title = document.cookie || 'none';</script>"""
 
 
 @contextmanager
 def fixture_server():
     pages = {"/plain.html": PLAIN.encode(), "/keyboard.html": KEYBOARD.encode(), "/form.html": FORM.encode(), "/react.html": REACT.encode(),
-             "/writes.html": WRITES.encode(), "/probe.html": PROBE.encode(), "/sign-in.html": SIGN_IN.encode()}
+             "/writes.html": WRITES.encode(), "/probe.html": PROBE.encode(), "/sign-in.html": SIGN_IN.encode(),
+             "/holder.html": SESSION_SIGN_IN.encode(), "/copy.html": SESSION_SIGN_IN.encode(), "/cookies.html": COOKIES.encode()}
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):  # noqa: N802 - BaseHTTPRequestHandler protocol name
@@ -175,6 +181,37 @@ async def test_scripted_steps_guard_a_mock_password_page(tmp_path, monkeypatch):
     finally:
         browser_control.pane_disconnected(thread_id, "pane")
         await owner.close_thread(thread_id)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_a_sign_in_outlives_its_browser_closing_and_a_copys_reaches_the_profile_in_place(monkeypatch):
+    """A session-cookie sign-in survives the saved profile closing; one made on a copy reaches it without a reload."""
+    if os.environ.get("CORSIA_BROWSER_E2E") != "1":
+        pytest.skip("set CORSIA_BROWSER_E2E=1 in the isolated host browser environment")
+    from host_access import browser_launch, browser_session_launch
+    owner_key = f"signin-e2e-{uuid4().hex}"
+    monkeypatch.setattr(browser_launch, "_owner_key", lambda thread_id: owner_key)
+    holder, other = f"signin-holder-{uuid4().hex}", f"signin-copy-{uuid4().hex}"
+    owner = BrowserSessionOwner(namespace="corsia-signin-e2e", instance_key=uuid4().hex)
+    try:
+        with fixture_server() as origin:
+            assert (await owner.run(holder, ("open", f"{origin}/holder.html"))).startswith("holder=1")
+            await owner.close_thread(holder)
+            assert (await owner.run(holder, ("open", f"{origin}/cookies.html"))).startswith("holder=1")
+            await owner.run(holder, ("open", f"{origin}/plain.html"))
+            assert "copy=1" in await owner.run(other, ("open", f"{origin}/copy.html"))
+            assert owner._sessions[other].record.copy_of == holder
+            await owner.close_thread(other)
+            assert json.loads(await owner.run(holder, ("get", "url"), session="existing"))["url"] == f"{origin}/plain.html"
+            assert "copy=1" in await owner.run(holder, ("open", f"{origin}/cookies.html"))
+    finally:
+        await owner.shutdown()
+        profile = browser_launch.profile_dir(holder)
+        assert profile is not None
+        browser_session_launch.kept_signins_path(str(profile)).unlink(missing_ok=True)
+        import shutil
+        shutil.rmtree(profile, ignore_errors=True)
 
 
 def page_endpoint(rendered: str) -> str:

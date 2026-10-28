@@ -252,6 +252,7 @@ class BrowserSessionOwner:
                 return
             runtime.record = replace(runtime.record, terminal_state="resetting")
             try:
+                await launch.keep_copy_signins(self, runtime)
                 await browser_session_commands.end_session(runtime.record.thread_id, runtime.record.session)
                 if runtime.attempt is not None:
                     runtime.attempt = runtime.attempt.settled()
