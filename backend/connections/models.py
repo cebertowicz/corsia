@@ -166,12 +166,27 @@ def connection_available(provider: str, db=None) -> bool:
     This is the gate connection-conditional tools hang off.
     """
     _db = db or get_db()
-    row = _db.execute(
-        "SELECT status FROM connections WHERE provider = ?", (provider,)
-    ).fetchone()
-    if not db:
-        _db.close()
-    return bool(row) and row["status"] == ConnectionStatus.AVAILABLE.value
+    try:
+        row = _db.execute(
+            "SELECT status FROM connections WHERE provider = ?", (provider,)
+        ).fetchone()
+        if not row:
+            return False
+        if row["status"] == ConnectionStatus.AVAILABLE.value:
+            return True
+        if provider not in VENDORS or row["status"] == ConnectionStatus.NOT_INSTALLED.value:
+            return False
+        from connections import resolve_builtin_binary
+        from connections.account_evidence import current_ready_discovery
+        from connections.vendor_accounts import list_accounts
+
+        if resolve_builtin_binary(provider, db=_db)[1] is None:
+            return False
+        return any(current_ready_discovery(account) is not None
+                   for account in list_accounts(provider=provider, db=_db))
+    finally:
+        if not db:
+            _db.close()
 
 
 SOURCE_CHECK_KEY = "source_check"

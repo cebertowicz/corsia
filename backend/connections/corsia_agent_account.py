@@ -202,7 +202,8 @@ def bind_corsia_agent_account(thread_id: str, account_id: str, *, user_id: str,
         return {"bound": True, "reason": None}
 
 
-async def finish_signin(operation: Any, receipt: ReceiptFence | None, binary: str) -> None:
+async def finish_signin(operation: Any, receipt: ReceiptFence | None, binary: str, *,
+                        target_account_id: str | None = None) -> None:
     """Read a completed sign-in's models once, then record its first-run outcome.
 
     ``operation`` is the sign-in record. Only a new inference-vendor login with a
@@ -213,12 +214,13 @@ async def finish_signin(operation: Any, receipt: ReceiptFence | None, binary: st
     from infra.db_async import run_in_db
     from infra.state.ws import notify_models_changed
 
-    reads = operation.provider in VENDORS and operation.duplicate_of is None and receipt is not None
-    refresh, observed = await _refresh(operation, receipt, binary) if reads else ("skipped", None)
+    target = target_account_id or operation.account_id
+    reads = operation.provider in VENDORS and (operation.duplicate_of is None or target_account_id is not None) and receipt is not None
+    refresh, observed = await _refresh(operation, receipt, binary, account_id=target) if reads else ("skipped", None)
     bind = operation.bind
     if bind is not None:
         try:
-            bind.outcome, bind.bind_reason = await run_in_db(signin_outcome, operation.account_id, refresh,
+            bind.outcome, bind.bind_reason = await run_in_db(signin_outcome, target, refresh,
                                                              observed, bind=bind)
         except Exception as exc:  # noqa: BLE001 - a poller waits on this outcome, so it must always land
             log.warning("account %s sign-in outcome failed: %s", operation.account_id, type(exc).__name__)
@@ -227,14 +229,14 @@ async def finish_signin(operation: Any, receipt: ReceiptFence | None, binary: st
         notify_models_changed()
 
 
-async def _refresh(operation: Any, receipt: ReceiptFence, binary: str) -> tuple[str, RefreshObservation | None]:
+async def _refresh(operation: Any, receipt: ReceiptFence, binary: str, *, account_id: str) -> tuple[str, RefreshObservation | None]:
     """Read the new login's models once; how that ended, and what a ready read left."""
     from connections import harness_models
     from infra.time import utc_now_iso
 
     try:
         result = await harness_models.refresh_provider(operation.provider, reason="account-signin",
-            account_id=operation.account_id, expected_receipt=receipt, binary=binary)
+            account_id=account_id, expected_receipt=receipt, binary=binary)
     except Exception as exc:  # noqa: BLE001 - a failed read leaves the sign-in completed and unchecked
         log.warning("account %s discovery failed: %s", operation.account_id, type(exc).__name__)
         return "failed", None
