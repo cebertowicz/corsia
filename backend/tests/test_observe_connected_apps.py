@@ -150,6 +150,13 @@ def test_registration_failure_notifies_partial_changes_once(isolated_db, monkeyp
     assert notified == [changed]
 
 
+def test_turnless_result_registers_like_the_shell(isolated_db):
+    _agent("a")
+    pr = result("create_pull_request", '{"id":"7","url":"https://github.com/owner/repo/pull/7"}')
+    assert notice_for_result("a", None, {}, pr) == ["Registered pull request owner/repo#7 to you."]
+    assert _owner("owner/repo#7") == "a"
+
+
 def test_wrong_app_never_marks(isolated_db):
     _agent("a")
     output = '{"id":"123","url":"https://github.com/owner/repo/pull/7#issuecomment-123"}'

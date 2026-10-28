@@ -13,23 +13,30 @@ from tools.shell_output import registration_warning as build_registration_warnin
 log = logging.getLogger(__name__)
 
 
-def observe_current_result(result: object, args: dict) -> object:
+async def observe_in_db(result: object, args: dict) -> object:
+    """Observe on the DB pool, which doesn't carry context variables, so read the turn first."""
+    from infra import state
+    from infra.db_async import run_in_db
+
+    turn = state._current_turn_identity.get(None)
+    return await run_in_db(observe_current_result, result, args,
+                           state._current_thread_id.get(None), getattr(turn, "turn_id", None))
+
+
+def observe_current_result(result: object, args: dict, thread_id: str | None, turn_id: str | None) -> object:
     """Observe the clean result before any tool notices are appended."""
     from events.self_caused import record_result
-    from infra import state
     from loguru import logger
     from tools.mcp_stamp import restamp
 
-    thread_id = state._current_thread_id.get(None)
-    turn = state._current_turn_identity.get(None)
     notices = []
     try:
         record_result(thread_id, result)
     except Exception:
         logger.exception("Could not record connected-app event identity")
         notices.append("Couldn't record this result's event identity. Your own event may wake you again.")
-    if thread_id and turn is not None:
-        notices.extend(notice_for_result(thread_id, turn.turn_id, args, result))
+    if thread_id:
+        notices.extend(notice_for_result(thread_id, turn_id, args, result))
     return restamp(result, str(result) + "\n\n" + "\n".join(notices)) if notices else result
 
 
@@ -53,10 +60,14 @@ def observe_with_warning(thread_id: str, tool: str | None, args: dict, content: 
     return told, warning
 
 
-def notice_for_result(thread_id: str, turn_id: str, args: dict, result: object) -> list[str]:
-    """Keep an observer failure from withholding a completed tool result."""
+def notice_for_result(thread_id: str, turn_id: str | None, args: dict, result: object) -> list[str]:
+    """Keep an observer failure from withholding a completed tool result.
+
+    With no turn (a fork), register with no origin, as the shell path does.
+    """
+    origin = RegistrationOrigin(thread_id, turn_id, "observe_rule") if turn_id else None
     told, warning = observe_with_warning(
         thread_id, None, args, str(result), metadata=result_stamp(result),
-        is_error=is_error_result(result), origin=RegistrationOrigin(thread_id, turn_id, "observe_rule"),
+        is_error=is_error_result(result), origin=origin,
     )
     return told + ([warning] if warning else [])
