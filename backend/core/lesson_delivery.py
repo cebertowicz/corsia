@@ -261,16 +261,23 @@ def start_trials(
             })
     if not pending:
         return delivered
+
+    def unrecorded(tx) -> list[tuple[TrialDelivery, Variant | None]]:
+        # Re-read under the write lock: an overlapping start of this task may have recorded first.
+        now, _prior = _receipts(tx, thread_id=thread_id, node_id=node_id, trials=[trial for trial, _ in pending])
+        return [(trial, variant) for trial, variant in pending
+                if (trial.lesson_id, trial.behavioral_sha256) not in now]
+
     try:
         with write_transaction(db, scope="trial_draw") as tx:
-            for trial, variant in pending:
+            for trial, variant in unrecorded(tx):
                 _insert(
                     tx, thread_id=thread_id, node_id=node_id, trial=trial, variant=variant,
                     checkpoint_generation_id=checkpoint_generation_id,
                 )
     except Exception:
         with write_transaction(db, scope="trial_omission") as tx:
-            for trial, _variant in pending:
+            for trial, _variant in unrecorded(tx):
                 _insert(
                     tx, thread_id=thread_id, node_id=node_id, trial=trial, variant=None,
                     checkpoint_generation_id=checkpoint_generation_id,

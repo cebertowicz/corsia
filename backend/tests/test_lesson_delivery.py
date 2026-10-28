@@ -298,6 +298,25 @@ def test_start_trials_records_both_halves_once_per_task(db, monkeypatch):
     ]
 
 
+def test_overlapping_starts_of_one_task_record_one_receipt(db, monkeypatch):
+    from core import lesson_delivery
+
+    _resolved(monkeypatch, [_trial()])
+    node_id = _node("with")
+    start_trials(db, thread_id="thread", node_id=node_id)
+    real = lesson_delivery._receipts
+    reads = []
+
+    def stale_first_read(*args, **kwargs):
+        # The second start read before the first one wrote.
+        reads.append(1)
+        return ({}, set()) if len(reads) == 1 else real(*args, **kwargs)
+
+    monkeypatch.setattr(lesson_delivery, "_receipts", stale_first_read)
+    assert len(start_trials(db, thread_id="thread", node_id=node_id)) == 1
+    assert db.execute("SELECT COUNT(*) FROM guidance_loads WHERE node_id=?", (node_id,)).fetchone()[0] == 1
+
+
 def test_a_without_draw_is_recorded_and_a_crossover_needs_the_same_thread(db, monkeypatch):
     _resolved(monkeypatch, [_trial()])
     with_node = _node("with")
