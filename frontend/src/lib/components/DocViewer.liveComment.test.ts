@@ -81,6 +81,93 @@ async function answer(ask: Record<string, any>, fields = {}) {
 		reserved: true, ...fields });
 }
 const released = () => wire.frames.filter(frame => frame.type === 'doc_release');
+it('collapses the selected text before returning focus on dismissal', async () => {
+	vi.stubGlobal('innerWidth', 1440);
+	vi.spyOn(EditorView.prototype, 'coordsAtPos').mockReturnValue({ left: 20, right: 30, top: 20, bottom: 30 });
+	await open(); await select(); await compose();
+	const view = EditorView.findFromDOM(host.querySelector<HTMLElement>('.cm-editor')!)!;
+	expect(view.state.selection.main.empty).toBe(false);
+	document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })); flushSync();
+	expect(document.activeElement).toBe(view.contentDOM);
+	expect(view.state.selection.main.empty).toBe(true);
+	view.contentDOM.dispatchEvent(new KeyboardEvent('keydown', { key: 'Backspace', bubbles: true }));
+	expect(view.state.doc.toString()).toBe('alpha bet gamma');
+});
+it('keeps an open draft focused when a live session is replaced', async () => {
+	await open(); await select(); await compose();
+	const input = document.querySelector<HTMLTextAreaElement>('.composer textarea')!;
+	input.focus();
+	connectionState.set('disconnected'); connectionState.set('connected');
+	await vi.waitFor(() => expect(wire.frames.filter(frame => frame.type === 'doc_open').length).toBeGreaterThan(1));
+	const ask = wire.frames.findLast(frame => frame.type === 'doc_open')!;
+	const replacement = new Y.Doc(); replacement.getText('text').insert(0, 'NEW alpha beta gamma');
+	emit('doc_opened', { type: 'doc_opened', live: true, writable: true, artifact_id: 'artifact', store_id: 'new-store',
+		request_id: ask.request_id, update: encodeUpdate(Y.encodeStateAsUpdate(replacement)), vector: encodeUpdate(Y.encodeStateVector(replacement)), pending: false, held: null });
+	await vi.waitFor(() => expect(host.querySelector('.cm-content')?.textContent).toBe('NEW alpha beta gamma'));
+	expect(document.querySelector('.composer textarea')).toBe(input);
+	expect(document.activeElement).toBe(input);
+	expect(input.value).toBe('Keep my body');
+	input.value += ' more'; input.dispatchEvent(new Event('input', { bubbles: true })); flushSync();
+	expect(get(commentDraft)?.body).toBe('Keep my body more');
+	expect(host.querySelector('.cm-content')?.textContent).toBe('NEW alpha beta gamma');
+	replacement.destroy();
+});
+it.each([
+	['reply', { replies: [{ id: 'reply', author: 'agent', author_kind: 'agent', body: 'A reply', created_at: '2026-10-07T00:00:00Z' }] }],
+	['resolution', { resolved: true }],
+	['suggestion creation', { replacement: 'A revised alpha' }],
+	['suggestion acceptance', { replacement: 'A revised alpha', decision: 'accepted' }],
+	['new comment', { id: 'new-comment', body: 'New agent comment' }],
+])('keeps a draft focused when a comment refresh brings an agent %s', async (_case, changes) => {
+	await open(); await select(); await compose();
+	const input = document.querySelector<HTMLTextAreaElement>('.composer textarea')!;
+	input.focus();
+	const row = { id: 'other', artifact_id: 'artifact', body: 'Earlier comment', anchor_text: 'alpha', from_off: 0, to_off: 5,
+		author: 'agent', author_kind: 'agent', created_at: '2026-10-07T00:00:00Z', parent_id: null, review: false, resolved: false, acked: false, replies: [], ...changes };
+	api.fetchComments.mockResolvedValue({ comments: [row], feedback: { open_count: 1, owner_label: null, undelivered_batches: [] } });
+	const count = api.fetchComments.mock.calls.length;
+	emit('doc_comment_changed', { type: 'doc_comment_changed', artifact_id: 'artifact', comment_id: row.id });
+	await vi.waitFor(() => expect(api.fetchComments.mock.calls.length).toBeGreaterThan(count));
+	await vi.waitFor(() => expect(get(docComments).artifact?.some(comment => comment.id === row.id)).toBe(true));
+	expect(document.querySelector('.composer textarea')).toBe(input);
+	expect(document.activeElement).toBe(input);
+	expect(input.value).toBe('Keep my body');
+});
+it.each([
+	['inside', (text: Y.Text) => text.insert(8, 'X')],
+	['at the start', (text: Y.Text) => text.insert(6, 'X')],
+	['at the end', (text: Y.Text) => text.insert(10, 'X')],
+])('keeps focus and draft when an agent edits %s the selection', async (_case, edit) => {
+	await open(); await select(); await compose();
+	const input = document.querySelector<HTMLTextAreaElement>('.composer textarea')!;
+	input.focus(); remote(edit);
+	await vi.waitFor(() => expect(host.querySelector('.cm-content')?.textContent).toContain('X'));
+	expect(document.querySelector('.composer textarea')).toBe(input);
+	expect(document.activeElement).toBe(input);
+	expect(input.value).toBe('Keep my body');
+});
+it('keeps an open draft focused while an agent edits elsewhere', async () => {
+	await open(); await select(); await compose();
+	const input = document.querySelector<HTMLTextAreaElement>('.composer textarea')!;
+	input.focus();
+	remote(text => text.insert(0, 'NEW '));
+	await vi.waitFor(() => expect(host.querySelector('.cm-content')?.textContent).toBe('NEW alpha beta gamma'));
+	expect(document.querySelector('.composer textarea')).toBe(input);
+	expect(document.activeElement).toBe(input);
+	input.value += ' more'; input.dispatchEvent(new Event('input', { bubbles: true })); flushSync();
+	expect(get(commentDraft)?.body).toBe('Keep my body more');
+	expect(host.querySelector('.cm-content')?.textContent).toBe('NEW alpha beta gamma');
+});
+it('keeps the focused draft and explains a changed selection after an agent deletes it', async () => {
+	await open(); await select(); await compose();
+	const input = document.querySelector<HTMLTextAreaElement>('.composer textarea')!;
+	input.focus();
+	remote(text => text.delete(6, 4));
+	await vi.waitFor(() => expect(document.querySelector('.selection-reason')?.textContent).toContain('text you selected changed'));
+	expect(document.querySelector('.composer textarea')).toBe(input);
+	expect(document.activeElement).toBe(input);
+	expect(input.value).toBe('Keep my body');
+});
 it('captures original selection before Comment and submits its reserved range after remote prefix', async () => {
 	await open(); await select(); remote(text => text.insert(0, 'NEW ')); await compose();
 	document.querySelector<HTMLButtonElement>('.composer .submit')!.click();
