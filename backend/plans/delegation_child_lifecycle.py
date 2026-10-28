@@ -29,10 +29,11 @@ def notify_turn_error(
     Plan, fixed cause and parent's last message identify the existing episode. ``resumes_at`` is the reset wait the worker's liveness actually armed, never a time merely quoted.
     """
     from datetime import datetime, timezone
-    from plans.delegation_error_episode import error_episode
 
+    from infra.thread_confinement import worker_error_for_agent
     from plans import delegation_turn_end, wait_causes
     from plans.delegation_child_rollover import has_rollover_successor
+    from plans.delegation_error_episode import error_episode
     from plans.delegation_notice import _wake_parent
     from prompts import plan_wakes as text
     from subagents.provider_usage_limits import is_provider_usage_or_quota_limit
@@ -48,9 +49,6 @@ def notify_turn_error(
         return
     parent_plan_id, worker = delegation
     provider_limit = is_provider_usage_or_quota_limit(error)
-    from infra.thread_confinement import worker_error_for_agent
-
-    error = worker_error_for_agent(connection, worker, error)
 
     # A head held for its model has the same recovery as a limit (#3317).
     held_kind = wait_causes.stalled_why(connection, thread_id)
@@ -65,7 +63,8 @@ def notify_turn_error(
     if held_kind != 'account' and not held and not provider_limit:
         _wake_parent(
             connection, parent_plan_id, worker, kind="child_turn_errored",
-            subject_id=error_episode(connection, parent_plan_id, worker, error), child_plan_id=str(plan["id"]), error=error,
+            subject_id=error_episode(connection, parent_plan_id, worker, error), child_plan_id=str(plan["id"]),
+            error=worker_error_for_agent(connection, worker, error),
         )
         return
     if held_kind == 'account':

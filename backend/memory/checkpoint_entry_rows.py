@@ -30,7 +30,7 @@ def entry_rows_matching(
     thread_id: str | None,
     candidate_limit: int,
     per_thread: int,
-    caller_thread_id: str | None = None,
+    caller_thread_id: str | None = "",
 ) -> list[dict]:
     """Return entry rows for an already-built FTS5 ``match`` expression."""
     return hydrate_entry_rows(
@@ -48,7 +48,7 @@ def entry_rank_rows_matching(
     thread_id: str | None,
     candidate_limit: int,
     per_thread: int,
-    caller_thread_id: str | None = None,
+    caller_thread_id: str | None = "",
 ) -> list[dict]:
     """Return the ranked, bounded entry rows with no checkpoint columns.
 
@@ -58,10 +58,7 @@ def entry_rank_rows_matching(
     """
     params: list[object] = [match]
     scope = scope_clause(thread_id, params)
-    from infra.thread_confinement import restrict_agent_read
-
-    db.create_function("restricted_agent_read", 3, restrict_agent_read)
-    params.extend((user_id, caller_thread_id, max(1, per_thread) * 20, candidate_limit))
+    params.extend((user_id, caller_thread_id, caller_thread_id, max(1, per_thread) * 20, candidate_limit))
     # Both window sorts carry only the narrow ranking keys of every match; the
     # wide columns (search_text, canonical body) are joined back for the bounded
     # winners. Carrying them through the sorts cost more than the FTS match.
@@ -76,7 +73,7 @@ def entry_rank_rows_matching(
         "  JOIN threads AS thread ON thread.id = entry.thread_id "
         "  WHERE checkpoint_entry_search_fts MATCH ? "
         f"    {scope}"
-        "    AND thread.user_id = ? AND NOT restricted_agent_read(thread.confinement, thread.id, ?)"
+        "    AND thread.user_id = ? AND (? IS NULL OR thread.confinement IS NULL OR thread.id = ?)"
         "), revisions AS ("
         "  SELECT *, ROW_NUMBER() OVER ("
         "      PARTITION BY thread_id, history_epoch, entry_id "

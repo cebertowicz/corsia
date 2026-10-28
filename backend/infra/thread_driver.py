@@ -121,27 +121,15 @@ def _parent_completion(
     ).fetchone()
     if existing is not None:
         return None
-    answer = db.execute(
-        "SELECT content FROM messages WHERE thread_id=? AND role='assistant' "
-        "AND json_valid(metadata) AND json_extract(metadata,'$.turn_id')=? "
-        "AND length(trim(content))>0 ORDER BY seq DESC,rowid DESC LIMIT 1",
-        (child_id, turn_id),
-    ).fetchone()
-    # Only a finished answer, never a tool-calling intermediate, crosses isolation.
-    from infra.thread_confinement import (
-        ISOLATED_RESULT_LABEL, finished_agent_result, restrict_agent_read,
-    )
+    from infra.thread_confinement import ISOLATED_RESULT_LABEL, agent_result, restrict_agent_read
 
     mode = db.execute("SELECT confinement FROM threads WHERE id=?", (child_id,)).fetchone()[0]
-    if restrict_agent_read(mode, child_id, str(parent)):
-        final = finished_agent_result(db, child_id)
-        if final is None:
-            return None
-        content = f"{PARENT_COMPLETION_HEADING}\n\n{ISOLATED_RESULT_LABEL}\n\n{final['content']}"
-    else:
-        if answer is None:
-            return None
-        content = f"{PARENT_COMPLETION_HEADING}\n\n{str(answer['content']).strip()}"
+    confined = restrict_agent_read(mode, child_id, str(parent))
+    answer = agent_result(db, child_id, turn_id=turn_id, confined=confined)
+    if answer is None:
+        return None
+    label = f"{ISOLATED_RESULT_LABEL}\n\n" if confined else ""
+    content = f"{PARENT_COMPLETION_HEADING}\n\n{label}{str(answer['content']).strip()}"
     from infra.passive_changes import materialize_pending_digest
 
     materialize_pending_digest(db, str(parent))

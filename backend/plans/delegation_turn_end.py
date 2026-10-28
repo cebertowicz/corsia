@@ -304,30 +304,21 @@ def turn_reply(connection, worker: str):
     every harness passes its Turn id here, so the bound is that Turn's start.
     The question or result usually ends the reply, so the tail is what travels.
     """
-    from infra.thread_confinement import (
-        ISOLATED_RESULT_LABEL, finished_agent_result, restrict_agent_read,
-    )
+    from infra.thread_confinement import ISOLATED_RESULT_LABEL, agent_result, restrict_agent_read
 
     thread = connection.execute("SELECT confinement FROM threads WHERE id=?", (worker,)).fetchone()
-    if thread and restrict_agent_read(thread[0], worker, ""):
-        final = finished_agent_result(connection, worker)
-        return None if final is None else {
-            "id": final["id"], "text": f"{ISOLATED_RESULT_LABEL}\n\n{final['content']}",
-        }
-    last = connection.execute(
-        """SELECT id,content,created_at FROM messages WHERE thread_id=? AND seq IS NOT NULL
-             AND role='assistant' AND length(trim(content)) > 0
-           ORDER BY seq DESC LIMIT 1""",
-        (worker,),
-    ).fetchone()
+    confined = bool(thread and restrict_agent_read(thread[0], worker, ""))
+    last = agent_result(connection, worker, confined=confined)
     turn = latest_turn(connection, worker)
     if last is None or (
-        turn is not None and instant(last["created_at"]) < instant(turn["started_at"])
+        not confined and turn is not None and instant(last["created_at"]) < instant(turn["started_at"])
     ):
         return None
     text = str(last["content"]).strip()
     if len(text) > FINAL_REPLY_CHARS:
         text = "…" + text[-FINAL_REPLY_CHARS:]
+    if confined:
+        text = f"{ISOLATED_RESULT_LABEL}\n\n{text}"
     return {"id": str(last["id"]), "text": text}
 
 

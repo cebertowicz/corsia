@@ -16,7 +16,17 @@ import sqlite3
 from subagents.cc_invocation import CONFINEMENT_UNTRUSTED
 
 
-ISOLATED_RESULT_LABEL = "from an isolated worker; contains outside content"
+ISOLATED_RESULT_LABEL = "from an untrusted agent; contains outside content"
+
+
+def restricted_read_notice() -> str:
+    """Explain where another agent can find the shared result."""
+    return "This is an untrusted agent's thread. Only its final result is shared, through delegate_status."
+
+
+def agent_caller(user: dict) -> str | None:
+    """Identify an in-process agent; None denotes the person's API view."""
+    return (user.get("thread_id") or "") if user.get("token_kind") == "internal" else None
 
 
 def restrict_agent_read(mode: object, thread_id: str, caller_thread_id: str | None) -> bool:
@@ -30,32 +40,44 @@ def restrict_agent_read(mode: object, thread_id: str, caller_thread_id: str | No
 
 
 def worker_error_for_agent(db: sqlite3.Connection, thread_id: str, error: str) -> str:
-    """Keep an isolated worker's unclassified failure text out of a wake."""
+    """Redact an unclassified error when the agent is untrusted."""
     row = db.execute("SELECT confinement FROM threads WHERE id=?", (thread_id,)).fetchone()
     if row and restrict_agent_read(row[0], thread_id, ""):
-        return "isolated worker turn failed"
+        return "untrusted agent's turn failed"
     return error
 
 
-def finished_agent_result(db: sqlite3.Connection, thread_id: str) -> dict | None:
-    """Return a completed turn's final text only when its last step is an answer."""
-    turn = db.execute(
-        "SELECT id, status FROM active_turns WHERE thread_id=? ORDER BY turn_order DESC LIMIT 1",
-        (thread_id,),
-    ).fetchone()
-    if turn is None or turn[1] != "completed":
-        return None
+def agent_result(
+    db: sqlite3.Connection, thread_id: str, *, turn_id: str | None = None, confined: bool = False,
+) -> dict | None:
+    """Select an agent's reply, applying the completed-answer boundary when confined."""
+    if confined:
+        turn = db.execute(
+            "SELECT id, status FROM active_turns WHERE thread_id=? ORDER BY turn_order DESC LIMIT 1",
+            (thread_id,),
+        ).fetchone()
+        if turn is None or turn[1] != "completed" or (turn_id is not None and turn[0] != turn_id):
+            return None
+        turn_id = turn[0]
+    where = "thread_id=?"
+    params: list = [thread_id]
+    if confined or turn_id is None:
+        where += " AND seq IS NOT NULL"
+    if turn_id is not None:
+        where += " AND json_valid(metadata) AND json_extract(metadata, '$.turn_id')=?"
+        params.append(turn_id)
+    if not confined:
+        where += " AND role='assistant' AND length(trim(content))>0"
     row = db.execute(
-        "SELECT id, role, content, metadata, created_at FROM messages "
-        "WHERE thread_id=? AND json_valid(metadata) "
-        "AND json_extract(metadata, '$.turn_id')=? AND seq IS NOT NULL "
-        "ORDER BY seq DESC, rowid DESC LIMIT 1", (thread_id, turn[0]),
+        "SELECT id, role, content, metadata, created_at FROM messages WHERE " + where
+        + " ORDER BY seq DESC, rowid DESC LIMIT 1", params,
     ).fetchone()
     if row is None or row[1] != "assistant" or not str(row[2] or "").strip():
         return None
-    metadata = json.loads(row[3])
-    if metadata.get("llm_tool_calls") or metadata.get("tool_calls") or metadata.get("step_type") == "tool_calls":
-        return None
+    if confined:
+        metadata = json.loads(row[3])
+        if metadata.get("llm_tool_calls") or metadata.get("tool_calls") or metadata.get("step_type") == "tool_calls":
+            return None
     return {"id": row[0], "role": "assistant", "content": str(row[2]), "created_at": row[4]}
 
 

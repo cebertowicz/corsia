@@ -12,7 +12,7 @@ from checkpoint_retrieval_fixtures import _install_checkpoint, fresh_db  # noqa:
 from tests.child_parent_notice_helpers import db as notice_db, delegated, wakes  # noqa: F401
 
 CANARY = "INJECT_CANARY_7f3e"
-LABEL = "from an isolated worker; contains outside content"
+LABEL = "from an untrusted agent; contains outside content"
 
 
 def seed(db, *, status="running", confinement="untrusted"):
@@ -89,15 +89,15 @@ def test_search_filters_before_limit_and_self_can_read(deleg_db, with_fts):
 
 
 def test_finished_result_rejects_intermediate_and_running(deleg_db):
-    from infra.thread_confinement import finished_agent_result
+    from infra.thread_confinement import agent_result
 
     seed(deleg_db)
     add_final(deleg_db)
-    assert finished_agent_result(deleg_db, "isolated") is None
+    assert agent_result(deleg_db, "isolated", confined=True) is None
     deleg_db.execute("UPDATE active_turns SET status='completed' WHERE id='isolated-turn'")
-    assert finished_agent_result(deleg_db, "isolated")["content"] == CANARY
+    assert agent_result(deleg_db, "isolated", confined=True)["content"] == CANARY
     deleg_db.execute("UPDATE messages SET metadata=? WHERE id='final-row'", (json.dumps({"turn_id": "isolated-turn", "llm_tool_calls": [{"id": "x"}]}),))
-    assert finished_agent_result(deleg_db, "isolated") is None
+    assert agent_result(deleg_db, "isolated", confined=True) is None
 
 
 @pytest.mark.asyncio
@@ -112,9 +112,8 @@ async def test_api_status_and_messages_keep_person_view(deleg_db, monkeypatch):
         assert status["recent_messages"] == []
         page = await get_messages("isolated", token="ignored")
         assert CANARY not in json.dumps(page)
-        with pytest.raises(Exception) as exc:
-            await get_tool_result("isolated", "tool-row", "call", token="ignored")
-        assert getattr(exc.value, "status_code", None) == 404
+        result = await get_tool_result("isolated", "tool-row", "call", token="ignored")
+        assert "restricted" in result
     with internal_request("u-test", "isolated"):
         status = await thread_status("isolated", token="ignored", messages=5)
         assert CANARY in json.dumps(status["recent_messages"])
@@ -177,7 +176,7 @@ def test_error_notice_does_not_expose_worker_error(notice_db):
     notice_db.execute("UPDATE threads SET confinement='untrusted' WHERE id='worker'")
     notify_turn_error(notice_db, "worker", error=CANARY)
     assert CANARY not in json.dumps([dict(row) for row in wakes(notice_db)])
-    assert "isolated worker turn failed" in str(wakes(notice_db)[0]["content"])
+    assert "untrusted agent's turn failed" in str(wakes(notice_db)[0]["content"])
 
 
 @pytest.mark.asyncio

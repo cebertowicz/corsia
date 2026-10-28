@@ -86,15 +86,12 @@ def _narrative_rows(
     caller_thread_id: str,
 ) -> list[dict]:
     """Return bounded narrative-only FTS matches without rebuilding entries."""
-    from infra.thread_confinement import restrict_agent_read
-
-    db.create_function("restricted_agent_read", 3, restrict_agent_read)
     params: list[object] = [f"raw_result : ({fts5_escape(query, prefix=True)})"]
     scope = ""
     if thread_id is not None:
         scope = "AND checkpoint.thread_id = ? "
         params.append(thread_id)
-    params.extend((user_id, caller_thread_id, max(1, per_thread) * 20, candidate_limit))
+    params.extend((user_id, caller_thread_id, caller_thread_id, max(1, per_thread) * 20, candidate_limit))
     rows = db.execute(
         "WITH scored AS ("
         "  SELECT checkpoint.id, checkpoint.thread_id, checkpoint.through_seq, "
@@ -110,7 +107,7 @@ def _narrative_rows(
         "  WHERE checkpoints_fts MATCH ? "
         f"    {scope}"
         "    AND checkpoint.status = 'installed' AND thread.user_id = ?"
-        "    AND NOT restricted_agent_read(thread.confinement, thread.id, ?)"
+        "    AND (? IS NULL OR thread.confinement IS NULL OR thread.id = ?)"
         "), ranked AS ("
         "  SELECT *, ROW_NUMBER() OVER (PARTITION BY thread_id "
         "      ORDER BY relevance ASC, generation_order DESC) AS thread_rank "

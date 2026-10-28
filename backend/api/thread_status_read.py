@@ -5,7 +5,7 @@ from infra.conductor import get_coordination_scopes
 from infra.database import get_db
 from infra.queries import get_thread_for_user
 from infra.thread_confinement import (
-    ISOLATED_RESULT_LABEL, finished_agent_result, restrict_agent_read,
+    ISOLATED_RESULT_LABEL, agent_caller, agent_result, restrict_agent_read,
 )
 
 
@@ -20,14 +20,14 @@ def read_status(thread_id: str, user: dict, limit: int):
             "WHERE thread_id = ? AND status='running' ORDER BY started_at DESC LIMIT 1",
             (thread_id,),
         ).fetchone()
-        caller = user.get("thread_id") if user.get("token_kind") == "internal" else None
+        caller = agent_caller(user)
         restricted = restrict_agent_read(thread["confinement"], thread_id, caller)
         recent = db.execute(
             "SELECT id, role, content, created_at FROM messages "
             "WHERE thread_id = ? ORDER BY created_at DESC LIMIT ?",
             (thread_id, limit),
         ).fetchall() if limit and not restricted else []
-        final = finished_agent_result(db, thread_id) if limit and restricted else None
+        final = agent_result(db, thread_id, confined=True) if limit and restricted else None
         if final:
             final["content"] = f"{ISOLATED_RESULT_LABEL}\n\n{final['content']}"
         thread = dict(thread)

@@ -237,7 +237,7 @@ async def test_a_settled_workers_later_turn_wakes_its_owner_as_an_ordinary_child
     await asyncio.to_thread(finish_later_turn)
     assert await asyncio.to_thread(completion, "owner-asked") == OWNER
     assert completions() == [
-        f"{PARENT_COMPLETION_HEADING}\n\nfrom an isolated worker; contains outside content\n\nAnswered the owner."
+        f"{PARENT_COMPLETION_HEADING}\n\nfrom an untrusted agent; contains outside content\n\nAnswered the owner."
     ]
 
 

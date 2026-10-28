@@ -5,6 +5,7 @@ import hashlib
 
 
 def error_episode(connection, parent_plan_id: str, worker: str, cause: str) -> str:
+    # Newest first: stop at the parent's latest input.
     sent = connection.execute(
         """SELECT m.input_order AS last FROM messages AS m JOIN plans AS p ON p.id=?
            WHERE m.thread_id=? AND m.input_order IS NOT NULL AND json_valid(m.metadata)

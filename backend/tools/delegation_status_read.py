@@ -28,7 +28,7 @@ def read_delegate_status(thread_id: str, user_id: str, message_count: int, calle
     from infra.checkpoint_queries import latest_for_thread
     from infra.database import get_db
     from infra.thread_confinement import (
-        ISOLATED_RESULT_LABEL, finished_agent_result, restrict_agent_read,
+        ISOLATED_RESULT_LABEL, agent_result, restrict_agent_read,
     )
 
     db = get_db()
@@ -49,7 +49,7 @@ def read_delegate_status(thread_id: str, user_id: str, message_count: int, calle
             "ORDER BY created_at DESC LIMIT ?",
             (thread_id, message_count),
         ).fetchall() if message_count and not restricted else []
-        final = finished_agent_result(db, thread_id) if message_count and restricted else None
+        final = agent_result(db, thread_id, confined=True) if message_count and restricted else None
         if final is not None:
             final["content"] = f"{ISOLATED_RESULT_LABEL}\n\n{final['content']}"
         checkpoint = latest_for_thread(thread_id, db=db)

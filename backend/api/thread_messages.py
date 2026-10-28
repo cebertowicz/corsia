@@ -111,12 +111,12 @@ async def get_messages(
     def _query():
         db = get_db()
         try:
-            from infra.thread_confinement import restrict_agent_read
+            from infra.thread_confinement import agent_caller, restrict_agent_read, restricted_read_notice
 
-            caller = user.get("thread_id") if user.get("token_kind") == "internal" else None
+            caller = agent_caller(user)
             thread = get_thread_for_user(thread_id, user["id"], db=db)
             if thread is not None and restrict_agent_read(thread["confinement"], thread_id, caller):
-                return ({"messages": [], "has_more": False, "oldest_id": None, "turn_summaries": {}}, [])
+                return ({"messages": [], "restricted": True, "restriction_reason": restricted_read_notice()}, [])
             if from_id is not None and to_id is not None:
                 result = read_authorized_run_range(
                     db, thread_id, limit, from_id, to_id, before, user_id=user["id"],
@@ -177,12 +177,13 @@ async def get_tool_result(
     def _query():
         db = get_db()
         try:
-            from infra.thread_confinement import restrict_agent_read
+            from infra.thread_confinement import agent_caller, restrict_agent_read, restricted_read_notice
 
             thread = get_thread_for_user(thread_id, user["id"], db=db)
-            caller = user.get("thread_id") if user.get("token_kind") == "internal" else None
-            if not thread or restrict_agent_read(thread["confinement"], thread_id, caller):
+            if not thread:
                 return None
+            if restrict_agent_read(thread["confinement"], thread_id, agent_caller(user)):
+                return {"restricted": True, "restriction_reason": restricted_read_notice()}
             return load_tool_result(db, thread_id, message_id, tool_call_id)
         finally:
             db.close()
@@ -190,4 +191,4 @@ async def get_tool_result(
     result = await run_in_db(_query)
     if result is None:
         raise HTTPException(404)
-    return {"result": result}
+    return result if isinstance(result, dict) and "restricted" in result else {"result": result}
