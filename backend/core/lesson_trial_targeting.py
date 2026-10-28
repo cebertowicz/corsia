@@ -68,7 +68,10 @@ def target_trials(
     open_trials, retired = [], []
     normalized = target(decision)
     for path in sorted((place.tray / "skills").glob("*/SKILL.md")):
-        current = lesson_files.read_trial(path.read_text(encoding="utf-8", errors="replace"))
+        try:
+            current = lesson_files.read_trial(path.read_text(encoding="utf-8", errors="replace"))
+        except OSError:
+            continue
         if (
             current is None
             or current.lesson.owner != place.thread_id
@@ -83,33 +86,45 @@ def target_trials(
 
 
 def active_target_trials(db: Any, place: ThreadPlace, decision: Decision) -> list[tuple[Path, Any]]:
-    """Read the project's and workspace's owner trays for active trials on this file."""
-    from types import SimpleNamespace
-    from core.lesson_report_sources import source_inputs
+    """Find offered trials on this file across the user's live owner trays."""
+    from datetime import datetime, timezone
+    from core.lesson_trials import offer_refusal
+    from core.project_context import resolve_project_row_paths
     from core.skill_scanning import skill_files
+    from core.workspace_layout import ThreadRootResolver
     from infra.config import WORKSPACE
 
-    owner = db.execute("SELECT user_id, project_id FROM threads WHERE id=?", (place.thread_id,)).fetchone()
+    owner = db.execute("SELECT user_id FROM threads WHERE id=?", (place.thread_id,)).fetchone()
     if owner is None:
         raise TrialRefused("invalid-output", "The trial owner is unavailable.")
-    ids = tuple(row["id"] for row in db.execute(
-        "SELECT id FROM threads WHERE user_id=? AND (project_id IS NULL OR project_id=?)",
-        (owner["user_id"], owner["project_id"]),
-    ))
-    roots, _roles, unavailable = source_inputs(
-        db, Path(WORKSPACE), SimpleNamespace(thread_ids=ids, user_id=owner["user_id"]),
+    rows = db.execute(
+        """SELECT t.id, t.project_id, p.name, p.path FROM threads t
+           LEFT JOIN projects p ON p.id=t.project_id
+           WHERE t.user_id=? AND t.archived_at IS NULL
+             AND COALESCE(t.lifecycle_state, 'active') NOT IN ('archived', 'purged')""",
+        (owner["user_id"],),
     )
-    if unavailable:
-        raise TrialRefused("invalid-output", "Trial owner trays could not be resolved; try again when available.")
-    normalized = target(decision)
+    workspace = Path(WORKSPACE)
+    resolver = ThreadRootResolver()
+    projects: dict[str, Path | None] = {}
+    normalized, now = target(decision), datetime.now(timezone.utc)
     matches = []
-    for root, scope in roots.items():
-        if scope.get("scope") != "thread":
-            continue
-        for path in skill_files(root):
-            current = lesson_files.read_trial(path.read_text(encoding="utf-8"))
-            if (current is not None and current.lesson.owner == scope["scope_id"]
-                    and current.lesson.state == "trial" and target_from_lesson(current) == normalized):
+    for row in rows:
+        project_id = row["project_id"]
+        if project_id and project_id not in projects:
+            projects[project_id] = resolve_project_row_paths(
+                workspace, project_name=row["name"], raw_path=row["path"],
+            )[1]
+        scope = projects[project_id] if project_id else workspace
+        if scope is None:
+            raise TrialRefused("invalid-output", "Trial owner trays could not be resolved; try again when available.")
+        for path in skill_files(resolver.root(scope, row["id"])):
+            try:
+                current = lesson_files.read_trial(path.read_text(encoding="utf-8", errors="replace"))
+            except OSError:
+                continue
+            if (current is not None and current.lesson.owner == row["id"]
+                    and offer_refusal(current.lesson, now) is None and target_from_lesson(current) == normalized):
                 matches.append((path, current))
     return matches
 

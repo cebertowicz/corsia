@@ -162,8 +162,6 @@ def _target_full(
     previous: Any, merge: Any, destination: Destination, revising: bool,
 ) -> bool:
     """Count the effective target, including the metadata a revision keeps."""
-    from dataclasses import replace
-
     metadata = lesson_case.revised(previous.lesson.case_metadata if previous is not None else {}, pending)
     if not (metadata.get("target_file") or metadata.get("new_target_path")):
         return False
