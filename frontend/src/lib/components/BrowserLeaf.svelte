@@ -285,7 +285,7 @@
 		if (clipboardKey(event, clipboardKeys, () => clipboard ??= new BrowserPaneClipboard(
 			message => { if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message)); },
 			navigator.clipboard, data => new ClipboardItem(data)
-		), () => { status = 'Could not access the clipboard'; })) return;
+		), error => { status = error ?? "CORSIA couldn't access the clipboard. Allow clipboard access in your browser and try again."; })) return;
 		socket.send(JSON.stringify({
 			type: 'input_keyboard', eventType: event.type === 'keydown' ? 'keyDown' : 'keyUp',
 			key: event.key, code: event.code, keyCode: event.keyCode, text: keyText(event), modifiers: keyModifiers(event)

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 from dataclasses import dataclass
 from typing import Awaitable, Callable
@@ -138,9 +139,9 @@ async def key_event(thread_id: str, event: dict, connection_token: str) -> None:
     await browser_cdp.dispatch_key_event(endpoint, event)
 
 
-async def clipboard_selection(thread_id: str, connection_token: str) -> str:
+async def clipboard_selection(thread_id: str, connection_token: str, request_id: int) -> str:
     endpoint = await _page_endpoint(thread_id, connection_token, "This page couldn't be copied")
-    return await browser_cdp.clipboard_selection(endpoint)
+    return await browser_cdp.clipboard_selection(endpoint, _clipboard_request(connection_token, request_id))
 
 
 async def clipboard_paste(thread_id: str, connection_token: str, text: str) -> None:
@@ -148,9 +149,13 @@ async def clipboard_paste(thread_id: str, connection_token: str, text: str) -> N
     await browser_cdp.clipboard_paste(endpoint, text)
 
 
-async def clipboard_cut(thread_id: str, connection_token: str, text: str) -> None:
+async def clipboard_cut(thread_id: str, connection_token: str, text: str, request_id: int) -> None:
     endpoint = await _page_endpoint(thread_id, connection_token, "This page couldn't be cut")
-    await browser_cdp.clipboard_cut(endpoint, text)
+    await browser_cdp.clipboard_cut(endpoint, text, _clipboard_request(connection_token, request_id))
+
+
+def _clipboard_request(connection_token: str, request_id: int) -> str:
+    return hashlib.sha256(f"{connection_token}:{request_id}".encode()).hexdigest()
 
 
 async def open_url(thread_id: str, url: str, connection_token: str | None = None) -> str:

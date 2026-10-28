@@ -1,7 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
-import { BrowserPaneClipboard } from './browserPaneClipboard';
+import { BrowserPaneClipboard, clipboardKey, clipboardReply } from './browserPaneClipboard';
 
 describe('browser pane clipboard', () => {
+ it('reports a page selection failure with its next step', async () => {
+  const clipboard = new BrowserPaneClipboard(vi.fn(), { write: vi.fn(async (items: Record<string, Promise<Blob>>[]) => { await items[0]['text/plain']; }), readText: vi.fn() }, data => data);
+  const fail = vi.fn();
+  clipboardKey({ type: 'keydown', key: 'c', code: 'KeyC', ctrlKey: true, metaKey: false, altKey: false } as KeyboardEvent, new Set(), () => clipboard, fail);
+  clipboardReply({ type: 'clipboard_selection', id: 1 }, clipboard, fail);
+  await vi.waitFor(() => expect(fail).toHaveBeenCalledWith("CORSIA couldn't copy from the page. Select the text again and copy."));
+ });
  it('starts clipboard write during copy, then supplies the page selection', async () => {
   const send = vi.fn();
   let item: Record<string, Promise<Blob>> = {};
@@ -22,7 +29,7 @@ describe('browser pane clipboard', () => {
   const cut = clipboard.copy(true);
   clipboard.selection(1, 'selected');
   await cut;
-  expect(send).toHaveBeenLastCalledWith({ type: 'clipboard_cut', text: 'selected' });
+  expect(send).toHaveBeenLastCalledWith({ type: 'clipboard_cut', id: 1, text: 'selected' });
  });
  it('reads the host clipboard on paste and sends text to the page', async () => {
   const send = vi.fn();
@@ -46,6 +53,6 @@ describe('browser pane clipboard', () => {
   const cut = clipboard.copy(true);
   clipboard.selection(1, 'selected');
   await expect(cut).rejects.toThrow('denied');
-  expect(send).not.toHaveBeenCalledWith({ type: 'clipboard_cut', text: 'selected' });
+  expect(send).not.toHaveBeenCalledWith({ type: 'clipboard_cut', id: 1, text: 'selected' });
  });
 });

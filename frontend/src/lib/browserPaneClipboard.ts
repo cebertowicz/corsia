@@ -1,20 +1,21 @@
 type ClipboardMessage = { type: string; id?: number; text?: string };
 class EmptySelection extends Error {}
+class PageSelectionError extends Error {}
 
-export function clipboardKey<T>(event: KeyboardEvent, keys: Set<string>, get: () => BrowserPaneClipboard<T>, fail: () => void): boolean {
+export function clipboardKey<T>(event: KeyboardEvent, keys: Set<string>, get: () => BrowserPaneClipboard<T>, fail: (error?: string) => void): boolean {
  if (event.type === 'keyup' && keys.delete(event.code)) return true;
  const key = event.key.toLowerCase();
  if (event.type !== 'keydown' || !(event.metaKey || event.ctrlKey) || event.altKey || !['c', 'x', 'v'].includes(key)) return false;
  keys.add(event.code);
  const clipboard = get();
- void (key === 'v' ? clipboard.paste() : clipboard.copy(key === 'x')).catch(error => { if (!(error instanceof EmptySelection)) fail(); });
+ void (key === 'v' ? clipboard.paste() : clipboard.copy(key === 'x')).catch(error => { if (!(error instanceof EmptySelection)) fail(error instanceof PageSelectionError ? error.message : undefined); });
  return true;
 }
 
 export function clipboardReply<T>(message: Record<string, unknown>, clipboard: BrowserPaneClipboard<T> | null, fail: (error: string) => void): boolean {
  if (message.type === 'clipboard_selection' && typeof message.id === 'number') {
   if (typeof message.text === 'string') clipboard?.selection(message.id, message.text);
-  else clipboard?.fail(message.id, typeof message.error === 'string' ? message.error : 'Could not copy from the page');
+  else clipboard?.fail(message.id, typeof message.error === 'string' ? message.error : "CORSIA couldn't copy from the page. Select the text again and copy.");
   return true;
  }
  if (message.type === 'clipboard_error' && typeof message.error === 'string') {
@@ -45,7 +46,7 @@ export class BrowserPaneClipboard<T> {
    this.send({ type: 'clipboard_selection', id });
    await writing;
    const text = await selection;
-   if (cut && text) this.send({ type: 'clipboard_cut', text });
+   if (cut && text) this.send({ type: 'clipboard_cut', id, text });
   } finally {
    this.pending.delete(id);
   }
@@ -64,7 +65,7 @@ export class BrowserPaneClipboard<T> {
  }
 
  fail(id: number, error: string): void {
-  this.pending.get(id)?.reject(new Error(error));
+  this.pending.get(id)?.reject(new PageSelectionError(error));
   this.pending.delete(id);
  }
 

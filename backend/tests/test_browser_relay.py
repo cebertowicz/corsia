@@ -59,15 +59,39 @@ async def test_navigation_does_not_block_input_and_its_result_is_delivered(monke
 
 
 @pytest.mark.asyncio
+async def test_refused_pane_fit_is_sent_to_the_connected_pane(monkeypatch):
+    from host_access.browser_session_state import BrowserSessionError
+    delivered = asyncio.Event()
+    async def refuse(_thread, _appearance):
+        raise BrowserSessionError('refused')
+    monkeypatch.setattr(browser_stream.browser_pane, 'match_pane', refuse)
+    class Pane(FakePane):
+        async def receive_text(self):
+            if self.messages:
+                return self.messages.pop(0)
+            await delivered.wait()
+            raise WebSocketDisconnect()
+        async def send_text(self, payload):
+            await super().send_text(payload)
+            if json.loads(payload).get('type') == 'clipboard_error':
+                delivered.set()
+    pane = Pane([json.dumps({'type': 'appearance', 'width': 700, 'height': 900, 'scale': 1, 'scheme': 'dark'})])
+    with pytest.raises(WebSocketDisconnect):
+        await asyncio.wait_for(browser_stream._relay(pane, 'fit-thread', 'user'), 1)
+    assert any(json.loads(item).get('error') == "CORSIA couldn't fit the page to the pane. Try resizing the pane again."
+               for item in pane.text)
+
+
+@pytest.mark.asyncio
 async def test_clipboard_actions_stay_on_the_connected_page(monkeypatch):
     actions = []
     delivered = asyncio.Event()
-    async def selection(thread, connection):
+    async def selection(thread, connection, request_id):
         actions.append(('selection', thread, connection))
         return 'chosen'
     async def paste(thread, connection, text):
         actions.append(('paste', thread, connection, text))
-    async def cut(thread, connection, text):
+    async def cut(thread, connection, text, request_id):
         actions.append(('cut', thread, connection, text))
         delivered.set()
     monkeypatch.setattr(browser_stream.browser_pane, 'clipboard_selection', selection)
@@ -82,13 +106,33 @@ async def test_clipboard_actions_stay_on_the_connected_page(monkeypatch):
     pane = Pane([json.dumps(message) for message in [
         {'type': 'clipboard_selection', 'id': 1},
         {'type': 'clipboard_paste', 'text': 'host'},
-        {'type': 'clipboard_cut', 'text': 'chosen'},
+        {'type': 'clipboard_cut', 'id': 1, 'text': 'chosen'},
     ]])
     with pytest.raises(WebSocketDisconnect):
         await asyncio.wait_for(browser_stream._relay(pane, 'thread', 'user'), 1)
     assert [action[0] for action in actions] == ['selection', 'paste', 'cut']
     assert len({action[2] for action in actions}) == 1
     assert actions[1][3] == 'host' and actions[2][3] == 'chosen'
+
+
+@pytest.mark.asyncio
+async def test_clipboard_failure_suggests_a_next_step(monkeypatch):
+    from host_access.browser_session_state import BrowserSessionError
+    from ws import browser_clipboard
+    async def refuse(*_args):
+        raise BrowserSessionError('refused')
+    monkeypatch.setattr(browser_clipboard.browser_pane, 'clipboard_selection', refuse)
+    monkeypatch.setattr(browser_clipboard.browser_pane, 'clipboard_cut', refuse)
+    monkeypatch.setattr(browser_clipboard.browser_pane, 'clipboard_paste', refuse)
+    messages = []
+    for data in ({'type': 'clipboard_selection', 'id': 1},
+                 {'type': 'clipboard_cut', 'id': 1, 'text': 'text'}, {'type': 'clipboard_paste', 'text': 'text'}):
+        await browser_clipboard.handle('thread', 'pane', data, messages.append)
+    assert [message['error'] for message in messages] == [
+        "CORSIA couldn't copy from the page. Select the text again and copy.",
+        "CORSIA couldn't cut the text. Select it again and cut.",
+        "CORSIA couldn't paste into the page. Try pasting again.",
+    ]
 
 
 @pytest.mark.asyncio

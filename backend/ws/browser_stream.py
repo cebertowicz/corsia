@@ -214,7 +214,7 @@ async def _relay(pane: WebSocket, thread_id: str, user_id: str) -> None:
                 if kind == "navigate":
                     _request_navigate(thread_id, connection_token, data, report)
                 elif kind == "appearance":
-                    _request_match(thread_id, connection_token, data)
+                    _request_match(thread_id, connection_token, data, report)
                 elif kind == "input_mouse":
                     # CDP serializes pointer and key delivery on the page target, so typing cannot
                     # overtake the click that focuses its field.
@@ -326,15 +326,15 @@ async def _close_on_overflow(pane: WebSocket, overflow: asyncio.Event) -> None:
 # every input loop. Only the newest appearance from any pane connection is applied, and at most one
 # navigation waits: a newer one replaces it. A running command is never cancelled: cancelling it
 # resets the shared session. A navigation carries its own pane's report, so no relay owns the runner.
-_latest_appearance: dict[str, tuple[str, browser_pane.PaneAppearance]] = {}
+_latest_appearance: dict[str, tuple[str, browser_pane.PaneAppearance, Callable[[dict], None]]] = {}
 _pending_navigation: dict[str, tuple[str, dict, Callable[[dict], None]]] = {}
 _runners: dict[str, asyncio.Task] = {}
 
 
-def _request_match(thread_id: str, connection_token: str, data: dict) -> None:
+def _request_match(thread_id: str, connection_token: str, data: dict, report: Callable[[dict], None]) -> None:
     if (appearance := browser_pane.PaneAppearance.parse(data)) is None:
         return
-    _latest_appearance[thread_id] = (connection_token, appearance)
+    _latest_appearance[thread_id] = (connection_token, appearance, report)
     _run_page_commands(thread_id)
 
 
@@ -363,11 +363,12 @@ async def _run_pending(thread_id: str) -> None:
                 result = {"type": "navigate_result", "error": "Browser navigation failed"}
             report(result)
         elif (queued := _latest_appearance.pop(thread_id, None)) is not None:
-            connection_token, appearance = queued
+            connection_token, appearance, report = queued
             try:
                 await browser_pane.match_pane(thread_id, appearance)
             except (BrowserSessionError, ProcessOwnerError) as exc:
                 log.warning("browser pane %s kept its old appearance: %s", thread_id, exc)
+                report({"type": "clipboard_error", "error": "CORSIA couldn't fit the page to the pane. Try resizing the pane again."})
         else:
             return
 

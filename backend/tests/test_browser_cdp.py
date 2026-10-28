@@ -1,5 +1,6 @@
 import io
 import json
+import subprocess
 
 import pytest
 
@@ -174,10 +175,39 @@ async def test_clipboard_selection_and_paste_use_the_page_target(monkeypatch):
             calls.append((method, params))
             return {'result': {'value': 'selected'}} if method == 'Runtime.evaluate' else {}
     monkeypatch.setattr(browser_cdp, 'CdpClient', lambda _endpoint: Client())
-    assert await browser_cdp.clipboard_selection('endpoint') == 'selected'
+    assert await browser_cdp.clipboard_selection('endpoint', 'pane:1') == 'selected'
     await browser_cdp.clipboard_paste('endpoint', 'paste text')
     assert calls[0][0] == 'Runtime.evaluate'
     assert calls[1] == ('Input.insertText', {'text': 'paste text'})
+
+
+@pytest.mark.asyncio
+async def test_cut_refuses_a_different_occurrence_of_the_same_text(monkeypatch):
+    expressions = []
+    class Client:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *_args): pass
+        async def call(self, _method, **params):
+            expressions.append(params['expression'])
+            return {'result': {'value': 'same' if len(expressions) == 1 else True}}
+    monkeypatch.setattr(browser_cdp, 'CdpClient', lambda _endpoint: Client())
+    await browser_cdp.clipboard_selection('endpoint', 'pane:1')
+    await browser_cdp.clipboard_cut('endpoint', 'same', 'pane:1')
+    script = """
+      class Input { constructor() { this.value = 'same same'; this.selectionStart = 0; this.selectionEnd = 4; } }
+      global.HTMLInputElement = Input; global.HTMLTextAreaElement = class {};
+      const node = new Input(); let deleted = false;
+      global.window = {getSelection: () => null};
+      global.document = {activeElement: node, execCommand: () => { deleted = true; return true; }};
+      const [copy, cut] = JSON.parse(process.argv[1]);
+      if (eval(copy) !== 'same') process.exit(1);
+      node.selectionStart = 5; node.selectionEnd = 9;
+      if (eval(cut) !== false || deleted) process.exit(2);
+      eval(copy);
+      window.__corsiaCopyRequest = 'another:1';
+      if (eval(cut) !== false || deleted) process.exit(3);
+    """
+    subprocess.run(['node', '-e', script, json.dumps(expressions)], check=True)
 
 
 @pytest.mark.asyncio

@@ -381,6 +381,19 @@ async def test_match_pane_reports_a_refused_viewport_command(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_refused_pane_fit_reaches_the_pane(monkeypatch):
+    messages = []
+    async def refuse(_thread_id, _appearance):
+        raise BrowserSessionError('viewport refused')
+    monkeypatch.setattr(browser_stream.browser_pane, 'match_pane', refuse)
+    browser_stream._request_match('fit-refused', 'pane',
+        {'width': 700, 'height': 1400, 'scale': 2, 'scheme': 'dark'}, messages.append)
+    await browser_stream._runners['fit-refused']
+    assert messages == [{'type': 'clipboard_error',
+                         'error': "CORSIA couldn't fit the page to the pane. Try resizing the pane again."}]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(('width', 'height'), [(700, 1400), (1400, 500)])
 async def test_pane_box_is_applied_on_connect_and_again_after_tab_follow(monkeypatch, width, height):
     calls = []
@@ -391,7 +404,7 @@ async def test_pane_box_is_applied_on_connect_and_again_after_tab_follow(monkeyp
     monkeypatch.setattr(browser_pane.PROCESS_OWNER, 'browser_sessions', lambda: Owner())
     appearance = {'width': width, 'height': height, 'scale': 2, 'scheme': 'dark'}
     for _ in range(2):
-        browser_stream._request_match('thread-shape', 'pane', appearance)
+        browser_stream._request_match('thread-shape', 'pane', appearance, lambda message: None)
         await browser_stream._runners['thread-shape']
     assert [args for args in calls if args[:2] == ('set', 'viewport')] == [
         ('set', 'viewport', str(width), str(height), '2'),
@@ -443,10 +456,10 @@ async def test_a_newer_pane_size_supersedes_an_older_connections(monkeypatch):
 
     monkeypatch.setattr(browser_stream.browser_pane, "match_pane", match_pane)
     size = {"width": 400, "scale": 1, "scheme": "light"}
-    browser_stream._request_match("thread-1", "old-pane", {**size, "height": 1030})
+    browser_stream._request_match("thread-1", "old-pane", {**size, "height": 1030}, lambda message: None)
     await asyncio.sleep(0)
-    browser_stream._request_match("thread-1", "old-pane", {**size, "height": 1000})
-    browser_stream._request_match("thread-1", "new-pane", {**size, "height": 830})
+    browser_stream._request_match("thread-1", "old-pane", {**size, "height": 1000}, lambda message: None)
+    browser_stream._request_match("thread-1", "new-pane", {**size, "height": 830}, lambda message: None)
     release.set()
     await browser_stream._runners["thread-1"]
     assert fitted == [1030, 830]
