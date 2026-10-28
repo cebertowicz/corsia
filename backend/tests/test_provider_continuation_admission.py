@@ -128,7 +128,7 @@ async def test_codex_idle_resume_selects_current_input(main_db, monkeypatch, inv
         batch, thread_row=_thread_row(main_db), target=target,
     )
     assert initial.prepared_context.mode == "exact_replay"
-    _, working_dir = codex_destination_scope(
+    _, working_dir, _ = codex_destination_scope(
         "main-1", target_catalog_id=model, db=main_db,
     )
     registry = build_tool_registry(working_dir)

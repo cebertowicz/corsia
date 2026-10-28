@@ -100,17 +100,19 @@ def _default_app_server_home() -> Path:
 
 
 def governed_codex_model_catalog_path(
-    isolated_home: Path | None = None,
+    isolated_home: Path | None = None, *, confined: bool = False,
 ) -> Path:
     """Return CORSIA's invocation-local Codex model catalog path."""
     destination = Path(
         isolated_home or _default_app_server_home()
     ).expanduser().resolve()
-    return destination / _GOVERNED_MODEL_CATALOG_FILENAME
+    filename = "corsia-confined-model-catalog.json" if confined else _GOVERNED_MODEL_CATALOG_FILENAME
+    return destination / filename
 
 
 def _write_governed_model_catalog(*, source: Path, destination: Path,
-                                  catalog_source: Path | None = None, cache_receipt=None) -> Path:
+                                  catalog_source: Path | None = None, cache_receipt=None,
+                                  confined: bool = False) -> Path:
     """Copy discovered model truth while disabling provider-native agents.
 
     Also clears model metadata that would force Code Mode, so every managed
@@ -154,10 +156,19 @@ def _write_governed_model_catalog(*, source: Path, destination: Path,
     for model in catalog["models"]:
         if isinstance(model, dict):
             model["multi_agent_version"] = None
+            if confined:
+                # spec_plan.rs adds clock and user-input tools from metadata,
+                # independently of feature flags. No native tool may be added.
+                model["experimental_supported_tools"] = []
+                model["shell_type"] = "disabled"
+                model["apply_patch_tool_type"] = None
+                model["tool_mode"] = "direct"
+                model["supports_search_tool"] = False
+                model["use_responses_lite"] = False
             if model.get("tool_mode") == _FORCED_CODE_MODE_TOOL_MODE:
                 model["tool_mode"] = None
 
-    governed = governed_codex_model_catalog_path(destination)
+    governed = governed_codex_model_catalog_path(destination, confined=confined)
     temporary = destination / f".{governed.name}-{uuid.uuid4().hex}.tmp"
     try:
         temporary.write_text(
@@ -182,6 +193,7 @@ def clean_codex_app_server_env(
     isolated_home: Path | None = None,
     govern_model_catalog: bool = False,
     projection_receipt=None, catalog_source: Path | None = None, cache_receipt=None,
+    confined: bool = False,
 ) -> dict[str, str]:
     """Build an auth-only, config-isolated environment for app-server.
 
@@ -210,6 +222,7 @@ def clean_codex_app_server_env(
         _write_governed_model_catalog(
             source=source,
             destination=destination,
+            confined=confined,
             **({'catalog_source': catalog_source, 'cache_receipt': cache_receipt}
                if catalog_source is not None else {}),
         )
@@ -252,6 +265,7 @@ def build_session_env(session) -> dict[str, str]:
                 source_home=Path(session.source_codex_home) if session.source_codex_home else None,
                 isolated_home=Path(session.codex_home),
                 govern_model_catalog=not session.control_only,
+                confined=getattr(session, "confined", False),
                 **({'projection_receipt': session.vendor_account_receipt,
                     'catalog_source': getattr(session, 'vendor_catalog_source', None),
                     'cache_receipt': getattr(session, 'vendor_cache_receipt', None)}
@@ -261,5 +275,6 @@ def build_session_env(session) -> dict[str, str]:
     return dict(
         clean_codex_app_server_env(
             govern_model_catalog=not session.control_only,
+            confined=getattr(session, "confined", False),
         )
     )

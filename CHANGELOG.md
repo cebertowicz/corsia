@@ -8,6 +8,7 @@ the later entry describes the current behavior.
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here._
 
 - On a new chat you can pick which account it runs on before the first message.
+- Mail that is flagged or not yet screened shows only the sender's address in search results.
 - The reasoning level you pick for a local model is now the level it runs at.
 - Setup now offers to bring over skills you made on claude.ai, even if you only use the Claude app.
 - When every account for a vendor is at its limit, the model picker's "first back" time is now the soonest of them, matching the line above the composer.
@@ -15,6 +16,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - Agents see your mail, calendar and file actions as a short count until they need one, which keeps each agent's context smaller.
 - Connecting Google takes one Allow with no Google Cloud project. Sign-in and token renewal go through Google's Workspace extension sign-in service.
 - Your comment draft stays open when the document reconnects, and closing the comment box clears the text selection, so typing can't replace your text.
+- The context sheet no longer flickers between readings while it refreshes, and its bar and the context ring grow smoothly to each new reading.
 - The shared browser no longer asks you for a password on pages that only display a hidden secret.
 - Shared documents leave Files when the work that touched them finishes; pin one to keep it there. The document itself is never deleted.
 - The shared browser follows new tabs, can show you a page an agent is already working on, and passes your pointer to captchas without lag.
