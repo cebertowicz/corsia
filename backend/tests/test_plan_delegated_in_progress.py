@@ -151,6 +151,21 @@ def test_a_review_only_child_does_not_read_working_because_its_turn_is_still_ope
     assert read["severity"] == "not_moving"
 
 
+@pytest.mark.parametrize("status_value", ["running", "waiting_retry"])
+def test_a_turn_begun_after_review_makes_a_review_only_child_active(db, status_value):
+    """A Turn waiting to retry is as live as a running one, before or after review."""
+    step = _review_only_child(db)
+    begin_worker_turn(db, started_at="2999-01-01T00:00:00")
+    db.execute("UPDATE active_turns SET status=?, retry_at=? WHERE thread_id='worker'",
+               (status_value, "2030-01-01" if status_value == "waiting_retry" else None))
+
+    row = _row(_read(db), step.id)
+
+    assert row["reason"] == "A delegated child is working on this step"
+    with pytest.raises(service.PlanError, match="still working"):
+        _mark_done(db, step)
+
+
 def test_a_queued_handback_still_makes_a_review_only_child_active(db):
     step = _review_only_child(db)
     accept_thread_input(

@@ -102,7 +102,7 @@ _CHILD_SQL = """
               WHERE a.thread_id=n.spawned_thread_id AND a.status IN ('running','waiting_retry')) AS turn_running,
            EXISTS (
              SELECT 1 FROM active_turns a
-              WHERE a.thread_id=n.spawned_thread_id AND a.status='running'
+              WHERE a.thread_id=n.spawned_thread_id AND a.status IN ('running','waiting_retry')
                 AND julianday(a.started_at) > julianday((
                   SELECT MAX(e.created_at) FROM plan_node_events e
                   JOIN plan_nodes reviewed ON reviewed.id=e.node_id
