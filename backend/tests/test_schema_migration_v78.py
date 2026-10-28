@@ -115,7 +115,7 @@ def _build_existing_v77_database(path) -> None:
 
 
 def test_the_step_is_registered_at_77_and_81_is_current() -> None:
-    assert SCHEMA_VERSION == 155
+    assert SCHEMA_VERSION == 156
     assert MIGRATIONS[77] is migrate_77_to_78
 
 
