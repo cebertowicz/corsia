@@ -21,6 +21,9 @@ CAPTURED_CODEX_VERSIONS = frozenset({
     "codex-cli 0.162.1", "codex-cli 0.163.0", "codex-cli 0.164.0", "codex-cli 0.165.0",
 })
 # Each listed version passed the full-array capture on start and resume.
+# CONFIG keys were checked against Codex source (core/config.schema.json,
+# tools/spec_plan.rs) for 0.162.1 only; on later versions, network behaviour
+# rests on what the capture's stub provider sees.
 # Environment tools independently enable apply_patch, even with shell disabled.
 CONFIG = (
     # Prevent plugin startup sync's hard-coded GitHub/ChatGPT requests too.
