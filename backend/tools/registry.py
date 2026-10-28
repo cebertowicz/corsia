@@ -5,6 +5,7 @@ from dataclasses import replace
 import logging
 from typing import Any
 
+from host_access.credential_sanitizer import sanitize_credential_text
 from tools.result_sanitizer import sanitize_result
 from infra.tool_result_errors import is_error_result
 from tools.base import Tool
