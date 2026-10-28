@@ -36,6 +36,24 @@ def test_linux_launch_keeps_other_inherited_flags(monkeypatch, blocked):
     assert '--disable-blink-features=AutomationControlled' in args[1]
 
 
+@pytest.mark.parametrize(('show_window', 'ua'), [(False, 'Mozilla/5.0 (X11; Linux x86_64) Chrome/156.0.0.0'),
+                                                    (False, None), (False, ''), (True, 'Fixture UA')])
+def test_linux_launch_user_agent_is_a_separate_argument(monkeypatch, show_window, ua):
+    monkeypatch.setattr(browser_launch, 'sys', SimpleNamespace(platform='linux'))
+    monkeypatch.setattr(launch, 'sys', SimpleNamespace(platform='linux'))
+    monkeypatch.setenv('AGENT_BROWSER_ARGS', '--foo=1,--bar=2\n--baz=3')
+    args = launch.flags(SimpleNamespace(show_window=show_window), ua)
+    assert args[0:2] == ['--args', '--foo=1\n--bar=2\n--baz=3\n--disable-blink-features=AutomationControlled']
+    assert ' ' not in args[1]
+    if not show_window and ua:
+        assert args[2:4] == ['--user-agent', ua]
+        assert args.count(ua) == 1
+        assert args[4:] == ['--init-script', str(browser_launch.STEALTH_INIT_SCRIPT)]
+    else:
+        assert '--user-agent' not in args
+        assert args[2:] == ['--init-script', str(browser_launch.STEALTH_INIT_SCRIPT)]
+
+
 @pytest.mark.asyncio
 async def test_linux_never_downloads_on_first_use(synthetic_browser, monkeypatch):
     monkeypatch.setattr(cli, 'sys', SimpleNamespace(platform='linux'))
