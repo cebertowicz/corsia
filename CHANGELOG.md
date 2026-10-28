@@ -7,6 +7,9 @@ the later entry describes the current behavior.
 
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here._
 
+- Setup now offers to bring over skills you made on claude.ai, even if you only use the Claude app.
+- When every account for a vendor is at its limit, the model picker's "first back" time is now the soonest of them, matching the line above the composer.
+- Answers to your chat comments appear on the commented messages, and a reply notice takes you to unread answers.
 - Agents see your mail, calendar and file actions as a short count until they need one, which keeps each agent's context smaller.
 - Connecting Google takes one Allow with no Google Cloud project. Sign-in and token renewal go through Google's Workspace extension sign-in service.
 - Your comment draft stays open when the document reconnects, and closing the comment box clears the text selection, so typing can't replace your text.
