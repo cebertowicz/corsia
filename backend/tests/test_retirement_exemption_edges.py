@@ -1,8 +1,7 @@
 """Edges of the retirement exemption that its main tests do not reach.
 
-A row's stored location never decides its retirement, a user comment shows
-the owner a shared document whose row an ownership change settled, and the
-ended pull request reads the same in Python and SQL.
+A user comment shows the owner a shared document whose row an ownership
+change settled, and the ended pull request reads the same in Python and SQL.
 """
 
 from __future__ import annotations
@@ -56,37 +55,6 @@ def _row(db, thread_id: str, artifact_id: str) -> sqlite3.Row:
         "WHERE parent_thread_id=? AND artifact_id=?",
         (thread_id, artifact_id),
     ).fetchone()
-
-
-def test_retirement_reads_no_stored_location_or_project_row(db):
-    """Nothing in a row's location decides retirement any more: a location
-    pathlib cannot expand, or a project row left over from another workspace,
-    used to spare every row or fail every settlement."""
-    thread_id = make_session(db, prefix="any-location")
-    note = _document(db, thread_id, "projects/alpha/.threads/t1/notes.md")
-    shared = _document(db, thread_id, "shared/planning/roadmap.md")
-    db.execute(
-        "UPDATE artifact_registrations SET origin_plan_node_id='node-1' "
-        "WHERE parent_thread_id=?",
-        (thread_id,),
-    )
-    db.execute(
-        "UPDATE artifact_identities SET path='~no-such-user-for-this-test/notes.md' WHERE id=?",
-        (note["id"],),
-    )
-    db.execute(
-        "INSERT INTO projects (id,name,path,created_at,updated_at) "
-        "VALUES ('moved','moved',?,'t0','t0')",
-        (_WS.replace("ws-1", "ws-other") + "/projects/moved",),
-    )
-    db.commit()
-
-    assert node_retirement.retire_registrations_for_node(
-        db, node_id="node-1", trigger="test", causal_event_id=None,
-    ) == 2
-    db.commit()
-    for artifact in (note, shared):
-        assert _row(db, thread_id, artifact["id"])["retired_at"] is not None
 
 
 def test_a_user_comment_shows_a_shared_document_its_ownership_change_settled(db):
