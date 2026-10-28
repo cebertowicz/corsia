@@ -306,4 +306,3 @@ def _ensure_name_available(
                 f"skill_name {name} is already a skill at {row.path}; a trial "
                 "never replaces one. Choose a new name"
             ))
-    return None

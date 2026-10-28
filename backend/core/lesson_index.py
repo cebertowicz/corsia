@@ -38,7 +38,6 @@ from core.skill_registry_types import SkillRow
 from core.skill_scanning import omitted_row
 
 OVERRIDDEN = "overridden by a more specific skill"
-OVER_BUDGET = "the lesson index budget is full"
 UNCHECKED = "its review could not be checked"
 UNREADABLE = "its file could not be read"
 SAME_NAME = "an ordinary skill has its name"
@@ -80,7 +79,6 @@ def line_for(name: str, description: str, path: object, *, trial: bool = False) 
     return f"- {name}{TRIAL_MARK if trial else ''}: {description} ({path})"
 
 
-# Trial budgets are applied to task-start payloads by lesson_delivery.
 def line_tokens(line: str, model: str | None = None) -> int:
     """The Skills estimator applied to one index line."""
     from core.token_estimation import _text_tokens

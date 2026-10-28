@@ -226,7 +226,7 @@ def _mutation_operation(
             workflow_task_fields.append_close_notice(
                 result.result, node_id=params["node_id"], db=db, workflows=workflows,
             )
-        attach_plan_result(db, result, thread_id, operation in node_start_recall._NODE_OPERATIONS)
+        attach_plan_result(db, result, thread_id, operation in node_start_recall.NODE_OPERATIONS)
         node_start_recall.attach_to_result(db, operation, result, caller_thread_id=thread_id)
         return result
     finally:
@@ -248,7 +248,7 @@ def _decision_operation(thread_id, actor_row, operation, plan_id, params, mutati
         if operation == "draft":
             return call(plan_id, **common, **params)
         result = call(params.pop("decision_id", None), **common, **params)
-        attach_plan_result(db, result, thread_id, operation in node_start_recall._NODE_OPERATIONS)
+        attach_plan_result(db, result, thread_id, operation in node_start_recall.NODE_OPERATIONS)
         node_start_recall.attach_to_result(db, operation, result, caller_thread_id=thread_id)
         return result
     finally:

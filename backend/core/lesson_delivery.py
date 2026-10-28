@@ -5,8 +5,8 @@ When a plan task starts, each eligible trial is drawn with or without for that
 task, and the with half is returned in the plan result: the trial's index line
 when its target is read on demand (a skill or a new file), or the lesson body
 when its target is already in this thread's context. Every resolved trial
-leaves one receipt per task in ``guidance_loads``. A trial the ordinary skill
-cap or the task-start token cap leaves out, a body whose target this thread
+leaves one receipt per task in ``guidance_loads``. A trial the task-start count
+cap or token cap leaves out, a body whose target this thread
 does not receive or already has its section, or one whose draw could not be
 recorded, gets a receipt with no variant: it is in neither arm, never counted
 as without.
@@ -30,7 +30,8 @@ from core.token_estimation import _text_tokens
 
 Variant = Literal["with", "without", "crossover"]
 
-#: Most tokens one task start may add. Trials past it are omitted, not withheld.
+#: Most trials and tokens one task start may admit; excess trials are omitted.
+START_TRIAL_CAP = 40
 START_TOKEN_CAP = 1_500
 OMIT_COUNT_CAP = "count_cap"
 OMIT_TOKEN_CAP = "token_cap"
@@ -91,15 +92,8 @@ def delivery_for_trial(trial, path: Path, data: bytes) -> TrialDelivery:
     lesson = trial.lesson
     metadata = lesson.case_metadata
     target = str(metadata.get("new_target_path") or metadata.get("target_file") or "")
-    if not target:
-        # Legacy trials had no target metadata and were offered as skill lines
-        # wherever ordinary skill resolution delivered their owner's tray.
-        target = str(path.resolve())
-        return TrialDelivery(
-            lesson.id, trial.behavioral_sha256, path.resolve(), data, target,
-            line_for(trial.name, trial.description[:NON_SYSTEM_DESCRIPTION_LIMIT], path, trial=True),
-        )
-    if metadata.get("new_target_path") or is_skill_file(Path(target)):
+    if not target or metadata.get("new_target_path") or is_skill_file(Path(target)):
+        target = target or str(path.resolve())
         return TrialDelivery(
             lesson.id, trial.behavioral_sha256, path.resolve(), data, target,
             line_for(trial.name, trial.description[:NON_SYSTEM_DESCRIPTION_LIMIT], path, trial=True),

@@ -19,17 +19,6 @@ PERIOD_SQL = (
 )
 
 
-def read_trial_omissions(db, *, user_id: str, thread_ids: tuple[str, ...],
-                         from_ts: str, to_ts: str) -> list[dict[str, Any]]:
-    """Read omitted trials; a NULL reason means the cause is unknown."""
-    sql = PERIOD_SQL.replace("g.variant='with'", "g.variant IS NULL").replace(
-        "g.path,g.raw_sha256 ", "g.path,g.raw_sha256,g.omission_reason "
-    )
-    owners = list(dict.fromkeys(thread_ids))
-    return list(json_row_chunks(db, sql, (json.dumps(owners), user_id, from_ts, to_ts),
-                                (*FIELDS, "omission_reason"), "created_at,receipt_id"))
-
-
 def read_trial_deliveries(db, *, user_id: str, thread_ids: tuple[str, ...],
                           from_ts: str, to_ts: str) -> list[dict[str, Any]]:
     """Read same-user deliveries; indexed offers remain a separate report signal."""

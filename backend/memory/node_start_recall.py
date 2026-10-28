@@ -33,7 +33,7 @@ MAX_HITS = 3
 SOURCE_CANDIDATES = 100
 RULE_FIELDS = frozenset({"active_constraints", "approvals_and_preferences"})
 RESULT_KEY = "prior_words"
-_NODE_OPERATIONS = frozenset({"start", "activate", "add", "insert"})
+NODE_OPERATIONS = frozenset({"start", "activate", "add", "insert"})
 _HEADER = "Earlier words from the person that match this task, newest first; where they differ, the newer one governs."
 _MATCH_FUNCTION = "prior_words_match"
 _OWNER_FUNCTION = "prior_words_owner"
@@ -73,9 +73,7 @@ def attach_to_result(
 ) -> None:
     """Attach ``prior_words`` to a plan result that starts a task or raises a decision."""
     result = getattr(result, "result", result)
-    if not isinstance(result, dict):
-        return
-    if not DELIVERY_ON:
+    if not DELIVERY_ON or not isinstance(result, dict):
         return
     try:
         subject = _subject(db, operation, result)
@@ -106,7 +104,7 @@ def related_for_next(
 
 
 def _subject(db, operation: str, result: dict) -> tuple[NodeText, str] | None:
-    if operation in _NODE_OPERATIONS and isinstance(result.get("node"), dict):
+    if operation in NODE_OPERATIONS and isinstance(result.get("node"), dict):
         node_id = result["node"].get("id")
         text = _node_text(db, str(node_id)) if node_id else None
         return None if text is None else (text, operation)

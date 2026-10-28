@@ -157,17 +157,18 @@ def _listed_skills(
     return listed
 
 
+def _scope_order(rows: list[SkillRow], precedence: tuple[tuple[str, str], ...]) -> list[SkillRow]:
+    """Order skills by scope specificity and name."""
+    specificity = {root: index for index, root in enumerate(reversed(precedence))}
+    return sorted(rows, key=lambda row: (specificity.get((row.scope, row.scope_id), len(specificity)), row.name))
+
+
 def _ordered_index_rows(
     rows: list[SkillRow], *, precedence: tuple[tuple[str, str], ...],
 ) -> tuple[list[SkillRow], list[SkillRow]]:
     """Order rows for the stable full index and names-only overflow."""
-    specificity = {root: index for index, root in enumerate(reversed(precedence))}
-
-    def index_order(row: SkillRow) -> tuple[int, str]:
-        return specificity.get((row.scope, row.scope_id), len(specificity)), row.name
-
     system_rows = sorted((row for row in rows if row.scope == "system"), key=lambda row: row.name)
-    other_rows = sorted((row for row in rows if row.scope != "system"), key=index_order)
+    other_rows = _scope_order([row for row in rows if row.scope != "system"], precedence)
     full_rows = list(system_rows)
     name_only_rows = []
     ordinary_count = 0
@@ -186,16 +187,14 @@ def trial_delivery_rows(
     *, thread_id: str, project_id: str | None, workspace: Path, db,
 ) -> tuple[list[SkillRow], list[SkillRow]]:
     """Return eligible and cap-omitted trial snapshots in scope precedence order."""
+    from core.lesson_delivery import START_TRIAL_CAP
+
     resolved = resolve_effective_skills(
         thread_id=thread_id, project_id=project_id, workspace=workspace, db=db,
     )
     split = partition(resolved.included, resolved.omitted, thread_id=thread_id, db=db)
-    specificity = {root: index for index, root in enumerate(reversed(resolved.precedence))}
-    rows = sorted(
-        split.per_task,
-        key=lambda row: (specificity.get((row.scope, row.scope_id), len(specificity)), row.name),
-    )
-    return rows[:_NON_SYSTEM_FULL_SKILL_LIMIT], rows[_NON_SYSTEM_FULL_SKILL_LIMIT:]
+    rows = _scope_order(split.per_task, resolved.precedence)
+    return rows[:START_TRIAL_CAP], rows[START_TRIAL_CAP:]
 
 
 def _displayable_skill_errors(rows: list[SkillRow]) -> list[SkillRow]:

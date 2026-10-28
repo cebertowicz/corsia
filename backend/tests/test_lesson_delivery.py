@@ -89,6 +89,21 @@ def _in_context(monkeypatch, tmp_path: Path, text: str = "# Rules\n", *, deliver
     )
 
 
+def test_trial_cap_is_independent_of_index_limit_and_uses_scope_order(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    from core import skills_registry
+
+    rows = [SimpleNamespace(name=f"trial-{i:02}", scope="thread", scope_id="owner") for i in range(41)]
+    rows.append(SimpleNamespace(name="priority", scope="thread", scope_id="child"))
+    resolved = SimpleNamespace(included=rows, omitted=[], precedence=(("thread", "owner"), ("thread", "child")))
+    monkeypatch.setattr(skills_registry, "resolve_effective_skills", lambda **_: resolved)
+    monkeypatch.setattr(skills_registry, "partition", lambda *_args, **_kwargs: SimpleNamespace(per_task=rows))
+    monkeypatch.setattr(skills_registry, "_NON_SYSTEM_FULL_SKILL_LIMIT", 1)
+    admitted, omitted = skills_registry.trial_delivery_rows(thread_id="child", project_id=None, workspace=tmp_path, db=None)
+    assert len(admitted) == 40 and len(omitted) == 2
+    assert admitted[0].name == "priority" and [row.name for row in omitted] == ["trial-39", "trial-40"]
+
+
 def test_read_file_description_does_not_duplicate_trial_marker_protocol():
     from tools.filesystem_rw import ReadFileTool
 
@@ -250,19 +265,6 @@ def test_delivery_reader_keeps_owners_and_variants_separate(db, monkeypatch):
                                  from_ts="2000", to_ts="2100")
     assert len(rows) == 1
     assert rows[0]["thread_id"] == "thread" and rows[0]["lesson_id"] == "new"
-
-
-def test_omission_reader_keeps_unknown_old_reasons_unknown(db, monkeypatch):
-    from core.lesson_trial_receipts import read_trial_omissions
-
-    db.execute("INSERT INTO threads (id,user_id,created_at,updated_at) VALUES ('thread','user','t','t')")
-    db.commit()
-    _resolved(monkeypatch, [], [_trial("old")])
-    start_trials(db, thread_id="thread", node_id="task")
-    db.execute("UPDATE guidance_loads SET omission_reason=NULL WHERE node_id='task'")
-    db.commit()
-    rows = read_trial_omissions(db, user_id="user", thread_ids=("thread",), from_ts="2000", to_ts="2100")
-    assert len(rows) == 1 and rows[0]["omission_reason"] is None
 
 
 def test_start_trials_returns_and_records_the_with_half(db, monkeypatch):
