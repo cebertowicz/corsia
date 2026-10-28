@@ -1,4 +1,4 @@
-"""What a confined (``review``) thread's CORSIA tool calls may reach, on any harness.
+"""What a confined (``untrusted``) thread's CORSIA tool calls may reach, on any harness.
 
 The tool boundary (``tools.registry``) reads the thread's stored confinement
 (``infra.thread_confinement``) on every call. A confined thread may call only
@@ -21,7 +21,7 @@ from typing import Any
 from infra.thread_confinement import ConfinementRecordDamaged, parse
 
 #: The only tools a confined thread has: they read, and resolve every path below.
-REVIEW_READ_TOOLS = frozenset({"read_file", "grep", "glob", "list_dir"})
+UNTRUSTED_READ_TOOLS = frozenset({"read_file", "grep", "glob", "list_dir"})
 
 _roots: ContextVar[tuple[Path, ...] | None] = ContextVar("confined_read_roots", default=None)
 
@@ -41,10 +41,10 @@ def call_refusal(name: str, thread_context: Mapping[str, Any]) -> str | None:
         roots = context_roots(thread_context)
     except ConfinementRecordDamaged as error:
         return f"Error: refused: {error}; no tool may run."
-    if roots is None or name in REVIEW_READ_TOOLS:
+    if roots is None or name in UNTRUSTED_READ_TOOLS:
         return None
-    return (f"Error: refused: {name} is not available to a confined review worker; "
-            f"it may only use {', '.join(sorted(REVIEW_READ_TOOLS))} on its read paths.")
+    return (f"Error: refused: {name} is not available to a confined untrusted worker; "
+            f"it may only use {', '.join(sorted(UNTRUSTED_READ_TOOLS))} on its read paths.")
 
 
 @contextmanager
@@ -79,7 +79,7 @@ def check(given: Path, resolved: Path, *, for_write: bool) -> None:
     if roots is None:
         return
     if for_write:
-        raise PermissionError("A confined review worker cannot write.")
+        raise PermissionError("A confined untrusted worker cannot write.")
     lexical = Path(os.path.normpath(given.absolute()))
     for candidate in (lexical, resolved):
         if not any(candidate == root or candidate.is_relative_to(root) for root in roots):
@@ -104,7 +104,7 @@ def advertised_definitions(registry: Any, thread_context: Mapping[str, Any] | No
 
 
 def project_definitions(definitions: tuple[dict, ...], confined: bool) -> tuple[dict, ...]:
-    return tuple(d for d in definitions if d["function"]["name"] in REVIEW_READ_TOOLS) if confined else definitions
+    return tuple(d for d in definitions if d["function"]["name"] in UNTRUSTED_READ_TOOLS) if confined else definitions
 
 
 async def advertised(registry: Any, thread_context: Mapping[str, Any] | None) -> tuple[dict, ...]:

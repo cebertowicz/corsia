@@ -16,7 +16,7 @@ def test_chat_migration_follows_thread_confinement():
     from infra.migration_154_to_155_thread_confinement import migrate_154_to_155
     from infra.schema import SCHEMA_VERSION
 
-    assert SCHEMA_VERSION == 158
+    assert SCHEMA_VERSION == 160
     assert MIGRATIONS[154] is migrate_154_to_155
     assert MIGRATIONS[155] is migrate_155_to_156
 

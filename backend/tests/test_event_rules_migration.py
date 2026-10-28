@@ -39,7 +39,7 @@ def test_upgrade_from_135_matches_a_fresh_install_and_seeds_only_the_shipped_rul
     fresh = _fresh()
     upgraded = _dev_135()
     result = migrate_to_current(upgraded, SCHEMA_VERSION)
-    assert (result.migrated, result.from_version, result.to_version) == (True, 135, 158)
+    assert (result.migrated, result.from_version, result.to_version) == (True, 135, 160)
     sync_shipped_rules(upgraded)
     sync_shipped_rules(fresh)
     assert [tuple(r) for r in upgraded.execute(_OBJECTS)] == [tuple(r) for r in fresh.execute(_OBJECTS)]
