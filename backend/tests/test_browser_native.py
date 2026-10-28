@@ -74,7 +74,7 @@ async def test_display_secret_and_sign_in_are_distinguished_in_chrome(native_own
     assert len((await browser_cdp.page_password_probe(endpoint, {})).visible_nodes) == 1
 
 
-async def test_pane_open_is_the_stock_clients_current_page(native_owner, monkeypatch, capsys):
+async def test_pane_open_is_the_stock_clients_current_page(native_owner, monkeypatch):
     async def serve(_reader, writer):
         writer.write(b'HTTP/1.1 200 OK\r\nContent-Length: 12\r\nConnection: close\r\n\r\nBrowser test')
         await writer.drain()
@@ -92,17 +92,12 @@ async def test_pane_open_is_the_stock_clients_current_page(native_owner, monkeyp
         binding = runtime.record.binding
         assert binding is not None, f'pane open={opened!r}'
         # BrowserOpenTool suppresses the one-time notice before parsing get url.
-        tabs_before = await native_owner.run('native-pane-open', ['tab'], session='existing', notice=False)
         owner_url = await native_owner.run('native-pane-open', ['get', 'url'], session='existing', notice=False)
         binding_after_owner = (await native_owner._observe(runtime)).binding
         result = await native_owner._invoke(native_owner._session_argv(runtime, ['get', 'url']), timeout=30)
-        tabs_after = await native_owner.run('native-pane-open', ['tab'], session='existing', notice=False)
         binding_after_raw = (await native_owner._observe(runtime)).binding
-        diagnostic = (f'pane open={opened!r}; tabs before={tabs_before!r}; agent get url={owner_url!r}; '
-                      f'raw returncode={result.returncode}, stdout={result.stdout!r}, stderr={result.stderr!r}; '
-                      f'tabs after={tabs_after!r}')
-        with capsys.disabled():
-            print(diagnostic)
+        diagnostic = (f'pane open={opened!r}; agent get url={owner_url!r}; '
+                      f'raw returncode={result.returncode}, stdout={result.stdout!r}, stderr={result.stderr!r}')
         assert browser_cli.json_object(owner_url).get('url') == url, diagnostic
         assert binding_after_owner == binding, diagnostic
         assert result.returncode == 0, diagnostic
