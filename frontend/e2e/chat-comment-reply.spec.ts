@@ -47,7 +47,9 @@ test('reply from the thread and edit the pending highlight before sending', asyn
   const comment = row.locator('.chat-comment-thread').first();
   await expect(comment.getByText('First comment')).toBeVisible();
   await capture('thread');
-  await comment.getByRole('button', { name: /Reply to comment/ }).click();
+  const replyButton = comment.getByRole('button', { name: /Reply to comment/ });
+  if ((page.viewportSize()?.width ?? 0) <= 768) await replyButton.tap();
+  else await replyButton.click();
   await expect(page.getByRole('dialog', { name: 'Reply' })).toBeVisible();
   await page.getByRole('textbox', { name: 'Reply' }).fill('Draft reply');
   await capture('compose');

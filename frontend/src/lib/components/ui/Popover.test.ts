@@ -16,8 +16,8 @@ function render(options: { open?: boolean; anchor?: DOMRect; fill?: boolean; wid
 }
 beforeEach(() => {
 	// jsdom has no layout: match the dimensions provided by each geometry fixture.
-	vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(function () { return this.getBoundingClientRect().width; });
-	vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockImplementation(function () { return this.getBoundingClientRect().height; });
+	vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(function (this: HTMLElement) { return this.getBoundingClientRect().width; });
+	vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockImplementation(function (this: HTMLElement) { return this.getBoundingClientRect().height; });
 });
 afterEach(() => { if (component) unmount(component); component = null; host?.remove(); vi.restoreAllMocks(); });
 describe('Popover', () => {
