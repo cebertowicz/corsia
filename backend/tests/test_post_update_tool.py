@@ -161,7 +161,7 @@ def test_post_update_reaches_native_claude_code_and_codex(tmp_path):
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     registry = build_tool_registry(str(workspace))
-    external = dynamic_tool_definitions(registry, frozenset())
+    external = dynamic_tool_definitions(registry)
     cc = {tool["name"] for tool in mcp_tool_payloads(external)}
     codex = {tool["name"] for tool in to_dynamic_tool_specs(external)}
 

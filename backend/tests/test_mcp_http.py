@@ -564,7 +564,7 @@ async def test_seven_servers_and_39_tools_in_fresh_codex_registries(
         assert {name for name in harness.tool_names if name in expected} == expected
         assert await native.tools.get("first_read_one").execute() == "ok"
         assert await harness.get("second_read_two").execute() == "ok"
-        definitions = dynamic_tool_definitions(harness, frozenset())
+        definitions = dynamic_tool_definitions(harness)
         assert http_mcp.token not in json.dumps(definitions)
         await mcp_runtime.stop_mcp_runtime()
 

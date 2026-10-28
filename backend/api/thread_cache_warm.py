@@ -6,7 +6,6 @@ from fastapi import APIRouter, HTTPException
 from loguru import logger
 
 from api.thread_cache_warm_probe import (
-    has_positive_context_evidence,
     probe_is_memory_hot,
     probe_progress,
     warm_transport_identity,
@@ -15,7 +14,6 @@ from infra.auth import authenticate
 from infra.database import get_db
 from infra.db_async import run_in_db
 from infra.queries import get_thread_for_user
-from tools.connected_app_visibility import account_capabilities_for_thread
 from llm.context_window_discovery import ensure_context_window
 from llm.resolution import (
     ExecutionTarget,
@@ -33,6 +31,10 @@ def _is_warmable_omlx_target(target: ExecutionTarget) -> bool:
         and target.provider == "omlx"
         and target.backend == "network"
     )
+
+
+def _has_positive_context_evidence(target: ExecutionTarget) -> bool:
+    return target.context_window is not None and target.context_window > 0
 
 
 def _warm_suppressed(suppression: str) -> dict:
@@ -85,7 +87,7 @@ async def _prove_warm_target(target: ExecutionTarget, thread_id: str):
             "ok": False,
             "message": "Not a warmable available Native oMLX network model",
         }
-    if has_positive_context_evidence(target):
+    if _has_positive_context_evidence(target):
         return target
     await ensure_context_window(target.catalog_id)
     db = get_db()
@@ -96,7 +98,7 @@ async def _prove_warm_target(target: ExecutionTarget, thread_id: str):
             return {"ok": False, "message": str(exc)}
     finally:
         db.close()
-    if not has_positive_context_evidence(target):
+    if not _has_positive_context_evidence(target):
         return {
             "ok": False,
             "message": f"Exact context-window evidence is unknown for {target.catalog_id}",
@@ -124,8 +126,7 @@ async def _build_warm_prefix(
 
     agent = await get_agent()
     await agent._connect_mcp()
-    tool_defs = _freeze_tool_definitions(advertised_tool_definitions(
-        agent.tools, await run_in_db(account_capabilities_for_thread, thread_id)))
+    tool_defs = _freeze_tool_definitions(advertised_tool_definitions(agent.tools))
     wire_tool_defs = list(tool_defs)
     candidates, eager_checkpoint_id, pending_opening = await run_in_db(
         _warm_replay_candidates, thread_id, target.catalog_id,

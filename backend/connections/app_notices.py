@@ -2,7 +2,7 @@
 
 import sqlite3
 
-from connections.app_reach import AppReach, _reach, reach_reaches_thread
+from connections.app_reach import AppReach, _reach, _reach_reaches_thread
 from infra.database import write_transaction
 
 def append_app_notice(
@@ -31,8 +31,8 @@ def append_app_notice(
         details["state"] = state
     for row in db.execute("SELECT id FROM threads"):
         thread_id = row["id"]
-        reached_before = before is not None and reach_reaches_thread(before, thread_id, db=db)
-        reached_after = after is not None and reach_reaches_thread(after, thread_id, db=db)
+        reached_before = before is not None and _reach_reaches_thread(before, thread_id, db=db)
+        reached_after = after is not None and _reach_reaches_thread(after, thread_id, db=db)
         if (before is None and reached_after) or (before is not None and reached_before != reached_after):
             append_thread_context_note(db, thread_id=thread_id, summary=summary, details=details)
 

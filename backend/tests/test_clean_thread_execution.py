@@ -320,7 +320,7 @@ async def test_codex_admitted_failure_keeps_one_owner_and_drives_after_unlock(
 
     tool_resolutions = 0
 
-    async def resolve_tools(*_args, **_kwargs):
+    def resolve_tools(*_args, **_kwargs):
         nonlocal tool_resolutions
         tool_resolutions += 1
         if failure_stage == "replacement_setup" and tool_resolutions == 2:
@@ -374,7 +374,7 @@ async def test_codex_admitted_failure_keeps_one_owner_and_drives_after_unlock(
     monkeypatch.setattr(runtime, "_prepare_dispatch_context", prepare_context)
     monkeypatch.setattr(runtime, "_dispatch_prepared_codex", spawn_locked)
     monkeypatch.setattr(runtime, "_reusable_app_session", lambda _id: session)
-    monkeypatch.setattr(runtime, "_prepare_app_server_tools", resolve_tools)
+    monkeypatch.setattr(runtime, "_resolve_app_server_tools", resolve_tools)
     monkeypatch.setattr("llm.resolution.resolve_execution_target", lambda _model, **_kwargs: target)
     monkeypatch.setattr(runtime, "_configure_spec_app_server_input", configure)
     monkeypatch.setattr(runtime, "_maintain_codex_initial_boundary", boundary)
@@ -940,7 +940,7 @@ async def test_codex_checkpoint_stop_transfers_no_write_before_stop_terminal(
         ),
     )
     monkeypatch.setattr(
-        codex_runtime, "_prepare_app_server_tools", AsyncMock(return_value=(object(), ())),
+        codex_runtime, "_resolve_app_server_tools", lambda *_a, **_k: (object(), ()),
     )
     monkeypatch.setattr(codex_runtime, "_configure_spec_app_server_input", configure)
     monkeypatch.setattr(

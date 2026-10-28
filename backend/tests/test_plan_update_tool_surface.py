@@ -91,7 +91,7 @@ async def test_a_codex_thread_whose_handle_was_reset_starts_fresh_with_plan_upda
 
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    _registry_for_start, dynamic_tools = _tool_surface(str(workspace), None, thread_id)
+    _registry_for_start, dynamic_tools = _tool_surface(str(workspace), None)
     method, names = await _start_names(dynamic_tools)
 
     assert method == "thread/start"

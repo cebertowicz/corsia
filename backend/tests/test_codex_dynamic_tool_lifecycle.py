@@ -1355,7 +1355,7 @@ async def test_fresh_rejected_start_is_unaccepted_and_not_reusable(
     )
     monkeypatch.setattr(
         "subagents.harness_tool_bridge.dynamic_tool_definitions",
-        lambda _registry, _capabilities: (),
+        lambda _registry: (),
     )
 
     call = locked_spawn(
@@ -1467,7 +1467,7 @@ async def test_fresh_malformed_post_drain_response_is_ambiguous_and_quarantined(
     )
     monkeypatch.setattr(
         "subagents.harness_tool_bridge.dynamic_tool_definitions",
-        lambda _registry, _capabilities: (),
+        lambda _registry: (),
     )
 
     with pytest.raises(Exception, match="did not return a turn id"):

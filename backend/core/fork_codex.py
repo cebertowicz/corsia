@@ -10,7 +10,6 @@ from typing import Any
 
 from history.types import HistoryBoundary
 from core.fork_account import admit_fork, bind_fork_session
-from core.fork_tools import codex_fork_tools as _fork_tools
 
 from core.fork_runtime import ForkKind
 from llm.resolution import ExecutionTarget
@@ -186,6 +185,31 @@ def _copy_rollout(source: CodexWarmSource, isolated_home: Path) -> None:
     )
 
 
+def _fork_tools(request: ProviderForkRequest, cwd: str, kind: ForkKind):
+    """Use the exact cold surface frozen at fit, or rebuild warm callbacks."""
+    from core.fork_tools import allowed_definitions
+    from subagents.harness_tool_bridge import build_tool_registry, dynamic_tool_definitions
+    from tools.catalog import fork_tool_definitions
+
+    if request.warm_source is not None:
+        # A warm resume keeps the source's tool list so its cached prefix
+        # holds; the kind's allowlist is enforced at execution instead.
+        registry = request.tool_registry or build_tool_registry(cwd)
+        return registry, dynamic_tool_definitions(registry)
+    if request.tool_registry is not None:
+        definitions = (
+            fork_tool_definitions(request.tool_registry, kind.tool_allowlist)
+            if hasattr(request.tool_registry, "get_definitions") else request.dynamic_tool_specs
+        )
+        return request.tool_registry, allowed_definitions(definitions, kind)
+    registry = build_tool_registry(cwd)
+    definitions = allowed_definitions(
+        fork_tool_definitions(registry, kind.tool_allowlist)
+        if hasattr(registry, "get_definitions") else dynamic_tool_definitions(registry),
+        kind,
+    )
+    return registry, definitions
+
 
 def _fork_session(
     request: ProviderForkRequest,
@@ -199,7 +223,6 @@ def _fork_session(
     cold_input=None,
     fork_tool_result_fits=None,
     kind: ForkKind,
-    capabilities: frozenset[str],
     cancel_event: asyncio.Event | None = None,
     on_raw_message=None,
 ):
@@ -208,7 +231,7 @@ def _fork_session(
 
     from core.fork_tools import ForkToolBoundary
 
-    registry, definitions = _fork_tools(request, cwd, kind, capabilities)
+    registry, definitions = _fork_tools(request, cwd, kind)
     boundary = ForkToolBoundary(
         kind, request, registry, cancel_event or asyncio.Event(), fork_tool_result_fits,
     )
@@ -241,12 +264,12 @@ def _fork_session(
     ), kind=kind)
 
 
-def _fit_cold_request(request: ProviderForkRequest, cwd: str, *, kind: ForkKind, capabilities: frozenset[str]):
+def _fit_cold_request(request: ProviderForkRequest, cwd: str, *, kind: ForkKind):
     from core.fork_render import codex_cold_surface, fit_cold_fork_input
 
-    registry, definitions = _fork_tools(request, cwd, kind, capabilities)
+    registry, definitions = _fork_tools(request, cwd, kind)
     surface, registry, definitions, developer = codex_cold_surface(
-        cwd, writer=request.target, capabilities=capabilities, registry=registry, definitions=definitions,
+        cwd, writer=request.target, registry=registry, definitions=definitions,
         developer=request.developer_instructions,
     )
     request = replace(
@@ -264,7 +287,6 @@ async def _run_app_server_fork(
     cwd: str, cancel_event: asyncio.Event,
     cold_input=None,
     kind: ForkKind,
-    capabilities: frozenset[str],
 ) -> ProviderForkResult:
     from core.fork_codex_context import CodexForkContext, frozen_context_tokens
     from core.token_estimation import measure_request
@@ -323,7 +345,6 @@ async def _run_app_server_fork(
         cold_input=cold_input,
         fork_tool_result_fits=tool_boundary,
         kind=kind,
-        capabilities=capabilities,
         cancel_event=cancel_event,
         on_raw_message=on_raw_message,
     )
@@ -348,15 +369,11 @@ async def invoke_fork(
         raise TypeError(f"Codex {kind.name} received another harness's warm source")
     if cancel_event.is_set():
         raise asyncio.CancelledError
-    from infra.db_async import run_in_db
-    from tools.connected_app_visibility import account_capabilities_for_thread
-
-    capabilities = await run_in_db(account_capabilities_for_thread, request.thread_id)
     cold_input = None
     if source is None:
         source_home = Path(request.vendor_launch.codex_source or request.vendor_launch.warm_home)
         cwd = request.working_dir
-        request, cold_input = await asyncio.to_thread(_fit_cold_request, request, cwd, kind=kind, capabilities=capabilities)
+        request, cold_input = await asyncio.to_thread(_fit_cold_request, request, cwd, kind=kind)
         if on_cold_input is not None:
             await on_cold_input(cold_input.first_included_seq)
     else:
@@ -377,7 +394,6 @@ async def invoke_fork(
             isolated_home=isolated_home,
             cwd=cwd,
             cancel_event=cancel_event,
-            capabilities=capabilities,
             cold_input=cold_input,
             kind=kind,
         )

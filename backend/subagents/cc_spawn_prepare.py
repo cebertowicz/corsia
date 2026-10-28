@@ -171,9 +171,6 @@ async def _build_live(
     )]
     resolved_dir = (resolve_claude_dir(request.claude_dir) if request.claude_dir is not None
                     else thread_claude_dir(child_id, db=db))
-    from tools.connected_app_visibility import account_capabilities_for_thread
-
-    capabilities = await run_in_db(account_capabilities_for_thread, child_id)
     live = _Live(
         session=None, seed_file=seed_file, claude_dir=resolved_dir,
         parent_thread_id=request.parent_thread_id,
@@ -187,7 +184,7 @@ async def _build_live(
         context_snapshot=reconstruction.snapshot.to_dict(),
         source_artifacts=artifacts,
         tool_definitions=(
-            () if tool_registry is None else dynamic_tool_definitions(tool_registry, capabilities)
+            () if tool_registry is None else dynamic_tool_definitions(tool_registry)
         ),
     )
     return live, resolved_dir

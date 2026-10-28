@@ -66,7 +66,7 @@ def codex_destination_scope(
     return project_id, working_dir
 
 
-def _tool_surface(working_dir: str, session, thread_id: str) -> tuple[Any, tuple[dict[str, Any], ...]]:
+def _tool_surface(working_dir: str, session) -> tuple[Any, tuple[dict[str, Any], ...]]:
     if session is not None:
         registry = getattr(session, "tool_registry", None)
         if registry is None:
@@ -79,11 +79,8 @@ def _tool_surface(working_dir: str, session, thread_id: str) -> tuple[Any, tuple
         dynamic_tool_definitions,
     )
 
-    from tools.connected_app_visibility import account_capabilities_for_thread
-
     registry = build_tool_registry(working_dir)
-    capabilities = account_capabilities_for_thread(thread_id)
-    return registry, dynamic_tool_definitions(registry, capabilities)
+    return registry, dynamic_tool_definitions(registry)
 
 
 def _validate_live_model(
@@ -144,7 +141,7 @@ def _live_preparation(
     live = _LIVE.get(thread_id)
     session = live.session if live is not None else _APP_SESSIONS.get(thread_id)
     validate_live_compaction(session, target)
-    registry, tools = _tool_surface(working_dir, session, thread_id)
+    registry, tools = _tool_surface(working_dir, session)
     return _DeliveryPreparation(
         fingerprint,
         projection,
@@ -175,7 +172,7 @@ def _cold_preparation(
         or tail.sealed_boundary != sealed_boundary
     ):
         raise ValueError("Codex replay does not match the admitted history boundary")
-    registry, tools = _tool_surface(working_dir, None, thread_id)
+    registry, tools = _tool_surface(working_dir, None)
     return _DeliveryPreparation(
         None,
         tail,

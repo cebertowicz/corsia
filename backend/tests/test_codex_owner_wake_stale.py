@@ -72,7 +72,7 @@ async def test_idle_owner_wake_after_context_change_is_delivered(
     idle.expected_reported_model = target.expected_reported_model
     idle.runtime_context_epoch = 0
     idle.tool_registry = registry
-    idle.dynamic_tools = dynamic_tool_definitions(registry, frozenset())
+    idle.dynamic_tools = dynamic_tool_definitions(registry)
     idle.config_overrides = _compaction_overrides(
         target.context_window,
         discovered_context_window=target.discovered_context_window,

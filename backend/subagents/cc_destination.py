@@ -95,12 +95,10 @@ def _fit_sections(*, seed, transcript, frame, tool_definitions, checkpoint_text,
     return sections, fit, input_tokens
 
 
-def _provider_resume_tools(working_dir: str, live: _Live | None, confinement: LaunchConfinement, thread_id: str):
+def _provider_resume_tools(working_dir: str, live: _Live | None, confinement: LaunchConfinement):
     if live is not None and live.tool_registry is not None:
         return live.tool_registry, tuple(live.tool_definitions or ())
-    from tools.connected_app_visibility import account_capabilities_for_thread
-
-    return launch_tools(working_dir, confinement.confined, account_capabilities_for_thread(thread_id))
+    return launch_tools(working_dir, confinement.confined)
 
 
 def _require_session_in_root(live, provider_session_id: str, claude_dir: str) -> None:
@@ -177,7 +175,7 @@ def _provider_resume_destination(
         seed=None, transcript=None, frame=frame,
         tool_definitions=(), checkpoint_text=None,
     )
-    registry, tool_definitions = _provider_resume_tools(working_dir, live, confinement, session_id)
+    registry, tool_definitions = _provider_resume_tools(working_dir, live, confinement)
     return CCPreparedDestination(
         thread_id=session_id, mode="provider_resume",
         target_catalog_id=target.catalog_id, current_user_text=current_user_text,
@@ -209,10 +207,7 @@ def _cold_material(
     )
     prior_cc_session_id = _artifact_cc_session_id(session_id, db)
     cc_session_id = str(uuid.uuid4())
-    from tools.connected_app_visibility import account_capabilities_for_thread
-
-    capabilities = account_capabilities_for_thread(session_id)
-    tool_registry, tool_definitions = launch_tools(working_dir, confinement.confined, capabilities)
+    tool_registry, tool_definitions = launch_tools(working_dir, confinement.confined)
     allowed_tools = frozenset(
         definition["function"]["name"] for definition in tool_definitions
     )

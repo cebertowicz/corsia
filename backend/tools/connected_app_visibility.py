@@ -1,28 +1,9 @@
 """Reach checks for MCP tools bound to durable connected-app identities."""
 
-import logging
 import sqlite3
 from typing import Any
 
 from tools.base import Tool
-
-log = logging.getLogger(__name__)
-
-
-def account_capabilities_for_thread(thread_id: str) -> frozenset[str]:
-    """Resolve account reach off-loop for one index render; discovery fails closed."""
-    from connections.connected_accounts import capabilities_reaching_thread
-    from infra.database import get_db
-
-    try:
-        db = get_db()
-        try:
-            return capabilities_reaching_thread(thread_id, db=db)
-        finally:
-            db.close()
-    except (OSError, sqlite3.Error):
-        log.warning("Account capability discovery failed; account tools are not listed")
-        return frozenset()
 
 
 def mcp_app_id(tool: Tool) -> str | None:

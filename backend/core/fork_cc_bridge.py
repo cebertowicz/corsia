@@ -70,7 +70,7 @@ async def result_stream(request, thread_id, token, body):
         yield cc_tool_bridge_payload(ToolMediaContent(text=str(result), image=media.image), secret=token)
 
 
-def definitions(handle, capabilities: frozenset[str]):
+def definitions(handle):
     """Advertise the source's list on a warm resume, the narrowed list on cold.
 
     A warm fork resumes the source's cached prefix, which embeds the source's
@@ -83,7 +83,7 @@ def definitions(handle, capabilities: frozenset[str]):
     source = handle.request.warm_source
     if source is not None:
         frozen = getattr(source, "tool_definitions", None)
-        return frozen if frozen is not None else dynamic_tool_definitions(handle.tool_registry, capabilities)
+        return frozen if frozen is not None else dynamic_tool_definitions(handle.tool_registry)
     return allowed_definitions(
         fork_tool_definitions(handle.tool_registry, handle.kind.tool_allowlist), handle.kind,
     )

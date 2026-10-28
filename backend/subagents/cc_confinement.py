@@ -87,7 +87,7 @@ def launch_confinement(thread_id: str, live, db) -> LaunchConfinement:
     return registered_confinement(thread_id, db)
 
 
-def launch_tools(working_dir: str | None, confined: bool, capabilities: frozenset[str]) -> tuple[object, tuple]:
+def launch_tools(working_dir: str | None, confined: bool) -> tuple[object, tuple]:
     """The CORSIA tool registry and definitions a launch installs and budgets.
 
     A review child has no tool bridge, so it gets neither, however it launches.
@@ -97,4 +97,4 @@ def launch_tools(working_dir: str | None, confined: bool, capabilities: frozense
     from subagents.harness_tool_bridge import build_tool_registry, dynamic_tool_definitions
 
     registry = build_tool_registry(working_dir)
-    return registry, dynamic_tool_definitions(registry, capabilities)
+    return registry, dynamic_tool_definitions(registry)

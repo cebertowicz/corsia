@@ -14,13 +14,10 @@ import sqlite3
 import uuid
 from typing import Literal
 
-from connections.account_capabilities import decode_capabilities
 from connections.account_provider import AccountProvider
 from connections.agent_add_reach import AddingScopeError, reach_for_adding_thread as _agent_add_reach
 from connections.app_lifecycle_support import _assert_selected_projects_exist
-from connections.app_reach import (
-    AppReach, AppReachError, normalize_reach, reach_reaches_scopes, reach_reaches_thread, resolve_thread_scopes,
-)
+from connections.app_reach import AppReach, AppReachError, normalize_reach, reach_reaches_thread
 from connections.google.provider import GOOGLE
 from connections.mailhost.provider import MAILHOST
 from connections.microsoft.provider import MICROSOFT
@@ -95,29 +92,6 @@ def account_reaches_thread(account_id: str, thread_id: str, *, db: sqlite3.Conne
         return reach_reaches_thread(reach, thread_id, db=db)
     except (AppReachError, ConnectedAccountError):
         return False
-
-
-def capabilities_reaching_thread(thread_id: str, *, db: sqlite3.Connection) -> frozenset[str]:
-    """Union capabilities of accounts reaching a thread, resolving the parent chain once."""
-    rows = db.execute("SELECT id,reach_mode,outside_projects,capabilities_json FROM connected_accounts").fetchall()
-    projects: dict[str, set[str]] = {}
-    for row in db.execute("SELECT account_id,project_id FROM connected_account_reach"):
-        projects.setdefault(row["account_id"], set()).add(row["project_id"])
-    scopes = resolve_thread_scopes(thread_id, db=db)
-    corsia = any(row["reach_mode"] == ONLY_CORSIA for row in rows) and _is_corsia_agent_thread(thread_id, db=db)
-    result: set[str] = set()
-    for row in rows:
-        capabilities = decode_capabilities(row["capabilities_json"])
-        if capabilities is None:
-            continue
-        if row["reach_mode"] == ONLY_CORSIA:
-            reached = corsia
-        else:
-            reach = AppReach(row["reach_mode"], frozenset(projects.get(row["id"], set())), bool(row["outside_projects"]))
-            reached = reach_reaches_scopes(reach, scopes)
-        if reached:
-            result.update(capabilities)
-    return frozenset(result)
 
 
 def get_account(account_id: str, *, db: sqlite3.Connection) -> dict[str, object]:

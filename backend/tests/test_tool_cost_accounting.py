@@ -69,7 +69,7 @@ def test_index_rows_and_corsia_remainder_equal_the_old_tool_definitions_total(tm
         _ConfiguredTool("mcp_linear_issue", "linear"),
     ):
         registry.register(tool)
-    definitions = tuple(advertised_tool_definitions(registry, frozenset()))
+    definitions = tuple(advertised_tool_definitions(registry))
     canonical = _canonical_tool_definitions(definitions)
     total = _text_tokens(canonical, "m") + 4
 
@@ -90,7 +90,7 @@ def test_no_connected_app_keeps_the_single_row_and_total(tmp_path):
     from core.native_context_prefix import _canonical_tool_definitions
     from tools.catalog import advertised_tool_definitions
 
-    definitions = tuple(advertised_tool_definitions(_registry(tmp_path), frozenset()))
+    definitions = tuple(advertised_tool_definitions(_registry(tmp_path)))
     canonical = _canonical_tool_definitions(definitions)
 
     entries = tool_definition_entries(

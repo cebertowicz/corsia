@@ -44,7 +44,7 @@ def test_warm_checkpoint_session_uses_governed_catalog_for_receipt_ids(tmp_path,
         on_event=lambda event: None,
         on_exit=lambda code, error: None,
         fork_tool_result_fits=lambda reply, usage=None: True,
-        kind=CHECKPOINT_KIND, capabilities=frozenset(),
+        kind=CHECKPOINT_KIND,
     )
 
     assert any(value.startswith("model_catalog_json=") for value in session.build_cmd())
@@ -65,7 +65,7 @@ async def test_first_input_nonfit_never_starts_a_codex_session(monkeypatch, tmp_
             _request(target(100), None, binary="unused"), None,
             source_home=tmp_path, isolated_home=tmp_path, cwd=str(tmp_path),
             cancel_event=asyncio.Event(), cold_input=ColdFoldInput((), 101, None, 0),
-            kind=CHECKPOINT_KIND, capabilities=frozenset(),
+            kind=CHECKPOINT_KIND,
         )
     session.assert_not_called()
 
@@ -212,7 +212,7 @@ async def test_codex_invocation_returns_partial_checkpoint_when_reply_does_not_f
     result = await codex._run_app_server_fork(
         request, None, source_home=tmp_path, isolated_home=tmp_path, cwd=str(tmp_path),
         cancel_event=asyncio.Event(), cold_input=ColdFoldInput((), 90, None, 0),
-        kind=CHECKPOINT_KIND, capabilities=frozenset(),
+        kind=CHECKPOINT_KIND,
     )
     assert result.raw_body == "Partial checkpoint."
     assert result.diagnostic == "checkpoint_context_truncated"

@@ -1489,7 +1489,7 @@ async def test_codex_cold_writer_thread_arms_managed_tool_receipts(tmp_path, ven
         request, None, source_home=tmp_path / "source", isolated_home=isolated_home,
         cwd=str(tmp_path), on_event=None, on_exit=None,
         fork_tool_result_fits=lambda *_args: True,
-        kind=CHECKPOINT_KIND, capabilities=frozenset(),
+        kind=CHECKPOINT_KIND,
     )
     rollout = isolated_home / "sessions" / "rollout-writer.jsonl"
 
@@ -1613,7 +1613,7 @@ async def test_codex_checkpoint_uses_callback_capable_app_server(
     )
     monkeypatch.setattr(
         "subagents.harness_tool_bridge.dynamic_tool_definitions",
-        lambda _registry, _capabilities: definitions,
+        lambda _registry: definitions,
     )
     result = await codex.invoke_fork(
         _request(_target("codex"), source, binary="codex"), asyncio.Event(), kind=CHECKPOINT_KIND
@@ -1657,7 +1657,7 @@ async def test_checkpoint_session_runs_dynamic_tool_without_foreground_step(
         request, None,
         source_home=tmp_path / "source", isolated_home=tmp_path / "isolated",
         cwd=str(tmp_path), on_event=None, on_exit=None,
-        kind=CHECKPOINT_KIND, capabilities=frozenset(),
+        kind=CHECKPOINT_KIND,
     )
     execute = AsyncMock(return_value="checkpoint tool result")
     monkeypatch.setattr("subagents.harness_tool_bridge.execute_tool", execute)
@@ -1769,7 +1769,7 @@ async def test_checkpoint_cancel_terminates_exact_provider_handle(
         )
         monkeypatch.setattr(
             "subagents.harness_tool_bridge.dynamic_tool_definitions",
-            lambda _registry, _capabilities: (),
+            lambda _registry: (),
         )
 
     cancel = asyncio.Event()

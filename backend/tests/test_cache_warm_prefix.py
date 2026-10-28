@@ -83,7 +83,7 @@ def test_cache_warm_eager_checkpoint_matches_native_send_without_exact_render(
             "parameters": {"type": "object", "properties": {}},
         },
     },)
-    monkeypatch.setattr("tools.catalog.advertised_tool_definitions", lambda _tools, _capabilities: tools)
+    monkeypatch.setattr("tools.catalog.advertised_tool_definitions", lambda _tools: tools)
     observed: list[str] = []
 
     async def observe(**kwargs):
@@ -139,7 +139,7 @@ def test_cache_warm_selects_fitting_checkpoint_tail_after_exact_exceeds_budget(
     )
     agent = _make_mock_agent(system_prompt="<SYS>")
     monkeypatch.setattr("core.agent.get_agent", AsyncMock(return_value=agent))
-    monkeypatch.setattr("tools.catalog.advertised_tool_definitions", lambda _tools, _capabilities: [])
+    monkeypatch.setattr("tools.catalog.advertised_tool_definitions", lambda _tools: [])
     observed_info = []
 
     async def _observe_prefix(**kwargs):
@@ -241,7 +241,7 @@ def test_cache_warm_fails_closed_when_only_exact_history_exceeds_budget(monkeypa
     )
     agent = _make_mock_agent(system_prompt="<SYS>")
     monkeypatch.setattr("core.agent.get_agent", AsyncMock(return_value=agent))
-    monkeypatch.setattr("tools.catalog.advertised_tool_definitions", lambda _tools, _capabilities: [])
+    monkeypatch.setattr("tools.catalog.advertised_tool_definitions", lambda _tools: [])
     target = SimpleNamespace(
         catalog_id="omlx/model-1",
         transport_model="omlx@srv-1/model-1",

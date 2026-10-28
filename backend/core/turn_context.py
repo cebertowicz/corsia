@@ -152,13 +152,10 @@ async def prepare_turn_context(
     from core.thread_history import prepare_history_for_llm
     from tools.catalog import advertised_tool_definitions
 
-    if tool_definitions is None:
-        from infra.db_async import run_in_db
-        from tools.connected_app_visibility import account_capabilities_for_thread
-
-        capabilities = await run_in_db(account_capabilities_for_thread, thread_id)
-        tool_definitions = advertised_tool_definitions(agent.tools, capabilities)
-    frozen_tools = native_prefix._selected_tool_definitions(tool_definitions)
+    frozen_tools = native_prefix._selected_tool_definitions(
+        advertised_tool_definitions(agent.tools)
+        if tool_definitions is None else tool_definitions
+    )
     source_content = (
         user_content
         if user_source_content is native_prefix.USER_SOURCE_UNSET
@@ -215,12 +212,8 @@ async def prepare_native_context_payload(
 
     agent = await get_agent()
     await agent._connect_mcp()
-    from infra.db_async import run_in_db
-    from tools.connected_app_visibility import account_capabilities_for_thread
-
-    capabilities = await run_in_db(account_capabilities_for_thread, thread_id)
     frozen_tools = native_prefix._freeze_tool_definitions(
-        advertised_tool_definitions(agent.tools, capabilities)
+        advertised_tool_definitions(agent.tools)
     )
     installed: list[Any] = []
     snapshot: list[Any] = []

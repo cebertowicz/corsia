@@ -53,13 +53,11 @@ def build_tool_registry(working_dir: str | None = None) -> ToolRegistry:
     return agent.tools
 
 
-def dynamic_tool_definitions(
-    registry: ToolRegistry, capabilities: frozenset[str],
-) -> tuple[dict[str, Any], ...]:
+def dynamic_tool_definitions(registry: ToolRegistry) -> tuple[dict[str, Any], ...]:
     """Return the advertised tool list for Claude Code (MCP) and Codex (dynamic)."""
     from tools.catalog import advertised_tool_definitions
 
-    return advertised_tool_definitions(registry, capabilities)
+    return advertised_tool_definitions(registry)
 
 
 def write_cc_mcp_config(

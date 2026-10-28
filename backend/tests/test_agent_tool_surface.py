@@ -48,7 +48,7 @@ def test_external_harness_surface_is_direct_and_cataloged(tmp_path, monkeypatch)
     registry = build_tool_registry(str(workspace))
     names = {
         definition["function"]["name"]
-        for definition in dynamic_tool_definitions(registry, frozenset())
+        for definition in dynamic_tool_definitions(registry)
     }
     reachable = {name for pack in pack_members().values() for name in pack}
 
@@ -150,7 +150,7 @@ async def test_native_cc_and_codex_share_canonical_plan_surface(tmp_path, monkey
     )
 
     native = list(payload.tool_definitions)
-    canonical = dynamic_tool_definitions(registry, frozenset())
+    canonical = dynamic_tool_definitions(registry)
     cc = mcp_tool_payloads(canonical)
     codex = to_dynamic_tool_specs(canonical)
 
@@ -184,7 +184,7 @@ def test_plan_read_params_are_identical_across_native_cc_and_codex(tmp_path):
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     registry = build_tool_registry(str(workspace))
-    canonical = dynamic_tool_definitions(registry, frozenset())
+    canonical = dynamic_tool_definitions(registry)
     cc = mcp_tool_payloads(canonical)
     codex = to_dynamic_tool_specs(canonical)
 
@@ -216,7 +216,7 @@ def test_process_tools_reach_native_cc_and_codex_surfaces(tmp_path):
     from subagents.corsia_mcp_server import mcp_tool_payloads
 
     registry = build_tool_registry(str(workspace))
-    external = dynamic_tool_definitions(registry, frozenset())
+    external = dynamic_tool_definitions(registry)
     native_names = set(registry.tool_names)
     cc_names = {
         definition["name"]
@@ -247,7 +247,7 @@ def test_mcp_payloads_expose_registry_tools_without_bridge_wrapper(tmp_path):
     from subagents.corsia_mcp_server import mcp_tool_payloads
 
     registry = build_tool_registry(str(workspace))
-    payloads = mcp_tool_payloads(dynamic_tool_definitions(registry, frozenset()))
+    payloads = mcp_tool_payloads(dynamic_tool_definitions(registry))
     by_name = {tool["name"]: tool for tool in payloads}
 
     loaded = _loaded_schemas(registry, "delegation")

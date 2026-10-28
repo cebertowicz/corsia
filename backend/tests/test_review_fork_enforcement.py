@@ -105,7 +105,7 @@ async def test_cc_bridge_owns_token_allowlist_exact_call_and_cancel(review_env):
         assert env["CORSIA_CC_TOOL_TOKEN"] == handle.tool_token
         with pytest.raises(HTTPException):
             authenticate(http, "reviewer", "forged")
-        advertised = {item["function"]["name"] for item in definitions(handle, frozenset())}
+        advertised = {item["function"]["name"] for item in definitions(handle)}
         assert advertised <= ARTIFACT_REVIEW_KIND.tool_allowlist
         assert "doc_feedback_send" in advertised
 
@@ -469,8 +469,8 @@ async def test_warm_cc_review_advertises_the_source_tool_list(review_env, frozen
     warm = SimpleNamespace(tool_definitions=source_tools if frozen else None)
     provider = replace(_request(None), fork_id=row["fork_id"], thread_id="reviewer", warm_source=warm)
     with bind_bridge(provider, ARTIFACT_REVIEW_KIND, asyncio.Event()) as (_request_, handle):
-        advertised = definitions(handle, frozenset())
-        expected = source_tools if frozen else dynamic_tool_definitions(handle.tool_registry, frozenset())
+        advertised = definitions(handle)
+        expected = source_tools if frozen else dynamic_tool_definitions(handle.tool_registry)
         assert json.dumps(advertised, sort_keys=False) == json.dumps(expected, sort_keys=False)
 
         async def bound(operation, _call_id, _name, _arguments):
@@ -517,12 +517,12 @@ def test_warm_codex_review_advertises_the_full_source_surface(tmp_path):
 
     cwd = str(tmp_path)
     registry = build_tool_registry(cwd)
-    full = dynamic_tool_definitions(build_tool_registry(cwd), frozenset())
+    full = dynamic_tool_definitions(build_tool_registry(cwd))
     warm = replace(_request(None), warm_source=object(), tool_registry=registry)
     cold = replace(_request(None), warm_source=None, tool_registry=None)
 
-    warm_registry, warm_tools = _fork_tools(warm, cwd, ARTIFACT_REVIEW_KIND, frozenset())
-    _cold_registry, cold_tools = _fork_tools(cold, cwd, ARTIFACT_REVIEW_KIND, frozenset())
+    warm_registry, warm_tools = _fork_tools(warm, cwd, ARTIFACT_REVIEW_KIND)
+    _cold_registry, cold_tools = _fork_tools(cold, cwd, ARTIFACT_REVIEW_KIND)
 
     assert warm_registry is registry
     assert json.dumps(warm_tools) == json.dumps(full)

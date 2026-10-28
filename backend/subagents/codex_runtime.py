@@ -85,10 +85,10 @@ from subagents.codex_runtime_spawn import (
     capture_app_server_request as _capture_app_server_request,
     new_app_server_live as _new_app_server_live,
     remember_spawned_turn as _remember_spawned_app_server_turn,
+    resolve_app_server_tools as _resolve_app_server_tools,
     reusable_app_session as _reusable_app_session,
     stamp_app_server_context as _stamp_app_server_context,
 )
-from subagents.codex_tool_preparation import prepare_app_server_tools as _prepare_app_server_tools
 from subagents.codex_spawn_preflight import (
     resolve_spawn_payload as _resolve_spawn_payload,
     spawn_binary as _spawn_binary,
@@ -781,7 +781,10 @@ async def _run_app_server_turn(spec: _AppServerTurnSpec) -> TurnIdentity | None:
     _require_owned_accept_db(spec.db)
     bcast = spec.broadcast or _default_broadcast
     session = _reusable_app_session(spec.thread_id)
-    tool_registry, dynamic_tools = await _prepare_app_server_tools(session, spec)
+    tool_registry, dynamic_tools = _resolve_app_server_tools(
+        session, working_dir=spec.working_dir, tool_registry=spec.tool_registry,
+        dynamic_tools=spec.dynamic_tools,
+    )
     exact_model = _validate_codex_transport_model(spec.model)
     live = _new_app_server_live(
         session,

@@ -91,7 +91,7 @@ def test_warm_endpoint_probes_fitting_checkpoint_tail_when_exact_is_oversized(
     )
     agent = _make_mock_agent(system_prompt="<SYS>")
     monkeypatch.setattr("core.agent.get_agent", AsyncMock(return_value=agent))
-    monkeypatch.setattr("tools.catalog.advertised_tool_definitions", lambda _tools, _capabilities: [])
+    monkeypatch.setattr("tools.catalog.advertised_tool_definitions", lambda _tools: [])
     provider = MagicMock()
     provider.probe_cache = AsyncMock(return_value={
         "ok": True,
@@ -906,7 +906,7 @@ async def test_omlx_warm_key_probe_and_payload_match_real_send_sanitization(
             {"history_messages": 2, "history_tokens": 20, "was_trimmed": False},
         )),
     )
-    monkeypatch.setattr("tools.catalog.advertised_tool_definitions", lambda _tools, _capabilities: tools)
+    monkeypatch.setattr("tools.catalog.advertised_tool_definitions", lambda _tools: tools)
 
     result = await api_runtime.warm_session_cache("thread-native", token="t")
     task = state._active_warm_tasks.get("thread-native")

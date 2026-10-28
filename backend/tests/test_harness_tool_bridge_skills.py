@@ -84,7 +84,7 @@ async def test_harness_tool_bridge_can_load_skill_body(
     registry = build_tool_registry(str(workspace))
     tool_names = {
         definition["function"]["name"]
-        for definition in dynamic_tool_definitions(registry, frozenset())
+        for definition in dynamic_tool_definitions(registry)
         if definition.get("type") == "function"
     }
     assert "read_file" in tool_names

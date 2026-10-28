@@ -13,7 +13,6 @@ from infra.database import get_db
 from infra.db_async import run_in_db
 from infra.queries import get_thread_for_user
 from infra.send_dispatch import provider_for
-from tools.connected_app_visibility import account_capabilities_for_thread
 from llm.resolution import (
     ModelUnavailableError,
     resolve_execution_target,
@@ -167,7 +166,6 @@ async def next_turn_context_snapshot(
     )
 
     tool_definitions: tuple[dict, ...] = ()
-    capabilities = await run_in_db(account_capabilities_for_thread, thread_id)
     if provider == "native":
         from core.agent import get_agent
         from core.native_context_prefix import _freeze_tool_definitions
@@ -176,7 +174,7 @@ async def next_turn_context_snapshot(
         agent = await get_agent()
         await agent._connect_mcp()
         tool_definitions = _freeze_tool_definitions(
-            advertised_tool_definitions(agent.tools, capabilities)
+            advertised_tool_definitions(agent.tools)
         )
     elif provider in {"cc", "codex"}:
         # Same catalog-filtered ledger Native uses, built from a throwaway
@@ -190,7 +188,7 @@ async def next_turn_context_snapshot(
         tool_definitions = timing.measure(
             "tool_registry",
             lambda: _freeze_tool_definitions(
-                advertised_tool_definitions(build_tool_registry(), capabilities)
+                advertised_tool_definitions(build_tool_registry())
             ),
         )
     try:

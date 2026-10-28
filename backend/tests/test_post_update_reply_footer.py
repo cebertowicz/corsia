@@ -267,10 +267,10 @@ def test_post_update_is_reachable_on_every_harness_surface():
     registry = build_tool_registry()
     assert registry.has("post_update") and is_reachable("post_update")
     assert "post_update" in reachable_tool_names(registry)
-    assert "- post_update:" in pack_index(registry, frozenset())
+    assert "- post_update:" in pack_index(registry)
     from subagents.harness_tool_bridge import dynamic_tool_definitions
 
-    advertised = {d["function"]["name"] for d in dynamic_tool_definitions(registry, frozenset())}
+    advertised = {d["function"]["name"] for d in dynamic_tool_definitions(registry)}
     assert {TOOLS_LOAD, TOOL_CALL} <= advertised
 
 
