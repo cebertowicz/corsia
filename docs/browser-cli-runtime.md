@@ -262,10 +262,11 @@ spawn boundary can follow actual execution; neither is no-effects proof.
 The producer acknowledgement is the stock local-CDP cleanup contract. It is not
 an independently enforced kernel containment boundary for every conceivable
 helper process. macOS Chrome starts a new process session and can survive a backend
-crash. Before a saved-profile launch, CORSIA reclaims an orphaned Chrome group whose
-command line matches that exact profile. A live or otherwise unverified holder is
-left alone and reported as a saved sign-in in use. Restart does not remove stale
-temporary profiles. The allocator skips occupied ports until the inventory is exhausted.
+crash. Before a saved-profile launch, CORSIA reclaims a headless orphaned Chrome
+group whose command line matches that exact profile. A headed orphan is left for
+the person to close; a live or otherwise unverified holder is left alone and
+reported with its process ID. Restart does not remove stale temporary profiles.
+The allocator skips occupied ports until the inventory is exhausted.
 
 ## Verification and rollout
 

@@ -29,6 +29,7 @@ _COOKIE_TIMEOUT = 5.0
 _COOKIE_PARAMS = ("name", "value", "domain", "path", "secure", "httpOnly", "sameSite", "expires",
                   "priority", "sourceScheme", "sourcePort", "partitionKey")
 _SIGNIN_MISSED = "Saved sign-in wasn't used this time. This browser starts signed out."
+STREAM_MISMATCH = "managed browser stream did not use its reserved listener"
 
 
 class CopyRestoreError(RuntimeError):
@@ -118,7 +119,7 @@ async def verify_stream(owner: Any, runtime: Any, result: Any = None) -> None:
     except (ValueError, AttributeError):
         actual = None
     if result.returncode or result.timed_out or result.completion != "exited" or actual != runtime.chrome.stream_port:
-        raise RuntimeError("managed browser stream did not use its reserved listener")
+        raise RuntimeError(STREAM_MISMATCH)
     await asyncio.to_thread(require_listener, runtime.record.binding.pid, actual)
 
 

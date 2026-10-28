@@ -1,45 +1,53 @@
-"""Recover a saved profile from a Chrome orphaned by a previous backend."""
+"""Recover a saved profile from a headless Chrome orphaned by a previous backend."""
 from __future__ import annotations
 
+import logging
 import os
-import signal
-import time
+from pathlib import Path
 
 import psutil
 
-from host_access import browser_identity as identity
+from host_access import browser_chrome, browser_identity as identity, browser_session_launch
+
+logger = logging.getLogger(__name__)
+HEADED_HOLDER = "A CORSIA browser window left from before a restart is still open. Please close that window, then try again."
+UNVERIFIED_HOLDER = "CORSIA cannot verify or stop browser process {pid}. Please quit that process, then try again; agents cannot quit it."
+_SAFE_STARTUP_MESSAGES = frozenset({
+    browser_chrome.CHROME_EXITED, browser_chrome.CHROME_NOT_STARTED,
+    browser_chrome.LISTENER_UNVERIFIED, browser_chrome.ENDPOINT_MISMATCH,
+    browser_session_launch.STREAM_MISMATCH,
+})
 
 
 class BrowserProfileInUse(RuntimeError):
     """A live or unverified browser still holds the saved profile."""
 
-    def __init__(self) -> None:
-        super().__init__("Another browser is using the saved sign-in. Close it and try again.")
-
-
-_SAFE_STARTUP_MESSAGES = frozenset({
-    "Another browser is using the saved sign-in. Close it and try again.",
-    "managed Chrome exited during startup",
-    "managed Chrome did not start its reserved listener",
-    "managed browser listener ownership could not be verified",
-    "managed browser endpoint did not match its reserved listener",
-    "managed browser stream did not use its reserved listener",
-    "orphaned managed Chrome process group did not exit",
-})
+    def __init__(self, pid: int, *, headed: bool = False) -> None:
+        super().__init__(HEADED_HOLDER if headed else UNVERIFIED_HOLDER.format(pid=pid))
 
 
 def startup_message(exc: BaseException) -> str:
     """Only known internal diagnostics are safe to put in the service log."""
     message = str(exc)
-    return message if message in _SAFE_STARTUP_MESSAGES else "details withheld"
+    return message if isinstance(exc, BrowserProfileInUse) or message in _SAFE_STARTUP_MESSAGES else "details withheld"
+
+
+def _still_ours(process: psutil.Process, birth: float, argument: str) -> bool | None:
+    try:
+        current = identity.process_for_identity(process.pid)
+        argv = current.cmdline()
+        return True if (current.is_running() and identity.process_create_time(current) == birth
+                        and current.ppid() == 1 and current.uids().real == os.getuid()
+                        and argument in argv and "--headless=new" in argv
+                        and os.getpgid(current.pid) == current.pid) else None
+    except (psutil.Error, OSError, identity.BrowserIdentityError, identity.BrowserPidAbsent):
+        return None
 
 
 def close_orphans(profile: str, owned_pids: frozenset[int]) -> None:
-    """Close only orphaned Chrome group leaders using this exact profile, off-loop.
+    """Close only verified headless Chrome group leaders on this exact profile, off-loop."""
+    from host_access.processes import stop_orphan_group
 
-    A managed Chrome is a session and group leader. Requiring reparenting to
-    init avoids disturbing Chrome owned by another still-running backend.
-    """
     argument = f"--user-data-dir={profile}"
     candidates = []
     for process in psutil.process_iter(["pid"]):
@@ -54,57 +62,21 @@ def close_orphans(profile: str, owned_pids: frozenset[int]) -> None:
             matched = True
             if (pid in owned_pids or process.ppid() != 1 or process.uids().real != os.getuid()
                     or os.getpgid(pid) != pid):
-                raise BrowserProfileInUse()
+                raise BrowserProfileInUse(pid)
+            if "--headless=new" not in argv:
+                raise BrowserProfileInUse(pid, headed=True)
             candidates.append((process, identity.process_create_time(process)))
         except (psutil.NoSuchProcess, psutil.ZombieProcess, ProcessLookupError, identity.BrowserPidAbsent):
             continue
-        except (psutil.AccessDenied, PermissionError):
+        except (psutil.AccessDenied, PermissionError, identity.BrowserIdentityError):
             if matched:
-                raise BrowserProfileInUse() from None
+                raise BrowserProfileInUse(pid) from None
     for process, birth in candidates:
-        try:
-            pid = process.pid
-            if (not process.is_running() or identity.process_create_time(process) != birth
-                    or process.ppid() != 1 or argument not in process.cmdline()
-                    or os.getpgid(pid) != pid):
-                raise BrowserProfileInUse()
-            try:
-                _terminate_group(pid)
-            except RuntimeError as exc:
-                raise BrowserProfileInUse() from exc
-        except (psutil.NoSuchProcess, psutil.ZombieProcess, ProcessLookupError, identity.BrowserPidAbsent):
-            continue
-        except (psutil.AccessDenied, PermissionError):
-            raise BrowserProfileInUse() from None
-
-
-def _group_exists(pid: int) -> bool:
-    try:
-        os.killpg(pid, 0)
-        return True
-    except ProcessLookupError:
-        return False
-
-
-def _wait_for_group(pid: int, seconds: float) -> bool:
-    deadline = time.monotonic() + seconds
-    while _group_exists(pid):
-        if time.monotonic() >= deadline:
-            return False
-        time.sleep(0.1)
-    return True
-
-
-def _terminate_group(pid: int) -> None:
-    try:
-        os.killpg(pid, signal.SIGTERM)
-    except ProcessLookupError:
-        return
-    if _wait_for_group(pid, 5):
-        return
-    try:
-        os.killpg(pid, signal.SIGKILL)
-    except ProcessLookupError:
-        return
-    if not _wait_for_group(pid, 5):
-        raise RuntimeError("orphaned managed Chrome process group did not exit")
+        pid = process.pid
+        result = stop_orphan_group(
+            pid, lambda: _still_ours(process, birth, argument),
+            on_signal=lambda: logger.info("signalled orphaned Chrome pid=%s profile=%s", pid, Path(profile).name),
+            ignore_zombie_leader=True,
+        )
+        if result == "unverified":
+            raise BrowserProfileInUse(pid)
