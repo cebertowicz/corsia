@@ -147,7 +147,7 @@ def _activate(
     from infra.guidance_git import digest
     from plans import public as plans
 
-    path, base = destination.path, admission.text
+    path, base = admission.destination_path or destination.path, admission.text
     assert path is not None and base is not None and place.tray is not None
     trial = lesson_files.read_trial(base)
     assert trial is not None

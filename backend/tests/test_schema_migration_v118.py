@@ -143,6 +143,7 @@ def test_no_designation_changes_no_titles():
 
 def test_runner_upgrades_a_117_database_in_one_transaction(tmp_path):
     from infra.database_migrations import migrate_to_current
+    from infra.migration_46_to_47_guidance_manifests import _GUIDANCE_47_DDL
 
     path = tmp_path / "upgrade.db"
     with sqlite3.connect(path) as connection:
@@ -154,6 +155,7 @@ def test_runner_upgrades_a_117_database_in_one_transaction(tmp_path):
             PRAGMA user_version=117;
             """
         )
+        connection.execute(_GUIDANCE_47_DDL[1])
         _setting(connection, OLD_KEY, "ws")
     with sqlite3.connect(path) as connection:
         result = migrate_to_current(connection, SCHEMA_VERSION)

@@ -8,6 +8,7 @@ import pytest
 
 from infra.database_migrations import MIGRATIONS, migrate_to_current
 from infra.migration_116_to_117_script_schedules import migrate_116_to_117
+from infra.migration_46_to_47_guidance_manifests import _GUIDANCE_47_DDL
 from infra.schema import SCHEMA_SQL, SCHEMA_VERSION
 
 _V116_TABLE = """
@@ -26,7 +27,7 @@ _V116_TABLE = """
         ON automation_schedules(state, next_run_at);
     CREATE INDEX idx_automation_schedules_scope
         ON automation_schedules(scope_id, next_run_at);
-"""
+""" + _GUIDANCE_47_DDL[1] + ";"
 
 
 def _columns(db: sqlite3.Connection) -> list[str]:

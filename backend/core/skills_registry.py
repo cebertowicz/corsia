@@ -182,6 +182,22 @@ def _ordered_index_rows(
     return full_rows, name_only_rows
 
 
+def trial_delivery_rows(
+    *, thread_id: str, project_id: str | None, workspace: Path, db,
+) -> tuple[list[SkillRow], list[SkillRow]]:
+    """Return eligible and cap-omitted trial snapshots in scope precedence order."""
+    resolved = resolve_effective_skills(
+        thread_id=thread_id, project_id=project_id, workspace=workspace, db=db,
+    )
+    split = partition(resolved.included, resolved.omitted, thread_id=thread_id, db=db)
+    specificity = {root: index for index, root in enumerate(reversed(resolved.precedence))}
+    rows = sorted(
+        split.per_task,
+        key=lambda row: (specificity.get((row.scope, row.scope_id), len(specificity)), row.name),
+    )
+    return rows[:_NON_SYSTEM_FULL_SKILL_LIMIT], rows[_NON_SYSTEM_FULL_SKILL_LIMIT:]
+
+
 def _displayable_skill_errors(rows: list[SkillRow]) -> list[SkillRow]:
     """Keep malformed skills separate from unavailable role-root diagnostics."""
     return [
@@ -242,11 +258,9 @@ def skill_context_sources(
                 "error_count": len(resolved.errors),
                 "system_unavailable": resolved.system_unavailable,
                 "repair_owner": "skills",
-                # Always a list here; a row without the key predates lessons.
-                "lessons": split.lessons,
-                # The listed skills by scope, for the context sheet. Absent on
-                # a row that predates it: unavailable, never "none".
-                "skills": _listed_skills(full_rows, name_only_rows, split.lessons),
+                # This index offers no trials; task-start receipts record delivery separately.
+                "lessons": [],
+                "skills": _listed_skills(full_rows, name_only_rows, []),
             },
         )
     ]

@@ -94,10 +94,21 @@ USAGE_SCHEMA_SQL = """
         delivered_sha256 TEXT NOT NULL,
         byte_count INTEGER NOT NULL,
         partial INTEGER NOT NULL CHECK (partial IN (0, 1)),
-        created_at TEXT NOT NULL
+        created_at TEXT NOT NULL,
+        node_id TEXT,
+        variant TEXT CHECK (variant IS NULL OR variant IN ('with', 'without', 'crossover')),
+        checkpoint_generation_id TEXT,
+        lesson_id TEXT,
+        lesson_behavioral_sha256 TEXT,
+        omission_reason TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_guidance_loads_turn
         ON guidance_loads(turn_id) WHERE turn_id IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS idx_guidance_loads_lesson_node
+        ON guidance_loads(lesson_id, lesson_behavioral_sha256, node_id) WHERE lesson_id IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS idx_guidance_loads_trial_thread_time
+        ON guidance_loads(thread_id, created_at, lesson_id, lesson_behavioral_sha256, id)
+        WHERE variant='with' AND lesson_id IS NOT NULL AND lesson_behavioral_sha256 IS NOT NULL;
 """ + LIMIT_HISTORY_SCHEMA_SQL
 # The hourly rollup Measurement reads in place of the ledger (``api.usage_rollup``).
 USAGE_SCHEMA_SQL += USAGE_ROLLUP_SQL

@@ -142,12 +142,25 @@ def _skill(env: Env, name: str = "cite-the-head") -> Path:
 
 
 def _offered(env: Env) -> list[dict]:
-    """The lessons the next installed skills index would carry."""
-    sources = skill_context_sources(
-        thread_id=THREAD, project_id=None, workspace=env.workspace, db=env.db,
-    )
-    index = [source for source in sources if source.source_id == "dynamic:skills-index"]
-    return index[0].metadata["lessons"] if index else []
+    """Eligible lessons leave cached context and can reach a task's with arm."""
+    from core.lesson_delivery import draw, start_trials
+    from core.lesson_index import partition
+    from core.skill_resolution import resolve_effective_skills
+
+    sources = skill_context_sources(thread_id=THREAD, project_id=None, workspace=env.workspace, db=env.db)
+    index = next(source for source in sources if source.source_id == "dynamic:skills-index")
+    assert index.metadata["lessons"] == []
+    resolved = resolve_effective_skills(thread_id=THREAD, project_id=None, workspace=env.workspace, db=env.db)
+    split = partition(resolved.included, resolved.omitted, thread_id=THREAD, db=env.db)
+    records = []
+    for record in split.lessons:
+        assert record["index_line"] not in index.prompt_content
+        node = next(f"verify-{record['id']}-{n}" for n in range(1000)
+                    if draw(record["id"], record["behavioral_sha256"], f"verify-{record['id']}-{n}") == "with")
+        delivered = start_trials(env.db, thread_id=THREAD, node_id=node)
+        if any(item["lesson_id"] == record["id"] for item in delivered):
+            records.append(record)
+    return records
 
 
 def _reviews(env: Env, prefix: str = "") -> list[sqlite3.Row]:
@@ -1015,14 +1028,14 @@ async def test_appended_evidence_finds_the_same_captured_review(env: Env) -> Non
 async def test_a_full_lesson_budget_captures_the_next_trial(env: Env) -> None:
     from plans import public as plans
 
-    env.monkeypatch.setattr("core.lesson_index.INDEX_TOKEN_BUDGET", 1)
+    env.monkeypatch.setattr("core.lesson_delivery.START_TOKEN_CAP", 1)
     entry = _entry(env)
 
     reply = _place(env, entry)
     await _drain(env.worker)
 
-    assert "the trial lessons already offered fill the lesson index budget" in reply
-    assert "retire or promote a trial lesson you no longer need" in reply
+    assert "the trial exceeds the task-start guidance budget" in reply
+    assert "shorten the trial guidance so it fits at task start" in reply
     assert not _skill(env).exists() and _offered(env) == []
     assert plans.open_capture_review_counts(env.db) == {THREAD: 1}
 

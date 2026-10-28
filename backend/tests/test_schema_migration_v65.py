@@ -6,6 +6,7 @@ import sqlite3
 from contextlib import closing
 
 from infra.database_migrations import migrate_to_current
+from infra.migration_46_to_47_guidance_manifests import _GUIDANCE_47_DDL
 from infra.schema import SCHEMA_VERSION
 
 
@@ -32,6 +33,7 @@ def test_startup_migration_removes_legacy_session_tables_idempotently() -> None:
             CREATE TABLE session_summaries (id TEXT PRIMARY KEY);
             PRAGMA user_version=64;
         """)
+        db.execute(_GUIDANCE_47_DDL[1])
         assert _table_names(db) == set(_LEGACY_TABLES)
 
         result = migrate_to_current(db, SCHEMA_VERSION)

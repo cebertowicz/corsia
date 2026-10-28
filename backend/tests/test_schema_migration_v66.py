@@ -12,6 +12,7 @@ import pytest
 
 from infra.database import initialize_schema
 from infra.database_migrations import migrate_to_current
+from infra.migration_46_to_47_guidance_manifests import _GUIDANCE_47_DDL
 from infra.schema import SCHEMA_VERSION
 
 _TABLES = (
@@ -127,6 +128,8 @@ def test_startup_migration_adds_comment_context_columns_idempotently() -> None:
             );
             PRAGMA user_version=66;
         """)
+        db.execute(_GUIDANCE_47_DDL[1])
+        db.commit()
 
         result = migrate_to_current(db, SCHEMA_VERSION)
 

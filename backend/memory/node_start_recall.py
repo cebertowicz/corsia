@@ -26,7 +26,7 @@ from infra.checkpoint_queries import current_installed_through_seq
 from infra.product_events import emit_product_event
 from llm.locality import cloud_off_project_ids
 from memory.checkpoint_search import caller_user_id
-from memory.node_text import node_text as _node_text
+from memory.node_text import node_text as _node_text, started_node_id as _started_node_id
 from memory.task_match import Match, NodeText, TaskTerms, first_term_at, match, task_terms
 
 MAX_HITS = 3
@@ -34,7 +34,6 @@ SOURCE_CANDIDATES = 100
 RULE_FIELDS = frozenset({"active_constraints", "approvals_and_preferences"})
 RESULT_KEY = "prior_words"
 _NODE_OPERATIONS = frozenset({"start", "activate", "add", "insert"})
-_STARTED_HOWS = frozenset({"started", "auto_selected"})
 _HEADER = "Earlier words from the person that match this task, newest first; where they differ, the newer one governs."
 _MATCH_FUNCTION = "prior_words_match"
 _OWNER_FUNCTION = "prior_words_owner"
@@ -74,7 +73,11 @@ def attach_to_result(
 ) -> None:
     """Attach ``prior_words`` to a plan result that starts a task or raises a decision."""
     result = getattr(result, "result", result)
-    if not DELIVERY_ON or not isinstance(result, dict):
+    if not isinstance(result, dict):
+        return
+    from core.lesson_delivery import attach_plan_result
+    attach_plan_result(db, result, caller_thread_id, operation in _NODE_OPERATIONS)
+    if not DELIVERY_ON:
         return
     try:
         subject = _subject(db, operation, result)
@@ -115,13 +118,6 @@ def _subject(db, operation: str, result: dict) -> tuple[NodeText, str] | None:
     node_id = _started_node_id(result.get("next"))
     text = _node_text(db, node_id) if node_id else None
     return None if text is None else (text, "close_next")
-
-
-def _started_node_id(block: object) -> str | None:
-    selected = block.get("selected") if isinstance(block, dict) else None
-    if not isinstance(selected, dict) or selected.get("how") not in _STARTED_HOWS:
-        return None
-    return str(selected["id"])
 
 
 def _related(db, text: NodeText, caller_thread_id: str) -> tuple[str, list[_Hit]]:

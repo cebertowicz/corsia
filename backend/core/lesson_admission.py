@@ -20,7 +20,8 @@ from typing import Any
 from core import lesson_case, lesson_files
 from core.lesson_trials import PERMANENT_KINDS, lesson_id, parse_instant
 from core.thread_identity import thread_agent_identity
-from core.placement_decide import Decision, Destination, InvalidDecision, ThreadPlace
+from core.placement_decide import Decision, Destination, ThreadPlace
+from core.lesson_trial_targeting import TrialRefused, same_case, target_trials
 
 #: A source a person wrote: citing one does not make the agent's rule theirs.
 HUMAN_KINDS = frozenset({"user", "message"})
@@ -39,16 +40,8 @@ FIXES = {
     "no-selective-trigger": (
         "give skill_description (when it applies) and trial.boundary (when it does not)"
     ),
-    "over-budget": "retire or promote a trial lesson you no longer need",
+    "over-budget": "shorten the trial guidance so it fits at task start",
 }
-
-
-class TrialRefused(InvalidDecision):
-    """The trial cannot be placed as answered; ``code`` is the worker's reason."""
-
-    def __init__(self, code: str, message: str) -> None:
-        super().__init__(message)
-        self.code = code
 
 
 @dataclass(frozen=True)
@@ -67,6 +60,7 @@ class Admission:
     hold: str | None = None
     text: str | None = None
     case_metadata: dict[str, Any] = field(default_factory=dict)
+    destination_path: Path | None = None
 
 
 def human_refs(body: dict[str, Any]) -> set[tuple[str, str]]:
@@ -116,11 +110,11 @@ def admit(
     epoch = int(entry.get("history_epoch", row["history_epoch"]))
     capture_id = lesson_id(thread_id, epoch, int(entry["entry_id"]))
     revising = _revises(thread_id, destination.path)
-    if "new_evidence" in decision.case_metadata and not revising:
-        raise TrialRefused("invalid-output", (
-            "new_evidence is only for revising your own watch or trial lesson; "
-            "leave it out and call again"
-        ))
+    has_target = bool(decision.case_metadata.get("target_file") or decision.case_metadata.get("new_target_path"))
+    opened, retired = target_trials(place, decision) if has_target else ([], [])
+    retired_match = next(((path, item) for path, item in retired if same_case(item, decision)), None)
+    if "new_evidence" in decision.case_metadata and not (revising or retired_match):
+        raise TrialRefused("invalid-output", "new_evidence is only for revising your own watch or trial lesson, or replacing a matching retired lesson")
     capture = None
     if place.tray is not None:
         path = lesson_files.capture_path(place.tray, capture_id)
@@ -135,14 +129,21 @@ def admit(
         raise TrialRefused("invalid-output", (
             "skill_name must be a new lowercase-hyphenated name for the trial skill"
         ))
-    identity, text = _render(thread_id, capture_id, entry, decision, destination.path, capture, pending)
-    offered = _offered_elsewhere(db, place, str(decision.skill_name), destination.path)
-    line = _index_line(decision, destination.path)
-    from core.lesson_index import fits_budget
+    if retired_match and not decision.case_metadata.get("new_evidence"):
+        raise TrialRefused("retired-match", "A retired trial has the same target, section, and cause; name new evidence.")
+    merge = next(((path, item) for path, item in opened if same_case(item, decision)), None)
+    write_path = merge[0] if merge else destination.path
+    identity, text = _render(thread_id, capture_id, entry, decision, write_path, capture, pending)
+    _offered_elsewhere(db, place, str(decision.skill_name), write_path)
+    from core.lesson_delivery import START_TOKEN_CAP, delivery_for_trial
+    from core.token_estimation import _text_tokens
 
-    if not fits_budget(offered, line, identity):
-        return Admission(identity, capture_id, "over-budget")
-    return Admission(identity, capture_id, None, text)
+    rendered = lesson_files.read_trial(text)
+    assert rendered is not None
+    payload = delivery_for_trial(rendered, write_path, text.encode()).payload
+    if _text_tokens(payload, None) > START_TOKEN_CAP:
+        return Admission(identity, capture_id, "over-budget", case_metadata=pending)
+    return Admission(identity, capture_id, None, text, destination_path=write_path)
 
 
 def _incomplete(
@@ -285,15 +286,6 @@ def _render(
     if errors:
         raise TrialRefused("invalid-output", f"{errors[0]}. Correct it and call again")
     return identity, text
-
-
-def _index_line(decision: Decision, path: Path) -> str:
-    from core.lesson_index import line_for
-
-    return line_for(
-        str(decision.skill_name), " ".join(str(decision.skill_description).split()), path,
-        trial=True,
-    )
 
 
 def _offered_elsewhere(
