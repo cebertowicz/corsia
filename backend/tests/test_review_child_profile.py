@@ -29,7 +29,7 @@ from reviewer.reviewer_exact_source import (
     render_write_profile,
 )
 from subagents.cc_env import clean_claude_env
-from subagents.cc_invocation import claude_review_profile_args
+from subagents.cc_invocation import claude_untrusted_profile_args
 
 
 CLAUDE_MD_MARKER = "REVIEW_CHILD_MUST_NOT_LOAD_THIS_CLAUDE_MD"
@@ -176,7 +176,7 @@ class _ReviewPeer:
 
 
 def test_review_profile_args_leave_only_read_tools_available():
-    args = claude_review_profile_args()
+    args = claude_untrusted_profile_args()
 
     assert args == [
         "--restricted", "--safe-mode", "--setting-sources", "",
@@ -261,7 +261,7 @@ async def test_review_child_profile_confines_stock_claude_to_the_fixed_head():
         command = [
             "/usr/bin/sandbox-exec", "-p", profile, binary, "-p", "Run each requested tool call.",
             "--output-format", "stream-json", "--verbose", "--model", "claude-sonnet-4-6", "--add-dir", str(head_tree),
-            *claude_review_profile_args(),
+            *claude_untrusted_profile_args(),
         ]
         process = await asyncio.create_subprocess_exec(
             *command, cwd=str(run_dir), env=env,

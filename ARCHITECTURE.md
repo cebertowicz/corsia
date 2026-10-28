@@ -74,7 +74,7 @@ restores drift rather than accepting edits as System content.
 
 ### Confined workers
 
-`infra/thread_confinement.py` persists a review worker's approved read directories
+`infra/thread_confinement.py` persists an untrusted worker's approved read directories
 on its thread. `tools/confined_reads.py` projects only `read_file`, `grep`, `glob`
 and `list_dir`; the registry and filesystem gate recheck every call and resolved
 path, including symlink targets. The parent's tool surface is unchanged.
