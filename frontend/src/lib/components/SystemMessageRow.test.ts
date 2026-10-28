@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 
 import SystemMessageRow from './SystemMessageRow.svelte';
@@ -19,6 +19,7 @@ beforeEach(() => {
 
 afterEach(() => {
 	vendorAccounts.set([]);
+	vi.unstubAllGlobals();
 	if (component) unmount(component);
 	component = null;
 	host.remove();
@@ -30,6 +31,20 @@ function render(msg: unknown): void {
 }
 
 describe('SystemMessageRow', () => {
+	it('loads accounts once for several rows even when the response is empty', async () => {
+		const fetchAccounts = vi.fn().mockResolvedValue(new Response(JSON.stringify({ accounts: [] }), { status: 200 }));
+		vi.stubGlobal('fetch', fetchAccounts);
+		const rows = ['first', 'second', 'third'].map((id) => mount(SystemMessageRow, {
+			target: host, props: { msg: { role: 'system', content: 'Settings › Providers', metadata: { account_id: id } } },
+		}));
+		flushSync();
+		await vi.waitFor(() => expect(fetchAccounts).toHaveBeenCalledTimes(1));
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		flushSync();
+		expect(fetchAccounts).toHaveBeenCalledTimes(1);
+		for (const row of rows) await unmount(row);
+	});
+
 	it('puts the expired-Claude recovery line before raw details', () => {
 		render({
 			id: 'auth-failure', role: 'system',
@@ -57,7 +72,7 @@ describe('SystemMessageRow', () => {
 	});
 
 	it('links the same way in any error that names an account', () => {
-		const text = 'Couldn’t start Codex on FOMRRT1: its model list is out of date. Use Sign in again on FOMRRT1 under Settings › Providers. Reference: R-7K2M';
+		const text = 'Couldn’t start Codex on FOMRRT1: its model list is out of date. Use Sign in again on FOMRRT1 under Settings › Providers.';
 		vendorAccounts.set([account('fomrrt1', { state: 'signed_in' })]);
 		render({ id: 'stale-models', role: 'system', content: text, metadata: { type: 'harness_error', account_id: 'fomrrt1' } });
 

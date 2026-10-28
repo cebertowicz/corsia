@@ -1,3 +1,7 @@
+<script module lang="ts">
+	let requestedAccounts = false;
+</script>
+
 <script lang="ts">
 	/**
 	 * One system row in the transcript, and the styling of every kind of it.
@@ -36,7 +40,12 @@
 	const linkableAccount = $derived(!!namedAccount && !namedAccount.is_default && namedAccount.state !== 'legacy' && namedAccount.state !== 'removed');
 	const content = $derived(String(msg.content ?? ''));
 	const linkAt = $derived(linkableAccount ? content.indexOf(PROVIDERS_LINK_TEXT) : -1);
-	$effect(() => { if (accountId && $vendorAccounts.length === 0) void loadVendorAccounts(); });
+	$effect(() => {
+		if (accountId && $vendorAccounts.length === 0 && !requestedAccounts) {
+			requestedAccounts = true;
+			void loadVendorAccounts();
+		}
+	});
 	const quietRow = $derived(
 		passiveContextEvent || activityReceipt || artifactRemovalEvent || subagentDone,
 	);

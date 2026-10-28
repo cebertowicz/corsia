@@ -193,15 +193,13 @@ async def _hold(operation: SignIn, home: str, binary: str) -> None:
 
 
 async def start_signin(account_id: str, *, bind: FirstRunBind | None = None) -> dict[str, Any]:
-    """Begin, or return the live, vendor browser sign-in for one signed-out added account."""
+    """Begin, or return the live, vendor browser sign-in for an added account."""
     account = await custom_account(account_id)
     if account["state"] == "signed_in":
         result = await signin_recheck(account_id, lambda selected: verify(selected, report_refresh=True))
         if result is not None:
             return result
         account = await custom_account(account_id)
-    if account["state"] != "signed_out":
-        raise AccountError("account is already signed in")
     provider = account["provider"]
     binary = await _binary(provider)
     if binary is None:

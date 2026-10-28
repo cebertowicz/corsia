@@ -22,7 +22,9 @@ async def test_cache_failure_uses_turn_bound_account_and_own_cause(accounts):
     mid = await marker()
     row = db.execute('SELECT content,metadata FROM messages WHERE id=?', (mid,)).fetchone()
     metadata = json.loads(row['metadata'])
-    assert row['content'] == (f"Couldn’t start Codex on Second: its model list is out of date. "
-                              f"Use Sign in again on Second under Settings › Providers. Reference: {metadata['ref']}")
+    assert row['content'] == ("Couldn’t start Codex on Second: its model list is out of date. "
+                              "Use Sign in again on Second under Settings › Providers.")
+    assert 'ref' not in metadata
+    assert metadata['reference']
     assert metadata['account_id'] == account['id']
     assert metadata['cause'] == 'account_model_cache_changed'

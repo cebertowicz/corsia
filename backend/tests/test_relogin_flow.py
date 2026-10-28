@@ -34,6 +34,31 @@ async def test_signed_in_relogin_refresh_result(accounts, monkeypatch, caplog, s
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('skip_reason', ['codex_auth_projection_changed', 'codex_auth_source_missing', 'no_receipt'])
+async def test_signed_in_account_without_refresh_starts_vendor_login(accounts, monkeypatch, skip_reason):
+    from connections import account_controls, harness_models
+
+    _, _, account, _ = accounts
+    monkeypatch.setattr(account_controls, '_binary', AsyncMock(return_value='/synthetic'))
+    monkeypatch.setattr(account_controls, '_vendor_status', AsyncMock(return_value=(True, {}, None)))
+    monkeypatch.setattr(account_controls, 'refresh_default_identity', AsyncMock())
+    monkeypatch.setattr(account_controls, 'readiness_reason', lambda _: None if skip_reason == 'no_receipt' else skip_reason)
+    monkeypatch.setattr(account_controls, 'account_receipt', lambda _: None if skip_reason == 'no_receipt' else {'revision': 1})
+    refresh = AsyncMock()
+    monkeypatch.setattr(harness_models, 'refresh_provider', refresh)
+    spawn = AsyncMock(return_value=SimpleNamespace())
+    monkeypatch.setattr(account_controls, '_spawn', spawn)
+    monkeypatch.setattr(account_controls, '_hold', AsyncMock())
+    monkeypatch.setattr(account_controls, '_run', AsyncMock(return_value=(0, b'')))
+    result = await account_controls.start_signin(account['id'])
+    assert result['status'] == 'waiting'
+    spawn.assert_awaited_once()
+    refresh.assert_not_awaited()
+    await account_controls._SIGNINS[account['id']].task
+    account_controls._SIGNINS.pop(account['id'])
+
+
+@pytest.mark.asyncio
 async def test_signed_in_account_found_signed_out_starts_login(accounts, monkeypatch):
     from connections import account_controls
     from connections.vendor_accounts import get_account

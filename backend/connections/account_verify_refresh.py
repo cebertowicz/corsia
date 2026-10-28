@@ -1,4 +1,4 @@
-"""Report the outcome of an added account's model refresh during verification."""
+"""Look up added accounts and report model refresh outcomes during verification."""
 from __future__ import annotations
 
 import logging
