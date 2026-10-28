@@ -10,8 +10,8 @@ pin was applied before or after the task settled -- otherwise the fact that
 the task finished is lost forever, since settlement fires at most once per
 node. A genuine re-registration clears that column (``identity_bridge``), so
 unpin after a re-write never resettles a row whose current content is
-unrelated to the old retirement. An exempt shared-document row must stay
-visible regardless of pin toggles.
+unrelated to the old retirement. An exempt row (a document the user commented
+on) must stay visible regardless of pin toggles.
 """
 
 from __future__ import annotations
@@ -232,12 +232,21 @@ def test_unpin_keeps_rows_never_retired_visible(db):
     assert (row["surfacing"], row["retired_at"]) == ("visible", None)
 
 
-def test_exempt_shared_document_row_stays_visible_across_pin_toggles(db):
+def _user_comment(db, artifact_id: str) -> None:
+    db.execute(
+        "INSERT INTO doc_comments "
+        "(id,artifact_id,author,author_kind,body,created_at,updated_at) "
+        "VALUES (?,?,'user','user','Check this.','t0','t0')",
+        (f"c-{artifact_id}", artifact_id),
+    )
+
+
+def test_exempt_commented_document_row_stays_visible_across_pin_toggles(db):
     thread_id, _node, artifact = _thread_node_artifact(
         db, "exempt", path="workspace://ws-1/shared/planning/out.md",
     )
-    # Legacy state this branch's migration restores: an exempt row that was
-    # settled before the exemption existed.
+    # An exempt row that was settled before the exemption applied to it.
+    _user_comment(db, artifact["id"])
     db.execute(
         """UPDATE artifact_identities
            SET retention='durable', path=?,
@@ -256,7 +265,7 @@ def test_exempt_shared_document_row_stays_visible_across_pin_toggles(db):
     pinning.update_pinned(artifact["id"], pinned=True, parent_thread_id=thread_id, db=db)
     assert _row(db, artifact["id"], thread_id)["surfacing"] == "visible"
 
-    # Unpinning must NOT re-retire: shared documents are exempt.
+    # Unpinning must NOT re-retire: the user's comment exempts the document.
     # Pin/unpin never mutates retired_at (only node settlement and
     # re-registration do), so the legacy stamp is left exactly as it was —
     # it's simply inert against an exempt row in every consumer.
@@ -292,10 +301,15 @@ def test_pane_retirement_exempt_flag_matches_the_shared_sql_predicate(db):
     own_folder = _register_durable(db, thread_id, "own", "workspace", ".threads/t1")
     repo = _register_durable(db, thread_id, "repo", "repo")
     pinned_ws = _register_durable(db, thread_id, "pinned", "workspace")
+    commented = _register_durable(db, thread_id, "commented", "workspace")
     pinning.update_pinned(pinned_ws["id"], pinned=True, parent_thread_id=thread_id, db=db)
+    _user_comment(db, commented["id"])
+    db.commit()
 
     items = {n["id"]: n for n in view.pane_for_thread(thread_id)["nodes"] if n["kind"] == "artifact"}
-    assert items[workspace["id"]]["retirement_exempt"] is True
+    # A shared document is task-scoped; pin keeps a row but is not an exemption.
+    assert items[workspace["id"]]["retirement_exempt"] is False
     assert items[own_folder["id"]]["retirement_exempt"] is False
     assert items[repo["id"]]["retirement_exempt"] is False
-    assert items[pinned_ws["id"]]["retirement_exempt"] is True
+    assert items[pinned_ws["id"]]["retirement_exempt"] is False
+    assert items[commented["id"]]["retirement_exempt"] is True

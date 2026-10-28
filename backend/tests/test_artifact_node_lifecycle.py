@@ -395,7 +395,7 @@ def test_pinning_revives_settled_artifacts_without_overriding_quiet():
 
 
 @pytest.mark.usefixtures("isolated_db")
-def test_settlement_spares_shared_documents_but_retires_task_scoped_files():
+def test_settlement_retires_task_scoped_files_shared_documents_included():
     db = get_db()
     thread_id = make_session(db, prefix="retirement-scope")
     _plan, node = _node_and_turn(db, thread_id, turn_id="turn-scope")
@@ -435,10 +435,7 @@ def test_settlement_spares_shared_documents_but_retires_task_scoped_files():
 
     _accept(db, node.id)
 
-    durable_row = _registration(db, durable_workspace["id"], thread_id)
-    assert durable_row["surfacing"] == "visible"
-    assert durable_row["retired_at"] is None
-    for artifact in (own_folder, working_tray, repo_file):
+    for artifact in (durable_workspace, own_folder, working_tray, repo_file):
         row = _registration(db, artifact["id"], thread_id)
         assert row["surfacing"] == "settled"
         assert row["retired_at"] is not None
