@@ -725,7 +725,7 @@ def test_startup_reconciliation_settles_orphan_and_never_emits_fifth_outcome(
         unverified["creation_fingerprint"] = _process_creation_fingerprint(live.pid)
         upsert_transition(unverified)
         monkeypatch.setattr(
-            managed_process_recovery.os,
+            os,
             "killpg",
             lambda _pgid, _signal: (_ for _ in ()).throw(PermissionError()),
         )

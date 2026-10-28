@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import json
 
 import pytest
 
 from host_access import browser_control
 from host_access.browser_sessions import BrowserSessionCleanupError, BrowserSessionError, BrowserSetupError
+from tests.skill_sidecar_helpers import POINTER
 from tools import browser_run_steps, browser_runtime
 
 
@@ -29,7 +31,8 @@ async def invoke(tool, monkeypatch, responses, **kwargs):
 def page_at(url, calls):
     async def fake_run(args, **_run_kwargs):
         calls.append(args)
-        return "ok" if args[0] != "get" else ("Console" if args[1] == "title" else url)
+        # The session renders a `get` as agent-browser's data object, as it does on a real page.
+        return "ok" if args[0] != "get" else json.dumps({"title": "Console"} if args[1] == "title" else {"url": url})
 
     return fake_run
 
@@ -203,7 +206,7 @@ async def test_selector_wait_retries_until_success_or_deadline(tool, monkeypatch
 
     async def fake_sleep(seconds):
         pauses.append(seconds)
-    monkeypatch.setattr(browser_run_steps, "asyncio", SimpleNamespace(sleep=fake_sleep))
+    monkeypatch.setattr(browser_run_steps, "asyncio", SimpleNamespace(sleep=fake_sleep, to_thread=asyncio.to_thread))
     async def fake_run(args, **kwargs):
         calls.append((args, kwargs))
         if args[0] == "wait":
@@ -236,27 +239,131 @@ async def test_start_at_resumes_from_named_step(tool, monkeypatch):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("name", ["unknown/file", "google-setup/../console-project", "google-setup/console-project.json"])
+@pytest.mark.parametrize("name", ["unknown/file", "google-setup/../console-project", "google-setup/console-project.json", "/google-setup/console-project", "../file"])
 async def test_unknown_or_traversal_file_is_refused(tool, name):
     assert json.loads(await tool.execute(name, _thread_id="thread")) == {"ok": False, "error": "unknown steps file"}
 
 
+def installed_skill(tmp_path, monkeypatch):
+    monkeypatch.setattr(browser_run_steps.config, "WORKSPACE", tmp_path)
+    folder = tmp_path / "skills/example"
+    folder.mkdir(parents=True)
+    (folder / "SKILL.md").write_text("---\nname: example\ndescription: Use for example setup.\n---\nSetup.\n", encoding="utf-8")
+    steps = folder / "steps"
+    steps.mkdir()
+    return steps
+
+
 def test_unknown_step_key_is_refused(tmp_path, monkeypatch):
-    path = tmp_path / "example/steps"
-    path.mkdir(parents=True)
+    path = installed_skill(tmp_path, monkeypatch)
     (path / "bad.json").write_text(json.dumps({"domains": ["google.com"], "steps": [
         {"id": "bad", "says": "Open", "action": "goto", "url": "https://console.cloud.google.com", "expected": "anything"}
     ]}), encoding="utf-8")
-    monkeypatch.setattr(browser_run_steps, "_SKILLS", tmp_path)
 
-    _data, error = browser_run_steps._load("example/bad")
+    _data, error = browser_run_steps._load("example/bad", "thread", None)
 
     assert error == "unknown step key"
 
 
 def test_shipped_step_files_load_and_validate():
     for name in ("google-setup/console-project", "google-setup/console-apis", "google-setup/console-client"):
-        data, error = browser_run_steps._load(name)
+        data, error = browser_run_steps._load(name, "thread", None)
         assert error is None and data is not None
         assert all(step["action"] in {"goto", "click", "type", "wait_for"} for step in data["steps"])
         assert not any("script" in step for step in data["steps"])
+
+
+def test_installed_skill_rejects_escaped_step_symlink(tmp_path, monkeypatch):
+    steps = installed_skill(tmp_path, monkeypatch)
+    outside = tmp_path / "outside.json"
+    outside.write_text('{"domains":["example.com"],"steps":[]}', encoding="utf-8")
+    (steps / "escape.json").symlink_to(outside)
+    assert browser_run_steps._load("example/escape", "thread", None) == (None, "unknown steps file")
+
+
+def test_installed_skill_rejects_escaped_steps_directory(tmp_path, monkeypatch):
+    steps = installed_skill(tmp_path, monkeypatch)
+    steps.rmdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "run.json").write_text('{"domains":["example.com"],"steps":[]}', encoding="utf-8")
+    steps.symlink_to(outside, target_is_directory=True)
+    assert browser_run_steps._load("example/run", "thread", None) == (None, "unknown steps file")
+
+
+def test_system_skill_shadows_installed_name(tmp_path, monkeypatch):
+    monkeypatch.setattr(browser_run_steps.config, "WORKSPACE", tmp_path)
+    folder = tmp_path / "skills/google-setup"
+    (folder / "steps").mkdir(parents=True)
+    (folder / "SKILL.md").write_text("---\nname: google-setup\ndescription: Use for setup.\n---\n", encoding="utf-8")
+    (folder / "steps/console-project.json").write_text('{"domains":["example.com"],"steps":[]}', encoding="utf-8")
+    data, error = browser_run_steps._load("google-setup/console-project", "thread", None)
+    assert error is None and "google.com" in data["domains"]
+
+
+def test_project_and_thread_skills_follow_effective_precedence(tmp_path, monkeypatch):
+    from tests.project_ref_helpers import project_ref, select_workspace
+    from tests.test_skills_registry import _db
+
+    workspace = tmp_path / "workspace"
+    project = workspace / "projects/corsia"
+    project.mkdir(parents=True)
+    select_workspace(monkeypatch, workspace)
+    monkeypatch.setattr(browser_run_steps.config, "WORKSPACE", workspace)
+    for root, marker in ((project, "project"), (project / ".threads/thread", "thread")):
+        folder = root / "skills/example"
+        (folder / "steps").mkdir(parents=True)
+        (folder / "SKILL.md").write_text("---\nname: example\ndescription: Use for setup.\n---\n", encoding="utf-8")
+        (folder / "steps/run.json").write_text(json.dumps({"domains": ["example.com"], "steps": [
+            {"id": marker, "says": marker, "action": "click", "selector": "#go"}
+        ]}), encoding="utf-8")
+
+    def db():
+        conn = _db()
+        conn.execute("INSERT INTO projects (id, name, path) VALUES (?, ?, ?)", ("proj", "CORSIA", project_ref("corsia")))
+        conn.execute("INSERT INTO threads (id, project_id) VALUES (?, ?)", ("thread", "proj"))
+        return conn
+
+    monkeypatch.setattr(browser_run_steps, "get_db", db)
+    data, error = browser_run_steps._load("example/run", "thread", "proj")
+    assert error is None and data["steps"][0]["id"] == "thread"
+    (project / ".threads/thread/skills/example/SKILL.md").unlink()
+    data, error = browser_run_steps._load("example/run", "thread", "proj")
+    assert error is None and data["steps"][0]["id"] == "project"
+
+
+def test_installed_skill_rejects_script_and_reference(tmp_path, monkeypatch):
+    steps = installed_skill(tmp_path, monkeypatch)
+    script = {"domains": ["example.com"], "steps": [{"id": "x", "says": "Click", "action": "click", "script": "alert(1)"}]}
+    (steps / "script.json").write_text(json.dumps(script), encoding="utf-8")
+    assert browser_run_steps._load("example/script", "thread", None)[1] == "unknown step key"
+    script["include"] = "other/file"
+    (steps / "reference.json").write_text(json.dumps(script), encoding="utf-8")
+    assert browser_run_steps._load("example/reference", "thread", None)[1] == "steps file must contain domains and steps"
+
+
+@pytest.mark.asyncio
+async def test_installed_skill_runs_and_logs_origin(tmp_path, monkeypatch):
+    steps = installed_skill(tmp_path, monkeypatch)
+    # As the library installer writes it: SKILL.md points at the sidecar that carries the origin.
+    (steps.parent / "SKILL.md").write_text(
+        f"---\nname: example\ndescription: Use for example setup.\n{POINTER}---\nSetup.\n", encoding="utf-8",
+    )
+    (steps.parent / "corsia.yaml").write_text(
+        f"origin:\n  source: example\n  sha256: '{'a' * 64}'\n  adopted_at: '2026-10-28T00:00:00Z'\n  version: '2.1'\n",
+        encoding="utf-8",
+    )
+    (steps / "run.json").write_text(json.dumps({"domains": ["example.com"], "steps": [
+        {"id": "click", "says": "Click", "action": "click", "selector": "#go"}
+    ]}), encoding="utf-8")
+    calls = []
+    monkeypatch.setattr(browser_run_steps, "_call", page_at("https://example.com/", calls))
+    messages = []
+    sink = browser_run_steps.logger.add(messages.append, format="{message}", level="INFO")
+    try:
+        result = json.loads(await browser_run_steps.BrowserRunStepsTool().execute("example/run", _thread_id="thread"))
+    finally:
+        browser_run_steps.logger.remove(sink)
+    assert result == {"ok": True, "steps": ["click"]}
+    assert ["click", "#go"] in calls
+    assert any("source=installed skill=example version=2.1" in str(message) for message in messages)
