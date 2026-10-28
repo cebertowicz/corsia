@@ -9,8 +9,8 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 
 - A paused task, review or decision you owe stays orange in the plan, and so does the task above it; pausing only clears its flag and count in the left menu.
 - An agent can finish or close a task it handed to another agent that was stopped, instead of it staying stuck, and a finished agent's documents pass to the agent that started it.
+- You stay signed in to a site after the shared browser closes, even when you signed in while another agent was also using the shared browser.
 - Chat comments can be sent on their own while an agent is replying, and the New mark on reply chips lines up with its text.
-
 - In the shared browser, an agent's click on a button's own text or icon reaches the button.
 - After you sign in to Claude Code, setup now shows it's checking your Claude models instead of asking you to sign in again.
 - Plan and decision messages use clearer, consistent wording.
