@@ -56,9 +56,10 @@ beforeEach(() => {
 	define('clientWidth', () => 548);
 	define('clientHeight', () => 400);
 	Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1440 });
-	// Tags are placed against the layer's measured size, which jsdom reports as zero.
+	// jsdom reports zero sizes: give the image layer and its clipping canvas realistic bounds.
 	const measured = HTMLElement.prototype.getBoundingClientRect;
 	vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+		if (this.classList.contains('layout')) return new DOMRect(0, 0, 800, 600);
 		return this.hasAttribute('data-image-regions') ? new DOMRect(24, 50, 500, 250) : measured.call(this);
 	});
 	docComments.set({});
@@ -253,6 +254,17 @@ describe('ImageCommentLightbox', () => {
 			tag(1).dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 0 }));
 			await settle();
 			expect(document.activeElement?.classList.contains('ct-input')).toBe(true);
+		});
+
+		it('does not focus a reply whose anchor is outside the canvas', async () => {
+			await render({ src: SRC, alt: 'Mock screen', artifactId: 'art-img' });
+			const root = host.querySelector<HTMLElement>('.layout')!;
+			Object.defineProperty(root, 'getBoundingClientRect', { configurable: true, value: () => new DOMRect(0, 0, 20, 20) });
+			tag(1).focus();
+			tag(1).dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 0 }));
+			await settle();
+			expect(document.body.querySelector('[data-popover]')?.getAttribute('aria-hidden')).toBe('true');
+			expect(document.activeElement?.classList.contains('ct-input')).toBe(false);
 		});
 
 		it('opens the drawer by growing its track, sized to leave the image its fitted height', async () => {
