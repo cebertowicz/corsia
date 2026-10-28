@@ -4,14 +4,13 @@ Select with CORSIA_NATIVE_BROWSER_TEST=1 and absolute binary/Chrome paths.
 Generic integration suites do not install or launch this optional native dependency.
 """
 import asyncio
-import json
 import os
 from pathlib import Path
 import shutil
 
 import psutil
 import pytest
-from host_access import browser_cdp, browser_pane
+from host_access import browser_cdp, browser_cli, browser_pane
 from host_access import browser_identity as identity
 from host_access.browser_sessions import BrowserSessionError, BrowserSessionOwner
 
@@ -75,7 +74,7 @@ async def test_display_secret_and_sign_in_are_distinguished_in_chrome(native_own
     assert len((await browser_cdp.page_password_probe(endpoint, {})).visible_nodes) == 1
 
 
-async def test_pane_open_is_the_stock_clients_current_page(native_owner, monkeypatch):
+async def test_pane_open_is_the_stock_clients_current_page(native_owner, monkeypatch, capsys):
     async def serve(_reader, writer):
         writer.write(b'HTTP/1.1 200 OK\r\nContent-Length: 12\r\nConnection: close\r\n\r\nBrowser test')
         await writer.drain()
@@ -88,22 +87,30 @@ async def test_pane_open_is_the_stock_clients_current_page(native_owner, monkeyp
     monkeypatch.setattr(browser_pane.PROCESS_OWNER, 'browser_sessions', lambda: native_owner)
     try:
         opened = await browser_pane.open_url('native-pane-open', url)
-        assert not opened.startswith('Error:')
+        assert not opened.startswith('Error:'), f'pane open={opened!r}'
         runtime = native_owner._sessions['native-pane-open']
         binding = runtime.record.binding
-        assert binding is not None
-        # Exercise the agent's actual path before any independent client can
-        # reconfigure Chrome. Both paths use the same session and launch flags.
-        owner_url = await native_owner.run('native-pane-open', ['get', 'url'], session='existing')
-        assert json.loads(owner_url)['url'] == url, f'pane open={opened!r}; agent get url={owner_url!r}'
-        assert (await native_owner._observe(runtime)).binding == binding
+        assert binding is not None, f'pane open={opened!r}'
+        # BrowserOpenTool suppresses the one-time notice before parsing get url.
+        tabs_before = await native_owner.run('native-pane-open', ['tab'], session='existing', notice=False)
+        owner_url = await native_owner.run('native-pane-open', ['get', 'url'], session='existing', notice=False)
+        binding_after_owner = (await native_owner._observe(runtime)).binding
         result = await native_owner._invoke(native_owner._session_argv(runtime, ['get', 'url']), timeout=30)
-        assert result.returncode == 0
-        data = json.loads(result.stdout)['data']
-        assert data['lifecycle']['reused'] is True
-        assert data['lifecycle']['launched'] is False
-        assert (await native_owner._observe(runtime)).binding == binding
-        assert data['url'] == url
+        tabs_after = await native_owner.run('native-pane-open', ['tab'], session='existing', notice=False)
+        binding_after_raw = (await native_owner._observe(runtime)).binding
+        diagnostic = (f'pane open={opened!r}; tabs before={tabs_before!r}; agent get url={owner_url!r}; '
+                      f'raw returncode={result.returncode}, stdout={result.stdout!r}, stderr={result.stderr!r}; '
+                      f'tabs after={tabs_after!r}')
+        with capsys.disabled():
+            print(diagnostic)
+        assert browser_cli.json_object(owner_url).get('url') == url, diagnostic
+        assert binding_after_owner == binding, diagnostic
+        assert result.returncode == 0, diagnostic
+        data = browser_cli.json_object(result.stdout).get('data', {})
+        assert data.get('lifecycle', {}).get('reused') is True, diagnostic
+        assert data.get('lifecycle', {}).get('launched') is False, diagnostic
+        assert binding_after_raw == binding, diagnostic
+        assert data.get('url') == url, diagnostic
     finally:
         server.close()
         await server.wait_closed()
