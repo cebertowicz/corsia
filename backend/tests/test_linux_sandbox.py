@@ -137,9 +137,13 @@ def test_cache_creation_skips_symlink_ancestor(tmp_path, caplog):
     assert list(outside.iterdir()) == []
 
 
-def test_cache_creation_skips_unwritable_optional_cache(tmp_path, caplog):
+def test_cache_creation_skips_unwritable_optional_cache(tmp_path, caplog, monkeypatch):
+    from tools import managed_runtime
+    monkeypatch.setattr(managed_runtime.platform, 'system', lambda: 'Linux')
+    monkeypatch.delenv('XDG_CACHE_HOME', raising=False)
     home = tmp_path / 'home'
-    (home / '.cache').mkdir(parents=True)
+    # The protected CORSIA cache already exists; only the optional ones can't be created.
+    (home / '.cache/corsia').mkdir(parents=True, mode=0o700)
     (home / '.cache').chmod(0o500)
     policy = ProtectedHostPathPolicy(home, home / '.local/state/corsia')
     try:
