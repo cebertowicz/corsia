@@ -137,7 +137,8 @@ async def test_a_catalog_change_starts_a_held_start_on_the_ready_local_model(loc
     local_only.ready["models"] = (LOCAL,)
     worker_runner.poke_on_catalog_change()
     for _ in range(200):
-        if starts(rule)[0][3] is not None:  # claimed, and its worker made
+        # The worker is recorded before its first input is sent, so wait for the send.
+        if local_only.sent.await_count:
             break
         await asyncio.sleep(0.02)
     [(outcome, reason, _identity, worker)] = starts(rule)
