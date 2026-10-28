@@ -117,8 +117,10 @@ def test_the_folder_is_display_only_and_never_stored_or_shown_in_full(folder_app
 def test_launch_cwd_of_an_imported_outside_folder_app_is_its_own_per_app_cache(folder_app, monkeypatch, tmp_path):
     from infra import config
     from tools import mcp_local_transport as transport
+    from tools.managed_runtime import application_cache_root
 
     db, row, folder = folder_app
+    monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
     workspace, state = tmp_path / "workspace", tmp_path / "state"
     workspace.mkdir()
     state.mkdir()
@@ -135,7 +137,7 @@ def test_launch_cwd_of_an_imported_outside_folder_app_is_its_own_per_app_cache(f
     )
     profile.unlink(missing_ok=True)
 
-    cache = tmp_path / "home" / "Library" / "Caches"
+    cache = application_cache_root()
     assert Path(params.cwd).is_relative_to(cache) and row["id"] in str(params.cwd)
     assert str(folder) not in " ".join([str(params.cwd), *params.args, *params.env.values()])
 
