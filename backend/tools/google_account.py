@@ -101,7 +101,7 @@ class GoogleConnectTool(Tool):
             "account: post its reply verbatim with post_update followed by [Open it in Connected apps](<link>); "
             "its Connected apps row provides the next action. Omit account_id to add another account, which agents "
             "can use where this conversation works. "
-            "Google asks them to allow Gmail, Calendar, Drive and Docs in one go. Gmail "
+            "Google asks for Gmail, Calendar, Drive and Docs; their own client also asks for Sheets. Gmail "
             "and Calendar are required; the others are optional, and google_status lists what "
             "they allowed. The Google tools here use email and calendar. To use their own "
             "Desktop OAuth client instead, pass its downloaded JSON as client_file; "

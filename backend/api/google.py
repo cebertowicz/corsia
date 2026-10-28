@@ -12,6 +12,7 @@ from __future__ import annotations
 import html
 import json
 import logging
+import traceback
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -135,8 +136,8 @@ async def callback(request: Request, code: str | None = None, state: str | None 
         )
     except GoogleError as exc:
         return _page(_callback_message(exc), 400)
-    except Exception:
-        log.error("Google sign-in callback failed")
+    except Exception as error:
+        log.error("Google sign-in callback failed (%s)\n%s", type(error).__name__, "".join(traceback.format_tb(error.__traceback__)))
         return _page("Google sign-in failed. Go back to CORSIA and try again.", 500)
     return _page(CONNECTED_PAGE)
 

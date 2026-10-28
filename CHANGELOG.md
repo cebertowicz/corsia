@@ -7,7 +7,7 @@ the later entry describes the current behavior.
 
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here._
 
-- Google sign-in can use a shared client without setting up your own Google Cloud project.
+- Connecting Google no longer needs your own Google Cloud project: sign in through Google's service for its Workspace tools.
 
 - Measurement labels and messages are clearer about what is shown.
 - Provider and model settings use clearer wording for connection, account and usage states.

@@ -55,6 +55,7 @@ class FakeGoogle:
         self.refresh_status = 200
         self.scope = " ".join(oauth.SCOPES)
         self.id_token: str | None = None
+        self.token_subject: str | None = "published-subject"
         self.email = EMAIL
 
     def handler(self, request: httpx.Request) -> httpx.Response:
@@ -76,6 +77,10 @@ class FakeGoogle:
             if self.id_token is not None:
                 grant["id_token"] = self.id_token
             return httpx.Response(200, json=grant)
+        if url == google_client.TOKEN_INFO_URL:
+            assert request.method == "POST" and parse_qs(request.content.decode())["access_token"] == [ACCESS]
+            subject = google_client.id_token_subject(self.id_token) if self.id_token else self.token_subject
+            return httpx.Response(200, json={"sub": subject})
         if url == oauth.PROFILE_URL:
             return httpx.Response(200, json={"emailAddress": self.email})
         return httpx.Response(200, json={"ok": True})
@@ -864,6 +869,7 @@ async def test_published_callback_and_refresh(google, conductor, monkeypatch, ca
     assert ACCESS not in response.text and REFRESH not in response.text
     assert ACCESS not in caplog.text and REFRESH not in caplog.text
     assert _credentials() == {"client": "published", "client_id": oauth.PUBLISHED_CLIENT_ID, "refresh_token": REFRESH}
+    assert _only_account()["provider_subject"] == "published-subject"
     calls = []
 
     def handler(request):
@@ -917,6 +923,22 @@ async def test_published_callback_rejects_missing_required_grant(google, conduct
     assert ACCESS not in response.text and REFRESH not in response.text
 
 
+async def test_published_callback_refuses_missing_subject(google, conductor):
+    google.token_subject = None
+    url = json.loads(await GoogleConnectTool().execute(_thread_id=conductor))["url"]
+    query = parse_qs(urlparse(url).query)
+    state = json.loads(base64.b64decode(query["state"][0]))["csrf"]
+    async with _http() as http:
+        response = await http.get("/api/google/oauth/callback", params={
+            "state": state, "access_token": ACCESS, "refresh_token": REFRESH,
+            "scope": " ".join(oauth.PUBLISHED_REQUIRED_SCOPES),
+        })
+    assert response.status_code == 400
+    assert "Google did not provide an account identity" in response.text
+    assert ACCESS not in response.text and REFRESH not in response.text
+    assert _only_account() is None
+
+
 async def test_callback_unexpected_error_does_not_log_or_render_credentials(monkeypatch, caplog):
     async def fail(*args, **kwargs):
         raise RuntimeError(REFRESH)
@@ -929,6 +951,7 @@ async def test_callback_unexpected_error_does_not_log_or_render_credentials(monk
     assert response.status_code == 500
     assert REFRESH not in response.text and ACCESS not in response.text
     assert REFRESH not in caplog.text and ACCESS not in caplog.text
+    assert "RuntimeError" in caplog.text and "test_google_sign_in.py" in caplog.text
 
 
 def test_google_bundle_requires_secret_except_published():

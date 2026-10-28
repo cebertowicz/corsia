@@ -21,7 +21,9 @@ from infra.db_async import run_in_db
 log = logging.getLogger(__name__)
 
 TOKEN_URL = "https://oauth2.googleapis.com/token"
-PUBLISHED_REFRESH_URL = "https://google-workspace-extension.geminicli.com/refreshToken"
+PUBLISHED_URL = "https://google-workspace-extension.geminicli.com"
+PUBLISHED_REFRESH_URL = f"{PUBLISHED_URL}/refreshToken"
+TOKEN_INFO_URL = "https://oauth2.googleapis.com/tokeninfo"
 STATUS_CONNECTED = "connected"
 STATUS_NEEDS_SIGN_IN = "needs_sign_in"
 TIMEOUT_SECONDS = 20.0
@@ -120,6 +122,27 @@ def id_token_subject(value: object) -> str | None:
         return None
     subject = claims.get("sub") if isinstance(claims, dict) else None
     return subject if isinstance(subject, str) and subject else None
+
+
+async def token_subject(access_token: str) -> str:
+    """Get Google's stable account subject without putting the token in a URL."""
+    try:
+        async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as http:
+            response = await http.post(TOKEN_INFO_URL, data={"access_token": access_token})
+    except httpx.HTTPError:
+        raise GoogleRequestFailed() from None
+    if response.status_code != 200:
+        raise GoogleRequestFailed(response.status_code)
+    try:
+        subject = response.json().get("sub")
+    except (ValueError, AttributeError):
+        subject = None
+    if not isinstance(subject, str) or not subject.strip():
+        raise GoogleSignInError(
+            "Google did not provide an account identity. Call google_connect and try again.",
+            browser_message="Google did not provide an account identity. Go back to CORSIA and try again.",
+        )
+    return subject
 
 
 def _on_account(work, account_id: str, *args: object):  # type: ignore[no-untyped-def]
