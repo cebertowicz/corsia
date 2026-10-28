@@ -44,6 +44,12 @@ const CHAT = [
 	{ role: 'assistant', content: 'I drafted launch-plan.md with one section per workstream. Each needs a named owner, so I left a question on every one.', metadata: { for_user: true } },
 ] as Array<{ role: string; content: string; metadata?: Record<string, unknown> }>;
 
+const IMAGE_THREAD_TITLE = 'Walkthrough review';
+const IMAGE_CHAT = [
+	{ role: 'user', content: 'Can you check the header and the save button on the new walkthrough screen?' },
+	{ role: 'assistant', content: 'I looked at both and answered on the pins in walkthrough.md.', metadata: { for_user: true } },
+] as typeof CHAT;
+
 function skipMismatchedProject(width: number, projectName: string): void {
 	test.skip((width === 393) !== projectName.endsWith('mobile'), 'Each device project captures its native requested viewport.');
 }
@@ -57,7 +63,20 @@ async function freezeClock(page: Page): Promise<void> {
 		}
 		Object.setPrototypeOf(FrozenDate, RealDate);
 		window.Date = FrozenDate as DateConstructor;
+		// A reply counts read after a 1.5 s dwell. While a frame is being taken the dwell is held, so the frame shows the reply
+		// still marked New however long the capture takes; releasing the hold lets the dwell finish within 100 ms.
+		const realSetTimeout = window.setTimeout.bind(window);
+		(window as unknown as { __holdDwell: boolean }).__holdDwell = false;
+		window.setTimeout = ((fn: TimerHandler, delay?: number, ...args: unknown[]) => {
+			if (delay !== 1500 || typeof fn !== 'function') return realSetTimeout(fn, delay, ...args);
+			const run = (): number | void => (window as unknown as { __holdDwell: boolean }).__holdDwell ? realSetTimeout(run, 100) : fn(...args);
+			return realSetTimeout(run, delay);
+		}) as typeof window.setTimeout;
 	}, FROZEN_NOW);
+}
+
+async function holdDwell(page: Page, hold: boolean): Promise<void> {
+	await page.evaluate((value) => { (window as unknown as { __holdDwell: boolean }).__holdDwell = value; }, hold);
 }
 
 async function settled(page: Page): Promise<Buffer> {
@@ -83,6 +102,9 @@ async function shot(page: Page, name: string): Promise<void> {
 		coreSettings.update((current) => ({ ...current, features: { ...current?.features, debug_version_overlay: false } }));
 	});
 	await expect(page.locator('.version-overlay')).toHaveCount(0);
+	// Park the pointer on inert space so no control keeps the hover it got from the last click.
+	const view = page.viewportSize()!;
+	await page.mouse.move(view.width - 2, Math.round(view.height / 2));
 	const frame = await settled(page);
 	expect(await page.evaluate(() => document.body.innerText), `Frame ${name} shows test wording`).not.toMatch(/\be2e\b|fixture|Another agent|e2e-/i);
 	mkdirSync(screenshotDir, { recursive: true });
@@ -234,11 +256,13 @@ for (const theme of ['light', 'dark'] as const) {
 			await expect(chipBox(page).locator('.ct-new')).toBeVisible();
 			await shot(page, `01-text-document-chip-${theme}-${width}`);
 			const before = await page.locator('.cm-scroller').evaluate((el) => el.scrollTop);
+			await holdDwell(page, true);
 			await chipButton(page).click();
 			// The first waiting reply is brought into view, focused, and the comments list opens at it.
 			await expect(page.locator(`[data-comment-id="${doc.roots[8]}"]`)).toHaveClass(/focused/);
 			await expect.poll(() => page.locator('.cm-scroller').evaluate((el) => el.scrollTop)).toBeGreaterThan(before);
 			await shot(page, `02-text-document-landed-${theme}-${width}`);
+			await holdDwell(page, false);
 		});
 	}
 }
@@ -257,6 +281,7 @@ for (const theme of ['light', 'dark'] as const) {
 			await freezeClock(page);
 			const seeded = await seedImageDocument(page, request, 'launch-walkthrough', width === 393 ? null : 420);
 			await onlyThread(request, seeded.sessionId);
+			sqlite([['UPDATE threads SET title=? WHERE id=?', [IMAGE_THREAD_TITLE, seeded.sessionId]]]);
 			const image = '![Mock screen](shots/screen.png)';
 			const from = DOC.indexOf(image);
 			const ids: string[] = [];
@@ -271,10 +296,10 @@ for (const theme of ['light', 'dark'] as const) {
 			tidy(seeded.artifactId);
 			addAgentReply(seeded.artifactId, ids[0], seeded.sessionId, 'Yes, the header is final. I attached the export.');
 			addAgentReply(seeded.artifactId, ids[1], seeded.sessionId, 'It stays where it is; only its label changed.');
-			for (const message of CHAT) await injectMessage(request, seeded.sessionId, message, TEST_TOKEN);
+			for (const message of IMAGE_CHAT) await injectMessage(request, seeded.sessionId, message, TEST_TOKEN);
 			await loginByUrl(page);
 			if (width <= 768) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
-			await page.getByText(seeded.sessionTitle).first().click();
+			await page.getByText(IMAGE_THREAD_TITLE).first().click();
 			await expect(page.locator('.cm-md-image img').first()).toBeVisible();
 			await expectChip(page, '2 new replies');
 			// Opening the document delivers the two pin comments, and the delivery toast sits at the bottom of the same cell.
@@ -283,20 +308,24 @@ for (const theme of ['light', 'dark'] as const) {
 			await shot(page, `03a-image-document-chip-with-delivery-toast-${theme}-${width}`);
 			await expect(delivered).toHaveCount(0, { timeout: 15_000 });
 			await shot(page, `03-image-document-chip-${theme}-${width}`);
+			await holdDwell(page, true);
 			await chipButton(page).click();
 			// The image opens with the pin's thread open, its reply marked New; the chip steps aside while the image covers the document.
 			await expect(overlay(page)).toBeVisible();
 			await expect(page.getByText('Yes, the header is final. I attached the export.')).toBeVisible();
 			await expect(chipBox(page)).toHaveCount(0);
 			await shot(page, `04-image-pin-thread-open-${theme}-${width}`);
+			await holdDwell(page, false);
 			// Back to the document: one waiting reply is left and the chip says so; the next tap goes to the second pin.
 			await backToDocument(page);
 			await expectChip(page, '1 new reply');
 			await shot(page, `05-image-document-one-left-${theme}-${width}`);
+			await holdDwell(page, true);
 			await chipButton(page).click();
 			await expect(overlay(page)).toBeVisible();
 			await expect(page.getByText('It stays where it is; only its label changed.')).toBeVisible();
 			await shot(page, `06-image-second-pin-${theme}-${width}`);
+			await holdDwell(page, false);
 			await backToDocument(page);
 			// Everything read: the chip is gone.
 			await expect(chipBox(page)).toHaveCount(0);
@@ -327,10 +356,12 @@ for (const theme of ['light', 'dark'] as const) {
 			await expect(chatChip).toContainText('3 new replies · launch-plan.md');
 			await expect(chatComposer(page)).toBeVisible();
 			await shot(page, `08-chat-chip-reference-${theme}-${width}`);
+			await holdDwell(page, true);
 			await chatChip.click();
 			await expect(page.locator(`[data-comment-id="${doc.roots[2]}"]`)).toHaveClass(/focused/);
 			await expect(page.locator('.doc .cm-content')).toContainText('Q4 launch plan');
 			await shot(page, `09-arrived-from-chat-${theme}-${width}`);
+			await holdDwell(page, false);
 			// The first reply is read after its dwell. Put the comments list away: the document's chip is back, counting the other two.
 			await page.waitForTimeout(1700);
 			await page.getByRole('button', { name: 'Close comments' }).click();
@@ -419,6 +450,7 @@ for (const width of [1440, 393]) {
 		await freezeClock(page);
 		const seeded = await seedImageDocument(page, request, 'launch-walkthrough', width === 393 ? null : 420);
 		await onlyThread(request, seeded.sessionId);
+		sqlite([['UPDATE threads SET title=? WHERE id=?', [IMAGE_THREAD_TITLE, seeded.sessionId]]]);
 		const image = '![Mock screen](shots/screen.png)';
 		const from = DOC.indexOf(image);
 		const ids: string[] = [];
@@ -433,12 +465,15 @@ for (const width of [1440, 393]) {
 		tidy(seeded.artifactId);
 		addAgentReply(seeded.artifactId, ids[0], seeded.sessionId, 'Yes, the header is final. I attached the export.');
 		addAgentReply(seeded.artifactId, ids[1], seeded.sessionId, 'It stays where it is; only its label changed.');
-		for (const message of CHAT) await injectMessage(request, seeded.sessionId, message, TEST_TOKEN);
+		for (const message of IMAGE_CHAT) await injectMessage(request, seeded.sessionId, message, TEST_TOKEN);
 		await loginByUrl(page);
 		if (width <= 768) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
-		await page.getByText(seeded.sessionTitle).first().click();
+		await page.getByText(IMAGE_THREAD_TITLE).first().click();
 		await expect(page.locator('.cm-md-image img').first()).toBeVisible();
-		await expect(page.locator('.toast').filter({ hasText: /comments? sent/ })).toHaveCount(0, { timeout: 15_000 });
+		// Opening the document delivers the two pin comments; take the frame once the confirmation has come and gone.
+		const delivered = page.locator('.toast').filter({ hasText: /comments? sent/ });
+		await expect(delivered).toBeVisible();
+		await expect(delivered).toHaveCount(0, { timeout: 15_000 });
 		await expect(chipBox(page)).toHaveCount(0);
 		await shot(page, `B2-image-document-before-light-${width}`);
 	});
