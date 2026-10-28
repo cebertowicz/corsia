@@ -26,6 +26,12 @@ pytestmark = [pytest.mark.integration, pytest.mark.skipif(
     os.environ.get('CORSIA_NATIVE_BROWSER_TEST') != '1', reason='explicit native-browser job only',
 )]
 
+# The run's first Chrome launch on a cold hosted runner once took 32.7 s, past run()'s 30 s
+# default; later launches take seconds. Warm it once so no test's own budget pays for it.
+# Best effort, tried once: a Chrome that cannot launch fails in the tests that cover it.
+COLD_START_SECONDS = 90.0
+_warmed: list[bool] = []
+
 
 @pytest.fixture
 async def native_owner(monkeypatch, tmp_path):
@@ -46,6 +52,10 @@ async def native_owner(monkeypatch, tmp_path):
     owner = BrowserSessionOwner(namespace='corsia-test', binary=str(binary))
     assert owner.socket_dir.parent == identity.default_socket_root()
     try:
+        if not _warmed:
+            _warmed.append(True)
+            await owner.run('native-warm-up', ['open', 'about:blank'], timeout=COLD_START_SECONDS)
+            await owner.close_thread('native-warm-up')
         yield owner
     finally:
         await owner.shutdown()

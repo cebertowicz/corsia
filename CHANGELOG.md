@@ -8,6 +8,7 @@ the later entry describes the current behavior.
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here._
 
 - The shared browser keeps filling its pane after you switch tabs, and you can copy, cut and paste between a page and your own clipboard.
+- Updates show the data upgrade step while your data is being upgraded.
 - Update settings show the changes for the update currently on offer.
 - Email drafts describe the conversation in plain sentences, say why a message’s text is withheld, and say when your usual font couldn’t be read. A message that arrives while a reply draft is being saved now stops the send.
 - In phone chat, the scroll-to-bottom arrow lines up with the plan control, with notices above and the conversation visible around them.

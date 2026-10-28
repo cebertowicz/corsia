@@ -88,6 +88,66 @@ describe('update screen store', () => {
 		vi.advanceTimersByTime(2_000);
 		expect(read).toHaveBeenCalledTimes(2);
 	});
+	it('follows a replacement migration after a stopping service still reports serving', async () => {
+		updateStatus.set(status(inFlight()));
+		updateUnreachable.set(true);
+		progress = { schema: 1, pid: 90, seq: 500, phase: 'serving', done: null, total: null };
+		await refreshStartupProgress();
+		vi.setSystemTime(5_000);
+		progress = { schema: 1, pid: 91, seq: 1, phase: 'migrating', done: 1, total: 3 };
+		await refreshStartupProgress();
+		expect(get(updateScreenView)).toMatchObject({ step: 'upgrading', mode: 'progress' });
+		expect(get(updateScreenView)!.percent).toBeLessThan(68);
+	});
+
+	it('uses a late-phase heartbeat for liveness without treating it as a replacement step', async () => {
+		updateStatus.set(status(inFlight()));
+		updateUnreachable.set(true);
+		for (let at = 0; at <= 90_000; at += 10_000) {
+			vi.setSystemTime(at);
+			progress = { schema: 1, pid: 90, seq: at / 10_000, phase: 'serving', done: null, total: null };
+			await refreshStartupProgress();
+			expect(get(updateScreenView)).toMatchObject({ step: 'restarting', mode: 'progress' });
+		}
+		vi.setSystemTime(150_000);
+		await refreshStartupProgress();
+		expect(get(updateScreenView)).toMatchObject({ step: 'restarting', mode: 'longer' });
+	});
+
+	it('ignores a late old-process serving record after the replacement begins migrating', async () => {
+		updateStatus.set(status(inFlight()));
+		updateUnreachable.set(true);
+		progress = { schema: 1, pid: 91, seq: 1, phase: 'migrating', done: 1, total: 3 };
+		await refreshStartupProgress();
+		vi.setSystemTime(50_000);
+		progress = { schema: 1, pid: 90, seq: 500, phase: 'serving', done: null, total: null };
+		await refreshStartupProgress();
+		expect(get(updateScreenView)).toMatchObject({ step: 'upgrading', mode: 'progress' });
+		vi.setSystemTime(60_000);
+		progress = { schema: 1, pid: 91, seq: 1, phase: 'migrating', done: 1, total: 3 };
+		await refreshStartupProgress();
+		expect(get(updateScreenView)).toMatchObject({ step: 'upgrading', mode: 'longer' });
+		progress = { schema: 1, pid: 91, seq: 2, phase: 'migrating', done: 1, total: 3 };
+		await refreshStartupProgress();
+		expect(get(updateScreenView)).toMatchObject({ step: 'upgrading', mode: 'progress' });
+	});
+
+	it('keeps liveness when a later process is first seen recovering', async () => {
+		updateStatus.set(status(inFlight()));
+		updateUnreachable.set(true);
+		progress = { schema: 1, pid: 91, seq: 1, phase: 'migrating', done: 1, total: 3 };
+		await refreshStartupProgress();
+		for (let at = 10_000; at <= 90_000; at += 10_000) {
+			vi.setSystemTime(at);
+			progress = { schema: 1, pid: 92, seq: at / 10_000, phase: 'recovering', done: null, total: null };
+			await refreshStartupProgress();
+			expect(get(updateScreenView)).toMatchObject({ step: 'upgrading', mode: 'progress' });
+		}
+		vi.setSystemTime(150_000);
+		await refreshStartupProgress();
+		expect(get(updateScreenView)).toMatchObject({ mode: 'longer' });
+	});
+
 	it('keeps an advancing 245-second progress replay monotone, then stops creeping once its source freezes', async () => {
 		updateStatus.set(status(inFlight()));
 		tickUpdateScreen(0);
