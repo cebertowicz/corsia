@@ -47,6 +47,7 @@ SIGN_IN_RECOVERY = (
 PUBLISHED_SIGN_IN_RECOVERY = "Google rejected the saved sign-in. Call google_connect again for this account."
 NEEDS_SIGN_IN = SIGN_IN_RECOVERY
 UNREACHABLE = "Couldn't reach Google. Try again later."
+INVALID_CLIENT = "The saved Google client is invalid. Remove and reconnect this account."
 # Transport errors raised before any request bytes reach Google.
 _NEVER_SENT = (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)
 
@@ -124,7 +125,7 @@ def client_for(account_id: str | None, client_file: object, db) -> tuple[str, st
     try:
         published = uses_published(stored[1]) if stored is not None else True
     except ValueError:
-        raise GoogleSignInError("The saved Google client is invalid. Remove and reconnect this account.") from None
+        raise GoogleSignInError(INVALID_CLIENT) from None
     if client_file:
         return read_client_file(client_file)
     if account_id is not None and not published:
@@ -204,7 +205,10 @@ def sign_in_recovery(account_id: str, *, db) -> str:  # type: ignore[no-untyped-
     from connections.connected_accounts import _stored_bundle
 
     stored = _stored_bundle(account_id, db=db)
-    return PUBLISHED_SIGN_IN_RECOVERY if stored and uses_published(stored[1]) else SIGN_IN_RECOVERY
+    try:
+        return PUBLISHED_SIGN_IN_RECOVERY if stored and uses_published(stored[1]) else SIGN_IN_RECOVERY
+    except ValueError:
+        raise GoogleSignInError(INVALID_CLIENT) from None
 
 
 async def _access_token(account_id: str) -> tuple[str, bool]:

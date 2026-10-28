@@ -15,6 +15,7 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass
+from typing import cast
 from urllib.parse import urlencode
 
 from connections.app_reach import AppReach
@@ -143,18 +144,19 @@ def _begin(
         credentials = _client_for(account_id, client_file, db)
     finally:
         db.close()
-    kind = "own" if credentials is not None else "published"
-    published = client.uses_published({"client": kind})
-    if published:
-        client_id, client_secret = PUBLISHED_CLIENT_ID, None
+    scopes: tuple[str, ...]
+    if credentials is None:
+        kind, client_id, client_secret, verifier = "published", PUBLISHED_CLIENT_ID, None, None
+        scopes = PUBLISHED_SCOPES
     else:
-        assert credentials is not None
+        kind = "own"
         client_id, client_secret = credentials
-    verifier = None if published else secrets.token_urlsafe(64)
+        verifier = secrets.token_urlsafe(64)
+        scopes = SCOPES
     pending = _Pending(
         state=secrets.token_urlsafe(32), account_id=account_id or str(uuid.uuid4()),
         adding=account_id is None, actor=actor, adding_thread_id=adding_thread_id, reach=reach,
-        starting_thread_id=starting_thread_id, scopes=PUBLISHED_SCOPES if published else SCOPES,
+        starting_thread_id=starting_thread_id, scopes=scopes,
         verifier=verifier, client=kind, client_id=client_id,
         client_secret=client_secret, redirect_uri=redirect_uri(), created_at=time.monotonic(),
     )
@@ -175,8 +177,7 @@ def _begin(
             "uri": pending.redirect_uri, "manual": False, "csrf": pending.state,
         }).encode()).decode()
     else:
-        assert verifier is not None
-        params["code_challenge"] = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
+        params["code_challenge"] = base64.urlsafe_b64encode(hashlib.sha256(cast(str, verifier).encode()).digest()).rstrip(b"=").decode()
         params["code_challenge_method"] = "S256"
     return AUTH_URL + "?" + urlencode(params), pending
 

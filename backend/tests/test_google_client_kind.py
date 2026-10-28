@@ -66,8 +66,9 @@ def test_saved_account_lookup(kind, published, monkeypatch):
 def test_unknown_saved_client_refuses_recovery(monkeypatch):
     bundle = {"client": "unknown", "client_id": "id", "client_secret": "secret", "refresh_token": "refresh"}
     monkeypatch.setattr(connected_accounts, "_stored_bundle", lambda *args, **kwargs: (provider.GOOGLE, bundle))
-    with pytest.raises(ValueError):
+    with pytest.raises(client.GoogleSignInError) as error:
         client.sign_in_recovery("account", db=None)
+    assert str(error.value) == client.INVALID_CLIENT
 
 
 @pytest.mark.parametrize("kind,published", [("published", True), ("own", False), (None, False)])

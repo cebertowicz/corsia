@@ -330,7 +330,7 @@ def resolve_credentials(account_id: str, *, db: sqlite3.Connection) -> dict[str,
     if stored is None or not stored[0].valid_bundle(stored[1]):
         return None
     spec, bundle = stored
-    required = spec.required_for(bundle) if spec.required_for else spec.required_fields
+    required = spec.fields_for(bundle)
     return {key: bundle[key] for key in required | (set(bundle) & spec.optional_bundle_fields)}
 
 
@@ -342,7 +342,7 @@ def account_client(account_id: str, *, db: sqlite3.Connection) -> dict[str, str]
         return None
     spec, bundle = stored
     try:
-        required = spec.required_for(bundle) if spec.required_for else spec.required_fields
+        required = spec.fields_for(bundle)
     except ValueError:
         return None
     needed = spec.client_fields & required
@@ -371,7 +371,7 @@ def take_refresh_token(account_id: str, *, db: sqlite3.Connection | None = None)
         if stored is None or not stored[0].valid_bundle(stored[1]):
             return None
         spec, bundle = stored
-        required = spec.required_for(bundle) if spec.required_for else spec.required_fields
+        required = spec.fields_for(bundle)
         kept = (spec.client_fields & required) | (spec.client_fields & spec.optional_bundle_fields & set(bundle))
         _write_bundle(account_id, {key: bundle[key] for key in kept}, db=conn)
         return {key: bundle[key] for key in required}
