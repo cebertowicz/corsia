@@ -598,6 +598,39 @@ for (const theme of ['light', 'dark'] as const) {
 	}
 }
 
+for (const theme of ['light', 'dark'] as const) {
+	for (const width of [1440, 393]) {
+		test(`${TAG} ${theme} ${width}px: multiple replies in one thread and a phone draft`, async ({ page, request }, testInfo) => {
+			test.setTimeout(90_000);
+			test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires isolated synthetic state');
+			skipMismatchedProject(width, testInfo.project.name);
+			await page.setViewportSize({ width, height: width === 393 ? 852 : 900 });
+			await page.emulateMedia({ colorScheme: theme });
+			const threadId = await createSession(request, THREAD_TITLE);
+			await onlyThread(request, threadId);
+			const doc = await seedTextDocument(page, request, threadId, `multi-${theme}-${width}`, 'launch-plan.md', [8]);
+			addAgentReply(doc.artifactId, doc.roots[8], threadId, 'The handover is ready.');
+			addAgentReply(doc.artifactId, doc.roots[8], threadId, 'I added the final owner.');
+			await stageWorkspace(page, threadId, doc.docPath, 'launch-plan.md', 'artifact');
+			await openThread(page, THREAD_TITLE);
+			await expectChip(page, '3 new replies');
+			await shot(page, `multi-replies-one-thread-${theme}-${width}`);
+			if (width === 393) {
+				const line = page.locator('.cm-line').filter({ hasText: 'This workstream covers the first-run screens' }).first();
+				await line.dblclick({ position: { x: 20, y: 8 } });
+				await page.locator('.sel-comment').click();
+				await page.getByPlaceholder('Comment…').fill('Please confirm the handover.');
+				await expect(page.locator('[data-adaptive-drawer].drawer-backdrop')).toBeVisible();
+				await expect(chipBox(page)).toHaveCount(0);
+				await shot(page, `phone-draft-with-replies-${theme}-${width}`);
+				await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+				await expectChip(page, '3 new replies');
+				await shot(page, `phone-after-draft-${theme}-${width}`);
+			}
+		});
+	}
+}
+
 // Before frames (light): the same two documents on the base commit, where no chip exists. Run only on the base checkout
 // (`--grep baseline`); the assertion that no chip is drawn is what proves the checkout is the base.
 for (const width of [1440, 393]) {
