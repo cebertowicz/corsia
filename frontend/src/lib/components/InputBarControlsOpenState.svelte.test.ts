@@ -253,13 +253,12 @@ describe('context sheet group expansion across a preview refresh', () => {
 		await loadFirstPreview(fetches);
 		await openGroup('Project');
 
-		// A turn completes: a measured reading without a snapshot replaces the
-		// preview until the next one lands.
+		// The previous preview stays visible until the next one lands.
 		setContextUsage('session-ctx', measuredNoSnapshot as never);
 		flushSync();
 		await vi.waitFor(() => expect(fetches.calls()).toBe(2));
-		expect(groups()).toHaveLength(0);
-		expect(host.querySelector('.ctx-headline')?.textContent).toContain('72%');
+		expect(group('Project').open).toBe(true);
+		expect(host.querySelector('.ctx-headline')?.textContent).toContain('60%');
 
 		fetches.resolve(1, previewResponse('preview-2'));
 		await vi.waitFor(() => expect(groups().length).toBeGreaterThan(0));
@@ -316,12 +315,12 @@ describe('context sheet group expansion across a preview refresh', () => {
 		await loadFirstPreview(fetches);
 		await openGroup('Project');
 
-		// The new owner has no usable reading yet, so the sheet has no usage.
+		// The previous preview remains visible while the new reading loads.
 		setContextUsage('session-ctx', foreignReading as never);
 		flushSync();
 		await vi.waitFor(() => expect(fetches.calls()).toBe(2));
-		expect(host.querySelector('.ctx-headline')).toBeNull();
-		expect(groups()).toHaveLength(0);
+		expect(host.querySelector('.ctx-headline')?.textContent).toContain('60%');
+		expect(group('Project').open).toBe(true);
 
 		fetches.resolve(1, previewResponse('preview-2'));
 		await vi.waitFor(() => expect(groups().length).toBeGreaterThan(0));
@@ -337,8 +336,8 @@ describe('context sheet group expansion across a preview refresh', () => {
 		setContextUsage('session-ctx', foreignReading as never);
 		flushSync();
 		await vi.waitFor(() => expect(fetches.calls()).toBe(2));
-		expect(host.textContent).toContain('Loading context');
-		expect(groups()).toHaveLength(0);
+		expect(host.textContent).toContain('Updating');
+		expect(group('Project').open).toBe(true);
 
 		fetches.resolve(1, previewResponse('preview-2'));
 		await vi.waitFor(() => expect(groups().length).toBeGreaterThan(0));

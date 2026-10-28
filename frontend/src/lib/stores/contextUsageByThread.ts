@@ -22,16 +22,13 @@ export const contextUsageByThread = writable<ReadonlyMap<string, ContextUsage>>(
 
 export interface ContextPreviewEntry {
 	/** Thread, model and measured reading the preview was read against. */
-	owner: string;
+	owner: string | null;
 	/** `owner` plus the latest checkpoint: a change re-reads the preview. */
-	key: string;
+	key: string | null;
 	usage: ContextUsage | null;
 	loading: boolean;
 	error: string;
-	modelId: string | null;
-	generation: number;
-	/** Owner of the usage, which may precede an in-flight request. */
-	sourceOwner: string | null;
+	previous: ContextUsage | null;
 }
 
 export const contextPreviewByThread = writable<ReadonlyMap<string, ContextPreviewEntry>>(new Map());
@@ -86,7 +83,7 @@ export function setContextUsage(threadId: string, usage: ContextUsage | null): v
  * read replaces it.
  */
 export function recordMeasuredUsage(threadId: string, usage: ContextUsage | null): void {
-	previewGenerations.set(threadId, (previewGenerations.get(threadId) ?? 0) + 1);
+	invalidateContextPreview(threadId);
 	const unmeasured = !usage || usage.token_usage_available === false;
 	const kept = getContextUsage(threadId);
 	if (unmeasured && kept) {
@@ -180,7 +177,19 @@ export function hasMeasuredNumbers(usage: ContextUsage | null): boolean {
 /** Retire `threadId`'s preview. A read in flight settles before its replacement starts. */
 export function invalidateContextPreview(threadId: string): void {
 	previewGenerations.set(threadId, (previewGenerations.get(threadId) ?? 0) + 1);
-	if (!activePreviewReads.has(threadId)) setMapEntry(contextPreviewByThread, threadId, null);
+	const current = get(contextPreviewByThread).get(threadId);
+	if (current) setMapEntry(contextPreviewByThread, threadId, {
+		owner: null, key: null, usage: null, previous: current.usage ?? current.previous, loading: false, error: '',
+	});
+}
+
+function loadingPreview(request: PreviewRequest, current: ContextPreviewEntry | undefined): ContextPreviewEntry {
+	return {
+		owner: request.owner, key: request.key,
+		usage: current?.owner === request.owner ? current.usage : null,
+		previous: request.carry ? current?.usage ?? current?.previous ?? null : null,
+		loading: true, error: '',
+	};
 }
 
 async function readContextPreview(
@@ -189,9 +198,7 @@ async function readContextPreview(
 ): Promise<PreviewReadResult> {
 	const { threadId, owner, key } = request;
 	const current = get(contextPreviewByThread).get(threadId);
-	const shown = current?.owner === owner || (request.carry && current?.modelId === request.modelId && current.generation !== generation)
-		? current?.usage ?? null : null;
-	const entry = { owner, key, modelId: request.modelId, generation, sourceOwner: shown ? current?.sourceOwner ?? current?.owner ?? null : null, usage: shown, loading: true, error: '' };
+	const entry = loadingPreview(request, current);
 	setMapEntry(contextPreviewByThread, threadId, entry);
 	const isCurrent = () =>
 		(previewGenerations.get(threadId) ?? 0) === generation
@@ -205,14 +212,13 @@ async function readContextPreview(
 		const usage = await fetchNextTurnPreview(threadId, request.authToken, request.modelId);
 		if (!isCurrent()) return discarded();
 		const preview = usage ? { ...usage, thread_id: threadId } : null;
-		setMapEntry(contextPreviewByThread, threadId, { owner, key, modelId: request.modelId, generation, sourceOwner: owner, usage: preview, loading: false, error: '' });
+		setMapEntry(contextPreviewByThread, threadId, { owner, key, usage: preview, previous: null, loading: false, error: '' });
 		return { result: preview !== null, discardedByGeneration: false, entry };
 	} catch (exc) {
 		if (!isCurrent()) return discarded();
 		const error = exc instanceof Error ? exc.message : 'Context preview unavailable';
 		setMapEntry(contextPreviewByThread, threadId, {
-			owner, key, modelId: request.modelId, generation, sourceOwner: owner,
-			usage: entry.sourceOwner === owner ? shown : null, loading: false, error,
+			owner, key, usage: entry.usage, previous: null, loading: false, error,
 		});
 		return { result: false, discardedByGeneration: false, entry };
 	}
@@ -233,7 +239,7 @@ function startContextPreviewRead(request: PreviewRequest): Promise<boolean> {
 			active.pending = null;
 			if (!pending) {
 				if (attempt.discardedByGeneration && get(contextPreviewByThread).get(request.threadId) === attempt.entry) {
-					setMapEntry(contextPreviewByThread, request.threadId, null);
+					invalidateContextPreview(request.threadId);
 				}
 				if (activePreviewReads.get(request.threadId) === active) activePreviewReads.delete(request.threadId);
 				return attempt.result;
@@ -258,11 +264,9 @@ export async function ensureContextPreview(request: PreviewRequest): Promise<boo
 		if (generationIsCurrent && !active.pending && current?.owner === request.owner && current.key === request.key) {
 			return active.promise;
 		}
+		if (active.pending?.key === request.key && current?.key === request.key) return active.promise;
 		active.pending = request;
-		// A queued turn keeps the carried reading while the discarded read settles.
-		if (request.carry && !generationIsCurrent && current?.modelId === request.modelId && current.usage) {
-			setMapEntry(contextPreviewByThread, request.threadId, { ...current, owner: request.owner, key: request.key });
-		}
+		setMapEntry(contextPreviewByThread, request.threadId, loadingPreview(request, current));
 		return active.promise;
 	}
 	if (current?.key === request.key && (current.loading || !current.error || !request.retryError)) {
@@ -278,4 +282,5 @@ export function clearAllContextUsage(): void {
 	for (const active of activePreviewReads.values()) active.pending = null;
 	activePreviewReads.clear();
 	for (const threadId of get(contextPreviewByThread).keys()) invalidateContextPreview(threadId);
+	contextPreviewByThread.set(new Map());
 }

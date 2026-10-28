@@ -63,7 +63,7 @@ describe('preview refresh', () => {
 		recordMeasuredUsage('a', usage(500));
 		fetchPreview.mockImplementation(() => new Promise(() => {}));
 		const switched = request('a', 'model-b', usage(500));
-		void ensureContextPreview({ ...switched, carry: true });
+		void ensureContextPreview(switched);
 		expect(contextReading(get(contextPreviewByThread).get('a'), switched.owner, usage(500))?.total_used).toBe(500);
 		const other = request('b', 'model-a', usage(200));
 		void ensureContextPreview({ ...other, carry: true });

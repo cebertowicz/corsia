@@ -261,24 +261,6 @@ describe('turns after a preview (trace rows 5, 7)', () => {
 		expect(composer.headline()).toContain('42%');
 	});
 
-	it('does not carry a preview across a model switch while refreshing', async () => {
-		const composer = mountComposer();
-		setContextUsage('thread-a', measured('thread-a', 420) as never);
-		composer.props.sheetView = 'context';
-		flushSync();
-		await vi.waitFor(() => expect(composer.donut()).toBe('~30%'));
-		let finish!: (response: unknown) => void;
-		fetchMock.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
-		recordMeasuredUsage('thread-a', measured('thread-a', 510) as never);
-		flushSync();
-		expect(composer.donut()).toBe('~30%');
-		activeModelId.set('model-b');
-		flushSync();
-		expect(composer.donut()).not.toBe('~30%');
-		finish({ ok: true, json: async () => ({ preview: measured('thread-a', 700) }) });
-		await vi.waitFor(() => expect(previewCalls()).toHaveLength(3));
-	});
-
 	it('keeps the carried reading when the sheet closes during refresh until the read lands', async () => {
 		const composer = mountComposer();
 		setContextUsage('thread-a', measured('thread-a', 420) as never);
@@ -385,6 +367,25 @@ describe('turns after a preview (trace rows 5, 7)', () => {
 });
 
 describe('a reading kept past an unmeasurable turn', () => {
+	for (const withReceipt of [true, false]) {
+		it(`refreshes after two unmeasured turns with receipt: ${withReceipt}`, async () => {
+			const composer = mountComposer();
+			if (withReceipt) setContextUsage('thread-a', measured('thread-a', 420) as never);
+			composer.props.sheetView = 'context';
+			flushSync();
+			await vi.waitFor(() => expect(composer.donut()).toBe('~30%'));
+			previewTotal = 500;
+			recordMeasuredUsage('thread-a', null);
+			flushSync();
+			await vi.waitFor(() => expect(composer.donut()).toBe('~50%'));
+			previewTotal = 700;
+			recordMeasuredUsage('thread-a', null);
+			flushSync();
+			await vi.waitFor(() => expect(composer.donut()).toBe('~70%'));
+			expect(previewCalls()).toHaveLength(3);
+		});
+	}
+
 	it('refreshes an old preview after an unmeasured turn while closed', async () => {
 		const composer = mountComposer();
 		beginThreadEntry('thread-a');

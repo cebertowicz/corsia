@@ -198,6 +198,7 @@
 	$effect(() => {
 		const t = $token;
 		const ids = previewIds;
+		const preview = ownedPreview;
 		const sheetOpen = surface === 'sheets' && sheetView === 'context';
 		const opening = sheetOpen && !sheetWasOpen;
 		sheetWasOpen = sheetOpen;
@@ -211,7 +212,7 @@
 			// per owner, so a failed read is not repeated.
 			const hydrated = $measuredHydratedThreads.has(boundThreadId);
 			const usable = hasMeasuredNumbers(measuredReading) && !measuredReading?.stale;
-			if (!hydrated || usable || ownedPreview) return;
+			if (!hydrated || usable || preview) return;
 		}
 		void ensureContextPreview({
 			threadId: boundThreadId,

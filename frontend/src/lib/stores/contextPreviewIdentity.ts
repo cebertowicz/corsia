@@ -17,7 +17,6 @@ export function previewIdentity(
 		measured?.token_usage_available ?? null,
 		measured?.total_used ?? null,
 		measured?.model_context_window ?? null,
-		measured?.stale ?? false,
 	]);
 	const checkpoint = [latest?.id ?? null, latest?.status ?? null, latest?.startedAt ?? null];
 	return { owner, key: JSON.stringify([owner, checkpoint]) };
@@ -29,5 +28,5 @@ export function contextReading(
 	owner: string,
 	measured: ContextUsage | null,
 ): ContextUsage | null {
-	return (preview?.owner === owner ? preview.usage : null) ?? measured;
+	return (preview?.owner === owner ? (preview.usage ?? preview.previous) : null) ?? measured;
 }
