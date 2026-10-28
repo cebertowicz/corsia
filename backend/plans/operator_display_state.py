@@ -104,7 +104,7 @@ def asks_user_from_facts(
     pause_only = bool(causes) and all(
         cause.get("reason_key") == "plan_paused"
         or (cause.get("placed") and user_steering.is_user_pause(cause))
-        for cause in causes
+        for cause in causes or ()
     )
     return state not in TERMINAL_DISPLAY and bool(
         (assignee == "user" and (condition == "ready" or (condition == "paused" and pause_only)))
