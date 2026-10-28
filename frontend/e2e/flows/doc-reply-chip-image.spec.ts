@@ -135,14 +135,6 @@ for (const width of [393, 1440]) {
 			await reply(roots[0], 'The header is ready.');
 			await expect(chip).toContainText('2 new replies');
 			await capturePlacement('arrival');
-			if (theme === 'light' && process.env.REPLY_CHIP_PLACEMENT_DIR) {
-				await overlay(page).locator('[data-image-comments-pill]').click();
-				await expect(page.locator(width === 393 ? '[data-adaptive-drawer]' : '.canvas-comment-drawer').first()).toBeVisible();
-				await capturePlacement('drawer');
-				if (width === 393) await page.getByRole('button', { name: 'Done', exact: true }).click();
-				else await page.keyboard.press('Escape');
-				await expect(chip).toBeVisible();
-			}
 			if (frameDir) await page.screenshot({ path: path.join(frameDir, `Q1-image-arrival-${theme}-${width}.png`), scale: 'css', animations: 'disabled' });
 			await page.evaluate(() => {
 				const samples: unknown[] = [];
@@ -171,6 +163,13 @@ for (const width of [393, 1440]) {
 				await chip.click();
 				await expect(page.getByText('The save button stays in place.', { exact: true })).toBeVisible();
 			} else await capturePlacement('other-pin');
+			if (theme === 'light' && process.env.REPLY_CHIP_PLACEMENT_DIR) {
+				await reply(width === 393 ? roots[1] : roots[0], 'A further reply is waiting.');
+				await expect(chip).toBeVisible();
+				await overlay(page).locator('[data-image-comments-pill]').click();
+				await expect(page.locator(width === 393 ? '[data-adaptive-drawer]' : '.canvas-comment-drawer').first()).toBeVisible();
+				await capturePlacement('drawer');
+			}
 			await writer.close();
 		});
 	}
