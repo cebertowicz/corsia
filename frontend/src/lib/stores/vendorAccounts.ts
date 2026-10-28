@@ -60,6 +60,8 @@ export interface SigninResult {
 	cause: string | null;
 	duplicate_of?: string | null;
 	held_by?: string | null;
+	/** Support reference for a failure the person may report. */
+	ref?: string | null;
 }
 
 export const vendorAccounts = writable<VendorAccount[]>([]);

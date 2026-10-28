@@ -29,4 +29,7 @@
 .account-manager .inline-actions,
 .account-manager .signin-actions { display: flex; align-items: center; gap: var(--space-1); flex-wrap: wrap; }
 .account-manager .accounts .btn.ghost { padding-inline: 0; }
+/* A settings link lands on this button: the ring Connected apps draws on its linked row's action. */
+.account-manager .link-target { display: contents; }
+.account-manager .link-target.deep-link-focus .btn { outline: medium solid var(--accent); outline-offset: 0; }
 .account-manager .signin-state { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; margin-top: var(--space-2); color: var(--text-secondary); font-size: var(--text-footnote); min-width: 0; }

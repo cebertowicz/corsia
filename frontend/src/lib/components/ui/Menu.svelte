@@ -29,6 +29,7 @@
 		busy = false,
 		note = null,
 		error = null,
+		focusId = null,
 		onSelect,
 		onClose,
 	}: {
@@ -41,6 +42,8 @@
 		/** One quiet line under the items, such as a side effect of an action. */
 		note?: string | null;
 		error?: string | null;
+		/** The item that takes focus on open when it is not the first (a link that lands on one verb). */
+		focusId?: string | null;
 		onSelect: (id: string) => void;
 		onClose: () => void;
 	} = $props();
@@ -63,7 +66,7 @@
 		Math.max(8, Math.min(y, window.innerHeight - (menuH ? menuH + 8 : items.length * ITEM_H + 16)))
 	);
 
-	onMount(() => entries()[0]?.focus({ preventScroll: true }));
+	onMount(() => (entries().find((entry) => focusId && entry.dataset.menuId === focusId) ?? entries()[0])?.focus({ preventScroll: true }));
 
 	function entries(): HTMLButtonElement[] {
 		return [...(menuEl?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]') ?? [])];
@@ -111,8 +114,10 @@
 		<button
 			class="press-tint menu-item"
 			class:danger={item.danger}
+			class:landed={!!focusId && focusId === item.id}
 			type="button"
 			role="menuitem"
+			data-menu-id={item.id}
 			disabled={busy || item.disabled}
 			title={item.title}
 			onclick={() => onSelect(item.id)}
@@ -145,6 +150,8 @@
 		.menu-item:hover:not(:disabled) { background: var(--bg-hover); }
 	}
 	.menu-item:focus-visible { background: var(--bg-hover); }
+	/* A link that lands on one verb marks it: focus moved by script after a click does not match :focus-visible. */
+	.menu-item.landed { background: var(--bg-hover); box-shadow: inset 0 0 0 2px var(--accent); }
 	.menu-item:disabled { opacity: 0.6; cursor: default; }
 	.menu-item.danger { color: var(--red-text); }
 	.note { margin: 0; padding: 2px 10px 4px; color: var(--text-secondary); font-size: var(--text-caption); }

@@ -35,4 +35,31 @@ describe('SystemMessageRow', () => {
 		expect(details?.querySelector('summary')?.textContent).toBe('Show details');
 		expect(details?.textContent).toContain('Failed to authenticate: OAuth session expired and could not be refreshed.');
 	});
+
+	it('shows a lost-login error as written and links Settings › Providers to the account named', () => {
+		const text = 'FOMRRT1 is signed out of Claude Code. Sign it in again under Settings › Providers.';
+		render({ id: 'lost-login', role: 'system', content: text, metadata: { type: 'result', cause: 'sign_in_expired', cc: true, account_id: 'fomrrt1' } });
+
+		expect(host.textContent?.trim()).toBe(text);
+		expect(host.querySelector('details')).toBeNull();
+		const link = host.querySelector<HTMLAnchorElement>('a')!;
+		expect(link.textContent).toBe('Settings › Providers');
+		expect(link.getAttribute('href')).toBe('/settings/providers#account-fomrrt1');
+		expect(link.closest('.md-content')).not.toBeNull();
+	});
+
+	it('links the same way in any error that names an account', () => {
+		const text = 'Couldn’t start Codex on FOMRRT1: its model list is out of date. Use Sign in again on FOMRRT1 under Settings › Providers. Reference: R-7K2M';
+		render({ id: 'stale-models', role: 'system', content: text, metadata: { type: 'harness_error', account_id: 'fomrrt1' } });
+
+		expect(host.textContent?.trim()).toBe(text);
+		expect(host.querySelector('a')?.getAttribute('href')).toBe('/settings/providers#account-fomrrt1');
+	});
+
+	it('writes no link without a usable account id to land on', () => {
+		render({ id: 'no-account', role: 'system', content: 'Sign it in again under Settings › Providers.', metadata: { type: 'harness_error' } });
+		render({ id: 'odd-account', role: 'system', content: 'Sign it in again under Settings › Providers.', metadata: { type: 'harness_error', account_id: 'x y' } });
+
+		expect(host.querySelector('a')).toBeNull();
+	});
 });
