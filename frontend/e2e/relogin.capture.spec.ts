@@ -2,7 +2,7 @@ import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, type Locator, type Page } from '@playwright/test';
 import { test } from './support/test';
-import { createSession, loginByUrl, openSettings, TEST_TOKEN } from './support/corsia';
+import { loginByUrl, openSettings, TEST_TOKEN } from './support/corsia';
 import { injectMessage } from './support/mock';
 
 // Review frames for signing an account in again from Provider settings: the real app on the mock backend,
@@ -25,8 +25,11 @@ const CC_ERROR = 'FOMRRT1 is signed out of Claude Code. Sign it in again under S
 const CODEX_ERROR = 'Couldn’t start Codex on FOMRRT1: its model list is out of date. Use Sign in again on FOMRRT1 under Settings › Providers. Reference: R-7K2M';
 
 const harnessRows = [
-	...['claude-opus', 'claude-sonnet', 'claude-haiku'].map((id) => ({ id, harness: 'claude-code', available: true, enabled: true, display_name: id })),
-	...['codex-sol', 'codex-terra'].map((id) => ({ id, harness: 'codex', available: true, enabled: true, display_name: id })),
+	{ id: 'claude-opus', harness: 'claude-code', available: true, enabled: true, display_name: 'Opus 5.5' },
+	{ id: 'claude-sonnet', harness: 'claude-code', available: true, enabled: true, display_name: 'Sonnet 5.5' },
+	{ id: 'claude-haiku', harness: 'claude-code', available: true, enabled: true, display_name: 'Haiku 5.5' },
+	{ id: 'codex-sol', harness: 'codex', available: true, enabled: true, display_name: 'Sol 6.1' },
+	{ id: 'codex-terra', harness: 'codex', available: true, enabled: true, display_name: 'Terra 6.1' },
 ];
 const catalogRow = (r: { id: string; harness: string; display_name: string }) => ({
 	id: r.id, selector: r.id, litellm_model: r.id, name: r.display_name, display_name: r.display_name,
@@ -63,7 +66,10 @@ async function mockBackend(page: Page, scenario: Scenario) {
 }
 
 const waiting = (account: Fixture) => ({ account_id: account.id, route: 'browser', status: 'waiting', cause: null });
-const completed = (account: Fixture, cause: string | null = null, ref: string | null = null) => ({ account_id: account.id, route: cause ? null : 'browser', status: 'completed', cause, ...(ref ? { ref } : {}) });
+const completed = (account: Fixture) => ({ account_id: account.id, route: 'browser', status: 'completed', cause: null });
+/** What #1616's sign-in answers for an account the vendor still has signed in. */
+const alreadySignedIn = (account: Fixture) => ({ account_id: account.id, route: null, status: 'already_signed_in', cause: null });
+const modelRefreshFailed = (account: Fixture) => ({ account_id: account.id, route: null, status: 'model_refresh_failed', cause: 'account_refresh_failed', ref: 'R-7K2M' });
 
 const claudeAccounts = (overrides: Record<string, State> = {}): Fixture[] => [
 	{ id: 'cc-personal', provider: 'claude-code', name: 'Personal', state: 'signed_in', is_default: true },
@@ -77,6 +83,8 @@ const codexAccounts = (): Fixture[] => [
 /** `rowId` centers that account's row in the dialog first, so every frame of a pair shows the same stretch of the list. */
 async function shot(page: Page, name: string, tag: string, rowId?: string) {
 	if (rowId) await page.locator(`#vendor-account-${rowId}`).evaluate((row) => row.scrollIntoView({ block: 'center' }));
+	// The developer build stamp is not part of the product.
+	await page.addStyleTag({ content: '.version-overlay { display: none !important; }' });
 	await page.waitForTimeout(500);
 	mkdirSync(outputDir, { recursive: true });
 	await page.screenshot({ path: join(outputDir, `${name}-${tag}.png`), animations: 'disabled' });
@@ -91,9 +99,21 @@ async function openProviderDialog(page: Page, provider: 'claude-code' | 'codex')
 	await expect(page.getByRole('dialog')).toBeVisible();
 }
 
-/** A thread that holds one failed turn's error, opened the way a person reaches it. */
-async function openErrorThread(page: Page, request: Parameters<typeof createSession>[0], title: string, text: string, accountId: string) {
-	const threadId = await createSession(request, title);
+const THREAD_TITLE = 'Summarise open pull requests';
+type Request = Parameters<typeof injectMessage>[0];
+
+/** A thread bound to a catalog model, so the composer reads a ready model instead of an unknown one. */
+async function createThread(request: Request, title: string, model: string) {
+	const response = await request.post(`/api/threads?token=${encodeURIComponent(TEST_TOKEN)}`, { data: { title, model } });
+	expect(response.ok()).toBeTruthy();
+	return (await response.json()).thread_id as string;
+}
+
+/** A thread that holds one failed turn's error, opened the way a person reaches it; the caller deletes it afterwards. */
+async function openErrorThread(page: Page, request: Request, text: string, accountId: string, model: string, created: string[]) {
+	const title = THREAD_TITLE;
+	const threadId = await createThread(request, title, model);
+	created.push(threadId);
 	await injectMessage(request, threadId, { role: 'user', content: 'Summarise the open pull requests.' }, TEST_TOKEN);
 	await injectMessage(request, threadId, { role: 'system', content: text, metadata: { type: 'harness_error', account_id: accountId } }, TEST_TOKEN);
 	if ((page.viewportSize()?.width ?? 0) <= 768) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
@@ -118,6 +138,10 @@ test.describe('Sign in again review frames', () => {
 		test.describe(theme, () => {
 			let tag = '';
 			let mobile = false;
+			const created: string[] = [];
+			test.afterEach(async ({ request }) => {
+				for (const id of created.splice(0)) await request.delete(`/api/threads/${id}?token=${encodeURIComponent(TEST_TOKEN)}`);
+			});
 			async function start(page: Page, scenario: Scenario, height?: number) {
 				await page.emulateMedia({ colorScheme: theme });
 				await mockBackend(page, scenario);
@@ -132,7 +156,7 @@ test.describe('Sign in again review frames', () => {
 
 			test('a and b: a failed Claude Code turn links to the signed-out row with Sign in focused', async ({ page, request }) => {
 				await start(page, { accounts: claudeAccounts({ 'cc-1': 'signed_out' }) });
-				await openErrorThread(page, request, `relogin a ${theme} ${tag}`, CC_ERROR, 'cc-1');
+				await openErrorThread(page, request, CC_ERROR, 'cc-1', 'claude-sonnet', created);
 				await shot(page, 'a-failed-turn', tag);
 				await page.getByRole('link', { name: 'Settings › Providers' }).click();
 				const signIn = page.locator('#vendor-account-cc-1 [data-chat-link-focus] .btn');
@@ -164,7 +188,7 @@ test.describe('Sign in again review frames', () => {
 			test('c: Sign in again on an account that is still signed in', async ({ page }) => {
 				await start(page, {
 					accounts: claudeAccounts(),
-					signin: (account) => completed(account, 'already_signed_in'),
+					signin: alreadySignedIn,
 				});
 				await openProviderDialog(page, 'claude-code');
 				await page.locator('#vendor-account-cc-1').click({ button: 'right', position: { x: 60, y: 12 } });
@@ -176,7 +200,7 @@ test.describe('Sign in again review frames', () => {
 			test('c: Sign in again when the model list could not be reloaded', async ({ page }) => {
 				await start(page, {
 					accounts: claudeAccounts(),
-					signin: (account) => completed(account, 'models_reload_failed', 'R-7K2M'),
+					signin: modelRefreshFailed,
 				});
 				await openProviderDialog(page, 'claude-code');
 				await page.locator('#vendor-account-cc-1').click({ button: 'right', position: { x: 60, y: 12 } });
@@ -205,7 +229,7 @@ test.describe('Sign in again review frames', () => {
 
 			test('d: a Codex error links to the signed-in row with its menu open and Sign in again focused', async ({ page, request }) => {
 				await start(page, { accounts: codexAccounts() });
-				await openErrorThread(page, request, `relogin d ${theme} ${tag}`, CODEX_ERROR, 'cx-1');
+				await openErrorThread(page, request, CODEX_ERROR, 'cx-1', 'codex-terra', created);
 				await shot(page, 'd2-codex-error', tag);
 				await page.getByRole('link', { name: 'Settings › Providers' }).click();
 				await expect(page.getByRole('menuitem', { name: 'Sign in again' })).toBeFocused();
@@ -227,10 +251,13 @@ test.describe('Sign in again review frames', () => {
 				await start(page, {
 					accounts: claudeAccounts({ 'cc-3': 'signed_out', 'cc-4': 'signed_out', 'cc-5': 'signed_out' }),
 					check: (account) => account.id === 'cc-5' ? waiting(account) : null,
-				}, mobile ? 1500 : 1300);
+				});
 				await openProviderDialog(page, 'claude-code');
 				await expect(page.locator('#vendor-account-cc-5 .signin-state')).toContainText('Waiting for sign-in in your browser');
 				await shot(page, 'f-five-accounts', tag);
+				// The same list scrolled to its end: the waiting row with Check and Cancel, then the footer.
+				await page.getByRole('button', { name: 'Add account' }).evaluate((footer) => footer.scrollIntoView({ block: 'end' }));
+				await shot(page, 'f2-five-accounts-scrolled', tag);
 			});
 		});
 	}

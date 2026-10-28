@@ -7,6 +7,7 @@
 	 * holds what a system notice looks like. The list was over its size budget
 	 * before this split and the two concerns were interleaved.
 	 */
+	import { loadVendorAccounts, vendorAccounts } from '$lib/stores/vendorAccounts';
 	import SubagentChip from './SubagentChip.svelte';
 	import EventChip from './EventChip.svelte';
 	import SendRefChip from './SendRefChip.svelte';
@@ -28,11 +29,14 @@
 	const artifactRemovalEvent = $derived(isArtifactRemovalEvent(msg));
 	const subagentDone = $derived(msg.role === 'system' && msg.metadata?.type === 'subagent_done');
 	const signInExpired = $derived(msg.metadata?.cause === 'sign_in_expired');
-	/** A lost-login error names the account to sign in again; "Settings › Providers" in its text then links to that account's row. */
+	/** A lost-login error names the account to sign in again; "Settings › Providers" in its text then links to that account's row. Default and legacy accounts have no row to press, so their errors stay text. */
 	const PROVIDERS_LINK_TEXT = 'Settings › Providers';
 	const accountId = $derived(typeof msg.metadata?.account_id === 'string' && /^[\w-]+$/.test(msg.metadata.account_id) ? msg.metadata.account_id : null);
+	const namedAccount = $derived(accountId ? $vendorAccounts.find((account) => account.id === accountId) : undefined);
+	const linkableAccount = $derived(!!namedAccount && !namedAccount.is_default && namedAccount.state !== 'legacy' && namedAccount.state !== 'removed');
 	const content = $derived(String(msg.content ?? ''));
-	const linkAt = $derived(accountId ? content.indexOf(PROVIDERS_LINK_TEXT) : -1);
+	const linkAt = $derived(linkableAccount ? content.indexOf(PROVIDERS_LINK_TEXT) : -1);
+	$effect(() => { if (accountId && $vendorAccounts.length === 0) void loadVendorAccounts(); });
 	const quietRow = $derived(
 		passiveContextEvent || activityReceipt || artifactRemovalEvent || subagentDone,
 	);

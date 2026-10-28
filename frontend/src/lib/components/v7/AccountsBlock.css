@@ -31,5 +31,10 @@
 .account-manager .accounts .btn.ghost { padding-inline: 0; }
 /* A settings link lands on this button: the ring Connected apps draws on its linked row's action. */
 .account-manager .link-target { display: contents; }
-.account-manager .link-target.deep-link-focus .btn { outline: medium solid var(--accent); outline-offset: 0; }
+/* Room above the row's Sign in, so its ring clears the Signed out line; the status line already centres its button beside its text. */
+.account-manager .link-target .btn { margin-top: var(--space-2); }
+.account-manager .signin-state .link-target .btn { margin-top: 0; }
+.account-manager .link-target.deep-link-focus .btn { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* A touch screen gets the 44px target on the buttons a link lands on. */
+@media (pointer: coarse) { .account-manager .link-target .btn.sm { height: var(--touch-target); } }
 .account-manager .signin-state { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; margin-top: var(--space-2); color: var(--text-secondary); font-size: var(--text-footnote); min-width: 0; }
