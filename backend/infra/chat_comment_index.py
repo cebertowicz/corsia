@@ -39,7 +39,7 @@ def attach_comments(db: sqlite3.Connection, thread_id: str, user_id: str, messag
         (user_id, user_id, thread_id, json.dumps(list(by_id))),
     ).fetchall()
     answer_rows = db.execute(
-        "SELECT a.assistant_message_id,a.cid,answer.content FROM chat_comment_answers a INDEXED BY sqlite_autoindex_chat_comment_answers_1 "
+        "SELECT a.assistant_message_id,a.cid,answer.content FROM chat_comment_answers a "
         "JOIN messages answer ON answer.id=a.assistant_message_id AND answer.thread_id=a.thread_id "
         "JOIN chat_comments c ON c.user_message_id=a.user_message_id AND c.cid=a.cid AND c.thread_id=a.thread_id "
         "JOIN messages sender ON sender.id=a.user_message_id AND sender.thread_id=a.thread_id "

@@ -11,7 +11,7 @@
 	import { clearWarmKeysForThread, warmActiveThread } from '$lib/chatWarm';
 	import { refreshVisibleThread, subscribeChatPanelEvents } from './chatPanelEvents';
 	import { watchChatCommentThreads } from '$lib/chatCommentRefresh';
-	import { mergeChatReplyAttention, setChatReplyAttention } from '$lib/stores/chatReplyAttention';
+	import { beginChatReplyAttentionRead, setChatReplyAttention } from '$lib/stores/chatReplyAttention';
 	import { createChatReplyJumper } from './chatReplyJump';
 	import { hydrateFetchedMessages, mergeFetchedHistoryRows } from '$lib/messageHistory';
 	import { adoptThreadSnapshot, retainDisplayedRows } from '$lib/stores/displayedThreads';
@@ -199,9 +199,11 @@
 		await loadOlder(pager, {
 			...guardedPort,
 			async fetchPage(cursor) {
+				const threadId = get(activeThreadId) ?? '';
+				const sequence = beginChatReplyAttentionRead();
 				const page = await guardedPort.fetchPage(cursor);
 				if (page !== PAGER_ABORT && page) {
-					mergeChatReplyAttention(get(activeThreadId) ?? '', page.chat_reply_items ?? []);
+					setChatReplyAttention(threadId, page.chat_reply_items ?? [], sequence);
 					mergeTurnSummaries((page as MessagePage).turn_summaries);
 					focusRuns = adoptOlderPageRuns(focusRuns, page);
 				}
@@ -249,6 +251,7 @@
 		firstLoadFailed = false;
 		firstLoadPending = true;
 		const signal = firstPageRead.start();
+		const sequence = beginChatReplyAttentionRead();
 		try {
 			const res = await fetch(`/api/threads/${threadId}/messages?token=${t}&limit=${MSG_PAGE_SIZE}${focusParam()}`, { signal });
 			if (!res.ok) {
@@ -259,7 +262,7 @@
 			const data = await res.json() as MessagePage;
 			if (!isCurrentFirstPageRequest(threadId, gen)) return;
 			firstLoadFailed = false;
-			setChatReplyAttention(threadId, data.chat_reply_items ?? []);
+			setChatReplyAttention(threadId, data.chat_reply_items ?? [], sequence);
 			const hydrated = hydrateFetchedMessages(data.messages ?? []);
 			mergeTurnSummaries(data.turn_summaries);
 			adoptThreadSnapshot(threadId, hydrated);

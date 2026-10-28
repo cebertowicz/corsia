@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ChatPanel from './ChatPanel.svelte';
 import { withEmptyAttentionQueue } from '../__tests__/fixtures/attentionQueue';
 import { token } from '$lib/stores/auth';
+import { chatReplyAttention, refreshChatReplyAttention } from '$lib/stores/chatReplyAttention';
 import { activeThreadId, messages, reasoningEffort, threads } from '$lib/stores/threads';
 import { _resetTurnStateForTests } from '$lib/ws/turnState';
 import { _resetCheckpointsForTests } from '$lib/stores/checkpoints';
@@ -81,6 +82,29 @@ afterEach(() => {
 });
 
 describe('ChatPanel new chat', () => {
+	it('keeps a refresh when an older page arrives late', async () => {
+		const reply = (id: string, unread: number) => ({ detail: { title: '', unread_count: unread, newest_at: 't', destination: { pane: 'chat-replies', id, user_message_id: 'sender', cid: 'c1.1', seq: 1 }, source: { thread_id: 'thread-b' } } });
+		let resolveOlder!: (response: Response) => void;
+		const older = new Promise<Response>(resolve => { resolveOlder = resolve; });
+		let olderRequested = false;
+		globalThis.fetch = withEmptyAttentionQueue(vi.fn(async (input: RequestInfo | URL) => {
+			const url = String(input);
+			if (url.includes('before=')) { olderRequested = true; return older; }
+			if (url.includes('/messages?')) return { ok: true, json: async () => ({ messages: [{ id: 'b1', thread_id: 'thread-b', role: 'assistant', content: 'newest', created_at: 't' }], has_more: true, oldest_id: 'b1', chat_reply_items: [reply('old', 4)] }) } as Response;
+			if (url.includes('/chat-comment-threads')) return { ok: true, json: async () => ({ chat_reply_items: [reply('new', 2)] }) } as Response;
+			return { ok: true, json: async () => ({ thread_kind: 'chat' }) } as Response;
+		}) as typeof fetch);
+		component = mount(ChatPanel, { target: host, props: { onOpenLightbox: () => {} } });
+		flushSync();
+		await (component as Record<string, any>).selectThread('thread-b');
+		await new Promise(resolve => setTimeout(resolve, 50));
+		host.querySelector('.messages')?.dispatchEvent(new Event('scroll'));
+		await vi.waitFor(() => expect(olderRequested).toBe(true));
+		await refreshChatReplyAttention('thread-b');
+		resolveOlder({ ok: true, json: async () => ({ messages: [{ id: 'old', thread_id: 'thread-b', role: 'assistant', content: 'old', created_at: 't' }], has_more: false, oldest_id: 'old', chat_reply_items: [reply('old', 4)] }) } as Response);
+		await vi.waitFor(() => expect(get(messages).some(row => row.id === 'old')).toBe(true));
+		expect(get(chatReplyAttention)?.items).toEqual([reply('new', 2)]);
+	});
 	it('shows the reply chip after loading an older page with an answered comment', async () => {
 		const reply = { detail: { title: '', unread_count: 1, newest_at: 't', destination: { pane: 'chat-replies', id: 'old', user_message_id: 'sender', cid: 'c1.1', seq: 1 }, source: { thread_id: 'thread-b' } } };
 		globalThis.fetch = withEmptyAttentionQueue(vi.fn(async (input: RequestInfo | URL) => {

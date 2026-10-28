@@ -1,7 +1,7 @@
 import { get } from 'svelte/store';
 import { token } from '$lib/stores/auth';
 import { activeThreadId, messages, type Message } from '$lib/stores/threads';
-import { setChatReplyAttention } from '$lib/stores/chatReplyAttention';
+import { beginChatReplyAttentionRead, setChatReplyAttention } from '$lib/stores/chatReplyAttention';
 import type { CommentReplyItem } from '$lib/api/attentionQueue';
 import { on } from '$lib/ws';
 
@@ -32,6 +32,7 @@ export function watchChatCommentThreads(pageSize: number): () => void {
 		const hasComments = targets.length > 0 || rows.some(row => row.metadata?.reply_context?.comments?.length);
 		if (!hasComments) return;
 		const current = ++generation;
+		const sequence = beginChatReplyAttentionRead();
 		try {
 			// The server identifies placed answers; do not parse tags in the client.
 			const stepIds = Array.isArray(frame.step_ids) ? frame.step_ids : frame.context_message_id ? [frame.context_message_id] : [];
@@ -50,7 +51,7 @@ export function watchChatCommentThreads(pageSize: number): () => void {
 				return fresh ? { ...row, chat_comments: fresh.chat_comments ?? [], chat_visible_content: fresh.chat_visible_content, chat_answer_cids: fresh.chat_answer_cids } : row;
 			}));
 			const replies = targetRows.replies ?? answers.replies;
-			if (replies !== null) setChatReplyAttention(threadId, replies);
+			if (replies !== null) setChatReplyAttention(threadId, replies, sequence);
 		} catch (error) { console.error('Could not refresh chat comment threads', error); }
 	}
 	const stops = [on('turn_complete', frame => refresh(frame)), on('message_added', frame => {

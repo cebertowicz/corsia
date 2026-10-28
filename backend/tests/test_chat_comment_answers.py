@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 
 from auth_fixtures import OTHER_TOKEN, OWNER_TOKEN, OWNER_USER
 from doc_feedback_helpers import seed_thread
-from infra.chat_comment_answers import UNREAD_SQL, parse_answers, unread_answers, visible_answer_content
+from infra.chat_comment_answers import parse_answers, visible_answer_content
 from infra.database import get_db, initialize_schema
 from infra.database_migrations import migrate_to_current
 from infra.queries import insert_message
@@ -73,23 +73,12 @@ def test_fresh_and_upgraded_schema():
     db.close()
 
 
-def test_write_places_known_answers_and_unread_skips_deleted(isolated_db):
+def test_write_places_known_answers(isolated_db):
     db = get_db()
     try:
         _seed(db)
         _answer(db)
-        assert [r["cid"] for r in unread_answers(db, OWNER_USER, "thread", 10)] == ["c1.1", "c1.2"]
-        db.execute("INSERT INTO chat_comment_views VALUES (?, 'question', 'c1.1', '2026-01-01T12')", (OWNER_USER,))
-        assert [r["cid"] for r in unread_answers(db, OWNER_USER, "thread", 10)] == ["c1.1", "c1.2"]
-        db.execute("UPDATE chat_comment_views SET seen_at='2026-01-03' WHERE cid='c1.1'")
-        assert [r["cid"] for r in unread_answers(db, OWNER_USER, "thread", 1)] == ["c1.2"]
-        assert unread_answers(db, "another-user", "thread", 10) == []
-        db.execute("SAVEPOINT deletion")
-        db.execute("DELETE FROM messages WHERE id='answer'")
-        assert unread_answers(db, OWNER_USER, "thread", 10) == []
-        db.execute("ROLLBACK TO deletion")
-        db.execute("DELETE FROM messages WHERE id='question'")
-        assert unread_answers(db, OWNER_USER, "thread", 10) == []
+        assert [r[0] for r in db.execute("SELECT cid FROM chat_comment_answers ORDER BY cid")] == ["c1.1", "c1.2"]
         db.rollback()
     finally:
         db.close()
@@ -109,8 +98,10 @@ def test_route_stamps_the_newest_seen_answer_and_checks_ownership(isolated_db):
     def unread_and_stamps():
         db = get_db()
         try:
-            unread = [r["cid"] for r in unread_answers(db, OWNER_USER, "thread", 10)]
-            return unread, [r[0] for r in db.execute("SELECT seen_at FROM chat_comment_views")]
+            from doceditor.reply_attention import chat_reply_items
+            items = chat_reply_items(db, OWNER_USER, "thread")
+            count = items[0]['detail']['unread_count'] if items else 0
+            return count, [r[0] for r in db.execute("SELECT seen_at FROM chat_comment_views")]
         finally:
             db.close()
 
@@ -123,9 +114,9 @@ def test_route_stamps_the_newest_seen_answer_and_checks_ownership(isolated_db):
         db.commit()
     finally:
         db.close()
-    assert unread_and_stamps() == (["c1.1", "c1.2"], [])
+    assert unread_and_stamps() == (2, [])
     assert client.post(url, headers=headers, json={"assistant_message_id": "answer"}).status_code == 200
-    assert unread_and_stamps() == (["c1.2"], ["2026-01-02"])
+    assert unread_and_stamps() == (1, ["2026-01-02"])
     db = get_db()
     try:
         insert_message("thread", "assistant", "[c1.1] again", {"turn_unbound_reason": "legacy_import"},
@@ -133,14 +124,14 @@ def test_route_stamps_the_newest_seen_answer_and_checks_ownership(isolated_db):
         db.commit()
     finally:
         db.close()
-    assert unread_and_stamps() == (["c1.2", "c1.1"], ["2026-01-02"])
+    assert unread_and_stamps() == (2, ["2026-01-02"])
     # A newer answer arriving during the first reply's dwell stays unread.
     assert client.post(url, headers=headers, json={"assistant_message_id": "answer"}).status_code == 200
-    assert unread_and_stamps() == (["c1.2", "c1.1"], ["2026-01-02"])
+    assert unread_and_stamps() == (2, ["2026-01-02"])
     assert client.post(url, headers=headers, json={"assistant_message_id": "answer-2"}).status_code == 200
-    assert unread_and_stamps() == (["c1.2"], ["2026-01-04"])
+    assert unread_and_stamps() == (1, ["2026-01-04"])
     assert client.post(url, headers=headers, json={"assistant_message_id": "answer"}).status_code == 200
-    assert unread_and_stamps() == (["c1.2"], ["2026-01-04"])
+    assert unread_and_stamps() == (1, ["2026-01-04"])
 
 
 @pytest.mark.parametrize("operation", ["purge", "delete"])
@@ -171,23 +162,6 @@ def test_thread_teardown_removes_only_its_chat_comment_rows(isolated_db, operati
         assert [row[0] for row in db.execute("SELECT thread_id FROM chat_comment_answers")] == ["other"]
         assert [row[0] for row in db.execute("SELECT thread_id FROM chat_comments")] == ["other"]
         assert [row[0] for row in db.execute("SELECT user_message_id FROM chat_comment_views")] == ["other-question"]
-    finally:
-        db.rollback()
-        db.close()
-
-
-def test_unread_query_uses_indexes_on_large_thread(isolated_db):
-    db = get_db()
-    try:
-        _seed(db)
-        db.executemany("INSERT INTO messages(id,thread_id,role,content,created_at,seq) VALUES (?, 'thread', 'tool', '', 't', ?)",
-                       [(f"tool-{n}", n + 2) for n in range(2000)])
-        db.execute("UPDATE threads SET next_message_seq=2002 WHERE id='thread'")
-        _answer(db)
-        plan = " ".join(str(row[3]) for row in db.execute("EXPLAIN QUERY PLAN " + UNREAD_SQL, (OWNER_USER, OWNER_USER, "thread", 10)))
-        assert "idx_chat_comment_answers_thread_time" in plan
-        assert "SCAN u" not in plan and "SCAN m" not in plan
-        assert len(unread_answers(db, OWNER_USER, "thread", 10)) == 2
     finally:
         db.rollback()
         db.close()

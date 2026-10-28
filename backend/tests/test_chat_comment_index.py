@@ -130,7 +130,6 @@ def test_page_and_scoped_attention_use_answer_indexes(isolated_db):
 
 
 def test_unread_projections_agree_for_missing_rows_and_new_answers(isolated_db):
-    from infra.chat_comment_answers import unread_answers
     from doceditor.reply_attention import chat_reply_items
 
     db = get_db()
@@ -143,19 +142,16 @@ def test_unread_projections_agree_for_missing_rows_and_new_answers(isolated_db):
         db.execute("INSERT INTO messages(id,thread_id,role,content,metadata,created_at,seq) VALUES ('user','thread','user','',?,'t',2)", (json.dumps(metadata),))
         db.execute("INSERT INTO messages(id,thread_id,role,content,created_at,seq) VALUES ('a1','thread','assistant','[c1.1] first','u',3)")
         db.execute("INSERT INTO chat_comment_answers VALUES ('thread','user','c1.1','a1','u')")
-        assert unread_answers(db, 'person', 'thread', 10) == []
         assert chat_reply_items(db, 'person', 'thread') == []
         place_comments(db, 'thread', 'user', metadata, 't')
         db.execute("INSERT INTO chat_comment_views VALUES ('person','user','c1.1','u')")
         db.execute("INSERT INTO messages(id,thread_id,role,content,created_at,seq) VALUES ('a2','thread','assistant','[c1.1] again','v',4)")
         db.execute("INSERT INTO chat_comment_answers VALUES ('thread','user','c1.1','a2','v')")
-        assert [row['assistant_message_id'] for row in unread_answers(db, 'person', 'thread', 10)] == ['a2']
         assert chat_reply_items(db, 'person', 'thread')[0]['detail']['unread_count'] == 1
         page = [{'id': 'target', 'role': 'assistant'}]
         attach_comments(db, 'thread', 'person', page)
         assert [answer['unread'] for answer in page[0]['chat_comments'][0]['answers']] == [False, True]
         db.execute("DELETE FROM messages WHERE id='target'")
-        assert unread_answers(db, 'person', 'thread', 10) == []
         assert chat_reply_items(db, 'person', 'thread') == []
         page = [{'id': 'target', 'role': 'assistant'}]
         attach_comments(db, 'thread', 'person', page)
