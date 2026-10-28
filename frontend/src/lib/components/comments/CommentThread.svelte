@@ -39,6 +39,7 @@
 	import ResolvedWhileReplying from './ResolvedWhileReplying.svelte';
 	import CommentMarkdownBody from './CommentMarkdownBody.svelte';
 	import CommentReplyList, { type CommentReplyData } from './CommentReplyList.svelte';
+	import { createReplyVisibility } from './replyVisibility';
 
 	let { comment, focused = false, linked = false, selectable = false, focusReply = false, showReply = false, keepReplyVisible = false, flat = false, hideOrphan = flat, leaving = false, scrollOnFocus = true, onFocus, readOnly = false, onReply, onResolve, onAgree, onDecision, onViewed, onMovePin, tagColor = null, decisionError = '', reopenReachesOwner = false, replyText = $bindable(''), replySelection = null, onReplySelection }: {
 		comment: CommentThreadData;
@@ -123,6 +124,8 @@
 	const dwellTimers = new Map<string, number>();
 	const dwelled = new Set<string>();
 	let stampTimer: number | null = null;
+	const unreadKey = $derived(JSON.stringify(comment.newReplyIds ?? []));
+	const replyVisibility = createReplyVisibility(dwellThenStamp, (id) => cancelDwell(id), () => cancelDwell());
 	function cancelDwell(replyId?: string) {
 		for (const [id, timer] of dwellTimers) {
 			if (!replyId || id === replyId) { window.clearTimeout(timer); dwellTimers.delete(id); }
@@ -172,25 +175,11 @@
 	$effect(() => {
 		observeTick;
 		newestReply;
-		const unread = new Set(comment.newReplyIds ?? []);
-		const root = el;
-		if (!root || !onViewed || typeof IntersectionObserver === 'undefined') return;
-		const observers: IntersectionObserver[] = [];
-		for (const element of root.querySelectorAll<HTMLElement>('[data-reply-id]')) {
-			const replyId = element.dataset.replyId;
-			if (!replyId || !unread.has(replyId)) continue;
-			const observer = new IntersectionObserver((entries) => {
-				const entry = entries.at(-1);
-				if (entry?.isIntersecting && entry.intersectionRatio === 1) dwellThenStamp(replyId);
-				else cancelDwell(replyId);
-			}, { threshold: 1 });
-			observers.push(observer);
-			observer.observe(element);
-		}
-		return () => { for (const observer of observers) observer.disconnect(); cancelDwell(); };
+		replyVisibility.sync(el, !!onViewed, JSON.parse(unreadKey));
 	});
+	$effect(() => () => replyVisibility.clear());
 	function onVisibilityChange() {
-		if (document.visibilityState === 'visible') observeTick++;
+		if (document.visibilityState === 'visible') { replyVisibility.clear(); observeTick++; }
 		else cancelDwell();
 	}
 

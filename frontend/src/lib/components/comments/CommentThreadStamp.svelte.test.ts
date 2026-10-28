@@ -21,6 +21,10 @@ class FakeObserver {
 		if (this.disconnected || !this.target) return;
 		this.callback([{ isIntersecting: visible, intersectionRatio: visible ? 1 : 0, target: this.target } as IntersectionObserverEntry], this as unknown as IntersectionObserver);
 	}
+	reportTall() {
+		if (!this.target) return;
+		this.callback([{ isIntersecting: true, intersectionRatio: 0.5, target: this.target, intersectionRect: { height: 599 }, rootBounds: { height: 600 } } as IntersectionObserverEntry], this as unknown as IntersectionObserver);
+	}
 	disconnect() { this.disconnected = true; }
 	unobserve() {}
 	takeRecords() { return []; }
@@ -57,6 +61,36 @@ afterEach(() => {
 });
 
 describe('CommentThread stamping', () => {
+	it('stamps a tall reply filling the visible area', async () => {
+		const onViewed = vi.fn().mockResolvedValue(undefined);
+		state.comment = { ...state.comment, replies: [reply('r1')], newReplyIds: ['r1'] };
+		render(onViewed);
+		FakeObserver.live()[0].reportTall();
+		await dwell();
+		expect(onViewed).toHaveBeenCalledWith('c1', 'r1');
+	});
+
+	it('preserves an in-progress dwell across an identical unread projection', async () => {
+		const onViewed = vi.fn().mockResolvedValue(undefined);
+		state.comment = { ...state.comment, replies: [reply('r1')], newReplyIds: ['r1'] };
+		render(onViewed);
+		FakeObserver.live()[0].report(true);
+		await new Promise((resolve) => setTimeout(resolve, 500));
+		arrive({ newReplyIds: ['r1'] });
+		await new Promise((resolve) => setTimeout(resolve, 1100));
+		expect(onViewed).toHaveBeenCalledWith('c1', 'r1');
+	});
+	it('preserves an existing dwell when another unread reply arrives', async () => {
+		const onViewed = vi.fn().mockResolvedValue(undefined);
+		state.comment = { ...state.comment, replies: [reply('r1')], newReplyIds: ['r1'] };
+		render(onViewed);
+		FakeObserver.live()[0].report(true);
+		await new Promise((resolve) => setTimeout(resolve, 500));
+		arrive({ replies: [reply('r1'), reply('r2')], newReplyIds: ['r1', 'r2'] });
+		await new Promise((resolve) => setTimeout(resolve, 1100));
+		expect(onViewed).toHaveBeenCalledWith('c1', 'r1');
+	});
+
 	it('observes against the viewport even inside a scroll container', () => {
 		state.comment = { ...state.comment, replies: [reply('r1')], newReplyIds: ['r1'] };
 		const style = vi.spyOn(window, 'getComputedStyle').mockImplementation((element) => ({ overflowY: element === host ? 'auto' : 'visible' }) as CSSStyleDeclaration);
