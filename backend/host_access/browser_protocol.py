@@ -8,7 +8,7 @@ from host_access import browser_identity as identity
 
 
 def json_object(raw: str) -> dict:
-    """Decode exactly one object; partial or noisy output is not protocol evidence."""
+    """Decode exactly one object; partial/noisy output is never protocol evidence."""
     try:
         value = json.loads(raw)
     except (ValueError, TypeError):
@@ -17,7 +17,7 @@ def json_object(raw: str) -> dict:
 
 
 async def close_request(reader: asyncio.StreamReader, writer: asyncio.StreamWriter, request_id: str) -> None:
-    """Consume the producer acknowledgement; transport EOF is not success."""
+    """Consume the local-CDP producer acknowledgement; transport EOF is not success."""
     try:
         writer.write((json.dumps({"id": request_id, "action": "close"}) + "\n").encode())
         await writer.drain()
