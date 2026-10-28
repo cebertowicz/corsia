@@ -37,7 +37,7 @@ def unread_reply_items(db, user_id: str) -> list[dict]:
         (*params, user_id),
     ).fetchall()
     if not rows:
-        return []
+        return _chat_reply_items(db, user_id)
     roots = root_visible_thread_ids([str(row['author_thread_id']) for row in rows], db=db)
     ids = json.dumps(list({str(row['artifact_id']) for row in rows}))
     artifacts = db.execute(
@@ -69,4 +69,27 @@ def unread_reply_items(db, user_id: str) -> list[dict]:
                 'source': {'thread_id': roots[str(row['author_thread_id'])] or row['author_thread_id']},
             },
         })
-    return result
+    return result + _chat_reply_items(db, user_id)
+
+
+def _chat_reply_items(db, user_id: str) -> list[dict]:
+    rows = db.execute("""WITH unread AS (
+        SELECT a.thread_id,a.user_message_id,a.cid,a.answered_at,c.target_message_id,target.seq AS target_seq,
+               ROW_NUMBER() OVER (PARTITION BY a.thread_id ORDER BY a.answered_at,a.user_message_id,a.cid) AS position,
+               COUNT(*) OVER (PARTITION BY a.thread_id) AS unread_count,
+               MAX(a.answered_at) OVER (PARTITION BY a.thread_id) AS newest_at
+          FROM chat_comment_answers a
+          JOIN threads t ON t.id=a.thread_id AND t.user_id=?
+          JOIN chat_comments c ON c.user_message_id=a.user_message_id AND c.cid=a.cid AND c.thread_id=a.thread_id
+          JOIN messages sender ON sender.id=a.user_message_id AND sender.thread_id=a.thread_id
+          JOIN messages target ON target.id=c.target_message_id AND target.thread_id=a.thread_id
+          JOIN messages answer ON answer.id=a.assistant_message_id AND answer.thread_id=a.thread_id
+          LEFT JOIN chat_comment_views v ON v.user_id=? AND v.user_message_id=a.user_message_id AND v.cid=a.cid
+         WHERE v.user_id IS NULL OR v.seen_at < a.answered_at
+    ) SELECT * FROM unread WHERE position=1""", (user_id, user_id)).fetchall()
+    return [{'detail': {
+        'title': '', 'unread_count': row['unread_count'], 'newest_at': row['newest_at'],
+        'destination': {'pane': 'chat-replies', 'id': row['target_message_id'],
+                        'user_message_id': row['user_message_id'], 'cid': row['cid'], 'seq': row['target_seq']},
+        'source': {'thread_id': row['thread_id']},
+    }} for row in rows]

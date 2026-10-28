@@ -35,6 +35,9 @@ def test_parser_places_multitag_sections_and_leaves_uncited_text():
     assert parsed["c1.1"] == parsed["c1.2"] == [{"text": "shared\n\nmore", "assistant_message_id": "answer"}]
     assert parsed["c1.3"][0]["text"] == "final"
     assert "intro" not in str(parsed)
+    trailing = parse_answers("leading post\n\n[c1.1] answer\n\ntrailing paragraph", "answer")
+    assert trailing["c1.1"][0]["text"] == "answer\n\ntrailing paragraph"
+    assert "leading post" not in str(trailing)
 
 
 def test_malformed_cid_is_rejected():
@@ -53,7 +56,7 @@ def test_fresh_and_upgraded_schema():
     db.commit()
     migrate_to_current(db, SCHEMA_VERSION)
     assert {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'chat_comment_%'")} == {
-        "chat_comment_answers", "chat_comment_views"
+        "chat_comment_answers", "chat_comment_views", "chat_comments"
     }
     db.close()
 
@@ -99,9 +102,9 @@ def test_route_stamps_the_newest_seen_answer_and_checks_ownership(isolated_db):
         finally:
             db.close()
 
-    assert client.post(url, headers={"Authorization": f"Bearer {OTHER_TOKEN}"}).status_code == 404
-    # Opened before any answer committed: an answer timed before this view still reads unread.
-    assert client.post(url, headers=headers).status_code == 200
+    assert client.post(url, headers={"Authorization": f"Bearer {OTHER_TOKEN}"}, json={"assistant_message_id": "answer"}).status_code == 404
+    # An answer not yet committed cannot move the stamp.
+    assert client.post(url, headers=headers, json={"assistant_message_id": "answer"}).status_code == 200
     db = get_db()
     try:
         _answer(db)
@@ -109,7 +112,7 @@ def test_route_stamps_the_newest_seen_answer_and_checks_ownership(isolated_db):
     finally:
         db.close()
     assert unread_and_stamps() == (["c1.1", "c1.2"], [])
-    assert client.post(url, headers=headers).status_code == 200
+    assert client.post(url, headers=headers, json={"assistant_message_id": "answer"}).status_code == 200
     assert unread_and_stamps() == (["c1.2"], ["2026-01-02"])
     db = get_db()
     try:
@@ -119,7 +122,12 @@ def test_route_stamps_the_newest_seen_answer_and_checks_ownership(isolated_db):
     finally:
         db.close()
     assert unread_and_stamps() == (["c1.2", "c1.1"], ["2026-01-02"])
-    assert client.post(url, headers=headers).status_code == 200
+    # A newer answer arriving during the first reply's dwell stays unread.
+    assert client.post(url, headers=headers, json={"assistant_message_id": "answer"}).status_code == 200
+    assert unread_and_stamps() == (["c1.2", "c1.1"], ["2026-01-02"])
+    assert client.post(url, headers=headers, json={"assistant_message_id": "answer-2"}).status_code == 200
+    assert unread_and_stamps() == (["c1.2"], ["2026-01-04"])
+    assert client.post(url, headers=headers, json={"assistant_message_id": "answer"}).status_code == 200
     assert unread_and_stamps() == (["c1.2"], ["2026-01-04"])
 
 
@@ -138,6 +146,10 @@ def test_thread_teardown_removes_only_its_chat_comment_rows(isolated_db, operati
         db.execute("INSERT INTO messages(id,thread_id,role,content,created_at,seq) "
                    "VALUES ('other-question','other','user','x','t',1)")
         db.execute("INSERT INTO chat_comment_answers VALUES ('other','other-question','c1.1','other-answer','t')")
+        db.executemany("INSERT INTO chat_comments (thread_id,target_message_id,user_message_id,cid,created_at) VALUES (?,?,?,?,?)", [
+            ('thread', 'answer', 'question', 'c1.1', 't'),
+            ('other', 'other-answer', 'other-question', 'c1.1', 't'),
+        ])
         db.executemany("INSERT INTO chat_comment_views VALUES (?,?,?,?)", [
             (OWNER_USER, "question", "c1.1", "t"),
             (OWNER_USER, "other-question", "c1.1", "t"),
@@ -147,6 +159,7 @@ def test_thread_teardown_removes_only_its_chat_comment_rows(isolated_db, operati
         else:
             delete_thread_family(db, ["thread"])
         assert [row[0] for row in db.execute("SELECT thread_id FROM chat_comment_answers")] == ["other"]
+        assert [row[0] for row in db.execute("SELECT thread_id FROM chat_comments")] == ["other"]
         assert [row[0] for row in db.execute("SELECT user_message_id FROM chat_comment_views")] == ["other-question"]
     finally:
         db.rollback()

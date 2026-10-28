@@ -28,7 +28,7 @@
 	const singleDocument = $derived(documents.length === 1 ? documents[0] : null);
 	const countLabel = $derived(`${unreadCount} new ${unreadCount === 1 ? 'reply' : 'replies'}`);
 	const documentLabel = $derived(singleDocument ? singleDocument.detail.title : `${documents.length} documents`);
-	const chipLabel = $derived(`${countLabel} · ${documentLabel}`);
+	const chipLabel = $derived(documents.some(item => item.detail.destination.pane === 'chat-replies') ? countLabel : `${countLabel} · ${documentLabel}`);
 	const card = $derived.by((): MessageCard | null => {
 		const target = singleDocument ?? newest;
 		if (!target) return null;
@@ -37,7 +37,7 @@
 			artifact_id: target.detail.destination.id,
 			title: chipLabel,
 			type: 'document',
-			icon: 'file-text',
+			icon: target.detail.destination.pane === 'chat-replies' ? 'message-square' : 'file-text',
 			name: chipLabel,
 			path: target.detail.destination.path ?? null,
 			available: true,
@@ -57,6 +57,6 @@
 
 {#if card && unreadCount}
 	<section class="reply-chip-notice" aria-label="Unread agent replies" onclickcapture={openReplyDocument}>
-		<AttachmentRow {card} threadId={$activeThreadId} variant="chip" chipWidth="content" newMarker />
+		<AttachmentRow {card} threadId={$activeThreadId} variant="chip" chipWidth="content" newMarker onActivate={card.icon === 'message-square' ? () => {} : undefined} />
 	</section>
 {/if}

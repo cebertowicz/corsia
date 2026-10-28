@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 
 from infra.auth import authenticate
+from infra.chat_comment_index import attach_comments
 from infra.database import get_db
 from infra.db_async import run_in_db, run_read
 from infra.queries import get_thread_for_user
@@ -114,6 +115,9 @@ async def get_messages(
                     db, thread_id, limit, before, user_id=user["id"],
                 )
             attach_result_cards(db, thread_id, user["id"], result)
+            if result is not None:
+                page = result['messages'] if isinstance(result, dict) else result[0]
+                attach_comments(db, thread_id, user['id'], page)
             return result
         finally:
             db.close()

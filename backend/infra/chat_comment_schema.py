@@ -1,6 +1,18 @@
 """Read stamps and the write-time index of chat-comment answers."""
 
 CHAT_COMMENT_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS chat_comments (
+    thread_id TEXT NOT NULL,
+    target_message_id TEXT NOT NULL,
+    user_message_id TEXT NOT NULL,
+    cid TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    root_user_message_id TEXT,
+    root_cid TEXT,
+    PRIMARY KEY (user_message_id, cid)
+);
+CREATE INDEX IF NOT EXISTS idx_chat_comments_target
+    ON chat_comments(thread_id, target_message_id);
 CREATE TABLE IF NOT EXISTS chat_comment_views (
     user_id TEXT NOT NULL,
     user_message_id TEXT NOT NULL,

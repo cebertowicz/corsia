@@ -65,6 +65,7 @@ def delete_thread_chat_comment_answers(db: sqlite3.Connection, thread_id: str) -
         "(SELECT id FROM messages WHERE thread_id=?)", (thread_id,),
     )
     db.execute("DELETE FROM chat_comment_answers WHERE thread_id=?", (thread_id,))
+    db.execute("DELETE FROM chat_comments WHERE thread_id=?", (thread_id,))
 
 
 UNREAD_SQL = """SELECT a.thread_id, a.user_message_id, a.cid, a.assistant_message_id, a.answered_at

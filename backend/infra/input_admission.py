@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from core.message_history import NON_HUMAN_MARKERS, REPLY_VIA_POST_UPDATE_KEY
 from core.reply_context import REPLY_CONTEXT_KEY
 from core.viewing_context import VIEWING_DOCUMENT_KEY, VIEWING_DOCUMENT_TARGET_KEY
+from infra.chat_comment_index import place_comments
 from infra.database import get_db, write_transaction
 from infra.document_viewing import PreparedViewingDocument
 from infra.reply_context import require_every_comment, validate_reply_context
@@ -303,6 +304,8 @@ def accept_thread_input(
                 hold,
             ),
         )
+        if role == 'user':
+            place_comments(connection, thread_id, message_id, metadata, accepted_at)
         connection.execute(
             "UPDATE threads SET next_input_order=next_input_order+1 WHERE id=?",
             (thread_id,),
