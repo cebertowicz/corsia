@@ -277,6 +277,33 @@ describe('SetupScreen', () => {
 		expect(calls.filter((call) => call.method === 'POST' && call.url.includes('/install'))).toEqual([{ url: '/api/providers/cli/claude-code/install', method: 'POST' }]);
 	});
 
+	it('polls for the chosen CLI without a source event and starts its install', async () => {
+		await passFolder();
+		vi.useFakeTimers();
+		try {
+			button('Claude')?.click(); flushSync();
+			sources = [{ source: 'claude-code', name: 'Claude Code', state: 'not_installed' }];
+			await vi.advanceTimersByTimeAsync(3000); await tick();
+			expect(calls.filter((call) => call.method === 'POST' && call.url === '/api/providers/cli/claude-code/install')).toHaveLength(1);
+		} finally { vi.useRealTimers(); }
+	});
+
+	it('shows Retry if detection fails while an unchecked source is present', async () => {
+		sources = [{ source: 'claude-code', name: 'Claude Code', state: 'unverified' }];
+		await passFolder();
+		const originalFetch = vi.mocked(fetch).getMockImplementation()!;
+		vi.mocked(fetch).mockImplementation(async (input, init) => String(input).includes('/sources/recheck') ? new Response('{}', { status: 500 }) : originalFetch(input, init));
+		vi.useFakeTimers();
+		try {
+			button('Claude')?.click(); flushSync();
+			await vi.advanceTimersByTimeAsync(3000); await tick();
+			const row = host.querySelector('section[aria-label="Claude Code"]');
+			expect(row?.textContent).toContain('Couldn’t check Claude Code.');
+			expect(row?.textContent).toContain('Retry');
+			expect(row?.querySelector('.spinner')).toBeNull();
+		} finally { vi.useRealTimers(); }
+	});
+
 	describe('the Local model row by host', () => {
 		const providersStep = async (extra: Array<{ source: string; name: string; state: string }> = []) => {
 			sources = [{ source: 'claude-code', name: 'Claude Code', state: 'not_installed' }, { source: 'codex', name: 'Codex', state: 'not_installed' }, ...extra];

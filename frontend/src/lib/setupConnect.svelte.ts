@@ -80,7 +80,7 @@ function hasNoUsableModel(source: ModelSource): boolean {
 export function createSetupConnect(deps: ConnectDeps) {
 	let flow = $state<Record<string, ConnectPhase | undefined>>({});
 	let attempts = $state<Record<string, SetupAttempt>>({ 'claude-code': { attempt: 'none' }, codex: { attempt: 'none' } });
-	const active = $derived(Object.values(flow).some((entry) => entry?.phase === 'installing' || entry?.phase === 'signing-in'));
+	const active = $derived(Object.values(flow).some((entry) => entry?.phase === 'awaiting-source' || entry?.phase === 'installing' || entry?.phase === 'signing-in'));
 	function setConnect(vendor: string, next: ConnectPhase | undefined) {
 		flow = { ...flow, [vendor]: next };
 		if (next?.phase === 'failed') attempts = { ...attempts, [vendor]: { attempt: next.failed === 'signin' ? 'signin_failed' : 'install_failed', cause: next.failed === 'signin' ? next.signinCause ?? 'signin_failed' : installCause(next.cause), ref: next.ref ?? undefined } };
@@ -199,6 +199,7 @@ export function createSetupConnect(deps: ConnectDeps) {
 		if (!current || ticking) return;
 		ticking = true;
 		try {
+			if (Object.values(flow).some((entry) => entry?.phase === 'awaiting-source')) await deps.refreshSources(true);
 			for (const [vendor, entry] of Object.entries(flow)) {
 				if (entry?.phase === 'installing') {
 					const install = await getCliInstall(current, vendor).catch(() => null);
@@ -249,5 +250,5 @@ export function createSetupConnect(deps: ConnectDeps) {
 		if (source.state === 'unverified') return { meta: source.reason ?? '', busy: !source.checked_at, action: source.checked_at ? { label: 'Check again', run: () => void deps.refreshSources(true) } : undefined };
 		return { meta: copy.uses, action: signInAction };
 	}
-	return { get active() { return active; }, get attempts() { return attempts; }, tick: tickConnect, row: connectRow, install, pick, sourcesChanged, signIn, stop };
+	return { get active() { return active; }, get attempts() { return attempts; }, tick: tickConnect, row: connectRow, install, pick, sourcesChanged, awaitingSource: (vendor: string) => flow[vendor]?.phase === 'awaiting-source', signIn, stop };
 }

@@ -104,7 +104,7 @@
 	const aiRows = $derived.by((): AiRow[] => {
 		const rows = CLI_VENDORS.filter((vendor) => cliSignedIn(vendor) || cliPicked(vendor)).map((vendor): AiRow => {
 			const source = sources.find((row) => row.source === vendor);
-			if (!source) {
+			if (!source || (sourceError && connectFlow.awaitingSource(vendor))) {
 				const name = vendor === 'codex' ? 'Codex' : 'Claude Code';
 				return sourceError ? { key: vendor, name, meta: `Couldn’t check ${name}.`, error: true, action: { label: 'Retry', run: () => void refreshSources(true) } } : { key: vendor, name, meta: '', busy: true };
 			}
