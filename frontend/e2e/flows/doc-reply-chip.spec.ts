@@ -115,6 +115,44 @@ async function shot(page: Page, name: string): Promise<void> {
 	writeFileSync(path.join(screenshotDir, `${name}.png`), frame);
 }
 
+async function startMotionProbe(page: Page): Promise<void> {
+	await page.evaluate(() => {
+		const w = window as unknown as { __replyMotion: { active: boolean; samples: unknown[] } };
+		const probe = w.__replyMotion = { active: true, samples: [] };
+		const start = performance.now();
+		const sample = () => {
+			if (!probe.active) return;
+			const selectors = ['[data-doc-reply-chip]', '.drawer-motion', '.drawer-backdrop:not(.outro-shield)', '.cm-content'];
+			const elements = selectors.map((selector) => {
+				const node = document.querySelector<HTMLElement>(selector);
+				if (!node) return { selector, present: false };
+				const style = getComputedStyle(node), box = node.getBoundingClientRect();
+				const animations = node.getAnimations().map((animation) => {
+					const effect = animation.effect as KeyframeEffect | null;
+					return { playState: animation.playState, timing: effect?.getTiming(), keyframes: effect?.getKeyframes() };
+				});
+				return { selector, present: true, opacity: style.opacity, transform: style.transform, transition: style.transition, animation: style.animation, box: { x: box.x, y: box.y, width: box.width, height: box.height }, animations };
+			});
+			probe.samples.push({ ms: performance.now() - start, elements });
+			requestAnimationFrame(sample);
+		};
+		requestAnimationFrame(sample);
+	});
+}
+
+async function saveMotionProbe(page: Page, name: string): Promise<void> {
+	await page.waitForTimeout(600);
+	const samples = await page.evaluate(() => {
+		const probe = (window as unknown as { __replyMotion: { active: boolean; samples: unknown[] } }).__replyMotion;
+		probe.active = false;
+		return probe.samples;
+	});
+	if (screenshotDir) {
+		mkdirSync(screenshotDir, { recursive: true });
+		writeFileSync(path.join(screenshotDir, `${name}.json`), JSON.stringify(samples));
+	}
+}
+
 function sqlite(statements: Array<[string, Array<string | number | null>]>): void {
 	const stateRoot = process.env.CORSIA_E2E_STATE_DIR;
 	if (process.env.CORSIA_E2E_MOCK !== '1' || !stateRoot) throw new Error('Requires isolated synthetic state');
@@ -241,11 +279,12 @@ async function chipHitBox(page: Page) {
 /** The chip, once drawn: its text, and that nothing else on the document's surface sits under it. */
 async function expectChip(page: Page, text: string): Promise<void> {
 	await expect(chipButton(page)).toHaveText(new RegExp(text));
-	const chip = (await chipBox(page).boundingBox())!;
 	const view = page.viewportSize()!;
-	expect(chip.x, 'inside the viewport on the left').toBeGreaterThanOrEqual(0);
-	expect(chip.x + chip.width, 'inside the viewport on the right').toBeLessThanOrEqual(view.width + 0.5);
-	expect(chip.y + chip.height, 'inside the viewport at the bottom').toBeLessThanOrEqual(view.height + 0.5);
+	// Opening the artifact on mobile can still be moving its whole surface when its text appears.
+	await expect.poll(async () => {
+		const chip = await chipBox(page).boundingBox();
+		return !!chip && chip.x >= 0 && chip.x + chip.width <= view.width + 0.5 && chip.y + chip.height <= view.height + 0.5;
+	}, { message: 'the settled chip is inside the viewport' }).toBe(true);
 }
 
 for (const theme of ['light', 'dark'] as const) {
@@ -325,6 +364,71 @@ for (const theme of ['light', 'dark'] as const) {
 }
 
 for (const width of [1440, 393]) {
+	test(`${TAG} extremes ${width}px: long reply and large count`, async ({ page, request }, testInfo) => {
+		test.setTimeout(90_000);
+		test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires isolated synthetic state');
+		skipMismatchedProject(width, testInfo.project.name);
+		await page.setViewportSize({ width, height: width === 393 ? 852 : 900 });
+		await page.emulateMedia({ colorScheme: 'light' });
+		const threadId = await createSession(request, THREAD_TITLE);
+		await onlyThread(request, threadId);
+		const doc = await seedTextDocument(page, request, threadId, `extremes-${width}`, 'launch-plan.md', []);
+		const token = 'launchreadiness'.repeat(20);
+		addAgentReply(doc.artifactId, doc.roots[8], threadId, token);
+		await stageWorkspace(page, threadId, doc.docPath, 'launch-plan.md', 'artifact');
+		await openThread(page, THREAD_TITLE);
+		await expectChip(page, '1 new reply');
+		await holdDwell(page, true);
+		await chipButton(page).click();
+		await expect(page.locator(`[data-comment-id="${doc.roots[8]}"]`)).toHaveClass(/focused/);
+		await expect(page.getByText(token)).toBeVisible();
+		await shot(page, `long-unbroken-reply-light-${width}`);
+		await page.getByRole('button', { name: 'Close comments' }).click();
+		const statement = "INSERT INTO doc_comments (id, artifact_id, parent_id, author, author_kind, author_thread_id, body, created_at, updated_at) VALUES (lower(hex(randomblob(16))), ?, ?, ?, 'agent', ?, ?, ?, ?)";
+		sqlite(Array.from({ length: 119 }, (_, index) => [statement, [doc.artifactId, doc.roots[10], REPLIER, threadId, `Update ${index + 1}.`, null, null]]));
+		await reloadComments(page, doc.artifactId);
+		await expectChip(page, '120 new replies');
+		await shot(page, `extreme-count-light-${width}`);
+	});
+}
+
+for (const width of [1440, 393]) {
+	test(`${TAG} fetch failure ${width}px: retain the last reply count`, async ({ page, request }, testInfo) => {
+		test.setTimeout(90_000);
+		test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires isolated synthetic state');
+		skipMismatchedProject(width, testInfo.project.name);
+		await page.setViewportSize({ width, height: width === 393 ? 852 : 900 });
+		await page.emulateMedia({ colorScheme: 'light' });
+		const threadId = await createSession(request, THREAD_TITLE);
+		await onlyThread(request, threadId);
+		const doc = await seedTextDocument(page, request, threadId, `fetch-failure-${width}`, 'launch-plan.md', [8, 10]);
+		await stageWorkspace(page, threadId, doc.docPath, 'launch-plan.md', 'artifact');
+		await openThread(page, THREAD_TITLE);
+		await expectChip(page, '2 new replies');
+		const route = `**/api/artifacts/${doc.artifactId}/comments?*`;
+		for (const failure of ['server', 'permission', 'offline'] as const) {
+			await page.route(route, (requestRoute) => failure === 'offline'
+				? requestRoute.abort('internetdisconnected')
+				: requestRoute.fulfill({ status: failure === 'permission' ? 403 : 500, body: 'Unavailable' }));
+			const loadState = await page.evaluate(async (id) => {
+				const { commentLoads, loadComments } = await import('/src/lib/stores/docComments.ts');
+				await loadComments(id).catch(() => undefined);
+				let state: string | undefined;
+				const unsubscribe = commentLoads.subscribe((all) => { state = all[id]?.state; });
+				unsubscribe();
+				return state;
+			}, doc.artifactId);
+			expect(loadState).toBe('error');
+			await expectChip(page, '2 new replies');
+			await shot(page, `fetch-${failure}-light-${width}`);
+			await page.unroute(route);
+			await reloadComments(page, doc.artifactId);
+			await expectChip(page, '2 new replies');
+		}
+	});
+}
+
+for (const width of [1440, 393]) {
 	test(`${TAG} light ${width}px: activity and reply notices stay clear`, async ({ page, request }, testInfo) => {
 		test.setTimeout(90_000);
 		test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires isolated synthetic state');
@@ -337,7 +441,9 @@ for (const width of [1440, 393]) {
 		const reviewerId = await createSession(request, 'Review colleague');
 		await stageWorkspace(page, threadId, doc.docPath, 'launch-plan.md', 'artifact');
 		await openThread(page, THREAD_TITLE);
-		await expectChip(page, '2 new replies');
+		const baseline = process.env.REPLY_ACTIVITY_BASELINE === '1';
+		if (baseline) await expect(chipBox(page)).toHaveCount(0);
+		else await expectChip(page, '2 new replies');
 		// Activity is emitted by the settled tool call, not by the direct comment API.
 		const reviewer = await page.context().newPage();
 		await loginByUrl(reviewer);
@@ -352,11 +458,13 @@ for (const width of [1440, 393]) {
 		await sendButton(reviewer).click();
 		const activity = page.locator('[data-doc-activity-pill]');
 		await expect(activity).toBeVisible();
-		const activityBox = await hitBox(activity.getByRole('button'));
-		const replyBox = await chipHitBox(page);
-		expect(replyBox.height, 'reply target is at least 44px high').toBeGreaterThanOrEqual(44);
-		expect(replyBox.x < activityBox.x + activityBox.width && activityBox.x < replyBox.x + replyBox.width && replyBox.y < activityBox.y + activityBox.height && activityBox.y < replyBox.y + replyBox.height, 'activity stays clear of the reply target').toBe(false);
-		await shot(page, `01e-activity-with-chip-light-${width}`);
+		if (!baseline) {
+			const activityBox = await hitBox(activity.getByRole('button'));
+			const replyBox = await chipHitBox(page);
+			expect(replyBox.height, 'reply target is at least 44px high').toBeGreaterThanOrEqual(44);
+			expect(replyBox.x < activityBox.x + activityBox.width && activityBox.x < replyBox.x + replyBox.width && replyBox.y < activityBox.y + activityBox.height && activityBox.y < replyBox.y + replyBox.height, 'activity stays clear of the reply target').toBe(false);
+		}
+		await shot(page, `${baseline ? 'baseline-activity' : '01e-activity-with-chip'}-light-${width}`);
 		await reviewer.close();
 	});
 }
@@ -402,31 +510,36 @@ for (const width of [1440, 393]) {
 
 for (const width of [1440, 393]) {
 	for (const route of ['Escape', 'scrim'] as const) {
-		test(`${TAG} focus ${width}px ${route}: return to the reply notice`, async ({ page, request }, testInfo) => {
-			test.setTimeout(90_000);
-			test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires isolated synthetic state');
-			skipMismatchedProject(width, testInfo.project.name);
-			await page.setViewportSize({ width, height: width === 393 ? 852 : 900 });
-			const threadId = await createSession(request, THREAD_TITLE);
-			await onlyThread(request, threadId);
-			const doc = await seedTextDocument(page, request, threadId, `focus-${width}-${route}`, 'launch-plan.md', [8, 10]);
-			await stageWorkspace(page, threadId, doc.docPath, 'launch-plan.md', 'artifact');
-			await openThread(page, THREAD_TITLE);
-			await expectChip(page, '2 new replies');
-			await holdDwell(page, true);
-			await chipButton(page).focus();
-			await page.keyboard.press('Enter');
-			const backdrop = page.locator('[data-adaptive-drawer].drawer-backdrop');
-			await expect(backdrop).toBeVisible();
-			if (route === 'Escape') await page.keyboard.press('Escape');
-			else {
-				const box = (await backdrop.boundingBox())!;
-				await page.mouse.click(box.x + 5, box.y + 5);
-			}
-			await expect(backdrop).toHaveCount(0);
-			await expect(chipButton(page)).toBeFocused();
-			await holdDwell(page, false);
-		});
+		for (const reduced of [false, true]) {
+			test(`${TAG} focus ${width}px ${route} ${reduced ? 'reduced' : 'standard'}: return to the reply notice`, async ({ page, request }, testInfo) => {
+				test.setTimeout(90_000);
+				test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires isolated synthetic state');
+				skipMismatchedProject(width, testInfo.project.name);
+				await page.setViewportSize({ width, height: width === 393 ? 852 : 900 });
+				await page.emulateMedia({ reducedMotion: reduced ? 'reduce' : 'no-preference' });
+				const threadId = await createSession(request, THREAD_TITLE);
+				await onlyThread(request, threadId);
+				const doc = await seedTextDocument(page, request, threadId, `focus-${width}-${route}-${reduced}`, 'launch-plan.md', [8, 10]);
+				await stageWorkspace(page, threadId, doc.docPath, 'launch-plan.md', 'artifact');
+				await openThread(page, THREAD_TITLE);
+				await expectChip(page, '2 new replies');
+				await holdDwell(page, true);
+				await chipButton(page).focus();
+				await page.keyboard.press('Enter');
+				const backdrop = page.locator('[data-adaptive-drawer].drawer-backdrop');
+				await expect(backdrop).toBeVisible();
+				await startMotionProbe(page);
+				if (route === 'Escape') await page.keyboard.press('Escape');
+				else {
+					const box = (await backdrop.boundingBox())!;
+					await page.mouse.click(box.x + 5, box.y + 5);
+				}
+				await expect(backdrop).toHaveCount(0);
+				await expect(chipButton(page)).toBeFocused();
+				await saveMotionProbe(page, `close-${route}-${width}-${reduced ? 'reduced' : 'standard'}`);
+				await holdDwell(page, false);
+			});
+		}
 	}
 }
 
@@ -680,20 +793,23 @@ test.describe('reply chip motion evidence', () => {
 				await expect(chipBox(page)).toHaveCount(0);
 				await page.waitForTimeout(600);
 				addAgentReply(doc.artifactId, doc.roots[8], threadId, 'The owner is confirmed.');
+				await startMotionProbe(page);
 				await reloadComments(page, doc.artifactId);
 				await expectChip(page, '1 new reply');
-				await page.waitForTimeout(700);
+				await saveMotionProbe(page, `chip-entry-${width}-${reduced ? 'reduced' : 'standard'}`);
 				await chipButton(page).click();
 				await expect(page.locator(`[data-comment-id="${doc.roots[8]}"]`)).toHaveClass(/focused/);
 				await page.waitForTimeout(2000);
+				await startMotionProbe(page);
 				await page.getByRole('button', { name: 'Close comments' }).click();
 				await expect(chipBox(page)).toHaveCount(0);
-				await page.waitForTimeout(700);
+				await saveMotionProbe(page, `close-button-${width}-${reduced ? 'reduced' : 'standard'}`);
 				// Stimulate a second arrival and a viewed event while the document is visible, so the recording includes the chip's own exit.
 				addAgentReply(doc.artifactId, doc.roots[8], threadId, 'The handover is ready.');
 				await reloadComments(page, doc.artifactId);
 				await expectChip(page, '1 new reply');
 				await page.waitForTimeout(700);
+				await startMotionProbe(page);
 				await page.evaluate(async ({ artifactId, rootId }) => {
 					const { docComments, markThreadViewed } = await import('/src/lib/stores/docComments.ts');
 					let replyId: string | undefined;
@@ -703,7 +819,7 @@ test.describe('reply chip motion evidence', () => {
 					await markThreadViewed(artifactId, rootId, replyId);
 				}, { artifactId: doc.artifactId, rootId: doc.roots[8] });
 				await expect(chipBox(page)).toHaveCount(0);
-				await page.waitForTimeout(700);
+				await saveMotionProbe(page, `chip-exit-${width}-${reduced ? 'reduced' : 'standard'}`);
 			});
 		}
 	}

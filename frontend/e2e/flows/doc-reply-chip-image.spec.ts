@@ -94,10 +94,18 @@ for (const width of [393, 1440]) {
 				expect(target.x < box.x + box.width && box.x < target.x + target.width && target.y < box.y + box.height && box.y < target.y + target.height, 'reply target clears image controls').toBe(false);
 			}
 			const frameDir = process.env.REPLY_CHIP_SCREENSHOT_DIR;
-			if (frameDir) { mkdirSync(frameDir, { recursive: true }); await page.screenshot({ path: path.join(frameDir, `Q1-image-waiting-${theme}-${width}.png`), animations: 'disabled' }); }
+			if (frameDir) {
+				await page.evaluate(async () => {
+					const { coreSettings } = await import('/src/lib/stores/settings.ts');
+					coreSettings.update((current) => ({ ...current, features: { ...current?.features, debug_version_overlay: false } }));
+				});
+				await expect(page.locator('.version-overlay')).toHaveCount(0);
+				mkdirSync(frameDir, { recursive: true });
+				await page.screenshot({ path: path.join(frameDir, `Q1-image-waiting-${theme}-${width}.png`), scale: 'css', animations: 'disabled' });
+			}
 			await reply(roots[0], 'The header is ready.');
 			await expect(chip).toContainText('2 new replies');
-			if (frameDir) await page.screenshot({ path: path.join(frameDir, `Q1-image-arrival-${theme}-${width}.png`), animations: 'disabled' });
+			if (frameDir) await page.screenshot({ path: path.join(frameDir, `Q1-image-arrival-${theme}-${width}.png`), scale: 'css', animations: 'disabled' });
 			await chip.click();
 			await expect(page.getByText('The header is ready.', { exact: true })).toBeVisible();
 			await expect(overlay(page)).toBeVisible();
