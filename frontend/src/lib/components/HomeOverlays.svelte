@@ -69,7 +69,7 @@
 
 	<ConfirmDialog
 		open={!!deleteConfirmId}
-		title="Delete conversation?"
+		title="Delete chat?"
 		description="This will permanently remove all messages. This cannot be undone."
 		confirmLabel="Delete"
 		destructive={true}

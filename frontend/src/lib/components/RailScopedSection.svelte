@@ -175,10 +175,10 @@
 		onpointerup={clearHold}
 		onpointercancel={clearHold}
 		title={conductorThreadId
-			? `${entryLabel} — this scope's main thread`
+			? `${entryLabel} — main chat for this ${$uiScope ? 'project' : 'workspace'}`
 			: conductorKnownAbsent
-				? `No ${entryLabel === 'CORSIA' ? 'CORSIA agent' : 'conductor'} for this scope`
-				: `Open ${entryLabel === 'CORSIA' ? 'CORSIA' : 'conductor'} chat`}
+				? `No main chat for this ${$uiScope ? 'project' : 'workspace'}`
+				: 'Open main chat'}
 	>
 		<button
 			type="button"

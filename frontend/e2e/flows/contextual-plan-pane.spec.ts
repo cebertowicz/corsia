@@ -390,7 +390,7 @@ test.describe("@flow:contextual-plan @surface:chat @surface:plans contextual thr
     if (isCompact) {
       await expect(page.getByRole("button", { name: "Chat" })).toBeVisible();
       await expect(
-        page.getByLabel("Subagent conversation").getByRole("textbox", { name: "Message CORSIA" }),
+        page.getByLabel("Agent chat").getByRole("textbox", { name: "Message CORSIA" }),
       ).toBeVisible();
       await expect(page.getByRole("textbox", { name: "Message CORSIA" })).toHaveCount(1);
       await saveEvidenceScreenshot(
@@ -405,10 +405,10 @@ test.describe("@flow:contextual-plan @surface:chat @surface:plans contextual thr
         page.getByRole("tab", { name: delegatedTitle }),
       ).toBeVisible();
       await expect(
-        page.getByLabel("Subagent conversation").getByRole("textbox", { name: "Message CORSIA" }),
+        page.getByLabel("Agent chat").getByRole("textbox", { name: "Message CORSIA" }),
       ).toBeVisible();
       await expect(
-        page.getByRole("separator", { name: "Resize artifact panel" }),
+        page.getByRole("separator", { name: "Resize Files panel" }),
       ).toBeVisible();
       await saveEvidenceScreenshot(
         page,

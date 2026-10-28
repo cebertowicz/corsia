@@ -303,6 +303,7 @@
 						onOpenImage={openImage}
 						onDocumentPlace={recordDocumentPlace}
 						covered={imageOpen}
+						readStampSuppressed={documentCovered}
 						onLanded={() => { if (threadId && activeTab) consumeTabLanding(threadId, activeTab.instanceId); }}
 					/>
 				</div>

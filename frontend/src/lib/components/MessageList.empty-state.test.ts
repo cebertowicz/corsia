@@ -66,7 +66,7 @@ describe('the empty canvas is a three-way, not a default', () => {
 	it('does not greet while the first page is still loading', () => {
 		renderList({ firstLoadPending: true });
 		expect(greeting()).toBeNull();
-		expect(host.textContent).toContain('Loading this thread');
+		expect(host.textContent).toContain('Loading this chat');
 	});
 
 	it('does not greet after the first page failed, and offers a retry', () => {
@@ -74,9 +74,9 @@ describe('the empty canvas is a three-way, not a default', () => {
 		renderList({ firstLoadFailed: true, onRetryFirstLoad });
 
 		expect(greeting()).toBeNull();
-		expect(host.textContent).toContain("Couldn't load this thread");
+		expect(host.textContent).toContain("Couldn’t load this chat. Try again.");
 
-		const retry = host.querySelector<HTMLButtonElement>('[aria-label="Retry loading this thread"]');
+		const retry = host.querySelector<HTMLButtonElement>('[aria-label="Retry loading this chat"]');
 		expect(retry).not.toBeNull();
 		retry!.click();
 		flushSync();
@@ -85,8 +85,8 @@ describe('the empty canvas is a three-way, not a default', () => {
 
 	it('a failure outranks a load still in flight — the last word wins', () => {
 		renderList({ firstLoadPending: true, firstLoadFailed: true });
-		expect(host.textContent).toContain("Couldn't load this thread");
-		expect(host.textContent).not.toContain('Loading this thread');
+		expect(host.textContent).toContain("Couldn’t load this chat. Try again.");
+		expect(host.textContent).not.toContain('Loading this chat');
 	});
 
 	it('keeps a failed refresh visible above a transcript that already has rows', () => {
@@ -101,7 +101,7 @@ describe('the empty canvas is a three-way, not a default', () => {
 
 		expect(greeting()).toBeNull();
 		expect(host.querySelector('[data-message-id="m1"]')).not.toBeNull();
-		const retry = host.querySelector<HTMLButtonElement>('[aria-label="Retry loading this thread"]');
+		const retry = host.querySelector<HTMLButtonElement>('[aria-label="Retry loading this chat"]');
 		expect(retry).not.toBeNull();
 		retry!.click();
 		flushSync();
