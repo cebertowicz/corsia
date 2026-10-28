@@ -38,10 +38,11 @@ export function unknownStatus(rows: Model[]): Model[] {
 async function loadScoped(scope: string | null, refreshUsage: boolean) {
 	const seq = ++loadSeq;
 	let rows: Model[];
+	const accountId = scope ? null : get(draftAccountId);
 	try {
-		rows = await readCatalog(scope, refreshUsage, scope ? null : get(draftAccountId));
+		rows = await readCatalog(scope, refreshUsage, accountId);
 	} catch (err) {
-		if (seq !== loadSeq) return;
+		if ((!scope && !accountId) || seq !== loadSeq) return;
 		console.warn('[models] thread catalog read failed; its statuses are unknown', err);
 		loadedScope = scope;
 		models.update(unknownStatus);
@@ -119,9 +120,7 @@ draftAccountId.subscribe(() => {
 });
 
 // Opening another thread re-reads the catalog on that thread's account.
-let scopeInitialized = false;
 activeThreadId.subscribe(() => {
-	if (!scopeInitialized) { scopeInitialized = true; return; }
 	const scope = catalogScope();
-	if (scope !== loadedScope) void loadScoped(scope, false);
+	if (loadedScope !== undefined && scope !== loadedScope) void loadScoped(scope, false);
 });

@@ -6,7 +6,6 @@
 	import { toasts } from '$lib/stores/toast';
 	import { activeModelId, loadModels, getLastChosenModelId } from '$lib/stores/models';
 	import { models } from '$lib/stores/modelsState';
-	import { vendorAccounts } from '$lib/stores/vendorAccounts';
 	import { loadThreads } from '$lib/stores/threadsLoad';
 	import { loadSettings, loadUpdateStatus } from '$lib/stores/settings';
 	import { connect, on, subscribeThread } from '$lib/ws';
@@ -180,6 +179,7 @@
 
 	async function attachThreadToProject(id: string, projectId: string | null, projectName?: string | null) {
 		try {
+			if (!$token) throw new Error('Not signed in');
 			await saveThreadProject(id, projectId, $token);
 			toasts.show(projectId ? `Moved to ${projectName ?? 'project'}` : 'Removed from project', 'success');
 			// The active conversation's scope follows its project assignment.
@@ -309,7 +309,7 @@
 		activeView = 'chat';
 		const pendingEffort = get(reasoningEffort);
 		const inheritModel = $activeModelId ?? getLastChosenModelId();
-		const accountId = draftAccountForModel(get(draftAccountId), inheritModel, get(models), get(vendorAccounts));
+		const accountId = draftAccountForModel(get(draftAccountId), inheritModel, get(models));
 		const body = buildNewThreadBody({ projectId, reasoningEffort: pendingEffort, modelId: inheritModel, accountId });
 		const res = await fetch(`/api/threads?token=${t}`, {
 			method: 'POST',

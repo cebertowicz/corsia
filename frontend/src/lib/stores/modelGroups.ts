@@ -24,7 +24,7 @@ export interface ModelGroup {
 export function canonicalName(model: Model): string {
 	return model.display_name ?? model.name;
 }
-export function groupKey(model: Model): string {
+function groupKey(model: Model): string {
 	const connection = model.connection ?? model.provider ?? model.backend;
 	return model.backend === 'network' && model.server_name ? `${connection}:${model.server_name}` : connection;
 }

@@ -20,6 +20,14 @@ describe('draft account selection', () => {
 		expect(fetcher.mock.calls.some(([url]) => url.includes('account_id=chosen'))).toBe(true);
 		expect(get(models)[0].runs_on?.[0].account_id).toBe('chosen');
 	});
+	it('preserves the workspace catalog when an unscoped read fails without a choice', async () => {
+		activeThreadId.set(null);
+		const rows = [{ id: 'codex/test', status: 'ready' }] as Parameters<typeof models.set>[0];
+		models.set(rows);
+		vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
+		await loadModels();
+		expect(get(models)).toEqual(rows);
+	});
 	it('clears the choice when the chat surface is entered or left', () => {
 		draftAccountId.set('chosen');
 		activeThreadId.set('thread');

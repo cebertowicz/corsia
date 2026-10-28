@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { buildNewThreadBody, createAccountRefusal, draftAccountForModel } from './threadCreate';
 import { PIN_FAILED, TURN_RUNNING } from './stores/threadAccountPin';
-import type { VendorAccount } from './stores/vendorAccounts';
 import type { Model } from './stores/models';
 
 describe('session creation helpers', () => {
@@ -10,10 +9,9 @@ describe('session creation helpers', () => {
 		expect(buildNewThreadBody({ modelId: 'codex/model' })).toEqual({ title: 'New Chat', model: 'codex/model' });
 	});
 	it('sends the choice matching the current model vendor after a model change', () => {
-		const models = [{ id: 'codex/model', connection: 'codex' }] as Model[];
-		const accounts = [{ id: 'chosen', provider: 'codex' }, { id: 'other', provider: 'claude-code' }] as VendorAccount[];
-		expect(draftAccountForModel('chosen', 'codex/model', models, accounts)).toBe('chosen');
-		expect(draftAccountForModel('other', 'codex/model', models, accounts)).toBeNull();
+		const models = [{ id: 'codex/model', runs_on: [{ account_id: 'chosen', selected: true }, { account_id: 'other', selected: false }] }] as Model[];
+		expect(draftAccountForModel('chosen', 'codex/model', models)).toBe('chosen');
+		expect(draftAccountForModel('other', 'codex/model', models)).toBeNull();
 	});
 
 	it('maps account refusals using existing pin copy', () => {

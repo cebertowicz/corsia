@@ -1,4 +1,4 @@
-import { writable, derived } from 'svelte/store';
+import { writable, derived, get } from 'svelte/store';
 import { turnStates, type ThreadTurnState, type TurnIdentity } from '../ws/turnState';
 import type { ThreadModelSwitchState } from './threadModelSwitch';
 export interface Thread extends ThreadModelSwitchState {
@@ -121,8 +121,11 @@ const activeThreadIdStore = writable<string | null>(null);
 export const activeThreadId = {
 	subscribe: activeThreadIdStore.subscribe,
 	set(id: string | null) {
-		draftAccountId.set(null);
 		activeThreadIdStore.set(id);
+		draftAccountId.set(null);
+	},
+	update(fn: (id: string | null) => string | null) {
+		this.set(fn(get(activeThreadIdStore)));
 	},
 };
 export const messages = writable<Message[]>([]);

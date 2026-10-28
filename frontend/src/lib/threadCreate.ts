@@ -1,14 +1,12 @@
 import type { Thread } from '$lib/stores/threads';
 import { modelMatchesId, type Model } from '$lib/stores/models';
-import { ACCOUNT_LIMITED, ACCOUNT_SIGNED_OUT, groupKey } from '$lib/stores/modelGroups';
-import type { VendorAccount } from '$lib/stores/vendorAccounts';
+import { ACCOUNT_LIMITED, ACCOUNT_SIGNED_OUT } from '$lib/stores/modelGroups';
 import { accountRefusalMessage, reasonOf } from '$lib/stores/threadAccountPin';
 import { ACCOUNT_PROJECT_DENIED } from '$lib/messageDeliveryCopy';
 
-export function draftAccountForModel(accountId: string | null, modelId: string | null, models: Model[], accounts: VendorAccount[]): string | null {
+export function draftAccountForModel(accountId: string | null, modelId: string | null, models: Model[]): string | null {
 	const model = models.find((row) => modelMatchesId(row, modelId));
-	const account = accounts.find((row) => row.id === accountId);
-	return model && account && groupKey(model) === account.provider ? account.id : null;
+	return accountId && model?.runs_on?.some((entry) => entry.selected && entry.account_id === accountId) ? accountId : null;
 }
 
 export function createAccountRefusal(status: number, detail: unknown, clearChoice: () => void): string | null {
