@@ -12,12 +12,9 @@ import asyncio
 from infra.database import get_db
 from infra.thread_confinement import ConfinementRecordDamaged, read_dirs
 from subagents.cc_confinement import ConfinementRefused
+from subagents.codex_versions import CAPTURED_CODEX_VERSIONS, captured_versions
 from tools.confined_reads import UNTRUSTED_READ_TOOLS
 
-# CI captures each admitted version on cold start and process resume.
-CAPTURED_CODEX_VERSIONS = frozenset({
-    "codex-cli 0.162.1", "codex-cli 0.163.0", "codex-cli 0.164.0", "codex-cli 0.165.0",
-})
 # Each listed version passed the full-array capture on start and resume.
 # CONFIG keys appear in core/config.schema.json for every listed version;
 # tools/spec_plan.rs and the capture cover tool planning and observed requests.
@@ -111,10 +108,7 @@ async def verify_version(binary: str | None = None) -> None:
         raise
     version = output.decode(errors="replace").strip()
     if process.returncode != 0 or version not in CAPTURED_CODEX_VERSIONS:
-        versions = sorted(
-            (value.removeprefix("codex-cli ") for value in CAPTURED_CODEX_VERSIONS),
-            key=lambda value: tuple(int(part) for part in value.split(".")),
-        )
+        versions = captured_versions()
         supported = ", ".join(versions[:-1]) + " and " + versions[-1] if len(versions) > 1 else versions[0]
         raise ConfinementRefused(
             f"Couldn’t start this read-only agent on Codex {version.removeprefix('codex-cli ') or '(version unknown)'}: "
