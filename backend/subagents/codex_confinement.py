@@ -18,6 +18,8 @@ CAPTURED_CODEX_VERSION = "codex-cli 0.162.1"
 # Verified against rust-v0.162.1 core/config.schema.json and tools/spec_plan.rs.
 # Environment tools independently enable apply_patch, even with shell disabled.
 CONFIG = (
+    # Prevent plugin startup sync's hard-coded GitHub/ChatGPT requests too.
+    "features.plugins=false",
     "features.stable_environment_tools=false",
     "features.view_image=false",
     "features.deferred_executor=false",

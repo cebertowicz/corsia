@@ -1,17 +1,19 @@
 """Capture the FULL model tools array, including hosted tools, on the pinned CLI.
 
-No subscription, API key, network provider, or production state is used. CI may
+No subscription, API key, external service, or production state is used. CI may
 lack the optional Codex binary; a release claiming this version must run this
 capture on its supported binary. See codex_confinement.CAPTURED_CODEX_VERSION.
 """
 from __future__ import annotations
 
+import base64
 import json
 import shutil
+from datetime import datetime, timezone
 
 import pytest
 
-from codex_confined_capture import AppServerClient, CaptureEndpoint
+from codex_confined_capture import AppServerClient, CaptureEndpoint, loopback_tls
 from subagents import codex_confinement as confinement
 from subagents.codex_app_server import CodexAppServerSession
 from subagents.codex_app_server_events import to_dynamic_tool_specs
@@ -32,11 +34,23 @@ def model_catalog():
     }]}
 
 
+def synthetic_id_token():
+    claims = {"https://api.openai.com/auth": {
+        "chatgpt_account_id": "synthetic-account", "chatgpt_plan_type": "pro",
+    }}
+    payload = base64.urlsafe_b64encode(json.dumps(claims).encode()).decode().rstrip("=")
+    return f"e30.{payload}.synthetic"
+
+
 def seed_home(tmp_path):
     source = tmp_path / "person-codex"
     source.mkdir()
     (source / "auth.json").write_text(json.dumps({
-        "auth_mode": "chatgpt", "tokens": {"access_token": "synthetic-test-only"},
+        "auth_mode": "chatgpt", "last_refresh": datetime.now(timezone.utc).isoformat(),
+        "tokens": {
+            "id_token": synthetic_id_token(), "access_token": "synthetic-test-only",
+            "refresh_token": "synthetic-refresh-only", "account_id": "synthetic-account",
+        },
     }))
     (source / "models_cache.json").write_text(json.dumps(model_catalog()))
     (source / "config.toml").write_text(
@@ -60,6 +74,7 @@ def definitions():
 async def test_pinned_binary_full_tools_cold_start_and_process_resume(tmp_path, monkeypatch):
     from infra import config
 
+    monkeypatch.delenv("CODEX_ACCESS_TOKEN", raising=False)
     binary = shutil.which("codex")
     await confinement.verify_version(binary)
     monkeypatch.setattr(config, "RUNTIME_DIR", tmp_path / "runtime")
@@ -73,7 +88,19 @@ async def test_pinned_binary_full_tools_cold_start_and_process_resume(tmp_path, 
     monkeypatch.setattr(confinement, "thread_context", lambda *_args, **_kw: context)
     home = tmp_path / "isolated-codex"
 
-    with CaptureEndpoint() as endpoint:
+    tls, certificate = loopback_tls(tmp_path)
+    with CaptureEndpoint(tls) as endpoint:
+        # login/src/auth/manager.rs:1727-1730,3001-3022: this non-JWT
+        # access token with recent last_refresh does not proactively refresh. Trap
+        # refresh/revoke and all other HTTP traffic locally regardless.
+        for key, value in {
+            "CODEX_CA_CERTIFICATE": str(certificate),
+            "CODEX_REFRESH_TOKEN_URL_OVERRIDE": endpoint.url + "/oauth/token",
+            "CODEX_REVOKE_TOKEN_URL_OVERRIDE": endpoint.url + "/oauth/revoke",
+            "HTTP_PROXY": endpoint.url, "HTTPS_PROXY": endpoint.url, "ALL_PROXY": endpoint.url,
+            "NO_PROXY": "127.0.0.1,localhost",
+        }.items():
+            monkeypatch.setenv(key, value)
         def session(provider_id=None):
             result = CodexAppServerSession(
                 binary=binary, task="review", working_dir=str(staging), model="confined-capture",
@@ -92,6 +119,8 @@ async def test_pinned_binary_full_tools_cold_start_and_process_resume(tmp_path, 
         async with AppServerClient(cold) as client:
             effective_config = await client.rpc("config/read", {"includeLayers": False})
             assert "hostile" not in json.dumps(effective_config)
+            account = await client.rpc("account/read", {"refreshToken": False})
+            assert account["account"]["type"] == "chatgpt"
             started = await client.rpc("thread/start", {
                 **params, "environments": [], "dynamicTools": to_dynamic_tool_specs(definitions()),
             })
@@ -103,7 +132,9 @@ async def test_pinned_binary_full_tools_cold_start_and_process_resume(tmp_path, 
             await client.rpc("thread/resume", {**params, "threadId": provider_id, "excludeTurns": True})
             await client.complete_turn(provider_id)
 
-    assert len(endpoint.requests) == 2
+    assert endpoint.unexpected == []  # Includes auth URLs and external proxy attempts.
+    assert endpoint.chatgpt_requests == len(endpoint.requests) == 2
+    assert endpoint.account_checks >= 2  # Real ChatGPT workspace routing, once per process.
     for request in endpoint.requests:
         confinement.assert_tools(request["tools"])
         # Equality of the full array also catches hosted web_search/image tools.
@@ -118,5 +149,8 @@ async def test_pinned_binary_full_tools_cold_start_and_process_resume(tmp_path, 
                        "synthetic-test-only"):
             assert marker not in captured
     assert (home / "config.toml").read_text() == ""
+    print("built-in openai, ChatGPT auth; unexpected/auth/proxy requests: []")
+    print("loopback workspace checks:", endpoint.account_checks,
+          "; optional local services:", sorted(set(endpoint.local_services)))
     print("codex-cli 0.162.1 cold and process-resume full tools: " +
           json.dumps(endpoint.requests[0]["tools"], sort_keys=True))
