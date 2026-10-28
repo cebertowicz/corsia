@@ -215,7 +215,10 @@ def _prepare(row: Mapping[str, Any], run_input: Mapping[str, Any]) -> dict[str, 
                                   "read that declares a valid result")
     facts = (run_input.get("event") or {}).get("facts") or {}
     root = inputs.owner_root(owner["id"], project, db)
+    from llm.resolution import resolve_execution_target
+
     return {"owner": owner, "model": owner.get("model"),
+            "harness": resolve_execution_target(model, db=db).harness,
             "skill": skill, "schema": schema, "root": root, "facts": facts,
             "workflow": f"{skill.name}@{_workflow_version(skill) or 'unversioned'}",
             "staging": inputs.staging_dir(root, facts.get(inputs.STAGING_FACT)),
@@ -243,6 +246,14 @@ async def _start(row: Mapping[str, Any], run_input: dict[str, Any]) -> int:
     waited = row["id"] <= _state["waited"]
     try:
         found = await run_in_db(_prepare, row, run_input)
+        if found["harness"] == "codex":
+            from subagents.cc_confinement import ConfinementRefused
+            from subagents.codex_confinement import verify_version
+
+            try:
+                await verify_version()
+            except ConfinementRefused as exc:
+                raise inputs.StartRefused(str(exc)) from exc
         read_paths, task = await asyncio.to_thread(_write, found, row["id"], run_input)
         check = json.dumps({"workflow": found["workflow"], "schema": found["schema"],
                             "trace": run_input.get("trace") or [], "waited": waited,

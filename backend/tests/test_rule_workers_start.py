@@ -179,28 +179,71 @@ async def test_a_paused_owner_skips_and_a_request_after_resume_starts(world, mon
 
 # 12 -- a Local only owner's start runs local or is refused: test_rule_workers_local_only.
 
+def _select_codex_owner():
+    from infra.database import get_db, write_transaction
+
+    other = get_db().execute("SELECT id FROM models WHERE harness='codex' AND available=1 ORDER BY id LIMIT 1").fetchone()
+    with write_transaction(None, scope="rule_worker_model") as db:
+        db.execute("UPDATE threads SET model=? WHERE id=?", (other[0], OWNER))
+    return other[0]
+
+
 # Codex owners pass the same preparation contract; launch enforces confinement.
 @pytest.mark.asyncio
 async def test_codex_owner_prepares_a_confined_worker(world):
     from automation import worker_runner
-    from infra.database import get_db, write_transaction
     from infra.db_async import run_in_db
 
     def prepare():
-        other = get_db().execute("SELECT id FROM models WHERE harness='codex' AND available=1 "
-                                 "ORDER BY id LIMIT 1").fetchone()
-        with write_transaction(None, scope="rule_worker_model") as db:
-            db.execute("UPDATE threads SET model=? WHERE id=?", (other[0], OWNER))
+        model = _select_codex_owner()
         found = worker_runner._prepare(
             {"thread_id": OWNER, "workflow_id": "worker-flow"},
             {"event": {"facts": {"staging_path": "req"}}},
         )
-        assert found["model"] == other[0]
+        assert found["model"] == model
         assert found["staging"] == str(world["staging"].resolve())
         assert found["schema"]
 
     await run_in_db(prepare)
     assert _workers() == []
+
+
+@pytest.mark.asyncio
+async def test_unverified_codex_owner_is_told_before_a_worker_exists(world, monkeypatch):
+    from automation import worker_runner
+    from infra.db_async import run_in_db
+    from subagents import codex_confinement
+    from subagents.cc_confinement import ConfinementRefused
+    from unittest.mock import AsyncMock
+
+    await run_in_db(_select_codex_owner)
+    monkeypatch.setattr(codex_confinement, "verify_version", AsyncMock(side_effect=ConfinementRefused("version refused")))
+    rule = await make_rule()
+    await request()
+    assert await worker_runner.drive() == 0
+    assert starts(rule)[0][0] == "refused"
+    assert _workers() == []
+    assert "version refused" in owner_wakes()[0]
+
+
+@pytest.mark.asyncio
+async def test_verified_codex_owner_reaches_spawn(world, monkeypatch):
+    from infra.db_async import run_in_db
+    from subagents import codex_confinement
+    from tools import delegate_task
+    from unittest.mock import AsyncMock
+
+    await run_in_db(_select_codex_owner)
+    probe = AsyncMock()
+    spawn = AsyncMock(return_value={"thread_id": "worker"})
+    monkeypatch.setattr(codex_confinement, "verify_version", probe)
+    monkeypatch.setattr(delegate_task, "_spawn", spawn)
+    rule = await make_rule()
+    await request()
+    from automation import worker_runner
+    assert await worker_runner.drive() == 1
+    probe.assert_awaited_once()
+    assert spawn.await_args.args[3]["confinement"] == "review"
 
 
 # 13 -- worker.* is CORSIA's alone: an agent's emit and a script or CLI line are refused.

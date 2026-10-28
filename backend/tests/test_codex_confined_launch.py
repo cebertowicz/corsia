@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -23,7 +24,7 @@ from test_codex_confined_capture import definitions
     {"type": "function", "name": "clock"},
 ])
 def test_full_surface_refuses_any_extra_native_or_hosted_tool(extra):
-    with pytest.raises(ConfinementRefused, match="update CORSIA"):
+    with pytest.raises(ConfinementRefused, match="Choose another model"):
         confinement.assert_tools([*definitions(), extra])
 
 
@@ -35,13 +36,11 @@ async def test_unknown_version_refuses_before_worker_or_auth_access(tmp_path, mo
     binary.chmod(0o700)
     from infra import config
     monkeypatch.setattr(config, "RUNTIME_DIR", tmp_path / "runtime")
-    monkeypatch.setattr(confinement, "thread_context", lambda *_args: {
-        "confinement": "review", "confined_read_dirs": '["/review"]',
-    })
+    monkeypatch.setattr(confinement, "confined_dirs", lambda *_args: ("/review",))
     session = CodexAppServerSession(binary=str(binary), task="review", corsia_thread_id="worker",
                                     dynamic_tools=definitions())
     monkeypatch.setattr(session, "build_env", lambda: pytest.fail("auth must not be projected"))
-    with pytest.raises(ConfinementRefused, match="update CORSIA"):
+    with pytest.raises(ConfinementRefused, match="choose another model"):
         await session.start()
     assert session._proc is None
 
@@ -67,7 +66,7 @@ def test_live_handle_cannot_restore_an_unconfined_surface():
     from subagents.codex_destination_render import _tool_surface
     from subagents.codex_runtime_errors import CodexPreparedContextStale
 
-    context = {"confinement": "review", "confined_read_dirs": '["/review"]'}
+    context = True
     session = SimpleNamespace(tool_registry=object(), dynamic_tools=definitions(), confined=False)
     with pytest.raises(CodexPreparedContextStale, match="confined live handle"):
         _tool_surface("/empty", session, context)
@@ -78,21 +77,40 @@ def test_live_handle_cannot_restore_an_unconfined_surface():
 
 
 @pytest.mark.asyncio
-async def test_confined_fork_refuses_before_admission(monkeypatch):
+async def test_confined_fork_refuses_and_cleans_its_home(isolated_db, tmp_path, monkeypatch):
+    from dataclasses import replace
+    from connections.account_runtime import LaunchHomes
     from core import fork_codex
+    from core.checkpoint_fork_kind import CHECKPOINT_KIND
+    from core.fork_fit import ColdFoldInput
     from core.fork_types import ProviderForkRejected
+    from test_checkpoint_provider_adapters import _request, _target
+    from test_confined_reads import _seed_thread
 
-    monkeypatch.setattr(confinement, "thread_context", lambda *_args: {"confinement": "review"})
-    monkeypatch.setattr(fork_codex, "admit_fork", lambda *_args: pytest.fail("fork must not admit"))
-    request = SimpleNamespace(thread_id="worker", target=SimpleNamespace(harness="codex"))
-    with pytest.raises(ProviderForkRejected, match="cannot fork"):
-        await fork_codex.invoke_fork(request, asyncio.Event(), kind=SimpleNamespace(name="review"))
+    _seed_thread(isolated_db, "thread-1", tmp_path)
+    request = replace(_request(None), target=_target("codex"), binary="unused",
+                      working_dir=str(tmp_path), vendor_launch=LaunchHomes(None, False, warm_home=str(tmp_path)))
+    monkeypatch.setattr(fork_codex, "admit_fork", lambda value: value)
+    monkeypatch.setattr(fork_codex, "_fit_cold_request", lambda value, *a, **k: (value, ColdFoldInput((), 1, None, 0)))
+    monkeypatch.setattr(fork_codex, "_fork_tools", lambda *a, **k: (object(), ()))
+    monkeypatch.setattr(fork_codex, "bind_fork_session", lambda _request, session, **kw: session)
+    original = confinement.prepare_launch
+    homes = []
+    def check_launch(session):
+        homes.append(session.codex_home)
+        assert Path(session.codex_home).is_dir()
+        return original(session)
+    monkeypatch.setattr(confinement, "prepare_launch", check_launch)
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", AsyncMock(side_effect=AssertionError("process spawned")))
+    with pytest.raises(ProviderForkRejected, match="can’t fork"):
+        await fork_codex.invoke_fork(request, asyncio.Event(), kind=CHECKPOINT_KIND)
+    assert len(homes) == 1 and not Path(homes[0]).exists()
 
 
-@pytest.mark.parametrize("attribute,value", [("control_only", True), ("fork_id", "fork"),
+@pytest.mark.parametrize("attribute,value", [("control_only", True),
                                              ("sandbox_mode", "workspace-write"), ("approval_policy", "on-request")])
 def test_confined_launch_refuses_control_fork_and_weakened_policy(tmp_path, monkeypatch, attribute, value):
-    monkeypatch.setattr(confinement, "thread_context", lambda *_args: {"confinement": "review"})
+    monkeypatch.setattr(confinement, "confined_dirs", lambda *_args: ("/review",))
     session = CodexAppServerSession(binary="fake", task="review", dynamic_tools=definitions())
     setattr(session, attribute, value)
     with pytest.raises(ConfinementRefused):

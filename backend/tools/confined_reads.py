@@ -100,9 +100,11 @@ def advertised_definitions(registry: Any, thread_context: Mapping[str, Any] | No
         roots = context_roots(thread_context or {})
     except ConfinementRecordDamaged:
         return ()
-    if roots is None:
-        return definitions
-    return tuple(d for d in definitions if d["function"]["name"] in REVIEW_READ_TOOLS)
+    return project_definitions(definitions, roots is not None)
+
+
+def project_definitions(definitions: tuple[dict, ...], confined: bool) -> tuple[dict, ...]:
+    return tuple(d for d in definitions if d["function"]["name"] in REVIEW_READ_TOOLS) if confined else definitions
 
 
 async def advertised(registry: Any, thread_context: Mapping[str, Any] | None) -> tuple[dict, ...]:

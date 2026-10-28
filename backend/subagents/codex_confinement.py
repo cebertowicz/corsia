@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 
 from infra.database import get_db
-from infra.thread_confinement import ConfinementRecordDamaged, parse
+from infra.thread_confinement import ConfinementRecordDamaged, read_dirs
 from subagents.cc_confinement import ConfinementRefused
 from tools.confined_reads import REVIEW_READ_TOOLS
 
@@ -31,26 +31,17 @@ CONFIG = (
 )
 
 
-def thread_context(thread_id: str | None, *, db=None) -> dict:
-    """Load and validate the canonical launch restriction, never a session copy."""
+def confined_dirs(thread_id: str | None):
     if not thread_id:
-        return {}
-    connection = db or get_db()
+        return None
+    db = get_db()
     try:
-        row = connection.execute(
-            "SELECT confinement,confined_read_dirs FROM threads WHERE id=?", (thread_id,),
-        ).fetchone()
-        if row is None:
-            raise ConfinementRefused("Codex destination thread no longer exists; no worker was launched.")
-        context = dict(row)
         try:
-            parse(context.get("confinement"), context.get("confined_read_dirs"))
+            return read_dirs(thread_id, db)
         except ConfinementRecordDamaged as exc:
             raise ConfinementRefused(str(exc)) from exc
-        return context
     finally:
-        if db is None:
-            connection.close()
+        db.close()
 
 
 def neutral_working_dir(thread_id: str) -> str:
@@ -70,31 +61,39 @@ def assert_tools(definitions) -> None:
         tool = definition.get("function", definition)
         if definition.get("type") != "function" or tool.get("name") not in REVIEW_READ_TOOLS:
             raise ConfinementRefused(
-                "Confined Codex tool surface contains a native or unapproved tool; update CORSIA."
+                "Couldn’t start this read-only agent on Codex: CORSIA supplied an unsafe tool. Choose another model."
             )
         names.append(tool["name"])
     if len(names) != len(REVIEW_READ_TOOLS) or set(names) != REVIEW_READ_TOOLS:
         raise ConfinementRefused(
-            "Confined Codex requires exactly read_file, grep, glob and list_dir; update CORSIA."
+            "Couldn’t start this read-only agent on Codex: CORSIA supplied the wrong tools. Choose another model."
         )
 
 
 def prepare_launch(session) -> None:
     """Bind persisted confinement to every ordinary or alternate launch path."""
-    context = thread_context(session.corsia_thread_id)
-    session.confined = context.get("confinement") is not None
+    session.confined = confined_dirs(session.corsia_thread_id) is not None
     if not session.confined:
         return
-    if session.control_only or session.fork_id is not None:
-        raise ConfinementRefused("A confined Codex worker cannot run a control session or fork.")
+    if session.fork_id is not None:
+        from core.fork_types import ProviderForkRejected
+
+        raise ProviderForkRejected("Couldn’t start this read-only agent on Codex: it can’t fork. Choose another model.")
+    if session.control_only:
+        raise ConfinementRefused("Couldn’t start this read-only agent on Codex: CORSIA can’t run this request. Choose another model.")
     if session.sandbox_mode != "read-only" or session.approval_policy != "never":
-        raise ConfinementRefused("Confined Codex requires read-only sandbox and never approvals.")
+        raise ConfinementRefused("Couldn’t start this read-only agent on Codex: CORSIA couldn’t keep it read-only. Choose another model.")
     assert_tools(session.dynamic_tools)
     session.working_dir = neutral_working_dir(session.corsia_thread_id)
 
 
-async def verify_version(binary: str) -> None:
+async def verify_version(binary: str | None = None) -> None:
     """Admit only the binary version whose complete model request was captured."""
+    if binary is None:
+        from infra.db_async import run_in_db
+        from subagents.codex_runtime_config import codex_binary, codex_connection
+
+        binary = await run_in_db(lambda: codex_binary(codex_connection()))
     process = await asyncio.create_subprocess_exec(
         binary, "--version", stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
     )
@@ -108,12 +107,13 @@ async def verify_version(binary: str) -> None:
     version = output.decode(errors="replace").strip()
     if process.returncode != 0 or version != CAPTURED_CODEX_VERSION:
         raise ConfinementRefused(
-            f"Confined Codex is verified only on {CAPTURED_CODEX_VERSION}; "
-            "update CORSIA for this Codex version. No worker was launched."
+            f"Couldn’t start this read-only agent on {version or 'Codex (version unknown)'}: "
+            "read-only agents run only on Codex 0.162.1 for now. "
+            "Switch Codex to 0.162.1, or choose another model."
         )
 
 
-def tool_surface(working_dir: str, session, thread_context=None):
+def tool_surface(working_dir: str, session, confined: bool = False):
     """Freeze the shared read projection, or validate the existing live handle."""
     from subagents.codex_runtime_errors import CodexPreparedContextStale
 
@@ -124,7 +124,7 @@ def tool_surface(working_dir: str, session, thread_context=None):
                 "Codex app-server handle has no frozen CORSIA tool registry"
             )
         tools = tuple(getattr(session, "dynamic_tools", ()) or ())
-        if (thread_context or {}).get("confinement") is not None:
+        if confined:
             assert_tools(tools)
             if not getattr(session, "confined", False):
                 raise CodexPreparedContextStale("Confined Codex requires a confined live handle")
@@ -132,7 +132,7 @@ def tool_surface(working_dir: str, session, thread_context=None):
     from subagents.harness_tool_bridge import build_tool_registry, dynamic_tool_definitions
 
     registry = build_tool_registry(working_dir)
-    return registry, dynamic_tool_definitions(registry, thread_context)
+    return registry, dynamic_tool_definitions(registry, confined)
 
 
 def config_args() -> list[str]:

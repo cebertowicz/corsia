@@ -191,6 +191,17 @@ async def _spawn(
             model_id=model, account_id=kwargs.get("account_id"),
             confinement=confinement, read_paths=read_paths, rule_start=rule_start,
         )
+    if confinement == CONFINEMENT_REVIEW and rule_start is None:
+        from llm.resolution import resolve_execution_target
+        from subagents.cc_confinement import ConfinementRefused
+        from subagents.codex_confinement import verify_version
+
+        target = await run_in_db(resolve_execution_target, model)
+        if target.harness == "codex":
+            try:
+                await verify_version()
+            except ConfinementRefused as exc:
+                return f"Error: {exc}"
     # Eligibility above is the sole catalog gate for all delegation paths.
     return await _spawn_native_child(parent_thread_id, parent, task, kwargs, model,
                                      confinement, read_paths, rule_start)
@@ -201,7 +212,7 @@ async def _spawn_native_child(
     model: str, confinement: str, read_paths: list[str], rule_start: RuleStart | None,
 ) -> dict[str, Any] | str:
     """Start a native or local worker (``review`` confined to its read paths when asked)."""
-    confined_dirs = await _native_read_dirs(parent_thread_id, model, confinement, read_paths)
+    confined_dirs = await _native_read_dirs(parent_thread_id, confinement, read_paths)
     if isinstance(confined_dirs, str):
         return confined_dirs
     child_title = kwargs.get("title") or task[:60] or "Subagent"
@@ -246,7 +257,7 @@ async def _spawn_native_child(
 
 
 async def _native_read_dirs(
-    parent_thread_id: str, model: str, confinement: str, read_paths: list[str],
+    parent_thread_id: str, confinement: str, read_paths: list[str],
 ) -> tuple[str, ...] | str:
     """A confined worker's read dirs, checked as the parent's own reads.
 

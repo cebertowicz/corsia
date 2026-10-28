@@ -36,7 +36,7 @@ def test_cold_launch_uses_row_when_session_disagrees(child_db, monkeypatch):
     assert (result.mode, result.add_dirs) == ("review", ("/row",))
     row = dict(child_db.execute("SELECT * FROM threads WHERE id='child'").fetchone())
     assert tuple(map(str, context_roots(row))) == ("/row",)
-    _, cwd = codex_destination_scope(
+    _, cwd, _ = codex_destination_scope(
         "child", target_catalog_id="codex/test", expected_selected_model=row["model"], db=child_db,
     )
     assert cwd.endswith("codex-confined-cwd/child")

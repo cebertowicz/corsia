@@ -54,12 +54,13 @@ def build_tool_registry(working_dir: str | None = None) -> ToolRegistry:
 
 
 def dynamic_tool_definitions(
-    registry: ToolRegistry, thread_context: dict | None = None,
+    registry: ToolRegistry, confined: bool = False,
 ) -> tuple[dict[str, Any], ...]:
     """Return the shared confinement-aware provider-facing tool projection."""
-    from tools.confined_reads import advertised_definitions
+    from tools.catalog import advertised_tool_definitions
+    from tools.confined_reads import project_definitions
 
-    return advertised_definitions(registry, thread_context)
+    return project_definitions(advertised_tool_definitions(registry), confined)
 
 
 def write_cc_mcp_config(

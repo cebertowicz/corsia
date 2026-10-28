@@ -92,7 +92,9 @@ async def test_a_local_review_refuses_a_read_its_parent_lacks(child_db, native_s
 
 
 @pytest.mark.asyncio
-async def test_codex_review_records_confinement_before_first_input(child_db, native_spawn, reviewed_dir):
+async def test_codex_review_records_confinement_before_first_input(child_db, native_spawn, reviewed_dir, monkeypatch):
+    from subagents import codex_confinement
+    monkeypatch.setattr(codex_confinement, "verify_version", AsyncMock())
     _seed_parent(child_db)
     receipt = await native_spawn.spawn(
         "parent", {"user_id": "steve"}, "review",
@@ -101,6 +103,22 @@ async def test_codex_review_records_confinement_before_first_input(child_db, nat
     assert thread_confinement.read_dirs(receipt["thread_id"], child_db) == (reviewed_dir,)
     assert thread_confinement.read_dirs("parent", child_db) is None
     assert native_spawn.lineage == []
+
+
+@pytest.mark.asyncio
+async def test_unverified_codex_refuses_before_creating_a_child(child_db, native_spawn, reviewed_dir, monkeypatch):
+    from subagents import codex_confinement
+    from subagents.cc_confinement import ConfinementRefused
+
+    _seed_parent(child_db)
+    monkeypatch.setattr(codex_confinement, "verify_version", AsyncMock(side_effect=ConfinementRefused("version refused")))
+    result = await native_spawn.spawn(
+        "parent", {"user_id": "steve"}, "review",
+        {"model": "codex/gpt-5-codex", "confinement": "review", "read_paths": [reviewed_dir]},
+    )
+    assert "version refused" in result
+    assert child_db.execute("SELECT COUNT(*) FROM threads").fetchone()[0] == 1
+    native_spawn.sent.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -122,11 +140,11 @@ async def test_a_confined_worker_switched_to_another_harness_stays_confined(
     assert claude.working_dir.endswith(f"{worker}/confined") and Path(claude.working_dir).is_dir()
 
     child_db.execute("UPDATE threads SET model='codex/gpt-5-codex' WHERE id=?", (worker,))
-    project, cwd = codex_destination_scope(worker, target_catalog_id="codex/gpt-5-codex", db=child_db)
+    project, cwd, confined = codex_destination_scope(worker, target_catalog_id="codex/gpt-5-codex", db=child_db)
+    assert confined
     assert cwd.endswith(f"codex-confined-cwd/{worker}")
     from subagents.codex_destination_render import _tool_surface
-    context = dict(child_db.execute("SELECT * FROM threads WHERE id=?", (worker,)).fetchone())
-    _, tools = _tool_surface(cwd, None, context)
+    _, tools = _tool_surface(cwd, None, confined)
     assert {d["function"]["name"] for d in tools} == {"read_file", "grep", "glob", "list_dir"}
     assert thread_confinement.read_dirs("parent", child_db) is None
 

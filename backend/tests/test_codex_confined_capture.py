@@ -84,8 +84,7 @@ async def test_pinned_binary_full_tools_cold_start_and_process_resume(tmp_path, 
     (staging.parent / "AGENTS.md").write_text("ATTACKER_PARENT_MUST_NOT_LOAD")
     (staging / "AGENTS.md").write_text("ATTACKER_STAGE_MUST_NOT_LOAD")
     source = seed_home(tmp_path)
-    context = {"confinement": "review", "confined_read_dirs": json.dumps([str(staging)])}
-    monkeypatch.setattr(confinement, "thread_context", lambda *_args, **_kw: context)
+    monkeypatch.setattr(confinement, "confined_dirs", lambda *_args, **_kw: (str(staging),))
     home = tmp_path / "isolated-codex"
 
     tls, certificate = loopback_tls(tmp_path)

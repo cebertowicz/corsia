@@ -44,6 +44,10 @@ class CodexWarmSource:
     vendor_account_receipt: object | None = None
 
 
+def _sessions_root(path: Path) -> Path | None:
+    return next((parent for parent in path.parents if parent.name == "sessions"), None)
+
+
 def warm_tool_boundary_prefix_bytes(
     thread_id: str,
     boundary: Any,
@@ -72,7 +76,7 @@ def _warm_source_proof(thread_id: str, prefix_bytes: int | None):
         return registered
     provider_id, rollout, effort = registered.provider_id, registered.rollout, registered.effort
     rollout = Path(rollout)
-    sessions_root = next((parent for parent in rollout.parents if parent.name == "sessions"), None)
+    sessions_root = _sessions_root(rollout)
     if sessions_root is None:
         return "rollout_outside_sessions"
     try:
@@ -359,11 +363,6 @@ async def invoke_fork(
     """Run one disposable fork through the Codex process."""
     if request.target.harness != "codex":
         raise TypeError("Codex adapter requires a Codex target")
-    from subagents.codex_confinement import thread_context
-
-    context = await asyncio.to_thread(thread_context, request.thread_id)
-    if context.get("confinement") is not None:
-        raise ProviderForkRejected("A confined Codex worker cannot fork; return its review result directly.")
     request = admit_fork(request)
     source = request.warm_source
     if source is not None and not isinstance(source, CodexWarmSource):

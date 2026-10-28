@@ -81,9 +81,11 @@ path, including symlink targets. The parent's tool surface is unchanged.
 
 Codex uses this same model-reachable tool boundary as native workers. Its
 app-server process is **not OS-sandboxed** by CORSIA, and this boundary does not
-restrict the process's network access. `subagents/codex_confinement.py` admits
-only the captured Codex version, disables native and hosted tool producers,
-uses a neutral empty working directory, and refuses forks. Project instructions
+restrict the process's network access. `subagents/codex_confinement.py` reads
+confinement through the canonical thread owner and admits only the captured
+Codex version before spawning and again at app-server start. It disables native
+and hosted tool producers, uses a neutral empty working directory, and refuses
+forks at launch. Project instructions
 are disabled. The isolated Codex home projects subscription auth for the
 app-server, without importing the person's config, profiles or MCP servers;
 confined reads cannot reach that home. No model-invoked native tool can reach a

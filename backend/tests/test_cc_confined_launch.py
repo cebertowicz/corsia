@@ -319,6 +319,7 @@ async def test_delegate_task_review_needs_paths_on_every_model(child_db, monkeyp
     monkeypatch.setattr(delegate_task, "eligible_delegation_model", eligible)
     monkeypatch.setattr(delegate_task.delegation, "_is_cc_model", lambda _m: False)
     monkeypatch.setattr(delegate_task.delegation, "_is_delisted", lambda _m: False)
+    monkeypatch.setattr("subagents.codex_confinement.verify_version", AsyncMock())
     monkeypatch.setattr(
         delegate_task, "create_visible_fresh_thread",
         AsyncMock(side_effect=AssertionError("no thread may be created")),
