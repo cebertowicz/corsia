@@ -176,6 +176,7 @@
 			{#if scopeStateKind}
 				<ActivityScopeState
 					kind={scopeStateKind}
+					scopeNoun={projectId === null ? 'workspace' : 'project'}
 					canGoWorkspace={projectId !== null}
 					onRetry={() => query.retry()}
 					{onGoWorkspace}
@@ -195,6 +196,7 @@
 				{#if groups.length === 0}
 					<ActivityScopeState
 						kind="empty"
+						scopeNoun={projectId === null ? 'workspace' : 'project'}
 						onRetry={() => query.retry()}
 						{onGoWorkspace}
 					/>
