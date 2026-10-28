@@ -201,7 +201,10 @@ export async function startVendorSignin(accountId: string): Promise<{ ok: boolea
 	const wasSignedIn = get(vendorAccounts).some((account) => account.id === accountId && account.state === 'signed_in');
 	const result = await request<SigninResult>(`/api/vendor-accounts/${encodeURIComponent(accountId)}/signin`, json('POST'), 'Could not start sign-in.');
 	if (!result.ok) return result;
-	if (wasSignedIn && result.data.status === 'waiting') await loadVendorAccounts();
+	if (wasSignedIn && result.data.status === 'waiting') {
+		const refreshed = await loadVendorAccounts();
+		if (!refreshed.ok && !refreshed.superseded) return { ok: true, signin: result.data, error: refreshed.error ?? 'Couldn’t load your accounts.' };
+	}
 	return reconcileSignin(result.data);
 }
 
