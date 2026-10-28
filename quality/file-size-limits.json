@@ -20,7 +20,7 @@
     "once you have looked at it and mean to accept it."
   ],
   "limits": {
-    "backend/api/project_repos.py": 792,
+    "backend/api/project_repos.py": 760,
     "backend/api/project_scaffolding.py": 447,
     "backend/connections/harness_models.py": 599,
     "backend/core/step_handler.py": 424,

@@ -34,6 +34,7 @@ def _shipped_rule() -> observe_rules.ObserveRule:
     db = sqlite3.connect(":memory:")
     db.row_factory = sqlite3.Row
     db.executescript(EVENT_RULE_SCHEMA_SQL)
+    db.execute("CREATE TABLE projects (id TEXT PRIMARY KEY, conductor_thread_id TEXT)")
     observe_rules.sync_shipped_rules(db)
     return observe_rules.from_row(db.execute("SELECT * FROM event_rules").fetchone())
 

@@ -4,7 +4,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
@@ -16,6 +15,8 @@ from events import rule_declarations, rule_reads, rules
 from events.connectors import EventTypeDecl
 from events.disposition import delivery_disposition
 from events.envelope import EventEnvelope
+from events.intake_errors import _ERROR_FIXES as _ERROR_FIXES
+from events.intake_errors import failure_code as failure_code, format_event_error as format_event_error
 from events.platform import deliver_envelope_sync
 from events.resolve import Target, resolve_targets
 from infra.database import get_db, write_transaction
@@ -23,23 +24,6 @@ from infra.measure_admission import admit as admit_measure
 from infra.measure_admission import count_unversioned
 
 _MAX_FACT_BYTES = 64 * 1024
-_UNAVAILABLE = ("database is locked", "database is busy", "unable to open database", "disk i/o error")
-_DECLARE_IT = "declare it with use: route or both in your measures.yaml and run measure_sync"
-# Shared by the CLI, the agent tool and scripts, so no fix names one surface's flags.
-_ERROR_FIXES = {
-    "facts_not_object": "Pass the facts as a JSON object.",
-    "bad_json": "Pass the facts as valid JSON.",
-    "too_large": "Send fewer or shorter facts.",
-    "undeclared_type": f"Check the type name, or {_DECLARE_IT}.",
-    "undeclared_fact": "Use only facts declared for this event type.",
-    "bad_fact_kind": "Match each declared fact kind.",
-    "record_only": f"To route it, {_DECLARE_IT}.",
-    "not_your_namespace": f"Emit only a type you declared; to add one, {_DECLARE_IT}.",
-    "reserved_type": "Emit a type you declared instead.",
-    "intake_unreachable": "Retry with the same event id.",
-    "internal_error": "This is a CORSIA defect and was logged; report it instead of retrying.",
-    "record_refused": "Fix the record as the text says; the event was not routed.",
-}
 
 
 @dataclass(frozen=True)
@@ -87,20 +71,6 @@ def emitted_event_id(event_type: str, identity: str | None) -> str:
     if not identity:
         return uuid4().hex
     return hashlib.sha256(f"{event_type}\0{identity}".encode()).hexdigest()
-
-
-def failure_code(exc: Exception) -> str:
-    """``intake_unreachable`` for a database or OS that can't be reached (retry); else ``internal_error`` (a defect)."""
-    if isinstance(exc, sqlite3.OperationalError):
-        unreachable = any(text in str(exc).lower() for text in _UNAVAILABLE)
-    else:
-        unreachable = isinstance(exc, OSError)
-    return "intake_unreachable" if unreachable else "internal_error"
-
-
-def format_event_error(code: str, text: str, fix: str | None = None) -> str:
-    """Render the common caller-facing error copy without exposing event facts."""
-    return f"{code}: {text.rstrip('.')}. {fix or _ERROR_FIXES.get(code, 'Correct the event and try again.')}"
 
 
 def _refusal(code: str, text: str) -> IntakeResult:
