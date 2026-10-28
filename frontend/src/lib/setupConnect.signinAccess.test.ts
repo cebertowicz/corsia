@@ -16,7 +16,10 @@ function serve(check: Record<string, unknown>) {
 		if (url.startsWith('/api/vendor-accounts?')) return json({ accounts: [] });
 		if (url === '/api/vendor-accounts' && method === 'POST') return json({ id: 'account-1' });
 		if (url === '/api/vendor-accounts/account-1/signin' && method === 'POST') return json({ account_id: 'account-1', status: 'waiting' });
-		if (url === '/api/vendor-accounts/account-1/signin/check') return json({ account_id: 'account-1', ...check });
+		if (url === '/api/vendor-accounts/account-1/signin/check') {
+			if (check.status === 'missing') return new Response(JSON.stringify({ detail: 'no sign-in is in progress for this account' }), { status: 409 });
+			return json({ account_id: 'account-1', ...check });
+		}
 		return json({ status: 'cancelled' });
 	}));
 	return calls;
@@ -56,6 +59,53 @@ describe('a sign-in the browser never returns to', () => {
 
 const account = (state: string) => ({ account_id: `a-${state}`, label: 'me@example.com', label_verified: true, identified: true, state, resets_at: null, corsia_agent_binding: false });
 const signedIn = (source: typeof claude, ...states: string[]) => ({ ...source, state: 'ready' as const, accounts: states.map(account) }) as unknown as ModelSource;
+
+describe('a completed sign-in while models are checked', () => {
+	it.each([claude, codex])('keeps $name busy until the outcome and refresh settle', async (source) => {
+		const check: Record<string, unknown> = { status: 'completed', outcome: null };
+		serve(check);
+		let current: ModelSource = source;
+		const refresh = vi.fn(async () => { current = signedIn(source, 'ready'); });
+		const flow = createSetupConnect({ token: () => 'session', sources: () => [current], refreshSources: refresh });
+		await flow.signIn(source);
+		expect(flow.active).toBe(true);
+		expect(flow.row(current)).toEqual({ meta: `Checking your ${source === claude ? 'Claude' : 'ChatGPT'} models…`, busy: true, spinning: true });
+		expect(refresh).not.toHaveBeenCalled();
+		check.outcome = 'ready';
+		await flow.tick();
+		expect(refresh).toHaveBeenCalledOnce();
+		expect(flow.active).toBe(false);
+		expect(flow.row(current).meta).toBe('Ready · me@example.com');
+	});
+
+	it('stops polling and refreshes when the backend has lost the sign-in', async () => {
+		const check: Record<string, unknown> = { status: 'completed', outcome: null };
+		const calls = serve(check);
+		let current: ModelSource = claude;
+		const refresh = vi.fn(async () => { current = signedIn(claude, 'ready'); });
+		const flow = createSetupConnect({ token: () => 'session', sources: () => [current], refreshSources: refresh });
+		await flow.signIn(claude);
+		check.status = 'missing';
+		await flow.tick();
+		expect(refresh).toHaveBeenCalledOnce();
+		expect(flow.active).toBe(false);
+		expect(flow.row(current).meta).toBe('Ready · me@example.com');
+		await flow.tick();
+		expect(calls.filter((call) => call.endsWith('/signin/check'))).toHaveLength(2);
+	});
+
+	it('renders the existing no-model state after the outcome and refresh', async () => {
+		const check: Record<string, unknown> = { status: 'completed', outcome: null };
+		serve(check);
+		let current: ModelSource = claude;
+		const flow = createSetupConnect({ token: () => 'session', sources: () => [current], refreshSources: async () => { current = signedIn(claude, 'no_usable_model'); } });
+		await flow.signIn(claude);
+		check.outcome = 'no_usable_model';
+		await flow.tick();
+		expect(flow.row(current).meta).toBe('This Claude account has no models for Claude Code. Sign in with another account, or turn Claude Code off.');
+		expect(flow.row(current).error).toBe(true);
+	});
+});
 
 describe('an account the service records as signed in with no usable model', () => {
 	it('says the account does not include the tool, from the record alone, and offers a new sign-in or turning it off', () => {
