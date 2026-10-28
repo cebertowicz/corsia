@@ -132,6 +132,22 @@ describe('update screen store', () => {
 		expect(get(updateScreenView)).toMatchObject({ step: 'upgrading', mode: 'progress' });
 	});
 
+	it('keeps liveness when a later process is first seen recovering', async () => {
+		updateStatus.set(status(inFlight()));
+		updateUnreachable.set(true);
+		progress = { schema: 1, pid: 91, seq: 1, phase: 'migrating', done: 1, total: 3 };
+		await refreshStartupProgress();
+		for (let at = 10_000; at <= 90_000; at += 10_000) {
+			vi.setSystemTime(at);
+			progress = { schema: 1, pid: 92, seq: at / 10_000, phase: 'recovering', done: null, total: null };
+			await refreshStartupProgress();
+			expect(get(updateScreenView)).toMatchObject({ step: 'upgrading', mode: 'progress' });
+		}
+		vi.setSystemTime(150_000);
+		await refreshStartupProgress();
+		expect(get(updateScreenView)).toMatchObject({ mode: 'longer' });
+	});
+
 	it('keeps an advancing 245-second progress replay monotone, then stops creeping once its source freezes', async () => {
 		updateStatus.set(status(inFlight()));
 		tickUpdateScreen(0);
