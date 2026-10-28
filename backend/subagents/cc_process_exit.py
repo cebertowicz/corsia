@@ -168,8 +168,7 @@ async def _publish_process_exit(
     broadcast: Broadcast,
     db,
 ) -> None:
-    added_signed_out = not live.tool_boundary_marker_id and await claude_turn_signed_out(
-        identity.turn_id, detail, db=db)
+    added_signed_out = not live.tool_boundary_marker_id and await claude_turn_signed_out(identity.turn_id, detail, db=db)
     marker_id = live.tool_boundary_marker_id or _surface_process_exit(
         child_thread_id, code, detail, broadcast, db, added_signed_out
     )
