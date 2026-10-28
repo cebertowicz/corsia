@@ -1,6 +1,6 @@
 import { untrack } from 'svelte';
 import { commentDraft, cancelCommentCapture, discardCommentDraft, type CommentDraft } from '$lib/stores/commentDraft';
-import { captureComment, selectComment, selectionRange, SELECTION_LOST, type CommentSelection } from '$lib/stores/commentSelection';
+import { captureComment, selectComment, selectionRange, SELECTION_LOST, SELECTION_RECONNECTED, type CommentSelection } from '$lib/stores/commentSelection';
 import type { LiveDocumentSession } from '$lib/stores/liveDocumentSession';
 import { addComment } from '$lib/stores/docComments';
 import type { SelectionLabel } from '$lib/stores/commentDraft';
@@ -88,7 +88,9 @@ export function createViewerCommentDraft(context: Context) {
 	const reason = $derived.by(() => {
 		context.text(); context.generation();
 		const draft = context.draft(), selection = draft?.scope === context.scope() ? draft.selection : undefined;
-		return selection && (selection.session !== context.session() || !selectionRange(selection)) ? SELECTION_LOST : '';
+		if (!selection) return '';
+		if (selection.session !== context.session()) return SELECTION_RECONNECTED;
+		return selectionRange(selection) ? '' : SELECTION_LOST;
 	});
 	function select(value: ViewerSelection): void {
 		pending = value;

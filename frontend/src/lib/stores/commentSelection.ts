@@ -3,6 +3,7 @@ import { encodeUpdate, newClientId, textDigest } from './documentWire';
 import type { LiveDocumentSession } from './liveDocumentSession';
 
 export const SELECTION_LOST = 'The text you selected changed or was removed. Select the text again; your draft will carry over.';
+export const SELECTION_RECONNECTED = 'The document reconnected. Select the text again; your draft will carry over.';
 export interface CommentSelection {
 	session: LiveDocumentSession;
 	from: Y.RelativePosition;

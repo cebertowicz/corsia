@@ -131,7 +131,7 @@ it('keeps the draft and reports the selection lost when the live session is repl
 	commentDraft.update(draft => draft && { ...draft, body: 'Unfinished' }); flushSync();
 	current.set({ replaceSession: true });
 	expect(current.controller.draft?.body).toBe('Unfinished');
-	expect(current.controller.reason).toContain('text you selected changed');
+	expect(current.controller.reason).toContain('The document reconnected');
 });
 
 describe('the pending mark before and while the composer is open', () => {
