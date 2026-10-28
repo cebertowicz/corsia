@@ -4,14 +4,20 @@ Select with CORSIA_NATIVE_BROWSER_TEST=1 and absolute binary/Chrome paths.
 Generic integration suites do not install or launch this optional native dependency.
 """
 import asyncio
+from contextlib import contextmanager
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import os
 from pathlib import Path
 import shutil
+from threading import Thread
+from types import SimpleNamespace
 
 import psutil
 import pytest
-from host_access import browser_identity as identity
+from host_access import browser_identity as identity, browser_pane
 from host_access.browser_sessions import BrowserSessionError, BrowserSessionOwner
+from ws import browser_stream
+from ws.browser_frames import PaneFrames
 
 pytestmark = [pytest.mark.integration, pytest.mark.skipif(
     os.environ.get('CORSIA_NATIVE_BROWSER_TEST') != '1', reason='explicit native-browser job only',
@@ -94,3 +100,72 @@ async def test_native_browser_success_failure_close_and_reopen(native_owner, tmp
     await owner.close_thread('native')
     await owner.shutdown()
     await owner.shutdown()
+
+
+@contextmanager
+def popup_fixture():
+    pages = {
+        '/': b'''<!doctype html><title>Opener</title><button id="open" onclick="window.open('/popup')">Sign in</button>
+                  <output id="result"></output><script>window.addEventListener('message', e => {
+                  document.querySelector('#result').textContent = e.data; });</script>''',
+        '/popup': b'''<!doctype html><title>Popup</title><label>Account<input id="account"></label>
+                       <button id="finish" onclick="window.opener.postMessage(document.querySelector('#account').value, '*');
+                       window.close()">Finish</button>''',
+    }
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            body = pages.get(self.path)
+            self.send_response(200 if body else 404)
+            self.send_header('Content-Type', 'text/html')
+            self.end_headers()
+            if body:
+                self.wfile.write(body)
+
+        def log_message(self, *_args):
+            pass
+
+    server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f'http://127.0.0.1:{server.server_port}'
+    finally:
+        server.shutdown()
+        thread.join()
+        server.server_close()
+
+
+async def _wait_for_pane_endpoint(thread, token, expected):
+    async def wait():
+        while browser_pane._page_endpoints.get((thread, token)) != expected:
+            await asyncio.sleep(0.05)
+    await asyncio.wait_for(wait(), 5)
+
+
+async def test_native_pane_follows_popup_and_returns_to_opener(native_owner, monkeypatch):
+    thread, token = 'native-popup', 'native-pane'
+    monkeypatch.setattr(browser_pane, 'PROCESS_OWNER', SimpleNamespace(browser_sessions=lambda: native_owner))
+    monkeypatch.setattr(browser_stream, 'emit_product_event', lambda *_args, **_kwargs: None)
+    pane = None
+    with popup_fixture() as origin:
+        try:
+            assert not (await native_owner.run(thread, ['open', origin])).startswith('Error:')
+            opener = await native_owner.page_endpoint(thread)
+            pane = asyncio.create_task(browser_stream._follow_page(thread, token, PaneFrames(), lambda _msg: None))
+            await _wait_for_pane_endpoint(thread, token, opener)
+            await asyncio.sleep(0.2)  # Allow the CDP target discovery replay to finish.
+            assert not (await native_owner.run(thread, ['click', '#open'])).startswith('Error:')
+            assert 'Account' in await native_owner.run(thread, ['snapshot'])
+            popup = await native_owner.page_endpoint(thread)
+            assert popup != opener
+            await _wait_for_pane_endpoint(thread, token, popup)
+            assert not (await native_owner.run(thread, ['fill', '#account', 'signed in'])).startswith('Error:')
+            assert not (await native_owner.run(thread, ['click', '#finish'])).startswith('Error:')
+            await _wait_for_pane_endpoint(thread, token, opener)
+            assert 'signed in' in await native_owner.run(thread, ['snapshot'])
+        finally:
+            if pane:
+                pane.cancel()
+                await asyncio.gather(pane, return_exceptions=True)
+            browser_pane.clear_page_endpoint(thread, token)
