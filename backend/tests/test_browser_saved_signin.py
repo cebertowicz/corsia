@@ -4,7 +4,7 @@ import sqlite3
 
 import pytest
 from infra.config import STATE_ROOT
-from host_access import browser_cli, browser_launch, browser_sessions as sessions
+from host_access import browser_cli, browser_launch, browser_session_launch, browser_sessions as sessions
 from tests.browser_process_fixture import synthetic_browser  # noqa: F401
 from tools.host_path_policy import ProtectedHostPathPolicy
 
@@ -183,6 +183,111 @@ async def test_the_profile_frees_up_for_the_next_session_once_its_holder_closes(
     await fake.owner.close_thread("a")
     await fake.owner.run("b", ["open", "about:blank"])
     assert f"--user-data-dir={browser_launch.profile_dir('b')}" in fake.chrome_calls[1]
+    await fake.owner.shutdown()
+
+
+async def test_the_saved_profile_keeps_session_cookies_when_it_launches_again(synthetic_browser, chrome154):
+    # Chrome deletes session cookies at startup unless it restores the last session (a session-cookie sign-in).
+    await synthetic_browser.owner.run("a", ["open", "about:blank"])
+    await synthetic_browser.owner.close_thread("a")
+    await synthetic_browser.owner.run("a", ["open", "about:blank"])
+    assert all("--restore-last-session" in argv for argv in synthetic_browser.chrome_calls)
+    assert len(synthetic_browser.chrome_calls) == 2
+    await synthetic_browser.owner.shutdown()
+
+
+def _cdp_browsers(monkeypatch, cookies_by_endpoint):
+    """Give each fixture Chrome its own endpoint and a CDP that reads and writes its cookies."""
+    from host_access import browser_cdp, browser_chrome
+    launched = browser_chrome.ChromeProcess.launch
+    writes = []
+
+    async def launch(executable, **kwargs):
+        chrome = await launched(executable, **kwargs)
+        chrome.endpoint = f"ws://127.0.0.1:39400/devtools/browser/{len(cookies_by_endpoint)}"
+        cookies_by_endpoint[chrome.endpoint] = []
+        return chrome
+
+    class Cdp:
+        def __init__(self, endpoint, **_):
+            self.endpoint = endpoint
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            pass
+
+        async def call(self, method, **params):
+            if method == "Storage.getCookies":
+                return {"cookies": cookies_by_endpoint[self.endpoint]}
+            assert method == "Storage.setCookies"
+            writes.append((self.endpoint, params["cookies"]))
+            return {}
+
+    monkeypatch.setattr(browser_chrome.ChromeProcess, "launch", launch)
+    monkeypatch.setattr(browser_cdp, "CdpClient", Cdp)
+    return writes
+
+
+def _seeding(fake, monkeypatch, cookies):
+    """A `state save` that writes the holder's cookies, as agent-browser's state file holds them."""
+    import json
+    original = fake.owner._invoke
+
+    async def invoke(argv, *, timeout):
+        if "state" in argv and "save" in argv:
+            Path(argv[-1]).write_text(json.dumps({"cookies": cookies, "origins": []}))
+        return await original(argv, timeout=timeout)
+
+    monkeypatch.setattr(fake.owner, "_invoke", invoke)
+
+
+_HOLDER_SIGNIN = {"name": "sid", "value": "holder", "domain": "example.com", "path": "/", "expires": -1, "session": True}
+_COPY_SIGNIN = {"name": "auth", "value": "copy", "domain": "accounts.example.com", "path": "/", "expires": -1,
+                "session": True, "size": 8, "httpOnly": True}
+
+
+async def test_a_sign_in_made_on_a_copy_reaches_the_running_profile_without_moving_its_page(
+        synthetic_browser, chrome154, monkeypatch):
+    fake = synthetic_browser
+    cookies = {}
+    writes = _cdp_browsers(monkeypatch, cookies)
+    _seeding(fake, monkeypatch, [_HOLDER_SIGNIN])
+    await fake.owner.run("a", ["open", "about:blank"])
+    await fake.owner.run("b", ["open", "about:blank"])
+    holder, copy = (fake.owner._sessions[thread].chrome.endpoint for thread in ("a", "b"))
+    # The copy kept the holder's sign-in it started from, and gained its own.
+    cookies[copy] = [_HOLDER_SIGNIN, _COPY_SIGNIN]
+    commands = len(fake.calls)
+    await fake.owner.close_thread("b")
+    assert writes == [(holder, [{key: value for key, value in _COPY_SIGNIN.items()
+                                 if key not in {"expires", "session", "size"}}])]
+    # Written through CDP only: no agent-browser `state load` (it navigates) reached the holder's page.
+    assert not any("state" in call for call in fake.calls[commands:])
+    assert not browser_session_launch.kept_signins_path(fake.owner._sessions["a"].record.profile).exists()
+    await fake.owner.shutdown()
+
+
+async def test_a_copys_sign_in_waits_for_the_profiles_next_launch_once_its_holder_has_closed(
+        synthetic_browser, chrome154, monkeypatch):
+    fake = synthetic_browser
+    cookies = {}
+    writes = _cdp_browsers(monkeypatch, cookies)
+    _seeding(fake, monkeypatch, [_HOLDER_SIGNIN])
+    await fake.owner.run("a", ["open", "about:blank"])
+    await fake.owner.run("b", ["open", "about:blank"])
+    profile = fake.owner._sessions["a"].record.profile
+    cookies[fake.owner._sessions["b"].chrome.endpoint] = [_HOLDER_SIGNIN, _COPY_SIGNIN]
+    await fake.owner.close_thread("a")
+    await fake.owner.close_thread("b")
+    kept = browser_session_launch.kept_signins_path(profile)
+    assert writes == [] and kept.is_file() and oct(kept.stat().st_mode & 0o777) == "0o600"
+    await fake.owner.run("c", ["open", "about:blank"])
+    assert fake.owner._sessions["c"].record.profile == profile
+    assert [(endpoint, [cookie["name"] for cookie in written]) for endpoint, written in writes] == [
+        (fake.owner._sessions["c"].chrome.endpoint, ["auth"])]
+    assert not kept.exists()
     await fake.owner.shutdown()
 
 
