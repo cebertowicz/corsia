@@ -4,19 +4,9 @@ import type { Checkpoint } from './checkpoints';
 import { findModelById, type Model } from './models';
 import { fetchNextTurnPreview } from './nextTurnPreview';
 
-/**
- * The one owner of a thread's context reading: the donut and the context
- * sheet headline both render `contextReading`, so they cannot disagree.
- *
- * Keyed by the thread whose numbers they are (#2269), so every visible
- * composer, the active thread's and a subagent conversation's in the artifact
- * leaf, reads its own thread's entry.
- *
- * - `measured` is the last receipt: a live frame, or on entry the newest
- *   receipt stored on the thread's first message page.
- * - `preview` is the next-turn estimate, kept per thread with the identity it
- *   was read for. It is shown only while that identity still holds, so a newer
- *   measured turn or a model change hides it without a write.
+/** Per-thread readings shared by the donut and sheet (#2269).
+ * Measured usage is the last receipt; the preview estimates the next turn.
+ * A newer turn refreshes the preview and a model change hides it.
  */
 export const contextUsageByThread = writable<ReadonlyMap<string, ContextUsage>>(new Map());
 
@@ -28,6 +18,8 @@ export interface ContextPreviewEntry {
 	usage: ContextUsage | null;
 	loading: boolean;
 	error: string;
+	/** The last preview may bridge a newer measured receipt. */
+	retained?: boolean;
 }
 
 export const contextPreviewByThread = writable<ReadonlyMap<string, ContextPreviewEntry>>(new Map());
@@ -73,15 +65,9 @@ export function setContextUsage(threadId: string, usage: ContextUsage | null): v
 	setMapEntry(contextUsageByThread, threadId, usage);
 }
 
-/**
- * Record a turn's measured usage. Any turn retires the preview, which it has
- * made older; a turn that could not measure (no usage, or usage marked
- * unavailable) keeps the reading already shown rather than blanking it, but
- * marks it stale so it stops standing in for a receipt and the next preview
- * read replaces it.
- */
+/** Invalidate the preview; an unmeasured turn keeps the last receipt as stale. */
 export function recordMeasuredUsage(threadId: string, usage: ContextUsage | null): void {
-	invalidateContextPreview(threadId);
+	invalidateContextPreview(threadId, true);
 	const unmeasured = !usage || usage.token_usage_available === false;
 	const kept = getContextUsage(threadId);
 	if (unmeasured && kept) {
@@ -108,16 +94,17 @@ function setHydrated(threadId: string, hydrated: boolean): void {
 
 /** Entering a thread: forget its reading until its first page is read again. */
 export function beginThreadEntry(threadId: string): void {
+	const active = activePreviewReads.get(threadId);
+	if (active) active.pending = null;
+	invalidateContextPreview(threadId);
+	setMapEntry(contextPreviewByThread, threadId, null);
 	setContextUsage(threadId, null);
 	setHydrated(threadId, false);
 }
 
 type ReceiptRow = { thread_id?: string; metadata?: any };
 
-/**
- * Fill `threadId`'s measured reading from the newest stored receipt in a
- * fetched first page. A live reading that arrived first is newer and is kept.
- */
+/** Hydrate the newest stored receipt unless a live reading arrived first. */
 export function hydrateMeasuredFromRows(threadId: string, rows: readonly ReceiptRow[]): void {
 	if (!getContextUsage(threadId)) {
 		for (let index = rows.length - 1; index >= 0; index--) {
@@ -139,21 +126,14 @@ function receiptModel(usage: ContextUsage): string | null {
 	return usage.receipt_model ?? snapshotModel;
 }
 
-/**
- * Two ids name one model when they are the same string, or when the catalog
- * resolves both to one row by the canonical rule (`modelMatchesId`). An id the
- * catalog has no row for matches only by exact string.
- */
+/** Match exact model IDs or IDs resolved to the same catalog row. */
 function sameModel(a: string, b: string, catalog: readonly Model[]): boolean {
 	if (a === b) return true;
 	const rowA = findModelById(catalog as Model[], a);
 	return !!rowA && rowA === findModelById(catalog as Model[], b);
 }
 
-/**
- * The measured reading this composer may show: its own thread's, and not
- * taken on a model other than the one selected.
- */
+/** A measured reading belongs to this thread and selected model. */
 export function measuredFor(
 	usage: ContextUsage | null,
 	threadId: string | null,
@@ -192,6 +172,13 @@ export function previewIdentity(
 	return { owner, key: JSON.stringify([owner, checkpoint]) };
 }
 
+/** Whether two preview identities belong to the same thread and model. */
+export function samePreviewModel(left: string, right: string): boolean {
+	const [leftThread, leftModel] = JSON.parse(left);
+	const [rightThread, rightModel] = JSON.parse(right);
+	return leftThread === rightThread && leftModel === rightModel;
+}
+
 /** The reading both the donut and the sheet headline show: preview ?? measured. */
 export function contextReading(
 	preview: ContextPreviewEntry | undefined,
@@ -202,9 +189,11 @@ export function contextReading(
 }
 
 /** Retire `threadId`'s preview. A read in flight settles before its replacement starts. */
-export function invalidateContextPreview(threadId: string): void {
+export function invalidateContextPreview(threadId: string, retain = false): void {
 	previewGenerations.set(threadId, (previewGenerations.get(threadId) ?? 0) + 1);
-	if (!activePreviewReads.has(threadId)) setMapEntry(contextPreviewByThread, threadId, null);
+	const current = get(contextPreviewByThread).get(threadId);
+	if (retain && current) setMapEntry(contextPreviewByThread, threadId, { ...current, retained: true });
+	else if (!retain && !activePreviewReads.has(threadId)) setMapEntry(contextPreviewByThread, threadId, null);
 }
 
 async function readContextPreview(
@@ -213,9 +202,14 @@ async function readContextPreview(
 ): Promise<PreviewReadResult> {
 	const { threadId, owner, key } = request;
 	const current = get(contextPreviewByThread).get(threadId);
-	// The same owner refreshes in place: its last preview stays on screen.
-	const shown = current?.owner === owner ? current.usage : null;
-	const entry = { owner, key, usage: shown, loading: true, error: '' };
+	// A receipt changes the owner, but its model's previous preview can remain
+	// visible until its replacement arrives.
+	const shown = current && (current.owner === owner || (current.retained && samePreviewModel(current.owner, owner)))
+		? current.usage : null;
+	const entry = {
+		owner, key, usage: shown, loading: true, error: '',
+		retained: !!shown && (current?.owner !== owner || !!current?.retained),
+	};
 	setMapEntry(contextPreviewByThread, threadId, entry);
 	const isCurrent = () =>
 		(previewGenerations.get(threadId) ?? 0) === generation
@@ -234,7 +228,9 @@ async function readContextPreview(
 	} catch (exc) {
 		if (!isCurrent()) return discarded();
 		const error = exc instanceof Error ? exc.message : 'Context preview unavailable';
-		setMapEntry(contextPreviewByThread, threadId, { owner, key, usage: shown, loading: false, error });
+		setMapEntry(contextPreviewByThread, threadId, {
+			owner, key, usage: current?.owner === owner ? shown : null, loading: false, error,
+		});
 		return { result: false, discardedByGeneration: false, entry };
 	}
 }
@@ -253,7 +249,8 @@ function startContextPreviewRead(request: PreviewRequest): Promise<boolean> {
 			const pending = active.pending;
 			active.pending = null;
 			if (!pending) {
-				if (attempt.discardedByGeneration && get(contextPreviewByThread).get(request.threadId) === attempt.entry) {
+				const current = get(contextPreviewByThread).get(request.threadId);
+				if (attempt.discardedByGeneration && current?.loading && current.key === attempt.entry.key) {
 					setMapEntry(contextPreviewByThread, request.threadId, null);
 				}
 				if (activePreviewReads.get(request.threadId) === active) activePreviewReads.delete(request.threadId);
@@ -282,7 +279,7 @@ export async function ensureContextPreview(request: PreviewRequest): Promise<boo
 		active.pending = request;
 		return active.promise;
 	}
-	if (current?.key === request.key && (current.loading || !current.error || !request.retryError)) {
+	if (!current?.retained && current?.key === request.key && (current.loading || !current.error || !request.retryError)) {
 		return current.usage !== null;
 	}
 	return startContextPreviewRead(request);
