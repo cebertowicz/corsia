@@ -126,10 +126,10 @@ def normalization_refusal(exc: CommandRedactionError) -> str:
     )
 
 
-def protected_scope_denial(reason: str, *, lease_active: bool) -> str:
+def protected_scope_denial(reason: str, *, lease_active: bool, conditional: bool = False) -> str:
     """Return state-aware next-step guidance for a protected-scope refusal."""
     preamble = (
-        f"Blocked by protected scope: {reason}.\n"
+        f"{'If blocked' if conditional else 'Blocked'} by protected scope: {reason}.\n"
         "First check for a protected-scope way to reach the goal — a "
         "registered repo, a `.worktrees/` worktree, or a workspace path "
         "usually covers it, and it's faster than review."

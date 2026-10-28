@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 from pathlib import Path
 import shutil
@@ -14,6 +15,8 @@ HOME_RW = (
     '.cache/pnpm', '.cache/yarn', '.npm', '.cargo', '.rustup', 'go',
     '.local/share/uv', '.local/share/pnpm', '.local/share/fnm',
 )
+logger = logging.getLogger(__name__)
+HOME_CACHES = tuple(path for path in HOME_RW if path.startswith('.cache/') or path == '.npm')
 HOME_RO = ('.gitconfig', '.config/git', '.local/bin')
 PERSISTENCE = ('.config/systemd/user', '.config/autostart', '.bashrc',
                '.profile', '.bash_profile', '.zshrc', '.zprofile')
@@ -32,23 +35,61 @@ def cleanup_thread_tmp(state_root: Path, thread_id: str) -> None:
     class RetryRemoval(Exception):
         pass
 
+    root = thread_tmp_root(state_root, thread_id)
+
     def restore_access(_function, path, error):
         if not isinstance(error[1], PermissionError):
             raise error[1]
-        mode = os.stat(path, follow_symlinks=False).st_mode
-        if mode & 0o700 == 0o700 or not os.path.isdir(path) or os.path.islink(path):
-            raise error[1]
-        os.chmod(path, mode | 0o700, follow_symlinks=False)
-        raise RetryRemoval
+        # A failed unlink or rmdir can be caused by the parent directory.
+        for target in (Path(path), Path(path).parent):
+            if not target.is_relative_to(root) or target.is_symlink() or not target.is_dir():
+                continue
+            mode = os.stat(target, follow_symlinks=False).st_mode
+            if mode & 0o700 != 0o700:
+                os.chmod(target, mode | 0o700, follow_symlinks=False)
+                raise RetryRemoval
+        raise error[1]
 
     while True:
         try:
-            shutil.rmtree(thread_tmp_root(state_root, thread_id), onerror=restore_access)
+            shutil.rmtree(root, onerror=restore_access)
             return
         except RetryRemoval:
             continue
         except FileNotFoundError:
             return
+
+
+def _prepare_home_caches(home: Path, protected_cache: Path | None = None) -> None:
+    """Create cache paths without traversing symlinks; the protected cache is required."""
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    paths = [(home / relative, False) for relative in HOME_CACHES]
+    if protected_cache is not None:
+        paths.append((protected_cache, True))
+    for path, required in paths:
+        base = home if path.is_relative_to(home) else Path('/')
+        current = None
+        try:
+            current = os.open(base, flags)
+            for part in path.relative_to(base).parts:
+                created = False
+                try:
+                    os.mkdir(part, 0o700, dir_fd=current)
+                    created = True
+                except FileExistsError:
+                    pass
+                child = os.open(part, flags, dir_fd=current)
+                os.close(current)
+                current = child
+                if created:
+                    os.fchmod(current, 0o700)
+        except OSError as exc:
+            if required:
+                raise ValueError(f"Couldn't protect CORSIA's cache folder {path}: check that you can open it and that it isn't a symlink.") from exc
+            logger.warning('Skipping unavailable cache path %s: %s', path, exc)
+        finally:
+            if current is not None:
+                os.close(current)
 
 
 def _canonical(paths: Sequence[Path]) -> list[Path]:
@@ -183,11 +224,19 @@ def build_protected_argv(
     command: str, cwd: Path, *, path_policy: Any,
     rw_roots: Sequence[Path], ro_roots: Sequence[Path],
     readonly_overlays: Sequence[Path], env: Mapping[str, str],
+    hidden_roots: Sequence[Path] = (),
     thread_id: str, executable: str,
 ) -> list[str]:
     """Render only; the caller owns startup verification and process launch."""
+    from tools.managed_runtime import application_cache_root
+
     home, state = path_policy.home, path_policy.state_root
-    rw = _canonical([*rw_roots, *(home / path for path in HOME_RW)])
+    cache = application_cache_root(home)
+    _prepare_home_caches(home, cache)
+    rw = _canonical([*rw_roots, *(home / path for path in HOME_RW
+                                   if (home / path).exists() and not any(
+                                       part.is_symlink() for part in (home / path, *(home / path).parents)
+                                       if part != home and part.is_relative_to(home)))])
     ro = _canonical([*ro_roots, *(home / path for path in HOME_RO)])
     if Path('/') in [*rw, *ro]:
         raise ValueError('Linux protected shell requires specific directories instead of a root filesystem grant')
@@ -195,11 +244,12 @@ def build_protected_argv(
     rw = [path for path in rw if path != Path('/tmp') and not any(path.is_relative_to(root) for root in runtime_roots)]
     ro = [path for path in ro if path != Path('/tmp') and not any(path.is_relative_to(root) for root in runtime_roots)]
     tmp, file_mask = _backing(state, thread_id)
-    hidden = _canonical([state, *path_policy.private_roots, *path_policy.credential_roots,
-                         *path_policy.write_roots, *(home / path for path in PERSISTENCE)])
+    hidden = _canonical([state, *path_policy.private_roots, *path_policy.credential_roots, *hidden_roots,
+                         *(home / path for path in PERSISTENCE)])
+    overlays = _canonical([cache, *readonly_overlays, *path_policy.write_roots])
     omitted = [entry for entry in (home.iterdir() if home.is_dir() else ())
                if not any(path == entry or path.is_relative_to(entry) for path in [*rw, *ro])]
-    protected = [*_canonical(readonly_overlays), *hidden, *omitted,
+    protected = [*overlays, *hidden, *omitted,
                  home / '.ssh', *path_policy.control_files]
     grants = protected_mounts(rw, ro, protected)
     mounts = _Mounts(executable)
@@ -215,7 +265,7 @@ def build_protected_argv(
             mounts.bind(path, ro=grants[path])
     for entry in omitted:
         _mask(mounts, entry, file_mask)
-    for path in sorted(_canonical(readonly_overlays), key=lambda value: len(value.parts)):
+    for path in sorted(overlays, key=lambda value: len(value.parts)):
         if path.exists():
             mounts.bind(path, ro=True)
     _ssh(mounts, home)
