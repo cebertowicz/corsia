@@ -8,7 +8,7 @@ const nameOf = () => null;
 describe('an unavailable sign-in on an account row', () => {
 	it('shows a reference when present', () => {
 		const unavailable = { account_id: 'work', route: null, status: 'unavailable', cause: 'vendor_status_unreadable', ref: 'R-7K2M' } as SigninResult;
-		expect(signinMessage(unavailable, nameOf, {})).toBe('Sign-in is unavailable Reference: R-7K2M');
+		expect(signinMessage(unavailable, nameOf, {})).toBe('Sign-in is unavailable. Reference: R-7K2M');
 		expect(signinMessage({ ...unavailable, ref: undefined }, nameOf, {})).toBe('Sign-in is unavailable');
 	});
 });
