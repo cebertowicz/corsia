@@ -170,15 +170,7 @@ async def page_info(thread_id: str) -> tuple[str | None, str | None]:
     owner = PROCESS_OWNER.browser_sessions()
     url = await owner.run(thread_id, ("get", "url"), session="existing", pane=True)
     title = await owner.run(thread_id, ("get", "title"), session="existing", pane=True)
-    return _rendered_field(url, "url"), _rendered_field(title, "title")
-
-
-def _rendered_field(rendered: str, key: str) -> str | None:
-    """Read one value from owner.run's rendered result: agent-browser's `data` object, unwrapped."""
-    if rendered.startswith("Error:"):
-        return None
-    value = browser_cli.json_object(rendered).get(key)
-    return value if isinstance(value, str) else rendered
+    return browser_cli.rendered_field(url, "url"), browser_cli.rendered_field(title, "title")
 
 
 async def go(thread_id: str, action: str) -> str:
