@@ -67,28 +67,32 @@ def migrate_155_to_156(conn: sqlite3.Connection) -> None:
         repaired[artifact_id] = launcher
     now = datetime.now(timezone.utc).isoformat()
     for artifact_id, launcher in repaired.items():
-        owners = conn.execute(
-            "SELECT id,parent_thread_id,relationship_state FROM artifact_registrations "
-            "WHERE artifact_id=? AND relationship_state IN ('owner-pinned','owner-active','unassigned-triage')",
-            (artifact_id,),
-        ).fetchall()
-        for registration_id, owner, state in owners:
-            conn.execute(
-                "UPDATE artifact_registrations SET relationship_state='subscriber-recent', updated_at=? WHERE id=?",
-                (now, registration_id),
-            )
-        # If the rehomed row was the only owner, the forward release belongs to
-        # the launcher. Otherwise record the actual demoted owner rows.
-        released = [(owner, state) for _, owner, state in owners] or [(launcher, 'owner-active')]
-        for owner, state in released:
-            conn.execute(
-                """INSERT INTO artifact_registration_events
-                   (id, artifact_id, event_type, actor_thread_id, authority, reason, source_path,
-                    causal_event_id, affected_thread_id, old_owner_thread_id, new_owner_thread_id,
-                    old_relationship_state, new_relationship_state, metadata, created_at)
-                   VALUES (?,?,'ownership_released',NULL,'migration',
-                           'release rehomed provider session', 'infra.migration_155_to_156',
-                           NULL,?,?,NULL,?,'subscriber-recent',NULL,?)""",
-                (str(uuid.uuid4())[:12], artifact_id, owner, owner, state, now),
-            )
+        _release_remaining_owners(conn, artifact_id, launcher, now)
     # Re-running finds no rehomed registration rows, so it appends no new events.
+
+
+def _release_remaining_owners(conn, artifact_id, launcher, now):
+    owners = conn.execute(
+        "SELECT id,parent_thread_id,relationship_state FROM artifact_registrations "
+        "WHERE artifact_id=? AND relationship_state IN ('owner-pinned','owner-active','unassigned-triage')",
+        (artifact_id,),
+    ).fetchall()
+    for registration_id, owner, state in owners:
+        conn.execute(
+            "UPDATE artifact_registrations SET relationship_state='subscriber-recent', updated_at=? WHERE id=?",
+            (now, registration_id),
+        )
+    # If the rehomed row was the only owner, the forward release belongs to
+    # the launcher. Otherwise record the actual demoted owner rows.
+    released = [(owner, state) for _, owner, state in owners] or [(launcher, 'owner-active')]
+    for owner, state in released:
+        conn.execute(
+            """INSERT INTO artifact_registration_events
+               (id, artifact_id, event_type, actor_thread_id, authority, reason, source_path,
+                causal_event_id, affected_thread_id, old_owner_thread_id, new_owner_thread_id,
+                old_relationship_state, new_relationship_state, metadata, created_at)
+               VALUES (?,?,'ownership_released',NULL,'migration',
+                       'release rehomed provider session', 'infra.migration_155_to_156',
+                       NULL,?,?,NULL,?,'subscriber-recent',NULL,?)""",
+            (str(uuid.uuid4())[:12], artifact_id, owner, owner, state, now),
+        )
