@@ -96,7 +96,7 @@ def ask_deferred_sql(node_id_sql: str, *, plan_state_sql: str) -> str:
 
 def asks_user_from_facts(
     state: str, condition: str, assignee: str | None, review_kind: str | None,
-    *, has_attention: bool, causes: list[dict] | None = None,
+    *, has_attention: bool, causes: list[dict],
 ) -> bool:
     """Whether the row asks the person, independently of a pause ``ask_deferred`` counts."""
     from plans import user_steering
@@ -104,7 +104,7 @@ def asks_user_from_facts(
     pause_only = bool(causes) and all(
         cause.get("reason_key") == "plan_paused"
         or (cause.get("placed") and user_steering.is_user_pause(cause))
-        for cause in causes or ()
+        for cause in causes
     )
     return state not in TERMINAL_DISPLAY and bool(
         (assignee == "user" and (condition == "ready" or (condition == "paused" and pause_only)))
