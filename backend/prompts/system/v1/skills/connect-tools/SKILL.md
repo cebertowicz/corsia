@@ -26,7 +26,7 @@ Pick the method yourself, cheapest and most dependable first:
 3. **A connected app** (also called an MCP server): its actions' descriptions take up room in every turn that uses it, and quality varies.
 4. **The browser:** slowest, breaks when pages change, and the person must sign in again whenever the session expires.
 
-When a method can't do what the work needs, use the next one. Setting up or reconnecting a connected app is in skill `coordination-api`, for agents that have the API tool. Email, calendar and files ship for Google (skill `google-setup`), Microsoft (skill `microsoft-setup`) and other hosts (skill `mail-host-setup`, also the start when you don't know the host yet); only the CORSIA thread runs those, so anywhere else ask the person to connect the account there.
+When a method can't do what the work needs, use the next one. Setting up or reconnecting a connected app is in skill `coordination-api`, for agents that have the API tool. Email, calendar and files ship for Google (load pack `email`, call `google_status`, then `google_connect`: one Allow, no Google Cloud project; use skill `google-setup` only when the person says Google blocked the sign-in, for example "Access blocked" or "your admin hasn't allowed this app", when the same address comes back refused after they said they clicked Allow, or when they ask for their own Google Cloud project; an expired link gets a new link, and a Cancel or "not now" is a decline, not a refusal), Microsoft (skill `microsoft-setup`) and other hosts (skill `mail-host-setup`, also the start when you don't know the host yet); only the CORSIA thread runs those, so anywhere else ask the person to connect the account there.
 
 ## Setting one up
 

@@ -353,6 +353,7 @@ ensure_model_source() {
 
 LINUX_APT_BASE=(build-essential curl ca-certificates xz-utils unzip jq sqlite3 python3 lsof)
 LINUX_OS_RELEASE="${CORSIA_INSTALL_OS_RELEASE:-/etc/os-release}"
+LINUX_USERNS_RESTRICT="${CORSIA_INSTALL_USERNS_RESTRICT:-/proc/sys/kernel/apparmor_restrict_unprivileged_userns}"
 LINUX_LOCAL_BIN="$HOME/.local/bin"
 UV_BIN=""
 
@@ -460,14 +461,21 @@ linux_install_needed() {
 }
 
 linux_browser_deps() {
-    local distro packages=(libcairo2 libgbm1 libpango-1.0-0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 fonts-liberation)
+    local distro packages=(libnss3 libxkbcommon0 libcairo2 libgbm1 libpango-1.0-0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 fonts-liberation)
     distro="$( (. "$LINUX_OS_RELEASE"; printf '%s' "${ID:-}") )"
     if [ "$distro" = ubuntu ]; then
         packages+=(libasound2t64 libatk1.0-0t64 libatk-bridge2.0-0t64 libatspi2.0-0t64 libcups2t64)
     else
         packages+=(libasound2 libatk1.0-0 libatk-bridge2.0-0 libatspi2.0-0 libcups2)
     fi
-    install_apt_linux apparmor "${packages[@]}"
+    if linux_userns_restricted; then packages+=(apparmor); fi
+    install_apt_linux "${packages[@]}"
+}
+
+# Ubuntu's AppArmor blocks unprivileged user namespaces, which Chromium's sandbox needs;
+# Debian's kernel allows them and its AppArmor 3 can't parse a userns rule.
+linux_userns_restricted() {
+    [ "$(cat "$LINUX_USERNS_RESTRICT" 2> /dev/null)" = 1 ]
 }
 
 linux_install_chromium() {
@@ -501,6 +509,11 @@ linux_install_chromium() {
     as_admin chmod -R go-w "$staging/$archive_dir"
     if [ -e /opt/corsia/chromium ]; then as_admin mv /opt/corsia/chromium "$staging/previous"; fi
     as_admin mv "$staging/$archive_dir" /opt/corsia/chromium
+    if ! linux_userns_restricted; then
+        as_admin rm -rf "$staging"
+        say '     The browser is ready.'
+        return
+    fi
     [ ! -L /etc/apparmor.d/corsia-chromium ] || stop "The browser rule path is not safe. Check /etc/apparmor.d/corsia-chromium, then run this again."
     printf '%s\n' '#include <tunables/global>' 'profile corsia-chromium /opt/corsia/chromium/chrome flags=(unconfined) {' '  userns,' '}' \
         | as_admin tee "$staging/corsia-chromium" > /dev/null

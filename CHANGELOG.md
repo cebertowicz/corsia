@@ -8,6 +8,7 @@ the later entry describes the current behavior.
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here._
 
 - Every agent's always-on tool list now counts the mail, calendar and file actions in one line per pack instead of naming each one, so agents that don't handle mail stop paying for them.
+- Connecting Google takes one Allow with no Google Cloud project. Sign-in and token renewal go through Google's Workspace extension sign-in service.
 - Your comment draft stays open when the document reconnects, and closing the comment box clears the text selection, so typing can't replace your text.
 - The shared browser no longer asks you for a password on pages that only display a hidden secret.
 - Shared documents leave Files when the work that touched them finishes; pin one to keep it there. The document itself is never deleted.
