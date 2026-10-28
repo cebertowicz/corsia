@@ -233,13 +233,29 @@ def signin_popup_fixture(variant):
             server.server_close()
 
 
+def _click_expression(selector):
+    return (f"(() => {{ const element = document.querySelector({json.dumps(selector)}); "
+            "if (!element) return null; const r = element.getBoundingClientRect(); "
+            "return [r.x + r.width / 2, r.y + r.height / 2]; })()")
+
+
 async def _pane_click(thread, token, selector):
     endpoint = await browser_pane._page_endpoint(thread, token, 'pane unavailable')
     async with browser_cdp.CdpClient(endpoint) as cdp:
-        result = await cdp.call('Runtime.evaluate', expression=(
-            f"(() => {{ const r = document.querySelector({json.dumps(selector)}).getBoundingClientRect(); "
-            "return [r.x + r.width / 2, r.y + r.height / 2]; }})()"), returnByValue=True)
-    x, y = result['result']['value']
+        async def coordinates():
+            while True:
+                result = await cdp.call('Runtime.evaluate', expression=_click_expression(selector), returnByValue=True)
+                assert 'exceptionDetails' not in result, f"coordinate lookup failed for {selector}: {result}"
+                remote = result.get('result', {})
+                if remote.get('subtype') != 'null':
+                    value = remote.get('value')
+                    assert isinstance(value, list) and len(value) == 2, f"invalid coordinates for {selector}: {result}"
+                    return value
+                await asyncio.sleep(0.05)
+        try:
+            x, y = await asyncio.wait_for(coordinates(), 5)
+        except TimeoutError as exc:
+            raise AssertionError(f'element {selector} did not appear in the pane') from exc
     for event_type in ('mousePressed', 'mouseReleased'):
         await browser_pane.mouse_event(thread, {'eventType': event_type, 'x': x, 'y': y,
                                                 'button': 'left', 'clickCount': 1}, token)
