@@ -29,8 +29,10 @@ from infra.fresh_threads import create_fresh_thread
 from infra.queries import thread_is_openable
 
 WORKSPACE_SCOPE = "workspace"
+
+
 def conductor_title(project_name: str) -> str:
-    """Canonical title for a newly created project conductor."""
+    """Canonical conductor title for a project name: its creation title and the match for a rename."""
     return f"{project_name} Conductor"
 
 

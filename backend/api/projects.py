@@ -13,8 +13,7 @@ from infra import config
 from infra.database import get_db, write_transaction
 from infra.db_async import run_in_db, run_read
 from infra.conductor import conductor_title
-from infra.passive_changes import append_agent_roster_transition
-from infra.thread_titles import write_thread_title
+from infra.thread_titles import retitle_thread
 from infra.queries import get_project as _get_project
 from infra.repo_policy_transition import RepoPolicyTransitionBusy
 from api.project_events import notify_projects_changed
@@ -184,10 +183,7 @@ def _rename_project_conductor(db, project, updates):
         return
     before = db.execute('SELECT * FROM threads WHERE id = ?', (project['conductor_thread_id'],)).fetchone()
     if before and before['title'] == conductor_title(project['name']):
-        write_thread_title(db, before['id'], conductor_title(updates['name']), updates['updated_at'])
-        after = db.execute('SELECT * FROM threads WHERE id = ?', (before['id'],)).fetchone()
-        append_agent_roster_transition(db, before=before, after=after,
-            summary=f"Agent responsibility map updated: {after['title']}")
+        retitle_thread(db, before, conductor_title(updates['name']), updates['updated_at'])
 
 
 @router.patch("/{project_id}")

@@ -218,7 +218,8 @@ export async function updateProject(
 	);
 	if (patch.name !== undefined) {
 		const { loadThreads } = await import('./threadsLoad');
-		await loadThreads(currentToken);
+		// The rename is already saved; a failed refresh must not report it as failed.
+		await loadThreads(currentToken).catch(() => {});
 	}
 }
 
