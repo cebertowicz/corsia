@@ -23,7 +23,7 @@ class FakeObserver {
 	}
 	reportTall(shown = 599, viewport = 600) {
 		if (!this.target) return;
-		this.callback([{ isIntersecting: true, intersectionRatio: 0.5, target: this.target, intersectionRect: { height: shown }, rootBounds: { top: 0, height: viewport } } as IntersectionObserverEntry], this as unknown as IntersectionObserver);
+		this.callback([{ isIntersecting: true, intersectionRatio: 0.5, target: this.target, intersectionRect: { height: shown }, boundingClientRect: { height: shown / 0.5 }, rootBounds: { top: 0, height: viewport } } as IntersectionObserverEntry], this as unknown as IntersectionObserver);
 	}
 	disconnect() { this.disconnected = true; }
 	unobserve() {}
