@@ -234,6 +234,22 @@ async def test_css_target_uses_hit_identity(uncovered, expected):
 
 
 @pytest.mark.asyncio
+async def test_an_extended_selector_that_throws_keeps_the_existing_resolver():
+    class Throws(FakeCdp):
+        async def call(self, method, **params):
+            if method == "Runtime.evaluate":
+                # A thrown SyntaxError still arrives as an object with an id, beside exceptionDetails.
+                return {"result": {"type": "object", "subtype": "error", "objectId": "error"},
+                        "exceptionDetails": {"text": "Uncaught"}}
+            assert method != "DOM.describeNode"
+            return await super().call(method, **params)
+
+    found, node = await browser_dom_write._css_target(Throws(labelled=False), "text=Sign in",
+                                                      {"x": 20, "y": 60, "width": 200, "height": 30})
+    assert (found, node) == (False, None)
+
+
+@pytest.mark.asyncio
 async def test_ref_hit_walks_to_the_matching_ancestor(monkeypatch):
     class AncestorCdp(FakeCdp):
         async def call(self, method, **params):

@@ -109,8 +109,9 @@ async def _css_target(cdp: CdpClient, selector: str, box: dict) -> tuple[bool, i
     result = await cdp.call("Runtime.evaluate", contextId=context, returnByValue=False, silent=True,
                             expression=f"document.querySelector({json.dumps(selector)})")
     target = result.get("result", {}).get("objectId")
-    if not isinstance(target, str):
-        # Native selectors in frames or its extended selector syntax keep the existing resolver.
+    if "exceptionDetails" in result or not isinstance(target, str):
+        # Native selectors in frames or its extended selector syntax (which querySelector throws on,
+        # returning the error object's id) keep the existing resolver.
         return False, None
     description = await cdp.call("DOM.describeNode", objectId=target)
     node = protocol_int(description.get("node", {}).get("backendNodeId"))
