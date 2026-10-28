@@ -3,7 +3,8 @@
 	import './AccountsBlock.css';
 	import { Button, Field, Message } from '$lib/components/ui';
 	import Toggle from '../ui/Toggle.svelte';
-	import Menu, { type MenuItem } from '../ui/Menu.svelte';
+	import Menu from '../ui/Menu.svelte';
+	import { accountMenuItems, accountStateLabel, displayName, landOnAccount } from './accountRowActions';
 	import { createRowMenu } from '../ui/rowMenu.svelte';
 	import ConfirmDialog from '../ConfirmDialog.svelte';
 	import OverageSwitch from './OverageSwitch.svelte';
@@ -46,19 +47,7 @@
 	let editError = $state('');
 	let removeTarget = $state<VendorAccount | null>(null);
 	const accountMenu = createRowMenu<VendorAccount>((account) => account.state !== 'removed' && !pending[account.id]);
-	const menuItems = $derived.by<MenuItem[]>(() => {
-		const account = accountMenu.open?.item;
-		if (!account) return [];
-		const disabled = account.details_stale || !!pending[account.id];
-		return [
-			{ id: 'rename', label: 'Rename', disabled },
-			...(account.state === 'legacy' || account.is_default ? [] : [{ id: 'sign-in-again', label: 'Sign in again', disabled }]),
-			...(account.state === 'legacy' ? [] : [
-				{ id: 'sign-out', label: 'Sign out', disabled },
-				{ id: 'remove', label: 'Remove', danger: true, disabled },
-			]),
-		];
-	});
+	const menuItems = $derived(accountMenuItems(accountMenu.open?.item, pending));
 	const policyState = createProviderPolicyState();
 	const policyError = $derived(policyState.error);
 	const policyProvider = $derived(policyState.policy?.providers.find((entry) => entry.provider_key === provider.name));
@@ -127,14 +116,6 @@
 		return account ? displayName(account) : null;
 	}
 
-	function stateLabel(account: VendorAccount): string | null {
-		if (account.state === 'signed_out') return 'Signed out';
-		if (account.state === 'legacy') return 'Managed by provider';
-		if (account.state === 'removed') return 'Removed';
-		const vendor = VENDORS[account.provider];
-		if (account.no_usable_model && vendor) return `This ${vendor.name} account has no models for ${vendor.cli}. Sign in with another account, or turn this account off.`;
-		return null;
-	}
 
 	async function focusHolder(result: SigninResult) {
 		if (!result.held_by) return;
@@ -181,10 +162,9 @@
 			actionError = result.error ?? 'Could not start sign-in.';
 			return;
 		}
-		rememberSignin(result.signin);
+		if (result.signin.status === 'superseded' && result.signin.cause === 'account_refresh_superseded') clearSignin(accountId);
+		else rememberSignin(result.signin);
 		if (result.error) actionError = result.error;
-		// A login that was lost reads signed in until the vendor says otherwise: the row follows the answer.
-		if (result.signin.status === 'waiting' && accounts.find((account) => account.id === accountId)?.state === 'signed_in') void refreshAccounts();
 	}
 
 	async function checkSignin(accountId: string) {
@@ -213,9 +193,6 @@
 		if (result.error) actionError = result.error;
 	}
 
-	function displayName(account: VendorAccount): string {
-		return account.label.text;
-	}
 
 	function beginRename(account: VendorAccount) {
 		if (account.details_stale || pending[account.id] || (editingId && pending[editingId])) return;
@@ -270,25 +247,7 @@
 	let linkedRowId = $state<string | null>(null);
 	let linkedMenuId = $state<string | null>(null);
 	function clearLinkedFocus(): void { linkedRowId = null; }
-	async function landOnAccount(account: VendorAccount) {
-		await tick();
-		const row = document.getElementById(`vendor-account-${account.id}`);
-		if (!row) return;
-		row.scrollIntoView({ block: 'center' });
-		if (account.state === 'signed_out') {
-			const button = row.querySelector<HTMLButtonElement>('[data-link-target] button');
-			if (button && !button.disabled) {
-				button.focus();
-				if (document.activeElement === button) linkedRowId = account.id;
-				return;
-			}
-		} else if (account.state === 'signed_in' && !account.is_default) {
-			linkedMenuId = account.id;
-			accountMenu.openFor(account, row);
-			return;
-		}
-		row.focus();
-	}
+
 	$effect(() => {
 		const anchor = $settingsNavigation.anchor;
 		const id = anchor?.startsWith('account-') ? anchor.slice('account-'.length) : null;
@@ -296,7 +255,9 @@
 		if (!anchor || !account) return;
 		clearSettingsAnchor(anchor);
 		clearLinkedFocus();
-		requestAnimationFrame(() => void landOnAccount(account));
+		requestAnimationFrame(() => void landOnAccount(account, (id) => linkedRowId = id, (row) => {
+			linkedMenuId = account.id; accountMenu.openFor(account, row);
+		}));
 	});
 
 	function selectAccountMenu(id: string) {
@@ -367,7 +328,7 @@
 									/>
 								{/if}
 							</AccountUsageRow>
-							{#if stateLabel(account)}<div class="account-meta"><span>{stateLabel(account)}</span></div>{/if}
+							{#if accountStateLabel(account)}<div class="account-meta"><span>{accountStateLabel(account)}</span></div>{/if}
 						</div>
 						<!-- Row actions open with right-click, long-press, or the context-menu key. -->
 					</div>

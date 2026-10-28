@@ -77,6 +77,7 @@ def surface_exit_error(
     insert_message_fn: Callable,
     logger,
     added_signed_out: bool = False,
+    added_account=None,
 ) -> str | None:
     if code in (0, None) and not (stderr or "").strip():
         return None
@@ -87,6 +88,8 @@ def surface_exit_error(
     if not added_signed_out:
         reconcile_expired_login(stderr, logger)
     text = f"⚠️ Claude Code stopped: {last.strip()[:300]}"
+    if added_account and added_account["state"] == "signed_out":
+        text = f'{added_account["name"]} is signed out of Claude Code. Sign it in again under Settings › Providers.'
     try:
         meta = {
             "cc": True,
@@ -95,6 +98,8 @@ def surface_exit_error(
             "harness": "claude-code",
             **cause_fields("claude-code", "process_exited", stderr),
         }
+        if added_account and added_account["state"] == "signed_out":
+            meta["account_id"] = added_account["id"]
         mid = insert_turn_error(
             insert_message_fn, thread_id, text, meta,
             turn_id=getattr(turn_identity, "turn_id", None),

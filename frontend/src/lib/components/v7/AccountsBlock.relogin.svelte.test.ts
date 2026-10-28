@@ -117,6 +117,19 @@ describe('Sign in again on an account row', () => {
 		document.querySelector<HTMLButtonElement>('[data-menu-id="sign-in-again"]')!.click();
 		await vi.waitFor(() => expect(document.querySelector('#vendor-account-fomrrt1 .signin-state')?.textContent?.trim()).toBe('FOMRRT1 is still signed in, but its model list couldn’t be reloaded. Use Sign in again to retry. Reference: R-7K2M'));
 		expect(document.querySelector('#vendor-account-fomrrt1 .signin-state button')).toBeNull();
+		await openMenu('fomrrt1');
+		expect(menuLabels()).toContain('Sign in again');
+		unmount(component);
+	});
+
+	it('does not show an error when a model refresh was superseded', async () => {
+		serve([personal, signedIn], { account_id: 'fomrrt1', route: null, status: 'superseded', cause: 'account_refresh_superseded' });
+		const component = mount(AccountsBlock, { target: document.body, props: { provider } });
+		await settle();
+		await openMenu('fomrrt1');
+		document.querySelector<HTMLButtonElement>('[data-menu-id="sign-in-again"]')!.click();
+		await settle();
+		expect(document.querySelector('#vendor-account-fomrrt1 .signin-state')).toBeNull();
 		unmount(component);
 	});
 });

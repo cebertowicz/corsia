@@ -198,12 +198,18 @@ export async function setVendorAccountOverage(account: VendorAccount, allow: boo
 }
 
 export async function startVendorSignin(accountId: string): Promise<{ ok: boolean; signin?: SigninResult; error?: string }> {
+	const wasSignedIn = get(vendorAccounts).some((account) => account.id === accountId && account.state === 'signed_in');
 	const result = await request<SigninResult>(`/api/vendor-accounts/${encodeURIComponent(accountId)}/signin`, json('POST'), 'Could not start sign-in.');
 	if (!result.ok) return result;
+	if (wasSignedIn && result.data.status === 'waiting') await loadVendorAccounts();
 	return reconcileSignin(result.data);
 }
 
 async function reconcileSignin(signin: SigninResult): Promise<{ ok: boolean; signin: SigninResult; error?: string }> {
+	if (signin.status === 'superseded' && signin.cause === 'account_refresh_superseded') {
+		await loadVendorAccounts();
+		return { ok: true, signin };
+	}
 	if (signin.status !== 'completed' && signin.status !== 'already_signed_in') return { ok: true, signin };
 	confirmAccounts((accounts) => accounts.map((account) => account.id === signin.account_id
 		? { ...account, state: 'signed_in', details_stale: true } : account));

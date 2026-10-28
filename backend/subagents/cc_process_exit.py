@@ -99,19 +99,6 @@ def remember_process_exit(
     return True
 
 
-def _surface_process_exit(
-    child_thread_id: str,
-    code: int | None,
-    detail: str,
-    broadcast: Broadcast,
-    db,
-    added_signed_out: bool,
-) -> str | None:
-    return surface_exit_error(
-        child_thread_id, code, detail, broadcast, db, None,
-        insert_message_fn=insert_message, logger=log, added_signed_out=added_signed_out,
-    )
-
 
 async def _settle_process_exit(
     child_thread_id: str, live: _Live, identity: TurnIdentity,
@@ -159,9 +146,13 @@ async def _publish_process_exit(
     broadcast: Broadcast,
     db,
 ) -> None:
-    added_signed_out = not live.tool_boundary_marker_id and await claude_turn_signed_out(identity.turn_id, detail, db=db)
-    marker_id = live.tool_boundary_marker_id or _surface_process_exit(
-        child_thread_id, code, detail, broadcast, db, added_signed_out
+    added_account = not live.tool_boundary_marker_id and await claude_turn_signed_out(
+        identity.turn_id, detail, db=db, include_account=True,
+    )
+    marker_id = live.tool_boundary_marker_id or surface_exit_error(
+        child_thread_id, code, detail, broadcast, db, None,
+        insert_message_fn=insert_message, logger=log, added_signed_out=bool(added_account),
+        added_account=added_account,
     )
     payload = {
         "type": "turn_complete", "thread_id": child_thread_id,
