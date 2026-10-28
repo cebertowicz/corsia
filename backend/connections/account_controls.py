@@ -348,18 +348,6 @@ async def verify(account_id: str) -> dict[str, Any]:
     return {"account_id": account_id, "vendor_signed_in": signed_in, "cause": cause, "state": account["state"]}
 
 
-async def sign_out_expired(account_id: str) -> dict[str, Any]:
-    """Sign out an added account whose own Turn ended on the vendor's exact expired-login error.
-
-    That error is the definite answer, as it is for the Default source, so a stale
-    successful status read cannot leave the account selectable with no way to sign in.
-    """
-    account = await _custom(account_id)
-    if account["state"] != "signed_in":
-        return account
-    return await run_in_db(change_state, account_id, "signed_out", expected_revision=account["revision"])
-
-
 async def vendor_logout(account: dict) -> dict[str, Any]:
     """Run the vendor's own logout for this account's stored home; nothing falls back to another home."""
     provider = account["provider"]

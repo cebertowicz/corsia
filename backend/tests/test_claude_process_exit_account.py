@@ -1,7 +1,7 @@
 """A Claude process exit follows the account captured by its Turn."""
 import json
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -10,7 +10,7 @@ from vendor_account_fixtures import accounts, claude  # noqa: F401
 
 @pytest.mark.asyncio
 async def test_process_exit_uses_added_account_and_emits_one_completion(claude, monkeypatch):
-    from connections import account_controls, claude_discovery
+    from connections import account_lifecycle, claude_discovery
     from connections.models import get_connection
     from subagents import cc_process_exit, cc_runtime_errors
 
@@ -19,9 +19,9 @@ async def test_process_exit_uses_added_account_and_emits_one_completion(claude, 
     db.commit()
     before = get_connection('claude-code', db=db)
     default_reconcile = AsyncMock()
-    account_sign_out = AsyncMock()
+    account_sign_out = MagicMock()
     monkeypatch.setattr(claude_discovery, 'reconcile_turn_auth_failure', default_reconcile)
-    monkeypatch.setattr(account_controls, 'sign_out_expired', account_sign_out)
+    monkeypatch.setattr(account_lifecycle, 'sign_out_expired', account_sign_out)
     monkeypatch.setattr(cc_process_exit, 'consume_and_attach_terminal_context_usage', AsyncMock())
     identity = SimpleNamespace(turn_id='claude-turn', frame_fields=lambda: {'turn_id': 'claude-turn'})
     live = SimpleNamespace(tool_boundary_marker_id=None, last_assistant_message_id=None)
@@ -35,7 +35,7 @@ async def test_process_exit_uses_added_account_and_emits_one_completion(claude, 
     row = db.execute("SELECT content,metadata FROM messages WHERE thread_id='claude-destination'").fetchone()
     assert row['content'] == '⚠️ Claude Code stopped: Not logged in · Please run /login'
     assert json.loads(row['metadata'])['cause'] == 'process_exited'
-    account_sign_out.assert_awaited_once_with(claude.other)
+    account_sign_out.assert_called_once_with(claude.other)
     default_reconcile.assert_not_awaited()
     assert get_connection('claude-code', db=db) == before
     assert sum(frame.get('type') == 'turn_complete' for frame in frames) == 1

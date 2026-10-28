@@ -46,11 +46,13 @@ def reconcile_expired_login(detail: str | None, logger, account: dict | None = N
     if auth_failure_kind("claude-code", detail) is None:
         return
     from connections.claude_discovery import reconcile_turn_auth_failure
-    from connections.account_controls import sign_out_expired
+    from connections.account_lifecycle import sign_out_expired
+    from infra.db_async import run_in_db
 
     try:
         loop = asyncio.get_running_loop()
-        check = sign_out_expired(account["id"]) if account and account["custom"] else reconcile_turn_auth_failure(detail)
+        check = (run_in_db(sign_out_expired, account["id"]) if account and account["custom"]
+                 else reconcile_turn_auth_failure(detail))
         task = loop.create_task(check)
     except RuntimeError:
         logger.warning(

@@ -40,6 +40,15 @@ async def test_added_claude_failure_signs_out_only_its_account(claude, monkeypat
     source_check.assert_not_awaited()
 
 
+def test_expired_sign_out_leaves_the_default_to_its_source_check(claude):
+    from connections.account_lifecycle import sign_out_expired
+    from connections.vendor_accounts import get_account
+
+    before = get_account(claude.first, db=claude.db)
+    assert sign_out_expired(claude.first, db=claude.db) == before
+    assert get_account(claude.first, db=claude.db) == before
+
+
 @pytest.mark.asyncio
 async def test_default_failure_keeps_provider_recheck(claude, monkeypatch):
     from connections import claude_discovery
