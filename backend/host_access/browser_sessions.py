@@ -21,6 +21,7 @@ from host_access.browser_session_state import (
 )
 
 logger = logging.getLogger(__name__)
+
 BROWSER_NAMESPACE = "corsia-prod"
 CommandResult: TypeAlias = browser_cli.CommandResult
 # Which session a command may use: any (start one if needed), only a new one, or only the open one.
@@ -30,6 +31,7 @@ _EXECUTABLE_CHANGED = (
     "close the browser session with browser_close, then restart CORSIA to use the new build"
 )
 
+# Session state and errors are defined in browser_session_state.
 
 class BrowserSessionOwner:
     """Serialize admission, observation and producer-mediated close per session."""
