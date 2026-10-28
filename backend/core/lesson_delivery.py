@@ -23,7 +23,7 @@ from typing import Literal
 from loguru import logger
 
 from core.lesson_files import has_section
-from core.lesson_index import line_for
+from core.lesson_index import NON_SYSTEM_DESCRIPTION_LIMIT, line_for
 from core.skill_registry_types import SkillRow
 from core.skill_validation import is_skill_file
 from core.token_estimation import _text_tokens
@@ -97,12 +97,12 @@ def delivery_for_trial(trial, path: Path, data: bytes) -> TrialDelivery:
         target = str(path.resolve())
         return TrialDelivery(
             lesson.id, trial.behavioral_sha256, path.resolve(), data, target,
-            line_for(trial.name, trial.description, path, trial=True),
+            line_for(trial.name, trial.description[:NON_SYSTEM_DESCRIPTION_LIMIT], path, trial=True),
         )
     if metadata.get("new_target_path") or is_skill_file(Path(target)):
         return TrialDelivery(
             lesson.id, trial.behavioral_sha256, path.resolve(), data, target,
-            line_for(trial.name, trial.description, path, trial=True),
+            line_for(trial.name, trial.description[:NON_SYSTEM_DESCRIPTION_LIMIT], path, trial=True),
         )
     payload = (
         f"[Trial section for {target}; adds {metadata.get('target_section')}; "
@@ -302,7 +302,7 @@ def attach_at_start(
     Only the task Plans still attributes to the caller receives guidance. A
     failure never fails the plan operation; it is reported in ``facts``.
     """
-    from plans.selection_validity import attributed_selection
+    from plans.public import attributed_selection
 
     try:
         selected = attributed_selection(db, thread_id)

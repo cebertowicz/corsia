@@ -212,11 +212,11 @@ def test_target_matching_never_reuses_another_owners_trial(tmp_path, monkeypatch
 
 def test_plan_start_delivers_trial_even_when_prior_words_are_disabled(db, monkeypatch):
     from memory import node_start_recall
-    from plans import selection_validity
+    from plans import public
 
     node_id = _node("with")
     _resolved(monkeypatch, [_trial()])
-    monkeypatch.setattr(selection_validity, "attributed_selection", lambda *_: {"node_id": node_id})
+    monkeypatch.setattr(public, "attributed_selection", lambda *_: {"node_id": node_id})
     monkeypatch.setattr(node_start_recall, "DELIVERY_ON", False)
     result = {"node": {"id": node_id, "kind": "task"}}
     node_start_recall.attach_to_result(db, "start", result, caller_thread_id="thread")
