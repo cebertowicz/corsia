@@ -262,7 +262,7 @@ async def test_queued_pointer_moves_collapse_as_they_arrive():
         async def receive_text(self):
             return await sent.get()
 
-    messages = browser_pane_input._pane_messages(Pane())
+    messages = browser_pane_input.pane_messages(Pane())
     # A stalled page holds at most one waiting move: moves behind a move replace it, a click never does.
     assert [await anext(messages) for _ in range(3)] == [move(3), click, move(4)]
     await messages.aclose()
@@ -284,7 +284,7 @@ async def test_a_stalled_page_closes_the_pane_instead_of_queueing_input_without_
         async def close(self, code):
             closed.append(code)
 
-    messages = browser_pane_input._pane_messages(Pane())
+    messages = browser_pane_input.pane_messages(Pane())
     delivered = 0
     with pytest.raises(WebSocketDisconnect):
         while True:

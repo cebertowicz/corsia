@@ -8,7 +8,7 @@ from typing import AsyncIterator
 from fastapi import WebSocket, WebSocketDisconnect
 
 
-async def _pane_messages(pane: WebSocket) -> AsyncIterator[dict]:
+async def pane_messages(pane: WebSocket) -> AsyncIterator[dict]:
     """The pane's messages in the order sent, less each pointer move a later queued move replaces.
 
     Chrome answers a pointer move only after its next frame, tens of milliseconds, while the pane
@@ -70,7 +70,7 @@ def _is_move(data: dict | Exception) -> bool:
     return isinstance(data, dict) and data.get("type") == "input_mouse" and data.get("eventType") == "mouseMoved"
 
 
-async def _close_on_overflow(pane: WebSocket, overflow: asyncio.Event) -> None:
+async def close_on_overflow(pane: WebSocket, overflow: asyncio.Event) -> None:
     """Close the pane once any reliable output path exhausts its bounded queue."""
     await overflow.wait()
     with contextlib.suppress(Exception):

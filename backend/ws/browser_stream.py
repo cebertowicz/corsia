@@ -206,7 +206,7 @@ async def _relay(pane: WebSocket, thread_id: str, user_id: str) -> None:
                                    session=partial(browser_pane.session_identity, thread_id))
 
     async def from_pane() -> None:
-        async with contextlib.aclosing(browser_pane_input._pane_messages(pane)) as messages:
+        async with contextlib.aclosing(browser_pane_input.pane_messages(pane)) as messages:
             async for data in messages:
                 kind = data.get("type")
                 if kind == "navigate":
@@ -235,7 +235,7 @@ async def _relay(pane: WebSocket, thread_id: str, user_id: str) -> None:
             asyncio.create_task(_follow_page(thread_id, connection_token, frames, report)),
             asyncio.create_task(from_pane()),
             asyncio.create_task(frames.send(pane.send_text)),
-            asyncio.create_task(browser_pane_input._close_on_overflow(pane, overflow)),
+            asyncio.create_task(browser_pane_input.close_on_overflow(pane, overflow)),
         }
         done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
         for task in pending:
