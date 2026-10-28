@@ -64,6 +64,13 @@ for (const mode of ['normal', 'focus', 'focus-collapsed'] as const) test(`chat a
   const chip = page.getByText('1 new reply', { exact: false });
   await expect(chip).toBeVisible({ timeout: 30_000 });
   if (mode === 'focus') {
+    await page.locator('.messages').evaluate((element) => { element.scrollTop = element.scrollHeight; });
+    await expect.poll(async () => {
+      const box = await row.boundingBox();
+      return box ? box.y + box.height : 0;
+    }).toBeLessThan(0);
+    await page.waitForTimeout(2_000);
+    await expect(chip).toBeVisible();
     const spacing = await page.evaluate((answer) => {
       const scroller = document.querySelector<HTMLElement>('.messages')!;
       const toggle = [...scroller.querySelectorAll<HTMLElement>('.fold-toggle')].at(-1);
