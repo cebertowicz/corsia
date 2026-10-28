@@ -20,6 +20,7 @@ class BrowserSessionRecord:
     session: str = field(repr=False)
     lease_id: str | None = field(default=None, repr=False)
     show_window: bool = field(default=False, repr=False)
+    shared: bool = field(default=False, repr=False)
     admitted_at: float = field(default_factory=time.time, repr=False)
     binding: identity.DaemonBinding | None = field(default=None, repr=False)
     terminal_state: BrowserTerminalState = "running"

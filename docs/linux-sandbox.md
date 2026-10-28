@@ -1,6 +1,6 @@
 # Protected commands on Linux
 
-Use the ordinary shell and script tools for project work. CORSIA runs protected commands with bubblewrap 0.8.0 or newer. The existing workspace, repository and additional-directory settings determine writable paths. Each thread gets a private, persistent `/tmp`, removed when the thread closes.
+Use the ordinary shell and script tools for project work. CORSIA runs protected commands with bubblewrap 0.8.0 or newer. The existing workspace, repository and additional-directory settings determine writable paths. Each chat gets a private, persistent `/tmp`, removed when the chat closes.
 
 ## Sandbox setup
 
@@ -8,7 +8,7 @@ If bubblewrap is missing or its startup check fails, protected commands do not r
 
 Workspace writes, linked-worktree commits, branch creation, fetches, rebases, stashes and pushes can use the protected shell. SSH uses a forwarded agent socket; private key files remain hidden. Generated workspace context, protected repository controls, private state and persistence paths remain protected even when an additional writable directory contains them. DNS and ordinary network access remain available.
 
-Grants for `/dev` or `/proc` retain the minimal devices and private process view. A grant for `/tmp` retains the thread's private temp directory. Grant specific project directories instead of `/`; a root filesystem grant is refused.
+Grants for `/dev` or `/proc` retain the minimal devices and private process view. A grant for `/tmp` retains the chat's private temp directory. Grant specific project directories instead of `/`; a root filesystem grant is refused.
 
 Some writes require a different target:
 

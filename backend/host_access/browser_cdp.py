@@ -225,14 +225,21 @@ async def _report_page_metadata(cdp: CdpClient, report: Callable[[dict], Awaitab
 async def page_endpoint(run: RunCommand) -> str:
     """The one resolver of a session's shared page target, for agent commands, probes and the pane.
 
-    It picks the page target showing the session's current URL, so every consumer acts on the page
-    agent-browser itself reports, even when the browser holds more than one tab.
+    It picks the page matching agent-browser's active URL and title. Pages with the same
+    URL and title remain indistinguishable because the native CLI exposes no target ID.
     """
-    browser_endpoint = _data_field(await run(("get", "cdp-url"), 10), "cdpUrl")
-    if browser_endpoint is None or not browser_endpoint.startswith("ws"):
-        raise BrowserSessionError("This page couldn't be checked")
+    endpoint = await browser_endpoint(run, "This page couldn't be checked")
     current_url = _data_field(await run(("get", "url"), 10), "url")
-    return await asyncio.to_thread(_page_endpoint, browser_endpoint, current_url)
+    current_title = _data_field(await run(("get", "title"), 10), "title")
+    return await asyncio.to_thread(_page_endpoint, endpoint, current_url, current_title)
+
+
+async def browser_endpoint(run: RunCommand, refusal: str) -> str:
+    """The session's browser-level CDP endpoint, refused with the caller's own wording."""
+    endpoint = _data_field(await run(("get", "cdp-url"), 10), "cdpUrl")
+    if endpoint is None or not endpoint.startswith("ws"):
+        raise BrowserSessionError(refusal)
+    return endpoint
 
 
 def _data_field(result: browser_cli.CommandResult, key: str) -> str | None:
@@ -241,7 +248,7 @@ def _data_field(result: browser_cli.CommandResult, key: str) -> str | None:
     return value if not result.returncode and isinstance(value, str) else None
 
 
-def _page_endpoint(browser_endpoint: str, expected_url: str | None = None) -> str:
+def _page_endpoint(browser_endpoint: str, expected_url: str | None = None, expected_title: str | None = None) -> str:
     """Resolve agent-browser's browser endpoint to the page its session currently displays."""
     parsed = urlparse(browser_endpoint)
     listing = urlunparse(("http", parsed.netloc, "/json/list", "", "", ""))
@@ -254,7 +261,8 @@ def _page_endpoint(browser_endpoint: str, expected_url: str | None = None) -> st
         raise BrowserSessionError("This page couldn't be checked")
     pages = [target for target in targets if isinstance(target, dict) and target.get("type") == "page"]
     if expected_url:
-        pages.sort(key=lambda target: target.get("url") != expected_url)
+        pages.sort(key=lambda target: (target.get("url") != expected_url,
+                                       expected_title is not None and target.get("title") != expected_title))
     for target in pages:
         endpoint = target.get("webSocketDebuggerUrl")
         if isinstance(endpoint, str) and endpoint.startswith("ws"):

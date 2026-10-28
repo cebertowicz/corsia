@@ -89,6 +89,12 @@ class BrowserSessionOwner:
         async with self._owner_lock:
             return thread_id in self._sessions
 
+    async def is_shared(self, thread_id: str) -> bool:
+        """Report whether the live session is shared with the person."""
+        async with self._owner_lock:
+            runtime = self._sessions.get(thread_id)
+            return bool(runtime and runtime.record.shared)
+
     async def _run_admitted(self, runtime: BrowserRuntime, args: Sequence[str], *,
                             lease_id: str | None, timeout: float) -> tuple[CommandResult, bool]:
         """Run one command in an admitted session; report whether it left the session unfinished."""
@@ -162,20 +168,13 @@ class BrowserSessionOwner:
                 notice = browser_session_commands.restart_notice(self._restart_notices, thread_id, notice)
                 runtime = BrowserRuntime(BrowserSessionRecord(
                     thread_id, secrets.token_urlsafe(12), lease_id, bool(show_window),
-                    profile=shared, copy_of=copy_of, profile_notice=notice))
+                    profile=shared, copy_of=copy_of, profile_notice=notice, shared=bool(show_window)))
                 self._sessions[thread_id] = runtime
             elif session == "new":
                 raise BrowserSessionError("the browser is already open; take over in the pane to navigate it")
             if runtime.record.terminal_state != "running":
                 return runtime  # The serialized command path reports this responsibility.
             self._assert_admitted(runtime, lease_id)
-            if show_window is not None and runtime.record.show_window != show_window:
-                current = "visible" if runtime.record.show_window else "headless"
-                requested = "true" if show_window else "false"
-                raise BrowserSessionError(
-                    f"browser session is already running {current}. Call browser_close, "
-                    f"then browser_open with show_window={requested}."
-                )
             if runtime.record.lease_id is None and lease_id is not None:
                 runtime.record = replace(runtime.record, lease_id=lease_id)
             return runtime

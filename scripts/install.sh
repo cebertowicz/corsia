@@ -404,9 +404,9 @@ managed_runtime_linux() {
     PYTHONPATH="$CORSIA_HOME/backend" python3 -c '
 import sys
 from pathlib import Path
-from tools.managed_runtime import ManagedRuntimeError, ensure_runtime
+from tools.managed_runtime import ManagedRuntimeError, ensure_runtime, runtime_cache_root
 try:
-    print(ensure_runtime(sys.argv[1], root=Path.home() / ".cache" / "corsia" / "runtimes", arch="linux-" + sys.argv[2]))
+    print(ensure_runtime(sys.argv[1], root=runtime_cache_root(), arch="linux-" + sys.argv[2]))
 except ManagedRuntimeError as error:
     if "checksum" in str(error):
         print(f"Couldn’t verify the {sys.argv[1]} download. Run this again.", file=sys.stderr)
