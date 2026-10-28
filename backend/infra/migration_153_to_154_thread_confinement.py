@@ -14,6 +14,19 @@ _REVIEW_RECORD = """
       AND json_extract(i.metadata, '$.claude_invocation.confinement')='review'
 """
 
+# A record the old launch reader refused: not JSON, a confinement that is not a known
+# mode, or an unconfined launch that names add-dirs (``stored_confinement``).
+_DAMAGED_RECORD = """
+    NOT json_valid(i.metadata)
+    OR (json_extract(i.metadata, '$.claude_invocation.confinement') IS NOT NULL
+        AND (json_type(i.metadata, '$.claude_invocation.confinement') <> 'text'
+             OR json_extract(i.metadata, '$.claude_invocation.confinement') NOT IN ('none', 'review')
+             OR (json_extract(i.metadata, '$.claude_invocation.confinement')='none'
+                 AND json_type(i.metadata, '$.claude_invocation.add_dirs') IS NOT NULL
+                 AND (json_type(i.metadata, '$.claude_invocation.add_dirs') <> 'array'
+                      OR json_array_length(i.metadata, '$.claude_invocation.add_dirs') > 0))))
+"""
+
 
 def migrate_153_to_154(conn: sqlite3.Connection) -> None:
     """Add each thread's write-once confinement and read dirs, and carry over the
@@ -35,7 +48,7 @@ def migrate_153_to_154(conn: sqlite3.Connection) -> None:
         "WHERE confinement IS NULL AND EXISTS ("
         "SELECT 1 FROM artifact_identities i JOIN artifact_registrations r ON r.artifact_id=i.id "
         "WHERE r.parent_thread_id=threads.id AND i.integration='claude-code' "
-        "AND i.type='session' AND NOT json_valid(i.metadata))"
+        f"AND i.type='session' AND ({_DAMAGED_RECORD}))"
     )
     conn.execute(
         "UPDATE threads SET confinement='review', confined_read_dirs=("

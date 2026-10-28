@@ -96,6 +96,28 @@ def test_damaged_legacy_session_refuses_launch() -> None:
         db.close()
 
 
+@pytest.mark.parametrize("invocation", [
+    {"confinement": "admin"},
+    {"confinement": 1},
+    {"confinement": "none", "add_dirs": ["/x"]},
+    {"confinement": "none", "add_dirs": None},
+])
+def test_unknown_or_malformed_legacy_confinement_refuses_launch(invocation) -> None:
+    from subagents.cc_confinement import ConfinementRefused, launch_confinement
+
+    db = _legacy_db()
+    try:
+        _cc_session(db, "old", "odd", invocation, "2")
+        _cc_session(db, "old", "plain", {"confinement": "none", "add_dirs": []}, "1")
+        db.commit()
+        migrate_to_current(db, SCHEMA_VERSION)
+        db.row_factory = sqlite3.Row
+        with pytest.raises(ConfinementRefused):
+            launch_confinement("old", None, db)
+    finally:
+        db.close()
+
+
 def test_v154_step_is_idempotent_and_skips_an_absent_table() -> None:
     db = _legacy_db()
     empty = sqlite3.connect(":memory:")
