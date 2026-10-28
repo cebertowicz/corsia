@@ -154,17 +154,6 @@ def _connector(item_type: Any, connector: Any) -> str:
     return declared[0]
 
 
-def _tool(tool: Any) -> str:
-    from tools.catalog import normalize_tool_name
-
-    name = normalize_tool_name(tool if isinstance(tool, str) else None)
-    if name not in SHELL_TOOLS:
-        raise RuleRefused(
-            f"For a connected app, give its upstream tool name as tool. "
-            f"For a shell command use tool {sorted(SHELL_TOOLS)[0]!r} with argv_prefix such as ['gh', 'pr', 'create'].")
-    return name
-
-
 def _prefix(raw: Any) -> list[str]:
     if (not isinstance(raw, list) or not 0 < len(raw) <= MAX_PREFIX
             or not all(isinstance(arg, str) and 0 < len(arg) <= MAX_ARGUMENT and "\n" not in arg
@@ -190,8 +179,9 @@ def create(
     from tools.catalog import normalize_tool_name
 
     owner = _connector(item_type, connector)
-    if normalize_tool_name(tool if isinstance(tool, str) else None) in SHELL_TOOLS:
-        name, words = _tool(tool), _prefix(argv_prefix)
+    normalized = normalize_tool_name(tool if isinstance(tool, str) else None)
+    if normalized in SHELL_TOOLS:
+        name, words = normalized, _prefix(argv_prefix)
     else:
         if not isinstance(tool, str) or not tool or tool.startswith("mcp__"):
             raise RuleRefused("For a connected app, give the upstream tool name as tool; for a shell use bash with argv_prefix.")

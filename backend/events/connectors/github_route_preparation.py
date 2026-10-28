@@ -159,9 +159,9 @@ def _prepare_route(
     apply_routed_rules(prepared, internal_event, payload, selected_pr, routing_state, wake_reason,
                        scope)
     if self_caused_event and prepared.result is None:
-        from events.connectors.github_rules import _drop
+        from events.connectors.github_rules import drop_delivery
 
-        _drop(prepared, internal_event, "self_caused")
+        drop_delivery(prepared, internal_event, "self_caused")
 
 
 async def release_notice_off_loop(thread_id: str, identity: Any) -> None:

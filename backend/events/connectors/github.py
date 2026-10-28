@@ -139,7 +139,7 @@ def _pr_artifact_in_output(result_text: str) -> ObservedArtifactDecl | None:
 def _pr_artifact_in_result(result_text: str) -> ObservedArtifactDecl | None:
     """Read a GitHub MCP created object's URL field, or the shell's PR URL line."""
     try:
-        result, _ = json.JSONDecoder().raw_decode(result_text.lstrip())
+        result = json.loads(result_text)
     except (TypeError, ValueError):
         return _pr_artifact_in_output(result_text)
     if not isinstance(result, dict):
@@ -385,8 +385,7 @@ def github_routing_envelope(
         artifact_ref=artifact_ref,
         provenance={},
         event_class=MANIFEST.decl(routed_type).event_class if routed_type else github_event_class(payload),
-        ownerless_ok=False,
-        origin="connector",
+        ownerless_ok=False, origin="connector",
     )
 
 

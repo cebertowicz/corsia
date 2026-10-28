@@ -145,7 +145,7 @@ def _apply(
     if plan is None or thread is None:
         return
     if thread in plan.drops:
-        _drop(prepared, internal_event, f"dropped by rule {plan.drops[thread]}")
+        drop_delivery(prepared, internal_event, f"dropped by rule {plan.drops[thread]}")
         return
     ride = plan.rides.get(thread)
     if ride is None:
@@ -156,8 +156,8 @@ def _apply(
         prepared.details = {**(prepared.details or {}), "rule_notes": list(ride.notes)}
 
 
-def _drop(prepared: PreparedRoute, internal_event: str, reason: str) -> None:
-    """The routed thread wrote a rule dropping this event for itself."""
+def drop_delivery(prepared: PreparedRoute, internal_event: str, reason: str) -> None:
+    """Suppress an event dropped by a rule or caused by the routed thread."""
     from events.connectors import github_pr_notice
     from events.router import RouteOutcome, RouteResult
 

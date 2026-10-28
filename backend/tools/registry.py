@@ -89,10 +89,8 @@ class ToolRegistry:
                 name, params, review_request_id=review_request_id,
             ))
             if isinstance(result, ConnectedAppResult):
-                from events.self_caused import record_current_result
-                notice = await asyncio.to_thread(record_current_result, result)
-                if notice:
-                    result = restamp(result, f"{result}\n\n{notice}")
+                from registry.connected_app_observation import observe_current_result
+                result = await asyncio.to_thread(observe_current_result, result, resolve_dispatch(name, params)[1])
             # The reminder only touches plain text, so a stamped result earns it as text.
             plain = str(result) if isinstance(result, ConnectedAppResult) else result
             result = restamp(result, await remind_current_turn(plain, name, params))

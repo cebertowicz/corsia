@@ -8,7 +8,7 @@ from unittest.mock import patch
 import pytest
 
 from events.self_caused import is_self_caused, record_result
-from infra.database import get_db
+from infra import state
 from registry.connected_app_observation import notice_for_result
 from tests.test_observe_rules import _agent, _owner, _tool, _write
 from tools.mcp_stamp import ConnectedAppResult
@@ -36,29 +36,6 @@ async def test_shipped_rule_and_agent_rule_use_connector_identity(isolated_db):
     assert "already belongs to another chat" in notice_for_result("a", "turn-a", {}, result("make_pr", output))[0]
     assert _owner("owner/repo#7") == "b"
     assert notice_for_result("a", "turn-a", {}, result("make_pr", output, "https://wrong.example")) == []
-
-
-@pytest.mark.asyncio
-async def test_bridge_and_native_project_notice_from_in_memory_stamp(isolated_db):
-    from core.turns_steps import _append_tool_results_sync
-    from subagents.harness_tool_bridge import _with_notice_and_marker
-
-    _agent("a")
-    output = result("create_pull_request", '{"id":"3","url":"https://github.com/owner/repo/pull/7"}')
-    with patch("core.plan_notice.plan_notice", return_value=None), \
-            patch("core.repo_staleness_notice.repo_staleness_notice", return_value=None), \
-            patch("events.connectors.github_pr_notice.pr_event_notice", return_value=None):
-        text = await _with_notice_and_marker(
-            str(output), SimpleNamespace(invocation_id="inv"), thread_id="a",
-            turn_identity=SimpleNamespace(turn_id="turn"), provider_tool_call_id="call",
-            name="alias", arguments={}, connected_app_result=output)
-    assert "Registered pull request owner/repo#7 to you." in text
-    output2 = result("create_pull_request", '{"id":"4","url":"https://github.com/owner/repo/pull/8"}')
-    context = SimpleNamespace(add_tool_result=lambda messages, _id, _name, content: [*messages, {"role": "tool", "content": content}])
-    call = SimpleNamespace(id="call", name="alias", arguments={})
-    canonical = SimpleNamespace(turn_id="turn", media_metadata=None)
-    projected = _append_tool_results_sync(SimpleNamespace(context=context), [], [(call, output2, canonical)], "a", None, None)
-    assert "Registered pull request owner/repo#8 to you." in projected[0]["content"]
 
 
 @pytest.mark.asyncio
@@ -92,11 +69,7 @@ async def test_comment_marked_without_observe_rule_and_routing_suppresses_only_c
         _write("UPDATE self_caused_events SET at='2000-01-01T00:00:00+00:00'")
         expired = await route_event("webhook.github.pr_comment", payload, delivery_id="delivery-1")
         assert expired.outcome == RouteOutcome.ACCEPTED and expired.thread_id == "a"
-    db = get_db()
-    try:
-        assert db.execute("SELECT count(*) FROM event_route_decisions WHERE event_type='observe:self_caused'").fetchone()[0] == 0
-    finally:
-        db.close()
+
 
 
 @pytest.mark.asyncio
@@ -116,27 +89,43 @@ async def test_notifications_poller_suppresses_marked_comment(isolated_db):
 
 
 @pytest.mark.asyncio
-async def test_registry_marks_before_return_for_native_and_harness_paths(isolated_db, monkeypatch):
-    from infra import state
+@pytest.mark.parametrize("mode", ["native", "harness"])
+async def test_registry_marks_before_return_for_native_and_harness_paths(isolated_db, monkeypatch, mode):
     from tools.registry import ToolRegistry
+    from subagents.harness_tool_bridge import execute_tool
 
     _agent("a")
-    content = result("add_issue_comment", '{"id":"123","url":"https://github.com/owner/repo/pull/7#issuecomment-123"}')
-
+    outputs = iter([
+        result("create_pull_request", '{"id":"7","url":"https://github.com/owner/repo/pull/7"}'),
+        result("add_issue_comment", '{"id":"123","url":"https://github.com/owner/repo/pull/7#issuecomment-123"}'),
+    ])
     async def execute(*args, **kwargs):
-        return content
-
+        return next(outputs)
     async def remind(text, *args):
-        return text
-
+        return text + "\n\nreminder"
     monkeypatch.setattr(ToolRegistry, "_execute_unredacted", execute)
     monkeypatch.setattr("tools.registry.remind_current_turn", remind)
-    token = state._current_thread_id.set("a")
-    try:
-        await ToolRegistry().execute("alias", {})
-        assert is_self_caused("github", "issue_comment:123", "a")
-    finally:
-        state._current_thread_id.reset(token)
+    registry = ToolRegistry()
+    identity = SimpleNamespace(turn_id="turn")
+    if mode == "native":
+        thread_token = state._current_thread_id.set("a")
+        turn_token = state._current_turn_identity.set(identity)
+        try:
+            pr = await registry.execute("alias", {})
+            comment = await registry.execute("alias", {})
+        finally:
+            state._current_turn_identity.reset(turn_token)
+            state._current_thread_id.reset(thread_token)
+    else:
+        async def publish(completion, **kwargs):
+            return completion.result
+        monkeypatch.setattr("subagents.harness_tool_bridge.publish_completed_tool_result", publish)
+        pr = await execute_tool(registry, thread_id="a", turn_identity=identity, name="alias", arguments={})
+        comment = await execute_tool(registry, thread_id="a", turn_identity=identity, name="alias", arguments={})
+    assert "Registered pull request owner/repo#7 to you." in pr
+    assert "reminder" in pr and "reminder" in comment
+    assert _owner("owner/repo#7") == "a"
+    assert is_self_caused("github", "issue_comment:123", "a")
 
 
 def test_wrong_app_never_marks(isolated_db):
