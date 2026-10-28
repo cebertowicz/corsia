@@ -95,9 +95,9 @@ export const kpiBody = {
 	previous: { start: '2026-10-07T07:00:00.000000', end: '2026-10-08T07:00:00.000000', from: '2026-09-21', to: '2026-09-27', tokens: kpiTokens(655_800_000) },
 };
 
-/** Open a project's Measurement scope from the page's Scope select, the one way to leave All work. */
+/** Open a project's Measurement scope from the page's Showing select, the one way to leave All work. */
 export async function selectProjectScope(page: Page, projectName: string): Promise<void> {
-	await page.getByRole('button', { name: /Measurement scope:/ }).click();
+	await page.getByRole('button', { name: /Showing:/ }).click();
 	await page.getByRole('combobox', { name: 'Search projects and agents' }).fill(projectName);
 	await page.getByRole('option', { name: new RegExp(`^${projectName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`) }).first().click();
 }

@@ -2,13 +2,13 @@
 
 Use this for first-run task `Connect web search` and any time later the person asks to turn on web search. On the app path, use the server-seeded `Web search` task instead of creating `Connect web search`; keep the person-step tasks and dependencies this file needs, and mark the seeded task done or skipped. Brave's pages were checked read-only in the agent browser on 2026-10-09. Follow it exactly; never improvise a step, a link or a price.
 
-**Rules.** You never see, ask for, read or repeat the key or a password. The person types their password themselves and pastes the key into Settings › Keys; never accept either in chat. If they paste a key in chat anyway, post `Please don't paste keys here. Delete that message, then put the key in Settings › Keys.` and carry on. Browser steps follow `references/browser-person-steps.md`. When `web_search_ready` is true, search already works; skip this key setup. Without a saved key, the managed local server can provide search. When `web_search_ready` is false, search doesn't work right now; this setup turns it on, and so can the managed local server once it's running.
+**Rules.** You never see, ask for, read or repeat the key or a password. The person types their password themselves and pastes the key into Settings › Keys; never accept either in chat. If they paste a key in chat anyway, post `Please don't paste keys here. Delete that message, then put the key in Settings › Keys.` and carry on. Browser steps follow `references/browser-person-steps.md`. When `web_search_ready` is true, search already works; skip this key setup. Every install tries search without a key first; a Brave key can make search steadier. When `web_search_ready` is false, search didn't work on the check; a Brave key is an optional alternative.
 
 ## 1. Explain, then ask
 
-One `post_update`, word for word. Keep the two bracketed parts only when step 5 of `references/first-run-app.md` will run the lookup (the app path); on any other path leave both out.
+One `post_update`, word for word. Keep the first and last bracketed parts only when step 5 of `references/first-run-app.md` will run the lookup (the app path); on any other path leave both out. Keep the middle bracketed part only when `## Setup facts` shows both `web_search_ready` and `web_search_key` false; on a path without both facts, leave it out.
 
-> Web search lets me look things up on the web for you[, starting with you, so you don't have to tell me everything yourself]. A Brave Search key is one way to turn it on. Brave's free plan still asks for a credit card; search costs $5 per 1,000 searches, and every month includes $5 of free credit, about 1,000 searches. That's usually enough for most people, so search usually costs nothing. Searches using that key go to Brave. Do you already have a Brave Search API account? It's the account apps use to search, separate from the Brave browser. [If you'd rather I didn't look you up, just say so.]
+> Web search lets me look things up on the web for you[, starting with you, so you don't have to tell me everything yourself]. [I couldn't search without a key just now. ]A Brave Search key makes search steadier. Brave's free plan still asks for a credit card; search costs $5 per 1,000 searches, and every month includes $5 of free credit, enough for 1,000 searches. That's usually enough for most people, so search usually costs nothing. Searches using that key go to Brave. Do you already have a Brave Search API account? It's the account apps use to search, separate from the Brave browser. [If you'd rather I didn't look you up, just say so.]
 
 End your turn. Not now: `OK. Settings › Keys has it whenever you want it.` Close their task and task `Connect web search` with `You chose not now. Settings › Keys has it.`
 
@@ -34,18 +34,21 @@ If the person says a step doesn't match what they see, answer only from this lis
 - No confirmation email: `Check your spam folder. If it isn't there, sign up again with the same email.`
 - Plans page asks them to log in: `Log in with the email and password you just created, then open Plans again.`
 - Unsure which plan: `Choose Search. It's the one with web results; the other plans aren't needed.`
-- Worried about cost: `Search costs $5 per 1,000 searches, and the $5 of free credit each month covers about 1,000. You only pay past that.`
+- Worried about cost: `Search costs $5 per 1,000 searches, and the $5 of free credit each month covers 1,000. You only pay past that.`
 - Can't find where to paste it: `Settings › Keys, under Web search: [Settings › Keys](/settings/keys).`
 
 Anything else: `Tell me what's on your screen and I'll help.`
 
 ## 5. After they say it's in
 
+When they say it's in, or on any later wake, first call `corsia_api` with `GET /api/keys`. In `keys`, find the entry with `name` `web-search` and read `is_set`. If false, use the No key found row without searching. If true, run one `web_search` for `CORSIA` and use the matching result row below. If the read fails, or the entry or `is_set` is missing, use the Key check failed row.
+
 | Then | Say | Record |
 |---|---|---|
-| The person says it's in, or any later wake | Run one `web_search` for `CORSIA`. Results, or none: `Web search works.` | `mark_done` their task with evidence in plain words (what they said, what you checked); task `Connect web search` done |
+| Results, or none | `Web search works.` | `mark_done` their task with evidence in plain words (what they said, what you checked); task `Connect web search` done |
 | `Web search: key refused.` | `Brave didn't accept that key. Copy it again from API Keys and save it in Settings › Keys; Check tells you right away.` | Replace their task with `Add a key Brave accepts`; close the old one (`Key refused`) |
 | `Web search failed: [reason class]` | `Web search didn't work just now: [reason, never the key]. Your key is saved; I'll try again next time I'm working.` Once per reason | Note `I'll try again (told you: [reason class])`; later wakes re-check silently |
 | No key found | `I don't see it in Settings › Keys yet. Paste it under Web search and press Save.` | Their task stays open |
+| Key check failed | `I couldn't check Settings › Keys just now. I'll check again next time I'm working.` Once | Their task stays open; later wakes re-check silently |
 
 A tool result starting `Error:` is a failed search; report it without guessing a reason. You may add a key entry and read entries' metadata, nothing more.

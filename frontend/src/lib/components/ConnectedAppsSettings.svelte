@@ -2,7 +2,7 @@
 	import { onMount, tick } from 'svelte';
 	import { Button } from '$lib/components/ui';
 	import { projects, loadProjects } from '$lib/stores/projects';
-	import { requestAppKey, settingsAnchor, settingsNavigation } from '$lib/stores/settingsNavigation';
+	import { clearConnectedAppRequest, requestAppKey, settingsAnchor, settingsNavigation } from '$lib/stores/settingsNavigation';
 	import {
 		approveConnectedApp, connectedAppStateLine, declineConnectedApp, loadConnectedAppsRows, reconnectConnectedApp, removeAccount, removeConnectedApp,
 		runtimeDownloadFailureBody, signOutOfAccount, startAccountSignIn, type AccountSignOutResult, type ConnectedAccount, type ConnectedApp,
@@ -186,7 +186,7 @@
 	function capabilityLabels(account: ConnectedAccount): string { return account.capabilities.map((capability) => ({ mail: 'Email', calendar: 'Calendar', files: 'Files' }[capability])).join(', '); }
 
 	function clearLinkedFocus(): void { linkedRowId = null; }
-	/** Try again and Edit server's Save close the row and its pressed button with it: focus goes to that row's header. */
+	/** Retry and Edit server's Save close the row and its pressed button with it: focus goes to that row's header. */
 	const closeRow = (id: string): void => { openId = null; void refresh(); void tick().then(() => [...document.querySelectorAll<HTMLElement>('[data-connected-account-id]')].find((item) => item.dataset.connectedAccountId === id)?.querySelector<HTMLElement>('.face.open')?.focus()); };
 
 	/** The button a chat link lands on: an account's Sign in or Where it works…, an app waiting on approval's Approve or Choose where it works…. */
@@ -199,6 +199,7 @@
 		const id = $settingsNavigation.connectedAppId;
 		const linked = rows.find((row) => row.id === id);
 		if (loading || !id || !linked) return;
+		clearConnectedAppRequest();
 		openId = id;
 		clearLinkedFocus();
 		requestAnimationFrame(() => {
@@ -233,11 +234,11 @@
 	{#if loading}
 		<p class="state" role="status">Loading connected apps…</p>
 	{:else if error}
-		<div class="state" role="alert"><p>{error}</p><Button onclick={load}>Try again</Button></div>
+		<div class="state" role="alert"><p>{error}</p><Button onclick={load}>Retry</Button></div>
 	{:else}
-		{#if offline}<div class="offline" role="status">Showing last known items. <Button variant="ghost" size="sm" onclick={load}>Try again</Button></div>{/if}
+		{#if offline}<div class="offline" role="status">Showing last known items. <Button variant="ghost" size="sm" onclick={load}>Retry</Button></div>{/if}
 		{#if rows.length === 0}
-			<p class="state">No connected apps yet. Connect one here, or ask CORSIA in chat to bring over the apps you use in Claude Code, Claude Desktop, Cursor, Codex, OpenClaw or Hermes Agent, for example: “Bring over my apps from Claude.”</p>
+			<p class="state">No connected apps. Connect one here, or ask CORSIA in chat to bring over the apps you use in Claude Code, Cursor or another tool.</p>
 		{:else}
 			<div class="rows">
 				{#each rows as row (row.id)}
@@ -255,14 +256,14 @@
 									{:else}
 									{#if errorId === row.id && actionError && actionId === null}<p class="error" role="alert">{actionError}</p>{/if}
 									<p class="capabilities"><span class="capability-label">Reaches</span><span>{capabilityLabels(row)}</span></p>
-									{#if microsoftCause(row, 'admin_approval_required')}<p class="impact">Your organization needs to approve CORSIA before it can connect this account. Send this to your IT admin, then press Sign in.</p>{:else if microsoftCause(row, 'consent_cancelled')}<p class="impact">Sign-in was cancelled. Press Sign in to try again.</p>{:else if microsoftCause(row, 'refresh_token_invalid')}<p class="impact">Microsoft signed you out, so agents can’t use this account until you sign in again.</p>{:else if microsoftCause(row, 'provider_unavailable')}<p class="impact">Microsoft had a problem with sign-in. Try again.</p>{:else if microsoftCause(row, 'registration_misconfigured')}<p class="impact">Your Microsoft app for CORSIA isn’t set up correctly. Ask CORSIA in chat to fix it, then press Sign in.</p>{:else if row.state === 'needs_sign_in'}<p class="impact">{row.provider_display_name} signed you out, so agents can’t use this account until you sign in again.</p>{/if}
+									{#if microsoftCause(row, 'admin_approval_required')}<p class="impact">Your organization needs to approve CORSIA before it can connect this account. Send this to your IT admin, then press Sign in.</p>{:else if microsoftCause(row, 'consent_cancelled')}<p class="impact">Sign-in was cancelled. Press Sign in to try again.</p>{:else if microsoftCause(row, 'refresh_token_invalid')}<p class="impact">Microsoft signed you out, so agents can’t use this account until you sign in again.</p>{:else if microsoftCause(row, 'provider_unavailable')}<p class="impact">Microsoft had a problem with sign-in. Press Retry.</p>{:else if microsoftCause(row, 'registration_misconfigured')}<p class="impact">Your Microsoft app for CORSIA isn’t set up correctly. Ask CORSIA in chat to fix it, then press Sign in.</p>{:else if row.state === 'needs_sign_in'}<p class="impact">{row.provider_display_name} signed you out, so agents can’t use this account until you sign in again.</p>{/if}
 									{#if manualStep?.id === row.id}<AccountManualNotice account={manualStep} />{/if}
 									{#if offline}<p class="offline-action-note" role="status">Actions are unavailable while offline.</p>{/if}
 									<div class="actions account-actions">
-										{#if microsoftCause(row, 'admin_approval_required')}<span class="account-action"><Button variant="primary" size="sm" disabled={offline || !adminApprovalMessage(row)} onclick={() => void copyAdminMessage(row)}>Copy message for IT</Button></span><span class="account-action" class:deep-link-focus={linkedRowId === row.id && !offline} data-chat-link-focus={linkedRowId === row.id && !offline || undefined} onfocusout={clearLinkedFocus}><Button variant="ghost" size="sm" disabled={offline} loading={actionId === row.id} onclick={() => { clearLinkedFocus(); void startSignIn(row); }}>Sign in</Button></span>{:else if accountNeedsSignIn(row)}<span class="account-action" class:deep-link-focus={linkedRowId === row.id && !offline} data-chat-link-focus={linkedRowId === row.id && !offline || undefined} onfocusout={clearLinkedFocus}><Button variant={microsoftCause(row, 'registration_misconfigured') ? 'ghost' : 'primary'} size="sm" disabled={offline} loading={actionId === row.id} onclick={() => { clearLinkedFocus(); void startSignIn(row); }}>{microsoftCause(row, 'provider_unavailable') ? 'Try again' : 'Sign in'}</Button></span>{/if}
-										<span class="account-action" class:deep-link-focus={linkedRowId === row.id && !accountNeedsSignIn(row) && !offline} data-chat-link-focus={linkedRowId === row.id && !accountNeedsSignIn(row) && !offline || undefined} onfocusout={clearLinkedFocus}><Button variant="ghost" size="sm" disabled={offline} onclick={() => { clearLinkedFocus(); whereApprove = false; whereRow = row; }}>Where it works…</Button></span>
-										{#if row.state === 'connected'}<span class="account-action"><Button variant="ghost" size="sm" disabled={offline} onclick={() => confirmingOut = row}>Sign out</Button></span>{/if}
-										<span class="danger-text account-action"><Button variant="ghost" size="sm" disabled={offline} loading={actionId === row.id} onclick={() => confirmingRemove = row}>Remove</Button></span>
+										{#if microsoftCause(row, 'admin_approval_required')}<span class="row-action"><Button variant="primary" size="sm" disabled={offline || !adminApprovalMessage(row)} onclick={() => void copyAdminMessage(row)}>Copy message for IT</Button></span><span class="row-action" class:deep-link-focus={linkedRowId === row.id && !offline} data-chat-link-focus={linkedRowId === row.id && !offline || undefined} onfocusout={clearLinkedFocus}><Button variant="ghost" size="sm" disabled={offline} loading={actionId === row.id} onclick={() => { clearLinkedFocus(); void startSignIn(row); }}>Sign in</Button></span>{:else if accountNeedsSignIn(row)}<span class="row-action" class:deep-link-focus={linkedRowId === row.id && !offline} data-chat-link-focus={linkedRowId === row.id && !offline || undefined} onfocusout={clearLinkedFocus}><Button variant={microsoftCause(row, 'registration_misconfigured') ? 'ghost' : 'primary'} size="sm" disabled={offline} loading={actionId === row.id} onclick={() => { clearLinkedFocus(); void startSignIn(row); }}>{microsoftCause(row, 'provider_unavailable') ? 'Retry' : 'Sign in'}</Button></span>{/if}
+										<span class="row-action" class:deep-link-focus={linkedRowId === row.id && !accountNeedsSignIn(row) && !offline} data-chat-link-focus={linkedRowId === row.id && !accountNeedsSignIn(row) && !offline || undefined} onfocusout={clearLinkedFocus}><Button variant="ghost" size="sm" disabled={offline} onclick={() => { clearLinkedFocus(); whereApprove = false; whereRow = row; }}>Where it works…</Button></span>
+										{#if row.state === 'connected'}<span class="row-action"><Button variant="ghost" size="sm" disabled={offline} onclick={() => confirmingOut = row}>Sign out</Button></span>{/if}
+										<span class="danger-text row-action"><Button variant="ghost" size="sm" disabled={offline} loading={actionId === row.id} onclick={() => confirmingRemove = row}>Remove</Button></span>
 									</div>
 									{#if copiedAdminMessageId === row.id}<p class="copied" role="status">Message copied</p>{/if}
 									{/if}
@@ -273,7 +274,7 @@
 						<div class="item" data-connected-app-id={row.id}>
 							<SettingsRow name={row.name} subTone={tone(row)} stackActions>
 								{#snippet sub()}{@render appSecondLine(row)}{#if row.notice}<span class="line">{row.notice}</span>{/if}{/snippet}
-								{#snippet actions()}<span class="account-action" class:deep-link-focus={linkedRowId === row.id} data-chat-link-focus={linkedRowId === row.id || undefined} onfocusout={clearLinkedFocus}>{#if needsPlace(row)}<Button variant="primary" size="sm" onclick={() => { clearLinkedFocus(); whereApprove = true; whereRow = row; }}>Choose where it works…</Button>{:else}<Button variant="primary" size="sm" loading={isBusy(row.id, 'approve')} disabled={isBusy(row.id, 'decline')} onclick={() => { clearLinkedFocus(); void runApp(row, 'approve'); }}>Approve</Button>{/if}</span><Button variant="ghost" size="sm" loading={isBusy(row.id, 'decline')} disabled={isBusy(row.id, 'approve')} onclick={() => runApp(row, 'decline')}>Decline</Button>{/snippet}
+								{#snippet actions()}<span class="row-action" class:deep-link-focus={linkedRowId === row.id} data-chat-link-focus={linkedRowId === row.id || undefined} onfocusout={clearLinkedFocus}>{#if needsPlace(row)}<Button variant="primary" size="sm" onclick={() => { clearLinkedFocus(); whereApprove = true; whereRow = row; }}>Choose where it works…</Button>{:else}<Button variant="primary" size="sm" loading={isBusy(row.id, 'approve')} disabled={isBusy(row.id, 'decline')} onclick={() => { clearLinkedFocus(); void runApp(row, 'approve'); }}>Approve</Button>{/if}</span><Button variant="ghost" size="sm" loading={isBusy(row.id, 'decline')} disabled={isBusy(row.id, 'approve')} onclick={() => runApp(row, 'decline')}>Decline</Button>{/snippet}
 							</SettingsRow>
 							{#if errorId === row.id && actionError && !rowBusy(row.id)}<p class="error" role="alert">{actionError}</p>{/if}
 							{#if hasSignInToShow(row)}<div class="details"><AppSignInPanel app={row} {signInHere} confirmOut={confirmingAppOut === row.id} onConfirmOut={(on) => confirmingAppOut = on ? row.id : null} onChange={(patch) => replaceApp({ ...row, ...patch })} onRefresh={refresh} onSignedOut={() => signedOut = new Set(signedOut).add(row.id)} /></div>{/if}
@@ -299,8 +300,8 @@
 {#if removedManualStep}<AccountManualNotice account={removedManualStep} removed onDismiss={() => removedManualStep = null} />{/if}
 {#if whereRow}<WhereItWorks app={whereRow} approve={whereApprove} onClose={() => whereRow = null} onSaved={(row) => { if (whereApprove && !isAccount(row)) approved(row); else replace(row); whereRow = null; }} />{/if}
 {#if connectAppOpen}<ConnectAppFlow onClose={() => connectAppOpen = false} onConnected={(app) => { rows = [...rows, { ...app, kind: 'hosted_app' }]; }} onSignIn={(app) => { openId = app.id; signInAfterApprove = app.id; }} />{/if}
-{#if confirmingOut}<ConfirmDialog open title={`Sign out of ${accountName(confirmingOut)}?`} description="Agents will no longer be able to use this account, including in conversations already running. You can sign in again any time." confirmLabel="Sign out" onConfirm={() => signOut(confirmingOut!)} onCancel={() => confirmingOut = null} />{/if}
-{#if confirmingRemove}<ConfirmDialog open title={`Remove ${accountName(confirmingRemove)}?`} description={confirmingRemove.provider === 'mailhost' ? `Agents lose access to it. The app password still works until you delete it in your ${confirmingRemove.provider_display_name} account settings.` : confirmingRemove.provider === 'microsoft' ? 'Agents will no longer be able to use this account. CORSIA deletes its sign-in from this computer. Microsoft may still list CORSIA as allowed; remove it on Microsoft’s page.' : confirmingRemove.provider === 'google' ? 'Agents will no longer be able to use this account, including in conversations already running. This signs CORSIA out and revokes CORSIA’s access to this Google account.' : ''} confirmLabel="Remove" destructive onConfirm={() => remove(confirmingRemove!)} onCancel={() => confirmingRemove = null} />{/if}
+{#if confirmingOut}<ConfirmDialog open title={`Sign out of ${accountName(confirmingOut)}?`} description="Agents will no longer be able to use this account, including in chats already running. You can sign in again any time." confirmLabel="Sign out" onConfirm={() => signOut(confirmingOut!)} onCancel={() => confirmingOut = null} />{/if}
+{#if confirmingRemove}<ConfirmDialog open title={`Remove ${accountName(confirmingRemove)}?`} description={confirmingRemove.provider === 'mailhost' ? `Agents lose access to it. The app password still works until you delete it in your ${confirmingRemove.provider_display_name} account settings.` : confirmingRemove.provider === 'microsoft' ? 'Agents will no longer be able to use this account. CORSIA deletes its sign-in from this computer. Microsoft may still list CORSIA as allowed; remove it on Microsoft’s page.' : confirmingRemove.provider === 'google' ? 'Agents will no longer be able to use this account, including in chats already running. This signs CORSIA out and revokes CORSIA’s access to this Google account.' : ''} confirmLabel="Remove" destructive onConfirm={() => remove(confirmingRemove!)} onCancel={() => confirmingRemove = null} />{/if}
 
 <style>
 	.connected-apps { width: 100%; scroll-margin-top: var(--space-5); }
@@ -318,18 +319,18 @@
 	.line { display: block; }
 	.details { padding: var(--space-1) var(--space-2) var(--space-3); }
 	.actions { display: flex; flex-wrap: wrap; gap: var(--space-1); margin-left: calc(-1 * var(--button-pad-x-sm)); }
-	.account-action :global(.btn:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+	.row-action :global(.btn:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
 	.danger-text :global(.btn.ghost), .danger-text :global(.btn.ghost:hover:not(:disabled)) { color: var(--red-text); }
 	.key-detail { color: var(--text-secondary); font-size: var(--text-subhead); line-height: 1.5; margin: 0 0 var(--space-2); }
-	.error { color: var(--red); margin: 0 0 var(--space-2); font-size: var(--text-footnote); }
+	.error { color: var(--red-text); margin: 0 0 var(--space-2); font-size: var(--text-footnote); }
 	.copied { margin: 0 0 var(--space-2); color: var(--text-secondary); font-size: var(--text-subhead); line-height: var(--lh-normal); }
 	.impact { margin: 0 0 var(--space-2); color: var(--text-secondary); font-size: var(--text-subhead); line-height: var(--lh-normal); }
 	.capabilities { display: flex; gap: var(--space-2); margin: 0 0 var(--space-2); color: var(--text-secondary); font-size: var(--text-caption); line-height: var(--lh-normal); }
 	.capability-label { color: var(--text-tertiary); }
 	.account-open-name { min-width: 0; font-size: var(--text-subhead); color: var(--text-primary); overflow-wrap: anywhere; }
-	.account-action { position: relative; display: inline-flex; }
+	.row-action { position: relative; display: inline-flex; }
 	/* A chat link moves focus here after opening the account, so retain a visible arrival mark even without keyboard modality. */
-	.account-action.deep-link-focus :global(.btn) { outline: medium solid var(--accent); outline-offset: var(--space-1); }
-	.account-action::after { content: ''; position: absolute; inset: calc(-1 * var(--space-2)); }
-	.account-action :global(button) { position: relative; z-index: 1; }
+	.row-action.deep-link-focus :global(.btn) { outline: medium solid var(--accent); outline-offset: var(--space-1); }
+	.row-action::after { content: ''; position: absolute; inset: calc(-1 * var(--space-2)); }
+	.row-action :global(button) { position: relative; z-index: 1; }
 </style>

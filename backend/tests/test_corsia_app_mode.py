@@ -356,7 +356,9 @@ class App:
             # The backend hands its caller to every lifecycle run.
             "CORSIA_RESTART_CALLER_TOKEN": "test-caller",
             "CORSIA_HEALTH_WAIT_SECONDS": "5",
-            "CORSIA_DRAIN_MAX_WAIT": "1",
+            # The drain loop reads a whole-second clock, so a 1-second cap can expire between its start and
+            # its first poll on a slow runner. No test here needs the cap to expire; a quiet drain returns at once.
+            "CORSIA_DRAIN_MAX_WAIT": "30",
             **extra,
         }
 

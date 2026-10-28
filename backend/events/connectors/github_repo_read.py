@@ -3,11 +3,13 @@ from __future__ import annotations
 
 import asyncio
 import functools
+import logging
 from datetime import datetime, timedelta
 from typing import Any
 
 from events.connectors import github_notifications_feed as feed
 
+log = logging.getLogger(__name__)
 MAX_HOURLY_READS = 300
 
 
@@ -38,6 +40,8 @@ async def get(runner: feed.GhRunner, path: str, state: dict[str, Any], now: date
         response = await asyncio.to_thread(functools.partial(
             feed.gh_get, runner, path, {"If-None-Match": etag} if etag else None, low_priority=True))
     except feed.FeedError as exc:
+        if exc.error_class == "read_refused":
+            log.warning("github-repo-read: %s", exc)
         return None, exc.error_class
     if keep_etag and response.headers.get("etag"):
         state.setdefault("etags", {})[path] = response.headers["etag"]

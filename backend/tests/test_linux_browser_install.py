@@ -4,7 +4,8 @@ import sys
 from types import SimpleNamespace
 
 import pytest
-from host_access import browser_cli as cli, browser_identity as identity, browser_sessions as sessions
+from host_access import browser_cli as cli, browser_identity as identity, browser_launch
+from host_access import browser_session_launch as launch, browser_sessions as sessions
 from host_access.browser_cli import chrome_executable as select_chrome
 from tests.browser_process_fixture import synthetic_browser  # noqa: F401
 
@@ -22,10 +23,24 @@ async def test_linux_spawn_uses_managed_path_and_removes_inherited_args(monkeypa
     assert json.loads(result.stdout) == ['/opt/corsia/chromium/chrome', None, None]
 
 
+@pytest.mark.parametrize('blocked', ['--no-sandbox', '--no-sandbox=true',
+                                     '--disable-setuid-sandbox', '--disable-setuid-sandbox=true'])
+def test_linux_launch_keeps_other_inherited_flags(monkeypatch, blocked):
+    monkeypatch.setattr(browser_launch, 'sys', SimpleNamespace(platform='linux'))
+    monkeypatch.setattr(launch, 'sys', SimpleNamespace(platform='linux'))
+    monkeypatch.setenv('AGENT_BROWSER_ARGS', f'{blocked} --foo=1')
+    args = launch.flags(SimpleNamespace(show_window=False), None)
+    assert args[0] == '--args'
+    assert '--foo=1' in args[1]
+    assert blocked not in args[1]
+    assert '--disable-blink-features=AutomationControlled' in args[1]
+
+
 @pytest.mark.asyncio
 async def test_linux_never_downloads_on_first_use(synthetic_browser, monkeypatch):
     monkeypatch.setattr(cli, 'sys', SimpleNamespace(platform='linux'))
-    monkeypatch.setattr(sessions, 'sys', SimpleNamespace(platform='linux'))
+    monkeypatch.setattr(launch, 'sys', SimpleNamespace(platform='linux'))
+    monkeypatch.setattr(cli, 'chrome_executable', lambda: ('/opt/corsia/chromium/chrome', 'system'))
     monkeypatch.setattr(cli, 'chrome_download_missing', lambda: pytest.fail('Linux tried to download'))
     await synthetic_browser.owner._pin_native()
     assert synthetic_browser.owner._native is not None
@@ -51,7 +66,7 @@ def test_linux_selects_managed_browser_and_ignores_environment(monkeypatch, tmp_
 @pytest.mark.asyncio
 async def test_missing_linux_browser_refuses_without_a_download(synthetic_browser, monkeypatch, tmp_path):
     monkeypatch.setattr(cli, 'sys', SimpleNamespace(platform='linux'))
-    monkeypatch.setattr(sessions, 'sys', SimpleNamespace(platform='linux'))
+    monkeypatch.setattr(launch, 'sys', SimpleNamespace(platform='linux'))
     monkeypatch.setattr(cli, 'chrome_executable', select_chrome)
     monkeypatch.setattr(cli, 'LINUX_CHROME_PATHS', (tmp_path / 'missing',))
     monkeypatch.setattr(cli, 'chrome_download_missing', lambda: pytest.fail('Linux tried to download'))

@@ -305,7 +305,7 @@ describe('ProvidersPolicyBlock', () => {
 		await vi.waitFor(() => expect(host.querySelector('[aria-label="Use Personal"]')).not.toBeNull());
 		// The setting's value is unknown, so its switch is hidden rather than shown as off.
 		expect(host.querySelector('[aria-label="Local models only"]')).toBeNull();
-		expect(host.querySelector('[role="alert"]')?.textContent).toContain('Couldn’t load this setting. Try again');
+		expect(host.querySelector('[role="alert"]')?.textContent).toContain('Couldn’t load this setting. Retry');
 	});
 
 	it('keeps the existing loading line until Local models only has loaded', async () => {

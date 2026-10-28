@@ -84,7 +84,7 @@ describe('contextSheetSnapshotModel', () => {
 				expect.objectContaining({
 					id: 'usage:conversation-history',
 					category: 'History',
-					label: 'Conversation history',
+					label: 'Chat history',
 					tokenCount: 20,
 				}),
 				expect.objectContaining({
@@ -228,7 +228,7 @@ describe('contextSheetSnapshotModel', () => {
 			expect.objectContaining({
 				id: 'usage:conversation-history',
 				category: 'History',
-				label: 'Conversation history',
+				label: 'Chat history',
 				tokenCount: 10,
 			}),
 				expect.objectContaining({
@@ -436,7 +436,7 @@ describe('contextSheetSnapshotModel', () => {
 			expect.objectContaining({
 				id: 'usage:conversation-history',
 				category: 'History',
-				label: 'Conversation history',
+				label: 'Chat history',
 				countLabel: '23 messages',
 				tokenLabel: '23k tokens',
 			}),
@@ -949,7 +949,7 @@ describe('contextSheetSnapshotModel', () => {
 			expect.objectContaining({
 				id: 'usage:conversation-history',
 				category: 'History',
-				label: 'Conversation history',
+				label: 'Chat history',
 				tokenCount: 10,
 			}),
 		]);
@@ -1239,7 +1239,7 @@ describe('held-by-the-harness row', () => {
 		const history = model?.sourceGroups.find((group) => group.id === 'history');
 		const rows = Object.fromEntries((history?.sources ?? []).map((row) => [row.label, row.tokenCount]));
 		expect(rows).toMatchObject({
-			'Conversation history': 450, 'GitHub, looked up (estimated)': 400, 'Linear, looked up (estimated)': 150, 'Current message': 50,
+			'Chat history': 450, 'GitHub, looked up (estimated)': 400, 'Linear, looked up (estimated)': 150, 'Current message': 50,
 		});
 		expect(history?.tokenCount).toBe(1050);
 		expect(usage.total_used).toBe(1050);
@@ -1255,7 +1255,7 @@ describe('held-by-the-harness row', () => {
 			was_trimmed: false, history_messages: 6, context_snapshot: { source_inventory: [] },
 		});
 		const history = model?.sourceGroups.find((group) => group.id === 'history');
-		expect(history?.sources.map((row) => row.label)).toEqual(['Conversation history']);
+		expect(history?.sources.map((row) => row.label)).toEqual(['Chat history']);
 		expect(history?.tokenCount).toBe(1000);
 	});
 

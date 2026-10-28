@@ -1161,7 +1161,7 @@ async def test_broad_command_classes_are_reviewer_decisions(
 
 
 @pytest.mark.asyncio
-async def test_browser_only_gates_local_file_effects(tmp_path, monkeypatch):
+async def test_browser_open_has_no_reviewable_host_action(tmp_path, monkeypatch):
     from tools import host_access_gate as gate
 
     called = []
@@ -1181,17 +1181,13 @@ async def test_browser_only_gates_local_file_effects(tmp_path, monkeypatch):
         tool_name="browser_open",
         params={"url": "https://example.com", "wait_for_load": True},
     )
-    with pytest.raises(gate.HostAccessRequired):
-        await gate.authorize_host_action(
-            thread_id="thread-1",
-            project_id=None,
-            tool=tool,
-            tool_name="browser_open",
-            params={"url": "file:///outside/report.html"},
-        )
-
+    file_action = await gate.authorize_host_action(
+        thread_id="thread-1", project_id=None, tool=tool, tool_name="browser_open",
+        params={"url": "file:///outside/report.html"},
+    )
     assert ordinary.parameter_overrides == {}
-    assert called == ["thread-1"]
+    assert file_action.parameter_overrides == {}
+    assert called == []
 
 
 @pytest.mark.asyncio

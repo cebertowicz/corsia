@@ -9,6 +9,7 @@
 	import ArtifactTabStrip from './ArtifactTabStrip.svelte';
 	import DeliveryConfirmation from './attention/DeliveryConfirmation.svelte';
 	import type { DocViewerTarget } from '$lib/docViewerTarget';
+	import { targetForTab } from '$lib/artifactViewerTarget';
 	import type { ImageViewportPlace, TabLoadSignal } from '$lib/artifactTabs';
 	import { returnToPlanNode } from '$lib/planLeafReturn';
 	import { pushBackLayer } from '$lib/historyBackLayer';
@@ -20,7 +21,7 @@
 	import { requestArtifactTabClose } from '$lib/artifactTabClose';
 	import {
 		threadWorkspaces, emptyWorkspace, getActiveTab, isTabChanged, type ArtifactTab,
-		setActiveTab, setActiveSurface, setLeafVisible, applyTabLoadSignal, markTabSaved,
+		setActiveTab, setActiveSurface, setLeafVisible, applyTabLoadSignal, consumeTabLanding, markTabSaved,
 	} from '$lib/stores/artifactWorkspace';
 	import {
 		tabViewState, tabDocumentImage, recordTabDocumentPlace, recordTabImagePlace, openTabDocumentImage,
@@ -42,17 +43,7 @@
 	const workspace = $derived(threadId ? ($threadWorkspaces[threadId] ?? emptyWorkspace()) : emptyWorkspace());
 	const activeTab = $derived(getActiveTab(workspace));
 
-	function targetForTab(t: ArtifactTab): DocViewerTarget {
-		if (t.kind !== 'document') throw new Error('Only document tabs have DocViewer targets');
-		return {
-			instanceId: t.instanceId,
-			path: t.path,
-			name: t.title,
-			projectId: $uiScope?.id ?? null,
-			threadId: threadId,
-			artifactId: t.artifactId,
-		};
-	}
+	const viewerTarget = (t: ArtifactTab) => targetForTab(t, $uiScope?.id ?? null, threadId);
 
 	// Every tab opens in the document viewer. A file the backend says is an image
 	// is switched to the image viewer for as long as this leaf is mounted; nothing
@@ -62,7 +53,7 @@
 	const imageKey = (instanceId: string) => `${threadId}\u0000${instanceId}`;
 	const imageTabIds = $derived(new Set(workspace.tabs.filter((t) => imageTabs.includes(imageKey(t.instanceId))).map((t) => t.instanceId)));
 	const showable = $derived<DocViewerTarget | null>(
-		activeTab?.kind === 'document' && threadId && activeTab.status !== 'unavailable' ? targetForTab(activeTab) : null
+		activeTab?.kind === 'document' && threadId && activeTab.status !== 'unavailable' ? viewerTarget(activeTab) : null
 	);
 	const showsImage = $derived(showable !== null && !!activeTab && imageTabs.includes(imageKey(activeTab.instanceId)));
 	const target = $derived(showsImage ? null : showable);
@@ -247,7 +238,7 @@
 </script>
 
 {#if mode === 'rail'}
-	<button class="rail" onclick={expand} aria-label="Expand artifact panel ({workspace.tabs.length} open)">
+	<button class="rail" onclick={expand} aria-label="Expand Files ({workspace.tabs.length} open)">
 		{#each workspace.tabs as t (t.instanceId)}
 			<span class="rail-ico" class:active={t.instanceId === workspace.activeTabId} class:err={t.status === 'error' || t.status === 'unavailable'}>
 				{#if imageTabIds.has(t.instanceId)}
@@ -261,7 +252,7 @@
 	</button>
 {:else}
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
-	<div class="leaf" class:compact={mode === 'compact'} bind:this={leafEl} onclick={onLeafClick} onkeydown={onLeafKeydown} oninput={onLeafInput}>
+	<div class="leaf" class:compact={mode === 'compact'} class:expanded={mode === 'expanded'} bind:this={leafEl} onclick={onLeafClick} onkeydown={onLeafKeydown} oninput={onLeafInput}>
 		{#if mode === 'expanded'}
 			<div class="canvas-header-strip">
 				<ArtifactTabStrip
@@ -284,8 +275,8 @@
 			{:else if activeTab?.status === 'unavailable'}
 				<div class="gone" role="status">
 					<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" /></svg>
-					<p>{activeTab.title} is no longer available.</p>
-					<span>It was deleted, moved out of this scope, or unregistered.</span>
+					<p>{activeTab.title} is unavailable.</p>
+					<span>It isn’t in this chat’s files.</span>
 					<button type="button" onclick={() => requestCloseTab(activeTab.instanceId)}>Close tab</button>
 				</div>
 			{:else if imageTarget}
@@ -312,6 +303,7 @@
 						onOpenImage={openImage}
 						onDocumentPlace={recordDocumentPlace}
 						covered={imageOpen}
+						onLanded={() => { if (threadId && activeTab) consumeTabLanding(threadId, activeTab.instanceId); }}
 					/>
 				</div>
 				<!-- Shown once the document under it is bound, so its comments come from that document from the first frame. -->
@@ -362,6 +354,13 @@
 		background: var(--bg-primary);
 	}
 	.leaf.compact { flex: 1; border-left: none; }
+	/* The tab strip belongs to the header band, which a status banner does not move: the leaf reaches back up
+	   under the banner (the banner paints over it) and its content starts below the banner as before. */
+	.leaf.expanded {
+		margin-top: calc(-1 * var(--status-banners-height, 0px));
+		height: calc(100% + var(--status-banners-height, 0px));
+		padding-top: calc(var(--header-bottom) + var(--status-banners-height, 0px));
+	}
 	/* Expanded tabs occupy the canvas segment of the shared header. They are out of
 	   leaf flow, so the document begins directly below the header with no second band. */
 	.canvas-header-strip {

@@ -13,7 +13,19 @@ import { visitDividers } from './threadUpdateCards';
 /** `[from_seq, to_seq, rows_shown]`: rows inside a collapsed block are not in the count. */
 export type InViewRange = [number, number, number];
 
+export interface ReplyComment {
+	id: string;
+	seq: number;
+	from_off: number;
+	to_off: number;
+	quote: string;
+	anchor_prefix: string;
+	anchor_suffix: string;
+	note: string;
+}
+
 export interface ReplyContext {
+	comments?: ReplyComment[];
 	in_view?: InViewRange[];
 	first_unread?: { seq: number; truncated: boolean };
 }

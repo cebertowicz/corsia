@@ -23,7 +23,7 @@ from api import google as google_api
 from connections.connected_accounts import GOOGLE_PROVIDER, MICROSOFT_PROVIDER, create_account, list_accounts, resolve_credentials
 from connections.app_reach import AppReach
 from connections.google import client as google_client
-from connections.google import oauth
+from connections.google import oauth, reach_replies
 from infra import key_store
 from infra.corsia_agent import set_corsia_agent
 from infra.database import get_db
@@ -304,7 +304,7 @@ async def test_connect_when_connected_and_without_a_client_file(google, conducto
     out = await GoogleConnectTool().execute(_thread_id=conductor)
     assert out == f"Error: {oauth.NEEDS_CLIENT_FILE}"
     assert "If none exists yet, follow skill `google-setup`" in out
-    assert "Never create a second project or client when one already exists." in out
+    assert "Never create a second project when one already exists." in out
     account_id = await _connect(google, conductor, client_file)
     out = json.loads(await GoogleConnectTool().execute(_thread_id=conductor, account_id=account_id))
     assert out == {
@@ -800,8 +800,8 @@ async def test_callback_uses_browser_copy_without_agent_tool_names(monkeypatch):
             oauth.GoogleSignInError(reply, browser_message=reply) for reply in (
                 oauth.ALREADY_CONNECTED.format(address="sam@example.test", reach=""),
                 oauth.ALREADY_NEEDS_SIGN_IN.format(address="sam@example.test"),
-                oauth.CONNECTED_NOT_FOR_PROJECT.format(address="sam@example.test", project="Garden plan"),
-                oauth.CONNECTED_NOT_FOR_ALL.format(address="sam@example.test"),
+                reach_replies.CONNECTED_NOT_FOR_PROJECT.format(address="sam@example.test", project="Garden plan"),
+                reach_replies.CONNECTED_NOT_FOR_ALL.format(address="sam@example.test"),
             )
         ),
     )

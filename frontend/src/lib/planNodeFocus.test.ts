@@ -23,7 +23,17 @@ describe('focusPlanNode', () => {
 
 		expect(show).toHaveBeenCalledWith('t1');
 		expect(focus).toHaveBeenCalledOnce();
-		expect(focus).toHaveBeenCalledWith('node-1', null);
+		expect(focus).toHaveBeenCalledWith('node-1', null, false);
+	});
+
+	it('asks the pane to open the row’s details when the caller does', async () => {
+		const focus = vi.fn();
+		register(registerPlanSurface(() => true));
+		register(registerNodeFocus('t1', focus));
+
+		await focusPlanNode('t1', 'node-1', null, true);
+
+		expect(focus).toHaveBeenCalledWith('node-1', null, true);
 	});
 
 	it('hands a nested subagent-plan node over with the step that nests it', async () => {
@@ -33,7 +43,7 @@ describe('focusPlanNode', () => {
 
 		await focusPlanNode('t1', 'sub', 'spawn');
 
-		expect(focus).toHaveBeenCalledWith('sub', 'spawn');
+		expect(focus).toHaveBeenCalledWith('sub', 'spawn', false);
 	});
 
 	it('drops the request when no surface can show the plan', async () => {
@@ -88,6 +98,6 @@ describe('focusPlanNode', () => {
 
 		await focusPlanNode('t1', 'node-1');
 
-		expect(focus).toHaveBeenCalledWith('node-1', null);
+		expect(focus).toHaveBeenCalledWith('node-1', null, false);
 	});
 });

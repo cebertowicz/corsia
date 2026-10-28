@@ -85,6 +85,13 @@ describe('DocViewerStatus freshness metadata', () => {
 		expect(details?.getAttribute('aria-expanded')).toBe('true');
 	});
 
+	it('does not claim a zero comment count before the document is ready', () => {
+		render(value(), undefined, { ready: false, commentCount: 0 });
+		const pill = host.querySelector<HTMLButtonElement>('.comment-status')!;
+		expect(pill.getAttribute('aria-label')).toBe('Comments unavailable until the document opens');
+		expect(pill.querySelector('.count')).toBeNull();
+	});
+
 	it('names unsent feedback in the comment pill; Send waits for held document comments', () => {
 		render(value(), undefined, { commentCount: 2 });
 		component!.sync('artifact-1', { open_count: 3, owner_label: 'Style', undelivered_batches: [] });

@@ -296,6 +296,6 @@ class TestInvokeCCSubagent:
         assert "num_turns=30" in message
 
     def test_envelope_signals_skips_missing_keys(self):
-        from reviewer.reviewer_backends import _envelope_signals
-        assert _envelope_signals({"subtype": "error_max_turns"}) == "subtype=error_max_turns"
-        assert _envelope_signals({}) == ""
+        from reviewer.failures import envelope_signals
+        assert envelope_signals({"subtype": "error_max_turns"}) == "subtype=error_max_turns"
+        assert envelope_signals({}) == ""

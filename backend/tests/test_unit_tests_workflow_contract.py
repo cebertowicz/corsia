@@ -212,7 +212,7 @@ def test_live_reviewer_proof_is_a_separate_static_workflow_dispatch_job() -> Non
     live_reviewer = _workflow_job(workflow, "live-reviewer")
 
     assert "name: Integration tests (L3)" in integration
-    assert "timeout-minutes: 15" in integration
+    assert "timeout-minutes: 25" in integration
     assert "Run integration tests" in integration
     assert "Run bounded live Haiku reviewer proof" not in integration
     assert "!(github.event_name == 'workflow_dispatch' && inputs.live_reviewer)" in integration

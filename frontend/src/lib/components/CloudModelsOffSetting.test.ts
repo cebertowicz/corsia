@@ -89,7 +89,7 @@ describe('CloudModelsOffSetting', () => {
 		expect(host.querySelector('.status.error')).not.toBeNull();
 		expect((toggle() as HTMLButtonElement).getAttribute('aria-pressed')).toBe('false');
 	});
-	it('load failed: says the setting did not load, hides the switch, and Try again reloads it', async () => {
+	it('load failed: says the setting did not load, hides the switch, and Retry reloads it', async () => {
 		let reads = 0;
 		vi.stubGlobal('fetch', vi.fn(async () => (++reads === 1
 			? { ok: false, status: 500, json: async () => ({}) }
@@ -99,7 +99,7 @@ describe('CloudModelsOffSetting', () => {
 		await vi.waitFor(() => expect(host.querySelector('[role="alert"]')?.textContent).toContain('Couldn’t load this setting.'));
 		expect(text()).not.toContain('subscriptions');
 		expect(toggle()).toBeNull();
-		(Array.from(host.querySelectorAll('button')).find((b) => b.textContent === 'Try again') as HTMLButtonElement).click();
+		(Array.from(host.querySelectorAll('button')).find((b) => b.textContent === 'Retry') as HTMLButtonElement).click();
 		await vi.waitFor(() => expect(toggle()?.getAttribute('aria-pressed')).toBe('true'));
 		expect(host.querySelector('[role="alert"]')).toBeNull();
 	});

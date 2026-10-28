@@ -5,9 +5,8 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
-import tempfile
 from typing import Any
-from urllib.parse import unquote, urlsplit
+
 
 from infra.default_port import DEFAULT_BACKEND_PORT
 from tools.base import Tool
@@ -19,6 +18,7 @@ from tools.browser_runtime import (
 )
 from tools.filesystem_effects import copy_bound_file
 from tools.filesystem_gate import _resolve_path
+from tools.private_runtime_files import BROWSER_STAGING_DIR, private_mkdtemp
 
 
 class BrowserOpenTool(Tool):
@@ -57,50 +57,13 @@ class BrowserOpenTool(Tool):
 
     async def execute(self, url: str, wait_for_load: bool = True,
                       show_window: bool = False, **kwargs: Any) -> str:
-        thread_id, project_id = _execution_context(kwargs)
-        effective_url = url
-        reviewed_local_path = False
-        lease_id: str | None = None
-        split = urlsplit(url)
-        if split.scheme.lower() == "file":
-            if split.netloc not in {"", "localhost"}:
-                return "Error: Remote file URLs are not supported."
-            if split.query or split.fragment:
-                return "Error: Local file URLs cannot include a query or fragment."
-            raw_path = unquote(split.path)
-            from tools.host_access_gate import consume_current_action_permit
-
-            consumed = await consume_current_action_permit(
-                thread_id=thread_id,
-                project_id=project_id,
-                tool=self,
-                tool_name=self.name,
-                params={
-                    "url": url,
-                    "wait_for_load": wait_for_load,
-                    "show_window": show_window,
-                },
-            )
-            if consumed is not None:
-                if consumed.resolved_path is None:
-                    return "Error: reviewed local browser path is unavailable"
-                local_path = consumed.resolved_path
-                reviewed_local_path = True
-                lease_id = consumed.lease_id
-            else:
-                try:
-                    local_path = await asyncio.to_thread(_resolve_path, raw_path, self._workspace)
-                except PermissionError as exc:
-                    return f"Error: {exc}"
-            if reviewed_local_path:
-                return await self._open_reviewed_local_file(
-                    local_path,
-                    thread_id=thread_id,
-                    wait_for_load=wait_for_load,
-                    show_window=show_window,
-                    lease_id=lease_id,
-                )
-            effective_url = local_path.as_uri()
+        thread_id, _ = _execution_context(kwargs)
+        from host_access.browser_navigation import normalize_url
+        from host_access.browser_session_state import BrowserSessionError
+        try:
+            effective_url = normalize_url(url)
+        except BrowserSessionError as exc:
+            return f"Error: {exc}"
 
         # agent-browser's open-URL command waits for navigation inside the
         # command itself. Long-lived applications can therefore make it time out
@@ -111,6 +74,7 @@ class BrowserOpenTool(Tool):
             ["open", "about:blank"],
             thread_id=thread_id,
             show_window=show_window,
+            notice=False,  # Deliver a one-time session notice with the navigation result returned below.
         )
         if result.startswith("Error"):
             return result
@@ -121,6 +85,7 @@ class BrowserOpenTool(Tool):
                 f"location.href = {json.dumps(effective_url)}; 'navigating'",
             ],
             thread_id=thread_id,
+            navigation_url=effective_url,
         )
         if navigation_result.startswith("Error"):
             return navigation_result
@@ -133,54 +98,6 @@ class BrowserOpenTool(Tool):
             )
             return f"{navigation_result}\n{wait_result}".strip()
         return navigation_result
-
-    async def _open_reviewed_local_file(
-        self,
-        local_path: Path,
-        *,
-        thread_id: str,
-        wait_for_load: bool,
-        show_window: bool,
-        lease_id: str | None,
-    ) -> str:
-        if local_path.suffix.lower() in {".htm", ".html"}:
-            return (
-                "Error: reviewed host HTML cannot be opened safely because "
-                "relative resources cannot be descriptor-bound. Copy the "
-                "document and its resources into the workspace first."
-            )
-        try:
-            with tempfile.TemporaryDirectory(
-                prefix="corsia-browser-open-"
-            ) as stage_dir:
-                stage_path = (
-                    Path(stage_dir).resolve(strict=True)
-                    / f"document{local_path.suffix}"
-                )
-                copy_bound_file(local_path, stage_path)
-                result = await _run(
-                    ["open", stage_path.as_uri()],
-                    thread_id=thread_id,
-                    lease_id=lease_id,
-                    show_window=show_window,
-                )
-                if result.startswith("Error"):
-                    return result
-                wait_result = await _run(
-                    ["wait", "--load", "networkidle"],
-                    thread_id=thread_id,
-                    lease_id=lease_id,
-                    timeout=15,
-                )
-                if wait_result.startswith("Error"):
-                    return wait_result
-                return (
-                    f"{result}\n{wait_result}".strip()
-                    if wait_for_load
-                    else result
-                )
-        except (OSError, PermissionError) as exc:
-            return f"Error: {exc}"
 
 
 class BrowserScreenshotTool(Tool):
@@ -243,8 +160,8 @@ class BrowserScreenshotTool(Tool):
             lease_id = None
 
         try:
-            with tempfile.TemporaryDirectory(
-                prefix="corsia-browser-screenshot-"
+            with private_mkdtemp(
+                BROWSER_STAGING_DIR, prefix="corsia-browser-screenshot-"
             ) as stage_dir:
                 stage_path = Path(stage_dir).resolve(strict=True) / "screenshot.png"
                 args = ["screenshot", str(stage_path)]

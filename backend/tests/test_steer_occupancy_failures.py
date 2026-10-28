@@ -40,11 +40,12 @@ async def test_write_failure_accounting_distinguishes_no_write_from_ambiguous(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("rejected", [False, True])
 async def test_codex_rpc_rejection_releases_count_but_lost_ack_preserves_it(monkeypatch, rejected):
+    from unittest.mock import Mock
     from subagents.codex_app_server import CodexAppServerSession, CodexAppServerError
 
     session = CodexAppServerSession(binary="unused", task=None, codex_thread_id="thread")
     session._track_active_turn("turn")
-    monkeypatch.setattr("subagents.codex_app_server.STEER_ACK_TIMEOUT", 0.01)
+    monkeypatch.setattr("subagents.codex_app_server.STEER_REQUEST_TIMEOUT", 0.01)
 
     def write(payload):
         request = json.loads(payload)
@@ -56,11 +57,12 @@ async def test_codex_rpc_rejection_releases_count_but_lost_ack_preserves_it(monk
     async def drain():
         return None
 
-    session._proc = SimpleNamespace(returncode=None, stdin=SimpleNamespace(write=write, drain=drain))
+    session._proc = SimpleNamespace(returncode=None, stdin=SimpleNamespace(write=write, drain=drain), kill=Mock())
     with pytest.raises(CodexAppServerError):
         await session.steer("input", input_context=("input", 20))
     assert session.tool_context.pending_inputs == ({} if rejected else {"input": 20})
     assert session._pending == {}
+    session._proc.kill.assert_not_called()
 
 
 @pytest.mark.asyncio

@@ -23,6 +23,7 @@ ToolCategory = Literal[
     "artifacts",
     "connection_admin",
     "host_access",
+    "processes",
     "discovery",
     "email",
     "microsoft",

@@ -1,6 +1,8 @@
 <script lang="ts">
 	import InputBarControls from './InputBarControls.svelte';
 	import QueuedInputStack from './QueuedInputStack.svelte';
+	import ChatCommentChips from './ChatCommentChips.svelte';
+	import type { ChatComment } from '$lib/chatCommentAnchors';
 	import type { Attachment, SheetView } from './inputBarHelpers';
 	import { updateOperation, updateRestarting } from '$lib/update/store';
 	import { holdsNewWork } from '$lib/update/model';
@@ -10,6 +12,9 @@
 		inputEl = $bindable<HTMLDivElement | undefined>(),
 		threadId,
 		pendingAttachments,
+		comments,
+		onEditComment,
+		onRemoveComment,
 		isMultiLine,
 		sheetView,
 		toggleSheet,
@@ -35,6 +40,9 @@
 		inputEl?: HTMLDivElement;
 		threadId: string | null;
 		pendingAttachments: Attachment[];
+		comments: ChatComment[];
+		onEditComment: (id: string) => void;
+		onRemoveComment: (id: string) => void;
 		isMultiLine: boolean;
 		sheetView: SheetView;
 		toggleSheet: (view: Exclude<SheetView, null>) => void;
@@ -113,6 +121,10 @@
 					</div>
 				{/each}
 			</div>
+		{/if}
+
+		{#if comments.length}
+			<ChatCommentChips {comments} onEdit={onEditComment} onRemove={onRemoveComment} />
 		{/if}
 
 		<!-- svelte-ignore a11y_no_static_element_interactions -->

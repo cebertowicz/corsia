@@ -83,9 +83,11 @@ class EmailDraftTool(Tool):
             "Save an email as a draft document the person can read, from the account named "
             "by account_id. Gmail accounts append their signature. Nothing is sent. Returns "
             "draft_id and revision, which email_send needs. It is sent from the same account. "
-            "Pass draft_id to replace an open draft; every field is required again, so "
-            "send the whole message. Pass reply_to_message_id, a message id from the same account, "
-            f"to thread the email under that message. {AFTER_DRAFT}"
+            "Pass draft_id to replace an open draft; send the whole message again. Pass "
+            "reply_to_message_id, a message id from the same account, to thread the email under "
+            "that message. A replaced draft stays a reply to its earlier message unless you pass "
+            "another one; for an email that is not a reply, start a new draft without draft_id. "
+            f"{AFTER_DRAFT}"
         )
 
     @property

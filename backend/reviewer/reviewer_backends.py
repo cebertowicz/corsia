@@ -11,13 +11,14 @@ from pathlib import Path
 
 from infra import config
 from subagents.managed_launch import codex_project_discovery_args
+from tools.private_runtime_files import REVIEWER_OUTPUT_DIR, private_mkstemp
 from reviewer.failures import (
     CCMaxTurnsError,
     CCRateLimitError,
     CCUnavailableError,
     cc_max_turns as _cc_max_turns,
     classify_cc_error as _classify_cc_error,
-    envelope_signals as _envelope_signals,
+    envelope_failure_detail,
     is_usage_or_quota_limit as _is_usage_or_quota_limit,
     parse_envelope,
     raise_cli_failure,
@@ -137,10 +138,10 @@ def invoke_cc_subagent(
 
     result_text = envelope.get("result")
     if envelope.get("is_error") or envelope.get("subtype") != "success":
-        signals = _envelope_signals(envelope) or f"subtype={envelope.get('subtype')}"
         raise _classify_cc_error(
             f"{result_text} {stderr} subtype={envelope.get('subtype')}",
-            f"CC error envelope ({signals}): {str(result_text)[:200]}",
+            f"CC error envelope: {envelope_failure_detail(envelope, output, stderr)}",
+            envelope,
         )
 
     usage = envelope.get("usage") or {}
@@ -168,8 +169,8 @@ def invoke_codex_reviewer(
     codex_bin = os.environ.get("CODEX_BIN", "codex")
     output_path: str | None = None
     try:
-        with tempfile.NamedTemporaryFile("w", delete=False) as output_file:
-            output_path = output_file.name
+        descriptor, output_path = private_mkstemp(REVIEWER_OUTPUT_DIR, prefix="codex-last-", suffix=".txt")
+        os.close(descriptor)
 
         cmd = [
             codex_bin, "exec",

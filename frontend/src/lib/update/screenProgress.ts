@@ -111,7 +111,7 @@ export class ProgressModel {
 		return Math.max(this.value, this.lifted);
 	}
 
-	/** One decimal on screen and bar; 100 only once the new version is confirmed. */
+	/** The real percentage to one decimal, never 100: that comes only once the new version is confirmed. The screen shows a whole number counting up to it. */
 	get percent(): number {
 		return Math.min(99.9, Math.floor(this.shown * 10 + 1e-8) / 10);
 	}
@@ -148,9 +148,13 @@ export function drainCount(total: number | null | undefined, blocking: number | 
 	return { done: total - Math.min(total, blocking ?? total), total };
 }
 
+/** A remote client cannot see the restart, so its time-based guess stops where the restart step ends and never claims a step it has not seen. */
+export const REMOTE_ESTIMATE_CEILING = BANDS.plain.restarting!.end;
+
 /** A remote client estimates only from its last confirmed screen value and the usual restart time. */
 export function remoteEstimate(lastSeen: number, elapsedMs: number, usualSeconds: number): number {
+	if (lastSeen >= REMOTE_ESTIMATE_CEILING) return lastSeen;
 	const usual = Math.max(1, usualSeconds) * 1000;
 	const share = Math.min(1, Math.max(0, elapsedMs / usual));
-	return Math.min(95, Math.max(lastSeen, lastSeen + (95 - lastSeen) * share));
+	return lastSeen + (REMOTE_ESTIMATE_CEILING - lastSeen) * share;
 }

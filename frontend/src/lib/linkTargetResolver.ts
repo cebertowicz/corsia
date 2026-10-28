@@ -154,7 +154,7 @@ async function routeLinkTarget(href: string, deps: LinkResolverDeps): Promise<Li
 
 	const threadId = deps.activeThreadId();
 	if (!threadId) {
-		deps.showError('Open a conversation before opening a linked document');
+		deps.showError('Open a chat before opening a linked document');
 		return failed('workspace_document', 'no_active_thread');
 	}
 	try {

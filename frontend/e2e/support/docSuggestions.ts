@@ -3,7 +3,7 @@ import { expect, type APIRequestContext, type Page, type TestInfo } from '@playw
 import { createSession, loginByUrl, TEST_TOKEN, waitForModelListLoaded } from './corsia';
 
 /** A comment left by another thread: a suggestion when it has a `replacement`, a plain comment when it has none. */
-export interface SeededReviewItem { quote: string; replacement?: string; body: string }
+export interface SeededReviewItem { quote: string; replacement?: string; body: string; insert_after?: boolean; author?: 'agent' | 'person' }
 
 export async function chooseThread(page: Page, title: string) {
 	if ((page.viewportSize()?.width ?? 0) <= 768) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
@@ -36,12 +36,18 @@ export async function openSuggestionDocument(page: Page, request: APIRequestCont
 	expect(seeded.ok(), await seeded.text()).toBeTruthy();
 	const artifactId = (await seeded.json()).artifact.id;
 	const ids: string[] = [];
-	for (const { quote, replacement, body } of suggestions) {
-		const created = await request.post('/api/delegation/docs/comments', {
-			params, data: { artifact_id: artifactId, quote, replacement, body, as_session_id: reviewerId },
-		});
+	for (const { quote, replacement, body, insert_after, author } of suggestions) {
+		const start = text.indexOf(quote);
+		const created = author === 'person'
+			? await request.post(`/api/artifacts/${artifactId}/comments`, {
+				params, data: { body, anchor_text: quote, from_off: start, to_off: start + quote.length, replacement, delivery_policy: 'immediate' },
+			})
+			: await request.post('/api/delegation/docs/comments', {
+				params, data: { artifact_id: artifactId, quote, replacement, body, insert_after, as_session_id: reviewerId },
+			});
 		expect(created.ok(), await created.text()).toBeTruthy();
-		ids.push((await created.json()).comment.id as string);
+		const result = await created.json();
+		ids.push((result.comment ?? result).id as string);
 	}
 
 	await page.addInitScript(({ ownerId, docPath, name, artifactId, splitWidth }) => {

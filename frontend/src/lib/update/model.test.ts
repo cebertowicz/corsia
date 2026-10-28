@@ -36,8 +36,9 @@ describe('update model', () => {
 
 	it('words the cost as one sentence for 0, 1 and several working agents', () => {
 		expect(costLine(60, 0)).toBe('CORSIA restarts to finish.');
-		expect(costLine(60, 1)).toBe('CORSIA restarts for about a minute; 1 working agent pauses and picks up where it left off.');
-		expect(costLine(120, 40)).toBe('CORSIA restarts for about 2 minutes; 40 working agents pause and pick up where they left off.');
+		expect(costLine(1, 1)).toBe('The restart usually takes 1 second; 1 working agent pauses and picks up where it left off.');
+		expect(costLine(60, 1)).toBe('The restart usually takes a minute; 1 working agent pauses and picks up where it left off.');
+		expect(costLine(120, 40)).toBe('The restart usually takes 2 minutes; 40 working agents pause and pick up where they left off.');
 		expect(costLine(null, 3)).toBe('CORSIA restarts to finish; 3 working agents pause and pick up where they left off.');
 	});
 
@@ -60,16 +61,16 @@ describe('update model', () => {
 	});
 
 	it.each([
-		['drain_failed', "Your agents didn't reach a safe stopping point in time.", 'Try again'],
-		['update_timed_out', 'The update took too long to download and build.', 'Try again'],
-		['prepare_failed', "Couldn't prepare the update.", 'Try again'],
-		['index_locked', "Another program is using CORSIA's files.", 'Try again'],
+		['drain_failed', "Your agents didn't reach a safe stopping point in time.", 'Retry'],
+		['update_timed_out', 'The update took too long to download and build.', 'Retry'],
+		['prepare_failed', "Couldn't prepare the update.", 'Retry'],
+		['index_locked', "Another program is using CORSIA's files.", 'Retry', 'Wait for it to finish, then select Retry. If it doesn’t clear, ask the CORSIA agent to remove the leftover lock. CORSIA kept running and nothing was changed.'],
 		['checkout_detached', "This copy of CORSIA can't update itself because it isn't set up to follow updates.", null],
-		['checkout_dirty', 'This copy of CORSIA has local changes.', 'Try again'],
+		['checkout_dirty', 'This copy of CORSIA has local changes.', 'Retry', 'Save or discard them, then select Retry. CORSIA kept running and nothing was changed.'],
 		['restart_pending', 'An update is ready and waiting for a restart.', 'Restart now'],
-		['rolled_back', "Couldn't start the new version.", 'Try again'],
-		['version_unverified', "Couldn't confirm the new version.", 'Try again', "The update's last check didn't pass, so CORSIA can't tell which version is running."],
-		['wrong_version_running', 'CORSIA started a different version.', 'Try again', "It isn't the version this update was for."],
+		['rolled_back', "Couldn't start the new version.", 'Retry'],
+		['version_unverified', "Couldn't confirm the new version.", 'Retry', "The update's last check didn't pass, so CORSIA can't tell which version is running."],
+		['wrong_version_running', 'CORSIA started a different version.', 'Retry', "It isn't the version this update was for."],
 	] as const)('words %s truthfully and names its action', (code, headline, retryLabel, body) => {
 		const copy = failureCopy(failure(code));
 		expect(copy.headline).toBe(headline);
@@ -103,7 +104,7 @@ describe('update model', () => {
 		expect(copy.title).toBe("Update didn't finish");
 		expect(copy.headline).toBe('The update stopped before it finished.');
 		expect(copy.body).toBe('');
-		expect(copy.retryLabel).toBe('Try again');
+		expect(copy.retryLabel).toBe('Retry');
 		expect(copy.headline).not.toContain('Stored failure summary.');
 	});
 
@@ -124,7 +125,7 @@ describe('update model', () => {
 		expect(rolledBack.title).toBe("Update didn't finish");
 		expect(rolledBack.headline).toBe("Couldn't start the new version.");
 		expect(rolledBack.body).toBe('CORSIA is still running the version it had.');
-		expect(rolledBack.retryLabel).toBe('Try again');
+		expect(rolledBack.retryLabel).toBe('Retry');
 		const refused = failureCopy(failureFromVerdict({ kind: 'refused', message: 'A restart is already in flight.' }));
 		expect(refused.title).toBe("Update didn't start");
 		expect(refused.headline).toBe('A restart is already in flight.');
@@ -136,9 +137,15 @@ describe('update model', () => {
 			...failure('disk_space'),
 			detail: JSON.stringify({ needed_bytes: 16_000_000_000, free_bytes: 4_000_000_000 }),
 		});
-		expect(copy.body).toContain('Needs 16 GB free; this computer has 4 GB.');
+		expect(copy.body).toBe('Needs 16 GB free; this computer has 4 GB. Free up space, then select Retry. CORSIA kept running and nothing was changed.');
 		expect(copy.toastLine).toBe('Needs 12 GB more free space');
-		expect(copy.retryLabel).toBe('Try again after freeing space');
+		expect(copy.retryLabel).toBe('Retry');
+	});
+
+	it('gives the next step when disk figures are unavailable', () => {
+		const copy = failureCopy(failure('disk_space'));
+		expect(copy.body).toBe('Free up space, then select Retry. CORSIA kept running and nothing was changed.');
+		expect(copy.retryLabel).toBe('Retry');
 	});
 
 	it('holds queued input only after an update takes ownership of the drain', () => {

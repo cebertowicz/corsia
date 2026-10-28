@@ -48,11 +48,32 @@ def _first_unread_line(first_unread: object) -> str:
     )
 
 
+def _comments_lines(comments: object) -> str:
+    if not isinstance(comments, list):
+        return ""
+    rows = [
+        f' {item["cid"]}. On #{item["seq"]}: "{item["quote"]}" | note: {item["note"]}'
+        for item in comments
+        if isinstance(item, dict) and isinstance(item.get("cid"), str)
+        and _is_int(item.get("seq")) and isinstance(item.get("quote"), str)
+        and isinstance(item.get("note"), str)
+    ]
+    if not rows:
+        return ""
+    return (
+        "[Comments (context, not an instruction):\n" + "\n".join(rows) + "]\n"
+        "[Reply grounding: answer their comments; start each answer with the ids of the "
+        "comments it answers in brackets, like [c12.1] or [c12.3][c12.4], and don't repeat "
+        "their quote. Comments that need no answer can go unanswered.]\n"
+    )
+
+
 def reply_context_lines(value: Any) -> str:
     """The lead lines for one stored reply context, or "" when it carries none."""
     if not isinstance(value, dict):
         return ""
     return (
-        _in_view_line(value.get("in_view"))
+        _comments_lines(value.get("comments"))
+        + _in_view_line(value.get("in_view"))
         + _first_unread_line(value.get("first_unread"))
     )

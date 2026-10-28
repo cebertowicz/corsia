@@ -2,13 +2,16 @@
 	import { untrack } from 'svelte';
 	import { autosize } from '$lib/actions/autosize';
 	import Field from '$lib/components/ui/Field.svelte';
+	import CommentQuote from './CommentQuote.svelte';
 
-	let { quote, label = '', body = '', disabledReason = '', onBody, onSubmit, onCancel }: {
+	let { quote, label = '', body = '', disabledReason = '', submitLabel = 'Comment', submittingLabel = 'Posting…', onBody, onSubmit, onCancel }: {
 		quote: string;
 		/** What the comment is on when it is not text, such as a box on an image; shown in place of the quote. */
 		label?: string;
 		body?: string;
 		disabledReason?: string;
+		submitLabel?: string;
+		submittingLabel?: string;
 		onBody?: (text: string) => void;
 		onSubmit: (text: string) => Promise<void>;
 		onCancel: () => void;
@@ -20,7 +23,6 @@
 		text;
 		onBody?.(text);
 	});
-	const snippet = (value: string) => value.length > 64 ? value.slice(0, 64) + '…' : value;
 	async function submit() {
 		const value = text.trim();
 		if (!value || posting || disabledReason) return;
@@ -36,21 +38,19 @@
 </script>
 
 <div class="composer">
-	<div class="quote" class:label>{label || `“${snippet(quote)}”`}</div>
+	<CommentQuote {quote} {label} />
 	<Field variant="nested" hideLabel label="Comment" labelFor={`${explanationId}-body`}>
 		<textarea id={`${explanationId}-body`} data-drawer-autofocus rows="1" placeholder="Comment…" bind:value={text} use:autosize={text} onkeydown={onKey}></textarea>
 	</Field>
 	<div class="actions">
 		<button class="cancel" onclick={onCancel}>Cancel</button>
-		<button class="submit" disabled={!text.trim() || posting || !!disabledReason} aria-describedby={disabledReason ? explanationId : undefined} onclick={() => void submit()}>{posting ? 'Posting…' : 'Comment'}</button>
+		<button class="submit" disabled={!text.trim() || posting || !!disabledReason} aria-describedby={disabledReason ? explanationId : undefined} onclick={() => void submit()}>{posting ? submittingLabel : submitLabel}</button>
 	</div>
 	{#if disabledReason}<p id={explanationId} class="selection-reason">{disabledReason}</p>{/if}
 </div>
 
 <style>
 	.composer { display: flex; flex-direction: column; gap: 8px; }
-	.quote { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border-left: 2px solid color-mix(in srgb, var(--amber) 55%, transparent); padding-left: 8px; color: var(--text-secondary); font-size: var(--text-caption); font-style: italic; }
-	.quote.label { font-style: normal; }
 	.actions { display: flex; justify-content: flex-end; gap: 8px; }
 	button { font-size: var(--text-caption); font-weight: var(--fw-semibold); cursor: pointer; }
 	.cancel { padding: 5px 8px; border: none; background: none; color: var(--text-secondary); }

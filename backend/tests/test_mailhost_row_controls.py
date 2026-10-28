@@ -1,4 +1,4 @@
-"""A mail-host row on screen: what the list says about each state, and the row's own Try again and
+"""A mail-host row on screen: what the list says about each state, and the row's own Retry and
 Edit server, which run only behind the person's session and CORSIA password (H17).
 
 Servers are local TLS fakes (``mailhost_fakes``). The routes are driven over ASGI like the app's own.
@@ -76,7 +76,7 @@ async def _listed(client, account_id: str) -> dict:
 
 
 async def _check(client, account_id, *, token=OWNER_SESSION_TOKEN, body=None):
-    """Try again: one press, so no body unless a test sends one."""
+    """Retry: one press, so no body unless a test sends one."""
     return await client.post(f"/api/mcp/accounts/{account_id}/mailhost/check", headers=_auth(token), json=body)
 
 
@@ -175,7 +175,7 @@ async def test_a_mail_host_entry_can_be_cleared_but_the_card_is_told_it_cannot_b
     assert refused.status_code == 400 and refused.json()["detail"]["message"] == key_store.removal_refusal(key)
 
 
-# -- Try again ------------------------------------------------------------------------------------
+# -- Retry ----------------------------------------------------------------------------------------
 # One press: no CORSIA password, no body. It is the person's alone by session provenance (an agent or
 # API token is refused), takes only the row id and reads the stored servers when it runs.
 
@@ -279,7 +279,7 @@ async def test_a_second_try_again_while_one_runs_joins_it_and_starts_no_second_c
     again = await _check(unreachable.client, unreachable.account_id)
     assert again.status_code == 200
     await check.wait_for_checks()
-    assert len(runs) == 2, "once the first ended, Try again starts a new check"
+    assert len(runs) == 2, "once the first ended, Retry starts a new check"
 
 
 # -- Edit server ----------------------------------------------------------------------------------

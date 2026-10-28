@@ -64,6 +64,8 @@ export type TranscriptUpdateEntry = {
 	id: string;
 	card: UpdateCard;
 	earlier: number;
+	/** Focus: the open person steps that read as this one line, in order; absent for a single step. */
+	group?: UpdateCard[];
 };
 
 /** Retained non-attention lifecycle outcomes, presented after their work gap. */

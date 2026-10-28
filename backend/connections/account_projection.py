@@ -7,7 +7,7 @@ import stat
 import uuid
 
 from connections.account_evidence import discovery_record, store_record
-from connections.account_home import source_auth_exists, source_auth_path
+from connections.account_home import missing_home_reason, source_auth_exists, source_auth_path
 from connections.account_policy import AccountAdmissionError
 from connections.account_receipts import ReceiptFence, receipt_is_current
 from connections.vendor_accounts import get_account
@@ -65,20 +65,92 @@ def _gate(record, receipt):
 
 
 def _fail(account, record, receipt, cause, source, destination, *, db):
-    record['auth_projection']['failed'] = {
-        'cause': cause, 'source': str(source), 'destination': str(destination),
-        'account_revision': receipt.account_revision, 'login_seq': receipt.login_seq, 'at': utc_now_iso()}
-    store_record(account['id'], record, db=db)
+    if cause != SOURCE_MISSING:
+        record['auth_projection']['failed'] = {
+            'cause': cause, 'source': str(source), 'destination': str(destination),
+            'account_revision': receipt.account_revision, 'login_seq': receipt.login_seq, 'at': utc_now_iso()}
+        store_record(account['id'], record, db=db)
     from connections.account_holds import refresh_account_holds
 
     refresh_account_holds(account['id'], db=db)
 
 
+def repair_moved_projections(*, legacy_root: Path | None = None, state_root: Path | None = None, db=None) -> None:
+    """Repair the legacy state-root move at startup; remove with heal_moved_state_paths."""
+    from infra.config import STATE_ROOT
+    from infra.moved_state_paths import _under_current
+    from infra.platform_paths import legacy_state_root
+
+    legacy = Path(legacy_root) if legacy_root is not None else legacy_state_root()
+    current = str(Path(state_root if state_root is not None else STATE_ROOT).resolve(strict=False))
+    prefixes = tuple(dict.fromkeys((str(legacy), str(legacy.resolve(strict=False)))))
+    with write_transaction(db, scope='account_projection_move_repair') as connection:
+        rows = connection.execute(
+            "SELECT a.id FROM vendor_accounts a JOIN connections c ON c.id=a.connection_id "
+            "WHERE c.provider='codex' AND a.discovery_json IS NOT NULL"
+        ).fetchall()
+        for row in rows:
+            account = get_account(row['id'], db=connection)
+            record = discovery_record(account)
+            projection = record['auth_projection']
+            before = repr(projection)
+            failed = projection.get('failed')
+            if isinstance(failed, dict):
+                if failed.get('cause') == SOURCE_MISSING:
+                    projection['failed'] = None
+                else:
+                    for field in ('source', 'destination'):
+                        value = failed.get(field)
+                        if isinstance(value, str):
+                            failed[field] = _under_current(value, prefixes, current) or value
+            if current not in prefixes:
+                _repair_moved_homes(projection, prefixes, current, account['revision'], record['login_seq'])
+            if repr(projection) != before:
+                store_record(account['id'], record, db=connection)
+                from connections.account_holds import refresh_account_holds
+                refresh_account_holds(account['id'], db=connection)
+
+
+def _repair_moved_homes(projection, prefixes, current, revision, login_seq):
+    from infra.moved_state_paths import _under_current
+
+    for old_destination, entry in list(projection['homes'].items()):
+        moved = _under_current(old_destination, prefixes, current)
+        if moved is None:
+            for field in ('source', 'destination', 'home'):
+                value = entry.get(field)
+                if isinstance(value, str):
+                    entry[field] = _under_current(value, prefixes, current) or value
+            continue
+        old_source = entry['source']
+        destination = Path(moved)
+        state = _link_state(Path(old_source), destination)
+        del projection['homes'][old_destination]
+        if state == 'absent':
+            continue
+        if state == 'intact':  # no turn survives a restart, so even a temporary home's link is unowned
+            destination.unlink()
+            continue
+        for field in ('source', 'destination', 'home'):
+            value = entry.get(field)
+            if isinstance(value, str):
+                entry[field] = _under_current(value, prefixes, current) or value
+        projection['homes'].setdefault(moved, entry)  # a launch after the home repair may own it already
+        if _link_state(Path(entry['source']), destination) == 'intact':
+            continue  # already linked to the moved source
+        failed = projection.get('failed')
+        if state == 'changed' and (not failed or (failed.get('account_revision'), failed.get('login_seq')) != (
+                revision, login_seq)):
+            projection['failed'] = {
+                'cause': CHANGED, 'source': entry['source'], 'destination': moved,
+                'account_revision': revision, 'login_seq': login_seq, 'at': utc_now_iso()}
+
+
 def projection_gate(receipt: ReceiptFence, *, db=None) -> None:
     """Account-wide gate before a caller even allocates a fresh temporary home."""
     with write_transaction(db, scope='account_projection_gate') as connection:
-        _, record = _current(receipt, db=connection)
-        cause = _gate(record, receipt)
+        account, record = _current(receipt, db=connection)
+        cause = missing_home_reason(account) or _gate(record, receipt)
     if cause:
         raise AccountAdmissionError(cause)
 

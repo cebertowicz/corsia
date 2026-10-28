@@ -8,7 +8,6 @@ import json
 import os
 import secrets
 import sys
-import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -23,6 +22,7 @@ from subagents.harness_tool_publication import (
     ToolBridgeResult,
     publish_completed_tool_result,
 )
+from tools.private_runtime_files import HARNESS_MCP_DIR, private_mkstemp
 from tools.registry import ToolRegistry
 from tools.recorded_call import (
     CompletedToolCall,
@@ -87,13 +87,7 @@ def write_cc_mcp_config(
             }
         }
     }
-    out_dir = Path(tempfile.gettempdir()) / "corsia-harness-mcp"
-    out_dir.mkdir(parents=True, exist_ok=True)
-    fd, raw_path = tempfile.mkstemp(
-        prefix="cc-",
-        suffix=".json",
-        dir=out_dir,
-    )
+    fd, raw_path = private_mkstemp(HARNESS_MCP_DIR, prefix="cc-", suffix=".json")
     path = Path(raw_path)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:

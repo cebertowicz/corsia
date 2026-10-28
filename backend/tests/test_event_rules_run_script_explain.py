@@ -35,13 +35,13 @@ def test_a_script_that_reports_a_breach_ran_and_is_counted_as_run(runs):
     assert (listed["starts_24h"], listed["skips_24h"]) == (1, 0)
 
 
-def test_an_owner_gone_at_evaluation_reads_as_the_claim_does_not_as_a_delivery(runs):
+def test_an_archived_creator_holds_a_script_rule_without_queueing(runs):
     rule = _rule(_script(runs, "gone.sh"))
     _write("UPDATE threads SET lifecycle_state='archived', archived_reason='user' WHERE id=?", OWNER)
     event_id = _emit()
     _sweep()
 
-    gone = "its owner is no longer available"
-    assert runs["calls"] == [] and _outcomes(rule["id"]) == [("dead_lettered", gone)]
+    reason = "creator unavailable"
+    assert runs["calls"] == [] and _outcomes(rule["id"]) == [("held", reason)]
     assert _explained(event_id) == [
-        ("dead_lettered", f"rule {rule['id']} did not run {OWNER}'s script: {gone}")]
+        ("held", f"rule {rule['id']} held it from {OWNER}: {reason}")]

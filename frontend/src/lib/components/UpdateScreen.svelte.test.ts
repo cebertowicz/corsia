@@ -29,19 +29,19 @@ afterEach(() => {
 
 describe('UpdateScreen remote copy', () => {
 	it('names the main computer while progress is estimated remotely', () => {
-		showRemote({ mode: 'progress', step: 'restarting', label: 'Restarting CORSIA', percent: 80, estimated: true, fromVersion: null, toVersion: null, failure: null, serviceDown: true });
+		showRemote({ operationId: 'update-1', mode: 'progress', step: 'restarting', label: 'Restarting CORSIA', percent: 80, estimated: true, fromVersion: null, toVersion: null, failure: null, serviceDown: true });
 		expect(document.body.textContent).toContain('Progress shows on your main computer, Studio Mac.');
 	});
 
 	it('uses main-computer guidance immediately for a remote restart with no estimate', () => {
-		showRemote({ mode: 'progress', step: 'restarting', label: 'Restarting CORSIA', percent: 80, estimated: false, fromVersion: null, toVersion: null, failure: null, serviceDown: true });
+		showRemote({ operationId: 'update-1', mode: 'progress', step: 'restarting', label: 'Restarting CORSIA', percent: 80, estimated: false, fromVersion: null, toVersion: null, failure: null, serviceDown: true });
 		expect(document.body.textContent).toContain('Open CORSIA on Studio Mac.');
 		expect(document.body.textContent).toContain('Progress shows on your main computer, Studio Mac.');
 		expect(document.body.textContent).not.toContain('About 80.0%');
 	});
 
 	it('uses the accepted recovery and main-computer copy after a longer remote restart', () => {
-		showRemote({ mode: 'longer', step: 'restarting', label: 'Restarting CORSIA', percent: 80, estimated: true, fromVersion: null, toVersion: null, failure: null, serviceDown: true });
+		showRemote({ operationId: 'update-1', mode: 'longer', step: 'restarting', label: 'Restarting CORSIA', percent: 80, estimated: true, fromVersion: null, toVersion: null, failure: null, serviceDown: true });
 		expect(document.body.textContent).toContain('Open CORSIA on Studio Mac.');
 		expect(document.body.textContent).toContain('Progress shows on your main computer, Studio Mac.');
 	});
@@ -49,7 +49,7 @@ describe('UpdateScreen remote copy', () => {
 	it('shows the manual quit-and-reopen escape when local startup progress cannot be read without starting the service', () => {
 		const invoke = vi.fn();
 		(window as unknown as { __TAURI_INTERNALS__?: { invoke: typeof invoke } }).__TAURI_INTERNALS__ = { invoke };
-		showLocal({ mode: 'progress', step: 'restarting', label: 'Restarting CORSIA', percent: 80, estimated: false, fromVersion: null, toVersion: null, failure: null, serviceDown: true, startupProgressUnavailable: true });
+		showLocal({ operationId: 'update-1', mode: 'progress', step: 'restarting', label: 'Restarting CORSIA', percent: 80, estimated: false, fromVersion: null, toVersion: null, failure: null, serviceDown: true, startupProgressUnavailable: true });
 		expect(document.body.textContent).toContain('Couldn’t read startup progress.');
 		expect(document.body.textContent).toContain('quit CORSIA with ⌘Q and open it again.');
 		expect(document.body.textContent).not.toContain('Start CORSIA');
@@ -57,7 +57,7 @@ describe('UpdateScreen remote copy', () => {
 	});
 
 	it('uses the main-computer fallback once when the remote name is absent', () => {
-		showRemote({ mode: 'longer', step: 'restarting', label: 'Restarting CORSIA', percent: 80, estimated: true, fromVersion: null, toVersion: null, failure: null, serviceDown: true }, '');
+		showRemote({ operationId: 'update-1', mode: 'longer', step: 'restarting', label: 'Restarting CORSIA', percent: 80, estimated: true, fromVersion: null, toVersion: null, failure: null, serviceDown: true }, '');
 		expect(document.body.textContent).toContain('Open CORSIA on your main computer.');
 		expect(document.body.textContent).toContain('Progress shows on your main computer.');
 		expect(document.body.textContent).not.toContain('your main computer, your main computer');

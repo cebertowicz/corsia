@@ -29,10 +29,11 @@
 	import { MessageListScrollControl } from './messageListScrollControl';
 	import { createFocusWorkBlock } from './focusWorkBlock.svelte';
 
-	let { messagesEl = $bindable(), userIsNearBottom = $bindable(true), ignoreScrollEvents = $bindable(false), onOpenLightbox, hasMoreMessages = false, loadingOlderMessages = false, olderLoadFailed = false, onLoadOlder, firstLoadPending = false, firstLoadFailed = false, onRetryFirstLoad, threadId = undefined, turnSummaries = {}, historyComplete = undefined, focusRuns = [], runLoads = {}, onLoadRun }: {
+	let { messagesEl = $bindable(), userIsNearBottom = $bindable(true), ignoreScrollEvents = $bindable(false), hideScrollFab = false, onOpenLightbox, hasMoreMessages = false, loadingOlderMessages = false, olderLoadFailed = false, onLoadOlder, firstLoadPending = false, firstLoadFailed = false, onRetryFirstLoad, threadId = undefined, turnSummaries = {}, historyComplete = undefined, focusRuns = [], runLoads = {}, onLoadRun }: {
 		messagesEl: HTMLDivElement | undefined;
 		userIsNearBottom: boolean;
 		ignoreScrollEvents: boolean;
+		hideScrollFab?: boolean;
 		onOpenLightbox: (url: string) => void;
 		hasMoreMessages?: boolean;
 		loadingOlderMessages?: boolean;
@@ -328,7 +329,7 @@
 			{onLoadRun}
 		/>
 	</div>
-{#if !userIsNearBottom && (focusLive.current.active || messageRows.length > 0)}
+{#if !hideScrollFab && !userIsNearBottom && (focusLive.current.active || messageRows.length > 0)}
 	<button class="scroll-fab" onclick={scrollToBottomFromUser} aria-label="Scroll to bottom" title="Scroll to bottom">
 		<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12l7 7 7-7"/></svg>
 	</button>

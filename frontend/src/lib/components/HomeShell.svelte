@@ -102,6 +102,7 @@
 	let mainEl = $state<HTMLElement | undefined>(undefined);
 	let artifactHeaderInset = $state<number | null>(null);
 	let headerRightControlsInset = $state(0);
+	let statusBannersHeight = $state(0);
 	const mainDrawer = createMainDrawerController({
 		getMainEl: () => mainEl,
 		getSidebarOpen: () => sidebarOpen,
@@ -242,6 +243,7 @@
 		class:pane-open={paneVisible}
 		style:--artifact-header-inset={artifactHeaderInset === null ? undefined : `${artifactHeaderInset}px`}
 		style:--header-right-controls-inset={artifactHeaderInset === null ? undefined : `${headerRightControlsInset}px`}
+		style:--status-banners-height="{statusBannersHeight}px"
 		bind:this={mainEl}
 		use:toastAnchorSurface
 		ontransitionstart={mainDrawer.onTransitionStart}
@@ -251,7 +253,7 @@
 		ontouchcancel={mainDrawer.onTouchEnd}
 	>
 		<Header onToggleSidebar={onToggleSidebar} onTogglePane={onTogglePane} onRightControlsWidth={(width) => { headerRightControlsInset = width; }} {onMeasurement} {activeView} {conductorThreadId} hasPane={viewHasPane} {artifactHeaderInset} />
-		<StatusBanners />
+		<StatusBanners bind:height={statusBannersHeight} />
 		{#if $threadSettingsOpen && ($activeThread || (conductorThreadId != null && $activeThreadId === conductorThreadId))}
 			<ThreadSettingsView
 				conductor={conductorThreadId != null && $activeThreadId === conductorThreadId}

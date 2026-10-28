@@ -282,7 +282,7 @@ ensure_python_env() {
     if [ "${CORSIA_INSTALL_LINUX:-}" = 1 ]; then
         say "     Building…"
     else
-        say "3/8  Building (about 2 minutes)"
+        say "3/8  Building"
     fi
     "$(service_which python3.11)" -m venv "$CORSIA_HOME/.venv"
     "$python" -m pip install --quiet --disable-pip-version-check \

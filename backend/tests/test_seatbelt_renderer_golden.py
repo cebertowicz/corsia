@@ -14,6 +14,9 @@ FIXTURE = Path(__file__).parent / "fixtures" / "seatbelt_renderer_golden.json"
 
 
 def render_baseline(monkeypatch: MonkeyPatch) -> dict[str, str]:
+    from host_access import browser_ports
+    monkeypatch.setattr(browser_ports, 'SOCKET_ROOT', Path('/golden/browser-sockets'))
+    monkeypatch.setattr(browser_ports, 'RESERVED_PORTS', (39400, 39401))
     home = Path('/golden/home')
     repo = Path('/golden/work/repo')
     profile = Path('/golden/state/profile.sb')
