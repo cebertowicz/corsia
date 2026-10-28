@@ -1,10 +1,10 @@
-"""Schema 155: locate sent chat comments by their target message."""
+"""Schema 156: locate sent chat comments by their target message."""
 
 import json
 import sqlite3
 
 
-def migrate_154_to_155(conn: sqlite3.Connection) -> None:
+def migrate_155_to_156(conn: sqlite3.Connection) -> None:
     conn.execute("""CREATE TABLE IF NOT EXISTS chat_comments (
         thread_id TEXT NOT NULL, target_message_id TEXT NOT NULL,
         user_message_id TEXT NOT NULL, cid TEXT NOT NULL, created_at TEXT NOT NULL,

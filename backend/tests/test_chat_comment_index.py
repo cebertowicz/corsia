@@ -8,12 +8,22 @@ from auth_fixtures import OWNER_TOKEN, OTHER_TOKEN, OWNER_USER
 from doc_feedback_helpers import seed_thread
 from infra.database import get_db
 from infra.chat_comment_index import attach_comments, place_comments
-from infra.migration_154_to_155_chat_comments import migrate_154_to_155
+from infra.migration_155_to_156_chat_comments import migrate_155_to_156
+
+
+def test_chat_migration_follows_thread_confinement():
+    from infra.database_migrations import MIGRATIONS
+    from infra.migration_154_to_155_thread_confinement import migrate_154_to_155
+    from infra.schema import SCHEMA_VERSION
+
+    assert SCHEMA_VERSION == 156
+    assert MIGRATIONS[154] is migrate_154_to_155
+    assert MIGRATIONS[155] is migrate_155_to_156
 
 
 def test_migration_accepts_a_partial_database_without_messages():
     with sqlite3.connect(':memory:') as db:
-        migrate_154_to_155(db)
+        migrate_155_to_156(db)
         assert db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='chat_comments'").fetchone()
 
 
@@ -32,7 +42,7 @@ def test_places_each_comment_on_its_target_and_ignores_missing_targets(isolated_
         rows = db.execute('SELECT target_message_id,user_message_id,cid FROM chat_comments').fetchall()
         assert [tuple(row) for row in rows] == [('target', 'user', 'c1.1')]
         db.execute('DROP TABLE chat_comments')
-        migrate_154_to_155(db)
+        migrate_155_to_156(db)
         rows = db.execute('SELECT target_message_id,user_message_id,cid FROM chat_comments').fetchall()
         assert [tuple(row) for row in rows] == [('target', 'user', 'c1.1')]
     finally:
