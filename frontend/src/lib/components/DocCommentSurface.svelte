@@ -197,7 +197,7 @@
 	function closeDrawer() { onClose(); restoreFocus(); }
 	/** The card or thumbnail last clicked in the drawer: what an image covering the document was opened from. */
 	let opener: Element | null = null;
-	// Covered by the image a card opened, the drawer keeps its scroll; uncovered, that card has focus again.
+	// While covered, the drawer keeps its scroll; uncovered, the opener has focus again.
 	$effect.pre(() => {
 		if (!covered) return;
 		const back = openerFocus(opener, document.activeElement);
@@ -334,7 +334,7 @@
 		</div>{/key}</div>
 	</div>
 	<div class="drawer-footers" use:drawerFooterHeight>
-		<CommentPlacementRecovery {...placementRecovery} onFocusHome={() => drawer?.querySelector<HTMLElement>('[data-drawer-focus-home]')} />
+		<CommentPlacementRecovery {...placementRecovery} onFocusHome={() => drawer?.querySelector<HTMLElement>('[data-drawer-focus-home]') ?? undefined} />
 	</div>
 {/snippet}
 

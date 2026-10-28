@@ -309,7 +309,7 @@
 		viewingThreadId={target?.threadId ?? null}
 		reviewTargetKey={targetKey}
 		targetInstanceId={target?.instanceId ?? null}
-		imageOpen={covered} activityRoot={docRoot}
+		{covered} activityRoot={docRoot}
 		{onReload}
 		onOpenComments={commentUI.openList}
 		{freshness}
@@ -376,7 +376,7 @@
 		onFocus={focusFromCard}
 		load={loadedArtifactId ? $commentLoads[loadedArtifactId] : undefined}
 		onRetry={() => reloadDocumentFeedback(loadedArtifactId, undefined, () => loadSeq, feedbackStatus)}
-		placementRecovery={{ onReload: loadedArtifactId && liveSession ? () => reloadPlacements(loadedArtifactId) : undefined, unplacedCount: commentStatus.orphanedCount, replaceableCount: commentStatus.replaceableCount, reloading: commentStatus.placementReloading, reloadError: commentStatus.placementReloadError, unavailable: liveConnection === 'disconnected' || liveConnection === 'reconnecting', connectionDescriptionId: liveConnectionDescriptionId(liveSession?.artifactId) }}
+		placementRecovery={{ onReload: loadedArtifactId && liveSession ? () => loadedArtifactId ? reloadPlacements(loadedArtifactId) : false : undefined, unplacedCount: commentStatus.orphanedCount, replaceableCount: commentStatus.replaceableCount, reloading: commentStatus.placementReloading, reloadError: commentStatus.placementReloadError, unavailable: liveConnection === 'disconnected' || liveConnection === 'reconnecting', connectionDescriptionId: liveConnectionDescriptionId(liveSession?.artifactId) }}
 		onSubmit={submitComment}
 		onReply={threadActions.reply}
 		onViewed={(id, replyId) => loadedArtifactId ? markThreadViewed(loadedArtifactId, id, replyId) : Promise.resolve()}
