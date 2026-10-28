@@ -32,6 +32,12 @@ describe('nextUnreadThread', () => {
 		expect(nextUnreadThread([thread('a', ['r1'])], 'a')?.id).toBe('a');
 	});
 
+	it('skips the visible thread without losing its position in document order', () => {
+		expect(nextUnreadThread(order, 'c', 'c')?.id).toBe('d');
+		expect(nextUnreadThread(order, 'd', 'a')?.id).toBe('c');
+		expect(nextUnreadThread([thread('a', ['r1'])], null, 'a')).toBeNull();
+	});
+
 	it('keeps moving forward when the thread it left has cleared', () => {
 		const cleared = [thread('a', ['r1']), thread('b'), thread('c', ['r2'])];
 		expect(nextUnreadThread(cleared, 'b')?.id).toBe('c');

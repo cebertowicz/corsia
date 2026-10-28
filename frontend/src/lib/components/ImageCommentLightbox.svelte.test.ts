@@ -81,6 +81,18 @@ afterEach(() => {
 });
 
 describe('ImageCommentLightbox', () => {
+	it('shows the document reply chip for replies arriving while its image is open', async () => {
+		const step = vi.fn();
+		await render({ src: SRC, alt: 'Mock screen', artifactId: 'art-img', onReplyStep: step });
+		expect(host.querySelector('[data-doc-reply-chip]')).toBeNull();
+		docComments.update((current) => ({ ...current, 'art-img': current['art-img'].map((item, index) => index === 1 ? { ...item, newReplyIds: ['new-reply'] } : item) }));
+		await settle();
+		const chip = host.querySelector<HTMLButtonElement>('[data-doc-reply-chip] button');
+		expect(chip?.textContent).toContain('1 new reply');
+		chip!.click();
+		expect(step).toHaveBeenCalledOnce();
+	});
+
 	it('reads the image\'s comments, counts them on the pill and numbers their tags on the image', async () => {
 		await render({ src: SRC, alt: 'Mock screen', artifactId: 'art-img' });
 		expect(mocks.fetchComments).toHaveBeenCalledWith('art-img');

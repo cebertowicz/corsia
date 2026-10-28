@@ -160,6 +160,7 @@
 		show: (thread, landing) => { if (thread && landing) { scroll.value = landing; focusedDocComment.set(thread.id); } commentUI.state = { kind: 'list' }; },
 		openImageOr: (id, otherwise) => images.openOr([id], { id }, otherwise), onLanded: () => onLanded?.(),
 	});
+	export function stepToUnreadReply(beforeText?: () => void, excludeId?: string) { replyNavigation.step(beforeText, excludeId); }
 	// A card for a comment on part of an image opens the image at its tag; any other card goes to its text.
 	function focusFromCard(id: string, placement?: 'top') { images.openOr([id], { id }, () => focusInText(id, placement)); }
 

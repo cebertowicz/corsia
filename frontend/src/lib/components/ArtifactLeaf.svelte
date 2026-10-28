@@ -90,13 +90,13 @@
 		easeCanvas = true;
 		if (threadId && target) openTabDocumentImage(threadId, target.instanceId, request);
 	}
-	function closeImage() {
+	function closeImage(restore = true) {
 		const image = shownImage;
 		if (!threadId || !target || !image) return;
 		easeCanvas = true;
 		restoringDocument = null;
 		clearTabDocumentImage(threadId, target.instanceId);
-		restoreDocument(image);
+		if (restore) restoreDocument(image);
 	}
 	// Collapsing the pane to its rail closes the image; a tab switch, or leaving for chat, keeps it with its tab.
 	$effect(() => {
@@ -314,12 +314,12 @@
 						comments={imageComments}
 						{target}
 						place={shownImage.camera ?? null}
-						onBack={closeImage}
+						onBack={() => closeImage()} onReplyStep={(excludeId) => viewer?.stepToUnreadReply(() => closeImage(false), excludeId)}
 						onPlace={(camera) => recordDocumentImageCamera(target.instanceId, camera)}
 					/>
 				{/if}
 				<!-- The document owns its bottom band; the image overlay owns its own confirmation. -->
-				{#if imageOpen}<DeliveryConfirmation artifactId={target.artifactId} />{/if}
+				{#if imageOpen && !imageComments}<DeliveryConfirmation artifactId={target.artifactId} />{/if}
 			{/if}
 		</div>
 	</div>

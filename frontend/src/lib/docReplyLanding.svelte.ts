@@ -21,12 +21,12 @@ export function createReplyNavigation(source: {
 		target: source.target, ready: source.ready, first, landing: () => landing(first()),
 		open: (thread, target) => { source.show(thread, target); lastReplyStep = thread?.id ?? null; source.onLanded(); },
 	});
-	function step() {
-		const thread = nextUnreadThread(source.comments(), lastReplyStep);
+	function step(beforeText?: () => void, excludeId?: string) {
+		const thread = nextUnreadThread(source.comments(), lastReplyStep, excludeId);
 		if (!thread) return;
 		lastReplyStep = thread.id;
 		const target = landing(thread);
-		source.openImageOr(thread.id, () => source.show(thread, target));
+		source.openImageOr(thread.id, () => { beforeText?.(); source.show(thread, target); });
 	}
 	return { step, reset: () => { lastReplyStep = null; } };
 }

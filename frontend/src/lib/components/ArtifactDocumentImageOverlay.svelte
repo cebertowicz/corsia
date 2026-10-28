@@ -7,7 +7,7 @@
 	import type { DocumentImageComments } from '$lib/docViewerImages';
 	import type { TabDocumentImage } from '$lib/stores/tabViewState';
 
-	let { image, comments, target, place = null, onBack, onPlace }: {
+	let { image, comments, target, place = null, onBack, onPlace, onReplyStep }: {
 		image: TabDocumentImage;
 		/** From the document under the image as it is now; none when it cannot hold comments. */
 		comments?: DocumentImageComments;
@@ -15,6 +15,7 @@
 		place?: ImageViewportPlace | null;
 		onBack: () => void;
 		onPlace: (place: ImageViewportPlace) => void;
+		onReplyStep: (excludeId?: string) => void;
 	} = $props();
 
 	// Back, Escape, another tab, a collapsed canvas or another thread all end this overlay: each is this one send of
@@ -35,6 +36,7 @@
 				readOnly={comments.readOnly}
 				docName={target.name}
 				{onBack}
+				{onReplyStep}
 				inDocument={{
 					occurrence: { from: image.from, to: image.to },
 					post: (region, text) => comments.post(image.from, image.to, region, text),

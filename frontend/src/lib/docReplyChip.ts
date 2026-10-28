@@ -10,7 +10,8 @@ export function unreadReplyCount(threads: DocComment[]): number {
  * coming back to the first after the last. Going by place in the document, not by the unread list, keeps a tap moving
  * forward when the thread it left has since cleared.
  */
-export function nextUnreadThread(inDocumentOrder: DocComment[], lastId: string | null): DocComment | null {
+export function nextUnreadThread(inDocumentOrder: DocComment[], lastId: string | null, excludeId?: string): DocComment | null {
 	const from = lastId ? inDocumentOrder.findIndex((thread) => thread.id === lastId) : -1;
-	return inDocumentOrder.slice(from + 1).find(hasNewReplies) ?? inDocumentOrder.find(hasNewReplies) ?? null;
+	const waiting = (thread: DocComment) => thread.id !== excludeId && hasNewReplies(thread);
+	return inDocumentOrder.slice(from + 1).find(waiting) ?? inDocumentOrder.find(waiting) ?? null;
 }

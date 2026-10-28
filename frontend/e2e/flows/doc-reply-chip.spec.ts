@@ -392,10 +392,24 @@ for (const theme of ['light', 'dark'] as const) {
 			await shot(page, `03-image-document-chip-${theme}-${width}`);
 			await holdDwell(page, true);
 			await chipButton(page).click();
-			// The image opens with the pin's thread open, its reply marked New; the chip steps aside while the image covers the document.
+			// The open pin is excluded from the count: desktop shows the other reply clear of the popover; the phone's modal hides the chip.
 			await expect(overlay(page)).toBeVisible();
 			await expect(page.getByText('Yes, the header is final. I attached the export.')).toBeVisible();
-			await expect(chipBox(page)).toHaveCount(0);
+			if (width === 393) {
+				await expect(chipBox(page)).toHaveCount(0);
+			} else {
+				await expectChip(page, '1 new reply');
+				await expect(chipButton(page)).toHaveAttribute('title', '1 new reply');
+				const popover = page.locator('[data-popover]').filter({ hasText: 'Yes, the header is final. I attached the export.' });
+				await expect(popover).toBeVisible();
+				const chip = (await chipBox(page).boundingBox())!;
+				const targets = [popover, ...await popover.locator('button, input, textarea, select, a[href], [role="button"]').all()];
+				for (const target of targets) {
+					if (!await target.isVisible()) continue;
+					const box = (await target.boundingBox())!;
+					expect(chip.x < box.x + box.width && box.x < chip.x + chip.width && chip.y < box.y + box.height && box.y < chip.y + chip.height, 'reply chip clears the pin popover and its controls').toBe(false);
+				}
+			}
 			await shot(page, `04-image-pin-thread-open-${theme}-${width}`);
 			await holdDwell(page, false);
 			// Back to the document: one waiting reply is left and the chip says so; the next tap goes to the second pin.
