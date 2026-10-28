@@ -124,6 +124,9 @@ async def test_review_spawn_and_cold_start_stay_confined(
     _assert_confined(launches[0], reviewed_dir, child_id)
     stored = _stored_invocation(child_db, child_id)
     assert stored["confinement"] == "review" and stored["add_dirs"] == [reviewed_dir]
+    # On its row too, so a switch to another harness can't launch it unconfined.
+    from infra.thread_confinement import read_dirs
+    assert read_dirs(child_id, child_db) == (reviewed_dir,)
 
     # Retirement drops every in-memory handle, as a restart does; the cold
     # start can learn the confinement only from the stored launch record.
@@ -191,7 +194,7 @@ async def test_review_launches_read_confinement_once_and_install_no_tools(
     """A cold start and a provider resume read confinement once each, before the
     destination is prepared, and build, install and budget no CORSIA tools."""
     import connections.models as cm
-    import registry.cc_session as cc_session
+    import infra.thread_confinement as thread_confinement
     import subagents.cc_runtime as rt
     from subagents import cc_destination, harness_tool_bridge
 
@@ -206,8 +209,8 @@ async def test_review_launches_read_confinement_once_and_install_no_tools(
         confinement="review", add_dirs=(reviewed_dir,),
     )
     reads = []
-    reader = cc_session.registered_confinement
-    monkeypatch.setattr(cc_session, "registered_confinement",
+    reader = thread_confinement.read_dirs
+    monkeypatch.setattr(thread_confinement, "read_dirs",
                         lambda *args, **kwargs: reads.append(args[0]) or reader(*args, **kwargs))
     fits = []
     fit = cc_destination._fit_sections
@@ -322,9 +325,9 @@ async def test_delegate_task_review_needs_paths_and_a_claude_code_model(child_db
     )
     codex = await delegate_task._spawn(
         "parent", {}, "task",
-        {"model": "codex/gpt-5.6-terra", "confinement": "review", "read_paths": ["/w"]},
+        {"model": "codex/gpt-5-codex", "confinement": "review", "read_paths": ["/w"]},
     )
-    assert codex.startswith("Error: refused: no confined launch for ")
+    assert codex.startswith("Error: refused: Couldn’t start this read-only agent on ")
 
 
 def test_unconfined_launch_is_unchanged():
