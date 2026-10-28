@@ -39,21 +39,18 @@ def is_empty_text_block_rejection(detail: str | None) -> bool:
     return "400" in text and "text content blocks must be non-empty" in text
 
 
-def reconcile_expired_login(detail: str | None, logger, account: dict | None = None) -> None:
+def reconcile_expired_login(detail: str | None, logger) -> None:
     """Schedule the canonical bounded check for Claude's exact expired-login error."""
     from connections.auth_failure import auth_failure_kind
 
     if auth_failure_kind("claude-code", detail) is None:
         return
     from connections.claude_discovery import reconcile_turn_auth_failure
-    from connections.account_lifecycle import sign_out_expired
-    from infra.db_async import run_in_db
 
     try:
-        loop = asyncio.get_running_loop()
-        check = (run_in_db(sign_out_expired, account["id"]) if account and account["custom"]
-                 else reconcile_turn_auth_failure(detail))
-        task = loop.create_task(check)
+        task = asyncio.get_running_loop().create_task(
+            reconcile_turn_auth_failure(detail),
+        )
     except RuntimeError:
         logger.warning(
             "Claude Code expired-login reconciliation skipped without a running loop",
@@ -79,7 +76,7 @@ def surface_exit_error(
     *,
     insert_message_fn: Callable,
     logger,
-    account: dict | None = None,
+    added_signed_out: bool = False,
 ) -> str | None:
     if code in (0, None) and not (stderr or "").strip():
         return None
@@ -87,7 +84,8 @@ def surface_exit_error(
         (line for line in reversed((stderr or "").splitlines()) if line.strip()),
         f"Claude Code exited with code {code}.",
     )
-    reconcile_expired_login(stderr, logger, account)
+    if not added_signed_out:
+        reconcile_expired_login(stderr, logger)
     text = f"⚠️ Claude Code stopped: {last.strip()[:300]}"
     try:
         meta = {
