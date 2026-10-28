@@ -47,9 +47,26 @@ def test_nested_phase_counts_and_terminal(db):
     assert _run_tasks_are_terminal(db, outer["id"])
     result = {}
     append_close_notice(result, node_id=inner["id"], db=db, workflows={"outer": Workflow(("design", "review"))})
-    assert result["notice"] == "Required step review has no task in this run."
+    assert result["notice"] == "Required step review has no task in this outer run."
     _mutate(db, plan.id, "archive_node", {"node_id": inner["id"], "expected_revision": closed["revision"]})
     assert _missing_required_steps(db, phase, workflows) == ("design",)
+
+
+def test_closing_nested_phase_checks_its_own_run(db):
+    plan = service.ensure_plan("thread", "owner", db=db)
+    outer = _phase(db, plan, "Outer", "outer")
+    inner = _phase(db, plan, "Inner", "inner", outer["id"], "design")
+    step = _mutate(db, plan.id, "add", {
+        "kind": "task", "title": "Draft", "acceptance_criteria": "Drafted", "parent_id": inner["id"],
+        "workflow_ref": "inner", "workflow_step": "draft", "difficulty": "standard", "size": "S",
+    })["node"]
+    _mutate(db, plan.id, "close_node", {"node_id": step["id"], "expected_revision": step["revision"], "reason": "Done"})
+    inner = db.execute("SELECT * FROM plan_nodes WHERE id=?", (inner["id"],)).fetchone()
+    _mutate(db, plan.id, "close_node", {"node_id": inner["id"], "expected_revision": inner["revision"], "reason": "Done"})
+    result = {}
+    workflows = {"outer": Workflow(("design",)), "inner": Workflow(("draft", "check"))}
+    append_close_notice(result, node_id=inner["id"], db=db, workflows=workflows)
+    assert result["notice"] == "Required step check has no task in this inner run."
 
 
 def test_same_workflow_ancestor_notice(db):

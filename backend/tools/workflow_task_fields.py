@@ -162,23 +162,29 @@ def append_close_notice(
     db,
     workflows: dict[str, Workflow],
 ) -> None:
-    """Prompt when a run's final task closes before a required step exists."""
+    """Prompt when a run's final task closes before a required step exists.
+
+    A nested phase that closes ends its own run and may end its parent's, so
+    both runs are checked, each line naming its workflow.
+    """
 
     node = db.execute("SELECT kind,parent_id FROM plan_nodes WHERE id=?", (node_id,)).fetchone()
-    phase = (
-        _phase_for_node(db, str(node["parent_id"]))
-        if node is not None and node["kind"] == "phase" and node["parent_id"] is not None
-        else _phase_for_node(db, node_id)
-    )
-    if phase is None or not _run_tasks_are_terminal(db, str(phase["id"])):
-        return
-    missing = _missing_required_steps(db, phase, workflows)
-    if missing is None:
-        result["notice"] = _unavailable_workflow_notice(phase)
-    elif missing:
-        result["notice"] = " ".join(
-            f"Required step {step} has no task in this run." for step in missing
-        )
+    nested = node is not None and node["kind"] == "phase" and node["parent_id"] is not None
+    phases = [_phase_for_node(db, node_id)]
+    if nested:
+        phases.append(_phase_for_node(db, str(node["parent_id"])))
+    notices = []
+    for phase in phases:
+        if phase is None or not _run_tasks_are_terminal(db, str(phase["id"])):
+            continue
+        missing = _missing_required_steps(db, phase, workflows)
+        run = f"this {phase['workflow_ref']} run" if nested else "this run"
+        if missing is None:
+            notices.append(_unavailable_workflow_notice(phase))
+        else:
+            notices.extend(f"Required step {step} has no task in {run}." for step in missing)
+    if notices:
+        result["notice"] = " ".join(notices)
 
 
 def _phase_for_node(db, node_id: str):
