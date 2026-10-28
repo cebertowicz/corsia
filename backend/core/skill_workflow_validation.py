@@ -16,6 +16,7 @@ _WORKFLOW_STEP_KEYS = frozenset(
         "quality",
         "after",
         "replaces",
+        "workflow",
     }
 )
 _WORKFLOW_DIFFICULTIES = frozenset({"routine", "standard", "hard"})
@@ -51,7 +52,7 @@ def _workflow_step_shape_errors(step: dict[str, Any], label: str) -> list[str]:
     return errors
 
 
-def validate_workflow(corsia: dict[str, Any]) -> list[str]:
+def validate_workflow(corsia: dict[str, Any], *, skill_name: str | None = None) -> list[str]:
     """Validate checkable workflow steps without prescribing their full shape."""
 
     workflow = corsia.get("workflow")
@@ -79,6 +80,12 @@ def validate_workflow(corsia: dict[str, Any]) -> list[str]:
         step_id = text_value(step.get("id"))
         step_label = f"{prefix} {step_id!r}" if step_id else prefix
         errors.extend(_workflow_step_shape_errors(step, step_label))
+        if "workflow" in step:
+            reference = text_value(step["workflow"])
+            if reference is None:
+                errors.append(f"{step_label}.workflow must be a non-empty string")
+            elif reference == skill_name:
+                errors.append(f"{step_label}.workflow cannot name its own skill")
         if not step_id:
             errors.append(f"{prefix}.id is required")
             continue
