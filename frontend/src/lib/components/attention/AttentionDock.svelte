@@ -342,7 +342,8 @@
 		min-height: 44px; padding: var(--space-2) var(--space-2) var(--space-2) 2px;
 		/* Needs-you is the composer's frosted card: its glass, hairline, corner and soft shadow. */
 		border: 1px solid var(--border); border-radius: var(--radius-xl);
-		background: var(--glass-thin); box-shadow: var(--glass-rim), var(--shadow-chip);
+		background: linear-gradient(var(--glass-thin), var(--glass-thin)), var(--bg-primary);
+		box-shadow: var(--glass-rim), var(--shadow-chip);
 		color: var(--text-primary);
 		font: inherit; text-align: left; cursor: pointer;
 		transition: background var(--dur-tight) var(--ease-snap);
