@@ -1079,6 +1079,65 @@ test.describe('round five composed evidence', () => {
 	}
 });
 
+test.describe('round six toolbar comparison', () => {
+	for (const theme of ['light', 'dark'] as const) {
+		test(`${TAG} round6 no held 393 ${theme}`, async ({ page, request }, info) => {
+			test.setTimeout(90_000);
+			test.skip(process.env.CORSIA_E2E_MOCK !== '1' || !info.project.name.endsWith('mobile'));
+			await page.setViewportSize({ width: 393, height: 852 });
+			await page.emulateMedia({ colorScheme: theme });
+			const threadId = await createSession(request, THREAD_TITLE);
+			await onlyThread(request, threadId);
+			const doc = await seedTextDocument(page, request, threadId, `r6-no-held-${theme}`, 'launch-plan.md', [8, 10]);
+			await stageWorkspace(page, threadId, doc.docPath, 'launch-plan.md', 'artifact');
+			await openThread(page, THREAD_TITLE);
+			await expectChip(page, '2 new replies');
+			await expect(page.locator('.document-header .sending-now')).toHaveCount(0);
+			await page.mouse.move(391, 426);
+			await page.waitForTimeout(600);
+			const x = await page.locator('.document-header .comment-status').evaluate(node => node.getBoundingClientRect().x);
+			const crop = await page.locator('.document-header').screenshot({ animations: 'disabled', scale: 'css' });
+			const version = process.env.R6_VERSION ?? 'candidate';
+			if (screenshotDir) {
+				const dir = path.join(screenshotDir, 'round6'); mkdirSync(dir, { recursive: true });
+				writeFileSync(path.join(dir, `no-held-${version}-${theme}.png`), crop);
+				writeFileSync(path.join(dir, `no-held-${version}-${theme}.json`), JSON.stringify({ x, md5: createHash('md5').update(crop).digest('hex') }));
+			}
+		});
+	}
+	test(`${TAG} round6 held Send desktop pane 420`, async ({ page, request }, info) => {
+		test.setTimeout(90_000);
+		test.skip(process.env.CORSIA_E2E_MOCK !== '1' || info.project.name.endsWith('mobile'));
+		await page.setViewportSize({ width: 1440, height: 900 });
+		await page.emulateMedia({ colorScheme: 'light' });
+		const threadId = await createSession(request, THREAD_TITLE);
+		await onlyThread(request, threadId);
+		const doc = await seedTextDocument(page, request, threadId, 'r6-held-420', 'launch-plan.md', [8, 10]);
+		await holdDocumentComments(request);
+		const from = TEXT.indexOf(SECTIONS[0].anchor);
+		await seedHeldComments(request, doc.artifactId, 1, 'Review', { text: SECTIONS[0].anchor, from, to: from + SECTIONS[0].anchor.length });
+		await stageWorkspace(page, threadId, doc.docPath, 'launch-plan.md', 'artifact');
+		await openThread(page, THREAD_TITLE);
+		await expectChip(page, '2 new replies');
+		await page.waitForTimeout(600);
+		const geometry = await headerSend(page).evaluate(node => {
+			const rect = node.getBoundingClientRect();
+			const canvas = node.closest('.document-canvas')!.getBoundingClientRect();
+			const hit = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
+			return { x: rect.x, y: rect.y, width: rect.width, height: rect.height, canvasX: canvas.x, canvasWidth: canvas.width, whole: rect.x >= canvas.x && rect.right <= canvas.right && rect.y >= canvas.y && rect.bottom <= canvas.bottom, hit: !!hit && (hit === node || node.contains(hit)) };
+		});
+		await page.mouse.move(1438, 450);
+		const crop = await page.locator('.document-header').screenshot({ animations: 'disabled', scale: 'css' });
+		if (screenshotDir) {
+			const dir = path.join(screenshotDir, 'round6'); mkdirSync(dir, { recursive: true });
+			writeFileSync(path.join(dir, 'held-candidate-desktop-420.png'), crop);
+			writeFileSync(path.join(dir, 'held-candidate-desktop-420.json'), JSON.stringify({ ...geometry, md5: createHash('md5').update(crop).digest('hex') }));
+		}
+		expect(geometry.canvasWidth).toBe(420);
+		expect(geometry.whole && geometry.hit).toBe(true);
+	});
+});
+
 // Before frames (light): the same two documents on the base commit, where no chip exists. Run only on the base checkout
 // (`--grep baseline`); the assertion that no chip is drawn is what proves the checkout is the base.
 for (const width of [1440, 393]) {
