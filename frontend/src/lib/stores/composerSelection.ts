@@ -1,6 +1,7 @@
 import { derived, type Readable } from 'svelte/store';
 import { activeModelId, models, threadCatalogs, workspaceModels } from './modelsState';
 import { threadModelFor, threadModelVersion, type Model } from './models';
+import { heldThreadSwitch } from './threadModelTruth';
 import { unknownStatus } from './modelsLoad';
 import { subagentMeta, subagentThreadRows } from './subagents';
 import { activeThreadId, reasoningEffort, threads, type Thread } from './threads';
@@ -19,6 +20,8 @@ export interface ComposerSelection {
 	isOpen: boolean;
 	/** The thread's row: the list's, or a worker's own (a worker is not in the list). */
 	thread: ComposerThreadRow | undefined;
+	/** The thread's switch state: its row's, or the one held beside the model of a thread the list omits (the conductor). */
+	switching: Pick<ComposerThreadRow, 'pending_model' | 'switch_status' | 'switch_error'> | undefined;
 	modelId: string | null;
 	effort: string | null;
 	/** The catalog read on this thread's account; a thread not yet read has every status unknown. */
@@ -38,11 +41,12 @@ export const composerSelectionFor: Readable<(threadId?: string | null) => Compos
 			const worker = $subagentMeta.get(id ?? '');
 			const thread: ComposerThreadRow | undefined = $threads.find((row) => row.id === id)
 				?? (worker ? { ...$workerRows.get(worker.childThreadId), model: threadModelFor(worker.childThreadId) } : undefined);
+			const switching = thread ?? heldThreadSwitch(id ?? '');
 			if (id === null || id === $activeThreadId) {
-				return { threadId: id, isOpen: true, thread, modelId: $activeModelId, effort: $reasoningEffort, models: $models };
+				return { threadId: id, isOpen: true, thread, switching, modelId: $activeModelId, effort: $reasoningEffort, models: $models };
 			}
 			return {
-				threadId: id, isOpen: false, thread,
+				threadId: id, isOpen: false, thread, switching,
 				modelId: thread?.model ?? null, effort: thread?.reasoning_effort ?? null,
 				models: $catalogs.get(id) ?? unknownStatus($workspaceModels),
 			};
