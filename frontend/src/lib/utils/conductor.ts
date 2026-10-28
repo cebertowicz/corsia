@@ -1,5 +1,6 @@
 import { get, writable } from 'svelte/store';
 import { acceptThreadModelTruth } from '$lib/stores/models';
+import { patchUnlistedThreadRow } from '$lib/stores/threadRow';
 import { activeThreadId } from '$lib/stores/threads';
 import type { UiScope } from '$lib/stores/uiScope';
 
@@ -12,6 +13,10 @@ export interface CoordinationTarget {
 	project_id?: string | null;
 	bootloader_files?: string[] | string | null;
 	driver?: string | null;
+	pending_model?: string | null;
+	switch_status?: string | null;
+	switch_error?: string | null;
+	switch_operation_id?: string | null;
 	[key: string]: unknown;
 }
 
@@ -91,6 +96,14 @@ async function fetchTarget(token: string | null, url: string): Promise<Coordinat
 		if (target.model && target.updated_at) {
 			acceptThreadModelTruth(threadId, target.model, target.updated_at);
 		}
+		// Its switch state is server truth like a listed row's, so each read replaces it: a switch
+		// that ended while the page was away clears, and one still pending or failed shows.
+		patchUnlistedThreadRow(threadId, {
+			pending_model: target.pending_model ?? null,
+			switch_status: target.switch_status ?? null,
+			switch_error: target.switch_error ?? null,
+			switch_operation_id: target.switch_operation_id ?? null,
+		});
 		return { kind: 'target', target, firstRunPending: data?.first_run_pending === true };
 	} catch {
 		return { kind: 'unknown' };

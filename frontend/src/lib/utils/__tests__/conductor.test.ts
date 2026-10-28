@@ -17,6 +17,8 @@ import {
 	activeModelId,
 } from '$lib/stores/models';
 import { activeThreadId } from '$lib/stores/threads';
+import { composerSelectionFor } from '$lib/stores/composerSelection';
+import { unlistedThreadRows } from '$lib/stores/threadRow';
 
 const originalFetch = globalThis.fetch;
 
@@ -26,6 +28,7 @@ afterEach(() => {
 	activeThreadId.set(null);
 	activeModelId.set(null);
 	corsiaAgentId.set(null);
+	unlistedThreadRows.set(new Map());
 	_resetThreadModelTruthForTests();
 });
 
@@ -143,6 +146,28 @@ describe('fetchConductor', () => {
 		await fetchCorsiaAgent('tok');
 
 		expect(get(activeModelId)).toBe('claude-code/opus');
+	});
+
+	it('shows the switch the server still holds after a reload, and clears it once it ended', async () => {
+		const read = (fields: Record<string, unknown>) => {
+			globalThis.fetch = vi.fn(async () => ({
+				ok: true,
+				json: async () => ({ thread_id: 'cond-1', target: { thread_id: 'cond-1', ...fields } }),
+			})) as unknown as typeof fetch;
+			return fetchCorsiaAgent('tok');
+		};
+		const switching = () => get(composerSelectionFor)('cond-1').switching;
+
+		await read({ pending_model: 'm/b', switch_status: 'preparing', switch_error: null, switch_operation_id: 'op-1' });
+		expect(switching()).toMatchObject({ pending_model: 'm/b', switch_status: 'preparing' });
+
+		await read({ pending_model: 'm/b', switch_status: 'failed', switch_error: 'No room', switch_operation_id: 'op-1' });
+		expect(switching()).toMatchObject({ switch_status: 'failed', switch_error: 'No room' });
+
+		// The commit landed while the page was disconnected: the read carries no switch.
+		await read({ pending_model: null, switch_status: null });
+		expect(switching()?.pending_model).toBeNull();
+		expect(switching()?.switch_status).toBeNull();
 	});
 
 	it('reports absent when the API answers with no conductor', async () => {
