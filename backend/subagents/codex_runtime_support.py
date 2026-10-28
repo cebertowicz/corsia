@@ -20,11 +20,6 @@ from subagents.codex_runtime_state import (
 log = logging.getLogger(__name__)
 
 
-def default_broadcast(thread_id: str, message: dict) -> None:
-    from infra import state
-
-    state.broadcast_to_thread(thread_id, message)
-
 
 def require_owned_accept_db(db) -> None:
     if db is not None:

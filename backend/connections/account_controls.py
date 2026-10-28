@@ -17,7 +17,7 @@ import logging
 from typing import Any
 
 from connections import account_login_wait, account_signin_prompt
-from connections.account_verify_refresh import custom_account as _custom, refresh_models, signin_recheck
+from connections.account_verify_refresh import custom_account, refresh_models, signin_recheck
 from connections.account_identity import codex_identity, refresh_default_identity
 from connections.account_lifecycle import change_state
 from connections.account_profiles import profile_for, sign_out_account
@@ -194,12 +194,12 @@ async def _hold(operation: SignIn, home: str, binary: str) -> None:
 
 async def start_signin(account_id: str, *, bind: FirstRunBind | None = None) -> dict[str, Any]:
     """Begin, or return the live, vendor browser sign-in for one signed-out added account."""
-    account = await _custom(account_id)
+    account = await custom_account(account_id)
     if account["state"] == "signed_in":
         result = await signin_recheck(account_id, lambda selected: verify(selected, report_refresh=True))
         if result is not None:
             return result
-        account = await _custom(account_id)
+        account = await custom_account(account_id)
     if account["state"] != "signed_out":
         raise AccountError("account is already signed in")
     provider = account["provider"]
@@ -325,7 +325,7 @@ async def verify(account_id: str, *, report_refresh: bool = False) -> dict[str, 
 
     Verify never lifts a signed-out account or its hold; only sign-in does.
     """
-    account = await _custom(account_id)
+    account = await custom_account(account_id)
     provider = account["provider"]
     receipt = account_receipt(account)
     current_c6 = readiness_reason(account) in ("codex_auth_projection_changed", "codex_auth_source_missing")
