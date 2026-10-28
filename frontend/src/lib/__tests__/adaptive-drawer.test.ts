@@ -201,6 +201,44 @@ describe("AdaptiveDrawer", () => {
     }
   });
 
+  it("shields a modal outro and removes the shield on completion, reopening, and unmount", async () => {
+    const instant = Element.prototype.animate;
+    Element.prototype.animate = function animate(_keyframes, options) {
+      const duration = typeof options === "number" ? options : Number(options?.duration ?? 0);
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const animation = { cancel() { clearTimeout(timer); }, finish() {}, currentTime: 0, playState: "running" } as unknown as Animation;
+      Object.defineProperty(animation, "onfinish", { set(callback: ((event: Event) => void) | null) {
+        if (callback) timer = setTimeout(() => callback(new Event("finish")), duration);
+      } });
+      return animation;
+    };
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      component = mount(AdaptiveDrawerHarness, { target: host, props: { callerControlled: true, onClose: vi.fn() } });
+      await settle();
+      const open = () => (host.querySelector("[data-drawer-trigger]") as HTMLButtonElement).click();
+      const close = () => (host.querySelector(".drawer-done") as HTMLButtonElement).click();
+      open(); await settle(); await vi.advanceTimersByTimeAsync(300);
+      close(); await settle();
+      expect(host.querySelector(".outro-shield")).not.toBeNull();
+      await vi.advanceTimersByTimeAsync(300); await settle();
+      expect(host.querySelector(".outro-shield")).toBeNull();
+      open(); await settle(); await vi.advanceTimersByTimeAsync(300);
+      close(); await settle();
+      expect(host.querySelector(".outro-shield")).not.toBeNull();
+      open(); await settle();
+      expect(host.querySelector(".outro-shield")).toBeNull();
+      await vi.advanceTimersByTimeAsync(300); await settle();
+      close(); await settle();
+      expect(host.querySelector(".outro-shield")).not.toBeNull();
+      unmount(component); component = null; await settle();
+      expect(host.querySelector(".outro-shield")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+      Element.prototype.animate = instant;
+    }
+  });
+
   it("closes from its explicit control and Escape", async () => {
     const close = vi.fn();
     component = mount(AdaptiveDrawerHarness, {

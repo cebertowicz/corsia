@@ -2,14 +2,15 @@
 	import type { MessageCard } from '$lib/api/messageCards';
 	import AttachmentRow from '$lib/components/AttachmentRow.svelte';
 
-	// The document notice uses the same attachment chip and New marker as the chat notice.
-	let { artifactId, path, threadId, count, where = null, onOpen }: {
+	// One notice for unread replies in both the chat dock and document.
+	let { artifactId, path, threadId, count, where = null, type = 'document', onOpen }: {
 		artifactId: string;
 		path: string | null;
 		threadId: string | null | undefined;
 		count: number;
 		/** What the chip adds after the count when the reader is not already in the document: its name, or "N documents". */
 		where?: string | null;
+		type?: 'chat' | 'document';
 		onOpen: () => void;
 	} = $props();
 
@@ -18,8 +19,8 @@
 		kind: 'artifact',
 		artifact_id: artifactId,
 		title: label,
-		type: 'document',
-		icon: 'file-text',
+		type,
+		icon: type === 'chat' ? 'message-square' : 'file-text',
 		name: label,
 		path,
 		available: true,

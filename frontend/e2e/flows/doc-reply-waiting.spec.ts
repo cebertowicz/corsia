@@ -664,6 +664,17 @@ for (const theme of ['light', 'dark'] as const) {
 			await expect(dock).not.toContainText(' of ');
 			await expect(composer).toBeVisible();
 			await expect.poll(() => stackProblems(page, { chip, dock: dock.locator('.dock-bar'), composer })).toEqual([]);
+			// The shared chip's 44px hit extension must not steal the neighbouring controls' edges.
+			for (const neighbour of [dock.locator('.dock-bar'), composer]) {
+				const edgeHits = await neighbour.evaluate((element) => {
+					const rect = element.getBoundingClientRect();
+					return [rect.top + 1, rect.bottom - 1].map(y => {
+						const hit = document.elementFromPoint(rect.left + rect.width / 2, y);
+						return !!hit && (element === hit || element.contains(hit));
+					});
+				});
+				expect(edgeHits, 'neighbour edges remain hit-testable').toEqual([true, true]);
+			}
 			await shot(page, `03a-reply-chip-needs-you-stack-${theme}-${width}`);
 			if (width === 393) {
 				// The transcript outgrows the phone screen, so the frame above is scrolled to the newest message and the oldest rows

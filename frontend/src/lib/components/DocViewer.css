@@ -13,10 +13,10 @@
 }
 /* CodeMirror owns scrolling; this grid cell clips without a second scroll container. */
 .doc-main { grid-area: editor; flex: 1; min-width: 0; min-height: 0; overflow: clip; overscroll-behavior: contain; }
-/* With a reply band on a narrow screen, leave the activity pill its own space. */
 @media (max-width: 600px) {
   /* A touch pointer at phone width keeps one 24px (the fine rail's) text inset on both sides instead of the 44px marker rail on the left only; the marker's hit box stays railWidth() and reaches into the text's edge. The editor, header and review bar read this; ArtifactLeaf's page gutter shares the condition. */
   @media (any-pointer: coarse) { .doc { --doc-phone-inset: 24px; } }
+  /* With a reply band on a narrow screen, leave the activity pill its own space. */
   .doc:has(.doc-bottom-band):has(.activity-pill) .doc-main { box-sizing: border-box; padding-bottom: calc(var(--touch-target) + var(--space-1)); }
 }
 .ed-wrap { position: relative; height: 100%; min-height: 0; }

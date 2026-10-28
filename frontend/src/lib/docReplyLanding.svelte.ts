@@ -1,6 +1,6 @@
 import { tick } from 'svelte';
 import type { DocViewerTarget } from '$lib/docViewerTarget';
-import type { DocComment } from '$lib/stores/docComments';
+import { hasNewReplies, type DocComment } from '$lib/stores/docComments';
 import { canvasCommentScrollTarget, type CanvasScrollTarget } from '$lib/docCanvasComments';
 import { nextUnreadThread } from '$lib/docReplyChip';
 
@@ -14,7 +14,7 @@ export function createReplyNavigation(source: {
 	onLanded: () => void;
 }) {
 	let lastReplyStep: string | null = null;
-	const first = () => source.comments().find((comment) => (comment.newReplyIds?.length ?? 0) > 0) ?? null;
+	const first = () => source.comments().find(hasNewReplies) ?? null;
 	const landing = (thread: DocComment | null) => thread
 		? canvasCommentScrollTarget(source.comments(), source.text(), thread.id, false, 'quote-tap') : null;
 	createReplyLanding({

@@ -18,7 +18,7 @@
 	import { regionColor, revealCentre } from '$lib/imageRegions';
 	import { FIT_MARGIN } from '$lib/imageZoom';
 	import { subscribeToDocumentCommentChanges } from '$lib/docViewerOperations';
-	import { commentLoads, docComments, loadComments, markThreadViewed, type DocComment } from '$lib/stores/docComments';
+	import { commentLoads, docComments, hasNewReplies, loadComments, markThreadViewed, type DocComment } from '$lib/stores/docComments';
 	import { isPaneDrawer } from '$lib/stores/paneOpen';
 	import { prefersReducedMotion } from '$lib/stores/viewport';
 	import { projects } from '$lib/stores/projects';
@@ -235,7 +235,7 @@
 			{/snippet}
 		</ImageLightbox>
 		{/key}
-		{#if onReplyStep}<DocBottomBand {artifactId} path="" threadId={null} threads={all.filter((comment) => (comment.newReplyIds?.length ?? 0) > 0 && !(image.ui.state?.kind === 'thread' && image.ui.state.id === comment.id))} ready={loaded} covered={false} sheetModalOpen={image.ui.sheetModalOpen} onStep={() => onReplyStep?.(image.ui.state?.kind === 'thread' ? image.ui.state.id : undefined)} />{/if}
+		{#if onReplyStep}<DocBottomBand {artifactId} path="" threadId={null} threads={all.filter((comment) => hasNewReplies(comment) && !(image.ui.state?.kind === 'thread' && image.ui.state.id === comment.id))} ready={loaded} covered={false} sheetModalOpen={image.ui.sheetModalOpen} onStep={() => onReplyStep?.(image.ui.state?.kind === 'thread' ? image.ui.state.id : undefined)} />{/if}
 	</div>
 	{#key focus?.id}
 	{#if artifactId}
