@@ -1,97 +1,120 @@
-"""Clipboard operations on the shared browser page."""
+"""Native clipboard commands for the shared browser page."""
+import asyncio
 import json
-
-from websockets.exceptions import ConnectionClosed, PayloadTooBig, WebSocketException
+import sys
+from urllib.parse import urlsplit
 
 from host_access.browser_cdp import CdpClient
 from host_access.browser_session_state import BrowserSessionError
 
-
-class FrameSelectionError(BrowserSessionError):
-    """Focus is inside an embedded frame, whose selection the top document cannot read."""
-
-
-class SelectionTooLargeError(BrowserSessionError):
-    """The selected text exceeded the CDP response limit."""
-
-
-# Six bytes per selected byte covers JSON escaping, plus room for the CDP envelope.
-_SELECTION_MAX_SIZE = 6 * 5_000_000 + 4096
-
-# Descend through the focused document and shadow roots; a cross-origin frame is inaccessible.
-_FOCUSED_DOCUMENT = """let doc = document, node;
- while (true) {
-  node = doc.activeElement;
-  while (node?.shadowRoot?.activeElement) node = node.shadowRoot.activeElement;
-  if (node?.tagName !== 'IFRAME' && node?.tagName !== 'FRAME') break;
-  try { doc = node.contentDocument; } catch { return null; }
-  if (!doc) return null;
+WORLD = "corsia-clipboard"
+# The listener and its record live in an isolated world, never in page script state.
+PRELOAD = """(() => {
+ if (window.__corsiaClipboardListener) return;
+ window.__corsiaClipboardListener = true;
+ for (const kind of ['copy', 'cut']) {
+  const pending = new WeakMap();
+  window.addEventListener(kind, event => {
+   if (!event.isTrusted) return;
+   let owner;
+   try { owner = window.top; void owner.document; } catch { owner = window; }
+   let node = document.activeElement;
+   while (node?.shadowRoot?.activeElement) node = node.shadowRoot.activeElement;
+   let selection = '';
+   if (node instanceof HTMLInputElement || node instanceof HTMLTextAreaElement) {
+    if (node.type !== 'password' && node.selectionStart !== null && node.selectionEnd !== null)
+     selection = node.value.slice(node.selectionStart, node.selectionEnd);
+   } else selection = window.getSelection()?.toString() || '';
+   const record = {kind, selection, data: ''};
+   pending.set(event, record);
+   setTimeout(() => {
+    record.prevented = event.defaultPrevented;
+    owner.__corsiaClipboardRecord = record;
+    owner.__corsiaClipboardSequence = (owner.__corsiaClipboardSequence || 0) + 1;
+   }, 0);
+  }, true);
+  window.addEventListener(kind, event => {
+   const record = pending.get(event);
+   if (record) record.data = event.clipboardData?.getData('text/plain') || '';
+  });
  }
- const view = doc.defaultView;"""
-
-# Read only the person's selected text. Password controls deliberately retain Chrome's no-copy behavior.
-_SELECTION = """(() => {
- """ + _FOCUSED_DOCUMENT + """
- if (node instanceof view.HTMLInputElement || node instanceof view.HTMLTextAreaElement) {
-  if (node.type === 'password' || node.selectionStart === null || node.selectionEnd === null) return '';
-  window.__corsiaCopiedSelection = {node, doc, start: node.selectionStart, end: node.selectionEnd};
-  return node.value.slice(node.selectionStart, node.selectionEnd);
- }
- const selection = view.getSelection();
- window.__corsiaCopiedSelection = selection?.rangeCount ? {node, doc, range: selection.getRangeAt(0).cloneRange()} : null;
- return selection?.toString() || '';
 })()"""
 
 
-async def clipboard_selection(endpoint: str, request: str) -> str:
-    """Read the page selection for a person's explicit copy or cut."""
-    try:
-        async with CdpClient(endpoint, max_size=_SELECTION_MAX_SIZE) as cdp:
-            result = await cdp.call("Runtime.evaluate", expression=f"window.__corsiaCopyRequest = {json.dumps(request)}; {_SELECTION}", returnByValue=True)
-    except WebSocketException as exc:
-        if (isinstance(exc, PayloadTooBig) or isinstance(exc.__cause__, PayloadTooBig)
-                or (isinstance(exc, ConnectionClosed) and exc.sent is not None and exc.sent.code == 1009)):
-            raise SelectionTooLargeError("The selected text is too large") from exc
-        raise
-    value = result.get("result", {}).get("value")
-    if not result.get("exceptionDetails") and value is None:
-        raise FrameSelectionError("This page's selection is inside an embedded frame")
-    if result.get("exceptionDetails") or not isinstance(value, str):
-        raise BrowserSessionError("This page's selection couldn’t be copied")
-    return value
+class PageHandledError(BrowserSessionError):
+    """A page handled the event but its custom clipboard data was inaccessible."""
+
+
+async def _world(cdp: CdpClient) -> tuple[int, str]:
+    tree = await cdp.call("Page.getFrameTree")
+    frame = tree.get("frameTree", {}).get("frame", {})
+    frame_id, url = frame.get("id"), frame.get("url")
+    if not isinstance(frame_id, str) or not isinstance(url, str):
+        raise BrowserSessionError("This page couldn't receive clipboard input")
+    result = await cdp.call("Page.createIsolatedWorld", frameId=frame_id, worldName=WORLD)
+    context = result.get("executionContextId")
+    if not isinstance(context, int):
+        raise BrowserSessionError("This page couldn't receive clipboard input")
+    return context, url
+
+
+async def _evaluate(cdp: CdpClient, context: int, expression: str) -> object:
+    result = await cdp.call("Runtime.evaluate", expression=expression, contextId=context,
+                            returnByValue=True, awaitPromise=True)
+    if result.get("exceptionDetails"):
+        raise BrowserSessionError("This page couldn't receive clipboard input")
+    return result.get("result", {}).get("value")
+
+
+async def _command(cdp: CdpClient, command: str) -> None:
+    key = {"copy": "c", "cut": "x", "paste": "v", "undo": "z"}[command]
+    args = {"key": key, "code": f"Key{key.upper()}", "windowsVirtualKeyCode": ord(key.upper()), "modifiers": 4 if sys.platform == "darwin" else 2}
+    await cdp.call("Input.dispatchKeyEvent", type="keyDown", commands=[command], **args)
+    await cdp.call("Input.dispatchKeyEvent", type="keyUp", **args)
+
+
+async def clipboard_selection(endpoint: str, cut: bool) -> str:
+    """Dispatch native copy or cut and retrieve the isolated event record."""
+    async with CdpClient(endpoint, max_size=30_004_096) as cdp:
+        context, _ = await _world(cdp)
+        sequence = await _evaluate(cdp, context, "window.__corsiaClipboardSequence || 0")
+        if not isinstance(sequence, int):
+            raise BrowserSessionError("This page couldn't be copied")
+        kind = "cut" if cut else "copy"
+        await _command(cdp, kind)
+        for _ in range(20):
+            record = await _evaluate(cdp, context, f"(() => {{ if (window.__corsiaClipboardSequence <= {sequence}) return null; const record = window.__corsiaClipboardRecord; delete window.__corsiaClipboardRecord; return record; }})()")
+            if isinstance(record, dict) and record.get("kind") == kind:
+                if record.get("prevented"):
+                    text = record.get("data")
+                    if not text:
+                        raise PageHandledError("The page handled this clipboard action")
+                else:
+                    text = record.get("selection")
+                if isinstance(text, str):
+                    return text
+                break
+            await asyncio.sleep(0.025)
+        raise BrowserSessionError("This page couldn't be copied")
 
 
 async def clipboard_paste(endpoint: str, text: str) -> None:
-    """Insert the person's clipboard into the focused page field."""
+    """Write the person's text with a temporary write-only grant and paste natively."""
     async with CdpClient(endpoint) as cdp:
-        await cdp.call("Input.insertText", text=text)
+        context, url = await _world(cdp)
+        parsed = urlsplit(url)
+        if not parsed.scheme or not parsed.netloc:
+            raise BrowserSessionError("This page couldn't receive pasted text")
+        origin = f"{parsed.scheme}://{parsed.netloc}"
+        await cdp.call("Browser.grantPermissions", origin=origin, permissions=["clipboardSanitizedWrite"])
+        try:
+            await _evaluate(cdp, context, f"navigator.clipboard.writeText({json.dumps(text)})")
+        finally:
+            await cdp.call("Browser.resetPermissions")
+        await _command(cdp, "paste")
 
 
-async def clipboard_cut(endpoint: str, text: str, request: str) -> None:
-    """Delete only if the same selection remains in an editable field after the copy succeeded."""
-    expected = json.dumps(text)
-    expression = f"""(() => {{
- const copied = window.__corsiaCopiedSelection;
- if (window.__corsiaCopyRequest !== {json.dumps(request)}) return false;
- window.__corsiaCopiedSelection = null;
- window.__corsiaCopyRequest = null;
- {_FOCUSED_DOCUMENT}
- if (!copied || copied.doc !== doc || copied.node !== node || !node) return false;
- const field = node instanceof view.HTMLInputElement || node instanceof view.HTMLTextAreaElement;
- const selection = view.getSelection();
- const range = !field && selection?.rangeCount ? selection.getRangeAt(0) : null;
- const sameRange = field
-  ? node.selectionStart === copied.start && node.selectionEnd === copied.end
-  : range && copied.range && range.startContainer === copied.range.startContainer
-    && range.startOffset === copied.range.startOffset && range.endContainer === copied.range.endContainer
-    && range.endOffset === copied.range.endOffset;
- const selected = field ? node.value.slice(node.selectionStart, node.selectionEnd) : selection?.toString();
- if (!sameRange || selected !== {expected} || !selected) return false;
- const editable = (node instanceof view.HTMLInputElement || node instanceof view.HTMLTextAreaElement)
-  ? !node.readOnly && !node.disabled && node.type !== 'password' : node.isContentEditable;
- return !editable || doc.execCommand('delete');
-}})()"""
+async def clipboard_undo(endpoint: str) -> None:
+    """Ask the focused page to undo the last native edit."""
     async with CdpClient(endpoint) as cdp:
-        result = await cdp.call("Runtime.evaluate", expression=expression, returnByValue=True)
-    if result.get("exceptionDetails") or result.get("result", {}).get("value") is not True:
-        raise BrowserSessionError("This page's selection couldn’t be cut")
+        await _command(cdp, "undo")

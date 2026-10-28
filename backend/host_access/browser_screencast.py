@@ -7,6 +7,7 @@ from typing import Callable
 import websockets
 
 from host_access.browser_cdp import CdpClient
+from host_access.browser_clipboard import PRELOAD, WORLD
 from host_access.browser_session_state import BrowserSessionError
 
 
@@ -56,6 +57,7 @@ class PaneScreencast:
             try:
                 await self._start(cdp)
                 await cdp.send("Page.enable")
+                await cdp.send("Page.addScriptToEvaluateOnNewDocument", source=PRELOAD, worldName=WORLD, runImmediately=True)
                 async for raw in cdp.socket:
                     message = json.loads(raw)
                     if message.get("method") == "Page.screencastFrame":

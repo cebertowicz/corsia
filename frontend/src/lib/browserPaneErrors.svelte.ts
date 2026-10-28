@@ -4,6 +4,7 @@ type ErrorSource = 'fit' | 'clipboard';
 export class BrowserPaneErrors {
  private errors = $state<{ source: ErrorSource; error: string }[]>([]);
  current = $derived(this.errors.at(-1)?.error ?? '');
+ currentSource = $derived(this.errors.at(-1)?.source);
 
  handle(message: Record<string, unknown>): boolean {
   if (message.type !== 'pane_error' || (message.source !== 'fit' && message.source !== 'clipboard')

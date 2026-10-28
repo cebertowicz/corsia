@@ -1,21 +1,30 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BrowserPaneClipboard, clipboardKey, clipboardReply } from './browserPaneClipboard';
 
 describe('browser pane clipboard', () => {
+ afterEach(() => vi.unstubAllGlobals());
+ it('uses the platform shortcut and forwards every keyup', () => {
+  vi.stubGlobal('navigator', { platform: 'MacIntel' });
+  const clipboard = new BrowserPaneClipboard(vi.fn(), { write: vi.fn().mockRejectedValue(new Error('denied')), readText: vi.fn() }, data => data);
+  const event = { type: 'keydown', key: 'c', ctrlKey: true, metaKey: false, altKey: false } as KeyboardEvent;
+  expect(clipboardKey(event, () => clipboard, vi.fn())).toBe(false);
+  expect(clipboardKey({ ...event, type: 'keyup', metaKey: true } as KeyboardEvent, () => clipboard, vi.fn())).toBe(false);
+  expect(clipboardKey({ ...event, ctrlKey: false, metaKey: true } as KeyboardEvent, () => clipboard, vi.fn())).toBe(true);
+ });
  it('reports a page selection failure with its next step', async () => {
   const clipboard = new BrowserPaneClipboard(vi.fn(), { write: vi.fn(async (items: Record<string, Promise<Blob>>[]) => { await items[0]['text/plain']; }), readText: vi.fn() }, data => data);
   const fail = vi.fn();
-  clipboardKey({ type: 'keydown', key: 'c', code: 'KeyC', ctrlKey: true, metaKey: false, altKey: false } as KeyboardEvent, new Set(), () => clipboard, fail);
+  clipboardKey({ type: 'keydown', key: 'c', code: 'KeyC', ctrlKey: true, metaKey: false, altKey: false } as KeyboardEvent, () => clipboard, fail);
   clipboardReply({ type: 'clipboard_selection', id: 1 }, clipboard);
-  await vi.waitFor(() => expect(fail).toHaveBeenCalledWith("CORSIA couldn’t copy from the page. Select the text again and copy."));
+  await vi.waitFor(() => expect(fail).toHaveBeenCalledWith("CORSIA couldn’t copy from the page. Select the text again and copy.", false));
  });
  it('names clipboard permission only when the browser refused it', async () => {
   const keydown = { type: 'keydown', key: 'c', code: 'KeyC', ctrlKey: true, metaKey: false, altKey: false } as KeyboardEvent;
   const refused = new BrowserPaneClipboard(vi.fn(), { write: vi.fn().mockRejectedValue(new DOMException('denied', 'NotAllowedError')), readText: vi.fn() }, data => data);
   const broken = new BrowserPaneClipboard(vi.fn(), { write: vi.fn().mockRejectedValue(new Error('write failed')), readText: vi.fn() }, data => data);
   const fail = vi.fn();
-  clipboardKey(keydown, new Set(), () => refused, fail);
-  clipboardKey(keydown, new Set(), () => broken, fail);
+  clipboardKey(keydown, () => refused, fail);
+  clipboardKey(keydown, () => broken, fail);
   await vi.waitFor(() => expect(fail).toHaveBeenCalledTimes(2));
   expect(fail.mock.calls.map(call => call[0]).sort()).toEqual([
    'CORSIA couldn’t access the clipboard. Allow clipboard access in your browser and try again.',
@@ -25,7 +34,7 @@ describe('browser pane clipboard', () => {
  it('stays quiet when the stream ends during a copy', async () => {
   const clipboard = new BrowserPaneClipboard(vi.fn(), { write: vi.fn(async (items: Record<string, Promise<Blob>>[]) => { await items[0]['text/plain']; }), readText: vi.fn() }, data => data);
   const fail = vi.fn();
-  clipboardKey({ type: 'keydown', key: 'c', code: 'KeyC', ctrlKey: true, metaKey: false, altKey: false } as KeyboardEvent, new Set(), () => clipboard, fail);
+  clipboardKey({ type: 'keydown', key: 'c', code: 'KeyC', ctrlKey: true, metaKey: false, altKey: false } as KeyboardEvent, () => clipboard, fail);
   clipboard.dispose();
   await new Promise(resolve => setTimeout(resolve, 0));
   expect(fail).not.toHaveBeenCalled();
@@ -45,20 +54,21 @@ describe('browser pane clipboard', () => {
   const clipboard = new BrowserPaneClipboard(send, { write, readText: vi.fn() }, function (data) { return data; });
   const copied = clipboard.copy(false);
   expect(write).toHaveBeenCalledOnce();
-  expect(send).toHaveBeenCalledWith({ type: 'clipboard_selection', id: 1 });
+  expect(send).toHaveBeenCalledWith({ type: 'clipboard_selection', id: 1, cut: false });
   clipboard.selection(1, 'selected');
   await copied;
   expect(await (await item['text/plain']).text()).toBe('selected');
   expect(send).toHaveBeenCalledTimes(1);
  });
- it('deletes selected text only after a successful cut write', async () => {
+ it('uses native cut and supplies clipboard text', async () => {
   const send = vi.fn();
   const write = vi.fn(async (items: Record<string, Promise<Blob>>[]) => { await items[0]['text/plain']; });
   const clipboard = new BrowserPaneClipboard(send, { write, readText: vi.fn() }, function (data) { return data; });
   const cut = clipboard.copy(true);
   clipboard.selection(1, 'selected');
   await cut;
-  expect(send).toHaveBeenLastCalledWith({ type: 'clipboard_cut', id: 1, text: 'selected' });
+  expect(send).toHaveBeenCalledWith({ type: 'clipboard_selection', id: 1, cut: true });
+  expect(send).toHaveBeenCalledTimes(1);
  });
  it('reads the host clipboard on paste and sends text to the page', async () => {
   const send = vi.fn();
@@ -86,6 +96,6 @@ describe('browser pane clipboard', () => {
   const cut = clipboard.copy(true);
   clipboard.selection(1, 'selected');
   await expect(cut).rejects.toThrow('denied');
-  expect(send).not.toHaveBeenCalledWith({ type: 'clipboard_cut', id: 1, text: 'selected' });
+  expect(send).toHaveBeenCalledWith({ type: 'clipboard_selection', id: 1, cut: true });
  });
 });

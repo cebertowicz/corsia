@@ -114,17 +114,17 @@ async def test_mouse_and_keyboard_clear_only_clipboard_error(monkeypatch):
 async def test_clipboard_actions_stay_on_the_connected_page(monkeypatch):
     actions = []
     delivered = asyncio.Event()
-    async def selection(thread, connection, request_id):
-        actions.append(('selection', thread, connection))
+    async def selection(thread, connection, cut):
+        actions.append(('selection', thread, connection, cut))
         return 'chosen'
     async def paste(thread, connection, text):
         actions.append(('paste', thread, connection, text))
-    async def cut(thread, connection, text, request_id):
-        actions.append(('cut', thread, connection, text))
+    async def undo(thread, connection):
+        actions.append(('undo', thread, connection))
         delivered.set()
     monkeypatch.setattr(browser_stream.browser_pane, 'clipboard_selection', selection)
     monkeypatch.setattr(browser_stream.browser_pane, 'clipboard_paste', paste)
-    monkeypatch.setattr(browser_stream.browser_pane, 'clipboard_cut', cut)
+    monkeypatch.setattr(browser_stream.browser_pane, 'clipboard_undo', undo)
     class Pane(FakePane):
         async def receive_text(self):
             if self.messages:
@@ -134,13 +134,13 @@ async def test_clipboard_actions_stay_on_the_connected_page(monkeypatch):
     pane = Pane([json.dumps(message) for message in [
         {'type': 'clipboard_selection', 'id': 1},
         {'type': 'clipboard_paste', 'text': 'host'},
-        {'type': 'clipboard_cut', 'id': 1, 'text': 'chosen'},
+        {'type': 'clipboard_undo'},
     ]])
     with pytest.raises(WebSocketDisconnect):
         await asyncio.wait_for(browser_stream._relay(pane, 'thread', 'user'), 1)
-    assert [action[0] for action in actions] == ['selection', 'paste', 'cut']
+    assert [action[0] for action in actions] == ['selection', 'paste', 'undo']
     assert len({action[2] for action in actions}) == 1
-    assert actions[1][3] == 'host' and actions[2][3] == 'chosen'
+    assert actions[1][3] == 'host' and actions[0][3] is False
 
 
 @pytest.mark.asyncio
@@ -150,46 +150,40 @@ async def test_clipboard_failure_suggests_a_next_step(monkeypatch):
     async def refuse(*_args):
         raise BrowserSessionError('refused')
     monkeypatch.setattr(browser_clipboard.browser_pane, 'clipboard_selection', refuse)
-    monkeypatch.setattr(browser_clipboard.browser_pane, 'clipboard_cut', refuse)
+    monkeypatch.setattr(browser_clipboard.browser_pane, 'clipboard_undo', refuse)
     monkeypatch.setattr(browser_clipboard.browser_pane, 'clipboard_paste', refuse)
     messages = []
     for data in ({'type': 'clipboard_selection', 'id': 1},
-                 {'type': 'clipboard_cut', 'id': 1, 'text': 'text'}, {'type': 'clipboard_paste', 'text': 'text'}):
+                 {'type': 'clipboard_undo'}, {'type': 'clipboard_paste', 'text': 'text'}):
         await browser_clipboard.handle('thread', 'pane', data, messages.append)
     assert [message['error'] for message in messages] == [
-        "CORSIA couldn’t copy from the page. Select the text again and copy.",
-        "CORSIA couldn’t cut the text. Select it again and cut.",
+        "CORSIA couldn’t copy from this page. Try copying again.",
+        "CORSIA couldn’t undo the cut. Try undoing in the page.",
         "CORSIA couldn’t paste into the page. Try pasting again.",
     ]
 
 
 @pytest.mark.asyncio
-async def test_copy_inside_an_embedded_frame_says_the_clipboard_was_kept(monkeypatch):
-    from host_access import browser_clipboard as page_clipboard
+async def test_page_handled_clipboard_reports_failure_without_text(monkeypatch):
+    from host_access.browser_clipboard import PageHandledError
     from ws import browser_clipboard
-    async def evaluate(*_args, **_kwargs):
-        return {'result': {'type': 'object', 'subtype': 'null', 'value': None}}
-    class Cdp:
-        async def __aenter__(self):
-            return self
-        async def __aexit__(self, *_args):
-            return False
-        call = staticmethod(evaluate)
-    monkeypatch.setattr(page_clipboard, 'CdpClient', lambda _endpoint, **_kwargs: Cdp())
-    async def selection(_thread, _connection, request_id):
-        return await page_clipboard.clipboard_selection('endpoint', f'pane:{request_id}')
+    async def selection(*_args):
+        raise PageHandledError('page handled')
     monkeypatch.setattr(browser_clipboard.browser_pane, 'clipboard_selection', selection)
+    events = []
+    monkeypatch.setattr(browser_clipboard, 'emit_product_event', lambda *args, **kwargs: events.append((args, kwargs)))
     messages = []
-    await browser_clipboard.handle('thread', 'pane', {'type': 'clipboard_selection', 'id': 1}, messages.append)
+    await browser_clipboard.handle('thread', 'pane', {'type': 'clipboard_selection', 'id': 1, 'cut': True}, messages.append)
     assert messages == [{'type': 'clipboard_selection', 'id': 1,
-                         'error': "Couldn’t copy from this embedded area because it comes from another site. Your clipboard wasn’t changed."}]
+                         'error': 'CORSIA couldn’t copy from this page. Try copying again.'}]
+    assert events == [(('browser_pane', 'clipboard'), {'thread_id': 'thread', 'properties': {'action': 'cut', 'outcome': 'page_handled'}})]
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(('failure', 'message'), [
-    (OSError('CDP disconnected'), 'CORSIA couldn’t copy from the page. Select the text again and copy.'),
-    (WebSocketException('disconnected'), 'CORSIA couldn’t copy from the page. Select the text again and copy.'),
-    (browser_stream.browser_clipboard.SelectionTooLargeError('too large'), 'CORSIA couldn’t copy because too much text is selected. Select less text and copy.'),
+    (OSError('CDP disconnected'), 'CORSIA couldn’t copy from this page. Try copying again.'),
+    (WebSocketException('disconnected'), 'CORSIA couldn’t copy from this page. Try copying again.'),
+    (TimeoutError('timed out'), 'CORSIA couldn’t copy from this page. Try copying again.'),
 ])
 async def test_clipboard_transport_failure_reports_error_and_allows_retry(monkeypatch, failure, message):
     from ws import browser_clipboard

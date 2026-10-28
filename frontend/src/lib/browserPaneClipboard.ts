@@ -1,23 +1,23 @@
-type ClipboardMessage = { type: string; id?: number; text?: string };
+type ClipboardMessage = { type: string; id?: number; text?: string; cut?: boolean };
 class EmptySelection extends Error {}
 class PageSelectionError extends Error {}
 class StreamEnded extends Error {}
 
 /** Name the cause only when it is known; a closed stream already shows its own status. */
 function failureMessage(error: unknown, key: string): string | null {
- if (error instanceof EmptySelection || error instanceof StreamEnded) return null;
+ if (error instanceof StreamEnded) return null;
+ if (error instanceof EmptySelection) return 'Select text in the page to copy.';
  if (error instanceof PageSelectionError) return error.message;
  if (error instanceof DOMException && error.name === 'NotAllowedError') return 'CORSIA couldn’t access the clipboard. Allow clipboard access in your browser and try again.';
  return key === 'v' ? 'CORSIA couldn’t paste. Try again.' : 'CORSIA couldn’t copy. Try again.';
 }
 
-export function clipboardKey<T>(event: KeyboardEvent, keys: Set<string>, get: () => BrowserPaneClipboard<T>, fail: (error: string) => void, clear: () => void = () => {}): boolean {
- if (event.type === 'keyup' && keys.delete(event.code)) return true;
+export function clipboardKey<T>(event: KeyboardEvent, get: () => BrowserPaneClipboard<T>, fail: (error: string, cut: boolean) => void, clear: () => void = () => {}): boolean {
  const key = event.key.toLowerCase();
- if (event.type !== 'keydown' || !(event.metaKey || event.ctrlKey) || event.altKey || !['c', 'x', 'v'].includes(key)) return false;
- keys.add(event.code);
+ const mac = /Mac|iPhone|iPad|iPod/.test(navigator.platform);
+ if (event.type !== 'keydown' || !(mac ? event.metaKey : event.ctrlKey) || event.altKey || !['c', 'x', 'v'].includes(key)) return false;
  const clipboard = get();
- void (key === 'v' ? clipboard.paste() : clipboard.copy(key === 'x')).then(() => { if (key === 'c') clear(); }).catch(error => { const message = failureMessage(error, key); if (message) fail(message); });
+ void (key === 'v' ? clipboard.paste() : clipboard.copy(key === 'x')).then(() => { if (key !== 'v') clear(); }).catch(error => { const message = failureMessage(error, key); if (message) fail(message, key === 'x' && !(error instanceof EmptySelection)); });
  return true;
 }
 
@@ -49,10 +49,9 @@ export class BrowserPaneClipboard<T> {
   void data.catch(() => {});
   try {
    const writing = this.clipboard.write([this.item({ 'text/plain': data })]);
-   this.send({ type: 'clipboard_selection', id });
+   this.send({ type: 'clipboard_selection', id, cut });
    try { await writing; } catch (error) { throw selectionFailure ?? error; }
-   const text = await selection;
-   if (cut && text) this.send({ type: 'clipboard_cut', id, text });
+   await selection;
   } finally {
    this.pending.delete(id);
   }

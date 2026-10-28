@@ -141,14 +141,28 @@ describe('BrowserLeaf clipboard shortcuts', () => {
   flushSync();
   expect(page().textContent).not.toContain('Copy failed again');
  });
+ it('offers undo when a cut fails', async () => {
+  vi.stubGlobal('ClipboardItem', class { constructor(public data: Record<string, Promise<Blob>>) {} });
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { write: vi.fn(async (items: { data: Record<string, Promise<Blob>> }[]) => { await items[0].data['text/plain']; }), readText: vi.fn() } });
+  const { canvas, socket } = render();
+  canvas.dispatchEvent(new KeyboardEvent('keydown', { key: 'x', code: 'KeyX', ctrlKey: true, bubbles: true, cancelable: true }));
+  socket.receive({ type: 'clipboard_selection', id: 1, error: 'Copy failed' });
+  await vi.waitFor(() => expect(page().textContent).toContain('Undo'));
+  const undo = [...page().querySelectorAll('button')].find(button => button.textContent?.trim() === 'Undo');
+  undo?.click();
+  expect(socket.sent).toContainEqual({ type: 'clipboard_undo' });
+  socket.receive({ type: 'pane_error', source: 'clipboard', error: 'Paste failed' });
+  flushSync();
+  expect(page().textContent).not.toContain('Undo');
+ });
  it('copies the selected page text to the host clipboard', async () => {
   let written: Promise<Blob> | undefined;
   const write = vi.fn(async (items: { data: Record<string, Promise<Blob>> }[]) => { written = items[0].data['text/plain']; await written; });
   vi.stubGlobal('ClipboardItem', class { constructor(public data: Record<string, Promise<Blob>>) {} });
   Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { write, readText: vi.fn() } });
   const { canvas, socket } = render();
-  canvas.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', code: 'KeyC', metaKey: true, bubbles: true, cancelable: true }));
-  expect(socket.sent).toContainEqual({ type: 'clipboard_selection', id: 1 });
+  canvas.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', code: 'KeyC', ctrlKey: true, bubbles: true, cancelable: true }));
+  expect(socket.sent).toContainEqual({ type: 'clipboard_selection', id: 1, cut: false });
   socket.receive({ type: 'clipboard_selection', id: 1, text: 'page selection' });
   await vi.waitFor(() => expect(written).toBeDefined());
   expect(await (await written!).text()).toBe('page selection');

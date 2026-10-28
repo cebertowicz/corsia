@@ -1,7 +1,6 @@
 import io
 import json
 import logging
-import subprocess
 
 import pytest
 
@@ -207,107 +206,72 @@ async def test_dispatch_mouse_event_uses_the_pressed_button_mask(monkeypatch, bu
 
 
 @pytest.mark.asyncio
-async def test_clipboard_selection_and_paste_use_the_page_target(monkeypatch):
+async def test_clipboard_selection_and_paste_use_native_commands(monkeypatch):
     calls = []
     class Client:
         async def __aenter__(self): return self
         async def __aexit__(self, *_args): pass
         async def call(self, method, **params):
             calls.append((method, params))
-            return {'result': {'value': 'selected'}} if method == 'Runtime.evaluate' else {}
+            if method == 'Page.getFrameTree': return {'frameTree': {'frame': {'id': 'top', 'url': 'https://example.com/'}}}
+            if method == 'Page.createIsolatedWorld': return {'executionContextId': 7}
+            if method == 'Runtime.evaluate':
+                value = 0 if '|| 0' in params['expression'] else {'kind': 'copy', 'prevented': False, 'selection': 'selected'}
+                return {'result': {'value': value}}
+            return {}
     monkeypatch.setattr(browser_clipboard, 'CdpClient', lambda _endpoint, **_kwargs: Client())
-    assert await browser_clipboard.clipboard_selection('endpoint', 'pane:1') == 'selected'
+    assert await browser_clipboard.clipboard_selection('endpoint', False) == 'selected'
     await browser_clipboard.clipboard_paste('endpoint', 'paste text')
-    assert calls[0][0] == 'Runtime.evaluate'
-    assert calls[1] == ('Input.insertText', {'text': 'paste text'})
+    commands = [params['commands'][0] for method, params in calls if method == 'Input.dispatchKeyEvent' and 'commands' in params]
+    assert commands == ['copy', 'paste']
+    grants = [params['permissions'] for method, params in calls if method == 'Browser.grantPermissions']
+    assert grants == [['clipboardSanitizedWrite']]
+    assert any(method == 'Browser.resetPermissions' for method, _ in calls)
 
 
 @pytest.mark.asyncio
-async def test_cut_refuses_a_different_occurrence_of_the_same_text(monkeypatch):
-    expressions = []
+@pytest.mark.parametrize(('platform', 'modifier'), [('darwin', 4), ('linux', 2)])
+async def test_clipboard_commands_use_native_platform_modifier(monkeypatch, platform, modifier):
+    calls = []
+    class Client:
+        async def call(self, method, **params): calls.append((method, params))
+    monkeypatch.setattr(browser_clipboard.sys, 'platform', platform)
+    await browser_clipboard._command(Client(), 'cut')
+    assert [params['type'] for _, params in calls] == ['keyDown', 'keyUp']
+    assert all(params['modifiers'] == modifier for _, params in calls)
+    assert calls[0][1]['commands'] == ['cut']
+
+
+@pytest.mark.asyncio
+async def test_page_handled_cut_does_not_return_plain_selection(monkeypatch):
     class Client:
         async def __aenter__(self): return self
         async def __aexit__(self, *_args): pass
-        async def call(self, _method, **params):
-            expressions.append(params['expression'])
-            return {'result': {'value': 'same' if len(expressions) == 1 else True}}
+        async def call(self, method, **params):
+            if method == 'Page.getFrameTree': return {'frameTree': {'frame': {'id': 'top', 'url': 'https://example.com/'}}}
+            if method == 'Page.createIsolatedWorld': return {'executionContextId': 7}
+            if method == 'Runtime.evaluate':
+                value = 0 if '|| 0' in params['expression'] else {'kind': 'cut', 'prevented': True, 'data': '', 'selection': 'wrong'}
+                return {'result': {'value': value}}
+            return {}
     monkeypatch.setattr(browser_clipboard, 'CdpClient', lambda _endpoint, **_kwargs: Client())
-    await browser_clipboard.clipboard_selection('endpoint', 'pane:1')
-    await browser_clipboard.clipboard_cut('endpoint', 'same', 'pane:1')
-    script = """
-      class Input { constructor() { this.value = 'same same'; this.selectionStart = 0; this.selectionEnd = 4; } }
-      global.HTMLInputElement = Input; global.HTMLTextAreaElement = class {};
-      const node = new Input(); let deleted = false;
-      global.window = {getSelection: () => null, HTMLInputElement: Input, HTMLTextAreaElement: global.HTMLTextAreaElement};
-      global.document = {activeElement: node, defaultView: window, execCommand: () => { deleted = true; return true; }};
-      const [copy, cut] = JSON.parse(process.argv[1]);
-      if (eval(copy) !== 'same') process.exit(1);
-      node.selectionStart = 5; node.selectionEnd = 9;
-      if (eval(cut) !== false || deleted) process.exit(2);
-      eval(copy);
-      window.__corsiaCopyRequest = 'another:1';
-      if (eval(cut) !== false || deleted) process.exit(3);
-      node.selectionStart = 0; node.selectionEnd = 4; node.readOnly = true;
-      eval(copy);
-      if (eval(cut) !== true || deleted) process.exit(4);
-      node.readOnly = false;
-      document.execCommand = () => false;
-      eval(copy);
-      if (eval(cut) !== false) process.exit(5);
-    """
-    subprocess.run(['node', '-e', script, json.dumps(expressions)], check=True)
+    with pytest.raises(browser_clipboard.PageHandledError):
+        await browser_clipboard.clipboard_selection('endpoint', True)
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('by_close_code', [False, True])
-async def test_clipboard_selection_budget_and_oversize_cause(monkeypatch, by_close_code):
-    from websockets.exceptions import ConnectionClosedError, PayloadTooBig
-    from websockets.frames import Close
-    sizes = []
+async def test_clipboard_missing_capture_fails(monkeypatch):
     class Client:
         async def __aenter__(self): return self
         async def __aexit__(self, *_args): pass
-        async def call(self, _method, **_params):
-            if by_close_code:
-                raise ConnectionClosedError(None, Close(1009, 'frame too big'))
-            raise ConnectionClosedError(None, None) from PayloadTooBig(30_100_000, 30_004_096)
-    def connect(_endpoint, **kwargs):
-        sizes.append(kwargs['max_size'])
-        return Client()
-    monkeypatch.setattr(browser_clipboard, 'CdpClient', connect)
-    with pytest.raises(browser_clipboard.SelectionTooLargeError):
-        await browser_clipboard.clipboard_selection('endpoint', 'pane:1')
-    assert sizes == [6 * 5_000_000 + 4096]
-
-
-@pytest.mark.asyncio
-async def test_clipboard_descends_nested_frames_and_refuses_cross_origin(monkeypatch):
-    expressions = []
-    class Client:
-        async def __aenter__(self): return self
-        async def __aexit__(self, *_args): pass
-        async def call(self, _method, **params):
-            expressions.append(params['expression'])
-            return {'result': {'value': 'frame text' if len(expressions) == 1 else True}}
+        async def call(self, method, **params):
+            if method == 'Page.getFrameTree': return {'frameTree': {'frame': {'id': 'top', 'url': 'https://example.com/'}}}
+            if method == 'Page.createIsolatedWorld': return {'executionContextId': 7}
+            if method == 'Runtime.evaluate': return {'result': {'value': 0 if '|| 0' in params['expression'] else None}}
+            return {}
     monkeypatch.setattr(browser_clipboard, 'CdpClient', lambda _endpoint, **_kwargs: Client())
-    await browser_clipboard.clipboard_selection('endpoint', 'pane:1')
-    await browser_clipboard.clipboard_cut('endpoint', 'frame text', 'pane:1')
-    script = """
-      class Input { constructor() { this.value = 'frame text'; this.selectionStart = 0; this.selectionEnd = 10; } }
-      const input = new Input(), view = {HTMLInputElement: Input, HTMLTextAreaElement: class {}, getSelection: () => null};
-      let deleted = false;
-      const inner = {activeElement: input, defaultView: view, execCommand: () => { deleted = true; return true; }};
-      const middle = {activeElement: {tagName: 'IFRAME', contentDocument: inner}};
-      global.document = {activeElement: {tagName: 'IFRAME', contentDocument: middle}};
-      global.window = {};
-      const [copy, cut] = JSON.parse(process.argv[1]);
-      if (eval(copy) !== 'frame text' || eval(cut) !== true || !deleted) process.exit(1);
-      middle.activeElement = {tagName: 'IFRAME', contentDocument: null};
-      if (eval(copy) !== null) process.exit(2);
-      middle.activeElement = {tagName: 'IFRAME', get contentDocument() { throw Error('denied'); }};
-      if (eval(copy) !== null) process.exit(3);
-    """
-    subprocess.run(['node', '-e', script, json.dumps(expressions)], check=True)
+    with pytest.raises(browser_clipboard.BrowserSessionError):
+        await browser_clipboard.clipboard_selection('endpoint', False)
 
 
 @pytest.mark.asyncio

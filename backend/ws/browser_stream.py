@@ -225,7 +225,7 @@ async def _relay(pane: WebSocket, thread_id: str, user_id: str) -> None:
                     browser_control.person_input(thread_id)
                     if data.get("eventType") in {"keyDown", "rawKeyDown"}:
                         report({"type": "pane_error", "source": "clipboard", "error": None})
-                elif kind in {"clipboard_selection", "clipboard_paste", "clipboard_cut"}:
+                elif kind in {"clipboard_selection", "clipboard_paste", "clipboard_undo"}:
                     await browser_clipboard.handle(thread_id, connection_token, data, report)
 
     tasks: set[asyncio.Task] = set()
