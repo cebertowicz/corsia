@@ -190,6 +190,17 @@ async def test_native_pane_clipboard_selection_and_paste(native_owner, monkeypat
         assert result['result']['value'] == 'Pasted text'
         # A successful paste reports no error: it clears any the pane is showing.
         assert replies[1:] == [{'type': 'pane_error', 'error': None}]
+        # Focus inside an embedded frame hides its selection from the top document, so copy says so.
+        async with browser_cdp.CdpClient(endpoint) as cdp:
+            await cdp.call('Runtime.evaluate', expression=(
+                "document.body.innerHTML = '<iframe srcdoc=\"<p>Framed text</p>\"></iframe>';"
+                "new Promise(done => document.querySelector('iframe').onload = () => {"
+                " const frame = document.querySelector('iframe'); frame.focus();"
+                " const range = frame.contentDocument.createRange(); range.selectNodeContents(frame.contentDocument.body);"
+                " frame.contentWindow.getSelection().addRange(range); done(); })"), awaitPromise=True)
+        await browser_clipboard.handle(thread, connection, {'type': 'clipboard_selection', 'id': 2}, replies.append)
+        assert replies[2:] == [{'type': 'clipboard_selection', 'id': 2,
+                                'error': "CORSIA can’t copy from inside this embedded area yet. Your clipboard wasn’t changed."}]
     finally:
         browser_pane.clear_page_endpoint(thread, connection)
 

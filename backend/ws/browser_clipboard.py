@@ -4,6 +4,7 @@ from typing import Callable
 from websockets.exceptions import WebSocketException
 
 from host_access import browser_control, browser_pane
+from host_access.browser_clipboard import FrameSelectionError
 from host_access.browser_session_state import BrowserSessionError
 
 
@@ -13,6 +14,8 @@ async def handle(thread_id: str, connection: str, data: dict, report: Callable[[
         try:
             text = await browser_pane.clipboard_selection(thread_id, connection, data["id"])
             report({"type": kind, "id": data["id"], "text": text})
+        except FrameSelectionError:
+            report({"type": kind, "id": data["id"], "error": "CORSIA can’t copy from inside this embedded area yet. Your clipboard wasn’t changed."})
         except (BrowserSessionError, OSError, WebSocketException, TimeoutError):
             report({"type": kind, "id": data["id"], "error": "CORSIA couldn’t copy from the page. Select the text again and copy."})
     elif (kind == "clipboard_paste" or (kind == "clipboard_cut" and isinstance(data.get("id"), int))) and isinstance(data.get("text"), str):

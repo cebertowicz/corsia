@@ -1,14 +1,23 @@
 type ClipboardMessage = { type: string; id?: number; text?: string };
 class EmptySelection extends Error {}
 class PageSelectionError extends Error {}
+class StreamEnded extends Error {}
 
-export function clipboardKey<T>(event: KeyboardEvent, keys: Set<string>, get: () => BrowserPaneClipboard<T>, fail: (error?: string) => void, clear: () => void = () => {}): boolean {
+/** Name the cause only when it is known; a closed stream already shows its own status. */
+function failureMessage(error: unknown, key: string): string | null {
+ if (error instanceof EmptySelection || error instanceof StreamEnded) return null;
+ if (error instanceof PageSelectionError) return error.message;
+ if (error instanceof DOMException && error.name === 'NotAllowedError') return 'CORSIA couldn’t access the clipboard. Allow clipboard access in your browser and try again.';
+ return key === 'v' ? 'CORSIA couldn’t paste. Try again.' : 'CORSIA couldn’t copy. Try again.';
+}
+
+export function clipboardKey<T>(event: KeyboardEvent, keys: Set<string>, get: () => BrowserPaneClipboard<T>, fail: (error: string) => void, clear: () => void = () => {}): boolean {
  if (event.type === 'keyup' && keys.delete(event.code)) return true;
  const key = event.key.toLowerCase();
  if (event.type !== 'keydown' || !(event.metaKey || event.ctrlKey) || event.altKey || !['c', 'x', 'v'].includes(key)) return false;
  keys.add(event.code);
  const clipboard = get();
- void (key === 'v' ? clipboard.paste() : clipboard.copy(key === 'x')).then(() => { if (key === 'c') clear(); }).catch(error => { if (!(error instanceof EmptySelection)) fail(error instanceof PageSelectionError ? error.message : undefined); });
+ void (key === 'v' ? clipboard.paste() : clipboard.copy(key === 'x')).then(() => { if (key === 'c') clear(); }).catch(error => { const message = failureMessage(error, key); if (message) fail(message); });
  return true;
 }
 
@@ -71,7 +80,7 @@ export class BrowserPaneClipboard<T> {
  }
 
  dispose(): void {
-  for (const request of this.pending.values()) request.reject(new Error('Browser stream ended'));
+  for (const request of this.pending.values()) request.reject(new StreamEnded('Browser stream ended'));
   this.pending.clear();
  }
 }

@@ -282,7 +282,7 @@
 		if (clipboardKey(event, clipboardKeys, () => clipboard ??= new BrowserPaneClipboard(
 			message => { if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message)); },
 			navigator.clipboard, data => new ClipboardItem(data)
-		), error => { paneError = error ?? 'CORSIA couldn’t access the clipboard. Allow clipboard access in your browser and try again.'; }, () => { paneError = ''; })) return;
+		), error => { paneError = error; }, () => { paneError = ''; })) return;
 		socket.send(JSON.stringify({
 			type: 'input_keyboard', eventType: event.type === 'keydown' ? 'keyDown' : 'keyUp',
 			key: event.key, code: event.code, keyCode: event.keyCode, text: keyText(event), modifiers: keyModifiers(event)
@@ -373,7 +373,8 @@
 				<Avatar name={agentName} color={agentColor(threadId)} hidden />
 			</span>
 		{/if}
-		<canvas bind:this={canvas} tabindex="0" aria-label="Shared browser" onpointerdown={sendMouse} onpointerup={sendMouse} onpointercancel={sendMouse} onpointermove={sendMouse} onwheel={sendWheel} onkeydown={sendKey} onkeyup={sendKey}></canvas>
+		<!-- The host's own menu would swallow the right button's release and leave it held on the page. -->
+		<canvas bind:this={canvas} tabindex="0" aria-label="Shared browser" onpointerdown={sendMouse} onpointerup={sendMouse} onpointercancel={sendMouse} onpointermove={sendMouse} oncontextmenu={event => event.preventDefault()} onwheel={sendWheel} onkeydown={sendKey} onkeyup={sendKey}></canvas>
 		<BrowserPageStatus status={streaming ? paneError || status : status} {streaming} {ended} onreconnect={connect} onretry={() => void go()} />
 		{#if passwordPage}<div class="password-notice" class:top={keyboardOpen} role="status" transition:fade={{ duration: $prefersReducedMotion ? 0 : 160 }}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 11V8a5 5 0 0 1 10 0v3M6 11h12v10H6z" /></svg>Enter your password to continue</div>{/if}
 	</div>

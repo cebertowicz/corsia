@@ -137,6 +137,28 @@ async def test_clipboard_failure_suggests_a_next_step(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_copy_inside_an_embedded_frame_says_the_clipboard_was_kept(monkeypatch):
+    from host_access import browser_clipboard as page_clipboard
+    from ws import browser_clipboard
+    async def evaluate(*_args, **_kwargs):
+        return {'result': {'type': 'object', 'subtype': 'null', 'value': None}}
+    class Cdp:
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *_args):
+            return False
+        call = staticmethod(evaluate)
+    monkeypatch.setattr(page_clipboard, 'CdpClient', lambda _endpoint: Cdp())
+    async def selection(_thread, _connection, request_id):
+        return await page_clipboard.clipboard_selection('endpoint', f'pane:{request_id}')
+    monkeypatch.setattr(browser_clipboard.browser_pane, 'clipboard_selection', selection)
+    messages = []
+    await browser_clipboard.handle('thread', 'pane', {'type': 'clipboard_selection', 'id': 1}, messages.append)
+    assert messages == [{'type': 'clipboard_selection', 'id': 1,
+                         'error': "CORSIA can’t copy from inside this embedded area yet. Your clipboard wasn’t changed."}]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize('failure', [OSError('CDP disconnected'), WebSocketException('message too big')])
 async def test_clipboard_transport_failure_reports_error_and_allows_retry(monkeypatch, failure):
     from ws import browser_clipboard

@@ -9,6 +9,27 @@ describe('browser pane clipboard', () => {
   clipboardReply({ type: 'clipboard_selection', id: 1 }, clipboard, fail);
   await vi.waitFor(() => expect(fail).toHaveBeenCalledWith("CORSIA couldn’t copy from the page. Select the text again and copy."));
  });
+ it('names clipboard permission only when the browser refused it', async () => {
+  const keydown = { type: 'keydown', key: 'c', code: 'KeyC', ctrlKey: true, metaKey: false, altKey: false } as KeyboardEvent;
+  const refused = new BrowserPaneClipboard(vi.fn(), { write: vi.fn().mockRejectedValue(new DOMException('denied', 'NotAllowedError')), readText: vi.fn() }, data => data);
+  const broken = new BrowserPaneClipboard(vi.fn(), { write: vi.fn().mockRejectedValue(new Error('write failed')), readText: vi.fn() }, data => data);
+  const fail = vi.fn();
+  clipboardKey(keydown, new Set(), () => refused, fail);
+  clipboardKey(keydown, new Set(), () => broken, fail);
+  await vi.waitFor(() => expect(fail).toHaveBeenCalledTimes(2));
+  expect(fail.mock.calls.map(call => call[0]).sort()).toEqual([
+   'CORSIA couldn’t access the clipboard. Allow clipboard access in your browser and try again.',
+   'CORSIA couldn’t copy. Try again.',
+  ]);
+ });
+ it('stays quiet when the stream ends during a copy', async () => {
+  const clipboard = new BrowserPaneClipboard(vi.fn(), { write: vi.fn(async (items: Record<string, Promise<Blob>>[]) => { await items[0]['text/plain']; }), readText: vi.fn() }, data => data);
+  const fail = vi.fn();
+  clipboardKey({ type: 'keydown', key: 'c', code: 'KeyC', ctrlKey: true, metaKey: false, altKey: false } as KeyboardEvent, new Set(), () => clipboard, fail);
+  clipboard.dispose();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(fail).not.toHaveBeenCalled();
+ });
  it('reports selection errors even when Chromium rejects the promised clipboard data', async () => {
   const clipboard = new BrowserPaneClipboard(vi.fn(), { write: vi.fn(async (items: Record<string, Promise<Blob>>[]) => {
    try { await items[0]['text/plain']; } catch { throw new Error('clipboard write rejected'); }

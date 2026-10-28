@@ -5,10 +5,15 @@ from host_access.browser_cdp import CdpClient
 from host_access.browser_session_state import BrowserSessionError
 
 
+class FrameSelectionError(BrowserSessionError):
+    """Focus is inside an embedded frame, whose selection the top document cannot read."""
+
+
 # Read only the person's selected text. Password controls deliberately retain Chrome's no-copy behavior.
 _SELECTION = """(() => {
  let node = document.activeElement;
  while (node?.shadowRoot?.activeElement) node = node.shadowRoot.activeElement;
+ if (node?.tagName === 'IFRAME' || node?.tagName === 'FRAME') return null;
  if (node instanceof HTMLInputElement || node instanceof HTMLTextAreaElement) {
   if (node.type === 'password' || node.selectionStart === null || node.selectionEnd === null) return '';
   window.__corsiaCopiedSelection = {node, start: node.selectionStart, end: node.selectionEnd};
@@ -25,6 +30,8 @@ async def clipboard_selection(endpoint: str, request: str) -> str:
     async with CdpClient(endpoint) as cdp:
         result = await cdp.call("Runtime.evaluate", expression=f"window.__corsiaCopyRequest = {json.dumps(request)}; {_SELECTION}", returnByValue=True)
     value = result.get("result", {}).get("value")
+    if not result.get("exceptionDetails") and value is None:
+        raise FrameSelectionError("This page's selection is inside an embedded frame")
     if result.get("exceptionDetails") or not isinstance(value, str):
         raise BrowserSessionError("This page's selection couldn’t be copied")
     return value
