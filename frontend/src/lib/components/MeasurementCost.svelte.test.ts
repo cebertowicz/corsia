@@ -229,7 +229,7 @@ describe('MeasurementCost', () => {
 		expect(markup.querySelector('.billing-link')).toBeNull();
 	});
 	it('says so when no usage record could be priced, and withholds a rate under the minimum n', () => {
-		expect(text(render({ data: data({ series: [], latest: null, previous: null }) }))).toContain('No accepted work in this range has a size rating yet.');
+		expect(text(render({ data: data({ series: [], latest: null, previous: null }) }))).toContain('No accepted work in this range has a size rating.');
 		unmount(component!); host?.remove();
 		expect(text(render({ data: data({ series: [], latest: null, previous: null, coverage: { priced_records: 0, usage_records: 3 } }) }))).toContain('No usage records could be priced in this range.');
 		unmount(component!); host?.remove();

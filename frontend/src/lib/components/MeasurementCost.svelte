@@ -92,7 +92,7 @@
 			{:else if costState.data.coverage.usage_records === 0}
 				<p class="sentence">No usage was recorded in this range.</p>
 			{:else}
-				<p class="sentence">{costState.data.coverage.priced_records === 0 ? 'No usage records could be priced in this range.' : 'No accepted work in this range has a size rating yet.'}</p>
+				<p class="sentence">{costState.data.coverage.priced_records === 0 ? 'No usage records could be priced in this range.' : 'No accepted work in this range has a size rating.'}</p>
 			{/if}
 			{#if costState.data.coverage.usage_records > 0}<p class="caption">{coverageText(costState.data.coverage.priced_records, costState.data.coverage.usage_records)} in {periodText} are priced{#if costState.data.coverage.priced_records < costState.data.coverage.usage_records}; the rest are local, unlisted or unproven prices and are not in any dollar figure{/if}.{#each costState.data.excluded as excluded}{#if excluded.models.length}<br />{excludedLine(excluded)}{/if}{/each}</p>{/if}
 		{/if}

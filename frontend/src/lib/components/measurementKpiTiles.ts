@@ -84,7 +84,8 @@ export function tokensTile(kpi: Kpi): KpiTile {
 	const total = kpi.current.tokens.total, before = kpi.previous.tokens.total;
 	const change = before.value > 0 && kpi.previous.tokens_recorded !== false ? percentChange(total.value, before.value) : 'new';
 	const parts = kpi.current.tokens;
-	const empty = total.value === 0 && before.value === 0;
+	// Calls that recorded no token count still read `0+`, never the no-tokens sentence.
+	const empty = total.value === 0 && before.value === 0 && !total.unknown_records && !before.unknown_records;
 	return {
 		id: 'tokens', label: 'Tokens', value: empty ? '–' : tokens(total),
 		sub: empty ? 'Shows when agents use tokens.' : change === 'new' ? span(kpi.current) : `${span(kpi.current)}, ${versusPrevious(change, span(kpi.previous))}`,

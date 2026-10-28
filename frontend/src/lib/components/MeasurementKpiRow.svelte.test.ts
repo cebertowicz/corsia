@@ -111,6 +111,15 @@ describe('MeasurementKpiRow', () => {
 		expect(tile('tokens')).not.toContain('Shows when agents use tokens.');
 	});
 
+	it('reads 0+ with its parts when calls recorded no token count, never the no-tokens sentence', async () => {
+		const uncounted = { total: figure(0, 3), input: figure(0, 3), cache_write: figure(0, 3), cache_read: figure(0, 3), output: figure(0, 3) };
+		const zeros = { total: figure(0), input: figure(0), cache_write: figure(0), cache_read: figure(0), output: figure(0) };
+		await render(state({ current: period({ tokens: uncounted }), previous: period({ tokens: zeros }) }));
+		expect(tile('tokens')).toContain('Tokens 0+');
+		expect(tile('tokens')).not.toContain('Shows when agents use tokens.');
+		expect(host.querySelector('[data-kpi="tokens"] dl')).not.toBeNull();
+	});
+
 	it('shows the five tiles in order, each a number and unit with its window, n and change', async () => {
 		await render(state({ current: period(), previous: before }));
 		expect([...host.querySelectorAll('[data-kpi]')].map((node) => (node as HTMLElement).dataset.kpi)).toEqual(['work', 'first-try', 'cost', 'minutes', 'tokens']);
@@ -149,7 +158,7 @@ describe('MeasurementKpiRow', () => {
 		expect(tile('tokens')).not.toContain(' vs ');
 	});
 
-	it('reads new on the tokens tile when the previous window began before tokens were fully recorded, never a percentage over a partial base', async () => {
+	it('gives the tokens tile no comparison when the previous window began before tokens were fully recorded, never a percentage over a partial base', async () => {
 		await render(state({ current: period(), previous: { ...before, tokens_recorded: false } }));
 		expect(tile('tokens')).toContain('Sep 28 to Oct 4');
 		expect(tile('tokens')).not.toContain(' vs ');
