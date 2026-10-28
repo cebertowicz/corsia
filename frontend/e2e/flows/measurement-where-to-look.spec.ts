@@ -193,6 +193,11 @@ test.describe('@flow:measurement-where-to-look @surface:measurement the Biggest 
 						.filter((cell) => cell.scrollWidth > cell.clientWidth)
 						.map((cell) => cell.textContent?.replace(/\s+/g, ' ').trim()));
 					expect(overflowingCells, `${scheme}: no Agents body cell overflows its own column at ${width}`).toEqual([]);
+					const headerOverlap = await region.locator('thead th').evaluateAll((cells) => {
+						const buttons = cells.map((cell) => cell.querySelector('button')!.getBoundingClientRect());
+						return buttons.slice(0, -1).some((box, i) => box.right > buttons[i + 1].left + 0.5);
+					});
+					expect(headerOverlap, `${scheme}: Agents headers do not overlap`).toBe(false);
 					const lines = await region.locator('thead th').evaluateAll((cells) => cells.map((cell) => {
 						const tops = new Set<number>();
 						const walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT);

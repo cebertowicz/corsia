@@ -47,7 +47,7 @@ function render(rows: MeasurementAgentRow[], over: Partial<AgentsState> = {}): v
 describe('MeasurementAgentsMinutes', () => {
 	it('names the latest window and shows the approved columns', () => {
 		render([row('a', 5.1)]);
-		expect(host.querySelector('h4')?.textContent).toBe('Agents with the most of your minutes per outcome, Sep 28 to Oct 4');
+		expect(host.querySelector('h4')?.textContent).toBe('Agents with the most of your minutes per outcome, Sep 28 to Oct 4');
 		expect([...host.querySelectorAll('thead th')].map((cell) => cell.textContent)).toEqual(['Agent', 'Minutes per outcome', 'Your minutes', 'Outcomes']);
 	});
 

@@ -61,7 +61,7 @@
 	{:else if !latest || !size}<p class="empty">No completed weeks in this range.</p>
 	{:else}
 		{#if view.periods.length}
-			<p class="stat"><b>{rate === null ? '–' : rate.toFixed(0)}</b> h of work per hour you spend, {nowText}, n {group(current.n)}, {vsPrevious((w) => w.value, true)}</p>
+			<p class="stat"><b>{rate === null ? '–' : rate.toFixed(0)}</b> h of work per hour you spend, {nowText}, n&nbsp;{group(current.n)}, {vsPrevious((w) => w.value, true)}</p>
 		{:else}
 			<p class="stat"><b>–</b> h of work per hour you spend</p>
 		{/if}

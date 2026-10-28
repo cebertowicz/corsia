@@ -59,7 +59,7 @@ const weeksScenario: Scenario = {
 		'first-try': 'First-try rate (agent-graded) 89% Sep 7 to Oct 4, n 2,345, new vs Aug 10 to Sep 6 (n 450)',
 		cost: 'Cost per person-hour of work delivered $1.51 Sep 7 to Oct 4, n 1,742, new vs Aug 10 to Sep 6 (n 0)',
 		minutes: 'Your minutes per outcome 3.7 min Sep 7 to Oct 4, n 2,345, new vs Aug 10 to Sep 6 (n 450)',
-		tokens: 'Tokens 58B Sep 7 to Oct 4, new vs Aug 10 to Sep 6 Uncached input 838M Cache write 549M Cache read 56.5B Output 204M',
+		tokens: 'Tokens 58B Sep 7 to Oct 4 Uncached input 838M Cache write 549M Cache read 56.5B Output 204M',
 	},
 };
 
@@ -275,6 +275,14 @@ test.describe('@flow:measurement-kpi-row @surface:measurement the key-figures ro
 		test(`shows five tiles for both grains at phone and desktop width (${scheme}, ${scope})`, async ({ page, request }, testInfo) => {
 			await page.emulateMedia({ colorScheme: scheme });
 			const row = await enter(page, request, testInfo, scheme, scope);
+			for (const width of [1920, 393]) {
+				await page.setViewportSize({ width, height: 1200 });
+				const position = await page.locator('.measurement-scroller').evaluate((scroller) => {
+					scroller.scrollTop = 0;
+					return { top: scroller.firstElementChild!.getBoundingClientRect().top, header: document.querySelector('.shell-header')!.getBoundingClientRect().bottom };
+				});
+				expect(position.top, `content starts below the header at ${width}`).toBeGreaterThanOrEqual(position.header - 0.5);
+			}
 
 			await expectTiles(row, days);
 			await capture(page, row, testInfo, 393, `kpi-row-${scope}-${scheme}-days-393.png`);

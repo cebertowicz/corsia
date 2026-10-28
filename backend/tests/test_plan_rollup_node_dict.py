@@ -170,6 +170,12 @@ def test_chat_list_batches_child_plan_reads(db, scene):
 
     child_plan, child_step, child_id = child_steps[0]
     _activate(db, child_plan.id, child_step.id, PlanActor(child_id, "user", None))
+    db.execute(
+        """INSERT INTO active_turns
+           (id,thread_id,execution_epoch,model,status,started_at,boot_epoch)
+           VALUES (?,?,0,'native/model','running','2000-01-01T00:00:00','boot-1')""",
+        (f"turn-{child_id}", child_id),
+    )
     fresh = operator_chat_state.read_thread_states(["parent"], actor=HUMAN, db=db)
     assert fresh["states"]["parent"]["state"] == "moving"
 
