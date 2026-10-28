@@ -105,9 +105,9 @@ def inherited_args() -> list[str]:
 
 
 def stealth_args(ua: str | None, *, headless: bool) -> str:
-    """The ``--args`` value: what the environment already set, plus the evasions.
+    """Inherited and stealth switches, separated by newlines for direct Chrome launch.
 
-    agent-browser splits this value on commas or newlines, and a user agent holds a comma, so newlines it is.
+    agent-browser also splits ``--args`` on whitespace; pass a spaced user agent separately.
     """
     inherited = inherited_args()
     ours = ["--disable-blink-features=AutomationControlled"]

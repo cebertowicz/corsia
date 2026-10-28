@@ -2,6 +2,9 @@ import { HARNESSES, pickerCatalogModels, withoutStaleSiblings } from './harnessM
 import { modelAvailability, type Model } from './models';
 import type { UsageWindow } from './modelUsage';
 import type { VendorAccount } from './vendorAccounts';
+import { earliestReset, resetLabel } from './resetTime';
+
+export { resetLabel };
 
 export type GroupState = 'ready' | 'limited' | 'signed_out' | 'unavailable';
 
@@ -86,25 +89,6 @@ export function windowLabel(window: UsageWindow): string {
 	if (window.kind.startsWith('five_hour')) return '5h';
 	if (window.kind.startsWith('seven_day')) return 'wk';
 	return window.kind.replace(/^(claude|codex)[:_]/, '').replace(/_/g, ' ');
-}
-
-function sameDay(a: Date, b: Date): boolean {
-	return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
-}
-
-/** A reset in the browser's zone: a time today, a weekday within six days, else a date. */
-export function resetLabel(iso: string | null | undefined, withTime = false, now: Date = new Date()): string {
-	if (!iso) return '';
-	const at = new Date(/[zZ]|[+-]\d\d:?\d\d$/.test(iso) ? iso : `${iso}Z`);
-	if (Number.isNaN(at.getTime())) return '';
-	const time = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: at.getMinutes() ? '2-digit' : undefined }).format(at);
-	if (sameDay(at, now)) return time;
-	const days = (at.getTime() - now.getTime()) / 86_400_000;
-	if (days < 6) {
-		const weekday = new Intl.DateTimeFormat(undefined, { weekday: 'short' }).format(at);
-		return withTime ? `${weekday} ${time}` : weekday;
-	}
-	return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(at);
 }
 
 export type UsageLevel = 'normal' | 'amber' | 'red';
@@ -265,8 +249,9 @@ export function groupStatusSegments(group: ModelGroup, accounts: VendorAccount[]
 	if (group.state === 'limited') {
 		const usages = accounts.map((account) => account.usage);
 		if (usages.some(checkInProgress)) return [{ text: 'limited · checking', level: 'red' }];
-		const back = resetLabel(group.resetsAt, true);
 		const severalAccounts = accounts.length > 1;
+		// With several accounts the group's own reset is one account's; first back is the soonest of them all.
+		const back = resetLabel((severalAccounts && earliestReset(usages.map((usage) => usage?.resets_at))) || group.resetsAt, true);
 		const prefix = severalAccounts ? `All ${accounts.length} accounts limited` : 'limited';
 		return [{ text: limitedStatus(prefix, back, severalAccounts ? 'first back' : 'back', usages.some((usage) => usage?.check?.error)), level: 'red' }];
 	}

@@ -338,10 +338,14 @@ def account_client(account_id: str, *, db: sqlite3.Connection) -> dict[str, str]
     """The account's saved registration (its provider's client fields), kept after Sign out so
     signing in again needs no new setup."""
     stored = _stored_bundle(account_id, db=db)
-    if stored is None or not stored[0].valid_bundle(stored[1], stored[0].client_fields):
+    if stored is None:
         return None
     spec, bundle = stored
-    return {key: bundle[key] for key in spec.client_fields}
+    needed = spec.client_fields - spec.optional_bundle_fields
+    if not spec.valid_bundle(bundle, needed):
+        return None
+    keys = needed | (spec.client_fields & spec.optional_bundle_fields & set(bundle))
+    return {key: bundle[key] for key in keys}
 
 
 def account_registration(account_id: str, *, db: sqlite3.Connection) -> dict[str, str | None]:
@@ -363,8 +367,10 @@ def take_refresh_token(account_id: str, *, db: sqlite3.Connection | None = None)
         if stored is None or not stored[0].valid_bundle(stored[1]):
             return None
         spec, bundle = stored
-        _write_bundle(account_id, {key: bundle[key] for key in spec.client_fields}, db=conn)
-        return {key: bundle[key] for key in spec.required_fields}
+        kept = spec.client_fields & set(bundle)
+        _write_bundle(account_id, {key: bundle[key] for key in kept}, db=conn)
+        keys = spec.required_fields | (spec.optional_bundle_fields & set(bundle))
+        return {key: bundle[key] for key in keys}
 
 
 def granted_scopes(account_id: str, *, db: sqlite3.Connection) -> list[str]:

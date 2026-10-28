@@ -1,4 +1,4 @@
-"""Schema 155 -> 156: undo what thread-end ownership rehoming did to a parent.
+"""Schema 156 -> 157: undo what thread-end ownership rehoming did to a parent.
 
 A worker's review session moved to its parent made 154 -> 155 copy the worker's
 confinement onto the parent's row, and left the parent resuming the worker's
@@ -30,7 +30,7 @@ _OWN_CLOSED_RECORD = """
 """
 
 
-def migrate_155_to_156(conn: sqlite3.Connection) -> None:
+def migrate_156_to_157(conn: sqlite3.Connection) -> None:
     # Earlier migrations also support partial historical databases with no registry;
     # 154 -> 155 copied no confinement into those.
     if conn.execute(
@@ -119,7 +119,7 @@ def _release_remaining_owners(conn, artifact_id, launcher, now):
                 causal_event_id, affected_thread_id, old_owner_thread_id, new_owner_thread_id,
                 old_relationship_state, new_relationship_state, metadata, created_at)
                VALUES (?,?,'ownership_released',NULL,'migration',
-                       'release rehomed provider session', 'infra.migration_155_to_156',
+                       'release rehomed provider session', 'infra.migration_156_to_157',
                        NULL,?,?,NULL,?,'subscriber-recent',NULL,?)""",
             (str(uuid.uuid4())[:12], artifact_id, owner, owner, state, now),
         )

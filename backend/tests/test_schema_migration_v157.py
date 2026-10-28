@@ -5,7 +5,7 @@ import sqlite3
 import pytest
 
 from infra.database_migrations import MIGRATIONS
-from infra.migration_155_to_156_rehome_repair import migrate_155_to_156
+from infra.migration_156_to_157_rehome_repair import migrate_156_to_157
 from infra.migration_154_to_155_thread_confinement import migrate_154_to_155
 from infra import thread_confinement
 from infra.schema import SCHEMA_SQL, SCHEMA_VERSION
@@ -38,7 +38,7 @@ def test_removes_only_thread_end_rehomes_and_is_idempotent(integration, kind):
     migrate_154_to_155(db)
     if integration == "claude-code":
         assert thread_confinement.read_dirs("parent", db) == ("/src",)
-    migrate_155_to_156(db)
+    migrate_156_to_157(db)
     rows = db.execute("SELECT i.external_id,r.parent_thread_id FROM artifact_registrations r "
                       "JOIN artifact_identities i ON i.id=r.artifact_id ORDER BY 1,2").fetchall()
     assert [tuple(r) for r in rows] == [("child-session", "worker"),
@@ -47,7 +47,7 @@ def test_removes_only_thread_end_rehomes_and_is_idempotent(integration, kind):
         assert thread_confinement.read_dirs("parent", db) is None
         assert thread_confinement.read_dirs("worker", db) == ("/src",)
     event_count = db.execute("SELECT COUNT(*) FROM artifact_registration_events").fetchone()[0]
-    migrate_155_to_156(db)
+    migrate_156_to_157(db)
     assert [tuple(r) for r in db.execute("SELECT i.external_id,r.parent_thread_id FROM artifact_registrations r "
                                         "JOIN artifact_identities i ON i.id=r.artifact_id ORDER BY 1,2")] == [tuple(r) for r in rows]
     assert db.execute("SELECT COUNT(*) FROM artifact_registration_events").fetchone()[0] == event_count
@@ -74,11 +74,11 @@ def test_later_deliberate_transfer_is_untouched(integration, kind):
     db.execute("UPDATE artifact_registration_events SET created_at='same'")
     before = [tuple(r) for r in db.execute("SELECT parent_thread_id,relationship_state FROM artifact_registrations ORDER BY 1")]
     events = db.execute("SELECT COUNT(*) FROM artifact_registration_events").fetchone()[0]
-    migrate_155_to_156(db)
+    migrate_156_to_157(db)
     assert [tuple(r) for r in db.execute("SELECT parent_thread_id,relationship_state FROM artifact_registrations ORDER BY 1")] == before
     assert ("other", "owner-active") in before
     assert db.execute("SELECT COUNT(*) FROM artifact_registration_events").fetchone()[0] == events
-    migrate_155_to_156(db)
+    migrate_156_to_157(db)
     assert db.execute("SELECT COUNT(*) FROM artifact_registration_events").fetchone()[0] == events
     db.close()
 
@@ -97,9 +97,9 @@ def test_release_event_names_the_owner_row_demoted():
                     source_path="registry.ownership.rehome_on_thread_end", db=db)
     models.register_artifact(**artifact, parent_thread_id="other", db=db)
     db.execute("UPDATE artifact_registrations SET relationship_state='owner-pinned' WHERE parent_thread_id='other'")
-    migrate_155_to_156(db)
+    migrate_156_to_157(db)
     row = db.execute("SELECT affected_thread_id,old_owner_thread_id,old_relationship_state "
-                     "FROM artifact_registration_events WHERE source_path='infra.migration_155_to_156'").fetchone()
+                     "FROM artifact_registration_events WHERE source_path='infra.migration_156_to_157'").fetchone()
     assert tuple(row) == ("other", "other", "owner-pinned")
     assert db.execute("SELECT relationship_state FROM artifact_registrations WHERE parent_thread_id='other'").fetchone()[0] == "subscriber-recent"
     db.close()
@@ -133,7 +133,7 @@ def test_repaired_session_matches_forward_release(integration, kind):
                         source_path="registry.ownership.rehome_on_thread_end", db=repaired)
         migrate_154_to_155(repaired)
         migrate_154_to_155(forward)
-        migrate_155_to_156(repaired)
+        migrate_156_to_157(repaired)
         with write_transaction(forward, scope="test_archive") as conn:
             assert archive_settled_worker(conn, "worker")
         for db in (repaired, forward):
@@ -179,7 +179,7 @@ def test_persistent_parent_recovers_own_session_after_review_worker_rehome():
     assert _artifact_cc_session_id("parent", db) == "worker-session"
     migrate_154_to_155(db)
     assert thread_confinement.read_dirs("parent", db) == ("/src",)
-    migrate_155_to_156(db)
+    migrate_156_to_157(db)
     assert thread_confinement.read_dirs("parent", db) is None
     assert thread_confinement.read_dirs("worker", db) == ("/src",)
     assert _artifact_cc_session_id("parent", db) == "parent-session"
@@ -207,7 +207,7 @@ def test_backfilled_spawned_parent_is_repaired_unless_its_own_record_is_review(o
                     source_path="registry.ownership.rehome_on_thread_end", db=db)
     migrate_154_to_155(db)
     assert thread_confinement.read_dirs("parent", db) == ("/src",)
-    migrate_155_to_156(db)
+    migrate_156_to_157(db)
     # A thread's own review record keeps it closed, children or not.
     assert thread_confinement.read_dirs("parent", db) == (("/src",) if own_review else None)
     assert thread_confinement.read_dirs("worker", db) == ("/src",)
@@ -230,7 +230,7 @@ def test_root_with_moved_review_record_is_cleared():
                     source_path="registry.ownership.rehome_on_thread_end", db=db)
     migrate_154_to_155(db)
     assert thread_confinement.read_dirs("root", db) == ("/src",)
-    migrate_155_to_156(db)
+    migrate_156_to_157(db)
     assert thread_confinement.read_dirs("root", db) is None
     db.close()
 
@@ -259,7 +259,7 @@ def test_v155_damaged_parent_backfill_clears_only_a_moved_record(damaged_moved):
     migrate_154_to_155(db)
     with pytest.raises(thread_confinement.ConfinementRecordDamaged):
         thread_confinement.read_dirs("parent", db)
-    migrate_155_to_156(db)
+    migrate_156_to_157(db)
     if damaged_moved:
         assert thread_confinement.read_dirs("parent", db) is None
     else:
@@ -269,19 +269,19 @@ def test_v155_damaged_parent_backfill_clears_only_a_moved_record(damaged_moved):
     if not damaged_moved:
         assert thread_confinement.read_dirs("worker", db) == ("/src",)
     before = db.total_changes
-    migrate_155_to_156(db)
+    migrate_156_to_157(db)
     assert db.total_changes == before
     db.close()
 
 
 def test_absent_or_partial_registry_is_a_noop():
     with sqlite3.connect(":memory:") as db:
-        migrate_155_to_156(db)
+        migrate_156_to_157(db)
         db.execute("CREATE TABLE artifact_identities (id TEXT)")
-        migrate_155_to_156(db)
+        migrate_156_to_157(db)
         assert db.execute("SELECT COUNT(*) FROM artifact_identities").fetchone()[0] == 0
 
 
 def test_migration_registered():
-    assert SCHEMA_VERSION == 156
-    assert MIGRATIONS[155] is migrate_155_to_156
+    assert SCHEMA_VERSION == 157
+    assert MIGRATIONS[156] is migrate_156_to_157

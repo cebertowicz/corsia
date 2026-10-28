@@ -13,6 +13,7 @@
 	import { waitFace } from './waitFace';
 	import { threadPlanStates } from '$lib/stores/threadPlanStates';
 	import { coreSettings } from '$lib/stores/settings';
+	import { chatReplyJump } from '$lib/stores/chatReplyJump';
 	import { activeToolsByThread, messages } from '$lib/stores/threads';
 	import { INITIAL_TURN_STATE, turnStates } from '$lib/ws/turnState';
 	import { threadLiveStep, UNKNOWN_STEP } from './plans/planLiveStep';
@@ -172,6 +173,17 @@
 	$effect(() => {
 		void openTimeEvents;
 		requestOpenTime(untrack(() => openQueries));
+	});
+	// A reply on a hidden row opens the Focus run containing it.
+	$effect(() => {
+		const target = $chatReplyJump;
+		if (!target || target.threadId !== boundThreadId) return;
+		const index = renderedEntries.findIndex(entry => entry.kind === 'fold' &&
+			(entry.items.some(item => item.message.id === target.messageId) ||
+				(entry.stub && entry.stub.firstSeq <= target.seq && target.seq <= entry.stub.lastSeq)));
+		if (index < 0) return;
+		const tokens = runTokens(renderedEntries, index, historyComplete);
+		if (!isRunExpanded(tokens, expandedFolds)) expandedFolds = new Set([...expandedFolds, ...tokens]);
 	});
 	// An open run whose rows were never read starts reading them, however it was opened.
 	$effect(() => {

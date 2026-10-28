@@ -16,6 +16,7 @@
 	import { onMount, type Snippet } from 'svelte';
 	import CommentReplyChipRow from './CommentReplyChipRow.svelte';
 	import { replyItemsForThread, subscribeReplyAttention } from './replyItems';
+	import { chatReplyAttention } from '$lib/stores/chatReplyAttention';
 	import { get } from 'svelte/store';
 	import { on } from '$lib/ws';
 	import { connectionState } from '$lib/stores/connection';
@@ -72,7 +73,8 @@
 
 	const dockQueue = $derived($visibleQueue);
 	const current = $derived(shownItem(dockQueue, $activeId));
-	const hasReplies = $derived(replyItemsForThread($visibleQueue, $activeThreadId).length > 0);
+	const hasReplies = $derived(replyItemsForThread($visibleQueue, $activeThreadId).length > 0 ||
+		($chatReplyAttention?.threadId === $activeThreadId && $chatReplyAttention.items.length > 0));
 	$effect(() => { showing = !!current || hasReplies; });
 	const position = $derived(
 		current ? dockQueue.items.findIndex((i) => i.external_id === current.external_id) + 1 : 0,

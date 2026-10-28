@@ -11,6 +11,7 @@ export interface MessagePage {
 	has_more: boolean;
 	oldest_id: string | null;
 	turn_summaries?: Record<string, TurnSummary>;
+	chat_reply_items?: import('./api/attentionQueue').CommentReplyItem[];
 	/** A Focus page: one stub per collapsed run (see `focusRuns`). */
 	runs?: unknown;
 }
