@@ -494,13 +494,27 @@ def test_synced_default_source_installs_and_invalid_paths_are_not_offered(home, 
     (bucket / "linked").symlink_to(outside)
     (bucket / "manifest.json").write_text(json.dumps({"skills": [
         {"name": "my-recipe"}, {"name": "linked", "source": "custom"},
+        {"name": "..", "source": "custom"}, {"name": "a/b", "source": "custom"},
         {"name": "../outside", "source": "custom"}, {"name": ".hidden", "source": "custom"},
     ]}))
     offers = skills.skill_offers(roots, ["claude-code"], workspace)
     rows = {row["name"]: row for row in offers}
     assert rows["my-recipe"]["state"] == "new"
     assert rows["linked"]["state"] == "unreadable"
-    assert "../outside" not in rows and ".hidden" not in rows
+    assert not {"..", "a/b", "../outside", ".hidden"} & rows.keys()
+    assert "/synced/org_account/my-recipe:" in rows["my-recipe"]["item_id"]
     result = skills.install_skills(roots, ["claude-code"], workspace, [rows["my-recipe"]["item_id"]])
     assert result[0]["outcome"] == "installed"
     assert (workspace / "skills" / "my-recipe" / "SKILL.md").is_file()
+
+
+def test_synced_equal_and_missing_timestamps_use_first_bucket(home):
+    roots, workspace = home
+    for bucket, description in (("z_account", "second"), ("a_account", "first")):
+        _synced_bucket(roots.claude, bucket, [
+            {"name": "equal-time", "updatedAt": "2026-10-20T12:00:00Z", "description": description},
+            {"name": "missing-time", "description": description},
+        ])
+    offers = {row["name"]: row for row in skills.skill_offers(roots, ["claude-code"], workspace)}
+    assert offers["equal-time"]["description"] == "first"
+    assert offers["missing-time"]["description"] == "first"
