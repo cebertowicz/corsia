@@ -85,7 +85,7 @@ def applicable(db: sqlite3.Connection, project_id: str | None, thread_id: str, t
     ).fetchall()]
 
 
-def sync_shipped_rules(db: sqlite3.Connection) -> None:
+def sync_shipped_rules(db: sqlite3.Connection, project_id: str | None = None) -> None:
     """Reconcile global shipped rows with the registered connector declarations."""
     declarations = []
     for name in connectors.registered_connectors():
@@ -119,6 +119,9 @@ def sync_shipped_rules(db: sqlite3.Connection) -> None:
             "DELETE FROM event_rules WHERE scope='global' AND kind='observe' "
             "AND origin LIKE 'rule_set:%'" + (f" AND id NOT IN ({placeholders})" if ids else ""), ids,
         )
+    from events.connectors.github_screen.install import sync
+
+    sync(db, project_id)
 
 
 def project_of(db: sqlite3.Connection, thread_id: str) -> str | None:

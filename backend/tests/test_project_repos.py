@@ -150,6 +150,7 @@ def _configure_repo_api(monkeypatch, module, workspace: Path, db) -> None:
     monkeypatch.setattr(module, "run_in_db", _run_now)
     monkeypatch.setattr(module, "get_db", lambda: _NoClose(db))
     monkeypatch.setattr(module, "_sync", lambda *_args: None)
+    monkeypatch.setattr("events.observe_rules.sync_shipped_rules", lambda *_args: None)
 
 
 _HOST_LOAD_DEADLINE_S = 120

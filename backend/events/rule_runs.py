@@ -72,7 +72,8 @@ def queue(
         else:
             outcomes.append(Outcome(rule.id, writer, QUEUED, run_input=json.dumps({
                 "event": {"type": f"{event.connector}.{event.event_type}", "id": event.event_id,
-                          "rule_id": rule.id, "facts": dict(event.facts)},
+                          "rule_id": rule.id, "facts": dict(event.facts), "origin": event.origin,
+                          **({"artifact": dict(event.artifact_ref)} if event.artifact_ref else {})},
                 "trace": [*event.trace, rule.id],
             }, ensure_ascii=False, default=str)))
     return outcomes

@@ -175,6 +175,7 @@ def rule_event(
         envelope.event_id, envelope.connector or "", envelope.type,
         watch_event or envelope.type, envelope.facts, envelope.artifact_ref, ends_artifact,
         trace=tuple(envelope.provenance.get("rule_trace") or ()), requester=_requester(envelope),
+        origin=envelope.origin,
     )
 
 

@@ -459,6 +459,9 @@ def _commit_add_policy(
         _require_policy_snapshot(project_id, name, policy, db=connection)
         _require_source_binding(ws_dir, name, repo_path)
         _require_owned_source(identity)
+        from events.observe_rules import sync_shipped_rules
+
+        sync_shipped_rules(connection, project_id)
     return response
 
 
@@ -700,6 +703,9 @@ def _commit_detach_policy(
                 409,
                 f"Repository source binding '{name}' reappeared during detach",
             )
+        from events.observe_rules import sync_shipped_rules
+
+        sync_shipped_rules(connection, project_id)
 
 
 @router.delete("/{project_id}/repos/{name}")

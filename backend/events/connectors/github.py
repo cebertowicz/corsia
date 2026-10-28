@@ -250,6 +250,36 @@ def _relationships(event_type: str, facts: dict, raw: dict) -> tuple[dict, ...]:
              "to_ref": pr_external_id(facts.get("repo"), number)},)
 
 
+def _capture_screen(staging):
+    from events.connectors.github_screen.result import capture_floor
+
+    return capture_floor(staging)
+
+
+def _apply_screen(payload, record):
+    from events.connectors.github_screen.result import apply_captured_floor
+
+    return apply_captured_floor(payload, record)
+
+
+def _screen_instructions():
+    from core.injection_rules import injection_rule_text
+
+    return "List every matching injection sign in injection_signs; use [] when none match:\n" + injection_rule_text()
+
+
+def _screen_version():
+    from events.connectors.github_screen.workflow import version
+
+    return version()
+
+
+def _screen_workflow(project_id: str):
+    from events.connectors.github_screen.workflow import workflow
+
+    return workflow(project_id)
+
+
 def _project_repositories(project_id: str) -> frozenset[str] | None:
     """The repositories a project's registered source repositories track."""
     from events.connectors.github_notifications_feed import FeedError, tracked_github_repositories
@@ -342,6 +372,8 @@ MANIFEST = register(ConnectorManifest(
     shipped_observe_rules=(ShippedObserveRuleDecl(
         id="ruleset_github_pr_create", tool="bash", argv_prefix=("gh", "pr", "create"), item_type=PR_TYPE,
     ),),
+    shipped_workflows={"github-pr-screen": _screen_workflow},
+    shipped_result_hooks={"github-pr-screen": (_capture_screen, _apply_screen, _screen_instructions, _screen_version)},
     resolve_relationships=_relationships,
     repository_fact="repo",
     project_repositories=_project_repositories,

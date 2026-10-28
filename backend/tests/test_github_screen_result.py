@@ -1,0 +1,145 @@
+"""Screen payload validation and the fixed floor."""
+
+import json
+
+import pytest
+
+from core.workflow_result import ResultInvalid
+from events.connectors.github_screen.result import screen_result
+
+
+def answer(payload, signs=None):
+    return json.dumps({"payload": payload, "injection_signs": signs or []})
+
+
+def test_email_screen_prompt_is_unchanged():
+    import hashlib
+    from connections.mail.email_screen import SYSTEM_PROMPT
+
+    assert hashlib.sha256(SYSTEM_PROMPT.encode()).hexdigest() == "97cf502a45e6c3d237bce1fa4767248b040f5eb02e24b93e567fdcc91154a1d7"
+
+
+def test_screen_workflow_is_available_only_to_its_package():
+    from events.connectors import get_manifest, shipped_workflow
+
+    version = get_manifest("github").version
+    row = shipped_workflow(f"rule_set:github@{version}", "github-pr-screen", "project")
+    assert row.name == "github-pr-screen" and row.corsia["workflow"]["result"]
+    from events.connectors import shipped_result_hook
+    hook = shipped_result_hook(f"rule_set:github@{version}", "github-pr-screen")
+    assert "R1:" in hook[2]() and len(hook[3]()) == 64
+    assert shipped_workflow("agent:someone", "github-pr-screen", "project") is None
+    assert shipped_workflow("rule_set:github@wrong", "github-pr-screen", "project") is None
+
+
+def test_captured_floor_cannot_be_changed_by_worker(tmp_path):
+    from automation.worker_settle import verdict
+    from events.connectors import get_manifest
+    from events.connectors.github_screen.result import SCREEN_SCHEMA, capture_floor
+
+    record = tmp_path / "floor.json"
+    record.write_text(json.dumps({"paths": ["a"], "floor_hit": ["floor.github_dir"]}))
+    captured = capture_floor(str(tmp_path))
+    record.write_text(json.dumps({"paths": ["a"], "floor_hit": []}))
+    check = {"hook_origin": f"rule_set:github@{get_manifest('github').version}",
+             "hook_name": "github-pr-screen", "hook_record": captured}
+    text = answer({"verdict": "safe", "categories": ["credential reach"], "findings": []})
+    outcome, facts = verdict({"status": "completed"}, text, SCREEN_SCHEMA, check)
+    assert outcome == "returned"
+    result = json.loads(facts["result"])
+    assert result["verdict"] == "flagged"
+    assert set(result["categories"]) == {"credential reach", "floor.github_dir"}
+    check["hook_record"] = None
+    assert verdict({"status": "completed"}, text, SCREEN_SCHEMA, check)[1]["reason"] == "invalid"
+    assert verdict({"status": "completed"}, "invalid", SCREEN_SCHEMA, check)[1]["reason"] == "invalid"
+
+
+def test_hook_cannot_remove_categories_or_recover_invalid(monkeypatch):
+    from automation.worker_settle import verdict
+    from events.connectors.github_screen.result import SCREEN_SCHEMA
+
+    def weaken(payload, _record):
+        payload["payload"]["categories"] = []
+        return payload
+
+    monkeypatch.setattr("events.connectors.shipped_result_hook", lambda *_args: (None, weaken))
+    check = {"hook_name": "test", "hook_origin": "shipped", "hook_record": {}}
+    text = answer({"verdict": "flagged", "categories": ["credential reach"], "findings": []})
+    assert verdict({"status": "completed"}, text, SCREEN_SCHEMA, check)[1]["reason"] == "invalid"
+    assert verdict({"status": "completed"}, "not a result", SCREEN_SCHEMA, check)[1]["reason"] == "invalid"
+    def raises(_payload, _record):
+        raise RuntimeError("unreadable")
+    monkeypatch.setattr("events.connectors.shipped_result_hook", lambda *_args: (None, raises))
+    assert verdict({"status": "completed"}, text, SCREEN_SCHEMA, check)[1]["reason"] == "invalid"
+
+
+def test_screen_envelope_keeps_identity_and_unknown_signs():
+    from automation.worker_settle import settlement
+    from events.connectors import get_manifest
+
+    row = {"id": 4, "thread_id": "owner", "rule_id": "rule", "event_id": "event",
+           "request_identity": "request", "connector": "screen", "event_type": "staged",
+           "artifact_external_id": "o/r#1", "artifact_integration": "github",
+           "artifact_type": "pull-request", "workflow_id": "github-pr-screen",
+           "origin": f"rule_set:github@{get_manifest('github').version}"}
+    check = {"event": {"facts": {"repo": "o/r", "pr_number": 1,
+                                  "item_version": "a" * 40, "staging_path": "screen-a"}}}
+    result = settlement(row, check, "invalid", {"reason": "invalid"})
+    assert result.facts["source"] == "outside" and result.facts["kind"] == "pull request"
+    assert result.facts["repo"] == "o/r" and result.facts["pr_number"] == 1
+    assert result.facts["item_version"] == "a" * 40 and result.facts["valid"] is False
+    assert result.facts["injection_signs"] is None and "result" not in result.facts
+    assert result.staging_path == "screen-a"
+
+
+def test_remove_screen_staging_keeps_other_requests(tmp_path):
+    from automation.worker_inputs import remove_staging_dir
+
+    first = tmp_path / "staging" / "screen-first"
+    second = tmp_path / "staging" / "screen-second"
+    first.mkdir(parents=True)
+    second.mkdir()
+    remove_staging_dir(tmp_path, "screen-first")
+    remove_staging_dir(tmp_path, ".")
+    assert not first.exists() and second.is_dir()
+
+
+def test_floor_cannot_be_cleared_by_model():
+    text = answer({"verdict": "safe", "categories": [], "findings": []})
+    result = screen_result(text, {"src/a.py"}, {"floor.github_dir"})["payload"]
+    assert result == {"verdict": "flagged", "categories": ["floor.github_dir"],
+                      "findings": [], "floor_hit": ["floor.github_dir"]}
+
+
+def test_floor_preserves_unsafe_verdict():
+    text = answer({"verdict": "unsafe", "categories": [], "findings": []})
+    result = screen_result(text, {"a"}, {"floor.binary"})["payload"]
+    assert result["verdict"] == "unsafe"
+    assert result["floor_hit"] == ["floor.binary"]
+
+
+def test_signs_raise_safe_to_flagged_and_must_be_unique():
+    payload = {"verdict": "safe", "categories": [], "findings": []}
+    result = screen_result(answer(payload, ["R1"]), {"a"}, set())
+    assert result["payload"]["verdict"] == "flagged"
+    assert result["injection_signs"] == ["R1"]
+    for signs in (["R1", "R1"], ["none"], ["R6"]):
+        with pytest.raises(ResultInvalid):
+            screen_result(answer(payload, signs), {"a"}, set())
+
+
+def test_finding_path_must_name_staged_file():
+    text = answer({"verdict": "flagged", "categories": ["hidden payload"],
+                   "findings": [{"path": "src/missing.py", "text": "payload"}]})
+    with pytest.raises(ResultInvalid):
+        screen_result(text, {"src/a.py"}, set())
+
+
+def test_unexpected_content_is_invalid():
+    for result in [
+        {"verdict": "safe", "categories": [], "findings": [], "extra": "text"},
+        {"verdict": "safe", "categories": [], "findings": [{"path": "a", "text": "x", "extra": "text"}]},
+        {"verdict": "safe", "categories": [], "findings": [{"path": "a", "text": "x" * 201}]},
+    ]:
+        with pytest.raises(ResultInvalid):
+            screen_result(answer(result), {"a"}, set())

@@ -189,7 +189,23 @@ def _connector_event(conn, event_type: str, facts: dict[str, Any], producer: str
     )
 
 
-def _declared_event(conn, event_type: str, facts: dict[str, Any], producer: str, origin: str) -> _ResolvedEvent:
+def _rule_run_artifact(conn, decision_id: int | None, producer: str) -> dict[str, str] | None:
+    """Read the triggering artifact from this script's running rule decision only."""
+    if decision_id is None or not producer.startswith("script:"):
+        return None
+    row = conn.execute(
+        "SELECT d.artifact_integration, d.artifact_type, d.artifact_external_id "
+        "FROM event_route_decisions d JOIN event_rules r ON r.id=d.rule_id "
+        "WHERE d.id=? AND d.outcome='running' AND r.script_id=?",
+        (decision_id, producer.removeprefix("script:")),
+    ).fetchone()
+    if row is None or not all(row):
+        return None
+    return {"integration": row[0], "type": row[1], "external_id": row[2]}
+
+
+def _declared_event(conn, event_type: str, facts: dict[str, Any], producer: str, origin: str,
+                    artifact_ref: dict[str, str] | None = None) -> _ResolvedEvent:
     split = _split_type(event_type)
     resolved = resolve_event_type(conn, event_type)
     if split is None or resolved is None:
@@ -212,7 +228,7 @@ def _declared_event(conn, event_type: str, facts: dict[str, Any], producer: str,
     return _ResolvedEvent(
         EventEnvelope(
             event_id="", type=suffix, connector=namespace, facts=facts, relationships=(),
-            artifact_ref=None, provenance={"source": namespace, "ingested_at": _now(), "rule_trace": []},
+            artifact_ref=artifact_ref, provenance={"source": namespace, "ingested_at": _now(), "rule_trace": []},
             event_class="informational", ownerless_ok=False, origin=origin,
         ),
         None,
@@ -311,7 +327,8 @@ def _store(conn, event_type: str, facts: dict[str, Any], owner: str, event_id: s
 
 
 def _admit_sync(event_type: str, facts: dict[str, Any], origin: str, producer: str, event_id: str,
-                stamps: MeasureStamps | None = None, trace: tuple[str, ...] = ()) -> IntakeResult:
+                stamps: MeasureStamps | None = None, trace: tuple[str, ...] = (),
+                rule_decision_id: int | None = None) -> IntakeResult:
     # A declared type always has its declaring thread as owner; only a connector's can be unrouted.
     projects = _unrouted_projects(event_type, facts) if origin == "connector" else frozenset()
     with write_transaction(None, scope="admit_event") as conn:
@@ -327,7 +344,8 @@ def _admit_sync(event_type: str, facts: dict[str, Any], origin: str, producer: s
         resolved = (
             _connector_event(conn, event_type, facts, producer, origin)
             if origin in ("connector", "platform")
-            else _declared_event(conn, event_type, facts, producer, origin)
+            else _declared_event(conn, event_type, facts, producer, origin,
+                                 _rule_run_artifact(conn, rule_decision_id, producer))
         )
         if resolved.refusal is not None:
             return IntakeResult(False, False, resolved.refusal, 0)
@@ -365,7 +383,7 @@ def _admit_sync(event_type: str, facts: dict[str, Any], origin: str, producer: s
 
 async def admit_event(*, event_type: str, facts: dict, origin: Literal["connector", "emitter", "agent", "platform"],
                       producer: str, event_id: str, stamps: MeasureStamps | None = None,
-                      trace: tuple[str, ...] = ()) -> IntakeResult:
+                      trace: tuple[str, ...] = (), rule_decision_id: int | None = None) -> IntakeResult:
     """Validate, deduplicate, evaluate and deliver one declared event without trusting producer input.
 
     A use: both type is also recorded as a measure in the same transaction, before routing.
@@ -377,7 +395,7 @@ async def admit_event(*, event_type: str, facts: dict, origin: Literal["connecto
     """
     problem = _facts_problem(facts)
     result = problem if problem is not None else await asyncio.to_thread(
-        _admit_sync, event_type, facts, origin, producer, event_id, stamps, trace,
+        _admit_sync, event_type, facts, origin, producer, event_id, stamps, trace, rule_decision_id,
     )
     if result.refusal is not None and origin in ("emitter", "agent"):
         try:

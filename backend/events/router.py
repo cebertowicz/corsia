@@ -368,10 +368,6 @@ def _summarize(
         author = (comment.get("user") or {}).get("login", "?")
         details.update({"author": author, "url": comment.get("html_url")})
         summary = f"{external_id} comment from {author}"
-        if facts and facts.get("author_origin") == "inside":
-            body = (comment.get("body") or "")[:280]
-            details["comment"] = body
-            summary += f": {body[:100]}"
         return summary, details
 
     if pr:

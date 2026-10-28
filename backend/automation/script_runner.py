@@ -186,7 +186,8 @@ async def run_claimed(
         logger.exception("script schedule {} failed unexpectedly", schedule.id)
         report = _error_report(schedule, f"the runner failed: {exc}")
     report = await _stamped(schedule, report)
-    report = await _admit_events(schedule, report, rule_run.trace if rule_run else ())
+    report = await _admit_events(schedule, report, rule_run.trace if rule_run else (),
+                                 rule_run.decision_id if rule_run else None)
     try:
         woken = await run_in_db_unless_owned(
             db, settle, schedule, report, finished_at(), db, rule_run=rule_run,
@@ -202,7 +203,8 @@ async def run_claimed(
         await _drive_owner(schedule.thread_id)
 
 
-async def _admit_events(schedule: Schedule, report: RunReport, trace: tuple[str, ...] = ()) -> RunReport:
+async def _admit_events(schedule: Schedule, report: RunReport, trace: tuple[str, ...] = (),
+                        rule_decision_id: int | None = None) -> RunReport:
     """Route parsed event lines before synchronous settlement; one refusal wakes the owner once.
 
     ``trace`` is the rule chain of a rule-started run; each event it sends carries it.
@@ -221,6 +223,7 @@ async def _admit_events(schedule: Schedule, report: RunReport, trace: tuple[str,
                 event_type=event["type"], facts=event["facts"], origin="emitter",
                 producer=producer, event_id=f"{producer}:{report.run_id}:{index}", stamps=stamps,
                 **({"trace": trace} if trace else {}),
+                **({"rule_decision_id": rule_decision_id} if rule_decision_id is not None else {}),
             )
         except asyncio.CancelledError:
             raise
