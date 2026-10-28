@@ -80,11 +80,6 @@ def _current_operation(thread_id, actor_row, ensure, read: dict, reader):
         actor = _thread_actor(thread_id, actor_row)
         other = read.get("thread_id")
         other = other if other not in (None, thread_id) else None
-        from infra.thread_confinement import read_restriction
-
-        restriction = read_restriction(db, reader, other) if other is not None else None
-        if restriction is not None:
-            return restriction.payload()
         known = read.get("known_revision")
         include_folded = read.get("include_folded")
         if read.get("mode") == "full" and ensure:
@@ -106,6 +101,11 @@ def _current_operation(thread_id, actor_row, ensure, read: dict, reader):
                 include_folded=include_folded, thread_id=other, db=db,
             )
         if other is not None:
+            from infra.thread_confinement import read_restriction
+
+            restriction = read_restriction(db, reader, other)
+            if restriction is not None:
+                return restriction.payload()
             return public.addressed_to(page, other, db=db)
         return page
     finally:

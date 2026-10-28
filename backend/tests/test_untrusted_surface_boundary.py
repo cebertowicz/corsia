@@ -174,6 +174,20 @@ async def test_person_and_self_keep_private_status_and_transcript(deleg_db, monk
     assert person_status == own_status
 
 
+@pytest.mark.asyncio
+async def test_provider_words_do_not_make_raw_runtime_errors_shareable(deleg_db):
+    from api.delegation import thread_status
+    from infra.internal_principal import internal_request
+    from tools.delegation import DelegateStatusTool
+
+    _plant(deleg_db)
+    deleg_db.execute("UPDATE active_turns SET error=? WHERE id='isolated-turn'", ("quota exceeded: " + INJECTION,))
+    deleg_db.commit()
+    assert INJECTION not in await DelegateStatusTool().execute("isolated", _thread_id="sender-self")
+    with internal_request("u-test", "sender-self"):
+        assert INJECTION not in json.dumps(await thread_status("isolated", token="test", messages=5))
+
+
 @pytest.mark.parametrize("tool_metadata", [{"tool_calls": [{"id": "call"}]}, {"llm_tool_calls": "damaged"}])
 def test_terminal_result_skips_later_tool_call_rows(deleg_db, tool_metadata):
     from infra.thread_confinement import agent_result

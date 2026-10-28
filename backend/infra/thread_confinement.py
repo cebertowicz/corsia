@@ -107,18 +107,10 @@ def checkpoint_for_reader(reader: Reader, thread_row, checkpoint) -> dict | None
     return status
 
 
-def _shared_error(error: str | None) -> str | None:
-    from subagents.provider_usage_limits import is_provider_usage_or_quota_limit
-
-    if not error or is_provider_usage_or_quota_limit(error):
-        return error
-    return UNTRUSTED_TURN_ERROR
-
-
 def worker_error_for_agent(db: sqlite3.Connection, thread_id: str, error: str) -> str:
-    """Only unclassified worker text is private; provider refusals keep their meaning."""
+    """Hide raw worker text; callers retain their already-classified provider/account notices."""
     row = db.execute("SELECT id, confinement FROM threads WHERE id=?", (thread_id,)).fetchone()
-    return _shared_error(error) if row and not may_read_transcript(Reader.agent(), row) else error
+    return UNTRUSTED_TURN_ERROR if row and not may_read_transcript(Reader.agent(), row) else error
 
 
 def project_runtime(reader: Reader, thread_row, truth: dict) -> dict:
@@ -127,7 +119,8 @@ def project_runtime(reader: Reader, thread_row, truth: dict) -> dict:
         return truth
     result = dict(truth)
     if result.get("last_turn") is not None:
-        result["last_turn"] = {**result["last_turn"], "error": _shared_error(result["last_turn"].get("error"))}
+        last = result["last_turn"]
+        result["last_turn"] = {**last, "error": UNTRUSTED_TURN_ERROR if last.get("error") else last.get("error")}
     return result
 
 
