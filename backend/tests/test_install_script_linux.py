@@ -73,6 +73,7 @@ UV = (
 )
 
 STUBS = {
+    "agent-browser": 'echo "agent-browser 0.31.2"',
     "bwrap": 'if [ "$1" = --version ]; then echo "bubblewrap 0.9.0"; fi',
     "uname": 'case "$1" in -s) echo "${STUB_OS:-Linux}" ;; -m) echo "${STUB_ARCH:-aarch64}" ;; esac',
     "id": 'if [ "$1" = -un ]; then echo tester; else echo "${STUB_UID:-1000}"; fi',
@@ -186,7 +187,13 @@ def _download(url, destination):
     return hashlib.sha256(destination.read_bytes()).hexdigest()
 ''')
     (tools / "python3").symlink_to(sys.executable)
-    shutil.copy2(INSTALL, checkout / "scripts" / "install.sh")
+    # The existing prerequisite tests use preinstalled Chrome and the CLI; the
+    # browser install has separate tests because these fixtures never write /opt.
+    chrome = tmp_path / "system-chrome"
+    chrome.write_text("#!/bin/sh\nexit 0\n")
+    chrome.chmod(0o755)
+    installer = INSTALL.read_text().replace("/opt/google/chrome/chrome", str(chrome))
+    (checkout / "scripts" / "install.sh").write_text(installer)
     shutil.copy2(REPO / "scripts" / "install-linux-sandbox.sh", checkout / "scripts" / "install-linux-sandbox.sh")
     (checkout / "backend" / "requirements.lock").write_text("")
     corsia = checkout / "scripts" / "corsia"
@@ -269,7 +276,7 @@ FRESH_CALLS = [
 ]
 
 
-def test_a_fresh_ubuntu_installs_apt_packages_uv_python_and_node_then_starts(env):
+def test_ubuntu_installs_apt_packages_uv_python_and_node_then_starts(env):
     result = _run(env)
 
     assert result.returncode == 0, result.stderr
@@ -284,6 +291,35 @@ def test_a_fresh_ubuntu_installs_apt_packages_uv_python_and_node_then_starts(env
     assert (Path(env["HOME"]) / ".corsia" / ".venv" / "bin" / "python").exists()
     assert f"CORSIA is running at {APP_URL}" in result.stdout
     assert "There is no local model on Linux" in result.stdout
+
+
+def test_installs_pinned_browser_cli_when_missing(env):
+    configured = _everything_installed(env)
+    (Path(env["STUB_BIN"]) / "agent-browser").unlink()
+    npm = Path(env["STUB_BIN"]) / "npm"
+    npm.write_text(
+        '#!/bin/bash\nset -eu\n'
+        'echo "npm $*" >> "$STUB_LOG"\n'
+        'mkdir -p "$HOME/.local/bin"\n'
+        'printf "#!/bin/bash\\necho agent-browser 0.31.2\\n" > "$HOME/.local/bin/agent-browser"\n'
+        'chmod +x "$HOME/.local/bin/agent-browser"\n'
+    )
+    npm.chmod(0o755)
+    result = _run(configured)
+    assert result.returncode == 0, result.stderr
+    assert any(call.endswith("agent-browser@0.31") for call in _calls(env) if call.startswith("npm install -g"))
+    assert (_local_bin(env) / "agent-browser").is_file()
+
+
+@pytest.mark.parametrize("distro, expected", [("ubuntu", "libasound2t64"), ("debian", "libasound2")])
+def test_browser_dependencies_match_the_distribution(env, distro, expected):
+    Path(env["CORSIA_INSTALL_OS_RELEASE"]).write_text(f'ID={distro}\nVERSION_ID="24.04"\n')
+    command = 'source "$1"; install_apt_linux() { printf "%s\\n" "$@"; }; linux_browser_deps'
+    result = subprocess.run(["/bin/bash", "-c", command, "_", str(_script(env))],
+                            env={**env, "CORSIA_INSTALL_SOURCE_ONLY": "1"},
+                            text=True, capture_output=True, check=True)
+    assert expected in result.stdout.splitlines()
+    assert "fonts-liberation" in result.stdout.splitlines()
 
 
 def test_x86_64_downloads_the_x86_64_builds(env):

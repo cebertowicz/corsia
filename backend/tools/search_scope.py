@@ -35,6 +35,15 @@ THREADS_NOTICE = (
 _WILDCARD = frozenset("*?[{")
 
 
+def search_identity(path: Path, thread_id: str | None, all_threads: bool) -> tuple[str | None, bool]:
+    """Search explicitly granted thread inputs under their owner's tray scope."""
+    from tools.confined_reads import confined, confined_thread_owner
+
+    if confined():
+        return confined_thread_owner(path) or thread_id, False
+    return thread_id, all_threads
+
+
 def keep_path(path: Path, current_thread_id: str | None, all_threads: bool) -> bool:
     """Whether a search may return ``path``: it lies in no other thread's folder."""
     return all_threads or all(
