@@ -11,7 +11,7 @@ from plans import operator_node_facts as facts
 from plans.operator_display_state import (
     NODE_LABEL_KEYS, PLAN_LABEL_KEYS, TERMINAL_DISPLAY, TONE_KEYS, _HUMAN_REVIEWS,
     display_from_facts, needs_user_from_facts, node_paused, plan_paused, retired_display,
-    review_deferred,
+    review_deferred, row_needs_user,
 )
 #: Leaves whose primary condition opens their path by default. Paused work
 #: (a whole-plan pause or a node pause hold) is "Collapsed by default" in the
@@ -158,28 +158,12 @@ def _status_reason(
     )
 
 
-def _needs_user(node: dict, review: dict | None, execution: dict) -> bool:
-    """Whether this open row has a concrete action the user can take now."""
-    return needs_user_from_facts(
-        str(node["state"]),
-        str(execution["condition"]),
-        None if node.get("assignee") is None else str(node["assignee"]),
-        None if review is None else str(review["kind"]),
-        has_attention=any(
-            link["role"] == "attention" and link.get("attention_state") == "raised"
-            for link in node.get("artifact_links", [])
-        ),
-        plan_paused=plan_paused(execution),
-        node_paused=node_paused(execution),
-    )
-
-
 def _display(node: dict, execution: dict, review: dict | None, *, stopped: str | None = None) -> dict[str, str]:
     return display_from_facts(
         str(node["state"]),
         str(execution["condition"]),
         None if review is None else str(review["kind"]),
-        needs_user=_needs_user(node, review, execution),
+        needs_user=row_needs_user(node, review, execution, deferred=False),
         child_working=_child_plan_working(execution),
         # A stopped selected executor makes an otherwise-running row wait.
         executor_stopped=stopped is not None,
@@ -287,7 +271,7 @@ def project(
                 "node_cost": node_costs[str(item.plan["id"])][node["id"]],
                 "initiative": initiatives.get(node["id"]),
                 "last_transition_at": None if lean else changed[node["id"]],
-                "requires_user_action": _needs_user(node, review, execution),
+                "requires_user_action": row_needs_user(node, review, execution),
             }
     return states
 

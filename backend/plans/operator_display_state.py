@@ -94,6 +94,21 @@ def ask_deferred_sql(node_id_sql: str, *, plan_state_sql: str) -> str:
     return f"({plan_state_sql}='paused' OR {node_paused_sql(node_id_sql)})"
 
 
+def asks_user_from_facts(
+    state: str, condition: str, assignee: str | None, review_kind: str | None,
+    *, has_attention: bool, causes: list[dict] | None = None,
+) -> bool:
+    """Whether the row asks the person, independently of its pause."""
+    pause_only = causes is not None and bool(causes) and all(
+        cause.get("kind") == "paused" and cause.get("reason_key") in {"manual_pause", "plan_paused"}
+        for cause in causes
+    )
+    return state not in TERMINAL_DISPLAY and bool(
+        (assignee == "user" and (condition == "ready" or (condition == "paused" and pause_only)))
+        or review_kind in _HUMAN_REVIEWS or has_attention
+    )
+
+
 def needs_user_from_facts(
     state: str,
     condition: str,
@@ -108,12 +123,31 @@ def needs_user_from_facts(
 
     Every plan-owned ask is deferred under a plan or item pause (``ask_deferred``).
     """
-    if state in TERMINAL_DISPLAY or ask_deferred(plan_paused=plan_paused, node_paused=node_paused):
-        return False
-    return bool(
-        (assignee == "user" and condition == "ready")
-        or review_kind in _HUMAN_REVIEWS
-        or has_attention
+    return not ask_deferred(plan_paused=plan_paused, node_paused=node_paused) and asks_user_from_facts(
+        state, condition, assignee, review_kind, has_attention=has_attention,
+    )
+
+
+def row_needs_user(node: dict, review: dict | None, execution: dict, *, deferred: bool = True) -> bool:
+    """Whether this open row has a concrete action the user can take now.
+
+    ``deferred`` drops an ask its pause defers (Needs you, counts); the plan row
+    reads it undeferred, so a paused ask keeps its look there.
+    """
+    facts = (
+        str(node["state"]), str(execution["condition"]),
+        None if node.get("assignee") is None else str(node["assignee"]),
+        None if review is None else str(review["kind"]),
+    )
+    has_attention = any(
+        link["role"] == "attention" and link.get("attention_state") == "raised"
+        for link in node.get("artifact_links", [])
+    )
+    if not deferred:
+        return asks_user_from_facts(*facts, has_attention=has_attention, causes=execution["causes"])
+    return needs_user_from_facts(
+        *facts, has_attention=has_attention,
+        plan_paused=plan_paused(execution), node_paused=node_paused(execution),
     )
 
 
@@ -153,3 +187,12 @@ def display_from_facts(
         # at a time, so Working means moving (owner, 2026-09-30).
         return {"label_key": "waiting", "tone_key": "waiting"}
     return {"label_key": "working", "tone_key": "active"}
+
+
+def queued_reason(node: dict) -> str | None:
+    """Why a presented leaf that nothing blocks is not moving, or ``None``."""
+    if node["display"]["label_key"] != "waiting" or node["execution"]["condition"] != "ready":
+        return None
+    if node["child"] is not None:
+        return "Worker idle"
+    return "Not started" if node["state"] == "pending" else "Set aside"
