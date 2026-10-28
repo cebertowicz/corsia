@@ -18,10 +18,10 @@ class Cdp:
     async def call(self, method, **params):
         if method == "DOM.describeNode":
             return {"node": self.nodes[params["nodeId"]]}
+        if method == "Accessibility.queryAXTree":
+            return {"nodes": [{"role": {"value": "button"}, "name": {"value": "Show secret"}}] if self.reveal else []}
         if method == "DOM.querySelectorAll":
             selector = params["selector"]
-            if "aria-label" in selector:
-                return {"nodeIds": [9] if self.reveal else []}
             if "one-time-code" in selector:
                 return {"nodeIds": [10] if self.credentials else []}
             return {"nodeIds": [11] if self.form else []}
@@ -45,3 +45,27 @@ async def test_display_secret_is_not_a_password_prompt(options):
                          ids=["prefilled-form", "nearby-username", "empty-sign-in"])
 async def test_sign_in_password_is_guarded(options):
     assert await browser_cdp._password_inputs(Cdp(**options)) == {77}
+
+
+@pytest.mark.asyncio
+async def test_slack_box_reveal_text_in_wrapper_is_not_a_prompt():
+    class SlackBox(Cdp):
+        def __init__(self):
+            super().__init__()
+            self.nodes[6]["parentId"] = 9
+            self.nodes[9] = {"nodeName": "DIV", "nodeId": 9, "parentId": 7, "attributes": []}
+            self.nodes[5]["attributes"] += ["value", "fixture"]
+
+        async def call(self, method, **params):
+            if method == "Accessibility.queryAXTree":
+                return {"nodes": ([{"role": {"value": "button"}, "name": {"value": "Show"}},
+                                    {"role": {"value": "button"}, "name": {"value": "Regenerate"}}]
+                                   if params["nodeId"] == 9 else [])}
+            return await super().call(method, **params)
+
+    assert await browser_cdp._password_inputs(SlackBox()) == set()
+
+
+@pytest.mark.asyncio
+async def test_readonly_password_in_sign_in_form_remains_guarded():
+    assert await browser_cdp._password_inputs(Cdp(readonly=True, form=True)) == {77}

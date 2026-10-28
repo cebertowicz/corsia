@@ -114,30 +114,30 @@ async def _password_inputs(cdp: CdpClient) -> set[int]:
 
 
 async def _display_secret(cdp: CdpClient, node: dict) -> bool:
-    """Recognize display-only fields from attributes and nearby controls, never field values.
-
-    Incomplete ancestry or a CDP failure leaves the field guarded. The reveal signal is a
-    sibling control with a show/reveal label; an autofilled sign-in form remains guarded.
-    """
+    """Recognize display secrets without reading field values; uncertain context stays guarded."""
     flat = node.get("attributes") or []
     names = {str(name).lower() for name in flat[::2]}
-    if names & {"readonly", "disabled"}:
-        return True
+    display_signal = bool(names & {"readonly", "disabled"})
     parent = node.get("parentId")
     if not isinstance(parent, int):
         return False
     try:
-        reveal = await cdp.call(
-            "DOM.querySelectorAll", nodeId=parent,
-            selector=":scope > :is(button, input, [role=button]):is([aria-label*=show i], [aria-label*=reveal i], [title*=show i], [title*=reveal i])",
-        )
-        if not reveal.get("nodeIds"):
-            return False
+        reveal_levels = 0
         while isinstance(parent, int):
             ancestor = (await cdp.call("DOM.describeNode", nodeId=parent, depth=0)).get("node", {})
             name = str(ancestor.get("nodeName", "")).upper()
             if name == "#DOCUMENT":
-                return True
+                return display_signal
+            if not display_signal and reveal_levels < 3 and name not in {"FORM", "BODY"}:
+                buttons = await cdp.call("Accessibility.queryAXTree", nodeId=parent, role="button")
+                for button in buttons.get("nodes", []):
+                    label = button.get("name", {}).get("value", "")
+                    if isinstance(label, str) and label.strip().casefold().startswith(("show", "reveal")):
+                        display_signal = True
+                        break
+                reveal_levels += 1
+            if name in {"FORM", "BODY"}:
+                reveal_levels = 3
             nearby = await cdp.call(
                 "DOM.querySelectorAll", nodeId=parent,
                 selector="input:is([type=email i], [autocomplete~=username i], [autocomplete~=email i], [autocomplete~=one-time-code i], [name*=username i], [name*=email i])",

@@ -442,12 +442,12 @@ async def test_display_secret_and_sign_in_are_distinguished_in_chrome():
             endpoint = await owner.page_endpoint(thread_id)
             async with browser_cdp.CdpClient(endpoint) as cdp:
                 await cdp.call("Runtime.evaluate", expression="""document.body.innerHTML = `
-                  <div><input type="password" value="fixture" readonly><button aria-label="Show secret">Show</button></div>
-                  <div><input type="password" value="fixture"><button aria-label="Show secret">Show</button></div>`""")
+                  <div><input type="password" value="fixture" readonly></div>
+                  <div><div><input type="password" value="fixture"></div><div><button>Show</button><button>Regenerate</button></div></div>`""")
             assert not (await browser_cdp.page_password_probe(endpoint, {})).visible_nodes
             async with browser_cdp.CdpClient(endpoint) as cdp:
                 await cdp.call("Runtime.evaluate", expression="""document.body.innerHTML = `
-                  <form><input type="email"><div><input type="password" value="fixture">
+                  <form><input type="email"><div><input type="password" value="fixture" readonly>
                   <button type="button" aria-label="Show password">Show</button></div><button>Sign in</button></form>`""")
             assert len((await browser_cdp.page_password_probe(endpoint, {})).visible_nodes) == 1
     finally:
