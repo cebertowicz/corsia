@@ -181,22 +181,3 @@ async def test_mcp_wrapper_rewrites_private_path_denial(monkeypatch):
         "Nothing was returned. Use the app's own working directory or a supported "
         "non-private integration."
     )
-
-
-@pytest.mark.parametrize(
-    ("providers", "expected"),
-    [(None, ["plain", "google", "microsoft"]),
-     (set(), ["plain"]),
-     ({"google"}, ["plain", "google"]),
-     ({"microsoft"}, ["plain", "microsoft"])],
-)
-def test_account_tool_filter(monkeypatch, providers, expected):
-    from tools.connected_app_visibility import tools_for_connected_accounts
-
-    monkeypatch.setattr("tools.connected_app_visibility.connected_account_providers", lambda: providers)
-    catalog = {
-        "plain": SimpleNamespace(account_providers=frozenset()),
-        "google": SimpleNamespace(account_providers=frozenset({"google", "mailhost"})),
-        "microsoft": SimpleNamespace(account_providers=frozenset({"microsoft"})),
-    }
-    assert tools_for_connected_accounts(list(catalog), catalog) == expected

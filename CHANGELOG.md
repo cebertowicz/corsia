@@ -7,7 +7,7 @@ the later entry describes the current behavior.
 
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here._
 
-- Agents are offered mail, calendar and file actions only once an account that can serve them is connected.
+- Every agent's always-on tool list now counts the mail, calendar and file actions in one line per pack instead of naming each one, so agents that don't handle mail stop paying for them.
 - The shared browser follows new tabs, can show you a page an agent is already working on, and passes your pointer to captchas without lag.
 - You stay signed in to a site after the shared browser closes, even when you signed in while another agent was also using the shared browser.
 - Chat comments can be sent on their own while an agent is replying, and the New mark on reply chips lines up with its text.

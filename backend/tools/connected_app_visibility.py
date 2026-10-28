@@ -1,37 +1,9 @@
 """Reach checks for MCP tools bound to durable connected-app identities."""
 
-import logging
 import sqlite3
 from typing import Any
 
 from tools.base import Tool
-
-log = logging.getLogger(__name__)
-
-
-def connected_account_providers() -> set[str] | None:
-    """Return stored providers, or None to keep discovery open on store errors."""
-    from infra.database import get_db
-
-    try:
-        db = get_db()
-        try:
-            return {row[0] for row in db.execute("SELECT DISTINCT provider FROM connected_accounts")}
-        finally:
-            db.close()
-    except (OSError, sqlite3.Error) as exc:
-        log.warning("Account discovery store unavailable: %s", type(exc).__name__)
-        return None
-
-
-def tools_for_connected_accounts(names: list[str], catalog: dict[str, Any]) -> list[str]:
-    """Filter account actions by provider presence, retaining all on store failure."""
-    providers = connected_account_providers()
-    return [
-        name for name in names
-        if providers is None or not catalog[name].account_providers
-        or catalog[name].account_providers.intersection(providers)
-    ]
 
 
 def mcp_app_id(tool: Tool) -> str | None:
